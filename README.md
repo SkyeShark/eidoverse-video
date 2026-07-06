@@ -1,3 +1,5 @@
+<p align="center"><img src="eidoversevideologo.png" alt="Eidoverse Video" width="720"></p>
+
 # Eidoverse Video — prealpha 0.01
 
 **A film studio for AI agents.** Eidoverse is a toolkit an agent uses to
