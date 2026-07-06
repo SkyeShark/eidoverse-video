@@ -3,8 +3,16 @@
 Eidoverse is an original toolkit. Where a module's design drew on published
 work or public references, it's acknowledged here. The bundled asset
 library (models, VRMs, textures) is a mix of original handmade and AI
-generated work by the maintainer, released with the repo; the particle
-sprites are the Kenney Particle Pack (kenney.nl, CC0).
+generated work by the maintainer and collaborators (see Assets), released
+with the repo; the particle sprites are the Kenney Particle Pack
+(kenney.nl, CC0).
+
+## Code
+
+The toolkit was written by the maintainer in collaboration with
+Anthropic's Claude models — **Claude Opus 4.6, 4.7, and 4.8** built the
+production pipeline this was extracted from, and **Claude Fable 5**
+did the extraction, the release engineering, and the launch film.
 
 ## Engine & libraries (dependencies, not derivations)
 
@@ -40,9 +48,9 @@ sprites are the Kenney Particle Pack (kenney.nl, CC0).
   post-processing looks (CRT, VHS, halftone, cross-hatch, kaleidoscope, …)
   as TSL node graphs.
 - **`parallax_material.js`** (silhouette POM with self-shadowing + curved-
-  surface clipping) — the ray-march core is the *Silhouette Parallax
-  Occlusion Mapping for three.js (WebGPU/TSL)* contribution by SkyeShark
-  (MIT), adapted to the eidoverse eval-injection model and three 0.184.
+  surface clipping) — the ray-march core is this project's own *Silhouette
+  Parallax Occlusion Mapping for three.js (WebGPU/TSL)* library (MIT),
+  adapted to the eidoverse eval-injection model and three 0.184.
   Submitted upstream to three.js as a contribution candidate.
 
 ## Assets
@@ -55,3 +63,7 @@ sprites are the Kenney Particle Pack (kenney.nl, CC0).
   is a mix of original handmade and AI generated work by the maintainer,
   released with the repo. Particle sprites: Kenney Particle Pack
   (kenney.nl, CC0).
+- **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)).
+- **The claudesona** (Claude's logo-bloom character design, worn by both
+  Claude VRMs) — designed by **voooooogel**
+  ([x.com/voooooogel](https://x.com/voooooogel)).
