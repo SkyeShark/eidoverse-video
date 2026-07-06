@@ -1,0 +1,12 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 62,
+    "script": "eidoverse/examples/obstacle_course.js",
+    "outputVideo": "eidoverse/examples/obstacle_course.mp4",
+    "skipPreflightQA": true,
+    "assets": {
+        "character_vrm": "eidoverse/assets/vrms/aporia.vrm"
+    }
+}

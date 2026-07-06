@@ -1,0 +1,13 @@
+# Code is mounted into Linux containers — keep LF everywhere.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.glb binary
+*.gltf binary
+*.vrm binary
+*.vrma binary
+*.ttf binary
+*.hdr binary
+*.mp3 binary
+*.mp4 binary
+*.wav binary

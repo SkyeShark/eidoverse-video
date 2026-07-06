@@ -1,0 +1,18 @@
+# Host-side Python dependencies, BY TIER. The render engine itself needs
+# NONE of these (local rendering = Deno 2.8.1 + ffmpeg only).
+#
+# Tier 1 — asset fetchers (fetch_hdri.py / fetch_texture.py on the host):
+requests
+#
+# Tier 2 — TTS narration + lipsync chain (or run these in the container
+# via `eido.py shell` and skip installing them locally):
+# edge-tts
+# librosa
+# pyworld
+# stable-ts
+#
+# Tier 3 — HEAVY: vocal separation for music videos (pulls PyTorch, ~3GB):
+# demucs
+#
+# Music/SFX generation additionally needs a ComfyUI install with the
+# ACE-Step / Stable Audio models — see docs/SETUP.md §5.

@@ -1,0 +1,12 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 10.0,
+    "script": "eidoverse/examples/basic_vrm.js",
+    "outputVideo": "eidoverse/examples/basic_vrm.mp4",
+    "skipPreflightQA": true,
+    "assets": {
+        "character_vrm": "eidoverse/assets/vrms/claude.vrm"
+    }
+}

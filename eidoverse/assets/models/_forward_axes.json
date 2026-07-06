@@ -1,0 +1,8 @@
+{
+  "_comment": "driveAlong/faceToward forward-axis hints for models whose NOSE direction is easy to misread from the preview alone (symmetric bodies, headlights that look like taillights, etc). Keyed by filename stem (no extension). fetch_model surfaces the matching hint when it delivers the model so agents stop guessing the sign. Value is the LOCAL axis the nose points along: '+x' | '-x' | '+z' | '-z'. Add an entry whenever a model proves ambiguous in production.",
+  "scifihovercar_lambo_yellow_no_interior": "+x",
+  "scifihovercar_lambo_blue_no_interior": "+x",
+  "scifihovercar_lambo_green_no_interior": "+x",
+  "scifihovercar_lambo_purple_no_interior": "+x",
+  "scifihovercar_lambo_red": "+x"
+}
