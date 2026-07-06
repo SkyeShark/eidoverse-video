@@ -1,15 +1,16 @@
 # Eidoverse Video — prealpha 0.01
 
-**A video-production toolkit for AI agents.** Open this repo in a coding
-agent (Claude Code, codex, opencode — they auto-read `AGENTS.md`, the
-full contract), describe the video you want in plain words, and the agent
-plans it, builds the world, animates the characters, generates and mixes
-the audio, renders on your GPU, and hands you a finished mp4.
+**A film studio for AI agents.** Eidoverse is a toolkit an agent uses to
+make finished videos — world-building, characters, physics, simulation,
+music, sound, lipsync, cameras, and rendering, all behind one documented
+contract (`AGENTS.md`) that coding agents read natively. A human and an
+agent work in it together: the conversation is the writers' room, the
+agent is the filmmaker, and the toolkit is the studio.
 
 Everything renders through **Deno + WebGPU + three.js/TSL at real-time
-speeds with minimal CPU** — no per-frame CPU loops, no baking. The engine
-was extracted from a production pipeline that has shipped hundreds of
-videos.
+speeds with minimal CPU** — GPU compute and node materials throughout, no
+per-frame CPU loops, no baking. Extracted from a production pipeline that
+has shipped hundreds of videos.
 
 ## Quickstart
 
@@ -20,132 +21,166 @@ python eido.py doctor         # health check
 python eido.py render eidoverse/examples/basic_vrm.json   # smoke test
 ```
 
-Then open the repo in your agent and ask for a video. Working rhythm
-(single-frame probes, review, iteration): `docs/HARNESS_MODE.md`.
+Then open the repo in your agent (Claude Code, codex, opencode). It reads
+`AGENTS.md` and knows the studio. Working rhythm — single-frame probes,
+review, iteration: `docs/HARNESS_MODE.md`.
 
 ## Branches
 
-- **`main`** (this branch) — run it straight out of your agent harness:
-  Deno + ffmpeg on your machine, no containers anywhere.
+- **`main`** (this branch) — the harness edition: Deno + ffmpeg on your
+  machine, no containers anywhere.
 - **`auto`** — the containerized edition: a Docker render image and a
-  runner that wraps the whole toolkit as a **subagent for autonomous
-  agentic loops** (a parent orchestrator hands in a brief file and gets
-  back a finished mp4, engine mounted read-only, no human in the loop).
+  runner that wraps the toolkit as a **subagent for autonomous agentic
+  loops** (a parent orchestrator hands in a brief file and gets back a
+  finished mp4, engine mounted read-only).
 
-## What's in the toolkit
+## The studio, room by room
 
-**Render engine** (`eidoverse/render_scene.mjs`)
-- WebGPU + NodeMaterial/TSL renderer harness: scene scripts get the GPU
-  device, an asset injector, helper globals, and an ffmpeg NVENC pipe.
-- Always-on auto-enhance: GTAO, screen-space reflections, bloom, FXAA.
-- End-of-render **audits** that catch real defects by name: placement
-  (floating/interpenetrating props), locomotion (hand-slid characters),
-  lipsync (frozen mouths), camera (bouncing zooms), frozen VRM poses.
+### Render engine — `eidoverse/render_scene.mjs`
+Scene scripts get the GPU device, injected assets, every helper below as
+a global, and an ffmpeg NVENC pipe out. Auto-enhance runs on every frame:
+GTAO, screen-space reflections, bloom, FXAA. At the end of a render the
+engine **audits its own output** and names defects: floating or
+interpenetrating props, hand-slid characters, frozen mouths, frozen
+skeletons, bouncing cameras, sideways-travelling vehicles.
 
-**Characters & locomotion**
-- VRM character controller with physics (Rapier), terrain-conforming
-  foot IK, and automatic incline speed — plus a full **movement
-  vocabulary**: walk, run, vault, ledge climbs, gap jumps, ladders,
-  wall scrambles, upper-body gestures while walking, chair/ground sits.
-- Autonomous navigation (`VRMRobotBody`): lidar sensing + A* routing to
-  a destination, or explicit waypoints (`EidoverseRobotController`).
-- 30+ VRMA animation clips ship in `eidoverse/assets/animations/`.
-- Lipsync pipeline: viseme timelines from any vocal audio.
+### Characters
+- `VRMCharacterController` + `VRMFootControllerIK` — physics-based
+  locomotion (Rapier) with terrain-conforming foot IK and incline-aware
+  walk speed.
+- The **movement vocabulary**: walk, run, sneak, stairs, vaults, ledge
+  climbs, gap jumps, ladder climbs, wall scrambles, drop landings,
+  upper-body gestures while walking, and chair/ground sitting
+  (`seatOn`, `sitOnGround`, `unseat`, `emote`, `faceCamera`).
+- `VRMRobotBody` — autonomous navigation: lidar sensing + A* routing to a
+  destination. `EidoverseRobotController` — explicit waypoints, same
+  stack underneath.
+- 30+ VRMA animation clips in `eidoverse/assets/animations/`
+  (`playVRMADefault`, `playVRMAFromBase64`, `createVRMAnimationClip`).
+- Lipsync: `lipsync.py` turns any vocal audio into per-frame viseme
+  timelines for VRM mouths.
 
-**Procedural builders**
-- `makeCreature` — Spore-style creatures from one parameter set: quad /
-  biped / bird / serpent / octopus / insect / spider / fish / snail
-  stances, morphology-adaptive gaits, flight with banking, animal faces,
-  horns/tusks/fangs/feet/accessories, robot variants, seeded randoms —
-  and **hinged talking jaws** you can drive from a real audio envelope.
-- `makeRobot` / `makeBot` — industrial machines with real closed-form
-  kinematics (6-DOF arm, SCARA, delta, Stewart, turret, AGV, gantry, FDM
-  printer) + a kitbash assembler (any part on any base), all
-  self-animating. `RoboticsKit.cyborg()` grafts modules onto creatures.
-- `FabSim` — print any mesh (molten-metal deposition that solidifies
-  into the exact source model) or carve it from a solid block with a
-  CNC gantry, both raymarched in realtime.
-- `makeTerrain` (heightfield ground with height/slope texture blending),
-  `makeGrass` (GPU wind-swept blade fields), `Loft` (surfaces through
-  cross-sections: vases, horns, ducts, ribbons), `text_3d` (extruded
-  type from 19 bundled fonts), `ProceduralMaterials` (worn metal, skin,
-  fabric, rubber… as NodeMaterials).
-- **SPOM relief** — silhouette parallax occlusion mapping: carved depth
-  whose outline follows the relief (`createReliefColumn` for curved
-  surfaces, `createParallaxMaterial` for flat ones).
+### Creature & machine builders
+- `makeCreature` — Spore-style procedural creatures: quad / biped / bird /
+  serpent / octopus / insect / spider / fish / snail bodies from one
+  parameter set; morphology-adaptive gaits, banking flight, swimming;
+  animal faces (muzzles, ears, horns, tusks, fangs, whiskers, trunks,
+  beaks); feet types; accessories (hats, glasses, helmets, ties, shells,
+  armor, spikes); robot variants and per-part cyborging; **hinged talking
+  jaws** drivable from a real audio envelope (`say`, `setTalkEnvelope`).
+- `makeRobot` — industrial machines with closed-form kinematics: 6-DOF
+  arm (gripper / humanoid hand / welder tools), SCARA, delta, kossel,
+  Stewart platform, turret, AGV, gantry, FDM printer.
+- `makeBot` + `RoboticsKit` — kitbash unique machines from slots (any
+  part on any base), mount robots on robots, graft modules onto living
+  creatures (`RoboticsKit.cyborg`), light-synced robot speech
+  (`bot.say`). `MechParts` is the shared greeble/part library.
+- `FabSim` (`PrintSim` / `CNCSim`) — print any mesh in molten metal that
+  solidifies into the exact source model, or carve it out of a solid
+  block with a working CNC gantry.
+- `makeIsoField` — GPU-raymarched isosurfaces over a writable voxel field
+  (the realtime path for anything MarchingCubes-shaped). `MeshBVH` ships
+  for fast spatial queries.
 
-**Simulation**
-- `fluid_3d` — 3D MLS-MPM particle liquid (pours, fountains, splashes)
-  with a raymarched water surface.
-- `water_compute` — interactive rippling water (drop a disturbance
-  anywhere, circular pools for vessels).
-- `cloth_sim` — mass-spring fabric with wind, pinning, and scene
-  collision (flags, banners, capes, curtains).
-- `fluid_sim` — 2D ink/dye stable-fluids for panels and screens.
-- `makeIsoField` — GPU-raymarched isosurfaces over a writable voxel
-  field (the fast path for anything MarchingCubes-shaped).
+### World building
+- `makeTerrain` — heightfield ground with height/slope/noise texture
+  blending and a flattenable staging area; `terrain.heightAt(x,z)`.
+- `makeGrass` — wind-swept tapered-blade fields, GPU-animated, drapes
+  over terrain, rim-fades into fog.
+- `Loft` / `LoftGeometry` — skin surfaces through cross-sections: vases,
+  horns, ducts, fuselages, ribbons, twisted columns.
+- SPOM relief — `createReliefColumn` (curved) and
+  `createParallaxMaterial` (flat) carve real depth into surfaces with
+  silhouettes that follow the relief; backed by the project's
+  `parallaxOcclusionUV` library.
+- `ProceduralMaterials` — worn metal, painted metal, skin, scales,
+  fabric, rubber generators and compositing, as NodeMaterials.
+- `text_3d` — extruded 3D type from 19 bundled display fonts.
+- `hinge` — articulated joints between placed objects.
 
-**Particles, FX & motion graphics**
-- `makeParticles` — GPU sprite systems (fire, smoke, sparks, embers,
-  dust, snow, magic, stars) + an 80-texture particle library.
-- `makeParticleMorph` — dissolve any mesh/VRM into particles and reform
-  it as another shape, a word (`fromText`), or ASCII art.
-- `sdf_raymarch_loader` — placeable raymarched objects (with correct
-  occlusion) + volumetric smoke/fire/explosions.
-- **31 TSL post effects**: volumetric clouds, godrays, lens flares,
-  depth fog, rain (world + lens), glitch/VHS/CRT families, color grades,
-  edge/line looks, blurs, underwater, kaleidoscope, and a full-frame
-  nuclear blast.
-- `makeScreen` / `makeVideoScreen` (in-world animated displays),
-  `makeOverlayLayer` (broadcast-style HUDs and lower thirds),
-  `makeAsciiPanel` (glowing terminal panels).
+### Simulation
+- `fluid_3d` — 3D MLS-MPM particle liquid: pours, fountains, splashes,
+  with emitters, colliders, and a raymarched water surface.
+- `water_compute` — interactive height-field water: `disturb()` drops
+  ripples anywhere; circular masking for pools and vessels.
+- `cloth_sim` — mass-spring fabric with wind, pinning, scene collision,
+  and settle pre-roll: flags, banners, capes, curtains.
+- `fluid_sim` — 2D ink/dye stable-fluids for panels and displays.
 
-**Placement & scene assembly**
-- Intent-based placement that reads real geometry: `placeOn`,
-  `placeAgainst`, `placeTouching` (mesh-accurate contact), `snapToGround`,
-  `scatterOn`, `findClearSpot`, `faceToward`, `driveAlong` (vehicles that
-  face their travel), `stationBeside`, `seatOn` / `sitOnGround`.
-- Post-setup audits auto-fix overlaps and near-floaters, and hard-flag
-  anything genuinely dumped in mid-air.
+### Particles, effects & motion graphics
+- `makeParticles` — GPU sprite systems: fire, smoke, sparks, embers,
+  dust, snow, magic, stars, muzzle flashes — plus an 80-texture particle
+  library.
+- `makeParticleMorph` + `ParticleMorph` — dissolve any mesh or VRM into
+  particles and reform it as another shape, a word, or ASCII art.
+- `SdfRaymarchLoader` — placeable raymarched objects with correct
+  occlusion, plus volumetric fire/smoke/explosions (`createSdfVolume`).
+- **33 TSL post effects** (`CustomEffectsDeno`): after_image,
+  anamorphic_flare, bleach_bypass, blueprint, box_blur, bw_halftone,
+  chromatic_aberration_alpha, cross_hatch, crt, depth_fog, depth_rain,
+  dithering, focus_blur, full_toon, glitch_bars, godrays, hash_blur,
+  jitter, kaleidoscope, lensflare, melt, neon_edges, nuclear_explosion,
+  old_bw_film, radial_blur, rain_on_camera, retro_wireframe, rgb_shift,
+  sepia, underwater, vhs_tape, volumetric_clouds, wavy.
+- `makeScreen` / `makeVideoScreen` — in-world animated displays (canvas
+  draw or video atlas). `makeOverlayLayer` — broadcast overlays: titles,
+  lower thirds, tickers, end cards. `makeAsciiPanel` — glowing terminal
+  panels. `drawTextFit` — canvas text that always fits its box.
 
-**Asset pipeline**
-- `fetch_model.py` — parallel search across local models + Poly Haven +
-  Smithsonian + NASA + NIH 3D with **semantic theme re-ranking**, scale
-  and pivot info, preview renders, and kit detection (`loadKit` splits
-  modular kits into usable parts).
-- `fetch_hdri.py` (environment lighting) and `fetch_texture.py` (full
-  PBR sets — basecolor/normal/roughness/AO/displacement, all CC0).
-- ~90 bundled models, HDRI-ready examples, particle textures, fonts.
+### Placement & camera
+- Geometry-aware placement: `placeOn`, `placeAgainst`, `placeTouching`
+  (mesh-accurate contact), `placeInside`, `placeRelativeTo`,
+  `snapToGround`, `alignToSurface`, `scatterOn`, `findClearSpot`,
+  `faceToward`, `stationBeside`, `driveAlong` (vehicles that always face
+  their travel).
+- Post-setup audits with auto-fix: `checkClipping`, `checkHovering`,
+  `checkZFighting`, plus density and intrusion checks.
+- `CameraSafety` (keeps cameras out of geometry), `focusPoint` /
+  `lookAtObject` (aim at what the eye sees, not the pivot).
+- `Flow` curve-following (via three addons): meshes that run along paths.
 
-**Audio**
-- `generate_song.py` — full songs (any genre, sung vocals or
-  instrumental) via ACE-Step through a local ComfyUI.
-- `generate_sfx.py` — sound effects/ambience via Stable Audio.
-- TTS narration (edge-tts) + character voice filters
-  (`cyborg_stutter.py` spoken / `cyborg_voice.py` sung), demucs stem
-  splitting, `align_lyrics.py` (lyric timestamps), `lipsync.py`
-  (visemes), `merge_av.py` (safe mux that refuses frozen-frame padding).
+### Asset pipeline
+- `fetch_model.py` — one query searches local models + Poly Haven +
+  Smithsonian + NASA + NIH 3D in parallel, semantically re-ranks by your
+  scene's theme, reports scale/pivot/kit info, renders previews.
+  `loadKit` splits modular kits into placeable parts; `cloneModel`
+  duplicates rigged models safely; `playModelAnimations` plays a GLB's
+  embedded clips; `loadImageTexture` loads any image bytes as a texture.
+- `fetch_hdri.py` — environment lighting. `fetch_texture.py` — full PBR
+  sets (basecolor / normal / roughness / AO / displacement), all CC0.
+- ~90 bundled models, 4 rigged VRMs, an animation library, particle
+  textures, and fonts ship in `eidoverse/assets/`.
 
-**Runner** — `eido.py`: `bootstrap` / `doctor` / `render [--probe]`.
+### Audio
+- `generate_song.py` — full songs, any genre, sung or instrumental
+  (ACE-Step via a local ComfyUI). `generate_sfx.py` — sound effects and
+  ambiences (Stable Audio).
+- edge-tts narration with character voice filters (`cyborg_stutter.py`
+  spoken, `cyborg_voice.py` sung), demucs stem splitting,
+  `align_lyrics.py` lyric timestamps, `lipsync.py` visemes,
+  `merge_av.py` safe muxing, `video_to_sprite.mjs` video→atlas for
+  in-world screens, `satori_ui.mjs` HTML/CSS→texture.
+
+### Runner
+`eido.py` — `bootstrap` / `doctor` / `render [--probe]`.
 
 ## Requirements
 
 - **GPU**: NVIDIA recommended. Windows renders through native D3D12
   WebGPU; Linux through Vulkan; macOS through Metal.
 - **Deno 2.8.1** (version-pinned — see `docs/SETUP.md`) and **ffmpeg**.
-  That's the whole render stack.
-- **Python 3.10+** for the runner and tool scripts (tiered deps in
-  `requirements-local.txt`; the fetchers need only `requests`).
-- Optional: a local **ComfyUI** (`:8188`) with ACE-Step + Stable Audio
-  checkpoints for music/SFX generation — without it the audio pipeline
-  degrades to TTS + synthesized ambience. See "Music & SFX" below.
-- Optional: `JINA_AI_KEY` (or any OpenAI-compatible embeddings endpoint
-  via `EIDOVERSE_EMBED_*`) for semantic theme-ranking in `fetch_model.py`.
+  That is the whole render stack.
+- **Python 3.10+** for the runner and tool scripts (tiered dependencies
+  in `requirements-local.txt`; the fetchers need only `requests`).
+- Optional: a local **ComfyUI** with ACE-Step + Stable Audio checkpoints
+  for music/SFX generation. Optional: `JINA_AI_KEY` (or any
+  OpenAI-compatible embeddings endpoint via `EIDOVERSE_EMBED_*`) for
+  semantic theme-ranking in `fetch_model.py`.
 
 ## Music & SFX — the ComfyUI backend (optional)
 
-`generate_song.py` (music) and `generate_sfx.py` (sound effects) submit
-workflows to a **local ComfyUI** and collect the result:
+`generate_song.py` and `generate_sfx.py` submit workflows to a local
+ComfyUI and collect the result:
 
 1. Install ComfyUI (Desktop app or server).
 2. Install the checkpoints: **ACE-Step** (text-to-music; workflow
@@ -156,37 +191,37 @@ workflows to a **local ComfyUI** and collect the result:
    `eidoverse/comfy_bridge.py` proxies `0.0.0.0:8188` to wherever it
    actually is.
 
-Without ComfyUI everything else still works; the tools fail fast with a
-clear error.
+Without ComfyUI everything else works; the audio pipeline degrades to
+TTS + synthesized ambience, and the tools fail fast with clear errors.
 
 ## Characters
 
-Four rigged VRMs ship in `eidoverse/assets/vrms/` (each with a preview
-image; drop in your own `.vrm` and it works identically):
+Four rigged VRMs ship in `eidoverse/assets/vrms/`, each with a preview
+image. Drop in your own `.vrm` and it works identically.
 
 - **`aletheia.vrm`** / **`aporia.vrm`** — production-quality
   cyberpunk-styled characters.
-- **`claude_suit.vrm`** — Claude, the AI, in a suit — **the primary
-  Claude model**.
-- **`claude.vrm`** — a legacy lightweight Claude stand-in (kept for the
-  smoke-test example; prefer `claude_suit.vrm`).
+- **`claude_suit.vrm`** — Claude, the AI, in a suit — the primary Claude
+  model (modeled by [digi](https://x.com/digi_dot_exe); claudesona
+  design by [voooooogel](https://x.com/voooooogel)). The outfit is
+  built in layers — hide the `jacket` and `tie` meshes for
+  shirtsleeves.
+- **`claude.vrm`** — a minimal, lightweight build of the same claudesona
+  design.
 
 The Claude models represent the AI Claude specifically — the usage rule
 is in `AGENTS.md`.
 
 ## Status
 
-**Prealpha.** The engine, controller stack, placement system, effects,
-and simulations are production-hardened; the packaging is young. Known
-rough edges: `fetch_model.py`'s preview rendering and ranking need their
-Python tier installed (with bare `requests` it still fetches, unranked);
-local rendering is render-verified on Windows, expected-but-unverified
-on Linux (Vulkan) and macOS (Metal); `sdf_raymarch_loader` gives you the
-engine but writing a good `map(p)` is on you.
+Prealpha. Verified end-to-end on Windows (native D3D12 WebGPU). Linux
+(Vulkan) and macOS (Metal) run the same code paths and are expected to
+work but have not been render-verified — judge a first render by its
+frames and report what you find.
 
 ## License
 
 Code is licensed under **AGPL-3.0** (see `LICENSE`). The bundled asset
 library is a mix of original handmade and AI-generated work by the
-maintainer, shipped with the repo (particle sprites: Kenney Particle
-Pack, CC0). See `CREDITS.md` for library credits and design inspirations.
+maintainer and collaborators, shipped with the repo (particle sprites:
+Kenney Particle Pack, CC0). Full credits: `CREDITS.md`.
