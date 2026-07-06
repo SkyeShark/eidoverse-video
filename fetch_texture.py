@@ -279,7 +279,10 @@ if not matches:
     print(f"No textures found matching '{query}' on Poly Haven, AmbientCG, or TextureCan.")
     sys.exit(1)
 
-matches.sort(key=lambda m: (m[0], m[1]), reverse=True)
+# Equal-quality matches prefer AmbientCG (the deepest PBR library of the
+# three); cross-source popularity numbers aren't comparable, so source
+# preference outranks popularity.
+matches.sort(key=lambda m: (m[0], m[4] == "ambientcg", m[1]), reverse=True)
 score, _pop, tex_id, disp_name, source, payload = matches[0]
 print(f"Found {len(matches)} matches across sources. Using: {tex_id} ({disp_name}) from {source}")
 if len(matches) > 1:
