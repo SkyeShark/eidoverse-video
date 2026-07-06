@@ -63,7 +63,7 @@ did the extraction, the release engineering, and the launch film.
   is a mix of original handmade and AI generated work by the maintainer,
   released with the repo. Particle sprites: Kenney Particle Pack
   (kenney.nl, CC0).
-- **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)).
+- **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)) provided under CC-BY.
 - **The claudesona** (Claude's logo-bloom character design, worn by both
   Claude VRMs) — designed by **voooooogel**
   ([x.com/voooooogel](https://x.com/voooooogel)).
