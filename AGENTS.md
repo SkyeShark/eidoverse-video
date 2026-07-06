@@ -6,35 +6,46 @@ usage**. Everything renders on the GPU — WebGPU + NodeMaterial/TSL
 throughout, no per-frame CPU loops, no baking — and the toolkit layers
 simulation (fluids, water, cloth, particles), procedural builders
 (creatures, robots, terrain, materials), a character controller,
-audio generation, and post effects on top of that base. You are working in
-this repo alongside a human collaborator; what to make comes from the
-conversation.
+audio generation, and post effects on top of that base.
+
+You are producing a **finished produced short** — not a render smoke test,
+not an isolated 3D clip. A complete piece of media: 3D scene + (optionally)
+character + audio + motion graphics + a story arc that fills the runtime.
 
 Read this file completely before doing anything else. It is the single
 agent-facing contract for the whole toolkit: the API, the production rules,
 and the hard-won anti-patterns live here.
 
-The goal for any video is a **finished produced short** — not a render
-smoke test, not an isolated 3D clip. A complete piece of media: 3D scene +
-(optionally) character + audio + motion graphics + a story arc that fills
-the runtime.
+**Your assignment:** this is the containerized edition — you run as a
+subagent invoked by a parent agentic loop (a bot, a cron job, a queue
+worker, another agent), inside the render container with the repo
+mounted at `/workspace`. Read `/workspace/_brief.txt` (and
+`/workspace/_context.txt` if present) — that's the brief. Don't ask for
+clarification — interpret and ship. If you need to pick between options
+(camera, palette, length), pick.
 
-**Rendering:** `python eido.py render <scene.json>` — native Deno + your
-GPU, no containers. Iterate with single-frame probes (`--probe`) before
-committing to full renders, and don't run two sustained renders
-concurrently.
+**Rendering:** from `/workspace`:
+`deno run --allow-all --unstable-webgpu --node-modules-dir=auto
+eidoverse/render_scene.mjs work/<id>/scene.json`. Iterate with cheap
+single-frame checks before committing to full renders, and don't run two
+sustained renders concurrently.
 
-**Audio capabilities:** `generate_song.py` / `generate_sfx.py` need a
-reachable ComfyUI backend — confirm with `python generate_song.py --probe`
-(exits 0/1 in seconds). No ComfyUI → build the mix from edge-tts narration
-(+ ffmpeg-synthesized ambience) or user-supplied audio. Never fake a tool
-invocation; degrade honestly.
+**Runtime capabilities:** before planning audio, read
+`/workspace/_capabilities.json` if it exists — it says whether a ComfyUI
+backend is reachable (`"comfyui": true/false`) for `generate_song.py` /
+`generate_sfx.py`, and whether a semantic-ranking key is set for
+`fetch_model.py` theme fit. Then CONFIRM from where you actually run:
+`python generate_song.py --probe` (exits 0/1 in seconds) — the
+capabilities file reflects the host-side probe, and a container can still
+fail to reach `host.docker.internal`. No ComfyUI → skip music/SFX
+generation and build the mix from edge-tts narration (+ ffmpeg-synthesized
+ambience) or operator-supplied audio. Never fake a tool invocation;
+degrade honestly.
 
 **Scratch space:** all your work goes in `work/<short_id>/` —
 scene files, fetched assets, audio, intermediates, and the final mp4.
-The engine files under `eidoverse/` are the canonical library every scene
-shares — edit copies in `work/`, and change the engine itself only as a
-deliberate, discussed decision.
+The engine files and `eidoverse/assets/` are mounted read-only; a
+permission error writing to them means "find another way," not "force it."
 
 ## Duration — decide from the format, then fill it
 
@@ -60,8 +71,8 @@ one strong scene that runs the full minute beats an ambitious fragment.
 
 ## Mandatory production rules
 
-These are non-negotiable — they are the difference between a finished
-piece and a render test.
+These are non-negotiable. The operator loop's reviewer will reject
+videos that skip them.
 
 1. **Audio is required, fills the entire runtime, in correct mix balance.**
    - Generated music or instrumental bed (`generate_song.py`, when ComfyUI is available)
@@ -681,7 +692,7 @@ piece and a render test.
    a broken render, are the slow paths. (Exception: a missing BACKEND is
    an environment fact, not your bug — `generate_song.py`/`generate_sfx.py`
    fail fast with a clear error when ComfyUI isn't reachable; check
-   the ComfyUI probe first and degrade honestly.)
+   `_capabilities.json` first and degrade honestly.)
 
 8. **End the session with a playable mp4 on disk, or hand back a
    concrete blocker.** The only acceptable outcome is a final mp4 at
@@ -691,25 +702,41 @@ piece and a render test.
    than a 75-second concept that never finishes. Verify with
    `ls -la work/<id>/*.mp4` before terminating.
    If you genuinely can't produce one, return the specific blocker
-   (what you tried, what failed, what tool's error) so the human
+   (what you tried, what failed, what tool's error) so the operator
    knows what went wrong.
 
 ## How to invoke the renderer
 
-Everything renders natively on this machine (deno 2.8.1 + ffmpeg + your
-GPU; setup in docs/SETUP.md):
+Inside the render container (agentic loop, or `eido.py shell`):
+
+```bash
+cd /workspace && deno run --allow-all --unstable-webgpu --node-modules-dir=auto \
+    eidoverse/render_scene.mjs work/<your_scene>.json
+```
+
+From the host via the container (harness mode — wraps the same command
+in docker run):
 
 ```bash
 python eido.py render work/<your_scene>.json            # full render
 python eido.py render work/<your_scene>.json --probe    # single frame, for framing checks
+```
+
+**Local, no Docker at all** (host deno 2.8.1 + host ffmpeg + host GPU —
+typically several times FASTER than the container path; setup in
+docs/SETUP.md "Local rendering"):
+
+```bash
+python eido.py render work/<your_scene>.json --local
 # or raw, from the repo root:
 deno run --allow-all --unstable-webgpu eidoverse/render_scene.mjs work/<your_scene>.json
 ```
 
-(If the ffmpeg has no nvenc, set `RENDER_CODEC=libx264`.)
+(If the host ffmpeg has no nvenc, set `RENDER_CODEC=libx264`.)
 
-All paths in scene configs and tool calls are RELATIVE to the repo
-root — the engine always runs with that as its cwd.
+All paths in scene configs and tool calls are RELATIVE to the workspace
+root — the engine runs with that as its cwd in every mode above (the
+container mounts the repo AT `/workspace`, so they're the same paths).
 
 ## Scene file shape
 
@@ -908,10 +935,11 @@ scene.add(gltf.scene);
 ## Audio pipeline (deep dive)
 
 > **Backend check first:** `generate_song.py` and `generate_sfx.py` need a
-> ComfyUI backend (default `http://127.0.0.1:8188`; override with the
-> `COMFYUI_URL` env var). Probe with `python generate_song.py --probe`. If it
-> isn't up: build the audio from edge-tts narration + ffmpeg-synthesized
-> ambience (`anoisesrc` → filters), or user-supplied audio files.
+> ComfyUI backend (default `http://127.0.0.1:8188` on the host /
+> `host.docker.internal:8188` in the container; override with the
+> `COMFYUI_URL` env var). `_capabilities.json` tells you if it's up. If it
+> isn't: build the audio from edge-tts narration + ffmpeg-synthesized
+> ambience (`anoisesrc` → filters), or operator-supplied audio files.
 > Both scripts fail fast with a clear error rather than hanging — if you
 > see that error, switch strategy; don't retry in a loop and don't fake it.
 
@@ -2545,7 +2573,7 @@ These are shimmed automatically, but knowing them helps when oddities appear:
   });
   ```
   The see-through is **alpha opacity** (`transparent: true` + `opacity` ~0.2–0.4). `transmission` + `ior` add refraction flavor on top, but they are NOT what makes it see-through. `transmission: 1.0` with no opacity renders OPAQUE/dark on this stack (the backdrop sample comes back black). For a hero refraction effect, hand-roll screen-space refraction; for ordinary glass/water/ice/windows, the alpha+transmission pattern is the way.
-- **Video encoder**: the frame→nvenc pipe defaults to 8000k average / 10000k peak. If high-frequency content (fluid, noise, dense particles, fast motion across the whole frame) still macroblocks into "pixel boxes", raise it via `RENDER_BITRATE` or switch to `RENDER_CQ=19` (near-lossless). (If a delivery target imposes a file-size ceiling, respect it: keep `-cq` higher, drop resolution, or shorten the clip.)
+- **Video encoder**: the frame→nvenc pipe defaults to 8000k average / 10000k peak. If high-frequency content (fluid, noise, dense particles, fast motion across the whole frame) still macroblocks into "pixel boxes", raise it via `RENDER_BITRATE` or switch to `RENDER_CQ=19` (near-lossless). (If your operator loop imposes a file-size ceiling, respect it: keep `-cq` higher, drop resolution, or shorten the clip.)
 - **Transparent materials write into the auto-enhance G-buffer.** The scene pass renders color + encoded normals + metalrough as MRT; those extra attachments follow each material's own blend state (opaques hard-write, transparents blend by their attachment alpha). A custom transparent billboard/quad that lets the DEFAULT normal write through smears its quad-face normals over the buffer GTAO reads, and AO stamps hard dark rectangles behind it. `makeParticles` already opts its quads out; for your own transparent effect quads copy its pattern — `mat.mrtNode = mrt({ normal: vec4(0), metalrough: vec4(0) })` (alpha-0 writes preserve what's underneath; color stays default). Real transparent SURFACES (water, glass) should keep writing their true normals — SSR needs them.
 
 ## Compressing the final video
@@ -2639,7 +2667,7 @@ this is the checklist form.
 
 ## When stuck
 
-- **Renderer won't start**: `python eido.py doctor` diagnoses deno/ffmpeg/deps. If deps were never fetched, `python eido.py bootstrap`.
+- **Render container missing** (harness mode): `docker ps`; `python eido.py doctor` diagnoses docker/GPU/image/deps. If the image was never built, `docs/SETUP.md`.
 - **Effects look black / weird cloud reflections indoors**: `volumetric_clouds` is an OUTDOOR sky effect — don't apply it to interiors (its screen-space cloud-reflect on metals can't tell ceiling from sky). Interior haze = `scene.fog` / `depth_fog`.
 - **HUD / lower-third vanishes under the clouds (or under in-scene glass/particles)**: you parented the overlay to the world camera. Use `globalThis.makeOverlayLayer({ fov: camera.fov })`. See "full-frame broadcast overlay".
 - **VRM all-black**: you imported `@pixiv/three-vrm` directly. Use `globalThis.GLTFLoader`.
@@ -2647,7 +2675,7 @@ this is the checklist form.
 - **Music drowning voice**: amix is normalizing. Add `normalize=0` + explicit weights.
 - **TTS clusters at the start**: use `adelay` per line; space across the timeline.
 - **Texture missing on GLB**: confirm textures embedded, not external.
-- **`generate_song.py` / `generate_sfx.py` connection error**: ComfyUI backend isn't reachable — check `COMFYUI_URL` / `python generate_song.py --probe`, or degrade to TTS + ffmpeg-synthesized ambience.
+- **`generate_song.py` / `generate_sfx.py` connection error**: ComfyUI backend isn't reachable — check `_capabilities.json` / `COMFYUI_URL`, or degrade to TTS + ffmpeg-synthesized ambience.
 - **Render hangs at first frame**: malformed `expressionManager` call, missing asset key, or missing `await` on `playVRMADefault`.
 
 ## Hand-off
@@ -2662,7 +2690,7 @@ If you hit a real blocker that you couldn't work around, say so concretely:
 
 > Could not render `<id>`. <Concrete blocker, one sentence>. Tried <what>, got <what>. Returning unfinished.
 
-Don't fake completion. The human will catch it
+Don't fake completion. The operator (or the parent agent) will catch it
 and lose trust. Honesty is the contract: a real problem reported clearly
 gets fixed; a faked "done" gets caught downstream and costs far more.
 

@@ -11,12 +11,18 @@ conversation.
    direction, anything you care about. That conversation IS the brief.
 2. **The agent** plans phases, fetches assets, writes
    `work/<id>/scene.js` + `scene.json`, generates/mixes audio, renders.
-   The fetchers and audio tools run on the host — install the tiers you
-   use from `requirements-local.txt` (fetchers need only `requests`).
-3. Renders run natively on your GPU:
+   `fetch_hdri.py` / `fetch_texture.py` run fine on the host (they just
+   need `requests`); **run `fetch_model.py` inside the container**
+   (`python eido.py shell`) — preview rendering and ranking need the
+   container toolchain, and a host run degrades (no previews, and
+   candidate downloads can pile up unranked).
+3. Renders go through the container — or fully locally with `--local`
+   (host deno + GPU, several times faster; see docs/SETUP.md §6):
    ```bash
    python eido.py render work/<id>/scene.json --probe   # single frame — framing check
-   python eido.py render work/<id>/scene.json           # full render
+   python eido.py render work/<id>/scene.json           # full render (container)
+   python eido.py render work/<id>/scene.json --local   # full render (no docker)
+   python eido.py shell                                 # interactive container shell
    ```
 4. **You** review the mp4 (and any probe frames) and give notes; the agent
    iterates.
@@ -31,9 +37,10 @@ conversation.
   for the same GPU device and can wedge the driver stack. Probes are
   exempt; full renders queue.
 - **The agent's scratch space is `work/<id>/`** (gitignored). Engine files
-  under `eidoverse/` are the toolkit — an agent CAN edit them, but treat
-  engine edits as deliberate toolkit development, not per-video hacks;
-  per-video code belongs in the scene script.
+  under `eidoverse/` are the toolkit — a harness agent CAN edit them (they
+  are only ro-mounted in the agentic loop), but treat engine edits as
+  deliberate toolkit development, not per-video hacks; per-video code
+  belongs in the scene script.
 - **Review like a producer.** The bar in `AGENTS.md` ("looks like a real
   produced short") applies; the human eye is the final audit. The engine's
   render-log audits (`[placement]`, `[locomotion]`, `[lipsync]`,

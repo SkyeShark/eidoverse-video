@@ -1,0 +1,74 @@
+# Eidoverse minimal render base — Deno + WebGPU + Mesa + ffmpeg only.
+# A lighter alternative to docker/Dockerfile when you don't need the agent
+# CLIs, the audio toolchain, or the preview-scraping Chrome (renders still
+# work; generate_song/sfx, edge-tts, demucs, and fetch_model previews won't).
+#
+#   docker build -f docker/Dockerfile.base -t eidoverse:base docker
+#
+# Stack: Ubuntu rolling + Kisak Mesa (recent D3D12 Gallium / Vulkan) +
+# Deno + Node + static nvenc ffmpeg.
+
+FROM ubuntu:rolling
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get -y dist-upgrade \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates curl unzip xz-utils git \
+        software-properties-common gnupg \
+        python3 python3-pip python3-venv python3-dev \
+        fontconfig \
+        fonts-dejavu-core fonts-liberation fonts-noto-mono \
+        build-essential pkg-config libcairo2-dev g++ \
+ && rm -rf /var/lib/apt/lists/*
+
+# Stock Ubuntu Mesa, PINNED — the D3D12 Gallium driver for WSL2 and the
+# Vulkan ICD path for native Linux. Resolute's stock 26.0.3 works; the
+# Kisak PPA's 26.1.4 corrupts the TSL effects path (banded gradient output),
+# so the PPA is deliberately NOT used. Exact pins fail the build loudly on
+# an archive bump — re-verify a rendered FRAME before updating them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --allow-downgrades \
+        libvulkan1 vulkan-tools \
+        mesa-vulkan-drivers=26.0.3-1ubuntu1 mesa-libgallium=26.0.3-1ubuntu1 \
+        libgl1-mesa-dri=26.0.3-1ubuntu1 libegl-mesa0=26.0.3-1ubuntu1 \
+        libgbm1=26.0.3-1ubuntu1 libglx-mesa0=26.0.3-1ubuntu1 \
+        libegl1 libgl1 mesa-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+# Static ffmpeg with NVENC (BtbN GPL build)
+# PINNED to a dated autobuild: "latest" tracks the newest nvenc SDK, which
+# can demand a newer NVIDIA driver than the host has (e.g. API 13.1 needs
+# driver 610+) and then every encode fails with "Driver does not support
+# the required nvenc API version". Bump the pin deliberately, after
+# checking your driver.
+RUN curl -fsSL https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-03-31-13-11/ffmpeg-N-123777-g53537f6cf5-linux64-gpl.tar.xz \
+        -o /tmp/ffmpeg.tar.xz && \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp && \
+    install -m 0755 /tmp/ffmpeg-N-123777-g53537f6cf5-linux64-gpl/bin/ffmpeg  /usr/local/bin/ffmpeg && \
+    install -m 0755 /tmp/ffmpeg-N-123777-g53537f6cf5-linux64-gpl/bin/ffprobe /usr/local/bin/ffprobe && \
+    rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-N-123777-g53537f6cf5-linux64-gpl
+
+# Custom display fonts (OFL) + cache
+COPY fonts/*.ttf /usr/share/fonts/truetype/custom/
+RUN chmod 644 /usr/share/fonts/truetype/custom/*.ttf && fc-cache -f
+
+# Deno (baked), PINNED: Deno bundles wgpu/naga; 2.9.x corrupts the TSL
+# effects path. Bump only after checking a rendered FRAME.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s -- -y v2.8.1
+
+# Node.js 22 LTS (NodeSource)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+ && apt-get install -y nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video
+ENV GALLIUM_DRIVER=d3d12
+ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib
+ENV MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+
+# Smoke-test key binaries (build fails loudly if broken)
+RUN deno --version && node --version && ffmpeg -version 2>&1 | head -1
+
+WORKDIR /workspace

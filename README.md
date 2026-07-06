@@ -11,26 +11,33 @@ speeds with minimal CPU** — no per-frame CPU loops, no baking. The engine
 was extracted from a production pipeline that has shipped hundreds of
 videos.
 
-## Quickstart
+## Quickstart (containerized)
 
 ```bash
-# 1. Install Deno 2.8.1 (pinned) + ffmpeg          → docs/SETUP.md
-python eido.py bootstrap      # one-time dependency fetch
-python eido.py doctor         # health check
+# 1. Build the render image (one-time; ~15-30 min)  → docs/SETUP.md
+docker build -f docker/Dockerfile --build-arg AGENT=none -t eidoverse:render docker
+python eido.py bootstrap --image eidoverse:render   # deps into the container volume
+python eido.py doctor                               # health check
 python eido.py render eidoverse/examples/basic_vrm.json   # smoke test
+
+# Autonomous loop: build an agent-flavored image, hand it a brief
+docker build -f docker/Dockerfile --build-arg AGENT=claude -t eidoverse:claude docker
+python eido.py agent --agent claude --brief my_brief.txt   # → runs/<timestamp>/
 ```
 
-Then open the repo in your agent and ask for a video. Working rhythm
-(single-frame probes, review, iteration): `docs/HARNESS_MODE.md`.
+The runner writes `_brief.txt`/`_capabilities.json`, mounts the repo at
+`/workspace` (engine files read-only), launches the agent CLI inside the
+container, and collects the outputs. Full loop docs: `docs/AGENT_LOOP.md`.
 
 ## Branches
 
-- **`main`** (this branch) — run it straight out of your agent harness:
-  Deno + ffmpeg on your machine, no containers anywhere.
-- **`auto`** — the containerized edition: a Docker render image and a
-  runner that wraps the whole toolkit as a **subagent for autonomous
-  agentic loops** (a parent orchestrator hands in a brief file and gets
-  back a finished mp4, engine mounted read-only, no human in the loop).
+- **`auto`** (this branch) — the containerized edition: a Docker render
+  image and a runner that wraps the whole toolkit as a **subagent for
+  autonomous agentic loops** (a parent orchestrator hands in a brief file
+  and gets back a finished mp4, engine mounted read-only, no human in the
+  loop).
+- **`main`** — the harness edition: no Docker anywhere; an agent + its
+  human install Deno + ffmpeg and render natively.
 
 ## What's in the toolkit
 
@@ -126,7 +133,7 @@ Then open the repo in your agent and ask for a video. Working rhythm
   splitting, `align_lyrics.py` (lyric timestamps), `lipsync.py`
   (visemes), `merge_av.py` (safe mux that refuses frozen-frame padding).
 
-**Runner** — `eido.py`: `bootstrap` / `doctor` / `render [--probe]`.
+**Runner** — `eido.py`: `bootstrap` / `doctor` / `render [--probe]` / `shell` / `agent` (the loop runner) / `cleanup`.
 
 ## Requirements
 
