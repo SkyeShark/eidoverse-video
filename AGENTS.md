@@ -863,7 +863,10 @@ globalThis._vrm = vrm;
 pick one** (same as fetched props):
 - `aletheia.vrm` — Aletheia, a production-quality character (blonde, cyberpunk styling)
 - `aporia.vrm` — Aporia, a production-quality character (dark-haired, cyberpunk styling)
-- `claude_suit.vrm` — Claude, the AI, in a suit — the PRIMARY Claude model (see rule below)
+- `claude_suit.vrm` — Claude, the AI, in a suit — the PRIMARY Claude model (see rule below).
+  **The outfit is built in LAYERS** — mesh names `jacket`, `tie`, `shirt`, `pants`, `shoes`:
+  hide layers to change the look (jacket + tie off = casual shirtsleeves):
+  `vrm.scene.traverse(o => { if (o.name === 'jacket' || o.name === 'tie') o.visible = false; })`
 - `claude.vrm` — a legacy lightweight Claude stand-in; prefer `claude_suit.vrm`
 
 Any other `.vrm` you drop into `eidoverse/assets/vrms/` works the same
