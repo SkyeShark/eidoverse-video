@@ -1865,8 +1865,20 @@ const wild = globalThis.makeCreature(makeCreature.random(42));
   amplitude envelope onto the jaw** — pair with `lipsync.py`'s
   `get_mouth_openness` per frame for TTS-synced creature speech.
   `c.hasJaw` tells you if this head articulates.
-⚠ judge creature renders from frame ~10+, not frame 0 — shadow maps and
-pipelines settle over the first frames (a t=0 probe can look black).
+⚠ **PROBE WARM-UP — creatures look BROKEN at frame 0, not just dark.** A
+creature's gait and foot-plants assemble over the first ~1-2 seconds; at
+frame 0 the body renders as scattered spheres with a detached floating
+head — which looks exactly like a catastrophic skinning/engine bug and
+has sent real builds on false bug hunts. Shadow maps and pipelines also
+settle over the first frames (a t=0 probe can look black), and particle
+systems start clumped at their emitters. NEVER judge creatures,
+particles, or lighting from a single frame-0 probe: render ≥1.5s and
+judge the LAST frame. To probe a mid-film beat, give `renderFrame` a
+time-offset hook (`t += Number(Deno.env.get('T_OFFSET') || 0)` at the
+top) and render a 1.5-2s window that ENDS on the beat you care about.
+Creatures that must be pre-settled but unseen (a late reveal) should
+wait PARKED far from camera on real ground — a hidden group can't warm
+up, and a cold reveal scrambles on camera.
 
 **Silhouette Parallax Occlusion Mapping (SPOM)** — ray-march a height map to give a surface real interior depth AND an outline that follows the relief, so the mesh EDGE shows the bumps in profile instead of a flat polygon line. Backed by our `parallax_occlusion.js` library (`parallaxOcclusionUV`). Two helpers: **`createReliefColumn`** (curved surfaces — the easy, correct path) and **`createParallaxMaterial`** (flat surfaces + full control).
 
