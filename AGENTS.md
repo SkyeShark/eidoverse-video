@@ -863,7 +863,8 @@ globalThis._vrm = vrm;
 pick one** (same as fetched props):
 - `aletheia.vrm` — Aletheia, a production-quality character (blonde, cyberpunk styling)
 - `aporia.vrm` — Aporia, a production-quality character (dark-haired, cyberpunk styling)
-- `claude.vrm` / `claude_suit.vrm` — Claude, the AI (see rule below)
+- `claude_suit.vrm` — Claude, the AI, in a suit — the PRIMARY Claude model (see rule below)
+- `claude.vrm` — a legacy lightweight Claude stand-in; prefer `claude_suit.vrm`
 
 Any other `.vrm` you drop into `eidoverse/assets/vrms/` works the same
 way. Point `config.assets` at the VRM **where it lives** — e.g.

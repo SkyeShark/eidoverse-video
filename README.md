@@ -1,144 +1,192 @@
 # Eidoverse Video — prealpha 0.01
 
-A **video-production toolkit for AI agents**: a Deno + WebGPU + three.js/TSL
-render engine with physics-based VRM character locomotion (Rapier), foot IK,
-a movement vocabulary (run / vault / climb / jump / ladders / gestures /
-sitting), 33 TSL post-processing effects, simulation showpieces (3D fluid,
-cloth, interactive water, particle morphs, GPU grass, procedural terrain),
-semantic asset fetchers (models / HDRIs / PBR textures), and a full audio
-pipeline (music + SFX generation via ComfyUI, TTS narration, lipsync,
-mixing) — all documented as a single agent-facing contract (`AGENTS.md`)
-that Claude Code, codex, and opencode read natively.
+**A video-production toolkit for AI agents.** Open this repo in a coding
+agent (Claude Code, codex, opencode — they auto-read `AGENTS.md`, the
+full contract), describe the video you want in plain words, and the agent
+plans it, builds the world, animates the characters, generates and mixes
+the audio, renders on your GPU, and hands you a finished mp4.
 
-Open the repo in your coding agent, describe the video you want, and the
-agent plans a 4–6 phase piece, fetches and places assets, writes a scene
-script against the engine's globals, generates and mixes audio, renders,
-self-verifies against the engine's audits, and ships a finished mp4.
+Everything renders through **Deno + WebGPU + three.js/TSL at real-time
+speeds with minimal CPU** — no per-frame CPU loops, no baking. The engine
+was extracted from a production pipeline that has shipped hundreds of
+videos.
 
-**Status: prealpha.** Extracted from a production pipeline that has shipped
-hundreds of videos; the extraction is fresh, so expect rough edges in setup.
+## Quickstart
+
+```bash
+# 1. Install Deno 2.8.1 (pinned) + ffmpeg          → docs/SETUP.md
+python eido.py bootstrap      # one-time dependency fetch
+python eido.py doctor         # health check
+python eido.py render eidoverse/examples/basic_vrm.json   # smoke test
+```
+
+Then open the repo in your agent and ask for a video. Working rhythm
+(single-frame probes, review, iteration): `docs/HARNESS_MODE.md`.
 
 ## Branches
 
-- **`main`** (this branch) — run it straight out of your agent harness
-  with your human/agent pair: install Deno + ffmpeg, no containers
-  anywhere.
+- **`main`** (this branch) — run it straight out of your agent harness:
+  Deno + ffmpeg on your machine, no containers anywhere.
 - **`auto`** — the containerized edition: a Docker render image and a
   runner that wraps the whole toolkit as a **subagent for autonomous
   agentic loops** (a parent orchestrator hands in a brief file and gets
   back a finished mp4, engine mounted read-only, no human in the loop).
 
+## What's in the toolkit
+
+**Render engine** (`eidoverse/render_scene.mjs`)
+- WebGPU + NodeMaterial/TSL renderer harness: scene scripts get the GPU
+  device, an asset injector, helper globals, and an ffmpeg NVENC pipe.
+- Always-on auto-enhance: GTAO, screen-space reflections, bloom, FXAA.
+- End-of-render **audits** that catch real defects by name: placement
+  (floating/interpenetrating props), locomotion (hand-slid characters),
+  lipsync (frozen mouths), camera (bouncing zooms), frozen VRM poses.
+
+**Characters & locomotion**
+- VRM character controller with physics (Rapier), terrain-conforming
+  foot IK, and automatic incline speed — plus a full **movement
+  vocabulary**: walk, run, vault, ledge climbs, gap jumps, ladders,
+  wall scrambles, upper-body gestures while walking, chair/ground sits.
+- Autonomous navigation (`VRMRobotBody`): lidar sensing + A* routing to
+  a destination, or explicit waypoints (`EidoverseRobotController`).
+- 30+ VRMA animation clips ship in `eidoverse/assets/animations/`.
+- Lipsync pipeline: viseme timelines from any vocal audio.
+
+**Procedural builders**
+- `makeCreature` — Spore-style creatures from one parameter set: quad /
+  biped / bird / serpent / octopus / insect / spider / fish / snail
+  stances, morphology-adaptive gaits, flight with banking, animal faces,
+  horns/tusks/fangs/feet/accessories, robot variants, seeded randoms —
+  and **hinged talking jaws** you can drive from a real audio envelope.
+- `makeRobot` / `makeBot` — industrial machines with real closed-form
+  kinematics (6-DOF arm, SCARA, delta, Stewart, turret, AGV, gantry, FDM
+  printer) + a kitbash assembler (any part on any base), all
+  self-animating. `RoboticsKit.cyborg()` grafts modules onto creatures.
+- `FabSim` — print any mesh (molten-metal deposition that solidifies
+  into the exact source model) or carve it from a solid block with a
+  CNC gantry, both raymarched in realtime.
+- `makeTerrain` (heightfield ground with height/slope texture blending),
+  `makeGrass` (GPU wind-swept blade fields), `Loft` (surfaces through
+  cross-sections: vases, horns, ducts, ribbons), `text_3d` (extruded
+  type from 19 bundled fonts), `ProceduralMaterials` (worn metal, skin,
+  fabric, rubber… as NodeMaterials).
+- **SPOM relief** — silhouette parallax occlusion mapping: carved depth
+  whose outline follows the relief (`createReliefColumn` for curved
+  surfaces, `createParallaxMaterial` for flat ones).
+
+**Simulation**
+- `fluid_3d` — 3D MLS-MPM particle liquid (pours, fountains, splashes)
+  with a raymarched water surface.
+- `water_compute` — interactive rippling water (drop a disturbance
+  anywhere, circular pools for vessels).
+- `cloth_sim` — mass-spring fabric with wind, pinning, and scene
+  collision (flags, banners, capes, curtains).
+- `fluid_sim` — 2D ink/dye stable-fluids for panels and screens.
+- `makeIsoField` — GPU-raymarched isosurfaces over a writable voxel
+  field (the fast path for anything MarchingCubes-shaped).
+
+**Particles, FX & motion graphics**
+- `makeParticles` — GPU sprite systems (fire, smoke, sparks, embers,
+  dust, snow, magic, stars) + an 80-texture particle library.
+- `makeParticleMorph` — dissolve any mesh/VRM into particles and reform
+  it as another shape, a word (`fromText`), or ASCII art.
+- `sdf_raymarch_loader` — placeable raymarched objects (with correct
+  occlusion) + volumetric smoke/fire/explosions.
+- **31 TSL post effects**: volumetric clouds, godrays, lens flares,
+  depth fog, rain (world + lens), glitch/VHS/CRT families, color grades,
+  edge/line looks, blurs, underwater, kaleidoscope, and a full-frame
+  nuclear blast.
+- `makeScreen` / `makeVideoScreen` (in-world animated displays),
+  `makeOverlayLayer` (broadcast-style HUDs and lower thirds),
+  `makeAsciiPanel` (glowing terminal panels).
+
+**Placement & scene assembly**
+- Intent-based placement that reads real geometry: `placeOn`,
+  `placeAgainst`, `placeTouching` (mesh-accurate contact), `snapToGround`,
+  `scatterOn`, `findClearSpot`, `faceToward`, `driveAlong` (vehicles that
+  face their travel), `stationBeside`, `seatOn` / `sitOnGround`.
+- Post-setup audits auto-fix overlaps and near-floaters, and hard-flag
+  anything genuinely dumped in mid-air.
+
+**Asset pipeline**
+- `fetch_model.py` — parallel search across local models + Poly Haven +
+  Smithsonian + NASA + NIH 3D with **semantic theme re-ranking**, scale
+  and pivot info, preview renders, and kit detection (`loadKit` splits
+  modular kits into usable parts).
+- `fetch_hdri.py` (environment lighting) and `fetch_texture.py` (full
+  PBR sets — basecolor/normal/roughness/AO/displacement, all CC0).
+- ~90 bundled models, HDRI-ready examples, particle textures, fonts.
+
+**Audio**
+- `generate_song.py` — full songs (any genre, sung vocals or
+  instrumental) via ACE-Step through a local ComfyUI.
+- `generate_sfx.py` — sound effects/ambience via Stable Audio.
+- TTS narration (edge-tts) + character voice filters
+  (`cyborg_stutter.py` spoken / `cyborg_voice.py` sung), demucs stem
+  splitting, `align_lyrics.py` (lyric timestamps), `lipsync.py`
+  (visemes), `merge_av.py` (safe mux that refuses frozen-frame padding).
+
+**Runner** — `eido.py`: `bootstrap` / `doctor` / `render [--probe]`.
+
 ## Requirements
 
 - **GPU**: NVIDIA recommended. Windows renders through native D3D12
   WebGPU; Linux through Vulkan; macOS through Metal.
-- **Deno 2.8.1** (pinned — see `docs/SETUP.md`) and **ffmpeg** on PATH.
+- **Deno 2.8.1** (version-pinned — see `docs/SETUP.md`) and **ffmpeg**.
   That's the whole render stack.
-- **Python 3** for the `eido.py` runner and the optional tool scripts.
+- **Python 3.10+** for the runner and tool scripts (tiered deps in
+  `requirements-local.txt`; the fetchers need only `requests`).
 - Optional: a local **ComfyUI** (`:8188`) with ACE-Step + Stable Audio
-  models for music/SFX generation (`generate_song.py` / `generate_sfx.py`);
-  without it the audio pipeline degrades to TTS + synthesized ambience.
-- Optional: `JINA_AI_KEY` (or any OpenAI-compatible embeddings endpoint via
-  `EIDOVERSE_EMBED_*`) for semantic theme-ranking in `fetch_model.py`.
-
-## Quickstart
-
-```bash
-# 1. Install Deno 2.8.1 + ffmpeg (docs/SETUP.md §1)
-
-# 2. One-time dependency fetch (materializes node_modules from deno.lock)
-python eido.py bootstrap
-
-# 3. Health check
-python eido.py doctor
-
-# 4. Smoke test — a 10-second orbit of the sample character
-python eido.py render eidoverse/examples/basic_vrm.json
-```
-
-Then open the repo in **Claude Code, codex, or opencode** — the agent
-auto-reads `AGENTS.md` and knows the whole toolkit. Describe the video
-you want, in plain words. The agent writes the scene into `work/<id>/`
-and renders it natively on your GPU. See `docs/HARNESS_MODE.md` for the
-working rhythm (probes, review, iteration).
-
-## Repo map
-
-```
-AGENTS.md            the single agent-facing contract (API + production rules)
-CLAUDE.md            one-line pointer shim (@AGENTS.md) so Claude Code auto-loads it
-eido.py              runner: bootstrap / doctor / render
-docs/                SETUP.md, HARNESS_MODE.md
-eidoverse/           the render engine
-├── render_scene.mjs      engine entry (helper injection, audits, ffmpeg pipe)
-├── render_common.mjs     shared engine helpers
-├── *.js                  helper modules (controller, foot IK, placement, sims, …)
-├── effects_tsl/          33 TSL post-processing effects + registry
-├── examples/             starter scenes (basic_vrm, obstacle_course)
-└── assets/               vrms / models / animations / particle_textures / fonts
-fetch_model.py fetch_hdri.py fetch_texture.py     asset fetchers
-generate_song.py generate_sfx.py                  ComfyUI music/SFX (optional backend)
-merge_av.py align_lyrics.py lipsync.py            audio/lipsync tools
-cyborg_voice.py cyborg_stutter.py                 character voice filters
-deno.lock deno.json  pinned JS deps + workspace marker (node_modules regenerates from them)
-work/                agent scratch (gitignored)
-```
+  checkpoints for music/SFX generation — without it the audio pipeline
+  degrades to TTS + synthesized ambience. See "Music & SFX" below.
+- Optional: `JINA_AI_KEY` (or any OpenAI-compatible embeddings endpoint
+  via `EIDOVERSE_EMBED_*`) for semantic theme-ranking in `fetch_model.py`.
 
 ## Music & SFX — the ComfyUI backend (optional)
 
-`generate_song.py` (music) and `generate_sfx.py` (sound effects) don't
-synthesize audio themselves — they submit workflows to a **local ComfyUI**
-and collect the result. To enable them:
+`generate_song.py` (music) and `generate_sfx.py` (sound effects) submit
+workflows to a **local ComfyUI** and collect the result:
 
-1. Install ComfyUI (Desktop app or server) on the host.
-2. Install the model checkpoints into ComfyUI's `models/` tree:
-   - **ACE-Step** (text-to-music) — used by `generate_song.py`; its
-     workflow is embedded in the script (tags/lyrics/bpm/key/seed in,
-     `song.mp3` out).
-   - **Stable Audio 3** (text-to-SFX) — used by `generate_sfx.py`; the
-     repo ships the workflow (`sa3_workflow.json`) and the script fills
-     in prompt/duration/category/seed.
-3. Reachability: the tools look for ComfyUI at `:8188`
-   (`COMFYUI_URL` overrides). ComfyUI Desktop binds localhost on a
-   roaming port — `eidoverse/comfy_bridge.py` fixes that by proxying
-   `0.0.0.0:8188` to wherever ComfyUI actually is.
+1. Install ComfyUI (Desktop app or server).
+2. Install the checkpoints: **ACE-Step** (text-to-music; workflow
+   embedded in the script) and **Stable Audio** (text-to-SFX; the repo
+   ships `sa3_workflow.json`).
+3. The tools look for ComfyUI at `:8188` (`COMFYUI_URL` overrides).
+   ComfyUI Desktop binds a roaming localhost port —
+   `eidoverse/comfy_bridge.py` proxies `0.0.0.0:8188` to wherever it
+   actually is.
 
-Without ComfyUI everything else still works: the tools fail fast with a
-clear error and the audio pipeline degrades to edge-tts narration +
-ffmpeg-synthesized ambience.
-
-## Helper maturity — what's solid, what's rough
-
-Production-hardened (hundreds of shipped renders): the render engine +
-audits, the character controller stack (locomotion / maneuvers / foot IK /
-seating), the effects catalog, the placement system, the simulation
-showpieces (fluid_3d, cloth, water, particle morph, grass, terrain), the
-fetchers. Rougher edges to expect at prealpha:
-
-- **`sdf_raymarch_loader`** — the engine is solid; writing your own good
-  `map(p)` TSL is on you (the shipped EXAMPLES are vehicles + volumetrics).
-- **`robotics_kit`** — brand new (7 machine archetypes + kitbash assembly +
-  creature cyborg grafts); kinematics are closed-form and solid, but it
-  has far fewer shipped renders behind it than the rest.
-- **`rhombic_dodecahedron`, `robot_debug`** — niche, functional, lightly
-  documented.
-- **`fetch_model.py` previews/ranking** — install its tier from
-  `requirements-local.txt`; with bare `requests` it still fetches but
-  degrades (no previews, relevance-only ranking without an embeddings key).
-- **Local rendering on Linux/macOS** — expected to work (Vulkan/Metal),
-  verified only on Windows so far.
+Without ComfyUI everything else still works; the tools fail fast with a
+clear error.
 
 ## Characters
 
-Three rigged VRM characters ship in `eidoverse/assets/vrms/`:
-**Aletheia** and **Aporia** (production-quality, cyberpunk-styled) and
-**Claude** (a light mannequin, also the default smoke-test character —
-represents the AI Claude specifically; see the usage rule in AGENTS.md).
-Drop any additional `.vrm` into the same folder and it works identically.
+Four rigged VRMs ship in `eidoverse/assets/vrms/` (each with a preview
+image; drop in your own `.vrm` and it works identically):
+
+- **`aletheia.vrm`** / **`aporia.vrm`** — production-quality
+  cyberpunk-styled characters.
+- **`claude_suit.vrm`** — Claude, the AI, in a suit — **the primary
+  Claude model**.
+- **`claude.vrm`** — a legacy lightweight Claude stand-in (kept for the
+  smoke-test example; prefer `claude_suit.vrm`).
+
+The Claude models represent the AI Claude specifically — the usage rule
+is in `AGENTS.md`.
+
+## Status
+
+**Prealpha.** The engine, controller stack, placement system, effects,
+and simulations are production-hardened; the packaging is young. Known
+rough edges: `fetch_model.py`'s preview rendering and ranking need their
+Python tier installed (with bare `requests` it still fetches, unranked);
+local rendering is render-verified on Windows, expected-but-unverified
+on Linux (Vulkan) and macOS (Metal); `sdf_raymarch_loader` gives you the
+engine but writing a good `map(p)` is on you.
 
 ## License
 
 Code is licensed under **AGPL-3.0** (see `LICENSE`). The bundled asset
-library is a mix of original handmade and AI generated work by the
+library is a mix of original handmade and AI-generated work by the
 maintainer, shipped with the repo (particle sprites: Kenney Particle
 Pack, CC0). See `CREDITS.md` for library credits and design inspirations.
