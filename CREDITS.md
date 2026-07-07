@@ -61,8 +61,10 @@ did the extraction, the release engineering, and the launch film.
   redistribution.
 - The bundled `eidoverse/assets/` library (characters, props, animations)
   is a mix of original handmade and AI generated work by the maintainer,
-  released with the repo. Particle sprites: Kenney Particle Pack
-  (kenney.nl, CC0).
+  released with the repo. Content of `eidovers/assets/models` is either handmade work
+  by me ([x.com/skyesharkie](https://x.com/skyesharkie)) or meshy.ai generations. 
+  All provided CC0, though attribution is appreciated on handmade (easy to tell which).
+  Particle sprites: Kenney Particle Pack (kenney.nl, CC0).
 - **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)), provided under CC-BY.
 - **`aletheia.vrm`** and **`aporia.vrm`** — avatars of **aihegemonymemes** ([x.com/aihegemonymemes](https://x.com/aihegemonymemes)), provided under CC-BY.
 - **The claudesona** (Claude's logo-bloom character design, worn by both
