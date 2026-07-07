@@ -209,7 +209,7 @@ image. Drop in your own `.vrm` and it works identically.
   built in layers — hide the `jacket` and `tie` meshes for
   shirtsleeves.
 - **`claude.vrm`** — a minimal, lightweight build of the same claudesona
-  design.
+  design, CC0.
 
 The Claude models represent the AI Claude specifically — the usage rule
 is in `AGENTS.md`.
