@@ -1108,6 +1108,91 @@ globalThis.renderFrame = async function (t) {
 };
 ```
 
+**⚠️ `claude_suit.vrm` mouth is SPECIAL — drive raw morphs, not expressions.**
+The visible cat-smile is PAINTED on the face; the animatable mouth is a hidden
+black cavity revealed by the `show MMD mouth` shapekey. The expressionManager
+path above barely moves it (the expression binds under-drive the reveal) —
+voice over that mouth reads frozen. The render-verified recipe:
+
+1. Select the 3 face plates once at setup and write **raw
+   `morphTargetInfluences` inside `mesh.onBeforeRender`** (survives the
+   engine's VRM passes), `fill(0)` FIRST — leftover expression weights
+   otherwise hold the mouth shut. (`fill(0)` also kills auto-blink;
+   re-apply `Blink` yourself if you want it.)
+   ```js
+   const plates = [];
+   vrm.scene.traverse(o => { if (o.morphTargetDictionary && ('show MMD mouth' in o.morphTargetDictionary)) plates.push(o); });
+   for (const p of plates) p.onBeforeRender = () => {
+       const inf = p.morphTargetInfluences, d = p.morphTargetDictionary;
+       inf.fill(0);
+       for (const [nm, w] of Object.entries(globalThis._suitMouth || {})) if (nm in d) inf[d[nm]] = w;
+   };
+   ```
+2. Per frame set `globalThis._suitMouth` to a viseme pose. This table is
+   contact-sheet tested — **weights above 1 are intentional** (morph deltas
+   scale linearly past 1; these stacks are verified tear-free):
+   ```js
+   const S = 'show MMD mouth';
+   const SUIT_VISEMES = {
+       aa: { [S]: 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 },   // big open — the workhorse
+       oh: { [S]: 1.2, LipFunnel: 1.0, 'お': 0.8 },          // rounded drop
+       ou: { [S]: 0.8, LipPucker: 1.2 },                     // tight pucker
+       ee: { [S]: 1.0, 'え': 1.5 },                          // wide + shallow
+       ih: { [S]: 0.9, 'い': 1.2 },                          // flat slit
+       rest: {},                                             // painted smile returns
+   };
+   ```
+3. Simplest talking (one openness signal — `lipsync.py get_mouth_openness`
+   or an RMS envelope): scale the whole `aa` pose by openness 0..1 —
+   verified to ramp smoothly. For full visemes: **WINNER-TAKE-ALL, never
+   additive.** `lipsync.py` emits all five channels at once — summing the
+   poses renders untested morph combinations that read as glitches.
+   EMA-smooth the channels (~3 frames), pick the dominant one, render ONLY
+   its pose scaled by `min(1, value/0.35)`; below ~0.03 raw → rest.
+4. Traps (all render-verified): `vis_aa/ih/ou/ee/oh` and the plain vowel
+   shapes do NOTHING without the reveal; `MouthClosed` does NOT hide the
+   cavity (rest = reveal at 0); never drive `hide mouth` (it restyles the
+   painted line — an aesthetic change, not lipsync); `O`/`お` solo are
+   empty exports. Expression accents that DO work as raw morphs: `Smile`,
+   `MouthSmileLeft/Right`, `MouthFrown`, `Blink`, `EyeClosedLeft/Right`,
+   `EyeWide`, `Blush`/`照れ`.
+
+`claude.vrm` (the classic sona) is the opposite: its mouth is
+expression-bound and the plain `expressionManager.setValue` viseme path
+above works as written — no raw-morph handling needed.
+
+**`claude_suit.vrm` wardrobe — the clothing is LAYERED and RECOLORABLE**
+(render-verified). Named nodes: `jacket`, `tie`, `shirt`, `pants`, `shoes`.
+- **Hide layers** with `vrm.scene.getObjectByName('jacket').visible = false`
+  (same for `tie`) — the shirt underneath is fully modeled.
+- **`flower` is NOT clothing** — it's the head MANE, the character's
+  signature bloom. Never hide it when dressing him down.
+- **Recolor**: these meshes carry material ARRAYS — `mesh.material.color`
+  is undefined; collect
+  `(Array.isArray(m.material) ? m.material : [m.material])` per layer and
+  `mat.color.setHex(...)` each. Stock palette for restore: jacket
+  `#273884`, tie `#e70024`, shirt `#cecece`, pants `#fdc955`, shoes
+  `#65411f`, mane `#f98a53`.
+- **Casual look**: hide jacket + tie, then PUFF the shirt so it reads as a
+  relaxed pullover instead of a fitted undershirt. `node.scale` is ignored
+  on skinned meshes — displace vertices along normals ONCE at setup:
+  ```js
+  const shirt = vrm.scene.getObjectByName('shirt');
+  shirt.traverse((m) => {
+      if (!m.isMesh) return;
+      const pos = m.geometry.attributes.position, nor = m.geometry.attributes.normal;
+      for (let i = 0; i < pos.count; i++) {
+          pos.setXYZ(i, pos.getX(i) + nor.getX(i) * 0.02,
+                        pos.getY(i) + nor.getY(i) * 0.02,
+                        pos.getZ(i) + nor.getZ(i) * 0.02);
+      }
+      pos.needsUpdate = true;
+  });
+  ```
+  `0.02` is the verified fit (relaxed shirt); `0.035` reads as a bulky
+  sweater — keep it ≤0.02 unless a sweater is the point. Copy the original
+  positions first if you need to restore the fitted look.
+
 Music-video full protocol:
 1. `generate_song.py` with a vocal tag + singable lyrics
 2. demucs split → `vocals.wav` + `no_vocals.wav`
