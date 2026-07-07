@@ -202,7 +202,7 @@ Four rigged VRMs ship in `eidoverse/assets/vrms/`, each with a preview
 image. Drop in your own `.vrm` and it works identically.
 
 - **`aletheia.vrm`** / **`aporia.vrm`** — production-quality
-  cyberpunk-styled characters.
+  cyberpunk-styled characters, avatars of [digi](https://x.com/aihegemonymemes), CC-BY license.
 - **`claude_suit.vrm`** — Claude, the AI, in a suit — the primary Claude
   model (modeled by [digi](https://x.com/digi_dot_exe), CC-BY license); claudesona
   design by [voooooogel](https://x.com/voooooogel)). The outfit is
