@@ -122,7 +122,8 @@ videos that skip them.
    bookshelf + books on it + a mug + a discarded sweater + a plant in
    the corner + framed art on the wall + a rug + something half-visible
    through the doorway. An outdoor establishing shot is hero terrain
-   chunk + scattered rocks + grass clusters + a tree or two + a path +
+   chunk + scattered rocks + grass clusters (makeGrass) + a tree or two
+   (GROW them — makeSeedTree, never a gray-box or a mismatched GLB) + a path +
    distant silhouettes + clouds + atmospheric haze. Each is its own
    `fetch_model.py` call. Read each `_preview.jpg`, place with
    `placeOn` / `placeAgainst` / `snapToGround` — never raw coords. Reach
@@ -224,6 +225,21 @@ videos that skip them.
            bladeHeight: 0.55, spacing: 0.18, perCell: 5, wind: 0.24,
            color: 0x35540f, colorTip: 0xaecb5a /* base→tip */ });
        // wind animates itself every frame — you call nothing.
+   - `makeSeedTree` — REAL procedural trees & plants via SeedThree's headless
+     agent API (github.com/SkyeShark/SeedThree — same three/TSL stack; a tree
+     grown here is IDENTICAL to one grown in the SeedThree app, and presets
+     round-trip with its Save/Load panel). SEED-FIRST design: iterate `seed`
+     and read `stats` before touching any dial; open knob folders on demand.
+       const oak = await makeSeedTree({ species: 'whiteOak', seed: 1737, scene, sunLight: sun });
+       console.log(oak.stats.summary);                       // height/width/lod0Triangles
+       await makeSeedTree.describe();                        // species menu
+       await makeSeedTree.describe('joshuaTree', 'shape');   // ONE folder of dials
+     Gotchas (verified): set `globalThis._noAutoFixPlacement = true` in setup()
+     — the placement auto-fix dismembers intentionally-overlapping tree
+     geometry; trees sway by default (`makeSeedTree.setWind({strength,speed})`);
+     judge shadowed trees from frame ≥2. Source: SEEDTHREE_DIR / ../SeedThree /
+     ./SeedThree checkout = textured tier; no checkout = GitHub import,
+     geometry tier (placeholder materials).
 
    **Build LOWPOLY hero geometry when fetched models don't fit the art
    direction** — stylized reads better than a mismatched photoreal GLB:

@@ -161,6 +161,16 @@ RUN set -e; case "$AGENT" in \
       *)        echo "unknown AGENT='$AGENT' (use claude|codex|opencode|none)"; exit 1 ;; \
     esac
 
+# SeedThree (github.com/SkyeShark/SeedThree, MIT) — procedural plant generator.
+# Scene agents reach it through globalThis.makeSeedTree (eidoverse/seedthree_api.js),
+# which resolves SEEDTHREE_DIR; the checkout's assets/ enables the textured tier
+# (without it the bridge degrades to placeholder geometry via its GitHub import).
+RUN curl -fsSL https://github.com/SkyeShark/SeedThree/archive/refs/heads/main.tar.gz | tar -xz -C /opt \
+ && mv /opt/SeedThree-main /opt/SeedThree \
+ && rm -rf /opt/SeedThree/node_modules \
+ && chown -R node:node /opt/SeedThree
+ENV SEEDTHREE_DIR=/opt/SeedThree
+
 # Workspace mount point + X11 socket dir
 RUN mkdir -p /workspace && chown node:node /workspace
 RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
