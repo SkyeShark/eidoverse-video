@@ -17,7 +17,7 @@
 //   map                  a loaded THREE.Texture from the particle library (recommended).
 //                        Omit → a soft procedural dot (always works, less characterful).
 //   origin   [x,y,z]     emitter centre (default [0,0,0])
-//   count, size, color, area, speed, lifetime, gravity[3], grow, wobble, opacity, blending
+//   count, size, color, area (number | [x,y,z] extents), speed, lifetime, gravity[3], grow, wobble, opacity, blending
 //                        — each defaults from the preset; override any.
 // returns { mesh, material, update(t) }  (update is auto-registered; calling it is optional).
 (function () {
@@ -72,14 +72,28 @@
         // Per-instance buffers (computed once on the CPU at build time — this is
         // allowed; the PER-FRAME motion is all GPU). iEmit: spawn offset within
         // the emitter area; iVel: launch velocity; iSeed: (phase, wobbleAmt, sizeVar).
+        // `area` accepts a scalar radius OR [x,y,z] per-axis extents; anything
+        // non-numeric falls back to the preset and WARNS instead of NaN-ing
+        // every particle position (a NaN area silently kills the whole emitter)
+        let areaX, areaY, areaZ;
+        if (Array.isArray(P.area)) {
+            areaX = Number(P.area[0]) || 0;
+            areaY = P.area.length > 1 ? (Number(P.area[1]) || 0) : areaX;
+            areaZ = P.area.length > 2 ? (Number(P.area[2]) || 0) : areaX;
+        } else if (Number.isFinite(Number(P.area))) {
+            areaX = areaY = areaZ = Number(P.area);
+        } else {
+            console.warn(`[particles] invalid area ${JSON.stringify(P.area)} — expected number or [x,y,z]; using preset ${base.area}`);
+            areaX = areaY = areaZ = base.area;
+        }
         const emit = new Float32Array(count * 3);
         const vel = new Float32Array(count * 3);
         const seed = new Float32Array(count * 3);
         for (let i = 0; i < count; i++) {
-            const th = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1)), r = Math.cbrt(Math.random()) * P.area;
-            emit[i * 3]     = Math.sin(ph) * Math.cos(th) * r;
-            emit[i * 3 + 1] = Math.cos(ph) * r * 0.6;
-            emit[i * 3 + 2] = Math.sin(ph) * Math.sin(th) * r;
+            const th = rand(0, Math.PI * 2), ph = Math.acos(rand(-1, 1)), r = Math.cbrt(Math.random());
+            emit[i * 3]     = Math.sin(ph) * Math.cos(th) * r * areaX;
+            emit[i * 3 + 1] = Math.cos(ph) * r * 0.6 * areaY;
+            emit[i * 3 + 2] = Math.sin(ph) * Math.sin(th) * r * areaZ;
             vel[i * 3]      = rand(-1, 1) * P.spread;
             vel[i * 3 + 1]  = P.up + rand(-0.2, 0.2) * P.spread;
             vel[i * 3 + 2]  = rand(-1, 1) * P.spread;
