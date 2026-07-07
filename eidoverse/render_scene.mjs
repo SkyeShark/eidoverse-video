@@ -228,8 +228,9 @@ const HELPER_MODULES = [
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
     'eidoverse/particles.js',             // globalThis.makeParticles — GPU textured sprite particles (sparks/smoke/dust/…)
     'eidoverse/grass.js',                 // globalThis.makeGrass — GPU wind grass field (tapered blades, height-gradient color, adjustable wind/density/height/color)
-    // SHELVED (not in the first public push — module kept, uncomment to enable):
-    // 'eidoverse/seed_three.js',         // globalThis.makeTree — SeedThree procedural trees/plants (10 species, real morphology, SSS leaf cards, TSL wind)
+    'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; local checkout or GitHub import)
+    // RETIRED (unfinished stub bridge over SeedThree core internals — superseded by seedthree_api.js):
+    // 'eidoverse/seed_three.js',
     'eidoverse/screen.js',              // globalThis.makeScreen — animated canvas-2D screen/display panel (self-updating CanvasTexture, unlit emissive, exact UI colors)
     'eidoverse/creature_builder.js',    // globalThis.makeCreature — universal procedural creature builder (spine+limbs auto-rig, morphology-adaptive gait, makeCreature.random)
     'eidoverse/model_kit.js',             // globalThis.loadKit — named, origin-centered parts for modular-kit / asset-library GLTFs (don't drop the whole gltf.scene; assemble from parts). fetch_model.py flags kits with [KIT_INFO].
