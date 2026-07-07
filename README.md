@@ -216,7 +216,7 @@ is in `AGENTS.md`.
 
 ## Status
 
-Prealpha. Verified end-to-end on Windows (native D3D12 WebGPU) and MacOS. Linux
+Prealpha. Verified end-to-end on Windows (native D3D12 WebGPU) and MacOS (Vulkan). Linux
 (Vulkan) runs the same code paths and is expected to
 work but has not been render-verified — judge a first render by its
 frames and report what you find.
