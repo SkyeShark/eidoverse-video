@@ -117,13 +117,13 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
   particles and reform it as another shape, a word, or ASCII art.
 - `SdfRaymarchLoader` — placeable raymarched objects with correct
   occlusion, plus volumetric fire/smoke/explosions (`createSdfVolume`).
-- **33 TSL post effects** (`CustomEffectsDeno`): after_image,
+- **31 TSL post effects** (`CustomEffectsDeno`): after_image,
   anamorphic_flare, bleach_bypass, blueprint, box_blur, bw_halftone,
-  chromatic_aberration_alpha, cross_hatch, crt, depth_fog, depth_rain,
+  chromatic_aberration_alpha, cross_hatch, crt, depth_fog,
   dithering, focus_blur, full_toon, glitch_bars, godrays, hash_blur,
   jitter, kaleidoscope, lensflare, melt, neon_edges, nuclear_explosion,
   old_bw_film, radial_blur, rain_on_camera, retro_wireframe, rgb_shift,
-  sepia, underwater, vhs_tape, volumetric_clouds, wavy.
+  sepia, underwater, vhs_tape, wavy.
 - `makeScreen` / `makeVideoScreen` — in-world animated displays (canvas
   draw or video atlas). `makeOverlayLayer` — broadcast overlays: titles,
   lower thirds, tickers, end cards. `makeAsciiPanel` — glowing terminal

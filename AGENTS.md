@@ -1579,7 +1579,7 @@ pattern; a full-frame fx overlay is never canvas work.)
 ```js
 globalThis._fx = globalThis.CustomEffectsDeno.applyTo({
     scene, camera,
-    effects: 'volumetric_clouds,glitch_bars',   // comma-separated — chain 1-4 freely
+    effects: 'depth_fog,glitch_bars',   // comma-separated — chain 1-4 freely
     opts: { glitch_bars: { barFreq: 22, shift: 0.03, opacity: 0.85 } },
 });
 // per frame — update the effect's uniforms, THEN render. _fx.update(t) does
@@ -1600,7 +1600,7 @@ await globalThis._fx.update(t);
 await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS render after — update() doesn't
 ```
 
-Always-on baseline (no opt-in): GTAO + SSR + UnrealBloom + FXAA + cloud-reflect on `metalness > 0.4` when `volumetric_clouds` is active.
+Always-on baseline (no opt-in): GTAO + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` (see "WORLD-SPACE SKY + WEATHER").
 
 **This list below IS the complete catalog (31 effects) — do NOT discover effects
 by `grep`/`ls`-ing `effects_tsl/`.** A `| head` on that truncates the directory
@@ -1613,12 +1613,12 @@ system's own shafts for outdoor epics), `vhs_tape`/`old_bw_film`/`bw_halftone` f
 `underwater`/`depth_fog` for mood. (Programmatic list at runtime: `CustomEffectsDeno.list()`.)
 
 Library (31 effects) — the families:
-- **3D/volumetric** (scene passes): `nuclear_explosion`; (`volumetric_clouds`
-  is DEPRECATED — use the world-space sky system for skies)
+- **3D/volumetric** (scene passes): `nuclear_explosion` (skies and rain are
+  NOT effects — use the world-space sky + weather systems)
 - **Glitch/retro** (the real glitch — use instead of hand-rolled bars): `glitch_bars`, `vhs_tape`, `crt`, `rgb_shift`, `chromatic_aberration_alpha`, `jitter`, `after_image`
 - **Colour grade**: `full_toon`, `sepia`, `bleach_bypass`, `old_bw_film`, `bw_halftone`
 - **Line/edge**: `cross_hatch`, `neon_edges`, `blueprint`, `dithering`, `retro_wireframe`
-- **Atmospheric / light**: `depth_fog`, `godrays`, `lensflare`, `anamorphic_flare`, `underwater`
+- **Atmospheric / light**: `depth_fog`, `godrays`, `lensflare`, `anamorphic_flare`, `underwater`, `rain_on_camera` (lens droplets — world rain is the weather system's job)
 - **Distort**: `melt`, `wavy`, `kaleidoscope`
 - **Blur/focus**: `focus_blur` (DoF), `radial_blur`, `box_blur`, `hash_blur`
 
@@ -2409,7 +2409,7 @@ top of the rendered video regardless of where the camera moves:
 
 **Use `globalThis.makeOverlayLayer({ fov })` — do NOT parent overlays to the
 main camera.** An overlay parented to the world camera lives in the SCENE pass,
-so world-layer effects (`volumetric_clouds`/`nuclear_explosion`/`underwater`…)
+so world-layer effects (`nuclear_explosion`/`underwater`/`godrays`…)
 composite right over it, and in-scene transparent content can cover it.
 `makeOverlayLayer` puts the overlay in its OWN scene that the engine composites
 as a second `pass()` node — layered correctly:
@@ -2421,9 +2421,9 @@ world + world-layer FX     ← UNDER the overlay (it's the thing being filmed)
 ```
 
 **Which effects go under vs over, and how to switch.**
-- **Always UNDER (locked):** `volumetric_clouds`, `nuclear_explosion`, `depth_rain`,
-  `godrays`, `underwater` — full-world effects that look broken over a HUD; the
-  override is ignored for these.
+- **Always UNDER (locked):** `nuclear_explosion`, `godrays`, `underwater` —
+  full-world effects that look broken over a HUD; the override is ignored
+  for these.
 - **Switchable, default UNDER:** `depth_fog`, `retro_wireframe`.
 - **Switchable, default OVER:** everything else (`vhs_tape`, `glitch_bars`,
   `rgb_shift`, `crt`, grain, scanlines, `blueprint`, `cross_hatch`, …).
@@ -2434,7 +2434,7 @@ OVER (a screen filter) but set `layer:'under'` to stylize only the world and
 keep the HUD crisp:
 ```js
 globalThis.CustomEffectsDeno.applyTo({ scene, camera,
-  effects: 'volumetric_clouds,blueprint,vhs_tape',
+  effects: 'blueprint,vhs_tape',
   opts: { blueprint: { layer: 'under' } },   // world becomes a blueprint; HUD + vhs stay on top
 });
 ```
@@ -2723,7 +2723,7 @@ These are shimmed automatically, but knowing them helps when oddities appear:
   ```
   The see-through is **alpha opacity** (`transparent: true` + `opacity` ~0.2–0.4). `transmission` + `ior` add refraction flavor on top, but they are NOT what makes it see-through. `transmission: 1.0` with no opacity renders OPAQUE/dark on this stack (the backdrop sample comes back black). For a hero refraction effect, hand-roll screen-space refraction; for ordinary glass/water/ice/windows, the alpha+transmission pattern is the way.
 - **Video encoder**: the frame→nvenc pipe defaults to 8000k average / 10000k peak. If high-frequency content (fluid, noise, dense particles, fast motion across the whole frame) still macroblocks into "pixel boxes", raise it via `RENDER_BITRATE` or switch to `RENDER_CQ=19` (near-lossless). (If a delivery target imposes a file-size ceiling, respect it: keep `-cq` higher, drop resolution, or shorten the clip.)
-- **Screen-space depth-keyed effects composite OVER no-depth particles.** `volumetric_clouds` (and any effect that reads scene depth) blends its result using the depth BEHIND a particle quad — additive sprites, particle-morph clouds, and `fromText` particle words all get clouds/fog drawn straight through them. If a particle showpiece must read against the sky, either frame it against geometry (occlusion works fine — stones in front of the word clip it correctly) or use `SkyMesh` + `scene.fog` instead of the screen-space sky. Also remember additive particles literally cannot show against a bright sky (add-to-white is invisible) — stage glowing particle work against dark backgrounds.
+- **Screen-space depth-keyed effects composite OVER no-depth particles.** Any effect that reads scene depth (`depth_fog`, `godrays`, …) blends its result using the depth BEHIND a particle quad — additive sprites, particle-morph clouds, and `fromText` particle words all get fog/rays drawn straight through them. If a particle showpiece must read against the sky, frame it against geometry (occlusion works fine — stones in front of the word clip it correctly). The world-space sky system does NOT have this problem — its cloud dome draws in the scene pass behind the particles. Also remember additive particles literally cannot show against a bright sky (add-to-white is invisible) — stage glowing particle work against dark backgrounds.
 - **Transparent materials write into the auto-enhance G-buffer.** The scene pass renders color + encoded normals + metalrough as MRT; those extra attachments follow each material's own blend state (opaques hard-write, transparents blend by their attachment alpha). A custom transparent billboard/quad that lets the DEFAULT normal write through smears its quad-face normals over the buffer GTAO reads, and AO stamps hard dark rectangles behind it. `makeParticles` already opts its quads out; for your own transparent effect quads copy its pattern — `mat.mrtNode = mrt({ normal: vec4(0), metalrough: vec4(0) })` (alpha-0 writes preserve what's underneath; color stays default). Real transparent SURFACES (water, glass) should keep writing their true normals — SSR needs them.
 
 ## Compressing the final video
@@ -2818,7 +2818,7 @@ this is the checklist form.
 ## When stuck
 
 - **Renderer won't start**: `python eido.py doctor` diagnoses deno/ffmpeg/deps. If deps were never fetched, `python eido.py bootstrap`.
-- **Cloud reflections indoors**: the WORLD-SPACE sky system works fine inside enclosures — walls/ceilings occlude the dome natively, and SSR blocks sky reflections wherever interior geometry is reflected (only off-screen occluders can leak a little sky onto mirrors). It was the deprecated screenspace `volumetric_clouds` that couldn't tell ceiling from sky. Interior haze = `scene.fog` / `depth_fog`; interiors that set their own HDRI keep it via `sky.bakeEnv(renderer, { ifAbsent: true })`.
+- **Cloud reflections indoors**: the WORLD-SPACE sky system works fine inside enclosures — walls/ceilings occlude the dome natively, and SSR blocks sky reflections wherever interior geometry is reflected (only off-screen occluders can leak a little sky onto mirrors). Interior haze = `scene.fog` / `depth_fog`; interiors that set their own HDRI keep it via `sky.bakeEnv(renderer, { ifAbsent: true })`.
 - **HUD / lower-third vanishes under the clouds (or under in-scene glass/particles)**: you parented the overlay to the world camera. Use `globalThis.makeOverlayLayer({ fov: camera.fov })`. See "full-frame broadcast overlay".
 - **VRM all-black**: you imported `@pixiv/three-vrm` directly. Use `globalThis.GLTFLoader`.
 - **VRM in T-pose**: see the anti-patterns list. Most common: forgot `await playVRMADefault(vrm, 'idle', ...)` (non-controller scenes), or pre-played idle UNDER a controller (controller scenes).

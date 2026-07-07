@@ -1,6 +1,6 @@
 // sky_system.js — WORLD-SPACE volumetric sky for eidoverse.
 //
-// Replaces the screenspace volumetric_clouds pipeline's weak spots:
+// Replaces the old screenspace cloud pipeline's weak spots:
 //   · clouds live on a camera-centered DOME rendered in the scene pass —
 //     depth-tests against geometry natively (no depth-keying), rays are
 //     world-anchored (no off-frame-sun striping), edges get real MSAA
@@ -12,7 +12,7 @@
 //   · distance fade into horizon haze (kills the hard horizon clamp band)
 //   · optional pure-sky HDRI backdrop blended under the procedural layers
 //
-// Cloud density/lighting math ported from effects_tsl/volumetric_clouds.js
+// Cloud density/lighting math carried over from the old screenspace effect
 // (two-stage FBM erosion, numerical Mie phase, Beer's law + powdered effect,
 // Hillaire energy-conserving accumulation) — same look, new home.
 //
@@ -739,8 +739,8 @@
                 const uvW = vec2(xz.y.add(u.skyWind.z.mul(u.time)), xz.x.add(u.skyWind.x.mul(u.time))).mul(float(-0.00005).mul(u.wScale));
                 return clamp(weatherNode.sample(uvW).r.sub(u.largeT).mul(u.largeA), 0, 2);
             },
-            // MOVING per-pixel cloud reflections on metals — the volumetric_clouds
-            // technique, verbatim contract: register the engine autoenhance hooks
+            // MOVING per-pixel cloud reflections on metals — the engine's
+            // cloud-reflect contract: register the engine autoenhance hooks
             // (_autoEnhanceCloudReflectHook + blur). The hook raymarches THIS sky
             // field along each metal pixel's reflect direction every frame, so
             // reflections drift with the clouds; autoenhance composes it as an
@@ -836,9 +836,8 @@
             },
             // bake sky+clouds into an equirect env (→ scene.environment). The
             // domes are transparent, depthless, and G-buffer-excluded, so SSR
-            // can NEVER hit them — env-IBL is how clouds reach reflections
-            // (port of volumetric_clouds.bakeEnvEquirect). One-shot; re-call
-            // after big TOD / weather changes.
+            // can NEVER hit them — env-IBL is how clouds reach reflections.
+            // One-shot; re-call after big TOD / weather changes.
             // OVERRIDE SEMANTICS: when the sky system is active it OWNS
             // scene.environment — the bake replaces any agent-chosen HDRI by
             // default (the sky IS the world's light). Interior scenes that

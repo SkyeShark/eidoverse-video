@@ -35,7 +35,7 @@ did the extraction, the release engineering, and the launch film.
   geometry technique discussed in the three.js community (see three.js
   PR #33776 for a related exploration); this implementation targets the
   TSL/WebGPU pipeline and adds the sweep/taper/twist authoring layer.
-- **`effects_tsl/volumetric_clouds.js`** — the atmosphere model follows
+- **`sky_system.js`** — the volumetric cloud/atmosphere model follows
   published physically-based sky/cloud rendering techniques (spherical-
   shell atmosphere, FBM-eroded weather fields, multi-scale Beer's law,
   a numerical Mie phase fit, and Sébastien Hillaire's energy-conserving

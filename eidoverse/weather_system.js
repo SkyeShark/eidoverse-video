@@ -1,8 +1,8 @@
 // weather_system.js — weather layer composing with the eidoverse sky system
 // (task #40, v2 after Skye's lookdev critique of v1).
 //
-// Replaces the screenspace depth_rain effect the way sky_system replaced
-// screenspace volumetric_clouds. v2 fixes the three v1 sins:
+// Replaces the old screenspace rain pass the way sky_system replaced the
+// old screenspace clouds. v2 fixes the three v1 sins:
 //   · SKY COUPLING: weather greys/darkens the live TOD palette every frame
 //     (storms stay stormy through a day cycle) and dims cloud radiance via
 //     the sky's cloudDim hook — no more blue-sky rain.

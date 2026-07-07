@@ -6,23 +6,21 @@
 // Public API: GodraysFX.applyTo({ scene, camera, opts });
 //
 // Auto-discovers the scene's first DirectionalLight (or the light passed
-// via opts.light) and renders rays from its world-space position. Same
-// scene-light tracking pattern as volumetric_clouds.
+// via opts.light) and renders rays from its world-space position.
+//
+// (For shafts breaking through a cloudy SKY, prefer the sky system's own
+// cloud shafts — they march the actual cloud density. godrays is the tool
+// for rays through GEOMETRY gaps: windows, trees, pillars.)
 //
 // Recognised opts:
 //   light          THREE.DirectionalLight | THREE.PointLight — light source
 //                    (default: first DirectionalLight in scene).
 //   strength       Float — final additive strength of the rays (default 0.5).
 //   opacity        Float — final blend (default 1.0).
-//   cloudOpacityTex TextureNode (optional) — per-pixel cloud opacity from
-//                    volumetric_clouds.getCloudOpacityTex(). When set,
-//                    godrays output is multiplied by (1 - opacity) per
-//                    pixel so dense clouds occlude the rays. Pattern:
-//                      const fx  = applyTo({ effects:'volumetric_clouds', ... });
-//                      const gfx = applyTo({ effects:'godrays', opts:{
-//                                    godrays: { cloudOpacityTex: fx.getCloudOpacityTex() }
-//                                  }});
-//                    (Apply clouds first so the texture exists when godrays asks.)
+//   cloudOpacityTex TextureNode (optional) — per-pixel occluder opacity
+//                    (0=clear, 1=opaque). When set, godrays output is
+//                    multiplied by (1 - opacity) per pixel so dense cover
+//                    occludes the rays.
 
 (function () {
     'use strict';
@@ -41,21 +39,6 @@
         if (typeof THREE.godrays !== 'function') {
             throw new Error('[godrays] THREE.godrays missing — render_common.mjs must import display/GodraysNode.js');
         }
-        // Mutually exclusive with volumetric_clouds: GodraysNode uses
-        // shadow maps for occlusion, but volumetric_clouds is a screen-
-        // space post-process and never participates in shadow casting,
-        // so combining them produces "rays + uniform glow" rather than
-        // proper cloud-shaped shafts. Use volumetric_clouds' built-in
-        // cloudShafts opt instead — it raymarches from the sun's screen
-        // position through the cloud OPACITY texture, producing real
-        // shaft-through-clouds patterns.
-        if (globalThis._volumetricCloudsActive) {
-            throw new Error(
-                '[godrays] cannot stack with volumetric_clouds (screen-space clouds aren\'t in the shadow map). ' +
-                'Use opts.volumetric_clouds.cloudShafts instead — same effect, cloud-aware.',
-            );
-        }
-
         let light = opts.light;
         if (!light) {
             scene.traverse((obj) => {
@@ -69,9 +52,8 @@
             opacity:  THREE.uniform(opts.opacity  ?? 1.0),
         };
 
-        // Optional cloud occlusion — a TextureNode whose alpha channel
-        // represents per-pixel cloud opacity (0=clear, 1=opaque cloud).
-        // Provided by volumetric_clouds via getCloudOpacityTex().
+        // Optional occluder mask — a TextureNode whose alpha channel
+        // represents per-pixel cover opacity (0=clear, 1=opaque).
         const cloudOpacityTex = opts.cloudOpacityTex ?? null;
 
         globalThis._autoEnhanceColorHook = (colorOut, sceneDepth /*, sceneNormal, sceneMR */) => {

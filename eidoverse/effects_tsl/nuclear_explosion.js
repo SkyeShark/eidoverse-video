@@ -1,6 +1,6 @@
 // nuclear_explosion.js — TSL port of the SDF-mushroom-cloud raymarcher.
 //
-// Mirrors volumetric_clouds.js's hook scaffold:
+// Installs the engine's world-layer hook scaffold:
 //   - _autoEnhancePreSSRHook  : composite the explosion over scene pixels
 //                               along the view ray (clamped to scene depth)
 //   - _autoEnhanceCloudReflectHook : on metallic surfaces, raymarch the
@@ -9,8 +9,8 @@
 //   - _autoEnhanceCloudReflectBlurHook : roughness-weighted blur of the
 //                               reflection contribution (same as clouds)
 //
-// Differences vs volumetric_clouds:
-//   - Bounded volume (mushroom cloud SDF) instead of infinite atmosphere
+// Design notes:
+//   - Bounded volume (mushroom cloud SDF) instead of an infinite atmosphere
 //     shell. Ray ends at min(maxT, sceneDepth) so opaque geometry occludes
 //     the explosion correctly.
 //   - Density derived from SDF-falloff × multi-octave value noise at
@@ -38,14 +38,12 @@
 //   volSteps     Int   — volumetric-march iterations inside the volume (default 96).
 //   reflectSteps Int   — march iterations for the reflection-path contribution (default 48).
 //
-// Effect stacking: nuclear_explosion + volumetric_clouds compose
-// automatically. Apply volumetric_clouds FIRST, then nuclear_explosion —
-// the explosion's hooks capture any previously-installed sky / cloud-
-// reflect hooks at applyTo() time, call them first to get the cloud-
-// rendered scene, then composite the mushroom volume over that. So
-// view-ray sky pixels get clouds + nuke, metal reflections get clouds +
-// nuke reflection, all in one pipeline. Apply order matters — clouds
-// first, nuke second.
+// Effect stacking: the explosion's hooks capture any previously-installed
+// sky / cloud-reflect hooks at applyTo() time, call them first to get the
+// already-composited scene, then composite the mushroom volume over that —
+// so it chains cleanly after other world-layer hooks (e.g. the sky
+// system's enableReflections: metal reflections get sky + nuke). Apply
+// order matters — install the other hook first, nuke second.
 
 (function () {
     'use strict';
@@ -82,7 +80,7 @@
             loopSeconds:  uniform(opts.loopSeconds ?? 20.0),
             maxT:         uniform(opts.maxT        ?? 80.0),
             opacity:      uniform(opts.opacity     ?? 1.0),
-            // Camera matrices (volumetric_clouds pattern).
+            // Camera matrices (screen-ray reconstruction).
             projInv:  uniform(camera.projectionMatrixInverse),
             camWorld: uniform(camera.matrixWorld),
             camNear:  uniform(camera.near),
@@ -466,8 +464,8 @@
                         return vec4(cloudCol, 1);
                     })();
                 },
-                // Roughness-weighted blur of the reflection contribution.
-                // Same algorithm as volumetric_clouds.reflectBlur.
+                // Roughness-weighted blur of the reflection contribution
+                // (same algorithm as the sky system's reflect blur).
                 reflectBlur(reflContribIn, sceneDepth, sceneNormal, sceneMR) {
                     const cloudTex = convertToTexture(reflContribIn);
                     if (typeof THREE.gaussianBlur !== 'function') {
@@ -499,12 +497,13 @@
             return { update(t) { built.update(t); }, uniforms: u };
         }
 
-        // Capture any previously-installed hooks (e.g. volumetric_clouds)
-        // so we can compose over them. Apply order at the call site:
-        //   1) clouds.applyTo  — installs preSSR / cloudReflect / blur
-        //   2) nuke.applyTo    — captures clouds' hooks, wraps them
+        // Capture any previously-installed hooks (e.g. the sky system's
+        // cloud-reflect) so we can compose over them. Apply order at the
+        // call site:
+        //   1) other hook installs first (preSSR / cloudReflect / blur)
+        //   2) nuke.applyTo    — captures those hooks, wraps them
         // Then the autoenhance pipeline calls OUR hook, which
-        //   a) calls clouds' hook first (sky-replaced colorOut + cloud-reflect contrib)
+        //   a) calls the captured hook first (its colorOut + reflect contrib)
         //   b) raymarches the explosion as the front layer
         //   c) returns the composited result
         const priorPreSSR     = globalThis._autoEnhancePreSSRHook       ?? null;
