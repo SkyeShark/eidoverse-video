@@ -193,7 +193,7 @@ piece and a render test.
      ears, tusks, horn styles), typed feet, accessories (hats/ties/shades),
      robots, seeded randoms.
    - SPOM relief — real CARVED depth + a silhouette that follows the relief. `createReliefColumn` for CURVED surfaces (columns/pipes whose flanges overhang the outline); `createParallaxMaterial` for FLAT surfaces (brick / stone / tile / tread / panel). The height field is `fetch_texture`'s **`displacement`** map. The single most under-used surface showpiece; deep docs below.
-   - `volumetric_clouds` / `nuclear_explosion` — screenspace sky & blast.
+   - The world-space sky system (day cycles, storms, cloud shadows) or the `nuclear_explosion` blast.
    - A `VRMCharacterController` walk with terrain (stairs, ramps) — real
      locomotion reads better than any teleport.
    - `makeTerrain` — procedural heightfield ground with multi-texture blending
@@ -360,12 +360,14 @@ piece and a render test.
    3. **Architecture** — bounding walls, floors, ceilings, columns,
       doorways, the framing geometry, all PBR-textured (no flat colors).
    4. **Atmosphere** — volumetric haze (`scene.fog = new THREE.FogExp2(...)`
-      or the `depth_fog` effect for interiors; `volumetric_clouds` for
-      outdoor skies), light shafts, fog for distance.
+      or the `depth_fog` effect for interiors; the WORLD-SPACE SKY SYSTEM
+      for outdoor skies), light shafts, fog for distance.
    5. **Sky / horizon** — HDRI environment lighting always. An outdoor sky
-      with clouds comes from the `volumetric_clouds` effect — it renders
-      sky, sun, and clouds with real depth and drift, so the sky reads as
-      sky (`sparseness: 'low'|'medium'|'overcast'`, `mood: 'normal'|'stormy'`). `SkyMesh` is the plain gradient dome
+      with clouds comes from the **sky system** (`eidoverse/sky_system.js` —
+      see the "WORLD-SPACE SKY + WEATHER" section): raymarched clouds living
+      IN the world, so geometry occludes them natively; sun/moon/stars,
+      time-of-day palette, cloud types, day cycles, weather states via
+      `eidoverse/weather_system.js`. `SkyMesh` is the plain gradient dome
       for a clear, cloudless sky. For sci-fi interiors, distant silhouettes
       seen through windows / vents / portals.
 
@@ -832,9 +834,9 @@ scene.environmentNode = THREE.pmremTexture(hdriTex);   // lighting only — NEVE
 //  fallback — fine for a quick look, but a real HDRI is the production path.)
 ```
 
-**Visible sky / horizon** — for outdoor scenes, use the
-`volumetric_clouds` TSL effect (see the FX section; cloud cover via
-`sparseness: 'low'|'medium'|'overcast'`, grading via `mood: 'normal'|'stormy'`). That renders procedural sky + clouds + sun. For indoor scenes
+**Visible sky / horizon** — for outdoor scenes, use the WORLD-SPACE SKY
+SYSTEM (`eidoverse/sky_system.js` — see "WORLD-SPACE SKY + WEATHER"). That
+renders geometry-aware sky + clouds + sun/moon/stars. For indoor scenes
 build the actual enclosure (walls, ceiling, windows showing what's
 outside through the glass). For abstract scenes write a custom
 backdrop / gradient / shader dome that fits the brief — never leave
@@ -1605,13 +1607,14 @@ by `grep`/`ls`-ing `effects_tsl/`.** A `| head` on that truncates the directory
 ALPHABETICALLY, so you only ever see `after_image`…`dithering` and silently miss
 the back half of the alphabet. Pick from the WHOLE list here, and **vary your
 choice** — reaching for the same `glitch_bars`/`crt` every time wastes the palette.
-Match the effect to the mood: `godrays`/`anamorphic_flare`/`volumetric_clouds` for
-epic/atmospheric, `vhs_tape`/`old_bw_film`/`bw_halftone` for retro, `neon_edges`/
+Match the effect to the mood: `godrays`/`anamorphic_flare` (plus the sky
+system's own shafts for outdoor epics), `vhs_tape`/`old_bw_film`/`bw_halftone` for retro, `neon_edges`/
 `blueprint`/`retro_wireframe` for techy, `melt`/`wavy`/`kaleidoscope` for trippy,
 `underwater`/`depth_fog` for mood. (Programmatic list at runtime: `CustomEffectsDeno.list()`.)
 
 Library (31 effects) — the families:
-- **3D/volumetric** (scene passes): `volumetric_clouds`, `nuclear_explosion`
+- **3D/volumetric** (scene passes): `nuclear_explosion`; (`volumetric_clouds`
+  is DEPRECATED — use the world-space sky system for skies)
 - **Glitch/retro** (the real glitch — use instead of hand-rolled bars): `glitch_bars`, `vhs_tape`, `crt`, `rgb_shift`, `chromatic_aberration_alpha`, `jitter`, `after_image`
 - **Colour grade**: `full_toon`, `sepia`, `bleach_bypass`, `old_bw_film`, `bw_halftone`
 - **Line/edge**: `cross_hatch`, `neon_edges`, `blueprint`, `dithering`, `retro_wireframe`
@@ -1998,17 +2001,75 @@ or a sine-displaced mesh.** These read with true depth and motion:
 - **Screen-filling nuke / shockwave** → the `nuclear_explosion` effect — a
   SCREENSPACE post effect (fills the frame; add it to the `effects:` string).
   Use it when the blast IS the shot.
-- **Sky + clouds** → the `volumetric_clouds` effect (cover via `sparseness`, grading via `mood`).
-- **RAIN** → two composable effects: `depth_rain` (WORLD-SPACE weather —
-  falling streak layers, organic puddles with refraction + sky fresnel,
-  splash rings on every upward surface, cover occlusion so overhangs stay
-  dry, global wet-darkening + rain haze) and `rain_on_camera` (LENS rain —
-  screen-locked refracting droplets + wet blur; fixed size, never zooms
-  with the camera). Chain them for full weather:
-  `effects: 'depth_rain,rain_on_camera'` (weather first, lens on top).
+- **Sky + clouds** → the WORLD-SPACE SKY SYSTEM (`makeSkySystem`, full
+  section below) — cloud types, time-of-day, sun/moon/stars, day cycles.
+- **RAIN / STORMS** → the WEATHER SYSTEM (`makeWeatherSystem`, same
+  section) — states from drizzle to darkstorm with world-anchored rain,
+  wet surfaces + puddles, from-the-clouds lightning, and smooth
+  agent-directable transitions. Add `rain_on_camera` (LENS rain —
+  screen-locked refracting droplets + wet blur) on top only when the
+  shot wants a lens inside the storm.
 - **Water / pours / splashes** → the fluid tools (`water_compute`,
   `fluid_3d`) — including novel uses: rain sheeting down a
   window, a character wading, ink blooming, a zero-g blob.
+
+## WORLD-SPACE SKY + WEATHER (`eidoverse/sky_system.js` + `eidoverse/weather_system.js`)
+
+The sky is GEOMETRY-AWARE volumetrics, not a post effect: clouds live on a
+camera-centered dome rendered in the scene pass, so buildings, terrain, and
+characters occlude the sky naturally, reflections move with the clouds, and
+sky elements can sit beyond the atmosphere. Use this for every outdoor sky.
+
+```js
+eval(Deno.readTextFileSync('eidoverse/sky_system.js'));
+const stars = await globalThis.loadImageTexture(ASSETS.starmap, { srgb: true }); // eidoverse/assets/sky/starmap_tycho_4k.jpg
+const moon  = await globalThis.loadImageTexture(ASSETS.moonmap, { srgb: true }); // eidoverse/assets/sky/moon_color_1k.jpg
+const sky = await globalThis.makeSkySystem({ scene, textures: { stars, moon },
+    opts: { hours: 15, clouds: 'cumulus' } });
+sky.applyToLights({ sun, hemi, fog: scene.fog });   // palette drives the scene lights
+// per frame: sky.update(t, camera)  — REQUIRED (drift, matrices)
+```
+
+- `sky.setTime(hours 0-24)` — sun/moon arcs, palette, stars fade. For a day
+  cycle call it per frame and re-run `applyToLights` each frame too.
+- `sky.setClouds('cumulus'|'stratus'|'cirrus'|'clear', overrides?)`.
+- `opts.azimuth` aims the sun's arc (put sunrise in front of the camera);
+  `opts.moonAngularDeg` scales the moon disc (16 = a looming companion
+  world; its texture is any 2:1 equirect); `opts.ringCurve = R` bows the
+  cloud deck upward along ±z to follow a curved megastructure horizon.
+- `sky.enableReflections(camera)` — per-pixel MOVING cloud reflections on
+  metals (SSR composes on top; geometry occludes sky reflections).
+- `await sky.bakeEnv(renderer)` — bakes the real sky into
+  `scene.environment` for env-IBL/transmission. **It OVERRIDES any
+  agent-set HDRI by default** (the sky owns the world's light); interiors
+  that keep their own HDRI pass `{ ifAbsent: true }`.
+- `sky.tslCloudShadow(positionWorld, k)` / `sky.wrapCloudShadows(scene)` —
+  drifting cloud shadows on ground materials; `sky.weatherAt(x, z)` (JS)
+  and `sky.sunCoverageDim(x, z)` for gameplay/light coupling.
+
+```js
+eval(Deno.readTextFileSync('eidoverse/weather_system.js'));
+const bolt = await globalThis.loadImageTexture(ASSETS.bolt_trace, {});          // eidoverse/assets/particle_textures/trace_06.png
+const drop = await globalThis.loadImageTexture(ASSETS.rain_drop, { srgb: true }); // eidoverse/assets/sky/rain_streak.png
+const weather = await globalThis.makeWeatherSystem({ scene, sky, opts: { textures: { bolt, drop } } });
+weather.wrapScene();                       // wet-darkening + puddles + cloud shadows on scene materials
+weather.setWeather('storm', 1);            // clear|drizzle|sunshower|overcast|rain|storm|hurricane|noreaster|darkstorm
+sun.intensity *= weather.sunDim();
+// per frame: weather.update(t, camera)  — REQUIRED (rain, lightning, greying)
+```
+
+- `weather.transitionTo(name, k, durationSeconds)` — SMOOTH weather change:
+  everything (cloud coverage, rain, wind, lightning odds, greying, wetness)
+  eases across the window. Duration is yours to direct: `90` = a storm
+  rolling in over a minute and a half; default 45. One call, no other steps.
+- Weather couples the sky automatically: coverage presets, sun dimming,
+  wind-driven cloud + rain drift, from-the-clouds lightning with distant
+  sheet flashes on harsh states, world-tiled rain curtains under dense
+  cells. Mark materials `userData.noWet` to skip wetness; sky-element
+  materials should set `userData.keepEnv` so reflection-hook env
+  suppression leaves their env-IBL alone.
+- Scene lights should re-apply per frame during transitions/cycles:
+  `sky.applyToLights(...)` then `sun.intensity *= weather.sunDim()`.
 
 **`sdf_raymarch_loader`** — raymarched 3D objects PLACED in the scene (at a
 position, occluding/occluded by other geometry — unlike the screenspace
@@ -2702,7 +2763,7 @@ this is the checklist form.
   thirds. Same render pipeline for everything, same colour space, same AA.
 - **Scenes in voids = bug.** If the visible background is a flat dark color
   and the fog fades into the same color, you've made a void — props read as
-  floating in nothing. Outdoors → `volumetric_clouds` sky. Indoors → build
+  floating in nothing. Outdoors → the world-space sky system. Indoors → build
   the enclosure. Stylized negative space → EARN it (gradient, horizon line,
   a ground plane that reads as a stage). Flat `#0a0a14` + matching fog is
   "I forgot," not "I made a choice." The most common shape: HDRI loaded for
@@ -2757,7 +2818,7 @@ this is the checklist form.
 ## When stuck
 
 - **Renderer won't start**: `python eido.py doctor` diagnoses deno/ffmpeg/deps. If deps were never fetched, `python eido.py bootstrap`.
-- **Effects look black / weird cloud reflections indoors**: `volumetric_clouds` is an OUTDOOR sky effect — don't apply it to interiors (its screen-space cloud-reflect on metals can't tell ceiling from sky). Interior haze = `scene.fog` / `depth_fog`.
+- **Cloud reflections indoors**: the WORLD-SPACE sky system works fine inside enclosures — walls/ceilings occlude the dome natively, and SSR blocks sky reflections wherever interior geometry is reflected (only off-screen occluders can leak a little sky onto mirrors). It was the deprecated screenspace `volumetric_clouds` that couldn't tell ceiling from sky. Interior haze = `scene.fog` / `depth_fog`; interiors that set their own HDRI keep it via `sky.bakeEnv(renderer, { ifAbsent: true })`.
 - **HUD / lower-third vanishes under the clouds (or under in-scene glass/particles)**: you parented the overlay to the world camera. Use `globalThis.makeOverlayLayer({ fov: camera.fov })`. See "full-frame broadcast overlay".
 - **VRM all-black**: you imported `@pixiv/three-vrm` directly. Use `globalThis.GLTFLoader`.
 - **VRM in T-pose**: see the anti-patterns list. Most common: forgot `await playVRMADefault(vrm, 'idle', ...)` (non-controller scenes), or pre-played idle UNDER a controller (controller scenes).

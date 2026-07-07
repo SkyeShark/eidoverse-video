@@ -228,6 +228,8 @@ const HELPER_MODULES = [
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
     'eidoverse/particles.js',             // globalThis.makeParticles — GPU textured sprite particles (sparks/smoke/dust/…)
     'eidoverse/grass.js',                 // globalThis.makeGrass — GPU wind grass field (tapered blades, height-gradient color, adjustable wind/density/height/color)
+    'eidoverse/sky_system.js',            // globalThis.makeSkySystem — WORLD-SPACE volumetric sky: raymarched cloud dome IN the scene (geometry occludes it), sun/moon/stars, time-of-day, cloud types, day cycles, moving metal reflections, env bake
+    'eidoverse/weather_system.js',        // globalThis.makeWeatherSystem — weather states (clear..darkstorm): world-anchored rain, wet surfaces + puddles, from-the-clouds lightning, smooth transitionTo(name, k, seconds)
     'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; local checkout or GitHub import)
     // RETIRED (unfinished stub bridge over SeedThree core internals — superseded by seedthree_api.js):
     // 'eidoverse/seed_three.js',
@@ -1531,10 +1533,13 @@ try {
             for (const mat of mats) {
                 if (!mat) continue;
                 const transmission = mat.transmission ?? 0;
-                if (transmission > 0) {
+                // userData.keepEnv: sky elements (ringworlds, megastructures)
+                // ARE part of the sky — the baked env is their intended light
+                if (transmission > 0 || mat.userData?.keepEnv) {
                     transmissiveKept++;  // leave env default → samples scene.environment
-                } else {
-                    // Suppress env on opaque via BOTH knobs:
+                } else if (mat.isMeshStandardNodeMaterial || mat.isMeshPhysicalNodeMaterial
+                    || mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                    // Suppress env on opaque PBR via BOTH knobs:
                     //   - `envNode = vec3(0)`: TSL-native NodeMaterial path
                     //     (MeshStandardNodeMaterial / MeshPhysicalNodeMaterial)
                     //   - `envMapIntensity = 0`: legacy path used by
@@ -1543,6 +1548,11 @@ try {
                     //     to NodeMaterial at render time, but the conversion
                     //     reads `envMapIntensity` to populate the env scaling
                     //     uniform. Setting both covers every conversion path.
+                    // PBR family ONLY: on Basic/Sprite-family NodeMaterials
+                    // `envNode` means a classic reflection MAP — assigning
+                    // vec3(0) makes their build call texture(<vec3>), which
+                    // throws and silently DROPS the mesh (sky domes, rain
+                    // quads vanish). They do no env-IBL — nothing to suppress.
                     if ('envNode' in mat) mat.envNode = zeroEnv;
                     if (mat.envMapIntensity !== undefined) mat.envMapIntensity = 0;
                     opaqueSuppressed++;
@@ -1896,12 +1906,26 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                         const sceneNormalTex = (typeof sample === 'function' && colorToDirection)
                             ? null  // sceneNormal already a direction node
                             : null;
-                        // sceneNormal is already a per-pixel decoded direction
-                        // (view-space). Don't re-sample — that'd return garbage
-                        // since it's not a raw texture node. Use directly.
+                        // Hooks that gate sky visibility by REFLECTION DIRECTION
+                        // internally (world-space sky systems) flag themselves
+                        // `selfGated` — the N·up multiply would cut a hard
+                        // terminator at normal.y=0 on top of their correct
+                        // ray-based gate. Geometry occlusion of the sky
+                        // reflection (roofs etc.) comes from the SSR hit along
+                        // the same ray in the deferred compose below.
+                        if (globalThis._autoEnhanceCloudReflectHook.selfGated) {
+                            added.push('cloudReflect-selfGated');
+                        } else {
+                        // sceneNormal is the sample() wrapper — call .sample(uv)
+                        // for the decoded view-space direction and take .xyz:
+                        // vec4(<wrapper>, 0) counts the wrapper as 4 components
+                        // (4+1=5 → "exceeds maximum length of vec4") and the
+                        // broken gate zeroes the whole cloud contribution.
                         const upGate = THREE.Fn(() => {
+                            const nSample = (typeof sceneNormal.sample === 'function')
+                                ? sceneNormal.sample(THREE.uv()) : sceneNormal;
                             const worldN = THREE.normalize(
-                                THREE.cameraWorldMatrix.mul(THREE.vec4(sceneNormal, 0)).xyz,
+                                THREE.cameraWorldMatrix.mul(THREE.vec4(nSample.xyz, 0)).xyz,
                             );
                             return THREE.clamp(worldN.y, 0, 1);
                         })();
@@ -1909,6 +1933,7 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                             ? THREE.convertToTexture(cloudReflTex.mul(upGate))
                             : cloudReflTex.mul(upGate);
                         added.push('cloudReflect-upGate');
+                        }
                     } catch (e) {
                         console.warn('[auto-enhance] up-gate failed:', e.message);
                     }

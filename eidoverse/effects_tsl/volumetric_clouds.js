@@ -1,5 +1,14 @@
 // volumetric_clouds.js — physically-motivated volumetric cloud system.
 //
+// ⚠️ DEPRECATED — superseded by the WORLD-SPACE sky system
+// (eidoverse/sky_system.js + eidoverse/weather_system.js). This screenspace
+// effect paints clouds as a post-process keyed on depth: geometry can never
+// occlude the sky naturally, rays are camera-anchored, and reflections need
+// the bespoke hook pipeline. makeSkySystem() puts the clouds IN the world
+// (real depth interaction, sun/moon/stars/day-cycle, weather states, moving
+// metal reflections, env bake) — use it for anything new. This file remains
+// only so existing scenes keep rendering.
+//
 // The cloud math: spherical-shell
 // atmosphere on a 6300 km Earth, 800-m cloud base, 600-m thick
 // cumulus band, two-stage subtractive FBM erosion of a height-shaped
@@ -47,6 +56,7 @@
     const EARTH_RADIUS_M_DEFAULT = 6300e3;
 
     function applyTo(args) {
+        console.warn('[volumetric_clouds] DEPRECATED: use the world-space sky system instead — eval eidoverse/sky_system.js and call makeSkySystem({scene, textures}) (+ eidoverse/weather_system.js for rain/storms). This screenspace effect is kept only for old scenes.');
         args = args || {};
         const { scene, camera } = args;
         if (!camera) throw new Error('VolumetricCloudsFX.applyTo: opts.camera required');
