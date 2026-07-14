@@ -25,7 +25,7 @@
     const T3 = globalThis.THREE;
     const {
         uniform, Fn, vec2, vec3, vec4, float, Loop, Break, If,
-        sin, cos, fract, floor, mix, clamp, smoothstep, dot, length,
+        sin, cos, fract, floor, mix, clamp, smoothstep, step, dot, length,
         normalize, max, min, abs, exp, pow, sqrt, acos, asin,
         positionWorld, cameraPosition, screenCoordinate,
     } = T3;
@@ -247,14 +247,25 @@
             const r2 = u.wallCloud.z.mul(u.wallCloud.z);
             return u.wallCloud.w.mul(exp(wdx.mul(wdx).add(wdz.mul(wdz)).div(r2).negate()));
         };
+        // slope-aware weather decorrelation: the weather map is y-less, so a
+        // coverage column paints ONE value up the whole layer — fine on a
+        // flat deck, but on the ring corner's climb every column extrudes
+        // into a slope-length streamer (drape and sample-count A/Bs both
+        // left the streaks — they're density structure). Shearing the
+        // lookup by in-layer height, gated by |slope|, breaks the climb
+        // into stacked cells and is an exact no-op wherever the deck is flat.
+        const ringZShear = (pIn, ch) => RING_R
+            ? ringSlopeAt(pIn).mul(ch).mul(RING_THICK * 2.0)
+            : float(0);
         const cloudsAt = (pIn) => {
             const p = pIn.mul(u.stretch);
             const atmoH = atmoHeight(pIn);
             const ch = atmoH.sub(u.cloudStart.sub(wallLower(pIn).mul(260))).div(u.cloudHeight).clamp(0, 1);
+            const zW = ringZShear(pIn, ch);
             const p1 = p.add(vec3(u.skyWind.x.mul(u.time), 0, u.skyWind.z.mul(u.time)));
-            const largeWeather = clamp(wSampleL(vec2(p1.z, p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
+            const largeWeather = clamp(wSampleL(vec2(p1.z.add(zW), p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
-            const weather2 = max(wSampleS(vec2(p2.z, p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
+            const weather2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = largeWeather.mul(weather2).mul(smoothstep(0.0, 0.5, ch)).mul(smoothstep(1.0, 0.5, ch));
             const shapeExp = float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch)));
             const cloudShape = pow(weather.max(1e-6), shapeExp);
@@ -262,7 +273,7 @@
             const den1 = max(cloudShape.sub(fbmE(p3.mul(float(0.01).mul(u.dScale))).mul(0.7)), 0);
             const p4 = p3.add(vec3(0, u.time.mul(15.2), 0));
             const den2 = max(den1.sub(fbmE(p4.mul(float(0.05).mul(u.dScale))).mul(0.2)), 0);
-            return { density: largeWeather.mul(u.finalMul).mul(min(den2.mul(5), 1)), ch };
+            return { density: largeWeather.mul(u.finalMul).mul(min(den2.mul(5), 1)).mul(ringStrip(pIn)), ch };
         };
         // light-march density = reference "fast" path: full weather + first
         // erosion. The old crude blob approximation self-shadowed a DIFFERENT
@@ -271,15 +282,16 @@
             const p = pIn.mul(u.stretch);
             const atmoH = atmoHeight(pIn);
             const ch = atmoH.sub(u.cloudStart).div(u.cloudHeight).clamp(0, 1);
+            const zW = ringZShear(pIn, ch);
             const p1 = p.add(vec3(u.skyWind.x.mul(u.time), 0, u.skyWind.z.mul(u.time)));
-            const lw = clamp(wSampleL(vec2(p1.z, p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
+            const lw = clamp(wSampleL(vec2(p1.z.add(zW), p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
-            const w2 = max(wSampleS(vec2(p2.z, p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
+            const w2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = lw.mul(w2).mul(smoothstep(0.0, 0.5, ch)).mul(smoothstep(1.0, 0.5, ch));
             const shape = pow(weather.max(1e-6), float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch))));
             const p3 = p2.add(vec3(u.time.mul(12.3), 0, 0));
             const den = max(shape.sub(fbmE(p3.mul(float(0.01).mul(u.dScale))).mul(0.7)), 0);
-            return lw.mul(u.finalMul).mul(min(den.mul(5), 1));
+            return lw.mul(u.finalMul).mul(min(den.mul(5), 1)).mul(ringStrip(pIn));
         };
         // erosion-free density proxy for SHAFT occlusion: real beams are cast by
         // cloud MASSES, not 20-100 m erosion froth — sampling the eroded field
@@ -289,13 +301,14 @@
         const smoothDensity = (pIn) => {
             const p = pIn.mul(u.stretch);
             const ch = atmoHeight(pIn).sub(u.cloudStart.sub(wallLower(pIn).mul(260))).div(u.cloudHeight).clamp(0, 1);
+            const zW = ringZShear(pIn, ch);
             const p1 = p.add(vec3(u.skyWind.x.mul(u.time), 0, u.skyWind.z.mul(u.time)));
-            const lw = clamp(wSampleL(vec2(p1.z, p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
+            const lw = clamp(wSampleL(vec2(p1.z.add(zW), p1.x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
-            const w2 = max(wSampleS(vec2(p2.z, p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
+            const w2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = lw.mul(w2).mul(smoothstep(0.0, 0.5, ch)).mul(smoothstep(1.0, 0.5, ch));
             const shape = pow(weather.max(1e-6), float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch))));
-            return lw.mul(u.finalMul).mul(min(shape.mul(3.5), 1));
+            return lw.mul(u.finalMul).mul(min(shape.mul(3.5), 1)).mul(ringStrip(pIn));
         };
         const phaseMie = (c) => {
             const p1 = c.add(0.8194068);
@@ -326,9 +339,9 @@
         // interpolated mesh position. Along shared dome-triangle edges, MSAA
         // shades the pixel from both triangles at slightly different
         // interpolation positions; the nonlinear march amplifies that into
-        // faint seam lines along the whole 7.5-degree triangle grid
-        // (Skye's annotated parallel sky lines). Uniform-matrix math is
-        // bit-identical per pixel -> seams impossible by construction.
+        // faint parallel seam lines along the whole 7.5-degree triangle
+        // grid. Uniform-matrix math is bit-identical per pixel -> seams
+        // impossible by construction.
         const screenRayDir = () => {
             if (T3.getViewPosition && T3.screenUV) {
                 const vp = T3.getViewPosition(T3.screenUV, float(0.5), u.projInv);
@@ -354,31 +367,182 @@
         };
         // altitude above ground without |p−earthC|−R cancellation (0.5 m ulp
         // steps → horizontal micro-bands in the density height profile).
-        // opts.ringCurve (= ring radius): RINGWORLD mode — the ground curves UP
-        // along ±z (the ring plane), so the deck's reference surface rises with
-        // it: subtract a capped cylindrical rise z²/2R. Flat across the band (x).
+        // opts.ringCurve (= ring radius): RINGWORLD mode — the atmosphere is
+        // RING-NATIVE: cloud "altitude" = radial distance INWARD from the
+        // band's surface, h = R − dist(p, ring axis). The deck hugs the
+        // ring's interior all the way around BY CONSTRUCTION — no rise hack,
+        // no follow clamp. (Every flat-ground correction we stacked — capped
+        // parabola, true-circle rise, tangent extension — still read as "an
+        // earth sky bolted over a ring" the moment an exterior lookdev
+        // camera saw the shape from outside.) Near the bottom this equals
+        // the old y-height, so the ground-level look is unchanged; the
+        // march window (sTop shell) bounds how far up the arc the volumetric
+        // lining renders, and the band's 2D sheet carries the rest.
         const RING_R = opts.ringCurve ?? 0;
-        const RING_RISE_MAX = 820;
+        const RING_RISE_MAX = RING_R ? RING_R * 0.60 : 0;   // march-ceiling allowance up the arc
+        const RING_BASE = opts.ringCloudBase ?? 450;        // deck base over the local scene (m)
+        const RING_THICK = opts.ringCloudThick ?? 280;      // deck thickness (m)
+        // THE PROFILE IS A ROUNDED-CORNER CHORD (a square with beveled
+        // edges): dead-flat across the local scene, then a TRUE CIRCULAR
+        // ARC lifting the far deck, then a clean density fade-out.
+        // BAND-MATCHING IS DELIBERATELY ABSENT: the ring band renders at
+        // renderOrder −99 with no depth write and the cloud dome composites
+        // over it at −98, so clouds ALWAYS draw in front of the halo — any
+        // geometric "hug/kiss the band" is unobservable by construction.
+        // The profile is a pure LOOK: flat local ceiling + a far upward
+        // sweep.
+        // The arc is a circular fillet (a smoothstep ramp is near-linear
+        // mid-window — it read as "a flat plane that angled"): radius from
+        // window W and rise D in closed form, r = (W² + D²) / 2D. The arc
+        // top's slope is W/(r−D) — keep it ≤ ~1.7 (W ≳ 1.7·D) or cloud
+        // forms smear along the climb.
+        // HARDCODED — hand-authored profile (tuned at R=5000, expressed
+        // R-relative so the shape scales with the ring): flat 522, crest
+        // 4086, rise 1524, end 3706. The flat ceiling covers the local
+        // stage; the sweep begins just past the scene's border — one great
+        // arc (r ≈ 4929) fading out mid-climb, 400 m before the end.
+        // Deliberately NOT config/opts: this is the ringworld sky's
+        // authored shape, not a user knob.
+        const RING_ZFLAT  = RING_R * 0.1044;  // flat chord half-span (m)
+        const RING_ZCREST = RING_R * 0.8172;  // arc crest z — the climb ends here
+        const RING_RISE   = RING_R * 0.3048;  // crest height above the base (m)
+        const RING_ZEND   = RING_R * 0.7412;  // density fade-out completes (m)
+        const RING_ARC_W  = Math.max(RING_ZCREST - RING_ZFLAT, 1);
+        const RING_ARC_RAD = (RING_ARC_W * RING_ARC_W + RING_RISE * RING_RISE) / (2 * Math.max(RING_RISE, 1));
+        // JS mirror of the profile (slab precompute + external probes)
+        const _deckY = (z) => {
+            const uz = Math.min(Math.max(Math.abs(z) - RING_ZFLAT, 0), RING_ARC_W * 0.999);
+            return RING_BASE + RING_ARC_RAD - Math.sqrt(Math.max(RING_ARC_RAD * RING_ARC_RAD - uz * uz, 1));
+        };
+        // the whole deck lives in a thin horizontal SLAB the march clips
+        // to — without the clip the samples stretch over ~10 km for a
+        // ~300 m layer and the deck dissolves into slicing noise
+        let RING_SLAB_LO = 0, RING_SLAB_HI = 0;
+        if (RING_R) {
+            RING_SLAB_LO = RING_BASE - 20;
+            RING_SLAB_HI = RING_BASE + RING_THICK + 20;
+            for (let z = 0; z <= Math.min(RING_ZEND, RING_R); z += 25) {
+                // draped layer: vertical extent = thick·√(1+slope²)
+                const sl = (_deckY(z + 50) - _deckY(z - 50)) / 100;
+                RING_SLAB_HI = Math.max(RING_SLAB_HI, _deckY(z) + RING_THICK * Math.sqrt(1 + sl * sl) + 20);
+            }
+        }
+        // TSL mirror of the deck profile — used by atmoHeight AND by the
+        // density functions' slope-aware weather decorrelation below
+        const ringDeckY = (zq) => {
+            const uz = clamp(zq.abs().sub(float(RING_ZFLAT)), float(0), float(RING_ARC_W * 0.999));
+            return float(RING_BASE + RING_ARC_RAD)
+                .sub(sqrt(max(float(RING_ARC_RAD * RING_ARC_RAD).sub(uz.mul(uz)), float(1))));
+        };
+        const ringSlopeAt = (pIn) => RING_R
+            ? ringDeckY(pIn.z.add(60)).sub(ringDeckY(pIn.z.sub(60))).div(120)
+            : float(0);
         const atmoHeight = (pIn) => {
             const base = pIn.y.mul(pIn.y.add(2 * R_EARTH)).add(pIn.x.mul(pIn.x)).add(pIn.z.mul(pIn.z))
                 .div(length(vec3(pIn.x, pIn.y.add(R_EARTH), pIn.z)).add(R_EARTH));
-            return RING_R ? base.sub(min(pIn.z.mul(pIn.z).div(2 * RING_R), RING_RISE_MAX)) : base;
+            if (!RING_R) return base;
+            const bigY = ringDeckY(pIn.z);
+            // DRAPE the layer on the slope: layer height is measured NORMAL
+            // to the envelope, not vertically — with vertical h, every
+            // coverage cell on the arc's climb becomes a tall leaning
+            // wafer (the streak-column artifact); normal h lays cells along
+            // the slope like orographic cloth. Slope by finite difference
+            // (the profile is pure arithmetic, no texture taps).
+            const slope = ringSlopeAt(pIn);
+            const cosT = float(1).div(sqrt(slope.mul(slope).add(1)));
+            return u.cloudStart.add(pIn.y.sub(bigY).mul(cosT).mul(u.cloudHeight).div(float(RING_THICK)));
+        };
+        // RINGWORLD cloud containment: clouds live in the band's atmosphere —
+        // but the air BULGES above the edge walls (real containment spills),
+        // so the strip is wider than the walls with a soft shoulder, and the
+        // local volumetric deck FADES OUT with distance along the ring: a
+        // hard-edged narrow corridor converges by perspective into a wedge
+        // ("triangular cloud" artifact); beyond a few km the far side's cloud
+        // sheet carries the fiction instead. Scattering still fills the dome.
+        // LOCAL air width — the band underneath the local scene at LOCAL
+        // scale. The ring sky element is a schematic MINIATURE: its model
+        // half-width is the VISTA's width, never the local air's — tuning
+        // clouds to it shrink-wraps them to the arc's visual footprint.
+        // Kilometers wide, so weather overhead spreads like a real
+        // sky; the bound only keeps cloud forms from crowding the far arc's
+        // flanks against space. BOTH cloud layers use it — high cirrus is
+        // local weather too, just high.
+        const uLocalHalf = uniform(opts.ringLocalHalf ?? 4000);
+        // the band's GEOMETRIC half-width (bakeEnv auto-adopts the loaded
+        // ring's real value)
+        const uBandHalf = uniform(opts.ringBandHalf ?? 483);
+        // far end of the 2D layer's outward V — how wide the high sheet is
+        // by the time it reaches the rising ring (defaults to 2× local)
+        const uWispFarHalf = uniform(opts.ringWispFarHalf ?? (opts.ringLocalHalf ?? 4000) * 2);
+        // PROPORTIONAL soft shoulder: a hard cut folds perspective into the
+        // wedge artifact. Width-only masks are valid at ANY distance (the
+        // ring curves in Y-Z, so x is the width axis globally).
+        const ringWidth = (pIn) => RING_R
+            ? smoothstep(uLocalHalf.mul(1.3), uLocalHalf.mul(0.66), pIn.x.abs())
+            : float(1);
+        const ringStrip = (pIn) => {
+            if (!RING_R) return float(1);
+            // WIDTH is an authored bound in ALL weather states — never
+            // weather-widened. (A grey-driven flood toward a 26 km full-sky
+            // ceiling reads as infinite outward clouds over the empty
+            // horizon perpendicular to the ring.)
+            const wMask = smoothstep(uLocalHalf.mul(1.3), uLocalHalf.mul(0.66), pIn.x.abs());
+            // along-ring terminal fade — the deck just ENDS cleanly (clouds
+            // composite in front of the ring regardless, so no band contact
+            // is needed). Density dies across the 400 m BEFORE the end, and
+            // the end NEVER exceeds the arc crest — past the crest the
+            // profile holds crest height, so any density there reads as an
+            // extra flat shelf hanging off the curve's tip. Weather never
+            // overrides this bound either.
+            const effEnd = Math.min(RING_ZEND, RING_ZCREST);
+            return wMask.mul(smoothstep(float(effEnd), float(effEnd - 400), pIn.z.abs()));
         };
 
         // ---------------- CLOUD DOME material ----------------
         // body parameterized on (dir, org) so the env bake below can evaluate
         // the SAME sky from equirect directions (dome pass uses screen rays)
+        // CLOUDDBG=1: lookdev build that strips every under-the-deck camera
+        // assumption — no upward-ray gate, march from the camera over the
+        // full range, no distance/horizon fades. Coarse (N_MARCH over the
+        // whole fadeDist) but it SHOWS THE SHAPE from any vantage, which is
+        // the entire point of a debug view — never cull the subject of a
+        // debug. Proper any-vantage rendering is future work.
+        const CLOUD_DBG = globalThis.Deno?.env?.get?.('CLOUDDBG') === '1';
         const cloudBody = (dirIn, orgIn, passesIn) => {
             const dir = dirIn;
             const org = orgIn;
             // ring mode: the deck rises up to RING_RISE_MAX above the spherical
             // shell — widen the march ceiling so risen clouds aren't cut
             const sTop = u.cloudStart.add(u.cloudHeight).add(RING_R ? RING_RISE_MAX : 0);
-            const t0 = shellFar(org, dir, u.cloudStart);
-            // clamp the march to the pre-fade range: near the horizon the full
-            // shell chord is 30-80 km but everything past fadeDist is faded out
-            // anyway — clamping concentrates the samples where edges resolve
-            const t1 = min(shellFar(org, dir, sTop), u.fadeDist.mul(1.1));
+            // RING MODE MARCH WINDOW: the deck is an annular tube around the
+            // ring axis — a spherical-shell ceiling would cut every ray at a
+            // flat altitude and the deck's risen far ends would never render.
+            // March from the camera to the ray's exit from the ring cylinder
+            // (we're inside → far root), fadeDist-clamped.
+            let t0, t1;
+            if (RING_R) {
+                const oy = org.y, oz = org.z;   // ring axis at y≈0 (sensor-measured vs the real mesh)
+                const aQ = dir.y.mul(dir.y).add(dir.z.mul(dir.z)).add(1e-6);
+                const bQ = dir.y.mul(oy).add(dir.z.mul(oz));
+                const cQ = oy.mul(oy).add(oz.mul(oz)).sub(RING_R * RING_R * 0.99);
+                const tFar = bQ.negate().add(sqrt(max(bQ.mul(bQ).sub(aQ.mul(cQ)), float(0)))).div(aQ);
+                // clip the march to the deck's SLAB — without it, 64 steps
+                // stretch over ~10 km for a ~300 m layer and the sunlit deck
+                // dithers into checkerboard noise
+                const dyMag = max(abs(dir.y), float(1e-4));
+                const dyS = dir.y.div(max(abs(dir.y), float(1e-6)));
+                const dySafe = dyS.mul(dyMag);
+                const tA = float(RING_SLAB_LO).sub(org.y).div(dySafe);
+                const tB = float(RING_SLAB_HI).sub(org.y).div(dySafe);
+                t0 = max(min(tA, tB), float(0));
+                t1 = min(min(max(tA, tB), tFar), u.fadeDist);
+            } else {
+                t0 = CLOUD_DBG ? float(0) : shellFar(org, dir, u.cloudStart);
+                // clamp the march to the pre-fade range: near the horizon the full
+                // shell chord is 30-80 km but everything past fadeDist is faded out
+                // anyway — clamping concentrates the samples where edges resolve
+                t1 = CLOUD_DBG ? u.fadeDist : min(shellFar(org, dir, sTop), u.fadeDist.mul(1.1));
+            }
             const stepS = max(t1.sub(t0), 0).div(N_MARCH);
             const mu = dot(u.cloudLightDir, dir);
             const phaseF = phaseMie(mu);
@@ -402,7 +566,7 @@
             const M_PASS = Math.max(1, passesIn ?? opts.cloudPasses ?? 8);
             const colSum = vec3(0).toVar();
             const trSum = float(0).toVar();
-            If(dir.y.greaterThan(0.008).and(t0.lessThan(u.fadeDist)), () => {
+            If(CLOUD_DBG ? float(1).greaterThan(0) : dir.y.greaterThan(0.008).and(t0.lessThan(u.fadeDist)), () => {
                 for (let k = 0; k < M_PASS; k++) {
                     const Trk = float(1).toVar();
                     const colk = vec3(0).toVar();
@@ -431,14 +595,30 @@
             const col = colSum.div(M_PASS).toVar();
             const Tr = trSum.div(M_PASS);
             // cheap high-wisp layer (reference: fbm at the outer-shell hit,
-            // painted through remaining transmittance — thin high cirrus for free)
+            // painted through remaining transmittance — thin high cirrus for free).
+            // Ring mode: the high layer lives in the SAME contained atmosphere as
+            // the deck — unmasked it mottled the whole dome, spilling past the
+            // ring edges and reading as clouds floating in space behind the arc
             const pC = org.add(dir.mul(shellFar(org, dir, sTop.add(1000))));
-            const wispD = max(fbm3A(pC.mul(vec3(1, 1, 1.8)).mul(0.002)).sub(0.45), 0).mul(u.wispOn);
+            // 2D layer V-BOUNDARY: a constant-width sheet converges by
+            // perspective and crashes into the ring at a vanishing point. The
+            // boundary instead OPENS OUTWARD in plan view — local air width
+            // near the camera, FLARING with distance along the ring so the
+            // far field stays wide on screen — and the flare stops growing
+            // (caps) where the shell reaches the rising ring geometry. zMeet
+            // tracks the preset's shell height against the ring curve.
+            // ring mode: the sphere-shell wisp layer OFF — it hovered as
+            // detached films with no relationship to the ring. A 2D
+            // continuation that carries the cloud curve up the arc past the
+            // volumetric span is the planned replacement.
+            const wispW = RING_R ? float(0) : float(1);
+            const wispD = max(fbm3A(pC.mul(vec3(1, 1, 1.8)).mul(0.002)).sub(0.45), 0).mul(u.wispOn)
+                .mul(wispW);
             col.addAssign(Tr.mul(u.wispColor).mul(wispD).mul(u.cloudDim));
             const wispA = min(wispD.mul(2.2), 0.85);
             // distance fade into horizon haze — no hard clamp band
-            const distFade = smoothstep(u.fadeDist, u.fadeDist.mul(0.35), t0);
-            const horizFade = smoothstep(0.008, 0.06, dir.y);
+            const distFade = CLOUD_DBG ? float(1) : smoothstep(u.fadeDist, u.fadeDist.mul(0.35), t0);
+            const horizFade = CLOUD_DBG ? float(1) : smoothstep(0.008, 0.06, dir.y);
             const fade = distFade.mul(horizFade);
             // PREMULTIPLIED output: the Hillaire accumulator yields premultiplied
             // radiance. Standard alpha blending multiplies it by alpha AGAIN,
@@ -464,7 +644,12 @@
                 const segL = u.cloudHeight.div(sy);
                 const hp = org.add(dir.mul(stepH).mul(jit.mul(0.5).add(0.3))).toVar();
                 for (let i = 0; i < 20; i++) {
-                    const hEnter = max(u.cloudStart.sub(atmoHeight(hp)), 0).div(sy);
+                    // ring mode: atmoHeight is a remapped PROFILE coordinate,
+                    // not meters — the shaft/altitude math needs physical y
+                    // (this is what silently killed the god rays)
+                    const hEnter = RING_R
+                        ? max(float(RING_SLAB_LO + 20).sub(hp.y), 0).div(sy)
+                        : max(u.cloudStart.sub(atmoHeight(hp)), 0).div(sy);
                     const od = float(0).toVar();
                     for (let j = 0; j < 6; j++) {
                         od.addAssign(smoothDensity(hp.add(u.cloudLightDir.mul(hEnter.add(segL.mul((j + 0.5) / 6))))));
@@ -480,9 +665,17 @@
                     const tCur = stepH.mul(i + 0.5);
                     const colTex = wSampleS(vec2(cp1z, cp1x).mul(0.0008).add(vec2(0.61, 0.23)));
                     const colMod = mix(colTex.mul(1.1).add(0.25), float(0.8), smoothstep(900, 2600, tCur));
+                    const belowBase = RING_R
+                        ? smoothstep(float(RING_SLAB_LO + 20), float((RING_SLAB_LO + 20) * 0.55), hp.y)
+                        : smoothstep(u.cloudStart, u.cloudStart.mul(0.55), atmoHeight(hp));
                     const precip = u.precipK.mul(smoothstep(u.precipLo, u.precipHi, cellCov)).mul(colMod).mul(2.1e-4 * (1 - (i / 20) * 0.5))
-                        .mul(smoothstep(u.cloudStart, u.cloudStart.mul(0.55), atmoHeight(hp)).mul(0.5).add(0.5));
-                    const rho = u.shaftDen.mul(u.shaftK).mul(exp(atmoHeight(hp).div(-900))).add(precip);
+                        .mul(belowBase.mul(0.5).add(0.5));
+                    const altPhys = RING_R ? hp.y : atmoHeight(hp);
+                    // ring mode: curtains OFF pending their own tune — they were
+                    // silently dead here (t0 was 0 so the curtain march never ran)
+                    // until the slab fix restored t0, and they woke up as hard
+                    // rectangular walls that hide the deck's curve
+                    const rho = u.shaftDen.mul(u.shaftK).mul(exp(altPhys.div(-900))).add(RING_R ? float(0) : precip);
                     shaft.addAssign(trH.mul(vis.mul(0.75).add(0.25)).mul(rho).mul(stepH));
                     trH.assign(trH.mul(exp(rho.mul(stepH).negate())));
                     hp.assign(hp.add(dir.mul(stepH)));
@@ -500,6 +693,38 @@
             return vec4(col.mul(u.cloudTint).mul(fade).add(shaftCol).add(vec3(dg2, dg2, dg2)), coverT);
         };
         const cloudOut = Fn(() => cloudBody(screenRayDir(), cameraPosition));
+        // analytic ringworld band along a ray — SHARED by the env bake and the
+        // live reflection hook. The band mesh is depthless by design (local
+        // clouds must render in front of it), so SSR can never return it: any
+        // reflection path that wants the arc has to trace it analytically.
+        // Ray from ~ground vs the ring cylinder (axis X through (0, centerY,
+        // 0), radius R), inside → far root; terrain sampled with the authored
+        // tiling; landmask-black = water (dark, glossy-ish).
+        const ringEnvTrace = (dir, rw) => {
+            const oy = float(2 - rw.centerY);
+            const a = dir.y.mul(dir.y).add(dir.z.mul(dir.z)).max(1e-6);
+            const b = oy.mul(dir.y).mul(2);
+            const cq = oy.mul(oy).sub(rw.radius * rw.radius);
+            const disc = b.mul(b).sub(a.mul(cq).mul(4)).max(0);
+            const tHit = b.negate().add(sqrt(disc)).div(a.mul(2));
+            const hx = dir.x.mul(tHit);
+            const hy = oy.add(dir.y.mul(tHit)), hz = dir.z.mul(tHit);
+            const inBand = smoothstep(rw.halfWidth + 30, rw.halfWidth - 30, hx.abs());
+            const theta = atan2f(hz, hy.negate());          // 0 at the overhead crest
+            const uT = theta.div(Math.PI * 2).mul(rw.repeat ?? 8);
+            const vT = hx.div(rw.halfWidth * 2).add(0.5);
+            const land = T3.texture(rw.map, vec2(uT, vT)).rgb;   // T3-qualified: bare texture() is NOT in this scope — the bake's original inline trace used it and silently died for every ringworld bake (the long-standing 'MeshBasicNodeMaterial invalid pipeline' audit noise)
+            const mraw = rw.mask ? T3.texture(rw.mask, vec2(uT, float(1).sub(vT))).r : float(1);
+            const wk = smoothstep(0.55, 0.45, mraw);        // mask BLACK = water
+            const ringAlbedo = mix(land, vec3(0.03, 0.055, 0.07), wk);
+            // radial-inward normal lambert vs the sun + ambient
+            const nrm = normalize(vec3(0, hy.negate(), hz.negate()));
+            const lit = clamp(dot(nrm, u.sunDir), 0, 1).mul(0.75).add(0.3);
+            const col = ringAlbedo.mul(lit).mul(u.cloudDim);
+            // haze out where the band dives to the horizon (huge t)
+            const hazeK = smoothstep(3.2, 1.2, tHit.div(rw.radius));
+            return { col, k: inBand.mul(hazeK) };
+        };
         // keep sky surfaces OUT of the auto-enhance G-buffer (GTAO/SSR must not
         // treat dome normals as scene geometry)
         const noGBuffer = (m) => {
@@ -585,7 +810,9 @@
         };
         const bgOut = Fn(() => bgBody(screenRayDir()));
         const bgMat = noGBuffer(new T3.MeshBasicNodeMaterial({ side: T3.BackSide, depthWrite: false, fog: false }));
-        bgMat.colorNode = bgOut().rgb;
+        // CLOUDDBG: dim the background dome so cloud VOLUMES read against
+        // dark — the below-horizon haze otherwise whites out exterior views
+        bgMat.colorNode = CLOUD_DBG ? bgOut().rgb.mul(0.12) : bgOut().rgb;
         const bgDome = new T3.Mesh(new T3.SphereGeometry(DOME_R, 48, 24), bgMat);
         bgDome.renderOrder = -100; bgDome.frustumCulled = false; bgDome.userData.noSupportCheck = true;
         scene.add(bgDome);
@@ -747,8 +974,23 @@
             // SSR-gated fallback with AO + N·up gating and suppresses env-IBL on
             // opaques (no double-count). Call from setup() with the scene camera.
             enableReflections(camera, ropts = {}) {
+                // debug modes REPLACE the final image (render_scene checks this
+                // flag in the deferred compose) — additive debug over a lit
+                // beauty is unreadable and misled a whole night of bisects
+                if (ropts.debug) globalThis._cloudReflDebugReplace = true;
                 const reflHook = (colorIn, sceneDepth, sceneNormal, sceneMR) => {
                     if (ropts.debug === 'null') return Fn(() => vec4(0, 0, 0, 1))(); // bisect: constant, no samples
+                    if (ropts.debug === 'mr') {
+                        // bisect: visualize the raw G-buffer this hook sees —
+                        // R = metalness, G = roughness, B = depth ×10 (reversed-z:
+                        // scene depths live in 0..~0.1, unscaled they read black)
+                        const dTex = T3.convertToTexture(sceneDepth);
+                        return Fn(() => {
+                            const suv = T3.uv();
+                            const mrV = sceneMR.sample(suv);
+                            return vec4(mrV.r, mrV.g, clamp(dTex.sample(suv).r.mul(10), 0, 1), 1);
+                        })();
+                    }
                     const depthTex = T3.convertToTexture(sceneDepth);
                     return Fn(() => {
                         const suv = T3.uv();
@@ -778,7 +1020,15 @@
                                 // 1-pass march: denoise + roughness blur downstream
                                 // clean the variance (multi-pass here would be waste)
                                 const cld = cloudBody(reflDir, reflRO, 1);
-                                const bg = bgBody(reflDir).rgb;
+                                let bg = bgBody(reflDir).rgb;
+                                // ringworld scenes: the arc is part of this
+                                // world's sky — trace it into reflections
+                                // (bg < ring < clouds, the on-screen stack)
+                                const rw = sys._envRingworld;
+                                if (rw && rw.map) {
+                                    const rt = ringEnvTrace(reflDir, rw);
+                                    bg = mix(bg, rt.col, rt.k);
+                                }
                                 // RAY-based sky visibility, not normal-based: the sky
                                 // is world-space now, so occlusion is the SSR hit
                                 // along this same ray (roof paints over sky in the
@@ -881,6 +1131,11 @@
                 }
                 const bakeMat = new T3.NodeMaterial();
                 const rw = bopts.ringworld;
+                if (rw) sys._envRingworld = rw;   // the reflection hook traces the same band (built post-setup, after this bake)
+                if (rw && rw.halfWidth) uBandHalf.value = rw.halfWidth;   // 2D layer's far cap = REAL band width
+                if (rw && rw.localHalf) uLocalHalf.value = rw.localHalf;  // optional: local-air width override
+                // (deliberately NOT adopting rw.centerY for the deck — the
+                // bake's 4940 convention is not the mesh axis; sensor-proven)
                 bakeMat.fragmentNode = Fn(() => {
                     const suv = T3.uv();
                     const lon = suv.x.mul(Math.PI * 2).sub(Math.PI);
@@ -889,33 +1144,8 @@
                     const dir = normalize(vec3(cl.mul(sin(lon)), sin(lat), cl.mul(cos(lon))));
                     let bg = bgBody(dir).rgb;
                     if (rw && rw.map) {
-                        // analytic ring: ray (from ~ground) vs the ring cylinder
-                        // (axis X through (0, centerY, 0), radius R). We're
-                        // inside → far root. Terrain sampled with the authored
-                        // 8×1 tiling; landmask-black = water (dark, glossy-ish).
-                        const oy = float(2 - rw.centerY);
-                        const a = dir.y.mul(dir.y).add(dir.z.mul(dir.z)).max(1e-6);
-                        const b = oy.mul(dir.y).mul(2);
-                        const cq = oy.mul(oy).sub(rw.radius * rw.radius);
-                        const disc = b.mul(b).sub(a.mul(cq).mul(4)).max(0);
-                        const tHit = b.negate().add(sqrt(disc)).div(a.mul(2));
-                        const hx = dir.x.mul(tHit);
-                        const hy = oy.add(dir.y.mul(tHit)), hz = dir.z.mul(tHit);
-                        const inBand = smoothstep(rw.halfWidth + 30, rw.halfWidth - 30, hx.abs());
-                        const theta = atan2f(hz, hy.negate());          // 0 at the overhead crest
-                        const uT = theta.div(Math.PI * 2).mul(rw.repeat ?? 8);
-                        const vT = hx.div(rw.halfWidth * 2).add(0.5);
-                        const land = texture(rw.map, vec2(uT, vT)).rgb;
-                        const mraw = rw.mask ? texture(rw.mask, vec2(uT, float(1).sub(vT))).r : float(1);
-                        const wk = smoothstep(0.55, 0.45, mraw);        // mask BLACK = water
-                        const ringAlbedo = mix(land, vec3(0.03, 0.055, 0.07), wk);
-                        // radial-inward normal lambert vs the sun + ambient
-                        const nrm = normalize(vec3(0, hy.negate(), hz.negate()));
-                        const lit = clamp(dot(nrm, u.sunDir), 0, 1).mul(0.75).add(0.3);
-                        const ringCol = ringAlbedo.mul(lit).mul(u.cloudDim);
-                        // haze out where the band dives to the horizon (huge t)
-                        const hazeK = smoothstep(3.2, 1.2, tHit.div(rw.radius));
-                        bg = mix(bg, ringCol, inBand.mul(hazeK));
+                        const rt = ringEnvTrace(dir, rw);
+                        bg = mix(bg, rt.col, rt.k);
                     }
                     const cld = cloudBody(dir, vec3(0, 2, 0));
                     // premultiplied cloud over sky; below the horizon fade to a
