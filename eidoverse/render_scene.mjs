@@ -1267,6 +1267,27 @@ try {
             }
         }
     }
+    // Reset SkinnedMesh object-level bounding volumes before the first frame.
+    // SkinnedMesh.raycast and Frustum.intersectsObject lazily compute
+    // this.boundingSphere ONCE from the pose at that instant and never refresh
+    // it. Any raycast that reaches a skinned mesh during setup or the audit
+    // above (placeTouching/seatOn/checkClipping rays) computes it while
+    // bindMatrixInverse is still stale — the sphere absorbs the model's world
+    // offset, the renderer applies matrixWorld on top at cull time, and the
+    // ghost sphere lands at 2× the placement offset: whole meshes get
+    // frustum-culled from most camera angles for the entire video (the
+    // vanishing face/jacket/limbs/whole-VRM bug). Nulling here makes
+    // frame 1 recompute every sphere with settled matrices.
+    {
+        const sceneRoot = globalThis._s || globalThis._scene;
+        if (sceneRoot) {
+            let wiped = 0;
+            sceneRoot.traverse((o) => {
+                if (o.isSkinnedMesh) { o.boundingSphere = null; o.boundingBox = null; wiped++; }
+            });
+            if (wiped) console.log(`[render_scene] reset ${wiped} SkinnedMesh bounding volume(s) post-setup — cull spheres recompute on frame 1`);
+        }
+    }
 } catch (e) {
     console.error('[render_scene] setup() FAILED:', e.message);
     if (e.stack) console.error(e.stack.split('\n').slice(0, 8).join('\n'));
