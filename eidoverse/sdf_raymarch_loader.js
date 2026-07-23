@@ -958,9 +958,38 @@ function createSdfVolume(spec) {
     mesh.frustumCulled = false;
     mesh.userData.isSdfRaymarch = true;
     mesh.userData.isSdfVolume = true;
-    mesh.renderOrder = 1;   // after opaque SDF surfaces in the overlay
+    mesh.renderOrder = 1;   // after opaque SDF surfaces; re-sorted per frame
+    // bounds-box center in the mesh's local space — the per-frame
+    // back-to-front volume sort needs it (the geometry is pre-translated,
+    // so mesh.position alone is NOT the visual center)
+    mesh.userData.sdfCenter = [(nx + xx) * 0.5, (ny + xy) * 0.5, (nz + xz) * 0.5];
     SDF_SHADOW_SCENE.add(mesh);
     return mesh;
+}
+
+// Transparent volumes must composite back-to-front. Three sorts by object
+// position, but volume boxes are geometry-translated (position stays at
+// the placement point) and overlapping boxes defeat the default sort —
+// interpenetrating explosions/fires pop through each other. Re-rank
+// renderOrder by camera distance to the TRUE box center every render.
+const _volSortTmpA = new THREE.Vector3();
+const _volSortTmpB = new THREE.Vector3();
+const _volSortList = [];
+function sortSdfVolumesForCamera(camera) {
+    _volSortList.length = 0;
+    camera.getWorldPosition(_volSortTmpB);
+    for (const m of SDF_SHADOW_SCENE.children) {
+        if (!m.userData || !m.userData.isSdfVolume) continue;
+        const c = m.userData.sdfCenter || [0, 0, 0];
+        _volSortTmpA.set(c[0], c[1], c[2]);
+        m.localToWorld(_volSortTmpA);
+        _volSortList.push([m, _volSortTmpA.distanceToSquared(_volSortTmpB)]);
+    }
+    if (_volSortList.length < 2) return;
+    _volSortList.sort((a, b) => b[1] - a[1]);   // farthest first
+    for (let i = 0; i < _volSortList.length; i++) {
+        _volSortList[i][0].renderOrder = 1 + i;  // nearest renders last (on top)
+    }
 }
 
 // =====================================================================
@@ -1155,6 +1184,7 @@ function registerSdfHelper(renderer, mainScene) {
         //    pixel multiplies to BLACK. The overlay must render context-free
         //    (SDF self-shadowing already lives in shade()) — save/null/
         //    restore the context around the draw.
+        sortSdfVolumesForCamera(camera);
         const saveAutoClear = renderer.autoClear;
         const saveContext = renderer.contextNode;
         renderer.autoClear = false;
@@ -1216,6 +1246,7 @@ function registerSdfHelper(renderer, mainScene) {
                     m.userData.sdfPassType.value = passType;
                 }
             }
+            sortSdfVolumesForCamera(camera);
             const saveAutoClear = renderer.autoClear;
             renderer.autoClear = false;
             renderer[REENTRY_GUARD] = true;
@@ -3885,6 +3916,697 @@ EXAMPLES.smoke = {
         return vol;
     },
 };
+
+// =====================================================================
+// Gyroid fireball — TSL port (2026-07-23) of a compact cellular-explosion
+// shader (user-supplied). Faithful pieces: the gyroid fbm "spice"
+// (8 octaves, lacunarity 1.7, running-sum z-warp), the lifecycle curves
+// (growth pow .2 / fade pow 9 / burn pow .4 / advance pow .4), the
+// cos(vec3(1,2,3)*5.5 + n.y) palette on the field gradient, the
+// burn-to-smoke blend, and radius = .3*noise*growth with the .05 feather.
+// The source's screen-space cell grid + blue-noise dither are 2D tricks
+// and intentionally dropped — uSeed stands in for the per-cell id. Loops
+// ~3s/uSpeed: ignition -> fireball -> smoke puff -> gone. Live knobs:
+// uSpeed, uSeed, uDensity.
+// =====================================================================
+EXAMPLES.gyroidFireball = {
+    bounds: { min: [-0.75, -0.75, -0.75], max: [0.75, 0.75, 0.75] },
+    steps: 56,
+    _u: {
+        uSpeed: SDF_TSL.uniform(1.0),
+        uSeed: SDF_TSL.uniform(0.0),
+        uDensity: SDF_TSL.uniform(1.0),
+    },
+    _animMemo: null,
+    _gyroid(p) {
+        const T = SDF_TSL;
+        return T.dot(T.cos(p), T.sin(p.yzx));
+    },
+    // the source fbm verbatim: 8 octaves, a /= 1.7, z warped by the running sum
+    _gfbm(p) {
+        const T = SDF_TSL;
+        const E = EXAMPLES.gyroidFireball;
+        let result = T.float(0.0);
+        let q = p;
+        let a = 0.5;
+        for (let i = 0; i < 8; i++) {
+            q = T.vec3(q.x, q.y, q.z.add(result.mul(0.1)));
+            result = result.add(T.abs(E._gyroid(q.div(a)).mul(a)));
+            a /= 1.7;
+        }
+        return result;
+    },
+    _anim() {
+        const E = EXAMPLES.gyroidFireball;
+        if (E._animMemo) return E._animMemo;
+        const T = SDF_TSL;
+        const timeline = T.time.mul(E._u.uSpeed).div(3.0).add(E._u.uSeed);
+        const ax = T.fract(timeline);
+        E._animMemo = {
+            cycle: T.floor(timeline),
+            growth: T.pow(ax, 0.2),
+            fade: T.float(1.0).sub(T.pow(ax, 9.0)),
+            burn: T.float(1.0).sub(T.pow(ax, 0.4)),
+            advance: T.pow(ax, 0.4),
+        };
+        return E._animMemo;
+    },
+    sample(p) {
+        const T = SDF_TSL;
+        const { vec3, float } = T;
+        const E = EXAMPLES.gyroidFireball;
+        const A = E._anim();
+
+        // The source's whole character is the per-pixel gyroid fbm TEXTURE —
+        // so the field is sampled in FULL 3D at every march point (a
+        // direction-only field flattens into a shaded balloon). The z
+        // advance pushes fresh noise through the volume per cycle, like the
+        // source's ray.z advance.
+        const drift = A.advance.mul(2.0).add(A.cycle.mul(7.77))
+            .add(E._u.uSeed.mul(196.128));
+        const q = vec3(p.x.mul(3.1), p.y.mul(3.1), p.z.mul(3.1).add(drift));
+        const noise = E._gfbm(q);
+
+        // silhouette: direction-noise radius (the blobby outline), grown
+        const r = T.max(T.length(p), float(1e-4));
+        const nd = p.div(r);
+        const outline = E._gfbm(vec3(nd.x, nd.y, nd.z.add(drift)));
+        const radius = T.min(outline.mul(0.3).mul(A.growth), float(0.62));
+        const shell = float(1.0).sub(T.smoothstep(0.0, 0.06, r.sub(radius)));
+
+        // interior filaments: threshold the 3D field so the inside has
+        // structure and gaps instead of a solid fill
+        const fil = T.smoothstep(0.35, 0.95, noise);
+        const dens = shell.mul(fil.mul(0.75).add(0.25));
+
+        // 3D field gradient -> shading normal (source's e-offset trick)
+        const e = 0.14;
+        const nx = E._gfbm(q.add(vec3(e, 0.0, 0.0)));
+        const ny = E._gfbm(q.add(vec3(0.0, e, 0.0)));
+        const nrm = T.normalize(vec3(noise.sub(nx), noise.sub(ny), noise.sub(1.0)));
+
+        // palette + burn-to-smoke blend (source constants); hot phase gets
+        // pushed past 1.0 so the core blooms like fire, not pastel paint
+        let col = T.cos(vec3(5.5, 11.0, 16.5).add(nrm.y)).add(0.2);
+        col = col.mul(A.burn.mul(1.6).add(0.8));
+        const smokeK = noise.sub(A.burn.mul(2.0));
+        const shade = nrm.y.mul(0.5).add(0.5);
+        col = T.mix(col, vec3(T.max(smokeK.mul(shade).mul(0.55), float(0.0))),
+            T.smoothstep(0.0, 0.1, smokeK));
+        col = T.max(col, vec3(0.0));
+
+        const alpha = dens.mul(A.fade).mul(0.30).mul(E._u.uDensity);
+        // two-speed: stride the empty space, resolve the shell + interior
+        const step = T.select(r.sub(radius).greaterThan(0.14), float(0.05), float(0.016));
+        return { color: col, alpha, step };
+    },
+    make(opts) {
+        const o = { ...(opts || {}) };
+        const E = EXAMPLES.gyroidFireball;
+        E._animMemo = null;   // fresh nodes per built instance
+        if (o.speed != null) E._u.uSpeed.value = o.speed;
+        if (o.seed != null) E._u.uSeed.value = o.seed;
+        if (o.density != null) E._u.uDensity.value = o.density;
+        delete o.speed; delete o.seed; delete o.density;
+        const vol = createSdfVolume({ ...EXAMPLES.gyroidFireball, ...o });
+        vol.userData.sdfLiveUniforms = E._u;
+        return vol;
+    },
+};
+
+// =====================================================================
+// Bonfire — v3 (2026-07-23): the fire is the PROVEN torch-flame field
+// (EXAMPLES.flame's revolved gradient-simplex fbm — flame SHAPES come
+// from the signed noise itself, which is what stops it reading as
+// smooth "snakes"), scaled up to bonfire size with high turbulence,
+// plus a noise-gated broken smoke plume on a wind-bent axis that
+// dissipates mid-box. Base at y=0. Live knobs: uSpeed, uDensity.
+// =====================================================================
+EXAMPLES.bonfire = {
+    bounds: { min: [-0.9, 0.0, -0.9], max: [0.9, 2.8, 0.9] },
+    steps: 92,
+    _u: {
+        uSpeed: SDF_TSL.uniform(1.0),
+        uDensity: SDF_TSL.uniform(1.0),
+    },
+    _animMemo: null,
+    _anim() {
+        const E = EXAMPLES.bonfire;
+        if (E._animMemo) return E._animMemo;
+        const T = SDF_TSL;
+        const t = T.time.mul(E._u.uSpeed);
+        E._animMemo = { t, T3: t.mul(5.4) };
+        return E._animMemo;
+    },
+    sample(p) {
+        const T = SDF_TSL;
+        const { vec3, vec2, float } = T;
+        const E = EXAMPLES.bonfire;
+        const { t } = E._anim();
+
+        // ---- fire: teardrop ENVELOPE x the ring's cascading vnoise stack
+        // advected upward fast, thresholded — the flame shapes come from
+        // 3D noise (angular variation for free), not from any primitive.
+        // A revolved 2D field rings; a wobbled tube snakes; this boils. ----
+        const rise = vec3(0.0, t.mul(2.6), 0.0);
+        const sp = p.sub(rise);
+        let nf = T.vnoise(sp.mul(3.0)).mul(0.8);
+        nf = nf.add(T.vnoise(sp.mul(8.5)).mul(0.4));
+        nf = nf.add(T.vnoise(sp.mul(15.0)).mul(0.2));
+        nf = nf.add(T.vnoise(sp.mul(38.0)).mul(0.45).mul(nf));
+        const hy = T.clamp(p.y.div(1.15), 0.0, 1.0);
+        // whole-body sway + width pulse: the envelope axis BENDS with a
+        // height-growing low-freq wander and the radius breathes — the
+        // silhouette wiggles instead of holding a geometric cone
+        const swx = T.vnoise(vec3(t.mul(0.9), p.y.mul(1.4), 0.0)).sub(0.5).mul(hy).mul(hy).mul(0.60);
+        const swz = T.vnoise(vec3(7.0, p.y.mul(1.4), t.mul(0.7))).sub(0.5).mul(hy).mul(hy).mul(0.44);
+        const pulse = T.vnoise(vec3(t.mul(1.6), p.y.mul(2.2), 3.0)).sub(0.5).mul(0.36).add(1.0);
+        const rEnv = float(0.34).mul(T.pow(float(1.0).sub(hy), 0.75)).add(0.04).mul(pulse);
+        const env = float(1.0).sub(T.smoothstep(rEnv.mul(0.5), rEnv.add(0.10),
+            T.length(vec2(p.x.sub(swx), p.z.sub(swz)))))
+            .mul(T.smoothstep(-0.02, 0.08, p.y))
+            .mul(float(1.0).sub(T.smoothstep(0.85, 1.2, p.y)));
+        const fdens = T.clamp(env.mul(nf).sub(0.43).div(0.45), 0.0, 1.0);
+        const c1 = T.clamp(fdens.mul(float(1.8).sub(p.y.mul(1.1))), 0.0, 1.0);
+        // torch palette: orange base -> yellow -> white-hot core (blooms);
+        // the noise modulates the interior so it reads as flame structure,
+        // not a saturated glow cone
+        const fireCol = vec3(c1.mul(1.8), c1.mul(c1).mul(c1).mul(1.8),
+            c1.mul(c1).mul(c1).mul(c1).mul(c1).mul(c1).mul(1.4))
+            .mul(nf.mul(0.42).add(0.62));
+
+        // ---- broken smoke: noise-gated puffs on a wind-bent axis,
+        // dissipated by y~2.1 (bounds top 2.8 — no flat clip) ----
+        const h01 = T.clamp(p.y.sub(0.55).div(1.45), 0.0, 1.0);
+        const cx = h01.mul(h01).mul(0.22).add(T.sin(t.mul(0.6).add(p.y.mul(1.3))).mul(h01).mul(0.05));
+        const cz = h01.mul(0.1).mul(T.cos(t.mul(0.45)));
+        const rr = T.length(vec2(p.x.sub(cx), p.z.sub(cz)));
+        const prof = float(1.0).sub(T.smoothstep(
+            h01.mul(0.34).add(0.06), h01.mul(0.5).add(0.14), rr));
+        const bil = T.fbm(p.mul(1.8).add(vec3(0.16, -0.8, 0.03).mul(t)));
+        const fin = T.fbm(p.mul(4.4).add(vec3(0.0, -1.5, 0.1).mul(t)).add(9.1));
+        const gate = T.smoothstep(0.55, 0.80, bil.mul(0.65).add(fin.mul(0.48)));
+        const sdens = prof.mul(gate)
+            .mul(T.smoothstep(0.50, 0.95, p.y))
+            .mul(float(1.0).sub(T.smoothstep(1.55, 2.10, p.y)))
+            // fade before the bounds walls — the box must never slice smoke
+            .mul(float(1.0).sub(T.smoothstep(0.58, 0.85, T.length(p.xz))));
+        const ember = float(1.0).sub(T.smoothstep(0.6, 1.15, p.y));
+        const smokeCol = T.mix(vec3(0.10, 0.10, 0.105), vec3(0.38, 0.37, 0.365), h01)
+            .add(vec3(0.42, 0.18, 0.05).mul(ember).mul(0.5));
+
+        const w = fdens.div(T.max(fdens.add(sdens), float(0.001)));
+        const col = T.mix(smokeCol, fireCol, w);
+        const alpha = fdens.mul(0.28).add(sdens.mul(0.05)).mul(E._u.uDensity);
+
+        const far = T.length(p.xz).sub(0.78);
+        const step = T.select(far.greaterThan(0.1), float(0.06), float(0.022));
+        return { color: col, alpha, step };
+    },
+    make(opts) {
+        const o = { ...(opts || {}) };
+        const E = EXAMPLES.bonfire;
+        E._animMemo = null;   // fresh nodes per built instance
+        if (o.speed != null) E._u.uSpeed.value = o.speed;
+        if (o.density != null) E._u.uDensity.value = o.density;
+        delete o.speed; delete o.density;
+        const vol = createSdfVolume({ ...EXAMPLES.bonfire, ...o });
+        vol.userData.sdfLiveUniforms = E._u;
+        return vol;
+    },
+};
+
+// =====================================================================
+// Candle flame — TSL port (2026-07-23) of a raymarched candle's flame
+// (user-supplied shader; the candle/table/plate scene is ignored).
+// Faithful pieces: the teardrop SDF (sphere in a vertically-warped
+// space, radius pinched with height), the HOLLOW BASE subtraction that
+// makes the blue zone above the wick, the three-channel anchored sway
+// noise (base pinned, tip flickers), the blue->warm height palette, and
+// brightness from SDF interior depth (bright core, soft skin). Plus a
+// delicate smoke thread off the tip (Skye's request — the source had
+// none). Base sits at y=0; flame ~0.16 tall, smoke to ~0.6 — REAL
+// candle scale; scale the mesh for stylized use. Knobs: uSpeed, uDensity.
+// =====================================================================
+EXAMPLES.candleFlame = {
+    bounds: { min: [-0.16, 0.0, -0.16], max: [0.16, 0.62, 0.16] },
+    steps: 56,
+    _u: {
+        uSpeed: SDF_TSL.uniform(1.0),
+        uDensity: SDF_TSL.uniform(1.0),
+    },
+    _animMemo: null,
+    _anim() {
+        const E = EXAMPLES.candleFlame;
+        if (E._animMemo) return E._animMemo;
+        const T = SDF_TSL;
+        E._animMemo = { t: T.time.mul(E._u.uSpeed).mul(0.37) };
+        return E._animMemo;
+    },
+    // the source's getFlameMovement: three low-frequency noise channels at
+    // different speeds, dead-zone shaped, anchored at the base
+    _sway(p, t) {
+        const T = SDF_TSL;
+        const { vec3 } = T;
+        const n1 = T.vnoise(p.mul(0.3).add(vec3(0.4, 4.5, 0.5).mul(t))).sub(0.5).mul(0.5);
+        const n2 = T.vnoise(p.mul(0.1).add(vec3(0.5, 2.8, 0.3).mul(t.add(100.0)))).sub(0.5).mul(0.4);
+        const n3 = T.vnoise(p.mul(0.3).add(vec3(0.6, 3.2, 0.4).mul(t.add(200.0)))).sub(0.5).mul(0.5);
+        let nf = vec3(n1, n2, n3);
+        nf = T.sign(nf).mul(T.smoothstep(0.07, 1.0, T.abs(nf)));
+        return nf.mul(2.2).mul(T.smoothstep(-0.17, 0.25, p.y));
+    },
+    // the source's map_flame in its own local units
+    _flameDf(pl, t) {
+        const T = SDF_TSL;
+        const { vec3, float } = T;
+        const E = EXAMPLES.candleFlame;
+        const fm = E._sway(pl, t);
+        const p2 = pl.sub(fm);
+        // hollow base (the blue zone above the wick)
+        const is = T.length(p2.mul(vec3(1.0, 0.5, 1.0)).add(vec3(0.0, 0.04, 0.0))).sub(0.04);
+        // taper + the teardrop vertical warp
+        const px = p2.xz.mul(p2.y.mul(1.7).add(1.0));
+        const ya = T.max(T.abs(p2.y), float(1e-4));
+        const yw = p2.y.div(float(0.6).add(float(1.8).div(T.pow(ya, p2.y.mul(1.3).add(0.2)))));
+        const df = T.length(vec3(px.x, yw, px.y)).sub(0.07);
+        return T.max(df, is.negate());
+    },
+    sample(p) {
+        const T = SDF_TSL;
+        const { vec3, vec2, float } = T;
+        const E = EXAMPLES.candleFlame;
+        const { t } = E._anim();
+
+        // world -> the shader's flame-local frame (flame centred near 0,
+        // bottom at ~-0.12): base sits at world y=0, ~0.16 world tall
+        const S = 0.45;
+        const pl = vec3(p.x.div(S), p.y.div(S).sub(0.17), p.z.div(S));
+        const df = E._flameDf(pl, t);
+
+        // brightness from interior depth (the source's density march)
+        const dens = T.clamp(df.negate().add(0.002).mul(26.0), 0.0, 1.0);
+        // blue at the hollow base -> warm body (source palette + heights)
+        const fCol = T.mix(vec3(0.12, 0.08, 0.94), vec3(1.25, 0.9, 0.55).mul(2.0),
+            T.smoothstep(-0.16, -0.02, pl.y));
+
+        // delicate smoke thread off the tip: thin gaussian around a
+        // swaying line, broken by rising noise, gone by y~0.55
+        const h = T.clamp(p.y.sub(0.17).div(0.38), 0.0, 1.0);
+        const sw = E._sway(vec3(0.0, p.y.mul(2.0), 0.0), t).mul(0.045);
+        const rr = T.length(vec2(p.x.sub(sw.x).sub(h.mul(h).mul(0.03)), p.z.sub(sw.z)));
+        // tiny tapering billows: thread widens into puffs then disperses
+        // (the explosion cascade at miniature scale, not a bare line)
+        const width = h.mul(0.052).add(0.006).mul(float(1.0).sub(h.mul(0.4)));
+        const thread = float(1.0).sub(T.smoothstep(width.mul(0.25), width, rr));
+        const spc = vec3(p.x, p.y.sub(t.mul(1.4)), p.z);
+        let nSm = T.vnoise(spc.mul(14.0)).mul(0.8);
+        nSm = nSm.add(T.vnoise(spc.mul(38.0)).mul(0.4));
+        nSm = nSm.add(T.vnoise(spc.mul(90.0)).mul(0.45).mul(nSm));
+        const sdens = T.clamp(thread.mul(nSm).sub(0.34).div(0.55), 0.0, 1.0)
+            .mul(T.smoothstep(0.16, 0.24, p.y))
+            .mul(float(1.0).sub(T.smoothstep(0.42, 0.58, p.y)));
+
+        const w = dens.div(T.max(dens.add(sdens), float(0.001)));
+        const col = T.mix(vec3(0.30, 0.30, 0.31), fCol, w);
+        const alpha = dens.mul(0.5).add(sdens.mul(0.028)).mul(E._u.uDensity);
+
+        // tiny volume — fine strides only where the flame/thread lives
+        const near = T.min(df, rr.sub(0.05));
+        const step = T.select(near.greaterThan(0.08), float(0.03), float(0.0055));
+        return { color: col, alpha, step };
+    },
+    make(opts) {
+        const o = { ...(opts || {}) };
+        const E = EXAMPLES.candleFlame;
+        E._animMemo = null;   // fresh nodes per built instance
+        if (o.speed != null) E._u.uSpeed.value = o.speed;
+        if (o.density != null) E._u.uDensity.value = o.density;
+        delete o.speed; delete o.density;
+        const vol = createSdfVolume({ ...EXAMPLES.candleFlame, ...o });
+        vol.userData.sdfLiveUniforms = E._u;
+        return vol;
+    },
+};
+
+// =====================================================================
+// Fire — large roaring blaze (2026-07-23), from a user-supplied
+// tapered-box volumetric fire + a realistic smoke-column shader.
+// Body: the tapered-box FOOTPRINT as an envelope x a cascading vnoise
+// stack advected upward, hard-thresholded (noise-SHAPED density — the
+// source's depth-ramp math reads as a dim gumdrop at this scale),
+// per-sample 3-channel wobble, outer->mid->core palette driven by heat
+// and modulated by the noise. Smoke: hollow sin^4 shell column torn by
+// height-growing ridged turbulence + swirl, dispersing by y~4.9.
+// Base at y=0; fire ~2.4 tall, smoke to ~5. Knobs: uSpeed, uDensity.
+// =====================================================================
+EXAMPLES.fire = {
+    bounds: { min: [-1.5, 0.0, -1.5], max: [1.5, 5.1, 1.5] },
+    steps: 130,
+    _u: {
+        uSpeed: SDF_TSL.uniform(1.0),
+        uDensity: SDF_TSL.uniform(1.0),
+    },
+    _animMemo: null,
+    _anim() {
+        const E = EXAMPLES.fire;
+        if (E._animMemo) return E._animMemo;
+        const T = SDF_TSL;
+        const t = T.time.mul(E._u.uSpeed);
+        E._animMemo = {
+            t,
+            tSdf: t.mul(0.54),      // source: TIME*0.027*20
+            tDens: t.mul(0.81),     // source: TIME*0.027*30
+            tWob: t.mul(0.162),     // source: TIME*0.027*6
+        };
+        return E._animMemo;
+    },
+    // source get_noise_value: tiled 3D texture -> engine value noise
+    _noise(p, sf, toff) {
+        const T = SDF_TSL;
+        return T.vnoise(p.mul(sf * 2.2).add(T.vec3(0.0, 1.0, 0.0).mul(toff)));
+    },
+    // source get_per_sample_wobble: three offset noise channels, centered
+    _wobble(p, strength, freq, A) {
+        const T = SDF_TSL;
+        const { vec3 } = T;
+        const E = EXAMPLES.fire;
+        const wx = E._noise(p.add(vec3(100.0, 0.0, 0.0)), freq, A.tWob);
+        const wy = E._noise(p.add(vec3(0.0, 200.0, 0.0)), freq, A.tWob.mul(1.2));
+        const wz = E._noise(p.add(vec3(0.0, 0.0, 300.0)), freq, A.tWob.mul(0.8));
+        return vec3(wx.sub(0.5), wy.sub(0.5), wz.sub(0.5)).mul(strength);
+    },
+    sample(p) {
+        const T = SDF_TSL;
+        const { vec3, vec2, float } = T;
+        const E = EXAMPLES.fire;
+        const A = E._anim();
+
+        const H = 2.45, W = 2.25, TAPER = 0.425;
+        const lp = p.sub(vec3(0.0, H * 0.5, 0.0));   // box centred at H/2
+        const nh = T.clamp(p.y.div(H), 0.0, 1.0);
+
+        // tapered box + advected-noise distortion (the flame body)
+        const taper = T.max(float(1.0).sub(nh.mul(TAPER)), float(0.01));
+        const tp = vec3(lp.x.div(taper), lp.y, lp.z.div(taper));
+        const d = T.sdBox(tp, vec3(W * 0.5, H * 0.5, W * 0.5))
+            .add(E._noise(lp.add(E._wobble(lp, 2.0, 0.125, A)), 0.225, A.tSdf).mul(0.3));
+
+        // density: the bonfire's proven grammar at blaze scale — tapered
+        // FOOTPRINT envelope x the cascading vnoise stack advected upward
+        // fast, hard-thresholded. The noise IS the flame shapes; every
+        // ramp on box depth alone rendered a dim gumdrop (tried twice).
+        const wobD = E._wobble(p, 1.4, 0.1375, A);
+        // y-compressed noise domain: features elongate VERTICALLY (licking
+        // tongues, not cauliflower); rise raised to keep feature speed
+        const sp2 = p.add(wobD.mul(0.4)).sub(vec3(0.0, A.t.mul(2.8), 0.0))
+            .mul(vec3(1.0, 0.55, 1.0));
+        let nf = T.vnoise(sp2.mul(1.6)).mul(0.8);
+        nf = nf.add(T.vnoise(sp2.mul(4.4)).mul(0.4));
+        nf = nf.add(T.vnoise(sp2.mul(8.0)).mul(0.2));
+        nf = nf.add(T.vnoise(sp2.mul(19.0)).mul(0.45).mul(nf));
+        // whole-body sway + width pulse — break the static cone silhouette
+        const swX = T.vnoise(vec3(A.t.mul(0.7), p.y.mul(0.5), 1.0)).sub(0.5).mul(nh).mul(nh).mul(1.1);
+        const swZ = T.vnoise(vec3(4.0, p.y.mul(0.5), A.t.mul(0.55))).sub(0.5).mul(nh).mul(nh).mul(0.8);
+        const pulseF = T.vnoise(vec3(A.t.mul(1.2), p.y.mul(0.8), 9.0)).sub(0.5).mul(0.30).add(1.0);
+        const rad = T.length(vec2(p.x.sub(swX), p.z.sub(swZ))).div(taper.mul(W * 0.5))
+            .mul(nh.mul(0.8).add(1.0)).mul(pulseF);
+        const env = float(1.0).sub(T.smoothstep(0.30, 1.0, rad))
+            .mul(T.smoothstep(-0.02, 0.15, p.y))
+            .mul(float(1.0).sub(T.smoothstep(1.45, 2.45, p.y)));
+        const dens = T.clamp(env.mul(nf).sub(0.43).div(0.45), 0.0, 1.0);
+
+        // palette: the source's outer->mid->core stops driven by heat,
+        // noise-modulated so the interior reads as structure, not a glow
+        const c1 = T.clamp(dens.mul(float(1.55).sub(p.y.mul(0.45))), 0.0, 1.0);
+        let col = T.mix(vec3(0.8, 0.01, 0.0), vec3(1.0, 0.625, 0.0), T.smoothstep(0.10, 0.60, c1));
+        col = T.mix(col, vec3(1.0, 0.9, 0.5), T.smoothstep(0.80, 1.0, c1));
+        col = col.mul(nf.mul(0.42).add(0.62)).mul(2.0);
+
+        // smoke: the realistic COLUMN recipe (user-supplied shader) — a
+        // hollow sin^4 shell, displaced laterally by HEIGHT-GROWING ridged
+        // turbulence (coherent at the fire, torn to shreds up high), with
+        // a height-growing swirl; curve-faded taper at the top
+        const h2 = T.clamp(p.y.sub(2.0).div(2.8), 0.0, 1.0);
+        const g = T.clamp(p.y.sub(1.9).mul(0.55), 0.0, 2.0);
+        // swirl: rotate xz by noise*g
+        const ang = T.vnoise(p.mul(0.4).sub(vec3(0.0, A.t.mul(0.4), 0.0))).sub(0.5).mul(g).mul(0.9);
+        const ca = T.cos(ang), sa = T.sin(ang);
+        const rx0 = p.x.mul(ca).sub(p.z.mul(sa));
+        const rz0 = p.x.mul(sa).add(p.z.mul(ca));
+        // ridged 5-octave turbulence at the advected position (lac 2.7)
+        const spT = vec3(rx0, p.y.sub(A.t.mul(1.1)), rz0).mul(0.55);
+        let tX = float(0.0), tZ = float(0.0), oof = 1.0;
+        {
+            let q = spT;
+            for (let i = 0; i < 5; i++) {
+                tX = tX.add(T.abs(T.vnoise(q).mul(2.0).sub(1.0)).mul(oof));
+                tZ = tZ.add(T.abs(T.vnoise(q.add(41.7)).mul(2.0).sub(1.0)).mul(oof));
+                oof *= 0.5;
+                q = q.mul(2.7);
+            }
+        }
+        const dispX = tX.sub(1.0).mul(g).mul(0.55);
+        const dispZ = tZ.sub(1.0).mul(g).mul(0.55);
+        const sx = rx0.add(dispX).add(g.mul(0.10));   // wind drift grows too
+        const sz = rz0.add(dispZ);
+        // hollow shell: sin^4 of the normalized radial coordinate
+        const rxn = T.clamp(sx.mul(sx).add(sz.mul(sz)).mul(2.6).sub(p.y.sub(2.0).mul(0.16)), 0.0, 1.0);
+        const shell = T.pow(T.sin(rxn.mul(Math.PI)), 4.0);
+        const sdens = shell
+            .mul(T.smoothstep(2.0, 2.7, p.y))
+            .mul(T.pow(float(1.0).sub(T.smoothstep(3.3, 4.9, p.y)), 1.6))
+            // fade before the bounds walls — the swirl-displaced column
+            // must never get sliced flat by the box
+            .mul(float(1.0).sub(T.smoothstep(1.05, 1.42, T.length(p.xz))));
+        const smokeCol = T.mix(vec3(0.075, 0.072, 0.072), vec3(0.30, 0.29, 0.285),
+            T.clamp(h2.add(tX.mul(0.15)), 0.0, 1.0))
+            .add(vec3(0.5, 0.2, 0.04).mul(float(1.0).sub(T.smoothstep(2.0, 2.9, p.y))).mul(0.4));
+
+        // alpha calibrated to the 0.045 fine stride (bonfire's optical depth)
+        const wF = dens.div(T.max(dens.add(sdens), float(0.001)));
+        const outCol = T.mix(smokeCol, col, wF);
+        const alpha = dens.mul(0.33).add(sdens.mul(0.055)).mul(E._u.uDensity);
+
+        const far = T.min(d, T.length(lp.xz).sub(1.15));
+        const step = T.select(far.greaterThan(0.25), float(0.11), float(0.045));
+        return { color: outCol, alpha, step };
+    },
+    make(opts) {
+        const o = { ...(opts || {}) };
+        const E = EXAMPLES.fire;
+        E._animMemo = null;   // fresh nodes per built instance
+        if (o.speed != null) E._u.uSpeed.value = o.speed;
+        if (o.density != null) E._u.uDensity.value = o.density;
+        delete o.speed; delete o.density;
+        const vol = createSdfVolume({ ...EXAMPLES.fire, ...o });
+        vol.userData.sdfLiveUniforms = E._u;
+        return vol;
+    },
+};
+
+// =====================================================================
+// Nuclear blast — the original screenspace SDF-mushroom-cloud raymarcher
+// (nuclear_explosion.js) reborn as a PLACED volume (2026-07-23). The
+// anatomy, lifecycle, advection and palette are the original's, ported
+// into createSdfVolume local space (SCALE shrinks its ~100m units into a
+// ~4-unit placeable; the base-surge ring is radially capped to stay in
+// bounds — scale the group up for the full 2km ring read):
+//   cap (squashed sphere, easeOut rise+swell) + stem (WIDER at top) +
+//   trail bulge riding under the cap + base-surge torus + ground pad,
+//   all sminCubic-fused; noise sampled at ADVECTED positions (weighted
+//   cross-section rolls in the cap + surge ring); density = SDF-depth
+//   falloff x 4-octave cascade; late-loop SPATIAL dispersal (wisps
+//   dissolve first, dense core last); heat = core-distance falloff that
+//   cools over the loop; near-black smoke band under the fire ramp.
+// Loops 20s/uSpeed. Base at y=0. Live knobs: uSpeed, uHeat, uDensity.
+// =====================================================================
+EXAMPLES.nuclearBlast = {
+    // HUGE by default — the cap tops out around 18-19 units (a real
+    // mushroom cloud dwarfing any scene); make({ size }) rescales
+    // (size 0.3 ≈ a tabletop demo). Bounds/steps derive from size in make().
+    bounds: { min: [-10.4, 0.0, -10.4], max: [10.4, 19.1, 10.4] },
+    steps: 300,
+    SCALE: 1.4,
+    _u: {
+        uSpeed: SDF_TSL.uniform(1.0),
+        uHeat: SDF_TSL.uniform(1.0),
+        uDensity: SDF_TSL.uniform(1.0),
+    },
+    _animMemo: null,
+    _easeOut(t) {
+        const T = SDF_TSL;
+        return T.float(1.0).sub(T.pow(T.float(1.0).sub(t), 3.0));
+    },
+    _sminCubic(a, b, k) {
+        const T = SDF_TSL;
+        const h = T.max(T.float(k).sub(T.abs(a.sub(b))), 0.0).div(k);
+        return T.min(a, b).sub(h.mul(h).mul(h).mul(k).div(6.0));
+    },
+    // the original's timeline, verbatim (tn = first 60% of the loop)
+    _anim() {
+        const E = EXAMPLES.nuclearBlast;
+        if (E._animMemo) return E._animMemo;
+        const T = SDF_TSL;
+        const clamp01 = (x) => T.clamp(x, 0.0, 1.0);
+        const tnLoop = T.fract(T.time.mul(E._u.uSpeed).div(20.0));
+        const tn = clamp01(tnLoop.div(0.6));
+        const capY = T.mix(T.float(1.0), T.float(8.0), E._easeOut(clamp01(tn.div(0.55)))).add(tn);
+        const capR = T.mix(T.float(0.5), T.float(4.6), E._easeOut(clamp01(tn.div(0.50)))).add(tn.mul(0.5));
+        const stemBaseR = T.mix(T.float(0.30), T.float(1.1), E._easeOut(clamp01(tn.div(0.40))));
+        const stemTopR = T.mix(T.float(0.70), T.float(2.2), E._easeOut(clamp01(tn.div(0.50))));
+        const trailRise = clamp01(tn.sub(0.10).div(0.5));
+        const trailY = T.mix(T.float(1.0), capY.mul(0.60), trailRise);
+        const trailR = T.mix(T.float(0.4), T.float(2.4), trailRise);
+        // radially capped so the ground ring stays inside the bounds box
+        const surgeR = T.min(
+            T.mix(T.float(2.0), T.float(16.0), E._easeOut(clamp01(tn.div(0.7)))).add(tn.mul(4.0)),
+            T.float(6.6));
+        const ringPeak = T.smoothstep(0.0, 0.4, tn);
+        const ringFade = T.float(1.0).sub(T.smoothstep(0.4, 1.0, tn));
+        const ringTube = T.mix(T.float(0.4), T.float(2.2), ringPeak)
+            .mul(T.mix(T.float(0.15), T.float(1.0), ringFade));
+        const padH = T.mix(T.float(0.6), T.float(1.8), E._easeOut(clamp01(tn.div(0.5))))
+            .mul(T.mix(T.float(0.3), T.float(1.0), ringFade));
+        E._animMemo = {
+            tnLoop, tn, capY, capR,
+            stemTop: capY.sub(0.6), stemBaseR, stemTopR,
+            trailRise, trailY, trailR,
+            surgeR, ringTube, padH, ringFade,
+            coolFactor: T.float(1.0).sub(T.smoothstep(0.4, 0.85, tnLoop)),
+        };
+        return E._animMemo;
+    },
+    // unified mushroom SDF in ORIGINAL local units (the original mapScene)
+    _map(p, A) {
+        const T = SDF_TSL;
+        const { vec2, vec3 } = T;
+        const E = EXAMPLES.nuclearBlast;
+        const qc = p.sub(vec3(0.0, A.capY, 0.0)).div(vec3(1.0, 0.78, 1.0));
+        const dCap = T.length(qc).sub(A.capR);
+        const hS = T.clamp(p.y.div(T.max(A.stemTop, T.float(0.001))), 0.0, 1.0);
+        const rS = T.mix(A.stemBaseR, A.stemTopR, T.pow(hS, 0.7));
+        const dStem = T.max(T.length(p.xz).sub(rS),
+            T.max(p.y.sub(A.stemTop), p.y.negate()));
+        const qt = p.sub(vec3(0.0, A.trailY, 0.0)).div(vec3(1.3, 0.9, 1.3));
+        const dTrail = T.length(qt).sub(A.trailR);
+        const radial = T.length(p.xz).sub(A.surgeR);
+        const dRing = T.length(vec2(radial, p.y.sub(A.ringTube.mul(0.6)))).sub(A.ringTube);
+        const padR = A.surgeR.sub(A.ringTube.mul(0.4));
+        const heightAtR = A.padH.mul(
+            T.float(1.0).sub(T.smoothstep(padR.mul(0.2), padR, T.length(p.xz))));
+        const dPad = T.max(T.length(p.xz).sub(padR),
+            T.max(p.y.sub(heightAtR), p.y.negate()));
+        const dSurge = E._sminCubic(dRing, dPad, 0.6);
+        const dStemCap = E._sminCubic(dStem, dCap, 0.6);
+        const dTrailed = E._sminCubic(dStemCap, dTrail,
+            T.mix(T.float(0.2), T.float(0.5), A.trailRise));
+        return E._sminCubic(dTrailed, dSurge,
+            T.mix(T.float(0.3), T.float(1.0), A.ringFade));
+    },
+    // weighted cross-section rolls (the original's advection, If-free)
+    _advect(p, A) {
+        const T = SDF_TSL;
+        const { vec2, vec3 } = T;
+        const radialDist = T.max(T.length(p.xz), T.float(1e-4));
+        const outward = p.xz.div(radialDist);
+        const t = T.time;
+        const rot2 = (v, a) => {
+            const c = T.cos(a), s = T.sin(a);
+            return vec2(v.x.mul(c).sub(v.y.mul(s)), v.x.mul(s).add(v.y.mul(c)));
+        };
+        // base-surge roll
+        const torusW = T.exp(T.abs(radialDist.sub(A.surgeR)).mul(-0.4))
+            .mul(T.exp(T.abs(p.y.sub(1.0)).mul(-0.4)))
+            .mul(T.smoothstep(0.35, 0.6, radialDist));
+        const cr1 = rot2(vec2(radialDist.sub(A.surgeR), p.y.sub(1.0)), t.mul(0.25));
+        const xz1 = outward.mul(cr1.x.add(A.surgeR));
+        const torusPos = vec3(xz1.x, cr1.y.add(1.0), xz1.y);
+        // cap roll around the cap's vortex ring
+        const capW = T.exp(T.abs(p.y.sub(A.capY)).mul(-0.18))
+            .mul(T.exp(T.max(radialDist.sub(A.capR), T.float(0.0)).mul(-0.3)))
+            .mul(T.smoothstep(0.15, 0.35, radialDist));
+        const tubeR = A.capR.mul(0.65);
+        const cr2 = rot2(vec2(radialDist.sub(tubeR), p.y.sub(A.capY)), t.mul(0.35));
+        const xz2 = outward.mul(cr2.x.add(tubeR));
+        const capPos = vec3(xz2.x, cr2.y.add(A.capY), xz2.y);
+        let adv = T.mix(p, torusPos, torusW);
+        adv = T.mix(adv, capPos, capW);
+        return adv;
+    },
+    // the original's palette: near-black smoke band under the fire ramp
+    _heatToColor(heat) {
+        const T = SDF_TSL;
+        const { vec3 } = T;
+        const smokeMix = T.clamp(heat.div(0.08), 0.0, 1.0);
+        const smokeCol = T.mix(vec3(0.012), vec3(0.18, 0.16, 0.14), smokeMix);
+        let c = T.mix(vec3(0.0), vec3(1.0, 0.30, 0.0), T.clamp(heat.mul(12.0).sub(1.0), 0.0, 1.0));
+        c = T.mix(c, vec3(1.6, 1.0, 0.5), T.clamp(heat.mul(14.0).sub(5.0), 0.0, 1.0));
+        c = T.mix(c, vec3(2.5, 1.9, 1.2), T.clamp(heat.mul(30.0).sub(18.0), 0.0, 1.0));
+        return T.mix(c, smokeCol, T.step(heat, T.float(0.08)));
+    },
+    sample(pw) {
+        const T = SDF_TSL;
+        const { vec3, float } = T;
+        const E = EXAMPLES.nuclearBlast;
+        const A = E._anim();
+        const S = E.SCALE;
+        const p = pw.div(S);   // original local units
+
+        const d = E._map(p, A);
+
+        // density: SDF-depth falloff x the original's 4-octave cascade at
+        // advected positions (the rolls live in the noise, not the shape)
+        const falloff = T.clamp(d.div(-0.8), 0.0, 1.0);
+        const sp = E._advect(p, A);
+        let nb = T.vnoise(sp.mul(0.8)).mul(0.8);
+        nb = nb.add(T.vnoise(sp.mul(2.2)).mul(0.4));
+        nb = nb.add(T.vnoise(sp.mul(5.0)).mul(0.2));
+        nb = nb.add(T.vnoise(sp.mul(13.0)).mul(0.45).mul(nb));
+        const density0 = falloff.mul(nb);
+
+        // spatial dispersal: late in the loop the threshold rises in the
+        // mushroom region so wisps dissolve first, dense core last
+        const radialDist = T.length(p.xz);
+        const mushroomRegion = T.clamp(
+            T.smoothstep(2.5, 5.0, p.y).add(
+                float(1.0).sub(T.smoothstep(2.5, 6.0, radialDist))
+                    .mul(T.smoothstep(0.5, 2.5, p.y))),
+            0.0, 1.0);
+        const dispersal = T.smoothstep(0.75, 1.0, A.tnLoop).mul(mushroomRegion);
+        const lowT = T.mix(float(0.3), float(1.1), dispersal);
+        const dens = T.clamp(density0.sub(lowT).div(0.6), 0.0, 1.0);
+
+        // heat: core-distance falloff, cooling over the loop (original)
+        const coreDist = T.length(p.sub(vec3(0.0, A.capY.mul(0.85), 0.0)));
+        const coreTerm = T.exp(coreDist.mul(-0.18));
+        const heat = T.clamp(
+            dens.mul(coreTerm).add(coreTerm.mul(0.6)).mul(A.coolFactor).mul(E._u.uHeat),
+            0.0, 1.0);
+        const col = E._heatToColor(heat);
+
+        const alpha = dens.mul(0.20).mul(E._u.uDensity);
+        // two-speed march: strides expressed in ORIGINAL-local units and
+        // scaled by SCALE, so density-per-stride stays calibrated at any size
+        const step = T.select(d.greaterThan(0.5), float(0.30 * S), float(0.075 * S));
+        return { color: col, alpha, step };
+    },
+    make(opts) {
+        const o = { ...(opts || {}) };
+        const E = EXAMPLES.nuclearBlast;
+        E._animMemo = null;   // fresh nodes per built instance
+        if (o.speed != null) E._u.uSpeed.value = o.speed;
+        if (o.heat != null) E._u.uHeat.value = o.heat;
+        if (o.density != null) E._u.uDensity.value = o.density;
+        if (o.size != null) E.SCALE = o.size;   // read at build time by sample()
+        const s = E.SCALE;
+        o.bounds = { min: [-7.45 * s, 0.0, -7.45 * s], max: [7.45 * s, 13.65 * s, 7.45 * s] };
+        delete o.speed; delete o.heat; delete o.density; delete o.size;
+        const vol = createSdfVolume({ ...EXAMPLES.nuclearBlast, ...o });
+        vol.userData.sdfLiveUniforms = E._u;
+        return vol;
+    },
+};
+
 
 
 
