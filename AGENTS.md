@@ -2094,8 +2094,14 @@ EXAMPLES catalog — surface: `basicSphere`, `stylizedBlob`, `detailedCoat`,
 `fractalCore` (mandelbulb), `explosion` (pyroclastic fireball), the four
 vehicles (`stylizedModernSedan`, `stylizedCyberpunkSedan`,
 `stylizedSciFiSleekCar`, `stylizedFighterJet`); volumetric:
-`explosionRing` (expanding smoke-ring detonation), `flame` (torch fire),
-`smoke` (rising plume). Every entry is a working reference for its
+`nuclearBlast` (rising mushroom cloud — rolling cap, boiling stem, heat
+that cools to smoke), `explosionRing` (expanding smoke-ring detonation),
+`gyroidFireball` (looping cellular burst — fireball to smoke puff),
+`fire` (large roaring blaze — licking noise-shaped flames under a torn,
+swirling smoke column), `bonfire` (campfire — boiling flame lobes,
+broken smoke puffs), `candleFlame` (real-scale candle flame, blue-cored,
+with a delicate smoke thread — scale the mesh for stylized use), `flame`
+(torch fire), `smoke` (rising plume). Every entry is a working reference for its
 technique — take the wiring, replace the content. A localized
 fireball/explosion at a point in the scene belongs here (not the
 screenspace nuke). Volumes are transparent; keep the camera outside their
