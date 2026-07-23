@@ -1583,6 +1583,29 @@ const screen = globalThis.makeScreen({
 screen.mesh.position.set(0, 1.4, -2);  scene.add(screen.mesh);
 ```
 
+**UI on a GLB's REAL screen surface — `screen.applyTo(model)`.** When a
+fetched model HAS a screen mesh (laptop, monitor, TV, kiosk), putting your
+UI on that actual surface beats floating a separate plane in front of it —
+and `applyTo` is the ONLY correct way to do it:
+```js
+const ui = globalThis.makeScreen({ draw, px: 1024 });
+ui.applyTo(laptopModel);        // finds the /screen|display|monitor|lcd/i
+                                // submesh; or pass the exact mesh yourself
+```
+Never assign `screen.material` to a GLB mesh by hand — glTF UV convention
+is v-down while the canvas texture is v-up, so a hand swap renders the UI
+UPSIDE DOWN and backwards (and neither `texture.flipY` nor a repeat/offset
+UV flip fixes it on this stack; `applyTo` flips in canvas space, which
+works everywhere). One `makeScreen` drives ONE surface: after `applyTo`,
+don't also add `screen.mesh` — make a second `makeScreen` for a second
+surface. The flip matches the glTF spec's UV convention, which is what
+conforming models use — but authors ship odd UVs, so RENDER AND LOOK at
+the screen, then override per model if needed: `{ flip: false }` (content
+came out flipped — that model's UVs are already v-up) or
+`{ mirrorX: true }` (mirrored island). Agent-authored planes
+(`screen.mesh`, your own geometry) are untouched by all of this — the
+flip only engages inside `applyTo`.
+
 Do NOT hand-build CanvasTexture screens in scenes anymore — this helper IS
 that pattern, done right. Full-frame HUDs / lower thirds still go through
 `makeOverlayLayer` (screen-locked); screen-space glitch/CRT looks are still
@@ -2318,7 +2341,7 @@ Pick by intent:
 
 | Brief calls for…                                                      | Anchor to | Pattern |
 |----------------------------------------------------------------------|-----------|---------|
-| Display showing content (news on a TV, code on a laptop, dialog on a screen, time on a watch, HUD inside a cockpit) | The screen mesh | `globalThis.makeScreen` (animated canvas screen — see its entry) |
+| Display showing content (news on a TV, code on a laptop, dialog on a screen, time on a watch, HUD inside a cockpit) | The screen mesh | `globalThis.makeScreen` (animated canvas screen — see its entry); `screen.applyTo(model)` to take over a GLB's real screen submesh |
 | Title card, lower-third, caption, ticker, chyron, network bug, score readout, subtitle, end card — anything that would be overlaid on the final video in a broadcast edit | The camera | `makeOverlayLayer` (screen-locked overlay pass) |
 
 #### Pattern A — UI on an in-world screen mesh
