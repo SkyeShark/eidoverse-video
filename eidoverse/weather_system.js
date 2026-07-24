@@ -20,9 +20,10 @@
 //   weather.setWeather('storm', 1.0);     // see WEATHER table below
 //   // per frame: weather.update(t, camera)
 //
-// States: clear · drizzle · sunshower · overcast · rain · storm (great-plains
-// towering deck + lightning) · hurricane (sheared sheets of rain) · darkstorm
-// (near-black green-cast sky, heavy lightning).
+// States: clear · drizzle · sunshower · fair · overcast · rain · storm
+// (great-plains towering deck + lightning) · hurricane (sheared sheets of
+// rain) · cyclone (sealed canopy sheet; 'noreaster' accepted as a legacy
+// alias) · darkstorm (near-black green-cast sky, heavy lightning).
 // Colored/alien rain: uniforms.rainColor + wetTint.
 (function () {
     const T3 = globalThis.THREE;
@@ -227,7 +228,7 @@
         // Cyclone's upper sheet uses moderate anisotropy: the old
         // [0.14, 0.15, 3.30] stretch drew 20:1 straight streaks instead of
         // wind-torn cloud masses.
-        noreaster: { clouds: 'stratus', over: { largeT: 0.00, largeA: 2.2, finalMul: 0.50, start: 240, height: 400, wispOn: 1.00, wispScale: 0.00100, wispThreshold: 0.22, wispStrength: 1.00, wispOpacity: 1.12, wispFilament: 0.22, wispStretch: [0.46, 0.24, 1.95], wispTint: [0.45, 0.56, 0.72] }, sunDim: 0.10, grey: 0.95, dark: 0.26, greyTint: [0.92, 0.97, 1.06], rain: 1.00, wet: 1.00, windK: 6.5, len: 0.60, fall: 1.6, dash: 0.0, lightning: 0.05, lightningPalette: 'standard', localStrikeChance: 0.010, horMul: 0.5, cellLo: 0.10, cellHi: 0.35, dense: 1.9, distant: 0.15 },
+        cyclone:   { clouds: 'stratus', over: { largeT: 0.00, largeA: 2.2, finalMul: 0.50, start: 240, height: 400, wispOn: 1.00, wispScale: 0.00100, wispThreshold: 0.22, wispStrength: 1.00, wispOpacity: 1.12, wispFilament: 0.22, wispStretch: [0.46, 0.24, 1.95], wispTint: [0.45, 0.56, 0.72] }, sunDim: 0.10, grey: 0.95, dark: 0.26, greyTint: [0.92, 0.97, 1.06], rain: 1.00, wet: 1.00, windK: 6.5, len: 0.60, fall: 1.6, dash: 0.0, lightning: 0.05, lightningPalette: 'standard', localStrikeChance: 0.010, horMul: 0.5, cellLo: 0.10, cellHi: 0.35, dense: 1.9, distant: 0.15 },
         // ~19.3 km cumulonimbus system represented by its only visible part:
         // a shallow sealed 3D underside plus a running ordinary volumetric
         // underlayer, with the dark-tinted canopy sheet as the textured cloud
@@ -1505,6 +1506,7 @@
                 diagnostics.precipitation.rainVisible = transitionHasRain;
             },
             setWeather(name, k = 1) {
+                if (name === 'noreaster') name = 'cyclone';   // state renamed; legacy alias
                 // An immediate state application supersedes any old morph.
                 // Without this, a caller applying a settled/debug/initial
                 // state mid-transition was silently overwritten on the next
