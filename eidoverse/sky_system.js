@@ -1636,7 +1636,10 @@
             // the new column — opaque bodies replace, glows add. Evaluated
             // here so the body appears in the sky, in the reflection hook,
             // AND in the env bake with one function.
-            if (opts.celestial) col.assign(opts.celestial(dir, col));
+            // celestial hook rides the same weather-visibility gate as the
+            // default sun disc — a giant filling a third of the sky otherwise
+            // burns white through any dense cover (rain whiteout, lookdev)
+            if (opts.celestial) col.assign(mix(col, opts.celestial(dir, col), clamp(u.celestialVisibility, 0, 1)));
             // HDR sun disc + corona
             const disc = smoothstep(0.99995, 0.999985, mu);
             col.addAssign(u.sunColor.mul(disc).mul(u.sunDiscI).mul(u.celestialVisibility));
