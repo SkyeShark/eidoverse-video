@@ -2137,9 +2137,17 @@
                 // only covers camera-visible ground — below-horizon rays whose
                 // target the camera cannot see (e.g. the ground directly under
                 // a mirror ball) previously reflected NOTHING. Sample the baked
-                // env (its ground-bounce band) for those rays instead; black
-                // until the scene's first bakeEnv fills the shared target.
-                const envFbNode = T3.texture(sys._ensureEnvTarget().texture);
+                // env (its ground-bounce band) for those rays instead.
+                // The node starts on an INITIALIZED 1x1 black placeholder —
+                // binding a never-rendered RenderTarget texture at pipeline
+                // compile races texture init on the wgpu backend (intermittent
+                // "OutputType is invalid" shader rejections that silently drop
+                // whole materials). bakeEnv swaps the real texture in after
+                // its first render.
+                const envFbPlaceholder = new T3.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+                envFbPlaceholder.needsUpdate = true;
+                const envFbNode = T3.texture(envFbPlaceholder);
+                sys._envFbNode = envFbNode;
                 // debug modes REPLACE the final image (render_scene checks this
                 // flag in the deferred compose) — additive debug over a lit
                 // beauty is unreadable and misled a whole night of bisects
@@ -2412,6 +2420,9 @@
                 // Reused render-target textures need an explicit PMREM version
                 // bump or rough materials keep sampling the first bake forever.
                 target.texture.needsPMREMUpdate = true;
+                // hand the now-rendered bake to the reflection hook's
+                // below-horizon fallback (it boots on a 1x1 placeholder)
+                if (sys._envFbNode) sys._envFbNode.value = target.texture;
                 // EIDOVERSE PORT: in the offline host the sky owns the world's
                 // light — assign the bake to scene.environment like the
                 // pre-port core (the browser branch skips this because Chrome
