@@ -2210,8 +2210,15 @@
                                 const liveEnvironment = ropts.deltaOnly === true
                                     ? cld.rgb.sub(bg.mul(cld.a))
                                     : bg.mul(float(1).sub(cld.a)).add(cld.rgb);
+                                // EIDOVERSE PORT: this host's deferred compose
+                                // (render_scene.mjs) gates cloud rgb only by SSR
+                                // miss and never reads the alpha metadata — bake
+                                // the ray-based horizon fade into rgb here (as
+                                // the pre-port core did) so down-rays contribute
+                                // nothing where SSR misses. Alpha still carries
+                                // skyVis for compositors that consume it.
                                 cloudCol.assign(liveEnvironment
-                                    .mul(op));
+                                    .mul(op).mul(skyVis));
                             }
                         });
                         return vec4(cloudCol, skyVis.mul(isSurface));
@@ -2378,7 +2385,18 @@
                 // Reused render-target textures need an explicit PMREM version
                 // bump or rough materials keep sampling the first bake forever.
                 target.texture.needsPMREMUpdate = true;
-                console.log(`[sky] env bake ${W}x${H} ready for per-material reflection assignment`);
+                // EIDOVERSE PORT: in the offline host the sky owns the world's
+                // light — assign the bake to scene.environment like the
+                // pre-port core (the browser branch skips this because Chrome
+                // suppresses Basic-family sky domes when it is set).
+                // bopts.ifAbsent respects an agent-set HDRI; bopts.assign =
+                // false opts out entirely (per-material assignment workflows).
+                if (bopts.assign !== false && !(bopts.ifAbsent && scene.environment)) {
+                    scene.environment = target.texture;
+                    console.log(`[sky] env bake ${W}x${H} -> scene.environment (clouds reach reflections via env-IBL)`);
+                } else {
+                    console.log(`[sky] env bake ${W}x${H} ready for per-material reflection assignment`);
+                }
                 return target.texture;
             },
             update(t, camera) {
