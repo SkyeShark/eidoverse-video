@@ -25,6 +25,12 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
+# Windows Python defaults stdout/stderr to the legacy console code page
+# (e.g. cp1252), which lacks glyphs used in our messages (#1).
+for _stream in (sys.stdout, sys.stderr):
+    if _stream and _stream.encoding and _stream.encoding.lower() not in ("utf-8", "utf8"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # ------------------------------------------------------------- utilities ---
 
 
