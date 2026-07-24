@@ -2120,7 +2120,26 @@
             // cloud delta with the same sharp receiver weight as pinned r184
             // SSR: opacity * final MRT metalness * Fresnel. The browser then
             // builds and samples the matching roughness mip lobe.
+            // shared env-target creation: bakeEnv renders into it; the
+            // reflection hook samples it as the below-horizon fallback
+            _ensureEnvTarget(W = 512, H = 256) {
+                if (sys._envTarget) return sys._envTarget;
+                const target = new T3.RenderTarget(W, H, { type: T3.HalfFloatType, format: T3.RGBAFormat, depthBuffer: false, stencilBuffer: false });
+                target.texture.mapping = T3.EquirectangularReflectionMapping;
+                target.texture.minFilter = T3.LinearFilter; target.texture.magFilter = T3.LinearFilter;
+                target.texture.colorSpace = T3.LinearSRGBColorSpace;
+                target.texture.name = 'sky_system_env';
+                sys._envTarget = target;
+                return target;
+            },
             enableReflections(camera, ropts = {}) {
+                // EIDOVERSE PORT: the hook suppresses material env-IBL and SSR
+                // only covers camera-visible ground — below-horizon rays whose
+                // target the camera cannot see (e.g. the ground directly under
+                // a mirror ball) previously reflected NOTHING. Sample the baked
+                // env (its ground-bounce band) for those rays instead; black
+                // until the scene's first bakeEnv fills the shared target.
+                const envFbNode = T3.texture(sys._ensureEnvTarget().texture);
                 // debug modes REPLACE the final image (render_scene checks this
                 // flag in the deferred compose) — additive debug over a lit
                 // beauty is unreadable and misled a whole night of bisects
@@ -2219,6 +2238,15 @@
                                 // skyVis for compositors that consume it.
                                 cloudCol.assign(liveEnvironment
                                     .mul(op).mul(skyVis));
+                                // below-horizon fallback: baked-env sample
+                                // along the same ray (SSR hits still override
+                                // via the compositor's 1-ssrAlpha gate). The
+                                // bake target stores rows Y-FLIPPED (see the
+                                // bake fragment's inverse mapping) — flip v.
+                                const envUV = equirectUV(reflDir);
+                                cloudCol.addAssign(envFbNode.sample(
+                                    vec2(envUV.x, float(1).sub(envUV.y))).rgb
+                                    .mul(op).mul(float(1).sub(skyVis)));
                             }
                         });
                         return vec4(cloudCol, skyVis.mul(isSurface));
@@ -2296,14 +2324,13 @@
                 // is what trips the redundant-createTexture throw, and callers
                 // re-bake on TOD / weather changes (day cycle, scene segments)
                 let target = sys._envTarget;
-                if (!target || target.width !== W || target.height !== H) {
-                    target?.dispose?.();
-                    target = new T3.RenderTarget(W, H, { type: T3.HalfFloatType, format: T3.RGBAFormat, depthBuffer: false, stencilBuffer: false });
-                    target.texture.mapping = T3.EquirectangularReflectionMapping;
-                    target.texture.minFilter = T3.LinearFilter; target.texture.magFilter = T3.LinearFilter;
-                    target.texture.colorSpace = T3.LinearSRGBColorSpace;
-                    target.texture.name = 'sky_system_env';
-                    sys._envTarget = target;
+                if (!target) {
+                    target = sys._ensureEnvTarget(W, H);
+                } else if (target.width !== W || target.height !== H) {
+                    // EIDOVERSE PORT: resize IN PLACE — the reflection hook's
+                    // env-fallback node captured this texture object; a
+                    // dispose/recreate would leave it sampling a dead texture.
+                    target.setSize(W, H);
                 }
                 const rw = bopts.ringworld;
                 if (rw) sys._envRingworld = rw;   // the reflection hook traces the same band (built post-setup, after this bake)
