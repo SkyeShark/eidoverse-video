@@ -20,11 +20,20 @@
 //   weather.setWeather('storm', 1.0);     // see WEATHER table below
 //   // per frame: weather.update(t, camera)
 //
-// States: clear · drizzle · sunshower · fair · overcast · rain · storm
-// (great-plains towering deck + lightning) · hurricane (sheared sheets of
-// rain) · cyclone (sealed canopy sheet; 'noreaster' accepted as a legacy
-// alias) · darkstorm (near-black green-cast sky, heavy lightning).
-// Colored/alien rain: uniforms.rainColor + wetTint.
+// States (these are whole dialed-in looks — pick one, don't rebuild it):
+//   clear · fair · sunshower · overcast · rain · storm (great-plains
+//   towering deck + lightning) · cyclone (sealed canopy sheet) ·
+//   darkstorm (near-black green-cast sky, heavy lightning).
+// Retired: 'drizzle' and 'hurricane' (pre-Eanpa stubs) and 'noreaster'
+// (renamed) — all still accepted as legacy aliases, see LEGACY_STATES.
+//
+// COLOUR OVERRIDES layer ON TOP of the chosen state; they retint a dialed-in
+// look and never replace it. Pass in opts, or set later via setColors():
+//   rainColor    [r,g,b]  precipitation streaks + splashes
+//   cloudColor   [r,g,b]  cloud body tint
+//   sunColor     [r,g,b]  the star's light + disc
+//   shieldColor  [r,g,b]  red giant shieldworld's hex shield
+// Omit any of them to keep the state's authored colour.
 (function () {
     const T3 = globalThis.THREE;
     const {
@@ -211,6 +220,18 @@
     });
 
     //           clouds     overrides                                              sunDim grey dark greyTint           rain  wet  windK len  fall dash lightning
+    // Retired state names, mapped to the nearest surviving look so an older
+    // scene still renders instead of throwing. 'drizzle' and 'hurricane' were
+    // eidoverse's own pre-Eanpa stubs and never existed in the Eanpa engine —
+    // keeping them alongside the ported set left the list reading as two
+    // different weather vocabularies bolted together (a light-rain state the
+    // engine had no look for, and a second severe state doing cyclone's job).
+    const LEGACY_STATES = {
+        noreaster: 'cyclone',   // renamed during the Eanpa port
+        hurricane: 'cyclone',   // retired stub — cyclone is the severe state
+        drizzle:   'rain',      // retired stub — use rain at a low k
+    };
+
     const WEATHER = {
         clear:     { clouds: 'clear',   over: {},                                                 sunDim: 1.00, grey: 0.00, dark: 1.00, greyTint: [1, 1, 1],        rain: 0.00, wet: 0.00, windK: 0.0, len: 0.30, fall: 1.0, dash: 0.0, lightning: 0.00 },
         // High/2D clouds are authored with each weather state too.  They are
@@ -218,13 +239,11 @@
         // volumetric bodies: fair skies get sparse warm veils, stratiform
         // weather gets broad cool sheets, and severe storms get fast sheared
         // slate filaments.  All of these fields lerp with the volume below.
-        drizzle:   { clouds: 'stratus', over: { largeT: 0.10, finalMul: 0.14, wispOn: 0.64, wispThreshold: 0.38, wispStrength: 0.68, wispOpacity: 0.88, wispFilament: 0.03, wispStretch: [0.82, 0.25, 1.28], wispTint: [0.76, 0.83, 0.92] }, sunDim: 0.70, grey: 0.35, dark: 0.88, greyTint: [1, 1, 1], rain: 0.45, wet: 0.40, windK: 0.3, len: 0.09, fall: 0.5, dash: 0.8, lightning: 0.00, horMul: 0.92, cellLo: 0.35, cellHi: 0.65, celestialVisibility: 0.45 },
         sunshower: { clouds: 'cumulus', over: { largeT: 0.50, weatherT: 0.34, wispOn: 0.16, wispThreshold: 0.58, wispStrength: 0.42, wispOpacity: 1.10, wispFilament: 0.20, wispStretch: [0.70, 0.32, 1.72], wispTint: [1.04, 0.99, 0.91] }, sunDim: 0.92, grey: 0.05, dark: 1.00, greyTint: [1, 1, 1], rain: 0.45, wet: 0.55, windK: 0.5, len: 0.2, fall: 0.9, dash: 0.0, lightning: 0.00, cellLo: 0.85, cellHi: 1.25 },
         fair:      { clouds: 'cumulus', over: { largeT: 0.58, largeA: 3.2, weatherT: 0.26, finalMul: 0.24, wispOn: 0.13, wispThreshold: 0.62, wispStrength: 0.38, wispOpacity: 1.06, wispFilament: 0.18, wispStretch: [0.72, 0.33, 1.66], wispTint: [1.02, 0.99, 0.94] }, sunDim: 0.88, grey: 0.15, dark: 1.00, greyTint: [1, 1, 1], rain: 0.00, wet: 0.00, windK: 0.5, len: 0.3, fall: 1.0, dash: 0.0, lightning: 0.00 },
         overcast:  { clouds: 'stratus', over: { largeT: 0.05, finalMul: 0.20, wispOn: 0.90, wispThreshold: 0.30, wispStrength: 0.90, wispOpacity: 0.96, wispFilament: 0.05, wispStretch: [0.92, 0.24, 1.18], wispTint: [0.66, 0.74, 0.84] }, sunDim: 0.45, grey: 0.60, dark: 0.75, greyTint: [1, 1, 1], rain: 0.00, wet: 0.15, windK: 0.4, len: 0.3, fall: 1.0, dash: 0.0, lightning: 0.00, horMul: 0.85, cellLo: 0.5, cellHi: 0.9, celestialVisibility: 0.30 },
         rain:      { clouds: 'stratus', over: { largeT: 0.02, finalMul: 0.26, height: 320, wispOn: 0.94, wispScale: 0.00092, wispThreshold: 0.27, wispStrength: 0.96, wispOpacity: 1.00, wispFilament: 0.12, wispStretch: [0.66, 0.22, 1.65], wispTint: [0.57, 0.66, 0.78] }, sunDim: 0.30, grey: 0.75, dark: 0.55, greyTint: [1, 1, 1], rain: 0.70, wet: 0.85, windK: 1.0, len: 0.22, fall: 1.0, dash: 0.0, lightning: 0.00, horMul: 0.75, cellLo: 0.5, cellHi: 0.85, celestialVisibility: 0.15 },
         storm:     { clouds: 'cumulus', over: { largeT: 0.12, largeA: 4.0, finalMul: 0.34, start: 550, height: 950, wispOn: 0.52, wispScale: 0.00096, wispThreshold: 0.36, wispStrength: 0.88, wispOpacity: 1.05, wispFilament: 0.32, wispStretch: [0.40, 0.20, 2.18], wispTint: [0.53, 0.60, 0.70] }, sunDim: 0.18, grey: 0.80, dark: 0.42, greyTint: [1, 1, 1], rain: 1.00, wet: 1.00, windK: 2.2, len: 0.3, fall: 1.2, dash: 0.0, lightning: 0.30, lightningPalette: 'standard', localStrikeChance: 0.018, horMul: 0.6, cellLo: 1.0, cellHi: 1.45, distant: 0.5, celestialVisibility: 0.10 },
-        hurricane: { clouds: 'stratus', over: { largeT: 0.00, finalMul: 0.40, start: 380, height: 520, wispOn: 1.00, wispScale: 0.00108, wispThreshold: 0.24, wispStrength: 1.00, wispOpacity: 1.10, wispFilament: 0.30, wispStretch: [0.18, 0.16, 3.00], wispTint: [0.48, 0.57, 0.68] }, sunDim: 0.12, grey: 0.90, dark: 0.30, greyTint: [1, 1, 1], rain: 1.00, wet: 1.00, windK: 4.5, len: 0.45, fall: 1.4, dash: 0.0, lightning: 0.12, lightningPalette: 'standard', localStrikeChance: 0.012, horMul: 0.55, cellLo: 0.35, cellHi: 0.7, dense: 1.4, distant: 0.3, celestialVisibility: 0.08 },
         // Cyclone's upper sheet uses moderate anisotropy: the old
         // [0.14, 0.15, 3.30] stretch drew 20:1 straight streaks instead of
         // wind-torn cloud masses.
@@ -252,6 +271,20 @@
         const weatherRegistry = globalThis.__eanpaWeatherByScene
             ?? (globalThis.__eanpaWeatherByScene = new WeakMap());
         weatherRegistry.get(scene)?.dispose?.();
+        // ---- COLOUR OVERRIDES (multipliers over the chosen preset) --------
+        // The weather states and skybox packages are complete, dialed-in
+        // looks; these do NOT rebuild them. Each is a per-channel multiplier
+        // defaulting to [1,1,1] = the authored colour, applied AFTER the
+        // preset has driven its value each frame. Anything else gets
+        // overwritten on the next tick by the state machine.
+        const asRGB = (v, dflt) => (Array.isArray(v) && v.length === 3)
+            ? [+v[0], +v[1], +v[2]] : dflt.slice();
+        const COLOR = {
+            rain:   asRGB(opts.rainColor,   [1, 1, 1]),
+            cloud:  asRGB(opts.cloudColor,  [1, 1, 1]),
+            sun:    asRGB(opts.sunColor,    [1, 1, 1]),
+            shield: asRGB(opts.shieldColor, [1, 1, 1]),
+        };
         const N_RAIN = opts.rainCount ?? 16000;
         const RAD = opts.rainRadius ?? 45;     // world tile half-extent (m)
         const HGT = opts.rainHeight ?? 24;     // vertical recycle height (m)
@@ -1505,8 +1538,21 @@
                 splashInst.visible = transitionHasRain && N_SPLASH > 0;
                 diagnostics.precipitation.rainVisible = transitionHasRain;
             },
+            // Retint the ACTIVE look without changing which look is active.
+            // Each field is a per-channel multiplier; omit one to leave it be,
+            // pass [1,1,1] to clear it back to the preset's authored colour.
+            //   weather.setColors({ rain: [1.0, 0.55, 0.30] })   // ember rain
+            setColors(c = {}) {
+                if (c.rain)   COLOR.rain   = asRGB(c.rain,   COLOR.rain);
+                if (c.cloud)  COLOR.cloud  = asRGB(c.cloud,  COLOR.cloud);
+                if (c.sun)    COLOR.sun    = asRGB(c.sun,    COLOR.sun);
+                if (c.shield) COLOR.shield = asRGB(c.shield, COLOR.shield);
+                sky?.setColors?.({ cloud: COLOR.cloud, sun: COLOR.sun, shield: COLOR.shield });
+                return { ...COLOR };
+            },
+            getColors() { return { ...COLOR }; },
             setWeather(name, k = 1) {
-                if (name === 'noreaster') name = 'cyclone';   // state renamed; legacy alias
+                name = LEGACY_STATES[name] ?? name;
                 // An immediate state application supersedes any old morph.
                 // Without this, a caller applying a settled/debug/initial
                 // state mid-transition was silently overwritten on the next
@@ -2020,7 +2066,16 @@
                         return locallyLit
                             + (distantColor - locallyLit) * distantLightningTint;
                     });
-                    u.rainColor.value.set(...litRain);
+                    // COLOUR OVERRIDE (multiplicative, applied last). litRain
+                    // above is recomputed from sky + lightning every frame, so
+                    // anything written straight to u.rainColor is clobbered on
+                    // the next tick — that is why setting it "used to work"
+                    // and then stopped. Multiplying here retints the state's
+                    // authored rain instead of replacing it, so lightning
+                    // flashes and sky coupling still read through.
+                    const rc = COLOR.rain;
+                    u.rainColor.value.set(
+                        litRain[0] * rc[0], litRain[1] * rc[1], litRain[2] * rc[2]);
                     diagnostics.precipitation.sceneLight = Number(u.rainLight.value);
                     diagnostics.precipitation.sceneColor = [...litRain];
                     const g = w.grey * k, d = 1 - (1 - w.dark) * k, gt = w.greyTint;

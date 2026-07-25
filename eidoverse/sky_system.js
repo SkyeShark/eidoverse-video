@@ -55,6 +55,59 @@
         return TOD[2];
     };
 
+    // ---- finite-angular-size source (opts.sourceAngularRadiusDeg) ----------
+    // The TOD table above is authored for a ~0.25 deg-radius sun, so every
+    // knot near the horizon encodes a POINT source: fully up above el 0, gone
+    // below it, whole twilight compressed into roughly 8 deg of elevation.
+    // A red giant seen from close orbit has an angular RADIUS of ~16 deg, and
+    // the geometry is not a detail: its lower limb touches the horizon while
+    // the centre is still at +16, half the disc is still pouring light at
+    // el 0, and the upper limb does not set until -16. Driving that star with
+    // the point-source curve is what makes its sunset read narrow and abrupt,
+    // like a small sun, instead of the long wide burn a giant actually gives.
+    //
+    // Rather than hand-authoring a second table, integrate the authored one
+    // over the source's own solid angle: sample the point-source response
+    // across the disc and weight each slice by that slice's chord width
+    // (sqrt(1 - t^2) for a uniform disc). That is a convolution of the palette
+    // with the source profile — the textbook way to turn a point response
+    // into an extended-source response — so it stretches sunset over the full
+    // angular diameter and softens the terminator without inventing colours.
+    // Rdeg = 0 short-circuits to todAt, so existing worlds are bit-identical.
+    // The spread must also TAPER OFF as the disc sets, and this is physics
+    // rather than taste: a slice of the disc that is below the horizon is
+    // occluded by the world and contributes no light at all, so it must not
+    // be averaged in. Without the taper the convolution keeps reaching up
+    // into twilight entries long after the star is down and perturbs the
+    // night palette — measured: at 01:00 it removed the copper highlight
+    // from the metal spheres. Scaling the radius by the fraction of the disc
+    // still above the horizon makes R_eff reach exactly 0 the moment the
+    // upper limb sets, so from there down todDisc IS todAt by construction
+    // and night is untouched, not merely argued to be.
+    const DISC_TAPS = 11;
+    const todDisc = (elDeg, Rdeg) => {
+        if (!(Rdeg > 0.05)) return todAt(elDeg);
+        const Reff = Rdeg * Math.max(0, Math.min(1, (elDeg + Rdeg) / Rdeg));
+        if (!(Reff > 0.05)) return todAt(elDeg);
+        const zen = [0, 0, 0], hor = [0, 0, 0], sun = [0, 0, 0];
+        let int = 0, star = 0, wsum = 0;
+        for (let i = 0; i < DISC_TAPS; i++) {
+            const t = ((i + 0.5) / DISC_TAPS) * 2 - 1;        // -1..1 across the disc
+            const w = Math.sqrt(Math.max(0, 1 - t * t));      // chord width at t
+            const p = todAt(elDeg + t * Reff);
+            for (let c = 0; c < 3; c++) {
+                zen[c] += p.zen[c] * w; hor[c] += p.hor[c] * w; sun[c] += p.sun[c] * w;
+            }
+            int += p.int * w; star += p.star * w; wsum += w;
+        }
+        const n = 1 / wsum;
+        return {
+            el: elDeg,
+            zen: zen.map((v) => v * n), hor: hor.map((v) => v * n), sun: sun.map((v) => v * n),
+            int: int * n, star: star * n,
+        };
+    };
+
     // ---------------- cloud presets ----------------
     const PRESETS = {
         // thresholds tuned for the 1/f weather map (mean ~0.5): largeT sets
@@ -140,6 +193,12 @@
             cloudTint: uniform(V(1, 1, 1)),
             cloudDim: uniform(1),      // weather-system hook for rain, shafts, and Ringworld reflection response
             cloudRadiance: uniform(1), // cloud-form readability; severe weather may lift this without brightening rain/shafts/ring
+            // WORLD-level cloud exposure, multiplied on top of cloudRadiance.
+            // The weather system owns cloudRadiance (it rewrites it per state),
+            // so a scene that needs a permanent exposure offset — an alien
+            // star whose cloud radiance would otherwise tone-map to white —
+            // sets this instead and weather can never clobber it.
+            cloudRadianceScale: uniform(1),
             wispColor: uniform(V(0.8, 0.8, 0.8)),
             wispTint: uniform(V(1, 1, 1)),
             wispStretch: uniform(V(1, 1, 1)),
@@ -406,7 +465,7 @@
         // light-march density = reference "fast" path: full weather + first
         // erosion. The old crude blob approximation self-shadowed a DIFFERENT
         // cloud field than the camera march saw — blotchy interior shading.
-        const cheapDensity = (pIn) => {
+        const cheapDensityFbm = (pIn, fbmFn) => {
             const p = pIn.mul(u.stretch);
             const atmoH = atmoHeight(pIn);
             const ch = atmoH.sub(u.cloudStart).div(u.cloudHeight).clamp(0, 1);
@@ -420,9 +479,10 @@
                 .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
             const shape = pow(weather.max(1e-6), float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch))));
             const p3 = p2.add(vec3(u.time.mul(12.3), 0, 0));
-            const den = max(shape.sub(fbmE(p3.mul(float(0.01).mul(u.dScale))).mul(0.7)), 0);
+            const den = max(shape.sub(fbmFn(p3.mul(float(0.01).mul(u.dScale))).mul(0.7)), 0);
             return lw.mul(u.finalMul).mul(min(den.mul(5), 1)).mul(ringStrip(pIn));
         };
+        const cheapDensity = (pIn) => cheapDensityFbm(pIn, fbmE);
         // Erosion-free density proxy for sparse light integration. Real beams
         // and severe-weather shadows are cast by cloud MASSES, not 20-100 m
         // erosion froth: undersampling the detailed field makes shafts flicker
@@ -444,10 +504,24 @@
         };
         const phaseMie = (c) => {
             const p1 = c.add(0.8194068);
-            return exp(c.mul(-65.0).sub(55.0)).mul(9.805233e-6)
+            const raw = exp(c.mul(-65.0).sub(55.0)).mul(9.805233e-6)
                 .add(exp(p1.mul(p1).mul(-83.70334)).mul(0.1388198))
                 .add(exp(c.mul(7.810083)).mul(2.054747e-3))
                 .add(exp(c.mul(-4.552125e-12)).mul(2.600563e-2));
+            // opts.cloudPhaseSoften — widen the phase lobe for a star with a
+            // LARGE ANGULAR DIAMETER. This curve peaks ~5.1 forward against
+            // ~0.028 to the side: a 180x spike that is right for a ~0.5 deg
+            // sun, where every ray sees essentially the same light direction.
+            // A red giant filling tens of degrees of sky does not work that
+            // way — the source must be integrated over its own solid angle,
+            // which convolves the phase and flattens that spike. Left sharp,
+            // one cloud sits in the forward lobe and blows to featureless
+            // white while its neighbour a few degrees off reads dead grey,
+            // both under the same light. Blending toward a flat lobe lowers
+            // the peak and lifts the sides — one exposure then fits the whole
+            // cloud field, and backlit cloud glows instead of clipping.
+            const soften = opts.cloudPhaseSoften ?? 0;
+            return soften > 0 ? mix(raw, float(0.09), float(soften)) : raw;
         };
         const lightCacheOpts = opts.lightCache || null;
         const DIRECT_LIGHT_MASS_SCALE = 0.25;
@@ -499,8 +573,26 @@
                 If(u.lightCacheDirect.greaterThan(0.001), () => { addMassLight(massDen); });
                 den.assign(mix(detailedDen, massDen, clamp(u.lightCacheDirect, 0, 1)));
             }
+            // `scatter` gates the two MULTIPLE-SCATTERING terms below — the
+            // ones with tiny extinction (0.1, 0.02) that let light penetrate
+            // deep cloud. It is keyed on mu, the angle from the star, and by
+            // default collapses to 0.008 looking toward the star while sitting
+            // at 1.0 looking away: a 125x swing. Consequences:
+            //   · thick cloud NEAR the star loses multiple scattering entirely
+            //     and renders as a solid flat mass with no light through it,
+            //     while thin cloud beside it takes the phase function's
+            //     forward peak and blazes — one sky, two unrelated looks.
+            //   · the transition is a function of mu alone, and mu = 0 is the
+            //     plane through the camera perpendicular to the star. A plane
+            //     through the camera projects to a STRAIGHT LINE on screen, so
+            //     the change lands as a hard diagonal cutting across the cloud
+            //     field, unrelated to any cloud shape.
+            // Under a small sun this hides inside the sun's glare. Under a star
+            // subtending tens of degrees it is the dominant artifact.
+            // opts.cloudMultiScatterFloor raises the forward floor so backlit
+            // cloud keeps transmitting; default preserves the original.
             const scatter = mix(
-                float(0.008), float(1.0),
+                float(opts.cloudMultiScatterFloor ?? 0.008), float(1.0),
                 float(1).sub(smoothstep(0.0, 0.96, mu)),
             );
             const beers = exp(stepL.mul(den).negate())
@@ -912,8 +1004,27 @@
                     : flatP;
                 const stepL = clamp(u.cloudHeight.mul(2.2), 380, 700).div(N_LIGHT);
                 const den = float(0).toVar();
+                // FILL NOISE IS ALWAYS THE ANALYTIC EROSION BASIS, never the
+                // cached 3D-texture basis — even when the density cache is on.
+                // Measured (red giant, TIER=balanced, both caches): this compute
+                // pass reads the basis texture EXACTLY right (GPU readback vs
+                // CPU emulation of the full weather+erosion chain: max err
+                // 0.0097 = f16 rounding, corr 1.0000), but the FRAGMENT stage's
+                // reads of the same Data3DTexture drift over the run on the
+                // Deno-wgpu backend (differential probes: pristine at t=2.5 s,
+                // straight-edged corrupt regions growing from t≈4 s — same
+                // object identity, compute readback still pristine at t=18 s).
+                // A cache built from the TRUE basis therefore lights a field
+                // the fragment no longer renders, and the divergence lands as
+                // a flat unlit mass with a hard straight boundary. The analytic
+                // fbm is pure ALU — bit-consistent across stages by
+                // construction — and the froxel grid (~470 m cells) low-passes
+                // erosion detail anyway, so mass-scale lighting (weather
+                // envelope, shared with the fragment) is unchanged. Verified:
+                // artifact gone, Earth/ringworld unchanged, fill cost is
+                // amortized over refreshSeconds so balanced-tier fps holds.
                 for (let j = 0; j < N_LIGHT; j++) {
-                    den.addAssign(cheapDensity(p.add(u.cloudLightDir.mul(stepL).mul(j + 0.5))));
+                    den.addAssign(cheapDensityFbm(p.add(u.cloudLightDir.mul(stepL).mul(j + 0.5)), fbm3A));
                 }
                 T3.textureStore(lightCacheTex, gid, vec4(den, 0, 0, 1)).toWriteOnly();
             });
@@ -1041,7 +1152,7 @@
                                 canopyGate,
                             );
                             const radiance = ambGrey.add(u.cloudLightColor.mul(intensity).mul(celestialK))
-                                .mul(u.cloudRadiance).add(canopySkylight).mul(s.density);
+                                .mul(u.cloudRadiance).mul(u.cloudRadianceScale).add(canopySkylight).mul(s.density);
                             const trStep = exp(s.density.mul(stepS).negate());
                             colk.addAssign(Trk.mul(radiance.sub(radiance.mul(trStep)).div(max(s.density, 1e-6))));
                             Trk.assign(Trk.mul(trStep));
@@ -1224,7 +1335,7 @@
             // cloudBody speaks premultiplied RGBA: multiply the straight wisp
             // radiance by its actual coverage (the old density-vs-alpha split
             // made every thin sheet intrinsically dark grey).
-            col.addAssign(Tr.mul(u.wispColor).mul(wispAlpha).mul(u.cloudRadiance));
+            col.addAssign(Tr.mul(u.wispColor).mul(wispAlpha).mul(u.cloudRadiance).mul(u.cloudRadianceScale));
             });
 
             // SEALED LOW CUMULONIMBUS VOLUME. The semantic storm can be roughly
@@ -1672,6 +1783,23 @@
         // palette is COMPUTED so lights, cloud radiance, and weather greying
         // all inherit it — and idempotent, unlike mutating the uniforms
         // per-frame (a compounding lerp on these collapsed a sky to black).
+        // Angular RADIUS of the light source in degrees (Sol from Earth is
+        // ~0.27). Non-zero stretches sunset/twilight over the source's real
+        // angular extent — see todDisc. Default 0 keeps point-source timing.
+        const SRC_R_DEG = Math.max(0, opts.sourceAngularRadiusDeg ?? 0);
+        // ---- COLOUR OVERRIDES (multipliers over the chosen sky package) ----
+        // The three world packages (earth / ringworld / shieldworld) are whole
+        // look-dev units. These retint an active package; they do not compose
+        // one. Each defaults to [1,1,1] and is applied AFTER the palette has
+        // driven the value, because the palette rewrites both of these every
+        // frame from sun elevation.
+        const asRGB3 = (v, dflt) => (Array.isArray(v) && v.length === 3)
+            ? [+v[0], +v[1], +v[2]] : dflt.slice();
+        const SKY_COLOR = {
+            cloud:  asRGB3(opts.cloudColor,  [1, 1, 1]),
+            sun:    asRGB3(opts.sunColor,    [1, 1, 1]),
+            shield: asRGB3(opts.shieldColor, [1, 1, 1]),
+        };
         const PT = opts.paletteTint;
         const tintPal = (p) => !PT ? p : {
             ...p,
@@ -1713,7 +1841,15 @@
         };
         const updateWispColor = () => {
             const pal = state.palette;
-            u.wispColor.value.set(...pal.sun).lerp(V(1, 1, 1), 0.62)
+            // Thick high-sheet multiple scattering converges on the
+            // ILLUMINANT's colour, not on white. Hard-coding white was
+            // invisible under a near-white sun but forced an almost-white
+            // canopy under a tinted star (a red giant's ice sheet rendered
+            // as a white flood over the whole sky). Desaturate toward the
+            // star's own chromaticity instead — identical for a white sun.
+            const _pk = Math.max(pal.sun[0], pal.sun[1], pal.sun[2], 1e-4);
+            const _neutral = V(pal.sun[0] / _pk, pal.sun[1] / _pk, pal.sun[2] / _pk);
+            u.wispColor.value.set(...pal.sun).lerp(_neutral, 0.62)
                 .multiplyScalar(0.22 + pal.int * 0.34)
                 .multiply(u.wispTint.value);
         };
@@ -1838,11 +1974,14 @@
                 sys.sunDir.set(Math.cos(elRad) * Math.cos(azRad), Math.sin(elRad), Math.cos(elRad) * Math.sin(azRad)).normalize();
                 u.sunDir.value.copy(sys.sunDir);
                 const elDeg = elRad * 180 / Math.PI;
-                const pal = tintPal(todAt(elDeg));
+                const pal = tintPal(todDisc(elDeg, SRC_R_DEG));
                 state.palette = pal;
                 u.zenith.value.set(...pal.zen);
                 u.horizon.value.set(...pal.hor);
-                u.sunColor.value.set(...pal.sun);
+                u.sunColor.value.set(
+                    pal.sun[0] * SKY_COLOR.sun[0],
+                    pal.sun[1] * SKY_COLOR.sun[1],
+                    pal.sun[2] * SKY_COLOR.sun[2]);
                 u.starFade.value = pal.star;
                 u.hdriDim.value = Math.max(0.04, Math.min(1, 0.1 + pal.int * 0.45));
                 // cloud lighting: sun by day, MOON by night (smooth handoff in twilight)
@@ -1851,11 +1990,44 @@
                 // donor calibration: reference shader is HDR-native and the engine
                 // effect rescales by colorScale 0.08 for ACES (cloud bodies ~1-3,
                 // sky bg ~0.1-0.5). Baked into these coefficients.
-                const sunCol = V(...pal.sun).multiplyScalar(pal.int * 7);
+                // opts.cloudLightScale — scales ONLY the star-driven cloud
+                // light, leaving the ambient/skylight term (ambGrey) intact.
+                // A world under a tinted star needs its sunlit cloud radiance
+                // pulled under the ACES knee, but doing that with cloudTint
+                // scales the ambient term too and the clouds go BLACK once the
+                // star is down. This knob dims the key, not the fill.
+                // opts.cloudLightTint — PER-CHANNEL key balance, [r,g,b].
+                // A scalar dim cannot fix a tinted star and neither can
+                // desaturating toward grey (that just yields grey cloud):
+                // sunlit radiance here is ~(21, 5.9, 2.1), and ACES converges
+                // on white whenever ONE channel runs far ahead of the others.
+                // What works is REBALANCING the channels — cutting red hardest
+                // (a tint like [0.07, 0.11, 0.16], blue-weighted) so the peak
+                // lands under the knee with the ratio intact. The result
+                // tone-maps to copper with structure instead of white.
+                // Applied to the KEY only, so the ambient/skylight fill is
+                // untouched and clouds keep their form after the star sets.
+                const sunBase = V(...pal.sun);
+                const clTint = opts.cloudLightTint;
+                if (clTint) sunBase.multiply(V(clTint[0], clTint[1], clTint[2]));
+                const sunCol = sunBase.multiplyScalar(pal.int * 7 * (opts.cloudLightScale ?? 1));
                 const moonCol = V(0.45, 0.55, 0.85).multiplyScalar(1.3 * nightK);
-                u.cloudLightColor.value.copy(sunCol.lerp(moonCol, nightK));
+                // NOTE: this uniform is a Vector3, not a Color (sunCol/moonCol
+                // are built with V()). Multiplying it by a THREE.Color gives
+                // NaN on every channel — Vector3.multiply reads .x/.y/.z and a
+                // Color only carries .r/.g/.b — which renders the clouds dark.
+                u.cloudLightColor.value.copy(sunCol.lerp(moonCol, nightK))
+                    .multiply(V(...SKY_COLOR.cloud));
                 u.cloudLightDir.value.copy(nightK > 0.5 ? sys.moonDir : sys.sunDir);
-                const ambDay = V(...pal.zen).multiplyScalar(0.34 * (0.25 + pal.int * 0.55));
+                // opts.cloudAmbScale — the cloud FILL term, i.e. what lights a
+                // cloud face turned away from the star. It is derived from the
+                // zenith colour, and under a red paletteTint the red tint
+                // multiplied against the naturally BLUE zenith very nearly
+                // cancels: luminance falls to about a quarter of Earth's, so
+                // every unlit cloud face reads as dead grey no matter how the
+                // key is exposed. Scaling the fill restores the shadow side.
+                const ambDay = V(...pal.zen).multiplyScalar(
+                    0.34 * (0.25 + pal.int * 0.55) * (opts.cloudAmbScale ?? 1));
                 const ambNight = V(0.04, 0.055, 0.10).multiplyScalar(0.6);
                 u.cloudAmbSky.value.copy(ambDay.lerp(ambNight, nightK));
                 u.cloudAmbGround.value.set(0.8, 0.8, 0.8).multiplyScalar(Math.max(0.008, pal.int * 0.027));
@@ -1881,6 +2053,25 @@
                 u.moonUp.value.copy(sys.moonDir.clone().cross(mr).normalize());
                 sys.setSun(az, el);
             },
+            // Retint the ACTIVE sky package without changing which package is
+            // active. Per-channel multipliers over the authored look; omit a
+            // field to leave it alone, pass [1,1,1] to clear it.
+            //   sky.setColors({ cloud: [1.0, 0.72, 0.55], sun: [1, 0.8, 0.6] })
+            // `shield`/`star` forward to a celestial module that supports them
+            // (the red giant shieldworld); ignored by packages that don't.
+            setColors(c = {}) {
+                if (c.cloud)  SKY_COLOR.cloud  = asRGB3(c.cloud,  SKY_COLOR.cloud);
+                if (c.sun)    SKY_COLOR.sun    = asRGB3(c.sun,    SKY_COLOR.sun);
+                if (c.shield) SKY_COLOR.shield = asRGB3(c.shield, SKY_COLOR.shield);
+                const cm = opts.celestialModule ?? sys._celestialModule;
+                if (c.shield) cm?.setShieldColor?.(SKY_COLOR.shield);
+                if (c.star)   cm?.setStarColor?.(asRGB3(c.star, [1, 1, 1]));
+                // re-drive the palette so cloud/sun take effect this frame
+                // rather than waiting for the next setTime/cycle tick
+                sys.setTime?.(state.hours);
+                return { ...SKY_COLOR };
+            },
+            getColors() { return { ...SKY_COLOR }; },
             setClouds(name, over = {}) {
                 // An immediate set supersedes a cloud-only morph. Weather's
                 // transitionTo() deliberately uses this setter to capture its
@@ -1967,8 +2158,19 @@
                 const pal = state.palette;
                 const nightK = u.moonLightK.value;
                 if (sun) {
-                    sun.color.setRGB(...pal.sun).lerp(new T3.Color(0.5, 0.6, 0.95), nightK);
-                    sun.intensity = Math.max(0.08, pal.int * 1.15) * (1 - nightK) + 0.35 * nightK;
+                    // At night this light BECOMES the moonlight: it tracks the
+                    // moon and takes a cool blue-white, which is correct for
+                    // Earth — our moonlight looks blue only because Sol is
+                    // white. It is WRONG for any tinted star: a moon orbiting
+                    // a ~3200 K red giant reflects ORANGE light, and there is
+                    // no white light in such a system to make a blue moonbeam.
+                    // opts.moonLightColor / moonLightIntensity let a world set
+                    // its own; defaults are the Earth values.
+                    const ml = opts.moonLightColor ?? [0.5, 0.6, 0.95];
+                    sun.color.setRGB(...pal.sun).lerp(new T3.Color(ml[0], ml[1], ml[2]), nightK)
+                    .multiply(new T3.Color(...SKY_COLOR.sun));
+                    sun.intensity = Math.max(0.08, pal.int * 1.15) * (1 - nightK)
+                        + (opts.moonLightIntensity ?? 0.35) * nightK;
                     const d = nightK > 0.5 ? sys.moonDir : sys.sunDir;
                     sun.position.copy(d.clone().multiplyScalar(120));
                 }

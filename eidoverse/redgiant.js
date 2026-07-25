@@ -112,6 +112,11 @@ globalThis.makeRedGiant = async function ({ opts = {} } = {}) {
         // patchy around the limb like the ALMA asymmetric chromosphere
         const rimPatch = vn(vec2(phi.mul(2.2), uStarT.mul(0.11))).mul(0.6).add(0.55);
         sCol = sCol.add(vec3(1.35, 0.32, 0.38).mul(pow(float(1).sub(muL), 6).mul(1.8)).mul(rimPatch));
+        // COLOUR OVERRIDE, applied once the authored ramp is fully assembled:
+        // granulation, convection cells, hot patch, limb darkening/reddening
+        // and the chromospheric rim all keep their relative structure and only
+        // the overall hue shifts. Default [1,1,1] leaves the star untouched.
+        sCol = sCol.mul(uStarTint);
         // fuzzy molecular limb (MOLsphere at 1.2-1.4 R*): the silhouette is
         // a gradient ~9% of R wide, never a crisp edge
         const inDisc = smoothstep(1.045, 0.955, rho).mul(face);
@@ -181,8 +186,13 @@ globalThis.makeRedGiant = async function ({ opts = {} } = {}) {
     // photosphere emits almost NO blue — there is nothing for the air to
     // Rayleigh-scatter into a blue sky. Deep red key, red-orange horizon,
     // dim iron-red zenith.
+    // channel ceiling 1.0 (same hue ratios as the original 1.30/1.22-red
+    // bands): tints >1 pushed sun-facing cloud radiance past white before
+    // tone mapping — the whole forward-scatter lobe cored to a white flood
+    // under the giant (a third of the sky). ACES now rolls those clouds
+    // into peach/orange with white only at thin silver-lining edges.
     const paletteTint = opts.paletteTint
-        ?? { zen: [0.72, 0.20, 0.10], hor: [1.30, 0.38, 0.14], sun: [1.22, 0.34, 0.12] };
+        ?? { zen: [0.72, 0.20, 0.10], hor: [1.00, 0.29, 0.11], sun: [1.00, 0.28, 0.10] };
 
     // ---- shield (built in attach — needs the scene) ----
     // gnomonic-plane scale: cells this size read as HEXAGONS (~25 px at 720p
@@ -191,14 +201,43 @@ globalThis.makeRedGiant = async function ({ opts = {} } = {}) {
     const uImpP = [0, 1, 2, 3, 4].map(() => uniform(new T3.Vector3(0, 0, -99)));  // x,y = plane pos, z = birth time
     const uImpA = [0, 1, 2, 3, 4].map(() => uniform(0));
     let shield = null;
+    // Live tint over the star's authored ember ramp. [1,1,1] = the dialed-in
+    // red giant; this multiplies the final surface colour so granulation,
+    // convection cells, the hot patch and limb darkening all keep their
+    // relative structure and only the hue/level shifts.
+    const uStarTint = uniform(new T3.Vector3(
+        ...(opts.starColor ?? [1, 1, 1])));
 
     const sys = {
         celestial, paletteTint, flares: FLARES, flareEnv,
         uniforms: { starDir: uStarDir, starT: uStarT, burstK: uBurstK, impP: uImpP, impA: uImpA },
         shield: null,
+        // Recolour the hex shield live. [r,g,b] in linear HDR — values above 1
+        // are intentional (the lattice is emissive). Default [0.38, 0.95, 1.3]
+        // is the authored cyan. No-op if the scene built with shield:false.
+        setShieldColor(rgb) {
+            if (!sys._uShieldColor || !Array.isArray(rgb) || rgb.length !== 3) return sys;
+            sys._uShieldColor.value.set(+rgb[0], +rgb[1], +rgb[2]);
+            return sys;
+        },
+        // Recolour the STAR itself: [r,g,b] multiplier over the authored
+        // ember ramp (deep red -> orange -> hot yellow-white). [1,1,1] is the
+        // dialed-in red giant; push blue for a hotter star, red for cooler.
+        setStarColor(rgb) {
+            if (!Array.isArray(rgb) || rgb.length !== 3) return sys;
+            uStarTint.value.set(+rgb[0], +rgb[1], +rgb[2]);
+            return sys;
+        },
         attach({ scene, sky }) {
             sys._sky = sky;
+            // Register with the sky so sky.setColors({ shield, star }) can
+            // reach this module without the scene passing it in by hand.
+            if (sky) sky._celestialModule = sys;
             if (opts.shield === false) return sys;
+            // live shield tint — authored cyan by default, see setShieldColor
+            const sc = opts.shieldColor ?? [0.38, 0.95, 1.3];
+            const uShieldColor = uniform(new T3.Vector3(sc[0], sc[1], sc[2]));
+            sys._uShieldColor = uShieldColor;
             const shieldMat = new T3.MeshBasicNodeMaterial({
                 transparent: true, depthWrite: false, side: T3.BackSide, fog: false,
             });
@@ -249,7 +288,10 @@ globalThis.makeRedGiant = async function ({ opts = {} } = {}) {
                 // the view ray crosses the cloud layer
                 const deckP = dir.mul(sky.uniforms.cloudStart.div(tmax(dir.y, 0.06)));
                 const cloudOcc = sky.tslCloudShadow ? sky.tslCloudShadow(deckP, 0.92) : float(1);
-                shieldMat.colorNode = vec3(0.38, 0.95, 1.3).mul(edge.add(cellGlow.mul(1.5)).add(0.15));
+                // Base hex-lattice emissive, times a live tint uniform so the
+                // shield can be recoloured without rebuilding the material.
+                // The authored cyan stays the default; setShieldColor swaps it.
+                shieldMat.colorNode = uShieldColor.mul(edge.add(cellGlow.mul(1.5)).add(0.15));
                 shieldMat.opacityNode = edge.mul(faceK).mul(0.05)
                     .add(cellGlow.mul(edge.mul(0.5).add(0.5)).mul(0.45))
                     .mul(horizon).mul(cloudOcc);

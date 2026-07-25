@@ -290,7 +290,29 @@
                 const tAround = T3.normalize(T3.cross(vec3(1, 0, 0), rHat));       // +u around the ring
                 const nmS = texture(textures.bandNormal, vec2(uvT.x, float(1).sub(uvT.y))).xyz.mul(2).sub(1);
                 const pertN = T3.normalize(tAround.mul(nmS.x).add(vec3(1, 0, 0).mul(nmS.y)).add(nGeo.mul(nmS.z)));
-                relief = T3.clamp(T3.dot(pertN, uSunDirN), float(0), float(1));
+                // LIT-side face-on flatness — the mirror of the night problem
+                // solved below. dot(N, sunDir) loses ALL slope response when
+                // the star sits face-on to a segment, and that is exactly the
+                // geometry of the far arc at LOCAL NIGHT: still fully sunlit,
+                // but seen face-on, so the band reads as a painted map with no
+                // relief. Rake the lit term the same way the night term is
+                // raked, and blend it in by how face-on the light has become
+                // (grazing segments keep the true dot, which is correct there).
+                const nmL = T3.normalize(tAround.mul(nmS.x.mul(2.3)).add(vec3(1, 0, 0).mul(nmS.y.mul(2.3))).add(nGeo.mul(nmS.z)));
+                const sTan = T3.normalize(uSunDirN.sub(nGeo.mul(T3.dot(uSunDirN, nGeo))).add(vec3(0.02, 0, 0.01)));
+                const sRake1 = T3.normalize(sTan.add(nGeo.mul(0.35)));
+                const sRake2 = T3.normalize(T3.cross(nGeo, sTan).add(nGeo.mul(0.35)));
+                const litRake = T3.clamp(
+                    float(0.22).add(T3.dot(nmL, sRake1).mul(1.05)).add(T3.dot(nmL, sRake2).abs().mul(0.45)),
+                    float(0.08), float(1.4));
+                // Never let the rake drop out entirely: a pure face-on test
+                // leaves a band of intermediate angles where the plain dot is
+                // ALREADY flattening but the rake has not faded in — the
+                // "flat at certain lighting angles" gap. Floor the blend so
+                // some slope response is always present, ramping to full when
+                // the light goes face-on.
+                const faceOn = T3.clamp(T3.dot(uSunDirN, nGeo).abs().sub(0.05).mul(1.8).add(0.38), float(0.38), float(1));
+                relief = mix(T3.clamp(T3.dot(pertN, uSunDirN), float(0), float(1)), litRake, faceOn);
                 // NIGHT: the planet illuminant sits near face-on to the visible
                 // arc — dot(pertN, moonDir) ≈ nz ± a few % = noon-flatness all
                 // over again. RAKE the night light instead: project the moon

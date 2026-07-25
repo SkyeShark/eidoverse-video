@@ -1,4 +1,4 @@
-# Eidoverse — Agent Guide
+﻿# Eidoverse — Agent Guide
 
 Eidoverse is a collection of useful tools for **creating and rendering
 three.js videos in Deno, at real-time speeds, with absolutely minimal CPU
@@ -2053,7 +2053,7 @@ const bolt = await globalThis.loadImageTexture(ASSETS.bolt_trace, {});          
 const drop = await globalThis.loadImageTexture(ASSETS.rain_drop, { srgb: true }); // eidoverse/assets/sky/rain_streak.png
 const weather = await globalThis.makeWeatherSystem({ scene, sky, opts: { textures: { bolt, drop } } });
 weather.wrapScene();                       // wet-darkening + puddles + cloud shadows on scene materials
-weather.setWeather('storm', 1);            // clear|drizzle|sunshower|overcast|rain|storm|hurricane|noreaster|darkstorm
+weather.setWeather('storm', 1);            // clear|fair|sunshower|overcast|rain|storm|cyclone|darkstorm
 sun.intensity *= weather.sunDim();
 // per frame: weather.update(t, camera)  — REQUIRED (rain, lightning, greying)
 ```
@@ -2070,6 +2070,116 @@ sun.intensity *= weather.sunDim();
   suppression leaves their env-IBL alone.
 - Scene lights should re-apply per frame during transitions/cycles:
   `sky.applyToLights(...)` then `sun.intensity *= weather.sunDim()`.
+
+### PICK A PACKAGE — the skies are whole looks, not parts bins
+
+Every sky is a **wholesale, dialed-in look-dev package**. Select one; do not
+assemble your own out of the internals. The engine exposes seams (a celestial
+hook, palette tints, cloud phase terms) because the packages are built on
+them — they are not a menu for inventing a fourth world, and recombining
+them is how you get a sky that reads broken.
+
+**Three worlds** — the complete set (names as they appear in Eanpa):
+
+| key | world |
+|---|---|
+| `earth` | Earth |
+| `ringworld` | Orbital / Halo |
+| `shieldworld` | Earth 5129323011 CE (Red Giant) — far-future Earth under the expanded Sun, behind a hex shield |
+
+Two of the three ARE Earth. `shieldworld` is not an alien planet — it is this
+planet, five billion years on. Its star's disc is procedural (live fbm
+granulation, Betelgeuse-class convection cells, an asymmetric hot patch, limb
+darkening that reddens at the rim), so it churns rather than sitting still.
+
+**Four cloud types:** `clear` · `cumulus` · `stratus` · `cirrus`
+**Eight weather states:** `clear` · `fair` · `sunshower` · `overcast` ·
+`rain` · `storm` · `cyclone` · `darkstorm`
+
+`drizzle` and `hurricane` were retired — pre-Eanpa eidoverse stubs that never
+existed in the Eanpa engine and left the list reading as two vocabularies
+bolted together. They and `noreaster` still resolve as legacy aliases
+(`LEGACY_STATES` in `weather_system.js`), so old scenes keep rendering.
+
+### COLOUR OVERRIDES — retint a package, don't rebuild it
+
+These are the ONLY sanctioned way to deviate from an authored look. Each is a
+per-channel multiplier that applies *after* the preset has driven its value,
+so it retints the dialed-in look and everything else (lightning coupling, sky
+response, day-cycle timing) still reads through. Omit one to keep the
+authored colour; `[1, 1, 1]` is the identity.
+
+```js
+// at construction
+const sky = await globalThis.makeSkySystem({ scene, textures: { stars },
+    opts: { hours: 15, clouds: 'cumulus',
+            cloudColor: [1.0, 0.72, 0.55],       // cloud body tint
+            sunColor:   [1.0, 0.85, 0.70] } });  // star light + disc
+const weather = await globalThis.makeWeatherSystem({ scene, sky,
+    opts: { textures: { bolt, drop },
+            rainColor: [1.6, 0.55, 0.35] } });   // streaks + splashes
+
+// or live, any time
+sky.setColors({ cloud: [...], sun: [...], star: [...], shield: [...] });
+weather.setColors({ rain: [...] });
+sky.getColors(); weather.getColors();            // read current multipliers
+```
+
+- `rainColor` — precipitation streaks and splashes.
+- `cloudColor` — cloud body lighting.
+- `sunColor` — the star's light and disc.
+- `star` — **shieldworld only**: retints the red giant's own surface. The
+  granulation, convection cells, hot patch and limb keep their structure;
+  only the hue moves. Push blue for a hotter star, red for cooler.
+- `shield` — **shieldworld only**: the hex shield lattice. Values above 1 are
+  intentional, it is emissive; the authored cyan is `[0.38, 0.95, 1.3]`.
+
+`star` and `shield` route to the celestial module, which registers itself
+during `rg.attach({ scene, sky })` — so **call them after attach**, or they
+silently no-op.
+
+### Offline-render gotchas (these cost a full day; don't rediscover them)
+
+- **Call `sky.prepareOptimizedCaches(renderer, camera)` EVERY FRAME** when
+  `densityCache`/`lightCache` are on. It self-throttles internally (0.18 s,
+  plus on camera/sun movement), so it is cheap. The browser host does this in
+  `cloud_spatial.js`; nothing does it for you offline. Without it the cloud
+  light cache stays pinned to whatever camera and sun existed when it was
+  last built, and a moving camera leaves the stale cache volume's edge drawn
+  as a **hard straight line across the clouds** — lit one side, flat unlit
+  mass the other.
+- **Bake the environment ONCE in setup, never on a timer.** `bakeEnv`
+  internally force-rebuilds that same cloud light cache, so a periodic
+  re-bake makes cloud lighting jump in visible STEPS at the re-bake interval.
+  It is also expensive: deleting a 2 s loop took one scene 37 → 60 fps.
+- **`metalness: 1` has zero diffuse response.** Ambient and hemisphere lights
+  cannot touch it; `scene.environment` is its only light. A scene that never
+  calls `bakeEnv` renders its metals BLACK at night. If night looks "solid
+  black", check the env bake before touching a single light.
+- **The density cache corrupts on the Deno-wgpu backend.** The fragment
+  stage's reads of the density `Data3DTexture` drift over a run (pristine
+  early, straight-edged corrupt regions from t≈4 s) while a compute-stage
+  readback of the same object stays exact. Symptom is again a hard-edged flat
+  cloud mass. `densityCache: undefined` fixes it; keep `lightCache` — that is
+  the expensive one (it replaces a 20-tap sun march per sample), so you keep
+  nearly all of the balanced tier's speed.
+- **Some scenes eval a `work/` COPY of an engine module**, not the engine
+  file. `work/skylab/redgiant/redgiant.js` was a stale fork of
+  `eidoverse/redgiant.js`, so engine-side edits rendered as no-ops with no
+  error. Check which path a scene actually evals before debugging further.
+- **Uniform types are not interchangeable.** `u.cloudLightColor.value` is a
+  `Vector3`, not a `Color`. `Vector3.multiply(new THREE.Color(...))` reads
+  `.x/.y/.z` off an object that only has `.r/.g/.b` → `NaN` on every channel
+  → black clouds, no error thrown.
+- Verifying a change: probe renders lie in specific ways. A config named
+  `*_probe` emits `*_probe_probe1.png`, so copying the wrong file gives you
+  stale frames with identical stats. The `cycle` camera blends yaw
+  frame-to-frame and is STATEFUL — `T_OFFSET` does not reproduce a mid-cycle
+  camera; render from t=0 and seek with `-ss`. Always confirm from the
+  DELIVERED mp4, and A/B with `ffmpeg -lavfi psnr` before believing your own
+  eyes: an "obvious" fix that returns `inf` changed nothing at all, and a
+  control render of the SAME config tells you the noise floor (~57-59 dB
+  here) so you can tell a real difference from encoder jitter.
 
 **`sdf_raymarch_loader`** — raymarched 3D objects PLACED in the scene (at a
 position, occluding/occluded by other geometry — unlike the screenspace
