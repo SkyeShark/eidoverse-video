@@ -386,11 +386,21 @@
             // 8-bit chroma quantises away. Expanding chroma about the term's
             // own luma restores the hue separation without touching contrast
             // or brightness. opts.nightSat overrides; 1 = off.
-            const nSat = float(Number(_envRG('RINGNSAT') ?? opts.nightSat ?? 1.75));
+            const nSat = float(Number(_envRG('RINGNSAT') ?? opts.nightSat ?? 1.3));
             let nBase = albedoArc.mul(vec3(nt[0], nt[1], nt[2]));
             const nLum = T3.dot(nBase, vec3(0.2126, 0.7152, 0.0722));
             nBase = mix(vec3(nLum, nLum, nLum), nBase, nSat).max(vec3(0));
-            const nightSide = nBase.mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
+            // 0.60 -> 1.20. THE dominant cause of the washed-out night arc, and
+            // it is not a colour bug: measured local detail was already fine
+            // (high-pass energy 5.16 at night vs 5.44 by day, i.e. equal), but
+            // the arc sat at mean luma 32/255 against day's 139 — deep in the
+            // ACES toe, where the curve compresses AND desaturates. Chroma
+            // range therefore grows SUPERLINEARLY as the level rises: V spread
+            // 35 -> 52 -> 67 at levels 0.60 / 1.20 / 2.00. Lifting out of the
+            // toe is what restores the terrain's hue separation; the small
+            // nSat above only tops it up. opts.nightLevel / RINGNLEV override.
+            const nLev = float(Number(_envRG('RINGNLEV') ?? opts.nightLevel ?? 1.20));
+            const nightSide = nBase.mul(nightRelief).mul(nightAO).mul(shine).mul(nLev).mul(nightVis);
             // strong graze response: at a segment's local morning/evening the
             // ridges catch the sun and the valleys drop out — the flat-at-noon
             // residue is carried by the baked AO above
