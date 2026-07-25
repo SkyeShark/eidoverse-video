@@ -218,6 +218,7 @@
         const bandMat = new T3.MeshStandardNodeMaterial({ roughness: 1, metalness: 0, fog: false });
         bandMat.userData.keepEnv = true;          // sky element — keeps the baked sky env under reflection-hook suppression
         let sysArcLight = null;                   // set inside the band block (terminator uniforms)
+        let sysBandLayer = null;                  // RINGLIT: layer the band + its sun live on
         // `lightweight` preserves moving water in the realtime skybox with two
         // filtered reads from the already-resident band normal. `full` retains
         // the older procedural value-noise field for offline/lookdev callers.
@@ -375,7 +376,25 @@
             // Rec.709 luma (0.343) with blue pulled back to 1.22x red, so the
             // arc keeps a moonlit cast while the albedo's chroma survives.
             // opts.nightTint overrides.
-            const nt = opts.nightTint ?? [0.321, 0.345, 0.392];
+            // NIGHT TINT = the PLANETSHINE colour. The arc's shaded side is lit
+            // by the same body that lights the local ground — so it must be the
+            // same hue, or the two disagree about what is in the sky. Derived
+            // from opts.planetShineColor at the authored night LUMINANCE
+            // (Rec.709 0.343), so the scene states the colour once and both
+            // the ground light and the band inherit it.
+            //
+            // The old default was cool (blue > red), inherited from Earth-moon
+            // assumptions. A body whose albedo is orange mineral reflects a
+            // WARM near-white, not cool blue — a grey moon reflects cool light
+            // because it is grey, not because moonlight is intrinsically blue.
+            const PS = opts.planetShineColor;
+            let nt = opts.nightTint;
+            if (!nt && Array.isArray(PS) && PS.length === 3) {
+                const L = 0.2126 * PS[0] + 0.7152 * PS[1] + 0.0722 * PS[2];
+                const k = 0.343 / Math.max(L, 1e-4);     // hold the authored night luma
+                nt = [PS[0] * k, PS[1] * k, PS[2] * k];
+            }
+            nt = nt ?? [0.369, 0.339, 0.302];   // warm default, same 0.343 luma
             // SATURATION RECOVERY. Measured on an arc-only crop, the night side
             // has healthy CONTRAST (Y spread 112 vs day's 103) but its chroma
             // range collapses: V (red<->green) spans 39 by day and only 20 at
@@ -405,17 +424,55 @@
             // ridges catch the sun and the valleys drop out — the flat-at-noon
             // residue is carried by the baked AO above
             const litArc = albedoArc.mul(A.warmT).mul(A.litCol).mul(float(0.22).add(relief.mul(1.05)));
-            bandMat.colorNode = vec3(0);
+            // ---- RINGLIT=1: REAL LIGHT PATH (experimental) -----------------
+            // The default path below hands the band ZERO albedo and paints
+            // everything through emissiveNode. That opts the surface out of
+            // GTAO, out of specular/Fresnel shape, and out of any diffuse
+            // response to normalNode — and it lays two SOLID-colour terms
+            // (A.insc, and the foot mix toward uHazeCol) over detail that does
+            // carry albedo, which flattens it the way a flat emissive map over
+            // a PBR material always does.
+            //
+            // None of that is required by the geometry. The analytic dSun IS
+            // N.L against the inner-surface normal, verified: the ring at
+            // theta=0 is tangent to the ground so its normal IS the ground
+            // normal and it dims identically (0.6428/0.6428 at +40 deg,
+            // -0.6428/-0.6428 at -40); and overhead-at-night equals
+            // underfoot-at-day exactly (0.8192 both at |55| deg), which is the
+            // "flip the scene and it's daytime" symmetry. So a real
+            // directional light reproduces the wanted gradient for free, and
+            // the terminator sweeps along the arc as the sun's elevation
+            // changes through the cycle.
+            //
+            // Real albedo, so the surface takes light, AO and specular. The
+            // authored wide terminator is preserved as an irradiance SHAPE on
+            // top (raw N.L at -35 deg only lights theta>=150; the
+            // smoothstep(-0.22, 0.30) spreads it much further down the arc).
+            const RING_LIT = _envRG('RINGLIT') === '1' || opts.litBand === true;
+            if (RING_LIT) {
+                bandMat.colorNode = albedoArc.mul(A.warmT);
+                bandMat.aoNode = nightAO;
+            } else {
+                bandMat.colorNode = vec3(0);
+            }
             // animated water shimmer survives the day-cycle dimming: added
             // AFTER the air/exposure terms; lit seas glint by sun, night seas
             // glint by planet-shine (sun glints ride the day gain so the
             // night Arch doesn't glitter at full noon strength)
             const sparkle = k.mul(shim.pow(8)).mul(float(0.55))
                 .mul(A.litK.mul(mix(float(0.35), float(1), A.dayF)).add(nightVis.mul(0.5)));
-            const arcOut = litArc.mul(A.litK).mul(A.trans)
-                .add(nightSide.mul(float(1).sub(A.litK)).mul(A.trans))
-                .add(A.insc.mul(float(0.68)))
-                .add(sparkle);
+            // In the lit path the diffuse response is REAL, so emissive must
+            // stop duplicating it — otherwise the surface is lit twice. Only
+            // genuinely self-emitting terms remain (water glints), plus the
+            // atmospheric inscatter, which is kept but scaled down hard: it is
+            // a solid haze colour with no albedo in it, and at full strength
+            // over a now-lit surface it is exactly the flat-wash term.
+            const arcOut = RING_LIT
+                ? sparkle.add(A.insc.mul(float(0.18)))
+                : litArc.mul(A.litK).mul(A.trans)
+                    .add(nightSide.mul(float(1).sub(A.litK)).mul(A.trans))
+                    .add(A.insc.mul(float(0.68)))
+                    .add(sparkle);
             // RINGFOOT0=1: debug — the foot veil assumes a GROUND camera (ray
             // near horizontal = band foot in local haze); from an exterior
             // camera it whitewashes the whole lower arc and impersonates a
@@ -736,6 +793,30 @@
 
         group.add(ringClouds);   // built origin-centered — no recenter needed
 
+        // ---- BAND SUN (RINGLIT path only) -------------------------------
+        // The band needs the sun at FULL intensity while the local scene keeps
+        // its dimmed/moonlit one. Not so the band stays bright — the near band
+        // must and does go dark, because at theta=0 its normal is the ground
+        // normal and N.L is identical. It needs full intensity so that N.L has
+        // real SUNLIGHT to work with where the arc turns over at the top.
+        //
+        // An undimmed sun cannot simply be left on for the whole scene: local
+        // geometry with non-upward normals (the monoliths' undersides) would be
+        // lit from below at night, which the ground should be occluding. Hence
+        // a dedicated light restricted to the band's layer.
+        let bandSun = null;
+        if (_envRG('RINGLIT') === '1' || opts.litBand === true) {
+            const BAND_LAYER = opts.bandLayer ?? 2;
+            bandSun = new T3.DirectionalLight(0xffffff, opts.bandSunIntensity ?? 3.0);
+            bandSun.castShadow = false;      // a +-50 m shadow map cannot span a 10 km mesh
+            bandSun.layers.set(BAND_LAYER);  // illuminates ONLY the band layer
+            group.add(bandSun);
+            for (const m of [terrain, walls]) {
+                if (m) { m.layers.set(BAND_LAYER); m.receiveShadow = false; }
+            }
+            sysBandLayer = BAND_LAYER;
+        }
+
         const sys = {
             group, band: terrain, walls, clouds: ringClouds, cloudUniforms: cu,
             arcLight: sysArcLight,
@@ -756,6 +837,16 @@
                         sysArcLight.sunElev.value = sk.sunDir.y;
                     }
                     if (sk?.moonDir) sysArcLight.moonDir.value.copy(sk.moonDir).normalize();
+                    // RINGLIT: drive the band's own sun from the TRUE sun
+                    // direction, including below the local horizon — that is
+                    // what lights the arc's upper reaches while the ground and
+                    // the arc's foot are correctly dark. Position is a
+                    // direction only (DirectionalLight aims at its target).
+                    if (bandSun && sk?.sunDir) {
+                        bandSun.position.copy(sk.sunDir).multiplyScalar(20000);
+                        bandSun.target.position.set(0, 0, 0);
+                        bandSun.target.updateMatrixWorld();
+                    }
                     // haze + sun color follow the LOCAL palette — the arc's
                     // radiance tracks the same sun that lights the ground
                     const pal = sk?.state?.palette;
@@ -821,6 +912,11 @@
                     }
                 }
             },
+            // RINGLIT: the scene's camera must enable this layer or the band
+            // vanishes (it is moved OFF layer 0 so the local dimmed sun cannot
+            // reach it). Scenes do: if (ring.bandLayer != null)
+            // camera.layers.enable(ring.bandLayer)
+            get bandLayer() { return sysBandLayer; },
             info: {
                 radius: R_REF,
                 tile,
