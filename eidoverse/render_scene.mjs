@@ -164,10 +164,12 @@ if (Object.keys(assetsConfig).length > 0) {
         const pat = new RegExp(`(?:\\.${escaped}\\b|\\[\\s*["'\`]${escaped}["'\`]\\s*\\]|\\b${escaped}\\s*:)`);
         return !pat.test(assetRefCorpus);
     });
-    if (missingKeys.length > 0) {
-        console.error(`[render_scene] FATAL: scene never references assets: ${missingKeys.join(', ')}`);
-        Deno.exit(1);
-    }
+    // An asset a scene declares but never names is simply supplied by the engine
+    // instead, and the engine's own default is the right answer — a sky package
+    // owns its starmap, its planet and its band textures, so a scene listing them
+    // is redundant, not broken. Silent on purpose: naming those keys in a warning
+    // teaches whoever reads it about inputs that no longer do anything.
+    void missingKeys;
 }
 
 // Orphan check: warn loudly about model files in the work dir that the

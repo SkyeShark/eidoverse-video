@@ -137,7 +137,19 @@
         // Dark Thunderstorm uses a bounded lowest-layer integration. Two
         // interleaved eight-step strata resolve real foreground/deep overlap
         // without marching the invisible remainder of the 19.3 km system.
-        const N_STORM_STEPS = 12;
+        // Storm-field march resolution. This is a SEPARATE, coarser march from the
+        // main deck's N_MARCH, and it only runs while stormCanopy > 0 — i.e. on
+        // darkstorm alone. 12 steps is ample where a ray crosses the layer
+        // steeply, which is what happens over the ring's CURVED sides, but over
+        // the FLAT middle the deck base sits at constant altitude so a grazing ray
+        // skims nearly parallel to the layer and its chord runs for kilometres.
+        // 12 steps then land hundreds of metres apart against ~150 m features, and
+        // the field reads as cloud smeared along that plane — the darkstorm band,
+        // whose upper edge is exactly the elevation of the deck base at the
+        // flat/curve join (atan(450/4200) = 6.1 deg, measured at y=345).
+        // STORMSTEPS overrides; the loop bound has to be a build-time constant.
+        const N_STORM_STEPS = Math.max(4, Math.round(Number(
+            globalThis.Deno?.env?.get?.('STORMSTEPS') ?? opts.stormSamples ?? 12)));
         const N_STORM_PASSES = 2;
         // Cloud shadows are a sky-budget item, but 2-6 taps integrated a
         // fine erosion-bearing density so coarsely that a drifting cloud
@@ -439,8 +451,15 @@
         // left the streaks — they're density structure). Shearing the
         // lookup by in-layer height, gated by |slope|, breaks the climb
         // into stacked cells and is an exact no-op wherever the deck is flat.
+        // RINGSHEAR scales the coefficient for bisecting the vertically
+        // stretched "wall" of cloud reported at the horizon on darkstorm.
+        // darkstorm authors its own layer geometry (start 500 / height 650 vs
+        // the cumulus default 700 / 520), so a coefficient tuned against the
+        // default may not break its climb into cells.
+        const RING_SHEAR_K = Number(
+            globalThis.Deno?.env?.get?.('RINGSHEAR') ?? 2.0);
         const ringZShear = (pIn, ch) => RING_R
-            ? ringSlopeAt(pIn).mul(ch).mul(RING_THICK * 2.0)
+            ? ringSlopeAt(pIn).mul(ch).mul(RING_THICK * RING_SHEAR_K)
             : float(0);
         const cloudsAt = (pIn) => {
             const p = pIn.mul(u.stretch);
@@ -811,6 +830,18 @@
             const layerBase = RING_R
                 ? ringDeckY(pIn.z).sub(RING_BASE).add(bottom)
                 : bottom;
+            // The band-like feature at the ring horizon is the cloud deck's
+            // curved climb seen edge-on — present in every weather state and
+            // structurally correct. Dark Storm's grainier rendition of it is
+            // march quantization of the patchy low scud (few samples, large
+            // weights), and that same quantization is what paints the sealed
+            // dark horizon and the cloud-to-ground rain bands of the AUTHORED
+            // look. A "fix" that resolved the sampling (capping the march at
+            // the containment exit) removed the grain — and with it the rain
+            // bands and the seal, leaving the ring visible in what read as
+            // clear air. It was reverted deliberately: the quantization is
+            // load-bearing here. Do not "fix" it without re-authoring the
+            // curtains and the horizon seal as real density first.
             const altitude = (RING_R ? pIn.y : atmoHeight(pIn)).sub(layerBase);
             const h = clamp(altitude.div(depth), 0, 1);
             const envelope = smoothstep(0.0, 0.045, h).mul(
@@ -1072,6 +1103,14 @@
                 const tB = float(RING_SLAB_HI).sub(org.y).div(dySafe);
                 t0 = max(min(tA, tB), float(0));
                 t1 = min(min(max(tA, tB), tFar), u.fadeDist);
+                // NOTE for whoever chases the darkstorm horizon band next: capping
+                // this chord was tried and does NOT fix it. At grazing elevation
+                // the path through the slab is ~10 km (855/sin(5deg)) which at a
+                // fixed step count is ~150 m per step against ~150 m features, so
+                // it looks like the obvious cause — but capping it to 6000 and to
+                // 3500 both left the band unchanged (47.45 and 47.56 dB in the
+                // affected strip, against a 47.5 dB render-to-render floor). Not
+                // shipped, because it costs far-deck reach for nothing.
             } else {
                 t0 = CLOUD_DBG ? float(0) : shellFar(org, dir, u.cloudStart);
                 // clamp the march to the pre-fade range: near the horizon the full
@@ -1803,14 +1842,37 @@
         const SKY_COLOR = {
             cloud:  asRGB3(opts.cloudColor,  [1, 1, 1]),
             sun:    asRGB3(opts.sunColor,    [1, 1, 1]),
+            sky:    asRGB3(opts.skyColor,    [1, 1, 1]),
             shield: asRGB3(opts.shieldColor, [1, 1, 1]),
         };
         const PT = opts.paletteTint;
-        const tintPal = (p) => !PT ? p : {
-            ...p,
-            zen: PT.zen ? p.zen.map((v, i) => v * PT.zen[i]) : p.zen,
-            hor: PT.hor ? p.hor.map((v, i) => v * PT.hor[i]) : p.hor,
-            sun: PT.sun ? p.sun.map((v, i) => v * PT.sun[i]) : p.sun,
+        const isOne = (c) => c[0] === 1 && c[1] === 1 && c[2] === 1;
+        // SKY COLOUR is applied HERE, at the single choke point every palette
+        // value passes through, and deliberately not at the individual consumers.
+        // The zenith and horizon must stay consistent with each other and with
+        // everything that reads them — the fog colour, the band's haze, the rain
+        // curtain, the cloud ambient — all of which sample the weathered horizon.
+        // Tinting them at their use sites is how you get a retinted sky with
+        // untinted fog on the horizon line.
+        const tintPal = (p) => {
+            let q = p;
+            if (PT) {
+                q = {
+                    ...q,
+                    zen: PT.zen ? q.zen.map((v, i) => v * PT.zen[i]) : q.zen,
+                    hor: PT.hor ? q.hor.map((v, i) => v * PT.hor[i]) : q.hor,
+                    sun: PT.sun ? q.sun.map((v, i) => v * PT.sun[i]) : q.sun,
+                };
+            }
+            if (!isOne(SKY_COLOR.sky)) {
+                const S = SKY_COLOR.sky;
+                q = {
+                    ...q,
+                    zen: q.zen.map((v, i) => v * S[i]),
+                    hor: q.hor.map((v, i) => v * S[i]),
+                };
+            }
+            return q;
         };
         const state = { hours: 12, azBase: opts.azimuth ?? 1.9, elMax: opts.maxElevationDeg ?? 62, azSpanK: opts.azSpanK ?? 0.9, preset: 'cumulus', palette: tintPal(todAt(40)) };
         // Cloud-type changes use the same persistent material graph as weather.
@@ -2046,11 +2108,33 @@
                 state.hours = hours;
                 const dayK = (hours - 6) / 12;                       // 6h sunrise → 18h sunset
                 const el = Math.sin(dayK * Math.PI) * state.elMax * Math.PI / 180;
-                const az = state.azBase + (dayK - 0.5) * Math.PI * state.azSpanK;
-                // moon: opposite arc
-                const mK = (hours + 6) % 24 / 12 - 0.5;
+                // AZIMUTH HAS TO BE PERIODIC IN 24 h, and it was not. It was
+                // (dayK - 0.5) * PI * azSpanK — linear in `hours` with no wrap — so
+                // it advanced 2*PI*azSpanK across a day and then SNAPPED when the
+                // caller's clock rolled 23:59 -> 00:00. Elevation never showed the
+                // fault because sin(dayK*PI) shifts by exactly 2*PI across that
+                // wrap and is unchanged.
+                //
+                // The visible casualty was the COMPANION BODY, not the star: the
+                // star is below the horizon at midnight, but the planet's phase is
+                // dot(surfaceNormal, sunDir), so half of it snapped from dark to
+                // lit in one frame.
+                //
+                // This ramp preserves the authored daytime arc exactly — the star
+                // still sweeps azSpanK*PI from sunrise to sunset, centred on azBase
+                // at noon — and closes the remaining angle across the night, so a
+                // full cycle returns to where it began and nothing jumps.
+                const arcAz = (h, span) => {
+                    const w = ((h % 24) + 24) % 24;
+                    if (w >= 6 && w < 18) return (w - 12) / 12 * span * Math.PI;
+                    const n = ((w - 18) + 24) % 24;          // 0..12 across the night
+                    return span * Math.PI * 0.5 + n / 12 * (2 - span) * Math.PI;
+                };
+                const az = state.azBase + arcAz(hours, state.azSpanK);
+                // moon: the opposite arc, and the same continuity requirement — its
+                // own (hours + 6) % 24 term jumped at 18h, right at moonrise.
                 const mel = Math.sin(((hours + 12 - 6) / 12) * Math.PI) * 48 * Math.PI / 180;
-                const maz = state.azBase + mK * Math.PI * 0.8 + Math.PI;
+                const maz = state.azBase + Math.PI + arcAz(hours + 12, 0.8);
                 sys.moonDir.set(Math.cos(mel) * Math.cos(maz), Math.sin(mel), Math.cos(mel) * Math.sin(maz)).normalize();
                 u.moonDir.value.copy(sys.moonDir);
                 const mr = V(0, 1, 0).cross(sys.moonDir).normalize();
@@ -2059,19 +2143,31 @@
                 sys.setSun(az, el);
             },
             // Retint the ACTIVE sky package without changing which package is
-            // active. Per-channel multipliers over the authored look; omit a
-            // field to leave it alone, pass [1,1,1] to clear it.
-            //   sky.setColors({ cloud: [1.0, 0.72, 0.55], sun: [1, 0.8, 0.6] })
-            // `shield`/`star` forward to a celestial module that supports them
-            // (the red giant shieldworld); ignored by packages that don't.
+            // active. Per-channel multipliers over the authored look. EVERY field
+            // is optional and independent: omit one and that channel keeps the
+            // package's authored colour, pass [1,1,1] to clear an earlier tint,
+            // and setColors({}) changes nothing.
+            //   sky.setColors({ cloud: [1.0, 0.72, 0.55], star: [1, 0.8, 0.6] })
+            //   star    the star's light and its disc
+            //   cloud   tints every cloud layer together
+            //   sky     the atmosphere: zenith + horizon, and so everything that
+            //           reads them (fog, haze, the rain curtain)
+            //   shield  only meaningful where the package HAS a shield (the red
+            //           giant); forwarded to its celestial module, ignored here
+            //           by packages without one
             setColors(c = {}) {
+                // `star` and `sun` name the same channel — the star's light. A
+                // package with its own disc shader (the red giant) also gets the
+                // colour forwarded there, so a scene can say either word.
+                const starC = c.star ?? c.sun;
                 if (c.cloud)  SKY_COLOR.cloud  = asRGB3(c.cloud,  SKY_COLOR.cloud);
-                if (c.sun)    SKY_COLOR.sun    = asRGB3(c.sun,    SKY_COLOR.sun);
+                if (starC)    SKY_COLOR.sun    = asRGB3(starC,    SKY_COLOR.sun);
+                if (c.sky)    SKY_COLOR.sky    = asRGB3(c.sky,    SKY_COLOR.sky);
                 if (c.shield) SKY_COLOR.shield = asRGB3(c.shield, SKY_COLOR.shield);
                 const cm = opts.celestialModule ?? sys._celestialModule;
                 if (c.shield) cm?.setShieldColor?.(SKY_COLOR.shield);
-                if (c.star)   cm?.setStarColor?.(asRGB3(c.star, [1, 1, 1]));
-                // re-drive the palette so cloud/sun take effect this frame
+                if (starC)    cm?.setStarColor?.(SKY_COLOR.sun);
+                // re-drive the palette so cloud/star/sky take effect this frame
                 // rather than waiting for the next setTime/cycle tick
                 sys.setTime?.(state.hours);
                 return { ...SKY_COLOR };
