@@ -114,6 +114,13 @@
     const lightningCadenceFor = (paletteName = 'standard') => (
         LIGHTNING_CADENCE[paletteName] ?? LIGHTNING_CADENCE.standard
     );
+    // GAP SCALE — the cadence above is authored for a realtime world you
+    // stand around in, where 16-38 s of dark between strikes is the point.
+    // A produced clip is 15-90 s long, so at that spacing most videos catch
+    // one strike or none. Everything here is scaled to fit that runtime:
+    // storms read as storms within a shot. Raise toward 1 for real-time
+    // pacing on a long piece — makeWeatherSystem({ opts: { lightningGapScale: 1 } }).
+    let LIGHTNING_GAP_SCALE = 0.42;
     const lightningEventGapAt = (eventIndex, paletteName = 'standard', level = 1) => {
         const cadence = lightningCadenceFor(paletteName);
         const safeLevel = Math.max(0.01, Math.min(1, Number(level) || 0));
@@ -125,7 +132,8 @@
         );
         const spread = cadence.maxGapSeconds - cadence.minGapSeconds;
         return (cadence.minGapSeconds
-            + jsHash(eventIndex * 47.17 + 19.73) * spread) * rarityScale;
+            + jsHash(eventIndex * 47.17 + 19.73) * spread)
+            * rarityScale * LIGHTNING_GAP_SCALE;
     };
     const lightningInitialEventGapAt = (eventIndex, paletteName = 'standard', level = 1) => {
         const cadence = lightningCadenceFor(paletteName);
@@ -133,9 +141,10 @@
             || !Number.isFinite(cadence.initialGapMaxSeconds)) {
             return lightningEventGapAt(eventIndex, paletteName, level);
         }
-        return cadence.initialGapMinSeconds
+        return (cadence.initialGapMinSeconds
             + jsHash(eventIndex * 53.71 + 41.9)
-                * (cadence.initialGapMaxSeconds - cadence.initialGapMinSeconds);
+                * (cadence.initialGapMaxSeconds - cadence.initialGapMinSeconds))
+            * LIGHTNING_GAP_SCALE;
     };
     const lightningStrokePlanAt = (eventIndex, paletteName = 'standard') => {
         const cadence = lightningCadenceFor(paletteName);
@@ -285,6 +294,11 @@
             sun:    asRGB(opts.sunColor,    [1, 1, 1]),
             shield: asRGB(opts.shieldColor, [1, 1, 1]),
         };
+        // 1 = the authored realtime cadence (16-38 s between events); the
+        // default compresses that to fit a produced clip's runtime.
+        if (Number.isFinite(opts.lightningGapScale)) {
+            LIGHTNING_GAP_SCALE = Math.max(0.05, Math.min(4, Number(opts.lightningGapScale)));
+        }
         const N_RAIN = opts.rainCount ?? 16000;
         const RAD = opts.rainRadius ?? 45;     // world tile half-extent (m)
         const HGT = opts.rainHeight ?? 24;     // vertical recycle height (m)
