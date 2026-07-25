@@ -137,7 +137,7 @@
             // night side (which is scaled right down), and the arc reads as a
             // smooth blue wash with the normal-map detail visible but drowned.
             // Daytime is unaffected: there litArc dwarfs the veil anyway.
-            const inscNight = mx(f(0.28), f(1), dayF);
+            const inscNight = mx(f(Number(globalThis.Deno?.env?.get?.('RINGINSCN') ?? 0.28)), f(1), dayF);
             const insc = uHazeCol.mul(f(1).sub(trans0)).mul(veil).mul(rainT)
                 .add(uHazeCol.mul(f(1).sub(rainT)).mul(veil).mul(f(0.55))
                     .mul(f(1.08).sub(curt.mul(0.22))))
@@ -364,7 +364,15 @@
             // night side, that brightness has to come from the term that
             // actually RESPONDS to relief, or the arc goes flat-black again
             // (the failure the shine floor above was added to prevent).
-            const nightSide = albedoArc.mul(vec3(0.30, 0.34, 0.50)).mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
+            // NIGHT TINT — cool, but nowhere near as saturated as it was.
+            // (0.30, 0.34, 0.50) put blue at 1.67x red, which overwhelmed the
+            // terrain's own greens and browns: the relief resolved fine but
+            // every biome read as the same uniform blue. This is the same
+            // Rec.709 luma (0.343) with blue pulled back to 1.22x red, so the
+            // arc keeps a moonlit cast while the albedo's chroma survives.
+            // opts.nightTint overrides.
+            const nt = opts.nightTint ?? [0.321, 0.345, 0.392];
+            const nightSide = albedoArc.mul(vec3(nt[0], nt[1], nt[2])).mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
             // strong graze response: at a segment's local morning/evening the
             // ridges catch the sun and the valleys drop out — the flat-at-noon
             // residue is carried by the baked AO above
@@ -506,13 +514,132 @@
         // below), but the unused material objects need no renderer lifetime.
         for (const material of sourceMaterials) material.dispose?.();
 
+        // debug gates: RINGNOCLOUD / RINGFOGWALL / RINGRAINWALL — declared here
+        // because the cloud sheet below is the first consumer
+        const _envRG = (k) => globalThis.Deno?.env?.get?.(k);
+
+        // ---- RING CLOUD LAYER: animated 2D procedural cloud sheet floating
+        // above the band ("up" = toward the ring axis, so SMALLER radius).
+        // Look is driven by the weather/sky state from update() — coverage per
+        // weather name, storm greying, palette tint, wind-matched drift.
+        const cloudH = opts.cloudHeight ?? 60;
+        const cu = {
+            cover: uniform(0.45), grey: uniform(0), dens: uniform(1), rad: uniform(1),
+            tintSun: uniform(new T3.Vector3(1, 0.97, 0.9)),
+            tintAmb: uniform(new T3.Vector3(0.72, 0.78, 0.9)),
+            wind: uniform(new T3.Vector2(0.0035, 0.0008)),
+        };
+        const cloudGeo = new T3.CylinderGeometry(R_REF - cloudH, R_REF - cloudH, 940, 256, 1, true);
+        cloudGeo.rotateZ(Math.PI / 2);  // cylinder axis Y → ring axis X
+        // Standard-family, NOT Basic: with shadow maps enabled, a Basic sheet's
+        // pipeline compiles to an EMPTY fragment output struct — Dawn tolerates
+        // it, Deno's naga rejects it ("Structure types must have at least one
+        // member") and the sheet silently dies. Standard is proven under
+        // shadows here; the clouds stay visually unlit by routing colour
+        // through emissiveNode.
+        const cloudMat = new T3.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, side: T3.FrontSide, fog: false, roughness: 1, metalness: 0 });
+        {
+            // SATELLITE-IMAGERY clouds: the ring is a super-Earth-scale
+            // megastructure, so the sheet reads like weather systems seen from
+            // orbit — km-scale masses, domain-warped filament detail,
+            // isotropic cells (v cells = u cells / 33.4, the band's aspect).
+            const cuv = uv();
+            const h2c = (pp) => {                     // sin-free hash21 (Hoskins)
+                const a = fract(vec3(pp.x, pp.y, pp.x).mul(0.1031));
+                const d = T3.dot(a, vec3(a.y, a.z, a.x).add(33.33));
+                const b = a.add(d);
+                return fract(b.x.add(b.y).mul(b.z));
+            };
+            const vnc = (pp, rep) => {                // wrap-safe: lattice mod rep
+                const i = T3.mod(floor(pp), rep), i1 = T3.mod(floor(pp).add(vec2(1, 0)), rep);
+                const i2 = T3.mod(floor(pp).add(vec2(0, 1)), rep), i3 = T3.mod(floor(pp).add(vec2(1, 1)), rep);
+                const f = fract(pp);
+                const s = f.mul(f).mul(float(3).sub(f.mul(2)));
+                return mix(mix(h2c(i), h2c(i1), s.x), mix(h2c(i2), h2c(i3), s.x), s.y);
+            };
+            const drift = cu.wind.mul(tU);
+            // octave sampler: N integer cells around (exact cylinder wrap),
+            // isotropic v, wind drift, optional warp offset
+            const oct = (N, w, dir, warpOff) => {
+                const sc = vec2(N, N / 33.4);
+                let pp = cuv.add(drift.mul(dir)).mul(sc);
+                if (warpOff) pp = pp.add(warpOff.mul(N * 0.012));
+                return vnc(pp, vec2(N, 1e6)).mul(w);
+            };
+            // macro weather systems (~5 km) + a coarse vec2 warp field that
+            // swirls the filament octaves (the satellite-swirl look)
+            const sysM = oct(6, 1, 1);
+            const wX = oct(10, 1, 0.6).sub(0.5), wY = oct(10, 1, -0.7).sub(0.5);
+            const warp = vec2(wX, wY);
+            const fil = oct(40, 0.38, 1, warp).add(oct(80, 0.26, -0.8, warp))
+                .add(oct(160, 0.19, 1.3, warp)).add(oct(320, 0.12, -1.1, warp))
+                .add(oct(640, 0.07, 0.9, warp));
+            const field = sysM.mul(0.62).add(fil.mul(0.55));   // macro systems lead — READABLE cloud masses
+            // threshold rides coverage so low-cover states leave most of the
+            // band clear (distinct systems), high-cover states close over.
+            // Field distribution: mean ~0.59, realistic max ~0.94.
+            const th = float(0.88).sub(cu.cover.mul(0.55));
+            const cov = smoothstep(th, th.add(0.15), field);   // tight window: defined masses, not gauze
+            // soft edges at the strip borders so clouds never touch the walls
+            const edge = smoothstep(0.02, 0.15, cuv.y).mul(smoothstep(0.98, 0.85, cuv.y));
+            const bright = mix(cu.tintSun, cu.tintAmb, smoothstep(0.2, 0.9, field)); // dense cores shade toward ambient
+            cloudMat.colorNode = vec3(0);   // no lit response — self-coloured via emissive
+            // ring clouds follow the ARC's day/night + air: night-side systems
+            // dim toward moon-grey, and the whole sheet is seen through the
+            // local atmosphere like the band beneath it
+            const Ac = arcShade();
+            // cu.rad is the sky's own cloudRadiance — the same readability
+            // multiplier the volumetric march is dimmed by (clear 1.0,
+            // overcast 0.45, storm 0.18, cyclone 0.10). Using it instead of a
+            // local grey approximation is what makes the far sheet read as the
+            // SAME weather as the deck overhead rather than a bright sheet
+            // pasted behind a dark storm.
+            cloudMat.emissiveNode = bright.mul(cu.rad)
+                .mul(float(0.22).add(Ac.litK.mul(0.78)))
+                .mul(Ac.trans).mul(Ac.expK)
+                .add(Ac.insc.mul(float(0.35)));
+            // NEAR FADE: the sheet's local section would clip through the scene
+            // floor (it passes ~ground level near the viewer) — and clouds HERE
+            // are the local weather, already carried by the volumetric deck.
+            // The sheet only dresses the FAR side.
+            const sheetDist = T3.length(T3.positionWorld.sub(T3.cameraPosition));
+            // cu.dens carries the volumetric field's own density (finalMul), so
+            // a thin overcast sheet and a dense cyclone deck read differently
+            // here rather than at one fixed opacity.
+            cloudMat.opacityNode = cov.mul(edge)
+                .mul(smoothstep(float(3500), float(7000), sheetDist))
+                .mul(float(0.85).sub(cu.grey.mul(0.12)))
+                .mul(cu.dens).clamp(0, 1);
+        }
+        // No G-buffer wrap needed: the engine's pass MRT weights aux
+        // attachments by material alpha, so this sheet's invisible near
+        // section (opacity 0) contributes nothing. Its geometry lies tangent
+        // to y=0 at the local origin — with alpha-1 padding it would silently
+        // ERASE the metalness of any scene floor beneath it.
+        // opts.ringClouds = false (or RINGNOCLOUD=1) drops the sheet. It exists
+        // because the shared sky cloud field is a CAMERA-CENTERED dome and so
+        // cannot reach the far arc kilometres away or the overhead crossing —
+        // those are the sheet's whole job. The near fade above keeps it out of
+        // the local scene, where the volumetric deck is the right owner.
+        let ringClouds = null;
+        if (opts.ringClouds !== false && _envRG('RINGNOCLOUD') !== '1') {
+            const cloudMatBack = cloudMat.clone();
+            cloudMatBack.side = T3.BackSide;
+            ringClouds = new T3.Group();
+            ringClouds.name = 'ring_clouds';
+            for (const m of [new T3.Mesh(cloudGeo, cloudMat), new T3.Mesh(cloudGeo, cloudMatBack)]) {
+                m.userData.noSupportCheck = true; m.userData.noWet = true;
+                ringClouds.add(m);
+            }
+            ringClouds.userData.noSupportCheck = true; ringClouds.userData.noWet = true;
+        }
+
         // ---- FOG BOUNDARY (engine-owned): a soft palette-colored haze wall
         // ringing the local scene so ANY consumer's arbitrary terrain blends
         // into the distant band instead of cutting against it. Opaque-ish at
         // horizon level, dissolving upward; local opaques occlude it by depth.
         let fogWall = null;
         // RINGFOGWALL=0 / RINGRAINWALL=0 — bisect the two horizon walls
-        const _envRG = (k) => globalThis.Deno?.env?.get?.(k);
         if (opts.fogWall !== false && _envRG('RINGFOGWALL') !== '0') {
             const fwR = opts.fogWallRadius ?? 1250;
             const fogGeo = new T3.CylinderGeometry(fwR, fwR, 90, 96, 1, true);
@@ -583,10 +710,10 @@
             group.add(rainWall);
         }
 
-        // Weather coupling retained only for the band atmosphere/rain veil.
-        // Cloud morphology now has one owner: the shared sky cloud field.
+        group.add(ringClouds);   // built origin-centered — no recenter needed
+
         const sys = {
-            group, band: terrain, walls,
+            group, band: terrain, walls, clouds: ringClouds, cloudUniforms: cu,
             arcLight: sysArcLight,
             bindWeather(weather, sky) { sys._wx = weather; sys._sky = sky; },
             update(t) {
@@ -624,12 +751,50 @@
                     if (pal?.sun) sysArcLight.sunCol.value.setRGB(pal.sun[0], pal.sun[1], pal.sun[2]).lerp(new T3.Color(1, 1, 1), 0.35);
                 }
                 if (wx && wx.state && wx.state.def) {
+                    cu.grey.value = (wx.state.def.grey ?? 0) * (wx.state.k ?? 1);
                     // sub-cloud rain veil: gated ABOVE the light states —
-                    // sunshower/drizzle (rain 0.45) get NONE, rain (0.7) a
-                    // moderate wash, storms (0.9-1.0) the full murk
+                    // sunshower (rain 0.45) gets NONE, rain (0.7) a moderate
+                    // wash, storms (0.9-1.0) the full murk
                     const rk = (wx.state.def.rain ?? 0) * (wx.state.k ?? 1);
                     const rg = Math.min(1, Math.max(0, (rk - 0.45) / 0.5));
                     uRainHazeN.value = rg * rg * (3 - 2 * rg);
+                }
+                // MATCH THE LOCAL VOLUMETRICS. Coverage, density and colour all
+                // come from the very uniforms the volumetric march reads, not
+                // from a parallel per-state table here — a second table drifts
+                // from the clouds it is supposed to match the moment either
+                // side is retuned, and it cannot follow a weather transition
+                // that the sky is already lerping.
+                //   largeT  = coverage THRESHOLD (lower = more sky covered)
+                //   finalMul= field density
+                //   cloudLightColor / cloudAmbSky = the clouds' own lit/fill
+                //     colours, so paletteTint worlds (the red giant) match too
+                if (sk?.uniforms) {
+                    const U = sk.uniforms;
+                    if (U.largeT) {
+                        cu.cover.value = Math.max(0, Math.min(1, 1 - U.largeT.value));
+                    }
+                    if (U.finalMul) {
+                        // 0.24 is the fair-weather reference density
+                        cu.dens.value = Math.max(0.55, Math.min(1.5, U.finalMul.value / 0.24));
+                    }
+                    // cloudLightColor is HDR-calibrated (sunBase * pal.int * 7);
+                    // /7 puts it back on the palette scale this sheet's own
+                    // exposure term expects.
+                    if (U.cloudLightColor) {
+                        cu.tintSun.value.copy(U.cloudLightColor.value).multiplyScalar(0.42 / 7);
+                    }
+                    if (U.cloudAmbSky) cu.tintAmb.value.copy(U.cloudAmbSky.value);
+                    if (U.cloudRadiance) cu.rad.value = U.cloudRadiance.value;
+                }
+                if (sk && sk.state && sk.state.palette) {
+                    if (sk.uniforms.skyWind) {
+                        const w = sk.uniforms.skyWind.value;
+                        // TRUE-scale drift: the far side is km away, so its
+                        // clouds must crawl SLOWER than the local raymarch
+                        // deck, never faster.
+                        cu.wind.value.set(w.x / 31400 * 1.2, w.z / 31400 * 0.5);
+                    }
                 }
             },
             info: {
