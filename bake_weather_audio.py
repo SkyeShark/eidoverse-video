@@ -16,6 +16,23 @@ low-passed -- the same parameters the browser build would have applied.
 import argparse, json, math, os, shlex, subprocess, sys
 
 
+def gain_expr(points, key="gain", fn=None):
+    """Piecewise-linear ffmpeg volume expression from a recorded envelope."""
+    if not points:
+        return None
+    val = (lambda p: fn(float(p[key]))) if fn else (lambda p: float(p[key]))
+    parts, pt, pg = [], 0.0, val(points[0])
+    for p in points:
+        t, g = float(p["t"]), val(p)
+        if t > pt:
+            slope = (g - pg) / (t - pt)
+            parts.append(
+                f"between(t,{pt:.3f},{t:.3f})*({pg:.5f}+({slope:.6f})*(t-{pt:.3f}))")
+        pt, pg = t, g
+    parts.append(f"gte(t,{pt:.3f})*{pg:.5f}")
+    return "+".join(parts)
+
+
 def build_filters(tl, duration):
     """-> (input args, filter_complex, output label)"""
     inputs, filters, mix = [], [], []
@@ -24,22 +41,42 @@ def build_filters(tl, duration):
     rain = tl.get("rain") or []
     if rain and any(p["gain"] > 0.0005 for p in rain):
         inputs += ["-stream_loop", "-1", "-i", tl["rainClip"]]
-        # piecewise-linear gain automation from the recorded envelope
-        expr_parts, prev_t, prev_g = [], 0.0, rain[0]["gain"]
-        for p in rain:
-            t, g = float(p["t"]), float(p["gain"])
-            if t > prev_t:
-                slope = (g - prev_g) / (t - prev_t)
-                expr_parts.append(
-                    f"between(t,{prev_t:.3f},{t:.3f})*({prev_g:.4f}+({slope:.6f})*(t-{prev_t:.3f}))")
-            prev_t, prev_g = t, g
-        expr_parts.append(f"gte(t,{prev_t:.3f})*{prev_g:.4f}")
-        vol = "+".join(expr_parts) if expr_parts else f"{prev_g:.4f}"
+        vol = gain_expr(rain) or "0"
         filters.append(
             f"[{idx}:a]atrim=0:{duration},volume='{vol}':eval=frame,"
             f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[rain]")
         mix.append("[rain]")
         idx += 1
+
+    # ---- WIND BED — synthesized, not a recording -------------------------
+    # Any real wind take carries its own location (the Eanpa desert bed is
+    # audibly a desert), so a generic bed has to be generated. Filtered pink
+    # noise in two layers: a low body that is always there at a whisper, and
+    # a brighter band that only emerges as the wind picks up. That is what
+    # makes a gale read as a gale rather than as louder hiss.
+    windc = tl.get("wind") or []
+    if windc:
+        wg = float(tl.get("windGain", 1) or 1)
+        # low body: audible floor at dead calm, rises sub-linearly
+        lo = gain_expr(windc, key="w", fn=lambda w: (0.010 + 0.075 * (w ** 0.6)) * wg)
+        # bright band: near-zero until the wind actually blows (w^1.8)
+        hi = gain_expr(windc, key="w", fn=lambda w: (0.055 * (w ** 1.8)) * wg)
+        for label, expr, filt in (
+            ("windlo", lo, "lowpass=f=620,highpass=f=45"),
+            ("windhi", hi, "bandpass=f=1500:width_type=h:w=1900"),
+        ):
+            inputs += ["-f", "lavfi", "-i",
+                       f"anoisesrc=c=pink:r=48000:d={duration}:a=0.9"]
+            filters.append(
+                # slow tremolo = gusting; the two layers use different rates
+                # so they drift against each other instead of pulsing together
+                f"[{idx}:a]{filt},"
+                f"tremolo=f={0.11 if label == 'windlo' else 0.17}:d=0.45,"
+                f"volume='{expr}':eval=frame,"
+                f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+                f"[{label}]")
+            mix.append(f"[{label}]")
+            idx += 1
 
     for n, ev in enumerate(tl.get("events") or []):
         clip = ev["clip"]
@@ -121,8 +158,8 @@ def main():
 
     cmd = (["ffmpeg", "-y"] + inputs
            + ["-filter_complex", fc, "-map", out, "-c:a", "pcm_s16le", a.out])
-    print(f"baking {len(evs)} thunder event(s) + "
-          f"{len(tl.get('rain') or [])} rain points -> {a.out} ({dur:.1f}s)")
+    print(f"baking {len(evs)} thunder event(s) + {len(tl.get('rain') or [])} rain "
+          f"+ {len(tl.get('wind') or [])} wind points -> {a.out} ({dur:.1f}s)")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stderr[-2500:], file=sys.stderr)
@@ -132,7 +169,8 @@ def main():
     s = tl.get("stats", {})
     print(f"  ok — {a.out}  (strikes {s.get('strikes', 0)}: "
           f"{s.get('explosive', 0)} explosive / {s.get('close', 0)} close / "
-          f"{s.get('distant', 0)} distant, peak rain {s.get('maxRain', 0):.2f})")
+          f"{s.get('distant', 0)} distant, peak rain {s.get('maxRain', 0):.2f}, "
+          f"peak wind {s.get('maxWind', 0):.2f})")
     return 0
 
 

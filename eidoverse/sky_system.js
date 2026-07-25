@@ -2179,7 +2179,21 @@
                     hemi.groundColor.setRGB(pal.hor[0] * 0.25, pal.hor[1] * 0.2, pal.hor[2] * 0.18);
                     hemi.intensity = 0.25 + pal.int * 0.25 + nightK * 0.06;
                 }
-                if (fog && fog.color) fog.color.setRGB(...pal.hor).multiplyScalar(0.5 + pal.int * 0.12);
+                // FOG FOLLOWS THE WEATHERED SKY, not the clean TOD palette.
+                // pal.hor is the authored time-of-day horizon; the weather
+                // system greys/darkens the sky it should melt into and writes
+                // the result to u.horizon (darkstorm drives it near-black).
+                // Reading pal.hor here left distance fog at a BRIGHT DAYTIME
+                // horizon under a black storm, so the ground's far edge lit up
+                // as a hard bright strip along the horizon that matched
+                // nothing else in frame. u.horizon already carries grey/dark/
+                // horMul, so it needs no extra dimming beyond the exposure
+                // term. Falls back to pal.hor when no weather is attached.
+                if (fog && fog.color) {
+                    const h = u.horizon?.value;
+                    if (h) fog.color.setRGB(h.x, h.y, h.z).multiplyScalar(0.5 + pal.int * 0.12);
+                    else fog.color.setRGB(...pal.hor).multiplyScalar(0.5 + pal.int * 0.12);
+                }
                 return pal;
             },
             // world weather-field access — the SAME macro coverage the clouds

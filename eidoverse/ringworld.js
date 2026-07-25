@@ -130,9 +130,18 @@
             // hazed arc GLOW ~35% brighter than the sky it should melt into.
             // The curtain field also shades the fill (dense sheets read a
             // touch darker-grey) so the murk itself has cloudy structure.
+            // NIGHT COLLAPSE. Inscatter is light scattered INTO the view ray,
+            // so it is proportional to the light available to scatter — at
+            // night there is almost none. Left at full strength it is a flat
+            // ADDITIVE veil that swamps every relief-modulated term on the
+            // night side (which is scaled right down), and the arc reads as a
+            // smooth blue wash with the normal-map detail visible but drowned.
+            // Daytime is unaffected: there litArc dwarfs the veil anyway.
+            const inscNight = mx(f(0.28), f(1), dayF);
             const insc = uHazeCol.mul(f(1).sub(trans0)).mul(veil).mul(rainT)
                 .add(uHazeCol.mul(f(1).sub(rainT)).mul(veil).mul(f(0.55))
-                    .mul(f(1.08).sub(curt.mul(0.22))));
+                    .mul(f(1.08).sub(curt.mul(0.22))))
+                .mul(inscNight);
             const gain = mx(f(0.15), f(1), dayF)                                             // NIGHT_GAIN..DAY_GAIN for fixed-exposure ACES
                 .mul(mx(f(0.4), f(1), ss(f(-0.05), f(0.12), uSunElev)));                     // extra twilight rolloff — no sunset spike
             // the far arc is STILL fully sunlit at local midnight — its lit
@@ -351,7 +360,11 @@
             // so the smooth pVis terminator READ as a hard edge and the
             // no-shine zone lost its relief entirely (flat black band).
             const shine = float(0.40).add(A.pVis.mul(0.60));
-            const nightSide = albedoArc.mul(vec3(0.30, 0.34, 0.50)).mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.42)).mul(nightVis);
+            // 0.42 -> 0.60: with the inscatter veil no longer propping up the
+            // night side, that brightness has to come from the term that
+            // actually RESPONDS to relief, or the arc goes flat-black again
+            // (the failure the shine floor above was added to prevent).
+            const nightSide = albedoArc.mul(vec3(0.30, 0.34, 0.50)).mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
             // strong graze response: at a segment's local morning/evening the
             // ridges catch the sun and the valleys drop out — the flat-at-noon
             // residue is carried by the baked AO above
@@ -498,7 +511,9 @@
         // into the distant band instead of cutting against it. Opaque-ish at
         // horizon level, dissolving upward; local opaques occlude it by depth.
         let fogWall = null;
-        if (opts.fogWall !== false) {
+        // RINGFOGWALL=0 / RINGRAINWALL=0 — bisect the two horizon walls
+        const _envRG = (k) => globalThis.Deno?.env?.get?.(k);
+        if (opts.fogWall !== false && _envRG('RINGFOGWALL') !== '0') {
             const fwR = opts.fogWallRadius ?? 1250;
             const fogGeo = new T3.CylinderGeometry(fwR, fwR, 90, 96, 1, true);
             const fogMat = new T3.MeshStandardNodeMaterial({
@@ -520,7 +535,7 @@
         // only covers the halo directions); opacity rides the blended rain
         // gate, so it simply isn't there outside real rain.
         let rainWall = null;
-        if (opts.fogWall !== false) {
+        if (opts.fogWall !== false && _envRG('RINGRAINWALL') !== '0') {
             const rwR = (opts.fogWallRadius ?? 1250) + 130;
             const rainGeoW = new T3.CylinderGeometry(rwR, rwR, 730, 96, 1, true);
             const rainMatW = new T3.MeshStandardNodeMaterial({
@@ -528,7 +543,14 @@
                 fog: false, roughness: 1, metalness: 0,
             });
             rainMatW.colorNode = vec3(0);
-            rainMatW.emissiveNode = mix(uHazeCol, vec3(1, 1, 1), 0.22);   // lighter than the haze band
+            // Lighter than the haze band, but PROPORTIONALLY. Mixing toward
+            // absolute white pinned this curtain at a 0.22 floor regardless of
+            // conditions: fine in daylight where the haze is bright, but under
+            // a darkstorm sky (~0.02) it read as a hard WHITE STRIP along the
+            // horizon, brighter than the storm it was supposedly made of.
+            // Scaling keeps the same "a touch brighter than haze" intent and
+            // follows the sky all the way down to night.
+            rainMatW.emissiveNode = uHazeCol.mul(1.28);
             rainMatW.opacityNode = smoothstep(float(0.9), float(0.12), uv().y)
                 .mul(float(0.7)).mul(uRainHazeN);
             rainWall = new T3.Mesh(rainGeoW, rainMatW);
@@ -586,7 +608,19 @@
                     // haze + sun color follow the LOCAL palette — the arc's
                     // radiance tracks the same sun that lights the ground
                     const pal = sk?.state?.palette;
-                    if (pal?.hor) sysArcLight.hazeCol.value.setRGB(pal.hor[0], pal.hor[1], pal.hor[2]);
+                    // HAZE COLOUR MUST COME FROM THE WEATHERED SKY, not the raw
+                    // time-of-day palette. state.palette is the clean TOD
+                    // colour; the weather system greys and darkens the actual
+                    // sky (darkstorm: grey 0.97, dark 0.14, horMul 0.22) by
+                    // writing sky.uniforms.horizon. Reading pal.hor instead
+                    // left the haze band at a BRIGHT DAYTIME horizon under a
+                    // near-black storm — a white strip along the horizon, with
+                    // the world rain curtains (which mix toward white on top of
+                    // it) brighter still. Fall back to pal.hor only if the
+                    // uniform is missing.
+                    const hz = sk?.uniforms?.horizon?.value;
+                    if (hz) sysArcLight.hazeCol.value.setRGB(hz.x ?? hz.r, hz.y ?? hz.g, hz.z ?? hz.b);
+                    else if (pal?.hor) sysArcLight.hazeCol.value.setRGB(pal.hor[0], pal.hor[1], pal.hor[2]);
                     if (pal?.sun) sysArcLight.sunCol.value.setRGB(pal.sun[0], pal.sun[1], pal.sun[2]).lerp(new T3.Color(1, 1, 1), 0.35);
                 }
                 if (wx && wx.state && wx.state.def) {

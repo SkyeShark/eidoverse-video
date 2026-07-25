@@ -42,24 +42,54 @@
     const SPEED_OF_SOUND = 343;          // m/s — flash-to-clap delay
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+    // ---- MIX TARGETS -------------------------------------------------------
+    // Rain is a BED and thunder is an EVENT, so thunder has to sit above it —
+    // the same logic as voice-over-music. Ceiling the bed here and let claps
+    // peak well over it; the baker's limiter catches close strikes, which
+    // should slam.
+    const RAIN_BED_CEILING = 0.26;
+    // Distance attenuation is COMPRESSED into [floor, 1] rather than used
+    // raw. Two reasons: the inverse model is a game-audio approximation, and
+    // the licensed 'distant' takes are ALREADY recorded distant, so
+    // attenuating them again double-counts and buries a 700 m strike under
+    // the rain. Real thunder is ~120 dB at source and plainly audible over
+    // rain kilometres out. Compressing (not clamping) keeps far strikes
+    // present while preserving the ORDERING — a hard floor made 700 m and
+    // 2 km identical and threw away the sense of distance entirely.
+    const DIST_GAIN_FLOOR = 0.42;
+
     // Web Audio 'inverse' distance model, evaluated in closed form.
     // Spec: gain = ref / (ref + rolloff * (clamp(d, ref, max) - ref))
     const distanceGain = (d, { refDistance, maxDistance, rolloffFactor }) => {
         const c = clamp(d, refDistance, maxDistance);
-        return refDistance / (refDistance + rolloffFactor * (c - refDistance));
+        const g = refDistance / (refDistance + rolloffFactor * (c - refDistance));
+        return DIST_GAIN_FLOOR + (1 - DIST_GAIN_FLOOR) * g;
     };
 
+    // Perceived rain severity. rainK SATURATES at 1.0 for storm, cyclone and
+    // darkstorm, so on its own it makes three very different storms sound
+    // identical. denseA (the rain-curtain density the state machine also
+    // drives: storm 1.0, darkstorm 1.75, cyclone 1.9) is what separates them.
+    // The exponent is gentler than the original square so light rain is
+    // quiet-but-present rather than 14 dB down.
+    const rainSeverity = (rainK, denseA) => (
+        Math.pow(clamp(rainK, 0, 1), 1.1) * (0.75 + 0.25 * clamp(denseA, 0, 2))
+    );
+
     globalThis.makeWeatherAudio = function makeWeatherAudio({
-        weather, camera, rainGain = 0.72, thunderGain = 1, quiet = false,
+        weather, camera, rainGain = 1, thunderGain = 1.8, quiet = false,
+        wind = true, windGain = 1,
     } = {}) {
         const events = [];
         const rainCurve = [];
+        const windCurve = [];
         let previousStrike = null;
         let variation = 0;
         let lastRain = -1;
+        let lastWind = -1;
         const stats = {
             strikes: 0, explosive: 0, close: 0, distant: 0, cracks: 0,
-            maxRain: 0, nearestMeters: null, farthestMeters: null,
+            maxRain: 0, maxWind: 0, nearestMeters: null, farthestMeters: null,
         };
 
         // Listener-relative azimuth: 0 = dead ahead, +PI/2 = hard right.
@@ -157,15 +187,34 @@
                 const cam = camera ?? globalThis._c;
                 if (!wx) return;
 
-                // rain bed — squared so light rain stays under the mix,
-                // matching the standalone's rainGain curve
+                // rain bed — scaled by real severity (rate AND curtain
+                // density), ceilinged so thunder can sit above it
                 const rain = clamp(Number(wx.uniforms?.rainK?.value ?? 0), 0, 1);
-                const g = rain * rain * rainGain;
-                if (Math.abs(g - lastRain) > 0.01) {
+                const dense = Number(wx.uniforms?.denseA?.value ?? 1);
+                const g = RAIN_BED_CEILING * rainSeverity(rain, dense) * rainGain;
+                if (Math.abs(g - lastRain) > 0.005) {
                     rainCurve.push({ t: Number(t.toFixed(3)), gain: Number(g.toFixed(4)) });
                     lastRain = g;
                 }
                 if (rain > stats.maxRain) stats.maxRain = rain;
+
+                // WIND BED — a sky is never truly silent, so this runs under
+                // everything at a whisper and swells with the actual wind.
+                // Driven off windVec, which the state machine sets to
+                // windK * 3.2 and lerps through transitions, so the bed
+                // follows a storm rolling in rather than stepping per state.
+                // Synthesized in the baker (filtered noise), NOT a recording:
+                // any real wind take carries its own location — the Eanpa
+                // desert bed is a desert — and this has to work for any world.
+                if (wind) {
+                    const wk = Number(wx.uniforms?.windVec?.value?.length?.() ?? 0) / 3.2;
+                    const w = clamp(wk / 5, 0, 1.2);
+                    if (Math.abs(w - lastWind) > 0.015) {
+                        windCurve.push({ t: Number(t.toFixed(3)), w: Number(w.toFixed(4)) });
+                        lastWind = w;
+                    }
+                    if (w > stats.maxWind) stats.maxWind = w;
+                }
 
                 // thunder — one event per NEW strike, gated on the flash
                 const strike = wx.state?.strike;
@@ -194,7 +243,16 @@
                 }
             },
             timeline() {
-                return { rainClip: CLIPS.rain, rain: rainCurve, events, stats };
+                return {
+                    rainClip: CLIPS.rain,
+                    rain: rainCurve,
+                    // wind is SYNTHESIZED by the baker from this envelope —
+                    // no clip, so it carries no location and suits any world
+                    wind: wind ? windCurve : [],
+                    windGain,
+                    events,
+                    stats,
+                };
             },
             toJSON() { return JSON.stringify(this.timeline(), null, 1); },
         };
