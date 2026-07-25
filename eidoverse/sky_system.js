@@ -1356,6 +1356,11 @@
                     const layerRingYAt = (zq) => ringDeckY(zq).sub(RING_BASE).add(layerY);
                     const tLo = layerY.sub(org.y).div(stormDy).toVar();
                     const tHi = layerY.add(RING_RISE).sub(org.y).div(stormDy).toVar();
+                    // NOTE: raising this bisection count does NOT fix the
+                    // speckled band along the horizon on darkstorm. Measured
+                    // 6 / 12 / 20 steps: high-pass energy in the affected rows
+                    // 0.649 / 0.655 / 0.642, i.e. unchanged. The solve is not
+                    // the source; look elsewhere before spending steps here.
                     for (let solveStep = 0; solveStep < 6; solveStep++) {
                         const tMid = tLo.add(tHi).mul(0.5);
                         const pMid = org.add(dir.mul(tMid));

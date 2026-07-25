@@ -17,6 +17,10 @@
 
     globalThis.makeRingworld = async function ({ glbBytes, textures = {}, opts = {} } = {}) {
         const { texture, uv, mix, smoothstep, float, vec2, vec3, fract, floor, uniform } = T3;
+        // Debug/override gates, declared at function entry because consumers are
+        // spread through the build (RINGNSAT in the terrain shading, RINGNOCLOUD
+        // at the cloud sheet, RINGFOGWALL/RINGRAINWALL at the horizon walls).
+        const _envRG = (k) => globalThis.Deno?.env?.get?.(k);
 
         // ---- parse GLB, find the split meshes ----
         const buf = glbBytes.buffer.slice(glbBytes.byteOffset, glbBytes.byteOffset + glbBytes.byteLength);
@@ -372,7 +376,21 @@
             // arc keeps a moonlit cast while the albedo's chroma survives.
             // opts.nightTint overrides.
             const nt = opts.nightTint ?? [0.321, 0.345, 0.392];
-            const nightSide = albedoArc.mul(vec3(nt[0], nt[1], nt[2])).mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
+            // SATURATION RECOVERY. Measured on an arc-only crop, the night side
+            // has healthy CONTRAST (Y spread 112 vs day's 103) but its chroma
+            // range collapses: V (red<->green) spans 39 by day and only 20 at
+            // night, with nothing below neutral — the terrain's greens simply
+            // vanish and the arc reads as a flat wash. That is not an additive
+            // veil (inscatter was ruled out by bisect: V spread 20/20/19 at
+            // insc 0.28/0.10/0.0); it is the night term being so dark that
+            // 8-bit chroma quantises away. Expanding chroma about the term's
+            // own luma restores the hue separation without touching contrast
+            // or brightness. opts.nightSat overrides; 1 = off.
+            const nSat = float(Number(_envRG('RINGNSAT') ?? opts.nightSat ?? 1.75));
+            let nBase = albedoArc.mul(vec3(nt[0], nt[1], nt[2]));
+            const nLum = T3.dot(nBase, vec3(0.2126, 0.7152, 0.0722));
+            nBase = mix(vec3(nLum, nLum, nLum), nBase, nSat).max(vec3(0));
+            const nightSide = nBase.mul(nightRelief).mul(nightAO).mul(shine).mul(float(0.60)).mul(nightVis);
             // strong graze response: at a segment's local morning/evening the
             // ridges catch the sun and the valleys drop out — the flat-at-noon
             // residue is carried by the baked AO above
@@ -513,10 +531,6 @@
         // meshes. Their textures remain intentionally alive (and are exposed
         // below), but the unused material objects need no renderer lifetime.
         for (const material of sourceMaterials) material.dispose?.();
-
-        // debug gates: RINGNOCLOUD / RINGFOGWALL / RINGRAINWALL — declared here
-        // because the cloud sheet below is the first consumer
-        const _envRG = (k) => globalThis.Deno?.env?.get?.(k);
 
         // ---- RING CLOUD LAYER: animated 2D procedural cloud sheet floating
         // above the band ("up" = toward the ring axis, so SMALLER radius).
