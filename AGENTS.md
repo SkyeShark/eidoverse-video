@@ -72,7 +72,7 @@ piece and a render test.
 2. **Asset sourcing comes before procedural geometry.** Before building
    anything from primitives, in this order:
    - `python3 fetch_model.py "search terms"` — searches local custom models + Poly Haven + Smithsonian + NASA + NIH 3D **all at once, in parallel**, ranks every candidate across all sources, and delivers the best one (printing the runners-up from every source). **READ the preview before placing the mesh** — verify orientation + scale by using visible features plus the colored axis labels (+X red, +Y green, +Z blue).
-     - **ALWAYS pass `--theme "<the brief's mood/setting>"`** so the pick fits your video, e.g. `fetch_model.py "car" --theme "cyberpunk neon dystopia"` or `fetch_model.py "vase" --theme "ancient cracked archaeological relic"`. Theme fit is **semantic** — an embedding model scores how well each candidate matches your setting by meaning, not keywords, so phrase the theme naturally (paraphrases, mood words, eras all work). The theme RE-RANKS the relevance-matched candidates: a damaged car floats up for a dystopia and sinks for a vintage showroom. It never promotes an off-query item (a clock won't win "chair") — it only reorders genuinely-relevant ones. *(Theme ranking uses `EIDOVERSE_EMBED_URL`/`EIDOVERSE_EMBED_MODEL`/`EIDOVERSE_EMBED_KEY` — any OpenAI-compatible `/v1/embeddings` endpoint, defaulting to Jina's free tier via `JINA_AI_KEY`; with no key it degrades to relevance-only, never errors.)*
+     - **ALWAYS pass `--theme "<your piece's mood/setting>"`** so the pick fits your video, e.g. `fetch_model.py "car" --theme "cyberpunk neon dystopia"` or `fetch_model.py "vase" --theme "ancient cracked archaeological relic"`. Theme fit is **semantic** — an embedding model scores how well each candidate matches your setting by meaning, not keywords, so phrase the theme naturally (paraphrases, mood words, eras all work). The theme RE-RANKS the relevance-matched candidates: a damaged car floats up for a dystopia and sinks for a vintage showroom. It never promotes an off-query item (a clock won't win "chair") — it only reorders genuinely-relevant ones. *(Theme ranking uses `EIDOVERSE_EMBED_URL`/`EIDOVERSE_EMBED_MODEL`/`EIDOVERSE_EMBED_KEY` — any OpenAI-compatible `/v1/embeddings` endpoint, defaulting to Jina's free tier via `JINA_AI_KEY`; with no key it degrades to relevance-only, never errors.)*
      - **LOCAL models are referenced IN PLACE — never copy them.** When the match is a local/custom model, fetch_model prints `Local model (referenced IN PLACE — not copied): <absolute path>`. Put **that exact absolute path** into your `scene.json` `assets` (the engine loads any path). Do NOT copy the `.glb` into your work folder — duplicating multi-MB meshes per scene bleeds the disk. (Downloaded models from Poly Haven/NASA/etc. still land in cwd as `model_embedded.gltf` — those you keep locally.)
      - Browse the whole local catalog without fetching: `python3 fetch_model.py --list-local` prints every local model's path + dims + preview. Reference straight from there.
      - It also prints an **`[ORIGIN_INFO]`** line saying where the model's pivot `(0,0,0)` sits in its bbox — **BASE** (y=0 is the bottom; rests directly on a surface), **CENTERED** (y=0 is mid-height; add half the height to stand it on a floor), **TOP**, or **OFFSET**. Do NOT assume the pivot is the geometric center — many GLBs are base-pivoted and a "centered" `position.y` floats or sinks them. The safe move is always `placeOn`/`placeAgainst` (they seat the bbox regardless of pivot); read `[ORIGIN_INFO]` only when you must set `position.y` by hand.
@@ -121,7 +121,7 @@ piece and a render test.
    > **EXAMPLES ARE ILLUSTRATIVE — DO NOT COPY THEM VERBATIM.** Every code
    > block in this doc and in `eidoverse/examples/` shows you the *API shape
    > and wiring*, not a scene to reproduce. Take the wiring; **throw away the
-   > content.** The brief, palette, props, camera moves, parameters, and
+   > content.** The subject, palette, props, camera moves, parameters, and
    > composition in an example are placeholders — reproducing them is the #1
    > cause of samey, interchangeable videos and it means you skipped the
    > actual job: adapting the tool to YOUR piece. A pour example pours into a
@@ -230,10 +230,7 @@ piece and a render test.
      ./SeedThree checkout = textured tier; no checkout = GitHub import,
      geometry tier (placeholder materials).
 
-   **Build LOWPOLY hero geometry when fetched models don't fit the art
-   direction** — stylized reads better than a mismatched photoreal GLB:
-   - low-segment primitives (`CylinderGeometry(r, r, h, 6)`, `IcosahedronGeometry(r, 0)`),
-     `flatShading: true`, a restrained 4-6 color palette shared across meshes;
+   **Procedural-geometry techniques**, for meshes you build rather than fetch:
    - organic silhouettes = vertex jitter on a low-seg geometry (displace
      `geometry.attributes.position` ONCE at build time with seeded noise — a
      one-time CPU pass at setup is fine; only PER-FRAME CPU loops are banned).
@@ -241,9 +238,11 @@ piece and a render test.
      shared corners are duplicated vertices, so naive per-vertex jitter tears
      the mesh into floating shards. Key the jitter by POSITION (a Map from
      `x.toFixed(4)+','+y...` → offset) so duplicated corners move together;
-   - kitbash variants: `cloneModel(base)` + non-uniform scale + yaw + palette
+   - kitbash variants: `cloneModel(base)` + non-uniform scale + yaw + material
      swap turns one rock/tree/crate into a field of distinct ones;
-   - tile box architecture with `uvByWorld` so textures keep uniform density.
+   - `uvByWorld` reprojects a mesh's UVs from world space, so a tiling
+     texture holds the same real-world scale across meshes of different
+     sizes instead of stretching to each one's own UV layout.
 
    **Layer environments in passes, like a set dresser** — each pass is quick,
    and scenes that skip a layer read hollow:
@@ -289,8 +288,8 @@ piece and a render test.
    // kit.islands() groups parts that are spatially together (a multi-mesh plant
    // comes back as one object) if you'd rather grab whole sub-objects.
    ```
-   Detaching individual pieces and arranging them is how you make the brief's
-   unique building / pipework / fence / facade. (`kit.get()` returns `null` for
+   Detaching individual pieces and arranging them is how you make the
+   unique building / pipework / fence / facade your scene needs. (`kit.get()` returns `null` for
    an unknown name; a model that isn't a kit just has one part.)
 
    **Snap the pieces together with `placeTouching`** so they actually meet
@@ -312,7 +311,7 @@ piece and a render test.
    awning from kit D + paint from `ProceduralMaterials.createWornMetal`.
    Reach for five models whose pieces, combined, make your scene — that's
    a better strategy than searching for the one model that perfectly
-   matches the brief (which usually doesn't exist).
+   matches everything (which usually doesn't exist).
 
    **Layer procedural detail onto fetched bases.** Poly Haven textures
    give you a clean PBR start; `ProceduralMaterials.composite(base,
@@ -323,10 +322,10 @@ piece and a render test.
    `createFabric`, `createWornMetal`) produce NodeMaterial output with
    basecolor + roughness + metalness + normal — required minimums.
 
-   **Build complex geometry from primitives + math when no GLB fits.**
-   `BufferGeometry` + your math = anything. Beyond the procedural
-   toolkits (makeCreature, ProceduralMaterials, SDF, water, cloth), the
-   stock three.js geometry constructors are your structural toolkit:
+   **Parametric geometry constructors.** Each takes a curve, a profile, a
+   flat outline, or a repeated unit and generates the surface from it.
+   (`Loft` / `LoftGeometry`, documented below, is the general case — it
+   skins a surface through arbitrary cross sections.)
    - `TubeGeometry(curve)` — pipes, cables, vines, tentacles, snakes,
      winding paths, hair strands. Build the curve from any sequence of
      points (`CatmullRomCurve3`, `QuadraticBezierCurve3`).
@@ -338,21 +337,60 @@ piece and a render test.
    - `ParametricGeometry((u, v, t) => new Vector3(...))` — any
      mathematically defined surface (Möbius strips, twisted columns,
      Klein bottles, organic blobs).
-   - `BoxGeometry` / `CylinderGeometry` / `SphereGeometry` ARRAYS — when
-     you need 200 identical boards in a stack, 60 stacked crates, a
-     wall of windows, an instanced grid of light bulbs. Use
-     `InstancedMesh(geom, mat, count)` and set per-instance matrices in
-     `setup()` (one-time, in `setup()` — not per-frame; per-frame goes
-     through TSL compute).
+   - `InstancedMesh(geom, mat, count)` — the same unit repeated many times
+     (200 boards in a stack, a wall of windows, a grid of light bulbs). Set
+     per-instance matrices in `setup()` — one-time; per-frame goes through
+     TSL compute.
 
-   With procedural materials applied, these read as rocks, statues, sci-
-   fi machinery, organic structures, ancient ruins — whatever the brief
-   needs. Geometry primitives + procedural materials + clever placement
-   produces a unique-feeling scene out of zero downloaded assets.
+   **Booleans — `three-bvh-csg`** (mapped in `deno.json`; peers on the same
+   `three@0.184.0` and `three-mesh-bvh@0.9.10` the engine uses). Union,
+   subtract and intersect real solids: cut openings, hollow a shell, chamfer
+   an edge against a rounded solid, difference two forms into a third.
+   Verified on this stack — the result is indexed, carries `normal` and `uv`,
+   and the engine's WebGPU classes consume it directly.
+
+   ```js
+   // scene scripts are eval'd — dynamic import(), never a top-level import
+   const { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION }
+       = await import('three-bvh-csg');
+
+   const body = new Brush(new THREE.BoxGeometry(1, 1, 1));
+   const bore = new Brush(new THREE.CylinderGeometry(0.3, 0.3, 2, 32));
+   bore.position.set(0, 0, 0);
+   body.updateMatrixWorld();  bore.updateMatrixWorld();   // ⚠ REQUIRED
+
+   const ev = new Evaluator();
+   ev.useGroups = false;                       // one material out
+   const result = ev.evaluate(body, bore, SUBTRACTION);   // returns a Mesh
+   result.material = new THREE.MeshStandardNodeMaterial({ roughness: 0.5 });
+   result.geometry.computeVertexNormals();     // after a chamfer/bevel cut
+   scene.add(result);
+   ```
+
+   - Operations: `ADDITION` `SUBTRACTION` `REVERSE_SUBTRACTION`
+     `INTERSECTION` `DIFFERENCE` `HOLLOW_SUBTRACTION` `HOLLOW_INTERSECTION`.
+   - ⚠ **`updateMatrixWorld()` on every brush before `evaluate`** — a brush's
+     transform is read from its world matrix, so an un-updated brush cuts
+     from the wrong place (or not at all).
+   - ⚠ **Brushes must carry the SAME attribute set.** Mixing a geometry that
+     has `uv` with one that doesn't produces garbage or throws — strip or add
+     attributes so both match before evaluating.
+   - ⚠ **Closed solids only.** An open shell or non-manifold mesh has no
+     well-defined inside, so the boolean result is undefined. Cap your lathes
+     and extrusions.
+   - ⚠ **This is CPU work — do it ONCE in `setup()`.** Per-frame booleans
+     violate the no-CPU-loop rule and will not hold framerate. For animated
+     boolean-looking cuts use SDF (`sdf_raymarch_loader`) or `makeIsoField`,
+     which march on the GPU.
+   - Reuse one `Evaluator` across many operations; chain by feeding a result
+     back in as a `Brush(result.geometry)`.
+   - `useGroups = true` preserves each brush's material as a group instead of
+     flattening to one. `computeMeshVolume(geometry)` is also exported.
+
 
    **Compose environments in layers, near-to-far.** A finished
    environment has all of these — a scene missing one reads incomplete:
-   1. **Hero geometry** — the brief's central object (a desk, altar,
+   1. **Hero geometry** — the scene's central object (a desk, altar,
       vehicle, fountain, stage).
    2. **Mid-ground dressing** — clutter and props that establish the
       world (papers, mugs, tools, signs, debris, plants, the small
@@ -663,15 +701,14 @@ piece and a render test.
    not a number you guessed. Keep them inset from the front edge and leave
    a sliver of `minSpacing` so they don't z-fight each other.
 
-3. **Expand the brief into a fully realized piece.** The brief is the
-   seed — a concept, a mood, a few anchor elements. Your job is to
-   imagine the rest into existence: the world it lives in, the
-   composition and depth of every frame, the rhythm, the things the
-   brief doesn't mention but that the piece needs to feel real and
-   complete. A brief that names three things doesn't mean a video of
-   three things floating in black; it means three things ANCHORED in
-   the world you build around them. Take creative authorship. The brief
-   trusts you to do the expansion work.
+3. **Expand what you're asked for into a fully realized piece.** A
+   request is usually a seed — a concept, a mood, a few anchor elements.
+   The rest is yours to imagine into existence: the world it lives in, the
+   composition and depth of every frame, the rhythm, the things nobody
+   named but that the piece needs to feel real and complete. Three named
+   things doesn't mean a video of three things floating in black; it means
+   three things ANCHORED in the world you build around them. Take creative
+   authorship.
 
 4. **Story progression, not loops.** 4-6 distinct visual phases planned
    BEFORE writing any code. Each phase looks/feels different — different
@@ -743,8 +780,8 @@ root — the engine always runs with that as its cwd.
 ```
 
 `assets` is whatever your scene actually needs — HDRIs, GLBs, PBR
-texture sets, VRMs, audio. Declare only what your scene uses. The brief
-decides what belongs there; there is no required set.
+texture sets, VRMs, audio. Declare only what your scene uses; there is no
+required set.
 
 **Asset injection is RAW BYTES.** Point each asset at the REAL file —
 `hdri.hdr`, `model_embedded.gltf`, `character.vrm`, `image.png` — NOT a
@@ -773,9 +810,9 @@ globalThis.setup = async function () {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(50, WIDTH / HEIGHT, 0.1, 200);
 
-    // Build the world the brief asks for here — HDRI sky + lighting,
+    // Build the world your piece needs here — HDRI sky + lighting,
     // terrain or interior, props, characters (or none of those, if the
-    // brief is abstract / pure motion graphics / data viz / something
+    // piece is abstract / pure motion graphics / data viz / something
     // else). The patterns below are reusable; pick the ones that fit.
 
     globalThis._r = renderer; globalThis._s = scene; globalThis._c = camera;
@@ -798,7 +835,7 @@ globalThis.renderFrame = async function (t) {
 The trailing `// preflight: ASSETS['key', ...]` comment is required —
 the engine uses it to verify every declared asset is read.
 
-### Reusable patterns (mix and match per the brief)
+### Reusable patterns (mix and match as your piece needs)
 
 **HDRI for lighting** — provides ambient + IBL reflections. HDRI is
 INVISIBLE: only set the environment, NOT `scene.background`.
@@ -834,11 +871,11 @@ SYSTEM (`eidoverse/sky_system.js` — see "WORLD-SPACE SKY + WEATHER"). That
 renders geometry-aware sky + clouds + sun/moon/stars. For indoor scenes
 build the actual enclosure (walls, ceiling, windows showing what's
 outside through the glass). For abstract scenes write a custom
-backdrop / gradient / shader dome that fits the brief — never leave
+backdrop / gradient / shader dome that fits the piece — never leave
 `scene.background` as a flat dark color and call it done.
 
 **Motivated lights on top of HDRI** — HDRI alone is flat ambient. Add
-key/rim/fill that match the brief's mood. One `DirectionalLight` with
+key/rim/fill that match the piece's mood. One `DirectionalLight` with
 `castShadow: true` per scene MAX.
 
 ```js
@@ -850,8 +887,8 @@ key.position.set(3, 8, 6); scene.add(key);
 flat-color `MeshStandardNodeMaterial({ color: ... })`. See the "Asset
 sourcing" section above for the four-map material recipe.
 
-**VRM character** — ONLY when the brief calls for a character on
-screen. Many briefs don't. The `loader.register(VRMLoaderPlugin)` line
+**VRM character** — ONLY when the piece calls for a character on
+screen. Many don't. The `loader.register(VRMLoaderPlugin)` line
 is REQUIRED — without it MToon falls back to a WebGL ShaderMaterial
 under WebGPURenderer and the character renders solid black with only
 the eyes visible.
@@ -897,7 +934,7 @@ video **explicitly references the AI Claude**. Do **NOT** cast Claude as
 a generic narrator, correspondent, anchor, bystander, or "a human" —
 Claude is a specific identity (and not a human), not a faceless extra.
 Likewise in **dialogue/narration/on-screen text**: do not bring up or
-name-drop "Claude" unless the brief specifically asks for it.
+name-drop "Claude" unless the piece specifically calls for it.
 
 **Character voices** — assign one edge-tts voice per character and keep
 it consistent for the whole piece (and across pieces, if you're building
@@ -946,20 +983,12 @@ python3 generate_song.py "<tags>" "<lyrics>" [--bpm N] [--key "K"] [--seed N]
 **Tag rules:**
 - For VOCAL tracks, name the voice type in the tags (e.g. `female lead vocal`)
 - For INSTRUMENTAL, omit the vocal tag AND set lyrics field to empty/whitespace
-- Genre palette — DO NOT default to synthwave / cyberpunk. The full menu:
-  jazz, swing, lounge, ragtime, country, folk, bluegrass, classical, orchestral,
-  baroque, opera, ambient, dark ambient, drone, trance, happy hardcore, EBM,
-  industrial, martial industrial, new wave, dark wave, ska, pop punk, reggae,
-  bossa nova, trip-hop, downtempo, chiptune, vaporwave, slushwave, neoclassical
-  darkwave, folkwave, jazzwave, ostalgie, cabaret, cyber cabaret, military
-  march, circus, digitized opera, gospel, blues, funk, soul, R&B, hip-hop,
-  trap, house, techno, breakbeat, drum and bass, dubstep, psytrance, minimal
-  techno. If you catch yourself typing "synthwave" or "cyberpunk", stop and
-  pick something else.
+- `tags` is free text — ACE responds to genre names, instrument lists,
+  production adjectives, and tempo/mood words, in any combination.
 
 **Lyrics rules:**
 - Lyrics field is SINGABLE WORDS ONLY. No timestamps. No `[verse]` / `[chorus]` / `[bridge]` labels. No descriptive markers. ACE renders lyrics verbatim — labels become sung words.
-- If the brief calls for instrumental, leave the lyrics field empty.
+- For an instrumental, leave the lyrics field empty.
 
 **Output:** writes `song.mp3` in CWD. Poll loop waits up to 5 minutes — that's enough for typical generations. If ACE legitimately doesn't finish, FIX THE BRIEF (shorter duration, simpler tags) before falling back to a synth bed.
 
@@ -1185,7 +1214,7 @@ look right without something to reflect. Set this up before you start
 populating geometry, not after.
 
 - HDRI mandatory for any non-flat-indoor scene (`fetch_hdri.py`; point the `hdri` asset at the raw `hdri.hdr`). The HDRI gives you global ambient + reflections all at once.
-- Manual lights ON TOP of HDRI for specific motivated sources — a key light from the direction the brief implies, a rim/back light to separate the subject from the background, accent point lights for diegetic sources (neon signs, screens, candles, sun through a window).
+- Manual lights ON TOP of HDRI for specific motivated sources — a key light from the direction the scene implies, a rim/back light to separate the subject from the background, accent point lights for diegetic sources (neon signs, screens, candles, sun through a window).
 - **NEVER use `SpotLight` with `castShadow: true`** — crashes MToon shaders, makes the VRM invisible.
 - Keep to ONE `DirectionalLight` with `castShadow: true` per scene (the "sun" / main key). Additional lights should have `castShadow: false`.
 - Use multiple `PointLight`s (no shadow casting) for diegetic neon / interior practicals — they're cheap and add color depth.
@@ -1480,7 +1509,7 @@ planned A* path. Attach it to a `VRMRobotBody` while DIALING IN a
 navigation scene (why is she routing around nothing? what did the lidar
 see?), then remove it — its visuals in a finished video read as glitch
 lines coming off the character. Never leave it enabled in a final render
-unless the brief explicitly wants a "robot POV / diagnostics" look.
+unless you explicitly want a "robot POV / diagnostics" look.
 
 ### Character locomotion (low level)
 `VRMCharacterController` + `VRMFootControllerIK` — tread-synced stride, foot
@@ -1530,6 +1559,56 @@ const armB = globalThis.cloneModel(armA);   // SkeletonUtils — own skeleton, a
 ```
 `cloneModel` accepts the GLTF result or its `.scene`. Use it for ANY model you
 duplicate; only plain unrigged meshes are safe with `.clone()`.
+
+**Animated bird characters — crow & cactus wren.** Two purpose-built,
+fully-clipped bird assets live in `eidoverse/assets/models/`. Each is one
+skinned mesh with a named clip set, so `playModelAnimations` selects behaviour
+by name:
+
+| model | clips | size L×H×W |
+|---|---|---|
+| `crow_bird_animated_corvid_raven_black_cawing_flying_walking.glb` | `Idle` `Walk` `Hop` `Peck` `Fly` `Caw` `Talk` `TurnL` `TurnR` | 0.77 × 0.52 × 0.88 m |
+| `cactus_wren_bird_animated_desert_songbird_calling_hopping_walking.glb` | `Idle` `Walk` `Hop` `Peck` `Fly` `Call` `TurnL` `TurnR` | 0.19 × 0.13 × 0.22 m |
+
+Both are authored to drop straight in: **feet at the origin** (place them on the
+ground with no offset hunting), **nose along +z** (registered in
+`_forward_axes.json`, so `driveAlong`/`faceToward` get the sign right), and
+**real-world scale** — crow 51 cm tall, wren 18.5 cm bill-to-tail. Don't rescale
+them to "look right"; a wren really is that much smaller than a crow.
+
+```js
+const loader = new globalThis.GLTFLoader();
+const crow = await new Promise((res, rej) =>
+    loader.parse(globalThis.b64toArrayBuffer(globalThis.ASSETS.crow), '', res, rej));
+globalThis.playModelAnimations(crow, { clip: 'Idle' });   // or 'Walk' / 'Fly' / 'Caw'
+crow.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+scene.add(crow.scene);
+```
+`Walk`/`Hop` are **in-place** cycles (the feet slide back through stance) — drive
+the body forward yourself, or the bird moonwalks. `Fly` is a level cruise: pitch
+the whole model for a climb or dive. For a flock, `cloneModel` each extra bird
+and offset its action time (`action.time = Math.random() * clip.duration`) so
+they don't beat in unison.
+
+**Paired call audio, pre-aligned to the clips** — in `eidoverse/assets/audio/`:
+
+| file | length | use |
+|---|---|---|
+| `crow_caw_clip_synced.wav` | 1.60 s | two caws landing exactly on the two gape peaks of the crow's `Caw` clip (48 f @ 30 fps) — start it with the clip, no offset |
+| `cactus_wren_call_clip_synced.wav` | 2.40 s | the wren's churr; the `Call` clip (72 f @ 30 fps) bobs the head on all 12 note onsets detected from this very file |
+| `crow_caw_single.wav` | 0.74 s | one caw, for one-off / scattered background use |
+| `crow_caw_says_claude.wav` | 0.41 s | the caw articulated into the word "Claude" |
+
+Because each `*_clip_synced.wav` is exactly the clip's length, syncing is just
+"start both at the same time" — no offset table. ⚠️ `crow_caw_says_claude.wav`
+is subject to the **Claude-identity rule** above: use it only when the video
+explicitly references the AI Claude, never as a generic bird noise.
+
+The crow caws are our own Stable Audio 3 generations (`generate_sfx.py`), CC0
+like the rest of the library — so they're safe to publish. Regenerate or extend
+them the same way if you need a different call; score candidates against a real
+caw's band profile (a crow caw puts ~70-80% of its energy in **0.8-2 kHz** — a
+generation that lands mostly above 5 kHz is hiss, not a bird).
 
 
 **In-world screens & displays = `globalThis.makeScreen`** — the canonical
@@ -1813,7 +1892,7 @@ globalThis.makeGrass({ scene, width: 60, depth: 40, bladeHeight: 0.7,
     spacing: 0.16, perCell: 5, wind: 0.28, windSpeed: 2.0,
     color: 0x2f5212, colorTip: 0xb6d45a });
 ```
-- Tune to the brief: `width`/`depth` (metres; `size` = square), `center [x,z]`,
+- Tune to the scene: `width`/`depth` (metres; `size` = square), `center [x,z]`,
   `spacing` (smaller = denser → heavier), `perCell` (blades/tuft), `bladeHeight`,
   `bladeWidth`, `color`+`colorTip` (base→tip — dry/autumn/alien grass), `wind`
   (amplitude; **0 = dead-still**), `windSpeed`, `lean`.
@@ -2203,7 +2282,7 @@ a collider cup, optionally paired with a `water_compute({ circular: true })`
 surface whose `mesh.position.y` you raise over the fill duration so the
 stream lands on a rippling, rising level. Same primitives compose into
 fountains, rain into a barrel, a waterfall pool — point them where the
-brief needs.
+scene needs.
 
 **`WaterMesh` + `SkyMesh`** — passive ocean / large-scale water with
 FFT-style waves. Better than `water_compute` when you need horizon-
@@ -2643,8 +2722,8 @@ grep -nE "(leftUpperArm|rightUpperArm|leftShoulder|rightShoulder)\.rotation" "$S
 #    should return at least one hit.
 grep -nE "enableFootIK" "$SC"
 
-# 5. Walk Backwards is a narrative choice. If the brief doesn't call for
-#    backward motion, swap to the forward walk + waypoints.
+# 5. Walk Backwards is a narrative choice. If you don't want backward
+#    motion, swap to the forward walk + waypoints.
 grep -nE "Walk.?Backward" "$SC"
 
 # 6. NodeMaterial discipline. The pipeline is WebGPU + TSL only — every
@@ -2843,8 +2922,6 @@ Most have deep-dive sections above; this is the checklist form.
 - **Sitting / emoting a stationary VRM — use `seatOn` / `emote`,** never
   hand-lowered idle poses or chair clips on the floor.
 - **NEVER `SpotLight` with `castShadow: true`** (MToon crash).
-- **Genre: don't default to synthwave/cyberpunk.** Match the brief; use the
-  whole menu; surprise yourself.
 - **Don't fake tool invocations.** If a generator errors or its backend is
   down, surface the actual error in your hand-off — don't synthesize a
   fallback and label it as the tool's output.
