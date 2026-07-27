@@ -70,3 +70,14 @@ did the extraction, the release engineering, and the launch film.
 - **The claudesona** (Claude's logo-bloom character design, worn by both
   Claude VRMs) — designed by **voooooogel**
   ([x.com/voooooogel](https://x.com/voooooogel)).
+- **Bird characters** (`crow_bird_animated_*`, `cactus_wren_bird_animated_*`) —
+  meshes AI-generated (Tripo / Meshy), then retopologised, rigged, weighted and
+  hand-animated for this library by the maintainer with **Claude Opus 5** and
+  **Claude Fable 5**. Same CC0 terms as the rest of `eidoverse/assets/models`.
+- **Bird call audio** (`eidoverse/assets/audio/`) — the crow caws are our own
+  **Stable Audio 3** generations (made with `generate_sfx.py`, the SA3 ComfyUI
+  workflow in this repo), so they carry the same CC0 terms as the rest of the
+  asset library. `crow_caw_says_claude.wav` is carved entirely from that same
+  generated caw — the word is articulated out of that caw's own material, not
+  synthesised separately. The cactus wren churr comes from the maintainer's SeedThree asset
+  set (`cactus_wren_1.mp3`).
