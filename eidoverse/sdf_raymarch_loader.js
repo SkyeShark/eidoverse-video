@@ -276,8 +276,8 @@ const SDF_TSL = (function buildSdfTslEngine(THREE) {
     const opMirrorZ = (p) => vec3(p.x, p.y, abs(p.z));
 
     // --- noise / fbm (fixed small octave counts — JS-unrolled at build
-    // time, same convention as effects_tsl/volumetric_clouds.js's manual
-    // 2x unroll, rather than a runtime Loop) ---
+    // time rather than a runtime Loop, the pipeline's usual manual-unroll
+    // convention) ---
     const _hash = (p) => {
         const pp = fract(p.mul(0.3183099).add(vec3(0.71, 0.113, 0.419))).mul(17.0);
         return fract(pp.x.mul(pp.y).mul(pp.z).mul(pp.x.add(pp.y).add(pp.z)));

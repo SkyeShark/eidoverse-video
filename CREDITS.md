@@ -35,7 +35,7 @@ did the extraction, the release engineering, and the launch film.
   geometry technique discussed in the three.js community (see three.js
   PR #33776 for a related exploration); this implementation targets the
   TSL/WebGPU pipeline and adds the sweep/taper/twist authoring layer.
-- **`effects_tsl/volumetric_clouds.js`** — the atmosphere model follows
+- **`sky_system.js`** — the volumetric cloud/atmosphere model follows
   published physically-based sky/cloud rendering techniques (spherical-
   shell atmosphere, FBM-eroded weather fields, multi-scale Beer's law,
   a numerical Mie phase fit, and Sébastien Hillaire's energy-conserving
@@ -61,9 +61,23 @@ did the extraction, the release engineering, and the launch film.
   redistribution.
 - The bundled `eidoverse/assets/` library (characters, props, animations)
   is a mix of original handmade and AI generated work by the maintainer,
-  released with the repo. Particle sprites: Kenney Particle Pack
-  (kenney.nl, CC0).
-- **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)).
+  released with the repo. Content of `eidovers/assets/models` is either handmade work
+  by me ([x.com/skyesharkie](https://x.com/skyesharkie)) or meshy.ai generations. 
+  All provided CC0, though attribution is appreciated on handmade (easy to tell which).
+  Particle sprites: Kenney Particle Pack (kenney.nl, CC0).
+- **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)), provided under CC-BY.
+- **`aletheia.vrm`** and **`aporia.vrm`** — avatars of **aihegemonymemes** ([x.com/aihegemonymemes](https://x.com/aihegemonymemes)), provided under CC-BY.
 - **The claudesona** (Claude's logo-bloom character design, worn by both
   Claude VRMs) — designed by **voooooogel**
   ([x.com/voooooogel](https://x.com/voooooogel)).
+- **Bird characters** (`crow_bird_animated_*`, `cactus_wren_bird_animated_*`) —
+  meshes AI-generated (Tripo / Meshy), then retopologised, rigged, weighted and
+  hand-animated for this library by the maintainer with **Claude Opus 5** and
+  **Claude Fable 5**. Same CC0 terms as the rest of `eidoverse/assets/models`.
+- **Bird call audio** (`eidoverse/assets/audio/`) — the crow caws are our own
+  **Stable Audio 3** generations (made with `generate_sfx.py`, the SA3 ComfyUI
+  workflow in this repo), so they carry the same CC0 terms as the rest of the
+  asset library. `crow_caw_says_claude.wav` is carved entirely from that same
+  generated caw — the word is articulated out of that caw's own material, not
+  synthesised separately. The cactus wren churr comes from the maintainer's SeedThree asset
+  set (`cactus_wren_1.mp3`).

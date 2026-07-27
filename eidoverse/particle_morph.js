@@ -265,6 +265,17 @@
             transparent: true, depthWrite: false, blending: blend, side: THREE.DoubleSide,
             toneMapped: opts.blending === 'normal',
         });
+        // Keep the quads OUT of the G-buffer (same opt-out as makeParticles):
+        // without an mrtNode the shadow+MRT scene pass compiles this material
+        // into an empty fragment output struct that Naga rejects — the whole
+        // cloud silently vanishes. vec4(0) alpha-0 writes preserve the
+        // destination; visible in color, invisible to AO/SSR.
+        if (THREE.mrt && THREE.vec4) {
+            mat.mrtNode = THREE.mrt({
+                normal: THREE.vec4(0),
+                metalrough: THREE.vec4(0),
+            });
+        }
 
         const uMorph = uniform(float(0));        // 0..1 between iFrom/iTo
         const uTurb = uniform(float(0));         // 0..1 turbulence amount

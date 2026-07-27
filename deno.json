@@ -5,6 +5,8 @@
     "three/webgpu": "npm:three@0.184.0/webgpu",
     "three/tsl": "npm:three@0.184.0/tsl",
     "three/addons/": "npm:three@0.184.0/examples/jsm/",
+    "three-bvh-csg": "npm:three-bvh-csg@0.0.18",
+    "three-mesh-bvh": "npm:three-mesh-bvh@0.9.10",
     "lil-gui": "npm:lil-gui@0.21.0"
   }
 }

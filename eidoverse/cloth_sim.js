@@ -335,23 +335,26 @@ export async function createClothPanel(renderer, opts = {}) {
 
     // --- Per-vertex normals from the SIMULATED surface ---
     // Without this the cloth keeps the flat plane's +Z normal everywhere, so a
-    // textured/lit banner shades like a flat decal no matter how it folds. We
-    // recompute each vertex normal from its grid neighbours (cross of the two
-    // tangents), sign-corrected for edge vertices that sample backward.
+    // textured/lit banner shades like a flat decal no matter how it folds.
+    // CENTRAL differences, not one-sided: a forward difference gives every
+    // vertex the face normal of its upper-right QUAD, so under curvature the
+    // lighting shows the grid as hard quad facets (flat at rest — the artifact
+    // only appears when the cloth moves/drapes). Symmetric tangents
+    // (pos[c+1]−pos[c−1] × pos[r+1]−pos[r−1]) average the curvature at the
+    // vertex and shade C1-smooth across quad boundaries; edges degrade to a
+    // one-sided difference with consistent orientation (no sign flip needed).
     const normalBuf = instancedArray(new Float32Array(N * 3), 'vec3').setName('ClothNormals');
     const normalKernel = Fn(() => {
         const i = instanceIndex;
         const c = i.mod(COLS_u);
         const r = i.div(COLS_u);
-        const here = posBuf.element(i);
-        const colFwd = c.lessThan(COLS_u.sub(uint(1)));
-        const rowFwd = r.lessThan(ROWS_u.sub(uint(1)));
-        const cN = colFwd.select(i.add(uint(1)), i.sub(uint(1)));
-        const rN = rowFwd.select(i.add(COLS_u), i.sub(COLS_u));
-        const tx = posBuf.element(cN).sub(here);
-        const ty = posBuf.element(rN).sub(here);
-        const sign = colFwd.select(float(1), float(-1)).mul(rowFwd.select(float(1), float(-1)));
-        const nrm = ty.cross(tx).mul(sign).normalize();
+        const cPrev = c.greaterThan(uint(0)).select(i.sub(uint(1)), i);
+        const cNext = c.lessThan(COLS_u.sub(uint(1))).select(i.add(uint(1)), i);
+        const rPrev = r.greaterThan(uint(0)).select(i.sub(COLS_u), i);
+        const rNext = r.lessThan(ROWS_u.sub(uint(1))).select(i.add(COLS_u), i);
+        const tx = posBuf.element(cNext).sub(posBuf.element(cPrev));
+        const ty = posBuf.element(rNext).sub(posBuf.element(rPrev));
+        const nrm = ty.cross(tx).normalize();
         normalBuf.element(i).assign(nrm);
     })().compute(N, [64]);
 
@@ -370,7 +373,11 @@ export async function createClothPanel(renderer, opts = {}) {
     // instanceIndex is 0 for a non-instanced mesh and collapses every
     // vertex onto particle 0.
     mat.positionNode = posBuf.element(vertexIndex);
-    mat.normalNode = transformNormalToView(normalBuf.element(vertexIndex));
+    // .toVarying() is LOAD-BEARING (canonical webgpu_compute_cloth wiring):
+    // without it the storage read evaluates per-FRAGMENT where vertexIndex is
+    // the flat provoking vertex — normals stop interpolating and every
+    // triangle shades as a hard facet (herringbone banding on any curvature).
+    mat.normalNode = transformNormalToView(normalBuf.element(vertexIndex)).toVarying();
     const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     mesh.castShadow = mesh.receiveShadow = true;

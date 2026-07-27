@@ -102,7 +102,7 @@
         // opts[name].layer = 'under' | 'over' (e.g. blueprint/cross_hatch read
         // as a world treatment with layer:'under', or a screen filter as-is).
         const ALWAYS_UNDER = new Set([
-            'volumetric_clouds', 'nuclear_explosion', 'depth_rain', 'godrays', 'underwater',
+            'nuclear_explosion', 'godrays', 'underwater',
         ]);
         const DEFAULT_UNDER = new Set(['depth_fog', 'retro_wireframe']);
         const layerOf = (name) => {
@@ -193,11 +193,6 @@
     } else {
         console.warn('[custom_effects_deno] old_bw_film unavailable — OldBWFilmFX not loaded');
     }
-    if (globalThis.VolumetricCloudsFX && typeof globalThis.VolumetricCloudsFX.applyTo === 'function') {
-        register('volumetric_clouds', globalThis.VolumetricCloudsFX.applyTo);
-    } else {
-        console.warn('[custom_effects_deno] volumetric_clouds unavailable — VolumetricCloudsFX not loaded');
-    }
     if (globalThis.NuclearExplosionFX && typeof globalThis.NuclearExplosionFX.applyTo === 'function') {
         register('nuclear_explosion', globalThis.NuclearExplosionFX.applyTo);
     } else {
@@ -232,11 +227,6 @@
         register('rain_on_camera', globalThis.RainOnCameraFX.applyTo);
     } else {
         console.warn('[custom_effects_deno] rain_on_camera unavailable — RainOnCameraFX not loaded');
-    }
-    if (globalThis.DepthRainFX && typeof globalThis.DepthRainFX.applyTo === 'function') {
-        register('depth_rain', globalThis.DepthRainFX.applyTo);
-    } else {
-        console.warn('[custom_effects_deno] depth_rain unavailable — DepthRainFX not loaded');
     }
     if (globalThis.RadialBlurFX && typeof globalThis.RadialBlurFX.applyTo === 'function') {
         register('radial_blur', globalThis.RadialBlurFX.applyTo);

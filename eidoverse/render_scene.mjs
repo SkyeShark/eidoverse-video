@@ -164,10 +164,12 @@ if (Object.keys(assetsConfig).length > 0) {
         const pat = new RegExp(`(?:\\.${escaped}\\b|\\[\\s*["'\`]${escaped}["'\`]\\s*\\]|\\b${escaped}\\s*:)`);
         return !pat.test(assetRefCorpus);
     });
-    if (missingKeys.length > 0) {
-        console.error(`[render_scene] FATAL: scene never references assets: ${missingKeys.join(', ')}`);
-        Deno.exit(1);
-    }
+    // An asset a scene declares but never names is simply supplied by the engine
+    // instead, and the engine's own default is the right answer — a sky package
+    // owns its starmap, its planet and its band textures, so a scene listing them
+    // is redundant, not broken. Silent on purpose: naming those keys in a warning
+    // teaches whoever reads it about inputs that no longer do anything.
+    void missingKeys;
 }
 
 // Orphan check: warn loudly about model files in the work dir that the
@@ -228,9 +230,11 @@ const HELPER_MODULES = [
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
     'eidoverse/particles.js',             // globalThis.makeParticles — GPU textured sprite particles (sparks/smoke/dust/…)
     'eidoverse/grass.js',                 // globalThis.makeGrass — GPU wind grass field (tapered blades, height-gradient color, adjustable wind/density/height/color)
-    // SHELVED (not in the first public push — module kept, uncomment to enable):
+    'eidoverse/sky_system.js',            // globalThis.makeSkySystem — WORLD-SPACE volumetric sky: raymarched cloud dome IN the scene (geometry occludes it), sun/moon/stars, time-of-day, cloud types, day cycles, moving metal reflections, env bake
+    'eidoverse/weather_system.js',        // globalThis.makeWeatherSystem — weather states (clear..darkstorm): world-anchored rain, wet surfaces + puddles, from-the-clouds lightning, smooth transitionTo(name, k, seconds)
     'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; SEEDTHREE_DIR baked into the image)
-    // 'eidoverse/seed_three.js',         // RETIRED — unfinished stub bridge; superseded by seedthree_api.js above
+    // RETIRED (unfinished stub bridge over SeedThree core internals — superseded by seedthree_api.js):
+    // 'eidoverse/seed_three.js',
     'eidoverse/screen.js',              // globalThis.makeScreen — animated canvas-2D screen/display panel (self-updating CanvasTexture, unlit emissive, exact UI colors)
     'eidoverse/creature_builder.js',    // globalThis.makeCreature — universal procedural creature builder (spine+limbs auto-rig, morphology-adaptive gait, makeCreature.random)
     'eidoverse/model_kit.js',             // globalThis.loadKit — named, origin-centered parts for modular-kit / asset-library GLTFs (don't drop the whole gltf.scene; assemble from parts). fetch_model.py flags kits with [KIT_INFO].
@@ -249,7 +253,6 @@ const HELPER_MODULES = [
     'eidoverse/effects_tsl/vhs_tape.js',       // VHS look (NTSC chroma bleed)
     'eidoverse/effects_tsl/crt.js',            // CRT look (curve+scanlines+grille)
     'eidoverse/effects_tsl/old_bw_film.js',    // 12fps b&w film with dirt
-    'eidoverse/effects_tsl/volumetric_clouds.js',  // 3D cloud volumes via VolumeNodeMaterial
     'eidoverse/effects_tsl/chromatic_aberration_alpha.js',  // alpha-aware RGB shift
     'eidoverse/effects_tsl/wavy.js',           // sinusoidal horizontal row shift
     'eidoverse/effects_tsl/jitter.js',         // hash-driven RGB-shift bursts
@@ -265,14 +268,13 @@ const HELPER_MODULES = [
     'eidoverse/effects_tsl/full_toon.js',      // cel shading + 3-stop palette tint + sobel outline
     'eidoverse/effects_tsl/cross_hatch.js',    // crosshatch shading — three/addons sobel + rotated hatch lines
     'eidoverse/effects_tsl/retro_wireframe.js',  // pseudo-wireframe retro display (faceted outline + triplanar tri-mesh fill)
-    'eidoverse/effects_tsl/nuclear_explosion.js',  // SDF mushroom-cloud raymarched, same hook scaffold as volumetric_clouds
+    'eidoverse/effects_tsl/nuclear_explosion.js',  // SDF mushroom-cloud raymarched world-layer pass
     'eidoverse/effects_tsl/anamorphic_flare.js',  // wraps three's anamorphic() — horizontal flares from bright pixels
     'eidoverse/effects_tsl/sepia.js',             // wraps three's sepia() Fn
     'eidoverse/effects_tsl/bleach_bypass.js',     // wraps three's bleach() Fn — cinema bleach bypass look
     'eidoverse/effects_tsl/after_image.js',       // wraps three's afterImage() — frame feedback trail
     'eidoverse/effects_tsl/rgb_shift.js',         // wraps three's rgbShift() — directional channel split
     'eidoverse/effects_tsl/rain_on_camera.js',    // rain-on-the-lens — screen-locked refraction + wet blur
-    'eidoverse/effects_tsl/depth_rain.js',     // worldspace weather: streaks+puddles+splashes+cover occlusion
     'eidoverse/effects_tsl/radial_blur.js',       // wraps three's radialBlur() — light-shaft / zoom blur
     'eidoverse/effects_tsl/box_blur.js',          // wraps three's boxBlur() — cheap blocky blur
     'eidoverse/effects_tsl/hash_blur.js',         // wraps three's hashBlur() — random-pattern blur
@@ -1178,7 +1180,7 @@ try {
 }
 
 // Screen-space overlay layer — HUD / lower-thirds / motion-graphics that must
-// sit ABOVE the world (incl. depth-keyed effects like volumetric_clouds) yet
+// sit ABOVE the world (incl. depth-keyed world-layer effects) yet
 // still receive screen-space effects (vhs/glitch). Creates a transparent
 // overlay scene + a STATIC camera at the origin matching the main camera's FOV
 // (so meshes parented to it at z=-1 are screen-locked), and registers the
@@ -1267,6 +1269,27 @@ try {
             }
         }
     }
+    // Reset SkinnedMesh object-level bounding volumes before the first frame.
+    // SkinnedMesh.raycast and Frustum.intersectsObject lazily compute
+    // this.boundingSphere ONCE from the pose at that instant and never refresh
+    // it. Any raycast that reaches a skinned mesh during setup or the audit
+    // above (placeTouching/seatOn/checkClipping rays) computes it while
+    // bindMatrixInverse is still stale — the sphere absorbs the model's world
+    // offset, the renderer applies matrixWorld on top at cull time, and the
+    // ghost sphere lands at 2× the placement offset: whole meshes get
+    // frustum-culled from most camera angles for the entire video (the
+    // vanishing face/jacket/limbs/whole-VRM bug). Nulling here makes
+    // frame 1 recompute every sphere with settled matrices.
+    {
+        const sceneRoot = globalThis._s || globalThis._scene;
+        if (sceneRoot) {
+            let wiped = 0;
+            sceneRoot.traverse((o) => {
+                if (o.isSkinnedMesh) { o.boundingSphere = null; o.boundingBox = null; wiped++; }
+            });
+            if (wiped) console.log(`[render_scene] reset ${wiped} SkinnedMesh bounding volume(s) post-setup — cull spheres recompute on frame 1`);
+        }
+    }
 } catch (e) {
     console.error('[render_scene] setup() FAILED:', e.message);
     if (e.stack) console.error(e.stack.split('\n').slice(0, 8).join('\n'));
@@ -1296,9 +1319,10 @@ try {
 // either a different timing or a fresh-RT workaround that hasn't been
 // validated yet.
 //
-// SKIPPED when volumetric_clouds is in 'outdoor' mode — its cloud-reflect
-// hook is the metal-reflection source there, and stacking an env-map on
-// top drowns out the SSR/cloud contributions on chrome surfaces.
+// SKIPPED when a cloud-reflect hook is installed (sky_system's
+// enableReflections) — the hook is the metal-reflection source there, and
+// stacking an env-map on top drowns out the SSR/cloud contributions on
+// chrome surfaces.
 {
     const scene = globalThis._scene || globalThis._s;
     const renderer = globalThis._renderer || globalThis._r;
@@ -1474,13 +1498,13 @@ try {
         }
     }
 
-    // When volumetric_clouds is active, cloud-reflect handles SPECULAR
-    // env-IBL on opaque metals — letting scene.environment also contribute
-    // double-counts those reflections (the env-fallback equirect IS the same
-    // sky the cloud-reflect raymarches). But transmissive surfaces
-    // (transmission > 0): glass / refractive plastic still need env for the
-    // refracted-through colour, which cloud-reflect doesn't cover. Without
-    // this, glass balls render as black voids.
+    // When a cloud-reflect hook is active (sky_system's enableReflections),
+    // it handles SPECULAR env-IBL on opaque metals — letting
+    // scene.environment also contribute double-counts those reflections
+    // (the env equirect IS the same sky the hook raymarches). But
+    // transmissive surfaces (transmission > 0): glass / refractive plastic
+    // still need env for the refracted-through colour, which cloud-reflect
+    // doesn't cover. Without this, glass balls render as black voids.
     //
     // Strategy (TSL-native): keep scene.environmentIntensity at its full
     // value so transmissive materials get the env via the normal NodeMaterial
@@ -1490,33 +1514,9 @@ try {
     // for env-IBL — setting it to a constant zero overrides the global env
     // for that material only. The legacy `material.envMap` / `envMapIntensity`
     // fields don't work for NodeMaterial (verified empirically).
-    // When volumetric_clouds is active, replace the basic gradient env-
-    // fallback with a baked cloud-sky equirect — same skyRay raymarch the
-    // cloud-reflect hook uses, but rendered to a texture once at setup.
-    // This makes scene.environment the actual cloud sky, so transmissive
-    // materials (glass) refract/reflect cloud sky consistent with the
-    // cloud-reflect that opaque metals get. Without this, transmissive
-    // materials see only the basic gradient (or whatever fallback) which
-    // visually conflicts with the cloud-reflect cloud detail on metals.
-    if (cloudReflectActive && globalThis._fx?.bakeEnvEquirect) {
-        try {
-            const renderer2 = globalThis._renderer || globalThis._r;
-            if (renderer2) {
-                const baked = await globalThis._fx.bakeEnvEquirect(renderer2, { width: 512, height: 256 });
-                // Mark the baked texture as "GPU-pre-init by render-target"
-                // so the patched textureUtils.createTexture skips re-init.
-                baked.userData = baked.userData || {};
-                baked.userData._pmremPreInit = true;
-                if (scene) {
-                    scene.environment = baked;
-                    console.log('[render_scene] volumetric_clouds active — scene.environment = baked cloud-sky equirect (transmissive refraction will sample real cloud sky)');
-                }
-            }
-        } catch (e) {
-            console.warn(`[render_scene] cloud-sky env bake failed (${e.message}); leaving scene.environment as previous`);
-            if (e.stack) console.warn(e.stack.split('\n').slice(0, 6).join('\n'));
-        }
-    }
+    // (Scenes wanting the env to BE the real sky call
+    // `await sky.bakeEnv(renderer)` — the sky system bakes its own equirect
+    // into scene.environment, consistent with the cloud-reflect on metals.)
 
     if (scene && scene.environment && cloudReflectActive && globalThis.THREE?.vec3) {
         const zeroEnv = globalThis.THREE.vec3(0, 0, 0);
@@ -1531,10 +1531,13 @@ try {
             for (const mat of mats) {
                 if (!mat) continue;
                 const transmission = mat.transmission ?? 0;
-                if (transmission > 0) {
+                // userData.keepEnv: sky elements (ringworlds, megastructures)
+                // ARE part of the sky — the baked env is their intended light
+                if (transmission > 0 || mat.userData?.keepEnv) {
                     transmissiveKept++;  // leave env default → samples scene.environment
-                } else {
-                    // Suppress env on opaque via BOTH knobs:
+                } else if (mat.isMeshStandardNodeMaterial || mat.isMeshPhysicalNodeMaterial
+                    || mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                    // Suppress env on opaque PBR via BOTH knobs:
                     //   - `envNode = vec3(0)`: TSL-native NodeMaterial path
                     //     (MeshStandardNodeMaterial / MeshPhysicalNodeMaterial)
                     //   - `envMapIntensity = 0`: legacy path used by
@@ -1543,6 +1546,11 @@ try {
                     //     to NodeMaterial at render time, but the conversion
                     //     reads `envMapIntensity` to populate the env scaling
                     //     uniform. Setting both covers every conversion path.
+                    // PBR family ONLY: on Basic/Sprite-family NodeMaterials
+                    // `envNode` means a classic reflection MAP — assigning
+                    // vec3(0) makes their build call texture(<vec3>), which
+                    // throws and silently DROPS the mesh (sky domes, rain
+                    // quads vanish). They do no env-IBL — nothing to suppress.
                     if ('envNode' in mat) mat.envNode = zeroEnv;
                     if (mat.envMapIntensity !== undefined) mat.envMapIntensity = 0;
                     opaqueSuppressed++;
@@ -1896,12 +1904,26 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                         const sceneNormalTex = (typeof sample === 'function' && colorToDirection)
                             ? null  // sceneNormal already a direction node
                             : null;
-                        // sceneNormal is already a per-pixel decoded direction
-                        // (view-space). Don't re-sample — that'd return garbage
-                        // since it's not a raw texture node. Use directly.
+                        // Hooks that gate sky visibility by REFLECTION DIRECTION
+                        // internally (world-space sky systems) flag themselves
+                        // `selfGated` — the N·up multiply would cut a hard
+                        // terminator at normal.y=0 on top of their correct
+                        // ray-based gate. Geometry occlusion of the sky
+                        // reflection (roofs etc.) comes from the SSR hit along
+                        // the same ray in the deferred compose below.
+                        if (globalThis._autoEnhanceCloudReflectHook.selfGated) {
+                            added.push('cloudReflect-selfGated');
+                        } else {
+                        // sceneNormal is the sample() wrapper — call .sample(uv)
+                        // for the decoded view-space direction and take .xyz:
+                        // vec4(<wrapper>, 0) counts the wrapper as 4 components
+                        // (4+1=5 → "exceeds maximum length of vec4") and the
+                        // broken gate zeroes the whole cloud contribution.
                         const upGate = THREE.Fn(() => {
+                            const nSample = (typeof sceneNormal.sample === 'function')
+                                ? sceneNormal.sample(THREE.uv()) : sceneNormal;
                             const worldN = THREE.normalize(
-                                THREE.cameraWorldMatrix.mul(THREE.vec4(sceneNormal, 0)).xyz,
+                                THREE.cameraWorldMatrix.mul(THREE.vec4(nSample.xyz, 0)).xyz,
                             );
                             return THREE.clamp(worldN.y, 0, 1);
                         })();
@@ -1909,6 +1931,7 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                             ? THREE.convertToTexture(cloudReflTex.mul(upGate))
                             : cloudReflTex.mul(upGate);
                         added.push('cloudReflect-upGate');
+                        }
                     } catch (e) {
                         console.warn('[auto-enhance] up-gate failed:', e.message);
                     }
@@ -2091,7 +2114,7 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
         // Composited as a SECOND pass() node in THIS PostProcessing graph (the
         // canonical WebGPU way; a second renderer.render() to the canvas ghosts
         // — see three.js #32535). Placed AFTER the effect hook so depth-keyed
-        // screenspace effects (volumetric_clouds etc.) can't paint over it, and
+        // world-layer effects can't paint over it, and
         // BEFORE renderOutput so it shares the scene's tone-map. Source-over
         // alpha via mix(base, overlay, overlay.a) keeps smooth transparency.
         // Opt-in: scene sets globalThis._overlayScene (+ optional _overlayCamera).

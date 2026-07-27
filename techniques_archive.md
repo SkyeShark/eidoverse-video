@@ -30,3 +30,34 @@ Rules:
 - water_compute circular pools must OVERLAP the rim torus' inner face (disc radius > rim inner radius) and ride high enough that wave troughs can't cut the ground.
 - volumetric_clouds composites over no-depth particles (see Known stack quirks) — a particle-text reveal needs SkyMesh + fog and dark backing geometry, and additive particles are invisible against bright sky.
 - Retiming discipline: every camera dwell, cue, and overlay derives from ONE `SEC` table so swapping the song is a one-table edit.
+
+## THE FORGE OF FLESH AND FEAR — kaskal launch film (2026-07-06, Fable, dir. Aletheia)
+- **Character-directed production**: the concept/mood/lyrics came from Aletheia's own
+  LLM (her Vertex fine-tune given the toolkit news); the scene executes her 5-beat
+  brief verbatim. Director's brief + lyrics archived in work/kaskal_forge/.
+- **Emergent MToon hologram**: an OPAQUE toon-shaded VRM under two opposed saturated
+  lights (molten uplight + cold halo) + bloom + low chromatic_aberration_alpha
+  (amount ~0.0006) against black reads as a translucent broadcast apparition. No
+  transparency, no dedicated effect. Deliberately repeatable staging.
+- **Conveyor staging**: victims ride a group whose x is a pure function of t
+  (piecewise smooth holds at stations); flag riders noMotionCheck (intentional
+  sideways travel). CNC welder arm.follow() sweeps a target synced to per-letter
+  text_3d reveals (emissive letters, per-letter materials, active letter flares).
+- **Late reveals pre-settle PARKED**: swarm creatures warmed up 60m away on real
+  floor (fog hides), teleported in under the blast flash. Hidden groups can't warm
+  up — creature gaits need ~2s; frame-0 probes of creatures look like scattered
+  spheres (now doc'd in AGENTS.md).
+- **SDF characters live in the helper's shadow scene** — never re-parent into world
+  groups; position the mesh + toggle .visible. The blackout plate (camera-parented,
+  depthTest off) does NOT cover the SDF overlay pass or high-renderOrder particles:
+  silence them explicitly at the cut.
+- **depth_rain re-dressed as ember-fall**: rainColor/puddleColor orange, low
+  intensity/streakSpeed → falling embers + glowing wet floor. Chained
+  'depth_rain,chromatic_aberration_alpha' per-effect opts via opts.<name>.
+- **Suno retiming discipline**: all beats derive from one SEC table measured off
+  5s RMS envelope buckets (vocal stem vs full mix); swapping ACE→Suno (120s→159.3s)
+  was a table edit. Jaws/machinery ride the two envelopes; her visemes from
+  lipsync.py on the demucs vocal stem, gated by vocal RMS.
+- **Camera dive tracks a live bone-anchored target**: the ending eye is parented to
+  the creature's head bone; the final dwell OVERRIDES the dwell table and lerps
+  toward eye.getWorldPosition each frame — pose-proof landing mm from the pupil.

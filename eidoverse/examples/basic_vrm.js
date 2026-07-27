@@ -50,16 +50,13 @@ globalThis.setup = async function () {
     globalThis._c = camera;
     globalThis._vrm = vrm;
 
-    // Volumetric clouds — also drives the cloud-reflect-on-metal floor
+    // Depth fog — atmospheric depth cue (for a full sky + moving cloud
+    // reflections use makeSkySystem instead; see AGENTS.md "WORLD-SPACE SKY")
     globalThis._fx = globalThis.CustomEffectsDeno.applyTo({
         scene, camera,
-        effects: 'volumetric_clouds',
+        effects: 'depth_fog',
         opts: {
-            volumetric_clouds: {
-                sunPowerScale: 80, colorScale: 0.12,
-                cloudStart: 200, cloudHeight: 200, weatherScale: 6,
-                sparseness: 'medium', mood: 'normal',
-            },
+            depth_fog: { density: 0.06 },
         },
     });
 };

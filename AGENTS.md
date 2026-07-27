@@ -1,4 +1,4 @@
-# Eidoverse — Agent Guide
+﻿# Eidoverse — Agent Guide
 
 Eidoverse is a collection of useful tools for **creating and rendering
 three.js videos in Deno, at real-time speeds, with absolutely minimal CPU
@@ -83,7 +83,7 @@ videos that skip them.
 2. **Asset sourcing comes before procedural geometry.** Before building
    anything from primitives, in this order:
    - `python3 fetch_model.py "search terms"` — searches local custom models + Poly Haven + Smithsonian + NASA + NIH 3D **all at once, in parallel**, ranks every candidate across all sources, and delivers the best one (printing the runners-up from every source). **READ the preview before placing the mesh** — verify orientation + scale by using visible features plus the colored axis labels (+X red, +Y green, +Z blue).
-     - **ALWAYS pass `--theme "<the brief's mood/setting>"`** so the pick fits your video, e.g. `fetch_model.py "car" --theme "cyberpunk neon dystopia"` or `fetch_model.py "vase" --theme "ancient cracked archaeological relic"`. Theme fit is **semantic** — an embedding model scores how well each candidate matches your setting by meaning, not keywords, so phrase the theme naturally (paraphrases, mood words, eras all work). The theme RE-RANKS the relevance-matched candidates: a damaged car floats up for a dystopia and sinks for a vintage showroom. It never promotes an off-query item (a clock won't win "chair") — it only reorders genuinely-relevant ones. *(Theme ranking uses `EIDOVERSE_EMBED_URL`/`EIDOVERSE_EMBED_MODEL`/`EIDOVERSE_EMBED_KEY` — any OpenAI-compatible `/v1/embeddings` endpoint, defaulting to Jina's free tier via `JINA_AI_KEY`; with no key it degrades to relevance-only, never errors.)*
+     - **ALWAYS pass `--theme "<your piece's mood/setting>"`** so the pick fits your video, e.g. `fetch_model.py "car" --theme "cyberpunk neon dystopia"` or `fetch_model.py "vase" --theme "ancient cracked archaeological relic"`. Theme fit is **semantic** — an embedding model scores how well each candidate matches your setting by meaning, not keywords, so phrase the theme naturally (paraphrases, mood words, eras all work). The theme RE-RANKS the relevance-matched candidates: a damaged car floats up for a dystopia and sinks for a vintage showroom. It never promotes an off-query item (a clock won't win "chair") — it only reorders genuinely-relevant ones. *(Theme ranking uses `EIDOVERSE_EMBED_URL`/`EIDOVERSE_EMBED_MODEL`/`EIDOVERSE_EMBED_KEY` — any OpenAI-compatible `/v1/embeddings` endpoint, defaulting to Jina's free tier via `JINA_AI_KEY`; with no key it degrades to relevance-only, never errors.)*
      - **LOCAL models are referenced IN PLACE — never copy them.** When the match is a local/custom model, fetch_model prints `Local model (referenced IN PLACE — not copied): <absolute path>`. Put **that exact absolute path** into your `scene.json` `assets` (the engine loads any path). Do NOT copy the `.glb` into your work folder — duplicating multi-MB meshes per scene bleeds the disk. (Downloaded models from Poly Haven/NASA/etc. still land in cwd as `model_embedded.gltf` — those you keep locally.)
      - Browse the whole local catalog without fetching: `python3 fetch_model.py --list-local` prints every local model's path + dims + preview. Reference straight from there.
      - It also prints an **`[ORIGIN_INFO]`** line saying where the model's pivot `(0,0,0)` sits in its bbox — **BASE** (y=0 is the bottom; rests directly on a surface), **CENTERED** (y=0 is mid-height; add half the height to stand it on a floor), **TOP**, or **OFFSET**. Do NOT assume the pivot is the geometric center — many GLBs are base-pivoted and a "centered" `position.y` floats or sinks them. The safe move is always `placeOn`/`placeAgainst` (they seat the bbox regardless of pivot); read `[ORIGIN_INFO]` only when you must set `position.y` by hand.
@@ -132,7 +132,7 @@ videos that skip them.
    > **EXAMPLES ARE ILLUSTRATIVE — DO NOT COPY THEM VERBATIM.** Every code
    > block in this doc and in `eidoverse/examples/` shows you the *API shape
    > and wiring*, not a scene to reproduce. Take the wiring; **throw away the
-   > content.** The brief, palette, props, camera moves, parameters, and
+   > content.** The subject, palette, props, camera moves, parameters, and
    > composition in an example are placeholders — reproducing them is the #1
    > cause of samey, interchangeable videos and it means you skipped the
    > actual job: adapting the tool to YOUR piece. A pour example pours into a
@@ -204,7 +204,7 @@ videos that skip them.
      ears, tusks, horn styles), typed feet, accessories (hats/ties/shades),
      robots, seeded randoms.
    - SPOM relief — real CARVED depth + a silhouette that follows the relief. `createReliefColumn` for CURVED surfaces (columns/pipes whose flanges overhang the outline); `createParallaxMaterial` for FLAT surfaces (brick / stone / tile / tread / panel). The height field is `fetch_texture`'s **`displacement`** map. The single most under-used surface showpiece; deep docs below.
-   - `volumetric_clouds` / `nuclear_explosion` — screenspace sky & blast.
+   - The world-space sky system (day cycles, storms, cloud shadows) or the `nuclear_explosion` blast.
    - A `VRMCharacterController` walk with terrain (stairs, ramps) — real
      locomotion reads better than any teleport.
    - `makeTerrain` — procedural heightfield ground with multi-texture blending
@@ -241,10 +241,7 @@ videos that skip them.
      ./SeedThree checkout = textured tier; no checkout = GitHub import,
      geometry tier (placeholder materials).
 
-   **Build LOWPOLY hero geometry when fetched models don't fit the art
-   direction** — stylized reads better than a mismatched photoreal GLB:
-   - low-segment primitives (`CylinderGeometry(r, r, h, 6)`, `IcosahedronGeometry(r, 0)`),
-     `flatShading: true`, a restrained 4-6 color palette shared across meshes;
+   **Procedural-geometry techniques**, for meshes you build rather than fetch:
    - organic silhouettes = vertex jitter on a low-seg geometry (displace
      `geometry.attributes.position` ONCE at build time with seeded noise — a
      one-time CPU pass at setup is fine; only PER-FRAME CPU loops are banned).
@@ -252,9 +249,11 @@ videos that skip them.
      shared corners are duplicated vertices, so naive per-vertex jitter tears
      the mesh into floating shards. Key the jitter by POSITION (a Map from
      `x.toFixed(4)+','+y...` → offset) so duplicated corners move together;
-   - kitbash variants: `cloneModel(base)` + non-uniform scale + yaw + palette
+   - kitbash variants: `cloneModel(base)` + non-uniform scale + yaw + material
      swap turns one rock/tree/crate into a field of distinct ones;
-   - tile box architecture with `uvByWorld` so textures keep uniform density.
+   - `uvByWorld` reprojects a mesh's UVs from world space, so a tiling
+     texture holds the same real-world scale across meshes of different
+     sizes instead of stretching to each one's own UV layout.
 
    **Layer environments in passes, like a set dresser** — each pass is quick,
    and scenes that skip a layer read hollow:
@@ -300,8 +299,8 @@ videos that skip them.
    // kit.islands() groups parts that are spatially together (a multi-mesh plant
    // comes back as one object) if you'd rather grab whole sub-objects.
    ```
-   Detaching individual pieces and arranging them is how you make the brief's
-   unique building / pipework / fence / facade. (`kit.get()` returns `null` for
+   Detaching individual pieces and arranging them is how you make the
+   unique building / pipework / fence / facade your scene needs. (`kit.get()` returns `null` for
    an unknown name; a model that isn't a kit just has one part.)
 
    **Snap the pieces together with `placeTouching`** so they actually meet
@@ -323,7 +322,7 @@ videos that skip them.
    awning from kit D + paint from `ProceduralMaterials.createWornMetal`.
    Reach for five models whose pieces, combined, make your scene — that's
    a better strategy than searching for the one model that perfectly
-   matches the brief (which usually doesn't exist).
+   matches everything (which usually doesn't exist).
 
    **Layer procedural detail onto fetched bases.** Poly Haven textures
    give you a clean PBR start; `ProceduralMaterials.composite(base,
@@ -334,10 +333,10 @@ videos that skip them.
    `createFabric`, `createWornMetal`) produce NodeMaterial output with
    basecolor + roughness + metalness + normal — required minimums.
 
-   **Build complex geometry from primitives + math when no GLB fits.**
-   `BufferGeometry` + your math = anything. Beyond the procedural
-   toolkits (makeCreature, ProceduralMaterials, SDF, water, cloth), the
-   stock three.js geometry constructors are your structural toolkit:
+   **Parametric geometry constructors.** Each takes a curve, a profile, a
+   flat outline, or a repeated unit and generates the surface from it.
+   (`Loft` / `LoftGeometry`, documented below, is the general case — it
+   skins a surface through arbitrary cross sections.)
    - `TubeGeometry(curve)` — pipes, cables, vines, tentacles, snakes,
      winding paths, hair strands. Build the curve from any sequence of
      points (`CatmullRomCurve3`, `QuadraticBezierCurve3`).
@@ -349,21 +348,60 @@ videos that skip them.
    - `ParametricGeometry((u, v, t) => new Vector3(...))` — any
      mathematically defined surface (Möbius strips, twisted columns,
      Klein bottles, organic blobs).
-   - `BoxGeometry` / `CylinderGeometry` / `SphereGeometry` ARRAYS — when
-     you need 200 identical boards in a stack, 60 stacked crates, a
-     wall of windows, an instanced grid of light bulbs. Use
-     `InstancedMesh(geom, mat, count)` and set per-instance matrices in
-     `setup()` (one-time, in `setup()` — not per-frame; per-frame goes
-     through TSL compute).
+   - `InstancedMesh(geom, mat, count)` — the same unit repeated many times
+     (200 boards in a stack, a wall of windows, a grid of light bulbs). Set
+     per-instance matrices in `setup()` — one-time; per-frame goes through
+     TSL compute.
 
-   With procedural materials applied, these read as rocks, statues, sci-
-   fi machinery, organic structures, ancient ruins — whatever the brief
-   needs. Geometry primitives + procedural materials + clever placement
-   produces a unique-feeling scene out of zero downloaded assets.
+   **Booleans — `three-bvh-csg`** (mapped in `deno.json`; peers on the same
+   `three@0.184.0` and `three-mesh-bvh@0.9.10` the engine uses). Union,
+   subtract and intersect real solids: cut openings, hollow a shell, chamfer
+   an edge against a rounded solid, difference two forms into a third.
+   Verified on this stack — the result is indexed, carries `normal` and `uv`,
+   and the engine's WebGPU classes consume it directly.
+
+   ```js
+   // scene scripts are eval'd — dynamic import(), never a top-level import
+   const { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION }
+       = await import('three-bvh-csg');
+
+   const body = new Brush(new THREE.BoxGeometry(1, 1, 1));
+   const bore = new Brush(new THREE.CylinderGeometry(0.3, 0.3, 2, 32));
+   bore.position.set(0, 0, 0);
+   body.updateMatrixWorld();  bore.updateMatrixWorld();   // ⚠ REQUIRED
+
+   const ev = new Evaluator();
+   ev.useGroups = false;                       // one material out
+   const result = ev.evaluate(body, bore, SUBTRACTION);   // returns a Mesh
+   result.material = new THREE.MeshStandardNodeMaterial({ roughness: 0.5 });
+   result.geometry.computeVertexNormals();     // after a chamfer/bevel cut
+   scene.add(result);
+   ```
+
+   - Operations: `ADDITION` `SUBTRACTION` `REVERSE_SUBTRACTION`
+     `INTERSECTION` `DIFFERENCE` `HOLLOW_SUBTRACTION` `HOLLOW_INTERSECTION`.
+   - ⚠ **`updateMatrixWorld()` on every brush before `evaluate`** — a brush's
+     transform is read from its world matrix, so an un-updated brush cuts
+     from the wrong place (or not at all).
+   - ⚠ **Brushes must carry the SAME attribute set.** Mixing a geometry that
+     has `uv` with one that doesn't produces garbage or throws — strip or add
+     attributes so both match before evaluating.
+   - ⚠ **Closed solids only.** An open shell or non-manifold mesh has no
+     well-defined inside, so the boolean result is undefined. Cap your lathes
+     and extrusions.
+   - ⚠ **This is CPU work — do it ONCE in `setup()`.** Per-frame booleans
+     violate the no-CPU-loop rule and will not hold framerate. For animated
+     boolean-looking cuts use SDF (`sdf_raymarch_loader`) or `makeIsoField`,
+     which march on the GPU.
+   - Reuse one `Evaluator` across many operations; chain by feeding a result
+     back in as a `Brush(result.geometry)`.
+   - `useGroups = true` preserves each brush's material as a group instead of
+     flattening to one. `computeMeshVolume(geometry)` is also exported.
+
 
    **Compose environments in layers, near-to-far.** A finished
    environment has all of these — a scene missing one reads incomplete:
-   1. **Hero geometry** — the brief's central object (a desk, altar,
+   1. **Hero geometry** — the scene's central object (a desk, altar,
       vehicle, fountain, stage).
    2. **Mid-ground dressing** — clutter and props that establish the
       world (papers, mugs, tools, signs, debris, plants, the small
@@ -371,12 +409,14 @@ videos that skip them.
    3. **Architecture** — bounding walls, floors, ceilings, columns,
       doorways, the framing geometry, all PBR-textured (no flat colors).
    4. **Atmosphere** — volumetric haze (`scene.fog = new THREE.FogExp2(...)`
-      or the `depth_fog` effect for interiors; `volumetric_clouds` for
-      outdoor skies), light shafts, fog for distance.
+      or the `depth_fog` effect for interiors; the WORLD-SPACE SKY SYSTEM
+      for outdoor skies), light shafts, fog for distance.
    5. **Sky / horizon** — HDRI environment lighting always. An outdoor sky
-      with clouds comes from the `volumetric_clouds` effect — it renders
-      sky, sun, and clouds with real depth and drift, so the sky reads as
-      sky (`sparseness: 'low'|'medium'|'overcast'`, `mood: 'normal'|'stormy'`). `SkyMesh` is the plain gradient dome
+      with clouds comes from the **sky system** (`eidoverse/sky_system.js` —
+      see the "WORLD-SPACE SKY + WEATHER" section): raymarched clouds living
+      IN the world, so geometry occludes them natively; sun/moon/stars,
+      time-of-day palette, cloud types, day cycles, weather states via
+      `eidoverse/weather_system.js`. `SkyMesh` is the plain gradient dome
       for a clear, cloudless sky. For sci-fi interiors, distant silhouettes
       seen through windows / vents / portals.
 
@@ -407,7 +447,7 @@ videos that skip them.
    - `placeOn(obj, target, { xz, yOffset, xzOffset })` — sit obj's
      bbox-bottom on target's top surface AND center obj's bbox at the xz
      anchor (both axes are bbox-corrected, so an off-center loader pivot
-     no longer lands the model sideways). ⚠ The default `xz: 'centered'`
+     is handled). ⚠ The default `xz: 'centered'`
      means the TARGET'S center — `obj.position.set(...)` before a bare
      `placeOn(obj, floor)` is silently DISCARDED and every prop piles up
      at the floor's center (the "furniture blob"). Pass your spot
@@ -528,8 +568,7 @@ videos that skip them.
      the waypoints AND yaws it to face its travel direction — coupled, so it
      can never slide sideways. Never animate a vehicle with a bare
      `obj.position.x = lerp(...)`: the model travels perpendicular to its own
-     wheels unless its nose happens to align with that axis (the sideways-
-     vehicle bug — a 75-second video of a vehicle drifting broadside). The
+     wheels unless its nose happens to align with that axis. The
      render audit flags this (`[motion] ⚠ RE-RENDER — travelled sideways`);
      intentional lateral slides (conveyor, crab) opt out with
      `obj.userData.noMotionCheck = true`. **Opt-outs are logged by name at
@@ -624,7 +663,7 @@ videos that skip them.
    if (spot) bench.position.copy(spot);
    ```
 
-   **Placement anti-patterns (these are real failures that have shipped):**
+   **Placement anti-patterns:**
 
    - **Never write `obj.position.x/.z = …` after a place helper.** The
      helper centers the object's *bounding box* at the anchor; a raw
@@ -648,7 +687,7 @@ videos that skip them.
 
    `placeOn(item, shelf)` snaps to the shelf unit's OUTER TOP, not an
    interior board — and hand-guessing each board's Y/Z drops the books
-   *inside* the carcass (a shipped bug). Instead, drop onto the actual
+   *inside* the carcass. Instead, drop onto the actual
    board surface with `snapToGround`, which raycasts down from the item's
    current xz against the shelf's own meshes:
 
@@ -673,15 +712,14 @@ videos that skip them.
    not a number you guessed. Keep them inset from the front edge and leave
    a sliver of `minSpacing` so they don't z-fight each other.
 
-3. **Expand the brief into a fully realized piece.** The brief is the
-   seed — a concept, a mood, a few anchor elements. Your job is to
-   imagine the rest into existence: the world it lives in, the
-   composition and depth of every frame, the rhythm, the things the
-   brief doesn't mention but that the piece needs to feel real and
-   complete. A brief that names three things doesn't mean a video of
-   three things floating in black; it means three things ANCHORED in
-   the world you build around them. Take creative authorship. The brief
-   trusts you to do the expansion work.
+3. **Expand what you're asked for into a fully realized piece.** A
+   request is usually a seed — a concept, a mood, a few anchor elements.
+   The rest is yours to imagine into existence: the world it lives in, the
+   composition and depth of every frame, the rhythm, the things nobody
+   named but that the piece needs to feel real and complete. Three named
+   things doesn't mean a video of three things floating in black; it means
+   three things ANCHORED in the world you build around them. Take creative
+   authorship.
 
 4. **Story progression, not loops.** 4-6 distinct visual phases planned
    BEFORE writing any code. Each phase looks/feels different — different
@@ -769,8 +807,8 @@ container mounts the repo AT `/workspace`, so they're the same paths).
 ```
 
 `assets` is whatever your scene actually needs — HDRIs, GLBs, PBR
-texture sets, VRMs, audio. Declare only what your scene uses. The brief
-decides what belongs there; there is no required set.
+texture sets, VRMs, audio. Declare only what your scene uses; there is no
+required set.
 
 **Asset injection is RAW BYTES.** Point each asset at the REAL file —
 `hdri.hdr`, `model_embedded.gltf`, `character.vrm`, `image.png` — NOT a
@@ -779,11 +817,8 @@ straight on `globalThis.ASSETS[key]` (no base64 round-trip).
 `globalThis.b64toArrayBuffer(ASSETS.key)` still works — it passes that
 `Uint8Array` through to an `ArrayBuffer` — so
 `loader.parse(globalThis.b64toArrayBuffer(ASSETS.x))` is the universal
-pattern for GLB / VRM / HDR. (The `fetch_*` scripts still emit a
-`*_b64.txt` sidecar for legacy reasons; ignore it and point at the raw
-file. Pointing the `hdri` asset at `hdri_b64.txt` and then parsing it
-yields "no header found" — you'd be handing the loader base64 text, not
-the HDR bytes.)
+pattern for GLB / VRM / HDR. (Point the `hdri` asset at `hdri.hdr` itself — handing the loader base64
+text instead of HDR bytes yields "no header found".)
 
 JS — minimum scene shape, no assumptions about content:
 
@@ -802,9 +837,9 @@ globalThis.setup = async function () {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(50, WIDTH / HEIGHT, 0.1, 200);
 
-    // Build the world the brief asks for here — HDRI sky + lighting,
+    // Build the world your piece needs here — HDRI sky + lighting,
     // terrain or interior, props, characters (or none of those, if the
-    // brief is abstract / pure motion graphics / data viz / something
+    // piece is abstract / pure motion graphics / data viz / something
     // else). The patterns below are reusable; pick the ones that fit.
 
     globalThis._r = renderer; globalThis._s = scene; globalThis._c = camera;
@@ -827,7 +862,7 @@ globalThis.renderFrame = async function (t) {
 The trailing `// preflight: ASSETS['key', ...]` comment is required —
 the engine uses it to verify every declared asset is read.
 
-### Reusable patterns (mix and match per the brief)
+### Reusable patterns (mix and match as your piece needs)
 
 **HDRI for lighting** — provides ambient + IBL reflections. HDRI is
 INVISIBLE: only set the environment, NOT `scene.background`.
@@ -835,8 +870,7 @@ HDRIs are designed to be a global light source, not a backdrop —
 using one as the visible sky gives a flat 360 photo behind everything.
 
 ```js
-// HDRLoader (RGBELoader is deprecated in three 0.184). The `hdri` asset
-// points at the RAW hdri.hdr (see "Asset injection is RAW BYTES" above).
+// HDRLoader. The `hdri` asset points at the RAW hdri.hdr (see "Asset injection is RAW BYTES" above).
 const { HDRLoader } = await import('npm:three@0.184.0/addons/loaders/HDRLoader.js');
 const hdr = new HDRLoader().parse(globalThis.b64toArrayBuffer(globalThis.ASSETS.hdri));
 // 1) CPU row-flip — DataTexture.flipY is IGNORED on WebGPU; without this the
@@ -859,16 +893,16 @@ scene.environmentNode = THREE.pmremTexture(hdriTex);   // lighting only — NEVE
 //  fallback — fine for a quick look, but a real HDRI is the production path.)
 ```
 
-**Visible sky / horizon** — for outdoor scenes, use the
-`volumetric_clouds` TSL effect (see the FX section; cloud cover via
-`sparseness: 'low'|'medium'|'overcast'`, grading via `mood: 'normal'|'stormy'`). That renders procedural sky + clouds + sun. For indoor scenes
+**Visible sky / horizon** — for outdoor scenes, use the WORLD-SPACE SKY
+SYSTEM (`eidoverse/sky_system.js` — see "WORLD-SPACE SKY + WEATHER"). That
+renders geometry-aware sky + clouds + sun/moon/stars. For indoor scenes
 build the actual enclosure (walls, ceiling, windows showing what's
 outside through the glass). For abstract scenes write a custom
-backdrop / gradient / shader dome that fits the brief — never leave
+backdrop / gradient / shader dome that fits the piece — never leave
 `scene.background` as a flat dark color and call it done.
 
 **Motivated lights on top of HDRI** — HDRI alone is flat ambient. Add
-key/rim/fill that match the brief's mood. One `DirectionalLight` with
+key/rim/fill that match the piece's mood. One `DirectionalLight` with
 `castShadow: true` per scene MAX.
 
 ```js
@@ -880,8 +914,8 @@ key.position.set(3, 8, 6); scene.add(key);
 flat-color `MeshStandardNodeMaterial({ color: ... })`. See the "Asset
 sourcing" section above for the four-map material recipe.
 
-**VRM character** — ONLY when the brief calls for a character on
-screen. Many briefs don't. The `loader.register(VRMLoaderPlugin)` line
+**VRM character** — ONLY when the piece calls for a character on
+screen. Many don't. The `loader.register(VRMLoaderPlugin)` line
 is REQUIRED — without it MToon falls back to a WebGL ShaderMaterial
 under WebGPURenderer and the character renders solid black with only
 the eyes visible.
@@ -906,8 +940,11 @@ globalThis._vrm = vrm;
 pick one** (same as fetched props):
 - `aletheia.vrm` — Aletheia, a production-quality character (blonde, cyberpunk styling)
 - `aporia.vrm` — Aporia, a production-quality character (dark-haired, cyberpunk styling)
-- `claude_suit.vrm` — Claude, the AI, in a suit — the PRIMARY Claude model (see rule below)
-- `claude.vrm` — a legacy lightweight Claude stand-in; prefer `claude_suit.vrm`
+- `claude_suit.vrm` — Claude, the AI, in a suit — the PRIMARY Claude model (see rule below).
+  **The outfit is built in LAYERS** — mesh names `jacket`, `tie`, `shirt`, `pants`, `shoes`:
+  hide layers to change the look (jacket + tie off = casual shirtsleeves):
+  `vrm.scene.traverse(o => { if (o.name === 'jacket' || o.name === 'tie') o.visible = false; })`
+- `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is the primary model
 
 Any other `.vrm` you drop into `eidoverse/assets/vrms/` works the same
 way. Point `config.assets` at the VRM **where it lives** — e.g.
@@ -924,7 +961,7 @@ video **explicitly references the AI Claude**. Do **NOT** cast Claude as
 a generic narrator, correspondent, anchor, bystander, or "a human" —
 Claude is a specific identity (and not a human), not a faceless extra.
 Likewise in **dialogue/narration/on-screen text**: do not bring up or
-name-drop "Claude" unless the brief specifically asks for it.
+name-drop "Claude" unless the piece specifically calls for it.
 
 **Character voices** — assign one edge-tts voice per character and keep
 it consistent for the whole piece (and across pieces, if you're building
@@ -974,20 +1011,12 @@ python3 generate_song.py "<tags>" "<lyrics>" [--bpm N] [--key "K"] [--seed N]
 **Tag rules:**
 - For VOCAL tracks, name the voice type in the tags (e.g. `female lead vocal`)
 - For INSTRUMENTAL, omit the vocal tag AND set lyrics field to empty/whitespace
-- Genre palette — DO NOT default to synthwave / cyberpunk. The full menu:
-  jazz, swing, lounge, ragtime, country, folk, bluegrass, classical, orchestral,
-  baroque, opera, ambient, dark ambient, drone, trance, happy hardcore, EBM,
-  industrial, martial industrial, new wave, dark wave, ska, pop punk, reggae,
-  bossa nova, trip-hop, downtempo, chiptune, vaporwave, slushwave, neoclassical
-  darkwave, folkwave, jazzwave, ostalgie, cabaret, cyber cabaret, military
-  march, circus, digitized opera, gospel, blues, funk, soul, R&B, hip-hop,
-  trap, house, techno, breakbeat, drum and bass, dubstep, psytrance, minimal
-  techno. If you catch yourself typing "synthwave" or "cyberpunk", stop and
-  pick something else.
+- `tags` is free text — ACE responds to genre names, instrument lists,
+  production adjectives, and tempo/mood words, in any combination.
 
 **Lyrics rules:**
 - Lyrics field is SINGABLE WORDS ONLY. No timestamps. No `[verse]` / `[chorus]` / `[bridge]` labels. No descriptive markers. ACE renders lyrics verbatim — labels become sung words.
-- If the brief calls for instrumental, leave the lyrics field empty.
+- For an instrumental, leave the lyrics field empty.
 
 **Output:** writes `song.mp3` in CWD. Poll loop waits up to 5 minutes — that's enough for typical generations. If ACE legitimately doesn't finish, FIX THE BRIEF (shorter duration, simpler tags) before falling back to a synth bed.
 
@@ -1213,7 +1242,7 @@ look right without something to reflect. Set this up before you start
 populating geometry, not after.
 
 - HDRI mandatory for any non-flat-indoor scene (`fetch_hdri.py`; point the `hdri` asset at the raw `hdri.hdr`). The HDRI gives you global ambient + reflections all at once.
-- Manual lights ON TOP of HDRI for specific motivated sources — a key light from the direction the brief implies, a rim/back light to separate the subject from the background, accent point lights for diegetic sources (neon signs, screens, candles, sun through a window).
+- Manual lights ON TOP of HDRI for specific motivated sources — a key light from the direction the scene implies, a rim/back light to separate the subject from the background, accent point lights for diegetic sources (neon signs, screens, candles, sun through a window).
 - **NEVER use `SpotLight` with `castShadow: true`** — crashes MToon shaders, makes the VRM invisible.
 - Keep to ONE `DirectionalLight` with `castShadow: true` per scene (the "sun" / main key). Additional lights should have `castShadow: false`.
 - Use multiple `PointLight`s (no shadow casting) for diegetic neon / interior practicals — they're cheap and add color depth.
@@ -1286,8 +1315,8 @@ simple, correct path is to put it in `collisionMeshes`.)*
 
 With ANY of these the controller owns the mixer, the root transform, AND the feet:
 - Do **NOT** pre-play idle (`playVRMADefault('idle')`) before/under it — a
-  pre-played action stays at weight 1 and blends over every clip it plays
-  (the recurring "legs drag around, no walk animation" bug).
+  pre-played action stays at weight 1 and blends over every clip it plays,
+  so the legs drag and no walk animation shows.
 - Do **NOT** call `mixer.update(dt)` / `vrm.update(dt)` yourself (it does).
 - Do **NOT** write `vrm.scene.position` / `.rotation.y` per frame — read
   position via `getPosition()`; face the camera only when stationary via the
@@ -1440,7 +1469,7 @@ is the cause:
 - `WIDTH`, `HEIGHT`, `FPS`, `DURATION`, `TOTAL_FRAMES`
 - `canvas`, `GPU_ADAPTER`, `GPU_DEVICE`
 - `ASSETS[key]` — raw `Uint8Array` bytes keyed by your `assets` map
-- `b64toArrayBuffer(x)` → ArrayBuffer (passes Uint8Array through; decodes legacy base64 strings)
+- `b64toArrayBuffer(x)` → ArrayBuffer (passes Uint8Array through; decodes base64 strings)
 
 ### Three.js
 - `THREE` — three@0.184.0 (WebGPU build + TSL)
@@ -1488,7 +1517,7 @@ from moving → emoting, let the controller run out of waypoints (or call
 
 **Sitting clips available** (in `assets/animations/`): `sitting_normal_chair` + `sitting_nervous_arm_rub_chair` (chair — use via `seatOn`), `sitting_on_ground` (cross-legged) + `sit_laying_on_ground` (lying down) (floor — use via `sitOnGround`). Match the clip to the surface: chair clips need a chair, floor clips need the floor.
 
-**Multiple characters — just animate each; the engine drives them all.** Load each VRM, then call `playVRMADefault` / `seatOn` / `sitOnGround` / the controller per VRM. The render loop updates EVERY loaded VRM's mixer **and** `vrm.update()` every frame (one mixer per VRM — replaying a clip on a VRM replaces its previous mixer, so idle+sit can't both play). Do **NOT** hand-roll mixer management for multi-VRM scenes — capturing mixers into your own vars, nulling `globalThis._mixer` between loads, or updating `_mixer1`/`_mixer2` in `renderFrame`. That old workaround leaves the 2nd character standing in its chair or sunk through the seat (only one VRM got driven). Each `seatOn`/`playVRMADefault` call is self-sufficient.
+**Multiple characters — just animate each; the engine drives them all.** Load each VRM, then call `playVRMADefault` / `seatOn` / `sitOnGround` / the controller per VRM. The render loop updates EVERY loaded VRM's mixer **and** `vrm.update()` every frame (one mixer per VRM — replaying a clip on a VRM replaces its previous mixer, so idle+sit can't both play). Do **NOT** hand-roll mixer management for multi-VRM scenes — capturing mixers into your own vars, nulling `globalThis._mixer` between loads, or updating `_mixer1`/`_mixer2` in `renderFrame`. Each `seatOn`/`playVRMADefault` call is self-sufficient.
 
 **Lip-sync when a VRM speaks.** If you lay TTS in a character's voice, drive the mouth: `lipsync.py` → `get_viseme_timeline(vocals.wav, fps)`, then per frame set `vrm.expressionManager` visemes (`aa`/`ih`/`ou`/`ee`/`oh`) + occasional `blink` and `em.update()`. Voice over a frozen mouth reads as broken.
 
@@ -1508,7 +1537,7 @@ planned A* path. Attach it to a `VRMRobotBody` while DIALING IN a
 navigation scene (why is she routing around nothing? what did the lidar
 see?), then remove it — its visuals in a finished video read as glitch
 lines coming off the character. Never leave it enabled in a final render
-unless the brief explicitly wants a "robot POV / diagnostics" look.
+unless you explicitly want a "robot POV / diagnostics" look.
 
 ### Character locomotion (low level)
 `VRMCharacterController` + `VRMFootControllerIK` — tread-synced stride, foot
@@ -1558,6 +1587,56 @@ const armB = globalThis.cloneModel(armA);   // SkeletonUtils — own skeleton, a
 ```
 `cloneModel` accepts the GLTF result or its `.scene`. Use it for ANY model you
 duplicate; only plain unrigged meshes are safe with `.clone()`.
+
+**Animated bird characters — crow & cactus wren.** Two purpose-built,
+fully-clipped bird assets live in `eidoverse/assets/models/`. Each is one
+skinned mesh with a named clip set, so `playModelAnimations` selects behaviour
+by name:
+
+| model | clips | size L×H×W |
+|---|---|---|
+| `crow_bird_animated_corvid_raven_black_cawing_flying_walking.glb` | `Idle` `Walk` `Hop` `Peck` `Fly` `Caw` `Talk` `TurnL` `TurnR` | 0.77 × 0.52 × 0.88 m |
+| `cactus_wren_bird_animated_desert_songbird_calling_hopping_walking.glb` | `Idle` `Walk` `Hop` `Peck` `Fly` `Call` `TurnL` `TurnR` | 0.19 × 0.13 × 0.22 m |
+
+Both are authored to drop straight in: **feet at the origin** (place them on the
+ground with no offset hunting), **nose along +z** (registered in
+`_forward_axes.json`, so `driveAlong`/`faceToward` get the sign right), and
+**real-world scale** — crow 51 cm tall, wren 18.5 cm bill-to-tail. Don't rescale
+them to "look right"; a wren really is that much smaller than a crow.
+
+```js
+const loader = new globalThis.GLTFLoader();
+const crow = await new Promise((res, rej) =>
+    loader.parse(globalThis.b64toArrayBuffer(globalThis.ASSETS.crow), '', res, rej));
+globalThis.playModelAnimations(crow, { clip: 'Idle' });   // or 'Walk' / 'Fly' / 'Caw'
+crow.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+scene.add(crow.scene);
+```
+`Walk`/`Hop` are **in-place** cycles (the feet slide back through stance) — drive
+the body forward yourself, or the bird moonwalks. `Fly` is a level cruise: pitch
+the whole model for a climb or dive. For a flock, `cloneModel` each extra bird
+and offset its action time (`action.time = Math.random() * clip.duration`) so
+they don't beat in unison.
+
+**Paired call audio, pre-aligned to the clips** — in `eidoverse/assets/audio/`:
+
+| file | length | use |
+|---|---|---|
+| `crow_caw_clip_synced.wav` | 1.60 s | two caws landing exactly on the two gape peaks of the crow's `Caw` clip (48 f @ 30 fps) — start it with the clip, no offset |
+| `cactus_wren_call_clip_synced.wav` | 2.40 s | the wren's churr; the `Call` clip (72 f @ 30 fps) bobs the head on all 12 note onsets detected from this very file |
+| `crow_caw_single.wav` | 0.74 s | one caw, for one-off / scattered background use |
+| `crow_caw_says_claude.wav` | 0.41 s | the caw articulated into the word "Claude" |
+
+Because each `*_clip_synced.wav` is exactly the clip's length, syncing is just
+"start both at the same time" — no offset table. ⚠️ `crow_caw_says_claude.wav`
+is subject to the **Claude-identity rule** above: use it only when the video
+explicitly references the AI Claude, never as a generic bird noise.
+
+The crow caws are our own Stable Audio 3 generations (`generate_sfx.py`), CC0
+like the rest of the library — so they're safe to publish. Regenerate or extend
+them the same way if you need a different call; score candidates against a real
+caw's band profile (a crow caw puts ~70-80% of its energy in **0.8-2 kHz** — a
+generation that lands mostly above 5 kHz is hiss, not a bird).
 
 
 **In-world screens & displays = `globalThis.makeScreen`** — the canonical
@@ -1625,7 +1704,7 @@ pattern; a full-frame fx overlay is never canvas work.)
 ```js
 globalThis._fx = globalThis.CustomEffectsDeno.applyTo({
     scene, camera,
-    effects: 'volumetric_clouds,glitch_bars',   // comma-separated — chain 1-4 freely
+    effects: 'depth_fog,glitch_bars',   // comma-separated — chain 1-4 freely
     opts: { glitch_bars: { barFreq: 22, shift: 0.03, opacity: 0.85 } },
 });
 // per frame — update the effect's uniforms, THEN render. _fx.update(t) does
@@ -1646,24 +1725,25 @@ await globalThis._fx.update(t);
 await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS render after — update() doesn't
 ```
 
-Always-on baseline (no opt-in): GTAO + SSR + UnrealBloom + FXAA + cloud-reflect on `metalness > 0.4` when `volumetric_clouds` is active.
+Always-on baseline (no opt-in): GTAO + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` (see "WORLD-SPACE SKY + WEATHER").
 
 **This list below IS the complete catalog (31 effects) — do NOT discover effects
 by `grep`/`ls`-ing `effects_tsl/`.** A `| head` on that truncates the directory
 ALPHABETICALLY, so you only ever see `after_image`…`dithering` and silently miss
 the back half of the alphabet. Pick from the WHOLE list here, and **vary your
 choice** — reaching for the same `glitch_bars`/`crt` every time wastes the palette.
-Match the effect to the mood: `godrays`/`anamorphic_flare`/`volumetric_clouds` for
-epic/atmospheric, `vhs_tape`/`old_bw_film`/`bw_halftone` for retro, `neon_edges`/
+Match the effect to the mood: `godrays`/`anamorphic_flare` (plus the sky
+system's own shafts for outdoor epics), `vhs_tape`/`old_bw_film`/`bw_halftone` for retro, `neon_edges`/
 `blueprint`/`retro_wireframe` for techy, `melt`/`wavy`/`kaleidoscope` for trippy,
 `underwater`/`depth_fog` for mood. (Programmatic list at runtime: `CustomEffectsDeno.list()`.)
 
 Library (31 effects) — the families:
-- **3D/volumetric** (scene passes): `volumetric_clouds`, `nuclear_explosion`
+- **3D/volumetric** (scene passes): `nuclear_explosion` (skies and rain are
+  NOT effects — use the world-space sky + weather systems)
 - **Glitch/retro** (the real glitch — use instead of hand-rolled bars): `glitch_bars`, `vhs_tape`, `crt`, `rgb_shift`, `chromatic_aberration_alpha`, `jitter`, `after_image`
 - **Colour grade**: `full_toon`, `sepia`, `bleach_bypass`, `old_bw_film`, `bw_halftone`
 - **Line/edge**: `cross_hatch`, `neon_edges`, `blueprint`, `dithering`, `retro_wireframe`
-- **Atmospheric / light**: `depth_fog`, `godrays`, `lensflare`, `anamorphic_flare`, `underwater`
+- **Atmospheric / light**: `depth_fog`, `godrays`, `lensflare`, `anamorphic_flare`, `underwater`, `rain_on_camera` (lens droplets — world rain is the weather system's job)
 - **Distort**: `melt`, `wavy`, `kaleidoscope`
 - **Blur/focus**: `focus_blur` (DoF), `radial_blur`, `box_blur`, `hash_blur`
 
@@ -1752,7 +1832,7 @@ bot.detach('left');                            // returns the module — re-add 
   living BONES that `RoboticsKit.connect()` accepts — use them directly
   for full manual control.
 
-**Robot scene direction — hero-reel lessons (hard-won, follow these):**
+**Robot scene direction:**
 - SHOW the beat ON CAMERA: schedule pick/assembly moments to land inside the
   camera's framing, then VERIFY by extracting frames at those exact times —
   a log line saying it happened is not a shot of it happening. Hold a static
@@ -1863,7 +1943,7 @@ globalThis.makeGrass({ scene, width: 60, depth: 40, bladeHeight: 0.7,
     spacing: 0.16, perCell: 5, wind: 0.28, windSpeed: 2.0,
     color: 0x2f5212, colorTip: 0xb6d45a });
 ```
-- Tune to the brief: `width`/`depth` (metres; `size` = square), `center [x,z]`,
+- Tune to the scene: `width`/`depth` (metres; `size` = square), `center [x,z]`,
   `spacing` (smaller = denser → heavier), `perCell` (blades/tuft), `bladeHeight`,
   `bladeWidth`, `color`+`colorTip` (base→tip — dry/autumn/alien grass), `wind`
   (amplitude; **0 = dead-still**), `windSpeed`, `lean`.
@@ -2035,7 +2115,7 @@ const wall = new THREE.Mesh(geo, globalThis.createParallaxMaterial({
 wall.castShadow = wall.receiveShadow = true;  scene.add(wall);
 ```
 
-The material is a real **lit `MeshStandardNodeMaterial`** — the relief is lit, self-shadowed (a second march toward `lightDir`), and its **shading normal is derived from the height field by default** (`heightNormal:true`), so it shades like geometry with NO normal map needed. It also sets `maskShadowNode` so cast shadows follow the carved outline; `createReliefColumn` additionally enables the relief self-shadow mode so recesses shadow themselves. `computeTangents()` is mandatory (POM marches in tangent space) — as a safety net, the helper audits the scene at first render: a POM mesh with no tangents gets them auto-computed (the warning names the mesh), and when they can't be computed (merged non-indexed geometry) the relief shading normal is disabled instead of miscompiling into an invisible mesh (`THREE.Node: Recursion detected` on a POM surface means exactly this). It also warns on `curvedSilhouette` without `inflate` and other footguns — read the warnings; they name the exact fix. (`selfLit`/`lambert` remain legacy unlit escape hatches; never `MeshBasicNodeMaterial` — it renders all-black under the march.)
+The material is a real **lit `MeshStandardNodeMaterial`** — the relief is lit, self-shadowed (a second march toward `lightDir`), and its **shading normal is derived from the height field by default** (`heightNormal:true`), so it shades like geometry with NO normal map needed. It also sets `maskShadowNode` so cast shadows follow the carved outline; `createReliefColumn` additionally enables the relief self-shadow mode so recesses shadow themselves. `computeTangents()` is mandatory (POM marches in tangent space) — as a safety net, the helper audits the scene at first render: a POM mesh with no tangents gets them auto-computed (the warning names the mesh), and when they can't be computed (merged non-indexed geometry) the relief shading normal is disabled instead of miscompiling into an invisible mesh (`THREE.Node: Recursion detected` on a POM surface means exactly this). It also warns on `curvedSilhouette` without `inflate` and other footguns — read the warnings; they name the exact fix. (Never `MeshBasicNodeMaterial` — it renders all-black under the march.)
 
 **How to EVALUATE a SPOM render (or you'll ship plain POM by mistake):** pull the camera BACK so the whole object, its silhouette against the background, AND its floor shadow are all in frame; put it in a LIT scene with a real floor; ORBIT so the silhouette sweeps. A zoomed-in, barely-moving shot of a dark panel proves nothing. On a curved surface, confirm the relief peaks visibly **bulge past** the round base outline.
 
@@ -2046,17 +2126,136 @@ or a sine-displaced mesh.** These read with true depth and motion:
 - **Screen-filling nuke / shockwave** → the `nuclear_explosion` effect — a
   SCREENSPACE post effect (fills the frame; add it to the `effects:` string).
   Use it when the blast IS the shot.
-- **Sky + clouds** → the `volumetric_clouds` effect (cover via `sparseness`, grading via `mood`).
-- **RAIN** → two composable effects: `depth_rain` (WORLD-SPACE weather —
-  falling streak layers, organic puddles with refraction + sky fresnel,
-  splash rings on every upward surface, cover occlusion so overhangs stay
-  dry, global wet-darkening + rain haze) and `rain_on_camera` (LENS rain —
-  screen-locked refracting droplets + wet blur; fixed size, never zooms
-  with the camera). Chain them for full weather:
-  `effects: 'depth_rain,rain_on_camera'` (weather first, lens on top).
+- **Sky + clouds** → the WORLD-SPACE SKY SYSTEM (`makeSkySystem`, full
+  section below) — cloud types, time-of-day, sun/moon/stars, day cycles.
+- **RAIN / STORMS** → the WEATHER SYSTEM (`makeWeatherSystem`, same
+  section) — states from fair to darkstorm with world-anchored rain,
+  wet surfaces + puddles, from-the-clouds lightning, and smooth
+  agent-directable transitions. Add `rain_on_camera` (LENS rain —
+  screen-locked refracting droplets + wet blur) on top only when the
+  shot wants a lens inside the storm.
 - **Water / pours / splashes** → the fluid tools (`water_compute`,
   `fluid_3d`) — including novel uses: rain sheeting down a
   window, a character wading, ink blooming, a zero-g blob.
+
+## WORLD-SPACE SKY + WEATHER (`eidoverse/sky_system.js` + `eidoverse/weather_system.js`)
+
+The sky is GEOMETRY-AWARE volumetrics, not a post effect: clouds live on a
+camera-centered dome rendered in the scene pass, so buildings, terrain, and
+characters occlude the sky naturally, reflections move with the clouds, and
+sky elements can sit beyond the atmosphere. Use this for every outdoor sky.
+
+```js
+eval(Deno.readTextFileSync('eidoverse/sky_system.js'));
+const stars = await globalThis.loadImageTexture(ASSETS.starmap, { srgb: true }); // eidoverse/assets/sky/starmap_tycho_4k.jpg
+const moon  = await globalThis.loadImageTexture(ASSETS.moonmap, { srgb: true }); // eidoverse/assets/sky/moon_color_1k.jpg
+const sky = await globalThis.makeSkySystem({ scene, textures: { stars, moon },
+    opts: { hours: 15, clouds: 'cumulus' } });
+sky.applyToLights({ sun, hemi, fog: scene.fog });   // palette drives the scene lights
+// per frame: sky.update(t, camera)  — REQUIRED (drift, matrices)
+```
+
+- `sky.setTime(hours 0-24)` — sun/moon arcs, palette, stars fade. For a day
+  cycle call it per frame and re-run `applyToLights` each frame too.
+- `sky.setClouds('cumulus'|'stratus'|'cirrus'|'clear', overrides?)`.
+- `opts.azimuth` aims the sun's arc (put sunrise in front of the camera);
+  `opts.moonAngularDeg` scales the moon disc (16 = a looming companion
+  world; its texture is any 2:1 equirect); `opts.ringCurve = R` bows the
+  cloud deck upward along ±z to follow a curved megastructure horizon.
+- `sky.enableReflections(camera)` — per-pixel MOVING cloud reflections on
+  metals (SSR composes on top; geometry occludes sky reflections).
+- `await sky.bakeEnv(renderer)` — bakes the real sky into
+  `scene.environment` for env-IBL/transmission. **It OVERRIDES any
+  agent-set HDRI by default** (the sky owns the world's light); interiors
+  that keep their own HDRI pass `{ ifAbsent: true }`.
+- `sky.tslCloudShadow(positionWorld, k)` / `sky.wrapCloudShadows(scene)` —
+  drifting cloud shadows on ground materials; `sky.weatherAt(x, z)` (JS)
+  and `sky.sunCoverageDim(x, z)` for gameplay/light coupling.
+
+```js
+eval(Deno.readTextFileSync('eidoverse/weather_system.js'));
+const bolt = await globalThis.loadImageTexture(ASSETS.bolt_trace, {});          // eidoverse/assets/particle_textures/trace_06.png
+const drop = await globalThis.loadImageTexture(ASSETS.rain_drop, { srgb: true }); // eidoverse/assets/sky/rain_streak.png
+const weather = await globalThis.makeWeatherSystem({ scene, sky, opts: { textures: { bolt, drop } } });
+weather.wrapScene();                       // wet-darkening + puddles + cloud shadows on scene materials
+weather.setWeather('storm', 1);            // clear|fair|sunshower|overcast|rain|storm|cyclone|darkstorm
+sun.intensity *= weather.sunDim();
+// per frame: weather.update(t, camera)  — REQUIRED (rain, lightning, greying)
+```
+
+- `weather.transitionTo(name, k, durationSeconds)` — SMOOTH weather change:
+  everything (cloud coverage, rain, wind, lightning odds, greying, wetness)
+  eases across the window. Duration is yours to direct: `90` = a storm
+  rolling in over a minute and a half; default 45. One call, no other steps.
+- Weather couples the sky automatically: coverage presets, sun dimming,
+  wind-driven cloud + rain drift, from-the-clouds lightning with distant
+  sheet flashes on harsh states, world-tiled rain curtains under dense
+  cells. Mark materials `userData.noWet` to skip wetness; sky-element
+  materials should set `userData.keepEnv` so reflection-hook env
+  suppression leaves their env-IBL alone.
+- Scene lights should re-apply per frame during transitions/cycles:
+  `sky.applyToLights(...)` then `sun.intensity *= weather.sunDim()`.
+
+### PICK A PACKAGE — the skies are whole looks, not parts bins
+
+Every sky is a **wholesale, dialed-in look-dev package**. Select one; do not
+assemble your own out of the internals. The engine exposes seams (a celestial
+hook, palette tints, cloud phase terms) because the packages are built on
+them — they are not a menu for inventing a fourth world, and recombining
+them is how you get a sky that reads broken.
+
+**Three worlds** — the complete set (names as they appear in Eanpa):
+
+| key | world |
+|---|---|
+| `earth` | Earth |
+| `ringworld` | Orbital / Halo |
+| `shieldworld` | Earth 5129323011 CE (Red Giant) — far-future Earth under the expanded Sun, behind a hex shield |
+
+Two of the three ARE Earth. `shieldworld` is not an alien planet — it is this
+planet, five billion years on, under a hex shield. Its star fills roughly a
+third of the sky and its surface visibly churns, so give it room in frame.
+
+**Four cloud types:** `clear` · `cumulus` · `stratus` · `cirrus`
+**Eight weather states:** `clear` · `fair` · `sunshower` · `overcast` ·
+`rain` · `storm` · `cyclone` · `darkstorm`
+
+### COLOUR OVERRIDES — retint a package, don't rebuild it
+
+These are the ONLY sanctioned way to deviate from an authored look. Each is a
+per-channel multiplier that applies *after* the preset has driven its value,
+so it retints the dialed-in look and everything else (lightning coupling, sky
+response, day-cycle timing) still reads through. Omit one to keep the
+authored colour; `[1, 1, 1]` is the identity.
+
+```js
+// at construction
+const sky = await globalThis.makeSkySystem({ scene, textures: { stars },
+    opts: { hours: 15, clouds: 'cumulus',
+            cloudColor: [1.0, 0.72, 0.55],       // cloud body tint
+            sunColor:   [1.0, 0.85, 0.70] } });  // star light + disc
+const weather = await globalThis.makeWeatherSystem({ scene, sky,
+    opts: { textures: { bolt, drop },
+            rainColor: [1.6, 0.55, 0.35] } });   // streaks + splashes
+
+// or live, any time
+sky.setColors({ cloud: [...], sun: [...], star: [...], shield: [...] });
+weather.setColors({ rain: [...] });
+sky.getColors(); weather.getColors();            // read current multipliers
+```
+
+- `rainColor` — precipitation streaks and splashes.
+- `cloudColor` — cloud body lighting.
+- `sunColor` — the star's light and disc.
+- `star` — **shieldworld only**: retints the red giant's own surface. The
+  granulation, convection cells, hot patch and limb keep their structure;
+  only the hue moves. Push blue for a hotter star, red for cooler.
+- `shield` — **shieldworld only**: the hex shield lattice. Values above 1 are
+  intentional, it is emissive; the authored cyan is `[0.38, 0.95, 1.3]`.
+
+`star` and `shield` route to the celestial module, which registers itself
+during `rg.attach({ scene, sky })` — so **call them after attach**, or they
+silently no-op.
 
 **`sdf_raymarch_loader`** — raymarched 3D objects PLACED in the scene (at a
 position, occluding/occluded by other geometry — unlike the screenspace
@@ -2140,7 +2339,7 @@ a collider cup, optionally paired with a `water_compute({ circular: true })`
 surface whose `mesh.position.y` you raise over the fill duration so the
 stream lands on a rippling, rising level. Same primitives compose into
 fountains, rain into a barrel, a waterfall pool — point them where the
-brief needs.
+scene needs.
 
 **`WaterMesh` + `SkyMesh`** — passive ocean / large-scale water with
 FFT-style waves. Better than `water_compute` when you need horizon-
@@ -2402,7 +2601,7 @@ top of the rendered video regardless of where the camera moves:
 
 **Use `globalThis.makeOverlayLayer({ fov })` — do NOT parent overlays to the
 main camera.** An overlay parented to the world camera lives in the SCENE pass,
-so world-layer effects (`volumetric_clouds`/`nuclear_explosion`/`underwater`…)
+so world-layer effects (`nuclear_explosion`/`underwater`/`godrays`…)
 composite right over it, and in-scene transparent content can cover it.
 `makeOverlayLayer` puts the overlay in its OWN scene that the engine composites
 as a second `pass()` node — layered correctly:
@@ -2414,9 +2613,9 @@ world + world-layer FX     ← UNDER the overlay (it's the thing being filmed)
 ```
 
 **Which effects go under vs over, and how to switch.**
-- **Always UNDER (locked):** `volumetric_clouds`, `nuclear_explosion`, `depth_rain`,
-  `godrays`, `underwater` — full-world effects that look broken over a HUD; the
-  override is ignored for these.
+- **Always UNDER (locked):** `nuclear_explosion`, `godrays`, `underwater` —
+  full-world effects that look broken over a HUD; the override is ignored
+  for these.
 - **Switchable, default UNDER:** `depth_fog`, `retro_wireframe`.
 - **Switchable, default OVER:** everything else (`vhs_tape`, `glitch_bars`,
   `rgb_shift`, `crt`, grain, scanlines, `blueprint`, `cross_hatch`, …).
@@ -2427,7 +2626,7 @@ OVER (a screen filter) but set `layer:'under'` to stylize only the world and
 keep the HUD crisp:
 ```js
 globalThis.CustomEffectsDeno.applyTo({ scene, camera,
-  effects: 'volumetric_clouds,blueprint,vhs_tape',
+  effects: 'blueprint,vhs_tape',
   opts: { blueprint: { layer: 'under' } },   // world becomes a blueprint; HUD + vhs stay on top
 });
 ```
@@ -2553,9 +2752,8 @@ The character DOES THINGS — walks through environments, turns to face camera, 
 
 ## Pre-render self-scan — grep before you waste a render
 
-Run these against your `scene.js` before the first full render. Each
-catches a failure mode that has eaten thousands of frames in past
-sessions. Fix any matches and re-scan.
+Run these against your `scene.js` before the first full render. Fix any
+matches and re-scan.
 
 ```bash
 SC=work/<id>/scene.js
@@ -2581,8 +2779,8 @@ grep -nE "(leftUpperArm|rightUpperArm|leftShoulder|rightShoulder)\.rotation" "$S
 #    should return at least one hit.
 grep -nE "enableFootIK" "$SC"
 
-# 5. Walk Backwards is a narrative choice. If the brief doesn't call for
-#    backward motion, swap to the forward walk + waypoints.
+# 5. Walk Backwards is a narrative choice. If you don't want backward
+#    motion, swap to the forward walk + waypoints.
 grep -nE "Walk.?Backward" "$SC"
 
 # 6. NodeMaterial discipline. The pipeline is WebGPU + TSL only — every
@@ -2716,7 +2914,7 @@ These are shimmed automatically, but knowing them helps when oddities appear:
   ```
   The see-through is **alpha opacity** (`transparent: true` + `opacity` ~0.2–0.4). `transmission` + `ior` add refraction flavor on top, but they are NOT what makes it see-through. `transmission: 1.0` with no opacity renders OPAQUE/dark on this stack (the backdrop sample comes back black). For a hero refraction effect, hand-roll screen-space refraction; for ordinary glass/water/ice/windows, the alpha+transmission pattern is the way.
 - **Video encoder**: the frame→nvenc pipe defaults to 8000k average / 10000k peak. If high-frequency content (fluid, noise, dense particles, fast motion across the whole frame) still macroblocks into "pixel boxes", raise it via `RENDER_BITRATE` or switch to `RENDER_CQ=19` (near-lossless). (If your operator loop imposes a file-size ceiling, respect it: keep `-cq` higher, drop resolution, or shorten the clip.)
-- **Screen-space depth-keyed effects composite OVER no-depth particles.** `volumetric_clouds` (and any effect that reads scene depth) blends its result using the depth BEHIND a particle quad — additive sprites, particle-morph clouds, and `fromText` particle words all get clouds/fog drawn straight through them. If a particle showpiece must read against the sky, either frame it against geometry (occlusion works fine — stones in front of the word clip it correctly) or use `SkyMesh` + `scene.fog` instead of the screen-space sky. Also remember additive particles literally cannot show against a bright sky (add-to-white is invisible) — stage glowing particle work against dark backgrounds.
+- **Screen-space depth-keyed effects composite OVER no-depth particles.** Any effect that reads scene depth (`depth_fog`, `godrays`, …) blends its result using the depth BEHIND a particle quad — additive sprites, particle-morph clouds, and `fromText` particle words all get fog/rays drawn straight through them. If a particle showpiece must read against the sky, frame it against geometry (occlusion works fine — stones in front of the word clip it correctly). The world-space sky system does NOT have this problem — its cloud dome draws in the scene pass behind the particles. Also remember additive particles literally cannot show against a bright sky (add-to-white is invisible) — stage glowing particle work against dark backgrounds.
 - **Transparent materials write into the auto-enhance G-buffer.** The scene pass renders color + encoded normals + metalrough as MRT; those extra attachments follow each material's own blend state (opaques hard-write, transparents blend by their attachment alpha). A custom transparent billboard/quad that lets the DEFAULT normal write through smears its quad-face normals over the buffer GTAO reads, and AO stamps hard dark rectangles behind it. `makeParticles` already opts its quads out; for your own transparent effect quads copy its pattern — `mat.mrtNode = mrt({ normal: vec4(0), metalrough: vec4(0) })` (alpha-0 writes preserve what's underneath; color stays default). Real transparent SURFACES (water, glass) should keep writing their true normals — SSR needs them.
 
 ## Compressing the final video
@@ -2739,8 +2937,7 @@ renderer default but recovers some detail.
 
 ## Hard rules & anti-patterns (the "why" collection)
 
-Codified from real shipped failures. Most have deep-dive sections above;
-this is the checklist form.
+Most have deep-dive sections above; this is the checklist form.
 
 - **The deliverable is a 3D SCENE — never a slideshow of images on planes.**
   Web images are encouraged AS MATERIAL (textures on walls/posters/screens,
@@ -2756,7 +2953,7 @@ this is the checklist form.
   thirds. Same render pipeline for everything, same colour space, same AA.
 - **Scenes in voids = bug.** If the visible background is a flat dark color
   and the fog fades into the same color, you've made a void — props read as
-  floating in nothing. Outdoors → `volumetric_clouds` sky. Indoors → build
+  floating in nothing. Outdoors → the world-space sky system. Indoors → build
   the enclosure. Stylized negative space → EARN it (gradient, horizon line,
   a ground plane that reads as a stage). Flat `#0a0a14` + matching fog is
   "I forgot," not "I made a choice." The most common shape: HDRI loaded for
@@ -2782,8 +2979,6 @@ this is the checklist form.
 - **Sitting / emoting a stationary VRM — use `seatOn` / `emote`,** never
   hand-lowered idle poses or chair clips on the floor.
 - **NEVER `SpotLight` with `castShadow: true`** (MToon crash).
-- **Genre: don't default to synthwave/cyberpunk.** Match the brief; use the
-  whole menu; surprise yourself.
 - **Don't fake tool invocations.** If a generator errors or its backend is
   down, surface the actual error in your hand-off — don't synthesize a
   fallback and label it as the tool's output.
@@ -2805,13 +3000,11 @@ this is the checklist form.
   shapes. A scene with ZERO fetched models is almost always a placeholder.
 - **Mirrored / flipped text** → you took the `getImageData`→`DataTexture`
   path. Use `CanvasTexture`; orient the plane, don't flip pixels.
-- **Re-reading these docs beats re-discovering the bug.** Every rule here
-  was paid for in broken renders.
 
 ## When stuck
 
 - **Render container missing** (harness mode): `docker ps`; `python eido.py doctor` diagnoses docker/GPU/image/deps. If the image was never built, `docs/SETUP.md`.
-- **Effects look black / weird cloud reflections indoors**: `volumetric_clouds` is an OUTDOOR sky effect — don't apply it to interiors (its screen-space cloud-reflect on metals can't tell ceiling from sky). Interior haze = `scene.fog` / `depth_fog`.
+- **Cloud reflections indoors**: the WORLD-SPACE sky system works fine inside enclosures — walls/ceilings occlude the dome natively, and SSR blocks sky reflections wherever interior geometry is reflected (only off-screen occluders can leak a little sky onto mirrors). Interior haze = `scene.fog` / `depth_fog`; interiors that set their own HDRI keep it via `sky.bakeEnv(renderer, { ifAbsent: true })`.
 - **HUD / lower-third vanishes under the clouds (or under in-scene glass/particles)**: you parented the overlay to the world camera. Use `globalThis.makeOverlayLayer({ fov: camera.fov })`. See "full-frame broadcast overlay".
 - **VRM all-black**: you imported `@pixiv/three-vrm` directly. Use `globalThis.GLTFLoader`.
 - **VRM in T-pose**: see the anti-patterns list. Most common: forgot `await playVRMADefault(vrm, 'idle', ...)` (non-controller scenes), or pre-played idle UNDER a controller (controller scenes).

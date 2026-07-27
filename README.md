@@ -122,13 +122,13 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
   particles and reform it as another shape, a word, or ASCII art.
 - `SdfRaymarchLoader` — placeable raymarched objects with correct
   occlusion, plus volumetric fire/smoke/explosions (`createSdfVolume`).
-- **33 TSL post effects** (`CustomEffectsDeno`): after_image,
+- **31 TSL post effects** (`CustomEffectsDeno`): after_image,
   anamorphic_flare, bleach_bypass, blueprint, box_blur, bw_halftone,
-  chromatic_aberration_alpha, cross_hatch, crt, depth_fog, depth_rain,
+  chromatic_aberration_alpha, cross_hatch, crt, depth_fog,
   dithering, focus_blur, full_toon, glitch_bars, godrays, hash_blur,
   jitter, kaleidoscope, lensflare, melt, neon_edges, nuclear_explosion,
   old_bw_film, radial_blur, rain_on_camera, retro_wireframe, rgb_shift,
-  sepia, underwater, vhs_tape, volumetric_clouds, wavy.
+  sepia, underwater, vhs_tape, wavy.
 - `makeScreen` / `makeVideoScreen` — in-world animated displays (canvas
   draw or video atlas). `makeOverlayLayer` — broadcast overlays: titles,
   lower thirds, tickers, end cards. `makeAsciiPanel` — glowing terminal
@@ -207,23 +207,23 @@ Four rigged VRMs ship in `eidoverse/assets/vrms/`, each with a preview
 image. Drop in your own `.vrm` and it works identically.
 
 - **`aletheia.vrm`** / **`aporia.vrm`** — production-quality
-  cyberpunk-styled characters.
+  cyberpunk-styled characters, avatars of [aihegemonymemes](https://x.com/aihegemonymemes), CC-BY license.
 - **`claude_suit.vrm`** — Claude, the AI, in a suit — the primary Claude
-  model (modeled by [digi](https://x.com/digi_dot_exe); claudesona
+  model (modeled by [digi](https://x.com/digi_dot_exe), CC-BY license); claudesona
   design by [voooooogel](https://x.com/voooooogel)). The outfit is
   built in layers — hide the `jacket` and `tie` meshes for
   shirtsleeves.
 - **`claude.vrm`** — a minimal, lightweight build of the same claudesona
-  design.
+  design, CC0.
 
 The Claude models represent the AI Claude specifically — the usage rule
 is in `AGENTS.md`.
 
 ## Status
 
-Prealpha. Verified end-to-end on Windows (native D3D12 WebGPU). Linux
-(Vulkan) and macOS (Metal) run the same code paths and are expected to
-work but have not been render-verified — judge a first render by its
+Prealpha. Verified end-to-end on Windows (native D3D12 WebGPU) and MacOS (Vulkan). Linux
+(Vulkan) runs the same code paths and is expected to
+work but has not been render-verified — judge a first render by its
 frames and report what you find.
 
 ## License
