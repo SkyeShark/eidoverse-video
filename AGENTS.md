@@ -2809,17 +2809,6 @@ scene.add(tv.mesh);   // position over the TV / monitor / billboard's screen fac
 Never hand-roll the UV offset math or a raw material for this — the helper is
 the canonical path (same family as `makeScreen` for drawn content).
 
-### 3D fluid — pours, sprays, splashes (`fluid_3d.js`)
-MLS-MPM particle fluid with emitters + sphere colliders + a raymarched water surface. Getting it to read as *water* (not specks, blobs, flat sheets, or invisible) is mostly these levers:
-- **`surfaceMesh` boxMin/boxMax ARE the world placement.** They position the [0,1]³ domain in world space inside the shader — never ALSO scale/move the returned mesh (the raymarch then samples density at a ghost location and the water is invisible). Set the world box via the options and leave the mesh untransformed. (The returned proxy self-exempts from the placement audits — it legitimately overlaps the vessel and the fluid; if anything ever relocates it, the pool vanishes and the stream cuts off at a floating box edge.)
-- **Emitter spawn density ∝ rate / (velocity × area).** A slow dense spawn (`velocity: [0,-0.5,0]`, high rate, wide radius) piles particles up AT the nozzle and the raymarch renders a fat levitating water mushroom there. Give pours a strong exit velocity (≥1.5 domain-units/s), a modest rate, and a tight radius so the stream leaves the spawn region before density accumulates.
-- **Substep the sim**: call `fluid.step(dt/N)` N times (≈3) per frame. One `step(1/60)` per frame is unstable — the water flickers and gets flung onto the domain walls.
-- **Lower the gravity** (e.g. `gravity:[0,-22,0]`, far below the strong default) so the pour stays a dense, connected 3D body. High gravity thins the falling stream below the surface threshold, so only pooled water shows.
-- **Small, dense domain + TIGHT framing.** A big domain dilutes per-cell density below the iso threshold → invisible water. The fluid is a closed box, so water always clamps onto its walls as flat sheets — do NOT enlarge the domain to hide them (that dilutes the water); instead frame tight on the subject so the walls/floor are off-frame, and occlude the back with a backdrop.
-- **Scale the surface `steps` to the box size** — too few raymarch steps over a large box undersamples into cubic / aliased blobs (more steps is cheap here).
-- **Make it interact with a character**: update sphere `setColliders([...])` every frame from the VRM's bone world positions (head/chest/hips/arms, mapped into the [0,1] domain) so the water sheets off the moving body.
-- **Surface depth + shading**: the raymarched surface must write per-fragment hit depth or it sorts behind opaque geometry and reads as flat sheets stuck to the box planes. And water reflecting a dim environment renders dark — give it a bright reflection source or it blends into the background.
-
 ## Story / production arc
 
 ### Plan 4-6 distinct visual phases BEFORE writing code
