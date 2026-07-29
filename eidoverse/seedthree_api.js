@@ -31,9 +31,10 @@
 //   git clone --depth 1 https://github.com/SkyeShark/SeedThree
 //
 // VERIFIED GOTCHAS (from the API's own eidoverse integration notes):
-//   · set `globalThis._noAutoFixPlacement = true` in setup() — the clipping
-//     auto-fix dismembers intentionally-overlapping tree geometry (this bridge
-//     also marks objects allowIntersect as belt-and-braces)
+//   · placement auto-fix is OFF by default (audits warn, never move parts);
+//     do NOT opt in with `_autoFixPlacement = true` in tree scenes — the
+//     clipping auto-fix dismembers intentionally-overlapping tree geometry
+//     (this bridge also marks objects allowIntersect as belt-and-braces)
 //   · trees sway by default (windStrength 0.5) — makeSeedTree.setWind() tunes
 //   · judge shadowed trees from frame ≥2 (shadow frustum settles a frame late)
 (function () {
@@ -91,7 +92,7 @@
         object.userData.allowIntersect = true;   // trees are intentionally-overlapping geometry
         if (position) object.position.set(position[0], position[1], position[2]);
         if (scene) scene.add(object);
-        if (!globalThis._noAutoFixPlacement) console.warn('[seedthree_api] set globalThis._noAutoFixPlacement = true in setup() — the placement auto-fix dismembers trees');
+        if (globalThis._autoFixPlacement === true) console.warn('[seedthree_api] this scene opted into _autoFixPlacement — the placement auto-fix dismembers intentionally-overlapping tree geometry; remove the opt-in for tree scenes (audits are warn-only by default)');
         return { object, stats: out.stats, preset: out.preset, api };
     };
     for (const k of ['describe', 'listSpecies', 'getSchema', 'defaultControls', 'setWind', 'toPreset', 'fromPreset', 'skeleton']) {

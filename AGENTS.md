@@ -160,6 +160,11 @@ videos that skip them.
      a flood swallowing the set.
    - `water_compute` — rippling interactive water surface (`disturb()` drops
      ripples anywhere). Pours and streams come from `fluid_3d` emitters.
+   - `fluid_swe` — shallow-water heightfield liquid over any terrain bed:
+     mass-exact fills, pours with stream tubes + droplet spray + foam
+     (whitewater generated from the field's own state), body coupling with
+     entry splashes and wakes. The pond/pool/spring workhorse (~2.8 ms in a
+     full scene).
    - `cloth_sim` — flags, banners, capes, curtains with wind + colliders.
    - `makeParticleMorph` — dissolve a mesh/VRM into particles and reform it
      as something else (the signature transition). **ANY mesh OR TEXT can be
@@ -251,9 +256,23 @@ videos that skip them.
      `x.toFixed(4)+','+y...` → offset) so duplicated corners move together;
    - kitbash variants: `cloneModel(base)` + non-uniform scale + yaw + material
      swap turns one rock/tree/crate into a field of distinct ones;
-   - `uvByWorld` reprojects a mesh's UVs from world space, so a tiling
-     texture holds the same real-world scale across meshes of different
-     sizes instead of stretching to each one's own UV layout.
+   - **`layerSurface(meshes, opts)` — run this on EVERY set you model
+     yourself.** Geometry you build arrives clean, and clean is what makes a
+     procedural set read as grey-box no matter how good the modeling is. Two
+     things are missing and this fixes both in one call (full docs in
+     "MAKING BUILT GEOMETRY LOOK BUILT" below):
+     - **matched texel density** — `ExtrudeGeometry`'s UVs are already metric
+       while `Lathe`/`Cylinder`/`Box`/`Sphere` are normalised 0..1, so the
+       same stone comes out crisp on an extruded step and smeared across a
+       13 m revolved basin. It rescales the UVs each constructor produced to
+       a common metres-per-tile, **keeping** their layout (bevel and boolean
+       cut islands stay exactly as generated — only their scale moves).
+     - **wear that follows the form** — measures curvature PER PIXEL in the
+       shader (screen-space normal derivatives normalised to 1/metres, nothing
+       baked) and drives weathering off it: grime in the inside
+       corners a boolean made, bleach on convex edges and chamfers, silt at a
+       world-space waterline, dust on up-facing planes, triplanar grunge
+       breaking all of it up.
 
    **Layer environments in passes, like a set dresser** — each pass is quick,
    and scenes that skip a layer read hollow:
@@ -397,6 +416,74 @@ videos that skip them.
      back in as a `Brush(result.geometry)`.
    - `useGroups = true` preserves each brush's material as a group instead of
      flattening to one. `computeMeshVolume(geometry)` is also exported.
+
+   ### MAKING BUILT GEOMETRY LOOK BUILT (`eidoverse/surface_layers.js`)
+
+   A fetched GLB arrives with authored UVs and wear baked into its maps. A
+   lathe revolve, an extruded moulding and a boolean cut arrive **clean**, on
+   **four different UV scales**, with no dirt in any corner. That — not the
+   modeling — is why hand-built sets read as grey-box. Four globals fix it;
+   `layerSurface` is the one-liner that runs all of them.
+
+   ```js
+   globalThis.layerSurface(myMeshes, {
+       metresPerTile: 1.15,                 // one texture tile per 1.15 m, on everything
+       grunge: { scale: 0.55, seed: 7 },
+       layers: [
+           { mask: 'cavity', scale: 0.75, color: 0x2b2419, roughness: 1.0, amount: 0.9, range: [0.15, 0.72], grunge: 0.35 },
+           { mask: 'edges',  color: 0xc9bda0, roughness: 0.62, amount: 0.6, range: [0.20, 0.72] },
+           { mask: 'up',     color: 0x8a7859, amount: 0.38, power: 3, grunge: 0.8 },
+           { mask: 'below',  y: WATERLINE, fade: 0.5, color: 0x11423c, roughness: 0.55, amount: 0.85 },
+       ],
+   });
+   ```
+
+   **Masks** (each remapped through `range: [a, b]`, scaled by `amount`,
+   optionally broken up by `grunge: 0..1`):
+
+   | mask | driven by | use it for |
+   |---|---|---|
+   | `cavity` | baked raycast AO | grime, moss, soot — the workhorse |
+   | `crease` | concave curvature | sharp dirt lines in inside corners |
+   | `edges` | convex curvature | polish, chipping, bleached exposure on chamfers |
+   | `up` | `normalWorld.y^power` | dust, silt, ash, snow |
+   | `slope` | `1 - abs(normalWorld.y)` | runoff streaking on vertical faces |
+   | `below` / `above` | world Y, `y` + `fade` | **waterlines**, tide marks, buried bases |
+   | `grunge` | triplanar tiling fbm | breakup on its own |
+
+   ⚠ **These tools are for geometry you BUILT, and they refuse fetched
+   assets** — GLBs, VRMs and kit parts carry an authored UV unwrap
+   corresponding 1:1 to their own texture (or a shared atlas/trim sheet), so
+   rescaling their UVs makes every island sample outside the region it was
+   unwrapped onto and the model comes out as confetti. `GLTFLoader` output is
+   stamped `userData._loadedAsset`; skinned meshes, morph-target meshes and
+   MToon materials are refused on top of that. Skipped meshes are NAMED in the
+   log, so handing over a whole scene root is safe — it just weathers nothing.
+
+   - **`normalizeTexelDensity(meshes, { metresPerTile })`** measures each
+     mesh's real UV-per-metre (median over triangles, via `matrixWorld`, so a
+     kitbashed `.scale.setScalar(1.7)` clone is measured at the size it
+     appears) and scales its existing `uv` to a common target. It **keeps the
+     constructor's UV islands** — a world-space *reprojection* would throw
+     away the bevel and cap layouts `ExtrudeGeometry`/CSG generate and seam
+     badly on anything not axis-aligned. It warns if a material's texture
+     `repeat` isn't 1, because that multiplies on top and undoes the work.
+   - **The curvature masks are PER-PIXEL TSL — nothing is baked.** `curv` comes
+     from screen-space derivatives of the world normal, each divided by the
+     squared length of the matching position derivative, which puts it in
+     1/metres so the mask does not swim as the camera dollies. Give each layer
+     a `scale` in metres for the feature size it should answer to (0.6 for a
+     broad hollow, 0.05 for a tight crease). ⚠ Derivatives are taken WITHIN a
+     triangle, so a bevelled/filleted edge gives a clean gradient while a HARD
+     boolean corner with split normals gives only a thin line — model the
+     fillet (`bevelEnabled: true`) if you want dirt to collect there.
+   - **`makeLayeredMaterial({ base, layers, grunge })`** if you want the
+     material without the baking, and **`grungeTexture(size, seed)`** for the
+     seamlessly-tiling fbm on its own.
+   - `normalizeTexelDensity` is geometry authoring — one attribute write at
+     build time, same class as `computeVertexNormals()`/`computeTangents()`.
+     The masks are pure GPU. Call it AFTER the group is positioned, since the
+     density measurement reads `matrixWorld`.
 
 
    **Compose environments in layers, near-to-far.** A finished
@@ -1106,11 +1193,42 @@ frame to backfill the audio is exactly how frozen-frame videos ship.
 ### Lipsync — any scene with a VRM + audible vocals
 
 ```bash
-python3 -m demucs --two-stems=vocals music.wav      # → vocals.wav + no_vocals.wav
-python3 align_lyrics.py vocals.wav --out lyrics_aligned.json
+# 1. split the mix. Stems land in <out>/htdemucs/<input-stem>/ — NOT next to
+#    the input, so copy them out or reference the nested path.
+python3 -m demucs --two-stems=vocals -o stems song.wav
+#    → stems/htdemucs/song/vocals.wav  +  stems/htdemucs/song/no_vocals.wav
+
+# 2. align. ⚠ `lyrics` is a REQUIRED POSITIONAL and it is the TEXT ITSELF,
+#    not a path — passing a filename "succeeds" and aligns that literal
+#    string as the only lyric. The flag is --output, not --out.
+python3 align_lyrics.py vocals.wav "$(cat lyrics.txt)" --output lyrics_aligned.json
+#    or from python:  from align_lyrics import align_lyrics
+#                     align_lyrics('vocals.wav', lyrics_text, method='chunked')
+
+# 3. OPTIONAL synthetic timbre — only if the character concept wants it.
 python3 cyborg_voice.py vocals.wav cyborg_vocals.wav   # NOT cyborg_stutter
-python3 lipsync.py cyborg_vocals.wav --out visemes.json
+
+# 4. visemes. ⚠ lipsync.py has NO CLI — it is a MODULE. A `python3
+#    lipsync.py … --out …` command exits silently having written nothing.
+python3 -c "import json; from lipsync import get_viseme_timeline; \
+json.dump(get_viseme_timeline('vocals.wav', fps=30), open('visemes.json','w'))"
 ```
+
+⚠ **Gate the visemes to the aligned lyric windows.** demucs leaves
+instrumental bleed in the vocal stem, so `get_viseme_timeline` reports mouth
+motion through intros, solos and outros — the character sings along to the
+piano. Zero every frame that falls outside a line's `[start, end]` (a ~0.12 s
+pad each side keeps the consonant attack and release):
+
+```python
+wins = [(l['start'] - 0.12, l['end'] + 0.12) for l in lines if l['text'].strip()]
+for i, f in enumerate(timeline):
+    if not any(a <= i / fps <= b for a, b in wins):
+        for k in f: f[k] = 0.0
+```
+
+A closed mouth through an instrumental tail is also what makes a final shot
+read as "the music continues without them" rather than "the animation broke."
 
 If the character is on screen and the audio track has their voice (song,
 narration, dialog, anything), the visemes pipeline is required. There is
@@ -1223,11 +1341,13 @@ above works as written — no raw-morph handling needed.
   positions first if you need to restore the fitted look.
 
 Music-video full protocol:
-1. `generate_song.py` with a vocal tag + singable lyrics
-2. demucs split → `vocals.wav` + `no_vocals.wav`
-3. `align_lyrics.py vocals.wav` → `lyrics_aligned.json`
-4. `cyborg_voice.py vocals.wav` (NOT stutter — stutter breaks sustained notes)
-5. `lipsync.py cyborg_vocals.wav` → `visemes.json`
+1. `generate_song.py` with a vocal tag + singable lyrics (or a supplied track)
+2. demucs split → `stems/htdemucs/<name>/{vocals,no_vocals}.wav`
+3. `align_lyrics.py vocals.wav "<the lyrics text>" --output lyrics_aligned.json`
+4. `cyborg_voice.py vocals.wav` — OPTIONAL, only for a synthetic timbre
+   (NOT stutter — stutter breaks sustained notes)
+5. `get_viseme_timeline(vocals.wav, fps)` from the `lipsync` MODULE (no CLI),
+   then GATE the result to the lyric windows — see the section above
 6. ONE scene script with VRM + environment + props + HDRI in the same scene
 7. Different VRMA animations per song section — idle bridge, walking verses, expressive choruses; don't loop one across the whole song
 8. Camera varies — close-ups on face for emotional lines, wide for choruses, dolly-in on builds
@@ -2134,9 +2254,11 @@ or a sine-displaced mesh.** These read with true depth and motion:
   agent-directable transitions. Add `rain_on_camera` (LENS rain —
   screen-locked refracting droplets + wet blur) on top only when the
   shot wants a lens inside the storm.
-- **Water / pours / splashes** → the fluid tools (`water_compute`,
-  `fluid_3d`) — including novel uses: rain sheeting down a
-  window, a character wading, ink blooming, a zero-g blob.
+- **Water / pours / splashes** → the fluid tools (`fluid_swe` for ponds /
+  pools / springs / wading with whitewater, `water_compute` for simple
+  ripple surfaces, `fluid_3d` for container liquid) — including novel
+  uses: rain sheeting down a window, a character wading, ink blooming,
+  a zero-g blob.
 
 ## WORLD-SPACE SKY + WEATHER (`eidoverse/sky_system.js` + `eidoverse/weather_system.js`)
 
@@ -2332,14 +2454,77 @@ surface to a disc (for round containers — cups, bowls, barrels);
 `maxHeight` clamps wave height so sustained disturbance can't run away
 into a spike; `displaceScale` tunes visible wave amplitude.
 
-**Pours / streams** — use `fluid_3d` (the MLS-MPM particle liquid): aim an
-emitter where the stream starts, give the container a collider, render the
-particles as water. Pour-into-container pattern = a `fluid_3d` pour filling
-a collider cup, optionally paired with a `water_compute({ circular: true })`
-surface whose `mesh.position.y` you raise over the fill duration so the
-stream lands on a rippling, rising level. Same primitives compose into
-fountains, rain into a barrel, a waterfall pool — point them where the
-scene needs.
+**`fluid_swe`** — shallow-water heightfield liquid over an arbitrary bed
+(terrain, basin, anything expressible as `bedFn(x,z)→y`). Mass conservation
+is structural: a pond filling from a spring CANNOT lose volume. Pours travel
+as a glassy stream tube that breaks into droplet spray along one shared
+ballistic arc; landings return volume + momentum + foam to the field, and
+the field itself promotes violent water (impacts, breaking crests) into
+spray — whitewater emerges from the sim state, never from parametric
+effects. Spheres couple bodies: a plunging body erupts a collar, a wading
+one carves a wake.
+```js
+const { createWaterSWE } = await import(globalThis.EIDOVERSE_DIR + 'fluid_swe.js');
+const swe = await createWaterSWE(renderer, {
+    worldSize: [16, 16], gridSize: [256, 256], domainCenter: [0, 0, 0],
+    bedFn: (x, z) => groundY(x, z),          // the terrain IS the bed
+    sprayMax: 6144,                          // whitewater budget (0 = off)
+    envTex: skyEnvCopy,                      // see envTex note below
+});
+await swe.init();
+scene.add(swe.surfaceMesh);
+if (swe.sprayMesh) scene.add(swe.sprayMesh);
+if (swe.streamMesh) scene.add(swe.streamMesh);
+// per frame:
+swe.setPours([{ x, y, z, vx, vy, vz, rate }]);   // rate in m³/s — mouths ON
+                                                 // the visible geometry's lip
+swe.setSpheres([{ x, y, z, r, vx, vy, vz }]);    // vy matters: entry splash
+await swe.step(dt); swe.syncRenderPhase();
+```
+**Liquid presets** — one word selects a whole material behaviour
+(`preset: 'water' | 'gel' | 'goo' | 'lava' | 'mud'`, any option still
+overrides). Presets drive sim feel AND look: `yieldSlope` (Bingham yield —
+gel HOLDS mounds instead of levelling), `waveScale` (gloopy slow response),
+`specPow`/`specGain` (highlight tightness), `sprayStretch` (needles vs
+blobs), `streamAeration` (water whitens as it falls; honey/gel stays a
+glassy filament), `dropletVisibility`, `foamGain` (gel barely froths).
+```js
+const gel = await createWaterSWE(renderer, { preset: 'gel',
+    deepColor: '#6e2603', shallowColor: '#ff7d1f', ... });  // Portal-gel
+```
+**Pour styles** — `setPours([{ ..., style: 'seep', seepWidth: 0.8 }])`:
+'jet' (default) renders the ballistic stream tube + droplet breakup;
+'seep' is a slow dribbling curtain at the mouth (a rock spring, a weeping
+wall — a seep must NOT render a jet parabola). Mass ledger identical.
+
+Key options: `initLevel` pre-fills to a waterline (standing ponds — but a
+scene whose POINT is the fill must start dry); `foamDecay` tightens/loosens
+churn patches; palette (`deepColor`/`shallowColor`/`absorption`) + `foamColor`.
+`envTex` (optional) makes the fresnel reflect a real sky: pass a PLAIN
+equirect texture — if your sky lives in a RenderTarget (e.g. a bake),
+copy it once via `readRenderTargetPixelsAsync` into a half-float
+`DataTexture` (flip rows). ⚠ never bind a live RenderTarget texture into
+the water materials: on this stack that intermittently drops whole draws
+silently. Without `envTex`, the constant `skyColor` washes out grazing
+angles on large flat water.
+Scene craft: give runup a TALL containment — water that slops over a low
+rim pools on the outer apron as floating-looking slabs. A character wading
+needs a LOCAL shaped collider strip sampled from the bed: the whole
+terrain's AABB sends the controller climbing, and a flat proxy reads as
+walking ON the water.
+What it cannot do: overhangs, curling breakers, submerged interiors — that
+remains `fluid_3d` / `fluid_water` territory.
+
+**Pours / streams into CONTAINERS** — use `fluid_3d` (the MLS-MPM particle
+liquid): aim an emitter where the stream starts, give the container a
+collider, render the particles as water. Pour-into-container pattern = a
+`fluid_3d` pour filling a collider cup, optionally paired with a
+`water_compute({ circular: true })` surface whose `mesh.position.y` you
+raise over the fill duration so the stream lands on a rippling, rising
+level. For pours into POOLS, PONDS, or terrain water, prefer `fluid_swe`
+above — its pours conserve mass and make their own whitewater. Same
+primitives compose into fountains, rain into a barrel, a waterfall pool —
+point them where the scene needs.
 
 **`WaterMesh` + `SkyMesh`** — passive ocean / large-scale water with
 FFT-style waves. Better than `water_compute` when you need horizon-

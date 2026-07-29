@@ -215,7 +215,13 @@ export async function setupRenderer(width, height) {
             // data when reinterpreted as f16.
             // For these 1D-like sampled buffers, strip the RENDER_ATTACHMENT bit and
             // keep rgba32float (Mesa allows rgba32float as a sampled texture).
-            if (h === 1) {
+            // 2026-07-14: the h===1 test resurfaced the corruption on meshes with
+            // enough vertices that MorphNode wraps its layout past maxTextureWidth
+            // into multiple ROWS (Clippy: 4816 verts x 2 attrs -> 4096x3). The
+            // reliable discriminator is depthOrArrayLayers: morph/skinning buffers
+            // are DataArrayTextures (one layer per morph target); every genuine
+            // render target in this pipeline is single-layer.
+            if (h === 1 || arr > 1) {
                 _stripRACount++;
                 if (_stripRACount <= 3) {
                     console.log(`[render_common] stripping RENDER_ATTACHMENT from morph-like rgba32float texture (${w}x${h}x${arr})`);
@@ -557,6 +563,10 @@ export function startFfmpegPipe(width, height, fps, outputPath, opts = {}) {
     else if (_bv) args.push('-b:v', String(_bv), '-maxrate', String(_bv));
     else args.push('-b:v', '8000k', '-maxrate', '10000k', '-bufsize', '16000k');
     if (opts.audio) args.push('-i', opts.audio, '-c:a', 'aac', '-shortest');
+    // explicit container: atomic-write encodes to <name>.mp4.part, and
+    // ffmpeg can't infer a muxer from a .part extension ("Unable to choose
+    // an output format" → every render dies at startup)
+    if (!/\.(mp4|mov|mkv|webm)$/i.test(outputPath)) args.push('-f', 'mp4');
     args.push(outputPath);
 
     // stderr: 'inherit' so ffmpeg's diagnostics flow straight to our stderr.

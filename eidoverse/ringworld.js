@@ -1223,6 +1223,23 @@
                 if (sysPendingLights.length) sysPendingLights = [];
                 return sys;
             },
+            // Detach the band's lights from wherever they ended up.
+            //
+            // Necessary because they deliberately live on the SCENE ROOT rather
+            // than under `group`, so a host that tears the ring down with
+            // `scene.remove(ring.group)` would otherwise leave them behind, still
+            // lighting the next skybox from under the world. That never surfaced
+            // in the offline renderer, which builds one scene per render and
+            // exits; it matters in the realtime host, where the skybox is swapped
+            // live. Safe to call more than once, and safe if they never attached.
+            disposeLights() {
+                for (const o of [bandSun, bandSun?.target, bandShine, bandShine?.target]) {
+                    if (o?.parent) o.parent.remove(o);
+                    o?.dispose?.();
+                }
+                sysPendingLights = [];
+                return sys;
+            },
             update(t) {
                 tU.value = t;
                 const wx = sys._wx, sk = sys._sky;

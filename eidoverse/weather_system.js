@@ -114,13 +114,19 @@
     const lightningCadenceFor = (paletteName = 'standard') => (
         LIGHTNING_CADENCE[paletteName] ?? LIGHTNING_CADENCE.standard
     );
-    // GAP SCALE — the cadence above is authored for a realtime world you
-    // stand around in, where 16-38 s of dark between strikes is the point.
-    // A produced clip is 15-90 s long, so at that spacing most videos catch
-    // one strike or none. Everything here is scaled to fit that runtime:
-    // storms read as storms within a shot. Raise toward 1 for real-time
-    // pacing on a long piece — makeWeatherSystem({ opts: { lightningGapScale: 1 } }).
-    let LIGHTNING_GAP_SCALE = 0.42;
+    // GAP SCALE — the cadence above is authored for a realtime world you stand
+    // around in, where 16-38 s of dark between strikes is the point.
+    //
+    // The DEFAULT FOLLOWS THE HOST, because the right answer genuinely differs:
+    //   • realtime (browser) — 1.0, the authored spacing. Compressing it is not an
+    //     improvement here, it just makes the storm restless — and incidentally
+    //     multiplies how often every per-strike path runs.
+    //   • offline renderer — 0.42. A produced clip is 15-90 s long, so at the
+    //     authored spacing most videos catch one strike or none; the whole scale
+    //     is fitted to that runtime so storms read as storms within a shot.
+    //
+    // Override either way with makeWeatherSystem({ opts: { lightningGapScale } }).
+    let LIGHTNING_GAP_SCALE = globalThis.Deno ? 0.42 : 1;
     const lightningEventGapAt = (eventIndex, paletteName = 'standard', level = 1) => {
         const cadence = lightningCadenceFor(paletteName);
         const safeLevel = Math.max(0.01, Math.min(1, Number(level) || 0));
@@ -1337,17 +1343,62 @@
             wetnessStats.wrappedMaterials = wrapped.size;
             return true;
         };
-        const wrapScene = () => {
-            let n = 0;
+        // Materials still waiting to be wrapped, drained a few per frame by update().
+        let wetPending = null;
+        let wetWrappedCount = 0;
+
+        /**
+         * Install wetness on every eligible material in the scene.
+         *
+         * BUDGETED ON PURPOSE. Wrapping rewrites colorNode/roughnessNode/
+         * metalnessNode and sets needsUpdate, which on WebGPU invalidates that
+         * material's WGSL and forces a pipeline rebuild. Doing the whole scene in
+         * one call marks every material dirty in the same frame, so the NEXT frame
+         * compiles every pipeline back to back — terrain, temple, vegetation, rocks
+         * — and the app locks solid for tens of seconds with nothing on screen to
+         * say it is still alive. The total work is identical either way; what
+         * matters is that it is SPREAD, so the frame loop keeps running and wetness
+         * simply arrives over about a second instead of after a freeze.
+         *
+         * @param opts2.budget materials per frame. Infinity restores the old
+         *        all-at-once behaviour — appropriate when pre-warming behind a
+         *        loading screen, where a stall is expected and there is no
+         *        interactivity to protect.
+         */
+        const wrapScene = (opts2 = {}) => {
+            const budget = opts2.budget ?? 4;
+            const queue = [];
             scene.traverse((o) => {
                 if (!o.isMesh || o.userData.noWet) return;
                 if (sky && sky.domes && sky.domes.includes(o)) return;
                 const mats = Array.isArray(o.material) ? o.material : [o.material];
-                for (const m of mats) if (wrapMaterial(m, o)) n++;
+                for (const m of mats) queue.push([m, o]);
             });
-            console.log(`[weather] wetness wrapped ${n} materials`);
+            wetWrappedCount = 0;
+            if (budget === Infinity || !(budget > 0)) {
+                for (const [m, o] of queue) if (wrapMaterial(m, o)) wetWrappedCount++;
+                wetPending = null;
+                console.log(`[weather] wetness wrapped ${wetWrappedCount} materials (synchronous)`);
+            } else {
+                wetPending = queue;
+                console.log(`[weather] wetness wrapping ${queue.length} materials at ${budget}/frame`);
+            }
             if (sky && sky.wrapCloudShadows) sky.wrapCloudShadows(scene, 0.5);
-            return n;
+            return wetWrappedCount;
+        };
+
+        /** Drain a slice of the wrap queue. Called once per update(). */
+        const drainWetWrap = (budget = 4) => {
+            if (!wetPending) return;
+            let done = 0;
+            while (wetPending.length && done < budget) {
+                const [m, o] = wetPending.shift();
+                if (wrapMaterial(m, o)) { wetWrappedCount++; done++; }
+            }
+            if (!wetPending.length) {
+                wetPending = null;
+                console.log(`[weather] wetness wrapped ${wetWrappedCount} materials`);
+            }
         };
 
         const state = { name: 'clear', k: 1, def: WEATHER.clear };
@@ -1665,6 +1716,11 @@
                 // A disposed/non-owning system must never keep advancing its
                 // scheduler or writing flash values into the shared sky.
                 if (disposed || weatherRegistry.get(scene) !== sys) return false;
+                // Pay off a slice of the wetness wrap, if any is outstanding. Doing
+                // it here rather than all inside wrapScene() is what keeps the first
+                // weather activation from stalling the app while every wrapped
+                // material's pipeline rebuilds in a single frame.
+                drainWetWrap();
                 u.time.value = t;
                 // drive an active weather transition
                 if (sys._trans) {
@@ -2127,6 +2183,9 @@
                     mat.needsUpdate = true;
                 }
                 wrapped.clear();
+                // drop any outstanding wrap queue too, so a disposed system
+                // stops holding references to the scene's materials
+                wetPending = null;
                 wrappedRoots.clear();
                 receiverMeshes.clear();
                 receiverNames.length = 0;

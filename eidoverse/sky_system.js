@@ -2743,13 +2743,20 @@
                 // hand the now-rendered bake to the reflection hook's
                 // below-horizon fallback (it boots on a 1x1 placeholder)
                 if (sys._envFbNode) sys._envFbNode.value = target.texture;
-                // EIDOVERSE PORT: in the offline host the sky owns the world's
-                // light — assign the bake to scene.environment like the
-                // pre-port core (the browser branch skips this because Chrome
-                // suppresses Basic-family sky domes when it is set).
-                // bopts.ifAbsent respects an agent-set HDRI; bopts.assign =
-                // false opts out entirely (per-material assignment workflows).
-                if (bopts.assign !== false && !(bopts.ifAbsent && scene.environment)) {
+                // Assigning the bake to scene.environment is HOST-DEPENDENT, and
+                // this is the one place the two hosts genuinely disagree:
+                //   • offline renderer — wants it. The sky owns the world's light,
+                //     and env-IBL is how clouds reach reflections.
+                //   • browser (the realtime host) — must NOT have it by default.
+                //     Chrome suppresses Basic-family sky domes once
+                //     scene.environment is set, which blanks the sky entirely.
+                // So the default follows the host rather than being hard-coded to
+                // either, which keeps ONE shared engine file correct in both and
+                // avoids the forked-copy drift that has bitten this code before.
+                // bopts.assign forces it either way; bopts.ifAbsent respects an
+                // HDRI the scene already set.
+                const assignEnv = bopts.assign ?? !!globalThis.Deno;
+                if (assignEnv && !(bopts.ifAbsent && scene.environment)) {
                     scene.environment = target.texture;
                     console.log(`[sky] env bake ${W}x${H} -> scene.environment (clouds reach reflections via env-IBL)`);
                 } else {
