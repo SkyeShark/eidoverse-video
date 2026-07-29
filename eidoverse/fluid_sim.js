@@ -5,7 +5,7 @@
 // trails behind a moving subject, glitch-like distortion of an
 // underlying texture, abstract motion graphics.
 //
-// This is NOT 3D water — see water_compute.js for height-field surface
+// This is NOT 3D water — see fluid_swe.js for height-field surface
 // water, or WaterMesh from three/addons for ocean-style surfaces.
 //
 // Agent API
