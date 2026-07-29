@@ -298,8 +298,6 @@ const HELPER_MODULES = [
     'eidoverse/sky_system.js',            // globalThis.makeSkySystem — WORLD-SPACE volumetric sky: raymarched cloud dome IN the scene (geometry occludes it), sun/moon/stars, time-of-day, cloud types, day cycles, moving metal reflections, env bake
     'eidoverse/weather_system.js',        // globalThis.makeWeatherSystem — weather states (clear..darkstorm): world-anchored rain, wet surfaces + puddles, from-the-clouds lightning, smooth transitionTo(name, k, seconds)
     'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; local checkout or GitHub import)
-    // RETIRED (unfinished stub bridge over SeedThree core internals — superseded by seedthree_api.js):
-    // 'eidoverse/seed_three.js',
     'eidoverse/screen.js',              // globalThis.makeScreen — animated canvas-2D screen/display panel (self-updating CanvasTexture, unlit emissive, exact UI colors)
     'eidoverse/creature_builder.js',    // globalThis.makeCreature — universal procedural creature builder (spine+limbs auto-rig, morphology-adaptive gait, makeCreature.random)
     'eidoverse/creature_realist.js',    // globalThis.makeRealisticCreature (async) — SPECIMEN pipeline: offline-sculpted realist body (SDF anatomy → Quadriflow) bound onto the untouched makeCreature rig; same options + gait engine; caches by spec hash. Must load AFTER creature_builder.js.
@@ -3123,7 +3121,7 @@ try {
             catch (_) { try { blob += ' ' + Deno.readTextFileSync('/workspace/_brief.txt'); } catch (__) {} }
             blob = blob.toLowerCase();
             const TRIGGERS = [
-                ['fluid_3d (real 3D liquid that pours + collides)', ['water', 'liquid', 'pour', 'drink', 'coffee', 'tea', 'juice', 'potion', 'beer', 'wine', 'cocktail', ' bar ', 'kitchen', ' lab', 'chemical', 'fountain', 'splash', 'flood', 'blood', ' oil', 'milk', 'soup', 'elixir', 'serum']],
+                ['fluid_swe (heightfield liquid: pools, pours with stream + spray, whitewater)', ['water', 'liquid', 'pour', 'drink', 'coffee', 'tea', 'juice', 'potion', 'beer', 'wine', 'cocktail', ' bar ', 'kitchen', ' lab', 'chemical', 'fountain', 'splash', 'flood', 'blood', ' oil', 'milk', 'soup', 'elixir', 'serum']],
                 ['cloth_sim (flags / banners / capes / curtains / fabric — with collision + text-on-cloth)', ['flag', 'banner', 'cape', 'curtain', 'fabric', 'cloth', ' sail', 'tapestry', 'drape', 'tablecloth', ' robe', 'scarf', ' veil', 'awning']],
                 ['Loft.sweep (vases / horns / pipes / ducts / columns / ornament / ribbons)', ['vase', ' horn', ' pipe', ' duct', 'column', 'pillar', 'ornament', 'spiral', 'ribbon', 'bottle', 'goblet', 'trumpet', 'vessel', ' urn', 'chalice', 'tentacle', 'archway']],
                 ['makeParticleMorph (dissolve / reform ANY mesh, text, or a VRM mid-pose)', ['dissolve', 'transform', 'materializ', 'reform', 'shatter', 'disintegrat', ' morph', 'assemble', 'teleport', 'reveal', 'manifest', 'emerge']],
@@ -3133,7 +3131,7 @@ try {
             if (hits.length) {
                 console.log(`[palette] ⚠ This scene's content reads like it WANTS a showpiece and used none. Strong fit for what's in it: ${hits.map(h => h[0]).join('  •  ')}. These are the engine's flagships and almost no production reaches for them — weaving the matching one in is usually the line between "fine" and "memorable". (Creative call, not a hard gate — but a pointed one.)`);
             } else {
-                console.log(`[palette] note — no simulation/particle showpiece in this production. The under-used flagships (see AGENTS.md "Pick a SHOWPIECE"): fluid_3d (3D liquid), cloth_sim (fabric), Loft.sweep (lofted forms), makeParticles, makeParticleMorph (dissolve/reform any mesh). One showpiece is often the difference between fine and memorable. Your call.`);
+                console.log(`[palette] note — no simulation/particle showpiece in this production. The under-used flagships (see AGENTS.md "Pick a SHOWPIECE"): fluid_swe (liquid), cloth_sim (fabric), Loft.sweep (lofted forms), makeParticles, makeParticleMorph (dissolve/reform any mesh). One showpiece is often the difference between fine and memorable. Your call.`);
             }
         }
     }

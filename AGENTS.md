@@ -135,20 +135,6 @@ piece and a render test.
    transition, water under the final shot. "At least one" is the floor,
    not the ceiling. The menu (each verified, deep docs in their own
    sections below; pick what the story's beats call for, combine freely):
-   - `fluid_3d` — 3D MLS-MPM particle fluid (FLIP-style): pours that fill a
-     glass, fountains, rain collecting, a creature of water. Emitters +
-     box/cylinder domains + colliders. The single most under-used flagship
-     in the toolkit. **The DOMAIN IS the container**: size its walls/floor
-     to the visible vessel's interior (a domain bigger than the prop = fluid
-     sloshing around an invisible box in mid-air); only the ROOF should be
-     generous — it's invisible pour/splash headroom. **RENDER IT AS WATER** — a translucent/refractive surface
-     material, not bare FLYING SPHERES (the spheres are the debug view, not the
-     showpiece). Creative seeds, go past "pour into a glass": liquid that flows
-     UP, mercury / lava / molten gold / ink suspended in zero-g, a body or a
-     logo DISSOLVING into running liquid, a creature that moves made of water,
-     a flood swallowing the set.
-   - `water_compute` — rippling interactive water surface (`disturb()` drops
-     ripples anywhere). Pours and streams come from `fluid_3d` emitters.
    - `fluid_swe` — shallow-water heightfield liquid over any terrain bed:
      mass-exact fills, pours with stream tubes + droplet spray + foam
      (whitewater generated from the field's own state), body coupling with
@@ -163,8 +149,7 @@ piece and a render test.
      a word or logo in ONE call — **`{ ascii: true }`** reforms multi-line
      **ASCII ART** into particles (a face, a sigil, a diagram, an ASCII portrait
      in 3D space). Chain targets for a whole beat: VRM → galaxy → the word →
-     ASCII glyph → scatter. (You can even aim a `fluid_3d` pour at a `fromText`
-     point set so a liquid WRITES the word.)
+     ASCII glyph → scatter.
    - `makeParticles` — sparks/embers/smoke/snow/magic, GPU sprites.
    - `makeAsciiPanel(asciiText, opts)` — multi-line ASCII art / monospace text
      → a glowing terminal-screen mesh (CRT / HUD / server readout / boot
@@ -2203,11 +2188,10 @@ or a sine-displaced mesh.** These read with true depth and motion:
   agent-directable transitions. Add `rain_on_camera` (LENS rain —
   screen-locked refracting droplets + wet blur) on top only when the
   shot wants a lens inside the storm.
-- **Water / pours / splashes** → the fluid tools (`fluid_swe` for ponds /
-  pools / springs / wading with whitewater, `water_compute` for simple
-  ripple surfaces, `fluid_3d` for container liquid) — including novel
-  uses: rain sheeting down a window, a character wading, ink blooming,
-  a zero-g blob.
+- **Water / pours / splashes** → `fluid_swe` (ponds / pools / springs /
+  pours / wading, with whitewater from the sim's own state; a `bedFn`
+  shaped as a vessel interior makes cups and basins fillable too), plus
+  `WaterMesh` for horizon-filling passive ocean.
 
 ## WORLD-SPACE SKY + WEATHER (`eidoverse/sky_system.js` + `eidoverse/weather_system.js`)
 
@@ -2371,31 +2355,15 @@ fireball/explosion at a point in the scene belongs here (not the
 screenspace nuke). Volumes are transparent; keep the camera outside their
 bounds box.
 
-**Water comes from the fluid tools — `water_compute`, `fluid_3d`.**
+**Water comes from `fluid_swe`.**
 A real water surface ripples, a real pour streams and
 splashes, a real splash throws droplets with the sim's dynamics — reach
-for these for any pool, lake, rain-on-glass, pour, or splash. A displaced
+for it for any pool, lake, pour, or splash. A displaced
 mesh driven by a sine/noise function reads as plastic; let the sim carry
 the motion.
 
-**`water_compute`** — interactive height-field water surface (compute shaders).
-```js
 // NOTE: scene scripts are eval'd, NOT loaded as modules — use DYNAMIC
 // import() inside setup(), never a top-level `import` statement.
-const { createWaterCompute } = await import(globalThis.EIDOVERSE_DIR + 'water_compute.js');
-const water = await createWaterCompute(renderer, { width: 128, bounds: 20, color: 0x2266aa });
-scene.add(water.mesh);
-// per frame: water.step()
-// drop a ripple — coords are PLANE-LOCAL (the surface is built around its
-// own origin; ±bounds/2). If you moved water.mesh, pass offsets relative
-// to the mesh, NOT world coords — world coords silently miss the grid:
-//   water.disturb(localX, localZ, radius, amplitude)
-```
-Real-time wave sim (verified). Use for puddles, lakes, pools, fountain
-basins, rain-impacted surfaces. Key options: `circular: true` masks the
-surface to a disc (for round containers — cups, bowls, barrels);
-`maxHeight` clamps wave height so sustained disturbance can't run away
-into a spike; `displaceScale` tunes visible wave amplitude.
 
 **`fluid_swe`** — shallow-water heightfield liquid over an arbitrary bed
 (terrain, basin, anything expressible as `bedFn(x,z)→y`). Mass conservation
@@ -2455,23 +2423,20 @@ rim pools on the outer apron as floating-looking slabs. A character wading
 needs a LOCAL shaped collider strip sampled from the bed: the whole
 terrain's AABB sends the controller climbing, and a flat proxy reads as
 walking ON the water.
-What it cannot do: overhangs, curling breakers, submerged interiors — that
-remains `fluid_3d` / `fluid_water` territory.
+What it cannot do: overhangs, curling breakers, submerged interiors — a
+heightfield stores one surface height per column.
 
-**Pours / streams into CONTAINERS** — use `fluid_3d` (the MLS-MPM particle
-liquid): aim an emitter where the stream starts, give the container a
-collider, render the particles as water. Pour-into-container pattern = a
-`fluid_3d` pour filling a collider cup, optionally paired with a
-`water_compute({ circular: true })` surface whose `mesh.position.y` you
-raise over the fill duration so the stream lands on a rippling, rising
-level. For pours into POOLS, PONDS, or terrain water, prefer `fluid_swe`
-above — its pours conserve mass and make their own whitewater. Same
-primitives compose into fountains, rain into a barrel, a waterfall pool —
-point them where the scene needs.
+**Pours / streams into CONTAINERS** — shape the `bedFn` as the vessel's
+interior: a bowl, cup, barrel, or basin is a heightfield. Share one
+profile function between the visible vessel mesh (a lathe of it) and the
+sim's `bedFn`, and the container the liquid fills IS the prop's interior —
+the pour lands on a rippling, rising level and conserves mass to the
+brim. Same primitives compose into fountains, rain into a barrel, a
+waterfall pool — point them where the scene needs.
 
 **`WaterMesh` + `SkyMesh`** — passive ocean / large-scale water with
-FFT-style waves. Better than `water_compute` when you need horizon-
-filling water you don't push around interactively.
+FFT-style waves, for horizon-filling water you don't push around
+interactively.
 ```js
 const { WaterMesh } = await import('npm:three@0.184.0/addons/objects/WaterMesh.js');
 const { SkyMesh } = await import('npm:three@0.184.0/addons/objects/SkyMesh.js');
@@ -2567,7 +2532,7 @@ from the scene". If a shot needs the flag out of the way, move the POLE (a
 scene decision), never "fix" the cloth sim.
 
 **`fluid_sim`** — 2D stable-fluids (ink, dye, smoke, swirling color).
-NOT 3D liquid (use water_compute / WaterMesh for that).
+NOT 3D liquid (use fluid_swe / WaterMesh for that).
 ```js
 const { createFluidSim } = await import(globalThis.EIDOVERSE_DIR + 'fluid_sim.js');
 const fluid = await createFluidSim(renderer, { profile: 'balanced', curlStrength: 4 });
