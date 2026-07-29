@@ -31,6 +31,61 @@ import {
     startFfmpegPipe, readbackFrame, drainReadback, shutdown, loadAssets,
 } from './render_common.mjs';
 
+// PHASE-A.1 AUDIT LIFECYCLE (design: work/sol_collab/PROPOSALS.md; hardening:
+// work/sol_collab/REVIEW_PHASE_A.md findings 15-17). Installed BEFORE config
+// parsing so even a malformed config leaves an audit trail. The persisted
+// digest is built from the structured ledger — the console tee is a runtime-
+// warnings section, not the source of truth — and it is written on EVERY exit
+// path: normal completion, Deno.exit() shortcuts, uncaught errors, unhandled
+// rejections. The flush latch is set only after a successful write, so one
+// failed write does not disable later retries.
+import {
+    buildInventory, mapDeclarations, coverageRecords, createLedger,
+    digestFromLedger, snapshotPolicy,
+} from './audit_core.js';
+const __ledger = createLedger();
+const __runId = `${Deno.args[0] || 'inline'}@${new Date().toISOString()}`;
+let __lastRendered = { scene: null, camera: null };   // renderer-call capture (fallback evidence only)
+let __auditSetupState = null;                         // inventory/declaration census at end of setup (TOCTOU diff)
+let __framingSnapshot = null;                         // camera + subject evidence captured BEFORE cleanup
+let __auditOutBase = 'render';                        // refined once config parses
+let __runStatus = 'running';
+const __auditLog = [];
+{
+    const _push = (s) => {
+        if (/^\s/.test(s) && __auditLog.length) __auditLog[__auditLog.length - 1] += '\n' + s;
+        else __auditLog.push(s);
+    };
+    const _w = console.warn.bind(console), _e = console.error.bind(console);
+    console.warn = (...a) => { try { _push(a.map(String).join(' ')); } catch (_) {} _w(...a); };
+    console.error = (...a) => { try { _push(a.map(String).join(' ')); } catch (_) {} _e(...a); };
+}
+function __auditPaths() {
+    const base = __auditOutBase;
+    const txt = /\.[a-z0-9]+$/i.test(base) ? base.replace(/(\.[a-z0-9]+)$/i, '.audit.txt') : base + '.audit.txt';
+    return { txt, json: txt.replace(/\.audit\.txt$/, '.audit.json') };
+}
+let __digestFlushed = false;
+function __flushDigest(reason, detail) {
+    if (__digestFlushed) return;
+    try {
+        if (detail) {
+            __ledger.record({ check: 'lifecycle', outcome: 'WARN', class: 'CORRECTNESS', message: `run ended abnormally (${reason}): ${detail}` });
+        }
+        __runStatus = reason;
+        const p = __auditPaths();
+        Deno.writeTextFileSync(p.txt, digestFromLedger(__ledger, __auditLog, { runId: __runId, status: reason }));
+        Deno.writeTextFileSync(p.json, JSON.stringify({ runId: __runId, status: reason, ...__ledger.toJSON() }, null, 1));
+        __digestFlushed = true;   // latch only after BOTH writes succeeded
+        console.log(`[render_scene] full digest -> ${p.txt} (+ .audit.json ledger)`);
+    } catch (e) { console.log(`[render_scene] digest flush failed (${e && e.message}); will retry on next exit path.`); }
+}
+globalThis.addEventListener('unload', () => __flushDigest('process exit'));
+globalThis.addEventListener('error', (ev) => __flushDigest('uncaught error', ev?.error?.message || ev?.message || String(ev?.error || '')));
+// Deno terminates on unhandled promise rejections WITHOUT firing unload —
+// an async render crash (e.g. WebGPU device loss) must still leave a digest.
+globalThis.addEventListener('unhandledrejection', (ev) => __flushDigest('unhandled rejection', ev?.reason?.message || String(ev?.reason || '')));
+
 const config = loadConfig(Deno.args[0]);
 const width = config.width || 1280;
 const height = config.height || 720;
@@ -38,8 +93,17 @@ const fps = config.fps || 30;
 const duration = config.duration || 5.0;
 const totalFrames = Math.ceil(duration * fps);
 const dt = 1.0 / fps;
+
 const outputVideo = config.outputVideo || config.composedOutput
     || (config.outputDir || './scene') + '.mp4';
+__auditOutBase = outputVideo;
+// Run-start stamp: overwrite any stale audit artifact immediately so a file
+// claiming to describe this output either says "running" (crashed before
+// flush) or carries this run's final status — never a previous run's verdict.
+try {
+    const p = __auditPaths();
+    Deno.writeTextFileSync(p.txt, `AUDIT DIGEST — run ${__runId} — status: running\n(this run has not finished; if this file still says "running", the run died before its final flush)\n`);
+} catch (_) { /* stamp is best-effort */ }
 
 // --- Read scene script ---
 let sceneScript;
@@ -228,6 +292,7 @@ const HELPER_MODULES = [
     'eidoverse/camera_safety.js',
     'eidoverse/sdf_raymarch_loader.js',
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
+    'eidoverse/surface_layers.js',        // globalThis.normalizeTexelDensity / makeLayeredMaterial / layerSurface — matched texel density + per-pixel curvature/world-space/grunge weathering for AGENT-BUILT (lathe/extrude/boolean) geometry; REFUSES fetched GLB/VRM/kit meshes
     'eidoverse/particles.js',             // globalThis.makeParticles — GPU textured sprite particles (sparks/smoke/dust/…)
     'eidoverse/grass.js',                 // globalThis.makeGrass — GPU wind grass field (tapered blades, height-gradient color, adjustable wind/density/height/color)
     'eidoverse/sky_system.js',            // globalThis.makeSkySystem — WORLD-SPACE volumetric sky: raymarched cloud dome IN the scene (geometry occludes it), sun/moon/stars, time-of-day, cloud types, day cycles, moving metal reflections, env bake
@@ -237,9 +302,12 @@ const HELPER_MODULES = [
     // 'eidoverse/seed_three.js',
     'eidoverse/screen.js',              // globalThis.makeScreen — animated canvas-2D screen/display panel (self-updating CanvasTexture, unlit emissive, exact UI colors)
     'eidoverse/creature_builder.js',    // globalThis.makeCreature — universal procedural creature builder (spine+limbs auto-rig, morphology-adaptive gait, makeCreature.random)
+    'eidoverse/creature_realist.js',    // globalThis.makeRealisticCreature (async) — SPECIMEN pipeline: offline-sculpted realist body (SDF anatomy → Quadriflow) bound onto the untouched makeCreature rig; same options + gait engine; caches by spec hash. Must load AFTER creature_builder.js.
+    'eidoverse/creature_specimen.js',    // globalThis.makeSpecimen (async) — GROUND-UP realist creature: own anatomy skeleton (scapula/digitigrade) + own 4-beat gait + brush-sculpted profile-loft body (cached); shares only the option vocabulary with makeCreature. Must load AFTER creature_realist.js line (independent of it).
     'eidoverse/model_kit.js',             // globalThis.loadKit — named, origin-centered parts for modular-kit / asset-library GLTFs (don't drop the whole gltf.scene; assemble from parts). fetch_model.py flags kits with [KIT_INFO].
     'eidoverse/loft.js',                  // globalThis.Loft + LoftGeometry — loft modeling: cross-section skinning, sweep with taper/twist/profile-morph
     'eidoverse/particle_morph.js',       // globalThis.makeParticleMorph + ParticleMorph.fromMesh/fromText/fromPoints/neuronGraph — GPU cloud that dissolves→reforms between shapes (incl. text + ASCII art via fromText)
+    'eidoverse/clippy.js',               // globalThis.makeClippy — the Office Assistant as an eidoverse character: gem-paperclip wire + eyes/brows, full gesture vocabulary as MORPH TARGETS (lean/tilt/squash/curl/wave/blink/brows/look), named clips (greet/think/alert/happy/sad) + idle fidgets
     'eidoverse/terrain.js',              // globalThis.makeTerrain — procedural heightfield + vertex-painted multi-texture blend
     // VRM character controller + IK. Loading them here means scene scripts
     // can call `new VRMCharacterController(...)` / `new VRMFootControllerIK(...)`
@@ -673,16 +741,53 @@ function _applyCpuMips(tex) {
 //   const nor    = await globalThis.loadImageTexture(ASSETS.concrete_nor);   // linear (default)
 //   albedo.repeat.set(8, 8); albedo.wrapS = albedo.wrapT = THREE.RepeatWrapping;
 //   const mat = new THREE.MeshStandardNodeMaterial({ map: albedo, normalMap: nor });
+// ⚠ DECODER FALLBACK. Deno's native createImageBitmap rejects a minority of
+// perfectly valid JPEGs with "Could not create the object. The reason is not
+// known…" — Poly Haven's seaworn_sandstone_brick_ao_1k.jpg is one (683028
+// bytes, baseline, grayscale; PIL and Skia both read it fine). Before this,
+// the only signal an agent got was that opaque message pointing at
+// createImageBitmap, and the natural "fix" was to drop the map from the
+// material — degrading the surface to route around a decoder bug.
+// @napi-rs/canvas (Skia) is already a hard dependency of the canvas-2d shim,
+// and it decodes these. So: try Deno, fall back to Skia, and say so.
+let _skiaMod = null, _skiaTried = false;
+const _skiaDecode = async (u8) => {
+    if (!_skiaTried) {
+        _skiaTried = true;
+        try { _skiaMod = await import('npm:@napi-rs/canvas@0.1.69'); }
+        catch (e) { console.warn('[loadImageTexture] Skia fallback unavailable:', e.message); }
+    }
+    if (!_skiaMod) return null;
+    const img = await _skiaMod.loadImage(u8);
+    const cv = _skiaMod.createCanvas(img.width, img.height);
+    cv.getContext('2d').drawImage(img, 0, 0);
+    const id = cv.getContext('2d').getImageData(0, 0, img.width, img.height);
+    return { width: img.width, height: img.height, data: new Uint8Array(id.data.buffer.slice(0)) };
+};
+
 globalThis.loadImageTexture = async (bytes, opts = {}) => {
     const u8 = bytes instanceof Uint8Array ? bytes
              : bytes instanceof ArrayBuffer ? new Uint8Array(bytes)
              : new Uint8Array(globalThis.b64toArrayBuffer(bytes));
     const blob = new Blob([u8]);
-    const bitmap = await createImageBitmap(blob);  // Deno native, single decode
+    let bitmap = null, skia = null;
+    try {
+        bitmap = await createImageBitmap(blob);     // Deno native, single decode
+    } catch (e) {
+        skia = await _skiaDecode(u8);
+        if (!skia) {
+            throw new Error('loadImageTexture: neither Deno nor Skia could decode this image ('
+                + u8.length + ' bytes). Deno said: ' + e.message);
+        }
+        console.warn('[loadImageTexture] Deno decoder rejected this image ('
+            + u8.length + ' bytes) — decoded via Skia instead. No action needed.');
+    }
 
-    const w = bitmap.width, h = bitmap.height;
+    const w = skia ? skia.width : bitmap.width, h = skia ? skia.height : bitmap.height;
     let data;
-    if (typeof bitmap[_DENO_BITMAP_DATA] === 'function') {
+    if (skia) {
+        data = skia.data;                            // already RGBA8
+    } else if (typeof bitmap[_DENO_BITMAP_DATA] === 'function') {
         const raw = bitmap[_DENO_BITMAP_DATA]();
         const total = raw?.length || 0;
         const px = w * h;
@@ -836,6 +941,15 @@ function _migrateGltfTextures(gltf) {
     if (!gltf?.scene) return;
     let totalSlots = 0, totalMats = 0, firstMat = true;
     gltf.scene.traverse((o) => {
+        // ⚠ STAMP EVERY LOADED ASSET. A fetched GLB / VRM / kit part carries
+        // AUTHORED UVs laid out against an atlas, and authored materials that
+        // may be MToon or carry slots a generic rebuild would drop. Helpers
+        // that rewrite UVs or replace materials (surface_layers.js) key off
+        // this flag to refuse — the alternative is trusting every caller not
+        // to hand them a scene root, which is not a guarantee an engine can
+        // make. Cheap to set here, load-bearing everywhere downstream.
+        o.userData._loadedAsset = true;
+        if (o.isMesh && o.geometry) o.geometry.userData._loadedAsset = true;
         if (o.isMesh) {
             const mats = Array.isArray(o.material) ? o.material : [o.material];
             for (const m of mats) {
@@ -859,6 +973,15 @@ globalThis.GLTFLoader = class extends _OrigGLTF {
         args[2] = (gltf) => {
             try {
                 _migrateGltfTextures(gltf);
+                // PROVENANCE STAMP (audit identity layer): every loaded asset
+                // root carries a source id; audit_core merges leaves into one
+                // body only WITHIN a shared provenance root. userData survives
+                // clone(), so cloned kit parts keep their lineage. This is
+                // tamper-evident, not tamper-proof (shared runtime).
+                if (gltf?.scene && gltf.scene.userData.__srcAsset === undefined) {
+                    globalThis.__gltfParseCount = (globalThis.__gltfParseCount || 0) + 1;
+                    gltf.scene.userData.__srcAsset = `gltf_${globalThis.__gltfParseCount}`;
+                }
                 if (gltf?.userData?.vrm) {
                     if (!globalThis._vrm) {
                         globalThis._vrm = gltf.userData.vrm;
@@ -1207,28 +1330,92 @@ globalThis.makeOverlayLayer = (opts = {}) => {
 };
 
 console.log('[render_scene] Calling setup()...');
+// Record the ACTUAL scene/camera handed to the renderer on every call —
+// end-of-run audits must judge what rendered, not whichever global a scene
+// happened to set last. Engine-side wrap; scene code needs no changes.
+try {
+    const RP = globalThis.THREE?.WebGPURenderer?.prototype;
+    if (RP) {
+        for (const m of ['render', 'renderAsync']) {
+            const orig = RP[m];
+            if (typeof orig === 'function' && !RP[`__auditWrapped_${m}`]) {
+                RP[m] = function (scene, camera, ...rest) {
+                    if (scene?.isScene && camera?.isCamera) { __lastRendered.scene = scene; __lastRendered.camera = camera; }
+                    return orig.call(this, scene, camera, ...rest);
+                };
+                Object.defineProperty(RP, `__auditWrapped_${m}`, { value: true, enumerable: false });
+            }
+        }
+    }
+} catch (_) { /* capture is best-effort */ }
 try {
     if (typeof globalThis.setup !== 'function') throw new Error('Scene must define globalThis.setup() (or window.setup())');
     await globalThis.setup();
     console.log('[render_scene] setup() completed OK');
 
-    // Post-setup placement audit. Runs once after the scene is fully built but
-    // before any frames render — fixes placement mistakes (model placed inside
-    // another model; prop hovering just above a surface). AUTO-FIX IS ON BY
-    // DEFAULT now (clipping pairs get pushed apart, near-surface hovering objects
-    // get snapped down) because advisory-only warnings were routinely ignored by
-    // weaker subagents → shipped videos full of clipping/floating props. It runs
-    // ONCE post-setup (not per-frame), so no jitter, and it's a no-op on scenes
-    // already placed correctly. Truly-floating "void/far" objects (nothing
-    // beneath) still HARD-WARN (can't be safely snapped). Opt OUT of auto-fix
-    // with `_noAutoFixPlacement = true` (revert to warn-only); opt out of the
-    // whole audit with `_noAutoPlacementCheck = true` (e.g. a VRM intentionally
-    // in a cockpit, or a deliberate floating-objects scene). Per-object opt-outs:
-    // `userData.noSupportCheck` (hovering) / `userData.noClippingCheck` (clipping).
-    if (!globalThis._noAutoPlacementCheck) {
-        const sceneRoot = globalThis._scene || globalThis._s;
+    // Post-setup audits (Phase A.1). Order matters:
+    //   1. POLICY SNAPSHOT — one immutable truthiness-exact capture of the
+    //      global gates; every gate below reads the snapshot, so flipping a
+    //      flag in renderFrame() cannot retroactively disarm anything, and a
+    //      re-snapshot at finalize reports any attempted mutation.
+    //   2. REPAIR (opt-in only) — if a scene explicitly asked for snapping,
+    //      it runs BEFORE accounting/audits as a recorded pass, so the
+    //      detector never judges evidence it modified.
+    //   3. COVERAGE ACCOUNTING — unconditional; every declaration (object
+    //      flags, assembly tags, global disables) becomes a ledger record and
+    //      a digest line. Declarations label results; they never make
+    //      geometry unobservable.
+    //   4. Placement checks, warn-only.
+    globalThis.__policySnapshot = undefined;   // engine-readable, set below
+    const __policy = snapshotPolicy(globalThis);
+    Object.defineProperty(globalThis, '__policySnapshot', { value: __policy, writable: false, configurable: false });
+    {
+        const sceneRoot = globalThis._s || globalThis._scene;
+        if (globalThis._s && globalThis._scene && globalThis._s !== globalThis._scene) {
+            console.warn('[audit:coverage] ⚠ two different scene globals are set (_s and _scene) — auditing _s; a decoy scene in the other global is NOT what rendered.');
+            __ledger.record({ check: 'coverage.scene', outcome: 'WARN', class: 'CORRECTNESS', message: 'divergent _s/_scene globals — audited scene may not be the rendered scene' });
+        }
+        if (sceneRoot && globalThis.THREE) {
+            // 2. opt-in repair pass, separated from auditing
+            if (__policy.flags._autoFixPlacement && !__policy.flags._noAutoPlacementCheck) {
+                try {
+                    if (typeof globalThis.checkClipping === 'function') globalThis.checkClipping(sceneRoot, { autoFix: true });
+                    if (typeof globalThis.checkHovering === 'function') globalThis.checkHovering(sceneRoot, { autoFix: true });
+                    if (typeof globalThis.checkZFighting === 'function') globalThis.checkZFighting(sceneRoot, { autoFix: true });
+                    __ledger.record({ check: 'repair', outcome: 'PASS', class: 'REVIEW', message: 'opt-in placement repair pass ran BEFORE audits (scene mutated by request); the audits below judge the repaired scene.' });
+                    console.log('[repair] opt-in placement repair applied — audits below judge the repaired scene.');
+                } catch (e) { __ledger.record({ check: 'repair', outcome: 'SKIPPED', message: `repair pass failed: ${e && e.message}` }); }
+            }
+            // 3. coverage accounting — inventory retained for the finalize diff
+            try {
+                const expected = ['checkClipping', 'checkHovering', 'checkDensity', 'checkZFighting', 'checkFacing', 'checkLineIntrusion'];
+                const missingChecks = __policy.flags._noAutoPlacementCheck ? [] : expected.filter((n) => typeof globalThis[n] !== 'function');
+                const inv = buildInventory(globalThis.THREE, sceneRoot);
+                const decl = mapDeclarations(globalThis.THREE, sceneRoot, inv, { seatedObjects: globalThis._seatedVRMs || [] });
+                for (const r of coverageRecords(decl, inv, __policy, { missingChecks })) {
+                    const rec = __ledger.record(r);
+                    (rec.outcome === 'WARN' ? console.warn : console.log)(`[audit:coverage] ${rec.message}`);
+                }
+                __auditSetupState = {
+                    bodies: inv.bodies.length, leaves: inv.leaves.length,
+                    declarationCount: decl.declarations.length,
+                    flagLeafCounts: Object.fromEntries([...decl.unionByFlag].map(([f, u]) => [f, u.leafCount])),
+                };
+            } catch (e) {
+                console.warn(`[audit:coverage] SKIPPED (${e && e.message ? e.message : 'error'}) — coverage accounting failed; declarations are UNACCOUNTED this run.`);
+                __ledger.record({ check: 'coverage', outcome: 'SKIPPED', message: String(e && e.message || e) });
+            }
+        } else {
+            console.log('[audit:coverage] SKIPPED — no scene global or THREE unavailable; nothing was accounted.');
+            __ledger.record({ check: 'coverage', outcome: 'SKIPPED', message: 'no scene global (_s/_scene) at end of setup — coverage cannot run' });
+        }
+    }
+    // 4. placement checks, warn-only (autoFix:false always — repair already
+    // ran above if requested). Gate reads the SNAPSHOT, not the live global.
+    if (!__policy.flags._noAutoPlacementCheck) {
+        const sceneRoot = globalThis._s || globalThis._scene;
         if (sceneRoot) {
-            const autoFix = globalThis._noAutoFixPlacement !== true;   // default ON
+            const autoFix = false;
             if (typeof globalThis.checkClipping === 'function') globalThis.checkClipping(sceneRoot, { autoFix });
             const _hover = (typeof globalThis.checkHovering === 'function')
                 ? (globalThis.checkHovering(sceneRoot, { autoFix }) || []) : [];
@@ -1236,26 +1423,16 @@ try {
             // Coplanar surfaces placed at the EXACT same depth (decal/panel flush on
             // a wall/floor) flicker — auto-nudge the thin one a few mm proud.
             if (typeof globalThis.checkZFighting === 'function') globalThis.checkZFighting(sceneRoot, { autoFix });
+            // Display panels (billboards/signs/screens): facing + pivot evidence —
+            // the wrong-rotation class the author can't feel. Detector only.
+            if (typeof globalThis.checkFacing === 'function') globalThis.checkFacing(sceneRoot);
             // A tall object planted IN a conveyor/belt/line (robot arm standing in
             // the middle of its own conveyor) — semantic placement audit.
             if (typeof globalThis.checkLineIntrusion === 'function') globalThis.checkLineIntrusion(sceneRoot);
-            // OPT-OUT TRANSPARENCY: every audit opt-out is honored, but NONE are
-            // silent. An opt-out is a declaration of intent ("this crab slides
-            // sideways on purpose") — slapping one on to make a warning go away
-            // is the warning, unfixed. Surface them all so the muzzle itself is
-            // visible in the log.
-            try {
-                const optOuts = {};
-                sceneRoot.traverse(o => {
-                    for (const flag of ['noSupportCheck', 'noClippingCheck', 'noMotionCheck', 'noIntrusionCheck', 'noZFightCheck']) {
-                        if (o.userData?.[flag]) (optOuts[flag] = optOuts[flag] || []).push(o.name || '(unnamed)');
-                    }
-                });
-                for (const [flag, names] of Object.entries(optOuts)) {
-                    const shown = names.slice(0, 8).join(', ') + (names.length > 8 ? ` …+${names.length - 8}` : '');
-                    console.log(`[audit-optout] ${flag} on ${names.length} object(s): ${shown} — each must be a DELIBERATE choice (a real floater / intentional slide / planned overlap). If any was added to silence a warning, the warning was the bug: remove the flag and fix the placement/heading instead.`);
-                }
-            } catch (e) { /* transparency must never break the render */ }
+            // (Opt-out transparency now lives in the unconditional coverage
+            // section above — it accounts allowIntersect/assembly too, maps
+            // flags onto canonical bodies, and cannot be silenced by the
+            // global disable that used to gate this block.)
             // Vociferous escalation. 'void' (no surface beneath) and 'far'
             // (floating >1m above the nearest surface) are almost always a prop
             // dumped in mid-air by hand-coords instead of placeOn — and autoFix
@@ -1263,9 +1440,9 @@ try {
             const _floaters = _hover.filter((h) => h.kind === 'void' || h.kind === 'far');
             if (_floaters.length) {
                 const names = _floaters.slice(0, 6).map((h) => h.obj.name || '(unnamed)').join(', ');
-                console.warn(`[placement] ⚠ RE-RENDER REQUIRED — ${_floaters.length} object(s) floating with no/far support: ${names}. Rest props on their surface with placeOn(obj, surface) — hand-set coordinates don't express what sits on what, so props end up hovering in mid-air far from where they belong. If a floater is genuinely meant to fly, mark obj.userData.noSupportCheck = true. Treat this as a hard fail like a black frame.`);
+                console.warn(`[placement] ⚠ ${_floaters.length} object(s) are genuinely unsupported and will read as floating on camera: ${names}. placeOn(obj, surface) seats a piece on what it belongs to; a piece that is meant to fly can declare it with obj.userData.noSupportCheck = true.`);
             } else {
-                console.log('[placement] OK — every solid prop rests on a surface (or is marked noSupportCheck).');
+                console.log('[placement] every solid piece rests on a surface — placement reads grounded. Nice foundation to build detail on.');
             }
         }
     }
@@ -1616,7 +1793,7 @@ async function loadTslPostprocessingNodes() {
         } catch (e) { console.log(`[tsl-post] ${path} skipped: ${e.message}`); }
     };
     const base = 'npm:three@0.184.0/addons/tsl/display/';
-    await tryFn(base + 'GTAONode.js', 'ao');
+    await tryFn(base + 'GTAONode.js', 'ao');           // legacy fallback only — primary AO is vendored N8AO
     await tryFn(base + 'SSRNode.js', 'ssr');
     await tryFn(base + 'FXAANode.js', 'fxaa');
     await tryFn(base + 'BloomNode.js', 'bloom');
@@ -1686,8 +1863,9 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
     const {
         pass, output: outputNode_, mrt, normalView, directionToColor,
         colorToDirection, colorSpaceToWorking, SRGBColorSpace,
-        metalness, roughness, vec2, screenUV, sample,
+        metalness, roughness, vec2, vec4, screenUV, sample,
         builtinAOContext, renderOutput, UnsignedByteType, mix,
+        diffuseColor,
     } = THREE;
     const tsl = await loadTslPostprocessingNodes();
 
@@ -1699,7 +1877,16 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
         if (child.isMesh && child.material) {
             const mats = Array.isArray(child.material) ? child.material : [child.material];
             mats.forEach(mat => {
-                if (mat.alphaTest > 0.0001) { mat.alphaToCoverage = true; mat.needsUpdate = true; a2cCount++; }
+                if (mat.alphaTest > 0.0001) {
+                    // materials may explicitly opt out: on a single-sample
+                    // target A2C silently drops the whole draw (specimen fur)
+                    if (mat.userData?.noAutoAlphaToCoverage === true) {
+                        mat.alphaToCoverage = false;
+                    } else {
+                        mat.alphaToCoverage = true; a2cCount++;
+                    }
+                    mat.needsUpdate = true;
+                }
                 if (mat.transparent && mat.alphaTest < 0.0001) { mat.depthWrite = false; depthFixCount++; }
             });
         }
@@ -1715,10 +1902,20 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
         // metalness+roughness (vec2 packed) into separate channels.
         // Pattern matches webgpu_postprocessing_ssr.html.
         if (mrt && directionToColor && normalView && metalness && roughness && vec2 && scenePass.setMRT) {
+            // Aux attachments carry the material's per-pixel alpha in .a —
+            // NEVER a bare vec2/vec3 (the node builder pads those to alpha
+            // 1.0, so an alpha-blended material REPLACES the G-buffer under
+            // its whole quad even where it's fully invisible; a ring-cloud
+            // sheet lying tangent to a scene floor erased the floor's
+            // metalness this way and no flat surface ever reflected).
+            // With real alpha here, MaterialBlending weights every
+            // transparent's G-buffer contribution by its visibility and
+            // opaques hard-write as before.
+            const auxAlpha = diffuseColor ? diffuseColor.a : 1;
             const sceneMRT = mrt({
                 output: outputNode_,
-                normal: directionToColor(normalView),
-                metalrough: vec2(metalness, roughness),
+                normal: vec4(directionToColor(normalView), auxAlpha),
+                metalrough: vec4(metalness, roughness, 0, auxAlpha),
             });
             // G-buffer attachments default to NoBlending: a transparent quad
             // REPLACES the normal/metalrough underneath over its full
@@ -1763,34 +1960,80 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
 
         let colorOut = sceneColor;
 
-        // GTAO via builtinAOContext — production AO example pattern.
-        // The AO node feeds back into the scene's lighting context rather
-        // than multiplying after the fact.
-        // GTAO — kept in the pipeline; user verifies it visually (they can
-        // see it on a bright scene; I as an AI struggle with that subtle
-        // shading even with before/after). SSR is my primary self-verify
-        // target because reflections create an obvious "duplicated geometry"
-        // pattern I can pattern-match in a single frame.
-        // GTAO. We capture the AO texture node out of this scope so the
-        // cloud-reflect compose step below can also modulate by it — env-
-        // IBL contributions (cloud reflections on metallic surfaces) need
-        // to be attenuated by ambient occlusion the same way the diffuse
-        // lighting context is, otherwise rough metal in a concavity
-        // appears unnaturally bright (the AO darkens the base scene
-        // shading but a raw `colorOut + cloudReflTex` add would put full-
-        // brightness sky reflection on top, blowing past the tonemap).
-        let aoTexNode = null;
-        // Scene-tunable: globalThis._aoParams = { enabled, resolutionScale }.
+        // AMBIENT OCCLUSION: N8AO (vendored, eidoverse/vendor/n8ao/ — the
+        // WebGPU port of N8python's N8AO, endorsed by the original author).
+        // Chosen over three's GTAONode: no halo artifacts at depth edges and
+        // its own spatial+temporal denoise chain, so AO is stable in motion
+        // without the temporal-filter ghosting GTAO had. It consumes our
+        // existing MRT directly — the normal attachment is the same
+        // directionToColor encoding its own scene pass would produce — and
+        // returns beauty-with-AO-composited, which becomes colorOut BEFORE
+        // SSR so reflections inherit the occlusion.
+        // aoScalarNode carries an AO factor (combined/beauty luminance
+        // ratio — public outputs only) for the cloud-reflect env-IBL
+        // modulation below: rough metal in a concavity must not receive
+        // full-brightness sky reflection on top of AO-darkened shading.
+        let aoScalarNode = null;
+        // Scene-tunable: globalThis._aoParams =
+        //   { enabled, halfRes, quality, aoRadius, intensity, distanceFalloff }
+        // (+ live handle at globalThis._n8ao.configuration after setup).
         const _aop = globalThis._aoParams || {};
-        if (tsl.ao && builtinAOContext && _aop.enabled !== false) {
+        if (_aop.enabled !== false) {
             try {
-                const aoPass = tsl.ao(sceneDepth, sceneNormal, camera);
-                aoPass.resolutionScale = _aop.resolutionScale ?? 0.5;
-                if ('useTemporalFiltering' in aoPass) aoPass.useTemporalFiltering = true;
-                aoTexNode = aoPass.getTextureNode();
-                scenePass.contextNode = builtinAOContext(aoTexNode.sample(screenUV).r);
-                added.push('GTAO');
-            } catch (e) { console.warn('[auto-enhance] GTAO failed:', e.message); }
+                const { N8AONode } = await import('./vendor/n8ao/N8AONode.js');
+                const n8ao = new N8AONode({
+                    beautyNode: sceneColor, beautyTexture: scenePass.getTexture('output'),
+                    depthNode: sceneDepth, depthTexture: scenePass.getTexture('depth'),
+                    normalNode: scenePassNormal, normalTexture: scenePass.getTexture('normal'),
+                    // N8AO must drive the scene pass update itself: pass
+                    // TEXTURE references elsewhere in the graph (SSR) do NOT
+                    // trigger the pass's per-frame render, so without this the
+                    // scene renders once and every frame after shows frame 1
+                    // (frozen camera/motion — found the hard way).
+                    scenePassNode: scenePass,
+                    scene, camera,
+                });
+                // halfRes uses N8AO's depth-downsample pass, whose shader
+                // currently fails Naga validation on Deno WebGPU (invalid
+                // 'fragment_N8AO.Downsample' module -> black frames). Full-res
+                // until that shader is patched; opt back in per scene once
+                // fixed via _aoParams.halfRes = true.
+                n8ao.configuration.halfRes = _aop.halfRes ?? false;
+                // our chain is LINEAR until renderOutput at the very end —
+                // N8AO's default gamma-corrected composite double-corrects
+                // and washes the whole frame out.
+                n8ao.configuration.gammaCorrection = false;
+                if (_aop.quality) n8ao.setQualityMode(_aop.quality);
+                if (_aop.aoRadius !== undefined) n8ao.configuration.aoRadius = _aop.aoRadius;
+                if (_aop.intensity !== undefined) n8ao.configuration.intensity = _aop.intensity;
+                if (_aop.distanceFalloff !== undefined) n8ao.configuration.distanceFalloff = _aop.distanceFalloff;
+                const n8aoOut = n8ao.getTextureNode();
+                if (THREE.luminance && THREE.clamp) {
+                    aoScalarNode = THREE.clamp(
+                        THREE.luminance(n8aoOut.rgb).div(THREE.luminance(sceneColor.rgb).max(0.0001)),
+                        0, 1,
+                    );
+                }
+                colorOut = n8aoOut;
+                globalThis._n8ao = n8ao;
+                added.push('N8AO');
+            } catch (e) {
+                console.warn('[auto-enhance] N8AO failed, falling back to legacy GTAO:', e.message);
+                // Legacy fallback: GTAO with temporal filtering (known
+                // ghosting on movers — N8AO is the fix; this path only runs
+                // if the vendored module can't load).
+                if (tsl.ao && builtinAOContext) {
+                    try {
+                        const aoPass = tsl.ao(sceneDepth, sceneNormal, camera);
+                        aoPass.resolutionScale = _aop.resolutionScale ?? 0.5;
+                        if ('useTemporalFiltering' in aoPass) aoPass.useTemporalFiltering = true;
+                        const aoTexNode = aoPass.getTextureNode();
+                        aoScalarNode = aoTexNode.sample(screenUV).r;
+                        scenePass.contextNode = builtinAOContext(aoScalarNode);
+                        added.push('GTAO-fallback');
+                    } catch (e2) { console.warn('[auto-enhance] GTAO fallback failed too:', e2.message); }
+                }
+            }
         }
 
         // Pre-SSR hook: lets effects that should be REFLECTED (volumetric
@@ -1871,11 +2114,10 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                     // sky reflection on top of their AO-darkened base shading.
                     // This matches how Three's MeshPhysicalMaterial multiplies
                     // env-IBL contributions by ambient occlusion.
-                    if (aoTexNode) {
-                        const aoSample = aoTexNode.sample(screenUV).r;
+                    if (aoScalarNode) {
                         cloudReflTex = THREE.convertToTexture
-                            ? THREE.convertToTexture(cloudReflTex.mul(aoSample))
-                            : cloudReflTex.mul(aoSample);
+                            ? THREE.convertToTexture(cloudReflTex.mul(aoScalarNode))
+                            : cloudReflTex.mul(aoScalarNode);
                     }
                     // Specular shadow occlusion — multiply cloud-reflect by
                     // directional-light shadow visibility at each pixel's
@@ -1975,12 +2217,23 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
         // wrap — wrapping the multiplied node trips a TSL recursion in the
         // VarNode/StackNode graph).
         let ssrHitAlpha = null;
-        if (tsl.ssr && sceneMetalRough) {
+        // Scene-tunable: globalThis._ssrParams = { enabled, maxDistance,
+        // thickness, quality, resolutionScale }. Three's SSRNode defaults
+        // are authored for meter-scale demos (maxDistance = 1 WORLD UNIT):
+        // in a hundreds-of-meters scene the ray marches ~1 m and dies,
+        // which reads as "flat floors never reflect" — sphere-scale objects
+        // mask it by reflecting their immediate surroundings.
+        const _sp = globalThis._ssrParams || {};
+        if (tsl.ssr && sceneMetalRough && _sp.enabled !== false) {
             try {
                 const ssrNode = tsl.ssr(
                     colorOut, depthForSSR, sceneNormal,
                     sceneMetalRough.r, sceneMetalRough.g, camera
                 );
+                if (_sp.maxDistance !== undefined && ssrNode.maxDistance) ssrNode.maxDistance.value = _sp.maxDistance;
+                if (_sp.thickness !== undefined && ssrNode.thickness) ssrNode.thickness.value = _sp.thickness;
+                if (_sp.quality !== undefined && ssrNode.quality) ssrNode.quality.value = _sp.quality;
+                if (_sp.resolutionScale !== undefined) ssrNode.resolutionScale = _sp.resolutionScale;
                 const ssrTex = THREE.convertToTexture
                     ? THREE.convertToTexture(ssrNode)
                     : ssrNode;
@@ -2069,7 +2322,11 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                 const gatedCloud = ssrHitAlpha
                     ? cloudReflTex.rgb.mul(ssrHitAlpha.oneMinus())
                     : cloudReflTex.rgb;
-                colorOut = colorOut.add(gatedCloud);
+                // debug modes (REFLDBG) replace the image outright — an
+                // additive channel-view over the lit beauty is unreadable
+                colorOut = globalThis._cloudReflDebugReplace
+                    ? cloudReflTex
+                    : colorOut.add(gatedCloud);
                 colorOut = THREE.convertToTexture
                     ? THREE.convertToTexture(colorOut)
                     : colorOut;
@@ -2164,6 +2421,11 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
         // Patch renderer.renderAsync (and .render) to route through PostProcessing.
         const origRenderAsync = renderer.renderAsync.bind(renderer);
         const origRender = renderer.render.bind(renderer);
+        // Offscreen helper passes (e.g. cloud_spatial's half-res dome
+        // renders) need a REAL scene render into their own target — the
+        // patched renderAsync below ignores its arguments and runs the whole
+        // post pipeline instead.
+        globalThis._rawRenderAsync = origRenderAsync;
         let _insidePost = false;
         let _ppCallCount = 0;
         renderer.renderAsync = async function(s, c) {
@@ -2249,6 +2511,18 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
 // exception-free — no legit scene wants a frozen swap-chain — so this is a
 // prevent, not a detect.)
 const _guardRenderer = globalThis._r || globalThis._renderer;
+let _offlineNodeFrame = null;
+if (_guardRenderer?.init) {
+    await _guardRenderer.init();
+    _offlineNodeFrame = _guardRenderer._nodes?.nodeFrame || null;
+    if (_offlineNodeFrame) {
+        // Three advances FRAME-scoped nodes from its wall-clock RAF, not from
+        // manual render() calls. Offline video owns the clock, so stop that RAF
+        // and tick NodeFrame exactly once per encoded frame below.
+        _guardRenderer._animation?.stop?.();
+        if (_guardRenderer.info) _guardRenderer.info.autoReset = false;
+    }
+}
 let _frameRenderCount = 0;
 let _warnedNoRender = false;
 if (_guardRenderer && typeof _guardRenderer.renderAsync === 'function') {
@@ -2262,12 +2536,35 @@ if (_guardRenderer && typeof _guardRenderer.render === 'function') {
 
 // --- Render loop ---
 console.log(`[render_scene] Rendering ${totalFrames} frames at ${width}x${height} @ ${fps}fps → ${outputVideo}`);
-const ffmpeg = startFfmpegPipe(width, height, fps, outputVideo);
+// OUTPUT SAFETY: a crashed render must leave NO file under the output name.
+// (The old behaviour left the PREVIOUS video wearing today's name — stale
+// frames got reviewed as the new render.) Displace any existing output to
+// .prev (rollback kept), encode to .part, and only a clean ffmpeg exit
+// renames it into place. Absence of the output = the render did not finish.
+// suffix AFTER the extension (.mp4.part / .mp4.prev) so downstream tools that
+// glob *.mp4 never pick up a stale sibling as a real video
+const _encodePath = outputVideo + '.part';
+const _prevPath = outputVideo + '.prev';
+try {
+    Deno.statSync(outputVideo);
+    try { Deno.removeSync(_prevPath); } catch (_) { /* no prior .prev */ }
+    Deno.renameSync(outputVideo, _prevPath);
+    console.log(`[render_scene] displaced existing output to ${_prevPath} — if this run crashes, ${outputVideo} will NOT exist (never review a stale video as new).`);
+} catch (_) { /* no existing output */ }
+const ffmpeg = startFfmpegPipe(width, height, fps, _encodePath);
 const tStart = performance.now();
 
 for (let i = 0; i < totalFrames; i++) {
     const t = i * dt;
     globalThis._sceneTime = t;
+    if (_offlineNodeFrame) {
+        _guardRenderer.info?.reset?.();
+        _offlineNodeFrame.update();
+        _offlineNodeFrame.deltaTime = dt;
+        _offlineNodeFrame.time = t;
+        if (_guardRenderer.info) _guardRenderer.info.frame = _offlineNodeFrame.frameId;
+    }
+
     _frameRenderCount = 0;
 
     // Auto-advance any GLB/model animation mixers registered via
@@ -2322,8 +2619,13 @@ for (let i = 0; i < totalFrames; i++) {
             } catch (e) { /* one bad VRM must not kill the frame */ }
         }
         // A captured _vrm with no VRMA mixer (loaded but never played a clip)
-        // still needs its per-frame update.
-        if (globalThis._vrm && !_reg.has(globalThis._vrm) && typeof globalThis._vrm.update === 'function') {
+        // still needs its per-frame update — UNLESS a character controller
+        // owns it (controllers call vrm.update inside their own update; a
+        // second drive here wasted ~2 ms AND stepped spring bones at 2×
+        // rate, so hair/tie springs swung double-speed).
+        const _ctrlOwned = globalThis._controllerVrms;
+        if (globalThis._vrm && !_reg.has(globalThis._vrm) && typeof globalThis._vrm.update === 'function'
+            && !(_ctrlOwned && (_ctrlOwned.has(globalThis._vrm) || _ctrlOwned.has(globalThis._vrm.scene)))) {
             try { globalThis._vrm.update(dt); } catch (e) {}
         }
     } else {
@@ -2331,7 +2633,9 @@ for (let i = 0; i < totalFrames; i++) {
         if (globalThis._mixer && globalThis._mixer.time === mixerTimeBefore) {
             globalThis._mixer.update(dt);
         }
-        if (globalThis._vrm && typeof globalThis._vrm.update === 'function') {
+        const _ctrlOwned2 = globalThis._controllerVrms;
+        if (globalThis._vrm && typeof globalThis._vrm.update === 'function'
+            && !(_ctrlOwned2 && (_ctrlOwned2.has(globalThis._vrm) || _ctrlOwned2.has(globalThis._vrm.scene)))) {
             globalThis._vrm.update(dt);
         }
     }
@@ -2507,7 +2811,7 @@ for (let i = 0; i < totalFrames; i++) {
     // without being registered by a controller (see _controllerVrms) gets
     // flagged + summarised as RE-RENDER REQUIRED. Opt out (a VRM riding a
     // vehicle, intentional teleport) with globalThis._allowManualLocomotion=true.
-    if (!globalThis._noLocomotionCheck) try {
+    if (!(globalThis.__policySnapshot?.flags || globalThis)._noLocomotionCheck) try {
         const THREE = globalThis.THREE;
         const vrms = [];
         if (globalThis._vrm?.scene) vrms.push(globalThis._vrm);
@@ -2533,8 +2837,10 @@ for (let i = 0; i < totalFrames; i++) {
     // creature) animated by raw position writes travels PERPENDICULAR to its
     // own length when the agent never couples heading to travel (the
     // popemobile bug: built nose-along-Z, animated along X, yaw never set).
-    // Sample root objects every 10 frames; summary after the loop.
-    if (!globalThis._noMotionCheck && i % 10 === 0) try {
+    // Sample root objects every 3 frames (dense enough that out-and-back
+    // motion and quick rotations can't alias between samples); summary after
+    // the loop. Matrix reads are cheap — resolution here is nearly free.
+    if (!(globalThis.__policySnapshot?.flags || globalThis)._noMotionCheck && i % 3 === 0) try {
         const THREE = globalThis.THREE;
         const scene = globalThis._s || globalThis._scene;
         const M = globalThis._motionStats || (globalThis._motionStats = new Map());
@@ -2577,10 +2883,98 @@ for (let i = 0; i < totalFrames; i++) {
         }
     } catch (e) { /* detection must never break the render */ }
 
+    // ANIMATION-ENVELOPE tracking: the placement audits validate FRAME 0; an
+    // animated scene must hold its invariants across the whole timeline. Any
+    // object that MOVES (rotates or translates) gets its world envelope
+    // sampled; the summary derives the time-domain invariants: no sweeping
+    // below your own base level, spins stay on their pivot (a wrong pivot
+    // makes the visual centre ORBIT), no teleport
+    // jumps, no runaway scale. Sensors are shaped like invariants, not like
+    // the incident that motivated them. Summary after the loop. Sampled every
+    // 3 frames — dense enough that quick motion can't alias between samples.
+    if (!(globalThis.__policySnapshot?.flags || globalThis)._noMotionCheck && i % 3 === 0) try {
+        const THREE = globalThis.THREE;
+        const scene = globalThis._s || globalThis._scene;
+        const S = globalThis._animStats || (globalThis._animStats = new Map());
+        // world floor reference, captured once: "don't sweep below the world
+        // you stand in" — an object's own starting height is NOT the invariant
+        // (a hoisted load legitimately travels down; an elevator descends)
+        if (globalThis._animGroundY === undefined) {
+            const sb = new THREE.Box3().setFromObject(scene);
+            globalThis._animGroundY = sb.isEmpty() ? 0 : sb.min.y;
+        }
+        const consider = [];
+        for (const root of scene?.children || []) {
+            if (!root.visible || root.isLight || root.isCamera) continue;
+            consider.push(root);
+            for (const c of root.children || []) if (!c.isLight && !c.isCamera && c.visible) consider.push(c);
+        }
+        // Bounds of a mover. ⚠ SKINNED rigs must NOT use precise setFromObject:
+        // precise mode CPU-skins EVERY vertex (getVertexPosition →
+        // applyBoneTransform — 64k verts × bone math per call). On a walking
+        // VRM that dwarfed the whole frame budget and masqueraded as "VRMs
+        // are slow to draw" through a bisect ladder. Skeleton JOINT positions
+        // (+ flesh margin)
+        // bound a character to ~centimetres — exactly the fidelity the
+        // sink/pivot/teleport checks need — at ~50 points instead of 64k
+        // CPU-skinned vertices.
+        const _boxOfMover = (obj) => {
+            let hasSkin = false;
+            obj.traverse((m) => { if (m.isSkinnedMesh) hasSkin = true; });
+            if (!hasSkin) return new THREE.Box3().setFromObject(obj, true);
+            const box = new THREE.Box3();
+            const v = new THREE.Vector3();
+            obj.traverse((m) => {
+                if (m.isSkinnedMesh && m.skeleton) {
+                    for (const b of m.skeleton.bones) box.expandByPoint(b.getWorldPosition(v));
+                } else if (m.isMesh) {
+                    box.union(new THREE.Box3().setFromObject(m, true));
+                }
+            });
+            box.expandByScalar(0.12);
+            return box;
+        };
+        for (const obj of consider) {
+            if (obj.userData?.noMotionCheck) continue;
+            let rec = S.get(obj);
+            if (!rec) {
+                // precise=true measures transformed VERTICES — the coarse path
+                // transforms each mesh's local AABB, and a rotated torus/ring's
+                // phantom box corner then sweeps below ground (false breach)
+                const box = _boxOfMover(obj);
+                if (box.isEmpty()) continue;
+                const s = box.getSize(new THREE.Vector3());
+                S.set(obj, rec = {
+                    name: obj.name || '(unnamed)', q0: obj.quaternion.clone(), p0: obj.position.clone(),
+                    s0: obj.getWorldScale(new THREE.Vector3()).x || 1,
+                    size: Math.max(s.x, s.y, s.z), minY0: box.min.y,
+                    rotated: false, moving: false, centers: [], minYLow: box.min.y,
+                    maxStep: 0, lastC: null, scaleNow: 1,
+                });
+                continue;
+            }
+            const ang = 2 * Math.acos(Math.min(1, Math.abs(obj.quaternion.dot(rec.q0))));
+            if (!rec.rotated && ang > 0.35) rec.rotated = true;        // >20°: a real spin, not a sway
+            rec.posDrift = Math.max(rec.posDrift || 0, obj.position.distanceTo(rec.p0));
+            if (!rec.moving && (rec.rotated || rec.posDrift > 0.1)) rec.moving = true;
+            if (rec.moving) {
+                const box = _boxOfMover(obj); // movers only; skinned-safe (see above)
+                if (!box.isEmpty()) {
+                    const c = box.getCenter(new THREE.Vector3());
+                    if (rec.lastC) (rec.steps || (rec.steps = [])).push(c.distanceTo(rec.lastC));
+                    rec.lastC = c;
+                    rec.centers.push(c);
+                    rec.minYLow = Math.min(rec.minYLow, box.min.y);
+                    rec.scaleNow = (obj.getWorldScale(new THREE.Vector3()).x || 1);
+                }
+            }
+        }
+    } catch (e) { /* detection must never break the render */ }
+
     // NodeMaterial .opacity misuse: on this stack a NodeMaterial's `.opacity`
     // number does NOT bind — fades written to it silently do nothing (or the
     // plane renders fully opaque). Detect once mid-render, warn loudly.
-    if (i === 30 && !globalThis._noOpacityCheck) try {
+    if (i === 30 && !(globalThis.__policySnapshot?.flags || globalThis)._noOpacityCheck) try {
         const scene = globalThis._s || globalThis._scene;
         const seen = new Set();
         scene?.traverse(o => {
@@ -2627,6 +3021,49 @@ for (let i = 0; i < totalFrames; i++) {
 const finalData = await drainReadback(harness);
 if (finalData) await ffmpeg.write(finalData);
 
+// PRE-CLEANUP AUDIT SNAPSHOT (review findings 11, 14): capture the framing
+// evidence and the TOCTOU diff from the scene AS RENDERED, before cleanup()
+// gets a chance to mutate, dispose, or re-dress it.
+try {
+    const THREE = globalThis.THREE;
+    const scene = globalThis._s || globalThis._scene;
+    const cam = globalThis._c || globalThis._camera;
+    if (scene && cam) {
+        __framingSnapshot = { camera: cam.clone(), sceneRef: scene };
+        __framingSnapshot.camera.updateMatrixWorld(true);
+        __runFramingCheck(scene, __framingSnapshot.camera);
+    } else {
+        console.log('[framing] SKIPPED — no scene/camera globals at end of render. VIEW the probe frames to judge composition yourself.');
+        __ledger.record({ check: 'framing', outcome: 'SKIPPED', message: 'no scene/camera globals at end of render' });
+    }
+    if (scene && THREE && __auditSetupState) {
+        const inv2 = buildInventory(THREE, scene);
+        const decl2 = mapDeclarations(THREE, scene, inv2, { seatedObjects: globalThis._seatedVRMs || [] });
+        const pol2 = snapshotPolicy(globalThis);
+        const pol1 = globalThis.__policySnapshot;
+        const diffs = [];
+        for (const f of Object.keys(pol2.flags)) {
+            if (pol1 && pol2.flags[f] !== pol1.flags[f]) diffs.push(`${f}: ${pol1.flags[f]} -> ${pol2.flags[f]}`);
+        }
+        for (const [f, n] of Object.entries(__auditSetupState.flagLeafCounts)) {
+            const now = [...(decl2.unionByFlag.get(f)?.leafCount ? [decl2.unionByFlag.get(f).leafCount] : [0])][0];
+            if (now > n) diffs.push(`${f}: coverage grew ${n} -> ${now} leaves during render`);
+        }
+        for (const [f, u] of decl2.unionByFlag) {
+            if (!(f in __auditSetupState.flagLeafCounts)) diffs.push(`${f}: appeared during render (${u.leafCount} leaves)`);
+        }
+        if (inv2.leaves.length !== __auditSetupState.leaves) diffs.push(`leaf census changed ${__auditSetupState.leaves} -> ${inv2.leaves.length} during render`);
+        if (diffs.length) {
+            console.warn(`[audit:coverage] ⚠ POLICY/SCENE MUTATED AFTER SETUP — declarations are frozen at end of setup; changing them mid-render is itself a finding: ${diffs.join('; ')}`);
+            __ledger.record({ check: 'coverage.toctou', outcome: 'WARN', disposition: 'DECLARED_EXCEPTION', class: 'CORRECTNESS', metrics: { diffs }, message: `audit policy or scene census changed after setup: ${diffs.join('; ')}` });
+        } else {
+            __ledger.record({ check: 'coverage.toctou', outcome: 'PASS', class: 'INFO', message: 'policy and declaration census unchanged between setup and finalize' });
+        }
+    }
+} catch (e) {
+    __ledger.record({ check: 'coverage.toctou', outcome: 'SKIPPED', message: `finalize diff failed: ${e && e.message}` });
+}
+
 if (typeof globalThis.cleanup === 'function') {
     try { await globalThis.cleanup(); } catch (e) { console.warn('cleanup threw:', e.message); }
 }
@@ -2634,7 +3071,7 @@ if (typeof globalThis.cleanup === 'function') {
 // Foot-slide / hand-rolled-locomotion summary — a VRM that travelled a real
 // distance without a VRMCharacterController is sliding (stationary clip +
 // position lerp). The engine can't fix the rig; it flags it as a re-render.
-if (globalThis._locoStats && !globalThis._allowManualLocomotion) {
+if (globalThis._locoStats && !(globalThis.__policySnapshot?.flags || globalThis)._allowManualLocomotion) {
     const ctrl = globalThis._controllerVrms;
     const slid = [];
     for (const [root, rec] of globalThis._locoStats) {
@@ -2718,6 +3155,199 @@ if (globalThis._motionStats) {
     }
 }
 
+// Animation-envelope summary — time-domain invariants. These defects exist
+// only in MOTION; a still frame (even several) cannot verify them: an object
+// must not sweep below its own base level, a spin must hold its pivot (else
+// the visual centre orbits), no teleport jumps, no runaway scale.
+try { if (globalThis._animStats) {
+    const THREE = globalThis.THREE;
+    let animWarned = 0, movers = 0;
+    for (const [obj, rec] of globalThis._animStats) {
+        if (!rec.moving || rec.centers.length < 3) continue;
+        // a child animated INSIDE a moving parent (a seat on a rotating ride)
+        // inherits its world motion — the TOPMOST mover owns the warning;
+        // judging descendants in world space is noise
+        let ancestorMoves = false;
+        for (let p = obj.parent; p; p = p.parent) {
+            const ar = globalThis._animStats.get(p);
+            if (ar && ar.moving) { ancestorMoves = true; break; }
+        }
+        if (ancestorMoves) continue;
+        movers++;
+        // 1) wrong-pivot spin — ONLY for objects that rotate IN PLACE (own
+        // position fixed, orientation changing: a wheel). An object whose
+        // position is itself animated (a trolley, a cable re-fit between two
+        // moving endpoints) is a mover, not a spinner — orbit means nothing.
+        if (rec.rotated && (rec.posDrift || 0) < Math.max(0.1, 0.2 * rec.size)) {
+            const mean = rec.centers.reduce((a, c) => a.add(c), new THREE.Vector3()).divideScalar(rec.centers.length);
+            let orbit = 0;
+            for (const c of rec.centers) orbit = Math.max(orbit, c.distanceTo(mean));
+            if (orbit > Math.max(0.15, 0.08 * rec.size)) {
+                animWarned++;
+                console.warn(`[motion] ⚠ RE-RENDER REQUIRED — '${rec.name}' ROTATES ABOUT THE WRONG PIVOT: its visual centre orbits a ~${orbit.toFixed(2)}m radius instead of staying put while it spins (the pivot sits ~${orbit.toFixed(2)}m off the centre). Put the pivot ON the spin axis: wrap the geometry in a Group positioned AT the axis and rotate that group — never rotate an object whose origin is off-axis. If the orbit is intentional (a moon around a planet, a hammer-throw), set obj.userData.noMotionCheck = true.`);
+            }
+        }
+        // 2) floor breach: ANY mover sweeping below the WORLD's ground level
+        // (its own starting height is not the invariant — vertical travel is
+        // legitimate; passing through the floor is not)
+        const groundY = globalThis._animGroundY ?? 0;
+        const sank = groundY - rec.minYLow;
+        if (sank > 0.25) {
+            animWarned++;
+            console.warn(`[motion] ⚠ RE-RENDER REQUIRED — '${rec.name}' swept ${sank.toFixed(2)}m BELOW the scene's ground level during the animation (through the floor at its lowest point). Fix the pivot or the animation path so the body stays above the world it stands in. If it intentionally goes underground (a drill, a submarine), set obj.userData.noMotionCheck = true.`);
+        }
+        // 3) teleport: a DISCONTINUITY — one step wildly larger than the
+        // object's own typical step. A fast smooth mover has a large but
+        // CONSISTENT step; a mod-time wrap has one giant outlier.
+        if (rec.steps && rec.steps.length > 4) {
+            const sorted = [...rec.steps].sort((a, b) => a - b);
+            const median = sorted[Math.floor(sorted.length / 2)];
+            const maxStep = sorted[sorted.length - 1];
+            if (maxStep > Math.max(2.0, 4 * median, 1.5 * rec.size)) {
+                animWarned++;
+                console.warn(`[motion] ⚠ '${rec.name}' TELEPORTS — one jump of ~${maxStep.toFixed(1)}m between animation samples vs its typical ~${median.toFixed(2)}m step. Usually a mod-time wrap or a re-seeded path; ease the motion or hide the cut. Intentional (respawn/teleport beat): obj.userData.noMotionCheck = true.`);
+            }
+        }
+        // 4) runaway scale: accumulating *= per frame
+        const sRatio = rec.scaleNow / (rec.s0 || 1);
+        if (sRatio > 1.5 || sRatio < 0.67) {
+            animWarned++;
+            console.warn(`[motion] ⚠ '${rec.name}' scale DRIFTED ×${sRatio.toFixed(2)} over the render — a per-frame multiply accumulates; set scale from an absolute function of t, never scale.multiplyScalar(k) each frame. Intentional growth/shrink: obj.userData.noMotionCheck = true.`);
+        }
+    }
+    if (movers && !animWarned) console.log(`[motion] OK — ${movers} animated body(ies) hold their pivots, base level, continuity, and scale.`);
+
+    // SWEPT-ROTATION CLEARANCE — a fully general mechanical invariant: a body
+    // that spins in place must clear its static neighbors through its ENTIRE
+    // revolution, touching the world only at its bearing. Knows nothing about
+    // what any part is — the same measurement serves a rotor on a housing, a
+    // wheel in a fork, a fan on a wall, a radar dish on a mast. Points are
+    // rotated ANALYTICALLY about the measured spin axis (the scene is never
+    // mutated); containment uses the same 6-axis enclosure test as the deep
+    // clipping pass, with the same DoubleSide patch. Outer-band sampling
+    // (beyond 30% of the spinner's radius) excludes legitimate bearing/hub
+    // contact by construction.
+    try {
+        const sceneRoot2 = globalThis._s || globalThis._scene;
+        if (sceneRoot2 && globalThis._animStats) {
+            const AX6 = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].map(([x,y,z]) => new THREE.Vector3(x,y,z));
+            const rcS = new THREE.Raycaster();
+            const spinners = [];
+            for (const [obj, rec] of globalThis._animStats) {
+                if (!rec.rotated || !rec.moving || !obj.parent) continue;
+                if ((rec.posDrift || 0) > Math.max(0.1, 0.2 * rec.size)) continue;   // orbiters are a different check
+                const qRel = obj.quaternion.clone().multiply(rec.q0.clone().invert());
+                const halfAng = Math.acos(Math.min(1, Math.abs(qRel.w)));
+                if (halfAng * 2 < 0.35) continue;
+                const sq = Math.sqrt(Math.max(1e-12, 1 - qRel.w * qRel.w));
+                const axisLocal = new THREE.Vector3(qRel.x / sq, qRel.y / sq, qRel.z / sq).normalize();
+                const parentQ = obj.parent.getWorldQuaternion(new THREE.Quaternion());
+                spinners.push({ obj, rec, axisW: axisLocal.applyQuaternion(parentQ).normalize(), pivotW: obj.getWorldPosition(new THREE.Vector3()) });
+            }
+            for (const sp of spinners) {
+                // Sample UNIFORMLY OVER THE SURFACE (area-weighted barycentric
+                // walk, same as the touch system) — vertex sampling misses the
+                // long-thin-through-a-volume case entirely: a blade's vertices
+                // sit at its corners while its shaft passes through the mount.
+                const radialOf = (p) => { const rel = p.clone().sub(sp.pivotW); return rel.sub(sp.axisW.clone().multiplyScalar(rel.dot(sp.axisW))).length(); };
+                const tris = [];
+                const a3 = new THREE.Vector3(), b3 = new THREE.Vector3(), c3 = new THREE.Vector3();
+                let totalArea = 0;
+                sp.obj.traverse((m) => {
+                    if (!m.isMesh || !m.geometry?.attributes?.position) return;
+                    const pos = m.geometry.attributes.position, idx = m.geometry.index;
+                    const count = idx ? idx.count : pos.count;
+                    for (let i = 0; i < count; i += 3) {
+                        const ia = idx ? idx.getX(i) : i, ib = idx ? idx.getX(i + 1) : i + 1, ic = idx ? idx.getX(i + 2) : i + 2;
+                        a3.fromBufferAttribute(pos, ia); m.localToWorld(a3);
+                        b3.fromBufferAttribute(pos, ib); m.localToWorld(b3);
+                        c3.fromBufferAttribute(pos, ic); m.localToWorld(c3);
+                        const area = b3.clone().sub(a3).cross(c3.clone().sub(a3)).length() * 0.5;
+                        if (area < 1e-10) continue;
+                        totalArea += area;
+                        tris.push({ a: a3.clone(), b: b3.clone(), c: c3.clone(), area });
+                    }
+                });
+                if (!tris.length) continue;
+                const pts = [];
+                const N_SAMP = 240;
+                const step = totalArea / N_SAMP;
+                let acc = 0, maxR = 0;
+                for (const t3 of tris) {
+                    acc += t3.area;
+                    while (acc >= step) {
+                        acc -= step;
+                        let u = Math.random(), w = Math.random();
+                        if (u + w > 1) { u = 1 - u; w = 1 - w; }
+                        const p = t3.a.clone()
+                            .addScaledVector(t3.b.clone().sub(t3.a), u)
+                            .addScaledVector(t3.c.clone().sub(t3.a), w);
+                        maxR = Math.max(maxR, radialOf(p));
+                        pts.push(p);
+                    }
+                }
+                const outer = pts.filter((p) => radialOf(p) > 0.3 * maxR).slice(0, 40);
+                if (outer.length < 6 || maxR < 1e-4) continue;
+                // neighbors: other top-level statics whose bbox meets the swept volume
+                const sweepBox = new THREE.Box3(
+                    sp.pivotW.clone().subScalar(maxR * 1.05), sp.pivotW.clone().addScalar(maxR * 1.05));
+                const neighbors = [];
+                for (const root of sceneRoot2.children) {
+                    if (root === sp.obj || root.isLight || root.isCamera || !root.visible) continue;
+                    let related = false;
+                    root.traverse((d) => { if (d === sp.obj) related = true; });
+                    sp.obj.traverse((d) => { if (d === root) related = true; });
+                    if (related || spinners.some((s2) => s2.obj === root)) continue;
+                    const nb = new THREE.Box3().setFromObject(root);
+                    // a neighbor that fully CONTAINS the swept volume is an
+                    // environment shell (sky dome, fog sphere, room) — the
+                    // mechanism spins inside it, not through it. A real mount
+                    // never contains the whole sweep: blades poke out of it.
+                    if (!nb.isEmpty() && nb.intersectsBox(sweepBox) && !nb.containsBox(sweepBox)) neighbors.push({ root, box: nb });
+                }
+                const K = 12;
+                for (const nb of neighbors) {
+                    const nbMeshes = []; nb.root.traverse((m) => { if (m.isMesh && m.visible) nbMeshes.push(m); });
+                    if (!nbMeshes.length) continue;
+                    const saved = [];
+                    for (const m of nbMeshes) {
+                        (Array.isArray(m.material) ? m.material : [m.material]).forEach((mm) => {
+                            if (mm && mm.side !== THREE.DoubleSide) { saved.push([mm, mm.side]); mm.side = THREE.DoubleSide; }
+                        });
+                    }
+                    rcS.far = nb.box.getSize(new THREE.Vector3()).length();
+                    let anglesHit = 0, worstFrac = 0;
+                    for (let k = 0; k < K; k++) {
+                        const th = (k / K) * Math.PI * 2;
+                        let inside = 0, tested = 0;
+                        for (const p of outer) {
+                            const rp = p.clone().sub(sp.pivotW).applyAxisAngle(sp.axisW, th).add(sp.pivotW);
+                            if (!nb.box.containsPoint(rp)) continue;
+                            tested++;
+                            let hd = 0;
+                            for (const d of AX6) { rcS.set(rp, d); if (rcS.intersectObjects(nbMeshes, false).length) hd++; }
+                            if (hd >= 5) inside++;
+                        }
+                        if (inside > 0) { anglesHit++; worstFrac = Math.max(worstFrac, inside / Math.max(1, outer.length)); }
+                    }
+                    for (const [mm, s] of saved) mm.side = s;
+                    if (!anglesHit) continue;
+                    const nbName = nb.root.name || '(unnamed)';
+                    if (anglesHit === K) {
+                        console.warn(`[motion] swept-clearance: '${sp.rec.name}' overlaps '${nbName}' at every sampled rotation angle (outer points up to ${Math.round(worstFrac * 100)}% enclosed) — it reads as seated INTO its mount rather than ON a bearing. Standing it off along its spin axis usually snaps the whole mechanism into focus; mountOn(part, mount, {standoff}) seats exactly that joint, and one re-render will show it spinning free.`);
+                    } else {
+                        console.warn(`[motion] swept-clearance: '${sp.rec.name}' sweeps through '${nbName}' at ${anglesHit}/${K} sampled rotation angles — it clears at some angles and collides at others, so a small shift along its spin axis (or a touch more standoff at the bearing) frees the full circle. Cheap fix, big payoff on camera.`);
+                    }
+                }
+                if (neighbors.length && !neighbors.some((nb) => false)) { /* per-neighbor lines above carry the findings */ }
+            }
+            if (spinners.length && !__auditLog.some((l) => l.includes('swept-clearance'))) {
+                console.log(`[motion] swept-clearance: ${spinners.length} spinning bod${spinners.length === 1 ? 'y' : 'ies'} clear${spinners.length === 1 ? 's' : ''} the full revolution — clean bearings all around.`);
+            }
+        }
+    } catch (e) { /* sweep must never break the render */ }
+} } catch (e) { /* summary must never break the render */ }
+
 // Lipsync summary — flag any VRM whose mouth never animated across the render.
 if (globalThis.__lipsyncVrms && globalThis.__lipsyncVrms.size) {
     for (const vv of globalThis.__lipsyncVrms) {
@@ -2783,7 +3413,131 @@ try {
     }
 } catch (e) { /* never break the render */ }
 
+// Subject-framing summary — an agent can pass every placement and motion
+// audit and still ship a SPECK: nothing else senses composition. Project the
+// non-ground content's bounds through the final camera and measure how much
+// of the frame the subject actually occupies.
+// Phase A.1 (review findings 13-14): this runs as a FUNCTION invoked from the
+// pre-cleanup snapshot block with a camera CLONED before cleanup() could move
+// it, and every outcome (OK / warn / skip) is a ledger record so it persists
+// in the audit files. The renderer-call capture records internal post passes
+// too, so it is never trusted as "the" rendered camera.
+function __runFramingCheck(scene, cam) {
+try {
+    const THREE = globalThis.THREE;
+    if (scene && cam && cam.isPerspectiveCamera) {
+        // The subject is where geometric MASS concentrates, not the union of
+        // everything placed: one long thin run (a road, rails, a fence line)
+        // unioned with scattered dressing spans the frame while the actual
+        // subject sits in the distance as a speck. Collect candidates, then
+        // converge on the dominant mass cluster and measure THAT.
+        const cands = [];
+        scene.traverse((o) => {
+            if (!o.isMesh || !o.visible) return;
+            const b = new THREE.Box3().setFromObject(o);
+            if (b.isEmpty() || !isFinite(b.min.x)) return;
+            const s = b.getSize(new THREE.Vector3());
+            const span = Math.max(s.x, s.z);
+            if (span > 150 && s.y < span * 0.05) return;          // ground/ocean slabs are backdrop, not subject
+            const dims = [s.x, s.y, s.z].sort((a2, b2) => b2 - a2);
+            cands.push({
+                box: b,
+                c: b.getCenter(new THREE.Vector3()),
+                m: Math.max(s.x, 0.01) * Math.max(s.y, 0.01) * Math.max(s.z, 0.01),
+                run: dims[0] > 12 * Math.max(dims[1], 0.01),      // rails/roads/cables: mass counts, extent doesn't
+            });
+        });
+        let kept = cands;
+        for (let it = 0; it < 3 && kept.length > 1; it++) {
+            let M = 0; const C = new THREE.Vector3();
+            for (const k of kept) { M += k.m; C.addScaledVector(k.c, k.m); }
+            if (M <= 0) break;
+            C.multiplyScalar(1 / M);
+            let varSum = 0;
+            for (const k of kept) varSum += k.m * k.c.distanceToSquared(C);
+            const keepR = Math.max(Math.sqrt(varSum / M) * 1.25, 1e-3);
+            const next = kept.filter(k => k.c.distanceTo(C) <= keepR);
+            if (next.length === kept.length || next.length === 0) break;
+            kept = next;
+        }
+        const subj = new THREE.Box3();
+        let any = false;
+        for (const k of kept) { if (!k.run) { subj.union(k.box); any = true; } }
+        if (!any) for (const k of kept) { subj.union(k.box); any = true; }
+        if (any && !subj.isEmpty()) {
+            cam.updateMatrixWorld(true);
+            let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, inFront = 0;
+            const v = new THREE.Vector3();
+            for (const cx of [subj.min.x, subj.max.x]) for (const cy of [subj.min.y, subj.max.y]) for (const cz of [subj.min.z, subj.max.z]) {
+                v.set(cx, cy, cz).project(cam);
+                if (v.z < 1) inFront++;
+                minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+                minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+            }
+            if (inFront >= 4) {
+                const w = (Math.min(1, maxX) - Math.max(-1, minX)) / 2;
+                const h = (Math.min(1, maxY) - Math.max(-1, minY)) / 2;
+                const coverage = Math.max(0, w) * Math.max(0, h);
+                if (coverage < 0.06) {
+                    console.warn(`[framing] ⚠ RE-RENDER REQUIRED — the built subject covers only ~${(coverage * 100).toFixed(1)}% of the final frame (a speck in the distance). The camera is framing the whole scene (usually a huge ground plane) instead of the SUBJECT: compute the camera bounds from the built structure only, not the scene bbox. VIEW the probe frames — composition is not covered by any other audit.`);
+                    __ledger.record({ check: 'framing', outcome: 'WARN', class: 'CORRECTNESS', metrics: { coverage: +coverage.toFixed(4) }, message: `subject covers ~${(coverage * 100).toFixed(1)}% of the final frame — speck` });
+                } else {
+                    console.log(`[framing] OK — subject covers ~${Math.round(coverage * 100)}% of the final frame.`);
+                    __ledger.record({ check: 'framing', outcome: 'PASS', class: 'REVIEW', metrics: { coverage: +coverage.toFixed(4) }, message: `subject covers ~${Math.round(coverage * 100)}% of the final frame (automatic occupancy evidence — an explicit subject contract is Phase D)` });
+                }
+            } else {
+                // never be silent: a skipped check must say so, or its silence
+                // reads as a pass
+                console.log('[framing] SKIPPED — subject bounds are mostly behind the camera at the final frame; coverage cannot be judged from this vantage. VIEW the probe frames to judge composition yourself.');
+        __ledger.record({ check: 'framing', outcome: 'SKIPPED', message: '[framing] SKIPPED — subject bounds are mostly behind the camera at the final frame; coverage cannot be judged from this vantage. VIEW the probe frames to judge composition yourself.'.replace('[framing] ', '') });
+            }
+        } else {
+            console.log('[framing] SKIPPED — no subject found above backdrop scale. VIEW the probe frames to judge composition yourself.');
+        __ledger.record({ check: 'framing', outcome: 'SKIPPED', message: '[framing] SKIPPED — no subject found above backdrop scale. VIEW the probe frames to judge composition yourself.'.replace('[framing] ', '') });
+        }
+    } else if (scene && cam) {
+        console.log('[framing] SKIPPED — non-perspective camera. VIEW the probe frames to judge composition yourself.');
+        __ledger.record({ check: 'framing', outcome: 'SKIPPED', message: '[framing] SKIPPED — non-perspective camera. VIEW the probe frames to judge composition yourself.'.replace('[framing] ', '') });
+    }
+} catch (e) { console.log(`[framing] SKIPPED (${e && e.message ? e.message : 'error'}). VIEW the probe frames to judge composition yourself.`); __ledger.record({ check: 'framing', outcome: 'SKIPPED', message: String(e && e.message || e) }); }
+}
+
 const status = await ffmpeg.close();
 await shutdown(harness);
-console.log(`[render_scene] DONE — ffmpeg exit ${status.code} — output: ${outputVideo}`);
+if (status.success) {
+    try { Deno.removeSync(outputVideo); } catch (_) { /* nothing to replace */ }
+    Deno.renameSync(_encodePath, outputVideo);
+    console.log(`[render_scene] DONE — ffmpeg exit ${status.code} — output: ${outputVideo}`);
+    // PROBE FRAMES — extract three stills so "look at the render" costs one
+    // file read instead of a ritual. The log cannot see the picture; these can.
+    try {
+        const picks = [0.15, 0.5, 0.85].map((f) => Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * f))));
+        const probeBase = outputVideo.replace(/(\.[a-z0-9]+)$/i, '');
+        const sel = picks.map((n) => `eq(n\\,${n})`).join('+');
+        const p = new Deno.Command('ffmpeg', {
+            args: ['-y', '-loglevel', 'error', '-i', outputVideo, '-vf', `select=${sel}`, '-vsync', 'vfr', `${probeBase}_probe%d.png`],
+            stdout: 'null', stderr: 'piped',
+        }).outputSync();
+        if (p.code === 0) console.log(`[render_scene] probe frames: ${probeBase}_probe1..3.png — VIEW them before reporting this render done.`);
+        else console.warn(`[render_scene] probe-frame extraction failed (ffmpeg exit ${p.code}) — extract and view frames manually before claiming success.`);
+    } catch (e) { console.warn(`[render_scene] probe-frame extraction skipped (${e.message}) — extract and view frames manually before claiming success.`); }
+} else {
+    console.error(`[render_scene] ❌ ffmpeg exit ${status.code} — encode left at ${_encodePath}; ${outputVideo} was NOT written (previous version, if any, is at ${_prevPath}).`);
+}
+// the digest is the LAST thing in the log — even a tail-only reader sees it
+if (__auditLog.length) {
+    console.log(`[render_scene] AUDIT DIGEST — ${__auditLog.length} finding(s) above threshold this run (informational measurements stayed out of this list). Worth a look — some may be intentional, and saying so is a fine answer. If one points at something you can make better, another pass is cheap and usually worth it:`);
+    for (const l of __auditLog.slice(0, 20)) console.log('  ' + l.split('\n')[0]);
+    if (__auditLog.length > 20) console.log(`  ...and ${__auditLog.length - 20} more`);
+} else {
+    console.log('[render_scene] audit digest: every measurement within normal range this run — nicely built. If the probe frames spark a better idea, there is room in the budget to chase it.');
+}
+// audit.txt + audit.json are written even when clean — an absent audit file
+// must mean "the audit never ran", never "the audit was clean".
+__flushDigest('normal completion');
+// A clean digest is NOT the definition of done. The audits cover correctness
+// only — composition, proportion, silhouette, style, and "does it read as the
+// thing" live ONLY in the eye. Crossing this line off without looking is how
+// a green checklist ships an unwatchable video.
+console.log('[render_scene] the digest measures physics, not beauty — the probe frames show how it actually looks, and your eyes are the better judge of that. The two together are the real loop: measure, look, adjust, render again. Iterating is not rework; it is how good scenes get good.');
 Deno.exit(status.success ? 0 : 1);

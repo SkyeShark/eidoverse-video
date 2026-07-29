@@ -27,6 +27,24 @@
             if (!globalThis.VRMCharacterController) {
                 throw new Error('[eidoverse-robot] VRMCharacterController global missing — character_controller.js not loaded');
             }
+            // Draw-cost hygiene for every controller-driven VRM: three-vrm's
+            // official merge utilities collapse the rig's submeshes onto a
+            // shared skeleton — fewer skinned draws paying r184's per-item
+            // cost in the beauty AND shadow passes. Functionality-neutral by
+            // design of these utils (expressions, morphs, springs survive).
+            // opts.skipVrmOptimize opts out for rigs that prove incompatible.
+            if (!opts.skipVrmOptimize && globalThis.VRMUtils && vrm) {
+                try {
+                    globalThis.VRMUtils.removeUnnecessaryVertices(vrm.scene);
+                    globalThis.VRMUtils.combineMorphs(vrm);
+                    globalThis.VRMUtils.combineSkeletons(vrm.scene);
+                    let n = 0;
+                    vrm.scene.traverse((o) => { if (o.isSkinnedMesh) n++; });
+                    console.log(`[eidoverse-robot] VRM merged to ${n} skinned draw(s) (combineMorphs+combineSkeletons)`);
+                } catch (e) {
+                    console.warn('[eidoverse-robot] VRM merge skipped:', e.message);
+                }
+            }
             // Resolved file path first: the npm: specifier makes deno (re)wire
             // the node_modules symlink, which fails with 'File exists (os
             // error 17)' when the link was created by a different uid. The

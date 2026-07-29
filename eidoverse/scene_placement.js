@@ -107,7 +107,7 @@ export function installScenePlacement(THREE) {
     // misses lips, gaps, and uneven tops. This is the cheap, BVH-free analogue
     // of a box shapecast — fine because placement runs once in setup(), not
     // per frame. Returns { y, hits } or null if nothing under the footprint.
-    function supportYUnderFootprint(obj, meshes, cx, cz, startY, grid = 3) {
+    function supportYUnderFootprint(obj, meshes, cx, cz, startY, grid = 9) {
         const oBox = tightBox(obj);
         const hx = (oBox.max.x - oBox.min.x) / 2;
         const hz = (oBox.max.z - oBox.min.z) / 2;
@@ -159,7 +159,7 @@ export function installScenePlacement(THREE) {
         // positions — every bare placeOn(obj, floor) piled props at the
         // floor's center (the "furniture blob"). 'centered' is still available
         // explicitly.
-        const { xz = 'auto', yOffset = 0, xzOffset = null, grid = 3, surfaceEps = 0.0006 } = opts;
+        const { xz = 'auto', yOffset = 0, xzOffset = null, grid = 7, surfaceEps = 0.0006 } = opts;
         const tBox = tightBox(target);
         let x, z;
         if (Array.isArray(xz)) {
@@ -274,7 +274,7 @@ export function installScenePlacement(THREE) {
     // Returns true on contact, false (and warns) if no target surface lies in
     // that direction — so you can fall back to placeAgainst / hand coords.
     globalThis.placeTouching = (obj, target, side, opts = {}) => {
-        const { dir: dirOpt = null, gap = 0, grid = 4, allowIntersect = false } = opts;
+        const { dir: dirOpt = null, gap = 0, grid = 8, allowIntersect = false } = opts;
         const SIDE_DIR = { left: [-1,0,0], right: [1,0,0], behind: [0,0,-1], front: [0,0,1], below: [0,-1,0], above: [0,1,0] };
         const d = dirOpt || SIDE_DIR[side];
         if (!d) { console.warn(`[placeTouching] need a side (left/right/front/behind/above/below) or opts.dir`); return false; }
@@ -323,6 +323,85 @@ export function installScenePlacement(THREE) {
         return true;
     };
 
+    // ───────── 2.4 surfacePoint — where does this object's surface face, over there? ─────────
+    // The question every mounting decision needs answered: given a direction
+    // of interest, return the point on obj's surface on that side plus its
+    // outward normal. Generic over any geometry (raycast against the real
+    // meshes, BVH-accelerated).
+    //   surfacePoint(tower, new THREE.Vector3(0,0,1))
+    //     -> { point, normal, distance }   (world space; null if no surface there)
+    globalThis.surfacePoint = (obj, dir, opts = {}) => {
+        obj.updateWorldMatrix(true, true);
+        const meshes = collectMeshes(obj, opts.exclude || []);
+        if (!meshes.length) return null;
+        const box = tightBox(obj);
+        const center = box.getCenter(new THREE.Vector3());
+        const R = box.getSize(new THREE.Vector3()).length() * 0.75 + 1e-3;
+        const d = dir.clone().normalize();
+        const rc = new THREE.Raycaster(center.clone().addScaledVector(d, R), d.clone().negate(), 0, R * 2);
+        rc.firstHitOnly = true;
+        const hits = rc.intersectObjects(meshes, false);
+        if (!hits.length) return null;
+        const h = hits[0];
+        const n = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : d.clone();
+        if (n.dot(d) < 0) n.negate();                       // outward = toward the asker
+        return { point: h.point.clone(), normal: n.normalize(), distance: h.point.distanceTo(center) };
+    };
+
+    // ───────── 2.45 mountOn — seat a part ON a bearing point of its mount ─────────
+    // The joint that centers-based placement always gets wrong: a rotor on a
+    // housing, a wheel on an axle mount, a fan on a wall, a dish on a mast —
+    // the part belongs ON the mount's surface, offset outward along the
+    // surface normal, touching only at that bearing. This verb thinks in
+    // surfaces and normals (how a rigger thinks) instead of centers.
+    //   mountOn(rotor, cap, { dir, standoff: 0.15, faceAxis: new THREE.Vector3(0,0,1) })
+    //   - dir: world direction from the mount's center toward the mounting
+    //     side. Default: toward the part's current position (rough-place the
+    //     part on the correct side first, mountOn refines).
+    //   - standoff: extra clearance along the normal beyond surface kiss
+    //     (default 0). A spinning part usually wants a little.
+    //   - faceAxis: the part's LOCAL axis to align INTO the mount (its "back").
+    //     Omit to keep the part's current rotation and only translate.
+    // Assumes the part sits under an unrotated parent (scene/identity group),
+    // like snapConnectors. Returns { point, normal } or null.
+    globalThis.mountOn = (part, mount, opts = {}) => {
+        part.updateWorldMatrix(true, true);
+        mount.updateWorldMatrix(true, true);
+        const mBox = tightBox(mount);
+        const mCenter = mBox.getCenter(new THREE.Vector3());
+        let dir = opts.dir ? opts.dir.clone() : part.getWorldPosition(new THREE.Vector3()).sub(mCenter);
+        if (dir.lengthSq() < 1e-8) dir.set(0, 0, 1);
+        const sp = globalThis.surfacePoint(mount, dir, opts);
+        if (!sp) { console.log(`[mountOn] no surface found on '${mount.name || 'mount'}' toward (${dir.normalize().toArray().map((v) => v.toFixed(2))}) — a different dir will find one.`); return null; }
+        if (opts.faceAxis) {
+            const target = sp.normal.clone().negate();      // part's face axis points INTO the mount
+            const cur = opts.faceAxis.clone().normalize().applyQuaternion(part.quaternion);
+            part.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(cur, target));
+            part.updateWorldMatrix(true, true);
+        }
+        // depth of the part's own surface toward the mount, along -normal
+        const pBox = tightBox(part);
+        const pCenter = pBox.getCenter(new THREE.Vector3());
+        const inward = sp.normal.clone().negate();
+        let depth = 0;
+        const v = new THREE.Vector3();
+        for (const m of collectMeshes(part, [])) {
+            const pos = m.geometry?.attributes?.position;
+            if (!pos) continue;
+            const stride = Math.max(1, Math.floor(pos.count / 4000));
+            for (let i = 0; i < pos.count; i += stride) {
+                v.fromBufferAttribute(pos, i); m.localToWorld(v);
+                depth = Math.max(depth, v.clone().sub(pCenter).dot(inward));
+            }
+        }
+        const standoff = opts.standoff || 0;
+        const targetCenter = sp.point.clone().addScaledVector(sp.normal, standoff + depth);
+        part.position.add(targetCenter.sub(pCenter));
+        part.updateWorldMatrix(true, true);
+        console.log(`[mountOn] seated '${part.name || 'part'}' on '${mount.name || 'mount'}' at (${sp.point.toArray().map((x) => x.toFixed(2))}), bearing normal (${sp.normal.toArray().map((x) => x.toFixed(2))}), standoff ${standoff}m — a spinning part mounted here clears everything but its bearing.`);
+        return { point: sp.point, normal: sp.normal };
+    };
+
     // ───────── 2.5 placeInside — rest obj on an INTERIOR surface of a container ─────────
     // The shelf-board pattern, packaged: centers obj's bbox on the container's
     // bbox in XZ, aims at `aimY` (world height of the compartment you want),
@@ -369,7 +448,7 @@ export function installScenePlacement(THREE) {
     //            3 in `below` mode so a book doesn't drop through a gap in a
     //            board. Raise for props with irregular bases on uneven ground.
     globalThis.snapToGround = (obj, groundMeshes, opts = {}) => {
-        const { yOffset = 0, below = false, grid = (below ? 3 : 1), surfaceEps = 0.0006 } = opts;
+        const { yOffset = 0, below = false, grid = (below ? 9 : 5), surfaceEps = 0.0006 } = opts;
         const list = Array.isArray(groundMeshes) ? groundMeshes : [groundMeshes];
         // Ground meshes placed in the SAME setup() haven't had a render tick
         // yet — their matrixWorld is still identity, so raycasts hit them at
@@ -552,7 +631,7 @@ export function installScenePlacement(THREE) {
                 if (bSup && (bSup === a.root || isAncestor(bSup, a.m) || isAncestor(a.m, bSup))) continue;
                 if (isAncestor(a.m, b.m) || isAncestor(b.m, a.m)) continue;
                 if (!a.box.intersectsBox(b.box)) continue;
-                report.push({ a: a.m, b: b.m });
+                report.push({ a: a.m, b: b.m, ar: a.root, br: b.root });
                 if (autoFix) {
                     // Bbox INTERSECTION is proximity, not penetration: resting
                     // contact (book on table, arch on floor, figure beside desk)
@@ -564,7 +643,15 @@ export function installScenePlacement(THREE) {
                         const tox = Math.min(a.box.max.x, b.box.max.x) - Math.max(a.box.min.x, b.box.min.x);
                         const toy = Math.min(a.box.max.y, b.box.max.y) - Math.max(a.box.min.y, b.box.min.y);
                         const toz = Math.min(a.box.max.z, b.box.max.z) - Math.max(a.box.min.z, b.box.min.z);
-                        if (Math.min(tox, toy, toz) < 0.04) continue;   // touch/rest — not clipping
+                        // the touch/rest band scales with the FINER part: a
+                        // fixed 4cm band swallows thin elements whole (a 2cm
+                        // railing can never sit near anything without reading
+                        // as clipping), and tolerances that punish fine detail
+                        // teach builders to thicken everything past the noise
+                        // floor. Fine parts get a fine band; big parts keep 4cm.
+                        const thinOf = (e) => Math.min(e.box.max.x - e.box.min.x, e.box.max.y - e.box.min.y, e.box.max.z - e.box.min.z);
+                        const touchBand = Math.min(0.04, Math.max(0.008, 0.3 * Math.min(thinOf(a), thinOf(b))));
+                        if (Math.min(tox, toy, toz) < touchBand) continue;   // touch/rest — not clipping
                     }
                     // Intentional overlap (half-buried rocks, a stake in the
                     // ground, a controller-driven character wading the set) —
@@ -608,13 +695,28 @@ export function installScenePlacement(THREE) {
             }
         }
         if (report.length) {
-            const verb = autoFix ? `separated ${movedCount} of` : 'detected';
-            console.warn(`[checkClipping] ${verb} ${report.length} clipping pair(s):`);
+            // CONTACT IS HOW THINGS ARE BUILT. Shallow AABB overlap between
+            // assemblies is usually a JOINT (axle in bearing, hanger on rim,
+            // post in deck) — reporting it as a warning teaches agents to pull
+            // parts apart, and every clearance added to silence a line loosens
+            // a joint (the disassembly bug). So the pair list is INFO ONLY —
+            // never "fix" a touching joint by adding an air gap. Real defects
+            // (an object substantially INSIDE another) get the ⚠ below.
+            const verb = autoFix ? `separated ${movedCount} of` : 'noted';
+            console.log(`[checkClipping] measured ${report.length} contact/overlap pair(s) — this is data, not defects: parts that join are SUPPOSED to touch (a brace in its socket, a rail on its post). Nothing here asks for action; the probe frames are the judge of whether any pair looks wrong.`);
+            // meshes are usually unnamed — prefer the placed root's name, else
+            // describe by size + position so the line is actionable anyway
+            const _descM = (m, r) => {
+                if (r && r.name) return r.name;
+                if (m.name) return m.name;
+                const b = new THREE.Box3().setFromObject(m);
+                const s = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
+                return `(${s.x.toFixed(1)}x${s.y.toFixed(1)}x${s.z.toFixed(1)}m @ ${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)})`;
+            };
             for (const p of report.slice(0, 10)) {
-                const an = p.a.name || '(unnamed)', bn = p.b.name || '(unnamed)';
-                console.warn(`  ${an} <=> ${bn}`);
+                console.log(`  ${_descM(p.a, p.ar)} <=> ${_descM(p.b, p.br)}`);
             }
-            if (report.length > 10) console.warn(`  ...and ${report.length - 10} more`);
+            if (report.length > 10) console.log(`  ...and ${report.length - 10} more`);
         }
 
         // ── DEEP-INTERPENETRATION report (mesh-accurate, MOVES NOTHING) ──────
@@ -650,6 +752,10 @@ export function installScenePlacement(THREE) {
                 seenPair.add(key);
                 const optOut = (r) => r.userData && (r.userData.allowIntersect || r.userData.noClippingCheck);
                 if (optOut(ra) || optOut(rb)) continue;
+                // parts of ONE MACHINE are supposed to embed at welds and sockets
+                // (a pane in its frame, a post in its footing) — same declared
+                // assembly = construction, not interpenetration
+                if (ra.userData?.assembly && ra.userData.assembly === rb.userData?.assembly) continue;
                 const ba = new THREE.Box3().setFromObject(ra), bb = new THREE.Box3().setFromObject(rb);
                 const ox = Math.min(ba.max.x, bb.max.x) - Math.max(ba.min.x, bb.min.x);
                 const oy = Math.min(ba.max.y, bb.max.y) - Math.max(ba.min.y, bb.min.y);
@@ -702,7 +808,7 @@ export function installScenePlacement(THREE) {
             _ray.far = savedFar;
             if (deep.length) {
                 deep.sort((a, b) => b.frac - a.frac);
-                console.warn(`[checkClipping] ⚠ ${deep.length} object(s) substantially INSIDE another — likely misplaced. Move the smaller object's xz to a clear spot (findClearSpot helps), or set userData.allowIntersect = true if the overlap is intentional:`);
+                console.warn(`[checkClipping] ⚠ ${deep.length} object(s) substantially INSIDE another. If they are INDEPENDENT things (a tree in a car), move the smaller one clear (findClearSpot helps). If the pair is PARTS OF ONE MACHINE joined by a WELD or SOCKET (a brace into a leg, a pane in its frame), that embedding is correct construction — group the machine under one root or set userData.assembly='<machine>' on both. But match the JOINT TYPE: pivoting/hanging parts (a lamp below its hook, a door on its hinge, a rotor in its housing) must CLEAR their mounts, and resting parts touch faces without overlap. Never fix a real joint with an air gap — and never ram a moving part through its mount:`);
                 for (const d of deep) {
                     console.warn(`  ${d.small.name || '(unnamed)'} is ~${Math.round(d.frac * 100)}% inside ${d.big.name || '(unnamed)'}`);
                 }
@@ -711,6 +817,88 @@ export function installScenePlacement(THREE) {
             console.warn('[checkClipping] deep-interpenetration pass skipped:', e.message);
         }
         return report;
+    };
+
+    // ───────── 7.2 checkFacing — display panels: which way do they face? ─────────
+    // Wrong ROTATION is a classic agent blind spot (a billboard/sign/screen
+    // placed facing a wall, or spun about an offset pivot so the panel swings
+    // into the massing) — the author can't feel it, and the orbit beauty pass
+    // flatters it. DETECTOR ONLY (moves nothing): finds thin, textured,
+    // free-standing panels, reports the clearance on each side of the display
+    // axis, and warns on interpenetration or a buried face — with pivot-offset
+    // evidence when the pivot sits far from the visual centre (rotating about
+    // an offset pivot TRANSLATES the panel; rotate about the centre instead).
+    // Kit fabric is exempt by its own declaration (allowIntersect /
+    // noClippingCheck): panels IN a wall are the wall. Per-object opt-out:
+    // userData.noFacingCheck.
+    globalThis.checkFacing = (scene, opts = {}) => {
+        const { minSize = 1.2, thinFrac = 0.28, buriedAt = 0.3 } = opts;
+        if (!scene) return [];
+        // candidates: top-level placed objects AND their direct children (kit
+        // builds put every part under one assembly root)
+        const lvl1 = scene.children.filter((c) => c !== globalThis._c && c !== globalThis._camera && !c.isLight && !c.isCamera);
+        const cands = [...lvl1];
+        for (const r of lvl1) for (const c of (r.children || [])) if (!c.isLight && !c.isCamera) cands.push(c);
+        const entries = [];
+        for (const o of cands) {
+            const box = new THREE.Box3().setFromObject(o);
+            if (box.isEmpty() || !isFinite(box.min.x)) continue;
+            entries.push({ o, box });
+        }
+        const isAnc = (a, b) => { let p = b; while (p) { if (p === a) return true; p = p.parent; } return false; };
+        const out = [];
+        for (const e of entries) {
+            const r = e.o;
+            if (r.userData?.noFacingCheck) continue;
+            let textured = false, exempt = !!(r.userData?.allowIntersect || r.userData?.noClippingCheck);
+            r.traverse((o) => {
+                if (o.userData?.allowIntersect || o.userData?.noClippingCheck) exempt = true;
+                const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+                for (const m of mats) if (m && m.map) textured = true;
+            });
+            if (exempt || !textured) continue;
+            const size = e.box.getSize(new THREE.Vector3());
+            const dims = [size.x, size.y, size.z];
+            const maxD = Math.max(...dims), minD = Math.min(...dims);
+            const thinAxis = dims.indexOf(minD);
+            if (maxD < minSize || minD > thinFrac * maxD || thinAxis === 1) continue;   // not a standing display panel
+            const k = thinAxis === 0 ? 'x' : 'z', latK = thinAxis === 0 ? 'z' : 'x';
+            const clr = { '+': Infinity, '-': Infinity };
+            let penetrated = null;
+            for (const oth of entries) {
+                if (oth === e || isAnc(oth.o, r) || isAnc(r, oth.o)) continue;
+                const ov = ['x', 'y', 'z'].map((ax) => Math.min(e.box.max[ax], oth.box.max[ax]) - Math.max(e.box.min[ax], oth.box.min[ax]));
+                if (ov.every((v) => v > 0.05)) { penetrated = oth; continue; }
+                const oy = e.box.min.y < oth.box.max.y && e.box.max.y > oth.box.min.y;
+                const lat = e.box.min[latK] < oth.box.max[latK] && e.box.max[latK] > oth.box.min[latK];
+                if (!oy || !lat) continue;
+                const gp = oth.box.min[k] - e.box.max[k], gm = e.box.min[k] - oth.box.max[k];
+                if (gp >= 0) clr['+'] = Math.min(clr['+'], gp);
+                if (gm >= 0) clr['-'] = Math.min(clr['-'], gm);
+            }
+            const wc = e.box.getCenter(new THREE.Vector3());
+            const pivotOff = wc.distanceTo(r.getWorldPosition(new THREE.Vector3()));
+            const pivotNote = pivotOff > 0.15 * maxD
+                ? ` (pivot ${pivotOff.toFixed(2)}m from the visual centre — rotating about the pivot TRANSLATES the panel; rotate about the centre)` : '';
+            // an unnamed panel is unactionable — describe it by size + position
+            const describe = (obj, box) => {
+                if (obj.name) return obj.name;
+                const s = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+                return `(unnamed ${s.x.toFixed(1)}x${s.y.toFixed(1)}x${s.z.toFixed(1)}m @ ${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)})`;
+            };
+            const nm = describe(r, e.box);
+            const fmt = (v) => (v === Infinity ? 'open' : v.toFixed(2) + 'm');
+            if (penetrated) {
+                const ov = ['x', 'y', 'z'].map((ax) => (Math.min(e.box.max[ax], penetrated.box.max[ax]) - Math.max(e.box.min[ax], penetrated.box.min[ax])).toFixed(2));
+                console.warn(`[checkFacing] ⚠ display panel '${nm}' INTERPENETRATES '${describe(penetrated.o, penetrated.box)}' by (${ov.join(', ')})m — wrong rotation or wrong spot${pivotNote}. Face it out and clear the massing, or set userData.noFacingCheck = true if the overlap is intentional.`);
+            } else if (clr['+'] < buriedAt && clr['-'] < buriedAt) {
+                console.warn(`[checkFacing] ⚠ display panel '${nm}' is BURIED — blocked on both display sides (${k}+ ${fmt(clr['+'])}, ${k}- ${fmt(clr['-'])}); nothing can see its face${pivotNote}.`);
+            } else {
+                console.log(`[checkFacing] '${nm}' display axis ${k}: ${k}+ ${fmt(clr['+'])}, ${k}- ${fmt(clr['-'])}${pivotNote}`);
+            }
+            out.push({ obj: r, penetrated: !!(penetrated), clearance: { plus: clr['+'], minus: clr['-'] } });
+        }
+        return out;
     };
 
     // ───────── 7.5 checkZFighting — flag + fix coplanar surfaces that z-fight ─────────
@@ -777,8 +965,14 @@ export function installScenePlacement(THREE) {
         }
         if (report.length) {
             const verb = autoFix ? `nudged ${push * 1000}mm apart` : 'detected';
-            console.warn(`[checkZFighting] ${verb} ${report.length} coplanar pair(s) that would flicker (place decals/panels a few mm proud of their surface, or set material.polygonOffset=true):`);
-            for (const p of report.slice(0, 8)) console.warn(`  ${(p.a.name || '(unnamed)')} <=> ${(p.b.name || '(unnamed)')} (coplanar on ${p.ax})`);
+            console.warn(`[checkZFighting] ${report.length} coplanar pair(s) share an exact face depth, which flickers on camera. A few mm either way settles it — sinking slightly into the surface works just as well as sitting proud, and material.polygonOffset=true is fine too:`);
+            const _descZ = (m) => {
+                if (m.name) return m.name;
+                const b = new THREE.Box3().setFromObject(m);
+                const s = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
+                return `(${s.x.toFixed(1)}x${s.y.toFixed(1)}x${s.z.toFixed(1)}m @ ${c.x.toFixed(0)},${c.y.toFixed(0)},${c.z.toFixed(0)})`;
+            };
+            for (const p of report.slice(0, 8)) console.warn(`  ${_descZ(p.a)} <=> ${_descZ(p.b)} (coplanar on ${p.ax})`);
             if (report.length > 8) console.warn(`  ...and ${report.length - 8} more`);
         }
         return report;
@@ -856,7 +1050,7 @@ export function installScenePlacement(THREE) {
                 if (sMeshes.length) {
                     const rb = tightBox(root);
                     const rcx = (rb.min.x + rb.max.x) / 2, rcz = (rb.min.z + rb.max.z) / 2;
-                    const sup2 = supportYUnderFootprint(root, sMeshes, rcx, rcz, rb.min.y + 0.01, 5);
+                    const sup2 = supportYUnderFootprint(root, sMeshes, rcx, rcz, rb.min.y + 0.01, 11);
                     if (sup2 && rb.min.y - sup2.y < 0.06) continue;
                     let touching = false;
                     for (const rs of recSupports) {
@@ -896,7 +1090,7 @@ export function installScenePlacement(THREE) {
             });
             if (anyMesh && !anyOpaque) continue;
 
-            const support = supportYUnderFootprint(root, others, bx, bz, by + 0.01, 3);
+            const support = supportYUnderFootprint(root, others, bx, bz, by + 0.01, 9);
             // Classify, DON'T silently skip the bad cases (the old code treated
             // "nothing beneath" and "far above" as intentional and ignored them
             // — which is exactly how a prop dumped in mid-air far from its desk
@@ -917,15 +1111,27 @@ export function installScenePlacement(THREE) {
             }
         }
         if (report.length) {
-            const verb = autoFix ? 'auto-snapped' : 'detected';
-            console.warn(`[checkHovering] ${verb} ${report.length} hovering object(s) — rest props on a surface with placeOn(obj, surface); if a floater is intentional (drone/lamp/orb/bird) set obj.userData.noSupportCheck = true:`);
-            for (const p of report.slice(0, 10)) {
-                const n = p.obj.name || '(unnamed)';
-                if (p.kind === 'void') console.warn(`  ${n} — floating with NO surface beneath its footprint (hand-coords don't say what it sits on; use placeOn)`);
-                else if (p.kind === 'far') console.warn(`  ${n} — floating ${p.gap.toFixed(2)}m above the nearest surface below it`);
-                else console.warn(`  ${n} — hovering ${p.gap.toFixed(3)}m above the nearest surface below it`);
+            // Severity-honest register: a small seating gap is a MEASUREMENT
+            // (often invisible on camera), not a defect — say so explicitly,
+            // because to a small model an unlabeled number reads as an alarm.
+            // Only genuinely unsupported bodies get warning register.
+            const near = report.filter((p) => p.kind === 'near');
+            const hard = report.filter((p) => p.kind !== 'near');
+            if (near.length) {
+                const verb = autoFix ? 'auto-seated' : 'measured';
+                console.log(`[checkHovering] ${verb} ${near.length} small seating gap(s) — these are usually fine and often invisible on camera. placeOn(obj, surface) seats a piece flush if you'd like it exact; no action implied:`);
+                for (const p of near.slice(0, 6)) console.log(`  ${p.obj.name || '(unnamed)'} — ${p.gap.toFixed(3)}m above its surface (small)`);
             }
-            if (report.length > 10) console.warn(`  ...and ${report.length - 10} more`);
+            if (hard.length) {
+                console.warn(`[checkHovering] ${hard.length} object(s) have no real support — these will read as floating on camera:`);
+                for (const p of hard.slice(0, 10)) {
+                    const n = p.obj.name || '(unnamed)';
+                    if (p.kind === 'void') console.warn(`  ${n} — nothing beneath its footprint at all (placeOn(obj, surface) says what it sits on)`);
+                    else console.warn(`  ${n} — ${p.gap.toFixed(2)}m above the nearest surface (a real gap, not a seating tolerance)`);
+                }
+                if (hard.length > 10) console.warn(`  ...and ${hard.length - 10} more`);
+                console.warn(`  (a deliberate flyer — drone, lamp, orb, bird — can declare itself with obj.userData.noSupportCheck = true; for the rest, a seat + quick re-render usually transforms how grounded the scene feels)`);
+            }
         }
         return report;
     };
@@ -965,11 +1171,13 @@ export function installScenePlacement(THREE) {
             if (hasGeometry) things++;
         }
         if (things < min) {
-            console.warn(
-                `[checkDensity] sparse scene — ${things} distinct object(s) placed ` +
-                `(a finished scene reads as a place, not a placeholder; aim for ${min}+). ` +
-                `Kitbash: fetch_model.py many times, break kits into pieces, layer ` +
-                `mid-ground dressing + architecture + atmosphere. See AGENTS.md "Kitbash hard".`
+            // Observation register, not a demand: object COUNT is a weak
+            // proxy for richness (one group can hold a whole village), so
+            // this line only offers a look, never orders a fix.
+            console.log(
+                `[checkDensity] ${things} distinct top-level object(s) placed — a low count sometimes ` +
+                `means a scene reads sparse, and sometimes just means good grouping. The probe frames ` +
+                `will tell you which; if the place feels empty there, mid-ground dressing is the usual cure.`
             );
         } else {
             console.log(`[checkDensity] ${things} distinct objects placed`);
