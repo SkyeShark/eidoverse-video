@@ -2295,6 +2295,8 @@ const weather = await globalThis.makeWeatherSystem({ scene, sky,
 
 // or live, any time
 sky.setColors({ cloud: [...], sun: [...], star: [...], shield: [...] });
+sky.setColors({ sky: [...] });   // the atmosphere (zenith + horizon) and all its readers — distance fog, haze, rain curtain
+sky.setColors({ fog: [...] });   // final multiplier on just the scene fog colour — grade the haze without moving the sky
 weather.setColors({ rain: [...] });
 sky.getColors(); weather.getColors();            // read current multipliers
 ```
