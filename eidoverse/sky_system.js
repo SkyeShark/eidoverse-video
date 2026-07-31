@@ -1843,6 +1843,7 @@
             cloud:  asRGB3(opts.cloudColor,  [1, 1, 1]),
             sun:    asRGB3(opts.sunColor,    [1, 1, 1]),
             sky:    asRGB3(opts.skyColor,    [1, 1, 1]),
+            fog:    asRGB3(opts.fogColor,    [1, 1, 1]),
             shield: asRGB3(opts.shieldColor, [1, 1, 1]),
         };
         const PT = opts.paletteTint;
@@ -2152,6 +2153,9 @@
             //   cloud   tints every cloud layer together
             //   sky     the atmosphere: zenith + horizon, and so everything that
             //           reads them (fog, haze, the rain curtain)
+            //   fog     a final multiplier on JUST the scene fog colour that
+            //           applyToLights writes — grade the distance haze without
+            //           moving the sky it melts into
             //   shield  only meaningful where the package HAS a shield (the red
             //           giant); forwarded to its celestial module, ignored here
             //           by packages without one
@@ -2163,6 +2167,7 @@
                 if (c.cloud)  SKY_COLOR.cloud  = asRGB3(c.cloud,  SKY_COLOR.cloud);
                 if (starC)    SKY_COLOR.sun    = asRGB3(starC,    SKY_COLOR.sun);
                 if (c.sky)    SKY_COLOR.sky    = asRGB3(c.sky,    SKY_COLOR.sky);
+                if (c.fog)    SKY_COLOR.fog    = asRGB3(c.fog,    SKY_COLOR.fog);
                 if (c.shield) SKY_COLOR.shield = asRGB3(c.shield, SKY_COLOR.shield);
                 const cm = opts.celestialModule ?? sys._celestialModule;
                 if (c.shield) cm?.setShieldColor?.(SKY_COLOR.shield);
@@ -2291,9 +2296,10 @@
                 // horMul, so it needs no extra dimming beyond the exposure
                 // term. Falls back to pal.hor when no weather is attached.
                 if (fog && fog.color) {
+                    const F = SKY_COLOR.fog;
                     const h = u.horizon?.value;
-                    if (h) fog.color.setRGB(h.x, h.y, h.z).multiplyScalar(0.5 + pal.int * 0.12);
-                    else fog.color.setRGB(...pal.hor).multiplyScalar(0.5 + pal.int * 0.12);
+                    if (h) fog.color.setRGB(h.x * F[0], h.y * F[1], h.z * F[2]).multiplyScalar(0.5 + pal.int * 0.12);
+                    else fog.color.setRGB(pal.hor[0] * F[0], pal.hor[1] * F[1], pal.hor[2] * F[2]).multiplyScalar(0.5 + pal.int * 0.12);
                 }
                 return pal;
             },

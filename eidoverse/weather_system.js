@@ -2148,7 +2148,14 @@
                         litRain[0] * rc[0], litRain[1] * rc[1], litRain[2] * rc[2]);
                     diagnostics.precipitation.sceneLight = Number(u.rainLight.value);
                     diagnostics.precipitation.sceneColor = [...litRain];
-                    const g = w.grey * k, d = 1 - (1 - w.dark) * k, gt = w.greyTint;
+                    const g = w.grey * k, d = 1 - (1 - w.dark) * k;
+                    // the grey target sits IN the tinted atmosphere: setColors'
+                    // `sky` channel covers everything that reads the horizon
+                    // (fog, haze), and the greyed sky under weather still does —
+                    // an untinted grey target washed a scene's sky tint out of
+                    // the distance fog as coverage rose. [1,1,1] tint = identity.
+                    const _sc = sky.getColors?.().sky ?? [1, 1, 1];
+                    const gt = [w.greyTint[0] * _sc[0], w.greyTint[1] * _sc[1], w.greyTint[2] * _sc[2]];
                     // horMul: storms need the horizon DARKER than its luminance,
                     // not just desaturated — the bright haze band reads sunny
                     const horMul = 1 - (1 - (w.horMul ?? 1)) * k;
