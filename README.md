@@ -46,7 +46,7 @@ container, and collects the outputs. Full loop docs: `docs/AGENT_LOOP.md`.
 ### Render engine — `eidoverse/render_scene.mjs`
 Scene scripts get the GPU device, injected assets, every helper below as
 a global, and an ffmpeg NVENC pipe out. Auto-enhance runs on every frame:
-GTAO, screen-space reflections, bloom, FXAA. At the end of a render the
+N8AO ambient occlusion, screen-space reflections, bloom, FXAA. At the end of a render the
 engine **audits its own output** and names defects: floating or
 interpenetrating props, hand-slid characters, frozen mouths, frozen
 skeletons, bouncing cameras, sideways-travelling vehicles.

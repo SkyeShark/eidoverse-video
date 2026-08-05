@@ -13,7 +13,7 @@
  *      registry exposed as CustomEffectsDeno, scene_placement, ...)
  *   - VRMA defaults injection
  *   - Scene script eval + setup() + post-setup placement audit + renderFrame(t) loop
- *   - Auto-enhance TSL post stack (GTAO / SSR / bloom / FXAA)
+ *   - Auto-enhance TSL post stack (N8AO / SSR / bloom / FXAA)
  *   - GPU→CPU readback → ffmpeg-nvenc pipe
  *   - Three.js WebGPURenderer with FakeGPUCanvasContext + browser shims
  *
