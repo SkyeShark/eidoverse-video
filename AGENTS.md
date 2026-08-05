@@ -1777,7 +1777,7 @@ await globalThis._fx.update(t);
 await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS render after — update() doesn't
 ```
 
-Always-on baseline (no opt-in): GTAO + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` (see "WORLD-SPACE SKY + WEATHER").
+Always-on baseline (no opt-in): N8AO ambient occlusion + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` (see "WORLD-SPACE SKY + WEATHER").
 
 **This list below IS the complete catalog (31 effects) — do NOT discover effects
 by `grep`/`ls`-ing `effects_tsl/`.** A `| head` on that truncates the directory
