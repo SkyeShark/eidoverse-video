@@ -948,14 +948,15 @@ export async function createFlora(opts = {}) {
     // shrub wood: second instanced mesh, same placement, real bark maps riding
     // the tube network's wrapped UVs (flat colour on visible branches is a
     // defect; stemColor is only the no-asset fallback)
-    let stemMesh = null;
+    let stemMesh = null, stemMapsRef = null;
     if (shrubGeos && shrubGeos.stem) {
         {
             const stemGeo = shrubGeos.stem;
             stemGeo.setAttribute('aPosRot', new T3.InstancedBufferAttribute(posRot, 4));
             stemGeo.setAttribute('aScaleVar', new T3.InstancedBufferAttribute(scaleVar, 4));
             stemGeo.setAttribute('aPhase', new T3.InstancedBufferAttribute(phase, 3));
-            const stemMaps = spec.stem ? await loadStemMaps(spec.stem) : null;
+            stemMapsRef = spec.stem ? await loadStemMaps(spec.stem) : null;
+            const stemMaps = stemMapsRef;
             const smat = new T3.MeshStandardNodeMaterial({
                 metalness: 0, roughness: 0.9,
                 color: spec.stemColor ?? 0x7a6a55,
@@ -991,6 +992,16 @@ export async function createFlora(opts = {}) {
     const update = (t) => { uT.value = t || 0; };
     (globalThis._autoParticleSystems || (globalThis._autoParticleSystems = [])).push(update);
 
+    const dispose = () => {
+        const i = (globalThis._autoParticleSystems ?? []).indexOf(update);
+        if (i >= 0) globalThis._autoParticleSystems.splice(i, 1);
+        geo.dispose();
+        mat.dispose();
+        for (const t of maps ? [maps.albedo, maps.normal, maps.rough, maps.transl] : []) t?.dispose?.();
+        if (stemMesh) { stemMesh.geometry.dispose(); stemMesh.material.dispose(); }
+        for (const t of stemMapsRef ? [stemMapsRef.albedo, stemMapsRef.rough] : []) t?.dispose?.();
+    };
+
     const setPushers = (list = []) => {
         for (let i = 0; i < 4; i++) {
             const p = list[i];
@@ -1000,7 +1011,7 @@ export async function createFlora(opts = {}) {
 
     if (stemMesh) mesh.add(stemMesh);                    // rides along into the scene
     console.log(`[grass2] ${opts.species}: ${count} instances × ${geo.attributes.position.count} verts (${spec.archetype}${stemMesh ? '+stems' : ''})`);
-    return { mesh, stemMesh, material: mat, update, setPushers,
+    return { mesh, stemMesh, material: mat, update, setPushers, dispose,
         uniforms: { time: uT, windDir: uWindDir, base: uBase, gust: uGust, sunDir: uSunDir },
         count };
 }
