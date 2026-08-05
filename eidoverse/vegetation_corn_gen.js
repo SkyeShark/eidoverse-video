@@ -245,7 +245,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                       oy = s1y * Math.cos(a) + s2y * Math.sin(a),
                       oz = s1z * Math.cos(a) + s2z * Math.sin(a);
                 row.push(V(cx + ox * r, cy + oy * r, cz + oz * r,
-                    u, 0.710 + (j / RADC) * (0.990 - 0.710), aE + t * 0.08));
+                    u, 0.710 + (j / RADC) * (0.990 - 0.710), aE));
             }
             rows.push(row);
         }
@@ -255,7 +255,7 @@ export function buildCornGeometry(name, seed, over = {}) {
         for (const [si, cu, cv, cr, flip] of [[0, 0.478, 0.93, 0.017, true], [COB_STA.length - 1, 0.478, 0.97, 0.010, false]]) {
             const row = rows[si === 0 ? 0 : rows.length - 1];
             const t = COB_PROF[COB_STA[si === 0 ? 0 : COB_STA.length - 1]][0];
-            const c = V(bx + ax * t * len, by + ay * t * len, bz + az * t * len, cu, cv, aE + t * 0.08);
+            const c = V(bx + ax * t * len, by + ay * t * len, bz + az * t * len, cu, cv, aE);
             for (let j = 0; j < 10; j++) {
                 if (flip) idx.push(row[j + 1], row[j], c);
                 else idx.push(row[j], row[j + 1], c);
@@ -327,7 +327,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                     const [ox, oy, oz] = radial(th + kk * halfArc);
                     const rr = Math.max(0.004, cobR(t)) + lift + pad + (1 - Math.abs(kk)) * 0.003;
                     V(bx + ax * t * cobLen + ox * rr, by + ay * t * cobLen + oy * rr,
-                      bz + az * t * cobLen + oz * rr, u, vMidH + dv, aE + Math.max(0, t) * 0.08);
+                      bz + az * t * cobLen + oz * rr, u, vMidH + dv, aE);
                 }
                 rows2++;
             };
@@ -392,7 +392,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                     for (const [kk, dv] of COLS) {
                         const bend = (1 - kk * kk) * cup;         // parabolic cross-curve
                         V(c[0] + tx2 * w * kk + ox * bend, c[1] + ty2 * w * kk + oy * bend, c[2] + tz2 * w * kk + oz * bend,
-                          u, vMidH + dv, aE + 0.12);
+                          u, vMidH + dv, aE);
                     }
                     rows2++;
                 }
@@ -408,7 +408,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                 const [ox, oy, oz] = radial(th);
                 const apex = V(bx + ax * tipT * cobLen + ox * 0.004, by + ay * tipT * cobLen + oy * 0.004,
                     bz + az * tipT * cobLen + oz * 0.004,
-                    HUSK.u0 + 0.97 * (HUSK.u1 - HUSK.u0), (HUSK.v0 + HUSK.v1) / 2, aE + 0.12);
+                    HUSK.u0 + 0.97 * (HUSK.u1 - HUSK.u0), (HUSK.v0 + HUSK.v1) / 2, aE);
                 const lastRow = sA + (rows2 - 1) * 5;
                 for (let cq = 0; cq < 4; cq++) idx.push(lastRow + cq, lastRow + cq + 1, apex);
             }
@@ -435,7 +435,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                     const drop = sL * 0.7 * t * t * t;     // ...and over
                     const cx2 = stx + ax * rise + bX * out, cy2 = sty + ay * rise - drop, cz2 = stz + az * rise + bZ * out;
                     const u = 0.72 + t * 0.275;    // sparse tip corner: card edges cross mostly-empty alpha
-                    const aS = aE + 0.08 + t * 0.1;   // rooted at the tip's weight, freer toward the ends
+                    const aS = aE;                    // silk anchors WITH the ear — one rigid assembly
                     V(cx2 - wx, cy2 - wy, cz2 - wz, u, vMid - 0.025, aS);
                     V(cx2 + wx, cy2 + wy, cz2 + wz, u, vMid + 0.025, aS);
                 }
