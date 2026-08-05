@@ -2005,6 +2005,9 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
   same-centre stands foreshorten into stamped bands.
 - `density` = interior fullness (1 = authored); `seed` varies everything;
+  on ROW plantings it works both ways: below 1 it leaves gaps in the rows,
+  above 1 it tightens in-row spacing (a grid cannot hold more plants on
+  command; the row gap is the machinery's, the in-row spacing is the crop's);
   `variant` picks another grown skeleton for shrub/corn species.
 - Grass options: `height` (metres) sets blade length AND wind compliance (lawns
   are stiff, tallgrass sways); `color` = a GRASS_COLORS name — spring `green/
