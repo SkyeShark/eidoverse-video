@@ -435,8 +435,9 @@ export function buildCornGeometry(name, seed, over = {}) {
                     const drop = sL * 0.7 * t * t * t;     // ...and over
                     const cx2 = stx + ax * rise + bX * out, cy2 = sty + ay * rise - drop, cz2 = stz + az * rise + bZ * out;
                     const u = 0.72 + t * 0.275;    // sparse tip corner: card edges cross mostly-empty alpha
-                    V(cx2 - wx, cy2 - wy, cz2 - wz, u, vMid - 0.025, aE + 0.18);
-                    V(cx2 + wx, cy2 + wy, cz2 + wz, u, vMid + 0.025, aE + 0.18);
+                    const aS = aE + 0.08 + t * 0.1;   // rooted at the tip's weight, freer toward the ends
+                    V(cx2 - wx, cy2 - wy, cz2 - wz, u, vMid - 0.025, aS);
+                    V(cx2 + wx, cy2 + wy, cz2 + wz, u, vMid + 0.025, aS);
                 }
                 for (let sg = 0; sg < 3; sg++) {
                     const a2 = sA + sg * 2;
@@ -475,7 +476,9 @@ export function buildCornGeometry(name, seed, over = {}) {
             const hw = rng.range(0.011, 0.02);
             const dx = Math.cos(yaw) * Math.sin(pitch), dyy = Math.cos(pitch), dz = Math.sin(yaw) * Math.sin(pitch);
             const px2 = -Math.sin(yaw), pz2 = Math.cos(yaw);
-            const by2 = ty + spikeH * rng.range(0.35, 0.95);
+            const hF = rng.range(0.35, 0.95);
+            const by2 = ty + spikeH * hF;
+            const aB = 0.82 + hF * 0.1;    // the spike's own weight here — attachments inherit it
             const vMid = 0.725 + R() * 0.22;
             // X-cross pair, art-edge-to-art-edge u — flat strips vanished
             // edge-on and mid-art windows cut painted strands with hard edges
@@ -487,7 +490,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                     const arc = t * t * bl * 0.55;                  // strand arcs over
                     const cx2 = tx + dx * bl * t + dx * arc * 0.4, cy2 = by2 + dyy * bl * t - arc, cz2 = tz + dz * bl * t + dz * arc * 0.4;
                     const u = 0.7 + t * 0.295;
-                    const a = 0.88 + t * 0.12;
+                    const a = Math.min(1, aB + t * 0.1);
                     V(cx2 - wxx, cy2 - wyy, cz2 - wzz, u, vMid - 0.025, a);
                     V(cx2 + wxx, cy2 + wyy, cz2 + wzz, u, vMid + 0.025, a);
                 }
