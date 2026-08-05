@@ -230,7 +230,7 @@ export function buildCornGeometry(name, seed, over = {}) {
         const s2x = ay * s1z - az * s1y, s2y = az * s1x - ax * s1z, s2z = ax * s1y - ay * s1x;
         return [s1x, s1y, s1z, s2x, s2y, s2z];
     }
-    function cob(bx, by, bz, ax, ay, az, len) {
+    function cob(bx, by, bz, ax, ay, az, len, aE) {
         const [s1x, s1y, s1z, s2x, s2y, s2z] = basisFrom(ax, ay, az);
         const RADC = 10, t1 = 0.985;
         const rows = [];
@@ -245,7 +245,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                       oy = s1y * Math.cos(a) + s2y * Math.sin(a),
                       oz = s1z * Math.cos(a) + s2z * Math.sin(a);
                 row.push(V(cx + ox * r, cy + oy * r, cz + oz * r,
-                    u, 0.710 + (j / RADC) * (0.990 - 0.710), 0.35));
+                    u, 0.710 + (j / RADC) * (0.990 - 0.710), aE + t * 0.08));
             }
             rows.push(row);
         }
@@ -255,7 +255,7 @@ export function buildCornGeometry(name, seed, over = {}) {
         for (const [si, cu, cv, cr, flip] of [[0, 0.478, 0.93, 0.017, true], [COB_STA.length - 1, 0.478, 0.97, 0.010, false]]) {
             const row = rows[si === 0 ? 0 : rows.length - 1];
             const t = COB_PROF[COB_STA[si === 0 ? 0 : COB_STA.length - 1]][0];
-            const c = V(bx + ax * t * len, by + ay * t * len, bz + az * t * len, cu, cv, 0.35);
+            const c = V(bx + ax * t * len, by + ay * t * len, bz + az * t * len, cu, cv, aE + t * 0.08);
             for (let j = 0; j < 10; j++) {
                 if (flip) idx.push(row[j + 1], row[j], c);
                 else idx.push(row[j], row[j + 1], c);
@@ -413,7 +413,7 @@ export function buildCornGeometry(name, seed, over = {}) {
                 for (let cq = 0; cq < 4; cq++) idx.push(lastRow + cq, lastRow + cq + 1, apex);
             }
         }
-        if (peel) cob(bx, by, bz, ax, ay, az, cobLen);
+        if (peel) cob(bx, by, bz, ax, ay, az, cobLen, aE);
         // silk: thin strand slivers hanging by the tip's side (never draped
         // across the kernel face). Closed: bursting OUT past the husk points.
         const st = peel ? 1.02 : 1.16;                    // ABOVE the tip cap / past the husk apex
