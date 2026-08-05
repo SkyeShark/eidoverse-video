@@ -632,9 +632,15 @@ function placeRows(o, spec) {
     const rng = (() => { let s = ((o.seed ?? 7) + 5) * 2654435761 % 2147483647;
         return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
     const r = typeof o.rows === 'object' ? o.rows : {};
-    const gap = r.spacing ?? 0.76, inRow = r.plant ?? 0.24;
+    // `density` works BOTH ways on a planted field, because a grid cannot
+    // simply be told to hold more plants: below 1 it drops plants (skip),
+    // above 1 it tightens the IN-ROW spacing — which is how a real field's
+    // population is set, the row gap being fixed by the machinery. Without
+    // the second half, every density >= 1 rendered the identical field.
+    const k = o.density ?? 1;
+    const gap = r.spacing ?? 0.76, inRow = (r.plant ?? 0.24) / Math.max(1, k);
     const ang = r.angle ?? 0, jit = r.jitter ?? 0.05;
-    const skip = Math.min(0.95, (r.skip ?? 0.03) + Math.max(0, 1 - (o.density ?? 1)));
+    const skip = Math.min(0.95, (r.skip ?? 0.03) + Math.max(0, 1 - k));
     const stride = Math.max(1, r.stride ?? 1), phase = r.phase ?? 0;
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const W = o.width, D = o.depth, cx = o.center[0], cz = o.center[1];
