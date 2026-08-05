@@ -294,10 +294,10 @@ const HELPER_MODULES = [
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
     'eidoverse/surface_layers.js',        // globalThis.normalizeTexelDensity / makeLayeredMaterial / layerSurface — matched texel density + per-pixel curvature/world-space/grunge weathering for AGENT-BUILT (lathe/extrude/boolean) geometry; REFUSES fetched GLB/VRM/kit meshes
     'eidoverse/particles.js',             // globalThis.makeParticles — GPU textured sprite particles (sparks/smoke/dust/…)
-    'eidoverse/grass.js',                 // globalThis.makeGrass — GPU wind grass field (tapered blades, height-gradient color, adjustable wind/density/height/color)
+    'eidoverse/vegetation.js',            // globalThis.createFlora — the VEGETATION BRUSH: asset-driven species (grass/galleta_dry/grass_tuft/blackbrush/creosote/sagebrush/yucca/corn), seasonal color, height+wind coupling, organic/row planting, surface raycast placement, cross-field occupancy, character pushers
     'eidoverse/sky_system.js',            // globalThis.makeSkySystem — WORLD-SPACE volumetric sky: raymarched cloud dome IN the scene (geometry occludes it), sun/moon/stars, time-of-day, cloud types, day cycles, moving metal reflections, env bake
     'eidoverse/weather_system.js',        // globalThis.makeWeatherSystem — weather states (clear..darkstorm): world-anchored rain, wet surfaces + puddles, from-the-clouds lightning, smooth transitionTo(name, k, seconds)
-    'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; SEEDTHREE_DIR baked into the image)
+    'eidoverse/seedthree_api.js',         // globalThis.makeSeedTree — SeedThree procedural trees/plants via its headless agent API (seed-first design; identical to the SeedThree app; local checkout or GitHub import)
     'eidoverse/screen.js',              // globalThis.makeScreen — animated canvas-2D screen/display panel (self-updating CanvasTexture, unlit emissive, exact UI colors)
     'eidoverse/creature_builder.js',    // globalThis.makeCreature — universal procedural creature builder (spine+limbs auto-rig, morphology-adaptive gait, makeCreature.random)
     'eidoverse/creature_realist.js',    // globalThis.makeRealisticCreature (async) — SPECIMEN pipeline: offline-sculpted realist body (SDF anatomy → Quadriflow) bound onto the untouched makeCreature rig; same options + gait engine; caches by spec hash. Must load AFTER creature_builder.js.

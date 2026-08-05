@@ -92,8 +92,12 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
 ### World building
 - `makeTerrain` — heightfield ground with height/slope/noise texture
   blending and a flattenable staging area; `terrain.heightAt(x,z)`.
-- `makeGrass` — wind-swept tapered-blade fields, GPU-animated, drapes
-  over terrain, rim-fades into fog.
+- `createFlora` — the vegetation brush: asset-driven species with real PBR
+  map sets — grass carpets (seasonal color), Mojave desert (galleta bunch
+  grass, blackbrush, creosote, sagebrush, yucca), full corn plants with
+  baked cobs and planted rows. GPU-instanced whole plants, self-animating
+  wind, character pushers that part the foliage, circular/organic stands,
+  raycast placement onto any geometry.
 - `Loft` / `LoftGeometry` — skin surfaces through cross-sections: vases,
   horns, ducts, fuselages, ribbons, twisted columns.
 - SPOM relief — `createReliefColumn` (curved) and
