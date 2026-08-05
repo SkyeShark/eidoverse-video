@@ -43,6 +43,11 @@ export const GRASS_COLORS = {
     emerald:       [0.56, 1.04, 0.61],
     blue:          [0.64, 1.05, 1.61],
     'blue-green':  [0.6, 1.07, 1.18],
+    // GREEN is a recolor, not a multiplier: a species whose sheet is
+    // authored another hue (galleta's straw) can only be brought BACK to
+    // green by discarding hue and re-tinting. Value reproduces the blade
+    // atlas's own mean green from its luminance.
+    green:         { recolor: [0.755, 1.145, 0.29] },
     'gray-green':  { recolor: [0.92, 0.97, 0.83] },
     burgundy:      { recolor: [1.95, 0.57, 0.81] },
     rust:          { recolor: [1.93, 0.79, 0.32] },

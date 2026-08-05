@@ -2007,9 +2007,14 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
 - `density` = interior fullness (1 = authored); `seed` varies everything;
   `variant` picks another grown skeleton for shrub/corn species.
 - Grass options: `height` (metres) sets blade length AND wind compliance (lawns
-  are stiff, tallgrass sways); `color` = a GRASS_COLORS name — spring `lime/
-  emerald/blue/blue-green/gray-green`, fall `burgundy/rust/copper/orange/
+  are stiff, tallgrass sways); `color` = a GRASS_COLORS name — spring `green/
+  lime/emerald/blue/blue-green/gray-green`, fall `burgundy/rust/copper/orange/
   straw/brown` — or a custom `[r,g,b]` multiplier. Blade grasses only.
+  ⚠ The green family are MULTIPLIERS over the atlas; the rest are luminance
+  RECOLORS (they discard the sheet's hue). A species authored in another hue
+  (galleta_dry ships a straw recolor) can only be returned to green by a
+  recolor — hence `green` — because its own recolor runs last and a
+  multiplier cannot survive it.
 - Corn: pair with `rows: { spacing: 0.9, plant: 0.24, angle, jitter, skip,
   stride, phase }` for a planted field (rectangular = cultivated; stride/phase
   interleave variant calls through ONE grid — e.g. every 5th row seeded with
