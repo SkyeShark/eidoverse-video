@@ -70,6 +70,8 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
   beaks); feet types; accessories (hats, glasses, helmets, ties, shells,
   armor, spikes); robot variants and per-part cyborging; **hinged talking
   jaws** drivable from a real audio envelope (`say`, `setTalkEnvelope`).
+- `makeSpecimen` / `makeRealisticCreature` — the realist creature
+  pipelines: sculpted anatomy bodies bound onto the same rigs and gaits.
 - `makeRobot` — industrial machines with closed-form kinematics: 6-DOF
   arm (gripper / humanoid hand / welder tools), SCARA, delta, kossel,
   Stewart platform, turret, AGV, gantry, FDM printer.
@@ -87,8 +89,20 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
 ### World building
 - `makeTerrain` — heightfield ground with height/slope/noise texture
   blending and a flattenable staging area; `terrain.heightAt(x,z)`.
-- `makeGrass` — wind-swept tapered-blade fields, GPU-animated, drapes
-  over terrain, rim-fades into fog.
+- `createFlora` — the vegetation brush: asset-driven species with real PBR
+  map sets — grass carpets (seasonal color), Mojave desert (galleta bunch
+  grass, blackbrush, creosote, sagebrush, yucca), full corn plants with
+  baked cobs and planted rows. GPU-instanced whole plants, self-animating
+  wind, character pushers that part the foliage, circular/organic stands,
+  raycast placement onto any geometry.
+- `makeSkySystem` — world-space volumetric sky: raymarched cloud dome the
+  scene occludes, sun/moon/stars, time-of-day, day cycles, env bake, and
+  `setColors` grading (cloud/sun/sky/fog channels).
+- `makeWeatherSystem` — weather states (clear → darkstorm): world-anchored
+  rain, wet surfaces and puddles, lightning, smooth transitions.
+- `layerSurface` / `normalizeTexelDensity` — matched texel density and
+  per-pixel curvature/world-space/grunge weathering for agent-built
+  geometry.
 - `Loft` / `LoftGeometry` — skin surfaces through cross-sections: vases,
   horns, ducts, fuselages, ribbons, twisted columns.
 - SPOM relief — `createReliefColumn` (curved) and

@@ -111,7 +111,7 @@ piece and a render test.
    bookshelf + books on it + a mug + a discarded sweater + a plant in
    the corner + framed art on the wall + a rug + something half-visible
    through the doorway. An outdoor establishing shot is hero terrain
-   chunk + scattered rocks + grass clusters (makeGrass) + a tree or two
+   chunk + scattered rocks + grass/shrub strokes (createFlora) + a tree or two
    (GROW them — makeSeedTree, never a gray-box or a mismatched GLB) + a path +
    distant silhouettes + clouds + atmospheric haze. Each is its own
    `fetch_model.py` call. Read each `_preview.jpg`, place with
@@ -194,16 +194,14 @@ piece and a render test.
        const terrain = makeTerrain({ size: 80, amplitude: 3, seed: 7, flatRadius: 8,
            layers: [{ map: grass, repeat: 18 }, { map: dirt, repeat: 14 }, { map: rock, repeat: 10 }] });
        scene.add(terrain.mesh);
-   - `makeGrass` — a field of real tapered grass blades with GPU WIND sway and a
-     height-gradient color, in one call (the textured-ground partner to
-     makeTerrain — lay grass ON TOP of it). Wind animates itself on the GPU (no
-     per-frame CPU); width/depth, density, blade height, base→tip color, and wind
-     amplitude/speed are all adjustable. Pass `heightFn: terrain.heightAt` to drape
-     it over uneven terrain, or `clipFn` to carve a path through it.
-       globalThis.makeGrass({ scene, width: 40, depth: 30, center: [0, -10],
-           bladeHeight: 0.55, spacing: 0.18, perCell: 5, wind: 0.24,
-           color: 0x35540f, colorTip: 0xaecb5a /* base→tip */ });
-       // wind animates itself every frame — you call nothing.
+   - `createFlora` — the VEGETATION BRUSH (the textured-ground partner to
+     makeTerrain — lay plants ON TOP of it): asset-driven species with real
+     PBR map sets, GPU-instanced, self-animating wind, character pushers.
+     Grass carpets, desert bunch grass, three Mojave shrubs, yucca, full
+     corn plants. Circular/organic stands or planted rows; seasonal color.
+       const f = await createFlora({ species: 'grass', size: 30,
+           height: 0.45, color: 'emerald', heightFn: terrain.heightAt });
+       scene.add(f.mesh);   // wind self-animates; f.setPushers([...]) parts it
    - `makeSeedTree` — REAL procedural trees & plants via SeedThree's headless
      agent API (github.com/SkyeShark/SeedThree — same three/TSL stack; a tree
      grown here is IDENTICAL to one grown in the SeedThree app, and presets
@@ -1985,44 +1983,64 @@ globalThis.makeParticles({ scene, camera, preset: 'sparks', map: tex, origin: [0
 - You call nothing per frame — motion + billboarding self-update. Returns `{ mesh, material, update, uniforms }`; pulse `uniforms.opacity.value` for a burst.
 - Anything that should glow (sparks/fire/magic) uses additive blending automatically; smoke/dust/snow use normal blending. NEVER fake a spark/ember with a tiny emissive box.
 
-**`makeGrass`** — a field of real tapered grass blades with GPU wind sway, NEVER
-a flat green PlaneGeometry (the outdoor tech-demo tell). 5-vertex tapered blades
-on a jittered tuft grid (continuous coverage, no isolated-blade "chunks"); vertex
-colour is a base→tip height gradient; wind is a sine sway + scrolling gust field,
-all on the GPU via `positionNode` (no per-frame CPU). Wind animates itself.
+**`createFlora`** — the VEGETATION BRUSH: asset-driven species with real map
+sets (albedo/normal/roughness/translucency under `eidoverse/assets/grass/`),
+GPU-instanced whole plants, 3-layer wind, and character pushers that part the
+foliage around a walking body. One call paints one stand ("stroke"); layer
+strokes to dress a scene. Async — `await` it.
 ```js
-globalThis.makeGrass({ scene, width: 40, depth: 30, center: [0, -10] });   // simplest
-// lusher, breezier, sun-kissed:
-globalThis.makeGrass({ scene, width: 60, depth: 40, bladeHeight: 0.7,
-    spacing: 0.16, perCell: 5, wind: 0.28, windSpeed: 2.0,
-    color: 0x2f5212, colorTip: 0xb6d45a });
+const f = await createFlora({ species: 'grass', size: 30, height: 0.45,
+    color: 'copper', heightFn: terrain.heightAt, sunDir: SUN_DIR });
+scene.add(f.mesh);
+// per frame (walkers part the plants; slot 2 can ride the camera):
+f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
 ```
-- Tune to the scene: `width`/`depth` (metres; `size` = square), `center [x,z]`,
-  `spacing` (smaller = denser → heavier), `perCell` (blades/tuft), `bladeHeight`,
-  `bladeWidth`, `color`+`colorTip` (base→tip — dry/autumn/alien grass), `wind`
-  (amplitude; **0 = dead-still**), `windSpeed`, `lean`.
-- `heightFn: (x,z) => y` drapes it over uneven ground — pass `terrain.heightAt`
-  (from `makeTerrain`) so each blade sits on the surface. `clipFn: (x,z) => bool`
-  skips blades (carve a path, keep a clearing, avoid a building footprint —
-  but DON'T clip holes around props standing in the field; grass hugging a
-  rock or a log reads natural, a bare ring around it reads wrong).
-- Rim fade — the field's edge thins out and tints so it blends away instead of
-  ending in a hard line: `fade` (default on when the scene has fog; `false`
-  disables), `fadeStart`/`fadeEnd` (fractions of the half-extent, 0.62/0.98),
-  `fadeColor` (default = fog colour). Against a BRIGHT sky/fog, pass a dark
-  earth tone instead (e.g. `fadeColor: 0x6e5f3e`) — tinting rim blades toward a
-  bright horizon paints the very line you're hiding. And size the field so its
-  edge dies INSIDE the fog's heavy band; extend the underlying terrain far
-  past the grass so the ground, not the void, carries the distance.
-- `backlight` (default 0.22, `0` disables) — a height²-scaled emissive on each
-  blade that reads as low sun glowing through the tips; lovely at golden hour,
-  turn it off for overcast/night.
-- You call nothing per frame — wind self-updates. Returns `{ mesh, material,
-  update, uniforms: { wind }, bladeCount }`. Lay grass ON TOP of a textured
-  ground/terrain; the blades are the detail, the ground carries the far distance.
-- Density costs: ~40×30m at spacing 0.17 / perCell 5 ≈ 250K blades — fine. Keep
-  the field to roughly what the camera sees rather than carpeting a whole world
-  off-screen.
+- Species: `grass` (green turf carpet — the meadow default), `galleta_dry`
+  (desert bunch grass), `blackbrush`/`creosote`/`sagebrush` (real Mojave shrubs — grown skeletons,
+  welded wood tubes with bark maps + foliage spray cards), `yucca` (Mojave
+  yucca: bayonet crown, dried skirt, bendy trunk), `corn` (full plant: cane,
+  arching leaves, husked ears with a BAKED real cob, silk, tassel).
+- Footprint: stands are CIRCULAR by default (never square); `size` = diameter,
+  or `width`/`depth` for ellipses; `footprint: 'organic'` masks a lobed
+  irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
+  same-centre stands foreshorten into stamped bands.
+- `density` = interior fullness (1 = authored); `seed` varies everything;
+  `variant` picks another grown skeleton for shrub/corn species.
+- Grass options: `height` (metres) sets blade length AND wind compliance (lawns
+  are stiff, tallgrass sways); `color` = a GRASS_COLORS name — spring `lime/
+  emerald/blue/blue-green/gray-green`, fall `burgundy/rust/copper/orange/
+  straw/brown` — or a custom `[r,g,b]` multiplier. Blade grasses only.
+- Corn: pair with `rows: { spacing: 0.9, plant: 0.24, angle, jitter, skip,
+  stride, phase }` for a planted field (rectangular = cultivated; stride/phase
+  interleave variant calls through ONE grid — e.g. every 5th row seeded with
+  `corn: { peel: true }` for open cobs). Plants carry 1-3 ears, independently
+  open/closed (`corn: { peelChance }`). A skipped row pair (`clipFn`) makes an
+  honest drive lane — an in-canopy camera NEEDS one (or a pusher riding the
+  lens) or it eats leaves.
+- Placement: `heightFn: (x,z)=>y` OR `surface: mesh/[meshes]` (raycast down —
+  grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant);
+  `align` = surface-normal tilt share (grass hugs, woody stays skyward);
+  `maxSlope`; `clipFn(x,z)`; explicit `placements: [[x, z, scale], ...]` for
+  hero plants. Structural species claim footprints in a cross-stroke occupancy
+  registry — later strokes avoid them (`avoid: false` opts out;
+  `resetFloraOccupancy()` between scenes if you rebuild).
+- Returns `{ mesh, stemMesh, material, update, setPushers, uniforms, count }`.
+  Wind self-updates. `sunDir` should match your key light. Budgets: whole
+  plants are 0.5-3.3K tris each and instanced — thousands are fine.
+- The MOJAVE recipe (desert dressing, field-approved): galleta base + the
+  three shrubs as de-centred organic strokes, two seeds each, yucca kept off
+  the walk line with heroes staged by hand:
+  ```js
+  await addField('galleta_dry', { width: 56, depth: 46, seed: 3, density: 1.3 });
+  await addField('blackbrush', { width: 54, depth: 46, seed: 5, density: 0.85, center: [6, -4], footprint: 'organic' });
+  await addField('blackbrush', { width: 54, depth: 46, seed: 55, variant: 1, density: 0.85, center: [-7, 6], footprint: 'organic' });
+  // creosote + sagebrush: same pattern, own seeds/centres
+  await addField('yucca', { width: 54, depth: 46, seed: 21, density: 0.7, clipFn: (x, z) => Math.abs(x) < 1.4 });
+  await addField('yucca', { placements: [[2.4, 8.5, 1.9], [-2.5, 4.0, 2.3]] });   // heroes
+  ```
+  A field of ONE cloned skeleton reads as wallpaper — always two seeds per
+  shrub species, and de-centre the strokes (concentric same-centre ellipses
+  foreshorten into stamped parallel bands from a low camera).
 
 **`makeParticleMorph`** — a GPU particle CLOUD that MORPHS between point-set
 targets: dissolve a mesh/VRM into volumetric particles and reform it into
