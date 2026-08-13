@@ -1999,7 +1999,10 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   (desert bunch grass), `blackbrush`/`creosote`/`sagebrush` (real Mojave shrubs — grown skeletons,
   welded wood tubes with bark maps + foliage spray cards), `yucca` (Mojave
   yucca: bayonet crown, dried skirt, bendy trunk), `corn` (full plant: cane,
-  arching leaves, husked ears with a BAKED real cob, silk, tassel).
+  arching leaves, husked ears with a BAKED real cob, silk, tassel),
+  `sunflower` (full plant: cane, petioled heart-leaf canopy, one nodding
+  head — seed-disc plate, dense fitted ray-petal whorl, bract rosette back;
+  the head rides wind as one rigid assembly).
 - Footprint: stands are CIRCULAR by default (never square); `size` = diameter,
   or `width`/`depth` for ellipses; `footprint: 'organic'` masks a lobed
   irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
@@ -2025,6 +2028,14 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   open/closed (`corn: { peelChance }`). A skipped row pair (`clipFn`) makes an
   honest drive lane — an in-canopy camera NEEDS one (or a pusher riding the
   lens) or it eats leaves.
+- Sunflower: same `rows` treatment (spacing ~0.85, plant ~0.5); `heading`
+  (world azimuth, ± `headingJitter`) points every plant one way — sunflower
+  fields face the sun together; omit it for the wild-patch look. Lookdev
+  pins via `sunflower: { pitch, headYaw, rank, stalkLean, heightJitter }`.
+  Card widths follow `assets/grass/sunflower_fit.json` — the measured alpha
+  envelope of the sheet's petal cells + leaf window (re-measure it whenever
+  the art changes; the format lives in vegetation_sunflower_gen.js, which
+  falls back to built-in envelopes without the file).
 - Placement: `heightFn: (x,z)=>y` OR `surface: mesh/[meshes]` (raycast down —
   grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant);
   `align` = surface-normal tilt share (grass hugs, woody stays skyward);

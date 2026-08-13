@@ -1,57 +1,65 @@
 // sunflower_gen — the sunflower (Helianthus annuus) for createFlora: cane
-// stalk, spiral petioled heart-leaves, and a nodding head — seed-disc lathe
-// (Skye's highpoly cut down + baked/painted into the sheet's disc circle),
-// a ring of ray-petal cards, and a bract star card behind. Every part UV'd
-// onto the ONE sunflower_ trim sheet; the whole plant is a single geometry +
-// single material, field-instanced by createFlora exactly like corn.
+// stalk, spiral petioled heart-leaves, and a nodding head — thin-plate seed
+// disc, a dense fitted ray-petal whorl, bract star behind. One geometry on
+// the ONE sunflower_ trim sheet, field-instanced like corn.
 //
-// sunflower_ sheet regions (UV, v up, 1024²):
-//   DISC   circle centre (.24,.80) r .185 — the seed disc, planar projection
-//          (u tracks local +side, v tracks local +up when facing the head)
-//   PETALS u .5–1, v .586–1 — 4 cols × 2 rows = 8 ray-petal variants, base at
-//          each cell's low-v edge, tip at high-v; alpha carves the silhouette
-//   BRACT  circle centre (.81,.35) r .137 — back-of-head bract rosette card
-//   LEAF   u .004–.62, v .21–.49 — heart leaf, base left tip right, midrib at
-//          v .35; alpha carves the serrated edge
-//   STALK  v .005–.195 — cane, fibre runs along v
+// Reference laws baked in (work/sunflower/ref/, Skye's corrections):
+//   - MATERIALS FIRST: petal + leaf cards are simple planes whose loop
+//     widths follow sunflower_fit.json — the measured alpha envelope of
+//     Sol's art (overdraw pull-in). Geometry invents no silhouettes.
+//   - STRUCTURE IS TUBES: petioles and the neck are real tubes; flat
+//     ribbons vanish edge-on and read as broken hovering pieces.
+//   - The head is a THIN PLATE (rim depth ~13% of diameter), petals emerge
+//     tucked under the rim in one dense whorl, coverage of the circumference
+//     guaranteed by construction; the leaf canopy is most of the plant.
+//   - The whole head is ONE RIGID ASSEMBLY in wind: every head vertex
+//     carries the identical aH (the corn-ear law).
 //
-// The head (neck knuckle → disc → petals → bracts) is ONE RIGID ASSEMBLY in
-// wind: every head vertex carries the identical aH — displacement scales by
-// aH², so any variation shears the parts apart (the corn-ear law).
+// sunflower_ sheet regions (UV, v up, 1024²) — layout v2, dead space spent:
+//   DISC   circle centre (.2405,.780) r .2053 (planar projection)
+//   PETALS u .5–1, v .586–1 — 4 cols × 2 rows = 8 fitted variants
+//   BRACT  circle centre (.826,.3793) r .1701 (art may reach ×1.05)
+//   LEAF   u .004–.6305, v .2102–.5396 — heart leaf, base left, midrib v .3743
+//   STALK  v .005–.195 — cane, fibre along v
 
 const T3 = globalThis.THREE;
 import { Rng } from './vegetation_shrub_gen.js';
 
 const TAU = Math.PI * 2;
-
-// triangle wave 0→1→0…, for seam-free mirrored UVs under ClampToEdge
 const tri = (s) => { const m = s % 2; return m <= 1 ? m : 2 - m; };
 
-// disc = a simple flattened partial sphere (Skye's spec): a lens — gently
-// bulged front, shallower back — and Sol's circular disc painting carries
-// ALL the surface detail (seed spiral, floret ring, spiky band)
+// thin plate: gentle front bulge, near-flat back, knife rim
 const DISC_R = 0.30;
-const DISC_FRONT = [0, 0.07, 0.13, 0.19, 0.24, 0.275, 0.295, 0.300]
-    .map((r) => [r, 0.045 + 0.105 * Math.pow(1 - Math.pow(r / 0.302, 2.4), 0.7)]);
+const DISC_FRONT = [0, 0.09, 0.16, 0.22, 0.265, 0.29, 0.300]
+    .map((r) => [r, 0.012 + 0.052 * Math.pow(1 - Math.pow(r / 0.302, 2.2), 0.8)]);
 const DISC_RIM_BACK = [
-    [0.297, 0.020],
-    [0.270, -0.010],
-    [0.180, -0.030],
-    [0.000, -0.038],
+    [0.302, 0.002],
+    [0.290, -0.012],
+    [0.170, -0.024],
+    [0.000, -0.030],
 ];
+
+// stand-in envelopes if sunflower_fit.json is missing (regenerate with
+// work/sunflower/measure_fit.py whenever new art lands)
+const FIT_FALLBACK = {
+    petals: Array(8).fill([[0.5, 0.20], [0.5, 0.31], [0.5, 0.34], [0.5, 0.34], [0.5, 0.32], [0.5, 0.19]]),
+    leaf: [[0.5, 0.47], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.39], [0.5, 0.22]],
+    bractR: 1.05,
+};
 
 export const SUNFLOWER_GEN = {
     sunflower: {
-        height: 1.9,         // stalk height (m) before per-plant jitter
-        leaves: 9,
-        leafLen: 0.42,       // petiole + blade (m)
+        height: 1.9,
+        leaves: 11,
+        leafLen: 0.62,       // petiole + blade (m) at full size
         headR: 0.20,         // head radius petal-tip to axis (m)
-        petals: 21,
+        petals: 26,
     },
 };
 
 export function buildSunflowerGeometry(name, seed, over = {}) {
     const cfg = { ...(SUNFLOWER_GEN[name] ?? SUNFLOWER_GEN.sunflower), ...over };
+    const fit = cfg.fit ?? FIT_FALLBACK;
     const rng = new Rng(seed);
     const R = () => rng.next();
 
@@ -59,8 +67,43 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
     let vb = 0;
     const V = (x, y, z, u, vv, a) => { pos.push(x, y, z); uv.push(u, vv); aH.push(a); return vb++; };
     const quad = (a, b, c, d) => idx.push(a, b, c, a, c, d);
+    const B = (p0, p1, p2, t) => {
+        const s = 1 - t;
+        return [s * s * p0[0] + 2 * s * t * p1[0] + t * t * p2[0],
+                s * s * p0[1] + 2 * s * t * p1[1] + t * t * p2[1],
+                s * s * p0[2] + 2 * s * t * p1[2] + t * t * p2[2]];
+    };
+    // tube along a bezier: RADS-gon rings, stalk-band art (fibre along v)
+    function tube(p0, p1, p2, r0, r1, rings, RADS, a0, a1, vOff = 0.02) {
+        const rows = [];
+        for (let g = 0; g <= rings; g++) {
+            const t = g / rings;
+            const c = B(p0, p1, p2, t);
+            const d = B(p0, p1, p2, Math.min(1, t + 0.01));
+            let tx = d[0] - c[0], ty = d[1] - c[1], tz = d[2] - c[2];
+            const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+            let s1x = -tz, s1y = 0, s1z = tx;
+            const sl = Math.hypot(s1x, s1y, s1z) || 1e-6; s1x /= sl; s1z /= sl;
+            const s2x = ty * s1z - tz * s1y, s2y = tz * s1x - tx * s1z, s2z = tx * s1y - ty * s1x;
+            const r = r0 + (r1 - r0) * t;
+            const row = [];
+            const vband = vOff + 0.15 * tri(0.3 + t * 0.9);
+            for (let j = 0; j <= RADS; j++) {
+                const an = (j / RADS) * TAU;
+                const ox = s1x * Math.cos(an) + s2x * Math.sin(an),
+                      oy = s1y * Math.cos(an) + s2y * Math.sin(an),
+                      oz = s1z * Math.cos(an) + s2z * Math.sin(an);
+                row.push(V(c[0] + ox * r, c[1] + oy * r, c[2] + oz * r,
+                    0.03 + 0.94 * tri((j / RADS) * 2), vband, a0 + (a1 - a0) * t));
+            }
+            rows.push(row);
+        }
+        for (let i = 0; i < rows.length - 1; i++) for (let j = 0; j < RADS; j++)
+            quad(rows[i][j], rows[i][j + 1], rows[i + 1][j + 1], rows[i + 1][j]);
+        return rows;
+    }
 
-    // ── stalk: a near-vertical cane ─────────────────────────────────────────
+    // ── stalk ───────────────────────────────────────────────────────────────
     const H = cfg.height * (cfg.heightJitter ?? rng.range(0.9, 1.1));
     const leanA = R() * TAU, leanAmt = (cfg.stalkLean ?? rng.range(0.02, 0.08)) * H;
     const lx = Math.cos(leanA) * leanAmt, lz = Math.sin(leanA) * leanAmt;
@@ -72,10 +115,10 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
         for (const t of STA) {
             const [cx, cy, cz] = P(t);
             const r = stalkR(t), row = [];
-            const vband = 0.012 + 0.176 * tri(t * 2.4);          // fibre along v, mirrored
+            const vband = 0.012 + 0.176 * tri(t * 2.4);
             for (let j = 0; j <= RADS; j++) {
                 const a = (j / RADS) * TAU;
-                const u = 0.03 + 0.94 * tri((j / RADS) * 2);     // mirrored wrap, no seam
+                const u = 0.03 + 0.94 * tri((j / RADS) * 2);
                 row.push(V(cx + Math.cos(a) * r, t === 0 ? -0.04 : cy, cz + Math.sin(a) * r,
                     u, vband, t * 0.8));
             }
@@ -85,120 +128,88 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
             quad(rows[i][j], rows[i][j + 1], rows[i + 1][j + 1], rows[i + 1][j]);
     }
 
-    // ── leaves: spiral phyllotaxis, petiole + drooping heart blade ──────────
-    const LEAF = { u0: 0.010, u1: 0.615, v0: 0.215, vm: 0.350, v1: 0.485 };
-    const B = (p0, p1, p2, t) => {
-        const s = 1 - t;
-        return [s * s * p0[0] + 2 * s * t * p1[0] + t * t * p2[0],
-                s * s * p0[1] + 2 * s * t * p1[1] + t * t * p2[1],
-                s * s * p0[2] + 2 * s * t * p1[2] + t * t * p2[2]];
-    };
+    // ── leaves: tube petiole + fitted drooping heart blade ──────────────────
+    const LEAF = { u0: 0.004, u1: 0.6305, v0: 0.2102, vm: 0.3743, v1: 0.5396 };
+    // art aspect: window u-span long × v-span across
+    const LEAF_ACROSS = (LEAF.v1 - LEAF.v0) / (LEAF.u1 - LEAF.u0);
     const nL = Math.round(cfg.leaves * rng.range(0.9, 1.15));
     const rank = cfg.rank ?? R() * TAU;
     for (let i = 0; i < nL; i++) {
-        const f = 0.15 + 0.70 * ((i + R() * 0.4) / nL);          // foliage runs high
-        const yaw = rank + i * 2.3998 + rng.vary(0, 0.3);        // golden-angle spiral
-        const size = (0.55 + 0.5 * Math.sin(Math.PI * Math.min(1, 0.2 + f * 0.9))) * rng.range(0.85, 1.15);
-        const petL = cfg.leafLen * 0.38 * size;
-        const bladeL = cfg.leafLen * 0.62 * size;
+        // canopy stops short of the head — a top leaf at the head's height
+        // slices across the petals as a bar in head-on views
+        const f = 0.14 + 0.63 * ((i + R() * 0.4) / nL);
+        const yaw = rank + i * 2.3998 + rng.vary(0, 0.3);
+        const size = (0.6 + 0.45 * Math.sin(Math.PI * Math.min(1, 0.2 + f * 0.9)))
+            * (1 - Math.max(0, f - 0.6) * 0.9) * rng.range(0.85, 1.15);
+        const petL = cfg.leafLen * 0.34 * size;
+        const bladeL = cfg.leafLen * 0.66 * size;
         const [sx, sy, sz] = P(f);
         const dirX = Math.cos(yaw), dirZ = Math.sin(yaw);
         const sideX = -Math.sin(yaw), sideZ = Math.cos(yaw);
         const aL = f * 0.8;
-        // petiole: thin strip arcing out and slightly up, stalk-band art
-        // (fibre along its length = along v)
         const r0 = stalkR(f);
-        const q0 = [sx + dirX * r0 * 0.5, sy, sz + dirZ * r0 * 0.5];
-        const q1 = [q0[0] + dirX * petL * 0.6, q0[1] + petL * 0.42, q0[2] + dirZ * petL * 0.6];
-        const q2 = [q0[0] + dirX * petL * 1.05, q0[1] + petL * rng.range(0.3, 0.5), q0[2] + dirZ * petL * 1.05];
-        {
-            const sA = vb, SEG = 3;
-            const uc = 0.36, hw = 0.006 + 0.004 * size;
-            for (let sg = 0; sg <= SEG; sg++) {
-                const t = sg / SEG;
-                const c = B(q0, q1, q2, t);
-                const vband = 0.03 + t * 0.15;
-                const a = aL + t * 0.04;
-                V(c[0] - sideX * hw, c[1], c[2] - sideZ * hw, uc - 0.04, vband, a);
-                V(c[0] + sideX * hw, c[1] + hw * 0.5, c[2] + sideZ * hw, uc + 0.04, vband, a);
-            }
-            for (let sg = 0; sg < SEG; sg++) {
-                const a2 = sA + sg * 2;
-                quad(a2, a2 + 1, a2 + 3, a2 + 2);
-            }
-        }
-        // blade: 3-col folded strip on a drooping bezier — wide heart base,
-        // tapering tip, edges cupped down; alpha carves the serration
+        // petiole TUBE, base buried in the cane (junction law), arcing out
+        // and slightly up before the blade takes over and droops
+        const q0 = [sx + dirX * r0 * 0.2, sy, sz + dirZ * r0 * 0.2];
+        const q1 = [q0[0] + dirX * petL * 0.55, q0[1] + petL * 0.38, q0[2] + dirZ * petL * 0.55];
+        const q2 = [q0[0] + dirX * petL * 1.02, q0[1] + petL * rng.range(0.32, 0.5), q0[2] + dirZ * petL * 1.02];
+        tube(q0, q1, q2, 0.0062 * size, 0.0038 * size, 3, 4, aL, aL + 0.05);
+        // blade: plane strip continuing the petiole tangent, drooping to a
+        // hanging tip; widths from the measured art envelope
+        const petT = [q2[0] - q1[0], q2[1] - q1[1], q2[2] - q1[2]];
+        const ptl = Math.hypot(...petT) || 1;
         const b0 = q2;
-        const b1 = [b0[0] + dirX * bladeL * 0.5, b0[1] + bladeL * 0.18, b0[2] + dirZ * bladeL * 0.5];
-        const b2 = [b0[0] + dirX * bladeL * 0.95, b0[1] - bladeL * rng.range(0.18, 0.38), b0[2] + dirZ * bladeL * 0.95];
-        const wHalf = bladeL * 0.52;
-        const sB = vb, SEGB = 4;
-        for (let sg = 0; sg <= SEGB; sg++) {
-            const t = sg / SEGB;
+        const b1 = [b0[0] + (petT[0] / ptl) * bladeL * 0.42, b0[1] + (petT[1] / ptl) * bladeL * 0.42, b0[2] + (petT[2] / ptl) * bladeL * 0.42];
+        const b2 = [b0[0] + dirX * bladeL * 0.82, b0[1] - bladeL * rng.range(0.3, 0.55), b0[2] + dirZ * bladeL * 0.82];
+        const bands = fit.leaf;
+        const NB = bands.length;
+        const sB = vb;
+        for (let g = 0; g < NB; g++) {
+            const t = g / (NB - 1);
             const c = B(b0, b1, b2, t);
-            const hw = wHalf * (0.35 + 0.95 * Math.pow(Math.sin(Math.min(Math.PI, (0.18 + t) * Math.PI * 0.92)), 0.8));
-            const sag = hw * (0.28 + 0.3 * t);                    // edges droop below midrib
-            const a = Math.min(1, aL + t * t * 0.18);
+            const hw = bands[g][1] * LEAF_ACROSS * bladeL / 0.5;   // env frac -> metres
+            const fold = hw * 0.34;                                 // V-fold, edges below midrib
+            const a = Math.min(1, aL + t * t * 0.16);
             const u = LEAF.u0 + t * (LEAF.u1 - LEAF.u0);
-            V(c[0] - sideX * hw, c[1] - sag, c[2] - sideZ * hw, u, LEAF.v0, a);
-            V(c[0], c[1], c[2], u, LEAF.vm, a);
-            V(c[0] + sideX * hw, c[1] - sag, c[2] + sideZ * hw, u, LEAF.v1, a);
+            // sink the first band into the petiole tip so the junction is
+            // covered from every angle
+            const sink = g === 0 ? -0.006 : 0;
+            V(c[0] - sideX * hw + dirX * sink, c[1] - fold, c[2] - sideZ * hw + dirZ * sink, u, LEAF.v0, a);
+            V(c[0] + dirX * sink, c[1], c[2] + dirZ * sink, u, LEAF.vm, a);
+            V(c[0] + sideX * hw + dirX * sink, c[1] - fold, c[2] + sideZ * hw + dirZ * sink, u, LEAF.v1, a);
         }
-        for (let sg = 0; sg < SEGB; sg++) {
-            const a2 = sB + sg * 3, b3 = a2 + 3;
+        for (let g = 0; g < NB - 1; g++) {
+            const a2 = sB + g * 3, b3 = a2 + 3;
             quad(a2, a2 + 1, b3 + 1, b3); quad(a2 + 1, a2 + 2, b3 + 2, b3 + 1);
         }
     }
 
-    // ── the head: ONE rigid assembly (constant aH) ──────────────────────────
+    // ── the head: ONE rigid assembly ────────────────────────────────────────
     const aHead = 0.82;
-    const s = (cfg.headR ?? 0.20) / 0.48;      // head units → metres (petal reach .48u)
-    const pitch = cfg.pitch ?? rng.range(0.6, 1.05);   // nod from vertical (rad)
-    const headYaw = cfg.headYaw ?? (leanA + rng.vary(0, 0.6));  // nods the way it leans
+    const s = (cfg.headR ?? 0.20) / 0.50;      // head units -> metres (petal reach ~.50u)
+    const pitch = cfg.pitch ?? rng.range(0.6, 1.05);
+    const headYaw = cfg.headYaw ?? (leanA + rng.vary(0, 0.6));
     const [tx, ty, tz] = P(1);
-    // head axis A (faces outward/down-ish), frame (S1,S2) spans the disc plane
     const ax = Math.cos(headYaw) * Math.sin(pitch), ay = Math.cos(pitch), az = Math.sin(headYaw) * Math.sin(pitch);
     let s1x = -az, s1y = 0, s1z = ax;
     { const l = Math.hypot(s1x, s1y, s1z) || 1; s1x /= l; s1z /= l; }
     const s2x = ay * s1z - az * s1y, s2y = az * s1x - ax * s1z, s2z = ax * s1y - ay * s1x;
-    // head centre: a short neck arcs from the stalk tip into the disc's back
     const neckL = 0.10 * s;
     const hx = tx + ax * neckL * 0.85, hy = ty + ay * neckL * 0.85 + neckL * 0.25, hz = tz + az * neckL * 0.85;
     const radial = (th) => [s1x * Math.cos(th) + s2x * Math.sin(th),
                             s1y * Math.cos(th) + s2y * Math.sin(th),
                             s1z * Math.cos(th) + s2z * Math.sin(th)];
-    // neck: stalk-band cane from the stalk tip to the disc back boss
-    {
-        const RADS = 6, rows = [];
-        const n0 = [tx, ty, tz];
-        const n1 = [tx, ty + neckL * 0.5, tz];
-        const n2 = [hx - ax * 0.02 * s, hy - ay * 0.02 * s, hz - az * 0.02 * s];
-        for (let g = 0; g <= 3; g++) {
-            const t = g / 3;
-            const c = B(n0, n1, n2, t);
-            const r = stalkR(1) * (1 - t * 0.25);
-            const row = [];
-            const vband = 0.012 + 0.14 * tri(0.9 + t * 0.7);
-            for (let j = 0; j <= RADS; j++) {
-                const a = (j / RADS) * TAU;
-                const [ox, oy, oz] = radial(a);
-                row.push(V(c[0] + ox * r, c[1] + oy * r, c[2] + oz * r,
-                    0.03 + 0.94 * tri((j / RADS) * 2), vband, t < 0.34 ? 0.8 : aHead));
-            }
-            rows.push(row);
-        }
-        for (let i = 0; i < rows.length - 1; i++) for (let j = 0; j < RADS; j++)
-            quad(rows[i][j], rows[i][j + 1], rows[i + 1][j + 1], rows[i + 1][j]);
-    }
-    // disc lathe on the sheet's planar circle: u tracks S1, v tracks S2.
-    // The BACK cone samples the BRACT circle instead — a head's back is green
-    // receptacle/bracts, not seed art (the bract card in front of it mostly
-    // hides it, but it peeks at grazing angles)
-    const discUV = (rr, th) => [0.24 + 0.185 * (rr / DISC_R) * Math.cos(th),
-                                0.80 + 0.185 * (rr / DISC_R) * Math.sin(th)];
-    const backUV = (rr, th) => [0.81 + 0.10 * (rr / DISC_R) * Math.cos(th),
-                                0.35 + 0.10 * (rr / DISC_R) * Math.sin(th)];
+    // neck TUBE from the stalk tip, burying into the head's back
+    tube([tx, ty, tz], [tx, ty + neckL * 0.5, tz],
+        [hx - ax * 0.024 * s, hy - ay * 0.024 * s, hz - az * 0.024 * s],
+        stalkR(1), stalkR(1) * 0.8, 3, 5, 0.8, aHead, 0.03);
+
+    // disc plate on the sheet's planar circle; back cone samples the BRACT
+    // circle (a head's back is green, not seed art)
+    const discUV = (rr, th) => [0.2405 + 0.2053 * (rr / DISC_R) * Math.cos(th),
+                                0.780 + 0.2053 * (rr / DISC_R) * Math.sin(th)];
+    const backUV = (rr, th) => [0.826 + 0.12 * (rr / DISC_R) * Math.cos(th),
+                                0.3793 + 0.12 * (rr / DISC_R) * Math.sin(th)];
     {
         const RADD = 12;
         const front = DISC_FRONT.map((p) => [...p, discUV]);
@@ -208,10 +219,8 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
         for (let k = 0; k < prof.length; k++) {
             const [r, x, uvFn] = prof[k];
             if (r < 1e-6) {
-                // centre pole (front boss / back cone apex): a single vertex
-                const [uu, vv2] = uvFn(0, 0);
-                rings.push([V(hx + ax * x * s, hy + ay * x * s, hz + az * x * s,
-                    uu, vv2, aHead)]);
+                const [uu2, vv2] = uvFn(0, 0);
+                rings.push([V(hx + ax * x * s, hy + ay * x * s, hz + az * x * s, uu2, vv2, aHead)]);
                 continue;
             }
             const row = [];
@@ -236,54 +245,73 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
             }
         }
     }
-    // ray petals: staggered double ring around the rim, 8 art variants
+    // ray petals: ONE dense whorl, coverage by construction — base arc width
+    // computed from the actual petal count (+15% overlap), card widths follow
+    // each variant's measured envelope; bases tuck UNDER the rim
     {
-        const N = cfg.petals ?? 21;
+        const N = cfg.petals ?? 26;
         const cells = [];
         for (let cx2 = 0; cx2 < 4; cx2++) for (let ry = 0; ry < 2; ry++)
-            cells.push({ u0: 0.5 + 0.125 * cx2 + 0.008, u1: 0.5 + 0.125 * (cx2 + 1) - 0.008,
-                         v0: ry === 0 ? 0.7937 : 0.5879, v1: ry === 0 ? 0.9995 : 0.7927 });
+            cells.push({ u0: 0.5 + 0.125 * cx2 + 0.006, u1: 0.5 + 0.125 * (cx2 + 1) - 0.006,
+                         v0: ry === 0 ? 0.7937 : 0.5879, v1: ry === 0 ? 0.9995 : 0.7927,
+                         fit: fit.petals[cx2 * 2 + ry] });
+        // required half-width at the widest band so neighbours overlap
+        const rimR = 0.285;
+        const needHW = (TAU * rimR / N) * 0.5 * 1.15;
         for (let k = 0; k < N; k++) {
-            const ringB = k % 3 === 2;                        // every 3rd petal sits behind
-            const th = (k / N) * TAU + (ringB ? 0.14 : 0) + rng.vary(0, 0.05);
-            const cell = cells[Math.floor(R() * cells.length)];
+            const th = (k / N) * TAU + rng.vary(0, 0.04);
+            const ci = Math.floor(R() * cells.length);
+            const cell = cells[ci];
+            const maxEnv = Math.max(...cell.fit.map((b) => b[1]));
+            const cardHW = needHW / maxEnv;                 // env frac -> world
+            const L = cardHW * 2 * (0.207 / 0.125) * rng.range(0.92, 1.1); // cell aspect
             const [ox, oy, oz] = radial(th);
-            // tangent in the disc plane for petal width
             const txp = s2x * Math.cos(th) - s1x * Math.sin(th),
                   typ = s2y * Math.cos(th) - s1y * Math.sin(th),
                   tzp = s2z * Math.cos(th) - s1z * Math.sin(th);
-            const rA = (ringB ? 0.262 : 0.272) * s;
-            const xA = (ringB ? -0.002 : 0.012) * s;
-            const L = 0.21 * s * rng.range(0.85, 1.12) * (ringB ? 0.92 : 1);
-            const hw0 = L * 0.30;
-            // petal sweeps outward in the disc plane, cupping slightly forward
-            // then relaxing back at the tip
-            const fwd = ringB ? -0.05 : 0.06;
-            const sA = vb, SEG = 3;
-            for (let sg = 0; sg <= SEG; sg++) {
-                const t = sg / SEG;
-                const rr = rA + L * t;
-                const lift = (fwd * Math.sin(t * Math.PI) - 0.06 * t * t * (pitch > 0.9 ? 1 : 0.4)) * s;
-                const hw = hw0 * (0.55 + 0.75 * Math.sin(Math.min(Math.PI, (0.25 + t) * Math.PI * 0.8)));
-                const cup = hw * 0.22 * (1 - t * 0.6);
+            // droop: most petals near the disc plane, some relaxed back
+            const droop = rng.range(-0.30, 0.10) - (k % 5 === 0 ? 0.18 : 0);
+            const cd = Math.cos(droop), sd = Math.sin(droop);
+            const dx = ox * cd + ax * sd, dy = oy * cd + ay * sd, dz = oz * cd + az * sd;
+            // enough roll spread that edge-on heads keep petal presence —
+            // perfectly disc-plane petals vanish to lines in side views
+            const roll = rng.vary(0, 0.35);
+            const wx = txp * Math.cos(roll) + ax * Math.sin(roll),
+                  wy = typ * Math.cos(roll) + ay * Math.sin(roll),
+                  wz = tzp * Math.cos(roll) + az * Math.sin(roll);
+            // base tucked under the rim: start inside and slightly behind
+            const bxp = hx + ox * (rimR - 0.012) * s - ax * 0.004 * s,
+                  byp = hy + oy * (rimR - 0.012) * s - ay * 0.004 * s,
+                  bzp = hz + oz * (rimR - 0.012) * s - az * 0.004 * s;
+            const bands = cell.fit;
+            const NBp = bands.length;
+            const sA = vb;
+            for (let g = 0; g < NBp; g++) {
+                const t = g / (NBp - 1);
+                const hw = bands[g][1] * cardHW * 2;        // env frac of full card
+                const cup = Math.sin(t * Math.PI) * L * 0.05;  // gentle forward cup
+                const cx3 = bxp + dx * L * t * s + ax * cup * s,
+                      cy3 = byp + dy * L * t * s + ay * cup * s,
+                      cz3 = bzp + dz * L * t * s + az * cup * s;
+                const u = cell.u0 + (cell.u1 - cell.u0) * 0.5;
                 const vv2 = cell.v0 + (cell.v1 - cell.v0) * t;
-                const cx3 = hx + ax * (xA + lift) + ox * rr, cy3 = hy + ay * (xA + lift) + oy * rr, cz3 = hz + az * (xA + lift) + oz * rr;
-                V(cx3 - txp * hw + ax * cup, cy3 - typ * hw + ay * cup, cz3 - tzp * hw + az * cup, cell.u0, vv2, aHead);
-                V(cx3, cy3, cz3, (cell.u0 + cell.u1) / 2, vv2, aHead);
-                V(cx3 + txp * hw + ax * cup, cy3 + typ * hw + ay * cup, cz3 + tzp * hw + az * cup, cell.u1, vv2, aHead);
+                V(cx3 - wx * hw * s, cy3 - wy * hw * s, cz3 - wz * hw * s, cell.u0, vv2, aHead);
+                V(cx3 + wx * hw * s, cy3 + wy * hw * s, cz3 + wz * hw * s, cell.u1, vv2, aHead);
             }
-            for (let sg = 0; sg < SEG; sg++) {
-                const a2 = sA + sg * 3, b3 = a2 + 3;
-                quad(a2, a2 + 1, b3 + 1, b3); quad(a2 + 1, a2 + 2, b3 + 2, b3 + 1);
+            for (let g = 0; g < NBp - 1; g++) {
+                const a2 = sA + g * 2;
+                quad(a2, a2 + 1, a2 + 3, a2 + 2);
             }
         }
     }
-    // bract star: one flat card just behind the disc + a smaller rotated
-    // second for depth — the back of the head
+    // bract star cards behind the disc, sized by the art's real reach
     {
-        const BR = { cu: 0.81, cv: 0.35, r: 0.137 };
-        for (const [off, sc, rot] of [[0.012, 1.0, 0], [0.030, 0.72, 0.45]]) {
-            const bs = 0.34 * sc * s;
+        const BR = { cu: 0.826, cv: 0.3793, r: 0.1701 };
+        // clamp hard: past 1.05 the card's UV corners leave the bract
+        // circle's black margin and dip into the opaque stalk band
+        const bR = Math.min(fit.bractR ?? 1.05, 1.05);
+        for (const [off, sc, rot] of [[0.014, 1.0, 0], [0.032, 0.74, 0.45]]) {
+            const bs = 0.30 * bR * sc * s;
             const bxc = hx - ax * off * s, byc = hy - ay * off * s, bzc = hz - az * off * s;
             const sA = vb;
             for (const [k1, k2] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
@@ -291,7 +319,7 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
                 const rx = k1 * cr - k2 * sr, rz = k1 * sr + k2 * cr;
                 const [o1x, o1y, o1z] = [s1x * rx + s2x * rz, s1y * rx + s2y * rz, s1z * rx + s2z * rz];
                 V(bxc + o1x * bs, byc + o1y * bs, bzc + o1z * bs,
-                    BR.cu + BR.r * rx, BR.cv + BR.r * rz, aHead);
+                    BR.cu + BR.r * bR * rx, BR.cv + BR.r * bR * rz, aHead);
             }
             quad(sA, sA + 1, sA + 2, sA + 3);
         }

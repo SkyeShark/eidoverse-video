@@ -92,9 +92,10 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
 - `createFlora` — the vegetation brush: asset-driven species with real PBR
   map sets — grass carpets (seasonal color), Mojave desert (galleta bunch
   grass, blackbrush, creosote, sagebrush, yucca), full corn plants with
-  baked cobs and planted rows. GPU-instanced whole plants, self-animating
-  wind, character pushers that part the foliage, circular/organic stands,
-  raycast placement onto any geometry.
+  baked cobs and planted rows, sunflowers with seed-disc heads and shared
+  field heading. GPU-instanced whole plants, self-animating wind, character
+  pushers that part the foliage, circular/organic stands, raycast placement
+  onto any geometry.
 - `makeSkySystem` — world-space volumetric sky: raymarched cloud dome the
   scene occludes, sun/moon/stars, time-of-day, day cycles, env bake, and
   `setColors` grading (cloud/sun/sky/fog channels).
