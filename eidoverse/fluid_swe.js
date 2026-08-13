@@ -272,6 +272,7 @@ export async function createWaterSWE(renderer, options = {}) {
         emissiveFalloff: uniform(o.emissiveFalloff),
         foamColor: uniform(new THREE.Color(o.foamColor)),
         foamStrength: uniform(o.foamStrength),
+        rain: uniform(o.rainRate),
     };
 
     // ── storage (depth-1 3D textures; the proven recipe) ──────────────────
@@ -355,10 +356,15 @@ export async function createWaterSWE(renderer, options = {}) {
         capacity: 0.5,      // sediment capacity ∝ speed·depth (Kc)
         erode: 0.55,        // pickup rate toward capacity (Ks, 1/s)
         deposit: 0.35,      // settling rate above capacity (Kd, 1/s)
+        bank: 1.0,          // LATERAL pickup: flow eats its banks sideways —
+                            // without it every channel incises a narrow slot
+                            // (depth was the only degree of freedom)
         minDepth: 0.004,    // films thinner than this don't erode
-        talusSlope: 1.0,    // angle of repose as rise/run (1.0 ≈ 45°)
-        talusRate: 1.2,     // relaxation speed of over-steep banks
-        maxDelta: 1.4,      // cut/fill depth clamp, metres
+        talusSlope: 0.55,   // angle of repose as rise/run (0.55 ≈ 29° wet sand;
+                            // 1.0 ≈ 45° holds slot walls up — desert alluvium
+                            // slumps far flatter)
+        talusRate: 2.2,     // relaxation speed of over-steep banks
+        maxDelta: 0.9,      // cut/fill depth clamp, metres
         siltColor: '#96754e',      // fresh wet deposit tint (terrain)
         cutColor: '#6b4f33',       // exposed cut-bank earth tint (terrain)
         siltWaterColor: '#8a6b42', // suspended-load water tint
@@ -607,12 +613,14 @@ export async function createWaterSWE(renderer, options = {}) {
             const ci3 = vec3(c).z.toInt().mul(NX).add(vec3(c).x.toInt());
             h.addAssign(float(depVolRd.element(ci3)).div(FXP).div(DX * DZ));
         });
-        // rain: distributed depth, modulated by slow-drifting squall bands
+        // rain: distributed depth, modulated by slow-drifting squall bands.
+        // U.rain is a UNIFORM so a scene can ramp the storm in and out
+        // (api.setRain); o.rainRate is the initial value AND the build gate.
         if (o.rainRate > 0) {
             const squall = fbm2(w.mul(0.16).add(vec2(U.time.mul(0.11), U.time.mul(0.045))));
             const bands = clamp(squall.mul(1.5).sub(0.25), 0.0, 1.6);
             const rainMul = mix(float(1), bands, float(o.rainPatchiness));
-            h.addAssign(float(o.rainRate).mul(rainMul).mul(U.dt));
+            h.addAssign(U.rain.mul(rainMul).mul(U.dt));
         }
         h.assign(clamp(h, 0.0, o.maxDepth));
         textureStore(hDst, c, vec4(h, 0, 0, 1)).toWriteOnly();
@@ -713,16 +721,37 @@ export async function createWaterSWE(renderer, options = {}) {
         const slope = length(vec2(
             bT(p.add(duv)).sub(bT(p.sub(duv))).div(2 * DX),
             bT(p.add(dwv)).sub(bT(p.sub(dwv))).div(2 * DZ)));
-        // STREAM-POWER capacity: |v|^1.7 with only a weak depth term —
-        // concentrated fast flow carries far more than a broad slow sheet,
-        // which is the channelization feedback itself (a linear-|v| capacity
-        // erodes sheet floods into a maze instead of incising a wash)
-        const C = float(EK.capacity).mul(pow(spd, 1.7)).mul(min(h, 0.2).mul(5.0)).mul(wet);
+        // STREAM-POWER capacity: |v|^1.7 with a SATURATING depth term —
+        // concentrated fast flow carries far more than a broad slow sheet
+        // (the channelization feedback), but past ~8 cm extra depth buys
+        // NOTHING: a deepening column stops out-carrying its widening
+        // neighbours, which is what lets a wash grow broad instead of
+        // drilling a slot
+        const C = float(EK.capacity).mul(pow(spd, 1.7)).mul(min(h, 0.08).mul(12.0)).mul(wet);
         const diff = C.sub(s);
         // taper pickup as the cut approaches maxDelta — a gully bottoms out
         const cutRoom = smoothstep(-EK.maxDelta, -EK.maxDelta * 0.6, delta);
         const ero = max(diff, 0.0).mul(EK.erode).mul(U.dt).mul(wet).mul(cutRoom)
-            .mul(float(1).add(min(slope, 1.2).mul(1.6)));
+            .mul(float(1).add(min(slope, 1.2).mul(1.6))).toVar();
+        // BANK EROSION — the widening mechanism: a cell standing above a
+        // flowing neighbour is a bank face exposed to that neighbour's
+        // current; the flow undercuts it SIDEWAYS regardless of how little
+        // water sits on the bank itself. Pickup ∝ the neighbour's stream
+        // power × the exposed face height.
+        if (EK.bank > 0) {
+            let bankPow = float(0);
+            for (const dq of [duv, duv.mul(-1), dwv, dwv.mul(-1)]) {
+                const pn = p.add(dq);
+                const hN = R(hNew, pn).r;
+                const vN = R(vNew, pn).rg;
+                const face = clamp(bC.sub(bT(pn)), 0.0, 0.6);      // exposed bank height
+                const powN = pow(length(vN), 1.7).mul(min(hN, 0.08).mul(12.0))
+                    .mul(smoothstep(EK.minDepth, EK.minDepth * 3, hN));
+                bankPow = bankPow.add(powN.mul(face));
+            }
+            const bankEro = bankPow.mul(EK.bank).mul(EK.erode).mul(0.35).mul(U.dt).mul(cutRoom);
+            ero.addAssign(bankEro);
+        }
         const dep = min(max(diff.negate(), 0.0).mul(EK.deposit).mul(U.dt), s);
         delta.subAssign(ero);
         delta.addAssign(dep);
@@ -1670,6 +1699,9 @@ export async function createWaterSWE(renderer, options = {}) {
         get simTime() { return simTime; },
         /** flip the material's read phase — call ONCE per frame after step() */
         syncRenderPhase() { phaseU.value = phase; },
+        /** live rainfall dial, m/s of depth (needs rainRate > 0 at build so
+         *  the kernel path exists) — ramp a storm in and out on camera */
+        setRain(v) { U.rain.value = Math.max(0, v); },
         setEmitters(list = []) {
             for (let i = 0; i < NEMI; i++) {
                 const e = list[i];
