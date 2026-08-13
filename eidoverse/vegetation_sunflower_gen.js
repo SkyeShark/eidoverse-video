@@ -299,26 +299,35 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
                          fit: fit.petals[cx2 * 2 + ry] });
         const rimR = 0.285;
         const needHW = (TAU * rimR / N) * 0.5 * 1.25;
-        for (let k = 0; k < N; k++) {
-            const th = (k / N) * TAU + rng.vary(0, 0.04);
+        // LAYERED whorls — real heads stack ray florets, so background never
+        // shows between petal bases and the disc: a main outer whorl plus a
+        // shorter inner layer, phase-offset half a spacing, tucked deeper
+        // under the rim and tilted slightly forward (young florets angle up)
+        const layers = [
+            { n: N, rIn: 0.020, lenK: 1.0, phase: 0, droopLo: -0.30, droopHi: 0.10 },
+            { n: Math.round(N * 0.6), rIn: 0.042, lenK: 0.55, phase: Math.PI / N,
+              droopLo: -0.02, droopHi: 0.30 },
+        ];
+        for (const LY of layers) for (let k = 0; k < LY.n; k++) {
+            const th = (k / LY.n) * TAU + LY.phase + rng.vary(0, 0.04);
             const cell = cells[Math.floor(R() * cells.length)];
             const maxEnv = Math.max(...cell.fit.map((b) => b[1]));
             const cardHW = needHW / maxEnv;
-            const L = cardHW * 2 * (0.207 / 0.125) * rng.range(0.94, 1.06);
+            const L = cardHW * 2 * (0.207 / 0.125) * LY.lenK * rng.range(0.94, 1.06);
             const [ox, oy, oz] = radial(th);
             const txp = s2x * Math.cos(th) - s1x * Math.sin(th),
                   typ = s2y * Math.cos(th) - s1y * Math.sin(th),
                   tzp = s2z * Math.cos(th) - s1z * Math.sin(th);
-            const droop = rng.range(-0.30, 0.10) - (k % 5 === 0 ? 0.18 : 0);
+            const droop = rng.range(LY.droopLo, LY.droopHi) - (LY.lenK === 1 && k % 5 === 0 ? 0.18 : 0);
             const cd = Math.cos(droop), sd = Math.sin(droop);
             const dx = ox * cd + ax * sd, dy = oy * cd + ay * sd, dz = oz * cd + az * sd;
             const roll = rng.vary(0, 0.35);
             const wx = txp * Math.cos(roll) + ax * Math.sin(roll),
                   wy = typ * Math.cos(roll) + ay * Math.sin(roll),
                   wz = tzp * Math.cos(roll) + az * Math.sin(roll);
-            const bxp = hx + ox * (rimR - 0.012) * s - ax * 0.004 * s,
-                  byp = hy + oy * (rimR - 0.012) * s - ay * 0.004 * s,
-                  bzp = hz + oz * (rimR - 0.012) * s - az * 0.004 * s;
+            const bxp = hx + ox * (rimR - LY.rIn) * s - ax * 0.004 * s,
+                  byp = hy + oy * (rimR - LY.rIn) * s - ay * 0.004 * s,
+                  bzp = hz + oz * (rimR - LY.rIn) * s - az * 0.004 * s;
             const bands = cell.fit;
             const NBp = bands.length;
             const uMid = (cell.u0 + cell.u1) / 2, uSpan = (cell.u1 - cell.u0);
