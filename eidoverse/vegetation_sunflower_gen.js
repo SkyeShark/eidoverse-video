@@ -201,9 +201,11 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
             }
             sweepTube(pts, radii, weights, 4, 0.03);
         }
-        // blade: plane strip continuing the petiole, drooping; geometry
-        // width AND uv v-window both follow the measured envelope band —
-        // that's what keeps the art unwarped on a fitted card
+        // blade: 5-column strip continuing the petiole — geometry width AND
+        // uv v-window both follow the measured envelope band (unwarped fit),
+        // cross-section is a real leaf surface: parabolic cup off the
+        // midrib, a travelling edge RUFFLE (real blades undulate — a single
+        // hard V-fold reads as folded paper), and a decurving tip
         const petT = [q2[0] - q1[0], q2[1] - q1[1], q2[2] - q1[2]];
         const ptl = Math.hypot(...petT) || 1;
         const b0 = q2;
@@ -211,6 +213,8 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
         const b2 = [b0[0] + dirX * bladeL * 0.82, b0[1] - bladeL * rng.range(0.3, 0.55), b0[2] + dirZ * bladeL * 0.82];
         const bands = fit.leaf;
         const NB = bands.length;
+        const rufPhase = R() * TAU, rufFreq = rng.range(5.5, 7.5);
+        const COLS = [-1, -0.5, 0, 0.5, 1];
         const sB = vb;
         leafBladeStart.push(sB);
         for (let g = 0; g < NB; g++) {
@@ -218,19 +222,24 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
             const c = B(b0, b1, b2, t);
             const [cFrac, hwFrac] = bands[g];
             const hw = hwFrac * LEAF_ACROSS * bladeL / 0.5;
-            const fold = hw * 0.34;
             const a = Math.min(1, aL + t * t * 0.16);
             const u = LEAF.u0 + t * (LEAF.u1 - LEAF.u0);
             const vC = LEAF.v0 + cFrac * (LEAF.v1 - LEAF.v0);
             const vHw = hwFrac * (LEAF.v1 - LEAF.v0);
             const sink = g === 0 ? -0.006 : 0;
-            V(c[0] - sideX * hw + dirX * sink, c[1] - fold, c[2] - sideZ * hw + dirZ * sink, u, vC - vHw, a);
-            V(c[0] + dirX * sink, c[1], c[2] + dirZ * sink, u, vC, a);
-            V(c[0] + sideX * hw + dirX * sink, c[1] - fold, c[2] + sideZ * hw + dirZ * sink, u, vC + vHw, a);
+            const tipDrop = Math.max(0, t - 0.72) * bladeL * 0.35;   // decurving tip
+            for (const k of COLS) {
+                const cup = hw * 0.34 * k * k;                        // parabolic cup
+                const ruffle = hw * 0.09 * Math.abs(k) * Math.sin(rufPhase + t * rufFreq + k * 2.4);
+                V(c[0] + sideX * hw * k + dirX * sink,
+                  c[1] - cup + ruffle - tipDrop,
+                  c[2] + sideZ * hw * k + dirZ * sink,
+                  u, vC + vHw * k, a);
+            }
         }
         for (let g = 0; g < NB - 1; g++) {
-            const a2 = sB + g * 3, b3 = a2 + 3;
-            quad(a2, a2 + 1, b3 + 1, b3); quad(a2 + 1, a2 + 2, b3 + 2, b3 + 1);
+            const a2 = sB + g * 5, b3 = a2 + 5;
+            for (let cq = 0; cq < 4; cq++) quad(a2 + cq, a2 + cq + 1, b3 + cq + 1, b3 + cq);
         }
     }
     const headStart = vb;   // every vertex from here on is head assembly
@@ -399,7 +408,7 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
         }
         const UPK = 0.65;
         for (const sB of leafBladeStart) {
-            for (let i = sB; i < sB + 18 && i < headStart; i++) {
+            for (let i = sB; i < sB + 30 && i < headStart; i++) {
                 const nx2 = nrm.getX(i) * (1 - UPK), ny2 = nrm.getY(i) * (1 - UPK) + UPK, nz2 = nrm.getZ(i) * (1 - UPK);
                 const l = Math.hypot(nx2, ny2, nz2) || 1;
                 nrm.setXYZ(i, nx2 / l, ny2 / l, nz2 / l);
