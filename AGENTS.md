@@ -1801,6 +1801,38 @@ Library (31 effects) — the families:
 
 ### Procedural toolkits
 
+**`makeDismemberment`** — per-limb health + dismemberment + blood for ANY VRM
+humanoid (the shipped cast or an arbitrary rig — bones resolve through
+`vrm.humanoid`, and per-mesh reduced skeletons from `combineSkeletons` /
+`removeUnnecessaryJoints` are handled).
+
+```js
+const dm = await globalThis.makeDismemberment(vrm, { scene, groundY: 0 });
+dm.damage('leftArm', 45, { type: 'slash' }); // Fallout rules: part HP, cripple at 0,
+                                             // sever on edged overkill / death blow;
+                                             // limbs bleed the life pool at 0.45x
+dm.sever('head');                            // direct choreography; also 'leftArm',
+                                             // 'leftArm:elbow', ':wrist', legs, knees
+dm.hitTest(ray);                             // -> {key, part, point, distance} via POSED
+                                             // bone capsules (never a bind-pose raycast)
+dm.bleed(point, { intensity: 0.6 });         // stab wound without a sever
+```
+- The sever SPLITS every influenced skinned submesh (sleeves, hair, face —
+  material groups and morph targets survive), caps both cross-sections with a
+  procedural flesh material whose bone disc sits at the true bone position,
+  bakes the severed piece rigid (it tumbles on a built-in integrator, or pass
+  `{world, RAPIER}` for a Rapier dynamic body), and starts arterial
+  blood: pressure-pulsed spurt on the scene clock, analytically scheduled
+  ground stains, and a spreading pool that dries over minutes.
+- Everything self-updates via the engine drain; blood runs on the scene clock
+  passed to `update(t)`, so offline renders and live hosts behave identically.
+- `liquid: 'swe'` swaps the decal pool for a `createWaterSWE` heightfield patch
+  fed by the stumps (real flow). At puddle scale under a bright env its fresnel
+  reflection washes pale — use it for lake-scale blood, or pair with a dark env;
+  the decal pool is the default and reads correctly everywhere.
+- Events surface through `opts.onEvent` + `dm.events`; state via `dm.state()`.
+  `dispose()` removes every mesh/material the system created.
+
 **`makeRobot` / `makeBot` / `RoboticsKit`** — INDUSTRIAL MACHINES with real
 kinematics (creatures/humanoids stay `makeCreature`'s job). Everything is
 slew-rate-limited and self-animating (engine drain) — you write NO per-frame code.
@@ -2446,6 +2478,44 @@ const gel = await createWaterSWE(renderer, { preset: 'gel',
 'jet' (default) renders the ballistic stream tube + droplet breakup;
 'seep' is a slow dribbling curtain at the mouth (a rock spring, a weeping
 wall — a seep must NOT render a jet parabola). Mass ledger identical.
+
+**HYDRAULIC EROSION + RAIN — the bed can be ALIVE.** Pass `erosion: {}` and
+the terrain under the water becomes dynamic: fast flow picks the bed up as
+suspended sediment (the water visibly muddies), carries it downstream, and
+lays it down where the current slackens — rills capture into a braided
+wash, the wash incises, cut banks cave to the angle of repose, a silt fan
+builds at the outlet. Pair it with `rainRate` (distributed rainfall over
+the whole domain, m/s of depth; 4.5e-5 ≈ a violent cloudburst; animated
+squall bands via `rainPatchiness`) — rain is THE natural source for wash
+formation; a lone jet pour reads as a garden hose. `swe.setRain(v)` ramps
+the storm live (build with `rainRate > 0` so the kernel path exists), and
+the weather system's falling rain is the matching LOOK — this term is
+where its water lands.
+```js
+const swe = await createWaterSWE(renderer, {
+    worldSize: [17, 17], gridSize: [256, 256], bedFn: groundY,
+    rainRate: 4.6e-5, rainPatchiness: 0.6,
+    erosion: {
+        capacity: 0.30, erode: 0.32, deposit: 0.42, bank: 1.2,
+        talusSlope: 0.5,        // wet-sand repose ≈ 29° — banks slump WIDE
+        talusRate: 3.0, maxDelta: 0.35,
+        terrainMaps: { albedo: soilAlbedo, rough: soilRough },
+        terrainRepeat: 3.7,     // MATCH the surrounding ground's texel density
+    },
+});
+scene.add(swe.terrainMesh);     // the eroding ground patch — lay it over the
+                                // static terrain (same bedFn), sink the static
+                                // mesh ~1.5 cm under it so the rim never z-fights
+// per frame: swe.setRain(stormRamp);   // 0 → rainRate → 0 across the piece
+```
+Scene craft for a wash that READS: shape the domain as a broad valley
+(damp your dune noise inside it, add a gentle cross-fall) — a raw dune
+field breaks rain into scattered pools and no channel ever organizes.
+Widening vs slot-cutting is the tuning axis: `bank` (lateral pickup) +
+low `talusSlope` + small `maxDelta` give flood-broad washes; raise
+`maxDelta`/`talusSlope` and drop `bank` for a young slot gully. The water
+muddies by suspended load automatically; the patch tints cut banks with
+`cutColor` and fresh deposits with `siltColor`.
 
 Key options: `initLevel` pre-fills to a waterline (standing ponds — but a
 scene whose POINT is the fill must start dry); `foamDecay` tightens/loosens

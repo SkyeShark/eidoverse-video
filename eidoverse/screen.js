@@ -235,4 +235,51 @@
         }
         return { mesh, material, texture, update, setFrame };
     };
+
+    // makeAsciiPanel — multi-line ASCII art / monospace text as a glowing
+    // terminal-screen MESH (the AGENTS.md contract; this wrapper is what
+    // makes that doc entry true). A thin preset over makeScreen: fixed
+    // text, retro redraw throttle, optional teletype reveal + blink cursor.
+    // Returns the MESH (screen handle rides on mesh.userData.screen).
+    //   makeAsciiPanel('LINE1\nLINE2', { color: 0x27e0a0, width: 1.2,
+    //       background: '#04140c', reveal: 0 /* chars/s; 0 = all at once */ })
+    globalThis.makeAsciiPanel = function makeAsciiPanel(asciiText, opts = {}) {
+        const lines = String(asciiText).replace(/\t/g, '    ').split('\n');
+        const cols = Math.max(...lines.map((l) => l.length), 1);
+        const color = new THREE.Color(opts.color ?? 0x27e0a0);
+        const colStr = '#' + color.getHexString();
+        const bg = opts.background ?? '#050a08';
+        const width = opts.width ?? 1.2;
+        const px = opts.px ?? Math.min(1024, Math.max(384, cols * 18));
+        const chW = px / (cols + 2);                    // one-col margin each side
+        const chH = chW * 1.9;
+        const height = opts.height ?? width * ((lines.length + 1) * chH) / px;
+        const reveal = opts.reveal ?? 0;                // chars per second
+        const total = lines.reduce((a, l) => a + l.length, 0);
+        const screen = globalThis.makeScreen({
+            width, height, px, fps: opts.fps ?? 8, auto: opts.auto,
+            draw(ctx, t, w, h) {
+                ctx.fillStyle = bg;
+                ctx.fillRect(0, 0, w, h);
+                ctx.font = Math.floor(chH * 0.62) + 'px monospace';
+                ctx.textBaseline = 'top';
+                ctx.fillStyle = colStr;
+                let budget = reveal > 0 ? Math.floor(t * reveal) : Infinity;
+                let lastX = chW, lastY = chH * 0.5;
+                for (let i = 0; i < lines.length && budget > 0; i++) {
+                    const chunk = lines[i].slice(0, budget);
+                    ctx.fillText(chunk, chW, chH * 0.5 + i * chH);
+                    budget -= lines[i].length;
+                    lastX = chW + chunk.length * chW * 0.62;
+                    lastY = chH * 0.5 + i * chH;
+                }
+                if ((reveal === 0 || Math.floor(t * reveal) < total + 8) &&
+                    Math.floor(t * 1.6) % 2 === 0) {
+                    ctx.fillRect(lastX + 2, lastY, chW * 0.55, chH * 0.7);
+                }
+            },
+        });
+        screen.mesh.userData.screen = screen;
+        return screen.mesh;
+    };
 })();
