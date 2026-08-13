@@ -43,7 +43,7 @@ import {
     smoothstep, mix, min, max, abs, floor, fract, clamp, normalize, dot,
     reflect, pow, exp, If, Loop, Break, length, sign, hash, cross,
     positionLocal, positionWorld, cameraPosition, cameraViewMatrix, uv, atan,
-    texture, equirectUV,
+    texture, equirectUV, transformNormalToView,
 } from 'three/tsl';
 
 // ── LIQUID PRESETS — the eidoverse contract: complicated behaviour as one
@@ -140,6 +140,25 @@ const DEFAULTS = {
     rippleAmp: 0.014,             // render-domain detail wave height, metres
     rippleScale: 9.0,             // ripples per metre-ish (wavelength ~0.3 m)
     rippleSpeed: 0.9,
+    // ── HYDRAULIC EROSION (opt-in: pass {} or overrides; null = off, nothing
+    // built). The bed becomes DYNAMIC: flowing water carves it where the
+    // current is fast, carries the spoil as suspended sediment (the water
+    // visibly muddies), and lays it down where the flow slackens — gullies
+    // deepen upstream, deltas fan out downstream, and steep cut banks CAVE
+    // to the angle of repose. Ships its own eroding terrain-patch mesh
+    // (swe.terrainMesh) displaced from the live bed — give it the scene's
+    // PBR set via terrainMaps and lay it over the static terrain.
+    erosion: null,                // {capacity, erode, deposit, talusSlope,
+                                  //  talusRate, maxDelta, siltColor, cutColor,
+                                  //  terrain, terrainMaps, terrainRepeat, ...}
+    // ── RAIN — distributed mass over the whole domain (m of depth per
+    // second; 4.5e-5 ≈ a violent 160 mm/h cloudburst). THE natural source
+    // for wash/gully erosion: sheetwash gathers into rills, rills capture
+    // each other, a channel wins. Patchiness animates slow squall bands
+    // sweeping the domain instead of a uniform drizzle. Pair the look with
+    // makeWeatherSystem's falling rain — this term is where its water LANDS.
+    rainRate: 0,
+    rainPatchiness: 0.6,
     // SPRAY (v2.0): ballistic white-water particles — visible falling jets
     // from spout mouths and burst spray on hard breaches. VISUAL layer: the
     // pours' mass still flows through the conserving emitter path (aerated
@@ -325,6 +344,41 @@ export async function createWaterSWE(renderer, options = {}) {
 
     const bed = (p) => texture3D(bedTex, p, 0).r;
 
+    // ── EROSION state: ONE extra ping-pong pair. R = bed DELTA in metres
+    // (negative = carved, positive = deposited), G = suspended sediment
+    // (column-metres, advected with the flow), B = fresh-silt age 0..1
+    // (drives the wet-silt tint on the terrain), A unused. The original
+    // bedTex stays pristine — the live bed is bedTex + delta, so erosion
+    // can never corrupt the baked terrain reference.
+    const ERO = !!o.erosion;
+    const EK = ERO ? {
+        capacity: 0.5,      // sediment capacity ∝ speed·depth (Kc)
+        erode: 0.55,        // pickup rate toward capacity (Ks, 1/s)
+        deposit: 0.35,      // settling rate above capacity (Kd, 1/s)
+        minDepth: 0.004,    // films thinner than this don't erode
+        talusSlope: 1.0,    // angle of repose as rise/run (1.0 ≈ 45°)
+        talusRate: 1.2,     // relaxation speed of over-steep banks
+        maxDelta: 1.4,      // cut/fill depth clamp, metres
+        siltColor: '#96754e',      // fresh wet deposit tint (terrain)
+        cutColor: '#6b4f33',       // exposed cut-bank earth tint (terrain)
+        siltWaterColor: '#8a6b42', // suspended-load water tint
+        wetDarken: 0.4,     // wet-ground darkening under standing water
+        terrain: true,      // build the eroding terrain-patch mesh
+        terrainMaps: null,  // { albedo, normal, rough } textures (scene loads)
+        terrainRepeat: 7,   // uv repeats of the maps across the domain
+        ...o.erosion,
+    } : null;
+    const dBedA = ERO ? mk('sweDBedA') : null, dBedB = ERO ? mk('sweDBedB') : null;
+    // per-phase live bed for the AB/BA kernel factories
+    const bedOf = (dSrc) => ERO ? ((p) => bed(p).add(R(dSrc, p).r)) : bed;
+    // frame-level (phase-mixed) delta/sediment reads — phaseU is set before
+    // any frame-level kernel or material samples these
+    const EU = ERO ? {
+        siltColor: uniform(new THREE.Color(EK.siltColor)),
+        cutColor: uniform(new THREE.Color(EK.cutColor)),
+        siltWaterColor: uniform(new THREE.Color(EK.siltWaterColor)),
+    } : null;
+
     // zero-init the dynamic fields
     const mkInit = (dst, name) => Fn(() => {
         const c = cellOf(instanceIndex);
@@ -370,7 +424,9 @@ export async function createWaterSWE(renderer, options = {}) {
     // 1) velocity: semi-Lagrangian self-advection + gravity on the SURFACE
     //    gradient η = bed + h (water flows downhill off dry bumps correctly),
     //    sphere impulses, drag, dry/wall zeroing, clamp.
-    const mkVel = (hSrc, vSrc, vDst, name) => Fn(() => {
+    const mkVel = (hSrc, vSrc, vDst, name, dBedSrc) => {
+        const bedL = bedOf(dBedSrc);
+        return Fn(() => {
         const c = cellOf(instanceIndex);
         const p = uvwOf(c);
         const h = R(hSrc, p).r;
@@ -378,11 +434,12 @@ export async function createWaterSWE(renderer, options = {}) {
         const v0 = R(vSrc, p).rg;
         const back = p.sub(vec3(v0.x.mul(U.dt).div(WX), 0, v0.y.mul(U.dt).div(WZ)));
         const v = R(vSrc, back).rg.toVar();
-        // surface-gradient gravity (central differences of η = bed + h)
-        const ex1 = bed(p.add(duv)).add(R(hSrc, p.add(duv)).r);
-        const ex0 = bed(p.sub(duv)).add(R(hSrc, p.sub(duv)).r);
-        const ez1 = bed(p.add(dwv)).add(R(hSrc, p.add(dwv)).r);
-        const ez0 = bed(p.sub(dwv)).add(R(hSrc, p.sub(dwv)).r);
+        // surface-gradient gravity (central differences of η = bed + h);
+        // bedL is the LIVE bed (bedTex + erosion delta) when erosion is on
+        const ex1 = bedL(p.add(duv)).add(R(hSrc, p.add(duv)).r);
+        const ex0 = bedL(p.sub(duv)).add(R(hSrc, p.sub(duv)).r);
+        const ez1 = bedL(p.add(dwv)).add(R(hSrc, p.add(dwv)).r);
+        const ez0 = bedL(p.sub(dwv)).add(R(hSrc, p.sub(dwv)).r);
         // waveScale slows the surface's pull (viscous sluggishness); the
         // Bingham yield gate stops flow entirely below yieldSlope — a gel
         // HOLDS its mounds instead of levelling like water
@@ -413,7 +470,7 @@ export async function createWaterSWE(renderer, options = {}) {
             const sp = U.sphPos.element(int(s)), sa = U.sphAux.element(int(s));
             const d2 = w.sub(sp.xz);
             const dist = length(d2).max(1e-4);
-            const surfY = bed(p).add(h);
+            const surfY = bedL(p).add(h);
             const dy = sp.y.sub(surfY).abs();
             const inStamp = dist.lessThan(sa.x).and(dy.lessThan(sa.x.mul(1.4)))
                 .and(h.greaterThan(o.dryEps));
@@ -489,6 +546,7 @@ export async function createWaterSWE(renderer, options = {}) {
         v.mulAssign(min(float(o.maxSpeed), sp2).div(sp2));
         textureStore(vDst, c, vec4(v, 0, 1)).toWriteOnly();
     })().compute(CELLS).setName(name);
+    };
 
     // 2) PER-CELL OUTFLOWS (pipe model, Chentanez) with PROPORTIONAL
     //    rescale. ⚠ the first cut capped each FACE at 1/4 column per substep
@@ -549,13 +607,22 @@ export async function createWaterSWE(renderer, options = {}) {
             const ci3 = vec3(c).z.toInt().mul(NX).add(vec3(c).x.toInt());
             h.addAssign(float(depVolRd.element(ci3)).div(FXP).div(DX * DZ));
         });
+        // rain: distributed depth, modulated by slow-drifting squall bands
+        if (o.rainRate > 0) {
+            const squall = fbm2(w.mul(0.16).add(vec2(U.time.mul(0.11), U.time.mul(0.045))));
+            const bands = clamp(squall.mul(1.5).sub(0.25), 0.0, 1.6);
+            const rainMul = mix(float(1), bands, float(o.rainPatchiness));
+            h.addAssign(float(o.rainRate).mul(rainMul).mul(U.dt));
+        }
         h.assign(clamp(h, 0.0, o.maxDepth));
         textureStore(hDst, c, vec4(h, 0, 0, 1)).toWriteOnly();
     })().compute(CELLS).setName(name);
 
     // 4) foam: advect by the NEW velocity, deposit from churn/crest/wake/
     //    emitter impact, decay.
-    const mkFoam = (hSrc, vNew, fSrc, fDst, name) => Fn(() => {
+    const mkFoam = (hSrc, vNew, fSrc, fDst, name, dBedSrc) => {
+        const bedL = bedOf(dBedSrc);
+        return Fn(() => {
         const c = cellOf(instanceIndex);
         const p = uvwOf(c);
         const v = R(vNew, p).rg;
@@ -566,7 +633,7 @@ export async function createWaterSWE(renderer, options = {}) {
         const dwz = R(vNew, p.add(dwv)).g.sub(R(vNew, p.sub(dwv)).g).div(2 * DZ);
         const churn = abs(dux.add(dwz));
         // crest: surface steepness
-        const e = (q) => bed(q).add(R(hSrc, q).r);
+        const e = (q) => bedL(q).add(R(hSrc, q).r);
         const steep = length(vec2(
             e(p.add(duv)).sub(e(p.sub(duv))).div(2 * DX),
             e(p.add(dwv)).sub(e(p.sub(dwv))).div(2 * DZ)));
@@ -595,7 +662,7 @@ export async function createWaterSWE(renderer, options = {}) {
             // ⚠ SAME vertical gate as the velocity coupling: without it a
             // sphere still FALLING toward the pool painted its wake from any
             // altitude — white on the water before the body ever arrives
-            const dyF = sp.y.sub(bed(p).add(h)).abs();
+            const dyF = sp.y.sub(bedL(p).add(h)).abs();
             If(d.lessThan(sa.x).and(dyF.lessThan(sa.x.mul(1.4)))
                 .and(spd.greaterThan(0.15)), () => {
                 f.addAssign(spd.mul(o.foamWake).mul(U.dt).mul(wet));
@@ -609,16 +676,91 @@ export async function createWaterSWE(renderer, options = {}) {
         f.assign(clamp(f, 0.0, 1.5));
         textureStore(fDst, c, vec4(f, 0, 0, 1)).toWriteOnly();
     })().compute(CELLS).setName(name);
+    };
 
-    // direction A→B and B→A pairs
-    const kVelAB = mkVel(hA, velA, velB, 'sweVelAB');
+    // ── EROSION KERNEL — runs LAST in each substep on the freshly updated
+    // depth/velocity, writing the other phase's delta field (the AB/BA
+    // discipline). Physics per cell:
+    //   capacity C = Kc·|v|·min(h, .35)   (fast, deep flow carries more)
+    //   under capacity → ERODE bed toward it; over → DEPOSIT the excess.
+    //   Suspended sediment ADVECTS semi-Lagrangian with the flow (the foam
+    //   recipe), so spoil travels downstream and fans out where |v| dies.
+    //   TALUS: pairwise antisymmetric exchange with the 4 neighbours where
+    //   the LIVE bed slope exceeds the angle of repose — cut banks cave in
+    //   instead of standing as razor walls. Both sides of every pair read
+    //   the SAME source phase and compute the same |excess|, so the
+    //   exchange conserves bed volume exactly.
+    //   Gates: dry cells neither erode nor advect; talus only acts where
+    //   the neighbourhood has actually been touched (|delta| > 3 mm) so
+    //   pristine terrain never creeps.
+    const mkErode = ERO ? (hNew, vNew, dSrc, dDst, name) => Fn(() => {
+        const c = cellOf(instanceIndex);
+        const p = uvwOf(c);
+        const h = R(hNew, p).r;
+        const v = R(vNew, p).rg;
+        const here = R(dSrc, p);
+        const delta = here.r.toVar();
+        const age = here.b.toVar();
+        // sediment advects with the flow; delta/age are bed-fixed
+        const back = p.sub(vec3(v.x.mul(U.dt).div(WX), 0, v.y.mul(U.dt).div(WZ)));
+        const s = R(dSrc, back).g.toVar();
+        const wet = smoothstep(EK.minDepth, EK.minDepth * 3, h);
+        const spd = length(v);
+        // live-bed slope (reused below for talus): steep ground erodes
+        // faster — headward retreat, the gully eating uphill
+        const bT = (q) => bed(q).add(R(dSrc, q).r);
+        const bC = bT(p);
+        const slope = length(vec2(
+            bT(p.add(duv)).sub(bT(p.sub(duv))).div(2 * DX),
+            bT(p.add(dwv)).sub(bT(p.sub(dwv))).div(2 * DZ)));
+        // STREAM-POWER capacity: |v|^1.7 with only a weak depth term —
+        // concentrated fast flow carries far more than a broad slow sheet,
+        // which is the channelization feedback itself (a linear-|v| capacity
+        // erodes sheet floods into a maze instead of incising a wash)
+        const C = float(EK.capacity).mul(pow(spd, 1.7)).mul(min(h, 0.2).mul(5.0)).mul(wet);
+        const diff = C.sub(s);
+        // taper pickup as the cut approaches maxDelta — a gully bottoms out
+        const cutRoom = smoothstep(-EK.maxDelta, -EK.maxDelta * 0.6, delta);
+        const ero = max(diff, 0.0).mul(EK.erode).mul(U.dt).mul(wet).mul(cutRoom)
+            .mul(float(1).add(min(slope, 1.2).mul(1.6)));
+        const dep = min(max(diff.negate(), 0.0).mul(EK.deposit).mul(U.dt), s);
+        delta.subAssign(ero);
+        delta.addAssign(dep);
+        s.addAssign(ero);
+        s.subAssign(dep);
+        // fresh-silt tracker: deposits paint it up, time fades it
+        age.addAssign(dep.mul(26.0));
+        age.mulAssign(float(1).sub(min(float(0.08).mul(U.dt), 0.5)));
+        // talus relaxation vs the 4 neighbours on the LIVE bed
+        const reposeH = EK.talusSlope * DX;
+        let slump = float(0);
+        for (const dq of [duv, duv.mul(-1), dwv, dwv.mul(-1)]) {
+            const dEl = bT(p.add(dq)).sub(bC);           // + = neighbour higher
+            const ex2 = abs(dEl).sub(reposeH);
+            const touched = smoothstep(0.003, 0.012,
+                max(abs(R(dSrc, p.add(dq)).r), abs(here.r)));
+            slump = slump.add(
+                max(ex2, 0.0).mul(0.25 * EK.talusRate).mul(U.dt)
+                    .mul(sign(dEl)).mul(touched));
+        }
+        delta.addAssign(slump);
+        delta.assign(clamp(delta, -EK.maxDelta, EK.maxDelta));
+        s.assign(clamp(s, 0.0, 0.6));
+        age.assign(clamp(age, 0.0, 1.0));
+        textureStore(dDst, c, vec4(delta, s, age, 1)).toWriteOnly();
+    })().compute(CELLS).setName(name) : null;
+
+    // direction A→B and B→A pairs (erosion kernels read the NEW h/vel)
+    const kVelAB = mkVel(hA, velA, velB, 'sweVelAB', dBedA);
     const kFluxB_A = mkFlux(hA, velB, 'sweFluxB_hA');
     const kHeightAB = mkHeight(hA, hB, 'sweHeightAB');
-    const kFoamAB = mkFoam(hA, velB, foamA, foamB, 'sweFoamAB');
-    const kVelBA = mkVel(hB, velB, velA, 'sweVelBA');
+    const kFoamAB = mkFoam(hA, velB, foamA, foamB, 'sweFoamAB', dBedA);
+    const kVelBA = mkVel(hB, velB, velA, 'sweVelBA', dBedB);
     const kFluxA_B = mkFlux(hB, velA, 'sweFluxA_hB');
     const kHeightBA = mkHeight(hB, hA, 'sweHeightBA');
-    const kFoamBA = mkFoam(hB, velA, foamB, foamA, 'sweFoamBA');
+    const kFoamBA = mkFoam(hB, velA, foamB, foamA, 'sweFoamBA', dBedB);
+    const kErodeAB = ERO ? mkErode(hB, velB, dBedA, dBedB, 'sweErodeAB') : null;
+    const kErodeBA = ERO ? mkErode(hA, velA, dBedB, dBedA, 'sweErodeBA') : null;
 
     let phase = 0;   // 0: state in A, 1: state in B
     let simTime = 0;
@@ -653,12 +795,14 @@ export async function createWaterSWE(renderer, options = {}) {
                 await renderer.computeAsync(kFluxB_A);
                 await renderer.computeAsync(kHeightAB);
                 await renderer.computeAsync(kFoamAB);
+                if (ERO) await renderer.computeAsync(kErodeAB);
                 phase = 1;
             } else {
                 await renderer.computeAsync(kVelBA);
                 await renderer.computeAsync(kFluxA_B);
                 await renderer.computeAsync(kHeightBA);
                 await renderer.computeAsync(kFoamBA);
+                if (ERO) await renderer.computeAsync(kErodeBA);
                 phase = 0;
             }
             if (firstSub) { await renderer.computeAsync(kDepClear); firstSub = false; }
@@ -667,6 +811,7 @@ export async function createWaterSWE(renderer, options = {}) {
         // surface's vertex buffer from the CURRENT height field
         await renderer.computeAsync(phase === 0 ? kRippleA : kRippleB);
         await renderer.computeAsync(phase === 0 ? kDisplaceA : kDisplaceB);
+        if (ERO && kTerraA) await renderer.computeAsync(phase === 0 ? kTerraA : kTerraB);
     }
 
 
@@ -732,11 +877,16 @@ export async function createWaterSWE(renderer, options = {}) {
             // aux.x = style (0 jet | 1 seep), aux.y = seep face width (m)
             pourAux: uniformArray(Array.from({ length: NEMI }, () => new THREE.Vector3(0, 0.5, 0))),
         };
+        // phase-mixed LIVE bed (bedTex + erosion delta when erosion is on)
+        const bedAt = ERO
+            ? (uvw) => texture3D(bedTex, uvw, 0).r
+                .add(mix(R(dBedA, uvw).r, R(dBedB, uvw).r, phaseU))
+            : (uvw) => texture3D(bedTex, uvw, 0).r;
         const surfAt = (x, z) => {
             const uvw = vec3(x.sub(center.x).div(WX).add(0.5), 0.5,
                 z.sub(center.z).div(WZ).add(0.5));
             const hh = mix(R(hA, uvw).r, R(hB, uvw).r, phaseU);
-            return texture3D(bedTex, uvw, 0).r.add(hh);
+            return bedAt(uvw).add(hh);
         };
         const hAt = (uvw) => mix(R(hA, uvw).r, R(hB, uvw).r, phaseU);
         const hPrevAt = (uvw) => mix(R(hB, uvw).r, R(hA, uvw).r, phaseU); // one substep older
@@ -866,11 +1016,11 @@ export async function createWaterSWE(renderer, options = {}) {
                             };
                             const uvwM = vec3(jp.x.sub(center.x).div(WX).add(0.5), 0.5,
                                 jp.z.sub(center.z).div(WZ).add(0.5));
-                            const t1 = solveTL(texture3D(bedTex, uvwM, 0).r.add(hAt(uvwM)));
+                            const t1 = solveTL(bedAt(uvwM).add(hAt(uvwM)));
                             const lx = jp.x.add(jv.x.mul(t1)), lz = jp.z.add(jv.z.mul(t1));
                             const uvwL = vec3(lx.sub(center.x).div(WX).add(0.5), 0.5,
                                 lz.sub(center.z).div(WZ).add(0.5));
-                            const tL = solveTL(texture3D(bedTex, uvwL, 0).r.add(hAt(uvwL)))
+                            const tL = solveTL(bedAt(uvwL).add(hAt(uvwL)))
                                 .clamp(0.08, 1.35);
                             // style 'seep': no ballistic arc — a slow dribble
                             // CURTAIN across the seep face (width aux.y),
@@ -939,7 +1089,7 @@ export async function createWaterSWE(renderer, options = {}) {
                         const Ita = PHI(taRaw, o.promoTaMin, o.promoTaMax);
                         // wave crest: CONVEX curvature (−∇²η) gated by a RISING
                         // surface (Ihmsen's move-in-normal-direction check)
-                        const eta = (q) => texture3D(bedTex, q, 0).r.add(hAt(q));
+                        const eta = (q) => bedAt(q).add(hAt(q));
                         const etaC = eta(uvw);
                         const lap = eta(uvw.add(duv)).add(eta(uvw.sub(duv)))
                             .add(eta(uvw.add(dwv))).add(eta(uvw.sub(dwv)))
@@ -1094,7 +1244,7 @@ export async function createWaterSWE(renderer, options = {}) {
             };
             const uvwM = vec3(jp.x.sub(center.x).div(WX).add(0.5), 0.5,
                 jp.z.sub(center.z).div(WZ).add(0.5));
-            const ysM = texture3D(bedTex, uvwM, 0).r.add(hAt(uvwM));
+            const ysM = bedAt(uvwM).add(hAt(uvwM));
             const t1g = solveTL(ysM);
             const lxg = jp.x.add(jv.x.mul(t1g)), lzg = jp.z.add(jv.z.mul(t1g));
             const uvwL = vec3(lxg.sub(center.x).div(WX).add(0.5), 0.5,
@@ -1104,7 +1254,7 @@ export async function createWaterSWE(renderer, options = {}) {
             // collapsed tL → the tube crumples into a kinked ribbon). Floor
             // it against the mouth-based solve; overshoot is safe (the
             // waterline cut hides submerged rings), undershoot is the artifact
-            const tL = max(solveTL(texture3D(bedTex, uvwL, 0).r.add(hAt(uvwL))),
+            const tL = max(solveTL(bedAt(uvwL).add(hAt(uvwL))),
                 t1g.mul(0.6)).clamp(0.08, STMAX);
             const tF = s.mul(tL).mul(1.03);
             const pos = jp.add(jv.mul(tF)).add(vec3(0, -4.9, 0).mul(tF).mul(tF)).toVar();
@@ -1244,6 +1394,13 @@ export async function createWaterSWE(renderer, options = {}) {
     const phaseU = uniform(0);
     const hRead = (p) => mix(R(hA, p).r, R(hB, p).r, phaseU);
     const foamRead = (p) => mix(R(foamA, p).r, R(foamB, p).r, phaseU);
+    // phase-mixed LIVE bed + suspended-sediment reads for the materials
+    const bedRd = ERO
+        ? (p) => bed(p).add(mix(R(dBedA, p).r, R(dBedB, p).r, phaseU))
+        : bed;
+    const siltRd = ERO
+        ? (p) => mix(R(dBedA, p).g, R(dBedB, p).g, phaseU)
+        : () => float(0);
     // ⚠⚠ NO TEXTURE READS IN THE VERTEX STAGE — ANY form of them (sampled OR
     // textureLoad, storage OR data texture) makes this stack emit an invalid
     // vertex module ("ShaderModule with 'vertex' label is invalid") and the
@@ -1291,7 +1448,9 @@ export async function createWaterSWE(renderer, options = {}) {
     const posStore = storage(posAttr, 'vec4', NVERT);
     // vertex (i,k) of the plane grid: vertexIndex = k*NX + i, u=i/(NX-1),
     // v row order matches PlaneGeometry (v=1 at -z after the rotateX above).
-    const mkDisplace = (hSrc, vSrc, name) => Fn(() => {
+    const mkDisplace = (hSrc, vSrc, name, dBedSrc) => {
+        const bedL = bedOf(dBedSrc);
+        return Fn(() => {
         const id = instanceIndex;
         const i = id.mod(NX), k = id.div(NX);
         const u2 = vec2(float(i).div(NX - 1), float(k).div(NZ - 1));
@@ -1301,11 +1460,79 @@ export async function createWaterSWE(renderer, options = {}) {
         const h = R(hSrc, p).r;
         // detail ripples come pre-baked (metres) from the ripple kernel
         const rip = R(rippleT, p).r;
-        const y = texture3D(bedTex, p, 0).r.add(h).add(rip).sub(center.y);
+        const y = bedL(p).add(h).add(rip).sub(center.y);
         posStore.element(id).assign(vec4(wx, y, wz, h));
     })().compute(NVERT).setName(name);
-    const kDisplaceA = mkDisplace(hA, velA, 'sweDisplaceA');
-    const kDisplaceB = mkDisplace(hB, velB, 'sweDisplaceB');
+    };
+    const kDisplaceA = mkDisplace(hA, velA, 'sweDisplaceA', dBedA);
+    const kDisplaceB = mkDisplace(hB, velB, 'sweDisplaceB', dBedB);
+
+    // ── ERODING TERRAIN PATCH — the ground the water carves, as a mesh.
+    // Same storage-buffer displacement discipline as the water surface
+    // (vertex-stage texture reads silently kill the draw on this stack).
+    // The fragment tints live off the phase-mixed delta field: carved cells
+    // expose raw cut earth, fresh deposits wear wet silt, standing water
+    // darkens the ground under it.
+    let terraMesh = null, kTerraA = null, kTerraB = null;
+    if (ERO && EK.terrain) {
+        const tGeo = new THREE.PlaneGeometry(WX, WZ, NX - 1, NZ - 1);
+        tGeo.rotateX(-Math.PI / 2);
+        const tAttr = new THREE.StorageBufferAttribute(new Float32Array(NVERT * 4), 4);
+        const tStore = storage(tAttr, 'vec4', NVERT);
+        const mkTerra = (dBedSrc, name) => Fn(() => {
+            const id = instanceIndex;
+            const i = id.mod(NX), k = id.div(NX);
+            const u2 = vec2(float(i).div(NX - 1), float(k).div(NZ - 1));
+            const wx = u2.x.sub(0.5).mul(WX);
+            const wz = u2.y.sub(0.5).mul(WZ);
+            const p = vec3(u2.x, 0.5, u2.y);
+            const dd = R(dBedSrc, p).r;
+            const y = bed(p).add(dd).sub(center.y);
+            tStore.element(id).assign(vec4(wx, y, wz, dd));
+        })().compute(NVERT).setName(name);
+        kTerraA = mkTerra(dBedA, 'sweTerraA');
+        kTerraB = mkTerra(dBedB, 'sweTerraB');
+        const tMat = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+        tMat.positionNode = tStore.element(vertexIndex).xyz;
+        const dPh = (q) => mix(R(dBedA, q).r, R(dBedB, q).r, phaseU);
+        const agePh = (q) => mix(R(dBedA, q).b, R(dBedB, q).b, phaseU);
+        const bedT = (q) => bed(q).add(dPh(q));
+        const tUv = uv();
+        const tP = (u2) => vec3(u2.x, 0.5, float(1).sub(u2.y));
+        tMat.normalNode = Fn(() => {
+            const p = tP(tUv);
+            return transformNormalToView(normalize(vec3(
+                bedT(p.sub(duv)).sub(bedT(p.add(duv))).div(2 * DX),
+                1.0,
+                bedT(p.sub(dwv)).sub(bedT(p.add(dwv))).div(2 * DZ))));
+        })();
+        tMat.colorNode = Fn(() => {
+            const p = tP(tUv);
+            const base = EK.terrainMaps && EK.terrainMaps.albedo
+                ? texture(EK.terrainMaps.albedo, tUv.mul(EK.terrainRepeat)).rgb
+                : EU.cutColor.mul(1.35);
+            const dd = dPh(p);
+            const cut = smoothstep(0.015, 0.3, dd.negate());
+            const silt = smoothstep(0.06, 0.5, agePh(p))
+                .max(smoothstep(0.01, 0.2, dd));
+            const hW = hRead(p);
+            const wet = smoothstep(0.0, 0.02, hW).mul(EK.wetDarken);
+            const col = mix(base, EU.cutColor, cut.mul(0.75)).toVar();
+            col.assign(mix(col, EU.siltColor, silt.mul(0.8)));
+            col.mulAssign(float(1).sub(wet));
+            return vec4(col, 1.0);
+        })();
+        if (EK.terrainMaps && EK.terrainMaps.rough) {
+            tMat.roughnessNode = texture(EK.terrainMaps.rough, tUv.mul(EK.terrainRepeat)).r;
+        }
+        terraMesh = new THREE.Mesh(tGeo, tMat);
+        terraMesh.name = 'water_swe_terrain';
+        terraMesh.position.copy(center);
+        terraMesh.frustumCulled = false;
+        terraMesh.receiveShadow = true;
+        for (const k of ['noClippingCheck', 'noSupportCheck', 'allowIntersect',
+            'noMotionCheck', 'noZFightCheck']) terraMesh.userData[k] = true;
+    }
     const mat = new THREE.MeshBasicNodeMaterial({
         transparent: true, depthWrite: false, fog: false,
     });
@@ -1322,7 +1549,7 @@ export async function createWaterSWE(renderer, options = {}) {
         // normal from ∇(bed + h + ripple), central differences — the ripple
         // term reads the per-frame bake, so the whole detail-normal path is
         // four texture taps instead of a per-pixel noise stack
-        const e = (q) => bed(q).add(hRead(q)).add(R(rippleT, q).r);
+        const e = (q) => bedRd(q).add(hRead(q)).add(R(rippleT, q).r);
         const velH = mix(R(velA, p).rg, R(velB, p).rg, phaseU);   // debug view
         const n = normalize(vec3(
             e(p.sub(duv)).sub(e(p.add(duv))).div(2 * DX),
@@ -1332,7 +1559,13 @@ export async function createWaterSWE(renderer, options = {}) {
         const fresnel = pow(float(1).sub(max(dot(n, viewD), 0.0)), 3.0)
             .mul(0.85).add(0.04);
         const depthTint = mix(U.shallowColor, U.deepColor,
-            float(1).sub(exp(h.negate().mul(U.absorption))));
+            float(1).sub(exp(h.negate().mul(U.absorption)))).toVar();
+        // suspended sediment MUDDIES the water — the visible proof the flow
+        // is carrying the hillside downstream
+        if (ERO) {
+            const muddy = smoothstep(0.004, 0.10, siltRd(p));
+            depthTint.assign(mix(depthTint, EU.siltWaterColor, muddy.mul(0.85)));
+        }
         const spec = pow(max(dot(reflect(U.keyLightDir.negate(), n), viewD), 0.0), o.specPow);
         const glow = float(1).sub(exp(h.negate().mul(U.emissiveFalloff)));
         // reflection color: the real sky along the reflected ray when an env
@@ -1357,7 +1590,7 @@ export async function createWaterSWE(renderer, options = {}) {
             };
             const taRaw = taOf(duv, 1, 0).add(taOf(duv.negate(), -1, 0))
                 .add(taOf(dwv, 0, 1)).add(taOf(dwv.negate(), 0, -1));
-            const eD = (q) => bed(q).add(hRead(q));
+            const eD = (q) => bedRd(q).add(hRead(q));
             const lapD = eD(p.add(duv)).add(eD(p.sub(duv)))
                 .add(eD(p.add(dwv))).add(eD(p.sub(dwv)))
                 .sub(eD(p).mul(4)).div(DX * DX);
@@ -1407,6 +1640,9 @@ export async function createWaterSWE(renderer, options = {}) {
         surfaceMesh, uniforms: U, step,
         sprayMesh: spray ? spray.mesh : null,
         streamMesh: spray ? spray.streamMesh : null,
+        /** the eroding ground patch (erosion:{terrain:true} only) — add it to
+         *  the scene OVER the static terrain; it carves live as water works */
+        terrainMesh: terraMesh,
         /** POURS — the system's water sources. Each is a mouth + jet velocity
          *  + rate (m3/s); ALL mass travels as droplets and lands where the
          *  arc lands. No hidden injection, no separate visual jets. */
@@ -1452,6 +1688,11 @@ export async function createWaterSWE(renderer, options = {}) {
         async init() {
             for (const k of [kInitH_A, kInitH_B, kInitV_A, kInitV_B, kInitF_A, kInitF_B])
                 await renderer.computeAsync(k);
+            if (ERO) {
+                await renderer.computeAsync(mkInit(dBedA, 'sweInitDBA'));
+                await renderer.computeAsync(mkInit(dBedB, 'sweInitDBB'));
+                if (kTerraA) await renderer.computeAsync(kTerraA);
+            }
             if (spray) await renderer.computeAsync(spray.kSprayInit);
             await renderer.computeAsync(kDepClear);
             return api;
