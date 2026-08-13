@@ -790,7 +790,8 @@ export async function createFlora(opts = {}) {
         catch { /* fallback envelopes in the gen */ }
         cornBuild = buildSunflowerGeometry('sunflower', `sunflower:${o.seed}:${o.variant ?? 0}`,
             { fit: sunFit, ...spec.sunflower, ...(opts.sunflower ?? {}) });
-        blendNormalsUp(cornBuild.geo, 0.3);
+        // the gen owns its normals (bent head volume + up-blended blades) —
+        // a generic re-blend here would undo that treatment
         console.log(`[grass2] sunflower plant: ${cornBuild.stats.verts} verts, ${cornBuild.stats.tris} tris`);
     }
     const baseGeo = shrubGeos ? shrubGeos.leaf
