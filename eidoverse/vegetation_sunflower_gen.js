@@ -33,14 +33,17 @@ import { Rng } from './vegetation_shrub_gen.js';
 const TAU = Math.PI * 2;
 const tri = (s) => { const m = s % 2; return m <= 1 ? m : 2 - m; };
 
-// thin plate: gentle front bulge, shallow back cup into the neck
+// thin plate: gentle front bulge, shallow back cup into the neck. The plate
+// stays a touch SMALLER than the petal attachment ring — a disc edge wider
+// than the whorl overhangs the petals and reads as poking through them
 const DISC_R = 0.30;
+const DISC_K = 0.97;
 const DISC_FRONT = [0, 0.09, 0.16, 0.22, 0.265, 0.29, 0.300]
-    .map((r) => [r, 0.012 + 0.052 * Math.pow(1 - Math.pow(r / 0.302, 2.2), 0.8)]);
+    .map((r) => [r * DISC_K, 0.012 + 0.052 * Math.pow(1 - Math.pow(r / 0.302, 2.2), 0.8)]);
 const DISC_RIM_BACK = [
-    [0.302, 0.002],
-    [0.290, -0.014],
-    [0.170, -0.036],
+    [0.302 * DISC_K, 0.002],
+    [0.290 * DISC_K, -0.014],
+    [0.170 * DISC_K, -0.036],
     [0.000, -0.046],
 ];
 
@@ -304,8 +307,8 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
         // shorter inner layer, phase-offset half a spacing, tucked deeper
         // under the rim and tilted slightly forward (young florets angle up)
         const layers = [
-            { n: N, rIn: 0.020, lenK: 1.0, phase: 0, droopLo: -0.30, droopHi: 0.10 },
-            { n: Math.round(N * 0.6), rIn: 0.042, lenK: 0.55, phase: Math.PI / N,
+            { n: N, rIn: 0.020, lenK: 1.0, phase: 0, droopLo: -0.22, droopHi: 0.10 },
+            { n: Math.round(N * 0.7), rIn: 0.042, lenK: 0.55, phase: Math.PI / N,
               droopLo: -0.02, droopHi: 0.30 },
         ];
         for (const LY of layers) for (let k = 0; k < LY.n; k++) {
@@ -319,15 +322,16 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
                   typ = s2y * Math.cos(th) - s1y * Math.sin(th),
                   tzp = s2z * Math.cos(th) - s1z * Math.sin(th);
             const droop = rng.range(LY.droopLo, LY.droopHi) - (LY.lenK === 1 && k % 5 === 0 ? 0.18 : 0);
-            const cd = Math.cos(droop), sd = Math.sin(droop);
-            const dx = ox * cd + ax * sd, dy = oy * cd + ay * sd, dz = oz * cd + az * sd;
             const roll = rng.vary(0, 0.35);
             const wx = txp * Math.cos(roll) + ax * Math.sin(roll),
                   wy = typ * Math.cos(roll) + ay * Math.sin(roll),
                   wz = tzp * Math.cos(roll) + az * Math.sin(roll);
-            const bxp = hx + ox * (rimR - LY.rIn) * s - ax * 0.004 * s,
-                  byp = hy + oy * (rimR - LY.rIn) * s - ay * 0.004 * s,
-                  bzp = hz + oz * (rimR - LY.rIn) * s - az * 0.004 * s;
+            // base sits just behind the disc's FRONT edge plane — petals
+            // leave the rim IN the disc plane (covering the band edge) and
+            // only then take their droop (progressive per band, below)
+            const bxp = hx + ox * (rimR - LY.rIn) * s + ax * 0.008 * s,
+                  byp = hy + oy * (rimR - LY.rIn) * s + ay * 0.008 * s,
+                  bzp = hz + oz * (rimR - LY.rIn) * s + az * 0.008 * s;
             const bands = cell.fit;
             const NBp = bands.length;
             const uMid = (cell.u0 + cell.u1) / 2, uSpan = (cell.u1 - cell.u0);
@@ -336,6 +340,11 @@ export function buildSunflowerGeometry(name, seed, over = {}) {
                 const t = g / (NBp - 1);
                 const [cFrac, hwFrac] = bands[g];
                 const hw = hwFrac * cardHW * 2;
+                // droop fades in over the first third — the base band exits
+                // flat across the rim, the tip carries the full angle
+                const dk = droop * Math.min(1, t / 0.35);
+                const cd = Math.cos(dk), sd = Math.sin(dk);
+                const dx = ox * cd + ax * sd, dy = oy * cd + ay * sd, dz = oz * cd + az * sd;
                 const cup = Math.sin(t * Math.PI) * L * 0.05;
                 const cx3 = bxp + dx * L * t * s + ax * cup * s,
                       cy3 = byp + dy * L * t * s + ay * cup * s,
