@@ -59,6 +59,7 @@ export const GRASS_COLORS = {
 
 import { buildShrubGeometry } from './vegetation_shrub_gen.js';
 import { buildCornGeometry } from './vegetation_corn_gen.js';
+import { buildSunflowerGeometry } from './vegetation_sunflower_gen.js';
 
 // ── species registry ─────────────────────────────────────────────────────────
 // card:    { w, h, curve, cup, segH } — one curved strip, full sheet per card
@@ -161,6 +162,19 @@ export const FLORA_SPECIES = {
         baseScale: [0.88, 1.14], density: 1.4, clump: 0.85,
         wind: { base: 0.05, gust: 0.11, gustFreq: 0.3, flutter: 1.2 },
         sss: 0.55, rough: 0.75, pushScale: 0.55,
+    },
+    sunflower: {
+        // the sunflower (sunflower_gen.js): cane stalk, spiral heart-leaves,
+        // one nodding head — seed-disc lathe (Skye's highpoly cut + baked),
+        // ray-petal card ring, bract star behind — all on the ONE sunflower_
+        // trim sheet. Pair with `rows` for a planted field.
+        archetype: 'sunflower', maps: 'sunflower',
+        sunflower: { height: 1.9, leaves: 9, leafLen: 0.55, headR: 0.20, petals: 21 },
+        footRadius: 0.3,
+        baseScale: [0.9, 1.12], density: 1.2, clump: 0.8,
+        // stiffer cane than corn, and the heavy head barely flutters
+        wind: { base: 0.04, gust: 0.09, gustFreq: 0.3, flutter: 0.8 },
+        sss: 0.5, rough: 0.8, pushScale: 0.4,
     },
 };
 
@@ -760,6 +774,12 @@ export async function createFlora(opts = {}) {
             { ...spec.corn, ...(opts.corn ?? {}) });
         blendNormalsUp(cornBuild.geo, 0.3);
         console.log(`[grass2] corn plant: ${cornBuild.stats.verts} verts, ${cornBuild.stats.tris} tris`);
+    }
+    if (spec.archetype === 'sunflower') {
+        cornBuild = buildSunflowerGeometry('sunflower', `sunflower:${o.seed}:${o.variant ?? 0}`,
+            { ...spec.sunflower, ...(opts.sunflower ?? {}) });
+        blendNormalsUp(cornBuild.geo, 0.3);
+        console.log(`[grass2] sunflower plant: ${cornBuild.stats.verts} verts, ${cornBuild.stats.tris} tris`);
     }
     const baseGeo = shrubGeos ? shrubGeos.leaf
         : cornBuild ? cornBuild.geo
