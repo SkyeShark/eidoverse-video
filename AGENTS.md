@@ -2499,13 +2499,30 @@ const swe = await createWaterSWE(renderer, {
         capacity: 0.30, erode: 0.32, deposit: 0.42, bank: 1.2,
         talusSlope: 0.5,        // wet-sand repose ≈ 29° — banks slump WIDE
         talusRate: 3.0, maxDelta: 0.35,
-        terrainMaps: { albedo: soilAlbedo, rough: soilRough },
-        terrainRepeat: 3.7,     // MATCH the surrounding ground's texel density
+        terrainMaps: { albedo: soilAlbedo, rough: soilRough, normal: soilNor },
+        terrainTexPeriod: 120 / 26, // static ground's (size / repeat), metres per
+                                // tile: WORLD-locks the patch uvs so the maps
+                                // continue the surrounding pattern at the same
+                                // fract phase. ⚠ Pass ALL THREE maps — albedo
+                                // alone leaves the patch glass-smooth beside a
+                                // normal-mapped world (the pebble relief IS the
+                                // normal map) and the material difference
+                                // prints the domain as a square even when the
+                                // heights meet flush. (`terrainRepeat` remains
+                                // for patch-local uvs, but phase-locked world
+                                // uvs are why the rim can't print.)
     },
 });
 scene.add(swe.terrainMesh);     // the eroding ground patch — lay it over the
-                                // static terrain (same bedFn), sink the static
-                                // mesh ~1.5 cm under it so the rim never z-fights
+                                // static terrain (same bedFn). ⚠ The static
+                                // mesh must DROP WELL AWAY (~1.5 m, feathered)
+                                // under the patch interior — sunk only a few
+                                // cm it fills every deeper cut from inside:
+                                // cuts vanish, deposits still rise, and the
+                                // piece reads as ground GROWING around the
+                                // water (and the water sinks out of sight
+                                // with its channel). Meet the patch flush
+                                // only at the feathered rim.
 // per frame: swe.setRain(stormRamp);   // 0 → rainRate → 0 across the piece
 ```
 Scene craft for a wash that READS: shape the domain as a broad valley

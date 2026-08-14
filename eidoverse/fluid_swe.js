@@ -364,7 +364,15 @@ export async function createWaterSWE(renderer, options = {}) {
                             // 1.0 ≈ 45° holds slot walls up — desert alluvium
                             // slumps far flatter)
         talusRate: 2.2,     // relaxation speed of over-steep banks
-        maxDelta: 0.9,      // cut/fill depth clamp, metres
+        maxDelta: 0.9,      // CUT depth clamp, metres
+        maxFill: 0.15,      // DEPOSIT height cap — far below the cut: capacity
+                            // crashes wherever flow slows, so without an
+                            // asymmetric cap the whole load drops at the
+                            // water's edge as instant levees and the piece
+                            // reads as ground RISING around the water
+        edgeFeather: 0.8,   // erosion+rain fade to zero over this many metres
+                            // at the domain wall — a hard sim boundary prints
+                            // itself into the terrain as square rims/seams
         siltColor: '#96754e',      // fresh wet deposit tint (terrain)
         cutColor: '#6b4f33',       // exposed cut-bank earth tint (terrain)
         siltWaterColor: '#8a6b42', // suspended-load water tint
@@ -372,6 +380,12 @@ export async function createWaterSWE(renderer, options = {}) {
         terrain: true,      // build the eroding terrain-patch mesh
         terrainMaps: null,  // { albedo, normal, rough } textures (scene loads)
         terrainRepeat: 7,   // uv repeats of the maps across the domain
+        terrainTexPeriod: null, // metres per texture tile, WORLD-locked: set it
+                            // to the static ground's (size / repeat) and the
+                            // patch samples the same maps at the same fract
+                            // phase — the pattern CONTINUES across the domain
+                            // rim instead of restarting there. Overrides
+                            // terrainRepeat when set.
         ...o.erosion,
     } : null;
     const dBedA = ERO ? mk('sweDBedA') : null, dBedB = ERO ? mk('sweDBedB') : null;
@@ -620,7 +634,10 @@ export async function createWaterSWE(renderer, options = {}) {
             const squall = fbm2(w.mul(0.16).add(vec2(U.time.mul(0.11), U.time.mul(0.045))));
             const bands = clamp(squall.mul(1.5).sub(0.25), 0.0, 1.6);
             const rainMul = mix(float(1), bands, float(o.rainPatchiness));
-            h.addAssign(U.rain.mul(rainMul).mul(U.dt));
+            const dWallR = min(min(p.x, float(1).sub(p.x)), min(p.z, float(1).sub(p.z)))
+                .mul(Math.min(WX, WZ));
+            const edgeR = ERO ? smoothstep(0.0, EK.edgeFeather * 1.6, dWallR) : float(1);
+            h.addAssign(U.rain.mul(rainMul).mul(edgeR).mul(U.dt));
         }
         h.assign(clamp(h, 0.0, o.maxDepth));
         textureStore(hDst, c, vec4(h, 0, 0, 1)).toWriteOnly();
@@ -704,6 +721,10 @@ export async function createWaterSWE(renderer, options = {}) {
     const mkErode = ERO ? (hNew, vNew, dSrc, dDst, name) => Fn(() => {
         const c = cellOf(instanceIndex);
         const p = uvwOf(c);
+        // domain-edge feather: all bed CHANGE dies smoothly at the wall
+        const dWall = min(min(p.x, float(1).sub(p.x)), min(p.z, float(1).sub(p.z)))
+            .mul(Math.min(WX, WZ));
+        const edgeM = smoothstep(0.0, EK.edgeFeather, dWall);
         const h = R(hNew, p).r;
         const v = R(vNew, p).rg;
         const here = R(dSrc, p);
@@ -732,7 +753,7 @@ export async function createWaterSWE(renderer, options = {}) {
         // taper pickup as the cut approaches maxDelta — a gully bottoms out
         const cutRoom = smoothstep(-EK.maxDelta, -EK.maxDelta * 0.6, delta);
         const ero = max(diff, 0.0).mul(EK.erode).mul(U.dt).mul(wet).mul(cutRoom)
-            .mul(float(1).add(min(slope, 1.2).mul(1.6))).toVar();
+            .mul(float(1).add(min(slope, 1.2).mul(1.6))).mul(edgeM).toVar();
         // BANK EROSION — the widening mechanism: a cell standing above a
         // flowing neighbour is a bank face exposed to that neighbour's
         // current; the flow undercuts it SIDEWAYS regardless of how little
@@ -752,7 +773,12 @@ export async function createWaterSWE(renderer, options = {}) {
             const bankEro = bankPow.mul(EK.bank).mul(EK.erode).mul(0.35).mul(U.dt).mul(cutRoom);
             ero.addAssign(bankEro);
         }
-        const dep = min(max(diff.negate(), 0.0).mul(EK.deposit).mul(U.dt), s);
+        // fillRoom: deposits taper OUT as the pile approaches maxFill — the
+        // levee governor (the deposit itself stays in the sediment column
+        // and advects on downstream instead)
+        const fillRoom = smoothstep(EK.maxFill, EK.maxFill * 0.4, delta);
+        const dep = min(max(diff.negate(), 0.0).mul(EK.deposit).mul(U.dt)
+            .mul(fillRoom).mul(edgeM), s);
         delta.subAssign(ero);
         delta.addAssign(dep);
         s.addAssign(ero);
@@ -772,8 +798,8 @@ export async function createWaterSWE(renderer, options = {}) {
                 max(ex2, 0.0).mul(0.25 * EK.talusRate).mul(U.dt)
                     .mul(sign(dEl)).mul(touched));
         }
-        delta.addAssign(slump);
-        delta.assign(clamp(delta, -EK.maxDelta, EK.maxDelta));
+        delta.addAssign(slump.mul(edgeM));
+        delta.assign(clamp(delta, -EK.maxDelta, EK.maxFill));
         s.assign(clamp(s, 0.0, 0.6));
         age.assign(clamp(age, 0.0, 1.0));
         textureStore(dDst, c, vec4(delta, s, age, 1)).toWriteOnly();
@@ -1528,17 +1554,34 @@ export async function createWaterSWE(renderer, options = {}) {
         const bedT = (q) => bed(q).add(dPh(q));
         const tUv = uv();
         const tP = (u2) => vec3(u2.x, 0.5, float(1).sub(u2.y));
+        // texture uv: WORLD-locked when terrainTexPeriod (metres/tile) is set —
+        // fract-phase-identical to a static PlaneGeometry ground whose
+        // size/repeat equals the period (v runs toward −z on a rotateX(−π/2)
+        // plane, hence the negate). Patch-local repeat otherwise.
+        const texUv = EK.terrainTexPeriod
+            ? vec2(positionWorld.x, positionWorld.z.negate()).div(EK.terrainTexPeriod)
+            : tUv.mul(EK.terrainRepeat);
         tMat.normalNode = Fn(() => {
             const p = tP(tUv);
-            return transformNormalToView(normalize(vec3(
-                bedT(p.sub(duv)).sub(bedT(p.add(duv))).div(2 * DX),
-                1.0,
-                bedT(p.sub(dwv)).sub(bedT(p.add(dwv))).div(2 * DZ))));
+            const gx = bedT(p.sub(duv)).sub(bedT(p.add(duv))).div(2 * DX).toVar();
+            const gz = bedT(p.sub(dwv)).sub(bedT(p.add(dwv))).div(2 * DZ).toVar();
+            if (EK.terrainMaps && EK.terrainMaps.normal) {
+                // detail normal, UDN-blended in the ground plane's tangent
+                // frame (T=+x, B=−z): albedo alone leaves the patch
+                // glass-smooth beside a normal-mapped world — the material
+                // difference prints the domain as a square even when the
+                // heights are flush
+                const tn = texture(EK.terrainMaps.normal, texUv).xyz.mul(2).sub(1);
+                const iz = float(1).div(tn.z.max(0.35));
+                gx.addAssign(tn.x.mul(iz));
+                gz.addAssign(tn.y.negate().mul(iz));
+            }
+            return transformNormalToView(normalize(vec3(gx, 1.0, gz)));
         })();
         tMat.colorNode = Fn(() => {
             const p = tP(tUv);
             const base = EK.terrainMaps && EK.terrainMaps.albedo
-                ? texture(EK.terrainMaps.albedo, tUv.mul(EK.terrainRepeat)).rgb
+                ? texture(EK.terrainMaps.albedo, texUv).rgb
                 : EU.cutColor.mul(1.35);
             const dd = dPh(p);
             const cut = smoothstep(0.015, 0.3, dd.negate());
@@ -1552,7 +1595,7 @@ export async function createWaterSWE(renderer, options = {}) {
             return vec4(col, 1.0);
         })();
         if (EK.terrainMaps && EK.terrainMaps.rough) {
-            tMat.roughnessNode = texture(EK.terrainMaps.rough, tUv.mul(EK.terrainRepeat)).r;
+            tMat.roughnessNode = texture(EK.terrainMaps.rough, texUv).r;
         }
         terraMesh = new THREE.Mesh(tGeo, tMat);
         terraMesh.name = 'water_swe_terrain';

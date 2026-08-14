@@ -228,3 +228,94 @@ probed headless on Blender 4.3.2, --factory-startup --background):
 - Blender 4.3 headless EEVEE Next renders fine for QA sheets; burn pose labels with render.use_stamp + use_stamp_note (disable all other stamp fields). Contact sheet = numpy over image.pixels (byte images round-trip gamma-safe: load PNG -> foreach_get, images.new(float_buffer=False) -> foreach_set -> save).
 - Engine probe gotcha (eido --probe + T_OFFSET pattern): a mixer catch-up inside renderFrame needs an explicit vrm.update(0.001) afterward or the single probe frame renders the load-time T-pose (normalized-humanoid -> raw-bone propagation happens in the engine loop, not at mixer.update). The [vrm-pose] audit on a 1-frame probe always reports T-pose-statue; only the full render verdict counts.
 - emote(vrm, ...) on a stationary VRM re-aims the standing emote (default facing) — a QA turntable that must keep the gesture on camera should pin vrm.scene.rotation.y after starting the emote.
+
+## softrains — There Will Come Soft Mornings (2026-08-05)
+- MMD-heritage VRM hand-bone frames: +Y along the arm toward fingertips, +Z = palm normal.
+  Prop-in-hand grip = attach to raw hand bone, then iterate local offset via close-up probe
+  renders (identity attach first to READ the frame, then rotate/offset). claude_suit right
+  hand grip for a watering can: pos (0,0.10,0.22), rot Euler(-1.05,0,0) in bone space.
+- fluid_swe at prop scale (planter box): keep the domain INSIDE the vessel dish only — a bed
+  cliff at the rim makes the heightfield surface draw a tall vertical skirt that reads as a
+  phantom waterfall. sprayMax: 0 at cm scale (whitewater needles blow up in 5mm cells).
+  Stream tube keeps its last arc after rate→0: set streamMesh.visible = pouring, AFTER syncRenderPhase.
+- ParticleMorph.fromMesh on low-poly primitives collapses to vertex rings — hand-sample
+  parametric surfaces (cylinder/cone/fins) into fromPoints for a crisp shape.
+- Controller 'reach' emote = arms out to the SIDES; aim the RIGHT hand at a work target by
+  setting _emoteFacingY 90° CCW of the target bearing. Emotes are one-shot: re-trigger
+  playEmote every ~2.5s to hold an engaged pose. loadEmote() at setup or playEmote no-ops.
+- grass2 createFlora clipFn strips double as prop stages: anything meant to be SEEN at ground
+  level (a crow, a small bot) must stand inside a cleared strip or the turf swallows it.
+- Weather sunshower + sky day-cycle: drive sky.setTime per frame from a piecewise knot table,
+  re-applyToLights every frame, transitions guarded with a probe catch-up branch (T_OFFSET
+  fires transitions late: if t already past the window end, setWeather directly).
+
+## sunflower_sol - Surgical disc trim-sheet PBR update (2026-08-12)
+- For a pixel-locked atlas edit, define one inclusive integer mask and hash decoded row-major
+  RGBA outside it before painting. Start every output from a byte-for-byte decoded copy, write
+  only masked pixels, re-decode the saved PNGs, and require the outside hashes to match.
+- A high-resolution head-on botanical source can be fitted to exact radial anatomy with a
+  piecewise radial remap (seed field -> gold ring -> dried band), then supersampled into the
+  atlas. Clamp the rim to textured source radii and opaque warm underpaint so no source
+  background leaks onto a geometry silhouette.
+- Derive microrelief normals from band-passed albedo rather than raw luminance: small-minus-
+  large local structure preserves seed/floret grooves without turning a bright radial ring
+  into one broad fake ridge. Clamp neighbor reads at the circular mask edge and use the
+  y-down image derivative sign appropriate for an OpenGL normal map.
+
+## THE SHAPE THE WATER LEFT (work/erosion, 2026-08-13) — Fable Arroyo
+
+**Hydraulic erosion for fluid_swe (now an engine feature, opt-in `erosion:{}`):**
+one extra ping-pong pair (R bed-delta, G suspended sediment, B silt age);
+stream-power capacity |v|^1.7 with SATURATING depth term (linear-|v| erodes a
+maze, saturation is what widens a wash); BANK erosion = neighbour stream power
+× exposed face height (without lateral pickup, depth is the only degree of
+freedom → slot canyons); talus at wet repose 0.55; the pristine bedTex never
+mutates — live bed = bedTex + delta everywhere. Eroding terrain-patch mesh via
+storage-buffer displacement; cut/silt/wet fragment tints carry the read as
+much as relief does. `rainRate` + `setRain()` = squall-banded distributed
+rainfall (the natural wash source; a jet pour reads as a garden hose).
+**Scene craft that made it READ:** damp your dune noise inside the domain and
+add a valley cross-fall or rain pools instead of channelizing; deep carving
+needs a LOW GRAZING finale camera (drone angles compress relief); tint
+contrast (cut '#4e3a24' vs silt '#a88a5e') outsells pure shading at distance.
+**The patch material must BE the ground material:** flush heights are not
+enough — albedo+rough without the NORMAL map leaves the patch glass-smooth
+beside a normal-mapped world (the pebble relief IS the normal map), and
+patch-local uvs restart the texture phase at the rim; either way the domain
+prints as a square of "different texture". `terrainMaps` takes all three and
+`terrainTexPeriod` (= static ground size/repeat, metres per tile) WORLD-locks
+the patch uvs to the same fract phase, so the pattern continues across the
+rim and the seam is impossible by construction.
+**In-world text earns its place only if a shot can resolve it:** the survey
+log is 9 short lines at 40 px on a 484 px canvas AND owns a dedicated close-up
+(camera ~1.6 m out along the facet normal → type ~50 screen px at 1080p).
+Diegetic text no shot can read is set dressing pretending to be writing.
+
+**MiniMax Music 3 (comfy_bridge):** `max_duration` is a WALL the model happily
+composes past — set the ceiling well ABOVE the intended piece and write an
+explicit natural ending into the arrangement ("finishes naturally around Ns…
+must complete its final cadence"); v3 ended itself at 132.4s under a 150 wall
+after two truncated attempts. Master with softclip+headroom (−0.9dB, peaks
+came in at 0.0 dBFS = AAC crunch) + fades. RMS cadence-finder fallback:
+scan the tail for the last quiet trough and cut+fade there.
+
+**claude_suit lipsync on THIS engine:** the VRM path runs combineMorphs — the
+raw 'show MMD mouth' recipe finds ZERO plates; runtime morph dictionaries are
+expression-named (aa/ee/ih/oh/ou). Drive those directly via
+morphTargetInfluences in onBeforeRender (fill(0) first — then RE-ADD blink
+yourself), winner-take-all with EMA ~3 frames. ⚠ Combined-morph weights CLAMP
+at 1.0: past it the mouth plate EXTRAPOLATES forward off the face (visible
+from the side) — the >1 punch idiom belongs to the raw-morph pipeline only.
+Gate visemes to align_lyrics windows ±0.12s or demucs bleed sings the
+instrumentals.
+
+**Controller on shaped ground:** a displaced walk strip MUST declare
+`userData.trimeshCollider = true` — the default bbox cuboid is an invisible
+plateau at the strip's high corner (the tall-AABB bug's third appearance).
+Real mixer + startPosition in opts; never hand-set the root.
+
+**Overlay layer:** title/end cards + a ticker (canvas cut to exact phrase
+width, repeat.x = (frameW/barH)·(64/pw), offset.x scroll) composite between
+world FX and signal FX exactly as documented. document.createElement('canvas')
+(napi shim) — OffscreenCanvas doesn't exist here; run `deno install` on fresh
+machines or every canvas texture is silently black.
