@@ -124,6 +124,9 @@
         mesh.name = 'terrain';
         mesh.receiveShadow = true;
         (globalThis._eidoToolUsage = globalThis._eidoToolUsage || new Set()).add('makeTerrain');
+        // real ground: the robot controller builds a Rapier TRIMESH from this
+        // (an AABB would box the hills at their highest point)
+        mesh.userData.trimeshCollider = true;
         return { mesh, heightAt };
     };
 })();

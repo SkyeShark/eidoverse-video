@@ -68,7 +68,43 @@
             let added = 0;
             for (const mesh of collMeshes) {
                 try {
-                    mesh.updateWorldMatrix(true, false);
+                    // Vegetation / effects declare themselves un-walkable — even a
+                    // scene that passes them wholesale never gets a collider from
+                    // them (a character walking on top of a bush is never the goal).
+                    if (mesh.userData?.noWalkable) continue;
+                    mesh.updateWorldMatrix(true, true);
+                    // TRIMESH path — real ground. An AABB turns any sloped mesh
+                    // into a box at its HIGHEST point (the character climbs onto
+                    // an invisible platform and walks on air). Terrain, ramps and
+                    // any shaped ground declare `userData.trimeshCollider = true`
+                    // (makeTerrain does this for its mesh) — or pass
+                    // opts.trimeshColliders = true to treat every collision mesh
+                    // this way. Static Rapier trimeshes; castShape ground probes
+                    // and foot IK read them like any collider.
+                    if (mesh.userData?.trimeshCollider || opts.trimeshColliders) {
+                        let tris = 0;
+                        mesh.traverse((m) => {
+                            if (!m.isMesh || !m.geometry?.attributes?.position) return;
+                            const posA = m.geometry.attributes.position;
+                            const v = new Float32Array(posA.count * 3);
+                            const tv = new THREE.Vector3();
+                            for (let i = 0; i < posA.count; i++) {
+                                tv.fromBufferAttribute(posA, i).applyMatrix4(m.matrixWorld);
+                                v[i * 3] = tv.x; v[i * 3 + 1] = tv.y; v[i * 3 + 2] = tv.z;
+                            }
+                            let idx;
+                            if (m.geometry.index) idx = new Uint32Array(m.geometry.index.array);
+                            else { idx = new Uint32Array(posA.count); for (let i = 0; i < posA.count; i++) idx[i] = i; }
+                            const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+                            world.createCollider(RAPIER.ColliderDesc.trimesh(v, idx), body);
+                            tris += idx.length / 3;
+                        });
+                        if (tris > 0) {
+                            console.log(`[eidoverse-robot] trimesh collider: '${mesh.name || 'unnamed'}' (${tris | 0} tris)`);
+                            added++;
+                            continue;
+                        }
+                    }
                     const box = new THREE.Box3().setFromObject(mesh);
                     if (box.isEmpty()) continue;
                     const c = box.getCenter(new THREE.Vector3());
