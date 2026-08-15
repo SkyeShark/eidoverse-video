@@ -38,9 +38,16 @@ def build_filters(tl, duration):
     inputs, filters, mix = [], [], []
     idx = 0
 
+    _unsafe = ("http://", "https://", "ftp://", "pipe:", "data:", "rtmp://", "rtsp://")
+
+    def _safe_clip(path):
+        if str(path).lower().startswith(_unsafe):
+            raise ValueError(f"Unsafe ffmpeg protocol in clip path: {path!r}")
+        return path
+
     rain = tl.get("rain") or []
     if rain and any(p["gain"] > 0.0005 for p in rain):
-        inputs += ["-stream_loop", "-1", "-i", tl["rainClip"]]
+        inputs += ["-stream_loop", "-1", "-i", _safe_clip(tl["rainClip"])]
         vol = gain_expr(rain) or "0"
         filters.append(
             f"[{idx}:a]atrim=0:{duration},volume='{vol}':eval=frame,"

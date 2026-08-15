@@ -28,16 +28,25 @@ CYBORG_FILTER = (
     "[echo][pitched]amix=inputs=2:weights=1 0.5"
 )
 
+_UNSAFE_PROTOCOLS = ("http://", "https://", "ftp://", "pipe:", "data:", "rtmp://", "rtsp://")
+
+
+def _safe_path(path: str) -> str:
+    """Reject paths that invoke dangerous ffmpeg protocol handlers."""
+    if path.lower().startswith(_UNSAFE_PROTOCOLS):
+        raise ValueError(f"Unsafe ffmpeg protocol in path: {path!r}")
+    return path
+
 
 def cyborg_tone(input_path: str, output_path: str, sample_rate: int = 44100, mono: bool = True) -> None:
     """Apply just the cyborg tone filter (echo + pitched undertone). No stutter."""
     cmd = [
         "ffmpeg", "-y",
-        "-i", input_path,
+        "-i", _safe_path(input_path),
         "-filter_complex", CYBORG_FILTER,
         "-ar", str(sample_rate),
         "-ac", "1" if mono else "2",
-        output_path,
+        _safe_path(output_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
