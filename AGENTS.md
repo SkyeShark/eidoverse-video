@@ -2876,6 +2876,63 @@ world camera freely without the overlay drifting. `makeOverlayLayer` sets
 without the overlay scaling — but since the overlay rides its own fixed camera,
 changing the world `camera.fov` no longer touches the overlay at all.
 
+#### Word-timed captions — `globalThis.makeCaptions`
+
+For spoken narration / dialog subtitles with the currently-spoken word
+highlighted (the short-form caption look), use `makeCaptions` — it owns the
+caption-page pattern on the overlay layer.
+
+Word timing comes from the studio itself, in order of preference:
+
+1. **You synthesize the voice with edge-tts** → `tts_captions.py`. The
+   synthesis stream's WordBoundary events ARE the timing — voice and
+   captions from one command, no transcription, no alignment:
+   ```sh
+   uv run tts_captions.py work/<id>/narration.json --out-dir work/<id>/audio
+   ```
+   `narration.json` is `[{"text": "...", "at": 7.5}, ...]` where `at` is the
+   line's placement in film seconds — the same number you give the mixer, so
+   caption timing and voice placement can never drift apart. Writes one mp3
+   per line plus `captions.json`.
+2. **Voice from ComfyUI or any other TTS** → force-align the KNOWN text:
+   ```sh
+   python3 align_lyrics.py work/<id>/audio/voice.wav "the narration text" \
+       --output work/<id>/assets/captions.json
+   ```
+3. **Audio you didn't write** → an external transcriber, the only path where
+   spelling can go wrong.
+
+Register the file as a `scene.json` asset and load it unchanged —
+`makeCaptions` accepts `[{text, startMs, endMs}]` (what `tts_captions.py`
+emits), a flat `[{word, start, end}]` in seconds, or the `align_lyrics.py`
+line format:
+
+```js
+const capWords = JSON.parse(new TextDecoder().decode(
+    globalThis.b64toArrayBuffer(ASSETS.captions)));
+const caps = globalThis.makeCaptions({
+    words: capWords,
+    layer: hud,            // ⚠ REUSE your makeOverlayLayer handle — calling
+                           // makeOverlayLayer twice REPLACES the overlay
+                           // globals and orphans the first layer's meshes
+    fov: camera.fov,
+    style: { highlightColor: '#FF9F1C' },   // any of: font, color, strokeColor,
+                                            // background, y, widthFrac,
+                                            // maxWordsPerPage, uppercase, …
+});
+// per frame: caps.update(t)   — redraws ONLY when the page/active word changes
+```
+
+Pages break at sentence ends, at `maxWordsPerPage`, and across silence gaps;
+text auto-shrinks to the safe width so a long line never clips mid-word.
+`caps.mesh` is an ordinary overlay plane — move it above an end card
+(`caps.mesh.position.y = …`) or hide it from scene code. Caption data rides
+`scene.json` assets like everything else. The forced-alignment path makes
+spelling exact by construction — the caption text IS your narration script,
+Whisper only supplies timing. Reserve external transcribers for audio whose
+text you don't have, and spell-check their output: a transcriber will happily
+write "cloud code" for "Claude Code".
+
 #### When neither — composited in post
 
 For overlay sequences that need full ffmpeg compositing (a separately-rendered

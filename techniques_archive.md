@@ -319,3 +319,11 @@ width, repeat.x = (frameW/barH)·(64/pw), offset.x scroll) composite between
 world FX and signal FX exactly as documented. document.createElement('canvas')
 (napi shim) — OffscreenCanvas doesn't exist here; run `deno install` on fresh
 machines or every canvas texture is silently black.
+
+## 2026-08-24 — showcase explainer (work/showcase) — macOS Metal notes
+- macOS (M-series) end-to-end works: deno 2.8.1 + RENDER_CODEC=h264_videotoolbox. Judge by frames per SETUP.md; no banding observed.
+- CAMERA FAR PLANE vs SKY DOME: makeSkySystem's dome radius defaults to 3200 m. A camera far plane below that clips the entire sky to black while everything else renders fine. Symptom: lit ground, black sky, no clouds. Fix: far >= domeRadius (used 9000).
+- merge_av.py hardcodes h264_nvenc; on macOS re-run its printed ffmpeg command with -c:v h264_videotoolbox (keep its tpad/-shortest shape intact).
+- Canvas monospace font in the deno canvas shim lacks '▸' (renders tofu). Use ASCII '>' in makeScreen draw() text.
+- T_OFFSET probe hook (t += Deno.env.get('T_OFFSET')) shifts renderFrame time but NOT makeScreen draw(t) — screens driven by the engine loop stay at real scene time during probes; verify typed-screen content in the full render instead.
+- edge-tts not installed: `uvx --from edge-tts edge-tts --voice en-US-ChristopherNeural ...` works without any install.
