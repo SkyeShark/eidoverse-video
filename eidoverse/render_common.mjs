@@ -278,47 +278,16 @@ export async function setupRenderer(width, height) {
         try {
             const GF = _napiCanvasMod.GlobalFonts;
             if (GF && typeof GF.registerFromPath === 'function') {
-                // Platform-aware core fonts + GENERIC-FAMILY ALIASES.
-                // Skia cannot resolve the CSS generic families ('monospace',
-                // 'sans-serif', 'serif') on Windows — ctx.font = '16px monospace'
-                // silently falls back to a PROPORTIONAL face, which destroys
-                // column alignment in every ASCII-art / terminal-text path
-                // (makeAsciiPanel, ParticleMorph.fromText({ascii:true}), …).
-                // Registering a real mono TTF UNDER the alias 'monospace' (and
-                // sans/serif equivalents) makes the generic names resolve.
-                // Linux font dirs are kept for hosts that have them.
                 const _fallbacks = [
-                    // [path, alias] — alias '' = register under its own name only
-                    ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'sans-serif'],
-                    ['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', ''],
-                    ['/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 'monospace'],
-                    ['/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf', ''],
-                    ['/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf', ''],
-                    ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', ''],   // color emoji (😀🎉🔥) — Skia renders the bitmaps
+                    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+                    '/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf',
+                    '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf',   // color emoji (😀🎉🔥) — Skia renders the bitmaps
                 ];
-                if (process.platform === 'win32') {
-                    const W = `${process.env.SystemRoot || 'C:\\Windows'}\\Fonts\\`;
-                    _fallbacks.push(
-                        [`${W}consola.ttf`, 'monospace'],          // Consolas — real mono
-                        [`${W}cour.ttf`, 'Courier New'],           // Courier New — mono
-                        [`${W}arial.ttf`, 'sans-serif'],           // Arial under the generic alias
-                        [`${W}ariali.ttf`, ''],
-                        [`${W}arialbd.ttf`, ''],
-                        [`${W}times.ttf`, 'serif'],                // Times New Roman under the generic alias
-                        [`${W}segoeui.ttf`, 'Segoe UI'],
-                        [`${W}seguiemj.ttf`, ''],                  // Segoe UI Emoji (color)
-                    );
-                }
-                let _n = 0, _mono = false;
-                for (const [p, alias] of _fallbacks) {
-                    try {
-                        if (GF.registerFromPath(p, alias || undefined)) {
-                            _n++;
-                            if (alias === 'monospace') _mono = true;
-                        }
-                    } catch (_) {}
-                }
-                console.log(`[render_common] registered ${_n} canvas-2d font(s) — generic families ${_mono ? 'RESOLVE (monospace OK)' : 'unavailable'}; text auto-fills missing glyphs (™ • → ∞ ★ …)`);
+                let _n = 0;
+                for (const p of _fallbacks) { try { if (GF.registerFromPath(p)) _n++; } catch (_) {} }
+                console.log(`[render_common] registered ${_n} canvas-2d symbol fallback font(s) — text auto-fills missing glyphs (™ • → ∞ ★ …)`);
             }
         } catch (e) {
             console.warn('[render_common] canvas-2d fallback-font registration failed:', e.message);
@@ -355,7 +324,6 @@ export async function setupRenderer(width, height) {
             }
             addEventListener() {} removeEventListener() {} setAttribute() {} getAttribute() { return null; }
         }
-
         // Patch document.createElement to return our shim for canvas elements.
         const origCreateElement = doc.createElement.bind(doc);
         doc.createElement = (tag) => {
