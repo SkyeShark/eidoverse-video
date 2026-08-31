@@ -625,7 +625,7 @@
             const pitch = S / 10;
             for (let k = 0; k < 10; k++) {                 // the threads, wandering periodically
                 const o = k * pitch + pitch / 2;
-                for (const [col, w, dy] of [['rgba(64,48,28,0.42)', 1.4, 0], ['rgba(214,192,156,0.30)', 0.8, 1.2]]) {
+                for (const [col, w, dy] of [['rgba(120,108,88,0.30)', 1.4, 0], ['rgba(224,214,192,0.28)', 0.8, 1.2]]) {
                     ctx.strokeStyle = col; ctx.lineWidth = w;
                     ctx.beginPath();
                     for (let x = 0; x <= S; x += 4) {
@@ -651,7 +651,7 @@
         inlayMat.map = mullTexture('#a3855f');
         inlayMat.roughness = 0.96;
         const mullMat = new THREE.MeshStandardNodeMaterial();    // the super: natural cotton
-        mullMat.map = mullTexture('#d9d0c1');
+        mullMat.map = mullTexture('#e7e2d7');
         mullMat.roughness = 0.96;
         mullMat.side = THREE.DoubleSide;
         const T_JOINT = Math.min(BOARD_TH, 0.0003), T_SPINE = Math.min(BOARD_TH, 0.0008);
@@ -957,8 +957,38 @@
             const rad = pA[o4], r = Math.max(1e-4, pA[o4 + 1]);
             const bow = pB[o4], phi0 = pB[o4 + 1], lead = pB[o4 + 2];
             let d = rad - phi0; d = Math.atan2(Math.sin(d), Math.cos(d));
-            const sg = Math.sign(d), ad = Math.abs(d);
+            const sg = Math.sign(d) || 1, ad = Math.abs(d);
             hRows[0][o4] = pA[o4 + 2]; hRows[0][o4 + 1] = pA[o4 + 3];
+            if (bow === 0) {
+                // exact: each segment's heading is the CHORD of the true
+                // lead-arc-tail across it, so every vertex lands on the path
+                // (midpoint sampling truncated any arc shorter than a
+                // segment: a climb lost most of its rise and the sheet ran
+                // on BELOW its plane — teeth through a propped board)
+                const aLen = r * ad;
+                const c0 = Math.cos(phi0), s0 = Math.sin(phi0);
+                const cx = lead * c0 - sg * r * s0;
+                const cy = lead * s0 + sg * r * c0;
+                const cr = Math.cos(rad), sr = Math.sin(rad);
+                const ex = cx + sg * r * sr, ey = cy - sg * r * cr;
+                let px = 0, py = 0;
+                for (let k = 0; k < NSEG; k++) {
+                    const s1 = leafBoneS[k + 1];
+                    let qx, qy;
+                    if (s1 <= lead) { qx = s1 * c0; qy = s1 * s0; }
+                    else if (s1 < lead + aLen) {
+                        const ph = phi0 + sg * (s1 - lead) / r;
+                        qx = cx + sg * r * Math.sin(ph);
+                        qy = cy - sg * r * Math.cos(ph);
+                    } else { const t = s1 - lead - aLen; qx = ex + t * cr; qy = ey + t * sr; }
+                    const j = k + 2;
+                    hRows[j >> 2][o4 + (j & 3)] =
+                        (Math.abs(qx - px) + Math.abs(qy - py) < 1e-9)
+                            ? rad : Math.atan2(qy - py, qx - px);
+                    px = qx; py = qy;
+                }
+                return;
+            }
             for (let k = 0; k < NSEG; k++) {
                 const run = leafMidS[k] - lead;
                 const ph = phi0 + sg * Math.min(run > 0 ? run / r : 0, ad) + bow * bowS[k];
@@ -1107,7 +1137,7 @@
         pageFrame.add(mull);
         const _mp = new Float32Array(MULL_PTS * 2);      // the posed profile [x0,y0, x1,y1, ...]
         const MULL_OVER = 0.0001;                          // the cloth over the case lining
-        function updateMull() {
+        function updateMull(uC) {
             let n = 0;
             const put = (x, y) => { _mp[n * 2] = x; _mp[n * 2 + 1] = y; n++; };
             for (let i = 0; i <= MULL_N_LIP; i++) {        // back joint -> back groove, on the lining
@@ -1131,7 +1161,8 @@
                 let nx = y1 - y0, ny = -(x1 - x0);
                 const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;      // inward, into the block
                 const tap = smooth01(Math.min(u, 1 - u) / 0.05);
-                const bk = backEnd + (back - backEnd) * tap;
+                const tapC = smooth01(Math.abs(u - uC) / 0.05);
+                const bk = backEnd + (back - backEnd) * Math.min(tap, tapC);
                 put(x - nx * bk, y - ny * bk);
             }
             for (let i = 0; i <= MULL_N_LIP; i++) {        // front groove -> front joint
@@ -1424,7 +1455,9 @@
                 let dl = Math.abs(Math.atan2(Math.sin(rad - spineAng), Math.cos(rad - spineAng)));
                 if (dl > Math.PI / 2) dl -= Math.PI / 2;
                 r = -d / (1 - Math.cos(Math.max(dl, 0.05)));
-                const rCap = Math.min(R_REACH, Math.max(R_BEND, 0.35 * -d));
+                const steep = Math.abs(Math.sin(rad));
+                const rCap = Math.min(R_REACH,
+                    Math.max(R_BEND, -d * 0.35 + (1 - steep) * R_REACH));
                 if (r > rCap) {
                     // a rise the arc cannot make within rCap: crease steeper,
                     // run STRAIGHT for the difference, then bend. A block's
@@ -1591,7 +1624,7 @@
                     (N_LEAF - 0.5 - i) * PITCH, nbx, nby, jbx, jby, pB[o4 + 1]);
             }
             for (let i = 0; i < N_LEAF; i++) bakeLeaf(i);
-            updateMull();
+            updateMull(1 - centre / N_LEAF);
             // window slots ride centre-1..centre+1: textured meshes take those
             // leaves (uniform copies of the same params), stock hides them
             pVis.fill(1);
