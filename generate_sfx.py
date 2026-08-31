@@ -24,8 +24,24 @@ if "--probe" in sys.argv:
 WF_PATH = Path("/workspace/sa3_workflow.json") if Path("/workspace/sa3_workflow.json").exists() else Path.home() / "Downloads" / "audio_stable_audio_3_medium_base.json"
 
 def main():
-    prompt, seconds, category, out = sys.argv[1], float(sys.argv[2]), sys.argv[3], sys.argv[4]
-    seed = int(sys.argv[5]) if len(sys.argv) > 5 else random.randrange(2**48)
+    # Flags (anywhere in argv):
+    #   --raw         bypass the workflow's LLM PROMPT ENHANCER (node 52:35): the
+    #                 prompt reaches Stable Audio verbatim. The enhancer rewrites
+    #                 the input through a per-category system prompt at temp 0.7 —
+    #                 "One-shot" is a MUSIC-SAMPLE brief ("pluck, slam, stab"), so a
+    #                 page riffle came back as a sci-fi riser and a book closing as
+    #                 a rattling slam. For foley, go raw and structure the prompt
+    #                 the way Stability's SFX guide does: "TrackType: SFX." + source
+    #                 + action/duration + mic/room/processing.
+    #   --neg "<text>" negative prompt (node 52:7; the workflow ships it empty)
+    args = [a for a in sys.argv[1:]]
+    raw = "--raw" in args
+    neg = None
+    if "--neg" in args:
+        i = args.index("--neg"); neg = args[i + 1]; del args[i:i + 2]
+    args = [a for a in args if a != "--raw"]
+    prompt, seconds, category, out = args[0], float(args[1]), args[2], args[3]
+    seed = int(args[4]) if len(args) > 4 else random.randrange(2**48)
     wf = json.load(open(WF_PATH, encoding="utf-8"))
     wf["52:31"]["inputs"]["value"] = prompt
     wf["52:36"]["inputs"]["value"] = seconds
@@ -33,6 +49,10 @@ def main():
     wf["52:43"]["inputs"]["choice"] = category
     wf["52:43"]["inputs"]["index"] = cats.index(category)
     wf["52:3"]["inputs"]["seed"] = seed
+    if raw:
+        wf["52:35"]["inputs"]["value"] = False      # switch -> on_false = the raw prompt
+    if neg is not None:
+        wf["52:7"]["inputs"]["text"] = neg
     wf["19"]["inputs"]["filename_prefix"] = "audio/eidoverse_sfx"
 
     r = urllib.request.urlopen(urllib.request.Request(
