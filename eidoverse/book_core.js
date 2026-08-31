@@ -812,10 +812,12 @@
             [arrays.iT.length + arrays.iB.length, arrays.iE.length, 2],
         ]);
 
-        // per-leaf params: pA = (rad, r, rootX, rootY), pB = (bow, phi0, -, -)
+        // per-leaf params: pA = (rad, r, rootX, rootY), pB = (bow, phi0, lead, -)
         // — phi0 is the sheet's heading as it leaves its fold (π/2 = straight
-        // up, the crease of a sheet standing in a shut block; the open arch
-        // sets it per fold), pVis = 0 while a window slot draws that leaf
+        // up, the crease of a sheet standing in a shut block), lead a straight
+        // run in that heading before the curl (a page HANGING off the block's
+        // spine before it bends onto the board), pVis = 0 while a window slot
+        // draws that leaf
         const pA = new Float32Array(N_LEAF * 4);
         const pB = new Float32Array(N_LEAF * 4);
         const pVis = new Float32Array(N_LEAF).fill(1);
@@ -840,11 +842,12 @@
                 const rad = pAn.x.toVar(), r = pBnSafe(pAn.y).toVar();
                 const bow = pBn.x.toVar();
                 const s = p.x.toVar();
-                const phi0 = pBn.y.toVar();
+                const phi0 = pBn.y.toVar(), lead = pBn.z.toVar();
                 const phi = (uNode) => {
                     const u = typeof uNode === 'number' ? T.float(uNode) : uNode;
                     const dir = T.float(1).sub(T.step(phi0.add(1e-6), rad).mul(2));
-                    return phi0.sub(dir.mul(T.min(u.div(r), rad.sub(phi0).abs())))
+                    const run = T.max(u.sub(lead), 0);
+                    return phi0.sub(dir.mul(T.min(run.div(r), rad.sub(phi0).abs())))
                         .add(bow.mul(T.sin(T.float(Math.PI / LEAF_W).mul(u))).mul(0.5));
                 };
                 const xy = T.vec2(pAn.z, pAn.w).toVar();
@@ -864,10 +867,11 @@
             const norFn = T.Fn(() => {
                 const n = T.normalGeometry;
                 const rad = pAn.x, r = pBnSafe(pAn.y);
-                const bow = pBn.x, phi0 = pBn.y;
+                const bow = pBn.x, phi0 = pBn.y, lead = pBn.z;
                 const u = T.positionGeometry.x;
                 const dir = T.float(1).sub(T.step(phi0.add(1e-6), rad).mul(2));
-                const ph = phi0.sub(dir.mul(T.min(u.div(r), rad.sub(phi0).abs())))
+                const run = T.max(u.sub(lead), 0);
+                const ph = phi0.sub(dir.mul(T.min(run.div(r), rad.sub(phi0).abs())))
                     .add(bow.mul(T.sin(T.float(Math.PI / LEAF_W).mul(u))).mul(0.5)).toVar();
                 const c = T.cos(ph).toVar(), sn = T.sin(ph).toVar();
                 return T.transformNormalToView(T.vec3(
@@ -1009,7 +1013,7 @@
             const o4 = i * 4;
             pA[o4] = deg * Math.PI / 180; pA[o4 + 1] = r;
             pA[o4 + 2] = rootX; pA[o4 + 3] = rootY;
-            pB[o4] = bow; pB[o4 + 1] = Math.PI / 2;
+            pB[o4] = bow; pB[o4 + 1] = Math.PI / 2; pB[o4 + 2] = 0;
         }
 
         // ---- posing ---------------------------------------------------------
@@ -1235,16 +1239,19 @@
         // start, this same arc bowed sheets out through the hinge; from the
         // fold's true place it is the endpaper drape, the pages leaning onto a
         // closing cover, and the arch's hump, in one formula.
+        // A sheet above its plane HANGS: straight toward the board (a page off
+        // the block's spine falls, it does not glide out on a 50 mm arc), then
+        // bends onto it with a paper's radius. The endpaper at page one now
+        // drops down the block's spine face and lies flat a finger from it.
+        const R_BEND = Math.min(0.012, 0.3 * BLOCK_H + 0.002);
         function bridge(o4, turned, rad, px, py, layer, nx, ny, jx, jy) {
             const d = (px - jx) * nx + (py - jy) * ny - layer;
-            let phi0, r;
+            let phi0, r, lead = 0;
             if (Math.abs(d) < 0.5 * R_CREASE) { phi0 = rad; r = R_CREASE; }
             else if (d > 0) {
-                let dj = Math.atan2(jy - py, jx - px) - rad;
-                dj = Math.abs(Math.atan2(Math.sin(dj), Math.cos(dj)));
-                const dl = Math.min(Math.PI / 2, Math.max(0.44, dj));
-                phi0 = rad + (turned ? dl : -dl);
-                r = d / (1 - Math.cos(dl));
+                phi0 = rad + (turned ? Math.PI / 2 : -Math.PI / 2);   // −n̂: toward the board
+                r = Math.min(R_BEND, d);
+                lead = d - r;
             } else {
                 const dl = Math.PI / 4;
                 phi0 = rad + (turned ? -dl : dl);
@@ -1252,7 +1259,7 @@
             }
             pA[o4] = rad;
             pA[o4 + 1] = Math.max(R_CREASE, Math.min(0.8 * LEAF_W, r));
-            pB[o4 + 1] = phi0;
+            pB[o4 + 1] = phi0; pB[o4 + 2] = lead;
         }
 
         const RIB_ROWS = 24;
