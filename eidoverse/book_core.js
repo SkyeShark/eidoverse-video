@@ -314,37 +314,99 @@
             caseBoneS.push(S_BEND1 + (S_END - S_BEND1) * (i / 4));
         const caseBones = makeChain(caseBoneS);
 
-        // Where the opening rotation goes. The JOINT bones themselves stay
-        // rigid (a rotating bone at the board's edge smears its crease across
-        // the board through the skin blend and the case reads as a splayed
-        // softcover); the grooves take the boards flat. The spine strip does
-        // NOT rotate as a rigid unit into a flat trough: that parked the two
-        // joints a spine-width apart when open, so the block — whose fold is
-        // measured between the joints — slid ~40 mm along its own back board
-        // across every sweep (a 1000-page tome visibly squishing from the
-        // tail), and the trough's depth floated the whole book. A hollow
-        // back CURLS instead: as the boards open, the strip rolls into a
-        // hanging loop beneath the joints, which converge under the fold —
-        // the block stays put on its board, and the pages reach their squares
-        // open as well as closed. CURL_DEG is the strip's extra turn at full
-        // open (beyond its 180° rest); the grooves absorb it, each finishing
-        // bent 90° + CURL_DEG/2, doubled back under its board's edge — where
-        // the desk hides it, like the loop. 180 is the closed-loop value:
-        // the strip becomes a full hanging circle, the two groove hairpins'
-        // offsets cancel exactly, and the front joint lands ON the back
-        // joint — boards contiguous, fold on the joint line at every k
-        // (mid-sweep the cover hinges a few mm off the block's spine face).
-        const CURL_DEG = 180;
-        const isGroove = (s) => (s > S_BEND0 + 1e-6 && s <= S_GROOVE_B + 1e-6)
-            || (s >= S_GROOVE_F - 1e-6 && s < S_BEND1 - 1e-6);
+        // THE SPINE BAND — how the case opens. Every mechanism that keeps the
+        // cloth's full length has to put it somewhere when the boards lie
+        // flat: rotate the strip flat (joints a spine-width apart → the
+        // block, whose fold is measured between the joints, slid ~40 mm
+        // along its own board: the squish), let it hang in a loop (below
+        // the desk: "the spine clips into the desk"), or arch it up (through
+        // the block's throw-up). None survives her eyes. So the band is
+        // posed, not conserved:
+        //   closed        — the rest chain, exactly (rims flat, round bulging)
+        //   rims          — the groove cloth TIGHTENS over the first third of
+        //                   the sweep (the hinge hugs the block; no hairpins)
+        //   round         — a rigid spine that tilts toward the desk and, over
+        //                   the second half, COMPRESSES uniformly into the gap
+        //                   under the gutter (its title squashes where the
+        //                   boards and pages hide it)
+        //   front rim+board — rotate through the sweep as before
+        // Nothing ever drops below the board plane, nothing crosses the
+        // block, the joints end ~0.15 T apart, and the fold's travel stays
+        // under a centimetre on a 1000-page tome. Bones carry their segment
+        // length in position.x, so compression is a per-bone length scale.
+        const isBackRim = (s) => s > S_BEND0 + 1e-6 && s <= S_GROOVE_B + 1e-6;
         const isRound = (s) => s > S_GROOVE_B + 1e-6 && s < S_GROOVE_F - 1e-6;
-        const nG = caseBoneS.filter(isGroove).length;
-        const nR = caseBoneS.filter(isRound).length;
-        const curlShare = nR > 0 && nG > 0 ? -CURL_DEG / angle : 0;   // < 0: the round bends MORE
-        const caseW = caseBoneS.map((s) =>
-            isGroove(s) ? (1 - curlShare) / nG : isRound(s) ? curlShare / nR : 0);
-        const caseCum = [];
-        { let a = 0; for (const w of caseW) { a += w; caseCum.push(a); } }
+        const isFrontRim = (s) => s >= S_GROOVE_F - 1e-6 && s < S_BEND1 - 1e-6;
+        const smooth01 = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+        // The BACK rim keeps its length: it is what holds the spine a groove's
+        // width clear of the block's spine face, so the round's tip never
+        // curls into the pages' corner and the block never has to shove
+        // aside for the cloth. Only the front rim and the round compress.
+        const L_SPAN = S_BEND1 - S_GROOVE_B;                    // round + front rim, at rest
+        const C_OPEN = Math.max(0.002, 0.15 * 2 * HALF_T);      // their length with the boards flat
+        const S_OPEN = Math.min(1, C_OPEN / Math.max(1e-6, L_SPAN));
+        const rimEase = (k) => smooth01(k / 0.35);
+        // The round stays a full-height rigid spine — its top, the hinge,
+        // ABOVE the block's top-spine corner (a squeeze that parked the hinge
+        // below the corner drove the round's tip and the hinge cloth through
+        // the pages: the bundle "through the spine's edge at the cover") —
+        // and COLLAPSES into the gap only as the cover lands, shrinking
+        // first and lying down after, so the hinge barely swings.
+        const collapse = (k) => smooth01((k - 0.85) / 0.15);
+        const roundScale = (k) => 1 - collapse(k) * (1 - S_OPEN);
+        const roundTilt = (k) => (Math.PI / 2) * collapse(k) ** 2;
+        function caseDirAt(i, k, sign) {
+            const s = caseMidS[i], rest = restAng(s);
+            if (isRound(s)) {
+                // the rigid spine lies DOWN spine-ward — and its bulge UNBENDS
+                // as it collapses: laid down with its rest curvature it hung a
+                // shallow U 0.8 mm under the boards' plane, the spine "clipping
+                // into the desk" of a book lying open
+                const c = collapse(k);
+                return rest + (Math.PI / 2 - rest) * c + sign * roundTilt(k);
+            }
+            if (isFrontRim(s) || s >= S_BEND1 - 1e-6) return rest + sign * (OPEN_DEG * Math.PI / 180) * k;
+            return rest;                                          // back board + back rim
+        }
+        function caseScaleAt(i, k) {
+            const s = caseMidS[i];
+            if (isRound(s)) return roundScale(k);
+            if (isFrontRim(s)) return 1 - rimEase(k) * (1 - S_OPEN);
+            return 1;                                             // boards + back rim: full length
+        }
+        // Compression is a bone SCALE, not a bone spacing: skinned vertices
+        // keep their bind offset from their bone, so bunching the bones left
+        // the rim's 12 mm of cloth hanging off them as a grey band between
+        // spine and cover. But a rotation inside a parent's non-uniform scale
+        // is a SHEAR, so the scale cannot ride the hierarchy either (it put
+        // the hinge 70 mm up and the cloth under the desk). Each bone's local
+        // matrix is therefore written directly:
+        //   local = T(L) · S(parent)⁻¹ · Rz(Δangle) · S(own)
+        // which composes to  rigid(parent) · T(parentScale·L) · Rz · S(own):
+        // the parent's scale shortens THIS segment, this bone's frame stays
+        // rigid, and its own scale compresses only the cloth bound to it.
+        const _mSi = new THREE.Matrix4(), _mR = new THREE.Matrix4(), _mS = new THREE.Matrix4();
+        function writeCase(dirAt, scaleAt) {
+            let prevA = 0, prevS = 1;
+            for (let i = 0; i < caseBones.length; i++) {
+                const b = caseBones[i];
+                const a = dirAt(i), s = scaleAt(i);
+                const L = i === 0 ? caseBoneS[0] : caseBoneS[i] - caseBoneS[i - 1];
+                b.matrixAutoUpdate = false;
+                b.matrix.makeTranslation(L, 0, 0)
+                    .multiply(_mSi.makeScale(1 / prevS, 1, 1))
+                    .multiply(_mR.makeRotationZ(a - prevA))
+                    .multiply(_mS.makeScale(s, 1, 1));
+                b.matrixWorldNeedsUpdate = true;
+                prevA = a; prevS = s;
+            }
+        }
+        function poseCase(k, sign) {
+            writeCase((i) => caseDirAt(i, k, sign), (i) => caseScaleAt(i, k));
+        }
+        function bindRestCase() {
+            writeCase(() => 0, () => 1);
+        }
         const caseMidS = caseBoneS.map((v, i) =>
             i < caseBoneS.length - 1 ? (v + caseBoneS[i + 1]) / 2 : v);
 
@@ -373,8 +435,7 @@
         {
             const _p = new THREE.Vector3(), _q = new THREE.Vector3();
             const poseK = (sg, k) => {
-                poseChain(caseBones, (i) =>
-                    restAng(caseMidS[i]) + sg * (OPEN_DEG * Math.PI / 180) * k * caseCum[i]);
+                poseCase(k, sg);
                 caseBones[0].updateMatrixWorld(true);
             };
             const tipY = (sg) => {
@@ -404,7 +465,7 @@
                 if (Math.abs(x - jointX) > Math.abs(apexX - jointX)) apexX = x;
             }
             tubeDepth = Math.max(0, Math.abs(apexX - jointX) - BOARD_TH);
-            poseChain(caseBones, () => 0);       // back to bind rest
+            bindRestCase();                       // back to bind rest
         }
         // Rounding amplitude: the block's spine edge bows into the hollow,
         // deepest at mid-stack, leaving a real clearance to the cloth. The
@@ -723,9 +784,9 @@
         // ---- the GPU leaf field ---------------------------------------------
         // No leaf is a skinned mesh any more. The fold is ANALYTIC — the old
         // bone chain only ever integrated leafPhi over 12 segments — so the
-        // vertex stage does the same sum from 8 scalars per leaf:
+        // vertex stage does the same sum from 5 scalars per leaf:
         //     pos(s) = root + Σₖ clamp(s−Sₖ, 0, Lₖ)·(cos φ(Mₖ), sin φ(Mₖ))
-        // with φ(u) = mix(arc, boardDrape, shoulder) + bow·sin(πu/W)/2 and
+        // with φ(u) = arc(u) + bow·sin(πu/W)/2 and
         // arc(u) = π/2 − dir·min(u/r, |π/2 − rad|) (leafPhi's atan2 collapses
         // to plain arithmetic). A whole book is then: TWO instanced draws for
         // every stock leaf (shells + edges), THREE textured "window" leaves
@@ -751,8 +812,8 @@
             [arrays.iT.length + arrays.iB.length, arrays.iE.length, 2],
         ]);
 
-        // per-leaf params: pA = (rad, r, rootX, rootY), pB = (bow, shoulder,
-        // radBoard, rBoard), pVis = 0 while a window slot draws that leaf
+        // per-leaf params: pA = (rad, r, rootX, rootY), pB = (bow, -, -, -),
+        // pVis = 0 while a window slot draws that leaf
         const pA = new Float32Array(N_LEAF * 4);
         const pB = new Float32Array(N_LEAF * 4);
         const pVis = new Float32Array(N_LEAF).fill(1);
@@ -775,18 +836,12 @@
             const posFn = T.Fn(() => {
                 const p = T.positionGeometry;
                 const rad = pAn.x.toVar(), r = pBnSafe(pAn.y).toVar();
-                const bow = pBn.x.toVar(), sh = pBn.y.toVar();
-                const radB = pBn.z.toVar(), rB = pBnSafe(pBn.w).toVar();
+                const bow = pBn.x.toVar();
                 const s = p.x.toVar();
                 const phi = (uNode) => {
                     const u = typeof uNode === 'number' ? T.float(uNode) : uNode;
                     const dir = T.float(1).sub(T.step(HPI + 1e-6, rad).mul(2));
-                    const arc = T.float(HPI).sub(dir.mul(
-                        T.min(u.div(r), rad.sub(HPI).abs())));
-                    const dirB = T.float(1).sub(T.step(HPI + 1e-6, radB).mul(2));
-                    const drp = T.float(HPI).sub(dirB.mul(
-                        T.min(u.div(rB), radB.sub(HPI).abs())));
-                    return T.mix(arc, drp, sh)
+                    return T.float(HPI).sub(dir.mul(T.min(u.div(r), rad.sub(HPI).abs())))
                         .add(bow.mul(T.sin(T.float(Math.PI / LEAF_W).mul(u))).mul(0.5));
                 };
                 const xy = T.vec2(pAn.z, pAn.w).toVar();
@@ -806,14 +861,10 @@
             const norFn = T.Fn(() => {
                 const n = T.normalGeometry;
                 const rad = pAn.x, r = pBnSafe(pAn.y);
-                const bow = pBn.x, sh = pBn.y;
-                const radB = pBn.z, rB = pBnSafe(pBn.w);
+                const bow = pBn.x;
                 const u = T.positionGeometry.x;
                 const dir = T.float(1).sub(T.step(HPI + 1e-6, rad).mul(2));
-                const arc = T.float(HPI).sub(dir.mul(T.min(u.div(r), rad.sub(HPI).abs())));
-                const dirB = T.float(1).sub(T.step(HPI + 1e-6, radB).mul(2));
-                const drp = T.float(HPI).sub(dirB.mul(T.min(u.div(rB), radB.sub(HPI).abs())));
-                const ph = T.mix(arc, drp, sh)
+                const ph = T.float(HPI).sub(dir.mul(T.min(u.div(r), rad.sub(HPI).abs())))
                     .add(bow.mul(T.sin(T.float(Math.PI / LEAF_W).mul(u))).mul(0.5)).toVar();
                 const c = T.cos(ph).toVar(), sn = T.sin(ph).toVar();
                 return T.transformNormalToView(T.vec3(
@@ -921,7 +972,7 @@
 
         // the CPU side of every leaf: same math the bones ran, now 8 floats
         const yOffOf = (i) => BLOCK_H * (1 - 2 * (i + 0.5) / N_LEAF);
-        function leafParams(i, deg, bow = 0, lift = 0, shoulder = 0, bf = null) {
+        function leafParams(i, deg, bow = 0, lift = 0) {
             const yOff = yOffOf(i);
             const c = Math.cos(deg * Math.PI / 180);
             const dy = yOff * c;
@@ -939,8 +990,8 @@
             // as deep as the measured hollow at this leaf's height allows.
             const rootY = lift + rootYOf(dy, closedness, up);
             const baseX = -foldShift + LEAF_TH
-                + GUTTER_IN * (1 - closedness)
-                + taperXOf(yOff, c, up);
+                + taperXOf(yOff, c, up)
+                - closedTuck * (1 - up);
             // uniform per-stack clamp on the BASE, parabola after: the
             // stack shifts as a rigid body to clear the cloth, and the
             // rounding still nests its middle into the hollow beyond it —
@@ -950,29 +1001,15 @@
             const cx = clothXat(rootY);
             if (cx > -Infinity) roundIn = Math.min(roundIn, Math.max(0, base - cx - LEAF_TH));
             const rootX = base - roundIn;
-            let radB = 0, rB = r, sh = 0;
-            if (shoulder > 0 && bf) {
-                sh = shoulder;
-                const o = rootY + r;
-                const nx = Math.sin(bf.ang), ny = -Math.cos(bf.ang);
-                const A = Math.max(0.05, bf.ang - Math.PI / 2);
-                const gx = -(1 - Math.cos(A)), gy = Math.sin(A);
-                const b0x = bf.jx + nx * o, b0y = bf.jy + ny * o;
-                const num = (rootX - b0x) * nx + (rootY - b0y) * ny;
-                const den = gx * nx + gy * ny;
-                rB = Math.abs(den) > 1e-6
-                    ? Math.min(0.4, Math.max(r, -num / den)) : r;
-                radB = bf.ang;
-            }
             const o4 = i * 4;
             pA[o4] = deg * Math.PI / 180; pA[o4 + 1] = r;
             pA[o4 + 2] = rootX; pA[o4 + 3] = rootY;
-            pB[o4] = bow; pB[o4 + 1] = sh; pB[o4 + 2] = radB; pB[o4 + 3] = rB;
+            pB[o4] = bow;
         }
 
         // ---- posing ---------------------------------------------------------
         // (leafPhi lives in the vertex stage now — see foldNodes above; the
-        // CPU keeps only the root/drape solve in leafParams.)
+        // CPU keeps only the root solve in leafParams.)
 
         // The fold: the text block folds ONCE, midway between the two joints —
         // and that midpoint is MEASURED off the posed chain every move. A
@@ -989,7 +1026,7 @@
 
         // The FRONT BOARD'S FRAME, measured in pageFrame coordinates — joint
         // position and surface angle read straight off the posed case bones,
-        // so a draped leaf can lie ON the actual board with nothing inferred.
+        // so the riding slab folds at the ACTUAL bend with nothing inferred.
         const _pj = new THREE.Vector3(), _pt = new THREE.Vector3();
         function boardFrame() {
             pageFrame.updateMatrixWorld(true);
@@ -1023,6 +1060,13 @@
             }
         }
         let stackClampX = -Infinity;  // per-stack rigid clamp, set in poseAll
+        // CLOSED TUCK: a flat closed sheet spends nothing in a gutter curl, so
+        // LEAF_W (sized for the open reach) overshoots the boards' square
+        // when shut — the outer leaves read flush with the board edges. The
+        // block tucks into the hollow by exactly the overshoot, MEASURED at
+        // build against the back board's fore-edge bone; the hollow cap
+        // still bounds the middle. Eases out with the throw-up.
+        let closedTuck = 0;
         function clothXat(y) {
             let best = -Infinity;
             for (let i = 0; i + 3 < clothPts.length; i += 2) {
@@ -1074,25 +1118,12 @@
             return ROUNDING * rf * rf * (3 - 2 * rf)
                 * Math.max(0, 1 - (yOff / BLOCK_H) ** 2);
         };
-        // `shoulder` (0..1) slides a TURNED leaf's root from the fold toward
-        // the FRONT JOINT. A cover mid-swing pivots at its joint while pages
-        // fold at the block's centre — parallel planes a foldShift apart, so
-        // a leaf lying "on" an inclined cover actually hung in air below it
-        // (the audit's page-first hits from behind, and the pale sliver at
-        // the spine's open end). Real paper DRAPES OVER THE SHOULDER: it
-        // leaves from the joint while the board is inclined and converges
-        // back to the fold as the board lies flat — which is exactly
-        // shoulder = sin(board angle). All of that math now lives in
-        // leafParams (CPU scalars) + foldNodes (vertex stage), above.
         // ONE monotonic fan over the whole block, indexed by leaf number — a
         // leaf higher in a stack must always tilt more, or a lower tail climbs
         // through the sheet above it (two independent fan scales did exactly
         // that, coincident to 15 µm).
         const LAID = PAGE_DEG;
         const FAN = 1.2;
-        // the gravity pile's fan: the block's through-thickness expressed as
-        // an angle at page length (see the turned-stack branch in poseAll)
-        const PILE_DEG = (2 * BLOCK_H / LEAF_W) * 180 / Math.PI;
         const split = openAt;
         const rightDeg = (i) => FAN * (N_LEAF - 1 - i) / Math.max(1, N_LEAF - 1 - split);
         const leftDeg = (i) => LAID - FAN * i / Math.max(1, N_LEAF - 1);
@@ -1141,33 +1172,95 @@
             pageFrame.add(mesh);
             backings.push({ mesh, bside });
         }
+        // ---- the riding slab --------------------------------------------------
+        // Mid-sweep the TURNED stack rides the cover as a SLAB: a hollow-back
+        // block flexes at the joint, so the turned sheets fold at the COVER'S
+        // BEND, stacked along its inward normal by their own thickness — the
+        // first-turned leaf on the pastedown, the last-turned deepest. The
+        // model before this placed them at mirrored spine heights and DRAPED
+        // each sheet up to the cover on a 200 mm arc, which bowed every sheet
+        // 3–4 mm outside the case at the hinge on its way up: the pale band
+        // between spine and cover, the wedge of roots at the spine's open
+        // ends, a flyleaf floating a finger under its cover. Shut, the slab's
+        // fold line IS the block's spine face (the hinge sits a lip fore-edge-
+        // ward of the shoulders), so it blends from the shoulder onto the bend
+        // as the rim tightens, and into the open-flat fold over the collapse.
+        const slab = { on: false, w: 0, land: 0, jx: 0, jy: 0, nx: 0, ny: 0, tx: 1, ty: 0, delta: 0 };
+        function slabSet(k, bf) {
+            slab.on = !!bf;
+            slab.w = bf ? rimEase(k) : 0;
+            slab.land = bf ? collapse(k) : (k >= 0.5 ? 1 : 0);
+            if (!bf) return;
+            const a = bf.ang;
+            slab.tx = Math.cos(a); slab.ty = Math.sin(a);
+            slab.nx = slab.ty; slab.ny = -slab.tx;                 // the cover's inward normal
+            slab.jx = bf.jx + slab.nx * BOARD_TH;                   // the pastedown at the bend
+            slab.jy = bf.jy + slab.ny * BOARD_TH;
+            // a sheet leaves its root vertically and bends to the board angle
+            // with radius r; that bend shifts its straight run r·delta along
+            // the normal, so the root sits at layer − r·delta and the SHEET at layer
+            slab.delta = (Math.sin(a) - 1) / (a <= Math.PI / 2 ? 1 : -1);
+        }
+        const _sr = [0, 0];
+        // the root of a sheet `layer` deep from the pastedown with curl r, given
+        // its place in the shut block (cx, cy) and in the open-flat fold (fx, fy)
+        function slabRoot(layer, r, cx, cy, fx, fy) {
+            const off = Math.max(-(BOARD_TH - 0.0003), layer - r * slab.delta);
+            const sx = slab.jx + slab.nx * off, sy = slab.jy + slab.ny * off;
+            let x = cx + (sx - cx) * slab.w, y = cy + (sy - cy) * slab.w;
+            x += (fx - x) * slab.land; y += (fy - y) * slab.land;
+            // never outside the cover: the landing blend can pass under the bend
+            const d = (x - slab.jx) * slab.nx + (y - slab.jy) * slab.ny;
+            if (d < off) { x += slab.nx * (off - d); y += slab.ny * (off - d); }
+            _sr[0] = x; _sr[1] = y;
+            return _sr;
+        }
+
         const RIB_ROWS = 24;
+        const _lp = [0, 0];
         function updateLinings(k, kL, maxDeg, splitY, clampTurnX, clampRestX) {
             const closedness = (1 - k) ** 2;
+            const up = throwUp(k);
+            const pt = (yOff, c, sideClamp) => {
+                const dy = yOff * c;
+                const y = rootYOf(dy, closedness, up);
+                let roundIn = roundInOf(yOff, k);
+                const baseX = -foldShift + LEAF_TH - 0.0004
+                            + taperXOf(yOff, c, up)
+                    - closedTuck * (1 - up);
+                const base = Math.max(baseX, sideClamp);
+                const cxr = clothXat(y);          // never deeper than the measured hollow
+                if (cxr > -Infinity) roundIn = Math.min(roundIn, Math.max(0, base - cxr - LEAF_TH));
+                _lp[0] = base - roundIn; _lp[1] = y;
+                return _lp;
+            };
             for (const b of backings) {
-                const degSide = b.bside === 'L'
-                    ? Math.min(LAID * kL, maxDeg) : 0;
-                const sideClamp = (b.bside === 'L' ? clampTurnX : clampRestX)
-                    - LEAF_TH * 0.65;
+                const L = b.bside === 'L';
+                const degSide = L ? Math.min(LAID * kL, maxDeg) : 0;
+                // the mull sits a real thickness BEHIND the roots (0.4 mm) so
+                // it is the spine face — coplanar, the leaves' cream root
+                // edges won and the block read as bare paper from the spine
+                // side — but never past the cloth (clamp = cloth + LEAF_TH)
+                const sideClamp = (L ? clampTurnX : clampRestX) - LEAF_TH + 0.00005;
+                const restClamp = clampRestX - LEAF_TH + 0.00005;
                 const c = Math.cos(degSide * Math.PI / 180);
                 // outermost leaves' thickness walls reach a sheet beyond
                 // their root centres — the lining overshoots to cover them
-                const lo = b.bside === 'L' ? splitY : -BLOCK_H - LEAF_TH * 1.5;
-                const hi = b.bside === 'L' ? BLOCK_H + LEAF_TH * 1.5 : splitY;
+                const lo = L ? splitY : -BLOCK_H - LEAF_TH * 1.5;
+                const hi = L ? BLOCK_H + LEAF_TH * 1.5 : splitY;
                 const pos = b.mesh.geometry.attributes.position;
                 for (let r2 = 0; r2 <= RIB_ROWS; r2++) {
                     const yOff = lo + (hi - lo) * (r2 / RIB_ROWS);
-                    const dy = yOff * c;
-                    const up = throwUp(k);
-                    const y = rootYOf(dy, closedness, up);
-                    let roundIn = roundInOf(yOff, k);
-                    const baseX = -foldShift + LEAF_TH * 0.35
-                        + GUTTER_IN * (1 - closedness)
-                        + taperXOf(yOff, c, up);
-                    const base = Math.max(baseX, sideClamp);
-                    const cxr = clothXat(y);          // never deeper than the measured hollow
-                    if (cxr > -Infinity) roundIn = Math.min(roundIn, Math.max(0, base - cxr - LEAF_TH));
-                    const x = base - roundIn;
+                    const f = pt(yOff, c, sideClamp);
+                    let x = f[0], y = f[1];
+                    if (L && slab.on) {                            // the mull rides the slab too
+                        let cx = 0, cy = 0;
+                        if (slab.w < 1) { const q = pt(yOff, 1, restClamp); cx = q[0]; cy = q[1]; }
+                        const sr = slabRoot(BLOCK_H - yOff, curlROf(yOff * c, up), cx, cy, x, y);
+                        // the shut/fold points carry their own 0.4 mm; the slab's share here
+                        const behind = 0.0004 * slab.w * (1 - slab.land);
+                        x = sr[0] - slab.tx * behind; y = sr[1] - slab.ty * behind;
+                    }
                     pos.setXYZ(r2 * 2, x, y, -LEAF_H / 2);
                     pos.setXYZ(r2 * 2 + 1, x, y, LEAF_H / 2);
                 }
@@ -1197,29 +1290,6 @@
             body.position.z = -Math.min(0, lo);
         }
 
-        // SEAT CLIP: the case may hang below the plane it rests on (the
-        // hollow's loop when open). A desk hides that only if it is solid —
-        // a thin top over an open frame shows the loop from any low angle.
-        // So the case discards its own fragments below the seat plane. The
-        // plane is FIXED in the case's frame: the back board is the chain's
-        // start and never moves relative to it, so its underside (the bind
-        // pose's lowest vertex) is the seat at every k, tilted books
-        // included. Done in the material (TSL opacity + alphaTest), not
-        // renderer clipping planes — r184's WebGPU path ignored those on this
-        // skinned mesh. Node materials only; classic ones stay unclipped.
-        let seatYLocal = Infinity;
-        for (let i = 1; i < casePos.length; i += 3) if (casePos[i] < seatYLocal) seatYLocal = casePos[i];
-        function armSeatClip() {
-            const { positionLocal, select, float } = tsl;
-            if (!positionLocal || !select || !float) return;
-            const below = positionLocal.y.lessThan(float(seatYLocal - 0.0002));
-            for (const m of [caseMesh.material].flat()) {
-                if (!m || !m.isNodeMaterial) continue;
-                m.opacityNode = select(below, float(0), float(1));
-                m.alphaTest = 0.5;
-                m.needsUpdate = true;
-            }
-        }
 
         // ---- public state ----------------------------------------------------
         let openK = null;        // 0..1 case opening
@@ -1227,33 +1297,12 @@
         let turnPhase = null;    // non-null while a leaf is mid-flight
         let turnWad = 1;         // sheets in the air together (bulk skips)
 
+        const lastClamp = { turn: -Infinity, rest: -Infinity };   // instrument: the last per-stack cloth clamps
         function poseAll() {
             const k = openK ?? 0;
-            // Drape weight: FULL plank whenever the board is meaningfully
-            // inclined (a partial blend leaves a fraction of the fold pose's
-            // sag — 19% of 15 mm still pokes), releasing to the fold arc only
-            // over the last stretch of lying flat, and off when closed.
-            const up = Math.min(1, Math.max(0, k / 0.12));
-            const down = Math.min(1, Math.max(0, (0.985 - k) / 0.12));
-            let shoulder = up * down;
-            // the board's measured frame, whenever the case is mid-sweep:
-            // the drape needs it past vertical, and the GRAVITY CLAMP below
-            // needs it the whole way down
-            let bf = k > 0.001 && k < 0.999 ? boardFrame() : null;
-            if (shoulder > 1e-4 && bf) {
-                // The DRAPE only while the board is past vertical. It
-                // bridges the leaf-plane/board-plane offset where the board
-                // OVERHANGS and the plain arc leaves the turned stack hanging
-                // in air beneath it. Below vertical that same offset lands
-                // the stack safely ON the block — and the drape arithmetic
-                // (leafPhi's direction flip at 90°) flings tails out the
-                // fore-edge of a closing cover instead. Tight ramp: the
-                // near-vertical sag of the plain arc is ~a millimetre.
-                const tilt = Math.min(1, Math.max(0,
-                    (bf.ang - Math.PI / 2) / 0.04));
-                shoulder *= tilt;
-            } else shoulder = 0;
-            const drapeBf = shoulder > 1e-4 ? bf : null;
+            // the board's measured frame, whenever the case is mid-sweep: the
+            // GRAVITY CLAMP and the riding slab below need it the whole way
+            const bf = k > 0.001 && k < 0.999 ? boardFrame() : null;
             // GRAVITY: a turned page can never stand steeper than the board
             // it rests on. Unclamped, a closing book's turned stack held
             // its open fan angle (~80° at half-close) and stood as a paper
@@ -1270,6 +1319,13 @@
             // its own height span and shifts as one body; the rounding
             // parabola still curves within it.
             const closedAll = (1 - k) ** 2;
+            // The boundary keeps a visible HOLLOW: one sheet's clearance
+            // (0.03 mm) put the compressed mid-sweep round a hair behind the
+            // pages' root edges, which won the depth fight — the block's bare
+            // spine face read through the cloth as a grey band. A quarter of
+            // the closed tube's depth, capped at 1.5 mm, scales the air with
+            // the book (0.5 mm on the pamphlet, 1.5 mm on the tome).
+            const CLOTH_GAP = Math.min(0.0015, Math.max(LEAF_TH, 0.25 * tubeDepth));
             const clampFor = (degSide) => {
                 const cs = Math.cos(degSide * Math.PI / 180);
                 let worst = -Infinity;
@@ -1279,10 +1335,12 @@
                     const cx = clothXat(y);
                     if (cx > worst) worst = cx;
                 }
-                return worst + LEAF_TH;
+                return worst + CLOTH_GAP;
             };
             const clampTurnX = clampFor(Math.min(LAID * kL, maxDeg));
             const clampRestX = clampFor(0);
+            lastClamp.turn = clampTurnX; lastClamp.rest = clampRestX;   // instrument
+            slabSet(k, bf);
             const pp = source ? physFor(page) : page;
             const centre = split + pp;
             for (let i = 0; i < N_LEAF; i++) {
@@ -1291,22 +1349,21 @@
                 // persists; reopening shows the same spread). Unscaled they
                 // stick out of a closing case and read as escaped pages.
                 if (i < centre) {
+                    // parallel to the cover it rides, never steeper than it
+                    const degT = Math.min(leftDeg(i) * kL, maxDeg);
+                    const o4 = i * 4;
+                    let cx = 0, cy = 0;
+                    if (slab.on && slab.w < 1) {          // its place in the SHUT block
+                        stackClampX = clampRestX;
+                        leafParams(i, 0);
+                        cx = pA[o4 + 2]; cy = pA[o4 + 3];
+                    }
                     stackClampX = clampTurnX;
-                    // GRAVITY PILE: when the board clamp bites, the turned
-                    // stack must not collapse into the board's plane (at
-                    // the last page that flattened a 55 mm tome to a sheet
-                    // mid finish-roll). Pages piled on a closing board keep
-                    // their thickness by ANGLE: the outermost (first-
-                    // turned) leaf hugs the board, inner leaves fan beneath
-                    // it, and the fan is the block's real thickness
-                    // expressed at page length — pamphlets barely fan,
-                    // tomes cascade.
-                    const natural = leftDeg(i) * kL;
-                    const pileFrac = centre > 1 ? i / (centre - 1) : 0;
-                    const piled = maxDeg - PILE_DEG * pileFrac;
-                    leafParams(i,
-                        Math.min(natural, Math.max(piled, maxDeg * 0.55)),
-                        0, 0, shoulder, drapeBf);
+                    leafParams(i, degT);                  // the open-flat fold
+                    if (slab.on) {
+                        const sr = slabRoot(BLOCK_H - yOffOf(i), pA[o4 + 1], cx, cy, pA[o4 + 2], pA[o4 + 3]);
+                        pA[o4 + 2] = sr[0]; pA[o4 + 3] = sr[1];
+                    }
                     continue;
                 }
                 stackClampX = clampRestX;
@@ -1376,8 +1433,7 @@
             k = Math.max(0, Math.min(1, k));
             if (k === openK) return;
             openK = k;
-            poseChain(caseBones, (i) => restAng(caseMidS[i])
-                + openSign * (OPEN_DEG * Math.PI / 180) * k * caseCum[i]);
+            poseCase(k, openSign);
             reseat();
             measureFold();
             poseAll();
@@ -1592,7 +1648,15 @@
             }
             return hi;
         })();
-        armSeatClip();
+        {
+            // closed tuck: measured, not assumed (the case is closed here)
+            const v = new THREE.Vector3();
+            pageFrame.updateMatrixWorld(true);
+            caseBones[0].getWorldPosition(v);
+            pageFrame.worldToLocal(v);
+            closedTuck = Math.max(0, LEAF_W - (v.x - SQUARE) - LEAF_TH);
+            poseAll();
+        }
         return {
             root, body, caseMesh, caseBones,
             leafField: { stockShells, stockEdges, windowSlots, pickL, pickR },
@@ -1617,7 +1681,10 @@
                 foldShift, cloth: clothPts.slice(),
                 joints: { back: B_BACK, front: B_FRONT },
                 GUTTER_IN, ROUNDING, REST_DROP, TAPER_FRAC, tubeDepth, PAGE_R_EFF,
-                caseBoneS: caseBoneS.slice(), caseW: caseW.slice(),
+                caseBoneS: caseBoneS.slice(),
+                caseScale: caseBoneS.map((_, i) => caseScaleAt(i, openK ?? 0)),
+                S_OPEN, C_OPEN, closedTuck,
+                clampTurn: lastClamp.turn, clampRest: lastClamp.rest,
             }),
         };
     }
