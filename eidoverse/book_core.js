@@ -610,10 +610,10 @@
         // groove · board, not one flat slab, and the shut block's spine
         // overhangs a real hollow at the joints.
         // kraft-backed open-weave cloth: a 1 cm tile, ten threads each way
-        function mullTexture() {
+        function mullTexture(base) {
             const S = 256;
             const { c, ctx } = canvas2d(S, S);
-            ctx.fillStyle = '#a3855f';
+            ctx.fillStyle = base;
             ctx.fillRect(0, 0, S, S);
             let seed = 7;
             const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -647,8 +647,11 @@
             t.anisotropy = 4;
             return t;
         }
-        const mullMat = new THREE.MeshStandardNodeMaterial();
-        mullMat.map = mullTexture();
+        const inlayMat = new THREE.MeshStandardNodeMaterial();   // the hollow's kraft tube
+        inlayMat.map = mullTexture('#a3855f');
+        inlayMat.roughness = 0.96;
+        const mullMat = new THREE.MeshStandardNodeMaterial();    // the super: natural cotton
+        mullMat.map = mullTexture('#d9d0c1');
         mullMat.roughness = 0.96;
         mullMat.side = THREE.DoubleSide;
         const T_JOINT = Math.min(BOARD_TH, 0.0003), T_SPINE = Math.min(BOARD_TH, 0.0008);
@@ -762,7 +765,7 @@
         caseGeo.addGroup(idxOuter.length + idxInner.length + idxRim.length, idxInlay.length, 3);
         skinByCoord(caseGeo, caseCoord, caseBoneS);
 
-        const caseMesh = bindSkinned(caseGeo, [clothMat, innerMat, trimMat, mullMat],
+        const caseMesh = bindSkinned(caseGeo, [clothMat, innerMat, trimMat, inlayMat],
                                      caseBones, caseFrame);
         caseMesh.name = 'case';
 
@@ -787,14 +790,12 @@
         const CLEAR = 0.0016;       // air under the pastedown
         const BLOCK_H = (PAGE_R - CLEAR) / (1 + 2 * TH_FRAC / N_LEAF);
         const PAGE_R_EFF = PAGE_R - BLOCK_H * (1 - TAPER_FRAC);
-        // A leaf's gutter arc eats r*(PI/2 - 1) of horizontal reach before the
-        // flat tail starts; the cut is longer by exactly that, plus gutterIn
-        // (the block tucks toward the spine to fill the hollow you can see
-        // into at the head), so neither moves the fore-edge square.
-        const REACH_LOSS = PAGE_R_EFF * (Math.PI / 2 - 1);
-        // + the fold's depth into the round beyond the joint line: sitting in
-        // the round, the folds are that much further spine-ward than the joint
-        const LEAF_W = BOARD_LEN - SQUARE + GUTTER_IN + REACH_LOSS + Math.min(0.006, 0.4 * tubeDepth);
+        // sized so the SHUT block's outermost sheet — its fold at the groove,
+        // one lip past the joint, its run dead straight — ends one square
+        // short of the boards' edge. (The old budget summed gutter/reach/tube
+        // allowances for a fold line that no longer exists; the end sheets of
+        // every closed book frayed to within a millimetre of the cover's rim.)
+        const LEAF_W = BOARD_LEN - SQUARE + LIP;
         const LEAF_H = HALF_H * 2 - 2 * SQUARE_HT;
         const LEAF_TH = (BLOCK_H * 2 / N_LEAF) * TH_FRAC;
 
@@ -1055,6 +1056,9 @@
         };
         const stockShells = mkInst(shellGeo, stockPaper, 'leaf_stock');
         const stockEdges = mkInst(edgeGeoI, stockEdge, 'leaf_stock_edges');
+        // the block's closed walls draw before its sheets: they prime the
+        // depth buffer and the hidden interior shells early-z out
+        stockEdges.renderOrder = -1;
 
         // =====================================================================
         // THE MULL — the loose binding cloth
@@ -1113,7 +1117,11 @@
             }
             // the strip's outer face: behind the folds by half a sheet, over
             // the lining by the cloth (= the fold line's clearance, spent)
-            const back = 0.5 * LEAF_TH + FOLD_UP - MULL_OVER;
+            // a sheet is a WEDGE a full LEAF_TH thick right at its fold, and a
+            // sheet hooking over a corner swings its underside past that — the
+            // mull keeps under it and hugs the lining
+            const back = FOLD_UP + 0.5 * LEAF_TH - MULL_OVER;
+            const backEnd = Math.min(back, 1.2 * LEAF_TH);
             const e = 0.004;
             for (let i = 0; i <= MULL_N_STRIP; i++) {
                 const u = i / MULL_N_STRIP;
@@ -1122,7 +1130,9 @@
                 const p0 = foldAt(Math.max(0, u - e)), x0 = p0.x, y0 = p0.y;
                 let nx = y1 - y0, ny = -(x1 - x0);
                 const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;      // inward, into the block
-                put(x - nx * back, y - ny * back);
+                const tap = smooth01(Math.min(u, 1 - u) / 0.05);
+                const bk = backEnd + (back - backEnd) * tap;
+                put(x - nx * bk, y - ny * bk);
             }
             for (let i = 0; i <= MULL_N_LIP; i++) {        // front groove -> front joint
                 const sv = S_GROOVE_F + (S_BEND1 - S_GROOVE_F) * (i / MULL_N_LIP);
@@ -1229,7 +1239,7 @@
             _sp.ang = Math.atan2(ny, nx);
             return _sp;
         }
-        const FOLD_UP = 0.00015;                                     // the fold line's clearance over the cloth (the mull lives in it)
+        const FOLD_UP = Math.max(0.00015, 2 * LEAF_TH);              // the fold line's clearance over the cloth (the mull lives in it)
         function spineAt(u) {
             const s = S_GROOVE_B + (S_GROOVE_F - S_GROOVE_B) * Math.min(1, Math.max(0, u));
             return caseInnerAt(s, thickAt(s) + 0.5 * LEAF_TH + FOLD_UP);
@@ -1242,7 +1252,9 @@
         // wearing its headband, both stacks' sheets leaving the hump and curling
         // down onto their boards). Its curvature reverses on the way — round,
         // flat, arch — as a rounded spine does when a book is laid open.
-        const ARCH_DEG = 150;                           // the open arch's angle (≈ the photo)
+        const ARCH_DEG = 126;                           // the open arch's angle (the photo reads ~150°,
+                                                        // but the feet draw in with the chord: 126° keeps
+                                                        // them near the grooves so open pages keep their reach)
         let thetaD = 1.7;                               // the shut round's angle, measured at build
         const arch = { w: 0, ax: 0, ay: 0, bx: 0, by: 0, th: 0 };
         function archSet(w) {                           // w = how far the round has straightened
@@ -1286,7 +1298,12 @@
             _fo.x = x; _fo.y = y;
             return _fo;
         }
-        function leafParams(i, deg, bow = 0) {
+        // o4 comes from the CALLER: poseAll draws each stack top-first, so a
+        // leaf's params live at its DRAW SLOT, not at leaf-index·4 (computing
+        // o4 from i here let the next leaf's params overwrite this leaf's
+        // solved bridge — every interior turned sheet lost its bridge and ran
+        // straight off the propped cover into the desk)
+        function leafParams(i, deg, bow = 0, o4 = i * 4) {
             const u = (N_LEAF - 0.5 - i) / N_LEAF;
             const f = foldAt(u), x = f.x, y = f.y;
             // the strip's outward normal, read off the fold line itself
@@ -1294,7 +1311,6 @@
             const p1 = foldAt(Math.min(1, u + e)), x1 = p1.x, y1 = p1.y;
             const p0 = foldAt(Math.max(0, u - e)), x0 = p0.x, y0 = p0.y;
             const ang = Math.atan2(-(x1 - x0), y1 - y0);
-            const o4 = i * 4;
             pA[o4] = deg * Math.PI / 180; pA[o4 + 1] = R_CREASE;
             pA[o4 + 2] = x; pA[o4 + 3] = y;
             pB[o4] = bow; pB[o4 + 1] = ang; pB[o4 + 2] = 0;
@@ -1407,10 +1423,20 @@
                 // more than four times its rise, never less than a paper bend.
                 let dl = Math.abs(Math.atan2(Math.sin(rad - spineAng), Math.cos(rad - spineAng)));
                 if (dl > Math.PI / 2) dl -= Math.PI / 2;
-                const rCap = Math.min(R_REACH, Math.max(R_BEND, 4 * -d));
-                dl = Math.max(dl, Math.acos(Math.max(-1, 1 + d / rCap)));
+                r = -d / (1 - Math.cos(Math.max(dl, 0.05)));
+                const rCap = Math.min(R_REACH, Math.max(R_BEND, 0.35 * -d));
+                if (r > rCap) {
+                    // a rise the arc cannot make within rCap: crease steeper,
+                    // run STRAIGHT for the difference, then bend. A block's
+                    // worth of pages flopped against an upright cover is a
+                    // compact slab against it — the exact-landing arc there
+                    // was a quarter-roll off the spine wider than the book,
+                    // and the finish flip swept it through the desk.
+                    dl = Math.max(dl, 0.79);
+                    r = rCap;
+                    lead = Math.max(0, (-d - r * (1 - Math.cos(dl))) / Math.sin(dl));
+                }
                 phi0 = rad + up * dl;
-                r = -d / (1 - Math.cos(dl));
             }
             pA[o4] = rad;
             pA[o4 + 1] = Math.max(R_CREASE, Math.min(0.8 * LEAF_W, r));
@@ -1472,22 +1498,54 @@
             // heading is the board's own plus its place in the fan (pageAngle
             // measured against a flat-open cover); a resting sheet the same
             // against the back board
-            const turnedRad = (i) => bf.ang + (leftDeg(i) - 180) * Math.PI / 180;
-            const restingRad = (i) => bb.ang + rightDeg(i) * Math.PI / 180;
+            // the fans OPEN with the book (kL): shut, every sheet lies dead
+            // flat in its stack — an unscaled fan tilted a closed tome's
+            // bottom sheets a couple of degrees through its back board, half
+            // their width in the open air by the fore-edge
+            const turnedRad = (i) => bf.ang + (leftDeg(i) - 180) * (Math.PI / 180) * kL;
+            const restingRad = (i) => bb.ang + rightDeg(i) * (Math.PI / 180) * kL;
+            // instance j draws leaf order(j), each stack TOP first: a reader
+            // looks down on the block, and bottom-up instance order made the
+            // GPU shade every buried sheet back-to-front before the top one
+            // covered them (front-to-back, the interior early-z rejects)
+            const slotOf = (i) => (i < centre ? centre - 1 - i : i);
+            // pages cannot rest on a cover that is above them: as the cover
+            // swings down past ~95° the turned pile FLOPS onto the resting
+            // side — each sheet's plane swings from the cover's face to its
+            // own place in the closed stack (the same virtual-plane solve as
+            // a flight, so both ends are exact) — and the last of the fall
+            // rides the cover down. Closing from the last page no longer
+            // hangs the whole block in the air off the lifting cover.
+            let coverDeg = bf.ang * 180 / Math.PI;
+            if (coverDeg < -90) coverDeg += 360;          // a propped cover reads ~196°, not −164°
+            const flop = smooth01((95 - coverDeg) / 20);
 
             // a shut cover clears the block by the head slot; that clearance is
             // the turned sheets' extra layer until the cover has lifted off
             const gapNow = headGap * (1 - smooth01(k / 0.15));
             for (let i = 0; i < N_LEAF; i++) {
-                const o4 = i * 4;
+                const o4 = slotOf(i) * 4;
                 // Turned leaves RIDE the cover: scaled by openK so closing the
                 // book carries the left stack down with it (page state
                 // persists; reopening shows the same spread). Unscaled they
                 // stick out of a closing case and read as escaped pages.
                 if (i < centre) {
-                    leafParams(i, turnedRad(i) * 180 / Math.PI);
-                    bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
-                        (i + 0.5) * PITCH + gapNow, nfx, nfy, jfx, jfy, pB[o4 + 1]);
+                    const radA = turnedRad(i);
+                    leafParams(i, radA * 180 / Math.PI, 0, o4);
+                    if (flop > 0 && (turnPhase === null || i < centre - 1)) {
+                        const layT = (i + 0.5) * PITCH + gapNow, layR = (N_LEAF - 0.5 - i) * PITCH;
+                        const radB = restingRad(i);
+                        const rad = radA + Math.atan2(Math.sin(radB - radA), Math.cos(radB - radA)) * flop;
+                        const qx = (jfx + nfx * layT) * (1 - flop) + (jbx + nbx * layR) * flop;
+                        const qy = (jfy + nfy * layT) * (1 - flop) + (jby + nby * layR) * flop;
+                        let vnx = nfx * (1 - flop) + nbx * flop, vny = nfy * (1 - flop) + nby * flop;
+                        const vl = Math.hypot(vnx, vny) || 1; vnx /= vl; vny /= vl;
+                        pA[o4] = rad;
+                        bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
+                    } else {
+                        bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
+                            (i + 0.5) * PITCH + gapNow, nfx, nfy, jfx, jfy, pB[o4 + 1]);
+                    }
                     continue;
                 }
                 if (turnPhase !== null && i >= centre && i < centre + turnWad) {
@@ -1515,7 +1573,7 @@
                     // flight lifted the fold a block-height off the hump and
                     // lerped raw angles: near a propped cover at −160° the
                     // sheets went round the long way, down through the desk.)
-                    leafParams(i, 0, Math.sin(Math.PI * e) * 0.55 * kL);
+                    leafParams(i, 0, Math.sin(Math.PI * e) * 0.55 * kL, o4);
                     const from = restingRad(i);
                     let dd = turnedRad(i) - from;
                     dd = ((dd % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -1528,7 +1586,7 @@
                     bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
                     continue;
                 }
-                leafParams(i, restingRad(i) * 180 / Math.PI);
+                leafParams(i, restingRad(i) * 180 / Math.PI, 0, o4);
                 bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
                     (N_LEAF - 0.5 - i) * PITCH, nbx, nby, jbx, jby, pB[o4 + 1]);
             }
@@ -1544,8 +1602,8 @@
                 slot.mesh.visible = on;
                 slot.leaf = on ? li : -1;
                 if (on) {
-                    pVis[li] = 0;
-                    const o4 = li * 4;
+                    pVis[slotOf(li)] = 0;
+                    const o4 = slotOf(li) * 4;
                     for (let r = 0; r < NROW; r++) {
                         const h = hRows[r];
                         slot.uRows[r].value.set(h[o4], h[o4 + 1], h[o4 + 2], h[o4 + 3]);
