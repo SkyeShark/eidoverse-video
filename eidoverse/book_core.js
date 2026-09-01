@@ -367,14 +367,15 @@
         const sweep = (k) => smooth01((k - 0.5) / 0.5);
         const tipTarget = (f) => Math.PI * f;                                  // at k = 1
         const flatTarget = (f) => smooth01(2 * Math.min(f, 1 - f));            // round straightened, at k = 1
-        const caseState = { f: 0.5, c: 0, tip: 0, beta: 0, alpha: 0 };
-        function caseDirAt(i, k, sign) {
-            const s = caseMidS[i], rest = restAng(s);
+        const caseState = { f: 0.5, c: 0, tip: 0, beta: 0, alpha: 0, side: 'front' };
+        function caseDirAtS(s, k, sign) {                   // the strip's heading at arc length s
+            const rest = restAng(s);
             if (isRound(s)) return rest + (Math.PI / 2 - rest) * caseState.c + sign * caseState.tip;
             if (isFrontRim(s) || s >= S_BEND1 - 1e-6)
                 return rest + sign * (OPEN_DEG * Math.PI / 180 + caseState.alpha) * k;
             return rest - sign * caseState.beta;                  // back board + back rim: the prop
         }
+        function caseDirAt(i, k, sign) { return caseDirAtS(caseMidS[i], k, sign); }
         const caseScaleAt = () => 1;
         // Compression is a bone SCALE, not a bone spacing: skinned vertices
         // keep their bind offset from their bone, so bunching the bones left
@@ -411,7 +412,40 @@
             return _gv.y;
         }
         let B_GB = 0, B_GF = 0, HINGE_R = 1;              // set once the chain exists (below)
-        function poseCase(k, sign, f = 0.5) {
+        // THE OTHER COVER. A book shut from its back — the back cover swung
+        // over the block lying on the front board — is the front close seen
+        // in a mirror: the strip is symmetric end to end, so the reflection
+        // of the front close at the mirrored page fraction (1 - f) is
+        // exactly it, board for board. Side 'back' solves the front close
+        // at 1 - f (its props, tip and round come out right for the other
+        // board by that symmetry), then writes the chain REFLECTED: bone i
+        // takes the heading of the arc length across from it, negated (a
+        // reflection turns the strip around and flips its angles). The
+        // chain's own ground is still bone 0, so pinBody() then carries the
+        // body to hold the front board where the reader saw it lie open
+        // (pinRef: the front side's k = 1 pose for this reading). In the
+        // world that reads as the back cover alone swinging over a still
+        // block, the spine standing up with it, and shut it lies front-
+        // cover-down where the open book's front board was: finished.
+        // (Merely pinning the front board under the front close's own pose
+        // is NOT the mirror: mid-sweep that round stood on the back board's
+        // edge and, laid over, hung 14 mm into the desk with the whole block
+        // rooted to it. And the finish before that composed the front close
+        // with a cartwheel of the book about the shut spine's line — a 60 mm
+        // spine lying flat swept through the desk, and the two rotations
+        // never cancelled.)
+        let pinRef = null;
+        function poseCase(k, sign, f = 0.5, side = 'front') {
+            if (side === 'back') {
+                poseCase(1, sign, f);                       // what the reader sees open: the pin's reference
+                pinRef = frontFrameCase();
+                poseCase(k, sign, 1 - f);                   // the front close of the mirrored reading
+                writeCase((i) => -caseDirAtS(S_END - caseMidS[i], k, sign), (i) => 1);
+                caseState.f = f;
+                caseState.side = 'back';
+                return;
+            }
+            caseState.side = 'front';
             const sw = sweep(k);
             caseState.f = f;
             caseState.tip = tipTarget(f) * sw;
@@ -1490,6 +1524,31 @@
             pB[o4 + 1] = phi0; pB[o4 + 2] = lead;
         }
 
+        // the front board's joint and heading in caseFrame coords — the chain's
+        // own pose, whatever the body is doing
+        const _pinP = new THREE.Vector3(), _pinT = new THREE.Vector3();
+        function frontFrameCase() {
+            caseBones[B_FRONT].getWorldPosition(_pinP); caseFrame.worldToLocal(_pinP);
+            caseBones[caseBones.length - 1].getWorldPosition(_pinT); caseFrame.worldToLocal(_pinT);
+            return [_pinP.x, _pinP.y, Math.atan2(_pinT.y - _pinP.y, _pinT.x - _pinP.x)];
+        }
+        // THE PIN: body = C · F_open · F_now⁻¹ · C⁻¹ (C = caseFrame's local
+        // matrix, F = the front board's frame in caseFrame coords) puts the
+        // front board back where it lay open. The front sweep leaves the body
+        // alone — the back board is the ground there.
+        const _mA = new THREE.Matrix4(), _mB = new THREE.Matrix4(), _mC = new THREE.Matrix4();
+        const _mD = new THREE.Matrix4(), _vS = new THREE.Vector3();
+        const frameMat = (m, fr) => m.makeRotationZ(fr[2]).setPosition(fr[0], fr[1], 0);
+        function pinBody() {
+            body.quaternion.identity(); body.position.set(0, 0, 0);
+            if (caseState.side !== 'back' || !pinRef) return;
+            const now = frontFrameCase();
+            caseFrame.updateMatrix();
+            _mB.copy(frameMat(_mD, now)).invert();                // F_now⁻¹
+            _mC.copy(caseFrame.matrix).invert();                  // C⁻¹
+            _mA.copy(caseFrame.matrix).multiply(frameMat(_mD, pinRef)).multiply(_mB).multiply(_mC);
+            _mA.decompose(body.position, body.quaternion, _vS);
+        }
         // Ride up on whatever part of the case is lowest: the strip's outer
         // surface is authored at local y=0, so the chain joints ARE the
         // surface and the lowest bone is the contact point. (A Box3 would read
@@ -1500,21 +1559,28 @@
             // desk plane (a hollow's loop, hidden in the desk) and must never
             // lift the book: seating on the lowest CLOTH point floated an
             // open tome 10.6 mm off its desk and bobbed it with every sweep.
-            caseFrame.updateMatrixWorld(true);
+            // Measured in ROOT space (root's +z is up; the desk is the plane
+            // z = -HALF_T, caseFrame's y = 0) through the local matrices: the
+            // body may be turned by the pin, so caseFrame's y is no longer
+            // "up", and nothing here may lean on a stale world.
+            body.updateMatrix();
             let lo = Infinity;
             for (let i = 0; i < caseBones.length; i++) {
                 const s = caseBoneS[i];
                 if (s > S_BEND0 + 1e-6 && s < S_BEND1 - 1e-6) continue;   // grooves + round: may hang
                 caseBones[i].getWorldPosition(_v);
                 caseFrame.worldToLocal(_v);
-                if (_v.y < lo) lo = _v.y;
+                _v.applyMatrix4(caseFrame.matrix).applyMatrix4(body.matrix);
+                if (_v.z < lo) lo = _v.z;
             }
-            body.position.z = -Math.min(0, lo);
+            body.position.z += -Math.min(0, lo + HALF_T);
+            body.updateWorldMatrix(true, true);       // every frame read below is fresh
         }
 
 
         // ---- public state ----------------------------------------------------
         let openK = null;        // 0..1 case opening
+        let openSide = 'front';  // which cover swings: 'front' (the back board grounds) | 'back' (the front board + block ground)
         let page = 0;            // leaves turned by setPage/poseTurn, atop split
         let turnPhase = null;    // non-null while a leaf is mid-flight
         let turnWad = 1;         // sheets in the air together (bulk skips)
@@ -1528,7 +1594,8 @@
         };
         function poseAll() {
             const k = openK ?? 0;
-            poseCase(k, openSign, fNow());
+            poseCase(k, openSign, fNow(), openSide);
+            pinBody();
             reseat();
             const bf = boardFrame(), bb = backFrame();
             refreshClothProfile();
@@ -1565,11 +1632,18 @@
             // hangs the whole block in the air off the lifting cover.
             let coverDeg = bf.ang * 180 / Math.PI;
             if (coverDeg < -90) coverDeg += 360;          // a propped cover reads ~196°, not −164°
-            const flop = smooth01((95 - coverDeg) / 20);
+            const back = openSide === 'back';
+            // front side: the turned pile flops off the closing front cover;
+            // back side (the mirror): the turned pile IS the block on the
+            // grounded board and never moves — the RESTING sheets flop onto
+            // it as the back cover comes over, gated by the boards' angle
+            const flop = back ? 0 : smooth01((95 - coverDeg) / 20);
+            const openDeg = Math.abs(Math.atan2(Math.sin(bf.ang - bb.ang), Math.cos(bf.ang - bb.ang))) * 180 / Math.PI;
+            const flopR = back ? smooth01((95 - openDeg) / 20) : 0;
 
             // a shut cover clears the block by the head slot; that clearance is
             // the turned sheets' extra layer until the cover has lifted off
-            const gapNow = headGap * (1 - smooth01(k / 0.15));
+            const gapNow = back ? 0 : headGap * (1 - smooth01(k / 0.15));
             for (let i = 0; i < N_LEAF; i++) {
                 const o4 = slotOf(i) * 4;
                 // Turned leaves RIDE the cover: scaled by openK so closing the
@@ -1633,7 +1707,23 @@
                     bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
                     continue;
                 }
-                leafParams(i, restingRad(i) * 180 / Math.PI, 0, o4);
+                const radR = restingRad(i);
+                leafParams(i, radR * 180 / Math.PI, 0, o4);
+                if (flopR > 0) {
+                    // the mirror flop: this resting sheet settles onto the pile
+                    // on the front board as the back cover comes over it —
+                    // the same virtual-plane solve as the front side's
+                    const layR = (N_LEAF - 0.5 - i) * PITCH, layT = (i + 0.5) * PITCH;
+                    const radT = turnedRad(i);
+                    const rad = radR + Math.atan2(Math.sin(radT - radR), Math.cos(radT - radR)) * flopR;
+                    const qx = (jbx + nbx * layR) * (1 - flopR) + (jfx + nfx * layT) * flopR;
+                    const qy = (jby + nby * layR) * (1 - flopR) + (jfy + nfy * layT) * flopR;
+                    let vnx = nbx * (1 - flopR) + nfx * flopR, vny = nby * (1 - flopR) + nfy * flopR;
+                    const vl = Math.hypot(vnx, vny) || 1; vnx /= vl; vny /= vl;
+                    pA[o4] = rad;
+                    bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
+                    continue;
+                }
                 bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
                     (N_LEAF - 0.5 - i) * PITCH, nbx, nby, jbx, jby, pB[o4 + 1]);
             }
@@ -1669,15 +1759,16 @@
             pickL.scale.x = openish ? 1 : 0.001;
         }
 
-        // (A FORWARD close — the finished book lying back-cover-up — is NOT
-        // a rig pose: extending k past 1 corkscrews the chain, because the
-        // forward-closed book is the SAME closed shape rotated 180° about
-        // its spine line. Drivers compose it: close normally while rotating
-        // the holder over the spine — see bookcomp's finish flip.)
-        function setOpen(k) {
+        // k = 0..1 is the swinging cover's sweep; side names the cover. A
+        // FORWARD close — the finished book lying front-cover-down — is the
+        // back side shut: the same shape as the front side shut, the other
+        // board on the desk. (Extending k past 1 would corkscrew the chain;
+        // the side is the second axis, not a longer sweep.)
+        function setOpen(k, side = openSide) {
             k = Math.max(0, Math.min(1, k));
-            if (k === openK) return;
-            openK = k;
+            side = side === 'back' ? 'back' : 'front';
+            if (k === openK && side === openSide) return;
+            openK = k; openSide = side;
             poseAll();
         }
 
@@ -1945,7 +2036,9 @@
                 GUTTER_IN, TAPER_FRAC, tubeDepth, PAGE_R_EFF,
                 caseBoneS: caseBoneS.slice(),
                 jointBackX, headGap, R_BEND, thetaD, archW: arch.w,
-                caseState: Object.assign({}, caseState),
+                caseState: Object.assign({}, caseState), openSide,
+                body: [body.position.x, body.position.y, body.position.z,
+                       body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w],
                 turnPhase, turnWad, page, centre: split + (source ? physFor(page) : page),
                 leaf: (i) => ({ A: Array.from(pA.subarray(i * 4, i * 4 + 4)), B: Array.from(pB.subarray(i * 4, i * 4 + 4)) }),
                 mull: () => Array.from(_mp),
