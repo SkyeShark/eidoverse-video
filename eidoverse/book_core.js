@@ -375,6 +375,11 @@
                 return rest + sign * (OPEN_DEG * Math.PI / 180 + caseState.alpha) * k;
             return rest - sign * caseState.beta;                  // back board + back rim: the prop
         }
+        // (A hinged lip — its heading curling from the round's end to the
+        // board's along its 12 mm — was tried for the flap a drooping cover
+        // folds back over the crown: the curl stood up as a loop and carried
+        // the board's plane 8 mm off the block. The lip stays rigid with its
+        // board; the joint's inside is roofed by the mull's flange instead.)
         function caseDirAt(i, k, sign) { return caseDirAtS(caseMidS[i], k, sign); }
         const caseScaleAt = () => 1;
         // Compression is a bone SCALE, not a bone spacing: skinned vertices
@@ -615,11 +620,45 @@
             (ON_BOARD(s) && (s < TI_FORE || S_END - s < TI_FORE))
             || (HALF_H - Math.abs(z) < TI_HEAD);
 
+        const T_JOINT = Math.min(BOARD_TH, 0.0003), T_SPINE = Math.min(BOARD_TH, 0.0008);
+        const thickAt = (sv) => {
+            const ease = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+            if (sv <= S_BEND0) return BOARD_TH - (BOARD_TH - T_JOINT) * ease((sv - (S_BEND0 - 0.004)) / 0.004);
+            if (sv >= S_BEND1) return BOARD_TH - (BOARD_TH - T_JOINT) * ease(((S_BEND1 + 0.004) - sv) / 0.004);
+            if (sv < S_GROOVE_B) return T_JOINT + (T_SPINE - T_JOINT) * ease((sv - (S_GROOVE_B - 0.004)) / 0.004);
+            if (sv > S_GROOVE_F) return T_JOINT + (T_SPINE - T_JOINT) * ease(((S_GROOVE_F + 0.004) - sv) / 0.004);
+            return T_SPINE;
+        };
+        // THE JOINT GROOVE. A case's inside is FLUSH across its joints — the
+        // pastedown and the super run flat from the board over the joint to
+        // the block's shoulder — and the cloth is pressed into a groove on
+        // the OUTSIDE, between each board's edge and the spine (the French
+        // groove). Authoring the thin joint on the bone line put the groove
+        // inside and left a smooth crown outside: with a board propped, that
+        // crown stood a board's thickness proud of the sheets lying on it and
+        // ran along the crease as a ridge of cloth, gold rule and all, at the
+        // front and end of every book (her "grey folding line"). So the inner
+        // face is held at the boards' inner faces over the lips and down the
+        // spine's shoulders, and the outer face is whatever thickness is left
+        // beneath it. The bone line stays the boards' outer face.
+        const SH_W = 0.22;                                // the shoulders' reach in u from each groove
+        const shoulderOff = (sv) => {
+            if (sv < S_BEND0 - 0.004 || sv > S_BEND1 + 0.004) return 0;
+            if (sv < S_GROOVE_B || sv > S_GROOVE_F) return BOARD_TH;
+            const u = (sv - S_GROOVE_B) / (S_GROOVE_F - S_GROOVE_B);
+            return BOARD_TH * smooth01(1 - Math.min(u, 1 - u) / SH_W);
+        };
+        const innerAt = (sv) => Math.max(thickAt(sv), shoulderOff(sv));   // the case's inner face, off the bone line
+        // its outer face: the groove, inward — over the lips and the boards'
+        // edge bevels only. The spine piece keeps its crown: dipping its
+        // shoulders too put a trench in the cloth beside the crease at the
+        // last pages, where the hanging round's shoulder faces up.
+        const outerAt = (sv) => (sv < S_GROOVE_B || sv > S_GROOVE_F) ? innerAt(sv) - thickAt(sv) : 0;
         (function outerStrip() {
             const NR = OUT_Z.length, base = casePos.length / 3;
             for (let i = 0; i < CS.length; i++)
                 for (let j = 0; j < NR; j++) {
-                    casePos.push(CS[i].s, 0, OUT_Z[j]);
+                    casePos.push(CS[i].s, outerAt(CS[i].s), OUT_Z[j]);
                     caseNor.push(0, -1, 0);
                     caseUv.push(CS[i].u, (HALF_H - OUT_Z[j]) / (2 * HALF_H));
                     caseCoord.push(CS[i].s);
@@ -688,21 +727,12 @@
         mullMat.map = mullTexture('#e7e2d7');
         mullMat.roughness = 0.96;
         mullMat.side = THREE.DoubleSide;
-        const T_JOINT = Math.min(BOARD_TH, 0.0003), T_SPINE = Math.min(BOARD_TH, 0.0008);
-        const thickAt = (sv) => {
-            const ease = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
-            if (sv <= S_BEND0) return BOARD_TH - (BOARD_TH - T_JOINT) * ease((sv - (S_BEND0 - 0.004)) / 0.004);
-            if (sv >= S_BEND1) return BOARD_TH - (BOARD_TH - T_JOINT) * ease(((S_BEND1 + 0.004) - sv) / 0.004);
-            if (sv < S_GROOVE_B) return T_JOINT + (T_SPINE - T_JOINT) * ease((sv - (S_GROOVE_B - 0.004)) / 0.004);
-            if (sv > S_GROOVE_F) return T_JOINT + (T_SPINE - T_JOINT) * ease(((S_GROOVE_F + 0.004) - sv) / 0.004);
-            return T_SPINE;
-        };
         (function innerSurface() {
             const NR = IN_Z.length;
             const baseP = casePos.length / 3;
             for (let i = 0; i < CS.length; i++)
                 for (let j = 0; j < NR; j++) {
-                    casePos.push(CS[i].s, thickAt(CS[i].s), IN_Z[j]);
+                    casePos.push(CS[i].s, innerAt(CS[i].s), IN_Z[j]);
                     caseNor.push(0, 1, 0);
                     caseUv.push(U_LINING(CS[i].s),
                         V_LINING((HALF_H - IN_Z[j]) / (2 * HALF_H)));
@@ -711,7 +741,7 @@
             const baseC = casePos.length / 3;
             for (let i = 0; i < CS.length; i++)
                 for (let j = 0; j < NR; j++) {
-                    casePos.push(CS[i].s, thickAt(CS[i].s), IN_Z[j]);
+                    casePos.push(CS[i].s, innerAt(CS[i].s), IN_Z[j]);
                     caseNor.push(0, 1, 0);
                     // U_RIM, not mirrored wrap: the mirror lands on the spine
                     // stamping at u~0.5, which is what once forced the head
@@ -727,7 +757,7 @@
             const baseI = casePos.length / 3;
             for (let i = 0; i < CS.length; i++)
                 for (let j = 0; j < NR; j++) {
-                    casePos.push(CS[i].s, thickAt(CS[i].s), IN_Z[j]);
+                    casePos.push(CS[i].s, innerAt(CS[i].s), IN_Z[j]);
                     caseNor.push(0, 1, 0);
                     caseUv.push(CS[i].s / 0.01, IN_Z[j] / 0.01);
                     caseCoord.push(CS[i].s);
@@ -753,10 +783,10 @@
             const base = casePos.length / 3;
             const z = zAt(j), nz = j === 0 ? 1 : -1;
             for (let i = 0; i < CS.length; i++)
-                for (const y of [0, thickAt(CS[i].s)]) {
+                for (const [q, y] of [[0, outerAt(CS[i].s)], [1, innerAt(CS[i].s)]]) {
                     casePos.push(CS[i].s, y, z);
                     caseNor.push(0, 0, nz);
-                    const off = (y === 0 ? 0 : (j === 0 ? -RIM_DV : RIM_DV));
+                    const off = (q === 0 ? 0 : (j === 0 ? -RIM_DV : RIM_DV));
                     caseUv.push(U_RIM(CS[i].s), vAt(j) + off);
                     caseCoord.push(CS[i].s);
                 }
@@ -1171,14 +1201,10 @@
         pageFrame.add(mull);
         const _mp = new Float32Array(MULL_PTS * 2);      // the posed profile [x0,y0, x1,y1, ...]
         const MULL_OVER = 0.0001;                          // the cloth over the case lining
+        const _mStrip = new Float32Array((MULL_N_STRIP + 1) * 2);
         function updateMull(uC) {
             let n = 0;
             const put = (x, y) => { _mp[n * 2] = x; _mp[n * 2 + 1] = y; n++; };
-            for (let i = 0; i <= MULL_N_LIP; i++) {        // back joint -> back groove, on the lining
-                const sv = S_BEND0 + (S_GROOVE_B - S_BEND0) * (i / MULL_N_LIP);
-                const q = caseInnerAt(sv, thickAt(sv) + MULL_OVER);
-                put(q.x, q.y);
-            }
             // the strip's outer face: behind the folds by half a sheet, over
             // the lining by the cloth (= the fold line's clearance, spent)
             // a sheet is a WEDGE a full LEAF_TH thick right at its fold, and a
@@ -1197,12 +1223,32 @@
                 const tap = smooth01(Math.min(u, 1 - u) / 0.05);
                 const tapC = smooth01(Math.abs(u - uC) / 0.05);
                 const bk = backEnd + (back - backEnd) * Math.min(tap, tapC);
-                put(x - nx * bk, y - ny * bk);
+                _mStrip[i * 2] = x - nx * bk; _mStrip[i * 2 + 1] = y - ny * bk;
             }
-            for (let i = 0; i <= MULL_N_LIP; i++) {        // front groove -> front joint
-                const sv = S_GROOVE_F + (S_BEND1 - S_GROOVE_F) * (i / MULL_N_LIP);
-                const q = caseInnerAt(sv, thickAt(sv) + MULL_OVER);
-                put(q.x, q.y);
+            // the flanges: a real super's edges run STRAIGHT from the block's
+            // shoulders over the joints onto the boards — from each foot of
+            // the strip to the board's inner face at its joint
+            // each flange: from the joint along the lip's inner face to the
+            // groove end of the lip, then straight to the strip's foot — so
+            // where a drooping cover folds its lip back over the crown, the
+            // super climbs the crown's edge as a wall of cloth instead of
+            // leaving a black slot between the flap and the shoulder
+            const lipB = S_BEND0 + (S_GROOVE_B - S_BEND0) * 0.85, lipF = S_BEND1 - (S_BEND1 - S_GROOVE_F) * 0.85;
+            const jb = caseInnerAt(S_BEND0, BOARD_TH + MULL_OVER), jbx = jb.x, jby = jb.y;
+            const gb = caseInnerAt(lipB, BOARD_TH + MULL_OVER), gbx = gb.x, gby = gb.y;
+            for (let i = 0; i <= MULL_N_LIP; i++) {        // back joint -> lip end -> back foot
+                const t = i / MULL_N_LIP;
+                if (t <= 0.5) { const u = t * 2; put(jbx + (gbx - jbx) * u, jby + (gby - jby) * u); }
+                else { const u = (t - 0.5) * 2; put(gbx + (_mStrip[0] - gbx) * u, gby + (_mStrip[1] - gby) * u); }
+            }
+            for (let i = 0; i <= MULL_N_STRIP; i++) put(_mStrip[i * 2], _mStrip[i * 2 + 1]);
+            const jf = caseInnerAt(S_BEND1, BOARD_TH + MULL_OVER), jfx = jf.x, jfy = jf.y;
+            const gf = caseInnerAt(lipF, BOARD_TH + MULL_OVER), gfx = gf.x, gfy = gf.y;
+            const ex = _mStrip[MULL_N_STRIP * 2], ey = _mStrip[MULL_N_STRIP * 2 + 1];
+            for (let i = 0; i <= MULL_N_LIP; i++) {        // front foot -> lip end -> front joint
+                const t = i / MULL_N_LIP;
+                if (t <= 0.5) { const u = t * 2; put(ex + (gfx - ex) * u, ey + (gfy - ey) * u); }
+                else { const u = (t - 0.5) * 2; put(gfx + (jfx - gfx) * u, gfy + (jfy - gfy) * u); }
             }
             // the ribbon: two rows (head, tail), normals off the profile
             let arc = 0;
@@ -1305,9 +1351,19 @@
             return _sp;
         }
         const FOLD_UP = Math.max(0.00015, 2 * LEAF_TH);              // the fold line's clearance over the cloth (the mull lives in it)
+        // THE SHOULDERS. A rounded-and-backed block is wider at its spine
+        // than across its pages: the binder hammers the outer leaves over
+        // into shoulders a board's thickness high, and the boards' inner
+        // faces butt against them at the joints. The fold line rides the
+        // case's inner face (innerAt: the round's own clearance rising to the
+        // boards' inner faces at the grooves), so the sheets at the ends of
+        // the book leave their shoulders level with their boards instead of
+        // climbing out of a groove; the mull's flanges cross the lips at that
+        // height too, as a real super spans the joint.
         function spineAt(u) {
-            const s = S_GROOVE_B + (S_GROOVE_F - S_GROOVE_B) * Math.min(1, Math.max(0, u));
-            return caseInnerAt(s, thickAt(s) + 0.5 * LEAF_TH + FOLD_UP);
+            u = Math.min(1, Math.max(0, u));
+            const s = S_GROOVE_B + (S_GROOVE_F - S_GROOVE_B) * u;
+            return caseInnerAt(s, innerAt(s) + 0.5 * LEAF_TH + FOLD_UP);
         }
         // THE HOLLOW BACK. Shut, the block's spine lies in the case round. As the
         // case spine tips back and flattens, the block's spine — glued, rounded,
@@ -1459,10 +1515,14 @@
         // "up off the plane" for a heading is read from n̂ itself (a resting
         // sheet at 0° and a turned one at 180° both have n̂ = +y).
         const HANG_MIN = 3 * R_BEND;                      // above this a sheet DROPS; below, one arc
-        function bridge(o4, rad, px, py, layer, nx, ny, jx, jy, spineAng) {
+        // dlMin: the takeoff of the sheet UNDER this one in its stack (0 for the
+        // first); a sheet never leaves its fold gentler than the sheet beneath
+        // it, or its tail climbs through that sheet. Returns the takeoff used
+        // by a climb (0 otherwise) so the caller can carry it up the stack.
+        function bridge(o4, rad, px, py, layer, nx, ny, jx, jy, spineAng, dlMin = 0) {
             const d = (px - jx) * nx + (py - jy) * ny - layer;
             const up = Math.sign(-Math.sin(rad) * nx + Math.cos(rad) * ny) || 1;   // +1: rad+δ lifts off the plane
-            let phi0 = rad, r = R_CREASE, lead = 0;
+            let phi0 = rad, r = R_CREASE, lead = 0, dlOut = 0;
             if (d > 0.5 * R_CREASE) {
                 if (d < HANG_MIN) {
                     // a little above its plane: the sheet leaves its fold dipping
@@ -1487,17 +1547,35 @@
                 // not a hairpin). And it lands within a sane radius: never
                 // more than four times its rise, never less than a paper bend.
                 let dl = Math.abs(Math.atan2(Math.sin(rad - spineAng), Math.cos(rad - spineAng)));
-                if (dl > Math.PI / 2) dl -= Math.PI / 2;
+                // Past 90° the sheet folds over the strip's shoulder and CANNOT
+                // leave along the normal (a hairpin back into the other stack);
+                // it leaves between the strip's tangent and the perpendicular.
+                // This has to be CONTINUOUS in the angle: the old rule dropped
+                // straight from the normal to the tangent at 90° (a 45° jump
+                // of takeoff between two neighbouring sheets whose roots sit
+                // either side of the round's crown), and the bundles crossed —
+                // her "grey folding line" near the binding at the front and
+                // end of the book. Reflect down to 135°, then the tangent.
+                if (dl > Math.PI / 2) dl = dl > 0.75 * Math.PI ? dl - Math.PI / 2 : Math.PI - dl;
+                // PAPER STIFFNESS: an arc no tighter than R_BEND for the rise
+                // it has to make — a 3 mm rise takes off at ~50°, not 88°.
+                // (Bigger rises than a bend can make keep the normal.)
+                dl = Math.min(dl, Math.acos(Math.max(-1, 1 + d / R_BEND)));
                 // THE HINGE: a sheet climbing onto a board must be ON its
                 // plane by the time it reaches the board's joint — the board's
                 // inner face sits a board's thickness above the lip, and a
                 // gentle arc that lands past the joint spends its first
                 // centimetre inside the board. If the joint lies ahead along
                 // the plane, the turn tightens until the rise fits before it.
+                // (An arc that lands exactly AT the joint still dips into the
+                // board by its chords' sag; the stiffness cap above lands the
+                // small rises well short of it.)
                 {
                     const runJ = (jx - px) * Math.cos(rad) + (jy - py) * Math.sin(rad);
                     if (runJ > 1e-4) dl = Math.max(dl, Math.min(2.4, 2 * Math.atan(-d / runJ)));
                 }
+                dl = Math.max(dl, dlMin);                     // at least as steep as the sheet beneath
+                dlOut = dl;
                 r = -d / (1 - Math.cos(Math.max(dl, 0.05)));
                 const steep = Math.abs(Math.sin(rad));
                 const rCap = Math.min(R_REACH,
@@ -1516,12 +1594,14 @@
                     dl = Math.max(dl, 0.79);
                     r = Math.min(rCap, -d / (1 - Math.cos(dl)));
                     lead = Math.max(0, (-d - r * (1 - Math.cos(dl))) / Math.sin(dl));
+                    dlOut = dl;
                 }
                 phi0 = rad + up * dl;
             }
             pA[o4] = rad;
             pA[o4 + 1] = Math.max(R_CREASE, Math.min(0.8 * LEAF_W, r));
             pB[o4 + 1] = phi0; pB[o4 + 2] = lead;
+            return dlOut;
         }
 
         // the front board's joint and heading in caseFrame coords — the chain's
@@ -1644,13 +1724,19 @@
             // a shut cover clears the block by the head slot; that clearance is
             // the turned sheets' extra layer until the cover has lifted off
             const gapNow = back ? 0 : headGap * (1 - smooth01(k / 0.15));
-            for (let i = 0; i < N_LEAF; i++) {
+            // Each pile is walked from its board UP, carrying the takeoff of
+            // the sheet beneath (bridge's dlMin): a sheet higher in a stack
+            // never rises gentler than the one under it, so tails never climb
+            // through the sheet above. Sheets in the air (flights, flops)
+            // neither take nor set it.
+            let dlRun = 0;
+            for (let i = 0; i < centre; i++) {
                 const o4 = slotOf(i) * 4;
                 // Turned leaves RIDE the cover: scaled by openK so closing the
                 // book carries the left stack down with it (page state
                 // persists; reopening shows the same spread). Unscaled they
                 // stick out of a closing case and read as escaped pages.
-                if (i < centre) {
+                {
                     const radA = turnedRad(i);
                     leafParams(i, radA * 180 / Math.PI, 0, o4);
                     if (flop > 0 && (turnPhase === null || i < centre - 1)) {
@@ -1664,12 +1750,15 @@
                         pA[o4] = rad;
                         bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
                     } else {
-                        bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
-                            (i + 0.5) * PITCH + gapNow, nfx, nfy, jfx, jfy, pB[o4 + 1]);
+                        dlRun = bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
+                            (i + 0.5) * PITCH + gapNow, nfx, nfy, jfx, jfy, pB[o4 + 1], dlRun);
                     }
-                    continue;
                 }
-                if (turnPhase !== null && i >= centre && i < centre + turnWad) {
+            }
+            dlRun = 0;
+            for (let i = N_LEAF - 1; i >= centre; i--) {
+                const o4 = slotOf(i) * 4;
+                if (turnPhase !== null && i < centre + turnWad) {
                     // WAD flights: a grabbed chunk of sheets in the air
                     // together, each lagging the one above it — a skip reads
                     // as a handful of pages, not a fast-forwarded single
@@ -1724,8 +1813,8 @@
                     bridge(o4, rad, pA[o4 + 2], pA[o4 + 3], 0, vnx, vny, qx, qy, pB[o4 + 1]);
                     continue;
                 }
-                bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
-                    (N_LEAF - 0.5 - i) * PITCH, nbx, nby, jbx, jby, pB[o4 + 1]);
+                dlRun = bridge(o4, pA[o4], pA[o4 + 2], pA[o4 + 3],
+                    (N_LEAF - 0.5 - i) * PITCH, nbx, nby, jbx, jby, pB[o4 + 1], dlRun);
             }
             for (let i = 0; i < N_LEAF; i++) bakeLeaf(i);
             updateMull(1 - centre / N_LEAF);
