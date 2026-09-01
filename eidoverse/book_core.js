@@ -1454,6 +1454,16 @@
                 // more than four times its rise, never less than a paper bend.
                 let dl = Math.abs(Math.atan2(Math.sin(rad - spineAng), Math.cos(rad - spineAng)));
                 if (dl > Math.PI / 2) dl -= Math.PI / 2;
+                // THE HINGE: a sheet climbing onto a board must be ON its
+                // plane by the time it reaches the board's joint — the board's
+                // inner face sits a board's thickness above the lip, and a
+                // gentle arc that lands past the joint spends its first
+                // centimetre inside the board. If the joint lies ahead along
+                // the plane, the turn tightens until the rise fits before it.
+                {
+                    const runJ = (jx - px) * Math.cos(rad) + (jy - py) * Math.sin(rad);
+                    if (runJ > 1e-4) dl = Math.max(dl, Math.min(2.4, 2 * Math.atan(-d / runJ)));
+                }
                 r = -d / (1 - Math.cos(Math.max(dl, 0.05)));
                 const steep = Math.abs(Math.sin(rad));
                 const rCap = Math.min(R_REACH,
@@ -1464,9 +1474,13 @@
                     // worth of pages flopped against an upright cover is a
                     // compact slab against it — the exact-landing arc there
                     // was a quarter-roll off the spine wider than the book,
-                    // and the finish flip swept it through the desk.
+                    // and the finish flip swept it through the desk. The
+                    // radius is the SMALLER of the cap and the exact one: a
+                    // tiny rise off a near-parallel wall wants a tiny hook,
+                    // not the cap (three sheets of the shut janus took a
+                    // 75 mm radius at 45° and rose clean through its cover).
                     dl = Math.max(dl, 0.79);
-                    r = rCap;
+                    r = Math.min(rCap, -d / (1 - Math.cos(dl)));
                     lead = Math.max(0, (-d - r * (1 - Math.cos(dl))) / Math.sin(dl));
                 }
                 phi0 = rad + up * dl;
