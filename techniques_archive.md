@@ -319,3 +319,54 @@ width, repeat.x = (frameW/barH)·(64/pw), offset.x scroll) composite between
 world FX and signal FX exactly as documented. document.createElement('canvas')
 (napi shim) — OffscreenCanvas doesn't exist here; run `deno install` on fresh
 machines or every canvas texture is silently black.
+
+## Pose overlays from clip-derived keyframes (pose_layers.js rewrite, 2026-09-11)
+
+The kneel-and-place overlay is now a six-key mini-clip whose values come from
+the clip library, with contacts solved numerically (work/kneel2/: sample ->
+compose -> bake). Transferable lessons:
+
+- claude_suit rig conventions (verified by sampling clips on the rig): hip
+  flexion = -x upperLeg; knee flexion = +x lowerLeg; foot +x = plantarflex;
+  ELBOW HINGE IS LOCAL Y (x on the forearm does ~nothing); upperArm z ~ -+65
+  = arm at side; upperArm x is mostly a TWIST that aims the elbow hinge plane
+  (the reach clip points the forearm via twist + elbow, not shoulder swing).
+- Don't hand-derive contact heights from segment math: FK-pin the planted
+  ankle by solving the hips translation per key (secant, exact), and tune
+  toe/knee heights with 1-D secants against the rendered rig.
+- BUT never per-key-solve a DOF the target is insensitive to: solving knee
+  height via hip angle (thigh near vertical) zig-zagged the hip -9 -> +18
+  between keys — reads as the leg flip-flopping even though every contact
+  was correct. Author state DOFs as monotone curves; solve contacts with the
+  sensitive DOF (pelvis height via the front knee).
+- Slerp between distant keys bows FK contacts (~1cm dig / skate mid-segment);
+  keep key spacing <= ~0.2 of the path, add a solved in-between key.
+- stand_to_sit keeps both feet planted through its whole descent — good
+  ground truth for planted-foot coordination on this rig.
+- claude_suit is short-armed: wrist bottoms out ~0.31m above floor from a
+  settled genuflect at full sane fold; ground-placing needs the prop to ease
+  the last ~10cm, or design the beat as place-beside-knee.
+
+Addendum (same day, after human review of the motion): three more lessons.
+(1) The metric matching "the joints flip-flop" is JOINT FLEXION ANGLE vs
+time, not joint world-path smoothness — the knee position moved smoothly
+while its flexion pumped 21->47->31->92. (2) The pelvis path must be SOLVED
+(smooth per-key x/z targets, support thigh pitch/abduction as the DOFs);
+emergent-from-ankle-pinning pelvis traces S-curves and drifts off the
+support foot. (3) Interpolate baked keys with monotone cubic (PCHIP) over
+key eulers, live base as the s=0 knot — C1, overshoot-free, so monotone key
+values can never reverse mid-segment. Debug view of choice: continuous
+joint-trajectory plots from per-frame world positions (work/kneel2/
+plot_traj.py); frame sheets hide exactly this defect class.
+
+Addendum 2 (tail/springbones, same day): (a) pose-overlay scenes double-step
+springbones — the engine post-frame vrm.update is unconditional for
+registered VRMs while the overlay must also update; pose_layers now swallows
+the duplicate (humanoid commit only). (b) A spring chain hanging in a limb's
+collider sweep gets PUNTED into a new shape every frame (~10Hz thrash) —
+damping cannot fix a positional mechanism; steer the chain OUT of the sweep.
+(c) claude_suit's tail has no animatable root (all links are joints parented
+to hips): steer via spring settings — blend gravityDir/gravityPower (wind
+pull) + raise dragForce while the beat is active, restore exactly after.
+Debug view: 30fps consecutive-frame crops of the chain region (tail_strip_*
+in work/kneel2/).
