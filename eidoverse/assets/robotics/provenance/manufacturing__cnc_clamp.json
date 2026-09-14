@@ -1,0 +1,48 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP clamp captive stud",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP low-profile toe clamp",
+          14
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP sliding M6 T-nut",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP sliding M6 T-nut",
+          12
+        ]
+      ]
+    }
+  ]
+}

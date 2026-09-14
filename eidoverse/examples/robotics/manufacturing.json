@@ -1,0 +1,8 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 24,
+  "duration": 19,
+  "script": "eidoverse/examples/robotics/manufacturing.scene.js",
+  "outputVideo": "work/modular_manufacturing.mp4"
+}

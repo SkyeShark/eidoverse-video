@@ -19,8 +19,8 @@
  *
  * Placement QA is native: checkClipping / checkHovering / checkDensity run
  * post-setup (the engine pipes straight to ffmpeg with no on-disk frames).
- * UI/motion-graphics go through the Satori UI path (satori_ui.mjs) and
- * the makeScreen/makeOverlayLayer helpers; see AGENTS.md "Motion graphics".
+ * UI/motion-graphics go through rasterizeUI in render_common.mjs and
+ * the makeScreen/makeOverlayLayer helpers; see tools-guides/motion-graphics.md.
  *
  * Usage: deno run --allow-all --unstable-webgpu --node-modules-dir=auto \
  *          eidoverse/render_scene.mjs <config.json>
@@ -264,7 +264,7 @@ try {
         );
         for (const name of orphans) console.error(`  - ${name}`);
         console.error(
-            `[render_scene] Either wire them into scene.json's "assets" + use them in setup(), or delete them. See AGENTS.md "Every fetched model must end up used OR deleted".`,
+            `[render_scene] Either wire them into scene.json's "assets" + use them in setup(), or delete them. See tools-guides/assets.md (asset housekeeping).`,
         );
     }
 } catch (_) { /* non-fatal */ }
@@ -285,10 +285,9 @@ const HELPER_MODULES = [
     'eidoverse/rhombic_dodecahedron.js',
     'eidoverse/robot_sensors.js', 'eidoverse/robot_memory.js', 'eidoverse/robot_planner.js',
     'eidoverse/robot_body.js', 'eidoverse/robot_debug.js',
-    'eidoverse/mech_parts.js',            // globalThis.MechParts — procedural mechanical part generators (chamfered boxes, lathe housings, cables, treads, wheels, greebles); robotics_kit builds from these
-    'eidoverse/robotics_kit.js',          // globalThis.makeRobot / RoboticsKit — industrial robots (arm/delta/stewart/turret/agv/gantry/scara/printer), contraption connect(), applyTextures()
-    'eidoverse/iso_field.js',             // globalThis.makeIsoField — GPU-raymarched isosurface over a CPU-written voxel field (fast path for the MarchingCubes pattern; fab_sim renders through it)
-    'eidoverse/fab_sim.js',               // globalThis.FabSim — additive print() (printer/delta, molten goo + true mesh) + subtractive carve() (gantry mill); PrintSim/CNCSim alias here
+    'eidoverse/robotics_kit.js',          // globalThis.makeRobot / RoboticsKit — async modular GLB kit, named parts/ports, assemblies, joint motion and IK
+    'eidoverse/iso_field.js',             // globalThis.makeIsoField — GPU-raymarched isosurface over a CPU-written voxel field (standalone scalar fields; G430 fabrication has its own GPU geometry)
+    'eidoverse/fab_sim.js',               // globalThis.FabSim — G430 sliced FDM beads and swept-tool 2.5D CNC; PrintSim/CNCSim alias the new path API
     'eidoverse/camera_safety.js',
     'eidoverse/sdf_raymarch_loader.js',
     'eidoverse/procedural_materials.js',  // canvas-2d unblocked via @napi-rs/canvas shim
@@ -429,7 +428,7 @@ const VRMA_SLOTS = [
     'climbLedge', 'climbWallUp', 'climbWallDown', 'climbLadder',
     'fallIdle', 'fallLand', 'stairsUp', 'stairsDown', 'stairsRunUp', 'stairsRunDown',
     // Expressive — for a STATIONARY VRM only (no active controller waypoints).
-    // See AGENTS.md "Emotes + sitting on a stationary character".
+    // See tools-guides/characters.md (emotes and sitting).
     'talk', 'salute', 'cheer', 'fist', 'raise', 'reach', 'crazy', 'dance',
     // Sitting clips — slot name == the .vrma filename in assets/animations/.
     //   CHAIR:  'sitting_normal_chair' (seatOn default), 'sitting_nervous_arm_rub_chair'
@@ -1743,7 +1742,10 @@ try {
 {
     const r = globalThis._renderer || globalThis._r;
     if (r && r._initPromise) {
-        try { await r._initPromise; r._initPromise = null; } catch (e) {
+        // Keep Three's settled initialization promise. Clearing it makes the
+        // offline clock guard initialize a second time, orphaning GPU resources
+        // that setup() already rendered into (PMREM and simulation targets).
+        try { await r._initPromise; } catch (e) {
             console.error('[render_scene] auto-upgrade renderer init failed:', e.message);
             Deno.exit(1);
         }
@@ -3132,7 +3134,7 @@ try {
             if (hits.length) {
                 console.log(`[palette] ⚠ This scene's content reads like it WANTS a showpiece and used none. Strong fit for what's in it: ${hits.map(h => h[0]).join('  •  ')}. These are the engine's flagships and almost no production reaches for them — weaving the matching one in is usually the line between "fine" and "memorable". (Creative call, not a hard gate — but a pointed one.)`);
             } else {
-                console.log(`[palette] note — no simulation/particle showpiece in this production. The under-used flagships (see AGENTS.md "Pick a SHOWPIECE"): fluid_swe (liquid), cloth_sim (fabric), Loft.sweep (lofted forms), makeParticles, makeParticleMorph (dissolve/reform any mesh). One showpiece is often the difference between fine and memorable. Your call.`);
+                console.log(`[palette] note — no simulation/particle showpiece in this production. The under-used flagships (see tools-guides/production.md (choose techniques for the story)): fluid_swe (liquid), cloth_sim (fabric), Loft.sweep (lofted forms), makeParticles, makeParticleMorph (dissolve/reform any mesh). One showpiece is often the difference between fine and memorable. Your call.`);
             }
         }
     }
@@ -3513,7 +3515,7 @@ if (status.success) {
         const picks = [0.15, 0.5, 0.85].map((f) => Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * f))));
         const probeBase = outputVideo.replace(/(\.[a-z0-9]+)$/i, '');
         const sel = picks.map((n) => `eq(n\\,${n})`).join('+');
-        const p = new Deno.Command('ffmpeg', {
+        const p = new Deno.Command(Deno.env.get('FFMPEG_PATH') || 'ffmpeg', {
             args: ['-y', '-loglevel', 'error', '-i', outputVideo, '-vf', `select=${sel}`, '-vsync', 'vfr', `${probeBase}_probe%d.png`],
             stdout: 'null', stderr: 'piped',
         }).outputSync();

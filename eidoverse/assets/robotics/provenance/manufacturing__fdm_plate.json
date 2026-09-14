@@ -1,0 +1,15 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP removable PEI spring-steel sheet",
+          260
+        ]
+      ]
+    }
+  ]
+}

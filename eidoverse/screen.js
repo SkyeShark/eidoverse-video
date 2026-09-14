@@ -237,7 +237,7 @@
     };
 
     // makeAsciiPanel — multi-line ASCII art / monospace text as a glowing
-    // terminal-screen MESH (the AGENTS.md contract; this wrapper is what
+    // terminal-screen MESH (the tools-guides/motion-graphics.md contract; this wrapper is what
     // makes that doc entry true). A thin preset over makeScreen: fixed
     // text, retro redraw throttle, optional teletype reveal + blink cursor.
     // Returns the MESH (screen handle rides on mesh.userData.screen).

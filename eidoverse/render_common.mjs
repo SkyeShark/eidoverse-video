@@ -221,7 +221,10 @@ export async function setupRenderer(width, height) {
             // reliable discriminator is depthOrArrayLayers: morph/skinning buffers
             // are DataArrayTextures (one layer per morph target); every genuine
             // render target in this pipeline is single-layer.
-            if (h === 1 || arr > 1) {
+            // eidoverse/data/* labels declare sampled Float32 resources (cutter
+            // paths, removal events, etc.), never render targets. Preserve their
+            // bytes and precision; f16 reinterpretation corrupts motion and time.
+            if (h === 1 || arr > 1 || desc.label?.startsWith('eidoverse/data/')) {
                 _stripRACount++;
                 if (_stripRACount <= 3) {
                     console.log(`[render_common] stripping RENDER_ATTACHMENT from morph-like rgba32float texture (${w}x${h}x${arr})`);
@@ -572,7 +575,7 @@ export function startFfmpegPipe(width, height, fps, outputPath, opts = {}) {
     // stderr: 'inherit' so ffmpeg's diagnostics flow straight to our stderr.
     // 'piped' would require us to drain the stream or Deno keeps the subprocess
     // handle open after exit, hanging the script indefinitely.
-    const proc = new Deno.Command('ffmpeg', {
+    const proc = new Deno.Command(Deno.env.get('FFMPEG_PATH') || 'ffmpeg', {
         args, stdin: 'piped', stdout: 'inherit', stderr: 'inherit',
     }).spawn();
     const writer = proc.stdin.getWriter();

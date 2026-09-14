@@ -1,0 +1,26 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting body",
+          336
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting collet",
+          240
+        ]
+      ]
+    }
+  ]
+}

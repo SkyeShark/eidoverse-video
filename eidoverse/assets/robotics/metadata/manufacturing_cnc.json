@@ -1,0 +1,1069 @@
+{
+  "roots": {
+    "gantry_y_screw_1": {
+      "parent": "gantry_base",
+      "location": [
+        0.2630000114440918,
+        0.0,
+        0.47699999809265137
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_y_screw_1",
+        "joint_type": "revolute",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "gantry_z_screw": {
+      "parent": "gantry_x",
+      "location": [
+        0.0,
+        0.09799999743700027,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_z_screw",
+        "joint_type": "revolute",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "gantry_y": {
+      "parent": "gantry_base",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_y",
+        "joint_type": "prismatic",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "limits": [
+          -0.235,
+          0.235
+        ]
+      }
+    },
+    "gantry_x_screw": {
+      "parent": "gantry_y",
+      "location": [
+        0.0,
+        0.12300000339746475,
+        0.5049999952316284
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_x_screw",
+        "joint_type": "revolute",
+        "axis": [
+          1,
+          0,
+          0
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "gantry_y_screw_-1": {
+      "parent": "gantry_base",
+      "location": [
+        -0.2630000114440918,
+        0.0,
+        0.47699999809265137
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_y_screw_-1",
+        "joint_type": "revolute",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "gantry_z": {
+      "parent": "gantry_x",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_z",
+        "joint_type": "prismatic",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          -0.08600000667572022,
+          0.08
+        ],
+        "output_frame": [
+          0.0,
+          0.064,
+          0.275
+        ],
+        "output_normal": [
+          0,
+          -1,
+          0
+        ],
+        "interface": "TC70"
+      }
+    },
+    "gantry_base": {
+      "parent": null,
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_base",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "architecture": "Supported XYZ / twin synchronized Y screws / independent X and Z screws",
+        "work_plane_z": 0.056,
+        "screw_pitch_m": 0.008,
+        "bed_bounds_xy": [
+          -0.225,
+          0.225,
+          -0.274,
+          0.246
+        ],
+        "working_travel_xy": [
+          0.38,
+          0.47
+        ]
+      }
+    },
+    "gantry_x": {
+      "parent": "gantry_y",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "gantry_x",
+        "joint_type": "prismatic",
+        "axis": [
+          1,
+          0,
+          0
+        ],
+        "limits": [
+          -0.19,
+          0.19
+        ]
+      }
+    },
+    "spindle_rotor": {
+      "parent": "spindle_fixed",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "spindle_rotor",
+        "joint_type": "revolute",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "spindle_fixed": {
+      "parent": "gantry_z",
+      "location": [
+        0.0,
+        -0.006999999284744263,
+        0.14300000667572021
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "spindle_fixed",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "attachment_position": [
+          0.0,
+          0.071,
+          0.132
+        ],
+        "attachment_normal": [
+          0,
+          1,
+          0
+        ],
+        "tcp": [
+          0,
+          0,
+          0
+        ],
+        "interface": "TC70",
+        "architecture": "Air-cooled spindle / 43 mm neck / ER-style collet"
+      }
+    },
+    "extruder_fixed": {
+      "parent": "gantry_z",
+      "location": [
+        0.0,
+        0.007000003010034561,
+        0.1980000138282776
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "extruder_fixed",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "attachment_position": [
+          0.0,
+          0.057,
+          0.077
+        ],
+        "attachment_normal": [
+          0,
+          1,
+          0
+        ],
+        "tcp": [
+          0,
+          0,
+          0
+        ],
+        "interface": "TC70",
+        "architecture": "Direct geared extrusion / idler tensioner / heatbreak and axial cooling"
+      }
+    },
+    "cnc_fixture_plate": {
+      "parent": "gantry_base",
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_fixture_plate",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_clamp_left_front": {
+      "parent": "gantry_base",
+      "location": [
+        -0.05625,
+        -0.043,
+        0.056
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_clamp_left_front",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_clamp_left_rear": {
+      "parent": "gantry_base",
+      "location": [
+        -0.05625,
+        0.043,
+        0.056
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_clamp_left_rear",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_clamp_right_front": {
+      "parent": "gantry_base",
+      "location": [
+        0.05625,
+        -0.043,
+        0.056
+      ],
+      "rotation_euler": [
+        0,
+        0,
+        3.141592653589793
+      ],
+      "properties": {
+        "module_id": "cnc_clamp_right_front",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_clamp_right_rear": {
+      "parent": "gantry_base",
+      "location": [
+        0.05625,
+        0.043,
+        0.056
+      ],
+      "rotation_euler": [
+        0,
+        0,
+        3.141592653589793
+      ],
+      "properties": {
+        "module_id": "cnc_clamp_right_rear",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "families": {
+    "fdm": [
+      "G430 TC70 tool receiver",
+      "G430 X bearing carriage",
+      "G430 X bearing support",
+      "G430 X guide",
+      "G430 X lead screw",
+      "G430 X motor",
+      "G430 X motor support",
+      "G430 Y bearing carriage -1",
+      "G430 Y bearing carriage 1",
+      "G430 Y bearing end -1",
+      "G430 Y bearing end 1",
+      "G430 Y guide -1",
+      "G430 Y guide 1",
+      "G430 Y lead screw -1",
+      "G430 Y lead screw 1",
+      "G430 Y motor -1",
+      "G430 Y motor 1",
+      "G430 Y motor support -1",
+      "G430 Y motor support 1",
+      "G430 Y nut carrier -1",
+      "G430 Y nut carrier 1",
+      "G430 Y structural rail -1",
+      "G430 Y structural rail 1",
+      "G430 Z captive nut",
+      "G430 Z cast mast",
+      "G430 Z ground rod -1",
+      "G430 Z ground rod 1",
+      "G430 Z lead screw",
+      "G430 Z linear bushing -1",
+      "G430 Z linear bushing 1",
+      "G430 Z motor",
+      "G430 Z rod seat (-1, 0.194)",
+      "G430 Z rod seat (-1, 0.528)",
+      "G430 Z rod seat (1, 0.194)",
+      "G430 Z rod seat (1, 0.528)",
+      "G430 cast bed chassis",
+      "G430 cast upright (-1, -1)",
+      "G430 cast upright (-1, 1)",
+      "G430 cast upright (1, -1)",
+      "G430 cast upright (1, 1)",
+      "G430 descending tool carriage",
+      "G430 interchangeable fixture bed",
+      "G430 isolation foot (-1, -1)",
+      "G430 isolation foot (-1, 1)",
+      "G430 isolation foot (1, -1)",
+      "G430 isolation foot (1, 1)",
+      "G430 traversing bridge",
+      "EX axial fan shroud",
+      "EX brass nozzle",
+      "EX compact drive motor",
+      "EX fan hub",
+      "EX filament inlet",
+      "EX geared coldside chassis",
+      "EX heatbreak",
+      "EX heater connector",
+      "EX heater service loop",
+      "EX idler release lever",
+      "EX rear robot adapter",
+      "EX silicone heater jacket",
+      "EX swept fan blade 0",
+      "EX swept fan blade 1",
+      "EX swept fan blade 2",
+      "EX swept fan blade 3",
+      "EX swept fan blade 4",
+      "EX swept fan blade 5",
+      "EX swept fan blade 6",
+      "EX tension adjuster",
+      "EX TC70 rear flange common carrier",
+      "EX TC70 rear flange common flange",
+      "EX controller connector"
+    ],
+    "cnc": [
+      "G430 TC70 tool receiver",
+      "G430 X bearing carriage",
+      "G430 X bearing support",
+      "G430 X guide",
+      "G430 X lead screw",
+      "G430 X motor",
+      "G430 X motor support",
+      "G430 Y bearing carriage -1",
+      "G430 Y bearing carriage 1",
+      "G430 Y bearing end -1",
+      "G430 Y bearing end 1",
+      "G430 Y guide -1",
+      "G430 Y guide 1",
+      "G430 Y lead screw -1",
+      "G430 Y lead screw 1",
+      "G430 Y motor -1",
+      "G430 Y motor 1",
+      "G430 Y motor support -1",
+      "G430 Y motor support 1",
+      "G430 Y nut carrier -1",
+      "G430 Y nut carrier 1",
+      "G430 Y structural rail -1",
+      "G430 Y structural rail 1",
+      "G430 Z captive nut",
+      "G430 Z cast mast",
+      "G430 Z ground rod -1",
+      "G430 Z ground rod 1",
+      "G430 Z lead screw",
+      "G430 Z linear bushing -1",
+      "G430 Z linear bushing 1",
+      "G430 Z motor",
+      "G430 Z rod seat (-1, 0.194)",
+      "G430 Z rod seat (-1, 0.528)",
+      "G430 Z rod seat (1, 0.194)",
+      "G430 Z rod seat (1, 0.528)",
+      "G430 cast bed chassis",
+      "G430 cast upright (-1, -1)",
+      "G430 cast upright (-1, 1)",
+      "G430 cast upright (1, -1)",
+      "G430 cast upright (1, 1)",
+      "G430 descending tool carriage",
+      "G430 interchangeable fixture bed",
+      "G430 isolation foot (-1, -1)",
+      "G430 isolation foot (-1, 1)",
+      "G430 isolation foot (1, -1)",
+      "G430 isolation foot (1, 1)",
+      "G430 traversing bridge",
+      "SP air cooled motor casing",
+      "SP collet nut",
+      "SP machined neck",
+      "SP rear mounting saddle",
+      "SP retained service loop",
+      "SP supported rotor pilot",
+      "SP two flute cutter",
+      "SP TC70 rear flange common carrier",
+      "SP TC70 rear flange common flange",
+      "SP controller outlet",
+      "SP power inlet"
+    ],
+    "gantry": [
+      "G430 TC70 tool receiver",
+      "G430 X bearing carriage",
+      "G430 X bearing support",
+      "G430 X guide",
+      "G430 X lead screw",
+      "G430 X motor",
+      "G430 X motor support",
+      "G430 Y bearing carriage -1",
+      "G430 Y bearing carriage 1",
+      "G430 Y bearing end -1",
+      "G430 Y bearing end 1",
+      "G430 Y guide -1",
+      "G430 Y guide 1",
+      "G430 Y lead screw -1",
+      "G430 Y lead screw 1",
+      "G430 Y motor -1",
+      "G430 Y motor 1",
+      "G430 Y motor support -1",
+      "G430 Y motor support 1",
+      "G430 Y nut carrier -1",
+      "G430 Y nut carrier 1",
+      "G430 Y structural rail -1",
+      "G430 Y structural rail 1",
+      "G430 Z captive nut",
+      "G430 Z cast mast",
+      "G430 Z ground rod -1",
+      "G430 Z ground rod 1",
+      "G430 Z lead screw",
+      "G430 Z linear bushing -1",
+      "G430 Z linear bushing 1",
+      "G430 Z motor",
+      "G430 Z rod seat (-1, 0.194)",
+      "G430 Z rod seat (-1, 0.528)",
+      "G430 Z rod seat (1, 0.194)",
+      "G430 Z rod seat (1, 0.528)",
+      "G430 cast bed chassis",
+      "G430 cast upright (-1, -1)",
+      "G430 cast upright (-1, 1)",
+      "G430 cast upright (1, -1)",
+      "G430 cast upright (1, 1)",
+      "G430 descending tool carriage",
+      "G430 interchangeable fixture bed",
+      "G430 isolation foot (-1, -1)",
+      "G430 isolation foot (-1, 1)",
+      "G430 isolation foot (1, -1)",
+      "G430 isolation foot (1, 1)",
+      "G430 traversing bridge"
+    ]
+  },
+  "mobile": {
+    "instances": [
+      {
+        "id": "gantry",
+        "family": "gantry",
+        "anchor": "gantry_base",
+        "demo": "gantry",
+        "parent": null,
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "root_rotations": {}
+      },
+      {
+        "id": "spindle",
+        "family": "spindle",
+        "anchor": "spindle_fixed",
+        "demo": "cnc",
+        "parent": "gantry_z",
+        "position": [
+          0.0,
+          -0.006999999284744263,
+          0.14300000667572021
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "root_rotations": {}
+      },
+      {
+        "id": "extruder",
+        "family": "extruder",
+        "anchor": "extruder_fixed",
+        "demo": "fdm",
+        "parent": "gantry_z",
+        "position": [
+          0.0,
+          0.007000003010034561,
+          0.1980000138282776
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "root_rotations": {}
+      }
+    ]
+  },
+  "inspector": {
+    "title": "Gantry with shared process heads",
+    "description": "The same geared FDM head and spindle mount on the manufacturing gantry.",
+    "assemblies": {
+      "fdm": {
+        "label": "FDM assembly",
+        "tool": "extruder",
+        "parts": [
+          "G430 TC70 tool receiver",
+          "G430 X bearing carriage",
+          "G430 X bearing support",
+          "G430 X guide",
+          "G430 X lead screw",
+          "G430 X motor",
+          "G430 X motor support",
+          "G430 Y bearing carriage -1",
+          "G430 Y bearing carriage 1",
+          "G430 Y bearing end -1",
+          "G430 Y bearing end 1",
+          "G430 Y guide -1",
+          "G430 Y guide 1",
+          "G430 Y lead screw -1",
+          "G430 Y lead screw 1",
+          "G430 Y motor -1",
+          "G430 Y motor 1",
+          "G430 Y motor support -1",
+          "G430 Y motor support 1",
+          "G430 Y nut carrier -1",
+          "G430 Y nut carrier 1",
+          "G430 Y structural rail -1",
+          "G430 Y structural rail 1",
+          "G430 Z captive nut",
+          "G430 Z cast mast",
+          "G430 Z ground rod -1",
+          "G430 Z ground rod 1",
+          "G430 Z lead screw",
+          "G430 Z linear bushing -1",
+          "G430 Z linear bushing 1",
+          "G430 Z motor",
+          "G430 Z rod seat (-1, 0.194)",
+          "G430 Z rod seat (-1, 0.528)",
+          "G430 Z rod seat (1, 0.194)",
+          "G430 Z rod seat (1, 0.528)",
+          "G430 cast bed chassis",
+          "G430 cast upright (-1, -1)",
+          "G430 cast upright (-1, 1)",
+          "G430 cast upright (1, -1)",
+          "G430 cast upright (1, 1)",
+          "G430 descending tool carriage",
+          "G430 isolation foot (-1, -1)",
+          "G430 isolation foot (-1, 1)",
+          "G430 isolation foot (1, -1)",
+          "G430 isolation foot (1, 1)",
+          "G430 traversing bridge",
+          "EX axial fan shroud",
+          "EX brass nozzle",
+          "EX compact drive motor",
+          "EX fan hub",
+          "EX filament inlet",
+          "EX geared coldside chassis",
+          "EX heatbreak",
+          "EX heater connector",
+          "EX heater service loop",
+          "EX idler release lever",
+          "EX rear robot adapter",
+          "EX silicone heater jacket",
+          "EX swept fan blade 0",
+          "EX swept fan blade 1",
+          "EX swept fan blade 2",
+          "EX swept fan blade 3",
+          "EX swept fan blade 4",
+          "EX swept fan blade 5",
+          "EX swept fan blade 6",
+          "EX tension adjuster",
+          "EX TC70 rear flange common carrier",
+          "EX TC70 rear flange common flange",
+          "EX controller connector"
+        ],
+        "batches": [
+          "gantry",
+          "process",
+          "common"
+        ],
+        "frame": [
+          [
+            0,
+            0.285,
+            0.015
+          ],
+          [
+            0.8,
+            0.65,
+            1.3
+          ],
+          1.1
+        ],
+        "z_limits_m": [
+          -0.13700001209974288,
+          0.08
+        ],
+        "tool_tip_rest_z_m": 0.1980000138282776,
+        "bed_top_z_m": 0.0560000017285347
+      },
+      "cnc": {
+        "label": "CNC assembly",
+        "tool": "spindle",
+        "parts": [
+          "G430 TC70 tool receiver",
+          "G430 X bearing carriage",
+          "G430 X bearing support",
+          "G430 X guide",
+          "G430 X lead screw",
+          "G430 X motor",
+          "G430 X motor support",
+          "G430 Y bearing carriage -1",
+          "G430 Y bearing carriage 1",
+          "G430 Y bearing end -1",
+          "G430 Y bearing end 1",
+          "G430 Y guide -1",
+          "G430 Y guide 1",
+          "G430 Y lead screw -1",
+          "G430 Y lead screw 1",
+          "G430 Y motor -1",
+          "G430 Y motor 1",
+          "G430 Y motor support -1",
+          "G430 Y motor support 1",
+          "G430 Y nut carrier -1",
+          "G430 Y nut carrier 1",
+          "G430 Y structural rail -1",
+          "G430 Y structural rail 1",
+          "G430 Z captive nut",
+          "G430 Z cast mast",
+          "G430 Z ground rod -1",
+          "G430 Z ground rod 1",
+          "G430 Z lead screw",
+          "G430 Z linear bushing -1",
+          "G430 Z linear bushing 1",
+          "G430 Z motor",
+          "G430 Z rod seat (-1, 0.194)",
+          "G430 Z rod seat (-1, 0.528)",
+          "G430 Z rod seat (1, 0.194)",
+          "G430 Z rod seat (1, 0.528)",
+          "G430 cast bed chassis",
+          "G430 cast upright (-1, -1)",
+          "G430 cast upright (-1, 1)",
+          "G430 cast upright (1, -1)",
+          "G430 cast upright (1, 1)",
+          "G430 descending tool carriage",
+          "G430 isolation foot (-1, -1)",
+          "G430 isolation foot (-1, 1)",
+          "G430 isolation foot (1, -1)",
+          "G430 isolation foot (1, 1)",
+          "G430 traversing bridge",
+          "SP TC70 rear flange common carrier",
+          "SP TC70 rear flange common flange",
+          "SP air cooled motor casing",
+          "SP collet nut",
+          "SP controller outlet",
+          "SP machined neck",
+          "SP power inlet",
+          "SP rear mounting saddle",
+          "SP retained service loop",
+          "SP supported rotor pilot",
+          "SP two flute cutter",
+          "BP T-slot deck extrusion 1",
+          "BP T-slot deck extrusion 2",
+          "BP T-slot deck extrusion 3",
+          "BP T-slot deck extrusion 4",
+          "BP T-slot deck extrusion 5",
+          "BP T-slot deck extrusion 6",
+          "BP T-slot deck extrusion 7",
+          "BP T-slot deck extrusion 8",
+          "BP clamp captive stud",
+          "BP low-profile toe clamp",
+          "BP sliding M6 T-nut"
+        ],
+        "batches": [
+          "gantry",
+          "process",
+          "common",
+          "plates"
+        ],
+        "frame": [
+          [
+            0,
+            0.285,
+            0.015
+          ],
+          [
+            0.8,
+            0.65,
+            1.3
+          ],
+          1.1
+        ],
+        "z_limits_m": [
+          -0.08600000667572022,
+          0.04
+        ],
+        "tool_tip_rest_z_m": 0.14300000667572021,
+        "bed_top_z_m": 0.0560000017285347,
+        "cutter": {
+          "kind": "flat",
+          "radius": 0.003,
+          "fluteLength": 0.018
+        }
+      },
+      "gantry": {
+        "label": "Bare gantry",
+        "parts": [
+          "G430 TC70 tool receiver",
+          "G430 X bearing carriage",
+          "G430 X bearing support",
+          "G430 X guide",
+          "G430 X lead screw",
+          "G430 X motor",
+          "G430 X motor support",
+          "G430 Y bearing carriage -1",
+          "G430 Y bearing carriage 1",
+          "G430 Y bearing end -1",
+          "G430 Y bearing end 1",
+          "G430 Y guide -1",
+          "G430 Y guide 1",
+          "G430 Y lead screw -1",
+          "G430 Y lead screw 1",
+          "G430 Y motor -1",
+          "G430 Y motor 1",
+          "G430 Y motor support -1",
+          "G430 Y motor support 1",
+          "G430 Y nut carrier -1",
+          "G430 Y nut carrier 1",
+          "G430 Y structural rail -1",
+          "G430 Y structural rail 1",
+          "G430 Z captive nut",
+          "G430 Z cast mast",
+          "G430 Z ground rod -1",
+          "G430 Z ground rod 1",
+          "G430 Z lead screw",
+          "G430 Z linear bushing -1",
+          "G430 Z linear bushing 1",
+          "G430 Z motor",
+          "G430 Z rod seat (-1, 0.194)",
+          "G430 Z rod seat (-1, 0.528)",
+          "G430 Z rod seat (1, 0.194)",
+          "G430 Z rod seat (1, 0.528)",
+          "G430 cast bed chassis",
+          "G430 cast upright (-1, -1)",
+          "G430 cast upright (-1, 1)",
+          "G430 cast upright (1, -1)",
+          "G430 cast upright (1, 1)",
+          "G430 descending tool carriage",
+          "G430 isolation foot (-1, -1)",
+          "G430 isolation foot (-1, 1)",
+          "G430 isolation foot (1, -1)",
+          "G430 isolation foot (1, 1)",
+          "G430 traversing bridge"
+        ],
+        "batches": [
+          "gantry"
+        ],
+        "frame": [
+          [
+            0,
+            0.285,
+            0.015
+          ],
+          [
+            0.8,
+            0.65,
+            1.3
+          ],
+          1.1
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "texture_bindings": {
+    "gantry": {
+      "base": {
+        "uri": "../textures/f81e45088fdb6668cb5febd4.png",
+        "identity": "f81e45088fdb6668cb5febd49c599b11b4c082bb8acb98e1a544b8c3bb0fd73f"
+      },
+      "fixed": {
+        "uri": "../textures/f27141f9d2a4c0cae73a27ca.png",
+        "identity": "f27141f9d2a4c0cae73a27ca0623f4a9c4c349e6a2869fe5c68ff2db94fae737"
+      },
+      "mask": {
+        "uri": "../textures/d179e7dde648c191b8373475.png",
+        "identity": "d179e7dde648c191b83734758f0ecff7242ef048b95dfeb7fac816243b5f8839"
+      },
+      "normal": {
+        "uri": "../textures/e3d7529e86c34a8132ba1db5.png",
+        "identity": "e3d7529e86c34a8132ba1db5dad0b946b6a1e23f051655d27d256a71979964f4"
+      },
+      "orm": {
+        "uri": "../textures/2359ebb4d84fff43f23d123c.png",
+        "identity": "2359ebb4d84fff43f23d123c504ed81b5fd1a9a7df53eddf7643d2fc1371af4d"
+      }
+    },
+    "process": {
+      "base": {
+        "uri": "../textures/08ac2a855a3c47180993e7ca.png",
+        "identity": "08ac2a855a3c47180993e7cacb70c834dc7f2091750f1ea1421f6ddc01e38f87"
+      },
+      "fixed": {
+        "uri": "../textures/d2d8b8217e17bb6cb6cbd886.png",
+        "identity": "d2d8b8217e17bb6cb6cbd8868956670cc695783f8118e471d2d9798cccac8a33"
+      },
+      "mask": {
+        "uri": "../textures/f11705a2d89fc709dfab9d4e.png",
+        "identity": "f11705a2d89fc709dfab9d4e4ce262aab5484d5174ddde1254c37b5d3f7e1716"
+      },
+      "normal": {
+        "uri": "../textures/068b4cb342de4836971db022.png",
+        "identity": "068b4cb342de4836971db022d8e5d204cf4f126784229837c04c17b05e2175ce"
+      },
+      "orm": {
+        "uri": "../textures/71a16fbd2f3c7229503d94b8.png",
+        "identity": "71a16fbd2f3c7229503d94b8ee73171afe00188fc7f591372be22ed53f0ca992"
+      }
+    },
+    "common": {
+      "base": {
+        "uri": "../textures/e775e6e4c9773e7a1ad33dcf.png",
+        "identity": "e775e6e4c9773e7a1ad33dcf561cc59a39e5057bbc0d539dfd9a5547117d7e31"
+      },
+      "fixed": {
+        "uri": "../textures/c340f9844109c9a4db11d940.png",
+        "identity": "c340f9844109c9a4db11d9402ccc063a19eebb01cbdc436977311906b483cd61"
+      },
+      "mask": {
+        "uri": "../textures/72feec464b98fa96ed792040.png",
+        "identity": "72feec464b98fa96ed79204039af239b1ea0d2a0f8981785f9083c48dbc753d4"
+      },
+      "normal": {
+        "uri": "../textures/f0264717b3d56f5b61772f60.png",
+        "identity": "f0264717b3d56f5b61772f605fed2565eaa2c1a8c69972d992cb4995f8d2c599"
+      },
+      "orm": {
+        "uri": "../textures/c9bbc03f0577f17d04ca0144.png",
+        "identity": "c9bbc03f0577f17d04ca01444342a70c0a8ce7de17e4e2932e35199080deb1b5"
+      }
+    },
+    "plates": {
+      "base": {
+        "uri": "../textures/plates_base.png",
+        "identity": "ec29b23fd8f93dabf736a4c3d3d7094dadbeae1ccb84cf34d53a5c341fe20cbb"
+      },
+      "normal": {
+        "uri": "../textures/plates_normal.png",
+        "identity": "eb823097e4b152a2a82909f2982ad3b0a91a59a6546daba68d3fad7acc8a76d2"
+      },
+      "orm": {
+        "uri": "../textures/plates_orm.png",
+        "identity": "12c77251ffed03046323bfd7b40868c5ebf10cea0eb395ef6eadf11ba01da1fa"
+      }
+    }
+  },
+  "build_surfaces": {
+    "fdm_sheet_thickness_m": 0.00065,
+    "cnc_t_slot_pitch_m": 0.05625,
+    "cnc_slot_mouth_m": 0.008,
+    "cnc_slot_undercut_m": 0.016,
+    "source_bake": [
+      4096,
+      8192
+    ],
+    "delivery_atlas": [
+      512,
+      1024
+    ]
+  }
+}

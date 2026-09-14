@@ -82,7 +82,7 @@ DENO_CACHE_CMDS = [
 def cmd_bootstrap(a):
     deno = find_deno()
     if not deno:
-        sys.exit("error: no deno found — install 2.8.1 (docs/SETUP.md)")
+        sys.exit("error: no deno found — install 2.8.1 or 2.9.5 (docs/SETUP.md)")
     if a.fresh and os.path.isdir(os.path.join(ROOT, "node_modules")):
         print("removing node_modules for a fresh build ...")
         shutil.rmtree(os.path.join(ROOT, "node_modules"))
@@ -110,11 +110,12 @@ def cmd_doctor(a):
     if deno:
         v = subprocess.run([deno, "--version"], capture_output=True, text=True).stdout.split()
         ver = v[1] if len(v) > 1 else "?"
-        report(f"deno {ver}", ver.startswith("2.8."),
-               "" if ver.startswith("2.8.") else
-               "pin 2.8.1 (2.9.x corrupts the effects path) — docs/SETUP.md")
+        good = ver.startswith("2.8.") or ver.startswith("2.9.")
+        report(f"deno {ver}", good,
+               "" if good else
+               "verified: 2.8.1 / 2.9.5 — judge others by a rendered frame (docs/SETUP.md)")
     else:
-        report("deno", False, "install 2.8.1 (docs/SETUP.md)")
+        report("deno", False, "install 2.8.1 or 2.9.5 (docs/SETUP.md)")
     ff = shutil.which("ffmpeg")
     if ff:
         enc = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
@@ -130,8 +131,8 @@ def cmd_doctor(a):
     report("rapier materialized", rap, "" if rap else "run: python eido.py bootstrap")
     comfy, port = probe_comfy()
     print(f"[{'ok ' if comfy else '-- '}] ComfyUI backend " +
-          (f"(port {port}) — music/SFX generation available" if comfy
-           else "not reachable — generate_song/sfx unavailable (optional)"))
+          (f"(port {port}) — reachable; check generator nodes/models before use" if comfy
+           else "not reachable — ComfyUI music/SFX unavailable (optional)"))
     jina = bool(os.environ.get("JINA_AI_KEY") or os.environ.get("EIDOVERSE_EMBED_KEY"))
     print(f"[{'ok ' if jina else '-- '}] embeddings key " +
           ("set — fetch_model theme ranking active" if jina
@@ -160,7 +161,7 @@ def cmd_render(a):
 
     deno = find_deno()
     if not deno:
-        sys.exit("error: no deno found — install 2.8.1 (docs/SETUP.md)")
+        sys.exit("error: no deno found — install 2.8.1 or 2.9.5 (docs/SETUP.md)")
     r = run([deno, "run", "--allow-all", "--unstable-webgpu",
              "--node-modules-dir=auto", "eidoverse/render_scene.mjs", rel], cwd=ROOT)
     sys.exit(r.returncode)

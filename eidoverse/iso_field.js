@@ -24,7 +24,7 @@
 // Shading samples the SCENE's lights (strongest directional + hemisphere
 // + two strongest point lights, captured at bind()) so the solid sits in
 // the same light as everything else. Raymarched pixels still can't CAST
-// shadows — pair with a colorWrite:false proxy box (CNCSim does).
+// shadows — pair with a colorWrite:false proxy box when needed; G430 CNC uses a separate heightfield runtime.
 //
 // TSL gotchas encoded here: instancedArray does NOT alias the array you
 // pass it (write through .value.array); TSL mix() with all-JS-number

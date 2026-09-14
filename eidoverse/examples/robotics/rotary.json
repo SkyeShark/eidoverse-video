@@ -1,0 +1,5 @@
+{
+ "width":1280,"height":900,"fps":24,"duration":31,
+ "script":"eidoverse/examples/robotics/rotary.scene.js",
+ "outputVideo":"work/rotary.mp4"
+}

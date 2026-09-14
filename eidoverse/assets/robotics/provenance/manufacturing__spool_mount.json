@@ -1,0 +1,15 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "feed_mount",
+      "faces": [
+        [
+          "FP rail-mounted spool carrier",
+          424
+        ]
+      ]
+    }
+  ]
+}

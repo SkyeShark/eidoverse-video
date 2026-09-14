@@ -309,7 +309,7 @@ for k, v in tex_urls.items():
 if "displacement" in tex_urls:
     print("displacement: FOUND -> SPOM available. Load it as heightMap and call "
           "createParallaxMaterial({heightMap, albedoMap, normalMap, depthScale, selfLit}) "
-          "+ geom.computeTangents(). See AGENTS.md \"SPOM\".")
+          "+ geom.computeTangents(). See tools-guides/terrain-surfaces.md (SPOM).")
 else:
     print("displacement: NONE for this material -> SPOM (createParallaxMaterial) needs a "
           "height map and will throw without one. For carved relief, pick a material that "

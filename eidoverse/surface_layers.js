@@ -15,7 +15,7 @@
 //      so bevel/boolean UV islands stay exactly as the constructor laid them
 //      out and only their SCALE moves.
 //
-//      (This is what the `uvByWorld` line in AGENTS.md was reaching for. A
+//      (This is what the earlier `uvByWorld` documentation was reaching for. A
 //      world-space UV REPROJECTION is the wrong tool: it discards the bevel
 //      and cap islands that ExtrudeGeometry/CSG generate, and it seams badly
 //      on anything that isn't axis-aligned. Normalising the density of the

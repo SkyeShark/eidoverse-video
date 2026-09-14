@@ -1,0 +1,557 @@
+{
+  "roots": {
+    "rotary_fixture": {
+      "parent": null,
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_fixture",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "interface": "G430 T-slot bed",
+        "input_frame": [
+          0,
+          0,
+          0
+        ],
+        "attachment_normal": [
+          0,
+          0,
+          -1
+        ],
+        "output_frame": [
+          0,
+          0,
+          0.097
+        ],
+        "output_normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "rotary_chuck": {
+      "parent": "rotary_fixture",
+      "location": [
+        0.0,
+        0.0,
+        0.09700000286102295
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_chuck",
+        "joint_type": "continuous",
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "rotary_tailstock": {
+      "parent": "rotary_fixture",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_tailstock",
+        "joint_type": "prismatic",
+        "axis": [
+          1,
+          0,
+          0
+        ],
+        "limits": [
+          -0.06,
+          0.04
+        ]
+      }
+    },
+    "rotary_quill": {
+      "parent": "rotary_tailstock",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_quill",
+        "joint_type": "prismatic",
+        "axis": [
+          1,
+          0,
+          0
+        ],
+        "limits": [
+          -0.006,
+          0.006
+        ]
+      }
+    },
+    "rotary_handwheel": {
+      "parent": "rotary_tailstock",
+      "location": [
+        0.0,
+        0.0,
+        0.09700000286102295
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_handwheel",
+        "joint_type": "continuous",
+        "axis": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "rotary_jaw_0": {
+      "parent": "rotary_chuck",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_jaw_0",
+        "joint_type": "prismatic",
+        "axis": [
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "limits": [
+          -0.009,
+          0.007
+        ]
+      }
+    },
+    "rotary_jaw_1": {
+      "parent": "rotary_chuck",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_jaw_1",
+        "joint_type": "prismatic",
+        "axis": [
+          0.0,
+          -1.0,
+          6.123233995736766e-17
+        ],
+        "limits": [
+          -0.009,
+          0.007
+        ]
+      }
+    },
+    "rotary_jaw_2": {
+      "parent": "rotary_chuck",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_jaw_2",
+        "joint_type": "prismatic",
+        "axis": [
+          0.0,
+          -1.2246467991473532e-16,
+          -1.0
+        ],
+        "limits": [
+          -0.009,
+          0.007
+        ]
+      }
+    },
+    "rotary_jaw_3": {
+      "parent": "rotary_chuck",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_jaw_3",
+        "joint_type": "prismatic",
+        "axis": [
+          0.0,
+          1.0,
+          -1.8369701987210297e-16
+        ],
+        "limits": [
+          -0.009,
+          0.007
+        ]
+      }
+    },
+    "rotary_stator": {
+      "parent": "rotary_fixture",
+      "location": [
+        -0.201,
+        0,
+        0.097
+      ],
+      "rotation_euler": [
+        0,
+        1.5707963267948966,
+        0
+      ],
+      "properties": {
+        "module_id": "rotary_stator",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "input_frame": [
+          0,
+          0,
+          0
+        ],
+        "interface": "R108",
+        "cable_bore_diameter_m": 0.038
+      },
+      "placement_quaternion_three": [
+        0,
+        0,
+        -0.7071067811865476,
+        0.7071067811865476
+      ]
+    },
+    "rotary_output": {
+      "parent": "rotary_stator",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "rotary_output",
+        "joint_type": "continuous",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "output_frame": [
+          0.0,
+          0.0,
+          0.108
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "texture_bindings": {
+    "rotary_workholding": {
+      "base": {
+        "uri": "../textures/rotary_workholding_base.png",
+        "identity": "e872bccbf13b56ba69c6bbe0dfd696bd03212f005c0621524203c95f02d3ca78"
+      },
+      "fixed": {
+        "uri": "../textures/rotary_workholding_fixed.png",
+        "identity": "4f4341b60dac8d379bc2d1b6b2a96ebabbb8e4b4f0deba2f84361223f98a5b61"
+      },
+      "mask": {
+        "uri": "../textures/rotary_workholding_mask.png",
+        "identity": "6b3fe6782ad60e7e9d8b960d9f29247359f0d64e89e0c05b24f73c94cf208eb9"
+      },
+      "normal": {
+        "uri": "../textures/rotary_workholding_normal.png",
+        "identity": "a9761af9a89e5b100163abf37de4625bf2f8d58914400c2ec8654928f005a9bb"
+      },
+      "orm": {
+        "uri": "../textures/rotary_workholding_orm.png",
+        "identity": "d3cc00618e1ed024d8d9e1d8bf6cd2fff10886924339a7d25008a1529f55d2ff"
+      }
+    },
+    "manufacturing": {
+      "base": {
+        "uri": "../textures/95c1be333f44d849cc28073b.png",
+        "identity": "95c1be333f44d849cc28073b68692ed70c7b989fa5e55c5e881d106d458e8129"
+      },
+      "fixed": {
+        "uri": "../textures/b51f4a35a198d3b9e0fd7429.png",
+        "identity": "b51f4a35a198d3b9e0fd7429a4e45add7cc536b1b065e2196065545aa4d3f4fc"
+      },
+      "mask": {
+        "uri": "../textures/15de8d812c9fe9737a5ab79c.png",
+        "identity": "15de8d812c9fe9737a5ab79c3531788a38f64ea1b41f81edd4ca5444baca281a"
+      },
+      "normal": {
+        "uri": "../textures/b634db86bdc5de8ef14c7b60.png",
+        "identity": "b634db86bdc5de8ef14c7b6013e077c744666fd416aa615d69443d9223f42996"
+      },
+      "orm": {
+        "uri": "../textures/84f0672979b29acc69f23c41.png",
+        "identity": "84f0672979b29acc69f23c413c4595b1acc1139d0765dc310ee62be77b6e4bec"
+      }
+    },
+    "common": {
+      "base": {
+        "uri": "../textures/e775e6e4c9773e7a1ad33dcf.png",
+        "identity": "e775e6e4c9773e7a1ad33dcf561cc59a39e5057bbc0d539dfd9a5547117d7e31"
+      },
+      "fixed": {
+        "uri": "../textures/c340f9844109c9a4db11d940.png",
+        "identity": "c340f9844109c9a4db11d9402ccc063a19eebb01cbdc436977311906b483cd61"
+      },
+      "mask": {
+        "uri": "../textures/72feec464b98fa96ed792040.png",
+        "identity": "72feec464b98fa96ed79204039af239b1ea0d2a0f8981785f9083c48dbc753d4"
+      },
+      "normal": {
+        "uri": "../textures/f0264717b3d56f5b61772f60.png",
+        "identity": "f0264717b3d56f5b61772f605fed2565eaa2c1a8c69972d992cb4995f8d2c599"
+      },
+      "orm": {
+        "uri": "../textures/c9bbc03f0577f17d04ca0144.png",
+        "identity": "c9bbc03f0577f17d04ca01444342a70c0a8ce7de17e4e2932e35199080deb1b5"
+      }
+    },
+    "plates": {
+      "base": {
+        "uri": "../textures/plates_base.png",
+        "identity": "ec29b23fd8f93dabf736a4c3d3d7094dadbeae1ccb84cf34d53a5c341fe20cbb"
+      },
+      "normal": {
+        "uri": "../textures/plates_normal.png",
+        "identity": "eb823097e4b152a2a82909f2982ad3b0a91a59a6546daba68d3fad7acc8a76d2"
+      },
+      "orm": {
+        "uri": "../textures/plates_orm.png",
+        "identity": "12c77251ffed03046323bfd7b40868c5ebf10cea0eb395ef6eadf11ba01da1fa"
+      }
+    }
+  },
+  "families": {},
+  "mobile": {},
+  "inspector": {
+    "assemblies": {
+      "rotary_fixture": {
+        "label": "Adjustable A-axis chuck and tailstock",
+        "parts": [
+          "RC bearing live centre",
+          "RC carriage lock lever",
+          "RC cast tailstock foot",
+          "RC continuous dovetail bed",
+          "RC formed headstock saddle",
+          "RC four jaw chuck body",
+          "RC handwheel crank",
+          "RC headstock brace -1",
+          "RC headstock brace 1",
+          "RC independent jaw 0",
+          "RC independent jaw 1",
+          "RC independent jaw 2",
+          "RC independent jaw 3",
+          "RC quill handwheel",
+          "RC quill lock lever",
+          "RC table T-nut 0",
+          "RC table T-nut 1",
+          "RC table T-nut 2",
+          "RC table T-nut 3",
+          "RC table T-nut 4",
+          "RC table T-nut 5",
+          "RC table T-nut 6",
+          "RC table T-nut 7",
+          "RC table fixing 0",
+          "RC table fixing 1",
+          "RC table fixing 2",
+          "RC table fixing 3",
+          "RC table fixing 4",
+          "RC table fixing 5",
+          "RC table fixing 6",
+          "RC table fixing 7",
+          "RC table stud 0",
+          "RC table stud 1",
+          "RC table stud 2",
+          "RC table stud 3",
+          "RC table stud 4",
+          "RC table stud 5",
+          "RC table stud 6",
+          "RC table stud 7",
+          "RC tailstock quill",
+          "RC tailstock sliding shoe",
+          "RD hollow drive casting",
+          "RD integral mounting flange",
+          "RD labyrinth seal",
+          "RD machined bearing land",
+          "RD output bolt flange",
+          "RD radial power port"
+        ],
+        "batches": [
+          "manufacturing",
+          "plates",
+          "rotary_workholding"
+        ]
+      }
+    }
+  },
+  "rotary_fixture": {
+    "axis": "X",
+    "axis_height_m": 0.097,
+    "stock_m": [
+      0.14,
+      0.036,
+      0.036
+    ],
+    "stock_limits_m": [
+      [
+        0.08,
+        0.18
+      ],
+      [
+        0.018,
+        0.05
+      ],
+      [
+        0.018,
+        0.05
+      ]
+    ],
+    "stock_left_x_m": -0.055,
+    "cut_end_allowances_m": [
+      0.029,
+      0.018
+    ],
+    "tool_kind": "flat",
+    "tool_radius_m": 0.003,
+    "jaw_grip_length_m": 0.013,
+    "quill_pitch_m": 0.001,
+    "setup_motion": "independent captured jaws, sliding tailstock and fed quill",
+    "centre_seat": {
+      "included_angle_degrees": 60,
+      "depth_m": 0.003,
+      "pilot_diameter_m": 0.0016,
+      "pilot_depth_m": 0.006
+    },
+    "table_fixings": {
+      "slot_pitch_m": 0.05625,
+      "stud_diameter_m": 0.006,
+      "nut_size_m": [
+        0.014,
+        0.02,
+        0.006
+      ],
+      "nut_top_below_table_m": 0.008,
+      "thread_engagement_m": 0.005,
+      "fixings_native_m": [
+        [
+          -0.18375,
+          -0.07,
+          0.012
+        ],
+        [
+          -0.18375,
+          0.07,
+          0.012
+        ],
+        [
+          -0.1275,
+          -0.07,
+          0.012
+        ],
+        [
+          -0.1275,
+          0.07,
+          0.012
+        ],
+        [
+          0.04125,
+          -0.06,
+          0.006
+        ],
+        [
+          0.04125,
+          0.06,
+          0.006
+        ],
+        [
+          0.15375,
+          -0.06,
+          0.006
+        ],
+        [
+          0.15375,
+          0.06,
+          0.006
+        ]
+      ],
+      "donor": "manufacturing/cnc_clamp"
+    }
+  }
+}

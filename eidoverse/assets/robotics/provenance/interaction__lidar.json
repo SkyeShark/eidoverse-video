@@ -1,0 +1,1 @@
+{"meshes":[{"node":0,"primitive":0,"batch":"interaction","faces":[["LDR infrared window",128]]},{"node":1,"primitive":0,"batch":"interaction","faces":[["LDR sealed crown",446]]},{"node":2,"primitive":0,"batch":"common","faces":[["LDR SM40 foot",82]]},{"node":3,"primitive":0,"batch":"interaction","faces":[["LDR thermal casting",574]]}],"unmatched":0}

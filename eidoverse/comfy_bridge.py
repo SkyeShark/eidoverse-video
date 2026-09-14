@@ -1,10 +1,11 @@
 """ComfyUI bridge — a stable, Docker-reachable endpoint for a roaming ComfyUI.
 
 WHY THIS EXISTS
-    The eidoverse music pipeline (generate_song.py / ACE-Step) runs INSIDE the
-    Docker sandbox and reaches ComfyUI on the host via
+    ComfyUI clients such as generate_song.py can run inside a
+    Docker sandbox and reach ComfyUI on the host via
     `http://host.docker.internal:8188`. That needs ComfyUI to be (a) on a KNOWN
     port and (b) listening on a Docker-reachable interface (0.0.0.0).
+    Native clients can use ComfyUI directly; this bridge is optional.
 
     The new ComfyUI Desktop breaks both: it binds 127.0.0.1 ONLY (localhost —
     Docker can't reach it) and auto-picks its port starting at 8000, so it lands
@@ -76,7 +77,7 @@ def _is_comfy(port: int) -> bool:
 
     Do NOT key liveness on /system_stats alone — some ComfyUI Desktop builds
     return HTTP 500 there while the rest of the API is perfectly healthy (the
-    /prompt + /history endpoints generate_song.py actually uses still work).
+    /prompt + /history endpoints the music drivers use still work).
     Keying discovery on the one broken endpoint made the bridge declare a live
     ComfyUI "not found" and refuse to proxy. Probe /queue first — tiny, always
     200 on a live server, and {"queue_running",...} is a strong ComfyUI

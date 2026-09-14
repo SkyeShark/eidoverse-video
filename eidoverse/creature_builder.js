@@ -2752,7 +2752,8 @@
             // living skeleton. 'head'|'chest'|'back'|'hips'|'wristL'|'wristR'.
             // Recipes: HEAD SWAP — hide the organic head first:
             //   c.anchor('head').children.forEach(o => o.visible = false);
-            //   RoboticsKit.connect(c.anchor('head'), makeBot({ head: {...} }).head);
+            //   const part = await RoboticsKit.loadPart(modelId, partName);
+            //   c.anchor('head').add(part.group); // align the retained donor frame explicitly
             // ROBOT HAND — c.parts('hand')[i].visible = false; connect at the wrist.
             anchor(n) {
                 if (n === 'head') return headBone;

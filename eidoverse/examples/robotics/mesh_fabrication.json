@@ -1,0 +1,8 @@
+{
+  "width": 1280,
+  "height": 900,
+  "fps": 24,
+  "duration": 31,
+  "script": "eidoverse/examples/robotics/mesh_fabrication.scene.js",
+  "outputVideo": "eidoverse/output/mesh_fabrication.mp4"
+}

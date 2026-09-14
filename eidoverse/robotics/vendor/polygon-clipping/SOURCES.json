@@ -1,0 +1,38 @@
+[
+  {
+    "name": "polygon-clipping.umd.js",
+    "url": "https://raw.githubusercontent.com/mfogel/polygon-clipping/v0.15.7/dist/polygon-clipping.umd.js",
+    "sha256": "de2bdc061b61d537f7d12f6519f46e35113f0f246b6a06293a08b615454946cf",
+    "bytes": 89619
+  },
+  {
+    "name": "LICENSE.md",
+    "url": "https://raw.githubusercontent.com/mfogel/polygon-clipping/v0.15.7/LICENSE.md",
+    "sha256": "864ae9e4ed75e1571a3bcf5dc9070264213445b32e7e2af5bf60eba46fb656d0",
+    "bytes": 1327
+  },
+  {
+    "name": "SPLAYTREE-LICENSE",
+    "url": "https://raw.githubusercontent.com/w8r/splay-tree/v3.1.2/Readme.md",
+    "sha256": "18b65eb99645589005889cdc3cd1307a79e3e29569ab0be8d406d7ccdc79b341",
+    "bytes": 1113
+  },
+  {
+    "name": "APACHE-2.0.txt",
+    "url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "bytes": 11358
+  },
+  {
+    "name": "ROBUST-PREDICATES-UNLICENSE",
+    "url": "https://raw.githubusercontent.com/mourner/robust-predicates/v3.0.2/LICENSE",
+    "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd",
+    "bytes": 1210
+  },
+  {
+    "name": "package.json",
+    "url": "https://raw.githubusercontent.com/mfogel/polygon-clipping/v0.15.7/package.json",
+    "sha256": "3781203fc733b97c2641fe5275b46d6b579597aa3ed61b35ce5ad37436856afa",
+    "bytes": 2510
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "width": 1280,
+  "height": 900,
+  "fps": 24,
+  "duration": 32,
+  "script": "eidoverse/examples/robotics/rotary_metal.scene.js",
+  "outputVideo": "work/rotary_metal.mp4"
+}

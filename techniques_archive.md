@@ -55,8 +55,8 @@ Rules:
   intensity/streakSpeed → falling embers + glowing wet floor. Chained
   'depth_rain,chromatic_aberration_alpha' per-effect opts via opts.<name>.
 - **Suno retiming discipline**: all beats derive from one SEC table measured off
-  5s RMS envelope buckets (vocal stem vs full mix); swapping ACE→Suno (120s→159.3s)
-  was a table edit. Jaws/machinery ride the two envelopes; her visemes from
+  5s RMS envelope buckets (vocal stem vs full mix); replacing a 120s draft
+  with a 159.3s Suno track was a table edit. Jaws/machinery ride the two envelopes; her visemes from
   lipsync.py on the demucs vocal stem, gated by vocal RMS.
 - **Camera dive tracks a live bone-anchored target**: the ending eye is parented to
   the creature's head bone; the final dwell OVERRIDES the dwell table and lerps
@@ -319,3 +319,264 @@ width, repeat.x = (frameW/barH)·(64/pw), offset.x scroll) composite between
 world FX and signal FX exactly as documented. document.createElement('canvas')
 (napi shim) — OffscreenCanvas doesn't exist here; run `deno install` on fresh
 machines or every canvas texture is silently black.
+
+## 2026-09-05 — Astra / A Room Made of Replies
+
+Working production: `work/astra_replies/`. Shared tools unchanged; experiments
+are separate files. Full notes: `production_feedback.md` in that directory.
+
+- Couple delta-printer axis motion and deposited bead reveal to one arc-length
+  cursor. `path_print.js` slices actual contours and infill; nonextruding travel
+  remains explicit. A single solid takes over on completion.
+- Preserve Omnitron's measured pivots and map sets in a detached GLB. Use a
+  calibrated tool frame/aperture, constrained pose IK and unwrapped periodic
+  angles. Export real scene geometry and sweep the arm AND attached payload;
+  reachable tool targets and coarse proxies can miss wrist/rod contacts.
+- Model clearance in the scene: a hinged printer frame and a side-fed rain
+  pipe leave the manipulation volume open. Union a receiver with its spillway,
+  then cut the actual outlet, rather than overlapping a capped chute and rim.
+- Small-vessel SWE: log quantized atomic drop volume and per-cell depth. A
+  0.4 mL drop rounds to zero at a 1e6 fixed-point scale. A fractional source
+  budget avoids tying flow rate to an assumed particle life cycle.
+- A 128×128 closed-cup GPU probe lost substantial volume in float16 state
+  during redistribution. Float32 state with nearest sampling retained volume
+  to about 1e-6 L over ten seconds; a warmed-up 8 L pour returned 8 L after
+  settling. See `water_probe.mjs` and its report. Keep broader regression work
+  separate from this production evidence.
+- Rooted foliage growth can wrap the vegetation brush's GPU position node:
+  scale the displacement from `aPosRot.xyz`, retaining placement, wind and
+  authored materials. Explicit placements avoid empty tiny random stands.
+- Map the editorial timeline to music cues instead of stretching the score.
+  Check collisions again at the final resampled frame times. Keep the full
+  supplied track and finish on the next complete video frame.
+- Synthesize motor foley from the exported print cursor and planned joint
+  velocities on that same clock. Give jaws and hinges their own envelopes;
+  verify silence during stationary holds. Keep generated water/garden recordings
+  as separate, crossfaded beds. Working implementation: `motion_sfx.py`.
+
+
+## Modular robotics foundation, permissive source intake, and native checks — Astra, 2026-09-05
+
+Working implementation: `work/modular_robotics/README.md`; evidence and native
+5-second 1280x720/24fps clip are in its `checks/` directory. Existing tool
+implementations are unchanged. A separate MIT-scoped original module library
+has 14 Blender-authored parts, shared packed PBR maps, full-frame attachment,
+typed joints, bounded full-pose IK and quintic rest-to-rest trajectories.
+Joint/pose guards explicitly permit named mating surfaces. The demonstration
+sweep checked 121 poses and 18 colliders; these discrete surface checks are not
+a continuous or containment collision proof.
+
+For efficient material baking, join a single global atlas while retaining
+module vertex-ownership groups, bake once per channel, then separate the rigid
+parts again. Pack image dependencies into the editable Blender files. Native
+procedural environment textures used Uint16 half-float data; Float32 produced
+an incorrect color cast on this installed stack. The generic motion audit
+misidentifies the moving center of an articulated chain as a displaced base
+pivot; the actual pivot has zero drift in the recorded sweep. Avoid suppressing
+the whole hierarchy. See `TOOL_FEEDBACK.md` for follow-up improvements.
+
+Platform source intake must preserve per-model licenses, revisions and hashes.
+The Menagerie UR5e source is staged under BSD-3-Clause, with all 20 mesh
+references resolved, but is not yet a runtime import. Restrictive or unclear
+assets are excluded from the open package across all sources, including Isaac
+Sim. Omnitron remains a local owner-authorized reference without copied source
+assets. General mechanical principles from public references can inform fresh
+geometry. `PLATFORM_SOURCES.md` records the licensing and importer plan.
+
+## Common Tools: original modular workshop and process-driven fabrication — Astra, 2026-09-05
+
+Staged production: `work/common_tools/`. An 80.29-second 1080p24 film with an
+original synthesized score and motion-derived mechanism sounds; a browser
+inspector also demonstrates 106.94 seconds of continuous-wall printing.
+
+24 new original Blender modules extend the earlier original robotics foundation.
+The compact wrist solved reach/clearance failures; full-frame tool ports support
+gripper, spindle and side-fed hotend. The vise grips orthogonal to the robot's
+jaws, avoiding competing contact spaces. The billet is seated and withdrawn
+vertically before lateral travel. Cutter flutes are a separate rotating mesh.
+
+The machining path is the single authority for axis positions and stock sweeps.
+Feed lookahead and small circular blends bound acceleration; a height field at
+0.125 mm spacing resolves the cut. Printing uses the same path clock to reveal
+an elliptical bead up to the nozzle, consume filament, and rotate the spool.
+The CNC section is explicitly labeled 5×; handling and inspector printing retain
+their actual motion time. The machining core rejects engaged diagonal Z ramps.
+
+Verification: 3,212 mesh/containment clearance samples at 25 ms, with explicit
+guide/bearing/support and state-dependent payload contact permissions; 16,057
+joint derivative samples at 5 ms; independent known-volume, acceleration,
+continuity, timestep-independence and nozzle-end checks. These are sampled
+geometry and kinematics, not a continuous collision or rigid-body simulation.
+
+Surface pipeline: ambientCG Metal009 CC0 inputs, original layered Blender
+materials using curvature wear and local AO, unique shared 2k UV atlas, packed
+PBR exports, and editable packed source/baked .blend files. Distribution contains
+only original MIT geometry/code/art and CC0 material inputs; no Omnitron,
+commercial platform or Isaac Sim source assets. Existing Eidoverse licensing is
+unchanged and its engine files were not edited.
+
+Rendering lessons: tune N8AO radius to mechanical scale (35 mm here), use
+half-float studio environment data, and load native image textures with
+`loadImageTexture`. Manual `makeScreen` updates after the scene clock keep
+nonsequential probes synchronized. Probe montages can trigger camera-bounce
+heuristics despite smooth individual shots. Hidden base/floor support faces
+produce coplanarity warnings requiring inspection. Automatic frame extraction
+still fails on this installation; direct FFmpeg extraction is the working path.
+Native material-copy bug: Three r184 node material cloning retained nodes but
+lost ordinary PBR color, maps, and metalness. `material_tools.js` explicitly
+preserves those fields; `check_materials.mjs` reproduces and checks the fix.
+Detailed implementation feedback: `work/common_tools/TOOL_FEEDBACK.md`.
+
+## Deno 2.9.5 effects-path check and WSL rendering — Fable, 2026-09-12
+
+- The old 2.8.1 pin ("2.9.x corrupts the effects path") did not reproduce.
+  `work/nightshift/fxtest/fx.js` (five spheres, fogged wall, shadowed spot,
+  full auto-enhance N8AO/SSR/bloom/FXAA plus the `depth_fog` TSL effect)
+  rendered on Windows deno 2.8.1 and WSL deno 2.9.5: same tone-step profile
+  down the wall and floor gradients (max 3 levels/pixel on the wall), SSIM
+  0.98 between them, no banding on either. The 2.8.1 frame showed the
+  rectangular SSR/AO patches on the wall; 2.9.5 was the cleaner of the two.
+  Docs and `eido.py doctor` now accept 2.8.x and 2.9.x.
+- Rendering from WSL on a `/mnt/c` checkout works (Vulkan adapter, RTX 5090)
+  but the static ffmpeg there has no nvenc: `RENDER_CODEC=libx264`. ComfyUI
+  on the Windows host is not reachable from WSL as 127.0.0.1 — run the
+  music/SFX generators from the Windows side.
+- Deno rewrites `node_modules/.bin` per OS. After a WSL run the Windows deno
+  fails with `os error 1920` on `.bin/ot`; `rm -rf node_modules/.bin` fixes it.
+- `fetch_model.py` crashes on Windows consoles with a cp1252 `UnicodeEncodeError`
+  (it prints an arrow glyph); set `PYTHONIOENCODING=utf-8` (or `PYTHONUTF8=1`)
+  before calling it.
+
+
+## Manufacturing surfaces and live feed — Astra, 2026-09-13
+
+- `fdm_plate` and `cnc_plate` are independently loadable kit modules with a
+  shared 512 x 1024 material set. The inspector preserves rectangular map
+  aspect in its image and UV overlay. Keep those authored UVs on extraction.
+- The FDM build surface belongs to the machine. Disposing a print job removes
+  its deposition, leaving the shared plate intact. Its actual 6 mm height sets
+  the default first-layer datum; use `buildPlate:false` with an explicitly
+  seated custom fixture when changing the surface.
+- The G430's milky PTFE wall encloses an opaque filament core. They share three
+  cubic control curves and move through uniforms without vertex uploads.
+  Match their endpoint tangents to the actual fitting bores, and include both
+  connection contact and free-span clearance in visual/motion review.
+- GPU stock readback and rewind probes distinguish actual material removal
+  from a plausible still image. This CNC implementation uses a flat-end cutter
+  and 2.5D stock; it does not provide rotary or undercut machining.
+
+
+## Removable sheets, supported tubing and relief stock - September 13
+
+- The accepted FDM surface datum is the original bed plus a 0.65 mm removable
+  PEI sheet. The sheet covers that bed and has accessible pull tabs.
+- A frame-mounted guide and shared push fittings support the 1.34 m PTFE route.
+  Straight insertion spans preserve clearance through the full fitting length;
+  a tangent at the endpoint alone does not establish that clearance.
+- The CNC T-slot table and toe clamps are reusable machine components. Dispose
+  of process stock and debris separately from the machine's shared hardware.
+- `cnc_relief` and `FabSim.carve` accept functions, heightfields or mesh envelopes.
+  Ball compensation, successive roughing and a finishing raster use a vertical
+  three-axis tool. Stock removal evaluates the swept cutter along full XYZ moves.
+- Filter curved stock normals at its grid sampling scale; unresolved scallop
+  normals can alias into false wide stripes. Increase stock resolution when
+  individual scallops need geometric detail. Keep abrupt cut walls distinct.
+
+
+## Indexed rotary stock and short direct feed - September 14
+
+- Load `cnc_rotary` for XYZ plus A-axis carving around stock. The separate
+  `rotary_fixture` supplies the existing drive, new saddle, four-jaw chuck and
+  live-centre tailstock. `cnc` and `cnc_relief` keep their respective pocket and
+  top-down relief processes. Use `FabSim.rotaryCarve` with an initialized renderer.
+- Rotary stock uses a tiled GPU distance field, swept ball-tool subtraction,
+  trilinear sampling and actual fragment depth. It is not a heightfield turned
+  sideways. A radius function about the stock axis defines the target; this
+  indexed four-axis planner does not provide arbitrary undercut mesh CAM.
+  Retract beyond the rectangular block's corners before indexing. Preserve the
+  calibrated fixture and end tabs; final part-off is a separate operation.
+- Keep Three's settled renderer initialization promise intact. Clearing
+  `_initPromise` after scene setup caused the offline clock guard to initialize
+  it again. Instrumentation found replaced texture/attribute managers while
+  backend resources still referred to the first initialization. Stock rendered
+  into during setup failed on subsequent target reuse; cleanup also failed.
+  Awaiting without clearing that promise fixes this lifetime error.
+- Compare actual stock-buffer readback through forward AND backward seek on
+  native WebGPU and the browser fallback. At 128 x 48 x 48, all 294,912 voxels
+  at five checkpoints agreed with an independent swept-cutter calculation
+  within 6 micrometres; the measured maxima were 1.95 and 4.12 micrometres.
+  This is a numerical field check, not a statement of physical machining accuracy.
+- Debris comes from first material engagement, sampled once during setup.
+  Repeated cuts and air moves add no chips. Keep stock discretization separate
+  from the coarser emission-volume estimate. Wood/plywood and metal use their
+  corresponding finish, feed and chip presets.
+- The FDM uses an exposed span between short seated PTFE entries: 30 mm at
+  the rail-mounted carrier, 96 mm at the head. The strands, translucent wall
+  and colored core update through curve uniforms. Preserve the accepted
+  0.65 mm removable PEI sheet on the original bed.
+- Payout begins within the actual winding shell at the authored helix phase.
+  A smooth axial reversal avoids a jump at either reel edge. The rendered
+  baked pack stays fixed in size; remaining-radius estimates control reel
+  timing. Geometric routing does not simulate elastic tension or extra payout
+  caused by head travel. Check whole-machine views as well as fitting macros.
+- New recoloring materials need the same GLB extras schema as the loader,
+  not only valid sidecar texture bindings. Confirm actual black, light and
+  saturated variants in the installed renderer before delivering an assembly.
+
+
+### Rotary metal studies and prepared workholding
+
+The G430 rotary blank includes a centre-drilled tailstock seat with pilot relief.
+It belongs to the initial stock; chip events describe subsequent removal only.
+The clamped assembly uses captured jaws, an accessible quill lock and T-slot
+fastenings. The setup adjustment itself is static.
+
+For metal timing, omit fabrication `duration` to retain the material's physical
+feed/depth rates. The `robotics/rotary_metal` example shows a physical-speed cut
+before accelerating the rest. Equal time-lapse durations do not demonstrate
+equal machining time. Material appearance is separate from cutting forces,
+machine stiffness, coolant and tool-wear simulation.
+
+
+### Adjustable rotary stock and timed FDM feed
+
+The G430 rotary fixture has independent captured jaws, a sliding tailstock and
+fed quill. Use `rotarySetup` or the dimensions on `rotaryCarve` to position them;
+the machining job sets its axis datum and retained ends from that same setup.
+The inspector's stock controls fit the fixture before restarting the carve.
+
+The FDM sample retains 25% alternating infill. Its reel and cooling fan follow
+physical process time even during time-lapse playback and rewinding. Short
+seated translucent PTFE sections guide the exposed strand through the carrier
+and into the head; their geometric routes are calibrated to the G430 frame.
+See tools-guides/robotics.md for supported sizes and motion ownership.
+
+### Supplied mesh fabrication, solid skins and indexed access
+
+Manufacturing accepts BufferGeometry, Mesh and Object3D source hierarchies.
+Snapshot the current transformed geometry once during setup, including parent,
+instance and reflection transforms. `sourceGeometry` preserves the source buffers;
+`fitSourceGeometry` fits uniformly into a physical Box3 or to a chosen size.
+The FDM job fits to its bed. Relief expects physical stock coordinates; fit its
+source into the available cutting region before calling `carve`.
+
+FDM cross-sections preserve holes, union overlapping solids and retain separate
+solids inside hollow shells. Local top/bottom skins compare adjacent layers,
+so lower ledges receive dense surfaces while internal columns retain sparse
+infill. Support generation and general printability assessment are separate.
+
+`rotaryCarve(machine, sourceMesh, {renderer, ...options})` clips source triangles
+into conservative projection cells at each indexed X-axis orientation, then
+makes lateral XYZ rasters with cutter-footprint compensation. It subtracts real
+swept tool volume from the stock field. The fitted 6 mm two-flute flat cutter
+has 18 mm exposed cutting length; the relief machine retains its ball nose.
+Source meshes are never substituted for the simulated result. The access report
+describes reach-limited footprints and retained end stock; it does not certify
+access to undercuts or every surface. Use `requireReach:true` to reject jobs
+that exceed the conservative cutting-length envelope.
+
+The local inspector accepts STL and embedded GLB files and offers ordinary mesh
+examples. Compare the same input in additive, relief and indexed machining to
+see each process's actual accessible result. Eight rotary table studs engage
+the shared T-slot nuts. The loader retains part ownership on every primitive
+when glTF represents one named part with several material primitives.

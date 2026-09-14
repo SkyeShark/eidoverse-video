@@ -1,0 +1,469 @@
+{
+  "roots": {
+    "spindle_fixed": {
+      "parent": null,
+      "location": [
+        -0.1899999976158142,
+        0.0,
+        0.017999999225139618
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "spindle_fixed",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "attachment_position": [
+          0.0,
+          0.071,
+          0.132
+        ],
+        "attachment_normal": [
+          0,
+          1,
+          0
+        ],
+        "tcp": [
+          0,
+          0,
+          0
+        ],
+        "interface": "TC70",
+        "architecture": "Air-cooled spindle / 43 mm neck / ER-style collet"
+      }
+    },
+    "spindle_rotor": {
+      "parent": "spindle_fixed",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "spindle_rotor",
+        "joint_type": "revolute",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          -1000000000.0,
+          1000000000.0
+        ]
+      }
+    },
+    "extruder_fixed": {
+      "parent": null,
+      "location": [
+        0.0,
+        0.0,
+        0.017999999225139618
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "extruder_fixed",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "attachment_position": [
+          0.0,
+          0.057,
+          0.077
+        ],
+        "attachment_normal": [
+          0,
+          1,
+          0
+        ],
+        "tcp": [
+          0,
+          0,
+          0
+        ],
+        "interface": "TC70",
+        "architecture": "Direct geared extrusion / idler tensioner / heatbreak and axial cooling"
+      }
+    },
+    "vacuum_fixed": {
+      "parent": null,
+      "location": [
+        0.1899999976158142,
+        0.0,
+        0.017999999225139618
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "vacuum_fixed",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "attachment_position": [
+          0.0,
+          0.0,
+          0.097
+        ],
+        "attachment_normal": [
+          0,
+          0,
+          1
+        ],
+        "tcp": [
+          0,
+          0,
+          0
+        ],
+        "interface": "TC70",
+        "architecture": "Dual bellows cups / independently sprung stems / manifold"
+      }
+    },
+    "vacuum_cup_-1": {
+      "parent": "vacuum_fixed",
+      "location": [
+        -0.0430000014603138,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "vacuum_cup_-1",
+        "joint_type": "prismatic",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          0.0,
+          0.006
+        ]
+      }
+    },
+    "vacuum_cup_1": {
+      "parent": "vacuum_fixed",
+      "location": [
+        0.0430000014603138,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "vacuum_cup_1",
+        "joint_type": "prismatic",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "limits": [
+          0.0,
+          0.006
+        ]
+      }
+    },
+    "extruder_fan": {
+      "parent": "extruder_fixed",
+      "location": [
+        0,
+        -0.0319,
+        0.074
+      ],
+      "rotation_euler": [
+        0,
+        0,
+        0
+      ],
+      "properties": {
+        "module_id": "extruder_fan",
+        "joint_type": "continuous",
+        "axis": [
+          0,
+          -1,
+          0
+        ],
+        "nominal_rpm": 4800
+      }
+    }
+  },
+  "families": {
+    "spindle": [],
+    "extruder": [],
+    "vacuum": []
+  },
+  "inspector": {
+    "title": "Modular process heads",
+    "description": "Complete spindle, geared FDM and sprung vacuum modules with shared TC70 and service hardware.",
+    "assemblies": {
+      "all": {
+        "label": "All process heads",
+        "batches": [
+          "process",
+          "common"
+        ],
+        "frame": [
+          [
+            0,
+            0.139,
+            0
+          ],
+          [
+            0.4,
+            0.35,
+            0.7
+          ],
+          0.59
+        ],
+        "parts": [
+          "SP air cooled motor casing",
+          "SP machined neck",
+          "SP rear mounting saddle",
+          "SP collet nut",
+          "SP two flute cutter",
+          "SP supported rotor pilot",
+          "SP retained service loop",
+          "EX geared coldside chassis",
+          "EX compact drive motor",
+          "EX axial fan shroud",
+          "EX fan hub",
+          "EX swept fan blade 0",
+          "EX heatbreak",
+          "EX silicone heater jacket",
+          "EX brass nozzle",
+          "EX filament inlet",
+          "EX idler release lever",
+          "EX tension adjuster",
+          "EX rear robot adapter",
+          "EX heater connector",
+          "EX heater service loop",
+          "VC curved manifold",
+          "VC manifold neck",
+          "VC bellows cup -1",
+          "VC floating stem -1",
+          "VC stem guide -1",
+          "VC pneumatic gland seat",
+          "EX swept fan blade 1",
+          "EX swept fan blade 2",
+          "EX swept fan blade 3",
+          "EX swept fan blade 4",
+          "EX swept fan blade 5",
+          "EX swept fan blade 6",
+          "VC bellows cup 1",
+          "VC floating stem 1",
+          "VC stem guide 1",
+          "SP power inlet",
+          "SP controller outlet",
+          "EX controller connector",
+          "VC pneumatic inlet",
+          "SP TC70 rear flange common flange",
+          "SP TC70 rear flange common carrier",
+          "EX TC70 rear flange common flange",
+          "EX TC70 rear flange common carrier",
+          "VC TC70 top flange common flange",
+          "VC TC70 top flange common carrier"
+        ]
+      },
+      "spindle": {
+        "label": "Spindle",
+        "batches": [
+          "process",
+          "common"
+        ],
+        "parts": [
+          "SP air cooled motor casing",
+          "SP machined neck",
+          "SP rear mounting saddle",
+          "SP TC70 rear flange common flange",
+          "SP TC70 rear flange common carrier",
+          "SP collet nut",
+          "SP two flute cutter",
+          "SP supported rotor pilot",
+          "SP power inlet",
+          "SP controller outlet",
+          "SP retained service loop"
+        ],
+        "frame": [
+          [
+            -0.19,
+            0.155,
+            0
+          ],
+          [
+            0.4,
+            0.35,
+            0.7
+          ],
+          0.36
+        ]
+      },
+      "extruder": {
+        "label": "Extruder",
+        "batches": [
+          "process",
+          "common"
+        ],
+        "parts": [
+          "EX geared coldside chassis",
+          "EX compact drive motor",
+          "EX axial fan shroud",
+          "EX fan hub",
+          "EX swept fan blade 0",
+          "EX swept fan blade 1",
+          "EX swept fan blade 2",
+          "EX swept fan blade 3",
+          "EX swept fan blade 4",
+          "EX swept fan blade 5",
+          "EX swept fan blade 6",
+          "EX heatbreak",
+          "EX silicone heater jacket",
+          "EX brass nozzle",
+          "EX filament inlet",
+          "EX idler release lever",
+          "EX tension adjuster",
+          "EX rear robot adapter",
+          "EX TC70 rear flange common flange",
+          "EX TC70 rear flange common carrier",
+          "EX heater connector",
+          "EX controller connector",
+          "EX heater service loop"
+        ],
+        "frame": [
+          [
+            0,
+            0.09,
+            0
+          ],
+          [
+            0.4,
+            0.35,
+            0.7
+          ],
+          0.19
+        ]
+      },
+      "vacuum": {
+        "label": "Vacuum",
+        "batches": [
+          "process",
+          "common"
+        ],
+        "parts": [
+          "VC curved manifold",
+          "VC TC70 top flange common flange",
+          "VC TC70 top flange common carrier",
+          "VC manifold neck",
+          "VC bellows cup -1",
+          "VC floating stem -1",
+          "VC stem guide -1",
+          "VC bellows cup 1",
+          "VC floating stem 1",
+          "VC stem guide 1",
+          "VC pneumatic gland seat",
+          "VC pneumatic inlet"
+        ],
+        "frame": [
+          [
+            0.19,
+            0.065,
+            0
+          ],
+          [
+            0.4,
+            0.35,
+            0.7
+          ],
+          0.19
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "texture_bindings": {
+    "process": {
+      "base": {
+        "uri": "../textures/08ac2a855a3c47180993e7ca.png",
+        "identity": "08ac2a855a3c47180993e7cacb70c834dc7f2091750f1ea1421f6ddc01e38f87"
+      },
+      "fixed": {
+        "uri": "../textures/d2d8b8217e17bb6cb6cbd886.png",
+        "identity": "d2d8b8217e17bb6cb6cbd8868956670cc695783f8118e471d2d9798cccac8a33"
+      },
+      "mask": {
+        "uri": "../textures/f11705a2d89fc709dfab9d4e.png",
+        "identity": "f11705a2d89fc709dfab9d4e4ce262aab5484d5174ddde1254c37b5d3f7e1716"
+      },
+      "normal": {
+        "uri": "../textures/068b4cb342de4836971db022.png",
+        "identity": "068b4cb342de4836971db022d8e5d204cf4f126784229837c04c17b05e2175ce"
+      },
+      "orm": {
+        "uri": "../textures/71a16fbd2f3c7229503d94b8.png",
+        "identity": "71a16fbd2f3c7229503d94b8ee73171afe00188fc7f591372be22ed53f0ca992"
+      }
+    },
+    "common": {
+      "base": {
+        "uri": "../textures/e775e6e4c9773e7a1ad33dcf.png",
+        "identity": "e775e6e4c9773e7a1ad33dcf561cc59a39e5057bbc0d539dfd9a5547117d7e31"
+      },
+      "fixed": {
+        "uri": "../textures/c340f9844109c9a4db11d940.png",
+        "identity": "c340f9844109c9a4db11d9402ccc063a19eebb01cbdc436977311906b483cd61"
+      },
+      "mask": {
+        "uri": "../textures/72feec464b98fa96ed792040.png",
+        "identity": "72feec464b98fa96ed79204039af239b1ea0d2a0f8981785f9083c48dbc753d4"
+      },
+      "normal": {
+        "uri": "../textures/f0264717b3d56f5b61772f60.png",
+        "identity": "f0264717b3d56f5b61772f605fed2565eaa2c1a8c69972d992cb4995f8d2c599"
+      },
+      "orm": {
+        "uri": "../textures/c9bbc03f0577f17d04ca0144.png",
+        "identity": "c9bbc03f0577f17d04ca01444342a70c0a8ce7de17e4e2932e35199080deb1b5"
+      }
+    }
+  }
+}

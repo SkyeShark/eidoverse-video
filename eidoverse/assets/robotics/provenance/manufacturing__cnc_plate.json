@@ -1,0 +1,92 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 1",
+          26
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 2",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 3",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 3,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 4",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 4,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 5",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 5,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 6",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 6,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 7",
+          40
+        ]
+      ]
+    },
+    {
+      "node": 7,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP T-slot deck extrusion 8",
+          26
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "roots": {
+    "cnc_ball_tool": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_ball_tool",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "texture_bindings": {
+    "rotary_workholding": {
+      "base": {
+        "uri": "../textures/rotary_workholding_base.png",
+        "identity": "e872bccbf13b56ba69c6bbe0dfd696bd03212f005c0621524203c95f02d3ca78"
+      },
+      "fixed": {
+        "uri": "../textures/rotary_workholding_fixed.png",
+        "identity": "4f4341b60dac8d379bc2d1b6b2a96ebabbb8e4b4f0deba2f84361223f98a5b61"
+      },
+      "mask": {
+        "uri": "../textures/rotary_workholding_mask.png",
+        "identity": "6b3fe6782ad60e7e9d8b960d9f29247359f0d64e89e0c05b24f73c94cf208eb9"
+      },
+      "normal": {
+        "uri": "../textures/rotary_workholding_normal.png",
+        "identity": "a9761af9a89e5b100163abf37de4625bf2f8d58914400c2ec8654928f005a9bb"
+      },
+      "orm": {
+        "uri": "../textures/rotary_workholding_orm.png",
+        "identity": "d3cc00618e1ed024d8d9e1d8bf6cd2fff10886924339a7d25008a1529f55d2ff"
+      }
+    }
+  },
+  "families": {},
+  "mobile": {},
+  "inspector": {
+    "assemblies": {
+      "ball_tool": {
+        "label": "6 mm ground two-flute ball cutter",
+        "parts": [
+          "SP 6 mm two-flute ball-nose cutter"
+        ],
+        "batches": [
+          "rotary_workholding"
+        ]
+      }
+    }
+  }
+}

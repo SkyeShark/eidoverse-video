@@ -1,0 +1,377 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 swept landing strut 0",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 swept landing strut 1",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 4,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 swept landing strut 2",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 6,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 swept landing strut 3",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 8,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge rotor and boom socket 0",
+          772
+        ],
+        [
+          "A420 composite boom 0",
+          64
+        ],
+        [
+          "A420 swept motor saddle 0",
+          832
+        ],
+        [
+          "A420 motor bearing core 0",
+          64
+        ]
+      ]
+    },
+    {
+      "node": 9,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 vented motor bell 0",
+          480
+        ],
+        [
+          "A420 captive propeller hub 0",
+          188
+        ],
+        [
+          "A420 1 propeller primary",
+          154
+        ],
+        [
+          "A420 propeller blade 0 1",
+          154
+        ]
+      ]
+    },
+    {
+      "node": 12,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 captive flight lock 0",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 14,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge foundation 0",
+          508
+        ],
+        [
+          "A420 captured fold pin 0",
+          92
+        ],
+        [
+          "A420 lock guide sleeve 0",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 16,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge rotor and boom socket 1",
+          772
+        ],
+        [
+          "A420 composite boom 1",
+          64
+        ],
+        [
+          "A420 swept motor saddle 1",
+          832
+        ],
+        [
+          "A420 motor bearing core 1",
+          64
+        ]
+      ]
+    },
+    {
+      "node": 17,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 vented motor bell 1",
+          480
+        ],
+        [
+          "A420 captive propeller hub 1",
+          188
+        ],
+        [
+          "A420 -1 propeller primary",
+          154
+        ],
+        [
+          "A420 propeller blade 1 1",
+          154
+        ]
+      ]
+    },
+    {
+      "node": 20,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 captive flight lock 1",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 22,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge foundation 1",
+          508
+        ],
+        [
+          "A420 captured fold pin 1",
+          92
+        ],
+        [
+          "A420 lock guide sleeve 1",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 24,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge rotor and boom socket 2",
+          772
+        ],
+        [
+          "A420 composite boom 2",
+          64
+        ],
+        [
+          "A420 swept motor saddle 2",
+          832
+        ],
+        [
+          "A420 motor bearing core 2",
+          64
+        ]
+      ]
+    },
+    {
+      "node": 25,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 vented motor bell 2",
+          480
+        ],
+        [
+          "A420 captive propeller hub 2",
+          188
+        ],
+        [
+          "A420 propeller blade 2 0",
+          154
+        ],
+        [
+          "A420 propeller blade 2 1",
+          154
+        ]
+      ]
+    },
+    {
+      "node": 28,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 captive flight lock 2",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 30,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge foundation 2",
+          508
+        ],
+        [
+          "A420 captured fold pin 2",
+          92
+        ],
+        [
+          "A420 lock guide sleeve 2",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 32,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge rotor and boom socket 3",
+          772
+        ],
+        [
+          "A420 composite boom 3",
+          64
+        ],
+        [
+          "A420 swept motor saddle 3",
+          832
+        ],
+        [
+          "A420 motor bearing core 3",
+          64
+        ]
+      ]
+    },
+    {
+      "node": 33,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 vented motor bell 3",
+          480
+        ],
+        [
+          "A420 captive propeller hub 3",
+          188
+        ],
+        [
+          "A420 propeller blade 3 0",
+          154
+        ],
+        [
+          "A420 propeller blade 3 1",
+          154
+        ]
+      ]
+    },
+    {
+      "node": 36,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 captive flight lock 3",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 38,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 hinge foundation 3",
+          508
+        ],
+        [
+          "A420 captured fold pin 3",
+          92
+        ],
+        [
+          "A420 lock guide sleeve 3",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 40,
+      "primitive": 0,
+      "batch": "air",
+      "faces": [
+        [
+          "A420 continuous avionics canopy",
+          918
+        ],
+        [
+          "A420 lower equipment tray",
+          158
+        ],
+        [
+          "A420 landing runner -1",
+          284
+        ],
+        [
+          "A420 landing runner 1",
+          284
+        ]
+      ]
+    }
+  ],
+  "unmatched": 0,
+  "mapping_validation": "All vertex attributes, indices and part IDs matched the non-animated airframe donor byte for byte."
+}

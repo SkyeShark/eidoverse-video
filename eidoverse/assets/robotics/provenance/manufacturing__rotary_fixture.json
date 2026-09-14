@@ -1,0 +1,581 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC continuous dovetail bed",
+          48
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC formed headstock saddle",
+          100
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC headstock brace 1",
+          8
+        ]
+      ]
+    },
+    {
+      "node": 3,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC headstock brace -1",
+          8
+        ]
+      ]
+    },
+    {
+      "node": 4,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 0",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 5,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 1",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 6,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 2",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 7,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 3",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 8,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 4",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 9,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 5",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 10,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 6",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 11,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC table fixing 7",
+          142
+        ]
+      ]
+    },
+    {
+      "node": 12,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC four jaw chuck body",
+          1036
+        ]
+      ]
+    },
+    {
+      "node": 13,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC independent jaw 0",
+          57
+        ]
+      ]
+    },
+    {
+      "node": 15,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC independent jaw 1",
+          57
+        ]
+      ]
+    },
+    {
+      "node": 17,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC independent jaw 2",
+          57
+        ]
+      ]
+    },
+    {
+      "node": 19,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC independent jaw 3",
+          57
+        ]
+      ]
+    },
+    {
+      "node": 22,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC carriage lock lever",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 23,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC cast tailstock foot",
+          298
+        ]
+      ]
+    },
+    {
+      "node": 24,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC quill lock lever",
+          188
+        ]
+      ]
+    },
+    {
+      "node": 25,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC tailstock sliding shoe",
+          34
+        ]
+      ]
+    },
+    {
+      "node": 26,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC handwheel crank",
+          156
+        ]
+      ]
+    },
+    {
+      "node": 27,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC quill handwheel",
+          316
+        ]
+      ]
+    },
+    {
+      "node": 29,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC bearing live centre",
+          286
+        ]
+      ]
+    },
+    {
+      "node": 30,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "RC tailstock quill",
+          256
+        ]
+      ]
+    },
+    {
+      "node": 34,
+      "primitive": 0,
+      "batch": "manufacturing",
+      "faces": [
+        [
+          "RD output bolt flange",
+          1024
+        ]
+      ]
+    },
+    {
+      "node": 36,
+      "primitive": 0,
+      "batch": "manufacturing",
+      "faces": [
+        [
+          "RD radial power port",
+          240
+        ],
+        [
+          "RD labyrinth seal",
+          512
+        ],
+        [
+          "RD machined bearing land",
+          744
+        ],
+        [
+          "RD hollow drive casting",
+          1280
+        ],
+        [
+          "RD integral mounting flange",
+          416
+        ]
+      ]
+    },
+    {
+      "node": 38,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 0",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 39,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 0",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 40,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 1",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 41,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 1",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 42,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 2",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 43,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 2",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 44,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 3",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 45,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 3",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 46,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 4",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 47,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 4",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 48,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 5",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 49,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 5",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 50,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 6",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 51,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 6",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 52,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table stud 7",
+          32
+        ]
+      ]
+    },
+    {
+      "node": 53,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 7",
+          24
+        ]
+      ]
+    },
+    {
+      "node": 39,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 0",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 41,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 1",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 43,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 2",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 45,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 3",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 47,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 4",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 49,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 5",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 51,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 6",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 53,
+      "primitive": 1,
+      "batch": "plates",
+      "faces": [
+        [
+          "RC table T-nut 7",
+          12
+        ]
+      ]
+    }
+  ]
+}

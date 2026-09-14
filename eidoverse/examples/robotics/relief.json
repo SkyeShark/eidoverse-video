@@ -1,0 +1,8 @@
+{
+  "width":1280,
+  "height":720,
+  "fps":24,
+  "duration":26,
+  "script":"eidoverse/examples/robotics/relief.scene.js",
+  "outputVideo":"work/modular_relief.mp4"
+}

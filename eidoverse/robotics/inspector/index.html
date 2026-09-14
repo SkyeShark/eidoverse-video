@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Eidoverse · Modular robotics</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font: 14px system-ui;
+      color: #22383e;
+      background: #e6ecec;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      height: 100vh;
+    }
+    aside {
+      padding: 22px 18px;
+      overflow: auto;
+      border-right: 1px solid #bac8ca;
+    }
+    h1 {
+      font-size: 21px;
+      font-weight: 650;
+      margin: 0 0 7px;
+    }
+    p {
+      line-height: 1.5;
+    }
+    label {
+      display: block;
+      margin: 14px 0 5px;
+    }
+    select, input[type="range"] {
+      width: 100%;
+    }
+    select, button {
+      font: inherit;
+      border: 1px solid #a2b5b9;
+      background: #f7fafa;
+      border-radius: 5px;
+      padding: 7px;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 12px 0;
+    }
+    .small {
+      font-size: 12px;
+      color: #567078;
+    }
+    .error {
+      color: #a02222;
+      white-space: pre-wrap;
+    }
+    #workspace {
+      display: grid;
+      grid-template-columns: 1fr;
+      min-width: 0;
+      min-height: 0;
+    }
+    #workspace.split {
+      grid-template-columns: 1fr 1fr;
+    }
+    #viewport {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+    }
+    #canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #uvPane {
+      display: none;
+      padding: 16px;
+      background: #18252a;
+      overflow: auto;
+      color: #e5eded;
+    }
+    #workspace.split #uvPane {
+      display: block;
+    }
+    #uv {
+      width: 100%;
+      height: auto;
+      background: #0c1316;
+    }
+    #caption {
+      position: absolute;
+      bottom: 15px;
+      left: 15px;
+      padding: 7px 10px;
+      border-radius: 5px;
+      background: #e7eeeecc;
+      pointer-events: none;
+    }
+    details {
+      margin-top: 16px;
+    }
+    #joints label {
+      font-size: 12px;
+    }
+    #status {
+      min-height: 40px;
+    }
+    @media (max-width: 800px) {
+      main {
+        grid-template-columns: 230px 1fr;
+      }
+      #workspace.split {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
+      }
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/build/three.webgpu.js",
+      "three/webgpu": "./vendor/three/build/three.webgpu.js",
+      "three/tsl": "./vendor/three/build/three.tsl.js",
+      "three/addons/": "./vendor/three/examples/jsm/",
+      "npm:three@0.184.0/addons/loaders/GLTFLoader.js": "./vendor/three/examples/jsm/loaders/GLTFLoader.js",
+      "npm:three@0.184.0/addons/utils/SkeletonUtils.js": "./vendor/three/examples/jsm/utils/SkeletonUtils.js",
+      "npm:three@0.184.0/addons/environments/RoomEnvironment.js": "./vendor/three/examples/jsm/environments/RoomEnvironment.js"
+    }
+  }
+  </script>
+  <main>
+    <aside>
+      <h1>Modular robotics</h1>
+      <p class="small">
+        The shared Eidoverse kit. Metres, radians, authored materials and
+        reusable interfaces.
+      </p>
+      <label for="asset">Module or assembled build</label><select id="asset">
+      </select>
+      <div id="status" class="small">Loading the catalog…</div>
+      <label for="clip">Motion</label><select id="clip"></select>
+      <div class="row">
+        <button id="play">Play</button>
+        <button id="reset">Reset</button>
+        <button id="frame">Frame</button>
+      </div>
+      <button id="frameWork" hidden>Inspect workpiece</button><input
+        id="time"
+        type="range"
+        min="0"
+        max="20"
+        step=".01"
+        value="0"
+      ><output id="timeLabel">0.00 s</output>
+      <div class="row">
+        <label>Body <input
+            id="primary"
+            type="color"
+            value="#e5e9e8"
+          ></label><label>Accent <input
+            id="accent"
+            type="color"
+            value="#569da3"
+          ></label>
+      </div>
+      <div class="row">
+        <label><input id="wire" type="checkbox"> Wireframe</label><label><input
+            id="split"
+            type="checkbox"
+          > UV split</label>
+      </div>
+      <div id="filamentControls" hidden><label>Filament <input id="filamentColor" type="color" value="#218675"></label></div>
+      <div id="stockControls" hidden><label for="stockMaterial">Stock material</label><select id="stockMaterial"><option value="aluminum">Aluminum</option><option value="brass">Brass</option><option value="steel">Steel</option><option value="wood">Hardwood</option><option value="plywood">Birch plywood</option></select></div>
+      <div id="rotaryStockControls" hidden>
+        <label for="stockPreset">Rotary blank</label>
+        <select id="stockPreset"><option value="140,36,36">140 × 36 × 36 mm</option><option value="100,24,28">100 × 24 × 28 mm</option><option value="180,44,50">180 × 44 × 50 mm</option></select>
+        <label>Length (mm) <input id="stockLength" type="number" min="80" max="180" step="1" value="140"></label>
+        <label>Width (mm) <input id="stockWidth" type="number" min="18" max="50" step="1" value="36"></label>
+        <label>Height (mm) <input id="stockHeight" type="number" min="18" max="50" step="1" value="36"></label>
+        <button id="applyStock">Fit blank and restart carving</button>
+      </div>
+      <div id="processControls" hidden><label for="processTiming">Process playback</label><select id="processTiming"><option value="lapse">Time lapse (18 seconds)</option><option value="physical">Physical timing</option></select><p id="processState" class="small"></p>
+        <label for="sourceSample">Workpiece source</label>
+        <select id="sourceSample"><option value="default">Machine demonstration</option><option value="handle">Offset handle mesh</option><option value="bracket">Fork bracket with bore</option><option value="ring">Knotted ring mesh</option></select>
+        <label for="sourceFile">Load local STL or embedded GLB</label><input id="sourceFile" type="file" accept=".stl,.glb">
+        <p id="sourceInfo" class="small">Source geometry is fitted uniformly into the selected process area.</p>
+      </div>
+      <label for="part">Inspect part</label><select id="part"></select>
+      <p id="partStats" class="small"></p><label><input
+          id="reference"
+          type="checkbox"
+        > Hand grasp cylinder</label>
+      <details>
+        <summary>Joints and attachment ports</summary>
+        <div id="joints"></div>
+        <pre id="ports" class="small" style="white-space: pre-wrap"></pre>
+      </details>
+      <p class="small">
+        Flight and walking/running are authored kinematics. CNC cuts heightfield
+        stock for pockets and relief, or volumetric stock in the XYZ + A machine.
+        Fabrication timing follows the selected playback mode.
+      </p>
+      <p id="error" class="error"></p>
+    </aside>
+    <div id="workspace">
+      <div id="viewport">
+        <canvas id="canvas"></canvas><span id="caption"
+        >Drag to orbit · scroll to zoom · click a part</span>
+      </div>
+      <section id="uvPane">
+        <label for="map">Material map</label><select id="map"></select>
+        <p id="mapStats" class="small"></p><canvas
+          id="uv"
+          width="1024"
+          height="1024"
+        ></canvas>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="./viewer.js"></script>
+</html>

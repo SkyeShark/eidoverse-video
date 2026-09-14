@@ -1,0 +1,247 @@
+{
+  "roots": {
+    "fdm_build_plate": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "fdm_build_plate",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_fixture_plate": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_fixture_plate",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_edge_clamp": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_edge_clamp",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "fdm_tube_support": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "fdm_tube_support",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "fdm_push_fitting": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "fdm_push_fitting",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    "cnc_ball_tool": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "cnc_ball_tool",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "families": {},
+  "mobile": {},
+  "inspector": {
+    "assemblies": {
+      "fdm_plate": {
+        "label": "Removable textured PEI sheet",
+        "parts": [
+          "BP removable PEI spring-steel sheet"
+        ],
+        "batches": [
+          "plates"
+        ]
+      },
+      "cnc_plate": {
+        "label": "Aluminum T-slot work table",
+        "parts": [
+          "BP T-slot deck extrusion 1",
+          "BP T-slot deck extrusion 2",
+          "BP T-slot deck extrusion 3",
+          "BP T-slot deck extrusion 4",
+          "BP T-slot deck extrusion 5",
+          "BP T-slot deck extrusion 6",
+          "BP T-slot deck extrusion 7",
+          "BP T-slot deck extrusion 8"
+        ],
+        "batches": [
+          "plates"
+        ]
+      },
+      "cnc_clamp": {
+        "label": "Low-profile T-slot toe clamp",
+        "parts": [
+          "BP clamp captive stud",
+          "BP low-profile toe clamp",
+          "BP sliding M6 T-nut"
+        ],
+        "batches": [
+          "plates"
+        ]
+      },
+      "tube_support": {
+        "label": "Frame-mounted PTFE guide",
+        "parts": [
+          "FP frame-supported guide bracket",
+          "FP supported PTFE guide eye"
+        ],
+        "batches": [
+          "plates"
+        ]
+      },
+      "push_fitting": {
+        "label": "4 mm PTFE push fitting",
+        "parts": [
+          "FP extruder push fitting body",
+          "FP extruder push fitting collet"
+        ],
+        "batches": [
+          "plates"
+        ]
+      },
+      "ball_tool": {
+        "label": "6 mm ball-nose cutter",
+        "parts": [
+          "SP 6 mm two-flute ball-nose cutter"
+        ],
+        "batches": [
+          "plates"
+        ]
+      }
+    }
+  },
+  "texture_bindings": {
+    "plates": {
+      "base": {
+        "uri": "../textures/plates_base.png",
+        "identity": "ec29b23fd8f93dabf736a4c3d3d7094dadbeae1ccb84cf34d53a5c341fe20cbb"
+      },
+      "normal": {
+        "uri": "../textures/plates_normal.png",
+        "identity": "eb823097e4b152a2a82909f2982ad3b0a91a59a6546daba68d3fad7acc8a76d2"
+      },
+      "orm": {
+        "uri": "../textures/plates_orm.png",
+        "identity": "12c77251ffed03046323bfd7b40868c5ebf10cea0eb395ef6eadf11ba01da1fa"
+      }
+    }
+  },
+  "build_surfaces": {
+    "fdm_sheet_thickness_m": 0.00065,
+    "cnc_t_slot_pitch_m": 0.05625,
+    "cnc_slot_mouth_m": 0.008,
+    "cnc_slot_undercut_m": 0.016,
+    "source_bake": [
+      4096,
+      8192
+    ],
+    "delivery_atlas": [
+      512,
+      1024
+    ]
+  }
+}

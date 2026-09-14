@@ -1,0 +1,177 @@
+{
+  "roots": {
+    "filament_stand": {
+      "parent": null,
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "filament_stand",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "interface": "SM40",
+        "input_frame": [
+          0,
+          0,
+          0
+        ],
+        "attachment_normal": [
+          0,
+          0,
+          -1
+        ],
+        "ports_json": "{\"filament_out\": {\"interface\": \"PTFE4\", \"position_m\": [0.041, -0.041, 0.322], \"normal\": [0, 0, 1]}}",
+        "filament_out": [
+          0.041,
+          -0.041,
+          0.32
+        ]
+      }
+    },
+    "filament_reel": {
+      "parent": "filament_stand",
+      "location": [
+        0.0,
+        0.0,
+        0.15000000596046448
+      ],
+      "rotation_euler": [
+        0.0,
+        1.5707963705062866,
+        0.0
+      ],
+      "properties": {
+        "module_id": "filament_reel",
+        "joint_type": "continuous",
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "filament_diameter_m": 0.00175,
+        "winding_radius_m": 0.083,
+        "core_radius_m": 0.033,
+        "winding_width_m": 0.05075,
+        "spool_outer_radius_m": 0.1,
+        "packing_fraction": 0.9
+      }
+    },
+    "filament_spool_fitting": {
+      "parent": "filament_stand",
+      "location": [
+        0.041,
+        -0.041,
+        0.313
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "properties": {
+        "module_id": "filament_spool_fitting",
+        "joint_type": "fixed",
+        "axis": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "inspector": {
+    "assemblies": {
+      "spool": {
+        "label": "Filament dispenser / 200 mm reel",
+        "parts": [
+          "FP front reel cheek",
+          "FP rear reel cheek",
+          "FP core sleeve",
+          "FP wound filament",
+          "FP dispenser foot",
+          "FP swept dispenser spine",
+          "FP polished axle",
+          "FP centering bushing -1",
+          "FP centering bushing 1",
+          "FP axle thumb nut",
+          "FP extruder push fitting body",
+          "FP extruder push fitting collet"
+        ],
+        "batches": [
+          "plates"
+        ]
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "families": {},
+  "mobile": {},
+  "texture_bindings": {
+    "feed": {
+      "base": {
+        "uri": "../textures/feed_base.png",
+        "identity": "cf837e91f5cbc3de5325881710aaec650f950d55265121d0340b9ff9c5d200bc"
+      },
+      "fixed": {
+        "uri": "../textures/feed_fixed.png",
+        "identity": "85d3e545b85d456005fb94633b5a62b7ba533cfaf4f3c78cf3ba500001e4a8a7"
+      },
+      "mask": {
+        "uri": "../textures/feed_mask.png",
+        "identity": "4544387641df7571e77ab5bba087ca1c42786461eab65dd09be37b2454f9e3a6"
+      },
+      "normal": {
+        "uri": "../textures/feed_normal.png",
+        "identity": "6d5b646b11a9bd71828176ea6101692322c711f7e7663b9093a59adb106eaad2"
+      },
+      "orm": {
+        "uri": "../textures/feed_orm.png",
+        "identity": "7eca2ee3217e5db10d6652cede6f3057e29ce5b2dee1d5eca57b420627a7ab43"
+      }
+    },
+    "plates": {
+      "base": {
+        "uri": "../textures/plates_base.png",
+        "identity": "ec29b23fd8f93dabf736a4c3d3d7094dadbeae1ccb84cf34d53a5c341fe20cbb"
+      },
+      "normal": {
+        "uri": "../textures/plates_normal.png",
+        "identity": "eb823097e4b152a2a82909f2982ad3b0a91a59a6546daba68d3fad7acc8a76d2"
+      },
+      "orm": {
+        "uri": "../textures/plates_orm.png",
+        "identity": "12c77251ffed03046323bfd7b40868c5ebf10cea0eb395ef6eadf11ba01da1fa"
+      }
+    }
+  },
+  "fabrication_feed": {
+    "filament_diameter_m": 0.00175,
+    "ptfe_outer_diameter_m": 0.004,
+    "ptfe_inner_diameter_m": 0.002,
+    "tube_length_m": 1.35,
+    "source_bake_size": 8192,
+    "delivery_size": 2048,
+    "atlas_coverage": 0.693639,
+    "filament_mask_channel": "b"
+  }
+}

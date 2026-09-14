@@ -1,5 +1,5 @@
 # Host-side Python dependencies, BY TIER. The render engine itself needs
-# NONE of these (local rendering = Deno 2.8.1 + ffmpeg only).
+# NONE of these (local rendering = Deno 2.8.1/2.9.5 + ffmpeg only).
 #
 # Tier 1 — asset fetchers (fetch_hdri.py / fetch_texture.py on the host):
 requests
@@ -15,4 +15,5 @@ requests
 # demucs
 #
 # Music/SFX generation additionally needs a ComfyUI install with the
-# ACE-Step / Stable Audio models — see docs/SETUP.md §5.
+# MiniMax Music 3 (recommended music) / Stable Audio (SFX) models.
+# generate_song.py runs the music workflow — see docs/SETUP.md §5.

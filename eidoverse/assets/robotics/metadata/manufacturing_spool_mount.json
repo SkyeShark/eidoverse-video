@@ -1,0 +1,68 @@
+{
+  "roots": {
+    "filament_carrier": {
+      "parent": null,
+      "location": [
+        0,
+        0,
+        0
+      ],
+      "properties": {
+        "module_id": "filament_carrier",
+        "joint_type": "fixed",
+        "interface": "G430 side-rail seat",
+        "input_frame": [
+          0.047,
+          0,
+          0.021
+        ],
+        "attachment_normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "texture_bindings": {
+    "feed_mount": {
+      "base": {
+        "uri": "../textures/feed_mount_base.png",
+        "identity": "a4f4ef882885e6e66bb3bdef7e76fb634ca66451a9c9684204f108b2d1da49a5"
+      },
+      "normal": {
+        "uri": "../textures/feed_mount_normal.png",
+        "identity": "1d2b2d0b9757fb5f214aa0dfbb75974c9117b08298360732eacca54c903ee4c5"
+      },
+      "orm": {
+        "uri": "../textures/feed_mount_orm.png",
+        "identity": "8dfc86b3c0ee66075a2209b4da20650d178957a54f65ac1426f1c8aa25f42c55"
+      }
+    }
+  },
+  "default_primary": [
+    0.58,
+    0.6,
+    0.57
+  ],
+  "default_accent": [
+    0.022,
+    0.048,
+    0.058
+  ],
+  "inspector": {
+    "assemblies": {
+      "spool_mount": {
+        "label": "Rail-mounted spool carrier",
+        "parts": [
+          "FP rail-mounted spool carrier"
+        ],
+        "batches": [
+          "feed_mount"
+        ]
+      }
+    }
+  },
+  "families": {},
+  "mobile": {}
+}

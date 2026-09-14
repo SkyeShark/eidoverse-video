@@ -1,0 +1,26 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "SP 6 mm two-flute ball-nose cutter",
+          640
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "rotary_workholding",
+      "faces": [
+        [
+          "SP 6 mm two-flute ball-nose cutter",
+          640
+        ]
+      ]
+    }
+  ]
+}

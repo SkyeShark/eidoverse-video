@@ -1,0 +1,917 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 cast bed chassis",
+          196
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 cast upright (1, 1)",
+          270
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 cast upright (1, -1)",
+          270
+        ]
+      ]
+    },
+    {
+      "node": 3,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 cast upright (-1, 1)",
+          270
+        ]
+      ]
+    },
+    {
+      "node": 4,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 cast upright (-1, -1)",
+          270
+        ]
+      ]
+    },
+    {
+      "node": 5,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 interchangeable fixture bed",
+          58
+        ]
+      ]
+    },
+    {
+      "node": 6,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 isolation foot (1, 1)",
+          320
+        ]
+      ]
+    },
+    {
+      "node": 7,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 isolation foot (1, -1)",
+          320
+        ]
+      ]
+    },
+    {
+      "node": 8,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 isolation foot (-1, 1)",
+          320
+        ]
+      ]
+    },
+    {
+      "node": 9,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 isolation foot (-1, -1)",
+          320
+        ]
+      ]
+    },
+    {
+      "node": 10,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y bearing end 1",
+          180
+        ]
+      ]
+    },
+    {
+      "node": 11,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y bearing end -1",
+          180
+        ]
+      ]
+    },
+    {
+      "node": 12,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y guide 1",
+          34
+        ]
+      ]
+    },
+    {
+      "node": 13,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y guide -1",
+          34
+        ]
+      ]
+    },
+    {
+      "node": 14,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y motor 1",
+          172
+        ]
+      ]
+    },
+    {
+      "node": 15,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y motor -1",
+          172
+        ]
+      ]
+    },
+    {
+      "node": 16,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y motor support 1",
+          175
+        ]
+      ]
+    },
+    {
+      "node": 17,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y motor support -1",
+          173
+        ]
+      ]
+    },
+    {
+      "node": 18,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y structural rail 1",
+          44
+        ]
+      ]
+    },
+    {
+      "node": 19,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y structural rail -1",
+          44
+        ]
+      ]
+    },
+    {
+      "node": 20,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 traversing bridge",
+          12
+        ]
+      ]
+    },
+    {
+      "node": 21,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X bearing support",
+          176
+        ]
+      ]
+    },
+    {
+      "node": 22,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X guide",
+          34
+        ]
+      ]
+    },
+    {
+      "node": 23,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X motor",
+          172
+        ]
+      ]
+    },
+    {
+      "node": 24,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X motor support",
+          176
+        ]
+      ]
+    },
+    {
+      "node": 25,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y bearing carriage 1",
+          28
+        ]
+      ]
+    },
+    {
+      "node": 26,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y bearing carriage -1",
+          28
+        ]
+      ]
+    },
+    {
+      "node": 27,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y nut carrier 1",
+          160
+        ]
+      ]
+    },
+    {
+      "node": 28,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y nut carrier -1",
+          160
+        ]
+      ]
+    },
+    {
+      "node": 29,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X bearing carriage",
+          26
+        ]
+      ]
+    },
+    {
+      "node": 30,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z cast mast",
+          220
+        ]
+      ]
+    },
+    {
+      "node": 31,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z ground rod 1",
+          252
+        ]
+      ]
+    },
+    {
+      "node": 32,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z ground rod -1",
+          252
+        ]
+      ]
+    },
+    {
+      "node": 33,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z motor",
+          172
+        ]
+      ]
+    },
+    {
+      "node": 34,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z rod seat (1, 0.194)",
+          164
+        ]
+      ]
+    },
+    {
+      "node": 35,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z rod seat (1, 0.528)",
+          164
+        ]
+      ]
+    },
+    {
+      "node": 36,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z rod seat (-1, 0.194)",
+          164
+        ]
+      ]
+    },
+    {
+      "node": 37,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z rod seat (-1, 0.528)",
+          164
+        ]
+      ]
+    },
+    {
+      "node": 38,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX axial fan shroud",
+          216
+        ]
+      ]
+    },
+    {
+      "node": 39,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX brass nozzle",
+          432
+        ]
+      ]
+    },
+    {
+      "node": 40,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX compact drive motor",
+          54
+        ]
+      ]
+    },
+    {
+      "node": 41,
+      "primitive": 0,
+      "batch": "common",
+      "faces": [
+        [
+          "EX controller connector",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 42,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX fan hub",
+          124
+        ]
+      ]
+    },
+    {
+      "node": 43,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX geared coldside chassis",
+          677
+        ]
+      ]
+    },
+    {
+      "node": 44,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX heatbreak",
+          128
+        ]
+      ]
+    },
+    {
+      "node": 45,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX heater connector",
+          181
+        ]
+      ]
+    },
+    {
+      "node": 46,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX heater service loop",
+          336
+        ]
+      ]
+    },
+    {
+      "node": 47,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX idler release lever",
+          82
+        ]
+      ]
+    },
+    {
+      "node": 48,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX rear robot adapter",
+          70
+        ]
+      ]
+    },
+    {
+      "node": 49,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX silicone heater jacket",
+          60
+        ]
+      ]
+    },
+    {
+      "node": 50,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 0",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 51,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 1",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 52,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 2",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 53,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 3",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 54,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 4",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 55,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 5",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 56,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX swept fan blade 6",
+          20
+        ]
+      ]
+    },
+    {
+      "node": 57,
+      "primitive": 0,
+      "batch": "common",
+      "faces": [
+        [
+          "EX TC70 rear flange common carrier",
+          320
+        ]
+      ]
+    },
+    {
+      "node": 58,
+      "primitive": 0,
+      "batch": "common",
+      "faces": [
+        [
+          "EX TC70 rear flange common flange",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 59,
+      "primitive": 0,
+      "batch": "process",
+      "faces": [
+        [
+          "EX tension adjuster",
+          158
+        ]
+      ]
+    },
+    {
+      "node": 61,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 descending tool carriage",
+          92
+        ]
+      ]
+    },
+    {
+      "node": 62,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 TC70 tool receiver",
+          387
+        ]
+      ]
+    },
+    {
+      "node": 63,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z captive nut",
+          138
+        ]
+      ]
+    },
+    {
+      "node": 64,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z linear bushing 1",
+          512
+        ]
+      ]
+    },
+    {
+      "node": 65,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z linear bushing -1",
+          512
+        ]
+      ]
+    },
+    {
+      "node": 67,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Z lead screw",
+          94
+        ]
+      ]
+    },
+    {
+      "node": 70,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 X lead screw",
+          94
+        ]
+      ]
+    },
+    {
+      "node": 73,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y lead screw 1",
+          94
+        ]
+      ]
+    },
+    {
+      "node": 75,
+      "primitive": 0,
+      "batch": "gantry",
+      "faces": [
+        [
+          "G430 Y lead screw -1",
+          94
+        ]
+      ]
+    },
+    {
+      "node": 78,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP core sleeve",
+          96
+        ]
+      ]
+    },
+    {
+      "node": 79,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP front reel cheek",
+          1152
+        ]
+      ]
+    },
+    {
+      "node": 80,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP rear reel cheek",
+          1152
+        ]
+      ]
+    },
+    {
+      "node": 81,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP wound filament",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 83,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP axle thumb nut",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 84,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP centering bushing 1",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 85,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP centering bushing -1",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 86,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP polished axle",
+          92
+        ]
+      ]
+    },
+    {
+      "node": 88,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "BP removable PEI spring-steel sheet",
+          260
+        ]
+      ]
+    },
+    {
+      "node": 90,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting body",
+          336
+        ]
+      ]
+    },
+    {
+      "node": 91,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting collet",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 93,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting body",
+          336
+        ]
+      ]
+    },
+    {
+      "node": 94,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting collet",
+          240
+        ]
+      ]
+    },
+    {
+      "node": 97,
+      "primitive": 0,
+      "batch": "feed_mount",
+      "faces": [
+        [
+          "FP rail-mounted spool carrier",
+          424
+        ]
+      ]
+    }
+  ]
+}

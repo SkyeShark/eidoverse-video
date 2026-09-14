@@ -1,0 +1,26 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP frame-supported guide bracket",
+          150
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP supported PTFE guide eye",
+          240
+        ]
+      ]
+    }
+  ]
+}

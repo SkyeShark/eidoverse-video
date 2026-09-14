@@ -1,0 +1,298 @@
+{
+  "air__air.glb": {
+    "binary_sha256": "d62427868fd194719296d4af719315e562395793934d67c195f76027988a6def",
+    "json_private_paths_removed": true
+  },
+  "air__mechanisms.glb": {
+    "binary_sha256": "d62427868fd194719296d4af719315e562395793934d67c195f76027988a6def",
+    "json_private_paths_removed": true
+  },
+  "arm__clamp_adapter.glb": {
+    "binary_sha256": "b0dd56a2a7d0eabf724789c734d8d18a7cb321c6f1162c9dc9c656c058bd1f44",
+    "json_private_paths_removed": true
+  },
+  "arm__elbow.glb": {
+    "binary_sha256": "2020823725e68a304d9c25a602a3dd91a72d9f514cbe5de01592904e113f22ef",
+    "json_private_paths_removed": true
+  },
+  "arm__forearm.glb": {
+    "binary_sha256": "b119f287e8a57ae6c125aaef3d9485abec5515d9458fbcb0686eb7e521052f6c",
+    "json_private_paths_removed": true
+  },
+  "arm__mc110_adapter.glb": {
+    "binary_sha256": "d9906e845f29f0ba3c7468b69f4e76123ec1456503b2e25f82dc301a164c2d2a",
+    "json_private_paths_removed": true
+  },
+  "arm__mechanisms.glb": {
+    "binary_sha256": "7148878181c921c773e3457834b8e91ee969ba44787cc78295ead4d784d0c286",
+    "json_private_paths_removed": true
+  },
+  "arm__shoulder.glb": {
+    "binary_sha256": "4a0d1ad70b50eeb1006f55ece3e93935936493512f61e13269fcd2fe7f42a150",
+    "json_private_paths_removed": true
+  },
+  "arm__sm40_adapter.glb": {
+    "binary_sha256": "c7ef7b864067ed25a2adfe917b3ce82373ee6adb0e32e92434e0f2994a85e41c",
+    "json_private_paths_removed": true
+  },
+  "arm__upper.glb": {
+    "binary_sha256": "87a8ccf9ca2917813749c46f597466df9db1dd87dc665e3c9a31f00f342294f1",
+    "json_private_paths_removed": true
+  },
+  "arm__wrist.glb": {
+    "binary_sha256": "8d2c4f7243798a4d3dd445e9e66ca49259fd1e509f2f3dfaca947a4621297baf",
+    "json_private_paths_removed": true
+  },
+  "articulated__mechanisms.glb": {
+    "binary_sha256": "8320f42802052ea9afcdde1466dc5d927d2ee33e455e24e0bec9ac4c103bae7b",
+    "json_private_paths_removed": true
+  },
+  "foundations__linear.glb": {
+    "binary_sha256": "0e929bdfa77fa7c1367b7a05f9463922e9698e25ad9a7c514dfff4ca0670d8b3",
+    "json_private_paths_removed": true
+  },
+  "foundations__mechanisms.glb": {
+    "binary_sha256": "4ed7211c7bc0aafab2c57eead950d38e378421c6fd533e78ce6534844709858e",
+    "json_private_paths_removed": true
+  },
+  "foundations__rotary.glb": {
+    "binary_sha256": "b3337d07adc37172aa454d1f6b6f8e5ef8d94864396a78ae2fcacd74a9f25cc4",
+    "json_private_paths_removed": true
+  },
+  "foundations__scara_arm.glb": {
+    "binary_sha256": "02d108fdb74e985dca66fee0bf56619245e70b918f23ddededff0b337b254a7a",
+    "json_private_paths_removed": true
+  },
+  "foundations__tooling.glb": {
+    "binary_sha256": "a9987abd8911e96885a3b6ef7ae30ebdc61e9ff71c7227ecd5bd2c74f2705e1e",
+    "json_private_paths_removed": true
+  },
+  "humanoid__humanoid_receiver_study.glb": {
+    "binary_sha256": "a08b0b79c96d74f0fd02ec35fcdd2c93696c4973fbbd6257c94acb3f138e9bbe",
+    "json_private_paths_removed": true
+  },
+  "interaction__antenna.glb": {
+    "binary_sha256": "92a0a45e2e48a00767e6126e326cddcbf2209b6dc899d68e36606143bd6e3777",
+    "json_private_paths_removed": true
+  },
+  "interaction__camera.glb": {
+    "binary_sha256": "feb5eead96eab759cf967382ea506aab7fb7b49777b80413bac714e1bb502eed",
+    "json_private_paths_removed": true
+  },
+  "interaction__diagnostic.glb": {
+    "binary_sha256": "16d0724c7c9e0b7815dcf24d81a78dcbc306f1276e86b7b01f79e120963a054e",
+    "json_private_paths_removed": true
+  },
+  "interaction__face.glb": {
+    "binary_sha256": "ed0776322ec9ca9f2271aad2ac2833badb9b16d184a32ef93424092b8dac8e34",
+    "json_private_paths_removed": true
+  },
+  "interaction__hand.glb": {
+    "binary_sha256": "bdf92dae7add1767d24fe334c4d5ce0f49da25d45687b7b6bcdcb17dc9b8a093",
+    "json_private_paths_removed": true
+  },
+  "interaction__lidar.glb": {
+    "binary_sha256": "6ba3e56f93092f8e37db758c439a4062efe083e266721f731b9ddb00f7d9c931",
+    "json_private_paths_removed": true
+  },
+  "interaction__mechanisms.glb": {
+    "binary_sha256": "a9eacc9a9d69ec1954bb43cd43b09aae6a208fa502a67d7602bdc5b097c7a32e",
+    "json_private_paths_removed": true
+  },
+  "mantis__mechanisms.glb": {
+    "binary_sha256": "c581abe238d24bff1a21b1764af02dae1550bde1fcf29fb9b1af61ccd93d2f15",
+    "json_private_paths_removed": true
+  },
+  "manufacturing__cnc.glb": {
+    "binary_sha256": "4f066cd21dc5b6070af214ba1cbebd924ae02f63d11ed705fb92f09f92927dcb",
+    "json_private_paths_removed": true
+  },
+  "manufacturing__fdm.glb": {
+    "binary_sha256": "d8dc0e33c3dd123d59c60a144d55fc3b88c648263dbb9c69836408525cfa2d07",
+    "json_private_paths_removed": true
+  },
+  "manufacturing__gantry.glb": {
+    "binary_sha256": "cf9d9c7ab194bcb5c0b11af3065a740539eab98db951f4ad2bb21bb4f7b9e7be",
+    "json_private_paths_removed": true
+  },
+  "manufacturing__mechanisms.glb": {
+    "binary_sha256": "a6af65a0addbca651665fb45c2071d78614a48a572352cdb15b6cabd2abf25eb",
+    "json_private_paths_removed": true
+  },
+  "mobility__body.glb": {
+    "binary_sha256": "2692f82c4508ea6335f7ad2b13a0e10ebef5f46ca02e278ee79345010b221d7e",
+    "json_private_paths_removed": true
+  },
+  "mobility__mechanisms.glb": {
+    "binary_sha256": "b4801366d626e66a458512520b43ac2a913af3a4da19042efbb8836aaa6aa2f1",
+    "json_private_paths_removed": true
+  },
+  "mobility__tracks.glb": {
+    "binary_sha256": "b966e793eb31b13feb3082ee8426d5385458fc09809e4b17c965000b64442061",
+    "json_private_paths_removed": true
+  },
+  "payloads__arm_clamp.glb": {
+    "binary_sha256": "c6e0433ff7b39be05cb81616b30cb7406e12a0576244dcdb023a568f99d3a556",
+    "json_private_paths_removed": true
+  },
+  "payloads__arm_hand.glb": {
+    "binary_sha256": "b1e75e8f4cb110f672b9aa4d1f0e66e3da2425d88d3cea9441a3616be036e183",
+    "json_private_paths_removed": true
+  },
+  "payloads__drone_clamp.glb": {
+    "binary_sha256": "0cf50286a7e8eac517ed14f765a42bf44cceeda1d3388dbece6c27a161527c54",
+    "json_private_paths_removed": true
+  },
+  "payloads__drone_hand.glb": {
+    "binary_sha256": "449d2ba7a7ca4fde324a057b01419938f653116a77645cd048c44eb16f09d89d",
+    "json_private_paths_removed": true
+  },
+  "payloads__mechanisms.glb": {
+    "binary_sha256": "2054d6216ae6e7e69be1a878c2629d28e23d22fe91205eaaba88dcd2b9e3e8b1",
+    "json_private_paths_removed": true
+  },
+  "payloads__rover_arm.glb": {
+    "binary_sha256": "403ea847a8c6932bb542168460095cbe3adc85c4772f8bf4aa8896f252a822f9",
+    "json_private_paths_removed": true
+  },
+  "platforms__mechanisms.glb": {
+    "binary_sha256": "300e1c2f2f70e52fab0907deeedf34ff9a8bdc222f63e58f7206592b0e04f7f6",
+    "json_private_paths_removed": true
+  },
+  "platforms__rover.glb": {
+    "binary_sha256": "7bebc50601ac2f9114cd6a6005a857ee42395494ef128668f54b5e14bf697572",
+    "json_private_paths_removed": true
+  },
+  "platforms__survey.glb": {
+    "binary_sha256": "4205ab1127614c50eb0de270985386e9c2e9612849d74a2b517937b7656fba61",
+    "json_private_paths_removed": true
+  },
+  "process__extruder.glb": {
+    "binary_sha256": "db5cc60b184554cc51d8f60d85aad794be4125d89111e86c9fced501bb610d3d",
+    "json_private_paths_removed": true
+  },
+  "process__mechanisms.glb": {
+    "binary_sha256": "acdc686fdd06b8cefbbd4451288f1d8503f24ce3d564ba55ce51ad6a169b6966",
+    "json_private_paths_removed": true
+  },
+  "process__spindle.glb": {
+    "binary_sha256": "4c78074b59866965ddfaba802da019097a63520232d9bf269001655ad6a03c6e",
+    "json_private_paths_removed": true
+  },
+  "process__vacuum.glb": {
+    "binary_sha256": "da2583c75106064cf8db8fa2f55441541f9b772a737878dd2b3bcd1908b5ac26",
+    "json_private_paths_removed": true
+  },
+  "quadruped__quadruped_receiver_study.glb": {
+    "binary_sha256": "ea38f554a79037c1dc122b3ffa99bba8e79cf6e8d875ec963f965de256f74071",
+    "json_private_paths_removed": true
+  },
+  "rotors_air_air__air_air_rotors.glb": {
+    "binary_sha256": "dad59a8931499a5675026756d3a3fe9d7c3e2afcb6df3c6c63d07888dceb8dc9",
+    "json_private_paths_removed": true
+  },
+  "rotors_payloads_v9_drone_clamp__payloads_v9_drone_clamp_rotors.glb": {
+    "binary_sha256": "270e430f744e16bf6e4e9443807975f558ffcb0663aeffa71d33abf9c95c0636",
+    "json_private_paths_removed": true
+  },
+  "rotors_payloads_v9_drone_hand__payloads_v9_drone_hand_rotors.glb": {
+    "binary_sha256": "2043ac6b77e8af3b1850fe6d170250fb2576ed63d99150d726dbaf61c27326ea",
+    "json_private_paths_removed": true
+  },
+  "rotors_platforms_v11_survey__platforms_v11_survey_rotors.glb": {
+    "binary_sha256": "00c149a4e406c4258d54ce8372beb1d24fe65e1d4788af48766e1399e7134c63",
+    "json_private_paths_removed": true
+  },
+  "stock__actuator.sm40.pan.pilot.glb": {
+    "binary_sha256": "a2ac813d6b3f66033dd1ea3c0ecf7708221fc7be44626116df7fbc382ab1599a",
+    "json_private_paths_removed": true
+  },
+  "stock__actuator.sm40.pan.rotor.glb": {
+    "binary_sha256": "e57d48421dc8458eb1a0af1bfba39051df69918311f1673f07bda1255467f9de",
+    "json_private_paths_removed": true
+  },
+  "stock__actuator.sm40.tilt.axle.glb": {
+    "binary_sha256": "65aca092aef1f6ee2637084c49a9fecb709a1b8c63b25a8eebb1ecdcc1050da4",
+    "json_private_paths_removed": true
+  },
+  "stock__actuator.sm40.tilt.cradle.glb": {
+    "binary_sha256": "463ae249743bae54bf5b1545bbc95261cebd00be393c558f54afa6a659653080",
+    "json_private_paths_removed": true
+  },
+  "stock__adapter.mc110.tc70.glb": {
+    "binary_sha256": "d9906e845f29f0ba3c7468b69f4e76123ec1456503b2e25f82dc301a164c2d2a",
+    "json_private_paths_removed": true
+  },
+  "stock__bearing.tc70.pitch.collar.glb": {
+    "binary_sha256": "3a94dce5be3c58d9957838030318f26f290b7101082c7634997285e3215916c9",
+    "json_private_paths_removed": true
+  },
+  "stock__bearing.tc70.pitch.housing.glb": {
+    "binary_sha256": "166b6d397990548f1d78dbf10a35291359a0bbf5344d12d50bf8817f68cb534b",
+    "json_private_paths_removed": true
+  },
+  "stock__bearing.tc70.pitch.insert.glb": {
+    "binary_sha256": "a723dff94adaf6a00a6e30584bdcf4ec0dc254454ae2294584915bda18cb04f3",
+    "json_private_paths_removed": true
+  },
+  "stock__bearing.tc70.pitch.spindle.glb": {
+    "binary_sha256": "f75dbfe70b75981b003ca899e4fa8238fc91335182b0b9f47bceac9f5f58889b",
+    "json_private_paths_removed": true
+  },
+  "stock__carrier.tc70.process.glb": {
+    "binary_sha256": "345daeeca1a88acbf6ed86de87949a3fba20edbb7fe2b027e5f571854a00f542",
+    "json_private_paths_removed": true
+  },
+  "stock__carrier.tc70.quill.glb": {
+    "binary_sha256": "2fc96d2253e2d16a60ab7929b6951c5161c5e778fafecb3e27071b8a3f13d523",
+    "json_private_paths_removed": true
+  },
+  "stock__carrier.tc70.wrist.glb": {
+    "binary_sha256": "bab8e73c88e08a240cdb8d19758585c5300866cd5959babbc63487103e8d9aef",
+    "json_private_paths_removed": true
+  },
+  "stock__common.glb": {
+    "binary_sha256": "9d2e1fa642a27c9c5e8bda3e54b4254014ada28ff6b3d7664aa3beecaf989af2",
+    "json_private_paths_removed": true
+  },
+  "stock__connector.power.14mm.glb": {
+    "binary_sha256": "0e9c420bdb76c41fa4b310ad9e6f40f4a9ebd46e0545bba7be0e79ae399a6b17",
+    "json_private_paths_removed": true
+  },
+  "stock__flange.mc110.body.glb": {
+    "binary_sha256": "f1b963a1b3d153fb425169c40a5ec91b436ab251241e6079ad07b3051e31b1b2",
+    "json_private_paths_removed": true
+  },
+  "stock__flange.tc70.6mm.glb": {
+    "binary_sha256": "24494f8cb130bf5b02782c9d5e6e9f102e5bcbe5a6368c96ad776cf19984e558",
+    "json_private_paths_removed": true
+  },
+  "stock__mechanisms.glb": {
+    "binary_sha256": "9d2e1fa642a27c9c5e8bda3e54b4254014ada28ff6b3d7664aa3beecaf989af2",
+    "json_private_paths_removed": true
+  },
+  "stock__mount.sm40.foot.glb": {
+    "binary_sha256": "8aa3bf8d718bec658ebeee45e721ae57eae9eef1f8eaca4dd71aca1c0611e9ef",
+    "json_private_paths_removed": true
+  },
+  "structure__body_saddles.glb": {
+    "binary_sha256": "1844c8d47b5cf1afa0e0f39e5e46e140804567d6fff8d5c1011e20f7cd9081e2",
+    "json_private_paths_removed": true
+  },
+  "structure__leg.glb": {
+    "binary_sha256": "5f6d8c6458819365dffd3379897bbc7723b114593efcba9d069896dd4e46fe6f",
+    "json_private_paths_removed": true
+  },
+  "structure__mechanisms.glb": {
+    "binary_sha256": "63d84c3533a0017be8b018e776bef3a0e5b66d6dbe3f30fdbb1e72d961413f13",
+    "json_private_paths_removed": true
+  },
+  "structure__pelvis.glb": {
+    "binary_sha256": "a8c416367fcfecb86669781e3c1e7b19bc91e85bfc6e3c6772eab2f13315a3be",
+    "json_private_paths_removed": true
+  },
+  "structure__structural_inspection.glb": {
+    "binary_sha256": "63d84c3533a0017be8b018e776bef3a0e5b66d6dbe3f30fdbb1e72d961413f13",
+    "json_private_paths_removed": true
+  }
+}

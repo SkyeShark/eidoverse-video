@@ -51,7 +51,7 @@ globalThis.setup = async function () {
     globalThis._vrm = vrm;
 
     // Depth fog — atmospheric depth cue (for a full sky + moving cloud
-    // reflections use makeSkySystem instead; see AGENTS.md "WORLD-SPACE SKY")
+    // reflections use makeSkySystem instead; see tools-guides/sky-weather.md)
     globalThis._fx = globalThis.CustomEffectsDeno.applyTo({
         scene, camera,
         effects: 'depth_fog',

@@ -1147,7 +1147,7 @@ export function installScenePlacement(THREE) {
     //
     // Advisory only — there's no auto-fix for "too empty"; you can't invent
     // geometry. The warning documents the sparse scene for the agent and for
-    // the human reviewer. See AGENTS.md "Kitbash hard" for the density bar.
+    // the human reviewer. See tools-guides/production.md for composition and density.
     //
     // opts:
     //   min: warn below this many distinct things (default 5).
@@ -1439,7 +1439,7 @@ export function installScenePlacement(THREE) {
     // camera shots, reaction beats, any planted character that should look at
     // the lens. opts.offset (radians) for a ¾ / profile turn (e.g. 0.4).
     // opts.camera to target a specific camera. Assumes the +Z-forward
-    // convention (VRM faces +Z after VRMUtils.rotateVRM0 — AGENTS.md "VRM
+    // convention (VRM faces +Z after VRMUtils.rotateVRM0 — tools-guides/characters.md "VRM
     // facing wrong direction"); if a VRM reads backwards, add `offset: Math.PI`.
     globalThis.faceCamera = (vrm, opts = {}) => {
         const cam = opts.camera || globalThis._c || globalThis._camera;

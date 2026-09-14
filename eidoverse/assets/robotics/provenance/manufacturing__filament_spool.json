@@ -1,0 +1,136 @@
+{
+  "meshes": [
+    {
+      "node": 0,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP core sleeve",
+          96
+        ]
+      ]
+    },
+    {
+      "node": 1,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP front reel cheek",
+          1152
+        ]
+      ]
+    },
+    {
+      "node": 2,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP rear reel cheek",
+          1152
+        ]
+      ]
+    },
+    {
+      "node": 3,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP wound filament",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 5,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP axle thumb nut",
+          192
+        ]
+      ]
+    },
+    {
+      "node": 6,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP centering bushing 1",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 7,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP centering bushing -1",
+          384
+        ]
+      ]
+    },
+    {
+      "node": 8,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP dispenser foot",
+          92
+        ]
+      ]
+    },
+    {
+      "node": 9,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP polished axle",
+          92
+        ]
+      ]
+    },
+    {
+      "node": 10,
+      "primitive": 0,
+      "batch": "feed",
+      "faces": [
+        [
+          "FP swept dispenser spine",
+          92
+        ]
+      ]
+    },
+    {
+      "node": 12,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting body",
+          336
+        ]
+      ]
+    },
+    {
+      "node": 13,
+      "primitive": 0,
+      "batch": "plates",
+      "faces": [
+        [
+          "FP extruder push fitting collet",
+          240
+        ]
+      ]
+    }
+  ]
+}
