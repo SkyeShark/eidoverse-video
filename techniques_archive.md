@@ -580,3 +580,33 @@ examples. Compare the same input in additive, relief and indexed machining to
 see each process's actual accessible result. Eight rotary table studs engage
 the shared T-slot nuts. The loader retains part ownership on every primitive
 when glTF represents one named part with several material primitives.
+
+## 2026-09-14 — Physical attachment frames and shared mount metadata
+
+The arm/gripper failure was a kit metadata problem. A650's output point was
+present but its normal was absent, so the loader guessed source +Z while the
+physical flange faces source +X: a 90-degree error. The gripper input was
+invented at the model origin instead of its coupling face. The S500 output
+likewise inherited +Z although its physical flange faces -Z.
+
+The catalog now supplies shared `port_frames` for those mounts and the other
+reused components whose frame fields were incomplete. This includes qualified
+copies inside assemblies; there are no duplicate models or texture maps.
+The gripper's actual coupling plane is at root-local public `(0, 0.1171, 0)`
+with outward +Y, measured from exported triangles. That normal belongs to the
+gripper and stays +Y in its own frame for every parent. Use the standard
+`parallel_gripper/input` port instead of a scene-specific mounting frame
+or changing its input normal to compensate for the parent.
+Existing scene-specific compensation and trajectories must be reevaluated
+against the corrected ports; the kit fix does not rewrite scene work files.
+
+Require explicit mounting position and outward normal rather than guessing
+axes. An optional tangent defines rotational alignment; `twist` only turns
+around the mating axis. Validate finite transforms before reparenting.
+Interface equality and coincident port matrices alone cannot catch incorrect
+authored metadata: both matrices can agree while the physical parts do not.
+The attachment regressions independently measure actual planar flange
+triangles, check centres and opposing normals over several joint poses and
+root transforms, and check intentional roll. Both physical checks fail with
+the original metadata. These tests validate the mount, not clearance for the
+entire attached payload; assembled motion still needs its own inspection.

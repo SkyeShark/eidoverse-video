@@ -71,11 +71,45 @@ console.log(Object.keys(body.ports), Object.keys(camera.ports));
 camera.setJoints({camera_pan:0.6, camera_tilt:0.15});
 ```
 
+An industrial arm and claw use the same connection API:
+
+```js
+const arm = await makeRobot('arm', {scene:_s});
+const claw = await makeRobot('gripper');
+arm.attach(claw, {
+  port:'a650_j6/output', childPort:'parallel_gripper/input'
+});
+arm.joints([0, 0.5, 0.4, 0, -0.9, 0]);
+claw.jawGap(0.03);
+```
+
+For the SCARA, load `scara` and use `s500_tool/output` with the same gripper
+input. The gripper input is on its robot-side coupling face. Use the declared
+ports directly; they contain the mounting position and orientation.
+
 Mounts align their authored mating frames, oppose their normals and preserve
-the source physical scale. `twist` is rotation around the attachment normal.
-Mismatched interfaces and graph cycles throw; choose the declared adapter.
+the source physical scale. `twist` is an intentional rotation in radians around
+the attachment normal, such as turning the jaws sideways. It cannot correct an
+incorrect mounting position or tilt. Mismatched interfaces, invalid frames and
+graph cycles throw; choose the declared adapter for different interfaces.
 SM40, TC70, MC110 and other interfaces are distinct. A socket does not establish
 clearance for every possible payload or motion: inspect the completed assembly.
+
+`robot.port(name).matrix` is local to that port's `owner`. Its X axis is the
+mount tangent, Z is the outward mating normal, and Y completes the basis.
+After updating world matrices, `owner.matrixWorld * matrix` gives the world
+frame. A component's outward normal stays fixed to that component; do not
+reverse it depending on which robot receives the attachment.
+
+When adding catalog content, shared component frames live in
+`catalog.json.port_frames`, keyed by `module_id` (also applied to qualified
+copies such as `rover_camera / camera_base`). Their `position_m`, `normal` and
+optional `tangent` use the catalog's source +Z-up coordinates; the loader
+converts them to the public convention. Per-instance input/output metadata can
+override a shared frame. A position and nonzero outward normal are required;
+provide a tangent when the mounting has a preferred rotational alignment.
+Verify those frames against the physical mating faces, including articulated
+poses. Matching interface names alone cannot verify an authored frame.
 
 `robot.roots`, `robot.specs`, `robot.ports`, `robot.parts()` and `robot.stats()`
 expose the actual content. Repeated humanoid joints use qualified names, so a

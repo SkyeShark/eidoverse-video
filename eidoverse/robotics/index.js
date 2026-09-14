@@ -52,11 +52,19 @@ function jointSpecs(scene, report) {
   }
   return { roots, specs };
 }
-function frameMatrix(point, normal) {
+function frameMatrix(point, normal, tangent) {
+  const finite3 = (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+  if (!finite3(point) || !finite3(normal) || Math.hypot(...normal) < 1e-10) {
+    throw Error('Mount frame needs an explicit finite position and nonzero outward normal; check the catalog port metadata.');
+  }
+  if (tangent !== undefined && !finite3(tangent)) throw Error('Mount tangent must be three finite numbers');
   const z = vector(normal).normalize(),
     ref = Math.abs(z.x) < .9 ? new T.Vector3(1, 0, 0) : new T.Vector3(0, 0, -1),
-    x = ref.addScaledVector(z, -ref.dot(z)).normalize(),
-    y = new T.Vector3().crossVectors(z, x),
+    x = tangent === undefined ? ref : vector(tangent);
+  x.addScaledVector(z, -x.dot(z));
+  if (x.lengthSq() < 1e-20) throw Error('Mount tangent must not be parallel to its normal');
+  x.normalize();
+  const y = new T.Vector3().crossVectors(z, x),
     m = new T.Matrix4().makeBasis(x, y, z);
   m.setPosition(vector(point));
   return m;
@@ -65,33 +73,42 @@ function installPorts(robot) {
   const ports = {};
   const add = (name, owner, s) => {
     if (!owner || !s.interface) return;
-    const p = s.position_m ?? s.position ?? [0, 0, 0],
-      n = s.normal ?? [0, 0, 1];
-    ports[name] = { ...s, name, owner, matrix: frameMatrix(p, n) };
+    const p = s.position_m ?? s.position;
+    try {
+      ports[name] = { ...s, name, owner, matrix: frameMatrix(p, s.normal, s.tangent) };
+    } catch (error) {
+      throw Error(`Invalid mount ${name}: ${error.message}`);
+    }
   };
   for (const [n, o] of Object.entries(robot.roots)) {
     const s = robot.specs[n];
+    // Shared authored frames cover reused components in standalone and assembled
+    // GLBs. Explicit per-instance metadata can override a shared frame.
+    const shared = robot.portFrames[s.module_id] ??
+      robot.portFrames[s.module_id?.split(' / ').at(-1)] ?? {};
     if (s.ports_json) {
       for (const [p, d] of Object.entries(JSON.parse(s.ports_json))) {
         add(n + "/" + p, o, d);
       }
     }
-    if (s.interface && s.output_frame) {
+    if (s.interface && (s.output_frame || shared.output)) {
       add(n + "/output", o, {
         interface: s.interface,
-        position_m: s.output_frame,
-        normal: s.output_normal ?? [0, 0, 1],
+        position_m: s.output_frame ?? shared.output?.position_m,
+        normal: s.output_normal ?? shared.output?.normal,
+        tangent: s.output_tangent ?? shared.output?.tangent,
       });
     }
     if (
       s.interface &&
       (s.attachment_position || s.input_frame || s.mount_pattern_m ||
-        n === "parallel_gripper")
+        shared.input)
     ) {
       add(n + "/input", o, {
         interface: s.interface,
-        position_m: s.attachment_position ?? s.input_frame ?? [0, 0, 0],
-        normal: s.attachment_normal ?? [0, 0, -1],
+        position_m: s.attachment_position ?? s.input_frame ?? shared.input?.position_m,
+        normal: s.attachment_normal ?? shared.input?.normal,
+        tangent: s.attachment_tangent ?? shared.input?.tangent,
       });
     }
   }
@@ -115,10 +132,17 @@ function installPorts(robot) {
     return p;
   };
   robot.attach = (child, { port, childPort, twist = 0 } = {}) => {
+    if (!Number.isFinite(twist)) throw Error('Attachment twist must be finite radians');
     if (child === robot || child.group.getObjectById(robot.group.id)) {
       throw Error("Attachment would create a scene-graph cycle");
     }
     const a = robot.port(port), b = child.port(childPort);
+    for (const p of [a, b]) {
+      if (!p.matrix?.isMatrix4 || !p.matrix.elements.every(Number.isFinite) ||
+          Math.abs(p.matrix.determinant()) < 1e-10) {
+        throw Error(`Invalid mount matrix ${p.name}`);
+      }
+    }
     if (a.interface !== b.interface) {
       throw Error(
         `Mount mismatch: ${a.interface} / ${b.interface}. Use the matching adapter.`,
@@ -352,6 +376,7 @@ export async function loadRobot(id, opts = {}) {
     model: gltf.scene,
     gltf,
     report,
+    portFrames: cat.port_frames ?? {},
     ...jointSpecs(gltf.scene, report),
     derivedPorts,
     connections: [],

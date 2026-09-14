@@ -6146,5 +6146,197 @@
       "bytes": 1683470,
       "file_sha256": "d3cc00618e1ed024d8d9e1d8bf6cd2fff10886924339a7d25008a1529f55d2ff"
     }
-  ]
+  ],
+  "port_frames": {
+    "a650_j6": {
+      "output": {
+        "position_m": [
+          0.018,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "tangent": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    "parallel_gripper": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0.1171
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "s500_tool": {
+      "output": {
+        "position_m": [
+          0,
+          0,
+          -0.009
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "linear_carriage": {
+      "output": {
+        "position_m": [
+          0,
+          0,
+          0.053
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "rotary_stator": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "camera_base": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "lidar_base": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "antenna_base": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "display_base": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "diagnostic_base": {
+      "input": {
+        "position_m": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "tangent": [
+          1,
+          0,
+          0
+        ]
+      }
+    }
+  }
 }

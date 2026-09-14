@@ -128,6 +128,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/robotics/serve_inspector.py](../eidoverse/robotics/serve_inspector.py) | CLI utility | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/robotics/studio.js](../eidoverse/robotics/studio.js) | Modular runtime ESM behind RoboticsKit/FabSim | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/robotics/tests/runtime_test.mjs](../eidoverse/robotics/tests/runtime_test.mjs) | Test suite | [development](../tools-guides/development.md) |
+| [eidoverse/robotics/tests/attachment_frames_test.mjs](../eidoverse/robotics/tests/attachment_frames_test.mjs) | Mount frames checked against physical flange triangles through articulation | [development](../tools-guides/development.md) |
 | [eidoverse/robotics/tests/fabrication_feed_test.mjs](../eidoverse/robotics/tests/fabrication_feed_test.mjs) | Filament, tubing and material-aware CNC regression checks | [development](../tools-guides/development.md) |
 | [eidoverse/robotics_kit.js](../eidoverse/robotics_kit.js) | Injected scene API | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/satori_ui.mjs](../eidoverse/satori_ui.mjs) | Legacy standalone demo; separate renderer | [motion-graphics](../tools-guides/motion-graphics.md) |
