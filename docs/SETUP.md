@@ -1,7 +1,8 @@
 # Setup
 
-Everything runs directly on your machine: Deno renders through your GPU,
-ffmpeg encodes, and the Python tools are optional extras. **The whole
+Everything runs in your environment: Deno renders through hardware WebGPU
+when GPU access is available, or software WebGPU when it is not. ffmpeg
+encodes, and the Python tools are optional extras. **The whole
 render dependency list is Deno + ffmpeg.**
 
 (A containerized edition — Docker render image + the autonomous
@@ -10,20 +11,19 @@ the sandboxed/subagent setup instead.)
 
 ## 0. Prerequisites
 
-- **GPU** — NVIDIA recommended. Windows renders through native D3D12
-  WebGPU; Linux through Vulkan; macOS through Metal.
+- **WebGPU runtime/driver** — use a hardware GPU whenever GPU access is
+  available; NVIDIA recommended. Windows uses D3D12; native Linux normally
+  uses Vulkan; macOS uses Metal. WSL 2 needs the
+  [explicit GPU setup below](#gpu-setup-for-wsl-2). Environments without
+  GPU access can use [software WebGPU fallback](#software-fallback).
 - **Python 3.10+** (the `eido.py` runner is stdlib-only).
 - A few GB of disk for node_modules + working space.
 
 ## 1. Install Deno 2.8.1 or 2.9.5 + ffmpeg
 
-Verified versions are **2.8.1** (Windows, native D3D12) and **2.9.5**
-(Linux/WSL, Vulkan). An earlier note pinned 2.8.1 because a 2.9.x build had
-shown banded gradients in the TSL effects path; a side-by-side test on
-2026-09-12 (`work/nightshift/fxtest/`, full auto-enhance chain plus a TSL
-effect on a gradient-heavy scene) rendered identically clean on 2.8.1 and
-2.9.5, so 2.9.5 is accepted. Judge any other version by a rendered frame
-with effects on, never by a clean exit:
+Use **Deno 2.8.1 or 2.9.5**. A version check or a successful render does
+not establish hardware acceleration: run the GPU health check in the same
+shell and OS you will render from, then inspect a probe frame with effects.
 
 ```powershell
 # Windows
@@ -36,14 +36,100 @@ deno --version
 curl -fsSL https://deno.land/install.sh | sh -s v2.9.5   # needs unzip or 7z
 ```
 
-**One OS per `node_modules/`.** Deno writes platform-native shims into
-`node_modules/.bin`; a WSL run leaves Linux symlinks that Windows cannot
-open (`os error 1920`) and vice versa. When switching OS on the same
-checkout, delete `node_modules/.bin` (or run `python eido.py bootstrap`)
-before rendering.
+Have `ffmpeg` on PATH. NVIDIA encoding uses `h264_nvenc` by default.
+If that encoder is unavailable, `RENDER_CODEC=libx264` selects CPU **video
+encoding**, or `h264_videotoolbox` uses Apple's encoder. This setting does
+not select the rendering backend: hardware or software WebGPU is reported
+separately by `doctor` and renderer startup.
 
-Have `ffmpeg` on PATH. If it lacks `h264_nvenc`, set
-`RENDER_CODEC=libx264` (or `h264_videotoolbox` on macOS).
+### GPU setup for WSL 2
+
+WSL seeing a GPU in `nvidia-smi` is not enough. CUDA, Vulkan and OpenGL use
+different driver paths. A Linux Deno process can select Mesa's software
+Vulkan renderer (`llvmpipe`/lavapipe) even while the NVIDIA card is visible.
+`powerPreference: 'high-performance'` does not prevent that selection.
+
+The verified WSL route is **Deno WebGPU → wgpu GL backend → Mesa D3D12 →
+the Windows hardware GPU**. The scene API remains WebGPU/TSL. This route
+does not need a Linux NVIDIA kernel driver or a Vulkan Dozen (`dzn`) ICD.
+
+1. Use WSL **2**, a current Windows GPU driver supporting WSL GPU access,
+   and current WSL/WSLg. Check `wsl --list --verbose` in PowerShell. If WSL
+   needs updating, use `wsl --update`; restart it after saving active work.
+   See [Microsoft's WSL GPU prerequisites](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps).
+2. In Ubuntu, ensure Mesa's EGL/D3D12 support is available. The distro
+   packages are `libgl1-mesa-dri`, `libegl-mesa0` and `libegl1`:
+
+   ```bash
+   sudo apt update
+   sudo apt install libgl1-mesa-dri libegl-mesa0 libegl1
+   test -e /dev/dxg && echo 'WSL GPU device present'
+   ```
+
+   `/dev/dxg` confirms access to the host GPU; the Deno probe below checks
+   whether the selected rendering driver actually uses it.
+3. Select the hardware backend **in the WSL shell used for both checks
+   and renders**:
+
+   ```bash
+   export PATH="$HOME/.deno/bin:$HOME/.local/bin:$PATH"
+   export DENO_WEBGPU_BACKEND=gl
+   export GALLIUM_DRIVER=d3d12
+   export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+   unset LIBGL_ALWAYS_SOFTWARE
+   python3 eido.py doctor --gpu-only
+   ```
+
+   Change `NVIDIA` to a substring of your intended GPU's name for Intel/AMD.
+   Mesa documents this selection in its
+   [D3D12 driver instructions](https://docs.mesa3d.org/drivers/d3d12.html).
+   Deno reads `DENO_WEBGPU_BACKEND` when creating its GPU instance; set it
+   before launching Deno, not inside scene code.
+4. On a machine with GPU access, look for a named hardware adapter,
+   `"backend":"hardware"`, `"isFallbackAdapter":false`, and
+   `"computeReadback":"passed"`. If `llvmpipe`, lavapipe or SwiftShader
+   is selected despite an accessible GPU, correct the driver/backend
+   configuration. After hardware works, keep the three backend/adapter
+   exports in your WSL shell profile or render launcher. Software fallback
+   remains available in environments without GPU access, as described below.
+5. Bootstrap and run a scene probe from that shell. Keep a separate checkout
+   and `node_modules/` for native Linux/WSL runs and Windows runs. Native
+   binaries and `.bin` shims differ by OS; sharing a dependency store can
+   break either installation. An agent working in WSL can instead launch
+   the Windows Python/Deno runner from PowerShell against its Windows
+   checkout; that uses Windows D3D12 and Windows dependencies.
+
+The WSL route above was checked on an RTX 5090 Laptop GPU with Deno 2.9.5:
+hardware selection, GPU compute/readback, and an inspected Three.js/TSL
+render. This is a setup check, not a guarantee that every effect or GPU
+simulation fits that backend's capabilities. Always inspect the scene probe.
+An alternative hardware Vulkan driver can also work, but must pass the
+same checks; installing `mesa-vulkan-drivers` alone does not establish it.
+
+### Software fallback
+
+Hosted sandboxes and other environments without GPU access can render through
+a compatible software WebGPU driver. Deno still uses the same WebGPU/TSL
+scene API, with rendering/compute performed on the CPU. There is no opt-in
+flag: hardware is requested first; an available software adapter is accepted
+with a warning. This requires a software WebGPU driver in the environment;
+it does not create one if the runtime has no usable adapter.
+
+For a Linux sandbox using Mesa, install the `mesa-vulkan-drivers` package if
+the environment permits it. Do not apply the WSL hardware-only backend
+exports in a GPU-less sandbox. Check the resulting setup with:
+
+```bash
+python eido.py doctor --gpu-only
+```
+
+A working fallback reports `"backend":"software"`, a CPU warning, and
+`"computeReadback":"passed"`, and the check succeeds. Rendering can be
+much slower; start with a short probe. Detected software rendering also
+defaults to the CPU `libx264` video encoder. Explicit `RENDER_CODEC` or
+per-encode codec choices take precedence; `RENDER_CQ` uses CRF with libx264.
+GPU access for optional AI model backends is separate from this
+scene-rendering fallback.
 
 ## 2. Bootstrap JS dependencies
 
@@ -63,9 +149,14 @@ character controller imports). Re-run after any `deno.lock` change.
 python eido.py doctor
 ```
 
-Checks: deno version, ffmpeg/nvenc, node_modules + rapier materialized,
+Checks: Deno version, the selected hardware/software WebGPU adapter plus
+a real compute dispatch/readback, ffmpeg/nvenc, node_modules + Rapier materialized,
 ComfyUI reachable (reported, not required), embeddings key set (reported,
-not required).
+not required). Use `python eido.py doctor --gpu-only` for the GPU check alone;
+it needs no scene assets or bootstrap. Failures return a nonzero exit code.
+Both the check and renderer startup report software fallback with a warning;
+it is not a failure if the adapter works. Missing adapters or failed compute
+checks remain errors. Direct renderer invocations report the backend too.
 
 ## 4. Smoke test
 
@@ -106,10 +197,12 @@ progress and logs before deciding that a slow first render is stuck.
 
 - **Windows**: native D3D12 WebGPU — the path this release was verified
   on.
-- **Linux**: wgpu goes through Vulkan — you need working Vulkan drivers
-  (`mesa-vulkan-drivers` / NVIDIA proprietary) + distro ffmpeg. Expected
-  to work; not yet render-verified — check your first frame, not just the
-  exit code, and report findings.
+- **Native Linux**: normally Vulkan with the GPU vendor's hardware driver
+  and distro ffmpeg. Run the GPU check to identify the selected adapter.
+  Mesa's software Vulkan driver supports the CPU fallback. The WSL hardware
+  test does not establish native Linux hardware Vulkan support.
+- **WSL 2**: use the [hardware backend setup](#gpu-setup-for-wsl-2) above.
+  The default adapter can be a CPU renderer even with a working host GPU.
 - **macOS**: wgpu → Metal. No nvenc — set `RENDER_CODEC=libx264` (or
   `h264_videotoolbox`). Same caveat: unverified, judge by frames.
 - **Fonts**: the 19 display fonts live at `eidoverse/assets/fonts/`. For
@@ -118,9 +211,19 @@ progress and logs before deciding that a slow first render is stuck.
 
 ## Troubleshooting
 
-- **`navigator.gpu missing`** — deno can't see a WebGPU adapter: check
-  GPU drivers (Vulkan on Linux) and that you're on a verified deno
-  (2.8.1 or 2.9.5).
+- **`navigator.gpu missing`** — include `--unstable-webgpu` when invoking
+  Deno directly and use Deno 2.8.1 or 2.9.5. `eido.py` adds the flag.
+- **Software fallback warning when a GPU is available** — run
+  `python eido.py doctor --gpu-only` in the render shell. On WSL, check the
+  three backend/adapter exports above and Mesa's D3D12 driver. On native
+  Linux, check the hardware Vulkan driver. A visible GPU in `nvidia-smi`
+  and a passing ffmpeg/NVENC check do not verify Deno's rendering adapter.
+- **`No WebGPU adapter found`** — neither a hardware nor a software adapter
+  is exposed by this runtime. Check the driver setup; GPU-less environments
+  need a compatible [software WebGPU driver](#software-fallback).
+- **`GPU compute check failed` / timeout** — an adapter was selected but
+  could not complete the compute/readback probe. Inspect the driver error
+  before rendering; do not treat adapter enumeration alone as success.
 - **Rapier import error at controller creation** — bootstrap didn't
   materialize node_modules; re-run step 2 (add `--fresh` if node_modules
   came from another OS).
@@ -132,12 +235,9 @@ progress and logs before deciding that a slow first render is stuck.
   connection error or missing node/model names. Check ComfyUI's address,
   version and model folders against the audio guide. A passing dependency
   probe still needs a real generation to check weight loading and GPU memory.
-- **Renders come out as banded color gradients (but "DONE" and all audits
-  pass)** — version drift caused this in earlier tests. Check the installed
-  versions and a minimal probe before assuming the cause (the effects-path
-  test scene in `work/nightshift/fxtest/fx.js` is a ready probe). Stay on a
-  verified Deno (2.8.1 or 2.9.5) and always judge a new stack by a rendered
-  FRAME, never by a clean exit.
+- **Banded gradients despite a successful exit** — check the Deno version
+  and a small scene probe with the same effects enabled. Stay on Deno 2.8.1
+  or 2.9.5 and judge the rendered frame as well as the logs.
 - **`node_modules\.bin\...: The file cannot be accessed by the system
   (os error 1920)`** on Windows — the shims were written by a Linux/WSL
   deno run on the same checkout. Delete `node_modules/.bin` and retry.

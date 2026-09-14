@@ -50,7 +50,13 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 - Use the installed systems and source before inventing a parallel API. Read
   errors and inspect inputs; report reproducible toolkit bugs accurately.
   A missing service, dependency or optional local backend is a real limitation.
-  Never hide a failure or label a fallback as a successful tool invocation.
+  Never hide a failure or misrepresent which backend actually ran.
+- Use hardware GPU rendering whenever the environment provides GPU access.
+  Run `python eido.py doctor --gpu-only` in the render shell to check the
+  backend. Software WebGPU fallback is supported for environments without
+  GPU access, including hosted sandboxes; report it clearly. If a GPU is
+  available but software is selected, fix the driver/backend configuration.
+  WSL 2 needs [explicit hardware backend selection](docs/SETUP.md#gpu-setup-for-wsl-2).
 - Render with NodeMaterials and TSL. Large per-frame vertex/instance updates,
   CPU raster loops and CPU booleans do not belong in scene playback. Build
   geometry once; use GPU deformation/compute for bulk motion. Small joint,

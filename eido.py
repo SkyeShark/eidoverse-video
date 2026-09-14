@@ -5,7 +5,7 @@ Everything runs directly on your machine: your deno, your ffmpeg, your
 GPU. Install the dependencies once (docs/SETUP.md), then:
 
     python eido.py bootstrap [--fresh]     # materialize node_modules from deno.lock
-    python eido.py doctor                  # health check
+    python eido.py doctor [--gpu-only]     # health check; report rendering backend
     python eido.py render <scene.json> [--probe]
 
 The containerized edition of this tool — Docker render image + the
@@ -116,6 +116,22 @@ def cmd_doctor(a):
                "verified: 2.8.1 / 2.9.5 — judge others by a rendered frame (docs/SETUP.md)")
     else:
         report("deno", False, "install 2.8.1 or 2.9.5 (docs/SETUP.md)")
+    if deno:
+        try:
+            gpu = subprocess.run(
+                [deno, "run", "--no-config", "--no-lock", "--unstable-webgpu",
+                 os.path.join(ROOT, "eidoverse", "gpu_check.mjs")],
+                cwd=ROOT, capture_output=True, text=True, timeout=30,
+            )
+            detail = gpu.stdout.strip() if gpu.returncode == 0 else gpu.stderr.strip()
+            report("WebGPU + compute/readback", gpu.returncode == 0,
+                   detail or f"GPU probe exited {gpu.returncode}")
+            if gpu.returncode == 0 and gpu.stderr.strip():
+                print(gpu.stderr.strip())  # Keep software/unknown adapter warnings visible.
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            report("WebGPU + compute/readback", False, str(exc))
+    if a.gpu_only:
+        sys.exit(0 if ok else 1)
     ff = shutil.which("ffmpeg")
     if ff:
         enc = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
@@ -180,6 +196,8 @@ def main():
     p.set_defaults(fn=cmd_bootstrap)
 
     p = sub.add_parser("doctor", help="health check")
+    p.add_argument("--gpu-only", action="store_true",
+                   help="check Deno, rendering backend and WebGPU compute/readback only")
     p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("render", help="render a scene config on this machine")

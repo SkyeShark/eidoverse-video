@@ -6,6 +6,14 @@ These notes combine the pinned stack's integration requirements with issues
 observed in earlier renders. Treat a workaround as a diagnosis to verify in
 the current scene, rather than assuming every dark frame has the same cause.
 
+- **A WebGPU adapter can be software.** Use `python eido.py doctor --gpu-only`
+  in the shell that will render. The runner reports the adapter and verifies
+  WebGPU compute/readback. Use hardware when GPU access is available;
+  environments without it can use software WebGPU, with a clear CPU warning.
+  WSL 2 with a GPU needs [backend selection](../docs/SETUP.md#gpu-setup-for-wsl-2).
+  `nvidia-smi`, WebGPURenderer class selection and `powerPreference` alone
+  do not prove hardware rendering. `RENDER_CODEC` controls video encoding
+  independently of the hardware/software scene-rendering backend.
 - **Materials are the NodeMaterial family** — `MeshStandardNodeMaterial` /
   `MeshPhysicalNodeMaterial` / `MeshBasicNodeMaterial`. Non-Node variants
   work via auto-wrap but accumulate WebGL idioms; the Node forms compose

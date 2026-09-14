@@ -20,6 +20,11 @@
  */
 
 import { DOMParser } from "jsr:@b-fuze/deno-dom";
+import { requestRenderAdapter } from './gpu_check.mjs';
+
+// setupRenderer runs before encoding; software rendering must also work on
+// machines with no hardware video encoder. Explicit codec choices still win.
+let defaultVideoCodec = 'h264_nvenc';
 
 // --- Config ---
 
@@ -110,10 +115,9 @@ class FakeGPUCanvasContext {
  * with the same renderer).
  */
 export async function setupRenderer(width, height) {
-    if (!navigator.gpu) throw new Error('navigator.gpu missing — run with --unstable-webgpu');
-
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (!adapter) throw new Error('No WebGPU adapter found');
+    const { adapter, info } = await requestRenderAdapter();
+    defaultVideoCodec = info.backend === 'software' ? 'libx264' : 'h264_nvenc';
+    console.log(`[render_common] WebGPU ${info.backend}: ${info.description} (vendor=${info.vendor}, device=${info.device}, fallback=${info.isFallbackAdapter})`);
     // Request 'core-features-and-limits' so Three.js's WebGPU backend doesn't
     // fall into compatibilityMode. Compat mode downgrades MRT (kills the
     // depth/normal channels GTAO/SSR need), restricts shader features, and
@@ -548,11 +552,13 @@ export function startFfmpegPipe(width, height, fps, outputPath, opts = {}) {
     // pixels in BGRA, our readback delivers BGRA bytes. Tell ffmpeg that's
     // what the input is — without this the channels look swapped (pure red
     // renders as solid blue, etc.).
+    const codec = opts.codec || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_CODEC')) || defaultVideoCodec;
+    console.log(`[render_common] video encoder: ${codec}`);
     const args = [
         '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-pix_fmt', 'bgra', '-s', `${width}x${height}`, '-r', String(fps),
         '-i', '-',
-        '-c:v', opts.codec || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_CODEC')) || 'h264_nvenc',
+        '-c:v', codec,
         '-preset', opts.preset || 'fast',
         '-pix_fmt', 'yuv420p',
     ];
@@ -562,7 +568,8 @@ export function startFfmpegPipe(width, height, fps, outputPath, opts = {}) {
     // macroblocks on high-frequency content (fluid, particles, dense motion).
     const _cq = opts.cq || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_CQ'));
     const _bv = opts.bitrate || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_BITRATE'));
-    if (_cq) args.push('-rc', 'vbr', '-cq', String(_cq), '-b:v', '0');
+    if (_cq && codec === 'libx264') args.push('-crf', String(_cq));
+    else if (_cq) args.push('-rc', 'vbr', '-cq', String(_cq), '-b:v', '0');
     else if (_bv) args.push('-b:v', String(_bv), '-maxrate', String(_bv));
     else args.push('-b:v', '8000k', '-maxrate', '10000k', '-bufsize', '16000k');
     if (opts.audio) args.push('-i', opts.audio, '-c:a', 'aac', '-shortest');

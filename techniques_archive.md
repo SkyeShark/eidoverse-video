@@ -581,6 +581,29 @@ see each process's actual accessible result. Eight rotary table studs engage
 the shared T-slot nuts. The loader retains part ownership on every primitive
 when glTF represents one named part with several material primitives.
 
+## 2026-09-14 — Verify Deno hardware selection on WSL
+
+WSL exposed the RTX 5090 to `nvidia-smi`, but default Linux Deno 2.9.5
+selected `llvmpipe (LLVM 21.1.8, 256 bits)`, `isFallbackAdapter: true`.
+`DENO_WEBGPU_BACKEND=gl GALLIUM_DRIVER=d3d12
+MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` selected `D3D12 (NVIDIA GeForce
+RTX 5090 Laptop GPU)`, passed an actual compute/readback check, and rendered
+an inspected Three.js/TSL frame. The hardware requirement is shared by
+`eidoverse/gpu_check.mjs`, `doctor --gpu-only`, and renderer startup.
+Keep these exports in the rendering environment and use separate OS dependency
+stores. Do not infer hardware use from a successful render or CUDA/NVENC
+availability. Setup and troubleshooting: [WSL GPU setup](docs/SETUP.md#gpu-setup-for-wsl-2).
+
+### 2026-09-14 — GPU access and software fallback
+
+Use hardware whenever the environment exposes GPU access. Hosted sandboxes
+without it must still be able to use a compatible software WebGPU driver.
+The renderer and doctor now accept software adapters with an explicit CPU
+warning, classify the backend in diagnostics, and keep actual adapter/compute
+failures as errors. The strict hardware-only policy in the preceding entry
+was too broad. Fix GPU selection where hardware is accessible; preserve
+software fallback for environments where it is not.
+
 ## 2026-09-14 — Physical attachment frames and shared mount metadata
 
 The arm/gripper failure was a kit metadata problem. A650's output point was

@@ -19,9 +19,15 @@ has shipped hundreds of videos.
 ```bash
 # 1. Install Deno 2.8.1 or 2.9.5 + ffmpeg          → docs/SETUP.md
 python eido.py bootstrap      # one-time dependency fetch
-python eido.py doctor         # health check
+python eido.py doctor         # reports hardware/software WebGPU + compute/readback
 python eido.py render eidoverse/examples/basic_vrm.json   # smoke test
 ```
+
+**Use hardware GPU rendering when GPU access is available.** Environments
+without it can use [software WebGPU fallback](docs/SETUP.md#software-fallback).
+On WSL 2 with a GPU, follow the [GPU setup](docs/SETUP.md#gpu-setup-for-wsl-2);
+the default adapter can be a CPU renderer even when `nvidia-smi` sees your
+card. `python eido.py doctor --gpu-only` reports and checks the rendering path.
 
 Then open the repo in your agent (Claude Code, codex, opencode). It reads
 [AGENTS.md](AGENTS.md), then opens the relevant guides in its
@@ -201,7 +207,7 @@ them with image, motion and sound inspection.
   older standalone Satori and Python lyric-overlay demonstrations.
 
 ### Runner
-`eido.py` — `bootstrap` / `doctor` / `render [--probe]`.
+`eido.py` — `bootstrap` / `doctor [--gpu-only]` / `render [--probe]`.
 
 ## Requirements
 

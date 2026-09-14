@@ -88,6 +88,8 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/particles.js](../eidoverse/particles.js) | Injected scene API | [particles-fx](../tools-guides/particles-fx.md) |
 | [eidoverse/procedural_materials.js](../eidoverse/procedural_materials.js) | Injected scene API | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
 | [eidoverse/redgiant.js](../eidoverse/redgiant.js) | Explicit facade/package component | [sky-weather](../tools-guides/sky-weather.md) |
+| [eidoverse/gpu_check.mjs](../eidoverse/gpu_check.mjs) | Hardware preference, software fallback reporting + standalone compute/readback diagnostic; invoked by `doctor --gpu-only` | [stack-notes](../tools-guides/stack-notes.md), [setup](SETUP.md#gpu-setup-for-wsl-2) |
+| [eidoverse/gpu_check_test.mjs](../eidoverse/gpu_check_test.mjs) | Hardware preference and software fallback tests; no GPU needed | [development](../tools-guides/development.md) |
 | [eidoverse/render_common.mjs](../eidoverse/render_common.mjs) | Native runner support + UI utility | [scene-format](../tools-guides/scene-format.md) |
 | [eidoverse/render_scene.mjs](../eidoverse/render_scene.mjs) | Native render entry | [scene-format](../tools-guides/scene-format.md) |
 | [eidoverse/rhombic_dodecahedron.js](../eidoverse/rhombic_dodecahedron.js) | Injected scene API | [geometry](../tools-guides/geometry.md) |
