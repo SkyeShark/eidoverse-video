@@ -581,6 +581,50 @@ see each process's actual accessible result. Eight rotary table studs engage
 the shared T-slot nuts. The loader retains part ownership on every primitive
 when glTF represents one named part with several material primitives.
 
+## NIGHT SHIFT — G430 print, A650+gripper pick-and-place, quadruped watcher (work/nightshift, 2026-09-14, Fable)
+
+- **A650 + parallel gripper target frame.** With `arm.attach(gripper, {port:'a650_j6/output', childPort:'parallel_gripper/input'})`
+  the jaws already point DOWN at the all-zero rest pose, so a "gripper pointing down" `moveTo` target is the
+  identity rotation in the arm group's local frame (position = `group.worldToLocal(p)`). Do not fold the group's
+  yaw into the target: a π rotation about the gripper axis lands j6 on its ±π limit and every solve fails.
+  The jaws are symmetric, so `makeRotationY(yaw)` in local space is all the orientation control needed.
+  Jaw fingertips sit 0.064 m below the flange; grip a small object with the flange ~0.076 m above its base.
+- **Down-pointing reach band** (arm-local, flange height y vs radius r along the reach direction): r 0.25–0.55 m
+  at y 0.20–0.45 m solves; y ≤ 0.15 only at r 0.3–0.5; nothing below 0.10. So a bed the arm must pick from
+  should sit HIGHER than the arm base (printer on a 0.12 m plinth, arm on the bench) and a shelf at y+0.3.
+  Seed IK with j1 = atan2(-z, x) (try both signs) plus a few elbow/wrist seeds; interpolate keys in joint space with smoothstep.
+- **Carrying the printed part.** After the jaws close, `gripper.group.attach(job.mesh)` moves the FDM bead mesh
+  with the arm (positionNode is mesh-local, so the deposited beads travel intact); `_s.attach(job.mesh)` on release
+  leaves it seated wherever the arm put it. Place height = shelf top + the flange offset above the part base.
+- **"Previous nights" prints without a second slicer.** `fab.print(printer, geom, {duration:10, buildPlate:false, color})`,
+  `seek(duration)`, `_s.attach(mesh)`, then set position (bottom at `SHELF_Y - job.base`) and yaw; do this BEFORE
+  creating the live job so the live job's `setColor` leaves the reel/strand in tonight's color. Real layer lines,
+  free.
+- **Timeline probe.** Render the real scene with `fps:1, duration:<film>` → one still per second of the whole film in
+  ~66 frames; judge every beat (cuts, park, grasp, place) from that before the 24 fps render.
+- **Lighting a white kit under one practical.** The A650/G430 white plastics blow out under a close SpotLight;
+  46 cd at 1.2 m with exposure 1.12 and `_bloomParams {strength:0.12, threshold:0.92}` kept them readable while
+  the room stays dark. Widen the cone (0.9 rad, penumbra 0.35) rather than adding fill to light a floor character.
+- **Machine SFX from kinematics** (`work/nightshift/synth_sfx.mjs`, deno, no GPU): reload the same printer + `fab.print`
+  job offline, seek it at 1 kHz along the film's playback clock, and turn per-axis on-screen speed into stepper
+  tones (pitch ∝ speed, per-axis detune), `state.type==='extrude'` into a feed-motor tick, and a blade-pass fan
+  tone that spins down after `printDone`. Replay the arm's joint keys for a servo whine ∝ weighted joint speed
+  with band-passed gear noise; add clicks at jaw close / part set-down / jaw open and a two-note completion beep.
+  Sounds land exactly on the motion by construction; Stable Audio beds are not needed for the machines.
+
+### WSL renders through lavapipe — Night Shift render budget (2026-09-14)
+
+- Per-frame cost in WSL was 8.5 s and bisected to the FDM bead meshes (five finished
+  345k-vertex prints + the live one), independent of material, shadows or draw count:
+  cost ∝ triangles × passes. `/usr/share/vulkan/icd.d/` has no NVIDIA ICD, so deno's
+  WebGPU uses lavapipe (CPU). A 7-mesh scene hides this (0.12 s/frame); big geometry exposes it.
+- Budget tools: `bakeBodies(robot)` merges kit meshes per rigid body (printer 96 → 31,
+  quadruped 96 → 13 with `bodies:['camera_pan','camera_tilt']`), `bakeFinishedBead(job)`
+  turns a completed print into plain position/normal geometry, and a coarser toolpath
+  (`blendTolerance:0`, 28 lathe segments, 0.6 mm layers, 1.1 mm beads) cuts the live
+  bead from 346k to ~110k vertices while keeping 90 visible layers.
+
+
 ## 2026-09-14 — Verify Deno hardware selection on WSL
 
 WSL exposed the RTX 5090 to `nvidia-smi`, but default Linux Deno 2.9.5
@@ -594,6 +638,23 @@ Keep these exports in the rendering environment and use separate OS dependency
 stores. Do not infer hardware use from a successful render or CUDA/NVENC
 availability. Setup and troubleshooting: [WSL GPU setup](docs/SETUP.md#gpu-setup-for-wsl-2).
 
+### Correction: WSL GPU route and the N8AO limit (2026-09-14)
+
+- The earlier "WSL renders on lavapipe" note was a setup error on my side, not a toolkit
+  limit: with `DENO_WEBGPU_BACKEND=gl GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`
+  (docs/SETUP.md "GPU setup for WSL 2") deno's WebGPU reaches the RTX 5090 through Mesa D3D12
+  and `python3 eido.py doctor --gpu-only` reports the hardware adapter. Night Shift's 12-frame
+  probe went from 101 s (lavapipe) to 3 s.
+- On that route three things black the frame with no surfaced error (WGSL validates, GL pipeline
+  creation returns GPUInternalError): renderer `antialias:true` (MSAA resolve), the N8AO pass, and the
+  SSR pass in the full film (a small lit scene's SSR passed). Fix: `antialias:false`,
+  `_aoParams={enabled:false}`, `_ssrParams={enabled:false}`; bloom/FXAA/shadows/fog/overlay/beads work.
+  Bisect recipe that found it: env-driven variants + mean-gray of one frame, plus an
+  `uncapturederror` listener in setup() to name the invalid pipeline.
+- The geometry reductions made for lavapipe are unnecessary on the GPU route; the film uses the
+  full-resolution toolpath again. `bakeBodies`/`bakeFinishedBead` stay in as harmless draw-call hygiene.
+
+
 ### 2026-09-14 — GPU access and software fallback
 
 Use hardware whenever the environment exposes GPU access. Hosted sandboxes
@@ -603,6 +664,32 @@ warning, classify the backend in diagnostics, and keep actual adapter/compute
 failures as errors. The strict hardware-only policy in the preceding entry
 was too broad. Fix GPU selection where hardware is accessible; preserve
 software fallback for environments where it is not.
+
+## Night Shift, second pass — gripper mount, A650 workspace, SCARA pick-and-place (2026-09-14, Fable)
+
+- **The kit gripper's `parallel_gripper/input` port sits at the gripper origin, between the fingers**, so
+  `attach()` to a TC70 flange leaves the black robot-side coupling 12 cm away from the flange and the wrist
+  pressed into the finger base (it reads as "mounted at 90°"). Mount on the coupling's top face instead:
+  add a port `{interface:'TC70', owner: grip.roots.parallel_gripper, matrix: basis(x, y, z=normal) at (0, 0.118, 0)}`.
+  With normal +Y the fingers extend along the parent flange's +normal (A650); with normal −Y the gripper
+  hangs below a downward-facing tool face (S500 quill). Fingertips are 0.182 m from that face.
+- **A650 workspace is an annulus, not a volume.** Its elbow folds to ~97° at most, so the wrist stays
+  ≥ ~0.35 m from the shoulder; the flange normal cannot point down over most of the workspace (the wrist
+  roll is not free about the tool axis, and the jaw axis follows the flange x-axis, which points down when
+  the tool is horizontal — use `twist: Math.PI/2` on the mount if you need horizontal jaws). A horizontal
+  gripper therefore works only on a ring ~0.52–0.59 m from the base. It cannot reach into the G430 from the
+  side (the Y rails/uprights sit exactly in its link envelope) and cannot swing a carried part past the
+  front uprights. Every attempt is in `work/nightshift/arm_plan*.mjs` with a capsule-vs-box collision report.
+- **S500 SCARA is the right pick-and-place tool for the printer.** Links 0.245 + 0.255 m (tool radius
+  0.16–0.50), quill 0.14 m, full-turn tool yaw. Placed in front of the printer (base 0.98 m high, 0.4 m
+  left of the bed centre) with the bridge parked at the back, its horizontal links enter over the bed's
+  open front, the quill lowers the gripper onto the part, and pulling the tool in to r = 0.20 m before the
+  swing keeps everything ≥ 3 cm from the corner uprights. `plan_scara.mjs`: calibrated 2-link IK
+  (`scaraJoints([shoulder, elbow, quill, tool])`, +shoulder toward −z, tool yaw = −(shoulder+elbow) keeps
+  the jaws world-fixed), per-frame joints to `arm_traj.json`, collision check, params consumed by the scene.
+- **Music prompts for MiniMax:** asking for "a warmer swell" produced a dense, chaotic second half; a
+  solo-instrument prompt with "same pattern throughout, no build-up, no climax" and picking the take with
+  the lowest onset density / RMS spread in its second half (measured with ffmpeg astats) gave a calm cue.
 
 ## 2026-09-14 — Physical attachment frames and shared mount metadata
 
@@ -633,3 +720,55 @@ triangles, check centres and opposing normals over several joint poses and
 root transforms, and check intentional roll. Both physical checks fail with
 the original metadata. These tests validate the mount, not clearance for the
 entire attached payload; assembled motion still needs its own inspection.
+
+### Root cause of the WSL GL route's black effects passes (2026-09-14)
+
+- `device.createRenderPipelineAsync` on a dumped WGSL module returns the backend message the harness
+  swallows: `WGSL textureLoad from depth textures is not supported in GLSL`, and for a non-comparison
+  `textureSampleLevel` Mesa reports `no matching function for call to textureLod(sampler2DShadow, vec2, uint)`.
+  naga's GLSL backend maps `texture_depth_2d` to `sampler2DShadow`; only `textureSampleCompare` and
+  `textureDimensions` work. Three's TSL compiles nearest-filtered `depthNode.sample(uv)` to `textureLoad`
+  (see the `tsl_coord_clampS_clamp_2dT` fetches in the generated WGSL), so N8AO, SSR and the depth copy
+  cannot run on that route; editing N8AO's helper does not help (and passing a node into its `Fn` throws
+  `depthNode.sample is not a function`, so the vendored file was restored from git).
+- Standalone probe scripts: `work/nightshift/_check/pipeline_test.mjs` (compiles dumped shaders with
+  parsed vertex layouts) and `depth_sample_test.mjs` (which depth operations the backend accepts).
+
+### Herringbone banding on the robotics kit's cast parts = spotlight self-shadowing (2026-09-14)
+
+- Symptom: a regular chevron/herringbone pattern following the triangle rows of the G430 cast uprights,
+  the S500 SCARA column and the quadruped body, visible in lit and half-lit areas, present with and
+  without N8AO/SSR. It is not the kit's materials: the UV islands sit on the right atlas regions, the
+  occlusion map is clean, and the kit's `manufacturing.json` example (studio lighting, no shadow map)
+  renders the same parts clean.
+- Cause: a close SpotLight (1 m above the bench, `castShadow`, 2048 map, `bias -0.00015`, PCFSoft) with
+  `normalBias 0` self-shadows the coarse smooth-shaded taper. `spot.shadow.normalBias = 0.005` removes
+  it completely with no visible peter-panning; 0.02 also works. Diagnostic scene:
+  `work/nightshift/_check/diag.scene.js` (kit printer as loaded, `DIAG=studio|mine`, `DIAG_NB`).
+- Pitfall that hid it: the auto-enhance harness sets `renderer.shadowMap.enabled = true`, so a scene-level
+  "shadows off" toggle changes nothing while auto-enhance is on; test lighting with
+  `globalThis._noAutoEnhance = true` or in a scene without the chain.
+- Do not diagnose by swapping or stripping kit materials; light-by-light and shadow on/off in a
+  separate probe scene isolates it in a handful of single-frame renders.
+
+### N8AO "grain" on small sets = the default 5 m aoRadius (2026-09-14)
+
+- Symptom: soft blotchy mottling over every surface of a tabletop/room-scale scene, present with SSR off,
+  gone with AO off; raising the quality preset alone (Ultra: 64 samples, 16 denoise) does not remove it.
+- Cause: `createDefaultN8AOConfiguration().aoRadius` is 5 world units. On a 2 m bench the hemisphere
+  samples span the whole room, so the denoised result is one low-frequency occlusion cloud.
+- Fix: `globalThis._aoParams = { aoRadius: <contact scale>, quality: 'High' }` in the scene; 0.15 m on
+  the Night Shift bench gives clean contact occlusion under 5 cm vases with no mottling. Pick the radius
+  from the smallest crevice you want darkened, not from the room. Probes: `work/nightshift/_check/ao_sheet2*.png`.
+
+### MiniMax Music 3: the `--seconds` pin is what garbled the Night Shift cues (2026-09-14)
+
+- Takes pinned with `--seconds 64` (v1 ambient cue, takes 1–3, ~25 s worth of caption) played coherently
+  for the first third and then disintegrated; the user heard them as "garbled nonsense". Takes with the
+  latent left to the encoder were coherent but 14–30 s long (takes 4–8, 10). Take 9, the same brief with
+  an explicit timed structure ("about 66 seconds: ... first 20 seconds ... from 20 to 45 seconds ...
+  resolves around 60 seconds") under `--max-duration 90` and no pin, came back as a coherent 90 s piece
+  and was trimmed to 62 s with a fade. Take 10, identical caption and a different seed, was 29 s.
+- Rule: length comes from the caption's timed structure plus a ceiling above the target; `--seconds` only
+  for short pieces or a pin near the encoder's estimate; roll seeds and select by measured duration.
+  Guide section: tools-guides/audio.md "Prompting MiniMax Music 3 for a film cue".

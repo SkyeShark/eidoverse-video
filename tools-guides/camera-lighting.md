@@ -19,6 +19,10 @@ also available when that is the intended look.
   distant subject; a directional light has no distance falloff.
 - Start with one shadow-casting directional light when appropriate. Additional
   shadow maps have a cost; inspect performance and the resulting shadows.
+- A close shadow-casting light (a lamp a metre above the set) self-shadows coarse
+  smooth-shaded geometry into triangle-aligned herringbone bands, seen on the robotics
+  kit's cast parts. Set `light.shadow.normalBias` (0.005 worked at that distance) before
+  touching bias or map size; leave the materials alone.
   Shadow-casting `SpotLight` has caused MToon failures on this pinned native
   stack. Use another shadow source for VRM scenes unless that compatibility
   has been verified in the current setup.

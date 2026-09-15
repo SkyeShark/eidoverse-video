@@ -74,6 +74,39 @@ does not guarantee a resolved musical ending. Describe the intended ending,
 allow room for its decay, and inspect the actual duration and cadence before
 timing a film. A short test can use `--seconds 24 --max-duration 30`.
 
+### Prompting MiniMax Music 3 for a film cue
+
+The text encoder plans the piece and its length from the caption; the audio
+latent is then generated to that plan. Garbled output comes from a mismatch
+between the two, not from the sampler settings (Night Shift, 2026-09-14,
+ten takes measured):
+
+- **Do not pin `--seconds` beyond what the caption plans.** A caption the
+  encoder reads as a 20–30 s idea, pinned to `--seconds 64`, gives 64 s of
+  audio whose second half disintegrates into dense, incoherent playing.
+  Reserve `--seconds` for short pieces (roughly 30 s or less) or for a pin
+  close to the encoder's own estimate.
+- **Ask for length in the caption, with a timed structure.** "about 66
+  seconds: a very quiet, sparse opening for the first 20 seconds; a slightly
+  fuller but still calm middle from 20 to 45 seconds with the same gentle
+  two-chord pattern; then it thins out and resolves on a soft sustained chord
+  around 60 seconds, decaying into silence" produced a coherent 90 s take
+  under `--max-duration 90`. The same brief without the timings came back as
+  14–30 s pieces.
+- **Set `--max-duration` above the target** (90 for a 66 s cue) and trim the
+  result with a fade. The ceiling is not a target; the encoder can stop well
+  short of it or run to it.
+- **Planned length varies by seed.** Identical captions returned 28 s and
+  90 s on different seeds. Generate several seeds, keep a log per take (the
+  driver prints seed, ceiling and latent), and pick by measured duration.
+- **For a calm cue, say so in structural terms.** "same pattern throughout,
+  no build-up, no climax", a single named instrument and a stated final
+  cadence hold; "a warmer swell" or "grows" turns the second half dense and
+  chaotic. Negative lists ("no drums, no synths") are cheap and did no harm.
+- **Measure before listening at length.** `ffprobe` for duration, then
+  `ffmpeg -af astats` per second for RMS spread and onset density in the
+  second half; the calmest take has the lowest spread and density there.
+
 Generation defaults are `--steps 24`, `--cfg 1`, `--cfg-scale 1.5` and
 `--top-k 50`. `--cfg` controls diffusion guidance; `--cfg-scale` and
 `--top-k` control the text encoder's acoustic generation. Change `--seed`

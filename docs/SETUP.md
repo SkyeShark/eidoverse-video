@@ -106,30 +106,29 @@ simulation fits that backend's capabilities. Always inspect the scene probe.
 An alternative hardware Vulkan driver can also work, but must pass the
 same checks; installing `mesa-vulkan-drivers` alone does not establish it.
 
-### Software fallback
+**Known limit of the WSL GL/D3D12 route** (2026-09-14, RTX 5090 Laptop,
+Mesa 26.0.3, deno 2.8.1 and 2.9.5): wgpu's GLSL backend declares every
+`texture_depth_2d` as `sampler2DShadow`, so a depth buffer can only be
+*compared* there, never read. Any pass that reads depth fails at pipeline
+creation with `GPUInternalError` (`WGSL textureLoad from depth textures is
+not supported in GLSL`; a non-comparison `textureSampleLevel` fails the same
+way in Mesa's compiler). Three's TSL turns nearest-filtered depth `sample()`
+into `textureLoad`, so this covers N8AO, SSR, the N8AO depth copy and any
+depth-fog / depth-of-field effect. Shadow maps (comparison sampling), bloom,
+FXAA, fog and the overlay work. The renderer's MSAA resolve (`antialias:
+true`) also blacks every frame on this route, and the kit's own
+`eidoverse/examples/robotics/manufacturing.json` renders black there for the
+same reason. The `auto` branch's Docker route sets `GALLIUM_DRIVER=d3d12` and
+the adapter name but not `DENO_WEBGPU_BACKEND=gl`; it was not tested from
+this checkout, so how it differs is unverified.
 
-Hosted sandboxes and other environments without GPU access can render through
-a compatible software WebGPU driver. Deno still uses the same WebGPU/TSL
-scene API, with rendering/compute performed on the CPU. There is no opt-in
-flag: hardware is requested first; an available software adapter is accepted
-with a warning. This requires a software WebGPU driver in the environment;
-it does not create one if the runtime has no usable adapter.
-
-For a Linux sandbox using Mesa, install the `mesa-vulkan-drivers` package if
-the environment permits it. Do not apply the WSL hardware-only backend
-exports in a GPU-less sandbox. Check the resulting setup with:
-
-```bash
-python eido.py doctor --gpu-only
-```
-
-A working fallback reports `"backend":"software"`, a CPU warning, and
-`"computeReadback":"passed"`, and the check succeeds. Rendering can be
-much slower; start with a short probe. Detected software rendering also
-defaults to the CPU `libx264` video encoder. Explicit `RENDER_CODEC` or
-per-encode codec choices take precedence; `RENDER_CQ` uses CRF with libx264.
-GPU access for optional AI model backends is separate from this
-scene-rendering fallback.
+What to do: for full auto-enhance at GPU speed use the Windows Deno (native
+D3D12) from Git Bash; on WSL either accept `_aoParams = {enabled:false}`,
+`_ssrParams = {enabled:false}` and `antialias:false`, or force the Vulkan
+software adapter (`DENO_WEBGPU_BACKEND=vulkan`) and budget CPU time. Capture
+the exact failure with `GPU_DEVICE.addEventListener('uncapturederror', ...)`
+in `setup()`, or compile a dumped WGSL module standalone with
+`device.createRenderPipelineAsync` to read the backend's message.
 
 ## 2. Bootstrap JS dependencies
 
