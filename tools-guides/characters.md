@@ -322,51 +322,128 @@ A VRM in T-pose despite a loaded animation traces to one of these:
 
 ## `claude_suit.vrm` — mouth + wardrobe recipes
 
-**The mouth drives raw morphs, not expressions.** The visible cat-smile is
-painted on the face; the animatable mouth is a hidden cavity revealed by
-the `show MMD mouth` shapekey. The expressionManager path barely moves it —
-voice over that mouth reads frozen. The render-verified recipe:
+**The mouth: give it morph targets of its own; never drive the rig's.**
+The visible cat-smile is PAINTED on the face. The animatable mouth is a flat
+black plate (849 vertices, on the same mesh as the painted eyes and smile —
+material `Material`) kept 29 mm BEHIND the face disc, and the rig's
+`show MMD mouth` shapekey is a pure translation toward the camera,
++28.8 mm per unit. Measured from the VRM's own morph data:
 
-1. Select the 3 face plates once at setup and write raw
-   `morphTargetInfluences` inside `mesh.onBeforeRender` (survives the
-   engine's VRM passes), `fill(0)` first — leftover expression weights
-   otherwise hold the mouth shut. (`fill(0)` also kills auto-blink;
-   re-apply `Blink` yourself if you want it.)
-   ```js
-   const plates = [];
-   vrm.scene.traverse(o => { if (o.morphTargetDictionary && ('show MMD mouth' in o.morphTargetDictionary)) plates.push(o); });
-   for (const p of plates) p.onBeforeRender = () => {
-       const inf = p.morphTargetInfluences, d = p.morphTargetDictionary;
-       inf.fill(0);
-       for (const [nm, w] of Object.entries(globalThis._suitMouth || {})) if (nm in d) inf[d[nm]] = w;
-   };
-   ```
-2. Per frame set `globalThis._suitMouth` to a viseme pose. Contact-sheet
-   tested — weights above 1 are intentional (morph deltas scale linearly
-   past 1; these stacks are verified tear-free):
-   ```js
-   const S = 'show MMD mouth';
-   const SUIT_VISEMES = {
-       aa: { [S]: 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 },   // big open — the workhorse
-       oh: { [S]: 1.2, LipFunnel: 1.0, 'お': 0.8 },          // rounded drop
-       ou: { [S]: 0.8, LipPucker: 1.2 },                     // tight pucker
-       ee: { [S]: 1.0, 'え': 1.5 },                          // wide + shallow
-       ih: { [S]: 0.9, 'い': 1.2 },                          // flat slit
-       rest: {},                                             // painted smile returns
-   };
-   ```
-3. Simplest talking (one openness signal — `lipsync.py get_mouth_openness`
-   or an RMS envelope): scale the whole `aa` pose by openness 0..1. For
-   full visemes: winner-take-all rather than additive — `lipsync.py` emits
-   all five channels at once, and summing the poses renders untested morph
-   combinations. EMA-smooth (~3 frames), pick the dominant channel, render
-   only its pose scaled by `min(1, value/0.35)`; below ~0.03 raw → rest.
-4. Verified traps: `vis_aa/ih/ou/ee/oh` and the plain vowel shapes do
-   nothing without the reveal; `MouthClosed` doesn't hide the cavity (rest
-   = reveal at 0); `hide mouth` restyles the painted line (an aesthetic
-   change, not lipsync); `O`/`お` solo are empty exports. Expression
-   accents that do work as raw morphs: `Smile`, `MouthSmileLeft/Right`,
-   `MouthFrown`, `Blink`, `EyeClosedLeft/Right`, `EyeWide`, `Blush`/`照れ`.
+| `show MMD mouth` | where the plate sits |
+| --- | --- |
+| 0.45–0.85 — the VRM's own `ou`/`ee`/`ih`/`oh` binds | wholly behind the face: the mouth never shows |
+| 1.0 — its `aa` bind | straddling the face: 55% hidden, poking through in patches |
+| ~1.1 | on the face |
+| 1.6 — the `aa` pose this guide used to recommend | floating 15–20 mm in front of the face |
+| 3.4 — that pose scaled up for a scream | floating 65–70 mm in front |
+
+That is why the expression path "barely moves" it, and why overdriving it
+looks right head-on: the offset lies along the camera axis, so a front-view
+contact sheet passes while every three-quarter shot shows a black slab off
+the face. The rig's vowel shapes (`あ`, `JawOpen`, `A`…) are authored flat
+while the face is a dome, so no mix of them follows it either. Leave all of
+them at 0 and give the plate three targets of its own, every vertex raycast
+onto the face 1.5 mm proud — a sliver under the smile, a wide scream, a round
+"oh". Render-verified from six angles on the raw rig and after
+`combineMorphs`: every mouth vertex stays 0.4–1.5 mm above the face at every
+opening.
+
+```js
+// claude_suit mouth that stays ON the face.  Call once in setup(), before the
+// first render, and AFTER anything that runs VRMUtils.combineMorphs
+// (EidoverseRobotController.create does, unless opts.skipVrmOptimize):
+// combineMorphs rebuilds each mesh's targets from the expression binds and
+// drops every other target, these included.
+function makeSuitMouth(vrm, { standoff = 0.0015 } = {}) {
+    let plate = null, face = null;
+    vrm.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const mats = (Array.isArray(o.material) ? o.material : [o.material]).map((m) => m.name);
+        if (!plate && o.morphTargetInfluences && mats.includes('Material')) plate = o;   // eyes + smile + mouth plate
+        if (!face && mats.includes('face')) face = o;                                   // the face disc
+    });
+    if (!plate || !face) throw new Error('makeSuitMouth: not claude_suit.vrm');
+    vrm.scene.updateMatrixWorld(true);
+    const inv = plate.matrixWorld.clone().invert(), ray = new THREE.Raycaster();
+    const onFace = (x, y) => {        // plate-local (x, y) -> face surface z in front of it, + standoff
+        const o = plate.localToWorld(new THREE.Vector3(x, y, 0.4));
+        ray.set(o, plate.localToWorld(new THREE.Vector3(x, y, -0.6)).sub(o).normalize());
+        const hit = ray.intersectObject(face, false)[0];
+        return (hit ? hit.point.applyMatrix4(inv).z : 0.115) + standoff;
+    };
+    const TOP = 1.4762;               // the plate's top edge, just under the painted smile
+    const at = (x, y, sx, sy) => { const X = x * sx, Y = TOP - (TOP - y) * sy; return [X, Y, onFace(X, Y)]; };
+    const geo = plate.geometry, pos = geo.attributes.position, n = pos.count;
+    const seat = new Float32Array(n * 3), wide = new Float32Array(n * 3), round = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (!(Math.abs(x) < 0.03 && y > 1.44 && y < 1.48 && z < 0.095)) continue;    // the hidden mouth plate
+        const S = at(x, y, 0.55, 0.05), W = at(x, y, 1.55, 1.95), O = at(x, y, 0.95, 1.95);
+        for (let k = 0; k < 3; k++) {
+            seat[i * 3 + k] = S[k] - [x, y, z][k];     // behind the face -> a sliver on it
+            wide[i * 3 + k] = W[k] - S[k];             // sliver -> full scream, 57 x 55 mm
+            round[i * 3 + k] = O[k] - S[k];            // sliver -> an 'oh', 35 x 55 mm
+        }
+    }
+    const idx = {};
+    for (const [name, arr] of [['seat', seat], ['wide', wide], ['round', round]]) {
+        geo.morphAttributes.position.push(new THREE.Float32BufferAttribute(arr, 3));
+        if (geo.morphAttributes.normal) geo.morphAttributes.normal.push(new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+        idx[name] = plate.morphTargetInfluences.push(0) - 1;
+    }
+    return {
+        plate,
+        // open 0..1, round 0..1 (the share of oh/ou), extra: { morphName: weight }
+        // on the same plate — e.g. { Blink: 1 }, or { blink: 1 } after combineMorphs
+        set(open, round = 0, extra = {}) {
+            const inf = plate.morphTargetInfluences, d = plate.morphTargetDictionary;
+            inf.fill(0);                               // the rig's own mouth targets stay at 0
+            const o = Math.min(1, Math.max(0, open)), r = Math.min(1, Math.max(0, round));
+            if (o > 0.04) { inf[idx.seat] = 1; inf[idx.wide] = o * (1 - r); inf[idx.round] = o * r; }
+            for (const [nm, w] of Object.entries(extra)) if (nm in d) inf[d[nm]] = w;
+        },
+    };
+}
+```
+
+Setup: `globalThis._mouth = makeSuitMouth(vrm);` — before the first render,
+and after anything that runs `VRMUtils.combineMorphs`
+(`EidoverseRobotController.create` does, unless `opts.skipVrmOptimize`):
+it drops every target no expression binds, these included. Create any mesh
+that shares the plate's geometry afterwards too (`combineMorphs` clones it).
+
+Per frame, **last thing before `renderAsync`** — after any controller update
+(a controller runs `vrm.update()`, whose expression manager rewrites
+expression-bound targets such as blink). Not in a `mesh.onBeforeRender`
+hook: on WebGPU via Metal the hook fires and writes its values (instrumented:
+234 calls, 1.565 written to `show MMD mouth`), but the node pipeline has
+already gathered the frame's morph influences, so the mouth never moves. The
+engine runs `vrm.update()` after `renderFrame`, so values written there
+survive the draw.
+
+```js
+_mouth.set(open);                  // wide: aa / ee / ih.  open 0..1
+_mouth.set(open, 1);               // round: oh / ou
+_mouth.set(0, 0, { Blink: 1 });    // set() owns the plate — re-add a blink yourself
+```
+
+- `open`: `lipsync.py`'s `get_mouth_openness(frame)` or an RMS envelope,
+  0..1. `open = 1` is the full scream; scale ordinary speech by ~0.4.
+- Full visemes: winner-take-all, never additive — EMA-smooth the five
+  channels (~3 frames), take the dominant one, `o = min(1, value / 0.35)`,
+  and map `aa` → `set(o)`, `ee` → `set(0.62 * o)`, `ih` → `set(0.45 * o)`,
+  `oh` → `set(0.95 * o, 0.8)`, `ou` → `set(0.62 * o, 1)`; below ~0.03 raw →
+  `set(0)`.
+- `extra` reaches the other morphs on the plate's mesh: `Blink`,
+  `EyeClosedLeft/Right`, `EyeWide`, `Smile`, `MouthSmileLeft/Right`,
+  `MouthFrown`. `Blush`/`照れ` live on another mesh (material `BLUSH`).
+  After `combineMorphs` only expression names remain: `{ blink: 1 }`,
+  `{ happy: 1 }`.
+- The render audit's `[lipsync] mouth NEVER moved` line watches the
+  expression manager, so it is a false positive on this path — confirm by
+  cropping the mouth in a sung frame and a silent one.
+- Check any mouth from the side, never only head-on: the old recipe passed
+  every front-view check.
 
 `claude.vrm` (the classic sona) is the opposite: its mouth is
 expression-bound and the plain `expressionManager.setValue` viseme path
