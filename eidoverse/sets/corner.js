@@ -589,12 +589,16 @@ export async function build(ctx) {
             let col = mix(hor, zen, smoothstep(0.0, 0.7, up));
             col = mix(gnd, col, smoothstep(-0.04, 0.02, up));
             // stars: 3D cell hash on the view direction
+            // hash() converts its seed to uint, which clamps a negative seed to 0 — so every cell whose seed
+            // went negative (most of the sky toward -Z) got the same hash and no stars. Wrap negatives into
+            // [2^22, 2^23) (exact in f32; positive seeds stay as they were, so existing stars don't move).
+            const pos = (x) => x.add(select(x.lessThan(0.0), float(4194304.0), float(0.0)));
             const star = (N, thr, gain) => {
                 const p = d.mul(N);
                 const cell = floor(p);
-                const h1 = hash(cell.x.add(cell.y.mul(157.0)).add(cell.z.mul(113.0)));
-                const h2 = hash(cell.x.mul(1.7).add(cell.y.mul(31.0)).add(cell.z.mul(71.0)).add(19.0));
-                const h3 = hash(cell.x.mul(3.1).add(cell.y.mul(11.0)).add(cell.z.mul(53.0)).add(7.0));
+                const h1 = hash(pos(cell.x.add(cell.y.mul(157.0)).add(cell.z.mul(113.0))));
+                const h2 = hash(pos(cell.x.mul(1.7).add(cell.y.mul(31.0)).add(cell.z.mul(71.0)).add(19.0)));
+                const h3 = hash(pos(cell.x.mul(3.1).add(cell.y.mul(11.0)).add(cell.z.mul(53.0)).add(7.0)));
                 const off = vec3(h1, h2, h3).mul(0.7).add(0.15);
                 const dd = length(fract(p).sub(off));
                 const on = step(thr, h1);

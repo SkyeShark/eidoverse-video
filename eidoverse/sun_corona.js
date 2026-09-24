@@ -22,7 +22,9 @@ export function makeSunCorona(THREE, { distance = 1500, size = 400, petals = 12,
     const a = k.sub(k.add(0.5).floor()).mul(2.0);                                         // -1..1 across a petal slot
     const len = mix(float(0.2), float(0.93), U.open);                                    // petal length breathes
     const s = r.sub(0.17).div(len.sub(0.17)).clamp(0.0, 1.0);                             // 0 at the disc, 1 at the tip
-    const halfW = mix(float(0.32), float(0.62), smoothstep(0.0, 0.55, s)).mul(float(1.0).sub(pow(s, 6.0)));
+    // floored: at r >= len, s = 1 and the width would be exactly 0 → smoothstep(0, 0, |a|) (a zero-width edge:
+    // a thin ring past the tips, NaN on the petal axes)
+    const halfW = mix(float(0.32), float(0.62), smoothstep(0.0, 0.55, s)).mul(float(1.0).sub(pow(s, 6.0))).max(1e-4);
     const blade = smoothstep(halfW, halfW.mul(0.7), a.abs()).mul(smoothstep(0.13, 0.21, r)).mul(smoothstep(len.add(0.02), len.sub(0.06), r));
     const vein = smoothstep(0.35, 0.0, a.abs()).mul(0.25).add(0.75);                      // a brighter midrib
     const petal = blade.mul(vein);

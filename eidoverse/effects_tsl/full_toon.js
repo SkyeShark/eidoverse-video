@@ -91,7 +91,8 @@
                 };
                 const sampleN = (off) => {
                     if (!normalTex) return vec3(0, 0, 1);
-                    return normalTex.sample(uvNode.add(off.mul(px))).rgb.mul(2).sub(1);
+                    // sceneNormal arrives DECODED to [-1,1] (render_scene wraps the MRT in colorToDirection)
+                    return normalTex.sample(uvNode.add(off.mul(px))).rgb;
                 };
 
                 const dC = max(linDepth(uvNode), 0.0001);

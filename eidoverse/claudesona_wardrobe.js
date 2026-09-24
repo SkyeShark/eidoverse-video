@@ -87,7 +87,10 @@ export const WARDROBE = {
 const byName = (root, name) => root.getObjectByName(name) || root.getObjectByName(name.replace(/\s+/g, '_'));
 
 export function makeWardrobe(THREE, vrm) {
-    const { positionGeometry, vec3, mix, step, fract, floor, abs, smoothstep, clamp, attribute, uniformArray, int, atan, float, hash } = THREE;
+    const { positionGeometry, vec3, mix, step, fract, floor, abs, smoothstep, clamp, attribute, uniformArray, int, atan, float, hash, uint } = THREE;
+    // exact integer cell hash (uint arithmetic): an f32 seed like x + y*1291 + z*7919 sits far above 2^24 and
+    // rounds runs of neighbouring cells onto one value (flecks became dashes). Cells must be non-negative.
+    const hashCell = (c) => hash(c.x.toUint().mul(uint(1597334677)).bitXor(c.y.toUint().mul(uint(3812015801))).bitXor(c.z.toUint().mul(uint(2654435769))));
     const layers = {};
     vrm.scene.traverse((o) => {
         const key = OPTIONAL.find((n) => o.name === n || o.name === `${n}_1` || o.name.startsWith(`${n}.`));
@@ -174,7 +177,7 @@ export function makeWardrobe(THREE, vrm) {
             const dir = fract(floor(P.x.div(s)).mul(0.5)).mul(4).sub(1);             // column parity -> -1 / +1
             const tw = fract(P.y.add(P.x.mul(dir)).div(s * 0.5));
             const cell = floor(P.mul(420.0)).add(10000.0);
-            const fl = step(0.9, hash(cell.x.add(cell.y.mul(1291.0)).add(cell.z.mul(7919.0))));
+            const fl = step(0.9, hashCell(cell));
             return mix(mix(a, b, smoothstep(0.25, 0.75, abs(tw.sub(0.5)).mul(2))), v3(p.c || p.b), fl.mul(0.55));
         }
         if (p.pattern === 'gradient') return mix(a, b, clamp(P.y.sub(0.85).div(0.55), 0.0, 1.0));
@@ -183,7 +186,7 @@ export function makeWardrobe(THREE, vrm) {
             const wx = smoothstep(0.08, 0.5, abs(fract(P.x.div(s)).sub(0.5)));
             const wy = smoothstep(0.08, 0.5, abs(fract(P.y.div(s)).sub(0.5)));
             const cell = floor(P.mul(150.0)).add(10000.0);
-            const slub = hash(cell.x.add(cell.y.mul(733.0)).add(cell.z.mul(3571.0)));
+            const slub = hashCell(cell);
             return mix(a, b, wx.mul(0.35).add(wy.mul(0.35)).add(slub.mul(0.3)));
         }
         return a;
