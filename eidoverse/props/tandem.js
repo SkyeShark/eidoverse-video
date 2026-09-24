@@ -202,7 +202,10 @@ function spokeMaterial(THREE, base, uSweep) {
     // at rest: bright nickel wire; smeared: a soft haze that shades like the wheel disc (a smeared
     // cylinder keeps its wire normals, which glint as zigzag streaks)
     const smear = T.smoothstep(0.01, 0.08, T.abs(uSweep));
-    const axle = T.transformNormalToView(T.vec3(0, 0, 1));
+    // the axle on the wire's own side: a fixed +Z axle points away from a camera on the bike's left (-Z), where
+    // mix(wireNormal, axle) passes through ~0 and normalize() returns NaN/sparkle
+    const axle0 = T.transformNormalToView(T.vec3(0, 0, 1));
+    const axle = axle0.mul(T.select(T.dot(T.normalViewGeometry, axle0).greaterThanEqual(0.0), T.float(1.0), T.float(-1.0)));
     m.normalNode = T.normalize(T.mix(T.normalViewGeometry, axle, smear));
     m.roughnessNode = T.mix(T.float(0.2), T.float(0.62), smear);
     m.metalnessNode = T.mix(T.float(1.0), T.float(0.45), smear);

@@ -20,7 +20,9 @@ verify the right thing was downloaded and which way it faces.
 LOCAL models (custom_models / assets/models) are referenced IN PLACE — the
 match prints the canonical absolute path + a cached preview, and is NEVER
 copied into the caller's cwd (copying multi-MB meshes per work folder bled the
-disk). Downloaded online models still land in cwd as model_embedded.gltf.
+disk). Downloaded online models land in cwd: Poly Haven as
+<model_id>_embedded.gltf, NASA / Smithsonian / NIH 3D as <title>.glb — each
+with a <name>.license.json sidecar (source, id, url, licence, title, author).
 
 Usage:
     python3 fetch_model.py "fire hydrant"
@@ -691,7 +693,29 @@ window.renderFrame = function(t) {
 """
 
 
+def _find_deno():
+    """Host deno binary: PATH first, then the default installer location
+    (same resolution as eido.py's find_deno)."""
+    p = shutil.which("deno")
+    if p:
+        return p
+    cand = os.path.expanduser("~/.deno/bin/deno.exe" if os.name == "nt" else "~/.deno/bin/deno")
+    return cand if os.path.isfile(cand) else None
+
+
 def _render_preview(model_path, dims=None):
+    """Best-effort preview: never raises. A missing deno/node/ffmpeg, a
+    timeout, or any renderer crash returns None — the downloaded model is
+    still delivered (callers must not treat a preview failure as a failed
+    download)."""
+    try:
+        return _render_preview_impl(model_path, dims)
+    except Exception as e:
+        print(f"_render_preview: skipped ({type(e).__name__}: {e}) — model is still usable")
+        return None
+
+
+def _render_preview_impl(model_path, dims=None):
     """Render a 512x512 preview of the model.
 
     Prefers the Deno + WebGPU eidoverse renderer (render_scene.mjs)
@@ -721,6 +745,10 @@ def _render_preview(model_path, dims=None):
                      "eidoverse", "render_scene.mjs"),
     ]
     deno_renderer = next((p for p in deno_renderer_paths if os.path.exists(p)), None)
+    deno_bin = _find_deno()
+    if deno_renderer is not None and deno_bin is None:
+        print("_render_preview: deno not found on PATH or ~/.deno/bin — skipping WebGPU preview")
+        deno_renderer = None
 
     tmp = tempfile.mkdtemp(prefix="fetch_preview_")
     try:
@@ -756,18 +784,20 @@ def _render_preview(model_path, dims=None):
             with open(config_path, "w") as f:
                 json.dump(config, f)
 
-            # Run deno from /workspace so the engine's relative paths
-            # (HELPER_MODULES list, render_common.mjs import) resolve.
+            # Run deno from the REPO ROOT (/workspace in the container) so
+            # the engine's cwd-relative 'eidoverse/<helper>.js' HELPER_MODULES
+            # paths resolve (from repo/eidoverse they would all miss).
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(deno_renderer)))
             proc = subprocess.run(
                 [
-                    "deno", "run",
+                    deno_bin, "run",
                     "--allow-all",
                     "--unstable-webgpu",
                     "--node-modules-dir=auto",
                     deno_renderer,
                     config_path,
                 ],
-                cwd="/workspace" if os.path.isdir("/workspace") else os.path.dirname(deno_renderer),
+                cwd=repo_root,
                 capture_output=True,
                 text=True,
                 timeout=180,
@@ -1111,10 +1141,12 @@ def _nih3d_download_entry(entry_id, label):
 
     # Collect every GLB candidate across all submissions/runs
     candidates = []  # (priority, sub_id, run_id, file_id, filename)
+    sub_meta = {}    # submissionId -> metadata (per-submission licence/author)
     for sub in submissions:
         sub_id = sub.get("submissionId")
         # Pull a friendly title from the latest submission with metadata
         md = sub.get("metadata") or {}
+        sub_meta[sub_id] = md
         if md.get("title"):
             title = md["title"]
         for run in sub.get("workflowRuns") or []:
@@ -1144,6 +1176,14 @@ def _nih3d_download_entry(entry_id, label):
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     pri, sub_id, run_id, file_id, fname = candidates[0]
+    md = sub_meta.get(sub_id) or {}
+    _LAST_LICENSE.update({
+        "id": entry_id, "title": md.get("title") or title,
+        "author": (md.get("userInfo") or {}).get("createdBy"),
+        "url": f"https://3d.nih.gov/entries/{entry_id}",
+        "license": md.get("license") or "unknown (NIH 3D submission lists none; check the entry page)",
+        "submission_id": sub_id,
+    })
 
     out_name = _safe_filename(title) + ".glb"
     download_url = f"https://3d.nih.gov/api/submissions/{sub_id}/runs/{run_id}/output-files/{file_id}"
@@ -1838,47 +1878,64 @@ def _deliver_polyhaven(model_id, resolution="1k"):
 
     gltf_data = files["gltf"][resolution]["gltf"]
     main_url = gltf_data["url"]
+    title, author = model_id, None
+    try:
+        info = requests.get(f"https://api.polyhaven.com/info/{model_id}", timeout=10).json()
+        title = info.get("name") or model_id
+        author = ", ".join((info.get("authors") or {}).keys()) or None
+    except Exception:
+        pass
+    _LAST_LICENSE.update({
+        "id": model_id, "title": title, "author": author,
+        "url": f"https://polyhaven.com/a/{model_id}",
+        "license": "CC0-1.0", "license_url": "https://polyhaven.com/license",
+    })
     main_fname = main_url.split("/")[-1]
 
-    model_dir = f"/tmp/{model_id}"
-    os.makedirs(model_dir, exist_ok=True)
-
-    print(f"Downloading {model_id} at {resolution}...")
-    resp = requests.get(main_url, timeout=60)
-    with open(f"{model_dir}/{main_fname}", "wb") as f:
-        f.write(resp.content)
-
-    for fname, fdata in gltf_data.get("include", {}).items():
-        filepath = f"{model_dir}/{fname}"
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        resp = requests.get(fdata["url"], timeout=60)
-        with open(filepath, "wb") as f:
+    # Private temp dir (never a shared /tmp/<id>: on Windows that became
+    # C:/tmp/<id> and a half-finished earlier run's files were reused).
+    model_dir = tempfile.mkdtemp(prefix=f"polyhaven_{_safe_filename(model_id)}_")
+    try:
+        print(f"Downloading {model_id} at {resolution}...")
+        resp = requests.get(main_url, timeout=60)
+        resp.raise_for_status()
+        with open(os.path.join(model_dir, main_fname), "wb") as f:
             f.write(resp.content)
-        print(f"  {fname} ({len(resp.content)} bytes)")
 
-    with open(f"{model_dir}/{main_fname}") as f:
-        gltf = json.load(f)
+        for fname, fdata in gltf_data.get("include", {}).items():
+            filepath = os.path.join(model_dir, fname)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            resp = requests.get(fdata["url"], timeout=60)
+            resp.raise_for_status()   # never embed an HTML error page as a texture/buffer
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            print(f"  {fname} ({len(resp.content)} bytes)")
 
-    for buf in gltf.get("buffers", []):
-        uri = buf.get("uri")
-        if uri and not uri.startswith("data:"):
-            with open(f"{model_dir}/{uri}", "rb") as f:
-                data = base64.b64encode(f.read()).decode()
-            buf["uri"] = f"data:application/octet-stream;base64,{data}"
+        with open(os.path.join(model_dir, main_fname), encoding="utf-8") as f:
+            gltf = json.load(f)
 
-    for img in gltf.get("images", []):
-        uri = img.get("uri")
-        if uri and not uri.startswith("data:"):
-            ext = uri.rsplit(".", 1)[-1].lower()
-            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(
-                ext, "application/octet-stream"
-            )
-            with open(f"{model_dir}/{uri}", "rb") as f:
-                data = base64.b64encode(f.read()).decode()
-            img["uri"] = f"data:{mime};base64,{data}"
+        for buf in gltf.get("buffers", []):
+            uri = buf.get("uri")
+            if uri and not uri.startswith("data:"):
+                with open(os.path.join(model_dir, uri), "rb") as f:
+                    data = base64.b64encode(f.read()).decode()
+                buf["uri"] = f"data:application/octet-stream;base64,{data}"
+
+        for img in gltf.get("images", []):
+            uri = img.get("uri")
+            if uri and not uri.startswith("data:"):
+                ext = uri.rsplit(".", 1)[-1].lower()
+                mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(
+                    ext, "application/octet-stream"
+                )
+                with open(os.path.join(model_dir, uri), "rb") as f:
+                    data = base64.b64encode(f.read()).decode()
+                img["uri"] = f"data:{mime};base64,{data}"
+    finally:
+        shutil.rmtree(model_dir, ignore_errors=True)
 
     embedded_path = f"{_safe_filename(model_id)}_embedded.gltf"
-    with open(embedded_path, "w") as f:
+    with open(embedded_path, "w", encoding="utf-8") as f:
         json.dump(gltf, f)
     print(f"Done: {embedded_path} ({os.path.getsize(embedded_path)} bytes)")
 
@@ -1912,6 +1969,10 @@ def _deliver_nasa(ref, label=None):
             + requests.utils.quote(path) + "/" + requests.utils.quote(glb_entry["name"])
         )
         out_name = _safe_filename(name) + ".glb"
+        _LAST_LICENSE.update({
+            "id": path, "title": name, "author": "NASA", "url": raw_url,
+            "license": _NASA_LICENSE, "license_url": _NASA_LICENSE_URL,
+        })
         print(f"NASA: downloading {out_name}")
         dl = requests.get(raw_url, timeout=120, stream=True)
         if dl.status_code != 200:
@@ -1932,6 +1993,11 @@ def _deliver_nasa(ref, label=None):
         if not files:
             return None
         out_name = _safe_filename(ref.get("name") or "nasa_model") + ".glb"
+        _LAST_LICENSE.update({
+            "id": href, "title": ref.get("name"), "author": "NASA", "url": href,
+            "download_url": files[0],
+            "license": _NASA_LICENSE, "license_url": _NASA_LICENSE_URL,
+        })
         dl = requests.get(files[0], timeout=120, stream=True)
         if dl.status_code != 200:
             return None
@@ -1992,6 +2058,14 @@ def _deliver_smithsonian(ref):
         return 2
 
     normalized = sorted(set(normalized), key=_rank)
+    _LAST_LICENSE.update({
+        "id": cand.get("uuid") or cand.get("slug"), "title": title,
+        "author": "Smithsonian Institution", "url": cand["href"],
+        "license": ("unverified: Smithsonian 3D models are CC0 only when the object page marks "
+                    "them Open Access; otherwise the Smithsonian Terms of Use (non-commercial) "
+                    "apply. Check the usage conditions at the url before publishing."),
+        "license_url": "https://www.si.edu/termsofuse",
+    })
     if not normalized:
         print(f"Smithsonian: no GLB URLs found on detail page for {cand['slug']}")
         return None
@@ -2026,23 +2100,51 @@ def _deliver_smithsonian(ref):
     return None
 
 
+# Licence record for the download in flight: the per-source deliverers fill
+# it from whatever their API exposes; _deliver_candidate writes the sidecar.
+_LAST_LICENSE = {}
+_NASA_LICENSE = ("NASA media usage guidelines: generally not copyrighted in the US; "
+                 "no NASA endorsement may be implied; NASA insignia/logos are restricted")
+_NASA_LICENSE_URL = "https://www.nasa.gov/nasa-brand-center/images-and-media/"
+
+
+def _write_license_sidecar(out_path, source, info):
+    """Write <model>.license.json next to a downloaded model and print it."""
+    rec = {"source": source, "file": os.path.basename(out_path)}
+    rec.update({k: v for k, v in info.items() if v is not None})
+    rec.setdefault("license", "unknown")
+    rec["fetched"] = time.strftime("%Y-%m-%d")
+    side = os.path.splitext(out_path)[0] + ".license.json"
+    try:
+        with open(side, "w", encoding="utf-8") as f:
+            json.dump(rec, f, indent=2, ensure_ascii=False)
+        print(f"License: {rec['license']} -> {side}")
+    except OSError as e:
+        print(f"License: {rec['license']} (sidecar not written: {e})")
+    return side
+
+
 def _deliver_candidate(cand, resolution="1k"):
     src = cand["source"]
+    _LAST_LICENSE.clear()
+    out = None
     try:
         if src == "local":
             return _deliver_local_model(cand["ref"])
         if src == "polyhaven":
-            return _deliver_polyhaven(cand["ref"], resolution)
-        if src == "nih3d":
-            return _nih3d_download_entry(cand["ref"], cand.get("name") or cand["ref"])
-        if src == "nasa":
-            return _deliver_nasa(cand["ref"], cand.get("name"))
-        if src == "smithsonian":
-            return _deliver_smithsonian(cand["ref"])
+            out = _deliver_polyhaven(cand["ref"], resolution)
+        elif src == "nih3d":
+            out = _nih3d_download_entry(cand["ref"], cand.get("name") or cand["ref"])
+        elif src == "nasa":
+            out = _deliver_nasa(cand["ref"], cand.get("name"))
+        elif src == "smithsonian":
+            out = _deliver_smithsonian(cand["ref"])
     except Exception as e:
         print(f"[{src}] deliver error: {e}")
         return None
-    return None
+    if out and os.path.exists(out):
+        _write_license_sidecar(out, src, dict(_LAST_LICENSE))
+    return out
 
 
 _FIND_FUNCS = [

@@ -92,9 +92,12 @@
     function buildUnderwaterHook({ camera, opts }) {
         const {
             uniform, Fn, vec2, vec3, vec4, float, uv, sample,
-            length, exp, mix, clamp, sin, cos, abs, pow, max, min, dot,
+            length, exp, mix, clamp, sin, cos, abs, pow, max, min, dot, sign,
             screenUV,
         } = THREE;
+        // pow() of a negative base is NaN in WGSL (and NaN survives a mix weight of 0), so the
+        // even powers below are taken of |x| and the odd one keeps its sign explicitly.
+        const pow4 = (x) => { const x2 = x.mul(x); return x2.mul(x2); };
 
         const u = {
             time:        uniform(0),
@@ -161,13 +164,13 @@
                     const causticSky1 = caustic2D(vec2(p.x, p.y),         u.time);
                     const causticSky2 = caustic2D(vec2(p.x, p.y.mul(2.7)), u.time);
                     const causticSkyCol = u.shallowCol.mul(
-                        causticSky1.mul(0.3).add(causticSky2.mul(0.3)).mul(pow(p.y, 4)),
+                        causticSky1.mul(0.3).add(causticSky2.mul(0.3)).mul(pow4(p.y)),
                     );
                     const horizonCol = u.horizonCol;
                     const skyColor = mix(
                         skyBaseCol.add(causticSkyCol),
                         horizonCol,
-                        pow(float(1).sub(pow(rdy, 4)), 20),
+                        pow(float(1).sub(pow4(rdy)), 20),
                     );
 
                     // ----- Hit-plane pixels = scene surface — apply caustic + fog -----
@@ -195,9 +198,11 @@
                     // ----- God rays: 1D-caustic-driven streaks in screen space -----
                     // Reverted back to screen-space — anchoring to worldPos
                     // collapsed all rays into long aligned lines.
-                    const gr1 = pow(caustic1D(p.x.add(p.y.mul(0.08)).div(1.7).add(0.5), float(1.8), u.time.mul(0.65)), 10).mul(0.05);
-                    const gr2 = pow(caustic1D(sin(p.x), float(0.3), u.time.mul(0.7)), 9).mul(0.4);
-                    const gr3 = pow(caustic1D(cos(p.x.mul(2.3)), float(0.3), u.time.mul(1.3)), 4).mul(0.1);
+                    // caustic1D returns 1.17 - (c/5)^p, negative where c is large
+                    const gr1 = pow(abs(caustic1D(p.x.add(p.y.mul(0.08)).div(1.7).add(0.5), float(1.8), u.time.mul(0.65))), 10).mul(0.05);
+                    const c2 = caustic1D(sin(p.x), float(0.3), u.time.mul(0.7));
+                    const gr2 = sign(c2).mul(pow(abs(c2), 9)).mul(0.4);
+                    const gr3 = pow(abs(caustic1D(cos(p.x.mul(2.3)), float(0.3), u.time.mul(1.3))), 4).mul(0.1);
                     // p.y is negative at TOP in TSL postproc, positive at
                     // BOTTOM. (1 + p.y) → 0 at top, 2 at bottom — so the
                     // falloff zeros out at the water line and grows as the
@@ -308,11 +313,13 @@
     // AND adds real 3D bubble particles to the scene. The agent calls this
     // once. No waterY, no bounds, no per-effect knobs required.
     // ---------------------------------------------------------------------
-    function applyTo(opts) {
-        opts = opts || {};
-        const { scene, camera } = opts;
+    function applyTo(args) {
+        args = args || {};
+        const { scene, camera } = args;
         if (!scene) throw new Error('UnderwaterFX.applyTo(): opts.scene required');
         if (!camera) throw new Error('UnderwaterFX.applyTo(): opts.camera required');
+        // CustomEffectsDeno passes { scene, camera, opts }; a direct caller may pass the options flat.
+        const opts = args.opts ?? args;
 
         const built = buildUnderwaterHook({ camera, opts });
         const bubbles = createBubbles({

@@ -984,7 +984,9 @@
             // World speed (XZ-plane) actually achieved this frame
             const dxA = t2.x - this._lastX;
             const dzA = t2.z - this._lastZ;
-            this.speedActual = Math.sqrt(dxA*dxA + dzA*dzA) / dt;
+            // dt = 0 (a paused/duplicate frame) → 0/0 = NaN would flow into
+            // the gait timeScale; keep the last finite speed instead.
+            if (dt > 0) this.speedActual = Math.sqrt(dxA*dxA + dzA*dzA) / dt;
             this._lastX = t2.x;
             this._lastZ = t2.z;
 
@@ -1929,7 +1931,7 @@
 
             // ── 3. Vertical motion detection (ascending/descending) ──
             if (this._lastBodyY === null) this._lastBodyY = t2.y;
-            const bodyVelY = (t2.y - this._lastBodyY) / dt;
+            const bodyVelY = dt > 0 ? (t2.y - this._lastBodyY) / dt : 0;
             this._lastBodyY = t2.y;
             const ascending  = grounded && moving && bodyVelY >  this._ascendThreshold;
             const descending = grounded && moving && bodyVelY <  this._descendThreshold;
@@ -3474,7 +3476,7 @@
                 this.world.step();
                 const t2 = this.body.translation();
                 const dxA = t2.x - this._lastX, dzA = t2.z - this._lastZ;
-                this.speedActual = Math.hypot(dxA, dzA) / dt;
+                if (dt > 0) this.speedActual = Math.hypot(dxA, dzA) / dt;
                 this._lastX = t2.x; this._lastZ = t2.z;
                 this._feetWorld.set(t2.x, t2.y - this.halfHeight - this.hipY - this.vrmFootY, t2.z);
                 this.grounded = true;

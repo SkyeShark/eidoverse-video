@@ -160,7 +160,23 @@ export function installScenePlacement(THREE) {
         // floor's center (the "furniture blob"). 'centered' is still available
         // explicitly.
         const { xz = 'auto', yOffset = 0, xzOffset = null, grid = 7, surfaceEps = 0.0006 } = opts;
-        const tBox = tightBox(target);
+        // The target may CONTAIN obj (placeOn(obj, scene) / a group holding
+        // obj): obj's own subtree must never be its own support, or the rays
+        // hit obj and it climbs by its own height every call.
+        const tMeshes = collectMeshes(target, [obj]);
+        let tBox;
+        if (isAncestor(target, obj)) {
+            target.updateWorldMatrix(true, true);
+            tBox = new THREE.Box3();
+            for (const m of tMeshes) {
+                if (m.geometry.boundingBox) _tmpBox.copy(m.geometry.boundingBox).applyMatrix4(m.matrixWorld);
+                else _tmpBox.setFromObject(m);
+                tBox.union(_tmpBox);
+            }
+            if (tBox.isEmpty()) { console.warn('[placeOn] target has no surfaces besides obj itself'); return false; }
+        } else {
+            tBox = tightBox(target);
+        }
         let x, z;
         if (Array.isArray(xz)) {
             x = xz[0]; z = xz[1];
@@ -179,7 +195,6 @@ export function installScenePlacement(THREE) {
         if (Array.isArray(xzOffset)) { x += xzOffset[0]; z += xzOffset[1]; }
         // Sample the target surface across the object's whole footprint (not a
         // single point) and seat on the highest support so nothing sinks in.
-        const tMeshes = collectMeshes(target);
         const support = supportYUnderFootprint(obj, tMeshes, x, z, tBox.max.y + 100, grid);
         if (!support) { console.warn('[placeOn] no surface under footprint at', x, z); return false; }
         const oBox = tightBox(obj);
@@ -457,11 +472,16 @@ export function installScenePlacement(THREE) {
         obj.updateWorldMatrix(true, true);
         for (const g of list) if (g && g.updateWorldMatrix) g.updateWorldMatrix(true, true);
         const meshes = [];
-        for (const g of list) for (const m of collectMeshes(g)) meshes.push(m);
+        // exclude obj's own subtree: a ground list holding the scene (or a
+        // group containing obj) otherwise makes obj its own ground
+        for (const g of list) for (const m of collectMeshes(g, [obj])) meshes.push(m);
         if (!meshes.length) { console.warn('[snapToGround] no ground meshes provided'); return false; }
         const oBox = tightBox(obj);
-        const x = obj.position.x;
-        const z = obj.position.z;
+        // WORLD xz of obj's origin: obj.position is parent-local, so under an
+        // offset parent the rays were cast at the wrong spot.
+        const wPos = obj.getWorldPosition(new THREE.Vector3());
+        const x = wPos.x;
+        const z = wPos.z;
         // below: start at the object's current bbox-bottom + a hair, so the hit
         // is the board directly under it (higher boards are above the ray origin
         // and never intersected). Otherwise start high → topmost surface.
@@ -851,7 +871,12 @@ export function installScenePlacement(THREE) {
             const r = e.o;
             if (r.userData?.noFacingCheck) continue;
             let textured = false, exempt = !!(r.userData?.allowIntersect || r.userData?.noClippingCheck);
+            // A character is never a display panel: a VRM's skinned parts
+            // (Body / Tail / Cloth — bind-pose boxes, thin in one axis) each
+            // read as a textured slab and "interpenetrate" each other.
+            for (let p = r; p; p = p.parent) if (p.userData?.vrm) exempt = true;
             r.traverse((o) => {
+                if (o.isSkinnedMesh) exempt = true;
                 if (o.userData?.allowIntersect || o.userData?.noClippingCheck) exempt = true;
                 const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
                 for (const m of mats) if (m && m.map) textured = true;

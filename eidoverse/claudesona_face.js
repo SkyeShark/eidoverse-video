@@ -117,7 +117,17 @@ export function makeFaceTrack(TL, { sectionBase = {}, lineCues = [], closeAfterL
     const lastWord = (TL.captions || []).length ? Math.max(...TL.captions.map((c) => c.t1)) : Infinity;
     return {
         at(t) {
-            const sec = sections.find((s) => t >= s.t0 && t < s.t1) || sections[sections.length - 1];
+            // inside a section → it; before the first → the FIRST (not the
+            // last); in a gap or after the end → the latest one already begun
+            let sec = sections.find((s) => t >= s.t0 && t < s.t1);
+            if (!sec && sections.length) {
+                let prev = null, first = sections[0];
+                for (const s of sections) {
+                    if (s.t0 < first.t0) first = s;
+                    if (s.t0 <= t && (!prev || s.t0 >= prev.t0)) prev = s;
+                }
+                sec = prev || first;
+            }
             const f = { ...((sec && sectionBase[sec.name]) || {}) };
             for (const c of cues) {
                 const w = smooth(c.t0 - 0.25, c.t0 + 0.4, t) * (1 - smooth(c.t1 + 0.3, c.t1 + 0.9, t));
@@ -127,7 +137,7 @@ export function makeFaceTrack(TL, { sectionBase = {}, lineCues = [], closeAfterL
             }
             if (closeAfterLast) {
                 const dusk = smooth(lastWord - 3.5, lastWord + 1.5, t);
-                if (dusk > 0) { f.soft = Math.max(f.soft || 0, 0.92 * dusk); f.smile = Math.max(f.smile || 0, 0.35); }
+                if (dusk > 0) { f.soft = Math.max(f.soft || 0, 0.92 * dusk); f.smile = Math.max(f.smile || 0, 0.35 * dusk); }
             }
             const out = {};
             for (const [k, v] of Object.entries(f)) {

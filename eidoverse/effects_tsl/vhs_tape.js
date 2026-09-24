@@ -38,6 +38,13 @@
 
         const u = {
             time:        uniform(0),
+            // The sin-hash below loses precision once its argument grows (311.7 * time*10 passes 1e7
+            // after ~1 h and rows collapse into bands), so the shader never sees raw time: tPhase wraps it
+            // at 100 s (60 whole crease periods of 5/3 s, so the crease sweep stays continuous) and tSeed
+            // adds a per-100 s salt so the noise does not repeat. Both are computed on the CPU in doubles;
+            // for t < 100 s they equal t, so early frames render exactly as before.
+            tPhase:      uniform(0),
+            tSeed:       uniform(0),
             intensity:   uniform(opts.intensity ?? 1.0),
             opacity:     uniform(opts.opacity ?? 1.0),
             iResolution: uniform(new THREE.Vector2(w, h)),
@@ -47,6 +54,9 @@
             uniforms: u,
             update(t) {
                 u.time.value = t;
+                const k = Math.floor(t / 100);
+                u.tPhase.value = t - k * 100;
+                u.tSeed.value = u.tPhase.value + ((k * 61.8034) % 100);
             },
             setResolution(width, height) {
                 u.iResolution.value.set(width, height);
@@ -73,7 +83,7 @@
 
                 return Fn(() => {
                     const uvBase = uv();
-                    const time = u.time;
+                    const time = u.tSeed;          // hash seed time (bounded)
                     const intensity = u.intensity;
                     const iRes = u.iResolution;
                     const origIn = colorTex.sample(uvBase);
@@ -146,7 +156,7 @@
 
                     // Tape crease — sine-banded corrupted rows
                     const tcRand = v2random(time.mul(vec2(0.67, 0.59)));
-                    const tcAngle = uvn.y.mul(8).sub(time.add(tcRand.mul(0.14)).mul(3.769911));
+                    const tcAngle = uvn.y.mul(8).sub(u.tPhase.add(tcRand.mul(0.14)).mul(3.769911));
                     const tcPhase = smoothstep(0.9, 0.96, sin(tcAngle));
                     const tcNoise = smoothstep(0.3, 1.0, v2random(vec2(uvn.y.mul(4.77), time)));
                     const tc = tcPhase.mul(tcNoise);
@@ -201,8 +211,9 @@
         };
     }
 
-    function applyTo(opts) {
-        opts = opts || {};
+    function applyTo(args) {
+        // CustomEffectsDeno passes { scene, camera, opts }; a direct caller may pass the options flat.
+        const opts = (args && args.opts) ?? args ?? {};
         const built = buildVHSTapeHook({ opts });
 
         globalThis._autoEnhanceColorHook = (colorOut, sceneDepth, sceneNormal, sceneMR) => {

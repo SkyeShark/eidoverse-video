@@ -24,7 +24,7 @@
     function buildCRTHook({ opts }) {
         const {
             uniform, Fn, vec2, vec3, vec4, float, uv,
-            sin, mod, mix, clamp, pow, step, abs, floor,
+            sin, mod, mix, clamp, pow, step, abs, floor, max,
         } = THREE;
 
         const w = opts.width  ?? globalThis.WIDTH  ?? 1920;
@@ -85,7 +85,9 @@
                     const vig = float(16).mul(cuv.x).mul(cuv.y)
                                 .mul(float(1).sub(cuv.x))
                                 .mul(float(1).sub(cuv.y));
-                    col.assign(col.mul(vec3(pow(vig, 0.3))));
+                    // vig < 0 outside the barrel (one of the four factors goes negative) — pow of a
+                    // negative base is NaN in WGSL, and NaN * 0 (the off-screen guard below) stays NaN.
+                    col.assign(col.mul(vec3(pow(max(vig, 0.0), 0.3))));
 
                     // ---- Phosphor green tint + brightness boost ----
                     col.assign(col.mul(vec3(0.95, 1.05, 0.95)).mul(2.8));
@@ -120,8 +122,9 @@
         };
     }
 
-    function applyTo(opts) {
-        opts = opts || {};
+    function applyTo(args) {
+        // CustomEffectsDeno passes { scene, camera, opts }; a direct caller may pass the options flat.
+        const opts = (args && args.opts) ?? args ?? {};
         const built = buildCRTHook({ opts });
 
         globalThis._autoEnhanceColorHook = (colorOut, sceneDepth, sceneNormal, sceneMR) => {

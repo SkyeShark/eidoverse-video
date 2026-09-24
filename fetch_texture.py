@@ -225,34 +225,52 @@ def texturecan_fetch(tid, detail_path, res):
     print(f"  downloading {os.path.basename(link)} …")
     r = requests.get(TC_BASE + link, headers=_TC_HEADERS, timeout=180)
     r.raise_for_status()
-    # zip members are matched by substring — TextureCan naming varies a bit
-    part_to_key = [
-        ("normal_opengl", "normal"), ("normal_gl", "normal"),
-        ("normal_directx", "normal_dx"), ("normal_dx", "normal_dx"),
-        ("normal", "normal"),
-        ("basecolor", "diff"), ("albedo", "diff"), ("color", "diff"), ("diff", "diff"),
-        ("rough", "rough"),
-        ("ao", "ao"), ("ambient", "ao"), ("occlusion", "ao"),
-        ("metal", "metal"),
-        ("height", "displacement"), ("disp", "displacement"),
-        ("opacity", "opacity"), ("alpha", "opacity"),
-        ("emissi", "emissive"),
-    ]
+    # Members are named <set_id>_<map token>_<res>.<ext>, e.g.
+    # tiles_0128_normal_opengl_1k.png. Match the TOKEN after the set-id prefix
+    # EXACTLY — substring matching made the result depend on zip order (a
+    # metal_0012_height map was claimed as "metal", a *_preview.jpg or an
+    # __MACOSX/._* AppleDouble stub could be claimed as a map).
+    token_to_key = {
+        "color": "diff", "basecolor": "diff", "base_color": "diff", "albedo": "diff",
+        "diffuse": "diff", "diff": "diff",
+        "roughness": "rough", "rough": "rough",
+        "ao": "ao", "ambientocclusion": "ao", "ambient_occlusion": "ao", "occlusion": "ao",
+        "metallic": "metal", "metalness": "metal", "metal": "metal",
+        "height": "displacement", "displacement": "displacement", "disp": "displacement",
+        "normal_opengl": "normal", "normal_gl": "normal", "normal": "normal",
+        "normal_directx": "normal_dx", "normal_dx": "normal_dx",
+        "opacity": "opacity", "alpha": "opacity",
+        "emissive": "emissive", "emission": "emissive",
+    }
+    # the set id is the zip's basename minus "_<res>_<code>.zip"
+    set_id = re.sub(r"_\d+k(_[^_]+)?$", "", os.path.splitext(os.path.basename(link))[0], flags=re.I).lower()
     prefix = tid.replace(":", "_")
     out_paths = {}
     with zipfile.ZipFile(io.BytesIO(r.content)) as z:
         for member in z.namelist():
-            stem, ext = os.path.splitext(os.path.basename(member))
+            base = os.path.basename(member)
+            if member.startswith("__MACOSX/") or base.startswith("._"):
+                continue
+            stem, ext = os.path.splitext(base)
             if ext.lower() not in (".jpg", ".jpeg", ".png"):
                 continue
             lstem = stem.lower()
-            for part, key in part_to_key:
-                if part in lstem and key not in out_paths:
-                    out_filename = f"{prefix}_{key}{ext.lower()}"
-                    with z.open(member) as src, open(out_filename, "wb") as dst:
-                        dst.write(src.read())
-                    out_paths[key] = os.path.abspath(out_filename)
-                    break
+            if set_id and lstem.startswith(set_id + "_"):
+                token = lstem[len(set_id) + 1:]
+            else:   # fall back to "<name>_<digits>_" as the id prefix
+                m = re.match(r".*?_\d{3,}_(.+)$", lstem)
+                token = m.group(1) if m else lstem
+            token = re.sub(r"_\d+k$", "", token)
+            key = token_to_key.get(token)
+            if key is None:
+                continue   # preview / unknown map
+            # an explicit OpenGL normal beats a generic "normal"
+            if key in out_paths and not (key == "normal" and token != "normal"):
+                continue
+            out_filename = f"{prefix}_{key}{ext.lower()}"
+            with z.open(member) as src, open(out_filename, "wb") as dst:
+                dst.write(src.read())
+            out_paths[key] = os.path.abspath(out_filename)
     return out_paths
 
 

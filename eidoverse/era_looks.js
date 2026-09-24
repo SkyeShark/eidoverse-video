@@ -587,8 +587,9 @@ export async function registerEraLooks() {
                 });
 
                 // --- film layers
-                const seed = pix.x.add(pix.y.mul(4099.0)).add(u.frame.mul(7919.0));
-                outc.mulAssign(float(1.0).add(hash(seed).sub(0.5).mul(u.grain.add(u.riso.mul(0.6))).mul(0.45)));
+                // exact integer hash: the old f32 seed (x + y*4099 + frame*7919) passed 2^24 after ~2000 frames
+                // and rounded neighbouring pixels onto one value (grain clumped into streaks)
+                outc.mulAssign(float(1.0).add(hash3(pix.x, pix.y, u.frame).sub(0.5).mul(u.grain.add(u.riso.mul(0.6))).mul(0.45)));
                 outc.mulAssign(float(1.0).add(hash(u.frame.mul(13.0).add(7.0)).sub(0.5).mul(u.flicker).mul(0.22)));
                 const sl = abs(fract(uv0.y.mul(H).mul(0.5)).sub(0.5)).mul(2.0);
                 outc.mulAssign(float(1.0).sub(u.scan.mul(0.38).mul(sl)));

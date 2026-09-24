@@ -272,7 +272,10 @@ export async function build(ctx) {
     {
         const P = positionLocal;
         const n = mx_fractal_noise_float(P.mul(2.5), 3, 2.0, 0.5).mul(0.5).add(0.5);
-        const pane = hash(floor(P.z.mul(1.8)).add(floor(P.y.mul(1.9)).mul(17.0)).add(floor(P.x.mul(0.2)).mul(101.0)));
+        // hash() takes its seed as uint: a negative seed clamps to 0, so every pane with one lit alike.
+        // Wrap negatives into [2^22, 2^23) (exact in f32; positive seeds keep their value).
+        const paneSeed = floor(P.z.mul(1.8)).add(floor(P.y.mul(1.9)).mul(17.0)).add(floor(P.x.mul(0.2)).mul(101.0));
+        const pane = hash(paneSeed.add(T.select(paneSeed.lessThan(0.0), float(4194304.0), float(0.0))));
         glassMat.colorNode = vec3(0.02, 0.025, 0.03);
         glassMat.roughnessNode = float(0.12).add(n.mul(0.3));
         glassMat.metalnessNode = float(0);

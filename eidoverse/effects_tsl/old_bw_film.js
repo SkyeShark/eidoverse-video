@@ -22,7 +22,7 @@
     function buildOldBWFilmHook({ opts }) {
         const {
             uniform, Fn, vec2, vec3, vec4, float, uv,
-            sin, cos, mod, mix, clamp, pow, step, smoothstep, fract, dot, floor,
+            sin, cos, mod, mix, clamp, pow, step, smoothstep, fract, dot, floor, hash, uint,
         } = THREE;
 
         const w = opts.width  ?? globalThis.WIDTH  ?? 1920;
@@ -56,14 +56,16 @@
                     const v2random = (p) =>
                         fract(sin(p.x.mul(127.1).add(p.y.mul(311.7))).mul(43758.5453));
                     // hash22: 2-channel hash, returns vec2 in [-1,+1] for
-                    // simplex gradient lookup at lattice corners.
+                    // simplex gradient lookup at lattice corners. The lattice
+                    // corner is an integer (the dirt lookup runs up to ~2e4
+                    // cells out), so it is hashed exactly in uint arithmetic —
+                    // a sin-hash here took arguments of ~1e7, far past f32
+                    // precision. +65536 keeps the corner non-negative for toUint.
                     const hash22 = (p) => {
-                        const q = vec2(
-                            p.x.mul(127.1).add(p.y.mul(311.7)),
-                            p.x.mul(269.5).add(p.y.mul(183.3)),
-                        );
-                        return fract(vec2(sin(q.x), sin(q.y)).mul(43758.5453))
-                            .mul(2).sub(1);
+                        const ux = p.x.add(65536).toUint(), uy = p.y.add(65536).toUint();
+                        const hx = hash(ux.mul(uint(1597334677)).bitXor(uy.mul(uint(3812015801))));
+                        const hy = hash(ux.mul(uint(2654435769)).bitXor(uy.mul(uint(2246822519))));
+                        return vec2(hx, hy).mul(2).sub(1);
                     };
                     // simplex2D: skewed-triangular noise, returns roughly
                     // [-1,+1]. Cells are NOT axis-aligned (tilted 30°), so
@@ -212,8 +214,9 @@
         };
     }
 
-    function applyTo(opts) {
-        opts = opts || {};
+    function applyTo(args) {
+        // CustomEffectsDeno passes { scene, camera, opts }; a direct caller may pass the options flat.
+        const opts = (args && args.opts) ?? args ?? {};
         const built = buildOldBWFilmHook({ opts });
 
         globalThis._autoEnhanceColorHook = (colorOut, sceneDepth, sceneNormal, sceneMR) => {

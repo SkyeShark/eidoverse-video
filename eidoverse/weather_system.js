@@ -1612,7 +1612,14 @@
                 if (c.cloud)  COLOR.cloud  = asRGB(c.cloud,  COLOR.cloud);
                 if (c.sun)    COLOR.sun    = asRGB(c.sun,    COLOR.sun);
                 if (c.shield) COLOR.shield = asRGB(c.shield, COLOR.shield);
-                sky?.setColors?.({ cloud: COLOR.cloud, sun: COLOR.sun, shield: COLOR.shield });
+                // Forward ONLY the channels this call named: forwarding every
+                // channel re-sent this module's [1,1,1] defaults and wiped
+                // tints set on the sky directly (api.setColors({ cloud })).
+                const fwd = {};
+                if (c.cloud)  fwd.cloud  = COLOR.cloud;
+                if (c.sun)    fwd.sun    = COLOR.sun;
+                if (c.shield) fwd.shield = COLOR.shield;
+                if (Object.keys(fwd).length) sky?.setColors?.(fwd);
                 return { ...COLOR };
             },
             getColors() { return { ...COLOR }; },
@@ -1695,7 +1702,10 @@
             hemiDim() {
                 const ordinary = 0.5 + (state.def.sunDim ?? 1) * 0.5;
                 const target = state.def.hemiDim ?? ordinary;
-                return Math.max(0.08, 1 - (1 - target) * state.k);
+                const amount = Number.isFinite(state.k)
+                    ? Math.max(0, Math.min(1, state.k))
+                    : 0;
+                return Math.max(0.08, 1 - (1 - target) * amount);
             },
             wrapMaterial, wrapScene,
             // Every pooled weather mesh, for boot-time pipeline warmup. These

@@ -25,6 +25,10 @@
 
         const u = {
             time:       uniform(0),
+            // bounded hash seed (speed*t wrapped at 1000 + a per-wrap salt, CPU doubles): the sin-hash
+            // argument 531.7*speed*t otherwise grows without bound and the noise quantizes in long videos.
+            // Equals speed*t below 1000 (100 s at the default speed), so early frames are unchanged.
+            seedT:      uniform(0),
             speed:      uniform(opts.speed     ?? 10.0),
             amplitude:  uniform(opts.amplitude ?? 0.2),
             opacity:    uniform(opts.opacity   ?? 1.0),
@@ -46,7 +50,11 @@
 
         return {
             uniforms: u,
-            update(t) { u.time.value = t; },
+            update(t) {
+                u.time.value = t;
+                const s = u.speed.value * t, k = Math.floor(s / 1000);
+                u.seedT.value = s - k * 1000 + ((k * 618.034) % 1000);
+            },
             hook(colorIn) {
                 const colorTex = THREE.convertToTexture(colorIn);
                 return Fn(() => {
@@ -56,8 +64,8 @@
                     // Single noise sample per frame (uv is whole-frame
                     // constant, advancing in time).
                     const noiseSeed = vec2(
-                        u.speed.mul(u.time),
-                        u.speed.mul(u.time).mul(2.0).div(25.0),
+                        u.seedT,
+                        u.seedT.mul(2.0).div(25.0),
                     );
                     const noise = hash4(noiseSeed);
                     const shift = vec4pow(noise, 8.0).mul(

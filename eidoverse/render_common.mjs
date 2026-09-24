@@ -21,6 +21,32 @@
 
 import { DOMParser } from "jsr:@b-fuze/deno-dom";
 
+// Hardware adapter ≠ NVIDIA: an AMD/Intel/Apple GPU used to get h264_nvenc
+// and ffmpeg died right after setup. Probe once per process: h264_nvenc must
+// be LISTED by `ffmpeg -encoders` AND encode one tiny frame (a build can list
+// it with no NVIDIA driver present); otherwise libx264. ~0.3 s, only runs
+// when RENDER_CODEC is unset on a hardware adapter.
+let defaultVideoCodec = 'h264_nvenc';
+
+async function _nvencUsable() {
+    const ff = Deno.env.get('FFMPEG_PATH') || 'ffmpeg';
+    try {
+        const list = await new Deno.Command(ff, {
+            args: ['-hide_banner', '-encoders'], stdout: 'piped', stderr: 'null',
+        }).output();
+        if (!new TextDecoder().decode(list.stdout).includes('h264_nvenc')) return false;
+        const test = await new Deno.Command(ff, {
+            args: ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+                   '-i', 'color=c=black:s=256x256:d=0.1', '-frames:v', '1',
+                   '-c:v', 'h264_nvenc', '-f', 'null', '-'],
+            stdout: 'null', stderr: 'null',
+        }).output();
+        return test.success;
+    } catch {
+        return false;
+    }
+}
+
 // --- Config ---
 
 export function loadConfig(configPath) {
@@ -114,6 +140,13 @@ export async function setupRenderer(width, height) {
 
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('No WebGPU adapter found');
+
+    // RENDER_CODEC wins; otherwise NVENC only when ffmpeg lists it AND a
+    // 1-frame test encode works (AMD/Intel/Apple GPUs used to fail right after setup).
+    if (!Deno.env.get('RENDER_CODEC')) {
+        defaultVideoCodec = (await _nvencUsable()) ? 'h264_nvenc' : 'libx264';
+        if (defaultVideoCodec === 'libx264') console.warn('[render_common] h264_nvenc unavailable on this machine/ffmpeg — encoding with libx264 (set RENDER_CODEC to override)');
+    }
     // Request 'core-features-and-limits' so Three.js's WebGPU backend doesn't
     // fall into compatibilityMode. Compat mode downgrades MRT (kills the
     // depth/normal channels GTAO/SSR need), restricts shader features, and
@@ -549,7 +582,7 @@ export function startFfmpegPipe(width, height, fps, outputPath, opts = {}) {
         '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-pix_fmt', 'bgra', '-s', `${width}x${height}`, '-r', String(fps),
         '-i', '-',
-        '-c:v', opts.codec || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_CODEC')) || 'h264_nvenc',
+        '-c:v', opts.codec || (typeof Deno !== 'undefined' && Deno.env.get('RENDER_CODEC')) || defaultVideoCodec,
         '-preset', opts.preset || 'fast',
         '-pix_fmt', 'yuv420p',
     ];
