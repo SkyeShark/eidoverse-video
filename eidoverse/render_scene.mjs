@@ -439,6 +439,14 @@ const VRMA_SLOTS = [
     // itself lowers/raises the body). Played via seatOn({transition:true}) /
     // standUp. stand_to_sit: hips Y 0.96->0.52, Z 0->-0.47 (sits down and back).
     'stand_to_sit', 'sit_to_stand',
+    // Performance — hand-authored singing/stage clips (128 BPM, one shared stance so any two crossfade without
+    // foot slide), made for the claudesona, playable on any VRM 1.0 humanoid. STATIONARY VRM only. `*_hold` loops
+    // start on the one-shot's last frame; `*_mirror` = the other hand. Source + manifest (beats, loop, use):
+    // assets/animations/performance_src/. See AGENTS.md (performance clips).
+    'stand_breathe', 'chorus_sway', 'sing_gesture_a', 'sing_gesture_a_mirror', 'sing_gesture_b', 'sing_open_arms',
+    'hand_to_heart', 'hand_to_heart_hold', 'head_bow', 'head_bow_hold', 'look_up_sky', 'look_up_sky_hold',
+    'phone_raise', 'phone_raise_hold', 'phone_raise_mirror', 'phone_raise_mirror_hold',
+    'wave_goodbye', 'wave_goodbye_mirror', 'bow_thanks',
 ];
 const vrmaSlotPaths = {};
 for (const slot of VRMA_SLOTS) {
@@ -3513,7 +3521,7 @@ if (status.success) {
         const probeBase = outputVideo.replace(/(\.[a-z0-9]+)$/i, '');
         const sel = picks.map((n) => `eq(n\\,${n})`).join('+');
         const p = new Deno.Command('ffmpeg', {
-            args: ['-y', '-loglevel', 'error', '-i', outputVideo, '-vf', `select=${sel}`, '-vsync', 'vfr', `${probeBase}_probe%d.png`],
+            args: ['-y', '-loglevel', 'error', '-i', outputVideo, '-vf', `select=${sel}`, '-fps_mode', 'vfr', `${probeBase}_probe%d.png`],
             stdout: 'null', stderr: 'piped',
         }).outputSync();
         if (p.code === 0) console.log(`[render_scene] probe frames: ${probeBase}_probe1..3.png — VIEW them before reporting this render done.`);

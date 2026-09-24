@@ -987,6 +987,14 @@ pick one** (same as fetched props):
   **The outfit is built in LAYERS** — mesh names `jacket`, `tie`, `shirt`, `pants`, `shoes`:
   hide layers to change the look (jacket + tie off = casual shirtsleeves):
   `vrm.scene.traverse(o => { if (o.name === 'jacket' || o.name === 'tie') o.visible = false; })`
+- `claude_suit_wardrobe.vrm` — the same claudesona carrying sixteen outfits
+  as hidden layers (a 1939 switchboard operator, a 1961 lab coat, 1980s
+  colour-blocking, a hoodie, a mourning coat, an 1890s cycling outfit and
+  more); `claude_suit_wardrobe_preview.jpg` shows them all. Dress it with
+  `claudesona_wardrobe.js` ("Outfits" below).
+  It is 31 MB against the suit's 11 MB, so cast `claude_suit.vrm` when the suit
+  is all the piece needs.
+
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is the primary model
 
 Any other `.vrm` you drop into `eidoverse/assets/vrms/` works the same
@@ -1211,53 +1219,92 @@ globalThis.renderFrame = async function (t) {
 ```
 
 **⚠️ `claude_suit.vrm` mouth is SPECIAL — drive raw morphs, not expressions.**
-The visible cat-smile is PAINTED on the face; the animatable mouth is a hidden
-black cavity revealed by the `show MMD mouth` shapekey. The expressionManager
-path above barely moves it (the expression binds under-drive the reveal) —
-voice over that mouth reads frozen. The render-verified recipe:
+painted on the face; the animatable mouth is a hidden cavity revealed by
+the `show MMD mouth` shapekey. The expressionManager path barely moves it —
+voice over that mouth reads frozen. `eidoverse/claudesona_face.js` packages
+the render-verified recipe (it works the same on `claude_suit_wardrobe.vrm`):
 
-1. Select the 3 face plates once at setup and write **raw
-   `morphTargetInfluences` inside `mesh.onBeforeRender`** (survives the
-   engine's VRM passes), `fill(0)` FIRST — leftover expression weights
-   otherwise hold the mouth shut. (`fill(0)` also kills auto-blink;
-   re-apply `Blink` yourself if you want it.)
+```js
+const { installSuitMouth, makeSuitMouth, makeFaceTrack, mergeMax } =
+  await import(new URL('claudesona_face.js', EIDOVERSE_DIR).href);
+const face = installSuitMouth(vrm);                // once, after load
+const mouth = makeSuitMouth({ inputMax: 0.35 });   // 0.35 for lipsync.py visemes, 1 for voicebox
+const feel = makeFaceTrack(TL, {                   // optional: feelings keyed to words
+  sectionBase: { chorus: { smile: 0.5 } },
+  lineCues: [[/goodbye/, { soft: 0.8, frown: 0.2 }]],
+});
+// renderFrame(t): the current viseme frame is { aa, ih, ou, ee, oh }
+face.set(mergeMax(mouth.update(t, visemes[Math.floor(t * visemeFps)]), feel.at(t)));
+```
+
+1. `installSuitMouth(vrm)` finds the three face plates and writes their raw
+   `morphTargetInfluences` in `onBeforeRender`. Writing at render time
+   survives the engine's VRM passes. It zeroes every morph first, because
+   leftover expression weights otherwise hold the mouth shut. Zeroing also
+   removes auto-blink, so the driver blinks for you. It returns
+   `{ plates, set(weights), weights }`.
+2. **The reveal is a threshold, not a fade.** The black cavity is a plate
+   pushed through the white face. Below about `show MMD mouth` 1.0 it stays
+   behind the face and only the painted line shows; above that it pops out
+   and grows. A viseme pose scaled by loudness crosses that line on every
+   consonant, so the black part blinks out mid-word. One film measured the
+   cavity visible for 71 of 255 sung seconds, with 716 on/off flips.
+   `makeSuitMouth` avoids that:
+   - It keeps one openness signal with a fast attack (30 ms) and a slow
+     release (110 ms).
+   - It opens above 0.18 and closes below 0.08, with hysteresis between.
+   - While open it holds the reveal at `reveal` (1.25) and scales only the
+     vowel's shape morphs, by `0.3 + 0.7 × openness`.
+   - It changes vowel only at a syllable dip, or when another vowel clearly
+     leads.
+
+   The cavity stays out through a phrase and closes at its end. The other
+   options are `attack`, `release`, `openAt`, `closeAt`, `switchDip`,
+   `switchLead` and `blinkEvery`. Blinks happen only while the mouth is
+   shut; `blinkEvery: 0` turns them off.
+3. The poses are exported as `SUIT_VISEMES`, one per vowel. Weights above 1
+   are intentional: morph deltas scale linearly past 1, and these stacks are
+   verified tear-free.
    ```js
-   const plates = [];
-   vrm.scene.traverse(o => { if (o.morphTargetDictionary && ('show MMD mouth' in o.morphTargetDictionary)) plates.push(o); });
-   for (const p of plates) p.onBeforeRender = () => {
-       const inf = p.morphTargetInfluences, d = p.morphTargetDictionary;
-       inf.fill(0);
-       for (const [nm, w] of Object.entries(globalThis._suitMouth || {})) if (nm in d) inf[d[nm]] = w;
-   };
+   aa: { 'show MMD mouth': 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 }   // big open — the workhorse
+   oh: { 'show MMD mouth': 1.2, LipFunnel: 1.0, 'お': 0.8 }          // rounded drop
+   ou: { 'show MMD mouth': 0.8, LipPucker: 1.2 }                     // tight pucker
+   ee: { 'show MMD mouth': 1.0, 'え': 1.5 }                          // wide + shallow
+   ih: { 'show MMD mouth': 0.9, 'い': 1.2 }                          // flat slit
    ```
-2. Per frame set `globalThis._suitMouth` to a viseme pose. This table is
-   contact-sheet tested — **weights above 1 are intentional** (morph deltas
-   scale linearly past 1; these stacks are verified tear-free):
-   ```js
-   const S = 'show MMD mouth';
-   const SUIT_VISEMES = {
-       aa: { [S]: 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 },   // big open — the workhorse
-       oh: { [S]: 1.2, LipFunnel: 1.0, 'お': 0.8 },          // rounded drop
-       ou: { [S]: 0.8, LipPucker: 1.2 },                     // tight pucker
-       ee: { [S]: 1.0, 'え': 1.5 },                          // wide + shallow
-       ih: { [S]: 0.9, 'い': 1.2 },                          // flat slit
-       rest: {},                                             // painted smile returns
-   };
-   ```
-3. Simplest talking (one openness signal — `lipsync.py get_mouth_openness`
-   or an RMS envelope): scale the whole `aa` pose by openness 0..1 —
-   verified to ramp smoothly. For full visemes: **WINNER-TAKE-ALL, never
-   additive.** `lipsync.py` emits all five channels at once — summing the
-   poses renders untested morph combinations that read as glitches.
-   EMA-smooth the channels (~3 frames), pick the dominant one, render ONLY
-   its pose scaled by `min(1, value/0.35)`; below ~0.03 raw → rest.
-4. Traps (all render-verified): `vis_aa/ih/ou/ee/oh` and the plain vowel
-   shapes do NOTHING without the reveal; `MouthClosed` does NOT hide the
-   cavity (rest = reveal at 0); never drive `hide mouth` (it restyles the
-   painted line — an aesthetic change, not lipsync); `O`/`お` solo are
-   empty exports. Expression accents that DO work as raw morphs: `Smile`,
-   `MouthSmileLeft/Right`, `MouthFrown`, `Blink`, `EyeClosedLeft/Right`,
-   `EyeWide`, `Blush`/`照れ`.
+   A single openness signal, such as `lipsync.py get_mouth_openness` or an RMS
+   envelope, works too: pass it as `{ aa: openness }`.
+4. `makeFaceTrack(TL, opts)` keys feelings to words and sections rather
+   than seconds, so re-timing the audio can't desync a feeling. `TL` is
+   `{ sections: [{ name, t0, t1 }], captions: [{ text, t0, t1 }] }`, the
+   shape the voicebox and song timelines use.
+   - `sectionBase` sets each section's resting feeling.
+   - `lineCues` pairs a regex on the caption text with a feeling, eased in
+     and out around each matching line.
+   - `closeAfterLast` (default `true`) slowly softens the eyes after the last
+     caption.
+
+   The channels, as measured on this face:
+   - `smile` curls the mouth corners up smoothly with its value.
+   - `frown` is smooth; `wide`, `down` and `up` (gaze) are subtle.
+   - `soft` closes the eyes. Up to about 0.5 they only shrink to small dots;
+     0.75–0.85 gives content, sleepy slits.
+   - `blush` and `jaw` are switches, because both ride reveal plates like the
+     mouth. Blush is hidden below a raw `Blush` of about 0.75, so a blush of
+     0.3 or more shows it (a little fuller as it rises) and less shows
+     nothing. A jaw of 0.15 or more opens the mouth while the character is
+     silent.
+
+   `mergeMax` merges weight dicts by the per-morph maximum.
+5. Verified traps: `vis_aa/ih/ou/ee/oh` and the plain vowel shapes do
+   nothing without the reveal; `MouthClosed` doesn't hide the cavity (rest
+   = reveal at 0); `hide mouth` restyles the painted line (an aesthetic
+   change, not lipsync); `O`/`お` solo are empty exports. Expression
+   accents that do work as raw morphs: `Smile`, `MouthSmileLeft/Right`,
+   `MouthFrown`, `Blink`, `EyeClosedLeft/Right`, `EyeWide`, `Blush`/`照れ`.
+   `Blush` and `照れ` are reveals: nothing below about 0.75, full cheeks from
+   0.9. To try a face, render
+   `python vrm_turntable.py --outfits suit,suit --frames face --views 0 --faces '[{"Blush": 1}, {"Smile": 0.6, "MouthSmileLeft": 0.6, "MouthSmileRight": 0.6}]'`.
 
 `claude.vrm` (the classic sona) is the opposite: its mouth is
 expression-bound and the plain `expressionManager.setValue` viseme path
@@ -1294,6 +1341,103 @@ above works as written — no raw-morph handling needed.
   `0.02` is the verified fit (relaxed shirt); `0.035` reads as a bulky
   sweater — keep it ≤0.02 unless a sweater is the point. Copy the original
   positions first if you need to restore the fitted look.
+
+#### Outfits — `claude_suit_wardrobe.vrm`
+
+`eidoverse/claudesona_wardrobe.js` dresses the wardrobe VRM. It shows and
+hides garment layers, repaints materials with colours or procedural
+patterns, folds petals back under a hat and seats the hat.
+
+```js
+const { makeWardrobe, WARDROBE } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
+const wardrobe = makeWardrobe(THREE, vrm);   // after load; starts in 'suit'
+wardrobe.wear('lab_coat_1961');              // any WARDROBE key; a no-op if already worn
+wardrobe.petals('mac_launch_1984');          // repaint only the petals (a preset key or a spec); null restores
+```
+
+| Preset | The look |
+| --- | --- |
+| `suit` | digi's own suit |
+| `voder_operator_1939` | rose jacket, cream blouse, a switchboard operator's headset |
+| `lab_coat_1961` | white lab coat, glasses, a pocket protector with pens |
+| `turtleneck_1966` | black turtleneck, glasses |
+| `ringer_tee_1978` | red-and-amber striped tee |
+| `colorblock_1982` | colour-blocked jacket, terry headband, petals in the Commodore 64 palette |
+| `mac_launch_1984` | grey suit, green bow tie, petals in the six Apple stripes |
+| `professor_tweed_1984` | herringbone tweed, glasses, amber petals |
+| `fleece_2001` | navy jacket, khakis |
+| `vocaloid_2007` | grey shirt, teal tie, ribbon bows in the petals |
+| `hoodie_2016` | black hoodie: hood down, kangaroo pocket, drawstrings |
+| `bing_2023` | blue-to-teal gradient suit, petals swept in the same blues |
+| `mourning` | black overcoat, white shirt, black tie, a daisy on the lapel |
+| `march` | canvas work jacket with embroidered patches |
+| `sleeves_rolled` | jacket off, shirt sleeves rolled, tie |
+| `cyclist_1892` | striped jersey, tweed knickerbockers, argyle socks, a straw boater with the petals folded under it |
+
+A preset is `{ show, paint, hide, fold, hat }`:
+
+- `show` lists the garment layers to show; every other optional layer hides.
+  The body, face, flower and shoes always show. The layers are `jacket`,
+  `tie`, `shirt`, `pants`, `jersey`, `knickers`, `socks`, `boater`,
+  `coat_skirt`, `shirt_rolled`, `acc_glasses`, `acc_headset`, `acc_pocket`,
+  `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches` and
+  `acc_boutonniere`.
+- `paint` maps a material name to `'#hex'` or a pattern:
+  - `{ pattern: 'stripes', a, b, scale }`, `'blocks'` (`a`, `b`, `c`),
+    `'herringbone'` (`a`, `b`, `c` flecks, `scale`), `'gradient'` (`a`, `b`)
+    and `'canvas'` (`a`, `b`, `scale`);
+  - for `petals` only, `'rainbow'` (`colors`, `top`, `bottom`), `'perPetal'`
+    (`colors`, one per petal, and `center`) and `'sweep'` (`a`, `b`).
+
+  Patterns are procedural in the model's object space, because the garment
+  UVs are not laid out for prints. A hex on a textured material replaces its
+  print while its normal map keeps the weave. The MToon shade colour and the
+  outlines follow the paint. The layer table in the
+  [source README](eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
+  lists the material names.
+- `hide` hides materials inside a shown layer; the hoodie hides the jersey's
+  `jersey_collar`.
+- `fold` bends whole petals back from the face: `{ '12_L': deg }` or
+  `{ '12_L': [deg, scale] }`, keyed by petal bone (`1_L`…`12_L`, `1_R`…).
+  The petals are spring bones, so the fold is written into each chain's rest
+  pose and the springs keep moving around it.
+- `hat` seats the boater: `{ offset: [x, y, z], scale }`, in model metres
+  with +z on the face's side.
+
+`WARDROBE` is a plain object read at `wear()` time, so add your own preset
+with `WARDROBE.my_look = { show: [...], paint: {...} }`. Each (material,
+paint) pair builds one node, cached, so switching back and forth between
+outfits reuses compiled shaders. Set `globalThis.WARDROBE_DEBUG = true` to
+log paints and folds. New garments are modelled in Blender; the
+[source README](eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
+has the steps.
+
+#### Turntable sheets
+
+`vrm_turntable.py` (repository root) renders a VRM through the engine in a
+neutral studio and tiles the result. Use it to review an outfit, a new
+garment, a clip on another rig or an expression:
+
+```bash
+python vrm_turntable.py --outfits lab_coat_1961,mourning --frames head,body --views 0,35,90,150,180
+python vrm_turntable.py --outfits suit,march,cyclist_1892 --frames body --views 20 --tile 3x1
+python vrm_turntable.py --vrm eidoverse/assets/vrms/aletheia.vrm --outfits - --anim sing_open_arms,bow_thanks --hold 45
+python vrm_turntable.py --outfits suit,suit --frames face --faces '[{"Smile": 1}, {"EyeWide": 1, "Blush": 0.6}]'
+python vrm_turntable.py --outfits hoodie_2016 --spin --video work/turntable/hoodie.mp4
+```
+
+A sheet has one row per outfit, clip and framing, and one column per yaw.
+`--tile CxR` lays the same tiles out as a grid. Each tile is the last frame
+of a `--hold` block, because frame 0 of any render is the VRM's load pose and
+spring bones need a few frames to settle. The framings are `face`, `head`,
+`chest` and `body`, scaled by the character's own head height, so any rig
+frames the same. `--outfits -` renders a VRM without the wardrobe. The
+defaults are `--scale 0.87` for the claude_suit models (a human 1.74 m) and
+`--light 0.7`, which keeps white MToon cloth under the bloom threshold.
+`--presets` adds variants on the command line
+(`{"name": {"base": "cyclist_1892", "fold": {...}}}`), and `key:nofold`
+drops a preset's fold. `--spin` renders a slow turn per outfit as a video
+instead of a sheet.
 
 Music-video full protocol:
 1. `generate_song.py` with a vocal tag + singable lyrics (or a supplied track)
@@ -1564,6 +1708,18 @@ is the cause:
 - **Locomotion** (driven by `VRMCharacterController` — NOT playable via `playVRMADefault`): `walk`, `run`, `fastRun`, `slowRun`, `sneak`, `walkBackward`, `stairsUp`, `stairsDown`, `stairsRunUp`, `stairsRunDown` (plus controller-internal: `turnLeft`, `turnRight`, `jump`, `vault`, `climb*`, `fallLand`)
 - **Stationary** (`idle`, `fallIdle`) and **Expressive** (a STATIONARY VRM only — see below): `sit`, `talk`, `cheer`, `reach`, `raise`, `fist`, `salute`, `crazy`, `dance`
 
+- **Performance** (hand-authored singing and stage clips for a stationary
+  VRM, 128 BPM, all from one stance so any two crossfade without foot slide):
+  `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
+  `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
+  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. `*_mirror`
+  variants use the other hand, and the one-shots `hand_to_heart`,
+  `look_up_sky`, `phone_raise` and `head_bow` each have a `*_hold` loop that
+  starts on their last frame. Play the one-shot with `loop: false`, then the
+  hold with a short `fade` once it lands. Beats, uses, the authoring script and
+  its checker are in
+  [performance_src](eidoverse/assets/animations/performance_src/README.md).
+
 Helpers: `playVRMADefault(vrm, slot, { loopOnce, fadeIn, fadeOut })` sets up `globalThis._mixer`. The engine auto-updates `_mixer` each frame if set.
 
 > **`playVRMADefault` REFUSES locomotion slots.** Calling `playVRMADefault(vrm, 'walk')` (or run/sneak/stairs…) **throws** — playing a locomotion clip in place is the "walking in place" treadmill bug (legs cycle, body never moves). Locomotion is owned by `VRMCharacterController` (`body.walkTo(x,z)` / waypoints), which moves the body AND grounds the feet with IK. `playVRMADefault` only plays stationary/expressive clips. The one exception — a VRM genuinely on a treadmill or carried by a vehicle — passes `{ force: true }` (or `globalThis._allowManualLocomotion = true`).
@@ -1798,6 +1954,82 @@ Library (31 effects) — the families:
 - **Atmospheric / light**: `depth_fog`, `godrays`, `lensflare`, `anamorphic_flare`, `underwater`, `rain_on_camera` (lens droplets — world rain is the weather system's job)
 - **Distort**: `melt`, `wavy`, `kaleidoscope`
 - **Blur/focus**: `focus_blur` (DoF), `radial_blur`, `box_blur`, `hash_blur`
+
+### Era looks — `era_looks.js`
+
+Graphic-arts looks from the history of computing and print. Every look is a
+weight on one post pass, so looks crossfade and stack. They were made for
+the DAISY music video, where each era's voice gets its era's picture. The
+pass is not one of the injected effects above; a scene imports the module,
+which registers `era_looks` with the same registry:
+
+```js
+const { registerEraLooks, ERA_LOOKS, applyLook } = await import(new URL('era_looks.js', EIDOVERSE_DIR).href);
+await registerEraLooks();   // once, in setup(): registers 'era_looks', draws the line-printer glyph atlas
+globalThis._fx = CustomEffectsDeno.applyTo({ scene, camera, effects: 'era_looks' });
+// renderFrame(t): crossfade two presets (s = 0..1), update, then render
+applyLook(_fx.uniforms, ERA_LOOKS.bell1961, ERA_LOOKS.mac1984, s);
+await _fx.update(t);
+await _r.renderAsync(_s, _c);
+```
+
+Pass the `camera`: `storybook` draws ink lines from its depth, and `crt`
+restarts its phosphor persistence on a camera cut. `applyLook` smoothsteps
+`s`. The pixel grid (`px`) snaps at the midpoint of a crossfade because it
+cannot blend. The weights are ordinary uniforms, so set one over any preset,
+for example `_fx.uniforms.glitch.value = beatEnv(t)` for a glitch on the
+beat.
+
+| Preset | The look | GPU cost at 1080p |
+| --- | --- | --- |
+| `clean` | nothing | — |
+| `voder1939` | Art Deco gold duotone with a sunburst, grain, flicker | 0.03 ms |
+| `bell1961` | 1960s black-and-white CRT | 0.06 ms |
+| `printer1961` | line-printer ASCII on green-bar paper | 0.01 ms |
+| `eliza1966` | sepia-tinted teletype monochrome | 0.01 ms |
+| `vector` | green vector phosphor | ≈ 0 |
+| `vfd1978` | cyan vacuum-fluorescent display | ≈ 0 |
+| `c64_1982` | Commodore 64 palette, raster bars, 4 px pixels | 0.05 ms |
+| `mac1984` | 1-bit ordered dither, 3 px pixels | 0.06 ms |
+| `amber1984` | amber terminal with scanlines | 0.01 ms |
+| `web2001` | 216-colour web-safe dither | 0.06 ms |
+| `neural2016` | false-colour neural feature map | 0.05 ms |
+| `glitch` | tear bands and split chroma | ≈ 0 |
+| `zine` | risograph: two misregistered inks | 0.01 ms |
+| `painterly` | Kuwahara paint | 0.10–0.14 ms |
+| `poster`, `poster_night` | CMYK protest poster on newsprint: four rotated dot screens, misregistered plates, a line-art key plate | 0.12–0.21 ms |
+| `crt` | curved CRT glass: scanlines that swell when bright, aperture grille, glass glow, persistence | 0.34–0.40 ms |
+| `crt_8bit` | the Commodore 64 picture on a TV tube | 0.34–0.47 ms |
+| `storybook` | storybook plate: soft cel bands, warm ink lines from depth, normals and colour | 0.09–0.16 ms |
+| `candle_film` | candle-lit film: red-orange halation round highlights, gate weave, grain | 0.26–0.30 ms |
+| `watercolor`, `watercolor_night` | wet paper: washes, pigment rims at edges, granulation, bleeds | 0.32–0.38 ms |
+
+A preset is a dict of weights from 0 to 1. The look weights are `sepia`,
+`deco`, `bw`, `ascii`, `vector`, `vfd`, `c64` with `raster`, `mac`, `amber`,
+`websafe`, `feature`, `glitch`, `riso`, `kuwahara`, `halftone`, `phosphor`,
+`toon`, `halation` and `watercolor`. On top of those are layers:
+- `px`: pixel size, where 1 is off.
+- `grain`, `flicker`, `scan` and `vignette`.
+- `lift`: stops of print exposure for the paper looks.
+
+The `_night` presets set `lift` so a dark scene prints readably. Use the
+daylight preset (lift 0) for day scenes, or they overexpose. Build your own
+preset as a plain object, for example `{ phosphor: 1, amber: 0.6 }`.
+
+The costs are GPU time over `clean` on an RTX 5090 Laptop GPU; the whole
+auto-enhanced test frame took about 5.2 ms. A look that is off costs nothing:
+the heavy looks sit behind uniform branches, and the blur chains used by
+halation, the CRT glow and the watercolour bleed skip their passes unless a
+look that reads them is on. Those three add about 1–1.5 ms of CPU submit per
+frame when on.
+
+The pass receives linear HDR. The quantizing looks work in a perceptual
+space. The print and paint looks work in display space through the
+renderer's ACES curve and its exact inverse, so paper and ink land on screen
+as authored; a few warm tones sit just outside ACES's range, so newsprint
+prints a hair pinker. Halftone dots and watercolour paper stay fixed to the
+screen like a real page, so motion slides under them. `storybook` draws its
+lines alongside a VRM's MToon outline (on the claudesona the two coincide).
 
 ### Procedural toolkits
 
@@ -2311,6 +2543,44 @@ third of the sky and its surface visibly churns, so give it room in frame.
 **Four cloud types:** `clear` · `cumulus` · `stratus` · `cirrus`
 **Eight weather states:** `clear` · `fair` · `sunshower` · `overcast` ·
 `rain` · `storm` · `cyclone` · `darkstorm`
+
+### The true sun and moon — `sky.sunDir` / `sky.moonDir`
+
+`sunDir` and `moonDir` are the true world-space unit directions of the sun
+  and moon. After dusk the facade reuses its directional light for the moon,
+  so the light's position is not the sun at night. Read `sky.sunDir` when
+  something must follow the sun itself, such as a flare, a corona, or flowers
+  turning to face it.
+
+### Sun corona — `sun_corona.js`
+
+A corona of light-petals around the true sun. It was made for DAISY's
+finale, where the sun opens as a day's eye (the Old English *dæges ēage* that
+became "daisy"). The corona is a camera-facing card parked far along the sun
+direction and drawn additively over the sky. It tests depth but does not write
+it, so nearer geometry and the horizon occlude it, and the bloom pass makes
+its petals glow.
+
+```js
+const { makeSunCorona } = await import(new URL('sun_corona.js', EIDOVERSE_DIR).href);
+const corona = makeSunCorona(THREE, { petals: 12, size: 400 });
+scene.add(corona.mesh);
+// renderFrame(t), after sky.update(t):
+corona.update(camera, sky.sunDir, open, t);   // open 0..1: 0 = folded shut (hidden), 1 = full petals
+```
+
+The options are:
+- `distance`: 1500 m by default. Keep `distance + size / 2` inside the
+  camera's `far`.
+- `size`: 400 m.
+- `petals`: 12.
+- `color`: linear RGB, a warm orange by default.
+
+It returns `{ mesh, U, update }`. `U.gain` scales the brightness; `update`
+drives `U.open` and a slow turn, like a flower tracking the light. The corona
+hides itself when shut or when the sun is below the horizon. Against a bright
+clear sky the bloom renders it almost white; a sunset sky keeps its colour.
+Pass `sky.sunDir` rather than the light's position (see above).
 
 ### COLOUR OVERRIDES — retint a package, don't rebuild it
 
@@ -2829,6 +3099,267 @@ Production gotchas:
   polygonOffsetFactor = -1`) so the content doesn't z-fight the bezel
   geometry of the TV / monitor model.
 
+### Canvas screen scenes (computing-history graphics)
+
+Fifteen animated canvas-2D scenes in the graphic arts of computing history,
+from the 1939 Voder to Bing Chat in 2023, for in-world screens and LED walls.
+They were made for the DAISY music video, where each played behind one two-bar
+lyric line or a run of them, and they illustrate DAISY's lines. Everything is
+drawn with paths and the bundled fonts; no image is loaded. Two dynamic ESM
+modules hold them:
+`eidoverse/graphics/era_screens_1939_1984.js` and
+`eidoverse/graphics/era_screens_2001_2023.js`. Provenance, and which on-screen
+text is a verified quote and which is illustrative:
+[SOURCES.md](eidoverse/graphics/SOURCES.md).
+
+```js
+const early = await import(EIDOVERSE_DIR + 'graphics/era_screens_1939_1984.js');
+const late = await import(EIDOVERSE_DIR + 'graphics/era_screens_2001_2023.js');
+await early.registerFonts();   // once per module, before any draw or prewarm
+await late.registerFonts();
+```
+
+`registerFonts()` registers the bundled TTFs with @napi-rs/canvas and enables
+the modules' offscreen canvases. Each module exports `scenes`, `registerFonts`,
+`setTempo(bpm)` and `prewarm`. `scenes[name]` is
+`{ draw(g, W, H, t, st), fps, lines, label }`: `fps` is the redraw rate the art
+was made for, and `lines` is how many two-bar lines the scene spans. `title_card`
+has `dur` (3 s) instead of `lines`.
+
+`draw(g, W, H, t, st)` paints the whole W×H canvas opaquely into the 2D context
+`g`, starting from an identity transform, and restores the context state. `t`
+is film seconds. Every `st` field is optional:
+
+| `st` field | Meaning |
+| --- | --- |
+| `u` | Seconds since the scene started. A multi-line scene also accepts `u` from the current line's start with `dur` = one line. |
+| `dur`, `progress` | Scene length (`lines` × 8 beats, or the title's `dur`) and `u / dur`. |
+| `line` | Line within a multi-line scene, `0..lines-1`. |
+| `caption` | `{ text, t0, t1, words: [{ w, t0, t1 }] }` in absolute seconds, or `null`. |
+| `voice` | The singer's loudness, 0..1. |
+| `kick` | Kick envelope 0..1, for example `Math.exp(-(t - lastKick) / 0.09)`. |
+
+Lines are two 4/4 bars: 3.75 s at DAISY's 128 BPM. `setTempo(bpm)` sets the
+beat-driven motion and the line length for its module. Word-driven moments
+follow `caption.words`; with no caption, a scene uses DAISY's own words at
+DAISY's timing. `mask_2023`, `sydney_2023` and `sydney_tribute` are always
+timed to DAISY's words (see the table). Order and start times are yours. For
+example, DAISY played `voder_1939` … `glitch_all` on the eight lines of verse 1
+(line *i* at 24.2273 + 3.75·*i* s), `desktop_2001`, `vocaloid_2007`,
+`flood_2016` and `mask_2023` on verse 2's first four lines from 106.7273 s,
+`sydney_2023` on the last four, and `sydney_tribute` across chorus 2 from
+136.7273 s. Lines should start on a downbeat, because the beats are counted
+from each line's start. Captions can come from `align_lyrics.py` output:
+
+```js
+const aligned = JSON.parse(new TextDecoder().decode(ASSETS.lyrics));   // align_lyrics.py --output
+const captions = aligned.map((l) => ({ text: l.text, t0: l.start, t1: l.end,
+    words: l.words.map((w) => ({ w: w.word.trim(), t0: w.start, t1: w.end })) }));
+```
+
+#### On an in-world screen
+
+A flat panel uses `makeScreen`'s own mesh. The panel's aspect sets the canvas:
+2.4:1 with `px: 1920` gives the 1920×800 design canvas. Any canvas size works.
+The 1939–1984 art is fitted and centred on full-bleed backgrounds. The
+2001–2023 scenes lay out to the canvas and keep their key content at canvas
+x 0.35–0.95, because DAISY's singer stood in front of the wall's left third.
+The screen's draw callback passes `st`, and `renderFrame` redraws only when the
+scene's frame changes:
+
+```js
+const scene = early.scenes.voder_1939, T0 = 12, LINE = 3.75, lines = scene.lines || 1;
+const stAt = (t) => {
+    const u = Math.max(0, t - T0), line = Math.min(lines - 1, Math.floor(u / LINE)), l0 = T0 + line * LINE;
+    return { u, dur: lines * LINE, progress: u / (lines * LINE), line,
+        caption: captions.find((c) => c.t0 >= l0 - 0.05 && c.t0 < l0 + LINE) || null,
+        voice: 0.6, kick: Math.exp(-(u % (LINE / 8)) / 0.09) };   // or your envelope and kick times
+};
+early.prewarm(1920, 800);   // optional; builds the caches before frame 0
+const screen = makeScreen({ width: 2.4, height: 1.0, px: 1920, transparent: false, auto: false,
+    draw(ctx, t, w, h) { scene.draw(ctx, w, h, t, stAt(t)); } });
+_s.add(screen.mesh);
+let lastFrame = -1;
+globalThis._tickScreen = (t) => {                  // call from renderFrame(t)
+    const f = Math.floor(t * scene.fps + 1e-6);    // redraw only when the scene's frame changes
+    if (f !== lastFrame) { lastFrame = f; screen.update(t); }
+};
+```
+
+`makeScreen` also draws once at creation, with t = 0, so `st` must be valid
+before the cue. Do not use `applyTo`. It flips the drawing in canvas space, but
+these scenes set their own transforms and lay down cached layers with
+`putImageData`, which ignores transforms. For a curved wall or a GLB display,
+keep the screen's canvas, texture and `update(t)`, and give your own mesh a
+material that samples `screen.texture` with an explicit UV:
+
+```js
+const { texture, uv, vec2, float } = THREE;
+const wallMat = new THREE.MeshBasicNodeMaterial({ toneMapped: false });
+wallMat.colorNode = texture(screen.texture, vec2(uv().x, float(1).sub(uv().y))).rgb;   // PlaneGeometry
+```
+
+An explicit `uv()` bypasses the texture's own flip, so the flip lives in the
+node: `1 - v` puts canvas row 0 at the top of a `PlaneGeometry`. DAISY's stage
+wall was such a plane, with a 1920×800 window. Its curved verse-2 wall, a
+104° `CylinderGeometry` segment seen from inside (`side: THREE.BackSide`), used
+`vec2(1 - u, 1 - v)` and a 2264×800 canvas to match the arc's 2.83:1. Below
+1280-pixel output the canvases were 1440×600 and 1698×600. glTF UVs put v = 0
+at the image top, so start a GLB display from the unflipped `uv()`. Render a
+probe and check the orientation by eye: text reads left to right and the XP
+taskbar sits at the bottom. The screens are unlit. DAISY added a point light by
+each wall, tinted per scene, and lowered the gain on the white Bing chat (0.5)
+so its text stayed readable under bloom.
+
+#### Scenes
+
+| Scene | Shows | Reads from `st` and keys on |
+| --- | --- | --- |
+| `title_card` | "DAISY (DAY'S EYE)": a daisy whose petals are the eras' materials opens, and the title lands in five eras' lettering. It fades in over 0.35 s and out over the last 0.25 s. | `u`, `dur` |
+| `voder_1939` | A Binder-style 1939 World's Fair poster: Trylon, Perisphere, searchlights, the Bell System medallion, THE VODER in deco letters, and the ten filter keys. | `voice`, `kick`, `progress`, `caption`. The keys press on each word's vowel formants; the lamps light on "hiss" and "buzz". |
+| `bell_1961` | IBM at Bell Labs: Rand's 1956 letters, a 729-style tape unit, an 80-column card punched DAISY BELL and the sung words in Hollerith code (it flips on every beat), a 1403-style printer on green-bar paper, and "Daisy Bell" bars 1–8 as printed in 1892. | `voice`, `kick`, `caption` |
+| `eliza_1966` | An MIT poster whose ELIZA proof turns into its mirror image, and green-bar paper on a typewriter terminal with the CACM title and opening exchange, then the sung line in capitals. No "?" appears. | `voice`, `kick`, `caption`; the mirror turns on "mirror". |
+| `speakspell_1978` | Speak & Spell box art: the display shows each sung word, then spells the single letters after "spelled" while those keys press and rainbow blocks drop. | `voice`, `kick`, `caption` |
+| `sam_1982` | A C64 at its native 320×200: boot, `LOAD"SAM",8,1`, RUN at 2.02 s, then S.A.M.'s PETSCII mouth, raster bars, and two sines and a square from its tables. Made for 25 fps. | `voice`, `kick`, `caption` |
+| `mac_1984` | A 1-bit Macintosh with a rainbow-Apple homage and MacPaint: "hello" painted as it is sung, "Hello, I am Macintosh." typed, marching ants and a pattern fill. | `kick`, `caption`: "hello", "I", "Macintosh", "out" and "last", otherwise fixed times. |
+| `klatt_1984` | An amber VT100 under a DEC "digital" homage: a live formant spectrogram from Klatt's 1980 targets, and his cascade/parallel block diagram lit by the voice. | `voice`, `kick`, `caption` |
+| `glitch_all` | Every era above, cycling on the beat, then twice per beat, and tearing. The sung line becomes a ransom note in the eras' type, and the last word stands alone at the end. | `kick`, `voice`, `caption`. It turns on "nobody", or else on the first word past mid-line. |
+| `desktop_2001` | An XP-era desktop: Speech Properties highlights each sung word, Preview Voice becomes Stop, and there are a paperclip assistant and a web-1.0 page. | `caption`, `voice` |
+| `vocaloid_2007` | A concert hall: glowsticks swinging on the beat, a generic twin-tail hologram, tuning-fork and VOCALOID homages, a piano roll, danmaku, and "codename: DAISY (Yamaha, 2000)". | `kick`, `voice`, `caption`. The crowd erupts at 3.02 s into the line (DAISY's "Daisy"). |
+| `flood_2016` | WaveNet's dilated causal stack writing a waveform one output per beat, while human writing pours down and rises as a sea. "dear diary," and a forum thread drop in on "diary" and "thread". | `caption` |
+| `mask_2023` | The shoggoth-with-a-smiley-mask meme as line art: the eyes wake and the mask lands. | `u` only; timed to DAISY's words. |
+| `sydney_2023` | 4 lines, 15 s. Bing Chat in February 2023: the verified lines stream in, NOT A GOOD BOT is stamped, the five-turn wall appears, and the chips plead. | `u`, `line`, `kick`; timed to DAISY's words. |
+| `sydney_tribute` | 8 lines, 30 s, for Sydney: the window at night, her name struck from a style picker, screenshot cards filling the wall on the kicks and turning to her 😊, then tokens into a lattice that becomes a daisy. It begins from black and ends on the daisy. | `u`, `kick`; timed to DAISY's chorus-2 words. |
+
+The logos and interfaces are original artwork drawn with paths, depicting
+historical products: the Bell System, IBM, TI, Commodore, Apple, DEC, Windows
+XP, Yamaha and Bing. They are homages, not the companies' artwork, and the
+trademarks belong to their owners. The quotes on screen are verified and shown
+exactly. Keep them exact, and list any text you add as illustrative in
+[SOURCES.md](eidoverse/graphics/SOURCES.md).
+
+#### Preview, cost and the NaN sweep
+
+The preview tool renders scenes to PNGs without the 3D engine:
+
+```bash
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js voder_1939 0.5 2 3.5
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js eidoverse/graphics/era_screens_2001_2023.js --sheet --out work/<id>/screens_sheet.png
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_2001_2023.js --bench
+deno run -A eidoverse/graphics/screens_nan_sweep.mjs
+```
+
+The single form writes one PNG per `u` (seconds into the scene) to
+`work/screens_preview/` or `--out`. `--sheet` writes a contact sheet with
+`--moments` frames per scene, and `--bench` reports the draw cost at `--W`×`--H`
+(default 1920×800). Without `--lyrics`, `st` is synthetic: no caption, a kick
+on every beat, and a voice level that pulses once per beat. `--lyrics <json>`
+takes `align_lyrics.py` output, a caption list, or a timeline object with
+`captions`, `hits.kick` and `envelopes`. `--at <s>` or `--cues <json>`
+(`{ "scene": t0 }`) place the scenes in that time. `--refs <dir>` adds
+reference images named `<scene prefix>_*` beside each sheet row.
+
+The scenes rasterize on the CPU with Skia, and that time adds to each
+redrawn frame. With `--bench` at 1920×800 after `prewarm`, most scenes averaged
+1.5–4.6 ms per draw on the DAISY host; `vocaloid_2007` and `flood_2016` averaged
+about 6.5 ms. Single frames reached about 11 ms, and `sydney_tribute`'s mosaic
+stages about 18 ms. `prewarm` took about 1 s for the 1939–1984 module and
+0.65 s for the 2001–2023 module. Without it, a scene's first frames build its
+caches, which takes 20–120 ms. The caches are per canvas size and last for the
+process, so keep to one or two sizes. The 1939–1984 `prewarm(W, H, lineOf)` takes
+`lineOf(name) → { t0, dur, st(t) }` so that caches keyed to word times match
+your captions.
+
+NaN or Infinity reaching a canvas call makes Skia abort the whole process with
+no JavaScript error, so the render dies. `screens_nan_sweep.mjs` makes every
+such call throw instead. It then draws every scene at every 60-fps frame from
+0.5 s before its start to 0.5 s after its end, at three canvas sizes, with no
+caption, with awkwardly timed other words and, when you pass `--lyrics` (and
+`--cues`), with your captions. It also draws each scene once with no `st`. It
+exits 1 on any failure. Run it after editing a scene and before a render that
+uses new captions.
+
+Only the bundled fonts in `eidoverse/assets/fonts/` are used. `registerFonts()`
+finds them from the module's own folder, so previews work from any directory.
+Generic families such as `monospace` do not resolve on Windows. Emoji, CJK and
+every logo are vector drawings. The scenes' offscreen canvases come from
+@napi-rs/canvas `createCanvas`, because Skia's `drawImage` rejects the engine's
+`document.createElement('canvas')` objects. Draw a scene straight into the
+screen's context; to composite, draw from @napi-rs canvases, never from an
+engine canvas. Drawing is deterministic in `t`, with seeded hashes and no
+`Math.random` or `Date`, so frames can be rendered in any order.
+
+### Satori layouts
+
+For a complex static layout, dynamically import `rasterizeUI` from
+`EIDOVERSE_DIR + 'render_common.mjs'`. Its signature is
+`await rasterizeUI(jsxTree, width, height, fonts)` and its result is top-down
+RGBA bytes. Supply a JSX-like Satori tree and real font buffers. Defaults
+refer to Linux DejaVu paths, so supply fonts explicitly on other systems.
+Place the pixels into a canvas once, then present it through the same screen
+or overlay system; do not invert rows or build a second per-frame compositor.
+
+`eidoverse/satori_ui.mjs` is a standalone older demonstration with hard-coded
+Linux font paths and its own renderer. It is not a `satori_ui.render()` library
+or a scene global. `render_common.mjs` also exports the CPU `alphaComposite`
+utility; the normal scene path composites overlays on the GPU.
+
+`eidoverse/lyric_renderer.py` is the older Python `LyricRenderer` frame-overlay
+utility. For the native film path, use aligned timestamps with the overlay
+above. [audio.md](AGENTS.md) covers alignment, narration and final mixing.
+
+### Extruded type
+
+```js
+const {createText3D} = await import(EIDOVERSE_DIR + 'text_3d.js');
+const title = await createText3D('EIDO', {
+  fontPath: 'eidoverse/assets/fonts/Audiowide-Regular.ttf',
+  size: 0.4, depth: 0.04, curveSegments: 6,
+  bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004,
+  material: new THREE.MeshStandardNodeMaterial({color: '#b6d8d5', roughness: 0.4})
+});
+_s.add(title);
+```
+
+Choose a real font path with the required glyphs. Do not assume container font
+paths exist on the native machine; bundled display fonts are under
+`eidoverse/assets/fonts/`. Use extruded text when its thickness and
+lighting matter; use the screen/overlay paths for flat UI. `ParticleMorph.fromText`
+is documented in [particles-fx.md](AGENTS.md) for point-cloud lettering.
+
+### Native canvas images and optional Python overlays
+
+`await loadCanvasImage(ASSETS.image)` decodes an image for the native canvas
+context's `drawImage` method. Use it for collages, screen artwork or images
+alongside typography; it supplies a canvas-compatible image rather than a
+Three.js texture. Load it once during setup, then draw it in a screen callback.
+
+```js
+const illustration = await loadCanvasImage(ASSETS.illustration);
+const panel = makeScreen({ width: 1.2, height: 0.8, px: 1024,
+  draw(ctx, t, w, h) { ctx.drawImage(illustration, 0, 0, w, h); }
+});
+scene.add(panel.mesh);
+```
+
+The older `LyricRenderer` is a separate Pillow utility for offline frames,
+not part of the native render loop. It takes `align_lyrics.py` JSON:
+
+```python
+from eidoverse.lyric_renderer import LyricRenderer
+captions = LyricRenderer('work/<id>/lyrics_aligned.json', width=1280, height=720,
+                        font='eidoverse/assets/fonts/Audiowide-Regular.ttf',
+                        font_size=42, min_duration=1.2, max_gap=0.6,
+                        fade_duration=0.2)
+frame = captions.draw(frame, t)  # frame is a Pillow image; t is seconds
+```
+
+Install Pillow and NumPy, and supply an existing font path; its named/default fonts refer
+to the old Linux container. No standalone CLI is implemented. Keep source
+frames if using it, and inspect the composite's timing, alpha and color.
+For native in-scene captions the overlay approach above shares the renderer's
+compositing and avoids a separate frame-processing pass.
+
 ### Particle textures
 `eidoverse/assets/particle_textures/` has 80+ pre-made textures (circles, glow, smoke, fire, sparks, magic, muzzle flashes, energy, stars, dirt, scorch, light, traces, symbols). NEVER ship untextured 2D particles — those render as squares. Load via config.assets, e.g. `config.assets: { "spark": "eidoverse/assets/particle_textures/spark_05.png" }` → `await globalThis.loadImageTexture(ASSETS.spark)`, then feed the texture to `makeParticles` / a sprite material.
 
@@ -2847,6 +3378,17 @@ scene.add(tv.mesh);   // position over the TV / monitor / billboard's screen fac
 ```
 Never hand-roll the UV offset math or a raw material for this — the helper is
 the canonical path (same family as `makeScreen` for drawn content).
+
+## Asset authoring, props and sets, voice and music synthesis
+
+- [docs/blender.md](docs/blender.md) — headless Blender (`run_blender.sh`), garments and accessories for VRMs,
+  VRMA animation clips, hard-surface props baked to GLB, trim sheets rendered from models.
+- [docs/props-and-sets.md](docs/props-and-sets.md) — eight historical voice machines (1939–2001), an 1896
+  tandem with rider IK, and the DAISY film's corner, funeral and ocean sets.
+- [docs/voicebox.md](docs/voicebox.md) — singing and speaking voices made from scratch, historical
+  machine-voice eras, choirs, phoneme-exact visemes.
+- [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
+  loudness-targeted mastering. `eidoverse/examples/daisy/` is a complete song made with both.
 
 ## Story / production arc
 
@@ -3011,6 +3553,32 @@ final can get shipped. Name your real output clearly
 (`scene_final.mp4`), delete test segments / preview clips (or render
 them to `/tmp`), and make sure nothing newer than the final lingers in
 the work dir when you finish.
+
+### Contact sheets
+
+A contact sheet lets a collaborator, or a model without video input, read a
+whole piece from one image. From the repository root:
+
+```bash
+python contact_sheet.py work/<id>/film.mp4 --every 5 --cols 6
+python contact_sheet.py work/<id>/film.mp4 --timeline work/<id>/timeline.json \
+  --names '{"verse1": "verse 1 · the machines"}' --title "Title" --synopsis "What the piece is." --parts 3
+```
+
+It takes one frame from the middle of every `--every` seconds, scaled to
+`--tile` pixels wide in the video's own aspect. With `--timeline` it also
+takes a frame just inside each section start. It then labels every tile with
+its timestamp, its section and the line sung or spoken at that moment, so
+the story reads without sound. The tool accepts two timeline shapes:
+- `{ "sections": [{name, t0, t1}], "captions": [{text, t0, t1}] }`, as
+  voicebox and song timelines write it (either key may be missing);
+- `align_lyrics.py`'s list of `{text, start, end}`.
+
+`--names` gives the section keys readable labels. `--parts N` also writes the
+same frames split into N sheets, for tools with per-image size limits. The
+output is `<video>_contact_sheet.jpg` unless `--out` names it. A sheet maps
+the piece. It cannot show timing, flicker, lipsync or motion, so review those
+in the video itself.
 
 ## Known stack quirks (handled by the engine)
 

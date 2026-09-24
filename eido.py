@@ -5,7 +5,7 @@ Wraps the Docker render container for both operating modes:
 
     python eido.py bootstrap [--image TAG] [--build] [--agent FLAVOR] [--local [--fresh]]
     python eido.py doctor    [--image TAG]
-    python eido.py render <scene.json> [--probe] [--image TAG] [--local]
+    python eido.py render <scene.json> [--probe [--frames N]] [--image TAG] [--local]
     python eido.py shell     [--image TAG]
     python eido.py agent --brief FILE [--context FILE] [--agent claude|codex|opencode]
                      [--image TAG] [--out DIR] [--comfy auto|on|off]
@@ -318,10 +318,12 @@ def cmd_render(a):
     cfg_container = to_container_path(cfg_host)
 
     if a.probe:
-        # single-frame probe: clone the config with duration = 1 frame
+        # probe: clone the config with duration = --frames frames (default 1). Frame 0 shows every VRM
+        # in its LOAD pose (the engine advances animation mixers after rendering a frame), so judge
+        # posed characters on a frame >= 10: `--probe --frames 12`, then extract the last frame.
         cfg = json.load(open(cfg_host, encoding="utf-8"))
         fps = cfg.get("fps", 30)
-        cfg["duration"] = 1.0 / fps
+        cfg["duration"] = max(1, a.frames) / fps
         out = cfg.get("outputVideo") or "probe.mp4"
         stem, ext = os.path.splitext(out)
         cfg["outputVideo"] = f"{stem}_probe{ext}"
@@ -517,7 +519,9 @@ def main():
     p = sub.add_parser("render", help="render a scene config in the container")
     common(p)
     p.add_argument("scene", help="path to scene.json (inside the repo)")
-    p.add_argument("--probe", action="store_true", help="single-frame framing check")
+    p.add_argument("--probe", action="store_true", help="short render for framing checks (see --frames)")
+    p.add_argument("--frames", type=int, default=1,
+                   help="with --probe: frames to render (default 1; use >= 12 to judge posed VRMs)")
     p.add_argument("--local", action="store_true", help="render with HOST deno + GPU (no docker)")
     p.set_defaults(fn=cmd_render)
 

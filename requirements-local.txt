@@ -11,6 +11,13 @@ requests
 # pyworld
 # stable-ts
 #
+# Tier 2b — voice & music synthesis (voicebox/ + synthkit/; see
+# docs/voicebox.md and docs/synthkit.md). Tested with Python 3.14.7:
+# numpy>=2.5  scipy>=1.18  numba>=0.67  soundfile>=0.14  cmudict>=1.1
+# pedalboard>=0.9.25  pyloudnorm>=0.2
+# praat-parselmouth>=0.4.7  edge-tts>=7.2   (resing / neural era only)
+# openai-whisper   (optional: intelligibility checks)
+#
 # Tier 3 — HEAVY: vocal separation for music videos (pulls PyTorch, ~3GB):
 # demucs
 #

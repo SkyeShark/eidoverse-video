@@ -60,6 +60,7 @@ export const GRASS_COLORS = {
 import { buildShrubGeometry } from './vegetation_shrub_gen.js';
 import { buildCornGeometry } from './vegetation_corn_gen.js';
 import { buildSunflowerGeometry } from './vegetation_sunflower_gen.js';
+import { buildDaisyGeometry, daisyLocalNodes, daisyColorNode, resolveDaisyPalette, DAISY_COLORS } from './vegetation_daisy_gen.js';
 
 // ── species registry ─────────────────────────────────────────────────────────
 // card:    { w, h, curve, cup, segH } — one curved strip, full sheet per card
@@ -175,6 +176,19 @@ export const FLORA_SPECIES = {
         // stiffer cane than corn, and the heavy head barely flutters
         wind: { base: 0.04, gust: 0.09, gustFreq: 0.3, flutter: 0.8 },
         sss: 0.5, rough: 0.8, pushScale: 0.4,
+    },
+    daisy: {
+        // the daisy (daisy_gen.js): a CLUMP — basal rosette of lobed spatulate
+        // leaves on tube petioles, 1-4 ribbed stems with clasping toothed
+        // leaves, one head per stem (involucre cup, phyllotaxis disc, fitted
+        // notched ray whorl; now and then a bud) — all on the ONE daisy_ sheet
+        // modelled in Blender. `color` recolors the rays; `close` shuts them.
+        archetype: 'daisy', maps: 'daisy',
+        daisy: { height: 0.45, headD: 0.05, headScale: 1 },
+        baseScale: [0.85, 1.15], density: 12, clump: 0.42,
+        // light heads on slender stems: modest sway, a small quick flutter
+        wind: { base: 0.018, gust: 0.035, gustFreq: 0.3, flutter: 0.12 },
+        sss: 0.6, rough: 1.0, pushScale: 0.8,
     },
 };
 
@@ -631,15 +645,21 @@ function finishPlacement(x, z, o, spec, rng, step, selfCheck) {
     // default 0.15 rad) — sunflower fields face one way; omit for the usual
     // random spin. ONE rng draw either way so the stream stays aligned.
     const spin = rng();
-    const yaw = o.heading != null
-        ? o.heading + (spin - 0.5) * 2 * (o.headingJitter ?? 0.15)
-        : spin * Math.PI * 2;
+    const yaw = headingYaw(o, x, z, spin);
     return {
         x, y, z, yaw,
         scale, tilt: 0,
         tx: ntx + Math.cos(leanAz) * lean, tz: ntz + Math.sin(leanAz) * lean,
         colorVar: rng(), phase: rng() * Math.PI * 2,
     };
+}
+
+// `headingTarget` [x, y, z] turns every plant toward one point (a camera);
+// otherwise `heading` is a shared azimuth; otherwise a random spin
+function headingYaw(o, x, z, spin) {
+    const jit = (spin - 0.5) * 2 * (o.headingJitter ?? 0.15);
+    if (o.headingTarget) return Math.atan2(o.headingTarget[2] - z, o.headingTarget[0] - x) + jit;
+    return o.heading != null ? o.heading + jit : spin * Math.PI * 2;
 }
 
 // ── row planting — the cultivated footprint ─────────────────────────────────
@@ -735,7 +755,10 @@ export async function createFlora(opts = {}) {
     // 'copper', 'straw'...) or a custom [r,g,b] multiplier over the atlas.
     // BLADE GRASSES ONLY — shrub/yucca foliage always renders its authored
     // sheet colours (no API path tints them; asset changes are art changes)
-    if (opts.color) {
+    // daisy: `color` = DAISY_COLORS name, [r,g,b] or a { name: weight } mix —
+    // recolors the ray florets only (the gen's colour node, below)
+    const daisyPalette = spec.archetype === 'daisy' ? resolveDaisyPalette(opts.color) : null;
+    if (opts.color && spec.archetype !== 'daisy') {
         if (!spec.blades) throw new Error(`[grass2] 'color' applies to blade grasses only — '${opts.species}' keeps its authored sheet colours`);
         const entry = Array.isArray(opts.color) ? opts.color : GRASS_COLORS[opts.color];
         if (!entry) throw new Error(`[grass2] unknown color '${opts.color}' — have: ${Object.keys(GRASS_COLORS).join(', ')} (or a custom [r,g,b])`);
@@ -794,6 +817,32 @@ export async function createFlora(opts = {}) {
         // a generic re-blend here would undo that treatment
         console.log(`[grass2] sunflower plant: ${cornBuild.stats.verts} verts, ${cornBuild.stats.tris} tris`);
     }
+    if (spec.archetype === 'daisy') {
+        let daisyFit = null;
+        try { daisyFit = JSON.parse(await Deno.readTextFile(ASSET_DIR + 'daisy_fit.json')); }
+        catch { /* fallback envelopes in the gen */ }
+        const dOpt = { ...spec.daisy, ...(opts.daisy ?? {}) };
+        if (opts.height) dOpt.height = opts.height;
+        if (opts.headScale) dOpt.headScale = opts.headScale;
+        // heads face a direction: heading = azimuth (atan2(dz, dx)), a vector
+        // [x, y, z] (e.g. the sun), or { toward: [x, y, z] } — a point every
+        // plant turns to (a camera). A vector's elevation tilts the heads.
+        const hd = opts.heading;
+        if (hd != null) {
+            let el = opts.headingElevation ?? 0.62;
+            if (Array.isArray(hd)) {
+                o.heading = Math.atan2(hd[2], hd[0]);
+                el = Math.atan2(hd[1], Math.hypot(hd[0], hd[2]));
+            } else if (hd.toward) {
+                const t = hd.toward, cy = o.heightFn ? o.heightFn(o.center[0], o.center[1]) : (o.y ?? 0);
+                o.heading = null; o.headingTarget = t;
+                el = Math.atan2(t[1] - cy - dOpt.height * 0.8, Math.hypot(t[0] - o.center[0], t[2] - o.center[1]));
+            }
+            dOpt.facing = { el };
+        }
+        cornBuild = buildDaisyGeometry('daisy', `daisy:${o.seed}:${o.variant ?? 0}`, { fit: daisyFit, ...dOpt });
+        console.log(`[grass2] daisy clump: ${cornBuild.stats.heads} heads + ${cornBuild.stats.buds} buds, ${cornBuild.stats.verts} verts, ${cornBuild.stats.tris} tris`);
+    }
     const baseGeo = shrubGeos ? shrubGeos.leaf
         : cornBuild ? cornBuild.geo
         : spec.archetype === 'rosette' ? rosetteGeometry(spec, gRng)
@@ -813,7 +862,9 @@ export async function createFlora(opts = {}) {
             const sy = o._surfaceAt ? (o._surfaceAt(pl[0], pl[1])?.y ?? 0) : null;
             return {
                 x: pl[0], y: sy ?? (o.heightFn ? o.heightFn(pl[0], pl[1]) : (o.y ?? 0)), z: pl[1],
-                yaw: pr() * Math.PI * 2,
+                // daisy heroes honour `heading`; other species keep their
+                // original random yaw here (approved scenes pass both)
+                yaw: spec.archetype === 'daisy' ? headingYaw(o, pl[0], pl[1], pr()) : pr() * Math.PI * 2,
                 scale, tilt: 0, colorVar: pr(),
                 phase: pr() * Math.PI * 2,
             };
@@ -857,11 +908,13 @@ export async function createFlora(opts = {}) {
 
     const aPR = attribute('aPosRot'), aSV = attribute('aScaleVar'),
         aPh = attribute('aPhase'), aHgt = attribute('aH');
+    // daisy: plant-local petal close + round-head correction, before instancing
+    const daisyHook = spec.archetype === 'daisy' ? daisyLocalNodes(cornBuild, { aSV, aPR, close: opts.close ?? 0 }) : null;
 
     // full instance transform in the vertex stage (the CK42BB layout):
     // scale → tilt(X) → yaw(Y) → translate → wind → push
     mat.positionNode = Fn(() => {
-        let p = positionLocal.mul(vec3(aSV.x, aSV.y, aSV.x)).toVar();
+        let p = (daisyHook ? daisyHook.position : positionLocal).mul(vec3(aSV.x, aSV.y, aSV.x)).toVar();
         const cR = cos(aPR.w), sR = sin(aPR.w);
         p = vec3(p.x.mul(cR).sub(p.z.mul(sR)), p.y, p.x.mul(sR).add(p.z.mul(cR))).toVar();
         // world tilt (aPhase.yz): random lean + the stroke's surface-normal
@@ -930,10 +983,14 @@ export async function createFlora(opts = {}) {
     // as if the sun sat somewhere else (and the SSS lobe points wrong)
     const rotNormal = Fn(() => {
         const cR = cos(aPR.w), sR = sin(aPR.w);
-        return transformNormalToView(vec3(
-            normalLocal.x.mul(cR).sub(normalLocal.z.mul(sR)),
-            normalLocal.y,
-            normalLocal.x.mul(sR).add(normalLocal.z.mul(cR))));
+        const nL = daisyHook ? daisyHook.normal : normalLocal;
+        const nV = transformNormalToView(vec3(
+            nL.x.mul(cR).sub(nL.z.mul(sR)),
+            nL.y,
+            nL.x.mul(sR).add(nL.z.mul(cR))));
+        // daisy heads are seen from both sides in sunlight: true two-sided
+        // shading (the carpet/canopy species keep their light-gather normals)
+        return daisyHook ? nV.mul(T3.faceDirection) : nV;
     })();
     // base = instance-rotated vertex normal (up for grass, bent for shrub
     // sprays — a LIGHT-GATHER direction); detail = the tangent map's deviation
@@ -963,6 +1020,7 @@ export async function createFlora(opts = {}) {
             .mul(step(float(rt.v0), u.y)).mul(step(u.y, float(rt.v1)));
         albRGB = albRGB.mul(mix(vec3(1, 1, 1), vec3(...rt.mul), inR));
     }
+    if (daisyPalette) albRGB = daisyColorNode(albRGB, { aSV, palette: daisyPalette });
     mat.colorNode = albRGB.mul(shade);
     if (maps) {
         mat.opacityNode = texNode(maps.albedo).a;
@@ -1055,9 +1113,12 @@ export async function createFlora(opts = {}) {
 
     if (stemMesh) mesh.add(stemMesh);                    // rides along into the scene
     console.log(`[grass2] ${opts.species}: ${count} instances × ${geo.attributes.position.count} verts (${spec.archetype}${stemMesh ? '+stems' : ''})`);
-    return { mesh, stemMesh, material: mat, update, setPushers, dispose,
-        uniforms: { time: uT, windDir: uWindDir, base: uBase, gust: uGust, sunDir: uSunDir },
-        count };
+    // daisy: close 0 = open .. 1 = shut (rays fold up and curl in over the disc)
+    const setClose = (v) => { if (daisyHook) daisyHook.uClose.value = v; };
+    return { mesh, stemMesh, material: mat, update, setPushers, dispose, setClose,
+        uniforms: { time: uT, windDir: uWindDir, base: uBase, gust: uGust, sunDir: uSunDir, close: daisyHook?.uClose,
+            lodNear: daisyHook?.uLodNear, lodFar: daisyHook?.uLodFar },
+        count, heads: cornBuild?.heads };
 }
 
 // helper-injection registration (HELPER_MODULES imports this file as an ES
@@ -1065,4 +1126,5 @@ export async function createFlora(opts = {}) {
 globalThis.createFlora = createFlora;
 globalThis.FLORA_SPECIES = FLORA_SPECIES;
 globalThis.GRASS_COLORS = GRASS_COLORS;
+globalThis.DAISY_COLORS = DAISY_COLORS;
 globalThis.resetFloraOccupancy = resetFloraOccupancy;

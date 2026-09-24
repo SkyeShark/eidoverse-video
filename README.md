@@ -172,6 +172,14 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
   `align_lyrics.py` lyric timestamps, `lipsync.py` visemes,
   `merge_av.py` safe muxing, `video_to_sprite.mjs` video→atlas for
   in-world screens, `satori_ui.mjs` HTML/CSS→texture.
+- `voicebox/` — voices made from scratch: a formant singer and speaker, the
+  machine voices of history (Voder 1939, a Kelly–Lochbaum tube model of the
+  1961 "Daisy Bell", Speak & Spell LPC, S.A.M., Klatt, desktop and neural TTS
+  re-sung on notes), choirs, and phoneme-exact visemes; see
+  [voicebox](docs/voicebox.md).
+- `synthkit/` — music built by hand: instruments, 808/909 drums, a sequencer
+  with sidechain and sends, designed FX, and a true-peak master bus; see
+  [synthkit](docs/synthkit.md).
 
 ### Runner
 `eido.py` — `bootstrap` / `doctor` / `render [--probe]` / `shell` / `agent` (the loop runner) / `cleanup`.
