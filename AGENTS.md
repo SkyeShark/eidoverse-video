@@ -93,8 +93,12 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Production planning](tools-guides/production.md) | Planning a complete film, choosing duration, story beats, sound and set dressing. |
 | [Scene format and renderer](tools-guides/scene-format.md) | Creating scene JSON/JS, loading assets, renderer setup and engine globals. |
 | [Asset sourcing and model kits](tools-guides/assets.md) | Finding models, HDRIs and PBR maps; loading GLBs and reusable kit parts. |
+| [Blender asset authoring](tools-guides/blender.md) | Headless Blender runs, garments and accessories for VRMs, VRMA animation clips, hard-surface props baked to GLB and trim sheets. |
+| [Props and sets](tools-guides/props-and-sets.md) | Historical voice machines (1939–2001), an 1896 tandem with rider IK, and the DAISY film's corner, funeral and ocean sets. |
 | [Audio and speech](tools-guides/audio.md) | Music, SFX, narration, voice processing, lyric timing, lipsync and mixing. |
-| [VRM characters](tools-guides/characters.md) | Loading, casting, animating, walking, running, gestures, sitting and foot IK. |
+| [Voice synthesis](tools-guides/voicebox.md) | Singing or speaking voices made from scratch, historical machine-voice eras (1939 Voder → neural), choirs, phoneme-exact visemes. |
+| [Music synthesis](tools-guides/synthkit.md) | Hand-built instruments and drums, sequencing, sidechain, designed FX, loudness-targeted mastering. |
+| [VRM characters](tools-guides/characters.md) | Loading, casting, animating, walking, running, gestures, sitting, foot IK, the claudesona's face and outfits, turntable sheets. |
 | [VRM autonomous navigation](tools-guides/navigation.md) | Sensor cones, occupancy memory, landmarks, route planning and diagnostics. |
 | [Procedural and realistic creatures](tools-guides/creatures.md) | Creature morphology, gait, speech and optional cached realist pipelines. |
 | [Clippy character](tools-guides/clippy.md) | Paperclip morphs, named performances and deterministic animation. |
@@ -104,18 +108,18 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Procedural geometry](tools-guides/geometry.md) | Parametric surfaces, lofts, booleans, curve deformation and rhombic voxels. |
 | [Terrain and surface materials](tools-guides/terrain-surfaces.md) | Heightfields, PBR generators, surface layers, UV density and parallax relief. |
 | [Vegetation and trees](tools-guides/vegetation.md) | Instanced foliage, species, planting, wind, pushers and SeedThree trees. |
-| [Sky, celestial worlds and weather](tools-guides/sky-weather.md) | Whole sky packages, time of day, clouds, rain, lightning, reflections and weather audio. |
+| [Sky, celestial worlds and weather](tools-guides/sky-weather.md) | Whole sky packages, time of day, clouds, rain, lightning, reflections, weather audio and the sun corona. |
 | [Shallow water and 2D fluids](tools-guides/liquids.md) | Terrain water, pours, erosion, ocean surfaces, ink and dye. |
 | [Free-surface water](tools-guides/free-surface-water.md) | 3D water volumes, emitters, static and moving colliders. |
 | [Volumetric fire](tools-guides/volume-fire.md) | Burning mesh emitters, GPU smoke/fire simulation and its compositor. |
 | [Cloth](tools-guides/cloth.md) | Fabric panels, pinning, wind, collisions and settling. |
 | [Particles and morphing](tools-guides/particles-fx.md) | Sprite effects and mesh/text/point-cloud transitions. |
 | [SDFs and isosurfaces](tools-guides/sdf-volumes.md) | Placeable raymarched surfaces, volume effects and voxel scalar fields. |
-| [Post-processing effects](tools-guides/postprocessing.md) | Effect registry, parameters, animated uniforms and compositing. |
-| [Motion graphics, screens and text](tools-guides/motion-graphics.md) | Titles, subtitles, overlays, screen UI, video atlases and 3D type. |
+| [Post-processing effects](tools-guides/postprocessing.md) | Effect registry, parameters, animated uniforms, compositing and the era looks (print, CRT, film and paint). |
+| [Motion graphics, screens and text](tools-guides/motion-graphics.md) | Titles, subtitles, overlays, screen UI, computing-history screen scenes, video atlases and 3D type. |
 | [Cameras and lighting](tools-guides/camera-lighting.md) | Framing, safe camera travel, focus targets, shadows and physical lighting. |
 | [Placement and assembly checks](tools-guides/placement.md) | Contact, scale, orientation, vehicle paths, clipping, hovering and z-fighting. |
-| [Render review and sharing](tools-guides/render-review.md) | Preflight, probes, image/video/audio review, audit reports and discussing the result. |
+| [Render review and sharing](tools-guides/render-review.md) | Preflight, probes, image/video/audio review, audit reports, contact sheets and discussing the result. |
 | [Renderer troubleshooting](tools-guides/stack-notes.md) | WebGPU/TSL limitations, texture orientation, transparency and encoding. |
 | [Toolkit maintenance](tools-guides/development.md) | Helper registration, dependencies, examples, tests and maintaining this guide index. |
 

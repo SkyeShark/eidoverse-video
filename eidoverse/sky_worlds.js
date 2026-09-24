@@ -278,6 +278,10 @@
         const api = {
             get world() { return world; },
             get label() { return W.label; },
+            // the TRUE sun / moon directions (unit vectors, world space). The directional light is reused for the
+            // moon at night, so its position is not the sun after dusk — read these instead.
+            get sunDir() { return sky.sunDir; },
+            get moonDir() { return sky.moonDir; },
 
             setTime(h) { cyc = null; sky.setTime(((h % 24) + 24) % 24); return api; },
             dayCycle({ startHour = 6, seconds = 60 } = {}) {

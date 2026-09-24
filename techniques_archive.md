@@ -772,3 +772,275 @@ entire attached payload; assembled motion still needs its own inspection.
 - Rule: length comes from the caption's timed structure plus a ceiling above the target; `--seconds` only
   for short pieces or a pin near the encoder's estimate; roll seeds and select by measured duration.
   Guide section: tools-guides/audio.md "Prompting MiniMax Music 3 for a film cue".
+
+
+## DAISY tandem hero prop (2026-09-23) — Opus 5.5 subagent (now eidoverse/props/tandem.js)
+
+- Blender 5.2 headless hero asset → GLB, driven from three.js: build_tandem.py (tgeo/tparts/tmats) models the
+  1896-pattern tandem part by part in a +X-travel / +Y-up / +Z-right "bike frame" (B() maps it to Blender Z-up;
+  the glTF exporter maps it straight back). Pivot empties (steer, wheel_*, crank_*, pedal_*, seat_*, grip_*)
+  with identity rotations spin about their local axes in JS; layout + chain belts ride in root extras
+  (userData.daisy_tandem).
+- BAKE SPEED: Cycles bakes every selected object in its own session (full scene sync each). 65 separate parts
+  = 680 s for ONE 2k colour pass, GPU idle, one CPU core busy. Join per (pivot, atlas) BEFORE baking
+  (carry per-part shader inputs as per-vertex attributes, read with Attribute GEOMETRY) → 26 s. Also
+  margin_type='EXTEND'; smart-project only meshes without usable UVs (boolean casts, lofts) — sweeps,
+  lathes and curve plates keep metric UVs and pack_islands separates UV-disconnected islands itself.
+- Cast lugs = boolean union of socket "plugs" (spear points) + fillet + WEIGHTED_NORMAL (FACE_AREA,
+  keep_sharp) applied → boolean seams stop smearing. Tubes stop at the joint centre inside the lug, uncapped.
+- Spokes without motion blur strobe at 60 fps. Per-vertex `_TRAIL` flag (exported via export_attributes)
+  + positionNode that swings trailing vertices back by wheel ω·shutter and opacity = wire/(wire + r·Δθ):
+  crisp at rest, a silver haze at speed, one draw call.
+- Block chain on the GPU: one-pitch link mesh instanced N times; vertex shader walks each instance round
+  the belt (2 tangent runs + 2 arcs, setLayout'ed TSL fn) from one phase uniform; ring tooth phases are
+  set at build time so blocks sit in gaps.
+- Tools: fetch_hdri.py has NO --help — any argument is a search term and it OVERWRITES the repo-root
+  hdri.hdr/hdri_b64.txt (restored from work/memory_of_water/assets/hdri_dusk.hdr, same bytes size).
+  fetch_texture.py writes into the cwd: run it from the target folder. Deno scripts outside the repo pick up
+  C:/Users/sdn52/package.json — use --no-config --no-lock.
+- Rider rig on a vehicle: analytic two-bone IK on NORMALIZED humanoid bones in the VRM's own frame (parent
+  vrm.scene to the seat; targets via vrm.scene.matrixWorld inverse, so scale 0.87 is free), then
+  vrm.humanoid.update() before the render (the engine's post-render vrm.update() stays the only spring step).
+  Frames: thigh/shin = frame-to-frame rotation (bone dir + hinge-side dir), hand = forearm dir pitched round
+  the grip axis, wrist twist split half into the forearm. Measured: toe/wrist targets hit at 0.000 mm.
+- Spring joints set bone.matrixAutoUpdate = false; releasing a joint (springBoneManager.deleteJoint) to pose it
+  by hand needs matrixAutoUpdate = true again, or the quaternion writes never reach the skin.
+- Spring pre-roll: after the first pose, springBoneManager.update(1/60) x120 in setup, or the mane/tie swing
+  in from the T-pose on camera.
+- mrtNode = mrt({normal: vec4(0), metalrough: vec4(0)}) on a LIT transparent material (spoke smear) fails
+  to compile ('fragment' ShaderModule invalid); the scene MRT already weights aux attachments by alpha.
+- ffmpeg 9.0 rejects -vsync: render_scene.mjs:3521's probe-frame extraction fails on this machine
+  ("probe-frame extraction failed"); -fps_mode vfr is the replacement. Extract frames manually meanwhile.
+
+
+## 2026-09-23 — DAISY corner/march set (now eidoverse/sets/corner.js): instancing gotchas on the WebGPU stack
+- **Per-instance values read in the FRAGMENT stage came back different per fragment** (instancedBufferAttribute used in colorNode → speckled sign art). Resolve per-instance values in the vertex stage and pass them with `THREE.varying(...)` (e.g. the sign's atlas cell).
+- **>8 vertex buffers silently drops the draw** ("The number of vertex buffers 9 exceeds the limit 8"): position+normal+uv + 3 rig attributes + 3 instance attributes vanished while a MeshBasic debug of the same mesh drew. Pack per-instance data into ONE `THREE.InstancedInterleavedBuffer(arr, stride, 1)` and read it with `instancedBufferAttribute(ib, 'vec4', stride, offset)`; a plain typed array/InterleavedBuffer here steps per VERTEX (exploded geometry). Pack rig channels into one vec3 attribute.
+- **Canvas textures on glTF meshes**: sample with the mesh's own `uv()` (glTF v=0 = canvas top). Three-built PlaneGeometry needs `vec2(uv().x, 1 - uv().y)` when sampling a canvas with an explicit uv node.
+- **NodeMaterial `.opacity` does not bind**: glass needs `opacityNode = float(op)`.
+- **A frame that compiles many new pipelines lands one frame late** in the readback (black on a run's first frame, a repeated frame mid-run): a cut into never-seen materials arrives 1 frame late.
+
+## 2026-09-23 — createFlora `daisy` species (eidoverse/vegetation_daisy_gen.js): what the build taught
+- **Headless Blender with `--factory-startup` DELETES the user's extension wheels**: startup wheel-sync
+  sees zero enabled extensions and removes `AppData/Roaming/Blender Foundation/Blender/5.2/extensions/
+  .local/lib/python3.13/site-packages/*` (locked files end up in `.~stale~NNNN`). Isolate every headless
+  run: `BLENDER_USER_RESOURCES=<scratch dir>` (the repository's `run_blender.sh` does this). A normal
+  interactive start re-syncs the wheels of enabled extensions.
+- **Card art without a bake cage**: model the high-poly pieces flat in "atlas space" and ortho-render
+  emission passes (albedo / data / world normal / AO node) per region — exact values, AA alpha for free.
+  Curved low-poly carriers (a domed disc, a cup seen from below) convert world normals to tangent space
+  per pixel with the analytic frame T=∂P/∂u, B=∂P/∂v, N=outward (three's derivative TBN uses exactly that).
+- **Per-vertex data past the 8-vertex-buffer ceiling**: a big instanced flora field already binds 8
+  (position/normal/uv/aH + 3 instance attrs + the instanceMatrix buffer above 1024 instances). Extra
+  per-vertex records go in `storage(StorageBufferAttribute, 'vec4', n).element(vertexIndex * k)` read in
+  positionNode; anything the fragment needs leaves the vertex stage through `.toVarying()`.
+- **N8AO default (5 m radius, x5) blackens small plants seen from behind** (a flower's own cup + stem read
+  as deep occlusion). Flower-scale shots: `_aoParams = { aoRadius: 0.3, intensity: 2, distanceFalloff: 0.5 }`.
+- **Far billboards sample the atlas's tiniest mips**: a sub-pixel impostor card takes its colour from the
+  whole atlas neighbourhood. Put the impostor tile among same-colour art (here inside the white ray cells),
+  or a far field of white flowers renders green from the neighbouring leaf windows.
+- **Sky-facing flowers vanish at grazing distance** (petals and axis-facing cards go edge-on): the far LOD
+  card must billboard toward the camera, sized ~0.75 of the head (the mean projected area of sky-facing
+  heads) or the LOD band reads as a denser stripe.
+- In these probes the sky_worlds dome rendered black under `_noAutoEnhance`, so lookdev kept auto-enhance
+  with bloom/SSR zeroed (`_bloomParams`, `_ssrParams`). Separately, every run with makeSky logged one
+  invalid 'fragment' ShaderModule (its WGSL has an empty `OutputType` struct) — cause not traced; the sky
+  still drew with auto-enhance on.
+
+
+## 2026-09-24 — DAISY era-2 voice machines: Blender hard-surface → baked GLB → eidoverse modules (now eidoverse/props/voice_machines/)
+
+- Pipeline: `era_bkit.py` (now in `eidoverse/assets/models/voice_machines_src/`; headless Blender 5.2, run ONLY
+  through `run_blender.sh`, which sandboxes BLENDER_USER_RESOURCES) models
+  each machine as masses (profile prisms, lofts, EXACT booleans, angle-limited bevels), gives faces bake-source
+  materials (AmbientCG scans box-projected in object space at real scale and tinted; AO-node grime broken up by a
+  dirty-plastic scan; pointiness edge wear; noise + up-facing yellowing; PIL-drawn labels/logos projected by empties
+  with facing + depth masks), bakes colour (2048) and roughness/normal/AO (1024) on the CPU, and exports one GLB.
+  Modules load it with `Deno.readFile(new URL('./assets/x.glb', import.meta.url))` + `GLTFLoader().parseAsync` and
+  rebuild `MeshStandardNodeMaterial`s from the baked maps. Named objects carry runtime roles: `screen_*`, `led_*`,
+  `glow_*` (voice-lit), `metal_*`.
+- Custom normals survive booleans and get interpolated across the sliver triangles a cut leaves on a flat face →
+  fan-shaped streaks. Keep `harden_normals` off in intermediate bevels; at the end clear custom split normals,
+  shade smooth by angle, then set exactly flat corner normals on coplanar regions larger than ~1 cm². A weighted-
+  normal modifier does not fix it after booleans, because the flat face is now many small slivers.
+- Several overlapping cutters joined into one operand need `use_self=True` on the EXACT boolean, or the target can
+  silently come back empty (a whole shell vanished). Log vertex counts per boolean.
+- A fine post-boolean bevel on dense vent geometry can explode a handful of vertices to ±4e6 m. Snapshot the mesh,
+  compare bounds after the bevel, restore and retry gentler.
+- Dished keycap tops made by stacked `inset_region` calls fold along a diagonal (obvious in the baked normal/AO maps,
+  a light/dark half on every key in the render). Build the dish as concentric scaled rings down to a centre vertex.
+- three's ACES multiplies by exposure/0.6 before the curve: emissive screen colours land ~1.7× brighter and paler
+  (the C64 light blue turned lavender). Pre-compensate the screen gain and keep spotlit CRT glass dark.
+- The native CanvasTexture shim flips through repeat/offset; `texture(tex, customUV)` skips the texture matrix, so
+  sample (u, 1 − v) yourself. Auto-mips sample zero at non-base levels; upload CPU mip chains as `texture.mipmaps`
+  (the Mac's 1-bit 50 % desktop then minifies to grey instead of moiré).
+- Black/smoked gloss plastic under a spotlight turns a scan's micro-variation into glitter (the Speak & Spell band
+  sparkled with texmix 0.2, bump 0.1, roughness 0.10-0.20). For dark gloss: texmix <= 0.05, bump <= 0.03 and a
+  roughness band only ~0.06 wide; the highlight then reads as one soft smoked-plastic sheen.
+- NEVER bake the normal pass at 1 sample. A scan bump finer than a texel gets point-sampled into per-texel white
+  noise (mean tilt 4-6 deg, p90 10 deg): every beige plastic read as granite/terrazzo under a grazing key. Cycles
+  bakes jitter inside the texel per sample, so 16 samples average it to texel-scale relief (seconds per map); the
+  GLBs also shrank (desktop 14.3 -> 11.9 MB, the noise was incompressible).
+- GOTCHA: `blender --background --factory-startup` against the REAL user folder syncs extensions to an empty
+  enabled set and deletes Skye's installed extension packages. Every headless run goes through run_blender.sh.
+- Bright printed yellow under a hot key: ACES's input matrix feeds ~0.13·G into blue and the shoulder desaturates,
+  so a (237,209,21) print rendered pale butter (229,210,88). Match printed colours to a reference photo at the SAME
+  red exposure: a deeper golden print (230,192,0) rendered (221,194,62) against the photo's (222,197,48).
+
+## 2026-09-24 — DAISY: dressing the claudesona (now eidoverse/claudesona_wardrobe.js, claudesona_face.js, sun_corona.js) — Opus 5.5
+One VRM carries every outfit as hidden layers (`eidoverse/assets/vrms/claude_suit_wardrobe.vrm`; guide: tools-guides/characters.md, "Outfits").
+- **Hats on a flower head = game "hat hair".** Fold the crown petals down the back and shorten them. They're spring
+  bones, so write the fold into each chain's REST pose: set the root joint's quaternion (and scale), `updateMatrix()`,
+  then `joint.setInitState()` for every joint in the chain; the springs keep moving around the new rest. Restore the
+  stored originals the same way when the hat comes off.
+- **VRM 1.0 two-node spring chains have ONE joint.** The last node is only the tail, so a chain's tip is
+  `joint.child`. Taking "the last joint" as the tip gives a zero direction → `setFromAxisAngle` with a zero axis → a
+  NON-UNIT quaternion that silently scales the bone.
+- **Per-part colour on a skinned mesh:** derive a part id per vertex from its dominant skin bone and write per-vertex
+  COLOURS. A float id attribute interpolates across seam triangles and `int()` lands on wrong parts (jagged rings).
+- **MToonNodeMaterial has `shadeColorNode`.** A procedural `colorNode` pattern vanishes in the shade (flat
+  `shadeColorFactor`) unless the shade gets the pattern too. Outline passes are separate materials ('X (Outline)'):
+  darken their `outlineColorFactor` with dark paints, or black cloth gets brown piping.
+- **On a textured garment, `m.color` multiplies the print** (the cyclist stripes ghosted through black paint). Put
+  the paint in `colorNode`; the normal map keeps the knit. Memoize pattern nodes per (material, spec) so re-wearing
+  an outfit reuses its compiled pipelines.
+- **A grey parametric rim washes out small dark accessories** (a deep green bow tie read mint, black acetate read
+  silver). Accessories get rim 0.
+- **A garment made by pushing verts out along normals cracks at split seams.** Skin shows through as coloured
+  lines on dark paint. Wear the source garment underneath, painted to match.
+- **Face emotion without an animation rig:** key the cues to the LYRICS (regex on caption text) plus a per-section
+  base, blended with smoothsteps and max-merged into the lipsync plate dict. Re-timing the song never desyncs a feeling.
+- **The earth sky reuses its directional light for the moon after dusk.** Anything tied to the sun must read the true
+  direction: `sky.sunDir` / `sky.moonDir` (getters added to eidoverse/sky_worlds.js).
+- **Spoken lines in a sung arrangement:** place each by its SPEECH onset (TTS renders carry ~0.2 s lead-in), chain
+  them end → start with a breath, and assert they end before the next hard event (an eruption, a verse downbeat).
+  Measure: whole-caption spans overlapped by up to 3 s before the fix. Sound captions ("(humming)") get their own
+  top lane so the words stay in the bottom lane.
+
+## 2026-09-24 — hand-authored VRMA performance clips from Blender (the claudesona; now eidoverse/assets/animations/ + performance_src/) — Opus 5.5 subagent
+
+- **Blender → VRMA works headless.** Use `bpy.ops.export_scene.vrma(filepath=..., armature_object_name=...)` from
+  the VRM add-on (4.4.0, Blender 5.2). Set `vrm1.humanoid.pose = 'restPositionPose'` first, so the exporter's
+  T-pose reference is the rig's own rest pose, which is the same pose three-vrm normalizes. The exporter samples
+  EVERY frame from `frame_start` to `frame_end` at the scene fps through `apply_pose_from_action`, so dense per-frame
+  keys (LINEAR) are the exact data you get. Every humanoid bone gets a channel (fingers included), so key relaxed
+  fingers or the hands export as T-pose paddles. The hips translation is ABSOLUTE; three-vrm scales it by the
+  hips-height ratio.
+- **Choose the fps so beats are whole frames.** At 128 BPM, 64 fps gives exactly 30 frames a beat. A loop of N beats
+  then ends on the sample it starts on, and its seam is 0.000°.
+- **Author in the normalized frame (x = her left, y = up, z = forward).** For each bone,
+  `q_blender_basis = Rrest⁻¹ · N · Rrest`, with the axis map (x, y, z)three → (x, −z, y)blender. This is exact, and
+  a pose written this way can be tested in the engine by setting `getNormalizedBoneNode(...).quaternion` directly.
+- **Arms: IK keys, not joint angles.**
+  - A key = palm-surface point, palm normal, finger direction, elbow pole.
+  - The upper arm's twist comes from aligning the elbow hinge with the pole.
+  - Split the remaining twist onto the forearm (pronation/supination, ±110° clamp) and leave the wrist the swing.
+  - Print elbow flexion, forearm twist and wrist swing for every key: a >60° wrist in an in-between key reads as
+    a "pledge hand" for a few frames. The fix is to point the fingers along the forearm mid-flight.
+- **Legs: IK every frame on one shared stance.** Every clip plants the same foot marks, so crossfading between any
+  two clips never slides the feet. Knee flexion is very sensitive near full extension: a 1.8 cm hips drop gave
+  22–28° knees. Watch the reach (> 0.999 = the foot lifts off its mark).
+- **Interpolate in rotation-vector space relative to the base pose.** Use an auto-clamped cubic Hermite (flat at
+  extremes, flowing through breakdowns), periodic for loops.
+- **Overlap by per-chain time lag.** On one-shots, FADE THE LAG OUT over the last beat, or the lagged bones are still
+  moving when the clip clamps.
+- **Hold loops start exactly on the one-shot's last frame.** Give the loop a flat copy of its first key before the
+  wrap, because lagged bones read the tail at frame 0. Breathe with sin² (zero value AND zero velocity at t = 0). A
+  sin breath starts at full speed and kicks visibly at a hard cut. Measured by frame diffs: 0.05 → 0.25 jump with
+  sin, smooth with sin².
+- **Mirror at the pose-spec level, not the baked curves.** Swap the arms with x negated, flip torso/hips turn and
+  tilt, and swap which heel peels, but KEEP the stance.
+- **Verify the artifact, not the intent.** Run FK on the .vrma's own rest nodes (glTF quats are x,y,z,w; take the
+  angle between quats with atan2, because arccos near 1 turns float32 norm error into a fake 0.05° seam).
+  Then draw motion trails, one dot per film frame for the hands, fingertips, head and hips, front and side: arcs
+  read as curves, spacing as dot density. A gesture that "slides" shows as a flat band; re-key it as an ellipse.
+- **A probe or tool script MUST register its renderer as `globalThis._r`.** Otherwise the runner doesn't own three's
+  NodeFrame clock, frame-scoped nodes (skinning) advance on the wall-clock RAF, and a character rendered faster than
+  ~60 fps moves at half rate. Frame diffs alternate 1.7 / 0.03, which is the tell. Split-viewport tools also set
+  `_noAutoEnhance`, and set `renderer.autoClear = false` with one `clear()` per frame, then setViewport/setScissor
+  per camera.
+- **digi's rest thumb points INTO the palm** (≈ 45° toward the fingers, −68 % palm-ward). A relaxed hand needs the
+  thumb "closed" ~44° about `thumbDir × fingerDir` so it lies along the index. An "opposition" rotation about the
+  finger axis makes it worse.
+- **The claudesona's flower sets the arm vocabulary.** The petal ring is radius ~0.45 m round the face, and the lower
+  petals droop over the chest to ~0.23 m in front of it.
+  - Raised hands go beside the ring (≥ 10 cm outside) and in front of its plane.
+  - A hand on the heart rests IN FRONT of the lower petal (palm z ≈ 0.235 at chest height), never under it.
+  - The upper arms and forearms carry spring colliders and push the petals; the hands don't.
+
+## DAISY integration (2026-09-24): conducting a many-set music video on one timeline
+- **Graphics modules and the canvas shim.** In the engine, `document.createElement('canvas')` returns the
+  HTMLCanvasShim wrapper, and @napi-rs Skia's `drawImage` rejects it ("Value is non of these types CanvasElement,
+  SVGCanvas, Image"). A 2D module that builds sprite canvases through the DOM works in a napi-only preview and fails
+  in a scene. Create sprite canvases with `createCanvas` from `npm:@napi-rs/canvas`; as a scene-side workaround,
+  hide `globalThis.document` around the (synchronous) draw call so the module's own napi fallback runs.
+- **N8AO is live per frame.** `globalThis._n8ao.configuration.{aoRadius,intensity,distanceFalloff}` sync every frame,
+  so one film can switch AO scale per set (0.3 m for flower-scale daisies, 0.8 m for rooms) without a rebuild.
+- **Several effects in one chain.** With more than one effect, `applyTo(...).uniforms` is keyed by effect name
+  (`_fx.uniforms.daisy_era.glitch`). A set's own effects (depth_fog, godrays) are applied in setup and zeroed by
+  `opacity` outside its section. GodraysNode samples the light's shadow map at graph build: keep that set visible
+  through the engine's one-frame shadow pre-render at the end of setup.
+- **Lights that appear recompile everything.** A light whose visibility toggles mid-film changes the lights hash and
+  rebuilds every visible material. Keep scene-wide helper lights (a face fill, a phone glow) always present at
+  intensity 0.
+- **A VRM on a vehicle rig, then back on clips.** While an IK rig owns her (the tandem's poseRider), stop the mixer
+  (`rec.mixer.stopAllAction()`) so `vrm.update()` steps the springs on the rider pose. To hand her back, re-add
+  `vrm.scene` to the scene and start the next clip with no fade.
+- **Switching clips without a skipped step.** The engine snapshots each `_vrmMixers` record's time before
+  `renderFrame`; replacing the record inside `renderFrame` (as `playVRMAFromBase64` does) skips that frame's mixer
+  step. Parse clips once, `mixer.clipAction(clip)` them, and mutate `rec.action` in place. Lock loops to the song:
+  `action.time = (t - main_t0) mod clip.duration`.
+- **Probe only what the range touches.** Building every set costs ~25 s; a conductor that builds only the sets whose
+  sections overlap `T_OFFSET .. T_OFFSET + duration` (plus a "stills" mode that renders K frames at each listed film
+  time) turns a probe into a few seconds of setup.
+- **Intermittent black render.** Rarely the post chain fails validation (`ShaderModule with 'fragment_RTT' label is
+  invalid`) and every frame is black; the same config renders fine on a re-run. Check logs for it before delivering.
+
+## 2026-09-24 — DAISY graphic-arts post looks (now eidoverse/era_looks.js; the film's march2026, vigil2025, ocean2026, crt1982 and sydney2023 presets are poster_night, candle_film, watercolor_night, crt_8bit and crt there) — Opus 5.5 subagent
+- **Put print and paint looks in display space.** A color hook gets linear HDR before tone mapping. Paper and ink
+  colours land on screen as authored if the hook maps the scene through three's own
+  `acesFilmicToneMapping(c, toneMappingExposure)` and hands the result back through its exact inverse: solve the RRT
+  fit's quadratic per channel and invert both matrices on the CPU. three r184's TSL fit divides by
+  `c * ((c + 0.4329510) * 0.983729)`, so the inverse's linear term is `0.4329510 * 0.983729`. The Hill constant
+  is off by up to 0.4%.
+- **WGSL rejects constant u32 overflow.** `uint(a).mul(uint(b))` with two constants whose product exceeds 2^32 fails
+  Naga ("multiplication operation overflowed"), and the whole post chain renders black (`fragment_RTT ... is invalid`).
+  Mix constant salts on the CPU (`Math.imul(...) >>> 0`). The black render in the integration entry above
+  (probes/stills_v1b.log, 02:36) was era_fx.js mid-edit with this bug. It was not intermittent.
+- **Gated mip blurs cost nothing when off.** three's BloomNode with threshold −1 is a half-res Gaussian pyramid
+  (σ ≈ 4, 14 and 39 px at 1080p; `_textureNodeBlurN`). Wrap its `updateBefore` to return early while no look reads it.
+  Only `getTextureNode()` pulls the node into the graph, not the level textures, so sample it at least once.
+- **Persistence without ghosts at cuts.** AfterImageNode computes max(new, old × damp). Zero damp for one frame
+  when the effect turns on and when the camera jumps (more than 0.6 m or 10°). Check the camera at composite time:
+  another render in the frame, such as an env bake, can run the pipeline before the scene's update().
+- **Benchmark post as throughput.** On this stack `onSubmittedWorkDone` carries ~13 ms of fixed latency, so timing
+  single frames hides GPU cost. Submit N frames and wait once. Tick `renderer._nodes.nodeFrame.update()` per render,
+  as the engine does per encoded frame. Without the tick, FRAME-scoped passes (scene, AO, bloom) are skipped and the
+  numbers are fiction.
+- **An env bake renders the whole post pipeline.** `sky.bakeEnv()` inside renderFrame runs the patched renderAsync
+  at that frame's node-frame id, and the frame shows that render. Set the camera before baking.
+- **Toon ink that keeps a flower field painted.** Ink only the near side of a depth step. Drop lines where both
+  sides are farther at 3× the tap radius; that catches shapes thinner than ~7 px, like petals and stems. Draw colour
+  lines only from steps, never from light ridges.
+
+## 2026-09-24 — moving a film's props and sets into the library (DAISY → eidoverse/props, eidoverse/sets) — Opus 5.5 subagent
+- **Pack exactly what the module reads.** Deno's fs functions are writable on 2.8: wrap `readFile(Sync)`,
+  `readTextFile(Sync)`, `stat(Sync)`, `readDir(Sync)` and napi `GlobalFonts.registerFromPath`, build the ORIGINAL module,
+  drive `update`/`camera`/`markAt` across its whole section, and log every path (the local, git-ignored
+  work/lib_check/trace_hook.js did this). Copy only
+  those files. Then trace the ported module the same way: zero reads under `work/` and the identical relative file list
+  (including the failed optional stats, e.g. a missing `_AmbientOcclusion`) prove the port. Dynamic `import()` of sibling
+  modules does not go through these calls; grep for them.
+- **Resolve a pack from `import.meta.url`, not the cwd.** Deno fs calls take a URL object, but code that concatenates
+  path strings (and `registerFromPath`) needs a filesystem path:
+  `fsPath = (u) => { const p = decodeURIComponent(u.pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; }`.
+- **three r184 double-counts CPU mip chains in `renderer.info.memory.texturesSize`.** For a texture whose `mipmaps[0]` is
+  the base image (the CPU-mipped canvases and GLB maps here) `_getTextureMemorySize` adds the base twice (≈2.33× base
+  instead of 1.33×). Subtract `mipmaps[0].data.byteLength` per texture in `info.memoryMap` for the real footprint.
+- **Per-pack GPU cost:** 30 renders back to back (tick `renderer._nodes.nodeFrame.update()` each) and one
+  `GPU_DEVICE.queue.onSubmittedWorkDone()`. The empty-scene baseline with the default post chain at 1080p on the RTX 5090
+  Laptop is 2.1 ms, 28 draw calls and 283 MB of render targets; subtract it. The numbers are in tools-guides/props-and-sets.md.
+- **Blender scripts that derive paths from `__file__`** (`HERE/..` as their root) only rebuild in the layout they were
+  written in: document that layout and rebuild in a copy of it under `work/`. Replace a hard-coded repo path with a walk
+  up to the folder holding `eido.py`. A scratch rebuild of the funeral crowd from the library copy matched size,
+  triangles and rig JSON (not bytes).

@@ -7,6 +7,10 @@ piece. Plan sound and image together, including intentional gaps. When voice
 needs to be intelligible, listen to its balance against the actual bed; a
 fixed gain difference is only a starting point, not a universal mix standard.
 
+## Synthesized voices and music (no models)
+
+When a piece wants its OWN voice or music, made by hand rather than generated: [voicebox](voicebox.md) sings and speaks from scratch (formant synthesis, historical machine voices from the 1939 Voder to neural TTS, choirs, a physical vocal-tract model), and [synthkit](synthkit.md) builds the music (instruments, drums, sequencer, sidechain, a −14 LUFS / −2 dBTP master). [`eidoverse/examples/daisy/`](../eidoverse/examples/daisy/README.md) is a full song made with both.
+
 ## Recommended music — MiniMax Music 3
 
 Use `generate_song.py` for generated music, including instrumental
@@ -214,6 +218,8 @@ instead of relying on an accidental frozen tail.
 
 ## Lipsync — a character visibly speaking or singing
 
+A voice made with [voicebox](voicebox.md) needs none of the steps below: `voicebox.visemes()` reads the synth's own phoneme timeline, frame-exact, with values 0..1 (not the 0.35 cap of `lipsync.py`, so drivers must not divide by 0.35).
+
 ```bash
 # 1. split the mix. Stems land in <out>/htdemucs/<input-stem>/ — nested,
 #    not next to the input — so reference the nested path.
@@ -278,8 +284,11 @@ globalThis.renderFrame = async function (t) {
 };
 ```
 
-`claude_suit.vrm`'s mouth is a special case (raw morphs, not expressions) —
-its render-verified recipe lives in [characters.md](characters.md).
+`claude_suit.vrm`'s mouth (and `claude_suit_wardrobe.vrm`'s) is a special case:
+raw morphs rather than expressions, and a threshold reveal that a scaled pose
+makes flicker. Drive it with `makeSuitMouth` from `eidoverse/claudesona_face.js`,
+feeding it these same viseme frames with `inputMax: 0.35`; see
+[characters.md](characters.md).
 
 ## Example workflow: a character performance music video
 

@@ -1,0 +1,73 @@
+{
+ "keystrip": {
+  "w": 0.66,
+  "h": 0.0155,
+  "keyX": [
+   -0.214,
+   -0.187,
+   -0.16,
+   -0.133,
+   -0.106,
+   0.106,
+   0.133,
+   0.16,
+   0.187,
+   0.214
+  ],
+  "stopX": [
+   0.03,
+   0.052,
+   0.074
+  ],
+  "quietX": 0.004
+ },
+ "panel": {
+  "w": 0.772,
+  "h": 0.27,
+  "dial": {
+   "x": 0.225,
+   "s": 0.005,
+   "R": 0.058
+  },
+  "pilot": {
+   "x": 0.112,
+   "s": 0.0
+  },
+  "knobs": {
+   "pitch": -0.33,
+   "gain": 0.335
+  },
+  "whisper": [
+   0.03,
+   0.0
+  ],
+  "bank": {
+   "x0": -0.33,
+   "s": 0.09
+  },
+  "name": [
+   -0.13,
+   0.03
+  ]
+ },
+ "moving": [
+  "voder_key_01",
+  "voder_key_02",
+  "voder_key_03",
+  "voder_key_04",
+  "voder_key_05",
+  "voder_key_06",
+  "voder_key_07",
+  "voder_key_08",
+  "voder_key_09",
+  "voder_key_10",
+  "voder_stop_td",
+  "voder_stop_pb",
+  "voder_stop_kg",
+  "voder_quiet",
+  "voder_wristbar",
+  "voder_needle",
+  "voder_pilot",
+  "voder_pedal"
+ ]
+}

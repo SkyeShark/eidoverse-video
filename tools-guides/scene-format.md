@@ -80,6 +80,15 @@ globalThis.renderFrame = async function (t) {
 };
 ```
 
+Always register the renderer as `globalThis._r` (or `_renderer`), probes and
+multi-viewport tools included. The runner drives three's NodeFrame clock one tick
+per encoded frame only for that renderer; an unregistered one keeps the
+wall-clock RAF, so frame-scoped nodes such as skinning update only every other
+frame when rendering runs faster than ~60 fps. Characters then move at half rate
+with no error. The frame diffs alternate large/near-zero, which is the tell.
+A tool that splits the canvas into viewports sets `globalThis._noAutoEnhance = true`
+next to it; the auto-enhance composer would otherwise take over `render()`.
+
 Use the declared assets in real setup/helper code. The runner records accesses
 to `ASSETS` through a Proxy; writing an asset name in a comment does not load
 or use it. The current static name scan does not enforce missing references.

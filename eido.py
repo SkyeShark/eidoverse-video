@@ -163,10 +163,12 @@ def cmd_render(a):
     rel = to_repo_rel(cfg_host)
 
     if a.probe:
-        # single-frame probe: clone the config with duration = 1 frame
+        # probe: clone the config with duration = --frames frames (default 1). Frame 0 shows every VRM
+        # in its LOAD pose (the engine advances animation mixers after rendering a frame), so judge
+        # posed characters on a frame >= 10: `--probe --frames 12`, then extract the last frame.
         cfg = json.load(open(cfg_host, encoding="utf-8"))
         fps = cfg.get("fps", 30)
-        cfg["duration"] = 1.0 / fps
+        cfg["duration"] = max(1, a.frames) / fps
         out = cfg.get("outputVideo") or "probe.mp4"
         stem, ext = os.path.splitext(out)
         cfg["outputVideo"] = f"{stem}_probe{ext}"
@@ -202,7 +204,9 @@ def main():
 
     p = sub.add_parser("render", help="render a scene config on this machine")
     p.add_argument("scene")
-    p.add_argument("--probe", action="store_true", help="single-frame render for framing checks")
+    p.add_argument("--probe", action="store_true", help="short render for framing checks (see --frames)")
+    p.add_argument("--frames", type=int, default=1,
+                   help="with --probe: frames to render (default 1; use >= 12 to judge posed VRMs)")
     p.set_defaults(fn=cmd_render)
 
     a = ap.parse_args()

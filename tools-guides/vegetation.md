@@ -21,7 +21,11 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   arching leaves, husked ears with a BAKED real cob, silk, tassel),
   `sunflower` (full plant: cane, petioled heart-leaf canopy, one nodding
   head — seed-disc plate, dense fitted ray-petal whorl, bract rosette back;
-  the head rides wind as one rigid assembly).
+  the head rides wind as one rigid assembly), `daisy` (oxeye/Shasta clump:
+  basal rosette of lobed spatulate leaves on tube petioles, 1-4 ribbed stems
+  with clasping toothed leaves, a 4-6 cm head per stem — involucre cup, domed
+  phyllotaxis disc, 24-30 notched fitted rays; now and then a bud; closable,
+  recolourable, with a far-LOD impostor).
 - Footprint: non-row stands are circular by default; `size` = diameter,
   or `width`/`depth` for ellipses; `footprint: 'organic'` masks a lobed
   irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
@@ -55,6 +59,46 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   envelope of the sheet's petal cells + leaf window (re-measure it whenever
   the art changes; the format lives in vegetation_sunflower_gen.js, which
   falls back to built-in envelopes without the file).
+- Daisy (`vegetation_daisy_gen.js`, the `daisy_` sheet — modelled and baked
+  in Blender; source and rebuild steps in
+  [`assets/grass/daisy_src/`](../eidoverse/assets/grass/daisy_src/README.md)): meadow density by
+  default (12 clumps/m², ~2.5 heads each); layer seeds for variety.
+  - `color`: `white` (default), `orange` (Claude orange, #D97757 mid-ray),
+    `pink`, `yellow`, `cream`, a custom sRGB `[r,g,b]`, or a weighted mix
+    `{ white: 5, orange: 3, yellow: 1 }` chosen per plant (all heads of a plant
+    share a colour). Rays only: the disc stays gold. `DAISY_COLORS` lists them.
+  - `heading`: which way the heads face — an azimuth in radians
+    (`Math.atan2(dz, dx)`), a direction `[x, y, z]` (e.g. `SUN_DIR`; its
+    elevation tilts the heads), or `{ toward: [x, y, z] }` — every plant turns
+    to that point (a camera). `headingJitter` (rad) loosens it. Omit for wild.
+  - `height` = flowering stem height in m (0.45); `headScale` enlarges heads
+    for stylized shots (2-4; stems thicken with it).
+  - `close` (0 open … 1 shut): the rays fold up about their hinges and curl
+    in over the disc. Animate with `field.setClose(v)` or
+    `field.uniforms.close.value` — the film's dusk.
+  - Far LOD: beyond `daisy: { lod: [10, 18] }` metres (× headScale) each head
+    fades to a camera-facing impostor card so a stand keeps its colour at 50 m;
+    retune per shot with `field.uniforms.lodNear/lodFar.value`
+    (`lod: false` keeps full detail; push it out for 1080p close work).
+  - Lookdev: `field.heads` lists each head's plant-local centre `c`, axis `a`,
+    diameter `d` and wind weight `aH` for aiming cameras.
+  - Under the default auto-enhance, N8AO's 5 m radius reads a head's own cup
+    and stem as deep occlusion and blackens heads seen from behind; for
+    flower-scale shots set `globalThis._aoParams = { aoRadius: 0.3,
+    intensity: 2, distanceFalloff: 0.5 }` in `setup()`.
+  ```js
+  // a mixed desert superbloom (~20k plants): interleaved seeds, one cohort
+  // turned to the sun; at dusk every stroke closes
+  const MIX = { white: 5, orange: 3, yellow: 1, pink: 1 };
+  const bloom = [];
+  for (const [seed, density, heading] of [[3, 0.31], [17, 0.31], [29, 0.27], [41, 0.26, SUN_DIR]]) {
+      const f = await createFlora({ species: 'daisy', size: 48, center: [0, -18], seed, density,
+          color: MIX, heading, heightFn: terrain.heightAt, sunDir: SUN_DIR });
+      scene.add(f.mesh);
+      bloom.push(f);
+  }
+  // per frame at dusk: for (const f of bloom) f.setClose(k);
+  ```
 - Placement: `heightFn: (x,z)=>y` OR `surface: mesh/[meshes]` (raycast down —
   grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant);
   `align` = surface-normal tilt share (grass hugs, woody stays skyward);
@@ -62,7 +106,8 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   hero plants. Structural species claim footprints in a cross-stroke occupancy
   registry — later strokes avoid them (`avoid: false` opts out;
   `resetFloraOccupancy()` between scenes if you rebuild).
-- Returns `{ mesh, stemMesh, material, update, setPushers, uniforms, count }`.
+- Returns `{ mesh, stemMesh, material, update, setPushers, setClose, uniforms, count, heads }`
+  (`setClose`/`heads` act on daisies; other species ignore them).
   Wind self-updates. `sunDir` should match your key light. Budgets: whole
   plants are 0.5-3.3K tris each and instanced — thousands are fine.
 - The MOJAVE recipe (desert dressing, field-approved): galleta base + the
@@ -128,12 +173,14 @@ and height, so use suitable separate groups for hero plants. Inspect grounding,
 water contact and wind throughout the shot.
 
 After awaiting `createFlora`, `FLORA_SPECIES` exposes the loaded species
-table and `GRASS_COLORS` the color options. The current species are `grass`,
-`galleta_dry`, `blackbrush`, `creosote`, `sagebrush`, `yucca`, `corn` and
-`sunflower`; `meadow_blades` is an alias of `grass`. Use `dispose()` on the
+table, `GRASS_COLORS` the grass colours and `DAISY_COLORS` the daisy ray
+colours. The current species are `grass`, `galleta_dry`, `blackbrush`,
+`creosote`, `sagebrush`, `yucca`, `corn`, `sunflower` and `daisy`;
+`meadow_blades` is an alias of `grass`. Use `dispose()` on the
 returned field when retiring it rather than leaving its resources registered.
 
-`vegetation_corn_gen.js`, `vegetation_shrub_gen.js` and
-`vegetation_sunflower_gen.js` are geometry generators behind this API. Their
+`vegetation_corn_gen.js`, `vegetation_shrub_gen.js`,
+`vegetation_sunflower_gen.js` and `vegetation_daisy_gen.js` are geometry
+generators behind this API. Their
 skeleton, wood and spray-card helpers support the brush; scene authors do not
 need to assemble an independent update loop for every generator export.

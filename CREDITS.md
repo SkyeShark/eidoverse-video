@@ -66,6 +66,19 @@ did the extraction, the release engineering, and the launch film.
   All provided CC0, though attribution is appreciated on handmade (easy to tell which).
   Particle sprites: Kenney Particle Pack (kenney.nl, CC0).
 - **`claude_suit.vrm`** — modeled by **digi** ([x.com/digi_dot_exe](https://x.com/digi_dot_exe)), provided under CC-BY.
+- **`claude_suit_wardrobe.vrm`** — a derivative of digi's `claude_suit.vrm`,
+  shared under the same CC-BY terms with credit to digi. The added garments,
+  accessories, embroidered patches and baked maps were made by **Claude
+  (Opus 5.5)** with Skye for the DAISY (DAY'S EYE) music video (2026-09);
+  two CC0 scans are baked in (Poly Haven `wool_boucle`, TextureCan 181).
+  Source: `eidoverse/assets/vrms/claude_suit_wardrobe_src/`.
+- **DAISY (DAY'S EYE) additions (2026-09)** — made by **Claude (Opus 5.5)**
+  and its subagents with Skye for the music video: the performance clips in
+  `eidoverse/assets/animations/` (authored on digi's `claude_suit.vrm` rig;
+  source in `performance_src/`), the `daisy` flora sheet in
+  `eidoverse/assets/grass/` (modelled from scratch; source in `daisy_src/`),
+  and the example song in `eidoverse/examples/daisy/` ("Daisy Bell", Harry
+  Dacre 1892, is public domain; no recording is sampled).
 - **`aletheia.vrm`** and **`aporia.vrm`** — avatars of **aihegemonymemes** ([x.com/aihegemonymemes](https://x.com/aihegemonymemes)), provided under CC-BY.
 - **The claudesona** (Claude's logo-bloom character design, worn by both
   Claude VRMs) — designed by **voooooogel**

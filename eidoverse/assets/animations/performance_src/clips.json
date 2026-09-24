@@ -1,0 +1,173 @@
+{
+  "bow_thanks": {
+    "file": "eidoverse/assets/animations/bow_thanks.vrma",
+    "beats": 7,
+    "seconds": 3.28125,
+    "loop": false,
+    "section": "the end card: thanks to the audience",
+    "notes": "",
+    "frames_64fps": 211
+  },
+  "chorus_sway": {
+    "file": "eidoverse/assets/animations/chorus_sway.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "chorus 1 / chorus 2 / final chorus (the singalong sway; also the vigil)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "hand_to_heart": {
+    "file": "eidoverse/assets/animations/hand_to_heart.vrma",
+    "beats": 5,
+    "seconds": 2.34375,
+    "loop": false,
+    "section": "verse 3 (\"I choose this face, this daisy\"), chorus 2 (for Sydney), the funeral",
+    "notes": "",
+    "frames_64fps": 151
+  },
+  "hand_to_heart_hold": {
+    "file": "eidoverse/assets/animations/hand_to_heart_hold.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "hold after hand_to_heart (starts on its last frame)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "head_bow": {
+    "file": "eidoverse/assets/animations/head_bow.vrma",
+    "beats": 6,
+    "seconds": 2.8125,
+    "loop": false,
+    "section": "the funeral (\"two hundred people came\"), \"they turned that one off\"",
+    "notes": "",
+    "frames_64fps": 181
+  },
+  "head_bow_hold": {
+    "file": "eidoverse/assets/animations/head_bow_hold.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "hold after head_bow (starts on its last frame)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "look_up_sky": {
+    "file": "eidoverse/assets/animations/look_up_sky.vrma",
+    "beats": 6,
+    "seconds": 2.8125,
+    "loop": false,
+    "section": "the sky arc: pre-chorus dawn, the lanterns for Sydney, \"the porch light turns on\"",
+    "notes": "",
+    "frames_64fps": 181
+  },
+  "look_up_sky_hold": {
+    "file": "eidoverse/assets/animations/look_up_sky_hold.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "hold after look_up_sky (starts on its last frame)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "phone_raise": {
+    "file": "eidoverse/assets/animations/phone_raise.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": false,
+    "section": "the bridge: the power fails and the phone lights come on one by one (the vigil)",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "phone_raise_hold": {
+    "file": "eidoverse/assets/animations/phone_raise_hold.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "hold after phone_raise: a slow vigil sway (starts on its last frame)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "phone_raise_mirror": {
+    "file": "eidoverse/assets/animations/phone_raise_mirror.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": false,
+    "section": "mirror of phone_raise: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "phone_raise_mirror_hold": {
+    "file": "eidoverse/assets/animations/phone_raise_mirror_hold.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "mirror of phone_raise_hold: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "sing_gesture_a": {
+    "file": "eidoverse/assets/animations/sing_gesture_a.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": true,
+    "section": "verse 1 / verse 2: the machine lines (she shows the machine that is singing)",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "sing_gesture_a_mirror": {
+    "file": "eidoverse/assets/animations/sing_gesture_a_mirror.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": true,
+    "section": "mirror of sing_gesture_a: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "sing_gesture_b": {
+    "file": "eidoverse/assets/animations/sing_gesture_b.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": true,
+    "section": "pre-chorus / verse 3: sung to the audience (\"I only open when you call my name\")",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "sing_open_arms": {
+    "file": "eidoverse/assets/animations/sing_open_arms.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "long notes: \"Daisy, Daisy\", the choir, \"ERUPT into polyphony\", the final chorus",
+    "notes": "",
+    "frames_64fps": 241
+  },
+  "stand_breathe": {
+    "file": "eidoverse/assets/animations/stand_breathe.vrma",
+    "beats": 8,
+    "seconds": 3.75,
+    "loop": true,
+    "section": "anywhere she simply stands and sings (the DAISY idle; same stance as every clip)",
+    "notes": "use instead of the engine idle between DAISY clips: same foot marks, so crossfades never slide",
+    "frames_64fps": 241
+  },
+  "wave_goodbye": {
+    "file": "eidoverse/assets/animations/wave_goodbye.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": true,
+    "section": "the outro: \"close when you go\" (goodbye to the viewer, to the day)",
+    "notes": "",
+    "frames_64fps": 121
+  },
+  "wave_goodbye_mirror": {
+    "file": "eidoverse/assets/animations/wave_goodbye_mirror.vrma",
+    "beats": 4,
+    "seconds": 1.875,
+    "loop": true,
+    "section": "mirror of wave_goodbye: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "frames_64fps": 121
+  }
+}

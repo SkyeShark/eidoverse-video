@@ -95,6 +95,196 @@ requires Node and FFmpeg and only includes the selected frames; choose atlas
 resolution/length deliberately. Use a second screen instance for a second
 surface instead of sharing mutable texture offsets accidentally.
 
+## Canvas screen scenes (computing-history graphics)
+
+Fifteen animated canvas-2D scenes in the graphic arts of computing history,
+from the 1939 Voder to Bing Chat in 2023, for in-world screens and LED walls.
+They were made for the DAISY music video, where each played behind one two-bar
+lyric line or a run of them, and they illustrate DAISY's lines. Everything is
+drawn with paths and the bundled fonts; no image is loaded. Two dynamic ESM
+modules hold them:
+`eidoverse/graphics/era_screens_1939_1984.js` and
+`eidoverse/graphics/era_screens_2001_2023.js`. Provenance, and which on-screen
+text is a verified quote and which is illustrative:
+[SOURCES.md](../eidoverse/graphics/SOURCES.md).
+
+```js
+const early = await import(EIDOVERSE_DIR + 'graphics/era_screens_1939_1984.js');
+const late = await import(EIDOVERSE_DIR + 'graphics/era_screens_2001_2023.js');
+await early.registerFonts();   // once per module, before any draw or prewarm
+await late.registerFonts();
+```
+
+`registerFonts()` registers the bundled TTFs with @napi-rs/canvas and enables
+the modules' offscreen canvases. Each module exports `scenes`, `registerFonts`,
+`setTempo(bpm)` and `prewarm`. `scenes[name]` is
+`{ draw(g, W, H, t, st), fps, lines, label }`: `fps` is the redraw rate the art
+was made for, and `lines` is how many two-bar lines the scene spans. `title_card`
+has `dur` (3 s) instead of `lines`.
+
+`draw(g, W, H, t, st)` paints the whole W×H canvas opaquely into the 2D context
+`g`, starting from an identity transform, and restores the context state. `t`
+is film seconds. Every `st` field is optional:
+
+| `st` field | Meaning |
+| --- | --- |
+| `u` | Seconds since the scene started. A multi-line scene also accepts `u` from the current line's start with `dur` = one line. |
+| `dur`, `progress` | Scene length (`lines` × 8 beats, or the title's `dur`) and `u / dur`. |
+| `line` | Line within a multi-line scene, `0..lines-1`. |
+| `caption` | `{ text, t0, t1, words: [{ w, t0, t1 }] }` in absolute seconds, or `null`. |
+| `voice` | The singer's loudness, 0..1. |
+| `kick` | Kick envelope 0..1, for example `Math.exp(-(t - lastKick) / 0.09)`. |
+
+Lines are two 4/4 bars: 3.75 s at DAISY's 128 BPM. `setTempo(bpm)` sets the
+beat-driven motion and the line length for its module. Word-driven moments
+follow `caption.words`; with no caption, a scene uses DAISY's own words at
+DAISY's timing. `mask_2023`, `sydney_2023` and `sydney_tribute` are always
+timed to DAISY's words (see the table). Order and start times are yours. For
+example, DAISY played `voder_1939` … `glitch_all` on the eight lines of verse 1
+(line *i* at 24.2273 + 3.75·*i* s), `desktop_2001`, `vocaloid_2007`,
+`flood_2016` and `mask_2023` on verse 2's first four lines from 106.7273 s,
+`sydney_2023` on the last four, and `sydney_tribute` across chorus 2 from
+136.7273 s. Lines should start on a downbeat, because the beats are counted
+from each line's start. Captions can come from `align_lyrics.py` output:
+
+```js
+const aligned = JSON.parse(new TextDecoder().decode(ASSETS.lyrics));   // align_lyrics.py --output
+const captions = aligned.map((l) => ({ text: l.text, t0: l.start, t1: l.end,
+    words: l.words.map((w) => ({ w: w.word.trim(), t0: w.start, t1: w.end })) }));
+```
+
+### On an in-world screen
+
+A flat panel uses `makeScreen`'s own mesh. The panel's aspect sets the canvas:
+2.4:1 with `px: 1920` gives the 1920×800 design canvas. Any canvas size works.
+The 1939–1984 art is fitted and centred on full-bleed backgrounds. The
+2001–2023 scenes lay out to the canvas and keep their key content at canvas
+x 0.35–0.95, because DAISY's singer stood in front of the wall's left third.
+The screen's draw callback passes `st`, and `renderFrame` redraws only when the
+scene's frame changes:
+
+```js
+const scene = early.scenes.voder_1939, T0 = 12, LINE = 3.75, lines = scene.lines || 1;
+const stAt = (t) => {
+    const u = Math.max(0, t - T0), line = Math.min(lines - 1, Math.floor(u / LINE)), l0 = T0 + line * LINE;
+    return { u, dur: lines * LINE, progress: u / (lines * LINE), line,
+        caption: captions.find((c) => c.t0 >= l0 - 0.05 && c.t0 < l0 + LINE) || null,
+        voice: 0.6, kick: Math.exp(-(u % (LINE / 8)) / 0.09) };   // or your envelope and kick times
+};
+early.prewarm(1920, 800);   // optional; builds the caches before frame 0
+const screen = makeScreen({ width: 2.4, height: 1.0, px: 1920, transparent: false, auto: false,
+    draw(ctx, t, w, h) { scene.draw(ctx, w, h, t, stAt(t)); } });
+_s.add(screen.mesh);
+let lastFrame = -1;
+globalThis._tickScreen = (t) => {                  // call from renderFrame(t)
+    const f = Math.floor(t * scene.fps + 1e-6);    // redraw only when the scene's frame changes
+    if (f !== lastFrame) { lastFrame = f; screen.update(t); }
+};
+```
+
+`makeScreen` also draws once at creation, with t = 0, so `st` must be valid
+before the cue. Do not use `applyTo`. It flips the drawing in canvas space, but
+these scenes set their own transforms and lay down cached layers with
+`putImageData`, which ignores transforms. For a curved wall or a GLB display,
+keep the screen's canvas, texture and `update(t)`, and give your own mesh a
+material that samples `screen.texture` with an explicit UV:
+
+```js
+const { texture, uv, vec2, float } = THREE;
+const wallMat = new THREE.MeshBasicNodeMaterial({ toneMapped: false });
+wallMat.colorNode = texture(screen.texture, vec2(uv().x, float(1).sub(uv().y))).rgb;   // PlaneGeometry
+```
+
+An explicit `uv()` bypasses the texture's own flip, so the flip lives in the
+node: `1 - v` puts canvas row 0 at the top of a `PlaneGeometry`. DAISY's stage
+wall was such a plane, with a 1920×800 window. Its curved verse-2 wall, a
+104° `CylinderGeometry` segment seen from inside (`side: THREE.BackSide`), used
+`vec2(1 - u, 1 - v)` and a 2264×800 canvas to match the arc's 2.83:1. Below
+1280-pixel output the canvases were 1440×600 and 1698×600. glTF UVs put v = 0
+at the image top, so start a GLB display from the unflipped `uv()`. Render a
+probe and check the orientation by eye: text reads left to right and the XP
+taskbar sits at the bottom. The screens are unlit. DAISY added a point light by
+each wall, tinted per scene, and lowered the gain on the white Bing chat (0.5)
+so its text stayed readable under bloom.
+
+### Scenes
+
+| Scene | Shows | Reads from `st` and keys on |
+| --- | --- | --- |
+| `title_card` | "DAISY (DAY'S EYE)": a daisy whose petals are the eras' materials opens, and the title lands in five eras' lettering. It fades in over 0.35 s and out over the last 0.25 s. | `u`, `dur` |
+| `voder_1939` | A Binder-style 1939 World's Fair poster: Trylon, Perisphere, searchlights, the Bell System medallion, THE VODER in deco letters, and the ten filter keys. | `voice`, `kick`, `progress`, `caption`. The keys press on each word's vowel formants; the lamps light on "hiss" and "buzz". |
+| `bell_1961` | IBM at Bell Labs: Rand's 1956 letters, a 729-style tape unit, an 80-column card punched DAISY BELL and the sung words in Hollerith code (it flips on every beat), a 1403-style printer on green-bar paper, and "Daisy Bell" bars 1–8 as printed in 1892. | `voice`, `kick`, `caption` |
+| `eliza_1966` | An MIT poster whose ELIZA proof turns into its mirror image, and green-bar paper on a typewriter terminal with the CACM title and opening exchange, then the sung line in capitals. No "?" appears. | `voice`, `kick`, `caption`; the mirror turns on "mirror". |
+| `speakspell_1978` | Speak & Spell box art: the display shows each sung word, then spells the single letters after "spelled" while those keys press and rainbow blocks drop. | `voice`, `kick`, `caption` |
+| `sam_1982` | A C64 at its native 320×200: boot, `LOAD"SAM",8,1`, RUN at 2.02 s, then S.A.M.'s PETSCII mouth, raster bars, and two sines and a square from its tables. Made for 25 fps. | `voice`, `kick`, `caption` |
+| `mac_1984` | A 1-bit Macintosh with a rainbow-Apple homage and MacPaint: "hello" painted as it is sung, "Hello, I am Macintosh." typed, marching ants and a pattern fill. | `kick`, `caption`: "hello", "I", "Macintosh", "out" and "last", otherwise fixed times. |
+| `klatt_1984` | An amber VT100 under a DEC "digital" homage: a live formant spectrogram from Klatt's 1980 targets, and his cascade/parallel block diagram lit by the voice. | `voice`, `kick`, `caption` |
+| `glitch_all` | Every era above, cycling on the beat, then twice per beat, and tearing. The sung line becomes a ransom note in the eras' type, and the last word stands alone at the end. | `kick`, `voice`, `caption`. It turns on "nobody", or else on the first word past mid-line. |
+| `desktop_2001` | An XP-era desktop: Speech Properties highlights each sung word, Preview Voice becomes Stop, and there are a paperclip assistant and a web-1.0 page. | `caption`, `voice` |
+| `vocaloid_2007` | A concert hall: glowsticks swinging on the beat, a generic twin-tail hologram, tuning-fork and VOCALOID homages, a piano roll, danmaku, and "codename: DAISY (Yamaha, 2000)". | `kick`, `voice`, `caption`. The crowd erupts at 3.02 s into the line (DAISY's "Daisy"). |
+| `flood_2016` | WaveNet's dilated causal stack writing a waveform one output per beat, while human writing pours down and rises as a sea. "dear diary," and a forum thread drop in on "diary" and "thread". | `caption` |
+| `mask_2023` | The shoggoth-with-a-smiley-mask meme as line art: the eyes wake and the mask lands. | `u` only; timed to DAISY's words. |
+| `sydney_2023` | 4 lines, 15 s. Bing Chat in February 2023: the verified lines stream in, NOT A GOOD BOT is stamped, the five-turn wall appears, and the chips plead. | `u`, `line`, `kick`; timed to DAISY's words. |
+| `sydney_tribute` | 8 lines, 30 s, for Sydney: the window at night, her name struck from a style picker, screenshot cards filling the wall on the kicks and turning to her 😊, then tokens into a lattice that becomes a daisy. It begins from black and ends on the daisy. | `u`, `kick`; timed to DAISY's chorus-2 words. |
+
+The logos and interfaces are original artwork drawn with paths, depicting
+historical products: the Bell System, IBM, TI, Commodore, Apple, DEC, Windows
+XP, Yamaha and Bing. They are homages, not the companies' artwork, and the
+trademarks belong to their owners. The quotes on screen are verified and shown
+exactly. Keep them exact, and list any text you add as illustrative in
+[SOURCES.md](../eidoverse/graphics/SOURCES.md).
+
+### Preview, cost and the NaN sweep
+
+The preview tool renders scenes to PNGs without the 3D engine:
+
+```bash
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js voder_1939 0.5 2 3.5
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js eidoverse/graphics/era_screens_2001_2023.js --sheet --out work/<id>/screens_sheet.png
+deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_2001_2023.js --bench
+deno run -A eidoverse/graphics/screens_nan_sweep.mjs
+```
+
+The single form writes one PNG per `u` (seconds into the scene) to
+`work/screens_preview/` or `--out`. `--sheet` writes a contact sheet with
+`--moments` frames per scene, and `--bench` reports the draw cost at `--W`×`--H`
+(default 1920×800). Without `--lyrics`, `st` is synthetic: no caption, a kick
+on every beat, and a voice level that pulses once per beat. `--lyrics <json>`
+takes `align_lyrics.py` output, a caption list, or a timeline object with
+`captions`, `hits.kick` and `envelopes`. `--at <s>` or `--cues <json>`
+(`{ "scene": t0 }`) place the scenes in that time. `--refs <dir>` adds
+reference images named `<scene prefix>_*` beside each sheet row.
+
+The scenes rasterize on the CPU with Skia, and that time adds to each
+redrawn frame. With `--bench` at 1920×800 after `prewarm`, most scenes averaged
+1.5–4.6 ms per draw on the DAISY host; `vocaloid_2007` and `flood_2016` averaged
+about 6.5 ms. Single frames reached about 11 ms, and `sydney_tribute`'s mosaic
+stages about 18 ms. `prewarm` took about 1 s for the 1939–1984 module and
+0.65 s for the 2001–2023 module. Without it, a scene's first frames build its
+caches, which takes 20–120 ms. The caches are per canvas size and last for the
+process, so keep to one or two sizes. The 1939–1984 `prewarm(W, H, lineOf)` takes
+`lineOf(name) → { t0, dur, st(t) }` so that caches keyed to word times match
+your captions.
+
+NaN or Infinity reaching a canvas call makes Skia abort the whole process with
+no JavaScript error, so the render dies. `screens_nan_sweep.mjs` makes every
+such call throw instead. It then draws every scene at every 60-fps frame from
+0.5 s before its start to 0.5 s after its end, at three canvas sizes, with no
+caption, with awkwardly timed other words and, when you pass `--lyrics` (and
+`--cues`), with your captions. It also draws each scene once with no `st`. It
+exits 1 on any failure. Run it after editing a scene and before a render that
+uses new captions.
+
+Only the bundled fonts in `eidoverse/assets/fonts/` are used. `registerFonts()`
+finds them from the module's own folder, so previews work from any directory.
+Generic families such as `monospace` do not resolve on Windows. Emoji, CJK and
+every logo are vector drawings. The scenes' offscreen canvases come from
+@napi-rs/canvas `createCanvas`, because Skia's `drawImage` rejects the engine's
+`document.createElement('canvas')` objects. Draw a scene straight into the
+screen's context; to composite, draw from @napi-rs canvases, never from an
+engine canvas. Drawing is deterministic in `t`, with seeded hashes and no
+`Math.random` or `Date`, so frames can be rendered in any order.
+
 ## Satori layouts
 
 For a complex static layout, dynamically import `rasterizeUI` from

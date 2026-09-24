@@ -148,6 +148,32 @@ intent; they do not prove clearance. Broad assembly labels can leave gaps in
 coverage. Investigate the underlying geometry rather than adding exemptions
 to conceal collisions or unsupported attachments.
 
+## Contact sheets
+
+A contact sheet lets a collaborator, or a model without video input, read a
+whole piece from one image. From the repository root:
+
+```bash
+python contact_sheet.py work/<id>/film.mp4 --every 5 --cols 6
+python contact_sheet.py work/<id>/film.mp4 --timeline work/<id>/timeline.json \
+  --names '{"verse1": "verse 1 · the machines"}' --title "Title" --synopsis "What the piece is." --parts 3
+```
+
+It takes one frame from the middle of every `--every` seconds, scaled to
+`--tile` pixels wide in the video's own aspect. With `--timeline` it also
+takes a frame just inside each section start. It then labels every tile with
+its timestamp, its section and the line sung or spoken at that moment, so
+the story reads without sound. The tool accepts two timeline shapes:
+- `{ "sections": [{name, t0, t1}], "captions": [{text, t0, t1}] }`, as
+  voicebox and song timelines write it (either key may be missing);
+- `align_lyrics.py`'s list of `{text, start, end}`.
+
+`--names` gives the section keys readable labels. `--parts N` also writes the
+same frames split into N sheets, for tools with per-image size limits. The
+output is `<video>_contact_sheet.jpg` unless `--out` names it. A sheet maps
+the piece. It cannot show timing, flicker, lipsync or motion, so review those
+in the video itself.
+
 ## Sharing the work
 
 Link the result clearly, explain the creative choices worth discussing, and

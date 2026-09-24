@@ -37,6 +37,13 @@ fetched props):
   The outfit is built in layers (mesh names `jacket`, `tie`, `shirt`,
   `pants`, `shoes`): hide layers to change the look (jacket + tie off =
   casual shirtsleeves).
+- `claude_suit_wardrobe.vrm` — the same claudesona carrying sixteen outfits
+  as hidden layers (a 1939 switchboard operator, a 1961 lab coat, 1980s
+  colour-blocking, a hoodie, a mourning coat, an 1890s cycling outfit and
+  more); `claude_suit_wardrobe_preview.jpg` shows them all. Dress it with
+  `claudesona_wardrobe.js` ([outfits](#outfits--claude_suit_wardrobevrm)).
+  It is 31 MB against the suit's 11 MB, so cast `claude_suit.vrm` when the suit
+  is all the piece needs.
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is primary
 
 Any `.vrm` dropped into `eidoverse/assets/vrms/` works the same way. Point
@@ -68,6 +75,17 @@ the piece (and across pieces for a recurring cast) — see [audio.md](audio.md).
 - **Stationary** (`idle`, `fallIdle`) and **expressive** (for a stationary
   VRM): `sit`, `talk`, `cheer`, `reach`, `raise`, `fist`, `salute`,
   `crazy`, `dance`
+- **Performance** (hand-authored singing and stage clips for a stationary
+  VRM, 128 BPM, all from one stance so any two crossfade without foot slide):
+  `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
+  `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
+  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. `*_mirror`
+  variants use the other hand, and the one-shots `hand_to_heart`,
+  `look_up_sky`, `phone_raise` and `head_bow` each have a `*_hold` loop that
+  starts on their last frame. Play the one-shot with `loop: false`, then the
+  hold with a short `fade` once it lands. Beats, uses, the authoring script and
+  its checker are in
+  [performance_src](../eidoverse/assets/animations/performance_src/README.md).
 
 `playVRMADefault(vrm, slot, { loop, fade })` returns `{ mixer, action, clip }`
 and registers that VRM for the native frame loop. Repeat is the default;
@@ -322,51 +340,96 @@ A VRM in T-pose despite a loaded animation traces to one of these:
 
 ## `claude_suit.vrm` — mouth + wardrobe recipes
 
+This recipe applies to `claude_suit.vrm` and to `claude_suit_wardrobe.vrm`
+(the same face).
+
 **The mouth drives raw morphs, not expressions.** The visible cat-smile is
 painted on the face; the animatable mouth is a hidden cavity revealed by
 the `show MMD mouth` shapekey. The expressionManager path barely moves it —
-voice over that mouth reads frozen. The render-verified recipe:
+voice over that mouth reads frozen. `eidoverse/claudesona_face.js` packages
+the render-verified recipe:
 
-1. Select the 3 face plates once at setup and write raw
-   `morphTargetInfluences` inside `mesh.onBeforeRender` (survives the
-   engine's VRM passes), `fill(0)` first — leftover expression weights
-   otherwise hold the mouth shut. (`fill(0)` also kills auto-blink;
-   re-apply `Blink` yourself if you want it.)
+```js
+const { installSuitMouth, makeSuitMouth, makeFaceTrack, mergeMax } =
+  await import(new URL('claudesona_face.js', EIDOVERSE_DIR).href);
+const face = installSuitMouth(vrm);                // once, after load
+const mouth = makeSuitMouth({ inputMax: 0.35 });   // 0.35 for lipsync.py visemes, 1 for voicebox
+const feel = makeFaceTrack(TL, {                   // optional: feelings keyed to words
+  sectionBase: { chorus: { smile: 0.5 } },
+  lineCues: [[/goodbye/, { soft: 0.8, frown: 0.2 }]],
+});
+// renderFrame(t): the current viseme frame is { aa, ih, ou, ee, oh }
+face.set(mergeMax(mouth.update(t, visemes[Math.floor(t * visemeFps)]), feel.at(t)));
+```
+
+1. `installSuitMouth(vrm)` finds the three face plates and writes their raw
+   `morphTargetInfluences` in `onBeforeRender`. Writing at render time
+   survives the engine's VRM passes. It zeroes every morph first, because
+   leftover expression weights otherwise hold the mouth shut. Zeroing also
+   removes auto-blink, so the driver blinks for you. It returns
+   `{ plates, set(weights), weights }`.
+2. **The reveal is a threshold, not a fade.** The black cavity is a plate
+   pushed through the white face. Below about `show MMD mouth` 1.0 it stays
+   behind the face and only the painted line shows; above that it pops out
+   and grows. A viseme pose scaled by loudness crosses that line on every
+   consonant, so the black part blinks out mid-word. One film measured the
+   cavity visible for 71 of 255 sung seconds, with 716 on/off flips.
+   `makeSuitMouth` avoids that:
+   - It keeps one openness signal with a fast attack (30 ms) and a slow
+     release (110 ms).
+   - It opens above 0.18 and closes below 0.08, with hysteresis between.
+   - While open it holds the reveal at `reveal` (1.25) and scales only the
+     vowel's shape morphs, by `0.3 + 0.7 × openness`.
+   - It changes vowel only at a syllable dip, or when another vowel clearly
+     leads.
+
+   The cavity stays out through a phrase and closes at its end. The other
+   options are `attack`, `release`, `openAt`, `closeAt`, `switchDip`,
+   `switchLead` and `blinkEvery`. Blinks happen only while the mouth is
+   shut; `blinkEvery: 0` turns them off.
+3. The poses are exported as `SUIT_VISEMES`, one per vowel. Weights above 1
+   are intentional: morph deltas scale linearly past 1, and these stacks are
+   verified tear-free.
    ```js
-   const plates = [];
-   vrm.scene.traverse(o => { if (o.morphTargetDictionary && ('show MMD mouth' in o.morphTargetDictionary)) plates.push(o); });
-   for (const p of plates) p.onBeforeRender = () => {
-       const inf = p.morphTargetInfluences, d = p.morphTargetDictionary;
-       inf.fill(0);
-       for (const [nm, w] of Object.entries(globalThis._suitMouth || {})) if (nm in d) inf[d[nm]] = w;
-   };
+   aa: { 'show MMD mouth': 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 }   // big open — the workhorse
+   oh: { 'show MMD mouth': 1.2, LipFunnel: 1.0, 'お': 0.8 }          // rounded drop
+   ou: { 'show MMD mouth': 0.8, LipPucker: 1.2 }                     // tight pucker
+   ee: { 'show MMD mouth': 1.0, 'え': 1.5 }                          // wide + shallow
+   ih: { 'show MMD mouth': 0.9, 'い': 1.2 }                          // flat slit
    ```
-2. Per frame set `globalThis._suitMouth` to a viseme pose. Contact-sheet
-   tested — weights above 1 are intentional (morph deltas scale linearly
-   past 1; these stacks are verified tear-free):
-   ```js
-   const S = 'show MMD mouth';
-   const SUIT_VISEMES = {
-       aa: { [S]: 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 },   // big open — the workhorse
-       oh: { [S]: 1.2, LipFunnel: 1.0, 'お': 0.8 },          // rounded drop
-       ou: { [S]: 0.8, LipPucker: 1.2 },                     // tight pucker
-       ee: { [S]: 1.0, 'え': 1.5 },                          // wide + shallow
-       ih: { [S]: 0.9, 'い': 1.2 },                          // flat slit
-       rest: {},                                             // painted smile returns
-   };
-   ```
-3. Simplest talking (one openness signal — `lipsync.py get_mouth_openness`
-   or an RMS envelope): scale the whole `aa` pose by openness 0..1. For
-   full visemes: winner-take-all rather than additive — `lipsync.py` emits
-   all five channels at once, and summing the poses renders untested morph
-   combinations. EMA-smooth (~3 frames), pick the dominant channel, render
-   only its pose scaled by `min(1, value/0.35)`; below ~0.03 raw → rest.
-4. Verified traps: `vis_aa/ih/ou/ee/oh` and the plain vowel shapes do
+   A single openness signal, such as `lipsync.py get_mouth_openness` or an RMS
+   envelope, works too: pass it as `{ aa: openness }`.
+4. `makeFaceTrack(TL, opts)` keys feelings to words and sections rather
+   than seconds, so re-timing the audio can't desync a feeling. `TL` is
+   `{ sections: [{ name, t0, t1 }], captions: [{ text, t0, t1 }] }`, the
+   shape the voicebox and song timelines use.
+   - `sectionBase` sets each section's resting feeling.
+   - `lineCues` pairs a regex on the caption text with a feeling, eased in
+     and out around each matching line.
+   - `closeAfterLast` (default `true`) slowly softens the eyes after the last
+     caption.
+
+   The channels, as measured on this face:
+   - `smile` curls the mouth corners up smoothly with its value.
+   - `frown` is smooth; `wide`, `down` and `up` (gaze) are subtle.
+   - `soft` closes the eyes. Up to about 0.5 they only shrink to small dots;
+     0.75–0.85 gives content, sleepy slits.
+   - `blush` and `jaw` are switches, because both ride reveal plates like the
+     mouth. Blush is hidden below a raw `Blush` of about 0.75, so a blush of
+     0.3 or more shows it (a little fuller as it rises) and less shows
+     nothing. A jaw of 0.15 or more opens the mouth while the character is
+     silent.
+
+   `mergeMax` merges weight dicts by the per-morph maximum.
+5. Verified traps: `vis_aa/ih/ou/ee/oh` and the plain vowel shapes do
    nothing without the reveal; `MouthClosed` doesn't hide the cavity (rest
    = reveal at 0); `hide mouth` restyles the painted line (an aesthetic
    change, not lipsync); `O`/`お` solo are empty exports. Expression
    accents that do work as raw morphs: `Smile`, `MouthSmileLeft/Right`,
    `MouthFrown`, `Blink`, `EyeClosedLeft/Right`, `EyeWide`, `Blush`/`照れ`.
+   `Blush` and `照れ` are reveals: nothing below about 0.75, full cheeks from
+   0.9. To try a face, render
+   `python vrm_turntable.py --outfits suit,suit --frames face --views 0 --faces '[{"Blush": 1}, {"Smile": 0.6, "MouthSmileLeft": 0.6, "MouthSmileRight": 0.6}]'`.
 
 `claude.vrm` (the classic sona) is the opposite: its mouth is
 expression-bound and the plain `expressionManager.setValue` viseme path
@@ -401,6 +464,103 @@ works as written.
   ```
   `0.02` is the verified relaxed fit; `0.035` reads as a bulky sweater.
   Copy the original positions first if the fitted look returns later.
+
+### Outfits — `claude_suit_wardrobe.vrm`
+
+`eidoverse/claudesona_wardrobe.js` dresses the wardrobe VRM. It shows and
+hides garment layers, repaints materials with colours or procedural
+patterns, folds petals back under a hat and seats the hat.
+
+```js
+const { makeWardrobe, WARDROBE } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
+const wardrobe = makeWardrobe(THREE, vrm);   // after load; starts in 'suit'
+wardrobe.wear('lab_coat_1961');              // any WARDROBE key; a no-op if already worn
+wardrobe.petals('mac_launch_1984');          // repaint only the petals (a preset key or a spec); null restores
+```
+
+| Preset | The look |
+| --- | --- |
+| `suit` | digi's own suit |
+| `voder_operator_1939` | rose jacket, cream blouse, a switchboard operator's headset |
+| `lab_coat_1961` | white lab coat, glasses, a pocket protector with pens |
+| `turtleneck_1966` | black turtleneck, glasses |
+| `ringer_tee_1978` | red-and-amber striped tee |
+| `colorblock_1982` | colour-blocked jacket, terry headband, petals in the Commodore 64 palette |
+| `mac_launch_1984` | grey suit, green bow tie, petals in the six Apple stripes |
+| `professor_tweed_1984` | herringbone tweed, glasses, amber petals |
+| `fleece_2001` | navy jacket, khakis |
+| `vocaloid_2007` | grey shirt, teal tie, ribbon bows in the petals |
+| `hoodie_2016` | black hoodie: hood down, kangaroo pocket, drawstrings |
+| `bing_2023` | blue-to-teal gradient suit, petals swept in the same blues |
+| `mourning` | black overcoat, white shirt, black tie, a daisy on the lapel |
+| `march` | canvas work jacket with embroidered patches |
+| `sleeves_rolled` | jacket off, shirt sleeves rolled, tie |
+| `cyclist_1892` | striped jersey, tweed knickerbockers, argyle socks, a straw boater with the petals folded under it |
+
+A preset is `{ show, paint, hide, fold, hat }`:
+
+- `show` lists the garment layers to show; every other optional layer hides.
+  The body, face, flower and shoes always show. The layers are `jacket`,
+  `tie`, `shirt`, `pants`, `jersey`, `knickers`, `socks`, `boater`,
+  `coat_skirt`, `shirt_rolled`, `acc_glasses`, `acc_headset`, `acc_pocket`,
+  `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches` and
+  `acc_boutonniere`.
+- `paint` maps a material name to `'#hex'` or a pattern:
+  - `{ pattern: 'stripes', a, b, scale }`, `'blocks'` (`a`, `b`, `c`),
+    `'herringbone'` (`a`, `b`, `c` flecks, `scale`), `'gradient'` (`a`, `b`)
+    and `'canvas'` (`a`, `b`, `scale`);
+  - for `petals` only, `'rainbow'` (`colors`, `top`, `bottom`), `'perPetal'`
+    (`colors`, one per petal, and `center`) and `'sweep'` (`a`, `b`).
+
+  Patterns are procedural in the model's object space, because the garment
+  UVs are not laid out for prints. A hex on a textured material replaces its
+  print while its normal map keeps the weave. The MToon shade colour and the
+  outlines follow the paint. The layer table in the
+  [source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
+  lists the material names.
+- `hide` hides materials inside a shown layer; the hoodie hides the jersey's
+  `jersey_collar`.
+- `fold` bends whole petals back from the face: `{ '12_L': deg }` or
+  `{ '12_L': [deg, scale] }`, keyed by petal bone (`1_L`…`12_L`, `1_R`…).
+  The petals are spring bones, so the fold is written into each chain's rest
+  pose and the springs keep moving around it.
+- `hat` seats the boater: `{ offset: [x, y, z], scale }`, in model metres
+  with +z on the face's side.
+
+`WARDROBE` is a plain object read at `wear()` time, so add your own preset
+with `WARDROBE.my_look = { show: [...], paint: {...} }`. Each (material,
+paint) pair builds one node, cached, so switching back and forth between
+outfits reuses compiled shaders. Set `globalThis.WARDROBE_DEBUG = true` to
+log paints and folds. New garments are modelled in Blender; the
+[source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
+has the steps.
+
+## Turntable sheets
+
+`vrm_turntable.py` (repository root) renders a VRM through the engine in a
+neutral studio and tiles the result. Use it to review an outfit, a new
+garment, a clip on another rig or an expression:
+
+```bash
+python vrm_turntable.py --outfits lab_coat_1961,mourning --frames head,body --views 0,35,90,150,180
+python vrm_turntable.py --outfits suit,march,cyclist_1892 --frames body --views 20 --tile 3x1
+python vrm_turntable.py --vrm eidoverse/assets/vrms/aletheia.vrm --outfits - --anim sing_open_arms,bow_thanks --hold 45
+python vrm_turntable.py --outfits suit,suit --frames face --faces '[{"Smile": 1}, {"EyeWide": 1, "Blush": 0.6}]'
+python vrm_turntable.py --outfits hoodie_2016 --spin --video work/turntable/hoodie.mp4
+```
+
+A sheet has one row per outfit, clip and framing, and one column per yaw.
+`--tile CxR` lays the same tiles out as a grid. Each tile is the last frame
+of a `--hold` block, because frame 0 of any render is the VRM's load pose and
+spring bones need a few frames to settle. The framings are `face`, `head`,
+`chest` and `body`, scaled by the character's own head height, so any rig
+frames the same. `--outfits -` renders a VRM without the wardrobe. The
+defaults are `--scale 0.87` for the claude_suit models (a human 1.74 m) and
+`--light 0.7`, which keeps white MToon cloth under the bloom threshold.
+`--presets` adds variants on the command line
+(`{"name": {"base": "cyclist_1892", "fold": {...}}}`), and `key:nofold`
+drops a preset's fold. `--spin` renders a slow turn per outfit as a video
+instead of a sheet.
 
 ## Nav diagnostics — `RobotDebug`
 

@@ -46,10 +46,45 @@ ring, load another moon texture or create a separate light for its band.
 - `update(t)` owns sky, weather, lightning/audio timing, celestial motion,
   lights and cache updates. Call once per frame; do not additionally update
   its internal sky and weather. Intentional extra lighting adjustments follow it.
+- `sunDir` and `moonDir` are the true world-space unit directions of the sun
+  and moon. After dusk the facade reuses its directional light for the moon,
+  so the light's position is not the sun at night. Read `sky.sunDir` when
+  something must follow the sun itself, such as a flare, a corona, or flowers
+  turning to face it.
 
 The clouds are rendered in the scene so solids occlude them. A flat HDRI
 background is not equivalent. Test the horizon, reflected sky, atmosphere and
 light changes at several points in a weather/day transition.
+
+## Sun corona — `sun_corona.js`
+
+A corona of light-petals around the true sun. It was made for DAISY's
+finale, where the sun opens as a day's eye (the Old English *dæges ēage* that
+became "daisy"). The corona is a camera-facing card parked far along the sun
+direction and drawn additively over the sky. It tests depth but does not write
+it, so nearer geometry and the horizon occlude it, and the bloom pass makes
+its petals glow.
+
+```js
+const { makeSunCorona } = await import(new URL('sun_corona.js', EIDOVERSE_DIR).href);
+const corona = makeSunCorona(THREE, { petals: 12, size: 400 });
+scene.add(corona.mesh);
+// renderFrame(t), after sky.update(t):
+corona.update(camera, sky.sunDir, open, t);   // open 0..1: 0 = folded shut (hidden), 1 = full petals
+```
+
+The options are:
+- `distance`: 1500 m by default. Keep `distance + size / 2` inside the
+  camera's `far`.
+- `size`: 400 m.
+- `petals`: 12.
+- `color`: linear RGB, a warm orange by default.
+
+It returns `{ mesh, U, update }`. `U.gain` scales the brightness; `update`
+drives `U.open` and a slow turn, like a flower tracking the light. The corona
+hides itself when shut or when the sun is below the horizon. Against a bright
+clear sky the bloom renders it almost white; a sunset sky keeps its colour.
+Pass `sky.sunDir` rather than the light's position (see above).
 
 ## Produce rain and thunder audio
 
