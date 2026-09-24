@@ -99,8 +99,10 @@ identical to the container.
    # Linux/mac
    curl -fsSL https://deno.land/install.sh | sh -s v2.8.1
    ```
-2. Have `ffmpeg` on PATH. If it lacks `h264_nvenc`, set
-   `RENDER_CODEC=libx264` for local renders.
+2. Have `ffmpeg` on PATH. The renderer encodes with `h264_nvenc` when
+   ffmpeg lists it and a one-frame test encode succeeds; otherwise it
+   warns and uses `libx264` (CPU video encoding). `RENDER_CODEC`
+   overrides the choice, for example `RENDER_CODEC=h264_videotoolbox`.
 3. Bootstrap the JS deps with HOST deno. (Deno's node_modules store is
    platform-specific; container runs keep their own copy in a Docker
    named volume, so the two modes never conflict — bootstrap each mode
@@ -122,8 +124,9 @@ identical to the container.
   (`mesa-vulkan-drivers` / NVIDIA proprietary) + distro ffmpeg. Expected to
   work; not yet render-verified — check your first frame, not just the exit
   code, and report findings.
-- **macOS**: wgpu → Metal. No nvenc — set `RENDER_CODEC=libx264` (or
-  `h264_videotoolbox`). Same caveat: unverified, judge by frames.
+- **macOS**: wgpu → Metal. No nvenc — the renderer falls back to `libx264`
+  on its own; set `RENDER_CODEC=h264_videotoolbox` for Apple's encoder.
+  Same caveat: unverified, judge by frames.
 - **Fonts**: the 19 display fonts live at `docker/fonts/` in the repo; the
   container installs them at `/usr/share/fonts/truetype/custom/`. For local
   `text_3d` use, point `fontPath` at `docker/fonts/<name>.ttf` (relative

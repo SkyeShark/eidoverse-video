@@ -9,7 +9,7 @@
 - designed effects: tape stop, stutter, bitcrush, a dial-up modem, a power-down, vinyl;
 - a **loudness-targeted master bus** with its own look-ahead true-peak limiter.
 
-Use it when a piece wants its own music, made the way the piece means. For generated songs, use MiniMax ([audio](../AGENTS.md)).
+Use it when a piece wants its own music, made the way the piece means. For generated songs, use `generate_song.py` ([audio](../AGENTS.md#audio-pipeline-deep-dive)).
 
 It is a host-side Python package imported from the repo root, like [voicebox](voicebox.md), and works at 48 kHz. [`eidoverse/examples/daisy/song.py`](../eidoverse/examples/daisy/README.md) is the full worked example: a 5:29 song with a 3/4 intro, a 128 BPM body, sections, era instruments, sidechain, choirs and mastering.
 

@@ -70,15 +70,21 @@ piece and a render test.
    - Audio runs from t=0 to end with no silent stretches; never front-loads narration and trails off into bare music
 
 2. **Asset sourcing comes before procedural geometry.** Before building
-   anything from primitives, in this order:
-   - `python3 fetch_model.py "search terms"` — searches local custom models + Poly Haven + Smithsonian + NASA + NIH 3D **all at once, in parallel**, ranks every candidate across all sources, and delivers the best one (printing the runners-up from every source). **READ the preview before placing the mesh** — verify orientation + scale by using visible features plus the colored axis labels (+X red, +Y green, +Z blue).
+   anything from primitives, in this order. The fetchers write their
+   downloads into the **current directory**, so run them from your piece's
+   folder (`cd work/<id>` — the commands below assume it, two levels under
+   the repo root); they find the local model library and the preview
+   renderer relative to their own location, not the current directory.
+   - `python3 ../../fetch_model.py "search terms"` — searches local custom models + Poly Haven + Smithsonian + NASA + NIH 3D **all at once, in parallel**, ranks every candidate across all sources, and delivers the best one (printing the runners-up from every source). **READ the preview before placing the mesh** — verify orientation + scale by using visible features plus the colored axis labels (+X red, +Y green, +Z blue).
      - **ALWAYS pass `--theme "<your piece's mood/setting>"`** so the pick fits your video, e.g. `fetch_model.py "car" --theme "cyberpunk neon dystopia"` or `fetch_model.py "vase" --theme "ancient cracked archaeological relic"`. Theme fit is **semantic** — an embedding model scores how well each candidate matches your setting by meaning, not keywords, so phrase the theme naturally (paraphrases, mood words, eras all work). The theme RE-RANKS the relevance-matched candidates: a damaged car floats up for a dystopia and sinks for a vintage showroom. It never promotes an off-query item (a clock won't win "chair") — it only reorders genuinely-relevant ones. *(Theme ranking uses `EIDOVERSE_EMBED_URL`/`EIDOVERSE_EMBED_MODEL`/`EIDOVERSE_EMBED_KEY` — any OpenAI-compatible `/v1/embeddings` endpoint, defaulting to Jina's free tier via `JINA_AI_KEY`; with no key it degrades to relevance-only, never errors.)*
-     - **LOCAL models are referenced IN PLACE — never copy them.** When the match is a local/custom model, fetch_model prints `Local model (referenced IN PLACE — not copied): <absolute path>`. Put **that exact absolute path** into your `scene.json` `assets` (the engine loads any path). Do NOT copy the `.glb` into your work folder — duplicating multi-MB meshes per scene bleeds the disk. (Downloaded models from Poly Haven/NASA/etc. still land in cwd as `model_embedded.gltf` — those you keep locally.)
-     - Browse the whole local catalog without fetching: `python3 fetch_model.py --list-local` prints every local model's path + dims + preview. Reference straight from there.
+     - **LOCAL models are referenced IN PLACE — never copy them.** When the match is a local/custom model, fetch_model prints `Local model (referenced IN PLACE — not copied): <absolute path>`. Put **that exact absolute path** into your `scene.json` `assets` (the engine loads any path). Do NOT copy the `.glb` into your work folder — duplicating multi-MB meshes per scene bleeds the disk. (Downloaded models land in the current directory with their `_preview.jpg` beside them: a Poly Haven model as `<model_id>_embedded.gltf` (textures inlined, 1k), a Smithsonian, NIH 3D or NASA model as `<name>.glb` (names lowercased, other characters → `_`) — those you keep locally.)
+     - **Every download writes a licence sidecar** beside the model: `<model file stem>.license.json` (so `<model_id>_embedded.license.json` for Poly Haven), recording `source`, `file`, `id`, `url`, `license`, `license_url`, title/author where the source exposes them, and the fetch date. Read it before redistributing. Poly Haven is `CC0-1.0`; Smithsonian entries are marked `unverified` (CC0 only when the object page says Open Access, otherwise the Smithsonian Terms of Use); NIH 3D licences vary per submission and read `unknown` when the entry lists none; NASA carries the NASA media usage guidelines. Local models are referenced in place and get no sidecar.
+     - **The preview is best-effort.** A missing Deno/ffmpeg, a timeout or a renderer crash skips `_preview.jpg` with a message; the model is still delivered.
+     - Browse the whole local catalog without fetching: `python3 fetch_model.py --list-local` (from the repo root) prints every local model's path + dims + preview. Reference straight from there.
      - It also prints an **`[ORIGIN_INFO]`** line saying where the model's pivot `(0,0,0)` sits in its bbox — **BASE** (y=0 is the bottom; rests directly on a surface), **CENTERED** (y=0 is mid-height; add half the height to stand it on a floor), **TOP**, or **OFFSET**. Do NOT assume the pivot is the geometric center — many GLBs are base-pivoted and a "centered" `position.y` floats or sinks them. The safe move is always `placeOn`/`placeAgainst` (they seat the bbox regardless of pivot); read `[ORIGIN_INFO]` only when you must set `position.y` by hand.
      - **It auto-picks the best match but PRINTS the alternatives spanning EVERY source** with the exact token to re-fetch each. The run also prints the full ranked candidate table (`rel=` relevance, `sim=` semantic theme similarity, `×` the theme multiplier, `→` combined score). If the preview isn't the variant you wanted — wrong colour, wrong type, wrong style — **re-fetch a specific one by its exact name/id**, e.g. `fetch_model.py "server_rack_01"`. Don't settle for the auto-pick when a listed alternative is the right one.
-   - `python3 fetch_hdri.py "search"` — environment lighting. Searches Poly Haven + AmbientCG. Required for any 3D scene that isn't a flat indoor stage. Outputs `hdri.hdr` (+ a legacy `hdri_b64.txt` sidecar you ignore). Point the `hdri` asset at the raw `hdri.hdr`.
-   - `python3 fetch_texture.py "material"` — PBR sets (basecolor + roughness + normal + AO + metalness + displacement) from Poly Haven + AmbientCG + TextureCan (all CC0). Required for every procedural surface. Outputs `tex_urls.json` — Poly Haven entries are CDN URLs, AmbientCG/TextureCan entries are absolute local paths the engine reads directly. **Fetching is step 1 of 2.** Step 2 is loading them onto your material — flat colors on procedural geometry is a bug. Pattern:
+   - `python3 ../../fetch_hdri.py "search" [resolution]` — environment lighting. `resolution` is `1k` (default), `2k`, `4k` or `8k`; the query may also be an exact Poly Haven or AmbientCG ID. Searches Poly Haven + AmbientCG; on an equal match score Poly Haven wins (native `.hdr`, no conversion). Required for any 3D scene that isn't a flat indoor stage. Outputs `hdri.hdr` (+ a legacy `hdri_b64.txt` sidecar you ignore) in the current directory. AmbientCG HDRIs come as OpenEXR; `fetch_hdri` converts them to Radiance `hdri.hdr` without tonemapping (needs `ffmpeg`, `ffprobe` and numpy). If it can't convert, it writes `hdri.exr` instead, tells you to load that with three's `EXRLoader` (not `RGBELoader`/`HDRLoader`) or pick a Poly Haven HDRI, and exits 2. Point the `hdri` asset at the raw `hdri.hdr`.
+   - `python3 ../../fetch_texture.py "material" [resolution]` — PBR sets (basecolor + roughness + normal + AO + metalness + displacement) from Poly Haven + AmbientCG + TextureCan (all CC0). `resolution` is `1k` (default), `2k`, `4k` or `8k`; the query may also be an exact Poly Haven or AmbientCG ID, or `texturecan:<id>`. Required for every procedural surface. Outputs `tex_urls.json` — Poly Haven entries are CDN URLs; AmbientCG/TextureCan maps are extracted into the current directory and their entries are absolute local paths the engine reads directly. **Fetching is step 1 of 2.** Step 2 is loading them onto your material — flat colors on procedural geometry is a bug. Pattern:
 
      ```js
      // 1) Download each tex_urls.json URL to assets/, declare in config.assets
@@ -211,9 +217,10 @@ piece and a render test.
        console.log(oak.stats.summary);                       // height/width/lod0Triangles
        await makeSeedTree.describe();                        // species menu
        await makeSeedTree.describe('joshuaTree', 'shape');   // ONE folder of dials
-     Gotchas (verified): set `globalThis._noAutoFixPlacement = true` in setup()
-     — the placement auto-fix dismembers intentionally-overlapping tree
-     geometry; trees sway by default (`makeSeedTree.setWind({strength,speed})`);
+     Gotchas (verified): leave `globalThis._autoFixPlacement` unset in tree
+     scenes — the opt-in placement repair pass dismembers
+     intentionally-overlapping tree geometry (`makeSeedTree` warns when a
+     scene has opted in; the audits are warn-only by default); trees sway by default (`makeSeedTree.setWind({strength,speed})`);
      judge shadowed trees from frame ≥2. Source: SEEDTHREE_DIR / ../SeedThree /
      ./SeedThree checkout = textured tier; no checkout = GitHub import,
      geometry tier (placeholder materials).
@@ -503,14 +510,22 @@ piece and a render test.
    import needed) — each one accounts for both objects' real bounding
    boxes and raycasts the geometry where it matters:
 
-   - `placeOn(obj, target, { xz, yOffset, xzOffset })` — sit obj's
-     bbox-bottom on target's top surface AND center obj's bbox at the xz
-     anchor (both axes are bbox-corrected, so an off-center loader pivot
-     is handled). ⚠ The default `xz: 'centered'`
-     means the TARGET'S center — `obj.position.set(...)` before a bare
-     `placeOn(obj, floor)` is silently DISCARDED and every prop piles up
-     at the floor's center (the "furniture blob"). Pass your spot
-     explicitly: `placeOn(obj, floor, { xz: [x, z] })`. And READ the
+   - `placeOn(obj, target, { xz, yOffset, xzOffset, grid, surfaceEps, sink })`
+     — sit obj's bbox-bottom on the highest sampled support under its
+     footprint AND center obj's bbox at the xz anchor (both axes are
+     bbox-corrected, so an off-center loader pivot is handled). The default
+     `xz: 'auto'` keeps an already nonzero XZ position and otherwise
+     centers on the TARGET — so an object left at the origin piles up at
+     the floor's center (the "furniture blob"). Pass your spot explicitly:
+     `placeOn(obj, floor, { xz: [x, z] })`. The target may be the scene or
+     a group that contains obj — obj's own subtree is excluded from the
+     supports, so it never lands on itself. `grid` controls footprint
+     sampling (default 7); `surfaceEps` (default 0.0006 m) lifts the object
+     a sub-millimetre off the support to avoid coplanar z-fighting — pass
+     `0` for exact contact. `sink` buries that fraction of the object's
+     bbox height into the surface (clamped to 0–0.9; 0.15–0.35 suits rocks)
+     and sets `userData._sunkPlacement`, which exempts the object from the
+     hovering audit. And READ the
      `*_preview.jpg` fetch_model emits (dimensions + axis guides) BEFORE
      placing. placeOn/snapToGround also record
      `obj.userData._supportTarget = target` — **support-chain memory** the
@@ -518,8 +533,8 @@ piece and a render test.
      seated on (resting contact is not clipping), and checkHovering verifies
      a seated object against its recorded support before flagging it. Net
      effect: stacked placements (books ON a table, props ON a shelf board)
-     survive the audits. xz: `'centered'` (default) | `'random'` | `[x, z]`
-     (absolute world). `xzOffset: [dx, dz]` nudges the object on the
+     survive the audits. xz: `'auto'` (default) | `'centered'` | `'random'`
+     | `[x, z]` (absolute world). `xzOffset: [dx, dz]` nudges the object on the
      surface — use it instead of writing `obj.position.x/z` yourself (a raw
      write puts the model's arbitrary ORIGIN at that coord, re-introducing
      the off-to-the-side bug). The workhorse for "vase on table", "laptop
@@ -544,10 +559,12 @@ piece and a render test.
      no target surface lies that way (then fall back to `placeAgainst`/hand
      coords). `gap: -0.02` bites in slightly for a seam; `allowIntersect:
      true` also tags obj so the clipping audit ignores it.
-   - `snapToGround(obj, groundMeshes, { yOffset })` — drop obj to
-     whatever surface is directly below its current xz. Handles stairs,
-     slopes, terraced floors automatically. Pass the array of walkable
-     meshes. For characters on uneven terrain, props on a sloped floor.
+   - `snapToGround(obj, groundMeshes, { yOffset, below })` — drop obj to
+     whatever surface is directly below its origin's **world-space** xz, so
+     it works under an offset parent. Handles stairs, slopes, terraced
+     floors automatically. Pass the array of walkable meshes; the list may
+     include the scene or a group containing obj (obj's own subtree is
+     excluded). For characters on uneven terrain, props on a sloped floor.
      VERIFY the result on fetched-GLTF props (group hierarchies can defeat
      the snap and leave the prop silently airborne): raycast straight down
      from above the bbox centre against the ground mesh, log the
@@ -574,10 +591,10 @@ piece and a render test.
      overlapping anything. Use when no specific surface anchors the
      placement and you just need empty space near a point.
    - `checkClipping(scene, { autoFix })` — pairwise bbox intersection
-     audit. Runs automatically after `setup()` and **auto-fixes by default**
-     (pushes intersecting pairs apart along the shortest-overlap axis;
-     skips intentional parent/child nesting). Set
-     `globalThis._noAutoFixPlacement = true` to revert to warn-only.
+     audit. Runs automatically after `setup()` and REPORTS (skips
+     intentional parent/child nesting); only the `_autoFixPlacement` repair
+     pass (below) pushes intersecting pairs apart along the
+     shortest-overlap axis.
      **It also runs a mesh-accurate DEEP-INTERPENETRATION pass** and prints,
      by name and never truncated:
      `[checkClipping] ⚠ N object(s) substantially INSIDE another …` →
@@ -598,13 +615,16 @@ piece and a render test.
      group does NOT hide them). For every placed object it footprint-samples
      the surface below and handles three cases:
        • **near** — a small `0.005–1.0 m` gap above the surface below it
-         (the "laptop slightly off the desk" smell) → **AUTO-SNAPPED down**
-         by default (disable with `_noAutoFixPlacement = true`);
+         (the "laptop slightly off the desk" smell) → measured and
+         reported (snapped down only by the `_autoFixPlacement` repair
+         pass);
        • **far** — floating more than 1 m above the nearest surface;
        • **void** — NOTHING beneath its footprint at all (a prop dumped in
          mid-air by hand-coords — `placeOn` would have put it on something).
      `far` and `void` can't be safely snapped (no/uncertain target) so they
-     escalate to `[placement] ⚠ RE-RENDER REQUIRED` — a hard fail. **An
+     escalate to `[placement] ⚠ N object(s) are genuinely unsupported …` —
+     a hard fail. Objects buried by `placeOn`/`scatterOn` `sink` are
+     skipped. **An
      object stays unflagged in exactly three ways:**
        1. it rests at/near ground level (the floor + anything sitting on it —
           auto, no flag);
@@ -676,15 +696,16 @@ piece and a render test.
      verify the frame at the move's CLOSEST APPROACH, not a mid-move frame —
      once the panel is wider than the frame, edge text clips mid-word.
    - `checkZFighting(scene, { autoFix })` — coplanar-surface audit. Runs
-     automatically after `setup()` and **auto-fixes by default**. A poster,
+     automatically after `setup()` and reports. A poster,
      screen, label, logo, sign, floor-marking, or any flat panel placed at the
      EXACT depth of the surface behind it (`panel.position.z = wall.z`) will
      Z-FIGHT — the two coplanar faces flicker frame-to-frame because the depth
      buffer can't pick a winner. **Never place a flat thing at its surface's
      exact coordinate** — offset it a few mm proud (`panel.position.z = wall.z
      + 0.005`) or set `material.polygonOffset = true; material.polygonOffsetFactor
-     = -1`. The audit nudges flagged thin panels ~3 mm out automatically and logs
-     `[checkZFighting] …`; an intentional flush decal can opt out with
+     = -1`. The audit logs `[checkZFighting] …` (the `_autoFixPlacement`
+     repair pass nudges flagged thin panels a few mm out); an intentional
+     flush decal can opt out with
      `obj.userData.noZFightCheck = true`. A `[checkZFighting]` line is a real
      flicker defect, not noise.
 
@@ -692,6 +713,17 @@ piece and a render test.
    (top + legs) or shelf (boards + sides) is checked as one thing, never
    per sub-mesh. A hover/clip/z-fight warning in the render log is a real
    defect to fix (or a missing `noSupportCheck`/`noZFightCheck`), not noise.
+
+   **The audits are warn-only by default.** A scene that sets
+   `globalThis._autoFixPlacement = true` (in `setup()` — the flags are
+   snapshotted when setup ends) gets a repair pass before the audits:
+   `checkClipping`, `checkHovering` and `checkZFighting` run once with
+   `autoFix: true`, then the warn-only audits judge the repaired scene.
+   `globalThis._noAutoPlacementCheck = true` skips both the repair and the
+   placement audits. Repair is a safety net, not a placement method —
+   things placed right don't need it, the `far`/`void` cases can't be
+   repaired at all, and it pushes apart geometry that overlaps on purpose
+   (trees: see `makeSeedTree` above).
 
    **TSL caveat**: vertex deformation done in a `positionNode` happens
    in the vertex shader at render time, so `Box3.setFromObject` (and
@@ -830,7 +862,9 @@ python eido.py render work/<your_scene>.json --probe    # single frame, for fram
 deno run --allow-all --unstable-webgpu eidoverse/render_scene.mjs work/<your_scene>.json
 ```
 
-(If the ffmpeg has no nvenc, set `RENDER_CODEC=libx264`.)
+Video encoding uses `h264_nvenc` when ffmpeg lists it and a one-frame test
+encode succeeds, and falls back to `libx264` otherwise (with a
+`[render_common]` warning); `RENDER_CODEC` overrides the choice.
 
 All paths in scene configs and tool calls are RELATIVE to the repo
 root — the engine always runs with that as its cwd.
@@ -854,7 +888,7 @@ texture sets, VRMs, audio. Declare only what your scene uses; there is no
 required set.
 
 **Asset injection is RAW BYTES.** Point each asset at the REAL file —
-`hdri.hdr`, `model_embedded.gltf`, `character.vrm`, `image.png` — NOT a
+`hdri.hdr`, `<model_id>_embedded.gltf`, `character.vrm`, `image.png` — NOT a
 `*_b64.txt` sidecar. The engine reads the file and puts a `Uint8Array`
 straight on `globalThis.ASSETS[key]` (no base64 round-trip).
 `globalThis.b64toArrayBuffer(ASSETS.key)` still works — it passes that
@@ -1074,16 +1108,24 @@ python3 generate_song.py "<tags>" "<lyrics>" [--bpm N] [--key "K"] [--seed N]
 
 Real SFX for your beats — wind beds, footsteps, impacts, mechanical
 whirs, water, crowd murmur — instead of shipping a video whose only
-audio is music + voice. Fast (~12–30s per clip on a local GPU).
+audio is music + voice. Fast (~12–30s per clip on a local GPU). The
+driver submits the repository's `sa3_workflow.json` (falling back to
+`/workspace/sa3_workflow.json`, then ComfyUI's
+`~/Downloads/audio_stable_audio_3_medium_base.json` template);
+`python3 generate_sfx.py --probe` prints the resolved workflow path and
+checks that ComfyUI is reachable (exit 0/1).
 
 ```bash
 python3 generate_sfx.py "<prompt>" <seconds> <category> <out.mp3> [seed]
-# category: SFX (ambiences/loops: wind, rain, footsteps, room tone)
-#           One-shot (single events: a thud, a door, a whoosh, an impact)
-#           Music | Instrument (usually use generate_song.py instead)
+# category: SFX | One-shot | Music | Instrument (for songs use generate_song.py)
 python3 generate_sfx.py "steady wind through dry grass, open field, no music" 24 SFX wind.mp3
-python3 generate_sfx.py "single soft body landing thud on stone, one-shot" 3 One-shot land.mp3
+python3 generate_sfx.py "a single soft body landing thud on stone, short, close mic, dry room" 3 SFX land.mp3
 ```
+
+The workflow's LLM prompt enhancer rewrites your prompt through a
+per-category brief before Stable Audio sees it. `One-shot` is a
+music-sample brief (plucks, stabs, slams), so it turns foley into musical
+hits — use `SFX` for sound effects, including single events.
 
 Describe the SOUND, not the scene ("slow footsteps through dry grass,
 rhythmic rustling" — not "a person walks sadly"). Add "no music, no
@@ -1142,14 +1184,26 @@ Plus 0.7s linear fade-in at the head and fade-out at the tail.
 Render the scene a touch LONGER than the audio, then mux:
 
 ```bash
-python3 merge_av.py --video scene_video_only.mp4 --audio mixed_audio.wav --out scene_final.mp4
+python3 merge_av.py --video scene_video_only.mp4 --audio mixed_audio.wav --out scene_final.mp4 [--tol 1.0] [--trim-tol 2.0] [--allow-trim]
 ```
 
-It trims the video to the audio with `-shortest` and **refuses to
-clone-pad a short render into a frozen-frame video.** If it prints
-`REFUSING TO MERGE — video is shorter than audio`, your render is too
-short: re-render with `duration` ≥ the audio length (a second longer is
-ideal). **NEVER hand-roll `tpad=stop_mode=clone`** — cloning the last
+It trims the video to the audio with `-shortest` and refuses two
+mismatches:
+
+- **Video shorter than the audio by more than `--tol`** (default 1 s): it
+  **refuses to clone-pad a short render into a frozen-frame video**
+  (`REFUSING TO MERGE — video … shorter than audio`, exit 2). Your render
+  is too short: re-render with `duration` ≥ the audio length (a second
+  longer is ideal).
+- **Audio shorter than the video by more than `--trim-tol`** (default
+  2 s): usually the wrong or a truncated mix, and `-shortest` would
+  silently cut the film, so it exits 3. Pass `--allow-trim` only when
+  cutting the video to the audio is intended.
+
+Within those tolerances the video is stream-copied. Only a video short by
+up to `--tol` is re-encoded, to pad that cushion: with `RENDER_CODEC` if
+set, else `h264_nvenc` when ffmpeg lists it and a one-frame test encode
+succeeds, else `libx264`. **NEVER hand-roll `tpad=stop_mode=clone`** — cloning the last
 frame to backfill the audio is exactly how frozen-frame videos ship.
 (Know the audio length before you render and set `duration` from it.)
 
@@ -1176,6 +1230,9 @@ python3 cyborg_voice.py vocals.wav cyborg_vocals.wav   # NOT cyborg_stutter
 python3 -c "import json; from lipsync import get_viseme_timeline; \
 json.dump(get_viseme_timeline('vocals.wav', fps=30), open('visemes.json','w'))"
 ```
+
+The timeline has one entry per video frame, `ceil(duration × fps)` entries —
+the same frame count the renderer uses for that duration.
 
 ⚠ **Gate the visemes to the aligned lyric windows.** demucs leaves
 instrumental bleed in the vocal stem, so `get_viseme_timeline` reports mouth
@@ -1486,9 +1543,16 @@ Three entry points, same engine underneath — pick by the job:
       collisionMeshes: [floor, wall, deskMesh],          // solids they walk on / around
       motion: { startX: 0, startZ: 4 },                  // walkSpeed OPTIONAL (see below)
   });
-  await body.walkTo(2.5, -3);                            // plans a path, turns + walks it, arrives → idle
+  const arrival = body.walkTo(2.5, -3);                  // plans a path, turns + walks it, arrives → idle
+  arrival.catch(err => console.error('Navigation:', err));
   // in renderFrame(t): body.update(t, dt);  read body.getPosition() / getHeadPosition()
   ```
+  `walkTo`/`runTo` resolve on arrival. If the controller stalls against a
+  collider, the body replans once; still stalled after ~1.5 s, the promise
+  REJECTS with `Error('blocked: collision stall at …')` and the waypoints
+  clear — always attach a `catch`. `body.performAction(clip, duration)`
+  resolves only after the emote has played for `duration` (default 1.5 s)
+  and rejects if the clip is unknown or fails to load.
 - **`EidoverseRobotController`** — explicit waypoints, no sensing/planning, same
   simple API. Use when you know the exact path. Same dialed-in
   `VRMCharacterController` + foot IK + incline speed underneath.
@@ -1543,16 +1607,28 @@ With ANY of these the controller owns the mixer, the root transform, AND the fee
 
 ## Movement vocabulary — run, vault, climb, jump, ladders, gestures, sitting
 
-The controller's full vocabulary, available through all three entry points
-(`VRMRobotBody` / `EidoverseRobotController` / `VRMCharacterController` expose
-the same calls). Everything below is animation-driven with automatic contact
-IK — hands plant on vaulted objects, grab ledge lips, and find ladder rungs on
-their own. Never hand-IK limbs or hand-animate any of these moves.
+The controller's full vocabulary. Everything below is animation-driven with
+automatic contact IK — hands plant on vaulted objects, grab ledge lips, and
+find ladder rungs on their own. Never hand-IK limbs or hand-animate any of
+these moves. The engine is `VRMCharacterController`; the two wrappers pass
+some of it through and hold the rest on an inner object:
 
-- **Running.** Per-waypoint: `setWaypoints([{ x, z, action: 'run' }, …])` —
-  they run to that waypoint and drop back to a walk for waypoints without it.
-  Direct: `setRunning(true/false)`. Stride syncs to actual speed; stairs
-  switch to run-stair clips automatically.
+| Entry point | Inner `VRMCharacterController` | `isManeuvering` |
+|---|---|---|
+| `VRMCharacterController` | itself | getter: `cc.isManeuvering` |
+| `EidoverseRobotController` | `ctrl.charCtrl` | getter: `ctrl.isManeuvering` |
+| `VRMRobotBody` | `body.controller.charCtrl` (`body.controller` is an `EidoverseRobotController` unless `opts.legsClass` overrides it) | method: `body.isManeuvering()` |
+
+`vault()`, `jump(opts)`, `climbLedge()`, `climbLadder(opts)` and
+`setRunning(v)` exist on all three. `autoManeuvers` and the gesture methods
+exist ONLY on `VRMCharacterController` — reach them through the inner object.
+
+- **Running.** On `EidoverseRobotController`, per-waypoint:
+  `ctrl.setWaypoints([{ x, z, action: 'run' }, …])` — they run to that
+  waypoint and drop back to a walk for waypoints without it. On
+  `VRMRobotBody`, `body.runTo(x, z)`. Direct, on any entry point:
+  `setRunning(true/false)`. Stride syncs to actual speed; stairs switch to
+  run-stair clips automatically.
 
 - **Auto-maneuvers (ON by default).** While walking/running, the controller
   scans the path ahead and handles what it finds without being told:
@@ -1565,10 +1641,13 @@ their own. Never hand-IK limbs or hand-animate any of these moves.
     face; corrections scale with penetration, so the clip keeps the motion;
   - near-level gaps up to ~2.2 m → JUMP across;
   - drops of ~0.85 m+ → a landing-recovery crouch on touchdown.
-  Set `autoManeuvers = false` while deliberately approaching furniture or
-  scenery the character should NOT parkour over (a bench they'll sit on is
-  not an obstacle), and re-enable after. Check `isManeuvering()` before
-  issuing new orders mid-flight.
+  Set `autoManeuvers = false` on the inner controller
+  (`ctrl.charCtrl.autoManeuvers = false`,
+  `body.controller.charCtrl.autoManeuvers = false`) while deliberately
+  approaching furniture or scenery the character should NOT parkour over (a
+  bench they'll sit on is not an obstacle), and re-enable after. Check
+  `isManeuvering` (a method on `VRMRobotBody`, a getter elsewhere — table
+  above) before issuing new orders mid-flight.
 
 - **Explicit maneuvers** (the character must be facing the geometry, within a stride):
   ```js
@@ -1588,11 +1667,13 @@ their own. Never hand-IK limbs or hand-animate any of these moves.
 
 - **Upper-body gestures WHILE walking/running.** An emote's upper body blended
   over the gait — wave, talk, cheer with the hands while the legs keep
-  walking:
+  walking. These live on `VRMCharacterController`; from a wrapper, use its
+  inner controller:
   ```js
-  await ctrl.loadGesture('cheer');           // once, at setup
-  ctrl.playGesture('cheer', { weight: 2.5 }); // ≈70% gesture on the upper body
-  ctrl.stopGesture();
+  const cc = ctrl.charCtrl;                 // VRMRobotBody: body.controller.charCtrl
+  await cc.loadGesture('cheer');            // once, at setup
+  cc.playGesture('cheer', { weight: 2.5 }); // ≈70% gesture on the upper body
+  cc.stopGesture();
   ```
   Weight is a mixer blend: `2.5 ≈ 70%`, `4 ≈ 80%`. Gestures end automatically
   when a maneuver starts (the whole body belongs to the vault/climb). A FULL
@@ -1601,8 +1682,9 @@ their own. Never hand-IK limbs or hand-animate any of these moves.
 
 - **Aiming a standing emote.** Full emotes (salute / bow / dance / talk while
   stopped) face `Math.PI` by default. To aim one at the camera or another
-  character, set the facing yaw before playing (on `EidoverseRobotController` /
-  `VRMRobotBody` the emote API lives on `.charCtrl`; on a bare
+  character, set the facing yaw before playing (on `EidoverseRobotController`
+  the emote API lives on `.charCtrl`; `VRMRobotBody` has
+  `body.setEmoteFacing(ry)`, which sets the same field; on a bare
   `VRMCharacterController` call it directly):
   ```js
   const b = ctrl.getPosition();
@@ -1679,8 +1761,8 @@ is the cause:
    VRM faces +Z. A camera at positive Z looks at the face. Set
    `vrm.scene.rotation.y = 0` to face the camera; don't fight the rig.
 
-7. **Loading Walk Backwards by default.** Backwards walking is a narrative
-   choice, not a default. Load the normal walk for forward locomotion.
+At the end of a render the `[vrm-pose]` check flags (`RE-RENDER REQUIRED`) a
+tracked VRM that NEVER left its load pose — the T-pose statue.
 
 ## What's on `globalThis` when your script runs
 
@@ -1704,16 +1786,21 @@ is the cause:
 
 ### VRMA animations
 `globalThis.VRMA_DEFAULTS_B64` keyed by slot. All clips ship in
-`eidoverse/assets/animations/` (slot name = filename stem):
-- **Locomotion** (driven by `VRMCharacterController` — NOT playable via `playVRMADefault`): `walk`, `run`, `fastRun`, `slowRun`, `sneak`, `walkBackward`, `stairsUp`, `stairsDown`, `stairsRunUp`, `stairsRunDown` (plus controller-internal: `turnLeft`, `turnRight`, `jump`, `vault`, `climb*`, `fallLand`)
-- **Stationary** (`idle`, `fallIdle`) and **Expressive** (a STATIONARY VRM only — see below): `sit`, `talk`, `cheer`, `reach`, `raise`, `fist`, `salute`, `crazy`, `dance`
+`eidoverse/assets/animations/` (slot name = filename stem). The slots are the
+`VRMA_SLOTS` list in `eidoverse/render_scene.mjs`; a slot whose `.vrma` is
+missing is skipped:
+- **Locomotion** (driven by `VRMCharacterController` — the walk/run/stairs clips are NOT playable via `playVRMADefault`): `walk`, `run`, `idle`, `turnLeft`, `turnRight`, `jump`, `vault`, `climbLedge`, `climbWallUp`, `climbWallDown`, `climbLadder`, `fallIdle`, `fallLand`, `stairsUp`, `stairsDown`, `stairsRunUp`, `stairsRunDown`
+- **Expressive** (a STATIONARY VRM only — see below): `talk`, `salute`, `cheer`, `fist`, `raise`, `reach`, `crazy`, `dance`
+- **Sitting** (see [Emotes + sitting](#emotes--sitting-on-a-stationary-character) below): chair poses `sitting_normal_chair` (the `seatOn` default) and `sitting_nervous_arm_rub_chair`; floor poses `sitting_on_ground` (cross-legged) and `sit_laying_on_ground` (lying down); transitions `stand_to_sit` and `sit_to_stand`, whose baked hips translation lowers and raises the body
 
 - **Performance** (hand-authored singing and stage clips for a stationary
   VRM, 128 BPM, all from one stance so any two crossfade without foot slide):
   `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
   `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
-  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. `*_mirror`
-  variants use the other hand, and the one-shots `hand_to_heart`,
+  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. Three have an
+  other-hand `*_mirror` variant: `sing_gesture_a_mirror`,
+  `phone_raise_mirror` (with its own `phone_raise_mirror_hold`) and
+  `wave_goodbye_mirror`. The one-shots `hand_to_heart`,
   `look_up_sky`, `phone_raise` and `head_bow` each have a `*_hold` loop that
   starts on their last frame. Play the one-shot with `loop: false`, then the
   hold with a short `fade` once it lands. Beats, uses, the authoring script and
@@ -1722,7 +1809,7 @@ is the cause:
 
 Helpers: `playVRMADefault(vrm, slot, { loopOnce, fadeIn, fadeOut })` sets up `globalThis._mixer`. The engine auto-updates `_mixer` each frame if set.
 
-> **`playVRMADefault` REFUSES locomotion slots.** Calling `playVRMADefault(vrm, 'walk')` (or run/sneak/stairs…) **throws** — playing a locomotion clip in place is the "walking in place" treadmill bug (legs cycle, body never moves). Locomotion is owned by `VRMCharacterController` (`body.walkTo(x,z)` / waypoints), which moves the body AND grounds the feet with IK. `playVRMADefault` only plays stationary/expressive clips. The one exception — a VRM genuinely on a treadmill or carried by a vehicle — passes `{ force: true }` (or `globalThis._allowManualLocomotion = true`).
+> **`playVRMADefault` REFUSES locomotion slots.** Calling `playVRMADefault(vrm, 'walk')` (or run/stairs…) **throws** — playing a locomotion clip in place is the "walking in place" treadmill bug (legs cycle, body never moves). Locomotion is owned by `VRMCharacterController` (`body.walkTo(x,z)` / waypoints), which moves the body AND grounds the feet with IK. `playVRMADefault` only plays stationary/expressive clips. The one exception — a VRM genuinely on a treadmill or carried by a vehicle — passes `{ force: true }` (or `globalThis._allowManualLocomotion = true`).
 
 ### Emotes + sitting on a stationary character
 
@@ -1898,6 +1985,22 @@ pattern, done right. Full-frame HUDs / lower thirds still go through
 `makeOverlayLayer` (screen-locked); screen-space glitch/CRT looks are still
 `CustomEffectsDeno`'s job, never faked inside `draw()`.
 
+**Canvas fonts.** Screen canvases are @napi-rs/canvas (Skia) canvases, which
+look fonts up by family name among installed and registered fonts. In the
+container the display fonts are installed system-wide; on a Windows
+`--local` render the generic names `sans-serif`, `serif` and `monospace` are
+not mapped to a matching face — they fall back to the system default face
+(as an unknown name does), so text renders but `monospace` is not
+monospaced. `drawTextFit`'s default font is `bold 48px monospace`. For a
+specific look, register a bundled font in `setup()` and name that family in
+`font`:
+
+```js
+const { GlobalFonts } = await import('npm:@napi-rs/canvas@0.1.69');
+GlobalFonts.registerFromPath('eidoverse/assets/fonts/ShareTechMono-Regular.ttf', 'Share Tech Mono');
+// font: 'bold 64px "Share Tech Mono"'
+```
+
 ### TSL postprocessing — `CustomEffectsDeno`
 
 **Use these for stylized looks — NEVER hand-roll them.** Drawing scanlines /
@@ -1933,7 +2036,7 @@ await globalThis._fx.update(t);
 await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS render after — update() doesn't
 ```
 
-Always-on baseline (no opt-in): N8AO ambient occlusion + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` (see "WORLD-SPACE SKY + WEATHER").
+Always-on baseline (no opt-in): N8AO ambient occlusion + SSR + UnrealBloom + FXAA. Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera, options)` (the `makeSky` facade in `eidoverse/sky_worlds.js` takes only `enableReflections(options)` and uses its own camera; see "WORLD-SPACE SKY + WEATHER").
 
 **This list below IS the complete catalog (31 effects) — do NOT discover effects
 by `grep`/`ls`-ing `effects_tsl/`.** A `| head` on that truncates the directory
@@ -2239,7 +2342,8 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   or `width`/`depth` for ellipses; `footprint: 'organic'` masks a lobed
   irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
   same-centre stands foreshorten into stamped bands.
-- `density` = interior fullness (1 = authored); `seed` varies everything;
+- `density` = interior fullness (1 = authored); `seed` varies everything
+  (any finite integer, including 0 and negatives);
   on ROW plantings it works both ways: below 1 it leaves gaps in the rows,
   above 1 it tightens in-row spacing (a grid cannot hold more plants on
   command; the row gap is the machinery's, the in-row spacing is the crop's);
@@ -2269,7 +2373,9 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   the art changes; the format lives in vegetation_sunflower_gen.js, which
   falls back to built-in envelopes without the file).
 - Placement: `heightFn: (x,z)=>y` OR `surface: mesh/[meshes]` (raycast down —
-  grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant);
+  grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant;
+  hit normals are taken in world space, so a rotated or uniformly scaled mesh
+  such as a `PlaneGeometry` laid flat with `rotation.x = -Math.PI / 2` works);
   `align` = surface-normal tilt share (grass hugs, woody stays skyward);
   `maxSlope`; `clipFn(x,z)`; explicit `placements: [[x, z, scale], ...]` for
   hero plants. Structural species claim footprints in a cross-stroke occupancy
@@ -2486,8 +2592,12 @@ sky.applyToLights({ sun, hemi, fog: scene.fog });   // palette drives the scene 
   `opts.moonAngularDeg` scales the moon disc (16 = a looming companion
   world; its texture is any 2:1 equirect); `opts.ringCurve = R` bows the
   cloud deck upward along ±z to follow a curved megastructure horizon.
-- `sky.enableReflections(camera)` — per-pixel MOVING cloud reflections on
-  metals (SSR composes on top; geometry occludes sky reflections).
+- `sky.enableReflections(camera, options?)` — per-pixel MOVING cloud
+  reflections on metals (SSR composes on top; geometry occludes sky
+  reflections). `options.gain` (default 1) scales the reflection. The
+  `makeSky` facade (`eidoverse/sky_worlds.js`) takes the options only —
+  `enableReflections(options)` — and uses the camera passed to `makeSky`
+  (else `globalThis._c`).
 - `await sky.bakeEnv(renderer)` — bakes the real sky into
   `scene.environment` for env-IBL/transmission. **It OVERRIDES any
   agent-set HDRI by default** (the sky owns the world's light); interiors
@@ -2510,7 +2620,8 @@ sun.intensity *= weather.sunDim();
 - `weather.transitionTo(name, k, durationSeconds)` — SMOOTH weather change:
   everything (cloud coverage, rain, wind, lightning odds, greying, wetness)
   eases across the window. Duration is yours to direct: `90` = a storm
-  rolling in over a minute and a half; default 45. One call, no other steps.
+  rolling in over a minute and a half; defaults `k = 1`, 45 s. One call, no
+  other steps.
 - Weather couples the sky automatically: coverage presets, sun dimming,
   wind-driven cloud + rain drift, from-the-clouds lightning with distant
   sheet flashes on harsh states, world-tiled rain curtains under dense
@@ -2518,7 +2629,10 @@ sun.intensity *= weather.sunDim();
   materials should set `userData.keepEnv` so reflection-hook env
   suppression leaves their env-IBL alone.
 - Scene lights should re-apply per frame during transitions/cycles:
-  `sky.applyToLights(...)` then `sun.intensity *= weather.sunDim()`.
+  `sky.applyToLights(...)` then `sun.intensity *= weather.sunDim()` and
+  `hemi.intensity *= weather.hemiDim()` (the hemisphere-light multiplier:
+  `0.5 + sunDim × 0.5` unless the preset authors its own, as `darkstorm`
+  does).
 
 ### PICK A PACKAGE — the skies are whole looks, not parts bins
 
@@ -2604,7 +2718,7 @@ const weather = await globalThis.makeWeatherSystem({ scene, sky,
 sky.setColors({ cloud: [...], sun: [...], star: [...], shield: [...] });
 sky.setColors({ sky: [...] });   // the atmosphere (zenith + horizon) and all its readers — distance fog, haze, rain curtain
 sky.setColors({ fog: [...] });   // final multiplier on just the scene fog colour — grade the haze without moving the sky
-weather.setColors({ rain: [...] });
+weather.setColors({ rain: [...] });   // also cloud/sun/shield; forwards to the sky ONLY the channels named
 sky.getColors(); weather.getColors();            // read current multipliers
 ```
 
@@ -3053,7 +3167,11 @@ plane.position.set(0, -0.42, -1);    // (x,y) camera-local at z = -1
 The overlay camera is static at the origin, so panels hold their place in the
 frame no matter how the world camera moves/cuts — you can swap or reassign the
 world camera freely without the overlay drifting. `makeOverlayLayer` sets
-`globalThis._overlayScene` / `_overlayCamera`; the engine does the rest.
+`globalThis._overlayScene` / `_overlayCamera` and returns
+`{ scene, camera, add }`; `add(obj)` parents the object to the overlay camera
+so it stays screen-locked. Give overlay materials `transparent: true` and
+`depthTest: false`, and use `renderOrder` to sort them; the engine does the
+rest.
 
 **Move the world camera by POSITION, not FOV/zoom,** if you want push-ins
 without the overlay scaling — but since the overlay rides its own fixed camera,
@@ -3279,9 +3397,11 @@ caption, with awkwardly timed other words and, when you pass `--lyrics` (and
 exits 1 on any failure. Run it after editing a scene and before a render that
 uses new captions.
 
-Only the bundled fonts in `eidoverse/assets/fonts/` are used. `registerFonts()`
-finds them from the module's own folder, so previews work from any directory.
-Generic families such as `monospace` do not resolve on Windows. Emoji, CJK and
+These modules use only the bundled fonts in `eidoverse/assets/fonts/`, by
+family name. `registerFonts()` registers them from the module's own folder, so
+previews work from any directory; never rely on a generic family here, since
+on Windows those fall back to the default face (see "Canvas fonts" under
+`makeScreen`). Emoji, CJK and
 every logo are vector drawings. The scenes' offscreen canvases come from
 @napi-rs/canvas `createCanvas`, because Skia's `drawImage` rejects the engine's
 `document.createElement('canvas')` objects. Draw a scene straight into the
@@ -3365,7 +3485,7 @@ compositing and avoids a separate frame-processing pass.
 
 ### Video on 3D screens
 ```bash
-python3 video_to_sprite.mjs <clip>.mp4 --out sprite.png   # (deno tool; see file header)
+node eidoverse/video_to_sprite.mjs <clip>.mp4 --output sprite   # → sprite.jpg + sprite_info.json (see file header)
 ```
 Load the atlas + its `*_info.json`, then `globalThis.makeVideoScreen` owns
 the rest — the screen material recipe (sRGB, unlit, `toneMapped:false`) and
@@ -3442,9 +3562,10 @@ grep -nE "(leftUpperArm|rightUpperArm|leftShoulder|rightShoulder)\.rotation" "$S
 #    should return at least one hit.
 grep -nE "enableFootIK" "$SC"
 
-# 5. Walk Backwards is a narrative choice. If you don't want backward
-#    motion, swap to the forward walk + waypoints.
-grep -nE "Walk.?Backward" "$SC"
+# 5. A controller-driven VRM must not also get a locomotion clip played
+#    in place (the treadmill bug — playVRMADefault throws on walk/run/
+#    stairs slots). Any hit here beside a controller is your bug.
+grep -nE "playVRMADefault\([^)]*'(walk|run|stairs[A-Za-z]*)'" "$SC"
 
 # 6. NodeMaterial discipline. The pipeline is WebGPU + TSL only — every
 #    material should be the *NodeMaterial variant. Non-node materials
@@ -3515,14 +3636,17 @@ ffmpeg -nostdin -loglevel error -i work/<id>/<name>.mp4 \
 #    obstacle) and re-render. Nothing warns you and nothing moves the
 #    camera for you.
 
-# 7. PLACEMENT LOG — clipping + near-surface hovering are AUTO-FIXED by
-#    default (the engine pushes overlapping models apart and snaps
-#    near-surface floaters down, once, post-setup). You'll see
-#    "[placement] ⚠ RE-RENDER REQUIRED — N object(s) floating with no/far
-#    support" ONLY for props dumped in mid-air with nothing beneath →
+# 7. PLACEMENT LOG — the placement audits are WARN-ONLY by default: they
+#    report clipping, near-surface hovering and z-fighting and move
+#    nothing (only a scene that set globalThis._autoFixPlacement = true
+#    gets the one-shot repair pass first). A [checkClipping] /
+#    [checkHovering] / [checkZFighting] line is a defect to fix in the
+#    scene. "[placement] ⚠ N object(s) are genuinely unsupported and will
+#    read as floating on camera" = props far above, or with nothing
+#    beneath →
 #    HARD FAIL: place them with placeOn / placeAgainst / snapToGround.
 #    A deliberate flyer → mark obj.userData.noSupportCheck = true.
-#    Don't lean on auto-fix as a crutch — place things right.
+#    Don't lean on the repair pass as a crutch — place things right.
 
 # 7b. LIPSYNC LOG — "[lipsync] ⚠ VRM '…' mouth NEVER moved across the
 #    render" → if that character SPEAKS, you forgot to drive visemes →

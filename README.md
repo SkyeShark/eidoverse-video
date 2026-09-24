@@ -55,7 +55,7 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
 - `VRMCharacterController` + `VRMFootControllerIK` — physics-based
   locomotion (Rapier) with terrain-conforming foot IK and incline-aware
   walk speed.
-- The **movement vocabulary**: walk, run, sneak, stairs, vaults, ledge
+- The **movement vocabulary**: walk, run, stairs, vaults, ledge
   climbs, gap jumps, ladder climbs, wall scrambles, drop landings,
   upper-body gestures while walking, and chair/ground sitting
   (`seatOn`, `sitOnGround`, `unseat`, `emote`, `faceCamera`).
@@ -145,8 +145,9 @@ skeletons, bouncing cameras, sideways-travelling vehicles.
   `snapToGround`, `alignToSurface`, `scatterOn`, `findClearSpot`,
   `faceToward`, `stationBeside`, `driveAlong` (vehicles that always face
   their travel).
-- Post-setup audits with auto-fix: `checkClipping`, `checkHovering`,
-  `checkZFighting`, plus density and intrusion checks.
+- Post-setup audits (warn-only; opt-in `_autoFixPlacement` repair pass):
+  `checkClipping`, `checkHovering`, `checkZFighting`, plus density and
+  intrusion checks.
 - `CameraSafety` (keeps cameras out of geometry), `focusPoint` /
   `lookAtObject` (aim at what the eye sees, not the pivot).
 - `Flow` curve-following (via three addons): meshes that run along paths.
