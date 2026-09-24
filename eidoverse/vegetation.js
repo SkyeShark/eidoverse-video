@@ -542,6 +542,18 @@ function valueNoise2D(seed) {
 // down — height from the hit point, slope from the hit normal. This is what
 // frees the brush from the terrain system: rocks, rooftops, sculpted ground,
 // any geometry at all. Returns null where the ray misses (no placement).
+// Park–Miller (Lehmer) stream. The seed is folded into [1, M-1]: a seed that
+// lands on 0 (seed: 0, or seed = -offset) would otherwise stick at 0 forever,
+// and a negative one would yield negative "uniforms". Identical output to the
+// old inline generators for every positive, non-degenerate seed.
+function lehmer(seed, mult) {
+    const M = 2147483647;
+    let s = Number.isFinite(seed) ? seed % M : 0;
+    if (s < 0) s += M;
+    if (s === 0) s = 2654435761 % M;
+    return () => { s = (s * mult) % M; return s / M; };
+}
+
 function surfaceSampler(surface) {
     const meshes = Array.isArray(surface) ? surface : [surface];
     for (const m of meshes) m.updateWorldMatrix(true, false);
@@ -554,15 +566,19 @@ function surfaceSampler(surface) {
         const hits = ray.intersectObjects(meshes, true);
         if (!hits.length) return null;
         const h = hits[0];
-        const n = h.normal ?? new T3.Vector3(0, 1, 0);
+        // Raycaster face normals are OBJECT-local: bring them to world space,
+        // or a rotated plane (e.g. PlaneGeometry + rotation.x = -PI/2) reads
+        // as a vertical wall and every placement is slope-rejected.
+        const n = h.normal
+            ? h.normal.clone().transformDirection(h.object.matrixWorld)
+            : new T3.Vector3(0, 1, 0);
         if (n.y < 0) n.negate();
         return { y: h.point.y, slope: Math.acos(Math.min(1, Math.abs(n.y))), nx: n.x, ny: n.y, nz: n.z };
     };
 }
 
 function placeInstances(o, spec) {
-    const rng = (() => { let s = (o.seed ?? 7) * 2654435761 % 2147483647;
-        return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+    const rng = lehmer((o.seed ?? 7) * 2654435761, 16807);
     const noise = valueNoise2D(o.seed ?? 7);
     const W = o.width, D = o.depth, cx = o.center[0], cz = o.center[1];
     // `density` means the stand's INTERIOR fullness in every footprint mode:
@@ -670,8 +686,7 @@ function headingYaw(o, x, z, spin) {
 // the whole planting; stride/phase interleave two strokes through one field
 // (e.g. every 4th row from a peeled-ear variant call).
 function placeRows(o, spec) {
-    const rng = (() => { let s = ((o.seed ?? 7) + 5) * 2654435761 % 2147483647;
-        return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+    const rng = lehmer(((o.seed ?? 7) + 5) * 2654435761, 16807);
     const r = typeof o.rows === 'object' ? o.rows : {};
     // `density` works BOTH ways on a planted field, because a grid cannot
     // simply be told to hold more plants: below 1 it drops plants (skip),
@@ -786,8 +801,7 @@ export async function createFlora(opts = {}) {
     }
 
     // base geometry: one tuft / cluster / rosette (seeded, so fields differ by seed)
-    const gRng = (() => { let s = (o.seed + 13) * 48271 % 2147483647;
-        return () => { s = (s * 48271) % 2147483647; return s / 2147483647; }; })();
+    const gRng = lehmer((o.seed + 13) * 48271, 48271);
     let shrubAnchor = null;
     if (spec.archetype === 'shrub') {
         try { shrubAnchor = JSON.parse(await Deno.readTextFile(ASSET_DIR + 'shrub_anchors.json'))[spec.maps] ?? null; }
@@ -855,8 +869,7 @@ export async function createFlora(opts = {}) {
             // seeded, not Math.random(): authored placements must reproduce
             // exactly per seed — run-to-run scale/yaw drift broke every
             // like-for-like lookdev comparison
-            const pr = (() => { let sN = ((o.seed ?? 7) * 131 + pi * 37 + 5) % 2147483647;
-                return () => { sN = (sN * 16807) % 2147483647; return sN / 2147483647; }; })();
+            const pr = lehmer((o.seed ?? 7) * 131 + pi * 37 + 5, 16807);
             const scale = pl[2] ?? 1;
             if (spec.footRadius) _placedPlants.push({ x: pl[0], z: pl[1], r: spec.footRadius * scale });
             const sy = o._surfaceAt ? (o._surfaceAt(pl[0], pl[1])?.y ?? 0) : null;

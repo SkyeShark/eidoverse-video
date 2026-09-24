@@ -403,7 +403,10 @@
                 const { sun: s, hemi: h } = L();
                 sky.applyToLights({ sun: s, hemi: h, fog: scene.fog });
                 if (s) s.intensity *= wx.sunDim();
-                if (h) h.intensity *= (0.5 + wx.sunDim() * 0.5);
+                // hemiDim() == 0.5 + sunDim()*0.5 for every preset that does
+                // not author its own hemiDim (clear stays 1.0); darkstorm's
+                // authored 0.12 is only honoured through it.
+                if (h) h.intensity *= wx.hemiDim();
                 return api;
             },
             audioTimeline() { return wxAudio?.toJSON?.() ?? null; },

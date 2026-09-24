@@ -254,18 +254,44 @@
             // Stationary expressive clip via the controller's emote system
             // (auto-suspends locomotion at the engine level). Best-effort: an
             // unknown emote degrades to a no-op rather than throwing.
+            // Enter 'performing' SYNCHRONOUSLY (open-ended while the clip
+            // loads): a caller polling getState() right after this call
+            // (VRMRobotBody.performAction) must not see the pre-emote state
+            // and resolve before the emote has even started.
+            const prevState = this.state;
+            this.currentAction = name;
+            this.state = 'performing';
+            this._emoteUntil = Infinity;
             try {
                 if (typeof this.charCtrl.loadEmote === 'function' && !this._emotesLoaded[name]) {
                     await this.charCtrl.loadEmote(name);
                     this._emotesLoaded[name] = true;
                 }
+                // superseded while loading (stop / setWaypoints / new emote)
+                if (this.currentAction !== name || this.state !== 'performing') return false;
                 this.charCtrl.playEmote?.(name);
-                this.currentAction = name;
-                this.state = 'performing';
                 this._emoteUntil = this._t + (duration ?? 1.5);
+                return true;
             } catch (e) {
                 console.warn('[eidoverse-robot] forceAction(' + name + ') failed: ' + e.message);
+                if (this.currentAction === name && this.state === 'performing') {
+                    this.currentAction = null;
+                    this.state = prevState === 'performing'
+                        ? ((this.waypointIndex < this.waypoints.length) ? 'walking' : 'idle')
+                        : prevState;
+                }
+                return false;
             }
+        }
+
+        // True while a collision stall has latched locomotion to zero input
+        // with waypoints still pending (see update()). The body layer uses it
+        // to replan / fail a walkTo instead of waiting on it forever.
+        isStalled() {
+            return !this.charCtrl?.isManeuvering &&
+                (this.charCtrl?._blockedFrames || 0) >= 6 &&
+                this.waypointIndex < this.waypoints.length &&
+                this.state !== 'performing' && this.state !== 'seated';
         }
 
         // Enter the SEATED state: crossfade a seated clip (e.g. stand_to_sit) in

@@ -25,6 +25,9 @@ async function setup() {
     ]
   ) {
     const robot = await api.loadRobot(id, { scene: _s, position });
+    // The drone flies with its hand payload hanging below it: nothing is
+    // meant to support it, so declare the intent to the placement audit.
+    if (clip === "flight") robot.group.userData.noSupportCheck = true;
     examples.push({ robot, clip });
   }
   _c.position.set(5, 3.8, 7);

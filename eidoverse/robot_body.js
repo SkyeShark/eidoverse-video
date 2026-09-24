@@ -172,6 +172,8 @@ class VRMRobotBody {
         this._replanCooldown = 0.4;           // seconds between forced replans
         this._blockedSince = -1;              // timestamp when last detected blocked
         this._blockedTimeout = 1.5;           // seconds before declaring unreachable
+        this._stallSince = -1;                // collision-stall start (controller latched idle)
+        this._stallReplanned = false;         // one replan per stall episode
 
         // Scan state
         this._scan = null;                    // { startTime, duration, yawFrom, yawTo }
@@ -273,6 +275,8 @@ class VRMRobotBody {
             this._currentPath = path;
             this._currentGoal = { x, z, mode };
             this._blockedSince = -1;
+            this._stallSince = -1;
+            this._stallReplanned = false;
             this._pendingAction = { kind: mode === 'run' ? 'running' : 'walking', resolve, reject, mode };
         });
     }
@@ -387,8 +391,17 @@ class VRMRobotBody {
                 reject(new Error(`unknown clip: ${clipName}`));
                 return;
             }
-            this.controller.forceAction(clipName, duration);
-            this._pendingAction = { kind: 'performing', resolve, reject };
+            const action = { kind: 'performing', resolve, reject };
+            this._pendingAction = action;
+            // forceAction enters 'performing' synchronously and resolves
+            // false if the clip could not load/play — fail THIS action then
+            // (unless it was already superseded).
+            Promise.resolve(this.controller.forceAction(clipName, duration)).then((ok) => {
+                if (ok === false && this._pendingAction === action) {
+                    this._pendingAction = null;
+                    reject(new Error(`clip failed to play: ${clipName}`));
+                }
+            });
         });
     }
 
@@ -669,6 +682,33 @@ class VRMRobotBody {
             this._stuckCheck = { lastPos: this.getPosition(), lastTime: t };
             return;
         }
+        // Collision stall: the controller latched zero input and reports
+        // 'idle' with waypoints still pending, so the moving-branch below
+        // never fires and walkTo() would wait forever. Replan once (sensors
+        // may have mapped the blocker by now → a path around it); if it is
+        // still stalled after _blockedTimeout, reject the action.
+        const pa = this._pendingAction;
+        if (pa && (pa.kind === 'walking' || pa.kind === 'running') &&
+            this.controller.isStalled?.()) {
+            if (this._stallSince < 0) this._stallSince = t;
+            if (!this._stallReplanned && (t - this._lastReplanTime) > this._replanCooldown) {
+                this._stallReplanned = true;
+                this._replan(t);
+            } else if (t - this._stallSince >= this._blockedTimeout) {
+                const p = this.getPosition();
+                const g = this._currentGoal;
+                this._pendingAction = null;
+                this.controller.setWaypoints([]);
+                this._currentPath = null;
+                this._currentGoal = null;
+                this._stallSince = -1;
+                this._stallReplanned = false;
+                pa.reject(new Error(`blocked: collision stall at (${p.x.toFixed(2)},${p.z.toFixed(2)})`
+                    + (g ? ` short of (${g.x.toFixed(2)},${g.z.toFixed(2)})` : '')
+                    + ` for ${this._blockedTimeout}s after replanning`));
+            }
+            return;
+        }
         const pos = this.getPosition();
         const dx = pos.x - this._stuckCheck.lastPos.x;
         const dz = pos.z - this._stuckCheck.lastPos.z;
@@ -688,6 +728,7 @@ class VRMRobotBody {
             }
         } else {
             this._blockedSince = -1;
+            if (isMoving) { this._stallSince = -1; this._stallReplanned = false; }
         }
         this._stuckCheck.lastPos = pos;
         this._stuckCheck.lastTime = t;

@@ -667,7 +667,12 @@ export async function build(THREE, opts = {}) {
         // the last struck character's key: down on the strike, released over the next character's time
         const last = n > 0 ? text[n - 1] : null;
         printed.key = last !== null && keyOf.has(last) ? keyOf.get(last) : -1;
-        printed.env = n > 0 && nTotal < text.length + 1 ? 1 - sstep(frac * 1.6) : 0;
+        // release uses the UNCLAMPED count: nTotal is clamped to text.length,
+        // so the old `nTotal < text.length + 1` was always true and the final
+        // key stayed down forever. Past the end, the last key releases over
+        // one more character's time (nChars = Infinity → released).
+        const raw = Math.max(0, nChars);
+        printed.env = n > 0 && raw < text.length + 1 ? 1 - sstep((raw - n) * 1.6) : 0;
         return { line: Lc, col, lines: lines.length };
     }
     setText('', 0);

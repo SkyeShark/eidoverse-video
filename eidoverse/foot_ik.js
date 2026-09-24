@@ -66,9 +66,16 @@
 
             // Smoothing state
             this.lastLowBonePosition = new THREE.Vector3().copy(tmpC);
+            // Seed rotation history from the bones (not identity): Smoothing()
+            // runs before the first SavingPositionRotation(), so an identity
+            // seed slerps the first frames' feet from a twisted pose.
             this.lastLowBoneRotation = new THREE.Quaternion();
             this.lastMiddleBoneRotation = new THREE.Quaternion();
             this.lastUpBoneRotation = new THREE.Quaternion();
+            lowBone.getWorldQuaternion(this.lastLowBoneRotation);
+            middleBone.getWorldQuaternion(this.lastMiddleBoneRotation);
+            upBone.getWorldQuaternion(this.lastUpBoneRotation);
+            this._rotationHistorySeeded = false;
             this.lastLowBoneAnimationPosition = new THREE.Vector3().copy(tmpC);
             this.lastLowBoneAnimationRotation = new THREE.Quaternion();
             lowBone.getWorldQuaternion(this.lastLowBoneAnimationRotation);
@@ -404,6 +411,15 @@
         FootIK(dt) {
             this.rootObject.updateMatrixWorld(true);
             this._updateSwingPhase(dt);
+            // First solve: re-seed rotation history from the CURRENT animated
+            // pose (the rig may have been placed/rotated since construction).
+            for (const leg of [this.m_LeftLeg, this.m_RightLeg]) {
+                if (!leg || leg._rotationHistorySeeded) continue;
+                leg.UpBone.getWorldQuaternion(leg.lastUpBoneRotation);
+                leg.MiddleBone.getWorldQuaternion(leg.lastMiddleBoneRotation);
+                leg.LowBone.getWorldQuaternion(leg.lastLowBoneRotation);
+                leg._rotationHistorySeeded = true;
+            }
 
             if (this.leftEnabled) {
                 this.SetPositionRotationFromRayCast(this.m_LeftLeg);

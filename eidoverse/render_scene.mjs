@@ -2744,7 +2744,7 @@ for (let i = 0; i < totalFrames; i++) {
     } catch (e) { /* never break the render */ }
 
     // ── Frozen-pose tracker ── per frame, note whether any VRM's skeleton ever
-    // moved (marker bones vs their frame-1 pose). At end-of-render we hard-flag
+    // moved (marker bones vs the normalized REST pose). At end-of-render we hard-flag
     // a VRM that spent the WHOLE render in its load pose — a T-pose statue means
     // no animation was ever played AND no controller was ever stepped (a
     // VRMRobotBody/controller you forgot to update(t, dt) each frame, or a
@@ -2764,12 +2764,29 @@ for (let i = 0; i < totalFrames; i++) {
                 .filter(Boolean);
             if (!bones.length) continue;
             if (!vv.__poseBase) {
-                vv.__poseBase = bones.map((b) => b.quaternion.toArray().concat(b.position.y));
-            } else {
+                // Baseline = the NORMALIZED REST pose (the load/T-pose), not
+                // the first tracked frame: by the time this runs the mixer
+                // has already posed frame 1, so a gently animated idle was
+                // compared against itself and flagged as frozen. Normalized
+                // bone nodes rest at identity rotation; hips height comes
+                // from the humanoid's normalizedRestPose when exposed.
+                const rest = vv.humanoid.normalizedRestPose || null;
+                const names = ['leftUpperArm', 'rightUpperLeg', 'hips'];
+                vv.__poseBase = bones.map((b) => {
+                    const nmB = names.find((n) => vv.humanoid.getNormalizedBoneNode(n) === b);
+                    const rp = rest && nmB && rest[nmB] && rest[nmB].position;
+                    const y = Array.isArray(rp) && Number.isFinite(rp[1]) ? rp[1] : b.position.y;
+                    return [0, 0, 0, 1, y];
+                });
+            }
+            {
                 for (let bi = 0; bi < bones.length; bi++) {
                     const b = bones[bi], base = vv.__poseBase[bi];
-                    const dq = Math.abs(b.quaternion.x - base[0]) + Math.abs(b.quaternion.y - base[1])
+                    const dqP = Math.abs(b.quaternion.x - base[0]) + Math.abs(b.quaternion.y - base[1])
                         + Math.abs(b.quaternion.z - base[2]) + Math.abs(b.quaternion.w - base[3]);
+                    const dqN = Math.abs(b.quaternion.x + base[0]) + Math.abs(b.quaternion.y + base[1])
+                        + Math.abs(b.quaternion.z + base[2]) + Math.abs(b.quaternion.w + base[3]);
+                    const dq = Math.min(dqP, dqN);   // q and -q are the same rotation
                     if (dq > 0.01 || Math.abs(b.position.y - base[4]) > 0.01) { vv.__poseMoved = true; break; }
                 }
             }
