@@ -106,7 +106,10 @@ def get_viseme_timeline(audio_path: str, fps: int = 30, fft_size: int = 1024) ->
     """
     samples, sr = _load_audio_mono(audio_path)
     duration = len(samples) / sr
-    n_frames = int(duration * fps)
+    # ceil, like render_scene.mjs (totalFrames = Math.ceil(duration * fps)):
+    # int() dropped the partial last frame, so timeline[frame] ran out one
+    # frame early. The epsilon keeps an exact multiple (2.0 s @ 30) at 60.
+    n_frames = int(np.ceil(duration * fps - 1e-6))
     hop = fft_size // 2  # 50% overlap
 
     # Smoothing (matches vtuber engine's smoothingTimeConstant = 0.3)

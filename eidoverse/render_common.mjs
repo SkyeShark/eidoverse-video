@@ -26,6 +26,30 @@ import { requestRenderAdapter } from './gpu_check.mjs';
 // machines with no hardware video encoder. Explicit codec choices still win.
 let defaultVideoCodec = 'h264_nvenc';
 
+// Hardware adapter ≠ NVIDIA: an AMD/Intel/Apple GPU used to get h264_nvenc
+// and ffmpeg died right after setup. Probe once per process: h264_nvenc must
+// be LISTED by `ffmpeg -encoders` AND encode one tiny frame (a build can list
+// it with no NVIDIA driver present); otherwise libx264. ~0.3 s, only runs
+// when RENDER_CODEC is unset on a hardware adapter.
+async function _nvencUsable() {
+    const ff = Deno.env.get('FFMPEG_PATH') || 'ffmpeg';
+    try {
+        const list = await new Deno.Command(ff, {
+            args: ['-hide_banner', '-encoders'], stdout: 'piped', stderr: 'null',
+        }).output();
+        if (!new TextDecoder().decode(list.stdout).includes('h264_nvenc')) return false;
+        const test = await new Deno.Command(ff, {
+            args: ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+                   '-i', 'color=c=black:s=256x256:d=0.1', '-frames:v', '1',
+                   '-c:v', 'h264_nvenc', '-f', 'null', '-'],
+            stdout: 'null', stderr: 'null',
+        }).output();
+        return test.success;
+    } catch {
+        return false;
+    }
+}
+
 // --- Config ---
 
 export function loadConfig(configPath) {
@@ -116,7 +140,15 @@ class FakeGPUCanvasContext {
  */
 export async function setupRenderer(width, height) {
     const { adapter, info } = await requestRenderAdapter();
-    defaultVideoCodec = info.backend === 'software' ? 'libx264' : 'h264_nvenc';
+    // RENDER_CODEC (read again in startFfmpegPipe) wins; software adapters
+    // keep libx264 without probing; hardware keeps NVENC when it works.
+    if (Deno.env.get('RENDER_CODEC')) defaultVideoCodec = Deno.env.get('RENDER_CODEC');
+    else if (info.backend === 'software') defaultVideoCodec = 'libx264';
+    else if (await _nvencUsable()) defaultVideoCodec = 'h264_nvenc';
+    else {
+        defaultVideoCodec = 'libx264';
+        console.warn('[render_common] h264_nvenc unavailable on this machine/ffmpeg — encoding with libx264 (set RENDER_CODEC to override)');
+    }
     console.log(`[render_common] WebGPU ${info.backend}: ${info.description} (vendor=${info.vendor}, device=${info.device}, fallback=${info.isFallbackAdapter})`);
     // Request 'core-features-and-limits' so Three.js's WebGPU backend doesn't
     // fall into compatibilityMode. Compat mode downgrades MRT (kills the

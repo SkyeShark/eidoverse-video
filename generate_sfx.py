@@ -1,4 +1,8 @@
-"""Headless Stable Audio 3 driver for the ComfyUI workflow in Downloads.
+"""Headless Stable Audio 3 driver for the committed sa3_workflow.json.
+
+Workflow lookup order: <repo>/sa3_workflow.json (next to this script),
+/workspace/sa3_workflow.json (container), then the original ComfyUI template
+~/Downloads/audio_stable_audio_3_medium_base.json.
 
 Usage: python generate_sfx.py "<prompt>" <seconds> <category> <out.mp3> [seed]
        python generate_sfx.py --probe    # fail-fast connectivity check (exit 0/1)
@@ -10,10 +14,18 @@ from pathlib import Path
 COMFY = __import__("os").environ.get("COMFYUI_URL") or (
     "http://host.docker.internal:8188" if __import__("os").path.exists("/.dockerenv") else "http://127.0.0.1:8188")
 
+_WF_CANDIDATES = [
+    Path(__file__).resolve().parent / "sa3_workflow.json",
+    Path("/workspace/sa3_workflow.json"),
+    Path.home() / "Downloads" / "audio_stable_audio_3_medium_base.json",
+]
+WF_PATH = next((p for p in _WF_CANDIDATES if p.exists()), _WF_CANDIDATES[0])
+
 if "--probe" in sys.argv:
     # answer in seconds so agents can rule audio in/out BEFORE planning —
     # _capabilities.json reflects the HOST probe; a container can still
     # fail to reach host.docker.internal
+    print(f"workflow: {WF_PATH}" + ("" if WF_PATH.exists() else "  (MISSING)"))
     try:
         urllib.request.urlopen(f"{COMFY}/system_stats", timeout=5)
         print(f"OK: ComfyUI reachable at {COMFY}")
@@ -21,7 +33,6 @@ if "--probe" in sys.argv:
     except Exception as e:  # noqa: BLE001
         print(f"ERROR: ComfyUI NOT reachable at {COMFY}: {e}")
         sys.exit(1)
-WF_PATH = Path("/workspace/sa3_workflow.json") if Path("/workspace/sa3_workflow.json").exists() else Path.home() / "Downloads" / "audio_stable_audio_3_medium_base.json"
 
 def main():
     # Flags (anywhere in argv):
@@ -64,7 +75,13 @@ def main():
     t0 = time.time()
     while time.time() - t0 < 600:
         time.sleep(3)
-        hist = json.loads(urllib.request.urlopen(f"{COMFY}/history/{pid}", timeout=15).read())
+        # One slow/failed poll must not kill the script while ComfyUI keeps
+        # generating (same as generate_song.py): log and keep polling.
+        try:
+            hist = json.loads(urllib.request.urlopen(f"{COMFY}/history/{pid}", timeout=15).read())
+        except (OSError, ValueError) as e:  # URLError/HTTPError/timeouts are OSError
+            print(f"  (history poll failed: {e}; retrying)", flush=True)
+            continue
         if pid not in hist:
             continue
         entry = hist[pid]
@@ -82,7 +99,9 @@ def main():
                     Path(out).write_bytes(data)
                     print(f"saved {out} ({len(data)} bytes) in {time.time()-t0:.0f}s")
                     return
-    print("TIMEOUT"); sys.exit(2)
+    print(f"TIMEOUT after 600s; prompt {pid} may still be running in ComfyUI — "
+          "check its queue/history before submitting another generation.")
+    sys.exit(2)
 
 if __name__ == "__main__":
     main()
