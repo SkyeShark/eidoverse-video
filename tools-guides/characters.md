@@ -66,23 +66,32 @@ the piece (and across pieces for a recurring cast) — see [audio.md](audio.md).
 ## VRMA animations
 
 `globalThis.VRMA_DEFAULTS_B64`, keyed by slot; clips ship in
-`eidoverse/assets/animations/` (slot = filename stem):
+`eidoverse/assets/animations/` (slot = filename stem). The slots are the
+`VRMA_SLOTS` list in `eidoverse/render_scene.mjs`; a slot whose `.vrma` is
+missing is skipped:
 
-- **Locomotion** (the controller's domain): `walk`, `run`, `fastRun`,
-  `slowRun`, `sneak`, `walkBackward`, `stairsUp`, `stairsDown`,
-  `stairsRunUp`, `stairsRunDown` (+ controller-internal `turnLeft`,
-  `turnRight`, `jump`, `vault`, `climb*`, `fallLand`)
-- **Stationary** (`idle`, `fallIdle`) and **expressive** (for a stationary
-  VRM): `sit`, `talk`, `cheer`, `reach`, `raise`, `fist`, `salute`,
-  `crazy`, `dance`
+- **Locomotion** (the controller's domain): `walk`, `run`, `idle`,
+  `turnLeft`, `turnRight`, `jump`, `vault`, `climbLedge`, `climbWallUp`,
+  `climbWallDown`, `climbLadder`, `fallIdle`, `fallLand`, `stairsUp`,
+  `stairsDown`, `stairsRunUp`, `stairsRunDown`
+- **Expressive** (for a stationary VRM): `talk`, `salute`, `cheer`, `fist`,
+  `raise`, `reach`, `crazy`, `dance`
+- **Sitting** (see [sitting](#emotes--sitting-on-a-stationary-character)
+  below): chair poses `sitting_normal_chair` (the `seatOn` default) and
+  `sitting_nervous_arm_rub_chair`; floor poses `sitting_on_ground`
+  (cross-legged) and `sit_laying_on_ground` (lying down); transitions
+  `stand_to_sit` and `sit_to_stand`, whose baked hips translation lowers and
+  raises the body
 - **Performance** (hand-authored singing and stage clips for a stationary
   VRM, 128 BPM, all from one stance so any two crossfade without foot slide):
   `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
   `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
-  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. `*_mirror`
-  variants use the other hand, and the one-shots `hand_to_heart`,
-  `look_up_sky`, `phone_raise` and `head_bow` each have a `*_hold` loop that
-  starts on their last frame. Play the one-shot with `loop: false`, then the
+  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. Three have an
+  other-hand `*_mirror` variant: `sing_gesture_a_mirror`,
+  `phone_raise_mirror` (with its own `phone_raise_mirror_hold`) and
+  `wave_goodbye_mirror`. The one-shots `hand_to_heart`, `look_up_sky`,
+  `phone_raise` and `head_bow` each have a `*_hold` loop that starts on
+  their last frame. Play the one-shot with `loop: false`, then the
   hold with a short `fade` once it lands. Beats, uses, the authoring script and
   its checker are in
   [performance_src](../eidoverse/assets/animations/performance_src/README.md).
@@ -129,6 +138,12 @@ Three entry points over the same engine — pick by the job:
   arrival.catch(error => console.error('Navigation:', error));
   // renderFrame(t): body.update(t, dt);  read body.getPosition() / getHeadPosition()
   ```
+  `walkTo`/`runTo` resolve on arrival. If the controller stalls against a
+  collider, the body replans once; still stalled after ~1.5 s, the promise
+  rejects with `Error('blocked: collision stall at …')` and the waypoints
+  clear, so always attach a `catch`. `body.performAction(clip, duration)`
+  resolves only after the emote has played for `duration` (default 1.5 s)
+  and rejects if the clip is unknown or fails to load.
 - **`EidoverseRobotController`** — explicit waypoints, no sensing/planning,
   same simple API. For when you know the path.
   ```js
@@ -174,12 +189,25 @@ things follow:
 
 ## Movement vocabulary — run, vault, climb, jump, ladders
 
-Available through all three entry points; everything is animation-driven
-with automatic contact IK — hands plant on vaulted objects, grab ledge
-lips, and find ladder rungs on their own.
+Everything is animation-driven with automatic contact IK — hands plant on
+vaulted objects, grab ledge lips, and find ladder rungs on their own. The
+engine is `VRMCharacterController`; the wrappers pass some of it through and
+hold the rest on an inner object:
 
-- **Running.** Per-waypoint `setWaypoints([{ x, z, action: 'run' }, …])`
-  (walk resumes at waypoints without it), or direct `setRunning(true)`.
+| Entry point | Inner `VRMCharacterController` | `isManeuvering` |
+|---|---|---|
+| `VRMCharacterController` | itself | getter: `cc.isManeuvering` |
+| `EidoverseRobotController` | `ctrl.charCtrl` | getter: `ctrl.isManeuvering` |
+| `VRMRobotBody` | `body.controller.charCtrl` (`body.controller` is an `EidoverseRobotController` unless `opts.legsClass` overrides it) | method: `body.isManeuvering()` |
+
+`vault()`, `jump(opts)`, `climbLedge()`, `climbLadder(opts)` and
+`setRunning(v)` exist on all three. `autoManeuvers` and the gesture methods
+exist only on `VRMCharacterController` — reach them through the inner object.
+
+- **Running.** On `EidoverseRobotController`, per-waypoint
+  `ctrl.setWaypoints([{ x, z, action: 'run' }, …])` (walk resumes at
+  waypoints without it); on `VRMRobotBody`, `body.runTo(x, z)`; or direct
+  `setRunning(true)` on any entry point.
   Stride syncs to speed; stairs switch to run-stair clips automatically.
 - **Auto-maneuvers (on by default).** While moving, the controller scans
   ahead and handles what it finds: knee-to-chest obstacles (~0.45–1.15 m
@@ -187,10 +215,13 @@ lips, and find ladder rungs on their own.
   ~2.3 m walls → climb (grab the lip, pull up, mantle — through the mantle
   the top surface is a hard floor for the hands and the stepping foot lands
   on top); near-level gaps to ~2.2 m → jump; drops of ~0.85 m+ → a
-  landing-recovery crouch. Set `autoManeuvers = false` while deliberately
+  landing-recovery crouch. Set `autoManeuvers = false` on the inner
+  controller (`ctrl.charCtrl.autoManeuvers = false`,
+  `body.controller.charCtrl.autoManeuvers = false`) while deliberately
   approaching furniture the character shouldn't parkour over (a bench
   they'll sit on isn't an obstacle), and re-enable after. Check
-  `isManeuvering()` before issuing new orders mid-flight.
+  `isManeuvering` (a method on `VRMRobotBody`, a getter elsewhere — table
+  above) before issuing new orders mid-flight.
 - **Explicit maneuvers** (facing the geometry, within a stride):
   ```js
   ctrl.vault();                          // over the cover ahead (needs a landing)
@@ -205,18 +236,21 @@ lips, and find ladder rungs on their own.
   quantize to the nearest rung. Tall rung-less walls (~2.3–4.5 m) get a
   wall-scramble (`wallScrambleMaxRise` tunes the ceiling).
 - **Upper-body gestures while walking** — an emote's upper body blended
-  over the gait:
+  over the gait. These live on `VRMCharacterController`; from a wrapper,
+  use its inner controller:
   ```js
-  await ctrl.loadGesture('cheer');            // once, at setup
-  ctrl.playGesture('cheer', { weight: 2.5 }); // ≈70% gesture on the upper body
-  ctrl.stopGesture();
+  const cc = ctrl.charCtrl;                 // VRMRobotBody: body.controller.charCtrl
+  await cc.loadGesture('cheer');            // once, at setup
+  cc.playGesture('cheer', { weight: 2.5 }); // ≈70% gesture on the upper body
+  cc.stopGesture();
   ```
   Weight is a mixer blend (`2.5 ≈ 70%`, `4 ≈ 80%`). Gestures end when a
   maneuver starts. A full emote (`playEmote`) suspends locomotion entirely
   — gestures are the move-and-emote path.
 - **Aiming a standing emote.** Full emotes face `Math.PI` by default; to
-  aim one, set the facing yaw before playing (on the wrappers the emote API
-  lives on `.charCtrl`):
+  aim one, set the facing yaw before playing (on `EidoverseRobotController`
+  the emote API lives on `.charCtrl`; `VRMRobotBody` has
+  `body.setEmoteFacing(ry)`, which sets the same field):
   ```js
   const b = ctrl.getPosition();
   ctrl.charCtrl._emoteFacingY = Math.atan2(cam.position.x - b.x, cam.position.z - b.z);
@@ -335,8 +369,12 @@ A VRM in T-pose despite a loaded animation traces to one of these:
    path for ramps/stairs. Foot IK suspends during emotes and airborne states.
 6. **Facing** — after `rotateVRM0`, +Z is forward; `rotation.y = 0` faces a
    +Z camera.
-7. **Walk Backwards loaded by default** — backwards walking is a narrative
-   choice; the forward walk is the default gait.
+
+At the end of a render the `[vrm-pose]` check flags (`RE-RENDER REQUIRED`) a
+tracked VRM (`_vrm`, `_v`, `_vrms` or helper-registered) whose left upper arm,
+right upper leg and hips never left the normalized rest pose — the T-pose. It
+compares against that rest pose, not the first frame, so a character held in
+any static non-T pose (a seated or emote hold) counts as posed.
 
 ## `claude_suit.vrm` — mouth + wardrobe recipes
 

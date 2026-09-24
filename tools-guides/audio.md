@@ -67,7 +67,8 @@ python generate_song.py "Instrumental marimba and soft synths, a playful phrase 
 
 For Python use, import `generate_song` from `generate_song.py`. Pass the
 caption as `tags`, optional `lyrics`, `bpm`, `key` and `seed`, and choose
-`max_duration`, `seconds`, `out` and sampler settings as keyword arguments.
+`max_duration`, `seconds`, `out`, `timeout_s` (default 900, the CLI's
+`--timeout`) and sampler settings as keyword arguments.
 
 `--max-duration` defaults to 120 seconds and caps the encoder's generated
 conditioning. By default that conditioning's length determines the audio
@@ -128,15 +129,27 @@ Describe the sound by how it was actually made.
 
 Generate wind beds, footsteps, impacts, mechanical whirs, water and crowd
 sounds. Generation time depends on the installed model, GPU and clip length.
+The driver submits the repository's `sa3_workflow.json` (it falls back to
+`/workspace/sa3_workflow.json`, then ComfyUI's
+`~/Downloads/audio_stable_audio_3_medium_base.json` template).
+`python generate_sfx.py --probe` prints the resolved workflow path and checks
+that ComfyUI is reachable (exit 0/1).
 
 ```bash
-python3 generate_sfx.py "<prompt>" <seconds> <category> <out.mp3> [seed]
-# category: SFX (ambiences/loops: wind, rain, footsteps, room tone)
-#           One-shot (single events: a thud, a door, a whoosh, an impact)
-#           Music | Instrument (prefer generate_song.py for songs/scores)
-python3 generate_sfx.py "steady wind through dry grass, open field, no music" 24 SFX wind.mp3
-python3 generate_sfx.py "single soft body landing thud on stone, one-shot" 3 One-shot land.mp3
+python generate_sfx.py "<prompt>" <seconds> <category> <out.mp3> [seed] [--raw] [--neg "<text>"]
+# category: SFX | One-shot | Music | Instrument
+python generate_sfx.py "steady wind through dry grass, open field, no music" 24 SFX wind.mp3
+python generate_sfx.py "TrackType: SFX. A single soft body landing thud on stone, short, close mic, dry room" 3 SFX land.mp3 --raw
 ```
+
+By default the workflow's LLM prompt enhancer rewrites your prompt through a
+per-category brief before Stable Audio sees it. `One-shot` is a music-sample
+brief (plucks, stabs, slams), so it turns foley into musical hits — use `SFX`
+for sound effects, including single events. `--raw` bypasses the enhancer and
+sends the prompt verbatim; structure a raw foley prompt as
+`TrackType: SFX.` + source + action/duration + mic/room/processing.
+`--neg "<text>"` sets the negative prompt (empty by default). The flags may go
+anywhere on the command line.
 
 Describe the sound, not the scene ("slow footsteps through dry grass,
 rhythmic rustling" rather than "a person walks sadly"). Adding "no music, no
@@ -150,9 +163,9 @@ can communicate weight and timing; silence can also be deliberate.
 
 ```bash
 edge-tts --voice <voice> --text "narration line" --write-media raw.wav
-python3 cyborg_stutter.py raw.wav final.wav   # glitch stutters — for spoken TTS
+python cyborg_stutter.py raw.wav final.wav   # glitch stutters — for spoken TTS
 # for SUNG vocals (separated from a song with demucs):
-python3 cyborg_voice.py vocals.wav final.wav  # tone-only filter — safe for lipsync
+python cyborg_voice.py vocals.wav final.wav  # tone-only filter — safe for lipsync
 ```
 
 The two filters divide the work: `cyborg_stutter.py` breaks sustained notes,
@@ -207,13 +220,24 @@ neither is a required finishing step.
 Render the scene a touch longer than the audio, then mux:
 
 ```bash
-python3 merge_av.py --video scene_video_only.mp4 --audio mixed_audio.wav --out scene_final.mp4
+python merge_av.py --video scene_video_only.mp4 --audio mixed_audio.wav --out scene_final.mp4 [--tol 1.0] [--trim-tol 2.0] [--allow-trim]
 ```
 
-It trims the video to the audio with `-shortest`, and it refuses to
-clone-pad a short render (`REFUSING TO MERGE — video is shorter than
-audio`). Measure the audio first and give the video enough duration, allowing
-for rounding. If you want a held final image, author that hold in the scene
+It trims the video to the audio with `-shortest` and refuses two mismatches:
+
+- **Video shorter than the audio by more than `--tol`** (default 1 s): it
+  will not clone-pad a short render (`REFUSING TO MERGE — video … shorter
+  than audio`, exit 2). Re-render longer.
+- **Audio shorter than the video by more than `--trim-tol`** (default 2 s):
+  usually the wrong or a truncated mix, and `-shortest` would silently cut
+  the film, so it exits 3. Pass `--allow-trim` when cutting the video to the
+  audio is intended.
+
+Within those tolerances the video is stream-copied. Only a video short by up
+to `--tol` is re-encoded, to pad that cushion: with `RENDER_CODEC` if set,
+else `h264_nvenc` when ffmpeg lists it and a one-frame test encode succeeds,
+else `libx264`. Measure the audio first and give the video enough duration,
+allowing for rounding. If you want a held final image, author that hold in the scene
 instead of relying on an accidental frozen tail.
 
 ## Lipsync — a character visibly speaking or singing
@@ -223,24 +247,27 @@ A voice made with [voicebox](voicebox.md) needs none of the steps below: `voiceb
 ```bash
 # 1. split the mix. Stems land in <out>/htdemucs/<input-stem>/ — nested,
 #    not next to the input — so reference the nested path.
-python3 -m demucs --two-stems=vocals -o stems song.wav
+python -m demucs --two-stems=vocals -o stems song.wav
 #    → stems/htdemucs/song/vocals.wav  +  stems/htdemucs/song/no_vocals.wav
 
 # 2. align. `lyrics` is a required positional and it is the TEXT ITSELF,
 #    not a path — a filename "succeeds" and aligns that literal string as
 #    the only lyric. The flag is --output.
-python3 align_lyrics.py vocals.wav "$(cat lyrics.txt)" --output lyrics_aligned.json
+python align_lyrics.py vocals.wav "$(cat lyrics.txt)" --output lyrics_aligned.json
 #    or from python:  from align_lyrics import align_lyrics
 #                     align_lyrics('vocals.wav', lyrics_text, method='chunked')
 
 # 3. optional synthetic timbre — when the character concept wants it:
-python3 cyborg_voice.py vocals.wav cyborg_vocals.wav   # (voice, not stutter)
+python cyborg_voice.py vocals.wav cyborg_vocals.wav   # (voice, not stutter)
 
-# 4. visemes. lipsync.py is a MODULE with no CLI — a `python3 lipsync.py`
+# 4. visemes. lipsync.py is a MODULE with no CLI — a `python lipsync.py`
 #    command exits silently having written nothing. Call it from python:
-python3 -c "import json; from lipsync import get_viseme_timeline; \
+python -c "import json; from lipsync import get_viseme_timeline; \
 json.dump(get_viseme_timeline('vocals.wav', fps=30), open('visemes.json','w'))"
 ```
+
+The timeline has one entry per video frame, `ceil(duration × fps)` entries —
+the same frame count the renderer uses for that duration.
 
 **Gate the visemes to the aligned lyric windows.** demucs leaves
 instrumental bleed in the vocal stem, so `get_viseme_timeline` reports mouth

@@ -12,14 +12,20 @@ for its forward/up axes before deciding that rotation.
 
 ## The helpers
 
-- **`placeOn(obj, target, { xz, yOffset, xzOffset, grid, surfaceEps })`**
+- **`placeOn(obj, target, { xz, yOffset, xzOffset, grid, surfaceEps, sink })`**
   seats the object's bbox bottom on the highest sampled support under its
   footprint. The current default is `xz: 'auto'`: preserve an already nonzero
   XZ position, otherwise center on the target. Use `xz: [x,z]` for an explicit
   world-space bbox-center anchor or `'centered'` to request recentering.
   `xzOffset: [dx,dz]` adds a relative offset; `yOffset` adjusts seating height.
-  `grid` controls footprint sampling (default 7). No `sink` option is read by
-  this helper; use a deliberately chosen negative `yOffset` for burial.
+  The target may be the scene or a group that contains obj — obj's own
+  subtree is excluded from the supports, so it never lands on itself.
+  `grid` controls footprint sampling (default 7); `surfaceEps` (default
+  0.0006 m) lifts the object a sub-millimetre off the support to avoid
+  coplanar z-fighting — pass `0` for exact contact. `sink` buries that
+  fraction of the object's bbox height into the surface (clamped to 0–0.9;
+  0.15–0.35 suits rocks) and sets `userData._sunkPlacement`, which exempts
+  the object from the hovering/support audit.
   `placeOn`/`snapToGround` record `userData._supportTarget` for support checks.
   Inspect the result on sloped or concave surfaces; a sampled highest support
   is not proof that every part of an object rests flush.
@@ -41,8 +47,10 @@ for its forward/up axes before deciding that rotation.
   `placeAgainst`). `gap: -0.02` bites in for a tight seam;
   `allowIntersect: true` tags obj so the clipping audit knows it's meant.
 - **`snapToGround(obj, groundMeshes, { yOffset, below })`** — drop obj to
-  whatever surface is directly below its current xz. Handles stairs,
-  slopes, terraced floors. Verify the result on fetched-GLTF props (group
+  whatever surface is directly below its origin's **world-space** xz, so it
+  works under an offset parent. Handles stairs, slopes, terraced floors. The
+  ground list may include the scene or a group containing obj; obj's own
+  subtree is excluded. Verify the result on fetched-GLTF props (group
   hierarchies can defeat the snap and leave a prop silently airborne):
   raycast down from above the bbox centre, log the `bbox.min.y − hit.y`
   gap, and correct unintended clearance at the asset's scale. Partial burial
@@ -113,8 +121,9 @@ snapToGround(mug, [desk]);                    // seat vertically, preserve its X
 character.position.set(2, 5, 1);               // approximate xz target
 snapToGround(character, [stair1, stair2, stair3, landing]);
 
-// Eight books spread across a shelf top.
-scatterOn(books, shelf, { count: 8, minSpacing: 0.04, rngSeed: 7 });
+// Eight boulders settled across a clearing, partly buried and leaning.
+scatterOn(boulders, clearing, { count: 8, minSpacing: 1.2, rngSeed: 7,
+                                sink: [0.15, 0.35], tiltMax: 0.3 });
 
 // A bench somewhere clear near the fountain.
 const spot = findClearSpot(bench, fountain.position, { radius: 3, scene });
@@ -167,10 +176,10 @@ checked as one thing. Warnings are observations to investigate. Bounding-box
 heuristics, nested groups, GPU deformation and intentional overlaps can produce
 false positives or missed cases. Inspect the named geometry and actual motion.
 
-- **`checkClipping(scene)`** — pairwise bbox intersection, auto-fixed by
-  default (intersecting pairs pushed apart along the shortest-overlap axis;
-  intentional parent/child nesting skipped). `globalThis._noAutoFixPlacement
-  = true` reverts to warn-only. It also runs a mesh-accurate
+- **`checkClipping(scene)`** — pairwise bbox intersection, reported
+  (intentional parent/child nesting skipped). With the repair opt-in below,
+  intersecting pairs are pushed apart along the shortest-overlap axis. It
+  also runs a mesh-accurate
   deep-interpenetration pass and prints, by name:
   `[checkClipping] ⚠ N object(s) substantially INSIDE another` — a whole
   object engulfed by another (a tree inside a car), as opposed to the bbox
@@ -182,7 +191,8 @@ false positives or missed cases. Inspect the named geometry and actual motion.
 - **`checkHovering(scene)`** — floating-object audit, descending through a
   single wrapper group to reach your props. For every placed object it
   footprint-samples the surface below: **near** (a 0.005–1.0 m gap — the
-  "laptop slightly off the desk" smell) auto-snaps down; **far** (>1 m
+  "laptop slightly off the desk" smell) is measured and reported (snapped
+  down only by the repair opt-in); **far** (>1 m
   above the nearest surface) and **void** (nothing beneath at all — the
   hand-coords tell) escalate to `[placement] ⚠ RE-RENDER REQUIRED`, since
   there's no safe snap target. An object goes unflagged three ways: it
@@ -191,16 +201,24 @@ false positives or missed cases. Inspect the named geometry and actual motion.
   `obj.userData.noSupportCheck = true`. Floating is fully supported —
   drones, balloons, chandeliers, a character mid-jump — the declaration is
   what separates them from an accidental float, which stays caught.
-- **`checkZFighting(scene)`** — coplanar-surface audit, auto-fixed by
-  default. A poster/screen/label/sign placed at the exact depth of the
+  Objects buried by `placeOn`/`scatterOn` `sink` are skipped.
+- **`checkZFighting(scene)`** — coplanar-surface audit. A poster/screen/label/sign placed at the exact depth of the
   surface behind it flickers frame-to-frame (the depth buffer can't pick a
   winner) — offset flat things a few mm proud (`wall.z + 0.005`) or set
-  `material.polygonOffset = true; polygonOffsetFactor = -1`. The audit
-  nudges flagged panels ~3 mm out and logs it; an intentional flush decal
+  `material.polygonOffset = true; polygonOffsetFactor = -1`. The repair
+  opt-in nudges flagged panels a few mm out; an intentional flush decal
   opts out with `obj.userData.noZFightCheck = true`.
 
-Auto-fix is a safety net, not a placement method — things placed right
-don't need it, and the `far`/`void` cases can't be auto-fixed at all.
+**The audits are warn-only by default.** A scene that sets
+`globalThis._autoFixPlacement = true` (in `setup()` — the flags are
+snapshotted when setup ends) gets a repair pass before the audits:
+`checkClipping`, `checkHovering` and `checkZFighting` run once with
+`autoFix: true`, then the warn-only audits judge the repaired scene.
+`globalThis._noAutoPlacementCheck = true` skips both the repair and the
+placement audits. Repair is a safety net, not a placement method — things
+placed right don't need it, the `far`/`void` cases can't be repaired at all,
+and it pushes apart geometry that overlaps on purpose (see
+[vegetation.md](vegetation.md) for trees).
 
 **TSL caveat:** vertex deformation in a `positionNode` happens at render
 time, so `Box3.setFromObject` (and every helper above) sees the undeformed
@@ -262,6 +280,8 @@ not a quality requirement. A whole village can be one group.
 
 `checkFacing(scene, { minSize: 1.2, thinFrac: 0.28, buriedAt: 0.3 })` returns
 findings about buried or obstructed thin textured panels without moving them.
+VRM and other skinned characters are skipped (their bind-pose parts are not
+panels).
 It does not know which side carries readable text. Inspect both sides and
 the authored forward direction. `noFacingCheck` records an intentional exemption.
 

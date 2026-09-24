@@ -32,15 +32,21 @@ ring, load another moon texture or create a separate light for its band.
 - `setTime(hours)` sets time of day and stops an active day cycle.
 - `dayCycle({startHour, seconds})` advances a full day over media time.
 - `setClouds(type, shape?)` selects `clear`, `cumulus`, `stratus` or `cirrus`.
-  `transitionClouds(type, seconds)` eases into a cloud preset.
+  `transitionClouds(type, seconds)` eases into a cloud preset (`seconds`
+  defaults to 2.5).
 - `setWeather(name, intensity)` selects `clear`, `fair`, `sunshower`,
   `overcast`, `rain`, `storm`, `cyclone` or `darkstorm`.
-  `transitionTo(name, intensity, seconds)` changes weather over time.
+  `transitionTo(name, intensity, seconds)` changes weather over time
+  (`intensity` defaults to 1, `seconds` to 45).
 - `setColors({cloud, star, sky, rain, shield})` retints authored channels.
   Omitted channels retain their values; `shield` only applies to `shieldworld`.
 - `wrapScene()` includes geometry added after initial construction in wetness
   and cloud-shadow effects. Materials can use `userData.noWet` when appropriate.
-- `enableReflections(options)` enables moving sky reflections.
+- `enableReflections(options)` enables moving sky reflections on metals,
+  using the camera passed to `makeSky` (else `globalThis._c`). `options` is
+  optional; `gain` (default 1) scales the reflection. The low-level
+  `makeSkySystem` object takes the camera first:
+  `enableReflections(camera, options)`.
   `await bakeEnv(options)` produces environment lighting; `{ifAbsent:true}`
   retains an environment already supplied by the scene.
 - `update(t)` owns sky, weather, lightning/audio timing, celestial motion,
@@ -115,7 +121,7 @@ custom scene or toolkit work after reviewing their contracts:
 | System | Entry and lifecycle |
 | --- | --- |
 | `sky_system.js` | `await makeSkySystem({scene,textures,opts})`; `update(t,camera)`, `setTime`, `setClouds`, `setColors`, `applyToLights`, `bakeEnv`, `enableReflections`, `wrapCloudShadows` |
-| `weather_system.js` | `await makeWeatherSystem({scene,sky,opts})`; `wrapScene`, `setWeather`, `transitionTo`, `update(t,camera)`, `sunDim`, `setColors` |
+| `weather_system.js` | `await makeWeatherSystem({scene,sky,opts})`; `wrapScene`, `setWeather`, `transitionTo`, `update(t,camera)`, `sunDim`, `hemiDim` (hemisphere-light multiplier; `0.5 + sunDim×0.5` unless the preset authors its own), `setColors` (forwards to the sky only the channels named, so `setColors({ rain })` leaves cloud/sun/shield tints alone) |
 | `redgiant.js` | `makeRedGiant({opts})`; attached by the shieldworld package; its star/shield tint and motion are driven by the shared sky |
 | `ringworld.js` | `makeRingworld({glbBytes,textures,opts})`; group, band lighting and `update(t)` are owned by the ringworld package |
 | `asteroid_moon.js` | `makeAsteroidMoon` loads the prepared mesh and maps; the package positions it on its authored orbit |

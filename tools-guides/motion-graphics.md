@@ -36,6 +36,25 @@ colors. Use `lit:true` when the surface should respond to scene lighting.
 Maintain canvas/mesh aspect ratio and central text margins; review the camera's
 closest approach so labels remain readable. Do not copy pixels to flip text.
 
+**Canvas fonts.** Screen canvases are @napi-rs/canvas (Skia) canvases, which
+look fonts up by family name among installed and registered fonts. On Windows
+the generic names `sans-serif`, `serif` and `monospace` are not mapped to a
+matching face: they fall back to the system default face (measured identical
+to Arial, as an unknown name does), so text renders but `monospace` is not
+monospaced. `drawTextFit`'s default font is `bold 48px monospace`, and the
+examples here use `sans-serif` only as placeholders. The engine does not
+register the bundled fonts. For a specific look, register one in `setup()` and
+name that family in `font`:
+
+```js
+const { GlobalFonts } = await import('npm:@napi-rs/canvas@0.1.69');
+GlobalFonts.registerFromPath('eidoverse/assets/fonts/ShareTechMono-Regular.ttf', 'Share Tech Mono');
+// font: 'bold 64px "Share Tech Mono"'
+```
+
+The path is relative to the working directory the renderer runs from (the
+repository root under `eido.py`). An installed system family also works by name.
+
 `makeAsciiPanel(asciiText, options)` uses the same screen system for multiline
 terminal art. Use supported fonts; the effect registry provides reusable
 CRT/glitch styling, while the screen draw callback can author its own content.
@@ -65,7 +84,9 @@ moving world camera. At z=-1 its half-height is `tan(fov/2)`, with half-width
 multiplied by output aspect ratio. Keep graphics within that frustum and text
 safe areas. Aspect and positions in this snippet are illustrative.
 The helper installs `globalThis._overlayScene` and `_overlayCamera` for the
-renderer; scene code normally interacts with the returned overlay group.
+renderer and returns `{ scene, camera, add }`; `add(obj)` parents the object to
+the overlay camera so it stays screen-locked. Give overlay materials
+`transparent: true` and `depthTest: false`, and use `renderOrder` to sort them.
 
 World effects composite before the overlay; signal effects can composite
 after it. `nuclear_explosion`, `godrays` and `underwater` stay under it;
@@ -275,9 +296,10 @@ caption, with awkwardly timed other words and, when you pass `--lyrics` (and
 exits 1 on any failure. Run it after editing a scene and before a render that
 uses new captions.
 
-Only the bundled fonts in `eidoverse/assets/fonts/` are used. `registerFonts()`
-finds them from the module's own folder, so previews work from any directory.
-Generic families such as `monospace` do not resolve on Windows. Emoji, CJK and
+These modules use only the bundled fonts in `eidoverse/assets/fonts/`, by
+family name. `registerFonts()` registers them from the module's own folder, so
+previews work from any directory; never rely on a generic family here, since
+on Windows those fall back to the default face ([canvas fonts](#in-world-screens-and-ascii-panels)). Emoji, CJK and
 every logo are vector drawings. The scenes' offscreen canvases come from
 @napi-rs/canvas `createCanvas`, because Skia's `drawImage` rejects the engine's
 `document.createElement('canvas')` objects. Draw a scene straight into the

@@ -13,7 +13,7 @@ Technical checks help establish whether those choices survived the pipeline.
 Read the scene's setup and frame loop. Search can locate code to inspect, but a
 match count does not establish correctness. From the repository root, for example:
 
-```powershell
+```bash
 rg -n 'AnimationMixer|clipAction|playVRMA|Controller|enableFootIK' work/<id>/scene.js
 rg -n 'position|rotation|renderFrame|renderAsync|computeAsync' work/<id>/scene.js
 rg -n '^\s*import\s' work/<id>/scene.js
@@ -58,10 +58,10 @@ the newest file timestamp.
 Check dimensions, duration and streams with `ffprobe`. The following commands
 run from the repository root; substitute the actual project and output names.
 
-```powershell
+```bash
 ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration,nb_frames -of json work/<id>/film.mp4
 ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,duration -of json work/<id>/film.mp4
-New-Item -ItemType Directory -Force -Path work/<id>/_check | Out-Null
+mkdir -p work/<id>/_check
 ffmpeg -nostdin -loglevel error -i work/<id>/film.mp4 -vf "fps=1" work/<id>/_check/frame_%03d.png
 ```
 
@@ -69,7 +69,7 @@ An absent audio stream is a problem when the piece should have sound. If sound
 is present, listen to the mix and check synchronization; a stream header alone
 cannot establish audibility. A waveform can help locate unintended silence:
 
-```powershell
+```bash
 ffmpeg -nostdin -loglevel error -i work/<id>/film.mp4 -filter_complex "[0:a]showwavespic=s=1280x240[out]" -map "[out]" -frames:v 1 work/<id>/_check/wave.png
 ```
 
@@ -83,7 +83,8 @@ For reusable assets, include different coating colors and both mirrored sides.
 
 Read the render's logs alongside the images:
 
-- **Placement:** setup-time adjustments can move props. Inspect the final
+- **Placement:** the audits only warn unless the scene opted into the
+  `_autoFixPlacement` repair pass ([placement](placement.md)), which can move props. Inspect the final
   arrangement and the entire moving range. An unsupported object warning can
   indicate a misplaced solid or an intentional flyer; declare intent accurately.
 - **Lipsync:** a mouth-never-moved warning matters when that character has an

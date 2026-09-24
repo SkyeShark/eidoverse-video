@@ -12,8 +12,9 @@ the current scene, rather than assuming every dark frame has the same cause.
   environments without it can use software WebGPU, with a clear CPU warning.
   WSL 2 with a GPU needs [backend selection](../docs/SETUP.md#gpu-setup-for-wsl-2).
   `nvidia-smi`, WebGPURenderer class selection and `powerPreference` alone
-  do not prove hardware rendering. `RENDER_CODEC` controls video encoding
-  independently of the hardware/software scene-rendering backend.
+  do not prove hardware rendering. Video encoding is chosen separately:
+  `RENDER_CODEC` if set, else `h264_nvenc` when ffmpeg lists it and a
+  one-frame test encode succeeds on a hardware adapter, else `libx264`.
 - **Materials are the NodeMaterial family** — `MeshStandardNodeMaterial` /
   `MeshPhysicalNodeMaterial` / `MeshBasicNodeMaterial`. Non-Node variants
   work via auto-wrap but accumulate WebGL idioms; the Node forms compose

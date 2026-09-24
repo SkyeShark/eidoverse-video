@@ -74,7 +74,7 @@ coverage; no video render is needed. For behavior changes, run the affected
 checks and inspect appropriate probe frames/motion. Use the available suites:
 
 ```bash
-deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/robotics/tests/runtime_test.mjs
+deno test --no-check --allow-read --allow-env --node-modules-dir=manual --no-lock eidoverse/robotics/tests/runtime_test.mjs
 deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/audit_core_test.mjs
 deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/dismember_core_test.mjs
 ```

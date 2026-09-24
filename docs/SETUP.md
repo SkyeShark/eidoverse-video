@@ -36,11 +36,13 @@ deno --version
 curl -fsSL https://deno.land/install.sh | sh -s v2.9.5   # needs unzip or 7z
 ```
 
-Have `ffmpeg` on PATH. NVIDIA encoding uses `h264_nvenc` by default.
-If that encoder is unavailable, `RENDER_CODEC=libx264` selects CPU **video
-encoding**, or `h264_videotoolbox` uses Apple's encoder. This setting does
-not select the rendering backend: hardware or software WebGPU is reported
-separately by `doctor` and renderer startup.
+Have `ffmpeg` on PATH. On a hardware (or unverified) adapter the renderer
+encodes with `h264_nvenc` when ffmpeg lists it and a one-frame test encode
+succeeds; otherwise it warns and uses `libx264` (CPU **video encoding**). A
+software adapter uses `libx264` without testing. `RENDER_CODEC` overrides the
+choice, for example `RENDER_CODEC=h264_videotoolbox` for Apple's encoder. The
+video encoder does not select the rendering backend: hardware or software
+WebGPU is reported separately by `doctor` and renderer startup.
 
 ### GPU setup for WSL 2
 
@@ -130,6 +132,34 @@ the exact failure with `GPU_DEVICE.addEventListener('uncapturederror', ...)`
 in `setup()`, or compile a dumped WGSL module standalone with
 `device.createRenderPipelineAsync` to read the backend's message.
 
+### Software fallback
+
+With no GPU access, Deno's WebGPU can still render on the CPU through a
+software adapter such as Mesa's `llvmpipe`/lavapipe on Linux. Nothing needs
+to be switched on in the kit; the adapter request in
+`eidoverse/gpu_check.mjs` handles both cases:
+
+- It asks for a `high-performance` adapter first and, if none is returned,
+  retries with `forceFallbackAdapter: true`. Only when both fail does it stop
+  with `No WebGPU adapter found`.
+- It classifies the adapter as `software` when the runtime flags it as a
+  fallback adapter or its name matches `llvmpipe`, `lavapipe`, `SwiftShader`,
+  `softpipe`, `WARP`, "Basic Render" or "software"; as `hardware` when it is
+  named and not flagged; otherwise as `unknown`.
+- A software adapter prints `[gpu] WARNING: Software WebGPU fallback: …` and
+  an unknown one `[gpu] WARNING: Cannot verify the WebGPU adapter type: …`.
+  These are warnings, not failures. `python eido.py doctor` then runs the
+  same compute dispatch/readback on it and keeps the warning in its output.
+- Renderer startup logs `[render_common] WebGPU software: …` (or `hardware`).
+  On a software adapter the default video encoder is `libx264`, with no NVENC
+  test; `RENDER_CODEC` still overrides that choice.
+
+Expect frames to take much longer on the CPU. Probe short and small first,
+and inspect the effects you rely on, because a software driver's
+capabilities are its own. If the warning appears on a machine that does have
+a GPU, the hardware path is misconfigured — see
+[Troubleshooting](#troubleshooting).
+
 ## 2. Bootstrap JS dependencies
 
 `node_modules/` is not committed; it regenerates from `deno.lock`:
@@ -202,8 +232,8 @@ progress and logs before deciding that a slow first render is stuck.
   test does not establish native Linux hardware Vulkan support.
 - **WSL 2**: use the [hardware backend setup](#gpu-setup-for-wsl-2) above.
   The default adapter can be a CPU renderer even with a working host GPU.
-- **macOS**: wgpu → Metal. No nvenc — set `RENDER_CODEC=libx264` (or
-  `h264_videotoolbox`). Same caveat: unverified, judge by frames.
+- **macOS**: wgpu → Metal. No nvenc — the renderer falls back to `libx264`
+  on its own; set `RENDER_CODEC=h264_videotoolbox` for Apple's encoder. Same caveat: unverified, judge by frames.
 - **Fonts**: the 19 display fonts live at `eidoverse/assets/fonts/`. For
   `text_3d`, point `fontPath` at `eidoverse/assets/fonts/<name>.ttf`
   (relative paths work) or install them system-wide.

@@ -30,7 +30,8 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   or `width`/`depth` for ellipses; `footprint: 'organic'` masks a lobed
   irregular patch; `center: [x,z]`. De-centre overlapping strokes — concentric
   same-centre stands foreshorten into stamped bands.
-- `density` = interior fullness (1 = authored); `seed` varies everything;
+- `density` = interior fullness (1 = authored); `seed` varies everything
+  (any finite integer, including 0 and negatives);
   on ROW plantings it works both ways: below 1 it leaves gaps in the rows,
   above 1 it tightens in-row spacing (a grid cannot hold more plants on
   command; the row gap is the machinery's, the in-row spacing is the crop's);
@@ -100,7 +101,9 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
   // per frame at dusk: for (const f of bloom) f.setClose(k);
   ```
 - Placement: `heightFn: (x,z)=>y` OR `surface: mesh/[meshes]` (raycast down —
-  grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant);
+  grows on ANY geometry: rocks, rooftops, sculpted ground; misses = no plant;
+  hit normals are taken in world space, so a rotated or uniformly scaled mesh
+  such as a `PlaneGeometry` laid flat with `rotation.x = -Math.PI / 2` works);
   `align` = surface-normal tilt share (grass hugs, woody stays skyward);
   `maxSlope`; `clipFn(x,z)`; explicit `placements: [[x, z, scale], ...]` for
   hero plants. Structural species claim footprints in a cross-stroke occupancy
@@ -146,9 +149,10 @@ await makeSeedTree.describe();                        // species menu
 await makeSeedTree.describe('joshuaTree', 'shape');   // ONE folder of dials
 ```
 
-Verified gotchas: set `globalThis._noAutoFixPlacement = true` in `setup()`
-— the placement auto-fix dismembers intentionally-overlapping tree
-geometry. Trees sway by default (`makeSeedTree.setWind({strength, speed})`).
+Verified gotchas: leave `globalThis._autoFixPlacement` unset in tree
+scenes — the opt-in placement repair pass dismembers intentionally-overlapping
+tree geometry (`makeSeedTree` warns when a scene has opted in; the audits are
+warn-only by default). Trees sway by default (`makeSeedTree.setWind({strength, speed})`).
 Judge shadowed trees from frame ≥2. Source: a `SEEDTHREE_DIR` / `../SeedThree`
 / `./SeedThree` checkout gives the textured tier; no checkout falls back to
 GitHub import at geometry tier (placeholder materials).

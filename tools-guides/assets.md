@@ -6,12 +6,20 @@ The fetch tools help find reusable models, environments and surface maps.
 They can save substantial work on a realistic setting. Inspect candidates for
 the scene you are making; reuse, kitbashing and original geometry are all part
 of the studio. Search ranking does not establish visual suitability or license
-compatibility with a particular redistribution.
+compatibility with a particular redistribution; for a downloaded model, read
+its [licence sidecar](#fetch_modelpy--meshes-from-everywhere-at-once) before
+redistributing.
+
+The fetchers write their downloads into the **current directory**, so run
+them from the piece's folder (paths below assume `work/<id>/`, two levels
+under the repo root). They find the local model library and the preview
+renderer relative to their own location, not the current directory.
 
 ## `fetch_model.py` — meshes from everywhere at once
 
 ```bash
-python3 fetch_model.py "search terms" --theme "your piece's mood/setting"
+cd work/<id>
+python ../../fetch_model.py "search terms" --theme "your piece's mood/setting"
 ```
 
 Searches local custom models + Poly Haven + Smithsonian + NASA + NIH 3D all
@@ -35,9 +43,25 @@ axis labels (+X red, +Y green, +Z blue).
   fetch_model prints `Local model (referenced IN PLACE — not copied):
   <absolute path>` — put that exact path into `scene.json` `assets` (the
   engine loads any path). Copying multi-MB meshes per scene bleeds the disk;
-  referencing in place costs nothing. Downloaded models (Poly Haven / NASA /
-  …) land in cwd as `model_embedded.gltf` — those stay with your work.
-  Browse the whole local catalog with `python3 fetch_model.py --list-local`.
+  referencing in place costs nothing. Downloaded models land in the current
+  directory with their `_preview.jpg` beside them: a Poly Haven model as
+  `<model_id>_embedded.gltf` (textures inlined, 1k), a Smithsonian, NIH 3D or
+  NASA model as `<name>.glb` (names lowercased, other characters → `_`) —
+  those stay with your work. Browse the whole local catalog with
+  `python fetch_model.py --list-local` (from the repo root).
+- **Every download writes a licence sidecar** beside the model:
+  `<model file stem>.license.json` (so `<model_id>_embedded.license.json` for
+  Poly Haven), recording `source`, `file`, `id`, `url`, `license`,
+  `license_url`, title/author where the source exposes them, and the fetch
+  date. Read it before redistributing. Poly Haven is `CC0-1.0`; Smithsonian
+  entries are marked `unverified` (CC0 only when the object page says Open
+  Access, otherwise the Smithsonian Terms of Use); NIH 3D licences vary per
+  submission and read `unknown` when the entry lists none; NASA carries the
+  NASA media usage guidelines. Local models are referenced in place and get
+  no sidecar.
+- **The preview is best-effort.** A missing Deno/ffmpeg, a timeout or a
+  renderer crash skips `_preview.jpg` with a message; the model is still
+  delivered.
 - **`[ORIGIN_INFO]`** tells you where the model's pivot `(0,0,0)` sits in
   its bbox — **BASE** (y=0 at the bottom; rests directly on a surface),
   **CENTERED** (add half the height to stand it on a floor), **TOP**, or
@@ -56,23 +80,37 @@ axis labels (+X red, +Y green, +Z blue).
 ## `fetch_hdri.py` — environment lighting
 
 ```bash
-python3 fetch_hdri.py "search"
+python ../../fetch_hdri.py "search" [resolution]
 ```
 
-Searches Poly Haven + AmbientCG. An HDRI provides environment lighting and
+`resolution` is the optional second argument: `1k` (default), `2k`, `4k` or
+`8k`. The query may also be an exact Poly Haven or AmbientCG ID.
+
+Searches Poly Haven + AmbientCG; on an equal match score Poly Haven wins
+(native `.hdr`, no conversion). An HDRI provides environment lighting and
 IBL reflections in a single asset; choose one when it suits the lighting rig. Outputs `hdri.hdr` (plus a legacy `hdri_b64.txt` sidecar you
-can ignore). Point the `hdri` asset at the raw `hdri.hdr`.
+can ignore) in the current directory. AmbientCG HDRIs come as OpenEXR;
+`fetch_hdri` converts them to Radiance `hdri.hdr` without tonemapping, so the
+HDR range is kept. The conversion needs `ffmpeg` and `ffprobe` on PATH and
+numpy. If it can't convert, it writes `hdri.exr` instead, tells you to load
+that with three's `EXRLoader` (not `RGBELoader`/`HDRLoader`) or pick a Poly
+Haven HDRI, and exits with status 2. Point the `hdri` asset at the raw `hdri.hdr`.
 
 ## `fetch_texture.py` — PBR sets
 
 ```bash
-python3 fetch_texture.py "material"
+python ../../fetch_texture.py "material" [resolution]
 ```
+
+`resolution` is the optional second argument: `1k` (default), `2k`, `4k` or
+`8k`. The query may also be an exact Poly Haven or AmbientCG ID, or
+`texturecan:<id>`.
 
 Basecolor + roughness + normal + AO + metalness + displacement, from Poly
 Haven + AmbientCG + TextureCan (all CC0). Outputs `tex_urls.json` — Poly
-Haven entries are CDN URLs; AmbientCG/TextureCan entries are absolute local
-paths the engine reads directly. Load the maps you need onto the material;
+Haven entries are CDN URLs; AmbientCG/TextureCan maps are extracted into the
+current directory and their entries are absolute local paths the engine reads
+directly. Load the maps you need onto the material;
 unused downloads do not change the scene. A constant channel is appropriate
 when that property is uniform. This example uses four varying channels:
 

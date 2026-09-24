@@ -14,7 +14,8 @@ python eido.py render work/<your_scene>.json --probe    # single frame, framing 
 deno run --allow-all --unstable-webgpu eidoverse/render_scene.mjs work/<your_scene>.json
 ```
 
-If the ffmpeg has no nvenc, set `RENDER_CODEC=libx264`. All paths in scene
+Video encoding uses `h264_nvenc` when ffmpeg can actually encode with it and
+falls back to `libx264` otherwise; `RENDER_CODEC` overrides the choice. All paths in scene
 configs and tool calls are relative to the repo root — the engine always
 runs with that as its cwd. `python eido.py doctor` diagnoses
 deno/ffmpeg/deps; `python eido.py bootstrap` fetches them the first time.

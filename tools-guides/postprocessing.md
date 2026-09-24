@@ -34,7 +34,7 @@ await globalThis._fx.update(t);
 await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS render after — update() doesn't
 ```
 
-The default auto-enhance path supplies N8AO ambient occlusion, SSR, UnrealBloom and FXAA; a scene can opt out when it owns its compositor (below). Moving sky/cloud reflections on metals come from the sky system's `sky.enableReflections(camera)` ([sky-weather.md](sky-weather.md)).
+The default auto-enhance path supplies N8AO ambient occlusion, SSR, UnrealBloom and FXAA; a scene can opt out when it owns its compositor (below). Moving sky/cloud reflections on metals come from the `makeSky` facade's `sky.enableReflections()`, which takes an optional options object and uses the camera passed to `makeSky` ([sky-weather.md](sky-weather.md)).
 
 Set `globalThis._aoParams = { aoRadius, quality, intensity, distanceFalloff, halfRes, enabled }` before setup to tune N8AO. Its default `aoRadius` is 5 world units, which on a room- or tabletop-scale set samples the whole space and reads as blotchy grain over every surface; set it to the contact scale you want darkened (0.15 m on a workbench). `quality` takes `Performance`, `Low`, `Medium`, `High` or `Ultra`.
 
