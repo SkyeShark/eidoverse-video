@@ -22,6 +22,7 @@ explores the toolkit and develops the work alongside the human.
 3. Renders run natively on your GPU:
    ```bash
    python eido.py render work/<id>/scene.json --probe   # single frame — framing check
+   python eido.py render work/<id>/scene.json --at 40   # the frame at 40 s, as a PNG
    python eido.py render work/<id>/scene.json           # full render
    ```
 4. **Review and develop the work together.** The agent inspects its renders,

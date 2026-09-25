@@ -129,6 +129,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 python eido.py doctor
 python eido.py bootstrap
 python eido.py render work/<id>/scene.json --probe
+python eido.py render work/<id>/scene.json --at 40 --at 72.5   # frames mid-piece, as PNGs
 python eido.py render work/<id>/scene.json
 ```
 
