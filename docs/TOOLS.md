@@ -1,6 +1,6 @@
 # Tool and source inventory
 
-[Main instructions](../AGENTS.md) list all 32 topic guides and when to read
+[Main instructions](../AGENTS.md) list all 33 topic guides and when to read
 them. This inventory maps every current first-party source file and entry point
 to its guide, with loading/usage roles. A source can be a public tool, internal
 support, an optional utility, an example or a test; file count is not tool count.
@@ -199,6 +199,11 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/vrm_turntable_scene.js](../eidoverse/vrm_turntable_scene.js) | Scene script behind vrm_turntable.py | [characters](../tools-guides/characters.md) |
 | [eidoverse/weather_audio.js](../eidoverse/weather_audio.js) | Explicit facade/package component | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/weather_system.js](../eidoverse/weather_system.js) | Injected scene API | [sky-weather](../tools-guides/sky-weather.md) |
+| [eidoverse/xr/example.html](../eidoverse/xr/example.html) | HTML entry point: minimal WebXR page on the kit (served by xr/serve.py) | [webxr](../tools-guides/webxr.md) |
+| [eidoverse/xr/quest.py](../eidoverse/xr/quest.py) | CLI utility: the headset over adb (Wi-Fi debugging, open, awake, pull recordings) | [webxr](../tools-guides/webxr.md) |
+| [eidoverse/xr/serve.py](../eidoverse/xr/serve.py) | CLI utility: HTTPS server for headset pages + /report telemetry log | [webxr](../tools-guides/webxr.md) |
+| [eidoverse/xr/shot.mjs](../eidoverse/xr/shot.mjs) | CLI utility: stills of a WebXR page from headless Chrome | [webxr](../tools-guides/webxr.md) |
+| [eidoverse/xr/xr_kit.js](../eidoverse/xr/xr_kit.js) | Browser ES module for WebXR pages (not a scene-script import) | [webxr](../tools-guides/webxr.md) |
 | [fetch_hdri.py](../fetch_hdri.py) | CLI utility | [assets](../tools-guides/assets.md) |
 | [fetch_model.py](../fetch_model.py) | CLI utility | [assets](../tools-guides/assets.md) |
 | [fetch_texture.py](../fetch_texture.py) | CLI utility | [assets](../tools-guides/assets.md) |
@@ -234,7 +239,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/robotics/rotary_metal.scene.js](../eidoverse/examples/robotics/rotary_metal.scene.js) | Aluminum rotary cutting at physical speed followed by a time-lapse finish | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/relief.scene.js](../eidoverse/examples/robotics/relief.scene.js) | Renderable close study of ball-nose roughing and finishing | [robotics](../tools-guides/robotics.md) |
 
-**210 first-party source/entry-point files, plus 8 asset `_src` folders; 32 guides; 31 post effects.**
+**215 first-party source/entry-point files, plus 8 asset `_src` folders; 33 guides; 31 post effects.**
 This is documentation coverage, not a claim that every API was executed in
 this audit or a count of robot parts. The inspector HTML entry point is included.
 

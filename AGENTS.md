@@ -120,6 +120,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Cameras and lighting](tools-guides/camera-lighting.md) | Framing, safe camera travel, focus targets, shadows and physical lighting. |
 | [Placement and assembly checks](tools-guides/placement.md) | Contact, scale, orientation, vehicle paths, clipping, hovering and z-fighting. |
 | [Render review and sharing](tools-guides/render-review.md) | Preflight, probes, image/video/audio review, audit reports, contact sheets and discussing the result. |
+| [WebXR in a headset](tools-guides/webxr.md) | Standing inside a piece live in a headset browser: the XR kit, serving to a Quest, controls, telemetry, stills and recordings. |
 | [Renderer troubleshooting](tools-guides/stack-notes.md) | WebGPU/TSL limitations, texture orientation, transparency and encoding. |
 | [Toolkit maintenance](tools-guides/development.md) | Helper registration, dependencies, examples, tests and maintaining this guide index. |
 
