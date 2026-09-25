@@ -93,6 +93,23 @@ const fps = config.fps || 30;
 const duration = config.duration || 5.0;
 const totalFrames = Math.ceil(duration * fps);
 const dt = 1.0 / fps;
+// CAPTURE (eido.py render --at T [--at T2 ...] [--jump]): frames at chosen times, not the whole film.
+// By default the film is REPLAYED from frame 0 — every mixer, controller, sim and particle system
+// steps exactly as in the full render — but only the requested frames are read back and encoded, so a
+// mid-film frame looks the way it will in the film. capture.jump renders ONLY the requested frames:
+// right for scenes that are a pure function of t, wrong for anything that accumulates per frame.
+// DURATION and TOTAL_FRAMES keep the film's own values either way.
+const __capture = (() => {
+    const c = config.capture;
+    if (!c || !Array.isArray(c.at) || !c.at.length) return null;
+    const frames = [...new Set(c.at.map((s) => Math.min(totalFrames - 1, Math.max(0, Math.round(Number(s) * fps)))))]
+        .sort((a, b) => a - b);
+    return { frames, set: new Set(frames), jump: !!c.jump };
+})();
+const __loopFrames = __capture
+    ? (__capture.jump ? __capture.frames : Array.from({ length: __capture.frames[__capture.frames.length - 1] + 1 }, (_, k) => k))
+    : null;
+const __nLoop = __loopFrames ? __loopFrames.length : totalFrames;
 
 const outputVideo = config.outputVideo || config.composedOutput
     || (config.outputDir || './scene') + '.mp4';
@@ -2544,7 +2561,10 @@ if (_guardRenderer && typeof _guardRenderer.render === 'function') {
 }
 
 // --- Render loop ---
-console.log(`[render_scene] Rendering ${totalFrames} frames at ${width}x${height} @ ${fps}fps → ${outputVideo}`);
+console.log(__capture
+    ? `[render_scene] Capturing ${__capture.frames.length} frame(s) [${__capture.frames.join(', ')}] of ${totalFrames} at ${width}x${height} @ ${fps}fps` +
+      (__capture.jump ? ' — jump: only those frames are rendered' : ` — replaying frames 0-${__nLoop - 1}, encoding only those`) + ` → ${outputVideo}`
+    : `[render_scene] Rendering ${totalFrames} frames at ${width}x${height} @ ${fps}fps → ${outputVideo}`);
 // OUTPUT SAFETY: a crashed render must leave NO file under the output name.
 // (The old behaviour left the PREVIOUS video wearing today's name — stale
 // frames got reviewed as the new render.) Displace any existing output to
@@ -2563,7 +2583,8 @@ try {
 const ffmpeg = startFfmpegPipe(width, height, fps, _encodePath);
 const tStart = performance.now();
 
-for (let i = 0; i < totalFrames; i++) {
+for (let __k = 0; __k < __nLoop; __k++) {
+    const i = __loopFrames ? __loopFrames[__k] : __k;
     const t = i * dt;
     globalThis._sceneTime = t;
     if (_offlineNodeFrame) {
@@ -3035,11 +3056,21 @@ for (let i = 0; i < totalFrames; i++) {
     // Pipelined readback: returns the PREVIOUS frame's data while the
     // current frame's GPU copy starts in parallel. First call returns
     // null (no prev). drainReadback() after the loop flushes the last.
-    const prevData = await readbackFrame(harness);
-    if (prevData) await ffmpeg.write(prevData);
-    if (i % 15 === 0 || i === totalFrames - 1) {
+    // Capturing: only the requested frames are read back, each on its own (not pipelined); the
+    // replayed frames in between skip the copy and the encode entirely.
+    if (__capture) {
+        if (__capture.set.has(i)) {
+            let d = await readbackFrame(harness);
+            if (!d) d = await drainReadback(harness);
+            if (d) await ffmpeg.write(d);
+        }
+    } else {
+        const prevData = await readbackFrame(harness);
+        if (prevData) await ffmpeg.write(prevData);
+    }
+    if (__k % 15 === 0 || __k === __nLoop - 1) {
         const elapsed = (performance.now() - tStart) / 1000;
-        console.log(`[render_scene] frame ${i+1}/${totalFrames} — ${elapsed.toFixed(2)}s, ${((i+1)/elapsed).toFixed(1)} fps`);
+        console.log(`[render_scene] frame ${i+1}/${totalFrames} — ${elapsed.toFixed(2)}s, ${((__k+1)/elapsed).toFixed(1)} fps`);
     }
 }
 
@@ -3536,7 +3567,22 @@ if (status.success) {
     console.log(`[render_scene] DONE — ffmpeg exit ${status.code} — output: ${outputVideo}`);
     // PROBE FRAMES — extract three stills so "look at the render" costs one
     // file read instead of a ritual. The log cannot see the picture; these can.
-    try {
+    // A capture run's video holds only the captured frames: each one becomes <output>_at<seconds>s.png.
+    if (__capture) try {
+        const probeBase = outputVideo.replace(/(\.[a-z0-9]+)$/i, '');
+        const p = new Deno.Command(Deno.env.get('FFMPEG_PATH') || 'ffmpeg', {
+            args: ['-y', '-loglevel', 'error', '-i', outputVideo, '-fps_mode', 'passthrough', `${probeBase}_cap%d.png`],
+            stdout: 'null', stderr: 'piped',
+        }).outputSync();
+        if (p.code !== 0) throw new Error(`ffmpeg exit ${p.code}`);
+        const outs = __capture.frames.map((fr, k) => {
+            const png = `${probeBase}_at${(fr * dt).toFixed(2)}s.png`;
+            Deno.renameSync(`${probeBase}_cap${k + 1}.png`, png);
+            return png;
+        });
+        console.log(`[render_scene] captured frames:\n  ${outs.join('\n  ')}\n— VIEW them before judging the scene.`);
+    } catch (e) { console.warn(`[render_scene] capture extraction failed (${e.message}) — extract the frames from ${outputVideo} manually.`); }
+    else try {
         const picks = [0.15, 0.5, 0.85].map((f) => Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * f))));
         const probeBase = outputVideo.replace(/(\.[a-z0-9]+)$/i, '');
         const sel = picks.map((n) => `eq(n\\,${n})`).join('+');

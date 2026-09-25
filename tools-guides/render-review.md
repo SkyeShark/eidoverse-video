@@ -47,9 +47,23 @@ Render a probe at the intended resolution before a long encode:
 python eido.py render work/<id>/scene.json --probe
 ```
 
-A probe checks one time sample. Use a short, separately named config/output to
-inspect motion, simulation settling and transitions before rendering the full
-piece. Keep useful probes and prior versions in the working project. The native
+A probe checks one time sample. To check moments later in the piece without a
+full render, capture frames at chosen times:
+
+```bash
+python eido.py render work/<id>/scene.json --at 12.5 --at 48 --at 88.25
+```
+
+Each time becomes `<output>_probe_at<seconds>s.png`. The piece is replayed from
+frame 0, so animation mixers, controllers, simulations and particles are exactly
+where they would be in the full render; only the requested frames are read back
+and encoded, so it costs a fraction of the full encode. For a scene that is a
+pure function of `t` (nothing accumulates frame to frame), add `--jump` to render
+only the requested frames. `DURATION` and `TOTAL_FRAMES` keep the piece's own
+values in both modes.
+
+Use a short, separately named config/output to inspect motion, simulation
+settling and transitions before rendering the full piece. Keep useful probes and prior versions in the working project. The native
 runner writes the configured `outputVideo`; it does not choose a deliverable by
 the newest file timestamp.
 
