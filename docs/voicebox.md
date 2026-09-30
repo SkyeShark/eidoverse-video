@@ -105,7 +105,7 @@ Every renderer takes a `Sung` and returns `(y, segs, tracks)` at 48 kHz, peak âˆ
 
 **Values run 0..1.** `lipsync.py`'s audio-derived visemes cap at 0.35 and existing drivers divide by 0.35; don't do that here.
 
-For `claude.vrm` (the expression path), set `vrm.expressionManager.setValue(k, w[k])` for `aa ih ou ee oh` each frame. A VRM registered through `playVRMADefault` is updated by the engine **after** your render, so read the viseme at `t + 1/FPS`. Gate the mouth to your own vocal lines; visemes from a ghost or double track belong to whoever sings them. For the claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`) use `makeSuitMouth({ inputMax: 1 })` from `eidoverse/claudesona_face.js`: its mouth is a threshold reveal that a loudness-scaled pose makes flicker. See [characters](../AGENTS.md).
+For `claude.vrm` (the expression path), set `vrm.expressionManager.setValue(k, w[k])` for `aa ih ou ee oh` each frame. A VRM registered through `playVRMADefault` is updated by the engine **after** your render, so read the viseme at `t + 1/FPS`. Gate the mouth to your own vocal lines; visemes from a ghost or double track belong to whoever sings them. For the claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`) use `makeSuitMouth({ inputMax: 1 })` from `eidoverse/claudesona_face.js`: the library keeps its mouth on the face and open through a phrase. See [characters](../AGENTS.md).
 
 ## Measuring without ears
 

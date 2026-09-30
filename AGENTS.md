@@ -1285,63 +1285,67 @@ globalThis.renderFrame = async function (t) {
 };
 ```
 
-**⚠️ `claude_suit.vrm` mouth is SPECIAL — drive raw morphs, not expressions.**
-painted on the face; the animatable mouth is a hidden cavity revealed by
-the `show MMD mouth` shapekey. The expressionManager path barely moves it —
-voice over that mouth reads frozen. `eidoverse/claudesona_face.js` packages
-the render-verified recipe (it works the same on `claude_suit_wardrobe.vrm`):
+**⚠️ `claude_suit.vrm`'s face is SPECIAL — drive it through `eidoverse/claudesona_face.js`** (it works the same on `claude_suit_wardrobe.vrm`). The visible
+cat-smile, eyes and lines are painted plates on a white face dome, and the
+rig's own shapes don't hold them to that dome: its mouth (`show MMD mouth`) is
+a flat black plate that the shapekey slides straight toward the camera
+(28.8 mm per unit, from 29 mm behind the face), so past about 1.1 it floats in
+front of the face — 4–10 mm at 1.25, 15–20 mm at 1.6 — and its eye, frown and
+blush targets swing parts of the painted features up to ~13 mm off it. The
+offsets lie along the view axis, so a head-on check passes and a
+three-quarter or profile shot shows black slabs and pink discs hovering off
+the face. The library fixes the face at load and drives it:
 
 ```js
 const { installSuitMouth, makeSuitMouth, makeFaceTrack, mergeMax } =
   await import(new URL('claudesona_face.js', EIDOVERSE_DIR).href);
-const face = installSuitMouth(vrm);                // once, after load
+const face = installSuitMouth(vrm);                // once, after load, before the first render
 const mouth = makeSuitMouth({ inputMax: 0.35 });   // 0.35 for lipsync.py visemes, 1 for voicebox
 const feel = makeFaceTrack(TL, {                   // optional: feelings keyed to words
   sectionBase: { chorus: { smile: 0.5 } },
   lineCues: [[/goodbye/, { soft: 0.8, frown: 0.2 }]],
 });
-// renderFrame(t): the current viseme frame is { aa, ih, ou, ee, oh }
+// renderFrame(t), after any controller update and right before renderAsync:
 face.set(mergeMax(mouth.update(t, visemes[Math.floor(t * visemeFps)]), feel.at(t)));
 ```
 
-1. `installSuitMouth(vrm)` finds the three face plates and writes their raw
-   `morphTargetInfluences` in `onBeforeRender`. Writing at render time
-   survives the engine's VRM passes. It zeroes every morph first, because
-   leftover expression weights otherwise hold the mouth shut. Zeroing also
-   removes auto-blink, so the driver blinks for you. It returns
-   `{ plates, set(weights), weights }`.
-2. **The reveal is a threshold, not a fade.** The black cavity is a plate
-   pushed through the white face. Below about `show MMD mouth` 1.0 it stays
-   behind the face and only the painted line shows; above that it pops out
-   and grows. A viseme pose scaled by loudness crosses that line on every
-   consonant, so the black part blinks out mid-word. One film measured the
-   cavity visible for 71 of 255 sung seconds, with 716 on/off flips.
-   `makeSuitMouth` avoids that:
-   - It keeps one openness signal with a fast attack (30 ms) and a slow
-     release (110 ms).
-   - It opens above 0.18 and closes below 0.08, with hysteresis between.
-   - While open it holds the reveal at `reveal` (1.25) and scales only the
-     vowel's shape morphs, by `0.3 + 0.7 × openness`.
-   - It changes vowel only at a syllable dip, or when another vowel clearly
+1. `installSuitMouth(vrm)` does two things once, on the loaded meshes:
+   - It re-seats every painted feature — at rest and at the end of every
+     expression target — onto the face dome along its depth axis, 1.8 mm
+     proud (x and y kept, so a front view is unchanged), and the blush 1 mm
+     proud, under the lines.
+   - It gives the mouth plate three targets of its own, raycast onto the
+     dome 1.5 mm proud: a sliver under the smile, a full open mouth and a
+     round "oh". The rig's own mouth shapes stay at 0.
+
+   Call it before the first render and after anything that runs
+   `VRMUtils.combineMorphs` (`EidoverseRobotController.create` does, unless
+   `opts.skipVrmOptimize`), which rebuilds the targets and drops these. It
+   returns `{ plate, plates, set(weights), weights }`. `set` zeroes every
+   face morph and writes `weights` straight away, so call it last in
+   `renderFrame` — a controller's `vrm.update` rewrites expression-bound
+   targets such as blink. Zeroing also removes auto-blink; the driver blinks
+   between phrases. The mouth weights are `mouthOpen` (0..1) and
+   `mouthRound` (0..1, the share of oh/ou), exported as `MOUTH_OPEN` and
+   `MOUTH_ROUND`; any other face morph can be passed by name.
+2. `makeSuitMouth(opts)` turns viseme frames into those weights. Scaling the
+   mouth straight by loudness would snap it shut on every consonant, so the
+   driver:
+   - keeps one openness signal with a fast attack (30 ms) and a slow release
+     (110 ms);
+   - opens above 0.18 and closes below 0.08, with hysteresis between;
+   - while open, never drops below `floor` (0.3) of the vowel's size;
+   - changes vowel only at a syllable dip, or when another vowel clearly
      leads.
 
-   The cavity stays out through a phrase and closes at its end. The other
-   options are `attack`, `release`, `openAt`, `closeAt`, `switchDip`,
-   `switchLead` and `blinkEvery`. Blinks happen only while the mouth is
-   shut; `blinkEvery: 0` turns them off.
-3. The poses are exported as `SUIT_VISEMES`, one per vowel. Weights above 1
-   are intentional: morph deltas scale linearly past 1, and these stacks are
-   verified tear-free.
-   ```js
-   aa: { 'show MMD mouth': 1.6, 'あ': 2.0, JawOpen: 1.5, A: 0.5 }   // big open — the workhorse
-   oh: { 'show MMD mouth': 1.2, LipFunnel: 1.0, 'お': 0.8 }          // rounded drop
-   ou: { 'show MMD mouth': 0.8, LipPucker: 1.2 }                     // tight pucker
-   ee: { 'show MMD mouth': 1.0, 'え': 1.5 }                          // wide + shallow
-   ih: { 'show MMD mouth': 0.9, 'い': 1.2 }                          // flat slit
-   ```
-   A single openness signal, such as `lipsync.py get_mouth_openness` or an RMS
-   envelope, works too: pass it as `{ aa: openness }`.
-4. `makeFaceTrack(TL, opts)` keys feelings to words and sections rather
+   The other options are `attack`, `release`, `openAt`, `closeAt`,
+   `switchDip`, `switchLead` and `blinkEvery`. Blinks happen only while the
+   mouth is shut; `blinkEvery: 0` turns them off. Per vowel (`SUIT_VISEMES`):
+   `aa` opens fully, `ee` 0.62, `ih` 0.45 (all wide); `oh` 0.95 at 0.8 round,
+   `ou` 0.62 fully round. A single openness signal, such as `lipsync.py
+   get_mouth_openness` or an RMS envelope, works too: pass it as
+   `{ aa: openness }`.
+3. `makeFaceTrack(TL, opts)` keys feelings to words and sections rather
    than seconds, so re-timing the audio can't desync a feeling. `TL` is
    `{ sections: [{ name, t0, t1 }], captions: [{ text, t0, t1 }] }`, the
    shape the voicebox and song timelines use.
@@ -1356,22 +1360,19 @@ face.set(mergeMax(mouth.update(t, visemes[Math.floor(t * visemeFps)]), feel.at(t
    - `frown` is smooth; `wide`, `down` and `up` (gaze) are subtle.
    - `soft` closes the eyes. Up to about 0.5 they only shrink to small dots;
      0.75–0.85 gives content, sleepy slits.
-   - `blush` and `jaw` are switches, because both ride reveal plates like the
-     mouth. Blush is hidden below a raw `Blush` of about 0.75, so a blush of
-     0.3 or more shows it (a little fuller as it rises) and less shows
-     nothing. A jaw of 0.15 or more opens the mouth while the character is
-     silent.
+   - `blush` and `jaw` are switches. The blush is a reveal plate re-seated on
+     the cheek at exactly `Blush` 1 (a partial weight sinks it into the
+     cheek), so a blush of 0.3 or more shows it and less shows nothing. A jaw
+     of 0.15 or more opens the mouth while the character is silent.
 
    `mergeMax` merges weight dicts by the per-morph maximum.
-5. Verified traps: `vis_aa/ih/ou/ee/oh` and the plain vowel shapes do
-   nothing without the reveal; `MouthClosed` doesn't hide the cavity (rest
-   = reveal at 0); `hide mouth` restyles the painted line (an aesthetic
-   change, not lipsync); `O`/`お` solo are empty exports. Expression
-   accents that do work as raw morphs: `Smile`, `MouthSmileLeft/Right`,
-   `MouthFrown`, `Blink`, `EyeClosedLeft/Right`, `EyeWide`, `Blush`/`照れ`.
-   `Blush` and `照れ` are reveals: nothing below about 0.75, full cheeks from
-   0.9. To try a face, render
-   `python vrm_turntable.py --outfits suit,suit --frames face --views 0 --faces '[{"Blush": 1}, {"Smile": 0.6, "MouthSmileLeft": 0.6, "MouthSmileRight": 0.6}]'`.
+4. Check a face from the side, not only head-on: every hovering mouth or
+   feature on this rig passed a front view. The render audit's
+   `[lipsync] mouth NEVER moved` line watches the expression manager, so it
+   is a false positive on this path — crop the mouth in a sung frame and a
+   silent one instead. To try a face, render
+   `python vrm_turntable.py --outfits suit,suit --frames face --views 0 --faces '[{"Blush": 1}, {"Smile": 0.6, "MouthSmileLeft": 0.6, "MouthSmileRight": 0.6}]'`
+   (raw rig weights, without the library's re-seating).
 
 `claude.vrm` (the classic sona) is the opposite: its mouth is
 expression-bound and the plain `expressionManager.setValue` viseme path
