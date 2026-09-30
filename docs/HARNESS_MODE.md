@@ -20,6 +20,7 @@ conversation.
    (host deno + GPU, several times faster; see docs/SETUP.md §6):
    ```bash
    python eido.py render work/<id>/scene.json --probe   # single frame — framing check
+   python eido.py render work/<id>/scene.json --at 40   # the frame at 40 s, as a PNG
    python eido.py render work/<id>/scene.json           # full render (container)
    python eido.py render work/<id>/scene.json --local   # full render (no docker)
    python eido.py shell                                 # interactive container shell

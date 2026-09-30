@@ -6,6 +6,7 @@ Wraps the Docker render container for both operating modes:
     python eido.py bootstrap [--image TAG] [--build] [--agent FLAVOR] [--local [--fresh]]
     python eido.py doctor    [--image TAG]
     python eido.py render <scene.json> [--probe [--frames N]] [--image TAG] [--local]
+    python eido.py render <scene.json> --at 12.5 [--at 40 ...] [--jump]   # frames mid-film, as PNGs
     python eido.py shell     [--image TAG]
     python eido.py agent --brief FILE [--context FILE] [--agent claude|codex|opencode]
                      [--image TAG] [--out DIR] [--comfy auto|on|off]
@@ -317,7 +318,28 @@ def cmd_render(a):
         sys.exit(f"error: {a.scene} not found")
     cfg_container = to_container_path(cfg_host)
 
-    if a.probe:
+    if a.jump and not a.at:
+        sys.exit("error: --jump needs --at")
+    if a.at:
+        # capture: the frames at the given times, as PNGs next to <output>_probe.mp4. The film is
+        # replayed from frame 0 (so mixers, controllers, sims and particles are where they would be)
+        # and only those frames are read back and encoded; --jump renders them alone instead (for
+        # scenes that are a pure function of t). DURATION stays the film's own.
+        cfg = json.load(open(cfg_host, encoding="utf-8"))
+        dur = cfg.get("duration", 5.0)
+        late = [t for t in a.at if t < 0 or t > dur]
+        if late:
+            sys.exit(f"error: --at {late} outside the film (0 to {dur} s)")
+        cfg["capture"] = {"at": a.at, "jump": a.jump}
+        out = cfg.get("outputVideo") or "probe.mp4"
+        stem, ext = os.path.splitext(out)
+        cfg["outputVideo"] = f"{stem}_probe{ext}"
+        probe_path = os.path.splitext(cfg_host)[0] + "_probe.json"
+        json.dump(cfg, open(probe_path, "w", encoding="utf-8"), indent=2)
+        cfg_container = to_container_path(probe_path)
+        print(f"capture config: {probe_path} → {stem}_probe_at<seconds>s.png"
+              + ("" if a.jump else f"  (replays {max(a.at):.2f} s of film to get there)"))
+    elif a.probe:
         # probe: clone the config with duration = --frames frames (default 1). Frame 0 shows every VRM
         # in its LOAD pose (the engine advances animation mixers after rendering a frame), so judge
         # posed characters on a frame >= 10: `--probe --frames 12`, then extract the last frame.
@@ -522,6 +544,12 @@ def main():
     p.add_argument("--probe", action="store_true", help="short render for framing checks (see --frames)")
     p.add_argument("--frames", type=int, default=1,
                    help="with --probe: frames to render (default 1; use >= 12 to judge posed VRMs)")
+    p.add_argument("--at", type=float, action="append", metavar="SECONDS",
+                   help="save the frame at SECONDS as a PNG (repeat for several). The film replays from 0 "
+                        "so everything stateful is where it would be; only these frames are read back")
+    p.add_argument("--jump", action="store_true",
+                   help="with --at: render only the requested frames, no replay (right only for scenes "
+                        "that are a pure function of t)")
     p.add_argument("--local", action="store_true", help="render with HOST deno + GPU (no docker)")
     p.set_defaults(fn=cmd_render)
 

@@ -858,6 +858,7 @@ GPU; setup in docs/SETUP.md):
 ```bash
 python eido.py render work/<your_scene>.json            # full render
 python eido.py render work/<your_scene>.json --probe    # single frame, for framing checks
+python eido.py render work/<your_scene>.json --at 40 --at 72.5   # frames mid-film, as PNGs
 # or raw, from the repo root:
 deno run --allow-all --unstable-webgpu eidoverse/render_scene.mjs work/<your_scene>.json
 ```
@@ -865,6 +866,15 @@ deno run --allow-all --unstable-webgpu eidoverse/render_scene.mjs work/<your_sce
 Video encoding uses `h264_nvenc` when ffmpeg lists it and a one-frame test
 encode succeeds, and falls back to `libx264` otherwise (with a
 `[render_common]` warning); `RENDER_CODEC` overrides the choice.
+
+**Frames mid-film:** a `capture` key in the config renders only the frames you
+name, as PNGs: `"capture": { "at": [40, 72.5] }` in a copy of your config
+(`eido.py render --at` writes that copy for you). The film is replayed from
+frame 0, so mixers, controllers, sims and particles are exactly where they
+will be in the full render; only the requested frames are read back and
+encoded, and each lands as `<output>_at<seconds>s.png`. Add `"jump": true`
+to render only those frames — right only for a scene that is a pure function
+of `t` (nothing accumulates frame to frame).
 
 All paths in scene configs and tool calls are RELATIVE to the repo
 root — the engine always runs with that as its cwd.
@@ -2506,9 +2516,9 @@ Shadow maps and pipelines also
 settle over the first frames (a t=0 probe can look black), and particle
 systems start clumped at their emitters. NEVER judge creatures,
 particles, or lighting from a single frame-0 probe: render ≥1.5s and
-judge the LAST frame. To probe a mid-film beat, give `renderFrame` a
-time-offset hook (`t += Number(Deno.env.get('T_OFFSET') || 0)` at the
-top) and render a 1.5-2s window that ENDS on the beat you care about.
+judge the LAST frame. To probe a mid-film beat, capture it
+(`"capture": { "at": [T] }` in a copy of the config, or `eido.py render
+--at T`): the film replays from frame 0, so everything has warmed up by T.
 Creatures that must be pre-settled but unseen (a late reveal) should
 wait PARKED far from camera on real ground — a hidden group can't warm
 up, and a cold reveal scrambles on camera.
@@ -3509,6 +3519,8 @@ the canonical path (same family as `makeScreen` for drawn content).
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
   loudness-targeted mastering. `eidoverse/examples/daisy/` is a complete song made with both.
+- [docs/webxr.md](docs/webxr.md) — a headset (WebXR) page of a piece, when the brief asks for one:
+  the `eidoverse/xr/` kit, stills from the container, and the serving steps left to the operator.
 
 ## Story / production arc
 
@@ -3667,7 +3679,9 @@ ffmpeg -nostdin -loglevel error -i work/<id>/<name>.mp4 \
 panic. Render a single frame (or 0.5s) at the target resolution to verify
 framing / subject position / camera angle BEFORE committing to the full
 encode — `eido.py render <cfg> --probe` in harness mode, or a short-
-duration copy of your config in the loop. If the test frame is broken,
+duration copy of your config in the loop. For a moment later in the film,
+capture it (`--at T`, or a `capture` key in the loop) instead of rendering
+up to it. If the test frame is broken,
 fixing it costs seconds; if you skip the test and the full render is
 broken, it costs the full re-render.
 
