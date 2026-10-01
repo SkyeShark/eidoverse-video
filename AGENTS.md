@@ -2577,7 +2577,12 @@ or a sine-displaced mesh.** These read with true depth and motion:
 - **Water / pours / splashes** → `fluid_swe` (ponds / pools / springs /
   pours / wading, with whitewater from the sim's own state; a `bedFn`
   shaped as a vessel interior makes cups and basins fillable too), plus
-  `WaterMesh` for horizon-filling passive ocean.
+  `WaterMesh` for horizon-filling passive ocean. Water that overturns in
+  three dimensions — a dam break, a sloshing tank, a wave curling over a
+  wall — is `fluid_water.js` ([docs/free-surface-water.md](docs/free-surface-water.md)).
+- **A burning object** → `fluid_grid.js` volume fire: a GPU fire/smoke simulation
+  emitted from the mesh that burns, with its own compositor
+  ([docs/volume-fire.md](docs/volume-fire.md)).
 
 ## WORLD-SPACE SKY + WEATHER (`eidoverse/sky_system.js` + `eidoverse/weather_system.js`)
 
@@ -3520,6 +3525,10 @@ the canonical path (same family as `makeScreen` for drawn content).
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
   loudness-targeted mastering. `eidoverse/examples/daisy/` is a complete song made with both.
+- [docs/free-surface-water.md](docs/free-surface-water.md) — `fluid_water.js`, three-dimensional level-set
+  water (dam breaks, sloshing tanks, emitters, moving sphere colliders).
+- [docs/volume-fire.md](docs/volume-fire.md) — `fluid_grid.js`, a volumetric fire and smoke simulation
+  burning from a mesh, with its own compositor.
 - [docs/webxr.md](docs/webxr.md) — a headset (WebXR) page of a piece, when the brief asks for one:
   the `eidoverse/xr/` kit, stills from the container, and the serving steps left to the operator.
 
