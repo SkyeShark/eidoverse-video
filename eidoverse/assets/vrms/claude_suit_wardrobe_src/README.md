@@ -19,6 +19,7 @@ DAISY (DAY'S EYE) music video, 2026-09.
 | `build_accessories.py` | Recipe: glasses, operator headset, pocket protector, bow tie, headband, ribbons. |
 | `build_era_garments.py` | Recipe: the jersey collar split, the coat skirt, rolled shirt sleeves, the hoodie, the patches, the boutonniere; exports the finished VRM. |
 | `paint_patches.py` | Recipe: the embroidered patch atlas (satin-stitch hatching, twill ground, merrowed rims). |
+| `ring_pivot.py` | Tool: hangs the petal ring's bottom-arc bone from a chest pivot so nods and tilts don't drive the ring into the jacket. Already applied to both claudesona VRMs; `export_wardrobe_vrm.py` re-applies it to every export. |
 
 The recipes are kept as they ran. Their stage inputs (`claude_suit_base.blend`,
 `cyclist_tex.blend`, the scan folders) were working files and are not in the
@@ -74,6 +75,14 @@ shown.
   seams. Dark garments wear the shirt underneath, painted the same colour, so
   any crack shows cloth.
 - Export with `export_invisibles=True`, or hidden layers are dropped.
+- The orange ring around the face is split-skinned: its top arc rides the
+  head, its bottom arc the `petals base lower` bone. That bone used to hang
+  from the neck, so every nod or tilt swung the arc down into the collar and
+  the lapels showed through it. It now hangs from a chest pivot that follows
+  only the neck's turn about the body's vertical (`ring_pivot.py`). Following
+  less of the turn stretches the ring into folds (none of it) or breaks the
+  lapel tip into fragments (60% of it), so the turn stays whole; big turns
+  still bring a lapel tip through the side of the ring, as before.
 - The petals are spring bones. Folding them under a hat means rewriting each
   chain's rest pose at runtime, which the wardrobe's `fold` does.
 

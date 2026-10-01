@@ -1285,6 +1285,14 @@ globalThis.renderFrame = async function (t) {
 };
 ```
 
+**The petal ring stays off the jacket on its own** (`claude_suit.vrm` and `claude_suit_wardrobe.vrm`). The
+orange ring around the face is split-skinned: the top arc rides the head, the bottom arc the `petals base lower`
+bone. That bone hangs from `petals base lower pivot` on the chest, whose VRMC_node_constraint follows only the
+neck's turn about the body's vertical, so a nod or a tilt no longer swings the arc into the collar, and a turn moves
+the ring as it always did. three-vrm applies it in `vrm.update()`; nothing to call. Big turns (past about 20°) can
+still bring a lapel tip through the side of the ring, as they always could: in a collar close-up, keep head turns
+small. The pivot is written by `eidoverse/assets/vrms/claude_suit_wardrobe_src/ring_pivot.py`.
+
 **⚠️ `claude_suit.vrm`'s face is SPECIAL — drive it through `eidoverse/claudesona_face.js`** (it works the same on `claude_suit_wardrobe.vrm`). The visible
 cat-smile, eyes and lines are painted plates on a white face dome, and the
 rig's own shapes don't hold them to that dome: its mouth (`show MMD mouth`) is
