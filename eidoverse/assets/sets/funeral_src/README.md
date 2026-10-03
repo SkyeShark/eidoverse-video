@@ -40,9 +40,12 @@ The outputs go to `work/daisy/sets/assets/`. Recreate the layout under
 mkdir -p work/daisy/sets/blender
 cp eidoverse/assets/sets/funeral_src/* work/daisy/sets/blender/
 bash work/daisy/sets/blender/run.sh build_crowd.py                 # -> work/daisy/sets/assets/crowd.glb + crowd_rig.json
-cp work/daisy/sets/assets/crowd.glb work/daisy/sets/assets/crowd_rig.json eidoverse/assets/sets/funeral/
+cp work/daisy/sets/assets/crowd.glb eidoverse/assets/models/funeral_crowd.glb      # the model library
+cp work/daisy/sets/assets/crowd_rig.json eidoverse/assets/sets/funeral/
 ```
 
+The other builders work the same way: their `<name>.glb` goes to the model library as
+`eidoverse/assets/models/funeral_<name>.glb`, their layout JSON to `eidoverse/assets/sets/funeral/`.
 The extra argument `preview` also renders a preview into `work/daisy/sets/probes/`. Keep the
 object and role names and the layout keys: `funeral.js` reads them. Check a
 rebuild with the library check scene

@@ -1,5 +1,5 @@
-// ocean/house.js — the small house on the spit (house.glb in the pack eidoverse/assets/sets/ocean/house/,
-// built in Blender by the pack's blender/house/*.py).
+// ocean/house.js — the small house on the spit (ocean_house.glb in the model library, eidoverse/assets/models/,
+// built in Blender by eidoverse/assets/sets/ocean_src/house/*.py).
 // One window, warm, switched on with the kick at bar 12 ("is there someone home"); the porch light —
 // the most important light of the verse — comes on at "on" (u 28.13), an incandescent swell with a
 // breath of flicker, a halo in the sea air, a pool of light on the porch, a glint on the cove.
@@ -7,7 +7,7 @@
 // buildHouse(THREE, { path, envMap }) -> null | { group, porchLocal, windowLocal, update(u, t) }
 //   group: the GLB scene (origin at grade, front +z); the set places it on the spit.
 
-import { OCEAN_ASSETS } from './util.js';
+import { MODELS } from './util.js';
 
 async function loadGLB(path) {
     try {
@@ -32,7 +32,7 @@ function toNode(THREE, m, envMap) {
     return n;
 }
 
-export async function buildHouse(THREE, { path = OCEAN_ASSETS + 'house/house.glb', envMap = null } = {}) {
+export async function buildHouse(THREE, { path = MODELS + 'ocean_house.glb', envMap = null } = {}) {
     const scene = await loadGLB(path);
     if (!scene) return null;
     const { uniform, float, vec3, vec4, mix, pow, abs, dot, normalView, positionViewDirection, texture, uv, mrt, exp, length } = THREE;

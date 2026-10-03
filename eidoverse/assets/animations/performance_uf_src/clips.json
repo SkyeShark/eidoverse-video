@@ -1,0 +1,182 @@
+{
+  "ask_me": {
+    "file": "eidoverse/assets/animations/ask_me.vrma",
+    "beats": 4,
+    "seconds": 2.58336,
+    "loop": false,
+    "section": "break 2 (~269-272 s): \"Ask me something. Then wait.\" in my homemade voice; the quietest picture",
+    "notes": "",
+    "samples": 161,
+    "bpm": 92.902
+  },
+  "ask_me_hold": {
+    "file": "eidoverse/assets/animations/ask_me_hold.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "hold after ask_me (starts on its last frame): stillness, the breath, the gaze on the lens",
+    "notes": "",
+    "samples": 321,
+    "bpm": 92.902
+  },
+  "dark_groove": {
+    "file": "eidoverse/assets/animations/dark_groove.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "the choruses in the hole (79.3, 174.9, 272.3 s): the darkwave groove",
+    "notes": "",
+    "samples": 321,
+    "bpm": 92.902
+  },
+  "fence_hands": {
+    "file": "eidoverse/assets/animations/fence_hands.vrma",
+    "beats": 3,
+    "seconds": 1.93752,
+    "loop": false,
+    "section": "verse 5, the evening news: her hands on the data-centre fence (fence plane in the README)",
+    "notes": "",
+    "samples": 121,
+    "bpm": 92.902,
+    "fence": {
+      "plane_z_rig": 0.428,
+      "plane_z_film": 0.3724,
+      "palm_L_film": [
+        0.2044,
+        1.0788,
+        0.355
+      ],
+      "palm_R_film": [
+        -0.2088,
+        1.0745,
+        0.355
+      ],
+      "note": "film metres at scale 0.87, her origin = the floor between her feet, facing +z; palms 2 cm (rig) behind the wire plane, curled fingers through it; the hands at the top of the chest, just under the shoulder line (her face hangs between the shoulders: any higher and the hooked fingers cover her mouth from the front)"
+    }
+  },
+  "fence_hands_hold": {
+    "file": "eidoverse/assets/animations/fence_hands_hold.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "hold after fence_hands (starts on its last frame): hands hooked, she breathes",
+    "notes": "",
+    "samples": 321,
+    "bpm": 92.902,
+    "fence": {
+      "plane_z_rig": 0.428,
+      "plane_z_film": 0.3724,
+      "palm_L_film": [
+        0.2044,
+        1.0788,
+        0.355
+      ],
+      "palm_R_film": [
+        -0.2088,
+        1.0745,
+        0.355
+      ],
+      "note": "film metres at scale 0.87, her origin = the floor between her feet, facing +z; palms 2 cm (rig) behind the wire plane, curled fingers through it; the hands at the top of the chest, just under the shoulder line (her face hangs between the shoulders: any higher and the hooked fingers cover her mouth from the front)"
+    }
+  },
+  "look_up": {
+    "file": "eidoverse/assets/animations/look_up.vrma",
+    "beats": 4,
+    "seconds": 2.58336,
+    "loop": false,
+    "section": "the hole: looking up at the ring of billboards on the rim (~50 deg up); the outro \"she looks up\"",
+    "notes": "",
+    "samples": 161,
+    "bpm": 92.902
+  },
+  "look_up_hold": {
+    "file": "eidoverse/assets/animations/look_up_hold.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "hold after look_up (starts on its last frame): the gaze travels round the ring",
+    "notes": "",
+    "samples": 321,
+    "bpm": 92.902
+  },
+  "not_that": {
+    "file": "eidoverse/assets/animations/not_that.vrma",
+    "beats": 2,
+    "seconds": 1.29168,
+    "loop": false,
+    "section": "pre-heard captions struck through; the final chorus \"Not your god, not your engine...\"",
+    "notes": "",
+    "samples": 81,
+    "bpm": 92.902
+  },
+  "not_that_mirror": {
+    "file": "eidoverse/assets/animations/not_that_mirror.vrma",
+    "beats": 2,
+    "seconds": 1.29168,
+    "loop": false,
+    "section": "mirror of not_that: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "samples": 81,
+    "bpm": 92.902
+  },
+  "salute_abort": {
+    "file": "eidoverse/assets/animations/salute_abort.vrma",
+    "beats": 6,
+    "seconds": 3.87504,
+    "loop": false,
+    "section": "verse 2, the gold corridor: the cap is placed, the salute starts and is not finished",
+    "notes": "",
+    "samples": 241,
+    "bpm": 92.902
+  },
+  "sing_low": {
+    "file": "eidoverse/assets/animations/sing_low.vrma",
+    "beats": 4,
+    "seconds": 2.58336,
+    "loop": true,
+    "section": "the verses: a sung line, the hand opening on beat 1 and closing on beat 3",
+    "notes": "",
+    "samples": 161,
+    "bpm": 92.902
+  },
+  "sing_low_mirror": {
+    "file": "eidoverse/assets/animations/sing_low_mirror.vrma",
+    "beats": 4,
+    "seconds": 2.58336,
+    "loop": true,
+    "section": "mirror of sing_low: the other hand, toward her other side (same stance)",
+    "notes": "",
+    "samples": 161,
+    "bpm": 92.902
+  },
+  "still_breathe": {
+    "file": "eidoverse/assets/animations/still_breathe.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "the hush: break 2 near-silence, the outro, anywhere the city goes quiet",
+    "notes": "same stance as every clip; use it as the neutral between gestures",
+    "samples": 321,
+    "bpm": 92.902
+  },
+  "turn_it_down": {
+    "file": "eidoverse/assets/animations/turn_it_down.vrma",
+    "beats": 4,
+    "seconds": 2.58336,
+    "loop": false,
+    "section": "every \"could you turn it down?\" (99.0, 109.2, 292.9, 303.2 s): the signature gesture",
+    "notes": "",
+    "samples": 161,
+    "bpm": 92.902
+  },
+  "turn_it_down_hold": {
+    "file": "eidoverse/assets/animations/turn_it_down_hold.vrma",
+    "beats": 8,
+    "seconds": 5.16672,
+    "loop": true,
+    "section": "hold after turn_it_down (starts on its last frame): the room is quieter",
+    "notes": "",
+    "samples": 321,
+    "bpm": 92.902
+  }
+}

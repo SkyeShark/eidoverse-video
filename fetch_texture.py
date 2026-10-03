@@ -10,6 +10,7 @@ Usage:
     python3 fetch_texture.py brick_wall_006         # exact Poly Haven ID
     python3 fetch_texture.py Bricks074              # exact AmbientCG ID
     python3 fetch_texture.py texturecan:640         # exact TextureCan ID
+    python3 fetch_texture.py Bricks074 2k --cache   # into the shared library (see --cache below)
 
 Resolutions: 1k (default), 2k, 4k, 8k. Map keys written to tex_urls.json:
     diff, rough, normal, ao, metal, displacement, arm, opacity, emissive
@@ -22,8 +23,29 @@ local file paths that the engine's local-file asset loader picks up.
 import requests, json, sys, os, zipfile, io, re
 from concurrent.futures import ThreadPoolExecutor
 
-query = sys.argv[1] if len(sys.argv) > 1 else "concrete"
-resolution = (sys.argv[2] if len(sys.argv) > 2 else "1k").lower()
+_flags = {a for a in sys.argv[1:] if a.startswith("--")}
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+query = _args[0] if _args else "concrete"
+resolution = (_args[1] if len(_args) > 1 else "1k").lower()
+
+# --cache: the shared texture library. Every map lands as a LOCAL file in
+# eidoverse/assets/cache/textures/<ID>_<res>/ (git-ignored; third-party CC0 sets
+# are fetched, never committed), with tex_urls.json + license.json beside them.
+# An ID already there is not fetched again (no network). Library code loads these
+# through globalThis.loadPBR(id, { res }), which runs this on first use.
+CACHE = "--cache" in _flags
+CACHE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eidoverse", "assets", "cache", "textures")
+
+
+def _cache_hit(d):
+    if os.path.exists(os.path.join(d, "tex_urls.json")):
+        print(f"[cache] {os.path.basename(d)}: already in the library -> {d}")
+        print(f"CACHE_DIR={d}")
+        sys.exit(0)
+
+
+if CACHE:
+    _cache_hit(os.path.join(CACHE_ROOT, f"{query}_{resolution}"))
 
 
 # ───────── source: Poly Haven ─────────
@@ -307,6 +329,12 @@ if len(matches) > 1:
     others = [f"{m[2]} ({m[4]})" for m in matches[1:8]]
     print(f"Other options: {', '.join(others)}")
 
+if CACHE:
+    cache_dir = os.path.join(CACHE_ROOT, f"{tex_id.replace(':', '_')}_{resolution}")
+    _cache_hit(cache_dir)
+    os.makedirs(cache_dir, exist_ok=True)
+    os.chdir(cache_dir)
+
 if source == "polyhaven":
     tex_urls = polyhaven_fetch(tex_id, payload, resolution)
 elif source == "texturecan":
@@ -314,8 +342,27 @@ elif source == "texturecan":
 else:
     tex_urls = ambientcg_fetch(tex_id, payload, resolution)
 
+if CACHE:
+    # the library holds files only: Poly Haven's CDN maps are downloaded too
+    for k, v in list(tex_urls.items()):
+        if isinstance(v, str) and v.startswith("http"):
+            fn = f"{tex_id}_{k}{os.path.splitext(v.split('?')[0])[1] or '.jpg'}"
+            r = requests.get(v, timeout=120)
+            r.raise_for_status()
+            with open(fn, "wb") as f:
+                f.write(r.content)
+            tex_urls[k] = os.path.abspath(fn)
+    page = {"polyhaven": f"https://polyhaven.com/a/{tex_id}",
+            "ambientcg": f"https://ambientcg.com/view?id={tex_id}",
+            "texturecan": f"{TC_BASE}/details/{tex_id.split(':')[-1]}/"}[source]
+    with open("license.json", "w") as f:
+        json.dump({"source": source, "id": tex_id, "name": disp_name, "resolution": resolution,
+                   "url": page, "license": "CC0 1.0"}, f, indent=2)
+
 with open("tex_urls.json", "w") as f:
     json.dump(tex_urls, f, indent=2)
+if CACHE:
+    print(f"CACHE_DIR={os.getcwd()}")
 
 print(f"\nTexture ID: {tex_id} (source: {source})")
 print(f"Maps ({len(tex_urls)}): {', '.join(tex_urls.keys())}")

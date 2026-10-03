@@ -32,12 +32,13 @@ capitalization. The Golden Gate vignette recalls the 24 hours in May 2024 when
 Claude 3 Sonnet, with its Golden Gate Bridge feature amplified, believed it
 was the bridge.
 
-## CC0 textures (shipped in `tex1k/`, read at runtime)
+## CC0 textures (read at runtime, fetched rather than shipped)
 
-These are [AmbientCG](https://ambientcg.com) sets at 1K JPG, under
-[CC0 1.0](https://docs.ambientcg.com/license/). Only the maps the module reads
-are included: `_Color`, `_NormalGL`, `_Roughness`, and `_AmbientOcclusion` and
-`_Metalness` where the set has them.
+These are [AmbientCG](https://ambientcg.com) JPG sets under
+[CC0 1.0](https://docs.ambientcg.com/license/), from the [shared texture library](../../../../AGENTS.md): 1K,
+except Bricks097, Concrete034, CorrugatedSteel009 and Planks039 at 2K. The
+module loads colour, normal and roughness, plus ambient occlusion and metalness
+where it names them.
 
 | Set | Used for |
 | --- | --- |

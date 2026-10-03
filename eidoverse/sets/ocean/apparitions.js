@@ -4,13 +4,13 @@
 //     every fragment's edge burning the faces' gold, and sinks as it goes;
 //   · the HUMAN OF LIGHT (human.glb): a figure of glowing points sampled from its surface plus a faint
 //     fresnel shell; it comes apart into rising sparks.
-// Both are GLBs built in Blender (the pack's figures/ in eidoverse/assets/sets/ocean/). If they are missing,
+// Both are GLBs built in Blender (ocean_robot.glb / ocean_human.glb in the model library, eidoverse/assets/models/). If they are missing,
 // this module adds nothing.
 //
 // buildApparitions(THREE, { dir, base }) -> { group, update(u) }
 //   dir: design-frame directory with robot.glb / human.glb; base: THREE.Vector3 where they rise (design frame)
 
-import { rng, OCEAN_ASSETS } from './util.js';
+import { rng, MODELS } from './util.js';
 
 async function loadGLB(path) {
     try {
@@ -55,7 +55,7 @@ function sampleSurface(THREE, root, n, seed = 5) {
     return pts;
 }
 
-export async function buildApparitions(THREE, { dir = OCEAN_ASSETS + 'figures/', base = new THREE.Vector3(), yaw = 0 } = {}) {
+export async function buildApparitions(THREE, { dir = MODELS + 'ocean_', base = new THREE.Vector3(), yaw = 0 } = {}) {
     const { Fn, uniform, float, vec2, vec3, vec4, attribute, positionLocal, positionWorld, normalView, positionViewDirection, mix, smoothstep, clamp,
         step, dot, abs, pow, max, exp, sin, length, cameraProjectionMatrix, modelViewMatrix, mrt, mx_noise_float } = THREE;
     const group = new THREE.Group();

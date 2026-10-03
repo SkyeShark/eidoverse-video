@@ -10,7 +10,7 @@
 // paper's own PBR albedo (a real paper mesh from Blender when present, else a curled fallback sheet).
 // buildPages(THREE, { paper }) -> { group, pages:[p23, p26], hiLocal(which) }
 
-import { dataTexture, makeCanvas, ensureFonts, rng, OCEAN_ASSETS } from './util.js';
+import { dataTexture, makeCanvas, ensureFonts, rng, MODELS } from './util.js';
 
 export const PAGE_W = 0.2159, PAGE_H = 0.2794;                // US Letter, metres
 const CW = 1632, CH = 2112;                                     // 192 dpi
@@ -172,7 +172,7 @@ async function loadPaper(THREE, path) {
     } catch (e) { console.warn('[ocean] pages.glb not loaded:', e.message); return null; }
 }
 
-export async function buildPages(THREE, { paper = null, paperPath = OCEAN_ASSETS + 'figures/pages.glb' } = {}) {
+export async function buildPages(THREE, { paper = null, paperPath = MODELS + 'ocean_pages.glb' } = {}) {
     await ensureFonts();
     if (!paper) paper = await loadPaper(THREE, paperPath);
     if (paper) console.log('[ocean] pages: Blender paper', Object.keys(paper).join(', '));

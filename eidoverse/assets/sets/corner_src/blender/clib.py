@@ -18,8 +18,8 @@ from mathutils import Vector, Matrix, Euler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TEX = os.path.join(ROOT, 'tex')
-GLB = os.path.join(ROOT, 'glb')
+REPO = os.path.abspath(os.path.join(ROOT, '..', '..', '..', '..'))      # the folder holding fetch_texture.py
+GLB = os.path.join(REPO, 'eidoverse', 'assets', 'models')                 # the model library: corner_<name>.glb
 PREV = os.path.join(ROOT, 'previews')
 BAKED = os.path.join(ROOT, 'baked')
 for d in (GLB, PREV, BAKED):
@@ -202,8 +202,13 @@ def bezier_points(pts, n=24):
 
 
 # ----------------------------------------------------------------------------------- textures
-def acg(tex_id):
-    d = os.path.join(TEX, tex_id)
+def acg(tex_id, res='2k'):
+    # a CC0 AmbientCG set from the shared texture library (fetch_texture.py --cache: fetched once, then reused)
+    import subprocess, sys
+    d = os.path.join(REPO, 'eidoverse', 'assets', 'cache', 'textures', f'{tex_id}_{res}')
+    if not os.path.exists(os.path.join(d, 'tex_urls.json')):
+        subprocess.run([sys.executable if 'python' in os.path.basename(sys.executable).lower() else 'python',
+                        os.path.join(REPO, 'fetch_texture.py'), tex_id, res, '--cache'], check=True)
     maps = {}
     for f in os.listdir(d):
         fl = f.lower()
@@ -609,7 +614,7 @@ def bake_and_swap(o, key, size=2048, samples=32, ao_dist=0.08):
 
 # ------------------------------------------------------------------------------------ export
 def export_glb(objs, filename):
-    path = os.path.join(GLB, filename)
+    path = os.path.join(GLB, filename if filename.startswith('corner_') else 'corner_' + filename)
     select_only(objs)
     # include children
     for o in objs:

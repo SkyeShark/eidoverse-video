@@ -2277,13 +2277,24 @@ if __name__ == "__main__":
         list_local_models()
         sys.exit(0)
 
-    # Parse: positional query + optional --theme "..." (or --theme=...).
+    # Parse: positional query + optional --theme "..." (or --theme=...);
+    # --cache [--res 2k] puts an exact Poly Haven ID into the shared library.
     query = None
     theme = None
+    cache = False
+    res = "1k"
     args = sys.argv[1:]
     i = 0
     while i < len(args):
         a = args[i]
+        if a == "--cache":
+            cache = True
+            i += 1
+            continue
+        if a == "--res" and i + 1 < len(args):
+            res = args[i + 1].lower()
+            i += 2
+            continue
         if a == "--theme":
             if i + 1 < len(args):
                 theme = args[i + 1]
@@ -2302,6 +2313,27 @@ if __name__ == "__main__":
     if not query:
         print('Usage: python3 fetch_model.py "search terms" [--theme "mood/setting"]')
         sys.exit(1)
+    if cache:
+        # The shared model library: eidoverse/assets/cache/models/<id>_<res>/ (git-ignored; third-party CC0
+        # models are fetched, never committed), with the licence sidecar beside the model. An ID already there
+        # is not fetched again. Library code calls globalThis.fetchModelFile(id, { res }), which runs this.
+        d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eidoverse", "assets", "cache", "models", f"{query}_{res}")
+        have = glob.glob(os.path.join(d, "*_embedded.gltf"))
+        if not have:
+            os.makedirs(d, exist_ok=True)
+            os.chdir(d)                                     # the deliverer writes <id>_embedded.gltf into the cwd
+            _render_preview = lambda *a, **k: None          # no GPU preview at fetch time (rebinds the module global)
+            _LAST_LICENSE.clear()
+            out = _deliver_polyhaven(query, res)
+            if not out:
+                print(f"[cache] Poly Haven: {query} at {res} was not delivered (the library takes exact Poly Haven IDs)")
+                sys.exit(2)
+            _write_license_sidecar(out, "polyhaven", dict(_LAST_LICENSE))
+            have = glob.glob(os.path.join(d, "*_embedded.gltf"))
+        else:
+            print(f"[cache] {query}_{res}: already in the library")
+        print(f"CACHE_FILE={os.path.abspath(have[0])}")
+        sys.exit(0)
     out = fetch_model(query, theme=theme)
     if out is None:
         sys.exit(2)

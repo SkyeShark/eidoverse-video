@@ -520,7 +520,8 @@ build_hoodie(arm)
 build_patches(arm)
 build_boutonniere(arm)
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(BL, 'era_wardrobe.blend'))
-out = os.path.join(REPO, 'eidoverse', 'assets', 'vrms', 'claude_suit_wardrobe.vrm')
+out = os.path.join(REPO, 'work', 'claude_suit_wardrobe_base.vrm')   # the library VRM comes from build_tuta.py (it adds the TuTa)
+os.makedirs(os.path.dirname(out), exist_ok=True)
 tmp = out.replace('.vrm', '.part.vrm')                                   # renders may be reading the live file
 res = bpy.ops.export_scene.vrm(filepath=tmp, export_invisibles=True, export_only_selections=False)
 if 'FINISHED' in res and os.path.getsize(tmp) > 1_000_000:

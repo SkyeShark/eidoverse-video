@@ -7,6 +7,7 @@
 // eidoverse/assets/sets/ocean/ and the shared engine assets eidoverse/assets/ (fonts)
 export const fsPath = (u) => { const p = decodeURIComponent(u.pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; };
 export const OCEAN_ASSETS = fsPath(new URL('../../assets/sets/ocean/', import.meta.url));
+export const MODELS = fsPath(new URL('../../assets/models/', import.meta.url));   // ocean_*.glb: the set's own models
 export const ENGINE_ASSETS = fsPath(new URL('../../assets/', import.meta.url));
 
 export const clamp01 = (x) => Math.max(0, Math.min(1, x));

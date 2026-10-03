@@ -46,7 +46,8 @@ Keep working files (stage `.blend`s, bake renders, look renders) under
 `work/`. A library asset keeps its editable source in an `<asset>_src/`
 folder next to it, with a README covering the files, the rebuild commands and
 the credits. See `eidoverse/assets/vrms/claude_suit_wardrobe_src/`,
-`eidoverse/assets/animations/performance_src/` and
+`eidoverse/assets/animations/performance_src/`,
+`eidoverse/assets/animations/performance_uf_src/` and
 `eidoverse/assets/grass/daisy_src/`. When a render may be reading the file
 you export, write a temporary file and `os.replace` it into place, so the
 render never loads half a file.
@@ -90,6 +91,10 @@ res = bpy.ops.export_scene.vrm(filepath=tmp, export_invisibles=True, export_only
 Review a garment in the engine with `vrm_turntable.py`
 ([AGENTS.md](../AGENTS.md), "Turntable sheets"). The claudesona's wardrobe
 is the worked example: `eidoverse/assets/vrms/claude_suit_wardrobe_src/`.
+Its last stage, `build_tuta.py`, builds a whole outfit (the TuTa) by script
+from that `.blend` and exports the library VRM: it welds digi's split seams before pushing the
+garment out, places bone-parented badges from a JSON spec, and leaves the
+surface (seams, piping, colour blocking) to TSL in the runtime.
 
 ## VRM animation clips (`.vrma`)
 
@@ -120,6 +125,16 @@ The add-on exports a baked action as VRMA:
 `eidoverse/assets/animations/performance_src/` holds the complete authoring
 script and a checker. Its README and the script's CONVENTIONS block describe
 the rest: interpolation, follow-through lag, hold loops and mirroring.
+
+When the tempo gives no whole frame rate, sample in beats.
+`eidoverse/assets/animations/performance_uf_src/` (92.90 BPM) sets the scene's
+`fps = 40` and `fps_base = beat`, so beat k is exactly frame 40k. It also adds:
+
+- world-space arm targets, converted through each key's torso pose;
+- per-frame arm locks for hands that hold something fixed in the world;
+- hanging arms that stay out of the breath layers;
+- a checker that skins the real rest mesh to measure the hands' clearance
+  from the petals and the body.
 
 ## Hard-surface props and baked GLBs
 

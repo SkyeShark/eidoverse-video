@@ -25,3 +25,6 @@ qc_frames/
 # Rendered example outputs + review frames (regenerate via eido.py render)
 eidoverse/examples/*.mp4
 eidoverse/examples/*.png
+
+# The shared texture/model library: third-party CC0 sets are fetched on first use (fetch_texture.py / fetch_model.py --cache), never committed
+eidoverse/assets/cache/

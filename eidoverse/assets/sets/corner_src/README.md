@@ -2,7 +2,7 @@
 
 [Pack README](../corner/README.md) · [Sources](../corner/SOURCES.md) · [Blender guide](../../../../docs/blender.md) · [Props and sets guide](../../../../docs/props-and-sets.md#the-corner)
 
-The scripts that built `glb/*.glb` and the sign atlas in
+The scripts that built the corner's models (`eidoverse/assets/models/corner_*.glb`) and the sign atlas in
 [`../corner/`](../corner/README.md). They are copied as they were run for the
 DAISY film, and the rebuild from this folder has not been re-run since the
 copy. Each Blender build models its asset at real scale, in metres, with its
@@ -15,32 +15,29 @@ exported unbaked: `SCREEN`, `PAGE`, `SHADE`, `BULB` and `GLASS`.
 
 | File | Role |
 | --- | --- |
-| `blender/clib.py` | The shared kit: scene reset, Cycles bake settings (GPU, OptiX), UV and bake helpers, GLB export and preview sheets. |
+| `blender/clib.py` | The shared kit: scene reset, Cycles bake settings (GPU, OptiX), UV and bake helpers, GLB export and preview sheets. Its `acg(id)` takes an AmbientCG set from the shared texture library (running `fetch_texture.py <ID> 2k --cache` the first time); `export_glb` writes `corner_<name>.glb` into the model library. |
 | `blender/props_util.py`, `blender/helpers_wcl.py` | Helpers for the room props, and for the window, curtain and laptop builds. |
 | `blender/camp_lib.py`, `blender/camp_logs.py` | Helpers for the camp: tents, bulb, pole, fire and bench, plus log geometry with bark, end-grain and split faces. |
 | `blender/build_<asset>.py` | One GLB each: `bench`, `books`, `bulb`, `chair`, `clock`, `curtain`, `desk`, `fire`, `lamp`, `laptop`, `marchers`, `mug`, `notebook`, `pages`, `pen`, `pole`, `rug`, `sign`, `tent_dome` (all three colours) and `window`. Some write their own art first, for example `clock` writes `art/clock_dial.png`. |
 | `art/paint_signs.py` | System Python with numpy, Pillow and SciPy. Paints the eight protest signs as layers: card, poster paint, marker, duct tape, lettering. Writes `art/sign_art_{color,normal,orm}.jpg` at 2048 × 768, and `_hi` versions at 4096 × 1536. |
 | `art/paint_sign_back.py` | System Python with Pillow. Writes `art/sign_back_print.png`, the shipping-box print on the sign backs. |
-| `acg_get.py` | Downloads AmbientCG sets into `tex/<ID>/`, keeping their zip names (`<ID>_2K-JPG_<Map>.jpg`), which are the names the module and the builds look for. |
 
 ## Rebuild
 
-The scripts resolve paths relative to the folder they sit in: `blender/..` is
-their root, with `tex/`, `glb/`, `art/`, `baked/` and `previews/` under it.
+The scripts resolve their working files relative to the folder they sit in:
+`blender/..` is their root, with `art/`, `baked/` and `previews/` under it.
 That root was the DAISY film's `work/daisy/sets/corner_assets/`. Recreate it
-under `work/`, which git ignores, and run from the repository root:
+under `work/`, which git ignores, and run from the repository root. The bake
+sources come from the shared texture library and the GLBs go straight into
+the model library (`eidoverse/assets/models/corner_*.glb`):
 
 ```bash
 mkdir -p work/daisy/sets/corner_assets
 cp -r eidoverse/assets/sets/corner_src/. work/daisy/sets/corner_assets/
 cd work/daisy/sets/corner_assets
-python acg_get.py 2K Asphalt033 Bark012 Cardboard002 Carpet015 Fabric019 Fabric030 Fabric036 Fabric061 \
-  Fabric062 Fabric083 Ground037 Ground106 Leather037 Metal032 Metal048A Metal048B Metal049A Metal050A \
-  PaintedPlaster017 PaintedWood009C Paper001 Paper003 Plastic006 Plastic012B Porcelain001 Rock058 Rope001 \
-  TreeEnd003 TreeEnd004 Wood049 Wood066 Wood092 WoodFloor064
 python art/paint_signs.py && python art/paint_sign_back.py
 cd ../../../..
-bash run_blender.sh work/daisy/sets/corner_assets/blender/build_sign.py      # one asset -> glb/camp_sign.glb
+bash run_blender.sh work/daisy/sets/corner_assets/blender/build_sign.py      # one asset -> eidoverse/assets/models/corner_camp_sign.glb
 ```
 
 - Build the signs' art before `build_sign.py`, which reads
@@ -53,7 +50,6 @@ bash run_blender.sh work/daisy/sets/corner_assets/blender/build_sign.py      # o
   ```
   Run it from `work/daisy/sets/corner_assets/`, then copy the three `_pot`
   files into `eidoverse/assets/sets/corner/art/`.
-- Copy the rebuilt GLBs into `eidoverse/assets/sets/corner/glb/`.
 - `run_blender.sh` is the repository's isolated headless runner (see the
   [Blender guide](../../../../docs/blender.md)). The run line in
   `clib.py`'s docstring is the bare Blender command it was first written with.

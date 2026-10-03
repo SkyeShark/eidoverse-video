@@ -122,13 +122,14 @@ export async function buildLand(THREE, coast, ctx = {}) {
     geo.computeVertexNormals();
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), RMAX);
 
-    // ---------------------------------------------------------------- PBR: Poly Haven CC0 (sources.json)
-    const T = OCEAN_ASSETS + 'tex/';
-    const ld = (p, srgb) => fileTexture(THREE, T + p, { srgb });
+    // ---------------------------------------------------------------- PBR: Poly Haven CC0, 2k, from the shared texture library
+    const set = async (id) => (await globalThis.fetchPBR(id, { res: '2k' })).files;
+    const [cs, s3, wg] = [await set('coast_sand_01'), await set('sand_03'), await set('withered_grass')];
+    const ld = (p, srgb) => fileTexture(THREE, p, { srgb });
     const [sD, sN, sA, wD, wN, wA, gD, gN, gA] = await Promise.all([
-        ld('sand/coast_sand_01_diff_2k.jpg', true), ld('sand/coast_sand_01_nor_gl_2k.jpg'), ld('sand/coast_sand_01_arm_2k.jpg'),
-        ld('sand/sand_03_diff_2k.jpg', true), ld('sand/sand_03_nor_gl_2k.jpg'), ld('sand/sand_03_arm_2k.jpg'),
-        ld('grass/withered_grass_diff_2k.jpg', true), ld('grass/withered_grass_nor_gl_2k.jpg'), ld('grass/withered_grass_arm_2k.jpg'),
+        ld(cs.diff, true), ld(cs.normal), ld(cs.arm),
+        ld(s3.diff, true), ld(s3.normal), ld(s3.arm),
+        ld(wg.diff, true), ld(wg.normal), ld(wg.arm),
     ]);
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.9, metalness: 0 });
     mat.name = 'ocean_land';

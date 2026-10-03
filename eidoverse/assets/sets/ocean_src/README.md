@@ -69,7 +69,8 @@ BLENDER_USER_RESOURCES="${TMP:-/tmp}/blender_user_isolated" "$BLENDER" --backgro
 Never run `--factory-startup` against your real Blender user folder: it
 deletes your installed extensions' Python packages (see the
 [Blender guide](../../../../docs/blender.md)). Copy the finished GLBs
-into `eidoverse/assets/sets/ocean/figures/` and `…/house/`, then check them
+into the model library as `eidoverse/assets/models/ocean_<name>.glb` (`ocean_robot`, `ocean_human`,
+`ocean_pages`, `ocean_house`), then check them
 with the library check scene
 ([guide](../../../../docs/props-and-sets.md#verify)).
 

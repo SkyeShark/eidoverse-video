@@ -13,19 +13,19 @@ closed on its own:
 - **The camp.** Tents, string lights, a campfire, SeedThree woods and marchers
   with hand-painted signs, under the set's own night-sky dome.
 
-The module loads everything from this folder, resolved from its own URL.
+The module reads the sign art from this folder and its models from the model library
+(`eidoverse/assets/models/corner_*.glb`), both resolved from its own URL; its CC0 textures come from the
+[shared texture library](../../../../AGENTS.md), fetched on first use.
 
 | Path | Contents | Size |
 | --- | --- | --- |
-| `glb/corner_*.glb` | The room: `desk`, `window`, `curtain`, `chair`, `rug`, `books`, `mug`, `lamp`, `notebook`, `pen`, `laptop` (the lid is a separate node), `clock` (the hands are separate nodes) and `pages`. Each is Blender-built with its layered look baked in. | 44.8 MB |
-| `glb/camp_*.glb` | The camp: `tent_dome_{orange,green,mustard}` (with a baked lantern-glow map), `pole`, `bulb`, `fire` (a stone ring, charred logs and an ash bed with baked emissive coals), `bench`, `marchers` (four rigged-by-attribute marcher bodies, instanced on the GPU) and `sign` (a corrugated board taped to a lath stick; the painted front comes from the art atlas). | 43.9 MB |
-| `tex/<ID>/` | AmbientCG 2K sets that the module tiles itself: `PaintedPlaster017` (walls), `WoodFloor064` (floor), `PaintedWood009C` (the skirting board) and `Ground037` with `Ground106` (the camp ground and its path). Each has `_Color`, `_NormalGL` and `_Roughness`, plus `_AmbientOcclusion` where the set has one. `Paper001` ships only its colour map, the notebook paper. | 78.9 MB |
+| `models/corner_*.glb` (room) | The room: `desk`, `window`, `curtain`, `chair`, `rug`, `books`, `mug`, `lamp`, `notebook`, `pen`, `laptop` (the lid is a separate node), `clock` (the hands are separate nodes) and `pages`. Each is Blender-built with its layered look baked in. | 44.8 MB |
+| `models/corner_camp_*.glb` | The camp: `tent_dome_{orange,green,mustard}` (with a baked lantern-glow map), `pole`, `bulb`, `fire` (a stone ring, charred logs and an ash bed with baked emissive coals), `bench`, `marchers` (four rigged-by-attribute marcher bodies, instanced on the GPU) and `sign` (a corrugated board taped to a lath stick; the painted front comes from the art atlas). | 43.9 MB |
+| texture library (fetched) | AmbientCG 2K sets that the module tiles itself: `PaintedPlaster017` (walls), `WoodFloor064` (floor), `PaintedWood009C` (the skirting board) and `Ground037` with `Ground106` (the camp ground and its path): colour, normal and roughness, plus ambient occlusion for the ground and the skirting. `Paper001`'s colour map is the notebook paper. | — |
 | `art/sign_art_{color,normal,orm}_pot.jpg` | The painted-sign atlas: 8 signs in 4 × 2 cells, resampled to 2048 × 1024. | 1.7 MB |
 
-The folder is 169.2 MB. The module picks each map in `tex/<ID>/` by its
-suffix (`_color.jpg`, `_normalgl.jpg`, `_roughness.jpg`,
-`_ambientocclusion.jpg`, ignoring case). A file it cannot find is logged as
-`[corner] missing texture` or `not built yet — skipped`, and the set renders
+This folder is 1.7 MB; the models are 85 MB in the model library. A model it
+cannot find is logged as `not built yet — skipped`, and the set renders
 without it.
 
 The set also uses shared engine assets: the Kalam and Exo 2 fonts from

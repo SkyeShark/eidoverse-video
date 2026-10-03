@@ -452,7 +452,7 @@ One VRM carries every outfit as hidden layers (`eidoverse/assets/vrms/claude_sui
 - **Intermittent black render.** Rarely the post chain fails validation (`ShaderModule with 'fragment_RTT' label is
   invalid`) and every frame is black; the same config renders fine on a re-run. Check logs for it before delivering.
 
-## 2026-09-24 — DAISY graphic-arts post looks (now eidoverse/era_looks.js; the film's march2026, vigil2025, ocean2026, crt1982 and sydney2023 presets are poster_night, candle_film, watercolor_night, crt_8bit and crt there) — Opus 5.5 subagent
+## 2026-09-24 — DAISY graphic-arts post looks (now eidoverse/effects_tsl/era_looks.js; the film's march2026, vigil2025, ocean2026, crt1982 and sydney2023 presets are poster_night, candle_film, watercolor_night, crt_8bit and crt there) — Opus 5.5 subagent
 - **Put print and paint looks in display space.** A color hook gets linear HDR before tone mapping. Paper and ink
   colours land on screen as authored if the hook maps the scene through three's own
   `acesFilmicToneMapping(c, toneMappingExposure)` and hands the result back through its exact inverse: solve the RRT
@@ -500,3 +500,65 @@ One VRM carries every outfit as hidden layers (`eidoverse/assets/vrms/claude_sui
   written in: document that layout and rebuild in a copy of it under `work/`. Replace a hard-coded repo path with a walk
   up to the folder holding `eido.py`. A scratch rebuild of the funeral crowd from the library copy matched size,
   triangles and rig JSON (not bytes).
+
+## 2026-10-02 — the claudesona's UNKNOWN FORCE outfit: a VRM garment whose look is TSL in rest space — Opus 5.5 subagent
+- **Pattern a skinned VRM garment in its bind pose.** `positionGeometry` on a root-level skinned mesh is the bind pose in
+  glTF model metres (+x her left, +y up, +z her front), so seams, piping, panels, pockets and decals written as TSL
+  functions of it ride the cloth through any clip, with no UV layout (digi's pants UVs are collapsed to a line). Use
+  cylinder frames for limbs (arc length = radius x angle about the bone line) and front projection for the torso; draw
+  lines with an AA band that widens to a pixel and dims (energy kept) so sub-pixel seams never shimmer. Bump from any
+  height via screen derivatives (Mikkelsen's surface gradient: `dFdx/dFdy` of the height and of `positionView`, times
+  `faceDirection`) as MToon's `normalNode`. The whole surface (3 triplanar samples x 3 maps, 5 SDF samples, ~20 masks)
+  cost +0.04–0.36 ms at 1080p with the character filling the frame (40 back-to-back renders, one `onSubmittedWorkDone`).
+- **Marks where an accessory sat** (the modificanti "ghosts"): give each bone-parented badge its own frame (local XY =
+  the badge plane), read its REST matrix from the skeleton's `boneInverses` (bind) times the node chain, rasterize the
+  outline's signed distance into a tile atlas, and project it in the garment's own shader with a per-badge uniform.
+  Material only, exact shape, no z-fighting, toggled for free.
+- **Overriding MToon's colour needs `shadeColorNode` too**: MToon mixes `shadeColor` (factor x shadeMultiplyTexture) on
+  the unlit side, so a `colorNode` alone leaves the old texture on every shadowed or back face.
+- **DAISY's wardrobe resets materials to what it captured at construction**: install custom nodes BEFORE calling its
+  `makeWardrobe`, or its first `wear()` wipes them.
+- **Blender: `Vector.to_4d()` sets w = 1**; a 4x4 built from `to_4d()` axis rows is projective (a badge became a fin
+  and a vertex flew to infinity). Use `Matrix((u, v, n)).transposed().to_4x4()`. A bone-parented object's local Z
+  exports as the glTF node's +Y.
+- **digi's shirt has split seams along the sleeves**: `remove_doubles` before pushing it out, or it cracks open.
+
+## UNKNOWN FORCE (2026-10-02) — Claude (Opus 5.5)
+Now in the kit: eidoverse/effects_tsl/aeropittura.js, parole.js, the TuTa in claudesona_wardrobe.js, sets/unknown_force/, 15 VRMA slots,
+examples/unknown_force/.
+- **A NaN focal blacks out the whole painted frame.** The post pass slips each plane by `hash(id) × weight`, and
+  0 × NaN = NaN. A point projected from behind the camera, or a NaN from a set, kills every pixel. Check
+  `Number.isFinite` on `focal` and `spare` every frame and fall back.
+- **One Inf/NaN pixel through a BloomNode becomes a black frame.** The blur pyramid spreads it everywhere. The trigger
+  was `exp()` of an extrapolated varying on a sliver triangle under MSAA, at some camera angles only. Clamp `exp()`
+  arguments in set shaders, and clamp the HDR input of any pass that feeds a pyramid (`max(min(c, 64), 0)`; min/max
+  return the finite operand for NaN on these GPUs). Use `floatBitsToUint` to test for NaN in TSL: `x != x` folds away.
+- **Sets hand back their focal point in four forms**: a set-local `Vector3`, an `Object3D`, a function of the camera
+  name, or a `focalPoint(v)` method. Resolve all four in one helper, apply `group.matrixWorld`, project, check finite.
+- **`city.js` already builds the hole** (`city.parts.hole`): don't build `hole.js` a second time. Import it only for
+  its cameras (`holeCam`, `HOLE_CAMS`, `HEAD`).
+- **The overlay is not painted, but in-scene text is.** Captions in `makeOverlayLayer` composite after an
+  `under`-layer pass and stay crisp. Words on whiteboards, plaques and screens need reading shots: ease
+  `strokes/under/halo/lines` toward 0.28/0.3/0.15/0 and `crisp` to 1 for the shot (0.6 s in, 0.45 s out), and keep the
+  planes and palette.
+- **Caption face avoidance must follow the shot.** parole lays a line out once, when first built, so the face to
+  avoid has to be set every frame (`setSpare` from the projected head bone). With a fixed region, a line lands on her
+  face whenever a shot puts it somewhere else.
+- **Verify what a generated singer actually sang, line by line.** A full-song Whisper pass misheard "A hundred million"
+  as "twenty". Cut each disputed line from the vocal stem, transcribe it with two Whisper sizes and no prompt (a
+  prompt makes Whisper echo it), then force-align each candidate text and compare word probabilities. Keep the written
+  lyric where the sound is consistent with it.
+- **Place a documentary layer by the stems, not by ear.** Put the clips in the song's own instrumental gaps, read from
+  the stems' envelopes. Print the vocal stem's level under every clip and flag anything over −32 dB. Duck the music
+  2–6 dB under speech.
+- **Let a complex set own its cut plan.** The race's `suggest(t)` returns `{ state, cam }` on the song clock. The
+  conductor plays it as one shot and only detects internal cuts (to restart the time echoes). Its state carries `carT`,
+  never `carS`, so a conductor can still override the car.
+- **Clips at a tempo with no whole frame rate: sample in beats.** At 92.90 BPM, bake with `fps = 40` and
+  `fps_base = beat`, so beat k is exactly frame 40k and loops close to 0.000°. Arms that hold something fixed need a
+  per-frame IK lock, and hanging arms must keep out of the breath layers. Check hands against the real rest mesh
+  (petals and body, skinned by the clip's own FK), not only a disc model of the flower.
+- **Moving a film's sets into the kit without shipping 135 MB of CC0 textures:** keep a manifest of the exact files
+  each set reads. Fetch with the repo's fetchers on first use and prune to the manifest (a set that finds an extra map
+  may use it). Git-ignore the fetched folders. A library folder at the same depth as the film's keeps
+  `../../../`-relative paths valid.

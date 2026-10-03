@@ -1031,12 +1031,15 @@ pick one** (same as fetched props):
   **The outfit is built in LAYERS** — mesh names `jacket`, `tie`, `shirt`, `pants`, `shoes`:
   hide layers to change the look (jacket + tie off = casual shirtsleeves):
   `vrm.scene.traverse(o => { if (o.name === 'jacket' || o.name === 'tie') o.visible = false; })`
-- `claude_suit_wardrobe.vrm` — the same claudesona carrying sixteen outfits
-  as hidden layers (a 1939 switchboard operator, a 1961 lab coat, 1980s
-  colour-blocking, a hoodie, a mourning coat, an 1890s cycling outfit and
-  more); `claude_suit_wardrobe_preview.jpg` shows them all. Dress it with
-  `claudesona_wardrobe.js` ("Outfits" below).
-  It is 31 MB against the suit's 11 MB, so cast `claude_suit.vrm` when the suit
+- `claude_suit_wardrobe.vrm` — the same claudesona carrying seventeen outfits
+  as hidden layers: sixteen from the DAISY music video (a 1939 switchboard
+  operator, a 1961 lab coat, 1980s colour-blocking, a hoodie, a mourning coat,
+  an 1890s cycling outfit and more; `claude_suit_wardrobe_preview.jpg`) and
+  the TuTa from UNKNOWN FORCE, black techwear with neon piping, techwear boots,
+  Balla's five snap-on badges and an optional sun disc
+  (`claude_suit_wardrobe_preview_tuta.jpg`). Dress it with
+  `claudesona_wardrobe.js` ("Outfits" and "The TuTa" below).
+  It is 34 MB against the suit's 11 MB, so cast `claude_suit.vrm` when the suit
   is all the piece needs.
 
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is the primary model
@@ -1426,7 +1429,7 @@ patterns, folds petals back under a hat and seats the hat.
 
 ```js
 const { makeWardrobe, WARDROBE } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
-const wardrobe = makeWardrobe(THREE, vrm);   // after load; starts in 'suit'
+const wardrobe = await makeWardrobe(THREE, vrm);   // right after load (async); starts in 'suit' or opts.wear
 wardrobe.wear('lab_coat_1961');              // any WARDROBE key; a no-op if already worn
 wardrobe.petals('mac_launch_1984');          // repaint only the petals (a preset key or a spec); null restores
 ```
@@ -1449,6 +1452,7 @@ wardrobe.petals('mac_launch_1984');          // repaint only the petals (a prese
 | `march` | canvas work jacket with embroidered patches |
 | `sleeves_rolled` | jacket off, shirt sleeves rolled, tie |
 | `cyclist_1892` | striped jersey, tweed knickerbockers, argyle socks, a straw boater with the petals folded under it |
+| `tuta` | the UNKNOWN FORCE TuTa: black techwear one-piece, techwear boots, belt and straps ([the TuTa](#the-tuta)) |
 
 A preset is `{ show, paint, hide, fold, hat }`:
 
@@ -1457,7 +1461,8 @@ A preset is `{ show, paint, hide, fold, hat }`:
   `tie`, `shirt`, `pants`, `jersey`, `knickers`, `socks`, `boater`,
   `coat_skirt`, `shirt_rolled`, `acc_glasses`, `acc_headset`, `acc_pocket`,
   `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches` and
-  `acc_boutonniere`.
+  `acc_boutonniere`. The `tuta` preset lists its own layers in `uf` (`tuta`,
+  `uf_boots`, `uf_straps`) and hides digi's shoes with `hideBase: ['shoes']`.
 - `paint` maps a material name to `'#hex'` or a pattern:
   - `{ pattern: 'stripes', a, b, scale }`, `'blocks'` (`a`, `b`, `c`),
     `'herringbone'` (`a`, `b`, `c` flecks, `scale`), `'gradient'` (`a`, `b`)
@@ -1487,6 +1492,107 @@ outfits reuses compiled shaders. Set `globalThis.WARDROBE_DEBUG = true` to
 log paints and folds. New garments are modelled in Blender; the
 [source README](eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
 has the steps.
+
+#### The TuTa
+
+The `tuta` preset is the outfit from the UNKNOWN FORCE music video (2026-10):
+
+- **The tuta.** Thayaht's 1920 TuTa, the one-piece T-cut overall, re-cut as
+  black techwear. His contrast topstitching becomes neon piping on the same
+  seams, cyan on her left and magenta on her right. A diagonal zip runs from
+  her left collarbone to her right hip.
+- **Balla's colour blocking** from *Il vestito antineutrale* (1914): a violet
+  wedge, a petrol wedge, a charcoal sleeve and a sodium lightning inlay.
+- **Techwear boots**, a belt (open at the back round the tail) and a thigh
+  strap.
+- **The modificanti.** Balla's snap-on shapes: five neon badges, one per camp
+  of the AI argument, hidden until pinned. Taking one off leaves a ghost.
+- **Face paint.** Her left half is split into thin magenta and cyan Futurist
+  planes, and the eyes get catchlights with a faint scanline.
+- **`acc_sundisc`** (optional): Balla's segmented sun behind the petal ring.
+
+On `claude_suit_wardrobe.vrm`, `makeWardrobe` dresses the TuTa's surface and
+adds its controls to the same wardrobe object; every other preset works
+alongside it.
+
+```js
+const { makeWardrobe, FINAL_CHORUS } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
+const wd = await makeWardrobe(THREE, vrm, { wear: 'tuta' });   // right after load, before anything else touches the materials
+wd.facePaint(true);
+wd.pin('mod_red');                            // now
+wd.pin('mod_gold', { at: 131.4 });            // a snap (a pop and a flash) at film time 131.4 s
+wd.unpin('mod_gold', { at: 273.0, eject: true });   // it pops off and tumbles away; its ghost stays
+// renderFrame(t), before rendering:
+wd.update(t);
+const b = wd.badgeWorld('mod_gold');          // { position, quaternion, flying, visible }: aim a camera at it
+```
+
+Call it before any other code changes the VRM's materials: the wardrobe resets
+materials to the nodes it captured at construction, and the TuTa installs its
+TSL first. It reads the rest pose from the skeleton's bind matrices. Its eye
+catchlights come on with the `tuta` preset only, so the other presets look
+exactly as they did before the TuTa joined the wardrobe.
+
+| Call | What it does |
+| --- | --- |
+| `await makeWardrobe(THREE, vrm, opts)` | On the wardrobe VRM, installs the TuTa's materials, then wears `opts.wear` (default `'suit'`). It also takes `neon` (default 1), `grime` (street dust, 1) and the ejection's physics: `ejectSpeed` (1.4 m/s), `ejectUp` (1.0 m/s), `ejectGravity` (2.2 m/s²), `ejectDrag` (0.8/s) and `floorY` (the VRM root's height). |
+| `wd.wear(key)` | `'tuta'` (tuta, boots and straps; digi's loafers hidden) or any other `WARDROBE` preset (the TuTa's layers go off). Badges show only on the tuta. A no-op if already worn. |
+| `wd.pin(key, { at })` | Pins a badge now, or at film time `at` with a 0.35 s snap. |
+| `wd.unpin(key, { ghost, at, eject, linger })` | Takes a badge off. It leaves its ghost unless `ghost: false`. With `at`, it unsnaps at that time: a flash, the badge shrinks away and the ghost fades in. With `eject: true`, the badge pops off and tumbles out along its outward normal for 1.2 s under a floaty gravity, its glow flickering out, bouncing off the floor; `linger: true` leaves it lying where it lands. |
+| `wd.schedule(events)` | Replaces the whole schedule: `[{ at, pin }, { at, unpin, ghost, eject, linger }, …]`. |
+| `wd.update(t)` | Per frame, before the render. Pins and unsnaps are pure functions of `t`. An ejection captures its launch pose at the first update at or after `at` and integrates from there with a fixed step, so render in order: the same frames give the same flight. |
+| `wd.badgeWorld(key, out)` | The badge's world `position` and `quaternion` now, plus `flying` and `visible`. |
+| `wd.clearGhost(key)` | Removes a ghost and that badge's schedule. |
+| `wd.facePaint(on)` | `true`, `false` or a 0..1 fade, independent of the outfit. |
+| `wd.sunDisc(on)` | Shows or hides `acc_sundisc`. |
+| `wd.neon(level)` | The glow of the piping, the inlay, the boots' accents, the face paint, the badge rims and the disc: 0..1, more is brighter. The film's outro turned her down with the city. |
+| `wd.badges`, `wd.pinned`, `wd.ghosts`, `wd.current`, `wd.uniforms`, `wd.layers`, `wd.base` | The badge objects, the immediate state, the worn preset, the TSL uniforms (`neon`, `paint`, `eyes`, `grime`, `ghost[5]`, `time`), every layer object and the garment wardrobe underneath. `wd.petals()` works as on any wardrobe. |
+
+The module also exports `BADGES`, `MODIFICANTI` (each badge's camp, glow and
+bone) and `FINAL_CHORUS` (the film's line-to-badge pairs). A preset that wears
+the TuTa's layers lists them in `uf`: `{ show: [], uf: ['tuta', 'uf_boots', 'uf_straps'], hideBase: ['shoes'], paint }`.
+
+**The modificanti.** The badges are sized to read in a medium shot: waist-up
+from 2.2 m at 1080p, about 100–160 px each. They sit clear of the petal ring,
+and all five fit at once. Each is an extruded outline with a painted face and an
+emissive rim; text and pictograms are painted, never geometry.
+
+| Key | Camp | The badge | Where (bone) |
+| --- | --- | --- | --- |
+| `mod_red` | the safety camp | a red enamel wedge, 144 × 45 mm, pointing at the zip | across her belly (`spine`) |
+| `mod_gold` | the state | a gold star over two chevrons | right upper arm, outside (`upper_arm.R`) |
+| `mod_chrome` | the money race | a chrome bolt tinted dollar-green, with banknote guilloche | left upper arm, outside (`upper_arm.L`) |
+| `mod_warning` | "only an engine" | a white warning triangle with a toaster pictogram | left hip, below the belt (`hips`) |
+| `mod_spray` | the evening news | a black canvas patch, CLANKER sprayed through a stencil, a magenta merrowed edge | right upper arm, below the gold (`upper_arm.R`) |
+
+**The ghost.** When a badge comes off, the suit keeps its exact shape: a faint
+emissive outline in the badge's glow (20 % of its rim) on the lighter, fuzzy
+hook-and-loop field it gripped. It is a per-badge SDF in the tuta's own shader,
+projected from the badge's rest frame, so it rides the cloth. The film's point:
+she can refuse the labels, but they leave marks.
+
+**Lighting her.** Black techwear disappears in the dark. Rim her with neon
+kickers from behind, at hip and shoulder height; MToon's parametric rim takes
+the scene's lights. The badges and the piping are emissive, so bloom picks them
+up.
+
+**Cost.** In a frame that the character fills at 1080p, the full outfit
+measured 3.57–3.89 ms against 3.53 ms for digi's suit (RTX 5090 Laptop GPU). Its
+surface work adds about 0.4 s of shader compile at startup.
+
+**Limits.**
+
+- At three-quarter views the mouth cavity floats off the face when the driver
+  holds the reveal at 1.25 or more. That is digi's rig, not the paint, which
+  never touches the face plates, so lipsync works unchanged.
+- The spray patch's stencil reads only from a medium shot in. An ejected arm
+  badge starts behind the hanging petals for its first frames from a frontal
+  camera.
+- The VRM has no peaked cap; the
+  [corridor set](eidoverse/sets/unknown_force/CORRIDOR_NEWS.md) carries one
+  that seats on her head bone.
+- The [source README](eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md#the-tuta)
+  has the Blender build and what it taught.
 
 #### Turntable sheets
 
@@ -1830,6 +1936,56 @@ Helpers: `playVRMADefault(vrm, slot, { loopOnce, fadeIn, fadeOut })` sets up `gl
 
 > **`playVRMADefault` REFUSES locomotion slots.** Calling `playVRMADefault(vrm, 'walk')` (or run/stairs…) **throws** — playing a locomotion clip in place is the "walking in place" treadmill bug (legs cycle, body never moves). Locomotion is owned by `VRMCharacterController` (`body.walkTo(x,z)` / waypoints), which moves the body AND grounds the feet with IK. `playVRMADefault` only plays stationary/expressive clips. The one exception — a VRM genuinely on a treadmill or carried by a vehicle — passes `{ force: true }` (or `globalThis._allowManualLocomotion = true`).
 
+#### Performance clips (UNKNOWN FORCE)
+
+Authored for the claudesona in the TuTa at 92.90 BPM: one beat is 0.64584 s, a
+bar 2.583 s. She is calm and unbothered, never pleading. Loops start on beat 1
+and last whole beats, and each one-shot that holds hands over to its `*_hold`
+loop on its exact last frame.
+
+| Clip | Beats | Kind | What she does |
+| --- | ---: | --- | --- |
+| `still_breathe` | 8 | loop | Almost motionless: one breath per bar, the head drifting a degree or two. The neutral between gestures, and the hush. |
+| `dark_groove` | 8 | loop | Low and slow, for a chorus. The knees are soft and the weight crosses on beats 1 and 3. The shoulders roll slowly back, the head nods on 2 and 4, and the hanging arms swing late. |
+| `sing_low`, `sing_low_mirror` | 4 | loop | A sung line. One hand at belly height opens palm up on beat 1 and closes into a loose cup on 3; the other arm hangs. |
+| `turn_it_down` | 4 | one-shot | The gesture for "could you turn it down?". The right hand comes up to the bottom of the chest, palm down, and presses slowly down to the belt like a fader. The head tilts to watch it. |
+| `turn_it_down_hold` | 8 | loop | The room is quieter: the hand stays low, with one breath per two bars. |
+| `not_that`, `not_that_mirror` | 2 | one-shot | A calm no. A hand rises to shoulder height and shows its palm, the head turns about 20° away, and the hand drops back to the stance. |
+| `look_up` | 4 | one-shot | A small dip, then the face lifts to 50°, mostly in the neck. |
+| `look_up_hold` | 8 | loop | The gaze travels round a ring at 49–51° of elevation, from +44° to −36°. |
+| `salute_abort` | 6 | one-shot | The hand flattens into a salute and starts toward the brim, then stops at the upper chest. It hangs there a beat and lowers, unhurried. |
+| `fence_hands` | 3 | one-shot | No step: both hands come up and hook into a chain-link fence at the top of the chest. |
+| `fence_hands_hold` | 8 | loop | She breathes, with her hands locked to the fence (the palms move 0.0 mm). |
+| `ask_me` | 4 | one-shot | A small open palm offered toward the lens at belly height, the face square to +Z. |
+| `ask_me_hold` | 8 | loop | Only the breath moves, countered in the neck so the face never leaves the lens. |
+
+```js
+await playVRMADefault(vrm, 'still_breathe', { loop: true });                  // the first clip: no fade
+const once = await playVRMADefault(vrm, 'turn_it_down', { loop: false, fade: 0.3 });
+// …once.clip.duration seconds later, a hard cut onto its hold:
+await playVRMADefault(vrm, 'turn_it_down_hold', { loop: true, fade: 0 });
+```
+
+- **Locking a loop to a song.** Start a loop on beat 1 of a bar and it stays
+  locked, because every loop lasts 4 or 8 beats. Off the beat, set its phase once
+  after the call (`r` is what `playVRMADefault` returned): `r.action.time = ((t - barStart) % r.clip.duration + r.clip.duration) % r.clip.duration`.
+  For another tempo, set `r.action.timeScale = bpm / 92.9`.
+- **Timing `turn_it_down`.** The hand reaches the top at beat 1.15 and presses
+  from 1.45 to 3.05, so start it about a beat before the words.
+- **The fence.** `fence_hands` puts the hands on a plane 0.372 m in front of her
+  (film metres, the VRM at scale 0.87, facing +Z). Build the chain link there,
+  covering at least x ±0.45 m and y 0.5–1.6 m, and move it with her root.
+- **Facing.** `ask_me` faces +Z: turn her root toward the camera rather than
+  tilting the camera.
+- **Your own nods.** A conductor's beat nod on the head or chest doubles
+  `dark_groove`'s nods and breaks `ask_me` and `look_up`. Turn it off for them.
+- **Stance.** The engine's `idle`, `talk` and `dance` stand differently, so
+  crossfading to or from them slides the feet a little. `still_breathe` is the
+  matching neutral.
+
+The clips play on any claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`);
+their flower clearances were tuned on the TuTa's body.
+
 ### Emotes + sitting on a stationary character
 
 Expressive clips are for a VRM that is **not** being moved by a
@@ -2077,17 +2233,16 @@ Library (31 effects) — the families:
 - **Distort**: `melt`, `wavy`, `kaleidoscope`
 - **Blur/focus**: `focus_blur` (DoF), `radial_blur`, `box_blur`, `hash_blur`
 
-### Era looks — `era_looks.js`
+### Era looks — `effects_tsl/era_looks.js`
 
 Graphic-arts looks from the history of computing and print. Every look is a
 weight on one post pass, so looks crossfade and stack. They were made for
 the DAISY music video, where each era's voice gets its era's picture. The
-pass is not one of the injected effects above; a scene imports the module,
-which registers `era_looks` with the same registry:
+pass is injected and registered like the effects above (its glyph atlas and
+blur pyramid are built once at load); a scene asks for `era_looks`:
 
 ```js
-const { registerEraLooks, ERA_LOOKS, applyLook } = await import(new URL('era_looks.js', EIDOVERSE_DIR).href);
-await registerEraLooks();   // once, in setup(): registers 'era_looks', draws the line-printer glyph atlas
+const { ERA_LOOKS, applyLook } = EraLooksFX;   // the presets + the crossfade, on the injected effect
 globalThis._fx = CustomEffectsDeno.applyTo({ scene, camera, effects: 'era_looks' });
 // renderFrame(t): crossfade two presets (s = 0..1), update, then render
 applyLook(_fx.uniforms, ERA_LOOKS.bell1961, ERA_LOOKS.mac1984, s);
@@ -2152,6 +2307,117 @@ as authored; a few warm tones sit just outside ACES's range, so newsprint
 prints a hair pinker. Halftone dots and watercolour paper stay fixed to the
 screen like a real page, so motion slides under them. `storybook` draws its
 lines alongside a VRM's MToon outline (on the claudesona the two coincide).
+
+### Aeropittura — `effects_tsl/aeropittura.js`
+
+The frame repainted as a Futurist painting of a dark cyberpunk night, made for
+the UNKNOWN FORCE music video (2026-10): Crali's aeropittura dives, Balla's
+street lights and sun cones, Boccioni's divisionist strokes, Carrà's dark
+grounds. Like the era looks it is one pass with a weight per ingredient, plus a
+master `force`, injected and registered like the others:
+
+```js
+const A = AeropitturaFX;   // LOOKS, PLANES, applyLook, setPlanes, RAMP
+globalThis._fx = CustomEffectsDeno.applyTo({ scene, camera, effects: 'aeropittura',
+    opts: { aeropittura: { layer: 'under' } } });   // under the HUD: captions stay crisp
+const U = _fx.uniforms;
+// renderFrame(t):
+A.applyLook(U, A.LOOKS.argue, 1);               // or applyLook(U, from, force, to, s): a crossfade
+A.setPlanes(U, A.PLANES.balla_sun);             // the plane family; switch it on cuts
+U.focal.value.set(fx, fy);                      // the idol the cones radiate from (uv, y down)
+U.spare.value.set(hx, hy, r);                   // a face kept readable (uv, y down; r in frame heights)
+await _fx.update(t);
+await _r.renderAsync(_s, _c);
+// on a camera cut: U.cut()                     // the time echoes restart from the new shot
+```
+
+**The looks.** `LOOKS` holds `off`, `hush` (the quiet floor: still a
+painting, just a calm one), `argue` and `storm`. The film used the look as the
+argument's volume: `argue` in the camps' rooms, `storm` in the choruses, `hush`
+at the end. It never set `off`, because a clean image would claim a pure
+outside that the song denies.
+
+**The ingredients** (0..1, each multiplied by `force`):
+
+- `echo`: simultaneity. R, G and B show different instants, about 50 ms apart.
+  Still things are untouched.
+- `multi`: Balla's repetitions, up to four older copies of anything that moves.
+- `strokes`: the divisionist stroke layers, broad over flats and fine at
+  edges. Each stroke is one colour from the scene, pushed warmer or cooler,
+  with a few toward the complement.
+- `under`: the anisotropic-Kuwahara underpainting the strokes sit on.
+- `halo`: Balla's *Street Light*, V-strokes of a light's colour and its
+  complement round every real light. Only display values above about 0.8 make
+  them, so a lit face does not grow flames.
+- `planes`: the plane family's slips, shadow planes, neon glazes and painted
+  plane edges.
+- `lines`: lines of force, drags along the contours of moving things and
+  sparse speed lines toward the focal point.
+- `palette`: the dark-cyberpunk gradient map (`RAMP`: wet black, petrol teal,
+  bruised violet, neon magenta, sodium, cold white). Saturated light keeps its
+  own hue.
+- `canvas`: canvas weave, a VHS scanline and grain.
+- `crisp`: hands fine detail back sharp (lettering, eyes, the mouth line).
+
+**The planes.** `PLANES` has six families:
+
+- `balla_sun`: rays and rings from the focal point (Balla's *Mercury Passing
+  Before the Sun*).
+- `revolt`: Russolo's chevrons.
+- `race_sun`: rays plus chevrons along `chevDir`.
+- `iridescent`: Balla's triangle lattice.
+- `dive`: rays and long diagonals.
+- `quiet`: a few diagonals.
+
+A family's plane ids switch at weight 0.5, so change families on cuts.
+
+**The other uniforms.**
+
+- `focal`: where the cones and speed lines start. Point it at the shot's idol:
+  the altar, the gold door, the floodlight, the singer.
+- `spin` turns the rays and the diagonals (radians).
+- `swirl` (radians at the centre) and `swirlR` (frame heights) make Crali's
+  vortex round the focal point, for a dive.
+- `brushAngle` is the stroke direction where the picture has no contours. The
+  default, 1.05 rad, is a Futurist diagonal.
+- `chevDir` aims the chevrons.
+
+**Reading shots.** In-scene text (a whiteboard, a plaque, a post) disappears
+under full brushwork. When the camera lands on words, ease the brush for the
+length of the shot and keep the planes, palette and canvas. The film eased in
+over 0.6 s and out over the last 0.45 s, toward these values:
+
+```js
+const READ = { strokes: 0.28, under: 0.3, halo: 0.15, lines: 0, multi: 0, crisp: 1 };
+for (const [k, v] of Object.entries(READ)) U[k].value += (v - U[k].value) * k01;   // k01: 0 → 1 → 0
+```
+
+Overlay text (captions, `parole.js`, a chyron) is composited after this pass,
+so it is never painted.
+
+**The NaN hazard.** A non-finite `focal`, such as a point projected from
+behind the camera or a NaN handed back by a set, blacks out the whole frame:
+each plane's slip is `hash(id) × weight`, and 0 × NaN is NaN. Check
+`Number.isFinite` before writing `focal` and `spare`. The pass also clamps its
+HDR input, because a single Inf or NaN pixel would otherwise spread through the
+halos' blur pyramid. Sets with exp() in their shaders can produce one at
+grazing angles (see the [city's notes](eidoverse/sets/unknown_force/CITY_HOLE.md#things-that-bit)).
+
+**Colour.** The pass paints in display space through the renderer's ACES and
+its exact inverse, so the ramp lands as authored. Under `argue`, near-white
+neutrals fall between the ramp's orange and white stops, so a white set paints
+peach. The film pulled `palette` down to 0.22 for its white showroom.
+
+**Art direction from Skye.** "More painterly like futurist paintings but also
+more dark cyberpunk rather than outrun": wet black streets, rain, fog, petrol
+teal and sodium, with neon magenta and cyan as accents, not the room. No
+outrun grid, no slit sun. "Vary the strokes so words in the scene stay
+readable; keep the radial planes": that became the reading shots above.
+
+**Cost.** About 6–8 ms per frame at 1920 × 1080 at `storm` on an RTX 5090
+Laptop GPU. The halo's blur pyramid skips its passes when `halo × force` is
+0. The [UNKNOWN FORCE sets](eidoverse/sets/unknown_force/README.md) give
+their per-shot totals with the pass on.
 
 ### Procedural toolkits
 
@@ -3241,6 +3507,149 @@ Production gotchas:
   polygonOffsetFactor = -1`) so the content doesn't z-fight the bezel
   geometry of the TV / monitor model.
 
+### Parole in libertà — `parole.js`
+
+Lyric captions as Marinetti's words-in-freedom, made for the UNKNOWN FORCE
+music video (2026-10). Every sung word is thrown in on its own time and lands
+in a seeded, deterministic Futurist layout. Words sit on torn paper slips in
+mixed Didone, slab and grotesk, with letterpress grain and a misregistered
+plate, and thin neon tubes and LED slips accent them. The module also lays out
+documentary quotes as collage blocks. It draws into an overlay layer, so a
+post pass under the HUD never paints it.
+
+```js
+const P = await import(new URL('parole.js', EIDOVERSE_DIR).href);
+const hud = makeOverlayLayer({ fov: camera.fov });
+const parole = await P.makeParole(THREE, { overlay: hud, timing: { lines } });   // registers its fonts
+parole.addLine({ text: 'UNKNOWN FORCE', start: 26, end: 33.5, template: 'rows', sizeScale: 1.6 });   // a title
+// renderFrame(t), after positioning the camera:
+parole.setSpare({ x, y, r });   // her face where THIS shot puts it (frame heights, centre origin, y up)
+parole.setHush(0);              // 0 = the argument, 1 = turned down
+parole.update(t);               // deterministic in t: any frame, any order
+```
+
+`timing` is `[{ text, start, end, words: [{ w, s, e }] }]` or `{ lines }` in
+film seconds. `align_lyrics.py`'s `{ word, start, end }` and `{ t0, t1 }`
+spellings work too. A line may carry `section` and `echo: true`. A line leaves
+0.85–1.6 s after its last word, always before the next line arrives.
+
+**How a line is drawn.** Words fall into four levels: connectives, ordinary
+words, strong words, and HUGE words. The HUGE words have their own treatment:
+CAPITAL LETTERS as a torn-out post card, SUPREME INTELLIGENCE as a gold plaque,
+UNKNOWN FORCE on Depero's red wedge, CLANKER sprayed through a stencil. Each
+camp's words carry its colour and typeface: red for the safety camp, gold for
+the state, chrome-green for the money camp, warning plates for "only an
+engine", magenta spray for the news. The singer's own words are paper-white
+under a neon tube. The templates are `rows` (a tilted, staircased baseline),
+`stair`, `band` (slips on a trajectory) and `calm`. All of them keep reading
+order. Section onomatopoeia and signs fill only free space.
+
+**The face.** `spare` keeps the singer's face clear: line blocks anchor where
+they cover it least, and the decor and the CLANKER aside avoid it. A line takes
+its layout when it is first built, so call `setSpare` every frame with the
+face's projected position. Each new line then avoids the face where the current
+shot puts it. The film computed the face from the head bone:
+
+```js
+const h = new THREE.Vector3(); vrm.humanoid.getNormalizedBoneNode('head').getWorldPosition(h); h.y += 0.1;
+const e = h.clone().add(new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(0.24));
+const a = h.clone().project(camera), b = e.clone().project(camera), asp = WIDTH / HEIGHT;
+const inView = vrm.scene.visible && Math.abs(a.x) < 1.1 && Math.abs(a.y) < 1.1 && a.z < 1;
+const r = Math.hypot((b.x - a.x) * asp / 2, (b.y - a.y) / 2) * 1.15;
+parole.setSpare(inView && Number.isFinite(r) ? { x: a.x * asp / 2, y: a.y / 2, r: Math.min(0.35, Math.max(0.06, r)) } : { r: 0 });
+```
+
+**Pre-heard captions.** `parole.preheard(lineIndex, alternatives, opts)` shows
+each camp's answer for the singer before she sings it, then strikes it through
+as she does. An alternative is a string or `{ text, camp }`, where camp is
+`safety`, `state`, `money`, `microsoft` or `news`; use up to four words each.
+
+- `layout: 'rim'` puts them in the four corners, pointing in. `'brace'` stacks
+  them under a `}`.
+- The default `mode: 'roll'` strikes one guess every `stagger` (0.35 s) from
+  the line's first word.
+  - Each guess arrives `fly` (0.14 s) plus `readable` (1.05 s) before its
+    strike, so it can be read for at least a second.
+  - At most four are on screen at once.
+  - A slow line wants `stagger` or `strikeAt`, so the last strike lands on the
+    big word.
+- `mode: 'together'` strikes them all at once, on the first HUGE word or on
+  `strikeAt`.
+
+By default the first "I'm the unknown force" of a chorus gets
+`P.PREHEARD_DEFAULT`. Pass `preheardDefault: false` to turn that off.
+
+**Quotes.** `parole.quote(text, { t0, t1, attribution, year, style, accent, emphasis, width, x, y, alignWith })`
+shows the text exactly as given. It is never re-worded or re-cased; emphasis is
+size and weight only. A block flies in from depth, settles to be read, and
+flies past the camera at `t1`. `style` is `'paper'` (a cream slip, black and
+red ink) or `'plate'` (a dark plate, chrome).
+
+With `alignWith: <an earlier quote's handle>`, the two quotes become one
+interlinear layout:
+
+- the words are set in columns from an LCS alignment;
+- the earlier quote's paper strips have the later one's dark plates slotted
+  under them;
+- `=` stands under every shared word and `↓` under every changed one, and the
+  changed words carry each side's accent;
+- the years stand at the left with the gap between them (`+111`).
+
+The film used it for Marinetti's 1912 line and Andreessen's 2023 paraphrase.
+Both stay up until the later `t1`.
+
+**Calm and hush.** A line with `calm: true` (or `template: 'calm'`, often with
+`decor: false, wedge: false`) is set small, lowercase and level in Space Mono,
+centred low, rising word by word. `setHush(x)` turns the whole layout down in
+two phases, and any value it holds is a clean layout:
+
+- From 0 to 0.75 each block shrinks, levels and settles low as one rigid
+  piece. Signs, bands, the wedge and the asides are gone by 0.5; the tubes
+  stop flickering.
+- From 0.75 to 1 the words re-set into calm rows.
+
+**Styling.** `styleOverrides` is
+`{ lines: { <index>: {...} }, byText: { '<line, lowercased>': {...} }, words: { <word>: {...} } }`.
+
+- A line can set `template`, `seed`, `anchor: [x, y]`, `theta` (degrees),
+  `sizeScale`, `spare`, `hold`, `wedge`, `decor` and `calm`.
+- A word can set `level` (0–3), `role` (a key of `P.FONTS`), `upper`,
+  `accent: { color, mode }` and `ink`.
+- The inks:
+  - print: `print`, `printRed`, `printInv`, `printBlack`, `printBlackRed`,
+    `goldPrint`, `safetyPrint`, `bare`;
+  - dark slips: `led:#hex`, `stencilSlip`;
+  - special: `post`, `warning`, `spray`, `soft`;
+  - quotes: `chrome`, `chromeW`, `neon:#hex`;
+  - reserved for the camps: `chromeG`, `gold`.
+
+The lexicon is written for that song: the HUGE words, the camps' words and
+`SECTIONS`. For another song, give every line its `section` and steer the rest
+with overrides.
+
+**Fonts.** `registerFonts()` registers 13 faces from `eidoverse/assets/fonts/`
+under `UF …` names, and `makeParole` calls it. Nine were added with this module
+(Anton, Archivo Black, Alfa Slab One, Old Standard TT, Space Mono, Bungee); each
+family's `OFL-*.txt` licence is beside it. The other four were already bundled.
+
+**Compositing and cost.** The engine mixes the overlay into the scene before
+tone mapping, so solid ink passes through the inverse of the renderer's ACES
+and lands on screen as drawn. The material writes straight colour.
+
+- Each line or quote group is one mipmapped canvas atlas drawn by one
+  `InstancedMesh`. Per frame only the instance matrices and four floats per
+  sprite change.
+- `update` takes about 0.1 ms.
+- Building a group costs 25–180 ms on the frame it is first needed (a chorus
+  entry with five guesses is the heaviest). `parole.prewarm(from, to)` moves
+  that into setup.
+- `P.build(THREE, opts)` wraps the API in the set/prop module shape
+  (`update(t, { hush })`).
+
+**Limits.** Two consecutive wide lines can overlap for about 0.3 s while the
+old one is thrown off. The layout reads the face once per line, so a cut in
+the middle of a line keeps the old shot's clearance.
+
 ### Canvas screen scenes (computing-history graphics)
 
 Fifteen animated canvas-2D scenes in the graphic arts of computing history,
@@ -3539,6 +3948,37 @@ the canonical path (same family as `makeScreen` for drawn content).
   burning from a mesh, with its own compositor.
 - [docs/webxr.md](docs/webxr.md) — a headset (WebXR) page of a piece, when the brief asks for one:
   the `eidoverse/xr/` kit, stills from the container, and the serving steps left to the operator.
+
+### The shared library — library code names IDs, never commits them
+
+Third-party CC0 sets (AmbientCG, Poly Haven, TextureCan) are fetched, never
+committed. Code that ships in the repository (sets, props, outfits) names
+the exact IDs it reads, and the shared library fetches each one once into
+`eidoverse/assets/cache/` (git-ignored):
+
+```bash
+python fetch_texture.py Concrete031 1k --cache          # -> eidoverse/assets/cache/textures/Concrete031_1k/
+python fetch_model.py metal_trash_can --cache --res 2k  # -> eidoverse/assets/cache/models/metal_trash_can_2k/
+```
+
+An ID already in the library is not fetched again. Each folder holds the
+maps (Poly Haven's too, downloaded rather than linked), `tex_urls.json` and
+a `license.json` (models: the usual `.license.json` sidecar). In the engine:
+
+```js
+const { files } = await fetchPBR('Concrete031', { res: '1k' });   // { diff, normal, rough, ao, metal, displacement, … } -> paths
+const t = await loadPBR('Concrete031', { res: '1k', maps: ['diff', 'normal', 'rough'] });
+const mat = new THREE.MeshStandardNodeMaterial({ map: t.map, normalMap: t.normalMap, roughnessMap: t.roughnessMap });
+const gltfPath = await fetchModelFile('metal_trash_can', { res: '2k' });   // read it like any local model
+```
+
+Each runs the fetcher on first use, so a fresh clone renders without a setup
+step. Offline, or with `EIDO_NO_FETCH=1`, a missing ID throws with the
+one-line fetch command. Name the maps a material reads (`maps`, or the
+`files` you pick): a set grows extra maps (AO, displacement) that would
+change a look tuned without them. Models you build yourself are not
+third-party: they go in the model library, `eidoverse/assets/models/`, as
+`<set>_<name>.glb`, where `fetch_model.py --list-local` finds them.
 
 ## Story / production arc
 

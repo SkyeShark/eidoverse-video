@@ -70,7 +70,7 @@ globalThis.setup = async function () {
             const [base, mod] = o.split(':');
             if (mod === 'nofold' && WARDROBE[base]) WARDROBE[o] = { ...WARDROBE[base], fold: undefined };
         }
-        wardrobe = makeWardrobe(THREE, vrm);
+        wardrobe = await makeWardrobe(THREE, vrm);
         console.log('[turntable] wardrobe layers: ' + Object.keys(wardrobe.layers).join(', '));
     }
     globalThis._r = renderer; globalThis._s = scene; globalThis._c = camera;   // the engine's per-frame VRM step keys on these

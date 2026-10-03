@@ -1,0 +1,76 @@
+{
+  "_doc": "Balla's modificanti for UNKNOWN FORCE, sized to read in a medium shot. Outlines are badge millimetres (+x right, +y up, seen from outside); 'pieces' are extruded separately (one object). Placement: a ray (Blender world, metres, T-pose) onto the tuta; 'up' = which way the badge's +y points (toward the shoulder on a hanging arm); 'rot' turns the badge in its plane (deg, CCW seen from outside). uv_extent = the square of badge mm the 1024 px face texture covers. paint_badges.py paints the textures and the ghost SDF atlas from this file; build_tuta.py builds the geometry.",
+  "uv_extent": 200,
+  "badges": {
+    "mod_red": {
+      "camp": "the safety camp (the quiet room)",
+      "bone": "spine",
+      "ray_origin": [0.075, -0.6, 1.043],
+      "ray_dir": [0, 1, 0],
+      "up": [0, 0, 1],
+      "rot": 6,
+      "thickness": 4.2,
+      "stand": 0.0015,
+      "pieces": [[[78, 24], [80, -22], [-82, -2]]],
+      "round": 3.0,
+      "colour": "#d0141f",
+      "glow": "#ff2a36"
+    },
+    "mod_gold": {
+      "camp": "the state",
+      "bone": "upper_arm.R",
+      "ray_origin": [-0.29, -0.377, 1.657],
+      "ray_dir": [0, 0.766, -0.643],
+      "up": [1, 0, 0],
+      "rot": 0,
+      "thickness": 4.4,
+      "stand": 0.0015,
+      "pieces": ["star:0,33,27,11.5", [[-44, -6], [0, -38], [44, -6], [44, 9], [0, -23], [-44, 9]], [[-44, -45], [0, -77], [44, -45], [44, -30], [0, -62], [-44, -30]]],
+      "round": 1.6,
+      "colour": "#e2ad2c",
+      "glow": "#ffc640"
+    },
+    "mod_chrome": {
+      "camp": "the race (money, e/acc)",
+      "bone": "upper_arm.L",
+      "ray_origin": [0.33, -0.377, 1.657],
+      "ray_dir": [0, 0.766, -0.643],
+      "up": [-1, 0, 0],
+      "rot": 8,
+      "thickness": 4.4,
+      "stand": 0.0015,
+      "pieces": [[[-20, 85], [31.5, 85], [7, 20], [38, 20], [-29, -90], [-7, -7], [-38, -7]]],
+      "round": 2.2,
+      "colour": "#9fc98a",
+      "glow": "#5dff9a"
+    },
+    "mod_warning": {
+      "camp": "Microsoft's 'only an engine'",
+      "bone": "hips",
+      "ray_origin": [0.415, -0.465, 0.877],
+      "ray_dir": [-0.55, 0.83, 0],
+      "up": [0, 0, 1],
+      "rot": 0,
+      "thickness": 3.8,
+      "stand": 0.0015,
+      "pieces": [[[0, 52], [-58, -48], [58, -48]]],
+      "round": 8.0,
+      "colour": "#f1f0ea",
+      "glow": "#e8f6ff"
+    },
+    "mod_spray": {
+      "camp": "the evening news (clanker)",
+      "bone": "upper_arm.R",
+      "ray_origin": [-0.425, -0.377, 1.657],
+      "ray_dir": [0, 0.766, -0.643],
+      "up": [1, 0, 0],
+      "rot": 0,
+      "thickness": 2.6,
+      "stand": 0.0012,
+      "pieces": [[[-33, 62], [-1, 63.5], [33, 62.5], [33.5, 20], [32.5, -21], [33, -62], [0, -63], [-33, -62.5], [-33.5, -20], [-32.5, 21]]],
+      "round": 6.0,
+      "colour": "#2b2b30",
+      "glow": "#ff4fd8"
+    }
+  }
+}

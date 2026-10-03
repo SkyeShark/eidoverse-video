@@ -14,8 +14,9 @@
 //
 // build(ctx) -> { group, mark, markAt(u), camera(u, st), update(t, st), dispose }
 //   ctx = { THREE, EIDOVERSE_DIR };  u = seconds since the BRIDGE began (bar 18 = 33.75 s).
-// Hero assets are Blender-built, layered and baked (pack blender/*.py -> glb/*.glb); PBR sets are AmbientCG
-// (CC0) in the pack's tex/. Pack: eidoverse/assets/sets/corner/ (README.md, SOURCES.md). The set is enclosed: the corner is a closed room
+// Hero assets are Blender-built, layered and baked (corner_src/blender/*.py) into the model library as
+// eidoverse/assets/models/corner_*.glb; PBR sets are AmbientCG (CC0) from the shared texture library (fetchPBR).
+// Pack: eidoverse/assets/sets/corner/ (README.md, SOURCES.md, the sign art). The set is enclosed: the corner is a closed room
 // with a matte painting outside its window; the camp sits inside its own night-sky dome. All lights are the
 // set's own (the conductor turns the sun off for enclosed sets); every material ignores the conductor's
 // daylight env bake (envNode = the set's own dim ambient), so the night stays night.
@@ -26,6 +27,7 @@ const B = (b) => b * BAR;
 // eidoverse/assets/sets/corner/ and the shared engine assets eidoverse/assets/ (fonts, particle sprites)
 const fsPath = (u) => { const p = decodeURIComponent(u.pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; };
 const DIR = fsPath(new URL('../assets/sets/corner/', import.meta.url));
+const MODELS = fsPath(new URL('../assets/models/', import.meta.url));
 const ENGINE_ASSETS = fsPath(new URL('../assets/', import.meta.url));
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const smooth = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
@@ -92,16 +94,16 @@ export async function build(ctx) {
         texCache.set(key, t);
         return t;
     }
+    // a CC0 AmbientCG set (2K) from the shared texture library (globalThis.fetchPBR: fetched once, on first use);
+    // the ground and the siding read their ambient occlusion, the plaster and the floor are lit without it
+    const WITH_AO = new Set(['Ground037', 'Ground106', 'PaintedWood009C']);
     async function acgMaps(id) {
-        const d = DIR + 'tex/' + id + '/';
-        let files = [];
-        try { files = [...Deno.readDirSync(d)].map((e) => e.name); } catch (e) { return {}; }
-        const f = (suf) => files.find((n) => n.toLowerCase().endsWith(suf));
+        const { files: F } = await globalThis.fetchPBR(id, { res: '2k' });
         const out = {};
-        if (f('_color.jpg')) out.map = await tex(d + f('_color.jpg'), { srgb: true });
-        if (f('_normalgl.jpg')) out.normalMap = await tex(d + f('_normalgl.jpg'));
-        if (f('_roughness.jpg')) out.roughnessMap = await tex(d + f('_roughness.jpg'));
-        if (f('_ambientocclusion.jpg')) out.aoMap = await tex(d + f('_ambientocclusion.jpg'));
+        if (F.diff) out.map = await tex(F.diff, { srgb: true });
+        if (F.normal) out.normalMap = await tex(F.normal);
+        if (F.rough) out.roughnessMap = await tex(F.rough);
+        if (WITH_AO.has(id) && F.ao) out.aoMap = await tex(F.ao);
         return out;
     }
     // a GLB material (MeshStandardMaterial from the loader) -> MeshStandardNodeMaterial with the same maps
@@ -122,7 +124,7 @@ export async function build(ctx) {
     const glbCache = new Map();
     async function glb(name) {
         if (glbCache.has(name)) return glbCache.get(name);
-        const b = readBytes(DIR + 'glb/' + name);
+        const b = readBytes(MODELS + (name.startsWith('corner_') ? name : 'corner_' + name));   // the model library
         if (!b) { console.warn(`[corner] ${name} not built yet — skipped`); glbCache.set(name, null); return null; }
         const loader = new globalThis.GLTFLoader();
         const ab = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
@@ -397,7 +399,7 @@ export async function build(ctx) {
         const [nbC, nbG] = cv(1024, 680);
         room.nb = { c: nbC, g: nbG, tex: canvasTex(nbC, true), last: -2 };
         room.paperImg = null;
-        try { room.paperImg = await globalThis.loadCanvasImage(readBytes(DIR + 'tex/Paper001/Paper001_2K-JPG_Color.jpg')); } catch (e) { }
+        try { room.paperImg = await globalThis.loadCanvasImage(readBytes((await globalThis.fetchPBR('Paper001', { res: '2k' })).files.diff)); } catch (e) { }
         room.nbPages = room.notebook ? byName(room.notebook, 'NotebookPages') : null;
         if (room.nbPages) {
             const pm = envFix(new T.MeshStandardNodeMaterial({ roughness: 0.82 }));

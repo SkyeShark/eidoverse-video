@@ -1,0 +1,12 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "duration": 329.0,
+  "script": "eidoverse/examples/unknown_force/scene.js",
+  "outputVideo": "work/unknown_force/out/unknown_force_1080p60.mp4",
+  "assets": {
+    "claude": "eidoverse/assets/vrms/claude_suit_wardrobe.vrm",
+    "timeline": "work/unknown_force/out/uf_timeline.json"
+  }
+}

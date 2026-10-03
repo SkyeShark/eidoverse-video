@@ -8,9 +8,10 @@
 //   Every material fogs itself (distance x height, brighter toward the sun) through outputNode, so
 //   the vignette is self-contained: no scene.fog, no post pass required.
 
-// asset root: the funeral pack eidoverse/assets/sets/funeral/, resolved from this module's own URL
+// the layout is in the funeral pack (eidoverse/assets/sets/funeral/); the model in the model library (funeral_bridge.glb)
 const fsPath = (u) => { const p = decodeURIComponent(u.pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; };
-const PACK = fsPath(new URL('../../assets/sets/funeral/', import.meta.url));
+const PACK = fsPath(new URL('../../assets/sets/funeral/', import.meta.url));   // the bridge layout
+const MODELS = fsPath(new URL('../../assets/models/', import.meta.url));
 
 export async function buildBridge(env) {
     const { THREE: T, glb, surface, SETS, own, noMRT, glowSprites, iattr, U, BRIDGE_AT, lightsGroup } = env;
@@ -89,7 +90,7 @@ export async function buildBridge(env) {
     lampGlass.colorNode = vec3(1.0, 0.62, 0.25).mul(2.8);
     lampGlass.outputNode = fogOut(0.6);
 
-    const g = await glb(A + 'bridge.glb');
+    const g = await glb(MODELS + 'funeral_bridge.glb');
     g.scene.traverse((o) => {
         if (!o.isMesh) return;
         const role = (o.material?.name || '').replace(/\.\d+$/, '');

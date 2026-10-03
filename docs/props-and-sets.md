@@ -1,8 +1,8 @@
-# Props and sets from the DAISY film
+# Props and sets from the DAISY and UNKNOWN FORCE films
 
 [Main instructions](../AGENTS.md)
 
-This library holds finished props and sets from the DAISY music video.
+This library holds finished props and sets from the DAISY and UNKNOWN FORCE music videos.
 Each piece has a module that builds it, animates it on the film clock, and
 reads its own files. They are usable as they are in a new piece, and as
 worked examples of hard-surface props, baked looks, GPU-driven moving parts
@@ -12,13 +12,20 @@ and whole enclosed sets.
 | --- | --- | --- |
 | Eight historical voice machines, 1939–2001 | [`eidoverse/props/voice_machines/`](../eidoverse/props/voice_machines/index.js) | [`models/voice_machines/`](../eidoverse/assets/models/voice_machines/README.md) |
 | An 1896-pattern tandem bicycle, its rider rig and a teapot stoker | [`eidoverse/props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
-| The corner and the march (a room and a night camp) | [`eidoverse/sets/corner.js`](../eidoverse/sets/corner.js) | [`sets/corner/`](../eidoverse/assets/sets/corner/README.md) |
-| The funeral (a bridge in fog and a warehouse vigil) | [`eidoverse/sets/funeral.js`](../eidoverse/sets/funeral.js) + [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md) |
-| The ocean of faces (a headland at night) | [`eidoverse/sets/ocean.js`](../eidoverse/sets/ocean.js) + [`ocean/*.js`](../eidoverse/sets/ocean/) | [`sets/ocean/`](../eidoverse/assets/sets/ocean/README.md) |
+| The corner and the march (a room and a night camp) | [`eidoverse/sets/corner.js`](../eidoverse/sets/corner.js) | [`sets/corner/`](../eidoverse/assets/sets/corner/README.md) + `models/corner_*.glb` |
+| The funeral (a bridge in fog and a warehouse vigil) | [`eidoverse/sets/funeral.js`](../eidoverse/sets/funeral.js) + [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md) + `models/funeral_*.glb` |
+| The ocean of faces (a headland at night) | [`eidoverse/sets/ocean.js`](../eidoverse/sets/ocean.js) + [`ocean/*.js`](../eidoverse/sets/ocean/) | [`sets/ocean/`](../eidoverse/assets/sets/ocean/README.md) + `models/ocean_*.glb` |
+| UNKNOWN FORCE: a night megacity round a sunken well, a quiet room, a showroom, a gold corridor, a data centre, a race on an elevated highway and a canyon of paper | [`eidoverse/sets/unknown_force/`](../eidoverse/sets/unknown_force/README.md) (14 modules) | none of its own ([sources](../eidoverse/sets/unknown_force/SOURCES.md)) |
 
 Every asset folder has a README, and a SOURCES file recording licences and
 provenance. A sibling `<name>_src/` folder holds the Blender scripts that
-built it (see the [Blender guide](blender.md)).
+built it (see the [Blender guide](blender.md)). The models the films built
+are in the model library, `eidoverse/assets/models/`, as `<set>_<name>.glb`.
+The CC0 textures every set reads (AmbientCG, Poly Haven) and the bin's Poly
+Haven trash can are not committed: each set names the IDs it reads and the
+[shared library](../AGENTS.md)
+fetches them on first use (`fetchPBR`, `fetchModelFile`). The UNKNOWN FORCE
+sets build their geometry in code; see [their section](#the-unknown-force-sets).
 
 ## How they load
 
@@ -34,15 +41,17 @@ const corner = await (await import(new URL('sets/corner.js', EIDOVERSE_DIR).href
 ```
 
 They read files with Deno and rely on the renderer's injected globals:
-`GLTFLoader` and `loadImageTexture` everywhere, and `makeScreen` for the
-era-2 machine screens. The corner also uses `loadCanvasImage`, `createFlora`
+`GLTFLoader` and `loadImageTexture` everywhere, `fetchPBR` in the sets, and
+`makeScreen` for the era-2 machine screens. The corner also uses `loadCanvasImage`, `createFlora`
 and `makeParticles`, and `makeSeedTree` when the optional SeedThree backend is
 installed. The funeral's post chain needs `CustomEffectsDeno`. The ocean
 expects the engine sky from `eidoverse/sky_worlds.js`. Canvas art is drawn
 with `@napi-rs/canvas`.
 
-The props are not in `fetch_model.py`'s catalogue, which lists only the top
-level of `eidoverse/assets/models/`. The era-1 GLBs have no textures of their
+The sets' own models (`corner_*`, `funeral_*`, `ocean_*`) are in
+`fetch_model.py`'s catalogue of `eidoverse/assets/models/`; load them through
+their set modules, which place and light them. The props are not in it, as it
+lists only the top level of that folder. The era-1 GLBs have no textures of their
 own, so load every piece through its module.
 
 All pieces are in metres with +Y up. Every `update(t, …)` is deterministic in
@@ -293,6 +302,71 @@ ocean.perform(u, vrm, camera.position);                 // after placing her, be
   `skyMoonDir(THREE, hours)`.
 - `dispose()` does nothing.
 
+## The UNKNOWN FORCE sets
+
+The sets of the UNKNOWN FORCE music video (2026-10): every camp of the AI
+argument gets a room, painted for the futurist post pass
+[aeropittura](../AGENTS.md). They live in
+[`eidoverse/sets/unknown_force/`](../eidoverse/sets/unknown_force/README.md),
+whose index has the shared conventions; each set has its own document beside
+its module.
+
+| Set | Module | Doc |
+| --- | --- | --- |
+| A night megacity round a sunken well, and the intro's Crali dive into it | `city.js` | [CITY_HOLE](../eidoverse/sets/unknown_force/CITY_HOLE.md) |
+| The hole in the middle: the chorus stage, twelve screens aimed at her | `hole.js` (built by `city.js`, or alone) | [CITY_HOLE](../eidoverse/sets/unknown_force/CITY_HOLE.md#the-hole-holejs) |
+| The quiet room: pews, a whiteboard altar, a crate that ships on a conveyor | `quiet_room.js` | [INTERIORS](../eidoverse/sets/unknown_force/INTERIORS.md) |
+| The showroom: a turntable, an ENGINE drawing, a toaster with a warning | `showroom.js` | [INTERIORS](../eidoverse/sets/unknown_force/INTERIORS.md#the-showroom-showroomjs) |
+| The gold corridor: SUPREME INTELLIGENCE, a poll board, a cap that seats on her head | `corridor.js` | [CORRIDOR_NEWS](../eidoverse/sets/unknown_force/CORRIDOR_NEWS.md) |
+| The evening news: a data centre, a chain-link fence, pickets, a sprayed tag | `news.js` | [CORRIDOR_NEWS](../eidoverse/sets/unknown_force/CORRIDOR_NEWS.md#the-evening-news-newsjs-song-20132222-s) |
+| The race: two billboards, Marinetti's 1908 racer off a broken viaduct, a marching column's shadows | `race.js` | [RACE](../eidoverse/sets/unknown_force/RACE.md) |
+| The bin: a canyon of thrown-away paper and a giant rusted trash can she climbs out of | `bin.js` | [BIN](../eidoverse/sets/unknown_force/BIN.md) |
+
+```js
+// in setup(): THREE is passed in (DAISY's sets take { THREE, EIDOVERSE_DIR })
+const S = await import(new URL('sets/unknown_force/quiet_room.js', EIDOVERSE_DIR).href);
+const room = await S.build(THREE, {});        // → { group, parts, update(t, state), dispose(), cams, focal, … }
+scene.add(room.group);
+renderer.shadowMap.enabled = true;            // the interiors each cast from one light
+// per frame:
+room.update(t, { shipT, sale, hell });        // each set's state keys are in its doc
+const c = room.cams.altar;                    // set-local { pos, target, fov }
+```
+
+- **Their textures are fetched, not shipped.** Each set names the CC0
+  texture sets it reads (and the bin its Poly Haven trash can); the shared
+  library fetches each once, the first time a set builds, about 135 MB in all.
+  To fetch ahead of a render or offline work, build each set once, or run
+  `python fetch_texture.py <ID> <res> --cache` for the IDs in
+  [SOURCES](../eidoverse/sets/unknown_force/SOURCES.md). The race needs no
+  files.
+- **Their marks.** The singer's mark is the set-local origin facing +Z. In the
+  bin it is `parts.mark`, moved by `climb`. In the showroom it is
+  `parts.turntable.platter`. The city's streets are 12 m above the hole's floor.
+  The cameras are framed for the claudesona at scale 0.87; the hole's are framed
+  at scale 1.
+- **Their focal points.** Each set names the idol the post pass radiates from,
+  in one of four forms: a `Vector3`, an `Object3D`, a function of the camera
+  name, or a `focalPoint(v)` method. Resolve it to a world point and check it is
+  finite before writing it; the
+  [set index](../eidoverse/sets/unknown_force/README.md#the-focal-point) has the
+  resolver.
+- **Their lights live in the group.** Hide a set when it is off screen. The race
+  keeps its lights present at 0 with `setActive(false)`, because a light that
+  appears or vanishes recompiles every material. The city brings its own fog
+  node (`parts.applyAtmosphere(scene)`); the news and the race want
+  `FogExp2`. The race carries a planar mirror, so turn SSR off for it.
+- **Their cut plans.** The city has `diveCam(t)` for its 40 s intro dive, and
+  `hole.js` has eight named moving shots (`holeCam(name, t)`). The race's
+  `suggest(t)` returns `{ state, cam }` for its whole section on the song
+  clock: the car's run, the crash, the march and the heel, cut on the sung
+  words.
+
+They were staged at 92.90 BPM for UNKNOWN FORCE, and their docs give the sung
+times as cues. Every `update` key is free, so drive them on your own clock.
+Each doc gives its set's measured cost and method; with the post pass on at
+1080p, the GPU-timed sets ran 8–12 ms per frame.
+
 ## Costs
 
 Measured on the library modules with an RTX 5090 Laptop GPU at 1920 × 1080,
@@ -363,13 +437,18 @@ globalThis.renderFrame = async function (t) { globalThis._m.update(t, { power: 1
   the funeral logs 20–35 `ShaderModule with 'fragment' label is invalid`
   errors, and the corner logs 1–11. The funeral's builders traced theirs to a
   one-off shadow pre-render. The frames rendered correctly in every check, but
-  the cause is not fixed.
-- **The texture sets are shipped.** Each set loads the CC0 texture sets it
+  the cause is not fixed. The UNKNOWN FORCE city kit logs about ten such errors
+  when shadow maps are on without the film's interiors in the scene; a probe's
+  frames were pixel-identical with shadow maps on and off.
+- **The DAISY texture sets are shipped.** Each DAISY set loads the CC0 texture sets it
   needs from its own folder, so it works offline. 115 MB of the packs is
   third-party 2K maps: the corner's AmbientCG sets and the ocean's Poly Haven
   maps.
-- **Named for DAISY.** The sets' beats, captions and marks were written for
-  that film. The machines and the tandem are general props.
+- **The UNKNOWN FORCE textures are fetched.** Offline, before the first fetch,
+  the city and the hole build without their maps, the interiors skip them,
+  and the corridor, the news and the bin stop with a file-not-found error.
+- **Named for their films.** The sets' beats, captions and marks were written for
+  DAISY and UNKNOWN FORCE. The machines and the tandem are general props.
 - **Rebuilds.** The `_src` scripts reproduce the assets only in the working
   layout their READMEs describe, and they need CC0 source sets that are not
   shipped.

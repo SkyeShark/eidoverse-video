@@ -4,7 +4,7 @@
 #   python eidoverse/assets/grass/daisy_src/fetch_refs.py [key ...]
 import json, time, urllib.request, urllib.parse, os, sys
 
-UA = 'EidoverseRefBot/1.0 (https://github.com/anima-research/eidoverse-video; daisy species lookdev)'
+UA = 'EidoverseRefBot/1.0 (https://github.com/SkyeShark/eidoverse-video; daisy species lookdev)'
 ROOT = os.path.dirname(os.path.abspath(__file__))
 while ROOT != os.path.dirname(ROOT) and not os.path.exists(os.path.join(ROOT, 'eido.py')):
     ROOT = os.path.dirname(ROOT)

@@ -13,13 +13,14 @@ turns its porch light on at "on".
 
 | Path | Contents | Size |
 | --- | --- | --- |
-| `figures/robot.glb` | A generic 1950s science-fiction robot archetype, 2.2 m to the antenna tips. The layered look is baked to one 2K atlas (colour, ORM, normal); its lenses and lamps are emission-ready. | 13.5 MB |
-| `figures/human.glb` | A neutral, sculptural human figure (1.75 m, geometry only). The module turns it into points of light sampled from its surface, with a faint fresnel shell. | 1.7 MB |
-| `figures/pages.glb` | Two curled US Letter sheets, `page_2023` and `page_2026`, bent isometrically. Their paper maps are embedded; the words are drawn on them at runtime. | 7.5 MB |
-| `house/house.glb` | The beach cottage: shingle siding, a broken-pitch roof, a porch with a screen door, one window and a lantern. Baked per object into colour, normal and ORM maps. | 21.8 MB |
-| `tex/sand/`, `tex/grass/` | Poly Haven 2K maps for the land: `coast_sand_01` and `sand_03` (the beach and the wet edge) and `withered_grass` (the rise). Each has `_diff`, `_nor_gl` and `_arm`. | 36.0 MB |
+| `models/ocean_robot.glb` | A generic 1950s science-fiction robot archetype, 2.2 m to the antenna tips. The layered look is baked to one 2K atlas (colour, ORM, normal); its lenses and lamps are emission-ready. | 13.5 MB |
+| `models/ocean_human.glb` | A neutral, sculptural human figure (1.75 m, geometry only). The module turns it into points of light sampled from its surface, with a faint fresnel shell. | 1.7 MB |
+| `models/ocean_pages.glb` | Two curled US Letter sheets, `page_2023` and `page_2026`, bent isometrically. Their paper maps are embedded; the words are drawn on them at runtime. | 7.5 MB |
+| `models/ocean_house.glb` | The beach cottage: shingle siding, a broken-pitch roof, a porch with a screen door, one window and a lantern. Baked per object into colour, normal and ORM maps. | 21.8 MB |
+| texture library (fetched) | Poly Haven 2K maps for the land: `coast_sand_01` and `sand_03` (the beach and the wet edge) and `withered_grass` (the rise): diffuse, normal (GL) and ARM. | — |
 
-The folder is 80.5 MB. The sea of faces, the echoes, the dune grass and the
+The models are in the model library (`eidoverse/assets/models/ocean_*.glb`, 43 MB); the land's maps come from the
+[shared texture library](../../../../AGENTS.md), fetched on first use. This folder keeps the README and SOURCES. The sea of faces, the echoes, the dune grass and the
 daisies are generated in code. The faces are procedural line drawings, and
 the daisies come from `ocean/daisies.js`, the film's instanced daisy field,
 which is shipped with the set. The pages use the Special Elite and Exo 2

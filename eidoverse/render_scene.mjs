@@ -363,6 +363,8 @@ const HELPER_MODULES = [
     'eidoverse/effects_tsl/hash_blur.js',         // wraps three's hashBlur() — random-pattern blur
     'eidoverse/effects_tsl/godrays.js',           // wraps three's godrays() — light-shaft volumetric rays
     'eidoverse/effects_tsl/lensflare.js',         // wraps three's lensflare() — ghost-spot lens flares
+    'eidoverse/effects_tsl/era_looks.js',         // twenty looks from the history of computing on one pass (sepia, ascii, c64, halftone, watercolor…), crossfadable
+    'eidoverse/effects_tsl/aeropittura.js',       // a Futurist painting of a neon night: divisionist strokes, Kuwahara underpainting, Balla's halos, planes, simultaneity
     'eidoverse/effects_tsl/custom_effects_deno.js',  // unified registry; depends on the per-effect modules above
 ];
 
@@ -419,6 +421,9 @@ for (const fname of HELPER_MODULES) {
         if (e.stack) console.log(`  stack: ${String(e.stack).split('\n').slice(0, 5).join('\n  ')}`);
     }
 }
+// effects with an async setup at load (era_looks, aeropittura) push a promise here; wait for them so every
+// registered effect is ready before setup() can apply it
+if (globalThis._effectsReady) await Promise.all(globalThis._effectsReady);
 
 // VRMA defaults — exposed on globalThis.VRMA_DEFAULTS_B64 keyed by slot.
 // Slot names are the stable agent-facing API; on-disk filenames vary
@@ -464,6 +469,11 @@ const VRMA_SLOTS = [
     'hand_to_heart', 'hand_to_heart_hold', 'head_bow', 'head_bow_hold', 'look_up_sky', 'look_up_sky_hold',
     'phone_raise', 'phone_raise_hold', 'phone_raise_mirror', 'phone_raise_mirror_hold',
     'wave_goodbye', 'wave_goodbye_mirror', 'bow_thanks',
+    // Performance, UNKNOWN FORCE (92.90 BPM; darker and smaller: grounded, slow, minimal). Same stance as the clips
+    // above, so the two sets crossfade. Source + manifest: assets/animations/performance_uf_src/.
+    'still_breathe', 'dark_groove', 'sing_low', 'sing_low_mirror', 'turn_it_down', 'turn_it_down_hold',
+    'not_that', 'not_that_mirror', 'look_up', 'look_up_hold', 'salute_abort', 'fence_hands', 'fence_hands_hold',
+    'ask_me', 'ask_me_hold',
 ];
 const vrmaSlotPaths = {};
 for (const slot of VRMA_SLOTS) {
@@ -865,6 +875,86 @@ globalThis.loadImageTexture = async (bytes, opts = {}) => {
     _applyCpuMips(tex);
     tex.needsUpdate = true;
     return tex;
+};
+
+// The shared texture library: third-party CC0 PBR sets (AmbientCG, Poly Haven, TextureCan) are FETCHED, never
+// committed. fetch_texture.py --cache puts an exact ID into eidoverse/assets/cache/textures/<ID>_<res>/ (git-ignored)
+// once; these run it on first use, so library sets and scenes just name the IDs they read.
+//   const { dir, files } = await fetchPBR('Concrete031', { res: '1k' });   // files: { diff, normal, rough, ao, … } -> paths
+//   const t = await loadPBR('Concrete031', { res: '1k', maps: ['diff', 'normal', 'rough'] });
+//   new THREE.MeshStandardNodeMaterial({ map: t.map, normalMap: t.normalMap, roughnessMap: t.roughnessMap });
+// `maps` loads only what is named (a set that picks up an extra map, e.g. displacement, would change its look).
+// Offline, or with EIDO_NO_FETCH=1, a missing ID throws with the one-line fetch command.
+const _REPO_DIR = new URL('../', globalThis.EIDOVERSE_DIR);
+const _fsPath = (u) => { const p = decodeURIComponent(new URL(u).pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; };
+const _pbrCache = new Map();
+globalThis.fetchPBR = (id, { res = '1k' } = {}) => {
+    const key = `${id}_${String(res).toLowerCase()}`;
+    if (!_pbrCache.has(key)) _pbrCache.set(key, (async () => {
+        const dir = _fsPath(new URL(`eidoverse/assets/cache/textures/${id.replace(':', '_')}_${String(res).toLowerCase()}/`, _REPO_DIR));
+        const read = () => { try { return JSON.parse(Deno.readTextFileSync(dir + 'tex_urls.json')); } catch { return null; } };
+        let urls = read();
+        if (!urls) {
+            const cmd = `python fetch_texture.py ${id} ${res} --cache`;
+            if (Deno.env.get('EIDO_NO_FETCH') === '1') throw new Error(`fetchPBR: ${id} (${res}) is not in the library; fetch it with: ${cmd}`);
+            console.log(`[fetchPBR] ${id} (${res}): not in the library yet; fetching once (CC0) …`);
+            const script = _fsPath(new URL('fetch_texture.py', _REPO_DIR));
+            for (const py of [Deno.env.get('PYTHON'), 'python', 'python3', 'py'].filter(Boolean)) {
+                try {
+                    const r = await new Deno.Command(py, { args: [script, id, String(res), '--cache'], stdout: 'piped', stderr: 'piped' }).output();
+                    if (!r.success) console.warn(`[fetchPBR] ${id}: ${new TextDecoder().decode(r.stderr).trim().split('\n').pop()}`);
+                    break;                                   // it ran: do not retry with another interpreter
+                } catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
+            }
+            urls = read();
+            if (!urls) throw new Error(`fetchPBR: ${id} (${res}) could not be fetched (offline?); run: ${cmd}`);
+        }
+        // tex_urls.json holds the paths where it was fetched; the files sit beside it wherever the repo is now
+        const files = {};
+        for (const [k, v] of Object.entries(urls)) files[k] = dir + String(v).split(/[\\/]/).pop();
+        return { id, res, dir, files };
+    })());
+    return _pbrCache.get(key);
+};
+// the same for models: an exact Poly Haven ID -> eidoverse/assets/cache/models/<id>_<res>/<id>_embedded.gltf (fetch_model.py --cache)
+//   const path = await fetchModelFile('metal_trash_can', { res: '2k' });   // then read it like any local model
+const _modelCache = new Map();
+globalThis.fetchModelFile = (id, { res = '1k' } = {}) => {
+    const key = `${id}_${String(res).toLowerCase()}`;
+    if (!_modelCache.has(key)) _modelCache.set(key, (async () => {
+        const dir = _fsPath(new URL(`eidoverse/assets/cache/models/${key}/`, _REPO_DIR));
+        const find = () => { try { for (const e of Deno.readDirSync(dir)) if (e.name.endsWith('_embedded.gltf')) return dir + e.name; } catch { } return null; };
+        let file = find();
+        if (!file) {
+            const cmd = `python fetch_model.py ${id} --cache --res ${res}`;
+            if (Deno.env.get('EIDO_NO_FETCH') === '1') throw new Error(`fetchModelFile: ${id} (${res}) is not in the library; fetch it with: ${cmd}`);
+            console.log(`[fetchModelFile] ${id} (${res}): not in the library yet; fetching once (CC0) …`);
+            const script = _fsPath(new URL('fetch_model.py', _REPO_DIR));
+            for (const py of [Deno.env.get('PYTHON'), 'python', 'python3', 'py'].filter(Boolean)) {
+                try { await new Deno.Command(py, { args: [script, id, '--cache', '--res', String(res)], stdout: 'piped', stderr: 'piped' }).output(); break; }
+                catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
+            }
+            file = find();
+            if (!file) throw new Error(`fetchModelFile: ${id} (${res}) could not be fetched (offline?); run: ${cmd}`);
+        }
+        return file;
+    })());
+    return _modelCache.get(key);
+};
+const _PBR_SLOTS = { diff: ['map', true], normal: ['normalMap', false], rough: ['roughnessMap', false], ao: ['aoMap', false],
+    metal: ['metalnessMap', false], displacement: ['displacementMap', false], arm: ['armMap', false],
+    opacity: ['alphaMap', false], emissive: ['emissiveMap', true] };
+globalThis.loadPBR = async (id, { res = '1k', maps = ['diff', 'normal', 'rough'], repeat = null } = {}) => {
+    const { files } = await globalThis.fetchPBR(id, { res });
+    const out = { id, files };
+    for (const m of maps) {
+        if (!files[m]) continue;                         // that map doesn't exist for this set
+        const [slot, srgb] = _PBR_SLOTS[m] || [m, false];
+        const t = await globalThis.loadImageTexture(Deno.readFileSync(files[m]), { srgb });
+        if (repeat) t.repeat.set(...(Array.isArray(repeat) ? repeat : [repeat, repeat]));
+        out[slot] = t;
+    }
+    return out;
 };
 
 // Some GLBs use a "alpha-of-diffuse-as-emissive-mask" packing: the

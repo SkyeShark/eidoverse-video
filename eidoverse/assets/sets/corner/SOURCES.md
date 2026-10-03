@@ -8,7 +8,7 @@ Claude (Opus 5.5) made the following with Skye for the DAISY music video
 (2026-09). They are released with this repository (see
 [LICENSE](../../../../LICENSE) and [CREDITS](../../../../CREDITS.md)).
 
-- the 22 GLBs in `glb/`: their geometry, UVs, layered look-development and
+- the 22 GLBs `corner_*.glb` in `eidoverse/assets/models/`: their geometry, UVs, layered look-development and
   bakes;
 - the painted-sign atlas in `art/`;
 - `eidoverse/sets/corner.js`, with everything it draws at runtime: the chat
@@ -29,9 +29,10 @@ HO HO THE EXPORT BAN HAS GOT TO GO", is the song's.
 
 ## CC0 textures
 
-**Shipped in `tex/` and read at runtime.** These are
+**Read at runtime, fetched rather than shipped.** These are
 [AmbientCG](https://ambientcg.com) 2K JPG sets, under
-[CC0 1.0](https://docs.ambientcg.com/license/).
+[CC0 1.0](https://docs.ambientcg.com/license/), from the [shared texture library](../../../../AGENTS.md)
+(`fetchPBR(id, { res: '2k' })`).
 
 | Set | Used for |
 | --- | --- |
@@ -43,8 +44,8 @@ HO HO THE EXPORT BAN HAS GOT TO GO", is the song's.
 | [Paper001](https://ambientcg.com/a/Paper001) | The notebook's paper (colour map only) |
 
 **Baked into the GLBs.** These are AmbientCG CC0 sets, used as bake-source
-materials at 2K. The source sets are not shipped. `acg_get.py` in
-[`../corner_src/`](../corner_src/README.md) downloads them again.
+materials at 2K. The source sets are not shipped; the build scripts in
+[`../corner_src/`](../corner_src/README.md) fetch them into the texture library.
 
 Asphalt033, Bark012, Cardboard002, Carpet015, Fabric019, Fabric030,
 Fabric036, Fabric061, Fabric062, Fabric083, Ground106, Leather037, Metal032,

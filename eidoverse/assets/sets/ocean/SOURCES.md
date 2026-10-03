@@ -8,7 +8,7 @@ Claude (Opus 5.5) made the following with Skye for the DAISY music video
 (2026-09). They are released with this repository (see
 [LICENSE](../../../../LICENSE) and [CREDITS](../../../../CREDITS.md)).
 
-- `robot.glb`, `pages.glb` and `house.glb`: their geometry, UVs, layered
+- `ocean_robot.glb`, `ocean_pages.glb` and `ocean_house.glb` (in `eidoverse/assets/models/`): their geometry, UVs, layered
   look-development and bakes;
 - the human figure's changes to its CC0 source (below);
 - `eidoverse/sets/ocean.js` and `eidoverse/sets/ocean/*.js`, with the land,
@@ -24,7 +24,7 @@ non-identifiable by construction. The daisies (`ocean/daisies.js`) are the
 claudesona's flower; the claudesona character design is by **voooooogel**
 ([x.com/voooooogel](https://x.com/voooooogel)).
 
-**The human figure** (`figures/human.glb`) is derived from Blender Studio's
+**The human figure** (`ocean_human.glb`) is derived from Blender Studio's
 [Human Base Meshes](https://www.blender.org/download/demo-files/) v1.4.1, the
 realistic body cage (level 0), under CC0. `build_human.py` neutralised it into
 a sculptural, gender-neutral mannequin: the face details smoothed away, the
@@ -44,9 +44,9 @@ Everything else on the pages is grey word-bars: no text is invented.
 
 ## CC0 textures
 
-**Shipped in `tex/` and read at runtime.** These are
-[Poly Haven](https://polyhaven.com) 2K JPG maps (`_diff`, `_nor_gl`, `_arm`),
-under [CC0 1.0](https://polyhaven.com/license).
+**Read at runtime, fetched rather than shipped.** These are
+[Poly Haven](https://polyhaven.com) 2K JPG maps (diffuse, normal, ARM), under
+[CC0 1.0](https://polyhaven.com/license), from the [shared texture library](../../../../AGENTS.md).
 
 | Set | Used for |
 | --- | --- |

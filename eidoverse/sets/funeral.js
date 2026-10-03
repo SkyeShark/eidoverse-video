@@ -26,6 +26,7 @@ const BAR = 1.875;
 // eidoverse/assets/sets/funeral/ and the shared engine assets eidoverse/assets/ (the crow, the typewriter font)
 const fsPath = (u) => { const p = decodeURIComponent(u.pathname); return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p; };
 const PACK = fsPath(new URL('../assets/sets/funeral/', import.meta.url));
+const MODELS = fsPath(new URL('../assets/models/', import.meta.url));   // the films' own models live in the model library
 const ENGINE_ASSETS = fsPath(new URL('../assets/', import.meta.url));
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
 const smooth = (a, b, x) => { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
@@ -86,7 +87,7 @@ export async function build(ctx) {
     async function tex(file, srgb) {
         const k = file + '|' + srgb;
         if (!texCache.has(k)) {
-            const t = await globalThis.loadImageTexture(bytes(A + 'tex1k/' + file), { srgb });
+            const t = await globalThis.loadImageTexture(bytes(file), { srgb });
             t.wrapS = t.wrapT = T.RepeatWrapping;
             t.anisotropy = 8;
             if (srgb) t.colorSpace = T.SRGBColorSpace;
@@ -94,12 +95,17 @@ export async function build(ctx) {
         }
         return texCache.get(k);
     }
+    // CC0 AmbientCG sets from the shared texture library (globalThis.fetchPBR: fetched once, on first use), 1K except
+    // the four whose 1K is half-height (the 2K keeps a full-size square / 2:1 map); ao and metalness where the film read them
+    const RES2K = new Set(["Bricks097", "Concrete034", "CorrugatedSteel009", "Planks039"]);
+    const WITH_AO = new Set(["Bricks097", "Concrete033", "Concrete048", "CorrugatedSteel009", "PaintedMetal012", "Planks039"]);
+    const WITH_MET = new Set(["Metal042B", "Metal048B", "Metal049A"]);
     async function pbr(id) {
-        const f = (s) => `${id}_${s}.jpg`;
+        const { files: F } = await globalThis.fetchPBR(id, { res: RES2K.has(id) ? '2k' : '1k' });
         return {
-            col: await tex(f('Color'), true), nrm: await tex(f('NormalGL'), false), rgh: await tex(f('Roughness'), false),
-            ao: exists(A + 'tex1k/' + f('AmbientOcclusion')) ? await tex(f('AmbientOcclusion'), false) : null,
-            met: exists(A + 'tex1k/' + f('Metalness')) ? await tex(f('Metalness'), false) : null,
+            col: await tex(F.diff, true), nrm: await tex(F.normal, false), rgh: await tex(F.rough, false),
+            ao: WITH_AO.has(id) && F.ao ? await tex(F.ao, false) : null,
+            met: WITH_MET.has(id) && F.metal ? await tex(F.metal, false) : null,
         };
     }
 
@@ -225,7 +231,7 @@ export async function build(ctx) {
     const SETS = {};
     for (const id of ['Bricks097', 'Concrete048', 'Concrete034', 'Planks039', 'PaintedMetal012', 'Metal049A',
         'CorrugatedSteel009', 'Wood066', 'Metal048B', 'Metal042B', 'PaintedMetal004', 'Concrete033', 'Asphalt012']) {
-        if (exists(A + `tex1k/${id}_Color.jpg`)) SETS[id] = await pbr(id);
+        SETS[id] = await pbr(id);
     }
 
     // ═════════════════════════════════ THE WAREHOUSE ═════════════════════════════════
@@ -342,7 +348,7 @@ export async function build(ctx) {
         exitMat.envNode = envRoom;
     }
 
-    const whGltf = await glb(A + 'warehouse.glb');
+    const whGltf = await glb(MODELS + 'funeral_warehouse.glb');
     const shadowSkip = new Set(['glass']);
     whGltf.scene.traverse((o) => {
         if (!o.isMesh) return;
@@ -661,7 +667,7 @@ export async function build(ctx) {
         sucker: simple([0.42, 0.3, 0.3], 0.35, { mottle: 0.3 }),
         stage: M.stage, fabric: M.fabric, timber: M.timber, cord: M.cord,
     };
-    const propsGltf = await glb(A + 'props.glb');
+    const propsGltf = await glb(MODELS + 'funeral_props.glb');
     const candleTypes = {};
     const propRoots = [];
     propsGltf.scene.traverse((o) => {
@@ -815,7 +821,7 @@ export async function build(ctx) {
     // its phone) swings about the shoulder on the GPU — hanging → holding the phone up (one by one,
     // through the hum) → raised overhead at ERUPT; heads bow in grief and lift at the eruption.
     const rig = JSON.parse(Deno.readTextFileSync(A + 'crowd_rig.json'));
-    const crowdGltf = await glb(A + 'crowd.glb');
+    const crowdGltf = await glb(MODELS + 'funeral_crowd.glb');
     const variants = [];
     crowdGltf.scene.traverse((o) => { if (o.isMesh && /person_/.test(o.name)) variants.push(o); });
     variants.sort((a, b) => a.name.localeCompare(b.name));
@@ -1343,7 +1349,7 @@ export async function build(ctx) {
 
     // ═════════════════════════════════ THE BRIDGE IN FOG (loaded if built) ═════════════════════════════════
     let bridge = null;
-    if (exists(A + 'bridge.glb')) {
+    if (exists(MODELS + 'funeral_bridge.glb')) {
         const mod = await import(new URL('./funeral/bridge.js', import.meta.url).href);
         bridge = await mod.buildBridge({ THREE: T, glb, surface, SETS, own, noMRT, glowSprites, iattr, U, BRIDGE_AT, BRIDGE_MARK, lightsGroup: lights });
         group.add(bridge.group);

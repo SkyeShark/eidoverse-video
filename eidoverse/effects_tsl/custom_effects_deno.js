@@ -328,6 +328,18 @@
     } else {
         console.warn('[custom_effects_deno] retro_wireframe unavailable — RetroWireframeFX not loaded');
     }
+    // whole-pass looks with an async setup at load (glyph atlas, blur pyramid); render_scene awaits
+    // globalThis._effectsReady before setup(), so they are ready when a scene applies them
+    if (globalThis.EraLooksFX && typeof globalThis.EraLooksFX.applyTo === 'function') {
+        register('era_looks', globalThis.EraLooksFX.applyTo);
+    } else {
+        console.warn('[custom_effects_deno] era_looks unavailable — EraLooksFX not loaded');
+    }
+    if (globalThis.AeropitturaFX && typeof globalThis.AeropitturaFX.applyTo === 'function') {
+        register('aeropittura', globalThis.AeropitturaFX.applyTo);
+    } else {
+        console.warn('[custom_effects_deno] aeropittura unavailable — AeropitturaFX not loaded');
+    }
     globalThis.CustomEffectsDeno = { register, applyTo, listEffects, list: listEffects, registry };
     console.log(`[custom_effects_deno] registry ready — ${listEffects().length} effects (pick from the WHOLE list + vary your choice; don't grep-discover, head truncates it): ${listEffects().join(', ')}`);
 })();
