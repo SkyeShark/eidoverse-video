@@ -85,7 +85,7 @@ export const WARDROBE = {
         paint: { shirt: '#ead9bd' },
         // hat hair: the crown petals fold down the back of the head under a slightly larger, raised boater
         fold: { '12_L': [165, 0.55], '11_R': [165, 0.55], '1_L': [150, 0.65], '10_R': [150, 0.65] },
-        hat: { offset: [0, 0.018, -0.015], scale: 1.12 },
+        hat: { seat: 'auto', sink: 0.008, tilt: -4, scale: 1.15 },   // measured seat (+ auto folds for any petal it hits)
     },
     // UNKNOWN FORCE (2026-10): Thayaht's 1920 TuTa re-cut as black techwear, techwear boots (digi's shoes hidden), the
     // belt and straps. Its badges (the modificanti), face paint, sun disc and neon are on the wardrobe API: pin(),
@@ -211,13 +211,28 @@ function makeBaseWardrobe(THREE, vrm) {
     for (const [bone, j] of jointOf) restQ.set(bone, (j._initialLocalRotation || bone.quaternion).clone());
     const petalRoot = (key) => byName(vrm.scene, `petal ${key}_001`) || byName(vrm.scene, `petal ${key}_s0`);
     const chainOf = (root) => { const out = []; root.traverse((b) => { if (jointOf.has(b)) out.push(b); }); return out; };
-    const foldQ = (root, deg) => {                                    // rotate the petal toward the back of the head
+    // each petal's REST direction (root -> tip) in its parent's frame, recorded once at construction: a fold is always
+    // measured from rest (measuring from the current pose compounds folds: re-wearing an outfit, or a search over fold
+    // angles, would turn each fold from wherever the last one left the petal)
+    const restDirP = new Map();
+    const restDirOf = (root) => {
+        if (restDirP.has(root)) return restDirP.get(root);
         vrm.scene.updateWorldMatrix(true, true);
         const chain = chainOf(root), last = chain[chain.length - 1];
-        const tip = jointOf.get(last).child || last.children[0] || last;          // VRM1: the last node is only a tail
-        const p0 = root.getWorldPosition(new THREE.Vector3()), p1 = tip.getWorldPosition(new THREE.Vector3());
-        const back = new THREE.Vector3(0, 0, -1).applyQuaternion(vrm.scene.getWorldQuaternion(new THREE.Quaternion()));
-        const axis = p1.sub(p0).normalize().cross(back).normalize();
+        const tip = jointOf.get(last)?.child || last.children[0] || last;
+        const d = tip.getWorldPosition(new THREE.Vector3()).sub(root.getWorldPosition(new THREE.Vector3()))
+            .applyQuaternion(root.parent.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+        restDirP.set(root, d);
+        return d;
+    };
+    const foldQ = (root, deg) => {                                    // rotate the petal toward the back of the head
+        vrm.scene.updateWorldMatrix(true, true);
+        const chain = chainOf(root);
+        const tip = { name: 'rest' };
+        const HF = hfCache || (hfCache = headFrame());                 // the BACK of the flower head (combed-back hair)
+        const back = HF ? HF.nF.clone().negate() : new THREE.Vector3(0, 0, -1).applyQuaternion(vrm.scene.getWorldQuaternion(new THREE.Quaternion()));
+        const tipd = restDirOf(root).clone().applyQuaternion(root.parent.getWorldQuaternion(new THREE.Quaternion()));
+        const axis = tipd.clone().cross(back).normalize();
         const Rw = new THREE.Quaternion().setFromAxisAngle(axis, deg * Math.PI / 180);
         const Pq = root.parent.getWorldQuaternion(new THREE.Quaternion());
         const Rp = Pq.clone().invert().multiply(Rw).multiply(Pq);        // the same turn, in the parent's frame
@@ -238,7 +253,15 @@ function makeBaseWardrobe(THREE, vrm) {
                 root.scale.setScalar(sc);
             }
             root.updateMatrix(); root.updateWorldMatrix(false, true);
-            for (const b of chain) { b.updateMatrix(); b.updateWorldMatrix(false, true); jointOf.get(b).setInitState(); }
+            for (const b of chain) {
+                b.updateMatrix(); b.updateWorldMatrix(false, true);
+                const j = jointOf.get(b);
+                j.setInitState();
+                // a folded petal lies against the head on purpose: its colliders would push it straight back out (onto the
+                // brim), so a folded chain springs freely about its fold; unfolded, it gets its colliders back
+                if (j._origColliders === undefined) j._origColliders = j.colliderGroups;
+                j.colliderGroups = want.has(root) ? [] : j._origColliders;
+            }
         }
         folded.clear(); for (const b of want.keys()) folded.add(b);
         if (globalThis.WARDROBE_DEBUG) for (const [root, d] of want) {
@@ -249,12 +272,205 @@ function makeBaseWardrobe(THREE, vrm) {
     };
 
     // ---- hat placement: `hat: { offset: [x, y, z] (model metres, +z = the face's side), scale }`
-    const hatRest = layers.boater ? { p: layers.boater.position.clone(), s: layers.boater.scale.clone() } : null;
+    const hatRest = layers.boater ? { p: layers.boater.position.clone(), s: layers.boater.scale.clone(), q: layers.boater.quaternion.clone() } : null;
+    // AUTO seat (hat: { seat: 'auto', sink, tilt, cant, scale }): measured, not tuned — the hat's up = the normal of
+    // its brim plane (its thinnest principal axis), its brim's bottom centred on the face disc's top edge at the disc's
+    // mid-depth (the claudesona's head IS the thin face disc), then sink (m) onto it, tilt (deg, + = crown back), cant
+    // (deg, to the side). The rest pose seats the boater 5 cm to one side and 17 cm forward: never rely on it.
+    // The flower head's own frame, measured from the face disc (never world axes: a player turned on a stage would
+    // put "the middle of the head" in front of it): the disc's centre c, its normal nF (the thinnest principal axis,
+    // pointing out of the face), its in-plane up uF (the head bone's up, projected), and the disc's top edge along uF.
+    let hfCache = null;                // the head frame, measured once per wear (it skins every flower vertex)
+    const headFrame = () => {
+        vrm.scene.updateWorldMatrix(true, true);
+        let face = null;
+        vrm.scene.traverse((o) => { if (o.isMesh && !face && (Array.isArray(o.material) ? o.material : [o.material]).some((m) => m?.name === 'face')) face = o; });
+        if (!face) return null;
+        const fp = face.geometry.attributes.position, F = [];
+        for (let i = 0; i < fp.count; i++) F.push(new THREE.Vector3().fromBufferAttribute(fp, i).applyMatrix4(face.matrixWorld));
+        const c = new THREE.Vector3(); for (const p of F) c.add(p); c.multiplyScalar(1 / F.length);
+        const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+        for (const p of F) { const d = [p.x - c.x, p.y - c.y, p.z - c.z]; for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) C[r * 3 + k] += d[r] * d[k]; }
+        const m3 = new THREE.Matrix3().set(...C.map((x, i) => x + (i % 4 === 0 ? 1e-9 : 0))).invert();
+        // the face's front from GEOMETRY: the face disc sits in front of the head bone (a VRM 0.x scene is turned 180
+        // degrees on load, so the scene's +z is the model's back — never use it for "forward")
+        const headPos = (vrm.humanoid?.getNormalizedBoneNode('head') || vrm.scene).getWorldPosition(new THREE.Vector3());
+        const hint = c.clone().sub(headPos).normalize();
+        let nF = hint.clone();
+        for (let it = 0; it < 60; it++) nF = nF.applyMatrix3(m3).normalize();
+        if (nF.dot(hint) < 0) nF.negate();                                   // out of the face (the model's front)
+        const head = vrm.humanoid?.getNormalizedBoneNode('head');           // normalized: identity at rest = the model's axes
+        const up0 = new THREE.Vector3(0, 1, 0).applyQuaternion(head ? head.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion());
+        const uF = up0.sub(nF.clone().multiplyScalar(up0.dot(nF))).normalize();
+        let top = -Infinity; for (const p of F) { const t = p.clone().sub(c).dot(uF); if (t > top) top = t; }
+        const sF = new THREE.Vector3().crossVectors(uF, nF).normalize();
+        // the head's DEPTH centre (the line a hat sits on, seen from the side): the face is only the front skin — the
+        // flower's body is behind it. From the skinned flower vertices in the head's central column (|side| < 6 cm,
+        // the top 15 cm), the midpoint between the face's front and the back of the petals.
+        let dMin = Infinity, dMax = -Infinity;
+        for (const p of F) { const d = p.clone().sub(c).dot(nF); if (d > dMax) dMax = d; }
+        let flower = null;
+        vrm.scene.traverse((o) => { if (o.isSkinnedMesh && !flower && (Array.isArray(o.material) ? o.material : [o.material]).some((m) => m?.name === 'petals')) flower = o; });
+        if (flower) {
+            flower.skeleton.update();
+            const pa = flower.geometry.attributes.position, v = new THREE.Vector3();
+            for (let i = 0; i < pa.count; i += 2) {
+                v.fromBufferAttribute(pa, i); flower.applyBoneTransform(i, v); v.applyMatrix4(flower.matrixWorld);
+                const q = v.sub(c); const sd = q.dot(sF), ud = q.dot(uF);
+                if (Math.abs(sd) < 0.06 && ud > top - 0.15 && ud < top + 0.01) { const d = q.dot(nF); if (d < dMin) dMin = d; }
+            }
+        }
+        const depthC = Number.isFinite(dMin) ? (dMin + dMax) / 2 : 0;    // along nF from the face disc's centroid
+        return { c, nF, uF, sF, top, depthC };
+    };
+    // AUTO seat (hat: { seat: 'auto', sink, tilt, cant, fwd, scale }): the hat's crown axis is put ON the head's centre
+    // plane (the flower is flat: the hat sits over its middle, front to back), its brim's bottom on the disc's top edge
+    // less `sink`, its up along the head's up tipped by tilt (deg, + = crown back) and cant (deg, sideways)
+    const seatAuto = (h, spec) => {
+        const HF = hfCache || (hfCache = headFrame()); if (!HF) return;
+        h.updateMatrixWorld(true);
+        const inv = h.matrixWorld.clone().invert(), V = [];
+        h.traverse((m) => { if (!m.isMesh) return; const a2 = m.geometry.attributes.position;
+            for (let i = 0; i < a2.count; i += 2) V.push(new THREE.Vector3().fromBufferAttribute(a2, i).applyMatrix4(m.matrixWorld).applyMatrix4(inv)); });
+        const mu = new THREE.Vector3(); for (const p of V) mu.add(p); mu.multiplyScalar(1 / V.length);
+        const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+        for (const p of V) { const d = [p.x - mu.x, p.y - mu.y, p.z - mu.z]; for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) C[r * 3 + k] += d[r] * d[k]; }
+        const m3 = new THREE.Matrix3().set(...C.map((x, i) => x + (i % 4 === 0 ? 1e-9 : 0))).invert();
+        let n = new THREE.Vector3(0.3, 1, 0.2).normalize();
+        for (let it = 0; it < 60; it++) n = n.applyMatrix3(m3).normalize();
+        let pmin = Infinity, pmax = -Infinity;
+        for (const p of V) { const t = p.clone().sub(mu).dot(n); if (t < pmin) pmin = t; if (t > pmax) pmax = t; }
+        if (pmax < -pmin) { n.negate(); [pmin, pmax] = [-pmax, -pmin]; }
+        // the crown's axis point: the centroid of the vertices in the top 40% (the crown), projected onto the brim plane
+        const crown = new THREE.Vector3(); let nc = 0;
+        for (const p of V) { const t = p.clone().sub(mu).dot(n); if (t > pmin + 0.6 * (pmax - pmin)) { crown.add(p); nc++; } }
+        crown.multiplyScalar(1 / Math.max(1, nc));
+        const axisPt = crown.clone().sub(n.clone().multiplyScalar(crown.clone().sub(mu).dot(n) - pmin));     // on the brim's bottom
+        const up = HF.uF.clone()
+            .applyAxisAngle(HF.sF, -(spec.tilt ?? -4) * Math.PI / 180)
+            .applyAxisAngle(HF.nF, -(spec.cant ?? 0) * Math.PI / 180);
+        const curUp = n.clone().transformDirection(h.matrixWorld);
+        const wq = new THREE.Quaternion().setFromUnitVectors(curUp, up).multiply(h.getWorldQuaternion(new THREE.Quaternion()));
+        const pq = h.parent.getWorldQuaternion(new THREE.Quaternion());
+        h.quaternion.copy(pq.clone().invert().multiply(wq));
+        h.scale.multiplyScalar(spec.scale ?? 1);
+        h.updateMatrixWorld(true);
+        const want = HF.c.clone().add(HF.uF.clone().multiplyScalar(HF.top - (spec.sink ?? 0.008))).add(HF.nF.clone().multiplyScalar(HF.depthC + (spec.fwd ?? 0)));
+        const dW = want.sub(h.localToWorld(axisPt.clone()));
+        const ps = h.parent.getWorldScale(new THREE.Vector3());
+        h.position.add(dW.applyQuaternion(pq.clone().invert()).divide(ps));
+        h.updateMatrixWorld(true);
+        hatLocal = { V, n, pmin, pmax, mu, bottomLocal: axisPt, HF };
+    };
+    let hatLocal = null, this_lift = 0;
+    // AUTO fold (hat.fold !== false with seat 'auto'): every petal whose chain passes through the seated hat (its own
+    // vertices' footprint: radius from the crown axis, height along the brim normal, + margin) is folded back, the
+    // angle stepped up until the chain clears; petals the hat doesn't touch stay as they are
+    // AUTO fold: the petals the hat would cut are TUCKED into its crown, folded back (combed-back hair) and shortened
+    // until every point of the petal is either inside the crown (hidden) or below the brim — never through the brim or
+    // sticking up beside the hat. Searched per petal (fold angle x length), so the tuck fits this hat and this head.
+    const autoFold = (base = {}, only = null) => {   // only: the petal keys allowed to fold (default: any the hat cuts)
+        const h = layers.boater;
+        if (!h || !hatLocal || !sbm) return base;
+        const { V, n, pmin, pmax, mu } = hatLocal;
+        let rmax = 0, rCrown = 0;
+        for (const p of V) {
+            const d = p.clone().sub(mu); const t = d.dot(n); const r = d.sub(n.clone().multiplyScalar(t)).length();
+            if (r > rmax) rmax = r;
+            if (t > pmin + 0.5 * (pmax - pmin) && r > rCrown) rCrown = r;
+        }
+        const crownTop = pmax - 0.004;
+        const where = (wp) => { const lp = h.worldToLocal(wp.clone()).sub(mu); const t = lp.dot(n); return { t, r: lp.sub(n.clone().multiplyScalar(t)).length() }; };
+        const bad = ({ t, r }) => {
+            if (r < rCrown - 0.003 && t < crownTop) return 0;            // inside the crown: hidden
+            if (t < pmin - 0.004) return 0;                              // below the brim: hair under the hat, fine
+            return 1;                                                    // through the brim, or above it beside the crown
+        };
+        const chainPts = (root) => {
+            vrm.scene.updateWorldMatrix(true, true);
+            const ch = chainOf(root), pts = [];
+            for (let k = 0; k < ch.length; k++) {
+                const a = ch[k].getWorldPosition(new THREE.Vector3());
+                const nx = ch[k + 1] ? ch[k + 1].getWorldPosition(new THREE.Vector3()) : (jointOf.get(ch[k])?.child || ch[k].children[0] || ch[k]).getWorldPosition(new THREE.Vector3());
+                for (let u = 0; u <= 1; u += 0.2) pts.push(a.clone().lerp(nx, u));
+            }
+            return pts;
+        };
+        const keys = [];
+        for (let i = 1; i <= 12; i++) for (const sd of ['L', 'R']) keys.push(`${i}_${sd}`);
+        // each petal's REAL surface: the flower's skinned vertices whose strongest bone is in that petal (the brim cuts
+        // the petal's wide mesh, not its centre line)
+        let flowerM = null;
+        vrm.scene.traverse((o) => { if (o.isSkinnedMesh && !flowerM && (Array.isArray(o.material) ? o.material : [o.material]).some((m) => m?.name === 'petals')) flowerM = o; });
+        const vertsOf = {};
+        if (flowerM) {
+            const sw = flowerM.geometry.attributes.skinWeight, si = flowerM.geometry.attributes.skinIndex, bones = flowerM.skeleton.bones;
+            for (let i = 0; i < sw.count; i += 2) {
+                let bi = 0, bw = -1;
+                for (let k = 0; k < 4; k++) { const w = sw.getComponent(i, k); if (w > bw) { bw = w; bi = si.getComponent(i, k); } }
+                const m = /petal[ _](\d+_[LR])/.exec(bones[bi]?.name || '');
+                if (m) (vertsOf[m[1]] = vertsOf[m[1]] || []).push(i);
+            }
+        }
+        const meshCost = (key) => {
+            if (!flowerM || !vertsOf[key]) return 0;
+            flowerM.skeleton.update();
+            let c = 0; const v = new THREE.Vector3(), pa = flowerM.geometry.attributes.position;
+            for (const i of vertsOf[key]) { v.fromBufferAttribute(pa, i); flowerM.applyBoneTransform(i, v); v.applyMatrix4(flowerM.matrixWorld); c += bad(where(v)); }
+            return c;
+        };
+        const out = { ...base };
+        for (const key of keys) {
+            if (only && !only.includes(key)) continue;
+            const root = petalRoot(key);
+            if (!root) continue;
+            vrm.scene.updateWorldMatrix(true, true);
+            const cost0 = meshCost(key);
+            if (cost0 === 0 && out[key] === undefined) continue;          // the hat doesn't touch it
+            let best = null;
+            // combed-back only: a half fold (90 deg) sticks straight out behind the head, above the brim
+            for (const deg of [150, 160, 170, 178]) for (const sc of [0.65, 0.5, 0.4, 0.3]) {
+                applyFold({ ...out, [key]: [deg, sc] });
+                vrm.scene.updateWorldMatrix(true, true);
+                const c = meshCost(key) + (1 - sc) * 0.5 + deg * 0.002;
+                if (!best || c < best.c) best = { c, deg, sc };
+            }
+            out[key] = [best.deg, best.sc];
+        }
+        applyFold(out);
+        // the BRIM must clear the flower itself (the petals' thick bases on the head's top edge can't fold away): from
+        // the skinned flower's real vertices under the brim's ring (outside the crown), lift the hat until the highest
+        // sits 3 mm under the brim
+        vrm.scene.updateWorldMatrix(true, true);
+        let flower = null;
+        vrm.scene.traverse((o) => { if (o.isSkinnedMesh && !flower && (Array.isArray(o.material) ? o.material : [o.material]).some((m) => m?.name === 'petals')) flower = o; });
+        let need = 0;
+        if (flower) {
+            const pa = flower.geometry.attributes.position, v = new THREE.Vector3();
+            for (let i = 0; i < pa.count; i += 3) {
+                v.fromBufferAttribute(pa, i); flower.applyBoneTransform(i, v); v.applyMatrix4(flower.matrixWorld);
+                const { t, r } = where(v);
+                if (r > rCrown - 0.002 && r < rmax && t > pmin - 0.003 && t < pmin + 0.025) need = Math.max(need, t - pmin + 0.003);   // the stubs at the brim, not petals rising past it
+            }
+        }
+        if (need > 0) {
+            const upW = n.clone().transformDirection(h.matrixWorld);
+            const ps = h.parent.getWorldScale(new THREE.Vector3()), pq = h.parent.getWorldQuaternion(new THREE.Quaternion());
+            h.position.add(upW.multiplyScalar(Math.min(need, 0.03)).applyQuaternion(pq.clone().invert()).divide(ps));
+            h.updateMatrixWorld(true);
+        }
+        this_lift = need;
+        if (globalThis.WARDROBE_DEBUG) console.log('[wardrobe] auto fold', JSON.stringify(out), 'brim lift', need.toFixed(4));
+        return out;
+    };
     const placeHat = (spec) => {
         const h = layers.boater;
         if (!h || !hatRest) return;
         h.position.copy(hatRest.p); h.scale.copy(hatRest.s);
+        if (hatRest.q) h.quaternion.copy(hatRest.q);
+        hatLocal = null;
         if (!spec) return;
+        if (spec.seat === 'auto') { seatAuto(h, spec); return; }
         vrm.scene.updateWorldMatrix(true, true);
         const [x, y, z] = spec.offset || [0, 0, 0];
         const inv = h.parent.getWorldQuaternion(new THREE.Quaternion()).invert()
@@ -303,8 +519,20 @@ function makeBaseWardrobe(THREE, vrm) {
         }
     };
 
+    // debug: a petal's direction (root -> tip) in the head frame: { up, fwd, side }
+    const petalDir = (key) => {
+        const root = petalRoot(key); if (!root) return null;
+        vrm.scene.updateWorldMatrix(true, true);
+        const ch = chainOf(root), last = ch[ch.length - 1];
+        const tip = (jointOf.get(last)?.child || last.children[0] || last).getWorldPosition(new THREE.Vector3());
+        const d = tip.sub(root.getWorldPosition(new THREE.Vector3())).normalize();
+        const HF = hfCache || (hfCache = headFrame());
+        return { up: +d.dot(HF.uF).toFixed(2), fwd: +d.dot(HF.nF).toFixed(2), side: +d.dot(HF.sF).toFixed(2) };
+    };
     let current = null;
     const api = {
+        petalDir,
+        get lift() { return this_lift; },
         layers, mats,
         get current() { return current; },
         wear(key) {
@@ -318,8 +546,10 @@ function makeBaseWardrobe(THREE, vrm) {
             const painted = new Set(Object.keys(preset.paint || {}));
             for (const [m] of orig) if (!painted.has(m.name)) resetMaterial(m);
             for (const [name, spec] of Object.entries(preset.paint || {})) paint(name, spec);
+            hfCache = null;
             applyFold(preset.fold);
             placeHat(preset.hat);
+            if (preset.hat?.seat === 'auto' && preset.hat.fold !== false) this.folds = autoFold(preset.fold || {}, preset.hat.foldKeys || null);
         },
         // repaint only the petals — another era's petal paint (a preset key) or a spec — without touching the
         // clothes; petals(null) gives the worn outfit's own petals back. For flashes: the finale's polyphony.
@@ -423,7 +653,8 @@ async function makeTutaWardrobe(THREE, vrm, opts = {}) {
     // ---------------------------------------------------------------- shared uniforms
     const U = {
         neon: uniform(opts.neon ?? 1.0),            // piping / inlay / paint glow level
-        eyes: uniform(0),                           // the eye catchlights: on with the TuTa (wear() sets it), off for the other presets
+        eyes: uniform(0),                           // the eye catchlights: on with the TuTa, or any preset with eyeLights / wd.eyeLights()
+        eyeNeon: uniform(0),                        // their neon tint (the TuTa's): 0 = plain white highlights
         paint: uniform(0),                          // face paint 0..1
         grime: uniform(opts.grime ?? 1.0),
         ghost: BADGES.map(() => uniform(0)),        // per badge: the mark it left
@@ -852,7 +1083,7 @@ async function makeTutaWardrobe(THREE, vrm, opts = {}) {
             const scan = float(1.0).sub(step(0.55, fract(sc)).mul(0.32).mul(float(1.0).sub(smoothstep(0.25, 0.6, fwidth(sc)))));   // before it aliases)
             const l = max(win, dot2.mul(0.8)).mul(scan).mul(inEye);
             light = light.add(l);
-            tint = tint.add(mix(vec3(1.0), C(nc), 0.18).mul(l));
+            tint = tint.add(mix(vec3(1.0), C(nc), U.eyeNeon.mul(0.18)).mul(l));
         }
         for (const m of surf('Material')) {
             m.emissiveNode = tint.mul(1.25).mul(U.eyes);
@@ -1071,6 +1302,11 @@ async function makeTutaWardrobe(THREE, vrm, opts = {}) {
         petals: (k) => base.petals(k),
         layers: { ...base.layers, ...layers }, mats: base.mats, base, uniforms: U, badges: Object.fromEntries(BADGES.map((k) => [k, layers[k]])), BADGES,
         get current() { return state.current; },
+        get folds() { return base.folds; },          // the petal folds in force (preset + automatic hat folds)
+        petalDir: (k) => base.petalDir(k),
+        get lift() { return base.lift; },
+        // eye catchlights on any outfit: amount 0..1 (1 = full), neon = the TuTa's tint (default plain white)
+        eyeLights(amount = 1, neon = false) { U.eyes.value = amount; U.eyeNeon.value = neon ? 1 : 0; },
         get pinned() { return new Set(BADGES.filter((k) => !state.events[k] && state.now[k].on)); },
         get ghosts() { return new Set(BADGES.filter((k) => !state.events[k] && state.now[k].ghost > 0)); },
         wear(key) {
@@ -1081,7 +1317,8 @@ async function makeTutaWardrobe(THREE, vrm, opts = {}) {
             const show = p.uf || [];                  // the TuTa's own layers: only the 'tuta' preset lists them
             for (const n of ['tuta', 'uf_boots', 'uf_straps']) if (layers[n]) layers[n].visible = show.includes(n);
             for (const o of baseShoes) o.visible = !(p.hideBase || []).includes('shoes');
-            U.eyes.value = show.includes('tuta') ? 1 : 0;
+            U.eyes.value = show.includes('tuta') ? 1 : (p.eyeLights ?? 0);        // catchlights: the TuTa, or a preset's eyeLights
+            U.eyeNeon.value = show.includes('tuta') ? 1 : 0;
             for (const k of BADGES) if (!state.events[k]) setBadgeVisible(k, state.now[k].on);
             if (layers.acc_sundisc) layers.acc_sundisc.visible = state.disc;
         },

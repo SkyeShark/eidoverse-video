@@ -249,6 +249,260 @@ export function makeSuitMouth({ inputMax = 1, floor = 0.3, attack = 0.03, releas
     };
 }
 
+// ── Visemes: a full mouth-shape set on the plate (installVisemeMouth + makeVisemeTrack) ─────────────────────────────
+// The two-channel mouth above (open, round) can only scale between two shapes. installVisemeMouth gives the same plate
+// one target per mouth shape instead: each is an OUTLINE (a superellipse: half-width a, height above/below its centre
+// bt/bb, exponent n — 2 an ellipse, 3+ boxier — and `lift`, the corners raised in mm), hung from just under the
+// painted smile and raycast onto the face dome `standoff` proud like the seat. Every plate vertex keeps its place
+// inside the disc (its angle and its share of the radius), so any two shapes blend into a sensible third: crossfades
+// between visemes are smooth. `seat` puts the plate on the face as a sliver; a shape's target is its outline minus
+// the seat. Closed (M, B, P, silence) = no shape: the sliver, then the plate goes back behind the face.
+// Sizes in mm on the face (the dome is ~150 mm across; the smile ~80 mm wide).
+export const VISEME_SHAPES = {
+    seat: { a: 10, bt: 0.7, bb: 0.7, n: 2, lift: 0 },
+    AA: { a: 25, bt: 4, bb: 22, n: 2.4, lift: 0 },      // "ah": big open drop
+    E: { a: 27, bt: 3, bb: 8, n: 3.0, lift: 5 },     // "eh/ay": wide, shallow, corners up
+    I: { a: 23, bt: 2, bb: 4, n: 3.2, lift: 3 },      // "ee/ih": a wide slit
+    O: { a: 16, bt: 6, bb: 18, n: 2.0, lift: 0 },      // "oh/aw": a tall round
+    U: { a: 10, bt: 3, bb: 7, n: 2.0, lift: 0 },      // "oo/w": a small pucker
+    FV: { a: 19, bt: 1.2, bb: 3.5, n: 4.0, lift: -1 },  // lip over teeth: a flat sliver, corners down
+    L: { a: 18, bt: 3, bb: 11, n: 2.4, lift: 1 },       // "l / th": medium open
+    C: { a: 21, bt: 2.5, bb: 9, n: 2.8, lift: 1 },      // most consonants (s t d n k g y h): teeth near together
+    CH: { a: 14, bt: 3, bb: 9, n: 2.2, lift: 0 },    // "ch sh j r er": pushed forward, rounded
+    MBP: { a: 10, bt: 0, bb: 0, n: 2, lift: 0 },        // lips pressed: no opening, the line alone (LINE_WARP)
+};
+// The painted smile line is the lips, so every viseme reshapes it too: one warp field per viseme, applied to the
+// line AND to the opening (which therefore stays tucked under the line). Over the mouth (|x| < 22 mm, fading to none
+// at the line's ends, 58 mm) x scales by `sx` (narrower for O/U/CH, wider for E/I), the centre peak moves `peak` mm
+// (+ up) and the line either side of it `corner` mm. The x warp is centred, so the line stays symmetric.
+export const LINE_WARP = {        // the painted "3" is the character: it keeps its shape. Visemes are driven by the black
+                                   // opening (VISEME_SHAPES) and by SQUEEZING the 3 in from the sides (sx < 1) for the
+                                   // rounded sounds; peak/corner/k stay available for other faces but are left neutral here
+    O: { sx: 0.7, peak: 0, corner: 0, k: 1 },              // rounded: squeezed in
+    U: { sx: 0.56, peak: 0, corner: 0, k: 1 },             // pursed: squeezed hard
+    CH: { sx: 0.76, peak: 0, corner: 0, k: 1 },            // pushed forward
+    L: { sx: 0.92, peak: 0, corner: 0, k: 1 },
+    MBP: { sx: 0.9, peak: 0, corner: 0, k: 1 },            // lips pressed together: a little squeeze
+};
+export const VISEMES = Object.keys(VISEME_SHAPES).filter((k) => k !== 'seat');
+
+function buildVisemeTargets(vrm, shapes, standoff, featureStandoff, blushStandoff, warps = LINE_WARP) {
+    const THREE = globalThis.THREE;
+    let plate = null, face = null, blush = null;
+    vrm.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const mats = (Array.isArray(o.material) ? o.material : [o.material]).map((m) => m?.name);
+        if (!plate && o.morphTargetInfluences && mats.includes('Material')) plate = o;
+        if (!face && mats.includes('face')) face = o;
+        if (!blush && o.morphTargetInfluences && mats.includes('BLUSH')) blush = o;
+    });
+    if (!plate || !face) throw new Error('installVisemeMouth: not claude_suit.vrm / claude_suit_wardrobe.vrm');
+    vrm.scene.updateMatrixWorld(true);
+    const faceZ = faceHeightField(plate, face);
+    conformToFace(plate, plate, faceZ, featureStandoff, { skip: (v) => isMouthPlate(v.x, v.y, v.z) });
+    if (blush) conformToFace(blush, plate, faceZ, blushStandoff, { rest: false, allTargets: true });
+    const inv = plate.matrixWorld.clone().invert(), ray = new THREE.Raycaster();
+    const onFace = (x, y) => {
+        const o = plate.localToWorld(new THREE.Vector3(x, y, 0.4));
+        ray.set(o, plate.localToWorld(new THREE.Vector3(x, y, -0.6)).sub(o).normalize());
+        const hit = ray.intersectObject(face, false)[0];
+        return (hit ? hit.point.applyMatrix4(inv).z : 0.115) + standoff;
+    };
+    const geo = plate.geometry, pos = geo.attributes.position, n = pos.count;
+    // the plate's disc in its own polar terms: centre, and its outline radius per angle (so each vertex is a share of it)
+    const ids = [];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (!isMouthPlate(x, y, z)) continue;
+        ids.push(i);
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hx = (x1 - x0) / 2, hy = (y1 - y0) / 2;
+    const BINS = 72, rmax = new Float32Array(BINS);
+    const polar = new Map();
+    for (const i of ids) {
+        const u = (pos.getX(i) - cx) / hx, v = (pos.getY(i) - cy) / hy;
+        const r = Math.hypot(u, v), th = Math.atan2(v, u);
+        const b = Math.floor(((th + Math.PI) / (2 * Math.PI)) * BINS) % BINS;
+        rmax[b] = Math.max(rmax[b], r);
+        polar.set(i, [r, th, b]);
+    }
+    // the painted smile's centre-line over the mouth, from its own vertices (binned by |x|): every opening hangs from
+    // it, so its top edge tucks under the line however wide it is (a flat top pokes out where the "w" dips)
+    const BIN = 0.0025, NB = 20, lo = new Float32Array(NB).fill(Infinity), hi = new Float32Array(NB).fill(-Infinity);
+    for (let i = 0; i < n; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (isMouthPlate(x, y, z) || Math.abs(x) > BIN * NB || y < 1.466 || y > 1.49) continue;
+        const b = Math.min(NB - 1, Math.floor(Math.abs(x) / BIN));
+        lo[b] = Math.min(lo[b], y); hi[b] = Math.max(hi[b], y);
+    }
+    const mid = [];
+    for (let b = 0; b < NB; b++) if (lo[b] < Infinity) mid.push([(b + 0.5) * BIN, (lo[b] + hi[b]) / 2]);
+    const TOP = y1 - 0.0005;
+    const smileY = (x) => {                       // the line's centre at |x| (linear between bins; TOP if unknown)
+        x = Math.abs(x);
+        if (!mid.length) return TOP;
+        if (x <= mid[0][0]) return mid[0][1];
+        for (let k = 1; k < mid.length; k++) if (x <= mid[k][0]) {
+            const f = (x - mid[k - 1][0]) / (mid[k][0] - mid[k - 1][0]);
+            return mid[k - 1][1] + (mid[k][1] - mid[k - 1][1]) * f;
+        }
+        return mid[mid.length - 1][1];
+    };
+    // a vertex at share r of angle th in the disc: across, u (the shape's width a); down, from the smile line by its
+    // share of the shape's height at that u (bt + bb, narrowing to the corners as a superellipse of exponent n);
+    // `lift` raises the bottom toward the corners (a smile's upturn)
+    // the plate is a thin closed lens (front and back surfaces stacked ~7 mm deep): keep each vertex's depth order,
+    // scaled to a fifth, or both surfaces land on the same height and the back one fights through the front
+    let zmax = -Infinity;
+    for (const i of ids) zmax = Math.max(zmax, pos.getZ(i));
+    const baseY = mid.length ? Math.min(...mid.map((m) => m[1])) : TOP;   // the smile's lowest centre-line
+    let halfT = 0.0015;                                                  // the stroke's half thickness (thinnest bin)
+    for (let b = 0; b < NB; b++) if (lo[b] < Infinity) halfT = Math.min(halfT, (hi[b] - lo[b]) / 2);
+    const sstep = (a, b, x) => { const q = Math.max(0, Math.min(1, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
+    const warpXY = (wp, x, y) => {
+        const ax = Math.abs(x) * 1000, f = 1 - sstep(26, 60, ax);            // 1 over the mouth, 0 at the line's ends
+        const c = Math.exp(-((ax / 13) ** 2)), side = sstep(8, 28, ax);
+        const k = wp.k ?? 1;                                                  // the w's depth about the line's low level
+        const yc = smileY(x);                                                // flatten the CENTRE-LINE, keep the stroke
+        const yk = baseY + (yc - baseY) * (1 + (k - 1) * f) + (y - yc);
+        // the squeeze scales the WHOLE line about its centre (a uniform copy: no falloff, so no new kinks in the 3)
+        return [x * wp.sx, yk + 0.001 * f * (wp.peak * c + wp.corner * side)];
+    };
+    const point = (s, r, th, z, w = null) => {
+        const u = r * Math.cos(th), v = r * Math.sin(th);
+        const span = Math.sqrt(Math.max(1e-6, 1 - u * u));
+        const t = Math.min(1, Math.max(0, (v / span + 1) / 2));          // 1 at the top edge, 0 at the bottom
+        const X = s.a * u * 0.001;
+        const H = (s.bt + s.bb) * 0.001 * Math.max(0, 1 - Math.abs(u) ** s.n) ** (1 / s.n);
+        const top = smileY(X) - 0.0002;                                  // follows the line (tucked under it)
+        // the closed sliver stays INSIDE the line's stroke (invisible); an opening hangs from the line's lowest level
+        const bot = s === shapes.seat ? top - Math.min(0.0008, halfT)
+            : Math.min(top - Math.min(0.0008, halfT), baseY - Math.max(0, H - s.lift * 0.001 * u * u));
+        let Y = bot + t * (top - bot), XX = X;
+        if (w) [XX, Y] = warpXY(w, X, Y);
+        return [XX, Y, onFace(XX, Y) - (zmax - z) * 0.2];
+    };
+    const tgt = {};
+    for (const name of Object.keys(shapes)) tgt[name] = new Float32Array(n * 3);
+    // the outline radius per angle, smoothed round the circle and read between bins (a raw per-bin max scales
+    // neighbouring vertices unevenly: a ragged edge)
+    for (let pass = 0; pass < 3; pass++) {
+        const c = rmax.slice();
+        for (let b = 0; b < BINS; b++) {
+            const a0 = c[(b + BINS - 1) % BINS] || c[b], a2 = c[(b + 1) % BINS] || c[b];
+            rmax[b] = Math.max(c[b], (a0 + 2 * c[b] + a2) / 4);
+        }
+    }
+    const rAt = (th) => {
+        const fb = ((th + Math.PI) / (2 * Math.PI)) * BINS - 0.5;
+        const b0 = ((Math.floor(fb) % BINS) + BINS) % BINS, b1 = (b0 + 1) % BINS, f = fb - Math.floor(fb);
+        return rmax[b0] * (1 - f) + rmax[b1] * f;
+    };
+    for (const i of ids) {
+        const [r, th] = polar.get(i);
+        const rr = Math.min(1, r / Math.max(1e-6, rAt(th)));
+        const rest = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+        const S = point(shapes.seat, rr, th, rest[2]);
+        for (const [name, s] of Object.entries(shapes)) {
+            const P = name === 'seat' ? S : point(s, rr, th, rest[2], warps[name]);
+            const base = name === 'seat' ? rest : S;
+            for (let k = 0; k < 3; k++) tgt[name][i * 3 + k] = P[k] - base[k];
+        }
+    }
+    // the line's own vertices move with each viseme's warp, re-seated on the dome at their new place
+    for (let i = 0; i < n; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        if (isMouthPlate(x, y, z) || Math.abs(x) > 0.11 || y < 1.455 || y > 1.507) continue;   // the WHOLE 3 (tails included), below the eyes
+        const z0 = onFace(x, y);
+        for (const name of Object.keys(shapes)) {
+            const wp = warps[name];
+            if (!wp) continue;
+            const [X, Y] = warpXY(wp, x, y);
+            tgt[name][i * 3] = X - x; tgt[name][i * 3 + 1] = Y - y; tgt[name][i * 3 + 2] = onFace(X, Y) - z0;
+        }
+    }
+    const idx = {};
+    for (const [name, arr] of Object.entries(tgt)) {
+        geo.morphAttributes.position.push(new THREE.Float32BufferAttribute(arr, 3));
+        if (geo.morphAttributes.normal) geo.morphAttributes.normal.push(new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+        idx[name] = plate.morphTargetInfluences.push(0) - 1;
+    }
+    return { plate, idx };
+}
+
+// Install the viseme mouth (instead of installSuitMouth — one or the other per VRM). set(weights): the face plates'
+// morphs by name as before, plus `viseme: {AA: 0.7, O: 0.3, ...}` (shares, summing to ≤ 1; the rest is the closed
+// sliver) and `mouth` (0..1, how far the mouth is open at all: 0 = behind the face). Call last in renderFrame.
+export function installVisemeMouth(vrm, { shapes = VISEME_SHAPES, standoff = 0.0015, featureStandoff = 0.0018,
+    blushStandoff = 0.001 } = {}) {
+    const { plate, idx } = buildVisemeTargets(vrm, shapes, standoff, featureStandoff, blushStandoff);
+    const plates = [];
+    vrm.scene.traverse((o) => { if (o.isMesh && o.morphTargetInfluences && o.morphTargetDictionary) plates.push(o); });
+    let weights = {};
+    const write = () => {
+        for (const p of plates) {
+            const inf = p.morphTargetInfluences, d = p.morphTargetDictionary;
+            inf.fill(0);
+            for (const [nm, w] of Object.entries(weights)) if (typeof w === 'number' && nm in d && !RIG_MOUTH.includes(nm)) inf[d[nm]] = w;
+        }
+        const vis = weights.viseme || {}, m = Math.min(1, Math.max(0, weights.mouth ?? 0));
+        // the plate comes onto the face only for an opening; pressed lips (MBP) move the line alone
+        let open = 0;
+        for (const [k, w] of Object.entries(vis)) if (k !== 'MBP') open += Math.max(0, w);
+        if (m > 0.02) {
+            const inf = plate.morphTargetInfluences;
+            if (open > 0.02) inf[idx.seat] = 1;
+            for (const [k, w] of Object.entries(vis)) if (k in idx && k !== 'seat') inf[idx[k]] = Math.max(0, w) * m;
+        }
+    };
+    for (const p of plates) p.onBeforeRender = write;
+    return { plate, plates, idx, set(w) { weights = w || {}; write(); }, get weights() { return weights; } };
+}
+
+// Phones → visemes (ARPAbet, stress digits dropped). M/B/P press the lips (MBP: the line only, no opening).
+export const PHONE_VISEME = {
+    AA: 'AA', AH: 'L', AE: 'AA', AY: 'AA', AW: 'AA', EH: 'E', EY: 'E', IY: 'I', IH: 'I', Y: 'I', AO: 'O', OW: 'O',
+    OY: 'O', UW: 'U', UH: 'U', W: 'U', ER: 'CH', R: 'CH', CH: 'CH', JH: 'CH', SH: 'CH', ZH: 'CH', F: 'FV', V: 'FV',
+    TH: 'L', DH: 'L', L: 'L', S: 'C', Z: 'C', T: 'C', D: 'C', N: 'C', K: 'C', G: 'C', NG: 'C', HH: 'C',
+    M: 'MBP', B: 'MBP', P: 'MBP',
+};
+
+// A viseme track from timed phones: events [{t0, t1, v}] (v a viseme name, or null = closed), as visemes_from_words
+// writes them. at(t) → {viseme: {...shares}, mouth}. Each event fades in over `lead` before its start (the mouth
+// shapes ahead of the sound) and the next one crosses over it; gaps longer than `closeGap` close the mouth.
+// `breath` adds a slow swell on long held vowels (sung notes), `scale` sizes the shapes (0.8 = a smaller mouth).
+export function makeVisemeTrack(events, { lead = 0.05, fade = 0.07, closeGap = 0.16, breath = 0.06, scale = 1 } = {}) {
+    const E = [...events].sort((a, b) => a.t0 - b.t0);
+    let i0 = 0;
+    const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    return {
+        at(t) {
+            while (i0 > 0 && E[i0].t0 > t) i0--;
+            while (i0 < E.length - 1 && E[i0 + 1].t0 - lead <= t) i0++;
+            const vis = {};
+            let mouth = 0;
+            for (let k = Math.max(0, i0 - 1); k <= Math.min(E.length - 1, i0 + 1); k++) {
+                const e = E[k];
+                const win = smooth(e.t0 - lead - fade, e.t0 - lead + fade * 0.4, t) * (1 - smooth(e.t1 - fade * 0.3, e.t1 + fade, t));
+                if (win <= 0) continue;
+                if (e.v) {
+                    const held = e.t1 - e.t0 > 0.35 ? 1 + breath * Math.sin((t - e.t0) * 2 * Math.PI * 1.3) : 1;
+                    vis[e.v] = Math.max(vis[e.v] || 0, win * held * scale);
+                    mouth = Math.max(mouth, win);
+                }
+            }
+            const tot = Object.values(vis).reduce((a, b) => a + b, 0);
+            if (tot > 1) for (const k of Object.keys(vis)) vis[k] /= tot;
+            // a short gap between sounding events keeps the mouth on the face (no flicker); long gaps close it
+            const prev = E[i0], next = E[i0 + 1];
+            if (mouth < 0.3 && prev && next && prev.v && next.v && next.t0 - prev.t1 < closeGap && t > prev.t1 && t < next.t0) mouth = 0.3;
+            return { viseme: vis, mouth };
+        },
+    };
+}
+
 // Emotion + gaze, keyed to WORDS and sections rather than seconds, so re-timing the audio can't desync a feeling.
 // TL = { sections: [{name, t0, t1}], captions: [{text, t0, t1}] } (the shape voicebox/song timelines use).
 // sectionBase: { sectionName: {smile, frown, wide, blush, soft, down, up, jaw} } — the resting feeling of a section.
