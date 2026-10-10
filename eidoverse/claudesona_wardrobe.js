@@ -31,7 +31,7 @@
 
 const OPTIONAL = ['jacket', 'tie', 'shirt', 'pants', 'jersey', 'knickers', 'socks', 'boater', 'boater_band', 'coat_skirt',
     'shirt_rolled', 'acc_glasses', 'acc_headset', 'acc_pocket', 'acc_bowtie', 'acc_headband', 'acc_ribbons', 'acc_hoodie',
-    'acc_patches', 'acc_boutonniere'];
+    'acc_patches', 'acc_boutonniere', 'sax_vest', 'sax_tee', 'acc_wayfarers', 'acc_glove_r', 'acc_cord'];
 const SUIT = ['jacket', 'tie', 'shirt', 'pants'];
 
 // the 1977 six-colour Apple stripes, top to bottom
@@ -80,6 +80,12 @@ export const WARDROBE = {
         paint: { Jacket: { pattern: 'canvas', a: '#977650', b: '#a8875e', scale: 0.0035 }, shirt: '#e9e2d0', pants: '#34445e' },
     },
     sleeves_rolled: { show: ['shirt_rolled', 'tie', 'pants'], paint: { shirt_rolled: '#eeeae2' } },  // jacket off, end of the day
+    // Eurovision 2010's saxophonist ("Epic Sax Guy"): sleeveless open pinstripe vest over a sleeveless yellow tee,
+    // bright blue trousers, white wayfarers, one red fingerless glove (right hand), a cord necklace (build_sax.py)
+    sax_guy_2010: {
+        show: ['sax_vest', 'sax_tee', 'pants', 'acc_wayfarers', 'acc_glove_r', 'acc_cord'],
+        paint: { vest: { pattern: 'stripes', axis: 'x', a: '#f2f1ec', b: '#3a3d45', scale: 0.034, width: 0.16 }, tee: '#f3c316', pants: '#1f63d8', shoes: '#ededea', glove_red: '#d40000' },
+    },
     cyclist_1892: {
         show: ['jersey', 'shirt', 'knickers', 'socks', 'boater', 'boater_band'],
         paint: { shirt: '#ead9bd' },
@@ -174,9 +180,9 @@ function makeBaseWardrobe(THREE, vrm) {
             return mix(v3(p.a), v3(p.b), smoothstep(0.0, 1.0, abs(ang.mul(2).sub(1))));
         }
         const a = v3(p.a), b = v3(p.b);
-        if (p.pattern === 'stripes') {
-            const s = p.scale ?? 0.08;
-            return mix(a, b, smoothstep(0.45, 0.55, abs(fract(P.y.div(s)).sub(0.5)).mul(2)));
+        if (p.pattern === 'stripes') {                 // axis 'y' (bands, default) or 'x' (pinstripes); width = b's share
+            const s = p.scale ?? 0.08, w = p.width ?? 0.5, q = (p.axis === 'x' ? P.x : P.y).div(s);
+            return mix(a, b, smoothstep(1 - w - 0.05, 1 - w + 0.05, abs(fract(q).sub(0.5)).mul(2)));
         }
         if (p.pattern === 'blocks') {                  // 80s colour-blocking: left/right/shoulder panels
             const c = v3(p.c || p.a);

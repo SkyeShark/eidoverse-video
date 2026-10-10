@@ -608,6 +608,7 @@ wardrobe.petals('mac_launch_1984');          // repaint only the petals (a prese
 | `sleeves_rolled` | jacket off, shirt sleeves rolled, tie |
 | `cyclist_1892` | striped jersey, tweed knickerbockers, argyle socks, a straw boater with the petals folded under it |
 | `tuta` | the UNKNOWN FORCE TuTa: black techwear one-piece, techwear boots, belt and straps ([the TuTa](#the-tuta)) |
+| `sax_guy_2010` | Eurovision 2010's saxophonist: open sleeveless pinstripe vest over a sleeveless yellow tee, bright blue trousers, white wayfarers, a red fingerless glove on the right hand, a cord necklace |
 
 A preset is `{ show, paint, hide, fold, hat }`:
 
@@ -615,11 +616,13 @@ A preset is `{ show, paint, hide, fold, hat }`:
   The body, face, flower and shoes always show. The layers are `jacket`,
   `tie`, `shirt`, `pants`, `jersey`, `knickers`, `socks`, `boater`,
   `coat_skirt`, `shirt_rolled`, `acc_glasses`, `acc_headset`, `acc_pocket`,
-  `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches` and
-  `acc_boutonniere`. The `tuta` preset lists its own layers in `uf` (`tuta`,
+  `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches`,
+  `acc_boutonniere`, `sax_vest`, `sax_tee`, `acc_wayfarers`, `acc_glove_r` and
+  `acc_cord`. The `tuta` preset lists its own layers in `uf` (`tuta`,
   `uf_boots`, `uf_straps`) and hides digi's shoes with `hideBase: ['shoes']`.
 - `paint` maps a material name to `'#hex'` or a pattern:
-  - `{ pattern: 'stripes', a, b, scale }`, `'blocks'` (`a`, `b`, `c`),
+  - `{ pattern: 'stripes', a, b, scale }` (horizontal bands; `axis: 'x'` for
+    vertical pinstripes, `width` = the share of `b`, 0.5 by default), `'blocks'` (`a`, `b`, `c`),
     `'herringbone'` (`a`, `b`, `c` flecks, `scale`), `'gradient'` (`a`, `b`)
     and `'canvas'` (`a`, `b`, `scale`);
   - for `petals` only, `'rainbow'` (`colors`, `top`, `bottom`), `'perPetal'`
