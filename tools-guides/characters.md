@@ -411,6 +411,44 @@ Replaying a helper clip replaces or crossfades its previous action according
 to `fade`. Do not null `_mixer` between character loads or independently update
 the same `vrm` a second time.
 
+**Pose overlays: kneel-and-place** (`eidoverse/pose_layers.js`, dynamic
+ESM). For beats the clip library doesn't cover, played OVER a looping clip
+on a stationary VRM — never a controller-driven one (the engine owns
+`vrm.update` for controller-owned VRMs its own way, and a pose track fights
+locomotion exactly like a clip would; park the controller first).
+
+```js
+// setup():
+const { makeKneelPlace } = await import(new URL('pose_layers.js', EIDOVERSE_DIR).href);
+await playVRMADefault(vrm, 'idle', { loopOnce: false });
+globalThis._kneel = makeKneelPlace(vrm);
+// renderFrame(t), BEFORE renderAsync:
+const k = _kneel.cycle(t, { t0: 44.8, inDur: 2.2, hold: 1.4, outDur: 1.8 });
+_kneel.apply(k, 1 / FPS);
+```
+
+`makeKneelPlace(vrm)` is a right-knee genuflect-and-place (stand → kneel →
+reach to the ground → rise) whose key poses were derived from the clip
+library and whose contacts were FK-solved on claude_suit.vrm. `cycle()`
+shapes a 0→1→0 envelope around `t0`; `apply(k)` evaluates the pose at path
+position k and commits it for this frame's draw — at k=0 the underlying
+clip is restored exactly, so the beat composes cleanly into a scene.
+`apply()` must run EVERY renderFrame while the beat is in scope (it also
+reduces the engine's post-frame `vrm.update` to a plain commit so spring
+chains don't double-step). Props are scene-owned: attach the object to the
+raw `rightHand` bone and release it during the hold — on short-armed VRMs
+the wrist bottoms out well above the floor, so ease the prop down the last
+stretch yourself.
+
+`makePoseTrack(vrm, track)` is the general mechanism: a track is key poses
+along s∈[0,1] (absolute normalized-local bone eulers + hips deltas,
+interpolated C1 monotone-cubic from the live clip sample) plus an optional
+`calm` list that re-tunes named spring chains (drag, gravity) while the
+overlay is active and restores them at k=0. Keep each joint's value
+sequence monotone across keys — zig-zag keys read as the joint
+flip-flopping in motion (see the module header before editing keys).
+
+
 ## T-pose / foot-slide diagnosis
 
 A VRM in T-pose despite a loaded animation traces to one of these:
