@@ -25,6 +25,7 @@ to the `.blend`.
 | `build_era_garments.py` | Recipe: the jersey collar split, the coat skirt, rolled shirt sleeves, the hoodie, the patches, the boutonniere; exports the finished VRM. |
 | `paint_patches.py` | Recipe: the embroidered patch atlas (satin-stitch hatching, twill ground, merrowed rims). |
 | `ring_pivot.py` | Tool: hangs the petal ring's bottom-arc bone from a chest pivot so nods and tilts don't drive the ring into the jacket. Already applied to both claudesona VRMs; `export_wardrobe_vrm.py` and `build_tuta.py` re-apply it to every export. |
+| `build_sax.py` | Recipe: the 2010 Eurovision saxophonist (`sax_guy_2010`) — the sleeveless open vest (digi's jacket, sleeves cut, front opened), the sleeveless tee (digi's shirt), the wayfarers, the fingerless glove (lifted from the right hand's skin, so it keeps its weights), the cord necklace. Adds them to the `.blend` and saves it; `build_tuta.py` then exports the VRM. Re-runnable. |
 | `build_tuta.py` | Builds the outfit: opens the library wardrobe `.blend` read-only, adds the tuta, the boots, the straps, the badges and the disc, saves `work/claude_suit_wardrobe_tuta.blend` and exports `../claude_suit_wardrobe.vrm` (through a temporary file, so a render reading the VRM never sees half a file) with the petal ring's chest pivot re-applied. `--no-export` skips the VRM; `--looks` adds EEVEE geometry checks in `work/claude_suit_wardrobe_looks/`. |
 | `paint_badges.py` | Paints the badges' faces and emissive rims, the ghost SDF atlas and the sun disc (system Python: PIL + numpy) into `../claude_suit_wardrobe_tex/`. Deterministic: it reproduces the shipped PNGs byte for byte. |
 | `badges.json` | The modificanti: outline polygons in badge millimetres, placement rays, bones, colours and glows. The runtime reads it too (badge names, camps, glows, the ghost atlas extent). |
@@ -61,6 +62,9 @@ Skinned layers follow the body; rigid ones are parented to a bone.
 | `uf_straps` | `webbing`, `buckle` | skinned (weights from the tuta): the belt, the thigh strap, the zip puller |
 | `mod_red`, `mod_gold`, `mod_chrome`, `mod_warning`, `mod_spray` | `mod_<key>` (painted face + emissive rim) | bone-parented, hidden until pinned |
 | `acc_sundisc` | `sundisc` | head bone, hidden unless `sunDisc(true)` |
+| `sax_vest`, `sax_tee` | `vest` (double-sided), `tee` | skinned (digi's jacket / shirt weights) |
+| `acc_glove_r` | `glove_red` | skinned (the right hand's own weights) |
+| `acc_wayfarers`, `acc_cord` | `wayfarer`, `lens_dark`; `cord_black` | head bone; chest bone |
 
 `BodyActual`, `face`, `Body`, `flower` and `shoes` are digi's and are always
 shown.
