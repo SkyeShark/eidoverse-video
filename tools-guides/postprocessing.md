@@ -36,7 +36,7 @@ await globalThis._r.renderAsync(globalThis._s, globalThis._c);   // ALWAYS rende
 
 The default auto-enhance path supplies N8AO ambient occlusion, SSR, UnrealBloom and FXAA; a scene can opt out when it owns its compositor (below). Moving sky/cloud reflections on metals come from the `makeSky` facade's `sky.enableReflections()`, which takes an optional options object and uses the camera passed to `makeSky` ([sky-weather.md](sky-weather.md)).
 
-Set `globalThis._aoParams = { aoRadius, quality, intensity, distanceFalloff, halfRes, enabled }` before setup to tune N8AO. Its default `aoRadius` is 5 world units, which on a room- or tabletop-scale set samples the whole space and reads as blotchy grain over every surface; set it to the contact scale you want darkened (0.15 m on a workbench). `quality` takes `Performance`, `Low`, `Medium`, `High` or `Ultra`.
+Set `globalThis._aoParams = { aoRadius, quality, intensity, distanceFalloff, halfRes, enabled }` before setup to tune N8AO. Its default `aoRadius` is 5 world units, which on a room- or tabletop-scale set samples the whole space and reads as blotchy grain over every surface; set it to the contact scale you want darkened (0.15 m on a workbench). `quality` defaults to `Neural-High`: N8AO 2.0's neural denoise, a small learned network in the second denoise pass that removes the grain and frame-to-frame boil of the AO. `Neural-Low` and `Neural-Medium` run it with fewer taps; `Performance`, `Low`, `Medium`, `High` and `Ultra` are the standard modes without it. The neural modes always use 16 AO samples at full resolution, so `halfRes` is ignored with them.
 
 The complete current catalog has 31 effects. Discover it programmatically
 with `CustomEffectsDeno.list()` or inspect the sources under `effects_tsl/`.

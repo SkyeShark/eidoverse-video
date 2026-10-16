@@ -12,6 +12,7 @@ This package intentionally preserves parts of the upstream mental model where pr
 - quality presets and display modes
 - transparency conventions via `userData.treatAsOpaque` and `userData.cannotReceiveAO`
 - blue-noise sampling asset vendored from upstream `src/BlueNoise.js`
+- the neural denoise model and its network, from upstream `n8ao@2.0.1` (`src/NeuralDenoiseModel.json`, `src/NeuralDenoise.js`)
 
 Important upstream licensing note:
 

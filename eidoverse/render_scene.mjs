@@ -2119,7 +2119,12 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                 // N8AO's default gamma-corrected composite double-corrects
                 // and washes the whole frame out.
                 n8ao.configuration.gammaCorrection = false;
-                if (_aop.quality) n8ao.setQualityMode(_aop.quality);
+                // N8AO 2.0's neural denoise (vendor/n8ao/NeuralDenoise.js) by default: its
+                // learned weights replace the second denoise pass's hand-tuned ones, which
+                // removes the grain and the frame-to-frame boil of the 16-sample AO. A scene
+                // picks another mode with _aoParams.quality: 'Neural-Low' / 'Neural-Medium'
+                // keep the network with fewer taps; 'Performance' ... 'Ultra' run without it.
+                n8ao.setQualityMode(_aop.quality || 'Neural-High');
                 if (_aop.aoRadius !== undefined) n8ao.configuration.aoRadius = _aop.aoRadius;
                 if (_aop.intensity !== undefined) n8ao.configuration.intensity = _aop.intensity;
                 if (_aop.distanceFalloff !== undefined) n8ao.configuration.distanceFalloff = _aop.distanceFalloff;

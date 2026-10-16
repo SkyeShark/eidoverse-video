@@ -3,6 +3,7 @@ import { NodeMaterial, QuadMesh, RenderTarget, RendererUtils, TempNode, } from "
 import { Fn, If, Loop, NodeUpdateType, abs, clamp, cross, distance, dot, exp, float, floor, fwidth, getScreenPosition, getViewPosition, int, ivec2, mat2, max, min, mix, normalize, passTexture, pow, property, mrt, sRGBTransferOETF, smoothstep, step, sub, texture, textureLoad, uniform, uniformArray, uv, vec2, vec3, vec4, } from "npm:three@0.184.0/tsl";
 import bluenoiseBits from "./BlueNoise.js";
 import { applyQualityMode, createDefaultN8AOConfiguration, generateDenoiseSamples, generateHemisphereSamples, resolveDisplayMode, } from "./math.js";
+import { neuralDenoiseState } from "./NeuralDenoise.js";
 /**
  * Custom version of three.js's getNormalFromDepth that accepts a resolution
  * uniform instead of calling textureSize(). The built-in version generates
@@ -129,6 +130,7 @@ export class N8AONode extends TempNode {
     aoMaterial = new NodeMaterial();
     accumulationMaterial = new NodeMaterial();
     blurMaterial = new NodeMaterial();
+    neuralBlurMaterial = new NodeMaterial();
     compositeMaterial = new NodeMaterial();
     depthCopyMaterial = new NodeMaterial();
     downsampleMaterial = new NodeMaterial();
@@ -193,6 +195,8 @@ export class N8AONode extends TempNode {
     width = 1;
     height = 1;
     needsFrame = true;
+    neuralDenoiseReady = false;
+    neuralDenoiseWarningKey = null;
     autoDetectTransparency = true;
     sharedContext = null;
     rendererState;
@@ -216,6 +220,7 @@ export class N8AONode extends TempNode {
         this.depthCopySourceTextureNode = texture(this.depthTexture);
         this.aoMaterial.name = "N8AO.AO";
         this.blurMaterial.name = "N8AO.Blur";
+        this.neuralBlurMaterial.name = "N8AO.NeuralBlur";
         this.accumulationMaterial.name = "N8AO.Accumulation";
         this.compositeMaterial.name = "N8AO.Composite";
         this.depthCopyMaterial.name = "N8AO.DepthCopy";
@@ -224,6 +229,8 @@ export class N8AONode extends TempNode {
         this.aoMaterial.depthWrite = false;
         this.blurMaterial.depthTest = false;
         this.blurMaterial.depthWrite = false;
+        this.neuralBlurMaterial.depthTest = false;
+        this.neuralBlurMaterial.depthWrite = false;
         this.accumulationMaterial.depthTest = false;
         this.accumulationMaterial.depthWrite = false;
         this.compositeMaterial.depthTest = false;
@@ -249,6 +256,31 @@ export class N8AONode extends TempNode {
                     this.configureAOPass();
                 }
                 else if (key === "denoiseSamples") {
+                    this.configureDenoisePass();
+                }
+                else if (key === "neuralDenoise") {
+                    // N8AO 2.0: turning neural denoising on applies the configuration its model
+                    // was trained with (16 AO samples, 4/8/16 denoise samples, radius 12, two
+                    // passes, full resolution)
+                    const reconfigureAO = value && (target.aoSamples !== 16 || target.halfRes);
+                    const disableHalfRes = value && target.halfRes;
+                    if (value) {
+                        target.aoSamples = 16;
+                        if (![4, 8, 16].includes(target.denoiseSamples)) {
+                            target.denoiseSamples = 8;
+                        }
+                        target.denoiseRadius = 12;
+                        target.denoiseIterations = 2;
+                        target.halfRes = false;
+                    }
+                    if (disableHalfRes) {
+                        this.configureHalfResTargets();
+                        this.configureCompositePass();
+                        this.setSize(this.width, this.height);
+                    }
+                    if (reconfigureAO) {
+                        this.configureAOPass();
+                    }
                     this.configureDenoisePass();
                 }
                 else if (key === "halfRes") {
@@ -297,6 +329,7 @@ export class N8AONode extends TempNode {
         this.placeholderTransparentTexture.dispose();
         this.aoMaterial.dispose();
         this.blurMaterial.dispose();
+        this.neuralBlurMaterial.dispose();
         this.accumulationMaterial.dispose();
         this.compositeMaterial.dispose();
         this.depthCopyMaterial.dispose();
@@ -402,12 +435,15 @@ export class N8AONode extends TempNode {
             this.quadMesh.render(renderer);
             let readTarget = this.aoTargetA;
             let writeTarget = this.aoTargetB;
+            // N8AO 2.0: the neural material runs as denoise pass two
+            const useNeuralDenoise = this.shouldUseNeuralDenoise();
             for (let blurIteration = 0; blurIteration < this.configuration.denoiseIterations; blurIteration += 1) {
                 this.blurIndexNode.value = blurIteration;
                 this.aoSourceTextureNode.value = readTarget.texture;
                 renderer.setRenderTarget(writeTarget);
-                this.quadMesh.material = this.blurMaterial;
-                this.quadMesh.name = "N8AO.Blur";
+                const neuralPass = useNeuralDenoise && blurIteration === 1;
+                this.quadMesh.material = neuralPass ? this.neuralBlurMaterial : this.blurMaterial;
+                this.quadMesh.name = neuralPass ? "N8AO.NeuralBlur" : "N8AO.Blur";
                 this.quadMesh.render(renderer);
                 const nextReadTarget = writeTarget;
                 const nextWriteTarget = readTarget;
@@ -614,6 +650,46 @@ export class N8AONode extends TempNode {
         const blurNode = this.createBlurNode();
         this.blurMaterial.fragmentNode = this.applySharedContext(blurNode);
         this.blurMaterial.needsUpdate = true;
+        // N8AO 2.0: the neural material exists only with neuralDenoise on and 4, 8 or 16 denoise samples
+        this.neuralDenoiseReady = this.configuration.neuralDenoise === true
+            && [4, 8, 16].includes(this.configuration.denoiseSamples);
+        if (this.neuralDenoiseReady) {
+            this.neuralBlurMaterial.fragmentNode = this.applySharedContext(this.createBlurNode(true));
+            this.neuralBlurMaterial.needsUpdate = true;
+        }
+    }
+    shouldUseNeuralDenoise() {
+        if (!this.configuration.neuralDenoise) {
+            this.neuralDenoiseWarningKey = null;
+            return false;
+        }
+        const incompatibilities = [];
+        if (this.configuration.aoSamples !== 16) {
+            incompatibilities.push(`aoSamples is ${this.configuration.aoSamples} (expected 16)`);
+        }
+        if (![4, 8, 16].includes(this.configuration.denoiseSamples)) {
+            incompatibilities.push(`denoiseSamples is ${this.configuration.denoiseSamples} (expected 4, 8, or 16)`);
+        }
+        if (this.configuration.denoiseRadius !== 12) {
+            incompatibilities.push(`denoiseRadius is ${this.configuration.denoiseRadius} (expected 12)`);
+        }
+        if (this.configuration.denoiseIterations !== 2) {
+            incompatibilities.push(`denoiseIterations is ${this.configuration.denoiseIterations} (expected 2)`);
+        }
+        if (this.configuration.halfRes) {
+            incompatibilities.push('halfRes is enabled (expected full resolution)');
+        }
+        if (incompatibilities.length > 0) {
+            const warningKey = incompatibilities.join('; ');
+            if (warningKey !== this.neuralDenoiseWarningKey) {
+                console.warn(`[N8AO] neuralDenoise is enabled but cannot run: ${warningKey}. `
+                    + 'Neural denoising has been disabled; standard denoising will be used.');
+                this.neuralDenoiseWarningKey = warningKey;
+            }
+            return false;
+        }
+        this.neuralDenoiseWarningKey = null;
+        return this.neuralDenoiseReady;
     }
     configureAccumulationPass() {
         const fragmentNode = Fn(() => {
@@ -777,7 +853,7 @@ export class N8AONode extends TempNode {
             return result;
         })();
     }
-    createBlurNode() {
+    createBlurNode(neural = false) {
         const resolution = this.resolutionNode;
         const projectionMatrixInverse = this.projectionMatrixInverseNode;
         const aoDepthNode = this.getAoDepthNode();
@@ -807,13 +883,14 @@ export class N8AONode extends TempNode {
                     .div(128)
                     .toVar();
                 const noise = blueNoiseNode.sample(blueNoiseUv).toVar();
-                const angle = blurIndexNode
+                // N8AO 2.0: the neural material is only bound for denoise iteration two
+                const angle = (neural ? noise.z.mul(Math.PI * 2) : blurIndexNode
                     .equal(0)
                     .select(noise.w.mul(Math.PI * 2), blurIndexNode
                     .equal(1)
                     .select(noise.z.mul(Math.PI * 2), blurIndexNode
                     .equal(2)
-                    .select(noise.y.mul(Math.PI * 2), noise.x.mul(Math.PI * 2))))
+                    .select(noise.y.mul(Math.PI * 2), noise.x.mul(Math.PI * 2)))))
                     .toVar();
                 const rotationSin = angle.sin().toVar();
                 const rotationCos = angle.cos().toVar();
@@ -825,6 +902,7 @@ export class N8AONode extends TempNode {
                     .toVar();
                 const invDistance = vec3(1).x.div(distanceFalloffToUse).toVar();
                 const totalWeight = float(1).toVar();
+                const neuralState = neural ? neuralDenoiseState(normal, radiusToUse, distanceFalloffToUse) : null;
                 Loop({
                     condition: "<",
                     end: int(denoiseSamples),
@@ -850,6 +928,11 @@ export class N8AONode extends TempNode {
                         .toVar();
                     occlusion.addAssign(sampleOcclusion.mul(rangeCheck));
                     totalWeight.addAssign(rangeCheck);
+                    if (neuralState) {
+                        If(sampleDepth.notEqual(1), () => {
+                            neuralState.encodeTap(sampleViewPosition.sub(viewPosition), sampleNormal, sampleOcclusion, tangentPlaneDistance);
+                        });
+                    }
                 });
                 const denoisedOcclusion = occlusion
                     .div(totalWeight.greaterThan(0).select(totalWeight, 1))
@@ -858,6 +941,10 @@ export class N8AONode extends TempNode {
                     .equal(0)
                     .select(1, clamp(denoisedOcclusion, 0, 1))
                     .toVar();
+                if (neuralState) {
+                    // the model's correction to the bilateral result, from the taps and the global token
+                    fixedOcclusion.assign(clamp(fixedOcclusion.add(neuralState.finish(fixedOcclusion, blurWorldRadiusNode, distanceFalloffNode)), 0, 1));
+                }
                 result.assign(vec4(fixedOcclusion, normal.mul(0.5).add(0.5)));
             });
             return result;
