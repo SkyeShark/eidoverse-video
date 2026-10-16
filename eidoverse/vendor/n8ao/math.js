@@ -28,6 +28,7 @@ export function createDefaultN8AOConfiguration() {
         transparencyAware: false,
         stencil: false,
         accumulate: false,
+        neuralDenoise: false,
     };
 }
 export function generateHemisphereSamples(sampleCount) {
@@ -57,6 +58,17 @@ export function generateDenoiseSamples(numSamples, numRings) {
     return samples;
 }
 export function applyQualityMode(configuration, mode) {
+    // N8AO 2.0: the neural modes use the configuration the model was trained with
+    if (mode === "Neural-Low" || mode === "Neural-Medium" || mode === "Neural-High") {
+        configuration.aoSamples = 16;
+        configuration.denoiseSamples = { "Neural-Low": 4, "Neural-Medium": 8, "Neural-High": 16 }[mode];
+        configuration.denoiseRadius = 12;
+        configuration.denoiseIterations = 2;
+        configuration.halfRes = false;
+        configuration.neuralDenoise = true;
+        return;
+    }
+    configuration.neuralDenoise = false;
     if (mode === "Performance") {
         configuration.aoSamples = 8;
         configuration.denoiseSamples = 4;
