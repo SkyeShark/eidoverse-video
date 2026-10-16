@@ -262,7 +262,6 @@ export class N8AONode extends TempNode {
                     // N8AO 2.0: turning neural denoising on applies the configuration its model
                     // was trained with (16 AO samples, 4/8/16 denoise samples, radius 12, two
                     // passes, full resolution)
-                    const reconfigureAO = value && (target.aoSamples !== 16 || target.halfRes);
                     const disableHalfRes = value && target.halfRes;
                     if (value) {
                         target.aoSamples = 16;
@@ -278,9 +277,8 @@ export class N8AONode extends TempNode {
                         this.configureCompositePass();
                         this.setSize(this.width, this.height);
                     }
-                    if (reconfigureAO) {
-                        this.configureAOPass();
-                    }
+                    // the AO pass too: its sample count, and the normals it hands the denoise passes
+                    this.configureAOPass();
                     this.configureDenoisePass();
                 }
                 else if (key === "halfRes") {
@@ -738,9 +736,15 @@ export class N8AONode extends TempNode {
         const screenSpaceRadiusNode = this.screenSpaceRadiusNode;
         const aoSamples = this.configuration.aoSamples;
         const halfRes = this.configuration.halfRes;
+        // eidoverse: with the neural denoise, the denoise passes read the G-buffer's shading normals (this.normalNode,
+        // directionToColor encoded), smooth across a low-poly mesh's facets. The depth-derived normals are flat per
+        // facet, and the model keeps the AO's facet-to-facet steps as creases: bands on every round shell. The AO
+        // itself keeps the depth normals
+        const sceneNormalNode = this.configuration.neuralDenoise === true && !halfRes ? this.normalNode : null;
         return Fn(() => {
             const uvNode = uv();
             const depth = aoDepthNode.sample(uvNode).x.toVar();
+            const sceneNormal = sceneNormalNode ? sceneNormalNode.sample(uvNode).xyz.toVar() : null;
             const encodedNormal = property("vec3");
             const result = property("vec4");
             If(depth.equal(1), () => {
@@ -847,7 +851,7 @@ export class N8AONode extends TempNode {
                     });
                 });
                 const occlusion = clamp(vec3(1).x.sub(occluded.div(totalWeight.equal(0).select(1, totalWeight))), 0, 1).toVar();
-                encodedNormal.assign(normal.mul(0.5).add(0.5));
+                encodedNormal.assign((sceneNormal ? normalize(sceneNormal.mul(2).sub(1)) : normal).mul(0.5).add(0.5));
                 result.assign(vec4(occlusion, encodedNormal));
             });
             return result;

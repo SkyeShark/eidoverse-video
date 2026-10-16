@@ -17,3 +17,10 @@ N8AO 2.0's neural denoise is ported in from npm `n8ao@2.0.1`
 Checked on the GPU against a plain-JS transcription of upstream's math (random
 tap tokens, real tap geometry through the local frame, the global-only path):
 largest difference 1.1e-7.
+
+One change from upstream: with `neuralDenoise` on, the AO pass hands the
+denoise passes the G-buffer's shading normals (`normalNode`, the scene pass's
+MRT normal) where upstream stores the depth-derived ones. On game-resolution
+meshes the depth normals are flat per facet, and the model kept the AO's
+facet-to-facet steps as creases: bands on every round shell. The AO itself
+still samples its hemisphere about the depth normals.
