@@ -2125,7 +2125,11 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
                 // picks another mode with _aoParams.quality: 'Neural-Low' / 'Neural-Medium'
                 // keep the network with fewer taps; 'Performance' ... 'Ultra' run without it.
                 n8ao.setQualityMode(_aop.quality || 'Neural-High');
-                if (_aop.aoRadius !== undefined) n8ao.configuration.aoRadius = _aop.aoRadius;
+                // The AO radius defaults to 0.3 m, the contact scale of people and props. N8AO's own
+                // 5 world units sample a whole room around a 1.8 m figure, and the denoise spreads that
+                // into a grey cloud on the floor and a halo round the silhouette. A scene raises it for
+                // architecture-scale occlusion and lowers it for tabletop work.
+                n8ao.configuration.aoRadius = _aop.aoRadius ?? 0.3;
                 if (_aop.intensity !== undefined) n8ao.configuration.intensity = _aop.intensity;
                 if (_aop.distanceFalloff !== undefined) n8ao.configuration.distanceFalloff = _aop.distanceFalloff;
                 const n8aoOut = n8ao.getTextureNode();

@@ -83,10 +83,10 @@ f.setPushers([{ x: p.x, y: p.y, z: p.z, r: 1.1 }]);
     (`lod: false` keeps full detail; push it out for 1080p close work).
   - Lookdev: `field.heads` lists each head's plant-local centre `c`, axis `a`,
     diameter `d` and wind weight `aH` for aiming cameras.
-  - Under the default auto-enhance, N8AO's 5 m radius reads a head's own cup
-    and stem as deep occlusion and blackens heads seen from behind; for
-    flower-scale shots set `globalThis._aoParams = { aoRadius: 0.3,
-    intensity: 2, distanceFalloff: 0.5 }` in `setup()`.
+  - The default auto-enhance runs N8AO at a 0.3 m radius, a flower head's
+    scale. For flower-scale shots also set `globalThis._aoParams = {
+    intensity: 2, distanceFalloff: 0.5 }` in `setup()`, so a head's own cup
+    and stem don't read as deep occlusion from behind.
   ```js
   // a mixed desert superbloom (~20k plants): interleaved seeds, one cohort
   // turned to the sun; at dusk every stroke closes
