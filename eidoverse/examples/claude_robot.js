@@ -13,6 +13,14 @@ const smooth = (a, b, x) => ease(Math.min(1, Math.max(0, (x - a) / (b - a))));
 // a 0 -> 1 -> 0 bump over [t0, t1]
 const bump = (t, t0, t1) => (t <= t0 || t >= t1) ? 0 : Math.sin(Math.PI * ease((t - t0) / (t1 - t0)));
 
+// three's mixer writes a bone only when its mixed value changed (PropertyMixer.apply), so after the pose reset in
+// renderFrame a bone whose key holds would sit at rest for as long as it holds (thumbs, fingers, the hips): write
+// every active binding's value from the accumulator the update just filled, where apply reads it
+function writeAll(mixer) {
+    const b = mixer._bindings, n = mixer._nActiveBindings, k = mixer._accuIndex + 1;
+    for (let i = 0; i < n; i++) b[i].binding.setValue(b[i].buffer, k * b[i].valueSize);
+}
+
 // the white shells under a studio key read as white, not glow: the bloom only takes the face's light
 globalThis._bloomParams = { ...(globalThis._bloomParams || {}), threshold: 3.2 };
 
@@ -157,13 +165,21 @@ function face(vrm, t) {
 globalThis.renderFrame = async function (t) {
     const { vrm, clip, DOF, stats, feet, camera } = globalThis._robot;
     const dt = 1 / FPS;
-    // the clip, from the rest pose each frame (a bone the clip leaves alone must not keep last frame's additions)
+    // the clip, from the rest pose each frame (a bone the clip leaves alone must not keep last frame's additions).
+    // three's mixer writes a bone only when its value changed, so every value it computed is written after it
+    // (writeAll: no held key leaves its bone at rest), and the bones the arm pass reads are put back to the clip's
+    // last pose after the reset and kept right after the mixer (the module's own guard, for loops without writeAll)
     vrm.humanoid.resetNormalizedPose();
+    DOF.restoreArmPose(vrm);
     clip.mixer.update(dt);
+    writeAll(clip.mixer);
+    DOF.keepArmPose(vrm);
     // the hardware pass: the torso's, clavicles' and neck's turns re-homed to the joints that have them, then each
-    // joint projected onto its real axes and clamped (legs, arms, hands)
+    // joint projected onto its real axes and clamped (legs, arms, hands), the legs kept clear of each other (dt is
+    // the frame's real time step: the legs' pass reads its stance velocities over it)
     DOF.rehomeBody(vrm, stats);
     DOF.applyHardwareDOF(vrm, DOF.LEG_JOINTS, stats);
+    DOF.applyLegClearance(vrm, stats, dt);
     DOF.applyArmDOF(vrm, stats, dt);
     DOF.applyHandDOF(vrm, stats);
     // the face, then the head and the crown, which follow its expressions at their actuators' rates
