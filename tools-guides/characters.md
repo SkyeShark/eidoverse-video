@@ -794,17 +794,23 @@ DOF.initCrown(vrm);
 const clip = await globalThis.playVRMADefault(vrm, 'idle');
 const stats = {};                     // the largest correction per joint, deg
 
-// every frame:
+// every frame (dt = the frame's real time step):
 vrm.humanoid.resetNormalizedPose();
+DOF.restoreArmPose(vrm);              // the clip's last arm pose, back after the reset
 clip.mixer.update(dt);
+writeAll(clip.mixer);                 // the example's helper: three's mixer skips unchanged values, so
+                                      // without it a held key leaves its bone at rest
+DOF.keepArmPose(vrm);                 // the clip's arm pose, kept for the arm pass
 DOF.rehomeBody(vrm, stats);
 DOF.applyHardwareDOF(vrm, DOF.LEG_JOINTS, stats);
+DOF.applyLegClearance(vrm, stats, dt); // the legs kept clear of each other
 DOF.applyArmDOF(vrm, stats, dt);
 DOF.applyHandDOF(vrm, stats);
 // ... set the face's expressions ...
 DOF.applyHeadExpression(vrm, dt);     // the head first: the crown reads its roll
 DOF.applyCrown(vrm, dt);
 vrm.update(dt);
+// after a cut or a seek (a pose drawn out of order): DOF.resetArmDOF(vrm), once
 ```
 
 **The limits** (exported: `LEG_JOINTS`, `HEAD_RANGE`, `SPINE_RANGE`, `ARM`):
