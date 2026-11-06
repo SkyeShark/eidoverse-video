@@ -1,0 +1,13 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 8.0,
+    "script": "eidoverse/examples/claude_robot.js",
+    "outputVideo": "eidoverse/examples/claude_robot.mp4",
+    "skipPreflightQA": true,
+    "assets": {
+        "character_vrm": "eidoverse/assets/vrms/claude_robot.vrm",
+        "joints": "eidoverse/assets/vrms/claude_robot.joints.json"
+    }
+}
