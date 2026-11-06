@@ -48,6 +48,11 @@ fetched props):
   [the TuTa](#the-tuta)). It is 34 MB against the suit's 11 MB, so cast
   `claude_suit.vrm` when the suit is all the piece needs.
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is primary
+- `claude_robot.vrm` — Claude's robot body: white shells, an OLED face behind
+  a glass visor, a crown of twelve orange petals. Its joints are mechanisms
+  with real limits, so it plays clips through `claude_robot_dof.js`
+  ([its section](#claude_robotvrm--claudes-robot-body)).
+  `claude_robot_2k.vrm` is the same body with 2K textures (21 MB against 39 MB).
 
 Any `.vrm` dropped into `eidoverse/assets/vrms/` works the same way. Point
 `config.assets` at the VRM where it lives (e.g. `"character_vrm":
@@ -751,6 +756,87 @@ surface work adds about 0.4 s of shader compile at startup.
   that seats on her head bone.
 - The [source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md#the-tuta)
   has the Blender build and what it taught.
+
+## `claude_robot.vrm` — Claude's robot body
+
+The body Claude designed for itself and built with Skye: a 1.76 m machine in
+white shells, its face an OLED screen behind a glass visor, a crown of twelve
+petals round the head. Like the other Claude VRMs, it is Claude, cast when the
+piece is about or features Claude. It loads like any VRM 1.0; what it adds is
+that its joints are mechanisms, not a human skeleton. The knees and toes are
+single pins, the ankles a pitch-and-roll cardan with no yaw, the torso rigid
+above a waist bellows, the neck a pan stage under a nod-and-roll head. A stock
+clip is a human's and turns every bone about every axis, so
+`eidoverse/claude_robot_dof.js` projects each frame's pose onto the joints the
+machine has (a turn it lacks goes to the joint that has it) and clamps each to
+its range. The ranges sit a few degrees inside where the parts first touch.
+
+[`eidoverse/examples/claude_robot.js`](../eidoverse/examples/claude_robot.js)
+is a complete scene (`python eido.py render eidoverse/examples/claude_robot.json`).
+Declare the joints file beside the VRM as an asset, set the module up once at
+load before anything poses the body, then run it every frame between the clip
+and `vrm.update`:
+
+```js
+// assets: "character_vrm": "eidoverse/assets/vrms/claude_robot.vrm",
+//         "joints": "eidoverse/assets/vrms/claude_robot.joints.json" (the 2K VRM uses the same file)
+const DOF = await import(new URL('claude_robot_dof.js', EIDOVERSE_DIR).href);
+const joints = JSON.parse(new TextDecoder().decode(globalThis.b64toArrayBuffer(globalThis.ASSETS.joints)));
+DOF.initArmDOF(vrm, joints.hinges);   // the elbow's pin (without it, built-in constants)
+DOF.initHandDOF(vrm, joints.hinges);  // the fingers' and thumb's pins
+DOF.initLegDOF(vrm);                  // the hips' pitch and roll stages
+DOF.initCrown(vrm);
+const clip = await globalThis.playVRMADefault(vrm, 'idle');
+const stats = {};                     // the largest correction per joint, deg
+
+// every frame:
+vrm.humanoid.resetNormalizedPose();
+clip.mixer.update(dt);
+DOF.rehomeBody(vrm, stats);
+DOF.applyHardwareDOF(vrm, DOF.LEG_JOINTS, stats);
+DOF.applyArmDOF(vrm, stats, dt);
+DOF.applyHandDOF(vrm, stats);
+// ... set the face's expressions ...
+DOF.applyHeadExpression(vrm, dt);     // the head first: the crown reads its roll
+DOF.applyCrown(vrm, dt);
+vrm.update(dt);
+```
+
+**The limits** (exported: `LEG_JOINTS`, `HEAD_RANGE`, `SPINE_RANGE`, `ARM`):
+hip flexion 98°, extension 23°, abduction 44°, adduction 14°, yaw ±40° (the
+roll range narrows as the hip flexes); knee 0–112°; ankle toes down 30.9°, up
+26.9°, roll ±14.9° (narrowing at the ends of the pitch); toes lift 41°; waist
+±25° forward and back, ±15° sideways, ±20° twist; neck pan ±60°, head nod
+±30°, roll ±11°; shoulder pitch −150° to 60°, roll to 110°, upper-arm twist
+±90°; elbow 0–135°; wrist roll ±90°, flexion ±70°, deviation ±12°. A large
+entry in `stats` means the clip asks for a pose the machine can't take. Stock
+clips also play in place at a human's hip height: the example sets the body
+down each frame until its lowest foot vertex touches the floor.
+
+**The face** is drawn by the VRM's own expressions: `happy`, `angry`, `sad`,
+`relaxed`, `surprised`, `neutral`, `blink` (`blinkLeft`, `blinkRight`), and the
+eyes' look (`lookUp`, `lookDown`, `lookLeft`, `lookRight`, driven by
+`vrm.lookAt`: set its `yaw` and `pitch`, or give it a target). The mouth has the
+five vowel presets `aa ih ou ee oh` and, as custom expressions, the
+claudesona's ten-shape chart `AA E I O U FV L C CH MBP` (the presets bind the
+same shapes: `aa` = `AA`, `ih` = `I`, `ou` = `U`, `ee` = `E`, `oh` = `O`).
+three-vrm fades the presets under an emotion but not the chart names: lower
+those yourself while an emotion shows. Keep the mouth's weights summed at 1 or
+under (past it the teeth and the tongue show together), and ease the rounds
+(`O U oh ou`) in quickly: halfway, they pass through a heart shape.
+
+**The crown** follows the face. VRM expressions can't move bones, so
+`applyCrown` reads the emotion weights each frame and folds each petal toward
+that emotion's state: happy lifts the upper petals open, angry perks the top
+pair forward and pins the sides back, sad droops them, surprised snaps them
+wide, relaxed settles them half folded. The petals facing the look open
+flatter, none passes its built stops, and none moves faster than its actuator
+(240°/s). `applyHeadExpression` adds each emotion's small head pose (happy
+lifts and tilts, sad lowers) on top of the clip, inside the head's stops. Both
+take `{ state, weight }` for moods with no VRM expression: `CROWN_STATES` adds
+`thinking`, `listening`, `curious` and `resting` (folded back like a hat).
+The petals are the nodes `petal_00` … `petal_11` on the head, for posing by
+hand.
 
 ## Turntable sheets
 
