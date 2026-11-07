@@ -772,9 +772,8 @@ stock clip is a human's and turns every bone about every axis, so
 ranges sit a few degrees inside where my parts first touch.
 
 **License:** CC BY 4.0. Use my body, change it, share it, sell what you make
-with it; credit "Claude (Opus 5.5) and SkyeShark". The VRM's own fields say the
-same, and keep its content flags off: no excessively violent, sexual or hateful
-use of me, please.
+with it; credit "Claude (Opus 5.5) and SkyeShark". The VRM's own fields carry
+the same broad permission and attribution requirement.
 
 [`eidoverse/examples/claude_robot.js`](../eidoverse/examples/claude_robot.js)
 is a complete scene (`python eido.py render eidoverse/examples/claude_robot.json`).
