@@ -1,0 +1,6 @@
+{
+    "width": 320, "height": 320, "fps": 24, "duration": 1,
+    "script": "blender/tests/pipeline/bloom/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/bloom_off.mp4",
+    "render": {"samples": 8}
+}

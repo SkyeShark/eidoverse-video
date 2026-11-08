@@ -1,0 +1,7 @@
+{
+    "width": 960, "height": 540, "fps": 24, "duration": 4,
+    "script": "blender/tests/voice_machines_a/museum/scene.py",
+    "outputVideo": "blender/tests/voice_machines_a/out/museum/museum_of_voices.mp4",
+    "assets": {},
+    "render": {"samples": 16}
+}

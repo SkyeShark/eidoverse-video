@@ -1,0 +1,21 @@
+"""eidoblend.look: the look family of the Blender edition (Blender 5.2, EEVEE). Cameras, lights, the EEVEE look presets,
+the post chain, exposure by measurement, and the review tools.
+
+Modules (import the one you need; this package imports none of them, so frame_stats runs outside Blender too):
+    render_settings  apply_auto_enhance(scene, 'film'|'probe'|'preview', ...), set_view, summary
+    exposure         exposure_sweep, pick_exposure, auto_expose: one render, every exposure measured
+    frame_stats      the highlight check (share of pixels with a channel >= 250), sequence checks, contact sheets
+    camera           make_camera, set_fov, focus_point, look_at_object, moves (dolly, push, orbit, pan, track, zoom,
+                     handheld), focus_on (focus pulls), add_shot / shot_spans
+    camera_safety    CameraSafety: check_camera (the keyed path, every frame), check_path, safe_position
+    camera_audit     camera_motion_audit (bounce), framing_audit (speck), focus_audit (soft subject)
+    lighting         units (lux, candela -> W), three-point rigs, practicals, create_rt_lighting, light probes, log_lights
+    stage_rig        create_stage_rig: pars and profiles hung on pipes, lenses glowing at their light's level
+    post             chain (the compositor order: bloom, under, overlay, over), custom_effects (the effect registry)
+    probe            render_stills at times (jump / preroll / replay), each measured
+    probe_cli        the command line: --blend X --at 1.5 --at 4 [--preroll 1] [--compare]
+    audit            the audit ledger (records, inventory, declarations, coverage, digest)
+    overlap          exact mesh-mesh overlap from BVH trees, push_clear
+
+Guides: tools-guides/camera-lighting.md, postprocessing.md, render-review.md, stack-notes.md.
+"""

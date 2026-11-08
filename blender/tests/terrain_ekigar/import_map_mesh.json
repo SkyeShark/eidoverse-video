@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "three/tsl": "./mesh_tsl_stub.mjs",
+    "three/webgpu": "file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three/build/three.module.js"
+  }
+}

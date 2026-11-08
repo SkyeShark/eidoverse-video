@@ -1,0 +1,6 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 16,
+    "script": "blender/tests/pipeline2/defaults/scene.py",
+    "outputVideo": "blender/tests/pipeline2/out/defaults.mp4",
+    "render": {"samples": 8}
+}

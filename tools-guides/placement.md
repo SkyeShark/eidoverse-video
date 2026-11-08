@@ -2,290 +2,363 @@
 
 [Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
 
-A model's `position` is its origin — sometimes a corner, sometimes the
-front face, sometimes an arbitrary studio pivot — so eyeballed raw
-coordinates give you chairs embedded in tables. The placement helpers (all
-on `globalThis`, no import) account for both objects' real bounding boxes
-and raycast the geometry where it matters. Set `obj.rotation` first — the
-helpers read the post-rotation bbox — and read the model's `_preview.jpg`
-for its forward/up axes before deciding that rotation.
+This is the Blender 5.2 EEVEE edition (`blender/eidoblend/placement/`). A
+model's location is its origin — sometimes a corner, sometimes the front
+face, sometimes an arbitrary studio pivot — so eyeballed raw coordinates
+give you chairs embedded in tables. The placement helpers account for both
+objects' real bounds and ray-cast the geometry where it matters. Set the
+rotation first — the helpers read the rotated bounds — and read the model's
+`_preview.jpg` for its forward and up axes before deciding that rotation.
+
+```python
+import sys; sys.path.insert(0, '<repo>/blender')
+from eidoblend.placement import place_on, snap_to_ground, scatter_on, place_against, run_placement_audits
+```
+
+**Axes and sides.** Blender is Z up, metres. The sides keep the engine's
+names, mapped through three (x, y, z) → Blender (x, −z, y): **front = −Y**
+(three's +Z, also the glTF importer's front), **behind = +Y**, left = −X,
+right = +X, above = +Z, below = −Z. Engine flags in `userData` are object
+custom properties here, snake_cased: `obj['no_support_check'] = True`.
+
+**Geometry is evaluated, in world space.** Every query reads the evaluated
+mesh (modifiers, Geometry Nodes, shape keys at the current frame), so a
+Displace or Subdivision modifier is seen exactly as it renders; only shader
+displacement is invisible to the helpers. Rays go through a per-object BVH
+built once in the object's own space and cached, so moving an object never
+rebuilds it; after editing a mesh's vertices in place call `clear_cache()`.
+BVH rays hit both sides of a face (no back-face culling).
 
 ## The helpers
 
-- **`placeOn(obj, target, { xz, yOffset, xzOffset, grid, surfaceEps, sink })`**
-  seats the object's bbox bottom on the highest sampled support under its
-  footprint. The current default is `xz: 'auto'`: preserve an already nonzero
-  XZ position, otherwise center on the target. Use `xz: [x,z]` for an explicit
-  world-space bbox-center anchor or `'centered'` to request recentering.
-  `xzOffset: [dx,dz]` adds a relative offset; `yOffset` adjusts seating height.
-  The target may be the scene or a group that contains obj — obj's own
-  subtree is excluded from the supports, so it never lands on itself.
-  `grid` controls footprint sampling (default 7); `surfaceEps` (default
-  0.0006 m) lifts the object a sub-millimetre off the support to avoid
-  coplanar z-fighting — pass `0` for exact contact. `sink` buries that
-  fraction of the object's bbox height into the surface (clamped to 0–0.9;
-  0.15–0.35 suits rocks) and sets `userData._sunkPlacement`, which exempts
-  the object from the hovering/support audit.
-  `placeOn`/`snapToGround` record `userData._supportTarget` for support checks.
-  Inspect the result on sloped or concave surfaces; a sampled highest support
-  is not proof that every part of an object rests flush.
+- **`place_on(obj, target, xy='auto', z_offset=0, xy_offset=None, grid=7,
+  surface_eps=0.0006, sink=None, seed=1)`** seats the object's bounds
+  bottom on the highest sampled support under its footprint. `xy='auto'`
+  (the default) keeps an already non-zero location (anchored at the bounds
+  centre), otherwise centres on the target; `(x, y)` is an explicit
+  world-space bounds-centre anchor, `'centered'` recentres, `'random'` picks
+  a spot seeded by `seed` (the engine used an unseeded random).
+  `xy_offset=(dx, dy)` adds a relative offset; `z_offset` adjusts the
+  height. The target may be an object, a list, a collection, or a group
+  that contains obj — obj's own subtree is never its own support. `grid`
+  sets the footprint sampling; `surface_eps` (0.6 mm) lifts the object a
+  hair off the support so a flat base never lands coplanar with the floor —
+  pass `0` for exact contact. `sink` buries that fraction of the object's
+  height (clamped 0–0.9; 0.15–0.35 suits rocks) and sets
+  `obj['_sunk_placement']`, which the hovering audit respects. It records
+  what obj sits on (`obj['_support_targets']`). Inspect the result on
+  sloped or concave surfaces; a sampled highest support is not proof that
+  every part of an object rests flush.
 
-- **`placeAgainst(obj, ref, side, gap)`** — clearance-aware side placement.
-  side: `'front' | 'behind' | 'left' | 'right' | 'above' | 'below'`; gap is
-  the real visible clearance between bbox edges in meters. "Chair behind
-  desk", "lamp left of monitor". Bbox-based — handles offset origins, but a
-  concave leading face can leave a visible gap.
-- **`placeTouching(obj, target, side, { gap, dir, grid, allowIntersect })`**
-  — the mesh-accurate sibling: raycasts obj's leading face against the
-  target's actual geometry and slides obj along one axis until the surfaces
-  kiss (or `gap` apart). `side` is the direction obj travels (`left(-x)` /
-  `right(+x)` / `front(+z)` / `behind(-z)` / `above(+y)` / `below(-y)`, or
-  an explicit `dir: [x,y,z]`). This is the tool for assembling anything out
-  of pieces — kit parts, several models, your own meshes — flush instead of
-  floating or interpenetrating. Returns `true` on contact, `false` + a
-  warning when no target surface lies that way (fall back to
-  `placeAgainst`). `gap: -0.02` bites in for a tight seam;
-  `allowIntersect: true` tags obj so the clipping audit knows it's meant.
-- **`snapToGround(obj, groundMeshes, { yOffset, below })`** — drop obj to
-  whatever surface is directly below its origin's **world-space** xz, so it
-  works under an offset parent. Handles stairs, slopes, terraced floors. The
-  ground list may include the scene or a group containing obj; obj's own
-  subtree is excluded. Verify the result on fetched-GLTF props (group
-  hierarchies can defeat the snap and leave a prop silently airborne):
-  raycast down from above the bbox centre, log the `bbox.min.y − hit.y`
-  gap, and correct unintended clearance at the asset's scale. Partial burial
-  can help a rock or fallen trunk look settled; use an appropriate negative
-  `yOffset`, rather than the same depth for every prop.
-- **`alignToSurface(obj, target)`** — rotate obj's +Y to the surface normal
-  under it: signs on slanted roofs, props on slopes.
-- **`scatterOn(items, target, { count, minSpacing, rngSeed, sink, tiltMax })`**
-  — spread N items across target's top footprint in an organic layout,
-  deterministic per `rngSeed`. Rocks/boulders/ruins/stumps read planted
-  when partially buried: `sink: [0.15, 0.35]` + `tiltMax: 0.3`. (An
-  ordered row of books on an interior shelf board is a different task —
-  the shelf recipe below.)
-- **`findClearSpot(obj, around, { radius, scene })`** — spiral-search a
-  Vector3 where obj's bbox fits without overlapping anything, for
-  placements no specific surface anchors.
-- **`faceToward(obj, target, { forward })`** — yaw-only aim at an
-  Object3D / Vector3 / [x,z]. `forward` is which local axis the model's
-  nose points along — read it off the preview's axis guides ('+z' default;
-  many GLBs are '-z' or '±x'). Guessed `rotation.y` constants are where
-  statues face the wall.
-- **`driveAlong(obj, waypoints, { duration, forward, startTime, loop })`**
-  — the way to move a vehicle / creature / anything elongated. Returns an
-  function `drive(t)`; call it each frame. Moves obj along a smooth curve through
-  the waypoints and yaws it to face travel — coupled, so it can't slide
-  sideways (a bare `position.x = lerp(...)` sends a model perpendicular to
-  its own wheels; the motion audit flags that as sideways travel;
-  deliberate lateral slides — conveyor, crab — declare
-  `obj.userData.noMotionCheck = true`). Exemptions describe intended motion;
-  they do not correct a mismatched forward axis. `forward` has
-  no default because there is no universal nose axis — read the preview;
-  for vehicles you build yourself, the house convention is nose along +Z.
-  driveAlong cross-checks the declared forward against the model's long
-  axis and warns on perpendicular; backwards it can't detect (no geometry
-  knows which end is the nose) — only the preview shows that. Models that
-  are easy to misread get a curated `driveAlong/faceToward forward axis`
-  line from fetch_model — when a hint is printed, it wins.
-  ```js
-  // read THIS model's preview for its nose axis — per-model, never copied
-  const drive = driveAlong(car, [[-8,0],[0,1.5],[6,0]], {
-      duration: 30,
-      forward: '-x',   // from this car's preview; yours will differ
-  });
-  // renderFrame: drive(t);   wheels point where it goes
+- **`place_against(obj, ref, side, gap=0.3)`** — clearance-aware side
+  placement: `'front' | 'behind' | 'left' | 'right' | 'above' | 'below'`,
+  with `gap` metres between the two bounds. "Chair behind desk", "lamp
+  left of monitor". Bounds based: offset origins are handled, a concave
+  leading face can leave a visible gap.
+- **`place_touching(obj, target, side, dir=None, gap=0, grid=8,
+  allow_intersect=False)`** — the mesh-accurate sibling: fans rays over the
+  inner 80 % of obj's leading bounds face along the travel direction and
+  slides obj until it meets the target's real geometry (or stops `gap`
+  short; negative bites in). `side` is the direction obj travels, or an
+  explicit `dir=(x, y, z)`. The tool for assembling pieces flush. Returns
+  `True` on contact, `False` (obj unmoved) when nothing lies that way.
+- **`snap_to_ground(obj, ground, z_offset=0, below=False, grid=None,
+  surface_eps=0.0006)`** — drops obj onto whatever lies under its origin's
+  **world** XY (so it works under a parent). `grid` defaults to 5, or 9 with
+  `below=True`, which casts from obj's current bottom instead of the sky so
+  it lands on the nearest surface beneath (an interior shelf board). The
+  ground may include a group containing obj; obj's own subtree is excluded.
+  Partial burial helps a rock or fallen trunk look settled: a negative
+  `z_offset` sized to the asset, not one depth for every prop.
+- **`align_to_surface(obj, target, keep_yaw=True)`** — turns obj's +Z to the
+  surface normal under it: signs on slanted roofs, props on slopes. It keeps
+  obj's heading (the engine's version replaced the whole rotation:
+  `keep_yaw=False`).
+- **`scatter_on(items, target, count=None, min_spacing=0.1, rng_seed=1,
+  sink=0, tilt_max=0)`** — spread items over the target's top footprint in
+  an organic layout, deterministic per `rng_seed` (the engine's LCG and its
+  sample order through the axis map: a seed lays out as it did in WebGPU).
+  Rocks, ruins and stumps read planted when partly buried:
+  `sink=(0.15, 0.35)` + `tilt_max=0.3`.
+- **`find_clear_spot(obj, around, radius=2.0, samples=16, scene=None,
+  exclude=None, z=None)`** — spiral search for a spot where obj's bounds
+  overlap nothing; returns a world `Vector` for its bottom centre, or None.
+  Seat the object there with `place_on(obj, ground, xy=(spot.x, spot.y))`.
+  The ground is not an obstacle: terrain (`trimesh_collider`) and anything
+  whose top is at or below the spot's bottom (a floor) are skipped. The
+  engine's `findClearSpot` counted the terrain's whole box and found nothing
+  on hilly ground.
+- **`face_toward(obj, target, forward='-y')`** — yaw-only aim at an object
+  or a point `(x, y)` / `(x, y, z)`. `forward` is the local axis the
+  model's nose points along: `'-y'` (the default: glTF imports face −Y),
+  `'+y'`, `'+x'`, `'-x'`. Guessed rotation constants are where statues face
+  the wall.
+- **`drive_along(obj, waypoints, duration=10, forward=None, start_time=0,
+  loop=False)`** — the way to move a vehicle / creature / anything
+  elongated: it keys location and Z rotation on every frame (LINEAR) along
+  the engine's centripetal Catmull-Rom path, heading coupled to travel, so
+  it cannot slide sideways; it also returns `drive(t)` to pose it at t
+  seconds. `forward` has no default because there is no universal nose
+  axis — read the preview; for vehicles you build, nose along −Y and
+  `forward='-y'`. It warns when the declared forward is perpendicular to
+  the model's long axis and when the mesh sits far from its origin (the
+  body would orbit the path: parent it under an Empty at its centre and
+  drive the Empty). Backwards it can't detect — only the preview shows that.
+  ```python
+  drive = drive_along(car, [(-8, 0), (0, -1.5), (6, 0)], duration=30,
+                      forward='+x')       # from THIS car's preview; yours will differ
   ```
-- **`stationBeside(obj, machine, { gap, side, forward })`** — a worker or
-  machine that operates on something stands beside it, facing it: a robot
-  arm beside its conveyor, a bartender behind the bar. Places obj clear of
-  the machine's working edge, base at floor level, nose aimed at the line.
-  The audit flags a conveyor/belt/assembly-line with a tall object planted
-  through its surface (riding parcels are fine; intentional intrusion:
-  `obj.userData.noIntrusionCheck = true`).
-  ```js
-  stationBeside(robotArm, conveyor, { gap: 0.3, forward: '+z' });
-  ```
+- **`station_beside(obj, machine, gap=0.2, side=None, face=True,
+  forward='-y')`** — a worker or machine that operates on something stands
+  beside it, facing it: clear of the working edge (the machine's short
+  horizontal axis), base at its floor level, nose aimed at the line.
 
 ## Composition recipes
 
-```js
-// Desk on the floor, chair behind it, laptop on it, mug right of laptop.
-placeOn(desk, floor);                          // desk bottom on floor
-placeAgainst(chair, desk, 'behind', 0.25);     // 25cm of clearance
-placeOn(laptop, desk, { xz: 'centered' });     // laptop centered on desk
-placeAgainst(mug, laptop, 'right', 0.08);      // mug 8cm to the right
-snapToGround(mug, [desk]);                    // seat vertically, preserve its XZ
+```python
+# Desk on the floor, chair behind it, laptop on it, mug right of laptop.
+place_on(desk, floor)                          # desk bottom on floor
+place_against(chair, desk, 'behind', 0.25)     # 25 cm of clearance (+Y side)
+place_on(laptop, desk, xy='centered')          # laptop centred on desk
+place_against(mug, laptop, 'right', 0.08)      # mug 8 cm to the right
+snap_to_ground(mug, [desk])                    # seat vertically, keep its XY
 
-// Character standing on stairs.
-character.position.set(2, 5, 1);               // approximate xz target
-snapToGround(character, [stair1, stair2, stair3, landing]);
+# Character standing on stairs (a VRM's root is its armature: character = me.arm).
+character.location = (2, -1, 5)                # approximate spot
+snap_to_ground(character, [stair1, stair2, landing])
 
-// Eight boulders settled across a clearing, partly buried and leaning.
-scatterOn(boulders, clearing, { count: 8, minSpacing: 1.2, rngSeed: 7,
-                                sink: [0.15, 0.35], tiltMax: 0.3 });
+# Eight boulders settled across a clearing, partly buried and leaning.
+scatter_on(boulders, clearing, min_spacing=1.2, rng_seed=7, sink=(0.15, 0.35), tilt_max=0.3)
 
-// A bench somewhere clear near the fountain.
-const spot = findClearSpot(bench, fountain.position, { radius: 3, scene });
-if (spot) bench.position.copy(spot);
+# A bench somewhere clear near the fountain, then seated on the ground there.
+spot = find_clear_spot(bench, fountain.location, radius=3)
+if spot:
+    place_on(bench, terrain, xy=(spot.x, spot.y))
 ```
 
-**Filling a shelf / cabinet / bookcase (interior boards):**
-`placeOn(item, shelf)` snaps to the unit's *outer top*, and hand-guessed
-board heights drop books inside the carcass. The board's true surface comes
-from `snapToGround`:
-
-```js
-// Books standing upright, spines out, on the second board from the top.
-// 1. Rotate each book upright + spine-out first (check its preview — many
-//    book GLBs sit flat by default).
-// 2. Position inside the shelf footprint, a little above the target board,
-//    then snapToGround({below:true}) onto the board beneath it.
-for (let i = 0; i < n; i++) {
-    const b = bookProto.clone();
-    b.rotation.set(0, spineOutYaw, 0);          // upright, spine out
-    b.position.set(shelfX - 0.3 + i * 0.05,     // along the board
-                   boardApproxY + 0.25,         // just above the target board
-                   shelfZ);                     // inset from the front edge
-    snapToGround(b, [shelf], { below: true });  // drops onto the board
-    scene.add(b);
-}
-```
-
-The books touch the board because the ray finds its true top. Keep them
-inset from the front edge with a sliver of spacing so they don't z-fight.
+**Filling a shelf / cabinet (interior boards):** `place_on(item, shelf)`
+lands on the unit's outer top. Position the item inside the footprint a
+little above the board you want, then `snap_to_ground(item, shelf,
+below=True)`; or `place_inside(item, shelf, aim_z=...)` with `aim_z`
+between the board you want and the one above (it centres the item in the
+footprint, matches the shelf's heading and does the snap). The engine read
+the board heights off the preview; a cast reads them exactly:
+`scene.ray_cast` straight down through the unit, again from just under each
+hit, keeping the surfaces every cast meets (the `boards()` helper in
+[the pipeline's renders](../blender/tests/pipeline2/test_renders.py), which
+run these recipes as written: the desk, the rubble, the bench, a worn metal
+rack filled with nine workshop props, claude.vrm dropped onto a landing).
 
 ## How placement goes wrong
 
-- **Absolute coordinates with offset pivots:** `obj.position.x = x` places
-  the origin at x, not the bbox center. A relative translation moves both
-  origin and geometry together; it is valid when the offset is deliberate.
-  Use an explicit helper anchor when you mean the visible bbox center.
-- **Mixing raw world coords and helpers for related props**: helper-placed
-  desk + raw-coord props on it means the props assume the desk surface is
-  at world 0 (it usually isn't) and float while the helper-placed ones sit
-  right. Once a surface is helper-placed, everything on it places relative
-  to it.
-- **Skipping the preview**: a fetched GLB can face any axis and sit on any
-  side — the preview tells you the rotation to set before placing.
+- **Absolute coordinates with offset pivots:** `obj.location.x = x` places
+  the origin at x, not the bounds centre. A relative move shifts origin and
+  geometry together; use a helper anchor when you mean the visible centre.
+- **Mixing raw coordinates and helpers for related props:** once a surface
+  is helper-placed, everything on it places relative to it.
+- **Skipping the preview:** a fetched model can face any axis and sit on any
+  side; the preview tells you the rotation to set before placing.
 
-## The audits (they run after `setup()`)
+## The audits (they run before a render)
 
-All audits operate on whole placed objects — a multi-part desk or shelf is
-checked as one thing. Warnings are observations to investigate. Bounding-box
-heuristics, nested groups, GPU deformation and intentional overlaps can produce
-false positives or missed cases. Inspect the named geometry and actual motion.
+`run_placement_audits(scene=None, auto_fix=None)` is the hook the render
+harness calls once a scene is built: on **every** build and every hand-edited
+reopen, whether or not the script imports this family, as the WebGPU runner
+ran its checks after every `setup()` (a prop dumped in mid-air by a hand-set
+location is exactly what they catch). All audits work on whole placed
+objects — parentless, not cameras or lights, descending through a lone
+wrapper — so a multi-part desk is checked as one thing. Warnings are
+observations to look at in the probe frames. Bounding boxes, nested groups
+and intentional overlaps can produce false positives or missed cases.
 
-- **`checkClipping(scene)`** — pairwise bbox intersection, reported
-  (intentional parent/child nesting skipped). With the repair opt-in below,
-  intersecting pairs are pushed apart along the shortest-overlap axis. It
-  also runs a mesh-accurate
-  deep-interpenetration pass and prints, by name:
-  `[checkClipping] ⚠ N object(s) substantially INSIDE another` — a whole
-  object engulfed by another (a tree inside a car), as opposed to the bbox
-  "clipping pairs" list, which is mostly resting-contact noise. The engulfed
-  case is a detector: it moves nothing, and the fix is a clear xz
-  (`findClearSpot`) or a proper seat (`placeOn` / `placeTouching`).
-  Intentional overlap (a stake driven into ground, a sword through a body)
-  declares itself: `obj.userData.allowIntersect = true`.
-- **`checkHovering(scene)`** — floating-object audit, descending through a
-  single wrapper group to reach your props. For every placed object it
-  footprint-samples the surface below: **near** (a 0.005–1.0 m gap — the
-  "laptop slightly off the desk" smell) is measured and reported (snapped
-  down only by the repair opt-in); **far** (>1 m
-  above the nearest surface) and **void** (nothing beneath at all — the
-  hand-coords tell) escalate to `[placement] ⚠ RE-RENDER REQUIRED`, since
-  there's no safe snap target. An object goes unflagged three ways: it
-  rests at/near ground level; all its meshes are transparent (glow planes,
-  holograms — auto-skipped); or you declare it a floater:
-  `obj.userData.noSupportCheck = true`. Floating is fully supported —
-  drones, balloons, chandeliers, a character mid-jump — the declaration is
-  what separates them from an accidental float, which stays caught.
-  Objects buried by `placeOn`/`scatterOn` `sink` are skipped.
-- **`checkZFighting(scene)`** — coplanar-surface audit. A poster/screen/label/sign placed at the exact depth of the
-  surface behind it flickers frame-to-frame (the depth buffer can't pick a
-  winner) — offset flat things a few mm proud (`wall.z + 0.005`) or set
-  `material.polygonOffset = true; polygonOffsetFactor = -1`. The repair
-  opt-in nudges flagged panels a few mm out; an intentional flush decal
-  opts out with `obj.userData.noZFightCheck = true`.
+Collection instances count as what they show: an Empty instancing a
+collection (a kit part from `assets.load_kit`, a collection instanced by
+hand) is seated, ray-cast and audited through the real geometry of the
+objects it instances, so `place_on(can, crate)` stacks one kit instance on
+another and a floating instance is named like any object.
 
-**The audits are warn-only by default.** A scene that sets
-`globalThis._autoFixPlacement = true` (in `setup()` — the flags are
-snapshotted when setup ends) gets a repair pass before the audits:
-`checkClipping`, `checkHovering` and `checkZFighting` run once with
-`autoFix: true`, then the warn-only audits judge the repaired scene.
-`globalThis._noAutoPlacementCheck = true` skips both the repair and the
-placement audits. Repair is a safety net, not a placement method — things
-placed right don't need it, the `far`/`void` cases can't be repaired at all,
-and it pushes apart geometry that overlaps on purpose (see
-[vegetation.md](vegetation.md) for trees).
+- **`check_clipping(scene)`** — pairs of placed objects whose bounds
+  intersect: printed as data (resting contact is how things are built: a
+  brace in its socket, a crate on a crate). A mesh-accurate pass then names
+  any object substantially INSIDE another — at least 18 % of up to 36
+  sampled points enclosed (5 of 6 axis rays hit the other) — loudly and
+  never truncated. That pass moves nothing; the fix is a clear spot
+  (`find_clear_spot`) or a proper seat. Intentional overlap (a stake in the
+  ground) declares `obj['allow_intersect'] = True`; parts of one machine
+  share `obj['assembly'] = '<machine>'`. Pairs seated one on the other
+  (`_support_targets`) and seated characters (`obj['eido_seated']`) are
+  skipped.
+- **`check_hovering(scene)`** — for every placed object, footprint rays
+  under its base: **near** (a 0.005–1.0 m gap, measured and printed as
+  small), **far** (> 1 m above the nearest surface) and **void** (nothing
+  beneath) are the floaters that escalate to `[placement] ⚠`. Unflagged:
+  objects at ground level, objects verified on their recorded support,
+  `make_terrain` ground (`trimesh_collider`), sunk placements, all-BLENDED
+  (glow) objects, seated characters, and declared flyers:
+  `obj['no_support_check'] = True` — drones, balloons, a character
+  mid-jump. Active rigid bodies are left to the simulation (a crate dropped
+  onto a pile starts in the air and settles where physics puts it; judge it
+  in motion). Ground level ignores sunk objects (a rock buried in the lowest
+  hollow would otherwise lift "ground" under the terrain).
 
-**TSL caveat:** vertex deformation in a `positionNode` happens at render
-time, so `Box3.setFromObject` (and every helper above) sees the undeformed
-extent. A TSL-warped mesh wants `mesh.geometry.boundingBox = new
-THREE.Box3(min, max)` set to the deformed extent before placing relative to
-it — the helpers honor a pre-set `geometry.boundingBox`.
+  *Verified on its recorded support* means the support's real surface is
+  under the object, within 6 cm of its base (`SEATED_GAP`): an 11 x 11 ray
+  grid over its footprint first, then, for thin supports the rays slip
+  between (a wire rack, slats), every triangle of the support clipped to the
+  footprint. The engine fell back to the support's bounding box instead,
+  which counted a clock as still on a stool that had been moved 0.3 m: the
+  stool's splayed legs kept its box under the clock while the seat was gone.
+  That clock is now named, 0.43 m in the air.
+- **`check_z_fighting(scene)`** — a thin object (under 6 cm on an axis: a
+  panel, decal, quad) with a face within 2 mm of another object's face and
+  overlapping it on the other two axes. EEVEE z-fights too: offset flat
+  things a few mm proud or sink them a little. Opt out:
+  `obj['no_z_fight_check'] = True`.
+- `check_facing(scene)`, `check_density(scene)` and
+  `check_line_intrusion(scene)` as below.
 
+**The audits are warn-only by default.** A scene with
+`scene['eido_auto_fix_placement'] = True` (or `auto_fix=True`) gets a repair
+pass first — clipping, hovering and z-fighting once with `auto_fix`, then
+the warn-only audits judge the repaired scene.
+`scene['eido_no_auto_placement_check'] = True` skips both. The runner reads
+the engine's names for the same two switches as well: `_auto_fix_placement =
+True` / `_no_auto_placement_check = True` at module level in the scene script
+(or as scene properties); the digest records either as a declared policy. Repair is a
+safety net, not a placement method: it pushes apart only substantial
+overlaps (never ground-scale geometry, never two seated objects), snaps only
+`near` gaps, and nudges z-fighting panels 4 mm.
+
+`test_placement.py` plants four mistakes and checks the audits name them:
+a crate hand-placed 1.5 m up (`far`), one 4 cm up (`near`), a decal flush on
+a crate face (z-fighting), a box inside a crate (deep interpenetration);
+and nothing the helpers placed is flagged. It also caught a real one of
+its own: a lid hinged open the wrong way read as 100 % inside its crate.
 
 ## Hinged parts
 
-`hinge(mesh, edge)` returns a pivot Group at an edge of the mesh's measured
-bounds and reparents the mesh while preserving its placement. Edges are
-`back`, `front`, `left`, `right`, `top` and `bottom`.
+`hinge(obj, edge='back')` returns an Empty at the midpoint of one edge of
+obj's bounds and parents obj to it, keeping its placement; the pivot
+carries obj's support record. Edges: `back` (+Y), `front` (−Y), `left`,
+`right`, `top`, `bottom`.
 
-```js
-const lidPivot = hinge(lidMesh, 'back');
-lidPivot.rotation.x = -Math.PI / 3;
+```python
+lid_pivot = hinge(lid, 'back')
+lid_pivot.rotation_euler.x = math.radians(-35)     # a back hinge opens with a NEGATIVE X turn
 ```
 
-Back/front edges commonly rotate around X; vertical left/right door edges
-rotate around Y; horizontal top/bottom flaps use X or Z. The helper only sets
-the pivot position, not a constrained rotation axis. Check its result and mesh axes
-before animating. Rotate the returned pivot, not the original mesh's center,
-and inspect clearance through the full swing. This is a generic rigid pivot,
-not an IK solver or a replacement for authored robotics ports/joints.
+A front hinge opens with a positive X turn; left/right door edges turn
+about Z. The helper only sets the pivot, not a constrained axis: inspect
+clearance through the full swing. It is a rigid pivot, not an IK solver or
+a replacement for authored robotics joints.
 
 ## Surface mounts and interior placement
 
-- `surfacePoint(obj, dir, { exclude })` raycasts inward from outside the
-  object's bounds along a world-space `THREE.Vector3` direction. It returns
-  `{ point, normal, distance }` in world space, or `null` if no surface is hit.
-- `mountOn(part, mount, { dir, standoff, faceAxis, exclude })` seats a part at
-  that surface. `faceAxis` is the part's local back axis to align into the
-  mount; omit it to retain rotation. `standoff` adds clearance in meters.
-  It returns `{ point, normal }` or `null`. The helper assumes an unrotated
-  parent; use the robotics port API for authored joints and transformed
-  assemblies. Check clearance around a spinning part through its full motion.
-- `placeInside(obj, container, { aimY, matchYaw, xzOffset })` centers an item
-  inside a compartment and snaps it to a surface below `aimY` in world meters.
-  `matchYaw` defaults true; `xzOffset` shifts the footprint. Choose `aimY`
-  between the desired shelf and the shelf above. Returns the snap result.
-- `placeRelativeTo(obj, ref, side, gap)` is a deprecated alias of
-  `placeAgainst`; use the latter name for new scenes.
+- `surface_point(obj, direction, exclude=())` casts inward from outside
+  obj's bounds along a world direction; returns `{'point', 'normal',
+  'distance'}` (world space) or None.
+- `mount_on(part, mount, dir=None, standoff=0, face_axis=None, exclude=())`
+  seats a part at that surface point, offset outward along the normal by
+  its own depth plus `standoff`. `face_axis` is the part's local axis to
+  turn into the mount (omit to keep its rotation). Returns
+  `{'point', 'normal'}` or None.
+- `place_inside(obj, container, aim_z=None, match_yaw=True, xy_offset=None)`
+  — the shelf-board pattern, above.
 
-```js
-const bearing = mountOn(rotor, housing, {
-  dir: new THREE.Vector3(0, 1, 0),
-  faceAxis: new THREE.Vector3(0, -1, 0), standoff: 0.01,
-});
-if (!bearing) console.warn('Rotor mount surface was not found');
-const seated = placeInside(bookProp, bookcase, { aimY: 1.1, xzOffset: [0.1, 0] });
+```python
+bearing = mount_on(rotor, housing, dir=(0, 0, 1), face_axis=(0, 0, -1), standoff=0.01)
+if not bearing:
+    print('rotor mount surface was not found')
 ```
+
+## Seating characters
+
+A character sits IN a chair, not on it: `place_on(vrm, chair)` stands her
+feet on the backrest's top. The seating helpers work on the characters
+family's VRMs ([characters](characters.md)) and key what they decide:
+
+```python
+from eidoblend.characters import load_vrm
+from eidoblend.placement import seat_on, sit_on_ground, unseat, emote, face_camera
+me = load_vrm('aletheia')
+seat_on(me, chair)                                  # the chair sit clip, facing out of the chair, on its seat pan
+you = load_vrm('aporia', location=(2.0, -1.0, 0.0))
+seat_on(you, chair2, transition='stand_to_sit', t=1.0, then='sitting_normal_chair')   # lowers into it from 1 s
+robot = load_vrm('claude_robot_2k')
+sit_on_ground(robot, at=(1.0, -0.5), ground=[floor])   # the ground sit clip, the lowest underside on the floor
+friend = load_vrm('claude', location=(-1.5, 0.5, 0.0))
+emote(friend, 'cheer')                              # an expressive clip on a planted VRM, looping
+face_camera(friend, offset=0.4)                     # a three-quarter turn toward the camera
+```
+
+- `find_seat_surface(chair)` finds the seat pan, not the box top: a 7 x 7
+  grid of downward casts over the inner 80 % of the footprint, the hit
+  heights binned by 3 cm, the fullest bin wins (a tie goes to the lower, so a
+  flat-topped throne back loses to the seat). It returns the pan's height,
+  centre and extent.
+- `chair_facing(chair)` reads which way a chair opens from its own geometry:
+  what stands more than 18 cm above the pan is the backrest, its weighted
+  centroid lies toward the back, and a sitter faces away from it (None for a
+  stool). Headings here are Blender's: radians about +Z, 0 facing −Y, a VRM's
+  front as loaded; the engine's offsets keep their sign.
+- `seat_on(h, chair, clip='sitting_normal_chair', face=None, sink=0.02)`
+  plays the sit clip, puts her root at the pan's centre, turns her out of
+  the chair (`face=`, else the chair's facing, else toward the camera), and
+  rests her real underside (an up-ray through her seated mesh under the
+  hips) on the pan, `sink` pressed in. With `transition='stand_to_sit'` she
+  stands `hip_back` (0.46 m) in front of the seat, facing out, and the clip
+  lowers her into it from `t`; her root is keyed on every frame of the
+  descent: from 40 % in, a one-sided clamp lifts her whenever her underside
+  would dip below the seat (it never pushes her down), and at the clip's end
+  a settle puts her hips over the pan, biased toward the backrest, and her
+  lowest underside on it. The last pose holds, as the engine's did, or
+  `then=` plays a seated loop after it.
+- `sit_on_ground(h, at, clip='sitting_on_ground', ground=None)` uses a
+  ground-sit clip (a chair clip on the floor dangles the legs through it)
+  and rests her lowest underside (up-rays at the hips ± 0.35 m) 5 mm above
+  the floor cast under `at`.
+- `emote(h, slot)` plays an expressive clip looping on a planted VRM;
+  `face_camera(h, camera=None, offset=0, frame=None)` turns her to the
+  camera (`frame=` keys the turn, for a camera that moves between shots).
+- A seated VRM carries `arm['eido_seated']` (the clipping and hovering
+  audits leave her, and her body never sets the ground level) and
+  `arm['eido_seat']`; `unseat(h)` clears both. The runner's
+  `placement.seated_facing` record names a sitter turned more than 110°
+  from her chair's facing (RE-RENDER REQUIRED: most often a rotation set
+  after `seat_on`; pass `face=` instead), and one more than 55° off for a
+  look. A VRM's armature rotates by quaternion, where `rotation_euler`
+  does nothing: the helpers turn it through its own rotation mode.
 
 ## Additional observations
 
-`checkDensity(scene, { min: 5, exclude: [] })` returns a count of top-level
-objects containing visible mesh geometry. It is a grouping/density observation,
-not a quality requirement. A whole village can be one group.
+`check_density(scene, min=5)` counts top-level objects holding geometry: a
+grouping observation, not a quality requirement.
 
-`checkFacing(scene, { minSize: 1.2, thinFrac: 0.28, buriedAt: 0.3 })` returns
-findings about buried or obstructed thin textured panels without moving them.
-VRM and other skinned characters are skipped (their bind-pose parts are not
-panels).
-It does not know which side carries readable text. Inspect both sides and
-the authored forward direction. `noFacingCheck` records an intentional exemption.
+`check_facing(scene, min_size=1.2, thin_frac=0.28, buried_at=0.3)` finds
+thin, textured (an Image Texture in the material), free-standing panels,
+reports the clearance on each side of their display axis and warns on
+interpenetration or a buried face, with pivot-offset evidence. Characters
+(armatures) are skipped. It does not know which side carries readable text.
+`obj['no_facing_check']` records an intentional exemption.
 
-`checkLineIntrusion(scene)` returns `{ obj, line }` findings for tall objects
-passing through name-matched transport lines. It uses bounding-box/name
-heuristics, not a manufacturing simulation. `noIntrusionCheck` declares an
-intentional intrusion; it does not make an arm clear of a conveyor.
+`check_line_intrusion(scene)` flags a tall object planted through a
+name-matched transport line (conveyor, belt, assembly line, treadmill,
+escalator). `obj['no_intrusion_check']` declares an intentional intrusion.
+
+## Not yet ported
+
+- The seating helpers' hand-off to a walking character's controller: the
+  engine played a sit-down through a controlled VRM's own mixer
+  (`beginSeated`, crossfading from her walk). Here `seat_on` sits a planted
+  VRM; a character the controller walks up to a seat is the characters
+  family's `controller.Locomotion` (`seat_spot`). After seating, the engine
+  reset the VRM's spring bones; keyed or baked springs are the characters
+  family's, so re-bake them after a seat if the scene uses them.
+- `focusPoint` / `lookAtObject` are the look family's `focus_point` /
+  `look_at_object` ([camera-lighting.md](camera-lighting.md)).
+- Geometry Nodes instances (a scatter made in a node tree) are not expanded
+  into the ray targets, as collection instances are: mark a scattered field
+  `no_clipping_check` / `no_support_check`, or realise the instances you need
+  to place on. The harness's coverage records count them as leaves.
+- `placeRelativeTo` (the engine's deprecated alias) is not carried over;
+  use `place_against`.

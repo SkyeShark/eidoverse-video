@@ -1,0 +1,7 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 1,
+    "script": "blender/tests/pipeline/kit/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/kit.mp4",
+    "assets": {"kit": "blender/tests/pipeline/out/kit_parts.glb"},
+    "render": {"samples": 16}
+}

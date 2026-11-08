@@ -1,14 +1,81 @@
-# Tool and source inventory
+# Tool and source inventory (Blender edition)
 
-[Main instructions](../AGENTS.md) list all 33 topic guides and when to read
-them. This inventory maps every current first-party source file and entry point
-to its guide, with loading/usage roles. A source can be a public tool, internal
-support, an optional utility, an example or a test; file count is not tool count.
+[Main instructions](../AGENTS.md) list all 34 topic guides and when to read
+them. This inventory maps the Blender edition's modules and command-line tools
+to their guides (part 1), then the WebGPU engine's sources, which stay on this
+branch as the reference each port is made from (part 2). A source can be a
+public tool, internal support, an optional utility, an example or a test; file
+count is not tool count.
 
-Coverage is checked against the source tree and the renderer's loading paths.
-Guide coverage also requires usable entry-point instructions, not just a file
-name in this table. Public globals and exported names were reviewed separately
-to distinguish missing scene APIs from internal implementation functions.
+## 1. The Blender edition
+
+Scenes are Python scripts run by `eido_blender.py`; systems are the
+`blender/eidoblend` package, one self-contained subpackage per family. Each
+family's guide holds its module table and API; this part names the runner's
+modules one by one and the families' packages as a whole.
+
+### The runner and the pipeline tools (`eidoblend.harness`)
+
+| Source or tool | Role | Instructions |
+| --- | --- | --- |
+| [eido_blender.py](../eido_blender.py) | CLI: `doctor`, `build`, `render` (`--probe`, `--at`), `bench`, `open` | [scene-format](../tools-guides/scene-format.md) |
+| [run_blender.sh](../run_blender.sh) | CLI utility: isolated headless Blender (every runner call goes through it) | [blender](../tools-guides/blender.md), [development](../tools-guides/development.md) |
+| [blender/README.md](../blender/README.md) | The edition's layout, families, tests, and what the `blender-auto` edition must add | [development](../tools-guides/development.md) |
+| [blender/eidoblend/\_\_init\_\_.py](../blender/eidoblend/__init__.py) | Package marker; imports nothing | [development](../tools-guides/development.md) |
+| [blender/eidoblend/common.py](../blender/eidoblend/common.py) | Shared paths, three.js → Blender axes, frame/time, small tools (no bpy) | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/\_\_init\_\_.py](../blender/eidoblend/harness/__init__.py) | The harness's module map; imports nothing | [development](../tools-guides/development.md) |
+| [blender/eidoblend/harness/config.py](../blender/eidoblend/harness/config.py) | scene.json → checked config, output names (no bpy) | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/runner.py](../blender/eidoblend/harness/runner.py) | Build (setup, `render_frame` keyed, caches stretched and baked, audits, `.blend`, its inputs incl. files the script read) then render | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/keying.py](../blender/eidoblend/harness/keying.py) | `ctx.key`'s keys made LINEAR (or as asked); changes `render_frame` made without a key, found and named | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/run_scene.py](../blender/eidoblend/harness/run_scene.py) | The script `eido_blender.py` runs inside Blender | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/context.py](../blender/eidoblend/harness/context.py) | `ctx`: what `setup` / `render_frame` / `cleanup` receive | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/settings.py](../blender/eidoblend/harness/settings.py) | The film and probe EEVEE presets, the `render` block, bloom | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/output.py](../blender/eidoblend/harness/output.py) | H.264 straight from EEVEE, PNG stills, `.part`/`.prev`, probe frames | [scene-format](../tools-guides/scene-format.md) |
+| [blender/eidoblend/harness/ledger.py](../blender/eidoblend/harness/ledger.py) | Audit ledger, flags and digest (port of `audit_core.js`; no bpy) | [render-review](../tools-guides/render-review.md) |
+| [blender/eidoblend/harness/audits.py](../blender/eidoblend/harness/audits.py) | Preflight, coverage, motion, framing, palette and asset checks | [render-review](../tools-guides/render-review.md) |
+| [blender/eidoblend/harness/assets.py](../blender/eidoblend/harness/assets.py) | Scene API: `load_image_texture`, `fetch_pbr`, `load_pbr`, `fetch_model_file`, `import_model`, `play_model_animations`, `clone_model`, `load_kit`, `load_hdri`, `make_glass` | [assets](../tools-guides/assets.md) |
+| [blender/eidoblend/harness/navigation.py](../blender/eidoblend/harness/navigation.py) | Scene API: `RobotSensors`, `RobotMemory`, `RobotPlanner`, `timed_route`, `debug_overlay` (port of the `robot_*.js` sensing/memory/planning) | [navigation](../tools-guides/navigation.md) |
+| [blender/eidoblend/harness/doctor.py](../blender/eidoblend/harness/doctor.py) | The in-Blender half of `doctor` (a 64x64 EEVEE render) | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/run_tests.py](../blender/tests/pipeline/run_tests.py) | Test suite: the runner end to end (T0–T16; most render) | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/query_blend.py](../blender/tests/pipeline/query_blend.py) | Test helper: what a saved build shows at given frames (positions, light values, key interpolations), no render | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/example/scene.py](../blender/tests/pipeline/example/scene.py) | Scene example/template (a stool, a clock, a push-in) | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/pipeline/crows/scene.py](../blender/tests/pipeline/crows/scene.py) | Test scene: a model's own clips on a model and its clone | [assets](../tools-guides/assets.md) |
+| [blender/tests/pipeline/defects/scene.py](../blender/tests/pipeline/defects/scene.py) | Test scene: planted defects the digest must name | [render-review](../tools-guides/render-review.md) |
+| [blender/tests/pipeline/placement_bridge/scene.py](../blender/tests/pipeline/placement_bridge/scene.py) | Test scene: the runner runs the placement family's audits | [placement](../tools-guides/placement.md) |
+| [blender/tests/pipeline/kit/scene.py](../blender/tests/pipeline/kit/scene.py) | Test scene: `load_kit` parts standing on their bases | [assets](../tools-guides/assets.md) |
+| [blender/tests/pipeline/make_kit.py](../blender/tests/pipeline/make_kit.py) | Test helper: a three-part kit GLB, made headless | [assets](../tools-guides/assets.md) |
+| [blender/tests/pipeline/nav/scene.py](../blender/tests/pipeline/nav/scene.py) | Test scene: a sensing walk through an unseen room | [navigation](../tools-guides/navigation.md) |
+| [blender/tests/pipeline/bloom/scene.py](../blender/tests/pipeline/bloom/scene.py) | Test scene: the compositor bloom option on a hot emitter | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/pipeline/bake/scene.py](../blender/tests/pipeline/bake/scene.py) | Test scene: a 300-frame rigid-body film, crates knocked after Blender's default cache end | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/pipeline/stale/scene.py](../blender/tests/pipeline/stale/scene.py) | Test scene: built from a plan file it reads; an edit to the plan rebuilds | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/pipeline/shots/scene.py](../blender/tests/pipeline/shots/scene.py) | Test scene: two shots, a keyed lamp step at the cut, per-shot framing | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/pipeline/hand_edit.py](../blender/tests/pipeline/hand_edit.py) | Test helper: a hand edit of a built `.blend`, done headless | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/check_docs.py](../blender/tests/pipeline/check_docs.py) | Docs check: links resolve, every module inventoried, the guide index complete (no Blender) | [development](../tools-guides/development.md) |
+
+### The families' packages
+
+| Package | Role | Instructions |
+| --- | --- | --- |
+| [blender/eidoblend/characters/](../blender/eidoblend/characters/__init__.py) | VRM characters: load, clips, locomotion, expressions, the robot body's joints | [characters](../tools-guides/characters.md) |
+| [blender/eidoblend/flora/](../blender/eidoblend/flora/__init__.py) | The vegetation brush (`create_flora`) and its generators | [vegetation](../tools-guides/vegetation.md) |
+| [blender/eidoblend/fx/](../blender/eidoblend/fx/__init__.py) | Liquids, fire, particles, cloth, SDF volumes, destruction | [liquids](../tools-guides/liquids.md), [volume-fire](../tools-guides/volume-fire.md), [particles-fx](../tools-guides/particles-fx.md) |
+| [blender/eidoblend/look/](../blender/eidoblend/look/__init__.py) | Cameras, lights, EEVEE look presets, the post chain, exposure, review tools | [camera-lighting](../tools-guides/camera-lighting.md), [postprocessing](../tools-guides/postprocessing.md) |
+| [blender/eidoblend/media/](../blender/eidoblend/media/__init__.py) | Screens, type, overlays, subtitles, books and sound | [motion-graphics](../tools-guides/motion-graphics.md), [books](../tools-guides/books.md), [audio](../tools-guides/audio.md) |
+| [blender/eidoblend/placement/](../blender/eidoblend/placement/__init__.py) | Seating things on things, and the placement audits | [placement](../tools-guides/placement.md) |
+| [blender/eidoblend/sky/](../blender/eidoblend/sky/__init__.py) | `make_sky`: the sky, celestial worlds and weather | [sky-weather](../tools-guides/sky-weather.md) |
+| [blender/eidoblend/terrain/](../blender/eidoblend/terrain/__init__.py) | `make_terrain`, surface layers | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
+| [blender/eidoblend/trees/](../blender/eidoblend/trees/__init__.py) | SeedThree trees (`make_seed_tree`), a bridge to SeedThree's Blender add-on | [trees](../tools-guides/trees.md), [vegetation](../tools-guides/vegetation.md) |
+
+Each family's tests live in `blender/tests/<family>/` (renders land in its
+git-ignored `out/`).
+
+## 2. The WebGPU engine: the port's reference
+
+These sources are the WebGPU edition as it stands on this branch: the
+reference each `eidoblend` port is made from, and the shared assets' authoring
+scripts. The roles describe them in their own engine (Deno + WebGPU); the
+Blender runner does not load them. `eido.py` still runs them where Deno is
+installed (`bootstrap` also serves the WebXR pages).
 
 | Source or tool | Role | Instructions |
 | --- | --- | --- |
@@ -17,7 +84,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [contact_sheet.py](../contact_sheet.py) | CLI utility: labelled contact sheets of a video | [render-review](../tools-guides/render-review.md) |
 | [cyborg_stutter.py](../cyborg_stutter.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [cyborg_voice.py](../cyborg_voice.py) | CLI utility | [audio](../tools-guides/audio.md) |
-| [eido.py](../eido.py) | CLI utility | [scene-format](../tools-guides/scene-format.md) |
+| [eido.py](../eido.py) | CLI utility: the WebGPU runner (`bootstrap` materializes node_modules for the WebXR pages; `render` needs Deno) | [development](../tools-guides/development.md) |
 | [eidoverse/assets/animations/performance_src/](../eidoverse/assets/animations/performance_src/README.md) | Asset source: Blender VRMA authoring script + engine-free clip checker | [blender](../tools-guides/blender.md) |
 | [eidoverse/assets/animations/performance_uf_src/](../eidoverse/assets/animations/performance_uf_src/README.md) | Asset source: Blender VRMA authoring script, mesh-aware clip checker and rig data (UNKNOWN FORCE clips) | [blender](../tools-guides/blender.md) |
 | [eidoverse/assets/grass/daisy_src/](../eidoverse/assets/grass/daisy_src/README.md) | Asset source: Blender + Python scripts that build the daisy sheet | [vegetation](../tools-guides/vegetation.md) |
@@ -34,6 +101,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/book_core.js](../eidoverse/book_core.js) | System support; see guide for entry point | [books](../tools-guides/books.md) |
 | [eidoverse/camera_safety.js](../eidoverse/camera_safety.js) | Injected scene API | [camera-lighting](../tools-guides/camera-lighting.md) |
 | [eidoverse/character_controller.js](../eidoverse/character_controller.js) | Injected scene API | [characters](../tools-guides/characters.md) |
+| [eidoverse/claude_robot_dof.js](../eidoverse/claude_robot_dof.js) | Dynamic ESM: the robot body's hardware-DOF pass (joint limits per frame) | [characters](../tools-guides/characters.md) |
 | [eidoverse/claudesona_face.js](../eidoverse/claudesona_face.js) | Dynamic ESM scene API | [characters](../tools-guides/characters.md) |
 | [eidoverse/claudesona_wardrobe.js](../eidoverse/claudesona_wardrobe.js) | Dynamic ESM scene API | [characters](../tools-guides/characters.md) |
 | [eidoverse/clippy.js](../eidoverse/clippy.js) | Injected scene API | [clippy](../tools-guides/clippy.md) |
@@ -43,9 +111,6 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/creature_builder.js](../eidoverse/creature_builder.js) | Injected scene API | [creatures](../tools-guides/creatures.md) |
 | [eidoverse/creature_realist.js](../eidoverse/creature_realist.js) | Injected API with optional external backend | [creatures](../tools-guides/creatures.md) |
 | [eidoverse/creature_specimen.js](../eidoverse/creature_specimen.js) | Injected API with optional external backend | [creatures](../tools-guides/creatures.md) |
-| [eidoverse/dismember.js](../eidoverse/dismember.js) | Injected scene API | [destruction](../tools-guides/destruction.md) |
-| [eidoverse/dismember_core.js](../eidoverse/dismember_core.js) | System support; see guide for entry point | [destruction](../tools-guides/destruction.md) |
-| [eidoverse/dismember_core_test.mjs](../eidoverse/dismember_core_test.mjs) | Test suite | [development](../tools-guides/development.md) |
 | [eidoverse/effects_tsl/aeropittura.js](../eidoverse/effects_tsl/aeropittura.js) | Injected effect implementation/registry (`aeropittura`, the Futurist painting pass) | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/effects_tsl/after_image.js](../eidoverse/effects_tsl/after_image.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/effects_tsl/anamorphic_flare.js](../eidoverse/effects_tsl/anamorphic_flare.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
@@ -81,6 +146,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/effects_tsl/vhs_tape.js](../eidoverse/effects_tsl/vhs_tape.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/effects_tsl/wavy.js](../eidoverse/effects_tsl/wavy.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/basic_vrm.js](../eidoverse/examples/basic_vrm.js) | Scene example/template | [development](../tools-guides/development.md) |
+| [eidoverse/examples/claude_robot.js](../eidoverse/examples/claude_robot.js) | Scene example/template: the robot body, its face and a clip through its joints | [characters](../tools-guides/characters.md) |
 | [eidoverse/examples/daisy/analyze.py](../eidoverse/examples/daisy/analyze.py) | Example CLI: section-by-section mix measurement | [synthkit](../tools-guides/synthkit.md) |
 | [eidoverse/examples/daisy/captions.py](../eidoverse/examples/daisy/captions.py) | Example CLI: timeline to ASS subtitles, lyric preview | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/song.py](../eidoverse/examples/daisy/song.py) | Worked example: a complete song with voicebox + synthkit | [voicebox](../tools-guides/voicebox.md) |
@@ -117,6 +183,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/parole.js](../eidoverse/parole.js) | Dynamic ESM scene API: parole-in-libertà captions and quotes | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [eidoverse/particle_morph.js](../eidoverse/particle_morph.js) | Injected scene API | [particles-fx](../tools-guides/particles-fx.md) |
 | [eidoverse/particles.js](../eidoverse/particles.js) | Injected scene API | [particles-fx](../tools-guides/particles-fx.md) |
+| [eidoverse/pose_bake.js](../eidoverse/pose_bake.js) | Dynamic ESM: solve a performance once, play the recorded poses back | [characters](../tools-guides/characters.md) |
 | [eidoverse/procedural_materials.js](../eidoverse/procedural_materials.js) | Injected scene API | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
 | [eidoverse/props/tandem.js](../eidoverse/props/tandem.js) | Dynamic ESM prop: tandem, rider IK, teapot stoker | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/props/voice_machines/index.js](../eidoverse/props/voice_machines/index.js) | Dynamic ESM: voice-machine catalogue, buildMachine/loadMachine | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -237,7 +304,6 @@ to distinguish missing scene APIs from internal implementation functions.
 | [generate_song.py](../generate_song.py) | MiniMax Music 3 generator | [audio](../tools-guides/audio.md) |
 | [lipsync.py](../lipsync.py) | Python audio module; no CLI | [audio](../tools-guides/audio.md) |
 | [merge_av.py](../merge_av.py) | CLI utility | [audio](../tools-guides/audio.md) |
-| [run_blender.sh](../run_blender.sh) | CLI utility: isolated headless Blender runner | [blender](../tools-guides/blender.md) |
 | [synthkit/__init__.py](../synthkit/__init__.py) | Python package API (import from repo root) | [synthkit](../tools-guides/synthkit.md) |
 | [synthkit/dsp.py](../synthkit/dsp.py) | Oscillators, filters, envelopes (numba) | [synthkit](../tools-guides/synthkit.md) |
 | [synthkit/fx.py](../synthkit/fx.py) | Designed effects (tape stop, stutter, modem, power-down) | [synthkit](../tools-guides/synthkit.md) |
@@ -265,14 +331,16 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/robotics/rotary_metal.scene.js](../eidoverse/examples/robotics/rotary_metal.scene.js) | Aluminum rotary cutting at physical speed followed by a time-lapse finish | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/relief.scene.js](../eidoverse/examples/robotics/relief.scene.js) | Renderable close study of ball-nose roughing and finishing | [robotics](../tools-guides/robotics.md) |
 
-**243 first-party source/entry-point files, plus 9 asset `_src` folders; 33 guides; 33 post effects.**
-This is documentation coverage, not a claim that every API was executed in
-this audit or a count of robot parts. The inspector HTML entry point is included.
+**Part 1: 28 runner files and 9 family packages. Part 2: 242 WebGPU source/entry-point files, plus 9 asset
+`_src` folders. 34 guides.** This is documentation coverage, not a claim that every API was executed in this
+audit or a count of robot parts. The inspector HTML entry point is included. Recount with
+`python blender/tests/pipeline/check_docs.py` ([development](../tools-guides/development.md#documentation-changes))
+when a family lands.
 
 ## Additional instructions and asset notes
 
-- [Setup](SETUP.md), [interactive workflow](HARNESS_MODE.md),
-  [engine maintainer map](../eidoverse/README.md) and
+- [The Blender edition's layout and tests](../blender/README.md), [setup](SETUP.md),
+  [interactive workflow](HARNESS_MODE.md), [engine maintainer map](../eidoverse/README.md) and
   [documentation maintenance](../tools-guides/development.md).
 - [Robotics assets](../eidoverse/assets/robotics/README.md) and
   [asset provenance](../eidoverse/assets/robotics/THIRD_PARTY.md).
@@ -304,6 +372,11 @@ source snapshot. An asset's `<name>_src/` folder holds the scripts that authored
 README, rather than script by script. Ignored working projects, `ASTRA_NOTES*.md` session notes,
 credits/license notices and the historical techniques archive are outside
 the active instruction split; they are preserved in place.
+
+`dismember.js`, `dismember_core.js` and its test exist only on `main` so far: this branch's
+`render_scene.mjs` still names them in `HELPER_MODULES`, and the destruction guide describes them; merge
+`main` before porting that system. Part 1 lists the families' packages by their `__init__.py`; their modules are
+in each family's guide.
 
 The retired `mech_parts.js` is intentionally absent. `robotics_kit.js` and
 `fab_sim.js` expose the new modular system. The separate `robot_*.js` VRM

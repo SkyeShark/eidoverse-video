@@ -1,0 +1,9 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 4,
+    "script": "blender/tests/pipeline/defects/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/defects.mp4",
+    "assets": {
+        "unused_model": "eidoverse/assets/models/corner_clock.glb"
+    },
+    "render": {"samples": 4}
+}

@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "three": "../../../../eidoverse-video-prealpha-0.01/node_modules/three/build/three.module.js",
+    "three/addons/": "../../../../eidoverse-video-prealpha-0.01/node_modules/three/examples/jsm/"
+  }
+}

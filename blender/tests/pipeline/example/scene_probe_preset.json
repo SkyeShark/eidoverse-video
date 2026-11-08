@@ -1,0 +1,6 @@
+{
+    "width": 960, "height": 540, "fps": 24, "duration": 3,
+    "script": "blender/tests/pipeline/example/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/example_pp.mp4",
+    "render": {"samples": 16, "preset": "probe"}
+}

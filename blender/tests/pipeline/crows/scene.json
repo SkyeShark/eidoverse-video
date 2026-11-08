@@ -1,0 +1,9 @@
+{
+    "width": 960, "height": 540, "fps": 24, "duration": 3,
+    "script": "blender/tests/pipeline/crows/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/crows.mp4",
+    "assets": {
+        "crow": "eidoverse/assets/models/crow_bird_animated_corvid_raven_black_cawing_flying_walking.glb"
+    },
+    "render": {"samples": 16}
+}

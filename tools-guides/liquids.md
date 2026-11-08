@@ -2,172 +2,254 @@
 
 [Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
 
-Choose the water representation by its motion and spatial needs. `fluid_swe`
-models a shallow-water heightfield over `bedFn(x,z) → y`, with coupled pours,
-droplets, foam and sphere interactions. Use [3D free-surface water](free-surface-water.md)
+Choose the water representation by its motion and spatial needs.
+`eidoblend.fx.swe` models a shallow-water heightfield over `bed_fn(x, y) → z`,
+with coupled pours, droplets, foam and sphere interactions. It is the
+Blender edition of `fluid_swe.js`. Use [3D free-surface water](free-surface-water.md)
 when the surface must fold over or flow around volumetric moving colliders.
-A flat reflective water shader is useful for a distant surface without those
-interactions; the 2D dye solver is for panels and fields of swirling color.
+A flat reflective water surface suits distant water without those
+interactions, and the 2D dye solver is for panels and fields of swirling
+colour (both are in "Not yet ported" below).
 
-Scene scripts are evaluated, so use dynamic `await import(...)` inside
-`setup()`. `fluid_swe` tracks liquid exchange between its field, pours and
-spray, but inspect behavior at boundaries and the chosen grid/time step;
-conservation intent is not a guarantee of exact volume in every configuration.
+The solver is the engine's, kernel for kernel, in numpy:
 
-```js
-const { createWaterSWE } = await import(globalThis.EIDOVERSE_DIR + 'fluid_swe.js');
-const swe = await createWaterSWE(renderer, {
-    worldSize: [16, 16], gridSize: [256, 256], domainCenter: [0, 0, 0],
-    bedFn: (x, z) => groundY(x, z),          // the terrain IS the bed
-    sprayMax: 6144,                          // whitewater budget (0 = off)
-    envTex: skyEnvCopy,                      // see envTex note below
-});
-await swe.init();
-scene.add(swe.surfaceMesh);
-if (swe.sprayMesh) scene.add(swe.sprayMesh);
-if (swe.streamMesh) scene.add(swe.streamMesh);
-// per frame:
-swe.setPours([{ x, y, z, vx, vy, vz, rate }]);   // rate in m³/s — mouths ON
-                                                 // the visible geometry's lip
-swe.setSpheres([{ x, y, z, r, vx, vy, vz }]);    // vy matters: entry splash
-await swe.step(dt); swe.syncRenderPhase();
+- flux-form shallow water with per-cell pipe outflows and proportional
+  rescale, so h ≥ 0 and mass is exact;
+- semi-Lagrangian velocity with surface gravity, Bingham yield, Manning bed
+  friction and drag;
+- disc emitters and sphere coupling for bodies;
+- foam advected and fed by churn, crests, wakes and landings;
+- rain with squall bands, and hydraulic erosion with talus slumping;
+- the spray exchange: field promotion into droplets that carry volume, and
+  pour droplets that return volume, momentum and foam where they land.
+
+It runs in three.js's frame internally, on the same (NZ, NX) layout as the
+engine's textures. Fields are rounded to half float after every kernel, as
+the engine's rgba16float storage was (`precision='half'`, the default). The
+presets, rain rates and thresholds were all tuned on that storage. Pass
+`precision='single'` to keep float32.
+
+```python
+import sys; sys.path.insert(0, REPO + '/blender')
+from eidoblend.fx.swe import create_water_swe
+
+swe = create_water_swe(
+    bed_fn=lambda x, y: ground_z(x, y),       # the terrain IS the bed (Blender world, vectorised if it can be)
+    world_size=(16, 16), grid_size=(256, 256), domain_center=(0, 0, 0),
+    spray_max=6144,                           # whitewater budget (0 = off)
+    cache_dir='//swe_cache')
+
+def controls(frame, t, swe):                  # the engine's per-frame calls, Blender coordinates
+    swe.set_pours([dict(x=4.7, y=1.0, z=0.53, vx=-0.35, vy=-1.7, vz=-0.4, rate=0.5)])
+    swe.set_spheres([dict(x=bx, y=by, z=bz, r=0.42, vx=vx, vy=vy, vz=vz)])   # vz matters: entry splash
+
+swe.bake(1, 1350, controls=controls, track_spheres=[(wader, 0.42)])
 ```
-**Liquid presets** — exported as `LIQUID_PRESETS`; one word selects a whole material behaviour
-(`preset: 'water' | 'gel' | 'goo' | 'lava' | 'mud'`, any option still
-overrides). Presets drive sim feel AND look: `yieldSlope` (Bingham yield —
-gel HOLDS mounds instead of levelling), `waveScale` (gloopy slow response),
-`specPow`/`specGain` (highlight tightness), `sprayStretch` (needles vs
-blobs), `streamAeration` (water whitens as it falls; honey/gel stays a
-glassy filament), `dropletVisibility`, `foamGain` (gel barely froths).
-```js
-const gel = await createWaterSWE(renderer, { preset: 'gel',
-    deepColor: '#6e2603', shallowColor: '#ff7d1f' });  // Portal-gel
-```
-**Pour styles** — `setPours([{ ..., style: 'seep', seepWidth: 0.8 }])`:
-'jet' (default) renders the ballistic stream tube + droplet breakup;
-'seep' is a slow dribbling curtain at the mouth (a rock spring, a weeping
-wall — a seep must NOT render a jet parabola). Mass ledger identical.
 
-**HYDRAULIC EROSION + RAIN — the bed can be ALIVE.** Pass `erosion: {}` and
-the terrain under the water becomes dynamic: fast flow picks the bed up as
-suspended sediment (the water visibly muddies), carries it downstream, and
-lays it down where the current slackens — rills capture into a braided
-wash, the wash incises, cut banks cave to the angle of repose, a silt fan
-builds at the outlet. Pair it with `rainRate` (distributed rainfall over
-the whole domain, m/s of depth; 4.5e-5 ≈ a violent cloudburst; animated
-squall bands via `rainPatchiness`) — rain is THE natural source for wash
-formation; a lone jet pour reads as a garden hose. `swe.setRain(v)` ramps
-the storm live (build with `rainRate > 0` so the kernel path exists), and
-the weather system's falling rain is the matching LOOK — this term is
-where its water lands.
-```js
-const swe = await createWaterSWE(renderer, {
-    worldSize: [17, 17], gridSize: [256, 256], bedFn: groundY,
-    rainRate: 4.6e-5, rainPatchiness: 0.6,
-    erosion: {
-        capacity: 0.30, erode: 0.32, deposit: 0.42, bank: 1.2,
-        talusSlope: 0.5,        // wet-sand repose ≈ 29° — banks slump WIDE
-        talusRate: 3.0, maxDelta: 0.35,
-        terrainMaps: { albedo: soilAlbedo, rough: soilRough, normal: soilNor },
-        terrainTexPeriod: 120 / 26, // static ground's (size / repeat), metres per
-                                // tile: WORLD-locks the patch uvs so the maps
-                                // continue the surrounding pattern at the same
-                                // fract phase. ⚠ Pass ALL THREE maps — albedo
-                                // alone leaves the patch glass-smooth beside a
-                                // normal-mapped world (the pebble relief IS the
-                                // normal map) and the material difference
-                                // prints the domain as a square even when the
-                                // heights meet flush. (`terrainRepeat` remains
-                                // for patch-local uvs, but phase-locked world
-                                // uvs are why the rim can't print.)
-    },
-});
-scene.add(swe.terrainMesh);     // the eroding ground patch — lay it over the
-                                // static terrain (same bedFn). ⚠ The static
-                                // mesh must DROP WELL AWAY (~1.5 m, feathered)
-                                // under the patch interior — sunk only a few
-                                // cm it fills every deeper cut from inside:
-                                // cuts vanish, deposits still rise, and the
-                                // piece reads as ground GROWING around the
-                                // water (and the water sinks out of sight
-                                // with its channel). Meet the patch flush
-                                // only at the feathered rim.
-// per frame: swe.setRain(stormRamp);   // 0 → rainRate → 0 across the piece
-```
-Scene craft for a wash that READS: shape the domain as a broad valley
-(damp your dune noise inside it, add a gentle cross-fall) — a raw dune
-field breaks rain into scattered pools and no channel ever organizes.
-Widening vs slot-cutting is the tuning axis: `bank` (lateral pickup) +
-low `talusSlope` + small `maxDelta` give flood-broad washes; raise
-`maxDelta`/`talusSlope` and drop `bank` for a young slot gully. The water
-muddies by suspended load automatically; the patch tints cut banks with
-`cutColor` and fresh deposits with `siltColor`.
+`bake()` runs the engine's `step(dt)` once per frame and writes per-frame
+OpenEXR data images. Geometry Nodes reads them back by frame number:
 
-Key options: `initLevel` pre-fills to a waterline (standing ponds — but a
-scene whose POINT is the fill must start dry); `foamDecay` tightens/loosens
-churn patches; palette (`deepColor`/`shallowColor`/`absorption`) + `foamColor`.
-`envTex` (optional) makes the fresnel reflect a real sky: pass a PLAIN
-equirect texture — if your sky lives in a RenderTarget (e.g. a bake),
-copy it once via `readRenderTargetPixelsAsync` into a half-float
-`DataTexture` (flip rows). ⚠ never bind a live RenderTarget texture into
-the water materials: on this stack that intermittently drops whole draws
-silently. Without `envTex`, the constant `skyColor` washes out grazing
-angles on large flat water.
-Scene craft: give runup a TALL containment — water that slops over a low
-rim pools on the outer apron as floating-looking slabs. A character wading
-needs a LOCAL shaped collider strip sampled from the bed: the whole
-terrain's AABB sends the controller climbing, and a flat proxy reads as
-walking ON the water.
-What it cannot do: overhangs, curling breakers, submerged interiors — a
+- `water`: surface height, depth, foam and foam noise;
+- `bed`: erosion;
+- `spray`: one texel per droplet slot;
+- `stream`: the pour tubes' vertices.
+
+The `.blend` then plays the water with no Python at render time.
+`track_spheres` feeds animated objects as spheres, with their velocities,
+every frame.
+
+The returned object holds:
+
+- `surface_object`, the displaced water surface;
+- `terrain_object`, the eroding ground patch (erosion only);
+- `spray_object`, the droplets: points from the cache, each a small sphere
+  stretched along its velocity;
+- `stream_object`, the pour tubes;
+- `material`, the surface material;
+- `solver`, the numpy state (`solver.volume()` for conservation checks);
+- the setters `set_pours`, `set_emitters`, `set_spheres` and `set_rain`.
+
+The probe `blender/tests/fx/test_swe_basin.py` is the engine's `swe_demo`: a
+bowl filling from three rim spouts, then a chrome wader breaching. It bakes
+288 frames at 256² with 6144 spray slots in about 40 s on the CPU.
+
+**Liquid presets**: exported as `LIQUID_PRESETS`. One word selects a whole
+material behaviour (`preset='water' | 'gel' | 'goo' | 'lava' | 'mud'`), and
+any option still overrides it. Presets drive both the sim and the look:
+
+- `yield_slope`: Bingham yield, so gel holds its mounds instead of levelling;
+- `wave_scale`: a gloopy, slow response;
+- `spec_pow`: highlight tightness, which sets the surface roughness;
+- `spray_stretch`: needles or blobs;
+- `stream_aeration`: water whitens as it falls; honey and gel stay glassy
+  filaments;
+- `droplet_visibility`;
+- `foam_gain`: gel barely froths.
+
+```python
+gel = create_water_swe(bed_fn, preset='gel', deep_color='#6e2603', shallow_color='#ff7d1f')
+```
+
+**Pour styles**: `set_pours([dict(..., style='seep', seep_width=0.8)])`.
+`'jet'` (the default) renders the ballistic stream tube and the droplet
+breakup. `'seep'` is a slow dribbling curtain at the mouth, for a rock
+spring or a weeping wall; a seep must not render a jet parabola. The mass
+ledger is identical. Put pour mouths on the visible geometry's lip.
+
+The pour throttle is the engine's (`fluid_swe.js` cycleEst 1.05 s, a
+−0.22 s cooldown, a −0.03 s re-roll). It assumes a droplet cycles in
+1.05 s, but droplets are born in the arc's breakup band and recycle much
+faster, so a pour delivers more than its `rate`:
+
+- a jet delivers 2–3×: three 0.5 m³/s pours on the demo filled at about
+  3.4 m³/s;
+- a seep at ground level, whose droplets land almost at once, delivers
+  about 15×: a 0.05 m³/s seep in the erosion probe added 0.75 m³ in its
+  first second, and the field held 15.7 m³ after 30 s against 2.27 m³ of
+  nominal rain plus pour.
+
+The films were tuned on that behaviour (their surge was a seep), so it is
+kept. Size a pour by what it delivers, not by its label: bake a few
+seconds, read `swe.solver.volume()` and scale `rate`.
+
+**Hydraulic erosion and rain: the bed can be alive.** Pass `erosion={}` and
+the terrain under the water becomes dynamic. Fast flow picks the bed up as
+suspended sediment, so the water visibly muddies. It carries it downstream
+and lays it down where the current slackens. Rills capture into a braided
+wash, the wash incises, cut banks cave to the angle of repose, and a silt
+fan builds at the outlet.
+
+Pair erosion with `rain_rate`: distributed rainfall over the whole domain,
+in m/s of depth. 4.6e-5 is a violent cloudburst, and `rain_patchiness`
+animates squall bands. Rain is the natural source for wash formation; a
+lone jet pour reads as a garden hose. `swe.set_rain(v)` inside `controls`
+ramps the storm. Build with `rain_rate > 0` so the rain term exists.
+
+Under half-float storage, rain increments smaller than half an fp16 step
+vanish on wet cells, as they did in the engine. A 17 m valley gathered
+about 60% of its nominal rain in the first 20 s.
+
+```python
+swe = create_water_swe(
+    bed_fn, world_size=(17, 17), grid_size=(256, 256), rain_rate=4.6e-5, rain_patchiness=0.6,
+    erosion=dict(capacity=0.30, erode=0.32, deposit=0.42, bank=1.2,
+                 talus_slope=0.5,         # wet-sand repose ~29 degrees: banks slump WIDE
+                 talus_rate=3.0, max_delta=0.35,
+                 terrain_maps=dict(albedo='soil_diff.jpg', rough='soil_rough.jpg', normal='soil_nor.jpg'),
+                 terrain_tex_period=120 / 26))   # metres per tile, WORLD-locked like the static ground
+```
+
+The probe `blender/tests/fx/test_swe_erosion.py` is the films' own setup:
+*The Shape the Water Left*'s ground (`shape_water.js` groundY), its erosion
+parameters and soil maps, rain set per frame and the seep surge. It bakes
+720 frames at 256² in about 3 minutes on the CPU and renders the dry patch
+at frame 1, the braided wash at frames 240 and 720, and a 2 m crop of the
+domain rim (`swe_erosion_{low,top,rim}_f*.png`).
+
+`terrain_object` is the eroding patch, displaced from the live bed. Lay it
+over the static terrain built from the same `bed_fn`. The static mesh must
+drop well away (about 1.5 m, feathered) under the patch interior and meet
+it flush only at the feathered rim. Sunk only a few centimetres, it fills
+every deeper cut from inside: cuts vanish, deposits still rise, and the
+piece reads as ground growing around the water. Pass all three maps.
+Albedo alone leaves the patch glass-smooth beside a normal-mapped world, and
+the domain prints as a square even when the heights meet flush.
+
+Scene craft for a wash that reads: shape the domain as a broad valley.
+Damp the dune noise inside it and add a gentle cross-fall; a raw dune field
+breaks rain into scattered pools and no channel ever organises. Widening
+versus slot-cutting is the tuning axis. `bank` plus a low `talus_slope` and
+a small `max_delta` give flood-broad washes. Raise `max_delta` and
+`talus_slope` and drop `bank` for a young slot gully.
+
+Key options:
+
+- `init_level` pre-fills to a waterline. A scene whose point is the fill
+  must start dry.
+- `foam_decay` tightens or loosens churn patches.
+- The palette is `deep_color`, `shallow_color` and `absorption`, plus
+  `foam_color`.
+- `emissive_color`, `emissive_strength` and `emissive_falloff` make water
+  glow with depth, as the demo's palette and lava do.
+
+Give runup a tall containment. Water that slops over a low rim pools on the
+outer apron. A wading character needs a local sphere or a few spheres
+(`track_spheres`); the whole body's bounds read as walking on the water.
+
+What it cannot do: overhangs, curling breakers, submerged interiors. A
 heightfield stores one surface height per column.
 
-**Pours / streams into CONTAINERS** — shape the `bedFn` as the vessel's
-interior: a bowl, cup, barrel, or basin is a heightfield. Share one
-profile function between the visible vessel mesh (a lathe of it) and the
-sim's `bedFn`, and the container the liquid fills IS the prop's interior —
-the pour lands on a rippling, rising level and conserves mass to the
-brim. Same primitives compose into fountains, rain into a barrel, a
-waterfall pool — point them where the scene needs.
+**The look in EEVEE.** The surface is one Principled water BSDF:
 
-**`WaterMesh` + `SkyMesh`** — Three.js's flat reflective water effect and
-sky. `WaterMesh` uses scrolling normal-map samples and planar reflection;
-it is not an FFT ocean simulation and does not displace a physical wave mesh.
-The pinned constructor needs an options object and a normal texture:
+- IOR 1.333, ray-traced refraction and reflections of the scene's own world;
+- clear water tinted by depth, the engine's depth-tinted body
+  (`1 − exp(−h · absorption)` × `surface_opacity` of it) and the engine's
+  eroded foam coverage through its flow-advected foam noise, in the
+  engine's proportions;
+- suspended-sediment muddying;
+- the shore fade as alpha;
+- the engine's emissive mix.
 
-```js
-const { WaterMesh } = await import('npm:three@0.184.0/addons/objects/WaterMesh.js');
-const { SkyMesh } = await import('npm:three@0.184.0/addons/objects/SkyMesh.js');
-const waterNormals = await loadImageTexture(ASSETS.water_normal);
-waterNormals.wrapS = waterNormals.wrapT = THREE.RepeatWrapping;
-const sky = new SkyMesh(); sky.scale.setScalar(10000); scene.add(sky);
-const water = new WaterMesh(new THREE.PlaneGeometry(10000, 10000), {
-  waterNormals, sunDirection: new THREE.Vector3(0.5, 0.8, 0.2).normalize(),
-  sunColor: 0xffffff, waterColor: 0x285f66, distortionScale: 3.7,
-});
-water.rotation.x = -Math.PI / 2; scene.add(water);
-```
+The engine's `envTex`, `skyColor` and hand-tuned specular are not needed:
+reflections come from the world. Set `scene.eevee.use_raytracing = True`.
+The surface material uses dithered transparency with ray-traced refraction.
 
-Declare a suitable tiling normal map as `water_normal`. Tune sky/sun uniforms
-together and inspect the reflection in the native render.
+Clear water refracts, and body or foam is diffuse. EEVEE's G-buffer keeps
+one of refraction or diffuse per pixel. Given both at once (a transmission
+weight between 0 and 1, or BSDFs mixed by Mix Shader), it picks one per
+pixel with a pattern that stays the same every sample, and the water shows
+a sandpaper grain that 64 samples do not clear. So the material makes the
+choice itself. A white-noise hash of the shaded position, new at every
+sample because EEVEE jitters each sample, picks clear water with
+probability (1 − body)(1 − foam). The Principled renders that pick with
+transmission exactly 0 or 1. The samples average to the engine's blend, the
+way hashed transparency does: a faint grain at 16 samples, smooth at 64
+(`swe_basin_natural_s64_f0072.png`). Film renders want 64 or more.
 
-**`fluid_sim`** — 2D stable-fluids (ink, dye, smoke, swirling color).
-It does not represent a 3D liquid surface; use the water systems above for that.
-```js
-const { createFluidSim } = await import(globalThis.EIDOVERSE_DIR + 'fluid_sim.js');
-const fluid = await createFluidSim(renderer, { profile: 'balanced', curlStrength: 4 });
-// Display: the splat COLOR tints density — use densityNode as the color.
-const plane = new THREE.Mesh(
-    new THREE.PlaneGeometry(W, H),
-    new THREE.MeshBasicNodeMaterial({ colorNode: fluid.densityNode }),
-);
-scene.add(plane);
-// per frame, BEFORE step: inject motion+color. dx/dy are velocity — big
-// values MOVE the fluid (swirls); near-zero just deposits a static blob.
-//   fluid.splat(uvX, uvY, dx, dy, [r,g,b]);   // uv in [0,1]
-//   fluid.step(1/30);
-// Or distort a scene texture: material.colorNode = fluid.distortion(sceneTex, 1);
-```
+The surface casts no shadow, like the engine's. EEVEE would treat the
+refractive sheet as opaque and shade the bed under the water.
 
-For 3D free-surface water with moving colliders, use
-[free-surface-water.md](free-surface-water.md). `fluid_3d.js` and
-`water_compute.js` are not files in this checkout; do not import those old names.
+Dry columns (under 1 mm) are drawn `dry_sink` under the bed: 1 cm or a
+quarter cell, whichever is more. The engine drew them on the bed, where
+they were invisible, because its surface was alpha-blended with no depth
+write. In EEVEE, a refractive fragment lying exactly on an opaque surface
+renders black even at alpha 0. Black z-fight speckle covered a dry erosion
+patch, and a black seam ran along the domain rim, where the rain gate keeps
+h at 0. Raise `dry_sink` (an argument of `create_water_swe`) for shots from
+far away, where depth precision is coarser. Keep it under the wall
+thickness of a vessel the water fills.
+
+Keep the domain rim out of frame where water pools against it. The rim is
+a closed wall, so a pool there ends in a cut face that shows the water's
+depth colour: a dark band at the edge of the patch.
+
+Droplets are white-grey aerated water, never a clear liquid. Each is a
+small sphere stretched along its velocity. It fades by size instead of
+alpha, so centimetre drops carry no dither noise. Streams are glassy tubes
+that aerate as they fall. Their streak noise is a value noise with the
+engine's quintic weights over Blender's White Noise hash, because the
+engine's PCG hash needs integer operations that shader nodes lack.
+
+**Pours and streams into containers**: shape `bed_fn` as the vessel's
+interior: a bowl, cup, barrel or basin is a heightfield. Share one profile
+function between the visible vessel (a lathe of it) and the sim's `bed_fn`.
+The container the liquid fills is then the prop's interior, and the pour
+lands on a rippling, rising level that conserves mass to the brim.
+
+## Not yet ported
+
+- The flat reflective water (`WaterMesh`). In Blender it is a plane with a
+  Principled water material and the `water_normal` texture scrolled twice by
+  scene time, reflecting through ray tracing or a plane light probe. Its
+  sky is the sky family's Eanpa port. Not built yet.
+- `fluid_sim` (2D stable fluids). It wraps the npm package three-fluid-fx,
+  whose licence has not been checked. The intended port is a numpy solver
+  baked to an EXR image sequence.
+- The erosion valley renders (`test_swe_erosion.py`) and carves braided
+  channels with banks and silt bars. It has not been compared frame by frame
+  with *The Shape the Water Left*'s renders.
+- The presets other than water are ported but not yet rendered. Seep pours
+  run in the erosion probe, but the seep's curtain is out of frame there.
+- The deprecated `chop` agitation is not ported; the engine kept it only
+  for A/B archaeology.
+- `SWE_DEBUG=promo`, the promotion-potential debug paint.

@@ -1,0 +1,47 @@
+{
+ "generators": [
+  ["scratches_default", "scratches", [512, 512, {}]],
+  ["scratches_recipe", "scratches", [512, 512, {"density": 0.5, "depth": 0.6}]],
+  ["scratches_directed", "scratches", [256, 256, {"density": 0.6, "depth": 0.9, "direction": 0.3, "seed": 7}]],
+  ["smudges_default", "smudges", [512, 512, {}]],
+  ["smudges_recipe", "smudges", [512, 512, {"amount": 0.5}]],
+  ["smudges_big", "smudges", [256, 256, {"amount": 0.8, "scale": 1.6, "seed": 5}]],
+  ["noise_default", "noise", [512, 512, {}]],
+  ["noise_recipe", "noise", [512, 512, {"scale": 12, "octaves": 5, "contrast": 0.7}]],
+  ["noise_warp", "noise", [256, 256, {"scale": 3, "warp": true, "offset": 2.5}]],
+  ["voronoi_cells", "voronoi", [512, 512, {}]],
+  ["voronoi_edges", "voronoi", [256, 256, {"mode": "edges", "scale": 6, "edgeWidth": 0.05}]],
+  ["voronoi_distance", "voronoi", [256, 256, {"mode": "distance", "scale": 10}]],
+  ["patches_blob", "patches", [512, 512, {}]],
+  ["patches_giraffe", "patches", [256, 256, {"shape": "voronoi", "baseColor": "#e8b04a", "patchColor": "#6b3a12", "scale": 6, "threshold": 0.0, "softness": 0.12}]],
+  ["patches_spots", "patches", [256, 256, {"shape": "spots", "baseColor": 7393329, "patchColor": 1710618, "scale": 7, "threshold": 0.4}]],
+  ["pores_default", "pores", [512, 512, {}]],
+  ["pores_deep", "pores", [256, 256, {"density": 0.9, "depth": 0.8, "seed": 3}]],
+  ["weave_default", "weave", [512, 512, {}]],
+  ["weave_fine", "weave", [256, 256, {"density": 30, "variation": 0.2}]],
+  ["grain_default", "grain", [512, 512, {}]],
+  ["grain_wood", "grain", [256, 256, {"scale": 3, "stretch": 14, "contrast": 1.6}]]
+ ],
+ "derived": [
+  ["h2n_noise", "heightToNormal", ["noise_default", {}]],
+  ["h2n_recipe", "heightToNormal", ["comp_recipe_height", {"strength": 1.4}]],
+  ["comp_recipe_height", "composite", ["noise_recipe", "scratches_recipe", "add", {"strength": 0.5}]],
+  ["comp_recipe_rough", "composite", ["smudges_recipe", "noise_recipe", "add", {}]],
+  ["comp_multiply", "composite", ["noise_default", "weave_default", "multiply", {}]],
+  ["comp_screen", "composite", ["noise_default", "grain_default", "screen", {"strength": 0.7}]],
+  ["comp_overlay", "composite", ["noise_default", "grain_default", "overlay", {}]],
+  ["comp_max", "composite", ["noise_default", "scratches_default", "max", {}]],
+  ["comp_min", "composite", ["noise_default", "weave_default", "min", {"strength": 0.5}]],
+  ["comp_resize", "composite", ["noise_default", "noise_warp", "multiply", {}]]
+ ],
+ "factories": [
+  ["painted_metal", "createPaintedMetal", {"scratches": true, "smudges": true}],
+  ["painted_metal_scratched", "createPaintedMetal", {"color": "#8a1c1c", "scratches": {"density": 0.6, "depth": 0.8, "direction": 1.2}, "texSize": 256}],
+  ["rubber", "createRubber", {}],
+  ["skin", "createSkin", {}],
+  ["skin_cow", "createSkin", {"color": 16773344, "patches": {"shape": "blob", "patchColor": 1710618, "scale": 3, "threshold": 0.5}, "texSize": 256}],
+  ["scaly", "createScaly", {}],
+  ["fabric", "createFabric", {"wear": {"amount": 0.5}}],
+  ["worn_metal", "createWornMetal", {}]
+ ]
+}

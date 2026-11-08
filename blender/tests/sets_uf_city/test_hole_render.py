@@ -1,0 +1,225 @@
+"""Probe: THE HOLE built on its own (hole.build() with no kit: its own sky, rain, clouds, signs and street disc), its
+screens and tickers redrawn through their API, a chorus shot keyed, and stills rendered from the chorus cameras.
+
+    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
+        bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_hole_render.py [--no-render] [--shots a,b]
+        [--samples 16] [--res 960x540] [--her] [--vrm path] [--power 1.0] [--compare] [--refs dir]
+
+Checks: the standalone extras; the light map painted with the hole's share only; billboards[0].set_canvas (a still),
+billboards[1].set_canvas(frames=...) (a keyed PNG sequence with its hold file), billboards[0].reset(), tickers[1]
+.set_items and its keyed speed; key_hole_cam ('spiral', 12 s at 24 fps) against hole_cam; the U.power turn-down. Then
+the screens and tickers go back to their camps, and the renders use the chorus cameras (spiral, riseUp, closeSing,
+orbit, low, nadir, screens, enter) at mid-shot, driven as the film's probe stage drove its standalone hole (focal light
+at (0, 0, 3), gain 0.35 over 70 m; song time 80 s + the shot's time). --compare writes out/compare_hole_alone_low.png
+beside the film's fin_standalone_hole.png (from --refs, default <cwd>/work/unknown_force/sets/probes).
+"""
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1]))
+
+import bpy  # noqa: E402
+import numpy as np  # noqa: E402
+from mathutils import Vector  # noqa: E402
+from eidoblend.common import script_args, ASSETS_DIR  # noqa: E402
+from eidoblend.sets.unknown_force import citykit as KIT  # noqa: E402
+from eidoblend.sets.unknown_force import hole as H  # noqa: E402
+from eidoblend.sets import unknown_force as UF  # noqa: E402
+
+OUT = HERE / 'out'
+OUT.mkdir(exist_ok=True)
+args = script_args()
+
+
+def opt(name, default=None):
+    return args[args.index(name) + 1] if name in args else default
+
+
+RENDER = '--no-render' not in args
+SAMPLES = int(opt('--samples', 16))
+RES = [int(v) for v in opt('--res', '960x540').split('x')]
+results = []
+
+
+def check(name, ok, detail=''):
+    results.append((name, bool(ok)))
+    print('[uf-hole] %s %s %s' % ('PASS' if ok else 'FAIL', name, detail), flush=True)
+
+
+for c in (bpy.data.objects, bpy.data.meshes, bpy.data.materials, bpy.data.lights, bpy.data.cameras,
+          bpy.data.node_groups, bpy.data.images, bpy.data.worlds):
+    for x in list(c):
+        c.remove(x)
+for c in list(bpy.data.collections):
+    bpy.data.collections.remove(c)
+scene = bpy.context.scene
+scene.render.resolution_x, scene.render.resolution_y = RES
+scene.render.resolution_percentage = 100
+scene.render.fps = 24
+KIT.eevee_settings(scene, samples=SAMPLES)
+
+# the registry
+check('registry lists every UNKNOWN FORCE set', UF.names() == ['city', 'quiet_room', 'hole', 'corridor', 'race', 'showroom',
+                                                              'news', 'bin'], str(UF.names()))
+check('registry finds the city and the hole on disk', {'city', 'hole'} <= set(UF.available()), str(UF.available()))
+check('registry: lazy module access', UF.module('hole') is H and UF.hole is H)
+
+t0 = time.perf_counter()
+hole = UF.build('hole', scene=scene)
+check('standalone build', True, f'{time.perf_counter() - t0:.1f} s')
+P = hole['parts']
+K = P['kit']
+U = K.U
+ex = P['extras']
+check('standalone extras: sky, rain, clouds, signs, street', ex is not None and all(k in ex for k in
+      ('sky', 'rain', 'clouds', 'signs', 'street')))
+P['apply_atmosphere'](scene)
+check('the hole\'s world is the scene\'s', scene.world == K.world)
+check('standalone signs: the 12 outward ads + 12 Futurist walls', ex['signs']['uf_count'] == 24, str(ex['signs']['uf_count']))
+lm = K.lm_canvas
+s = lm.shape[0] / (2 * KIT.LM_R)
+ctr = lm[int(KIT.LM_R * s), int(KIT.LM_R * s), :3]
+far = lm[int((KIT.LM_R + 300) * s), int((KIT.LM_R + 300) * s), :3]
+check('light map: the hole\'s share only (lit centre, dark city)', ctr.min() > 100 and far.max() == 0,
+      f'centre {ctr.tolist()}, 300 m out {far.tolist()}')
+
+# the screens' API
+bb = P['billboards']
+
+
+def title(ctx, w, h):
+    ctx.fillStyle = '#05040a'
+    ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#ffcf8a'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = f'{h * 0.3}px "Black Ops One"'
+    ctx.fillText('UNKNOWN FORCE', w / 2, h / 2)
+
+
+bb[0]['set_canvas'](title)
+px = np.empty(1024 * 576 * 4, np.float32)
+bb[0]['texture'].pixels.foreach_get(px)
+gold = (np.abs(px.reshape(-1, 4)[:, :3] - np.array([1.0, 0.81, 0.54])).sum(1) < 0.1).mean()
+check('billboard set_canvas: the still is in the image', gold > 0.02, f'{gold:.3f} of the pixels gold')
+
+
+def count(ctx, w, h, t):
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#29e7ff'
+    ctx.fillRect(0, 0, w * min(1.0, t / 2.0), h)
+
+
+seq_dir = OUT / 'hole_billboard_seq'
+bb[1]['set_canvas'](count, frames=range(10, 59, 1), fps=24, out_dir=seq_dir)
+n_png = len(list(seq_dir.glob('uf_billboard_1_seq_*.png')))
+img1 = next(n.image for n in bb[1]['material'].node_tree.nodes if n.type == 'TEX_IMAGE')
+check('billboard set_canvas(frames=...): a keyed PNG sequence + hold', img1.source == 'SEQUENCE' and n_png == 50,
+      f'{img1.name} {img1.source}, {n_png} files (49 frames + the hold)')
+bb[0]['reset']()
+bb[0]['texture'].pixels.foreach_get(px)
+red = (np.abs(px.reshape(-1, 4)[:, :3] - np.array(KIT.hex_rgb('#ff2a3a')) / 255).sum(1) < 0.12).mean()   # stored sRGB
+check('billboard reset: the camp screen is back (GOD in red)', red > 0.02, f'{red:.3f}')
+tk = P['tickers'][1]
+tk['set_items']([['COULD YOU TURN IT DOWN', '#ff4fd8'], ['?', '#e9f3f1']])
+tk['speed'].default_value = 0.05
+tk['material'].node_tree.keyframe_insert('nodes["speed"].outputs[0].default_value', frame=1)
+check('ticker set_items + keyable speed', tk['material'].node_tree.animation_data is not None)
+
+# a chorus shot keyed
+cam_d = bpy.data.cameras.new('probe_cam')
+cam_d.clip_start, cam_d.clip_end = 0.05, 6000.0
+cam = bpy.data.objects.new('probe_cam', cam_d)
+scene.collection.objects.link(cam)
+scene.camera = cam
+f0, f1 = H.key_hole_cam(cam, 'spiral', frame_start=1, fps=24)
+check('key_hole_cam spiral: 12 s at 24 fps', (f0, f1) == (1, 289), f'{f0}..{f1}')
+scene.frame_set(145)
+dg = bpy.context.evaluated_depsgraph_get()
+want = H.hole_cam('spiral', 6.0)
+got = cam.evaluated_get(dg).matrix_world.translation
+check('keyed spiral = hole_cam(spiral, 6 s)', (got - Vector(want['pos'])).length < 1e-3, str(tuple(round(v, 3) for v in got)))
+fwd = -(cam.evaluated_get(dg).matrix_world.to_3x3() @ Vector((0, 0, 1)))
+to_t = (Vector(want['target']) - Vector(want['pos'])).normalized()
+check('keyed spiral looks at her', fwd.dot(to_t) > 0.9999, f'{fwd.dot(to_t):.6f}')
+KIT.U_ALIASES  # (camelCase uniform names are accepted too)
+U['power'] = 0.5
+check('uniform aliases (camelCase)', abs(U['focalR'] - 230.0) < 1e-6 and U['power'] == 0.5)
+U['power'] = float(opt('--power', 1.0))
+
+# the singer (optional): the claudesona on her mark, lit by the screens and kickers through light linking
+if '--her' in args:
+    try:
+        from eidoblend.characters import load_vrm, play_vrma_default
+        hits = [Path(opt('--vrm'))] if opt('--vrm') else list(Path(ASSETS_DIR).rglob('claude_suit.vrm'))
+        before = set(bpy.data.objects)
+        her_h = load_vrm(str(hits[0]), name='uf_singer')
+        play_vrma_default(her_h, 'idle', t=0.0)        # the film's probe stage played the default idle on her
+        new = [o for o in bpy.data.objects if o not in before]
+        for o in new:
+            if o.type == 'MESH':
+                P['her'].objects.link(o)
+        # a loaded VRM faces -Y (the characters family's convention): her mark's front, three's +Z
+        check('the claudesona on her mark, idling', bool(new), hits[0].name)
+        done, left = KIT.fog_objects(K, [o for o in new if o.type == 'MESH'])
+        check('her materials take the haze, as scene.fogNode gave it', done > 0, f'{done} wrapped, {left} left')
+    except Exception as e:                              # noqa: BLE001
+        check('the claudesona on her mark', False, repr(e))
+
+cam2_d = bpy.data.cameras.new('probe_cam_still')
+cam2_d.clip_start, cam2_d.clip_end = 0.05, 6000.0
+cam2 = bpy.data.objects.new('probe_cam_still', cam2_d)
+scene.collection.objects.link(cam2)
+shots = [n for n in H.HOLE_CAMS]
+if opt('--shots'):
+    shots = [n for n in shots if any(k in n for k in opt('--shots').split(','))]
+# back to the camps for the renders (the film's default screens and tickers, its scroll speeds)
+bb[1]['reset']()
+tk['set_items'](H.TICKERS[1])
+tk['material'].node_tree.animation_data_clear()
+tk['speed'].default_value = -(0.012 + 0.004 * 1)
+times = []
+if RENDER:
+    scene.camera = cam2
+    scene.render.image_settings.file_format = 'PNG'
+    for n in shots:
+        tt = H.HOLE_CAM_DUR[n] * 0.5
+        KIT.apply_cam(cam2, H.hole_cam(n, tt))
+        scene.frame_set(1)
+        hole['update'](80.0 + tt, {'cam_vel': (0, 0, 0)})
+        P['set_focal']((0.0, 0.0, 3.0), {'gain': 0.35, 'radius': 70.0})    # the film's probe stage, as its stills
+        path = OUT / f'probe_hole_alone_{n}.png'
+        scene.render.filepath = str(path)
+        ts = time.perf_counter()
+        bpy.ops.render.render(write_still=True)
+        times.append(time.perf_counter() - ts)
+        if path.exists():
+            im = bpy.data.images.load(str(path))
+            a = np.empty(im.size[0] * im.size[1] * 4, np.float32)
+            im.pixels.foreach_get(a)
+            bpy.data.images.remove(im)
+            lum = float((a.reshape(-1, 4)[:, :3] @ np.array([0.2126, 0.7152, 0.0722])).mean())
+            check(f'render hole alone {n}', np.isfinite(a).all() and lum > 0.01, f'{times[-1]:.1f} s, luma {lum:.3f}')
+        else:
+            check(f'render hole alone {n}', False, 'no file')
+if RENDER and '--compare' in args:
+    from PIL import Image, ImageDraw
+    ref = Path(opt('--refs', str(Path.cwd() / 'work' / 'unknown_force' / 'sets' / 'probes'))) / 'fin_standalone_hole.png'
+    mine = OUT / 'probe_hole_alone_low.png'
+    if ref.exists() and mine.exists():
+        a = Image.open(ref).convert('RGB')
+        b = Image.open(mine).convert('RGB').resize(a.size, Image.LANCZOS)
+        sheet = Image.new('RGB', (a.width * 2 + 8, a.height + 28), (12, 12, 14))
+        sheet.paste(a, (0, 28))
+        sheet.paste(b, (a.width + 8, 28))
+        d = ImageDraw.Draw(sheet)
+        d.text((8, 7), 'WebGPU (the film\'s probe stage): fin_standalone_hole.png', fill=(230, 230, 230))
+        d.text((a.width + 16, 7), 'Blender 5.2 EEVEE: probe_hole_alone_low.png', fill=(230, 230, 230))
+        sheet.save(OUT / 'compare_hole_alone_low.png')
+    check('compare sheet beside the film\'s standalone hole', (OUT / 'compare_hole_alone_low.png').exists(), str(ref))
+fails = [n for n, ok in results if not ok]
+print(f'[uf-hole] {len(results) - len(fails)}/{len(results)} passed' + (f'; FAILED: {fails}' if fails else '') +
+      (f'; renders {np.mean(times):.1f} s each' if times else ''), flush=True)

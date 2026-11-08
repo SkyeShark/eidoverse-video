@@ -1,0 +1,8 @@
+{
+  "width": 1280,
+  "height": 720,
+  "fps": 24,
+  "duration": 20,
+  "script": "blender/eidoblend/characters/robotics/scenes/mantis.py",
+  "outputVideo": "work/modular_mantis.mp4"
+}

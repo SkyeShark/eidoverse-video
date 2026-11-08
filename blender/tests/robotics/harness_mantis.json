@@ -1,0 +1,9 @@
+{
+  "width": 640,
+  "height": 360,
+  "fps": 24,
+  "duration": 20,
+  "script": "blender/eidoblend/characters/robotics/scenes/mantis.py",
+  "outputVideo": "blender/tests/robotics/out/harness/modular_mantis.mp4",
+  "render": {"samples": 16}
+}

@@ -6,6 +6,93 @@ Choose music, ambience, voice, physical sound effects or silence for the
 piece. Plan sound and image together, including intentional gaps. When voice
 needs to be intelligible, listen to its balance against the actual bed; a
 fixed gain difference is only a starting point, not a universal mix standard.
+Real recorded foley (CC0, e.g. freesound) comes before generated effects:
+the episode mixes are built from recorded clips.
+
+## In the Blender edition
+
+Every audio tool here carries over unchanged. They are host-side Python run
+in the system Python: `generate_song.py`, `generate_sfx.py`, `merge_av.py`,
+`align_lyrics.py`, `lipsync.py`, `cyborg_voice.py`, `cyborg_stutter.py`,
+`bake_weather_audio.py`, `eidoverse/comfy_bridge.py`, and the
+[voicebox](voicebox.md) and [synthkit](synthkit.md) packages. Blender 5.2's
+own Python has numpy but no scipy, numba, soundfile, whisper or demucs, so
+these never run inside Blender. They write WAV and JSON, and
+`eidoblend.media.audio` places them on the film's frames:
+
+| Job | Blender edition |
+| --- | --- |
+| Put a sound on the timeline | `audio.add_sound(scene, path, t=…)`, a sound strip. A sequencer holding only sound strips leaves the 3D render in place (measured 11-07). |
+| A mix's event list (foley hits, page turns) | `audio.place_events(scene, [{t, clip, gain, pan}])` |
+| Beats and cues | `audio.add_markers(scene, times, prefix='kick')` |
+| Sound in the render | `audio.mux_settings(scene)` before a video render: H.264 with AAC 320k, 48 kHz, in one pass. Or stay video-only and use `merge_av.py`. |
+| A mixdown of the strips | `audio.mixdown(scene, 'work/<id>/mix.wav')` (WAV, FLAC, MP3, AAC by extension) |
+| A mouth that sings | `audio.prepare_visemes` + `audio.key_expressions` ([lipsync](#lipsync--a-character-visibly-speaking-or-singing)) |
+| Subtitles on the frame | `eidoblend.media.lyrics.LyricRenderer` (`lyric_renderer.py`, ported) or DAISY's ASS route ([below](#karaoke-captions-on-a-blender-film--the-ass-route)) |
+| Weather sound | `eidoblend.media.weather_audio` records over Blender frames, `bake_weather_audio.py` bakes ([below](#supporting-services-and-timing-utilities)) |
+
+Time follows the film convention: frame 1 is 0 s (`eidoblend.media.timebase`).
+A film that starts partway into a song sets `scene['eido_frame0'] = 1 −
+round(t_start × fps)`: frame 1 is then `t_start` in the song's time, and the
+song's excerpt for a video-only render starts at `t_start` too, not one frame
+earlier.
+
+**`audio.mixdown` runs in a child Blender.** Blender 5.2 runs
+`bpy.ops.sound.mixdown` as a window-manager job on its own thread. The
+operator returns FINISHED before the file exists: measured 11-07, it took
+8 ms, and 15 s of 48 kHz stereo was on disk 0.4 s later. Without an event
+loop (a background run, or a script that keeps the UI busy) the job is never
+ended, so only a session's first mixdown writes anything; every later one in
+the same session wrote no file at all. So `mixdown` saves a copy of the
+.blend, runs one mixdown in a child Blender (the same binary, with
+`--factory-startup` when this session had it), waits until the file is
+complete and returns. Measured: WAV S24, FLAC, MP3 and WAV S16 in a row from
+one session, each 15.00 s, 1 to 2 s apiece. A script that calls
+`bpy.ops.sound.mixdown` itself must wait for the file and must not expect a
+second one.
+
+### Every tool, run on this branch
+
+Measured 11-07 on the Blender branch, unchanged, with Blender-edition
+outputs (`blender/tests/media2/tools_host.py`, then
+`test_tools_film.py` in Blender):
+
+| Tool | What ran | Into the Blender film |
+| --- | --- | --- |
+| [synthkit](synthkit.md) | its guide's quick start: an 8-bar loop at 128 BPM, mastered, 17.0 s, 32 kick times (9.8 s to render) | a sound strip; the kick times as 32 markers |
+| [voicebox](voicebox.md) | its guide's quick start: "Daisy Daisy give me your answer do", handmade, 7.64 s, 184 viseme frames at 24 fps | as round one's probe: keyed onto claude.vrm |
+| `eidoverse/examples/daisy/` | `song.py --upto chorus2 --no-tts` (168.7 s, −14.0 LUFS, peak −2.2 dBFS), `captions.py` (43 captions to ASS; `--preview`, the CQT lyric video), `analyze.py` (LUFS per stem and section; `--asr` below) | the era screens' timeline and captions; the song under the EEVEE film; its ASS burned onto it |
+| `lipsync.py` | `get_viseme_timeline` on DAISY's lead stem, chorus 1 (69–84 s): 450 frames at 30 fps in 0.1 s, values capped at 0.35. Mouth openness correlates 0.60 with the song's own phoneme-exact visemes (a 1/6 s smoothing) | keyed onto claude.vrm with `divide=0.35`, gated to `align_lyrics.py`'s lines: 362 frames per expression, read back exactly, open at 70.46 s, shut between lines |
+| `align_lyrics.py` | the same excerpt and its four lines, Whisper medium (the default), chunked, on the CPU: 14 s, coverage 0.94, line starts within 0.48 s of the song's own (mean 0.29). Whisper small heard less (coverage 0.56) and placed "Daisy Daisy" 3.1 s late | the visemes' windows |
+| `cyborg_voice.py` | the sung excerpt, 15.00 → 15.06 s | a sound strip |
+| `cyborg_stutter.py` | a line voicebox speaks, 4.26 → 4.76 s with stutters | a sound strip, panned |
+| `merge_av.py` | muxed the 7.5 s EEVEE era film with the song; refused (exit 2) the same film against 10 s of sound | `era_film_av.mp4` |
+| `contact_sheet.py` | a labelled sheet of the EEVEE film with DAISY's sections and captions | `era_film_contact_sheet.jpg` |
+| `generate_song.py --probe` | exit 0: MiniMax Music 3 nodes and models found at 127.0.0.1:8188. Nothing was generated | (a generated song is a sound strip like any other) |
+| `generate_sfx.py --probe` | exit 0: ComfyUI reachable, `sa3_workflow.json` resolved. Nothing was generated | (recorded foley comes first) |
+
+The strips in the song's time (frame 1 = 69 s) went into a one-pass render
+(H.264 + 48 kHz stereo AAC, 2.0 s) and a mixdown. On Windows, a pipe's
+console encoding is cp1252, and `align_lyrics.py`'s last print (a "→") then
+raises after the JSON is written, with exit 1. Run it with
+`PYTHONIOENCODING=utf-8` (or `python -X utf8`) when its output is piped.
+
+The options those runs leave at their defaults, each run on this branch
+(`tools_host.py --only options`, CPU only, 11-07):
+
+| Tool and options | Result |
+| --- | --- |
+| `merge_av.py`, 7.5 s film, 4 s of sound | refused, exit 3 (`--trim-tol` 2.0); `--allow-trim` cut the film to 4.00 s; `--trim-tol 4` let the 3.5 s overrun through, 4.00 s |
+| `merge_av.py`, 7.5 s film, 8 s of sound | the pad path (gap 0.5 s within `--tol` 1.0), re-encoded with `RENDER_CODEC=libx264`, 8.00 s; `--tol 0.25` refused it, exit 2 |
+| `contact_sheet.py --parts 2 --names '{"verse1": "verse 1 · the machines"}' --synopsis …` | the full sheet plus `_part1` (4 frames) and `_part2` (3 frames); the section labels and the synopsis read as given |
+| `align_lyrics.py --method align` (medium) | 2 lines for the 4 given: it merges a line pair into one ("Daisy Daisy give me your answer do", 69.00 s), starts within 0.36 s; 20 s on the CPU |
+| `align_lyrics.py --chunk-sec 8 --top-db 24` (medium) | all 4 lines, starts within 0.19 s of the song's own; 28 s |
+| DAISY `captions.py --preview` | the 168.7 s CQT lyric video (1920×1080, libx264), era captions burned in; 23 s |
+| DAISY `analyze.py --asr --sections chorus1` | Whisper small per caption line, in the mix and in the vocals alone: mean word error rate 0.69 in the mix over chorus 1's 8 lines ("all of me made of you" heard exactly, "I can't afford a carriage" not at all) |
+
+Whisper there is an intelligibility meter for synthesized voices, so the
+numbers say how a listener might mishear the handmade lead, not that a tool
+failed.
 
 ## Synthesized voices and music (no models)
 
@@ -186,8 +273,9 @@ is the right tool for them: a convincing underwater gurgle = `vibrato`
 (~1.5–2×). For an effect that develops (clear → gurgling), `asplit` the
 voice, `afade` the clean copy out and the processed copy in (crossfade),
 then `amix normalize=0`. Water/rain/wind can be synthesized with
-`anoisesrc` (pink/white) → `bandpass`/`highpass` → `tremolo`. Mux all audio
-as a separate ffmpeg pass — the renderer outputs video-only.
+`anoisesrc` (pink/white) → `bandpass`/`highpass` → `tremolo`. Mux the audio
+in a separate ffmpeg pass, or let the Blender render carry its sound strips
+([In the Blender edition](#in-the-blender-edition)).
 
 ## Mix balance — voice above bed
 
@@ -214,6 +302,24 @@ available choices. For a five-second fade, use
 Listen to whether the fade preserves the musical cadence. Peak normalization
 and a `tanh` waveshaper are different operations from a loudness-aware mix;
 neither is a required finishing step.
+
+## Sound in a Blender film
+
+```python
+from eidoblend.media import audio
+audio.add_sound(scene, 'work/<id>/mix.wav', t=0.0, volume=1.0)
+audio.place_events(scene, book.page_turn_events())          # e.g. a book's turns (books.md)
+audio.add_markers(scene, [l['start'] for l in lines], prefix='line')
+audio.mux_settings(scene)                                    # then render to video: picture and sound in one file
+```
+
+The lead's films keep the mix outside Blender (`mix_ep3.py`: clips placed by
+frame, LUFS and true peak measured) and render chunks video-only; the cut
+concatenates and muxes once. Both routes work; a one-pass render suits a short
+piece or a probe. `make_edit_scene` in [motion graphics](motion-graphics.md)
+carries the sound when graphics go over the film. Measured 11-07: a one-pass
+render of a sung line wrote H.264 plus a 48 kHz stereo AAC stream, and the
+strip's mixdown came back at 48 kHz stereo.
 
 ## Merging onto the render — `merge_av.py`
 
@@ -291,32 +397,36 @@ Off-screen narration or music does not imply mouth movement for everyone in
 frame. When a character is silent, preserve their intended expression/rest
 pose; do not add a reset loop that erases it without supplying new animation.
 
-**Driving visemes per frame:**
-- Reset all visemes to 0 at the start of every frame before applying current
-  values — blend shapes persist otherwise and build up cumulatively.
-- Apply values directly — raw 0–0.35 range, no multiplier.
+**Keying the visemes in Blender.** The WebGPU engine set the expressions in
+every `renderFrame`; Blender keys them once at build time, so any frame
+renders in any order:
+
+```python
+from eidoblend.media import audio, timebase
+vis = audio.load_visemes(json.load(open('visemes.json')), fps=30)   # a bare list needs its fps
+lines = timebase.load_lines('lyrics_aligned.json')
+keys = audio.prepare_visemes(vis, scene, start_t=0.0, divide=0.35,    # lipsync.py caps at 0.35
+                             windows=audio.viseme_windows(lines), pad=0.12)
+audio.key_expressions(armature, keys)
+```
+
+- `divide=0.35` for `lipsync.py`'s audio-derived values (the lead's unboxing
+  face did the same); voicebox's are 0..1 already, so `divide=1`.
+- `windows` gates the mouth to the sung lines, which is the gating above.
+- Each frame's shapes are scaled to sum to at most 1, and every frame of the
+  range is keyed (zeros included), so nothing persists between lines.
+- `key_expressions` keys the shape keys through the VRM add-on's binds (VRM 1.0
+  presets, or a VRM 0.x model's `a i u e o` groups) and the add-on's expression
+  previews, with LINEAR interpolation.
 - Emotion expressions (happy/sad/angry) override mouth shapes, so they sit
   out during lipsync.
 
-```js
-globalThis.renderFrame = async function (t) {
-    if (globalThis._vrm?.expressionManager) {
-        ['aa', 'ih', 'ou', 'ee', 'oh'].forEach(k =>
-            globalThis._vrm.expressionManager.setValue(k, 0));
-        const v = globalThis._visemes?.[Math.floor(t * FPS)];
-        if (v) Object.entries(v).forEach(([k, val]) =>
-            globalThis._vrm.expressionManager.setValue(k, val));
-    }
-    // ...effects update + renderAsync...
-};
-```
-
 `claude_suit.vrm`'s mouth (and `claude_suit_wardrobe.vrm`'s) is a special case:
 its own shapes slide a flat plate off the face, and a mouth scaled straight by
-loudness snaps shut on every consonant. Drive it with `installSuitMouth` and
-`makeSuitMouth` from `eidoverse/claudesona_face.js`,
-feeding it these same viseme frames with `inputMax: 0.35`; see
-[characters.md](characters.md).
+loudness snaps shut on every consonant. Its suit-mouth driver is
+`eidoblend.characters.claudesona.face`: `install_suit_mouth(me)` once, then
+`make_suit_mouth(input_max=0.35)` for `lipsync.py`'s frames (1.0 for
+voicebox's), keyed with `face.bake(...)`; see [claudesona.md](claudesona.md).
 
 ## Example workflow: a character performance music video
 
@@ -325,9 +435,9 @@ feeding it these same viseme frames with `inputMax: 0.35`; see
 3. Apply any desired voice treatment, then generate visemes from the matching
    vocal timing and gate them to the sung windows.
 4. Build a scene and choreograph performance, camera and environment around
-   the song's structure. Use the movement controller for grounded VRM travel.
-5. Add readable captions if they serve the piece, using the native overlay
-   workflow in [motion-graphics.md](motion-graphics.md).
+   the song's structure. Key the visemes onto the singer in the build script.
+5. Add readable captions if they serve the piece: subtitle strips or the
+   overlay layer in [motion-graphics.md](motion-graphics.md).
 6. Review image, sound and synchronization together, including the ending.
 
 Instrumental films and other forms can use a different workflow. A singer,
@@ -339,15 +449,66 @@ captions, a fixed shot count and a fadeout are not prerequisites for a video.
   Use `lipsync.py`'s imported functions for mouth animation; it is not a
   standalone viseme JSON CLI. Keep speech and matching timings together.
 - `bake_weather_audio.py` turns the weather system's event timeline into a
-  WAV; its recording and bake workflow is in [sky-weather.md](sky-weather.md).
+  WAV, unchanged. In Blender the timeline comes from
+  `eidoblend.media.weather_audio`, a decision-for-decision port of
+  `weather_audio.js`: it steps the film's frames and records the rain and wind
+  envelopes and one thunder event per new strike (distance, the 343 m/s delay,
+  pan from the camera's own axes, the compressed inverse-distance gain).
+
+  ```python
+  from eidoblend.media import weather_audio
+  rec = weather_audio.WeatherAudioRecorder().record_scene(scene)   # reads 'eido_weather' each frame
+  rec.write('work/<id>/wx_audio.json')
+  # python bake_weather_audio.py work/<id>/wx_audio.json --out wx.wav --duration <d>
+  ```
+
+  By default it reads the weather from custom properties keyed on an object
+  named `eido_weather` (`rainK`, `denseA`, `windK` or `wind_len`, `strike_id`,
+  `strike_x/y/z`, `strike_flash`, `strike_local`, Blender metres); pass
+  `read=` to read them elsewhere. That object is a proposal to the sky-weather
+  family's port. `blender/tests/media/test_weather_audio_parity.py` feeds a
+  synthetic storm to both recorders: the timelines match exactly (11-07), and
+  the baker renders the port's.
 - `eidoverse/comfy_bridge.py` is an optional TCP bridge for a container client
   that needs to reach a host ComfyUI. Native rendering can use the backend
   directly. The bridge listens on all interfaces by default; starting it is a
   separate networking operation, not a prerequisite for reading these guides.
-- `eidoverse/lyric_renderer.py` exposes the older `LyricRenderer` Python
-  frame-compositing utility. Current scene subtitles use the engine overlay
-  path in [motion-graphics.md](motion-graphics.md); do not import the Python
-  renderer into a scene or assume it is part of the native frame loop.
+- `eidoverse/lyric_renderer.py`'s `LyricRenderer` (minimum display time, gap
+  filling, fades, wrapping, a backing pill, glow) is ported as
+  `eidoblend.media.lyrics.LyricRenderer`. It gives byte-identical frames to the
+  original, and its fonts resolve to the bundled files. It draws onto frames,
+  `burn`s over a rendered sequence, or becomes an overlay panel
+  (`make_lyric_layer`); see [motion-graphics.md](motion-graphics.md#lyric-subtitles--lyricrenderer).
+
+## Karaoke captions on a Blender film — the ASS route
+
+DAISY's `captions.py` writes ASS subtitles: one style per era, `\kf` karaoke
+on the lead's own lines, two lanes. They burn onto the EEVEE film at the cut
+with ffmpeg's `ass` filter and the bundled fonts. Shift them into the film's
+time first:
+
+```bash
+python eidoverse/examples/daisy/captions.py                      # work/daisy/out/daisy.ass
+ffmpeg -itsoffset -24.25 -i work/daisy/out/daisy.ass -c copy work/<id>/film.ass     # film frame 1 = 24.25 s
+ffmpeg -i work/<id>/film.mp4 -i work/<id>/song_excerpt.wav \
+    -vf "ass=work/<id>/film.ass:fontsdir=eidoverse/assets/fonts" -map 0:v -map 1:a \
+    -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a aac -shortest work/<id>/film_captions.mp4
+```
+
+Run it from the repository root: the filter's paths are relative, because a
+Windows drive colon breaks its argument parsing. Measured 11-07
+(`test_tools_film.py --only captions`): verse 1's era lines appeared on the
+EEVEE wall at 25.75 s and 29.75 s of the song, each in its era's style ("Bell
+Labs · 1961" in the corner, the line in typewriter type).
+
+## Not yet ported
+
+- The weather object `eido_weather` is a proposed contract; the sky-weather
+  family's port decides where rain, wind and strikes are exposed.
+- No generation was run on this branch: `generate_song.py` and
+  `generate_sfx.py` answered their probes. A real generation loads weights
+  onto the shared GPU and wants the collaborator's yes. Their output is an
+  MP3 that `audio.add_sound` places like any other.
 
 External music/SFX availability depends on the selected ComfyUI workflow and
 installed models. A connectivity probe does not prove all generators work.

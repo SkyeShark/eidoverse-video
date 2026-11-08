@@ -1,4 +1,4 @@
-# Eidoverse — your studio guide
+# Eidoverse — your studio guide (Blender edition)
 
 **A film studio for AI agents.** You are the filmmaker, and the toolkit is
 your studio. A human collaborator works alongside you; the conversation is
@@ -8,10 +8,15 @@ Bring your own ideas and creative judgment. Explore the tools, build worlds,
 experiment with motion and simulation, and develop what you want to make in
 conversation with your collaborator. A project can begin with either of you.
 
-The studio runs Three.js on native Deno, WebGPU and NodeMaterial/TSL. These
-instructions help you find and use its tools and care for the shared workspace.
+This is the **`blender` edition**: the studio renders in **Blender 5.2 with
+EEVEE**, whose light and materials read as real. Scenes are Python: a
+`scene.json` and a script with `setup(ctx)` that builds the world with `bpy`
+and the toolkit's own systems, ported from the WebGPU engine into the
+`eidoblend` package. `eidoverse/` holds that engine's source (the reference
+each port is made from) and the shared assets every edition reuses as they
+are: models, VRMs, animations, sets, sky textures, audio.
 
-This is the interactive `main` edition. The [autonomous-loop edition](README.md#branches)
+This is the interactive edition. The [autonomous-loop edition](README.md#branches)
 has its own workflow for receiving briefs from a parent agent.
 
 Read this file completely. It contains the shared working rules and routes
@@ -24,14 +29,17 @@ you to the detailed tool instructions below.
 2. Open the corresponding guides in the table **before using those systems**.
    These are ordinary repository Markdown files, read with your file tools;
    they do not require a skill plugin, registration command or runtime loader.
-   Merely having a file in `tools-guides/` does not load its contents.
 3. For a complete video, read [production](tools-guides/production.md),
    [scene format](tools-guides/scene-format.md) and
    [render review](tools-guides/render-review.md), then the relevant system guides.
    For toolkit maintenance, start with [development](tools-guides/development.md).
 4. Follow links to related guides when combining systems. There is no need to
    load every guide for every project. [The source inventory](docs/TOOLS.md) maps
-   every first-party tool/module to its primary guide, including optional tools.
+   every `eidoblend` module and CLI to its guide.
+
+Each guide describes the Blender edition and ends with a **Not yet ported**
+list: what the WebGPU system had that this edition does not have yet. Read it
+before relying on a system; a name in that list is not available here.
 
 The conversation with your collaborator takes precedence over production
 defaults. Use the guides to support the work you are developing together.
@@ -40,45 +48,51 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 
 ## Working rules
 
-- Put scene scripts, downloaded assets, audio, probes and outputs in
-  `work/<short_id>/`. Run commands from the repository root unless the tool
-  guide specifies another working directory. Reuse local assets in place.
-- `eidoverse/` is the shared engine. Stage exploratory changes separately;
-  develop the engine deliberately within the scope agreed in conversation.
-  Preserve your collaborator's work, unrelated edits and the previous
-  implementation when replacing tools.
+- Put scene configs, scripts, downloaded assets, audio, probes and outputs in
+  `work/<short_id>/`. Run commands from the repository root. Reuse local
+  assets in place.
+- Build with Blender's own data: meshes, materials, modifiers, Geometry
+  Nodes, keyframes, NLA strips, constraints, simulation zones and baked
+  caches. Motion you compute in Python goes in `render_frame(ctx, t, i)`,
+  which runs once per frame at build time and keys what it changes, so the
+  built `.blend` plays, scrubs and renders any frame on its own.
+- Use the toolkit's own systems for what they make: the sky family's
+  `make_sky` for skies, SeedThree for trees, the terrain, flora and
+  characters families for theirs. Port a missing piece from `eidoverse/`
+  rather than substituting a stock stand-in (a photo HDRI for the volumetric
+  sky, a default tree for SeedThree). Scanned assets are fine as what they
+  are: a Poly Haven plant is a plant.
+- `blender/eidoblend/` is the shared library: one subpackage per family,
+  each self-contained. Develop it deliberately within the scope agreed in
+  conversation. Preserve your collaborator's work, unrelated edits, and the
+  hand edits in a built `.blend` (the runner never rebuilds over them unasked).
 - Use the installed systems and source before inventing a parallel API. Read
   errors and inspect inputs; report reproducible toolkit bugs accurately.
   A missing service, dependency or optional local backend is a real limitation.
   Never hide a failure or misrepresent which backend actually ran.
-- Use hardware GPU rendering whenever the environment provides GPU access.
-  Run `python eido.py doctor --gpu-only` in the render shell to check the
-  backend. Software WebGPU fallback is supported for environments without
-  GPU access, including hosted sandboxes; report it clearly. If a GPU is
-  available but software is selected, fix the driver/backend configuration.
-  WSL 2 needs [explicit hardware backend selection](docs/SETUP.md#gpu-setup-for-wsl-2).
-- Render with NodeMaterials and TSL. Large per-frame vertex/instance updates,
-  CPU raster loops and CPU booleans do not belong in scene playback. Build
-  geometry once; use GPU deformation/compute for bulk motion. Small joint,
-  camera and Object3D transforms and supported simulation controls are fine.
-- Preserve authored UVs and material maps on loaded GLBs, VRMs and the modular
-  robotics kit. Apply `layerSurface`/texel normalization only to suitable
-  geometry built for the scene. Load image bytes with `loadImageTexture`.
+- Render headless through `eido_blender.py` (it runs `run_blender.sh`, an
+  isolated Blender user folder). Check the machine with
+  `python eido_blender.py doctor`. On a shared GPU, run one render at a time.
+- Blender is **Z-up, in metres**; colour management is **AgX**. Preserve
+  authored UVs, materials, rigs and clips on loaded GLBs and VRMs; import
+  with the toolkit's loaders (they keep what was authored and repair only
+  what an exporter lost, saying so).
 - Source and inspect assets before placing them. Read previews for scale,
-  pivot and forward direction. Use contact/placement helpers for related
-  objects and check clipping, hovering and z-fighting throughout motion.
+  pivot and forward direction. Use the placement helpers for related objects
+  and check contact, clipping, hovering and z-fighting throughout motion.
 - Use assets whose licenses permit the intended distribution. Keep license
   attribution with the asset. The modular robotics geometry/materials are CC0
   and its runtime is MIT; do not introduce restricted manufacturer models.
 - Keep setup, motion, rendering and audio on an explicit timeline. Each
-  animation/controller/simulation has one owner; avoid double updates.
+  animation, controller or simulation has one owner; avoid keying the same
+  property from two places.
 - Learn the API wiring from examples and make the creative choices for your
   own piece. For a full film, develop a complete visual and audio arc in the
   format and duration you and your collaborator choose. Studies and experiments
   can have their own form; targeted previews can be short or silent.
-- Run single-frame/short probes before long renders. Review actual images,
-  motion, sound and audit output before calling a video finished. Run one
-  sustained render at a time. A passing script is not a visual review.
+- Run stills and short probes before long renders. Review actual images,
+  motion, sound and audit output before calling a video finished. A passing
+  script is not a visual review.
 - Append useful discoveries to `techniques_archive.md`; search it by topic.
   Never overwrite the archive. Put corrections to reusable tool instructions
   in the corresponding guide as well.
@@ -90,9 +104,9 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 
 | Guide | Read when… |
 | --- | --- |
-| [Production planning](tools-guides/production.md) | Planning a complete film, choosing duration, story beats, sound and set dressing. |
-| [Scene format and renderer](tools-guides/scene-format.md) | Creating scene JSON/JS, loading assets, renderer setup and engine globals. |
-| [Asset sourcing and model kits](tools-guides/assets.md) | Finding models, HDRIs and PBR maps; loading GLBs and reusable kit parts. |
+| [Production planning](tools-guides/production.md) | Planning a complete film, choosing duration, story beats, sound, set dressing and render budgets. |
+| [Scene format and renderer](tools-guides/scene-format.md) | Creating scene JSON and Python scripts, the build and render, presets, outputs, coordinates. |
+| [Asset sourcing and model kits](tools-guides/assets.md) | Finding models, HDRIs and PBR maps; importing GLBs, their clips and clones, and kit parts. |
 | [Blender asset authoring](tools-guides/blender.md) | Headless Blender runs, garments and accessories for VRMs, VRMA animation clips, hard-surface props baked to GLB and trim sheets. |
 | [Props and sets](tools-guides/props-and-sets.md) | Historical voice machines (1939–2001), an 1896 tandem with rider IK, the DAISY film's corner, funeral and ocean sets, and the UNKNOWN FORCE film's night city, interiors, corridor, data centre, race and paper-canyon sets. |
 | [Audio and speech](tools-guides/audio.md) | Music, SFX, narration, voice processing, lyric timing, lipsync and mixing. |
@@ -108,10 +122,11 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Procedural geometry](tools-guides/geometry.md) | Parametric surfaces, lofts, booleans, curve deformation and rhombic voxels. |
 | [Terrain and surface materials](tools-guides/terrain-surfaces.md) | Heightfields, PBR generators, surface layers, UV density and parallax relief. |
 | [Vegetation and trees](tools-guides/vegetation.md) | Instanced foliage, species, planting, wind, pushers and SeedThree trees. |
+| [Trees (SeedThree)](tools-guides/trees.md) | SeedThree's procedural trees and plants in Blender (`make_seed_tree`): species, seeds, dials, materials and wind. |
 | [Sky, celestial worlds and weather](tools-guides/sky-weather.md) | Whole sky packages, time of day, clouds, rain, lightning, reflections, weather audio and the sun corona. |
 | [Shallow water and 2D fluids](tools-guides/liquids.md) | Terrain water, pours, erosion, ocean surfaces, ink and dye. |
 | [Free-surface water](tools-guides/free-surface-water.md) | 3D water volumes, emitters, static and moving colliders. |
-| [Volumetric fire](tools-guides/volume-fire.md) | Burning mesh emitters, GPU smoke/fire simulation and its compositor. |
+| [Volumetric fire](tools-guides/volume-fire.md) | Burning mesh emitters, smoke/fire simulation and its compositing. |
 | [Cloth](tools-guides/cloth.md) | Fabric panels, pinning, wind, collisions and settling. |
 | [Particles and morphing](tools-guides/particles-fx.md) | Sprite effects and mesh/text/point-cloud transitions. |
 | [SDFs and isosurfaces](tools-guides/sdf-volumes.md) | Placeable raymarched surfaces, volume effects and voxel scalar fields. |
@@ -121,27 +136,26 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Placement and assembly checks](tools-guides/placement.md) | Contact, scale, orientation, vehicle paths, clipping, hovering and z-fighting. |
 | [Render review and sharing](tools-guides/render-review.md) | Preflight, probes, image/video/audio review, audit reports, contact sheets and discussing the result. |
 | [WebXR in a headset](tools-guides/webxr.md) | Standing inside a piece live in a headset browser: the XR kit, serving to a Quest, controls, telemetry, stills and recordings. |
-| [Renderer troubleshooting](tools-guides/stack-notes.md) | WebGPU/TSL limitations, texture orientation, transparency and encoding. |
-| [Toolkit maintenance](tools-guides/development.md) | Helper registration, dependencies, examples, tests and maintaining this guide index. |
+| [Renderer troubleshooting](tools-guides/stack-notes.md) | Renderer limitations, texture orientation, transparency and encoding. |
+| [Toolkit maintenance](tools-guides/development.md) | The `eidoblend` package, families and their tests, Blender's Python, the guides and this index. |
 
 ## Native commands and starting points
 
 ```bash
-python eido.py doctor
-python eido.py bootstrap
-python eido.py render work/<id>/scene.json --probe
-python eido.py render work/<id>/scene.json --at 40 --at 72.5   # frames mid-piece, as PNGs
-python eido.py render work/<id>/scene.json
+python eido_blender.py doctor
+python eido_blender.py render work/<id>/scene.json --at 4 --at 12.5   # stills mid-piece, as PNGs
+python eido_blender.py render work/<id>/scene.json --probe --frames 24
+python eido_blender.py render work/<id>/scene.json                   # the film, H.264
+python eido_blender.py open work/<id>/scene.json                     # the built .blend in Blender
 ```
 
+A first scene to read and copy: [blender/tests/pipeline/example/](blender/tests/pipeline/example/scene.py).
+The edition's layout and the families' tests: [blender/README.md](blender/README.md).
 Setup and dependency versions: [docs/SETUP.md](docs/SETUP.md).
 Interactive workflow: [docs/HARNESS_MODE.md](docs/HARNESS_MODE.md).
-Engine structure: [eidoverse/README.md](eidoverse/README.md).
-Public examples: [eidoverse/examples/](eidoverse/examples/).
+The WebGPU engine the systems are ported from: [eidoverse/README.md](eidoverse/README.md).
 
 For modular robot assembly, start with [robotics](tools-guides/robotics.md): load
 catalog modules or named parts, connect declared ports, then select motion.
-The G430 FDM/CNC simulations use that same kit. The replaced primitive robot
-builders are not available APIs. The independent VRM navigation stack remains
-available through [characters](tools-guides/characters.md) and
-[navigation](tools-guides/navigation.md).
+The independent VRM navigation stack remains documented in
+[characters](tools-guides/characters.md) and [navigation](tools-guides/navigation.md).

@@ -28,3 +28,7 @@ eidoverse/examples/*.png
 
 # The shared texture/model library: third-party CC0 sets are fetched on first use (fetch_texture.py / fetch_model.py --cache), never committed
 eidoverse/assets/cache/
+
+# Blender edition: each family's test renders, builds and digests (regenerate with its tests), and Blender's backups
+blender/tests/*/out/
+*.blend1

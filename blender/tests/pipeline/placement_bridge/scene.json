@@ -1,0 +1,6 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 1,
+    "script": "blender/tests/pipeline/placement_bridge/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/placement_bridge.mp4",
+    "render": {"samples": 4}
+}

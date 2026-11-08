@@ -1,0 +1,8 @@
+{
+  "width": 1280,
+  "height": 900,
+  "fps": 24,
+  "duration": 31,
+  "script": "blender/eidoblend/fabrication/rotary/scenes/rotary.py",
+  "outputVideo": "work/rotary.mp4"
+}

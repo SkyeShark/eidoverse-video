@@ -1,0 +1,7 @@
+{
+    "width": 960, "height": 540, "fps": 30, "duration": 8,
+    "script": "blender/tests/claudesona/basic_vrm/scene.py",
+    "outputVideo": "blender/tests/claudesona/out/basic_vrm/basic_vrm_aletheia.mp4",
+    "assets": {"character_vrm": "eidoverse/assets/vrms/aletheia.vrm"},
+    "render": {"samples": 16}
+}

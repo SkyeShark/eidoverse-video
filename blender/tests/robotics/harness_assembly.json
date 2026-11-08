@@ -1,0 +1,9 @@
+{
+  "width": 640,
+  "height": 360,
+  "fps": 24,
+  "duration": 12,
+  "script": "blender/eidoblend/characters/robotics/scenes/assembly.py",
+  "outputVideo": "blender/tests/robotics/out/harness/modular_assembly.mp4",
+  "render": {"samples": 16}
+}

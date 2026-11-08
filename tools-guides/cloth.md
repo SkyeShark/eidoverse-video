@@ -1,71 +1,106 @@
-# Cloth — createClothPanel
+# Cloth — create_cloth_panel
 
 [Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
 
-Mass-spring cloth panels (verified): flags, banners, curtains, capes,
-hanging fabric. Pin any edge or corners; wind + gravity + box/sphere/floor
-collision; per-vertex normals, so lit fabric folds shade correctly.
+`eidoblend.fx.cloth` ports the engine's mass-spring cloth panels
+(`cloth_sim.js`) for flags, banners, curtains, capes and hanging fabric. Pin
+any edge or corners; wind, gravity, and box, sphere, floor or mesh
+collision are supported. The solver is the engine's kernel in numpy:
 
-```js
-const { createClothPanel } = await import(globalThis.EIDOVERSE_DIR + 'cloth_sim.js');
-const cloth = await createClothPanel(renderer, {
-    width: 3, height: 2.2, cols: 36, rows: 28,
-    pin: 'top',            // 'top' | 'top-corners' | 'left' | [vertexIds] | (c,r)=>bool
-    wind: 0.0004,          // GUST strength — 0.001 is already a strong gale
-    windBias: 0.15,        // constant-push fraction of wind (see recipes)
-    windDir: [0, 0, 1],    // push direction (panel local; face = ±Z)
-    settleSteps: 60,       // pre-roll so frame 0 shows DRAPED fabric
-    map: bannerTextureOrCanvas,   // graphic ON the fabric (see below)
-    floor: 0,                     // ground plane — fabric won't sink through
-    material: new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide }),
-});
-cloth.mesh.position.set(0, 2.2, 0);
-scene.add(cloth.mesh);
-cloth.collideWith([booth, table]);             // fabric respects scene geometry
-cloth.collideWith([character], { asSphere: true });
-// per frame: cloth.step()
-// move a pinned point (waving flag / cape on a moving character):
-//   cloth.setPinPosition(vertexIndex, [x,y,z])
+- each vertex averages its corrections over 12 springs (structural, shear,
+  bend), with the anti-streak ramp capped at 0.85;
+- Verlet integration with damping and a velocity clamp of 0.45 spacings per
+  step;
+- wind and gravity are per-step impulses;
+- colliders keep a skin of `thickness` between cloth and surface.
+
+`bake()` writes a `.pc2` point cache. A Mesh Cache modifier plays it, with
+Subdivision Surface and smooth shading on top, so lit folds shade smoothly
+and the `.blend` needs no Python at render time.
+
+```python
+import sys; sys.path.insert(0, REPO + '/blender')
+from eidoblend.fx.cloth import create_cloth_panel
+
+cloth = create_cloth_panel(
+    name='banner', material=fabric, location=(0, 0, 2.2),   # the panel hangs in XZ, its face looks along -Y
+    width=3, height=2.2, cols=36, rows=28,
+    pin='top',              # 'top' | 'top-corners' | 'left' | 'none' | [vertex ids] | f(col, row) -> bool
+    wind=0.0004,            # GUST strength: 0.001 is already a strong gale
+    wind_bias=0.15,         # constant-push fraction of wind (see recipes)
+    wind_dir=(0, -1, 0),    # push direction, Blender axes (the engine's panel +Z face is Blender -Y)
+    floor=0.0)              # ground plane: fabric won't sink through
+cloth.collide_with([booth, table])                       # fabric respects scene geometry
+cloth.collide_with([character], as_sphere=True, track=True)
+cloth.settle(60)                                         # pre-roll so frame 1 shows DRAPED fabric
+cloth.bake(1, 240, controls=lambda frame, t, c: c.set_pin_position(0, (x, y, z)))
 ```
 
-**Collision is opt-in — a cloth collides with nothing until
-`cloth.collideWith([...])` registers geometry.** If the fabric hangs near
-anything — a wall, ribs/battens, a sign, a pole, a booth, a screen frame, a
-character — register it, or the cloth sways and billows straight through
-whatever is behind it (the single most common cloth defect). A top-pinned
-cloth flutters several centimetres, so give it clearance *and* register the
-collider — the skin margin then holds it proud. Silencing the clipping audit
-(`userData.noClippingCheck` / `allowIntersect`) only hides the warning; the
-physics clip is still there until `collideWith` is wired.
+The probe `blender/tests/fx/test_cloth.py` is the two recipes below: a
+banner draping over a ball and a flag streaming from a pole. The bake takes
+0.3 s for 90 frames of both.
 
-`collideWith` auto-derives box colliders (`{ asSphere: true }` for round
-things), up to 8 boxes + 8 spheres. The cloth rests `opts.thickness`
-(default 3 cm — the collision skin) proud of every collider, which is what
-stops blowing fabric from clipping in; raise it for thick/heavy fabric or
-coarse cloth that still pokes through. For a cape or flag on a moving
-character or prop, pass `{ track: true }` — colliders re-derive every
-`step()`, no re-registering per frame. Collision resolves at vertex
-resolution, so for a thin protrusion (a pole) keep `cols`/`rows` high or
-bump `thickness`.
+**Collision is opt-in: a cloth collides with nothing until
+`collide_with([...])` registers geometry.** If the fabric hangs near
+anything (a wall, ribs or battens, a sign, a pole, a booth, a screen frame,
+a character), register it. Otherwise the cloth sways and billows straight
+through whatever is behind it, the single most common cloth defect. A
+top-pinned cloth flutters several centimetres, so give it clearance *and*
+register the collider; the skin then holds it proud.
 
-**Text or a logo on the fabric goes on the cloth's `map`** — composite it
-into a canvas and pass it as `map` (or set `mat.map`). It rides the folds
-and sway because the UVs are intact. A separate rigid plane floated in front
-of the cloth detaches, z-fights, and doesn't move with the fabric.
+`collide_with` derives box colliders from the objects' bounds by default.
+`as_sphere=True` makes spheres for round things, up to 8 boxes and 8
+spheres. `mode='mesh'` collides against the evaluated mesh itself: the
+nearest-surface push-out through a BVH tree, for shapes a box flatters.
+The cloth rests `thickness` (default 3 cm, the collision skin) proud of
+every collider. Raise it for thick or heavy fabric, or for coarse cloth
+that still pokes through. For a cape or flag on a moving character or
+prop, pass `track=True`: colliders re-derive every step. Collision resolves
+at vertex resolution, so for a thin protrusion (a pole) keep `cols` and
+`rows` high or raise `thickness`. Register colliders before `settle()`, so
+the pre-roll drapes over them.
 
-**Pick wind by what the fabric is doing** — a hanging banner is not a flag:
-- hanging banner / tapestry / curtain: `wind 0.0003–0.0006, windBias 0–0.2,
-  settleSteps 60` → drapes and sways. Cranking wind "to add life" blows it
-  horizontal toward `windDir` — the banner streams at the viewer as
-  stretched streaks.
-- streaming flag: `wind 0.0006–0.001, windBias 0.8–1.0`, `windDir` pointed
-  where it should stream.
+**Text or a logo on the fabric goes in its material**, through an Image
+Texture on the panel's `UVMap`. It rides the folds and sway because the UVs
+are intact. A separate rigid plane floated in front of the cloth detaches,
+z-fights, and doesn't move with the fabric.
 
-**Place flags with the stream in mind.** `pin: 'left'` hangs the panel off
-its pole; the wind carries the free end a full panel-length along `windDir`,
-and the cloth also drapes to near ground level below the pin. Budget that
-whole swept volume when placing — a pole 2 m upwind of a showpiece drapes
-the flag over it. Frame it like any prop: a flag near the dwell camera fills
-the shot with fabric, one parked behind the camera disappears from the
-scene. If a shot needs the flag out of the way, move the pole (a scene
-decision) rather than adjusting the sim.
+**Pick wind by what the fabric is doing**: a hanging banner is not a flag.
+- Hanging banner, tapestry or curtain: `wind` 0.0003–0.0006, `wind_bias`
+  0–0.2, settle 60. It drapes and sways. Cranking the wind "to add life"
+  blows it horizontal toward `wind_dir`, and the banner streams at the
+  viewer as stretched streaks.
+- Streaming flag: `wind` 0.0006–0.001, `wind_bias` 0.8–1.0, `wind_dir`
+  pointed where it should stream. Give `wind_dir` a component across the
+  flag's plane, as `(1, -0.4, 0)` does for a flag in XZ. Wind exactly in
+  the flag's own plane exerts no force out of it, and the deterministic
+  solver never breaks that symmetry, so the flag stays flat.
+
+**Time.** The engine's `step()` advanced 1/60 s per call, and scenes called
+it once per frame, so the cloth's speed followed the frame rate. The
+recipes above were tuned that way. `steps_per_frame=1`, the default, keeps
+their meaning. `steps_per_second=60` makes the motion frame-rate
+independent; at 30 fps it runs twice as fast as the engine did.
+
+**Place flags with the stream in mind.** `pin='left'` hangs the panel off
+its pole. The wind carries the free end a full panel-length along
+`wind_dir`, and the cloth also drapes to near ground level below the pin.
+Budget that whole swept volume when placing: a pole 2 m upwind of a
+showpiece drapes the flag over it. Frame it like any prop. A flag near the
+dwell camera fills the shot with fabric, and one parked behind the camera
+disappears from the scene. If a shot needs the flag out of the way, move
+the pole (a scene decision) rather than adjusting the sim.
+
+The engine's kernel read its neighbours from the same buffer it was
+writing, so a GPU race added noise to every pass. This port is truly
+Jacobi: every pass reads the previous pass's positions, and a bake repeats
+exactly.
+
+## Not yet ported
+
+- `setPinPosition` from a bone or object without a `controls` callback
+  (for example `pin_to=armature_bone`). Today you move pins yourself each
+  frame in `controls`, in the panel's local space.
+- Self-collision. The engine had none either. For garments that fold onto
+  themselves, Blender's own Cloth modifier is the explicit opt-in. Its
+  units differ from these recipes.

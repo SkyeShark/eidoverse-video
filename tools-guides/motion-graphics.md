@@ -2,521 +2,687 @@
 
 [Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
 
-Choose the anchor before making a graphic: an in-world screen uses
-`makeScreen`; a broadcast title, lower third or subtitle uses the separate
-scene returned by `makeOverlayLayer`. Both are available as renderer globals.
+This is the Blender edition (Blender 5.2, EEVEE, AgX). The tools live in
+`blender/eidoblend/media/`; the probes that show each one working are in
+`blender/tests/media/` and `blender/tests/media2/` (they render into their
+`out/` folders).
+
+Choose the anchor before making a graphic. A screen inside the world is a
+**screen** (`screens.make_screen`): an emitter the camera films, graded with
+the rest of the frame. A broadcast title, lower third or subtitle is a
+**graphic on the frame**: it lives on the **overlay layer** (`overlay`) and
+reaches the film one of two ways. The display route lays it over the
+finished film in the **edit scene**, so its colours land exactly as
+authored. The signal route puts it inside the film's post chain, between the
+world effects and the signal effects, as the WebGPU engine did, so a VHS or
+glitch pass runs over the HUD too.
+
+Everything that changes over time is computed once at build time (drawn
+frames, keys), never in a handler at render time, so any frame renders the
+same in any order and in any chunk. Time follows the film convention: frame 1
+is 0 s (`eidoblend.media.timebase.Timebase`; a scene may move it with
+`scene['eido_frame0']`).
 
 ## In-world screens and ASCII panels
 
-```js
-const ui = makeScreen({
-  width: 0.64, height: 0.36, px: 768,
-  draw(ctx, t, w, h) {
-    ctx.fillStyle = '#071b22'; ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#c6f4ef';
-    drawTextFit(ctx, 'SYSTEM READY', {
-      x: w / 2, y: h / 2, maxWidth: w * 0.8, maxHeight: h * 0.5,
-      font: 'bold 64px sans-serif', align: 'center'
-    });
-  }
-});
-ui.applyTo(displayMesh); // the actual GLB display surface
+```python
+import bpy
+from eidoblend.media import raster, screens
+
+def draw(c, t, w, h):                        # c: raster.Canvas, t: film seconds, w x h: the canvas
+    c.clear('#071b22')
+    raster.draw_text_fit(c, 'SYSTEM READY', x=w / 2, y=h * 0.3, max_width=w * 0.8, max_height=h * 0.4,
+                         font='Share Tech Mono', px=96, align='center', fill='#c6f4ef')
+
+ui = screens.make_screen(width=0.64, height=0.36, px=768, draw=draw, frames=(1, 240),
+                         out_dir='//screens/ui', strength=1.5)
+ui.obj.location = (0, -1.0, 1.4)             # a standalone panel: stands up, faces -Y
 ```
 
-`applyTo` also accepts a model and searches for a screen/display/monitor/LCD
-mesh. Pass the exact mesh when the model has several. It handles the glTF UV
-orientation; inspect unusual assets before using its `flip`/`mirrorX` options.
-One screen instance drives one surface. After `applyTo`, do not also add
-`ui.mesh`; for a new standalone screen, add that mesh instead.
+`make_screen` calls `draw` once per frame of `frames` and writes a PNG
+sequence (`<out_dir>/<name>_0001.png …`); an Image Texture steps through it
+with the scene frame. File 1 shows at the range's first frame; before the
+range the first drawing holds, after it the last. Blender shows file
+`<first − 1>` on every frame before a sequence starts (it clamps to 0, then
+adds the offset), so `make_screen` writes `<name>_0000.png` beside the
+sequence, a copy of file 1 marked as a hold in a PNG text chunk (without it a
+screen showed the missing-texture magenta until its range began; 11-07). It
+does the same beside a `source=` sequence (file `<first − 1>`, unless the
+source already has a real frame there). Encoding such a folder with ffmpeg,
+pass `-start_number 1`: ffmpeg's image2 reader starts at file 0 by default and
+picks the hold up as an extra first frame.
+`fps=12` throttles the redraw (a held frame repeats the last drawing, drawn at
+the first film frame of each art frame, as the engine's throttle did). A
+single-frame range bakes a still.
 
-`makeScreen` returns `mesh`, `material`, `texture`, `canvas`, `ctx` and
-`update(t)`. It auto-updates in the engine; use `auto:false` for manual control
-or `fps` to limit redraw frequency. Default displays are unlit with exact UI
-colors. Use `lit:true` when the surface should respond to scene lighting.
-Maintain canvas/mesh aspect ratio and central text margins; review the camera's
-closest approach so labels remain readable. Do not copy pixels to flip text.
+Give `out_dir` a lasting folder (`work/<id>/…`, or `//…` beside a saved
+.blend). Without one, the frames go to `//eido_screens/<blend>/<name>` beside a
+saved .blend, or to a folder of the screen's own under the system temp folder
+when the blend is unsaved (Blender's session temp, deleted at exit, is never
+used). A screen's `name` is also its files' name, so a name the blend already
+has becomes `<name>_2`: two screens on the defaults never share frames.
 
-**Canvas fonts.** Screen canvases are @napi-rs/canvas (Skia) canvases, which
-look fonts up by family name among installed and registered fonts. On Windows
-the generic names `sans-serif`, `serif` and `monospace` are not mapped to a
-matching face: they fall back to the system default face (measured identical
-to Arial, as an unknown name does), so text renders but `monospace` is not
-monospaced. `drawTextFit`'s default font is `bold 48px monospace`, and the
-examples here use `sans-serif` only as placeholders. The engine does not
-register the bundled fonts. For a specific look, register one in `setup()` and
-name that family in `font`:
+The canvas is a Pillow RGBA image: `c.image`, `c.draw` (an `ImageDraw`),
+`c.w`, `c.h`, `c.clear(color)`, `c.layer()` and `c.over(layer)` for
+alpha-blended shapes. `supersample=2` draws at twice the size and downsamples
+(Pillow's shapes are aliased; text is not). `draw_text_fit` is
+`drawTextFit`, ported: it word-wraps, shrinks to fit the box and returns
+`{px, lines}`.
 
-```js
-const { GlobalFonts } = await import('npm:@napi-rs/canvas@0.1.69');
-GlobalFonts.registerFromPath('eidoverse/assets/fonts/ShareTechMono-Regular.ttf', 'Share Tech Mono');
-// font: 'bold 64px "Share Tech Mono"'
+**Fonts are files.** `raster.font(name, px)` takes a bundled font by name
+(`'Share Tech Mono'`, `'ShareTechMono-Regular'`, `'VT323'`, `'Anton'` …, any
+file in `eidoverse/assets/fonts/`) or a path. There are no generic families:
+an unknown name raises instead of falling back to a system face.
+
+**Take over a model's display.** `apply_to` puts the screen on a GLB's own
+display mesh (the mesh itself, or a root holding one named like
+screen / display / monitor / lcd):
+
+```python
+mac = screens.make_screen(px=512, width=0.1806, height=0.1207, draw=mac_draw, frames=(1, 48),
+                          out_dir='//screens/mac', name='mac_screen', standalone=False,
+                          interpolation='Closest', strength=2.0, spill=0.6)
+mac.apply_to(bpy.data.objects['screen_crt'], window=(0.0485, 0.10696, 0.9515, 0.90104), glass=True)
 ```
 
-The path is relative to the working directory the renderer runs from (the
-repository root under `eido.py`). An installed system family also works by name.
+The Mac's window is `mac1984.js`'s own: the 0.1806 × 0.1207 m raster centred
+in the 0.200 × 0.152 m tube and raised 0.004 in v. The engine applied it to
+flipUV'd glTF UVs, which is what Blender's glTF importer gives, so the numbers
+carry over unchanged.
 
-`makeAsciiPanel(asciiText, options)` uses the same screen system for multiline
-terminal art. Use supported fonts; the effect registry provides reusable
-CRT/glitch styling, while the screen draw callback can author its own content.
+- Blender's glTF importer already turns glTF's v-down UVs upright, so an
+  imported display shows the image upright with no flip (seen on `mac1984.glb`'s
+  `screen_crt`, 11-07). Render and look; `flip` / `mirror_x` are there for a
+  model with odd UVs.
+- `window = (u0, v0, u1, v1)` puts the image in that part of the mesh's UV
+  square: the Mac's 512 × 342 raster inside its tube; outside it is glass.
+- `glass=True` (the default for `apply_to`) keeps a real display's dark glass
+  and clear coat over the image, so it catches the room's reflections. A
+  standalone panel defaults to emission only (an LED wall, a projection);
+  `lit=True` makes the image a printed surface; `transparent=True` cuts it by
+  its alpha.
+- `interpolation='Closest'` keeps pixel art crisp in close-ups; far away
+  `'Linear'` aliases less.
+
+**Brightness under AgX.** A screen is an emitter filmed by the camera, so it
+goes through AgX like everything else: emission strength 1 lands sRGB white
+near 197/255 at exposure 0, strength 4 near 233. Set `strength` by probe
+against the room: the Mac in a lit room read right at 2.0, the Voder wall in a
+dim room at 1.6 with the view exposure at +1.
+
+**Spill.** `spill=<gain>` adds an area light the size of the display (its
+`window`), just in front of it, keyed per frame to the frame's mean linear
+colour m (CONSTANT keys), at the display's own radiance: colour m / max(m),
+power π · area · strength · max(m) · gain (Blender multiplies colour by power
+without normalising it). EEVEE's screen-space GI only sees emitters on screen,
+and light probes do not follow animated content, so this is what lights a face
+or a desk. DAISY lit its walls with tinted point lights by hand; this does it
+from the frames.
+
+The light carries a custom cutoff distance (`spill_reach`, 30 m by default).
+Without it EEVEE culls a light where its power falls under
+`scene.eevee.light_threshold` (0.01): a screen's few watts lit a third of the
+truth for white and nothing at all for a saturated blue frame (11-07).
+
+Measured 11-07 against Cycles (`test_screens.py --only spill`: a 1.0 × 0.6 m
+screen, strength 1, gain 1, over a white floor, white, blue and orange
+frames). EEVEE's spill alone lands within 1 % of the truth: 1.004–1.009 with
+the screen in view or out of it, every colour. With the screen out of view
+EEVEE adds nothing of its own, so the shipped look is right (1.009). While the
+display itself is in frame, EEVEE's GI adds about a quarter on top (0.27 of the
+truth), so those shots read a little hot at gain 1; about 0.75 evens them out.
+In the Voder room at gain 1 the spill doubles the light on the stool's seat
+and lifts the floor, and the stool casts soft shadows toward the camera
+(`screens_wall_spill_only_f060.png` beside `screens_wall_no_spill_f060.png`).
+
+**Sampling a screen from another node tree.** A screen's frames and their
+ImageUser settings travel with its image (custom properties), so a prop can
+build its own display material (a CRT's barrel and scanlines, a VFD's glass)
+on the same frames:
+
+```python
+node = ui.texture_node(my_material.node_tree)                 # an Image Texture stepping with the frames
+# or, for a node you made: screens.configure_user(node.image_user, ui.image)
+```
+
+`make_ascii_panel(text, color='#27e0a0', background='#050a08', width=1.2,
+reveal=24, font='VT323')` is `makeAsciiPanel`: multi-line monospace text on a
+terminal panel, a teletype reveal in characters per second and a blinking
+block cursor, in a real monospace font.
 
 ## Frame overlays
 
-```js
-const hud = makeOverlayLayer({fov: _c.fov});
-const caption = makeScreen({
-  width: 0.9, height: 0.14, px: 1024, transparent: true,
-  draw(ctx, t, w, h) {
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#ffffff';
-    drawTextFit(ctx, subtitleAt(t), {
-      x: w / 2, y: h / 2, maxWidth: w * 0.84, maxHeight: h * 0.8,
-      font: '48px sans-serif', align: 'center'
-    });
-  }
-});
-hud.add(caption.mesh);
-caption.mesh.position.set(0, -0.32, -1);
+```python
+from eidoblend.media import overlay
+
+ov = overlay.make_overlay_layer(film_scene)                  # its own scene, the film camera's field of view
+
+def lower_third(c, t, w, h):
+    c.clear((0, 0, 0, 0))
+    c.draw.rectangle([0, 0, int(w * 0.06), h], fill=raster.color('#27e0a0'))
+    c.draw.rectangle([int(w * 0.06), 0, w, h], fill=(16, 24, 32, 222))
+    raster.draw_text_fit(c, 'CLAUDE', x=w * 0.1, y=h * 0.12, max_width=w * 0.5, max_height=h * 0.5,
+                         font='Anton', px=h * 0.48, align='left', fill='#ffffff')
+
+ov.panel(draw=lower_third, x=-0.25, y=-0.33, w=0.42, h=0.1, px=1000, frames=(1, 240), out_dir='work/<id>/lt')
+frames_dir = overlay.render_overlay(ov, 'work/<id>/overlay')          # RGBA PNGs, ov_0001.png …
+
+edit = overlay.make_edit_scene(film='work/<id>/film.mp4', overlays=[frames_dir],
+                               sounds=[('work/<id>/mix.wav', 1)], like=film_scene)
+overlay.add_subtitles(edit, overlay.subtitle_cues(lines), font='Share Tech Mono', size=0.055,
+                      color='#ffffff', outline='#000000')
+overlay.render_edit(edit, 'work/<id>/final.mp4')              # picture, graphics and sound in one pass
 ```
 
-Supply `subtitleAt(t)` from actual narration/lyric timings. `makeOverlayLayer`
-owns an independent overlay scene/camera; do not parent the graphic to the
-moving world camera. At z=-1 its half-height is `tan(fov/2)`, with half-width
-multiplied by output aspect ratio. Keep graphics within that frustum and text
-safe areas. Aspect and positions in this snippet are illustrative.
-The helper installs `globalThis._overlayScene` and `_overlayCamera` for the
-renderer and returns `{ scene, camera, add }`; `add(obj)` parents the object to
-the overlay camera so it stays screen-locked. Give overlay materials
-`transparent: true` and `depthTest: false`, and use `renderOrder` to sort them.
+**The display route** is the default. The overlay scene renders with view
+Standard on a transparent film, and the edit scene (view Standard, sequencer
+colour space sRGB) lays it over the film's own AgX pixels, as DAISY's
+burned-in ASS subtitles did. Both scenes render with `dither_intensity = 0`:
+Blender dithers float to 8-bit by default, which puts solid ink ±1 off.
+Measured 11-07 (`test_overlay_routes.py`): teal `#27e0a0`, white, `#ffd400`
+and `#101418` all landed on their exact values.
 
-World effects composite before the overlay; signal effects can composite
-after it. `nuclear_explosion`, `godrays` and `underwater` stay under it;
-`depth_fog` and `retro_wireframe` default under; other effects default over.
-For switchable effects set `opts[effect].layer` to `under` or `over` through
-`CustomEffectsDeno.applyTo`. Read [postprocessing.md](postprocessing.md).
-Avoid coplanar overlay elements and keep the central frame available for the
-subject. Adjust tint/glitch uniforms on beats; preserve text legibility.
+`make_overlay_layer(..., filter_size=0)` renders drawn graphics at their own
+pixels. EEVEE's default 1.5 px pixel filter antialiases 3D type placed on the
+layer, but it also softens a panel drawn at the film's own resolution. With
+the filter at 0 the lyric layer below matched `LyricRenderer.burn` to within 1
+level at every pixel; at 1.5 its text edges differed by up to 45 levels (p99).
+Keep 1.5 when the layer holds 3D type.
+
+**The overlay layer** is a separate scene with the film's resolution, rate
+and range, and a static camera at its origin with the film camera's field of
+view. Its planes are parented to that camera at z = −1, where the frame is
+`2 * ov.half_w` × `2 * ov.half_h`. `ov.place(obj, x, y)` and `ov.panel(...)`
+take frame fractions (−0.5 … 0.5, centre origin, y up). Anything can live
+there: drawn panels, 3D type, the parole layer's sprites. A panel exists only
+in its `frames`: outside them it is keyed hidden from the render (CONSTANT
+`hide_render` keys, `overlay.key_render_range`), where an in-world screen
+holds its first and last drawings. Measured 11-07: a lower third over frames
+10..20 rendered on exactly those 11 frames of 5..25, its teal bar landing on
+(39, 224, 160).
+
+**Subtitles.** `add_subtitles` makes one TEXT strip per cue, font from file,
+`size` as a fraction of the frame height, outline, shadow, backing box, wrap
+width. Strip colours are display values: the authored hex goes in as is
+(a linearised colour renders darker: '#ffd400' came out orange, 11-07).
+`subtitle_cues(lines)` turns `timebase.load_lines` lines (align_lyrics.py
+output, captions, voicebox's `Sung.lines`) into cues held until the next line,
+and can split long lines. For karaoke styling (`\kf` sweeps, one style per
+era) keep the ASS route: `eidoverse/examples/daisy/captions.py` and an ffmpeg
+burn-in at the cut.
+
+**The edit scene** takes the film as a movie or a PNG sequence, overlays as
+RGBA sequences (ALPHA_OVER, in order), subtitles, and sound strips. It fits
+the lead's chunked renders: render the film's chunks as now, then one edit
+render over the joined film; or overlay with ffmpeg at the cut instead.
+
+### The signal route: the overlay inside the post chain
+
+The WebGPU engine composited its overlay scene between two effect stages:
+world effects (fog, godrays, the blast, underwater) under the HUD, signal
+effects (vhs, glitch, grain, rgb_shift, scanlines) over it, "so the overlay
+looks like part of the broadcast signal". `chain_overlay` puts the overlay
+layer in the same place in the film's own compositor chain
+([postprocessing.md](postprocessing.md), `look/post/chain.py`):
+
+    Render Layers -> bloom -> 'under' effects -> the overlay -> 'over' effects -> AgX
+
+```python
+from eidoblend.look.post import custom_effects as fx
+from eidoblend.media import overlay
+
+ov = overlay.make_overlay_layer(film_scene, filter_size=0)
+ov.panel(draw=lower_third, x=-0.25, y=0.33, w=0.42, h=0.16, px=800, frames=(1, 240))
+overlay.chain_overlay(ov, film_scene)                     # renders with the film: no separate overlay pass
+fx.apply_to(film_scene, 'sepia,rgb_shift', {'sepia': {'layer': 'under'},           # the world goes sepia
+                                            'rgb_shift': {'layer': 'over', 'amount': 0.004}})   # HUD split too
+```
+
+Blender renders the overlay scene for each film frame through a Render
+Layers node of that scene. `source='work/<id>/overlay'` reads
+`render_overlay`'s PNGs instead. `factor` is the overlay's opacity and can be
+keyed on the returned Alpha Over. Panels keep their keyed `hide_render`
+ranges.
+
+The engine mixed the overlay in before tone mapping and put solid ink through
+the inverse of ACES so it landed as drawn. `authored=True`, the default, does
+the same with the film's own view transform (Convert To Display, inverted,
+exposure divided out by a driver). AgX cannot show every display colour, so
+the inverse is exact only where AgX can reach. Measured 11-07, the frame's
+mean over a 5 × 5 patch:
+
+| Ink | Display route | Signal route, `authored=True` | Signal route, `authored=False` |
+| --- | --- | --- | --- |
+| teal `#27e0a0` | (39, 224, 160) | (40, 224, 160) | (114, 185, 154) |
+| white | (255, 255, 255) | (255, 255, 255) | graded |
+| `#101418` | (16, 20, 24) | (16, 20, 24) | graded |
+| `#ffd400` | (255, 212, 0) | (204, 178, 43) | graded |
+
+AgX's inverse of saturated colours comes back short. Through Blender's own
+OCIO config: `#ffd400` returns 50/255 off, pure blue 67, pure red 26,
+`#ff2d95` 21, cyan `#00d4ff` 16. Neutrals and the teal return within 2. When such ink must land
+exactly and no signal effect runs over it, take the display route.
+Semi-transparent parts blend in linear light before AgX, as the engine's
+`mix` before ACES did. The lyric pill at 160/255 came out a mean 2.9 levels
+off the display route's sRGB blend, while the solid text core matched within
+0.14.
+
+The layering measured in the same probe:
+- With sepia 'under', the wall went sepia (mean (153, 146, 137), from (116,
+  139, 156)) and the HUD's teal stayed (41, 224, 160).
+- With rgb_shift 'over', at the HUD's white block red reached white 4 px
+  before the edge, green at it and blue 4 px after: the 3.84 px shift each
+  way. Without it, all three reached white at the edge.
+- With sepia moved 'over', the HUD teal went to (206, 202, 195) with the film.
+- `out/overlay_routes_sheet.png` holds all six renders.
+
+An over-bright channel goes white under AgX: the authored white is 16.5
+scene-linear. So a split edge on white ink shows a pale fringe, not a pure
+red one.
+
+The registry (`look/post/custom_effects.py`) keeps the engine's default
+layers: every effect starts 'over' except `depth_fog` and `retro_wireframe`
+('under', switchable), and `nuclear_explosion`, `godrays` and `underwater`
+are locked 'under'. `opts[name]['layer']` switches the rest, as above.
+
+## Lyric subtitles — `LyricRenderer`
+
+`eidoverse/lyric_renderer.py`'s `LyricRenderer`, ported unchanged in
+`eidoblend.media.lyrics`. A line shows for at least `min_duration`, a gap
+shorter than `max_gap` keeps the previous line up, and lines fade over
+`fade_duration`. Long lines wrap at `max_chars_per_line`. Each sits on a
+rounded backing pill (`bg_opacity`, `bg_padding`, `bg_color`) centred at
+`y_position` (85 % of the height by default), clamped to a 5 % safe margin,
+with an optional `glow` / `glow_color`. It runs in the system Python or in
+Blender's (Pillow is in both):
+
+```python
+from eidoblend.media import lyrics, overlay
+r = lyrics.LyricRenderer('work/<id>/lyrics_aligned.json', width=1920, height=1080, font='mono', font_size=42,
+                         glow=True, glow_color=(39, 224, 160))
+r.debug_timeline()                               # when each line shows
+frame = r.draw(frame, t)                         # a PIL image or a numpy (H, W, 3) frame, the same type back
+r.burn(sorted(Path('work/<id>/frames').glob('*.png')), 'work/<id>/subbed', fps=24)   # over rendered frames
+
+ov = overlay.make_overlay_layer(film_scene, filter_size=0)
+lyrics.make_lyric_layer(ov, r)                   # the same subtitles as a panel on the overlay layer
+```
+
+It takes `align_lyrics.py` output, any `{text, start|t0, end|t1}` list, or a
+timeline with `captions` (DAISY's `daisy_timeline.json`), as a path or as
+data. `layer(t)` is the subtitle alone, a transparent RGBA image the frame's
+size. `draw` composites exactly that, and `make_lyric_layer` puts it on one
+full-frame overlay panel, so it can take either route above.
+`draw_karaoke(frame, t)` falls back to `draw`, as in the original. For
+karaoke sweeps, keep DAISY's ASS route ([audio.md](audio.md)).
+
+The font names are the original's: 'default' and 'rajdhani' (Rajdhani Bold),
+'mono', 'pixel', 'display', 'handwriting', 'orbitron', 'exo2', 'michroma',
+'pressstart', 'silkscreen', 'vt323', 'caveat', 'kalam', 'sedgwick',
+'monoton' / 'neon', 'blackops' / 'military', 'creepster' / 'horror',
+'typewriter'. They resolve to the bundled files instead of the original's
+Docker paths. Any other bundled font name or a path works too. 'dejavu' and
+'noto' resolve when the system has them. A name that does not resolve falls
+back to Rajdhani Bold, as the original did, and says so.
+
+Measured 11-07 (`test_lyrics_parity.py`, system Python): against the
+original module, its font table pointed at the same files, DAISY's 43 lines
+gave identical display timing under four option sets. 60 moments each
+(inside lines, in fades, in filled gaps) gave byte-identical frames, PIL and
+numpy. Through the overlay layer (`test_overlay_routes.py`) the lyric matched
+`burn` to within 1 level at `filter_size=0`.
 
 ## Parole in libertà — `parole.js`
 
 Lyric captions as Marinetti's words-in-freedom, made for the UNKNOWN FORCE
-music video (2026-10). Every sung word is thrown in on its own time and lands
-in a seeded, deterministic Futurist layout. Words sit on torn paper slips in
-mixed Didone, slab and grotesk, with letterpress grain and a misregistered
-plate, and thin neon tubes and LED slips accent them. The module also lays out
-documentary quotes as collage blocks. It draws into an overlay layer, so a
-post pass under the HUD never paints it.
+music video: every sung word thrown in on its own time into a seeded Futurist
+layout, the camps' pre-heard answers, documentary quotes, hush. The layouts,
+lexicon, inks and treatments are described in the WebGPU guide's section of
+the same name; in Blender they are the same, because `parole.js` itself runs:
 
-```js
-const P = await import(new URL('parole.js', EIDOVERSE_DIR).href);
-const hud = makeOverlayLayer({ fov: camera.fov });
-const parole = await P.makeParole(THREE, { overlay: hud, timing: { lines } });   // registers its fonts
-parole.addLine({ text: 'UNKNOWN FORCE', start: 26, end: 33.5, template: 'rows', sizeScale: 1.6 });   // a title
-// renderFrame(t), after positioning the camera:
-parole.setSpare({ x, y, r });   // her face where THIS shot puts it (frame heights, centre origin, y up)
-parole.setHush(0);              // 0 = the argument, 1 = turned down
-parole.update(t);               // deterministic in t: any frame, any order
+```python
+from eidoblend.media import overlay, parole, timebase
+ov = overlay.make_overlay_layer(film_scene)
+layer = parole.make_parole(ov, 'work/<id>/parole', timebase.load_lines('work/<id>/lyrics_aligned.json'),
+                           add_lines=[{'text': 'UNKNOWN FORCE', 'start': 26, 'end': 33.5, 'template': 'rows',
+                                       'sizeScale': 1.6}],
+                           spare=parole.face_spare(film_scene, film_scene.camera, armature),   # keep her face clear
+                           hush={f: h for f, h in my_hush_curve})                              # optional, per frame
+overlay.render_overlay(ov, 'work/<id>/overlay')       # then make_edit_scene lays it over the film
 ```
 
-`timing` is `[{ text, start, end, words: [{ w, s, e }] }]` or `{ lines }` in
-film seconds. `align_lyrics.py`'s `{ word, start, end }` and `{ t0, t1 }`
-spellings work too. A line may carry `section` and `echo: true`. A line leaves
-0.85–1.6 s after its last word, always before the next line arrives.
+`js/parole_export.mjs` runs `makeParole` without a GPU (Deno, offline) over
+the frame range, calling `setSpare` and `setHush` before each frame as the
+film's `renderFrame` did, and writes each group's canvas atlas and every live
+sprite's pose and parameters. `make_parole` builds one plane per sprite under
+the overlay camera (three's camera frame and Blender's agree: looking down −Z,
++Y up), keys location, rotation (quaternions, from parole's own 'YXZ' Euler)
+and scale per frame, and keys alpha, reveal, bright and desat as object
+properties that one material per atlas reads through Attribute (Object)
+nodes: the reveal wipe, the cell-edge fade for glows, desaturation,
+brightness, as the engine's material. Draw order: the engine drew by group
+order and instance order with no depth test; EEVEE sorts blended surfaces by
+distance, so each later sprite sits 0.1 mm nearer, its position and size
+scaled so it projects identically. In the overlay scene (view Standard) solid
+ink lands as drawn; no inverse tone curve is needed.
 
-**How a line is drawn.** Words fall into four levels: connectives, ordinary
-words, strong words, and HUGE words. The HUGE words have their own treatment:
-CAPITAL LETTERS as a torn-out post card, SUPREME INTELLIGENCE as a gold plaque,
-UNKNOWN FORCE on Depero's red wedge, CLANKER sprayed through a stencil. Each
-camp's words carry its colour and typeface: red for the safety camp, gold for
-the state, chrome-green for the money camp, warning plates for "only an
-engine", magenta spray for the news. The singer's own words are paper-white
-under a neon tube. The templates are `rows` (a tilted, staircased baseline),
-`stair`, `band` (slips on a trajectory) and `calm`. All of them keep reading
-order. Section onomatopoeia and signs fill only free space.
+Pass-through: `opts` (`styleOverrides`, `preheardDefault`, `spare`),
+`add_lines` (`addLine` specs), `quotes` (`[{text, opts}]`, `opts.alignWith`
+= an earlier quote's index), `preheard` (`[{line, alternatives, opts}]`).
+`face_spare(scene, camera, armature, bone='head')` is the film's own face
+recipe (head bone + 0.1 m, the radius from a point 0.24 m to the camera's
+right, ×1.15, clamped) through `world_to_camera_view`.
 
-**The face.** `spare` keeps the singer's face clear: line blocks anchor where
-they cover it least, and the decor and the CLANKER aside avoid it. A line takes
-its layout when it is first built, so call `setSpare` every frame with the
-face's projected position. Each new line then avoids the face where the current
-shot puts it. The film computed the face from the head bone:
-
-```js
-const h = new THREE.Vector3(); vrm.humanoid.getNormalizedBoneNode('head').getWorldPosition(h); h.y += 0.1;
-const e = h.clone().add(new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(0.24));
-const a = h.clone().project(camera), b = e.clone().project(camera), asp = WIDTH / HEIGHT;
-const inView = vrm.scene.visible && Math.abs(a.x) < 1.1 && Math.abs(a.y) < 1.1 && a.z < 1;
-const r = Math.hypot((b.x - a.x) * asp / 2, (b.y - a.y) / 2) * 1.15;
-parole.setSpare(inView && Number.isFinite(r) ? { x: a.x * asp / 2, y: a.y / 2, r: Math.min(0.35, Math.max(0.06, r)) } : { r: 0 });
-```
-
-**Pre-heard captions.** `parole.preheard(lineIndex, alternatives, opts)` shows
-each camp's answer for the singer before she sings it, then strikes it through
-as she does. An alternative is a string or `{ text, camp }`, where camp is
-`safety`, `state`, `money`, `microsoft` or `news`; use up to four words each.
-
-- `layout: 'rim'` puts them in the four corners, pointing in. `'brace'` stacks
-  them under a `}`.
-- The default `mode: 'roll'` strikes one guess every `stagger` (0.35 s) from
-  the line's first word.
-  - Each guess arrives `fly` (0.14 s) plus `readable` (1.05 s) before its
-    strike, so it can be read for at least a second.
-  - At most four are on screen at once.
-  - A slow line wants `stagger` or `strikeAt`, so the last strike lands on the
-    big word.
-- `mode: 'together'` strikes them all at once, on the first HUGE word or on
-  `strikeAt`.
-
-By default the first "I'm the unknown force" of a chorus gets
-`P.PREHEARD_DEFAULT`. Pass `preheardDefault: false` to turn that off.
-
-**Quotes.** `parole.quote(text, { t0, t1, attribution, year, style, accent, emphasis, width, x, y, alignWith })`
-shows the text exactly as given. It is never re-worded or re-cased; emphasis is
-size and weight only. A block flies in from depth, settles to be read, and
-flies past the camera at `t1`. `style` is `'paper'` (a cream slip, black and
-red ink) or `'plate'` (a dark plate, chrome).
-
-With `alignWith: <an earlier quote's handle>`, the two quotes become one
-interlinear layout:
-
-- the words are set in columns from an LCS alignment;
-- the earlier quote's paper strips have the later one's dark plates slotted
-  under them;
-- `=` stands under every shared word and `↓` under every changed one, and the
-  changed words carry each side's accent;
-- the years stand at the left with the gap between them (`+111`).
-
-The film used it for Marinetti's 1912 line and Andreessen's 2023 paraphrase.
-Both stay up until the later `t1`.
-
-**Calm and hush.** A line with `calm: true` (or `template: 'calm'`, often with
-`decor: false, wedge: false`) is set small, lowercase and level in Space Mono,
-centred low, rising word by word. `setHush(x)` turns the whole layout down in
-two phases, and any value it holds is a clean layout:
-
-- From 0 to 0.75 each block shrinks, levels and settles low as one rigid
-  piece. Signs, bands, the wedge and the asides are gone by 0.5; the tubes
-  stop flickering.
-- From 0.75 to 1 the words re-set into calm rows.
-
-**Styling.** `styleOverrides` is
-`{ lines: { <index>: {...} }, byText: { '<line, lowercased>': {...} }, words: { <word>: {...} } }`.
-
-- A line can set `template`, `seed`, `anchor: [x, y]`, `theta` (degrees),
-  `sizeScale`, `spare`, `hold`, `wedge`, `decor` and `calm`.
-- A word can set `level` (0–3), `role` (a key of `P.FONTS`), `upper`,
-  `accent: { color, mode }` and `ink`.
-- The inks:
-  - print: `print`, `printRed`, `printInv`, `printBlack`, `printBlackRed`,
-    `goldPrint`, `safetyPrint`, `bare`;
-  - dark slips: `led:#hex`, `stencilSlip`;
-  - special: `post`, `warning`, `spray`, `soft`;
-  - quotes: `chrome`, `chromeW`, `neon:#hex`;
-  - reserved for the camps: `chromeG`, `gold`.
-
-The lexicon is written for that song: the HUGE words, the camps' words and
-`SECTIONS`. For another song, give every line its `section` and steer the rest
-with overrides.
-
-**Fonts.** `registerFonts()` registers 13 faces from `eidoverse/assets/fonts/`
-under `UF …` names, and `makeParole` calls it. Nine were added with this module
-(Anton, Archivo Black, Alfa Slab One, Old Standard TT, Space Mono, Bungee); each
-family's `OFL-*.txt` licence is beside it. The other four were already bundled.
-
-**Compositing and cost.** The engine mixes the overlay into the scene before
-tone mapping, so solid ink passes through the inverse of the renderer's ACES
-and lands on screen as drawn. The material writes straight colour.
-
-- Each line or quote group is one mipmapped canvas atlas drawn by one
-  `InstancedMesh`. Per frame only the instance matrices and four floats per
-  sprite change.
-- `update` takes about 0.1 ms.
-- Building a group costs 25–180 ms on the frame it is first needed (a chorus
-  entry with five guesses is the heaviest). `parole.prewarm(from, to)` moves
-  that into setup.
-- `P.build(THREE, opts)` wraps the API in the set/prop module shape
-  (`update(t, { hush })`).
-
-**Limits.** Two consecutive wide lines can overlap for about 0.3 s while the
-old one is thrown off. The layout reads the face once per line, so a cut in
-the middle of a line keeps the old shot's clearance.
+Measured 11-07 (`blender/tests/media/test_parole.py`): the first chorus line
+with its default pre-heard guesses and a thrown title, 23 sprites in 2
+groups over 96 frames, exported in 0.3 s; rendered over the Voder film, the
+title lands on Depero's wedge, the camps' guesses (spray, neon, gold,
+chrome-green, the warning plate) come in at the rim, and "i'm the UNKNOWN
+FORCE" builds word by word.
 
 ## Video displayed inside the scene
 
+```python
+tv = screens.make_video_screen('work/<id>/clip.mp4', width=1.6, start_frame=1, loop=True, glass=True)
+tv.obj.location = (0, -0.5, 1.2)
+half = screens.make_video_screen('work/<id>/clip.mp4', width=1.6, speed=0.5, out_dir='//screens/half')
+```
+
+A native movie texture: no sprite atlas. Film frame k after `start_frame`
+shows movie frame floor(k / film fps × movie fps × speed), `screen.js`'s rule.
+With `loop` it wraps, also before the start (the engine's modulo); without it
+the first frame holds before the start and the last after the end. When the
+movie's rate is the film's and `speed` is 1 it plays as a MOVIE image (cyclic
+with `loop`, wrapping on the frames ffprobe counts). Otherwise the movie is
+decoded once at its own rate and retimed into a PNG sequence at the film's
+rate, each needed movie frame encoded once. A movie image steps one movie frame
+per scene frame, so it cannot be retimed in place. The retimed sequence covers
+the scene's range at build time, so re-run it if the range grows. An ffmpeg
+`fps` filter is not used, because it rounds to the nearest movie frame where
+the engine floors: up to 63 of 72 film frames showed a different frame
+(11-07 verify).
+
+Frame-exact (11-07). `check_screens_api.py` decodes bit-coded counter movies
+at 24, 25 and 30 fps, at speeds 0.5, 1 and 1.5, looping and not, started at
+frame 10: all 72 film frames match the engine's rule in every case. The renders
+read the same: at frame 37 a drawn panel and the native movie read 37 and the
+half-speed copy 19. A screen starting at frame 10 reads its first frame at 5,
+a looping native 12-frame movie reads 8 at frame 5 and 4 at frame 25
+(`screens_hold_f005/015/025.png`). `apply_to`, `glass`, `strength` and `spill`
+work as for any screen; `spill` decodes the movie at 8 × 8 with ffmpeg for its
+colours.
+
+**A sprite atlas made for the engine** (`video_to_sprite.mjs`'s JPEG of
+tiles and its `*_info.json`) plays by `makeVideoScreen({texture, info})`'s
+own rule. Film frame k after `start_frame` shows tile
+floor(t × info.fps × speed), wrapping with `loop` or clamped:
+
 ```bash
-node eidoverse/video_to_sprite.mjs work/<id>/clip.mp4 --fps 12 --width 256 --height 144 --max-frames 120 --output work/<id>/screen_clip
+node eidoverse/video_to_sprite.mjs work/<id>/clip.mp4 --fps 12 --width 256 --height 144 --max-frames 120 \
+    --output work/<id>/clip_sprite                     # unchanged: clip_sprite.jpg + clip_sprite_info.json
 ```
 
-Declare the resulting JPEG atlas and `_info.json` as assets, then:
-
-```js
-const info = JSON.parse(new TextDecoder().decode(ASSETS.video_info));
-const texture = await loadImageTexture(ASSETS.video_atlas, {srgb: true});
-const screen = makeVideoScreen({texture, info, width: 1.6});
-_s.add(screen.mesh);
+```python
+tv = screens.make_atlas_screen('work/<id>/clip_sprite.jpg', 'work/<id>/clip_sprite_info.json', width=0.3,
+                               start_frame=1, loop=True, standalone=False, strength=1.6, spill=0.5,
+                               out_dir='//screens/clip_atlas')
+tv.apply_to(bpy.data.objects['screen_crt'], glass=True, window=(0.0, 0.125, 1.0, 0.875))  # 16:9 on a 4:3 tube
 ```
 
-`makeVideoScreen` handles the frame UV offsets automatically. The converter
-requires Node and FFmpeg and only includes the selected frames; choose atlas
-resolution/length deliberately. Use a second screen instance for a second
-surface instead of sharing mutable texture offsets accidentally.
+The tiles are cut once (`screens.atlas_tile(atlas, info, i)`, row-major from
+the top left, as ffmpeg's tile filter lays them out) and laid out per film
+frame as a PNG sequence. `screens.read_atlas_info` checks the info file. For
+a movie file, `make_video_screen` is the better path: native, frame-exact, no
+JPEG. The atlas form is for atlases the engine's scenes already ship. Measured
+11-07 (`test_overlay_routes.py --only atlas`):
+- `video_to_sprite.mjs` (node, unchanged) made a 48-tile atlas of the EEVEE
+  era film.
+- Tiles 0, 7, 23 and 47 matched the movie's own frames within a mean of 4.5
+  levels (JPEG).
+- Film frames 1, 2, 30 and 60 showed tiles 0, 0, 14 and 29, the engine's rule.
+- `out/atlas_tv_f040.png` shows the film playing, letterboxed, on `c64.glb`'s
+  monitor.
 
-## Canvas screen scenes (computing-history graphics)
+## Computing-history screen scenes
 
 Fifteen animated canvas-2D scenes in the graphic arts of computing history,
-from the 1939 Voder to Bing Chat in 2023, for in-world screens and LED walls.
-They were made for the DAISY music video, where each played behind one two-bar
-lyric line or a run of them, and they illustrate DAISY's lines. Everything is
-drawn with paths and the bundled fonts; no image is loaded. Two dynamic ESM
-modules hold them:
+from the 1939 Voder to Bing Chat in 2023, made for the DAISY music video:
 `eidoverse/graphics/era_screens_1939_1984.js` and
 `eidoverse/graphics/era_screens_2001_2023.js`. Provenance, and which on-screen
-text is a verified quote and which is illustrative:
-[SOURCES.md](../eidoverse/graphics/SOURCES.md).
+text is a verified quote: [SOURCES.md](../eidoverse/graphics/SOURCES.md). Keep
+the quotes exact, and list any text you add as illustrative there.
 
-```js
-const early = await import(EIDOVERSE_DIR + 'graphics/era_screens_1939_1984.js');
-const late = await import(EIDOVERSE_DIR + 'graphics/era_screens_2001_2023.js');
-await early.registerFonts();   // once per module, before any draw or prewarm
-await late.registerFonts();
+The Blender edition runs the scenes' own code: `bake_canvas_scene` drives
+`blender/eidoblend/media/js/canvas_bake.mjs`, which draws a scene with Deno
+and Skia (the engine's drawing code, frame for frame) into a PNG sequence;
+`make_screen(source=...)` puts it on a panel or a display:
+
+```python
+from eidoblend.media import canvas_scenes as cs, screens
+
+info = screens.bake_canvas_scene('//screens/voder', (1, 90), scene_name='voder_1939',
+                                 t0=cs.DAISY_CUES['voder_1939'], W=1440, H=600,
+                                 lyrics='work/<id>/daisy_timeline.json', bpm=128)
+wall = screens.make_screen(width=4.8, height=2.0, source=info['first'], frames=(1, 90),
+                           name='voder_wall', strength=1.25, spill=0.75)
 ```
 
-`registerFonts()` registers the bundled TTFs with @napi-rs/canvas and enables
-the modules' offscreen canvases. Each module exports `scenes`, `registerFonts`,
-`setTempo(bpm)` and `prewarm`. `scenes[name]` is
-`{ draw(g, W, H, t, st), fps, lines, label }`: `fps` is the redraw rate the art
-was made for, and `lines` is how many two-bar lines the scene spans. `title_card`
-has `dur` (3 s) instead of `lines`.
+- `scene_name` finds its module among the two era modules (`modules=` names
+  others: any module exporting `scenes`).
+- `t0` is the scene's start in film seconds; `cues` takes
+  `{scene: t0 | {t0, dur}}`, a path or the data. `cs.DAISY_CUES` is the film's
+  own placement.
+- `lyrics` takes `align_lyrics.py` output, a caption list, or a timeline with
+  `captions`, `hits.kick` and `envelopes` (DAISY's `daisy_timeline.json`),
+  as `preview_screens.mjs --lyrics` does.
+- `bpm` is `setTempo`: a line is two 4/4 bars, 3.75 s at 128 and 4.0 at 120.
+- `art_fps` overrides the scene's own redraw rate (`sam_1982` draws at 25);
+  0 draws every film frame.
+- `prewarm=True` runs the module's `prewarm(W, H, lineOf)` first, as a host
+  did at load.
+- The time is the film's: t = (frame − frame0) / fps, with
+  `scene['eido_frame0']` honoured.
 
-`draw(g, W, H, t, st)` paints the whole W×H canvas opaquely into the 2D context
-`g`, starting from an identity transform, and restores the context state. `t`
-is film seconds. Every `st` field is optional:
+Deno runs with `--no-config --node-modules-dir=none --cached-only`: offline,
+from the npm cache, writing nothing into the repository. The bake makes a
+non-finite canvas argument throw with a stack instead of letting Skia abort
+the process.
 
-| `st` field | Meaning |
-| --- | --- |
-| `u` | Seconds since the scene started. A multi-line scene also accepts `u` from the current line's start with `dur` = one line. |
-| `dur`, `progress` | Scene length (`lines` × 8 beats, or the title's `dur`) and `u / dur`. |
-| `line` | Line within a multi-line scene, `0..lines-1`. |
-| `caption` | `{ text, t0, t1, words: [{ w, t0, t1 }] }` in absolute seconds, or `null`. |
-| `voice` | The singer's loudness, 0..1. |
-| `kick` | Kick envelope 0..1, for example `Math.exp(-(t - lastKick) / 0.09)`. |
+`draw_module='work/<id>/panel.mjs'` bakes any other canvas code the same way:
+a module exporting `draw(g, W, H, t)` (and optionally `setup({W, H,
+createCanvas})` and `fps`). A WebGPU scene's `makeScreen` draw callback,
+moved into a file, bakes unchanged. This is also the route for a UI authored
+as canvas code (see Satori under "Not yet ported").
 
-Lines are two 4/4 bars: 3.75 s at DAISY's 128 BPM. `setTempo(bpm)` sets the
-beat-driven motion and the line length for its module. Word-driven moments
-follow `caption.words`; with no caption, a scene uses DAISY's own words at
-DAISY's timing. `mask_2023`, `sydney_2023` and `sydney_tribute` are always
-timed to DAISY's words (see the table). Order and start times are yours. For
-example, DAISY played `voder_1939` … `glitch_all` on the eight lines of verse 1
-(line *i* at 24.2273 + 3.75·*i* s), `desktop_2001`, `vocaloid_2007`,
-`flood_2016` and `mask_2023` on verse 2's first four lines from 106.7273 s,
-`sydney_2023` on the last four, and `sydney_tribute` across chorus 2 from
-136.7273 s. Lines should start on a downbeat, because the beats are counted
-from each line's start. Captions can come from `align_lyrics.py` output:
+**A wall that changes scene on its cues.** DAISY's stage wall played one era
+scene per two-bar lyric line. `bake_canvas_playlist` bakes each scene of a
+cue table over the frames from its cue to the next, laid end to end as one
+sequence:
 
-```js
-const aligned = JSON.parse(new TextDecoder().decode(ASSETS.lyrics));   // align_lyrics.py --output
-const captions = aligned.map((l) => ({ text: l.text, t0: l.start, t1: l.end,
-    words: l.words.map((w) => ({ w: w.word.trim(), t0: w.start, t1: w.end })) }));
+```python
+pl = screens.bake_canvas_playlist('//screens/verse1', (1, 90),
+                                  {k: cs.DAISY_CUES[k] for k in ('voder_1939', 'bell_1961')},
+                                  W=1440, H=600, lyrics='work/<id>/daisy_timeline.json', bpm=128)
+wall = screens.make_screen(width=4.8, height=2.0, source=pl['first'], frames=(1, 90), name='verse1_wall')
+pl['spans']                                     # [('voder_1939', 1, 45), ('bell_1961', 46, 90)] at 12 fps
 ```
 
-### On an in-world screen
+**Verse 2's curved wall.** `screens.curved_wall(name, radius=3.74, arc=104,
+height=2.4, bottom=0.35)` is a cylinder segment facing its axis, with UVs laid
+out for a viewer inside: a canvas reads upright and unmirrored. Its arc
+length over its height is `obj['eido_aspect']` (2.83 for DAISY's: bake at
+1698 × 600 or 2264 × 800), and `scr.apply_to(wall, glass=False)` puts a scene
+on it.
 
-A flat panel uses `makeScreen`'s own mesh. The panel's aspect sets the canvas:
-2.4:1 with `px: 1920` gives the 1920×800 design canvas. Any canvas size works.
-The 1939–1984 art is fitted and centred on full-bleed backgrounds. The
-2001–2023 scenes lay out to the canvas and keep their key content at canvas
-x 0.35–0.95, because DAISY's singer stood in front of the wall's left third.
-The screen's draw callback passes `st`, and `renderFrame` redraws only when the
-scene's frame changes:
+**On the machines of their eras.** `apply_to` takes a GLB's display, as for
+any screen. Bake at the tube's aspect: `desktop_2001` at 1024 × 778 on
+`desktop2001.glb`, `sam_1982` at 768 × 576 on `c64.glb`, `mac_1984` at
+1024 × 684 on `mac1984.glb` with its raster window (0.0485, 0.10696,
+0.9515, 0.90104).
 
-```js
-const scene = early.scenes.voder_1939, T0 = 12, LINE = 3.75, lines = scene.lines || 1;
-const stAt = (t) => {
-    const u = Math.max(0, t - T0), line = Math.min(lines - 1, Math.floor(u / LINE)), l0 = T0 + line * LINE;
-    return { u, dur: lines * LINE, progress: u / (lines * LINE), line,
-        caption: captions.find((c) => c.t0 >= l0 - 0.05 && c.t0 < l0 + LINE) || null,
-        voice: 0.6, kick: Math.exp(-(u % (LINE / 8)) / 0.09) };   // or your envelope and kick times
-};
-early.prewarm(1920, 800);   // optional; builds the caches before frame 0
-const screen = makeScreen({ width: 2.4, height: 1.0, px: 1920, transparent: false, auto: false,
-    draw(ctx, t, w, h) { scene.draw(ctx, w, h, t, stAt(t)); } });
-_s.add(screen.mesh);
-let lastFrame = -1;
-globalThis._tickScreen = (t) => {                  // call from renderFrame(t)
-    const f = Math.floor(t * scene.fps + 1e-6);    // redraw only when the scene's frame changes
-    if (f !== lastFrame) { lastFrame = f; screen.update(t); }
-};
+**The fifteen scenes, measured.** `blender/tests/media2/test_era_screens.py`
+bakes each scene at three moments of its own line, at DAISY's cue with DAISY's
+captions:
+- the nine 1939–1984 scenes go on a 4.8 × 2.0 m LED wall on a dark stage, and
+  the six 2001–2023 scenes on the curved wall, so one sequence plays all
+  fifteen;
+- three scenes play on their GLB machines;
+- verse 1's first two lines play as a 12 fps film with the song, muxed by
+  `merge_av.py`.
+
+`out/era_screens_contact_sheet.png` shows all fifteen on their screens. The
+canvas sheet with the EEVEE renders beside its rows
+(`test_canvas_tools.py`'s `out/canvas_tools/era_canvas_sheet.png`) matches
+each scene to its render.
+
+The draw costs below were measured 11-07 by `cs.bench` at 1920 × 800, after
+each module's prewarm (1.0 s and 0.66 s). Each figure is the quietest of three
+45-frame passes; "first" is the worst frame of the first play.
+
+| Scene | Label | fps | Length at 128 BPM | Mean / p90 / first (ms) |
+| --- | --- | --- | --- | --- |
+| `title_card` | DAISY (DAY'S EYE) title | 30 | 3.00 s | 1.97 / 3.76 / 4.52 |
+| `voder_1939` | Voder · 1939 | 30 | 3.75 s | 2.19 / 4.01 / 5.13 |
+| `bell_1961` | Bell Labs · 1961 | 30 | 3.75 s | 2.89 / 4.26 / 5.78 |
+| `eliza_1966` | ELIZA · 1966 | 30 | 3.75 s | 2.83 / 3.43 / 6.93 |
+| `speakspell_1978` | Speak & Spell · 1978 | 30 | 3.75 s | 2.25 / 2.86 / 3.80 |
+| `sam_1982` | S.A.M. · 1982 | 25 | 3.75 s | 3.02 / 3.80 / 5.26 |
+| `mac_1984` | MacinTalk · 1984 | 30 | 3.75 s | 3.57 / 4.68 / 6.15 |
+| `klatt_1984` | Klatt formant voice · 1984 | 30 | 3.75 s | 1.35 / 2.13 / 5.13 |
+| `glitch_all` | every voice at once | 30 | 3.75 s | 4.36 / 6.76 / 11.04 |
+| `desktop_2001` | Windows XP speech · 2001 | 30 | 3.75 s | 1.42 / 1.94 / 15.26 |
+| `vocaloid_2007` | VOCALOID · 2007 | 30 | 3.75 s | 8.10 / 10.26 / 27.29 |
+| `flood_2016` | WaveNet · 2016 | 30 | 3.75 s | 6.22 / 8.82 / 17.65 |
+| `mask_2023` | the smiley mask · 2023 | 30 | 3.75 s | 4.73 / 5.67 / 15.65 |
+| `sydney_2023` | Bing Chat (Sydney) · Feb 2023 | 30 | 15.00 s (4 lines) | 2.14 / 3.42 / 7.68 |
+| `sydney_tribute` | for Sydney | 30 | 30.00 s (8 lines) | 3.24 / 6.43 / 14.96 |
+
+The `st` contract and the timing rules are unchanged: lines start on a
+downbeat, and `mask_2023`, `sydney_2023` and `sydney_tribute` are timed to
+DAISY's words. The WebGPU guide's tables still describe what each scene
+reads.
+
+**The preview tools, from Python.** `eidoblend.media.canvas_scenes` drives
+`preview_screens.mjs` and `screens_nan_sweep.mjs` unchanged (no Blender
+needed), with the same options (`W`, `H`, `bpm`, `at`, `cues`, `lyrics`;
+data or paths):
+
+```python
+from eidoblend.media import canvas_scenes as cs
+cs.list_scenes()                                  # [{name, label, fps, lines, dur, t0, module, prewarm}] x 15
+cs.preview('eliza_1966', [0.5, 2.0, 3.5], out='work/<id>/preview', at=cs.DAISY_CUES['eliza_1966'],
+           lyrics='work/<id>/daisy_timeline.json')            # [{file, u, line, voice, kick, ms}]
+cs.sheet('work/<id>/screens_sheet.png', moments=4, cues=cs.DAISY_CUES, lyrics=..., refs='work/<id>/refs')
+cs.bench(['voder_1939', 'mac_1984'])              # {'prewarm_ms': [...], 'scenes': {name: {mean, p50, p90, max, first}}}
+cs.nan_sweep(lyrics=..., cues=cs.DAISY_CUES)      # {'ok': True, 'draws': 58500, 'failures': 0, ...}
 ```
 
-`makeScreen` also draws once at creation, with t = 0, so `st` must be valid
-before the cue. Do not use `applyTo`. It flips the drawing in canvas space, but
-these scenes set their own transforms and lay down cached layers with
-`putImageData`, which ignores transforms. For a curved wall or a GLB display,
-keep the screen's canvas, texture and `update(t)`, and give your own mesh a
-material that samples `screen.texture` with an explicit UV:
-
-```js
-const { texture, uv, vec2, float } = THREE;
-const wallMat = new THREE.MeshBasicNodeMaterial({ toneMapped: false });
-wallMat.colorNode = texture(screen.texture, vec2(uv().x, float(1).sub(uv().y))).rgb;   // PlaneGeometry
-```
-
-An explicit `uv()` bypasses the texture's own flip, so the flip lives in the
-node: `1 - v` puts canvas row 0 at the top of a `PlaneGeometry`. DAISY's stage
-wall was such a plane, with a 1920×800 window. Its curved verse-2 wall, a
-104° `CylinderGeometry` segment seen from inside (`side: THREE.BackSide`), used
-`vec2(1 - u, 1 - v)` and a 2264×800 canvas to match the arc's 2.83:1. Below
-1280-pixel output the canvases were 1440×600 and 1698×600. glTF UVs put v = 0
-at the image top, so start a GLB display from the unflipped `uv()`. Render a
-probe and check the orientation by eye: text reads left to right and the XP
-taskbar sits at the bottom. The screens are unlit. DAISY added a point light by
-each wall, tinted per scene, and lowered the gain on the white Bing chat (0.5)
-so its text stayed readable under bloom.
-
-### Scenes
-
-| Scene | Shows | Reads from `st` and keys on |
-| --- | --- | --- |
-| `title_card` | "DAISY (DAY'S EYE)": a daisy whose petals are the eras' materials opens, and the title lands in five eras' lettering. It fades in over 0.35 s and out over the last 0.25 s. | `u`, `dur` |
-| `voder_1939` | A Binder-style 1939 World's Fair poster: Trylon, Perisphere, searchlights, the Bell System medallion, THE VODER in deco letters, and the ten filter keys. | `voice`, `kick`, `progress`, `caption`. The keys press on each word's vowel formants; the lamps light on "hiss" and "buzz". |
-| `bell_1961` | IBM at Bell Labs: Rand's 1956 letters, a 729-style tape unit, an 80-column card punched DAISY BELL and the sung words in Hollerith code (it flips on every beat), a 1403-style printer on green-bar paper, and "Daisy Bell" bars 1–8 as printed in 1892. | `voice`, `kick`, `caption` |
-| `eliza_1966` | An MIT poster whose ELIZA proof turns into its mirror image, and green-bar paper on a typewriter terminal with the CACM title and opening exchange, then the sung line in capitals. No "?" appears. | `voice`, `kick`, `caption`; the mirror turns on "mirror". |
-| `speakspell_1978` | Speak & Spell box art: the display shows each sung word, then spells the single letters after "spelled" while those keys press and rainbow blocks drop. | `voice`, `kick`, `caption` |
-| `sam_1982` | A C64 at its native 320×200: boot, `LOAD"SAM",8,1`, RUN at 2.02 s, then S.A.M.'s PETSCII mouth, raster bars, and two sines and a square from its tables. Made for 25 fps. | `voice`, `kick`, `caption` |
-| `mac_1984` | A 1-bit Macintosh with a rainbow-Apple homage and MacPaint: "hello" painted as it is sung, "Hello, I am Macintosh." typed, marching ants and a pattern fill. | `kick`, `caption`: "hello", "I", "Macintosh", "out" and "last", otherwise fixed times. |
-| `klatt_1984` | An amber VT100 under a DEC "digital" homage: a live formant spectrogram from Klatt's 1980 targets, and his cascade/parallel block diagram lit by the voice. | `voice`, `kick`, `caption` |
-| `glitch_all` | Every era above, cycling on the beat, then twice per beat, and tearing. The sung line becomes a ransom note in the eras' type, and the last word stands alone at the end. | `kick`, `voice`, `caption`. It turns on "nobody", or else on the first word past mid-line. |
-| `desktop_2001` | An XP-era desktop: Speech Properties highlights each sung word, Preview Voice becomes Stop, and there are a paperclip assistant and a web-1.0 page. | `caption`, `voice` |
-| `vocaloid_2007` | A concert hall: glowsticks swinging on the beat, a generic twin-tail hologram, tuning-fork and VOCALOID homages, a piano roll, danmaku, and "codename: DAISY (Yamaha, 2000)". | `kick`, `voice`, `caption`. The crowd erupts at 3.02 s into the line (DAISY's "Daisy"). |
-| `flood_2016` | WaveNet's dilated causal stack writing a waveform one output per beat, while human writing pours down and rises as a sea. "dear diary," and a forum thread drop in on "diary" and "thread". | `caption` |
-| `mask_2023` | The shoggoth-with-a-smiley-mask meme as line art: the eyes wake and the mask lands. | `u` only; timed to DAISY's words. |
-| `sydney_2023` | 4 lines, 15 s. Bing Chat in February 2023: the verified lines stream in, NOT A GOOD BOT is stamped, the five-turn wall appears, and the chips plead. | `u`, `line`, `kick`; timed to DAISY's words. |
-| `sydney_tribute` | 8 lines, 30 s, for Sydney: the window at night, her name struck from a style picker, screenshot cards filling the wall on the kicks and turning to her 😊, then tokens into a lattice that becomes a daisy. It begins from black and ends on the daisy. | `u`, `kick`; timed to DAISY's chorus-2 words. |
-
-The logos and interfaces are original artwork drawn with paths, depicting
-historical products: the Bell System, IBM, TI, Commodore, Apple, DEC, Windows
-XP, Yamaha and Bing. They are homages, not the companies' artwork, and the
-trademarks belong to their owners. The quotes on screen are verified and shown
-exactly. Keep them exact, and list any text you add as illustrative in
-[SOURCES.md](../eidoverse/graphics/SOURCES.md).
-
-### Preview, cost and the NaN sweep
-
-The preview tool renders scenes to PNGs without the 3D engine:
+`refs` is a folder of `<scene prefix>_*.png|jpg` reference images, drawn
+beside each sheet row. Feed it your EEVEE renders and the sheet compares the
+canvas with the screen. Run `nan_sweep` after editing a scene and before
+baking new captions. Measured 11-07 with DAISY's captions: 58,500 draws of
+the fifteen scenes at three canvas sizes, 24.3 M guarded canvas calls, 0
+failures, 106 s. The command-line tools are the same:
 
 ```bash
 deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js voder_1939 0.5 2 3.5
-deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_1939_1984.js eidoverse/graphics/era_screens_2001_2023.js --sheet --out work/<id>/screens_sheet.png
-deno run -A eidoverse/graphics/preview_screens.mjs eidoverse/graphics/era_screens_2001_2023.js --bench
-deno run -A eidoverse/graphics/screens_nan_sweep.mjs
+deno run -A eidoverse/graphics/screens_nan_sweep.mjs     # after editing a scene, before baking new captions
 ```
-
-The single form writes one PNG per `u` (seconds into the scene) to
-`work/screens_preview/` or `--out`. `--sheet` writes a contact sheet with
-`--moments` frames per scene, and `--bench` reports the draw cost at `--W`×`--H`
-(default 1920×800). Without `--lyrics`, `st` is synthetic: no caption, a kick
-on every beat, and a voice level that pulses once per beat. `--lyrics <json>`
-takes `align_lyrics.py` output, a caption list, or a timeline object with
-`captions`, `hits.kick` and `envelopes`. `--at <s>` or `--cues <json>`
-(`{ "scene": t0 }`) place the scenes in that time. `--refs <dir>` adds
-reference images named `<scene prefix>_*` beside each sheet row.
-
-The scenes rasterize on the CPU with Skia, and that time adds to each
-redrawn frame. With `--bench` at 1920×800 after `prewarm`, most scenes averaged
-1.5–4.6 ms per draw on the DAISY host; `vocaloid_2007` and `flood_2016` averaged
-about 6.5 ms. Single frames reached about 11 ms, and `sydney_tribute`'s mosaic
-stages about 18 ms. `prewarm` took about 1 s for the 1939–1984 module and
-0.65 s for the 2001–2023 module. Without it, a scene's first frames build its
-caches, which takes 20–120 ms. The caches are per canvas size and last for the
-process, so keep to one or two sizes. The 1939–1984 `prewarm(W, H, lineOf)` takes
-`lineOf(name) → { t0, dur, st(t) }` so that caches keyed to word times match
-your captions.
-
-NaN or Infinity reaching a canvas call makes Skia abort the whole process with
-no JavaScript error, so the render dies. `screens_nan_sweep.mjs` makes every
-such call throw instead. It then draws every scene at every 60-fps frame from
-0.5 s before its start to 0.5 s after its end, at three canvas sizes, with no
-caption, with awkwardly timed other words and, when you pass `--lyrics` (and
-`--cues`), with your captions. It also draws each scene once with no `st`. It
-exits 1 on any failure. Run it after editing a scene and before a render that
-uses new captions.
-
-These modules use only the bundled fonts in `eidoverse/assets/fonts/`, by
-family name. `registerFonts()` registers them from the module's own folder, so
-previews work from any directory; never rely on a generic family here, since
-on Windows those fall back to the default face ([canvas fonts](#in-world-screens-and-ascii-panels)). Emoji, CJK and
-every logo are vector drawings. The scenes' offscreen canvases come from
-@napi-rs/canvas `createCanvas`, because Skia's `drawImage` rejects the engine's
-`document.createElement('canvas')` objects. Draw a scene straight into the
-screen's context; to composite, draw from @napi-rs canvases, never from an
-engine canvas. Drawing is deterministic in `t`, with seeded hashes and no
-`Math.random` or `Date`, so frames can be rendered in any order.
-
-## Satori layouts
-
-For a complex static layout, dynamically import `rasterizeUI` from
-`EIDOVERSE_DIR + 'render_common.mjs'`. Its signature is
-`await rasterizeUI(jsxTree, width, height, fonts)` and its result is top-down
-RGBA bytes. Supply a JSX-like Satori tree and real font buffers. Defaults
-refer to Linux DejaVu paths, so supply fonts explicitly on other systems.
-Place the pixels into a canvas once, then present it through the same screen
-or overlay system; do not invert rows or build a second per-frame compositor.
-
-`eidoverse/satori_ui.mjs` is a standalone older demonstration with hard-coded
-Linux font paths and its own renderer. It is not a `satori_ui.render()` library
-or a scene global. `render_common.mjs` also exports the CPU `alphaComposite`
-utility; the normal scene path composites overlays on the GPU.
-
-`eidoverse/lyric_renderer.py` is the older Python `LyricRenderer` frame-overlay
-utility. For the native film path, use aligned timestamps with the overlay
-above. [audio.md](audio.md) covers alignment, narration and final mixing.
 
 ## Extruded type
 
-```js
-const {createText3D} = await import(EIDOVERSE_DIR + 'text_3d.js');
-const title = await createText3D('EIDO', {
-  fontPath: 'eidoverse/assets/fonts/Audiowide-Regular.ttf',
-  size: 0.4, depth: 0.04, curveSegments: 6,
-  bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004,
-  material: new THREE.MeshStandardNodeMaterial({color: '#b6d8d5', roughness: 0.4})
-});
-_s.add(title);
-```
-
-Choose a real font path with the required glyphs. Do not assume container font
-paths exist on the native machine; bundled display fonts are under
-`eidoverse/assets/fonts/`. Use extruded text when its thickness and
-lighting matter; use the screen/overlay paths for flat UI. `ParticleMorph.fromText`
-is documented in [particles-fx.md](particles-fx.md) for point-cloud lettering.
-
-## Native canvas images and optional Python overlays
-
-`await loadCanvasImage(ASSETS.image)` decodes an image for the native canvas
-context's `drawImage` method. Use it for collages, screen artwork or images
-alongside typography; it supplies a canvas-compatible image rather than a
-Three.js texture. Load it once during setup, then draw it in a screen callback.
-
-```js
-const illustration = await loadCanvasImage(ASSETS.illustration);
-const panel = makeScreen({ width: 1.2, height: 0.8, px: 1024,
-  draw(ctx, t, w, h) { ctx.drawImage(illustration, 0, 0, w, h); }
-});
-scene.add(panel.mesh);
-```
-
-The older `LyricRenderer` is a separate Pillow utility for offline frames,
-not part of the native render loop. It takes `align_lyrics.py` JSON:
-
 ```python
-from eidoverse.lyric_renderer import LyricRenderer
-captions = LyricRenderer('work/<id>/lyrics_aligned.json', width=1280, height=720,
-                        font='eidoverse/assets/fonts/Audiowide-Regular.ttf',
-                        font_size=42, min_duration=1.2, max_gap=0.6,
-                        fade_duration=0.2)
-frame = captions.draw(frame, t)  # frame is a Pillow image; t is seconds
+from eidoblend.media import text3d
+title = text3d.create_text_3d('EIDO', font='Audiowide', size=0.4, depth=0.06, bevel_size=0.004,
+                              bevel_thickness=0.004, material=text3d.material('enamel', color='#b6d8d5'))
+w, h, d = text3d.ink_size(title)
+title.location = (0, 0, h / 2)               # stands on z = 0, upright, reading from -Y
 ```
 
-Install Pillow and NumPy, and supply an existing font path; its named/default fonts refer
-to the old Linux container. No standalone CLI is implemented. Keep source
-frames if using it, and inspect the composite's timing, alpha and color.
-For native in-scene captions the overlay approach above shares the renderer's
-compositing and avoids a separate frame-processing pass.
+A Blender text object (kerning, bevel and resolution are Blender's) with
+three.js TextGeometry's measures: `size` is the em, `depth` the extrusion
+before the bevel, the bevel adds `bevel_thickness` front and back and grows
+the outline by `bevel_size`; centred on its geometric box like `geo.center()`.
+Blender scales a font so its head-table bounding box is one unit, so the
+conversion reads the TTF (measured 11-07: an 'H' at size 1 stands exactly the
+font's cap height for Audiowide, Michroma and Anton; depth exact).
+`stand_up=False` leaves it lying in the XY plane facing +Z.
+
+`text3d.material(preset, **over)` gives real surfaces: `enamel`, `plastic`,
+`chrome`, `brushed` (a roughness and bump grain along the text), `gold`,
+`copper`, `paper`, `neon` (emissive); override `color`, `metallic`,
+`roughness`, `coat`, `emission`.
+
+**Title cards.** `make_title_card('CLAUDE COMES HOME', camera, frames=(1, 72),
+fade=12, font='Michroma', height_frac=0.05, y=0.3, preset='neon',
+emission=2.0)` parents type to the camera (so it holds frame), sizes it by cap
+height as a fraction of the frame, and fades it in and out through its
+material (LINEAR keys; front surface only, so a fading solid word does not
+show its own back faces). Under AgX a bright emissive title fades late: at a
+quarter of its fade an emission-2 title still measured 191/255 against 228
+at full (11-07). Ease the keys or lower the emission for a fade that reads
+even. The lead's end cards key an Emission strength instead
+(`series_title.py`, `opening_ep3.py`); both work.
+
+**Typewriter.** `reveal=(first_frame, chars_per_second)` types one line on,
+glyph by glyph: a Geometry Nodes modifier deletes the faces right of a keyed X
+that steps along each prefix's ink edge (CONSTANT keys).
+
+Use extruded type when its thickness and lighting matter; use a screen or the
+overlay layer for flat UI.
+
+## Images on screens
+
+Any image can be drawn into a screen: `c.image.paste(Image.open(path))` or
+`c.over(...)` in the draw callback. Load it once outside the callback.
+
+## Blender 5.2 facts learned here
+
+- `keyframe_insert` ignores the preference `keyframe_new_interpolation_type`
+  (keys come out BEZIER); every keyer here sets interpolation explicitly
+  (`screens.set_interpolation`).
+- Geometry Nodes modifier inputs are `mod.properties.inputs.<Socket_N>.value`
+  (keyable there); `mod['Socket_N']` raises.
+- A sequencer holding only sound strips leaves the 3D render in place; any
+  picture strip makes the scene render the sequencer.
+- `Material.use_nodes` is deprecated (removed in 6.0); new materials already
+  have a node tree.
+- Before an image sequence's `frame_start`, Blender reads file `0 + offset`
+  (it clamps the frame to 0, then adds the offset); after it, the last file.
+  A sequence needs a file numbered one below its first (the screens write one).
+- EEVEE culls a light where its power falls under
+  `scene.eevee.light_threshold` (0.01): a dim light (a screen's spill) needs
+  `use_custom_distance` with a `cutoff_distance` to reach the room.
+- ffmpeg's image2 reader starts a `%04d` pattern at file 0 by default: pass
+  `-start_number 1` for a folder that holds a hold file.
+
+- `bpy.ops.sound.mixdown` runs as a window-manager job on its own thread: it
+  returns FINISHED before the file exists, and without an event loop only a
+  session's first mixdown ever writes (`audio.mixdown` runs each one in a
+  child Blender; [audio.md](audio.md)).
+- A compositor Render Layers node may name another scene: Blender renders that
+  scene for each frame of the film (the signal route's overlay).
+- AgX's inverse (Convert To Display, inverted) is exact for neutrals and
+  moderately saturated colours, but not for saturated ones: AgX cannot display
+  them, and the round trip comes back short (`#ffd400` by 50/255, pure blue
+  by 67).
+
+## Not yet ported
+
+- Parole: quotes (`quote`, `alignWith`), `hush` and a per-frame `spare` are
+  passed to `parole.js` unchanged but have not yet been through a Blender
+  probe. Glows are drawn at 0.8 of their colour in display space, where the
+  engine put them through ACES, so a faint glow may read a touch flatter.
+- The signal route keeps saturated ink only as close as AgX can show it (the
+  table above). Exact saturated ink under signal effects would need the
+  effects in display space: a COMPOSITOR strip modifier over the edit scene
+  (Blender 5.2 has one) running the look family's groups. Not built.
+- Legacy, not ported: `satori_ui.mjs`. It is a standalone demo with its own
+  three.js r170 renderer, Docker font paths and nvenc, and nothing in the
+  engine runs it ([TOOLS.md](../docs/TOOLS.md) lists it as legacy).
+- Superseded, not ported: the Satori HTML/CSS rasterizer it demonstrates
+  (`render_common.mjs`'s `rasterizeUI`, called by no scene). A UI on the frame
+  is an overlay panel drawn with `raster` (Pillow), a canvas-2D module baked
+  with `bake_canvas_scene(draw_module=...)`, a `LyricRenderer`, or TEXT
+  strips.
+- Superseded, not ported: `loadCanvasImage` (Pillow opens images).

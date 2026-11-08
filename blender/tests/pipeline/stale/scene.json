@@ -1,0 +1,5 @@
+{
+    "width": 320, "height": 180, "fps": 24, "duration": 1,
+    "script": "blender/tests/pipeline/stale/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/stale.mp4"
+}

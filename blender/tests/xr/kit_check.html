@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>xr_kit check</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#05030b;overflow:hidden}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "/node_modules/three/build/three.webgpu.js",
+  "three/webgpu": "/node_modules/three/build/three.webgpu.js",
+  "three/tsl": "/node_modules/three/build/three.tsl.js",
+  "three/addons/": "/node_modules/three/examples/jsm/"
+} }
+</script>
+</head><body>
+<script type="module">
+// tests/xr/kit_check.html: every export and option of eidoverse/xr/xr_kit.js, exercised on a stage holding a GLB the
+// Blender edition exported (?glb=<url>, default the city test's bundle). Results in window.__shotInfo: {pass, fail,
+// results}. Headless Chrome has no headset, so a session is a STAND-IN: an object with the fields the kit reads
+// (inputSources with gamepads, frameRate, supportedFrameRates, requestAnimationFrame), and for startLoop and the rig in a
+// session a stand-in renderer whose xr reports isPresenting with a headset camera. What is checked is the kit's own logic
+// on those inputs (arming, heartbeats, the dead-layer signal, fps, the rig's placements relative to a head), not a
+// headset. Two errors are planted on purpose (telemetry reports them with their stacks); test_xr_pages.py reads the
+// server log for them and for the session reports. Run by test_xr_pages.py through eidoverse/xr/shot.mjs.
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { telemetry, createRenderer, keepSized, startLoop, WorldRig, Pads, BTN, makeLaser, Desktop, makeVeil } from '/eidoverse/xr/xr_kit.js';
+
+const Q = new URLSearchParams(location.search);
+const R = [];
+// the kit's startLoop(still) sets window.__shot; shot.mjs must not see it before the results are in
+let kitShot = '';
+Object.defineProperty(window, '__shot', { configurable: true, get: () => (window.__shotInfo ? kitShot : ''),
+  set: (v) => { kitShot = v; } });
+const check = (name, ok, detail = '') => { R.push({ name, ok: !!ok, detail: String(detail) }); };
+const near = (a, b, e = 1e-4) => Math.abs(a - b) <= e;
+const v3 = (v) => `(${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const flat = (v) => { const f = v.clone(); f.y = 0; return f.normalize(); };
+try {
+  // ---------------------------------------------------------------- BTN, telemetry
+  check('BTN: the xr-standard gamepad layout', BTN.TRIGGER === 0 && BTN.GRIP === 1 && BTN.STICK === 3 && BTN.AX === 4 && BTN.BY === 5, JSON.stringify(BTN));
+  const report = telemetry('xr_kit_check', { url: '/report' });
+  check('telemetry(tag, { url }) returns report()', typeof report === 'function');
+  await report({ phase: 'kit_check', what: 'hello' });
+  const seen = [];                                              // every report the session checks make, also logged
+  const rep = (o) => { seen.push(o); return report(o); };
+  // uncaught errors are reported with their stacks (planted: the server log must show both)
+  setTimeout(() => { throw new Error('kit_check planted error'); }, 0);
+  Promise.reject(new Error('kit_check planted rejection'));
+  await wait(50);
+
+  // ---------------------------------------------------------------- createRenderer, keepSized
+  const holder = document.createElement('div'); document.body.appendChild(holder);
+  const { renderer, vrButton } = await createRenderer({ parent: holder, button: false, framebufferScale: 0.8, foveation: 0 });
+  check('createRenderer: the canvas goes into `parent`', renderer.domElement.parentNode === holder);
+  check('createRenderer: WebGPURenderer on its WebGL2 backend', renderer.backend.isWebGLBackend === true, renderer.backend.constructor.name);
+  check('createRenderer: XR on, local-floor, a VR button made (not added: button false)', renderer.xr.enabled
+    && renderer.xr.getReferenceSpaceType() === 'local-floor' && vrButton && !vrButton.isConnected);
+  check('createRenderer: framebufferScale and foveation options reach the XR manager', near(renderer.xr.getFramebufferScaleFactor(), 0.8, 1e-9)
+    && renderer.xr._foveation === 0, `${renderer.xr.getFramebufferScaleFactor()} / ${renderer.xr._foveation}`);
+  {
+    const d = await createRenderer();                           // the defaults: document.body, 0.9, 1, a button
+    check('createRenderer() defaults: canvas in the body, scale 0.9, foveation 1, the VR button added, sRGB out, pixel ratio <= 2',
+      d.renderer.domElement.parentNode === document.body && near(d.renderer.xr.getFramebufferScaleFactor(), 0.9, 1e-9)
+      && d.renderer.xr._foveation === 1 && d.vrButton.isConnected && d.renderer.outputColorSpace === THREE.SRGBColorSpace
+      && d.renderer.getPixelRatio() === Math.min(devicePixelRatio, 2),
+      `button "${d.vrButton.textContent}"`);
+    d.vrButton.remove(); d.renderer.domElement.remove(); d.renderer.dispose();
+  }
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#05030b');
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.02, 3000);
+  scene.add(camera);
+  keepSized(renderer, camera);
+  camera.aspect = 1; camera.updateProjectionMatrix();
+  dispatchEvent(new Event('resize'));
+  check('keepSized: a resize sets the camera aspect to the window', near(camera.aspect, innerWidth / innerHeight, 1e-6), camera.aspect);
+  renderer.xr.isPresenting = true; camera.aspect = 1;
+  dispatchEvent(new Event('resize'));
+  check('keepSized: never while presenting (a resize in a session changes nothing)', camera.aspect === 1, camera.aspect);
+  renderer.xr.isPresenting = false;
+  dispatchEvent(new Event('resize'));
+
+  // ---------------------------------------------------------------- the stage: a GLB the Blender edition exported
+  const stage = new THREE.Group(); scene.add(stage);
+  const url = Q.get('glb') || '/blender/tests/xr/out/city/vr/scene.glb';
+  const gltf = await new GLTFLoader().loadAsync(url);
+  stage.add(gltf.scene);
+  check('the exported GLB loads into the stage', gltf.scene.children.length > 0, `${gltf.scene.children.length} roots, ${gltf.animations.length} clips`);
+  scene.add(new THREE.AmbientLight(0xffffff, 1));
+
+  // ---------------------------------------------------------------- WorldRig on the desktop (the head is the page camera)
+  const street = +(Q.get('street') || 0.25), table = +(Q.get('table') || 0.01);
+  const rig = new WorldRig({ renderer, camera, stage, street, table, eyeHeight: 1.6 });
+  check('WorldRig: constructor options kept (street, table, eyeHeight), street mode', rig.street === street && rig.table === table
+    && rig.eyeHeight === 1.6 && rig.mode === 'street');
+  const desk = new Desktop({ camera, dom: renderer.domElement });
+  desk.setMode('street');
+  const H0 = rig.head();
+  check('Desktop street: eyes at eyeHeight, looking down -z', near(H0.position.y, 1.6) && near(H0.forward.z, -Math.cos(desk.walker.pitch), 1e-6), v3(H0.position));
+  const P = new THREE.Vector3(3, 0, 7), F = new THREE.Vector3(1, 0, 0);
+  rig.standAt(P, { facing: F });
+  let w = rig.where();
+  check('standAt: you stand over the stage point, eyes eyeHeight / street units up', near(w.x, P.x, 1e-4) && near(w.z, P.z, 1e-4) && near(w.y, 1.6 / street, 1e-3), v3(w));
+  stage.updateMatrixWorld(true);
+  const fw = rig.head().forward.clone().transformDirection(new THREE.Matrix4().copy(stage.matrixWorld).invert());
+  check('standAt: you face the stage direction', fw.setY(0).normalize().dot(F) > 0.9999, v3(fw));
+  check('standAt: the stage at street scale', near(stage.scale.x, street), stage.scale.x);
+  rig.standAt(P, { facing: F, scale: 0.5 });
+  check('standAt { scale }: another street scale for this stand (eyes 1.6 / 0.5 units up)', near(stage.scale.x, 0.5) && near(rig.where().y, 3.2, 1e-3), v3(rig.where()));
+  rig.standAt(P, { facing: F });
+  rig.walk(0, 1, 1.0, 2.6);                                     // 1 s forward at 2.6 m/s
+  w = rig.where();
+  check('walk: 2.6 m forward is 2.6 / street units along the facing', near(w.x, P.x + 2.6 / street, 1e-3) && near(w.z, P.z, 1e-3), v3(w));
+  rig.walk(1, 0, 0.5, 2.0);                                     // 0.5 s right at 2 m/s
+  w = rig.where();
+  check('walk: right is +z when facing +x (y up, right-handed)', near(w.z, P.z + 1.0 / street, 1e-3), v3(w));
+  const wb = rig.where().clone();
+  rig.walk(0, 1, 1.0);                                          // the default speed: 2.6 m/s
+  check('walk: the default speed is 2.6 m/s', near(rig.where().x - wb.x, 2.6 / street, 1e-3), v3(rig.where()));
+  const before = rig.where().clone();
+  rig.turn(Math.PI / 2);
+  check('turn: you stay where you are in the stage', rig.where().distanceTo(before) < 1e-3, v3(rig.where()));
+  const y0 = stage.rotation.y;
+  check('flick: a hard stick turns 30 degrees', rig.flick(0.9) === true && near(stage.rotation.y - y0, Math.PI / 6, 1e-9));
+  check('flick: held, it does not turn again', rig.flick(0.9) === false && near(stage.rotation.y - y0, Math.PI / 6, 1e-9));
+  check('flick: between 0.3 and 0.6 it neither turns nor re-arms', rig.flick(0.45) === false && rig.flick(0.9) === false);
+  rig.flick(0.0);
+  check('flick: back to the middle re-arms it (a left flick turns back)', rig.flick(-0.9) === true && near(stage.rotation.y, y0, 1e-9));
+  rig.flick(0.0);
+  check('flick(x, step): another snap angle', rig.flick(0.9, Math.PI / 4) === true && near(stage.rotation.y - y0, Math.PI / 4, 1e-9));
+  // table
+  desk.setMode('table');
+  const C = new THREE.Vector3(2, 0, -3), AT = new THREE.Vector3(0, 0.9, -0.45);
+  rig.toTable({ centre: C, at: AT });
+  stage.updateMatrixWorld(true);
+  const cw = stage.localToWorld(C.clone());
+  check('toTable { centre, at }: the centre sits at the room point `at`, table scale', cw.distanceTo(AT) < 1e-6 && near(stage.scale.x, table) && rig.mode === 'table', v3(cw));
+  rig.spin(0.7); stage.updateMatrixWorld(true);
+  check('spin: turns about the table centre (it stays put)', stage.localToWorld(C.clone()).distanceTo(AT) < 1e-6);
+  rig.zoom(1.5); stage.updateMatrixWorld(true);
+  check('zoom: scales about the centre (it stays put)', stage.localToWorld(C.clone()).distanceTo(AT) < 1e-6 && near(stage.scale.x, table * 1.5, 1e-9));
+  rig.slide(0.1, 0.2); stage.updateMatrixWorld(true);
+  const moved = stage.localToWorld(C.clone()).sub(AT);
+  check('slide: moves the table 0.1 m right and 0.2 m forward of where you look', near(moved.length(), Math.hypot(0.1, 0.2), 1e-6), v3(moved));
+  rig.toTable({ centre: C, at: AT });
+  stage.updateMatrixWorld(true);
+  const o = new THREE.Vector3(0, 1.5, 0.5), target = stage.localToWorld(new THREE.Vector3(5, 0, 2));
+  const hit = rig.groundHit(o, target.clone().sub(o).normalize());
+  check('groundHit: a ray meets the stage ground at the stage point it aims at', hit && hit.distanceTo(new THREE.Vector3(5, 0, 2)) < 1e-3, hit && v3(hit));
+  check('groundHit: a ray pointing up meets nothing', rig.groundHit(o, new THREE.Vector3(0, 1, 0)) === null);
+  check('groundHit: a ray along the ground meets nothing', rig.groundHit(new THREE.Vector3(0, 0.9, 0), new THREE.Vector3(1, 0, 0)) === null);
+
+  // ---------------------------------------------------------------- WorldRig in a session (a stand-in headset pose)
+  {
+    const headCam = new THREE.PerspectiveCamera();
+    headCam.position.set(0.4, 1.72, -0.3); headCam.rotation.set(-0.2, 0.7, 0, 'YXZ'); headCam.updateMatrixWorld(true);
+    const xrR = { xr: { isPresenting: true, getCamera: () => headCam } };
+    const st2 = new THREE.Group();
+    const rg = new WorldRig({ renderer: xrR, camera: new THREE.PerspectiveCamera(), stage: st2, street: 0.12, table: 0.01 });
+    const hd = rg.head();
+    check('in a session, head() is the XR camera (position and forward)', hd.position.distanceTo(headCam.position) < 1e-9
+      && hd.forward.distanceTo(new THREE.Vector3(0, 0, -1).applyQuaternion(headCam.quaternion)) < 1e-9, v3(hd.position));
+    rg.standAt(new THREE.Vector3(-4, 0, 9), { facing: new THREE.Vector3(0, 0, 1) });
+    st2.updateMatrixWorld(true);
+    const wh = rg.where();
+    const fs = flat(hd.forward).transformDirection(new THREE.Matrix4().copy(st2.matrixWorld).invert());
+    check('in a session, standAt puts the stage point under the headset, facing the stage direction (default street 0.12)',
+      near(wh.x, -4, 1e-6) && near(wh.z, 9, 1e-6) && near(wh.y, 1.72 / 0.12, 1e-6) && flat(fs).dot(new THREE.Vector3(0, 0, 1)) > 0.999999 && near(st2.scale.x, 0.12), v3(wh));
+    rg.toTable();                                               // the defaults: centre 0, 0.45 m ahead, 75 cm below the eyes
+    st2.updateMatrixWorld(true);
+    const f = flat(hd.forward), c0 = st2.localToWorld(new THREE.Vector3());
+    check('in a session, toTable(): the centre 0.45 m ahead, 0.75 m below 1.72 m eyes (0.97), table scale',
+      c0.distanceTo(new THREE.Vector3(0.4 + f.x * 0.45, 0.97, -0.3 + f.z * 0.45)) < 1e-6 && near(st2.scale.x, 0.01), v3(c0));
+    rg.toTable({ centre: new THREE.Vector3(10, 0, 10), scale: 0.02, distance: 0.6, height: 0.7 });
+    st2.updateMatrixWorld(true);
+    const c1 = st2.localToWorld(new THREE.Vector3(10, 0, 10));
+    check('toTable { centre, scale, distance, height }', c1.distanceTo(new THREE.Vector3(0.4 + f.x * 0.6, 0.7, -0.3 + f.z * 0.6)) < 1e-6 && near(st2.scale.x, 0.02), v3(c1));
+    headCam.position.y = 1.2; headCam.updateMatrixWorld(true);
+    rg.toTable(); st2.updateMatrixWorld(true);
+    check('toTable(): the height is kept at 0.6 m or more (a seated viewer)', near(st2.localToWorld(new THREE.Vector3()).y, 0.6, 1e-9));
+    headCam.position.y = 2.1; headCam.updateMatrixWorld(true);
+    rg.toTable(); st2.updateMatrixWorld(true);
+    check('toTable(): and at 1.05 m or less (a tall viewer)', near(st2.localToWorld(new THREE.Vector3()).y, 1.05, 1e-9));
+  }
+
+  // ---------------------------------------------------------------- Pads with a stand-in session
+  const pads = new Pads(renderer, scene, { deadZone: 0.15 });
+  check('Pads: two controllers added to the scene', pads.ctrls.length === 2 && pads.ctrls.every((c) => c.parent === scene));
+  const btn = (n, on = []) => Array.from({ length: n }, (_, i) => ({ pressed: on.includes(i) }));
+  let frame = 0;
+  const sources = () => [
+    { handedness: 'left', gamepad: { buttons: btn(6, frame === 1 ? [BTN.AX] : []), axes: [0, 0, 0.5, -0.1] } },
+    { handedness: 'right', gamepad: { buttons: btn(6, frame >= 1 ? [BTN.TRIGGER] : []), axes: [0, 0, -0.9, 0.3] } },
+    { handedness: 'none', gamepad: null },                        // a hand without a gamepad: ignored
+  ];
+  renderer.xr.getSession = () => ({ inputSources: sources() });
+  // a controller's pose arrives as its matrix (the XR manager's controller groups do not auto-update from position):
+  // the right hand at (0.2, 1.2, -0.1), turned 30 degrees to the left
+  const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 6);
+  pads.ctrls[1].matrix.compose(new THREE.Vector3(0.2, 1.2, -0.1), qR, new THREE.Vector3(1, 1, 1));
+  pads.ctrls[1].updateMatrixWorld(true);
+  pads.poll();
+  let L = pads.hand('left'), Rh = pads.hand('right');
+  check('Pads: sticks dead-zoned (0.15)', near(L.x, 0.5) && L.y === 0 && near(Rh.x, -0.9) && near(Rh.y, 0.3), `${L.x},${L.y} ${Rh.x},${Rh.y}`);
+  check('Pads: nothing pressed on the first frame', !L.edge(BTN.AX) && !Rh.edge(BTN.TRIGGER));
+  frame = 1; pads.poll(); L = pads.hand('left'); Rh = pads.hand('right');
+  check('Pads: edge() on the frame a button goes down', L.edge(BTN.AX) && Rh.edge(BTN.TRIGGER) && L.pressed[BTN.AX]);
+  frame = 2; pads.poll(); L = pads.hand('left'); Rh = pads.hand('right');
+  check('Pads: released() on the frame it comes up; a held button has no edge', L.released(BTN.AX) && !Rh.edge(BTN.TRIGGER) && Rh.pressed[BTN.TRIGGER]);
+  check('Pads: the pointing ray starts at the controller and points down its -z', Rh.ray && Rh.ray.origin.distanceTo(new THREE.Vector3(0.2, 1.2, -0.1)) < 1e-6
+    && Rh.ray.dir.distanceTo(new THREE.Vector3(-Math.sin(Math.PI / 6), 0, -Math.cos(Math.PI / 6))) < 1e-6, Rh.ray && `${v3(Rh.ray.origin)} ${v3(Rh.ray.dir)}`);
+  check('Pads: hand() of a missing hand is idle', pads.hand('none').x === 0 && pads.hand('nobody').ray === null && !pads.hand('nobody').edge(0));
+  const pads2 = new Pads(renderer, scene, { deadZone: 0.6 });
+  pads2.poll();
+  check('Pads { deadZone }: a wider dead zone swallows a half stick', pads2.hand('left').x === 0 && near(pads2.hand('right').x, -0.9));
+  delete renderer.xr.getSession;
+  pads.poll();
+  check('Pads: no session, no hands', pads.hand('left').x === 0);
+
+  // ---------------------------------------------------------------- the laser and the veil
+  const laser = makeLaser(scene, '#ff7a5a');
+  const a = new THREE.Vector3(0, 1.2, 0), b = new THREE.Vector3(0.6, 0.9, -0.8);
+  laser.show(a, b);
+  const zdir = new THREE.Vector3(0, 0, 1).applyQuaternion(laser.mesh.quaternion);
+  check('makeLaser: show() spans from -> to (midpoint, length, aimed)', laser.mesh.visible && laser.mesh.position.distanceTo(a.clone().lerp(b, 0.5)) < 1e-9
+    && near(laser.mesh.scale.z, a.distanceTo(b), 1e-9) && zdir.dot(b.clone().sub(a).normalize()) > 0.999999);
+  laser.hide();
+  check('makeLaser: hide()', !laser.mesh.visible);
+  const laser2 = makeLaser(scene);
+  check('makeLaser(scene): the default colour and hidden until shown', !laser2.mesh.visible && laser2.mesh.parent === scene);
+  const veil = makeVeil(scene);
+  veil.set(0.5, '#ff0000');
+  check('makeVeil: set(0.5, colour) shows it, drawn last, never culled', veil.mesh.visible && veil.mesh.renderOrder === 1e6 && veil.mesh.frustumCulled === false
+    && near(veil.mesh.material.opacityNode.value, 0.5) && veil.mesh.material.colorNode.value.getHexString() === 'ff0000');
+  veil.set(0);
+  check('makeVeil: set(0) hides it (black by default)', !veil.mesh.visible && veil.mesh.material.colorNode.value.getHexString() === '000000');
+  veil.follow(new THREE.Vector3(1, 2, 3));
+  check('makeVeil: follow() puts it round the head', veil.mesh.position.equals(new THREE.Vector3(1, 2, 3)));
+
+  // ---------------------------------------------------------------- Desktop: keys, drag, wheel
+  desk.setMode('street');
+  dispatchEvent(new KeyboardEvent('keydown', { key: 'w' }));
+  desk.update(0.5, 3);
+  dispatchEvent(new KeyboardEvent('keyup', { key: 'w' }));
+  check('Desktop: W walks the preview camera forward (3 m/s x 0.5 s)', near(camera.position.z, -1.5, 1e-6), v3(camera.position));
+  dispatchEvent(new KeyboardEvent('keydown', { key: 'D' }));
+  desk.update(1.0);
+  dispatchEvent(new KeyboardEvent('keyup', { key: 'D' }));
+  check('Desktop: D strafes right at the default 3 m/s (keys case-blind)', near(camera.position.x, 3, 1e-6), v3(camera.position));
+  const yaw0 = desk.walker.yaw, pitch0 = desk.walker.pitch;
+  renderer.domElement.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100 }));
+  dispatchEvent(new PointerEvent('pointermove', { clientX: 150, clientY: 80 }));
+  dispatchEvent(new PointerEvent('pointerup', {}));
+  dispatchEvent(new PointerEvent('pointermove', { clientX: 400, clientY: 400 }));          // no drag: ignored
+  check('Desktop street: a drag looks round (0.004 rad a pixel), released it stops', near(desk.walker.yaw, yaw0 - 0.2, 1e-9)
+    && near(desk.walker.pitch, pitch0 + 0.08, 1e-9) && near(camera.rotation.y, desk.walker.yaw, 1e-9), `${desk.walker.yaw.toFixed(3)} ${desk.walker.pitch.toFixed(3)}`);
+  desk.setMode('table');
+  const ob = desk.orbit, oy = ob.yaw, op = ob.pitch, od = ob.dist;
+  check('Desktop: table mode orbits its target (pitch 0.6, 1.4 m)', near(camera.position.distanceTo(ob.at), ob.dist, 1e-6), v3(camera.position));
+  renderer.domElement.dispatchEvent(new PointerEvent('pointerdown', { clientX: 200, clientY: 200 }));
+  dispatchEvent(new PointerEvent('pointermove', { clientX: 260, clientY: 220 }));
+  dispatchEvent(new PointerEvent('pointerup', {}));
+  dispatchEvent(new WheelEvent('wheel', { deltaY: 100 }));
+  check('Desktop table: a drag orbits (0.005 rad a pixel), the wheel zooms (exp(0.001 dy))', near(ob.yaw, oy - 0.3, 1e-9) && near(ob.pitch, op + 0.1, 1e-9)
+    && near(ob.dist, od * Math.exp(0.1), 1e-9) && near(camera.position.distanceTo(ob.at), ob.dist, 1e-6), `${ob.yaw.toFixed(3)} ${ob.pitch.toFixed(3)} ${ob.dist.toFixed(3)}`);
+  desk.update(1.0);
+  check('Desktop: keys do nothing in table mode', near(camera.position.distanceTo(ob.at), ob.dist, 1e-6));
+  const cam2 = new THREE.PerspectiveCamera(), desk2 = new Desktop({ camera: cam2, dom: renderer.domElement, eyeHeight: 1.2, orbitTarget: new THREE.Vector3(1, 1, 1) });
+  desk2.setMode('table');
+  check('Desktop: orbitTarget and eyeHeight options', near(cam2.position.distanceTo(new THREE.Vector3(1, 1, 1)), 1.4, 1e-9) && desk2.eyeHeight === 1.2);
+  desk2.setMode('street');
+  check('Desktop: street mode at its eyeHeight, back at the start', near(cam2.position.y, 1.2, 1e-9) && cam2.position.x === 0 && cam2.position.z === 0);
+
+  // ---------------------------------------------------------------- startLoop with a stand-in session
+  {
+    const canvas = document.createElement('canvas');
+    let sess = null, pending = [];
+    const mkSession = (rate) => ({ frameRate: rate, supportedFrameRates: new Float32Array([72, 90, 120]),
+      requestAnimationFrame(cb) { pending.push(cb); return pending.length; } });
+    const sr = { xr: { isPresenting: false, getSession: () => sess }, info: { render: { triangles: 4321 } }, domElement: canvas,
+      loop: null, renders: 0, setAnimationLoop(fn) { this.loop = fn; }, render() { this.renders++; } };
+    const pump = () => { const p = pending; pending = []; p.forEach((cb) => cb()); };
+    let sessions = 0, lastDt = -1, lastXr = null, nFrames = 0;
+    const lp = startLoop(sr, new THREE.Scene(), new THREE.PerspectiveCamera(), { report: rep, hbMs: 60,
+      heartbeat: () => ({ mode: 'check' }), onSession: () => { sessions++; }, onFrame: (now, dt, xr) => { nFrames++; lastDt = dt; lastXr = xr; } });
+    sr.loop(1000); sr.loop(1016);
+    check('startLoop: on the desktop each frame calls onFrame (dt in seconds, not in XR) and renders', nFrames === 2 && near(lastDt, 0.016, 1e-9)
+      && lastXr === false && sr.renders === 2 && lp.frames === 2);
+    sr.loop(5000);
+    check('startLoop: dt is capped at 0.05 s (a stall does not jump the world)', near(lastDt, 0.05, 1e-12));
+    sess = mkSession(90); sr.xr.isPresenting = true;
+    let now = 6000;
+    sr.loop(now);
+    check('startLoop: a session is armed once it appears (polled, not the sessionstart event): onSession, sessionarmed',
+      sessions === 1 && seen.some((r) => r.phase === 'sessionarmed' && r.frameRate === 90 && JSON.stringify(r.supported) === '[72,90,120]') && lastXr === true);
+    // 11 s of a 90 Hz session: the loop and the session's own frames both run
+    for (let i = 0; i < 990; i++) { now += 1000 / 90; pump(); sr.loop(now); }
+    const m = seen.find((r) => r.phase === 'measured');
+    check('startLoop: measured after 10 s: the loop fps and the session fps (both 90)', m && near(m.fps, 90, 1) && near(m.xrfps, 90, 1) && m.frameRate === 90,
+      JSON.stringify(m));
+    await wait(150);                                            // heartbeats (hbMs 60), both alive
+    for (let i = 0; i < 20; i++) { now += 11; pump(); sr.loop(now); await wait(10); }
+    const hbs = seen.filter((r) => r.phase === 'hb');
+    const alive = hbs.filter((r) => r.loopAlive && r.xrAlive);
+    check('startLoop: heartbeats while presenting: frames, session frames, triangles, your heartbeat() fields', alive.length >= 1
+      && alive.every((r) => r.tris === 4321 && r.mode === 'check' && r.frames > 0 && r.sFrames > 0), JSON.stringify(hbs.slice(-1)));
+    // the XR layer dies: the loop keeps running, the session's own frames stop
+    const nDead = seen.length;
+    for (let i = 0; i < 30; i++) { now += 11; sr.loop(now); await wait(10); }
+    pending = [];
+    const dead = seen.slice(nDead).filter((r) => r.phase === 'hb' && r.loopAlive && !r.xrAlive);
+    check('startLoop: a dead XR layer shows as loopAlive with xrAlive false', dead.length >= 1, JSON.stringify(dead.slice(-1)));
+    // a second session is armed again, its counts start from zero
+    sess = mkSession(72); sr.loop(now += 14);
+    check('startLoop: a new session is armed again (onSession twice, sessionarmed at 72 Hz)', sessions === 2
+      && seen.filter((r) => r.phase === 'sessionarmed').length === 2 && lp.frames === 1);
+    canvas.dispatchEvent(new Event('webglcontextlost'));
+    check('startLoop: a lost WebGL context is reported', seen.some((r) => r.phase === 'contextlost'));
+    sr.xr.isPresenting = false; sess = null;
+    const nOut = seen.length;
+    await wait(150);
+    check('startLoop: no heartbeat outside a session', !seen.slice(nOut).some((r) => r.phase === 'hb'));
+    sr.setAnimationLoop = () => {};
+  }
+
+  // ---------------------------------------------------------------- the picture: the street, a laser, a light veil
+  desk.setMode('street');
+  rig.standAt(new THREE.Vector3(0, 0, 10), { facing: new THREE.Vector3(0, 0, -1) });
+  laser.show(new THREE.Vector3(0.25, 1.3, -0.2), stage.localToWorld(new THREE.Vector3(0, 0, 4)));
+  veil.set(0.18, '#ffd2a0'); veil.follow(rig.head().position);
+  let frames = 0;
+  const loop = startLoop(renderer, scene, camera, { still: true, report, onFrame: () => { frames++; } });
+  await new Promise((r) => { const iv = setInterval(() => { if (kitShot === 'ready') { clearInterval(iv); r(); } }, 20); });
+  check('startLoop(still): onFrame runs, the still is flagged after 3 rendered frames', frames >= 3 && loop.frames >= 3, `${frames} frames`);
+  window.__shotInfo = { pass: R.filter((r) => r.ok).length, fail: R.filter((r) => !r.ok).length, results: R };
+} catch (e) {
+  window.__shotInfo = { pass: R.filter((r) => r.ok).length, fail: R.filter((r) => !r.ok).length + 1, results: R, error: String(e.stack || e) };
+  window.__shot = 'error: ' + String(e.message || e);
+}
+</script>
+</body></html>

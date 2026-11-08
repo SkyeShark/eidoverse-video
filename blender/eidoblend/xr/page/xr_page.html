@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Eidoverse XR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{margin:0;height:100%;background:#05030b;overflow:hidden}
+#s{position:fixed;top:12px;left:12px;color:#ffb38f;font:15px/1.5 ui-monospace,monospace;z-index:9;text-shadow:0 0 6px #000;white-space:pre}
+</style>
+<!-- three.js from node_modules (eidoverse/xr/serve.py or eidoblend/xr/server.py serves it): the renderer's own build -->
+<script type="importmap">
+{ "imports": {
+  "three": "/node_modules/three/build/three.webgpu.js",
+  "three/webgpu": "/node_modules/three/build/three.webgpu.js",
+  "three/tsl": "/node_modules/three/build/three.tsl.js",
+  "three/addons/": "/node_modules/three/examples/jsm/"
+} }
+</script>
+</head><body><div id="s">loading…</div>
+<script type="module">
+// The Blender edition's XR page: a scene exported by eidoblend.xr.export_xr (scene.glb + scene.xr.json beside this
+// file), on the kit (eidoverse/xr/xr_kit.js). Guide: tools-guides/webxr.md. The controls are the kit example's:
+//   headset — street: left stick walks where you look, right stick flicks you round 30 degrees, X back to the start
+//             table: right stick slides it, left stick turns (x) and scales (y) it, grip re-centres it
+//             both: Y street <-> table (into the street where the right hand points), right trigger a flash
+//   desktop — street: WASD, drag to look · table: drag to orbit, wheel · V street <-> table · F flash
+//   stills  — ?t=4&street=x,z&look=deg&pitch=deg&face=deg  or  ?t=4&view=table  or  ?t=4&camera=<exported camera>
+//             (+ &shadows=1). street x,z are three's axes: a Blender ground point (x, y) is street=x,-y; face turns
+//             the facing you stand with (the stage, its sky and its light turn with it).
+import * as THREE from 'three';
+import { float, vec2, mix, abs, fract, min, max, clamp, fwidth, smoothstep, color, positionLocal, texture,
+  equirectUV } from 'three/tsl';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { RectAreaLightTexturesLib } from 'three/addons/lights/RectAreaLightTexturesLib.js';
+import { telemetry, createRenderer, keepSized, startLoop, WorldRig, Pads, BTN, makeLaser, Desktop, makeVeil } from '/eidoverse/xr/xr_kit.js';
+
+const MANIFEST = './scene.xr.json';
+const S = document.getElementById('s');
+const Q = new URLSearchParams(location.search), STILL = Q.has('t');
+const fail = (e) => {
+  const msg = String((e && e.stack) || e).slice(0, 600);
+  window.__shot = 'error: ' + msg.split('\n')[0];
+  S.style.display = ''; S.textContent = 'EIDOVERSE XR — failed\n' + msg;
+  console.error(e);
+};
+addEventListener('error', (e) => { if (STILL && !window.__shot) fail(e.error || e.message); });
+
+// ------------------------------------------------ page-side materials: what a GLB cannot hold (objects tagged in Blender
+// with the custom property xr_material = '<kind>', params in xr_params; eidoblend.xr.examples' ground uses 'grid')
+const PAGE_MATERIALS = {
+  // example.html's ground: an antialiased grid, one line a unit (the object's own units), fading out by `fade`
+  grid(mesh, p) {
+    const m = new THREE.MeshBasicNodeMaterial();
+    const g = vec2(positionLocal.x, positionLocal.z);
+    const d = abs(fract(g.sub(0.5)).sub(0.5)).div(max(fwidth(g), vec2(1e-4)));
+    const line = float(1).sub(min(smoothstep(0, 1.2, d.x), smoothstep(0, 1.2, d.y)));
+    const fade = clamp(float(1).sub(g.length().div(p.fade ?? 60)), 0, 1);
+    m.colorNode = mix(color(p.dark ?? '#0b0812'), color(p.line ?? '#35e8ff').mul(p.line_scale ?? 0.35), line.mul(fade));
+    mesh.material = m;
+  },
+};
+
+try {
+  const man = await (await fetch(MANIFEST)).json();
+  const report = telemetry('xr_' + man.name);
+  const { renderer } = await createRenderer({ button: !STILL });
+  renderer.toneMapping = { None: THREE.NoToneMapping, AgX: THREE.AgXToneMapping, Neutral: THREE.NeutralToneMapping,
+    ACESFilmic: THREE.ACESFilmicToneMapping }[man.view.tone_mapping] ?? THREE.AgXToneMapping;
+  renderer.toneMappingExposure = 2 ** (man.view.exposure || 0);
+  const SHADOWS = man.shadows || Q.get('shadows') === '1';
+  if (SHADOWS) renderer.shadowMap.enabled = true;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color().setRGB(...man.background, THREE.LinearSRGBColorSpace);
+  const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.02, 3000);
+  scene.add(camera);
+  keepSized(renderer, camera);
+
+  // ------------------------------------------------ the world, in Blender metres (y up), inside `stage`
+  const stage = new THREE.Group();
+  scene.add(stage);
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(new DRACOLoader().setDecoderPath('/node_modules/three/examples/jsm/libs/draco/gltf/'));
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  const gltf = await loader.loadAsync(man.glb);
+  stage.add(gltf.scene);
+  // the set's ground extent in stage units (as the example keeps its pointer inside its 55-unit square)
+  const bounds = new THREE.Box3().setFromObject(gltf.scene);
+  const onSet = (p) => p.x >= bounds.min.x && p.x <= bounds.max.x && p.z >= bounds.min.z && p.z <= bounds.max.z;
+  const named = (n) => gltf.scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(n)) || gltf.scene.getObjectByName(n);
+  let nTagged = 0, nMeshes = 0;
+  gltf.scene.traverse((o) => {
+    if (o.isMesh) {
+      nMeshes++;
+      if (SHADOWS) { o.castShadow = true; o.receiveShadow = true; }
+    }
+    const kind = o.userData && o.userData.xr_material;
+    if (kind && PAGE_MATERIALS[kind]) {
+      let p = {};
+      try { p = JSON.parse(o.userData.xr_params || '{}'); } catch (e) { /* defaults */ }
+      o.traverse((m) => { if (m.isMesh) { PAGE_MATERIALS[kind](m, p); nTagged++; } });
+    }
+    if (o.isLight && SHADOWS && (o.isDirectionalLight || o.isSpotLight)) {
+      o.castShadow = true; o.shadow.mapSize.set(2048, 2048); o.shadow.bias = -0.0005;
+      if (o.isDirectionalLight) { const c = o.shadow.camera; c.left = c.bottom = -40; c.right = c.top = 40; c.far = 400; }
+    }
+  });
+  // area lights (glTF has none): three's RectAreaLight from the manifest, radiance P / (pi A) as Blender's
+  if (man.rect_lights && man.rect_lights.length) {
+    THREE.RectAreaLightNode.setLTC(RectAreaLightTexturesLib.init());
+    for (const r of man.rect_lights) {
+      const li = new THREE.RectAreaLight(new THREE.Color().setRGB(...r.color, THREE.LinearSRGBColorSpace), r.intensity, r.width, r.height);
+      li.name = r.name;
+      li.position.set(...r.position);
+      li.quaternion.set(...r.quaternion);
+      stage.add(li);                                           // Blender's area light and three's both face their local -z
+    }
+  }
+  // the sky: the world's equirect on a dome round your head (in no stage, so it never scales; it turns with it)
+  let sky = null;
+  if (man.world && man.world.equirect) {
+    const env = await new HDRLoader().loadAsync(man.world.equirect);
+    env.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = env;
+    const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
+    m.colorNode = texture(env, equirectUV(positionLocal.normalize()));
+    sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 64, 32), m);
+    sky.frustumCulled = false; sky.renderOrder = -1;
+    scene.add(sky);
+  } else {
+    // no world.hdr (--no-world): the world's flat colour lights the set as Blender's would. A uniform world of radiance
+    // L gives a diffuse surface the irradiance pi L; three's ambient light adds its colour x intensity as irradiance
+    const bg = new THREE.Color().setRGB(...man.background, THREE.LinearSRGBColorSpace);
+    if (bg.r + bg.g + bg.b > 0) scene.add(new THREE.AmbientLight(bg, Math.PI));
+  }
+  // the timeline: every clip from t = 0 (the first frame), looped; stills set it once
+  const mixer = new THREE.AnimationMixer(gltf.scene);
+  for (const clip of gltf.animations) mixer.clipAction(clip).play();
+  const duration = Math.max(man.duration || 0, ...gltf.animations.map((c) => c.duration), 0);
+  let tracks = null;
+  if (man.tracks) tracks = await (await fetch(man.tracks)).json();
+  const at = (tr, key, t) => {                                 // a sampled track at t (linear; held at the ends)
+    const ts = tr.t, v = tr[key];
+    if (t <= ts[0]) return v[0];
+    if (t >= ts[ts.length - 1]) return v[v.length - 1];
+    let i = 0; while (ts[i + 1] < t) i++;
+    const k = (t - ts[i]) / (ts[i + 1] - ts[i]);
+    return Array.isArray(v[i]) ? v[i].map((x, j) => x + (v[i + 1][j] - x) * k) : v[i] + (v[i + 1] - v[i]) * k;
+  };
+  const mats = {};
+  gltf.scene.traverse((o) => { if (o.isMesh) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { mats[m.name] = m; }); });
+  const applyTracks = (t) => {
+    if (!tracks || !tracks.props) return;
+    for (const [name, tr] of Object.entries(tracks.props.lights || {})) {
+      const li = named(name); const L = li && (li.isLight ? li : li.children.find((c) => c.isLight));
+      if (L) { L.intensity = at(tr, 'intensity', t); L.color.setRGB(...at(tr, 'color', t), THREE.LinearSRGBColorSpace); }
+    }
+    for (const [name, tr] of Object.entries(tracks.props.emission || {})) if (mats[name]) mats[name].emissiveIntensity = at(tr, 'strength', t);
+    for (const [name, tr] of Object.entries(tracks.props.visible || {})) {
+      const o = named(name); if (!o) continue;
+      let i = 0; while (i + 1 < tr.t.length && tr.t[i + 1] <= t) i++;
+      o.visible = !!tr.v[i];
+    }
+  };
+  const setTime = (t) => { mixer.setTime(t); applyTracks(t); };
+
+  // ------------------------------------------------ the kit
+  const START = new THREE.Vector3(...man.start), TOWARD = new THREE.Vector3(...man.facing);
+  const CENTRE = new THREE.Vector3(...(man.table_centre || [0, 0, 0]));
+  const rig = new WorldRig({ renderer, camera, stage, street: man.street, table: man.table, eyeHeight: man.eye_height || 1.6 });
+  const pads = new Pads(renderer, scene);
+  const laser = makeLaser(scene);
+  const veil = makeVeil(scene);
+  const desk = new Desktop({ camera, dom: renderer.domElement, eyeHeight: man.eye_height || 1.6 });
+  let pointer = null, flashAt = -1e9, viaCamera = null;
+  const toStreet = (p = START) => { desk.setMode('street'); rig.standAt(p, { facing: TOWARD }); };
+  const toTable = () => { desk.setMode('table'); rig.toTable({ centre: CENTRE, at: renderer.xr.isPresenting ? null : desk.orbit.at }); };
+  addEventListener('keydown', (e) => {
+    if (renderer.xr.isPresenting) return;
+    if (e.key.toLowerCase() === 'v') (rig.mode === 'street' ? toTable : toStreet)();
+    if (e.key.toLowerCase() === 'f') flashAt = performance.now();
+  });
+
+  const T0 = STILL ? +Q.get('t') : 0;
+  if (STILL) {                                       // a still: stand somewhere, look somewhere, at time ?t=
+    S.style.display = 'none';
+    setTime(T0);
+    if (Q.get('camera')) {                           // through an exported camera, the world at life size
+      const c = named(Q.get('camera'));
+      const cam = c && (c.isCamera ? c : c.children.find((x) => x.isCamera));
+      if (!cam) throw new Error('no exported camera ' + Q.get('camera') + ' (cameras: ' + (man.cameras || []).join(', ') + ')');
+      stage.position.set(0, 0, 0); stage.rotation.set(0, 0, 0); stage.scale.setScalar(1);
+      scene.updateMatrixWorld(true);
+      cam.matrixWorld.decompose(camera.position, camera.quaternion, new THREE.Vector3());
+      camera.fov = cam.fov; camera.near = cam.near; camera.far = Math.max(cam.far, 100);
+      camera.updateProjectionMatrix();
+      if (sky) sky.scale.setScalar(Math.min(1, (0.9 * camera.far) / 1500));   // the dome inside the camera's far plane
+      viaCamera = cam.name;
+    } else if (Q.get('view') === 'table') toTable();
+    else {
+      const [x, z] = (Q.get('street') || `${START.x},${START.z}`).split(',').map(Number);
+      desk.setMode('street');
+      // face=deg turns the facing about the vertical (positive to the left): the stage, its sky and its light turn
+      const facing = TOWARD.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(+(Q.get('face') || 0)));
+      rig.standAt(new THREE.Vector3(x, 0, z), { facing });
+      desk.walker.yaw = -THREE.MathUtils.degToRad(+(Q.get('look') || 0));
+      desk.walker.pitch = THREE.MathUtils.degToRad(+(Q.get('pitch') || 0));
+      desk.apply();
+    }
+  } else { toStreet(); setTime(0); }
+
+  let t = T0, tris = 0, calls = 0;
+  startLoop(renderer, scene, camera, {
+    report, still: STILL,
+    onSession: () => setTimeout(() => toStreet(), 300),        // once the headset pose is live
+    heartbeat: () => { const w = rig.where(); return { mode: rig.mode, at: [+w.x.toFixed(2), +w.z.toFixed(2)], t: +t.toFixed(2) }; },
+    onFrame: (now, dt, xr) => {
+      if (!STILL) {
+        t += dt; if (duration > 0 && t > duration) t -= duration;
+        setTime(t);                                            // the film's clock, looped (one clip: cheap)
+      }
+      if (xr) {
+        pads.poll();
+        const L = pads.hand('left'), R = pads.hand('right');
+        laser.hide();
+        if (rig.mode === 'street') {
+          rig.walk(L.x, -L.y, dt);
+          rig.flick(R.x);
+          if (L.edge(BTN.AX)) toStreet();
+        } else {
+          rig.slide(R.x * 0.9 * dt, -R.y * 0.6 * dt);
+          rig.spin(-L.x * 0.9 * dt);
+          rig.zoom(Math.exp(-L.y * 0.9 * dt));
+          pointer = R.ray && rig.groundHit(R.ray.origin, R.ray.dir);
+          if (pointer && onSet(pointer)) laser.show(R.ray.origin, stage.localToWorld(pointer.clone()));
+          else pointer = null;
+          if (L.edge(BTN.AX) || L.edge(BTN.GRIP) || R.edge(BTN.GRIP)) rig.toTable({ centre: CENTRE });
+        }
+        if (L.edge(BTN.BY)) {
+          if (rig.mode === 'street') rig.toTable({ centre: CENTRE }); else rig.standAt(pointer || START, { facing: TOWARD });
+          report({ phase: 'button', what: 'view ' + rig.mode });
+        }
+        if (R.edge(BTN.TRIGGER)) flashAt = now;
+      } else if (!STILL) desk.update(dt);
+      const f = Math.max(0, 1 - (now - flashAt) / 400);         // a flash, fading over 0.4 s
+      veil.set(f * 0.7, '#ffd2a0');
+      const H = rig.head().position;
+      veil.follow(H);
+      if (sky) { sky.position.copy(H); sky.rotation.y = stage.rotation.y; }
+      scene.environmentRotation.y = stage.rotation.y;
+      if (STILL) {
+        window.__shotInfo = { t, clips: gltf.animations.length, duration: +duration.toFixed(3), meshes: nMeshes,
+          pageMaterials: nTagged, rect: (man.rect_lights || []).length, world: !!sky, tris, calls, camera: viaCamera,
+          mode: viaCamera ? 'camera' : rig.mode, toneMapping: man.view.tone_mapping };
+        // three resets renderer.info as each animation frame starts (before onFrame): read the counts once it is drawn
+        setTimeout(() => { tris = renderer.info.render.triangles; calls = renderer.info.render.drawCalls;
+          Object.assign(window.__shotInfo, { tris, calls }); }, 0);
+      }
+      if (!STILL && !xr && Math.floor(now / 500) !== Math.floor((now - dt * 1000) / 500))
+        S.textContent = `EIDOVERSE XR — ${man.name} — ${rig.mode}  t ${t.toFixed(1)} / ${duration.toFixed(1)} s\n` +
+          (rig.mode === 'street' ? 'WASD walk, drag to look' : 'drag to orbit, wheel to zoom') + ' · V street / table · F flash';
+    },
+  });
+  report({ phase: 'ready', backend: renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2', ua: navigator.userAgent.slice(0, 80),
+    clips: gltf.animations.length, duration, meshes: nMeshes });
+  window._xr = { THREE, scene, camera, stage, rig, desk, mixer, gltf, man, setTime };
+} catch (e) { fail(e); }
+</script>
+</body></html>

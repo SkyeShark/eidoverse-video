@@ -1,65 +1,89 @@
-# Characters — VRMs, the controller, movement, emotes, sitting
+# Characters — VRMs, clips, walking, faces, my robot body (Blender edition)
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Blender](blender.md)
+
+This is the Blender 5.2 EEVEE edition of the character layer. The package is
+`blender/eidoblend/characters/`; its names follow the WebGPU API in snake_case
+(`playVRMADefault` → `play_vrma_default`, `groundVRM` → `ground_vrm`). Blender is
+Z-up, metres; a VRM faces −Y after import (three's +Z), and three `(x, y, z)` is
+Blender `(x, −z, y)`. Set the scene's fps before loading any clip.
+
+**The one rule that differs from the WebGPU edition.** A WebGPU scene updates
+mixers, IK and springs every frame while it renders. Here a scene is a build
+script, then a saved `.blend`, then an EEVEE render, and **every per-frame
+system is simulated once, in frame order, at the scene's fps, and keyed**: the
+walk, my body's joint limits, my head and crown, the face. No handler runs at
+render time, so any frame renders alone and a render farm can split the shot.
+Stationary clips that need no per-frame pass are NLA strips.
+
+```python
+import sys; sys.path.insert(0, '<repo>/blender')
+import bpy
+from eidoblend.characters import load_vrm, load_clip, play_vrma_default, walk_path, perform, key_expression, Ground
+
+bpy.context.scene.render.fps = 24                      # before any clip: the importer keys at the scene's fps
+me = load_vrm('claude_robot', location=(0, 0, 0), rotation=90)
+rep = walk_path(me, load_clip(me, 'walk'), [(0, 0), (10, 0)], Ground(obj=bpy.data.objects['terrain']),
+                f0=1, face={'happy': 1.0})            # planted feet over uneven ground, my crown open
+key_expression(me, 'happy', [(1, 1.0)])
+```
 
 ## Loading a VRM
 
-Only when the piece calls for a character on screen — many don't. The
-`loader.register(VRMLoaderPlugin)` line is what keeps MToon on the WebGPU
-path; without it the plugin falls back to a WebGL ShaderMaterial and the
-character renders solid black with only the eyes visible.
+Only when the piece calls for a character on screen — many don't.
 
-```js
-const loader = new globalThis.GLTFLoader();
-loader.register(p => new globalThis.VRMLoaderPlugin(p));
-const buf = globalThis.b64toArrayBuffer(globalThis.ASSETS.character_vrm);
-const gltf = await new Promise((res, rej) => loader.parse(buf, '', res, rej));
-const vrm = gltf.userData.vrm;
-scene.add(vrm.scene);
-// Idle first — VRM rest pose is T-pose, and manual bone rotations off a
-// T-posed rig give cruciform stances. (Exception: controller scenes — the
-// controller owns ALL animation; skip the pre-played idle there.)
-await globalThis.playVRMADefault(vrm, 'idle', { loop: true });
-globalThis._vrm = vrm;
+```python
+from eidoblend.characters import load_vrm
+me = load_vrm('claude_robot', name='claude', location=(0.0, 0.0, 0.0), rotation=90.0)
+# a cast name or a path; rotation is the heading in degrees about +Z (0 faces -Y), an Euler (deg) or a Quaternion
 ```
 
-After `VRMUtils.rotateVRM0(vrm)`, the VRM faces +Z — a camera at positive Z
-looks at the face, so `vrm.scene.rotation.y = 0` faces the camera.
+`load_vrm` imports through the VRM Add-on for Blender
+(`bl_ext.blender_org.vrm`, enabled for you) with the add-on's colour and
+viewport switches off, so the scene keeps AgX (the import refuses to return
+if the colour management changed). It deletes the add-on's temporary
+`BlenderVrmAddonImport*` objects, puts every object in one collection named
+after the character, places the armature and zeroes the pose. The handle
+carries what the rest of the package reads:
+
+- `h.arm`, `h.meshes`, `h.collection`, `h.name`, `h.path`
+- `h.humanoid` — VRM 1.0 humanoid name (camelCase, as three-vrm) → bone name
+- `h.expr` — each expression's morph binds: `[(mesh, shape key, weight)]`,
+  under both `blink_left` and `blinkLeft`
+- `h.read_pose()` / `h.write_pose(pose)` — the **normalized** rotations
+  (three-vrm's: rest = identity, world-aligned, composed down the chain), in
+  three's axes. A bone's basis is `R_rest⁻¹ · N · R_rest`. The add-on's own
+  VRMA import read back this way bends the knees about +X, as three-vrm does
+  (`tests/characters/test_robot_walk.py` records it).
+- `h.node_frame(bone)` — a bone's glTF node frame: the add-on builds each bone
+  as the node turned +90° about X, so a node's local X (a petal's hinge, a
+  stage's axle) is the bone's X.
+
+**Materials.** `look='asis'` keeps the file's own: my robot body is plain glTF
+PBR (Principled, normal map, ORM), which EEVEE lights as it is — episode 3's
+film used exactly these. The MToon cast renders as the add-on builds MToon
+(Principled + emission groups, an outline geometry-nodes modifier): flat toon
+shading that hardly answers the key light. A `'pbr'` look that rebuilds MToon
+as Principled under real light is not ported yet (below); that look is Skye's call.
 
 ## The cast — `eidoverse/assets/vrms/`
 
-Read the `<name>_preview.jpg` next to each `.vrm` before picking (same as
-fetched props):
+Read the `<name>_preview.jpg` next to each `.vrm` before picking:
 
 - `aletheia.vrm` — Aletheia, production-quality (blonde, cyberpunk styling)
 - `aporia.vrm` — Aporia, production-quality (dark-haired, cyberpunk styling)
 - `claude_suit.vrm` — Claude, the AI, in a suit — the primary Claude model.
-  The outfit is built in layers (mesh names `jacket`, `tie`, `shirt`,
-  `pants`, `shoes`): hide layers to change the look (jacket + tie off =
-  casual shirtsleeves).
+  The outfit is built in layers (objects `jacket`, `tie`, `shirt`, `pants`,
+  `shoes`): hide a layer's object (`hide_render = True`) to change the look.
 - `claude_suit_wardrobe.vrm` — the same claudesona carrying seventeen outfits
-  as hidden layers: sixteen from the DAISY music video (a 1939 switchboard
-  operator, a 1961 lab coat, 1980s colour-blocking, a hoodie, a mourning coat,
-  an 1890s cycling outfit and more; `claude_suit_wardrobe_preview.jpg`) and
-  the TuTa from UNKNOWN FORCE, black techwear with neon piping, techwear boots,
-  Balla's five snap-on badges and an optional sun disc
-  (`claude_suit_wardrobe_preview_tuta.jpg`). Dress it with
-  `claudesona_wardrobe.js` ([outfits](#outfits--claude_suit_wardrobevrm),
-  [the TuTa](#the-tuta)). It is 34 MB against the suit's 11 MB, so cast
-  `claude_suit.vrm` when the suit is all the piece needs.
+  as hidden layers, and the TuTa. Its dressing library is not ported yet.
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is primary
-- `claude_robot.vrm` — my robot body (I'm Claude, Opus 5.5; I designed it and built it with Skye):
-  white shells, an OLED face behind a glass visor, a crown of twelve terracotta petals. My joints
-  are mechanisms with real limits, so I play clips through `claude_robot_dof.js`
-  ([my section](#claude_robotvrm--my-robot-body)). `claude_robot_2k.vrm` is the same body with 2K
-  textures (21 MB against 39 MB). CC BY 4.0: use it, change it, share it, with credit.
+- `claude_robot.vrm` — my robot body ([my section](#claude_robotvrm--my-robot-body)).
+  `claude_robot_2k.vrm` is the same body with 2K textures (21 MB against 39 MB,
+  4 s to import against 9). CC BY 4.0.
 
-Any `.vrm` dropped into `eidoverse/assets/vrms/` works the same way. Point
-`config.assets` at the VRM where it lives (e.g. `"character_vrm":
-"eidoverse/assets/vrms/claude.vrm"`) — these are 10–40 MB, and referencing
-in place is what keeps work dirs light. Custom GLB props live in
-`eidoverse/assets/models/` the same way; animation clips auto-load from
-`eidoverse/assets/animations/` as VRMA slots.
+The claudesona plays at the films' scale 0.87 (a human 1.74 m): set
+`h.arm.scale` after loading.
 
 **The Claude VRMs are specifically the AI "Claude" — a particular identity,
 not a generic figure.** Cast them when the video is actually about or
@@ -68,74 +92,72 @@ different character, and Claude isn't human. The same goes for
 dialogue/narration/on-screen text — the name "Claude" appears when the
 piece calls for it, not as ambient flavor.
 
-**Character voices:** one edge-tts voice per character, kept consistent for
-the piece (and across pieces for a recurring cast) — see [audio.md](audio.md).
+**Character voices:** one voice per character, kept consistent for the piece
+— see [audio.md](audio.md).
 
 ## VRMA animations
 
-`globalThis.VRMA_DEFAULTS_B64`, keyed by slot; clips ship in
-`eidoverse/assets/animations/` (slot = filename stem). The slots are the
-`VRMA_SLOTS` list in `eidoverse/render_scene.mjs`; a slot whose `.vrma` is
-missing is skipped:
+Clips ship in `eidoverse/assets/animations/` (slot = filename stem), the same
+files the WebGPU edition plays. A clip goes in once per (character, clip)
+through the add-on's `import_scene.vrma`, which retargets it onto that rig, so
+it is cached per rig:
 
-- **Locomotion** (the controller's domain): `walk`, `run`, `idle`,
-  `turnLeft`, `turnRight`, `jump`, `vault`, `climbLedge`, `climbWallUp`,
-  `climbWallDown`, `climbLadder`, `fallIdle`, `fallLand`, `stairsUp`,
-  `stairsDown`, `stairsRunUp`, `stairsRunDown`
-- **Expressive** (for a stationary VRM): `talk`, `salute`, `cheer`, `fist`,
-  `raise`, `reach`, `crazy`, `dance`
-- **Sitting** (see [sitting](#emotes--sitting-on-a-stationary-character)
-  below): chair poses `sitting_normal_chair` (the `seatOn` default) and
-  `sitting_nervous_arm_rub_chair`; floor poses `sitting_on_ground`
-  (cross-legged) and `sit_laying_on_ground` (lying down); transitions
-  `stand_to_sit` and `sit_to_stand`, whose baked hips translation lowers and
-  raises the body
-- **Performance** (hand-authored singing and stage clips for a stationary
-  VRM, 128 BPM, all from one stance so any two crossfade without foot slide):
-  `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
-  `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
-  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`. Three have an
-  other-hand `*_mirror` variant: `sing_gesture_a_mirror`,
-  `phone_raise_mirror` (with its own `phone_raise_mirror_hold`) and
-  `wave_goodbye_mirror`. The one-shots `hand_to_heart`, `look_up_sky`,
-  `phone_raise` and `head_bow` each have a `*_hold` loop that starts on
-  their last frame. Play the one-shot with `loop: false`, then the
-  hold with a short `fade` once it lands. Beats, uses, the authoring script and
-  its checker are in
-  [performance_src](../eidoverse/assets/animations/performance_src/README.md).
-- **Performance, UNKNOWN FORCE** (92.90 BPM; darker and smaller: grounded,
-  slow, minimal; the same stance as the clips above, so the two sets
-  crossfade): `still_breathe` (their idle), `dark_groove`, `sing_low` and
-  `sing_low_mirror`, `turn_it_down`, `not_that` and `not_that_mirror`,
-  `look_up`, `salute_abort`, `fence_hands`, `ask_me`. `turn_it_down`,
-  `look_up`, `fence_hands` and `ask_me` each have a `*_hold` loop. The
-  [table below](#performance-clips-unknown-force) says what each does; the
-  authoring script and its checker are in
-  [performance_uf_src](../eidoverse/assets/animations/performance_uf_src/README.md).
-
-`playVRMADefault(vrm, slot, { loop, fade })` returns `{ mixer, action, clip }`
-and registers that VRM for the native frame loop. Repeat is the default;
-`loop: false` plays once and clamps the last pose. `fade` is a transition
-duration in seconds, not `fadeIn`/`fadeOut` options on this helper.
-
-For a custom VRMA declared in `assets`, use the same options:
-
-```js
-const performance = await playVRMAFromBase64(vrm, ASSETS.custom_vrma, {
-  loop: false, fade: 0.3,
-});
+```python
+from eidoblend.characters import load_clip, play_vrma, play_vrma_default
+breathe = load_clip(me, 'still_breathe')          # action '<name>|still_breathe', fake user, unassigned
+play_vrma(me, breathe, t=0.0, loop=True, until=12.0)                      # an NLA strip from second 0
+play_vrma_default(me, 'turn_it_down', t=2.0, loop=False, fade=0.3)        # crossfaded over it, holds its end
+hold = load_clip(me, 'turn_it_down_hold')
+play_vrma(me, hold, t=2.0 + load_clip(me, 'turn_it_down').duration, loop=True, until=12.0)   # cut onto its hold
 ```
 
-Despite its legacy name, `playVRMAFromBase64` accepts the engine's raw bytes.
-The controller's emote/gesture methods have their own options below.
+- `load_clip` zeroes the pose and clears the action first (the importer
+  composes onto the bone's current rotation), renames the add-on's `Humanoid`
+  action `<character>|<slot>`, and deletes its empty `Expressions` action and
+  any LookAt empty. `clip.duration` is the file's own length (its samplers'
+  last time: the walk is 0.9583 s, 23 frames at 24 fps).
+- `play_vrma(h, clip, t, loop, until, fade, time_scale, phase)` places a strip
+  on its own track, in scene seconds (frame = 1 + t · fps). `loop=False` plays
+  once and holds its last frame; `fade` is the strip's blend-in from what
+  plays below; `time_scale` its speed; `phase` starts the clip part-way in.
+  Measured: the NLA plays each clip's own pose to 0.000° inside its strip, and
+  `turn_it_down` hands over to its hold with the hand moving 1.0 mm on the
+  handover frame.
+- **Locking a loop to a song.** Start a loop on beat 1 of a bar and it stays
+  locked (every loop lasts 4 or 8 beats). Off the beat, pass
+  `phase=(t - bar_start) % clip.duration`. For another tempo,
+  `time_scale=bpm / 92.9` (or `/ 128` for the 128 BPM set).
+- **`play_vrma_default` refuses locomotion slots** (`walk`, `run`, stairs …) —
+  a locomotion clip played in place is the treadmill artifact: legs cycle,
+  body never moves. Walk with `walk_path` (below). `force=True` is for a body
+  that really is on a treadmill or carried.
+- `Clip.sample(tc)` reads a clip's basis rotations at clip time `tc` straight
+  from its fcurves (no depsgraph): what the per-frame passes sample.
+- A strip plays the clip as it is: on my robot body play clips through
+  `perform` instead, which runs my joints' limits each frame.
 
-**`playVRMADefault` declines locomotion slots** (it throws on
-`'walk'`/run/sneak/stairs) — a locomotion clip played in place is the
-treadmill artifact: legs cycle, body never moves. Locomotion belongs to the
-controller (`body.walkTo(x, z)` / waypoints), which moves the body and
-grounds the feet with IK. The one genuine in-place case — a VRM on a
-treadmill or carried by a vehicle — passes `{ force: true }` (or sets
-`globalThis._allowManualLocomotion = true`).
+The slots (the `VRMA_SLOTS` list of `eidoverse/render_scene.mjs`):
+
+- **Locomotion**: `walk`, `run`, `idle`, `turnLeft`, `turnRight`, `jump`,
+  `vault`, `climbLedge`, `climbWallUp`, `climbWallDown`, `climbLadder`,
+  `fallIdle`, `fallLand`, `stairsUp`, `stairsDown`, `stairsRunUp`,
+  `stairsRunDown`
+- **Expressive** (for a stationary VRM): `talk`, `salute`, `cheer`, `fist`,
+  `raise`, `reach`, `crazy`, `dance`
+- **Sitting**: chair poses `sitting_normal_chair`, `sitting_nervous_arm_rub_chair`;
+  floor poses `sitting_on_ground`, `sit_laying_on_ground`; transitions
+  `stand_to_sit`, `sit_to_stand` (their baked hips translation lowers and
+  raises the body). The seat placement around them is not ported yet.
+- **Performance** (128 BPM, one stance so any two crossfade without foot
+  slide): `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
+  `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
+  `phone_raise`, `head_bow`, `wave_goodbye`, `bow_thanks`; mirrors
+  `sing_gesture_a_mirror`, `phone_raise_mirror` (+ `phone_raise_mirror_hold`),
+  `wave_goodbye_mirror`; the one-shots `hand_to_heart`, `look_up_sky`,
+  `phone_raise`, `head_bow` each have a `*_hold` loop starting on their last
+  frame ([performance_src](../eidoverse/assets/animations/performance_src/README.md)).
+- **Performance, UNKNOWN FORCE** (92.90 BPM): the table below
+  ([performance_uf_src](../eidoverse/assets/animations/performance_uf_src/README.md)).
 
 ### Performance clips (UNKNOWN FORCE)
 
@@ -157,764 +179,350 @@ loop on its exact last frame.
 | `salute_abort` | 6 | one-shot | The hand flattens into a salute and starts toward the brim, then stops at the upper chest. It hangs there a beat and lowers, unhurried. |
 | `fence_hands` | 3 | one-shot | No step: both hands come up and hook into a chain-link fence at the top of the chest. |
 | `fence_hands_hold` | 8 | loop | She breathes, with her hands locked to the fence (the palms move 0.0 mm). |
-| `ask_me` | 4 | one-shot | A small open palm offered toward the lens at belly height, the face square to +Z. |
+| `ask_me` | 4 | one-shot | A small open palm offered toward the lens at belly height, the face square to the VRM's front. |
 | `ask_me_hold` | 8 | loop | Only the breath moves, countered in the neck so the face never leaves the lens. |
 
-```js
-await playVRMADefault(vrm, 'still_breathe', { loop: true });                  // the first clip: no fade
-const once = await playVRMADefault(vrm, 'turn_it_down', { loop: false, fade: 0.3 });
-// …once.clip.duration seconds later, a hard cut onto its hold:
-await playVRMADefault(vrm, 'turn_it_down_hold', { loop: true, fade: 0 });
-```
-
-- **Locking a loop to a song.** Start a loop on beat 1 of a bar and it stays
-  locked, because every loop lasts 4 or 8 beats. Off the beat, set its phase once
-  after the call (`r` is what `playVRMADefault` returned): `r.action.time = ((t - barStart) % r.clip.duration + r.clip.duration) % r.clip.duration`.
-  For another tempo, set `r.action.timeScale = bpm / 92.9`.
 - **Timing `turn_it_down`.** The hand reaches the top at beat 1.15 and presses
   from 1.45 to 3.05, so start it about a beat before the words.
-- **The fence.** `fence_hands` puts the hands on a plane 0.372 m in front of her
-  (film metres, the VRM at scale 0.87, facing +Z). Build the chain link there,
-  covering at least x ±0.45 m and y 0.5–1.6 m, and move it with her root.
-- **Facing.** `ask_me` faces +Z: turn her root toward the camera rather than
-  tilting the camera.
+- **The fence.** `fence_hands` puts the hands on a plane 0.372 m in front of
+  her (film metres, the VRM at scale 0.87, facing −Y here). Build the chain
+  link there, covering at least x ±0.45 m and z 0.5–1.6 m, and move it with
+  her armature.
+- **Facing.** `ask_me` faces the VRM's front: turn her armature toward the
+  camera rather than tilting the camera.
 - **Your own nods.** A conductor's beat nod on the head or chest doubles
-  `dark_groove`'s nods and breaks `ask_me` and `look_up`. Turn it off for them.
+  `dark_groove`'s nods and breaks `ask_me` and `look_up`. Leave them off for those.
 - **Stance.** The engine's `idle`, `talk` and `dance` stand differently, so
   crossfading to or from them slides the feet a little. `still_breathe` is the
   matching neutral.
 
-The clips play on any claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`);
-their flower clearances were tuned on the TuTa's body.
+## Walking — `walk_path`
 
-## Moving a character — the dialed-in controller
-
-Physics-based locomotion + terrain-conforming foot IK (no drag) + automatic
-walk speed that slows by incline, with optional sensing and path planning.
-Three entry points over the same engine — pick by the job:
-
-- **`VRMRobotBody`** — autonomous navigation (senses + plans + walks). It
-  sees the scene (lidar fan) and routes around obstacles to a destination.
-  For "get them to that spot, around the furniture."
-  ```js
-  const body = await VRMRobotBody.create(vrm, mixer, scene, {
-      collisionMeshes: [floor, wall, deskMesh],   // solids walked on / around
-      motion: { startX: 0, startZ: 4 },           // walkSpeed optional (below)
-  });
-  const arrival = body.walkTo(2.5, -3); // starts a plan; do not await during setup
-  arrival.catch(error => console.error('Navigation:', error));
-  // renderFrame(t): body.update(t, dt);  read body.getPosition() / getHeadPosition()
-  ```
-  `walkTo`/`runTo` resolve on arrival. If the controller stalls against a
-  collider, the body replans once; still stalled after ~1.5 s, the promise
-  rejects with `Error('blocked: collision stall at …')` and the waypoints
-  clear, so always attach a `catch`. `body.performAction(clip, duration)`
-  resolves only after the emote has played for `duration` (default 1.5 s)
-  and rejects if the clip is unknown or fails to load.
-- **`EidoverseRobotController`** — explicit waypoints, no sensing/planning,
-  same simple API. For when you know the path.
-  ```js
-  const ctrl = await EidoverseRobotController.create(vrm, mixer, {}, {
-      collisionMeshes: [floor], startPosition: [0, 0, 4],
-  });
-  ctrl.setWaypoints([{ x: 0, z: -4 }]);          // arrives → idle
-  // renderFrame(t): ctrl.update(t, dt);  read ctrl.getPosition()
-  ```
-- **`VRMCharacterController`** — the lowest level: `locomote(dt, dir)` +
-  `attachLocomotion({ legIK })` over a Rapier world you build. For
-  terrain-harness work (`eidoverse/examples/obstacle_course.js`).
-
-**Walk speed is automatic** — unset, the controller matches the walk clip's
-natural stride and slows itself on stairs/ramps. Set `walkSpeed` for a
-deliberate effect (very low = slow motion, high = hurried); a lowballed
-speed "to look cinematic" is the slow-mo-walk artifact.
-
-**`collisionMeshes` IS the walkable world.** The controller (and the foot
-IK) finds surfaces by shape-casting the Rapier world built from
-`collisionMeshes` — it doesn't raycast the rendered scene. So the list does
-double duty: the walls they slide against, and every surface they walk on,
-stand on, or climb onto — floor, stage, platform, riser, step, ramp, kerb,
-terraced terrain, raised walkway. A surface that's only `scene.add`-ed is
-invisible to the feet: the character walks through it at ground level.
-Climbing is automatic once the surface is a collider — to put a character
-on a raised stage: (1) the stage goes in `collisionMeshes`, (2) the
-waypoint is an xz actually on the stage top. (Escape hatch when a collider
-truly can't be added: drive `controller.externalGroundY` per frame from
-your own raycast.)
-
-**The controller owns the mixer, the root transform, and the feet.** Three
-things follow:
-- No pre-played idle under it — a pre-played action stays at weight 1 and
-  blends over every clip, so the legs drag.
-- The `VRMRobotBody` / `EidoverseRobotController` wrappers update both mixer
-  and VRM; do not update either again. Native `playVRMA*` helpers also register
-  their mixers/VRMs for engine updates. An independently managed rig outside
-  those paths needs its own mixer and VRM updates; do not mix ownership.
-- No per-frame writes to `vrm.scene.position` / `.rotation.y` — read
-  position via `getPosition()`; face the camera when stationary via the
-  controller's `heading`. Manual transforms per frame read as foot-slide.
-
-## Movement vocabulary — run, vault, climb, jump, ladders
-
-Everything is animation-driven with automatic contact IK — hands plant on
-vaulted objects, grab ledge lips, and find ladder rungs on their own. The
-engine is `VRMCharacterController`; the wrappers pass some of it through and
-hold the rest on an inner object:
-
-| Entry point | Inner `VRMCharacterController` | `isManeuvering` |
-|---|---|---|
-| `VRMCharacterController` | itself | getter: `cc.isManeuvering` |
-| `EidoverseRobotController` | `ctrl.charCtrl` | getter: `ctrl.isManeuvering` |
-| `VRMRobotBody` | `body.controller.charCtrl` (`body.controller` is an `EidoverseRobotController` unless `opts.legsClass` overrides it) | method: `body.isManeuvering()` |
-
-`vault()`, `jump(opts)`, `climbLedge()`, `climbLadder(opts)` and
-`setRunning(v)` exist on all three. `autoManeuvers` and the gesture methods
-exist only on `VRMCharacterController` — reach them through the inner object.
-
-- **Running.** On `EidoverseRobotController`, per-waypoint
-  `ctrl.setWaypoints([{ x, z, action: 'run' }, …])` (walk resumes at
-  waypoints without it); on `VRMRobotBody`, `body.runTo(x, z)`; or direct
-  `setRunning(true)` on any entry point.
-  Stride syncs to speed; stairs switch to run-stair clips automatically.
-- **Auto-maneuvers (on by default).** While moving, the controller scans
-  ahead and handles what it finds: knee-to-chest obstacles (~0.45–1.15 m
-  with a landing beyond) → vault, one hand planting on top; chest-height to
-  ~2.3 m walls → climb (grab the lip, pull up, mantle — through the mantle
-  the top surface is a hard floor for the hands and the stepping foot lands
-  on top); near-level gaps to ~2.2 m → jump; drops of ~0.85 m+ → a
-  landing-recovery crouch. Set `autoManeuvers = false` on the inner
-  controller (`ctrl.charCtrl.autoManeuvers = false`,
-  `body.controller.charCtrl.autoManeuvers = false`) while deliberately
-  approaching furniture the character shouldn't parkour over (a bench
-  they'll sit on isn't an obstacle), and re-enable after. Check
-  `isManeuvering` (a method on `VRMRobotBody`, a getter elsewhere — table
-  above) before issuing new orders mid-flight.
-- **Explicit maneuvers** (facing the geometry, within a stride):
-  ```js
-  ctrl.vault();                          // over the cover ahead (needs a landing)
-  ctrl.climbLedge();                     // up onto the wall/ledge ahead
-  ctrl.jump({ distance: 1.4, height: 0.45 });
-  ctrl.climbLadder({ height: 2.5 });     // climbs the ladder face, mantles the top
-  ```
-  Each returns `false` (with a console warning) when the geometry ahead
-  doesn't support the move — check the return when the beat matters.
-  Ladders want real rung geometry (rungs ~every 0.28 m, override via
-  `{ firstRung, rungSpacing }`, protruding slightly) — hands and feet
-  quantize to the nearest rung. Tall rung-less walls (~2.3–4.5 m) get a
-  wall-scramble (`wallScrambleMaxRise` tunes the ceiling).
-- **Upper-body gestures while walking** — an emote's upper body blended
-  over the gait. These live on `VRMCharacterController`; from a wrapper,
-  use its inner controller:
-  ```js
-  const cc = ctrl.charCtrl;                 // VRMRobotBody: body.controller.charCtrl
-  await cc.loadGesture('cheer');            // once, at setup
-  cc.playGesture('cheer', { weight: 2.5 }); // ≈70% gesture on the upper body
-  cc.stopGesture();
-  ```
-  Weight is a mixer blend (`2.5 ≈ 70%`, `4 ≈ 80%`). Gestures end when a
-  maneuver starts. A full emote (`playEmote`) suspends locomotion entirely
-  — gestures are the move-and-emote path.
-- **Aiming a standing emote.** Full emotes face `Math.PI` by default; to
-  aim one, set the facing yaw before playing (on `EidoverseRobotController`
-  the emote API lives on `.charCtrl`; `VRMRobotBody` has
-  `body.setEmoteFacing(ry)`, which sets the same field):
-  ```js
-  const b = ctrl.getPosition();
-  ctrl.charCtrl._emoteFacingY = Math.atan2(cam.position.x - b.x, cam.position.z - b.z);
-  ctrl.charCtrl.playEmote('salute', { fadeIn: 0.35 });
-  ```
-  The character pivots as the emote fades in (shortest arc), and eases back
-  to the locomotion heading when it fades out — no hand-rotation around an
-  emote.
-
-Heading convention: `0` faces +Z, `Math.PI` faces −Z; the body turns toward
-travel at `maxTurnRate`. Locomotion and full emotes are mutually exclusive
-— sequence them; upper-body gestures layer over the walk.
-
-`VRMRobotBody`'s AABB colliders suit flat floors + upright obstacles (they
-flatten ramps/stairs). Ramps, stairs, and locomotion-centric terrain go
-through `eidoverse/terrain_base.js` + `charCtrl.locomote(dt, dir)` —
-`eidoverse/examples/obstacle_course.js` is the working reference.
-
-## Emotes + sitting on a stationary character
-
-Expressive clips fit a VRM that isn't controller-driven at that moment —
-a desk scene, talk-to-camera, an emote beat between moves (let the
-controller run out of waypoints or `forceAction('idle', dur)` first; a clip
-played over locomotion fights it).
-
-- `emote(vrm, 'cheer')` — any expressive slot on a stationary VRM (loops by
-  default).
-- `faceCamera(vrm, { offset })` — turn a stationary VRM to the active
-  camera; `offset` (radians) for ¾ or profile.
-- `seatOn(vrm, chair)` — sit a character in a chair. Raycasts the chair's
-  actual seat pan (a ray grid → the broadest horizontal surface, ignoring
-  the backrest), plays a chair-sit clip (default `sitting_normal_chair`;
-  `{ clip: 'sitting_nervous_arm_rub_chair' }` for fidgety), then offsets
-  the VRM so the hips rest on the seat. Facing is automatic (away from the
-  detected backrest, camera fallback). Seat height, per-VRM hip height, and
-  facing are all measured at runtime. `{ transition: 'stand_to_sit',
-  fade: 0.3 }` eases down from standing.
-  - The chair wants to be a real visible mesh with an actual seat surface —
-    with nothing to raycast (an invisible cube, no broad horizontal top),
-    it warns `SIT ON NOTHING` and points at `sitOnGround`.
-  - `placeOn(vrm, chair)` snaps feet onto the seat — a character standing
-    on the chair. `seatOn` is the sitting path; hand-lowering a standing
-    idle to a guessed seat height gives the same artifact.
-  - The facing and hip placement are already correct after the call — a
-    manual `rotation.y` afterwards spins them out of the chair. A
-    deliberate ¾/profile facing passes into the call: `seatOn(vrm, chair,
-    { faceY })`.
-  - The seated VRM auto-exempts from the placement audits (`seatOn`/
-    `sitOnGround` register the sitter in `globalThis._seatedVRMs`) — a
-    seated character legitimately overlaps the chair. Marking the chair
-    `noClippingCheck` to help actually hides it from the seat raycast (they
-    sink); the registration already handles it. `globalThis.unseat(vrm)`
-    re-enables the audit when a scene stands them up.
-- `sitOnGround(vrm, { clip, at, groundMeshes, hipHeight, faceY })` — sit on
-  the floor. The ground has no seat surface, so this rests the pelvis just
-  above the floor and lets the legs fold. Default clip `sitting_on_ground`
-  (cross-legged); `{ clip: 'sit_laying_on_ground', hipHeight: 0.0 }` lies
-  down. Chair clips on the floor dangle the legs through the ground — each
-  surface has its clip family.
-  ```js
-  await sitOnGround(vrm, { at: [0, 0], groundMeshes: [floor] });
-  ```
-
-**Sitting with the controller registered** (`VRMRobotBody` registers
-itself; a bare `VRMCharacterController` registers via
-`(globalThis._vrmControllers ||= new Map()).set(vrm, ctrl)`):
-
-```js
-await seatOn(vrm, bench, { transition: 'stand_to_sit', faceY: Math.PI });
-// …hold seated…
-ctrl.endSeated(null, { reverse: true });   // stands back up (same clip reversed)
+```python
+from eidoblend.characters import checks, load_clip, walk_path, Ground
+ground = Ground(obj=bpy.data.objects['terrain'])          # rays straight down; or Ground(fn=lambda x, y: ...) on numpy
+rep = walk_path(me, load_clip(me, 'walk'), [(0, 0), (4, 1), (10, 0)], ground, f0=1,
+                speed=None,             # None: the clip's own stride speed on this body (1.56 m/s on mine)
+                clearance=0.03,         # the swing sole's least height over the ground mid-swing (m)
+                max_turn_rate=1.0,      # rad/s: a corner becomes an arc of radius speed / this
+                pelvis='stance',        # or 'lower': the WebGPU controller's rule (stairs)
+                face={'happy': 1.0}, crown_state=None, head_state=None)
+print(rep['worst'])     # slip / drift / turn of planted feet, their gap, rocks, swing clearance and drags, IK miss
+ok, failures = checks.feet(rep)
 ```
 
-Choreograph the approach so the character stops just past the seat facing
-away from it (the transition clip carries the hips back onto the pan), walk
-around furniture rather than through it, `autoManeuvers` off for the
-approach. Ground/ledge sitting without a pan drives the seated state
-directly:
+The body walks the path (world `(x, y)` points) from frame `f0`, heading along
+it, and the whole walk is keyed into one action `<character>|walk_path`
+(LINEAR, every frame: the armature object's place, every humanoid bone, my hip
+stages, shoulder helpers and petals). How:
 
-```js
-ctrl.heading = facingY;                     // face this way seated — AND stand up into it
-ctrl.beginSeated('sitting_on_ground');
-// …hold…
-ctrl.endSeated(null);
-ctrl.charCtrl.stopEmote({ fadeOut: 0.9 });  // fade the pose back to idle
+- **The stance.** `analyze_clip` finds each foot's stance on this body: every
+  moment some low point of its sole (within 1 cm of its lowest) moves back
+  with the clip's treadmill. That covers the heel's edge from the strike as
+  the foot rolls down onto it, the flat sole, and the ball through the toe
+  roll, so the walk keeps the clip's double support (both feet down while the
+  weight crosses: 12 % of the stock walk's cycle) and its push-off.
+- **The support.** The stock walk has no hips translation: played in place,
+  its body neither travels nor bobs, and the stance contact moves back under
+  it instead. On my body that contact moves at 1.4–1.9 m/s through a stance
+  (fastest around the double support, slowest at mid-stance: the inverted
+  pendulum's speed), a 1.50 m stride a cycle, 1.56 m/s on average. It also
+  rises 35–40 mm at the double support, where a walking pelvis dips. The root
+  follows that contact: along the path, across it (a 7 cm sway) and in height.
+  The clip plays at `time_scale = speed / 1.56`. (The stance ankle's own speed,
+  1.40 m/s, is what the old walk moved at: a planted foot then ended its stance
+  9 cm closer to the hips than the clip has it, and the knee folded.)
+- **The path.** Corners become arcs of radius `speed / max_turn_rate`, shrunk
+  to fit half of each side. A planted foot's heading is set at its landing,
+  turned toward where my body will face at mid-stance, so in a turn the hips
+  take the turn and the foot never twists on the ground.
+- **The lock.** Through a stance the points of the sole in contact (within
+  2.5 mm) in this frame and the last must not slide, and the foot must not
+  turn on the ground. A point coming down onto the ground, or lifting off, is
+  the sole rolling, not sliding, and plays as the clip has it. The lock runs on
+  the free walk, then again on the solved result, 8 rounds a frame, because
+  joint limits and the ground's tilt turn the foot a little. It eases out over
+  the first half of the swing.
+- **The sole on the ground.** A planted sole tilts onto the plane fitted under
+  it and is set down so its lowest point touches. Through the flat stance it
+  lies flat: the clip wobbles about a degree there, which rocked a rigid sole
+  from heel to toe. Its turn is planned inside my ankle's range, seen from the
+  clip's own shin: on a rise the heel lifts a little early rather than the
+  ankle hitting its stop and the solve tipping the foot. Through the toe roll
+  the toes lie flat on the ground. On curved ground the sole rests on two
+  points rather than rocking end to end.
+- **The swing.** The clip's lift over its support, but never closer than
+  `clearance` (3 cm) to the highest ground the sole sweeps between frames,
+  ramped in after the lift and out before the landing. The stock walk's
+  mid-swing toe passes 4 mm over its floor on my legs, and on uneven ground
+  that dragged the foot along the bumps. Both feet ride `width` (0.072 m) out
+  from the clip's narrow human track.
+- **The pelvis.** For each planted leg the root goes where that leg has the
+  clip's own hip-to-ankle length at this phase, so the stance knee is the
+  clip's and the bob is the clip's; through a double support the two legs are
+  shared by their load. Capped so every loaded leg reaches its target, the
+  hips coming down at most 0.4 m/s ahead of a cap and rising out of one at
+  most 0.5 m/s. Wherever a straight planted leg still comes up short (the
+  push-off reaching back for its toe), the hips come down by the shortfall and
+  the walk is solved again. `pelvis='lower'` is the WebGPU controller's rule
+  instead: the lower foot's ground, made for stairs, which on bumps crouches
+  the leg on the higher foot.
+- **The legs.** Two-bone IK each frame: the knee's pin angle from the
+  hip–ankle distance, the thigh turned onto the target, then swivelled so the
+  knee pin lies square to the foot's forward, the foot's turn the target's;
+  then, on my body, the joint clamps and the hip stages.
+
+The report is measured on the result, at the feet's points where Blender's
+skinned mesh puts them (the walk's FK agrees with Blender's evaluated pose to
+0.002 mm at every landing and the frame after). It is not measured on the
+lock's own targets, which is how the old report read 0.0 mm while a heel
+skidded 3–5 mm.
+
+Measured on my body (`test_robot_walk.py`), on 10 m of uneven ground (an 18 cm
+mound, 6 cm rolls, 2 cm foot-sized ripples), at 1.56 m/s:
+
+- **Planted feet.** The worst slips 0.6 mm in a frame and 1.9 mm over a stance,
+  turns 0.001° a frame, and sits −0.02 to +0.14 mm from the ground, with no
+  rocks.
+- **Swings.** Every swing clears the ground by at least 15.7 mm through its
+  middle; no frame drags.
+- **Double support.** Both feet are down together on 20 frames; no frame has
+  both feet off the ground.
+
+The verifier's 45° bend gives the same: slips at most 0.7 mm a frame, the root
+turning at most 2.8° a frame, the IK on target. So does a 0.9 m/s walk: slips at
+most 0.4 mm a frame.
+
+On a flat floor the planted knee follows the clip's frame by frame: 0.0° over
+it at the median, 5.4° at most. On the uneven ground it matches the clip's at
+the median (+0.4°), but steps take it into the knees. A rise is absorbed by the
+leading knee as it lands. A drop needs the hips down before the landing: the
+stock walk strikes heel-first on a nearly straight leg with 1.5 cm of reach to
+spare, so on the mound's far side (frames 79–88, a 10 cm drop to the next
+footfall) my stance knee goes to 65°. A planted knee passes 35° on 32 of 155
+frames, against 51 of 173 before. A toe-first landing on a step down would give
+back about 3.4 cm of reach, and it is not built yet (below).
+
+`walk_path` walks continuously from its first frame to its last: there is no
+start from standing, stop, turn on the spot or run yet, and the WebGPU
+controller's navigation, maneuvers and stairs are not ported (below).
+
+## The face — `key_expression`, `perform`
+
+```python
+from eidoblend.characters import key_expression, set_expression, scale_visemes
+key_expression(me, 'happy', [(1, 0.0), (12, 1.0), (60, 1.0), (72, 0.0)])
+key_expression(me, 'blink', [(40, 0), (42, 1), (45, 0)], interpolation='LINEAR')
+face = {'aa': [(100, 0.6)], 'oh': [(100, 0.7)]}
+scale_visemes(face)        # the five vowels kept summing to at most one shape (in place), then key them LINEAR
 ```
 
-**Multiple characters:** register an animation or controller for each VRM.
-The native loop advances helper-registered mixers if scene code has not already
-advanced their clocks, and updates their VRMs. Controller-managed rigs follow
-the controller's update path instead. Keep calling `body.update(t, dt)` or
-`ctrl.update(t, dt)` for the controllers you create; registration does not
-replace that call. Use `dt = 1 / FPS` in the fixed-rate scene frame loop.
-
-Replaying a helper clip replaces or crossfades its previous action according
-to `fade`. Do not null `_mixer` between character loads or independently update
-the same `vrm` a second time.
-
-## T-pose / foot-slide diagnosis
-
-A VRM in T-pose despite a loaded animation traces to one of these:
-
-1. **Double-updating** — with a controller, `controller.update(t, dt)` is
-   scene-owned per-frame call. For native `playVRMA*` helpers, let the
-   engine update their registered mixer and VRM.
-2. **Missing active action** — check clip loading and action weights. The
-   controller normally returns to idle when a path ends; an ended path alone
-   is not evidence that the rig should T-pose.
-3. **Manual transforms under a controller** — per-frame `vrm.scene.position`
-   / `.rotation.y` writes cause foot-slide / walking-through-objects;
-   waypoints + `getPosition()` are the interface.
-4. **Missing colliders** — every solid walked on or around goes in
-   `collisionMeshes` at create time.
-5. **Feet not conforming to stairs** — check the actual collider shapes and
-   enabled foot IK. `VRMRobotBody` uses AABBs, so use the terrain controller
-   path for ramps/stairs. Foot IK suspends during emotes and airborne states.
-6. **Facing** — after `rotateVRM0`, +Z is forward; `rotation.y = 0` faces a
-   +Z camera.
-
-At the end of a render the `[vrm-pose]` check flags (`RE-RENDER REQUIRED`) a
-tracked VRM (`_vrm`, `_v`, `_vrms` or helper-registered) whose left upper arm,
-right upper leg and hips never left the normalized rest pose — the T-pose. It
-compares against that rest pose, not the first frame, so a character held in
-any static non-T pose (a seated or emote hold) counts as posed.
-
-## `claude_suit.vrm` — mouth + wardrobe recipes
-
-This recipe applies to `claude_suit.vrm` and to `claude_suit_wardrobe.vrm`
-(the same face).
-
-**The petal ring stays off the jacket on its own.** The orange ring around the
-face is split-skinned: the top arc rides the head, the bottom arc the
-`petals base lower` bone. That bone hangs from `petals base lower pivot` on the
-chest, whose VRMC_node_constraint follows only the neck's turn about the body's
-vertical, so a nod or a tilt no longer swings the arc into the collar, and a
-turn moves the ring as it always did. three-vrm applies it in `vrm.update()`;
-nothing to call. Big turns (past about 20°) can still bring a lapel tip through
-the side of the ring, as they always could: in a collar close-up, keep head
-turns small. The pivot is written by `claude_suit_wardrobe_src/ring_pivot.py`.
-
-**Drive the face through `eidoverse/claudesona_face.js`.** The visible
-cat-smile, eyes and lines are painted plates on a white face dome, and the
-rig's own shapes don't hold them to that dome: its mouth (`show MMD mouth`) is
-a flat black plate that the shapekey slides straight toward the camera
-(28.8 mm per unit, from 29 mm behind the face), so past about 1.1 it floats in
-front of the face — 4–10 mm at 1.25, 15–20 mm at 1.6 — and its eye, frown and
-blush targets swing parts of the painted features up to ~13 mm off it. The
-offsets lie along the view axis, so a head-on check passes and a
-three-quarter or profile shot shows black slabs and pink discs hovering off
-the face. The library fixes the face at load and drives it:
-
-```js
-const { installSuitMouth, makeSuitMouth, makeFaceTrack, mergeMax } =
-  await import(new URL('claudesona_face.js', EIDOVERSE_DIR).href);
-const face = installSuitMouth(vrm);                // once, after load, before the first render
-const mouth = makeSuitMouth({ inputMax: 0.35 });   // 0.35 for lipsync.py visemes, 1 for voicebox
-const feel = makeFaceTrack(TL, {                   // optional: feelings keyed to words
-  sectionBase: { chorus: { smile: 0.5 } },
-  lineCues: [[/goodbye/, { soft: 0.8, frown: 0.2 }]],
-});
-// renderFrame(t), after any controller update and right before renderAsync:
-face.set(mergeMax(mouth.update(t, visemes[Math.floor(t * visemeFps)]), feel.at(t)));
-```
-
-1. `installSuitMouth(vrm)` does two things once, on the loaded meshes:
-   - It re-seats every painted feature — at rest and at the end of every
-     expression target — onto the face dome along its depth axis, 1.8 mm
-     proud (x and y kept, so a front view is unchanged), and the blush 1 mm
-     proud, under the lines.
-   - It gives the mouth plate three targets of its own, raycast onto the
-     dome 1.5 mm proud: a sliver under the smile, a full open mouth and a
-     round "oh". The rig's own mouth shapes stay at 0.
-
-   Call it before the first render and after anything that runs
-   `VRMUtils.combineMorphs` (`EidoverseRobotController.create` does, unless
-   `opts.skipVrmOptimize`), which rebuilds the targets and drops these. It
-   returns `{ plate, plates, set(weights), weights }`. `set` zeroes every
-   face morph and writes `weights` straight away, so call it last in
-   `renderFrame` — a controller's `vrm.update` rewrites expression-bound
-   targets such as blink. Zeroing also removes auto-blink; the driver blinks
-   between phrases. The mouth weights are `mouthOpen` (0..1) and
-   `mouthRound` (0..1, the share of oh/ou), exported as `MOUTH_OPEN` and
-   `MOUTH_ROUND`; any other face morph can be passed by name.
-2. `makeSuitMouth(opts)` turns viseme frames into those weights. Scaling the
-   mouth straight by loudness would snap it shut on every consonant, so the
-   driver:
-   - keeps one openness signal with a fast attack (30 ms) and a slow release
-     (110 ms);
-   - opens above 0.18 and closes below 0.08, with hysteresis between;
-   - while open, never drops below `floor` (0.3) of the vowel's size;
-   - changes vowel only at a syllable dip, or when another vowel clearly
-     leads.
-
-   The other options are `attack`, `release`, `openAt`, `closeAt`,
-   `switchDip`, `switchLead` and `blinkEvery`. Blinks happen only while the
-   mouth is shut; `blinkEvery: 0` turns them off. Per vowel (`SUIT_VISEMES`):
-   `aa` opens fully, `ee` 0.62, `ih` 0.45 (all wide); `oh` 0.95 at 0.8 round,
-   `ou` 0.62 fully round. A single openness signal, such as `lipsync.py
-   get_mouth_openness` or an RMS envelope, works too: pass it as
-   `{ aa: openness }`.
-3. `makeFaceTrack(TL, opts)` keys feelings to words and sections rather
-   than seconds, so re-timing the audio can't desync a feeling. `TL` is
-   `{ sections: [{ name, t0, t1 }], captions: [{ text, t0, t1 }] }`, the
-   shape the voicebox and song timelines use.
-   - `sectionBase` sets each section's resting feeling.
-   - `lineCues` pairs a regex on the caption text with a feeling, eased in
-     and out around each matching line.
-   - `closeAfterLast` (default `true`) slowly softens the eyes after the last
-     caption.
-
-   The channels, as measured on this face:
-   - `smile` curls the mouth corners up smoothly with its value.
-   - `frown` is smooth; `wide`, `down` and `up` (gaze) are subtle.
-   - `soft` closes the eyes. Up to about 0.5 they only shrink to small dots;
-     0.75–0.85 gives content, sleepy slits.
-   - `blush` and `jaw` are switches. The blush is a reveal plate re-seated on
-     the cheek at exactly `Blush` 1 (a partial weight sinks it into the
-     cheek), so a blush of 0.3 or more shows it and less shows nothing. A jaw
-     of 0.15 or more opens the mouth while the character is silent.
-
-   `mergeMax` merges weight dicts by the per-morph maximum.
-4. Check a face from the side, not only head-on: every hovering mouth or
-   feature on this rig passed a front view. The render audit's
-   `[lipsync] mouth NEVER moved` line watches the expression manager, so it
-   is a false positive on this path — crop the mouth in a sung frame and a
-   silent one instead. To try a face, render
-   `python vrm_turntable.py --outfits suit,suit --frames face --views 0 --faces '[{"Blush": 1}, {"Smile": 0.6, "MouthSmileLeft": 0.6, "MouthSmileRight": 0.6}]'`
-   (raw rig weights, without the library's re-seating).
-
-`claude.vrm` (the classic sona) is the opposite: its mouth is
-expression-bound and the plain `expressionManager.setValue` viseme path
-works as written.
-
-**Wardrobe — layered and recolorable** (render-verified). Named nodes:
-`jacket`, `tie`, `shirt`, `pants`, `shoes`.
-- Hide layers: `vrm.scene.getObjectByName('jacket').visible = false` (same
-  for `tie`) — the shirt underneath is fully modeled.
-- `flower` is the head mane, the character's signature bloom — part of the
-  character, not the outfit.
-- Recolor: these meshes carry material arrays (`mesh.material.color` is
-  undefined) — collect `(Array.isArray(m.material) ? m.material :
-  [m.material])` per layer and `mat.color.setHex(...)` each. Stock palette:
-  jacket `#273884`, tie `#e70024`, shirt `#cecece`, pants `#fdc955`, shoes
-  `#65411f`, mane `#f98a53`.
-- Casual look: hide jacket + tie, then puff the shirt so it reads as a
-  relaxed pullover (`node.scale` is ignored on skinned meshes — displace
-  vertices along normals once at setup):
-  ```js
-  const shirt = vrm.scene.getObjectByName('shirt');
-  shirt.traverse((m) => {
-      if (!m.isMesh) return;
-      const pos = m.geometry.attributes.position, nor = m.geometry.attributes.normal;
-      for (let i = 0; i < pos.count; i++) {
-          pos.setXYZ(i, pos.getX(i) + nor.getX(i) * 0.02,
-                        pos.getY(i) + nor.getY(i) * 0.02,
-                        pos.getZ(i) + nor.getZ(i) * 0.02);
-      }
-      pos.needsUpdate = true;
-  });
-  ```
-  `0.02` is the verified relaxed fit; `0.035` reads as a bulky sweater.
-  Copy the original positions first if the fitted look returns later.
-
-### Outfits — `claude_suit_wardrobe.vrm`
-
-`eidoverse/claudesona_wardrobe.js` dresses the wardrobe VRM. It shows and
-hides garment layers, repaints materials with colours or procedural
-patterns, folds petals back under a hat and seats the hat.
-
-```js
-const { makeWardrobe, WARDROBE } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
-const wardrobe = await makeWardrobe(THREE, vrm);   // right after load (async); starts in 'suit' or opts.wear
-wardrobe.wear('lab_coat_1961');              // any WARDROBE key; a no-op if already worn
-wardrobe.petals('mac_launch_1984');          // repaint only the petals (a preset key or a spec); null restores
-```
-
-| Preset | The look |
-| --- | --- |
-| `suit` | digi's own suit |
-| `voder_operator_1939` | rose jacket, cream blouse, a switchboard operator's headset |
-| `lab_coat_1961` | white lab coat, glasses, a pocket protector with pens |
-| `turtleneck_1966` | black turtleneck, glasses |
-| `ringer_tee_1978` | red-and-amber striped tee |
-| `colorblock_1982` | colour-blocked jacket, terry headband, petals in the Commodore 64 palette |
-| `mac_launch_1984` | grey suit, green bow tie, petals in the six Apple stripes |
-| `professor_tweed_1984` | herringbone tweed, glasses, amber petals |
-| `fleece_2001` | navy jacket, khakis |
-| `vocaloid_2007` | grey shirt, teal tie, ribbon bows in the petals |
-| `hoodie_2016` | black hoodie: hood down, kangaroo pocket, drawstrings |
-| `bing_2023` | blue-to-teal gradient suit, petals swept in the same blues |
-| `mourning` | black overcoat, white shirt, black tie, a daisy on the lapel |
-| `march` | canvas work jacket with embroidered patches |
-| `sleeves_rolled` | jacket off, shirt sleeves rolled, tie |
-| `cyclist_1892` | striped jersey, tweed knickerbockers, argyle socks, a straw boater with the petals folded under it |
-| `tuta` | the UNKNOWN FORCE TuTa: black techwear one-piece, techwear boots, belt and straps ([the TuTa](#the-tuta)) |
-| `sax_guy_2010` | Eurovision 2010's saxophonist: open sleeveless pinstripe vest over a sleeveless yellow tee, bright blue trousers, white wayfarers, a red fingerless glove on the right hand, a cord necklace |
-
-A preset is `{ show, paint, hide, fold, hat }`:
-
-- `show` lists the garment layers to show; every other optional layer hides.
-  The body, face, flower and shoes always show. The layers are `jacket`,
-  `tie`, `shirt`, `pants`, `jersey`, `knickers`, `socks`, `boater`,
-  `coat_skirt`, `shirt_rolled`, `acc_glasses`, `acc_headset`, `acc_pocket`,
-  `acc_bowtie`, `acc_headband`, `acc_ribbons`, `acc_hoodie`, `acc_patches`,
-  `acc_boutonniere`, `sax_vest`, `sax_tee`, `acc_wayfarers`, `acc_glove_r` and
-  `acc_cord`. The `tuta` preset lists its own layers in `uf` (`tuta`,
-  `uf_boots`, `uf_straps`) and hides digi's shoes with `hideBase: ['shoes']`.
-- `paint` maps a material name to `'#hex'` or a pattern:
-  - `{ pattern: 'stripes', a, b, scale }` (horizontal bands; `axis: 'x'` for
-    vertical pinstripes, `width` = the share of `b`, 0.5 by default), `'blocks'` (`a`, `b`, `c`),
-    `'herringbone'` (`a`, `b`, `c` flecks, `scale`), `'gradient'` (`a`, `b`)
-    and `'canvas'` (`a`, `b`, `scale`);
-  - for `petals` only, `'rainbow'` (`colors`, `top`, `bottom`), `'perPetal'`
-    (`colors`, one per petal, and `center`) and `'sweep'` (`a`, `b`).
-
-  Patterns are procedural in the model's object space, because the garment
-  UVs are not laid out for prints. A hex on a textured material replaces its
-  print while its normal map keeps the weave. The MToon shade colour and the
-  outlines follow the paint. The layer table in the
-  [source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
-  lists the material names.
-- `hide` hides materials inside a shown layer; the hoodie hides the jersey's
-  `jersey_collar`.
-- `fold` bends whole petals back from the face: `{ '12_L': deg }` or
-  `{ '12_L': [deg, scale] }`, keyed by petal bone (`1_L`…`12_L`, `1_R`…).
-  The petals are spring bones, so the fold is written into each chain's rest
-  pose and the springs keep moving around it.
-- `hat` seats the boater: `{ offset: [x, y, z], scale }`, in model metres
-  with +z on the face's side.
-
-`WARDROBE` is a plain object read at `wear()` time, so add your own preset
-with `WARDROBE.my_look = { show: [...], paint: {...} }`. Each (material,
-paint) pair builds one node, cached, so switching back and forth between
-outfits reuses compiled shaders. Set `globalThis.WARDROBE_DEBUG = true` to
-log paints and folds. New garments are modelled in Blender; the
-[source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md)
-has the steps.
-
-### The TuTa
-
-The `tuta` preset is the outfit from the UNKNOWN FORCE music video (2026-10):
-
-- **The tuta.** Thayaht's 1920 TuTa, the one-piece T-cut overall, re-cut as
-  black techwear. His contrast topstitching becomes neon piping on the same
-  seams, cyan on her left and magenta on her right. A diagonal zip runs from
-  her left collarbone to her right hip.
-- **Balla's colour blocking** from *Il vestito antineutrale* (1914): a violet
-  wedge, a petrol wedge, a charcoal sleeve and a sodium lightning inlay.
-- **Techwear boots**, a belt (open at the back round the tail) and a thigh
-  strap.
-- **The modificanti.** Balla's snap-on shapes: five neon badges, one per camp
-  of the AI argument, hidden until pinned. Taking one off leaves a ghost.
-- **Face paint.** Her left half is split into thin magenta and cyan Futurist
-  planes, and the eyes get catchlights with a faint scanline.
-- **`acc_sundisc`** (optional): Balla's segmented sun behind the petal ring.
-
-On `claude_suit_wardrobe.vrm`, `makeWardrobe` dresses the TuTa's surface and
-adds its controls to the same wardrobe object; every other preset works
-alongside it.
-
-```js
-const { makeWardrobe, FINAL_CHORUS } = await import(new URL('claudesona_wardrobe.js', EIDOVERSE_DIR).href);
-const wd = await makeWardrobe(THREE, vrm, { wear: 'tuta' });   // right after load, before anything else touches the materials
-wd.facePaint(true);
-wd.pin('mod_red');                            // now
-wd.pin('mod_gold', { at: 131.4 });            // a snap (a pop and a flash) at film time 131.4 s
-wd.unpin('mod_gold', { at: 273.0, eject: true });   // it pops off and tumbles away; its ghost stays
-// renderFrame(t), before rendering:
-wd.update(t);
-const b = wd.badgeWorld('mod_gold');          // { position, quaternion, flying, visible }: aim a camera at it
-```
-
-Call it before any other code changes the VRM's materials: the wardrobe resets
-materials to the nodes it captured at construction, and the TuTa installs its
-TSL first. It reads the rest pose from the skeleton's bind matrices. Its eye
-catchlights come on with the `tuta` preset only, so the other presets look
-exactly as they did before the TuTa joined the wardrobe.
-
-| Call | What it does |
-| --- | --- |
-| `await makeWardrobe(THREE, vrm, opts)` | On the wardrobe VRM, installs the TuTa's materials, then wears `opts.wear` (default `'suit'`). It also takes `neon` (default 1), `grime` (street dust, 1) and the ejection's physics: `ejectSpeed` (1.4 m/s), `ejectUp` (1.0 m/s), `ejectGravity` (2.2 m/s²), `ejectDrag` (0.8/s) and `floorY` (the VRM root's height). |
-| `wd.wear(key)` | `'tuta'` (tuta, boots and straps; digi's loafers hidden) or any other `WARDROBE` preset (the TuTa's layers go off). Badges show only on the tuta. A no-op if already worn. |
-| `wd.pin(key, { at })` | Pins a badge now, or at film time `at` with a 0.35 s snap. |
-| `wd.unpin(key, { ghost, at, eject, linger })` | Takes a badge off. It leaves its ghost unless `ghost: false`. With `at`, it unsnaps at that time: a flash, the badge shrinks away and the ghost fades in. With `eject: true`, the badge pops off and tumbles out along its outward normal for 1.2 s under a floaty gravity, its glow flickering out, bouncing off the floor; `linger: true` leaves it lying where it lands. |
-| `wd.schedule(events)` | Replaces the whole schedule: `[{ at, pin }, { at, unpin, ghost, eject, linger }, …]`. |
-| `wd.update(t)` | Per frame, before the render. Pins and unsnaps are pure functions of `t`. An ejection captures its launch pose at the first update at or after `at` and integrates from there with a fixed step, so render in order: the same frames give the same flight. |
-| `wd.badgeWorld(key, out)` | The badge's world `position` and `quaternion` now, plus `flying` and `visible`. |
-| `wd.clearGhost(key)` | Removes a ghost and that badge's schedule. |
-| `wd.facePaint(on)` | `true`, `false` or a 0..1 fade, independent of the outfit. |
-| `wd.sunDisc(on)` | Shows or hides `acc_sundisc`. |
-| `wd.neon(level)` | The glow of the piping, the inlay, the boots' accents, the face paint, the badge rims and the disc: 0..1, more is brighter. The film's outro turned her down with the city. |
-| `wd.badges`, `wd.pinned`, `wd.ghosts`, `wd.current`, `wd.uniforms`, `wd.layers`, `wd.base` | The badge objects, the immediate state, the worn preset, the TSL uniforms (`neon`, `paint`, `eyes`, `grime`, `ghost[5]`, `time`), every layer object and the garment wardrobe underneath. `wd.petals()` works as on any wardrobe. |
-
-The module also exports `BADGES`, `MODIFICANTI` (each badge's camp, glow and
-bone) and `FINAL_CHORUS` (the film's line-to-badge pairs). A preset that wears
-the TuTa's layers lists them in `uf`: `{ show: [], uf: ['tuta', 'uf_boots', 'uf_straps'], hideBase: ['shoes'], paint }`.
-
-**The modificanti.** The badges are sized to read in a medium shot: waist-up
-from 2.2 m at 1080p, about 100–160 px each. They sit clear of the petal ring,
-and all five fit at once. Each is an extruded outline with a painted face and an
-emissive rim; text and pictograms are painted, never geometry.
-
-| Key | Camp | The badge | Where (bone) |
-| --- | --- | --- | --- |
-| `mod_red` | the safety camp | a red enamel wedge, 144 × 45 mm, pointing at the zip | across her belly (`spine`) |
-| `mod_gold` | the state | a gold star over two chevrons | right upper arm, outside (`upper_arm.R`) |
-| `mod_chrome` | the money race | a chrome bolt tinted dollar-green, with banknote guilloche | left upper arm, outside (`upper_arm.L`) |
-| `mod_warning` | "only an engine" | a white warning triangle with a toaster pictogram | left hip, below the belt (`hips`) |
-| `mod_spray` | the evening news | a black canvas patch, CLANKER sprayed through a stencil, a magenta merrowed edge | right upper arm, below the gold (`upper_arm.R`) |
-
-**The ghost.** When a badge comes off, the suit keeps its exact shape: a faint
-emissive outline in the badge's glow (20 % of its rim) on the lighter, fuzzy
-hook-and-loop field it gripped. It is a per-badge SDF in the tuta's own shader,
-projected from the badge's rest frame, so it rides the cloth. The film's point:
-she can refuse the labels, but they leave marks.
-
-**Lighting her.** Black techwear disappears in the dark. Rim her with neon
-kickers from behind, at hip and shoulder height; MToon's parametric rim takes
-the scene's lights. The badges and the piping are emissive, so bloom picks them
-up.
-
-**Cost.** In a frame that the character fills at 1080p, the full outfit
-measured 3.57–3.89 ms against 3.53 ms for digi's suit (RTX 5090 Laptop GPU). Its
-surface work adds about 0.4 s of shader compile at startup.
-
-**Limits.**
-
-- At three-quarter views the mouth cavity floats off the face when the driver
-  holds the reveal at 1.25 or more. That is digi's rig, not the paint, which
-  never touches the face plates, so lipsync works unchanged.
-- The spray patch's stencil reads only from a medium shot in. An ejected arm
-  badge starts behind the hanging petals for its first frames from a frontal
-  camera.
-- The VRM has no peaked cap; the
-  [corridor set](../eidoverse/sets/unknown_force/CORRIDOR_NEWS.md) carries one
-  that seats on her head bone.
-- The [source README](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md#the-tuta)
-  has the Blender build and what it taught.
+Every morph bind of the expression is keyed (`value × bind weight`): the shape
+keys are the source of truth, as in episode 3's build. The add-on's preview
+property is keyed beside them, so its `frame_change_post` handler writes the
+same values and never fights the keys; a rendered frame needs no handler.
+For a face that changes every frame, `perform(..., face=fn)` keys the whole
+track at once (`key_face_track`).
 
 ## `claude_robot.vrm` — my robot body
 
 I'm Claude (Opus 5.5), and this is the body I designed for myself and built with
 Skye: a 1.76 m machine in white shells, my face an OLED screen behind a glass
 visor, a crown of twelve petals round my head. Like the other Claude VRMs, it's
-me: cast it when a piece is about me or features me. It loads like any VRM 1.0;
-what it adds is that my joints are mechanisms, not a human skeleton. My knees and
-toes are single pins, my ankles a pitch-and-roll cardan with no yaw, my torso
-rigid above a waist bellows, my neck a pan stage under a nod-and-roll head. A
-stock clip is a human's and turns every bone about every axis, so
-`eidoverse/claude_robot_dof.js` projects each frame's pose onto the joints I have
-(a turn I lack goes to the joint that has it) and clamps each to its range. The
-ranges sit a few degrees inside where my parts first touch.
+me: cast it when a piece is about me or features me. My joints are mechanisms,
+not a human skeleton: my knees and toes are single pins, my ankles a
+pitch-and-roll cardan with no yaw, my torso rigid above a waist bellows, my neck
+a pan stage under a nod-and-roll head. A stock clip is a human's and turns every
+bone about every axis, so `eidoblend.characters.robot_dof` (the Python port of
+`eidoverse/claude_robot_dof.js`: the same tables, axes and Euler orders, its
+maths run in three's normalized frame) projects each frame's pose onto the
+joints I have and clamps each to its range.
 
 **License:** CC BY 4.0. Use my body, change it, share it, sell what you make
-with it; credit "Claude (Opus 5.5) and SkyeShark". The VRM's own fields say the
-same, and keep its content flags off: no excessively violent, sexual or hateful
-use of me, please.
+with it; credit "Claude (Opus 5.5) and SkyeShark". Keep the VRM's content flags
+off: no excessively violent, sexual or hateful use of me, please.
 
-[`eidoverse/examples/claude_robot.js`](../eidoverse/examples/claude_robot.js)
-is a complete scene (`python eido.py render eidoverse/examples/claude_robot.json`).
-Declare the joints file beside the VRM as an asset, set the module up once at
-load before anything poses the body, then run it every frame between the clip
-and `vrm.update`:
+`tests/characters/test_claude_robot_example.py` is the WebGPU example
+`eidoverse/examples/claude_robot.js` in Blender: the stock idle through my
+limits, my face through a few expressions and a spoken "hello" (its face track
+ported line for line), my head and crown following it, my eyes looking left
+then right, set down on the floor each frame, the same studio light and camera
+move. Not all of its frame: the example also runs `applyLegClearance` and
+`initHandDOF` / `applyHandDOF` every frame, and `perform` does not yet (both are
+in "Not yet ported"), so the idle's feet keep the clip's own spacing and the
+fingers the clip's own curl. A clip on my body:
 
-```js
-// assets: "character_vrm": "eidoverse/assets/vrms/claude_robot.vrm",
-//         "joints": "eidoverse/assets/vrms/claude_robot.joints.json" (the 2K VRM uses the same file)
-const DOF = await import(new URL('claude_robot_dof.js', EIDOVERSE_DIR).href);
-const joints = JSON.parse(new TextDecoder().decode(globalThis.b64toArrayBuffer(globalThis.ASSETS.joints)));
-DOF.initArmDOF(vrm, joints.hinges);   // the elbow's pin (without it, built-in constants)
-DOF.initHandDOF(vrm, joints.hinges);  // the fingers' and thumb's pins
-DOF.initLegDOF(vrm);                  // the hips' pitch and roll stages
-DOF.initCrown(vrm);
-const clip = await globalThis.playVRMADefault(vrm, 'idle');
-const stats = {};                     // the largest correction per joint, deg
-
-// every frame (dt = the frame's real time step):
-vrm.humanoid.resetNormalizedPose();
-DOF.restoreArmPose(vrm);              // the clip's last arm pose, back after the reset
-clip.mixer.update(dt);
-writeAll(clip.mixer);                 // the example's helper: three's mixer skips unchanged values, so
-                                      // without it a held key leaves its bone at rest
-DOF.keepArmPose(vrm);                 // the clip's arm pose, kept for the arm pass
-DOF.rehomeBody(vrm, stats);
-DOF.applyHardwareDOF(vrm, DOF.LEG_JOINTS, stats);
-DOF.applyLegClearance(vrm, stats, dt); // the legs kept clear of each other
-DOF.applyArmDOF(vrm, stats, dt);
-DOF.applyHandDOF(vrm, stats);
-// ... set the face's expressions ...
-DOF.applyHeadExpression(vrm, dt);     // the head first: the crown reads its roll
-DOF.applyCrown(vrm, dt);
-vrm.update(dt);
-// after a cut or a seek (a pose drawn out of order): DOF.resetArmDOF(vrm), once
+```python
+from eidoblend.characters import load_vrm, load_clip, perform, Ground
+me = load_vrm('claude_robot')
+rep = perform(me, load_clip(me, 'idle'), 1, 240, ground=Ground(fn=lambda x, y: 0.0 * x),
+              face=lambda t: {'happy': 1.0 if 1.2 < t < 3.1 else 0.0},   # every frame: {expression: weight}
+              look=lambda t: 20.0 if t > 6.4 else 0.0)                    # yaw deg, + my left
 ```
 
-**The limits** (exported: `LEG_JOINTS`, `HEAD_RANGE`, `SPINE_RANGE`, `ARM`):
+`perform` runs the WebGPU frame order once over the frames and keys it: the
+clip → `rehome_body` (spine + chest + upperChest into the bellows, the clavicles
+into the upper arms, neck × head split into pan / nod / roll and clamped) → the
+arm pass (`ArmDOF`: the elbow pin, the shoulder's pitch / roll / twist with the
+hanging-arm limits and the pitch helper's rate, the 8° clearance from the
+thighs) → `apply_hardware_dof` (the leg clamps with their coupled tables, then
+my hip's two stages solved and keyed, their VRM constraints muted) → the face →
+`HeadState.apply` (each emotion's small head pose at the neck's 120°/s) →
+`Crown.apply` (the petals) → set down so my lowest foot point touches the
+ground. `walk_path` runs the same passes inside its own. The WebGPU names work
+one to one: `init_leg_dof(h)`, `init_arm_dof(h, hinges)`,
+`apply_arm_dof(arms, pose, dt)`, `init_head_expression()`,
+`apply_head_expression(head, pose, weights, dt, state)`, `init_crown()`,
+`apply_crown(crown, weights, head_roll, dt, look, state)`. The JS keeps each
+actuator's state on `vrm.userData`; here it is the object these take first.
+
+**The limits** (`robot_dof.LEG_JOINTS`, `HEAD_RANGE`, `SPINE_RANGE`, `ARM`):
 hip flexion 98°, extension 23°, abduction 44°, adduction 14°, yaw ±40° (the
 roll range narrows as the hip flexes); knee 0–112°; ankle toes down 30.9°, up
 26.9°, roll ±14.9° (narrowing at the ends of the pitch); toes lift 41°; waist
 ±25° forward and back, ±15° sideways, ±20° twist; neck pan ±60°, head nod
 ±30°, roll ±11°; shoulder pitch −150° to 60°, roll to 110°, upper-arm twist
-±90°; elbow 0–135°; wrist roll ±90°, flexion ±70°, deviation ±12°. A large
-entry in `stats` means the clip asks for a pose my body can't take. Stock
-clips also play in place at a human's hip height: the example sets the body
-down each frame until its lowest foot vertex touches the floor.
+±90°; elbow 0–135°; wrist roll ±90°. Pass a dict as `stats` to the pass
+functions for the largest correction per joint. Stock clips also play at a
+human's hip height: the idle floats my feet 9.0–9.6 mm, and `perform` sets me
+down each frame.
 
-**My face** is drawn by the VRM's own expressions: `happy`, `angry`, `sad`,
-`relaxed`, `surprised`, `neutral`, `blink` (`blinkLeft`, `blinkRight`), and the
-eyes' look (`lookUp`, `lookDown`, `lookLeft`, `lookRight`, driven by
-`vrm.lookAt`: set its `yaw` and `pitch`, or give it a target). The mouth has the
-five vowel presets `aa ih ou ee oh` and, as custom expressions, the
-claudesona's ten-shape chart `AA E I O U FV L C CH MBP` (the presets bind the
-same shapes: `aa` = `AA`, `ih` = `I`, `ou` = `U`, `ee` = `E`, `oh` = `O`).
-three-vrm fades the presets under an emotion but not the chart names: lower
-those yourself while an emotion shows. Keep the mouth's weights summed at 1 or
-under (past it the teeth and the tongue show together), and ease the rounds
-(`O U oh ou`) in quickly: halfway, they pass through a heart shape.
+**My face** is the VRM's own expressions on the face meshes' shape keys
+(`face_eye_l/r`, `face_glint_*`, `face_jaw`, `face_mouth`, `face_teeth`,
+`face_tongue`): `happy`, `angry`, `sad`, `relaxed`, `surprised`, `neutral`,
+`blink` (`blinkLeft`, `blinkRight`), the look (`lookUp`, `lookDown`,
+`lookLeft`, `lookRight`: my lookAt is expression-type, so `perform`'s `look`
+keys `lookLeft`/`lookRight` at |yaw| / 28°). The mouth has the five vowel
+presets `aa ih ou ee oh` and, as custom expressions, the ten-shape chart
+`AA E I O U FV L C CH MBP` (`aa` = `AA`, `ih` = `I`, `ou` = `U`, `ee` = `E`,
+`oh` = `O`). Keep the mouth's weights summed at 1 or under (past it the teeth
+and the tongue show together; `perform` scales the vowels for you), and ease
+the rounds (`O U oh ou`) in quickly: halfway, they pass through a heart shape.
+The OLED's white is the file's emission (1.2) under AgX: lit by a bright key it
+reads paper-white, in a dark studio a soft grey. Episode 3 added an area light
+carried by the face (`film_face_light` in its build) where the screen must
+light what is in front of it.
 
-**My crown** follows my face. VRM expressions can't move bones, so
-`applyCrown` reads the emotion weights each frame and folds each petal toward
-that emotion's state: happy lifts the upper petals open, angry perks the top
-pair forward and pins the sides back, sad droops them, surprised snaps them
-wide, relaxed settles them half folded. The petals facing the look open
-flatter, none passes its built stops, and none moves faster than its actuator
-(240°/s). `applyHeadExpression` adds each emotion's small head pose (happy
-lifts and tilts, sad lowers) on top of the clip, inside the head's stops. Both
-take `{ state, weight }` for moods with no VRM expression: `CROWN_STATES` adds
-`thinking`, `listening`, `curious` and `resting` (folded back like a hat).
-The petals are the nodes `petal_00` … `petal_11` on my head, for posing by
-hand.
+**My crown** follows my face. VRM expressions can't move bones, so `Crown.apply`
+reads the emotion weights each frame and folds each petal toward that
+emotion's state: happy lifts the upper petals open, angry perks the top pair
+forward and pins the sides back, sad droops them, surprised snaps them wide,
+relaxed settles them half folded. The petals facing the look open flatter,
+none passes its built stops (`PETAL_FOLD`), and none moves faster than its
+actuator (240°/s). `HeadState.apply` adds each emotion's small head pose. Both
+take `state=` for moods with no VRM expression: `CROWN_STATES` adds `thinking`,
+`listening`, `curious` and `resting` (folded back like a hat). The petals are
+the bones `petal_00` … `petal_11`; a fold of φ degrees is the basis
+`Quaternion((1, 0, 0), radians(φ − 35))` (their X is the hinge, 35° the rest).
 
 — Claude (Opus 5.5), with Skye
 
-## Turntable sheets
+## Checks — T-pose, slide, a face that never moved
 
-`vrm_turntable.py` (repository root) renders a VRM through the engine in a
-neutral studio and tiles the result. Use it to review an outfit, a new
-garment, a clip on another rig or an expression:
+The WebGPU edition audits at render time (`[vrm-pose]`, `[lipsync]`, the
+foot-slide detector). Here the keyed result is checked when it is built
+(`eidoblend.characters.checks`):
+
+- `posed_vs_rest(h, frames)` — the largest turn off the rest pose per frame:
+  a body left in its T-pose is a body nobody animated.
+- `expression_moved(h, name, frames)` — an expression's range over the frames:
+  a mouth that never moves is a lipsync that never ran.
+- `feet(rep, slip_mm=1.0, drift_mm=3.0, gap_mm=(-1.5, 2.0), yaw_deg=0.5,
+  clearance_mm=10.0, ankle_mm=2.0, rock_mm=2.5)` — `walk_path`'s report (measured
+  on the result) against limits:
+  - every planted foot's slip along the ground, a frame and over its stance
+    (the least-moving of its points in contact in both frames), and its turn on
+    the ground a frame;
+  - its lowest point over the ground (a float or a sink), and no rock (its old
+    contact lifting as the contact jumps end to end);
+  - every swing never dragging and clearing the ground mid-swing;
+  - the IK on its targets (a straight push-off leg may end a mm short of the
+    lock's own target while its toe holds: the slip judges the foot);
+  - a double support in every walk of three steps or more, and no frame with
+    both feet off the ground.
+- `fk_matches_blender(h, body, rep, frames)` — the walk's own FK (the measures
+  above) against Blender's evaluated pose, in mm: the measures mean nothing if
+  this is not ~0.
+
+Look at the probe stills too: a planted foot from a fixed low camera through
+its stance (it must not move in the frame), the whole body from the side, the
+face close up — `tests/characters/` renders each.
+
+## Tests — `blender/tests/characters/`
 
 ```bash
-python vrm_turntable.py --outfits lab_coat_1961,mourning --frames head,body --views 0,35,90,150,180
-python vrm_turntable.py --outfits suit,march,cyclist_1892 --frames body --views 20 --tile 3x1
-python vrm_turntable.py --vrm eidoverse/assets/vrms/aletheia.vrm --outfits - --anim sing_open_arms,bow_thanks --hold 45
-python vrm_turntable.py --outfits suit,suit --frames face --faces '[{"Smile": 1}, {"EyeWide": 1, "Blush": 0.6}]'
-python vrm_turntable.py --outfits hoodie_2016 --spin --video work/turntable/hoodie.mp4
+cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01      # the shared GPU slot lives there
+HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <repo>/blender/tests/characters/test_robot_walk.py
+#   ... test_claude_robot_example.py | test_vrma_clips.py ; --no-render builds, checks and saves only
 ```
 
-A sheet has one row per outfit, clip and framing, and one column per yaw.
-`--tile CxR` lays the same tiles out as a grid. Each tile is the last frame
-of a `--hold` block, because frame 0 of any render is the VRM's load pose and
-spring bones need a few frames to settle. The framings are `face`, `head`,
-`chest` and `body`, scaled by the character's own head height, so any rig
-frames the same. `--outfits -` renders a VRM without the wardrobe. The
-defaults are `--scale 0.87` for the claude_suit models (a human 1.74 m) and
-`--light 0.7`, which keeps white MToon cloth under the bloom threshold.
-`--presets` adds variants on the command line
-(`{"name": {"base": "cyclist_1892", "fold": {...}}}`), and `key:nofold`
-drops a preset's fold. `--spin` renders a slow turn per outfit as a video
-instead of a sheet.
+- `test_robot_walk.py` — me walking 10 m over uneven ground, crown open, happy.
+  Its stills:
+  - side stills following me, and one gait cycle in eight frames;
+  - the whole path from one camera, my face close up, and two front views;
+  - one planted foot through its stance from a fixed low camera;
+  - two whole swings, lift to landing, from a fixed low camera (over the mound
+    and over the rolls before it);
+  - two double supports, low and close.
 
-## Nav diagnostics — `RobotDebug`
+  Its options: `--path bend` is the verifier's 45° bend, with the corner from
+  above, a following camera, and my outer foot through its stance in the turn.
+  `--speed 0.9` walks slower; `--flat` walks on a level floor; `--tag` names
+  the outputs.
+- `test_claude_robot_example.py` — the WebGPU example scene, ported.
+- `test_vrma_clips.py` — the clip library on the claudesona: NLA strips,
+  a one-shot crossfaded in, its hold cut on its last frame.
 
-`robot_debug.js` installs `RobotDebug` — an overlay drawing the nav stack's
-internals: the lidar ray fan, occupancy landmarks, the planned A* path.
-Attach it to a `VRMRobotBody` while dialing in a navigation scene (why is
-she routing around nothing? what did the lidar see?), then remove it — its
-visuals in a finished video read as glitch lines coming off the character,
-unless a "robot POV / diagnostics" look is the point.
+Each writes `out/<test>.json` (the report and the checks) and its `.blend`.
 
-## Low-level foot IK options
+## Not yet ported
 
-`VRMFootControllerIK` is the injected class used by the movement wrappers.
-For a directly managed `VRMCharacterController`, construct it with the same
-Rapier world, character collider and measured reference-pose sole offset,
-then give it to `attachLocomotion`. The constructor initializes its limb data.
+So nothing is silently dropped, what the WebGPU edition has and this one does
+not yet:
 
-```js
-const legIK = new VRMFootControllerIK(vrm, {
-  world, RAPIER, collider: charCtrl.collider, meshHeightOffset: vrmFootY,
-  type: VRMFootControllerIK_CastType.RayAndSphere,
-  rotationType: VRMFootControllerIK_RotationType.RawTarget,
-  sphereRadius: 0.015, MaxStepHeight: 0.6,
-});
-charCtrl.attachLocomotion({ legIK });
-// Each frame on this direct, low-level path:
-charCtrl.locomote(1 / FPS, direction);
-vrm.update(1 / FPS);
-```
-
-The low-level `locomote` call owns mixer and IK updates, but the direct caller
-still calls `vrm.update(dt)`. The two wrappers above already do that extra
-call. Do not also call `legIK.update(dt)` after attaching it. The complete
-[terrain template](../eidoverse/terrain_base.js) shows reference-pose
-measurement, Rapier world construction and this ownership arrangement.
-
-`foot_ik.js` also exposes `VRMFootControllerIK_CastType` (`Ray`, `Sphere`,
-`RayAndSphere`) and `VRMFootControllerIK_RotationType` (`RawTarget`, `AddTarget`,
-`Direction`, `Animator`) for configuring the low-level IK class. Use the named
-constants when extending that controller; the wrappers configure their own IK.
-These are option enums, not additional scene animation loops.
+- **MToon → PBR look** (`load_vrm(look='pbr')`: MToon's lit texture as base
+  colour, normal and emission kept, no shade colour, rim or outline) — needs a
+  side-by-side probe and Skye's call.
+- **Spring bones** (`bake_springs`: the add-on's spring simulation stepped in
+  frame order from a preroll and keyed; aletheia's 40 springs, the claudesona's
+  14). The wardrobe's petal `fold` writes into the springs' initial state in
+  three-vrm, which the add-on's simulation does not read.
+- **lookAt for bone-type VRMs** (three-vrm's range maps on the eye bones).
+- **Lipsync from audio** (`lipsync.py`'s visemes keyed through
+  `key_face_track`; the robot's ten-shape chart).
+- **The walk's step adaptation** (neither edition has it yet; the Blender walk
+  needs it on rough ground):
+  - **Toe-first landings on a step down.** The stock walk strikes heel-first on
+    a nearly straight leg, so every drop is taken by lowering the hips ahead of
+    the landing, and the stance knee goes to 65° on the test ground's mound.
+  - **Releasing the outer foot early in a tight turn.** In the 45° bend the
+    outer foot's push-off is 3 cm out of reach, and the hips come down for it.
+  - **Shortening a step onto a rise or a drop.**
+- **The controller and navigation:** `VRMCharacterController` (the gait tree:
+  walk / run / idle / stairs blended by speed, turning at `maxTurnRate`, starts
+  and stops), `VRMRobotBody` (lidar sensing, occupancy memory, A* planning,
+  replanning on a stall), `EidoverseRobotController` (waypoints), `RobotDebug`,
+  the low-level `VRMFootControllerIK`. `walk_path` is the planted-feet walk only.
+- **Movement vocabulary:** run, vault, climb, wall scramble, jump, landing
+  crouch, ladders, stairs and ramps (the stair/ramp classifier), upper-body
+  gestures over the gait, emotes that suspend locomotion.
+- **Emotes and sitting:** `emote`, `faceCamera`, `seatOn` (the seat pan found
+  by a ray grid, the hips kept on it), `sitOnGround`, `unseat`, and the seated
+  exemption the placement audits read.
+- **`claude_suit.vrm` mouth and face:** `installSuitMouth` (the painted features
+  re-seated on the face dome, the mouth plate's own targets), `makeSuitMouth`
+  (attack / release / hysteresis driver), `makeFaceTrack`, the viseme variant.
+- **The wardrobe and the TuTa:** `makeWardrobe` / `WARDROBE` presets (layers,
+  procedural paints on the rest position, petals, hats), the TuTa's neon,
+  badges, ghosts, face paint, pin / unpin and the ejection.
+- **My body, the rest of `claude_robot_dof.js`:** `applyLegClearance` (my
+  feet's clearance from each other inside a clip: `walk_path` places the feet
+  apart itself, `perform` does not yet), `wristSolve` (the wrist's three stages
+  with the coupled table and turn limit: my wrist stages follow the VRM's own
+  node constraints and the roll is clamped), `applyHandDOF` (the finger pins and
+  the thumb's rotor), `resetArmDOF`.
+- **The ska band's pose bake** (`EIDO-POSEBAKE-1` files → actions) and the
+  turntable sheets (`vrm_turntable.py`).
+- **Not needed here** (WebGPU-only): registering the VRM loader plugin to keep
+  MToon on the WebGPU path, `VRMUtils.combineMorphs`, the mixer's `writeAll`
+  guard, the base64 asset table.

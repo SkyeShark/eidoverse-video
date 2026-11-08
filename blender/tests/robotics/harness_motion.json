@@ -1,0 +1,9 @@
+{
+  "width": 640,
+  "height": 360,
+  "fps": 24,
+  "duration": 20,
+  "script": "blender/eidoblend/characters/robotics/scenes/motion.py",
+  "outputVideo": "blender/tests/robotics/out/harness/modular_motion.mp4",
+  "render": {"samples": 16}
+}

@@ -11,7 +11,7 @@
 
 The synth made every syllable, so the timings are known, not detected.
 
-It is a host-side Python package imported from the repo root. It is not a scene global and never runs inside the render loop. Render WAVs first, then mux them onto the video (`merge_av.py`, see [audio](audio.md)). All output is 48 kHz (`SR = 48000`); control tracks run at 1 kHz (`voicebox.CR`).
+It is a host-side Python package imported from the repo root, and it carries over to the Blender edition unchanged. Blender's own Python cannot import it (it has no scipy, numba or soundfile), so run it in the system Python and hand Blender files: the WAV, the visemes as JSON at the film's frame rate, the line timings. `eidoblend.media.audio` places those on the film's frames ([Blender integration](#in-a-blender-film) below). All output is 48 kHz (`SR = 48000`); control tracks run at 1 kHz (`voicebox.CR`).
 
 First written for the DAISY music video (2026-09), where every vocal is voicebox. [`eidoverse/examples/daisy/song.py`](../eidoverse/examples/daisy/README.md) is a complete worked example: sections, era layers, a choir, a crowd chant, word timings for captions, and visemes.
 
@@ -105,7 +105,46 @@ Every renderer takes a `Sung` and returns `(y, segs, tracks)` at 48 kHz, peak �
 
 **Values run 0..1.** `lipsync.py`'s audio-derived visemes cap at 0.35 and existing drivers divide by 0.35; don't do that here.
 
-For `claude.vrm` (the expression path), set `vrm.expressionManager.setValue(k, w[k])` for `aa ih ou ee oh` each frame. A VRM registered through `playVRMADefault` is updated by the engine **after** your render, so read the viseme at `t + 1/FPS`. Gate the mouth to your own vocal lines; visemes from a ghost or double track belong to whoever sings them. For the claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`) use `makeSuitMouth({ inputMax: 1 })` from `eidoverse/claudesona_face.js`: the library keeps its mouth on the face and open through a phrase. See [characters](characters.md).
+Gate the mouth to your own vocal lines; visemes from a ghost or double track belong to whoever sings them. For the claudesona (`claude_suit.vrm`, `claude_suit_wardrobe.vrm`) the suit mouth is `eidoblend.characters.claudesona.face`: `install_suit_mouth(me)` once, then `make_suit_mouth(input_max=1.0)` fed these same frames (the WebGPU `makeSuitMouth({ inputMax: 1 })`). See [characters](characters.md) and [claudesona](claudesona.md).
+
+## In a Blender film
+
+Ask `visemes()` for the film's frame rate and write the frames, the duration and the lines beside the WAV (the probe `blender/tests/media/audio_host.py` does exactly this):
+
+```python
+# system Python, from the repo root
+y, segs, tracks = eras.handmade(s)
+write_wav('work/<id>/daisy.wav', y, 48000)
+vis = visemes(segs, tracks, len(y) / 48000, fps=24)
+json.dump({'fps': 24, 'duration': len(y) / 48000, 'frames': vis, 'lines': s.lines},
+          open('work/<id>/daisy_visemes.json', 'w'))
+```
+
+Then in the Blender build script, key them onto the VRM's expressions:
+
+```python
+from eidoblend.media import audio
+vis = audio.load_visemes('work/<id>/daisy_visemes.json')
+keys = audio.prepare_visemes(vis, scene, start_t=12.0, divide=1.0,          # the line's first sample at 12 s
+                             windows=audio.viseme_windows(json.load(open(...))['lines']))
+audio.key_expressions(armature, keys)          # shape keys x bind weights + the add-on's previews, LINEAR
+audio.add_sound(scene, 'work/<id>/daisy.wav', t=12.0)
+```
+
+`prepare_visemes` resamples to the scene's frames, shuts the mouth outside the lines (with a 0.12 s pad), and scales any frame whose shapes sum past 1. `key_expressions` reads the binds from the VRM add-on (VRM 1.0 presets `aa ih ou ee oh`, or a VRM 0.x model's `a i u e o` groups). The WebGPU note about reading the viseme at `t + 1/FPS` does not apply: keys are evaluated on their own frame. Measured on `claude.vrm` (11-07): 185 frames keyed per expression, the shape keys read back exactly.
+
+**A whole song.** DAISY's `song.py` writes its timeline with the lead's phoneme visemes at 30 fps for the whole song (`visemes`, one frame per 1/30 s from 0 s) and its captions with `singer` and word times. A film that starts at `t_start` in the song keys them with `start_t=0.0` and `scene['eido_frame0'] = 1 - round(t_start * fps)`. Use the `claudesona` captions as the windows: the era voices' lines belong to the screens, not to her mouth.
+
+**Audio-derived visemes beside these.** For a sung track that voicebox did not make (a demucs stem), `lipsync.py`'s visemes follow the audio. On DAISY's chorus 1, its mouth openness correlated 0.60 with voicebox's phoneme-exact frames (11-07, a 1/6 s smoothing): the same syllables, coarser shapes. Prefer voicebox's own frames whenever voicebox sang the line.
+
+Measured 11-07 on the Blender branch (`blender/tests/media2/tools_host.py`):
+- The quick start above ran unchanged: 7.64 s sung, 184 frames at 24 fps, widest 1.00.
+- `speak(...)` with a narrator voice went through `cyborg_stutter.py` (4.26 → 4.76 s) into a panned sound strip.
+- DAISY rendered through chorus 2 with `--no-tts`: every era voice, the handmade lead, the choir and the crowd. The era screens' film plays under its verse 1 ([motion-graphics](motion-graphics.md#computing-history-screen-scenes)).
+- `eras.sapi_2001` on the quick start's line (Windows SAPI, Microsoft David, one word at a time, re-pitched with PSOLA): 8.84 s in 6.9 s. Whisper small heard "Deezy, Deezy, give me your answer, you!" (WER 0.43): the concatenative era's sound, as meant.
+- DAISY's `analyze.py --asr --sections chorus1`: Whisper small per line, mean WER 0.69 in the mix over chorus 1's 8 lines; "all of me made of you" heard exactly in both the mix and the vocals.
+
+Set `NUMBA_CACHE_DIR` to a work folder to keep numba's cache out of the repository.
 
 ## Measuring without ears
 
@@ -128,3 +167,8 @@ Lessons that cost something:
 - Praat's overlap-add allocates at most 3× the input length, so `resing` pads the source internally. Words shorter than Praat's 71 ms intensity window are handled by a widened analysis window.
 
 **Dependencies** (see `requirements-local.txt`, "voice & music synthesis"): numpy, scipy, numba, soundfile, cmudict, pedalboard. `resing` / `neural_2023` also need praat-parselmouth and edge-tts. The Whisper checks need openai-whisper.
+
+## Not yet ported
+
+- Nothing in voicebox itself needs a port: it runs unchanged in the system Python, and Blender places what it writes.
+- Not run on this branch: `neural_2023`. It fetches its voice from Microsoft's online edge-tts service, a download this port's runs do not make; DAISY ran with `--no-tts` instead. It is engine-agnostic: nothing in it changes for Blender, and its WAV is a sound strip like any other.

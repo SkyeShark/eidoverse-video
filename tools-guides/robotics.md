@@ -1,34 +1,82 @@
-# Modular robotics and G430 fabrication
+# Modular robotics and G430 fabrication (Blender edition)
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Characters](characters.md) · [Blender](blender.md)
 
 Use the baked modular kit, reusable interfaces and shared maps to assemble
-industrial, mobile and humanoid robots. VRM character navigation (`robot_body`,
-sensors, planner and controller) is a separate API.
+industrial, mobile and humanoid robots. This is the Blender 5.2 EEVEE edition:
+the package is `blender/eidoblend/characters/robotics/`, and its names follow
+the WebGPU API in snake_case (`makeRobot` → `make_robot`, `setJoints` →
+`set_joints`, `childPort` → `child_port`). VRM character navigation
+(`robot_body`, sensors, planner and controller) is a separate API
+([characters.md](characters.md)); the FDM and CNC processes are
+`eidoblend.fabrication`'s (below).
+
+**The one rule that differs from the WebGPU edition.** There, `play()` registers
+the engine clock and the robot moves while the scene renders. Here a scene is a
+build script, then a saved `.blend`, then a render: **`play()` samples the clip
+at every frame of the range and keys it** (LINEAR, one action with a slot per
+moving object). Nothing runs at render time, so any frame renders alone and the
+file plays when you open it. `sample(clip, seconds)` is unchanged: deterministic
+and seekable.
+
+**Axes.** The kit was authored in Blender, +Z up, and exported to glTF; Blender's
+importer brings every node back in its authoring frame. Every number the catalog
+and the metadata give in "source +Z-up coordinates" (joint axes, port frames,
+nominal matrices, gait rest matrices, track paths) is used **as it is** here: the
+WebGPU edition converts each to three's +Y up, and this edition must not convert
+them again. A three offset `(x, y, z)` in the WebGPU sources is Blender
+`(x, −z, y)`. Metres and radians, as there.
+
+```python
+import sys; sys.path.insert(0, '<repo>/blender')
+import bpy
+from eidoblend.characters.robotics import make_robot, studio, frame_camera
+from eidoblend.characters.robotics.studio import make_camera
+
+sc = bpy.context.scene
+sc.frame_start, sc.frame_end = 1, 240
+studio(sc)                                              # the kit's own studio light (studio.js)
+robot = make_robot('payloads/arm_hand', position=(0, 0, 0), color='#d9e0df', accent='#398b91')
+robot.sample('joints', 2)                               # explicit, deterministic seconds
+robot.grasp(1)                                          # all fingers + curved, opposed thumb
+robot.play('joints')                                    # keyed over frames 1..240
+cam = make_camera(35)                                   # three's vertical field of view
+frame_camera(cam, [robot.group])
+sc.camera = cam
+robot.stop()                                            # removes those keys again
+```
 
 ## Load a module or assembled robot
 
-```js
-const robot = await makeRobot('payloads/arm_hand', {
-  scene: _s, position: [0, 0, 0], color: '#d9e0df', accent: '#398b91'
-});
-robot.sample('joints', 2);             // explicit, deterministic seconds
-robot.grasp(1);                       // all fingers + curved, opposed thumb
-robot.play('joints');                 // optional engine-clock automatic update
-robot.stop();
-```
+`make_robot(id, **options)` (also `load_robot`; `RoboticsKit.load`) imports the
+model's GLB through Blender's own glTF importer, maps every object to its glTF
+node, puts the robot under one empty, `robot.group` (`robot|<id>`: place the
+robot there), in a collection of the same name, reads every module (an object
+with the custom property `module_id`) and its joint spec (the node's extras over
+the family metadata's root properties), installs the ports and the motion
+controls, and rebuilds every kit material's base colour with the recolour formula.
 
-Creation is **asynchronous**. Add `.group` to the scene yourself if `scene` was
-omitted. Metres, radians and **Three.js +Y up** are the public convention.
-`setJoints` takes rotation radians and prismatic travel metres; root metadata
-retains source-asset +Z axes and is converted by the runtime. Do not convert twice.
+| Option | Meaning |
+| --- | --- |
+| `position` (or `location`) | three numbers, Blender axes |
+| `rotation` | Euler XYZ, radians, Blender axes |
+| `scale` | positive, uniform |
+| `color` / `primary`, `accent`, `filament` | the palette (below) |
+| `textures=False` | geometry-only inspection: every map removed, base colour three's 0.863 stand-in |
+| `subassembly` | `{'root': node name, 'keepModule': kit_module}`: one root of a shared GLB |
+| `model` | `make_bot`'s model name |
+| `scene` | the scene whose collection the robot joins (default: the context's) |
+| `collection`, `name` | Blender's own: an existing collection, the empty's name |
 
-Inspect `await RoboticsKit.catalog()` for the complete catalog. It contains
-85 source GLBs and four reusable humanoid subassemblies extracted from an
-existing GLB; those extra entries do not duplicate the asset or texture files.
-The GLBs contain many component parts and sample assemblies. File and catalog
-entry totals describe packaging, not the number of unique component designs.
-Use `.parts()` to enumerate a model's pieces and `loadPart` to extract one.
+Any other option raises (`Unknown modular loader option ...: Geometry/slot
+presets were retired`), as do a bad position, rotation or scale and an unknown
+id (the delta, Stewart, turret and Kossel primitives stay retired). A refused
+load leaves nothing in the file.
+
+`catalog()` returns `eidoverse/assets/robotics/catalog.json`: 89 entries over 85
+source GLBs (the four humanoid subassemblies reuse the humanoid's GLB) and 67
+shared maps. File and entry totals describe packaging, not the number of unique
+component designs; `robot.parts()` enumerates a model's pieces.
 
 | Load name | Content |
 | --- | --- |
@@ -36,10 +84,10 @@ Use `.parts()` to enumerate a model's pieces and `loadPart` to extract one.
 | `scara` / `s500` | S500 SCARA arm |
 | `gripper`, `linear`, `rotary` | Parallel gripper, guided stage, hollow rotary drive |
 | `fdm`, `cnc`, `gantry` | G430 with extruder, with spindle, or without a process head |
-| `filament_spool` / `spool` | Freestanding 200 mm reel and dispenser with live filament |
+| `filament_spool` / `spool` | Freestanding 200 mm reel and dispenser |
 | `spool_mount` | Rail-mounted carrier; `fdm` combines it with the shared reel, axle and fittings |
 | `fdm_plate`, `cnc_plate` | Removable PEI sheet and T-slot table; included in their machines |
-| `cnc_relief` | T-slot CNC with ball-nose tool and coordinated rough/finish relief sample |
+| `cnc_relief` | T-slot CNC with the ball-nose tool |
 | `cnc_rotary` / `rotary_fixture` | XYZ + A stock-rotating CNC, or its reusable drive/chuck/tailstock fixture |
 | `cnc_clamp`, `tube_support`, `push_fitting`, `ball_tool` | Reusable workholding, feed hardware and the ground two-flute ball cutter |
 | `process/extruder`, `process/spindle`, `process/vacuum` | Detachable process heads |
@@ -54,33 +102,38 @@ Use `.parts()` to enumerate a model's pieces and `loadPart` to extract one.
 | `rover`, `platforms/survey`, `humanoid`, `quadruped`, `mantis` | Complete sample platforms |
 | `stock/<component ID>` | Reusable original flange, bearing, mount and connector geometry |
 
-`makeBot({model:'humanoid', ...options})` is an asynchronous convenience loader.
-Choose a catalog model and its declared joints/ports. Use Eidoverse's audio
-and display tools for speech, screens and diagnostic readouts.
+`make_bot(model='humanoid', **options)` is the convenience loader
+(`makeBot`). `RoboticsKit` is the facade (`version`, `ready()`, `catalog()`,
+`load()`, `load_part()`, `connect()`, `create_ptfe_tube()`, `service_loop()`).
+`asset_root()` (`ASSET_ROOT`) is index.js's `assetRoot`, `eidoverse/assets/robotics/`;
+`cache_stats()` counts the GLBs parsed and the maps shared this session. Use
+Eidoverse's audio and display tools for speech, screens and diagnostic readouts.
+
+The importer evaluates a GLB's own animations while it builds; the loader puts
+every node back on its transform from the file and keeps those animations as
+**muted** NLA tracks (the source clips; the `walk` sample evaluates them itself).
 
 ## Connections and reuse
 
-```js
-const body = await makeRobot('mobility/body', {scene:_s});
-const camera = await makeRobot('camera');
-body.attach(camera, {
-  port:'body_base/sensor_0', childPort:'camera_base/input', twist:0
-});
-// Equivalent: RoboticsKit.connect(body, camera, sameOptions)
-console.log(Object.keys(body.ports), Object.keys(camera.ports));
-camera.setJoints({camera_pan:0.6, camera_tilt:0.15});
+```python
+from eidoblend.characters.robotics import make_robot, connect
+
+body = make_robot('mobility/body')
+camera = make_robot('camera')
+body.attach(camera, port='body_base/sensor_0', child_port='camera_base/input', twist=0.0)
+# the same: connect(body, camera, port='body_base/sensor_0', child_port='camera_base/input')
+print(list(body.ports), list(camera.ports))
+camera.set_joints({'camera_pan': 0.6, 'camera_tilt': 0.15})
 ```
 
 An industrial arm and claw use the same connection API:
 
-```js
-const arm = await makeRobot('arm', {scene:_s});
-const claw = await makeRobot('gripper');
-arm.attach(claw, {
-  port:'a650_j6/output', childPort:'parallel_gripper/input'
-});
-arm.joints([0, 0.5, 0.4, 0, -0.9, 0]);
-claw.jawGap(0.03);
+```python
+arm = make_robot('arm')
+claw = make_robot('gripper')
+arm.attach(claw, port='a650_j6/output', child_port='parallel_gripper/input')
+arm.joints([0, 0.5, 0.4, 0, -0.9, 0])
+claw.jaw_gap(0.03)
 ```
 
 For the SCARA, load `scara` and use `s500_tool/output` with the same gripper
@@ -88,483 +141,374 @@ input. The gripper input is on its robot-side coupling face. Use the declared
 ports directly; they contain the mounting position and orientation.
 
 Mounts align their authored mating frames, oppose their normals and preserve
-the source physical scale. `twist` is an intentional rotation in radians around
-the attachment normal, such as turning the jaws sideways. It cannot correct an
-incorrect mounting position or tilt. Mismatched interfaces, invalid frames and
-graph cycles throw; choose the declared adapter for different interfaces.
-SM40, TC70, MC110 and other interfaces are distinct. A socket does not establish
-clearance for every possible payload or motion: inspect the completed assembly.
+the source physical scale: the child's empty is parented to the port's owner at
+`port · Rz(twist) · Rx(π) · child_frame⁻¹`. `twist` is an intentional rotation
+in radians around the attachment normal, such as turning the jaws sideways; it
+cannot correct an incorrect mounting position or tilt. Mismatched interfaces,
+invalid frames (a non-finite twist, a singular mount matrix) and graph cycles
+raise before anything moves; choose the declared adapter for different
+interfaces. SM40, TC70, MC110 and other interfaces are distinct. A socket does
+not establish clearance for every possible payload or motion: inspect the
+completed assembly. `robot.dispose()` removes a robot and every robot attached
+to it.
 
-`robot.port(name).matrix` is local to that port's `owner`. Its X axis is the
-mount tangent, Z is the outward mating normal, and Y completes the basis.
-After updating world matrices, `owner.matrixWorld * matrix` gives the world
-frame. A component's outward normal stays fixed to that component; do not
-reverse it depending on which robot receives the attachment.
+`robot.port(name)['matrix']` is local to that port's `owner` (an object): X is
+the mount tangent, Z the outward mating normal, Y completes the basis;
+`owner.matrix_world @ matrix` is the world frame. A component's outward normal
+stays fixed to that component; do not reverse it depending on which robot
+receives the attachment. Ports come from a module's extras (`ports_json`,
+`output_frame`, `attachment_position` / `input_frame`), from
+`catalog.json['port_frames']` keyed by `module_id` (also applied to qualified
+copies such as `rover_camera / camera_base`), from the family metadata's
+`mobile.ports`, and from the mating frames measured on the approved complete
+assembly (a humanoid's `pelvis_left_roll/left_leg`). A frame needs a finite
+position and a nonzero outward normal, and a tangent when the mounting has a
+preferred rotational alignment (`frame_matrix(point, normal, tangent)`); a
+missing, zero or parallel axis refuses the load. Verify new frames against the
+physical mating faces, including articulated poses
+(`blender/tests/robotics/test_attachment_frames.py` measures them from the
+triangles).
 
-When adding catalog content, shared component frames live in
-`catalog.json.port_frames`, keyed by `module_id` (also applied to qualified
-copies such as `rover_camera / camera_base`). Their `position_m`, `normal` and
-optional `tangent` use the catalog's source +Z-up coordinates; the loader
-converts them to the public convention. Per-instance input/output metadata can
-override a shared frame. A position and nonzero outward normal are required;
-provide a tangent when the mounting has a preferred rotational alignment.
-Verify those frames against the physical mating faces, including articulated
-poses. Matching interface names alone cannot verify an authored frame.
-
-`robot.roots`, `robot.specs`, `robot.ports`, `robot.parts()` and `robot.stats()`
-expose the actual content. Repeated humanoid joints use qualified names, so a
-left-hand or leg command cannot accidentally target the right-side copy.
+`robot.roots`, `robot.specs`, `robot.ports`, `robot.parts()` and
+`robot.stats()` expose the actual content. Repeated humanoid joints use
+qualified names (`left_hand / hand_base`), so a left-hand or leg command cannot
+target the right-side copy. `stats()` reports `triangles`, `meshes` (Blender
+objects), `primitives` (the glTF primitives behind them: three's mesh count),
+`uniqueGeometry`, `materials`, `textures` and `parts`.
 
 ### Individual components inside a GLB
 
-GLBs preserve named part meshes and articulated node hierarchies. Some exports
-batch several parts into one mesh; the included `provenance/` sidecars identify
-which triangles belong to each part. Use the loader below for either layout:
+GLBs preserve named part meshes and articulated node hierarchies; some exports
+batch several parts into one mesh, and the `provenance/` sidecars say which
+triangles belong to each part. `robot.part_faces(obj)` gives that table for a
+mesh (the part of every face; also stored on the object as `part_faces`).
 
-```js
-const catalog = await RoboticsKit.catalog();
-console.log(catalog.models['interaction/face'].parts); // discover exact part IDs
+```python
+from eidoblend.characters.robotics import catalog, load_part
 
-const yoke = await RoboticsKit.loadPart(
-  'interaction/face', 'FACE swept tilt yoke', {scene:_s}
-);
-console.log(yoke.parts(), yoke.stats().triangles);
-yoke.group.position.set(0.3, 0, 0); // offset from the original module placement
+print(catalog()['models']['interaction/face']['parts'])          # exact part IDs
+yoke = load_part('interaction/face', 'FACE swept tilt yoke')
+print(yoke.parts(), yoke.stats()['triangles'])                    # ['FACE swept tilt yoke'] 176
+yoke.group.location.x += 0.3                                      # offset from the original module placement
 ```
 
-`loadPart` isolates only that part's triangles, preserves its baked UVs/materials
-and shares cached texture maps. It retains the donor's hierarchy and origin;
-it does **not** recenter the component. Other donor meshes are hidden. Missing
-part names or incomplete triangle ownership throw an error. Keep `provenance/`
-with `models/` and `textures/` when distributing the kit.
+`load_part` keeps only that part's triangles (a copy of the mesh with its UVs,
+materials and exact shading normals), shares the cached maps, keeps the donor's
+hierarchy and origin (it does **not** recentre the component) and hides every
+other donor mesh. A missing part name or incomplete triangle ownership raises
+and removes the donor. Keep `provenance/` with `models/` and `textures/` when
+distributing the kit. `robot.part(name)` returns the mesh objects holding a
+part (a batched mesh can hold others too). For common bearings, flanges and
+mounts the standalone `stock/<component ID>` entries are also available:
+`make_robot('stock/flange.tc70.6mm')`. An extracted casting or fastener is
+geometry; its donor's joint/port metadata does not make it a mechanical module.
 
-For a loaded module, `robot.parts()` lists its part IDs. `robot.part(name)`
-returns the underlying mesh objects for inspection; a batched mesh can still
-contain other parts, so use `loadPart` to isolate geometry. For common bearings,
-flanges and mounts, standalone `stock/<component ID>` entries are also available:
+### The look
 
-```js
-const flange = await makeRobot('stock/flange.tc70.6mm', {scene:_s});
-```
+Do not re-unwrap, texel-normalize or replace the finished maps of these GLBs.
+The linear recolouring formula is `fixed.rgb + primary · mask.r + accent ·
+mask.g`, built into each kit material's node tree from its `eidoverse_recolor`
+extras; the palette is one node group per robot (`robot_palette|<robot>`,
+initialised from the material's default linear colours).
+`robot.set_colors(primary, accent)` changes body and accent while keeping
+metal, rubber, text, grime and normal maps. The dispenser adds `filament ·
+mask.b`: `filament='#218675'` when loading, or `robot.set_colors(filament=...)`.
+Colours are `'#rrggbb'`, `0xrrggbb` or an sRGB triple. Every map is one shared
+image per file (io.js's cache), clamped at its edges as there.
 
-Use complete catalog modules with the `attach` example above when building an
-articulated robot. An extracted casting or fastener is geometry; its donor's
-joint/port metadata does not make it a complete mechanical module.
+**Mirrored placements.** Never reflect normal-map green or tangent.w to
+compensate for a mirrored object. Blender's Normal Map node carries the
+object's negative-scale sign in its tangent frame, as the WebGPU runtime's
+parity uniform does: `test_normal_parity.py` mirrors the A650 in X and compares
+EEVEE's Normal pass with the mirrored source, with inverted green as the
+control.
 
-Do not re-unwrap, call `layerSurface`/texel normalization on, or replace the
-finished maps of these GLBs. The linear recoloring formula is
-`fixed.rgb + primary * mask.r + accent * mask.g`. `setColors(primary, accent)`
-changes body/accent while preserving metal, rubber, text, grime and normal maps.
-The dispenser adds `filament * mask.b`; use `filament:'#218675'` when loading
-or `robot.filament.setColor(color)` afterwards. It shares five 2048-square maps
-between the standalone dispenser and assembled printer; tube and live strand
-use no image textures.
-Never reflect normal-map green or tangent.w to compensate for a mirrored object.
-The NodeMaterial runtime corrects tangent-frame parity from its world transform.
+**Occlusion.** The importer routes a material's occlusion texture into its
+"glTF Material Output" group, which EEVEE does not render. three's aoMap only
+darkened indirect light; EEVEE's horizon scan and ray-traced GI occlude the
+world light in the crevices themselves, so the baked AO is left out rather than
+multiplied into the direct light.
 
 ## Motion and IK
 
-`robot.clips` lists available sample names. `sample(name, seconds)` is seekable;
-`play(name, {start, speed})` registers the engine clock; `stop()` removes it.
-Do not run the robot's automatic sample and a fabrication job on the same axes.
+`robot.clips` lists the samples this robot has. `sample(name, seconds)` resets
+the robot and poses it (seekable: the same seconds always give the same pose);
+`play(name, speed=1, start=0, frame_start=None, frame_end=None)` keys it over
+the scene's range at `t = max(0, (seconds since frame_start − start) · speed)`;
+`stop()` removes those keys (the pose stays). Objects a clip never moves stay
+unkeyed. Geometry Nodes inputs a sample changes on the robot's objects or on
+parts registered at load are keyed in the same action: the dispenser's
+`filament-feed` turns the reel AND pays the live strand out in the saved file.
+Do not play the robot's sample and a fabrication job on the same axes.
+`robot.key_pose(frame)` keys a pose you set by hand (`key_joints(frame)` the
+joints `set_joints` moved).
 
+- `set_joints({name: value}, clamp=False)`: revolute and continuous joints turn
+  about their axis from the rest (radians), prismatic ones travel along it
+  (metres); the whole transaction is validated first, and a value outside the
+  limits raises unless `clamp`. The rotary fixture's output and chuck share one
+  A-axis angle. `reset()` puts every module back at rest (MANTIS's nominal pose).
 - `grasp(0..1)` preserves the reviewed approach and curved final thumb contact.
-  `graspReference()` creates the cylinder used for that grasp, under each hand.
-- `jawGap(0..0.044)` drives both jaws and the opposed screw. Zero closes them.
-- `spinRotors(angle)` drives every propeller with its proper direction.
-  `fold(0..1)` parks propellers, releases locks, then folds the booms.
-- `trackTravel({rootName: metres, ...})` updates both specified belts and wheels.
-  The `drive` and `drive-circle` samples coordinate chassis travel with both
-  tracks. Track shoes are rigid objects with shared data, not CPU-deformed meshes.
-- `flight` demonstrates takeoff, translation and landing. Payload builds use
-  the same rotating propeller hierarchy. These are authored kinematics, not a
-  claim of flight dynamics, contact physics, actuator capability or load capacity.
+  `grasp_reference()` creates the grasped cylinder under each hand.
+- `jaw_gap(0..0.044)` drives both jaws and the opposed screw. Zero closes them.
+- `spin_rotors(angle)` drives every propeller with its proper direction (and
+  refuses folded booms); `fold(0..1)` parks propellers, releases locks, then
+  folds the booms.
+- `track_travel({root: metres, ...})` updates both belts and wheels. Track shoes
+  are rigid objects split from the batched mesh (their own faces, exact
+  shading), each placed round its stadium path; the `drive` and `drive-circle`
+  samples coordinate chassis travel with both tracks.
+- `flight` demonstrates takeoff, translation and landing. These are authored
+  kinematics, not a claim of flight dynamics, contact physics, actuator
+  capability or load capacity.
 - The complete humanoid and quadruped include `walk`, `run-circle`,
-  `run-figure_eight` and `run-straight`. Walking plays all constituent channels;
-  running uses the reviewed sampled trajectories and local joint matrices.
-- A650: `joints([q1,...,q6])`, `moveTo(localYUpMatrix4, seed)` and `ik`.
-  The solver is bounded damped least squares; an unreachable target throws.
-  `ik.forward/inverse` retain the explicitly documented native +Z-up source-asset axes.
-- S500: `scaraJoints([shoulder,elbow,quill,tool])` and
-  `moveScara([x,y,z], yaw, {tcp,seed})`. The low-level `scara` solver uses native
-  source-asset coordinates; `tcp` in that wrapper is likewise an authoring-axis offset.
-- G430: `axes([x,y,z])` uses machine XYZ travel. `moveTool([x,height,z])` is in
-  the machine's +Y-up bed frame, with height measured above the bed.
-  `toolTip()` returns that same frame; `toolTip(true)` returns a world Vector3.
+  `run-figure_eight` and `run-straight`. Walking plays all the GLB's own
+  channels (looped, linear and slerped as three's mixer does); running writes
+  the reviewed sampled trajectories as local joint matrices (`robot.running`, a
+  `RunningController`: `frame(clip, t)` the interpolated base, yaw, pitch and
+  joints; `apply(clip, t)`; `restore()`; `bounds(clip)` the box the run sweeps;
+  `duration(clip)`; `create_running_controller(nodes, quadruped, data)` builds
+  one over any `{node name: object}` map).
+- `cooling_fan(seconds, rpm=4800)` turns the extruder fan;
+  `rotary_setup(stock_length, stock_width, stock_height, quill)` sets the
+  rotary fixture's tailstock, quill, handwheel and jaws for a blank (80-180 mm
+  long, 18-50 mm wide and high); the `stock-setup` sample sweeps it.
+- A650: `joints([q1, ..., q6])`, `move_to(target, seed)` and `robot.ik`
+  (`SerialArm`). `target` is a 4x4 Matrix in the robot's frame; the solver is
+  bounded damped least squares, and an unreachable target raises.
+- S500: `scara_joints([shoulder, elbow, quill, tool])` and
+  `move_scara((x, y, z), yaw, tcp=(0, 0, 0), seed=None)`; `robot.scara` is the
+  analytic solver (`forward`, `inverse`, `demo`, `LIMITS`, `GRIP_TCP`).
+- G430: `axes((x, y, z))` uses machine XYZ travel (the lead screws turn with
+  it); `move_tool((x, y, height))` is in the gantry base's frame with the height
+  above the bed; `tool_tip()` returns that frame, `tool_tip(world=True)` a world
+  point. `robot.machine` holds `bed_top`, `axis_limits`, `bed_bounds`, `tool`,
+  `cutter`, `rest_tip` and `to_axes`.
+
+The solvers are importable on their own (plain Python): `scara`, `SerialArm`,
+`articulated_demo`, `gantry_demo`, `constrain_gantry_pose`, `grasp_values`,
+`rotary_fixture_setup`, `track_frame`.
+
+### Joint sliders
+
+```python
+from eidoblend.characters.robotics.rig import rig_joints, set_slider, unrig_joints
+rig_joints(arm)                         # one custom property per joint on arm.group: 'joint:a650_j2' ...
+set_slider(arm, 'a650_j2', 0.6)         # or drag it in the N panel; keyable like any property
+unrig_joints(arm)
+```
+
+Every revolute and prismatic joint with limits (and the rotary fixture's "A axis
+/ chuck") gets a slider with its limits as the range, driving its module through
+a simple-expression driver (no Python driver, so it evaluates with auto-run
+off). A robot with sliders is in manual mode: unrig it before `play()`.
+
+## Studio and framing
+
+`studio(scene, grid=True, shadows=False)` is studio.js's presentation: the
+camera sees `#c6cfd1`; the light is three's RoomEnvironment at intensity 0.9
+(its room, six boxes and six emissive panels ray-cast from the origin into an
+equirect, as the PMREM generator sees it, blurred by its 0.04 rad), a hemisphere
+light (sky `#e6f2ff`, ground `#485654`: a world split at the horizon gives
+three's exact irradiance mix), a sun `#fff3e4` at 2.3 from three's (2, 5, 3),
+and the 8 m, 80-division grid. The WebGPU studio's sun casts no shadow
+(`shadows=True` turns it on). The view transform is AgX, the film contract.
+
+`frame_camera(camera, objects, direction=(0.9, −1.5, 0.55), margin=1.25)`
+places the camera on `direction` far enough that the world box of the objects
+(or `(min, max)` boxes) fits, looking at its centre, with three's near and far
+rule. `make_camera(fov)` uses three's vertical field of view. `world_box(objects)`
+is that box (three's `Box3.expandByObject`: hidden meshes count too);
+`visible_only=True` on either leaves out meshes hidden from the render and the
+inspector's overlays, as the inspector's fit does. Objects disabled in the
+viewports keep a stale `matrix_world` in Blender (the depsgraph skips them), so
+the box composes their matrix from the parent chain instead.
+
+```python
+from eidoblend.characters.robotics import load_part, frame_camera, make_camera
+yoke = load_part('face', 'FACE swept tilt yoke')
+cam = make_camera(35)
+frame_camera(cam, [yoke.group], visible_only=True)       # the part, not its hidden donor meshes
+```
+
+## Inspector
+
+The WebGPU inspector (`serve_inspector.py`, a browser page on localhost:8989)
+becomes a scene you open, driven by an `Inspector` (the page's state and its
+`window.roboticsInspector` handle; it is also a dict of what the page shows):
+
+```python
+from eidoblend.characters.robotics.inspector import inspector_scene
+insp = inspector_scene('humanoid', clip='run-circle', wireframe=True)     # the studio, the robot, the clip keyed over 20 s
+insp = inspector_scene('arm', joints=True)                                # manual mode: the joint sliders
+insp = inspector_scene('hand', reference=True, uv='hand_uv.png')          # the grasp reference; the UV split view
+print(insp['status'], insp['ports'])                                       # also on the scene as custom properties
+insp.set_motion('grasp'); insp.set_time(2.5)                               # the motion list and the time slider
+part = insp.pick(0.5, 0.45)                                                # a click on the image: the part under it
+insp.draw_uv('palm_uv.png')                                                # the UV split view of that selection
+insp.set_wireframe(True); insp.set_reference(False); insp.set_colors('#d8dcd9', '#3d7f86')
+bpy.ops.wm.save_as_mainfile(filepath='hand_inspector.blend')
+```
+
+| viewer.js | Inspector |
+| --- | --- |
+| asset list | `load(model)` |
+| motion list, `setMotion` | `clips()`, `set_motion(clip)` (keys the clip over the 20 s) |
+| time slider, `setTime`, Reset, Play | `set_time(t)` (the keyed timeline, sub-frames included), `reset()`, `play()` |
+| Frame, Inspect workpiece | `fit()`, `frame_work()` |
+| Body / Accent / Filament pickers | `set_colors(primary, accent)`, `set_filament_color(c)` |
+| Wireframe, Hand grasp cylinder | `set_wireframe(on)`, `set_reference(on)` |
+| part list, click on the canvas | `pick_part(name)`, `pick(x, y)` (a ray cast; x, y in 0..1 from the top left) |
+| UV split view, map list | `draw_uv(path, batch, channel, material)` |
+| joint sliders | `set_joint(name, value)` (rig.py's drivers) |
+| stock material, rotary blank | `set_stock(material, preset, length, width, height)` |
+| process playback, workpiece source, `setSource` | `set_timing('lapse' / 'physical')`, `set_source(obj or 'handle' / 'bracket' / 'ring')` |
+| process state line | `process_state()` |
+
+It keeps the inspector's camera fit (the sweep of walk, drive-circle, flight and
+the runs, over the visible meshes), the part picker's triangle count and the UV
+split view (a metadata texture binding or a material's map, with the UV
+triangles of the batch, material or part drawn over it). A machine with a tool
+opens on `process`, as there: the job is `eidoblend.fabrication`'s (`print` of
+the inspector's 6 mm lathe ring at 40 mm with 25 % infill, `mill`, `carve` of the
+relief, `rotary_carve`), time lapse 18 s (32 s on the rotary machine), keyed over
+its duration. Physical timing keys the job's own time frame by frame, so it is
+refused past `MAX_KEYED_FRAMES` (25 min at 24 fps): the pocket mill machines for
+20 min and the print for 15, but the relief for 7.8 hours (time lapse, or
+`process_options={'duration': seconds}`, instead). The rotary job writes its
+stock cache next to the saved `.blend`: save first, or pass
+`process_options={'cache_dir': ...}`. A local STL or GLB is imported with
+Blender's own importer and handed to `set_source`.
+
+## Examples
+
+The three robotics examples are ported as builders and as harness scene
+scripts with their own configs:
+
+```python
+from eidoblend.characters.robotics.examples import EXAMPLES
+EXAMPLES['mantis'](bpy.context.scene)          # assembly | mantis | motion: everything built and keyed
+```
+
+```powershell
+python eido_blender.py render blender/eidoblend/characters/robotics/scenes/assembly.json
+python eido_blender.py render blender/eidoblend/characters/robotics/scenes/mantis.json
+python eido_blender.py render blender/eidoblend/characters/robotics/scenes/motion.json
+```
+
+`assembly`: the backbone with the stereo camera and the pan/tilt face on its
+sensor ports, both playing `joints`. `mantis`: MANTIS driving its circle, the
+camera carried with the body. `motion`: the humanoid and quadruped running
+their circles, the hand drone flying, the tracked arm driving. They declare
+`_no_auto_enhance`: their studio light is the presentation. Small harness
+configs for checking them (640 x 360, 16 samples, outputs in the test folder)
+are `blender/tests/robotics/harness_{assembly,mantis,motion}.json`:
+`python eido_blender.py render blender/tests/robotics/harness_mantis.json --at 6`.
+
+## MechParts and RoboticArm
+
+Two modules of the older production engine come with the kit:
+
+```python
+from eidoblend.characters.robotics import mech_parts as mp
+from eidoblend.characters.robotics.legacy_arm import RoboticArm
+
+box = mp.chamfered_box(0.3, 0.2, 0.25, 0.03)                  # crisp-facet box, analytic normals
+cable = mp.make_cable((-1, 0, 0.5), (0, 0, 0.45), radius=0.012, sag=0.12, corrugated=True)
+tread = mp.make_tread_track(run_len=0.5, cap_r=0.12, width=0.1)
+mp.key_tread(tread, 0.25, 1, 120)                             # scrollTread keyed per frame
+light = mp.stack_light(s=1.5)
+mp.key_lights(light, 1, 120, modes={1: 'run', 48: 'warn', 96: 'fault'})
+arm = RoboticArm(mount_point=(2, -1, 0), tool='saw')
+arm.bake([{'time': 0, 'target': (2.3, -1.6, 1.2), 'action': 'cut'}, {'time': 2, 'target': (2.7, -1.2, 0.5)}], 1, 72)
+```
+
+`mech_parts` is MechParts whole: chamfered box, lathe housings (motor, gearbox
+bell, joint hub, with their profiles), arm-link casting, catenary cables and
+corrugated conduit, the e-chain, tank treads, wheels and mecanum wheels, vent
+grilles, hex bolts, pistons, hose coils, the beacon and the stack light, the
+hazard-stripe and brushed-metal surfaces, `mulberry` and the default metal and
+rubber; each geometry is three's, vertex for vertex. Instanced parts are linked
+duplicates under an empty, so each instance is a keyable transform.
+`RoboticArm` is the primitive 2-link arm with its four tools (welder, gripper,
+spray, saw); for new work `make_robot('arm')` and `make_robot('gripper')`
+supersede it. Its base turns toward the target while its shoulder and elbow
+bend in the base's own X-Y plane, so its tip does not reach the target: ported
+as it is (the test follows the original's tool tip to the millimetre).
 
 ## FDM and CNC
 
-```js
-const printer = await makeRobot('fdm', {scene:_s});
-const job = await FabSim.print(printer, meshOrGeometry, {
-  size:0.04, layerHeight:0.0004, beadWidth:0.0008, infill:0.25,
-  base:0.00065, feed:0.025, duration:18, color:'#278b79'
-});
-job.seek(4);                          // seconds of playback; may rewind
-job.play();                          // optional engine-clock update
-job.setColor('#da642c');              // spool, live strand and deposited print
+The processes (FDM printing with slicing and the bead front, pocket milling,
+relief and rotary carving, the PTFE feed tubes and the live filament) are
+`eidoblend.fabrication`'s, which drives this kit's machines through
+`robot.machine`, `axes`, `move_tool` and `tool_tip`. The loader runs every
+function in `eidoblend.characters.robotics.INSTALLERS` at the end of a load (as
+index.js runs `installFilament`), and `RoboticsKit.create_ptfe_tube` /
+`service_loop` forward to `facade.FABRICATION`: importing `eidoblend.fabrication`
+registers its live filament and its tubes there, so import it before loading
+`fdm` or `filament_spool` when the strand matters. Without it, a dispenser's
+`filament-feed` sample says so instead of guessing.
+
+```python
+import eidoblend.fabrication                          # registers the live filament for the loads that follow
+from eidoblend.characters.robotics import make_robot, RoboticsKit
+spool = make_robot('filament_spool', filament='#da642c')
+spool.play('filament-feed')                           # the reel turns and the strand pays out, keyed
+tube = RoboticsKit.create_ptfe_tube(points=[(0, 0, 0), (0, 0, .1), (.1, 0, .1), (.1, 0, 0)])
 ```
 
-FDM accepts a BufferGeometry, Mesh, or Object3D hierarchy. It snapshots parent/world
-transforms, reflected placements, instances and the current skinned/morph pose,
-then fits uniformly to `size`; source vertex buffers remain unchanged.
-`space:"local"` ignores the root placement; `matrix` applies a Matrix4 before
-fitting. Overlapping mesh solids are unioned, while interior holes remain empty.
-Source materials are replaced by the selected filament color.
+## Tests — `blender/tests/robotics/`
 
-FDM slices the closed source solids into connected contours and alternating
-infill (25% by default), with three solid bottom/top layers by default (`solidLayers:0` disables
-these). Solid skins follow local ledges, recess roofs and changing cross-sections,
-including surfaces below taller features. Interior columns retain sparse infill.
-Open/nonmanifold slices are rejected. Travel is explicit and deposits
-nothing. A single acceleration-limited feed cursor drives both the actual nozzle
-and the GPU bead front. Layer height is real geometry; the finish is accumulated
-beads. There is no molten-metal field or final swap to an unprinted source mesh.
-The basic slicer does not generate support structures or certify printability.
-
-The dispenser's reel rotation follows consumed filament volume using the
-1.75 mm feed diameter and winding radius. It pauses during travel; direct-drive
-retraction does not rewind the supply reel. `retractLength` defaults to 0.0008 m
-and `retractSpeed` to 0.035 m/s. Retraction and priming take physical time with
-the nozzle stationary. `job.filamentLength`, `state.filamentLength`,
-`state.filamentRetraction` and `state.filamentSpeed` expose metres and metres/s.
-The loaded reel requires matching `filamentDiameter`; an oversized job is rejected.
-
-The FDM reel mounts on the fixed side rail. Filament pays off tangentially into
-the carrier's forward guide, then feeds the direct-drive extruder through an
-exposed span. The PTFE totals 174 mm: a 34 mm liner through the carrier, a
-44 mm inward-facing lower entry and a 96 mm head entry. Straight insertion
-sections seat in the fittings; the short bends guide the free strand around
-the frame. The head bend turns toward the supply within its forward clearance.
-Each section retains its length as the head moves.
-
-The milky, semi-transparent 4 mm outer / 2 mm inner tube surrounds an independently
-colored filament core. `robot.filament.guideTube` is the straight carrier liner;
-`robot.filament.tubes` contains four cubic sections forming the lower entries; `robot.filament.supplies` holds the two smoothly joined
-cubics for the exposed span. `supply` references the first of those cubics.
-Machine joint controls update their uniforms automatically. The reel and extruder
-share the same push fitting, with a 4.3 mm tube seat and narrower filament passage.
-Routing is calibrated for this G430 layout; changed mounts need new clearance
-checks. These are geometric feed paths. Pressure, temperature, elastic bending
-and extra reel payout caused by head travel are not simulated.
-
-The strand begins inside the polygonal winding surface, tangent to a baked row.
-Its visible payout traverses the reel continuously and reverses smoothly at the
-ends for long jobs. This represents level winding: the baked surface retains
-its size and detail instead of unmeshing each layer. `remainingRadius` is the
-consumption estimate used for reel timing, not a changing rendered radius.
-
-For a separate tube or cable, create an editable cubic curve in your scene:
-
-```js
-const tube = await RoboticsKit.createPTFETube({
-  points: [[0,0,0], [0,.20,0], [.12,.20,0], [.12,0,0]],
-  outerDiameter: .004, innerDiameter: .002, segments: 48, color: '#e7eee5'
-});
-_s.add(tube.mesh);
-// tube.setPoints(fourLocalPoints) changes control uniforms, never vertex buffers.
-// tube.sample(u), tube.length and tube.points inspect the curve in mesh-local space.
-// tube.dispose() removes the mesh and releases its geometry/material.
+```powershell
+# the pure solvers against the WebGPU edition (plain Python; run js_parity_dump.mjs first, see its header)
+python blender/tests/robotics/test_solvers_parity.py
+# from the main checkout (its run_blender.sh):
+bash run_blender.sh <repo>/blender/tests/robotics/test_js_parity.py         # the whole catalog, every clip, number for number
+bash run_blender.sh <repo>/blender/tests/robotics/test_attachment_frames.py
+bash run_blender.sh <repo>/blender/tests/robotics/test_runtime.py
+HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash <repo>/blender/tests/robotics/render_all.sh
 ```
 
-The synchronous ESM factory is exported from `robotics/index.js`. A standalone
-spool exposes `filament_stand/input` (SM40) and `filament_stand/filament_out`
-(PTFE4) ports. The assembled FDM uses its own G430 side-rail mount and downward
-filament-out frame; do not substitute the standalone dispenser's placement.
-Connect a dispenser mechanically before routing its feed.
-Its `filament-feed` sample demonstrates metered reel rotation independently;
-the assembled printer's fabrication job owns its feed timing. The print-head
-fan follows that same physical clock at 4,800 rpm by default (`fanRpm` on the
-print job). For independent head animation, use
-`robot.coolingFan(seconds, {rpm:4800})`; its shroud stays fixed.
-
-The original 450 × 520 mm FDM bed carries a 458 × 528 × 0.65 mm removable
-textured PEI spring-steel sheet. Two pull tabs extend beyond its front edge.
-The default `base:0.00065` places the first layer on that sheet; its extra
-width is overhang for removal, not extra axis travel. `buildPlate:false` hides
-the removable sheet and lets a scene provide its own fixture and `base`.
-`job.plate` references the sheet assembly; disposing the job preserves it.
-
-Give wide shots sufficient camera depth precision for the thin sheet and its
-bed. The fixed manufacturing example uses a 50 mm near plane with clear
-foreground space; choose a nearer plane when moving in for a close inspection.
-
-The CNC has a separate aluminum work table: eight extrusions form seven real
-T-slots with 8 mm mouths, 16 mm undercuts and 56.25 mm pitch. Four low-profile
-toe clamps engage sliding T-nuts and hold the included 78 × 128 × 20 mm stock.
-They fit 78 mm wide stock, 108–148 mm deep and at least 15 mm high. Other
-fixtures can use `workholding:false`, which hides the included clamps while
-the job exists. Supply and check appropriate workholding in that case.
-
-The sheet, table, clamp, frame guide and push fitting share
-one 512 × 1024 atlas containing base color, tangent normal and packed
-AO/roughness/metalness. The PEI coating uses CC0 ambientCG Plastic004 PBR with a fine, low-contrast
-powder-coated finish at a physical 100 mm scan repeat.
-Matching coating regions and extrusions reuse UVs; lettering remains unique.
-The maps request 8× anisotropic filtering, retained by the kit loader.
-
-For printing, the source is uniformly fitted to `size`, centered in X/Z and
-placed on the build surface. Object3D transforms are included in the planning
-snapshot; `space:"local"` uses the supplied root's local orientation instead.
-
-```js
-const cnc = await makeRobot('cnc', {scene:_s});
-const milling = await FabSim.mill(cnc, null, {
-  material:'wood',                   // aluminum, brass, steel, wood, plywood
-  stockWidth:0.078, stockDepth:0.128, stockHeight:0.020,
-  resolution:192, duration:18,
-  effects:{maxParticles:1200, seed:7319, dust:true}
-});
-const profiles = await FabSim.stockMaterials();
-// Explicit paths can be supplied instead of null, or made with pocketProgram().
-```
-
-Stock selection sets surface finish and default feed, plunge, spindle RPM,
-stepdown and pocket depth. Metal uses metallic PBR and small folded chips;
-wood uses three-dimensional grain, larger shavings and fine dust; plywood
-also exposes laminations on cut walls. Fine surface patterns are filtered to
-avoid moiré. Metal presets do not emit wood dust or generic sparks.
-
-These are illustrative motion/appearance presets for filmmaking, not machining
-settings validated for real equipment. Override `feed`, `plunge`, `rpm`,
-`stepdown`, `cutDepth`, `stepover` and `flutes` for your scene. A custom path's
-per-move `feed` takes precedence. `job.settings` exposes the effective defaults,
-cutter diameter and nominal chip load. The `cnc` assembly has a 6 mm flat end mill; `cnc_relief` has a 6 mm ball nose.
-Both use `radius:0.003`; a mismatching radius or profile is rejected.
-
-Chips originate only at newly removed material, including plunges. Air moves
-and repeated passes through the same cleared volume emit nothing. A fixed GPU
-particle pool evaluates emission and ballistic/damped travel from physical time,
-so seeking and replay remain deterministic. `effects:false` disables debris;
-wood `dust:false` retains shavings. Chips have a short lifetime rather than
-accumulating on the bed; the effects do not model coolant or chip collisions.
-`job.stock.removedVolume` is a grid estimate in cubic metres.
-
-For 3D relief carving, load the ball-nose assembly:
-
-```js
-const reliefCnc = await makeRobot('cnc_relief', {scene:_s});
-const target = await FabSim.sampleRelief(); // original flowing-crest sample
-const carving = await FabSim.carve(reliefCnc, target, {
-  material:'wood', stepover:0.0008, sampleStep:0.001,
-  resolution:192, duration:24
-});
-carving.seek(20);
-```
-
-`carve` accepts a height function `(x,z) => height`, a sampled heightfield
-`{heights,columns,rows,width,depth}`, or a Mesh/Object3D/BufferGeometry in
-physical stock coordinates. For meshes, `reliefFromMesh` samples the upper
-visible surface by downward rays and retains Object3D transforms. Fit the
-source inside the stock before calling it. The result is a three-axis relief;
-vertical undercuts and side machining require another process.
-
-`reliefProgram` makes successive roughing rasters followed by a finer finishing
-raster. Ball-footprint compensation raises the cutter tip over neighboring
-high areas; `roughAllowance` leaves material for the finish. `surfaceTolerance`
-is an added finish allowance on the sampled target, not a certified machining
-error bound. `sampleStep` controls path sampling and `stepover` controls spacing
-between finishing rows. The planner retracts above stock between rows. Use
-`job.program.stages` and `state.stage` to inspect the rough/finish sequence.
-
-Paths are arrays of `{position:[x,height,z], type:'rapid'|'cut'|'extrude', feed?}`.
-Lengths are metres and feed is metres/second. The GPU evaluates the actual
-swept flat-end or ball-nose cutter envelope against heightfield stock, including
-sloping moves. Spatial bins avoid scanning the complete toolpath for every
-stock vertex. Rewinding and seeking use the same progress cursor as the head.
-`job.stock.cellSize` reports stock discretization; a finer grid resolves finer
-scallops at greater rendering cost. `mill` accepts explicit cutter paths and
-`carve` also accepts them. The fitted tool profile and radius must match.
-Rapid moves through remaining stock, bed penetration, excessive footprint,
-incompatible workholding and cuts deeper than the exposed tool are rejected.
-`PrintSim.print` and `CNCSim.carve/mill` are asynchronous facade methods.
-
-For all-around carving, use the separate stock-rotating machine:
-
-```js
-const machine = await makeRobot('cnc_rotary', {scene:_s});
-const target = await FabSim.sampleRotary();
-const job = await FabSim.rotaryCarve(machine, target, {
-  renderer:_r, material:'wood', duration:32,
-  stockLength:.140, stockWidth:.036, stockHeight:.036,
-  angles:96, sampleStep:0.001, resolution:[256,96,96]
-});
-job.seek(16);
-```
-
-Initialize `_r` before creating the job. `rotaryCarve` accepts a BufferGeometry,
-Mesh or Object3D hierarchy, or a `radius(x,angle)` function in metres/radians.
-The stock's longitudinal axis is X. Supplied mesh geometry retains its world
-orientation and is fitted uniformly inside the cutting region by default.
-Use `fit:false` for geometry already positioned in stock coordinates.
-
-```js
-const job = await FabSim.rotaryCarve(machine, suppliedModel, {
-  renderer:_r, material:'aluminum', duration:32,
-  stockLength:.140, stockWidth:.036, stockHeight:.036,
-  angles:12, gridStep:.0005, sampleStep:.001, stepover:.00165
-});
-console.log(job.program.report); // input triangles, fitting, reach and retained ends
-```
-
-Mesh planning projects actual triangles from multiple indexed directions and
-makes lateral XYZ rasters. Upper bounds over clipped triangle cells protect thin
-features between sample rays; the full swept cutter footprint protects nearby
-surfaces. Coarser roughing precedes finishing. `gridStep` is the projection-cell
-size, `sampleStep` the axial path spacing, and `stepover` the lateral row spacing.
-Mesh input defaults to 12 orientations; `angles` accepts 4–96. A radius function
-uses circumferential stations (default 96), with an axial stroke at each angle.
-
-The cutter retracts beyond the uncut blank before each A-axis index; the chuck,
-drive and stock turn together with XYZ stationary. Both input modes subtract
-actual swept tool volume. The target mesh is never substituted for the cut stock.
-This is indexed four-axis machining: inaccessible undercuts, cavities narrower
-than the cutter and features requiring tool tilt cannot all be reproduced.
-Mesh programs conservatively retain stock beyond the installed flute reach and
-report `reachLimitedSamples`; `requireReach:true` rejects those jobs instead.
-The report does not certify complete surface accessibility. Smaller stock or
-another machining setup may be necessary, and sacrificial ends remain attached.
-
-For manual fixture motion, `setJoints({rotary_output:angle})` turns its output
-and chuck together. The inspector exposes this as **A axis / chuck**. Stop a
-fabrication job before taking manual ownership of that axis.
-
-The fixture accepts stock 80–180 mm long and 18–50 mm wide/high; the default
-is 140 × 36 × 36 mm. Width and height can differ. The stock's chuck-side end
-stays at machine X=-55 mm, and its centre is `-.055 + stockLength/2`.
-Its axis is 97 mm above the table. Cutting retains 29 mm at the chuck end
-and 18 mm at the tail end, in stock-local coordinates. These end allowances
-protect the workholding; a separate operation is needed for part-off.
-The rotary assembly uses the 6 mm two-flute flat end mill with 18 mm exposed
-cutting length. The relief assembly uses a 6 mm ball nose with 17 mm exposed
-cutting length. Removal follows the installed tool profile; an incompatible
-requested profile/radius, offset or overtravel is rejected.
-
-`machine.rotarySetup({stockLength, stockWidth, stockHeight, quill:0})` adjusts
-all four captured jaws and the sliding tailstock, returning the stock datums
-and applied joints. `rotaryCarve` calls it automatically. The tailstock travels
--60 to +40 mm on a continuous dovetail bed. Its quill travels ±6 mm and has a
-1 mm-pitch handwheel; combining a quill offset with an end-of-travel carriage
-can exceed the supported envelope and throws. The jaws grip 13 mm of end stock
-and move independently in retained radial guideways with accessible drives.
-The tailstock's carriage and quill have separate locks. Eight M6 table studs
-engage sliding T-nuts beneath the 8 mm bed-slot mouths. The fixture reuses the
-relief clamps' hardware and plate atlas. Inspect `RC table stud 0` /
-`RC table T-nut 0` through index 7; nut undersides and exposed mouth surfaces
-remain present. The rear “A / INDEX” marking identifies the stock rotation axis.
-
-The `stock-setup` sample demonstrates the carriage, quill, handwheel and four
-jaws with varied rectangular sizes. It illustrates adjustment without a
-clamped blank; stop a carving job before playing it. The inspector also has
-stock presets, length/width/height fields and a **Fit blank and restart carving** button that
-fits the fixture and restarts the job. Stock material is an independent choice.
-
-The fixture and optional ball cutter share one 2048-square atlas family
-containing base, fixed finish, recolor mask, tangent normal and ORM maps. The
-flat cutter reuses the process-head mesh and atlas. Repeated
-jaws, table fasteners, braces and lock levers share their primary surfaces.
-The standalone cutter keeps its closed shank; mounted variants omit the portion
-permanently covered by the collet while retaining the same finish.
-
-The blank starts with a prepared 60° centre seat in its tailstock end: 3 mm
-conical depth and a 1.6 mm diameter pilot extending 6 mm from the end face.
-That pilot clears the live-centre point. This preparation exists in the GPU
-stock before cutting and is excluded from chip generation. The sample does not
-depict centre drilling or the final part-off operation.
-
-The GPU subtracts the swept cutter from a tiled 3D distance field and renders its
-actual surface/depth. It can expose side and underside cuts, unlike a top-only
-heightfield. The default two stock buffers occupy about 39 MB; `resolution` sets
-XYZ voxel counts, and `job.stock.cellSize` reports their spacing. Rewind rebuilds
-the same field. Chip emission uses a separate one-time volumetric engagement
-sample, so repeated cuts and air travel add no false debris. Wood, plywood,
-aluminum, brass and steel use the existing appearance/feed presets.
-
-For a metal study, use `material:'aluminum'` or `material:'brass'` with the same
-fixture. Their default feeds and depth steps produce more passes and longer
-physical cutting times than wood. Omit `duration` to see those rates directly;
-equal time-lapse durations conceal that difference. The `rotary_metal` example
-includes eight seconds of physical-speed aluminum cutting before its time lapse.
-Metal stock uses metallic surfaces and folded chips without wood dust or generic
-sparks. The gantry depicts light machining; a steel preset does not establish
-machine stiffness, cutting forces or heavy steel capability. Coolant, chip
-collisions, heat and tool wear are not simulated.
-
-`job.removal.removedVolume` is a sampled volume estimate. `job.state.angle` is
-the unwrapped A-axis angle; `state.stockPosition` is the cutter tip in stock-axis
-coordinates, and `state.position` is its position above the machine bed.
-`rotaryProgram` exposes both planners without allocating stock buffers;
-`rotaryMeshProgram` explicitly selects mesh planning. `FabSim.sourceGeometry`
-creates a geometry snapshot; `FabSim.fitSourceGeometry(source,{bounds})` fits to
-a Three Box3. For relief, fit above the requested floor and below the stock top
-with X/Z inside the machining area before calling `carve`. Dispose temporary
-snapshots after planning. Materials on input meshes do not change stock material.
-`CNCSim.rotaryCarve` is also available through the injected asynchronous facade.
-
-`duration` changes playback speed only. `physicalDuration`, `path`, `state`,
-`time`, `done`, `seek`, `play`, `stop`, and `dispose` expose the job.
-`state.position` and `machine.toolTip()` must agree. Workspace checks reject a
-bad path before changing the machine; never clamp while extruding/cutting.
-Job geometry is prepared once, with GPU position evaluation during playback.
-Omit `duration` for physical timing. Spindle rotation, filament feed and chip
-motion all use that physical clock even when the process is shown in time lapse.
-Position and rotate the machine group freely: stock and deposition follow its
-bed frame. Check stock fixtures, workholding and the full tool envelope when
-creating a production scene; a valid XYZ path alone is not collision checking.
-
-## Inspector and examples
-
-Run `python eidoverse/robotics/serve_inspector.py` from the checkout and open
-`http://127.0.0.1:8989/`. It includes the complete catalog, assembled arms and
-mobile robots, motion controls, colors, wireframes, part selection, UV split view,
-triangle counts, attachment ports and independent joints. It serves only the
-kit and its inspector on localhost. The included Three r184 viewer is MIT and
-works without a CDN or account. Three's browser WebGL fallback is also
-supported; native scene rendering uses WebGPU. Keep `models/` and `textures/` together.
-FDM has a separate filament color picker; CNC has a stock material selector.
-Both offer physical-time or time-lapse playback (32 seconds for rotary carving,
-18 seconds for the other processes), process readouts,
-and an **Inspect workpiece** camera shortcut. **Workpiece source** offers ordinary
-mesh examples or local STL/embedded-GLB input. Files stay local; embedded GLBs
-must contain their resources. Model dimensions are uniformly fitted to the
-selected process region. The same source can be tried in FDM, relief and rotary
-CNC; changing the machine changes its physically accessible result. The standard
-pocket CNC accepts explicit paths; choose relief or rotary CNC for mesh planning.
-
-Renderable examples are in `eidoverse/examples/robotics/`:
-`assembly.json`, `manufacturing.json`, `relief.json`, `rotary.json`,
-`rotary_metal.json`, `mesh_fabrication.json`, `motion.json`, `mantis.json`.
-The manufacturing scene shows FDM, aluminum pocketing and wood relief together;
-the relief scene provides a close view of roughing and finishing; the rotary
-scene shows the complete all-around carve from rectangular stock.
-`mesh_fabrication` supplies a normal Object3D assembly to the rotary planner;
-replace that source with any loaded Mesh/Group to try your own geometry.
-Use `python eido.py render eidoverse/examples/robotics/manufacturing.json`.
-For a Windows native renderer whose FFmpeg is outside PATH, set `FFMPEG_PATH`
-to its executable; this applies to encoding and probe-frame extraction.
-
-The slicer bundles polygon-clipping and splaytree (MIT), robust-predicates
-(Unlicense), and an Apache-2.0 licensed transpiler helper. Their preserved notices
-are in `eidoverse/robotics/vendor/polygon-clipping/`.
+`js_parity_dump.mjs` runs the WebGPU kit in Deno and records, for all 89
+entries, the roots, ports, stats and every node's world matrix at rest and in
+every clip; `test_js_parity.py` loads the same models and compares them (1317
+checks). The ports of `attachment_frames_test.mjs` and `runtime_test.mjs` (its
+fabrication case is the fabrication package's) check the flanges from the
+triangles, load_part, the catalog, mirrored legs, independent limbs, the solvers
+against the meshes, that `play()` keys reproduce `sample()`, and, with the
+fabrication package imported, the PTFE forwarding and the keyed filament feed.
+The render tests (`render_all.sh`) render every catalog entry
+(`out/catalog/`), every clip on the robots that carry it (`out/motion/`),
+single parts taken out with `load_part` (`out/parts/`), the normal-map parity
+probe, the three examples (and a reopened `.blend`), the inspector (motions,
+picking, the UV view, the FDM and CNC processes) and MechParts / RoboticArm (the
+lineup, each generator alone in `out/mech_parts/`, each tool close up). Every
+render test also runs build-only (`-- --no-render`: everything built, keyed,
+posed and checked, nothing rendered; the results go to
+`out/<name>.norender.json`), which needs no GPU slot.
 
 Original runtime: MIT. Original geometry and authored materials: CC0. Source
 scan licenses and excluded proprietary authoring tools are recorded in
-`eidoverse/assets/robotics/THIRD_PARTY.md`. No manufacturer or Isaac Sim models,
-restricted reference images, fonts or proprietary Blender plugins are included.
+`eidoverse/assets/robotics/THIRD_PARTY.md`.
 
+## Not yet ported
 
-Run the JavaScript runtime checks with:
-
-```powershell
-deno test --no-check --allow-read --allow-env --node-modules-dir=manual --no-lock eidoverse/robotics/tests/
-```
-
-`--no-check` avoids requiring separate TypeScript declarations for the installed
-Three.js JavaScript package; the runtime assertions still execute. They cover
-the complete catalog, deterministic motion, mirrored mating frames, independent
-limbs, IK/tool calibration, workspace rejection, bead winding, mesh transforms,
-overlap unions, holes, local solid skins, cutter compensation and immutable
-fabrication vertex buffers. Visual/GPU review remains necessary. Example scenes
-supply studio lighting and disable automatic enhancement to preserve the baked
-material presentation. Assembly-audit coverage warnings remain visible;
-authored kinematic demos are not a collision or dynamics certification.
+- **The inspector's browser chrome**: the orbit controls (Blender's viewport
+  navigation does that job) and the file picker (import an STL or GLB with
+  Blender's own importer, then `insp.set_source(obj)`). The inspector's clock is
+  the keyed timeline: Play is the scene's playback, not a running loop.
+- **WebGPU-only machinery, not needed here**: the GLTFLoader texture plugin
+  (Blender's importer resolves the external maps; the sampler anisotropy extras
+  are validated, but anisotropy is a Blender preference, not a per-texture
+  setting), the Deno PMREM reuse workaround in `studio()` and its
+  `disposeStudio` (the room environment is one packed image), the
+  AnimationMixer (`robot.mixer`: the GLB's clips are muted NLA tracks and the
+  walk evaluates them directly), `serve_inspector.py` (no web server: the
+  inspector is a `.blend`).
+- **Owned elsewhere**: the fabrication processes, the live filament and the PTFE
+  tubes are `eidoblend.fabrication`'s; the kit loads them through `INSTALLERS`
+  and `facade.FABRICATION` once that package is imported (without it, a
+  dispenser shows its GLB without the strand, and `filament-feed` says why).
+- **The inspector's rotary process** is wired to `eidoblend.fabrication`'s
+  `rotary_carve` with the viewer's settings but has not been run from the
+  inspector (its volumetric stock writes one cache file per keyed frame).

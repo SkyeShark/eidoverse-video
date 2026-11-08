@@ -1,0 +1,7 @@
+{
+    "width": 960, "height": 540, "fps": 30, "duration": 10,
+    "script": "blender/tests/terrain_extras/course_scene/scene.py",
+    "outputVideo": "blender/tests/terrain_extras/out/course_scene.mp4",
+    "assets": {},
+    "render": {"samples": 16}
+}
