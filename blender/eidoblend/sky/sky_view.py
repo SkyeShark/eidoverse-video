@@ -3,10 +3,12 @@
 eido_sky_view       a node group whose outputs are the bake camera of the frame (Right, Up, Forward, TanX, TanY),
                     keyed per frame CONSTANT and held over [f, f+1) with the image sequences (world_nodes, P6)
 eido_sky_overlay    what draws OVER a sky element for a camera ray: the shield and the clouds of the frame's camera
-                    layers, premultiplied (Color, Alpha). The ringworld's band, walls and cloud sheet and the shattered
-                    moon composite it over themselves, so the clouds always draw in front of them, as WebGPU's draw
-                    order did (sky elements -99.x, cloud dome -98). With a cloud dome the dome draws the clouds over
-                    whatever lies beyond its radius, so the overlay then keeps only the shield there.
+                    layers, premultiplied (Color, Alpha). The shattered moon (and a custom cluster) composites it over
+                    itself, so the shield and clouds always draw in front of it, as WebGPU's draw order did (sky
+                    elements -99.x, cloud dome -98). With a cloud dome the dome draws the clouds over whatever lies
+                    beyond its radius, so the overlay then keeps only the shield there. (The ringworld's band needs no
+                    overlay: it reaches the frame as a plate inside the camera layer, under the clouds.)
+eido_sky_element    an AOV the sky elements write 1 into (mark_sky_element): use_fog leaves them unfogged
 
     surface = overlay_opaque(g, shader)              # opaque: (1 - a) * surface + Color
     emission, alpha = overlay_blended(g, c, alpha)   # blended: c (1 - a) + alpha * Color over (1 - alpha) * behind
@@ -17,6 +19,17 @@ from .nodes import Graph, new_group
 
 VIEW = 'eido_sky_view'
 OVERLAY = 'eido_sky_overlay'
+SKY_ELEMENT_AOV = 'eido_sky_element'
+
+
+def mark_sky_element(g):
+    """Write 1 to the sky-element AOV wherever this material's surface is drawn. use_fog's compositor fog reads it and
+    leaves those pixels unfogged: WebGPU's sky-element materials (the shattered moon's fragments and debris, the
+    ring's band) take no scene fog (fog: false), they carry their own air."""
+    n = g.node('ShaderNodeOutputAOV')
+    n.aov_name = SKY_ELEMENT_AOV
+    n.inputs['Value'].default_value = 1.0
+    return n
 
 
 def view_group():

@@ -181,6 +181,34 @@ Measured 11-07 (`blender/tests/media2/test_book_glb.py`):
   frame 24, turned a leaf over frames 32–50, and closed the back cover over
   the block from frame 56. `out/book_glb_sheet.png` shows the asset beside
   the closed rig, the film, and the colour-coded surfaces mid-turn.
+- **The saved file:** the same book saved as a .blend and opened in a fresh
+  Blender rendered frames 41 and 64 identically to the building session
+  (`test_reopen.py`, 11-08, mean difference 0.000). The poses live in the PC2
+  caches and keys, not in the session.
+
+## A raw rig spec — `makeBookRig`
+
+`rig=` hands `book_core.js` a `makeBookRig` spec as it is, with no
+`makeBookFromSpec` arithmetic and no GLB: the case's own numbers, the leaf
+count and the options. The janus measure written out by hand, as a plain
+blue book:
+
+```python
+RIG = {'boardLen': 0.1504, 'jointX': 0.0727, 'foreX': 0.0777, 'halfH': 0.11095, 'halfT': 0.01322,
+       'lip': 0.0055853, 'round': 0.0024147, 'uJoint': 0.4573174,
+       'pages': 16, 'openAt': 1, 'angle': 180, 'pageAngle': 179}
+plan = book.schedule((1, 40), open=[(1, 0.0), (12, 1.0), (30, 1.0), (40, 0.0)], turns=[(14, 28)])
+spreads = sorted(Path('eidoverse/assets/book_spreads').glob('*.jpg'))[:6]
+b = book.make_book('work/<id>/rigbook', plan, rig=RIG, spreads=spreads, cover={'color': '#1d4f8a'},
+                   name='rigbook')
+```
+
+Measured 11-07 (`blender/tests/media2/test_book_rig.py`): the rig took the
+spec to the last digit (`b.metrics`: BOARD_LEN 0.1504, HALF_T 0.01322, 16
+leaves), 6 spreads gave max page 5, the underside stayed within 0.13 mm of
+the desk through the open, the turn and the close, and `b.frames` held both
+coordinate frames. `out/book_rig_sheet.png` shows it closed, open, mid-turn
+and shut again.
 
 ## Rendering
 
@@ -204,6 +232,5 @@ Measured 11-07 (`blender/tests/media2/test_book_glb.py`):
   replaces it.
 - A Python rewrite of the solve: not needed, because the bridge runs the
   reviewed JS (`book_core.js`) instead.
-- `make_book(rig={...})`, a raw `makeBookRig` spec with no GLB, is accepted by
-  the exporter but no probe has rendered it. The GLB path builds its spec the
-  same way and is rendered.
+- The facade's `setSpread` and `update`: no-ops in the engine's own `makeBook`
+  facade, so there is nothing to port.

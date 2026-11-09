@@ -121,4 +121,45 @@ check('open petals add light around the sun', gain > 0.01, 'petal-zone luma open
 lower = petal_zone & (yy < cy)       # image rows run bottom-up in Blender pixels: lower half of the frame
 check('the ridge in front occludes the card (depth test)', behind[lower].mean() < open_[lower].mean() - 0.01,
       'lower-half luma %.3f behind the ridge vs %.3f open' % (behind[lower].mean(), open_[lower].mean()))
+
+
+# ---- the options: distance, size, petals, color (a second corona; the first is hidden) ----
+def petal_count(lum, zone):
+    """The dominant angular frequency of the luma in the petal zone: the number of petals."""
+    ang = np.arctan2(yy - cy, xx - cx)[zone]
+    bins = np.clip(((ang + math.pi) / (2 * math.pi) * 96).astype(int), 0, 95)
+    prof = np.bincount(bins, lum[zone], 96) / np.maximum(np.bincount(bins, None, 96), 1)
+    spec = np.abs(np.fft.rfft(prof - prof.mean()))
+    return int(np.argmax(spec[1:]) + 1)
+
+
+def render_rgb(frame, name):
+    sc.frame_set(frame)
+    sc.render.filepath = os.path.join(OUT, name + '.png')
+    bpy.ops.render.render(write_still=True)
+    img = bpy.data.images.load(sc.render.filepath)
+    w, h = img.size
+    px = np.array(img.pixels[:], np.float32).reshape(h, w, 4)[..., :3]
+    bpy.data.images.remove(img)
+    return px
+
+
+corona.mesh.hide_render = True
+c2 = make_sun_corona(sc, distance=900.0, size=250.0, petals=6, color=(0.40, 0.70, 1.0))
+c2.bake(sky, open_fn=lambda t, s: 1.0)
+sc.frame_set(1)
+d2 = c2.mesh.matrix_world.translation - cam.matrix_world.translation
+check('distance= and size= place and size the card', abs(d2.length - 900.0) < 1.0
+      and abs(max(c2.mesh.dimensions) - 250.0) < 0.5, 'distance %.2f, card %.1f m' % (d2.length, max(c2.mesh.dimensions)))
+rgb2 = render_rgb(1, 'corona_options_6_petals_blue')
+half2 = (125.0 / 900.0) / math.tan(math.radians(25)) * (W / 2)
+zone2 = (rr > half2 * 0.35) & (rr < half2 * 0.8)
+n12 = petal_count(open_, petal_zone)
+n6 = petal_count(rgb2 @ np.array([0.2126, 0.7152, 0.0722]), zone2)
+check('petals= sets the petal count (12 by default, 6 asked)', n12 == 12 and n6 == 6, 'counted %d and %d' % (n12, n6))
+c2.mesh.hide_render = True
+sky_only = render_rgb(1, 'corona_options_hidden')                 # the same frame without the card: the sky alone
+petal_rgb = (rgb2 - sky_only)[zone2].mean(0)
+check('color= tints the petals (a blue corona over the morning sky)', petal_rgb[2] > petal_rgb[0],
+      'petal light over the sky: rgb (%.4f, %.4f, %.4f)' % tuple(float(c) for c in petal_rgb))
 print('PASS corona all' if ok_all else 'FAIL corona some')

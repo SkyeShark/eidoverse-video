@@ -1,4 +1,4 @@
-"""ocean/util.py: small shared helpers for the verse-3 ocean set (port of eidoverse/sets/ocean/util.js).
+"""ocean/util.py: small shared helpers for the ocean set (port of eidoverse/sets/ocean/util.js).
 
 Everything deterministic: the seeded RNG is the WebGPU edition's stream bit for bit, so the same seed places the same
 grass, lights and faces. Canvas work is Pillow (Blender 5.2's Python ships it); a drawing becomes a Blender image

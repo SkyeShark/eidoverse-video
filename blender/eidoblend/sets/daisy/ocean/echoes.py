@@ -3,8 +3,8 @@
 Sixty-some small lights around and beneath her, each in the colour of an older machine voice (Voder tube glow, 1961
 CRT white, teletype paper, Speak & Spell VFD cyan, C64 violet-blue, Mac white, DECtalk amber, green phosphor, VOCALOID
 teal, Sydney violet). Most hang far out over the sea like boat lanterns, each with a glitter streak on the water; a
-few drift near her like fireflies. As the ocean of faces rises (bars 2-3) they sink into it: the older voices are part
-of the inheritance.
+few drift near her like fireflies. As the ocean of faces rises they can sink into it (`sink`): the older voices are
+part of the inheritance.
 
     echoes = build_echoes(coast, parent=layout_empty)   -> Echoes: group, control, objects, U, count, lights
     the uniforms are custom properties on echoes.control (t, level, sink); the streaks follow them through drivers

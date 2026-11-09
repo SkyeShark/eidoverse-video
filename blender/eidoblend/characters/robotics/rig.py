@@ -9,7 +9,13 @@ module it moves (no Python driver, so they evaluate with auto-run off):
                 for a mirrored module, Blender's own split], so each component is A cos(q/2) + B sin(q/2)
     prismatic   the module's location = rest location + rest rotation * axis * q
 
-    joints = rig_joints(robot)          {joint name: custom property name}; robot.group['joint:<name>'] = value
+    joints = rig_joints(robot, values=None)
+                                        {joint name: custom property name}; robot.group['joint:<name>'] = value. The
+                                        sliders start at `values` (default robot.state, the joints set_joints moved)
+    measure_joints(robot)               each slider's value read off its module's CURRENT transform (its turn about
+                                        the axis from rest, or its travel along it), clamped to the limits: rigging
+                                        with these keeps the visible pose, keyed or sampled, as the inspector's
+                                        sliders move one joint from the pose on screen
     set_slider(robot, joint, value)     the same from a script, with the depsgraph tagged (a Python write to a custom
                                         property alone does not re-evaluate its drivers)
     unrig_joints(robot)                 removes the drivers and the properties
@@ -67,7 +73,37 @@ def joint_names(robot):
     return out
 
 
-def rig_joints(robot):
+def _limits(robot, n):
+    import math
+    a_axis = bool(robot.report.get('rotary_fixture')) and n == 'rotary_output'
+    return (-math.pi, math.pi) if a_axis else tuple(robot.specs[n]['limits'])
+
+
+def measure_joints(robot):
+    """{joint: value} for every slider joint, read off the module's current local transform against its rest: the
+    signed turn about the joint axis (three's split of the matrices, as set_joints composes them) or the travel along
+    it, clamped to the slider's range. A pose set_joints made reads back exactly; a GLB clip's node rotation reads as
+    its component about the axis."""
+    import math
+    from .kit import decompose_three
+    out = {}
+    for n in joint_names(robot):
+        o, s = robot.roots[n], robot.specs[n]
+        loc0, rot0, _s0 = decompose_three(robot.rest[o.name])
+        loc, rot, _s = decompose_three(o.matrix_basis)
+        axis = Vector(s.get('axis') or (0, 0, 1)).normalized()
+        if s.get('joint_type') == 'prismatic':
+            v = (rot0.inverted() @ (loc - loc0)).dot(axis)
+        else:
+            rel = rot0.inverted() @ rot
+            v = 2.0 * math.atan2(Vector((rel.x, rel.y, rel.z)).dot(axis), rel.w)
+            v = math.atan2(math.sin(v), math.cos(v))
+        lo, hi = _limits(robot, n)
+        out[n] = max(lo, min(hi, v))
+    return out
+
+
+def rig_joints(robot, values=None):
     from .kit import decompose_three
     import math
     g = robot.group
@@ -75,9 +111,10 @@ def rig_joints(robot):
     for n in joint_names(robot):
         s = robot.specs[n]
         a_axis = bool(robot.report.get('rotary_fixture')) and n == 'rotary_output'
-        lo, hi = (-math.pi, math.pi) if a_axis else tuple(s['limits'])
+        lo, hi = _limits(robot, n)
         prop = PREFIX + ('A axis / chuck' if a_axis else n)
-        g[prop] = float(robot.state.get(n, 0.0))
+        start = robot.state.get(n, 0.0) if values is None or n not in values else values[n]
+        g[prop] = float(max(lo, min(hi, start)))
         ui = g.id_properties_ui(prop)
         ui.update(min=lo, max=hi, soft_min=lo, soft_max=hi, step=0.01 if s.get('joint_type') == 'prismatic' else 1,
                   description=f"{n} ({s.get('joint_type')}, {'m' if s.get('joint_type') == 'prismatic' else 'rad'})")
@@ -103,6 +140,8 @@ def rig_joints(robot):
                             f'{_num(A[i])} * cos(q / 2) + {_num(B[i])} * sin(q / 2)')
         made[n] = prop
     robot.joint_sliders = made
+    g.update_tag()                         # new drivers are evaluated once their property is tagged: pose them now
+    bpy.context.view_layer.update()
     return made
 
 

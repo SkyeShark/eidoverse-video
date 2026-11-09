@@ -176,7 +176,45 @@ def main():
     bpy.context.view_layer.update()     # matrix_world follows the new location / rotation
     el = math.degrees(math.asin((cam.matrix_world.to_quaternion() @ Vector((0, 0, -1))).normalized().z * -1))
     S.check('framed 18 degrees down', abs(el - 18) < 0.5, '%.2f' % el)
+
+    # ---- 4. the .glb as another engine gets it: re-imported by Blender's glTF importer ----
+    reimport(api, path)
     S.summary('forest_export_lod')
+
+
+def reimport(api, path):
+    """Import white_oak_1737.glb into an empty scene and render its LOD0 and its billboard
+    (LOD3) side by side under the probe sky: the export's look, not only its structure."""
+    scene = S.reset()
+    S.render_settings(scene, 960, 540, 16)
+    S.ground(scene, api.ASSETS_DIR, 'grass', tile=3.0)
+    S.sky_and_sun(scene, sun_elev_deg=35, sun_az_deg=200, strength=0.10, sun_strength=4.0)
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=path)
+    new = [o for o in bpy.data.objects if o not in before]
+    nodes = {o.name: o for o in new}
+    lod0 = nodes.get('White_Oak_LOD0')
+    lod3 = nodes.get('White_Oak_LOD3')
+    S.check('re-import: the LOD nodes come back', lod0 is not None and lod3 is not None,
+            ', '.join(sorted(n for n in nodes if n.startswith('White_Oak_LOD') and n.count('_') == 2)))
+    if lod0 is None or lod3 is None:
+        return
+    keep = {lod0, lod3} | set(lod0.children_recursive) | set(lod3.children_recursive)
+    for o in new:
+        if o.type == 'MESH' and o not in keep:
+            o.hide_render = True
+    # the LOD nodes share one spot: the billboard 18 m aside (world X)
+    bpy.context.view_layer.update()
+    mw = lod3.matrix_world.copy()
+    mw.translation = mw.translation + Vector((18.0, 0.0, 0.0))
+    lod3.matrix_world = mw
+    leaf = next((m for o in lod0.children_recursive if o.type == 'MESH' for m in o.data.materials
+                 if m and 'leaves' in m.name), None)
+    S.check('re-import: the leaf material keeps its cutout and texture', leaf is not None and any(
+        n.type == 'TEX_IMAGE' for n in leaf.node_tree.nodes), '%s, %s' % (
+        leaf.name if leaf else 'no leaves material', getattr(leaf, 'surface_render_method', None)))
+    S.camera(scene, (9.0, -46.0, 7.5), (9.0, 0.0, 7.5), lens=35)
+    S.render(scene, os.path.join(S.OUT, 'glb_reimport_LOD0_and_billboard.png'))
 
 
 main()

@@ -235,10 +235,10 @@ bad = []
 for k, cd in U_['lights'].items():
     if k == 'hemi':
         continue
-    w = lit[k].data.energy
-    if abs(w - cd * 4 * math.pi / 683) > 1e-6:
+    w = lit[k].data.energy                       # a float32 in Blender: compare to its precision, not to 1e-4 W
+    if abs(w - cd * 4 * math.pi) > 1e-6 * max(1.0, cd * 4 * math.pi):
         bad.append((k, w, cd))
-check('lights: every lamp at the WebGPU intensity (cd x 4 pi / 683 W)', not bad, str(bad))
+check('lights: every lamp at the WebGPU intensity (cd x 4 pi W, to float32 precision)', not bad, str(bad))
 check('shafts: shown while the doors part', not C.parts['shafts'].hide_render)
 C.dispose()
 
@@ -266,8 +266,8 @@ check('news uniforms: t, spray, floods, lights, chant, pulse, blink', not bad, s
 Ls = N.parts['lights']
 got = [l.data.energy for l in Ls['floods']] + [l.data.energy for l in Ls['street']] + [Ls['news'].data.energy,
                                                                                          Ls['graffiti'].data.energy]
-want = [c * 4 * math.pi / 683 for c in Uj['floods'] + Uj['street'] + [Uj['news'], Uj['graffiti']]]
-check('news lights: floods, street, the crew LED, the graffiti lamp', np.allclose(got, want, atol=1e-6))
+want = [c * 4 * math.pi for c in Uj['floods'] + Uj['street'] + [Uj['news'], Uj['graffiti']]]
+check('news lights: floods, street, the crew LED, the graffiti lamp', np.allclose(got, want, atol=1e-4))
 
 
 def quads(ob):

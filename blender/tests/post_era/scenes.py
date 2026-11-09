@@ -396,6 +396,58 @@ def post_scene(src, view, fps=24, frames=(1, 48), res=(960, 540), name='post', c
     return sc
 
 
+def hud_pixels(W, H, lines, bar=(0.06, 0.82, 0.62, 0.94), badge=(0.085, 0.845, 0.115, 0.895),
+               bar_rgba=(0.012, 0.014, 0.035, 0.82), badge_rgb=(0.02, 0.6, 0.7), size_px=None):
+    """A broadcast lower third as a straight-alpha float RGBA array (H, W, 4), top-down: a dark translucent bar, a
+    teal badge and white text lines in Press Start 2P, drawn by Blender's own text renderer (blf) into an offscreen
+    buffer, as the era looks' glyph atlas is. bar / badge: (x0, y0, x1, y1) in frame fractions, y down. Test dressing
+    (the overlay's contents belong to motion graphics)."""
+    import blf
+    import gpu
+    import numpy as np
+    from mathutils import Matrix
+    font = os.path.join(WORKTREE, 'eidoverse', 'assets', 'fonts', 'PressStart2P-Regular.ttf')
+    fid = blf.load(font)
+    if fid < 0:
+        raise FileNotFoundError(font)
+    if bpy.app.background:
+        try:
+            gpu.init()
+        except Exception:                                  # noqa: BLE001 (already up)
+            pass
+    size_px = size_px or max(8, int(round(H * 0.022)))
+    off = gpu.types.GPUOffScreen(W, H, format='RGBA32F')
+    with off.bind():
+        fb = gpu.state.active_framebuffer_get()
+        fb.clear(color=(0.0, 0.0, 0.0, 0.0))
+        with gpu.matrix.push_pop():
+            gpu.matrix.load_matrix(Matrix.Identity(4))
+            gpu.matrix.load_projection_matrix(Matrix(((2.0 / W, 0, 0, -1), (0, 2.0 / H, 0, -1), (0, 0, 1, 0),
+                                                      (0, 0, 0, 1))))
+            blf.size(fid, size_px)
+            blf.color(fid, 1.0, 1.0, 1.0, 1.0)
+            x = (badge[2] + 0.012) * W
+            top = H * (1.0 - bar[1])                       # y up in the buffer
+            step = (bar[3] - bar[1]) * H / (len(lines) + 1)
+            for i, line in enumerate(lines):
+                blf.position(fid, x, top - step * (i + 1) - size_px * 0.4, 0)
+                blf.draw(fid, line)
+        buf = fb.read_color(0, 0, W, H, 4, 0, 'FLOAT')
+    buf.dimensions = W * H * 4
+    text = np.array(buf.to_list(), np.float32).reshape(H, W, 4)[::-1]          # top-down
+    off.free()
+    blf.unload(font)
+    px = np.zeros((H, W, 4), np.float32)
+    x0, y0, x1, y1 = (int(bar[0] * W), int(bar[1] * H), int(bar[2] * W), int(bar[3] * H))
+    px[y0:y1, x0:x1] = bar_rgba
+    bx0, by0, bx1, by1 = (int(badge[0] * W), int(badge[1] * H), int(badge[2] * W), int(badge[3] * H))
+    px[by0:by1, bx0:bx1] = (*badge_rgb, 1.0)
+    a = np.clip(text[..., 0:1], 0.0, 1.0)              # white text's coverage: its red over the cleared buffer
+    px[..., :3] = px[..., :3] * (1.0 - a) + a
+    px[..., 3:4] = np.maximum(px[..., 3:4], a)
+    return px
+
+
 def render_png(scene, path, frame):
     scene.frame_set(frame)
     scene.render.image_settings.media_type = 'IMAGE'

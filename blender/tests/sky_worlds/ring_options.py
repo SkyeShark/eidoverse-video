@@ -1,7 +1,8 @@
 """The ringworld's make_ringworld options, each exercised and rendered against the default from one camera and sky.
 
 Three parts (--only picks variants by tag; --parts day,night,build picks parts):
-  day    one build at --hours (9.5, up the arc); the band's material is rebuilt per material option and rendered
+  day    one build at --hours (9.5, up the arc); the band's material is rebuilt per material option, its plate
+         rendered again (sky.bake_plates), and the frame rendered
   night  the same build at --night (23, horizon); the night-only options act through the keyed night values or the
          analytic night side, so each variant re-bakes, then renders
   build  the options that change the build get one make_sky each (several options per build where they act on
@@ -220,6 +221,7 @@ if 'day' in PARTS:
         if ONLY and tag not in ONLY and tag not in ('default', 'debugBand_basic'):
             continue
         rebuild_band(ring, dict(base_opts, **opts))
+        sky.bake_plates(log=lambda *a: None)      # the band reaches the frame through its plate
         shots[tag] = render(sc, tag)
     rebuild_band(ring, base_opts)
     mask = band_mask(shots['debugBand_basic'], shots['default']) if 'debugBand_basic' in shots else None
@@ -253,7 +255,9 @@ if 'day' in PARTS:
                 hz = max(ring.last['haze'])
                 check('night: hazeNightLevel lifts the night haze floor', hz > 0.3, 'haze peak %.3f' % hz)
         rebuild_band(ring, base_opts)
-        compare(nshots, 'night_default', None, 'night')
+        # judged over the band, as the day part is, when the camera is the day part's (horizon): a night option's mark
+        # is small against the whole dark frame, and the fog wall now veils the band's foot as WebGPU's does
+        compare(nshots, 'night_default', mask if args.view == 'horizon' else None, 'night')
         sheet(nshots, 'sheet_night')
 # ---- build variants ----
 def read_png(path):

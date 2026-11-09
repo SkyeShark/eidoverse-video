@@ -13,8 +13,9 @@ writes, in out_dir:
                      page's xr_* custom properties as extras, materials as the exporter writes them after the bake
                      below. Two faults of the 5.2 exporter are handled: its EXT_mesh_gpu_instancing pass leaves
                      animation channels on stale node indices (_GpuInstancingChannelFix re-points them while it runs;
-                     check_channels reads the GLB back), and its own instance nodes (export_gn_mesh) are left off when
-                     the motion bake has made every instance an object
+                     check_channels reads the GLB back), and its own instance nodes (export_gn_mesh) are left off:
+                     every instance is made an object first (keyed with the motion bake, still at the first frame
+                     without it)
     world.hdr        the world, equirectangular, three's convention (eidoblend.xr.world): the page's sky and its IBL
     textures/        what bake_for_gltf baked (eidoblend.xr.materials)
     choreo.json      markers and the property tracks glTF cannot carry (eidoblend.xr.motion.property_tracks)
@@ -28,7 +29,10 @@ do not save afterwards (export_cli.py opens it, exports and quits), or call expo
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
+import functools
+import inspect
 import json
 import math
 import os
@@ -42,25 +46,60 @@ from . import glb as G
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE_TEMPLATE = os.path.join(HERE, 'page', 'xr_page.html')
 TONE = {'Standard': 'None', 'AgX': 'AgX', 'Khronos PBR Neutral': 'Neutral', 'Filmic': 'ACESFilmic', 'Raw': 'None'}
-DEFAULTS = {'street': 1.0, 'table': None, 'start': None, 'facing': (0.0, 1.0, 0.0), 'eye_height': 1.6, 'name': None,
+DEFAULTS = {'street': 1.0, 'table': None, 'start': None, 'facing': None, 'eye_height': 1.6, 'name': None,
             'table_centre': None, 'shadows': False}
+
+
+@contextlib.contextmanager
+def context_scene(scene):
+    """`scene` as the context scene for the block, the window's scene put back after. Blender's glTF exporter exports
+    the context scene (use_active_scene), and the depsgraph, the view layer and the bakes are the context's too: an
+    export or a survey of another scene runs inside this."""
+    keep = bpy.context.scene
+    if scene is None or scene == keep:
+        yield scene
+        return
+    win = bpy.context.window
+    if win is None:                                    # (no window: an override; the exporter needs a window anyway)
+        vl = next((v for v in scene.view_layers if v.use), scene.view_layers[0])
+        with bpy.context.temp_override(scene=scene, view_layer=vl):
+            yield scene
+        return
+    win.scene = scene
+    try:
+        yield scene
+    finally:
+        win.scene = keep
+
+
+def _on_its_scene(fn):
+    """Run fn with its `scene` argument as the context scene (context_scene)."""
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def run(*a, **kw):
+        with context_scene(sig.bind_partial(*a, **kw).arguments.get('scene')):
+            return fn(*a, **kw)
+    return run
 
 
 # ------------------------------------------------------------------------------------------- the XR settings ---
 
-def set_xr(scene, *, street=1.0, table=None, start=None, facing=(0.0, 1.0, 0.0), eye_height=1.6, name=None,
+def set_xr(scene, *, street=1.0, table=None, start=None, facing=None, eye_height=1.6, name=None,
            table_centre=None, shadows=False, landmarks=True):
     """The scene's XR settings, saved with the .blend (scene['eido_xr']), in Blender axes:
     street   metres in the room per Blender unit when you stand in it (1.0: life size)
     table    metres per unit on the table (None: the scene's extent fits about 0.6 m)
     start    the ground point you start at (None: the scene camera's ground point, else the origin)
-    facing   the direction you face there; table_centre: the point at the table's centre (None: the start)
+    facing   the direction you face there (None: where the scene camera looks, levelled; else +Y)
+    table_centre  the point at the table's centre (None: the middle of the set)
     shadows  the page casts shadows from its sun (desktop cost; off by default for the headset)
     With landmarks, Blender's VR Scene Inspection gets the same two places (eidoblend.xr.landmarks), the street one
     active, and the session the kit page's view settings (landmarks.session_settings)."""
     d = {'street': float(street), 'table': None if table is None else float(table),
          'start': None if start is None else [float(x) for x in start],
-         'facing': [float(x) for x in facing], 'eye_height': float(eye_height), 'name': name,
+         'facing': None if facing is None else [float(x) for x in facing], 'eye_height': float(eye_height),
+         'name': name,
          'table_centre': None if table_centre is None else [float(x) for x in table_centre], 'shadows': bool(shadows)}
     scene['eido_xr'] = json.dumps(d)
     if landmarks:
@@ -105,9 +144,20 @@ def get_xr(scene):
     c, size = scene_extent(scene)
     if d.get('table') is None:
         d['table'] = round(0.6 / size, 6)
+    cam = scene.camera
     if d.get('start') is None:
-        cam = scene.camera
         d['start'] = [cam.matrix_world.translation.x, cam.matrix_world.translation.y, 0.0] if cam else [0.0, 0.0, 0.0]
+    if d.get('facing') is None:
+        # where the film's camera looks, levelled (you stand where it stands, looking where it looks); +Y when it looks
+        # straight down or up, or there is no camera
+        from mathutils import Vector
+        f = [0.0, 1.0, 0.0]
+        if cam is not None:
+            v = cam.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))
+            h = math.hypot(v.x, v.y)
+            if h > 0.05 * max(v.length, 1e-9):
+                f = [round(v.x / h, 6), round(v.y / h, 6), 0.0]
+        d['facing'] = f
     if d.get('table_centre') is None:
         d['table_centre'] = [c.x, c.y, 0.0]
     if not d.get('name'):
@@ -139,15 +189,34 @@ NOT_IN_GLTF = {'VOLUME': 'a volume (smoke, fire, clouds): glTF has no volumes; t
                'LIGHT_PROBE': "a light probe: the page lights with world.hdr and the GLB's lights"}
 
 
-def unsupported(objects):
-    """[(object name, why)] for objects the export cannot carry: NOT_IN_GLTF types, hair particle systems, point
-    clouds (written, but three draws glTF points one pixel wide)."""
+VOLUME_MESH = 'a volume material (haze, fog): glTF has no volumes; not exported (the page shows nothing there)'
+
+
+def volume_meshes(objects):
+    """The meshes whose every material is a volume with no surface (materials.volume_only): a haze or fog box round a
+    set, which Blender's exporter would write as an opaque grey box. export_xr leaves them out."""
+    from .materials import used_materials, volume_only
     out = []
+    for ob in objects:
+        if ob.type == 'MESH' and ob.material_slots:
+            mats = used_materials(ob)
+            if mats and all(volume_only(m) for m in mats):
+                out.append(ob)
+    return out
+
+
+def unsupported(objects):
+    """[(object name, why)] for objects the export cannot carry: NOT_IN_GLTF types, meshes of volume materials (left
+    out), hair particle systems, point clouds (written, but three draws glTF points one pixel wide)."""
+    out = []
+    vols = {o.name for o in volume_meshes(objects)}
     for ob in objects:
         if ob.type in NOT_IN_GLTF:
             out.append((ob.name, NOT_IN_GLTF[ob.type]))
         elif ob.type == 'POINTCLOUD':
             out.append((ob.name, 'a point cloud: written as glTF points, which three draws one pixel wide'))
+        if ob.name in vols:
+            out.append((ob.name, VOLUME_MESH))
         if ob.type == 'MESH':
             for ps in getattr(ob, 'particle_systems', []):
                 st = ps.settings
@@ -184,13 +253,17 @@ def metaballs_to_meshes(scene, objects, log=print):
     return made
 
 
+@_on_its_scene
 def survey_xr(scene=None):
     """What export_xr would do with a scene, changing nothing: objects by type, what it cannot carry, the materials it
     would bake (and why), the motion it would convert, the animated values the page plays or cannot, the lights, the
-    world and the view. Cheap (no bake, no GLB): run it before an export to see a film's XR cost."""
+    world, the view, the triangles rendering now and the film's own image textures as the headset would hold them
+    (their Quest grade: 'over' asks for max_image). Cheap (no bake, no GLB): run it before an export. Any scene: it is
+    made the context scene for the survey (context_scene)."""
     from . import materials as M
     from . import motion as MO
     sc = scene or bpy.context.scene
+    M.ensure_vrm_addon(log=None)                      # a cast's MToon is read as MToon (a headless .blend has no add-ons)
     objs = export_objects(sc)
     types = {}
     for ob in objs:
@@ -221,6 +294,14 @@ def survey_xr(scene=None):
     det = MO.detect(sc, objs)
     props = MO.animated_properties(sc)
     xr = get_xr(sc)
+    # the film's own image textures, as the headset would hold them (RGBA8 with mips, uncompressed): max_image's cue
+    imgs, trees = {}, set()
+    for m in mats:
+        if m.node_tree is not None:
+            for img in M._tree_images(m.node_tree, trees):
+                if img.type == 'IMAGE' and img.size[0] and img.size[1]:
+                    imgs[img.name] = tuple(img.size)
+    tex_mb = round(sum(w * h for w, h in imgs.values()) * 16 / 3 / 1e6, 1)
     return {
         'scene': sc.name, 'frames': [sc.frame_start, sc.frame_end], 'fps': sc.render.fps / sc.render.fps_base,
         'objects': types, 'unsupported': unsupported(objs),
@@ -237,52 +318,70 @@ def survey_xr(scene=None):
         'world': sc.world.name if sc.world else None,
         'view': (sc.view_settings.view_transform, sc.view_settings.look, sc.view_settings.exposure),
         'triangles_now': tri, 'xr': xr,
+        'textures': {'images': len(imgs), 'largest': max((max(s) for s in imgs.values()), default=0),
+                     'mb_gpu': tex_mb, 'quest': G.budget({'triangles': 0, 'draws': 0, 'texture_mb_gpu': tex_mb})['textures']},
     }
 
 
 def _rect_lights(scene, objects):
-    """Area lights as three RectAreaLight data (glTF has no area light): radiance L = P / (pi A), measured."""
+    """Area lights as three RectAreaLight data (glTF has no area light): radiance L = P / (pi A), measured.
+
+    Orientation: three's RectAreaLight and Blender's area light both shine down their local -z, with the width along
+    local x and the height along local y, so the light's local axes ARE its own axes in both. Its rotation in three's
+    world is then M R (M = Blender -> three, a -90 degree turn about x; R the light's rotation in Blender), not the
+    world-rotation conversion M R M^-1, which leaves every area light shining 90 degrees off (up into the sky). The
+    glTF exporter applies the same correction to the lights and cameras it writes (choreo.quat_to_three).
+    Size: a disk or an ellipse becomes the rectangle of the same area; power: Normalize off multiplies it by the area,
+    as the exporter does (motion.light_intensity)."""
+    from .choreo import quat_to_three
+    from .motion import area_light_size, light_color, light_intensity
     out = []
     for ob in objects:
         if ob.type != 'LIGHT' or ob.data.type != 'AREA':
             continue
-        li = ob.data
-        sx, sy, sz = ob.matrix_world.to_scale()
-        w = li.size * abs(sx)
-        h = (li.size_y if li.shape in ('RECTANGLE', 'ELLIPSE') else li.size) * abs(sy)
-        if li.shape in ('DISK', 'ELLIPSE'):
-            area = math.pi * w * h / 4
-            w, h = w * math.sqrt(math.pi / 4), h * math.sqrt(math.pi / 4)        # a rectangle of the same area
-        else:
-            area = w * h
-        power = li.energy * (2 ** getattr(li, 'exposure', 0.0))
-        col = list(li.color)
-        if getattr(li, 'use_temperature', False):
-            tc = li.temperature_color
-            col = [col[0] * tc[0], col[1] * tc[1], col[2] * tc[2]]
+        w, h, _area = area_light_size(ob)
         m = ob.matrix_world
-        p = m.translation
-        q = m.to_quaternion()
-        out.append({'name': ob.name, 'position': list(to_three(*p)), 'quaternion': [q.x, q.z, -q.y, q.w],
-                    'width': w, 'height': h, 'intensity': power / (math.pi * max(area, 1e-9)), 'color': col,
-                    'spread': math.degrees(getattr(li, 'spread', math.pi))})
+        out.append({'name': ob.name, 'position': list(to_three(*m.translation)),
+                    'quaternion': quat_to_three(m.to_quaternion(), True), 'width': w, 'height': h,
+                    'intensity': light_intensity(ob), 'color': light_color(ob),
+                    'spread': math.degrees(getattr(ob.data, 'spread', math.pi))})
     return out
 
 
-def _fallback_background(scene):
-    """The world as one linear colour (its radiance): a Background node's colour x strength when they are constants,
-    else the world's viewport colour. The page's background, and its ambient light when there is no world.hdr."""
+def _fallback_background(scene, world_info=None, frame=None, log=print):
+    """The world as one linear colour, its radiance averaged over the sphere: a Background node's colour x strength
+    when both are constants; else the baked world.hdr's mean (world_info); else MEASURED: the world rendered alone at
+    64 x 32 (Cycles on the CPU, a fraction of a second; eidoblend.xr.world) and averaged by solid angle; the world's
+    viewport colour only when that fails. The page's background, and its uniform environment when there is no
+    world.hdr."""
     w = scene.world
     if w is None:
         return [0.0, 0.0, 0.0]
     try:
         bg = next(n for n in w.node_tree.nodes if n.type == 'BACKGROUND')
-        if not bg.inputs['Color'].is_linked:
-            k = 1.0 if bg.inputs['Strength'].is_linked else float(bg.inputs['Strength'].default_value)
+        if not bg.inputs['Color'].is_linked and not bg.inputs['Strength'].is_linked:
+            k = float(bg.inputs['Strength'].default_value)
             return [c * k for c in list(bg.inputs['Color'].default_value)[:3]]
     except Exception:
         pass
-    return list(w.color)[:3]
+    if world_info and world_info.get('mean'):
+        return list(world_info['mean'])
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix='xr_world_mean_')
+    try:
+        from . import world as W
+        r = W.bake_world_equirect(scene, os.path.join(tmp, 'mean.hdr'), width=64, samples=8, frame=frame,
+                                  device='CPU', log=None)
+        if log:
+            log(f"[xr] the world's flat colour, measured: {r['mean']} (linear)")
+        return list(r['mean'])
+    except Exception as e:
+        if log:
+            log(f"[xr] the world's flat colour could not be measured ({e}): its viewport colour")
+        return list(w.color)[:3]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 class _GpuInstancingChannelFix:
@@ -378,12 +477,17 @@ def write_page(out_dir, manifest_name='scene.xr.json', template=PAGE_TEMPLATE):
 
 # ------------------------------------------------------------------------------------------------ the export ---
 
+@_on_its_scene
 def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_density=24.0, max_texture=2048,
-              bake_motion=True, motion_step=1, max_shape_keys=48, world=True, world_width=2048, world_frame=None,
-              world_samples=32, image_format='AUTO', compress=None, cameras=True, page=True, choreo_names=(),
-              log=print):
+              max_image=None, bake_motion=True, motion_step=1, max_shape_keys=48, world=True, world_width=2048,
+              world_frame=None, world_samples=32, image_format='AUTO', compress=None, cameras=True, page=True,
+              choreo_names=(), log=print):
     """Export `scene` for an XR page into out_dir (see the module doc). Returns the manifest (a dict) with
-    'report': what was baked, converted, skipped, and the GLB's own counts read back."""
+    'report': what was baked, converted, skipped, and the GLB's own counts read back. Any scene (default the context
+    scene): it is made the context scene while it exports (context_scene), the window's own put back after.
+    max_texture caps the bakes; max_image (None: off) scales the film's own image textures down to that many pixels
+    on the long side (materials.cap_images), for the headset's texture budget. bake_motion False sends instances and
+    deformation out still, at the first frame (keys, constraints, armatures and shape keys still play)."""
     t0 = time.time()
     sc = scene or bpy.context.scene
     out_dir = os.path.abspath(out_dir)
@@ -397,10 +501,15 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
     rep = {'motion': {}, 'materials': {}, 'lights': {}, 'warnings': []}
     keep_frame = sc.frame_current
     # 0. what glTF cannot hold at all (reported), metaballs (converted), the cast's MToon outlines (inverted hulls the
-    # page cannot draw, and would leave standing at the rest pose)
+    # page cannot draw, and would leave standing at the rest pose); the VRM add-on on, so a cast's MToon is read
+    if not M.ensure_vrm_addon(log=log):
+        rep['warnings'].append('the VRM add-on is not available: MToon materials go out as the exporter reads them')
     objs = export_objects(sc)
     for n, why in unsupported(objs):
         rep['warnings'].append(f'{n}: {why}')
+    rep['volume_meshes_left_out'] = [o.name for o in volume_meshes(objs)]
+    for o in volume_meshes(objs):                             # (a haze box would go out as an opaque grey box)
+        o.hide_render = True
     rep['metaballs'] = metaballs_to_meshes(sc, objs, log=log)
     objs = export_objects(sc)
     rep['mtoon_outlines_off'] = M.drop_mtoon_outlines(objs, log=log)
@@ -410,23 +519,31 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
                                'emission, alpha); the toon ramp is not glTF' +
                                (f", outlines off on {len(rep['mtoon_outlines_off'])} mesh(es)"
                                 if rep['mtoon_outlines_off'] else ''))
-    # 1. motion glTF cannot carry
-    if bake_motion:
-        det = MO.detect(sc, objs)
-        for src in det['instances'] + det['still_instances']:
-            still = src in det['still_instances']
-            r = MO.instances_to_objects(src, sc, step=motion_step, still=still, log=log)
-            rep['motion'][src.name] = {k: v for k, v in r.items() if k != 'objects'}
-            if r['dropped']:
-                rep['warnings'].append(f"{src.name}: {r['dropped']} {'still' if still else 'moving'} instances over "
-                                       f"the cap ({r['instances']} exported) are not in the GLB")
-        for ob, why in det['deforming']:
-            try:
-                r = MO.deform_to_shape_keys(ob, sc, step=motion_step, max_keys=max_shape_keys, log=log)
-                rep['motion'][ob.name] = {'morph_targets': r['keys'], 'step': r['step'], 'vertices': r['vertices']}
-            except RuntimeError as e:
-                rep['warnings'].append(str(e))
-        rep['motion']['skinned'] = [o.name for o in det['skinned']]
+    # 1. motion glTF cannot carry. Instances always become objects (the exporter's own instance nodes break its
+    # slide-to-zero pass in 5.2); without bake_motion they are taken still, at the first frame, and deformation is
+    # left to the exporter, which writes the surface as it stands at the first frame
+    det = MO.detect(sc, objs)
+    for src in det['instances'] + det['still_instances']:
+        still = src in det['still_instances'] or not bake_motion
+        r = MO.instances_to_objects(src, sc, step=motion_step, still=still,
+                                    frames=None if bake_motion else [sc.frame_start], log=log)
+        rep['motion'][src.name] = {k: v for k, v in r.items() if k != 'objects'}
+        if r['dropped']:
+            rep['warnings'].append(f"{src.name}: {r['dropped']} {'still' if still else 'moving'} instances over "
+                                   f"the cap ({r['instances']} exported) are not in the GLB")
+        if not bake_motion and src in det['instances']:
+            rep['warnings'].append(f'{src.name}: its moving instances are exported still, at the first frame '
+                                   '(no motion bake)')
+    for ob, why in det['deforming']:
+        if not bake_motion:
+            rep['warnings'].append(f'{ob.name} {why}: exported still, at the first frame (no motion bake)')
+            continue
+        try:
+            r = MO.deform_to_shape_keys(ob, sc, step=motion_step, max_keys=max_shape_keys, log=log)
+            rep['motion'][ob.name] = {'morph_targets': r['keys'], 'step': r['step'], 'vertices': r['vertices']}
+        except RuntimeError as e:
+            rep['warnings'].append(str(e))
+    rep['motion']['skinned'] = [o.name for o in det['skinned']]
     sc.frame_set(keep_frame)
     objs = export_objects(sc)
     # 2. the tracks glTF cannot carry (before lights are touched)
@@ -457,6 +574,8 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
         rep['materials'] = r
     else:
         rep['materials'] = {'survey': M.survey({s.material for o in meshes for s in o.material_slots if s.material})}
+    if max_image:
+        rep['images_capped'] = M.cap_images(meshes, int(max_image), log=log)
     # 4. lights: area -> the manifest (RectAreaLight); hide them so the exporter does not warn about them
     rect = _rect_lights(sc, objs)
     for ob in objs:
@@ -479,9 +598,10 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
     # 6. the GLB
     glb_path = os.path.join(out_dir, f'{name}.glb')
     any_normal = any('normal' in v.get('images', {}) for v in rep['materials'].get('baked', {}).values())
-    # export_gn_mesh only without the motion bake: with it every instance is an object already, and the exporter's
-    # instance nodes would double what it meshes itself (curves, text: Blender 5.2 lists their surface as instances)
-    # and break its own slide-to-zero pass (5.2's get_driver_on_shapekey reads a None object on an instance node)
+    # export_gn_mesh off: every instance is an object already (step 1, with or without the motion bake), and the
+    # exporter's own instance nodes would double what it meshes itself (curves, text: Blender 5.2 lists their surface
+    # as instances) and break its slide-to-zero pass (5.2's get_driver_on_shapekey reads a None object on an
+    # instance node: an export with --no-motion died there before step 1 took instances still)
     kw = dict(filepath=glb_path, export_format='GLB', check_existing=False, use_renderable=True, use_active_scene=True,
               export_apply=True, export_yup=True, export_extras=True, export_cameras=bool(cameras),
               export_lights=True, export_import_convert_lighting_mode='COMPAT', export_materials='EXPORT',
@@ -490,7 +610,7 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
               export_anim_scene_split_object=False, export_frame_range=True, export_force_sampling=True,
               export_frame_step=int(motion_step), export_anim_slide_to_zero=True, export_bake_animation=True,
               export_optimize_animation_size=True, export_skins=True, export_morph=True, export_morph_normal=True,
-              export_morph_animation=True, export_gpu_instances=True, export_gn_mesh=not bake_motion,
+              export_morph_animation=True, export_gpu_instances=True, export_gn_mesh=False,
               export_vertex_color='MATERIAL', will_save_settings=False)
     if compress == 'draco':
         kw.update(export_draco_mesh_compression_enable=True)
@@ -538,7 +658,9 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
         'shadows': xr['shadows'],
         'view': {'transform': vt, 'look': sc.view_settings.look, 'exposure': sc.view_settings.exposure,
                  'tone_mapping': TONE.get(vt, 'AgX')},
-        'world': world_info, 'background': _fallback_background(sc),
+        'world': world_info,
+        'background': _fallback_background(sc, world_info, world_frame if world_frame is not None else sc.frame_start,
+                                           log=log),
         'rect_lights': rect, 'page_materials': page_mats,
         'tracks': 'choreo.json' if tracks is not None else None,
         'camera': sc.camera.name if sc.camera else None,

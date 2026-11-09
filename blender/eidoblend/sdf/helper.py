@@ -112,17 +112,29 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
   shade_as ('albedo' | 'emission': a map + shade spec with no surface renders its shade() colour),
   cut_by_bounds (a shape that runs past its box on purpose), atlas_budget, pack_images,
   location / rotation / scale / name / scene / collection, build.
-  Python SDFs read S.time (uTime) and S.uniform('uName') while they are evaluated.
+  Python SDFs read S.time (uTime) and S.uniform('uName') while they are evaluated; a Python shade or surface may
+  take the engine's ctx as a 4th argument (ctx.ro, ctx.rd, ctx.softShadow(ro, rd, mint, maxt, k), ctx.calcNormal(p)).
+  Cache files are named for the object (two objects of one example keep their own); a frame with no surface is an
+  empty mesh.
 
 == Volumes ==
   create_sdf_volume(sample=GLSL | medium=GLSL, bounds, steps, post, cells | voxel, ...) -> a Volume object
   sample: SdfSample sample(vec3 p) -> sdfSample(color, alpha, step)   (the engine's contract, converted exactly;
           sample_as='albedo' reads the colour as scattering, lit by the scene)
   medium: SdfMedium medium(vec3 p) -> sdfMedium(density, albedo, emission)  (+ .temperature)
+  explosion_ring flame smoke gyroid_fireball bonfire candle_flame fire nuclear_blast (examples_volumes.py, tools-guides/sdf-explosions.md)
+  EXAMPLES['bonfire'].make(cells=200, build=False).bake(1, 120); make(look='lit'): fire emits, smoke scatters the scene's light
+  light_from_emission(vol) / light_from_surface(sdf): keyed lamps (EEVEE's volume emission lights no surface)
+  fit_volume_range(scene, camera, [vols]): the froxel range over these and every other scene volume; build_still(vol, t)
+  nuclear_explosion.apply_to(scene, camera, {origin, scale, timeOffset, loopSeconds, opacity}) -> .bake(fs, fe) .update(t) .key_opacity(f, v)
 
 == Screens ==
   make_sdf_texture(recipe='mandelbulb' | 'sierpinski_tetra' | 'menger_sponge' | 'gyroid', width, height, ...)
-  .update(t) .bake(fs, fe) .material(emission_strength=0.9) .set_uniform(name, v)
+  .update(t) .bake(fs, fe, controls=) .material(emission_strength=0.9) .set_uniform(name, v)
+  encoding='linear' (the engine's look: its sRGB render target read the shader's values as linear light, the
+  default) | 'srgb' (the values as display colours: darker); update(t) packs its frame into the .blend
+  make_explosion_texture(width, height, camera_pos, camera_target, time_scale, time_offset, update_every)
+  the mushroom-cloud detonation on a 15 s loop; .set_camera_pos(x, y, z) .set_camera_target(x, y, z), as above
 
 == Voxels ==
   rhombic_dodecahedron: create_rhombic_dodecahedron(radius) fill_volume_rd fill_sphere_rd voxelize_mesh_rd .reveal()
@@ -130,6 +142,10 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
 == EXAMPLES ==
   %(examples)s
   EXAMPLES['name'].make(**overrides) builds one; register_example(name, ...) adds yours.
+  Vehicles: EXAMPLES['stylized_modern_sedan' | 'stylized_cyberpunk_sedan' | 'stylized_sci_fi_sleek_car' |
+  'stylized_fighter_jet'].make(paint_color=, paint_roughness=, decal_text=, metal_color=, camo=, lamps=, quality=)
+  -> .set_paint() .set_camo() .set_decal_text() .key_uniform(name, frame, value) .live_uniforms .lamps
+  (tools-guides/sdf-vehicles.md)
 
 == Gotchas ==
   * bounds must hold the whole shape: the surface is closed at the bounds box (the engine never drew outside it).

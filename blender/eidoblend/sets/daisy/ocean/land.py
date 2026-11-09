@@ -1,4 +1,4 @@
-"""ocean/land.py: the shore of verse 3 (port of eidoverse/sets/ocean/land.js), in the DESIGN frame: her mark at the
+"""ocean/land.py: the ocean set's shore (port of eidoverse/sets/ocean/land.js), in the DESIGN frame: her mark at the
 origin, the open sea toward the moon, the cove and the house's spit behind her to the left.
 
     a small rise (her mark) at the tip of a low headland,
@@ -260,7 +260,7 @@ def build_land(coast, parent=None, collection=None, mesh=True, grass=True, daisi
     (2600 tufts of geometry blades swaying from a keyed clock: custom property 't' on the grass object), and her
     flowers (the flora family's daisy, shut for the night). parent: the layout Empty (design frame).
     design_to_world(x3, z3, y3=0) / world_to_design(x, y): the flora field lives in world space at the world origin,
-    so it is planted through these. webgpu_sway: the film's grass sway arithmetic (see _land_nodes._sway_group)."""
+    so it is planted through these. webgpu_sway: the WebGPU edition's grass sway arithmetic (_land_nodes._sway_group)."""
     import bpy
     from . import _bl, _land_nodes
     col = collection or bpy.context.scene.collection

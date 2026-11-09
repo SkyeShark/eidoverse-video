@@ -29,6 +29,10 @@ film the run is solved at build time and keyed, so the legs here, RobotLegs, are
      along the route it travelled (planted feet, the swing's clearance, the corners' arcs), then the hands, the wrists'
      stages, the gaze, the head and the crown (rig.post_pass); a walk starts at its stance foot's mid-stance and stops at
      the nearest one, and the hand-over between standing and walking crossfades with that foot held where it stands.
+  THE MOVES (vault, jump, climb_ledge, climb_ladder: the JS passes them to the engine's charCtrl) are the controller
+     family's own: when the body calls one, the controller family's VRMCharacterController plays it from where my body
+     stands (its scan ahead, its clips, its contact IK on the cover, the lip and the rungs) and plants it; the live run
+     follows its root frame by frame and the bake keys its frames (bake.bake_run).
 legs_class: any object with this contract may stand in (the controller family's VRMCharacterController port, when it has
 locomote and bake). The JS's VRMUtils merge (fewer skinned draws in three) and the Rapier world do not apply in Blender.
 """
@@ -293,15 +297,17 @@ class CollisionWorld:
                     return True
         return False
 
-    def as_ground(self):
-        """a round-one Ground over the same meshes (the walk's feet read it)"""
+    def as_ground(self, z_from=3.0):
+        """a round-one Ground over the same meshes (the walk's feet read it), probed down from z_from: give a level's
+        height plus a step (the bake's per-span level) so a foot by a tall solid reads the floor it stands on, not the
+        solid's top (from inside a box the probe meets its underside and reads the ground below)"""
         w = self
 
         def fn(xs, ys):
             xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
             out = np.empty(xs.shape)
             for i, (x, y) in enumerate(zip(xs.ravel(), ys.ravel())):
-                out.flat[i] = w.ground(float(x), float(y), 3.0)
+                out.flat[i] = w.ground(float(x), float(y), z_from)
             return out
         return Ground(fn=fn)
 
@@ -316,6 +322,10 @@ START_TURN = math.radians(25.0)
 # ground in a 90 deg corner. So the legs walk arcs of speed / 1.0, and make the big turns (over START_TURN) on the
 # spot: max_turn_rate=3.5 is the engine's exactly
 MAX_TURN_RATE = 1.0
+# a maneuver is simulated from this much standing before it (the bake crossfades my standing pose into it there) and
+# this much after it lands (it settles to standing before the legs walk on), s
+MANEUVER_PRE_S = 0.35
+MANEUVER_POST_S = 0.6
 
 
 class RobotLegs:
@@ -356,6 +366,9 @@ class RobotLegs:
         self._pre_turn = None                # a turn on the spot in progress: {'heading', 'left' (frames)}
         self.record = []
         self._gaze = None
+        self._maneuver = None                # a maneuver in flight (see _start_maneuver)
+        self._maneuvers = []                 # every maneuver made, in order (the bake keys each from its own frames)
+        self.maneuver_log = []               # what the controller family said about a move it could not start
         self.t = 0.0
         sc = bpy.context.scene
         self.fps = sc.render.fps / sc.render.fps_base
@@ -367,7 +380,7 @@ class RobotLegs:
 
     @property
     def is_maneuvering(self):
-        return False
+        return self._maneuver is not None
 
     @property
     def is_emoting(self):
@@ -409,6 +422,8 @@ class RobotLegs:
         engine controller's turning model). A step the collision world blocks is not taken (_blocked_frames counts). A
         turn on the spot in progress stands its frames out first"""
         self.t += dt
+        if self._maneuver is not None:
+            return self._follow_maneuver(dt)          # a maneuver in flight owns the frame (the input is not read)
         x, y = (inp.get('x', 0.0), inp.get('y', 0.0)) if isinstance(inp, dict) else (inp[0], inp[1])
         turning = self._pre_turn is not None and self._pre_turn['left'] > 0
         if turning:
@@ -463,10 +478,14 @@ class RobotLegs:
         self.record.append(rec)
         return rec
 
-    def set_gaze(self, yaw, pitch):
-        """the body's head override for the frame just stepped (VRMRobotBody._applyHeadOverride)"""
+    def set_gaze(self, yaw, pitch, look=None):
+        """the body's head override for the frame just stepped (VRMRobotBody._applyHeadOverride); look: (the look-at
+        target, the head's place and the heading its aim was taken from, the yaw and pitch limits) while one is held,
+        for the bake to re-aim the head from the keyed body (bake._aimed_gaze)"""
         if self.record:
             self.record[-1]['gaze'] = (yaw, pitch)
+            if look is not None:
+                self.record[-1]['look'] = look
 
     def load_emote(self, slot, loop=False):
         from ..vrma import load_clip
@@ -512,25 +531,102 @@ class RobotLegs:
             self.play_emote(slot, aim=False)
         return None
 
+    # ---- the maneuvers: robot_controller.js passes vault / jump / climbLedge / climbLadder through to the engine's
+    # charCtrl (VRMCharacterController). Here that controller is the controller family's port: each move is played by
+    # it from where my body stands, facing its heading, on the same collision meshes, at the moment it is called (its
+    # scan of the meshes ahead decides whether the move fits, as the engine's does: False when it does not)
     def vault(self):
-        return False
+        """vault the cover ahead along the heading (a wall 0.42 to 1.15 m high, with ground to land on beyond)"""
+        return self._start_maneuver('vault')
 
     def jump(self, opts=None):
-        return False
+        """jump({distance, height}): a leap forward along the heading (1.4 m and 0.45 m by default), the landing probed"""
+        o = dict(opts or {})
+        return self._start_maneuver('jump', distance=o.get('distance', 1.4), height=o.get('height', 0.45))
 
     def climb_ledge(self):
-        return False
+        """mount the block ahead (climbLedge; climbWallUp over 1.35 m)"""
+        return self._start_maneuver('climb_ledge')
 
     def climb_ladder(self, opts=None):
-        return False
+        """climbLadder({height, rate, firstRung, rungSpacing, timeScale}): up the ladder on the face ahead, the rung loop
+        chained into the mantle over its top (height: the ladder's, else the face's the scan measures)"""
+        o = dict(opts or {})
+        kw = {k: o[j] for j, k in (('height', 'height'), ('rate', 'rate'), ('firstRung', 'first_rung'),
+                                   ('first_rung', 'first_rung'), ('rungSpacing', 'rung_spacing'),
+                                   ('rung_spacing', 'rung_spacing'), ('timeScale', 'time_scale'),
+                                   ('time_scale', 'time_scale')) if j in o}
+        return self._start_maneuver('climb_ladder', **kw)
+
+    def _start_maneuver(self, name, **kw):
+        """the move simulated now through the controller family (eidoblend.characters.controller.Locomotion: its
+        VRMCharacterController, the robot preset, the clips, the move's planner and its contact IK), from MANEUVER_PRE_S
+        of standing to MANEUVER_POST_S of standing after the landing, and planted (its plant: the feet, my body's DOF
+        pass). The live run then follows its root frame by frame (_follow_maneuver: the body senses on from where the
+        move carries it) and the bake keys its frames (bake.bake_run) -> started?"""
+        if self._maneuver is not None or self._seated or self._emote is not None or self._pre_turn is not None:
+            return False
+        if self.record and self.record[-1]['state'] in ('walk', 'run'):
+            # the engine also vaults out of a walk or a run (its auto-maneuvers); here a move starts from standing
+            self.maneuver_log.append((self.t, name, ['moving: a move starts from standing (stop first)']))
+            return False
+        sim = self.simulate_maneuver(name, kw, (self.pos.x, self.pos.y, self.pos.z), self._heading)
+        if not sim['played']:
+            self.maneuver_log.append((self.t, name, sim['said'][-3:]))
+            return False
+        mv = dict(sim, id=len(self._maneuvers), name=name, kw=kw, k=0, t0=self.t,
+                  start=(self.pos.x, self.pos.y, self.pos.z, self._heading))
+        self._maneuvers.append(mv)
+        self._maneuver = mv
+        return True
+
+    def simulate_maneuver(self, name, kw, start, heading):
+        """one move through the controller family from `start` (x, y, z: the feet) facing `heading`: MANEUVER_PRE_S of
+        standing, the move, MANEUVER_POST_S of standing, planted -> {'frames' (the plant's: N, off, M, stages in
+        Blender's axes), 'records' (the controller's: feet_world, heading, mode, maneuver), 'played' (the maneuver
+        types it played), 'report', 'said' (its log)}. The bake runs it again from where the keyed body stands"""
+        from ..controller import CollisionWorld as ControllerWorld, Locomotion
+        names = self.world.names if self.world is not None else []
+        objs = [bpy.data.objects[n] for n in names if n in bpy.data.objects]
+        world = ControllerWorld(objs) if objs else ControllerWorld()
+        said = []
+        loco = Locomotion(self.h, world, start=tuple(start), heading=heading,
+                          log=lambda *a: said.append(' '.join(str(x) for x in a)))
+        loco.wait(MANEUVER_PRE_S)
+        getattr(loco, name)(**kw)
+        loco.wait(MANEUVER_POST_S)
+        rep = loco.bake(f0=1, key=False)
+        recs = rep['_records']
+        return {'frames': rep['_frames'], 'records': recs, 'said': said,
+                'played': sorted({r['maneuver'] for r in recs if r.get('maneuver')}),
+                'report': {k: v for k, v in rep.items() if k in ('segments', 'worst', 'timing_s')}}
+
+    def _follow_maneuver(self, dt):
+        mv = self._maneuver
+        k = mv['k']
+        r, fr = mv['records'][k], mv['frames'][k]
+        fw = r['feet_world']
+        self.pos.x, self.pos.y, self.pos.z = fw[0], fw[1], fw[2]
+        _l, rq, _s = fr['M'].decompose()
+        self._heading = 2.0 * math.atan2(rq.z, rq.w)         # the keyed root's facing (the bake reads it so)
+        rec = {'t': self.t - dt, 'state': 'maneuver', 'x': self.pos.x, 'y': self.pos.y, 'z': self.pos.z,
+               'heading': self._heading, 'step': 0.0, 'speed': 0.0, 'clip': None, 'gaze': None, 'goal': None,
+               'maneuver': mv['id'], 'maneuver_k': k, 'move': r.get('maneuver') or r.get('mode')}
+        self.record.append(rec)
+        mv['k'] = k + 1
+        if mv['k'] >= len(mv['records']):
+            self._maneuver = None                # landed and settled: the legs walk on from here
+            self.route = None
+            self._blocked_frames = 0
+        return rec
 
     # ------------------------------------------------------------------------------------------------------ the bake
     def bake(self, f0=1, ground=None, face=None, crown_state=None, head_state=None, fade=8, action_name=None,
-             key=True, log=print):
+             key=True, log=print, keep_feet_out=True):
         """the record keyed through my body's passes (see the module doc) -> report"""
         from . import bake as B
         return B.bake_run(self, f0=f0, ground=ground, face=face, crown_state=crown_state, head_state=head_state, fade=fade,
-                          action_name=action_name, key=key, log=log)
+                          action_name=action_name, key=key, log=log, keep_feet_out=keep_feet_out)
 
 
 # ------------------------------------------------------------------------------------------------------------ the adapter
@@ -618,7 +714,7 @@ class EidoverseRobotController:
     def is_maneuvering(self):
         return bool(getattr(self.char_ctrl, 'is_maneuvering', False))
 
-    # parkour passthroughs (the legs have no maneuvers yet: False, as the JS answers for a controller without them)
+    # parkour passthroughs (scripted moments; a legs object without a move answers False, as the JS's ?? false)
     def vault(self):
         return getattr(self.char_ctrl, 'vault', lambda: False)()
 

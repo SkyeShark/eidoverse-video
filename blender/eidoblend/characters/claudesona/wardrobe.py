@@ -159,6 +159,7 @@ class Wardrobe:
         self._rigs = {}
         self._hide_mods = {}
         self.current = None
+        self._worn = []                     # [(frame, key)]: the keyed wears, in frame order (worn_at)
         self.folds = {}
         self.lift = 0.0
         self._folded = set()
@@ -231,8 +232,9 @@ class Wardrobe:
         self.arm[prop] = 1.0 if hidden else 0.0
         if frame is not None:
             self.arm.keyframe_insert(f'["{prop}"]', frame=frame)
-            from ._paint import _constant_path
+            from ._paint import _constant_path, tag_keyed
             _constant_path(self.arm, f'["{prop}"]')
+            tag_keyed(self.arm)
 
     def _hide_mod(self, o):
         if o.name in self._hide_mods:
@@ -629,6 +631,8 @@ class Wardrobe:
         self.current = key
         if frame is not None and (getattr(self, '_first_key', None) is None or frame < self._first_key):
             self._first_key = int(frame)
+        if frame is not None:
+            self._worn = sorted([w for w in self._worn if w[0] != int(frame)] + [(int(frame), key)])
         p = WARDROBE.get(key) or WARDROBE['suit']
         for n, o in self.layers.items():
             self._show(o, n in p.get('show', []), frame)
@@ -661,6 +665,18 @@ class Wardrobe:
                     hat.animation_data.action_slot = held[1]
                 hat.matrix_basis = mb
         self.place_hat_keys(frame)
+
+    def worn_at(self, frame=None):
+        """the outfit at `frame`: the last keyed wear at or before it (before the first keyed wear, the first, as its
+        keys hold back to the start), or the outfit worn now when frame is None or nothing is keyed. A film's later
+        passes (the TuTa's bake) ask this per frame, as the WebGPU edition's update(t) sees the outfit worn at t."""
+        if frame is None or not self._worn:
+            return self.current
+        key = self._worn[0][1]
+        for f, k in self._worn:
+            if f <= frame:
+                key = k
+        return key
 
     def place_hat_keys(self, frame):
         """the boater's placement keyed (CONSTANT) at frame; the folds reach the render through bake_springs"""

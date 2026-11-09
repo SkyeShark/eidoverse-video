@@ -1,12 +1,16 @@
-"""The corridor and the evening news from the film's cameras, with the claudesona on her mark (claude_suit.vrm at 0.87,
-the scale the cameras were framed for): every camera, the states (the doors open, the post typing, the cap on her
-head with close-ups of its fit, a recount; the tag half sprayed, the floods off, the chyron in its overlay), one
-frame per cue of the cue sheets (cue_state, CUES), and one shot per set with the film's look on (apply_post: bloom and
-the aeropittura 'argue'). Writes out/shots/<set>/<shot>.png and a contact sheet per set.
+"""Test stills of the two sets as free assets, from their own cameras (the five each set ships, framed for a figure of
+1.6 m on the mark): every camera in the default state, then the states and options (the corridor's doors open and
+cracked, a repost typing, a recount, the lights dimmed, the cap carried to a head; the news set's tag half sprayed,
+the floods off, the signs on the kick, the chyron in its overlay) and one shot per set with the suggested look on
+(apply_post: the aeropittura 'argue'). Every still has the look's bloom, as the WebGPU probes' 'off' frames had.
+Writes out/shots/<set>/<shot>.png and a contact sheet per set.
+
+The cap shots need a head: --her stands the claudesona (claude_suit.vrm at 0.87, the scale capFit was measured for)
+on the mark for them alone and hides her elsewhere; without it, a bare head bone stands in (the cap's flight, no fit).
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sets_uf_corridor_news/render_shots.py [corridor|news|both] [--samples 16]
-        [--size 960x540] [--no-her] [--only base,states,cues,look]
+        <worktree>/blender/tests/sets_uf_corridor_news/render_shots.py [corridor|news] [--samples 16]
+        [--size 960x540] [--her] [--only base,states,look] [--dry]
 """
 import math
 import sys
@@ -25,8 +29,8 @@ A = F.args()
 WHICH = next((a for a in A if a in ('corridor', 'news', 'both')), 'both')
 SAMPLES = int(A[A.index('--samples') + 1]) if '--samples' in A else 16
 W, H = (int(v) for v in (A[A.index('--size') + 1] if '--size' in A else '960x540').split('x'))
-HER = '--no-her' not in A
-ONLY = set(A[A.index('--only') + 1].split(',')) if '--only' in A else {'base', 'states', 'cues', 'film', 'look'}
+HER = '--her' in A
+ONLY = set(A[A.index('--only') + 1].split(',')) if '--only' in A else {'base', 'states', 'look'}
 DRY = '--dry' in A                       # everything but the renders (a check of the script, outside the GPU slot)
 OUT = F.OUT / 'shots'
 if DRY:
@@ -44,9 +48,10 @@ def place_her(scale=0.87):
     return h
 
 
-def head_world(h):
-    pb = h.arm.pose.bones[h.humanoid['head']]
-    return h.arm.matrix_world @ pb.head
+def show(h, on):
+    if h is not None:
+        for o in h.objects:
+            o.hide_render = not on
 
 
 def look_cam(name, pos, target, fov_deg=30.0):
@@ -105,9 +110,8 @@ def corridor():
     clock = F.timer()
     C = COR.build(sc, {'postText': 'AMERICANISM, NOT EFFECTIVE ALTRUISM'})
     C.apply_look(sc)
+    C.apply_post(sc, aeropittura=False)        # the look's bloom on every still, as the WebGPU probes had it
     print(f'[shots] corridor built in {clock():.1f}s', flush=True)
-    her = place_her() if HER else None
-    head = (her.arm, her.humanoid['head']) if her else None
     names = []
 
     def shot(name, cam, st, t=0.0, cam_ob=None):
@@ -120,39 +124,28 @@ def corridor():
     if 'states' in ONLY:
         shot('corridorWide_doors_open', 'corridorWide', {'post': 1.0, 'open': 1.0}, t=2.0)
         shot('door_doors_crack', 'door', {'post': 1.0, 'open': 0.14}, t=2.0)
-        shot('postWall_typing_half', 'postWall', {'postText': 'THE DEPARTMENT OF WAR POSTS IN CAPITAL LETTERS',
-                                                  'post': 0.5}, t=3.0)
-        shot('poll_recount', 'poll', {'post': 1.0, 'tally': [512000, 418000, 141000]}, t=3.0)
-        if head:
-            shot('door_cap_on_head', 'door', {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0)
-            hw = head_world(her)
-            c = hw + Vector((0.0, 0.0, 0.12))
-            front = look_cam('cap_fit_front', c + Vector((0.0, -0.75, 0.04)), c, 28)
-            side = look_cam('cap_fit_side', c + Vector((0.75, 0.0, 0.04)), c, 28)
-            shot('cap_fit_front', None, {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0, cam_ob=front)
-            shot('cap_fit_side', None, {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0, cam_ob=side)
-            shot('door_cap_midflight', 'door', {'post': 1.0, 'capOn': 0.5, 'capHead': head}, t=4.0)
-    if 'cues' in ONLY:
-        # the doc's cue sheet, on the film's camera at each cue (cue_state is the film's state)
-        for cue, dt in zip(COR.CUES, (0.0, 0.0, 0.75, 0.0, 0.6, 1.5)):
-            t = cue['t'] + dt
-            cam = COR.cue_at(t)['cam']
-            shot(f'cue_{t:.2f}_{cam}', cam, COR.cue_state(t, cap_head=head), t=t)
-    if 'film' in ONLY:
-        # the film's own shots in the corridor, half way through each, its camera move applied (scene.js camPose)
-        filmcam = look_cam('film_cam', (0, 0, 0), (0, 1, 0), 40)
-        for t0_, cam, move in COR.FILM_SHOTS:
-            c = COR.film_cut(t0_ + 0.01)
-            t = (c['t0'] + c['t1']) / 2
-            c = COR.film_cut(t)
-            C.key_camera(filmcam, cam, c['u'], c['move'], scene=sc)
-            if her:
-                for o in her.objects:
-                    o.hide_render = not c['singer']
-            shot(f'film_{t:.2f}_{cam}', None, COR.film_state(t, cap_head=head), t=t, cam_ob=filmcam)
-        if her:
-            for o in her.objects:
-                o.hide_render = False
+        shot('postWall_repost_typing_half', 'postWall', {'postText': 'A NEW POST FROM THE MINISTRY, IN CAPITAL LETTERS',
+                                                         'post': 0.5}, t=3.0)
+        shot('poll_recount_no_stamp', 'poll', {'post': 1.0, 'tally': [512000, 418000, 341000]}, t=3.0)
+        shot('corridorWide_lights_dimmed', 'corridorWide', {'post': 1.0, 'lights': 0.3, 'screen': 0.4}, t=3.0)
+        her = place_her() if HER else None
+        if her is not None:
+            head = (her.arm, her.humanoid['head'])
+            hw = her.arm.matrix_world @ her.arm.pose.bones[her.humanoid['head']].head
+        else:
+            hb = bpy.data.objects.new('stand_in_head', None)      # a bare head bone where hers would be
+            sc.collection.objects.link(hb)
+            hb.location = (0.0, 0.0, 1.45)
+            head, hw = hb, Vector((0.0, 0.0, 1.45))
+        show(her, True)
+        shot('door_cap_on_head', 'door', {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0)
+        c = hw + Vector((0.0, 0.0, 0.12))
+        front = look_cam('cap_fit_front', c + Vector((0.0, -0.75, 0.04)), c, 28)
+        side = look_cam('cap_fit_side', c + Vector((0.75, 0.0, 0.04)), c, 28)
+        shot('cap_fit_front', None, {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0, cam_ob=front)
+        shot('cap_fit_side', None, {'post': 1.0, 'capOn': 1.0, 'capHead': head}, t=4.0, cam_ob=side)
+        shot('door_cap_midflight', 'door', {'post': 1.0, 'capOn': 0.5, 'capHead': head}, t=4.0)
+        show(her, False)
     if 'look' in ONLY:
         C.update(0.0, {'post': 1.0, 'postText': 'AMERICANISM, NOT EFFECTIVE ALTRUISM', 'capOn': 0.0, 'open': 0.0})
         sc.camera = C.camera('door', sc)
@@ -172,8 +165,8 @@ def news():
     clock = F.timer()
     N = NEWS.build(sc)
     N.apply_look(sc)
+    N.apply_post(sc, aeropittura=False)        # the look's bloom on every still, as the WebGPU probes had it
     print(f'[shots] news built in {clock():.1f}s', flush=True)
-    her = place_her() if HER else None
     names = []
 
     def shot(name, cam, st, t=0.0, cam_ob=None):
@@ -204,34 +197,8 @@ def news():
     if 'states' in ONLY:
         shot('wall_spray_half', 'wall', {'spray': 0.5}, t=1.25)
         shot('fence_floods_off', 'fence', {'floods': 0.0}, t=2.0)
-        shot('crowd_chant_pulse', 'crowd', {'pulse': 1.0, 'chant': 1.0}, t=0.26)
-    if 'cues' in ONLY:
-        for cue, dt in zip(NEWS.CUES, (0.0, 0.0, 1.25, 0.0)):
-            t = cue['t'] + dt
-            st = NEWS.cue_state(t)
-            name = f'cue_{t:.2f}_{cue["cam"]}'
-            shot(name, cue['cam'], st, t=t)
-            if st['chyron']:
-                chyron_over(name, cue['cam'], t)
-    if 'film' in ONLY:
-        # the film's own shots on the news set, half way through each: its camera move, her mark (at the fence from
-        # 215.4 s), hidden from the wall shot
-        filmcam = look_cam('film_cam', (0, 0, 0), (0, 1, 0), 40)
-        for t0_, cam, move in NEWS.FILM_SHOTS:
-            c = NEWS.film_cut(t0_ + 0.01)
-            t = (c['t0'] + c['t1']) / 2
-            c = NEWS.film_cut(t)
-            N.key_camera(filmcam, cam, c['u'], c['move'], scene=sc)
-            if her:
-                mx, my, mz = NEWS.film_singer_mark(t)
-                her.arm.location = CL.b3((mx, my, mz))
-                for o in her.objects:
-                    o.hide_render = not c['singer']
-            shot(f'film_{t:.2f}_{cam}', None, NEWS.film_state(t), t=t, cam_ob=filmcam)
-        if her:
-            her.arm.location = (0.0, 0.0, 0.0)
-            for o in her.objects:
-                o.hide_render = False
+        shot('crowd_signs_on_the_kick', 'crowd', {'pulse': 1.0, 'chant': 1.0}, t=0.26)
+        chyron_over('crowd_signs_on_the_kick', 'crowd', 0.26)
     if 'look' in ONLY:
         sc.camera = N.camera('crowd', sc)
         N.update(0.3, {'spray': 1.0})
@@ -243,9 +210,10 @@ def news():
     N.dispose()
 
 
-t0 = time.time()
-if WHICH in ('corridor', 'both'):
-    corridor()
-if WHICH in ('news', 'both'):
-    news()
-print(f'[shots] done in {time.time() - t0:.0f}s', flush=True)
+if __name__ == '__main__':                    # (verify_probes.py imports the helpers above)
+    t0 = time.time()
+    if WHICH in ('corridor', 'both'):
+        corridor()
+    if WHICH in ('news', 'both'):
+        news()
+    print(f'[shots] done in {time.time() - t0:.0f}s', flush=True)

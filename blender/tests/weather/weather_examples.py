@@ -10,10 +10,15 @@
   ground_y_splashes      no occluders: the splash rings on the flat ground_y plane (the JS default), close
   procedural_bolt        bolt_texture=None at a forced close strike (debug_force_local_strike)
   rain_without_splashes  splash_count=0 (the JS terrain-scene switch): no rings, the rain still falls
+  rain_cells_upwind      storm at the moment the street stands at a cell edge (found by replaying the sky): the
+  rain_cells_column      drops gated by the cell they fell from (the default), then by the cell straight above them
+                         (eidoverse's own gate), the same frame
+  impact_* / scorch_close, bolt_styles: the local strike close up, and the five lightning styles
 
 Writes out/examples/<name>.png and examples_sheet.png. Prints PASS/FAIL for what it can measure: the procedural and
 textured streaks differ, ember rain is warmer than plain rain, the two wet models both wet the road, the rings sit on
-ground_y, the procedural bolt is drawn, splash_count=0 leaves the splashes hidden.
+ground_y, the procedural bolt is drawn, splash_count=0 leaves the splashes hidden, each rain_cells mode keys its own
+gate at the camera and the two frames differ.
 """
 import argparse
 import math
@@ -119,11 +124,44 @@ shot.sun = None
 # a population of faint streaks, about 0.08 per cubic metre at 16000: a short view holds a handful)
 RAIN_VIEW = ((1.5, -4.0, 1.4), (1.0, 40.0, 3.2))
 names = ['rain_drop_texture', 'rain_procedural', 'ember_rain', 'wet_moisture_model', 'wet_eidoverse_model',
-         'ground_y_splashes', 'procedural_bolt', 'rain_without_splashes']
+         'ground_y_splashes', 'procedural_bolt', 'rain_without_splashes', 'rain_cells_upwind', 'rain_cells_column']
 if args.only:
     names = [n for n in names if n in args.only.split(',')]
 paths = {}
 stats = {}
+
+
+def cell_edge_time(weather='storm', t_max=300.0, hours=16.0):
+    """The first media time (after 20 s, so the street has had time to wet) at which the two rain_cells gates
+    disagree at the street camera, one raining there and the other not (or else where they disagree most): the
+    upwind gate (the cell the drops fell from) and the own-column gate, over the sky's own replay."""
+    sc.frame_start, sc.frame_end = 1, int(round(t_max * FPS)) + 1
+    look(*RAIN_VIEW)
+    sky = make_sky(sc, camera=cam, hours=hours, weather=weather, sun=shot.sun,
+                   cache_dir=os.path.join(OUT, 'cache', 'cell_edge'), quality='film')
+    shot.sun = sky.sun
+    wx = make_weather_system(sc, sky, moisture=False, log=lambda *a: None)
+    x, y = np.array([cam.location.x]), np.array([cam.location.y])
+    best = (-1.0, 0.0, 0.0, 0.0)
+    with wx._generators_off():
+        for f, t, _L in sky.frame_states(1, sc.frame_end):
+            if (f - 1) % (FPS // 2) or t < 20.0:            # every half second, once the moisture has had 20 s
+                continue
+            wx._upwind = 1.0
+            g_up = float(wx._cell_at(x, y)[0])
+            wx._upwind = 0.0
+            g_col = float(wx._cell_at(x, y)[0])
+            if abs(g_up - g_col) > best[0]:
+                best = (abs(g_up - g_col), t, g_up, g_col)
+            if best[0] > 0.9:
+                break
+    wx.dispose()
+    print('[examples] rain_cells: the gates at the street camera differ most at t=%.1fs: upwind %.2f, column %.2f'
+          % (best[1], best[2], best[3]), flush=True)
+    return best
+
+
+EDGE = cell_edge_time() if any(n.startswith('rain_cells_') for n in names) else None
 
 
 def img(p):
@@ -176,6 +214,14 @@ for name in names:
         check('procedural bolt: the forced strike draws its ribbon with no trace texture',
               bool(bolts) and not any(n.bl_idname == 'ShaderNodeTexImage'
                                       for n in bpy.data.materials['eido_bolt'].node_tree.nodes), [o.name for o in bolts])
+    elif name.startswith('rain_cells_'):
+        mode = name[len('rain_cells_'):]
+        p, wx, r, f = shot(name, 'storm', EDGE[1], lambda: look(*RAIN_VIEW), occluders=S['collection'],
+                           rain_cells=mode)
+        stats[name] = r
+        want = EDGE[2] if mode == 'upwind' else EDGE[3]
+        check("rain_cells='%s': the keyed rain cell at the camera is that gate (%.2f)" % (mode, want),
+              abs(r['cell_at_camera'] - want) < 1e-6, '%.4f' % r['cell_at_camera'])
     if not DRY:
         paths[name] = p
 from eidoblend.weather.keys import key_series  # noqa: E402
@@ -293,6 +339,13 @@ if 'rain_drop_texture' in paths and 'rain_procedural' in paths:
     a, b = img(paths['rain_drop_texture']), img(paths['rain_procedural'])
     check('the procedural streak shape differs from the drop texture (same frame)', np.abs(a - b).mean() > 1e-4,
           '%.5f' % np.abs(a - b).mean())
+if 'rain_cells_upwind' in paths and 'rain_cells_column' in paths:
+    a, b = img(paths['rain_cells_upwind']), img(paths['rain_cells_column'])
+    # storm rain in daylight is faint (as in WebGPU: rain_ab_blender.py), so the frames differ in their streaks and
+    # rings, not overall: count the pixels one of them changes by more than 8 levels
+    dpx = int((np.abs(a - b).max(axis=2) > 8 / 255).sum())
+    check('rain_cells: the two frames differ where the gates disagree (streaks and rings: pixels over 8 levels)',
+          dpx > 500, '%d px, mean |difference| %.5f' % (dpx, np.abs(a - b).mean()))
 if 'rain_drop_texture' in paths and 'ember_rain' in paths:
     a, b = img(paths['rain_drop_texture']), img(paths['ember_rain'])
     da, db = a[..., 0] - a[..., 2], b[..., 0] - b[..., 2]

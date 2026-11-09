@@ -12,7 +12,8 @@ Blender axes: front = -Y, behind = +Y, left = -X, right = +X, above = +Z, below 
 The runner (eidoblend.harness) imports this family and runs its audits on every build, whether or not a scene
 imports it. Collection instances (an Empty instancing a collection, such as a part from harness.assets.load_kit) are
 seated, ray-cast and audited through the real geometry they show. check_hovering verifies an object on its recorded
-support against the support's real surface under its footprint (surface_top_in_footprint), not the support's box.
+support against the support's real load-bearing surface under its footprint (surface_top_in_footprint: faces within
+60 degrees of level; a post or a backrest beside it holds nothing up), not the support's box.
 The seating helpers (seating.py) work on the characters family's VRM handles and import that family when called.
 """
 from .helpers import (place_on, place_against, place_touching, surface_point, mount_on, snap_to_ground,

@@ -1,0 +1,7 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 2, "frame_start": 0,
+    "script": "blender/tests/pipeline/gn_keying/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/gn_keying.mp4",
+    "render": {"samples": 16},
+    "notes": "T17: a Geometry Nodes modifier input keyed every frame through Blender 5.2's properties.inputs path"
+}

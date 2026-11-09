@@ -110,7 +110,9 @@ for name, o in objs.items():
                 f'sheen {sheen.default_value:.2f}')
 
 if A.get('render', '1') == '1':
-    cam = C.camera((0.0, -6.0, 1.5), (0.0, 0.0, 0.62), lens=35)
+    # the line-up runs from the shoggoth's arm tip at x = -3.75 m to the gyroid's edge at 3.15 m: this frame holds
+    # +-4 m at the line
+    cam = C.camera((-0.3, -7.2, 1.6), (-0.3, 0.0, 0.62), lens=32)
     shots = []
     for f in (1, FRAMES):
         sc.frame_set(f)

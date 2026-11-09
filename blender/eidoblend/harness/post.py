@@ -40,9 +40,16 @@ What does not carry over, and why:
     _aoParams intensity / distanceFalloff      EEVEE's occlusion is physical: no strength or falloff knob exists.
     _ssrParams maxDistance                     EEVEE's screen traces have no length limit to set.
 
-Colour: the overlay passes through the film's AgX, as the engine's passed through its tone map (it composited before
-renderOutput). For graphics whose colours must land exactly as drawn, media.overlay's display-space edit pass
-(make_edit_scene) is the tool.
+Colour: the engine mixed the overlay in before renderOutput, and the runner's renderer tone-mapped nothing (three's
+default NoToneMapping), so a lower third landed exactly as drawn, its 80 % panel 80 % dark over the film. The Blender
+film always ends in AgX, which would grade a plain alpha-over (measured: an 80 % panel darkened the film behind it
+by about a third, #f4efe6 text came out (193, 191, 188), a brand orange washed out). So the overlay stage is the
+media family's signal route, authored
+(media.overlay.chain_overlay(authored=True)): the over is done in display space and brought back through the
+inverse view transform, so the HUD lands as drawn and the 'over' hooks still process it with the film.
+make_overlay_layer(..., authored=False) keeps the plain alpha-over, graded by AgX with the film. A scene that made
+its own overlay stage (chain_overlay) keeps it. Saturated ink only comes back as close as AgX can show it (see
+media/overlay.py); for such ink with no 'over' hook, media.overlay's display route (make_edit_scene) is exact.
 """
 
 from __future__ import annotations
@@ -66,6 +73,7 @@ NAMES = {
                       '_auto_enhance_cloud_reflect_blur_hook', '_autoEnhanceCloudReflectBlurHook'),
 }
 OVERLAY_PROP = 'eido_overlay_scene'          # film scene custom property: the overlay scene's name
+OVERLAY_AUTHORED_PROP = 'eido_overlay_authored'   # False: the overlay alpha-overs in scene light, graded by AgX
 AO_QUALITY = {'low': (4, 1), 'medium': (8, 2), 'high': (12, 3), 'ultra': (16, 4)}   # (fast GI steps, rays)
 
 
@@ -112,16 +120,18 @@ class OverlayLayer:
         return getattr(self._ov, name)
 
 
-def make_overlay_layer(scene=None, fov=None, near=0.01, far=10.0, samples=8, name='overlay'):
+def make_overlay_layer(scene=None, fov=None, near=0.01, far=10.0, samples=8, name='overlay', authored=True):
     """render_scene.mjs's makeOverlayLayer: a transparent scene of its own with a STATIC camera at the origin whose
     field of view is the film camera's (or fov degrees, vertical, three's convention), registered on the film scene
     so the runner composites it over every frame (chain slot 'overlay'), before the screen hook. Built on the media
-    family's overlay scene (eidoblend.media.overlay), so its panels and subtitles work on it."""
+    family's overlay scene (eidoblend.media.overlay), so its panels and subtitles work on it. authored (default): the
+    HUD lands as drawn, as the engine's did; False: its linear colours alpha-over the film and AgX grades them."""
     from ..media import overlay as mo
     film = scene or bpy.context.scene
     ov = mo.make_overlay_layer(film, fov=fov, name=name, samples=samples)
     ov.camera.data.clip_start, ov.camera.data.clip_end = float(near), float(far)
     film[OVERLAY_PROP] = ov.scene.name
+    film[OVERLAY_AUTHORED_PROP] = bool(authored)
     return OverlayLayer(ov)
 
 
@@ -260,23 +270,30 @@ def apply(scene, ns=None, led=None):
         cam = _get(ns, scene, 'overlay_camera')
         if isinstance(cam, bpy.types.Object) and cam.type == 'CAMERA':
             ovs.camera = cam
-        t = chain.tree(scene)
-        rl = next((x for x in t.nodes if x.bl_idname == 'CompositorNodeRLayers' and x.scene == ovs), None)
-        if rl is None:
-            rl = t.nodes.new('CompositorNodeRLayers')
-            rl.name = 'look:overlay_scene'
-            rl.scene = ovs
-            rl.location = (-400, -320)
         ovs.render.film_transparent = True
         _match(ovs, scene)
-        chain.set_overlay(scene, rl)
-        added.append(f"overlay ('{ovs.name}')")
+        added.append(f"overlay ('{ovs.name}', {_overlay_stage(scene, ovs)})")
     install('screen', '_auto_enhance_screen_hook', 'over', 'screen_hook', 'screenHook')
     _record(led, 'WARN' if failed else 'PASS', 'auto-enhance: ' + ' + '.join(added)
             + f' + {scene.view_settings.view_transform}' + (f"; {'; '.join(notes)}" if notes else '')
             + _ignored_text(ignored) + (f"; NOT installed: {'; '.join(failed)}" if failed else ''),
             {'added': added, 'stages': [f'{s}:{n}' for s, n, _x in chain.stages(scene)]})
     return added
+
+
+def _overlay_stage(scene, ovs):
+    """The overlay scene into the chain's overlay slot, through the media family's signal route. A stage already
+    there (the scene called media.overlay.chain_overlay itself, or a build reopened) is kept. Otherwise authored
+    (scene['eido_overlay_authored'] unset or True: the over in display space, so the HUD lands as drawn) or graded
+    (False: a plain alpha-over in scene light, AgX after it). Returns the route, for the digest."""
+    from ..media import overlay as mo
+    chain = _chain()
+    st = next((n for _s, nm, n in chain.stages(scene) if nm == 'overlay'), None)
+    if st is not None and 'Foreground' in st.inputs and st.inputs['Foreground'].is_linked:
+        return 'its own overlay stage, kept'
+    authored = bool(scene.get(OVERLAY_AUTHORED_PROP, True))
+    mo.chain_overlay(ovs, scene, authored=authored)
+    return 'authored: lands as drawn' if authored else 'graded with the film by AgX'
 
 
 def _match(ovs, film):

@@ -24,7 +24,7 @@ weather audio timeline. Modules:
                 the moisture image sequence
     strike      the strike light, bolt meshes, impact sparks / puffs / scorch, the local-strike ray cast
     values      the keyed shader values every weather material reads
-    audio       the weather-audio timeline, bake_weather_audio.py and merge_av.py
+    audio       the weather-audio timeline, make_weather_audio (makeWeatherAudio), bake_weather_audio.py, merge_av.py
     keys        bulk F-curves
 
 Importing this package imports no bpy. Guide: tools-guides/weather-effects.md.
@@ -42,13 +42,19 @@ def make_weather_system(scene=None, sky=None, **opts):
     return _make(scene, sky, **opts)
 
 
+def make_weather_audio(weather=None, camera=None, **opts):
+    """The Blender makeWeatherAudio: see eidoblend.weather.audio.make_weather_audio."""
+    from .audio import make_weather_audio as _make
+    return _make(weather, camera, **opts)
+
+
 def weather_states():
     """The WEATHER table and LEGACY_STATES (owned by the sky package)."""
     from ..sky.weather_system import WEATHER, LEGACY_STATES
     return WEATHER, LEGACY_STATES
 
 
-__all__ = ['make_weather_system', 'weather_states', 'EANPA_LIGHTNING_PROFILE', 'LIGHTNING_CADENCE',
+__all__ = ['make_weather_system', 'make_weather_audio', 'weather_states', 'EANPA_LIGHTNING_PROFILE', 'LIGHTNING_CADENCE',
            'LIGHTNING_PALETTES', 'LIGHTNING_STYLES', 'js_hash', 'lightning_channel_at', 'lightning_event_gap_at',
            'lightning_flash_at', 'lightning_initial_event_gap_at', 'lightning_local_candidate_at',
            'lightning_stroke_plan_at', 'lightning_style_key_at', 'make_lightning_profile']

@@ -303,6 +303,9 @@ class Job:
         state = self.path.sample(t / self.duration * self.path.duration)
         robot.move_tool(state.position)
         modifier_input(self.mesh.modifiers['fabrication'], 'Progress').value = float(state.distance)
+        # a modifier input set from Python does not tag its object in 5.2: without the tag, the evaluated bead or
+        # stock (the viewport, evaluated_get) would stay at the previous seek until something else changed it
+        self.mesh.update_tag()
         self.time = t
         self.done = t >= self.duration
         self.state = Rec(state, playback_time=t, physical_time=state.time)
@@ -348,13 +351,18 @@ class Job:
     def key(self, frame_start=None, frame_end=None, fps=None, start=0.0, speed=1.0, scene=None):
         """Key every frame frame_start .. frame_end (the scene's range by default) at playback time
         (seconds since frame_start - start) * speed: the machine joints, reel and rotors as object keys, the
-        progress, chip clock and feed-tube controls as modifier-input keys, all LINEAR."""
+        progress, chip clock and feed-tube controls as modifier-input keys, all LINEAR. Only that frame range is
+        rewritten: another job keyed into other frames of the same machine (a second part printed after the first)
+        keeps its keys."""
         import bpy
         scene = scene or bpy.context.scene
         f0 = scene.frame_start if frame_start is None else int(frame_start)
         f1 = scene.frame_end if frame_end is None else int(frame_end)
+        if f1 < f0:
+            raise ValueError('frame_end must not precede frame_start')
         fps = (scene.render.fps / scene.render.fps_base) if fps is None else fps
         frames = list(range(f0, f1 + 1))
+        span = (f0, f1)
         objs = self._moving_objects()
         for o in objs:
             o.rotation_mode = 'QUATERNION'
@@ -375,11 +383,12 @@ class Job:
                 vals[i].append(tuple(v) if hasattr(v, '__len__') else float(v))
         for o in objs:
             _keys.write(o, 'location', frames, loc[o.name])
-            _keys.write(o, 'rotation_quaternion', frames, _keys.quaternions_continuous(rot[o.name]))
-            self._keyed.append((o, ('location', 'rotation_quaternion')))
+            before = _keys.value_before(o, 'rotation_quaternion', f0, 4)
+            _keys.write(o, 'rotation_quaternion', frames, _keys.quaternions_continuous(rot[o.name], before))
+            self._keyed.append((o, ('location', 'rotation_quaternion'), span))
         for s, v in zip(slots, vals):
             _keys.write(s, 'value', frames, v)
-            self._keyed.append((s.id_data, (s.path_from_id('value'),)))
+            self._keyed.append((s.id_data, (s.path_from_id('value'),), span))
         return self
 
     def play(self, start=0.0, speed=1.0, frame_start=None, frame_end=None, scene=None):
@@ -388,30 +397,55 @@ class Job:
         return self.key(frame_start, frame_end, start=start, speed=speed, scene=scene)
 
     def stop(self):
-        """Remove the keys play() / key() wrote; the current pose stays."""
-        for idb, paths in self._keyed:
-            _keys.clear(idb, paths)
+        """Remove the keys play() / key() wrote, in the frame ranges they wrote them (keys another job wrote into
+        other frames of the same machine stay); the current pose stays. An action left empty goes too."""
+        owners = {}
+        for idb, paths, span in self._keyed:
+            try:
+                _keys.clear(idb, paths, frame_range=span)
+                owners[idb.as_pointer()] = idb
+            except ReferenceError:                  # removed with its robot already
+                pass
+        for idb in owners.values():
+            try:
+                _keys.prune(idb)
+            except ReferenceError:
+                pass
         self._keyed = []
         return self
 
     def dispose(self):
+        """Remove the job's keys and everything it made: the bead or stock with its mesh, material and node trees, the
+        stock's data meshes, the chips. Shared hardware (the machine, the plate, the clamps) stays."""
         import bpy
         self.stop()
-        mod = self.mesh.modifiers.get('fabrication')
-        ng = mod.node_group if mod else None
-        mats = list(self.mesh.data.materials)
-        me = self.mesh.data
-        bpy.data.objects.remove(self.mesh)
-        bpy.data.meshes.remove(me)
+
+        def remove(ob):
+            try:
+                me = ob.data
+                bpy.data.objects.remove(ob)
+                if me is not None and me.users == 0:
+                    bpy.data.meshes.remove(me)
+            except ReferenceError:                  # removed with its robot already
+                pass
+        try:
+            mod = self.mesh.modifiers.get('fabrication')
+            ng = mod.node_group if mod else None
+            mats = list(self.mesh.data.materials)
+        except ReferenceError:
+            ng, mats = None, []
+        inner = [n.node_tree for n in ng.nodes if n.type == 'GROUP' and n.node_tree is not None] if ng else []
+        remove(self.mesh)
         for m in mats:
             if m is not None and m.users == 0:
                 bpy.data.materials.remove(m)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
+        for tree in {t.as_pointer(): t for t in inner}.values():   # the shared cutter envelope, once no stock uses it
+            if tree.users == 0:
+                bpy.data.node_groups.remove(tree)
         for ob in getattr(self, '_data_objects', []):
-            d = ob.data
-            bpy.data.objects.remove(ob)
-            bpy.data.meshes.remove(d)
+            remove(ob)
         if self.effects is not None:
             self.effects.dispose()
 

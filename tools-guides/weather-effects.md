@@ -95,6 +95,8 @@ Blender additions:
 - `occluders`: a collection. Rain stops at its roofs, splashes land on its surfaces, and its shelter keeps ground
   dry. `wet_exposure` (default True) is that last part.
 - `wet_model`: `'moisture'` (default) or `'eidoverse'`, see [Wet surfaces](#wet-surfaces-and-puddles-eido_wet).
+- `rain_cells`: `'upwind'` (default) or `'column'`, see [Rain and splashes](#rain-and-splashes). With
+  `wet_model='eidoverse'` and `rain_cells='column'` the rain and the wet ground are eidoverse's, formula for formula.
 - `moisture` (default on), `moisture_radius` 1024 and `moisture_resolution` 256 (Eanpa's values).
 - `cache_dir`: default `<sky cache>/weather`.
 
@@ -108,9 +110,20 @@ Blender additions:
 - `sun_dim()` and `hemi_dim()` are the sky's.
 - `debug_force_local_strike(at=0)`: the next lightning event after media time `at` becomes a close forward strike,
   34-58 m ahead within ±25°. It is pulled to 0.6 s after the call and bypasses chance and cooldown. It does nothing
-  in weather with no lightning.
+  in weather with no lightning. It returns True: the JS returns whether the weather can strike now, and here
+  whether it can at `at` is known only when the bake replays that moment (afterwards `wx.sched.impacts` lists every
+  local strike, and `diagnostics['lightning']['localImpact']` counts the attempts and strikes).
 - `update(t, camera=None)`: one frame of the weather, with the sky already at `t`. It is for an `on_frame` loop of
   your own. `bake()` calls it for you.
+- `dispose()` unwraps every material, removes the weather's objects, materials and node groups and unhooks the sky.
+  A scene has one weather system: making a second one disposes the first, as the JS registry does, and a disposed
+  system's `update()` returns False.
+- `uniforms`, `state` (`name`, `k`, `def_`, `strike`, `lastImpact`), `diagnostics` (the JS acceptance record:
+  transition, motion, precipitation, lightning, wetness), `rain` (the streak object), `bolt` (the strike light),
+  `WEATHER` and `lightning_profile` are the JS facade's fields, read after a plan or bake. Their positions are in
+  Blender axes: `state['strike']` x, y, z is the strike point (z its height) with its normal, and so are
+  `state['lastImpact']`, `diagnostics['lightning']['lastStrike']` and its `localImpact.lastSurfaceDamage`. Only the
+  scheduler's own records (`wx.sched.events`, `wx.sched.impacts`) stay in three.js axes, as the JS keeps them.
 
 ## Rain and splashes
 
@@ -132,10 +145,27 @@ camera walks through it.
 `test_blender_build.py` checks every quad corner the Geometry Nodes tree evaluates against the JS formulas, in float32:
 the largest difference is under a millimetre.
 
+**Against WebGPU itself.** `rain_ab_webgpu_scene.js` renders eidoverse's own `makeSky` weather in deno over a street
+of grey blocks, and `rain_ab_blender.py` renders the same blocks, camera, hour and moments in EEVEE
+(`wet_model='eidoverse'`, `rain_cells='column'`), each frame beside its twin with the rain hidden. In cyclone, storm,
+rain and darkstorm the two engines agree on rainK, denseA, rainLight, rainColor, the wetness and the streak length to
+four decimals. Daylight `rain` and `storm` streaks are faint in both: rain is translucent water lit by a dimmed sky,
+and over grey facades it has little contrast. It reads under darkstorm's canopy and in cyclone. The streak detail the
+rain adds to the frame (its high-pass energy) is as large in EEVEE or larger: cyclone 0.54 against WebGPU's 0.04,
+darkstorm 0.36 against 0.28, storm 0.12 against 0.03, rain 0.05 against 0.01. Point-sampling the drop texture (WebGPU
+samples it at mip level 0) changes it by 3-4 %, a 0.75 px pixel filter by 16-18 %, so the default linear filtering
+stays.
+The skies and their light differ between the two frames (WebGPU's hemisphere fill keeps the hour's blue zenith in a
+storm, where the Blender world fills with the greyed sky: both the sky's), so the comparison measures the rain's own
+detail, not the frames' levels.
+
 The cell gate samples the sky's weather field at the column the drops fell from: upwind of them by their fall time
-from the cloud base (Eanpa's `rainCellAt`; eidoverse sampled the drop's own column). The splashes and the moisture
-history read the same gate, so rain, rings and wet ground agree on where it is raining. Rain falls in cells: walk
-out from under one and the rain stops around you while the far curtains keep falling.
+from the cloud base (Eanpa's `rainCellAt`). The splashes and the moisture history read the same gate, so rain, rings
+and wet ground agree on where it is raining. Rain falls in cells: walk out from under one and the rain stops around
+you while the far curtains keep falling. eidoverse gates each drop by the cell straight above it instead;
+`rain_cells='column'` does that, for drops, rings and moisture alike. At the ground the two put the edge of a cell
+about 150 m apart in `rain` and about 290 m apart in `storm` and `cyclone` (the wind times the fall time from the
+deck); under darkstorm's sealed canopy they are the same.
 
 Splashes are rings that expand at 2.4 Hz on a hashed phase at world-tiled spots. With `occluders`, each ring sits
 1.5 cm above the first surface the rain reaches through its column (road, curb, awning, roof), on that surface's
@@ -143,7 +173,10 @@ slope, and only where the surface faces up. Without `occluders` they sit at `gro
 is the rain colour × 1.15.
 
 With `occluders`, a streak is hidden when a Raycast up its own rain line meets a surface. Rain stops at roofs, at the
-awning and at the ground, and never falls indoors.
+awning and at the ground, and never falls indoors. The rain lines are straight, so a crosswind puts a street canyon
+in the rain shadow of its upwind buildings: cyclone's rain falls about 50° from vertical, and behind 15 m buildings a
+16 m street gets almost no drops and stays dry (storm's 28° shelters a strip along the upwind side). eidoverse's
+rain fell everywhere; leave `occluders` out to have it so, or aim the street along the wind.
 
 Drops beading and running on the lens are a screen effect, not weather: `rain_on_camera` in the look package's post
 effects (`eidoblend.look.post`, [postprocessing.md](postprocessing.md)).
@@ -236,8 +269,10 @@ impact and thunderclap comes from the event index through `jsHash`, so the same 
   near the camera. `localStrikeChance`, a 45 s cooldown and a 28 m guard around the camera apply. Darkstorm also
   guarantees a local candidate on its first event and after six remote events in a row: a storm rolling in strikes
   close once, early, with no forcing.
-- The ray cast keeps the JS receiver rules. Each candidate column is cast straight down through every surface. It
-  skips hidden objects, objects marked `eido_noLightningStrike` (on the object or a parent), names like
+- The ray cast keeps the JS receiver rules. Each candidate column is cast straight down through every surface of the
+  targets, including the instances a target makes (a collection instance, Geometry Nodes instances), each through
+  its own world matrix, as the JS casts an InstancedMesh's instances; the strike record then goes on the instancer.
+  It skips hidden objects, objects marked `eido_noLightningStrike` (on the object or a parent), names like
   orb / emitter / beam / fastener / decal / foliage / vegetation / cactus / joshua (on the object, its parents or its
   collections), and BLENDED or translucent materials. It takes the first surface facing up within 44° of vertical.
   `strike_height_at` is the fallback when no target is hit. Mark roofs `eido_noLightningStrike` to keep strikes in
@@ -259,7 +294,10 @@ What it draws:
   the strike's colour. The sky bake gets these through the `on_frame` callback.
 - **A local impact**: 64 sparks on ballistic arcs (0.82 s), 16 gyroid-FBM burn puffs (4.5 s) whose white-hot ember
   core dies into ash grey and rises, and a broken-edged char disc with tendrils (90 s, fading from 65 s). The
-  impact pool keeps two effect slots and four scorch slots; a newer impact ends the oldest one's effects.
+  impact pool keeps two effect slots and four scorch slots; a newer impact ends the oldest one's effects. Sparks and
+  puffs draw their front faces only (backface culling), as three's default `FrontSide` does: one layer of smoke per
+  puff, and an additive spark adds its near faces once. The scorch, the bolt and the rain are double sided, as in
+  the JS.
 - **Records**: a record of each local strike goes to `on_local_strike` and onto the struck object
   (`eido_lightning_strikes`, `eido_lightning_last`). `state['strike']`, `state['lastImpact']` and `diagnostics`
   carry the rest.
@@ -300,22 +338,36 @@ wx.bake_audio('C:/films/street/weather.wav', frame_start=913)        # writes we
 wx.merge_av('street_video.mp4', 'C:/films/street/weather.wav', 'street_final.mp4')
 ```
 
+`make_weather_audio(weather, camera)` is `makeWeatherAudio` itself, for a frame loop of your own. Update it once per
+frame after the weather's `update(t, camera)`, with the same `t`: it reads the weather's uniforms and its strike as
+the JS does. `stats`, `timeline()` and `to_json()` are the JS object's.
+
+```python
+from eidoblend.weather import make_weather_audio
+wx_audio = make_weather_audio(weather=wx, camera=cam)
+for f, t, _ in sky.frame_states(1, 480):
+    wx.update(t, cam)
+    wx_audio.update(t)
+open('C:/films/street/wx_audio.json', 'w').write(wx_audio.to_json())
+```
+
 `test_lightning_parity.py` runs `weather_audio.js` on the engine's own weather and matches every thunder event and
 both bed envelopes. `test_audio_tools.py` bakes that same timeline with `bake_weather_audio.py` and finds each strike
-where the timeline puts it and on its side of the stereo field. The keyed `eido_weather` properties also serve
-`weather_audio.read_props`, so a saved `.blend` can be recorded again without the weather system.
+where the timeline puts it and on its side of the stereo field. `test_facade_records.py` finds that the loop above
+records exactly the timeline `audio_timeline()` records from the baked frames. The keyed `eido_weather` properties
+also serve `weather_audio.read_props`, so a saved `.blend` can be recorded again without the weather system.
 
 ## Lower level
 
 | Module | What |
 | --- | --- |
-| `lightning.py` | `EANPA_LIGHTNING_PROFILE` (`js_hash`, styles, palettes, cadence, gaps, stroke plans, flash and channel envelopes, local candidates), `make_lightning_profile(gap_scale)`, `LightningScheduler`, `style_color`, the impact particle data (`impact_particles`, `spark_at`, `puff_at`, `puff_uniforms`, `scorch_at`), `strike_candidates`, `storm_cell_strike_xz`. Plain Python |
+| `lightning.py` | `EANPA_LIGHTNING_PROFILE` (`js_hash`, styles, palettes, cadence, gaps, stroke plans, flash and channel envelopes, local candidates; its entries by snake_case names, `style_key_at`, `event_gap_at` ..., with the JS names `styleKeyAt`, `eventGapAt` ... as aliases), `make_lightning_profile(gap_scale)`, `LightningScheduler`, `style_color`, the impact particle data (`impact_particles`, `spark_at`, `puff_at`, `puff_uniforms`, `scorch_at`), `strike_candidates`, `storm_cell_strike_xz`. Plain Python |
 | `bolt.py` | `bolt_points`, `bolt_ribbon`: rebuildBolt in three.js space. Plain Python |
 | `moisture.py` | `RainAccumulationField`: `prepare`, `sample`, `displayed`, `bounds`, `reset`, `dispose`, `stats`. numpy |
 | `frame.py` | `rain_light` (rainLight / litRain / rainColor), `cell_gate`, `upwind_source`, `coverage_uv` |
 | `rain.py`, `wet.py`, `strike.py`, `shelter.py` | the generators and materials; `eido_wet`, `eido_wet_eidoverse`, `wrap_material` / `unwrap_material`; the lightning objects and the ray cast (`make_strike_finder`, `resolve_targets`); the exposure maps (`capture`, `soft_map`, `exposure_at`) |
 | `values.py`, `keys.py`, `_graph.py` | the keyed shader values group, bulk F-curves, the node builder with the weather hashes and value noise |
-| `audio.py` | `record`, `write_timeline`, `bake_wav`, `merge` |
+| `audio.py` | `make_weather_audio` / `WeatherAudio` (makeWeatherAudio), `record`, `write_timeline`, `bake_wav`, `merge` |
 
 ## Tests
 
@@ -332,19 +384,31 @@ They live in `blender/tests/weather/`. The first three need no Blender:
 
 These run in Blender with `bash run_blender.sh <test>`; tests that render go through the GPU slot:
 
-- `test_blender_build.py` (no render): the generators against the JS, shelter, splash placement, the lightning
-  objects, keys, wrap and unwrap, the receiver flags, the rain shadow (dry under the awning, a smooth ramp at a
-  building's lee), the heightfield fallback, every option the JS takes, and dispose. It also saves the scene
-  and reopens it in a fresh Blender (`check_saved_blend.py`). The reloaded file evaluates the same rain, light,
-  bolt, sparks and shader values with no weather code loaded.
+- `test_blender_build.py` (no render): the generators against the JS (both `rain_cells` gates), shelter, splash
+  placement, the lightning objects, keys, wrap and unwrap, the receiver flags, the rain shadow (dry under the
+  awning, a smooth ramp at a building's lee), the heightfield fallback, every option the JS takes, the uniform names
+  and the transition diagnostics, the one-system-per-scene registry, and dispose. It also saves the scene and
+  reopens it in a fresh Blender (`check_saved_blend.py`). The reloaded file evaluates the same rain, light, bolt,
+  sparks and shader values with no weather code loaded.
 - `probe_eevee_facts.py`: the Blender facts the design rests on (F1-F8).
 - `storm_street.py --mode check | stills | video`: a storm rolling in over a wet street while the camera walks down
   it, a close strike lighting it, a far strike's rumble, and the film with its rain and thunder track.
 - `weather_states.py`: every weather state on the street, shown when its rain has wet the street most; the legacy
   names.
 - `weather_examples.py`: the options and the source's examples (drop texture and procedural streaks, ember rain,
-  the two wet models, ground_y splashes, splash_count 0, the procedural bolt, the five bolt styles, the impact close).
+  the two wet models, ground_y splashes, splash_count 0, the two `rain_cells` gates at a cell edge, the procedural
+  bolt, the five bolt styles, the impact close).
 - `probe_puddles.py`: a road wetting, pooling and drying, close up.
+- `test_facade_records.py` (no render): the facade's records in Blender axes, `make_weather_audio` in a loop of its
+  own against the baked timeline, the profile's names, the front-face-only sparks, puffs and rings, and the plain
+  options at values other than their defaults.
+- `probe_strike_on_sand.py`: a forced strike on pale open ground, close: the flash, sparks, white-hot puffs, grey
+  smoke and the scorch, from the side and from above.
+- `rain_ab_webgpu_scene.js` with `rain_ab_blender.py`: the rain against WebGPU itself (see
+  [Rain and splashes](#rain-and-splashes)). The first renders eidoverse's own `makeSky` weather in deno, from the
+  worktree root: `RENDER_CODEC=libx264 RENDER_CQ=1 deno run --allow-all --unstable-webgpu --no-lock
+  eidoverse/render_scene.mjs blender/tests/weather/rain_ab_webgpu.json` (through the GPU slot); the second renders
+  the same set in EEVEE and compares.
 
 `weather_states.py`, `weather_examples.py` and `probe_puddles.py` take `--dry`: they plan, key and check with no sky
 bake and no render, so they need no GPU slot. `storm_street.py --mode check` is the same for the film.
@@ -364,6 +428,9 @@ its lit windows and shop fronts.
 - **The listener exposure** (`weather_listener.js`, Eanpa's standalone): rain muffled when the camera is under a
   roof. eidoverse's audio never had it.
 - **three's smooth light range window** on the strike light: EEVEE has a hard custom cutoff only (see Lightning).
+- **makeSky's own weather.** `sky_worlds.js` builds the weather system inside `makeSky` and wraps the scene; here
+  `make_sky` builds the sky alone and `make_weather_system(scene, sky)` attaches the weather to it. Until then a rain
+  state has no falling drops (the sky's curtains and greying are there).
 - **WebGPU-only machinery, dropped**: G-buffer exclusion (`mrtNode`: EEVEE draws Blended surfaces forward, after its
   G-buffer), the budgeted wrap queue (EEVEE compiles at render), pipeline warm-up (`pipeline_warmup_objects()`
   returns the weather's objects as an inventory), fixed bolt buffers (each bolt is its own mesh), `noSupportCheck`.

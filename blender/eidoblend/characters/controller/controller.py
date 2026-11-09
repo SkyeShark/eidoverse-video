@@ -29,14 +29,21 @@ What the WebGPU world gives that Blender has not, and what stands in:
 Additions of this edition, each an option that is off or neutral unless asked (film.py turns them on for a bake):
   gait_sync='stride'      the original: the ground gait's timeScale = speed / native speed. 'distance': the clip's phase
                           from the ground covered (distance matching: walk and run share one phase, aligned on the left
-                          strike; the stairs one cycle per two treads, anchored at the first edge, any shape, both ways)
+                          strike; the stairs one cycle per two treads, anchored at the first edge, any shape, both ways;
+                          while a stair clip leads, the walk's phase follows it, so a hand-back keeps the same foot down)
   native_walk_speed / native_run_speed=None   measured on this body (the clip's stride / its duration); the WebGPU
                           numbers (1.5, 3.6) were tuned on Aletheia
+  land_on_contact         a body already in the air lands when its feet reach the ground
+  ground_past_steep       the support probes under the feet look past a face too steep to stand on to the walkable
+                          surface under it (the original finds no ground there: the far side of a dome is a take-off)
   turn_on_spot(angle)     a turn on the spot plays turnLeft / turnRight, the root taking the clip's hips yaw (scaled to
                           the angle asked); the original never plays these clips
+  seat_dz                 while seated the root rises or sinks by it (the film's sit(seat=...): seatOn's settle)
   maneuver_planners / maneuvers   the maneuver engine (_start_maneuver, _update_maneuver, _end_maneuver, the path
                           sampling and scans) is here; the moves themselves (vault, climbLedge, jump, climbLadder,
-                          climbWall and their contact IK) register into ctrl.maneuvers (the controller-maneuvers step)
+                          climbWall and their contact IK) register into ctrl.maneuvers (maneuvers.py)
+  maneuver_feet_out_of_solids (on) / contact_world   the last pass of every maneuver frame: no foot inside a solid
+                          of contact_world (default the walking world)
 """
 
 import math
@@ -53,6 +60,7 @@ from .pose import Pose, humanoid_parents, root_matrix
 
 D2R = math.pi / 180.0
 R2D = 180.0 / math.pi
+FOLLOW_UNDER = 0.1          # the walk's and run's weight under which their phase follows a leading stair clip
 
 
 def _wrap(a):
@@ -99,23 +107,35 @@ PRESETS = {
 
 
 def measure_vrm(h, body):
-    """the original's constructor measures: the VRM's height and its lowest point (bbox), the hips' rest height over it"""
+    """the original's constructor measures: the VRM's height and its lowest point (bbox), the hips' rest height over it.
+    Measured AT REST (the armature's rest position, whatever its pose, action or NLA plays now), as the engine measures
+    a VRM it has just loaded: a controller built while the armature played a ground sit ran its whole take ~0.4 m off."""
     import bpy
     import numpy as np
-    dg = bpy.context.evaluated_depsgraph_get()
-    inv = h.arm.matrix_world.inverted()
-    zmin, zmax = math.inf, -math.inf
-    for o in h.meshes:
-        ev = o.evaluated_get(dg)
-        me = ev.to_mesh()
-        n = len(me.vertices)
-        if n:
-            co = np.empty(n * 3)
-            me.vertices.foreach_get('co', co)
-            M = np.array(inv @ o.matrix_world)
-            z = co.reshape(-1, 3) @ M[2, :3] + M[2, 3]
-            zmin, zmax = min(zmin, float(z.min())), max(zmax, float(z.max()))
-        ev.to_mesh_clear()
+    arm = h.arm.data
+    pose0 = arm.pose_position
+    if pose0 != 'REST':
+        arm.pose_position = 'REST'
+        bpy.context.view_layer.update()
+    try:
+        dg = bpy.context.evaluated_depsgraph_get()
+        inv = h.arm.matrix_world.inverted()
+        zmin, zmax = math.inf, -math.inf
+        for o in h.meshes:
+            ev = o.evaluated_get(dg)
+            me = ev.to_mesh()
+            n = len(me.vertices)
+            if n:
+                co = np.empty(n * 3)
+                me.vertices.foreach_get('co', co)
+                M = np.array(inv @ o.matrix_world)
+                z = co.reshape(-1, 3) @ M[2, :3] + M[2, 3]
+                zmin, zmax = min(zmin, float(z.min())), max(zmax, float(z.max()))
+            ev.to_mesh_clear()
+    finally:
+        if pose0 != 'REST':
+            arm.pose_position = pose0
+            bpy.context.view_layer.update()
     return zmax - zmin, zmin, body.H['hips'].z - zmin
 
 
@@ -242,6 +262,9 @@ class VRMCharacterController:
         self.maneuvers = dict(MV.AUTO)      # name -> callable(ctrl, scan, obstacle_or_gap, fx, fy[, slot]) -> bool
         self.maneuver_planners = []         # extra auto-trigger planners: callable(ctrl, fx, fy, speed) -> bool
         self.maneuver_hand_ik = dict(MV.HAND_IK)   # grab type -> callable(ctrl, m, u): a maneuver's contact IK
+        # this edition's: after the contact IK, no foot inside the world's solids (maneuvers.feet_out_of_solids)
+        self.maneuver_feet_out_of_solids = opts.get('maneuver_feet_out_of_solids', True)
+        self.contact_world = opts.get('contact_world')    # the solids for that pass (default: the walking world)
         self._body_y_target = start[2] + center_above_feet
         self._y_avg_window = []
         self._y_avg_size = opts.get('y_average_window_size', 4)
@@ -288,6 +311,7 @@ class VRMCharacterController:
         self.gait_sync = opts.get('gait_sync', 'stride')
         self.backward = bool(opts.get('backward', False))   # walk backward: face away from the travel, the clip reversed
         self.land_on_contact = bool(opts.get('land_on_contact', False))   # a fall lands when the feet reach the ground
+        self.ground_past_steep = bool(opts.get('ground_past_steep', False))   # a side hit looked past to the ground
         self.mode = 'loco'                  # what the last frame did: loco | emote | seated | turn | maneuver
         self.time = 0.0
         self.pose = Pose(self.body, root_matrix(start[0], start[1], start[2], self._heading), {})
@@ -310,9 +334,24 @@ class VRMCharacterController:
     def feet_world_position(self):
         return self._feet_world.copy()
 
-    def _ground_vector(self, x, y, origin_z):
-        """_groundVector: a 1 cm ball dropped from (x, y, origin_z): the contact's z, or None (nothing, or a side hit)"""
-        return self.world.ground_vector(x, y, origin_z, radius=0.01, min_normal=0.5, max_dist=2000.0)
+    def _ground_vector(self, x, y, origin_z, past_steep=False):
+        """_groundVector: a 1 cm ball dropped from (x, y, origin_z): the contact's z, or None (nothing, or a side hit).
+        past_steep (this edition's ground_past_steep, for the two support probes under the feet only): a side hit is
+        looked past, down a ray, to the first walkable surface under it (the floor beyond a dome's or a boulder's steep
+        far side: a step down, where the original finds no ground and the body takes off). The probes ahead keep the
+        original's answer: a ramp box's steep front edge read past would be a step and the ramp a stair"""
+        z = self.world.ground_vector(x, y, origin_z, radius=0.01, min_normal=0.5, max_dist=2000.0)
+        if z is not None or not past_steep:
+            return z
+        o = Vector((x, y, origin_z))
+        for _ in range(8):
+            h = self.world.ray_cast(o, Vector((0.0, 0.0, -1.0)), 2000.0)
+            if not h.hit:
+                return None
+            if h.normal.z >= 0.5:
+                return h.point.z
+            o = h.point - Vector((0.0, 0.0, 0.002))
+        return None
 
     def update(self, dt, input=None):
         """the original's update(dt, {x, z}): input a velocity (world x, y in m/s)"""
@@ -333,8 +372,10 @@ class VRMCharacterController:
         probe_z = cur.z + self.half_height + 5.0
         perp_x = math.cos(self._heading) if self._turning_enabled else -1.0
         perp_y = math.sin(self._heading) if self._turning_enabled else 0.0
-        left_hit = self._ground_vector(cur.x + perp_x * self.foot_stance_x, cur.y + perp_y * self.foot_stance_x, probe_z)
-        right_hit = self._ground_vector(cur.x - perp_x * self.foot_stance_x, cur.y - perp_y * self.foot_stance_x, probe_z)
+        left_hit = self._ground_vector(cur.x + perp_x * self.foot_stance_x, cur.y + perp_y * self.foot_stance_x, probe_z,
+                                       past_steep=self.ground_past_steep)
+        right_hit = self._ground_vector(cur.x - perp_x * self.foot_stance_x, cur.y - perp_y * self.foot_stance_x, probe_z,
+                                        past_steep=self.ground_past_steep)
         ahead_hit = None
         ahead_min, ahead_max = math.inf, -math.inf
         probe_ys = []
@@ -523,9 +564,11 @@ class VRMCharacterController:
             self._last_valid_ground_y = per_foot
             self._ground_stale_frames = 0
         thr = self.fall_threshold
-        if self.land_on_contact and self._velocity_y < 0.0:
-            # this edition's: a falling body lands when its feet reach the ground (the original regains the ground
-            # fall_threshold above it and floats the rest down at the body-Y rate cap, its feet in the air)
+        if self.land_on_contact and not self.grounded and self._velocity_y < 0.0:
+            # this edition's: a falling body (already in the air last frame) lands when its feet reach the ground (the
+            # original regains the ground fall_threshold above it and floats the rest down at the body-Y rate cap, its
+            # feet in the air). A grounded body walking down a slope keeps the original's threshold: read on it, the
+            # contact rule made the far side of a 35 cm dome a take-off
             thr = max(0.005, -self._velocity_y * dt)
         if per_foot is not None and (current_feet_y - per_foot) <= thr:
             grounded = True
@@ -773,8 +816,12 @@ class VRMCharacterController:
         self._active_emote = None
 
     def begin_seated(self, slot='stand_to_sit', fade_in=0.25):
-        """beginSeated: the seated transition plays on the controller's mixer and the root is the caller's"""
+        """beginSeated: the seated transition plays on the controller's mixer and the root is the caller's. While seated
+        the root holds where the seat began, raised by `seat_dz` (this edition's: the film's Sit sets it so the seated
+        underside rests on the seat's pan, seatOn's settle)"""
         self._seated = True
+        self._seat_root_z = self.pose.M.translation.z
+        self.seat_dz = 0.0
         if slot not in getattr(self, '_emote_actions', {}):
             self.load_emote(slot, loop=False)
         a = self.play_emote(slot, fade_in=fade_in)
@@ -1081,6 +1128,7 @@ class VRMCharacterController:
         ik = self._leg_ik
         mixer = self._mixer
         self.mode = 'loco'
+        self.hand_contact = {}              # this frame's hands the contact IK placed: {side: its weight} (the record's)
         # ---- EMOTE SUSPEND
         if self.is_emoting:
             self.mode = 'seated' if getattr(self, '_seated', False) else 'emote'
@@ -1108,6 +1156,11 @@ class VRMCharacterController:
                     ik.foot_plant_forward_offset = 0.0
                     ik.update(dt, self.pose)
             else:
+                if getattr(self, '_seat_root_z', None) is not None:
+                    t = self.pose.M.translation.copy()
+                    t.z = self._seat_root_z + getattr(self, 'seat_dz', 0.0)
+                    self.pose.M.translation = t
+                    self.pose.invalidate()
                 self.anim_pose = self.pose.copy()
             self.external_ground_y = None
             return
@@ -1391,6 +1444,8 @@ class VRMCharacterController:
             self._stair_phase_lock_active = False
             self._stair_phase_lock_dir = None
             self._stair_phase_lock_shape = None
+        if self.gait_sync == 'distance':
+            self._follow_stair_phase(dt, (walk_a, run_a), (su_a, sd_a, sru_a, srd_a))
         # 6.5 gestures; 7. the mixer
         self._update_gesture_weights(dt)
         if mixer:
@@ -1569,8 +1624,9 @@ class VRMCharacterController:
         lead = dom if dom is not None else a0
         passing = sorted(lead.clip.gait.passing.values()) if (lead is not None and lead.clip.gait is not None and
                                                               getattr(lead.clip.gait, 'passing', None)) else []
-        if wsum < 0.05 and getattr(self, '_ground_wsum_last', 0.0) < 0.05 and passing:
-            self._gait_phase = (passing[0] - 0.08 * sgn) % 1.0
+        st_w = sum(a.weight for a in stairs if a is not None)
+        if wsum < 0.05 and getattr(self, '_ground_wsum_last', 0.0) < 0.05 and st_w < 0.05 and passing:
+            self._gait_phase = (passing[0] - 0.08 * sgn) % 1.0      # a start from standing (not off the stairs)
         self._ground_wsum_last = wsum
         d_stop = getattr(self, 'stop_distance', None)
         if d_stop is not None and passing and d_stop < 2.2 * stride and ds != 0:
@@ -1591,6 +1647,27 @@ class VRMCharacterController:
                 continue
             a.time = a.clip.time_at_phase(self._gait_phase)
             a.time_scale = 0.0
+
+    def _follow_stair_phase(self, dt, ground, stairs):
+        """this edition's (distance matching): the stair clips keep their own clock (the tread-locked phase), the walk
+        and the run the shared one. Once a stair clip leads and the walk and the run have faded under FOLLOW_UNDER, the
+        shared phase follows it (its time after this frame's mixer step), so a hand-back from the stairs re-enters the
+        walk where the stairs are in the cycle, the same foot down (unfollowed, the walk came back off a dome with the
+        other foot planted: neither foot down for eight frames). Not before: a walk still carrying weight would jump its
+        phase mid-crossfade and flip the blended stance (a stair's first stance tucked 20 mm deeper)"""
+        st = [a for a in stairs if a is not None and a.clip.gait is not None and a.weight > 1e-3]
+        if not st:
+            return
+        lead = max(st, key=lambda a: a.weight)
+        gw = sum(a.weight for a in ground if a is not None)
+        if lead.weight <= gw or gw > FOLLOW_UNDER:
+            return
+        t_next = (lead.time + (lead.time_scale or 0.0) * dt) % lead.clip.duration
+        self._gait_phase = lead.clip.phase_at_time(t_next)
+        for a in ground:
+            if a is not None and a.clip.gait is not None:
+                a.time = a.clip.time_at_phase(self._gait_phase)
+                a.time_scale = 0.0
 
     # ================================================================================================ turn on the spot
     def turn_on_spot(self, angle, clip=None, fade=0.15):
@@ -1676,9 +1753,9 @@ class VRMCharacterController:
     def jump(self, distance=1.4, height=0.45):
         return MV.jump(self, distance=distance, height=height)
 
-    def climb_ladder(self, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0):
+    def climb_ladder(self, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0, standoff=None):
         return MV.climb_ladder(self, height=height, rate=rate, first_rung=first_rung, rung_spacing=rung_spacing,
-                               time_scale=time_scale)
+                               time_scale=time_scale, standoff=standoff)
 
     def climb_wall(self, rate=0.34, time_scale=1.1):
         return MV.climb_wall(self, rate=rate, time_scale=time_scale)
@@ -1709,9 +1786,26 @@ class VRMCharacterController:
         oz = cur.z + self.half_height + 3.0
         step = self.maneuver_scan_step
         N = max(6, int(math.ceil(self.maneuver_scan_range / step)))
-        return {'feet_y': feet_y, 'samples': [{'d': i * step, 'y': self._ground_vector(cur.x + fx * i * step,
-                                                                                      cur.y + fy * i * step, oz)}
-                                              for i in range(1, N + 1)]}
+        return {'feet_y': feet_y, 'fx': fx, 'fy': fy, 'x': cur.x, 'y': cur.y,
+                'samples': [{'d': i * step, 'y': self._ground_vector(cur.x + fx * i * step, cur.y + fy * i * step, oz)}
+                            for i in range(1, N + 1)]}
+
+    def _face_distance(self, scan, start_d, rise):
+        """this edition's: an obstacle's near face measured exactly, level rays along the scan from the body's axis at a
+        quarter, a half and three quarters of its rise (at most 1.2 m up). The scan's samples step maneuver_scan_step
+        (0.15 m), so its start_d lies up to a step past the face; a lip, a rung line or a prop placed from it hung up to
+        15 cm off the real one. -> the distance (m), or start_d when no face answers between the last sample before it
+        and it"""
+        if 'fx' not in scan:
+            return start_d
+        d = Vector((scan['fx'], scan['fy'], 0.0))
+        best = None
+        for k in (0.25, 0.5, 0.75):
+            z = scan['feet_y'] + min(1.2, max(0.06, k * rise))
+            h = self.world.ray_cast(Vector((scan['x'], scan['y'], z)), d, start_d + 0.02)
+            if h.hit and abs(h.normal.z) < 0.5 and h.distance > start_d - self.maneuver_scan_step - 0.02:
+                best = h.distance if best is None else min(best, h.distance)
+        return best if best is not None else start_d
 
     def _classify_path_ahead(self, scan):
         """at most one OBSTACLE (a single-step vertical jump of 0.40 m or more) and one GAP (a deep void back to level)"""
@@ -1738,7 +1832,8 @@ class VRMCharacterController:
                     obstacle = {'start_d': s['d'], 'end_d': end_d, 'depth': end_d - s['d'] + self.maneuver_scan_step,
                                 'top_y': top, 'rise': top - feet_y, 'landing_d': landing['d'] if landing else None,
                                 'landing_y': landing['y'] if landing else None,
-                                'plateau': end_d >= last_d - 1e-6 or landing is None}
+                                'plateau': end_d >= last_d - 1e-6 or landing is None,
+                                'face_d': self._face_distance(scan, s['d'], top - feet_y)}
                     break
             prev = s['y']
         gap = None
@@ -1858,6 +1953,7 @@ class VRMCharacterController:
         m = self._maneuver
         self.maneuver_type = m['type']          # this frame's maneuver (telemetry; the record reads it)
         m['t'] += dt
+        m['_dt'] = dt
         u = min(1.0, m['t'] / m['duration'])
         if m.get('path'):
             p = self._sample_maneuver_path(m['path'], u)
@@ -1887,6 +1983,8 @@ class VRMCharacterController:
             m['_sink_now'] = vs['amount'] * (k * k * (3 - 2 * k))
             _lower(self.pose, m['_sink_now'])
         self._apply_maneuver_hand_ik(m, u)
+        if self.maneuver_feet_out_of_solids and m['type'] != 'land':
+            MV.feet_out_of_solids(self, m)          # this edition's: no foot left inside a wall, a cover or a top
         self.anim_pose = self.pose.copy()           # the frame the film keys: the contact IK is part of the maneuver
         self.support_frame = {'dt': dt, 'maneuver': {'type': m['type'], 'slot': m['slot'], 'u': round(u, 3),
                                                      'duration': m['duration']},
@@ -1948,6 +2046,9 @@ class VRMCharacterController:
 
     def _solve_arm_ik(self, side, target, w):
         self._solve_limb_ik(side + 'UpperArm', side + 'LowerArm', side + 'Hand', target, w)
+        if w > 0.01:
+            hc = self.__dict__.setdefault('hand_contact', {})
+            hc[side] = max(hc.get(side, 0.0), min(1.0, w))      # the plant keeps this hand there (my robot body's arms)
 
     def _solve_leg_ik(self, side, target, w):
         self._solve_limb_ik(side + 'UpperLeg', side + 'LowerLeg', side + 'Foot', target, w)

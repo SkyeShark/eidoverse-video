@@ -59,7 +59,8 @@ class RedGiant:
         self.angular_radius = float(o.get('angularRadius', 0.28))
         self.gran_scale = float(o.get('granScale', 52))
         self.plasma_speed = float(o.get('plasmaSpeed', 0.5))
-        self.flares = tuple(o.get('flares') or FLARES)
+        # opts.flares ?? FLARES: an explicit empty list is honoured (no prominences, no sunspot events), as in the JS
+        self.flares = FLARES if o.get('flares') is None else tuple(o['flares'])
         self.hex_scale = float(o.get('hexScale', 22))
         self.shield_radius = float(o.get('shieldRadius', 21000))
         self.has_shield = o.get('shield', True) is not False
@@ -145,7 +146,7 @@ class RedGiant:
             tin = t / per + i * 0.37
             cyc = math.floor(tin)
             birth = (cyc - i * 0.37) * per
-            env_b = max(flare_env(f, birth) for f in self.flares)
+            env_b = max((flare_env(f, birth) for f in self.flares), default=0.0)
             ang = h1(cyc, i * 7 + 1) * math.pi * 2
             rad = (0.12 + h1(cyc, i * 7 + 2) * 0.55) * hs
             on = 1.0 if h1(cyc, i * 7 + 3) > (0.45 - env_b * 0.35) else 0.0

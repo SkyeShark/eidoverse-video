@@ -102,7 +102,7 @@ def _sway_group():
     (sway k, 0, sway k 0.6) with k = 0.16 y^2.
     WebGPU = 0 (default): y is the blade's own height and the offset turns with the tuft (yaw, scale): the base stays
     planted, the tips sway, which is what the formula is written for.
-    WebGPU = 1: the film's exact arithmetic. three applies an InstancedMesh's matrix to positionLocal BEFORE the
+    WebGPU = 1: the WebGPU edition's exact arithmetic. three applies an InstancedMesh's matrix to positionLocal BEFORE the
     material's positionNode (NodeMaterial.setupPosition), so the JS read the design-frame height (ground + blade) and
     offset along design x / z: on the 0.7 - 2 m dunes the whole tuft, base included, slid by up to ~0.2 m."""
     import bpy

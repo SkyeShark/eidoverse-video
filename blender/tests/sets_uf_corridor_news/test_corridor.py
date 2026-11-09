@@ -1,5 +1,5 @@
-"""The corridor (UNKNOWN FORCE verse 2) in Blender: build it, check the parts and the keyed update numerically, and
-(--render) render the film's five cameras plus the states (doors open, the post typing, the cap on a head, a recount).
+"""The gold corridor in Blender: build it, check the parts and the keyed update numerically, and (--render) render the
+set's five cameras plus the states (doors open, the post typing, the cap on a head, a recount).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_corridor.py
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
@@ -54,10 +54,21 @@ F.check('focal: the door at (0, 5.2, -23.8) three = Blender (0, 23.8, 5.2)',
 F.check('look: argue, exposure 1, bloom, fog null', C.look['name'] == 'argue' and C.look['fog'] is None
         and C.look['bloom']['strength'] == 0.55)
 lit = C.parts['lights']
-F.check('key light: 300 cd -> 300 x 4 pi / 683 W', abs(lit['key'].data.energy - 300 * 4 * math.pi / 683) < 1e-4,
+F.check('key light: 300 cd -> 300 x 4 pi W', abs(lit['key'].data.energy - 300 * 4 * math.pi) < 1e-3,
         f"{lit['key'].data.energy:.4f} W")
+F.check('apply_look: AgX at 0 stops (three exposure 1, the lamps W = 4 pi cd)', sc.view_settings.view_transform == 'AgX'
+        and abs(sc.view_settings.exposure) < 1e-9, f'{sc.view_settings.exposure:.3f}')
+C.apply_look(sc, view_look=CL.ACES_LIKE_LOOK)
+F.check("apply_look(view_look=ACES_LIKE_LOOK): the AgX look that follows the WebGPU frames' ACES tone",
+        sc.view_settings.view_transform == 'AgX' and sc.view_settings.look == CL.ACES_LIKE_LOOK, sc.view_settings.look)
+sc.view_settings.look = 'None'
 F.check('key light: spot_size = 2 x 0.3 rad, blend 0.8',
         abs(lit['key'].data.spot_size - 0.6) < 1e-6 and abs(lit['key'].data.spot_blend - 0.8) < 1e-6)
+misses = F.material_attr_misses(C.collection)
+F.check('every mesh carries the uv maps and attributes its materials read (the pedestal\'s marble its UVBook)',
+        not misses, str(misses[:4]))
+ped = [o for o in C.parts['pedestal'].children if o.type == 'MESH' and C.materials['marble'] in list(o.data.materials)]
+F.check('pedestal: the marble block has its own book-matched slab uv', len(ped) == 1 and 'UVBook' in ped[0].data.uv_layers)
 # the door is 24 m behind her: the door leaves' hinge pivots at three z = ZD - 0.11 -> Blender y = 24.11
 pl = C.parts['doors']['left']
 F.check('door pivots at three (-3.2, 0, -24.11) -> Blender (-3.2, 24.11, 0)',
@@ -87,7 +98,7 @@ F.check('post: typed in full by 1.5 s, cursor off', C.group['post_n'] == len(C.p
         and C.group['post_cursor'] == 0.0)
 ang = C.parts['doors']['left'].rotation_euler[2]
 F.check('doors: open eased to 93 deg at t = 3.5 s', abs(ang - 1.62) < 1e-3, f'{math.degrees(ang):.1f} deg')
-F.check('beyond light: 1500 cd once open', abs(lit['beyond'].data.energy - 1500 * 4 * math.pi / 683) < 1e-3)
+F.check('beyond light: 1500 cd once open', abs(lit['beyond'].data.energy - 1500 * 4 * math.pi) < 1e-2)
 F.check('shafts: shown once the doors part', not C.parts['shafts'].hide_render)
 sc.frame_set(1)
 F.check('shafts: hidden while shut', C.parts['shafts'].hide_render)
@@ -115,59 +126,53 @@ F.check('keys: uniforms LINEAR, post_n CONSTANT', interp.get('["open"]') == {'LI
 cv = C.parts['postWall'].canvas
 F.check('postWall.canvas: the shown post, drawn in full (2048 x 931)', (cv.width, cv.height) == (2048, 931))
 
-# ------------------------------------------------------------------------------------------- the cue sheet
-s0, s1, s2, s3 = (COR.film_state(t) for t in (120.7, 131.55, 139.0, 116.0))
-F.check("film_state: at 120.7 s the film's post waits untyped, doors shut, the cap on its cushion, the tally 49/39/12",
-        s0['postText'] == COR.FILM_POST_TEXT and s0['post'] == 0.0 and s0['open'] == 0.0 and s0['capOn'] == 0.0
-        and s0['tally'] == [49, 39, 12] and s0['lights'] == 1.0)
-F.check('film_state: at 131.55 s the post is half typed (smoothstep 130.8-132.3)', abs(s1['post'] - 0.5) < 1e-9)
-F.check('film_state: at 139 s the doors are half way to their 0.06 crack, the cap on her head',
-        abs(s2['open'] - 0.03) < 1e-9 and s2['capOn'] == 1.0)
-F.check('film_state: the blackout at 115.45-116.6 s dips the lights to 0.15', s3['lights'] == 0.15)
-F.check('cue_at: 134 s is "in capital letters", on the postWall shot', COR.cue_at(134.0)['lyric'] == 'in capital letters'
-        and COR.cue_at(134.0)['cam'] == 'postWall')
-c112 = COR.film_cut(112.0)
-F.check("film_cut: 112 s is the film's 'cap' shot, its orbit 0.1, her hidden", c112['cam'] == 'cap'
-        and c112['move'] == {'orbit': 0.1} and not c112['singer'] and abs(c112['u'] - (112.0 - 111.5) / 3.9) < 1e-9)
-p0, p1 = C.film_pose('door', 0.0, {'push': 1.2}), C.film_pose('door', 1.0, {'push': 1.2})
-F.check('film_pose: a push moves the camera 1.2 m toward its target over the shot',
-        abs(math.dist(p0['pos'], p1['pos']) - 1.2) < 1e-9 and p0['target'] == p1['target'])
-q0, q1 = C.film_pose('cap', 0.0, {'orbit': 0.1}), C.film_pose('cap', 1.0, {'orbit': 0.1})
-r0 = [a - b for a, b in zip(q0['pos'], q0['target'])]
-r1 = [a - b for a, b in zip(q1['pos'], q1['target'])]
-ang = math.atan2(r0[0], r0[2]) - math.atan2(r1[0], r1[2])
-F.check('film_pose: an orbit turns 0.1 rad about the vertical through the target', abs(abs(ang) - 0.1) < 1e-9
-        and abs(r0[1] - r1[1]) < 1e-12, f'{ang:.6f} rad')
-# keyed over the repost: the film's post is set from the start and waits untyped until 130.8 s
-REPOST = 'THE DEPARTMENT OF WAR POSTS IN CAPITAL LETTERS'
+# ------------------------------------------------------------------ a repost on your own clock, keyed
+# a new post set from the first keyed frame waits untyped until its typing starts at 1.0 s, then types over 0.5 s
+REPOST = 'A NEW POST, IN CAPITAL LETTERS'
 for f in range(1, 49):
-    ts = 129.8 + (f - 1) / 24.0
+    ts = (f - 1) / 24.0
     sc.frame_set(f)
-    C.update(ts, COR.film_state(ts, cap_head=head, post_text=REPOST), frame=f)
+    C.update(ts, {'postText': REPOST, 'post': max(0.0, min(1.0, (ts - 1.0) / 0.5))}, frame=f)
 C.keyer.finish()
 sc.frame_set(1)
 v_first, n_first = C.group['post_variant'], C.group['post_n']
-sc.frame_set(48)                                             # 131.758 s
-n_end = C.group['post_n']
-want = round(len(REPOST) * COR._ease((131.7583333 - 130.8) / 1.5))
-F.check('film keyed: the repost from its first frame, untyped until 130.8 s, then typed on the smoothstep',
-        v_first >= 1.0 and n_first == 0 and n_end == want, f'variant {v_first}, post_n {n_first} -> {n_end} (want {want})')
-# the film's cut as cameras: one per shot, keyed with its move, cut by markers
-sc.frame_start, sc.frame_end = 1, 24 * 4
-cams = C.make_cameras(frames=(1, 24 * 4), t0=108.0)           # 108.0-112.0 s: poll, door (push 0.6), cap (orbit 0.1)
-names = [n for (_f, n) in sorted(cams)]
-F.check("make_cameras: the film's shots 108-112 s are poll, door, cap, cut by timeline markers",
-        names == ['poll', 'door', 'cap'] and len([m for m in sc.timeline_markers if m.camera]) >= 3, str(sorted(cams)))
+sc.frame_set(31)                                             # t = 1.25 s: half typed
+n_mid = C.group['post_n']
+F.check('repost keyed: the new post from its first frame, untyped until 1.0 s, half typed at 1.25 s',
+        v_first >= 1.0 and n_first == 0 and n_mid == COR._js_round(len(REPOST) * 0.5),
+        f'variant {v_first}, post_n {n_first} -> {n_mid}')
+vi = C.parts['postWall'].set_text('ANOTHER POST', name='MINISTRY OF ANYTHING', meta='just now',
+                                  stats=('1', '2', '3', '4'))
+pst = C.parts['postWall']['state']
+F.check("set_text: a new name, meta and stats on the card make a new variant", vi >= 2 and pst['text'] == 'ANOTHER POST'
+        and pst['name'] == 'MINISTRY OF ANYTHING' and pst['stats'] == ['1', '2', '3', '4'], f'variant {vi}')
+# the sets' contract reads the result as a dict too
+F.check("contract: C['parts'] is C.parts, C['update'] the update, keys() holds group, parts, update, dispose, cams",
+        C['parts'] is C.parts and C['update'] is C.update and {'group', 'parts', 'update', 'dispose', 'cams'}
+        <= set(C.keys()) and C.get('nothing') is None)
+F.check("depthWrite false: the door's shafts and seam add every layer (Transparency Overlap)",
+        all(bpy.data.materials[n].use_transparency_overlap for n in ('corridor_shafts', 'corridor_door_seam')))
+# opts plaque: two lines of your own engraved over the door (the ink mask: where the black enamel fills the letters)
+ink0 = COR._plaque_relief(C.lib)['ink_canvas'].pixels()[..., 0].astype(float) / 255
+ink1 = COR._plaque_relief(C.lib, ('Ministry of', 'Anything'))['ink_canvas'].pixels()[..., 0].astype(float) / 255
+F.check('opts plaque: other words engraved, both lines inked, the transom the same size', ink1.shape == ink0.shape
+        and ink1[150:280].mean() > 0.05 and ink1[340:460].mean() > 0.05 and abs(ink1 - ink0).mean() > 0.02,
+        f'ink {ink0.mean():.3f} -> {ink1.mean():.3f}')
+# the suggested look, its focal keyed through the scene's camera as markers cut between three of the set's cameras
+sc.frame_start, sc.frame_end = 1, 96
+for f, name in ((1, 'poll'), (25, 'door'), (60, 'cap')):
+    m = sc.timeline_markers.new(f'cut_{name}', frame=f)
+    m.camera = C.camera(name, sc, set_active=False)
 e = C.apply_post(sc, frames=(1, 96))                          # bloom + aeropittura, the door's focal keyed per frame
 U = e.uniforms['aeropittura']
 foc = []
-for f in (10, 40, 90):                                        # the poll, door and cap shots
+for f in (10, 40, 90):                                        # the poll, door and cap cameras
     sc.frame_set(f)
     foc.append(tuple(round(v, 3) for v in U['focal'].default_value)[:2])
 bl = next((n for _s, nm, n in __import__('eidoblend.look.post.chain', fromlist=['stages']).stages(sc) if nm == 'bloom'), None)
-F.check("apply_post: bloom at the look's strength, threshold x SPEC; the aeropittura 'argue' with its focal following "
+F.check("apply_post: bloom at the look's strength and threshold; the aeropittura 'argue' with its focal following "
         "the cut", bl is not None and abs(bl.inputs['Strength'].default_value - 0.55) < 1e-6
-        and abs(bl.inputs['Threshold'].default_value - 0.7 / 683) < 1e-7 and len(set(foc)) == 3
+        and abs(bl.inputs['Threshold'].default_value - 0.7 * CL.SPEC) < 1e-7 and len(set(foc)) == 3
         and abs(U['strokes'].default_value - 0.9) < 1e-6, str(foc))
 
 if SAVE:

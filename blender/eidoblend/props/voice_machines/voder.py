@@ -2145,8 +2145,7 @@ def _draw_dial(ctx, w, h):
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.font = f'600 26px {DECO}'
-    ctx.strokeStyle = '#1c1611'
-    for i in range(21):
+    for i in range(21):                         # the ticks keep the red arc's stroke, as voder.js draws them
         a = a0 + (a1 - a0) * i / 20
         big = i % 4 == 0
         ctx.lineWidth = 4 if big else 2
@@ -2257,7 +2256,8 @@ class Voder(Machine):
 
 def build(glb=None, power=1.0, name='voder', collection=None, scene=None, location=(0.0, 0.0, 0.0), ctx=None):
     """voder.js build(THREE, opts): opts.glb (another GLB path), opts.power. ctx: a scene's ctx (its scene, and the
-    default route of every update's keys). Returns a Voder."""
+    default route of every update's keys). Returns a Voder. `power` holds until the first update sets one (voder.js's
+    own build-time update(0, {}) put its uniform back to 1 at once)."""
     scene = scene or (ctx.scene if ctx is not None else bpy.context.scene)
     path = glb or os.path.join(PACK, 'voder.glb')
     root, nodes, col = import_glb(path, name, collection, scene)

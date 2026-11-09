@@ -1,6 +1,8 @@
 """Her gestures against perform.js itself: claude_suit's normalized rig (rest positions, humanoid parents) goes to deno,
 where the untouched makePerformer runs handToFlower and lookAt on a three.js copy of that rig; the Blender port runs the
-same calls on the imported VRM; the resulting normalized rotations must agree.
+same calls on the imported VRM; the resulting normalized rotations must agree. Then key_gestures keys a hand rising and
+a head turning on their own clock (an NLA track), and bake_springs_with_plan bakes her springs with a reset and a
+stiffened stretch.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy_ocean/test_perform_parity.py
 """
@@ -81,6 +83,41 @@ for name in CASES:
     moved = sum(1 for q in js[name].values() if abs(q[3]) < 0.99999)
     ck.check(f'{name}: normalized rotations = perform.js', n_cmp > 0 and worst < 0.05,
              f'{n_cmp} bones compared, worst {worst:.2e} deg ({which}), {moved} moved by the JS')
+
+# ---- key_gestures: the hand rising to the flower and the head turning, on the caller's own clock, keyed on an NLA
+# track; then the springs baked with a reset and a stiffened stretch
+from eidoblend.sets.daisy.ocean.perform import key_gestures, bake_springs_with_plan  # noqa: E402
+from eidoblend.sets.daisy.ocean.util import ease  # noqa: E402
+sc = bpy.context.scene
+sc.render.fps = 24
+me.zero_pose()
+
+
+def gestures(f, P, h):
+    P.hand_to_flower(h, ease(f, 2, 18), side='right', tilt=0.16 * ease(f, 12, 22))
+    P.look_at(h, point_world, 0.6 * ease(f, 8, 22))
+
+
+rep = key_gestures(me, range(1, 26), gestures)
+
+
+def wrist_to_head(f):
+    sc.frame_set(f)
+    pb = me.arm.pose.bones
+    return ((me.arm.matrix_world @ pb[me.humanoid['rightHand']].head) - (me.arm.matrix_world @ pb[me.humanoid['head']].head)).length
+
+
+d1, d25 = wrist_to_head(1), wrist_to_head(25)
+tr = [t.name for t in me.arm.animation_data.nla_tracks]
+ck.check('key_gestures: the hand rises on its own clock (keyed on the NLA track), down before',
+         rep['track'] in tr and rep['frames'] == 25 and d1 > 0.45 and d25 < 0.36,
+         f"{rep['bones']} bones, wrist to head {d1:.3f} m at frame 1, {d25:.3f} m at frame 25; tracks {tr}")
+try:
+    sp = bake_springs_with_plan(me, range(1, 26), {'resets': [1], 'bump': {f: 1.0 for f in range(10, 16)}}, log=lambda *a: None)
+    ck.check('bake_springs_with_plan: the springs bake with a reset and six stiffened frames',
+             sp.get('stiffened_frames') == 6 and not sp.get('nan'), f"{ {k: sp[k] for k in ('springs', 'joints', 'resets', 'stiffened_frames', 'nan') if k in sp} }")
+except Exception as e:  # noqa: BLE001
+    ck.check('bake_springs_with_plan: the springs bake with a reset and six stiffened frames', False, f'{type(e).__name__}: {e}')
 ck.summary()
 with open(os.path.join(C.OUT, 'test_perform_parity.json'), 'w') as f:
     json.dump(ck.rows, f, indent=1)

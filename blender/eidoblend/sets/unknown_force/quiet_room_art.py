@@ -151,7 +151,8 @@ def draw_odds_board(ctx, W, H, r):
 
 
 def draw_clip_board(ctx, W, H, r):
-    """RIGHT WING (1.5 x 1.6 m): the paperclip, and the lyric in one image (SLOW DOWN struck out, SHIP Q3 over it)."""
+    """RIGHT WING (1.5 x 1.6 m): the paperclip, and the room's argument in one image (SLOW DOWN struck out, SHIP Q3
+    over it)."""
     L.board_base(ctx, W, H, r, ghosts=[{'t': 'okr: trust', 'x': 0.5, 'y': 0.08, 's': 0.05},
                                        {'t': 'v.4 -> v.5', 'x': 0.1, 'y': 0.6, 's': 0.07}])
     s = H / 1536

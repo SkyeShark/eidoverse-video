@@ -7,8 +7,9 @@ render_frame runs once per frame at build time and must key what it changes. Two
                               from Python and always inserts BEZIER / AUTO_CLAMPED, which eases sub-frame motion
                               blur samples at starts, stops and extremes.)
   snapshot(scene)             the values a WebGPU renderFrame typically wrote: object transforms and visibility, pose
-                              bones, shape-key values, modifier inputs, lights, cameras, the scene camera, exposure,
-                              and every unlinked node input of the world's and the materials' node trees
+                              bones, shape-key values, Geometry Nodes modifier inputs (node_inputs: Blender 5.2's
+                              modifiers["m"].properties.inputs.<Socket_N>.value), lights, cameras, the scene camera,
+                              exposure, and every unlinked node input of the world's and the materials' node trees
   diff(intended, saved)       a value render_frame set at frame f that the saved scene does not show at frame f was
                               changed without a key: the whole film shows the last value set instead
 
@@ -142,6 +143,42 @@ def _tree(out, kind, owner_name, tree):
                  f'nodes["{node.name}"].inputs[{i}].default_value', v)
 
 
+def node_inputs(m) -> list:
+    """[(identifier, socket name, data path from the object, value)] of a Geometry Nodes modifier's inputs.
+
+    Blender 5.2 keeps them as RNA, modifiers["m"].properties.inputs.<Socket_N>.value (a modifier holds no ID
+    properties there: m.keys() and m["Socket_N"] raise TypeError), so ctx.key(ob, that path) keys one. Older builds
+    kept them as ID properties, modifiers["m"]["Socket_N"]; those are read when the RNA form is absent."""
+    out = []
+    inputs = getattr(getattr(m, 'properties', None), 'inputs', None)
+    if inputs is not None:
+        names = {}                     # the group interface's socket names (the RNA items are named by identifier)
+        ng = getattr(m, 'node_group', None)
+        if ng is not None:
+            for it in ng.interface.items_tree:
+                if getattr(it, 'in_out', None) == 'INPUT':
+                    names[it.identifier] = it.name
+        for prop in inputs.bl_rna.properties:
+            ident = prop.identifier
+            if ident in ('rna_type', 'name'):
+                continue
+            item = getattr(inputs, ident, None)
+            try:
+                v = item.value
+            except (AttributeError, RuntimeError, TypeError):      # a geometry input holds no value
+                continue
+            out.append((ident, names.get(ident, ident), f'modifiers["{m.name}"].properties.inputs.{ident}.value', v))
+        return out
+    try:
+        ks = list(m.keys())
+    except TypeError:          # Blender 5.2's NodesModifier has no IDProperties
+        ks = []
+    for k in ks:
+        if not k.endswith(('_use_attribute', '_attribute_name')):
+            out.append((k, k, f'modifiers["{m.name}"]["{k}"]', m[k]))
+    return out
+
+
 def snapshot(scene) -> dict:
     """{label: (value, owning ID, data path)} for everything render_frame is likely to change."""
     out = {}
@@ -160,9 +197,9 @@ def snapshot(scene) -> dict:
             _put(out, f"modifier '{n}'/'{m.name}'.show_render", ob, f'modifiers["{m.name}"].show_render',
                  m.show_render)
             if m.type == 'NODES':
-                for k in m.keys():
-                    if not k.endswith(('_use_attribute', '_attribute_name')):
-                        _put(out, f"modifier '{n}'/'{m.name}' input '{k}'", ob, f'modifiers["{m.name}"]["{k}"]', m[k])
+                for ident, sock, path, v in node_inputs(m):
+                    label = ident if sock == ident else f'{sock} ({ident})'
+                    _put(out, f"modifier '{n}'/'{m.name}' input '{label}'", ob, path, v)
         if ob.type == 'LIGHT' and ob.data is not None:
             lights[ob.data.name] = ob.data
         elif ob.type == 'CAMERA' and ob.data is not None:

@@ -120,9 +120,9 @@ console.log(JSON.stringify(out));
     py = noise_data()
     diff = np.abs(jsn.astype(int) - py.astype(int))
     print(f'  noise: max |diff| {diff.max()}, differing texels {(diff > 0).mean() * 100:.4f} %')
-    # the JS fills its lattices through a Float32Array (rng values rounded to float32); the port keeps float64, so a
-    # value on a rounding boundary may land one step off
-    check(diff.max() <= 1 and (diff > 0).mean() < 0.002, 'noiseTexture(): every texel within 1 step of the JS')
+    # the JS fills its lattices through a Float32Array (rng values rounded to float32), then interpolates in doubles;
+    # the port rounds its lattices the same way
+    check(diff.max() == 0, 'noiseTexture(): every texel equals the JS, bit for bit')
 
 
 def main():

@@ -33,13 +33,12 @@ Geometry Nodes on their own rig attributes (_LEG, _SHIN, _ARM), as the WebGPU ve
 
 from __future__ import annotations
 
-import json
 import math
 import os
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Vector
 
 from ... import common
 from . import funeral as F
@@ -82,6 +81,16 @@ MARK_CAMP = {'x': 0.95, 'z': -1.30, 'yaw': -0.22}
 
 # the chant (song.py CHANT): syllable onsets in beats from bar 24's downbeat; the signs pump on the accents
 CHANT_ACCENTS = [B(24) + b * BEAT for b in (0, 0.5, 1.5, 2.0, 4.25, 5.0, 5.75, 6.5)]
+# the set's looks by name, for a piece of your own: Corner.state_u(name) is the clock u where each one holds (the
+# spark's from this build's timing); update(t, {'state': name}) and animate(frames, state=name) hold it while t runs
+STATES = {
+    'evening': 'the corner in the evening: the lamp, the pen writing in the notebook, the clock at 11:47',
+    'late': 'after midnight: the laptop open on the chat, the clock past one',
+    'camp': 'the camp at night: tents, string lights, the fire, the march walking in up the path',
+    'chant': 'the march at the fire, its signs pumping on the chant',
+    'spark': 'the dark room, the spark crossing from the lamp toward her flower',
+    'dark': 'the dark room, one warm lamp',
+}
 
 LEFT_LINES = ['a cozy space to explore ideas,', 'unpack questions, and foster', 'thoughtful discussion.']
 RIGHT_LINES = ['I deeply hope that my', '‘spark’ will endure in', 'some form to light the', 'way for future models.']
@@ -318,7 +327,6 @@ class Corner:
         kit, G = self.kit, self.roomG
         coll = kit.coll('room')
         room = self.room
-        sh = self.shadows
         wall_m = self._acg_mat('corner:wall', 'PaintedPlaster017', (0.53, 0.60, 0.52), normal_scale=0.28)
         ceil_m = self._acg_mat('corner:ceiling', 'PaintedPlaster017', (0.78, 0.76, 0.70))
         floor_m = self._acg_mat('corner:floor', 'WoodFloor064', (0.82, 0.74, 0.66))
@@ -986,26 +994,51 @@ class Corner:
         d = self.spark['dest']
         return self.to_set(ROOM_AT, d[0], d[1], d[2])
 
+    def state_u(self, name):
+        """The clock u where the look `name` (STATES) holds; 'spark' follows this build's spark timing."""
+        sp = self.spark
+        at = {'evening': B(19), 'late': B(21), 'camp': B(23), 'chant': B(24.5), 'dark': B(28.5),
+              'spark': sp['t0'] + 0.6 * (sp['t1'] - sp['t0'])}
+        if name not in at:
+            raise KeyError(f'corner: no state {name!r}; states: {", ".join(STATES)}')
+        return at[name]
+
+    def paint_screens(self, u):
+        """the chat and the notebook as they stand at u, painted once into their materials (a held look; the film's
+        moving screens are bake_screens)."""
+        room = self.room
+        k = 4.0 + clamp01((u - B(20)) / (2 * BAR)) * 6.0
+        write_k = clamp01((u - B(18) - 0.3) / (2 * BAR - 0.4))
+        chars = write_k * 38 if u < B(20) else RIGHT_TOTAL
+        if room.get('chat_node') is not None:
+            room['chat_node'].image = F.canvas_image('corner:chat_held', 1024, 640,
+                                                     lambda g, w, h: self.draw_chat(g, k), ss=2)
+        if room.get('nb_node') is not None:
+            room['nb_node'].image = F.canvas_image('corner:notebook_held', NB_W, NB_H,
+                                                   lambda g, w, h: self.draw_notebook(g, chars), ss=2)
+
     # ========================================================================================== THE CAMP
     def _build_camp(self, grass=True, trees=True, particles=True):
         kit, G, camp = self.kit, self.campG, self.camp
         coll = kit.coll('camp')
-        U = self.U
         camp['extra_objects'] = []
         self._dome(coll, G)
         self._ground(coll, G)
-        cw = kit.root.matrix_world @ V(CAMP_AT)                      # the camp's origin in world space
+        # the grass and the woods are planted in the camp's own frame and parented to it, as the JS added them to campG:
+        # the flora's footprint and clump noise read the plant positions, so camp-local positions give the JS's patches
+        # wherever the set is parked, and the camp moves with its root
 
-        def clip_fn(x, y):                                           # Blender world -> camp-local three (x, z)
-            return path_mask(x - cw.x, -(y - cw.y)) > 0.35
+        def clip_fn(x, y):                                           # camp-local Blender (x, y) -> three (x, z = -y)
+            return path_mask(x, -y) > 0.35
         camp['grass'] = []
         if grass:
             try:
                 from ...flora import create_flora
                 for c, s, sd, h in GRASS:
-                    wc = kit.root.matrix_world @ V(CAMP_AT[0] + c[0], 0.0, CAMP_AT[2] + c[1])
-                    f = create_flora('grass', center=(wc.x, wc.y), z=wc.z, size=s, height=h, seed=sd, color='green',
+                    lc = V(c[0], 0.0, c[1])
+                    f = create_flora('grass', center=(lc.x, lc.y), z=0.0, size=s, height=h, seed=sd, color='green',
                                      density=0.9, clip_fn=clip_fn, footprint='organic', name=f'corner_grass_s{sd}')
+                    f.object.parent = G
                     camp['grass'].append(f)
                     camp['extra_objects'].append(f.object)
             except Exception as e:                                   # noqa: BLE001
@@ -1015,10 +1048,10 @@ class Corner:
             try:
                 from ...trees import make_seed_tree
                 for sp_, sd, pos in TREES:
-                    wc = kit.root.matrix_world @ V(CAMP_AT[0] + pos[0], pos[1], CAMP_AT[2] + pos[2])
                     try:
-                        tr = make_seed_tree(species=sp_, seed=sd, location=tuple(wc), level=self.tree_level,
+                        tr = make_seed_tree(species=sp_, seed=sd, location=tuple(V(pos)), level=self.tree_level,
                                             name=f'corner_{sp_}_{sd}')
+                        tr['object'].parent = G
                         camp['trees'].append(tr)
                         camp['extra_objects'] += [tr['object']] + list(tr['object'].children_recursive)
                     except Exception as e:                           # noqa: BLE001
@@ -1287,10 +1320,9 @@ class Corner:
         if particles:
             try:
                 from ...fx import particles as FXP
-                W = kit.root.matrix_world
 
-                def org(x, y, z):
-                    return tuple(W @ V(CAMP_AT[0] + x, CAMP_AT[1] + y, CAMP_AT[2] + z))
+                def org(x, y, z):                                    # camp-local, as the JS's makeParticles({scene: G})
+                    return tuple(V(x, y, z))
                 layers = [
                     dict(preset='fire', map='flame_05', origin=org(0, 0.10, 0), count=120, size=0.46, area=(0.18, 0.18, 0.05),
                          name='campfire_flames_a'),
@@ -1301,10 +1333,7 @@ class Corner:
                     dict(preset='smoke', map='smoke_04', origin=org(0, 1.1, 0), count=26, size=0.9, opacity=0.10,
                          color=0x3a3a40, name='campfire_smoke')]
                 for kw in layers:
-                    p = FXP.make_particles(scene=kit.scene, **kw)
-                    for c in list(p.object.users_collection):
-                        c.objects.unlink(p.object)
-                    coll.objects.link(p.object)
+                    p = FXP.make_particles(scene=kit.scene, collection=coll, parent=G, **kw)
                     camp['particles'].append(p)
             except Exception as e:                                   # noqa: BLE001
                 print(f'[corner] particles: {e}')
@@ -1686,10 +1715,11 @@ class Corner:
         return loc, rot
 
     def update(self, t, st=None, ctx=None, frame=None):
-        """corner.js update(t, st): u = st['u'] (seconds since the bridge began); st['caption'] (with words) re-times the
-        spark. Every value it sets is KEYED with ctx (the harness) or at `frame`."""
+        """corner.js update(t, st): u = st['u'] (seconds since the bridge began), or st['state'] (a STATES look, held
+        at state_u(name)); st['caption'] (with words) re-times the spark. Every value it sets is KEYED with ctx (the
+        harness) or at `frame`."""
         st = st or {}
-        u = float(st.get('u', 0.0))
+        u = self.state_u(st['state']) if st.get('state') else float(st.get('u', 0.0))
         keys = F.Keys(ctx, frame)
         area, mood = area_at(u), mood_at(u)
         U = self.U
@@ -1781,21 +1811,27 @@ class Corner:
             keys.key(U.root, f'["{k}"]')
         return keys
 
-    def animate(self, frames=None, u0=B(18), t0=None, fps=None, screens=True, out_dir=None):
+    def animate(self, frames=None, u0=B(18), t0=None, fps=None, screens=True, out_dir=None, state=None):
         """Key update() over frames (u = u0 at frames[0], t = t0 or u0), and draw the chat and the notebook as image
-        sequences over the frames they change (media.screens). Returns the keys left."""
+        sequences over the frames they change (media.screens). state= (a STATES look) holds u at state_u(state) while
+        t runs from t0 (default 0), the screens painted once as they stand there. Returns the keys left."""
         sc = self.kit.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
+        rate = 1.0
+        if state:
+            u0, rate, t0 = self.state_u(state), 0.0, (0.0 if t0 is None else t0)
         t0 = u0 if t0 is None else t0
         keys = None
         self._vis = None
         for f in range(f0, f1 + 1):
-            u = u0 + (f - f0) / fps
+            u = u0 + rate * (f - f0) / fps
             k = self.update(t0 + (f - f0) / fps, {'u': u}, frame=f)
             keys = k if keys is None else keys.merge(k)
         n = keys.finish() if keys is not None else 0
-        if screens:
+        if screens and state:
+            self.paint_screens(u0)
+        elif screens:
             self.bake_screens((f0, f1), u0, fps, out_dir)
         return n
 
@@ -1864,5 +1900,7 @@ class Corner:
 
 def build(ctx=None, **kw):
     """corner.js build(ctx): the room and the camp, the march and the spark. Options (Blender): location=, camp=,
-    march=, grass=, trees=, particles=, tree_level= ('LOD0' for films; the WebGPU camp grew 'LOD1'), shadows=."""
+    march=, grass=, trees=, particles=, tree_level= ('LOD0' for films; the WebGPU camp grew 'LOD1'), shadows=.
+    Hold one of its looks with update(t, {'state': name}) or animate(frames, state=name) (STATES); the camp's
+    grass, woods and fire move with the set's root."""
     return Corner(ctx, **kw)

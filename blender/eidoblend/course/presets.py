@@ -11,8 +11,10 @@ template.setup(ctx, variant='stairs_handcloseup') runs one.
 
 EXAMPLES['obstacle_course']: eidoverse/examples/obstacle_course.js, the full locomotion vocabulary (walk and run over
 ramps, small obstacles, two stair sizes, cover vaults, a mount and drop, a gap jump, a wall climb, a ladder, a sit-down
-rest stop and a gesture while walking): its TERRAIN_CONFIG, its camera mode, its bench and the course direction its
-renderFrame scripted, as data (zones by segment index, the sit stop's route, the emote and gesture names).
+rest stop and a gesture while walking): its TERRAIN_CONFIG, its scene file's size, rate, duration and character, its
+camera, its bench and the course direction its renderFrame scripted, as data (zones by segment index, the sit stop's
+route and timing, the emote and gesture names, the ladder trigger, the follow camera's constants).
+template.setup(ctx, example='obstacle_course') plays it whole (template.CourseScene.direct_example).
 """
 
 PRESETS = {
@@ -76,9 +78,10 @@ PRESETS['obstacle_course_claude_clouds'] = {
     'useRealStepIK': True}
 
 # the variant scenes: a preset plus what their scripts set on top of the template (camera mode, telemetry, the
-# character, a recolour, a baked expression). template.setup(ctx, variant='stairs_claude_clouds') runs one. What
-# belongs to other families is named, not rebuilt: the clouds scenes' volumetric clouds and shafts post effect (the
-# sky / fx ports), the noik scene's IK switch and useRealStepIK (the controller port).
+# character, a recolour, a baked expression, the noik scene's foot IK switched off). template.setup(ctx,
+# variant='stairs_claude_clouds') runs one. The clouds scenes' volumetric clouds and shafts post effect came from the
+# POC scenes' effects library and is not ported (named in the entry). useRealStepIK rides along in the configs as the
+# scenes set it: nothing in the engine reads it.
 _CLOUDS_LOOK = {'obstacle': {'color': 0x4ab8c0}, 'ground': {'color': 0x183848, 'metalness': 0.8, 'roughness': 0.35}}
 SCENES = {
     'stairs_handcloseup': {'config': PRESETS['stairs_pyramid'], 'camera_mode': 'hands_closeup'},
@@ -135,7 +138,10 @@ _COURSE_SEGMENTS = [
 EXAMPLES = {
     'obstacle_course': {
         'config': {'type': 'obstacle_course', 'segments': _COURSE_SEGMENTS},
-        'camera_mode': 'three_quarter',
+        # its scene file (obstacle_course.json): 1280 x 720, 30 fps, 62 s, the character aporia.vrm
+        'size': (1280, 720), 'fps': 30, 'duration': 62.0, 'character': 'aporia',
+        # the CAMERA_MODE global it set (terrain_base's camera); its own renderFrame drew through the follow camera
+        'camera_mode': 'three_quarter', 'render_camera': 'follow',
         # the course direction its renderFrame scripted, by segment index
         'zones': {'run': (15, 23), 'sit': 26, 'gesture': 27, 'ladder': 28, 'finale': 29},
         # the bench: a solid 1.1 x 0.45 x 0.5 m box (three's x, y, z) in the sit segment's middle, colour 0x7a5a3a
@@ -146,7 +152,8 @@ EXAMPLES = {
         'sit_timing': {'settle': 0.45, 'sit_down': 2.9, 'hold': 2.2, 'stand_up': 2.3, 'reverse_speed': 1.25},
         'gesture': {'name': 'cheer', 'weight': 2.75, 'stop_before_end': 0.9},
         'ladder': {'trigger': 0.55, 'height': 2.5},
-        'finale': {'emote': 'salute', 'delay': 0.7, 'fade_in': 0.35},
+        # the salute 0.7 s after she stops, toward the camera; the film holds 1 s after it
+        'finale': {'emote': 'salute', 'delay': 0.7, 'fade_in': 0.35, 'hold': 1.0},
         # its follow camera: a full side view (radius 5.2 m, 3.4 m while maneuvering or sitting, damped at 2.5) that
         # swings to a rear three-quarter (46 degrees, damped at 1.8) from 2.2 m before the ladder
         'camera': {'radius': 5.2, 'radius_close': 3.4, 'radius_damp': 2.5, 'ladder_angle_deg': 46.0,

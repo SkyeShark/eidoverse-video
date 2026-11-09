@@ -6,16 +6,18 @@ cheer while walking, the sit stop on a bench, the salute) plus the falls and the
     1 idle, then walk with an upper-body gesture over the walk (loadGesture / playGesture 'cheer' at weight 2.75),
       the gesture stopped while walking (stopGesture), stop
     2 a full-body emote (loadEmote / playEmote 'salute', facing kept), stopEmote
-    3 walk to the bench's seat spot, square up with its back to the bench, sit (beginSeated 'stand_to_sit'), hold, stand
-      (endSeated reversed at 1.25x, as the example), stopEmote, walk on
+    3 walk to the bench's seat spot, square up with its back to the bench, sit (beginSeated 'stand_to_sit') on a bench
+      5 cm higher than the clip's own seat (seat=: seatOn's settle onto its pan), hold, stand (endSeated reversed at
+      1.25x, as the example), stopEmote, walk on
     4 up eight 0.18 m stairs, across a raised slab and off its 1.44 m edge: airborne (fallIdle), the landing deeper than
       fallLandMinDrop (0.85 m) plays fallLand (its feet planted where it lands), then the walk resumes and stops
     5 a backward walk (gait 'walkBackward': the walk clip under the travel, reversed), stop
     6 a jog (gait 'slowRun') on a curve, then a sprint (gait 'fastRun'), slowing to a walk and a stop
 
 Prints PASS / FAIL: checks.feet on every gait's frames, the gesture's weight while the legs walk, the emote's facing,
-the hips over the bench at the bench's height, the fall and the landing clip, the backward walk's facing against its
-travel, the jog's and the sprint's paces, the stops on their marks, the keyed armature against the bake.
+the hips over the bench at the bench's height, the seated skin resting on the pan and the seated boots on the floor
+(the visible mesh), the fall and the landing clip, the backward walk's facing against its travel, the jog's and the
+sprint's paces, the stops on their marks, the keyed armature against the bake.
 """
 
 import math
@@ -46,6 +48,7 @@ SEGMENTS = [
     {'kind': 'flat', 'length': 16.0},                                   # 4 landing, backward walk, the runs
 ]
 BENCH_XY = (1.45, 1.4)
+SEAT_RAISE = 0.05          # the bench this much higher than the seat the stand_to_sit clip was made for
 
 
 def bench(top):
@@ -81,7 +84,8 @@ def main():
     c = loco.ctrl
     sit_clip = c._emote_clip('stand_to_sit')
     hips_end = c.body.H['hips'].z + float(sit_clip.root_curve[-1][2])
-    top = round(hips_end - 0.10, 3)
+    # a bench 5 cm higher than the clip's own seat (its hips' end less 10 cm): the sit settles onto it (seat=)
+    top = round(hips_end - 0.10 + SEAT_RAISE, 3)
     R['seat'] = {'hips_end_z': round(hips_end, 3), 'bench_top': top, 'clip_s': round(sit_clip.duration, 2)}
     R.log(f'stand_to_sit ends with the hips {hips_end:.3f} m up: the bench top at {top:.3f} m')
     bn = bench(top)
@@ -102,9 +106,18 @@ def main():
     marks['gesture_stop'] = (0.0, 0.4)
     loco.move_to(marks['gesture_stop'], gait='walk')
     loco.emote('salute')
+
+    def auto(on):
+        def f(ctl):
+            ctl.auto_maneuvers = on
+        return f
+    # the bench is cover to the vault planner (its top over vault_min_rise 0.42): as the WebGPU example does, no
+    # maneuver near it
+    loco.call(auto(False))
     loco.move_to(spot, gait='walk')
     loco.turn_to(-90)
-    loco.sit(hold=2.0)
+    loco.sit(hold=2.0, seat=bn)
+    loco.call(auto(True))
     marks['after_fall'] = (0.0, y_far['y0'] + 3.5)
     loco.move_to((0.0, 4.6), gait='walk', stop=False)
     loco.move_to(marks['after_fall'], gait='walk')
@@ -156,6 +169,23 @@ def main():
         R.check('the hips rest at the seat height (their joint 5 - 15 cm over its top)', 0.05 < lo - top < 0.15,
                 f'{(lo - top) * 100:.1f} cm over the top')
         R['seat']['hips_low'] = round(lo, 3)
+        # seatOn's settle onto a seat higher than the clip's, the feet on the floor under it
+        from eidoblend.characters.controller.film import seat_underside
+        fa, fb = seated[0]['f'], seated[-1]['f']
+        mid = (fa + fb) // 2
+        sc.frame_set(mid)
+        hp = me.arm.matrix_world @ me.arm.pose.bones[hb].head
+        under = seat_underside(me, (hp.x, hp.y), top - 0.35)
+        gap = (under - top) if under is not None else 9.9
+        R['seat']['underside_over_pan_m'] = round(gap, 4)
+        R.check('the seat settles onto a bench 5 cm higher than the clip\'s (the skin\'s underside within 1.5 cm of '
+                'the pan)', abs(gap) < 0.015, f'{gap * 100:+.1f} cm')
+        fm = T.FootMesh(me)
+        floor = seated[0]['feet_world'][2]
+        lows = [min(v['zmin'] for v in fm.at(f).values()) - floor for f in range(fa + (fb - fa) // 3,
+                                                                                   fb - (fb - fa) // 3 + 1, 6)]
+        R.check('the seated feet stand on the floor (the visible boots within -6 / +10 mm of it through the hold)',
+                all(-0.006 <= z <= 0.010 for z in lows), f'{[round(z * 1000, 1) for z in lows]} mm')
     # 4 the fall and the landing
     air = [r for r in recs if not r['grounded']]
     fall_w = max((r['weights'].get('fallIdle', 0.0) for r in recs), default=0.0)

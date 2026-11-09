@@ -4,7 +4,8 @@
 
 Two systems, both stateless functions of the scene clock, both one Geometry
 Nodes graph on a point cloud, so a saved .blend scrubs, re-renders and motion
-blurs with no script running:
+blurs with no script running (additive particles need more than one motion
+blur step: see [Motion blur](#motion-blur)):
 
 - `eidoblend.fx.particles`: `make_particles`, the Blender edition of
   `particles.js`. Sparks, embers, smoke, dust, snow, magic, stars, muzzle
@@ -79,6 +80,12 @@ Stage each preset the way it is used. The probes in
   engine, and the preset's 0.5 m flame quads reach below the emitter, so a
   bare floor cuts them along straight grey lines. Set the fire on logs, as
   round one's campfire test (`blender/tests/fx`) does, or lift the emitter.
+- fire's tongues: the preset's `rotate: 0.35` starts every sprite at a random
+  angle over the whole circle, as the engine's code does, so about a third of
+  the tongues are turned more than 120 degrees from upright and a lone fire
+  reads as a fan. The preset's own comment wanted them upright: pass
+  `rotate=0` for upright tongues (`test_fire_tongue_rotation.py` renders both
+  side by side).
 
 - Override any preset field: `count`, `size`, `color`, `origin` (or
   `position`, the engine's alias), `gravity`, `speed`, `lifetime`, `area`,
@@ -256,7 +263,9 @@ following a walking body after it is hidden. The checks confirm the cloud on
 the hidden body to 2e-7 m.
 
 **`update_target(idx, pts)`** swaps one target. One index past the last adds
-one. The engine's live-pose capture is
+one; a gap is refused (the engine allowed holes its morph skipped, a .blend
+needs every index). `set_targets(arr)` replaces targets 0 to len(arr) − 1 and
+keeps the rest, as the engine's `setTargets`. The engine's live-pose capture is
 `m.update_target(0, from_mesh(vrm, m.count, frame=dissolve_frame))`: a
 snapshot of that frame's pose. A .blend keeps one point set per target index
 for the whole film, so to change a target mid-film, add it as a new index and
@@ -296,7 +305,7 @@ A live target transforms through a matrix the graph applies every frame.
 | a model's flat cut-out silhouette along a view axis, in its colours | `from_silhouette(src, n, axis='-y')` |
 | a POINTCLOUD object, a vertex-only mesh, .ply .npy .xyz .csv .txt .pts, an (m, 3 or 6) array | `from_point_cloud(src, n)` |
 | a Volume object or a .vdb, coloured by density | `from_volume(src, n, threshold=0.05)` |
-| text, multi-line ASCII art, a block banner | `'text:HELLO'`, `'ascii:<art>'`, `'banner:HELLO'` (`from_text`, `ascii_banner`) |
+| text, multi-line ASCII art, a block banner; `font_family` takes a repo display font or an installed family by name (`'Orbitron'`, `'Georgia'`, `'Arial Black'`), then the generic ones, as the engine's canvas did | `'text:HELLO'`, `'ascii:<art>'`, `'banner:HELLO'` (`from_text`, `ascii_banner`) |
 | the engine's diagrams | `'neural_net'`, `'neuron_graph'` |
 | the shapes the films hand-rolled for `fromPoints` | `shapes.sphere`, `scatter`, `galaxy`, `ring`, `torus`, `helix`, `spiral`, `disc`, `lattice`, `line`, `cube` |
 
@@ -315,16 +324,31 @@ it.
 lies:
 - a Principled BSDF's Base Color: its image texture sampled at the point's UV
   (through a multiply tint), or the plain value;
+- a procedural colour graph (Noise, Voronoi, Wave, Magic, Gradient, Checker,
+  Brick, White Noise, Gabor, Color Ramp, Mix, Math, Map Range, curves, Mapping,
+  Texture Coordinate Object / Generated / UV / Normal, the Geometry node's
+  Position and Normal, Hue/Saturation, Invert, Bright/Contrast, RGB to BW,
+  Separate / Combine Color, an image through a Mapping, node groups):
+  `graph_colors` copies the graph into a scratch Geometry Nodes tree and
+  evaluates it at the points in object space, with the same texture functions
+  the shader runs (normals are the mesh's shading normals, smooth or flat as
+  it is set);
 - the VRM add-on's MToon base colour and texture, when MToon is enabled;
 - a Diffuse, Emission or Toon colour, or a colour attribute;
 - plus the material's emission.
+
+A node the evaluation cannot reproduce (Camera, Window or Reflection
+coordinates, Geometry's Incoming, Parametric or Pointiness, Object Info, a
+Wavelength, Sky or IES node, an attribute other than the colour attribute) is
+named in the log, and the direct reading stands in for that material.
 
 Some points get no particles:
 - glass and mostly-transparent materials (`skip_glass`);
 - alpha-cut texels: leaves, decals;
 - the VRM add-on's MToon outline shells.
 
-Byte sRGB textures are linearised. Textures are read at 1024 px at most.
+Byte sRGB textures are linearised. The direct reader reads a texture at
+1024 px at most; the graph evaluation samples it at full size.
 
 **Live.** `from_object(vrm, n, live=True)` binds every particle to a
 barycentric point of the evaluated surface. It works for mesh objects whose
@@ -369,20 +393,46 @@ armature hidden as well, a mesh stops posing.
   makes Principled beads that the scene lights.
 - `render='points'` makes a point cloud, which EEVEE draws as spheres: the
   cheapest at huge counts.
-- `realize=True` gives one mesh instead of instances, for motion blur.
+- `realize=True` gives one mesh instead of instances. Motion blur does not
+  need it (below).
 - `own_colors` (a 0..1 number blends toward `color`/`color2`) and `gain`
   shape the colour.
 - `scene=` takes the engine's group as `make_particles` does: an object
   parents the cloud, and static targets are then read in its frame. A
   collection holds the cloud.
 
+### Motion blur
+
+Both systems motion-blur with `scene.render.use_motion_blur`, on EEVEE's
+terms for transparent surfaces:
+- normal-blended particles are DITHERED surfaces. They write velocity, so
+  EEVEE's default single time step blurs them, instanced or realized;
+- additive particles are BLENDED surfaces, which write no velocity. They blur
+  only when `scene.eevee.motion_blur_steps` is above 1: each step renders the
+  frame at another time and the steps accumulate.
+
+```python
+scene.render.use_motion_blur = True
+scene.eevee.motion_blur_steps = 8      # for additive sparks, fire, glowing clouds
+```
+
+`test_camera_cut_and_motion_blur.py` measures it on a spinning cloud: one
+step changes a normal cloud's pixels by 15 to 18 levels on average and an
+additive one's by 0; eight steps change the additive one by 14.
+
 ### The ASCII terminal panel
 
-`ascii_panel` is the engine's `makeAsciiPanel`, the glowing terminal that the
-text example puts under its cloud. It draws multi-line ASCII art or monospace
-text onto a plane: a background fill, a glow, CRT scanlines. Use it for
-monitors, HUDs, code walls and server readouts, and pass `figlet()` or
+`ascii_panel` is the engine's first `makeAsciiPanel` (`ascii_panel.js`, with
+the `bg`, `fontSize`, `glow` and `scanlines` options), the glowing terminal that
+the text example puts under its cloud. It draws multi-line ASCII art or
+monospace text onto a plane: a background fill, a glow, CRT scanlines. Use it
+for monitors, HUDs, code walls and server readouts, and pass `figlet()` or
 `ascii_banner()` output for big letters.
+
+The engine later moved `makeAsciiPanel` into `screen.js`: a teletype reveal
+with a blinking cursor, drawn through `makeScreen`. That one is
+`eidoblend.media.make_ascii_panel`, in
+[motion-graphics.md](motion-graphics.md#in-world-screens-and-ascii-panels).
 
 ```python
 from eidoblend.fx.particle_morph import ascii_panel
@@ -428,6 +478,26 @@ colours, then as a neural net, then as CLAUDE with the vortex reform.
 Reopening its saved .blend evaluates the same cloud with no script.
 `test_targets.py` checks every target source numerically.
 
+What a film asks of the two systems, each in its own test:
+- `test_camera_cut_and_motion_blur.py`: billboards left to face the active
+  camera follow a marker-bound cut (every quad faces the new camera), and
+  motion blur by blending mode, one time step against eight, with a keyed
+  cube as the control;
+- `test_body_to_body_teleport.py`: a walking body dissolves and lands on
+  another moving body, both live targets; once formed, the cloud is her live
+  surface on every frame (to 1 µm) and wears her colours;
+- `test_procedural_material_cloud.py`: models coloured by procedural
+  materials (marble, terrazzo, wood rings) beside their clouds;
+- `test_fire_tongue_rotation.py`: the fire preset's tongues as the engine
+  turns them, beside `rotate=0`;
+- `test_display_match_numeric.py`: the display match checked by numbers
+  against three's ACESFilmic. Flat additive quads of known light show three's
+  8-bit values to within 0.1 at the default exposure and 0.6 at
+  `engine_exposure=1.0`; saturated orange and cyan land near theirs, as far
+  as AgX reaches;
+- `test_saved_blend_render.py`: the robot film's saved .blend rendered in a
+  fresh Blender process, identical to the building run's stills.
+
 ### Particle textures
 
 Pass the sprite's name (`'spark_05'`), and the library's
@@ -462,6 +532,21 @@ are palette PNGs with transparency, read as RGBA.
   the object's bounds don't describe the volume, so a density guessed from
   them can ask for billions of points. `from_volume` measures its density
   instead.
+- The shader texture nodes (Noise, Voronoi, Wave, Magic, Gradient, Checker,
+  Brick, White Noise, Gabor) and Color Ramp, Mix, Math, Vector Math, Map Range,
+  Clamp, the curves, Vector Rotate, Gamma and Blackbody exist in Geometry
+  Nodes under the same idnames. A material's unlinked texture Vector is the
+  Generated coordinates; in Geometry Nodes it is Position, so a copied graph
+  links Generated explicitly. Texture Coordinate, Mapping, RGB, Invert,
+  Hue/Saturation, Bright/Contrast, RGB to BW and Image Texture do not exist
+  there (Separate / Combine Color are `FunctionNode*`, the image is
+  `GeometryNodeImageTexture`): `graph_colors` rebuilds them.
+- A camera made from Python keeps an identity `matrix_world` until the view
+  layer updates: read its axes after a depsgraph update.
+- The same mesh's loop triangles can come in a different order, each from a
+  different corner, from one session to the next (seen on a collection
+  instance's sphere). The samplers put the triangles and edges in a canonical
+  order first, so a seeded target is the same points in every session.
 
 ## Not yet ported
 
@@ -473,9 +558,13 @@ are palette PNGs with transparency, read as RGBA.
   the camera every frame.
 - Live targets on geometry whose topology changes over time (a Geometry Nodes
   scatter, remeshing) bind statically.
-- Particle colour from a material's procedural textures (Noise, Voronoi): the
-  sampler reads image textures, values, colour attributes and emission, not
-  procedural nodes.
+- Particle colour from material nodes the Geometry Nodes evaluation does not
+  rebuild: view-dependent coordinates (Camera, Window, Reflection, Geometry's
+  Incoming), Geometry's Parametric and Pointiness, Object Info (an object's
+  Random, Color, Location), Wavelength, Sky and IES textures, and attributes
+  other than the colour attribute. Those materials fall back to their direct
+  reading (the image at the UVs, or the plain colour), and the log names the
+  node.
 - `figlet()` uses pyfiglet when a Python has it. Neither Blender's Python nor
   this machine's has it, so banners come from `ascii_banner` (block letters
   drawn from the font).

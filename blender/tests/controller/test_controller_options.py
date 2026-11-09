@@ -362,7 +362,8 @@ def main():
                 seen.append(t)
         return ok, seen, c.feet_world_position.copy(), peak
     for name, x, y, kw, want, check in (
-            ('vault', 15.0, -0.7, {}, ['vault'], lambda p, pk: p.y > 0.4 and abs(p.z) < 0.05),
+            # the vault's root rises over the 0.55 m cover (the clip's own hips curve fitted to it: 0.27 m on Aletheia)
+            ('vault', 15.0, -0.7, {}, ['vault'], lambda p, pk: p.y > 0.4 and abs(p.z) < 0.05 and pk > 0.15),
             ('climb_ledge', 17.0, -0.6, {}, ['mount'], lambda p, pk: abs(p.z - 1.2) < 0.06),
             ('jump', -6.0, -2.0, {'distance': 1.4, 'height': 0.45}, ['jump'],
              lambda p, pk: abs(p.y - (-2.0 + 1.4)) < 0.1 and pk > 0.3),

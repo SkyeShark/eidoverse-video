@@ -26,7 +26,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _scene as S  # noqa: E402
-from eidoblend.fx.water3d import create_water_sim, ENGINE_SOLVER  # noqa: E402
+from eidoblend.fx.water3d import create_water_sim, DROP_SOLVER  # noqa: E402
 
 A = S.args()
 FPS = 30
@@ -77,7 +77,7 @@ def ball_at(t):
 S.key_path(ball, [(f, ball_at((f - 1) / FPS)) for f in range(1, END + 1)])
 
 # ---- the water: the scene's options ------------------------------------------------------------------------
-kw = ENGINE_SOLVER if A.get('solver') == 'engine' else {}
+kw = DROP_SOLVER if A.get('solver') == 'drop' else {}
 water = create_water_sim(scene=sc, name='sphere' + TAG, cache_dir=os.path.join(S.OUT, 'sphere_cache' + TAG),
                          gridSize=[64, 48, 64], worldSize=[W, H, D], domainCenter=[0, H / 2, 0], maxSpheres=4,
                          measureVolume=True, columnDepth=0.62, smooth_surface=True, shading=SHADING,
@@ -137,9 +137,12 @@ ok &= S.check('the water meets the submerged ball (a waterline ring on it)', rin
 ok &= S.check('the water closes in behind the sweeping ball', behind.get('old', 1.0) < 0.0,
               f'phi {behind.get("old", float("nan")):.3f} m where the centre was a second before')
 late = [(t, v, tg) for t, v, tg in vols if t > 3.0]
-ok &= S.check('volume held within 3 % of its target while the ball moves', bool(late) and
-              all(abs(v - tg) / tg < 0.03 for t, v, tg in late), f'{min(v / tg for t, v, tg in late):.3f} .. '
-              f'{max(v / tg for t, v, tg in late):.3f} of target' if late else '')
+# the engine's own run of this scene (engine_trace_spheretest.json, the controller on) spans 0.966 .. 1.021 of its
+# target over the same window; test_water3d_spheretest_parity.py holds the trace itself to it within 1 %
+ok &= S.check('volume held within 4 % of its target while the ball moves (the engine: 0.966 .. 1.021)',
+              bool(late) and all(abs(v - tg) / tg < 0.04 for t, v, tg in late),
+              f'{min(v / tg for t, v, tg in late):.3f} .. {max(v / tg for t, v, tg in late):.3f} of target'
+              if late else '')
 shots = []
 for f in (FRAMES if A.get('render', '1') == '1' else []):
     p = os.path.join(S.OUT, f'w3d_sphere{TAG}_f{f:04d}.png')

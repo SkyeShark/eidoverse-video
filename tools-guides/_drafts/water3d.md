@@ -23,8 +23,11 @@ lake = create_water_mesh(size_xy=(300, 300), location=(0, 60, 0),
 
 The options are WaterMesh's own (camelCase accepted): `alpha`, `size`,
 `sun_color`, `sun_direction`, `water_color`, `distortion_scale`,
-`water_normals` and `resolution_scale`. Its colour formula is ported term
-for term:
+`water_normals` and `resolution_scale`. `sun_object` binds the sun to a
+lamp: drivers read the lamp's world rotation and colour, so the glint
+follows the lamp as it is keyed. The normal map tiles every 103 m at
+`size` 1, so a lake seen from a person's height reads as swells; raise
+`size` for finer ripples. Its colour formula is ported term for term:
 
 - four samples of the water normal map, scrolled by time, at the world
   position times `size` over 103, 107, (8907, 9803) and (1091, 1027);
@@ -39,14 +42,33 @@ units. Here the mirror is EEVEE's own: a Glossy closure reflecting through a
 planar light probe made with the water, on the rippled normal tilted by the
 same push turned into an angle (about half a 48° field of view per screen
 width). Near water ripples the reflection hard and far water stays calm, as
-in the engine. `resolution_scale` has no Blender counterpart: the probe
+in the engine. The water itself is left out of the probe's capture
+(`hide_probe_plane`), as three's reflector clipped at its plane: lying on
+the mirror's own plane, it covered the whole mirrored scene, and the lake
+reflected a blur of the sky with no pier and no posts in it
+(`probe_water_mesh_mirror.py` holds the mirror image of two posts to the
+ray-traced one). `resolution_scale` has no Blender counterpart: the probe
 renders at the frame's resolution. The engine's shadow offset
 (`receivedShadowPositionNode`) has none either: the surface is an emission
 and a mirror, which take no shadow term.
 
 Pass your own normal map as `water_normals=path`, or let it make one:
 `make_water_normals(path)` synthesises a tileable map from an ocean
-spectrum. Three's `waternormals.jpg` is not in the CC0 cache.
+spectrum. Three's `waternormals.jpg`, which every engine WaterMesh sampled,
+is not in the CC0 cache, so the generated map is made to its statistics: a
+mean slope of 12° with 90 % under 21°, about equal in x and y, some 35
+ripples a tile. An earlier, four times steeper map broke the sea into white
+blotches wherever the reflectance term met a grazing normal
+(`probe_water_mesh_normals.py` renders the sea with three's map, the
+generated one and that steep one, row by row). The generated map is packed
+into the `.blend`: it is written to Blender's session temp folder, which
+goes when Blender exits, unless `normals_dir` names a folder of your own.
+
+One engine scene used `WaterMesh`: the night coast of the antad_response
+film (`waterColor 0x3d525c`, `sunColor 0xfff2e0`, `sunDirection (0.2, 0.4,
+−0.9)`, `distortionScale 4.5`, `size 1.1`, a 4000 m plane). Its options run
+verbatim in `probe_water_mesh_normals.py`, from a jetty at a person's
+height.
 
 `lake.set_uniform(key, value)` and `lake.key_uniform(key, frame)` drive the
 uniforms over time.
@@ -105,12 +127,17 @@ It takes one step per frame, as the engine's scenes call it. `bake()` writes
 each frame's heights as an OpenEXR data image. Geometry Nodes displaces the
 grid by them and stores the engine's shading normal, so the `.blend` plays
 with no Python. `circular=True` fades the waves at the inscribed disc's rim
-and clips the corners, for round vessels.
+and clips the corners, for round vessels. Both measure each vertex's own
+distance from the centre, as the engine's plane UVs did.
 
-Two engine details are kept as they were:
+Three engine details are kept as they were:
 
 - disturbances centre on the cell index times `bounds / width`, not on cell
   centres;
+- the kernel's neighbour indices are unsigned, so row 0's north neighbour
+  underflows and clamps to the last row, and column 0's west neighbour to
+  the last column. South and east clamp to the edge, so waves at the far
+  edges reach the near ones;
 - the shading normal is the engine's finite difference. Its neighbour names
   are swapped against three's `webgpu_compute_water` example it came from,
   so both slopes are inverted (a raised ripple shades like a pit) and it is
@@ -162,10 +189,10 @@ the four dissipations, `curl_strength`, `splat_radius`, `splat_force`,
 `performance`, `balanced` and `quality` profiles are the package's. It
 matches the package run on WebGPU (`test_stable_fluids_parity.py`) within
 0.5–3 % RMS after 60 frames of chaotic flow. The residue is the GPU's
-bilinear weights. It is CPU work: measured on a busy machine, a
-`performance` frame takes 0.1 s, a `balanced` one 0.8 s and a `quality` one
-3 s. Bake it on its own (no GPU needed) and render later with
-`load_bake`; the probe runs as `phase=bake`, then `phase=render`.
+bilinear weights. It is CPU work: measured on the shared machine, a
+`performance` frame takes 0.1–0.4 s, a `balanced` one 0.8–1.7 s and a
+`quality` one 3–7 s. Bake it on its own (no GPU needed) and render later
+with `load_bake`; the probe runs as `phase=bake`, then `phase=render`.
 
 Behaviour kept as the engine had it:
 
@@ -186,8 +213,12 @@ The fields bake to OpenEXR half sequences that Blender plays by frame. The
 engine's sampleable nodes are those sequences: `fluid.density_node`,
 `fluid.velocity_node` and `fluid.dye_node` (`fluid.images` holds all
 three). `fluid.density`, `.velocity` and `.dye` are the live arrays while it
-bakes. `fluid.load_bake(cache_dir, first, last)` attaches a bake made
-earlier without simulating again.
+bakes. The package's other nodes, which `fluid_sim.js` reached through
+`_raw`, are `fluid.raw.pressure`, `.divergence` and `.curl`; name them in
+`bake(fields=(..., 'pressure'))` to bake them as well. The pressure matches
+the package's within 1.4–2.1 % RMS in the parity test.
+`fluid.load_bake(cache_dir, first, last)` attaches a bake made earlier
+without simulating again.
 
 The engine scenes that used `fluid_sim.js` are rendered side by side in
 `test_stable_fluids.py`, each with its own options and splats:
@@ -243,6 +274,10 @@ Drop the `WaterMesh` and `fluid_sim` bullets (both ported above) and add:
 - `SkyMesh`'s box `scale` and its depth trick (`z = w`): the world is
   infinitely far by construction.
 - `fluid_sim.js`'s `_eidoToolUsage` registration (the engine's telemetry).
+- The production engine's pour showcase (`work/_showcase/pour`). It pours
+  with `createPour` from `pour_water.js`, a module that no longer exists
+  there. Its `water_compute` half, a rippling pool in a vessel, is the basin
+  pool in `test_water_flat.py`.
 
 The intro's "(both are in "Not yet ported" below)" becomes "(see Flat
 reflective water and 2D dye fluids below)".

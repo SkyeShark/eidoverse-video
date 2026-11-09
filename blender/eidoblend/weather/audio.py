@@ -5,14 +5,69 @@ The recorder is eidoblend.media.weather_audio.WeatherAudioRecorder (the JS recor
 rain bed envelope (rainK x curtain density, ceilinged under thunder), a synthesized wind bed envelope (the windVec
 length), and one thunder event per new strike, delayed 1 s per 343 m, panned from the camera's view of the strike,
 the compressed inverse-distance gain, the explosive / close / distant takes chosen by distance and locality. Here
-it reads the weather's own per-frame records, so no frame is evaluated twice.
+it reads the weather's own per-frame records, so no frame is evaluated twice. make_weather_audio is the JS factory
+itself, for a frame loop of your own.
 """
 import json
+import math
 import os
 import subprocess
 import sys
 
 from ..common import REPO
+
+
+class WeatherAudio:
+    """makeWeatherAudio's object: call update(t) once per frame, after the weather's update(t, camera), with the same
+    t; it reads the weather's uniforms (rainK, denseA, windVec) and its strike record as the JS reads them, and the
+    camera's world matrix as the listener. stats, timeline() and to_json() (the JS toJSON) as in weather_audio.js."""
+
+    def __init__(self, weather, camera=None, rain_gain=1.0, thunder_gain=1.8, quiet=False, wind=True, wind_gain=1.0):
+        from ..media.weather_audio import WeatherAudioRecorder
+        self.weather, self.camera = weather, camera
+        self.recorder = WeatherAudioRecorder(rain_gain=rain_gain, thunder_gain=thunder_gain, wind=wind,
+                                             wind_gain=wind_gain, quiet=quiet)
+        self.stats = self.recorder.stats
+
+    def update(self, t):
+        wx = self.weather
+        if wx is None:                              # the JS falls back to globalThis._weather: the scene's own system
+            import bpy
+            from .system import _REGISTRY
+            wx = _REGISTRY.get(bpy.context.scene.name)
+        u = getattr(wx, 'uniforms', None) if wx is not None else None
+        if not u:                                   # no weather, or no weather.update(t, camera) yet: the JS returns
+            return
+        cam = self.camera or getattr(getattr(wx, 'scene', None), 'camera', None)
+        st = wx.state.get('strike')                 # Blender axes (WeatherFX.state)
+        strike = (dict(id=st['id'], x=st['x'], y=st['y'], z=st['z'], flash=st['flash'], local=st['local'])
+                  if st else None)
+        wv = u.get('windVec', (0.0, 0.0, 0.0))
+        self.recorder.update(float(t), dict(rainK=u.get('rainK', 0.0), denseA=u.get('denseA', 1.0),
+                                            wind=math.sqrt(sum(float(c) * float(c) for c in wv)), strike=strike),
+                             cam.matrix_world if cam is not None else None)
+
+    def timeline(self):
+        return self.recorder.timeline()
+
+    def to_json(self):
+        return json.dumps(self.timeline(), indent=1)
+
+
+def make_weather_audio(weather=None, camera=None, rain_gain=1.0, thunder_gain=1.8, quiet=False, wind=True,
+                       wind_gain=1.0):
+    """makeWeatherAudio({weather, camera, rainGain, thunderGain, quiet, wind, windGain}), for a frame loop of your own
+    (weather None: the scene's weather system, as the JS reads globalThis._weather; camera None: the scene camera):
+
+        wx_audio = make_weather_audio(weather=wx, camera=cam)
+        for f, t, _ in sky.frame_states(a, b):
+            wx.update(t, cam)
+            wx_audio.update(t)
+        open('wx_audio.json', 'w').write(wx_audio.to_json())
+
+    A baked weather records the same timeline from its planned frames: WeatherFX.audio_timeline()."""
+    return WeatherAudio(weather, camera, rain_gain=rain_gain, thunder_gain=thunder_gain, quiet=quiet, wind=wind,
+                        wind_gain=wind_gain)
 
 
 def record(rows, t0=0.0, rain_gain=1.0, thunder_gain=1.8, wind=True, wind_gain=1.0, quiet=True):

@@ -1,20 +1,21 @@
-"""eidoblend.sets.unknown_force.city: UNKNOWN FORCE's world, a dark cyberpunk megacity at night painted by a Futurist,
-the Blender 5.2 EEVEE edition of eidoverse/sets/unknown_force/city.js.
+"""eidoblend.sets.unknown_force.city: a dark cyberpunk megacity at night painted by a Futurist, the Blender 5.2 EEVEE
+edition of eidoverse/sets/unknown_force/city.js (made for UNKNOWN FORCE; a free set for any piece).
 
 A radial city around THE HOLE (hole.py): four grand avenues run in from the diagonals to the hole, four more start at
 the first ring road, six ring roads circle it. Sant'Elia's stepped towers with external lift shafts, slabs with fins,
 wedges with sloped tops, set-back skyscrapers; the inner towers lean toward the hole (the city bows to its centre:
-every line runs to her). Lit windows are procedural per building, signs are canvas material on one mesh, the streets
-are wet and mirror the neon, rain wraps the camera, a low rain-cloud deck hangs at 345-520 m and glows with the
+every line runs to the mark). Lit windows are procedural per building, signs are canvas material on one mesh, the
+streets are wet and mirror the neon, rain wraps the camera, a low rain-cloud deck hangs at 345-520 m and glows with the
 city's light.
 
     from eidoblend.sets.unknown_force import city as C
-    city = C.build()                                   # includes hole.py (the chorus stage) unless {'hole': False}
-    city['parts']['apply_atmosphere'](scene)           # the World (the night sky, its hemisphere and environment)
-    C.key_dive(camera, city['parts']['kit'], frame_start=1, fps=24)   # the intro, keyed (camera, time, focal, rain)
+    city = C.build(scene)                              # includes hole.py (the stage in the well) unless hole=False
+    city.parts.apply_atmosphere(scene)                 # the World (the night sky, its hemisphere and environment)
+    cams = city.make_cameras()                         # the dive (Crali's, 40.8 s), keyed from the first frame
+    city.animate(lambda t: {'focal': C.dive_focal(t), 'power': C.turn_down(t, 30.0)})   # on your own clock, keyed
 
-FRAME: the singer's mark (the bottom of the hole) is the origin; the streets are at z = STREET_Y (12 m). Poses and
-focal points are in Blender axes; the layout code below works in three's axes, as citykit.py explains.
+FRAME: the mark at the bottom of the hole is the origin; the streets are at z = STREET_Y (12 m). Poses and focal
+points are in Blender axes; the layout code below works in three's axes, as citykit.py explains.
 """
 from __future__ import annotations
 
@@ -39,6 +40,7 @@ DIVE_AV = 45 * D2R
 DIVE_C3 = [RINGS[0]['r'] * math.cos(DIVE_AV), STREET_Y, RINGS[0]['r'] * math.sin(DIVE_AV)]    # three's axes (city.js)
 DIVE_C = KIT.to_blender(DIVE_C3)       # Blender axes, as every public position: (116.7, -116.7, 12)
 PLAZA_R = 44.0                         # the open plaza at the dive's crossing (low pavilions only)
+SKYGLOW_WET_SPECULAR = 0.04 / 0.9      # the sky-glow's specular on the wet floors (three's F0 0.04 / the puddles' 0.9)
 SUPERTALL_KEEPOUT = 170.0              # no supertall within this of the dive axis
 
 
@@ -588,14 +590,19 @@ def exclude_from_light(light_ob, collection, made=None):
 
 
 def unexclude_from_light(light_ob, collection):
-    """Undo exclude_from_light: light_ob lights the collection's objects again."""
+    """Undo exclude_from_light: light_ob lights the collection's objects again. A light that lights only what it
+    includes (light_only) takes the collection back as INCLUDE; any other light drops the exclusion."""
     rc = light_ob.light_linking.receiver_collection
     if rc is None:
         return
+    states = [cc.light_linking.link_state for cc in rc.collection_children]
     for i, c in enumerate(rc.children):
         if c == collection:
-            if rc.collection_children[i].light_linking.link_state == 'EXCLUDE':
-                rc.children.unlink(collection)
+            if states[i] == 'EXCLUDE':
+                if any(s == 'INCLUDE' for j, s in enumerate(states) if j != i):
+                    rc.collection_children[i].light_linking.link_state = 'INCLUDE'
+                else:
+                    rc.children.unlink(collection)
             return
 
 
@@ -728,11 +735,40 @@ def build(first=None, opts=None, ctx=None, **kw):
     from mathutils import Vector
     moon.rotation_mode = 'QUATERNION'
     moon.rotation_quaternion = Vector(KIT.to_blender((-300, 900, -200))).normalized().to_track_quat('Z', 'Y')
+    # the sky-glow on the wet floors. three's lit materials took direct light with F0 0.04 (metalness 0); here the
+    # floors' reflectivity (street 0.22..0.9, marble 0.12..0.78: the G-buffer value the engine's SSR read) is their
+    # Principled IOR, so the full sky-glow would glint up to 22x too bright wherever a puddle mirrors it (a field of
+    # white-blue specks in every view looking down at 60-70 degrees). The street, the blocks and the hole take it from
+    # a twin whose specular is 0.04 / 0.9 (energy and colour driven by the sky-glow's, turning with it).
+    wet = bpy.data.collections.new('uf_wet_floors')      # outside the scene, like the performer's: light linking only
+    K.made.add(wet)
+    for k in ('uf_street', 'uf_blocks'):
+        wet.objects.link(meshes[k])
+    moon_wd = moon_d.copy()
+    moon_wd.name = 'uf_skyglow_wet'
+    K.made.add(moon_wd)
+    moon_wd.specular_factor = SKYGLOW_WET_SPECULAR
+    for path, idx in (('energy', -1), ('color', 0), ('color', 1), ('color', 2)):
+        fc = moon_wd.driver_add(path, idx) if idx >= 0 else moon_wd.driver_add(path)
+        fc.driver.type = 'SCRIPTED'
+        var = fc.driver.variables.new()
+        var.name, var.type = 'v', 'SINGLE_PROP'
+        var.targets[0].id_type = 'LIGHT'
+        var.targets[0].id = moon_d
+        var.targets[0].data_path = path if idx < 0 else f'{path}[{idx}]'
+        fc.driver.expression = 'v'
+    moon_wet = KIT.new_object('uf_skyglow_wet', moon_wd, coll, parent=moon, made=K.made)
+    exclude_from_light(moon, wet, K.made)
+    light_only(moon_wet, [wet], K.made)
     atlas = KIT.make_sign_atlas(K)
     hole = None
     if hole_mod:
-        hole = hole_mod.build(dict(opts, kit=K, atlas=atlas, with_city=True, city_lights=[moon], collection=coll,
+        hole = hole_mod.build(dict(opts, kit=K, atlas=atlas, with_city=True, city_lights=[moon_wet], collection=coll,
                                    parent=root, scene=scene))
+        rc = moon_wet.light_linking.receiver_collection         # the hole's surfaces: the twin, not the sky-glow
+        if hole['collection'].name not in rc.children:
+            rc.children.link(hole['collection'])
+        _link_state(rc, hole['collection'], 'INCLUDE')
     plaza = make_plaza_screen(K, coll, root)
     signs = KIT.make_signs_mesh(K, atlas, bctx['signs'] + (hole['parts']['city_signs'] if hole else []), coll,
                                 parent=root)
@@ -751,9 +787,9 @@ def build(first=None, opts=None, ctx=None, **kw):
 
     def apply_atmosphere(sc=None, objects=None):
         """The scene's atmosphere: the city's World (the night sky, its hemisphere, its environment); the haze lives
-        in the set's materials. objects: the conductor's own objects (the singer, props) take the haze too, as three's
-        scene.fogNode fogged every material in the scene (KIT.fog_objects; see-through materials are left as they
-        are)."""
+        in the set's materials. objects: your own objects in the set (a performer, props) take the haze too, as
+        three's scene.fogNode fogged every material in the scene (KIT.fog_objects; see-through materials are left as
+        they are)."""
         sc = sc or scene
         sc.world = sky['world']
         if objects:
@@ -764,13 +800,15 @@ def build(first=None, opts=None, ctx=None, **kw):
     last = {'pos': None, 'frame': None}
 
     def update(t, state=None, frame=None, ctx=None):
-        """Set (and with frame, key) the city's clock and the rain's camera velocity: state {'cam_vel' | 'camVel' (m/s,
-        Blender axes), 'camera' (a camera object: its velocity by finite difference between calls when no cam_vel
-        is given), 'fps'}. ctx: the harness ctx (from now on, keys go through ctx.key)."""
+        """Set (and with frame, key) the city's clock, the rain's camera velocity and any control: state {'cam_vel' |
+        'camVel' (m/s, Blender axes), 'camera' (a camera object: its velocity by finite difference between calls
+        when no cam_vel is given), 'fps', and any of animate's controls ('power', 'focal', 'flash' ...)}. A still
+        sets everything and keys nothing. ctx: the harness ctx (from now on, keys go through ctx.key)."""
         if ctx is not None:
             U.keyer = ctx.key
         state = state or {}
         U['time'] = t
+        apply_state(U, state, frame)
         cv = state.get('cam_vel', state.get('camVel'))
         if cv is None and state.get('camera') is not None and frame is not None:
             try:                                  # matrix_world is current only after a depsgraph update
@@ -806,7 +844,7 @@ def build(first=None, opts=None, ctx=None, **kw):
         'fog_color': (K.fog_group(), 'color'), 'hole': hole, 'billboards': hole['parts']['billboards'] if hole else [],
         'signs': signs, 'traffic': traffic['object'], 'rain': rain['object'], 'clouds': clouds['group'],
         'sky': sky['world'], 'lamps': lamp['object'], 'meshes': meshes,
-        'lights': KIT.SetDict({'hemi': sky['world'], 'moon': moon}),
+        'lights': KIT.SetDict({'hemi': sky['world'], 'moon': moon, 'moon_wet': moon_wet}), 'wet_floors': wet,
         'set_lights': set_lights, 'plan': plan, 'atlas': atlas, 'plaza_screen': plaza,
         'apply_atmosphere': apply_atmosphere, 'set_focal': set_focal, 'collection': coll,
     })
@@ -824,21 +862,20 @@ def build(first=None, opts=None, ctx=None, **kw):
           f"{stats['build_s'] * 1000:.0f} ms", flush=True)
     parts['stats'] = stats
 
-    def animate(frames=None, t0=0.0, fps=None, section=None, focal=None, power=True):
-        """Key the set over film frames as the film's conductor drove it (scene.js), so the .blend plays on its own:
-        the clock (song seconds t0 at frames[0], then real time), Crali's focal light (the dive's focal point in the
-        intro; in the hole, her chest: focal, Blender axes, default hole.chest()), the rain's camera velocity (the
-        dive's; zero in the hole) and the outro's turn-down (power 1 - 0.85 smooth((t - 300) / 24) after 294.8 s).
-        section: 'dive' | 'hole' | None (by the song time: the dive to 40.8 s). frames: film frames (default the
-        intro from the scene's frame_start). Returns (first, last)."""
-        return animate_section(K, scene, frames, t0, fps, section, focal, power)
+    def animate(state=None, frames=None, t0=0.0, fps=None, camera=None):
+        """Key the set's moving parts on your own clock, so the .blend plays on its own: the clock (t0 seconds at
+        the first frame, then real time: rain, traffic, flicker, the plaza's sun, the tickers), state(t)'s controls
+        (any uniform; 'focal' a point or an object to follow; turn_down(t, start) for the lights going out one by
+        one) and the rain's streaks along the camera's motion. See animate_set. Returns (first, last)."""
+        return animate_set(K, scene, state, frames, t0, fps, camera)
 
     def make_cameras(frames=None, t0=0.0, fps=None, scene_=None, shots=None):
-        """The section's cameras, keyed into the .blend (near 0.25 m, far 6 km, the engine's). No shots: the dive,
-        every frame of song seconds [t0, 40.8] from frames[0] (default the scene's frame_start). shots: chorus shots
-        [(name, first frame, last frame)] (hole_cam's names, each stretched over its frames), one camera each, bound to
-        timeline markers (ctx.cut with a ctx). Returns {name: camera}; the first becomes the scene's camera."""
-        return make_section_cameras(K, scene_ or scene, ctx, frames, t0, fps, shots)
+        """The set's camera moves keyed into the .blend (near 0.25 m, far 6 km, the engine's). No shots: the dive
+        (40.8 s of its own; t0 starts it partway) from frames[0] (default the scene's frame_start). shots: the hole's
+        moves [(name, first frame, last frame)] (hole_cam's names, each stretched over its frames), one camera each,
+        bound to timeline markers (ctx.cut with a ctx). Returns {name: camera}; the first becomes the scene's
+        camera."""
+        return make_set_cameras(K, scene_ or scene, ctx, frames, t0, fps, shots)
     return KIT.SetDict(group=root, collection=coll, parts=parts, update=update, dispose=dispose, cams=cams,
                        animate=animate, make_cameras=make_cameras)
 
@@ -866,48 +903,176 @@ def make_set_focal(U):
     return set_focal
 
 
-# ------------------------------------------------------------------------------------------------ sections, keyed
-OUTRO_T = 294.8                        # the outro: the city turns itself down from here (scene.js)
+# ------------------------------------------------------------------------------------------------ moving parts, keyed
+# the controls a state may name besides the float uniforms (KIT.U_FLOATS): vectors, under their aliases
+STATE_VECTORS = {'focal': 'focal_pos', 'focal_pos': 'focal_pos', 'focalPos': 'focal_pos', 'focal_col': 'focal_col',
+                 'focal_color': 'focal_col', 'focalCol': 'focal_col', 'cam_vel': 'cam_vel', 'camVel': 'cam_vel'}
+_STATE_SKIP = ('camera', 'fps')
 
 
-def conductor_state(t, section=None, focal=None):
-    """What the film's conductor (scene.js) gave the city and the hole at song second t: (section, focal point,
-    camera velocity (both Blender axes), power)."""
-    sec = section or ('dive' if t <= DIVE_LEN else 'hole')
-    if sec == 'dive':
-        tt = min(t, DIVE_LEN)
-        fp, cv = dive_focal(tt), cam_velocity(dive_cam, tt)
-    else:
-        from .hole import chest
-        fp, cv = (list(focal) if focal is not None else chest()), [0.0, 0.0, 0.0]
-    pw = 1 - 0.85 * smooth((t - 300) / 24) if t > OUTRO_T else 1.0
-    return sec, fp, cv, pw
+def turn_down(t, start, length=24.0, to=0.15):
+    """The lights going out one by one, as a power curve on your clock: 1 until start (seconds), then a smooth step
+    down to `to` over length seconds (every window, sign, strip, lamp, car, flood, crown and screen at its own
+    threshold; the quiet ring and the pillar stay). For animate: lambda t: {'power': C.turn_down(t, 20.0)}."""
+    return 1.0 - (1.0 - to) * smooth((t - start) / max(float(length), 1e-6))
 
 
-def animate_section(K, scene, frames, t0, fps, section=None, focal=None, power=True):
-    """The body of the sets' animate(): see city's build()."""
-    fps = float(fps or scene.render.fps / scene.render.fps_base)
+def state_control(k):
+    """A state key -> the uniform it sets ('focal' -> 'focal_pos', camelCase aliases ...); KeyError for others."""
+    name = STATE_VECTORS.get(k) or KIT.U_ALIASES.get(k, k)
+    if name in STATE_VECTORS.values() or name in dict(KIT.U_FLOATS):
+        return name
+    raise KeyError(f'no control {k!r}: the uniforms ({", ".join(n for n, _ in KIT.U_FLOATS)}), focal (a point or an '
+                   f'object), focal_col, cam_vel')
+
+
+def _value(v, at=None):
+    """A control's value: a number, a vector, '#hex' (a colour) or an object (its world position; at(ob) gives it)."""
+    if hasattr(v, 'matrix_world'):
+        return tuple(at(v)) if at is not None else tuple(v.matrix_world.translation)
+    if isinstance(v, str):
+        return tuple(KIT.srgb_lin(v))
+    if hasattr(v, '__len__'):
+        return tuple(float(x) for x in v)
+    return float(v)
+
+
+def apply_state(U, state, frame=None, strict=False):
+    """Set (with frame, key) every control a state dict names, as update() takes it ('camera', 'fps', 'time' and
+    'cam_vel' are update's own). Other keys are passed over, as the engine's update(t, state) did (strict: refused)."""
+    for k, v in (state or {}).items():
+        if k in _STATE_SKIP or k in ('time', 'cam_vel', 'camVel'):
+            continue
+        try:
+            name = state_control(k)
+        except KeyError:
+            if strict:
+                raise
+            continue
+        U[name] = _value(v)
+        if frame is not None:
+            U.key(name, frame)
+
+
+def _frame_list(scene, frames):
+    """(first, last), a range or a list -> the frames (default the scene's frame range)."""
     if frames is None:
-        f0 = scene.frame_start
-        frames = range(f0, f0 + max(1, int(round((DIVE_LEN - t0) * fps))) + 1)
-    frames = list(frames)
+        return list(range(scene.frame_start, scene.frame_end + 1))
+    if isinstance(frames, tuple) and len(frames) == 2:
+        return list(range(int(frames[0]), int(frames[1]) + 1))
+    return [int(f) for f in frames]
+
+
+def _position_fn(scene, ob):
+    """frame -> the object's world position: from its own location keys when nothing else moves it (no parent, no
+    constraints), else through the depsgraph (frame_set)."""
+    if ob.parent is None and not len(ob.constraints):
+        ad = ob.animation_data
+        base = tuple(ob.location)
+        fcs = {}
+        if ad is not None and ad.action is not None:
+            from bpy_extras import anim_utils
+            try:
+                cb = anim_utils.action_get_channelbag_for_slot(ad.action, ad.action_slot)
+            except (AttributeError, TypeError, RuntimeError):
+                cb = None
+            fcs = {fc.array_index: fc for fc in (cb.fcurves if cb is not None else []) if fc.data_path == 'location'}
+        return lambda f: tuple(fcs[i].evaluate(f) if i in fcs else base[i] for i in range(3))
+
+    def by_depsgraph(f):
+        cur = scene.frame_current
+        scene.frame_set(int(math.floor(f)), subframe=f - math.floor(f))
+        p = tuple(ob.matrix_world.translation)
+        scene.frame_set(cur)
+        return p
+    return by_depsgraph
+
+
+def _camera_at(scene, f):
+    """The camera that renders frame f: the last camera marker at or before it, else the scene's camera."""
+    best = None
+    for m in scene.timeline_markers:
+        if m.camera is not None and m.frame <= f and (best is None or m.frame >= best.frame):
+            best = m
+    return best.camera if best is not None else scene.camera
+
+
+def _key_series(U, name, pts, eps=1e-6):
+    """Key a control's values [(frame, value)] LINEAR where they change: the first and last frames, every frame
+    whose value differs from the one before, and the frame before a change after a hold (no ramp across holds)."""
+    def same(a, b):
+        if isinstance(a, float) and isinstance(b, float):
+            return abs(a - b) <= eps
+        return all(abs(x - y) <= eps for x, y in zip(a, b))
+    prev, keyed_at = None, None
+    for i, (f, v) in enumerate(pts):
+        change = prev is None or not same(v, prev[1])
+        if change and prev is not None and keyed_at != prev[0]:
+            U.key(name, prev[0], prev[1])
+        if change or i == len(pts) - 1:
+            U.key(name, f, v)
+            keyed_at = f
+        prev = (f, v)
+
+
+def animate_set(K, scene, state=None, frames=None, t0=0.0, fps=None, camera=None):
+    """Key a set's moving parts on your own clock, so a saved .blend plays and renders any frame on its own (the
+    body of the city's and the hole's animate()).
+
+    state: a function of the set's seconds t returning {control: value}, or one dict for every frame. Controls: the
+      uniforms (power, win, neon, street, rain, cloud, fog, wet, flash, focal_gain, focal_r, flood, crown, cable,
+      column, screens, quiet; camelCase aliases too), 'focal' (a point in Blender axes, or an object whose position
+      is followed), 'focal_col' (RGB or '#hex'), 'cam_vel' (m/s; overrides the camera's) and 'time' (a clock of your
+      own; by default t0 + real time, two LINEAR keys extrapolated). Each is keyed where its value changes.
+    frames: (first, last), a range or a list (default the scene's frame range); t = t0 + (frame - first) / fps.
+    camera: whose motion the rain streaks along. None: the camera that renders each frame (camera markers, else the
+      scene's; still air without one); an object: that camera; False: cam_vel is left as it is.
+    Returns (first, last)."""
+    if state is not None and not callable(state) and not isinstance(state, dict):
+        frames, state = state, None                  # animate(frames, ...), as the other sets take it
+    fps = float(fps or scene.render.fps / scene.render.fps_base)
+    frames = _frame_list(scene, frames)
     U = K.U
-    prev = None
-    for i, f in enumerate(frames):
+    series = {}
+    pos_fns = {}
+
+    def pos_of(ob):
+        fn = pos_fns.get(ob.name)
+        if fn is None:
+            fn = pos_fns[ob.name] = _position_fn(scene, ob)
+        return fn
+
+    clock_own = False
+    for f in frames:
         t = t0 + (f - frames[0]) / fps
-        sec, fp, cv, pw = conductor_state(t, section, focal)
-        edge = i == 0 or i == len(frames) - 1 or sec != prev
-        if sec == 'dive' or edge:              # the hole's focal and velocity hold: their ends are enough
-            U.key('focal_pos', f, fp)
-            U.key('cam_vel', f, cv)
-        if power and (t >= OUTRO_T - 1 / fps or edge):
-            U.key('power', f, pw)
-        prev = sec
-    key_time(K, frames[0], fps, t0, frames[-1])
+        st = state(t) if callable(state) else (state or {})
+        for k, v in st.items():
+            if k in _STATE_SKIP:
+                continue
+            name = 'time' if k == 'time' else state_control(k)
+            clock_own |= name == 'time'
+            val = _value(v, at=lambda ob, f=f: pos_of(ob)(f)) if name != 'time' else float(v)
+            series.setdefault(name, []).append((f, val))
+    if camera is not False and 'cam_vel' not in series:
+        vel = []
+        for f in frames:
+            cam = camera if camera is not None else _camera_at(scene, f)
+            if cam is None:
+                vel.append((f, (0.0, 0.0, 0.0)))
+                continue
+            p = pos_of(cam)
+            a, b = p(f - 0.5), p(f + 0.5)
+            v = tuple((b[i] - a[i]) * fps for i in range(3))
+            vel.append((f, v if math.hypot(*v) < 400.0 else (0.0, 0.0, 0.0)))   # a jump (a cut) is not motion
+        series['cam_vel'] = vel
+    for name, pts in series.items():
+        _key_series(U, name, pts)
+    if not clock_own:
+        key_time(K, frames[0], fps, t0, frames[-1])
     return frames[0], frames[-1]
 
 
-def make_section_cameras(K, scene, ctx, frames, t0, fps, shots):
+def make_set_cameras(K, scene, ctx, frames, t0, fps, shots):
     """The body of the sets' make_cameras(): see city's build()."""
     from . import hole as H
     fps = float(fps or scene.render.fps / scene.render.fps_base)
@@ -1138,8 +1303,8 @@ def _set_image(mat, old, new):
 
 
 def bake_canvas_sequence(K, name, w, h, draw, frames, fps, out_dir, frame_start=None):
-    """A canvas redrawn over the film, as a numbered PNG sequence keyed to frames (the engine re-uploaded its
-    CanvasTexture). frames: film frame numbers; draw(ctx, w, h, t) with t = (frame - frames[0]) / fps (+ the
+    """A canvas redrawn over time, as a numbered PNG sequence keyed to frames (the engine re-uploaded its
+    CanvasTexture). frames: frame numbers; draw(ctx, w, h, t) with t = (frame - frames[0]) / fps (+ the
     frame_start offset when given, in seconds). out_dir may be blend-relative ('//uf_screens': beside the saved .blend,
     as the media family reads it; in a file not saved yet, that is the working folder). Returns the image
     (media.screens' sequence loader: a hold file before the range, the last file after it)."""
@@ -1167,7 +1332,7 @@ def bake_canvas_sequence(K, name, w, h, draw, frames, fps, out_dir, frame_start=
 
 
 # ------------------------------------------------------------------------------------------------ THE DIVE
-# dive_cam(t), t = song seconds 0..40.8: Tullio Crali's "Incuneandosi nell'abitato" (1939). Falling out of the low rain
+# dive_cam(t), t = seconds into the dive, 0..40.8: Tullio Crali's "Incuneandosi nell'abitato" (1939). Falling out of the low rain
 # clouds over the crossing of grand avenue 45 degrees and the first ring road, a nose-dive that circles that crossing
 # ever tighter and faster while the towers radiate from the vanishing point below, down between the towers, then the
 # pull-out: levelling into the avenue at ~15 m, flying toward the hole, which ends the shot framed at the avenue's end.
@@ -1246,7 +1411,7 @@ def dive_cam_three(t):
 
 
 def dive_cam(t):
-    """The intro dive (song seconds 0..40.8) in Blender axes: {'pos', 'target', 'fov', 'roll', 'up'}; apply it with
+    """The dive (t = seconds into it, 0..40.8) in Blender axes: {'pos', 'target', 'fov', 'roll', 'up'}; apply it with
     apply_cam(camera, dive_cam(t)) or key it with key_dive."""
     return KIT.pose_to_blender(dive_cam_three(t))
 
@@ -1267,9 +1432,9 @@ def camera_velocity(t):
 
 
 def key_dive(camera, K=None, *, frame_start=1, fps=24.0, t0=0.0, t1=DIVE_LEN, focal=True, step=1, keyer=None):
-    """Key the intro on a camera: every frame of song seconds [t0, t1] from frame_start, LINEAR; with K, also the
-    kit's clock, the rain's camera velocity and Crali's focal light (dive_focal). keyer: the harness's ctx.key (by
-    default the kit's, when the set was built with a ctx). Returns the frame range."""
+    """Key the dive on a camera: every frame of its seconds [t0, t1] from frame_start, LINEAR; with K, also the
+    kit's clock (the dive's seconds), the rain's camera velocity and Crali's focal light (dive_focal). keyer: the
+    harness's ctx.key (by default the kit's, when the set was built with a ctx). Returns the frame range."""
     keyer = keyer or (K.U.keyer if K is not None else None)
     n = int(round((t1 - t0) * fps))
     frames = list(range(frame_start, frame_start + n + 1, step))
@@ -1288,7 +1453,7 @@ def key_dive(camera, K=None, *, frame_start=1, fps=24.0, t0=0.0, t1=DIVE_LEN, fo
 
 
 def key_time(K, frame_start, fps, t0=0.0, frame_end=None):
-    """The kit's clock as two LINEAR keys with linear extrapolation: song seconds t0 at frame_start, then real time."""
+    """The kit's clock as two LINEAR keys with linear extrapolation: t0 seconds at frame_start, then real time."""
     frame_end = frame_end if frame_end is not None and frame_end > frame_start else frame_start + max(1, int(fps * 10))
     K.U.key('time', frame_start, t0)
     K.U.key('time', frame_end, t0 + (frame_end - frame_start) / fps)

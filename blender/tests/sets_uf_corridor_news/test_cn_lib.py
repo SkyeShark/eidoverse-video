@@ -1,6 +1,7 @@
 """cn_lib's API the two sets do not happen to call, exercised on its own (no renders): dyn_canvas, pbr_mat's offset /
-uv / P / opacity / alpha_test / transparent options, register_font, lum, bucket + box_uv metre UVs, slice_tris,
-make_world's hemisphere, spot / point lights, make_camera, the stroker and the fill rules.
+uv / P / opacity / alpha_test / transparent / ao / depth_write options, register_font, lum, bucket + box_uv metre
+UVs, slice_tris, make_world's hemisphere, spot / point lights, make_camera, the image-based light (prefiltered levels,
+the sheen layer), the stroker and the fill rules.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_cn_lib.py
 """
@@ -89,7 +90,7 @@ from mathutils import Vector  # noqa: E402
 bpy.context.view_layer.update()
 fwd = sp.matrix_world.to_3x3() @ Vector((0, 0, -1))
 aim = Vector(CL.b3([0, 1.25, 0])) - Vector(CL.b3([1.2, 9.2, 8.0]))
-check('spot: 300 cd at 4 pi / 683 W, aimed at its target, a custom cut-off', abs(sp.data.energy - 300 * 4 * math.pi / 683) < 1e-6
+check('spot: 300 cd at 4 pi x 300 W, aimed at its target, a custom cut-off', abs(sp.data.energy - 300 * 4 * math.pi) < 1e-4
       and fwd.angle(aim) < 1e-5 and sp.data.use_custom_distance and pt.data.use_shadow is False,
       f'{sp.data.energy:.4f} W, aim {math.degrees(fwd.angle(aim)):.4f} deg')
 cam = CL.make_camera(L, 'cnapi_cam', {'pos': [0.55, 1.25, 6.2], 'target': [0, 4.6, -24], 'fov': 38}, parent=root)
@@ -112,6 +113,22 @@ envs = [n for n in mi.node_tree.nodes if n.bl_idname == 'ShaderNodeTexEnvironmen
 check('Mat.standard(ibl): the material samples its prefiltered environment (two levels for r 0.3, one for r 1) and '
       'adds it as emission', len(es['levels']) == 5 and len(envs) == 3 and bsdf(mi).inputs['Emission Color'].is_linked,
       f'{len(envs)} samples')
+# pbr_mat's ao / ao_amt (three's aoNode: it occludes the image-based light), sheen's own image-based layer, depth_write
+Sa = L.pbr('PaintedMetal012', ao=True)
+uses = lambda m, img: any(n.bl_idname == 'ShaderNodeTexImage' and n.image == img for n in m.node_tree.nodes)  # noqa: E731
+ma = L.pbr_mat(Sa, name='cnapi_ao', ao_amt=0.6, env_i=L.env_i(0.5))
+mn = L.pbr_mat(Sa, name='cnapi_ao_off', ao=False, env_i=L.env_i(0.5))
+mz = L.pbr_mat(Sa, name='cnapi_ao_no_env')
+check('pbr_mat ao: the set\'s AO map occludes its image-based light (ao=False or no envMap: not sampled)',
+      Sa.get('ao') is not None and uses(ma, Sa['ao']) and not uses(mn, Sa['ao']) and not uses(mz, Sa['ao']))
+n_plain = len(L.mat('cnapi_nosheen').standard((0.3, 0.02, 0.03), rough=0.5, ibl=L.ibl(0.4)).node_tree.nodes)
+n_sheen = len(L.mat('cnapi_sheen').standard((0.3, 0.02, 0.03), rough=0.5, sheen=1.0, sheen_color=(0.35, 0.02, 0.03),
+                                            sheen_rough=0.35, ibl=L.ibl(0.4)).node_tree.nodes)
+check('Mat.standard(ibl, sheen): the sheen adds its image-based layer (IBLSheenBRDF) and its energy compensation',
+      n_sheen > n_plain + 8, f'{n_plain} -> {n_sheen} nodes')
+md = L.pbr_mat(S, name='cnapi_depthwrite', transparent=True, opacity=0.5, depth_write=False)
+check('pbr_mat depth_write=False: a blended material blends every layer (Transparency Overlap)',
+      md.surface_render_method == 'BLENDED' and md.use_transparency_overlap)
 
 # fills and strokes
 cv = CL.create_canvas(40, 40)

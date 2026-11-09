@@ -1,0 +1,75 @@
+{
+ "name": "badlands_sd_detail_context",
+ "role": "context",
+ "title": "Badlands National Park, South Dakota, USA (detail)",
+ "landform": "badlands (close range)",
+ "note": "A 1.2 km piece of the Badlands Wall at 1.2 m: the fluted walls, knife ridges, pinnacles and gully floors at the scale a character walks past them.",
+ "centre_lat": 43.75389,
+ "centre_lon": -101.92378,
+ "pixel_size_m": 6.0,
+ "extent_m": [
+  6000,
+  6000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "context_of": "badlands_sd_detail",
+ "source": {
+  "dataset": "USGS 3D Elevation Program (3DEP), best-available DEM (3DEPElevation ImageServer)",
+  "publisher": "U.S. Geological Survey",
+  "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+  "native_resolution_m": "1 m lidar where the projects in lidar_1m_products_here cover the tile, elsewhere 1/3 arc-second (~10 m)",
+  "vertical_datum": "NAVD88",
+  "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+  "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+  "kind": "usgs3dep",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 6,
+  "resampling": "bilinear",
+  "no_data_fraction": 0.0,
+  "request": {
+   "bbox": "-101.96264376357055,43.72582463093295,-101.88491623642943,43.7819487953482",
+   "bboxSR": 4326,
+   "imageSR": 4326,
+   "size": "1042,1040",
+   "format": "tiff",
+   "pixelType": "F32",
+   "noData": -9999,
+   "noDataInterpretation": "esriNoDataMatchAny",
+   "interpolation": "RSP_BilinearInterpolation",
+   "f": "json"
+  },
+  "export_size": [
+   1042,
+   1040
+  ],
+  "export_pixel_m": 6,
+  "lidar_1m_products_here": [
+   "USGS 1 Meter 13 x74y485 SD_Southwest_NRCS_SD_2018_D18",
+   "USGS 1 Meter 13 x74y486 SD_Southwest_NRCS_SD_2018_D18",
+   "USGS 1 Meter 13 x75y485 SD_Southwest_NRCS_SD_2018_D18",
+   "USGS 1 Meter 13 x75y486 SD_Southwest_NRCS_SD_2018_D18",
+   "USGS 1 Meter 14 x26y485 SD_Southwest_NRCS_SD_2018_D18",
+   "USGS 1 Meter 14 x26y486 SD_Southwest_NRCS_SD_2018_D18"
+  ]
+ },
+ "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+ "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 164.93,
+  "mean_m": 759.01,
+  "hypsometric_integral": 0.2525,
+  "slope_deg_p10": 0.6,
+  "slope_deg_p50": 3.33,
+  "slope_deg_p90": 32.5,
+  "slope_deg_p99": 48.54,
+  "slope_deg_mean": 9.87
+ },
+ "height_png": "badlands_sd_detail_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 717.36,
+ "height_max_m": 882.3,
+ "height_step_m": 0.0025168230716411067,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

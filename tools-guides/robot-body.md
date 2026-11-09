@@ -61,6 +61,16 @@ What the newer half does:
 - The stages the solves set and no humanoid bone carries (the hips' pitch and swing, the shoulders' pitch, the wrists'
   roll and flexion, the thumbs' rotors, the petals) come back as turns that `key_robot` keys; their VRM node
   constraints are muted, as the JS deletes them.
+- **The crown's and the head's states** (`CROWN_STATES`: neutral, happy, angry, sad, relaxed, surprised, thinking,
+  listening, curious, resting; `HEAD_STATES` for the seven that move the head): pass one as `crown_state` /
+  `head_state` (and `state_weight`) to `RobotRig.frame` / `finish` / `perform_robot`, on top of what the face's
+  expressions already do to them; the crown's lead screws move at 240°/s and the neck at 120°/s, so a state arrives
+  over a few frames.
+
+```python
+rep = perform_robot(me, load_clip(me, 'idle'), 1, 72, rig=rig, crown_state='listening')   # the whole take, one state
+rec = rig.frame(pose3, off, 1 / 24, {}, None, 'thinking', 'thinking', state_weight=1.0)   # frame by frame
+```
 
 `tests/robot_body/test_dof_parity.py` runs the JS module under deno and the Python on the same 510 frames of real clip
 poses (idle, walk, turnLeft, talk, cheer, sitting_normal_chair, reach and jump, crossfaded; every bone on my body,
@@ -128,7 +138,7 @@ rep = hands.pick_and_hold(me, rig, can, f0=1, side='right', ground=floor_ground,
                           face=lambda t: {'happy': 0.35})
 # can: an upright prop on a surface in front of me, its origin on its axis at its base. Keyed from f0: I reach, close
 # my hand on it, lift it, bring it before my face, roll it in my wrist to look it over, set it down where it was and let
-# go; my head follows it and my crown turns curious while I hold it
+# go; my eyes stay on it (my head and my face's eyes) and my crown turns curious while I hold it
 ```
 
 How it is careful, piece by piece (each usable on its own):
@@ -136,7 +146,10 @@ How it is careful, piece by piece (each usable on its own):
 - **The grasp is planned on my arm.** Round the prop's side facing the hand, candidates of approach (azimuth) and
   knuckle tilt are each solved on my arm, and the one with the most margin inside my wrist's stops wins; the grip sits
   as low as the open hand clears the surface under the prop. `hands.reach(rig, rec, side, wrist, turn, swivel)` is the
-  two-bone IK onto my elbow's pin (the joints file's hinge), the elbow's swivel chosen for the wrist's margin.
+  two-bone IK onto my elbow's pin (the joints file's hinge), the elbow's swivel chosen for the wrist's margin. A
+  flat-sided prop (a carton, a box) met at an angle squares the approach to its face (a palm square to the azimuth
+  would meet the face on its rim), the palm goes on the face itself, and the whole palm is measured against the prop:
+  where any of it would come closer than `palm_gap`, the grasp backs off along the approach.
 - **The arm only goes where my hardware takes it.** `hands.reach_through_hardware` solves a fan of elbow swivels and
   passes each through THIS frame's arm pass (`arm_preview(..., dt)`: the shoulder's stops, its pitch stage turning at
   most its actuator's 360°/s from where it is, the wrist's stops and turn limit), keeping the one my arm actually
@@ -145,9 +158,15 @@ How it is careful, piece by piece (each usable on its own):
 - **The fingers close until they touch.** `hands.close_on(hm, rec, Surface(prop), gap)` closes each finger's three
   pins in turn, proximal first, each until a link at or past it comes within `gap` of the prop's surface (a signed
   distance from a BVH of the prop's mesh), inside each pin's range; the thumb turns into the most opposition that clears
-  (its rotor), then its CMC, MCP and IP close the same way. `robot_dof`'s hand pass then clamps them like any clip.
+  (its rotor), then its CMC, MCP and IP close the same way. A thumb that closes so without touching (on a square
+  carton the pre-shaped thumb presses into the side at every opposition down to 15°, and from there it curls past the
+  carton into my palm) is searched again opened flat: the most opposition that clears flat and closes onto the prop
+  (on the carton 60°, touching it), and the hand comes in and lets go with the thumb opened so.
+  `robot_dof`'s hand pass then clamps them like any clip.
   Measured on the evaluated mesh at the closed hand (`gap` 0.6 mm): every finger and the thumb 0.74-0.77 mm from the
-  can, the palm 4.2 mm, and no hand vertex inside the can or the counter from the approach to the return.
+  can, the palm 4.2 mm, and no hand vertex inside the can or the counter from the approach to the return. On the
+  carton (`test_pick_up.py --prop carton`) the fingers and the thumb 0.3-0.9 mm from it, the palm 3.7 mm, nothing
+  inside it; my left hand (`--side left`) passes the same touch, the hold and the set-down on both props.
 - **The prop moves only in the hand that moves it.** A Child Of constraint on my hand's bone, its influence keyed on
   the frame the hand closes and off the frame it opens; the prop's own transform is keyed only where the hand left it.
   Against the hand bone the can drifts 0.0004 mm while held.
@@ -165,6 +184,14 @@ How it is careful, piece by piece (each usable on its own):
 - **The free hand moves in its joints.** On the way to the pre-grasp and home again nothing needs a straight path, and
   a wrist path through the room crosses where my shoulder's pitch stage must swap its solution (its actuator then lags
   by up to 16 cm), so there the arm eases bone by bone between key poses my hardware makes, as a clip moves an arm.
+- **My eyes are on the work.** From the reach my head turns to the can (VRMRobotBody's head actuator: at most 90°/s,
+  speeding up and slowing down, `head_rate` / `head_accel`), follows it a beat ahead while I lift it and look it over
+  (`gaze_lead`), goes ahead of my hand to where I set it down, and comes back onto the idle's own head after; the gaze
+  starts from the clip's head with its roll (`RobotRig.apply_gaze(..., roll)`), so it never jumps a frame. My neck's nod
+  stops at 30°, and the counter's top lies 45-50° under my eyes, so my face's eyes (its look expressions, the VRM's
+  look-at ranges: 28° across, 25° down) take what the head leaves (`look_eyes`, at most `eye_rate`). Measured: my
+  eyes within 4.2° of the can from the reach until it is looked over and 1.4° of where I set it down (my head alone
+  would be 26° off), the head turning at most 3.9° a frame.
 
 ## The embodied robot: `VRMRobotBody`
 
@@ -211,14 +238,18 @@ dbg.build(rep)                         # the overlays on the film's frames
 **The API is robot_body.js's, name for name in snake_case**; the JS's `(x, z)` arguments are Blender's `(x, y)` and a
 heading is radians about +Z, 0 facing −Y (the same number as three's `rotation.y`). Each action returns a `Pending`
 (the JS returns a Promise): `.state` `'pending'` / `'resolved'` / `'rejected'`, `.error`, `.then(ok, err)`;
-`body.run(generator)` steps a script the way an async scene awaits.
+`body.run(generator)` steps a script the way an async scene awaits, and `body.wait(seconds)` /
+`body.until(predicate)` are the scene's own timers (a JS scene's `await sleep(ms)` and its polling loops).
 
 - Actions: `walk_to(x, y)`, `run_to(x, y)`, `walk_to_landmark(name)`, `run_to_landmark(name)`,
   `look_at(x, y, z, hold=False, instant=False)`, `look_forward()`, `face_direction(heading)`,
   `scan_area(yaw_range=90, duration=1.5, center_yaw=0, passes=1)`, `perform_action(clip, duration)`, `stop()`
   (the pending action rejects with `'action … stopped'`), `begin_seated(slot)`, `stand_up(slot)`,
-  `set_emote_facing(heading or None)`, `set_running(v)`; `vault()`, `jump(opts)`, `climb_ledge()`,
-  `climb_ladder(opts)` and `is_maneuvering()` pass through to the legs (see "Not yet ported").
+  `set_emote_facing(heading or None)`, `set_running(v)`.
+- Moves, as the JS passes them to the engine's controller: `vault()`, `jump({'distance', 'height'})`,
+  `climb_ledge()`, `climb_ladder({'height', 'rate', 'firstRung', 'rungSpacing', 'timeScale'})`, each the move ahead
+  along my heading from where I stand, `True` when it started (`False`: nothing it fits ahead, or I am walking), and
+  `is_maneuvering()` while it lasts (below: "The moves").
 - Queries: `observe()` (the last reading), `can_see(x, y, z)` (inside the cone and not occluded), `distance_to`,
   `path_to`, `get_position`, `get_heading`, `get_head_position`, `get_head_direction`, `get_current_action`,
   `is_moving`, `is_blocked`, `get_map`, `get_landmarks`, `tag_landmark(name, x, y)`, `forget_landmark(name)`.
@@ -228,6 +259,26 @@ heading is radians about +Z, 0 facing −Y (the same number as three's `rotation
   `'blocked: collision stall at …'` after 1.5 s; the head panning and nodding at 90°/s inside its ±60° / ±30° (my
   neck's pan and my head's nod stops), its gaze replacing the clip's head each frame.
 - `body.log` (plans, replans, arrivals, rejections), `body.readings` and `body.paths` record the run for checks.
+- **A look-at is re-aimed from the keyed body.** The JS aims the head from the head and the heading it renders; here the
+  run is live and the film is its bake, and the keyed body can stand a little off the live one (the live run stops
+  within `arrive_radius` of the goal, the keyed walk stops on a mid-stance at the goal; a face_direction steps round
+  over a few frames where the live heading snapped). So each frame with a look-at target records it with the head's
+  place and heading the live aim used, and the bake adds the aim's change from those to the keyed ones (the head's
+  rate-limited turn kept, clamped at `yaw_limit` / `pitch_limit`). In `test_navigate_room.py` the live gaze panned my
+  neck 37.5° toward the lamp where the keyed body needs 49.8°; re-aimed, my head's facing comes to 5.8° of the lamp.
+
+**Any VRM, not only mine.** robot_body.js drives any VRM through the engine's own controller, which knows nothing of my
+hardware, and so does this one: `RobotRig(h)` knows my body by its hips' stage bones (round one's rule) and on any
+other VRM is a plain rig: its clips as they are, the gaze on its head bone exactly as `_applyHeadOverride` sets it
+(its neck the clip's), its feet set down; no joint limits, clearances, head states or crown. `test_other_vrm.py`
+walks Aletheia round a crate to a lamp: her standing arms, spine and neck are the idle's own to 0.00001°, her head
+bone's turn is the JS's on every frame, and my hands' work (`hands`) refuses her plainly (it needs my joints file).
+
+```python
+her = load_vrm('aletheia', location=(-2.6, -0.2, 0.0), rotation=math.degrees(h0))
+body = VRMRobotBody.create(her, bpy.context.scene, {'collision_meshes': [floor] + walls + [crate],
+                                                   'motion': {'start_x': -2.6, 'start_y': -0.2, 'start_heading': h0}})
+```
 
 **The controller, `EidoverseRobotController`** (robot_controller.js), is the waypoint contract the body drives:
 `set_waypoints([{x, y, action}])` (a `'run'` waypoint runs), `update(t, dt)`, `get_state()` (`'idle'`, `'walking'`,
@@ -271,26 +322,70 @@ The engine's legs are a physics controller that runs live in the browser. Here t
      both feet rested. A new clip where I stand crossfades in with each foot held where it stands, moved only when the
      clip itself lifts it (a planted foot stays put through a wave; a clip that steps carries its foot and lands it).
    - **Walking**: round one's `walk_path` along the route travelled (planted feet, the stance's rockers, the swing's
-     clearance), then the hands, wrists, gaze, head and crown. A walk starts from the standing foot's mid-stance and
-     stops on the stance nearest the goal, the other foot set down beside it and both held after.
+     clearance), then the hands, wrists, gaze, head and crown. A walk starts from the standing foot's mid-stance (from
+     where my keyed body stands, joining the live run's route at most 15° steeply) and stops on the stance nearest the
+     goal, the other foot set down beside it before anything else plays, and both held after.
    - **Running**: the controller family's `VRMCharacterController` (the engine's gait tree with the run clip's flight,
      its acceleration from standing and its stop on the point, its planted feet), on the same collision meshes.
      `walk_path` is a planted-feet walk and finds no stance in the run clip.
    - **Turning on the spot**: steps of at most 45°, the foot on the side I turn toward first, each foot lifted 4 cm and
      set down where the clip puts it at the step's heading while the other stays planted.
 
+   - **The moves** (below).
+
    A turn or a walk longer than the live run's frames for it runs the film on; `rep['map']` maps film frames to the
    run's frames. Measured in the tests: walks slip at most 0.65 mm a frame on planted feet, never turn a planted foot
-   on the ground, and no swing touches; standing, the hand-overs and the turns at most 0.32 mm a frame; the run
-   0.07 mm.
+   on the ground, and no swing touches; standing, the hand-overs and the turns at most 0.84 mm a frame; the run
+   0.19 mm. A walk that stops before an edge (a drop, a step up, a wall's foot) runs its route on past the goal only
+   over the goal's own level and stops with my feet back from the edge, so it may stop up to a step short of the goal.
+
+### The moves: vault, jump, climb a ledge, climb a ladder
+
+```python
+def script(b):
+    yield b.walk_to(-4.15, 0.0)                  # up to a low wall (0.8 m), facing it
+    if b.vault():                                # True: the move started
+        yield b.until(lambda: not b.is_maneuvering())        # (b.wait(seconds) waits a while)
+    yield b.walk_to(-1.55, 0.0)                  # to the ditch's edge
+    if b.jump({'distance': 1.4, 'height': 0.45}):
+        yield b.until(lambda: not b.is_maneuvering())
+    ...                                          # b.climb_ledge(): onto the 1 m step ahead
+    ...                                          # b.climb_ladder({'height': 1.9}): up the ladder ahead, over its top
+```
+
+The JS passes these to the engine's character controller; here they are the controller family's own
+(`eidoblend.characters.controller`, its `VRMCharacterController`: its scan of the meshes ahead, its clips, its contact
+IK on the cover, the lip and the rungs). When the body calls one, `RobotLegs` plays it through that controller from
+where I stand, facing my heading, on the same collision meshes: a beat of standing, the move (a ladder chains into the
+mantle over its top), the landing and a beat of standing after, planted by its plant (my body's DOF pass included).
+The live run follows its root frame by frame, so I sense on from where the move carries me. The bake plays the move
+again from where my keyed body actually stands (a walk's planted feet stop it a part of a stride from the live run's
+place), steps my feet over 8 frames from my stance to the move's (one foot at a time, lifted), and keys its frames
+through my passes. Refused, as the engine refuses: nothing the move fits ahead (`vault()` with no cover in the scan's
+2.6 m), and here also a move asked while walking (stop first).
+
+**A foot never goes into what I climb.** On my legs the controller family's mount and ladder put a foot into the face
+they climb (in the test about 0.22 m into the step and 0.28 m into the tower), so through a move the bake pushes such a
+foot out along the face onto it, the leg re-solved and clamped (`bake_run(keep_feet_out=True)`, the default); where my
+leg cannot take it out alone (the ladder holds my hips too close to the face) the whole body moves out by the rest
+(5 cm at most in the test), its hands with it. After the landing both feet are settled onto the level they landed on.
+
+`test_body_maneuvers.py` runs all four on one course: each starts and plays (vault; jump; climbLedge; climbLadder and
+its mantle), I sense on through each, the refusals answer `False`, and I end on the tower's top. On every keyed frame
+no sole point is more than 4 mm inside a solid, and standing, both feet are within 1 mm of what they stand on. The
+step-ins hold: each move lands within 1.1 cm of where I stand, a planted sole point moves at most 0.75 mm a frame, and
+where the move takes over the feet move 0.3 mm. My passes keep the controller's hands exactly; its contact IK does not
+put them on what they hold on my body (the vault's knuckles pass about 0.24 m over the wall's top, on the ladder they
+are a median 0.16 m from a rung), and the test reports that as its own FAIL until the controller family's contact IK
+holds on my proportions.
 
 ### Seeing what it knows: `RobotDebug`
 
 `RobotDebug(body)` with `show_rays`, `show_map`, `show_path`, `show_landmarks` and `update()` after each
 `body.update`, as the JS. A film frame must render alone, so `update()` records what each helper shows at each frame
 and `build(rep)` makes one object per helper holding every state with the frames it is shown on, a Geometry Nodes
-modifier keeping only the state that holds at the scene's current frame: the sensor rays from my head (hits red,
-misses cyan, opacity 0.6), the occupancy grid as a 2.5D decal at each cell's surface height + 2 cm (free green,
+modifier keeping only the state that holds at the scene's current frame: the sensor rays from my keyed head to where
+each really ended, so every hit lies on the surface it found (hits red, misses cyan, opacity 0.6), the occupancy grid as a 2.5D decal at each cell's surface height + 2 cm (free green,
 blocked red, cliff yellow, hazard purple, unknown not drawn, faded by confidence), the planned path (yellow, at 5 cm)
 and the landmarks (cyan balls at 0.5 m), all unlit and casting no shadow. `show_x(False)` after `build` hides that
 helper. Use it to see why a route bends; in a finished film it reads as diagnostics unless that is the look.
@@ -327,13 +422,24 @@ exact), a JS bake read here, and plays the shipped ska band bake: the trumpet pl
 ```bash
 cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01      # the shared GPU slot lives there
 HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <repo>/blender/tests/robot_body/test_pick_up.py
-#   ... test_navigate_room.py | test_body_api.py | test_claude_robot_example.py | test_pose_bake.py | test_dof_parity.py
+#   ... test_navigate_room.py | test_body_maneuvers.py | test_body_api.py | test_claude_robot_example.py
+#   ... test_crown_head_states.py | test_pose_bake.py | test_dof_parity.py | test_other_vrm.py
 #   --no-render builds, checks and saves only (no GPU slot needed)
 ```
 
 - `test_pick_up.py` — me picking up a can from a counter, looking it over and setting it back: the fingers touch and
   never pass in, the can moves only in my hand and never into the counter, my hand follows its plan through my
-  hardware, the can stands where it was after, both feet on the floor.
+  hardware, the can stands where it was after, both feet on the floor, my eyes on the can and then on where it goes.
+  `--side left` uses my left hand on a can before my left shoulder, `--prop carton` a 65 mm square carton; either
+  writes `out/pick_up_<side>_<prop>_*`.
+- `test_other_vrm.py` — `VRMRobotBody` on Aletheia (a VRM that is not my body): a plain rig, her clips untouched, the
+  JS's head override on her head bone, a walk round a crate, a turn, a look at a lamp and a wave.
+- `test_body_maneuvers.py` — down a hall: a vault over a low wall, a jump over a ditch, a climb onto a step and up a
+  ladder onto a tower, and the refusals (`render_maneuver_views.py` stills its saved `.blend` from the step's side,
+  where the tower does not hide the ladder).
+- `test_crown_head_states.py` — the presets: each of the ten `CROWN_STATES` (with its `HEAD_STATES` pose where there
+  is one) held in turn through the frame order, every petal at its state's fold inside its stops, the head at its
+  state's pitch, roll and pan, the actuators at their rates; my head rendered in each.
 - `test_navigate_room.py` — me crossing a room I have never seen to a goal behind a partition, a crate out of sight
   until the doorway: I scan, plan, replan on what I see, arrive, look at a lamp and wave. Its checks: arrival, a replan
   on sight, the memory on the real walls (100 % of blocked cells within 0.15 m of a surface), my clearance from every
@@ -350,13 +456,21 @@ Each writes `out/<test>.json` (the report and its PASS / FAIL checks), its `.ble
 
 ## Not yet ported
 
-- **Maneuvers through the robot body.** `vault`, `jump`, `climb_ledge`, `climb_ladder` pass through to the legs, and
-  `RobotLegs` has none: they answer `False`, as the JS does for a controller without them. The maneuvers live in the
-  controller family's `VRMCharacterController`; driving the body's walks through it (as its runs already are) is the
-  next step, `legs_class` the seam.
-- **`seatOn`** (the engine helper that finds a seat by raycasts and puts the hips on it). `begin_seated` plays the seated
-  clip where I stand with my feet held; the caller places me in front of the seat (`test_body_api.py` places a stool
-  under where the clip puts my hips).
+- **A move out of a walk or a run**, and the moves the engine starts on its own en route (its auto-maneuvers: low
+  cover vaulted, a gap jumped while walking a route). Here a move starts from standing: the body's walks are
+  `walk_path`'s, which has no moves, and the planner routes round what the memory holds as blocked.
+- **The moves' hands on my body**: the controller family's contact IK leaves my hands off the wall's top and the rungs
+  (numbers above); my bake keeps the feet out of the faces, the hands are theirs to place.
+- **My left hand's set-down is less exact than my right's.** From the mirrored stance the left grasp sits near my
+  wrist's extension stop, and setting the can down my hardware leaves the hand up to 4.4° off its planned turn (6.6°
+  on the frame it opens) against the right's 1.3°: the can lands that far off upright and tips onto its base over
+  three frames; my eyes come within 5.2-5.5° of the can and the set-down place where the right's are within 4.2°
+  (`test_pick_up.py --side left` reports both as its two FAILs). `pick_and_hold` plans upright props (round or
+  flat-sided); props lying down, handles and two-handed carries are not planned.
+- **`seatOn` with the body.** `eidoblend.placement.seating.seat_on` (scene_placement.js's seatOn) seats a VRM no body
+  drives; with a body, `begin_seated` plays the seated clip where I stand with my feet held, and the scene walks me to
+  the spot in front of the seat first (`test_body_api.py` places a stool under where the clip puts my hips). The JS
+  snaps the body there and settles the hips onto the pan by raycasts.
 - **The pivot of an aimed emote.** The engine pivots to `set_emote_facing`'s heading during the emote's fade-in; here I
   step round to it before the emote plays and back after (the emote's time starts after the turn).
 - **Upper-body gestures while walking** (`playGesture` on the inner controller), the run's own turns (a run's start

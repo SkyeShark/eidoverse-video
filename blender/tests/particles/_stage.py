@@ -14,6 +14,11 @@ REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 MAIN = 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01'
 sys.path.insert(0, os.path.join(REPO, 'blender'))
 OUT = os.path.join(HERE, 'out')
+# out=<folder under out/> (e.g. out=verify) writes a run's stills and files there instead, beside earlier runs
+_sub = next((x.split('=', 1)[1] for x in (sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
+             if x.startswith('out=')), None)
+if _sub:
+    OUT = os.path.join(OUT, _sub)
 os.makedirs(OUT, exist_ok=True)
 # the shared model library: this worktree has none of its own, the main checkout's is read (never written) here
 if not os.environ.get('EIDO_ASSET_CACHE') and not os.path.isdir(os.path.join(REPO, 'eidoverse', 'assets', 'cache')):

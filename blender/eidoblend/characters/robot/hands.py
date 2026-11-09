@@ -37,6 +37,11 @@ THE PATH (pick_and_hold) is planned for my hardware, not for a free arm:
   - setting down goes to contact: the prop, riding the hand as the hardware will put it, never passes into the surface;
   - the free hand (to the pre-grasp, and home after rising past the prop) moves in its joints between key poses my
     hardware makes, the way a clip moves an arm.
+
+THE GAZE (pick_and_hold): my head turns to the prop at the body's head actuator's rate, eased, from the clip's own head
+(its roll carried: RobotRig.apply_gaze) and back onto it, a beat ahead of the hand and ahead of it to where the prop is
+set down; my face's eyes (face_look, look_expression_weights: the VRM's look-at offset and ranges) take what my neck's
+stops and the head's speed leave.
 """
 
 import math
@@ -116,6 +121,10 @@ class HandModel:
 
     def __init__(self, rig, side, step=3):
         h = rig.h
+        if not getattr(rig, 'hardware', True) or not rig.hinges or 'leftThumbRotor' not in rig.hinges:
+            raise ValueError(f'[hands] {h.name}: my hands\' work needs my body\'s pins (the joints file beside '
+                             'claude_robot.vrm: the fingers\', the thumb\'s rotor and CMC, the wrist\'s stages); this VRM '
+                             'has none (a plain RobotRig)')
         self.rig, self.side, self.h = rig, side, h
         self.m = 1 if side == 'left' else -1
         T = rig.hinges or {}
@@ -363,11 +372,15 @@ def set_curls(hm, N, curls, dof_state=False):
                 N[side + k] = pin_turn(pin['axis'], g, side)
 
 
-def close_on(hm, rec, surf, gap=0.001, open_curls=None, step=1.0, support_z=None, alphas=range(60, -1, -5)):
+def close_on(hm, rec, surf, gap=0.001, open_curls=None, step=1.0, support_z=None, alphas=range(60, -1, -5), pre=None):
     """each finger's pins closed in turn (proximal first) until a link at or past the pin would come within `gap` of
     the prop's surface (a pin whose open angle already presses in opens until it clears); the thumb turned into the
-    most opposition (alpha, its rotor) that clears the prop open, then its CMC, MCP and IP closed the same way. No link
-    goes below support_z (the surface the prop stands on) -> (curls, the least clearance per finger, m)"""
+    most opposition (alpha, its rotor) that clears the prop open, then its CMC, MCP and IP closed the same way. A thumb
+    that closes that way without touching (a square-sided prop: the pre-shaped thumb presses into the side at every
+    higher opposition, and from the one that clears it curls past the prop into the palm) is searched again opened
+    flat (its CMC, MCP and IP at their open stops): the most opposition that clears flat and closes onto the prop;
+    `pre` (a dict) then gets that open thumb as 'Thumb', for the hand's approach and release. No link goes below
+    support_z (the surface the prop stands on) -> (curls, the least clearance per finger, m)"""
     side = hm.side
     N = dict(rec['N'])
     p_hand, W_hand = hm.rig.bone_world(rec, side + 'Hand')
@@ -440,27 +453,54 @@ def close_on(hm, rec, surf, gap=0.001, open_curls=None, step=1.0, support_z=None
         clear[f] = dist(f, 0)
     # the thumb: the most opposition that clears, then its pins
     rot = hm.pins.get('ThumbRotor')
+    th_open = list(th)
+
+    def close_thumb():
+        for idx, k in ((1, 'ThumbMetacarpal'), (2, 'ThumbProximal'), (3, 'ThumbDistal')):
+            pin = hm.pins.get(k)
+            if not pin:
+                continue
+            rng = pin['range']
+            if idx == 1:      # the CMC's coupled stop against the stator's lip (robot_dof's b_max at this alpha)
+                o = th[0] * R2D + hm.T['leftThumbRotor']['flex_at_rest']
+                lim = 87 if o <= 40 else (87 - 0.1 * (o - 40) if o <= 50 else 86 - 0.7 * (o - 50))
+                rng = (rng[0], min(rng[1], (lim - hm.T['leftThumbMetacarpal']['flex_at_rest']) * D2R))
+
+            def get(idx=idx):
+                return th[idx]
+
+            def put(v, idx=idx):
+                th[idx] = v
+            close_pin(get, put, 'Thumb', idx - 1, rng)
+        return dist('Thumb', 0)
     if rot:
         for a_d in alphas:
             th[0] = clamp(a_d * D2R, *rot['range'])
             if dist('Thumb', 0) > gap + 0.002:
                 break
-    for idx, k in ((1, 'ThumbMetacarpal'), (2, 'ThumbProximal'), (3, 'ThumbDistal')):
-        pin = hm.pins.get(k)
-        if not pin:
-            continue
-        rng = pin['range']
-        if idx == 1:          # the CMC's coupled stop against the stator's lip (robot_dof's b_max at this alpha)
-            o = th[0] * R2D + hm.T['leftThumbRotor']['flex_at_rest']
-            lim = 87 if o <= 40 else (87 - 0.1 * (o - 40) if o <= 50 else 86 - 0.7 * (o - 50))
-            rng = (rng[0], min(rng[1], (lim - hm.T['leftThumbMetacarpal']['flex_at_rest']) * D2R))
-
-        def get(idx=idx):
-            return th[idx]
-
-        def put(v, idx=idx):
-            th[idx] = v
-        close_pin(get, put, 'Thumb', idx - 1, rng)
+    c_th = close_thumb()
+    if rot and c_th > gap + 0.0005:
+        # it closed without touching: the most opposition at which the thumb opened flat clears, closing onto the prop
+        best_t = (c_th, list(th), th_open)
+        for a_d in alphas:
+            flat = [clamp(a_d * D2R, *rot['range'])] + [hm.pins[k]['range'][0] if k in hm.pins else 0.0
+                                                          for k in ('ThumbMetacarpal', 'ThumbProximal', 'ThumbDistal')]
+            th[:] = flat
+            c_open = dist('Thumb', 0)
+            if c_open <= gap + 0.0003:                  # opened flat it still presses in at this opposition
+                if pre is not None:
+                    pre.setdefault('trace', []).append((a_d, round(1000 * c_open, 1), None))
+                continue
+            c2 = close_thumb()
+            if pre is not None:
+                pre.setdefault('trace', []).append((a_d, round(1000 * c_open, 1), round(1000 * c2, 1)))
+            if c2 < best_t[0] - 1e-6:
+                best_t = (c2, list(th), flat)
+            if c2 <= gap + 0.0005:
+                break
+        th[:] = best_t[1]
+        if pre is not None and best_t[2] is not th_open:
+            pre['Thumb'] = tuple(best_t[2])
     clear['Thumb'] = dist('Thumb', 0)
     out = {f: tuple(curls[f]) for f in FINGERS}
     out['Thumb'] = tuple(th)
@@ -578,13 +618,39 @@ def _rot_z(q, ang):
     return Quaternion((0.0, 0.0, 1.0), ang) @ q
 
 
+FLAT_SNAP_DEG = 5.0      # a face whose normal is this far off the approach is a flat side met at an angle (a round
+#                          prop's facets: 2.8 deg on a 64-sided can), and the approach squares to it
+
+
+def _face_on(surf, axis, z, a, far):
+    """the prop's surface met from outside along the horizontal approach `a` (toward its axis) at height z -> (the
+    point, its outward horizontal normal) or None"""
+    o = Vector((axis.x, axis.y, z)) - a * far
+    hit = surf.bvh.ray_cast(o, a, 2.0 * far)
+    if hit[0] is None:
+        return None
+    n = Vector((hit[1].x, hit[1].y, 0.0))
+    if n.length < 1e-6:
+        return None
+    n.normalize()
+    if n.dot(a) > 0:                     # the face's outward side is the one the hand comes from
+        n = -n
+    return hit[0], n
+
+
 def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0.0, 0.0), heading=0.0, fps=None,
                   look_at_it=True, set_down_offset=(0.0, 0.0), gap=0.0006, palm_gap=0.003, face=None, timing=None,
-                  action_name=None, rest_feet=True, look_over_deg=(40.0, -35.0), log=print):
+                  action_name=None, rest_feet=True, look_over_deg=(40.0, -35.0), head_rate=math.pi / 2,
+                  head_accel=2.0 * math.pi, gaze_lead=0.1, look_eyes=True, eye_rate=5.0, log=print):
     """my body standing at `at` facing `heading` (rad, 0 faces -Y) reaches for `obj` (an upright prop on a surface in
     front of it, its origin on its axis), closes its hand on it, lifts it, brings it before its face, turns it in the
     wrist to look it over, sets it down (moved by set_down_offset, m) and lets go, all keyed from f0 -> report.
-    rest_feet: both feet on the floor through the idle (RobotRig.rest_feet)"""
+    rest_feet: both feet on the floor through the idle (RobotRig.rest_feet); look_at_it: my head looks at the prop from
+    the reach until my arm is home: where it stands, then where my hand carries it gaze_lead (s) ahead, then, once it is
+    looked over, where it will be set down (the eyes lead the hand), and back onto the clip's own head after. The head
+    turns at most head_rate (rad/s: VRMRobotBody's 90 deg/s), speeding up and slowing down at head_accel (rad/s2).
+    look_eyes: my face's eyes (its look expressions, the VRM's lookAt ranges) take what the head's stops and speed
+    leave, at most eye_rate (rad/s)"""
     from ..ground import Ground
     from ..vrma import load_clip
     from .rig import face_track, key_robot
@@ -630,8 +696,16 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
     support_z = lo.z
     best = None
     tried = []
+    far = 3.0 * radius + 0.1
     for phi_d in range(-60, 41, 10):
         a = Quaternion((0.0, 0.0, 1.0), -m * phi_d * D2R) @ a0
+        # a FLAT side (a carton, a box) met at an angle: the palm squared to it (the approach along the face's inward
+        # normal), else a palm square to the azimuth meets the face on its edge and presses one side of the hand in. A
+        # round prop's facets (a few degrees) leave the azimuth as it is
+        side_hit = _face_on(surf, axis, lo.z + 0.5 * height, a, far)
+        flat = side_hit is not None and math.degrees(side_hit[1].angle(-a)) > FLAT_SNAP_DEG
+        if flat:
+            a = -side_hit[1]
         for tau_d in range(-40, 41, 10):
             turn_c = grasp_turn(hm, a, tau_d * D2R)
             palm_off_c = turn_c @ hm.palm_centre
@@ -639,6 +713,10 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
             need = support_z + 0.008 - low + palm_off_c.z
             zg = min(hi.z - 0.035, max(lo.z + 0.5 * height, need))
             contact_c = axis + Vector((0.0, 0.0, zg)) - a * (radius + palm_gap)
+            if flat:
+                face_g = _face_on(surf, axis, zg, a, far)    # the palm on the face itself (not the bounding radius)
+                if face_g is not None:
+                    contact_c = face_g[0] - a * palm_gap
             wrist_c = contact_c - palm_off_c
             rec_c = {'N': dict(raw0['N']), 'off': raw0['off'], 'M': raw0['M']}
             r = reach(rig, rec_c, side, wrist_c, turn_c)
@@ -656,13 +734,36 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
         raise RuntimeError('[hands] no grasp of the prop is in reach from here')
     _c, phi_d, tau_d, approach, turn, grip_z, wrist_grasp, rep_g = best
     rep_g = dict(rep_g, azimuth_deg=phi_d, tilt_deg=tau_d)
-    wrist_pre = wrist_grasp - approach * 0.07
     # the hand closed where the arm's own pass leaves it (its stops: the wrist's split clamped, if it must be)
     rec_g = {'N': dict(raw0['N']), 'off': raw0['off'], 'M': raw0['M']}
     reach(rig, rec_g, side, wrist_grasp, turn)
     rec_g['N'] = arm_preview(rig, rec_g['N'], side)
     set_curls(hm, rec_g['N'], open_c)
-    closed, clear = close_on(hm, rec_g, surf, gap=gap, open_curls=open_c, support_z=support_z)
+    # the palm never presses in: the whole palm link (not only its centre) measured against the prop's surface there,
+    # and the grasp backed off along the approach by what it lacks of palm_gap (a flat face meets the palm's rim too)
+    for _k in range(3):
+        p_h, W_h = rig.bone_world(rec_g, side + 'Hand')
+        palm_min = float(surf.sdf(hm.link_points(side + 'Hand', p_h, W_h)).min())
+        if palm_min >= palm_gap - 0.0003:
+            break
+        wrist_grasp = wrist_grasp - approach * (palm_gap - palm_min)
+        rec_g = {'N': dict(raw0['N']), 'off': raw0['off'], 'M': raw0['M']}
+        reach(rig, rec_g, side, wrist_grasp, turn)
+        rec_g['N'] = arm_preview(rig, rec_g['N'], side)
+        set_curls(hm, rec_g['N'], open_c)
+    wrist_pre = wrist_grasp - approach * 0.07
+    pre = {}
+    closed, clear = close_on(hm, rec_g, surf, gap=gap, open_curls=open_c, support_z=support_z, pre=pre)
+    if 'Thumb' in pre:
+        # the pre-shaped thumb pressed into this prop: the hand comes in and lets go with the thumb opened flat at the
+        # opposition it closes from (it clears the prop there), not the pre-shape's
+        open_c = dict(open_c, Thumb=pre['Thumb'])
+        release_c = dict(release_c, Thumb=pre['Thumb'])
+        log(f'[hands] the thumb comes in opened flat at {math.degrees(pre["Thumb"][0]):.0f} deg of opposition (the '
+            f'pre-shape pressed into the prop)')
+    if pre.get('trace'):
+        log('[hands] the thumb searched opened flat (opposition deg, open clearance mm, closed clearance mm): '
+            + str(pre['trace']))
     log(f'[hands] grasp: azimuth {phi_d} deg, knuckles tilted {tau_d} deg, grip {1000 * (grip_z - lo.z):.0f} mm up; '
         f'elbow swivel {math.degrees(rep_g["swivel"]):.0f} deg, wrist margin {rep_g["margin_deg"]:.1f} deg (split '
         f'{[round(x, 1) for x in rep_g["wrist_split_deg"]]}), elbow {rep_g["flex_deg"]:.0f} deg; clearances (mm) '
@@ -863,6 +964,13 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
                     qa = -qa
                 return pa.lerp(pb, u), qa.slerp(qb, u), sa + (sb - sa) * u
         return keys[-1][1], keys[-1][2], keys[-1][3]
+    prop_down = down + (turn_down @ turn.inverted()) @ grip_vec   # the prop's grip point where it is set down
+    gz = None                                           # the head's gaze (yaw, pitch, roll) as it turns; None: the clip's
+    gv = 0.0                                            # the head's turning speed (rad/s)
+    t_where = T['face2'] + 0.25                         # from here my eyes go ahead of the hand to where it sets it down
+    look_off, look_ranges = face_look(h) if look_eyes else (None, None)
+    eye, eye_w = (0.0, 0.0), {}                         # my eyes' (yaw, pitch down) rad, and their look weights
+    tgt = None
     frames = []
     swivels, misses = [], []
     last_sw, rec_prev = None, None
@@ -921,21 +1029,54 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
         elif T['clear'] <= t < T['back']:
             v = ease((t - T['clear']) / (T['back'] - T['clear']))
             _hand_toward(hm, rec['N'], N_idle, release_c, 1.0 - v)
-        # the gaze: on the prop while the hand works, else the clip's
-        gaze = None
+        # the gaze: on the prop while the hand works (where it stands; where the hand carries it, a beat ahead; where
+        # it goes once looked over, and where it was set down), else the clip's own head. The head turns from the
+        # clip's head (its roll with it) and back onto it at most head_rate (VRMRobotBody's head actuator), speeding up
+        # and slowing down at head_accel, so it never jumps a frame
+        own = _clip_gaze(rec['N'])
+        tgt_g = own
         if look_at_it and T['reach'] <= t < T['back']:
             if t < T['closed']:
                 tgt = axis + Vector((0.0, 0.0, grip_z))
-            else:                                       # the prop where the hand carries it (rigid with the hand)
-                pw, pq, _s = path(t)
+            elif t < t_where:                           # the prop where the hand carries it (rigid with the hand)
+                pw, pq, _s = path(min(t + gaze_lead, t_where))
                 tgt = pw + (pq @ turn.inverted()) @ grip_vec
-            gaze = _gaze_to(rig, rec, tgt, heading)
+            else:                                       # where it goes, and where it was set down
+                tgt = prop_down
+            tgt_g = _gaze_to(rig, rec, tgt, heading) + (0.0,)
+        cur = own if gz is None else gz
+        d = [b_ - a_ for a_, b_ in zip(cur, tgt_g)]
+        dist = math.sqrt(sum(x * x for x in d))
+        gv = clamp(min(head_rate, math.sqrt(2.0 * head_accel * dist)), gv - head_accel * dt, gv + head_accel * dt)
+        stp = min(dist, gv * dt)
+        gz = tuple(a_ + x * stp / dist for a_, x in zip(cur, d)) if dist > 1e-9 else tuple(tgt_g)
+        if tgt_g is own and dist < 0.25 * D2R:
+            gz, gv = None, 0.0                          # back on the clip's own head (its bobble with it)
+        gaze = gz
         w = dict(face(t)) if face else {}
+        w.update(eye_w)                                 # the look the crown leans into: last frame's (the JS's applyCrown
+        #                                                 reads what vrm.update's look-at set the frame before)
         crown_state = 'curious' if T['lift'] <= t < T['over'] else None
         out = rig.finish(rec, dt, w, gaze, crown_state, None, state_weight=0.8)
         out['M'] = rec['M']
         out['f'] = f
         out['t'] = t
+        # MY EYES (the face's look expressions) take what my head's stops and its speed leave: from my face's look
+        # origin as the head now is, they hold the target while the head turns and look the rest of the way down where
+        # my neck's nod stops at 30 deg (the counter's top is 45-50 deg under my eyes), at most eye_rate
+        if look_ranges is not None:
+            e_t = (0.0, 0.0)
+            if look_at_it and T['reach'] <= t < T['back']:
+                ya, pa = _eye_angles(rig, out, tgt, look_off)
+                e_t = (clamp(ya, -look_ranges['horizontal'] * D2R, look_ranges['horizontal'] * D2R),
+                       clamp(pa, -look_ranges['up'] * D2R, look_ranges['down'] * D2R))
+            de = (e_t[0] - eye[0], e_t[1] - eye[1])
+            dl = math.hypot(*de)
+            s_e = min(1.0, eye_rate * dt / dl) if dl > 1e-9 else 0.0
+            eye = (eye[0] + de[0] * s_e, eye[1] + de[1] * s_e)
+            eye_w = look_expression_weights(eye[0] * R2D, eye[1] * R2D, look_ranges)
+            out['weights'].update(eye_w)
+            out['eye_deg'] = (eye[0] * R2D, eye[1] * R2D)
         if planned:
             out['hand_target'] = (wt.copy(), tq.copy())     # the planned wrist and hand turn (the checks' reference)
         frames.append(out)
@@ -946,7 +1087,7 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
         if rel_f is None and t >= T['open'] - 0.2:
             rel_f = f
     act = key_robot(h, frames, action_name or f'{h.name}|pick_and_hold')
-    fr_face = key_face_track(h, face_track(frames)) if face else {}
+    fr_face = key_face_track(h, face_track(frames)) if (face or look_ranges is not None) else {}
     # the prop rides the hand from the frame it closes to the frame it lets go
     sc.frame_set(att_f)
     pb = h.arm.pose.bones[h.humanoid[side + 'Hand']]
@@ -1007,6 +1148,62 @@ def _hand_toward(hm, N, N_idle, curls, u):
                 if qa.dot(qb) < 0:
                     qa = -qa
                 N[n] = qa.slerp(qb, u)
+
+
+def _clip_gaze(N):
+    """the clip's own head as a gaze (yaw, pitch, roll): the neck's and the head's turns composed and read in
+    RobotRig.apply_gaze's YXZ Euler (its inverse; rehomeBody already split them so), so a gaze that starts from the
+    clip's head or ends on it does not jump"""
+    q = q_to_three(N['neck']) @ q_to_three(N['head']) if 'neck' in N else q_to_three(N['head'])
+    x, y, z = euler_from_quat(q, 'YXZ')
+    return y, x, z
+
+
+def face_look(h):
+    """my face's look origin from the head bone (VRMC_vrm.lookAt offsetFromHeadBone, Blender's axes) and its look
+    expressions' ranges (deg: horizontal, down, up), or (None, None) for a VRM whose look-at turns eye bones"""
+    from ..vrm import glb_json
+    try:
+        la = glb_json(h.path).get('extensions', {}).get('VRMC_vrm', {}).get('lookAt') or {}
+    except Exception:  # noqa: BLE001
+        la = {}
+    if la.get('type') != 'expression':
+        return None, None
+
+    def rng(k, d):
+        return float((la.get(k) or {}).get('inputMaxValue', d))
+    return (v_from_three(Vector(la.get('offsetFromHeadBone', (0.0, 0.06, 0.0)))),
+            {'horizontal': rng('rangeMapHorizontalOuter', 90.0), 'down': rng('rangeMapVerticalDown', 90.0),
+             'up': rng('rangeMapVerticalUp', 90.0)})
+
+
+def look_expression_weights(yaw_deg, down_deg, ranges):
+    """the face's look expressions for an eye turn (yaw + toward my left, pitch + down, deg) over its ranges"""
+    return {'lookLeft': clamp(yaw_deg / ranges['horizontal'], 0.0, 1.0),
+            'lookRight': clamp(-yaw_deg / ranges['horizontal'], 0.0, 1.0),
+            'lookDown': clamp(down_deg / ranges['down'], 0.0, 1.0),
+            'lookUp': clamp(-down_deg / ranges['up'], 0.0, 1.0)}
+
+
+def look_expression_angles(w, ranges):
+    """look_expression_weights' inverse: (yaw, pitch down) deg from the weights"""
+    return ((w.get('lookLeft', 0.0) - w.get('lookRight', 0.0)) * ranges['horizontal'],
+            w.get('lookDown', 0.0) * ranges['down'] - w.get('lookUp', 0.0) * ranges['up'])
+
+
+def eye_ray(rig, rec, look_off, yaw_deg=0.0, down_deg=0.0):
+    """(origin, direction) of my gaze in the world: from the face's look origin, the head as it is in rec, the eyes
+    turned (yaw + toward my left, pitch + down, deg) in the head's frame (it faces -Y at rest, +Z up)"""
+    p, W = rig.bone_world(rec, 'head')
+    y, d = yaw_deg * D2R, down_deg * D2R
+    return p + W @ look_off, W @ Vector((math.sin(y) * math.cos(d), -math.cos(y) * math.cos(d), -math.sin(d)))
+
+
+def _eye_angles(rig, rec, target, look_off):
+    """the (yaw, pitch down) rad of a world point from my face's look origin, in my head's frame as it is in rec"""
+    p, W = rig.bone_world(rec, 'head')
+    d = W.inverted() @ (target - (p + W @ look_off))
+    return math.atan2(d.x, -d.y), math.atan2(-d.z, math.hypot(d.x, d.y))
 
 
 def _gaze_to(rig, rec, target, heading):

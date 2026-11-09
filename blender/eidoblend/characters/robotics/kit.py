@@ -24,7 +24,9 @@ matrices); this edition must not convert them again. Metres and radians, as ther
     frame_matrix(point, normal, tangent)   index.js frameMatrix in authoring (= Blender) terms
     vector(p) / to_authoring(p)     index.js's axis conversions: identities here (Blender's frame IS the authoring frame)
     INSTALLERS                      functions(robot, register_part) run at the end of every load, as index.js runs
-                                    installFilament: the fabrication port (filament.js) registers its own there
+                                    installFilament: the fabrication port (filament.js) registers its own there when
+                                    it is imported, and a dispenser's load (filament_stand + filament_reel) imports it
+                                    first, so a dispenser always gets its live filament, as there
 
     Robot   group / root / model (the 'robot|<id>' empty: place the robot there), collection, id, entry, report, gltf,
             roots / specs (module objects and their joint specs: the node's extras over the family metadata's root
@@ -55,6 +57,17 @@ LOADER_OPTIONS = ('model', 'scene', 'position', 'rotation', 'scale', 'color', 'p
                   'textures', 'subassembly')
 BLENDER_OPTIONS = ('location', 'collection', 'name')
 INSTALLERS = []
+
+
+def _import_fabrication():
+    """the fabrication port (filament.js's live filament and PTFE tubing), imported on first need: importing it
+    registers its installer in INSTALLERS and its tubing in facade.FABRICATION. False if it is not installed."""
+    import importlib
+    try:
+        importlib.import_module(__name__.rsplit('.characters.', 1)[0] + '.fabrication')
+        return True
+    except ImportError:
+        return False
 _OWN_KEYS = {'gltf_node', 'part_faces', 'robot_id', 'eidoverseRobotics', '_loadedAsset'}
 
 
@@ -731,6 +744,7 @@ def _assemble(rid, entry, report, provenance, gltf, path, opts, scene, name, new
         mesh['part_id'] = part
         mesh['eidoverseRobotics'] = True
         mesh['_loadedAsset'] = True
+        mesh['installed_part'] = True              # made at load by an installer, not in the GLB (catalog counts)
         r.part_ids[mesh.name] = [part]
         r.part_for_face[mesh.name] = [part] * len(mesh.data.polygons)
         r.extra_objects.append(mesh)
@@ -740,6 +754,8 @@ def _assemble(rid, entry, report, provenance, gltf, path, opts, scene, name, new
         for s in mesh.material_slots:
             if s.material is not None and s.material not in r.materials.materials:
                 r.materials.materials.append(s.material)
+    if 'filament_stand' in r.roots and 'filament_reel' in r.roots:
+        _import_fabrication()            # index.js imports filament.js: a dispenser always loads with its live filament
     for fn in INSTALLERS:
         fn(r, register_part)
 

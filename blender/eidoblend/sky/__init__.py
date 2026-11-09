@@ -20,6 +20,8 @@ import json
 import math
 import os
 
+import numpy as np
+
 from . import palette as P
 from .sky_system import SkySystem
 from .weather_system import WeatherSystem, WEATHER
@@ -65,6 +67,37 @@ def _cam_window(cam_obj, scene):
 def _smooth(e0, e1, x):
     t = max(0.0, min(1.0, (x - e0) / (e1 - e0)))
     return t * t * (3 - 2 * t)
+
+
+def _read_exr(path):
+    """An EXR as a float (H, W, 4) array, row 0 at the bottom (Blender's order, as write_exr takes it)."""
+    import bpy
+    img = bpy.data.images.load(path, check_existing=False)
+    try:
+        w, h = img.size
+        px = np.empty(w * h * 4, np.float32)
+        img.pixels.foreach_get(px)
+        return px.reshape(h, w, 4)
+    finally:
+        bpy.data.images.remove(img)
+
+
+def _resize_bilinear(img, h, w):
+    """Resample an (H, W, C) image to (h, w) over the same window: pixel centres to pixel centres, edges held."""
+    H, W = img.shape[:2]
+    if (H, W) == (h, w):
+        return img
+    ys = (np.arange(h) + 0.5) * H / h - 0.5
+    xs = (np.arange(w) + 0.5) * W / w - 0.5
+    y0 = np.floor(ys).astype(np.int64)
+    x0 = np.floor(xs).astype(np.int64)
+    fy = (ys - y0)[:, None, None].astype(np.float32)
+    fx = (xs - x0)[None, :, None].astype(np.float32)
+    ya, yb = np.clip(y0, 0, H - 1), np.clip(y0 + 1, 0, H - 1)
+    xa, xb = np.clip(x0, 0, W - 1), np.clip(x0 + 1, 0, W - 1)
+    top = img[ya][:, xa] * (1 - fx) + img[ya][:, xb] * fx
+    bot = img[yb][:, xa] * (1 - fx) + img[yb][:, xb] * fx
+    return top * (1 - fy) + bot * fy
 
 
 class Sky:
@@ -138,8 +171,16 @@ class Sky:
         ro = dict(opts.get('ring') or {})
         ro.setdefault('planetShineColor', tuple(self.W['planetShine']))
         ro.setdefault('centerY', b['centerY'])
+        # Eanpa's newest band (the eroded v4 relief and its albedo) whenever the repo carries the set beside the
+        # band's other maps; reliefDir=False keeps the v1 maps, a folder points at another copy of the set
+        cel = os.path.join(ASSETS, 'celestial')
+        if os.path.exists(os.path.join(cel, 'ring_relief_v4.bin.gz')):
+            ro.setdefault('reliefDir', cel)
         self.ring = make_ringworld(self.scene, assets, ro, cache_dir=os.path.join(self.cache_dir, 'ringworld'))
         self.ring.unlink_scene_sun(self.sun)
+        # the band behind every local object (WebGPU's depthless band): its own scene, a plate in the camera layer
+        self.ring.make_plate()
+        self._plate_job = None
         self.ring_k = ring_constants(self.W['sky']['ringCurve'])
 
     def _build_moon(self):
@@ -147,6 +188,7 @@ class Sky:
         m = self.W['moon']
         self.moon = make_shattered_moon(self.scene, os.path.join(ASSETS, m['glb']), spread=m['spread'],
                                         scale=m['scale'])
+        self.moon.world_owned = True          # the world's own moon: its orbit, fade and light are the sky's
 
     def _reset_state(self):
         """The state machine at its starting point: the options, then every immediate call in call order.
@@ -275,6 +317,19 @@ class Sky:
         self.dome_radius = None if radius is None else float(radius)
         return self
 
+    def attach_cluster(self, cluster):
+        """A CUSTOM celestial cluster (asteroid_moon.make_shattered_moon) in this sky: the scene places, scales and
+        animates cluster.group; every bake lights it with the sky's true sun (its own uniforms keep sun_col, gain,
+        fade), marches its accretion dust in the sky shader behind the fragments and composites the sky's clouds over
+        it, as the shieldworld does for its own moon. The shieldworld already owns its cluster. Returns the sky."""
+        if self.world_key == 'shieldworld':
+            raise ValueError('attach_cluster: the shieldworld already owns its shattered moon; do not add a duplicate')
+        cluster.placed = True
+        self.moon = cluster
+        self.moon_vals = None
+        self._baker = None                   # the sky shader now compiles the cluster's dust (HAS_DUST)
+        return self
+
     def wrap_scene(self):
         """The weather wraps the scene's materials for wetness and puddles: delegated to the weather system attached
         to this sky (eidoblend.weather.make_weather_system sets sky.weather_fx); without one there is nothing to
@@ -355,6 +410,11 @@ class Sky:
         self.world_extra = None
         if self.world_key == 'shieldworld':
             self._shieldworld_night(t, hours, L)
+        elif self.moon is not None:
+            # a custom cluster (attach_cluster): placed by the scene, lit by the true sun, its dust in the sky shader
+            mv = self.moon.update(t, sky_sun_dir=self.sky.sun_dir)
+            U.update(mv['U'])
+            self.moon_vals = mv
         self.lights = L
         return L
 
@@ -447,9 +507,11 @@ class Sky:
         """Whether the bake splits the camera rays into layers (sky elements composite them; a dome draws them)."""
         return self.ring is not None or self.moon is not None or self.dome_radius is not None
 
-    def bake(self, frame_start=None, frame_end=None, overscan=0.08, layer_scale=None, log=print):
+    def bake(self, frame_start=None, frame_end=None, overscan=0.08, layer_scale=None, plate_scale=1.0, log=print):
         """Replay the direction calls frame by frame, render the sky layers, key the world, the lamps and the
-        world's geometry."""
+        world's geometry. On the ringworld, render the band's plate per frame into the camera layer: plate_scale is
+        its pixel density against the frame's (1: the frame's own, so the band's textures take the mip levels a
+        direct render gives them; above 1 is crisper, but sharpens the night water's glints)."""
         import time
         import bpy
         from mathutils import Vector
@@ -466,7 +528,9 @@ class Sky:
         ew, eh = self.q['env']
         bk = self.baker()
         os.makedirs(self.cache_dir, exist_ok=True)
-        pat = {k: os.path.join(self.cache_dir, 'sky_%s_%%04d.exr' % k) for k in ('cam', 'back', 'cloud', 'shield', 'env')}
+        pat = {k: os.path.join(self.cache_dir, 'sky_%s_%%04d.exr' % k)
+               for k in ('cam', 'back', 'cloud', 'shield', 'env', 'base')}
+        pat['plate'] = os.path.join(self.cache_dir, 'ring_plate_%04d.exr')
         layered = self._layered()
         dome = self.dome_radius is not None
         want = ['back' if dome else 'cam']
@@ -474,6 +538,9 @@ class Sky:
             want.append('cloud')
             if self.red_giant is not None and self.red_giant.has_shield:
                 want.append('shield')
+        plate = self._plate_ready()
+        if plate:
+            want.append('base')          # the sky with no band: the ring's plate composites over it
         frames = []
         t_start = time.time()
         for f, t, L in self.frame_states(fs, fe):
@@ -495,11 +562,11 @@ class Sky:
             env_img = bk.environment(self.sky.U, ew, eh, origin_three=(org[0], max(2.0, org[1]), org[2]))
             t2 = time.time()
             for k in want:
-                write_exr(pat[k] % f, layers[k])
+                write_exr(pat[k] % f, layers['back' if k == 'base' else k])
             write_exr(pat['env'] % f, env_img)
             fr = dict(frame=f, t=t, basis=(tuple(right), tuple(up), tuple(-back)), tan=(tx, ty), lights=L,
                       U={k: v for k, v in self.sky.U.items()}, shadow_org=org, weather=self.wx.state['name'],
-                      extra=self.world_extra)
+                      extra=self.world_extra, cam_matrix=[list(row) for row in mw])
             if self.ring is not None:
                 fr['ring'] = dict(self.ring_vals)
             if self.moon is not None:
@@ -546,6 +613,15 @@ class Sky:
             from . import cloud_shadows
             cloud_shadows.bake_and_key(self, frames, ground_z=self.shadow_ground, caster_height=self.shadow_height,
                                        log=log)
+        if plate:
+            # every key the band reads is in place (the world, the ring's values and lamps, the band sun's cloud-shadow
+            # twin): render its plate per frame and composite it into the layer the world shows
+            ps = max(1.0, float(plate_scale))       # against the frame (with the overscan), whatever the layer scale
+            self._plate_job = dict(size=(int(math.ceil(rw * (1 + 2 * overscan) * ps)),
+                                         int(math.ceil(rh * (1 + 2 * overscan) * ps))),
+                                   pat=pat, target=want[0],
+                                   frames=[(fr['frame'], fr['cam_matrix'], fr['tan']) for fr in frames])
+            self._render_plates(log=log)
         if self.fog:
             from . import fog as FOG
             FOG.key_fog(FOG.setup_fog(sc, **self.fog), frames)
@@ -569,12 +645,110 @@ class Sky:
 
     def _key_moon(self, frames):
         m = self.moon
-        for idd in [m.keys_tree, m.group] + list(m.pieces):
-            if idd.animation_data:
-                idd.animation_data_clear()
+        m.clear_keys()                       # a placed cluster's group keeps the scene's own animation
         for fr in frames:
             m.key(fr['frame'], fr['moon'])
         m.finish_keys()
+
+    # ---- the ringworld's plate: the band behind every local object ----
+    def _plate_ready(self):
+        return self.ring is not None and getattr(self.ring, 'plate_scene', None) is not None
+
+    def _plate_settings(self, plate, w, h):
+        """The plate renders as the main scene does (samples, shadows, ray tracing, filter), at (w, h), with a
+        transparent film and the main scene's world, which lights the band."""
+        sc = self.scene
+        plate.world = sc.world
+        plate.render.fps, plate.render.fps_base = sc.render.fps, sc.render.fps_base
+        plate.frame_start, plate.frame_end = sc.frame_start, sc.frame_end
+        plate.render.resolution_x, plate.render.resolution_y = w, h
+        # the main render filters the band again when it samples the world, so the plate keeps a one-pixel filter of
+        # its own (filtered twice at full width, the sun's glints on the night water spread over more pixels and read
+        # brighter through the view transform)
+        plate.render.filter_size = min(sc.render.filter_size, 1.0)
+        for attr in ('taa_render_samples', 'use_shadows', 'shadow_ray_count', 'shadow_step_count', 'use_raytracing',
+                     'use_fast_gi', 'fast_gi_method', 'fast_gi_resolution', 'fast_gi_step_count', 'fast_gi_distance',
+                     'horizon_quality', 'horizon_thickness', 'horizon_bias', 'horizon_resolution',
+                     'clamp_surface_direct', 'clamp_surface_indirect', 'light_threshold', 'shadow_resolution_scale'):
+            if hasattr(sc.eevee, attr) and hasattr(plate.eevee, attr):
+                try:
+                    setattr(plate.eevee, attr, getattr(sc.eevee, attr))
+                except (AttributeError, TypeError, ValueError):
+                    pass
+        src, dst = getattr(sc.eevee, 'ray_tracing_options', None), getattr(plate.eevee, 'ray_tracing_options', None)
+        if src is not None and dst is not None:
+            for p in src.bl_rna.properties:
+                if not p.is_readonly and p.identifier != 'rna_type':
+                    try:
+                        setattr(dst, p.identifier, getattr(src, p.identifier))
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+        # the band sun's kilometre-scale shadows need the pool the ring asked of the main scene
+        plate.eevee.shadow_pool_size = max(plate.eevee.shadow_pool_size, sc.eevee.shadow_pool_size, '1024', key=int)
+
+    def _render_plates(self, log=print):
+        """Render the ring's plate for every frame of the last bake and composite it into the layer the world shows:
+        the clouds over the band over the sky, C + (1 - a)(P + (1 - Pa) B), from the bake's own cloud layer and the
+        sky it keeps without the band (sky_base). Under a cloud dome the world shows the sky behind the clouds, so the
+        plate goes into that layer, P + (1 - Pa) B, and the dome draws the clouds over it. The plate covers the camera
+        layer's window at bake(plate_scale=) times the frame's pixel density; the cloud and sky layers, soft by
+        nature, are resampled to it when it is finer."""
+        import time
+        import bpy
+        from mathutils import Matrix
+        from . import world_nodes as WN
+        from .bake.baker import write_exr
+        job = self._plate_job
+        r = self.ring
+        plate, pcam = r.plate_scene, r.plate_camera
+        pw, ph = job['size']
+        self._plate_settings(plate, pw, ph)
+        pat, target = job['pat'], job['target']
+        sc = self.scene
+        before = (sc.frame_current, sc.frame_subframe)
+        t0 = time.time()
+        for f, mw, tan in job['frames']:
+            tx, ty = tan
+            pcam.matrix_world = Matrix(mw).normalized()
+            pcam.data.angle = 2.0 * math.atan(tx)
+            # the layer's grid spans [-tx, tx] x [-ty, ty]: the pixel aspect gives the plate exactly that window
+            ratio = (ty * pw) / (tx * ph)
+            plate.render.pixel_aspect_x, plate.render.pixel_aspect_y = (1.0, ratio) if ratio >= 1.0 else (1.0 / ratio,
+                                                                                                        1.0)
+            # both scenes on the frame: the image sequences the band reads through the shared world (the sky's
+            # environment) and the band sun's cloud-shadow twin follow the main scene's frame, not the plate's
+            sc.frame_set(f)
+            plate.frame_set(f)
+            plate.render.filepath = pat['plate'] % f
+            bpy.ops.render.render(write_still=True, scene=plate.name)
+            pl = _read_exr(pat['plate'] % f)
+            base = _resize_bilinear(_read_exr(pat['base'] % f), ph, pw)
+            behind = pl[..., :3] + (1.0 - pl[..., 3:4]) * base[..., :3]
+            out = np.empty((ph, pw, 4), np.float32)
+            if target == 'back':
+                out[..., :3] = behind
+                out[..., 3] = 1.0
+            else:
+                cl = _resize_bilinear(_read_exr(pat['cloud'] % f), ph, pw)
+                out[..., :3] = cl[..., :3] + (1.0 - cl[..., 3:4]) * behind
+                out[..., 3] = cl[..., 3]
+            write_exr(pat[target] % f, out)
+            os.remove(pat['plate'] % f)
+        sc.frame_set(before[0], subframe=before[1])
+        WN.hold_before_first(pat[target], job['frames'][0][0])
+        img = bpy.data.images.get('eido_sky_camera_layer')
+        if img is not None:
+            img.reload()
+        log('[sky] ring plates: %d frames at %dx%d in %.1fs' % (len(job['frames']), pw, ph, time.time() - t0))
+
+    def bake_plates(self, log=print):
+        """Render the ringworld's plates again for the frames of the last bake, without baking the sky again: after
+        changing the band's materials or the ring's options, which reach the frame only through the plate. Returns
+        the sky."""
+        if not self._plate_ready() or not getattr(self, '_plate_job', None):
+            raise ValueError('bake_plates: bake() the ringworld first')
+        self._render_plates(log=log)
+        return self
 
     def bake_env(self, width=None, height=None):
         """bakeEnv: the environment of the sky's current state (the band traced in, on the ringworld) as a float

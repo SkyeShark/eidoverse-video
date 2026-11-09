@@ -19,7 +19,10 @@ The set (5 s at 24 fps, AgX) holds one of each thing an eidoblend film animates 
   popper     hide_render keyed (appears at 2 s)                                           -> a visibility track
   sun / spot / key (area)                                                                 -> punctual + RectAreaLight
   world      a sky gradient with a warm glow toward the sun                               -> world.hdr, oriented
-EEVEE stills from cam_film at t = 1.0, 2.5, 4.0 go to out/features/; the bundle to out/features/vr/ for the page test.
+EEVEE stills from cam_film at t = 1.0, 2.5, 4.0 and from cam_table_view (the page's desktop table view at life size) at
+2.5 go to out/features/; the bundle to out/features/vr/ for the page test. The key area light's energy is keyed (a
+cue), and checked numbers: the GLB against Blender (motion, morphs, joints, cameras, lights, materials), the tracks,
+the rect light's orientation, the light units, the choreo rotations.
 """
 import json
 import math
@@ -355,6 +358,10 @@ spot = light('spot', 'SPOT', (3.0, -2.5, 3.2), energy=400.0, spot_size=math.radi
 spot.rotation_euler = (Vector((0, 0, 1.0)) - spot.location).to_track_quat('-Z', 'Y').to_euler()
 key = light('key', 'AREA', (-2.4, -2.6, 2.4), energy=250.0, size=1.0, shape='SQUARE')
 key.rotation_euler = (Vector((0, 0, 1.1)) - key.location).to_track_quat('-Z', 'Y').to_euler()
+for f, v in ((1, 250.0), (61, 450.0), (97, 120.0), (121, 250.0)):       # a lighting cue: up at 2.5 s, down at 4 s
+    key.data.energy = v
+    key.data.keyframe_insert('energy', frame=f)
+key_linear(key.data)
 
 # cam_film: keyed dolly + Track To an empty at the robot's chest
 aim = bpy.data.objects.new('cam_aim', None)
@@ -373,7 +380,18 @@ tt = cam.constraints.new('TRACK_TO')
 tt.target = aim
 tt.track_axis, tt.up_axis = 'TRACK_NEGATIVE_Z', 'UP_Y'
 sc.camera = cam
-X.set_xr(sc, street=1.0, table=0.04, start=(0.0, -4.0, 0.0), facing=(0.0, 1.0, 0.0), table_centre=(0, 0.5, 0),
+# cam_table_view: the page's desktop table view (WorldRig.toTable at 1:25 with the table centre at the Desktop orbit
+# target, the orbit camera at pitch 0.6, 1.4 m away, 70 degrees) as a Blender camera at life size: the world 25 times
+# farther. EEVEE through it is the reference for the page's view=table, whose lights must look as they do at life size
+TABLE, CENTRE_B = 0.04, Vector((0.0, 0.5, 0.0))
+ctd = bpy.data.cameras.new('cam_table_view')
+_bl.vertical_fov_lens(ctd, 70.0, 960 / 540)
+ctd.clip_start, ctd.clip_end = 0.02 / TABLE, 3000.0 / TABLE
+cam_tv = bpy.data.objects.new('cam_table_view', ctd)
+col.objects.link(cam_tv)
+cam_tv.location = CENTRE_B + Vector((0.0, -1.4 * math.cos(0.6) / TABLE, 1.4 * math.sin(0.6) / TABLE))
+cam_tv.rotation_euler = _bl.look_at_rotation(cam_tv.location, CENTRE_B)
+X.set_xr(sc, street=1.0, table=TABLE, start=(0.0, -4.0, 0.0), facing=(0.0, 1.0, 0.0), table_centre=tuple(CENTRE_B),
          name='features', shadows=True)
 
 if '--dry' in sys.argv:                  # build only (no GPU): the scene, what the export would see, then stop
@@ -397,6 +415,14 @@ for t in (() if NO_RENDER else TIMES):
     t0 = time.time()
     bpy.ops.render.render(write_still=True)
     check(f'EEVEE still t = {t:g} s', os.path.exists(p), f'{time.time() - t0:.1f} s')
+if not NO_RENDER:                                        # the table view's reference, then cam_film is the camera again
+    sc.camera = cam_tv
+    sc.frame_set(frame_of(2.5))
+    p = os.path.join(OUT, 'eevee_cam_table_view_t2.5.png')
+    sc.render.filepath = p
+    bpy.ops.render.render(write_still=True)
+    check('EEVEE still through cam_table_view (the page table view at life size) t = 2.5 s', os.path.exists(p))
+    sc.camera = cam
 
 # ------------------------------------------------- what Blender says at the check times (before the export)
 truth = {}
@@ -420,6 +446,7 @@ for t in TIMES:
     d['orbiters'] = sorted((tuple(i.persistent_id), i.matrix_world.translation.copy()) for i in dg.object_instances
                            if i.is_instance and i.parent and i.parent.original == orbiters)
     d['lamp'] = lamp.data.energy
+    d['key'] = key.data.energy
     d['neon'] = es.default_value
     truth[t] = d
 sc.frame_set(sc.frame_start)
@@ -427,7 +454,7 @@ bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'features.blend'), check_
 
 # ----------------------------------------------------------------------------------------------- export ---
 vr = os.path.join(OUT, 'vr')
-man = X.export_xr(vr, sc, name='scene', world_width=1024, texel_density=40, choreo_names=('ball', 'drone'),
+man = X.export_xr(vr, sc, name='scene', world_width=1024, texel_density=40, choreo_names=('ball', 'drone', 'cam_film'),
                   bake_materials=not NO_RENDER, world=not NO_RENDER)
 rep, s_ = man['report'], man['summary']
 check('no GLB animation problem (every channel on its own node, every mover has one)', not rep.get('channel_problems'),
@@ -533,6 +560,28 @@ check('spot: outer cone half of spot_size, blend inside', sp_ and abs(sp_['spot'
 rect = {r['name']: r for r in man['rect_lights']}
 check('key: the area light -> a RectAreaLight, radiance P / (pi A)', 'key' in rect
       and abs(rect['key']['intensity'] - 250 / math.pi) < 1e-3 and abs(rect['key']['width'] - 1.0) < 1e-6, rect.get('key'))
+
+
+def three_rotate(q, v):
+    """A three quaternion [x, y, z, w] applied to a three vector."""
+    from mathutils import Quaternion
+    return Quaternion((q[3], q[0], q[1], q[2])) @ Vector(v)
+
+
+def to_three_v(v):
+    return Vector(to_three(*v))
+
+
+from eidoblend.common import to_three              # noqa: E402
+if 'key' in rect:                                  # three's RectAreaLight shines down its -z, its width along its x
+    kb = key.matrix_world.to_3x3().normalized()
+    a_dir = math.degrees(three_rotate(rect['key']['quaternion'], (0, 0, -1)).angle(to_three_v(kb @ Vector((0, 0, -1)))))
+    a_x = math.degrees(three_rotate(rect['key']['quaternion'], (1, 0, 0)).angle(to_three_v(kb @ Vector((1, 0, 0)))))
+    aim = (to_three_v(Vector((0, 0, 1.1))) - Vector(rect['key']['position'])).normalized()
+    a_aim = math.degrees(three_rotate(rect['key']['quaternion'], (0, 0, -1)).angle(aim))
+    check("key: the RectAreaLight shines where Blender's area light does (its -z on the robot), its width along "
+          'the light x', a_dir < 0.05 and a_x < 0.05 and a_aim < 0.05,
+          f'{a_dir:.3f} deg off its -z, {a_x:.3f} deg off its x, {a_aim:.3f} deg off the aim point')
 with open(os.path.join(vr, 'choreo.json')) as f:
     ch = json.load(f)
 pr = ch['props']
@@ -540,6 +589,9 @@ for t in TIMES:
     i = int(round(t * FPS))
     check(f'lamp track at t = {t:g}: energy / 4 pi', abs(pr['lights']['lamp']['intensity'][i] - truth[t]['lamp'] / (4 * math.pi)) < 1e-3,
           pr['lights']['lamp']['intensity'][i])
+    kt = pr['lights'].get('key', {}).get('intensity')
+    check(f'key (an area light) track at t = {t:g}: its RectAreaLight radiance P / (pi A)', kt is not None
+          and abs(kt[i] - truth[t]['key'] / math.pi) < 1e-3, kt and (kt[i], round(truth[t]['key'] / math.pi, 4)))
     check(f'neon emission track at t = {t:g}', abs(pr['emission']['neon']['strength'][i] - truth[t]['neon']) < 1e-3,
           pr['emission']['neon']['strength'][i])
 vis = pr['visible'].get('popper')
@@ -553,6 +605,18 @@ for t in TIMES:                                    # the guide's recipe: world t
     want = truth[t]['drone'].translation
     check(f'choreo track: the drone at t = {t:g}, three axes (x, z, -y)', row is not None
           and max(abs(row[1] - want.x), abs(row[2] - want.z), abs(row[3] + want.y)) < 1e-4, row and row[:4])
+    # rotations: the drone (geometry, converted) turns its converted local x where Blender turns its x; the camera (its
+    # own axes in three) looks down its -z where Blender's camera looks
+    rb = truth[t]['drone'].to_3x3().normalized()
+    a_d = math.degrees(three_rotate(row[4:8], to_three_v((1, 0, 0))).angle(to_three_v(rb @ Vector((1, 0, 0))))) \
+        if row else 1e9
+    crow = next((r for r in ch['track']['cam_film'] if abs(r[0] - t) < 1e-4), None)
+    cb = truth[t]['cam_film'].to_3x3().normalized()
+    a_c = math.degrees(three_rotate(crow[4:8], (0, 0, -1)).angle(to_three_v(cb @ Vector((0, 0, -1))))) if crow else 1e9
+    a_u = math.degrees(three_rotate(crow[4:8], (0, 1, 0)).angle(to_three_v(cb @ Vector((0, 1, 0))))) if crow else 1e9
+    check(f'choreo track rotations at t = {t:g}: the drone (geometry) and cam_film (a three camera: looks down -z, '
+          'up +y)', a_d < 0.05 and a_c < 0.05 and a_u < 0.05,
+          f'drone {a_d:.3f} deg, camera view {a_c:.3f} deg, camera up {a_u:.3f} deg')
 # the world image: its brightest pixel looks toward the sun
 if not NO_RENDER:
     img = bpy.data.images.load(os.path.join(vr, 'world.hdr'), check_existing=False)
@@ -565,6 +629,48 @@ if not NO_RENDER:
     d_ = Vector(W.equirect_direction((xx + 0.5) / img.size[0], (yy + 0.5) / img.size[1]))
     check("world.hdr: the sun's glow sits where three's equirect looks toward the sun",
           math.degrees(d_.angle(sun_dir)) < 3.0, f'{math.degrees(d_.angle(sun_dir)):.2f} deg off')
+# light units (motion.light_intensity, what the manifest and the tracks write), every type, Normalize on and off, against
+# the formulas (and, off, Blender's own Light.area as the glTF exporter multiplies by it); after the export, in a
+# throwaway collection
+from eidoblend.xr import motion as MO              # noqa: E402
+tmp_col = bpy.data.collections.new('xr_units')
+sc.collection.children.link(tmp_col)
+cases = []
+for kind, kw, scale, normalize in (('SUN', {'energy': 4.0, 'exposure': 1.0}, (1, 1, 1), True),
+                                   ('POINT', {'energy': 100.0, 'shadow_soft_size': 0.2}, (1, 1, 1), True),
+                                   ('POINT', {'energy': 100.0, 'shadow_soft_size': 0.2}, (1, 1, 1), False),
+                                   ('SPOT', {'energy': 100.0, 'exposure': -1.0}, (1, 1, 1), True),
+                                   ('AREA', {'energy': 50.0, 'shape': 'DISK', 'size': 2.0}, (1.5, 1.0, 1.0), True),
+                                   ('AREA', {'energy': 50.0, 'shape': 'RECTANGLE', 'size': 2.0, 'size_y': 0.5},
+                                    (1.0, 2.0, 1.0), False)):
+    ld = bpy.data.lights.new(f'u_{kind}', kind)
+    for k_, v_ in kw.items():
+        setattr(ld, k_, v_)
+    ld.normalize = normalize
+    ob = bpy.data.objects.new(f'u_{kind}_{"n" if normalize else "raw"}', ld)
+    tmp_col.objects.link(ob)
+    ob.scale = scale
+    cases.append((ob, kind, kw, scale, normalize))
+bpy.context.view_layer.update()
+bad = []
+for ob, kind, kw, scale, normalize in cases:
+    p = kw['energy'] * 2 ** kw.get('exposure', 0.0)
+    if kind == 'SUN':
+        want = p
+    elif kind == 'AREA':
+        w = kw['size'] * scale[0]
+        h = kw.get('size_y', kw['size']) * scale[1]
+        a = math.pi * w * h / 4 if kw['shape'] == 'DISK' else w * h
+        want = (p if normalize else p * a) / (math.pi * a)
+    else:
+        want = (p if normalize else p * ob.data.area(matrix_world=ob.matrix_world)) / (4 * math.pi)
+    got = MO.light_intensity(ob)
+    if abs(got - want) > 1e-6 * max(1.0, want):
+        bad.append((ob.name, got, want))
+w_, h_, a_ = MO.area_light_size(cases[4][0])
+check('light units: sun lux, point / spot candela (W / 4 pi), area radiance P / (pi A); Normalize off multiplies the '
+      'power by the area (a disk as the rectangle of its area)', not bad and abs(w_ * h_ - a_) < 1e-9,
+      bad or f'{len(cases)} lights; disk 3 x 2 m -> {w_:.3f} x {h_:.3f} m, {a_:.3f} m2')
 check('Quest budgets', all(v in ('ok', 'heavy') for v in s_['quest'].values()),
       f"{s_['triangles']} triangles, {s_['draws']} draws, {s_['texture_mb_gpu']} MB textures: {s_['quest']}")
 with open(os.path.join(OUT, 'export_report.json'), 'w') as f:

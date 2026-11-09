@@ -1,0 +1,27 @@
+step 250: max 496 m, mean 215 m, 133.9 ms/step
+step 500: max 941 m, mean 369 m, 133.7 ms/step
+step 750: max 1355 m, mean 483 m, 139.1 ms/step
+step 1000: max 1742 m, mean 566 m, 132.7 ms/step
+step 1250: max 2079 m, mean 624 m, 132.8 ms/step
+step 1500: max 2351 m, mean 665 m, 131.4 ms/step
+{
+ "pixel_m": 78.125,
+ "extent_km": 20.0,
+ "relief_m": 2258.3329788168603,
+ "hypsometric_integral": 0.2830943995845629,
+ "slope_p10": 2.777968561576399,
+ "slope_p50": 16.11591406713795,
+ "slope_p90": 24.970165625561414,
+ "slope_p99": 28.35152917669414,
+ "frac_slope_lt5": 0.173828125,
+ "frac_slope_gt30": 0.0,
+ "frac_slope_gt40": 0.0,
+ "frac_slope_gt50": 0.0,
+ "depression_area_frac": 0.0,
+ "depressions_per_100km2": 0.0,
+ "steps": 1500,
+ "seconds": 197.1,
+ "ms_per_step": 131.4,
+ "plain_op_ms": 1.198,
+ "step_cost_in_plain_ops": 110.0
+}

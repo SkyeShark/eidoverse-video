@@ -1,0 +1,75 @@
+{
+ "name": "meteor_crater_context",
+ "role": "context",
+ "title": "Meteor Crater (Barringer Crater), Arizona, USA",
+ "landform": "simple impact crater",
+ "note": "A 1.2 km bowl, 170 m deep, its raised rim 30-60 m above the plain and the ejecta blanket around it.",
+ "centre_lat": 35.0274,
+ "centre_lon": -111.0228,
+ "pixel_size_m": 15.0,
+ "extent_m": [
+  15000,
+  15000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "context_of": "meteor_crater",
+ "source": {
+  "dataset": "USGS 3D Elevation Program (3DEP), best-available DEM (3DEPElevation ImageServer)",
+  "publisher": "U.S. Geological Survey",
+  "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+  "native_resolution_m": "1 m lidar where the projects in lidar_1m_products_here cover the tile, elsewhere 1/3 arc-second (~10 m)",
+  "vertical_datum": "NAVD88",
+  "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+  "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+  "kind": "usgs3dep",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 15,
+  "resampling": "bilinear",
+  "no_data_fraction": 0.0,
+  "request": {
+   "bbox": "-111.10853594968056,34.95722295717858,-110.93706405031945,35.09754698837051",
+   "bboxSR": 4326,
+   "imageSR": 4326,
+   "size": "1043,1040",
+   "format": "tiff",
+   "pixelType": "F32",
+   "noData": -9999,
+   "noDataInterpretation": "esriNoDataMatchAny",
+   "interpolation": "RSP_BilinearInterpolation",
+   "f": "json"
+  },
+  "export_size": [
+   1043,
+   1040
+  ],
+  "export_pixel_m": 15,
+  "lidar_1m_products_here": [
+   "USGS 1 Meter 12 x49y387 AZ_NorthEast_D23",
+   "USGS 1 Meter 12 x49y388 AZ_NorthEast_D23",
+   "USGS 1 Meter 12 x49y389 AZ_NorthEast_D23",
+   "USGS 1 Meter 12 x50y387 AZ_NorthEast_D23",
+   "USGS 1 Meter 12 x50y388 AZ_NorthEast_D23",
+   "USGS 1 Meter 12 x50y389 AZ_NorthEast_D23"
+  ]
+ },
+ "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+ "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 228.87,
+  "mean_m": 1669.41,
+  "hypsometric_integral": 0.5923,
+  "slope_deg_p10": 0.44,
+  "slope_deg_p50": 1.1,
+  "slope_deg_p90": 2.71,
+  "slope_deg_p99": 17.64,
+  "slope_deg_mean": 1.74
+ },
+ "height_png": "meteor_crater_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 1533.86,
+ "height_max_m": 1762.73,
+ "height_step_m": 0.003492332341496912,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

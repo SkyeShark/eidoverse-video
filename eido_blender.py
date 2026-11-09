@@ -183,7 +183,8 @@ def cmd_doctor(a):
     if bl and bash and not a.no_render:
         out = os.path.join(os.environ.get('TMP') or os.environ.get('TEMP') or '/tmp', 'eido_blender_doctor.png')
         rc = run_blender(DOCTOR, [out])
-        report('EEVEE renders headless (64x64, 1 sample)', rc == 0 and os.path.exists(out),
+        report('EEVEE renders headless (64x64, 1 sample) and the GPU compute check passes',
+               rc == 0 and os.path.exists(out),
                '' if rc == 0 else f'Blender exited {rc}: read the lines above')
     comfy = None
     for port in [8188] + list(range(8000, 8021)):

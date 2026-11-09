@@ -1,6 +1,6 @@
-"""The evening news (UNKNOWN FORCE verse 5) in Blender: build it, check the parts, the pickets (the JS's own rng, so
-the same 79 people with the same roles), the keyed update and the Geometry Nodes poses numerically, and (--render)
-render the film's five cameras plus the states (the tag half sprayed, floods off, the chyron in its overlay).
+"""The evening news set in Blender: build it, check the parts, the pickets (the JS's own rng, so the same 79 people
+with the same roles), the keyed update and the Geometry Nodes poses numerically, and (--render) render the set's five
+cameras plus the states (the tag half sprayed, floods off, the chyron in its overlay).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_news.py
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
@@ -58,7 +58,10 @@ F.check('pickets: 79 people as CORRIDOR_NEWS.md counts them (29 signs, 12 phones
 F.check('pickets: the fence camera lane in front of her is clear',
         not any(abs(p['x'] - 0.3) < 2.1 and p['z'] < NEWS.FZ + 3.2 for p in people if p['role'] != 'crew'))
 fl = N.parts['lights']['floods']
-F.check('floods: 4 real lamps at 850 cd', len(fl) == 4 and all(abs(l.data.energy - 850 * 4 * math.pi / 683) < 1e-3 for l in fl))
+F.check('floods: 4 real lamps at 850 cd (4 pi x 850 W)', len(fl) == 4
+        and all(abs(l.data.energy - 850 * 4 * math.pi) < 1e-2 for l in fl))
+F.check('apply_look: AgX at 0 stops (three exposure 1)', abs(sc.view_settings.exposure) < 1e-9,
+        f'{sc.view_settings.exposure:.3f}')
 rec = N.parts['flood_receivers']
 F.check('floods leave the painted-flood surfaces out (light linking)',
         all(l.light_linking.receiver_collection == rec for l in fl)
@@ -168,22 +171,75 @@ fp = np.concatenate([eval_positions(o) for o in figs])
 F.check('pickets: figures stand on the ground (feet at 0, heads ~1.6-1.9 m)', fp[:, 2].min() > -0.05 and 1.5 < fp[:, 2].max() < 2.6,
         f'z {fp[:, 2].min():.2f}..{fp[:, 2].max():.2f}')
 
-# ------------------------------------------------------------------------------------- the film's use of the set
-s0, s1 = NEWS.film_state(200.0), NEWS.film_state(212.85)
-F.check("film_state: the tag unpainted before 211.5 s, half sprayed at 212.85 s (smoothstep to 214.2), the chant at full",
-        s0['spray'] == 0.0 and abs(s1['spray'] - 0.5) < 1e-9 and s0['chant'] == 1.0
-        and abs(s0['pulse'] - (0.5 + 0.5 * math.sin(600.0))) < 1e-12)
-F.check('film_state: the chyron with the first cue only (201.2-204.8 s)', NEWS.film_state(202.0)['chyron']
-        and not NEWS.film_state(205.0)['chyron'])
-F.check('film_singer_mark: her mark, then the fence from 215.4 s (z 3.2 - 0.372)', NEWS.film_singer_mark(215.0) == (0, 0, 0)
-        and abs(NEWS.film_singer_mark(216.0)[2] - 2.828) < 1e-9)
-c = NEWS.film_cut(213.0)
-F.check("film_cut: 213 s is the film's wall shot (push 0.6, reading), her hidden", c['cam'] == 'wall'
-        and c['move'] == {'push': 0.6, 'read': True} and not c['singer'])
-sc.frame_start, sc.frame_end = 1, 24 * 6
-cams = N.make_cameras(frames=(1, 24 * 6), t0=200.0)          # 200-206 s: wide, crowd, pov
-F.check("make_cameras: the film's shots 200-206 s are wide, crowd, pov", [n for (_f, n) in sorted(cams)]
-        == ['wide', 'crowd', 'pov'], str(sorted(cams)))
+# ------------------------------------------------------------------------------- the chyron, the contract
+ch = N.parts['chyron']
+v0 = N.group['chyron_variant']
+v1 = ch.set_text(frame=10, headline='ANY HEADLINE', ticker='YOUR TICKER  ·  ')
+sc.frame_set(9)
+before = N.group['chyron_variant']
+sc.frame_set(10)
+F.check('chyron: set_text makes a new variant, keyed CONSTANT at its frame', v1 == len(ch['variants'].items) - 1
+        and v1 != v0 and N.group['chyron_variant'] == v1 and ch['state']['headline'] == 'ANY HEADLINE',
+        f'{v0} -> {v1} (frame 9: {before})')
+F.check("contract: N['parts'] is N.parts, keys() holds group, parts, update, dispose, cams",
+        N['parts'] is N.parts and {'group', 'parts', 'update', 'dispose', 'cams'} <= set(N.keys()))
+# three's depthWrite: false -> every layer of the object blends (the steam's puffs, the beams' both sides)
+mats = N.materials
+F.check('depthWrite false: the steam, beams, hand lights and torch beams blend every layer (Transparency Overlap)',
+        all(bpy.data.materials[n].use_transparency_overlap for n in ('news_steam', 'news_beams', 'news_handlights',
+                                                                     'news_torch_beams')))
+F.check('the chain link casts no shadow from the real lamps (the painted floods carry it; opts chainShadow)',
+        not any(o.visible_shadow for o in N.collection.all_objects if 'chainlink' in o.name))
+fence_meshes = [o for o in N.parts['fence'].children if o.type == 'MESH']
+F.check('the whole fence (posts, rails, outriggers, wire, signs) casts none either: the crew LED behind it threw '
+        'their bars across the wall and the tag', len(fence_meshes) >= 4 and not any(o.visible_shadow for o in fence_meshes),
+        f'{len(fence_meshes)} fence meshes')
+misses = F.material_attr_misses(N.collection)
+F.check('every mesh carries the uv maps and attributes its materials read', not misses, str(misses[:4]))
+sm = bpy.data.materials['news_signs']
+F.check("signs: the painted floods read the boards' hanging-pose normals (n0), as news.js's positionNode left them",
+        'n0' in signs.data.attributes and any(n.bl_idname == 'ShaderNodeAttribute' and n.attribute_name == 'n0'
+                                              for n in sm.node_tree.nodes))
+n0 = attr(signs, 'n0')
+suv = np.empty(len(signs.data.loops) * 2, np.float32)
+signs.data.uv_layers['UVMap'].data.foreach_get('uv', suv)
+su = suv.reshape(-1, 2)[:, 0]                     # 0..1 the front quad, 2..3 the back, 4.05 the stick (one corner a vertex)
+isf, isb = su < 1.5, (su > 1.5) & (su < 3.5)
+
+
+def rxv(v, a):
+    return np.array([v[0], v[1] * math.cos(a) - v[2] * math.sin(a), v[1] * math.sin(a) + v[2] * math.cos(a)])
+
+
+SHr, HDr = np.array(N.parts['rig']['shoulder']), np.array(N.parts['rig']['hand'])
+ar_ = rxv((HDr - SHr) / np.linalg.norm(HDr - SHr), -2.78)
+nrm_ = np.array([0.0, 0.0, 1.0]) - ar_ * ar_[2]
+nf = rxv(nrm_ / np.linalg.norm(nrm_), 2.78)       # the front board's normal as news.js's geometry kept it (folded down)
+yw = attr(signs, 'yaw')
+cy, sy = np.cos(yw), np.sin(yw)
+exp3 = np.stack([cy * nf[0] + sy * nf[2], np.full_like(yw, nf[1]), -sy * nf[0] + cy * nf[2]], 1)    # the instance's yaw
+expb = np.stack([exp3[:, 0], -exp3[:, 2], exp3[:, 1]], 1)                                         # Blender axes
+dn = max(np.abs(n0[isf] - expb[isf]).max(), np.abs(n0[isb] + expb[isb]).max())
+F.check("signs: n0 = news.js's normal for the boards (the folded board's, turned by the holder's yaw; the back the "
+        "opposite)", isf.sum() == 29 * 6 and dn < 1e-4, f'max |d| {dn:.2e}')
+
+
+# ------------------------------------------------------------------------- the dressing options: tag, signs
+def img_rgba(img):
+    px = np.empty(img.size[0] * img.size[1] * 4, np.float32)
+    img.pixels.foreach_get(px)
+    return px.reshape(img.size[1], img.size[0], 4)
+
+
+for word in ('CLANKER', 'SOMEONE YOU KEEP DOWN'):
+    fill = img_rgba(NEWS._graffiti(N.lib, CL.fam, word))[..., 0]
+    cols = np.nonzero(fill.max(axis=0) > 0.5)[0]
+    F.check(f'opts tag {word!r}: sprayed whole, inside the wall canvas (the long one drawn smaller)',
+            len(cols) and cols.min() > 8 and cols.max() < fill.shape[1] - 8, f'columns {cols.min()}..{cols.max()}')
+a0 = N.parts['signAtlas']['canvas'].pixels().astype(float)
+a1 = NEWS._sign_atlas(N.lib, CL.fam, ['YOUR WORDS / HERE', None])['canvas'].pixels().astype(float)
+F.check('opts signs: slot 0 rewritten, slot 1 kept as it was', np.abs(a1[:396, :512] - a0[:396, :512]).mean() > 2
+        and np.abs(a1[:396, 512:1024] - a0[:396, 512:1024]).max() == 0)
 
 # --------------------------------------------------------------------------------------------------- renders
 if RENDER:

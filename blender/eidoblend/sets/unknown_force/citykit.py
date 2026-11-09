@@ -467,7 +467,16 @@ class Made(list):
 
 class SetDict(dict):
     """A set as the engine returned it: a dict of its contract (group, collection, parts, update, dispose, cams, and
-    the Blender additions animate, make_cameras), whose keys also read as attributes (city.parts is city['parts'])."""
+    the Blender additions animate, make_cameras), whose keys also read as attributes (city.parts is city['parts']).
+    A key wins over a dict method of the same name: city.update(t, state) is the set's update, not dict.update."""
+
+    def __getattribute__(self, k):
+        if not k.startswith('__'):
+            try:
+                return dict.__getitem__(self, k)
+            except KeyError:
+                pass
+        return dict.__getattribute__(self, k)
 
     def __getattr__(self, k):
         try:
@@ -1830,12 +1839,16 @@ def new_material(name, K=None, made=None):
     return m, NB(m.node_tree, K)
 
 
+ROUGHNESS_FLOOR = 0.0525               # three's getRoughness: max(roughness, 0.0525) (the base mip of a 256 cube map)
+
+
 def out_lit(nb, *, color, rough, metal=0.0, normal=None, emission=None, ior=None, fog=True):
     """A lit (MeshStandardNodeMaterial) output: Principled BSDF with emission, mixed toward the fog colour by its
-    factor (three's fog on the final colour)."""
+    factor (three's fog on the final colour). Roughness is floored at 0.0525 as three's lighting model floors it (the
+    puddles' 0.035 would otherwise focus a light's glint to five times three's peak)."""
     p = nb.new('ShaderNodeBsdfPrincipled')
     nb.feed(color, p.inputs['Base Color'])
-    nb.feed(rough, p.inputs['Roughness'])
+    nb.feed(nb.max(rough, ROUGHNESS_FLOOR), p.inputs['Roughness'])
     nb.feed(metal, p.inputs['Metallic'])
     if ior is not None:
         nb.feed(ior, p.inputs['IOR'])
@@ -2746,54 +2759,106 @@ def rain_material(K, name='uf_rain'):
 
 
 # ------------------------------------------------------------------------------------------------ clouds + sky
-def follow_active_camera(ob, axes=(0, 1)):
+# EEVEE draws blended objects back to front by the depth of their ORIGIN along the view, and has no renderOrder. three
+# drew the cloud deck (renderOrder 1, normal blending) before the signs (2), the rain (3) and the pillar of light (4),
+# all additive, so nothing additive was ever veiled by the deck. EEVEE, sorting the sheets by their own origins (above
+# the camera, often nearer than the set root where those three sit), laid the deck over them: at the dive's end it
+# turned the pillar into a dark mottled veil. So the deck's origin rides this far down the camera's view (beyond the far
+# clip: behind every other blended object, so it is drawn first) and a Geometry Nodes offset puts each sheet back where
+# it belongs. The push only reorders the drawing; the sheets keep their order among themselves (by height along the
+# view, as three's sort by depth did).
+CLOUD_SORT_PUSH = 20000.0
+
+
+def follow_active_camera(ob, axes=(0, 1), push=0.0):
     """Drivers that put ob's location on the scene camera's (world x, y by default): what the engine's update(camera)
     did per frame, here evaluated by the depsgraph on every frame and after every cut (a simple expression on the
-    active scene camera: no Python needed when the .blend is opened). 0 when the scene has no camera."""
+    active scene camera: no Python needed when the .blend is opened). 0 when the scene has no camera. push: metres
+    ahead of the camera along its view (the camera's -Z): location = camera + push * forward on the axes given, for an
+    origin that sorts a blended object behind every other (EEVEE sorts by origin)."""
     for i in axes:
         fc = ob.driver_add('location', i)
         d = fc.driver
         d.type = 'SCRIPTED'
         while d.variables:
             d.variables.remove(d.variables[0])
-        v = d.variables.new()
-        v.name = 'c'
-        v.type = 'CONTEXT_PROP'
-        t = v.targets[0]
-        t.context_property = 'ACTIVE_SCENE'
-        t.data_path = f'camera.matrix_world[3][{i}]'
-        t.use_fallback_value = True
-        t.fallback_value = 0.0
-        d.expression = 'c'
+        for nm, row in (('c', 3), ('z', 2)) if push else (('c', 3),):
+            v = d.variables.new()
+            v.name = nm
+            v.type = 'CONTEXT_PROP'
+            t = v.targets[0]
+            t.context_property = 'ACTIVE_SCENE'
+            t.data_path = f'camera.matrix_world[{row}][{i}]'           # row 3: the position; row 2: the camera's +Z
+            t.use_fallback_value = True
+            t.fallback_value = 0.0
+        d.expression = f'c - {float(push)!r} * z' if push else 'c'
     return ob
+
+
+def _cloud_sheet_gn(K, name):
+    """The sheets' Geometry Nodes: put this sheet's quad at world (camera x, camera y, height) when following (follow
+    1), else at (0, 0, height), whatever the object's own location (the sort push): offset = that point minus the
+    object's world location (Self Object). The deck's objects carry no rotation or scale."""
+    g = GN(name + '_gn', K)
+    nb = g.nb
+    height = g.input('height', 'FLOAT', CLOUD['base'])
+    follow = g.input('follow', 'FLOAT', 1.0)
+    ac = nb.new('GeometryNodeInputActiveCamera')
+    ci = nb.new('GeometryNodeObjectInfo', transform_space='ORIGINAL')
+    nb.links.new(ac.outputs[0], ci.inputs['Object'])
+    so = nb.new('GeometryNodeSelfObject')
+    si = nb.new('GeometryNodeObjectInfo', transform_space='ORIGINAL')
+    nb.links.new(so.outputs[0], si.inputs['Object'])
+    cam = V(nb, ci.outputs['Location'], 'v')
+    own = V(nb, si.outputs['Location'], 'v')
+    want = nb.comb(cam.x * follow, cam.y * follow, height)
+    sp = nb.new('GeometryNodeSetPosition')
+    nb.links.new(g.gin.outputs['Geometry'], sp.inputs['Geometry'])
+    nb.feed(want - own, sp.inputs['Offset'])
+    nb.links.new(sp.outputs[0], g.gout.inputs['Geometry'])
+    return g
 
 
 def make_clouds(K, collection, opt=None, *, parent=None, name='uf_clouds'):
     """The low rain-cloud deck: 13 noise sheets (4.8 km, the engine's) between CLOUD.base and CLOUD.top that move with
-    the scene camera in x and y (makeClouds' update(camera), as drivers); the noise is fixed in the world, their
-    undersides take the city's light map (the deck glows over the bright streets and over the hole), sheets near the
-    camera fade out (no hard planes when the camera falls through) and the far fade is the camera's. opt: layers (13),
-    size (4800), follow (True; False keeps the sheets still, centred on the hole: then give them a size that covers
-    the cameras, e.g. 6000). The deck follows a set root left at the origin, as the engine's did."""
+    the scene camera in x and y (makeClouds' update(camera)); the noise is fixed in the world, their undersides take
+    the city's light map (the deck glows over the bright streets and over the hole), sheets near the camera fade out
+    (no hard planes when the camera falls through) and the far fade is the camera's. opt: layers (13), size (4800),
+    follow (True; False keeps the sheets still, centred on the hole: then give them a size that covers the cameras,
+    e.g. 6000), sort_push (CLOUD_SORT_PUSH metres). The deck follows a set root left at the origin, as the engine's did.
+
+    The drawing order is three's: the deck first, then the additive signs, rain and pillar of light over it. The root
+    rides the active camera pushed sort_push metres down its view (drivers), so every sheet's origin is the farthest
+    of the blended objects; each sheet's Geometry Nodes modifier puts its quad back at its height ('height', world
+    metres) over the camera ('follow' 1) or over the origin ('follow' 0). sort_push=0 restores EEVEE's own order (the
+    sheets' origins above the camera: the deck veils whatever additive object sorts farther)."""
     opt = opt or {}
     layers = int(opt.get('layers', 13))
     follow = opt.get('follow', True)
     size = float(opt.get('size', 4800.0 if follow else 6000.0))
+    push = float(opt.get('sort_push', CLOUD_SORT_PUSH))
     mat = cloud_material(K)
     h = size / 2
     me = make_mesh(name + '_sheet', np.array([[-h, 0, h], [h, 0, h], [h, 0, -h], [-h, 0, -h]]), [[0, 1, 2, 3]], made=K.made)
     me.materials.append(mat)
     root = new_object(name, None, collection, parent=parent, made=K.made)
-    if follow:
+    if push:
+        follow_active_camera(root, axes=(0, 1, 2), push=push)
+    elif follow:
         follow_active_camera(root)
+    g = _cloud_sheet_gn(K, name)
     sheets = []
     for i in range(layers):
+        z = CLOUD['base'] + (CLOUD['top'] - CLOUD['base']) * (i / (layers - 1))
         sh = new_object(f'{name}_{i:02d}', me, collection, parent=root, made=K.made)
-        sh.location = (0.0, 0.0, CLOUD['base'] + (CLOUD['top'] - CLOUD['base']) * (i / (layers - 1)))
+        sh.location = (0.0, 0.0, z)                 # under the pushed root: the sheets keep their order along the view
+        mod = g.modifier(sh, K)
+        set_gn_input(mod, g.inputs['height'], z)
+        set_gn_input(mod, g.inputs['follow'], 1.0 if follow else 0.0)
         sh.visible_shadow = False
         audit_flags(sh, zfight=True)
         sheets.append(sh)
-    return {'group': root, 'sheets': sheets, 'follow': bool(follow), 'size': size,
+    return {'group': root, 'sheets': sheets, 'follow': bool(follow), 'size': size, 'sort_push': push, 'gn': g,
             'update': lambda camera=None: None}
 
 
@@ -2832,6 +2897,13 @@ def make_sky(K, name='uf_city_world', env_intensity=None):
     env_k = float(env_intensity if env_intensity is not None else K.opts.get('env_intensity', 0.32))
     w = bpy.data.worlds.new(name)                    # the kit's own; the scene takes it in apply_atmosphere
     K.made.add(w)
+    # three's hemisphere and envNode cast no shadows: no sun extracted from this World, and no sun shadow (EEVEE's
+    # default, a 1 mm sun shadow over a 6 km city, overflows the shadow pool: 'Shadow buffer full')
+    for attr, v in (('sun_threshold', 1.0e4), ('use_sun_shadow', False)):
+        try:
+            setattr(w, attr, v)
+        except (AttributeError, TypeError):
+            pass
     w.use_nodes = True
     nt = w.node_tree
     nt.nodes.clear()

@@ -259,6 +259,15 @@ def _band_caster(sky, caster, frames, locs):
         for attr in ('hide_probe_volume', 'hide_probe_sphere', 'hide_probe_plane'):
             if hasattr(tw, attr):
                 setattr(tw, attr, True)
+    # the band renders in the ring's plate scene (Ringworld.make_plate): the twin, which only its sun sees, lives there
+    pc = getattr(sky.ring, 'plate_collection', None)
+    if pc is not None:
+        if tw.name not in pc.objects:
+            pc.objects.link(tw)
+        main = {sky.scene.collection} | set(sky.scene.collection.children_recursive)   # not the light-linking ones
+        for c in list(tw.users_collection):
+            if c in main:
+                c.objects.unlink(tw)
     # the twin's material: a fresh copy of the caster's, made after this bake keyed it (so it carries this bake's
     # projection keys), with the shadow faded out by the twin object's keyed 'eido_band_caster_on' property
     old = bpy.data.materials.get('eido_sky_cloud_shadow_band')

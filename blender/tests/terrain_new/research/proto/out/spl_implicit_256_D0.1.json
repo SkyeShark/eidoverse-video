@@ -1,0 +1,22 @@
+{
+ "pixel_m": 78.125,
+ "extent_km": 20.0,
+ "relief_m": 3342.4592202907916,
+ "hypsometric_integral": 0.2534458064640622,
+ "slope_p10": 2.568627954569937,
+ "slope_p50": 27.106303493506687,
+ "slope_p90": 35.69409986577935,
+ "slope_p99": 40.53470752842011,
+ "frac_slope_lt5": 0.1581268310546875,
+ "frac_slope_gt30": 0.38671875,
+ "frac_slope_gt40": 0.0130615234375,
+ "frac_slope_gt50": 0.0,
+ "depression_area_frac": 0.0,
+ "depressions_per_100km2": 0.0,
+ "steps": 500,
+ "dt_years": 10000.0,
+ "seconds": 82.9,
+ "ms_per_step": 165.8,
+ "plain_op_ms": 1.773,
+ "step_cost_in_plain_ops": 94.0
+}

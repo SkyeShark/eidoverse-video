@@ -146,7 +146,9 @@ C.check('Blender loads the frame grids', 'density' in grid_names and 'emission' 
 if RENDER:
     for name, kw, rig in (
         ('fire', dict(sample=FIREBALL, steps=200), {'world': 0.05, 'sun': 0.0}),
-        ('smoke', dict(medium=SMOKE, steps=200), {'world': 0.35, 'sun': 4.0}),
+        # a dusk stage: under AgX a 0.35 grey world and the sunlit floor read as one grey, and the lit smoke had
+        # nothing to stand against
+        ('smoke', dict(medium=SMOKE, steps=200), {'world': 0.08, 'sun': 5.0}),
     ):
         C.stage(960, 540, 32, world_color=(rig['world'],) * 3, world_strength=1.0, sun=rig['sun'] > 0,
                 sun_energy=rig['sun'], sun_rot=(48.0, 0.0, 30.0), floor_color=(0.25, 0.25, 0.25))

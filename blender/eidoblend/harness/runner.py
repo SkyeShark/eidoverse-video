@@ -536,6 +536,7 @@ def build(run: Run):
         run.led.record(check='coverage.toctou', outcome='PASS', cls='INFO',
                        message='policy and object flags unchanged between setup and the end of the build')
     _audits(run, scene, policy, ns, assets, notes, modules=scene_modules)
+    kept = _keep_temp_images(run, cfg['_blend'])
     with run.step('save the .blend'):
         scene.frame_set(fs)
         bpy.context.preferences.filepaths.save_version = 0           # no .blend1 beside the build
@@ -543,6 +544,7 @@ def build(run: Run):
         tmp = cfg['_blend'] + '.part.blend'
         bpy.ops.wm.save_as_mainfile(filepath=tmp, compress=False, relative_remap=True, copy=True)
         os.replace(tmp, cfg['_blend'])
+    _prune_kept(cfg['_blend'], kept)                   # earlier builds' copies: the new .blend points at none of them
     rec = {
         'format': BUILD_FORMAT, 'built': L.stamp(), 'scene_json': cfg['_scene_json'], 'blend': cfg['_blend'],
         'inputs': inputs_digest(cfg, _module_files(cfg), reads, listed), 'policy': policy,
@@ -555,6 +557,82 @@ def build(run: Run):
     if callable(ns.get('cleanup')):
         ns['cleanup'](ctx)
     return scene
+
+
+def _temp_roots():
+    import tempfile
+    roots = {tempfile.gettempdir()} | {os.environ[k] for k in ('TMP', 'TEMP', 'TMPDIR') if os.environ.get(k)}
+    return [os.path.normcase(os.path.abspath(r)) + os.sep for r in roots]
+
+
+def _keep_temp_images(run: Run, blend: str):
+    """Images the build painted into the temp folder go beside the .blend before it is saved. A screen or an
+    html_mesh card made in setup() has no saved .blend to sit beside yet, so the media family writes its frames to
+    the temp folder; a build saved pointing there renders them pink once the temp folder is cleaned (a reused build
+    keeps rendering for days). Each such image's files (a sequence's numbered frames with its hold files, or the
+    one file) are copied to <blend stem>_files/<its folder's name> and the image repointed there (saved relative);
+    a source folder left holding nothing else (a screen's own folder, not Blender's session folder) is removed, as
+    the disk is shared."""
+    import re
+    roots = _temp_roots()
+    session = os.path.normcase(os.path.abspath(bpy.app.tempdir or '')) if bpy.app.tempdir else None
+    dest_root = os.path.splitext(blend)[0] + '_files'
+    taken, moved = {}, []                                              # source folder -> (destination, files copied)
+    for img in bpy.data.images:
+        if img.source not in ('FILE', 'SEQUENCE') or img.packed_file is not None or img.library is not None \
+                or not img.filepath:
+            continue
+        p = os.path.abspath(bpy.path.abspath(img.filepath))
+        if not any(os.path.normcase(p).startswith(r) for r in roots) or not os.path.exists(p):
+            continue
+        src, base = os.path.split(p)
+        if img.source == 'SEQUENCE':
+            stem, ext = os.path.splitext(base)
+            head = stem.rstrip('0123456789')
+            pat = re.compile(re.escape(head) + r'\d+' + re.escape(ext) + '$')
+            files = [f for f in os.listdir(src) if pat.match(f)]
+        else:
+            files = [base]
+        key = os.path.normcase(src)
+        dst = taken[key][0] if key in taken else os.path.join(dest_root, os.path.basename(src) or 'temp')
+        os.makedirs(dst, exist_ok=True)
+        for f in files:
+            shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
+        taken.setdefault(key, (dst, set()))[1].update(files)
+        img.filepath = os.path.join(dst, base)
+        moved.append(img.name)
+    for key, (dst, files) in taken.items():
+        if any(key + os.sep == r for r in roots) or (session and key.rstrip(os.sep) == session.rstrip(os.sep)):
+            continue                                                   # never empty the temp or session folder
+        try:
+            real = [d for d in os.listdir(key) if d not in files]
+        except OSError:
+            continue
+        if not real:
+            shutil.rmtree(key, ignore_errors=True)
+    if moved:
+        run.led.record(check='build.files', outcome='PASS', cls='INFO', metrics={'images': len(moved)},
+                       message=f'{len(moved)} image(s) the build painted into the temp folder kept beside the .blend '
+                               f"({os.path.basename(dest_root)}/): {', '.join(moved[:6])}"
+                               + (' ...' if len(moved) > 6 else ''))
+    return {os.path.dirname(bpy.path.abspath(img.filepath)) for img in bpy.data.images
+            if img.filepath and os.path.normcase(os.path.abspath(bpy.path.abspath(img.filepath))).startswith(
+                os.path.normcase(os.path.abspath(dest_root)) + os.sep)}
+
+
+def _prune_kept(blend: str, kept: set):
+    """After the new .blend is saved: the folders earlier builds kept beside it go (each build's painted folders
+    have names of their own, so they would pile up)."""
+    root = os.path.splitext(blend)[0] + '_files'
+    if not os.path.isdir(root):
+        return
+    keep = {os.path.normcase(os.path.abspath(k)) for k in kept}
+    for name in os.listdir(root):
+        p = os.path.join(root, name)
+        if os.path.isdir(p) and os.path.normcase(os.path.abspath(p)) not in keep:
+            shutil.rmtree(p, ignore_errors=True)
+    if not os.listdir(root):
+        os.rmdir(root)
 
 
 def _record_reads(run: Run, reads: list, listed: list):

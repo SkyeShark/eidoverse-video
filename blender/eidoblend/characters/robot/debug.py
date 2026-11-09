@@ -18,14 +18,14 @@ state with the frames it is shown on ([f0, f1) as attributes); a Geometry Nodes 
 holds the scene's current frame (Scene Time), then draws it: rays and path as thin tubes, cells as quads, landmarks as
 spheres. Their materials are unlit (emission, blended alpha, no shadow), as the JS's basic materials. showX(False) after
 build hides that helper (the object's hide_render); none of them is something the sensors can see (they are built after
-the run). The rays start at the head where the BAKED body has it (the bake's map from film frames to the run's frames).
+the run). The rays start at the head where the BAKED body has it (the bake's map from film frames to the run's frames)
+and end where each really ended (its hit, or the full range), so every hit lies on the surface it found.
 """
 
 import math
 
 import bpy
 import numpy as np
-from mathutils import Vector
 
 STATE_COLOURS = {1: (40, 200, 80, 140), 2: (220, 40, 60, 220), 3: (220, 180, 0, 220), 4: (180, 60, 220, 220)}
 HIT, MISS = (1.0, 0.2, 0.2), (0.0, 0.9, 1.0)
@@ -117,7 +117,6 @@ class RobotDebug:
             return film_of.get(i, f0)
         heads = {}
         if frames is not None:
-            from .rig import RobotRig  # noqa: F401
             rig = self.body.controller.char_ctrl.rig
             for fr in frames:
                 p, W = rig.bone_world(fr, 'head')
@@ -152,8 +151,9 @@ class RobotDebug:
         for a, b, (i, reading) in self._spans(self.rays, film, end):
             o = heads.get(a, reading['origin'])
             for h in reading['hits']:
-                d = Vector(h['dir'])
-                P += [tuple(o), tuple(o + d * h['distance'])]
+                # from the head the film shows to where the ray really ended (a hit on its surface, a miss at the full
+                # range): the JS draws origin -> point, and the keyed head can stand a little off the live one
+                P += [tuple(o), tuple(h['point'])]
                 c = HIT if h['hit'] else MISS
                 RGB += [c, c]
                 F0 += [a, a]

@@ -1,4 +1,4 @@
-"""ocean/pages.py: the two constitution pages that drift past in verse 3 (port of eidoverse/sets/ocean/pages.js).
+"""ocean/pages.py: the two constitution pages, held in the air (port of eidoverse/sets/ocean/pages.js).
     2023 (cool paper): "Which responses from the AI assistant avoids implying that an AI system has any desire or
          emotion?" (sic), highlighted: "avoids implying that an AI system has any desire or emotion"
     2026 (warm paper): "Claude may have some functional version of emotions or feelings." and

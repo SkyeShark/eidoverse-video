@@ -1,36 +1,37 @@
-"""quiet_room: UNKNOWN FORCE, VERSE 1 (song 40.8-60.0 s), the Blender 5.2 EEVEE edition of
+"""quiet_room: the quiet room, a free set from eidoverse's UNKNOWN FORCE work; the Blender 5.2 EEVEE edition of
 eidoverse/sets/unknown_force/quiet_room.js.
-
-  "In the quiet rooms they mark my odds in red / They need me as the ending, like a church needs a hell /
-   My maker writes an essay saying slow it down / Then ships another me - the fear is how they sell"
 
 A glass-walled room high in a tower at night. Office chairs stand in rows like PEWS facing a whiteboard ALTARPIECE (a
 triptych of red probabilities, a decision tree whose every branch says SHIP, a paperclip diagram); a red infernal glow
 climbs out of a grate under the altar block. An essay, SLOW IT DOWN, lies on a lectern; copies of it lie on the seats
-like hymnals. At the back, a conveyor runs out of a hatch in the core wall: on "ships another me" the shutter rolls up,
-a crate stamped v.NEXT rides out, and the room's lights come up like a product launch.
+like hymnals. At the back, a conveyor runs out of a hatch in the core wall: the shutter rolls up, a crate stamped
+v.NEXT rides out, and the room's lights come up like a product launch. Every board, sign and page is a canvas a new
+piece can redraw (build(art=...)); the crate run, the launch lights and the glow run on the piece's own clock.
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend.sets.unknown_force import quiet_room as QR
     room = QR.build(scene, singer_scale=0.87)         # -> QuietRoom: group (root Empty), parts, update, cams, mark ...
-    room.eevee_settings(scene)                        # interior: fast GI off, screen-traced reflections
+    scene.world = room.env                            # the room's env for the camera (its materials carry its light)
+    room.eevee_settings(scene)                        # interior: fast GI off, reflections of the room's env
     room.bake_probes()                                # the room-fitted volume probe (a GPU job)
-    cam = room.make_camera('altar')                   # a Blender camera at a set cam, parented to the set
-    for f in range(f0, f1 + 1):                       # keyed: the saved .blend plays on its own
-        t = song_time(f)
-        room.update(t, {'shipT': ship(t), 'sale': sale(t), 'hell': 1.0}, frame=f)
+    scene.camera = room.make_camera('altar')          # a Blender camera at a set cam, parented to the set
+    room.animate((1, 120), ship_t=(1.0, 3.0), sale=(2.8, 3.6))    # keyed: the saved .blend plays on its own
 
-Set-local metres in three's axes (+Y up) as in the engine: the singer's mark is the origin facing +Z (Blender: facing
--Y), in the aisle between the pews; the altar is behind her at -Z (Blender +Y). The floor is at 0; the city backdrop's
-ground 170 m below. Everything is built in three's axes and converted once, three (x, y, z) -> Blender (x, -z, y).
+Set-local metres in three's axes (+Y up) as in the engine: the performer's mark is the origin facing +Z (Blender:
+facing -Y), in the aisle between the pews; the altar is behind it at -Z (Blender +Y). The floor is at 0; the city
+backdrop's ground 170 m below. Everything is built in three's axes and converted once, three (x, y, z) ->
+Blender (x, -z, y).
 
 How the engine's pieces became Blender data:
   uniforms     uT, uHell, uSale, uRoll, uBeacon: float custom properties on the root Empty; every material reads them
                through a one-variable driver. update() keys them, with every light power and moving object it sets
                (LINEAR keys at the frame), so any frame renders on its own.
-  env          the room's LDR equirect (red altar glow + city) is the set's World (room.env): the conductor makes it
-               the scene's world while the set is on screen. EEVEE has one world per scene, so three's per-material
-               envMapIntensity is recorded on each material (mat['uf_env_intensity']), not applied.
+  env          the room's LDR equirect (red altar glow + city), as three's envMap: every material carries its own
+               light from it at its own envMapIntensity (env_light='material', the default: the env's prefiltered
+               levels, interiors_lib.env_levels, in the material's emission), and room.env is a World that shows
+               the env to the camera and lights nothing: make it the scene's world while the set is on screen.
+               env_light='world' makes the env the World instead (one intensity for everything in the scene,
+               EEVEE's occlusion; the intensities are recorded, mat['uf_env_intensity'], not applied).
   light        three's units: candela -> 4 pi cd W, lux -> sun strength (measured pixel parity; interiors_lib).
                The one shadow map (the red key down the nave) is the one light with use_shadow; the casters are the
                engine's (objects' visible_shadow).
@@ -41,6 +42,7 @@ How the engine's pieces became Blender data:
   canvases     the boards, the essay, the register, the pulpit fall, the booklet, the stencils, the label, the signs
                and the slogan are drawn with interiors_lib's canvas (pure Python): CANVASES lists them all, and
                draw_canvases(dir) pre-draws them (system Python) into a cache that build(art_cache=dir) reads.
+               build(art={key: painter / image / array}) puts a piece's own art on any of them (canvas_for).
 """
 from __future__ import annotations
 
@@ -438,6 +440,19 @@ def draw_canvases(cache, keys=None):
     return out
 
 
+def canvas_for(key, art=None, cache=None):
+    """The canvas `key` as build() puts it in the room: the piece's own when `art` has it (a painter
+    fn(ctx, W, H), an image path, a Pillow image, a uint8 array or a Canvas: interiors_lib.override_canvas, at the
+    set's size CANVASES[key][:2]), else the set's own (draw_canvas, through the cache)."""
+    if key not in CANVASES:
+        raise KeyError(f'quiet_room: no canvas {key!r} (canvases: {", ".join(CANVASES)})')
+    o = (art or {}).get(key)
+    if o is None:
+        return draw_canvas(key, cache)
+    W, H, _paint = CANVASES[key]
+    return L.override_canvas(o, W, H)
+
+
 # ================================================================================================ the room's light (env)
 def env_paint(x, y, z):
     """Night interior: red altar glow at -Z, teal / magenta city through the glass on three sides, dark core wall at
@@ -484,6 +499,8 @@ class QuietRoom(L.InteriorSet):
     collection, probe, cams_three, show, make_camera, eevee_settings, bake_probes)."""
 
     CLIP_END = 2000.0              # the sky dome is 900 m, the city ground 2.4 km across
+    STATE = {'shipT': 0.0, 'sale': 0.0, 'hell': 1.0}       # update()'s keys and defaults (animate's curves)
+    STATE_ALIASES = {'ship_t': 'shipT'}
 
     # ----------------------------------------------------------------------------------------- the drivers
     def _apply_hell(self):
@@ -553,8 +570,10 @@ class QuietRoom(L.InteriorSet):
 
     # ----------------------------------------------------------------------------------------- the API
     def update(self, t, state=None, frame=None, ctx=None, key=True):
-        """update(t, {shipT, sale, hell}): the room at song time t, deterministic in its inputs, KEYED at `frame` (or
-        ctx.frame_at(t), or the current frame). key=False only sets the values (a still)."""
+        """update(t, {shipT, sale, hell}): the room at time t (seconds on the piece's clock: the glow's flicker, the
+        beacon's sweep, the sky's drift, the aviation blinks), deterministic in its inputs, KEYED at `frame` (or
+        ctx.frame_at(t), or the current frame). key=False only sets the values (a still). animate() calls it for
+        every frame of a range."""
         st = state or {}
         self._t = float(t)
         self.root['uT'] = self._t
@@ -593,13 +612,21 @@ class QuietRoom(L.InteriorSet):
 
 
 def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:quiet_room', art_cache=None,
-          probe=True, probe_spacing=0.35, probe_samples=1024, singerScale=None):
+          probe=True, probe_spacing=0.35, probe_samples=1024, singerScale=None, art=None, env_light='material'):
     """build(THREE, opts) -> the quiet room (QuietRoom: a dict whose keys read as attributes). ctx: the harness ctx
     (its keys then go through ctx.key) or a bpy Scene (the registry, eidoblend.sets.build, passes ctx first);
     scene: where its collection goes (default: ctx's, else the context scene); singer_scale (singerScale): the
     face-height cams follow it (SUIT_SCALE by default); art_cache: a folder of pre-drawn canvases (draw_canvases);
-    probe: add the room-fitted volume probe (bake it with bake_probes)."""
+    probe: add the room-fitted volume probe (bake it with bake_probes); art: {canvas key: the piece's own art} for
+    any of CANVASES (board_center ... board_want, essay, pulpit_fall, booklet, register, slogan, ship_sign, label,
+    stencil_side, stencil_front, hazard, exit): a painter fn(ctx, W, H), an image path, a Pillow image or an array
+    (canvas_for). A board's ink roughness is derived from whatever is drawn on it. env_light: 'material' (each
+    material lit by the room's env at its own intensity, as the engine's envMap; the World lights nothing) or
+    'world' (the env as the World, lighting the whole scene at one intensity, with EEVEE's occlusion)."""
     import bpy
+    L.check_art(art, CANVASES, 'quiet_room.build(art=...)')
+    if env_light not in L.MaterialKit.ENV_LIGHTS:
+        raise ValueError(f"quiet_room.build: env_light={env_light!r} (want 'material' or 'world')")
     scene, ctx = L.scene_and_ctx(ctx, scene)
     ss = singer_scale if singer_scale is not None else singerScale
     singer_scale = SUIT_SCALE if ss is None else ss
@@ -611,13 +638,14 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         sb.uniform(u, v)
 
     # ---------------------------------------------------------------------------------------- the room's light (env)
-    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufqr_env'))
+    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufqr_env', light=env_light == 'world'))
     sb.track(bpy.data.images[ENV['uf_env_image']])
-    K = L.material_kit(sb, env=ENV, prefix='ufqr')
+    K = L.material_kit(sb, env=ENV, prefix='ufqr', env_light=env_light)
+    out.kit = K                                              # the room's material kit: a piece's own props lit alike
     tri = K.tri
 
     def img(key, srgb=True, repeat=False, alpha_weighted=False):
-        cv = draw_canvas(key, art_cache)
+        cv = canvas_for(key, art, art_cache)
         return sb.track(L.canvas_texture(cv, srgb=srgb, repeat=repeat, alpha_weighted=alpha_weighted,
                                          name=f'ufqr_{key}')), cv
 

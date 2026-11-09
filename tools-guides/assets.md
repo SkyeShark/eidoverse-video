@@ -310,7 +310,7 @@ ones, a neutral part count for ambiguous ones). Read it with the preview.
 
 ```python
 kit = assets.load_kit(ctx.assets['pipe_kit'])     # or load_kit(root) for a model already imported
-kit.list()                                        # ['pipe_elbow_01', 'pipe_valve_03', ...]  (kit.names: file order)
+kit.list()                                        # ['pipe_elbow_01', 'pipe_valve_03', ...]  (the file's order)
 elbow = kit.get('pipe_elbow_01', location=(2, 0, 0), rotation_z=math.radians(90))
 first = kit.part(0)                               # by catalogue position
 valves = kit.family('pipe_valve')                 # one instance of each part whose name starts so (any case)
@@ -379,6 +379,9 @@ Exo 2 and Old Standard. Other CSS (letter-spacing, shadows, transforms) is
 ignored. A function of `t` is painted on every frame, which is what the
 engine's `update()` was for. For a HUD on the frame, add the plane to the
 [overlay layer](scene-format.md#the-post-stack-its-hooks-and-the-overlay-layer).
+Painted frames go to `out_dir`; without one, inside a runner build they are
+painted into the temp folder (the `.blend` has no folder yet) and the build
+copies them beside the saved `.blend` (`<out>_files/`) before it saves.
 
 ## Interior windows
 

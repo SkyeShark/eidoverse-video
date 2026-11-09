@@ -1,4 +1,5 @@
-"""make_sdf_texture: an SDF raymarched into an image (the Blender edition of makeSdfTexture and SDF_TEX_RECIPES).
+"""make_sdf_texture: an SDF raymarched into an image (the Blender edition of makeSdfTexture and SDF_TEX_RECIPES),
+and make_explosion_texture (makeExplosionTexture, from the engine's pre-TSL GLSL file).
 
 createSdfObject places an SDF body in the scene; makeSdfTexture rendered an SDF with its own orbiting camera into a
 texture, for screens, holograms, billboards and wallpaper: the same fractal on several monitors, under full PBR.
@@ -14,7 +15,17 @@ the four distance estimators and the fragment main, rendered by a fragment pass 
     bulb.bake(1, 240)                      # or the whole film: a PNG sequence the image plays, frame by frame
     screen.data.materials.append(bulb.material(emission_strength=0.9))   # map + emissiveMap, as the engine's usage
 
-The texture is what the engine's 8-bit sRGB render target held: the shader's values, clamped, read as sRGB.
+The texture is an 8-bit sRGB image of the shader's values, clamped, made to read back as the engine's did. The WebGL
+engine tagged its 8-bit render target sRGB, so the GPU encoded each value on write and decoded it on read: its texels
+held the shader's values as LINEAR light. That is the engine's look (encoding='linear', the default): bright skies
+behind the fractals, and a washed, pale detonation whose own 1/2.2 gamma is applied twice, as the engine's smoke-test
+frames show (workspace/sdf_tex_smoketest, sdf_explosion_smoketest). encoding='srgb' reads the values as display
+colours instead, as the shaders were written (shadertoy-style recipes, the detonation's tone curve): darker skies,
+deeper colour.
+
+make_explosion_texture is the same contract around one self-contained shader: a mushroom-cloud detonation on a
+15-second loop, with its own camera, fire ramp, sky and tone curve. The engine dropped it with the TSL migration
+(dead on WebGPU); here it runs again from the GLSL backup, as written.
 """
 
 from __future__ import annotations
@@ -24,6 +35,13 @@ import os
 import numpy as np
 
 from .gpu_eval import _ensure_gpu, _read_texture
+from .spec import file_stem, resolve_cache_dir
+
+
+def _check_encoding(encoding):
+    if encoding not in ('srgb', 'linear'):
+        raise ValueError(f"make_sdf_texture: encoding is 'srgb' or 'linear', not {encoding!r}")
+    return encoding
 
 SDF_TEX_PALETTE_GLSL = r"""
 vec3 sdfTexPalette(float t, vec3 p, float mode) {
@@ -250,8 +268,9 @@ class SdfTexture:
     def __init__(self, recipe='mandelbulb', width=512, height=256, aspect=None, uniforms=None,
                  camera_orbit_radius=2.6, camera_orbit_speed=0.18, camera_pitch=0.4, camera_fov=1.6,
                  camera_target=(0.0, 0.0, 0.0), custom_de=None, custom_shade=None, update_every=1, anisotropy=None,
-                 name=None, cache_dir='//sdf_cache', samples=1):
+                 name=None, cache_dir='//sdf_cache', samples=1, encoding='linear'):
         import bpy
+        self.encoding = _check_encoding(encoding)
         base = SDF_TEX_RECIPES.get(recipe)
         if base is None and not custom_de:
             raise ValueError(f"make_sdf_texture: unknown recipe '{recipe}'. Built-ins: {', '.join(SDF_TEX_RECIPES)}. "
@@ -266,7 +285,7 @@ class SdfTexture:
         self.anisotropy = anisotropy          # Blender filters images by its own settings: kept for the record
         self.samples = max(1, int(samples))
         self.name = name or f'sdf_tex_{recipe}'
-        self.cache_dir = os.path.normpath(bpy.path.abspath(cache_dir)) if cache_dir.startswith('//') else cache_dir
+        self.cache_dir = resolve_cache_dir(cache_dir)
         merged = dict(base['default_uniforms'])
         merged.update(uniforms or {})
         self.uniforms = {
@@ -286,22 +305,28 @@ class SdfTexture:
         self.image.colorspace_settings.name = 'sRGB'
         self.texture = self.image
         self.sequence = None
+        # baked frames are named for the image, which Blender keeps unique: two screens of one recipe keep their own
+        self.stem = file_stem(self.image.name)
 
     # ------------------------------------------------------------------------------------------------ source ---
+    # the vector uniforms' swizzles over the uniform block (everything else is a float in .x)
+    _SWIZZLE = {'uTarget': '.xyz', 'sdfTexSize': '.xy', 'sdfTexJitter': '.xy'}
+
     def _layout(self):
         names = ['uTime', 'uAspect', 'uOrbitR', 'uOrbitSpeed', 'uPitch', 'uFov', 'uTarget'] + self._user
         names += ['sdfTexSize', 'sdfTexJitter']
         return names
 
+    def _uniform_macros(self):
+        """Each uniform as a #define over one uniform block (the engine declared them one by one)."""
+        return '\n'.join('#define %s (sdfTexU.v[%d]%s)' % (n, i, self._SWIZZLE.get(n, '.x'))
+                         for i, n in enumerate(self._layout()))
+
     def source(self):
         """The full fragment source (the engine's shader, its uniforms as macros over one uniform block)."""
-        lines = []
-        for i, n in enumerate(self._layout()):
-            sw = '.xyz' if n == 'uTarget' else ('.xy' if n in ('sdfTexSize', 'sdfTexJitter') else '.x')
-            lines.append('#define %s (sdfTexU.v[%d]%s)' % (n, i, sw))
         shade = (('vec3 sdfTexShade(vec3 p, vec3 n, vec3 rd, int iter, int maxIter, float t, float paletteMode) { %s }'
                   % self.custom_shade) if self.custom_shade else SDF_TEX_DEFAULT_SHADE)
-        return '\n'.join(['\n'.join(lines), 'vec2 vUv;', SDF_TEX_PALETTE_GLSL, self.de, _SDF_TEX_MAIN, shade,
+        return '\n'.join([self._uniform_macros(), 'vec2 vUv;', SDF_TEX_PALETTE_GLSL, self.de, _SDF_TEX_MAIN, shade,
                           SDF_TEX_DEFAULT_SKY, _SDF_TEX_MAIN_BODY])
 
     def _build(self):
@@ -362,13 +387,26 @@ class SdfTexture:
         self._frames += 1
         if n % self.update_every != 0:
             return self
-        img = np.clip(self.render(t), 0.0, 1.0)
+        img = self._texels(self.render(t))
         img[..., 3] = 1.0
         if self.image.source != 'GENERATED':
             self.image.source = 'GENERATED'
         self.image.pixels.foreach_set(img.ravel())
         self.image.update()
+        # a generated image's pixels are not saved with the .blend unless packed: packed, a build saved now and
+        # rendered later shows this frame, not a blank screen
+        self.image.pack()
         return self
+
+    def _texels(self, img):
+        """The 8-bit sRGB image's values for a shader output (H, W, 4): sRGB-encoded, so that they read back as the
+        shader's values in linear light (encoding='linear', the default: what the WebGL engine's sRGB render target
+        did to them), or the shader's colours taken as display sRGB (encoding='srgb')."""
+        a = np.clip(np.asarray(img, np.float32), 0.0, 1.0)
+        if self.encoding == 'linear':
+            c = a[..., :3]
+            a[..., :3] = np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(c, 1.0 / 2.4) - 0.055)
+        return a
 
     def set_uniform(self, name, value):
         """The engine's setUniform: 'power' or 'uPower'."""
@@ -387,10 +425,12 @@ class SdfTexture:
         self.image = self.texture = None
 
     # --------------------------------------------------------------------------------------------- the film ----
-    def bake(self, frame_start=None, frame_end=None, fps=None, every=None, log=print):
+    def bake(self, frame_start=None, frame_end=None, fps=None, every=None, controls=None, log=print):
         """Render frames frame_start..frame_end (t = (frame - frame_start) / fps) into <cache_dir>/<name>_####.png and
         make .image play them as a sequence (plus a hold copy before the first frame, which an image sequence shows
-        ahead of its range). every = update_every: a new frame each N film frames, held between."""
+        ahead of its range). every = update_every: a new frame each N film frames, held between. controls(frame, t)
+        -> {uniform: value} sets uniforms before each rendered frame (the engine's per-frame setUniform /
+        setCameraPos calls), e.g. an orbiting camera."""
         import bpy
         import OpenImageIO as oiio
         sc = bpy.context.scene
@@ -401,9 +441,12 @@ class SdfTexture:
         os.makedirs(self.cache_dir, exist_ok=True)
         last = None
         for f in range(fs, fe + 1):
-            path = os.path.join(self.cache_dir, f'{self.name}_{f:04d}.png')
+            path = os.path.join(self.cache_dir, f'{self.stem}_{f:04d}.png')
             if (f - fs) % every == 0 or last is None:
-                img = np.clip(self.render((f - fs) / fps), 0.0, 1.0)[::-1, :, :3]
+                if controls:
+                    for k, v in (controls(f, (f - fs) / fps) or {}).items():
+                        self.set_uniform(k, v)
+                img = self._texels(self.render((f - fs) / fps))[::-1, :, :3]
                 last = np.ascontiguousarray((img * 255.0 + 0.5).astype(np.uint8))
             out = oiio.ImageOutput.create(path)
             out.open(path, oiio.ImageSpec(self.width, self.height, 3, 'uint8'))
@@ -411,8 +454,8 @@ class SdfTexture:
             out.close()
             if f == fs:
                 import shutil
-                shutil.copyfile(path, os.path.join(self.cache_dir, f'{self.name}_{fs - 1:04d}.png'))
-        first = os.path.join(self.cache_dir, f'{self.name}_{fs:04d}.png')
+                shutil.copyfile(path, os.path.join(self.cache_dir, f'{self.stem}_{fs - 1:04d}.png'))
+        first = os.path.join(self.cache_dir, f'{self.stem}_{fs:04d}.png')
         old = self.image
         img = bpy.data.images.load(first, check_existing=False)
         img.name = self.name + '_seq'
@@ -465,8 +508,288 @@ def make_sdf_texture(opts=None, **kwargs):
     """The engine's makeSdfTexture(opts): recipe ('mandelbulb' | 'sierpinski_tetra' | 'menger_sponge' | 'gyroid'),
     width, height, aspect, uniforms, camera_orbit_radius / _speed, camera_pitch, camera_fov, camera_target,
     custom_de / custom_shade (GLSL), update_every, anisotropy. camelCase keys are accepted as the engine spelled
-    them. Extra: name, cache_dir, samples (jittered passes per frame)."""
+    them. Extra: name, cache_dir, samples (jittered passes per frame), encoding ('linear', the default: the engine's
+    look, as its sRGB render target stored the shader's values; 'srgb': the values as display colours, darker)."""
     o = dict(opts or {})
     o.update(kwargs)
     o = {_CAMEL_OPTS.get(k, k): v for k, v in o.items()}
     return SdfTexture(**o)
+
+
+# ============================================================================================ explosion texture ====
+# The backup's EXPLOSION_FRAGMENT_SHADER, as written. Its uniforms (uRes, uTime, uCamPos, uCamTarget) arrive as macros
+# over the uniform block, so their declarations and `precision` are left out; gl_FragColor is sdfTexColor; and the
+# pixel position takes the supersampling jitter (zero for the first sample, the engine's one sample per texel).
+# The animation is a 15-second loop:
+#     0.00-0.05  initial flash, the cap forms at the ground
+#     0.05-0.40  the cap rises fast, the stem extends
+#     0.40-0.85  the cloud expands and billows
+#     0.85-1.00  dissipation and fade
+EXPLOSION_FRAGMENT_SHADER = r"""
+float hash(vec3 p){
+  p = fract(p*0.3183099 + vec3(0.71, 0.113, 0.419));
+  p *= 17.0;
+  return fract(p.x*p.y*p.z*(p.x+p.y+p.z));
+}
+float vnoise(vec3 p){
+  vec3 i = floor(p); vec3 f = fract(p); f = f*f*(3.0 - 2.0*f);
+  float a = hash(i + vec3(0,0,0)); float b = hash(i + vec3(1,0,0));
+  float c = hash(i + vec3(0,1,0)); float d = hash(i + vec3(1,1,0));
+  float e = hash(i + vec3(0,0,1)); float g = hash(i + vec3(1,0,1));
+  float h = hash(i + vec3(0,1,1)); float k = hash(i + vec3(1,1,1));
+  return mix(mix(mix(a,b,f.x), mix(c,d,f.x), f.y),
+             mix(mix(e,g,f.x), mix(h,k,f.x), f.y), f.z);
+}
+float fbm(vec3 p){
+  float f = 0.0, amp = 0.5;
+  for(int i = 0; i < 5; i++){ f += amp*vnoise(p); p = p*2.07 + vec3(13.1, 7.3, 19.2); amp *= 0.5; }
+  return f;
+}
+float smin_cubic(float a, float b, float k){
+  float h = max(k - abs(a-b), 0.0)/k;
+  return min(a, b) - h*h*h*k*(1.0/6.0);
+}
+float ridgeFbm(vec3 p, float t){
+  float sum = 0.0; float a = 0.8;
+  for(int i = 0; i < 7; i++){
+    float c = cos(4.0), s = sin(4.0);
+    vec2 xz = mat2(c, -s, s, c) * p.xz; p.x = xz.x; p.z = xz.y;
+    sum += exp(sin(p.z / a + t * 0.5) - 3.0) * a;
+    sum += exp(sin(p.x / a + t * 0.3) - 3.0) * a * 0.6;
+    a *= 0.8;
+  }
+  return sum;
+}
+float easeOutCubic(float t){ return 1.0 - pow(1.0 - t, 3.0); }
+const float LOOP = 15.0;
+float sdStem(vec3 p, float stemTop, float baseR, float topR, float t){
+  float y = clamp(p.y, 0.0, stemTop);
+  float h = y / max(stemTop, 0.001);
+  float r = mix(baseR, topR, pow(h, 0.7));
+  vec3 q = p; float swirl = fbm(vec3(q.xz * 0.6, q.y * 0.4 + t * 0.3));
+  r += (swirl - 0.5) * 0.4 * h;
+  float radial = length(p.xz) - r;
+  float yClip = max(p.y - stemTop, -p.y);
+  return max(radial, yClip);
+}
+float sdCap(vec3 p, vec3 capCenter, float capR, float t){
+  vec3 q = p - capCenter;
+  float n1 = fbm(q * 0.45 + vec3(0.0, t * 0.15, t * 0.08));
+  float n2 = fbm(q * 1.2  + vec3(t * 0.2, 0.0, -t * 0.1));
+  float disp = n1 * 0.55 + n2 * 0.25;
+  float ridge = ridgeFbm(q * 0.6, t); disp += ridge * 1.4;
+  vec3 qStretch = q / vec3(1.0, 0.78, 1.0);
+  return length(qStretch) - capR - disp * 0.85 + 0.25;
+}
+float sdSmokeTrail(vec3 p, float trailY, float trailR, float t){
+  vec3 q = p - vec3(0.0, trailY, 0.0);
+  float n = fbm(q * 0.5 + vec3(0.0, t * 0.12, 0.0));
+  float r = trailR + n * 0.6 * trailR;
+  return length(q / vec3(1.3, 0.9, 1.3)) - r;
+}
+float sdBaseSurge(vec3 p, float t, float surgeR, float ringTube, float padH){
+  float radial = length(p.xz) - surgeR;
+  float n1 = fbm(vec3(p.xz * 0.30, t * 0.4));
+  float n2 = fbm(vec3(p.xz * 0.80, t * 0.6));
+  float ringDisp = n1 * 0.8 + n2 * 0.4;
+  float effRingTube = ringTube + ringDisp * 0.7;
+  float dRing = length(vec2(radial, p.y - ringTube * 0.6)) - effRingTube;
+  float innerR = surgeR - ringTube * 0.4;
+  float heightAtR = padH * smoothstep(innerR, innerR * 0.2, length(p.xz));
+  float padN = fbm(vec3(p.xz * 0.4, t * 0.3));
+  float effInnerR = innerR + padN * 0.8;
+  float padRadial = length(p.xz) - effInnerR;
+  float padY = max(p.y - heightAtR, -p.y);
+  float dPad = max(padRadial, padY);
+  return smin_cubic(dRing, dPad, 0.6);
+}
+vec2 mapScene(vec3 p, float t){
+  float tn = mod(uTime, LOOP) / LOOP;
+  float capY = mix(1.0, 9.0, easeOutCubic(min(tn / 0.6, 1.0))) + tn * 1.2;
+  float capR = mix(0.4, 3.4, easeOutCubic(min(tn / 0.5, 1.0))) + tn * 0.3;
+  float stemTop = capY - 0.6;
+  float stemBaseR = mix(0.25, 0.9, easeOutCubic(min(tn / 0.4, 1.0)));
+  float stemTopR  = mix(0.6, 1.6, easeOutCubic(min(tn / 0.5, 1.0)));
+  float dStem = sdStem(p, stemTop, stemBaseR, stemTopR, t);
+  float dCap = sdCap(p, vec3(0.0, capY, 0.0), capR, t);
+  float dCloud = smin_cubic(dStem, dCap, 0.6);
+  float trailRise = clamp((tn - 0.10) / 0.5, 0.0, 1.0);
+  float trailY = mix(1.0, capY * 0.60, trailRise);
+  float trailR = mix(0.3, 1.7, trailRise);
+  if(trailRise > 0.001){
+    float dSmoke = sdSmokeTrail(p, trailY, trailR, t);
+    dCloud = smin_cubic(dCloud, dSmoke, mix(0.3, 1.0, trailRise));
+  }
+  float surgeR   = mix(2.0, 16.0, easeOutCubic(min(tn / 0.7, 1.0))) + tn * 4.0;
+  float ringPeak = smoothstep(0.0, 0.4, tn);
+  float ringFade = 1.0 - smoothstep(0.4, 1.0, tn);
+  float ringTube = mix(0.4, 2.2, ringPeak) * mix(0.15, 1.0, ringFade);
+  float padH     = mix(0.6, 1.8, easeOutCubic(min(tn / 0.5, 1.0))) * mix(0.3, 1.0, ringFade);
+  float dSurge   = sdBaseSurge(p, t, surgeR, ringTube, padH);
+  dCloud = smin_cubic(dCloud, dSurge, mix(0.3, 1.0, ringFade));
+  float heightTerm = exp(-p.y * 0.18);
+  float axialTerm  = exp(-length(p.xz) * 0.4);
+  float coreTerm   = exp(-length(p - vec3(0.0, 1.5, 0.0)) * 0.25);
+  float temp = clamp(0.55 * heightTerm * axialTerm + 0.6 * coreTerm, 0.0, 1.0);
+  float colorNoise = fbm(p * 0.35 + vec3(0.0, t * 0.2, t * 0.15));
+  float perturb = (colorNoise - 0.5) * 0.45;
+  float perturbStrength = 1.0 - smoothstep(0.5, 0.85, temp);
+  temp = clamp(temp + perturb * perturbStrength, 0.0, 1.0);
+  float coolFactor = 1.0 - smoothstep(0.7, 1.0, tn);
+  temp *= coolFactor;
+  return vec2(dCloud, temp);
+}
+vec3 calcNormal(vec3 p){
+  const float e = 0.01;
+  vec2 h = vec2(1.0, -1.0) * 0.5773;
+  return normalize(
+    h.xyy * mapScene(p + e*h.xyy, uTime).x +
+    h.yyx * mapScene(p + e*h.yyx, uTime).x +
+    h.yxy * mapScene(p + e*h.yxy, uTime).x +
+    h.xxx * mapScene(p + e*h.xxx, uTime).x);
+}
+vec3 skyColor(vec3 rd){
+  float horizon = 1.0 - max(rd.y, 0.0);
+  vec3 zenith  = vec3(0.015, 0.020, 0.040);
+  vec3 horizonCol = vec3(0.08, 0.04, 0.05);
+  return mix(zenith, horizonCol, pow(horizon, 4.0));
+}
+vec3 fireRamp(float t){
+  vec3 c0 = vec3(0.020, 0.018, 0.018);
+  vec3 c1 = vec3(0.10, 0.08, 0.07);
+  vec3 c2 = vec3(0.40, 0.18, 0.08);
+  vec3 c3 = vec3(1.40, 0.50, 0.12);
+  vec3 c4 = vec3(2.30, 1.20, 0.40);
+  vec3 c5 = vec3(3.20, 2.20, 1.10);
+  if(t < 0.2)  return mix(c0, c1, t / 0.2);
+  if(t < 0.4)  return mix(c1, c2, (t - 0.2) / 0.2);
+  if(t < 0.6)  return mix(c2, c3, (t - 0.4) / 0.2);
+  if(t < 0.8)  return mix(c3, c4, (t - 0.6) / 0.2);
+  return mix(c4, c5, (t - 0.8) / 0.2);
+}
+void main(){
+  vec2 fc = gl_FragCoord.xy + 0.5 * sdfTexJitter;
+  vec2 p = (fc - 0.5*uRes) / uRes.y;
+  vec3 ro = uCamPos;
+  vec3 fwd = normalize(uCamTarget - uCamPos);
+  vec3 rt  = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
+  vec3 up  = cross(rt, fwd);
+  float fov = 1.4;
+  vec3 rd = normalize(fwd*fov + rt*p.x + up*p.y);
+  vec3 col = vec3(0.0);
+  bool hit = false;
+  float t = 0.0; float maxT = 200.0;
+  vec3 hitPos = ro; float hitTemp = 0.0;
+  float accumulated = 0.0; vec3 accumColor = vec3(0.0);
+  for(int i = 0; i < 64; i++){
+    vec3 q = ro + rd * t;
+    vec2 m = mapScene(q, uTime);
+    float d = m.x; float temp = m.y;
+    if(d < 0.4){
+      float density = clamp(1.0 - d / 0.4, 0.0, 1.0);
+      vec3 fc2 = fireRamp(temp);
+      float contribution = density * 0.05 * (1.0 - accumulated);
+      accumColor += fc2 * contribution; accumulated += contribution;
+      if(accumulated > 0.95) break;
+    }
+    if(d < 0.01){ hit = true; hitPos = q; hitTemp = temp; break; }
+    t += max(d * 0.7, 0.08);
+    if(t > maxT) break;
+  }
+  if(hit){
+    vec3 base = fireRamp(hitTemp);
+    vec3 n = calcNormal(hitPos);
+    vec3 toCore = normalize(vec3(0.0, 1.5, 0.0) - hitPos);
+    float coreGlow = max(dot(n, toCore), 0.0);
+    base *= 0.7 + 0.6 * coreGlow;
+    col = base + accumColor;
+  } else {
+    col = skyColor(rd) + accumColor;
+  }
+  float horizonHaze = exp(-max(rd.y, -0.2) * 3.0) * 0.06;
+  col += horizonHaze * vec3(0.8, 0.3, 0.1);
+  col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+  col = pow(clamp(col, 0.0, 1.0), vec3(1.0/2.2));
+  vec2 vc = (fc / uRes - 0.5);
+  float vig = 1.0 - dot(vc, vc) * 0.6;
+  col *= vig;
+  sdfTexColor = vec4(col, 1.0);
+}
+"""
+
+EXPLOSION_LOOP_SECONDS = 15.0
+
+_EXPLOSION_CAMEL = {'cameraPos': 'camera_pos', 'cameraTarget': 'camera_target', 'updateEvery': 'update_every',
+                    'timeScale': 'time_scale', 'timeOffset': 'time_offset'}
+
+
+class ExplosionTexture(SdfTexture):
+    """What make_explosion_texture returns: the SdfTexture contract (.image / .texture, update(t), bake(), material(),
+    dispose()) around the engine's mushroom-cloud shader, plus set_camera_pos / set_camera_target. The shader's own
+    time is t * time_scale + time_offset, as the engine's update(t) set it."""
+
+    _SWIZZLE = dict(SdfTexture._SWIZZLE, uRes='.xy', uCamPos='.xyz', uCamTarget='.xyz')
+
+    def __init__(self, width=512, height=512, camera_pos=(18.0, 7.0, 22.0), camera_target=(0.0, 5.0, 0.0),
+                 update_every=1, time_scale=1.0, time_offset=0.0, name=None, cache_dir='//sdf_cache', samples=1,
+                 encoding='linear'):
+        import bpy
+        self.encoding = _check_encoding(encoding)
+        self.recipe = 'explosion'
+        self.width = int(width) or 512
+        self.height = int(height) or 512
+        self.aspect = self.width / self.height
+        self.update_every = max(1, int(update_every or 1))
+        self.time_scale = 1.0 if time_scale is None else float(time_scale)
+        self.time_offset = 0.0 if time_offset is None else float(time_offset)
+        self.anisotropy = None
+        self.samples = max(1, int(samples))
+        self.name = name or 'sdf_tex_explosion'
+        self.cache_dir = resolve_cache_dir(cache_dir)
+        self.uniforms = {'uRes': (float(self.width), float(self.height)), 'uTime': 0.0,
+                         'uCamPos': tuple(float(x) for x in camera_pos),
+                         'uCamTarget': tuple(float(x) for x in camera_target)}
+        self._user = []
+        self.de = ''
+        self.custom_shade = None
+        self._shader = None
+        self._frames = 0
+        self.image = bpy.data.images.new(self.name, self.width, self.height, alpha=False, float_buffer=False)
+        self.image.colorspace_settings.name = 'sRGB'
+        self.texture = self.image
+        self.sequence = None
+        self.stem = file_stem(self.image.name)
+
+    def _layout(self):
+        return ['uRes', 'uTime', 'uCamPos', 'uCamTarget', 'sdfTexSize', 'sdfTexJitter']
+
+    def source(self):
+        return self._uniform_macros() + '\n' + EXPLOSION_FRAGMENT_SHADER
+
+    def render(self, t):
+        """The shader at film time t (its own clock: t * time_scale + time_offset), (H, W, 4), row 0 at the bottom.
+        The shader tone-maps and gamma-encodes itself, so its values were written as display colours; the engine's
+        sRGB render target read them as linear light (see the module's note on encoding)."""
+        return super().render(float(t) * self.time_scale + self.time_offset)
+
+    def set_camera_pos(self, x, y=None, z=None):
+        """The engine's setCameraPos(x, y, z): the shader camera, in its own y-up frame (default (18, 7, 22))."""
+        self.uniforms['uCamPos'] = tuple(float(v) for v in ((x, y, z) if y is not None else x))
+        return self
+
+    def set_camera_target(self, x, y=None, z=None):
+        """The engine's setCameraTarget(x, y, z) (default (0, 5, 0))."""
+        self.uniforms['uCamTarget'] = tuple(float(v) for v in ((x, y, z) if y is not None else x))
+        return self
+
+
+def make_explosion_texture(opts=None, **kwargs):
+    """The engine's makeExplosionTexture(opts) (its GLSL edition; the TSL migration dropped it): an animated
+    raymarched mushroom-cloud detonation rendered into an image, on a 15-second loop. Options: width, height (512),
+    camera_pos (18, 7, 22), camera_target (0, 5, 0), update_every, time_scale, time_offset; camelCase keys as the
+    engine spelled them. Extra: name, cache_dir, samples, encoding. Returns an ExplosionTexture: update(t), bake(fs, fe,
+    controls=), set_camera_pos / set_camera_target, material(), dispose(), .image / .texture."""
+    o = dict(opts or {})
+    o.update(kwargs)
+    o = {_EXPLOSION_CAMEL.get(k, k): v for k, v in o.items()}
+    return ExplosionTexture(**o)

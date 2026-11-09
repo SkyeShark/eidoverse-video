@@ -56,7 +56,7 @@ def tank(name, **kw):
 
 # ---- volume_control off: the engine's own uncontrolled trace ------------------------------------------------
 ref = json.load(open(os.path.join(S.HERE, 'engine_trace_dambreak_novc.json')))['trace']
-from eidoblend.fx.water3d import ENGINE_SOLVER as ENGINE                     # noqa: E402  (the engine's solver)
+from eidoblend.fx.water3d import ENGINE_SOLVER as ENGINE, DROP_SOLVER       # noqa: E402  (the presets)
 w = tank('novc', volume_control=False, **ENGINE)
 mine = [(0.0, w.measure_volume())]
 for f in range(1, 91):
@@ -86,10 +86,10 @@ ph, v = run(w, 30)
 ok &= S.check('reinit_scheme=central (the engine\'s kernel) runs at its cadence', bool(np.isfinite(ph).all()),
               f'volume {v:.4f} m3 after 1 s')
 w.dispose()
-# Godunov redistancing (the default): after 3 s of the dam break, |grad phi| is ~1 in the band 2-4 cells from the
-# surface (a distance field), where the engine's settings leave the clamped, advected profile
+# Godunov redistancing (DROP_SOLVER): after 3 s of the dam break, |grad phi| is ~1 in the band 2-4 cells from the
+# surface (a distance field), where the engine's settings (the defaults) leave the clamped, advected profile
 grads = {}
-for nm, kw in (('godunov', {}), ('engine', ENGINE)):
+for nm, kw in (('godunov', DROP_SOLVER), ('engine', ENGINE)):
     w = tank('rd_' + nm, **kw)
     ph, v = run(w, 90)
     g = np.stack(np.gradient(ph.astype(np.float64), w.solver.DX), axis=0)
@@ -100,6 +100,22 @@ for nm, kw in (('godunov', {}), ('engine', ENGINE)):
 ok &= S.check('godunov redistancing keeps phi a distance field (median ||grad phi| - 1| in the 2-4 cell band)',
               grads['godunov'] < 0.15 and grads['godunov'] < grads['engine'],
               f'godunov {grads["godunov"]:.3f}, engine settings {grads["engine"]:.3f}')
+w = tank('switch')
+run(w, 5)
+w.set_solver(**DROP_SOLVER)
+ph, v = run(w, 5)
+switched = (w.params['reinit_every'], w.params['reinit_scheme'], w.params['extrapolation'])
+w.set_solver(**ENGINE)
+ph2, v2 = run(w, 5)
+ok &= S.check('set_solver switches between the engine\'s solver and DROP_SOLVER mid-run',
+              switched == (1, 'godunov', 'bfs') and w.params['extrapolation'] == 'phi'
+              and bool(np.isfinite(ph).all() and np.isfinite(ph2).all()), f'{switched}, volume {v2:.4f} m3')
+try:
+    w.set_solver(extrapolation='nearest')
+    ok &= S.check('set_solver refuses an unknown extrapolation', False)
+except ValueError:
+    ok &= S.check('set_solver refuses an unknown extrapolation', True)
+w.dispose()
 w = tank('fast', max_speed=1.0, max_trace_cells=1.0, vel_damping=2.0, vel_smooth=0.5)
 run(w, 30)
 vel = w.solver.velocity()
@@ -174,28 +190,79 @@ run(w, 6)
 
 
 def surface_top(w, **o):
+    """The median height of the pool's TOP (the mesh also holds the body's floor-side face) and the face count."""
     for k, v in o.items():
         w.params[k] = v
     verts, tris, quads, attrs = w.surface_arrays()
-    mid = (np.abs(verts[:, 0]) < 0.5) & (np.abs(verts[:, 1]) < 0.5)
+    mid = (np.abs(verts[:, 0]) < 0.5) & (np.abs(verts[:, 1]) < 0.5) & (verts[:, 2] > 0.3)
     return float(np.median(verts[mid, 2])), len(tris) + len(quads)
 
 
 z0, n0 = surface_top(w, surface_bias=0.0, render_blur=0, smooth_surface=False, mesh_adaptivity=0.0)
 zb, _ = surface_top(w, surface_bias=0.02)
-ok &= S.check('surface_bias lowers the drawn surface by the bias', abs((z0 - zb) - 0.02) < 0.006,
-              f'{(z0 - zb) * 1000:.1f} mm')
-_, nb = surface_top(w, surface_bias=0.0, render_blur=2)
-_, ns = surface_top(w, render_blur=0, smooth_surface=True)
+# the phi = -bias contour sits bias / |grad phi| lower; the engine's solver keeps no distance field near the surface
+# (|grad phi| about 0.65 in this still pool), DROP_SOLVER's redistancing does (about 24 mm)
+ok &= S.check('surface_bias lowers the drawn surface by about the bias (between 1 and 2 times it)',
+              0.02 <= (z0 - zb) <= 0.04, f'{(z0 - zb) * 1000:.1f} mm for a 20 mm bias')
+_, ns = surface_top(w, surface_bias=0.0, smooth_surface=True)
 _, na = surface_top(w, smooth_surface=False, mesh_adaptivity=0.6)
-ok &= S.check('render_blur / smooth_surface / mesh_adaptivity change the mesh', nb != n0 and ns > n0 and na < n0,
-              f'faces plain {n0}, blur {nb}, smooth {ns}, adaptive {na}')
 w.dispose()
+# render_blur low-passes phi: a flat pool is a linear field it leaves alone, so it is tried on the dam break's
+# column, whose edges and corners it rounds (the meshed body loses that much volume)
+
+
+def mesh_volume(v, t, q):
+    tri = np.concatenate([t, q[:, [0, 1, 2]], q[:, [0, 2, 3]]]) if len(q) else t
+    a, b, c = v[tri[:, 0]].astype(np.float64), v[tri[:, 1]].astype(np.float64), v[tri[:, 2]].astype(np.float64)
+    return abs(float(np.einsum('ij,ij->i', a, np.cross(b, c)).sum()) / 6.0)
+
+
+w = tank('blur')
+run(w, 1)
+w.params.update(surface_bias=0.0, smooth_surface=False, mesh_adaptivity=0.0, render_blur=0)
+vp, tp, qp, _ = w.surface_arrays()
+w.params['render_blur'] = 2
+vb, tb, qb, _ = w.surface_arrays()
+w.dispose()
+volp, volb = mesh_volume(vp, tp, qp), mesh_volume(vb, tb, qb)
+ok &= S.check('render_blur / smooth_surface / mesh_adaptivity change the mesh',
+              volb < volp - 1e-4 and ns > n0 and na < n0,
+              f'column {volp * 1000:.1f} -> {volb * 1000:.1f} l with its edges rounded by blur 2; faces plain {n0}, '
+              f'smooth {ns}, adaptive {na}')
 from eidoblend.fx.water3d.material import display_matched  # noqa: E402
 from eidoblend.fx._util import color  # noqa: E402
 m = display_matched(sc, color('#2f8f9d'))
 ok &= S.check('engine_display matches the palette under AgX (differs from the raw colour)',
               not np.allclose(m, color('#2f8f9d'), atol=1e-3), f'{tuple(round(x, 4) for x in m)}')
+# the refraction thickness: the baked exit path linked as a slab (default), a sphere, or left to EEVEE ('none')
+th = {}
+for mode in ('slab', 'sphere', 'none'):
+    w = tank('rt_' + mode, refraction_thickness=mode)
+    out_n = [n for n in w.material.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'][0]
+    th[mode] = (out_n.inputs['Thickness'].is_linked, w.material.thickness_mode)
+    w.dispose()
+ok &= S.check('refraction_thickness links the baked path as a slab / sphere, or leaves it to EEVEE',
+              th['slab'] == (True, 'SLAB') and th['sphere'] == (True, 'SPHERE') and not th['none'][0], str(th))
+picks = {}
+for mode in ('lace', 'dither'):
+    w = tank('fp_' + mode, foam_pick=mode, foam_scale=60.0)
+    kinds = {n.bl_idname for n in w.material.node_tree.nodes}
+    picks[mode] = ('ShaderNodeTexNoise' in kinds, 'ShaderNodeTexWhiteNoise' in kinds,
+                   'w3d.foam_scale' in w.material.node_tree.nodes)
+    w.dispose()
+ok &= S.check('foam_pick: lace picks by a 3D noise at foam_scale, dither by a white-noise hash',
+              picks['lace'] == (True, False, True) and picks['dither'][1] and not picks['dither'][0], str(picks))
+w = tank('attrs', initial_level=0.5)
+run(w, 3)
+vt, _, _, at = w.surface_arrays()
+top = (np.abs(vt[:, 2] - 0.5) < 0.03) & (np.abs(vt[:, 0]) < 0.8) & (np.abs(vt[:, 1]) < 0.8)
+depth = 0.5 - 1.5 / 64 * 1.5                                    # to the analytic floor (its 1.5-cell margin)
+ok &= S.check('exit/bed: a still pool\'s top looks down to its floor (bed) about its depth',
+              bool(top.sum() > 100) and float(at['bed'][top].mean()) > 0.99 and
+              abs(float(np.median(at['exit'][top])) - depth) < 0.04,
+              f'{int(top.sum())} top vertices, bed {at["bed"][top].mean():.2f}, median exit '
+              f'{np.median(at["exit"][top]):.3f} m vs {depth:.3f}')
+w.dispose()
 
 # ---- renders: the wading pool, from above and from under the water, and an emissive goo ----------------------
 for ob in list(bpy.data.objects):
@@ -259,9 +326,11 @@ ok &= S.check('track_spheres fills the sphere slots (bone and object)',
 S.camera_look(sc, (-2.6, -3.4, 2.4), (0.0, 0.0, 0.3), lens=30)
 ok &= S.render(sc, 30, os.path.join(S.OUT, 'w3d_opt_wade_f0030.png'))
 ok &= S.render(sc, 60, os.path.join(S.OUT, 'w3d_opt_wade_f0060.png'))
-# under the water: inside_domain shows the surface's back faces
-pool.material.use_backface_culling = False
-pool.params['inside_domain'] = True
+# under the water: inside_domain shows the surface's back faces and absorbs along the view inside the water
+pool.set_inside_domain(True)
+ok &= S.check('set_inside_domain draws back faces and links the under-water absorption',
+              not pool.material.use_backface_culling and
+              [n for n in pool.material.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'][0].inputs['Volume'].is_linked)
 S.camera_look(sc, (-1.6, -1.7, 0.22), (0.4, 0.4, 0.5), lens=24)
 ok &= S.render(sc, 60, os.path.join(S.OUT, 'w3d_opt_underwater_f0060.png'))
 # an emissive goo, the engine shading (the engine's 'luminous liquid' palette)
@@ -269,12 +338,15 @@ for ob in [o for o in sc.objects if o.name.startswith(('wade', 'wader', 'hand', 
     bpy.data.objects.remove(ob, do_unlink=True)
 for (sx, sy, x, y) in ((0.2, 4.4, 2.1, 0), (0.2, 4.4, -2.1, 0), (4.4, 0.2, 0, 2.1), (4.4, 0.2, 0, -2.1)):
     S.box(sc, 'goo_wall', (sx, sy, 2.0), (x, y, 1.0), tiles)        # the surge runs up higher than the column
+# the engine drew to an sRGB canvas with no tone mapping: an emissive above 1 clips to its hue there, where AgX
+# bleaches it, so the engine-shading goo is built and viewed as that canvas (its palette display-matched to Standard)
+sc.view_settings.view_transform = 'Standard'
 goo = create_water_sim(scene=sc, name='goo', cache_dir=os.path.join(S.OUT, 'opt_cache'),
                        grid_size=(64, 64, 48), world_size=(4.0, 4.0, 3.0), domain_center=(0, 0, 1.5),
                        column_width=0.42, column_height=0.6, column_depth=0.5, shading='engine',
                        thickness_mode='view', emissive_strength=1.4, emissive_color='#2ffbe0', emissive_falloff=5.0,
                        sparkle_strength=0.6, deep_color='#0b3a2c', shallow_color='#3fe0a0', smooth_surface=True)
-S.camera_look(sc, (-3.4, -4.4, 2.8), (0.2, 0.0, 0.4), lens=30)
+S.camera_look(sc, (-2.0, -2.8, 6.0), (0.3, 0.3, 0.2), lens=24)     # steep, over the 2 m walls into the tank
 goo.bake(1, 45, mesh_frames=[45])
 ok &= S.render(sc, 45, os.path.join(S.OUT, 'w3d_opt_goo_f0045.png'))
 S.contact_sheet([os.path.join(S.OUT, p) for p in ('w3d_opt_wade_f0030.png', 'w3d_opt_wade_f0060.png',

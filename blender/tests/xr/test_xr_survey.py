@@ -81,6 +81,13 @@ if 'robot_walk' in surveys:
     check('robot_walk: my body: two skinned meshes on one armature, sun lights, no camera of its own',
           s['objects'].get('ARMATURE') == 1 and len(s['motion']['skinned']) == 2
           and {k for _, k in s['lights']} == {'SUN'} and 'CAMERA' not in s['objects'], (s['objects'], s['lights']))
+    tx = s.get('textures', {})
+    check("robot_walk: the survey grades its 4096 px maps over the headset's texture budget (max_image's cue)",
+          tx.get('largest') == 4096 and tx.get('quest') == 'over', tx)
+if 'example' in surveys:
+    tx = surveys['example'].get('textures', {})
+    check('example: its textures counted as the headset would hold them, within the budget', tx.get('images', 0) >= 3
+          and tx.get('quest') in ('ok', 'heavy'), tx)
 with open(os.path.join(OUT, 'surveys.json'), 'w') as f:
     json.dump(surveys, f, indent=1, default=str)
 n_fail = sum(1 for _, ok, _ in RESULTS if not ok)

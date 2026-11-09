@@ -107,7 +107,7 @@ if '2' in PARTS:
         elif frame > 30 and frame % 3 == 0:
             x, y = rng.uniform(-0.25, 0.25, 2)
             w.disturb(float(x), float(y), 0.015, 0.0025)   # rain
-        if 10 <= frame <= 20:
+        if 10 <= frame <= 30:
             h = w.heights
             W = w.W
             iz, ix = np.mgrid[0:W, 0:W]
@@ -119,8 +119,8 @@ if '2' in PARTS:
 
     pool.bake(1, 96, controls=controls, cache_dir=os.path.join(S.OUT, 'pool_cache'))
     radii = [r for f, r in rings]
-    ok &= S.check('a drop\'s ripple ring spreads outward', len(radii) > 4 and radii[-1] > radii[0] + 0.02,
-                  f'ring radius {radii[0]:.2f} -> {radii[-1]:.2f} m over frames 10..20')
+    ok &= S.check('a drop\'s ripple ring spreads outward', len(radii) > 4 and radii[-1] > radii[0] + 0.03,
+                  f'ring radius {radii[0]:.2f} -> {radii[-1]:.2f} m over frames 10..30')
     ok &= S.check('heights stay inside +-max_height', float(np.abs(pool.heights).max()) <= pool.max_height + 1e-6,
                   f'{np.abs(pool.heights).max():.4f} <= {pool.max_height:.4f}')
     sc.frame_set(48)
@@ -131,7 +131,7 @@ if '2' in PARTS:
     co = co.reshape(-1, 3)
     has_n = 'wave_normal' in me.attributes
     ev.to_mesh_clear()
-    rim = np.hypot(co[:, 0], co[:, 1]) > 0.335 * 0.98
+    rim = np.hypot(co[:, 0], co[:, 1]) >= 0.5 * 0.67                     # the disc's rim and the clipped corners
     ok &= S.check('the player displaces the grid and stores the shading normal',
                   float(np.abs(co[:, 2]).max()) > 1e-4 and has_n, f'max |dz| {np.abs(co[:, 2]).max():.4f} m')
     ok &= S.check('the circular fade holds the rim still', float(np.abs(co[rim, 2]).max()) < 1e-6)
@@ -149,7 +149,9 @@ if '3' in PARTS:
     sc.render.fps = 30
     sc.frame_start, sc.frame_end = 1, 75
     # background 0x16202c, AmbientLight 0x445566 x 1.0, DirectionalLight (5, 12, 8) x 2.5 (ACES there, AgX here)
-    S.world_backdrop(sc, camera_col=0x16202c, ambient_col=0x445566, ambient_strength=1.0, match_display=True)
+    # the engine's material had no envMap: its reflections saw nothing, so the world's glossy rays see black here
+    S.world_backdrop(sc, camera_col=0x16202c, ambient_col=0x445566, ambient_strength=1.0, match_display=True,
+                     glossy=(0x000000, 0.0))
     S.sun_three(sc, 'key', (5, 12, 8), 0xffffff, 2.5)
     S.camera_three(sc, (0, 8, 14), (0, 0, 0), 50)
     show = create_water_compute(name='showcase', width=128, bounds=20.0, color=0x2266aa)

@@ -1,21 +1,21 @@
-"""Probe: the UNKNOWN FORCE city (with the hole inside it) built in Blender 5.2 and rendered from the film's cameras.
+"""Probe: the UNKNOWN FORCE city (with the hole inside it) built in Blender 5.2 and rendered from the set's cameras.
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
         bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_city_render.py [--no-render] [--shots a,b]
         [--samples 16] [--res 960x540] [--bloom] [--save] [--power 1.0] [--her] [--vrm path] [--sweep]
         [--compare] [--refs dir] [--tag _suffix] [--clamp-indirect 10] [--set rain=0,wet=0.5] [--hash hoskins]
-        [--lapse dive,hole]
 
 Builds the city (seed 1909) and checks it numerically: the buildings, signs, lamps and cars against the engine's
 counts (1908, 4446 + the hole's 24, 1967, 2161), the merged buffers, the Geometry Nodes systems after evaluation (rain
 quads round the camera, cars on the roads, camera-facing cables), the uniforms and the pixel-angle driver, the keyed
-dive (camera, clock, focal light, rain velocity), the light linking of the hole's lights. Then renders stills (EEVEE,
-AgX) from the dive at the engine's mid-shot times, the city's two static views and the eight chorus cameras into
-out/, driven as the film's probe stage drove them. --her imports the claudesona (claude_suit.vrm, or --vrm) on her
-mark for the chorus shots. --compare writes out/compare_<shot>.png: the film's own WebGPU still of that shot (the
-probe stage's, from --refs, default <cwd>/work/unknown_force/sets/probes) beside this render. --lapse dive,hole renders
-the probe stage's divelapse and holelapse (the whole dive, the eight chorus shots start to end) at half size into
-out/lapse_<which>/ and out/lapse_<which>.mp4. Prints PASS / FAIL.
+dive (camera, clock, focal light, rain velocity), the cloud deck over the camera and drawn before every other blended
+object (three's renderOrder), the light linking of the hole's lights. Then renders stills of the set (EEVEE, AgX)
+from the dive at four of its times, the city's two static views, the hole's eight camera moves at mid-move and the
+turn-down into out/, lit as the WebGPU probe stage lit its stills of the set, and the dive's end again with the deck
+off (probe_dive_t40.8_cloud_0.png): the pillar of light reads as bright and even through the deck. --her puts a performer
+on the mark (a VRM: claude_suit.vrm, or --vrm) in the haze, for scale and for the performer-only lights. --compare
+writes out/compare_<shot>.png: the WebGPU probe stage's still of that view (from --refs, default
+<cwd>/work/unknown_force/sets/probes) beside this render. Prints PASS / FAIL.
 """
 import math
 import sys
@@ -140,10 +140,46 @@ P['traffic'].evaluated_get(dg).data.vertices.foreach_get('co', cz2)
 moved = np.linalg.norm(cz2.reshape(-1, 3)[::8] - cz[::8], axis=1)
 check('cars move with the keyed clock (4 s: 13-21 m/s)', 40 < float(np.median(moved)) < 90,
       f'median {np.median(moved):.1f} m')
-cl = P['clouds'].evaluated_get(dg).matrix_world.translation
-cpos = cam.evaluated_get(dg).matrix_world.translation
-check('the cloud deck rides the camera in x and y (makeClouds\' update)', abs(cl.x - cpos.x) < 1e-3 and
-      abs(cl.y - cpos.y) < 1e-3 and abs(cl.z) < 1e-6, f'deck ({cl.x:.1f}, {cl.y:.1f}), camera ({cpos.x:.1f}, {cpos.y:.1f})')
+cm_eval = cam.evaluated_get(dg).matrix_world
+cpos = cm_eval.translation.copy()
+cfwd = -(cm_eval.to_3x3() @ __import__('mathutils').Vector((0.0, 0.0, 1.0))).normalized()
+deck = sorted(P['clouds'].children, key=lambda s: s.name)
+deck_ctr = []
+for s in deck:
+    ev = s.evaluated_get(dg)
+    co = np.empty(len(ev.data.vertices) * 3, np.float64)
+    ev.data.vertices.foreach_get('co', co)
+    M4 = np.array(ev.matrix_world, np.float64)
+    deck_ctr.append((co.reshape(-1, 3) @ M4[:3, :3].T + M4[:3, 3]).mean(0))
+deck_ctr = np.array(deck_ctr)
+want_ctr = np.array([[cpos.x, cpos.y, KIT.CLOUD['base'] + (KIT.CLOUD['top'] - KIT.CLOUD['base']) * i / 12]
+                     for i in range(13)])
+check('the cloud deck rides the camera in x and y (makeClouds\' update): each sheet centred over it at its height',
+      len(deck) == 13 and float(np.abs(deck_ctr - want_ctr).max()) < 0.02,
+      f'worst {float(np.abs(deck_ctr - want_ctr).max()) * 1000:.1f} mm; camera ({cpos.x:.1f}, {cpos.y:.1f})')
+
+
+def _blended_objects():
+    """The scene's mesh objects that draw a BLENDED material (slots, or set by Geometry Nodes), evaluated."""
+    out = []
+    for o in scene.objects:
+        if o.type != 'MESH' or o.hide_render:
+            continue
+        ms = [sl.material for sl in o.material_slots if sl.material]
+        ms += [m for m in getattr(o.evaluated_get(dg).data, 'materials', []) if m]
+        if any(getattr(m, 'surface_render_method', '') == 'BLENDED' for m in ms):
+            out.append(o)
+    return out
+
+
+# EEVEE draws blended objects back to front by their origins' depth along the view; three drew the deck (renderOrder
+# 1) before the additive signs (2), rain (3) and pillar of light (4): the deck's origins must be the deepest
+others = [o for o in _blended_objects() if o not in deck]
+d_deck = min((s.evaluated_get(dg).matrix_world.translation - cpos).dot(cfwd) for s in deck)
+d_rest = {o.name: (o.evaluated_get(dg).matrix_world.translation - cpos).dot(cfwd) for o in others}
+check('the cloud deck is drawn first, as three\'s renderOrder 1 drew it (its origins deeper along the view than every '
+      'other blended object\'s)', bool(d_rest) and d_deck > max(d_rest.values()),
+      f'deck {d_deck:.0f} m; ' + ', '.join(f'{k} {v:.0f} m' for k, v in sorted(d_rest.items())))
 cab = hole['parts']['cables'].evaluated_get(dg).data
 cv = np.empty(len(cab.vertices) * 3, np.float32)
 cab.vertices.foreach_get('co', cv)
@@ -155,9 +191,26 @@ L = hole['parts']['lights']
 rc = L['ring'].light_linking.receiver_collection
 check('quiet ring lights the hole + her', rc is not None and {c.name for c in rc.children} ==
       {hole['collection'].name, hole['parts']['her'].name})
-rc2 = L['screen0'].light_linking.receiver_collection
-check('screen and kicker lights reach her only', rc2 is not None and [c.name for c in rc2.children] ==
-      [hole['parts']['her'].name])
+
+
+def link_states(light):
+    rcl = light.light_linking.receiver_collection
+    return {} if rcl is None else {c.name: rcl.collection_children[i].light_linking.link_state
+                                   for i, c in enumerate(rcl.children)}
+
+
+want_ll = {hole['parts']['her'].name: 'INCLUDE', hole['collection'].name: 'EXCLUDE', city['collection'].name: 'EXCLUDE'}
+got_ll = {k: link_states(L[k]) for k in ('screen0', 'screen1', 'screen2', 'screen3', 'kickL', 'kickR')}
+check('screen and kicker lights reach the performer only, never the set (even with nobody in `her`)',
+      all(v == want_ll for v in got_ll.values()), str(got_ll['screen0']))
+CL = P['lights']
+wet_n, hole_n = P['wet_floors'].name, hole['collection'].name
+check('the sky-glow: its wet twin (specular 0.04 / 0.9) lights the street, the blocks and the hole; the sky-glow the rest',
+      link_states(CL['moon']) == {wet_n: 'EXCLUDE', hole_n: 'EXCLUDE'} and
+      link_states(CL['moon_wet']) == {wet_n: 'INCLUDE', hole_n: 'INCLUDE'} and
+      abs(CL['moon_wet'].data.specular_factor - 0.04 / 0.9) < 1e-6 and
+      {o.name for o in P['wet_floors'].objects} == {'uf_street', 'uf_blocks'},
+      f"{link_states(CL['moon'])} / {link_states(CL['moon_wet'])}")
 check('the hole: 12 billboards, 4 tickers, 48 arms', len(hole['parts']['billboards']) == 12 and
       len(hole['parts']['tickers']) == 4 and len(hole['parts']['arms']) == 48)
 check('audit flags as the engine set them (rain, clouds, traffic, pillar, cables)',
@@ -201,13 +254,13 @@ for nme in H.HOLE_CAMS:
         cs = min(cs, clearance(pos))
         cc = min(cc, min(seg_dist(pos, e['a'], e['b']) for e in ends))
     worst[nme] = (cs, cc)
-check('chorus cameras: clear of every solid surface (>= 0.3 m)', all(v[0] >= 0.3 for v in worst.values()),
+check('the hole\'s camera moves: clear of every solid surface (>= 0.3 m)', all(v[0] >= 0.3 for v in worst.values()),
       ', '.join(f'{k} {v[0]:.2f}' for k, v in worst.items()))
-check('chorus cameras: >= 0.74 m from the cables (the engine\'s figure, to two decimals)',
+check('the hole\'s camera moves: >= 0.74 m from the cables (the engine\'s figure, to two decimals)',
       all(v[1] >= 0.735 for v in worst.values()),
       ', '.join(f'{k} {v[1]:.2f}' for k, v in worst.items()))
 
-# ------------------------------------------------------------------ the singer (optional): the claudesona on her mark
+# ------------------------------------------------------------------ a performer on the mark (optional, for scale)
 her_objs = []
 if '--her' in args:
     try:
@@ -218,20 +271,20 @@ if '--her' in args:
             vrm = hits[0] if hits else vrm
         before = set(bpy.data.objects)
         her_h = load_vrm(str(vrm), name='uf_singer')
-        play_vrma_default(her_h, 'idle', t=0.0)        # the film's probe stage played the default idle on her
+        play_vrma_default(her_h, 'idle', t=0.0)        # idling, as the WebGPU probe stage posed its figure
         her_objs = [o for o in bpy.data.objects if o not in before]
         for o in her_objs:
             if o.type == 'MESH':
                 hole['parts']['her'].objects.link(o)
-        # a loaded VRM faces -Y (the characters family's convention), which is her mark's front (three's +Z)
-        check('the claudesona on her mark, idling', bool(her_objs), str(vrm.name))
+        # a loaded VRM faces -Y (the characters family's convention), which is the mark's front (three's +Z)
+        check('a performer on the mark, idling', bool(her_objs), str(vrm.name))
         meshes_her = [o for o in her_objs if o.type == 'MESH']
         done, left = KIT.fog_objects(K, meshes_her)
         P['apply_atmosphere'](scene, objects=meshes_her)              # (idempotent: wrapped once)
         check('her materials take the haze, as scene.fogNode gave it', done > 0,
               f'{done} wrapped, {left} see-through left as they are')
     except Exception as e:                              # noqa: BLE001
-        check('the claudesona on her mark', False, repr(e))
+        check('a performer on the mark', False, repr(e))
 
 # ------------------------------------------------------------------ renders
 if '--power' in args:
@@ -242,29 +295,17 @@ for kv in (opt('--set') or '').split(','):          # --set rain=0,wet=0.5: unif
         U[k.strip()] = float(v)
         print(f'[uf-city] uniform {k.strip()} = {float(v)}', flush=True)
 if '--bloom' in args:
-    tree = bpy.data.node_groups.new('probe_bloom', 'CompositorNodeTree')
-    scene.compositing_node_group = tree
-    rl = tree.nodes.new('CompositorNodeRLayers')
-    gl = tree.nodes.new('CompositorNodeGlare')
-    try:
-        gl.glare_type = 'BLOOM'
-    except TypeError:
-        pass
-    for nm, v in (('Threshold', 0.7), ('Strength', 0.55), ('Size', 0.5)):
-        if nm in gl.inputs:
-            try:
-                gl.inputs[nm].default_value = v
-            except TypeError:
-                pass
-    out = tree.nodes.new('NodeGroupOutput')
-    tree.interface.new_socket('Image', in_out='OUTPUT', socket_type='NodeSocketColor')
-    tree.links.new(rl.outputs['Image'], gl.inputs['Image'])
-    tree.links.new(gl.outputs['Image'], out.inputs['Image'])
+    # the WebGPU post's bloom (CITY_HOLE.md: strength 0.55, radius 0.5, threshold 0.7) as the look family's chain
+    # stage: the compositor's Glare 'Bloom', on scene-linear light before AgX as three's was before its tone map
+    from eidoblend.look.post import chain as post_chain
+    gl = post_chain.set_bloom(scene, strength=0.55, size=0.5, threshold=0.7)
+    check('bloom: the look family\'s Glare stage', gl is not None and gl.inputs['Type'].default_value == 'Bloom',
+          f"strength {gl.inputs['Strength'].default_value:.2f}, size {gl.inputs['Size'].default_value:.2f}, "
+          f"threshold {gl.inputs['Threshold'].default_value:.2f}")
 
-# The stills are driven as the film's probe stage drove them (work/unknown_force/sets/probes/sets_probe.js), so they
-# compare like for like with its stills: the dive's focal light at gain 0.6 over 230 m; the hole's and the static
-# views' at (0, 0, 3) (three's (0, 3, 0)), gain 0.35 over 70 m, song time 80 s + the shot's time. (The film's
-# conductor itself left gain 1 over 230 m and put the focal point on her chest: the set's animate() keys that.)
+# The stills are lit as the WebGPU probe stage lit its stills of the set (work/unknown_force/sets/probes/
+# sets_probe.js), so they compare like for like: the dive's focal light at gain 0.6 over 230 m; the hole's and the
+# static views' at (0, 0, 3) (three's (0, 3, 0)), gain 0.35 over 70 m, the clock at 80 s + the move's time.
 FOCAL_DIVE = {'gain': 0.6, 'radius': 230.0}
 FOCAL_HOLE = {'pos': (0.0, 0.0, 3.0), 'gain': 0.35, 'radius': 70.0}
 shots = []
@@ -294,15 +335,15 @@ if RENDER:
             scene.camera = cam2
             if kind == 'static':
                 pose = city['cams'][what]
-                t_song = 80.0
+                t_clock = 80.0
             else:
                 tt = H.HOLE_CAM_DUR[what] * 0.5
                 pose = H.hole_cam(what, tt)
-                t_song = 80.0 + tt
+                t_clock = 80.0 + tt
             KIT.apply_cam(cam2, pose)
-            # a still: render at a frame where the song clock reads t_song; the dive keyed focal_pos and cam_vel, so
-            # key this still's values at its own frame (after the dive's range: the dive's frames keep theirs)
-            fr = int(round(t_song * 24)) + 1
+            # a still: render at a frame where the clock reads t_clock; the dive keyed focal_pos and cam_vel, so key
+            # this still's values at its own frame (after the dive's range: the dive's frames keep theirs)
+            fr = int(round(t_clock * 24)) + 1
             U.key('cam_vel', fr, (0.0, 0.0, 0.0))
             U.key('focal_pos', fr, FOCAL_HOLE['pos'])
             U['focal_gain'], U['focal_r'] = FOCAL_HOLE['gain'], FOCAL_HOLE['radius']
@@ -324,6 +365,41 @@ if RENDER:
             check(f'render {name}', np.isfinite(px).all() and lum > 0.01, f'{dt:.1f} s, mean display luma {lum:.3f}')
         else:
             check(f'render {name}', False, 'no file written')
+
+
+# ------------------------------------------------------------------ the deck behind the pillar of light (the dive's end)
+# The pillar of light above the signs, against the same frame with the deck off (cloud 0): three drew the deck before
+# the additive pillar, so the deck never dimmed it and the WebGPU still reads an even haze there. EEVEE's sort by
+# origin once laid the deck over the pillar: a dark mottled veil (display 0.306 against 0.42 with the deck off, spread
+# 0.070; the WebGPU's spread is 0.032).
+def region_stats(path, box):
+    """(mean, spread) of the display values in box = (x0, y0, x1, y1), fractions of the frame from its top left."""
+    im = bpy.data.images.load(str(path))
+    w, h = im.size
+    a = np.empty(w * h * 4, np.float32)
+    im.pixels.foreach_get(a)
+    bpy.data.images.remove(im)
+    a = a.reshape(h, w, 4)[::-1, :, :3]
+    r = a[int(box[1] * h):int(box[3] * h), int(box[0] * w):int(box[2] * w)]
+    return float(r.mean()), float(r.mean(2).std())
+
+
+VEIL = (450 / 960, 10 / 540, 500 / 960, 220 / 540)
+if RENDER and any(s[0] == 'dive_t40.8' for s in shots):
+    scene.camera = cam
+    U['focal_gain'], U['focal_r'] = FOCAL_DIVE['gain'], FOCAL_DIVE['radius']
+    scene.frame_set(int(round(40.8 * 24)) + 1)
+    was = U['cloud']
+    U['cloud'] = 0.0
+    off_path = OUT / f'probe_dive_t40.8_cloud_0{TAG}.png'
+    scene.render.filepath = str(off_path)
+    bpy.ops.render.render(write_still=True)
+    U['cloud'] = was
+    m_on, s_on = region_stats(OUT / f'probe_dive_t40.8{TAG}.png', VEIL)
+    m_off, s_off = region_stats(off_path, VEIL)
+    check('the dive\'s end: the cloud deck no longer veils the pillar of light (as bright as with the deck off, '
+          'and even)', m_on >= 0.97 * m_off and s_on <= 0.045,
+          f'mean {m_on:.3f} ({m_off:.3f} with the deck off), spread {s_on:.3f}')
 # ------------------------------------------------------------------ the uniforms, swept on one view (small stills)
 SWEEP = [('base', {}), ('power_0.35', {'power': 0.35}), ('flash_1', {'flash': 1.0}), ('wet_0', {'wet': 0.0}),
          ('floods_crowns_0', {'flood': 0.0, 'crown': 0.0}), ('fog_cloud_0', {'fog': 0.0, 'cloud': 0.0}),
@@ -357,7 +433,7 @@ if RENDER and '--sweep' in args:
         lums[tag] = float((a.reshape(-1, 4)[:, :3] @ np.array([0.2126, 0.7152, 0.0722])).mean())
         print(f'[uf-city] sweep {tag}: luma {lums[tag]:.4f}', flush=True)
     b = lums['base']
-    check('sweep: the outro turn-down darkens the city', lums['power_0.35'] < b * 0.85, f"{lums['power_0.35']:.4f} < {b:.4f}")
+    check('sweep: turning the power down darkens the city', lums['power_0.35'] < b * 0.85, f"{lums['power_0.35']:.4f} < {b:.4f}")
     check('sweep: windows and neon off darken it', lums['win_0_neon_0'] < b, f"{lums['win_0_neon_0']:.4f}")
     check('sweep: lightning on the deck brightens it', lums['flash_1'] > b, f"{lums['flash_1']:.4f}")
     check('sweep: every control changes the picture', all(abs(v - b) > 1e-4 for k, v in lums.items() if k != 'base'),
@@ -365,71 +441,26 @@ if RENDER and '--sweep' in args:
     for k, v in base.items():
         U[k] = v
     scene.render.resolution_x, scene.render.resolution_y = RES
-# ------------------------------------------------------------------ the outro (song 294.8 s on): the city turns itself
-# down around the vanishing point, as the film drove power = 1 - 0.85 smooth((t - 300) / 24); riseUp high in the well
-if RENDER and (not want_shots or 'outro' in want_shots):
-    t_song = 318.5
-    pw = 1 - 0.85 * KIT.smooth((t_song - 300) / 24)
+# ------------------------------------------------------------------ the lights going out one by one (turn_down): the
+# city dims round the vanishing point, keyed by animate on its own clock; the still is riseUp high in the well, 18.5 s
+# into a 24 s turn-down (power 0.26)
+if RENDER and (not want_shots or 'turned_down' in want_shots):
     scene.camera = cam2
     KIT.apply_cam(cam2, H.hole_cam('riseUp', 9.0))
-    fr = int(round(t_song * 24)) + 1
-    U.key('cam_vel', fr, (0.0, 0.0, 0.0))
-    U.key('focal_pos', fr, FOCAL_HOLE['pos'])
+    fa = 9000                               # the clock reads 80 s at frame fa: the state sees the clock's seconds
+    city.animate(lambda t: {'power': C.turn_down(t, 80.0, 24.0), 'focal': FOCAL_HOLE['pos']}, frames=(fa, fa + 24 * 24),
+                 t0=80.0, camera=False)
+    U.key('cam_vel', fa, (0.0, 0.0, 0.0))
     U['focal_gain'], U['focal_r'] = FOCAL_HOLE['gain'], FOCAL_HOLE['radius']
+    fr = fa + int(round(18.5 * 24))
     scene.frame_set(fr)
-    U['power'] = pw
-    path = OUT / 'probe_hole_riseUp_outro.png'
+    pw = U.tree.evaluated_get(bpy.context.evaluated_depsgraph_get()).nodes['u_power'].outputs[0].default_value
+    path = OUT / f'probe_hole_riseUp_turned_down{TAG}.png'
     scene.render.filepath = str(path)
     bpy.ops.render.render(write_still=True)
-    U['power'] = 1.0
-    check('render the outro (power %.2f)' % pw, path.exists())
-# ------------------------------------------------------------------ the probe stage's lapses (divelapse / holelapse)
-# the whole dive (41 frames, one per 1.02 s of song) and the eight chorus shots (5 frames each, start to end), at a
-# quarter of the probe size, driven as the stills above, assembled into out/lapse_<dive|hole>.mp4 (H.264, 10 fps)
-LAPSE = [x for x in (opt('--lapse') or '').split(',') if x]
-if RENDER and LAPSE:
-    import shutil
-    import subprocess
-    scene.render.resolution_x, scene.render.resolution_y = RES[0] // 2, RES[1] // 2
-    scene.eevee.taa_render_samples = 8
-    for which in LAPSE:
-        ldir = OUT / f'lapse_{which}'
-        if ldir.exists():
-            shutil.rmtree(ldir)
-        ldir.mkdir()
-        if which == 'dive':
-            steps = [('dive', t) for t in np.linspace(0.0, C.DIVE_LEN, 41)]
-        else:
-            steps = [(n, u * H.HOLE_CAM_DUR[n]) for n in H.HOLE_CAMS for u in np.linspace(0, 1, 5)]
-        ts = time.perf_counter()
-        for k, (n, t) in enumerate(steps):
-            if n == 'dive':
-                scene.camera = cam
-                U['focal_gain'], U['focal_r'] = FOCAL_DIVE['gain'], FOCAL_DIVE['radius']
-                scene.frame_set(int(round(t * 24)) + 1)
-            else:
-                scene.camera = cam2
-                KIT.apply_cam(cam2, H.hole_cam(n, t))
-                fr = int(round((80.0 + t) * 24)) + 1 + k            # a frame of its own per lapse step
-                U.key('cam_vel', fr, (0.0, 0.0, 0.0))
-                U.key('focal_pos', fr, FOCAL_HOLE['pos'])
-                U.key('time', fr, 80.0 + t)
-                U['focal_gain'], U['focal_r'] = FOCAL_HOLE['gain'], FOCAL_HOLE['radius']
-                scene.frame_set(fr)
-            scene.render.filepath = str(ldir / f'{which}_{k:03d}.png')
-            bpy.ops.render.render(write_still=True)
-        n_png = len(list(ldir.glob('*.png')))
-        mp4 = OUT / f'lapse_{which}.mp4'
-        ff = shutil.which('ffmpeg')
-        if ff:
-            subprocess.run([ff, '-y', '-loglevel', 'error', '-framerate', '10', '-i', str(ldir / f'{which}_%03d.png'),
-                            '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '18', str(mp4)],
-                           check=False)
-        check(f'lapse {which}: {len(steps)} frames' + (' and an MP4' if ff else ''), n_png == len(steps) and
-              (mp4.exists() or not ff), f'{time.perf_counter() - ts:.1f} s')
-    scene.render.resolution_x, scene.render.resolution_y = RES
-    scene.eevee.taa_render_samples = SAMPLES
-# ------------------------------------------------------------------ the film's own stills beside these renders
+    check('render the turn-down (power %.2f, keyed by animate)' % pw,
+          path.exists() and abs(pw - C.turn_down(80.0 + 18.5, 80.0, 24.0)) < 2e-3)
+# ------------------------------------------------------------------ the WebGPU probe stage's stills beside these renders
 # (the probe stage's WebGPU stills, look off: fin_<shot>_off.png). Their probe ran 0.8 s clips; the still is a frame
 # near the shot's mid time, the times used here.
 REFS = {'dive_t16.0': 'fin_dive16_off.png', 'dive_t40.8': 'fin_dive40_off.png',
@@ -448,11 +479,11 @@ if RENDER and '--compare' in args:
         sheet.paste(a, (0, 28))
         sheet.paste(b, (a.width + 8, 28))
         d = ImageDraw.Draw(sheet)
-        d.text((8, 7), f'WebGPU (the film\'s probe stage): {ref}', fill=(230, 230, 230))
+        d.text((8, 7), f'WebGPU (the probe stage): {ref}', fill=(230, 230, 230))
         d.text((a.width + 16, 7), f'Blender 5.2 EEVEE: probe_{shot}.png', fill=(230, 230, 230))
         sheet.save(OUT / f'compare_{shot}.png')
         made += 1
-    check('compare sheets beside the film\'s stills', made > 0, f'{made} written from {ref_dir}')
+    check('compare sheets beside the WebGPU stills', made > 0, f'{made} written from {ref_dir}')
 if '--save' in args:
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT / 'city_probe.blend'), compress=True)
 fails = [n for n, ok in results if not ok]

@@ -20,7 +20,7 @@ daisies.js (design frame, three x / z) -> create_flora (world, Blender x / y):
     stemHeight [a, b] -> height (a + b) / 2;  headScale -> head_scale x 1.4 (daisies.js heads were ~8.5 cm across at
                         1.2 on 0.22 m stems; flora's head is 5 cm at 1)
     close            -> close (0 open .. 1 shut, keyed through the prototype's close modifier)
-    pulse            -> the kick: every ray grows 10 % about its hinge (a 'pulse' modifier before flora's close, as
+    pulse            -> a beat's swell: every ray grows 10 % about its hinge (a 'pulse' modifier before flora's close, as
                         daisies.js's grow = 1 + 0.1 pulse) and glows (1, 0.85, 0.6) x 0.25 pulse (the petals only, on this
                         field's own copy of the flora material); the custom property 'pulse' on field.group, keyable
     wind             -> set_wind(strength);  t -> flora's 'Time Offset' (the field sways on the scene's clock)
@@ -62,7 +62,7 @@ class Daisies:
                       'uniforms': {'close': opts['close'], 'wind': opts['wind'], 'pulse': opts.get('pulse', 0.0)}}
 
     def set_pulse(self, v, frame=None):
-        """The kick's 0..1: rays grow 10 % and glow warm (keyed at frame when given)."""
+        """A beat's swell, 0..1: rays grow 10 % and glow warm (keyed at frame when given)."""
         ob = self.group
         ob['pulse'] = float(v)
         ob.update_tag()

@@ -14,15 +14,23 @@ ray-traced refraction and reflections, real fresnel. The engine's terms keep the
              where that probability is middling: a basin at 64 samples still read as sand)
     foam     band = max(ring^2, shore^2 * foam_shore), shore = 1 - smoothstep(0, foam_width, thick), times
              foam_strength (the engine's contact and shore foam), plus the Blender edition's churn foam,
-             smoothstep(0.25, 1, speed / churn_speed) * foam_churn: rough white water where the flow is fast
+             smoothstep(0.25, 1, shear / churn_speed) * foam_churn: rough white water where the flow shears (fast
+             water meeting slow: a plunge, a landing), which is where water entrains air
     glow     emission emissive_color * strength over the body by (1 - exp(-thick * falloff)) * min(strength, 1)
     sparkle  the engine's hash glints on uvw * sparkle_scale, animated by time * sparkle_speed, gated by fresnel
 
     EEVEE keeps ONE of refraction or diffuse per pixel; a fractional transmission or a Mix Shader of BSDFs is
-    resolved with a fixed per-pixel pattern that never converges (round one's measured sandpaper grain). So each
-    shading sample picks water / foam (and body, when stochastic) itself with a white-noise hash of the position
-    (new at every sample under EEVEE's jitter) and one Principled renders the pick with transmission exactly 0 or 1.
-    With body='tint' only foam is picked, so open water renders clean.
+    resolved with a fixed per-pixel pattern that never converges (round one's measured sandpaper grain). So water /
+    foam is picked and one Principled renders the pick with transmission exactly 0 or 1. foam_pick='lace' (the
+    default) fixes the pick per surface point with a 3D noise of the position (foam_scale per metre), so foam forms
+    coherent lace whose edges alone dither; 'dither' picks per sample with a white-noise hash, which stayed grainy
+    under churn foam at 64 samples (measured). body='stochastic' always picks per sample. With body='tint' only
+    foam is picked, so open water renders clean.
+
+    thickness  the material output's Thickness is the baked water path to where it leaves the water (surface.py's
+             'exit'), cut to BED_SHARE of it where the path ends on a solid ('bed'): EEVEE refracts through a slab
+             (refraction_thickness='slab', or 'sphere') of that thickness. Unlinked, EEVEE's own default rendered
+             the same settled pool bright in one frame and dark in the next; linked, the dam break matches Cycles.
 
 shading='engine' (the WebGPU look, unlit, for matching the engine's frames). fluid_water.js's colorNode, term for
 term, on the mesh: fresnel = (1 - max(n.v, 0))^3 * 0.85 + 0.04, depthTint = mix(shallow, deep, 1 - exp(-thick *
@@ -43,8 +51,8 @@ from .._util import color
 
 LOOK_KEYS = ('deep_color', 'shallow_color', 'sky_color', 'absorption', 'surface_opacity', 'key_light_dir',
              'emissive_color', 'emissive_strength', 'emissive_falloff', 'foam_color', 'foam_strength', 'foam_width',
-             'foam_shore', 'foam_churn', 'churn_speed', 'sparkle_strength', 'sparkle_scale', 'sparkle_speed',
-             'roughness')
+             'foam_shore', 'foam_churn', 'churn_speed', 'foam_scale', 'sparkle_strength', 'sparkle_scale',
+             'sparkle_speed', 'roughness')
 COLOR_KEYS = ('deep_color', 'shallow_color', 'sky_color', 'emissive_color', 'foam_color')
 VECTOR_KEYS = ('key_light_dir',)
 
@@ -138,7 +146,7 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
         n = b.node('ShaderNodeAttribute', attribute_name=nm, attribute_type='GEOMETRY')
         return b.s(n.outputs['Fac'])
 
-    thick, ring, speed = attr('thick'), attr('ring'), attr('speed')
+    thick, ring, shear = attr('thick'), attr('ring'), attr('shear')
     absorption, opacity = val('absorption'), val('surface_opacity')
     shallow, deep, sky = rgb('shallow_color'), rgb('deep_color'), rgb('sky_color')
     e_col, e_str, e_fall = rgb('emissive_color'), val('emissive_strength'), val('emissive_falloff')
@@ -154,7 +162,7 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
     op = b.clamp(opacity + glow * e_str * 0.30)                      # an emissive pool grows more opaque
     shore = 1.0 - b.smoothstep(0.0, f_w, thick)
     band = b.max(ring * ring, shore * shore * f_sh)
-    churn = b.smoothstep(0.25, 1.0, speed / b.max(c_speed, 1e-3)) * f_churn
+    churn = b.smoothstep(0.25, 1.0, shear / b.max(c_speed, 1e-3)) * f_churn
     foam_amt = b.clamp(band * f_str + churn)
 
     geo = b.node('ShaderNodeNewGeometry')
@@ -201,8 +209,20 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
         nt.links.new(mx.outputs[0], out.inputs['Surface'])
         return mat
 
-    pick = b.node('ShaderNodeTexWhiteNoise', noise_dimensions='3D')
-    nt.links.new(geo.outputs['Position'], pick.inputs['Vector'])
+    if o.get('body', 'tint') == 'stochastic' or o.get('foam_pick', 'lace') == 'dither':
+        # a white-noise hash of the position: a new pick at every sample under EEVEE's jitter
+        pick = b.node('ShaderNodeTexWhiteNoise', noise_dimensions='3D')
+        nt.links.new(geo.outputs['Position'], pick.inputs['Vector'])
+        pick_v = b.s(pick.outputs['Value'])
+    else:
+        # 'lace': the pick is fixed per surface point (a 3D noise of the position, its central spread stretched to
+        # 0..1), so foam forms coherent lace whose share follows the foam amount and only its edges dither
+        lace = b.node('ShaderNodeTexNoise', noise_dimensions='3D')
+        nt.links.new(geo.outputs['Position'], lace.inputs['Vector'])
+        b.link(val('foam_scale'), lace.inputs['Scale'])
+        lace.inputs['Detail'].default_value = 3.0
+        lace.inputs['Roughness'].default_value = 0.55
+        pick_v = b.clamp((b.s(lace.outputs['Fac']) - 0.32) / 0.36)
     if o.get('body', 'tint') == 'stochastic':
         # the shallow-water port's split: an opaque depth-tinted body with probability absorb * opacity, picked per
         # shading sample (grainy where that probability is middling: measured, a 128^3 basin still sandy at 64
@@ -216,7 +236,7 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
         body = 0.0
         clear_tint = b.rgb_mix((1, 1, 1, 1), tint, op)
     share_foam = foam_amt / b.max(foam_amt + body * (1.0 - foam_amt), 1e-4)
-    clear = b.math('LESS_THAN', b.s(pick.outputs['Value']), (1.0 - body) * (1.0 - foam_amt))
+    clear = b.math('LESS_THAN', pick_v, (1.0 - body) * (1.0 - foam_amt))
     opaque_col = b.rgb_mix(tint, f_col, share_foam)
     P = b.node('ShaderNodeBsdfPrincipled')
     P.hide = False
@@ -242,7 +262,50 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
     nt.links.new(shader, add.inputs[0])
     nt.links.new(sp.outputs[0], add.inputs[1])
     nt.links.new(add.outputs[0], out.inputs['Surface'])
+    _link_refraction_thickness(mat, b, out, o.get('refraction_thickness', 'slab'), attr)
+    # under the water: a volume absorption inside the mesh, so what a camera there sees through the water takes the
+    # depth tint by distance, as the engine's march from inside the box tinted it (linked by set_inside_domain)
+    va = b.node('ShaderNodeVolumeAbsorption')
+    va.name = va.label = 'w3d.under_water'
+    b.link(shallow, va.inputs['Color'])
+    b.link(absorption, va.inputs['Density'])
+    mat.volume_intersection_method = 'ACCURATE'
+    set_inside_domain(mat, bool(o.get('inside_domain', False)))
     return mat
+
+
+def set_inside_domain(mat, on):
+    """The camera inside the water (the engine's insideDomain): draw the back faces and absorb along the view inside
+    the mesh (a Volume Absorption of the shallow colour at the absorption density); off: front faces only, no
+    volume."""
+    nt = mat.node_tree
+    out = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'][0]
+    va = nt.nodes.get('w3d.under_water')
+    for lk in list(out.inputs['Volume'].links):
+        nt.links.remove(lk)
+    if on and va is not None:
+        nt.links.new(va.outputs[0], out.inputs['Volume'])
+    mat.use_backface_culling = not on
+    return mat
+
+
+# where the water path ends on a solid (a basin's floor) or runs deep, the slab is cut to this share of it, so EEVEE's
+# trace leaves the slab just above the floor and finds it, as a refracted view of the bed should
+BED_SHARE = 0.75
+
+
+def _link_refraction_thickness(mat, b, out, mode, attr):
+    """The material output's Thickness from the baked water path (surface.py's 'exit' and 'bed'): EEVEE models the
+    refraction through it as a slab (or a sphere) of that thickness. Left unlinked, EEVEE uses a default of its own,
+    and the same settled pool rendered bright in one frame and dark in the next (measured on the dam break, the
+    linked slab matching Cycles there). 'none' leaves it unlinked."""
+    if mode in (None, 'none'):
+        return
+    if mode not in ('slab', 'sphere'):
+        raise ValueError(f"water3d: refraction_thickness must be 'slab', 'sphere' or 'none', not {mode!r}")
+    mat.thickness_mode = 'SLAB' if mode == 'slab' else 'SPHERE'
+    ex, bed = attr('exit'), attr('bed')
+    b.link(ex * (1.0 - bed * (1.0 - BED_SHARE)), out.inputs['Thickness'])
 
 
 def set_look(mat, key, value, scene=None):

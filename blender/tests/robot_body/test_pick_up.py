@@ -17,11 +17,18 @@ Checks (PASS / FAIL), on the EVALUATED (skinned) mesh where it matters:
     carried, set down and settling
   - the hand follows its plan through my arm's hardware pass (at the can 3 mm / 4 deg, in the air 15 mm / 10 deg)
   - my forearm, hand and fingers clear my torso, head, crown and thighs; both feet on the floor throughout
+  - my eyes (the head's facing turned by the face's look expressions) are on the can from the reach until it is looked
+    over and on the place I set it down after (within 5 deg), and my head never turns faster than the body's head
+    actuator (90 deg/s) onto it or back to the idle
 Stills: out/pick_up_<moment>_f<k>.png (wide and close), out/pick_up.json, out/pick_up.blend.
 
     cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_pick_up.py [--no-render]
+        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_pick_up.py [--no-render] \
+        [--side left] [--prop carton]
+
+--side left: my left hand, the prop in front of my left shoulder (the mirrored pins, wrist and grasp); --prop carton: a
+juice carton (65 x 65 x 130 mm, square-sided) instead of the can. Any of them writes out/pick_up_<side>_<prop>_* instead.
 """
 
 import math
@@ -47,9 +54,20 @@ from eidoblend.characters.robot.example import directional, studio_environment  
 
 ARGS = S.argv()
 RENDER = '--no-render' not in ARGS
+
+
+def _arg(name, default):
+    return ARGS[ARGS.index(name) + 1] if name in ARGS and ARGS.index(name) + 1 < len(ARGS) else default
+
+
+SIDE = _arg('--side', 'right')
+OTHER = 'left' if SIDE == 'right' else 'right'
+PROP = _arg('--prop', 'can')
+MX = 1.0 if SIDE == 'right' else -1.0      # my right is -X (I face -Y): the left's places are the right's mirrored in x
+NAME = 'pick_up' if (SIDE, PROP) == ('right', 'can') else f'pick_up_{SIDE}_{PROP}'
 FPS = 24
 TOP = 0.95
-CAN = (-0.17, -0.44)
+CAN = (-0.17 * MX, -0.44)
 R = {'started': time.strftime('%Y-%m-%d %H:%M:%S')}
 T0 = time.time()
 OK = True
@@ -195,6 +213,47 @@ def can(name, x, y, z, r=0.033, hgt=0.122):
     return ob
 
 
+def carton(name, x, y, z, w=0.065, hgt=0.13):
+    """a juice carton: a square-sided box with softened edges and a printed band (its origin on its axis, at its base)"""
+    me = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.scale(bm, vec=(w, w, hgt), verts=bm.verts)
+    bmesh.ops.translate(bm, vec=(0.0, 0.0, hgt / 2), verts=bm.verts)
+    bmesh.ops.bevel(bm, geom=list(bm.edges), offset=0.003, segments=2, affect='EDGES')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    ob.location = (x, y, z)
+    bpy.context.scene.collection.objects.link(ob)
+    mat = bpy.data.materials.new('carton_print')
+    mat.use_nodes = True
+    nt = mat.node_tree
+    b = nt.nodes['Principled BSDF']
+    b.inputs['Roughness'].default_value = 0.45
+    b.inputs['Coat Weight'].default_value = 0.3
+    # a white carton with an orange band between 30 and 95 mm (by the object's height)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    nt.links.new(tc.outputs['Object'], sep.inputs['Vector'])
+    ramp = nt.nodes.new('ShaderNodeValToRGB')
+    ramp.color_ramp.interpolation = 'CONSTANT'
+    ramp.color_ramp.elements[0].color = (0.85, 0.84, 0.8, 1.0)
+    e1 = ramp.color_ramp.elements[1]
+    e1.position, e1.color = 0.03 / hgt, (0.9, 0.32, 0.05, 1.0)
+    e2 = ramp.color_ramp.elements.new(0.095 / hgt)
+    e2.color = (0.85, 0.84, 0.8, 1.0)
+    mth = nt.nodes.new('ShaderNodeMath')
+    mth.operation = 'DIVIDE'
+    mth.inputs[1].default_value = hgt
+    nt.links.new(sep.outputs['Z'], mth.inputs[0])
+    nt.links.new(mth.outputs[0], ramp.inputs['Fac'])
+    nt.links.new(ramp.outputs['Color'], b.inputs['Base Color'])
+    me.materials.append(mat)
+    return ob
+
+
 def hand_vertices(h, side):
     """the evaluated mesh's vertices whose strongest weight is a bone of `side`'s hand (fingers, thumb, palm)"""
     names = {h.humanoid[n] for n in h.humanoid if n.startswith(side) and any(k in n for k in ('Hand', 'Thumb', 'Index',
@@ -285,18 +344,19 @@ try:
     body_m = tex_mat('counter_body', 'PaintedWood009C_2k', 1.0)       # a painted kitchen cabinet
     top = box('counter_top', -0.75, 0.55, -0.9, -0.28, TOP - 0.04, TOP, wood, 0.004)
     cab = box('counter_cabinet', -0.72, 0.52, -0.86, -0.32, 0.0, TOP - 0.04, body_m, 0.006)
-    prop = can('can', CAN[0], CAN[1], TOP)
+    prop = can('can', CAN[0], CAN[1], TOP) if PROP == 'can' else carton('carton', CAN[0], CAN[1], TOP)
+    R['side'], R['prop'] = SIDE, PROP
     me = load_vrm('claude_robot', name='claude')
     rig = RobotRig(me)
     t = time.time()
-    rep = hands.pick_and_hold(me, rig, prop, f0=1, side='right', ground=Ground(fn=lambda x, y: 0.0 * np.asarray(x)),
-                              face=lambda tt: {'happy': 0.35}, action_name='claude|pick_up')
+    rep = hands.pick_and_hold(me, rig, prop, f0=1, side=SIDE, ground=Ground(fn=lambda x, y: 0.0 * np.asarray(x)),
+                              face=lambda tt: {'happy': 0.35}, action_name='claude|' + NAME)
     R['solve_s'] = round(time.time() - t, 1)
     R['pick'] = {k: v for k, v in rep.items() if not k.startswith('_') and k not in ('hand_model', 'surface')}
     sc.frame_start, sc.frame_end = rep['frames']
     fa, frl = rep['attach_frame'], rep['release_frame']
     log('solved', R['solve_s'], 's; attach', fa, 'release', frl, 'clearance mm', rep['clearance_mm'])
-    sets = hand_vertices(me, 'right')
+    sets = hand_vertices(me, SIDE)
     # 1. the hand on the can: touching, never in it (nor in the counter)
     top_bvh = bvh_of(top)
     worst_in, worst_top = 0.0, 0.0
@@ -329,7 +389,7 @@ try:
           f'from the approach to the return of the arm no hand vertex is more than {-1000 * worst_in:.2f} mm inside the can, '
           f'{-1000 * worst_top:.2f} mm inside the counter top')
     # 2. the can moves only in the hand
-    pb = me.arm.pose.bones[me.humanoid['rightHand']]
+    pb = me.arm.pose.bones[me.humanoid[SIDE + 'Hand']]
     rel0, drift_mm, drift_deg = None, 0.0, 0.0
     still = 0.0
     sc.frame_set(1)
@@ -359,11 +419,11 @@ try:
     wg = Vector(rep['wrist_grasp'])
     got = me.arm.matrix_world @ pb.head
     reach_mm = 1000 * (got - wg).length
-    wr = [fr['wrists'].get('right') for fr in rep['_frames'] if fr.get('wrists')]
-    W = rig.arms.wrist['right']
+    wr = [fr['wrists'].get(SIDE) for fr in rep['_frames'] if fr.get('wrists')]
+    W = rig.arms.wrist[SIDE]
     worst_split = [0.0, 0.0, 0.0]
     for fr in rep['_frames']:
-        st = fr['wrists'].get('right') if fr.get('wrists') else None
+        st = fr['wrists'].get(SIDE) if fr.get('wrists') else None
         if st is None:
             continue
     check('reach', reach_mm < 6.0, f'the wrist at the grasp is {reach_mm:.2f} mm from its target (after the arm\'s DOF pass); '
@@ -416,13 +476,14 @@ try:
         if fr.get('hand_target') is None:
             continue
         wt_, tq_ = fr['hand_target']
-        p_, W_ = rig.bone_world(fr, 'rightHand')
+        p_, W_ = rig.bone_world(fr, SIDE + 'Hand')
         k_ = 'at_can' if at_can(fr['f']) else ('in_air' if in_air(fr['f']) else 'after_letting_go')
         dev[k_][0].append((1000 * (p_ - wt_).length, fr['f']))
         dev[k_][1].append((math.degrees(W_.rotation_difference(tq_).angle), fr['f']))
     R['hand_follows_plan'] = {k: {'frames': len(a), 'wrist_mm_max': [round(max(a)[0], 2), max(a)[1]] if a else None,
                                   'turn_deg_max': [round(max(b)[0], 2), max(b)[1]] if b else None}
                               for k, (a, b) in dev.items()}
+    R['hand_turn_off_plan_at_the_can_deg'] = [(f_, round(d_, 2)) for d_, f_ in dev['at_can'][1]]
     hp = R['hand_follows_plan']
     good = (hp['at_can']['frames'] and hp['at_can']['wrist_mm_max'][0] < 3.0 and hp['at_can']['turn_deg_max'][0] < 4.0
             and hp['in_air']['frames'] and hp['in_air']['wrist_mm_max'][0] < 15.0 and hp['in_air']['turn_deg_max'][0] < 10.0)
@@ -434,11 +495,11 @@ try:
     # 4c. my forearm, hand and fingers clear the rest of my body (the torso, the head, the crown, the legs: the
     # evaluated mesh, nearest vertex to vertex) all through the reach, the carry before my face and the return
     from mathutils.kdtree import KDTree
-    arm_sets = part_vertices(me, 'right', ('LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal', 'ThumbDistal')
+    arm_sets = part_vertices(me, SIDE, ('LowerArm', 'Hand', 'ThumbMetacarpal', 'ThumbProximal', 'ThumbDistal')
                              + tuple(f + k for f in ('Index', 'Middle', 'Ring', 'Little')
                                      for k in ('Proximal', 'Intermediate', 'Distal')))
     body_names = {me.humanoid[n] for n in ('hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg',
-                                           'rightUpperLeg', 'leftShoulder') if n in me.humanoid}
+                                           'rightUpperLeg', OTHER + 'Shoulder') if n in me.humanoid}
     body_names |= {b.name for b in me.arm.data.bones if b.name.startswith('petal_')}
     body_sets = []
     for o in me.meshes:
@@ -476,8 +537,46 @@ try:
     R['feet_lowest_mm'] = {s: round(1000 * v, 2) for s, v in worst_gap.items()}
     check('both_feet_on_the_floor', all(v < 0.0015 for v in worst_gap.values()),
           f'each foot\'s lowest vertex within {R["feet_lowest_mm"]} mm of the floor at every 12th frame')
+    # 6. my eyes are on what my hand works on: the keyed head's facing turned by the keyed look expressions (my face's
+    # eyes), from the face's look origin, against the keyed can: on it from just after I start the reach until I have
+    # looked it over, then on the place I set it down from just after my eyes go there until my arm is home. And my
+    # head never jumps: from the clip's head onto the can and back it turns at most VRMRobotBody's 90 deg/s
+    look_off, look_rng = hands.face_look(me)
+    sc.frame_set(rep['frames'][1])
+    c_down = prop.matrix_world @ Vector((0.0, 0.0, 0.06))          # where it was set down (it stands there after)
+
+    def gaze_off(f, target):
+        fr = rep['_frames'][f - rep['frames'][0]]
+        o_, d_ = hands.eye_ray(rig, fr, look_off, *hands.look_expression_angles(fr['weights'], look_rng))
+        return round(math.degrees(d_.angle(target - o_)), 2)
+    gz_can, gz_down, head_only = [], [], []
+    for f in range(fr_of(T_['reach'] + 0.6), fr_of(T_['face2']) + 1, 3):
+        sc.frame_set(f)
+        c_ = prop.matrix_world @ Vector((0.0, 0.0, 0.06))
+        gz_can.append((gaze_off(f, c_), f))
+        fr = rep['_frames'][f - rep['frames'][0]]
+        o_, d_ = hands.eye_ray(rig, fr, look_off)
+        head_only.append((round(math.degrees(d_.angle(c_ - o_)), 2), f))
+    for f in range(fr_of(T_['face2'] + 0.25 + 0.6), fr_of(T_['back']) + 1, 3):
+        gz_down.append((gaze_off(f, c_down), f))
+    steps = []
+    for fa_, fb_ in zip(rep['_frames'][:-1], rep['_frames'][1:]):
+        Wa = rig.bone_world(fa_, 'head')[1]
+        Wb = rig.bone_world(fb_, 'head')[1]
+        steps.append((round(math.degrees(Wa.rotation_difference(Wb).angle), 2), fb_['f']))
+    eye_steps = [(round(math.hypot(b_['eye_deg'][0] - a_['eye_deg'][0], b_['eye_deg'][1] - a_['eye_deg'][1]), 2), b_['f'])
+                 for a_, b_ in zip(rep['_frames'][:-1], rep['_frames'][1:])]
+    R['gaze'] = {'on_can_deg_max': max(gz_can), 'on_set_down_place_deg_max': max(gz_down),
+                 'head_alone_off_can_deg_max': max(head_only), 'head_step_deg_max': max(steps),
+                 'eye_step_deg_max': max(eye_steps)}
+    lim = 90.0 / FPS + 1.0                              # the head's rate, plus the idle's own sway under it
+    check('eyes_on_the_work', max(gz_can)[0] < 5.0 and max(gz_down)[0] < 5.0 and max(steps)[0] < lim,
+          f'my eyes are on the can within {max(gz_can)} (deg, frame) from the reach until it is looked over, on where I set '
+          f'it down within {max(gz_down)} after (my head alone would be {max(head_only)} off: its nod stops at 30 deg); my '
+          f'head turns at most {max(steps)} (deg, frame) a frame (the bar {lim:.2f}: 90 deg/s and the idle\'s sway), my '
+          f'eyes {max(eye_steps)}')
     R['wrist_stats_deg'] = {k: v for k, v in rig.stats.items() if 'Hand' in k or 'LowerArm' in k or 'UpperArm' in k}
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, 'pick_up.blend'), compress=True)
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, NAME + '.blend'), compress=True)
 
     if RENDER:
         from eidoblend.look import render_settings as rs
@@ -491,26 +590,39 @@ try:
         close = S.C.camera('close', 70.0)
         shots = {}
         cpos = Vector((CAN[0], CAN[1], TOP + 0.06))
-        for name, tt in (('reach', 1.4), ('touch', T['touch']), ('closed', T['closed'] + 0.25), ('lift', T['lift']),
+        for name, tt in (('reach', 1.4), ('touch', T['touch']), ('closed', T['closed'] + 0.05), ('lift', T['lift']),
                          ('face', T['face'] + 0.3), ('turned_a', T['turn_a']), ('turned_b', T['turn_b']),
                          ('down', T['down'] + 0.1), ('let_go', T['open'] + 0.3), ('back', T['end'] - 0.2)):
             f = fr_at(tt)
-            S.C.aim(wide, (-1.45, -2.05, 1.55), (-0.1, -0.25, 1.05))
-            p = os.path.join(S.OUT, f'pick_up_{name}_wide_f{f:03d}.png')
+            S.C.aim(wide, (-1.45 * MX, -2.05, 1.55), (-0.1 * MX, -0.25, 1.05))
+            p = os.path.join(S.OUT, f'{NAME}_{name}_wide_f{f:03d}.png')
             shots[os.path.basename(p)] = S.C.still(sc, wide, f, p)
             sc.frame_set(f)
             hp = me.arm.matrix_world @ pb.head
             if name in ('touch', 'closed', 'down', 'let_go'):
-                S.C.aim(close, cpos + Vector((-0.42, -0.5, 0.18)), cpos + Vector((-0.03, 0.0, 0.0)))
-                p = os.path.join(S.OUT, f'pick_up_{name}_close_f{f:03d}.png')
+                S.C.aim(close, cpos + Vector((-0.42 * MX, -0.5, 0.18)), cpos + Vector((-0.03 * MX, 0.0, 0.0)))
+                p = os.path.join(S.OUT, f'{NAME}_{name}_close_f{f:03d}.png')
                 shots[os.path.basename(p)] = S.C.still(sc, close, f, p)
-                S.C.aim(close, cpos + Vector((0.25, -0.62, 0.12)), cpos + Vector((-0.03, 0.0, 0.0)))
-                p = os.path.join(S.OUT, f'pick_up_{name}_front_f{f:03d}.png')
+                S.C.aim(close, cpos + Vector((0.25 * MX, -0.62, 0.12)), cpos + Vector((-0.03 * MX, 0.0, 0.0)))
+                p = os.path.join(S.OUT, f'{NAME}_{name}_front_f{f:03d}.png')
+                shots[os.path.basename(p)] = S.C.still(sc, close, f, p)
+            if name in ('reach', 'down', 'face'):
+                # from my right, level with my head: my head nodding to the can and my eyes on it (the face's look
+                # expressions move the eyes on my face plate up to 8 mm)
+                hd = me.arm.matrix_world @ me.arm.pose.bones[me.humanoid['head']].head
+                cc = prop.matrix_world @ Vector((0.0, 0.0, 0.06))
+                mid = (hd + cc) / 2
+                S.C.aim(close, mid + Vector((-2.1 * MX, -0.35, 0.15)), mid)
+                p = os.path.join(S.OUT, f'{NAME}_{name}_side_f{f:03d}.png')
                 shots[os.path.basename(p)] = S.C.still(sc, close, f, p)
             if name in ('face', 'turned_a', 'turned_b', 'lift'):
+                # my head and the can in one frame (the 70 mm lens 2 m off holds 0.58 m top to bottom), from my front
+                # left, the side the can is turned to
                 hd = me.arm.matrix_world @ me.arm.pose.bones[me.humanoid['head']].head
-                S.C.aim(close, hd + Vector((0.35, -1.25, 0.05)), (hd + hp) / 2)
-                p = os.path.join(S.OUT, f'pick_up_{name}_close_f{f:03d}.png')
+                cc = prop.matrix_world @ Vector((0.0, 0.0, 0.06))
+                mid = (hd + cc) / 2
+                S.C.aim(close, mid + Vector((0.6 * MX, -1.9, 0.12)), mid)
+                p = os.path.join(S.OUT, f'{NAME}_{name}_close_f{f:03d}.png')
                 shots[os.path.basename(p)] = S.C.still(sc, close, f, p)
         R['renders'] = shots
     R['ok'] = OK
@@ -519,5 +631,5 @@ except Exception:  # noqa: BLE001
     R['error'] = traceback.format_exc()
     log(R['error'])
 R['seconds'] = round(time.time() - T0, 1)
-S.write_json('pick_up.json', R)
+S.write_json(NAME + '.json', R)
 log('done', R['ok'], R['seconds'], 's')

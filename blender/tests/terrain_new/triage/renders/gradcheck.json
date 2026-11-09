@@ -1,0 +1,640 @@
+{
+ "constant": {
+  "fixture": "standalone",
+  "note": "flat output"
+ },
+ "gradient": {
+  "fixture": "standalone",
+  "note": "flat output"
+ },
+ "radialGradient": {
+  "fixture": "standalone",
+  "angle_p50": 0.0017906407810217855,
+  "angle_p90": 0.017262092602888666,
+  "ratio_p50": 1.0001106672832898,
+  "reversed_pct": 0.0
+ },
+ "fbm": {
+  "fixture": "standalone",
+  "angle_p50": 0.1425603410761643,
+  "angle_p90": 0.42891969931774016,
+  "ratio_p50": 1.0043121688697565,
+  "reversed_pct": 0.0
+ },
+ "ridged": {
+  "fixture": "standalone",
+  "angle_p50": 0.9107890048956014,
+  "angle_p90": 15.018496511510902,
+  "ratio_p50": 1.01591723197012,
+  "reversed_pct": 0.17490622497576602
+ },
+ "voronoi": {
+  "fixture": "standalone",
+  "angle_p50": 0.02147794098900792,
+  "angle_p90": 0.07507379180931745,
+  "ratio_p50": 1.0004781060152899,
+  "reversed_pct": 0.0
+ },
+ "phacelle": {
+  "fixture": "detailed-base",
+  "angle_p50": 9.225298604646017,
+  "angle_p90": 31.704395241995204,
+  "ratio_p50": 0.974201787191145,
+  "reversed_pct": 0.42409355251831793
+ },
+ "thermal": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.2884649946361217,
+  "angle_p90": 4.605461501889199,
+  "ratio_p50": 1.010618450152279,
+  "reversed_pct": 0.0
+ },
+ "snow": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.3052957202064057,
+  "angle_p90": 6.33335361014297,
+  "ratio_p50": 1.0148978382926979,
+  "reversed_pct": 0.06512878692382033
+ },
+ "crater": {
+  "fixture": "flat",
+  "angle_p50": 13.048283973690951,
+  "angle_p90": 43.05938119488671,
+  "ratio_p50": 0.9417824764221522,
+  "reversed_pct": 2.114064023567976
+ },
+ "terrace": {
+  "fixture": "detailed-base",
+  "angle_p50": 2.586786631686559,
+  "angle_p90": 90.0,
+  "ratio_p50": 1.0220617275171646,
+  "reversed_pct": 0.012792358697737883
+ },
+ "stratify": {
+  "fixture": "detailed-base",
+  "angle_p50": 2.3341629624362716,
+  "angle_p90": 15.173960213597644,
+  "ratio_p50": 1.0136532210664917,
+  "reversed_pct": 0.004197888462103562
+ },
+ "curves": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "clampOp": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "warp": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "roughen": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.502519488359254,
+  "angle_p90": 4.121819248426944,
+  "ratio_p50": 1.0361277158953974,
+  "reversed_pct": 0.0
+ },
+ "combine": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "seamless": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "edgeFade": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.5760359557290322,
+  "angle_p90": 17.1760858842682,
+  "ratio_p50": 1.0188639128528856,
+  "reversed_pct": 0.9361580886093982
+ },
+ "invert": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.5679893111854604,
+  "ratio_p50": 1.0234574324810797,
+  "reversed_pct": 0.0
+ },
+ "clip": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293687126,
+  "angle_p90": 2.567989311185262,
+  "ratio_p50": 1.0234574324810755,
+  "reversed_pct": 0.0
+ },
+ "threshold": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.080698160744217,
+  "angle_p90": 3.6140731162964284,
+  "ratio_p50": 1.023357049615619,
+  "reversed_pct": 0.0
+ },
+ "softClip": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9407915537239739,
+  "angle_p90": 2.6378330250164463,
+  "ratio_p50": 1.0237061983117948,
+  "reversed_pct": 0.0
+ },
+ "gamma": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "fold": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.1833893060597538,
+  "angle_p90": 3.562309919348246,
+  "ratio_p50": 1.0282358750295457,
+  "reversed_pct": 0.0
+ },
+ "blur": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.5264847803186018,
+  "angle_p90": 1.4594914964245467,
+  "ratio_p50": 1.0134431732005862,
+  "reversed_pct": 0.0
+ },
+ "sharpen": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.1843653974222015,
+  "angle_p90": 3.5082829718147113,
+  "ratio_p50": 1.0313750121625513,
+  "reversed_pct": 0.0
+ },
+ "median": {
+  "fixture": "detailed-base",
+  "angle_p50": 10.396839858250043,
+  "angle_p90": 40.827264856033636,
+  "ratio_p50": 1.0721863121958126,
+  "reversed_pct": 1.1711029813716833
+ },
+ "dilate": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.4017819746561708,
+  "angle_p90": 12.004565592745696,
+  "ratio_p50": 1.0250817396341474,
+  "reversed_pct": 0.018912728266123103
+ },
+ "recurve": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9799165151577804,
+  "angle_p90": 2.790256274255431,
+  "ratio_p50": 1.0299408522618476,
+  "reversed_pct": 0.0
+ },
+ "perlin": {
+  "fixture": "standalone",
+  "angle_p50": 1.7329040474904325,
+  "angle_p90": 4.743687784035639,
+  "ratio_p50": 1.034298562041894,
+  "reversed_pct": 0.0
+ },
+ "cellular": {
+  "fixture": "standalone",
+  "angle_p50": 0.022088700704583162,
+  "angle_p90": 6.214573101010521,
+  "ratio_p50": 1.0005902604855985,
+  "reversed_pct": 0.0
+ },
+ "dotNoise": {
+  "fixture": "standalone",
+  "angle_p50": 3.927776944669449,
+  "angle_p90": 90.0,
+  "ratio_p50": 1.005696567865289,
+  "reversed_pct": 0.09924854671770877
+ },
+ "lineNoise": {
+  "fixture": "standalone",
+  "angle_p50": 0.0,
+  "angle_p90": 0.0,
+  "ratio_p50": 1.0,
+  "reversed_pct": 0.5235602094240838
+ },
+ "cracks": {
+  "fixture": "standalone",
+  "angle_p50": 4.8680740522400505,
+  "angle_p90": 90.0,
+  "ratio_p50": 0.9994887275853872,
+  "reversed_pct": 1.5239991152399912
+ },
+ "shape": {
+  "fixture": "standalone",
+  "angle_p50": 0.2518268467999657,
+  "angle_p90": 90.0,
+  "ratio_p50": 1.0134675154891255,
+  "reversed_pct": 0.0
+ },
+ "cone": {
+  "fixture": "standalone",
+  "angle_p50": 0.0007214336791546077,
+  "angle_p90": 0.004873816721013176,
+  "ratio_p50": 1.000019147583813,
+  "reversed_pct": 0.0
+ },
+ "hemisphere": {
+  "fixture": "standalone",
+  "angle_p50": 0.0006059435533778952,
+  "angle_p90": 0.038860937433376284,
+  "ratio_p50": 0.9998695600394729,
+  "reversed_pct": 0.0
+ },
+ "pattern": {
+  "fixture": "standalone",
+  "angle_p50": 0.0,
+  "angle_p90": 90.0,
+  "ratio_p50": 1.2,
+  "reversed_pct": 0.0
+ },
+ "steps": {
+  "fixture": "detailed-base",
+  "angle_p50": 21.817707426152325,
+  "angle_p90": 90.0,
+  "ratio_p50": 0.2058597605498457,
+  "reversed_pct": 0.01767825574543312
+ },
+ "fractalTerraces": {
+  "fixture": "detailed-base",
+  "angle_p50": 2.4710829670105405,
+  "angle_p90": 8.619402942287966,
+  "ratio_p50": 0.9694876611000256,
+  "reversed_pct": 0.0
+ },
+ "sandstone": {
+  "fixture": "detailed-base",
+  "angle_p50": 2.3476012482833637,
+  "angle_p90": 11.628215019152325,
+  "ratio_p50": 1.027627291776056,
+  "reversed_pct": 0.38061192303648406
+ },
+ "sand": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.899569089374666,
+  "angle_p90": 23.613513083277446,
+  "ratio_p50": 1.0415800238620827,
+  "reversed_pct": 0.2476494291470786
+ },
+ "mountain": {
+  "fixture": "standalone",
+  "angle_p50": 11.439388237847842,
+  "angle_p90": 35.95301078114436,
+  "ratio_p50": 0.9832635621236019,
+  "reversed_pct": 1.7095065742387991
+ },
+ "mountainRange": {
+  "fixture": "standalone",
+  "angle_p50": 23.67853936657216,
+  "angle_p90": 78.11746212013868,
+  "ratio_p50": 0.9870268000424355,
+  "reversed_pct": 7.465664244613382
+ },
+ "canyon": {
+  "fixture": "standalone",
+  "angle_p50": 4.4366259351402615,
+  "angle_p90": 22.47819170614335,
+  "ratio_p50": 0.968724816747575,
+  "reversed_pct": 0.21147403685092125
+ },
+ "island": {
+  "fixture": "standalone",
+  "angle_p50": 5.73534561572404,
+  "angle_p90": 68.67704787277277,
+  "ratio_p50": 0.9916906749971253,
+  "reversed_pct": 6.445332869807058
+ },
+ "volcano": {
+  "fixture": "standalone",
+  "angle_p50": 22.774398797877716,
+  "angle_p90": 106.91496997624235,
+  "ratio_p50": 0.8502099352347557,
+  "reversed_pct": 14.172955333469304
+ },
+ "rugged": {
+  "fixture": "detailed-base",
+  "angle_p50": 7.2922562616236135,
+  "angle_p90": 20.65322399851069,
+  "ratio_p50": 1.006333236942523,
+  "reversed_pct": 0.02730117395047987
+ },
+ "math": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "route": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "switchOp": {
+  "fixture": "detailed-base",
+  "angle_p50": 0.9243854293691068,
+  "angle_p90": 2.567989311185347,
+  "ratio_p50": 1.0234574324810772,
+  "reversed_pct": 0.0
+ },
+ "compare": {
+  "fixture": "detailed-base",
+  "angle_p50": 1.1951556816672344,
+  "angle_p90": 4.523640472298085,
+  "ratio_p50": 1.0251439847179207,
+  "reversed_pct": 0.5124359455068116
+ },
+ "caldera": {
+  "fixture": "standalone",
+  "angle_p50": 0.6203867450886796,
+  "angle_p90": 2.641411613378504,
+  "ratio_p50": 1.0020826669102552,
+  "reversed_pct": 0.10166818823138848
+ },
+ "impactCrater": {
+  "fixture": "standalone",
+  "angle_p50": 1.4873668665150965,
+  "angle_p90": 10.274876391433592,
+  "ratio_p50": 1.0117191170888373,
+  "reversed_pct": 0.2867890022652175
+ },
+ "cinderConeField": {
+  "fixture": "standalone",
+  "angle_p50": 0.3587332010240659,
+  "angle_p90": 8.088121742790875,
+  "ratio_p50": 1.002601627440957,
+  "reversed_pct": 1.2333453366942744
+ },
+ "maar": {
+  "fixture": "standalone",
+  "angle_p50": 1.688193084996126,
+  "angle_p90": 8.905421034180929,
+  "ratio_p50": 1.013080032988408,
+  "reversed_pct": 0.44696004511372417
+ },
+ "cirque": {
+  "fixture": "standalone",
+  "angle_p50": 1.6467047170377056,
+  "angle_p90": 23.628431234490378,
+  "ratio_p50": 1.0219502514488432,
+  "reversed_pct": 1.4304603918740233
+ },
+ "basinField": {
+  "fixture": "standalone",
+  "angle_p50": 0.6922329245914001,
+  "angle_p90": 59.051822839695845,
+  "ratio_p50": 1.0078070645965505,
+  "reversed_pct": 3.414350078156128
+ },
+ "moundField": {
+  "fixture": "standalone",
+  "angle_p50": 1.1008174930602286,
+  "angle_p90": 58.72094664024546,
+  "ratio_p50": 0.9907480408114923,
+  "reversed_pct": 4.197727835391852
+ },
+ "volcanicPlug": {
+  "fixture": "standalone",
+  "angle_p50": 2.8846186325096395,
+  "angle_p90": 38.99019443846661,
+  "ratio_p50": 1.0471695819518523,
+  "reversed_pct": 1.8444119795471146
+ },
+ "lavaDome": {
+  "fixture": "standalone",
+  "angle_p50": 3.1066926983282617,
+  "angle_p90": 22.589046388029708,
+  "ratio_p50": 1.0084610352320187,
+  "reversed_pct": 1.5353861857774753
+ },
+ "mesa": {
+  "fixture": "standalone",
+  "angle_p50": 2.102180578831659,
+  "angle_p90": 24.084648191240472,
+  "ratio_p50": 1.0036463872294892,
+  "reversed_pct": 1.9920318725099602
+ },
+ "glacialTrough": {
+  "fixture": "standalone",
+  "angle_p50": 0.9274333387261295,
+  "angle_p90": 6.512461040720835,
+  "ratio_p50": 1.005636131060125,
+  "reversed_pct": 0.24974815312290127
+ },
+ "meanderBelt": {
+  "fixture": "standalone",
+  "angle_p50": 0.9988480800035777,
+  "angle_p90": 15.647724416660761,
+  "ratio_p50": 1.0087374882433768,
+  "reversed_pct": 2.3498199734697742
+ },
+ "faultScarp": {
+  "fixture": "standalone",
+  "angle_p50": 4.143175719670129,
+  "angle_p90": 34.981695186501646,
+  "ratio_p50": 1.004951722359821,
+  "reversed_pct": 1.3620386643233744
+ },
+ "graben": {
+  "fixture": "standalone",
+  "angle_p50": 7.803050466831712,
+  "angle_p90": 29.308341930310004,
+  "ratio_p50": 1.131841537578387,
+  "reversed_pct": 0.8837141122023747
+ },
+ "dipSlope": {
+  "fixture": "standalone",
+  "angle_p50": 0.15885677791813946,
+  "angle_p90": 0.8962378778845164,
+  "ratio_p50": 1.0005175823259729,
+  "reversed_pct": 0.5389957131038632
+ },
+ "esker": {
+  "fixture": "standalone",
+  "angle_p50": 0.846795440593364,
+  "angle_p90": 22.31785017389737,
+  "ratio_p50": 0.9952967752124395,
+  "reversed_pct": 0.0
+ },
+ "moraineSet": {
+  "fixture": "standalone",
+  "angle_p50": 1.392012465186098,
+  "angle_p90": 8.385847869552652,
+  "ratio_p50": 1.0304411321522051,
+  "reversed_pct": 0.3119308309083677
+ },
+ "streamform": {
+  "fixture": "standalone",
+  "angle_p50": 1.0191876388846106,
+  "angle_p90": 90.0,
+  "ratio_p50": 1.0289008534966306,
+  "reversed_pct": 0.0
+ },
+ "oceanRidge": {
+  "fixture": "standalone",
+  "angle_p50": 4.3157306841760175,
+  "angle_p90": 17.667927737122966,
+  "ratio_p50": 1.0301542171425127,
+  "reversed_pct": 0.06052637071358504
+ },
+ "invertedChannel": {
+  "fixture": "standalone",
+  "angle_p50": 3.36617666480523,
+  "angle_p90": 60.96856893550549,
+  "ratio_p50": 0.9920865296266091,
+  "reversed_pct": 2.1335358696402675
+ },
+ "terraceStair": {
+  "fixture": "smooth",
+  "angle_p50": 1.0604612820202164,
+  "angle_p90": 3.065329960817664,
+  "ratio_p50": 0.999863425877934,
+  "reversed_pct": 0.025221211038483363
+ },
+ "waveCutPlatform": {
+  "fixture": "coast",
+  "angle_p50": 3.5083933634111184,
+  "angle_p90": 21.083616311682295,
+  "ratio_p50": 1.0,
+  "reversed_pct": 0.461314852653087
+ },
+ "playa": {
+  "fixture": "smooth",
+  "angle_p50": 3.6033394584447307,
+  "angle_p90": 22.738889797641445,
+  "ratio_p50": 1.0034610274959266,
+  "reversed_pct": 3.7268776114388897
+ },
+ "planationSurface": {
+  "fixture": "detailed-base",
+  "angle_p50": 9.008567883559055,
+  "angle_p90": 29.64957701119842,
+  "ratio_p50": 1.013801037664647,
+  "reversed_pct": 0.9773565034228542
+ },
+ "towerKarst": {
+  "fixture": "standalone",
+  "angle_p50": 36.923132630342444,
+  "angle_p90": 105.1961955490298,
+  "ratio_p50": 1.085818812832849,
+  "reversed_pct": 12.249287250537687
+ },
+ "cockpitKarst": {
+  "fixture": "standalone",
+  "angle_p50": 7.385470482437674,
+  "angle_p90": 50.94786541759993,
+  "ratio_p50": 1.0144037785793805,
+  "reversed_pct": 5.533256278238941
+ },
+ "limestonePavement": {
+  "fixture": "standalone",
+  "angle_p50": 45.300630893802925,
+  "angle_p90": 126.1128114825236,
+  "ratio_p50": 1.399044988630479,
+  "reversed_pct": 23.349001918172046
+ },
+ "bornhardt": {
+  "fixture": "standalone",
+  "angle_p50": 5.3219686469280285,
+  "angle_p90": 64.46021122968553,
+  "ratio_p50": 1.0172823766497965,
+  "reversed_pct": 4.8959425063632285
+ },
+ "badlands": {
+  "fixture": "smooth",
+  "angle_p50": 16.393855905533915,
+  "angle_p90": 97.58956661227171,
+  "ratio_p50": 1.0694715217780542,
+  "reversed_pct": 11.43222935818327
+ },
+ "patternedGround": {
+  "fixture": "slope",
+  "angle_p50": 7.101190533664439,
+  "angle_p90": 138.1562337245827,
+  "ratio_p50": 0.9999999999999805,
+  "reversed_pct": 20.897064438604765
+ },
+ "duneField": {
+  "fixture": "standalone",
+  "angle_p50": 0.2738067948170311,
+  "angle_p90": 18.11388238550907,
+  "ratio_p50": 1.0039210842246304,
+  "reversed_pct": 0.7026419336706015
+ },
+ "alluvialFan": {
+  "fixture": "standalone",
+  "angle_p50": 0.5166519800772958,
+  "angle_p90": 6.608735444565729,
+  "ratio_p50": 1.0019168340480884,
+  "reversed_pct": 0.38797284190106696
+ },
+ "sandur": {
+  "fixture": "standalone",
+  "angle_p50": 36.06515273441957,
+  "angle_p90": 173.80812982522633,
+  "ratio_p50": 1.0246488986871978,
+  "reversed_pct": 32.66799873803765
+ },
+ "delta": {
+  "fixture": "standalone",
+  "angle_p50": 2.167190494036633,
+  "angle_p90": 21.777114320026396,
+  "ratio_p50": 1.019492095245861,
+  "reversed_pct": 0.9210801758425791
+ },
+ "spitBar": {
+  "fixture": "standalone",
+  "angle_p50": 0.00698609248044117,
+  "angle_p90": 7.906215855882492,
+  "ratio_p50": 0.9999819790194837,
+  "reversed_pct": 0.32991838860913353
+ },
+ "reefRing": {
+  "fixture": "standalone",
+  "angle_p50": 0.02207401155221083,
+  "angle_p90": 0.5075274318982579,
+  "ratio_p50": 1.000143533550557,
+  "reversed_pct": 0.49633146309883475
+ },
+ "beachCusps": {
+  "fixture": "coast",
+  "angle_p50": 0.0025310414582656363,
+  "angle_p90": 9.354103679762776,
+  "ratio_p50": 1.0000620031417635,
+  "reversed_pct": 0.6547979680290814
+ },
+ "lavaField": {
+  "fixture": "slope",
+  "angle_p50": 8.537736462515939e-07,
+  "angle_p90": 5.680071308649778,
+  "ratio_p50": 0.9999999999999805,
+  "reversed_pct": 0.09456823689343341
+ },
+ "rockGlacier": {
+  "fixture": "standalone",
+  "angle_p50": 2.7642188588617844,
+  "angle_p90": 10.005216945657429,
+  "ratio_p50": 1.047107703036958,
+  "reversed_pct": 0.2383888203863543
+ }
+}

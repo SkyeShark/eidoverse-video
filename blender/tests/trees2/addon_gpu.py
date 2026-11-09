@@ -64,9 +64,16 @@ def main():
         png = os.path.join(S.OUT, 'addon_export_png.png')
         res = bpy.ops.seedthree.export_png(filepath=png)
         S.check('Export PNG renders the camera', 'FINISHED' in res and os.path.isfile(png))
+        # what renders: the MESH objects under the root (the billboard's cards hang under its
+        # Empty, whose own visibility draws nothing)
+        def shown():
+            return sorted({('BB' if o.get('seedthree_billboard_card') else o.get('seedthree_lod'))
+                           for o in bpy.data.objects.get(st.last_root).children_recursive
+                           if o.type == 'MESH' and not o.hide_render})
         st.preview = 'LOD2'
-        shown = sorted({ch.get('seedthree_lod') for ch in bpy.data.objects.get(st.last_root).children if not ch.hide_render})
-        S.check('Preview level LOD2 after the export bake', shown == ['LOD2'], str(shown))
+        S.check('Preview level LOD2 after the export bake', shown() == ['LOD2'], str(shown()))
+        st.preview = 'BB'
+        S.check('Preview level BB shows the baked billboard alone', shown() == ['BB'], str(shown()))
     finally:
         seedthree.unregister()
     S.summary('addon_gpu')

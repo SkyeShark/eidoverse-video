@@ -45,6 +45,28 @@ def _sstep(e0, e1, x):
     return t * t * (3.0 - 2.0 * t)
 
 
+def _strike_b(st):
+    """A strike record of the scheduler (three.js axes) in Blender axes: x, y, z the strike point (z its height),
+    normal; cloudY stays the deck's height. The facade's state and diagnostics carry these."""
+    if not st:
+        return st
+    out = dict(st)
+    out['x'], out['y'], out['z'] = _b3((st['x'], st['y'], st['z']))
+    if st.get('normal') is not None:
+        out['normal'] = list(_b3(st['normal']))
+    return out
+
+
+def _damage_b(d):
+    """A surface-damage record (three.js axes) in Blender axes: point and normal."""
+    if not d:
+        return d
+    out = dict(d)
+    out['point'] = list(_b3(d['point']))
+    out['normal'] = list(_b3(d['normal']))
+    return out
+
+
 class WeatherFX:
     """The weather system of one scene (making a second one disposes the first, as the JS registry does)."""
 
@@ -54,15 +76,22 @@ class WeatherFX:
                  strike_targets=None, strike_height_at=None, on_local_strike=None, occluders=None,
                  drop_texture='default', bolt_texture='default', moisture=True, moisture_radius=1024.0,
                  moisture_resolution=256, rain_color=None, cloud_color=None, sun_color=None, shield_color=None,
-                 wet_model='moisture', wet_exposure=True, cache_dir=None, log=print):
+                 wet_model='moisture', wet_exposure=True, rain_cells='upwind', cache_dir=None, log=print):
         import bpy
         if sky is None:
             raise ValueError('make_weather_system: pass the scene\'s Sky (eidoblend.sky.make_sky): the weather reads '
                              'its state machine, palette and weather field')
+        from .rain import RAIN_CELLS
+        if rain_cells not in RAIN_CELLS:
+            raise ValueError("make_weather_system: rain_cells must be one of %s, not '%s'"
+                             % (' | '.join(RAIN_CELLS), rain_cells))
         old = _REGISTRY.get(scene.name)
         if old is not None:
             old.dispose()
         self.scene, self.sky, self.log = scene, sky, log
+        self._disposed = False
+        self.rain_cells = rain_cells
+        self._upwind = RAIN_CELLS[rain_cells]
         self.opts = dict(rain_count=int(rain_count), rain_radius=float(rain_radius), rain_height=float(rain_height),
                          splash_count=int(splash_count), ground_y=float(ground_y), fall_speed=float(fall_speed),
                          puddles=float(puddles), wet_tint=tuple(wet_tint), storm_range=float(storm_range),
@@ -114,7 +143,7 @@ class WeatherFX:
         self.bolt_image = bpy.data.images.load(bolt, check_existing=True) if bolt else None
         from . import rain as R
         self.objects.update(R.build_rain_objects(coll, self.weather_map, self.drop_image, occluders,
-                                                 rain_count, rain_radius, rain_height, splash_count))
+                                                 rain_count, rain_radius, rain_height, splash_count, rain_cells))
         from .strike import strike_light, bolt_material
         self.light = strike_light(coll)
         self.bolt_material = bolt_material(self.bolt_image)
@@ -208,7 +237,8 @@ class WeatherFX:
     def _fresh_diagnostics(self):
         o = self.opts
         return dict(version='weather-acceptance-v3',
-                    transition=dict(active=False, target=None, durationSeconds=0.0, rawProgress=1.0),
+                    transition={'active': False, 'from': 'clear', 'target': 'clear', 'durationSeconds': 0.0,
+                                'elapsedSeconds': 0.0, 'rawProgress': 1.0, 'easedProgress': 1.0},
                     motion=dict(integration='positive-delta-time-velocity', verticalDirection='downward-only',
                                 fallVelocity=0.0, lastDeltaSeconds=0.0, totalFallDistance=0.0,
                                 totalWindDistance=[0.0, 0.0], fallPhase=0.0, windOffset=[0.0, 0.0]),
@@ -277,11 +307,13 @@ class WeatherFX:
         return np.clip((val - float(U['largeT'])) * float(U['largeA']), 0.0, 2.0)
 
     def _cell_at(self, x, y, height=0.0):
-        """rainCellAt over Blender (x, y) arrays at a height (0: the moisture columns' reference)."""
+        """rainCellAt over Blender (x, y) arrays at a height (0: the moisture columns' reference); with
+        rain_cells='column' the drop's own column, as eidoverse gates its drops."""
         u = self.sky.wx.u
         U = self.sky.sky.U
         x3, z3 = np.asarray(x, np.float64), -np.asarray(y, np.float64)
-        k = max(float(U['cloudStart']) - height, 0.0) / max(self.opts['fall_speed'] * float(u['fallMul']), 1.0)
+        k = (max(float(U['cloudStart']) - height, 0.0) / max(self.opts['fall_speed'] * float(u['fallMul']), 1.0)
+             * self._upwind)
         wv = u['windVec']
         cov = self._coverage(x3 - wv[0] * k, z3 - wv[2] * k)
         gate = _sstep(float(u['cellLo']), float(u['cellHi']), cov)
@@ -289,9 +321,7 @@ class WeatherFX:
         return gate + (1.0 - gate) * c
 
     def _notify_local(self, damage, hit_object):
-        rec = dict(damage)
-        rec['point'] = list(_b3(damage['point']))
-        rec['normal'] = list(_b3(damage['normal']))
+        rec = _damage_b(damage)
         self.state['lastImpact'] = rec
         if hit_object is not None:
             d = hit_object.get('eido_lightning_strikes', 0)
@@ -303,6 +333,8 @@ class WeatherFX:
     def update(self, t, camera=None, frame=None):
         """One frame, with the sky already updated to t (inside sky.frame_states or an on_frame-driven loop): the
         WebGPU weather.update(t, camera). Returns the frame's record (what the bake keys)."""
+        if self._disposed or _REGISTRY.get(self.scene.name) is not self:
+            return False                  # a disposed or replaced system never advances (the JS registry check)
         sky = self.sky
         wx, U, u = sky.wx, sky.sky.U, sky.wx.u
         cam = camera or self.scene.camera
@@ -380,10 +412,29 @@ class WeatherFX:
         return row
 
     def _update_state(self, row, r, w, k, tr):
-        self.state.update(name=self.sky.wx.state['name'], k=row['k'], def_=w, strike=r['strike'])
+        name = self.sky.wx.state['name']
+        self.state.update(name=name, k=row['k'], def_=w, strike=_strike_b(r['strike']))
         D = self.diagnostics
-        D['transition'].update(active=tr is not None, target=tr['toName'] if tr else None,
-                               durationSeconds=tr['dur'] if tr else 0.0, rawProgress=self.sky.wx.trans_s if tr else 1.0)
+        lt = dict(self.sched.diag)               # the scheduler's record (three.js axes), its positions in Blender's
+        lt['lastStrike'] = _strike_b(lt.get('lastStrike'))
+        li = dict(lt['localImpact'])
+        li['lastSurfaceDamage'] = _damage_b(li.get('lastSurfaceDamage'))
+        lt['localImpact'] = li
+        D['lightning'] = lt
+        T = D['transition']
+        t = row['t']
+        if tr:                                   # a morph running: the JS diagnostics.transition, field for field
+            t0 = tr['t0'] if tr.get('t0') is not None else t
+            self._trans_seen = (t0, tr['dur'])
+            T.update({'active': True, 'from': tr['fromName'], 'target': tr['toName'], 'durationSeconds': tr['dur'],
+                      'elapsedSeconds': max(0.0, t - t0), 'rawProgress': max(0.0, min(1.0, (t - t0) / tr['dur'])),
+                      'easedProgress': self.sky.wx.trans_s})
+        elif T.get('active'):                    # it ended this frame: from / target stay, progress completes
+            t0, dur = getattr(self, '_trans_seen', (t, 0.0))
+            T.update({'active': False, 'elapsedSeconds': max(0.0, t - t0), 'rawProgress': 1.0, 'easedProgress': 1.0})
+        elif not (T.get('target') == name and T.get('durationSeconds')):   # a set_weather (or none yet)
+            T.update({'active': False, 'from': name, 'target': name, 'durationSeconds': 0.0, 'elapsedSeconds': 0.0,
+                      'rawProgress': 1.0, 'easedProgress': 1.0})
         D['motion'].update(fallVelocity=row['fall'], totalFallDistance=self._total_fall,
                            totalWindDistance=list(self._total_wind), fallPhase=row['fall_phase'] % self.opts['rain_height'],
                            windOffset=[row['wind_offset'][0] % (self.opts['rain_radius'] * 2),
@@ -393,7 +444,8 @@ class WeatherFX:
         D['wetness'].update(wetness=row['wetness'], surfaceWater=row['surface_water'], targetWetness=row['wet_target'])
         self.uniforms = dict(time=row['t'], rainK=row['rain_k'], fallPhase=row['fall_phase'] % self.opts['rain_height'],
                              windOffset=row['wind_offset'], windVec=row['wind'], streakLen=row['streak_len'],
-                             fallMul=row['fall'] / self.opts['fall_speed'], dashK=row['dash_k'],
+                             fallSpeed=self.opts['fall_speed'], fallMul=row['fall'] / self.opts['fall_speed'],
+                             streakW=0.014, dashK=row['dash_k'],
                              rainColor=row['rain_color'], rainLight=row['rain_light'], wetness=row['wetness'],
                              wetTint=self.opts['wet_tint'], puddleK=self.opts['puddles'], cellLo=row['cell_lo'],
                              cellHi=row['cell_hi'], denseA=row['dense_a'], camPos=row['cam3'],
@@ -471,8 +523,12 @@ class WeatherFX:
                  % (len(rows), time.time() - t0, len(self.sched.events), len(self.sched.impacts)))
         self._active = True
         if bake_sky:
-            with self._generators_off():
-                self.sky.bake(frame_start, frame_end)
+            self._baking = True              # a sky whose bake() hands itself to its weather_fx bakes itself here
+            try:
+                with self._generators_off():
+                    self.sky.bake(frame_start, frame_end)
+            finally:
+                self._baking = False
         if keys:
             self.key(rows, frame_start=fs)
         self._write_state(rows)
@@ -481,25 +537,20 @@ class WeatherFX:
     def shelter_map(self, rows, texel=0.15, max_texels=1600):
         """The rain-exposure map of the occluders along the bake's rain-weighted mean direction (shelter.py)."""
         from .shelter import capture, mean_rain_direction
-        from .strike import resolve_targets
+        from .strike import target_surfaces
         from .wet import shelter_image
         from ..sky.bake.baker import write_exr
-        objs = resolve_targets(self.occluders)
-        if not objs:
+        surfaces = [s for s in target_surfaces(self.occluders) if s[3]]     # the occluders' meshes and instances
+        if not surfaces:
             return None
-        lo = [math.inf, math.inf]
-        hi = [-math.inf, -math.inf]
-        for ob in objs:
-            for c in ob.bound_box:
-                w = ob.matrix_world @ __import__('mathutils').Vector(c)
-                lo = [min(lo[0], w.x), min(lo[1], w.y)]
-                hi = [max(hi[0], w.x), max(hi[1], w.y)]
+        allv = np.concatenate([s[2] for s in surfaces])
+        lo, hi = allv[:, :2].min(axis=0), allv[:, :2].max(axis=0)
         span = max(hi[0] - lo[0], hi[1] - lo[1])
         texel = max(texel, span / max_texels)
         d = mean_rain_direction(rows)
         pad = 2.0
-        rgba, meta, z_low = capture(objs, d, (lo[0] - pad, lo[1] - pad, hi[0] + pad, hi[1] + pad), texel,
-                                    log=self.log, lowest=True)
+        rgba, meta, z_low = capture(None, d, (lo[0] - pad, lo[1] - pad, hi[0] + pad, hi[1] + pad), texel,
+                                    log=self.log, lowest=True, surfaces=surfaces)
         path = os.path.join(self.cache_dir, 'rain_exposure.exr')
         write_exr(path, rgba, half=False)
         shelter_image(path)
@@ -620,9 +671,9 @@ class WeatherFX:
         for r in rows:
             out.append({k: v for k, v in r.items() if k not in drop})
         with open(os.path.join(self.cache_dir, 'weather_state.json'), 'w', encoding='utf-8') as f:
-            json.dump(dict(frames=out, events=[dict(interval=e['interval'], time=e['time'], strike=e['strike'],
+            json.dump(dict(frames=out, events=[dict(interval=e['interval'], time=e['time'], strike=_strike_b(e['strike']),
                                                     color_key=e['color_key'], local=e['strike']['local'],
-                                                    damage=e['damage']) for e in self.sched.events],
+                                                    damage=_damage_b(e['damage'])) for e in self.sched.events],
                            diagnostics=self.diagnostics), f, indent=1, default=str)
 
     # ----------------------------------------------------------------------------------------------- audio ---
@@ -640,12 +691,15 @@ class WeatherFX:
 
     @property
     def audio(self):
-        """The weather-audio recorder fed with the planned frames (sky_worlds.js `audio`: stats, timeline()), or None
-        before a plan."""
+        """The weather-audio object of the planned frames (sky_worlds.js `audio`, makeWeatherAudio's object: stats,
+        timeline(), to_json()), or None before a plan."""
         if not getattr(self, 'rows', None):
             return None
-        from .audio import record
-        return record(self.rows)
+        from .audio import WeatherAudio, record
+        wa = WeatherAudio(self, self.scene.camera)
+        wa.recorder = record(self.rows)
+        wa.stats = wa.recorder.stats
+        return wa
 
     def audio_json(self, frame_start=None, **kw):
         """The timeline as weather_audio.js's toJSON() writes it (JSON, one-space indent): the string sky_worlds.js's
@@ -681,9 +735,12 @@ class WeatherFX:
         return [o for o in self.collection.objects]
 
     def dispose(self):
-        """Restore wrapped materials, remove the weather's objects, materials and groups, unhook the sky."""
+        """Restore wrapped materials, remove the weather's objects, materials and groups, unhook the sky. A second call
+        does nothing (returns False)."""
         import bpy
         from .wet import unwrap_material
+        if self._disposed:
+            return False
         for m in list(self.wrapped):
             unwrap_material(m)
         self.wrapped.clear()
@@ -713,6 +770,7 @@ class WeatherFX:
         if _REGISTRY.get(self.scene.name) is self:
             del _REGISTRY[self.scene.name]
         self._active = False
+        self._disposed = True
         return True
 
 
@@ -730,7 +788,8 @@ def make_weather_system(scene=None, sky=None, **opts):
     history, default on), moisture_radius 1024 / moisture_resolution 256 (Eanpa's), wet_model 'moisture' (eido_wet:
     Eanpa's response over the moisture history) or 'eidoverse' (eido_wet_eidoverse: eidoverse's one global
     wetness), wet_exposure True (the occluders' rain shadow on wet ground; False keeps them for drops and splashes
-    only), cache_dir.
+    only), rain_cells 'upwind' (drops, rings and moisture read the cloud cell their water fell from: Eanpa's
+    rainCellAt) or 'column' (each reads the cell straight above it, as eidoverse gates its drops), cache_dir.
     """
     import bpy
     scene = scene or bpy.context.scene

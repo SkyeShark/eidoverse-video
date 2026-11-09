@@ -1,0 +1,54 @@
+{
+ "name": "lauterbrunnen",
+ "role": "main",
+ "title": "Lauterbrunnen Valley, Bernese Oberland, Switzerland",
+ "landform": "glacial U-valley",
+ "note": "A glacial trough: a flat floor about 800 m up between limestone walls 300-500 m sheer, the hanging terraces of Wengen and Muerren above them.",
+ "centre_lat": 46.572,
+ "centre_lon": 7.905,
+ "pixel_size_m": 8.0,
+ "extent_m": [
+  8000,
+  8000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "source": {
+  "dataset": "swissALTI3D, 2 m tiles (1 km x 1 km), latest edition per tile",
+  "publisher": "Federal Office of Topography swisstopo",
+  "url": "https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swissalti3d",
+  "native_resolution_m": 2,
+  "vertical_datum": "LN02 (Swiss national heights)",
+  "licence": "swisstopo free geodata (Open Government Data): free use, the source must be cited; https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices",
+  "attribution": "(c) swisstopo, swissALTI3D",
+  "kind": "swissalti3d",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 2.0,
+  "resampling": "Gaussian low-pass (sigma 1.80 source px) then bilinear",
+  "no_data_fraction": 0.0,
+  "tiles_1km": 90,
+  "years": [
+   2025
+  ],
+  "grid": "LV95 (EPSG:2056)"
+ },
+ "licence": "swisstopo free geodata (Open Government Data): free use, the source must be cited; https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices",
+ "attribution": "(c) swisstopo, swissALTI3D",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 3141.99,
+  "mean_m": 1792.13,
+  "hypsometric_integral": 0.3371,
+  "slope_deg_p10": 11.82,
+  "slope_deg_p50": 31.47,
+  "slope_deg_p90": 52.46,
+  "slope_deg_p99": 75.84,
+  "slope_deg_mean": 31.85
+ },
+ "height_png": "lauterbrunnen.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 732.95,
+ "height_max_m": 3874.95,
+ "height_step_m": 0.04794384679942016,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

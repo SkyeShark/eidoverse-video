@@ -1,0 +1,68 @@
+{
+ "name": "cliffs_of_moher_context",
+ "role": "context",
+ "title": "Cliffs of Moher, County Clare, Ireland",
+ "landform": "sea cliffs",
+ "note": "Shale and sandstone sea cliffs rising 120-214 m straight out of the Atlantic for 8 km, from Hag's Head north past O'Brien's Tower.",
+ "centre_lat": 52.962,
+ "centre_lon": -9.44,
+ "pixel_size_m": 24.0,
+ "extent_m": [
+  24000,
+  24000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "data_note": "Copernicus GLO-30 (30 m) cannot resolve a vertical 200 m face: here the cliff is a steep ramp one or two source pixels wide. The plan of the coast and the cliff-top plateau are right; seven_sisters is the high-resolution (2 m lidar) reference for the vertical cliff itself.",
+ "context_of": "cliffs_of_moher",
+ "sea_floor": "every height at or below 0.3 m is set to -2 m: the sea surface is 0 m and the source's bathymetry is left out; 7 offshore patches of the source's sea data (each under 5% of the mainland) are sea as well",
+ "source": {
+  "dataset": "Copernicus DEM GLO-30 (public), 1 arc-second, AWS Open Data copernicus-dem-30m",
+  "publisher": "European Space Agency / Copernicus programme",
+  "url": "https://copernicus-dem-30m.s3.amazonaws.com/",
+  "native_resolution_m": 30,
+  "vertical_datum": "EGM2008 geoid",
+  "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+  "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+  "caveat": "A digital SURFACE model: it includes forest canopy and buildings.",
+  "kind": "copernicus",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 29.368,
+  "resampling": "bilinear, then Gaussian sigma 0.60 source px (17.6 m) against the radar speckle and the source lattice",
+  "no_data_fraction": 0.0,
+  "tiles": [
+   "53,-10",
+   "52,-10"
+  ],
+  "arcsec": [
+   1.5,
+   1.0
+  ],
+  "pixel_is_point": true
+ },
+ "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+ "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+ "water": [
+  {
+   "kind": "sea",
+   "name": "Atlantic",
+   "level_m": 0.0
+  }
+ ],
+ "shape_stats": {
+  "relief_m": 331.99,
+  "mean_m": 34.4,
+  "hypsometric_integral": 0.1096,
+  "slope_deg_p10": 0.0,
+  "slope_deg_p50": 0.0,
+  "slope_deg_p90": 5.37,
+  "slope_deg_p99": 12.36,
+  "slope_deg_mean": 1.71
+ },
+ "height_png": "cliffs_of_moher_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": -2.0,
+ "height_max_m": 330.0,
+ "height_step_m": 0.005065995269703212,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

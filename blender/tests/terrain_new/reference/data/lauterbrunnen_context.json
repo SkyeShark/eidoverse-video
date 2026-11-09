@@ -1,0 +1,58 @@
+{
+ "name": "lauterbrunnen_context",
+ "role": "context",
+ "title": "Lauterbrunnen Valley, Bernese Oberland, Switzerland",
+ "landform": "glacial U-valley",
+ "note": "A glacial trough: a flat floor about 800 m up between limestone walls 300-500 m sheer, the hanging terraces of Wengen and Muerren above them.",
+ "centre_lat": 46.572,
+ "centre_lon": 7.905,
+ "pixel_size_m": 32.0,
+ "extent_m": [
+  32000,
+  32000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "context_of": "lauterbrunnen",
+ "source": {
+  "dataset": "Terrain Tiles (Mapzen / Tilezen joerd), Terrarium PNG encoding, AWS Open Data elevation-tiles-prod",
+  "publisher": "Mapzen / Linux Foundation Tilezen, hosted by AWS",
+  "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  "native_resolution_m": "varies by region: 3DEP 3-10 m (USA), EU-DEM 25 m (Europe), SRTM 30-90 m, GMTED, ETOPO1",
+  "vertical_datum": "per source (mostly EGM96 geoid / NAVD88)",
+  "licence": "Open data, each underlying source credited: https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+  "attribution": "Terrain Tiles (Tilezen joerd) from: EU-DEM, produced using Copernicus data and information funded by the European Union; SRTM and GMTED2010 courtesy of the U.S. Geological Survey; ETOPO1, U.S. National Oceanic and Atmospheric Administration; (where in the UK) (c) Environment Agency copyright and/or database right 2015; (where in the USA) 3DEP courtesy of the U.S. Geological Survey",
+  "kind": "terrarium",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 26.273,
+  "resampling": "bilinear",
+  "no_data_fraction": 0.0,
+  "zoom": 12,
+  "tiles": 36,
+  "tile_range": [
+   2135,
+   1445,
+   2140,
+   1450
+  ]
+ },
+ "licence": "Open data, each underlying source credited: https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+ "attribution": "Terrain Tiles (Tilezen joerd) from: EU-DEM, produced using Copernicus data and information funded by the European Union; SRTM and GMTED2010 courtesy of the U.S. Geological Survey; ETOPO1, U.S. National Oceanic and Atmospheric Administration; (where in the UK) (c) Environment Agency copyright and/or database right 2015; (where in the USA) 3DEP courtesy of the U.S. Geological Survey",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 3539.25,
+  "mean_m": 2074.83,
+  "hypsometric_integral": 0.4316,
+  "slope_deg_p10": 5.77,
+  "slope_deg_p50": 25.67,
+  "slope_deg_p90": 45.08,
+  "slope_deg_p99": 58.22,
+  "slope_deg_mean": 25.76
+ },
+ "height_png": "lauterbrunnen_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 547.34,
+ "height_max_m": 4086.6,
+ "height_step_m": 0.05400564583810177,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

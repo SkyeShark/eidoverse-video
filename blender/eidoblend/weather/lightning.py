@@ -154,15 +154,22 @@ def lightning_local_candidate_at(event_index, chance, palette_name='standard', e
 
 
 def make_lightning_profile(gap_scale=DEFAULT_GAP_SCALE):
-    """globalThis.EANPA_LIGHTNING_PROFILE, with this system's gap scale bound into the gap functions."""
-    return dict(
-        styles=LIGHTNING_STYLES, palettes=LIGHTNING_PALETTES, styleKeyAt=lightning_style_key_at,
-        cadence=LIGHTNING_CADENCE,
-        eventGapAt=lambda i, p='standard', lv=1.0: lightning_event_gap_at(i, p, lv, gap_scale),
-        initialEventGapAt=lambda i, p='standard', lv=1.0: lightning_initial_event_gap_at(i, p, lv, gap_scale),
-        strokePlanAt=lightning_stroke_plan_at, flashAt=lightning_flash_at, channelAt=lightning_channel_at,
-        localCandidateAt=lambda i, c, **kw: lightning_local_candidate_at(i, c, **kw),
+    """globalThis.EANPA_LIGHTNING_PROFILE, with this system's gap scale bound into the gap functions. Its entries
+    by their snake_case names (style_key_at, event_gap_at, initial_event_gap_at, stroke_plan_at, flash_at, channel_at,
+    local_candidate_at), and by the JS names too (styleKeyAt, eventGapAt, ...) for code ported from the JS."""
+    prof = dict(
+        styles=LIGHTNING_STYLES, palettes=LIGHTNING_PALETTES, cadence=LIGHTNING_CADENCE,
+        style_key_at=lightning_style_key_at,
+        event_gap_at=lambda i, p='standard', lv=1.0: lightning_event_gap_at(i, p, lv, gap_scale),
+        initial_event_gap_at=lambda i, p='standard', lv=1.0: lightning_initial_event_gap_at(i, p, lv, gap_scale),
+        stroke_plan_at=lightning_stroke_plan_at, flash_at=lightning_flash_at, channel_at=lightning_channel_at,
+        local_candidate_at=lambda i, c, **kw: lightning_local_candidate_at(i, c, **kw),
     )
+    for js, py in (('styleKeyAt', 'style_key_at'), ('eventGapAt', 'event_gap_at'),
+                   ('initialEventGapAt', 'initial_event_gap_at'), ('strokePlanAt', 'stroke_plan_at'),
+                   ('flashAt', 'flash_at'), ('channelAt', 'channel_at'), ('localCandidateAt', 'local_candidate_at')):
+        prof[js] = prof[py]
+    return prof
 
 
 EANPA_LIGHTNING_PROFILE = make_lightning_profile()
@@ -364,6 +371,7 @@ class LightningScheduler:
         self.impact_slots = [dict(birth=-math.inf, impact=None) for _ in range(IMPACT_POOL_SIZE)]
         self.scorch_slots = [dict(birth=-math.inf, impact=None) for _ in range(SCORCH_POOL_SIZE)]
         self.diag = dict(schedule='deterministic-separated-events-bounded-return-strokes', palette='standard',
+                         paletteWeights=LIGHTNING_PALETTES, cadence=LIGHTNING_CADENCE,
                          eventCount=0, activeEvent=False, activeStrokeCount=0, eventElapsedSeconds=0.0,
                          nextEventAtSeconds=None, lastEventGapSeconds=None, activeStyle='white', flash=0.0,
                          lastStrike=None,

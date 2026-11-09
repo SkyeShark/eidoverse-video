@@ -56,9 +56,9 @@ def blender(script, *args, timeout=3600):
     return r.returncode, r.stdout + r.stderr
 
 
-def eb(*args):
+def eb(*args, env=None):
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'eido_blender.py'), *args], cwd=ROOT, capture_output=True,
-                       text=True, encoding='utf-8', errors='replace')
+                       text=True, encoding='utf-8', errors='replace', env=dict(os.environ, **(env or {})))
     return r.returncode, r.stdout + r.stderr
 
 
@@ -167,12 +167,23 @@ def u6():
     import numpy as np
     from PIL import Image
     for p in os.listdir(OUT):
-        if p.startswith('lower_third_probe_at'):
+        if p.startswith(('lower_third_probe_at', 'lower_third_no_vignette_at')):
             os.remove(os.path.join(OUT, p))
-    rc, log = eb('render', os.path.join(HERE, 'lower_third', 'scene.json'), '--at', '0.2', '--at', '2', '--rebuild',
-                 '--force')
-    pngs = [os.path.join(OUT, f'lower_third_probe_at{t}s.png') for t in ('0.20', '2.00')]
-    if not check('U6', rc == 0 and all(os.path.exists(p) for p in pngs),
+    cfg = os.path.join(HERE, 'lower_third', 'scene.json')
+    # the reference first: the same film without its screen hook (the scene drops it under EIDO_TEST_NO_VIGNETTE),
+    # so the vignette is measured against the same frame, not against what happens to sit in the corners; then the
+    # film itself, whose build is the one left on disk
+    rc0, log0 = eb('render', cfg, '--at', '2', '--rebuild', '--force', env={'EIDO_TEST_NO_VIGNETTE': '1'})
+    ref = os.path.join(OUT, 'lower_third_no_vignette_at2.00s.png')
+    if rc0 == 0 and os.path.exists(os.path.join(OUT, 'lower_third_probe_at2.00s.png')):
+        os.replace(os.path.join(OUT, 'lower_third_probe_at2.00s.png'), ref)
+    rc, log = eb('render', cfg, '--at', '0.2', '--at', '2', '--rebuild', '--force')
+    # a still is named by the time of the frame it snapped to (0.2 s at 24 fps is frame 6, 0.21 s): read the names
+    # the runner wrote, earliest first, rather than spelling them
+    pngs = sorted((os.path.join(OUT, p) for p in os.listdir(OUT)
+                   if p.startswith('lower_third_probe_at') and p.endswith('s.png')),
+                  key=lambda p: float(re.search(r'_at([\d.]+)s\.png$', p).group(1)))
+    if not check('U6', rc == 0 and len(pngs) == 2,
                  f'two stills rendered (exit {rc}): {pngs} (LOOK at them)'):
         print(log[-3000:])
         return
@@ -181,18 +192,40 @@ def u6():
     want = ['bloom:bloom', 'under:color_hook', 'overlay:overlay', 'over:screen_hook']
     check('U6', ae and ae['metrics'].get('stages') == want and ae['outcome'] == 'PASS',
           f"the digest records the film's stack in the engine's order: {ae['metrics'].get('stages') if ae else 'missing'}")
+    bf = next((r for r in d['records'] if r['check'] == 'build.files'), None)
+    kept = os.path.join(OUT, 'lower_third_files')
+    check('U6', bf and os.path.isdir(kept) and any(n.endswith('.png') for _r, _d, fs in os.walk(kept) for n in fs),
+          'the card html_mesh painted into the temp folder during setup() is kept beside the .blend '
+          f"(a reused build renders it after the temp folder is cleaned): {bf['message'][:110] if bf else 'missing'}")
     a, b = (np.asarray(Image.open(p).convert('RGB'), np.float64) for p in pngs)
     H, W = b.shape[:2]
     band = (slice(int(0.78 * H), int(0.89 * H)), slice(int(0.07 * W), int(0.30 * W)))   # the card's left half
     dark_b = (b[band].sum(2) < 120).mean()
     dark_a = (a[band].sum(2) < 120).mean()
     check('U6', dark_b > 0.35 and dark_b > dark_a + 0.15,
-          f'the card follows its keys on the overlay layer: its dark panel fills {dark_b:.0%} of its place at 2 s '
+          f'the card follows its keys on the overlay layer: its 80 % panel darkens {dark_b:.0%} of its place at 2 s '
           f'and {dark_a:.0%} at 0.2 s (still off the left edge)')
-    corner = b[:int(0.12 * H), :int(0.12 * W)].mean()
-    centre = b[int(0.3 * H):int(0.55 * H), int(0.4 * W):int(0.6 * W)].mean()
-    check('U6', corner < 0.75 * centre, f'the vignette darkens the corners: corner mean {corner:.0f}, centre '
-                                         f'{centre:.0f} (of 255)')
+    if not check('U6', rc0 == 0 and os.path.exists(ref), f'the reference still without the screen hook (exit {rc0}): '
+                                                          f'{ref}'):
+        print(log0[-3000:])
+        return
+    r = np.asarray(Image.open(ref).convert('RGB'), np.float64)
+    text = r[band].reshape(-1, 3)
+    text = text[text.sum(1) > np.percentile(text.sum(1), 97)]          # the brightest ink: the title's #f4efe6
+    check('U6', text.mean() > 225, f'the HUD lands as drawn (the authored route): the title ink reads '
+                                   f'{text.mean(0).round().tolist()} where its CSS is #f4efe6 (244, 239, 230); '
+                                   f'AgX grading a plain alpha-over left it at (193, 191, 188)')
+    h, w = int(0.12 * H), int(0.12 * W)
+    corners = [(slice(0, h), slice(0, w)), (slice(0, h), slice(W - w, W)), (slice(H - h, H), slice(W - w, W))]
+    ratio = [b[c].mean() / max(1e-6, r[c].mean()) for c in corners]
+    mid = (slice(int(0.3 * H), int(0.55 * H)), slice(int(0.4 * W), int(0.6 * W)))
+    centre = b[mid].mean() / max(1e-6, r[mid].mean())
+    # display values after AgX: its curve compresses a scene-light darkening (most on the bright plaster at the top),
+    # and this vignette is soft (its blurred ellipse leaves only the far corners near its 0.55); against the same
+    # frame without the hook the centre reads 1.000 exactly, so a corner a couple of per cent darker is the hook
+    check('U6', abs(centre - 1.0) < 0.005 and max(ratio) < centre - 0.02,
+          f'the vignette (the screen hook, over the HUD) darkens the corners against the same frame without it: '
+          f'{[round(float(x), 3) for x in ratio]} (top left, top right, bottom right), the centre {centre:.3f}')
 
 
 def u5():

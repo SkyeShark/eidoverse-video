@@ -6,11 +6,13 @@ at module level as its globals were:
     _auto_enhance_color_hook       a warm documentary grade (a little less saturation, warm gain), UNDER the overlay
     _auto_enhance_screen_hook      a vignette, OVER the overlay (a HUD is part of the picture the lens darkens)
 and an html_mesh lower third on the overlay layer (make_overlay_layer), placed with the media overlay's place() and
-sliding in from the left over the first 0.75 s (keyed). The overlay passes through AgX with the film (post.py).
+sliding in from the left over the first 0.75 s (keyed). The overlay lands as drawn (post.py's authored route: the
+over in display space), and the vignette after it darkens the HUD with the film.
 
     python eido_blender.py render blender/tests/pipeline2/lower_third/scene.json --at 2
 """
 import math
+import os
 
 import bpy
 from mathutils import Vector
@@ -70,6 +72,10 @@ def _auto_enhance_screen_hook(scene, tree):
     n = tree.nodes.new('CompositorNodeGroup')
     n.node_tree = g
     return n
+
+
+if os.environ.get('EIDO_TEST_NO_VIGNETTE') == '1':     # run_tests.py U6's reference still: the same film, no screen hook
+    del _auto_enhance_screen_hook
 
 
 def _plane(name, size, loc, rot, mat, uv=0.5):

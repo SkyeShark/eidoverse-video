@@ -1,0 +1,59 @@
+{
+ "name": "namib_star_dunes_context",
+ "role": "context",
+ "title": "Namib star dunes near Sossusvlei, Namibia",
+ "landform": "star dunes",
+ "note": "Star dunes 200-350 m high with radiating arms around the Sossusvlei and Deadvlei clay pans.",
+ "centre_lat": -24.745,
+ "centre_lon": 15.32,
+ "pixel_size_m": 32.0,
+ "extent_m": [
+  32000,
+  32000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "context_of": "namib_star_dunes",
+ "source": {
+  "dataset": "Copernicus DEM GLO-30 (public), 1 arc-second, AWS Open Data copernicus-dem-30m",
+  "publisher": "European Space Agency / Copernicus programme",
+  "url": "https://copernicus-dem-30m.s3.amazonaws.com/",
+  "native_resolution_m": 30,
+  "vertical_datum": "EGM2008 geoid",
+  "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+  "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+  "caveat": "A digital SURFACE model: it includes forest canopy and buildings.",
+  "kind": "copernicus",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 29.444,
+  "resampling": "bilinear, then Gaussian sigma 0.60 source px (17.7 m) against the radar speckle and the source lattice",
+  "no_data_fraction": 0.0,
+  "tiles": [
+   "-25,15"
+  ],
+  "arcsec": [
+   1.0,
+   1.0
+  ],
+  "pixel_is_point": true
+ },
+ "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+ "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 572.98,
+  "mean_m": 678.95,
+  "hypsometric_integral": 0.4452,
+  "slope_deg_p10": 1.15,
+  "slope_deg_p50": 6.72,
+  "slope_deg_p90": 18.95,
+  "slope_deg_p99": 28.58,
+  "slope_deg_mean": 8.57
+ },
+ "height_png": "namib_star_dunes_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 423.84,
+ "height_max_m": 996.83,
+ "height_step_m": 0.008743266956588083,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

@@ -168,6 +168,9 @@ one = csg.Evaluator(use_groups=False).evaluate(A, B, csg.ADDITION, name='r_union
 used = {one.data.materials[p.material_index].name for p in one.data.polygons}
 check({'csg_a', 'csg_b'} <= mats_kept and used == {'csg_a'},
       'use_groups=True keeps both materials (%s); False gives A\'s alone (%s)' % (sorted(mats_kept), sorted(used)))
+check([m.name for m in A.data.materials] == ['csg_a'],
+      'evaluate leaves A\'s mesh as it was: its material slots %s (three-bvh-csg never touches a brush)'
+      % [m.name for m in A.data.materials])
 bpy.data.objects.remove(one)
 # chaining: (A - B) n a small box
 small = box('C_small', 0.6, (x0 - 0.2, 0.0, 0.5), GREY)
@@ -233,6 +236,15 @@ check(len(fw4) > 0 and w4 < 1e-4 and len(fw3) + len(fw4) >= len(SH.data.polygons
       'no cap; with the intersection they cover the sheet' % (len(fw4), w4))
 cap.location.z += 1.2
 cap.location.x += 0.0
+# an open cutter has no inside (three-bvh-csg's result is undefined there too): the call says so
+import contextlib  # noqa: E402
+import io  # noqa: E402
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    junk = csg.evaluate(BALL, SH, csg.SUBTRACTION, hide_b=False, name='_open_cutter')
+bpy.data.objects.remove(junk)
+check(csg.open_edges(SH) > 0 and 'is open' in buf.getvalue() and csg.open_edges(BALL) == 0,
+      'an open cutter is named in a warning (%d boundary edges on the sheet; the ball closed)' % csg.open_edges(SH))
 SH.hide_render = True
 
 # --------------------------------------------------------------------------------------------- live ---

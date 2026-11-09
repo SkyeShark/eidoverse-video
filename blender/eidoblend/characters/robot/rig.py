@@ -69,21 +69,31 @@ def mouth_capped(w):
 class RobotRig:
     """my body's runtime state, one per VRM, made at load (claude_robot.js setup): arms (robot_dof.ArmDOF), hands
     (HandDOF), legs (LegStages), clear (LegClearance), head (HeadState), crown (Crown), body (round one's FK: the set-down)
-    and stats (the largest correction per joint, deg: a big entry means the clip asks for a pose my body cannot take)."""
+    and stats (the largest correction per joint, deg: a big entry means the clip asks for a pose my body cannot take).
 
-    def __init__(self, h, hinges=None, clearance=True, body=None):
+    hardware: my body's passes run only on my body (round one's rule, locomotion.Body: a VRM with my hips' stage bones;
+    None decides by that). Any other VRM gets a plain rig: its clips as they are, the body's gaze on its head bone exactly
+    as robot_body.js's _applyHeadOverride sets it, its feet set down; no joint limits, no clearances, no head states, no
+    crown (robot_body.js drives any VRM through the engine's own controller, which knows nothing of my hardware)."""
+
+    def __init__(self, h, hinges=None, clearance=True, body=None, hardware=None):
         self.h = h
-        rec = joints_record(h)
-        self.hinges = hinges if hinges is not None else (rec or {}).get('hinges')
-        if not self.hinges:
-            print('[robot] no joints file beside the VRM: the elbow keeps ARM\'s constants and the hands go unclamped',
-                  flush=True)
-        self.arms = dof.init_arm_dof(h, self.hinges, mute=True, wrist=True, mute_wrist=True)
-        self.hands = dof.init_hand_dof(h, self.hinges) if self.hinges else None
-        self.legs = dof.init_leg_dof(h)
-        self.clear = dof.LegClearance(h) if clearance else None
-        self.head = dof.init_head_expression()
-        self.crown = dof.init_crown(h)
+        self.hardware = ('leftHipPitch' in h.arm.data.bones) if hardware is None else bool(hardware)
+        if self.hardware:
+            rec = joints_record(h)
+            self.hinges = hinges if hinges is not None else (rec or {}).get('hinges')
+            if not self.hinges:
+                print('[robot] no joints file beside the VRM: the elbow keeps ARM\'s constants and the hands go '
+                      'unclamped', flush=True)
+            self.arms = dof.init_arm_dof(h, self.hinges, mute=True, wrist=True, mute_wrist=True)
+            self.hands = dof.init_hand_dof(h, self.hinges) if self.hinges else None
+            self.legs = dof.init_leg_dof(h)
+            self.clear = dof.LegClearance(h) if clearance else None
+            self.head = dof.init_head_expression()
+            self.crown = dof.init_crown(h)
+        else:
+            self.hinges = None
+            self.arms = self.hands = self.legs = self.clear = self.head = self.crown = None
         self.body = body or Body(h, use_dof=False)
         self.stats = {}
         self.hips_bone = h.humanoid['hips']
@@ -94,19 +104,22 @@ class RobotRig:
         (restoreArmPose before, keepArmPose after) -> (pose3, the hips' offset in armature space)"""
         h = self.h
         p3 = {n: Quaternion() for n in h.humanoid}
-        dof.restore_arm_pose(self.arms, p3)
+        if self.arms is not None:
+            dof.restore_arm_pose(self.arms, p3)
         rot, loc = clip.sample(tc)
         for n, b in h.humanoid.items():
             q = rot.get(b)
             if q is not None:
                 p3[n] = q_to_three(h.normalized_from_basis(b, q))
         off = h.hips_location_offset(loc.get(self.hips_bone, Vector()))
-        dof.keep_arm_pose(self.arms, p3)
+        if self.arms is not None:
+            dof.keep_arm_pose(self.arms, p3)
         return p3, off
 
     def reset(self):
         """a cut: the wrists' turn limit and the legs' clearance start fresh (resetArmDOF; the clearance memo)"""
-        dof.reset_arm_dof(self.arms)
+        if self.arms is not None:
+            dof.reset_arm_dof(self.arms)
         if self.clear is not None:
             self.clear.reset()
 
@@ -116,15 +129,16 @@ class RobotRig:
         """the example's hardware pass, gaze, head and crown on one sampled pose (p3 three's frame, changed in place)
         -> the frame record without M (the caller places the body: place())"""
         h, st = self.h, self.stats
-        hips3 = v_to_three(h.rest_head[self.hips_bone] + off)
-        dof.rehome_body(p3, st)
-        if legs:
-            dof.apply_hardware_dof(p3, dof.LEG_JOINTS, self.legs, st)
-            if clearance and self.clear is not None:
-                dof.apply_leg_clearance(self.clear, p3, hips3, st, dt, None, self.legs)
-        dof.apply_arm_dof(self.arms, p3, dt, 8.0, st)
-        if self.hands is not None:
-            dof.apply_hand_dof(self.hands, p3, st)
+        if self.hardware:
+            hips3 = v_to_three(h.rest_head[self.hips_bone] + off)
+            dof.rehome_body(p3, st)
+            if legs:
+                dof.apply_hardware_dof(p3, dof.LEG_JOINTS, self.legs, st)
+                if clearance and self.clear is not None:
+                    dof.apply_leg_clearance(self.clear, p3, hips3, st, dt, None, self.legs)
+            dof.apply_arm_dof(self.arms, p3, dt, 8.0, st)
+            if self.hands is not None:
+                dof.apply_hand_dof(self.hands, p3, st)
         return self._finish(p3, off, dt, weights, gaze, crown_state, head_state, state_weight)
 
     def stand_raw(self, clip, tc, dt, clearance=True):
@@ -135,13 +149,15 @@ class RobotRig:
         -> {'N' (Blender's axes), 'off', 'stages'}"""
         h, st = self.h, self.stats
         p3, off = self.clip_pose(clip, tc)
-        hips3 = v_to_three(h.rest_head[self.hips_bone] + off)
-        dof.rehome_body(p3, st)
-        dof.apply_hardware_dof(p3, dof.LEG_JOINTS, self.legs, st)
-        if clearance and self.clear is not None:
-            dof.apply_leg_clearance(self.clear, p3, hips3, st, dt, None, self.legs)
-        stages = {s: {k: q_from_three(v) for k, v in o.items()} for s, o in self.legs.out.items() if o}
-        dof.apply_arm_clearance(p3, 8.0)
+        stages = {}
+        if self.hardware:
+            hips3 = v_to_three(h.rest_head[self.hips_bone] + off)
+            dof.rehome_body(p3, st)
+            dof.apply_hardware_dof(p3, dof.LEG_JOINTS, self.legs, st)
+            if clearance and self.clear is not None:
+                dof.apply_leg_clearance(self.clear, p3, hips3, st, dt, None, self.legs)
+            stages = {s: {k: q_from_three(v) for k, v in o.items()} for s, o in self.legs.out.items() if o}
+            dof.apply_arm_clearance(p3, 8.0)
         return {'N': {n: q_from_three(q) for n, q in p3.items()}, 'off': off.copy(), 'stages': stages}
 
     def finish(self, raw, dt, weights=None, gaze=None, crown_state=None, head_state=None, state_weight=1.0):
@@ -157,7 +173,7 @@ class RobotRig:
         re-solved without the turn-out (the pass is a projection there, so the walk's arms stay; it gives the wrist
         stages), the hands, the gaze, the head and the crown. legs_out: the solver's own hip stages (Blender's axes)"""
         p3 = {n: q_to_three(q) for n, q in N.items()}
-        if arms:
+        if arms and self.arms is not None:
             dof.apply_arm_dof(self.arms, p3, dt, 0.0, self.stats)
         if self.hands is not None:
             dof.apply_hand_dof(self.hands, p3, self.stats)
@@ -169,29 +185,39 @@ class RobotRig:
     def _finish(self, p3, off, dt, weights, gaze, crown_state, head_state, state_weight):
         w = mouth_capped(dict(weights or {}))
         if gaze is not None:
-            self.apply_gaze(p3, gaze[0], gaze[1])
-        self.head.apply(p3, w, dt, state=head_state, weight=state_weight)
-        look = w.get('lookLeft', 0.0) - w.get('lookRight', 0.0)
-        petals = self.crown.apply(w, dof.head_roll_deg(p3), dt, look=look, state=crown_state, weight=state_weight)
+            self.apply_gaze(p3, gaze[0], gaze[1], gaze[2] if len(gaze) > 2 else 0.0, split=self.hardware)
+        petals = None
+        if self.head is not None:
+            self.head.apply(p3, w, dt, state=head_state, weight=state_weight)
+        if self.crown is not None:
+            look = w.get('lookLeft', 0.0) - w.get('lookRight', 0.0)
+            petals = list(self.crown.apply(w, dof.head_roll_deg(p3), dt, look=look, state=crown_state,
+                                           weight=state_weight))
         stages = {}
         for side in SIDES:
             o = self.legs.out.get(side) if self.legs is not None else None
             if o:
                 stages[side] = {k: q_from_three(v) for k, v in o.items()}
+        arms = self.arms
         return {'N': {n: q_from_three(q) for n, q in p3.items()}, 'off': off.copy(), 'stages': stages,
-                'helpers': dict(self.arms.helper_phi),
-                'wrists': {s: {k: q_from_three(v) for k, v in o.items()} for s, o in self.arms.wrist_out.items()},
+                'helpers': dict(arms.helper_phi) if arms is not None else {},
+                'wrists': ({s: {k: q_from_three(v) for k, v in o.items()} for s, o in arms.wrist_out.items()}
+                           if arms is not None else {}),
                 'rotors': {s: q_from_three(q) for s, q in (self.hands.rotor_out.items() if self.hands else ())},
-                'petals': list(petals), 'weights': w}
+                'petals': petals, 'weights': w}
 
     @staticmethod
-    def apply_gaze(p3, yaw, pitch):
+    def apply_gaze(p3, yaw, pitch, roll=0.0, split=True):
         """VRMRobotBody._applyHeadOverride: the head's local turn REPLACED by Euler(pitch, yaw, 0, 'YXZ') (the animation's
         head bobble given up for a steady gaze; yaw + toward the body's left, pitch + looking DOWN, as robot_body.js).
         On my body the neck carries the pan and the head the nod, so the turn is split as the stages stack (rehomeBody's
-        split) and clamped at their stops: pan +-60, nod +-30 (the body's own yawLimit / pitchLimit)"""
-        q = quat_from_euler(pitch, yaw, 0.0, 'YXZ')
-        if 'neck' in p3:
+        split) and clamped at their stops: pan +-60, nod +-30 (the body's own yawLimit / pitchLimit). roll (rad, the
+        head's roll stage, +-11): 0 is the JS's; a gaze that hands over from a clip's own head carries that head's roll,
+        so its first frame is the clip's exactly (rehomeBody leaves a clip's neck and head as pan, nod and roll).
+        split=False (any other VRM: a plain rig) is the JS exactly: the head bone alone takes the turn, the clip's neck
+        stays as it is"""
+        q = quat_from_euler(pitch, yaw, roll, 'YXZ')
+        if split and 'neck' in p3:
             x, y, z = euler_from_quat(q, 'YXZ')
             pan = clamp(y * R2D, *dof.HEAD_RANGE['pan']) * D2R
             nod = clamp(x * R2D, *dof.HEAD_RANGE['x']) * D2R
@@ -280,7 +306,10 @@ class RobotRig:
         return {s: g_in[s] - g_out[s] for s in closed}
 
     def _clamp_legs(self, rec):
-        """the legs of a record clamped as the hardware is, the hips' stages solved (rec['stages'])"""
+        """the legs of a record clamped as the hardware is, the hips' stages solved (rec['stages']); a plain rig's legs
+        are left as the solve made them"""
+        if self.legs is None:
+            return
         N = rec['N']
         p3 = {n: q_to_three(q) for n, q in N.items()}
         dof.apply_hardware_dof(p3, dof.LEG_JOINTS, self.legs)
@@ -476,7 +505,7 @@ def perform_robot(h, clip, f0, f1, rig=None, ground=None, at=(0.0, 0.0), heading
     phase = dt * time_scale if phase is None else phase
     Qr = Quaternion((0.0, 0.0, 1.0), heading * D2R)
     M0 = Matrix.Translation(Vector((at[0], at[1], 0.0))) @ Qr.to_matrix().to_4x4()
-    if preroll > 0:
+    if preroll > 0 and rig.head is not None:
         # the face's state settled before the first frame: the head's and the crown's actuators start where it is
         w0 = mouth_capped(dict(face(0.0))) if face else {}
         if look is not None:

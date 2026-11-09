@@ -8,7 +8,8 @@
       leaves, a single-vertex mesh, an explicit registration, flags as custom properties
   H   placement's check_hovering: the clock seated on the stool passes; the stool moved 0.3 m (round one's false
       negative: its splayed legs still under the clock's box) names the clock; a book on a wire rack the ray grid
-      slips through still counts as seated (the real surface is found)
+      slips through still counts as seated (the real surface is found); a book against a rack post and a cushion
+      against a backrest, lifted, are named (a vertical face in the footprint holds nothing up)
   K   harness kits: islands (a two-part plant is one island), part(i), family(); kit instances seated with place_on
       on the ground and on each other through their real geometry; a floating instance is named by the audit
   M   play_model_animations(clip='all', weights=...) against three's own AnimationMixer (Deno) on the same GLB:
@@ -327,6 +328,50 @@ def test_h():
     check('H3 a book on a wire rack the 11x11 rays slip through is still seated (the real surface is found)',
           grid_hit is None and not [r for r in rep if r['obj'] == book],
           f"ray grid hit {grid_hit}; flagged {[(r['obj'].name, round(r['gap'], 3)) for r in rep]}")
+    # a vertical part of the support inside the footprint holds nothing up: a book against a rack's post and a
+    # cushion against a chair's backrest, each lifted off its board / seat, are named (the engine's box test named
+    # them; a fallback that counted any of the support's faces rising past the base called them seated)
+    from eidoblend.placement import snap_to_ground
+
+    def boxes_mesh(name, boxes):
+        verts, faces = [], []
+        for (x0, y0, z0), (x1, y1, z1) in boxes:
+            o = len(verts)
+            verts += [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+                      (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+            faces += [(o, o + 3, o + 2, o + 1), (o + 4, o + 5, o + 6, o + 7), (o, o + 1, o + 5, o + 4),
+                      (o + 1, o + 2, o + 6, o + 5), (o + 2, o + 3, o + 7, o + 6), (o + 3, o, o + 4, o + 7)]
+        me = bpy.data.meshes.new(name)
+        me.from_pydata(verts, [], faces)
+        ob = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(ob)
+        return ob
+    posts = [((x, y, 0.0), (x + 0.04, y + 0.04, 1.8)) for x in (-0.42, 0.38) for y in (-0.22, 0.18)]
+    boards = [((-0.42, -0.22, z), (0.42, 0.22, z + 0.02)) for z in (0.4, 0.9, 1.4)]
+    seat_back = [((-0.22, -0.22, 0.42), (0.22, 0.22, 0.46)), ((-0.22, 0.18, 0.46), (0.22, 0.22, 0.95))] + \
+        [((x, y, 0.0), (x + 0.04, y + 0.04, 0.42)) for x in (-0.22, 0.18) for y in (-0.22, 0.18)]
+    out = []
+    for what, sup_boxes, item_box, at, lift in (
+            ('a book against a rack post', posts + boards, ((-0.075, -0.1, 0.0), (0.075, 0.1, 0.25)),
+             (-0.306, -0.12, 1.05), 0.25),
+            ('a cushion against a chair backrest', seat_back, ((-0.18, -0.18, 0.0), (0.18, 0.18, 0.08)),
+             (0.0, 0.01, 0.47), 0.3)):
+        for dz in (0.0, lift):
+            sc = fresh()
+            boxes_mesh('floor', [((-3, -3, -0.02), (3, 3, 0.0))])
+            sup = boxes_mesh('support', sup_boxes)
+            item = boxes_mesh('item', [item_box])
+            item.location = at
+            bpy.context.view_layer.update()
+            ok = snap_to_ground(item, sup, below=True)
+            item.location.z += dz
+            bpy.context.view_layer.update()
+            clear_cache()
+            hit = [r for r in check_hovering(sc) if r['obj'] == item]
+            out.append((what, dz, ok, [round(r['gap'], 3) for r in hit]))
+    check('H4 a vertical part of the support (a rack post, a backrest) in the footprint holds nothing up: seated '
+          'items pass, the same items lifted are named',
+          all(ok and bool(g) == bool(dz) and (not dz or abs(g[0] - dz) < 0.01) for _w, dz, ok, g in out), f'{out}')
 
 
 # ---------------------------------------------------------------------------------------------------------- K ---
@@ -355,8 +400,10 @@ def test_k():
     ground.scale = (8, 8, 0.1)
     ground.location.z = -0.05
     kit = assets.load_kit(glb)
-    check('K1 the kit lists its parts through the wrapper (count, names, list)',
-          kit.count == 5 and sorted(kit.names) == sorted(names) and kit.list() == sorted(names), f'{kit.names}')
+    # list() is the catalogue's own order, as the engine's (names.slice()); Blender's exporter wrote this GLB's
+    # children by name, so here that order is alphabetical
+    check('K1 the kit lists its parts through the wrapper (count, names, list in the file\'s order)',
+          kit.count == 5 and sorted(kit.names) == sorted(names) and kit.list() == kit.names, f'{kit.names}')
     groups = sorted(sorted(g) for g in kit.island_groups())
     check('K2 islands: the pot and its leaves are one island; four islands in all',
           len(groups) == 4 and ['plant_leaves', 'plant_pot'] in groups, f'{groups}')
@@ -721,9 +768,12 @@ def test_p():
     rl = [n for n in t.nodes if n.bl_idname == 'CompositorNodeRLayers' and n.scene == ov.scene]
     ao = next(n for _s, nm, n in chain.stages(sc) if nm == 'overlay')
     linked = rl and ao.inputs['Foreground'].is_linked and ao.inputs['Foreground'].links[0].from_node == rl[0]
-    check('P2 the overlay scene composites through its own Render Layers node (alpha over)', linked and
-          card.parent == ov.camera and card.name in ov.scene.objects and card.name not in sc.objects,
-          f'{len(rl)} overlay render layer(s); card parent {card.parent and card.parent.name}')
+    authored = ao.bl_idname == 'CompositorNodeGroup' and ao.node_tree and 'authored' in ao.node_tree.name
+    check('P2 the overlay scene composites through its own Render Layers node, on the authored route (the over in '
+          'display space: the HUD lands as drawn, as under the engine\'s untone-mapped output)', linked and authored
+          and card.parent == ov.camera and card.name in ov.scene.objects and card.name not in sc.objects,
+          f'{len(rl)} overlay render layer(s); stage {ao.bl_idname} {getattr(ao.node_tree, "name", "")}; '
+          f'card parent {card.parent and card.parent.name}')
     g = next(n for _s, nm, n in chain.stages(sc) if nm == 'bloom')
     ee = sc.eevee
     check('P3 _bloom_params -> the Glare; _ssr_params / _ao_params -> EEVEE',
@@ -749,6 +799,18 @@ def test_p():
     check('P6 a hook that raises is reported (WARN) and skipped; the other hooks still go in, as the engine went on',
           rec and rec['outcome'] == 'WARN' and 'NOT installed' in rec['message']
           and [n for _s, n, _x in chain.stages(sc3)] == ['screen_hook'], rec['message'][-90:] if rec else 'missing')
+    sc4 = fresh()
+    cam4 = bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
+    sc4.collection.objects.link(cam4)
+    sc4.camera = cam4
+    post.make_overlay_layer(sc4, authored=False)
+    led4 = L.create_ledger()
+    post.apply(sc4, {}, led4)
+    st4 = next((n for _s, nm, n in chain.stages(sc4) if nm == 'overlay'), None)
+    rec4 = next((r for r in led4.records if r['check'] == 'render.auto_enhance'), None)
+    check('P7 make_overlay_layer(authored=False): a plain alpha-over in scene light that AgX grades, named so in the '
+          'digest', st4 is not None and st4.bl_idname == 'CompositorNodeAlphaOver' and rec4
+          and 'graded' in rec4['message'], f"{st4 and st4.bl_idname}; {rec4['message'][:120] if rec4 else 'missing'}")
 
 
 # ---------------------------------------------------------------------------------------------------------- R ---
@@ -992,6 +1054,54 @@ def test_q():
           ok_desc and end is not None and abs(end - s2['z']) < 0.02 and walker.arm.get('eido_seated'),
           f"underside in the descent {[None if u is None else round(u, 3) for u in unders]}, at the end "
           f"{end if end is None else round(end, 3)} (pan {s2['z']:.3f})")
+    chair3 = assets.import_model(os.path.join(BIRDS, 'corner_chair.glb'), name='chair3')
+    place_on(chair3, floor, xy=(3.5, 0.0))
+    looper = load_vrm('claude', name='looper', location=(3.5, -1.0, 0.0))
+    seat_on(looper, chair3, transition='stand_to_sit', t=0.5, then='sitting_normal_chair')
+    s3 = find_seat_surface(chair3)
+    strips = [s for tr in looper.arm.animation_data.nla_tracks for s in tr.strips]
+    fades = [round(s.blend_in, 1) for s in strips]
+    hips, lows = [], []
+    for f in (64, 69, 74, 90, 118):                                 # the sit-down's end, the crossfade, the loop
+        sc.frame_set(f)
+        hp = SE._hips(looper)
+        hips.append(round((hp - Vector((s3['x'], s3['y'], hp.z))).length, 3))
+        lows.append(SE._lowest_up(SE._body_bvh(looper), SE._seat_grid(s3, 3), s3['z'] - 0.25, 0.6))
+    check('Q7 seat_on(transition, then=<loop>): the loop crossfades in (0.25 s) and her hips stay over the pan '
+          'through it and after, her underside on the pan (the loop\'s hips sit over its root, 0.4 m forward of the '
+          'sit-down\'s: left on that root she ended on the pan\'s front edge, in the air)',
+          all(b >= 5.9 for b in fades) and max(hips) < 0.12 and all(u is not None and abs(u - s3['z']) < 0.02
+                                                                    for u in lows[2:4]),
+          f"blend-in frames {fades}; hips from the pan centre {hips} m; underside "
+          f"{[None if u is None else round(u - s3['z'], 3) for u in lows]} m from the pan")
+    # a raised stage and a chair turned 140 degrees on it: the pan is found 0.3 m up, the sit-down (into its loop)
+    # ends facing out of the turned chair with her hips over its pan, and the floor sitter rests on the stage
+    stage = cube('stage')
+    stage.scale = (2.0, 2.0, 0.3)
+    stage.location = (0.0, 4.0, 0.15)
+    bpy.context.view_layer.update()
+    chair4 = assets.import_model(os.path.join(BIRDS, 'corner_chair.glb'), name='chair4')
+    chair4.rotation_euler.z = math.radians(140)
+    place_on(chair4, stage, xy=(0.4, 4.2))
+    s4 = find_seat_surface(chair4)
+    up = load_vrm('claude', name='up_sitter', location=(0.4, 3.6, 0.3))
+    seat_on(up, chair4, transition='stand_to_sit', t=0.5, then='sitting_normal_chair')
+    sc.frame_set(100)
+    bpy.context.view_layer.update()
+    hp4 = SE._hips(up)
+    off4 = math.hypot(hp4.x - s4['x'], hp4.y - s4['y'])
+    u4 = SE._lowest_up(SE._body_bvh(up), [(hp4.x, hp4.y)], s4['z'] - 0.6, 1.4)
+    d4 = math.degrees(SE._heading(up.arm) - chair_facing(chair4))
+    d4 = (d4 + 180) % 360 - 180
+    stage_sitter = load_vrm('claude', name='stage_floor_sitter')
+    zs = sit_on_ground(stage_sitter, at=(-0.6, 3.6), ground=[stage])
+    check('Q8 on a 0.3 m stage, a chair turned 140 deg: the pan found 0.3 m up; the sit-down into its loop ends '
+          'facing out of the turned chair, hips over the pan, her underside under them on it; sit_on_ground finds '
+          'the stage top', abs(s4['z'] - (0.3 + seat['z'])) < 0.03 and abs(d4) < 5 and off4 < 0.12
+          and u4 is not None and -0.02 < u4 - s4['z'] < 0.05 and abs(zs - 0.3) < 0.005,
+          f"pan {s4['z']:.3f} (floor chair {seat['z']:.3f}); heading {d4:.1f} deg off the chair's facing; hips "
+          f"{off4:.2f} m from the pan's centre; underside {u4 if u4 is None else round(u4 - s4['z'], 3)} m; "
+          f'stage sit at {zs:.3f}')
     floor_sitter = load_vrm('claude', name='floor_sitter')
     fz = sit_on_ground(floor_sitter, at=(-1.5, 0.5), ground=[floor])
     sc.frame_set(13)

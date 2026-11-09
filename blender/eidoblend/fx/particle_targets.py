@@ -45,8 +45,11 @@ Sources
 Colours. Each sampled point takes the colour of its material where it lies: the Principled BSDF's Base Color (its
 image texture sampled at the point's UV, through a multiply tint if there is one, else its value), the VRM add-on's
 MToon base colour and texture when MToon is enabled, a Diffuse / Emission / Toon colour, a colour attribute, plus the
-material's emission. Alpha-cut texels (alpha < 0.5) get no points. Byte sRGB textures are linearised; textures are read
-at most 1024 px across (enough for particles). A target without colours takes the morph's color / color2.
+material's emission. A procedural colour graph (Noise, Voronoi, Wave ... textures, ramps, mixes, math, Mapping,
+Texture Coordinate, groups, a mapped image) is evaluated by Geometry Nodes at the points (graph_colors: the same
+texture functions the shader runs); a node it cannot reproduce leaves the direct reading. Alpha-cut texels
+(alpha < 0.5) get no points. Byte sRGB textures are linearised; textures are read at most 1024 px across (enough for
+particles). A target without colours takes the morph's color / color2.
 
 Equal counts. Every target is resampled to the cloud's count: the engine's resampleToN (cycle with a 1 cm jitter when
 upsampling, stride when downsampling) for point lists; samplers draw exactly the count asked for. match_centroids moves
@@ -441,19 +444,55 @@ class _Piece:
     """One evaluated geometry: world vertices, triangles (vertex and loop indices, material index), edges, the
     active UVs per loop, a colour attribute, the materials, and whether the morph graph can sample it live."""
 
-    __slots__ = ('obj', 'verts', 'tris', 'tri_loops', 'tri_mat', 'edges', 'uv', 'col', 'col_domain', 'materials',
-                 'live_ok', 'radius')
+    __slots__ = ('obj', 'verts', 'tris', 'tri_loops', 'tri_mat', 'edges', 'uv', 'col', 'col_domain', 'col_name',
+                 'materials', 'live_ok', 'radius', 'M', 'texspace', 'cnrm')
 
     def __init__(self):
         self.tris = self.tri_loops = self.tri_mat = self.edges = self.uv = self.col = None
-        self.col_domain = None
+        self.col_domain = self.col_name = None
+        self.cnrm = None                                # corner (shading) normals, object space
         self.materials = []
         self.live_ok = False
         self.radius = None
+        self.M = np.eye(4)
+        self.texspace = None
+
+    def local(self, P):
+        """World points -> this geometry's object space (where a material's Object / Generated coordinates live)."""
+        M = self.M
+        return (np.asarray(P, np.float64) - M[:3, 3]) @ np.linalg.inv(M[:3, :3]).T
+
+
+def _texspace(ob, local_verts):
+    """The texture space a material's Generated coordinates are normalised to, (location, half size): the original
+    mesh's bounds (Blender's auto texture space), a curve's or metaball's own texture space, else the bounds of the
+    evaluated geometry. Zero-size axes count as 1, as Blender's."""
+    src = getattr(ob, 'original', None) or ob
+    d = getattr(src, 'data', None)
+    loc = size = None
+    try:
+        import bpy
+        if isinstance(d, bpy.types.Mesh) and getattr(d, 'use_auto_texspace', True) and len(d.vertices):
+            v = np.empty(len(d.vertices) * 3)
+            d.vertices.foreach_get('co', v)
+            v = v.reshape(-1, 3)
+            loc, size = (v.min(0) + v.max(0)) / 2, (v.max(0) - v.min(0)) / 2
+        elif d is not None and hasattr(d, 'texspace_location'):
+            loc, size = np.array(d.texspace_location, np.float64), np.array(d.texspace_size, np.float64)
+    except (AttributeError, TypeError, RuntimeError):
+        loc = size = None
+    if loc is None and local_verts is not None and len(local_verts):
+        loc = (local_verts.min(0) + local_verts.max(0)) / 2
+        size = (local_verts.max(0) - local_verts.min(0)) / 2
+    if loc is None:
+        return None
+    size = np.where(size == 0, 1.0, np.where(np.abs(size) < 1e-5, 1e-5, size))
+    return np.asarray(loc, np.float64), np.asarray(size, np.float64)
 
 
 def _read_mesh(me, M):
     p = _Piece()
+    p.M = np.array(M, dtype=np.float64)
     nv = len(me.vertices)
     v = np.empty(nv * 3, dtype=np.float64)
     me.vertices.foreach_get('co', v)
@@ -468,12 +507,27 @@ def _read_mesh(me, M):
         me.loop_triangles.foreach_get('loops', tl)
         mi = np.empty(nt, dtype=np.int64)
         me.loop_triangles.foreach_get('material_index', mi)
-        p.tris, p.tri_loops, p.tri_mat = tv.reshape(-1, 3), tl.reshape(-1, 3), mi
+        tv, tl = tv.reshape(-1, 3), tl.reshape(-1, 3)
+        # a canonical order: Blender 5.2 can hand the same mesh's loop triangles over in a different order (and each
+        # starting at a different corner) from one session to the next, and a seeded sample would then land on other
+        # points. Each triangle starts at its smallest vertex index (winding kept), the triangles sorted by them.
+        rot = (np.argmin(tv, axis=1)[:, None] + np.arange(3)[None, :]) % 3
+        tv, tl = np.take_along_axis(tv, rot, 1), np.take_along_axis(tl, rot, 1)
+        order = np.lexsort((tv[:, 2], tv[:, 1], tv[:, 0]))
+        p.tris, p.tri_loops, p.tri_mat = tv[order], tl[order], mi[order]
     ne = len(me.edges)
     if ne:
         e = np.empty(ne * 2, dtype=np.int64)
         me.edges.foreach_get('vertices', e)
-        p.edges = e.reshape(-1, 2)
+        e = np.sort(e.reshape(-1, 2), axis=1)                  # canonical too (see the triangles above)
+        p.edges = e[np.lexsort((e[:, 1], e[:, 0]))]
+    if len(me.loops):
+        try:                                            # the shading normals (smooth or flat, as the mesh is set)
+            cn = np.empty(len(me.loops) * 3, dtype=np.float32)
+            me.corner_normals.foreach_get('vector', cn)
+            p.cnrm = cn.reshape(-1, 3)
+        except (AttributeError, RuntimeError, TypeError):
+            p.cnrm = None
     uvl = next((u for u in me.uv_layers if u.active_render), None) or me.uv_layers.active
     if uvl is not None and len(me.loops):
         uv = np.empty(len(me.loops) * 2, dtype=np.float32)
@@ -485,6 +539,7 @@ def _read_mesh(me, M):
         ca.data.foreach_get('color', c)                    # linear (byte colours are converted by the API)
         p.col = c.reshape(-1, 4)[:, :3]
         p.col_domain = ca.domain
+        p.col_name = ca.name
     return p
 
 
@@ -564,6 +619,7 @@ def _collect_pieces(objs, owners, dg, found):
             continue
         try:
             pc_ = _read_mesh(me, M)
+            pc_.texspace = _texspace(None if inst.is_instance else ob, pc_.local(pc_.verts))
             slots = [s.material.original if s.material is not None else None for s in ob.material_slots]
             if inst.is_instance or not slots:
                 slots = [m.original if m is not None else None for m in me.materials] or slots
@@ -653,6 +709,473 @@ _SHADER_COLOR = {'ShaderNodeBsdfPrincipled': 'Base Color', 'ShaderNodeBsdfDiffus
 _GROUP_COLOR = ('Base Color', 'BaseColor', 'Lit Color', 'Color', 'Albedo', 'Diffuse', 'Main Color', 'Lit Color Texture')
 
 
+# ------------------------------------------------------------------------- procedural colours (Geometry Nodes) ---
+
+class _Unsupported(Exception):
+    """A material node the Geometry Nodes evaluation cannot reproduce: the direct readers take over."""
+
+
+# shader nodes that exist in Geometry Nodes 5.2 under the same idname, sockets and options: a material's colour graph
+# made of them is copied node for node into a scratch Geometry Nodes tree and evaluated at the sampled points (the
+# same texture functions the shader runs)
+_GN_SAME = frozenset({
+    'ShaderNodeTexNoise', 'ShaderNodeTexVoronoi', 'ShaderNodeTexWave', 'ShaderNodeTexMagic', 'ShaderNodeTexGradient',
+    'ShaderNodeTexChecker', 'ShaderNodeTexBrick', 'ShaderNodeTexWhiteNoise', 'ShaderNodeTexGabor',
+    'ShaderNodeValToRGB', 'ShaderNodeMix', 'ShaderNodeMath', 'ShaderNodeVectorMath', 'ShaderNodeMapRange',
+    'ShaderNodeClamp', 'ShaderNodeSeparateXYZ', 'ShaderNodeCombineXYZ', 'ShaderNodeRGBCurve', 'ShaderNodeFloatCurve',
+    'ShaderNodeVectorCurve', 'ShaderNodeValue', 'ShaderNodeVectorRotate', 'ShaderNodeGamma', 'ShaderNodeBlackbody',
+    'ShaderNodeMixRGB'})
+# texture nodes whose unlinked Vector is the Generated coordinates in a material (it is Position in Geometry Nodes)
+_IMPLICIT_GENERATED = frozenset({'ShaderNodeTexNoise', 'ShaderNodeTexVoronoi', 'ShaderNodeTexWave',
+                                 'ShaderNodeTexMagic', 'ShaderNodeTexGradient', 'ShaderNodeTexChecker',
+                                 'ShaderNodeTexBrick', 'ShaderNodeTexWhiteNoise', 'ShaderNodeTexGabor'})
+# the graphs the direct readers below read exactly: an image at the UVs, a colour attribute, a value, a multiply tint
+_DIRECT = frozenset({'ShaderNodeTexImage', 'ShaderNodeUVMap', 'ShaderNodeVertexColor', 'ShaderNodeAttribute',
+                     'ShaderNodeRGB', 'NodeReroute'})
+_SKIP_PROPS = frozenset({'location', 'location_absolute', 'width', 'height', 'name', 'label', 'parent', 'select',
+                         'hide', 'mute', 'color', 'use_custom_color', 'warning_propagation', 'show_options',
+                         'show_preview', 'show_texture', 'dimensions', 'width_hidden', 'color_tag'})
+_LUMA = (0.2126, 0.7152, 0.0722)                       # Rec.709 luminance (the scene-linear working space)
+
+
+def _graph_nodes(sock, depth=32):
+    """Every node upstream of an input socket."""
+    seen, front = [], [lk.from_node for lk in sock.links]
+    while front and depth:
+        nxt = []
+        for n in front:
+            if n in seen:
+                continue
+            seen.append(n)
+            for i in n.inputs:
+                nxt.extend(lk.from_node for lk in i.links)
+        front, depth = nxt, depth - 1
+    return seen
+
+
+def _needs_graph(sock):
+    """Whether a colour input's graph needs the Geometry Nodes evaluation: anything but an image at the UVs, a colour
+    attribute, a value or a constant multiply tint (procedural textures, ramps, mixes, math, Mapping, groups ...)."""
+    first = sock.links[0].from_node if sock.is_linked else None   # the node the direct reader looks at for a tint
+    for n in _graph_nodes(sock):
+        if n.bl_idname in _DIRECT:
+            if n.bl_idname == 'ShaderNodeTexImage':
+                v = n.inputs['Vector']
+                if v.is_linked and v.links[0].from_node.bl_idname not in ('ShaderNodeUVMap', 'NodeReroute'):
+                    return True                         # a mapped or projected image: the graph evaluation reads it
+            continue
+        if n == first and n.bl_idname in ('ShaderNodeMix', 'ShaderNodeMixRGB') and \
+                getattr(n, 'blend_type', '') == 'MULTIPLY':
+            fac = next((s for s in n.inputs if s.name in ('Factor', 'Fac') and s.enabled), None)
+            ins = [s for s in n.inputs if s.enabled and s.name in ('A', 'B', 'Color1', 'Color2')]
+            if fac is not None and not fac.is_linked and abs(float(fac.default_value if not hasattr(
+                    fac.default_value, '__len__') else fac.default_value[0]) - 1.0) < 1e-6 and \
+                    sum(not s.is_linked for s in ins) == 1:
+                continue                                # a constant tint over the image: read directly
+        return True
+    return False
+
+
+class _GNGraph:
+    """Copies the shader graph upstream of a socket into a Geometry Nodes tree whose points sit at the samples in
+    object space, carrying their UVs ('eido_uv') and colour attribute ('eido_acol'). Texture Coordinate, UV Map,
+    Attribute, Mapping, RGB, Separate / Combine Color, Invert, RGB to BW, Bright / Contrast, Hue / Saturation, Image
+    Texture, groups and reroutes are translated; the nodes Geometry Nodes shares are copied with their options, ramps
+    and curves. Anything else raises _Unsupported."""
+
+    def __init__(self, tree, texspace, has_uv, has_acol, acol_name, vec_attrs=()):
+        self.tree, self.nodes, self.links = tree, tree.nodes, tree.links
+        self.texspace = texspace
+        self.has_uv, self.has_acol, self.acol_name = has_uv, has_acol, acol_name
+        self.vec_attrs = set(vec_attrs)                 # eido_world, eido_nrm (world), eido_onrm (object space)
+        self.memo = {}
+        self.ctx = ()                                   # the group nodes we are inside, innermost last
+        self._pos = self._gen = self._uv = None
+        self._acol = {}
+        self._vattr = {}
+
+    def vec_attr(self, name, what):
+        if name not in self.vec_attrs:
+            raise _Unsupported(what)
+        if name not in self._vattr:
+            n = self.new('GeometryNodeInputNamedAttribute', data_type='FLOAT_VECTOR')
+            n.inputs['Name'].default_value = name
+            self._vattr[name] = n.outputs['Attribute']
+        return self._vattr[name]
+
+    # ---------------------------------------------------------------------------------------------- plumbing
+    def new(self, idname, **props):
+        n = self.nodes.new(idname)
+        for k, v in props.items():
+            setattr(n, k, v)
+        return n
+
+    def feed(self, sock, v):
+        if hasattr(v, 'is_output'):
+            self.links.new(v, sock)
+        else:
+            sock.default_value = v
+
+    def vmath(self, op, a, b=None, c=None):
+        n = self.new('ShaderNodeVectorMath', operation=op)
+        for k, v in ((0, a), (1, b), (2, c)):
+            if v is not None:
+                self.feed(n.inputs[k], v)
+        return n.outputs['Value' if op in ('DOT_PRODUCT', 'LENGTH', 'DISTANCE') else 'Vector']
+
+    def math(self, op, a, b=None):
+        n = self.new('ShaderNodeMath', operation=op)
+        self.feed(n.inputs[0], a)
+        if b is not None:
+            self.feed(n.inputs[1], b)
+        return n.outputs[0]
+
+    def mix_rgb(self, fac, a, b):
+        n = self.new('ShaderNodeMix', data_type='RGBA', blend_type='MIX')
+        ins = {s.identifier: s for s in n.inputs}
+        self.feed(ins['Factor_Float'], fac)
+        self.feed(ins['A_Color'], a)
+        self.feed(ins['B_Color'], b)
+        return {s.identifier: s for s in n.outputs}['Result_Color']
+
+    def const(self, si):
+        """An unlinked input's value as a socket of its kind."""
+        v = si.default_value
+        if hasattr(v, '__len__'):
+            v = tuple(v)
+            if len(v) == 4:
+                n = self.new('FunctionNodeInputColor')
+                n.value = v
+                return n.outputs[0]
+            n = self.new('FunctionNodeInputVector')
+            n.vector = tuple(v[:3]) + (0.0,) * (3 - len(v[:3]))
+            return n.outputs[0]
+        n = self.new('ShaderNodeValue')
+        n.outputs[0].default_value = float(v)
+        return n.outputs[0]
+
+    # ---------------------------------------------------------------------------------------------- coordinates
+    def pos(self):
+        if self._pos is None:
+            self._pos = self.new('GeometryNodeInputPosition').outputs[0]
+        return self._pos
+
+    def generated(self):
+        if self._gen is None:
+            if self.texspace is None:
+                raise _Unsupported('Generated coordinates without a texture space')
+            loc, size = self.texspace
+            self._gen = self.vmath('DIVIDE', self.vmath('SUBTRACT', self.pos(), tuple(loc - size)),
+                                   tuple(2.0 * size))
+        return self._gen
+
+    def uv(self):
+        if not self.has_uv:
+            raise _Unsupported('UV coordinates (the geometry has no UV map)')
+        if self._uv is None:
+            n = self.new('GeometryNodeInputNamedAttribute', data_type='FLOAT_VECTOR')
+            n.inputs['Name'].default_value = 'eido_uv'
+            self._uv = n.outputs['Attribute']
+        return self._uv
+
+    def acol(self, name, out):
+        if not self.has_acol or (name and self.acol_name and name != self.acol_name):
+            raise _Unsupported(f'the attribute {name!r} (only the colour attribute is carried)')
+        if 'n' not in self._acol:
+            n = self.new('GeometryNodeInputNamedAttribute', data_type='FLOAT_COLOR')
+            n.inputs['Name'].default_value = 'eido_acol'
+            self._acol['n'] = n.outputs['Attribute']
+        if out in ('Fac',):
+            return self.vmath('DOT_PRODUCT', self._acol['n'], _LUMA)
+        if out == 'Alpha':
+            return self.const_value(1.0)
+        return self._acol['n']
+
+    def const_value(self, x):
+        n = self.new('ShaderNodeValue')
+        n.outputs[0].default_value = float(x)
+        return n.outputs[0]
+
+    # ---------------------------------------------------------------------------------------------- the graph
+    def through(self, si):
+        """The value at a shader input socket: its link's source, translated, or its own value."""
+        if si.is_linked:
+            lk = si.links[0]
+            if lk.is_valid and not lk.is_muted:
+                return self.out(lk.from_socket)
+        if not hasattr(si, 'default_value'):
+            raise _Unsupported(f'an unlinked {si.bl_idname} input')
+        return self.const(si)
+
+    def inp(self, si, gs):
+        if si.is_linked and si.links[0].is_valid and not si.links[0].is_muted:
+            self.links.new(self.out(si.links[0].from_socket), gs)
+        elif hasattr(si, 'default_value') and hasattr(gs, 'default_value'):
+            v = si.default_value
+            try:
+                gs.default_value = tuple(v) if hasattr(v, '__len__') else v
+            except (TypeError, ValueError, AttributeError):
+                pass
+
+    def out(self, so):
+        n = so.node
+        key = (tuple((g.id_data.name, g.name) for g in self.ctx), n.id_data.name, n.name, so.identifier)
+        r = self.memo.get(key)
+        if r is None:
+            r = self.memo[key] = self._node(n, so)
+        return r
+
+    def _copy(self, n):
+        g = self.nodes.new(n.bl_idname)
+        for p in n.bl_rna.properties:
+            k = p.identifier
+            if p.is_readonly or k in _SKIP_PROPS or k.startswith('bl_') or not hasattr(g, k):
+                continue
+            try:
+                setattr(g, k, getattr(n, k))
+            except (TypeError, AttributeError, ValueError, RuntimeError):
+                pass
+        if n.bl_idname == 'ShaderNodeValToRGB':
+            a, b = n.color_ramp, g.color_ramp
+            b.color_mode, b.interpolation, b.hue_interpolation = a.color_mode, a.interpolation, a.hue_interpolation
+            while len(b.elements) > 1:
+                b.elements.remove(b.elements[-1])
+            b.elements[0].position, b.elements[0].color = a.elements[0].position, tuple(a.elements[0].color)
+            for e in list(a.elements)[1:]:
+                b.elements.new(e.position).color = tuple(e.color)
+        if n.bl_idname in ('ShaderNodeRGBCurve', 'ShaderNodeFloatCurve', 'ShaderNodeVectorCurve'):
+            a, b = n.mapping, g.mapping
+            b.use_clip = a.use_clip
+            for ca, cb in zip(a.curves, b.curves):
+                while len(cb.points) > 2:
+                    cb.points.remove(cb.points[-1])
+                for k, pa in enumerate(ca.points):
+                    pb = cb.points[k] if k < len(cb.points) else cb.points.new(*pa.location)
+                    pb.location, pb.handle_type = tuple(pa.location), pa.handle_type
+            b.update()
+        return g
+
+    def _node(self, n, so):
+        k = n.bl_idname
+        if n.mute:
+            for il in n.internal_links:
+                if il.to_socket == so:
+                    return self.through(il.from_socket)
+            raise _Unsupported(f'the muted node {n.name}')
+        if k == 'NodeReroute':
+            return self.through(n.inputs[0])
+        if k in _GN_SAME:
+            g = self._copy(n)
+            gins = {s.identifier: s for s in g.inputs}
+            for si in n.inputs:
+                gs = gins.get(si.identifier)
+                if gs is None:
+                    continue
+                if k in _IMPLICIT_GENERATED and si.identifier == 'Vector' and not si.is_linked:
+                    self.links.new(self.generated(), gs)
+                else:
+                    self.inp(si, gs)
+            return {s.identifier: s for s in g.outputs}[so.identifier]
+        if k == 'ShaderNodeTexCoord':
+            if getattr(n, 'object', None) is not None:
+                raise _Unsupported('Texture Coordinate in another object\'s space')
+            if so.identifier == 'Normal':
+                return self.vec_attr('eido_onrm', 'Texture Coordinate Normal (no normals carried)')
+            f = {'Generated': self.generated, 'Object': self.pos, 'UV': self.uv}.get(so.identifier)
+            if f is None:
+                raise _Unsupported(f'Texture Coordinate {so.identifier}')
+            return f()
+        if k == 'ShaderNodeNewGeometry':
+            if so.identifier == 'Position':
+                return self.vec_attr('eido_world', 'Geometry Position (no world positions carried)')
+            if so.identifier in ('Normal', 'True Normal'):
+                return self.vec_attr('eido_nrm', 'Geometry Normal (no normals carried)')
+            if so.identifier == 'Backfacing':
+                return self.const_value(0.0)
+            raise _Unsupported(f'Geometry {so.identifier}')
+        if k == 'ShaderNodeUVMap':
+            return self.uv()
+        if k == 'ShaderNodeAttribute':
+            if n.attribute_type != 'GEOMETRY':
+                raise _Unsupported(f'an {n.attribute_type} attribute')
+            return self.acol(n.attribute_name, so.identifier)
+        if k == 'ShaderNodeVertexColor':
+            return self.acol(n.layer_name, 'Alpha' if so.identifier == 'Alpha' else 'Color')
+        if k == 'ShaderNodeRGB':
+            c = self.new('FunctionNodeInputColor')
+            c.value = tuple(n.outputs[0].default_value)
+            return c.outputs[0]
+        if k in ('ShaderNodeSeparateColor', 'ShaderNodeCombineColor'):
+            g = self.new('FunctionNode' + k[len('ShaderNode'):], mode=n.mode)
+            gins = {s.identifier: s for s in g.inputs}
+            for si in n.inputs:
+                if si.identifier in gins:
+                    self.inp(si, gins[si.identifier])
+            return {s.identifier: s for s in g.outputs}[so.identifier]
+        ins = {s.identifier: s for s in n.inputs}
+        if k == 'ShaderNodeMapping':
+            v = self.through(ins['Vector'])
+            rot = self.through(ins['Rotation'])
+            scl = self.through(ins['Scale'])
+
+            def turn(x, invert=False):
+                r = self.new('ShaderNodeVectorRotate', rotation_type='EULER_XYZ', invert=invert)
+                self.feed(r.inputs['Vector'], x)
+                self.feed(r.inputs['Rotation'], rot)
+                return r.outputs[0]
+            vt = n.vector_type
+            if vt == 'POINT':
+                return self.vmath('ADD', turn(self.vmath('MULTIPLY', v, scl)), self.through(ins['Location']))
+            if vt == 'TEXTURE':
+                return self.vmath('DIVIDE', turn(self.vmath('SUBTRACT', v, self.through(ins['Location'])), True), scl)
+            if vt == 'VECTOR':
+                return turn(self.vmath('MULTIPLY', v, scl))
+            return self.vmath('NORMALIZE', turn(self.vmath('DIVIDE', v, scl)))
+        if k == 'ShaderNodeInvert':
+            c = self.through(ins['Color'])
+            return self.mix_rgb(self.through(ins['Fac']), c, self.vmath('SUBTRACT', (1.0, 1.0, 1.0), c))
+        if k == 'ShaderNodeRGBToBW':
+            return self.vmath('DOT_PRODUCT', self.through(ins['Color']), _LUMA)
+        if k == 'ShaderNodeBrightContrast':
+            c, br, co = self.through(ins['Color']), self.through(ins['Bright']), self.through(ins['Contrast'])
+            a = self.math('ADD', co, 1.0)                                    # out = max((1 + C) c + B - C / 2, 0)
+            b = self.math('SUBTRACT', br, self.math('MULTIPLY', co, 0.5))
+            cb = self.new('ShaderNodeCombineXYZ')
+            for ax in 'XYZ':
+                self.feed(cb.inputs[ax], b)
+            return self.vmath('MAXIMUM', self.vmath('ADD', self._scale(c, a), cb.outputs[0]), (0.0, 0.0, 0.0))
+        if k == 'ShaderNodeHueSaturation':
+            c = self.through(ins['Color'])
+            sep = self.new('FunctionNodeSeparateColor', mode='HSV')
+            self.feed(sep.inputs[0], c)
+            h = self.math('FRACT', self.math('ADD', self.math('ADD', sep.outputs[0], self.through(ins['Hue'])), 0.5))
+            s = self.new('ShaderNodeClamp')
+            self.feed(s.inputs['Value'], self.math('MULTIPLY', sep.outputs[1], self.through(ins['Saturation'])))
+            v = self.math('MULTIPLY', sep.outputs[2], self.through(ins['Value']))
+            cmb = self.new('FunctionNodeCombineColor', mode='HSV')
+            self.feed(cmb.inputs[0], h)
+            self.feed(cmb.inputs[1], s.outputs[0])
+            self.feed(cmb.inputs[2], v)
+            return self.mix_rgb(self.through(ins['Fac']), c, cmb.outputs[0])
+        if k == 'ShaderNodeTexImage':
+            if n.image is None or getattr(n, 'projection', 'FLAT') != 'FLAT':
+                raise _Unsupported('an image texture without an image, or not FLAT projected')
+            g = self.new('GeometryNodeImageTexture')
+            g.interpolation = n.interpolation if n.interpolation in ('Linear', 'Closest', 'Cubic') else 'Linear'
+            g.extension = n.extension if n.extension in ('REPEAT', 'EXTEND', 'CLIP', 'MIRROR') else 'REPEAT'
+            g.inputs['Image'].default_value = n.image
+            vin = ins['Vector']
+            self.links.new(self.out(vin.links[0].from_socket) if vin.is_linked else self.uv(), g.inputs['Vector'])
+            return g.outputs['Alpha' if so.identifier == 'Alpha' else 'Color']
+        if k == 'ShaderNodeGroup':
+            tree = n.node_tree
+            gout = None if tree is None else (
+                next((x for x in tree.nodes if x.bl_idname == 'NodeGroupOutput' and x.is_active_output), None) or
+                next((x for x in tree.nodes if x.bl_idname == 'NodeGroupOutput'), None))
+            if gout is None:
+                raise _Unsupported(f'the group {n.name} has no output')
+            si = next(s for s in gout.inputs if s.identifier == so.identifier)
+            self.ctx = self.ctx + (n,)
+            try:
+                return self.through(si)
+            finally:
+                self.ctx = self.ctx[:-1]
+        if k == 'NodeGroupInput':
+            if not self.ctx:
+                raise _Unsupported('a Group Input outside a group')
+            outer = self.ctx[-1]
+            si = next(s for s in outer.inputs if s.identifier == so.identifier)
+            saved, self.ctx = self.ctx, self.ctx[:-1]
+            try:
+                return self.through(si)
+            finally:
+                self.ctx = saved
+        raise _Unsupported(f'{k} ({n.name})')
+
+    def _scale(self, c, a):
+        n = self.new('ShaderNodeVectorMath', operation='SCALE')
+        self.feed(n.inputs[0], c)
+        self.feed(n.inputs['Scale'], a)
+        return n.outputs['Vector']
+
+
+def graph_colors(sock, pos, uv=None, acol=None, texspace=None, alpha_sock=None, acol_name=None, world=None,
+                 normal=None, obj_normal=None):
+    """The colours (and alphas) a material's colour input gives at points, evaluated by Geometry Nodes: the input's
+    shader graph copied into a scratch tree, run on points at `pos` (the geometry's OBJECT space, where Object and
+    Generated coordinates live) carrying `uv` (n, 2) and `acol` (n, 3), and optionally their world positions (the
+    Geometry node's Position), world normals (its Normal) and object-space normals (Texture Coordinate Normal).
+    texspace: (location, half size) for Generated. -> ((n, 3) linear colours, (n,) alphas or None), or (None, None)
+    when a node cannot be reproduced (the reason is printed)."""
+    bpy = _bpy()
+    from ._nodes import new_group
+    pos = np.asarray(pos, np.float64).reshape(-1, 3)
+    n = len(pos)
+    if n == 0:
+        return np.zeros((0, 3), np.float32), None
+    tree, gi, go = new_group('eido.ptargets.colours', 'GeometryNodeTree', [('Geometry', 'NodeSocketGeometry')],
+                             [('Geometry', 'NodeSocketGeometry')])
+    me = bpy.data.meshes.new('eido.ptargets.colours')
+    ob = None
+    try:
+        me.vertices.add(n)
+        me.vertices.foreach_set('co', pos.astype(np.float32).ravel())
+        if uv is not None:
+            a = me.attributes.new('eido_uv', 'FLOAT_VECTOR', 'POINT')
+            u3 = np.zeros((n, 3), np.float32)
+            u3[:, :2] = np.asarray(uv, np.float32).reshape(-1, 2)
+            a.data.foreach_set('vector', u3.ravel())
+        if acol is not None:
+            a = me.attributes.new('eido_acol', 'FLOAT_COLOR', 'POINT')
+            c4 = np.ones((n, 4), np.float32)
+            c4[:, :3] = np.asarray(acol, np.float32).reshape(-1, 3)
+            a.data.foreach_set('color', c4.ravel())
+        vec_attrs = []
+        for nm, arr in (('eido_world', world), ('eido_nrm', normal), ('eido_onrm', obj_normal)):
+            if arr is not None:
+                a = me.attributes.new(nm, 'FLOAT_VECTOR', 'POINT')
+                a.data.foreach_set('vector', np.asarray(arr, np.float32).reshape(-1, 3).ravel())
+                vec_attrs.append(nm)
+        tr = _GNGraph(tree, texspace, uv is not None, acol is not None, acol_name, vec_attrs)
+        geo = gi.outputs[0]
+        try:
+            for nm, s_, dt in (('eido_pcol', sock, 'FLOAT_COLOR'), ('eido_palpha', alpha_sock, 'FLOAT')):
+                if s_ is None:
+                    continue
+                src = tr.through(s_)
+                st = tree.nodes.new('GeometryNodeStoreNamedAttribute')
+                st.data_type, st.domain = dt, 'POINT'
+                st.inputs['Name'].default_value = nm
+                tree.links.new(geo, st.inputs['Geometry'])
+                tree.links.new(src, st.inputs['Value'])
+                geo = st.outputs[0]
+        except _Unsupported as e:
+            print(f'[particle_targets] material colours: {e}; read directly instead')
+            return None, None
+        tree.links.new(geo, go.inputs[0])
+        ob = bpy.data.objects.new('eido.ptargets.colours', me)
+        bpy.context.scene.collection.objects.link(ob)
+        ob.modifiers.new('colours', 'NODES').node_group = tree
+        bpy.context.view_layer.update()
+        ev = ob.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        m = ev.to_mesh()
+        try:
+            C = np.empty(n * 4, np.float32)
+            m.attributes['eido_pcol'].data.foreach_get('color', C)
+            A = None
+            if alpha_sock is not None and 'eido_palpha' in m.attributes:
+                A = np.empty(n, np.float32)
+                m.attributes['eido_palpha'].data.foreach_get('value', A)
+        finally:
+            ev.to_mesh_clear()
+        return C.reshape(-1, 4)[:, :3].copy(), A
+    finally:
+        if ob is not None:
+            bpy.data.objects.remove(ob)
+        bpy.data.meshes.remove(me)
+        bpy.data.node_groups.remove(tree)
+
+
 def _upstream(sock, kinds, depth=8):
     """The first node of one of `kinds` upstream of an input socket (breadth first through any nodes)."""
     if not sock.is_linked:
@@ -684,6 +1207,10 @@ class _ColorSource:
             np.ones(3, np.float32), None
         self.em_kind, self.em_rgb, self.em_img, self.em_strength = None, None, None, 0.0
         self.alpha_img = False
+        # a colour graph the direct readers cannot read (procedural textures, ramps, mixes, Mapping, groups ...):
+        # evaluated by Geometry Nodes at the points (graph_colors); the direct reading stays as the fallback
+        self.proc = self.proc_alpha = None
+        self.gain = 1.0
         self.invisible = False             # glass / a mostly transparent sheet: no points (skip_glass)
         self.skip_glass = skip_glass
         self.max_size = max_size
@@ -728,6 +1255,7 @@ class _ColorSource:
             st = sh.inputs['Strength']
             if not st.is_linked and st.default_value != 1.0:
                 self.tint = self.tint * float(st.default_value)
+                self.gain = float(st.default_value)
         if sh.bl_idname == 'ShaderNodeBsdfPrincipled':
             st = sh.inputs.get('Emission Strength')
             ec = sh.inputs.get('Emission Color')
@@ -743,6 +1271,8 @@ class _ColorSource:
             al = sh.inputs.get('Alpha')
             if al is not None and al.is_linked and self.kind == 'image':
                 self.alpha_img = _upstream(al, {'ShaderNodeTexImage'}) is not None
+            if al is not None and al.is_linked and self.proc is not None:
+                self.proc_alpha = al
             tw = sh.inputs.get('Transmission Weight')
             see_through = (tw is not None and not tw.is_linked and tw.default_value > 0.5) or \
                 (al is not None and not al.is_linked and al.default_value < 0.3)
@@ -753,6 +1283,8 @@ class _ColorSource:
         if not sock.is_linked:
             self.rgb = tuple(sock.default_value[:3])
             return
+        if _needs_graph(sock):
+            self.proc = sock
         src = sock.links[0].from_node
         if src.bl_idname == 'ShaderNodeMix' and getattr(src, 'blend_type', '') == 'MULTIPLY':
             ins = {s.identifier: s for s in src.inputs}
@@ -774,12 +1306,26 @@ class _ColorSource:
             self.kind = 'attr'
             self.attr = tex.layer_name if tex.bl_idname == 'ShaderNodeVertexColor' else tex.attribute_name
 
-    def colors(self, uv, attr_col, n=None):
-        """(n, 3) linear colours and (n,) alphas for n points with uv (n, 2) or None and colour-attribute values."""
+    def colors(self, uv, attr_col, n=None, pos=None, texspace=None, acol_name=None, world=None, normal=None,
+               obj_normal=None):
+        """(n, 3) linear colours and (n,) alphas for n points with uv (n, 2) or None and colour-attribute values.
+        pos: the points in the geometry's object space (with texspace, the Generated coordinates' texture space;
+        world, normal, obj_normal: their world positions and world / object-space normals): a procedural colour
+        graph is evaluated there; without pos the direct reading stands in."""
         if n is None:
             n = len(uv) if uv is not None else (len(attr_col) if attr_col is not None else 0)
         alpha = np.ones(n, np.float32)
-        if self.kind == 'image' and uv is not None:
+        got = None
+        if self.proc is not None and pos is not None and not self.invisible and n:
+            got, ga = graph_colors(self.proc, pos, uv, attr_col, texspace, self.proc_alpha, acol_name, world=world,
+                                   normal=normal, obj_normal=obj_normal)
+            if got is None:
+                self.proc = None                       # not reproducible: the direct reading from now on
+            elif ga is not None:
+                alpha = ga.astype(np.float32)
+        if got is not None:
+            c = got * float(self.gain)
+        elif self.kind == 'image' and uv is not None:
             s = _sample_image(self.img, uv)
             c = s[:, :3] * self.tint
             if self.alpha_img:
@@ -797,9 +1343,10 @@ class _ColorSource:
         return c.astype(np.float32), alpha
 
 
-def material_colors(material, uv=None, attr_col=None, max_size=1024, n=None):
-    """The colours (n, 3) and alphas (n,) a material shows at points with these UVs (the sampler from_object uses)."""
-    return _ColorSource(material, max_size).colors(uv, attr_col, n)
+def material_colors(material, uv=None, attr_col=None, max_size=1024, n=None, pos=None, texspace=None):
+    """The colours (n, 3) and alphas (n,) a material shows at points with these UVs (the sampler from_object uses).
+    pos (object space) and texspace let a procedural colour graph be evaluated at the points (graph_colors)."""
+    return _ColorSource(material, max_size).colors(uv, attr_col, n, pos=pos, texspace=texspace)
 
 
 # ---------------------------------------------------------------------------------------------- from_object ---
@@ -852,6 +1399,20 @@ def _sample_surface(pieces, n, rng, colors=True, live=False, alpha_cut=True, max
                     src = pc.tri_loops[t] if pc.col_domain == 'CORNER' else tv
                     acol = (pc.col[src] * w[sel][..., None].astype(np.float32)).sum(1)
                 mats = pc.tri_mat[t]
+                # for procedural colour graphs: object-space points and their shading normals (the corner normals
+                # interpolated, object space and world; the triangle's own when the mesh has none)
+                loc = pc.local(P[sel])
+                if pc.cnrm is not None:
+                    no = (pc.cnrm[pc.tri_loops[t]] * w[sel][..., None].astype(np.float32)).sum(1).astype(np.float64)
+                    no /= np.maximum(np.linalg.norm(no, axis=1, keepdims=True), 1e-12)
+                    nw = no @ np.linalg.inv(pc.M[:3, :3])
+                    nw /= np.maximum(np.linalg.norm(nw, axis=1, keepdims=True), 1e-12)
+                else:
+                    tw = pc.verts[tv]
+                    nw = np.cross(tw[:, 1] - tw[:, 0], tw[:, 2] - tw[:, 0])
+                    nw /= np.maximum(np.linalg.norm(nw, axis=1, keepdims=True), 1e-12)
+                    no = nw @ pc.M[:3, :3]
+                    no /= np.maximum(np.linalg.norm(no, axis=1, keepdims=True), 1e-12)
                 for mi in np.unique(mats):
                     ss = sel[mats == mi]
                     mat = pc.materials[mi] if 0 <= mi < len(pc.materials) else None
@@ -860,7 +1421,9 @@ def _sample_surface(pieces, n, rng, colors=True, live=False, alpha_cut=True, max
                         srcs[key] = _ColorSource(mat, max_size)
                     m_ = mats == mi
                     C[ss], A[ss] = srcs[key].colors(None if uv is None else uv[m_],
-                                                    None if acol is None else acol[m_], n=len(ss))
+                                                    None if acol is None else acol[m_], n=len(ss), pos=loc[m_],
+                                                    texspace=pc.texspace, acol_name=pc.col_name, world=P[ss],
+                                                    normal=nw[m_], obj_normal=no[m_])
         keep = A >= 0.5 if (colors and alpha_cut) else np.ones(k, bool)
         out_p.append(P[keep])
         if colors:
@@ -953,11 +1516,32 @@ def _vertex_colors(pc, max_size=1024):
         acol = pc.col[loops] if pc.col_domain == 'CORNER' else pc.col[np.nonzero(has)[0]]
     mats = pc.tri_mat[t]
     out = np.full((int(has.sum()), 3), 0.8, np.float32)
+    vidx = np.nonzero(has)[0]
+    loc = pc.local(pc.verts[vidx])
+    # vertex normals for procedural colour graphs, world and object space: the first corner's shading normal, or the
+    # area-weighted face normals when the mesh has no corner normals
+    V = pc.verts
+    if pc.cnrm is not None:
+        von = pc.cnrm[loops].astype(np.float64)
+        von /= np.maximum(np.linalg.norm(von, axis=1, keepdims=True), 1e-12)
+        vn = von @ np.linalg.inv(pc.M[:3, :3])
+        vn /= np.maximum(np.linalg.norm(vn, axis=1, keepdims=True), 1e-12)
+    else:
+        fn = np.cross(V[pc.tris[:, 1]] - V[pc.tris[:, 0]], V[pc.tris[:, 2]] - V[pc.tris[:, 0]])
+        vn = np.zeros_like(V)
+        for k in range(3):
+            np.add.at(vn, pc.tris[:, k], fn)
+        vn = vn[vidx]
+        vn /= np.maximum(np.linalg.norm(vn, axis=1, keepdims=True), 1e-12)
+        von = vn @ pc.M[:3, :3]
+        von /= np.maximum(np.linalg.norm(von, axis=1, keepdims=True), 1e-12)
     for mi in np.unique(mats):
         sel = mats == mi
         mat = pc.materials[mi] if 0 <= mi < len(pc.materials) else None
         out[sel] = _ColorSource(mat, max_size).colors(None if uv is None else uv[sel],
-                                                      None if acol is None else acol[sel], n=int(sel.sum()))[0]
+                                                      None if acol is None else acol[sel], n=int(sel.sum()),
+                                                      pos=loc[sel], texspace=pc.texspace, acol_name=pc.col_name,
+                                                      world=V[vidx][sel], normal=vn[sel], obj_normal=von[sel])[0]
     C[has] = out
     return C
 

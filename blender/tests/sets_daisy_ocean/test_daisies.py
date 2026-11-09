@@ -1,9 +1,10 @@
 """The ocean's daisies (ocean/daisies.py, the port of sets/ocean/daisies.js on the flora family's daisy): every option
 of daisies.js exercised, and its header example (a superbloom of 14000 on 60 m with a path cleared across it) built
-and rendered: open by day, with the kick's pulse, shut at dusk.
+and rendered: open by day, with a beat's pulse, shut at dusk. The swaying superbloom is one realized field of about
+9.7 million vertices: its render wants a 32 GB memory cap (at 12 GB Blender's draw cache runs out of memory).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy_ocean/test_daisies.py --no-render
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 32 bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy_ocean/test_daisies.py
 """
 import importlib.util
@@ -188,7 +189,7 @@ shot('superbloom_dusk_shut', *CLOSE, 4.0, SUN_AZ, strength=2.0, color=(1.0, 0.62
 from PIL import Image  # noqa: E402
 a = np.asarray(Image.open(p_day_close).convert('RGB'), np.float32)
 b = np.asarray(Image.open(p_pulse_close).convert('RGB'), np.float32)
-ck.check('pulse 1 brightens the petals (the kick glow)', (b - a).mean() > 0.3, f'mean +{(b - a).mean():.2f} / 255')
+ck.check('pulse 1 brightens the petals (the beat\'s glow)', (b - a).mean() > 0.3, f'mean +{(b - a).mean():.2f} / 255')
 for name, p in stills:
     im = np.asarray(Image.open(p).convert('RGB'), np.float32) / 255.0
     ck.check(f'{name}: rendered', im.mean() > 0.02, f'mean {im.mean():.3f}')

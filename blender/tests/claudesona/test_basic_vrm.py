@@ -1,8 +1,9 @@
 """eidoverse/examples/basic_vrm.js ported (blender/tests/claudesona/basic_vrm/scene.py), built and rendered without the
 runner: the scene's own setup(ctx) and render_frame(ctx, t, i), with a ctx that keys as the runner's does (LINEAR),
-over the whole film, then stills at 0, 3 and 6 s, for aletheia and for the claudesona (claude_suit.vrm, as the example
-loads any VRM: unscaled). The runner (eido_blender.py render basic_vrm/scene.json) is the way to run it once its
-keying snapshot reads Blender 5.2's Geometry Nodes modifiers (see the step report's hooks).
+over the whole film, then stills at 0, 3 and 6 s, for the example's own asset (claude.vrm, basic_vrm.json's
+character_vrm), for aletheia and for the claudesona (claude_suit.vrm, as the example loads any VRM: unscaled). The
+runner (eido_blender.py render basic_vrm/scene.json) is the way to run it once its keying snapshot reads Blender 5.2's
+Geometry Nodes modifiers (see the step report's hooks).
 
 Checks: the camera on the example's orbit at every still (radius 2.5 m, 1.4 m up, aimed at 1.1 m: three's
 (cos 0.4t r, 1.4, sin 0.4t r) looking at (0, 1.1, 0)); the idle clip moves the body between stills; the springs and the
@@ -120,9 +121,10 @@ def build(vrm_path, tag, C, R):
 def main():
     R, C = {}, S.Checks('basic_vrm')
     try:
+        e = build(os.path.join(S.VRMS, 'claude.vrm'), 'claude', C, R)          # the example's own character_vrm
         a = build(os.path.join(S.VRMS, 'aletheia.vrm'), 'aletheia', C, R)
         c = build(os.path.join(S.VRMS, 'claude_suit.vrm'), 'claudesona', C, R)
-        R['sheet'] = S.sheet(a + c, os.path.join(OUT, 'basic_vrm_sheet.png'), cols=3)
+        R['sheet'] = S.sheet(e + a + c, os.path.join(OUT, 'basic_vrm_sheet.png'), cols=3)
     except Exception:
         traceback.print_exc()
         R['error'] = traceback.format_exc()

@@ -145,23 +145,42 @@ def _ensure_slots(a, b):
             a.data.materials.append(m)
 
 
+def open_edges(ob):
+    """the number of boundary (open) edges of ob's mesh: 0 for a closed solid"""
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    n = sum(1 for e in bm.edges if e.is_boundary)
+    bm.free()
+    return n
+
+
 def evaluate(a, b, operation, live=False, solver='EXACT', use_groups=True, name=None, hide_b=True):
-    """A op B -> the result object (a new object, or A itself with the modifier when live=True).
-    hide_b: hide B from the render (three-bvh-csg's brushes are not in the scene; here B stays as the live cutter)."""
+    """A op B -> the result object (a new object, or A itself with the modifier when live=True; A's mesh is not
+    changed otherwise). hide_b: hide B from the render (three-bvh-csg's brushes are not in the scene; here B stays as
+    the live cutter). An open B (and an open A in a solid operation) has no inside: as in three-bvh-csg the result is
+    then undefined, and a warning says so."""
     bpy.context.view_layer.update()            # matrix_world is stale right after a transform is set
     ng = _tree(a, b, operation, solver, use_groups)
-    if use_groups:
-        _ensure_slots(a, b)
+    if b.type == 'MESH' and open_edges(b):
+        print('[csg] %s: the cutter %s is open (%d boundary edges): it has no inside, the result is undefined'
+              % (operation, b.name, open_edges(b)))
+    if (operation not in (HOLLOW_SUBTRACTION, HOLLOW_INTERSECTION) and a.type == 'MESH' and open_edges(a)):
+        print('[csg] %s: %s is open (%d boundary edges): a solid operation wants closed solids (the HOLLOW pair '
+              'takes an open A)' % (operation, a.name, open_edges(a)))
     if hide_b:
         b.hide_render = True
         b.display_type = 'WIRE'
     if live:
+        if use_groups:
+            _ensure_slots(a, b)
         md = a.modifiers.new('csg_' + operation.lower(), 'NODES')
         md.node_group = ng
         a['eido_csg'] = operation
         return a
     holder = a.copy()                          # A's own modifiers stay: the boolean takes A as it renders
     holder.data = a.data.copy()
+    if use_groups:
+        _ensure_slots(holder, b)
     for c in a.users_collection:
         c.objects.link(holder)
     md = holder.modifiers.new('csg', 'NODES')

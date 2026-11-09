@@ -8,7 +8,7 @@
 # then the contact sheets: python blender/tests/robotics/contact_sheet.py blender/tests/robotics/out/catalog \
 #   blender/tests/robotics/out/catalog_sheet.png --cols 10   (and out/motion, out/parts, out/mech_parts the same way)
 here="$(cd "$(dirname "$0")" && pwd)"
-names="${*:-catalog motion parts normal_parity examples inspector mech_parts}"
+names="${*:-catalog motion parts normal_parity examples inspector mech_parts studio}"
 rc=0
 for n in $names; do
     echo "=== $n ($(date +%H:%M:%S))"

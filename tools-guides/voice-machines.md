@@ -3,10 +3,12 @@
 [Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Props and sets](props-and-sets.md) · [Motion graphics](motion-graphics.md)
 
 This is the Blender edition (Blender 5.2, EEVEE, AgX). Eight machines that
-spoke or sang, built for the DAISY music video's museum of voices, are built
-by name from `blender/eidoblend/props/`. Each one is the pack's model
-(`eidoverse/assets/models/voice_machines/`, the same GLBs the WebGPU modules
-load) with its runtime parts made in Blender: the screens and their drawings,
+spoke or sang, first made for the DAISY music video's museum of voices, are
+free props for any new piece, built by name from `blender/eidoblend/props/`;
+nothing in them runs on that song's clock. Each one is the pack's model
+(`eidoverse/assets/models/voice_machines/`, the GLBs the Blender scripts in
+`models/voice_machines_src/` built and the WebGPU modules load) with its
+runtime parts made in Blender: the screens and their drawings,
 the CRT switch-on, the LEDs, the surfaces the voice lights from inside, the
 runtime metal. `update(t, state)` keys everything it changes, so a saved
 .blend plays and renders any frame on its own. The probes that show each
@@ -233,22 +235,29 @@ glass's UV), `barrel` (pincushion), `scan` (scanline count) and `scan_amt`,
 by smoothstep(0.05, 0.7, power)), the collapsed line burning up to 3× brighter.
 The engine faded its scanlines where they got finer than a pixel with
 `fwidth`; Blender's shader nodes have no screen-space derivatives, so the fade
-reads a pixel's footprint on the glass: the view depth times the pixel angle,
-over the tilt. `pixel_angle(nb, scene)` measures that angle in the shader
-itself, from each point's View Vector against its Window position (which
-gives the camera's field of view) and the render size (three one-variable
-drivers on the scene's resolution, no Python). It needs no driver on the
-camera, so it follows cuts and animated lenses, and a saved blend reopened
-with scripts off renders the same. Do not drive a material from
-`scene.camera`: a driver first evaluated while the scene has no camera (a
-machine is usually built before its shot's camera) is switched off by Blender
-for good. The measure assumes a perspective camera without lens shift.
+reads a pixel's footprint on the glass, over the tilt. `pixel_footprint(nb,
+scene)` measures it in the shader itself: each point's camera-space position
+against its Window position gives the metres one pixel spans there, through a
+perspective camera (the depth times the pixel angle) or an orthographic one
+(the ortho scale over the width), with the render size from three
+one-variable drivers on the scene's resolution (no Python).
+`pixel_angle(nb, scene)` is the perspective angle per pixel on its own, from
+the View Vector. Neither needs a driver on the camera, so they follow cuts
+and animated lenses, and a saved blend reopened with scripts off renders the
+same. Do not drive a material from `scene.camera`: a driver first evaluated
+while the scene has no camera (a machine is usually built before its shot's
+camera) is switched off by Blender for good. The measure assumes a camera
+without lens shift.
 
 ```python
 c = props.build('c64')
 for f, p in enumerate((0.02, 0.12, 0.3, 0.6, 1.0), start=1):
     c.update((f - 1) / 24, {'power': p})           # five frames of the switch-on
 ```
+
+The glass is a clear coat over a gloss base, so it mirrors the lights:
+broad, soft area lights read as a soft sheen across the tube, while a small,
+hot light leaves a sharp dot on it.
 
 ## Era canvas scenes on a machine's tube
 
@@ -261,18 +270,19 @@ the scene with the engine's own drawing code (Deno + Skia, through
 machine's drawing for the frame range through the same glass, raster,
 scanlines, switch-on, power and gain. Before and after the range the
 machine's own drawing shows (a CONSTANT-keyed root property `scene_<k>`).
+The scene plays from its own beginning on the range's first frame; `t0`
+(film seconds) starts its clock elsewhere, so `t0 = <that frame's time> - 2`
+joins it two seconds in.
 
 ```python
-from eidoblend.media import canvas_scenes as cs
-
-scene = bpy.context.scene
-scene['eido_frame0'] = 1 - round(cs.DAISY_CUES['sam_1982'] * 24)  # frame 1 = the scene's cue in the song
 c64 = props.build('c64', screen_dir='//screens/c64')
-c64.show_scene('sam_1982', (1, 90), t0=cs.DAISY_CUES['sam_1982'],
-               lyrics='work/daisy/daisy_timeline.json')          # captions, kicks, envelopes, as bake_canvas_scene
+c64.show_scene('sam_1982', (49, 138))                    # frames 49-138: the scene from its start
 mac = props.build('mac1984')
 mac.show_scene(source='work/mac/hello_reel_0001.png', frames=(120, 200))   # any frames: a sequence, a still, a movie
 ```
+
+`lyrics`, `cues` and `bpm` pass through to `bake_canvas_scene` for the
+scenes that draw captions or pulse with a beat.
 
 The default canvas is the machine's own scaled to about 1024 px wide
 (768 × 594 on the C64, 1024 × 684 on the Macintosh, 1024 × 778 on the
@@ -283,9 +293,9 @@ desktop); `W` / `H` override it.
 `eidoblend.props.voice_machines` also carries the helpers the five era-2
 modules share (the JS kept an identical copy in each): `rng(seed)` (bit-exact
 with the JS, including its float64 seed product), `lin(hex)`, the tiling
-noise (`noise_data()` / `noise_image()`: four periodic fBm channels, every
-texel within one step of the JS), `triplanar` (object space, three's planes
-mapped to Blender's), `metal_material`, `glow_material`, `led_material`,
+noise (`noise_data()` / `noise_image()`, also `noise_texture()`: four
+periodic fBm channels, bit-exact with the JS), `triplanar` (object space,
+three's planes mapped to Blender's), `metal_material`, `glow_material`, `led_material`,
 `screen_material`, `load_glb`, `EraScreen` (a drawing as a keyed PNG
 sequence), `SceneLayer`, `Channel` / `Lamp` and the `Machine` base class.
 `font(families, px, bold, italic)` finds a CSS-like family list in the
@@ -394,6 +404,9 @@ python -B blender/tests/voice_machines_a/test_screens_parity.py
 # from the main checkout, through the GPU slot: API checks, then renders
 HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
     <worktree>/blender/tests/voice_machines_a/test_machines.py [-- --only api,desk,close,crt,voice,mac,scene,lineup,plastic,kit,saved]
+# the machines as a new film uses them: two of a kind, one turned, a 30 fps clock from frame 1001, ortho cameras
+HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    <worktree>/blender/tests/voice_machines_a/test_instances_clock_ortho.py [-- --only two,turned,clock,ortho,footprint]
 # a whole scene through the harness: four machines powering on and speaking in turn on one desk, keyed by ctx
 python eido_blender.py build blender/tests/voice_machines_a/museum/scene.json
 python eido_blender.py render blender/tests/voice_machines_a/museum/scene.json --at 0.4 --at 1.3 --at 2.4 --at 3.6
@@ -409,6 +422,14 @@ same. It also runs the kit's own `rng`, noise, `buildMips`, `rrPoints`,
 `roundedRectShape`, `roundedPolyline` and `speckle` from the JS: the first
 six match bit for bit (or to 1e-12 m), the speckle has the same dots with
 the same ink (within 0.3 %), differing only along their antialiased rims.
+`test_instances_clock_ortho.py` builds two C64s without names into one
+screen folder (each keeps its own root, channels and frames), turns the
+desktop on the desk (the cloth still glows over its drivers), runs a 30 fps
+film clock that starts at frame 1001 (the new text lands on its frame; the
+blend reopened with scripts off renders the same), and measures
+`pixel_footprint` against the camera's own metres per pixel through
+landscape, portrait and orthographic cameras (within 0.1 %); its stills land
+in `out/verify/`.
 `test_machines.py` checks the registry, each machine's keyed update, the
 cursor's blink, the footprints, `dispose`, that every driver a machine makes
 is a one-variable AVERAGE with no path through `scene.camera`, the kit's
@@ -427,8 +448,9 @@ changed is keyed). Look at the frames.
 - Text drawn by FreeType instead of Skia: the same faces, hinted a little
   differently (the parity test's numbers); Skia's synthetic bold is imitated
   with a stroke where a family has no bold face.
-- `pixel_angle` (the screens' footprint) assumes a perspective camera with no
-  lens shift: under an orthographic camera the scanlines would not fade and
-  the Macintosh's raster would stay nearest-filtered.
+- `pixel_footprint` (the screens' footprint) assumes a camera without lens
+  shift: with a shift its measure drifts across the frame, so the scanline
+  fade and the Macintosh's nearest-to-smooth blend set in a little early or
+  late.
 - The desktop's speakers sit 1.3 mm into the desk: the pack's GLB places
   their bottoms there (the WebGPU edition does the same).

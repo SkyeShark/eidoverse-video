@@ -1,20 +1,21 @@
-"""eidoblend.sets.unknown_force.hole: THE HOLE IN THE MIDDLE, the chorus stage of UNKNOWN FORCE, the Blender 5.2 EEVEE
-edition of eidoverse/sets/unknown_force/hole.js.
+"""eidoblend.sets.unknown_force.hole: THE HOLE IN THE MIDDLE, a stage at the bottom of a sunken well, the Blender 5.2
+EEVEE edition of eidoverse/sets/unknown_force/hole.js (made for UNKNOWN FORCE's choruses; a free set for any piece).
 
-A sunken, stepped well at the centre of the city (city.py): she stands at the bottom (the origin, facing three's +Z,
-Blender's -Y) on wet black marble, inside a quiet ring of light, the one quiet place. Four terraces climb to the street
-(12 m up), cut by twelve radial stairs; around the rim twelve tall towers lean in over the well, and every one of them
-carries a big screen angled down at her head. Cables run from the towers down to an anchor ring around her; light
-pulses run down the cables, the towers' neon edges and the floor's inlaid lines toward her mark. She is the vanishing
-point: in plan everything here is radial or concentric about her.
+A sunken, stepped well at the centre of the city (city.py): the performer's mark is at the bottom (the origin, facing
+three's +Z, Blender's -Y) on wet black marble, inside a quiet ring of light, the one quiet place. Four terraces climb to
+the street (12 m up), cut by twelve radial stairs; around the rim twelve tall towers lean in over the well, and every
+one of them carries a big screen angled down at the performer's head. Cables run from the towers down to an anchor
+ring around the mark; light pulses run down the cables, the towers' neon edges and the floor's inlaid lines toward it.
+The mark is the vanishing point: in plan everything here is radial or concentric about it.
 
     from eidoblend.sets.unknown_force import hole as H
-    hole = H.build()                                   # the hole alone, with its own sky, rain, clouds and street disc
-    hole['parts']['billboards'][0]['set_canvas'](lambda ctx, w, h: ...)   # redraw a screen (canvas 1024 x 576)
-    H.key_hole_cam(camera, 'spiral', frame_start=1, fps=24)               # a chorus shot, keyed
-    hole['parts']['her'].objects.link(singer_mesh)     # the screens' and kickers' light reaches HER only
+    hole = H.build(scene)                              # the hole alone, with its own sky, rain, clouds and street disc
+    hole.parts.billboards[0].set_canvas(lambda ctx, w, h: ...)            # redraw a screen (canvas 1024 x 576)
+    H.key_hole_cam(camera, 'spiral', frame_start=1, fps=24)               # one of its eight camera moves, keyed
+    hole.parts.her.objects.link(performer_mesh)        # the screens' and kickers' light reaches the performer only
+    hole.animate(lambda t: {'focal': H.chest(), 'quiet': 1.0}, frames=(1, 240))   # on your own clock, keyed
 
-Usually you get it through city.py (city['parts']['hole']), which shares one material kit and one sign atlas.
+Inside the city you get it through city.py (city.parts.hole), which shares one material kit and one sign atlas.
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ except ImportError:                    # pragma: no cover
     bpy = None
 
 D2R = math.pi / 180
-HEAD = [0.0, 0.0, 1.55]               # the claudesona's face at scale 1, Blender axes (set HEAD[2] = 1.55 * 0.87 when scaled)
+HEAD = [0.0, 0.0, 1.55]               # a performer's face on the mark at scale 1, Blender axes (HEAD[2] = 1.55 * 0.87 when scaled)
 
 
 def _head3():
@@ -57,7 +58,7 @@ def _make_rim():
 
 _make_rim()
 
-# what each camp says she is: the default content of the twelve screens (the conductor redraws them)
+# what each camp says she is: the default content of the twelve screens (set_canvas redraws them)
 CAMPS = [
     {'word': 'GOD', 'sub': 'THE QUIET ROOMS', 'fg': '#ff2a3a', 'bg': '#140204', 'font': 'Black Ops One'},
     {'word': 'SUPREME INTELLIGENCE', 'sub': 'BY ORDER', 'fg': '#ffcf5a', 'bg': '#0e0a02', 'font': 'Michroma'},
@@ -289,7 +290,7 @@ def build(first=None, opts=None, ctx=None, **kw):
     K.made.add(coll)
     parent_coll.children.link(coll)
     root = KIT.new_object('set:hole', None, coll, parent=opts.get('parent'), made=K.made)
-    her = bpy.data.collections.new('uf_hole_her')       # the singer goes here: the screens' and kickers' light reach her only
+    her = bpy.data.collections.new('uf_hole_her')       # a performer goes here: the screens' and kickers' light reach only it
     K.made.add(her)
     HM = {'concrete': M['concrete'], 'metal': M['metal'], 'frame': M['frame'], 'marble': M['marble'], 'strip': M['strip'],
           'ground': M['ground'], 'floor': floor_material(K)}
@@ -652,12 +653,18 @@ def build(first=None, opts=None, ctx=None, **kw):
     # neon kickers behind her (the cyan and magenta ticker light): they rim the black tuta against the dark well
     lights['kickL'] = point('uf_hole_light_kickL', 0x29e7ff, 16, 6, 1.7, [-1.5, 0.9, -2.7])
     lights['kickR'] = point('uf_hole_light_kickR', 0xff4fd8, 16, 6, 1.7, [1.5, 1.05, -2.8])
-    # the hole's surfaces take only the quiet ring's light; the screen lights and the neon kickers light HER only (on wet
-    # marble a point light's highlight reads as a stray lamp; the screens' colour reaches the floor via the light map)
-    from .city import light_only
+    # the hole's surfaces take only the quiet ring's light; the screen lights and the neon kickers light the performer
+    # only (on wet marble a point light's highlight reads as a stray lamp; the screens' colour reaches the floor via the
+    # light map). Their receiver collection includes `her` and EXCLUDES the set's own collections (the hole's, and the
+    # city's around it): light linking ignores an include that holds no objects, so with nobody in `her` yet the
+    # include alone would let 1500 cd screen lights wash the towers and the street; three's lightsNode never did.
+    from .city import light_only, exclude_from_light
     light_only(lights['ring'], [coll, her], K.made)
+    set_colls = [coll] + ([opts['collection']] if opts.get('with_city') and opts.get('collection') is not None else [])
     for k in ('screen0', 'screen1', 'screen2', 'screen3', 'kickL', 'kickR'):
         light_only(lights[k], [her], K.made)
+        for c in set_colls:
+            exclude_from_light(lights[k], c, K.made)
 
     def set_lights(list_):
         """The hole's surfaces see only these lights, the quiet ring and the World (the hemisphere): every other scene
@@ -665,7 +672,7 @@ def build(first=None, opts=None, ctx=None, **kw):
         from .city import restrict_lights
         restrict_lights(scene, coll, list_, K.made)
     # as the engine's setLights([ring, ...cityLights, hemi]): the city's lights (city_lights: its sky-glow inside the
-    # city; none standalone, where the hemisphere is the World) and nothing a conductor had put in the scene before
+    # city; none standalone, where the hemisphere is the World) and nothing already in the scene before the build
     city_lights = list(opts.get('city_lights') or opts.get('cityLights') or [])
     set_lights(city_lights)
     # ---- standalone extras: its own sky, rain, clouds, signs and street disc so the hole renders by itself
@@ -682,7 +689,7 @@ def build(first=None, opts=None, ctx=None, **kw):
         extras = {'sky': sky, 'rain': rain, 'clouds': clouds, 'signs': signs, 'street': street}
 
     def apply_atmosphere(sc=None, objects=None):
-        """The scene's World (the kit's night); objects (the singer, props) take the haze as three's scene.fogNode
+        """The scene's World (the kit's night); objects (a performer, props) take the haze as three's scene.fogNode
         gave it to every material (KIT.fog_objects)."""
         sc = sc or scene
         if K.world is not None:
@@ -691,18 +698,20 @@ def build(first=None, opts=None, ctx=None, **kw):
             KIT.fog_objects(K, objects)
         return sc
 
-    from .city import make_set_focal, animate_section, make_section_cameras
+    from .city import make_set_focal, animate_set, make_set_cameras, apply_state
     set_focal = make_set_focal(U)
 
     def update(t, state=None, frame=None, ctx=None):
-        """Standalone only (inside the city, the city's update owns the clock): the clock and the rain's velocity.
-        ctx: the harness ctx (from now on, keys go through ctx.key)."""
+        """Standalone only (inside the city, the city's update owns the clock): the clock, the rain's velocity and
+        any control the state names (as the city's update). ctx: the harness ctx (from now on, keys go through
+        ctx.key)."""
         if ctx is not None:
             U.keyer = ctx.key
         if not standalone:
             return
         state = state or {}
         U['time'] = t
+        apply_state(U, state, frame)
         cv = state.get('cam_vel', state.get('camVel'))
         if cv is not None:
             U['cam_vel'] = cv
@@ -725,19 +734,17 @@ def build(first=None, opts=None, ctx=None, **kw):
                          'apply_atmosphere': apply_atmosphere, 'set_focal': set_focal, 'collection': coll,
                          'extras': extras, 'atlas': atlas})
 
-    def animate(frames=None, t0=80.0, fps=None, focal=None, power=True):
-        """Key the hole over film frames as the film's conductor drove it in a chorus (scene.js): the clock (song
-        seconds t0 at frames[0]), Crali's focal light on her chest (focal, Blender axes; default chest()), the rain
-        still (zero camera velocity) and, past 294.8 s, the outro's turn-down. Returns (first, last)."""
-        fps_ = float(fps or scene.render.fps / scene.render.fps_base)
-        if frames is None:
-            frames = range(scene.frame_start, scene.frame_start + int(round(HOLE_CAM_DUR['spiral'] * fps_)) + 1)
-        return animate_section(K, scene, frames, t0, fps_, 'hole', focal, power)
+    def animate(state=None, frames=None, t0=0.0, fps=None, camera=None):
+        """Key the hole's moving parts on your own clock, as the city's animate (city.animate_set): the clock (the
+        screens' flicker, the tickers, the cables' pulses, the rain), state(t)'s controls (power, quiet, screens,
+        column, cable ...; 'focal' a point, e.g. chest(), or an object to follow) and the rain along the camera.
+        Returns (first, last)."""
+        return animate_set(K, scene, state, frames, t0, fps, camera)
 
     def make_cameras(frames=None, t0=0.0, fps=None, scene_=None, shots=None):
-        """The chorus cameras keyed into the .blend: shots [(name, first frame, last frame)] (hole_cam's names, each
-        stretched over its frames), one camera each, bound to timeline markers (ctx.cut with a ctx). Default: all
-        eight shots back to back at their own lengths from frames[0] (default the scene's frame_start). Returns
+        """The hole's camera moves keyed into the .blend: shots [(name, first frame, last frame)] (hole_cam's names,
+        each stretched over its frames), one camera each, bound to timeline markers (ctx.cut with a ctx). Default:
+        all eight moves back to back at their own lengths from frames[0] (default the scene's frame_start). Returns
         {name: camera}."""
         sc = scene_ or scene
         fps_ = float(fps or sc.render.fps / sc.render.fps_base)
@@ -748,14 +755,14 @@ def build(first=None, opts=None, ctx=None, **kw):
                 n = int(round(HOLE_CAM_DUR[nm] * fps_))
                 shots.append((nm, f, f + n))
                 f += n + 1
-        return make_section_cameras(K, sc, ctx, None, t0, fps_, shots)
+        return make_set_cameras(K, sc, ctx, None, t0, fps_, shots)
     return KIT.SetDict(group=root, collection=coll, parts=parts, update=update, dispose=dispose, cams=cams,
                        animate=animate, make_cameras=make_cameras)
 
 
 def chest():
-    """Her chest (Blender axes), where the film's conductor put Crali's focal light in the hole: 1.3 m at scale 1,
-    scaled with HEAD (set HEAD[2] = 1.55 * 0.87 for the film's singer)."""
+    """The chest of a performer on the mark (Blender axes): 1.3 m at scale 1, scaled with HEAD (HEAD[2] = 1.55 * 0.87
+    for a smaller performer). A natural place for Crali's focal light in the hole: set_focal(H.chest())."""
     return [0.0, 0.0, 1.3 * HEAD[2] / 1.55]
 
 
@@ -805,9 +812,10 @@ def _make_cables(K, cable_list, coll, root, name='uf_hole_cables'):
     return ob
 
 
-# ------------------------------------------------------------------------------------------------ the chorus cameras
+# ------------------------------------------------------------------------------------------------ the camera moves
 # hole_cam(name, t, opts) -> {pos, target, fov, roll, up}, t = seconds since the shot began (clamped to its length;
-# opts['dur'] stretches it). Framed for a ~2 m claudesona at the origin facing three's +Z (face at ~1.55 m).
+# opts['dur'] stretches it). Made for the choruses; framed for a ~2 m performer on the mark facing three's +Z (face at
+# ~1.55 m).
 HOLE_CAM_DUR = {'spiral': 12, 'riseUp': 12, 'closeSing': 10, 'orbit': 16, 'low': 10, 'nadir': 10, 'enter': 8, 'screens': 10}
 HOLE_CAMS = list(HOLE_CAM_DUR)
 HOLE_CAM_ALIASES = {'rise_up': 'riseUp', 'close_sing': 'closeSing'}
@@ -873,13 +881,13 @@ def hole_cam_three(name, t, opts=None):
 
 
 def hole_cam(name, t, opts=None):
-    """A chorus shot's pose at t seconds into it, Blender axes: {'pos', 'target', 'fov', 'roll', 'up'?}. Names:
+    """One of the hole's camera moves, its pose t seconds into it, Blender axes: {'pos', 'target', 'fov', 'roll', 'up'?}. Names:
     spiral, riseUp, closeSing, orbit, low, nadir, screens, enter (rise_up / close_sing also accepted)."""
     return KIT.pose_to_blender(hole_cam_three(name, t, opts))
 
 
 def key_hole_cam(camera, name, *, frame_start=1, fps=24.0, dur=None, step=1, keyer=None):
-    """Key one chorus shot on a camera (every frame, LINEAR; through keyer, the harness's ctx.key, when given).
+    """Key one of the hole's camera moves on a camera (every frame, LINEAR; through keyer, the harness's ctx.key).
     dur stretches the shot (hole_cam's opts['dur']). Returns the frame range."""
     nm = HOLE_CAM_ALIASES.get(name, name)
     dur = dur or HOLE_CAM_DUR.get(nm, 10)

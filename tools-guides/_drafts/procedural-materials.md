@@ -88,7 +88,9 @@ Build your own from generated maps with `mesh_material(...)` — three's
 material options as keywords (`color`, `map`, `roughness`,
 `roughness_map`, `metalness`, `metalness_map`, `normal_map`,
 `normal_scale`, `clearcoat`, `clearcoat_roughness`,
-`clearcoat_roughness_map`, `transmission`, `thickness`, `ior`):
+`clearcoat_roughness_map`, `transmission`, `thickness`, `ior`, `ao_map`;
+anything else is ignored with three's warning, `'rougness' is not a
+property`):
 
 ```python
 # the engine's recipe: 90s computer plastic (no fetched texture exists for it)

@@ -12,7 +12,9 @@ pass over the saved previous output. It is exact when the frames render in order
 one after another); a frame rendered alone reads whatever trail the frame before it last wrote. On the scene's first
 frame the trail starts from the frame itself, as the WebGPU node's empty buffer did. The WebGPU effect does not reset
 at camera cuts, and neither does this one (e.cut() restarts it if a film wants that).
-Cost, measured in tests/post_era/test_after_image.py: one half-float DWAA EXR written and one read per frame.
+Cost, measured in tests/post_era/test_after_image.py at 960x540: one half-float EXR written (ZIP, lossless: a lossy
+codec's error would come back every frame through the feedback) and one read per frame, 0.62 MB of disk and 0.02 s a
+frame.
 """
 from __future__ import annotations
 

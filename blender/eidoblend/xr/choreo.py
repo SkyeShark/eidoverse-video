@@ -10,20 +10,40 @@ baked caches, so the data reads straight out of it, at any frame, in three's axe
 write() adds the timeline markers (cues: name, t, the camera a marker binds) and the property tracks the GLB cannot carry
 (light intensity and colour, emission strength, visibility; eidoblend.xr.motion.property_tracks), which the XR page
 template applies by name every frame.
+
+Rotations in three's axes (quat_to_three): a camera's or a light's quaternion is the one a three camera or light takes
+(it looks down its local -z in both), anything else's the one its converted geometry takes (a GLB node's).
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 
-import bpy
-
 from ..common import to_three
+
+OWN_AXES = ('CAMERA', 'LIGHT')          # object types whose local axes mean the same in three (look down -z, up +y)
+
+
+def quat_to_three(q, own_axes=False):
+    """A Blender rotation (a mathutils.Quaternion) as three's [x, y, z, w], for an object in three's world.
+
+    Geometry the glTF exporter (or a page) converts to three's axes vertex by vertex turns by M R M^-1 (M = Blender ->
+    three, -90 degrees about x; R the rotation): the rotation's axis maps like a direction, (ax, ay, az) -> (ax, az, -ay).
+    A camera or a light is not converted: it looks down its local -z, up its local +y, in both. Its rotation in three
+    is M R (own_axes=True), the correction the exporter applies to the cameras and lights it writes; M R M^-1 would
+    leave it looking 90 degrees off (a camera at the sky, an area light lighting nothing in front of it)."""
+    if own_axes:
+        from mathutils import Quaternion
+        r = Quaternion((math.sqrt(0.5), -math.sqrt(0.5), 0.0, 0.0)) @ q        # M: (x, y, z) -> (x, z, -y)
+        return [r.x, r.y, r.z, r.w]
+    return [q.x, q.z, -q.y, q.w]
 
 
 def sample_tracks(scene, names, step=2, three_axes=True, rotation=False):
     """{'fps', 'frame_start', 'step', 'track': {name: [[t, x, y, z] (+ [qx, qy, qz, qw] with rotation)]}}: each
-    object's world position every `step` frames, t in seconds from the first frame."""
+    object's world position every `step` frames, t in seconds from the first frame. With three_axes a camera's or a
+    light's rotation is the one a three camera or light takes (quat_to_three)."""
     sc = scene
     fps = sc.render.fps / sc.render.fps_base
     keep = sc.frame_current
@@ -41,8 +61,7 @@ def sample_tracks(scene, names, step=2, three_axes=True, rotation=False):
                 if rotation:
                     q = m.to_quaternion()
                     if three_axes:
-                        # a rotation's axis maps like a direction: (ax, ay, az) -> (ax, az, -ay); three order x, y, z, w
-                        row += [round(q.x, 6), round(q.z, 6), round(-q.y, 6), round(q.w, 6)]
+                        row += [round(v, 6) for v in quat_to_three(q, own_axes=ob.type in OWN_AXES)]
                     else:
                         row += [round(q.x, 6), round(q.y, 6), round(q.z, 6), round(q.w, 6)]
                 track[n].append(row)

@@ -9,9 +9,13 @@ on screen as authored. Here the renderer's tone map is the scene's view transfor
 
 ev is the scene's exposure, carried as a group input that a driver keeps equal to scene.view_settings.exposure
 (Convert To Display's own exposure is read-only, stack-notes.md). The nodes copy the scene's view transform, look
-and display when built; sync(scene) copies them again (apply_to and FX.update call it). Measured 11-07 on the meadow
-frame: through Convert To Display and its inverse, the worst pixel came back within 0.016 (linear); the
-'AgX Base sRGB' colour-space pair was 3x worse (0.053), so the view node pair it is.
+and display when built; sync(scene) copies them again (the era and aeropittura passes call it when applied, and
+FX.update() does). A view set later would land paper and ink through the wrong curve (measured 11-08: the poster's
+bare newsprint 16 levels off after the look went from AgX Base Contrast to Punchy, 0.08 once synced), so
+keep_synced() (turned on by those passes) syncs each scene before every render and save in this session, and
+stale(scene) lists the nodes that differ. Measured 11-07 on the meadow frame: through Convert To Display and its
+inverse, the worst pixel came back within 0.016 (linear); the 'AgX Base sRGB' colour-space pair was 3x worse
+(0.053), so the view node pair it is.
 """
 from __future__ import annotations
 
@@ -66,23 +70,92 @@ def from_disp(g, d, ev):
     return V(g, _exposure(g, n.outputs['Image'], ev, -1.0))
 
 
+def trees_of(scene):
+    """The scene's compositor tree and every group it uses, nested groups included: the trees its render composites
+    with. (The function groups are shared between scenes that use the same pass.)"""
+    out, todo = [], [scene.compositing_node_group] if scene.compositing_node_group else []
+    while todo:
+        t = todo.pop()
+        if t is None or t in out:
+            continue
+        out.append(t)
+        todo += [n.node_tree for n in t.nodes if n.bl_idname == 'CompositorNodeGroup' and n.node_tree is not None]
+    return out
+
+
+def _display_nodes(trees):
+    for t in trees:
+        for n in t.nodes:
+            if n.bl_idname == 'CompositorNodeConvertToDisplay' and n.get(TAG):
+                yield n
+
+
+def stale(scene, trees=None):
+    """The display nodes of the scene's own trees whose view transform, look or display differ from the scene's: the
+    view settings changed after the pass was applied (a config's render block setting the look, a set_view call), so
+    paper and ink would land through the wrong curve. [] when every one matches; sync() fixes the rest."""
+    vs, ds = scene.view_settings, scene.display_settings
+    return [n for n in _display_nodes(trees if trees is not None else trees_of(scene))
+            if (n.display_settings.display_device, n.view_settings.view_transform, n.view_settings.look)
+            != (ds.display_device, vs.view_transform, vs.look)]
+
+
 def sync(scene, trees=None):
-    """Copy the scene's view transform, look and display into every display node of the given trees (default: every
-    compositor group). Warns about view settings the pair does not carry (gamma, curves)."""
+    """Copy the scene's view transform, look and display into the display nodes of the given trees (default: the
+    trees the scene composites with, trees_of(scene): another scene's view never leaks into this one's). Only nodes
+    that differ are touched. Warns about view settings the pair does not carry (gamma, curves). Returns how many
+    display nodes the trees hold."""
     vs, ds = scene.view_settings, scene.display_settings
     if abs(vs.gamma - 1.0) > 1e-6:
         print(f'[look.post.display] warning: view gamma {vs.gamma} is not carried into display-space looks', flush=True)
     if vs.use_curve_mapping:
         print('[look.post.display] warning: view curves are not carried into display-space looks', flush=True)
-    n_set = 0
-    for t in (trees or [t for t in bpy.data.node_groups if t.bl_idname == 'CompositorNodeTree']):
-        for n in t.nodes:
-            if n.bl_idname == 'CompositorNodeConvertToDisplay' and n.get(TAG):
-                n.display_settings.display_device = ds.display_device
-                n.view_settings.view_transform = vs.view_transform
-                n.view_settings.look = vs.look
-                n_set += 1
-    return n_set
+    nodes = list(_display_nodes(trees if trees is not None else trees_of(scene)))
+    for n in nodes:
+        if n.display_settings.display_device != ds.display_device:
+            n.display_settings.display_device = ds.display_device
+        if n.view_settings.view_transform != vs.view_transform:
+            n.view_settings.view_transform = vs.view_transform
+        if n.view_settings.look != vs.look:
+            n.view_settings.look = vs.look
+    return len(nodes)
+
+
+@bpy.app.handlers.persistent
+def _sync_before_render(scene, *_a):
+    """render_pre: a scene about to render gets its display nodes onto its current view (only when they differ)."""
+    try:
+        if scene is not None and stale(scene):
+            n = len(stale(scene))
+            sync(scene)
+            print(f'[look.post.display] {scene.name}: {n} display node(s) copied onto the view '
+                  f'{scene.view_settings.view_transform} / {scene.view_settings.look} before rendering', flush=True)
+    except Exception as e:                                     # noqa: BLE001 - never stop a render over this
+        print(f'[look.post.display] warning: could not sync the display nodes before rendering: {e}', flush=True)
+
+
+@bpy.app.handlers.persistent
+def _sync_before_save(*_a):
+    """save_pre: every scene's display nodes onto its view, so a saved .blend renders as authored on its own."""
+    for sc in bpy.data.scenes:
+        try:
+            if stale(sc):
+                sync(sc)
+        except Exception as e:                                 # noqa: BLE001
+            print(f'[look.post.display] warning: could not sync {sc.name} before saving: {e}', flush=True)
+
+
+def keep_synced(enable=True):
+    """While this Python session renders or saves, copy each scene's view transform, look and display into its
+    display nodes first (render_pre, save_pre), so a view set after a pass was applied (the harness's config render
+    block, a later set_view) still lands paper and ink as authored. The era and aeropittura passes turn it on when
+    applied. A .blend rendered from the command line has no handler: it renders with the nodes as saved, and the
+    save synced them."""
+    for hs, fn_ in ((bpy.app.handlers.render_pre, _sync_before_render), (bpy.app.handlers.save_pre, _sync_before_save)):
+        for h in [h for h in hs if getattr(h, '__name__', '') == fn_.__name__]:
+            hs.remove(h)
+        if enable:
+            hs.append(fn_)
 
 
 def drive_exposure(scene, socket):

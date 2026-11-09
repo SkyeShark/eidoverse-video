@@ -86,4 +86,29 @@ for key in ('frag', 'frag2'):
             errq = max(errq, max(abs(x - y) for x, y in zip((a[1], a[2], a[3], a[0]), b)))
     report('%s: update(t) positions at %d times' % (key, len(fr['frames'])), err, 1e-9)
     report('%s: update(t) tumble quaternions' % key, errq, 1e-9)
+
+# ---- ring relief decoder (Eanpa src/ring_relief.js) on the real v4 set ----
+rel = d.get('relief')
+if rel is not None:
+    import gzip
+    from eidoblend.sky.ringworld import decode_ring_relief
+    raw = gzip.decompress(open(d['reliefPath'], 'rb').read())
+    mine = decode_ring_relief(raw)
+    hd = mine['height_data'].ravel()
+    nao = mine['normal_ao_data'].reshape(-1, 4)
+    dims = (mine['width'], mine['height']) == (rel['width'], rel['height'])
+    err = max(abs(float(hd[i]) - h) for i, h in zip(rel['idx'], rel['h']))
+    err_n = max(abs(int(a) - int(b)) for i, js in zip(rel['idx'], rel['nao']) for a, b in zip(nao[i], js))
+    report('ring relief v4: %dx%d, heights at %d texels (JS decodeRingRelief + fromHalfFloat)'
+           % (mine['width'], mine['height'], len(rel['idx'])), err if dims else 1.0, 0.0)
+    report('ring relief v4: normal + AO bytes at the same texels', err_n, 0)
+    refusals = []
+    for b in (b'\0' * 8, raw[:-1]):
+        try:
+            decode_ring_relief(b)
+            refusals.append(None)
+        except ValueError as e:
+            refusals.append(str(e))
+    report('ring relief: the JS refusals (%s)' % ' / '.join(str(r) for r in rel['refusals']),
+           0.0 if refusals == rel['refusals'] else 1.0, 0.0)
 print('PASS js parity all' if ok_all else 'FAIL js parity some')

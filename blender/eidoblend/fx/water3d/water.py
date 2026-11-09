@@ -35,17 +35,17 @@ DEFAULTS = dict(
     mg_levels=4, mg_cycles=2, mg_pre=2, mg_post=1, mg_coarse=4, mg_omega=0.8,
     pressure_iters=80,
     extrapolation_passes=6,
-    # 'bfs': an air cell takes the velocity of the water nearest it in steps; 'phi' is the engine's (from the
-    # neighbours deeper in phi), which hands the cell under fast-falling water the pool's velocity (see the guide)
-    extrapolation='bfs',
-    # redistancing: the engine leaves it off (reinit_every 0) because its central-difference kernel is unstable and
-    # names Godunov upwinding as the condition for turning it on. Here the Godunov kernel runs every substep: without
-    # it phi stops being a distance below falling water, the velocity extrapolation stops a cell under it and a
-    # dropped body slows and flattens before it reaches the pool (measured; see the guide). The engine's exact
-    # solver: reinit_every=0, reinit_scheme='central', extrapolation='phi' (ENGINE_SOLVER).
-    reinit_every=1,
+    # 'phi' is the engine's (an air cell takes the velocity of its neighbours deeper in phi); 'bfs' takes the velocity
+    # of the water nearest it in steps (the Blender edition's, part of DROP_SOLVER below)
+    extrapolation='phi',
+    # redistancing: off, as in the engine (its central-difference kernel is unstable, and its notes name Godunov
+    # upwinding as the condition for turning it on). reinit_scheme='godunov' is that kernel; DROP_SOLVER runs it
+    # every substep for water dropped onto water, where it keeps phi a distance below the falling body. It is not
+    # the default: in the 128^3 pour it lost about 6 litres around the end of the stream, where the engine's solver
+    # held the 30 litres poured (measured; see the guide)
+    reinit_every=0,
     reinit_iters=8,
-    reinit_scheme='godunov',
+    reinit_scheme='central',
     max_trace_cells=3.0,
     max_speed=6.0,
     # volume control (Kim et al. 2007): a PI controller on total volume as a divergence source
@@ -72,21 +72,32 @@ DEFAULTS = dict(
     sparkle_strength=0.0, sparkle_scale=26.0, sparkle_speed=1.4,
     warmup_seconds=0.0,
     # the Blender edition's own
-    extend_phi_into_solids=None,   # None = on with baked colliders or spheres (walls-only scenes match the engine)
+    extend_phi_into_solids=None,   # None = on with baked colliders, into walls and the baked field (never spheres):
+                                   # walls-only and sphere scenes run the engine's solver exactly
     shading='lit',                 # 'lit' (film: refraction, real reflections) | 'engine' (the WebGPU unlit look)
     engine_display='standard',     # engine shading: match the engine's untonemapped sRGB canvas under AgX | None
     thickness_mode='normal',       # 'normal' (any camera) | 'view' (the scene camera's ray, as the engine)
     mesh_adaptivity=0.0,           # OpenVDB polygon reduction on flat water (0 = none)
     roughness=0.04,                # the water's specular roughness (the engine's spec exponent was fixed)
     body='tint',                   # lit shading: 'tint' (all refracting, depth-tinted) | 'stochastic' (the SWE water's split)
-    foam_churn=0.0,                # lit shading: white water where the flow runs fast (0 = the engine's foam only)
-    churn_speed=2.0,               # m/s at which churn foam saturates
+    foam_churn=0.0,                # lit shading: white water where the flow shears, fast water meeting slow (a jet's
+                                   # plunge, a landing, a crown's root); 0 = the engine's foam only
+    churn_speed=2.0,               # the speed difference (m/s) at which churn foam saturates
+    refraction_thickness='slab',   # lit shading: EEVEE's refraction model through the baked water path ('slab' |
+                                   # 'sphere' | 'none' = EEVEE's own default, which flipped a pool between frames)
+    foam_pick='lace',              # lit shading: foam picked per surface point ('lace', a 3D noise: coherent foam whose
+                                   # edges alone dither) or per sample ('dither', white noise: grainy at 64 samples)
+    foam_scale=90.0,               # lace: noise frequency per metre (90 = lace about a centimetre across)
     write_grids=False,             # also write <name>_grids_####.vdb (phi, velocity, pressure, divergence)
 )
 
-# the three options that make the solver the engine's exactly (create_water_sim(**ENGINE_SOLVER, ...)): its
-# redistancing off and its phi-weighted velocity extrapolation. The parity probes run this way.
+# the three options that make the solver the engine's exactly: its redistancing off and its phi-weighted velocity
+# extrapolation. These are the defaults; the name stays so a call can say so (create_water_sim(**ENGINE_SOLVER, ...)).
 ENGINE_SOLVER = dict(reinit_every=0, reinit_scheme='central', extrapolation='phi')
+# the Blender edition's solver for water dropped onto water (create_water_sim(**DROP_SOLVER, ...)): Godunov
+# redistancing every substep and the breadth-first velocity extrapolation keep a falling body in free fall until it
+# meets the pool (measured: test_water3d_drop_ball.py). They erode thin water, so pours keep the engine's solver.
+DROP_SOLVER = dict(reinit_every=1, reinit_scheme='godunov', extrapolation='bfs')
 
 _CAMEL = {'gridSize': 'grid_size', 'worldSize': 'world_size', 'domainCenter': 'domain_center'}
 # the engine's double-underscore debug hooks: the solver ones act; the render ones map to the grids file
@@ -150,7 +161,8 @@ class WaterSim:
     sim_time, step, warmup, measure_volume, set_emitters, set_spheres, reset, dispose. The Blender edition's:
     material, bake (the frame loop, with fill_target for pours), capture (mesh the current state for one frame),
     attach_player (play what was meshed), surface_arrays (the mesh and its shading attributes as arrays),
-    emitter_flux (the live emitters' inflow, m^3/s) and solver (the GPU state)."""
+    emitter_flux (the live emitters' inflow, m^3/s), set_solver (switch to DROP_SOLVER and back between frames),
+    set_inside_domain (a camera under the water, per shot) and solver (the GPU state)."""
 
     def __init__(self, scene, o, name, cache_dir, log):
         import bpy
@@ -261,6 +273,23 @@ class WaterSim:
         self.solver.reset()
         return self
 
+    def set_solver(self, reinit_every=None, reinit_scheme=None, extrapolation=None, reinit_iters=None):
+        """Switch the redistancing and the velocity extrapolation from the next substep, e.g. from the engine's
+        solver for a pour to DROP_SOLVER the frame a body of water is dropped: water.set_solver(**DROP_SOLVER)."""
+        self.solver.set_solver(reinit_every, reinit_scheme, extrapolation, reinit_iters)
+        return self
+
+    def set_inside_domain(self, on=True):
+        """The engine's insideDomain, switchable per shot: a camera under the water sees the surface's back faces
+        and the water between it and them absorbs (lit shading)."""
+        from .material import set_inside_domain
+        self.params['inside_domain'] = bool(on)
+        if self.material is not None and self.material.get('w3d_shading') == 'lit':
+            set_inside_domain(self.material, bool(on))
+        elif self.material is not None:
+            self.material.use_backface_culling = not on
+        return self
+
     def dispose(self):
         self.solver.dispose()
 
@@ -326,16 +355,20 @@ class WaterSim:
                             self._spheres_local if self.solver.NSPH else None)
 
     def surface_arrays(self, camera_location=None):
-        """(verts, tris, quads, {'thick', 'ring'}) of the current state, Blender world coordinates."""
+        """(verts, tris, quads, {'thick', 'ring', 'speed', 'shear', 'exit', 'bed'}) of the current state, Blender world
+        coordinates (surface.py says what each attribute holds)."""
         o = self.params
         soft = self._soft()
         field = SF.render_field(self.solver.phi(), o, self.solver.DX, soft)
         verts, tris, quads = SF.mesh_field(field, o['world3'], self.center3, o['mesh_adaptivity'])
         grid = SF.Grid(field, o['world3'])
-        thick, ring, _nrm = SF.vertex_attributes(verts, grid, soft, o, self.solver.DX, o['world3'], self.center3,
-                                                 camera_b=camera_location)
-        speed = SF.vertex_speed(verts, self.solver.velocity(), o['world3'], self.center3)
-        return verts, tris, quads, {'thick': thick, 'ring': ring, 'speed': speed}
+        thick, ring, _nrm, exit_len, bed = SF.vertex_attributes(verts, grid, soft, o, self.solver.DX, o['world3'],
+                                                                self.center3, camera_b=camera_location)
+        vel = self.solver.velocity()
+        speed = SF.vertex_speed(verts, vel, o['world3'], self.center3)
+        shear = SF.vertex_shear(verts, vel, soft, o['world3'], self.center3, self.solver.DX)
+        return verts, tris, quads, {'thick': thick, 'ring': ring, 'speed': speed, 'shear': shear, 'exit': exit_len,
+                                    'bed': bed}
 
     def capture(self, frame):
         """Mesh the current state into <cache>/<name>_<frame>.ply (a manual loop's per-frame call)."""

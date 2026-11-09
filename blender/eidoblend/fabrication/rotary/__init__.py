@@ -18,8 +18,9 @@ when one of its names is first used, though eidoblend.fabrication itself loads b
     removal   rotary_removal.js: rotary_removal
     sweeps    rotary_stock.js's indexRotarySweeps (index_rotary_sweeps) and the numpy swept-cutter distances
     stock     rotary_stock.js's createRotaryStock (create_rotary_stock, RotaryStock, StockField; swizzle_finish gives
-              a finish_stock material the WebGPU rotary stock's (z, y, x) grain coordinates)
-    carve     rotary.js: rotary_carve, RotaryJob
+              a finish_stock material the WebGPU rotary stock's (z, y, x) grain coordinates, filter_finish its
+              fwidth(phase) pattern fades)
+    carve     rotary.js: rotary_carve, RotaryJob (keyed with each frame's shutter bracketed: shutter_offsets)
     examples  examples/robotics/rotary(_metal).scene.js: EXAMPLES['rotary'], EXAMPLES['rotary_metal']
 Stock coordinates (Blender axes): X along the rotary axis, Y the blank's width, Z its height; the program's A angle
 turns the stock about +X. Shared with the fabrication family: stock_profile, distance_time, finish_stock and
@@ -38,7 +39,8 @@ _EXPORTS = {
     'rotary_removal': 'removal',
     'index_rotary_sweeps': 'sweeps', 'sweep_distance_np': 'sweeps',
     'create_rotary_stock': 'stock', 'RotaryStock': 'stock', 'StockField': 'stock', 'swizzle_finish': 'stock',
-    'rotary_carve': 'carve', 'RotaryJob': 'carve',
+    'filter_finish': 'stock',
+    'rotary_carve': 'carve', 'RotaryJob': 'carve', 'shutter_offsets': 'carve', 'cut_offset': 'carve',
     'EXAMPLES': 'examples',
 }
 __all__ = sorted(_EXPORTS)

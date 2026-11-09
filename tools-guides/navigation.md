@@ -22,7 +22,10 @@ The usual way in. The body senses from its head every other frame, marks what
 it sees in its memory, plans with A*, replans when the map changes under its
 route, and walks the plan on its own legs; its actions are robot_body.js's in
 snake_case, each returning a `Pending` that a script `yield`s as a JS scene
-`await`s the promise.
+`await`s the promise. It drives any VRM, as the JS does: on my robot body its
+frames go through my hardware's passes, on any other (Aletheia, the claudesona)
+the clips play as they are and the head override turns the head bone alone
+([robot-body.md](robot-body.md#the-embodied-robot-vrmrobotbody), "Any VRM").
 
 ```python
 import math
@@ -186,8 +189,13 @@ contact on stairs, slopes and obstacles still needs looking at.
 
 - `terrain_base.js`, the WebGPU locomotion scene template (the controller
   family's `make_obstacle_course` builds its courses).
-- The body's maneuvers (vault, climb, jump, ladders) and stairs under the
-  body: [robot-body.md](robot-body.md#not-yet-ported).
+- Stairs and ramps under the body's own walks, and its moves out of a walk
+  (the engine's auto-maneuvers en route). Its scripted moves (`vault`,
+  `jump`, `climb_ledge`, `climb_ladder`) are ported, the controller family
+  playing them: [robot-body.md](robot-body.md#the-moves-vault-jump-climb-a-ledge-climb-a-ladder),
+  and what they still miss is under its [Not yet ported](robot-body.md#not-yet-ported).
+  The planner never routes over a rise past `max_step_height` (0.4 m): a body
+  that must cross a wall walks up to it and calls the move.
 - Speed: the planner is pure Python. In T11's 140 x 140 grid, 60 sensor
   sweeps of 384 rays and 6 plans took 0.8 s together; the robot body's room
   (120 x 120 cells, 192 rays every other frame) runs 322 frames in 2 s; the

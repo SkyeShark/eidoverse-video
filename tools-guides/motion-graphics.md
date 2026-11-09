@@ -23,6 +23,15 @@ same in any order and in any chunk. Time follows the film convention: frame 1
 is 0 s (`eidoblend.media.timebase.Timebase`; a scene may move it with
 `scene['eido_frame0']`).
 
+Measured 11-08 (`blender/tests/media2/test_reopen.py`): a verse-1 film (an era
+playlist on an LED wall with spill, and a HUD in the post chain that draws its
+own frame number as a bit code) was rendered out of order (60, 10, 49, 48),
+saved, and opened in a fresh Blender. Every frame read its own number and
+matched the building session to the bit (mean difference 0.000). With motion
+blur on (shutter 0.5), one time step showed the frame's own drawing, and four
+steps the mean of drawings 59 and 60: what a camera filming a display through
+that shutter records.
+
 ## In-world screens and ASCII panels
 
 ```python
@@ -240,16 +249,24 @@ fx.apply_to(film_scene, 'sepia,rgb_shift', {'sepia': {'layer': 'under'},        
 
 Blender renders the overlay scene for each film frame through a Render
 Layers node of that scene. `source='work/<id>/overlay'` reads
-`render_overlay`'s PNGs instead. `factor` is the overlay's opacity and can be
-keyed on the returned Alpha Over. Panels keep their keyed `hide_render`
-ranges.
+`render_overlay`'s PNGs instead (rendered once, reused). A sequence shorter
+than the film gets a clear hold file on each side, so nothing shows before
+its first frame and its last frame does not freeze after its range (measured:
+a 4 … 8 sequence left frames 2 and 10 the bare film to the bit). `factor` is
+the overlay's opacity; key the returned `['factor']` socket to fade the whole
+layer. Panels keep their keyed `hide_render` ranges. Calling `chain_overlay`
+again replaces the stage and its source.
 
-The engine mixed the overlay in before tone mapping and put solid ink through
-the inverse of ACES so it landed as drawn. `authored=True`, the default, does
-the same with the film's own view transform (Convert To Display, inverted,
-exposure divided out by a driver). AgX cannot show every display colour, so
-the inverse is exact only where AgX can reach. Measured 11-07, the frame's
-mean over a 5 × 5 patch:
+`authored=True`, the default, makes the overlay land as it lands on the
+display route: solid ink, glows, soft edges and fades alike. The engine mixed
+its overlay in before tone mapping; `parole.js` put solid ink through the
+inverse of ACES and left glows and soft edges in linear light, because a
+material cannot see the film under it. The compositor can. The overlay stage
+takes the film at the overlay slot into display space with the film's own
+view transform (Convert To Display, the view exposure applied by a driver),
+lays the overlay over it there by its alpha, and brings the mix back to scene
+light through the inverse, before the 'over' effects and AgX. Measured 11-07
+(`test_overlay_routes.py`, frame 3; ink is the mean over a 5 × 5 patch):
 
 | Ink | Display route | Signal route, `authored=True` | Signal route, `authored=False` |
 | --- | --- | --- | --- |
@@ -258,14 +275,30 @@ mean over a 5 × 5 patch:
 | `#101418` | (16, 20, 24) | (16, 20, 24) | graded |
 | `#ffd400` | (255, 212, 0) | (204, 178, 43) | graded |
 
-AgX's inverse of saturated colours comes back short. Through Blender's own
-OCIO config: `#ffd400` returns 50/255 off, pure blue 67, pure red 26,
-`#ff2d95` 21, cyan `#00d4ff` 16. Neutrals and the teal return within 2. When such ink must land
-exactly and no signal effect runs over it, take the display route.
-Semi-transparent parts blend in linear light before AgX, as the engine's
-`mix` before ACES did. The lyric pill at 160/255 came out a mean 2.9 levels
-off the display route's sRGB blend, while the solid text core matched within
-0.14.
+- The lyric's soft pixels (its teal glow ring, the 160/255 pill, the
+  antialiased edges: 60,796 pixels with alpha between 3 and 252) landed
+  within 2 levels of the display route, a mean of 0.2. The film away from the
+  graphics was untouched (0 levels).
+- White and teal boxes at alpha 0.1, 0.2, 0.3, 0.5 and 1.0 landed as the
+  display route blends them, within 1.7 levels. `factor` 0.5 over solid boxes
+  landed as alpha 0.5 does, within 0.5.
+- Light the view cannot show (a lamp above AgX's white) keeps (1 − alpha) of
+  its excess under soft pixels, as the engine's linear mix did: a 50 % teal
+  box over the lamp stays white, where the display route tints it teal
+  (147, 239, 207). Solid ink covers the lamp exactly.
+- `out/overlay_lyric_glow_ab_x2.png` shows the lyric on both routes, and
+  `out/overlay_fade_strip.png` the fades (display route above, signal route
+  below).
+
+AgX's inverse of saturated colours comes back short, because AgX cannot
+display them. Through Blender's own OCIO config: `#ffd400` returns 50/255
+off, pure blue 67, pure red 26, `#ff2d95` 21, cyan `#00d4ff` 16. Neutrals and
+the teal return within 2. When such ink must land exactly and no signal
+effect runs over it, take the display route.
+
+`authored=False` alpha-overs the overlay's linear colours (the chain's own
+Alpha Over) and AgX grades them with the film, as the engine graded a plain
+`makeScreen` overlay: the teal came out (114, 185, 154).
 
 The layering measured in the same probe:
 - With sepia 'under', the wall went sepia (mean (153, 146, 137), from (116,
@@ -442,6 +475,11 @@ JPEG. The atlas form is for atlases the engine's scenes already ship. Measured
 - Film frames 1, 2, 30 and 60 showed tiles 0, 0, 14 and 29, the engine's rule.
 - `out/atlas_tv_f040.png` shows the film playing, letterboxed, on `c64.glb`'s
   monitor.
+- Read back from the renders themselves (`test_reopen.py`, 11-08): a 30-tile
+  atlas whose tiles carry their own number as a bit code, played once at
+  1.5× from frame 10 and looping at 0.5× from frame 20, showed the engine's
+  tile on all ten frames rendered between 1 and 60. The once copy held tile 0
+  before its start and tile 29 after its end.
 
 ## Computing-history screen scenes
 
@@ -506,6 +544,11 @@ pl = screens.bake_canvas_playlist('//screens/verse1', (1, 90),
 wall = screens.make_screen(width=4.8, height=2.0, source=pl['first'], frames=(1, 90), name='verse1_wall')
 pl['spans']                                     # [('voder_1939', 1, 45), ('bell_1961', 46, 90)] at 12 fps
 ```
+
+A cue may also be `{t0, dur}`, as for `bake_canvas_scene`; its `dur` reaches
+the scene's progress. Measured 11-07 (`check_canvas_bake.py`): a playlist with
+`bell_1961` cued as `{t0, dur: 4}` gave the same frames as baking that scene
+alone with the same cue.
 
 **Verse 2's curved wall.** `screens.curved_wall(name, radius=3.74, arc=104,
 height=2.4, bottom=0.35)` is a cylinder segment facing its axis, with UVs laid

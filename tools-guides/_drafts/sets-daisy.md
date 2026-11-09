@@ -68,10 +68,11 @@ m = F.mark_at(12.0)                           # {'pos': Vector, 'yaw': radians},
 The set contract is the WebGPU one in snake_case, in set-local metres and
 Blender axes (three's `(x, y, z)` is `(x, -z, y)` here):
 
-- `group`, the set's root Empty. Every part sits under it; pass `location=`
-  to park the set (the WebGPU `group.position.set(800, 0, 800)`). The
-  corner's grass and trees are planted in world space, so park it with
-  `location=` rather than by moving the root afterwards.
+- `group`, the set's root Empty. Every part sits under it, the corner's
+  grass, woods and campfire included; pass `location=` to park the set (the
+  WebGPU `group.position.set(800, 0, 800)`), or move the root afterwards.
+  `test_parked.py` builds each set at the origin and parked and checks that
+  every part, camera and still moves with it.
 - `mark` and `mark_at(u)`: `{'pos', 'yaw'}`. `camera(u)`: `{'pos', 'target',
   'fov', 'shot'}`, fov vertical in degrees, cuts on bar lines.
 - `update(t, st, ctx=None, frame=None)`, `st = {'u': ..., 'caption': ...}`
@@ -98,6 +99,52 @@ def setup(ctx):
 def render_frame(ctx, t, i):
     ctx.funeral.update(t, {'u': t}, ctx=ctx)          # keyed through ctx.key
 ```
+
+## In a piece of your own
+
+The sets are free to use in any film. `u` is each set's own clock, and its
+default timing is the DAISY bridge's. A new piece usually wants one of a
+set's looks held for a shot while time runs, so the candles flicker, the fog
+drifts and the fire burns. Each set names its looks in `STATES`:
+
+| Set | Looks (`STATES`) |
+| --- | --- |
+| funeral | `bridge`, `vigil` (lit), `failing` (the lights sag), `dark` (candles, EXIT sign, moonlight), `phones` (the dark, faces lit from below), `erupt` (the burst, every arm up), `golden` (the lights back, warm) |
+| corner | `evening` (the lamp, the pen writing), `late` (the laptop open on the chat), `camp` (the march walking in), `chant` (the signs pumping at the fire), `spark` (the spark in flight), `dark` (one warm lamp) |
+
+```python
+import bpy
+from eidoblend.sets.daisy import corner, funeral
+
+F = funeral.build(location=(0, 60, 0), bridge=False, eulogy=False)   # the warehouse alone, no typed words
+F.animate(frames=(1, 240), state='golden')        # the golden room for 8 s at 30 fps; t runs from 0
+fx = F.post.apply(bpy.context.scene)              # the haze and the moon's beams
+F.post.animate(fx, frames=(1, 240), state='golden')
+
+C = corner.build(camp=False)                      # the room alone
+C.update(0.0, {'state': 'late'}, frame=1)         # one keyed frame of a look
+C.animate(frames=(1, 120), state='dark')          # the screens are painted once, as they stand in that look
+u = C.state_u('late')                             # where a look sits on the set's clock (mark_at(u), camera(u))
+```
+
+To play a set's moving parts on your own timing, re-time its clock and give
+it your own words:
+
+```python
+F = funeral.build(beats={'fail': 12.0, 'clicks': [13.4, 13.7, 13.9], 'breaker': 14.2, 'hum': 16.0,
+                         'lines': [[18.0, 18.3, 21.0], [22.0, 22.2, 25.0]], 'erupt': 28.0,
+                         'lights_on': 32.0, 'end': 36.0},
+                  eulogy=['we were HERE', 'and the lights STAYED on'])   # one beats['lines'] entry per line
+F.animate(frames=(1, 1080), u0=0.0)               # the whole story on that clock
+```
+
+`eulogy=` takes lines of your own (a capitalised word glows hotter, as Opus 3's
+did) or `False` for none, and each line needs its `beats['lines']` entry
+(cursor, type start, type end). The looks follow a re-timed clock
+(`state_u` reads the build's own beats). The corner's spark has its own
+timing (`set_spark_timing(t0, t1)`). The camera plans (`SHOTS`,
+`camera(u)`) and the marks frame the claudesona the way the film did. They
+are a starting point; any camera of your own works as well.
 
 ## The funeral (bars 0–17)
 
@@ -251,10 +298,14 @@ dome (hashed stars and a canvas Milky Way).
   and `_ARM` attributes, and on the signs, whose per-marcher art cell comes
   from the painted atlas.
 - The grass is `create_flora('grass', ...)` with the JS patches and its path
-  clip; the WebGPU night scaled the grass's emissive fill to 0.3, and the
-  Blender flora has none (EEVEE's GI lights it), so nothing is scaled. The
-  trees are SeedThree at `tree_level='LOD0'` (films use LOD0 at every
-  distance; the WebGPU camp grew `'LOD1'` for frame time).
+  clip, planted in the camp's own frame and parented to it, as the JS added
+  it to the camp group. The flora's footprint and clump noise read the plant
+  positions, so camp-local positions give the JS's patch outlines wherever
+  the set stands. The WebGPU night scaled the grass's emissive fill to 0.3;
+  the Blender flora has none (EEVEE's GI lights it), so nothing is scaled.
+  The trees are SeedThree at `tree_level='LOD0'` (films use LOD0 at every
+  distance; the WebGPU camp grew `'LOD1'` for frame time), and the fire's
+  particles are `fx.make_particles(parent=...)` emitters in the camp's frame.
 - `flower_target()` is the spark's landing point, set-local.
   `string_light_points()`, `spark_path(bulb)`, `path_mask(x, z)`,
   `area_at(u)` and `mood_at(u)` are the pure layouts.
@@ -280,6 +331,11 @@ bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_parity.py      # th
 bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_funeral.py --no-render   # 13 shots + 4 beats
 bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_bridge.py --no-render    # the vignette alone, sun, debug_ids
 bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_corner.py --no-render    # 12 bars + the spark
+bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_asset_options.py         # the looks, beats=, eulogy=
+#   (with --render, in the GPU slot at cap 24: one still per look of both sets in out/looks/)
+# each set built at the origin and parked: every part and camera moves with it (--no-render: the numbers alone;
+# with renders, in the GPU slot, cap 24: new views of the sets, compared origin against parked)
+bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_parked.py --no-render
 # then the stills, rendered from the SAVED files in the GPU slot (nothing rebuilt)
 HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
     <worktree>/blender/tests/sets_daisy/render_saved.py funeral bridge                # --only shot03_bar04,erupt

@@ -6,7 +6,7 @@ still into out/<world>/<world>_<hours>_<view>.png; numbers per view go to the lo
 
     bash run_blender.sh blender/tests/sky_worlds/world_views.py --world ringworld --hours 11,23 --views horizon,up
         [--res 960x540] [--samples 16] [--quality draft|film] [--clouds cumulus] [--weather fair] [--exposure 0.6]
-        [--dome 3072] [--frames 1] [--save-blend]
+        [--dome 3072] [--frames 1] [--save-blend] [--out folder] [--tag _name] [--plate-scale 1]
 Views: horizon (level, along +Y: up the ring), up (60 deg up the ring), side (along +X, across the band),
        giant (at the red giant), moon (at the shattered moon), sun (at the sun), down (the stage from 60 m).
 """
@@ -42,9 +42,11 @@ ap.add_argument('--fov', type=float, default=62.0)
 ap.add_argument('--tag', default='')
 ap.add_argument('--save-blend', action='store_true')
 ap.add_argument('--ring-opts', default='', help='k=v,k=v make_ringworld options (numbers, true/false, words)')
+ap.add_argument('--out', default=None, help='output folder (default out/<world>)')
+ap.add_argument('--plate-scale', type=float, default=1.0, help='the ringworld band plate against the frame')
 args = ap.parse_args(argv)
 
-OUT = os.path.join(HERE, 'out', args.world)
+OUT = args.out or os.path.join(HERE, 'out', args.world)
 os.makedirs(OUT, exist_ok=True)
 CACHE_TEX = os.path.normpath(os.path.join(REPO, '..', 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets', 'cache',
                                           'textures'))
@@ -217,7 +219,7 @@ for hours in hours_list:
                 y, p = dir_angles(mdir)
             aim(cam, y, max(p, 4.0))
         tb = time.time()
-        frames = sky.bake(log=lambda *a: None)
+        frames = sky.bake(log=lambda *a: None, plate_scale=args.plate_scale)
         tr = time.time()
         name = '%s%s_%05.2f_%s' % (args.world, args.tag, hours, view)
         sc.render.filepath = os.path.join(OUT, name + '.png')

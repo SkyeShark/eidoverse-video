@@ -16,8 +16,9 @@ What the JS file holds, and where it went:
   textures        tex(path, srgb), pbr(id, res, ao, met, disp) from the shared library (fetched once), build_mips,
                   data_tex / canvas_tex / dyn_canvas (canvas pixels -> packed bpy Images), height_field, box_blur,
                   normal_tex, pack_tex (relief: grey height -> tangent normal map, masks packed in RGBA).
-                  KeyedImage: a canvas whose drawing changes over the film (a post being typed, a recount) as a
-                  numbered PNG sequence whose shown file is keyed (the WebGPU edition redrew its DataTexture).
+                  ImageVariants: a canvas whose drawing changes over time (a new post, a recount, a new
+                  chyron): every variant packed, a keyed property picks the one shown (the WebGPU redrew its
+                  DataTexture).
   canvas          create_canvas: canvas-2D on numpy + FreeType (Pillow), drawn as @napi-rs/canvas (Skia) drew it:
                   shapes by a scanline fill (nonzero / evenodd, 4 x 4 samples at their centres) and outlined strokes
                   (joins, caps, the miter limit); text with Skia's layout (the faces' unhinted hmtx advances, their
@@ -40,10 +41,9 @@ What the JS file holds, and where it went:
   pbr_mat         a Principled BSDF material from a texture set with the JS options (tile, tint, recolor, macro,
                   rough, metal, nrm, post, physical sheen / clearcoat, side, transparent, alphaTest ...).
   dispose_all     removes every datablock the lib made.
-  SetBase         what corridor.build / news.build return: update, animate (on the song clock: t0), camera(name),
-                  film_pose / key_camera / make_cameras (the film's shots with their pushes and orbits, cut by
-                  markers), apply_look (exposure, EEVEE), apply_post (the look's bloom and aeropittura, its focal
-                  projected), focal_world, set_u, dispose.
+  SetBase         what corridor.build / news.build return (read as a dict too, the sets' contract): update,
+                  animate (the moving parts keyed on your own clock), camera(name), apply_look (exposure, EEVEE),
+                  apply_post (the look's bloom and aeropittura, its focal projected), focal_world, set_u, dispose.
 
 Coordinates: the sets are built in three's metres (Y up, the singer's mark the origin facing +Z) and converted once,
 three (x, y, z) -> Blender (x, -z, y), when a mesh or an object is made. Shaders read positions back in three's axes
@@ -966,7 +966,7 @@ class Context2D:
         if self.global_composite_operation == 'destination-out':
             # as @napi-rs/canvas 0.1.69 erases: only inside the canvas rect carried through the current transform
             # (its layer's bounds; measured: under translate(100, 50) a hole at (0, 0) keeps only its quarter at
-            # x >= 100, y >= 50), so the poll's LOSING BADLY stamp is distressed on its lower right only, as the film had it
+            # x >= 100, y >= 50), so the poll's LOSING BADLY stamp is distressed on its lower right only, as the WebGPU's
             a = a * self._erase_bounds(cx0, cy0, cx1, cy1)
             dst *= (1.0 - a)[..., None]
         else:
@@ -2001,18 +2001,36 @@ def slice_tris(g: Geo, s_of, cuts, eps=1e-7) -> Geo:
 
 
 # =================================================================================================== Blender =========
-# Everything below needs bpy. The sets light in three's numbers converted the house way (look/lighting.py): a
-# SpotLight's candela -> W = cd x 4 pi / 683. Everything that is light without a lamp (emissive paint, unlit glass,
-# the environment, the hemisphere light, fog) takes the same factor, SPEC = 1 / 683, so lamps and painted light keep
-# the ratio the WebGPU edition had. The view exposure that shows it as three did is view_exposure(look['exposure']).
+# Everything below needs bpy. Light units: three r155+ shades a punctual light of I candela as irradiance I / d^2
+# with no 683 lm/W factor, so the sets' levels carry over as radiometric numbers: a point or spot lamp is
+# W = 4 pi cd (cd_watts), and everything that is light without a lamp (emissive paint, unlit glass and screens, the
+# environment, the hemisphere light, fog) is three's number as it is (SPEC = 1). The view exposure that shows it as
+# three's renderer did is log2 of the look's exposure (0 stops at 1.0). This is the convention of the other round-two
+# sets (the race, the interiors, the funeral), so the conductor cuts between them without touching the exposure, and
+# a character dropped in (the VRM add-on's MToon, which emits its lit colour) renders as it does there. The glTF
+# importer's / 683 (look/lighting.candela_to_watts) is photometric: lamps and paint at / 683 need a +9.42-stop view
+# exposure, and that exposure blows a VRM's MToon out to white.
 
-SPEC = 1.0 / 683.0
+SPEC = 1.0
+
+
+def cd_watts(cd) -> float:
+    """three's PointLight / SpotLight intensity (candela) -> Blender point / spot power, W = 4 pi cd (irradiance
+    cd / d^2 as three shades it)."""
+    return float(cd) * 4.0 * math.pi
 
 
 def view_exposure(three_exposure=1.0) -> float:
     """The scene view exposure (stops) that shows a set lit in three's numbers the way three's renderer did at its
-    `exposure` (log2 683 = 9.42 stops at exposure 1.0)."""
-    return math.log2(683.0 * float(three_exposure))
+    toneMappingExposure (0 at 1.0)."""
+    return math.log2(float(three_exposure))
+
+
+# The AgX look nearest three's ACESFilmicToneMapping (its x exposure / 0.6 included), the WebGPU frames' tone. Measured
+# in Blender 5.2 (sRGB 8-bit for scene-linear grey 0.01 / 0.05 / 0.18 / 1 / 5): three's ACES 8 / 50 / 127 / 226 / 251,
+# this look 10 / 49 / 118 / 208 / 248, plain AgX 18 / 58 / 118 / 197 / 237 (twice as light in the deep darks, which is
+# why the marble's veins, the pickets' coats and the patch read lighter than the WebGPU frames under it).
+ACES_LIKE_LOOK = 'AgX - Medium High Contrast'
 
 
 def hex_srgb(h):
@@ -2610,25 +2628,62 @@ class NB:
         a004 = self.min(rx * rx, self.exp(ndv * (-9.28 * math.log(2.0)))) * rx + ry
         return a004 * -1.04 + rz, a004 * 1.04 + rw
 
-    def ibl(self, env_set, albedo, rough, metal, normal=None, coat=None, coat_rough=0.03):
-        """three's environment light for a standard material, in its own units (x envMapIntensity by the caller):
-        the diffuse albedo (1 - metal) x the roughness-1 level toward the normal (getIBLIrradiance's pi x radiance
-        x Lambert's 1 / pi), plus the prefiltered radiance toward the reflection x (F0 A + B), F0 = mix(0.04, albedo,
-        metal); a clearcoat adds its own layer. No occlusion, as in three."""
+    def sheen_dg(self, sheen_rough, ndv):
+        """three's IBLSheenBRDF: the Charlie sheen lobe integrated over the hemisphere (Estevez and Kulla's fit)."""
+        r = self.w(sheen_rough)
+        r2 = r * r
+        r_inv = 1.0 / (r + 0.1)
+        a = r * 1.0678 + r2 * 0.4573 - r_inv * 0.8469 - 1.9362
+        b = r * 0.5538 - r2 * 0.4670 - r_inv * 0.1255 - 0.6014
+        return self.clamp(self.exp(a * ndv + b), 0.0, 1.0)
+
+    def ibl(self, env_set, albedo, rough, metal, normal=None, coat=None, coat_rough=0.03, ao=None, sheen=None,
+            sheen_color=(1.0, 1.0, 1.0), sheen_rough=0.3):
+        """three r184's environment light for a standard / physical material, in its own units (x envMapIntensity by
+        the caller). Indirect specular: the prefiltered radiance toward the reflection x the single scattering
+        (F0 A + B) plus the multiple scattering (computeMultiscattering) x the irradiance, dielectric (F0 0.04) and
+        metal (F0 the albedo) mixed by metalness; indirect diffuse: the albedo (1 - metal) x (1 - the dielectric's
+        total scattering) x the roughness-1 level toward the normal (getIBLIrradiance's pi x radiance x Lambert's
+        1 / pi). A clearcoat adds its own layer; a sheen adds its layer (IBLSheenBRDF) and scales the rest by its
+        energy compensation. ao (an AO map's value): three's ambientOcclusion, the diffuse, coat and sheen x ao, the
+        specular x its specular occlusion. A, B are the DFG fit (three r184 reads a DFG table: within a few %)."""
         n3 = self.three(normal) if normal is not None else self.N_world()
         n3 = self.normalize(n3)
         v3 = self.incoming()
         ndv = self.clamp(self.dot(n3, v3), 1e-4, 1.0)
         R = n3 * (ndv * 2.0) - v3
         A, B = self.dfg(rough, ndv)
-        f0 = self.mix((0.04, 0.04, 0.04), albedo, metal)
-        spec = self.env_rough(env_set, R, rough) * (f0 * A + B)
-        diff = self.w(albedo) * (1.0 - self.w(metal)) * self.env_rough(env_set, n3, 1.0)
-        out = spec + diff
+        ems = 1.0 - (A + B)
+
+        def scatter(f0):
+            fss = self.w(f0) * A + B                                 # FssEss
+            favg = self.w(f0) * (1.0 - 0.047619) + 0.047619
+            return fss, fss * favg / (1.0 - ems * favg) * ems        # Fms x Ems
+        ss_d, ms_d = scatter((0.04, 0.04, 0.04))
+        ss_m, ms_m = scatter(albedo)
+        irr = self.env_rough(env_set, n3, 1.0)
+        spec = (self.env_rough(env_set, R, rough) * self.mix(ss_d, ss_m, metal)
+                + self.mix(ms_d, ms_m, metal) * irr)
+        diff = self.w(albedo) * (1.0 - self.w(metal)) * (1.0 - (ss_d + ms_d)) * irr
+        extra = None
+        if sheen is not None and not (self.w(sheen).is_const and self.w(sheen).v == 0.0):
+            sc = self.w(sheen_color) * sheen                         # three's sheen node: sheenColor x sheen
+            dg = self.sheen_dg(sheen_rough, ndv)
+            comp = 1.0 - self.max(self.max(sc.x, sc.y), sc.z) * dg
+            spec, diff = spec * comp, diff * comp
+            extra = irr * sc * dg                                    # sheenSpecularIndirect / pi
         if coat is not None and not (self.w(coat).is_const and self.w(coat).v == 0.0):
             ca, cb = self.dfg(coat_rough, ndv)
-            out = out + self.env_rough(env_set, R, coat_rough) * ((ca * 0.04 + cb) * coat)
-        return out
+            c_l = self.env_rough(env_set, R, coat_rough) * ((ca * 0.04 + cb) * coat)
+            extra = c_l if extra is None else extra + c_l
+        if ao is not None:
+            a_ = self.w(ao)
+            spec = spec * self.clamp(self.pow(ndv + a_, self.pow(2.0, self.w(rough) * -16.0 - 1.0)) - 1.0 + a_, 0.0, 1.0)
+            diff = diff * a_
+            if extra is not None:
+                extra = extra * a_
+        out = spec + diff
+        return out if extra is None else out + extra
 
 
 def drive_socket(sock, owner, prop, path='default_value'):
@@ -2689,10 +2744,11 @@ class Mat:
 
     def standard(self, color, rough=1.0, metal=0.0, normal=None, emissive=None, alpha=None, sheen=None,
                  sheen_rough=0.3, sheen_color=(1.0, 1.0, 1.0), coat=None, coat_rough=0.03, side='double',
-                 method=None, fog=None, emissive_scale=SPEC, ibl=None):
+                 method=None, fog=None, emissive_scale=SPEC, ibl=None, ao=None):
         """emissive in three's numbers (x SPEC here). side: 'front' culls back faces (three's FrontSide on an open
         surface), 'double' draws both. ibl: (env set, intensity): the material's own environment map, three's
-        envMap / envMapIntensity, added as its image-based light (NB.ibl)."""
+        envMap / envMapIntensity, added as its image-based light (NB.ibl, with the sheen and coat layers given here).
+        ao: three's aoNode (an AO map's value): it occludes that image-based light as three's did (NB.ibl)."""
         nb = self.nb
         b = nb.node('ShaderNodeBsdfPrincipled')
         b.hide = False
@@ -2704,7 +2760,8 @@ class Mat:
         if normal is not None:
             nb.put(b.inputs['Normal'], normal)
         if ibl is not None and ibl[0] is not None and ibl[1]:
-            light = nb.ibl(ibl[0], color, rough_c, metal, normal=normal, coat=coat, coat_rough=coat_rough) * float(ibl[1])
+            light = nb.ibl(ibl[0], color, rough_c, metal, normal=normal, coat=coat, coat_rough=coat_rough, ao=ao,
+                           sheen=sheen, sheen_color=sheen_color, sheen_rough=sheen_rough) * float(ibl[1])
             emissive = light if emissive is None else nb.w(emissive) + light
         if emissive is not None:
             nb.put(b.inputs['Emission Color'], nb.w(emissive) * emissive_scale)
@@ -2722,9 +2779,14 @@ class Mat:
             nb.put(b.inputs['Coat Roughness'], coat_rough)
         return self._finish(b.outputs[0], side, method, fog, None)
 
-    def unlit(self, color, alpha=None, additive=False, side='double', fog=None, scale=SPEC, method=None):
+    def unlit(self, color, alpha=None, additive=False, side='double', fog=None, scale=SPEC, method=None,
+              depth_write=None):
         """MeshBasicNodeMaterial: colour in three's numbers (x scale). additive: AdditiveBlending (emission over a
-        fully transparent surface, BLENDED); alpha: normal blending (BLENDED unless method says otherwise)."""
+        fully transparent surface, BLENDED); alpha: normal blending (BLENDED unless method says otherwise).
+        depth_write: three's depthWrite. False (the default for additive: every additive material of the sets has
+        it) blends every layer of the object, as three drew an instanced cloud of puffs or a double-sided cone in one
+        call (EEVEE's Transparency Overlap); True keeps the front-most layer of the object only (EEVEE's depth
+        prepass), which hid the steam behind its own front puffs and halved the beams and the door's shafts."""
         nb = self.nb
         c = nb.w(color)
         if fog:
@@ -2749,7 +2811,7 @@ class Mat:
             method = method or 'BLENDED'
         m = self._finish(shader, side, method, None, None)
         if method == 'BLENDED':
-            m.use_transparency_overlap = False
+            m.use_transparency_overlap = bool(additive) if depth_write is None else not depth_write
         return m
 
 
@@ -2796,7 +2858,7 @@ def prefilter_env(fn, levels=IBL_LEVELS, w_in=128, h_in=64):
 
 
 class ImageVariants:
-    """A texture the WebGPU edition redrew while the film ran (a new post, a recount, a new chyron) becomes a list of
+    """A texture the WebGPU edition redrew while it ran (a new post, a recount, a new chyron) becomes a list of
     packed images; every material that reads it samples them all and keeps the one the set root's `prop` names (a
     keyed property, CONSTANT keys). Each image key gets a node group (Vector -> Color, Alpha), rebuilt as variants are
     added, so a material made earlier picks up a later variant."""
@@ -3109,8 +3171,8 @@ class Lib:
         return self.data_tex(cv.pixels(), srgb=srgb, mips=mips, wrap=wrap, tx=tx, name=name)
 
     def dyn_canvas(self, W, H, draw, srgb=True, mips=True, wrap=CLAMP, name=None):
-        """A canvas whose image is rebuilt only when redraw(*args) is called (a build-time change; a change over the
-        film is an ImageVariants)."""
+        """A canvas whose image is rebuilt only when redraw(*args) is called (a build-time change; a change over
+        time, keyed, is an ImageVariants)."""
         lib = self
         cv = create_canvas(W, H)
 
@@ -3219,15 +3281,18 @@ class Lib:
                 macro_scale=0.35, rough=None, metal=0.0, nrm=1.0, ao=True, ao_amt=1.0, post=None, physical=False,
                 sheen=None, sheen_roughness=None, sheen_color=None, clearcoat=None, clearcoat_roughness=None,
                 side='double', transparent=False, opacity=None, alpha_test=None, env=None, env_i=None, fog=None,
-                method=None):
+                method=None, depth_write=None):
         """The JS pbrMat: a textured material from a set S. tile (metres per tile, number | (u, v)); uv: an X (default
         the mesh uv); tint (hex | rgb); recolor(col, nb) -> col; macro: 0..1 large albedo variation (fBm of P at
         macro_scale); rough: (mul, add); metal: number | 'map'; nrm: the normal strength;
         post(dict(col, rough, metal, uvN, P, nb)) -> dict(col?, rough?, metal?, emissive?, normal?, opacity?).
         env / env_i: three's envMap / envMapIntensity: the material's own image-based light (Mat.standard's ibl) from
         `env` (an ibl_env set) or the lib's env_set, at env_i; no env_i, no environment light (as a three material
-        without an envMap). AO maps are not wired (three darkens only the indirect light with them; EEVEE's own
-        occlusion stands in)."""
+        without an envMap). ao / ao_amt: three's aoNode, the set's AO map (when S has one and ao is not False) mixed
+        in by ao_amt; three darkened only the indirect light with it, so it occludes the image-based light here (the
+        lamps are untouched, as there). side: 'double' (the default here; three's was FrontSide: a closed mesh looks
+        the same, an open one keeps its inside) or 'front'. depth_write: three's depthWrite on a blended material
+        (False: every layer of the object blends, EEVEE's Transparency Overlap)."""
         M = Mat(self, name or S['id'])
         nb = M.nb
         tu, tv = tile if isinstance(tile, (tuple, list)) else (tile, tile)
@@ -3266,13 +3331,19 @@ class Lib:
         alpha = op if op is not None else opacity
         if alpha_test is not None and alpha is not None:
             alpha = nb.step(alpha_test, alpha)
+        ao_n = None
+        if ao is not False and S.get('ao') is not None and env_i:
+            at, _ = nb.tex(S['ao'], uvN)
+            ao_n = at.x * float(ao_amt) + (1.0 - float(ao_amt))
         m = M.standard(col, rough=nb.clamp(r_, 0.03, 1.0), metal=met_, normal=normal, emissive=emissive, alpha=alpha,
                        sheen=sheen if physical else None, sheen_rough=sheen_roughness if sheen_roughness is not None else 0.3,
                        sheen_color=hex_linear(sheen_color) if sheen_color is not None else (1.0, 1.0, 1.0),
                        coat=clearcoat if physical else None,
                        coat_rough=clearcoat_roughness if clearcoat_roughness is not None else 0.03,
                        side=side, method=method or ('BLENDED' if transparent and alpha_test is None else None), fog=fog,
-                       ibl=((env if isinstance(env, dict) else self.env_set), env_i) if env_i else None)
+                       ibl=((env if isinstance(env, dict) else self.env_set), env_i) if env_i else None, ao=ao_n)
+        if depth_write is not None and m.surface_render_method == 'BLENDED':
+            m.use_transparency_overlap = not depth_write
         return m
 
     def dispose_all(self):
@@ -3321,13 +3392,13 @@ def make_lib(name='uf', owner=None, collection=None) -> Lib:
 
 def spot(lib, name, color, cd, pos3, tgt3, angle, penumbra, parent=None, shadow=True, radius=0.02, cutoff=1000.0):
     """three's SpotLight(color, intensity cd, distance 0, angle, penumbra, decay 2) at pos3 aimed at tgt3 (three
-    space): W = cd x 4 pi / 683, spot_size = 2 x angle, blend = penumbra, a custom cutoff (three's distance 0 is
+    space): W = 4 pi cd (cd_watts), spot_size = 2 x angle, blend = penumbra, a custom cutoff (three's distance 0 is
     endless; Blender's light threshold would cull a weak far light)."""
     import bpy
     from mathutils import Vector
     from ...look import lighting as LL
     ld = bpy.data.lights.new(name, 'SPOT')
-    ld.energy = LL.candela_to_watts(cd)
+    ld.energy = cd_watts(cd)
     ld.color = hex_linear(color) if not isinstance(color, (tuple, list)) else tuple(color)
     ld.spot_size, ld.spot_blend = LL.three_spot(angle, penumbra)
     ld.spot_size = min(ld.spot_size, math.pi)
@@ -3350,12 +3421,11 @@ def spot(lib, name, color, cd, pos3, tgt3, angle, penumbra, parent=None, shadow=
 
 
 def point(lib, name, color, cd, pos3, parent=None, shadow=True, radius=0.05, cutoff=1000.0):
-    """three's PointLight(color, intensity cd, distance 0, decay 2)."""
+    """three's PointLight(color, intensity cd, distance 0, decay 2): W = 4 pi cd (cd_watts)."""
     import bpy
     from mathutils import Vector
-    from ...look import lighting as LL
     ld = bpy.data.lights.new(name, 'POINT')
-    ld.energy = LL.candela_to_watts(cd)
+    ld.energy = cd_watts(cd)
     ld.color = hex_linear(color) if not isinstance(color, (tuple, list)) else tuple(color)
     ld.use_custom_distance = True
     ld.cutoff_distance = cutoff
@@ -3440,7 +3510,7 @@ def pix_of(scene, camera=None) -> float:
 def normalized_bone_matrix(arm, bone_name):
     """three-vrm's normalized bone, in Blender: the bone's posed world position with the rotation it has made away
     from its rest (identity in the rest pose) and the character's own scale (a normalized bone's matrixWorld carries
-    the VRM scene's scale: the film's claudesona at 0.87 wears the cap at 0.87, its fit offset scaled with her), as a
+    the VRM scene's scale: a claudesona at 0.87 wears the cap at 0.87, its fit offset scaled with her), as a
     4 x 4 mathutils Matrix."""
     from mathutils import Matrix
     pb = arm.pose.bones[bone_name]
@@ -3515,12 +3585,12 @@ class SetBase:
 
     def apply_post(self, scene, camera=None, aeropittura=True, bloom=True, force=1.0, layer='under', frame=None,
                    frames=None):
-        """The look the set suggests, on the film's post chain (look/post): three's bloom at look['bloom'] (its
-        threshold in the sets' light units, x SPEC) and the aeropittura pass at LOOKS[look['name']] ('argue'), its
-        focal projected from focal_world() through the camera (left where it was when the point is behind it).
-        frames=(first, last): the focal keyed on every frame through the scene's camera there (cuts by markers, the
-        cameras' moves). Returns the aeropittura's FX handle (None without it). The film's conductor would do this;
-        the set's own probes use it to look at a frame with the look off and on, as the WebGPU doc asks."""
+        """The look the set suggests, on the post chain (look/post): three's bloom at look['bloom'] (its threshold in
+        the sets' light units, x SPEC) and the aeropittura pass at LOOKS[look['name']] ('argue'), its focal projected
+        from focal_world() through the camera (left where it was when the point is behind it). frames=(first, last):
+        the focal keyed on every frame through the scene's camera there (cuts by markers, the cameras' moves).
+        Returns the aeropittura's FX handle (None without it). The look is a suggestion: a piece of your own may
+        grade it any way; the probes use it to look at a frame with the look off and on, as the WebGPU doc asks."""
         from ...look.post import chain
         b = self.look.get('bloom') if bloom else None
         if b:
@@ -3545,9 +3615,9 @@ class SetBase:
         return e
 
     def animate(self, state=None, frames=None, scene=None, ctx=None, t0=None):
-        """Key update(t, state(t)) on every frame of `frames` (default: the scene's range); then the keys get their
-        interpolation. t: seconds from the scene's first frame, or the song time t0 + (f - frames[0]) / fps when
-        t0 is given (the film's clock: state=film_state)."""
+        """The set's moving parts on your own clock: key update(t, state(t)) on every frame of `frames` (default: the
+        scene's range), then give the keys their interpolation. state: a function of t (or one dict for every
+        frame). t: seconds from the scene's first frame, or t0 + (f - frames[0]) / fps when t0 is given."""
         import bpy
         sc = scene or bpy.context.scene
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
@@ -3560,84 +3630,30 @@ class SetBase:
         if ctx is None:
             self.keyer.finish()
 
-    def film_pose(self, name, u=0.0, move=None):
-        """scene.js's camPose: cams[name] (three's set-local axes) with a shot's move at u (0..1 through the shot):
-        push (metres toward the target, eased), orbit (radians about the vertical through the target, linear from
-        -1/2 to +1/2 of it), rise (metres up, eased)."""
-        c = self.cams_three[name]
-        pos, tgt = np.array(c['pos'], float), np.array(c['target'], float)
-        m = move or {}
-        d = (tgt - pos) / (np.linalg.norm(tgt - pos) or 1.0)
-        e = smooth(0.0, 1.0, u)
-        if m.get('push'):
-            pos = pos + d * float(m['push']) * e
-        if m.get('orbit'):
-            a = float(m['orbit']) * (u - 0.5)
-            r = pos - tgt
-            ca, sa = math.cos(a), math.sin(a)
-            pos = tgt + np.array([ca * r[0] + sa * r[2], r[1], -sa * r[0] + ca * r[2]])
-        if m.get('rise'):
-            pos[1] += float(m['rise']) * e
-        return {'pos': [float(v) for v in pos], 'target': [float(v) for v in tgt], 'fov': float(c.get('fov', 40))}
-
-    def key_camera(self, cam, name, u=0.0, move=None, frame=None, scene=None, ctx=None):
-        """Put a Blender camera on the shot `name` (film_pose with the move at u), the set's group carrying it, and
-        key it at frame: location, rotation, the vertical fov; the 'pix' footprint follows."""
-        import bpy
-        from mathutils import Vector
-        sc = scene or bpy.context.scene
-        p = self.film_pose(name, u, move)
-        loc, tgt = Vector(b3(p['pos'])), Vector(b3(p['target']))
-        R = (tgt - loc).to_track_quat('-Z', 'Y').to_matrix().to_4x4()
-        R.translation = loc
-        cam.rotation_mode = 'QUATERNION'
-        cam.matrix_world = self.group.matrix_world @ R
-        cam.data.sensor_fit = 'VERTICAL'
-        cam.data.angle_y = math.radians(p['fov'])
-        cam.data.clip_start = min(cam.data.clip_start, 0.05)
-        cam.data.clip_end = max(cam.data.clip_end, 2000.0)
-        self.keyer(cam, 'location', frame=frame, ctx=ctx)
-        self.keyer(cam, 'rotation_quaternion', frame=frame, ctx=ctx)
-        self.keyer(cam.data, 'lens', frame=frame, ctx=ctx)
-        self.set_u('pix', pix_of(sc, cam), ctx=ctx, frame=frame)
-        return p
-
-    def make_cameras(self, frames=None, t0=None, scene=None, ctx=None, cut=None):
-        """The film's cut as cameras (cut(t) -> {'cam', 'move', 'u'}, default the module's film_cut): one camera per
-        shot, keyed every frame of it with its move, bound to timeline markers at the cuts. t0: the song time at
-        frames[0] (default: the start of the set's first film span). Returns {(first frame, cam name): camera}."""
-        import bpy
-        from ...look.camera import add_shot
-        sc = scene or bpy.context.scene
-        cut = cut or self.film_cut
-        t0 = self.film_spans[0][0] if t0 is None else t0
-        fps = sc.render.fps / sc.render.fps_base
-        f0, f1 = frames or (sc.frame_start, sc.frame_end)
-        runs = []
-        for f in range(int(f0), int(f1) + 1):
-            t = t0 + (f - f0) / fps
-            c = cut(t)
-            key = (c['cam'], c.get('t0'))
-            if not runs or runs[-1][0] != key:
-                runs.append((key, []))
-            runs[-1][1].append((f, c))
-        cams = {}
-        for (name, _ts), lst in runs:
-            first = lst[0][0]
-            nm = f'{self.group.name}_shot_{name}_{first}'
-            cam = self.lib.own(bpy.data.objects.new(nm, self.lib.own(bpy.data.cameras.new(nm))))
-            self.collection.objects.link(cam)
-            for f, c in lst:
-                self.key_camera(cam, name, c['u'], c['move'], frame=f, scene=sc, ctx=ctx)
-            add_shot(sc, nm, first, cam)
-            cams[(first, name)] = cam
-        if ctx is None:
-            self.keyer.finish()
-        self.cameras = cams
-        return cams
-
     def update(self, t, state=None, ctx=None, frame=None):
         raise NotImplementedError
 
     def dispose(self):
         self.lib.dispose_all()
+
+    # the sets' contract reads build()'s result as a dict too (eidoblend.sets.unknown_force: group, parts, update,
+    # dispose, cams ...): S['parts'] is S.parts
+    _KEYS = ('group', 'parts', 'update', 'dispose', 'cams', 'cams_three', 'focal', 'focal_three', 'look', 'uniforms',
+             'materials', 'camera', 'animate', 'apply_look', 'apply_post', 'focal_world')
+
+    def keys(self):
+        return [k for k in self._KEYS if hasattr(self, k)]
+
+    def __getitem__(self, k):
+        if k not in self._KEYS or not hasattr(self, k):
+            raise KeyError(k)
+        return getattr(self, k)
+
+    def get(self, k, default=None):
+        try:
+            return self[k]
+        except KeyError:
+            return default
+
+    def __contains__(self, k):
+        return k in self.keys()

@@ -4,6 +4,7 @@
 // - redgiant.js (Eanpa engine): flareEnv for every slot and the shield's five impact slots over time
 // - ring_eclipse.js (Eanpa engine): ringSolarVisibility over a grid of suns and receivers
 // - fragment_motion.js (Eanpa engine): the separated base positions and update(t) of a stand-in cluster
+// - ring_relief.js (Eanpa src): decodeRingRelief on Eanpa's real v4 set (assets/ringworld/), texels and refusals
 // - eidoverse/ringworld.js eclipseK (copied inline below from the module's returned object: a pure function)
 const [threeDir, eanpaDir, outPath] = Deno.args;
 // (named T, not THREE: the eval'd classic script must resolve THREE to the global mock below)
@@ -88,5 +89,24 @@ const frag = fragOf(spec);
 const frag2 = fragOf([[0, 0, 0, 0.5], [0.3, 0.1, 0, 0.4], [-0.2, -0.1, 0.2, 0.35], [0.1, 0.4, -0.1, 0.3],
     [0.05, -0.3, -0.2, 0.25]]);
 
-Deno.writeTextFileSync(outPath, JSON.stringify({ redgiant, eclipse, frag, frag2 }, null, 1));
+// ---- ring_relief.js (Eanpa src): decodeRingRelief on the real v4 set, sampled at fixed texels ----
+let relief = null;
+const reliefPath = eanpaDir + '/../assets/ringworld/ring_relief_v4.bin.gz';
+try {
+    const rr = await import(toUrl(eanpaDir + '/../src/ring_relief.js'));
+    const gz = Deno.readFileSync(reliefPath);
+    const buf = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    const r = rr.decodeRingRelief(buf);
+    const idx = [0, 1, 4343, 4344, 777777, 3141592, r.width * r.height - 1];
+    relief = { width: r.width, height: r.height, idx,
+        h: idx.map((i) => T.DataUtils.fromHalfFloat(r.heightData[i])),
+        nao: idx.map((i) => Array.from(r.normalAoData.slice(i * 4, i * 4 + 4))) };
+    // the JS refusals, as messages
+    const refuse = (b) => { try { rr.decodeRingRelief(b); return null; } catch (e) { return e.message; } };
+    relief.refusals = [refuse(new ArrayBuffer(8)), refuse(buf.slice(0, buf.byteLength - 1))];
+} catch (e) {
+    console.log('[js_parity] ring relief skipped: ' + e.message);
+}
+
+Deno.writeTextFileSync(outPath, JSON.stringify({ redgiant, eclipse, frag, frag2, relief, reliefPath }, null, 1));
 console.log('[js_parity] wrote ' + outPath);

@@ -803,10 +803,12 @@ class Kit:
         self.count = len(self.names)
 
     def list(self):
-        return sorted(self.parts)
+        """The part names in the catalogue's own order, as the engine's list() (a copy of names)."""
+        return list(self.names)
 
     def family(self, prefix: str, location=(0, 0, 0)):
-        """One instance of each part whose name starts with prefix (case-insensitive, as the engine's)."""
+        """One instance of each part whose name starts with prefix (case-insensitive, as the engine's), in the
+        catalogue's order."""
         pf = str(prefix).lower()
         return [self.get(n, location) for n in self.list() if n.lower().startswith(pf)]
 

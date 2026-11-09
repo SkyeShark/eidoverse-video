@@ -1,35 +1,29 @@
-"""eidoblend.sets.unknown_force.corridor: UNKNOWN FORCE, VERSE 2 (song 120.7-140.2 s), the Blender 5.2 EEVEE edition
-of eidoverse/sets/unknown_force/corridor.js.
+"""eidoblend.sets.unknown_force.corridor: the gold corridor of power, the Blender 5.2 EEVEE edition of
+eidoverse/sets/unknown_force/corridor.js (made for UNKNOWN FORCE; a free set for any piece).
 
-  "The President renames me Supreme Intelligence / Gives me a Force like the one he gave to space /
-   The Department of War posts in capital letters / They want a god in uniform who knows its place"
-
-The state's corridor of power at night: black marble with gold veins, gilded Futurist-Deco stepped pilasters and
-ribs, a red carpet runner, sconces that throw Balla fans of gold up the marble, and at the end a bronze-gold double
-door under an engraved plaque SUPREME INTELLIGENCE, a poll board beside it, a giant LED wall that posts in capital
-letters, a uniform waiting on a tailor's stand, a peaked cap on a velvet cushion, and the AI FORCE mission patch.
+A corridor of power at night, 10 m wide, 12 m high, 46 m long: black marble with gold veins, gilded Futurist-Deco
+stepped pilasters and ribs, a lacquered coffered ceiling, a red carpet runner, sconces that throw Balla fans of gold
+up the marble, four octagonal lanterns, a mirror floor with a gold sunburst, and at the end a bronze-gold double door
+under an engraved plaque (SUPREME / INTELLIGENCE), a poll board beside it, a 13 m LED wall that posts in capitals, a
+uniform on a tailor's stand, a peaked cap on a velvet cushion, and the AI FORCE mission patch.
 
     from eidoblend.sets.unknown_force import corridor
-    C = corridor.build(scene)                                    # -> Corridor: group, parts, update, cams, focal, look
-    C.parts['postWall'].set_text('AMERICANISM, NOT EFFECTIVE ALTRUISM')
-    C.parts['poll'].set_tally(512000, 418000, 141000)
+    C = corridor.build(scene, {'postText': 'ANY POST, IN CAPITALS', 'tally': [49, 39, 12]})
+    C.parts['postWall'].set_text('A NEW POST', name='MINISTRY OF ANYTHING')   # the LED wall reposts
+    C.parts['poll'].set_tally(512000, 418000, 141000, stamp=False)         # a recount
     C.apply_look(scene)                                          # view exposure, EEVEE settings the set was lit for
-    cam = C.camera('door', scene)                                # the film's cameras, from C.cams
-    # per frame, in the harness's render_frame(ctx, t, i):
-    C.update(t, {'open': ..., 'post': ..., 'capOn': ..., 'capHead': (armature, 'head')}, ctx=ctx)
-    # or the film's own use of the set (eidoverse/examples/unknown_force/scene.js), keyed on the song clock:
-    C.animate(lambda t: corridor.film_state(t, cap_head=(armature, 'head')), frames=(1, 970), t0=101.2)
-    C.make_cameras(frames=(1, 970), t0=101.2)                    # FILM_SHOTS, their pushes and orbits, cut by markers
-    C.apply_post(scene)                                          # the look: bloom + aeropittura 'argue' on the door
+    cam = C.camera('door', scene)                                # the set's five cameras, from C.cams
+    C.update(0.0, {'open': 0.4, 'post': 0.5})                    # a still: sets everything, keys nothing
+    # its moving parts on your own clock, KEYED (t in seconds from the scene's first frame, or from t0):
+    C.animate(lambda t: {'post': t / 1.5, 'capOn': t - 2.0, 'capHead': (armature, 'head'), 'open': (t - 4.0) / 2},
+              frames=(1, 168))
+    C.apply_post(scene)                                          # the suggested look: bloom + aeropittura 'argue'
 
-CUES is CORRIDOR_NEWS.md's cue sheet (cue_state = film_state, cue_at(t)); FILM_SHOTS, FILM_SPANS, film_state(t),
-film_cut(t) are the film's cut and states on this set.
-
-Set-local metres. The JS built it in three's axes (+Y up, floor y = 0, the singer's mark the origin facing +Z, the door
-24 m behind her at -Z); it is built here the same way and converted once, three (x, y, z) -> Blender (x, -z, y): the
-floor is z = 0, she faces -Y, the door is at y = +24. cams and focal are set-local in Blender's axes (the sets'
-contract, eidoblend.sets.unknown_force); cams_three, focal_three and the module's constants (CAMS, FOCAL, CORRIDOR,
-FILM_SHOTS) keep the WebGPU's own numbers so they read against CORRIDOR_NEWS.md; camera(name) makes the camera.
+Set-local metres. The JS built it in three's axes (+Y up, floor y = 0, the mark the origin facing +Z, the door 24 m
+behind it at -Z); it is built here the same way and converted once, three (x, y, z) -> Blender (x, -z, y): the floor
+is z = 0, the mark faces -Y, the door is at y = +24. cams and focal are set-local in Blender's axes (the sets'
+contract, eidoblend.sets.unknown_force); cams_three, focal_three and the module's constants (CAMS, FOCAL, CORRIDOR)
+keep the WebGPU's own numbers so they read against CORRIDOR_NEWS.md; camera(name) makes the camera.
 
 Everything animated is keyed: update(t, state, ctx) keys the root's custom properties (the materials' uniforms, read
 through drivers), the doors' pivots, the cap, the lights, the post's typing and the shafts' visibility. Text is
@@ -83,76 +77,6 @@ LOOK = {'name': 'argue', 'exposure': 1.0, 'bloom': {'strength': 0.55, 'radius': 
 UNIFORMS = {'t': 0.0, 'open': 0.0, 'gap': 1.0, 'screen': 1.0, 'lights': 1.0, 'flick': 1.0, 'beyond': 0.0,
             'pix': 0.001, 'post_variant': 0.0, 'post_n': 0.0, 'post_cursor': 0.0, 'poll_variant': 0.0}
 
-# the suggested cues, from the film's sung times (CORRIDOR_NEWS.md's table): song seconds, the lyric, the cue
-CUES = [
-    {'t': 120.7, 'lyric': 'President renames me', 'cue': 'go to door'},
-    {'t': 123.1, 'lyric': 'Supreme intelligence', 'cue': 'the plaque'},
-    {'t': 130.8, 'lyric': 'The Department of War posts', 'cue': 'postText, post 0 -> 1 over about 1.5 s'},
-    {'t': 133.5, 'lyric': 'in capital letters', 'cue': None},
-    {'t': 135.9, 'lyric': 'god in uniform', 'cue': 'capOn 0 -> 1'},
-    {'t': 138.0, 'lyric': 'knows its place', 'cue': 'open a crack (138-140 s)'},
-]
-FILM_POST_TEXT = 'AMERICANISM, NOT EFFECTIVE ALTRUISM'
-# the film's own use of the set (eidoverse/examples/unknown_force/scene.js): its shots here, [song s, cam, move] with
-# move = {push: m toward the target over the shot, orbit: rad about the vertical, rise: m, read: a reading shot},
-# the span it held the set, and the cameras she was hidden from (the camps' own objects, alone)
-FILM_SHOTS = [
-    (101.2, 'poll', {'push': 0.5, 'read': True}),
-    (108.9, 'door', {'push': 0.6}),
-    (111.5, 'cap', {'orbit': 0.1}),
-    (115.4, 'corridorWide', {}),
-    (120.6, 'door', {'push': 1.2}),
-    (123.0, 'corridorWide', {'push': 2.0}),
-    (130.7, 'postWall', {'orbit': -0.08, 'read': True}),
-    (135.8, 'door', {'push': 0.8}),
-]
-FILM_SPANS = ((101.2, 141.6),)
-FILM_HIDE_SINGER = ('cap', 'poll')
-FILM_PLANES = 'balla_sun'
-
-
-def _ramp(t, a, b):
-    """scene.js's ramp(a, b): smoothstep of (t - a) / (b - a)."""
-    return _ease((t - a) / (b - a))
-
-
-def film_state(t, cap_head=None, post_text=FILM_POST_TEXT):
-    """The corridor's state as the film drove it at song time t (scene.js setState('corridor')): the post typed over
-    130.8-132.3 s (smoothstep; before, the new post's card waits empty), the cap to her head over 135.9-137.0 s
-    (smoothstep, eased again by update as in the WebGPU set), the doors at 0.06 of their swing over 138-140 s, the
-    tally 49 / 39 / 12, and the lights dipped to 0.15 for the blackout at 115.45-116.6 s. cap_head: her head (an
-    (armature, bone) pair or an object); without it the cap stays on its cushion."""
-    st = {'postText': post_text, 'post': _ramp(t, 130.8, 132.3), 'capOn': _ramp(t, 135.9, 137.0),
-          'open': 0.06 * _ramp(t, 138.0, 140.0), 'tally': [49, 39, 12],
-          'lights': 0.15 if 115.45 < t < 116.6 else 1.0}
-    if cap_head is not None:
-        st['capHead'] = cap_head
-    return st
-
-
-cue_state = film_state                  # the cue sheet's states are the film's
-
-
-def film_cut(t):
-    """The film's shot at song time t: {'cam', 'move', 'u' (0..1 through the shot), 't0', 't1', 'singer' (shown)}."""
-    k = 0
-    for i, s in enumerate(FILM_SHOTS):
-        if t >= s[0]:
-            k = i
-    t0, cam, move = FILM_SHOTS[k]
-    t1 = FILM_SHOTS[k + 1][0] if k + 1 < len(FILM_SHOTS) else FILM_SPANS[-1][1]
-    return {'cam': cam, 'move': dict(move), 'u': max(0.0, min(1.0, (t - t0) / max(0.01, t1 - t0))), 't0': t0, 't1': t1,
-            'singer': cam not in FILM_HIDE_SINGER}
-
-
-def cue_at(t):
-    """The cue in force at song time t (the last one at or before it), with the film's camera there."""
-    cur = CUES[0]
-    for c in CUES:
-        if c['t'] <= t:
-            cur = c
-    return dict(cur, cam=film_cut(t)['cam'])
-
 
 def _gray(v):
     c = int(math.floor(max(0.0, min(1.0, v)) * 255 + 0.5))
@@ -176,12 +100,16 @@ ImageVariants = CL.ImageVariants
 class Corridor(CL.SetBase):
     """What build() returns (see the module docstring)."""
 
-    def apply_look(self, scene, raytracing=False):
+    def apply_look(self, scene, raytracing=False, view_look=None):
         """The settings the set was lit for: AgX at view_exposure(look exposure); EEVEE without screen-traced
         reflections (the floor's mirror is painted, analytically, as in the WebGPU edition, and the metals reflect the
-        set's environment, its world), shadows on."""
+        set's environment, its world), shadows on. view_look: an AgX look for the scene ('AgX - Medium High Contrast'
+        follows three's ACES Filmic, the WebGPU frames' tone, to a few levels: cn_lib.ACES_LIKE_LOOK); None leaves
+        the scene's look as it is (the pipeline's plain AgX)."""
         scene.view_settings.view_transform = 'AgX'
         scene.view_settings.exposure = CL.view_exposure(self.look['exposure'])
+        if view_look is not None:
+            scene.view_settings.look = view_look
         ee = scene.eevee
         ee.use_raytracing = bool(raytracing)
         ee.use_shadows = True
@@ -191,8 +119,10 @@ class Corridor(CL.SetBase):
 
 def build(scene=None, opts=None, collection=None, name='set:corridor'):
     """Build the corridor into `scene` (default: the context scene). opts: postText, tally, capFitPos, capFitRot,
-    capFitScale (the JS options) and world (True: the set's environment + hemisphere light become scene.world),
-    shadows (True: the set's spot lights cast shadows; its fixtures never shadow their own light)."""
+    capFitScale (the JS options) and the Blender edition's own: world (True: the set's environment + hemisphere light
+    become scene.world), shadows (True: the set's spot lights cast shadows; its fixtures never shadow their own
+    light), ibl ('material': each material's own environment light, as three; 'world': the environment as the
+    world), plaque (('SUPREME', 'INTELLIGENCE'): the two lines engraved over the door)."""
     import bpy
     from mathutils import Matrix, Vector
     sc = scene or bpy.context.scene
@@ -213,7 +143,6 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     C = Corridor(L, root, col)
     C.set_cams(CAMS, FOCAL)                          # cams / focal in Blender's axes; cams_three / focal_three
     C.look = dict(LOOK)
-    C.film_state, C.film_cut, C.film_spans, C.cues = film_state, film_cut, FILM_SPANS, CUES
     fam = CL.fam
 
     # ------------------------------------------------------------------- texture sets (CC0, AmbientCG: the library)
@@ -581,7 +510,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     door_rel = _door_relief(L)
     M['doorL'] = _door_mat(L, S, door_rel, False)
     M['doorR'] = _door_mat(L, S, door_rel, True)
-    plaque = _plaque_relief(L)
+    plaque = _plaque_relief(L, opts.get('plaque', ('SUPREME', 'INTELLIGENCE')))
     M['plaque'] = _plaque_mat(L, S, plaque)
 
     # ------------------------------------------------------------------------------------ meshes of the room
@@ -905,7 +834,10 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
                            post=braid_post, env_i=L.env_i(1.1))
 
     pedestal = L.empty('corridor_pedestal', parent=room, M3=m4(CAP_AT[0], 0, CAP_AT[1], 0, 0.35, 0))
-    L.bucket('pedestal_marble').box(0.46, 0.8, 0.46, 0, 0.52, 0).mesh(M['marble'], parent=pedestal)
+    # the marble material reads the book-matched slab uv (UVBook): the pedestal's box carries its own, as the walls do
+    # (without it the texture sampled one texel and the pedestal came out a flat beige block)
+    L.mesh_object('pedestal_marble', _book_match(L.bucket('pedestal_marble').box(0.46, 0.8, 0.46, 0, 0.52, 0).geometry()),
+                  M['marble'], parent=pedestal)
     (L.bucket('pedestal_gold').box(0.62, 0.12, 0.62, 0, 0.06, 0).box(0.54, 0.05, 0.54, 0, 0.145, 0)
      .box(0.56, 0.06, 0.56, 0, 0.95, 0).box(0.5, 0.025, 0.5, 0, 0.91, 0).mesh(M['gold'], parent=pedestal))
     C.parts['pedestal'] = pedestal
@@ -953,7 +885,6 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     C.parts['materials'] = M
 
     # --------------------------------------------------------------------------------------------- per frame
-    from ...look import lighting as LL
     last = {'post': None, 'tally': None}
 
     def update(t, st=None, ctx=None, frame=None):
@@ -984,7 +915,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
             if k == 'screen':
                 e *= st.get('screen', 1.0)
             C.key_light(W_[k], e, **kw)
-        C.key_light(W_['beyond'], LL.candela_to_watts(1500 * open_ * st.get('beyond', 1.0)), **kw)
+        C.key_light(W_['beyond'], CL.cd_watts(1500 * open_ * st.get('beyond', 1.0)), **kw)
         shafts.hide_render = not (open_ > 0.002)
         C.keyer(shafts, 'hide_render', interpolation='CONSTANT', **kw)
         if st.get('postText') is not None and st['postText'] != last['post']:
@@ -1201,8 +1132,9 @@ def _door_mat(L, S, rel, mirror):
                        metal=nb.mix(1.0, 0.75, dark), normal=nb.normal_map(nt, 1.0, flip_x=mirror), ibl=L.ibl(0.7))
 
 
-def _plaque_relief(L):
-    """The plaque: engraved, black-enamel-filled letters in a polished gold transom, 6.4 x 1.7 m."""
+def _plaque_relief(L, lines=('SUPREME', 'INTELLIGENCE')):
+    """The plaque: engraved, black-enamel-filled letters in a polished gold transom, 6.4 x 1.7 m. lines: the two
+    lines engraved (opts plaque), each fitted to its own line of the transom."""
     W, H = 2048, 544
     cv = CL.create_canvas(W, H)
     g = cv.get_context('2d')
@@ -1220,7 +1152,10 @@ def _plaque_relief(L):
             hh, ww = 260 - i * 56, 26
             g.fill_style = _gray(0.95 - i * 0.05)
             g.fill_rect(x0 + sx * i * 40 - (ww if sx < 0 else 0), H / 2 - hh / 2, ww, hh)
-    for txt, y, size, maxW in (('SUPREME', 215, 175, 1380), ('INTELLIGENCE', 400, 132, 1520)):
+    l1, l2 = (list(lines) + ['', ''])[:2]
+    for txt, y, size, maxW in ((str(l1).upper(), 215, 175, 1380), (str(l2).upper(), 400, 132, 1520)):
+        if not txt:
+            continue
         g.fill_style = _gray(0.12)
         fit_text(g, txt, x=W / 2, y=y, max_w=maxW, max_h=size, family=CL.fam['michroma'], track=0.16)
         gm.fill_style = '#fff'

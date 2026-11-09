@@ -183,6 +183,21 @@ def options(nn, ng, up):
     S.check("morph() to an index with no target keeps that slot (the engine's `if (targets[idx])`)",
             (m3.uniforms.from_idx.value, m3.uniforms.to_idx.value) == (0, 1) and abs(m3.uniforms.morph.value - 0.6)
             < 1e-6, str((m3.uniforms.from_idx.value, m3.uniforms.to_idx.value)))
+    # setTargets assigns targets[i] for each i of the new list only: a shorter list keeps the targets past its end
+    keep2 = m3.targets[2].points.copy()
+    m3.set_targets([ng, nn])
+    S.check("set_targets with a shorter list: the engine's targets[i] = arr[i]; the target past it stays",
+            len(m3.targets) == 3 and np.allclose(m3.targets[2].points, keep2) and
+            np.allclose(m3.targets[0].points, np.asarray(ng)[::10]),          # 3000 -> 300: the engine's stride
+            f'{len(m3.targets)} targets')
+    try:
+        m3.update_target(5, nn)
+        gap = False
+    except IndexError:
+        gap = True
+    m3.update_target(3, up)
+    S.check('update_target: one past the last adds a target; a gap is refused with a clear error',
+            gap and len(m3.targets) == 4)
 
 
 def main():

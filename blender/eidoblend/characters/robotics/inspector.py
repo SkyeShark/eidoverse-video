@@ -18,22 +18,30 @@ controls. A browser page has no place in a Blender port; the same tool is a scen
                     part='', uv=None, primary=None, accent=None, scene=None, fps=24, resolution=(1280, 720),
                     process_options=None) -> Inspector
         model / clip / duration (20 s, the inspector's time slider) / primary / accent (the colour pickers)
-        joints=True     manual mode: rig.rig_joints, the joint sliders as keyable custom properties on the robot's empty
-        wireframe       the "Wireframe" toggle: every kit mesh with a wire overlay (#132e37 at 65 %), its own collection
+        joints=True     manual mode from rest: rig.rig_joints, the joint sliders as keyable custom properties on the
+                        robot's empty (the first motion stays selected: Reset returns to it)
+        wireframe       the "Wireframe" toggle: every kit mesh with a wire overlay (#132e37 at 65 %, one pixel wide at
+                        any size, as viewer.js's line segments), its own collection
         reference       the "Hand grasp cylinder" toggle: the grasped cylinders (made always, hidden unless on)
         part            the part picker: its triangle count, and the UV split view limited to its triangles
         uv=path         the UV split view: draw_uv() writes the map with the UV layout drawn over it
         process_options extra options for the fabrication job (e.g. cache_dir for the rotary stock, resolution)
 
     Inspector (also a dict: 'robot', 'camera', 'studio', 'clip', 'stats', 'status', 'ports', 'parts',
-    'part_triangles', 'uv', 'wire', 'references', 'joints', 'target', 'job', 'time'; the status line and the
-    ports list are also on the scene as custom properties 'inspector_status' / 'inspector_ports'):
+    'part_triangles', 'uv', 'wire', 'references', 'joints', 'target', 'job', 'time', 'state', 'source_info'; the
+    status line, the ports list, the process state line and the workpiece-source line are also on the scene as custom
+    properties 'inspector_status' / 'inspector_ports' / 'inspector_process_state' / 'inspector_source_info'):
         load(model)                 the asset list (asset_list(): the catalog without the 'rotors_*' variants):
                                     another catalog model in the same studio (the old one disposed)
         clips()                     the motion list ('process' first on a machine with a tool, as there)
         set_motion(clip)            setMotion / the motion list: keys the clip over the time range (or makes the job)
-        set_time(t) / reset()       setTime / the time slider (the keyed timeline, sub-frames included) / Reset
-        play(on=True)               Play: the scene's playback range is the clip's 20 s (or the job's duration)
+        set_time(t)                 setTime / the time slider: the job seeks t (viewer.js sample(): the state line
+                                    is the job's at t), the keyed timeline shows t (sub-frames included); like the
+                                    slider, it leaves manual mode
+        reset()                     Reset: manual mode off (the sliders' drivers removed, the motion keyed again) and
+                                    the motion's pose at 0 s, without refitting the camera
+        play(on=True)               Play: leaves manual mode; the scene's playback range is the clip's 20 s (or the
+                                    job's duration)
         fit() / frame_work()        the Frame and "Inspect workpiece" buttons
         set_colors(primary, accent) the Body / Accent pickers; set_filament_color(c) the Filament picker;
                                     pickers() their current values ('#rrggbb')
@@ -41,14 +49,20 @@ controls. A browser page has no place in a Blender port; the same tool is a scen
         pick(x, y) -> part          a click on the image (x, y in 0..1 from the top left): the part under it
         pick_part(name)             the part list: the selection and its 'N selected triangles'
         draw_uv(path, batch=None, channel=None, material=None)       the UV split view of the selection
-        set_joint(name, value)      a joint slider (manual mode: the rig's sliders drive the modules)
+        set_joint(name, value)      a joint slider: manual mode (the motion's keys stopped, the job kept; every slider
+                                    starts where its joint is on screen, so only this joint moves; the rig's drivers
+                                    move the modules; the value is clamped to the joint's range, as the input is)
         set_stock(material=None, preset=None, length=None, width=None, height=None)   the stock controls
         set_timing('lapse' | 'physical')             the process playback select (18 s / 32 s rotary, or the job's own
                                     time, keyed frame by frame: refused past MAX_KEYED_FRAMES, 25 min at 24 fps; the
                                     pocket mill is 20 min, the print 15 min, the relief 7.8 hours)
         set_source(source, name)    setSource: a workpiece for the process (a bpy Object / Mesh / Collection, or a
                                     manufacturing sample name: 'handle', 'bracket', 'ring'; None: the demonstration)
-        process_state()             the processState line; dispose()
+        process_state()             the processState line at the current time
+        source_info()               the workpiece-source line (#sourceInfo): '<name>. N source triangles; M indexed
+                                    views. ...' for a supplied mesh on the rotary machine, the slicing or relief note
+                                    on the others, 'Load a model or choose a mesh example ...' without one
+        dispose()
 
 The camera fit is the inspector's: for walk, drive-circle, flight and the runs, the box over the clip sampled every
 0.5 s from 0 to 20 s; otherwise the current pose; frameCamera with margin 1.08 from (.9, .55, 1.5) (from the left,
@@ -77,6 +91,21 @@ STOCK_MATERIALS = ('aluminum', 'brass', 'steel', 'wood', 'plywood')
 STOCK_PRESETS = {'140,36,36': (140, 36, 36), '100,24,28': (100, 24, 28), '180,44,50': (180, 44, 50)}
 SOURCE_SAMPLES = ('handle', 'bracket', 'ring')
 MAX_KEYED_FRAMES = 36000      # 25 min at 24 fps: physical timing keys every frame (the relief alone is 7.8 hours)
+NO_SOURCE = 'Load a model or choose a mesh example to generate its actual toolpath.'
+
+
+def _field(o, k, default=None):
+    """a field of a fabrication record: a dict (Rec) or an object"""
+    if o is None:
+        return default
+    if isinstance(o, dict):
+        return o.get(k, default)
+    return getattr(o, k, default)
+
+
+def _printing(job):
+    """viewer.js's test for a print: the job's state reports filament (job.state.filamentLength !== undefined)"""
+    return job is not None and _field(job.state, 'filament_length') is not None
 
 
 def _source_group():
@@ -99,31 +128,48 @@ def _source_group():
     return ng
 
 
-def wire_overlay(robot, visible=True, colour='#132e37', opacity=0.65, thickness=None):
-    """the inspector's wireframe: a linked copy of every kit mesh with a Wireframe modifier, an unlit translucent
-    line colour, in a 'wire|<robot>' collection; a mesh deformed by Geometry Nodes (a registered fabrication tube)
-    gets an overlay that reads its evaluated surface first. Returns the overlay objects."""
+WIRE_PX = 1.0           # viewer.js's LineSegments(WireframeGeometry): one pixel wide at any size
+
+
+def wire_material(colour='#132e37', opacity=0.65, pixels=WIRE_PX, name='inspector wire'):
+    """the overlay's material: the Wireframe node in pixel size (every triangle edge, as three's WireframeGeometry
+    gives them, `pixels` wide on screen at any distance) as the coverage of an unlit translucent line colour, BLENDED
+    over the surface it coincides with (same mesh, same matrix, so the depth test passes exactly where the surface is
+    and hides the edges behind it, as the WebGPU lines' depth test does)"""
     from .materials import to_linear
-    col = bpy.data.collections.new('wire|' + robot.group.name)
-    robot.collection.children.link(col)
-    mat = bpy.data.materials.new('inspector wire')
+    mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
     for n in list(nt.nodes):
         nt.nodes.remove(n)
+    wf = nt.nodes.new('ShaderNodeWireframe')
+    wf.use_pixel_size = True
+    wf.inputs['Size'].default_value = pixels
+    k = nt.nodes.new('ShaderNodeMath')
+    k.operation = 'MULTIPLY'
+    k.inputs[1].default_value = opacity
+    nt.links.new(wf.outputs['Fac'], k.inputs[0])
     em = nt.nodes.new('ShaderNodeEmission')
     em.inputs['Color'].default_value = tuple(to_linear(colour)) + (1.0,)
     tr = nt.nodes.new('ShaderNodeBsdfTransparent')
     mix = nt.nodes.new('ShaderNodeMixShader')
-    mix.inputs['Fac'].default_value = opacity
     out = nt.nodes.new('ShaderNodeOutputMaterial')
+    nt.links.new(k.outputs[0], mix.inputs['Fac'])
     nt.links.new(tr.outputs[0], mix.inputs[1])
     nt.links.new(em.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs['Surface'])
     mat.surface_render_method = 'BLENDED'
-    if thickness is None:
-        lo, hi = world_box([robot.group])
-        thickness = max(0.0002, (hi - lo).length * 0.0006)
+    mat.use_transparency_overlap = False
+    return mat
+
+
+def wire_overlay(robot, visible=True, colour='#132e37', opacity=0.65, pixels=WIRE_PX):
+    """the inspector's wireframe: a linked copy of every kit mesh, at the mesh's own matrix, with wire_material()
+    (`pixels` wide on screen), in a 'wire|<robot>' collection; a mesh deformed by Geometry Nodes (a registered
+    fabrication tube or strand) gets an overlay that reads its evaluated surface first. Returns the overlay objects."""
+    col = bpy.data.collections.new('wire|' + robot.group.name)
+    robot.collection.children.link(col)
+    mat = wire_material(colour, opacity, pixels)
     made = []
     for o in robot.meshes():
         if o.get('overlay'):
@@ -139,15 +185,14 @@ def wire_overlay(robot, visible=True, colour='#132e37', opacity=0.65, thickness=
                         if getattr(i, 'in_out', None) == 'INPUT' and i.name == 'Source')
             getattr(src.properties.inputs, item.identifier).value = o
             w['procedural_source'] = True
-        m = w.modifiers.new('wire', 'WIREFRAME')
-        m.thickness = thickness
-        m.use_replace = True
-        m.use_even_offset = False
-        m.material_offset = 0
         for s in w.material_slots:                       # the mesh is shared: the overlay's material is per object
             s.link = 'OBJECT'
             s.material = mat
         w.visible_shadow = False
+        w.visible_diffuse = w.visible_glossy = w.visible_transmission = False
+        for flag in ('hide_probe_volume', 'hide_probe_sphere', 'hide_probe_plane'):
+            if hasattr(w, flag):
+                setattr(w, flag, True)
         w.hide_render = w.hide_viewport = not visible
         w['overlay'] = True
         made.append(w)
@@ -355,7 +400,7 @@ class Inspector(dict):
     def __init__(self, scene, camera, studio_rec, duration=20.0, fps=24, process_options=None):
         super().__init__(scene=scene, camera=camera, studio=studio_rec, robot=None, clip=None, job=None, time=0.0,
                          stats=None, status='', ports='', parts=[], part_triangles=None, uv=None, wire=[],
-                         references=[], joints={}, target=None)
+                         references=[], joints={}, target=None, state='', source_info=NO_SOURCE)
         self.duration, self.fps = float(duration), fps
         self.manual = False
         self.selection = ''
@@ -447,39 +492,54 @@ class Inspector(dict):
     # ------------------------------------------------------------------------------------------------ motion
     def set_motion(self, clip):
         """chooseClip: the job disposed, time 0, manual mode off; 'process' makes the fabrication job (keyed over its
-        duration), any other motion is keyed over the time slider's 20 s; then the camera fit"""
+        duration), any other motion is keyed over the time slider's 20 s; the workpiece-source line; then the camera
+        fit (the clip's sweep, or the pose at 0 s)"""
         r = self.robot
         if clip not in self.clips():
             raise ValueError(f'Unknown motion {clip!r} for {r.id}; motions: {self.clips()}')
         self._dispose_job()
-        if self.manual and self['joints']:
-            from .rig import unrig_joints
-            unrig_joints(r)
-            self['joints'] = {}
-        self.manual = False
+        self._leave_manual(rekey=False)
         self['time'] = 0.0
         self['clip'] = clip
         self.scene['inspector_clip'] = clip
         r.stop()
         if clip == 'process':
-            job = self._make_job()
-            frames = int(math.ceil(job.duration * self.fps))
-            if frames > MAX_KEYED_FRAMES:
-                job.dispose()
-                raise ValueError(f'physical timing makes this job {job.duration:.0f} s long, {frames:,} keyed frames '
-                                 f'(more than {MAX_KEYED_FRAMES:,}): use the time lapse, or '
-                                 "process_options={'duration': seconds}")
-            self['job'] = job
-            self._range(job.duration)
-            job.play(frame_start=self.scene.frame_start, frame_end=self.scene.frame_end, scene=self.scene)
-            self['target'] = fit(r, self.camera, None)
+            self['job'] = self._checked_job()
+            self._key_motion()
+            self._update_source_info()
+            self.set_time(0.0)
+            self['target'] = fit(r, self.camera, None)                     # the pose at 0 s, as sample(); fit()
         else:
             self._range(self.duration)
             self['target'] = fit(r, self.camera, clip)                     # sampled, before the keys exist
-            r.play(clip, frame_start=self.scene.frame_start, frame_end=self.scene.frame_end, scene=self.scene)
-        self.set_time(0.0)
+            self._key_motion()
+            self._update_source_info()
+            self.set_time(0.0)
         self.update_stats()
         return self
+
+    def _checked_job(self):
+        """the process job, refused (and removed) when physical timing would key more than MAX_KEYED_FRAMES"""
+        job = self._make_job()
+        frames = int(math.ceil(job.duration * self.fps))
+        if frames > MAX_KEYED_FRAMES:
+            job.dispose()
+            raise ValueError(f'physical timing makes this job {job.duration:.0f} s long, {frames:,} keyed frames '
+                             f'(more than {MAX_KEYED_FRAMES:,}): use the time lapse, or '
+                             "process_options={'duration': seconds}")
+        return job
+
+    def _key_motion(self):
+        """key the selected motion over its range: the job over its duration, a clip over the slider's 20 s"""
+        sc, clip = self.scene, self['clip']
+        if clip == 'process':
+            if self['job'] is None:
+                self['job'] = self._checked_job()
+            self._range(self['job'].duration)
+            self['job'].play(frame_start=sc.frame_start, frame_end=sc.frame_end, scene=sc)
+        elif clip:
+            self._range(self.duration)
+            self.robot.play(clip, frame_start=sc.frame_start, frame_end=sc.frame_end, scene=sc)
 
     def _make_job(self):
         try:
@@ -514,24 +574,66 @@ class Inspector(dict):
         return fab.mill(r, None, material=self.stock_material, **opts)
 
     def set_time(self, t):
-        """setTime / the time slider: the keyed timeline at t seconds (a sub-frame between keys)"""
+        """setTime / the time slider (viewer.js: manual = false; time = t; sample()): out of manual mode, the job seeks
+        t (sample()'s job.seek(time): its state line is the job's at t), then the keyed timeline shows t (a sub-frame
+        between keys); the process state line is updated ('state', scene['inspector_process_state'])"""
         t = max(0.0, float(t))
+        if not math.isfinite(t):
+            raise ValueError('Inspector time must be finite')
+        self._leave_manual()
+        job = self['job']
+        if job is not None:
+            job.seek(t)                      # the pose it sets is the keys' at frame times; the keys win below
         sc = self.scene
         f = sc.frame_start + t * self.fps
         sc.frame_set(int(math.floor(f)), subframe=f - math.floor(f))
         self['time'] = t
+        line = self.process_state()
+        self['state'] = line
+        sc['inspector_process_state'] = line
         return self
 
     def reset(self):
-        """the Reset button: time 0, manual mode off"""
-        self.manual = False
+        """the Reset button (viewer.js: time = 0; manual = false; sample()): the sliders' drivers removed and the
+        motion keyed again if a slider had moved, then the motion's pose at 0 s; the camera stays"""
         return self.set_time(0.0)
 
     def play(self, on=True):
-        """the Play button: the scene plays its keyed range (open the file and press play, or render the range)"""
+        """the Play button: leaves manual mode (the motion keyed again); the scene plays its keyed range from the
+        current frame (open the file and press play, or render the range)"""
         self.playing = bool(on)
-        self.scene.frame_current = self.scene.frame_start
+        self._leave_manual()
+        self.scene['inspector_playing'] = self.playing
         return self
+
+    # ------------------------------------------------------------------------------------------------ manual mode
+    def _enter_manual(self, from_rest=False):
+        """a slider moved: the motion's keys and the job's stopped (the job kept, as there), every slider rigged at
+        its joint's value on screen (from_rest: the robot reset first, inspector_scene(joints=True))"""
+        from .rig import measure_joints, rig_joints
+        r = self.robot
+        self.playing = False
+        bpy.context.view_layer.update()
+        values = None if from_rest else measure_joints(r)
+        r.stop()
+        if self['job'] is not None:
+            self['job'].stop()
+        if from_rest:
+            r.reset()
+        self['joints'] = rig_joints(r, values)
+        self.manual = True
+
+    def _leave_manual(self, rekey=True):
+        """the time slider, Reset, Play or another motion: the sliders' drivers removed and (rekey) the selected
+        motion keyed again, as sample() resumes it"""
+        if not self.manual:
+            return
+        from .rig import unrig_joints
+        unrig_joints(self.robot)
+        self['joints'] = {}
+        self.manual = False
+        if rekey:
+            self._key_motion()
 
     # ------------------------------------------------------------------------------------------------ view
     def fit(self):
@@ -558,9 +660,11 @@ class Inspector(dict):
         job = self['job']
         if job is None:
             return None
-        printing = getattr(job, 'kind', '') == 'print'
+        printing = _printing(job)
         direction = (-0.7, -1.3, 0.34) if printing else (0.8, -0.5, 1.1)
-        return frame_camera(self.camera, [job.mesh], direction=direction, margin=1.55 if printing else 1.2)
+        target = frame_camera(self.camera, [job.mesh], direction=direction, margin=1.55 if printing else 1.2)
+        self['target'] = target
+        return target
 
     def set_colors(self, primary=None, accent=None):
         self.robot.set_colors(primary, accent)
@@ -575,7 +679,7 @@ class Inspector(dict):
         """the Filament picker: the print job's bead, reel and strand, else the robot's live filament"""
         self.filament_color = color
         job = self['job']
-        if job is not None and getattr(job, 'kind', '') == 'print':
+        if _printing(job):
             job.set_color(color)
         elif getattr(self.robot, 'filament', None) is not None:
             self.robot.filament.set_color(color)
@@ -631,16 +735,16 @@ class Inspector(dict):
         return rec
 
     def set_joint(self, name, value):
-        """a joint slider: manual mode (the rig's simple-expression drivers move the module)"""
-        from .rig import rig_joints, set_slider
+        """a joint slider (viewer.js: playing = false; manual = true; setJoints({[n]: value})): manual mode, the other
+        joints where they are on screen; the value clamped to the slider's range"""
+        from .rig import _limits, joint_names, set_slider
         r = self.robot
+        if name not in joint_names(r):
+            raise KeyError(f'No joint slider {name!r}; sliders: {joint_names(r)}')
         if not self.manual or not self['joints']:
-            self._dispose_job()
-            r.stop()
-            r.reset()
-            self['joints'] = rig_joints(r)
-            self.manual = True
-        set_slider(r, name, value)
+            self._enter_manual()
+        lo, hi = _limits(r, name)
+        set_slider(r, name, max(lo, min(hi, float(value))))
         return self
 
     # ------------------------------------------------------------------------------------------------ process
@@ -679,6 +783,32 @@ class Inspector(dict):
             name, source = source, fab.manufacturing_sample(source)
         self.source, self.source_name = source, (name if source is not None else '')
         return self.set_motion('process')
+
+    def source_info(self):
+        """viewer.js's #sourceInfo line, from the supplied workpiece and the job's program report: on the rotary
+        machine '<name>. N source triangles; M indexed views. [Some regions exceed tool reach and retain material.]
+        Undercuts and holding ends may remain.'; on the FDM machine the slicing note; on the relief machine the relief
+        note; without a supplied mesh the invitation to load one"""
+        if self.source is None:
+            return NO_SOURCE
+        report = _field(_field(self['job'], 'program'), 'report')
+        if report:
+            tris = int(_field(_field(report, 'source'), 'triangles', 0) or 0)
+            reach = 'Some regions exceed tool reach and retain material. ' if _field(report, 'reach_limited_samples') \
+                else ''
+            body = (f"{tris:,} source triangles; {_field(report, 'orientations')} indexed views. {reach}"
+                    'Undercuts and holding ends may remain.')
+        elif (self.robot.machine or {}).get('tool') == 'extruder_fixed':
+            body = 'Closed solids are sliced with 25% infill. Supports are not generated automatically.'
+        else:
+            body = 'Upper surface relief; vertical undercuts remain.'
+        return f'{self.source_name}. {body}'
+
+    def _update_source_info(self):
+        line = self.source_info()
+        self['source_info'] = line
+        self.scene['inspector_source_info'] = line
+        return line
 
     def process_state(self):
         """the processState line: the print's fed / retracted filament, or the cut's material, rpm, stage, A angle
@@ -721,18 +851,11 @@ def inspector_scene(model='payloads/arm_hand', clip=None, duration=20.0, joints=
     insp = Inspector(sc, cam, st, duration, fps, process_options)
     insp.wire_on, insp.reference_on = bool(wireframe), bool(reference)
     insp.load(model, primary, accent)
-    r = insp.robot
-    if joints:
-        r.stop()
-        r.reset()
-        from .rig import rig_joints
-        insp['joints'] = rig_joints(r)
-        insp.manual = True
-        insp['clip'] = None
-        sc['inspector_clip'] = ''
-        insp['target'] = insp.fit()
-    elif clip is not None and clip != insp['clip']:
+    if clip is not None and clip != insp['clip']:
         insp.set_motion(clip)
+    if joints:
+        insp._enter_manual(from_rest=True)
+        insp['target'] = insp.fit()
     if part:
         insp.pick_part(part)
     if uv:

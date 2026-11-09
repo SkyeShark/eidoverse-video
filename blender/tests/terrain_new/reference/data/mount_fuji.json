@@ -1,0 +1,104 @@
+{
+ "name": "mount_fuji",
+ "role": "main",
+ "title": "Mount Fuji, Japan",
+ "landform": "stratovolcano",
+ "note": "The whole cone (3776 m) with its apron, the Hoei crater on the south-east flank and the Fuji Five Lakes to the north.",
+ "centre_lat": 35.3606,
+ "centre_lon": 138.7274,
+ "pixel_size_m": 40.0,
+ "extent_m": [
+  40000,
+  40000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "source": {
+  "dataset": "GSI Tiles DEM10B (10 m mesh digital elevation model, elevation PNG tiles)",
+  "publisher": "Geospatial Information Authority of Japan (GSI)",
+  "url": "https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png",
+  "native_resolution_m": 10,
+  "vertical_datum": "Tokyo Peil (Japanese orthometric heights)",
+  "licence": "GSI Content Terms of Use (compatible with CC BY 4.0): free use with source credit; https://www.gsi.go.jp/ENGLISH/page_e30286.html",
+  "attribution": "Source: Geospatial Information Authority of Japan (GSI Tiles, DEM10B)",
+  "kind": "gsi",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 15.584,
+  "resampling": "Gaussian low-pass (sigma 1.16 source px) then bilinear",
+  "no_data_fraction": 0.0,
+  "zoom": 13,
+  "tiles": 144,
+  "tile_range": [
+   7247,
+   3229,
+   7258,
+   3240
+  ]
+ },
+ "licence": "GSI Content Terms of Use (compatible with CC BY 4.0): free use with source credit; https://www.gsi.go.jp/ENGLISH/page_e30286.html",
+ "attribution": "Source: Geospatial Information Authority of Japan (GSI Tiles, DEM10B)",
+ "water": [
+  {
+   "kind": "lake",
+   "name": "Lake Kawaguchi",
+   "seed": [
+    35.5135,
+    138.76
+   ],
+   "mask_value": 128,
+   "level_m": 830.51,
+   "area_km2": 5.184
+  },
+  {
+   "kind": "lake",
+   "name": "Lake Yamanaka",
+   "seed": [
+    35.418,
+    138.875
+   ],
+   "mask_value": 129,
+   "level_m": 980.48,
+   "area_km2": 6.024
+  },
+  {
+   "kind": "lake",
+   "name": "Lake Sai",
+   "seed": [
+    35.499,
+    138.685
+   ],
+   "mask_value": 130,
+   "level_m": 900.01,
+   "area_km2": 1.72
+  },
+  {
+   "kind": "lake",
+   "name": "Lake Motosu",
+   "seed": [
+    35.464,
+    138.58
+   ],
+   "mask_value": 131,
+   "level_m": 900.01,
+   "area_km2": 4.376
+  }
+ ],
+ "shape_stats": {
+  "relief_m": 3742.61,
+  "mean_m": 889.83,
+  "hypsometric_integral": 0.2323,
+  "slope_deg_p10": 2.23,
+  "slope_deg_p50": 9.16,
+  "slope_deg_p90": 33.12,
+  "slope_deg_p99": 41.03,
+  "slope_deg_mean": 13.91
+ },
+ "height_png": "mount_fuji.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 20.25,
+ "height_max_m": 3762.88,
+ "height_step_m": 0.05710887312123293,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)",
+ "water_mask_png": "mount_fuji_water.png",
+ "water_mask_encoding": "8-bit: 0 land, 255 sea, 128 + i the i-th lake of `water`"
+}

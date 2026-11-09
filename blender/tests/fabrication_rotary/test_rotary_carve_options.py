@@ -14,7 +14,8 @@ Checks
                 dust, max_particles, collection, the program's rate overrides (feed, plunge, rpm, rotation_speed,
                 rapid, acceleration), a ball-nose cutter fitted to the machine, every preset material's stock and chips
   the stock     readback(), tiled() (the WebGPU tiled 2D layout, voxel for voxel), layout, cell_size, bounds,
-                index, texture, settings; the chuck turned by hand turns the stock
+                index, texture (the file written last, the hold file after stop), settings; the chuck turned by
+                hand turns the stock; dispose(files=True) leaves no file and no cache folder
   refusals      no rotary chuck, no fitted cutter, no adjustable fixture, a tool or radius other than the
                 installed cutter's, a moved axis or end stock, a bad duration, a path beyond the gantry's travel;
                 none of them leaves an object behind
@@ -143,8 +144,12 @@ for f in (1, 13, 25):
     worst = max(worst, (m.tool_tip() - p).length)
 check('play: frame f plays the job at ((f - frame_start) / fps - start) * speed', worst < 1e-5,
       f'worst {worst * 1e6:.2f} um')
-check('stock.texture is the last written frame\'s VDB file', job.stock.texture == job.stock.frame_path(25)
+check('stock.texture is the VDB file written last (frame 25 after play)', job.stock.texture == job.stock.frame_path(25)
       and os.path.exists(job.stock.texture))
+job.seek(max(0.0, (12 / 24 - .5) * 3.0))
+job.key(13)
+check('stock.texture follows the write, not the frame number: frame 13 keyed again after 25 is the texture',
+      job.stock.texture == job.stock.frame_path(13))
 fld = job.stock.readback()
 check('stock.readback(): a copy of the field, (nx, ny, nz) samples', fld.shape == tuple(job.stock.resolution)
       and fld is not job.stock.field and np.array_equal(fld, job.stock.field))
@@ -161,24 +166,31 @@ for _ in range(500):
 check(f'stock.tiled(): the WebGPU tiled target ({lay["width"]} x {lay["height"]}, {lay["cols"]} columns of z '
       'slices), voxel for voxel', img.shape == (lay['height'], lay['width']) and tiles_ok
       and lay['cols'] == math.ceil(math.sqrt(ny)))
+check('stock.layout is the WebGPU api.layout key for key, in three\'s axes: ny the height count, nz the width count, '
+      'cols = ceil(sqrt(nz))', (lay['nx'], lay['ny'], lay['nz']) == (nx, nz, ny)
+      and lay['cols'] == math.ceil(math.sqrt(lay['nz'])) and lay['width'] == lay['nx'] * lay['cols']
+      and lay['height'] == lay['ny'] * math.ceil(lay['nz'] / lay['cols']))
 eps = max(s['stock_length'] / (nx - 4), s['stock_width'] / (ny - 4), s['stock_height'] / (nz - 4))
 check('stock: bounds pad the blank by two cells, cell_size spans them, the stroke index is (40, 16, 16)',
       abs(job.stock.bounds['max'][0] - (s['stock_length'] / 2 + 2 * eps)) < 1e-15
       and abs(job.stock.cell_size[0] - (s['stock_length'] + 4 * eps) / (nx - 1)) < 1e-15
       and tuple(job.stock.index.dims) == (40, 16, 16) and job.stock.settings is job.settings)
 job.stop()
-check('stop(): every key the job made is gone and the stock holds its current field',
+check('stop(): every key the job made is gone and the stock holds its current field (texture = the hold file)',
       keys_on(m.roots['rotary_chuck']) == 0 and keys_on(m.roots['gantry_x']) == 0
-      and not job.stock.volume_data.is_sequence)
+      and not job.stock.volume_data.is_sequence and job.stock.texture == job.stock.hold_path
+      and os.path.exists(job.stock.hold_path))
 m.set_joints({'rotary_output': 1.0})
 bpy.context.view_layer.update()
 rel = m.roots['rotary_fixture'].matrix_world.inverted() @ job.mesh.matrix_world
 check('the stock rides the chuck: the A axis turned by hand turns it', abs(math.atan2(rel[2][1], rel[1][1]) - 1.0) < 1e-6)
-files = [job.stock.frame_path(f) for f in job.stock.frames_written]
+files = [job.stock.frame_path(f) for f in job.stock.frames_written] + [job.stock.hold_path]
+cache = job.stock.cache_dir
 n_before = len(bpy.data.objects)
 job.dispose(files=True)
-check('dispose(files=True): the job\'s objects and its stock files are gone',
-      len(bpy.data.objects) < n_before and not any(os.path.exists(f) for f in files) and job.mesh is None)
+check('dispose(files=True): the job\'s objects, every stock file (each frame\'s and the hold file) and the emptied '
+      'cache folder are gone', len(bpy.data.objects) < n_before and not any(os.path.exists(f) for f in files)
+      and not os.path.exists(cache) and job.mesh is None)
 
 # ---------------------------------------------------------------------------------------------- auto_play ---
 sc.frame_start, sc.frame_end = 1, 4

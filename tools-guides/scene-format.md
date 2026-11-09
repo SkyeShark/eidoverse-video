@@ -199,7 +199,13 @@ output video, with its record `<out>.build.json`:
    `setup()`), preflight, coverage, motion, framing, palette, assets
    ([render review](render-review.md)). A scene with no camera stops here.
 8. The `.blend` saved (no `.blend1`), and `build.json`: its inputs, the
-   settings, each step's time, the audit ledger.
+   settings, each step's time, the audit ledger. Images the build painted
+   into the temp folder first (a screen or an `html_mesh` card made in
+   `setup()`, before the `.blend` had a folder) are copied beside it,
+   `<out>_files/`, the `.blend` points there (`build.files`) and the temp
+   folder they came from is removed when it held nothing else; a rebuild
+   prunes the earlier builds' folders. Left in the temp folder, a reused
+   build would render them pink once it is cleaned.
 
 The build's **inputs** are the config, the script, every module it imported
 from the repository or from beside the script (md5s), the declared assets
@@ -315,10 +321,23 @@ near=0.01, far=10)` makes the overlay scene (transparent, its camera the film
 camera's field of view, or `fov` degrees vertical) on the media family's
 overlay, so its `panel()` and subtitles work on it; the film's render renders
 it frame for frame through its own Render Layers node. A script may instead
-set `_overlay_scene` (and `_overlay_camera`) to a scene it built. The overlay
-passes through the film's AgX, as the engine's passed through its tone map;
-for graphics whose colours must land exactly as drawn, use the media family's
-display-space edit pass ([motion graphics](motion-graphics.md)).
+set `_overlay_scene` (and `_overlay_camera`) to a scene it built. The engine
+mixed its overlay in before `renderOutput`, which tone-mapped nothing, so a
+HUD landed exactly as drawn; the Blender film always ends in AgX, which would
+grade a plain alpha-over (measured on the lower third below: its 80 %
+panel darkened the crate behind it only from (130, 84, 61) to (92, 74, 65),
+and the `#f4efe6` title ink came out (193, 191, 188)). So the overlay stage
+is the media family's authored signal
+route (`media.overlay.chain_overlay(authored=True)`): the over happens in
+display space and comes back through the inverse view transform, the HUD
+lands as drawn (measured on the same lower third: the title ink (244, 239,
+231) where its CSS is (244, 239, 230), the panel dark over the crate), and
+the screen hook still processes it with the film.
+`make_overlay_layer(..., authored=False)` keeps the plain alpha-over that AgX
+grades; a scene that called `chain_overlay` itself keeps its own stage.
+Saturated ink comes back only as close as AgX can show it; for such ink with
+no screen hook, the media family's display-space edit pass is exact
+([motion graphics](motion-graphics.md)).
 `_no_auto_enhance = True` (or `NO_AUTOENHANCE=1`) turns EEVEE's ray tracing
 and fast GI off and adds no runner stages; a scene's own chain stages stay.
 The digest's `render.auto_enhance` record says what was installed, like the

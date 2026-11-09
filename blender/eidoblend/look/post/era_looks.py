@@ -228,6 +228,7 @@ def make(scene, o, stage='era_looks', layer='over'):
     D.drive_exposure(scene, node.inputs['Exposure'])
     drive_far(scene, node.inputs['Far'])
     D.sync(scene)                                      # the display nodes take the scene's view transform and look
+    D.keep_synced()                                    # and again before each render / save, if the view changes
     node.inputs['Damp'].default_value = math.exp(-1.0 / (fps * 0.04))
     hist = []
     if K > 0:                                          # persist_frames=0: no CRT persistence, nothing on disk
@@ -293,9 +294,10 @@ def build(fps=24.0, K=None, rebuild=False):
     """The era pass as one node group (built once per K; `rebuild` forces it)."""
     K = persist_frames(fps) if K is None else int(K)
     atlas = glyph_atlas()
-    # version 2: the Far input and the TubeOn output (a file's older group is rebuilt)
+    # version 3: the toon's background normal (version 2: the Far input and the TubeOn output); a file's older group
+    # is rebuilt, its sub-groups with it
     return fn(f'{GROUP}_k{K}', _ins(K), [('Image', 'C'), ('TubeOn', 'S')], lambda g, a: _era(g, a, K, atlas),
-              rebuild=rebuild, version=2)
+              rebuild=rebuild, version=3)
 
 
 class _Ctx:
@@ -623,6 +625,8 @@ def _toon_fn():
             Ps.append(g.sqrt(g.lum(D)))
             Zs.append(zAt(at))
             n = g.tap(nimg, at)
+            # nothing drawn: the Normal pass is 0, WebGPU's cleared normal buffer decoded to (-1, -1, -1)
+            n = g.mix(n, (-1.0, -1.0, -1.0), 1.0 - g.step(1e-8, g.dot(n, n)))
             Ns.append(g.mix((0.0, 0.0, 1.0), n, hasN))
         zc = g.max(Zs[0], 1e-4)
         # flatten small texture into the fill: depth-aware 5-tap mean
@@ -671,7 +675,8 @@ def _toon_fn():
         return {'c': from_disp(g.clamp(g.mix(cel * page, TOON_INK, inkA), 0.0, 1.0))}
     ins = _PAINT_INS + [('Depth', 'S', 1.0), ('Normal', 'V', (0.0, 0.0, 1.0)), ('HasDepth', 'S', 0.0),
                         ('HasNormal', 'S', 0.0), ('Far', 'S', 1000.0)]
-    return fn('eido_era_toon', ins, [('c', 'V')], body, version=2)
+    # version 3: the background's normal as WebGPU's cleared buffer decoded it (a file's older group is rebuilt)
+    return fn('eido_era_toon', ins, [('c', 'V')], body, version=3)
 
 
 # ------------------------------------------------------------------------------------------------- watercolor

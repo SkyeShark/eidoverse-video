@@ -1,5 +1,5 @@
-"""test_quiet_room.py: the quiet room (UNKNOWN FORCE verse 1) built in Blender 5.2 EEVEE, checked, and rendered from
-the film's cams with the claudesona at her mark.
+"""test_quiet_room.py: the quiet room built in Blender 5.2 EEVEE, checked, and rendered from the set's cams: the set
+alone (--vrm stands the claudesona at the mark, at the scale the cams are framed for).
 
     # pre-draw the canvases once (system Python, outside the GPU slot):
     cd blender && python -c "import sys; sys.path.insert(0, '.'); from eidoblend.sets.unknown_force import \
@@ -7,12 +7,12 @@ the film's cams with the claudesona at her mark.
     # build, check, bake the room probe, render (from the main checkout, through the GPU slot):
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_quiet_room.py -- [--cams altar,pews,...] [--no_render]
-        [--samples 16] [--res 960x540] [--no_vrm] [--probe_samples 512] [--probe_spacing 0.5] [--save]
+        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.5] [--save]
 
 Checks (PASS / FAIL lines): the build's contents (merged meshes, the 56 chairs, the 360-tower backdrop's
 survivors, every board image at 960 texels per metre), three's light units, the probe fitted to the room, keyed
-update() read back at its frames (crate, shutter, beacon, launch lights, hell flicker), cams aimed at their targets,
-and each render's exposure. Stills: out/qr/qr_<cam>_<state>.png and a contact sheet.
+update() and animate() read back at their frames (crate, shutter, beacon, launch lights, hell flicker), cams aimed
+at their targets, and each render's exposure. Stills: out/qr/qr_<cam>_<state>.png and a contact sheet.
 """
 import math
 import os
@@ -30,23 +30,23 @@ from eidoblend.sets.unknown_force import interiors_lib as L  # noqa: E402
 from eidoblend.sets.unknown_force import quiet_room as QR  # noqa: E402
 
 A = T.args({'cams': 'altar,pews,crate,close,board,hatch,lectern,essay,altar_launch,altar_hell0', 'samples': 16,
-            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.5, 'no_render': False, 'no_vrm': False,
+            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.5, 'no_render': False, 'vrm': False,
             'save': False, 'no_bloom': False, 'cycles': '', 'look': '', 'look_cams': 'altar,crate'})
 OUT = os.path.join(T.OUT, 'qr')
 os.makedirs(OUT, exist_ok=True)
 
-# the shots: name -> (cam, song time, state) as the treatment times them
+# the stills: name -> (cam, t on the set's clock (the glow's flicker, the beacon), state)
 SHOTS = {
-    'board': ('board', 41.0, {}),
-    'close': ('close', 42.5, {}),
-    'altar': ('altar', 45.6, {}),
-    'pews': ('pews', 47.5, {}),
-    'lectern': ('lectern', 50.8, {}),
-    'essay': ('essay', 52.6, {}),
-    'hatch': ('hatch', 56.4, {'shipT': 0.5}),
-    'crate': ('crate', 59.0, {'shipT': 1.0, 'sale': 1.0}),
-    'altar_launch': ('altar', 59.6, {'shipT': 1.0, 'sale': 1.0}),
-    'altar_hell0': ('altar', 45.6, {'hell': 0.0}),        # the hell glow out: pits, slot, red key, vault light
+    'board': ('board', 1.0, {}),
+    'close': ('close', 2.5, {}),
+    'altar': ('altar', 5.6, {}),
+    'pews': ('pews', 7.5, {}),
+    'lectern': ('lectern', 10.8, {}),
+    'essay': ('essay', 12.6, {}),
+    'hatch': ('hatch', 16.4, {'shipT': 0.5}),               # the crate halfway out of the hatch
+    'crate': ('crate', 19.0, {'shipT': 1.0, 'sale': 1.0}),  # shipped, the launch lights up
+    'altar_launch': ('altar', 19.6, {'shipT': 1.0, 'sale': 1.0}),
+    'altar_hell0': ('altar', 5.6, {'hell': 0.0}),           # the hell glow out: pits, slot, red key, vault light
 }
 
 
@@ -185,7 +185,31 @@ def main():
             bad.append(('beacon', f))
     T.check('update() keyed: crate, shutter, launch lights, hell flicker, uniforms and beacon read back at 11 frames',
             not bad, f'mismatch at {bad}' if bad else 'all 11')
-    # the parts' own drivers, each keyed alone (the conductor can drive the crate and the launch separately)
+    # animate(): the set on its own clock, its state curves (a span, a 4-tuple, a held number), keyed per frame
+    fps = 30.0
+    keyed = room.animate((201, 260), t0=3.0, fps=fps, ship_t=(3.2, 4.6), sale=(4.4, 4.9, 0.0, 0.8), hell=0.9)
+    bad = []
+    for f in (201, 215, 230, 245, 260):
+        scene.frame_set(f)
+        t = 3.0 + (f - 201) / fps
+        ship = min(1.0, max(0.0, (t - 3.2) / 1.4))
+        sale = 0.8 * min(1.0, max(0.0, (t - 4.4) / 0.5))
+        sy, cz, rx = ref_crate(ship)
+        if (Vector(room.parts['crate']['group'].location) - Vector(L.to_blender((QR.CONV['x'], QR.CONV['top'], cz)))).length > 1e-5:
+            bad.append(('crate', f))
+        if abs(room.root['uSale'] - sale) > 1e-5 or abs(room.root['uT'] - t) > 1e-4 or abs(keyed[f] - t) > 1e-9:
+            bad.append(('uniform', f))
+        flk = 0.86 + 0.08 * math.sin(t * 6.1) + 0.05 * math.sin(t * 13.7 + 1.3) + 0.03 * math.sin(t * 29.3 + 0.4)
+        if abs(room.root['uHell'] - 0.9 * flk) > 1e-5:
+            bad.append(('hell', f))
+    try:
+        room.animate((1, 2), shiP=1.0)
+        typo = False
+    except TypeError:
+        typo = True
+    T.check('animate(): 60 frames keyed on the set\'s own clock (ship_t span, sale 4-tuple, hell held), read back; '
+            'an unknown key is refused', not bad and typo and len(keyed) == 60, f'mismatch at {bad}' if bad else '')
+    # the parts' own drivers, each keyed alone (a piece can drive the crate and the launch separately)
     room.parts['crate']['update'](56.0, 0.42, frame=150)
     room.parts['saleLights']['set'](0.8, frame=150)
     room.parts['hell']['set'](0.6, 52.0, frame=150)
@@ -270,7 +294,7 @@ def main():
     T.render_setup(scene, (W, H), int(A['samples']), bloom=not A['no_bloom'])
     scene.world = room.env
     room.eevee_settings(scene)
-    if not A['no_vrm']:
+    if A['vrm']:
         T.load_singer(L.to_blender(QR.MARK['pos']), 0.0, QR.SUIT_SCALE)
     tb = time.perf_counter()
     secs = room.bake_probes(scene)
@@ -300,9 +324,9 @@ def main():
         T.check('hell 0 takes the red glow out of the altar shot', red['altar_hell0'] < 0.5 * red['altar'],
                 f"red excess {red['altar']:.4f} -> {red['altar_hell0']:.4f}")
     if A['look']:
-        # the film's look over the same keyed frames (qr_final_altar_argue / qr_final_crate_sale_argue in the
-        # WebGPU probes): the aeropittura under the HUD, its sun cones from the altar board
-        U = T.film_look(scene, A['look'])
+        # an aeropittura look over the same keyed frames (as qr_final_altar_argue / qr_final_crate_sale_argue in the
+        # WebGPU probes): the post pass under the HUD, its sun cones from the altar board (room.focal)
+        U = T.apply_look(scene, A['look'])
         for nm in [c for c in A['look_cams'].split(',') if c in want]:
             cam = SHOTS[nm][0]
             ok = T.aim_look(scene, U, cams[cam], room.focal)

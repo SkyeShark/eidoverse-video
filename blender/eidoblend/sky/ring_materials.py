@@ -7,7 +7,9 @@ eido_ring_arc_shade  arcShade(): the arc's terminator (eclipsed per pixel), gold
                      per-channel transmittance over the height-integrated optical length (8 km scale height), the
                      sub-cloud rain veil with its drifting curtains, the inscatter that collapses at night and under the
                      eclipse, and the foot veil that dissolves the seam at the horizon
-band / walls / cloud sheet / haze walls: the materials, each line named after its JS term.
+band / walls / cloud sheet / haze walls: the materials, each line named after its JS term. The band, walls and sheet
+render in the ring's plate scene (Ringworld.make_plate), whose image the sky's camera layer puts under the clouds and
+behind every local object; the haze walls stay in the main scene.
 Coordinates: Blender world space (Z up); a three.js constant direction (x, y, z) appears here as (x, -z, y). Every
 ring object is translation-only, so its object space is world space about the ring axis.
 """
@@ -16,7 +18,7 @@ import math
 import bpy
 
 from .nodes import Graph, new_group, keyed_values_group, vnoise2_group, vnoise2_rep_group
-from .sky_view import overlay_opaque, blended_surface
+from .sky_view import blended_surface
 
 KEYS = 'eido_ring_keys'
 ARC = 'eido_ring_arc_shade'
@@ -148,6 +150,8 @@ def arc_shade_group():
 def _image(path, colorspace='Non-Color'):
     img = bpy.data.images.load(path, check_existing=True)
     img.colorspace_settings.name = colorspace
+    if colorspace == 'Non-Color':
+        img.alpha_mode = 'CHANNEL_PACKED'          # data maps: an alpha channel is data (the v4 AO), never associated
     return img
 
 
@@ -208,7 +212,10 @@ def band_material(ring, ob, authored=False):
     rep = float(ring.info['repeat'])
     u_t = g.mul(u, rep)
     img_uv = g.comb(u_t, g.one_minus(vg), 0.0)             # every map: Blender image space (uvF of the JS)
-    land = g.image(ring.map_image, img_uv, label='band_albedo').outputs['Color']
+    if A.get('bandColor'):                                 # Eanpa's v4 albedo, the relief's match (ring_relief.js)
+        land = g.image(_image(A['bandColor'], 'sRGB'), img_uv, label='band_albedo_v4').outputs['Color']
+    else:
+        land = g.image(ring.map_image, img_uv, label='band_albedo').outputs['Color']
     m_soft = g.image(_image(ring.mask_soft_path), img_uv, label='landmask_soft').outputs['Color']
     ms, _, _ = g.sep(m_soft)
     m_sel = ms if opt_on(o, 'waterWhite', False) else g.one_minus(ms)
@@ -344,7 +351,8 @@ def band_material(ring, ob, authored=False):
     g.link(emis, bsdf.inputs['Emission Color'])
     bsdf.inputs['Emission Strength'].default_value = 1.0
     out = g.node('ShaderNodeOutputMaterial')
-    g.link(overlay_opaque(g, bsdf.outputs[0]), out.inputs['Surface'])
+    # no cloud overlay: the band renders in the ring's plate, and the sky's camera layer composites the clouds over it
+    g.link(bsdf.outputs[0], out.inputs['Surface'])
     ob.data.materials.clear()
     ob.data.materials.append(m)
     if not authored:
@@ -459,7 +467,7 @@ def walls_material(ring, ob):
     g.link(emis, bsdf.inputs['Emission Color'])
     bsdf.inputs['Emission Strength'].default_value = 1.0
     out = g.node('ShaderNodeOutputMaterial')
-    g.link(overlay_opaque(g, bsdf.outputs[0]), out.inputs['Surface'])
+    g.link(bsdf.outputs[0], out.inputs['Surface'])              # in the plate: the camera layer adds the clouds
     ob.data.materials.clear()
     ob.data.materials.append(m)
     return m
@@ -493,15 +501,21 @@ def cloud_sheet_material(ring, ob):
     emis = g.vadd(g.vscale(g.vmul(lit, arc.outputs['Trans']), k['rad']), g.vscale(arc.outputs['Insc'], 0.35))
     alpha = g.mul(coverage, g.smoothstep(3500.0, 7000.0, arc.outputs['FragD']))   # NEAR FADE
     out = g.node('ShaderNodeOutputMaterial')
-    g.link(blended_surface(g, g.vscale(emis, alpha), alpha, with_overlay=True), out.inputs['Surface'])
+    # over the band in the plate; the camera layer composites the local clouds over both
+    g.link(blended_surface(g, g.vscale(emis, alpha), alpha, with_overlay=False), out.inputs['Surface'])
     ob.data.materials.clear()
     ob.data.materials.append(m)
     return m
 
 
 def haze_wall_material(ring, ob, rain=False):
-    """FOG BOUNDARY (a low haze band) or RAIN WALL (up to the cloud base, only in real rain): local haze, drawn over
-    the clouds as WebGPU's transparent pass did, so no overlay."""
+    """FOG BOUNDARY (a low haze band) or RAIN WALL (up to the cloud base, only in real rain): local haze in the main
+    scene, depth-tested against the local geometry, so a terrain past the wall takes its haze, and drawn over the
+    band (which reaches the frame through the sky's camera layer). It is also drawn over the clouds of that layer:
+    WebGPU's draw order puts the cloud dome (-98) over these walls (-99), but the clouds' overlay cannot be laid on
+    them here, because a wall cannot tell sky behind it from a mesa behind it, and the overlay would paint clouds onto
+    the mesa. The difference is the veil over the cloud bases in the bottom fifth of the sky, in rain (rain wall)
+    and at the horizon line (fog wall); see the guide."""
     m = _new_material('eido_ring_rain_wall' if rain else 'eido_ring_fog_wall', 'BLENDED')
     m.use_backface_culling = True
     g = Graph(m.node_tree)

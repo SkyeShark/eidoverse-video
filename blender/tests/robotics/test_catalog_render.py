@@ -52,8 +52,14 @@ def main():
             r = make_robot(rid, scene=sc)
             st = r.stats()
             recolourable = sum(1 for m in r.materials.materials if m.get('eidoverse_recolor') is not None)
-            K.check(f'{rid}: loads with {st["triangles"]} triangles, {st["parts"]} parts',
-                    st['triangles'] > 0 and st['parts'] > 0 and st['triangles'] == entry['triangles'],
+            # the catalog counts the GLB's own triangles; a dispenser also gets filament.js's PTFE tubes and live
+            # strand at load (installFilament, as index.js runs it), counted by stats() as the WebGPU stats count them;
+            # the loader marks the meshes an installer registered
+            added = [o for o in r.meshes() if not o.hide_render and o.get('installed_part')]
+            extra = sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in added)
+            K.check(f'{rid}: loads with {st["triangles"]} triangles, {st["parts"]} parts'
+                    + (f' ({extra} of them filament.js parts added at load: {len(added)} meshes)' if added else ''),
+                    st['triangles'] > 0 and st['parts'] > 0 and st['triangles'] - extra == entry['triangles'],
                     f"catalog {entry['triangles']}")
             K.check(f'{rid}: recolour on every recolourable material', r.recoloured == recolourable,
                     f'{r.recoloured}/{recolourable}')

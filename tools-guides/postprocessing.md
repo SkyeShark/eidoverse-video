@@ -10,9 +10,21 @@ stylized looks, overlays. Code: `blender/eidoblend/look/render_settings.py`
 `look/post/custom_effects.py` (the effect registry), `look/post/era_looks.py`,
 `look/post/aeropittura.py`, `look/post/after_image.py` and
 `look/post/screen_effects.py` (the passes), `look/post/history.py` (earlier
-frames). Tests: `blender/tests/look/test_post.py` and
-`blender/tests/post_era/` render every effect, and their sheets are the
-reference pictures.
+frames). Tests: `blender/tests/look/test_post.py`,
+`blender/tests/post_era/` and `blender/tests/post_effects/` render every
+effect, and their sheets are the reference pictures; `post_effects/` checks
+the screen effects against their shaders in numpy on a still life
+(`test_parity.py`), lays out the whole catalogue at the WebGPU defaults and
+with options turned (`test_looks.py`), and renders the scene-side effects
+live (`test_live.py`); `test_verify_probes.py` holds old_bw_film's simplex to
+the shader's statistics and finds its dust frames, three's Gaussian kernel to
+numpy, underwater on a portrait frame, its bubbles out of the Depth pass,
+godrays in a closed room, focus_blur's screen mode following a moving target
+(and its saved `.blend`), and nuclear_explosion through the registry;
+`post_era/test_film_render.py` renders the temporal
+passes as a film is rendered, and `post_era/test_size_and_view.py` checks
+them under what the harness changes after a scene applied them (the probe's
+render size, a later view look).
 
 ## The EEVEE look — `apply_auto_enhance`
 
@@ -58,8 +70,14 @@ before reaching for a denoiser.
 
 The compositor graph keeps the WebGPU chain's order:
 
-    Render Layers -> bloom -> 'under' effects -> overlay (a HUD, alpha over) -> 'over' effects -> Group Output
+    Render Layers -> 'prebloom' effects -> bloom -> 'under' effects -> overlay (a HUD, alpha over) -> 'over' effects -> Group Output
 
+The 'prebloom' slot is WebGPU's `_autoEnhancePreBloomHook`: `lensflare` and
+`anamorphic_flare` sit there, so the bloom softens their ghosts and streaks
+too, whatever order they and the bloom were applied in (their `layer` option
+does not move them, as it did not there). WebGPU had one pre-bloom hook, so a
+second pre-bloom effect replaced the first; here both apply, in the order
+given: anamorphic_flare then lensflare ghosts the streaked highlight.
 All of it works on scene-linear light. AgX, the scene's view transform,
 applies once after the whole graph, as three's tone map applied after its
 overlay. Stages are nodes named `<slot>:<name>`, kept in order and relinked
@@ -97,15 +115,17 @@ e.uniforms['rgb_shift']['amount'].default_value = 0.008  # an effect's inputs: s
 fx.list()                                                # what exists, its options, how each is done
 fx.list_effects()                                        # the names (CustomEffectsDeno.listEffects)
 fx.register('my_look', build, params=[('amount', 1.0)])  # another package's effect (build(scene, opts) -> a group)
-fx.remove(scene, 'rgb_shift'); fx.clear(scene)           # take effects out of the chain
+fx.applied(scene)                                        # [(slot, name, node)]: the chain's, then the natives
+fx.remove(scene, 'rgb_shift'); fx.clear(scene)           # take effects out (a native's scene changes go back too)
 ```
 
 The registry keeps `custom_effects_deno.js`'s rules:
 
 - `effects` is a name, a comma string or a list. Every name must be
   registered: an unknown one raises a KeyError naming them all, before
-  anything is built. A registered name that is not ported raises
-  NotImplementedError with the reason.
+  anything is built. Every one of WebGPU's 33 names is ported
+  (`nuclear_explosion` through the SDF volumes' module, which checks its own
+  options: `register(..., passthrough=True)` hands them on as given).
 - Effects chain in the order given, each seeing its predecessor's output. The
   WebGPU registry needed `rtt()` render targets between stages; here every
   stage is a node in one compositor graph, so any number chain.
@@ -118,19 +138,34 @@ The registry keeps `custom_effects_deno.js`'s rules:
   (`e.uniforms['opacity']`) and also answers by name
   (`e.uniforms['glitch_bars']['opacity']`); with several it is keyed by
   effect name only.
-- `e.update(t)` and `e.set_resolution(w, h)` exist and do nothing: Scene Time
-  drives time inside the graph and the compositor works at the render size.
+- `e.update(t)` and `e.set_resolution(w, h)` exist. Nothing is pushed per
+  frame: Scene Time drives time inside the graph and the compositor works at
+  the render size. `e.update()` does copy the scene's view transform and look
+  into the display-space looks again (era looks, aeropittura). Those passes
+  also turn on `display.keep_synced()`, which does the same before every
+  render and save in the session, so a look set after them (the harness's
+  config `render` block runs after `setup()`) still lands paper and ink as
+  authored. Measured: the poster's bare newsprint came out 16 levels off when
+  the look went from AgX Base Contrast to Punchy with nothing synced, 0.08
+  once synced (`tests/post_era/test_size_and_view.py`).
+  `display.stale(scene)` lists display nodes that differ from the view.
 
 One difference: `apply_to` adds to the scene's chain, so a bloom applied by a
 set and a look applied by the film both stay. `CustomEffectsDeno.applyTo`
 replaced the scene's effects on every call; `fx.clear(scene)` first gives that.
+The native effects change the scene rather than the compositor (the fog
+volume, the lens's depth of field, the wireframe's material override,
+underwater's bubbles). `fx.applied(scene)` lists them after the chain's, and
+`fx.remove` / `fx.clear` put the scene back as it was before the first
+`apply_to` (checked: the fog volume, the focus empty and the bubbles gone; the
+lens, the override and the volume settings restored).
 
 **The options are the WebGPU effect's own.** Each effect takes the options of
 its `effects_tsl/<name>.js`, in snake_case. A ported scene's camelCase spelling
 is accepted (`barFreq` is `bar_freq`), in `apply_to`, `uniforms` and `key`
 alike. An option the effect doesn't know raises a KeyError that names the ones
 it does; `{'rgb_shift': {'pixels': 4}}` raises. A WebGPU option with no Blender
-counterpart, such as lensflare's `ghostSpacing`, prints why and is ignored.
+counterpart, such as godrays' `cloudOpacityTex`, prints why and is ignored.
 Nothing is dropped silently.
 
 **A timed burst is keyframes**, not a per-frame loop. The uniforms are the
@@ -167,49 +202,120 @@ Native first: what EEVEE does in the render is done there, not faked in post.
 
 | WebGPU effect | options (WebGPU's, snake_case) | Blender | status |
 | --- | --- | --- | --- |
-| `glitch_bars` | `bar_freq`, `scroll_speed`, `shift`, `opacity` | a group, its shader ported: bars where `fract(v·bar_freq + t·scroll_speed) ≥ 0.7`, red and blue split by `shift·sin(12t + 50v)` | rendered |
-| `rgb_shift` | `amount` (UV), `angle`, `opacity` | three's `rgbShift`: red at uv + amount·(cos, sin), blue at uv − that | rendered, edges checked |
-| `radial_blur` | `center_x`, `center_y`, `weight`, `decay`, `exposure`, `opacity`; `count` (built in) | three's `radialBlur`: `count` taps toward the centre weighted weight·decayᵏ, ×exposure/count, added over the frame | rendered |
+| `glitch_bars` | `bar_freq`, `scroll_speed`, `shift`, `opacity` | a group, its shader ported: bars where `fract(v·bar_freq + t·scroll_speed) ≥ 0.7`, red and blue split by `shift·sin(12t + 50v)`, v down the frame as WebGPU's (the bars scroll down); it writes alpha 1, so on a transparent film `opacity` fills the sky's alpha too, as WebGPU's | rendered, parity (opaque and transparent film) |
+| `rgb_shift` | `amount` (UV), `angle`, `opacity` | three's `rgbShift`: red at uv + amount·(cos, sin), blue at uv − that, in WebGPU's uv (a positive angle moves red down the frame) | rendered, edges checked, parity |
+| `radial_blur` | `center_x`, `center_y`, `weight`, `decay`, `exposure`, `opacity`; `count` (built in) | three's `radialBlur`: `count` taps toward the centre weighted weight·decayᵏ, ×exposure/count, added over the frame; the centre in WebGPU's uv (`center_y` 0.25 is a quarter down from the top), the interleaved-gradient start offset from the pixel counted from the top | rendered, parity |
 | `box_blur` | `opacity`; `size` 1..3, `separation` (built in) | three's `boxBlur`: a (2·size + 1)² grid of taps `separation` px apart, averaged (rows then columns) | rendered |
 | `sepia` | `amount`, `opacity` | three's sepia matrix (glfx.js) | rendered |
-| `old_bw_film` | `opacity` | the silent-film pass: 12 fps cadence, gate weave, dust in drifting regions on some frames, exposure flicker, vignette, jump cut at 7.7–8.2 s of a 24 s loop, BT.601 luma. Blender's Perlin noise stands in for the shader's simplex (spread ×1.6 to keep the dust thresholds' rarity) | rendered over 12 frames |
-| `neon_edges` | `glow_color`, `threshold`, `strength`, `opacity` | 4-tap Laplacian of BT.601 luma; core + half the halo in `glow_color` (hot pink by default), added over the frame | rendered |
+| `old_bw_film` | `opacity`; `width`, `height` warned | the silent-film pass: 12 fps cadence, gate weave, dust in drifting regions on the frames whose seed falls in a band, exposure flicker, vignette, jump cut at 7.7–8.2 s of a 24 s loop, BT.601 luma, in WebGPU's uv (y down). The dust is the shader's simplex noise (`screen_effects._simplex_fn`): its skewed lattice (cells tilted 30°, so the thresholded specks have no axis-aligned grid, the reason the shader chose it), the (0.5 − d²)⁴ corner kernels, ×70/2 + ½; each corner's gradient comes from Blender's White Noise of the integer lattice point where WebGPU hashed it in u32 arithmetic, so the specks fall elsewhere with the same statistics | rendered over 48 frames, the dust frames looked at full size; the noise field's statistics held to the shader's (numpy) |
+| `neon_edges` | `glow_color`, `threshold`, `strength`, `opacity`; `width`, `height` warned | 4-tap Laplacian of BT.601 luma; core + half the halo in `glow_color` (hot pink by default), added over the frame (alpha 1, as `glitch_bars`) | rendered |
+| `nuclear_explosion` | the SDF volumes' module's (`origin` in three's axes, `scale`, `time_offset`, `loop_seconds`, `opacity`, `quality`, `bake`, `disable_for_perf_test`, ...), checked there | always under the overlay. WebGPU's screen raymarcher of the mushroom cloud, as Volume objects in the scene: [`eidoblend.sdf.nuclear_explosion`](sdf-volumes.md) (cap, stem, trail, base surge, its heat palette, keyed glow lamps), baked over the scene's frames from its camera; the registry passes the options through to it, and `remove` / `clear` take the volumes and lamps out | through the registry: built (unbaked) and removed |
 | bloom (UnrealBloom) | `strength`, `radius` (= Glare Size), `threshold` | Glare 'Bloom' | rendered |
-| `lensflare` | `threshold`, `strength`, `ghost_tint`, `ghost_samples` (= Iterations 2..5), `opacity` (× strength); `ghost_spacing`, `ghost_attenuation` warned | Glare 'Ghosts' | rendered |
-| `anamorphic_flare` | `threshold`, `strength`, `color` (blue by default), `opacity` (× strength), Blender's `fade`; `scale`, `samples` warned | Glare 'Streaks', 2, horizontal (the bloom slot, as WebGPU's pre-bloom hook) | rendered |
-| `focus_blur` | `focus_distance`, `focus_objects` (their focus points averaged, followed every frame), Blender's `fstop`; `focal_length`, `bokeh_scale`, `opacity` warned | the camera's depth of field | native |
-| `depth_fog` | `color`, `density` (per metre, as WebGPU's exponential falloff), `noise_amount`, `noise_scale`; `edge_radius`, `edge_strength`, `opacity` warned | a fog layer: a volume box lit and shadowed by the scene; the volume range set to cover it | native, rendered with and without noise |
-| `godrays` | depth_fog's; `light`, `strength`, `cloud_opacity_tex` warned | the fog layer + volumetric shadows; `sun_beams` (Glare 'Sun Beams') as the post fallback | native; `sun_beams` rendered but not judged: the test frame had no source above its threshold |
+| `lensflare` | `threshold`, `ghost_tint`, `ghost_spacing`, `ghost_attenuation`, `strength`, `opacity`; `ghost_samples` (built in) | three's `LensflareNode`, ported: `ghost_samples` copies of the highlights above `threshold`, mirrored through the centre `ghost_spacing` apart (wrapped at the edges), each faded by (1 − distance to centre)^`ghost_attenuation` and tinted; computed at the node's quarter resolution (its four quarter-size texel centres round each pixel, blended as its bilinear read-back); added × `strength` in the 'prebloom' slot | rendered, parity (1e-9) |
+| `anamorphic_flare` | `threshold`, `scale`, `strength`, `color` (blue by default), `opacity`; `samples` (built in) | three's `AnamorphicNode`, ported: a horizontal streak of `samples` taps `scale` px apart through every highlight, each the colour × its luminance's excess over `threshold` × a linear falloff, tinted `color`; added × `strength` in the 'prebloom' slot. Its luminance is three's `luminance()` of the RGBA sample, which TSL computes as dot(rgba, (0.2126, 0.7152, 0.0722, **1**)): Y + alpha. So on an opaque frame the default threshold 3 streaks everything above Y = 2, and a threshold of 1 streaks the whole frame; on a transparent film the sky (alpha 0) streaks from Y > 3. At the defaults the streak reaches 24 px each way: a short smear, not a frame-wide line; a highlight smaller than `scale` streaks dotted, as the taps fall | rendered, parity on an opaque and a transparent film |
+| `focus_blur` | `focus_distance`, `focus_objects`, `focal_length`, `bokeh_scale`, `opacity`; `mode`: `'lens'` (the default; Blender's `fstop` too) or `'screen'` | `'screen'`: focus_blur.js as WebGPU ran it, three's `DepthOfFieldNode` ported (`screen_effects.focus_blur_screen`): from the Depth pass, CoC = smoothstep(0, `focal_length`, \|z − `focus_distance`\|) split into a near and a far field, the near one blurred by three's `gaussianBlur(CoC, 1, 2)` so the blurred foreground spreads over the sharp background, each field averaged over the 64-point golden-angle disc of radius `bokeh_scale` × CoC px and dilated by the 16-point max, the far field mixed in by min(CoC, 0.5)·2, then the near; `opacity`; `focus_objects` keyed every frame to their origins' mean distance along the view (WebGPU's `update()`; `screen_effects.set_focus_objects` re-keys). three runs the blur passes at half resolution; here they run at full (about a pixel sharper). `'lens'`: the camera's depth of field, WebGPU's knobs choosing the f-stop that blurs a point `focal_length` beyond the focus plane to three's full-CoC radius, 1.5 × `bokeh_scale` px (`fx.fstop_for_blur(scene, cam, focus_distance, focal_length, bokeh_scale)`); a lens keeps blurring past that distance (and nearer) where three's clamps, and `opacity` cannot mix a lens | 'screen': parity (its full-size structure), against three at half size, live with a target walking away and its saved `.blend` in a fresh Blender; 'lens': native, the radius checked (3.00 px for `focal_length` 1, `bokeh_scale` 2) |
+| `depth_fog` | `color`, `density` (per metre, as WebGPU's exponential falloff), `noise_amount`, `noise_scale`; `mode`: `'volume'` (the default) or `'screen'`; in `'screen'`: `edge_radius`, `edge_strength`, `opacity`, WebGPU's defaults (density 0.04, color (0.55, 0.62, 0.72), noise 0.4 at scale 6) | `'volume'`: a fog layer, a volume box lit and shadowed by the scene, the volume range set to cover it (`anisotropy`, `size`, `centre`, `near`, `far` are its own). `'screen'`: depth_fog.js as WebGPU ran it, a pass on the Depth pass: 1 − exp(−distance × density × (1 − n + n·noise)), value noise in screen space, three's `depthAwareBlend` (8 Poisson taps `edge_radius` px out, the mask read `edge_strength` × their mean same-depth offset away), the sky fogged to the fog colour | both rendered; 'screen' parity |
+| `godrays` | depth_fog's; `light` (an object or its name; default the first sun or point light), `strength`, `opacity`; `cloud_opacity_tex` warned | three's `GodraysNode` as EEVEE makes it: the fog layer + volumetric shadows, so the light's beams pass only through gaps in the geometry; `strength` and `opacity` scale that light's volume factor (strength / 0.5 × opacity: 0.5, WebGPU's default, is its physical scattering; set only when `light`, `strength` or `opacity` is given, so a set's own tuned factor stays otherwise), taken back by `remove` / `clear`; `sun_beams` (Glare 'Sun Beams') as the post fallback. Unlike three's node, which added the light's shafts alone, the volume also scatters the world's light, and EEVEE lights a volume with the world unoccluded unless a Light Probe Volume is baked: under a daylit sky (even in a closed room) the fog reads as a haze with the shafts faint in it, and it dims what lies behind. Under a dark sky, or indoors with a baked volume probe, the shafts are what shows | native, rendered at strength 0.5 and 1.5; in a closed room lit through gaps in one wall: under the daylit sky a uniform haze, under a dark sky the shafts (mean 21 → 33 levels from strength 0.5 to 1.5) |
 | `era_looks` | the 25 weights and `px` ([below](#era-looks--postera_lookspy)); Blender's `persist_frames`, `cuts`; `time`, `frame`, `weave` (Scene Time drives them), `cam_near`, `cam_far` (a driver on the camera's clip end) warned | one pass, every look a weight | every preset rendered, parity-checked |
 | `aeropittura` | the 10 ingredients, `force`, the 5 plane weights, `focal`, `spare`, `spin`, `swirl`, `swirl_r`, `brush_angle`, `chev_dir`; Blender's `cuts` ([below](#aeropittura--postaeropitturapy)); `time`, `frame` (Scene Time) warned | one pass, the futurist painting | every look and plane family rendered |
 | `after_image` | `damp`, `opacity`; Blender's `cuts` | three's afterImage: its own trail a frame earlier, read back from disk ([below](#earlier-frames--after_image-and-posthistorypy)) | every frame checked against the feedback in numpy |
 | `wavy` | `amplitude` (px), `frequency`, `phase`, `animate`, `anim_speed`, `opacity`; `width`, `height` warned | rows shifted by amplitude·sin(frequency·y + phase [+ t·anim_speed]) | rendered, parity |
 | `kaleidoscope` | `segments`, `rotate`, `opacity` | the frame folded into mirrored wedges about its centre | rendered, parity |
-| `jitter` | `speed`, `amplitude`, `opacity` | red, green, blue each displaced by a sin-hash burst; the seed folded every 1000 as WebGPU's update did | rendered, time-driven |
-| `melt` | `speed`, `swirl`, `opacity` | each pixel pulled along its hue angle by its saturation, breathing with time | rendered, time-driven |
+| `jitter` | `speed`, `amplitude`, `opacity` | red, green, blue each displaced by a sin-hash burst; the seed folded every 1000 as WebGPU's update did | rendered, time-driven (bursts, then quiet frames) |
+| `melt` | `speed`, `swirl`, `opacity` | each pixel pulled along its hue angle by its saturation, breathing with time | rendered, time-driven, parity |
 | `dithering` | `levels`, `opacity` | perceptual quantisation with three's `bayerDither` offset | rendered, parity |
-| `chromatic_aberration_alpha` | `amount`, `angle`, `opacity` | red and blue split along `angle`, each weighted by its own sample's alpha | rendered, parity |
+| `chromatic_aberration_alpha` | `amount`, `angle`, `opacity` | red and blue split along `angle`, each weighted by its own sample's alpha | rendered, parity (also on a transparent film: the alpha weighting) |
 | `bw_halftone` | `threshold`, `dot_size`, `angle` (degrees), `ink_color`, `paper_color`, `opacity`; `width`, `height` warned | a rotated cosine dot screen thresholded against luminance | rendered, parity |
-| `bleach_bypass` | `amount`, `opacity` | three's `bleach()` | rendered, parity |
-| `hash_blur` | `amount`, `opacity`; `repeats` (built in) | three's `hashBlur()`: `repeats` taps on a hashed spiral | rendered |
-| `crt` | `opacity`; `width`, `height` warned | the curved tube: barrel warp, wobble, guns and ghosts, rolling scanlines, flicker, aperture grille | rendered, time-driven |
-| `vhs_tape` | `intensity`, `opacity`; `width`, `height` warned | tape wobble, tracking noise, head-switching rows, YIQ chroma smear over a sigma-1 blur, dropouts, grain, tint | rendered, time-driven |
-| `rain_on_camera` | `amount`, `speed`, `drop_size`; `resolution`, `directions`, `quality`, `blur_size` (built in) | drops running down the lens: the frame refracted through them and blurred behind them | rendered, time-driven |
-| `blueprint` | `paper_color`, `grid_color`, `ink_color`, `cell_px`, `major_every`, `minor_line_w`, `major_line_w`, `grid_strength`, `major_strength`, `edge_strength`, `threshold`, `sharpness`, `depth_weight`, `normal_weight`, `rim_weight`, `rim_sharpness`, `shade_mid`, `shade_stripe_px`, `shade_line_width`, `paper_grain`, `vignette`, `opacity`; `shade_hi` (never read by its shader), `width`, `height`, `cam_near`, `cam_far` warned | blueprint paper, printed grid rulings, ink on depth, normal and rim edges, striped shading; the Normal pass turned to view space by the camera's axes (drivers). Its normals are decoded twice, as WebGPU's were, so the rim fires about 60° from facing | rendered |
-| `cross_hatch` | `wiggle`, `flicker`, `outline_strength`, `hatch_strength`, `depth_outline_strength`, `depth_outline_thresh`, `opacity`; `width`, `height`, `cam_near`, `cam_far` warned | a pencil drawing: outlines from the gradient of the noise-wiggled frame at three scales plus depth edges, five hatch layers following the value (skipped on bright pixels, turned on near objects), a facing boost from the view normal, paper grain, vignette, S-curve. Its 256 × 256 noise texture is regenerated byte for byte (the same LCG, run with JavaScript's arithmetic) | rendered |
-| `underwater` | `horizon_color`, `shallow_color`, `fog_density`, `fog_power`, `caustic_amt`, `caustic_scale`, `godray_amt`, `opacity`; `bubble_count`, `bubble_radius`, `bubble_range_y` (built in); `bubble_amt` (never read by its shader) warned | always under the overlay. The screen pass: a caustic water roof where nothing was drawn, caustics on up-facing geometry at its world position, depth fog to the horizon colour, god rays; positions rebuilt from the Depth pass along the camera's rays (its fov, near, far, axes and position, by drivers). The bubbles: Geometry Nodes on Scene Time round the camera's position, seeded (WebGPU drew them from Math.random()) | rendered over saved frames and live |
-| `retro_wireframe` | `color` (`green`, `amber`, `blue`, `multicolor`), `line_width` (px), `bg_color`, `line_intensity`, `hdr_channel_cap` | geometry-side, as WebGPU's material swap: a view-layer material override whose Wireframe node (pixel size) draws every render triangle at a constant pixel width, emission only, the world the background colour; `multicolor` adds a Geometry Nodes modifier storing a hash per triangle. `screen_effects.set_wire_color(scene, U, name)` and `retro_wireframe_cleanup(scene)` are WebGPU's `setColor` and `cleanup` | rendered live |
-| `full_toon` | `near_levels`, `far_levels`, `band_softness`, `hue_shift`, `saturation`, `contrast`, `smooth_radius`, `shadow_tint`, `midtone_tint`, `highlight_tint`, `outline_color`, `outline_strength`, `outline_threshold`, `outline_sharpness`, `outline_depth_weight`, `outline_normal_weight`, `opacity`; `width`, `height`, `cam_near`, `cam_far` warned | a screen cel pass on the Depth and Normal passes: depth-aware blur, bands by depth, a palette tint, outlines; its depth is WebGPU's 2z / (z + far), far from the camera's clip end | rendered |
+| `bleach_bypass` | `amount`, `opacity` | three's `bleach()`. Its overlay formula is for 0..1 colour, and the hook hands it HDR light, so a highlight above about 1 (a lamp, a specular glint) inverts to black, in WebGPU as here. The hook hands `bleach()` the rgb alone, so its `base.a` is TSL's pad, 1.0: `amount` weights every pixel, a transparent one too | rendered, parity (opaque and transparent film) |
+| `hash_blur` | `amount`, `opacity`; `repeats` (built in) | three's `hashBlur()`: `repeats` taps on a hashed spiral (its `degrees()` of an angle already in degrees kept) | rendered, hash-noise parity |
+| `crt` | `opacity`; `width`, `height` warned | the curved tube: barrel warp, wobble, guns and ghosts, ×2.8 phosphor boost, vignette, rolling scanlines, flicker. Its aperture grille is floor(uv·W) mod 2, an integer: as written the grille dims no column, in WebGPU as here | rendered, time-driven, parity |
+| `vhs_tape` | `intensity`, `opacity`; `width`, `height` warned | tape wobble, tracking noise, head-switching rows (at the TOP of the frame: the shader's uv runs down), YIQ chroma smear over three's `gaussianBlur(tex, null, 1)`, dropouts, AC beat, grain, tint. That blur is not a 1 px Gaussian: `GaussianBlurNode` takes 3 + 2·sigma taps each side of the centre (to ±4 px) weighted by a Gaussian of s = taps / 3 = 1.67 px, unnormalised (0.994 a pass); `screen_effects.three_gauss` is that kernel | rendered, time-driven, hash-noise parity; the kernel alone at parity |
+| `rain_on_camera` | `amount`, `speed`, `drop_size`; `resolution`, `directions`, `quality`, `blur_size` (built in) | drops running down the lens: the frame refracted through them and blurred behind them (9 px of the 1920-wide `resolution`; the header's 26 is not what the code does) | rendered, time-driven, hash-noise parity |
+| `blueprint` | `paper_color`, `grid_color`, `ink_color`, `cell_px`, `major_every`, `minor_line_w`, `major_line_w`, `grid_strength`, `major_strength`, `edge_strength`, `threshold`, `sharpness`, `depth_weight`, `normal_weight`, `rim_weight`, `rim_sharpness`, `shade_mid`, `shade_stripe_px`, `shade_line_width`, `paper_grain`, `vignette`, `opacity`; `shade_hi` (never read by its shader), `width`, `height`, `cam_near`, `cam_far` warned | blueprint paper, printed grid rulings, ink on depth, normal and rim edges, striped shading (a bright sky stripes too: its luminance passes `shade_mid`); the Normal pass turned to view space by the camera's axes (drivers). Its normals are decoded twice, as WebGPU's were, so the rim fires about 60° from facing, and the background's cleared normal decodes to (−3, −3, −3) | rendered, parity |
+| `cross_hatch` | `wiggle`, `flicker`, `outline_strength`, `hatch_strength`, `depth_outline_strength`, `depth_outline_thresh`, `opacity`; `width`, `height`, `cam_near`, `cam_far` warned | a pencil drawing: outlines from the gradient of the noise-wiggled frame at three scales plus depth edges, five hatch layers following the value (skipped on bright pixels, turned on near objects), a facing boost from the view normal, paper grain, vignette, S-curve. Its 256 × 256 noise texture is regenerated from the same LCG, run with JavaScript's arithmetic; its colour bytes are kept and its alpha held at 1, because the compositor's Image node multiplies colour by alpha whatever the image's alpha mode (read with the noise's own alpha, every hatch layer came out darker: the noise at half its mean). `uvSmooth` turns once per texel, as the shader's | rendered, parity |
+| `underwater` | `horizon_color`, `shallow_color`, `fog_density`, `fog_power`, `caustic_amt`, `caustic_scale`, `godray_amt`, `opacity`; `bubble_count`, `bubble_radius`, `bubble_range_y` (built in); `bubble_amt` (never read by its shader) warned | always under the overlay. The screen pass: a caustic water roof where nothing was drawn, caustics on up-facing geometry at its world position, depth fog to the horizon colour, god rays; positions rebuilt from the Depth pass along the camera's rays (its fov as the frame renders it, near, far, axes and position, by drivers). The bubbles: Geometry Nodes on Scene Time round the camera's position, seeded (WebGPU drew them from Math.random()); `uniforms['cam_pos']` is their anchor (WebGPU's `camPosUniform`). They are drawn as the WebGPU frame had them: WebGPU's auto-enhance turns depthWrite off on transparent materials, so the pass reads the depth BEHIND a bubble, and over the empty water roof replaces it with the roof (unseen there) while over geometry it fogs by what is behind it. EEVEE's Blended render method is the same contract (a blended surface is in Combined, not in the Depth or Normal pass): see-through bodies (air in water bends the view by 1.06) with the clear coat's Fresnel highlight, no shadow. `remove` / `clear` take them out with the pass | rendered over saved frames and live, parity on an AUTO-fit camera and on a portrait frame, the bubbles checked out of the Depth pass, with the registry's own example `['underwater', 'vhs_tape']` (world under, signal over) |
+| `retro_wireframe` | `color` (`green`, `amber`, `blue`, `multicolor`), `line_width` (px), `bg_color`, `line_intensity`, `hdr_channel_cap` | geometry-side, as WebGPU's material swap: a view-layer material override whose Wireframe node (pixel size) draws every render triangle at a constant pixel width, emission only; the background is a world of its own set as the view layer's world override, so a sky whose colour is linked (a gradient, the sky family's world) goes too and the scene's world is never edited; `multicolor` adds a Geometry Nodes modifier storing a hash per triangle. `screen_effects.set_wire_color(scene, U, name)` and `retro_wireframe_cleanup(scene)` are WebGPU's `setColor` and `cleanup`; `fx.remove` / `fx.clear` call the cleanup | rendered live in green, amber, blue and multicolor over a linked sky gradient, at two widths, after the cleanup, and from its saved `.blend` in a fresh Blender |
+| `full_toon` | `near_levels`, `far_levels`, `band_softness`, `hue_shift`, `saturation`, `contrast`, `smooth_radius`, `shadow_tint`, `midtone_tint`, `highlight_tint`, `outline_color`, `outline_strength`, `outline_threshold`, `outline_sharpness`, `outline_depth_weight`, `outline_normal_weight`, `opacity`; `width`, `height`, `cam_near`, `cam_far` warned | a screen cel pass on the Depth and Normal passes: depth-aware blur, bands by depth, a palette tint, outlines; its depth is WebGPU's 2z / (z + far), far from the camera's clip end. Where nothing was drawn the Normal pass is 0; it is read as WebGPU's cleared normal buffer decoded, (−1, −1, −1) in view space (minus the sum of the camera's axes in world space, by drivers), whose neighbours make no normal edge (read as 0, every pair made one and the whole sky inked solid in the outline colour) | rendered, parity; the sky checked cel-shaded, not inked |
 
 For an additive glare, `opacity` scales the glare and so multiplies its
 strength. "Parity" means the render matches the effect's shader transcribed
 into numpy on the same saved frame: a mean error of 2e-5 or less, and no
 pixel off by more than 0.02, at the WebGPU defaults and with options turned
-(`tests/post_era/test_screen_effects.py`). "Time-driven" means two frames over
-the same held source frame differ.
+(`tests/post_era/test_screen_effects.py`; `tests/post_effects/test_parity.py`,
+whose numpy is transcribed from the JS and three's nodes on its own, not from
+the port: 43 cases, transparent film among them, cross_hatch the loosest at
+a mean of 6e-4; `focus_blur`'s screen mode is also held to three run at half
+size, within a mean of 4e-3, 0.65 % of pixels off by more than 0.05 at the
+blurred edges). "Hash-noise parity" is
+for the effects whose detail is a `fract(sin(x)·43758)` hash of large
+arguments (jitter, hash_blur, vhs_tape, rain_on_camera): which rows crease,
+where a drop runs and each pixel's grain differ between any two GPUs, and
+from float64, so those match on the frame's mean colour (within 0.006) and
+on 64 px blocks, and are looked at. "Time-driven" means two frames over the
+same held source frame differ.
+
+Three things in Blender 5.2's compositor that the ports above had to work
+round, measured:
+
+- **The Image node multiplies colour by alpha whatever the image's alpha mode**
+  (`NONE` too): a data texture that keeps something in its fourth channel must
+  hold alpha at 1 and keep that data elsewhere.
+- **Scale (Relative) changes the image's domain, not its pixels.** Image
+  Coordinates of a scaled image, fed to a Map UV, composite a quarter-size
+  picture in the middle of the frame. To compute at a lower resolution, as
+  three's LensflareNode does, compute at that resolution's texel centres
+  yourself (`screen_effects.lensflare`).
+- **`camera.data.angle_y` is the sensor height's angle**, not the frame's: on
+  an AUTO-fit camera (look.camera's) it is 18.5 % too wide for 16:9. A pass
+  rebuilding rays from the Depth pass reads `screen_effects.tan_half_fov_y`
+  (and keeps it with `drive_tan_half_fov_y`, a simple-expression driver on
+  the fit, lens, sensor and frame; on a portrait frame the sensor width spans
+  the height, checked too).
+
+Two things about the WebGPU side that a port must read off three, not off the
+effect's comments (both checked under deno against three r184's own
+`WGSLNodeBuilder`):
+
+- **TSL pads a vec3 to vec4 with 1.0** wherever a vec3 meets a vec4: in
+  `dot()` (three's `luminance()` of an RGBA sample is Y + alpha:
+  AnamorphicNode's threshold) and in arithmetic (the engine's
+  `colorOut.add(ssrRGB)` raises the frame's alpha by 1 when SSR runs, so a
+  WebGPU film's pre-bloom frame may carry alpha 2 and its anamorphic streaks
+  start a whole unit lower again; the Blender chain's frame has alpha 1).
+- **three's `gaussianBlur(node, direction, sigma)` is not a Gaussian of
+  `sigma` px**: it takes 3 + 2·sigma taps each side of the centre and weights
+  them by a Gaussian of s = (3 + 2·sigma) / 3 px, unnormalised
+  (`screen_effects.three_gauss`).
 
 A finite fog layer, not a world volume: an infinite world volume extinguishes
 the sun and the sky entirely (measured: a black frame at 0.012/m).
+
+The flares, the fog's two modes, godrays and the lens, in one place:
+
+```python
+from eidoblend.look.post import custom_effects as fx
+fx.apply_to(scene, 'bloom', {'bloom': {'strength': 0.25, 'radius': 0.4, 'threshold': 0.85}})
+fx.apply_to(scene, 'anamorphic_flare,lensflare', {           # both land BEFORE the bloom ('prebloom')
+    'anamorphic_flare': {'threshold': 1.5, 'scale': 3.0, 'color': (0.1, 0.0, 1.0)},
+    'lensflare': {'threshold': 2.0, 'ghost_spacing': 0.3, 'ghost_tint': (1.0, 0.8, 0.6), 'ghost_samples': 6}})
+fx.apply_to(scene, 'depth_fog', {'depth_fog': {'mode': 'screen'}})            # WebGPU's pass, its defaults; or
+# fx.apply_to(scene, 'depth_fog', {'depth_fog': {'density': 0.02, 'size': (80, 80, 12)}})  # a lit fog volume
+fx.apply_to(scene, 'godrays', {'godrays': {'light': 'sun', 'strength': 1.0}})  # the sun scatters at factor 2
+fx.apply_to(scene, 'focus_blur', {'focus_blur': {'focus_objects': [hero], 'focal_length': 1.0, 'bokeh_scale': 2}})
+# or WebGPU's own depth of field, three's DepthOfFieldNode as a pass (its focus keyed every frame on the hero):
+# fx.apply_to(scene, 'focus_blur', {'focus_blur': {'mode': 'screen', 'focus_objects': [hero], 'focal_length': 3.0,
+#                                                  'bokeh_scale': 8.0}})
+```
+
+`depth_fog`'s screen mode is the WebGPU picture: the sky goes to the fog
+colour, as everything at the far plane does, and the fog is flat (unlit, no
+shadows). The volume is EEVEE's: lit by the sun, shadowed, scattering into
+beams, and the sky above the box stays clear. Pick the screen mode to match a
+WebGPU film frame for frame; pick the volume for a film made here. The same
+holds for `focus_blur`: its screen mode is three's depth of field (at the
+WebGPU defaults, focus 5 m and `bokeh_scale` 1, a pixel or two of softening;
+the blur stops growing `focal_length` past the focus), the lens is EEVEE's
+(bokeh from the camera, a blur that keeps growing into the distance).
 
 ## Era looks — `post/era_looks.py`
 
@@ -273,9 +379,11 @@ nearly black, and night presets on a day scene overexpose.
   (uniform `If` branches); a compositor evaluates every node (a Switch
   evaluates both sides), so the pass costs the same whatever the weights.
   Measured at 960 × 540: the group builds in 10–11 s (about 3,700 nodes
-  inlined; it is reused while the file keeps it), and composites in 0.19 s a
-  frame on the GPU compositor (0.25 s against 0.06 s for the same saved frame
-  with no pass) and 1.1 s on the CPU compositor.
+  inlined; it is reused while the file keeps it). It composites in 0.18 s a
+  frame on the GPU compositor against 0.05 s for the same saved frame with no
+  pass, and in 0.9 s on the CPU compositor. A second run, with the GPU shared
+  by other renders, took 1.1 s on the GPU (0.2 s with no pass) and 1.9 s on
+  the CPU.
 - The print and paint looks (halftone, toon, watercolor) work in display space
   through the scene's own view transform and its inverse (`post/display.py`:
   Convert To Display, its exposure driven from the scene's), as WebGPU's went
@@ -292,17 +400,15 @@ nearly black, and night presets on a day scene overexpose.
   switches them on). Its far plane, where nothing was drawn, is the scene
   camera's clip end through a driver (`cam_far`), as WebGPU's depth buffer
   cleared to its far plane. The near plane has no part: Blender's depth is
-  metric. Normals are world space; only their dot products are used.
+  metric. Normals are world space; only their dot products are used. Where
+  nothing was drawn the Normal pass is 0, read as WebGPU's cleared normal
+  buffer decoded it, (−1, −1, −1).
 - The ASCII glyph atlas is drawn by Blender's text renderer (`blf`) in Press
   Start 2P at 30 px, one 32 × 56 cell a glyph, into a packed image, so a saved
   file renders on its own (`EL.glyph_atlas()`). It was placed to match the
   WebGPU harness's own canvas drawing (the same code run through
   @napi-rs/canvas): '@' inks rows 14–40 of 56 in both. The glyphs print
-  upright. The WebGPU probe printed them upside down (its '.' sat high like an
-  apostrophe: the canvas shim's flip is a texture transform, which an
-  explicit-uv sample skips), and it printed its black background as '-', the
-  ramp's fourth glyph, where the code as written prints '@'; I could not find
-  that second cause in its code, so the port prints what the code says.
+  upright (the WebGPU probe's differences are below).
 - The NaN clamp: the pass clamps its input first (NaN → 0, +Inf → 65504),
   because here every look mixes in by its weight and 0 × Inf is NaN: one bad
   pixel would spread through the blur pyramids into every look weighted 0.
@@ -328,19 +434,40 @@ glitch tears and the halation grain are hashes (left out), the print and paint
 looks are judged on the renders. Every preset is rendered on the meadow, on
 the era probe beside the WebGPU probe's own frames
 (`tests/post_era/out/era/probe_vs_webgpu.jpg`) and, for the night presets, on
-a neon night set and on THE HOLE (`out/aero/era_on_hole_sheet.jpg`).
+a neon night set and on THE HOLE (`out/aero/era_on_hole_sheet.jpg`). The
+registry's layering is rendered with a lower third between the layers
+(`out/era/chain_sheet.jpg`): `c64_1982` under it, the HUD's text and badge
+stay exactly the overlay's own colours; `glitch_bars` and `rgb_shift` over it
+tear the text along with the picture.
 
-Three differences from the WebGPU probe. Two come from the view transform, not
-the pass. The palette looks mix their palettes in scene-linear before it, as
-WebGPU's did before its ACES output, and AgX shows the palette's white (1.0)
-at 195 of 255 where ACES showed 225: the C64 raster bars and the Mac's white
-read a step greyer (measured on the bars). And AgX lifts deep shadows far more
-than ACES: the probe's floor, black on the WebGPU screen, is dark grey here,
-so `poster_night` prints it grey and `mac1984` dithers it into sparse dots.
-The third is not isolated: on the dark background the watercolour's paper
-tooth is fainter than WebGPU's (pixel spread 1.9 levels against 6.6). Its
-tooth scales with the wash's pigment, which reads the source frame, and the
-WebGPU probe kept no clean frame to compare the sources with.
+Differences from the WebGPU probe. The probe scene lights its metal floor as
+three did (the hemisphere light as diffuse-only lamps, so the floor reflects
+the dark background): the floor is 0.002 scene-linear and black on screen in
+both editions (AgX shows it at 2 to 8 levels, ACES at 0 to 2). Probe sources
+rendered before that lighting was settled had a brighter floor, which printed
+as grey blotches under `poster_night`; that was the scene, not AgX, and the
+sources are rendered again. Compared at the WebGPU probe's own size (1920 ×
+1080, the frame at 0.5 s, as `era_new.js` updates it), three differences
+remain:
+
+- The view transform. The looks decide their tones in display space through
+  AgX where WebGPU went through ACES, and the two part at the top.
+  `poster_night` lifts the frame 1.6 stops, which pushed the orange petals
+  into ACES's shoulder, where they wash to cream, so WebGPU printed them as
+  paper; through AgX they stay orange and print as orange dots. The palette
+  looks mix their palettes in scene-linear before the view, and AgX shows
+  the palette's white (1.0) at 195 of 255 where ACES showed 225: the C64
+  raster bars and the Mac's white read a step greyer.
+- The watercolour's paper tooth on the dark ground: a pixel spread of 1.9
+  levels here against 6.1 in WebGPU's frame. On a black ground the shader's
+  output is 4 % of the paper colour, ±17 % for the tooth, about 2 levels of
+  spread, so WebGPU's input there was not the black its code implies. Not
+  isolated: the WebGPU probe kept no clean frame.
+- `printer1961`. The WebGPU frame prints the black background as '-' and the
+  bright character in dense glyphs, the reverse of the ramp as written, and
+  its glyphs upside down (its '.' sits high like an apostrophe: the canvas
+  shim's flip is a texture transform, which an explicit-uv sample skips). The
+  port prints what the code says: '@' on black, light glyphs on light.
 
 ## Aeropittura — `post/aeropittura.py`
 
@@ -376,7 +503,10 @@ edges), `under` (the anisotropic Kuwahara underpainting), `halo` (Balla's
 0.8), `planes` (the plane family), `lines` (lines of force), `palette` (the
 dark-cyberpunk gradient map, `RAMP`; saturated light keeps its hue), `canvas`
 (weave, a VHS scanline, grain), `crisp` (fine detail handed back sharp; not
-multiplied by `force`).
+multiplied by `force`). Three of them shape another: `halo` bends and tints
+the strokes, `multi` adds to the echo's ghosts, `crisp` hands detail back from
+under the strokes. Alone they leave the frame as it was, in WebGPU too (the
+test's `only_halo`, `only_multi` and `only_crisp` are the plain frame).
 
 **The planes.** `PLANES`: `balla_sun` (rays and rings from the focal point),
 `revolt` (Russolo's chevrons), `race_sun` (rays plus chevrons along
@@ -395,14 +525,19 @@ kept readable). `time` and `frame` are Scene Time.
 through the camera every frame. `key_focal` and `key_spare` do that once,
 ahead of the render, and key the result, so the `.blend` plays on its own:
 the target is an object, `(armature, 'bone')`, a function of the frame or a
-point; `key_spare` lifts the head 0.12 m and sizes the face by UNKNOWN FORCE's
-rule, `spare_radius(dist)` = 0.9 · clamp(0.55 / max(0.6, dist)). Behind the
-camera the focal falls back to (0.5, 0.42), as the film's did.
+point, read as the scene's own depsgraph evaluates it at each frame (so a
+scene that is not the window's works too); `key_spare` lifts the head 0.12 m
+and sizes the face by UNKNOWN FORCE's rule, `spare_radius(dist)` = 0.9 ·
+clamp(0.55 / max(0.6, dist)). Behind the camera the focal falls back to
+(0.5, 0.42). (The film fell back only on a non-finite projection; three's
+projection of a point behind the camera is finite and mirrored, so the
+film's cones then came from a mirrored point.)
 
 **Reading shots.** In-scene text disappears under full brushwork. When the
 camera lands on words, `ease_reading(U, start, end)` keys the brush toward
 `READ` (`strokes` 0.28, `under` 0.3, `halo` 0.15, `lines` 0, `multi` 0,
-`crisp` 1), in over 0.6 s and out over the last 0.45 s, keeping the planes,
+`crisp` 1), in over 0.6 s and out over the last 0.45 s, both smoothstepped as
+the film's ramps were, at the scene's frame rate, keeping the planes,
 palette and canvas. Overlay text (captions, a chyron) composites after the
 pass when the pass is 'under', so it is never painted.
 
@@ -416,12 +551,42 @@ spread through the halos' blur pyramid (checked).
 
 **What changed in the port.**
 
-- The underpainting is Blender's Kuwahara node, Anisotropic: the same filter
-  family as WebGPU's (Kyprianidis et al.'s anisotropic Kuwahara with
-  polynomial sector weights), radius 8 px at 1080p, but oriented by its own
-  structure tensor rather than the pass's flow field. WebGPU's loop (17 × 17
-  taps into 8 sectors per pixel) would be some 20,000 compositor nodes. The
-  strokes and lines of force still follow the pass's own flow field.
+- The underpainting is the pass's own anisotropic Kuwahara, ported
+  (`AP.kuwahara_aniso`, oriented by `AP.flow_field`): 8 polynomial sectors
+  (zeta 2/RAD, eta 0.33) over the flow's ellipse, 17 × 17 taps 1 px apart at
+  1080p, each sector's mean weighted by 1 / ((255 Σ var)⁴ + 1). Written out,
+  that loop is some 20,000 compositor nodes, so it is three nested function
+  groups (one tap, a row of 17 taps, 17 rows): the build stays near 500 nodes
+  and the compositor inlines it. (1 px apart at 1080p and at 540p; the next
+  points say how the spacing follows other sizes.) Checked against the shader transcribed into
+  numpy (`tests/post_era/test_aero_kuwahara.py`, on THE HOLE at 960 × 540 and
+  at 1920 × 1080): the flow field and the underpainting agree to 2e-4 at the
+  worst pixel, 0.00 sRGB levels on average. Alone it costs 0.3–0.6 s a frame
+  at 960 × 540 and 1.4–2.8 s at 1920 × 1080 on the GPU compositor (two runs,
+  the GPU shared with other renders), and 2 s at 960 × 540 on the CPU.
+- Blender's own Kuwahara node is the fast alternative, as a build option:
+  `fx.apply_to(scene, 'aeropittura', {'aeropittura': {'kuwahara':
+  'blender'}})`, 0.02–0.06 s a frame. It is the same family of filter, but its
+  sectors barely overlap and it reads its own structure tensor, so it smears
+  far less: 1.7–1.8 sRGB levels from the WebGPU picture on average, where no
+  filter at all is 2.8–3.2. Its settings are the best of a sweep against the
+  WebGPU filter (size 8 at 1080p, uniformity 4, sharpness 0.5, eccentricity
+  1), and it still keeps the drawing that the WebGPU underpainting paints
+  over: the petals' highlights and outlines, the screens' letters
+  (`out/aero/kuwahara/kuwahara_1080_sheet.jpg`).
+- WebGPU spaced its Kuwahara taps S px apart on top of the radius round(8 S),
+  so below 1080p its brush shrank twice over (2 px at 960 × 540). The port
+  keeps the 1080p brush at every size (4 px at 960 × 540), so a probe shows
+  the film's painting.
+- Built at one size, rendered at another. The tap count is the build
+  height's (the loop is unrolled into nodes), but the taps' spacing (8 S /
+  RAD px), the stroke cells (14 S and 6 S px) and every other offset come
+  from the frame as it composites. The harness builds a 1080p film and caps
+  its probe at 960 × 540 at render time: the pass built for 1080p then
+  paints the probe as the pass built for 540p does, 0.13 sRGB levels apart
+  on average against 29.7 between the painting and the plain frame
+  (`tests/post_era/test_size_and_view.py`). Built-time cells would have
+  painted the probe's strokes at twice their size.
 - The echoes and repetitions read the pass's own input from earlier frames,
   recorded every frame and read back
   ([history](#earlier-frames--after_image-and-posthistorypy)); a frame never
@@ -432,10 +597,11 @@ spread through the halos' blur pyramid (checked).
   the era looks. Under `argue`, near-white neutrals fall between the ramp's
   orange and white stops; the film pulled `palette` to 0.22 for its white
   showroom.
-- Cost, measured on THE HOLE at 960 × 540 on the GPU compositor: the pass
-  builds in 19 s (about 9,400 nodes once its groups are inlined); the first
-  frame composites in 4.4 s (shader compilation), every frame after in 0.59 s,
-  writing and reading its history included.
+- Cost, measured on THE HOLE at 960 × 540 on the GPU compositor (shared with
+  other renders): the pass builds in about 20 s; the first frame composites in
+  7.4 s (shader compilation), every frame after in 1.4 s, writing and reading
+  its history included. With Blender's Kuwahara node instead of its own, it
+  was 4.4 s and 0.59 s.
 
 Checked on the film's own set (THE HOLE, the claudesona singing, the closeSing
 camera): the looks rise hush < argue < storm; every plane family, the vortex,
@@ -474,6 +640,24 @@ wrote, or nothing where it was never rendered (the pass then starts clean, as
 WebGPU's empty buffer did). Cuts are keyed into the taps: after a cut at c,
 frame n reads max(n − k, c), and the cut frame itself ignores its taps.
 `after_image` does not reset at cuts unless given them (WebGPU's did not).
+A cut is the scene's first frame, a timeline marker that switches to another
+camera (Blender renders the first marker's camera from the start, so the
+first marker is no switch, and `history.camera_of(scene, frame)` gives the
+camera a frame renders with), the frames given to `cut()`, and for the era
+CRT's persistence also a camera jump, found from the camera's own F-curves or,
+for a parented or constrained camera, from the scene's depsgraph frame by
+frame.
+
+Checked as a film is rendered (`tests/post_era/test_film_render.py`): the
+harness's `bpy.ops.render.render(animation=True)` in the session that built
+the scene, and the saved `.blend` rendered by a fresh Blender from the
+command line (`blender -b film.blend -S scene -a`, factory settings, no
+Python behind it). For `after_image` (24 frames) every frame equals the numpy
+feedback in both, also with `auto_prune` keeping one trail frame on disk; for
+`aeropittura` storm (12 frames, echoes 1 to 4 frames back) and the era looks'
+`crt` (8 frames, its persistence 7 back) every frame equals the stills
+composited in order, exactly. A frame rendered alone with nothing on disk
+equals the same frame starting clean, in all three.
 
 Cost, measured at 960 × 540: `after_image` adds 0.02 s a frame (0.133 s
 against 0.114 s for the same saved frames with no pass) and 0.62 MB of disk a
@@ -484,16 +668,38 @@ read seven of them. The recorded frames stay on disk until
 
 ## Not yet ported
 
-- `nuclear_explosion`: an SDF mushroom cloud raymarched along the view ray. In
-  Blender it is a real volume, the `nuclearBlast` example of the
-  [SDF volumes](sdf-volumes.md); the registry name raises until that example
-  lands and is registered (`fx.register('nuclear_explosion', build,
-  kind='native')`).
-- Aeropittura's own anisotropic Kuwahara loop (Blender's node stands in, the
-  same filter family; above).
+- `focus_blur` mode `'screen'` runs three's blur passes at full resolution;
+  three ran them on half-size targets and read them back bilinearly, so its
+  near and far fields are about a pixel softer (against three at half size in
+  numpy: a mean of 3e-3 to 4e-3, under 0.7 % of pixels off by more than
+  0.05). The compositor has no half-size image to sample (Scale changes the
+  domain, not the pixels), and the lensflare's trick (computing at the
+  smaller target's texel centres) would cost a 64-tap disc four times over.
+- `old_bw_film`'s dust gradients and seed: its simplex corners are hashed by
+  White Noise where WebGPU used u32 multiplies and xors (which float maths
+  cannot carry), and its per-frame seed is a `fract(sin(x)·43758)` hash, so
+  which frames carry dust and where the specks fall differ, in the same
+  number, size and shape.
+- `retro_wireframe`'s multicolour pick: the per-triangle hash is the
+  shader's formula, run in Geometry Nodes' float32 (WebGPU ran it in
+  JavaScript's doubles over three's triangle order, which Blender's mesh does
+  not keep), so the colours land on different triangles, in the same palette.
+- The shaders' `fract(sin(x)·43758)` hashes of large arguments (jitter,
+  vhs_tape, rain_on_camera, hash_blur, depth_fog's screen noise, blueprint's
+  grain) are ported as written, so they are the same formula; their float
+  detail differs between GPUs and from WebGPU's, so which pixel takes which
+  value differs (checked: the same frame mean and 64 px blocks).
 - The WebGPU looks' exact noise: White Noise replaces the integer and sin
-  hashes (the same spread, different numbers).
+  hashes (the same spread, different numbers). Two of them were per-frame CPU
+  values in WebGPU and could be keyed exactly frame by frame: the era looks'
+  gate-weave jolt and their flicker. They are computed in the graph from
+  Scene Time instead, so the pass needs no keys over the shot's frame range.
 - The era looks' per-look GPU cost: every look runs every frame here.
+- three's ACES curve inside the display-space looks. They decide their tones
+  through the scene's view (AgX), and the presets were tuned under ACES, so
+  where the two curves part the print differs: `poster_night` prints the
+  orange petals as orange dots where WebGPU's ACES washed them to cream
+  ([era looks](#era-looks--postera_lookspy)).
 - The overlay's contents (titles, HUDs) belong to
   [motion graphics](motion-graphics.md); this family owns only the order.
 - The cloud reflections on metals (the old cloud-reflect hook) belong to the

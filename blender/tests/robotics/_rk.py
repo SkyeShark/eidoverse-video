@@ -103,6 +103,8 @@ def probe_render(sc, res=(960, 540), samples=16):
     r.image_settings.file_format = 'PNG'
     r.image_settings.color_mode = 'RGB'
     r.use_motion_blur = False
+    from eidoblend.characters.robotics.studio import match_display
+    match_display(sc)          # the studio's unlit colours for this look (a no-op without a studio)
 
 
 NO_RENDER = '--no-render' in sys.argv

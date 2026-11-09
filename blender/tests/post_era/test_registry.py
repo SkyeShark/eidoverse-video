@@ -2,7 +2,10 @@
 names and listing, effects as a name / comma string / list, unknown and unported names, layering (ALWAYS_UNDER,
 DEFAULT_UNDER, the layer switch), chaining order, the uniforms' shape for one and for several effects, options
 (camelCase, unknown raises, WebGPU-only warned), register(), key(), update() / set_resolution(), U.cut(), remove() and
-clear(). The chain is rendered in test_era_looks.py (registry_chain).
+clear(); the cuts the temporal passes restart at (history.camera_jumps, era looks' camJumped(), on keyed and on
+parented cameras; scene_cuts and camera_of with camera markers; the era pass's keyed restart and its taps never
+reading across a cut); chain.use_saved_frames / use_render. The chain is rendered in test_era_looks.py
+(registry_chain).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/post_era/test_registry.py
 """
@@ -67,9 +70,9 @@ def main():
     check(msg is not None and 'nope' in msg and 'era_looks' in msg, f'an unknown name raises, naming the registered '
                                                                     f'ones ({(msg or "")[:80]}...)')
     check(chain.stages(sc) == [], 'a failed apply_to adds nothing (names are checked before anything is built)')
-    msg = raises(NotImplementedError, fx.apply_to, sc, 'nuclear_explosion')
-    check(msg is not None and 'nuclear_explosion' in msg, f'a registered but unported name raises with its reason '
-                                                          f'({(msg or "")[:70]}...)')
+    msg = raises(ValueError, fx.apply_to, sc, 'nuclear_explosion')
+    check(msg is not None and 'camera' in msg, f"nuclear_explosion on a scene without a camera raises, as WebGPU's "
+                                               f"applyTo did ({(msg or '')[:70]}...)")
     e = fx.apply_to(sc, ' sepia , rgb_shift ')
     check([x['name'] for x in e.effects] == ['sepia', 'rgb_shift'], 'a comma string, spaces trimmed, in order')
     e2 = fx.apply_to(fresh_scene('reg_list'), ['glitch_bars'])
@@ -156,6 +159,36 @@ def main():
     fx.apply_to(sc6, 'bloom', {'bloom': {'strength': 0.5}})
     fx.apply_to(sc6, 'sepia')
     check([n for _s, n, _x in chain.stages(sc6)] == ['bloom', 'sepia'], 'a second apply_to adds to the chain')
+    # native effects change the scene (a fog volume, the lens, a material override, the bubbles): applied() lists
+    # them and clear() takes every change back, as the WebGPU applyTo dropped an effect when the next call replaced it
+    sc8 = fresh_scene('reg_native')
+    cam8 = bpy.data.objects.new('reg_native_cam', bpy.data.cameras.new('reg_native_cam'))
+    sc8.collection.objects.link(cam8)
+    sc8.camera = cam8
+    cam8.data.dof.use_dof, cam8.data.dof.focus_distance, cam8.data.dof.aperture_fstop = False, 7.0, 5.6
+    target = bpy.data.objects.new('reg_target', None)
+    sc8.collection.objects.link(target)
+    ee = sc8.eevee
+    ee.use_volumetric_shadows, ee.use_volume_custom_range = False, False
+    vl8 = sc8.view_layers[0]
+    fx.apply_to(sc8, 'depth_fog,focus_blur,retro_wireframe,underwater',
+                {'depth_fog': {'density': 0.02}, 'focus_blur': {'fstop': 2.0, 'focusObjects': [target]},
+                 'retro_wireframe': {'color': 'amber'}, 'underwater': {'bubbleCount': 10}})
+    names = [n for _s, n, _x in fx.applied(sc8)]
+    check(sorted(names) == ['depth_fog', 'focus_blur', 'retro_wireframe', 'underwater']
+          and 'look_depth_fog' in sc8.objects and cam8.data.dof.use_dof and abs(cam8.data.dof.aperture_fstop - 2) < 1e-6
+          and cam8.data.dof.focus_object is not None and vl8.material_override is not None
+          and 'uw_bubbles' in bpy.data.objects and ee.use_volumetric_shadows,
+          f'native effects applied and listed by applied(): {names}')
+    fx.apply_to(sc8, 'retro_wireframe', {'retro_wireframe': {'color': 'green'}})     # twice: the first state is kept
+    fx.clear(sc8)
+    d8 = cam8.data.dof
+    check(fx.applied(sc8) == [] and 'look_depth_fog' not in bpy.data.objects and not d8.use_dof
+          and abs(d8.focus_distance - 7.0) < 1e-6 and abs(d8.aperture_fstop - 5.6) < 1e-6 and d8.focus_object is None
+          and 'focus_reg_native_cam' not in bpy.data.objects and vl8.material_override is None
+          and 'uw_bubbles' not in bpy.data.objects and not ee.use_volumetric_shadows and not ee.use_volume_custom_range,
+          'clear(): the fog volume, the focus empty and the bubbles gone; the lens, the override and the volume '
+          'settings as they were')
     # the screen effects ported this round: each builds and takes its WebGPU options (camelCase too)
     samples = {'wavy': {'amplitude': 12, 'animSpeed': 2.0, 'animate': True}, 'kaleidoscope': {'segments': 8},
                'jitter': {'speed': 4.0}, 'melt': {'swirl': 0.5}, 'dithering': {'levels': 4},
@@ -207,6 +240,145 @@ def main():
         R = fx.REGISTRY[name]
         opts = [p[0] for p in R['params']] + sorted(R['build_opts'])
         check(len(opts) > 2, f'{name}: options {opts}')
+    # aeropittura's underpainting: its own Kuwahara by default, Blender's node on request, anything else refused
+    sc9 = fresh_scene('reg_aero_kw')
+    cam9 = bpy.data.objects.new('reg_aero_cam', bpy.data.cameras.new('reg_aero_cam'))
+    sc9.collection.objects.link(cam9)
+    sc9.camera = cam9
+    own = fx.apply_to(sc9, 'aeropittura').nodes['aeropittura'].node_tree
+    fx.clear(sc9)
+    bk = fx.apply_to(sc9, 'aeropittura', {'aeropittura': {'kuwahara': 'blender'}}).nodes['aeropittura'].node_tree
+    has_node = lambda t: any(n.bl_idname == 'CompositorNodeKuwahara' for n in t.nodes)      # noqa: E731
+    uses_own = lambda t: any(n.bl_idname == 'CompositorNodeGroup' and n.node_tree                   # noqa: E731
+                             and n.node_tree.name.startswith('eido_aero_kuwa_row') for n in t.nodes)
+    check(uses_own(own) and not has_node(own) and has_node(bk) and not uses_own(bk) and own.name != bk.name,
+          f"aeropittura: its own Kuwahara by default ({own.name}), Blender's node with kuwahara='blender' ({bk.name})")
+    msg = raises(ValueError, fx.apply_to, sc9, 'aeropittura', {'aeropittura': {'kuwahara': 'classic'}})
+    check(msg is not None and 'own' in msg, f"aeropittura: kuwahara='classic' raises ({msg})")
+    cuts_part()
+    source_part()
+    ease_part()
+
+
+def ease_part():
+    """aeropittura.ease_reading keys the film's smoothstepped ramps at the scene's own frame rate (30 here)."""
+    from eidoblend.look.post import aeropittura as AP
+    from eidoblend.look.post.history import _fcurves
+    sc = fresh_scene('reg_ease')
+    sc.render.fps, sc.render.fps_base = 30, 1.0
+    cam = bpy.data.objects.new('reg_ease_cam', bpy.data.cameras.new('reg_ease_cam'))
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    e = fx.apply_to(sc, 'aeropittura')
+    AP.apply_look(e.uniforms, AP.LOOKS['storm'], 1.0)                 # strokes 1 before the ease
+    AP.ease_reading(e.uniforms, 10, 70)                               # e.uniforms as apply_to returns it, no fps
+    t = sc.compositing_node_group
+    fc = {f.data_path: f for f in _fcurves(t.animation_data.action, t)}[
+        e.uniforms['strokes'].path_from_id('default_value')]
+    x = (4 / 30) / 0.6                                                 # frame 14: 4 frames in at 30 fps
+    want = 1.0 + (AP.READ['strokes'] - 1.0) * x * x * (3 - 2 * x)
+    got = [round(fc.evaluate(f), 4) for f in (10, 14, 28, 60, 70)]
+    check(abs(got[1] - want) < 1e-3 and abs(got[2] - AP.READ['strokes']) < 1e-3 and got[0] == 1.0 and got[4] == 1.0,
+          f'ease_reading: smoothstepped in over 0.6 s and out over 0.45 s at the scene\'s 30 fps (strokes at frames '
+          f'10, 14, 28, 60, 70: {got}; frame 14 should be {want:.4f})')
+    fx.clear(sc)
+
+
+def source_part():
+    """chain.use_saved_frames swaps the chain's source for an image sequence and chain.use_render puts the Render
+    Layers back, the stages' links kept both ways."""
+    sc = fresh_scene('reg_source')
+    fx.apply_to(sc, 'sepia')
+    exr = os.path.join(SC.OUT, 'after_image', 'src', 'src_0001_combined.exr')
+    if not os.path.exists(exr):
+        check(False, f'use_saved_frames / use_render: no saved frame to test with ({exr}: run test_after_image.py '
+                     f'--stage sources)')
+        return
+    st = chain.stages(sc)[0][2]
+    n = chain.use_saved_frames(sc, exr)
+    a = chain.source(sc)
+    ok1 = a.bl_idname == 'CompositorNodeImage' and _img_link_from(st) == a
+    rl = chain.use_render(sc)
+    ok2 = chain.source(sc).bl_idname == 'CompositorNodeRLayers' and _img_link_from(st) == rl
+    check(n == a and ok1 and ok2, 'use_saved_frames: the chain reads the image sequence; use_render: the Render '
+                                  'Layers again, the stage linked from each')
+    fx.clear(sc)
+
+
+def _img_link_from(node):
+    s = next((s for s in node.inputs if s.type == 'RGBA' and s.is_linked), None)
+    return s.links[0].from_node if s is not None else None
+
+
+def cuts_part():
+    """era_looks' camJumped() as history.camera_jumps: frames where the camera moved > 0.6 m or turned > 10 degrees
+    since the frame before, read from its F-curves or, for a parented camera, by stepping the scene; scene_cuts adds
+    the markers that switch cameras; the era pass keys its persistence restart (Fresh) on all of them."""
+    import math
+    from eidoblend.look.post import era_looks as EL
+    sc = fresh_scene('reg_cuts')
+    sc.frame_start, sc.frame_end = 1, 12
+    cam = bpy.data.objects.new('reg_cut_cam', bpy.data.cameras.new('reg_cut_cam'))
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    # a slow dolly and pan (0.1 m and 2 degrees a frame: no jump), a 1.5 m jump at 6, a 25 degree snap at 9
+    for f in range(1, 13):
+        x = 0.1 * (f - 1) + (1.5 if f >= 6 else 0.0)
+        yaw = math.radians(2.0 * (f - 1) + (25.0 if f >= 9 else 0.0))
+        cam.location = (x, -5.0, 1.5)
+        cam.rotation_euler = (math.radians(80), 0.0, yaw)
+        cam.keyframe_insert('location', frame=f)
+        cam.keyframe_insert('rotation_euler', frame=f)
+    from eidoblend.look.post.history import _fcurves
+    for fc in _fcurves(cam.animation_data.action, cam):
+        for k in fc.keyframe_points:
+            k.interpolation = 'LINEAR'
+    jumps = HI.camera_jumps(sc)
+    check(jumps == [6, 9], f'camera_jumps: a 1.5 m jump at 6 and a 25 degree snap at 9, nothing on the slow move '
+                           f'(found {jumps})')
+    # the same camera parented to a moving empty: read by stepping the scene
+    rig = bpy.data.objects.new('reg_cut_rig', None)
+    sc.collection.objects.link(rig)
+    cam.parent = rig
+    rig.location = (0.0, 0.0, 0.0)
+    rig.keyframe_insert('location', frame=1)
+    rig.keyframe_insert('location', frame=3)
+    rig.location = (0.0, 2.0, 0.0)
+    rig.keyframe_insert('location', frame=4)                      # 2 m between frames 3 and 4
+    for fc in _fcurves(rig.animation_data.action, rig):
+        for k in fc.keyframe_points:
+            k.interpolation = 'CONSTANT'
+    jumps = HI.camera_jumps(sc)
+    check(jumps == [4, 6, 9], f'camera_jumps with the camera parented to a moving rig (the scene stepped): the rig\'s '
+                              f'2 m move at 4 as well (found {jumps})')
+    # a marker switching to a second camera is a cut too; one binding the camera already in use is not (Blender
+    # renders the first marker's camera from the start, so the first marker is no switch either)
+    cam2 = bpy.data.objects.new('reg_cut_cam2', bpy.data.cameras.new('reg_cut_cam2'))
+    sc.collection.objects.link(cam2)
+    for nm, f, c in (('cam', 1, cam), ('cam_again', 7, cam), ('cam2', 11, cam2)):
+        sc.timeline_markers.new(nm, frame=f).camera = c
+    check(HI.scene_cuts(sc) == [1, 11], f'scene_cuts: the first frame and the switch to the second camera, not the '
+                                        f'marker re-binding the first ({HI.scene_cuts(sc)})')
+    check([HI.camera_of(sc, f).name for f in (1, 10, 11)] == ['reg_cut_cam', 'reg_cut_cam', 'reg_cut_cam2'],
+          'camera_of: the marker camera a render of each frame uses')
+    # the era pass, applied with no cuts given, keys its restart on the markers and the jumps
+    t0 = chain.tree(sc)
+    e = fx.apply_to(sc, 'era_looks')
+    EL.set_look(e.uniforms, EL.ERA_LOOKS['crt'])
+    # (the keys are read off their F-curves: this scene is not the window's, so a frame_set would not write the
+    # animated values back onto its sockets; a render of it evaluates them, test_film_render.py)
+    fcs = {fc.data_path: fc for fc in _fcurves(t0.animation_data.action, t0)}
+    fresh = e.nodes['era_looks'].inputs['Fresh']
+    fc_fresh = fcs[fresh.path_from_id('default_value')]
+    on = [f for f in range(1, 13) if fc_fresh.evaluate(f) > 0.5]
+    check(on == [1, 4, 6, 9, 11], f'era_looks restarts its CRT persistence on the first frame, the jumps and the '
+                                  f'marker (Fresh keyed on {on})')
+    h = e.histories['era_looks'][0]
+    tap = h.taps(t0)[3]
+    fc_off = fcs[f'nodes["{tap.name}"].frame_offset']
+    reads = [f + int(round(fc_off.evaluate(f))) for f in (5, 6, 7, 8, 9, 10)]
+    check(reads == [4, 6, 6, 6, 9, 9], f'the tap 3 frames back never reads across a cut: frames 5-10 read {reads}')
+    fx.clear(sc)
 
 
 try:

@@ -448,6 +448,13 @@ def _collide(col, cm, tail, radius, bpos, length):
     return bpos + d * (length / d.length) if d.length > _EPS else tail
 
 
+def _parents(o):
+    p = o.parent
+    while p is not None:
+        yield p
+        p = p.parent
+
+
 def _n_steps(t0, t1, rate):
     """solver steps in (t0, t1] at `rate` per second, counted on an exact grid (the add-on's Decimal schedule)"""
     r = Decimal(str(rate))
@@ -503,7 +510,7 @@ def key_track(h, tname, series, f0, scale_bones=()):
 
 
 def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=(), overrides=None, tie_limit_deg=None,
-                 length=None, hide_meshes=True, scene=None, log=None):
+                 length=None, hide_meshes=True, scene=None, log=None, step_hook=None):
     """simulate h's springs over frames f0..f1 in order and key them; returns a report:
        solver, rate, frames, springs, joints, steps, preroll_steps, resets, action, track, keys,
        swing_deg {spring: the most its first joint turned from its initial state}, tie_clamped_frames,
@@ -512,7 +519,9 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
     overrides: {frame: {bone: {'basis': Quaternion | None, 'scale': float, 'colliders': bool}}} (the wardrobe's petal
     folds; h.spring_overrides when not given); tie_limit_deg: None (default: the free tie every WebGPU film shows, the
     engine's limiter being inert), a cone in degrees, or 'engine' (the wrapper's own 10 deg); length: 'engine'
-    (three-vrm's, the default for solver 'three') or 'true' (the bone's real length; the only one solver 'addon' has)"""
+    (three-vrm's, the default for solver 'three') or 'true' (the bone's real length; the only one solver 'addon' has);
+    step_hook: fn(rig, frame), called before every step of solver 'three' (a caller's per-frame change to the
+    SpringRig, e.g. the ocean set's stiffening in sets.daisy.ocean.perform)"""
     scene = scene or bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
     dt = 1.0 / fps
@@ -531,6 +540,11 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
         raise ValueError(f"bake_springs rate={rate!r}: 'frame' or steps per second")
     lim = DEFAULT_TIE_LIMIT_DEG if tie_limit_deg in ('engine', 'auto') else tie_limit_deg
     arm = h.arm
+    # an action keyframe_insert created on the armature after its clips' NLA strips (root motion, a turn, the
+    # wardrobe's switches) is not evaluated by this session's depsgraph until the armature is tagged: the bake would
+    # read a body that does not move (renders build their own depsgraph, so the film would move without its springs)
+    for o in [arm] + [p for p in _parents(arm)]:
+        o.update_tag()
     rig = SpringRig(h, tie_limit_deg=lim, length=length)
     bones = [j.bone for j in rig.joints]
     resets = sorted(set(int(r) for r in resets))
@@ -578,6 +592,8 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
     def step(sdt):
         nonlocal steps, clamped
         if solver == 'three':
+            if step_hook is not None:
+                step_hook(rig, scene.frame_current)
             rig.update(sdt)
         else:
             mod.update_pose_bone_rotations(bpy.context, sdt)

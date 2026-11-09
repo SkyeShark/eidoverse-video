@@ -4,8 +4,8 @@ something different), keyed with play() over a short range and rendered at one t
 studio. Checks: play() keyed the clip (moving objects, LINEAR keys) and every still was written.
 
 The dispenser's 'filament-feed' drives the live filament, which the fabrication port installs at load (its
-kit_installer in INSTALLERS, registered when eidoblend.fabrication is imported): this test imports it first, as the
-WebGPU loader always runs installFilament.
+kit_installer in INSTALLERS): a dispenser's load imports the port itself, as the WebGPU loader always runs
+installFilament; the import below only reports early when the port is missing.
 
     out/motion/<robot>_<clip>_t<seconds>.png      480 x 270
     out/motion_render.json

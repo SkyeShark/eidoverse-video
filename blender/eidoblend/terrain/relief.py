@@ -17,8 +17,11 @@ where they still mean something:
   depth_scale   relief depth in UV-tile units (as the engine's); depth in metres = depth_scale x
                 the tile's world size (tile_metres), or pass depth_metres directly
   uv_scale      tiles across the mesh's UVs (number or (u, v))
-  silhouette    True carves inward from the surface (peaks at the polygon, like the engine's flat
-                SPOM); a relief column inflates outward instead (its peaks overhang the base)
+  silhouette    the relief carves inward from the surface (peaks at the polygon) as the engine's flat
+                SPOM did, with silhouette True and with False (the engine's interior POM, e.g. a floor):
+                what stands on the polygon stands on the peaks. True also lets silhouette_bounds cut
+                the outline; False never cuts. A relief column inflates outward instead (its peaks
+                overhang the base)
   contrast      the field notes' stretch: the map's own min..max is mapped to (floor, 1), so a
                 low-contrast mid-grey Poly Haven _disp carves visibly and no well is full depth
 The march's own knobs (minLayers, maxLayers, minViewZ, curvedSilhouette, curvature, the horizon trim,
@@ -36,7 +39,10 @@ The relief's bounds (parallax_occlusion.js), in the same scaled-UV space as the 
                      edges (each face displaces along its own normal) and stores each face's UV rectangle as the
                      FACE attributes uv_min / uv_max (the engine's uvMin / uvMax); the material culls back faces,
                      so where a well meets a box's edge the outline notches and the box reads through, as the
-                     engine's per-face discard did. world_uv_boxes() builds such boxes
+                     engine's per-face discard did. The engine discarded where the MARCHED uv left the face's
+                     rectangle; a displaced point carries its own face's uv, which never leaves it, so the
+                     attributes are not read by the material (they are there for a custom node tree). As in the
+                     engine, face_bounds replaces silhouette_bounds' cut. world_uv_boxes() builds such boxes
   debug_silhouette   paint the cut region magenta instead of cutting it; debug_march: show fract(uv) unlit
 parallax_occlusion_uv(tree, height_map, ...) is the library call itself for custom node trees: it returns .uv,
 .coverage, .missed, .sample(image) and .shadow() (1: EEVEE shadows the real relief) as sockets.
@@ -69,6 +75,20 @@ def _pair(v, d=1.0):
     if isinstance(v, (int, float)):
         return (float(v), float(v))
     return (float(v[0]), float(v[1]))
+
+
+def _rgba(color):
+    """an engine colour -> Blender linear RGBA: 0xRRGGBB or '#rrggbb' are sRGB (three's hex, converted as its
+    ColorManagement does); an (r, g, b) tuple or {'r', 'g', 'b'} is linear already (three's setRGB / Color.set of an
+    object)"""
+    if isinstance(color, dict):
+        return (float(color['r']), float(color['g']), float(color['b']), 1.0)
+    if isinstance(color, str) or (isinstance(color, int) and not isinstance(color, bool)):
+        c = int(color.lstrip('#'), 16) if isinstance(color, str) else int(color)
+        v = (((c >> 16) & 255) / 255.0, ((c >> 8) & 255) / 255.0, (c & 255) / 255.0)
+        return tuple(x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in v) + (1.0,)
+    c = tuple(color)
+    return (float(c[0]), float(c[1]), float(c[2]), 1.0)
 
 
 def _range(img):
@@ -179,6 +199,7 @@ def create_parallax_material(height_map, albedo_map=None, normal_map=None, rough
     alone crawls in motion once a pixel covers many texels), 'Cubic' or 'Linear'. The height map
     is always read Cubic: it moves vertices, and the geometry must not change with the camera.
     The relief's bounds (silhouette_bounds, sample_bounds, face_bounds) and the debug views: see the module's doc.
+    color: the engine's 0xRRGGBB or '#rrggbb' (sRGB), or a linear (r, g, b); it multiplies the albedo map.
     metalness_map: its red channel is the metalness (the engine's metalnessNode). lambert=True: a plain diffuse
     surface (the engine's MeshLambertNodeMaterial escape hatch); self_lit={'sun_dir', 'ambient', 'sun_color'}: unlit,
     shaded by hand as rgb x (ambient + sun_color x max(N.sun_dir, 0)) (Blender axes). march: the march-only options
@@ -205,8 +226,11 @@ def create_parallax_material(height_map, albedo_map=None, normal_map=None, rough
     debug_lit = bool(march.pop('debug_march_lit', False))
     uv = g.node('ShaderNodeUVMap', uv_map=uv_map or '').outputs['UV']
     vec = g.vmath('MULTIPLY', uv, (su, sv, 1.0))
-    pom = parallax_occlusion_uv(g, height_map, uv_node=vec, scale=depth_scale, silhouette=silhouette,
+    # the engine: libSil = sil && !faceBounds (per-face bounds replace the constant bounds' cut)
+    pom = parallax_occlusion_uv(g, height_map, uv_node=vec, scale=depth_scale,
+                                silhouette=bool(silhouette) and not face_bounds,
                                 silhouette_bounds=silhouette_bounds, sample_bounds=sample_bounds)
+    rgba = _rgba(color) if color is not None else None
     rv = pom.coord_at(vec)                         # every map read, clamped into sample_bounds
     himg = load_image(height_map, 'displacement')
     lo, hi = _range(himg)
@@ -218,10 +242,10 @@ def create_parallax_material(height_map, albedo_map=None, normal_map=None, rough
     base = None
     if albedo_map is not None:
         base = g.read(load_image(albedo_map, 'color'), rv, interpolation, far)
-        if color is not None:
-            base = g.mix('RGBA', 1.0, base, tuple(color)[:3] + (1.0,), blend='MULTIPLY')
-    elif color is not None:
-        bsdf.inputs['Base Color'].default_value = tuple(color)[:3] + (1.0,)
+        if rgba is not None:
+            base = g.mix('RGBA', 1.0, base, rgba, blend='MULTIPLY')
+    elif rgba is not None:
+        bsdf.inputs['Base Color'].default_value = rgba
     if debug_silhouette and pom.missed is not None:
         base = g.mix('RGBA', pom.missed, base if base is not None else bsdf.inputs['Base Color'].default_value[:],
                      (1.0, 0.0, 1.0, 1.0))
@@ -297,7 +321,9 @@ def create_parallax_material(height_map, albedo_map=None, normal_map=None, rough
         mat['eido_ao_map_unwired'] = getattr(ao_map, 'name', str(ao_map))
     dn = g.node('ShaderNodeDisplacement', space=space)
     g.set(dn.inputs['Height'], h)
-    dn.inputs['Midlevel'].default_value = 0.0 if inflate else (top if silhouette else 0.5)
+    # inward from the polygon (its top at the surface) whether or not the outline is cut: the engine's flat SPOM and
+    # its interior POM both put the peaks on the polygon; inflate pushes the floor out from it instead
+    dn.inputs['Midlevel'].default_value = 0.0 if inflate else top
     dn.inputs['Scale'].default_value = depth
     g.set(out.inputs['Displacement'], dn.outputs['Displacement'])
     mat['eido_relief_depth'] = depth
@@ -477,7 +503,7 @@ def create_relief_column(height_map, albedo_map=None, normal_map=None, radius=0.
         cap_r = radius + relief_world * 0.95
         cm = new_material(name + '_cap')
         cb = principled(cm)
-        cb.inputs['Base Color'].default_value = tuple(cap_color)[:3] + (1.0,)
+        cb.inputs['Base Color'].default_value = _rgba(cap_color)
         cb.inputs['Roughness'].default_value = 0.5
         cb.inputs['Metallic'].default_value = 0.3
         for end in (-1, 1):

@@ -231,6 +231,18 @@ def run(render=False, rider=True):
     S.check('tandem: the teapot sits on the rear saddle', abs(lo.z - seat.z) < 0.03, f'base {lo.z:.3f} m, saddle {seat.z:.3f} m')
     S.dispose_leaves_nothing('tandem teapot', lambda: TD.build_teapot_rider(height=0.2, segments=8, color=0xb03a2e,
                                                                            pitch=0.0, roll=0.0, name='teapot_2'))
+    # the glaze's pixel footprint is measured in the shader: built before the scene has a camera (as here), no driver
+    # of the material reads scene.camera (such a driver stays invalid, and the crazing then never fades with distance)
+    glaze = pot.parts['body'].data.materials[0]
+    sc.frame_set(2)
+    bpy.context.view_layer.update()
+    drv = list(glaze.node_tree.animation_data.drivers) if glaze.node_tree.animation_data else []
+    cam_vars = [v.targets[0].data_path for fc in drv for v in fc.driver.variables if 'camera' in v.targets[0].data_path]
+    S.check('tandem teapot: the crazing fades by the pixel footprint measured in the shader (no camera driver, all '
+            'drivers valid with no camera in the scene)', sc.camera is None and not cam_vars
+            and all(fc.driver.is_valid for fc in drv) and any(n.bl_idname == 'ShaderNodeCameraData'
+                                                              for n in glaze.node_tree.nodes),
+            f'{len(drv)} drivers, camera paths {cam_vars}')
 
     # opts.glb as bytes (the engine's Uint8Array, e.g. ASSETS.tandem): built, its maps packed, nothing left on disk
     def check_bytes_build(b2):
@@ -248,6 +260,28 @@ def run(render=False, rider=True):
     S.check('tandem: with EEVEE motion blur on, build() leaves the smear off (no double blur)', b3.group['spoke_smear'] == 0.0)
     b3.dispose()
     sc.render.use_motion_blur = False
+
+    # set_spoke_smear switches the smear at once (a bare property write waits for the next frame change)
+    sc.frame_set(f)
+
+    def spokes_moved(b):
+        import numpy as np
+        sp = next(o for o in b.parts['rear_wheel'].children_recursive if o.type == 'MESH' and '_TRAIL' in o.data.attributes)
+        co0 = np.empty(len(sp.data.vertices) * 3)
+        sp.data.vertices.foreach_get('co', co0)
+        ev = sp.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        m2 = ev.to_mesh()
+        c = np.empty(len(m2.vertices) * 3)
+        m2.vertices.foreach_get('co', c)
+        ev.to_mesh_clear()
+        return float(np.abs(c - co0).max())
+    on = spokes_moved(bike)
+    bike.set_spoke_smear(False)
+    off = spokes_moved(bike)
+    bike.set_spoke_smear(True)
+    back = spokes_moved(bike)
+    S.check('tandem: set_spoke_smear(False / True) switches the smear at once (same frame)',
+            on > 0.005 and off < 1e-7 and abs(back - on) < 1e-7, f'{on * 1000:.2f} -> {off * 1000:.4f} -> {back * 1000:.2f} mm')
 
     me = None
     if rider:

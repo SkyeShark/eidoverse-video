@@ -47,7 +47,8 @@ RIGS = {
 }
 RECIPE_RIG = {'lights': [((0.6, 0.8, -0.3), (1.0, 1.0, 1.0), 0.85)], 'world': 0.3}
 # the camera, as (azimuth from the front in degrees, elevation in degrees, distance in bounds diagonals)
-VIEWS = {'mr_hege': (20, 8, 1.5), 'red_shoggoth': (-25, 12, 1.0), 'detailed_coat': (55, 20, 1.35)}
+VIEWS = {'mr_hege': (20, 8, 1.5), 'red_shoggoth': (-25, 12, 1.35), 'detailed_coat': (55, 20, 1.35),
+         'gyroid': (25, 18, 1.5)}
 # overrides for close-ups: view=az,el,dist  lens=mm  aim=fraction of the bounds' height to look at  tag=suffix
 VIEW_ARG = tuple(float(x) for x in A['view'].split(',')) if 'view' in A else None
 LENS = float(A.get('lens', '50'))
@@ -78,6 +79,12 @@ def frame_camera(obj, view):
     a, e = math.radians(az), math.radians(el)
     off = Vector((math.sin(a) * math.cos(e), -math.cos(a) * math.cos(e), math.sin(e))) * diag * dist * 1.6
     return C.camera(tuple(Vector(centre) + off), tuple(centre), lens=LENS)
+
+
+# BVHTree.FromObject builds a tree that hits nothing past about 10 M quads (the 15.1 M-quad Menger sponge at 'high'),
+# and a second render of such a mesh for its silhouette passes the 12 GB of a GPU slot: those meshes skip the
+# silhouette check, saying so (test_mesh_depth_parity.py checks the mesher against the field)
+BVH_MAX_QUADS = 10_000_000
 
 
 def mesh_coverage(obj, cam, w, h):
@@ -140,13 +147,25 @@ for name in NAMES:
     ref = obj.raymarch_reference(cam, W, H, samples=4, t=T)
     refp = C.save_linear_png(os.path.join(C.OUT, f'ex_{name}{TAG}_ref.png'), ref)
     # silhouettes: the engine's march (one centred sample) against camera rays cast at the mesh, at quarter size
-    w4, h4 = W // 4, H // 4
-    ref4 = obj.raymarch_reference(cam, w4, h4, samples=1, t=T)
-    m_ref = ref4[::-1, :, 3] > 0.5
-    m_mesh = mesh_coverage(obj.object, cam, w4, h4)
-    iou = float((m_ref & m_mesh).sum()) / max(1.0, float((m_ref | m_mesh).sum()))
-    C.check(f'{name}: silhouette matches the raymarch', iou > 0.93,
-            f'IoU {iou:.3f} (mesh {m_mesh.mean() * 100:.1f}%, raymarch {m_ref.mean() * 100:.1f}% of the frame)')
+    # when the subject fills the frame; a distant subject is measured at full size, or its limbs are single pixels
+    from bpy_extras.object_utils import world_to_camera_view
+    ys = [world_to_camera_view(bpy.context.scene, cam, obj.object.matrix_world @ Vector(cb)).y
+          for cb in obj.object.bound_box]
+    tall = (max(ys) - min(ys)) * H
+    div = 4 if tall >= 400 else (2 if tall >= 200 else 1)
+    w4, h4 = W // div, H // div
+    if len(c.quads) > BVH_MAX_QUADS:
+        print(f'SKIP {name}: silhouette check: {len(c.quads)} quads pass what BVHTree holds and a second render '
+              f'of them passes the slot; the mesher is checked against the field in test_mesh_depth_parity.py',
+              flush=True)
+    else:
+        ref4 = obj.raymarch_reference(cam, w4, h4, samples=1, t=T)
+        m_ref = ref4[::-1, :, 3] > 0.5
+        m_mesh = mesh_coverage(obj.object, cam, w4, h4)
+        iou = float((m_ref & m_mesh).sum()) / max(1.0, float((m_ref | m_mesh).sum()))
+        C.check(f'{name}: silhouette matches the raymarch', iou > 0.93,
+                f'IoU {iou:.3f} at {w4}x{h4} (mesh {m_mesh.mean() * 100:.1f}%, raymarch {m_ref.mean() * 100:.1f}% '
+                f'of the frame)')
     C.sheet([eevee, refp], os.path.join(C.OUT, f'ex_{name}{TAG}_sheet.png'), cols=2)
     for img in list(bpy.data.images):
         if img.users == 0:

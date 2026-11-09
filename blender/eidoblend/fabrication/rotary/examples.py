@@ -7,8 +7,11 @@
 Each builder sets the scene to its example's config (eidoverse/examples/robotics/<name>.json: 1280 x 900, 24 fps, 31
 or 32 s), builds what setup() built (the robotics studio without its grid, the cnc_rotary machine in #b9c7c8 /
 #235b68, the rotary job, the 36-degree camera) and keys what renderFrame(t) did at every frame (or at `frames`; a
-frame left out has no stock file, so render only keyed frames then). The harness runs them as films through
-scenes/<name>.json (python eido_blender.py render blender/eidoblend/fabrication/rotary/scenes/rotary.json).
+frame left out has no stock file, so render only keyed frames then). Each frame is keyed at its clock's rate
+(job.clock_rate), so under the harness's motion blur a time-lapse frame exposes like a real-time camera (crisp, as
+the WebGPU frames were), a held frame is still, and a camera cut falls between two frames' shutters. The harness runs
+them as films through scenes/<name>.json (python eido_blender.py render
+blender/eidoblend/fabrication/rotary/scenes/rotary.json).
 
     rotary        an indexed rotary carving study in hardwood: the sample sculpture (change the radius function to
                   design the shape), the whole program played over 28 s after a one-second hold
@@ -24,12 +27,14 @@ import math
 import os
 
 from .._axes import Rec
-from .carve import rotary_carve
+from .carve import cut_offset, rotary_carve
 from .path import sample_rotary
 
 EXAMPLES_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', '..',
                                              'eidoverse', 'examples', 'robotics'))
 PRIMARY, ACCENT = '#b9c7c8', '#235b68'
+WIDE = ((-.31, .38, .48), (.015, .16, 0))       # three's eye and target: the studio view
+CLOSE = ((.22, .275, .30), (.025, .153, 0))     # rotary_metal's view of the cutting
 
 
 def config(name):
@@ -83,11 +88,16 @@ def rotary(scene=None, frames=None, cache_dir=None, resolution=(256, 96, 96), **
     machine = make_robot('cnc_rotary', scene=sc, primary=PRIMARY, accent=ACCENT)
     job = rotary_carve(machine, sample_rotary, material='wood', duration=28,
                        cache_dir=cache_dir or '//rotary_stock_cache', resolution=resolution)
-    _aim(cam, (-.31, .38, .48), (.015, .16, 0))
+    _aim(cam, *WIDE)
     fps = sc.render.fps / sc.render.fps_base
+
+    def clock(t):
+        return max(0.0, t - 1)
+
     for f in _frames(sc, frames):
-        job.seek(max(0.0, (f - sc.frame_start) / fps - 1))
-        job.key(f)
+        t = (f - sc.frame_start) / fps
+        job.seek(clock(t))
+        job.key(f, rate=job.clock_rate(clock, t))
     return Rec(scene=sc, machine=machine, job=job, camera=cam, studio=st)
 
 
@@ -114,16 +124,21 @@ def rotary_metal(scene=None, frames=None, cache_dir=None, material='aluminum', r
                                    'settings': {k: v for k, v in job.settings.items() if k != 'centre_seat'},
                                    'stages': len(job.program.stages)}))
     fps = sc.render.fps / sc.render.fps_base
+
+    def clock(t):
+        return metal_time(t, cutting_start, job.duration)
+
+    cut, shot = cut_offset(sc), None
     for f in _frames(sc, frames):
         t = (f - sc.frame_start) / fps
-        job.seek(metal_time(t, cutting_start, job.duration))
-        if t < 2 or t >= 28:
-            _aim(cam, (-.31, .38, .48), (.015, .16, 0))
-        else:
-            _aim(cam, (.22, .275, .30), (.025, .153, 0))
-        for path in ('location', 'rotation_quaternion'):
-            cam.keyframe_insert(path, frame=f)
-        job.key(f)
+        job.seek(clock(t))
+        wide = t < 2 or t >= 28
+        if wide != shot:                                 # a cut: keyed between this frame's shutter and the last's
+            _aim(cam, *(WIDE if wide else CLOSE))
+            for path in ('location', 'rotation_quaternion'):
+                cam.keyframe_insert(path, frame=f + cut)
+            shot = wide
+        job.key(f, rate=job.clock_rate(clock, t))
     _constant(cam)                                       # the camera cuts between its two views; it never travels
     return Rec(scene=sc, machine=machine, job=job, camera=cam, studio=st, cutting_start=cutting_start)
 

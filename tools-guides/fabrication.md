@@ -29,6 +29,28 @@ job.play()             # key every frame of the scene's range: t = (seconds - st
 job.set_color('#da642c')   # the deposited bead, the spool, the live strand and the guided cores
 ```
 
+`play()` keys the scene's whole range; `key(frame_start, frame_end, start=,
+speed=)` keys only those frames and leaves the rest of each curve as it is, so
+one machine can run one job after another in a film:
+
+```python
+bracket = fab.manufacturing_sample('bracket', as_parts=True)
+ring = fab.manufacturing_sample('ring', as_parts=True)
+first = fab.print(printer, bracket, size=.03, center=(-.022, 0), duration=3)
+second = fab.print(printer, ring, size=.024, center=(.024, 0), duration=3)
+first.key(1, 72)       # the bracket prints over frames 1..72 and stays on the sheet
+second.key(73, 144)    # then the ring, beside it; the axes, reel, fan and tubes carry both ranges
+second.stop()          # removes frames 73..144 only; the first job's keys stay
+```
+
+Each job seeks its own clock, so the head, the reel's turn and the consumed
+length start again from the second job's beginning at its first frame (the
+WebGPU seek does the same). Keep two jobs on one machine in separate frame
+ranges: where they overlap, the later `key()` wins. `stop()` and `dispose()`
+take the job's actions away with its keys once they are empty. `on_done=`
+runs when a `seek` reaches the end, which with keys means while `play()` or
+`key()` writes them, not during playback: a saved film plays without Python.
+
 The source is snapshotted once (`source_geometry`): every visible mesh under
 the object as Blender evaluates it now (modifiers, the armature's pose, shape
 keys, Geometry Nodes and collection instances), placed by its world matrix,
@@ -116,6 +138,9 @@ and small folded chips; wood gets three-dimensional growth rings and fibre
 running through the cut walls and floor, larger shavings and fine dust; plywood
 shows its plies on the walls. The fine patterns fade with their pixel footprint
 (the camera's angle per pixel is a driver on the material), so they never moiré.
+The driver reads the camera that is the scene's camera when the job is made
+(and the render height): make the camera first, and when several cameras show
+the stock, make the closest one the scene's camera while making the job.
 These are motion and appearance presets for films, not machining advice:
 override `feed`, `plunge`, `rpm`, `stepdown`, `cut_depth`, `stepover`,
 `flutes`; a path's own per-move `feed` wins. `job.settings` gives the effective
@@ -140,10 +165,14 @@ agree with the CPU envelope to well under a micron (`job.inspect_heights(points_
 and `job.stock.cell_size` is the discretisation: a finer grid resolves finer
 scallops at more evaluation time. The pocket program's zig-zag turns at the
 walls on alternate rows, so its walls carry real scallops (cusps 0.27 mm deep,
-5 mm apart, with the 3 mm cutter at a 2.5 mm stepover); where a column of
-vertices falls inside a cusp, the heightfield shows it as a one-cell tooth on
-the wall, as the WebGPU stock does. A finer `resolution` thins the teeth
-toward the real cusps.
+5 mm apart, with the 3 mm cutter at a 2.5 mm stepover). Whether the grid shows
+them depends on where its vertex columns fall, as on the WebGPU stock: on the
+default pocket at 128 cells the walls run straight, with a one-cell step where
+the 3 mm corner radius ends each wall; at 160 cells a column lies inside the
+cusps and the long walls show 29 one-vertex teeth; at 256 cells the cusps
+read as a slightly ragged wall. The floor and the stock top are the same
+finish, so under the studio's light (no shadows, as in the original) a pocket
+reads by its walls; a raking light or `studio(shadows=True)` shows its depth.
 
 **Chips** come only from newly removed material, plunges included (air moves and
 repeated passes through cleared stock emit nothing). `sample_removal` steps the
@@ -154,7 +183,11 @@ and tint is a function of its event's identity and the keyed physical time, so
 any frame shows the same chips however it is reached. `effects=False` drops
 them; `dust=False` keeps wood shavings without fines. Chips live a fraction of a
 second; there is no coolant or chip pile. `job.stock.removed_volume` is the grid
-estimate in cubic metres.
+estimate in cubic metres. As in the original, framing counts where chips can
+fly: a hidden box (`job.effects.bounds`, the stock plus 0.22 m around it, from
+4 cm below the stock to 9 cm above it) sits in the machine's hierarchy, and the
+hidden chip templates are chip-sized, so `frame_camera` on a robot's group
+frames what the WebGPU `frameCamera` frames.
 
 ```python
 relief_cnc = make_robot('cnc_relief')
@@ -249,7 +282,11 @@ their assertions, all their tests, the robotics kit's asset checks included;
 that it plays on its own; `test_growth_feed_mesh_relief_render.py` renders the
 saved example's print and pocket growing over eight times, the live filament
 feed at the reel and the head, the dispenser, a service loop and the bracket
-carved as a relief with and without `lift_over_steps`).
+carved as a relief with and without `lift_over_steps`;
+`test_job_keys_seek_dispose_framing_tubes.py` keys two prints into separate
+ranges of one printer, checks that `seek` alone updates the evaluated bead,
+stock and chips, that disposing print, mill and carve jobs leaves nothing
+behind, and that the example's wide camera frames as the WebGPU one).
 
 ## Not yet ported
 

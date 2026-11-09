@@ -332,7 +332,11 @@ a fresh render or visual validation.
   analogue, rendering each collection alone and reporting its time, is not
   written. Profile Python with `cProfile`; `eido_blender.py bench` gives the
   seconds a frame.
-- The locomotion, lipsync and VRM-pose audits: the characters family's.
+- `motion.locomotion`'s 60 % threshold is measured on one walk (a planted
+  foot moving 15 % of the travel), one slide (100 %) and synthetic rigs: a
+  run with flight phases, and a stride that does not match its speed, are
+  unmeasured. `motion.lipsync` reads VRM 0.x visemes and mouth-named shape
+  keys too, but only a VRM 1.0 face (claude.vrm) is exercised.
 - `gpu_check.mjs`'s explicit software-fallback request does not apply:
   Blender chooses its GPU when it starts. The rest of the check (hardware or
   software, and a compute dispatch read back) runs in `eido_blender.py

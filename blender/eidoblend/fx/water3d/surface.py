@@ -15,6 +15,11 @@ and the engine's per-pixel shading inputs become per-vertex attributes the mater
             default (view independent, any camera), or along the scene camera's view ray ('view', the engine's own)
     ring    solid proximity: the max of the soft occupancy over the engine's 6 taps 1.6 cells around the point
     speed   flow speed (m/s) from the velocity field (the Blender edition's churn foam reads it)
+    exit    the water path along the inward normal to where it leaves the water (m): EEVEE's refraction
+            thickness, which the engine's raymarch never needed (left unlinked, the same settled pool rendered
+            bright in one frame and dark in the next: measured on the dam break)
+    bed     1 where that path ends on a solid or runs deeper than 24 cells (water over a floor), 0 where it
+            leaves into air (a stream, a sheet, a drop)
 
 All arrays are in three.js axes, [k][j][i] = [z][y][x] (y up), domain-local (the domain centred on 0).
 """
@@ -252,28 +257,65 @@ def blender_to_local3(v, center3):
     return np.stack([v[:, 0], v[:, 2], -v[:, 1]], axis=1) - np.asarray(center3, dtype=np.float64)
 
 
-def vertex_speed(verts_b, velocity, world3, center3):
-    """Flow speed (m/s) at each vertex: the cell-centred velocity (the mean of each cell's two MAC faces, as the
-    engine's cellVel) sampled trilinearly. `velocity` is the solver's (NZ, NY, NX, 3) face field."""
+def cell_velocity(velocity):
+    """The cell-centred velocity: the mean of each cell's two MAC faces (the engine's cellVel). `velocity` is the
+    solver's (NZ, NY, NX, 3) face field."""
     v = np.asarray(velocity, dtype=np.float32)
     c = v.copy()
     c[:, :, 1:, 0] = 0.5 * (v[:, :, 1:, 0] + v[:, :, :-1, 0])
     c[:, 1:, :, 1] = 0.5 * (v[:, 1:, :, 1] + v[:, :-1, :, 1])
     c[1:, :, :, 2] = 0.5 * (v[1:, :, :, 2] + v[:-1, :, :, 2])
-    sp = Grid(np.linalg.norm(c, axis=-1), world3)
+    return c
+
+
+def vertex_speed(verts_b, velocity, world3, center3):
+    """Flow speed (m/s) at each vertex: the cell-centred velocity sampled trilinearly."""
+    sp = Grid(np.linalg.norm(cell_velocity(velocity), axis=-1), world3)
     if len(verts_b) == 0:
         return np.zeros(0, dtype=np.float32)
     return sp.sample(blender_to_local3(verts_b, center3)).astype(np.float32)
 
 
+def vertex_shear(verts_b, velocity, soft, world3, center3, dx, reach_cells=2.0):
+    """The flow's shear at each vertex (m/s): the largest speed difference between the water at the point and the
+    water reach_cells away along +-x, +-y, +-z (taps in solids skipped). Water moving as one body (a stream in free
+    fall, a falling slug, a still pool) reads near 0; fast water meeting slow water (a jet plunging into a pool, a slug
+    landing, a crown leaving the impact) reads its speed difference: where real water entrains air and turns white."""
+    n = len(verts_b)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    W = np.asarray(world3, dtype=np.float64)
+    c = cell_velocity(velocity)
+    comps = [Grid(c[..., k], world3) for k in range(3)]
+    P = blender_to_local3(verts_b, center3)
+
+    def vel(q):
+        return np.stack([g.sample(q) for g in comps], axis=1)
+
+    u0 = vel(P)
+    r = float(dx) * reach_cells
+    best = np.zeros(n)
+    for ax in range(3):
+        for sgn in (-1.0, 1.0):
+            e = np.zeros(3)
+            e[ax] = sgn * r
+            q = P + e
+            uvw = q / W + 0.5
+            usable = np.all((uvw >= 0.0) & (uvw <= 1.0), axis=1) & (soft(uvw) < 0.30)
+            d = np.linalg.norm(vel(q) - u0, axis=1)
+            best = np.where(usable, np.maximum(best, d), best)
+    return best.astype(np.float32)
+
+
 def vertex_attributes(verts_b, field_grid, soft, o, dx, world3, center3, camera_b=None):
-    """thick and ring per vertex (the engine's per-pixel shading inputs), plus the normal from grad phi."""
+    """thick and ring per vertex (the engine's per-pixel shading inputs), the normal from grad phi, and exit and
+    bed (the refraction thickness EEVEE needs): (thick, ring, normal, exit, bed)."""
     W = np.asarray(world3, dtype=np.float64)
     P = blender_to_local3(verts_b, center3)
     n = len(P)
-    if n == 0:
+    if n == 0:                                   # no water this frame (an empty tank before a pour): an empty surface
         z = np.zeros(0, dtype=np.float32)
-        return z, z, np.zeros((0, 3), dtype=np.float32)
+        return z, z, np.zeros((0, 3), dtype=np.float32), z, z
     # normal: central differences of the rendered field one sim cell either side (the engine's n)
     d = np.array([dx, dx, dx])
     g = np.zeros((n, 3))
@@ -302,6 +344,9 @@ def vertex_attributes(verts_b, field_grid, soft, o, dx, world3, center3, camera_
     for k in range(STEPS):
         q = P + dirs * (step * (k + 0.5))[:, None]
         thick += np.where(field_grid.sample(q) < 0.0, step, 0.0)
+    # the refraction thickness EEVEE needs (the material output's Thickness): the water path along the inward
+    # normal to where it leaves the water, and whether it ends on a solid (or runs deep) instead of in air
+    exit_len, bed = first_segment(P, -nrm, field_grid, soft, W, dx)
     # contact ring: max soft occupancy over the point and 1.6 cells along +-x, +-z and -y
     uvw = P / W + 0.5
     Wc = 1.6 / np.array([field_grid.nx, field_grid.ny, field_grid.nz], dtype=np.float64)
@@ -312,7 +357,46 @@ def vertex_attributes(verts_b, field_grid, soft, o, dx, world3, center3, camera_
         ring = np.maximum(ring, soft(uvw + np.array(off)))
     # the normal in Blender axes for the PLY
     nb = np.stack([nrm[:, 0], -nrm[:, 2], nrm[:, 1]], axis=1)
-    return thick.astype(np.float32), ring.astype(np.float32), nb.astype(np.float32)
+    return (thick.astype(np.float32), ring.astype(np.float32), nb.astype(np.float32), exit_len.astype(np.float32),
+            bed.astype(np.float32))
+
+
+def first_segment(P, dirs, field_grid, soft, W, dx, max_cells=24.0, step_cells=0.75):
+    """The water path from each surface point along dirs to where it leaves the water: (length in metres, bed).
+
+    bed is 1 where the path ends on a solid (water over a basin's floor, against a wall or a body) or is still in
+    water after max_cells (deep water), 0 where it leaves into air (a stream, a sheet, a drop). The render field
+    blends solids to air, so the occupancy is tested first, at the mask's own onset (0.30). An air exit is placed
+    at the linear zero crossing between the last two samples."""
+    n = len(P)
+    h = float(dx) * step_cells
+    steps = int(np.ceil(max_cells / step_cells))
+    length = np.full(n, steps * h)
+    bed = np.ones(n, dtype=bool)
+    alive = np.ones(n, dtype=bool)
+    prev = np.full(n, -1e-6)
+    for k in range(1, steps + 1):
+        idx = np.nonzero(alive)[0]
+        if len(idx) == 0:
+            break
+        t = k * h
+        q = P[idx] + dirs[idx] * t
+        uvw = q / W + 0.5
+        out = np.any((uvw < 0.0) | (uvw > 1.0), axis=1)            # past the open domain: air
+        solid = (soft(uvw) >= 0.30) & ~out
+        f = field_grid.sample(q)
+        air = ((f >= 0.0) | out) & ~solid
+        hit_s = idx[solid]
+        length[hit_s] = t
+        alive[hit_s] = False
+        hit_a = idx[air]
+        fp, fc = prev[hit_a], f[air]
+        frac = np.clip(fp / np.minimum(fp - fc, -1e-9), 0.0, 1.0)  # fp < 0 <= fc: where the line crosses zero
+        length[hit_a] = t - h + frac * h
+        bed[hit_a] = False
+        alive[hit_a] = False
+        prev[idx] = np.minimum(f, -1e-9)
+    return length, bed
 
 
 def write_ply(path, verts, tris, quads, attrs):

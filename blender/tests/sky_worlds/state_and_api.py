@@ -142,6 +142,18 @@ sky.set_time(11.0)
 check('ringworld: info carries the JS keys', all(key in r.info for key in (
     'radius', 'tile', 'halfWidth', 'repeat', 'mapTex', 'maskTex', 'waterWaveMode', 'waterWavesActive',
     'geometryRelief')), str(sorted(r.info)))
+v4_in_repo = os.path.exists(os.path.join(REPO, 'eidoverse', 'assets', 'sky', 'celestial', 'ring_relief_v4.bin.gz'))
+check("ringworld: the band takes Eanpa's v4 relief exactly when the repo carries the set (else the v1 maps)",
+      r.info.get('relief') == ('v4' if v4_in_repo else 'v1'), 'relief %s' % r.info.get('relief'))
+ps = getattr(r, 'plate_scene', None)
+check('ringworld: the band, its walls, cloud sheet and lamps render as a plate in their own scene (behind every local '
+      'object); the eclipse proxy shadows both scenes, the haze walls stay local',
+      ps is not None and all(o.name in ps.objects and o.name not in sc.objects
+                             for o in (r.band, r.walls, r.clouds, r.band_sun, r.band_shine))
+      and r.eclipse_proxy.name in sc.objects and r.eclipse_proxy.name in ps.objects
+      and r.fog_wall.name in sc.objects and r.fog_wall.name not in ps.objects
+      and ps.camera == r.plate_camera and ps.render.film_transparent,
+      'plate scene %s' % (ps.name if ps else None))
 
 
 class _FakeWeather:
@@ -170,6 +182,16 @@ check('spatial pass: 1/3 layer scale, resolution reported', sky.layer_scale == 1
       and sp.get_resolution() == dict(width=214, height=120, divisor=3), str(sp.get_resolution()))
 sp.set_divisor(2)
 check('spatial pass: set_divisor', sky.layer_scale == 0.5 and sp.get_divisor() == 2)
+sp.dispose()
+check('spatial pass: dispose restores the full layer, and a disposed pass ignores set_divisor',
+      sky.layer_scale == 1.0 and sp.set_divisor(4) is False and sky.layer_scale == 1.0)
+sp = make_spatial_cloud_pass(sky, div=2, width=1280, height=720)
+r0 = sp.get_resolution()
+sp.resize(1920, 1080)
+check('spatial pass: width/height and resize(w, h) set the reported base, attach is once, render() is a no-op',
+      r0 == dict(width=640, height=360, divisor=2) and sp.get_resolution() == dict(width=960, height=540, divisor=2)
+      and sp.attach() is False and sp.render() is None and sp.mode == 'spatial-current-frame-sky',
+      '%s then %s' % (r0, sp.get_resolution()))
 sp.dispose()
 check('ringworld: attach_lights is a no-op, dispose_lights removes both lamps and is safe twice',
       r.attach_lights() is r and r.dispose_lights() is r and r.dispose_lights() is r
@@ -215,4 +237,15 @@ check('shieldworld: the night block keys the cyan shield light and the amber moo
       ex is not None and ex['night_k'] > 0.99 and ex['moon_up_k'] > 0.99 and ex['tint'][0] < 0.25
       and ex['add'][2] > ex['add'][0] * 0.5, str({k: (tuple(round(c, 4) for c in v) if isinstance(v, tuple) else
                                                     round(v, 3)) for k, v in (ex or {}).items()}))
+try:
+    sky.attach_cluster(m)
+    check('shieldworld: attach_cluster refuses a second cluster (the world owns its moon)', False)
+except ValueError as e:
+    check('shieldworld: attach_cluster refuses a second cluster (the world owns its moon)', 'already owns' in str(e))
+check('shieldworld: its own moon rides the orbit (not placed by the scene)', not m.placed and not mv.get('placed'))
+try:
+    m.bake()
+    check('shieldworld: its own moon refuses a standalone cluster bake', False)
+except ValueError as e:
+    check('shieldworld: its own moon refuses a standalone cluster bake', 'its sky bakes it' in str(e) and not m.placed)
 print('PASS state_and_api all' if ok_all else 'FAIL state_and_api some')

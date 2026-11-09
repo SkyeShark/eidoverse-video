@@ -13,7 +13,7 @@ gives the walk up, as the JS's collision stall does. The scene's direction, awai
 
 Every query is called and checked against the scene (observe, can_see, distance_to, path_to, get_head_direction,
 get_head_position, is_blocked, get_landmarks, forget_landmark, get_map, get_current_action, is_moving, is_maneuvering,
-vault / jump / climb_ledge / climb_ladder, set_running; the controller's set_walk_speed, set_run_speed, is_busy,
+set_running; the controller's set_walk_speed, set_run_speed, is_busy,
 get_state, is_stalled), then the run is baked and checked on the keyed result:
   - the standing turns step round on planted feet (no sole point in contact slides over 2 mm a frame) and end at
     their heading
@@ -213,8 +213,7 @@ try:
     api['is_moving_0'] = body.is_moving()
     api['is_blocked_0'] = body.is_blocked()
     api['get_current_action_0'] = body.get_current_action()
-    api['vault'], api['jump'], api['climb_ledge'], api['climb_ladder'] = (body.vault(), body.jump({'distance': 1.0}),
-                                                                          body.climb_ledge(), body.climb_ladder())
+    # (the moves, vault / jump / climb_ledge / climb_ladder, play on their course: test_body_maneuvers.py)
     api['is_maneuvering'] = body.is_maneuvering()
     body.set_running(False)
     ctl.set_walk_speed(0.9)
@@ -228,7 +227,7 @@ try:
     api['get_map_is_memory'] = body.get_map() is body.memory
     check('queries_at_rest',
           abs(p0['x'] - START[0]) < 1e-6 and abs(api['get_heading_deg'] - math.degrees(h0)) < 0.01 and hp.z > 1.4
-          and abs(hd.length - 1) < 1e-6 and api['vault'] is False and api['jump'] is False and not api['is_moving_0']
+          and abs(hd.length - 1) < 1e-6 and api['is_maneuvering'] is False and not api['is_moving_0']
           and api['get_landmarks'] == ['stool'] and api['get_map_is_memory'] and api['get_state_0'] == 'idle',
           f'{api}')
 

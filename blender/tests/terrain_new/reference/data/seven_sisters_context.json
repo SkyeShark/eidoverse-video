@@ -1,0 +1,66 @@
+{
+ "name": "seven_sisters_context",
+ "role": "context",
+ "title": "Seven Sisters chalk cliffs, East Sussex, England",
+ "landform": "sea cliffs (chalk, with dry valleys)",
+ "note": "Vertical white chalk cliffs 50-160 m high, cut across a row of dry valleys (the \"sisters\"), from Cuckmere Haven east past Birling Gap toward Beachy Head.",
+ "centre_lat": 50.75,
+ "centre_lon": 0.198,
+ "pixel_size_m": 24.0,
+ "extent_m": [
+  24000,
+  24000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "data_note": "Terrain Tiles carry the Environment Agency 2 m lidar on this coast, so the vertical chalk faces are resolved (one or two pixels wide at 6 m). A few straight survey-strip seams show as faint steps inland in the north-east corner.",
+ "context_of": "seven_sisters",
+ "sea_floor": "every height at or below 0.3 m is set to -2 m: the sea surface is 0 m and the source's bathymetry is left out; 4 offshore patches of the source's sea data (each under 5% of the mainland) are sea as well",
+ "source": {
+  "dataset": "Terrain Tiles (Mapzen / Tilezen joerd), Terrarium PNG encoding, AWS Open Data elevation-tiles-prod",
+  "publisher": "Mapzen / Linux Foundation Tilezen, hosted by AWS",
+  "url": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  "native_resolution_m": "varies by region: 3DEP 3-10 m (USA), EU-DEM 25 m (Europe), SRTM 30-90 m, GMTED, ETOPO1",
+  "vertical_datum": "per source (mostly EGM96 geoid / NAVD88)",
+  "licence": "Open data, each underlying source credited: https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+  "attribution": "Terrain Tiles (Tilezen joerd) from: EU-DEM, produced using Copernicus data and information funded by the European Union; SRTM and GMTED2010 courtesy of the U.S. Geological Survey; ETOPO1, U.S. National Oceanic and Atmospheric Administration; (where in the UK) (c) Environment Agency copyright and/or database right 2015; (where in the USA) 3DEP courtesy of the U.S. Geological Survey",
+  "kind": "terrarium",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 12.091,
+  "resampling": "Gaussian low-pass (sigma 0.89 source px) then bilinear",
+  "no_data_fraction": 0.0,
+  "zoom": 13,
+  "tiles": 81,
+  "tile_range": [
+   4096,
+   2747,
+   4104,
+   2755
+  ]
+ },
+ "licence": "Open data, each underlying source credited: https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+ "attribution": "Terrain Tiles (Tilezen joerd) from: EU-DEM, produced using Copernicus data and information funded by the European Union; SRTM and GMTED2010 courtesy of the U.S. Geological Survey; ETOPO1, U.S. National Oceanic and Atmospheric Administration; (where in the UK) (c) Environment Agency copyright and/or database right 2015; (where in the USA) 3DEP courtesy of the U.S. Geological Survey",
+ "water": [
+  {
+   "kind": "sea",
+   "name": "English Channel",
+   "level_m": 0.0
+  }
+ ],
+ "shape_stats": {
+  "relief_m": 217.69,
+  "mean_m": 17.4,
+  "hypsometric_integral": 0.0891,
+  "slope_deg_p10": 0.0,
+  "slope_deg_p50": 0.0,
+  "slope_deg_p90": 6.46,
+  "slope_deg_p99": 18.37,
+  "slope_deg_mean": 1.86
+ },
+ "height_png": "seven_sisters_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": -2.0,
+ "height_max_m": 215.69,
+ "height_step_m": 0.003321736476691844,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

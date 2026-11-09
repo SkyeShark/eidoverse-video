@@ -195,6 +195,18 @@ def main():
         R['hat'] = {'tilt_deg': round(tilt, 2), 'lift_mm': round(1000 * lift, 1)}
         C.check("cyclist: the boater's brim normal along the head's up, tipped ~4 deg back; lift within 30 mm",
                 abs(tilt - 4.0) < 1.5 and 0.0 <= lift <= 0.0301, f"tilt {tilt:.2f} deg, lift {1000 * lift:.1f} mm")
+        # ... and it stays there through the block (the still is its last frames): in the head bone's frame
+        hb = h.humanoid['head']
+        rel = {}
+        for f in (fc, fc + HOLD // 2, fc + HOLD - 2):
+            sc.frame_set(f)
+            rel[f] = (h.arm.matrix_world @ h.arm.pose.bones[hb].matrix).inverted() @ hat.matrix_world
+        d_mm = max((rel[f].translation - rel[fc].translation).length for f in rel) * 1000
+        d_deg = max(math.degrees(rel[f].to_quaternion().rotation_difference(rel[fc].to_quaternion()).angle) for f in rel)
+        d_sc = max(abs(s - rel[fc].to_scale()[0]) for f in rel for s in rel[f].to_scale())
+        R['hat_drift'] = {'mm': round(d_mm, 4), 'deg': round(d_deg, 4), 'scale': round(d_sc, 5)}
+        C.check("cyclist: the boater stays seated through its block, to the still's frame (no easing toward the next "
+                "outfit's hat)", d_mm < 0.1 and d_deg < 0.01 and d_sc < 1e-4, f"{R['hat_drift']}")
         # petals(): another era's petals only, then the outfit's own back
         f = sc.frame_end + 5
         wd.wear('professor_tweed_1984', frame=f)

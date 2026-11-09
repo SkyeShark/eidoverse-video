@@ -56,9 +56,14 @@ from ._util import abspath, color, frame_file, scene_fps
 # ------------------------------------------------------------------------------------------------------------
 
 
-def make_water_normals(path, size=512, seed=7, wind=(1.0, 0.35), choppiness=1.0, strength=6.0):
+def make_water_normals(path, size=512, seed=7, wind=(1.0, 0.35), choppiness=1.0, strength=1.0, directional=0.5):
     """Write a tileable tangent-space water normal map (PNG, B up) synthesised from a Phillips ocean spectrum:
-    the role three's waternormals.jpg plays for WaterMesh. Returns the path. Regenerable; nothing to license."""
+    the role three's waternormals.jpg plays for WaterMesh. Returns the path. Regenerable; nothing to license.
+
+    The defaults match that map's statistics, which every WaterMesh scene was made with: a mean slope of about 12
+    degrees (90 % under 21), about the same in x and y, some 35 ripples across a tile. directional mixes the wind's
+    cos^2 spread with an isotropic one (1 = all along the wind). strength scales the slopes (6.0 gave a mean of 44
+    degrees: the sea broke into white blotches wherever the mirror term saw a grazing normal)."""
     rng = np.random.default_rng(seed)
     n = int(size)
     k = np.fft.fftfreq(n) * n
@@ -67,9 +72,10 @@ def make_water_normals(path, size=512, seed=7, wind=(1.0, 0.35), choppiness=1.0,
     kk[0, 0] = 1.0
     w = np.asarray(wind, dtype=np.float64)
     w = w / np.linalg.norm(w)
-    L = n / 18.0                                            # the dominant wavelength, in texels
+    L = n / 14.0                                            # the dominant wavelength, in texels
     cos = (kx * w[0] + ky * w[1]) / kk
-    ph = np.exp(-1.0 / (kk * L / n * 2 * np.pi) ** 2) / kk ** 4 * cos ** 2
+    spread = (1.0 - directional) + directional * cos ** 2
+    ph = np.exp(-1.0 / (kk * L / n * 2 * np.pi) ** 2) / kk ** 4 * spread
     ph *= np.exp(-(kk / (n * 0.35)) ** 2)                   # no aliasing near Nyquist
     ph[0, 0] = 0.0
     amp = np.sqrt(ph / 2) * (rng.standard_normal((n, n)) + 1j * rng.standard_normal((n, n)))
@@ -160,9 +166,10 @@ def create_water_mesh(size_xy=(100.0, 100.0), location=(0.0, 0.0, 0.0), geometry
     sc = scene or bpy.context.scene
     fps, fs = scene_fps(sc), sc.frame_start
     normals = o['water_normals']
-    if normals is None:
+    generated = normals is None
+    if generated:
         d = normals_dir or os.path.join(bpy.app.tempdir or os.path.abspath('.'), 'eido_water')
-        normals = os.path.join(d, 'water_normals_ocean_512.png')
+        normals = os.path.join(d, 'water_normals_ripples_512.png')
         if not os.path.exists(normals):
             make_water_normals(normals)
     if isinstance(normals, str):
@@ -170,6 +177,10 @@ def create_water_mesh(size_xy=(100.0, 100.0), location=(0.0, 0.0, 0.0), geometry
     else:
         img = normals
     img.colorspace_settings.is_data = True
+    if generated and not img.packed_file:
+        # the generated map lives in Blender's session temp folder (deleted when Blender exits) unless normals_dir
+        # says otherwise: packed, a saved .blend keeps its ripples
+        img.pack()
 
     mat = bpy.data.materials.new(name + '_water')
     mat.use_nodes = True
@@ -299,23 +310,34 @@ def create_water_mesh(size_xy=(100.0, 100.0), location=(0.0, 0.0, 0.0), geometry
         probe.location = obj.location
         dims = obj.dimensions if geometry is not None else (size_xy[0], size_xy[1], 0)
         probe.scale = (max(dims[0], 1e-3) / 2, max(dims[1], 1e-3) / 2, 1.0)
+        # the water lies on the mirror's own plane: left in the probe's capture, its own surface covers the whole
+        # mirrored scene and the lake reflects a blur of itself, no posts, no shore (measured:
+        # probe_water_mesh_mirror.py). three's reflector clipped at its plane; this is that clip
+        obj.hide_probe_plane = True
     params = dict(o)
     params['water_normals'] = normals if isinstance(normals, str) else img.filepath
     return WaterMesh(obj, mat, probe, params)
 
 
 def _drive_sun(sd_node, sun_col_node, sun):
-    """sun_direction (towards the sun) = the lamp's +Z axis in world space; sun_color = the lamp's colour."""
+    """sun_direction (towards the sun) = the lamp's +Z axis in world space; sun_color = the lamp's colour. The axis
+    comes from the lamp's world-space rotation as a quaternion (Transform Channel variables, which the depsgraph
+    orders after the lamp's transform; a matrix_world property path was read before it and lagged)."""
+    exprs = ('2 * (qx * qz + qw * qy)', '2 * (qy * qz - qw * qx)', '1 - 2 * (qx * qx + qy * qy)')
     for i in range(3):
         fc = sd_node.inputs[i].driver_add('default_value')
         d = fc.driver
         d.type = 'SCRIPTED'
-        v = d.variables.new()
-        v.name = 'm'
-        v.type = 'SINGLE_PROP'
-        v.targets[0].id = sun
-        v.targets[0].data_path = f'matrix_world[{i}][2]'
-        d.expression = 'm'
+        for nm, ch in (('qw', 'ROT_W'), ('qx', 'ROT_X'), ('qy', 'ROT_Y'), ('qz', 'ROT_Z')):
+            v = d.variables.new()
+            v.name = nm
+            v.type = 'TRANSFORMS'
+            t = v.targets[0]
+            t.id = sun
+            t.transform_type = ch
+            t.rotation_mode = 'QUATERNION'
+            t.transform_space = 'WORLD_SPACE'
+        d.expression = exprs[i]
     for i in range(3):
         fc = sun_col_node.outputs[0].driver_add('default_value', i)
         d = fc.driver
@@ -650,8 +672,12 @@ class WaterCompute:
 
     def step(self):
         rd = self.a if self.fresh_is_a else self.b
+        # the engine's getNeighbors: clamp(iz - 1u, 0u, W - 1u) on unsigned indices, so row 0's north neighbour
+        # underflows and clamps to the LAST row (and column 0's west neighbour to the last column), while south and
+        # east clamp to the edge: one-sided wrap-around, kept as it ran
+        N, Wn = np.roll(rd, 1, axis=0), np.roll(rd, 1, axis=1)
         p = np.pad(rd, 1, mode='edge')
-        N, S, Wn, E = p[:-2, 1:-1], p[2:, 1:-1], p[1:-1, :-2], p[1:-1, 2:]
+        S, E = p[2:, 1:-1], p[1:-1, 2:]
         new = ((N + S + E + Wn) * 0.5 - self.prev) * np.float32(self._visc)
         if self._dist is not None:
             dx, dz, r, amp = self._dist
@@ -712,8 +738,8 @@ class WaterCompute:
         tm = b.node('GeometryNodeInputSceneTime')
         frame = b.min(b.max(b.s(tm.outputs['Frame']), float(fs)), float(fe))
 
-        def h_at(du, dv):
-            n = b.node('GeometryNodeImageTexture', interpolation='Closest', extension='EXTEND')
+        def h_at(du, dv, extension='EXTEND'):
+            n = b.node('GeometryNodeImageTexture', interpolation='Closest', extension=extension)
             n.inputs['Image'].default_value = img
             b.link(b.combine(u + du, v + dv, 0.0), n.inputs['Vector'])
             b.link(frame, n.inputs['Frame'])
@@ -722,7 +748,11 @@ class WaterCompute:
 
         h = h_at(0.0, 0.0)
         if self.o['circular']:
-            d = b.sqrt((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5))
+            # the engine's uv() is the PlaneGeometry's (ix / (W - 1)), so its distance from the centre is the vertex's
+            # own |x, y| / bounds (the texel centres sit half a texel inside it)
+            pos = b.node('GeometryNodeInputPosition')
+            px, py, _ = b.vec(pos.outputs['Position']).xyz()
+            d = b.sqrt(px * px + py * py) / B
             h = h * b.smoothstep(0.5, 0.44, d)
         sp = b.node('GeometryNodeSetPosition')
         tree.links.new(gi.outputs[0], sp.inputs['Geometry'])
@@ -730,8 +760,10 @@ class WaterCompute:
         # the engine's normalNode: nx = (h_W - h_E) W / B, ny = (h_S - h_N) W / B, n = (-nx, -ny, 1) (plane-local)
         k = W / B
         t = 1.0 / W
-        hE, hW_ = h_at(t, 0.0), h_at(-t, 0.0)
-        hN, hS = h_at(0.0, t), h_at(0.0, -t)
+        # the kernel's neighbours: north and west wrap past row / column 0 (its unsigned underflow), south and east
+        # clamp to the edge
+        hE, hW_ = h_at(t, 0.0), h_at(-t, 0.0, 'REPEAT')
+        hN, hS = h_at(0.0, t, 'REPEAT'), h_at(0.0, -t)
         nx = (hW_ - hE) * k
         ny = (hS - hN) * k
         if self.o['normals'] == 'surface':
@@ -774,9 +806,10 @@ def _water_compute_material(name, o):
     nt.links.new(vt.outputs['Vector'], p.inputs['Normal'])
     alpha = float(o['opacity'])
     if o['circular']:
-        uv = b.node('ShaderNodeAttribute', attribute_name='texel_uv', attribute_type='GEOMETRY')
-        u, v, _ = b.vec(uv.outputs['Vector']).xyz()
-        d = b.sqrt((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5))
+        # uv() - 0.5 of the engine's PlaneGeometry is the object-space (x, y) / bounds
+        tc = b.node('ShaderNodeTexCoord')
+        ox, oy, _ = b.vec(tc.outputs['Object']).xyz()
+        d = b.sqrt(ox * ox + oy * oy) / float(o['bounds'])
         b.link(b.math('LESS_THAN', d, 0.5) * alpha, p.inputs['Alpha'])     # the alphaTest hard discard
     else:
         p.inputs['Alpha'].default_value = alpha

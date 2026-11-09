@@ -9,8 +9,9 @@ imports index.js on first use. Blender's Python is synchronous and imports on de
     RoboticsKit.load(id, **opts)        make_robot
     RoboticsKit.load_part(id, part, **opts)
     RoboticsKit.connect(parent, child, port, child_port, twist=0)    parent.attach(child, ...)
-    RoboticsKit.create_ptfe_tube(**opts) / service_loop(...)   filament.js's: the fabrication port registers them in
-                                        FABRICATION; until it does they raise and say so
+    RoboticsKit.create_ptfe_tube(**opts) / service_loop(...)   filament.js's, which index.js re-exports: the
+                                        fabrication port registers them in FABRICATION when imported, and the first
+                                        call imports it; without that package they raise and say so
     make_bot(model='humanoid', **opts)  makeBot({model, ...options})
 """
 
@@ -23,6 +24,8 @@ FABRICATION = {}            # {'create_ptfe_tube': fn, 'service_loop': fn}: set 
 
 def _fabrication(name):
     fn = FABRICATION.get(name)
+    if fn is None and kit._import_fabrication():            # index.js re-exports them from filament.js: always there
+        fn = FABRICATION.get(name)
     if fn is None:
         raise NotImplementedError(f'{name} is filament.js\'s (PTFE service tubing): the fabrication port provides it '
                                   "and registers it in eidoblend.characters.robotics.facade.FABRICATION")

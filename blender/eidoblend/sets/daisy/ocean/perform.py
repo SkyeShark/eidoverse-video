@@ -1,19 +1,20 @@
-"""ocean/perform.py: the claudesona's verse-3 gestures, layered over whatever clip plays (port of
-eidoverse/sets/ocean/perform.js).
+"""ocean/perform.py: the claudesona's gestures, layered over whatever clip plays (port of
+eidoverse/sets/ocean/perform.js): her hand rising to the flower by her cheek, her head turning to a point.
 
 Works on VRM 1.0 NORMALIZED rotations (rest = identity, model axes three's: +y up, +z the way she faces, +x her left),
 read from and written to the armature through the characters family's VRMHandle (read_pose / write_pose), so the
-WebGPU maths runs unchanged in three's frame.
+WebGPU maths runs unchanged in three's frame. Each gesture takes a weight w (0: the clip as it plays .. 1: the
+gesture), so it eases in and out on whatever clock the piece gives it.
 
     P = make_performer()
     P.hand_to_flower(h, w, side='right', tilt=0.1)    # two-bone IK: the hand rises to the petals by her cheek
     P.look_at(h, world_point, w)                      # neck + head toward a world point (Blender), clamped
     P.commit(h, frame=f, key=True)                    # normalized -> the armature's bones (and keys them)
 
-    key_performance(O, h, frames, camera)   the whole verse: each frame's clip pose + the set's gestures, keyed on an
-                                            NLA track 'ocean|perform' over exactly the verse's frames (REPLACE)
-    bake_springs_with_plan(h, frames, plan) the characters family's spring bake with the set's resets on cuts and the
-                                            flower's springs stiffened for the turn to the lens
+    key_gestures(h, frames, gestures)         gestures(frame, P, h) applies that frame's gestures; every frame's clip
+                                              pose + them, keyed on an NLA track 'ocean|gestures' over those frames
+    bake_springs_with_plan(h, frames, plan)   the characters family's spring bake with resets at given frames and the
+                                              springs stiffened by a per-frame bump (the flower following a fast turn)
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import math
 
 from . import _three as T
 
-TRACK = 'ocean|perform'
+TRACK = 'ocean|gestures'
 FINGERS = ('Index', 'Middle', 'Ring', 'Little')
 JOINTS = ('Proximal', 'Intermediate', 'Distal')
 
@@ -201,20 +202,24 @@ def make_performer():
     return Performer()
 
 
-# ------------------------------------------------------------------------------------------------- the verse
-GESTURE_BONES = ('neck', 'head', 'rightUpperArm', 'rightLowerArm', 'rightHand', 'rightThumbProximal') + tuple(
-    'right' + F + J for F in FINGERS for J in JOINTS)
+# ------------------------------------------------------------------------------------------------- keyed gestures
+GESTURE_BONES = ('neck', 'head', 'leftUpperArm', 'leftLowerArm', 'leftHand', 'leftThumbProximal', 'rightUpperArm',
+                 'rightLowerArm', 'rightHand', 'rightThumbProximal') + tuple(
+    s + F + J for s in ('left', 'right') for F in FINGERS for J in JOINTS)
 
 
-def key_performance(O, h, frames, camera=None):
-    """Every frame of the verse: the clip's pose (as the scene plays it), the set's gestures on top, keyed on the NLA
-    track 'ocean|perform' (REPLACE, nothing outside the verse) for the bones the gestures move."""
+def key_gestures(h, frames, gestures, track=TRACK):
+    """Every frame of `frames` (frame numbers, or (frame, anything) pairs): the clip's pose as the scene plays it,
+    then gestures(frame, P, h) (it calls P.hand_to_flower / P.look_at with that frame's weights; commit is done
+    here), keyed on the NLA track `track` (REPLACE, nothing outside those frames) for the bones the gestures move.
+    Returns {'track', 'bones', 'frames', 'gesture_samples'}."""
     import bpy
     from bpy_extras import anim_utils
     scene = bpy.context.scene
+    frames = [f[0] if isinstance(f, (tuple, list)) else int(f) for f in frames]
     ad = h.arm.animation_data or h.arm.animation_data_create()
     for tr in list(ad.nla_tracks):
-        if tr.name == TRACK:
+        if tr.name == track:
             for st in list(tr.strips):
                 if st.action is not None:
                     bpy.data.actions.remove(st.action)
@@ -222,11 +227,12 @@ def key_performance(O, h, frames, camera=None):
     bones = [h.humanoid[n] for n in GESTURE_BONES if n in h.humanoid]
     series = {b: [] for b in bones}
     moved = 0
-    for f, u in frames:
+    P = make_performer()
+    for f in frames:
         scene.frame_set(f)
         base = {b: h.arm.pose.bones[b].rotation_quaternion.copy() for b in bones}
-        cam_w = tuple(camera.matrix_world.translation) if camera is not None else None
-        O['perform'](u, h, cam_w)
+        gestures(f, P, h)
+        P.commit(h)
         for b in bones:
             q = h.arm.pose.bones[b].rotation_quaternion.copy()
             lst = series[b]
@@ -235,7 +241,7 @@ def key_performance(O, h, frames, camera=None):
             if base[b].rotation_difference(q).angle > 1e-4:
                 moved += 1
             lst.append((f, q))
-    act = bpy.data.actions.new(TRACK)
+    act = bpy.data.actions.new(track)
     slot = act.slots.new(id_type='OBJECT', name=h.arm.name)
     cb = anim_utils.action_ensure_channelbag_for_slot(act, slot)
     for b, lst in series.items():
@@ -247,27 +253,31 @@ def key_performance(O, h, frames, camera=None):
                 kp.interpolation = 'LINEAR'
             fc.update()
     act.use_fake_user = True
-    track = ad.nla_tracks.new()
-    track.name = TRACK
-    strip = track.strips.new(TRACK, int(frames[0][0]), act)
+    nt = ad.nla_tracks.new()
+    nt.name = track
+    strip = nt.strips.new(track, int(frames[0]), act)
     if hasattr(strip, 'action_slot'):
         strip.action_slot = slot
     strip.blend_type = 'REPLACE'
     strip.extrapolation = 'NOTHING'
     strip.use_auto_blend = False
-    scene.frame_set(frames[0][0])
-    return {'track': TRACK, 'bones': len(bones), 'frames': len(frames), 'gesture_samples': moved}
+    scene.frame_set(frames[0])
+    return {'track': track, 'bones': len(bones), 'frames': len(frames), 'gesture_samples': moved}
 
 
 def bake_springs_with_plan(h, frames, plan, log=None):
-    """characters.springs.bake_springs over the verse with the set's resets (the entry, the cuts) and, for the turn to
-    the lens, every joint's stiffness x (1 + 3.5 bump) and drag toward 0.95 by 0.6 bump (perform.js, originals restored
-    outside the window). The stiffening goes in through bake_springs(step_hook=...) when the characters family has
-    it, else it rides SpringRig.update for the length of this bake only."""
+    """characters.springs.bake_springs over frames (numbers, or (frame, ...) pairs) with plan = {'resets': [frames
+    where the springs settle at rest (a cut, an entry)], 'bump': {frame: 0..1}}: on a bumped frame every joint's
+    stiffness x (1 + 3.5 bump) and drag toward 0.95 by 0.6 bump (perform.js's stiffening, so the flower follows a fast
+    turn; the originals hold elsewhere). The stiffening goes in through bake_springs(step_hook=...) when the
+    characters family has it, else it rides SpringRig.update for the length of this bake only."""
     import inspect
     import bpy
     from eidoblend.characters import springs as SP
-    bump = plan['bump']
+    frames = [f[0] if isinstance(f, (tuple, list)) else int(f) for f in frames]
+    frames = [(f, None) for f in frames]
+    bump = plan.get('bump', {})
+    plan = {'resets': plan.get('resets', []), 'bump': bump}
 
     def stiffen(rig, frame):
         k = bump.get(frame, 0.0)

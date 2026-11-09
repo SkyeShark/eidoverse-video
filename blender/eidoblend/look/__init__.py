@@ -11,7 +11,10 @@ Modules (import the one you need; this package imports none of them, so frame_st
     camera_audit     camera_motion_audit (bounce), framing_audit (speck), focus_audit (soft subject)
     lighting         units (lux, candela -> W), three-point rigs, practicals, create_rt_lighting, light probes, log_lights
     stage_rig        create_stage_rig: pars and profiles hung on pipes, lenses glowing at their light's level
-    post             chain (the compositor order: bloom, under, overlay, over), custom_effects (the effect registry)
+    post             chain (the compositor order, its slots: prebloom, bloom, under, overlay, over), custom_effects
+                     (the effect registry: every WebGPU effect by name), era_looks, aeropittura, after_image,
+                     screen_effects (the passes), history (earlier frames through the disk, cuts), display (display
+                     space through the view transform, kept synced)
     probe            render_stills at times (jump / preroll / replay), each measured
     probe_cli        the command line: --blend X --at 1.5 --at 4 [--preroll 1] [--compare]
     audit            the audit ledger (records, inventory, declarations, coverage, digest)

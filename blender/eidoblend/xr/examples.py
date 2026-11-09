@@ -26,7 +26,6 @@ from __future__ import annotations
 import math
 
 import bpy
-from mathutils import Vector
 
 from . import _bl
 from ._bl import Tree, hex_rgb

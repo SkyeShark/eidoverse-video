@@ -34,7 +34,7 @@ RAIN_INPUTS = [
     ('Storm Canopy', 'NodeSocketFloat', 0.0), ('Sun Dir', 'NodeSocketVector', None),
     ('Cloud Start', 'NodeSocketFloat', 700.0), ('Cloud Drift', 'NodeSocketVector', None),
     ('Weather Scale', 'NodeSocketFloat', 1.0), ('Large T', 'NodeSocketFloat', 0.18), ('Large A', 'NodeSocketFloat', 3.0),
-    ('Shelter Length', 'NodeSocketFloat', 600.0),
+    ('Shelter Length', 'NodeSocketFloat', 600.0), ('Upwind', 'NodeSocketFloat', 1.0),
 ]
 SPLASH_INPUTS = [
     ('Count', 'NodeSocketInt', 1200), ('Radius', 'NodeSocketFloat', 45.0), ('Camera', 'NodeSocketVector', None),
@@ -43,7 +43,9 @@ SPLASH_INPUTS = [
     ('Cell Hi', 'NodeSocketFloat', 1.45), ('Storm Canopy', 'NodeSocketFloat', 0.0),
     ('Cloud Start', 'NodeSocketFloat', 700.0), ('Cloud Drift', 'NodeSocketVector', None),
     ('Weather Scale', 'NodeSocketFloat', 1.0), ('Large T', 'NodeSocketFloat', 0.18), ('Large A', 'NodeSocketFloat', 3.0),
+    ('Upwind', 'NodeSocketFloat', 1.0),
 ]
+RAIN_CELLS = {'upwind': 1.0, 'column': 0.0}
 
 
 def _coverage(b, weather_map, x, z, I):
@@ -57,8 +59,9 @@ def _coverage(b, weather_map, x, z, I):
 
 def _cell_gate(b, weather_map, x, y, z, I, wx, wz, fall, storm_h):
     """rainCellAt: the coverage at the upwind column the drops fell from, through cellLo..cellHi, opened under a
-    sealed storm canopy (there each drop keeps its own 0.82-1 storm gate)."""
-    k = b.max(b.s(I['Cloud Start']) - y, 0.0) / b.max(fall, 1.0)
+    sealed storm canopy (there each drop keeps its own 0.82-1 storm gate). Upwind 0 samples the drop's own column
+    (eidoverse's sky.tslCoverage(px, pz)), Upwind 1 the column it fell from (Eanpa's rainCellAt)."""
+    k = b.max(b.s(I['Cloud Start']) - y, 0.0) / b.max(fall, 1.0) * I['Upwind']
     cov = _coverage(b, weather_map, x - wx * k, z - wz * k, I)
     ordinary = b.sstep(I['Cell Lo'], I['Cell Hi'], cov)
     canopy = b.clamp(I['Storm Canopy'])
@@ -218,6 +221,7 @@ def splash_material():
     """eido_splash: rings (smoothstep 0.55-0.8 in, 0.85-1 out) in rainColor x 1.15."""
     from ._graph import G
     m = _new_material('eido_splash')
+    m.use_backface_culling = True            # three's FrontSide: the rings face the sky (the rain streaks are DoubleSide)
     nt = m.node_tree
     b = G(nt, x0=-1400, y0=400)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
@@ -253,8 +257,10 @@ def _emit_mix(nt, b, out, color, alpha):
 
 
 def build_rain_objects(collection, weather_map, drop_texture=None, occluders=None, rain_count=16000,
-                       rain_radius=45.0, rain_height=24.0, splash_count=1200):
-    """The two generator objects (eido_rain, eido_splashes) with their trees and materials."""
+                       rain_radius=45.0, rain_height=24.0, splash_count=1200, rain_cells='upwind'):
+    """The two generator objects (eido_rain, eido_splashes) with their trees and materials. rain_cells: 'upwind'
+    (the column the drops fell from) or 'column' (the drop's own column, as eidoverse gates them)."""
+    upwind = RAIN_CELLS[rain_cells]
     rm = rain_material(drop_texture)
     sm = splash_material()
     rtree, rids = build_rain_tree(weather_map, rm, occluders)
@@ -262,8 +268,9 @@ def build_rain_objects(collection, weather_map, drop_texture=None, occluders=Non
     out = {}
     for name, tree, ids, mat, consts in (
             ('eido_rain', rtree, rids, rm, dict(Count=int(rain_count), Radius=float(rain_radius),
-                                               Height=float(rain_height))),
-            ('eido_splashes', stree, sids, sm, dict(Count=int(splash_count), Radius=float(rain_radius)))):
+                                               Height=float(rain_height), Upwind=upwind)),
+            ('eido_splashes', stree, sids, sm, dict(Count=int(splash_count), Radius=float(rain_radius),
+                                                    Upwind=upwind))):
         ob = empty_mesh_object(name, collection)
         if not ob.data.materials:
             ob.data.materials.append(mat)

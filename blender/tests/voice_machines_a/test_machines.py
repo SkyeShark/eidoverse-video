@@ -17,7 +17,8 @@ voice   the voice-lit parts in a dim room, voice 0 vs 1: the C64's vents + monit
         LED, the Mac's vents, the desktop's speaker cloth + drive light -> out/voice_<name>_<view>.png (off | on)
 mac     the Mac's 1-bit screen near (crisp texels) and far (the dither greys, no moire) -> out/mac_near_far.png
 scene   era canvas scenes on the tubes (show_scene: sam_1982 on the C64, mac_1984 on the Mac, desktop_2001 on the
-        desktop), then each machine's own drawing back after the range -> out/scene_<name>.png
+        desktop), then each machine's own drawing back after the range -> out/scene_<name>.png; without t0 a scene
+        starts on its range's first frame
 lineup  all four side by side on one 3.3 m desk at true scale -> out/lineup_true_scale.png
 plastic the kit's runtime plastic (plastic_material, write_curvature) beside the baked C64
         -> out/plastic_runtime_vs_baked.png
@@ -366,12 +367,14 @@ def probe_desk_and_close():
                 mean = S.region_mean(p, (x - 12, y - 8, x + 12, y + 8))
                 check(mean.max() > 60, f'desk {n}: the screen is lit (centre sRGB {np.round(mean).tolist()})')
             if n == 'mac1984':
-                # the 50 % desktop between the window and the screen's left edge (canvas x 20..110, y 160..290), seen
-                # at about five texels a pixel: an even grey, as the engine's mipmapped minification made it, not
-                # the moire bands of an aliased dither or of scanlines finer than a pixel
+                # the 50 % desktop between the screen's left edge and the window (canvas x 8..58, y 75..195: below
+                # the menu bar, left of the window that starts at x 73), seen at about five texels a pixel: an even
+                # grey, as the engine's mipmapped minification made it, not the moire bands of an aliased dither or
+                # of scanlines finer than a pixel. (canvas x -> tube x: (0.0485 + x / 512 x 0.903 - 0.5) / 5;
+                # canvas y -> tube z: (0.901 - y / 342 x 0.794 + 0.9737) / 6.5789 - 0.224, the GLB's UV map)
                 ct = centre_of(m._tubes[0]['tube'])
-                (x0, y0), (x1, y1) = (S.project(sc, cam, ct + Vector((-0.083, 0.0, 0.004))),
-                                      S.project(sc, cam, ct + Vector((-0.052, 0.0, -0.042))))
+                (x0, y0), (x1, y1) = (S.project(sc, cam, ct + Vector((-0.0875, 0.0, 0.0345))),
+                                      S.project(sc, cam, ct + Vector((-0.0698, 0.0, -0.0079))))
                 patch = a[int(min(y0, y1)) + 2:int(max(y0, y1)) - 2, int(min(x0, x1)) + 2:int(max(x0, x1)) - 2]
                 lum = patch.mean(axis=2)
                 check(lum.size > 100 and lum.std() < 9.0, f'desk mac1984: the dithered desktop reads as an even grey '
@@ -402,14 +405,17 @@ def probe_crt():
     paths = [S.render(WORK / f'crt_{i + 1}.png', i + 1) for i in range(5)]
     strip(paths, OUT / 'crt_switch_on.png', [f'power {p}' for p in powers], h=240)
     x, y = S.project(sc, cam, ct)
-    rows = []
-    for pth in paths:
-        a = png_array(pth).mean(axis=2)
-        col = a[:, int(x) - 30:int(x) + 30].mean(axis=1)
-        rows.append(col)
-    base = rows[0].min()
-    lit = [int((r > base + (r.max() - base) * 0.5).sum()) for r in rows]
-    check(lit[1] < lit[2] < lit[3] <= lit[4], f'crt: the raster opens from a line as power rises (lit rows {lit})')
+    cols = [png_array(pth).mean(axis=2)[:, int(x) - 30:int(x) + 30].mean(axis=1) for pth in paths]
+    # the raster's own light over the nearly dark tube of power 0.02 (the glass and its reflections cancel), one
+    # threshold for every frame: the lit band's height, first to last lit row
+    diffs = [c - cols[0] for c in cols[1:]]
+    thr = 0.15 * max(d.max() for d in diffs)
+    band = []
+    for d in diffs:
+        lit = np.nonzero(d > thr)[0]
+        band.append(int(lit[-1] - lit[0] + 1) if len(lit) else 0)
+    check(0 < band[0] < band[1] < band[2] and band[3] >= band[2] - 2,
+          f'crt: the raster opens from a line as power rises (lit band at power 0.12 / 0.3 / 0.6 / 1.0: {band} rows)')
 
 
 def screen_box(sc, cam, o, pad=2):
@@ -488,21 +494,20 @@ def probe_mac():
 
 
 def probe_scene():
-    """Era canvas scenes on the tubes over frames 1-2, the machines' own drawings from frame 3."""
-    from eidoblend.media import canvas_scenes as cs
+    """Era canvas scenes on the tubes over frames 1-2 (1.6 s into each scene's own clock), the machines' own
+    drawings from frame 3; and show_scene's default start: a scene shown later in the film plays from its own
+    beginning."""
+    from eidoblend.media import screens as MS
     pairs = (('c64', 'sam_1982'), ('mac1984', 'mac_1984'), ('desktop2001', 'desktop_2001'))
-    timeline = HERE.parent / 'media2' / 'out' / 'daisy' / 'out' / 'daisy_timeline_upto_chorus2.json'
     from eidoblend.media.timebase import Timebase
     for n, scene_name in pairs:
         sc = stage(frames=(1, 3))
-        cue = cs.DAISY_CUES[scene_name]
-        sc['eido_frame0'] = 1 - round((cue + 1.6) * 24)          # frame 1 = 1.6 s into the scene's DAISY line
         tb = Timebase.of(sc)
         m = VM.build_machine(n, screen_dir=str(WORK / 'scene' / n))
         place(m)
         for f in (1, 2, 3):
             m.update(tb.t(f), {'power': 1, 'voice': 0.3})
-        layer = m.show_scene(scene_name, (1, 2), t0=cue, lyrics=timeline if timeline.exists() else None)
+        layer = m.show_scene(scene_name, (1, 2), t0=tb.t(1) - 1.6)         # frame 1 = 1.6 s into the scene
         check(layer.image.source == 'SEQUENCE' and fc_value(m.group, 'scene_0', 1) == 1.0 and
               fc_value(m.group, 'scene_0', 3) == 0.0, f'scene {scene_name} on {n}: baked, keyed 1 on frames 1-2, '
                                                       f'0 from frame 3 ({layer.px_size[0]} x {layer.px_size[1]})')
@@ -516,6 +521,20 @@ def probe_scene():
         d = np.abs(png_array(p2) - png_array(p3)).mean()
         check(d > 6 and S.magenta_fraction(p2) == 0.0, f'scene {n}: the scene and the drawing differ '
                                                       f'(mean |diff| {d:.1f}), no magenta')
+        if n == 'c64':                 # without t0 the scene starts at the range's first frame, wherever that is
+            seen, real = {}, MS.bake_canvas_scene
+
+            def spy(*a, **k):
+                seen.update(k)
+                return real(*a, **k)
+            MS.bake_canvas_scene = spy
+            try:
+                m.show_scene(scene_name, (3, 3))
+            finally:
+                MS.bake_canvas_scene = real
+            check(seen.get('t0') is not None and abs(seen['t0'] - tb.t(3)) < 1e-9,
+                  f'show_scene without t0: the scene starts on the range\'s first frame (t0 {seen.get("t0")} s = '
+                  f'frame 3 at {tb.t(3):.4f} s)')
 
 
 def probe_lineup():

@@ -15,13 +15,16 @@ The films render in Blender; a headset runs a live WebGL2 page. The Blender edit
     python blender/eidoblend/xr/shots.py http://127.0.0.1:8894/work/<id>/vr/index.html work/<id>/vr/shots "t=4"
 
 Modules (bpy only where it must be; server, shots and glb are plain Python):
-    export     set_xr / get_xr (the scene's XR settings), survey_xr, export_xr (the bundle), write_page,
-               export_objects, unsupported (what glTF cannot hold), metaballs_to_meshes
+    export     set_xr / get_xr (the scene's XR settings), survey_xr, export_xr (the bundle; any scene, made the context
+               scene meanwhile: context_scene), write_page, export_objects, unsupported (what glTF cannot hold),
+               volume_meshes (haze and fog boxes, left out), metaballs_to_meshes, check_channels
     materials  survey / classify (what the exporter would drop), bake_for_gltf (Cycles bakes of exactly those
-               channels), convert_mtoon / mtoon_to_gltf / drop_mtoon_outlines (a VRM cast), used_materials
-    motion     detect, instances_to_objects, deform_to_shape_keys, animated_properties, property_tracks
+               channels), convert_mtoon / mtoon_to_gltf / drop_mtoon_outlines (a VRM cast), used_materials,
+               cap_images (the film's textures scaled for the headset), volume_only
+    motion     detect, instances_to_objects, deform_to_shape_keys, animated_properties, property_tracks,
+               light_intensity / light_power / area_light_size / light_color (Blender's lights in three's units)
     world      bake_world_equirect (the world -> an .hdr in three's equirect convention), equirect_direction
-    choreo     sample_tracks, markers, write (the guide's recipe: a piece's data into the page's JSON)
+    choreo     sample_tracks, markers, write (the guide's recipe: a piece's data into the page's JSON), quat_to_three
     landmarks  stand_at / to_table / activate / session_settings / head_pose / view_camera: Blender's own VR session
                (VR Scene Inspection), the kit's WorldRig.standAt / toTable as landmarks
     examples   EXAMPLES['city']: the kit's example.html as a Blender scene

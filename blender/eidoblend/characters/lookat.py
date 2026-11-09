@@ -260,6 +260,9 @@ def bake_look_at(h, target, f0, f1, lag=1, kind=None, scene=None, look=None):
     returns a report with yaw / pitch per frame"""
     scene = scene or bpy.context.scene
     look = look or LookAt(h, kind=kind)
+    h.arm.update_tag()              # keys made after the clips' NLA strips evaluate (see springs.bake_springs)
+    if hasattr(target, 'update_tag'):
+        target.update_tag()
     pb = h.arm.pose.bones[look.head]
     heads, series = {}, []
     for f in range(int(f0), int(f1) + 1):

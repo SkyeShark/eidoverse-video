@@ -36,7 +36,9 @@ def equirect_direction(u, v):
 def bake_world_equirect(scene, path, width=2048, samples=32, frame=None, device='GPU', log=print,
                         camera_rotation=(math.pi / 2, 0.0, -math.pi / 2)):
     """Render scene.world alone to an equirectangular .hdr (width x width / 2). Returns {'path', 'seconds',
-    'mean', 'max'} (linear radiance of the image)."""
+    'mean', 'max'}: the world's linear radiance averaged over the sphere (each pixel by its solid angle, cos latitude:
+    an equirect's polar rows hold little of the sky) and its brightest pixel. device 'CPU' renders on the CPU (a tiny
+    measurement needs no GPU slot)."""
     import time
     import numpy as np
     t0 = time.time()
@@ -59,6 +61,8 @@ def bake_world_equirect(scene, path, width=2048, samples=32, frame=None, device=
         cam.rotation_euler = camera_rotation
         tmp.camera = cam
         dev = _bl.cycles_gpu(tmp, log) if device == 'GPU' else 'CPU'
+        if dev == 'CPU':
+            tmp.cycles.device = 'CPU'
         tmp.render.engine = 'CYCLES'
         tmp.cycles.samples = int(samples)
         tmp.cycles.use_denoising = False
@@ -80,8 +84,12 @@ def bake_world_equirect(scene, path, width=2048, samples=32, frame=None, device=
         img = bpy.data.images.load(os.path.abspath(path), check_existing=False)
         a = np.empty(img.size[0] * img.size[1] * 4, dtype=np.float32)
         img.pixels.foreach_get(a)
-        rgb = a.reshape(-1, 4)[:, :3]
-        stats = {'mean': [round(float(x), 5) for x in rgb.mean(0)], 'max': round(float(rgb.max()), 4)}
+        h_, w_ = img.size[1], img.size[0]
+        rgb = a.reshape(h_, w_, 4)[..., :3]
+        lat = (np.arange(h_) + 0.5) / h_ * math.pi - math.pi / 2           # rows from the bottom (Blender's order)
+        wt = np.cos(lat)[:, None, None]
+        mean = (rgb * wt).sum((0, 1)) / (wt.sum() * w_)
+        stats = {'mean': [round(float(x), 5) for x in mean], 'max': round(float(rgb.max()), 4)}
         bpy.data.images.remove(img)
     finally:
         for ob in list(tmp.collection.objects):

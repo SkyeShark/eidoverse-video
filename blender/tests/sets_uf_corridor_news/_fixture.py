@@ -90,3 +90,30 @@ def render_still(path, scene=None):
 def timer():
     t0 = time.time()
     return lambda: time.time() - t0
+
+
+def material_attr_misses(collection):
+    """(object, material, name) for every mesh whose material reads a named uv map or a geometry attribute that the
+    mesh (as evaluated, its Geometry Nodes applied) does not carry: the texture then samples a single texel and the
+    surface comes out one flat colour, as the corridor's pedestal once did (its marble read the walls' UVBook)."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    miss = []
+    for ob in collection.all_objects:
+        if ob.type != 'MESH':
+            continue
+        names = set(ob.data.attributes.keys()) | set(ob.data.uv_layers.keys())
+        ev = ob.evaluated_get(dg)
+        if getattr(ev, 'data', None) is not None and hasattr(ev.data, 'attributes'):
+            names |= set(ev.data.attributes.keys())
+        for m in ob.data.materials:                     # (a material a Geometry Nodes tree sets on its output is not here)
+            if m is None or m.node_tree is None:
+                continue
+            for n in m.node_tree.nodes:
+                want = None
+                if n.bl_idname == 'ShaderNodeUVMap' and n.uv_map:
+                    want = n.uv_map
+                elif n.bl_idname == 'ShaderNodeAttribute' and n.attribute_type == 'GEOMETRY':
+                    want = n.attribute_name
+                if want and want not in names:
+                    miss.append((ob.name, m.name, want))
+    return miss

@@ -373,9 +373,10 @@ def add_rigid_bodies(course):
 
 
 def merge_solids(course, name='course_solid'):
-    """join every solid piece of the course (steps, ramps, slabs, walls ...) into one mesh and union it (the
-    MANIFOLD boolean): one watertight solid without the stacked boxes' buried faces, for film dressing or a
-    single collider. The pieces are replaced by the merged object (returned); rails, rungs, dome and ground stay."""
+    """join every solid piece of the course (steps, ramps, slabs, walls ...) into one mesh and union it (csg.union_all:
+    one EXACT boolean with self intersection): one watertight solid without the stacked boxes' buried faces, for film
+    dressing or a single collider. The pieces are replaced by the merged object (returned); rails, rungs, dome and
+    ground stay."""
     from .csg import union_all
     boxes = [o for o in course.objects if o.get('eido_course_role') not in ('ground', 'rail', 'rung', 'dome')]
     if not boxes:

@@ -102,6 +102,7 @@ class CollisionWorld:
             raise ValueError('CollisionWorld: no mesh to walk on (pass objects=[...])')
         self.tree = BVHTree.FromPolygons(verts, polys)
         self._poly_obj = owner
+        self.top = max(v.z for v in verts)          # the highest point of the world (a ray from over it starts outside)
         self.casts = 0
         return self
 

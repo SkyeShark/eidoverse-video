@@ -7,8 +7,10 @@ over the whole run, as round one's walk_path places them for one clip (locomotio
 blend of clips at any speed):
 
   THE STANCE    a foot is down where the clips playing (at their weights and their own clip times) have it down: each
-                clip's measured stance (clips.analyze), blended; idle and the emotes stand on both feet; a fall, a seat,
-                a maneuver leave the feet to the clip
+                clip's measured stance (clips.analyze), blended; idle, the emotes and a seat stand on both feet (a seat's
+                pelvis stays where the seat puts it, its feet go onto the floor under it); a fall and a maneuver leave
+                the feet to the clip (the maneuver's contact IK places them). Neither foot down is a flight only where a
+                gait with one leads (FLIGHT_SLOTS); anywhere else the report lists it as airborne
   THE LOCK      through a stance the sole's points in contact in this frame and the last do not slip and the foot does
                 not turn on the ground (in a turn on the spot it pivots about its contact: that is a turn). The heading
                 it lands with is turned on by the free foot's own turn up to mid-stance (centred: on a curve the hips
@@ -47,10 +49,13 @@ LOCK_ROUNDS = 14                     # round one's 8 rounds converge for one cli
 from .pose import dof_pass
 
 CLEARANCE = 0.03
-STANCE_DROP_MAX = 0.45               # a stance whose ground lies this far under the body's support steps off an edge
+FLIGHT_SLOTS = ('run', 'stairsRunUp', 'stairsRunDown', 'fallIdle')   # the gaits whose frames may have neither foot down
+STAIR_SLOTS = ('stairsDown',)          # a descent's trailing foot leaves before the other lands (it is above the hips)
+STANCE_DROP_MAX = 0.45              # a stance whose ground lies this far under the body's support steps off an edge
 STEP_FIT_MAX = 0.30                  # a landing's fit may move it onto a tread at most this far down (a stair's rise)
 TWO_POINT_MAX = 3.0 * D2R            # the most the two-point support turns a planted sole in one round
 FIT_RANGE = 0.12                     # the most a landing moves along the foot to find its support (m)
+BOOT_FIT = 0.04                      # the most more it moves to take the boot out of a riser (a heel's tuck) (m)
 SWEEP_RATE = 1.2                     # the swing's clearance envelope rises toward an obstacle at most this fast (m/s)
 LOAD_FRAMES = 4
 
@@ -125,12 +130,20 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
         more = {s: set() for s in SIDES}
         f00 = frames[0]['f']
         for s in SIDES:
+            other = 'right' if s == 'left' else 'left'
             for row in rep['stances'][s]:
                 a, b = row['frames']
                 for f in range(a + (b - a + 1) // 2, b + 1):
                     m = frames[f - f00]['meas'][s]
                     if m['ankle_err'] > 0.003 or m['gap'] > 0.002:
-                        more[s].update(range(f, b + 1))
+                        # let go from the first frame on with the other foot down: a walk does not lift both feet at
+                        # once (until the other lands the pelvis comes down to this one instead). Down stairs the
+                        # trailing foot leaves the tread above before the other lands (a lower pelvis cannot reach a
+                        # foot above it), and a run may fly
+                        start = next((x for x in range(f, b + 1) if frames[x - f00]['meas'][other]['stance'] or
+                                      recs[x - f00].get('lead') in FLIGHT_SLOTS + STAIR_SLOTS), None)
+                        if start is not None:
+                            more[s].update(range(start, b + 1))
                         break
         if not any(more.values()):
             break
@@ -163,7 +176,7 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         ph, Wh = pb.hips(M, r['off'], N)
         rec = {'f': r['f'], 'M': M, 'Qr': Qr, 'psi': r['heading'], 'N': N, 'off': r['off'], 'ph0': ph, 'helpers': helpers,
                'mode': r['mode'], 'maneuver': r.get('maneuver'), 'feet': {}, 'z0': M.translation.z,
-               'grounded': r['grounded']}
+               'grounded': r['grounded'], 'lead': r.get('lead')}
         fks = {s: pb.leg_fk(s, ph, Wh, N) for s in SIDES}
         # my robot's feet are wider than a human's (robot_dof LEG_CLEARANCE.width): carried out from the clip's narrow
         # track where its ankles come closer than 18-23 cm, as round one's walk_path does
@@ -178,12 +191,12 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
                 fk['p_an'] = fk['p_an'] + Qr @ Vector((w_eff if s == 'left' else -w_eff, 0.0, 0.0))
             P = pb.sole(s, fk['p_an'], fk['W_ft'], fk['W_to'])
             st = r['stance'][s]
-            planted = (st >= 0.5) and r['grounded'] and ground_mode(r) and r['f'] not in released.get(s, ())
+            planted = (st >= 0.5) and r['grounded'] and feet_down_mode(r) and r['f'] not in released.get(s, ())
             if planted and float(np.max(_ground(world, P))) < M.translation.z - STANCE_DROP_MAX:
                 planted = False         # the clip plants it past an edge: nothing to stand on near the body's support
-            # a fall (the controller airborne), a seat and a maneuver leave the feet to the clip (a landing, fallLand,
-            # stands on the ground it landed on)
-            free = not ground_mode(r) or not r['grounded']
+            # a fall (the controller airborne) and a maneuver leave the feet to the clip (a landing, fallLand, stands
+            # on the ground it landed on); a seat plants them on the floor under the seated body
+            free = not feet_down_mode(r) or not r['grounded']
             rec['feet'][s] = {'p_an': fk['p_an'], 'p_th': fk['p_th'], 'W_ft': fk['W_ft'], 'W_to': fk['W_to'],
                               'W_sh': fk['W_sh'], 'P': P, 'zlow': float(P[:, 2].min()), 'stance': planted, 'free': free,
                               'Ntoes': N[s + 'Toes'] if (s + 'Toes') in N else Quaternion(),
@@ -219,7 +232,8 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         th0, fit = {}, {}
         for a, b in iv:
             th0[a] = wrap_pi(yaw_free[(a + b) // 2] - yaw_free[a]) if A[a]['mode'] != 'turn' else 0.0
-            fit[a] = _support_fit(world, A[a]['feet'][s], th0[a]) if A[a]['mode'] == 'loco' else Vector((0.0, 0.0))
+            fit[a] = _support_fit(world, A[a]['feet'][s], th0[a], boot=(pb, s)) if A[a]['mode'] == 'loco' else \
+                Vector((0.0, 0.0))
         delta, theta = Vector((0.0, 0.0)), 0.0
         lift = None
         for i, r in enumerate(A):
@@ -316,14 +330,16 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             fd['z_stance'] = float(np.max(G - P[:, 2]))
             fd['low_off'] = float(P[:, 2].min())
         # a planted foot keeps the surface it landed on: a heel that creeps over a higher edge mid-stance (a blend
-        # turning the planted sole) does not lift the foot onto that edge
+        # turning the planted sole) does not lift the foot onto that edge. That surface is the landing's own plane: a
+        # tread's level, or a slope's incline (a level there would sink a foot planted on a 45 deg ramp into it)
         for a, b in intervals[s]:
-            top = float(np.max(A[a]['feet'][s]['G']))
+            plane = landing_surface(A[a]['feet'][s]['P_plan'], A[a]['feet'][s]['G'])
             for i in range(a, b + 1):
                 fd = A[i]['feet'][s]
-                fd['surface_top'] = top + 0.01
-                if float(np.max(fd['G'])) > top + 0.01:
-                    fd['G'] = np.minimum(fd['G'], top + 0.01)
+                fd['surface'] = plane
+                lim = plane_z(plane, fd['P_plan']) + 0.01
+                if np.any(fd['G'] > lim):
+                    fd['G'] = np.minimum(fd['G'], lim)
                     fd['z_stance'] = float(np.max(fd['G'] - fd['P_plan'][:, 2]))
         for a, b in swings[s]:
             pa = a - 1 if a > 0 and A[a - 1]['feet'][s]['lock'] else None
@@ -421,11 +437,16 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
                 c = min(c, leg_dz(r, s, body.leg[s]['reach'] - REACH_MARGIN))
         cap.append(c)
     down, upr = 0.4 / fps, 0.5 / fps
+    # a frame whose feet are both the clip's (a maneuver, a fall) keeps the controller's root exactly: its contacts
+    # (hands on a lip, feet on rungs or out of a wall) were solved against it, and the smoothing and the rate envelope
+    # below would carry a neighbour's offset in (a mount's last crouch sunk into the top it ends on)
+    own_root = [all(r['feet'][s]['free'] for s in SIDES) for r in A]
 
     def shape(z_nom, hard):
         H = [min(hard[min(n - 1, max(0, i + k))] + (k * down if k > 0 else -k * upr) for k in range(-10, 11))
              for i in range(n)]
-        return [min(a, b) for a, b in zip(hann_smooth([min(a, b) for a, b in zip(z_nom, H)], 1), H)]
+        out = [min(a, b) for a, b in zip(hann_smooth([min(a, b) for a, b in zip(z_nom, H)], 1), H)]
+        return [0.0 if k else v for k, v in zip(own_root, out)]
     hard = list(cap)
     dzr = shape(dz_nom, hard)
 
@@ -467,6 +488,38 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
     return frames, rep
 
 
+def landing_surface(P, G, resid=0.012, jump=0.012):
+    """the surface a sole lands on: (normal, a point, kind). 'plane': the ground under all its points lies on one plane
+    within `resid` (a tread, a ramp). 'smooth': no plane, but no jump either between sole points within 2.5 cm of each
+    other (a dome, a boulder: the foot rests on the curve itself, nothing clamps it). 'level': an edge under the sole
+    (a stair's nose): the highest level under it, the upper tread"""
+    ok = G > -1e8
+    if ok.sum() >= 3:
+        xs, ys, zs = P[ok, 0], P[ok, 1], G[ok]
+        A = np.stack([xs - xs.mean(), ys - ys.mean(), np.ones_like(xs)], axis=1)
+        (a, b, c0), *_ = np.linalg.lstsq(A, zs - zs.mean(), rcond=None)
+        fit = a * (xs - xs.mean()) + b * (ys - ys.mean()) + c0 + zs.mean()
+        n = Vector((-a, -b, 1.0)).normalized()
+        c = Vector((float(xs.mean()), float(ys.mean()), float(c0 + zs.mean())))
+        if n.z > 0.5:
+            if float(np.max(np.abs(fit - zs))) < resid:
+                return n, c, 'plane'
+            Q = np.stack([xs, ys], axis=1)
+            near = ((Q[:, None, :] - Q[None, :, :]) ** 2).sum(-1) < 0.025 ** 2
+            if float(np.abs(zs[:, None] - zs[None, :])[near].max()) < jump:
+                return n, c, 'smooth'
+    top = float(np.max(G[ok])) if ok.any() else 0.0
+    return Vector((0.0, 0.0, 1.0)), Vector((0.0, 0.0, top)), 'level'
+
+
+def plane_z(plane, P):
+    """the landed-on surface's heights under points (n, 3): a plane's or a level's; a smooth curve sets no limit"""
+    n, c, kind = plane
+    if kind == 'smooth':
+        return np.full(len(P), np.inf)
+    return c.z - (n.x * (P[:, 0] - c.x) + n.y * (P[:, 1] - c.y)) / n.z
+
+
 def _free_ahead(A, s, i, end):
     """the first frame in [i, end) whose foot s is left to the clip (a fall, a seat, a maneuver), or None"""
     for j in range(i, min(end, len(A))):
@@ -486,16 +539,112 @@ def foot_yaw(W_ft, W_to=None):
     return math.atan2(f.y * hf - u.y * f.z, f.x * hf - u.x * f.z)
 
 
+def ground_yaw(W_ft, W_to, nrm):
+    """a foot's heading on the ground it stands on: foot_yaw in the frame that lays that ground (normal nrm) flat. On a
+    cross slope a rolled foot's pitch (a heel strike, a heel-off) reads as a turn in the world's frame (up's sideways
+    lean times the forward's drop), so a lock holding that heading turns the planted foot a degree or two a frame"""
+    if nrm.z > 0.9999:
+        return foot_yaw(W_ft, W_to)
+    q = Vector((0.0, 0.0, 1.0)).rotation_difference(nrm).inverted()
+    return foot_yaw(q @ W_ft, q @ W_to)
+
+
+def _surface_normal(fd, stance):
+    return fd['surface'][0] if stance and 'surface' in fd else Vector((0.0, 0.0, 1.0))
+
+
 def ground_mode(r):
-    """a frame whose feet stand on the ground: locomotion, an emote, a turn on the spot, a landing (fallLand)"""
+    """a frame whose body stands on its feet (the pelvis follows the planted legs): locomotion, an emote, a turn on the
+    spot, a landing (fallLand)"""
     return r['mode'] in ('loco', 'emote', 'turn') or (r['mode'] == 'maneuver' and r.get('maneuver') == 'land')
 
 
+def feet_down_mode(r):
+    """a frame whose feet stand on the ground: the standing modes and a seat (its pelvis is the seat's, its feet on
+    the floor under it)"""
+    return ground_mode(r) or r['mode'] == 'seated'
+
+
 def r_has_ground(r):
-    return r['grounded'] and ground_mode(r)
+    return r['grounded'] and feet_down_mode(r)
 
 
-def _support_fit(world, fd, th0):
+def _boot_inside(world, pb, s, fd, th0, shift, top):
+    """does the whole boot of a landing (its foot turned by th0 about the ankle and moved by shift, resting on `top`)
+    reach into a solid (a stair's riser behind or ahead of it)?"""
+    from .maneuvers import _inside
+    F = getattr(pb, '_feet_full', None)
+    if F is None:
+        from ..ground import foot_points
+        F = pb._feet_full = foot_points(pb.h, band=0.30, voxel=0.012)
+    if F.get(s) is None:
+        return False
+    W = Quaternion((0.0, 0.0, 1.0), th0) @ fd['W_ft']
+    Wt = W @ fd['Ntoes']
+    an = fd['p_an'] + Vector((shift.x, shift.y, 0.0))
+    P = [F[s]['Foot'] @ np.array(W.to_matrix()).T + np.array(an)]
+    if len(F[s]['Toes']):
+        P.append(F[s]['Toes'] @ np.array(Wt.to_matrix()).T + np.array(an + W @ pb.leg[s]['t']))
+    P = np.concatenate(P)
+    P[:, 2] += top - float(P[:, 2].min())                     # the boot standing on its support
+    G = world.h(P[:, 0], P[:, 1], z_from=P[:, 2] + 0.6)
+    for i in np.flatnonzero((G > -1e8) & (G - P[:, 2] > 0.003)):
+        if _inside(world, P[i]):
+            return True
+    return False
+
+
+def _support_fit(world, fd, th0, boot=None):
+    """a landing moved along the foot (at most FIT_RANGE) to where most of its sole is supported: the shift (xy). With
+    boot=(plant body, side) the whole boot must also stay out of every solid there (a descent's heel against the riser
+    behind it): the nearest shift that keeps it out and most of the support is taken"""
+    sh = _support_shift(world, fd, th0)
+    if boot is None:
+        return sh
+    pb, s = boot
+    P = fd['P']
+    G0 = world.h(P[:, 0], P[:, 1], z_from=fd['p_an'].z + 0.6)
+    if not (G0 > -1e8).any():
+        return sh
+    if landing_surface(P, G0)[2] == 'smooth' or landing_surface(P, G0)[0].z < 0.995:
+        return sh                         # a slope or a curve: the boot is not standing on a level (a tread) there
+    W = Quaternion((0.0, 0.0, 1.0), th0) @ fd['W_ft']
+    f = W @ FWD
+    f = Vector((f.x, f.y))
+    if f.length < 1e-6:
+        return sh
+    f.normalize()
+    d0 = sh.dot(f)
+
+    def support(here):
+        Q = P[:, :2] + np.array(here)
+        G = world.h(Q[:, 0], Q[:, 1], z_from=fd['p_an'].z + 0.6)
+        ok = G > -1e8
+        if not ok.any():
+            return None, 0.0
+        top = float(G[ok].max())
+        if top < float(G0[G0 > -1e8].max()) - STEP_FIT_MAX:
+            return None, 0.0
+        return top, float(np.mean(G[ok] > top - 0.01)) * ok.mean()
+    top0, frac0 = support(sh)
+    if top0 is None or not _boot_inside(world, pb, s, fd, th0, sh, top0):
+        return sh
+    # the boot reaches into a riser: the nearest shift (at most BOOT_FIT more, a heel's or a toe's tuck) that keeps it
+    # out and keeps the support; none (a tread shorter than the boot): the support's own landing
+    for k in range(1, int(BOOT_FIT / 0.01) + 1):
+        for d in (d0 + k * 0.01, d0 - k * 0.01):
+            if abs(d) > FIT_RANGE + 1e-9:
+                continue
+            here = f * d
+            top, frac = support(here)
+            if top is None or frac < max(0.6, 0.9 * frac0):
+                continue
+            if not _boot_inside(world, pb, s, fd, th0, here, top):
+                return here
+    return sh
+
+
+def _support_shift(world, fd, th0):
     """a landing moved along the foot (at most FIT_RANGE) to where most of its sole is supported: the shift (xy)"""
     P = fd['P']
     W = Quaternion((0.0, 0.0, 1.0), th0) @ fd['W_ft']
@@ -585,8 +734,8 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
             fk = body.leg_fk(s, ph, Wh, N)
             P = body.sole(s, fk['p_an'], fk['W_ft'], fk['W_to'])
             G = _ground(world, P)
-            if st_now[s] and 'surface_top' in fd:
-                G = np.minimum(G, fd['surface_top'])          # the surface it landed on, not an edge its heel crept over
+            if st_now[s] and 'surface' in fd:
+                G = np.minimum(G, plane_z(fd['surface'], P) + 0.01)   # the surface it landed on, not an edge it crept over
             gap = P[:, 2] - G
             pv = prev[s]
             if st_now[s] and pv is not None and pv['stance']:
@@ -616,10 +765,11 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
                         d = mv[int(np.argmin(np.linalg.norm(mv, axis=1)))]
                 T[s] = T[s] - Vector((d[0], d[1], 0.0))
                 if r['mode'] != 'turn':
-                    dy = wrap_pi(foot_yaw(fk['W_ft'], fk['W_to']) - pv['yaw'])
+                    nrm = _surface_normal(fd, st_now[s])
+                    dy = wrap_pi(ground_yaw(fk['W_ft'], fk['W_to'], nrm) - pv['yaw'])
                     dy = clamp(dy, yaw_acc[s] - YAW_CAP, yaw_acc[s] + YAW_CAP)
                     if abs(dy) > 1e-9:
-                        R = Quaternion((0.0, 0.0, 1.0), -dy)
+                        R = Quaternion(nrm, -dy)
                         Wt[s] = R @ Wt[s]
                         a_ = R @ Vector((T[s].x - c_now[0], T[s].y - c_now[1], 0.0))
                         T[s].x, T[s].y = c_now[0] + a_.x, c_now[1] + a_.y
@@ -646,7 +796,8 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
         meas[s] = {'gap': float(gap.min()), 'P': P, 'gaps': gap, 'ankle_err': (fk['p_an'] - T[s]).length,
                    'T': T[s].copy(), 'ankle': fk['p_an'].copy(),
                    'ankle_err_xy': (fk['p_an'] - T[s]).xy.length, 'stance': st_now[s], 'free': free[s],
-                   'yaw': foot_yaw(fk['W_ft'], fk['W_to']), 'lift_min': r['feet'][s]['lift_min'], 'mode': r['mode']}
+                   'yaw': ground_yaw(fk['W_ft'], fk['W_to'], _surface_normal(r['feet'][s], st_now[s])),
+                   'lift_min': r['feet'][s]['lift_min'], 'mode': r['mode']}
         prev[s] = meas[s]
     return {'f': r['f'], 'M': M, 'N': N, 'off': r['off'], 'stages': stages, 'helpers': r['helpers'], 'petals': petals,
             'meas': meas, 'psi': r['psi'], 'mode': r['mode']}
@@ -706,7 +857,10 @@ def report(frames, intervals, A, fps, clearance):
     grounded_modes = [r_has_ground(A[i]) for i in range(len(frames))]
     rep['double_support'] = [F[i] for i, d in enumerate(down) if all(d.values())]
     none = [i for i, d in enumerate(down) if not any(d.values()) and grounded_modes[i]]
-    planned_flight = [i for i in none if not any(A[i]['feet'][s]['stance'] for s in SIDES)]
+    # a flight is planned only where a gait with one leads (a run, a fall); anywhere else neither foot down is airborne
+    # (a turn on the spot, an emote, a walk have no flight: a frame with both feet in the air there is a defect)
+    planned_flight = [i for i in none if not any(A[i]['feet'][s]['stance'] for s in SIDES)
+                      and A[i].get('lead') in FLIGHT_SLOTS]
     rep['flight'] = [F[i] for i in planned_flight]
     rep['airborne'] = [F[i] for i in none if i not in planned_flight]
     allrows = [row for s in SIDES for row in rep['stances'][s]]

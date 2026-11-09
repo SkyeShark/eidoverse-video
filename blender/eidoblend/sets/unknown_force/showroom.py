@@ -1,30 +1,30 @@
-"""showroom: UNKNOWN FORCE, PRE-CHORUS 2 (song 163.1-173.7 s), the Blender 5.2 EEVEE edition of
+"""showroom: the showroom, a free set from eidoverse's UNKNOWN FORCE work; the Blender 5.2 EEVEE edition of
 eidoverse/sets/unknown_force/showroom.js.
 
-  "Microsoft swears I'm only an engine / Funny, no one ever wrote a warning for a toaster /
-   Nobody stays to hear me say"
-
-A cold white product-launch stage in a black void. The singer stands on a big white turntable (the product); behind her
-a 13 m LED wall shows an ENGINE assembly drawing whose exploded parts all point their callouts at her. Beside her, on a
-white plinth under its own spotlight, a chrome toaster with the only warning ever written for a toaster: THIS
-APPLIANCE IS NOT CONSCIOUS. Rows of empty theatre seats, their seats folded up, fade into the dark.
+A cold white product-launch stage in a black void. A big white turntable is the product's place; behind it a 13 m
+LED wall shows an ENGINE assembly drawing whose exploded parts all point their callouts at whoever stands on it.
+Beside it, on a white plinth under its own spotlight, a chrome toaster with the only warning ever written for a
+toaster: THIS APPLIANCE IS NOT CONSCIOUS. Rows of empty theatre seats, their seats folded up, fade into the dark.
+The LED wall plays any picture, movie or image sequence a new piece gives it (build(screen_media=...)); every
+printed thing is a canvas it can redraw (build(art=...)); the turntable, the wall's progress bar, the blackout and
+the beams run on the piece's own clock.
 
     from eidoblend.sets.unknown_force import showroom as SR
     show = SR.build(scene)                                 # -> Showroom: group, parts, update, cams, mark ...
+    scene.world = show.env
     show.eevee_settings(scene); show.bake_probes()
-    vrm.arm.parent = show.parts['turntable']['platter']    # she rides the turntable (her mark = the platter origin)
-    for f in range(f0, f1 + 1):
-        t = song_time(f)
-        show.update(t, {'spin': (t - 163.1) * 0.35, 'seq': 0.997, 'lights': 1, 'beams': 1, 'screen': 1}, frame=f)
+    rider.parent = show.parts['turntable']['platter']      # anything on the mark turns with the platter
+    show.animate((1, 240), spin=lambda t: 0.35 * t, seq=(0.0, 6.0), lights=(7.0, 7.5, 1.0, 0.0))
 
-Set-local metres in three's axes (+Y up). The singer's mark is the origin, facing +Z (Blender: facing -Y), on the
-turntable's top (y = 0); the stage deck is at y = -0.14 and the auditorium floor at y = -1.04 (the set extends below
-y = 0 by design). The set is enclosed in its own black void; its lights live in the set's collection (show(False)
-hides them). Camera far: 60 m is plenty (make_camera uses 100).
+Set-local metres in three's axes (+Y up). The mark is the origin, facing +Z (Blender: facing -Y), on the turntable's
+top (y = 0); the stage deck is at y = -0.14 and the auditorium floor at y = -1.04 (the set extends below y = 0 by
+design). The set is enclosed in its own black void; its lights live in the set's collection (show(False) hides them).
+Camera far: 60 m is plenty (make_camera uses 100).
 
 How the engine's pieces became Blender data: as quiet_room.py describes (uniforms on the root Empty read through
-drivers, keyed by update(); the env as the set's World; three's light units; static merging; canvases drawn by pure
-Python painters listed in CANVASES and cacheable with draw_canvases). Specific to the showroom:
+drivers, keyed by update(); the env as every material's own light at its own intensity (env_light='material': the
+chrome x 2.2, the seats x 0.25), show.env the World the camera sees; three's light units; static merging; canvases
+drawn by pure Python painters listed in CANVASES and cacheable with draw_canvases). Specific to the showroom:
   void         the 44 x 22 x 46 m black box is seen by the camera only: it is left out of the probes, so the probe
                bake and the reflections see the set's env (softbox strips, the bounce card, the wall glow, the floor
                bounce), as every engine material saw its envMap through the void
@@ -32,7 +32,9 @@ Python painters listed in CANVASES and cacheable with draw_canvases). Specific t
                material; the decals the engine pulled forward with polygonOffset sit 0.6 mm off their surface
   LED wall     the RGB-dot structure fades in where fwidth(px) is small: here the screen-pixel footprint at the
                wall (view distance x the camera's pixel angle / the facing); the pixel angle is the uniform
-               uPixelAngle, which update() computes from the shot's camera and keys
+               uPixelAngle, which update() computes from the shot's camera and keys. screen_media plays a clip
+               there through the Image Texture node's image user (frame_start, cyclic, auto refresh), fitted to
+               the wall's 13 x 5.6 m (screen_fit 'fit' letterboxes in LED black, 'fill' crops, 'stretch')
   beams        additive cones (three's AdditiveBlending, SRC_ALPHA, ONE: colour x a x a over the frame)
 """
 from __future__ import annotations
@@ -206,6 +208,36 @@ def draw_canvases(cache, keys=None):
     return out
 
 
+def canvas_for(key, art=None, cache=None):
+    """The canvas `key` as build() puts it in the set: the piece's own when `art` has it (a painter fn(ctx, W, H),
+    an image path, a Pillow image, a uint8 array or a Canvas, at CANVASES[key][:2]: interiors_lib.override_canvas),
+    else the set's own (draw_canvas, through the cache)."""
+    if key not in CANVASES:
+        raise KeyError(f'showroom: no canvas {key!r} (canvases: {", ".join(CANVASES)})')
+    o = (art or {}).get(key)
+    if o is None:
+        return draw_canvas(key, cache)
+    W, H, _paint = CANVASES[key]
+    return L.override_canvas(o, W, H)
+
+
+SCREEN_FITS = ('fit', 'fill', 'stretch')
+
+
+def screen_fit_scale(aspect, fit='fit', wall=SCREEN['w'] / SCREEN['h']):
+    """How a picture of `aspect` (w / h) sits on the LED wall: the (sx, sy) its uv is scaled by about the centre,
+    uv' = (uv - 0.5) * (sx, sy) + 0.5 ('fit': the whole picture, LED black beside or above it; 'fill': the wall
+    covered, the picture cropped; 'stretch': (1, 1))."""
+    if fit not in SCREEN_FITS:
+        raise ValueError(f'screen_fit: {fit!r} (want one of {", ".join(SCREEN_FITS)})')
+    if fit == 'stretch' or not aspect or abs(aspect - wall) < 1e-6:
+        return 1.0, 1.0
+    k = wall / aspect                       # > 1: the picture is narrower than the wall
+    if fit == 'fit':
+        return (k, 1.0) if k > 1 else (1.0, 1.0 / k)
+    return (1.0, 1.0 / k) if k > 1 else (k, 1.0)
+
+
 # ================================================================================================ the room's light (env)
 def env_paint(x, y, z):
     """the room's light: a black void, two softbox strips overhead, the LED wall behind (-Z), a faint grey floor
@@ -237,6 +269,14 @@ class Showroom(L.InteriorSet):
     keys also read as attributes, with the Blender side every interior shares (interiors_lib.InteriorSet)."""
 
     CLIP_END = 100.0               # the void is 44 x 22 x 46 m
+    STATE = {'spin': 0.0, 'seq': 0.997, 'lights': 1.0, 'beams': 1.0, 'screen': 1.0}   # update()'s keys (animate)
+
+    def animate(self, frames, t0=0.0, fps=None, ctx=None, camera=None, **state):
+        """InteriorSet.animate (the set keyed over `frames` on its own clock; spin, seq, lights, beams, screen as
+        state curves), with the LED wall's camera: an object, a function of the frame (a cut between cameras), or
+        None (the scene's camera when animate runs)."""
+        kw = (lambda f: {'camera': camera(f)}) if callable(camera) else {'camera': camera}
+        return super().animate(frames, t0=t0, fps=fps, ctx=ctx, update_kw=kw, **state)
 
     def _apply(self, t, st, camera=None):
         self.root['uT'] = float(t)
@@ -255,9 +295,11 @@ class Showroom(L.InteriorSet):
         lt['top'].ob.data.energy = lt['top'].watts(12 * lights)
 
     def update(self, t, state=None, frame=None, ctx=None, key=True, camera=None):
-        """update(t, {spin, seq, lights, beams, screen}), keyed at `frame` (or ctx.frame_at(t), or the current
-        frame); key=False only sets the values. camera: the shot's camera, whose pixel footprint the LED wall's
-        dot structure follows (default: the scene's camera when update runs; pass it when markers switch cameras)."""
+        """update(t, {spin, seq, lights, beams, screen}): the set at time t (seconds on the piece's clock: the
+        progress bar's scan), keyed at `frame` (or ctx.frame_at(t), or the current frame); key=False only sets the
+        values. camera: the shot's camera, whose pixel footprint the LED wall's dot structure follows (default: the
+        scene's camera when update runs; pass it when markers switch cameras). A clip on the wall (screen_media)
+        plays on the scene's frames, not on t."""
         self._apply(t, state or {}, camera)
         if key:
             f = self._frame(t, frame, ctx)
@@ -277,9 +319,28 @@ class Showroom(L.InteriorSet):
 
 
 def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:showroom', art_cache=None, probe=True,
-          probe_spacing=0.5, probe_samples=1024, singerScale=None):
-    """build(THREE, opts) -> the showroom (Showroom: a dict whose keys read as attributes). As quiet_room.build."""
+          probe_spacing=0.5, probe_samples=1024, singerScale=None, art=None, screen_media=None, screen_fit='fit',
+          seq_bar=None, env_light='material'):
+    """build(THREE, opts) -> the showroom (Showroom: a dict whose keys read as attributes). As quiet_room.build
+    (ctx / scene, singer_scale, art_cache, probe), and a new piece's options:
+      art           {canvas key: its own art} for any of CANVASES (engine_sheet, warning, platter, dial,
+                    rating_plate, toast, exit): a painter fn(ctx, W, H), an image path, a Pillow image or an array,
+                    resized to the canvas (canvas_for)
+      screen_media  the LED wall plays a clip instead of the ENGINE sheet: a movie, an image sequence (its first
+                    numbered file) or a still, as a path or {'path', 'start' (the scene frame its first frame plays
+                    on, 1), 'loop' (True), 'offset' (frames skipped, 0), 'aspect' (w / h, when Blender cannot read
+                    the size)}. It plays on the scene's frames, under the wall's brightness and LED structure
+      screen_fit    'fit' (default: the whole clip, LED black beside it), 'fill' (cropped to cover) or 'stretch'
+      seq_bar       the SEQUENCE COMPLETION bar (uSeq) over the wall: by default only over the set's own sheet
+      env_light     'material' (each material lit by the set's env at its own intensity, as the engine's envMap:
+                    the chrome at x 2.2, the seats at x 0.25; the World lights nothing) or 'world' (the env as the
+                    World, lighting the whole scene at one intensity)"""
     import bpy
+    L.check_art(art, CANVASES, 'showroom.build(art=...)')
+    if screen_fit not in SCREEN_FITS:
+        raise ValueError(f'showroom.build: screen_fit={screen_fit!r} (want one of {", ".join(SCREEN_FITS)})')
+    if env_light not in L.MaterialKit.ENV_LIGHTS:
+        raise ValueError(f"showroom.build: env_light={env_light!r} (want 'material' or 'world')")
     scene, ctx = L.scene_and_ctx(ctx, scene)
     ss = singer_scale if singer_scale is not None else singerScale
     singer_scale = SUIT_SCALE if ss is None else ss
@@ -290,14 +351,15 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     for u, v in (('uT', 0.0), ('uSeq', 0.997), ('uLights', 1.0), ('uBeams', 1.0), ('uScreen', 0.66),
                  ('uPixelAngle', L.DEFAULT_PIXEL_ANGLE)):
         sb.uniform(u, v)
-    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufsr_env'))
+    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufsr_env', light=env_light == 'world'))
     sb.track(bpy.data.images[ENV['uf_env_image']])
-    K = L.material_kit(sb, env=ENV, prefix='ufsr')
+    K = L.material_kit(sb, env=ENV, prefix='ufsr', env_light=env_light)
+    out.kit = K                                              # the set's material kit: a piece's own props lit alike
     tri, pbr, solid = K.tri, K.pbr, K.solid
     S = {i: L.acg(i) for i in ('Terrazzo005', 'Terrazzo003', 'Carpet012', 'Fabric031', 'Metal009', 'Metal027')}
 
     def img(key, srgb=True):
-        cv = draw_canvas(key, art_cache)
+        cv = canvas_for(key, art, art_cache)
         return sb.track(L.canvas_texture(cv, srgb=srgb, name=f'ufsr_{key}')), cv
 
     def add(geo, mat, pos=(0, 0, 0), rot=(0, 0, 0), parent=None, cast=True, recv=True, keep=False, name=''):
@@ -414,17 +476,38 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
 
     # ======================================================================================== THE LED WALL
     screen_g = grp('sr:screen')
-    sheet_tex, _cv = img('engine_sheet')
+    media = None
+    if screen_media is not None:
+        ms = dict(screen_media) if isinstance(screen_media, dict) else {'path': screen_media}
+        sheet_tex, minfo = L.media_image(ms['path'], name='ufsr_screen_media')
+        sb.track(sheet_tex)
+        size = minfo['size']
+        media = {'image': sheet_tex, 'frames': minfo['frames'], 'start': int(ms.get('start', 1)),
+                 'loop': bool(ms.get('loop', True)), 'offset': minfo['offset'] + int(ms.get('offset', 0)),
+                 'aspect': float(ms.get('aspect') or (size[0] / size[1] if size else 0.0)) or None,
+                 'fit': screen_fit if (ms.get('aspect') or size) else 'stretch'}
+    else:
+        sheet_tex, _cv = img('engine_sheet')
+    if seq_bar is None:
+        seq_bar = screen_media is None and 'engine_sheet' not in (art or {})
     screen_mat, g = K.new('ledwall')
     p = g.uv()
-    col = g.texture(sheet_tex, p).rgb
+    if media is not None:
+        sx, sy = screen_fit_scale(media['aspect'], media['fit'])
+        q = p if (sx, sy) == (1.0, 1.0) else (p - (0.5, 0.5, 0.0)) * (sx, sy, 1.0) + (0.5, 0.5, 0.0)
+        col = g.texture(sheet_tex, q, extension='CLIP').rgb             # CLIP: LED black outside the picture
+        media['scale'] = (sx, sy)
+    else:
+        col = g.texture(sheet_tex, p).rgb
     u_seq, u_t = g.uniform('uSeq'), g.uniform('uT')
-    # SEQUENCE COMPLETION: the bar fills to uSeq, with a slow scan inside the filled part
-    cy = 1.0 - p.y
-    in_x = g.step(SEQBAR['x0'] + 0.002, p.x) * g.step(p.x, g.mix(SEQBAR['x0'] + 0.002, SEQBAR['x1'] - 0.002, u_seq))
-    in_y = g.step(SEQBAR['y0'] + 0.006, cy) * g.step(cy, SEQBAR['y1'] - 0.006)
-    scan = g.smoothstep(0.0, 0.08, g.fract(p.x * 40.0 - u_t * 0.6)) * 0.25 + 0.75
-    col = g.mix(col, g.vec3(0.08, 0.12, 0.2) * scan, in_x * in_y)
+    if seq_bar:
+        # SEQUENCE COMPLETION: the bar fills to uSeq, with a slow scan inside the filled part
+        cy = 1.0 - p.y
+        in_x = g.step(SEQBAR['x0'] + 0.002, p.x) * g.step(p.x, g.mix(SEQBAR['x0'] + 0.002, SEQBAR['x1'] - 0.002,
+                                                                     u_seq))
+        in_y = g.step(SEQBAR['y0'] + 0.006, cy) * g.step(cy, SEQBAR['y1'] - 0.006)
+        scan = g.smoothstep(0.0, 0.08, g.fract(p.x * 40.0 - u_t * 0.6)) * 0.25 + 0.75
+        col = g.mix(col, g.vec3(0.08, 0.12, 0.2) * scan, in_x * in_y)
     # LED pixels: an RGB-dot grid that only appears when the wall is close enough to resolve it
     px_ = p * (SCREEN['W'], SCREEN['H'], 0.0)
     cell = g.fract(px_)
@@ -435,6 +518,17 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     led = g.mix(1.0, dotm * 1.6 + 0.08, resolve)
     g.basic(col * led * g.uniform('uScreen'))
     L.hide_from_probes(screen_mat)
+    if media is not None and sheet_tex.source in ('MOVIE', 'SEQUENCE'):
+        # the clip plays on the scene's frames: the Image Texture node's image user
+        for n_ in screen_mat.node_tree.nodes:
+            if n_.bl_idname == 'ShaderNodeTexImage' and n_.image == sheet_tex:
+                iu = n_.image_user
+                iu.frame_duration = media['frames']
+                iu.frame_start = media['start']
+                iu.frame_offset = media['offset']
+                iu.use_cyclic = media['loop']
+                iu.use_auto_refresh = True
+                media['image_user'] = iu
     wall = add(L.plane_geometry(SCR['w'], SCR['h']), screen_mat, (0, SCR['y0'] + SCR['h'] / 2, SCR['z']),
                parent=screen_g, cast=False, recv=False, keep=True, name='ledwall')
 
@@ -744,8 +838,8 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     L.merge_static(toaster)
 
     # ======================================================================================== SHADOW CASTERS
-    # the key's shadow map only needs the toaster, its plinth and the turntable rim (the singer is the conductor's);
-    # seats, rig, drapes and the stage only receive
+    # the key's shadow map only needs the toaster, its plinth and the turntable rim (a performer on the mark is the
+    # piece's own, not the set's); seats, rig, drapes and the stage only receive
     def cast_pick(o):
         if isinstance(o, L.MeshNode):
             k = False
@@ -776,7 +870,8 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
                    'top': top_spot}
     out['parts'] = {
         'turntable': {'group': tt_g.ob, 'platter': platter.ob, 'setSpin': out.set_spin},
-        'screen': {'mesh': wall.ob, 'uniforms': {'seq': '["uSeq"]', 'brightness': '["uScreen"]'}},
+        'screen': {'mesh': wall.ob, 'uniforms': {'seq': '["uSeq"]', 'brightness': '["uScreen"]'},
+                   'image': sheet_tex, 'media': media, 'seq_bar': bool(seq_bar)},
         'toaster': toaster.ob, 'plinth': toaster_g.ob, 'seats': seats_g.ob, 'rig': rig_g.ob,
         'beams': [b.ob for b in beams],
         'lights': {k_: v.ob for k_, v in out._lights.items()},

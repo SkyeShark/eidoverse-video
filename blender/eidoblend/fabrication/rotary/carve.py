@@ -17,10 +17,21 @@ fixture for the blank (jaws, tailstock, quill), and builds:
     job.removal    the chip events (removal.py), sampled once
     job.debris     the fabrication family's cutting_debris on those events (chips; wood fines too), on the bed
     job.program, job.path, job.settings, job.duration (playback seconds), job.physical_duration
-seek(seconds) poses everything at a playback time (duration maps it onto the physical program); key(frame) keys that
-pose and writes the stock's field for the frame; play(start, speed) seeks and keys every frame of the range (what the
-WebGPU play() did on the engine clock); stop() removes the job's keys and holds the stock as it is; dispose() removes
-everything the job made. Spindle rotation and chip flight run on the physical clock even in a time lapse.
+seek(seconds) poses everything at a playback time (duration maps it onto the physical program); key(frame, rate) keys
+that pose and writes the stock's field for the frame; play(start, speed) seeks and keys every frame of the range (what
+the WebGPU play() did on the engine clock); stop() removes the job's keys and holds the stock as it is; dispose()
+removes everything the job made. Spindle rotation and chip flight run on the physical clock even in a time lapse.
+
+THE SHUTTER. A time-lapse frame is seconds of program after the one before it, so keys at whole frames alone would
+make motion blur sample the straight line between two poses that far apart: the gantry ghosting across centimetres,
+the chuck swinging through an index. key() therefore brackets each frame's exposure with sub-frame keys
+(shutter_offsets: 31/64 of a frame each side for the CENTER shutter, 31/32 after START or before END), posing the
+machine at the physical times a real camera's exposure would see: the frame's moment plus offset / fps seconds,
+times rate capped at 1 (rate: program seconds per film second around the frame; 0 holds the pose; below 1, slow
+motion, the exposure shortens with it). Any shutter up to 31/32 of a frame then blurs only real motion. The spindle
+and the chips hold their frame's state through the bracket: 18,000 rpm turns 6 times in a 1/48 s exposure, more than
+any motion-blur step count resolves, and the chips' pool renumbers its instances as chips are born and die, so their
+motion vectors would join unrelated chips. The stock shows its frame's file through the whole bracket (stock.py).
 
 Options (the WebGPU names in snake_case): every rotary_program / rotary_mesh_program option, the blank (stock_length,
 stock_width, stock_height, quill), tool (must be the installed cutter's kind), duration, resolution (the stock field,
@@ -43,6 +54,27 @@ from .stock import create_rotary_stock
 
 JOINTS_MOVED = ('gantry_x', 'gantry_y', 'gantry_z', 'rotary_output', 'rotary_chuck', 'spindle_rotor')
 SETUP_KEYS = ('stock_length', 'stock_width', 'stock_height', 'quill')
+SHUTTER_SPAN = 31 / 64                          # f +- 31/64 is exact in float32 below frame 131,072: keys land as asked
+
+
+def shutter_offsets(scene=None):
+    """(before, after): the sub-frame offsets of the keys that bracket each keyed frame's exposure, for the scene's
+    motion-blur shutter position: CENTER (-31/64, +31/64), START (0, +31/32), END (-31/32, 0). Any shutter up to 31/32
+    of a frame then samples only the bracket."""
+    import bpy
+    pos = getattr((scene or bpy.context.scene).render, 'motion_blur_position', 'CENTER')
+    if pos == 'START':
+        return 0.0, 2 * SHUTTER_SPAN
+    if pos == 'END':
+        return -2 * SHUTTER_SPAN, 0.0
+    return -SHUTTER_SPAN, SHUTTER_SPAN
+
+
+def cut_offset(scene=None):
+    """Where to key a camera cut (CONSTANT) before a frame: midway between the brackets of that frame and the one
+    before it, so no shutter sees both shots (-1/2 for CENTER)."""
+    lo, hi = shutter_offsets(scene)
+    return lo - (1.0 - (hi - lo)) / 2
 
 
 def _opt(options, key, default=None):
@@ -160,6 +192,16 @@ class RotaryJob(Rec):
     __slots__ = ('_on_done', '_called', '_keyed')
 
     # ---------------------------------------------------------------------------------------------- the pose ---
+    def _pose(self, physical_time):
+        """The machine alone at a physical time (clamped to the program): the cutter tip and the A axis. The stock,
+        the spindle and the chips are left as they are. Returns (sample, tip over the bed)."""
+        s, path = self.settings, self.path
+        state = path.sample(min(max(float(physical_time), 0.0), path.duration))
+        p = (state['position'][0] + s['axis_x'], state['position'][1], state['position'][2] + s['axis_height'])
+        self.machine.move_tool(p)
+        self.machine.set_joints({'rotary_output': state['angle'], 'rotary_chuck': state['angle']})
+        return state, p
+
     def seek(self, seconds):
         """Pose the job at a playback time (clamped to 0..duration): the cutter tip and A axis from the program, the
         stock field to that moment, the chips' clock and the spindle on the physical clock. Returns the state."""
@@ -168,10 +210,7 @@ class RotaryJob(Rec):
         from ..machine import spin
         s, path, machine = self.settings, self.path, self.machine
         t = min(max(float(seconds), 0.0), self.duration)
-        state = path.sample(t / self.duration * path.duration)
-        p = (state['position'][0] + s['axis_x'], state['position'][1], state['position'][2] + s['axis_height'])
-        machine.move_tool(p)
-        machine.set_joints({'rotary_output': state['angle'], 'rotary_chuck': state['angle']})
+        state, p = self._pose(t / self.duration * path.duration)
         self.stock.update(state)
         self.debris.set_time(state['time'])
         spin(machine, 'spindle_rotor', math.fmod(state['time'] * s['rpm'] / 60 * TAU, TAU))
@@ -205,11 +244,7 @@ class RotaryJob(Rec):
             out.append((modifier_input(pool.modifier, 'Time'), 'value', 1))
         return out
 
-    def key(self, frame=None):
-        """Key the current pose at `frame` (the scene's current frame by default): the moving joints, the chips'
-        clock, LINEAR; and write the stock's field for that frame."""
-        import bpy
-        frame = bpy.context.scene.frame_current if frame is None else int(frame)
+    def _key_channels(self, frame):
         for target, path, n in self._channels():
             if path == 'rotation_quaternion':
                 q = target.rotation_quaternion
@@ -219,21 +254,56 @@ class RotaryJob(Rec):
                 self._keyed[(target.name, path)] = target.rotation_quaternion.copy()
             target.keyframe_insert(path, frame=frame)
             _linear_at(target, path, frame)
+
+    def key(self, frame=None, rate=1.0, scene=None):
+        """Key the current pose (the last seek) at `frame` (the scene's current frame by default), LINEAR, with the
+        frame's exposure bracketed (the module docstring, THE SHUTTER): the machine at the physical moments the
+        shutter would see, the spindle and the chips held; then write the stock's field for the frame.
+        rate: program seconds per film second around this frame (clock_rate() measures it from a playback clock);
+        capped at 1, so a time lapse exposes like a real-time camera; 0 for a held frame."""
+        import bpy
+        if not (isinstance(rate, (int, float)) and math.isfinite(rate) and rate >= 0):
+            raise ValueError('Key rate must be a finite number >= 0')
+        sc = scene or bpy.context.scene
+        frame = sc.frame_current if frame is None else int(frame)
+        fps = sc.render.fps / sc.render.fps_base
+        r = min(1.0, float(rate))
+        t0 = self.state['physical_time']
+        lo, hi = shutter_offsets(sc)
+        for df in sorted({lo, 0.0, hi}):
+            self._pose(t0 + df / fps * r)
+            self._key_channels(frame + df)
+        self._pose(t0)
         self.stock.write_frame(frame)
         return self
 
+    def clock_rate(self, clock, t, dt=1e-3):
+        """Program seconds per film second at film time t of a playback clock (film seconds -> job seconds, as given
+        to seek): the rate key() takes, the faster of the two sides, so a clock that starts or stops at this frame
+        still exposes its moving side (the held side clamps to the program's ends). Holds measure 0; a jump in the
+        clock measures more than 1, which key() caps."""
+        def physical(x):
+            return min(max(float(clock(x)), 0.0), self.duration) / self.duration * self.physical_duration
+        p = physical(t)
+        return max(0.0, (physical(t + dt) - p) / dt, (p - physical(t - dt)) / dt)
+
     def play(self, start=0.0, speed=1.0, frame_start=None, frame_end=None, scene=None, frames=None):
         """The WebGPU play(): every frame of the range (or the given frames) seeks t = (seconds since frame_start -
-        start) * speed and keys it. Returns the job."""
+        start) * speed and keys it, its shutter bracketed at that clock's rate. Returns the job."""
         import bpy
         sc = scene or bpy.context.scene
         fs = sc.frame_start if frame_start is None else int(frame_start)
         fe = sc.frame_end if frame_end is None else int(frame_end)
         fps = sc.render.fps / sc.render.fps_base
         self.stop()
+
+        def clock(x):
+            return max(0.0, (x - start) * speed)
+
         for f in (range(fs, fe + 1) if frames is None else sorted(int(v) for v in frames)):
-            self.seek(max(0.0, ((f - fs) / fps - start) * speed))
-            self.key(f)
+            t = (f - fs) / fps
+            self.seek(clock(t))
+            self.key(f, rate=self.clock_rate(clock, t), scene=sc)
         return self
 
     def stop(self):
@@ -263,7 +333,8 @@ class RotaryJob(Rec):
 
 
 def _linear_at(target, path, frame):
-    """Blender's keyframe_insert ignores the default interpolation: set the keys just made at `frame` LINEAR."""
+    """Blender's keyframe_insert ignores the default interpolation: set the keys just made at `frame` (a sub-frame
+    too) LINEAR."""
     idb = getattr(target, 'id_data', None) or target
     try:
         full = target.path_from_id(path)
@@ -282,7 +353,7 @@ def _linear_at(target, path, frame):
         pts = fc.keyframe_points
         for i in range(len(pts) - 1, -1, -1):
             kp = pts[i]
-            if abs(kp.co.x - frame) < 1e-6:
+            if abs(kp.co.x - frame) < 1e-4:
                 kp.interpolation = 'LINEAR'
                 break
             if kp.co.x < frame:

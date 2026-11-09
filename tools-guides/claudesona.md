@@ -108,7 +108,12 @@ weight dicts by the per-key maximum.
 Measured (`tests/claudesona/test_face.py`): every mouth key 1.5 mm proud on
 all 849 plate vertices, the painted features 1.79–1.80 mm, every expression
 target's end on the dome within 0.02 mm; the drivers equal the JS module's
-outputs on the same input (deno), to 1e-16.
+outputs on the same input (deno), to 1e-16. And against the JS's own geometry
+(`test_face_geometry.py`: `installSuitMouth` / `installVisemeMouth` run in deno
+on the same VRM): every plate, blush and mouth vertex, at rest and at the end
+of every shape key (the expressions, the rig's mouth shapes, the seat, the
+openings and the ten visemes with the line's warp), within 0.0002 mm.
+`face.idx` names each viseme's shape key, as the JS's `idx` its morph target.
 
 ## Lipsync from audio — `characters/lipsync.py`
 
@@ -173,7 +178,8 @@ What each part of a preset becomes:
 
 `wd.petal_dir(key)` gives a petal's direction in the head frame; `wd.folds`
 and `wd.lift` what the last wear decided; `wd.head_frame()` the face disc's
-frame. `wardrobe.DEBUG = True` logs paints and folds (the JS's
+frame; `wd.worn_at(frame)` the outfit keyed at a frame (the last keyed wear at
+or before it). `wardrobe.DEBUG = True` logs paints and folds (the JS's
 `WARDROBE_DEBUG`). Measured against claudesona_wardrobe.js run in deno on the
 same VRM: the cyclist's automatic folds identical (`12_L` 178°/0.65, `11_R`
 170°/0.65, `1_L` 150°/0.65, `10_R` 170°/0.65, `2_L` 150°/0.65), the brim lift
@@ -206,6 +212,13 @@ wd.bake(1, 9000)                                           # the JS's update(t),
 p = wd.badge_world('mod_gold', frame=8200)                 # {position, quaternion, flying, visible}: aim a camera
 ```
 
+Bake after the wears and the `neon(level, frame=...)` keys, as the springs
+are baked last: the WebGPU `update(t)` sees the outfit worn and the neon level
+at `t`, and `bake` reads the same per frame (`wd.worn_at(frame)`, from the
+keyed `wear(key, frame=...)` calls, and the keyed `cs_tuta.neon`), so a
+scheduled badge is keyed hidden on every frame of a film where the claudesona
+is not in the TuTa, and glows at that frame's neon.
+
 `pin(key, at=None)`, `unpin(key, ghost=True, at=None, eject=False,
 linger=False)`, `schedule(events)` (replaces the schedule), `clear_ghost(key)`,
 `face_paint(0..1 | bool)`, `sun_disc(bool)`, `neon(level)`, `eye_lights(amount,
@@ -216,9 +229,10 @@ integrated with the WebGPU edition's fixed 1/240 s step from its launch pose
 (out along its normal, a lift, floaty gravity, drag, a spin, a bounce and a
 slide on the floor), its glow flickering out; the pop's flare and eight embers
 are camera-facing cards (a Geometry Nodes billboard toward the active camera,
-as three's sprites face whatever renders). `make_wardrobe(..., neon, grime,
-plain, eject_speed, eject_up, eject_gravity, eject_drag, floor_z)` are the JS
-options. `FINAL_CHORUS` pairs each line of the last chorus with the badge
+as three's sprites face whatever renders) that add light as three's additive
+sprites do: colour × opacity, both the sprite's shape × its fade.
+`make_wardrobe(..., neon, grime, plain, eject_speed, eject_up, eject_gravity,
+eject_drag, floor_z)` are the JS options. `FINAL_CHORUS` pairs each line of the last chorus with the badge
 that comes off on it; `MODIFICANTI` gives each badge's camp, glow and bone.
 
 Measured against the JS module run in deno, frame by frame through a snap, an
@@ -284,10 +298,15 @@ set_look(me, 'mtoon')     # back to the add-on's MToon, outlines on
 
 The add-on's MToon import stays the default. The PBR look adds an EEVEE
 output fed by a Principled BSDF (base colour = MToon's lit colour × its
-texture, the wardrobe's paints included; metallic, roughness, IOR and normal
-from the VRM's glTF material; MToon's emission; alpha where MToon blends) and
-switches the outline modifiers off. Which one a film uses is an artistic
-call; both are kept.
+texture, the wardrobe's paints included; metallic, roughness and IOR from the
+VRM's glTF material; its normal map, or the TuTa's bump where the TuTa puts
+one; MToon's emission at MToon's strength, with the driver on it, so the
+badges' snaps, flicker and neon animate; alpha where MToon blends) and
+switches the outline modifiers off. It can be set before or after
+`make_wardrobe`: every paint, the TuTa's surfaces, face paint, catchlights,
+sun disc and badge glow re-feed the PBR path when they are built
+(`tests/claudesona/test_pbr_tuta.py` checks both orders). Which one a film
+uses is an artistic call; both are kept.
 
 ## Turntable sheets — `blender/tools/vrm_turntable.py`
 
@@ -320,8 +339,11 @@ irradiance I is a Blender world of radiance I / π), the grey floor disc.
 the terrain harness, as a runner scene: a VRM plays its idle clip on a dark
 reflective floor under a hemisphere and a sun, in a thin depth fog, while the
 camera orbits it (keyed in `render_frame`); its springs are baked in `setup`.
+`scene_claude.json` loads the example's own character (`claude.vrm`, as
+`basic_vrm.json` does); the others load aletheia and the claudesona.
 
 ```bash
+python eido_blender.py render blender/tests/claudesona/basic_vrm/scene_claude.json --at 0 --at 3 --at 6
 python eido_blender.py render blender/tests/claudesona/basic_vrm/scene.json --at 0 --at 3 --at 6
 python eido_blender.py render blender/tests/claudesona/basic_vrm/scene_claudesona.json --at 2
 ```
@@ -350,6 +372,16 @@ does, and renders the stills.
   the WebGPU edition does.
 - **A material's outline is `mtoon1.outline_material`.** Looking it up by the
   name `MToon Outline (<name>)` finds another character's in a file with two.
+- **An action that `keyframe_insert` creates on an object which already has
+  animation data is not evaluated by the session's depsgraph until the object
+  is tagged.** The armature carries its clips as NLA strips, so the first
+  keyed switch after `play_vrma_default` (a TuTa bake, a paint, a turn) made
+  an action that `frame_set` never played: Python read the last value it had
+  set on every frame. Renders build their own depsgraph and were right; any
+  bake that reads the evaluated scene (the springs, the gaze, the TuTa's neon)
+  was not. Every keyed setter and bake here tags the armature
+  (`_paint.tag_keyed`); `tests/claudesona/test_pbr_tuta.py` plays the clip
+  first on purpose.
 
 ## Tests — `blender/tests/claudesona/`
 
@@ -362,11 +394,14 @@ HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <
 #   test_lipsync.py   (python blender/tests/claudesona/sung_line_host.py first: the sung line, system Python)
 #   test_springs.py   test_lookat.py   test_wardrobe.py   test_tuta.py   [--no-render]
 #   test_turntable.py   test_basic_vrm.py
+#   test_pbr_tuta.py  (the PBR look on the TuTa: glow drivers, bump, face paint, both orders)   [--no-render]
+#   test_keyed_film.py  (three outfits, the TuTa's badges and an ejection, springs: saved, reopened, re-rendered)
+bash run_blender.sh <worktree>/blender/tests/claudesona/test_face_geometry.py     # no render: the face vs the JS's
 ```
 
 The references are the WebGPU modules themselves, run in deno on the CPU with
 the engine's three-vrm (`three_vrm_parity.mjs`, `face_parity.mjs`,
-`tuta_parity.mjs`).
+`face_geometry_parity.mjs`, `tuta_parity.mjs`).
 
 ## Not yet ported
 
@@ -380,3 +415,6 @@ the engine's three-vrm (`three_vrm_parity.mjs`, `face_parity.mjs`,
   same fleck positions.
 - **`boater_band`**, listed in the JS's optional layers, has no object in
   `claude_suit_wardrobe.vrm` (in either edition).
+- **Aletheia's four cat-tail chains** follow three-vrm within about 10 mm at
+  their tips, not 0.001 mm as every other chain: their nodes carry a 0.5 %
+  non-uniform scale that a Blender rest pose cannot hold.

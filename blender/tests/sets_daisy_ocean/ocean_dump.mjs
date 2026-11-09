@@ -1,9 +1,9 @@
-// ocean_dump.mjs: runs the WebGPU edition's verse-3 set (eidoverse/sets/ocean.js and ocean/*.js, untouched) headless
-// in Deno and dumps what the Blender port must reproduce: the coast (heights, signed distances, her mark, the house
-// pad), the sky's moon and the layout's turn, every shot's camera and her mark through the verse, the pages' flights
-// and highlights, the echoes' lights, the dune-grass plan, the sea's per-cell hash. Nothing renders: the TSL graphs
-// are built and never compiled; the GLBs are not loaded (GLTFLoader is absent, so the set falls back exactly as it
-// does when they are missing) and textures are stubs.
+// ocean_dump.mjs: runs the WebGPU edition's ocean set (eidoverse/sets/ocean.js and ocean/*.js, untouched) headless in
+// Deno and dumps what the Blender port must reproduce: the coast (heights, signed distances, the mark, the house pad),
+// the sky's moon (at the set's hour and two others) and the layout's turn, the eye point and the mark, the pages'
+// highlights, the echoes' lights, the dune-grass plan, the sea's per-cell hash. Nothing renders: the TSL graphs are
+// built and never compiled; the GLBs are not loaded (GLTFLoader is absent, so the set falls back exactly as it does
+// when they are missing) and textures are stubs.
 //   cd <worktree> && deno run --no-config --no-lock -A blender/tests/sets_daisy_ocean/ocean_dump.mjs <three build dir> <out.json>
 const [threeDir, outPath] = Deno.args;
 if (!threeDir || !outPath) throw new Error('usage: ocean_dump.mjs <node_modules/three/build dir> <out.json>');
@@ -44,29 +44,13 @@ for (let i = 0; i < 400; i++) {
     out.coast.samples.push([x, z, coast.sdist(x, z), coast.height(x, z)]);
 }
 
-// ---- the sky's moon, the layout's turn, her face
+// ---- the sky's moon (the set's hour, and two others for skyMoonDir's arguments), the layout's turn, the eye, the mark
 out.moon = v3(O.skyMoonDir(THREE));
+out.moons = [[21.5, 1.9], [2.0, 0.7]].map(([h, az]) => ({ hours: h, azimuth: az, dir: v3(O.skyMoonDir(THREE, h, az)) }));
 out.SKY = O.SKY;
-out.BAR = O.BAR;
 out.PSI = ocean.layout.rotation.y;
 out.E = v3(ocean.E);
 out.mark = v3(ocean.mark);
-
-// ---- every shot through the verse: camera, mark, and the state update() writes
-out.frames = [];
-for (let k = 0; k <= 33.75 * 20; k++) {
-    const u = k / 20, t = 100 + u;
-    ocean.update(t, { u, pulse: 0.5 });
-    const c = ocean.camera(u), m = ocean.markAt(u);
-    const p23 = ocean.pages.p23.holder, p26 = ocean.pages.p26.holder;
-    out.frames.push({
-        u, cam: { pos: v3(c.pos), target: v3(c.target), fov: c.fov }, mark: { pos: v3(m.pos), yaw: m.yaw },
-        reveal: ocean.sea.U.reveal.value, glow: ocean.sea.U.glow.value,
-        echoes: { sink: ocean.echoes.U.sink.value, level: ocean.echoes.U.level.value, visible: ocean.echoes.group.visible },
-        p23: { on: p23.visible, pos: v3(p23.position), q: [p23.quaternion.x, p23.quaternion.y, p23.quaternion.z, p23.quaternion.w] },
-        p26: { on: p26.visible, pos: v3(p26.position), q: [p26.quaternion.x, p26.quaternion.y, p26.quaternion.z, p26.quaternion.w] },
-    });
-}
 
 // ---- the pages: highlight rects and centres
 out.pages = {};

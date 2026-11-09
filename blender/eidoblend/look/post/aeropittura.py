@@ -29,9 +29,15 @@ The stages, as the WebGPU pass ran them:
      ring. A frame never rendered before reads as the current frame (the ring filled at a fresh start), and a cut
      (e.cut(f), the timeline's camera markers) restarts the echoes.
   B  the colour structure tensor (Sobel per channel)        C  the flow field: stroke direction, anisotropy, energy
-  D  the underpainting: an anisotropic Kuwahara. Here Blender's own Kuwahara node (Anisotropic, the same
-     Kyprianidis filter, radius 8 px at 1080p): the WebGPU loop (289 taps x 8 sectors per pixel at 1080p) as nodes is
-     some 20,000 nodes. Its sector overlap is Blender's (eta from the 8-sector envelope), not the WebGPU's 0.33.
+  D  the underpainting: the pass's own anisotropic Kuwahara (kuwahara_aniso): 8 polynomial sectors (zeta 2 / RAD,
+     eta 0.33) over the flow's ellipse, taps 1 px apart over [-8, 8]^2 at 1080p, as the WebGPU loop (the tap count
+     is the built height's; their spacing follows the frame being composited, so the brush keeps its size in the
+     picture at any render size). Nested function
+     groups (one tap; a row of 17 taps; 17 rows) keep the build to some 500 nodes; inlined, it is 289 taps a pixel.
+     Checked against the shader in numpy (tests/post_era/test_aero_kuwahara.py): 2e-4 at the worst pixel. Cost:
+     0.3-0.6 s a frame at 960x540 and 1.4-2.8 s at 1920x1080 on the GPU compositor. kuwahara='blender' (a build
+     option) uses Blender's Kuwahara node instead: 0.02-0.06 s, but its sectors barely overlap, so it smears far less
+     (1.7-1.8 sRGB levels from the WebGPU picture, where the own filter is 0.00 and no filter 2.8-3.2).
   E  the light field: three's mip-chain Gaussian of A's bright parts (display value > 0.8), its gradient pointing
      away from each light: Balla's street-light halos
   F  the divisionist strokes: two layers of oriented strokes (14 px and 6 px cells at 1080p), each one colour of
@@ -154,27 +160,33 @@ def set_spare(U, x, y, r, frame=None):
 
 
 def project_focal(scene, point, camera=None):
-    """A world point -> its focal (uv, y down) through the scene camera, or None behind the camera (never NaN)."""
+    """A world point -> its focal (uv, y down) through the scene camera (as the scene's depsgraph has it at the
+    current frame), or None behind the camera (never NaN)."""
     from bpy_extras.object_utils import world_to_camera_view
     from mathutils import Vector
-    cam = camera or scene.camera
+    from .history import evaluated
+    cam = evaluated(scene, camera or scene.camera)
     co = world_to_camera_view(scene, cam, Vector(point))
     if co.z <= 0 or not _finite(co.x, co.y):
         return None
     return co.x, 1.0 - co.y
 
 
-def _point(target, frame):
+def _point(target, frame, scene=None):
     """A world point from an Object (its origin, or a pose bone's head: (armature, 'bone')), a callable
-    frame -> point, or a fixed point."""
+    frame -> point, or a fixed point. Objects are read as the scene's own depsgraph evaluated them (history.evaluated:
+    right for a scene that is not the active one too)."""
     from mathutils import Vector
+    from .history import evaluated
+    ev = (lambda ob: evaluated(scene, ob)) if scene is not None else (lambda ob: ob)
     if callable(target):
         return Vector(target(frame))
     if isinstance(target, tuple) and len(target) == 2 and isinstance(target[0], bpy.types.Object):
         arm, bone = target
-        return arm.matrix_world @ arm.pose.bones[bone].head
+        a = ev(arm)
+        return a.matrix_world @ a.pose.bones[bone].head
     if isinstance(target, bpy.types.Object):
-        return target.matrix_world.translation.copy()
+        return ev(target).matrix_world.translation.copy()
     return Vector(target)
 
 
@@ -186,7 +198,7 @@ def key_focal(U, scene, target, frames, camera=None, fallback=(0.5, 0.42)):
     keep = scene.frame_current
     for f in frames:
         scene.frame_set(int(f))
-        uv = project_focal(scene, _point(target, f), camera)
+        uv = project_focal(scene, _point(target, f, scene), camera)
         out[int(f)] = uv if uv is not None else tuple(fallback)
         set_focal(U, *out[int(f)], frame=int(f))
     scene.frame_set(keep)
@@ -204,15 +216,16 @@ def key_spare(U, scene, head, frames, camera=None, lift=0.12, radius=spare_radiu
     the camera; r = radius(distance to the camera), 0 behind it or while visible(frame) is False (the film's rule:
     her head bone + 0.12 m). Returns {frame: (x, y, r)}."""
     from mathutils import Vector
+    from .history import evaluated
     out = {}
     keep = scene.frame_current
     for f in frames:
         scene.frame_set(int(f))
         cam = camera or scene.camera
-        p = _point(head, f) + Vector((0.0, 0.0, lift))
+        p = _point(head, f, scene) + Vector((0.0, 0.0, lift))
         uv = project_focal(scene, p, cam)
         on = uv is not None and (visible is None or visible(f))
-        r = radius((cam.matrix_world.translation - p).length) if on else 0.0
+        r = radius((evaluated(scene, cam).matrix_world.translation - p).length) if on else 0.0
         out[int(f)] = (*(uv if uv is not None else (0.5, 0.4)), r)
         set_spare(U, *out[int(f)], frame=int(f))
     scene.frame_set(keep)
@@ -242,15 +255,29 @@ def drive_time(socket, per_second, offset=0.0):
     return fc
 
 
+def _owner_fps(U):
+    """The frame rate of the scene whose compositor holds these uniforms (24 when none is found). U: the pass's
+    uniforms, or apply_to's e.uniforms (one effect: its uniforms answer at the top level)."""
+    tree = U['force'].id_data
+    for s in bpy.data.scenes:
+        if s.compositing_node_group == tree:
+            return s.render.fps / s.render.fps_base
+    return 24.0
+
+
 def ease_reading(U, start, end, ease_in=0.6, ease_out=0.45, fps=None, frame_step=1):
-    """The film's reading shots: over frames start..end the brush eases toward READ (in over 0.6 s, out over the
-    last 0.45 s), keyed every frame_step frames from the uniforms' values at `start`. k01 is 0 -> 1 -> 0."""
-    fps = fps or 24.0
+    """The film's reading shots: over frames start..end the brush eases toward READ, keyed every frame_step frames
+    from the uniforms' values at `start`: k = min(smooth((t - t0) / 0.6), 1 - smooth((t - (t1 - 0.45)) / 0.45)), the
+    film's own smoothstepped ramps (0 -> 1 -> 0), t in seconds at the scene's frame rate (fps: another rate)."""
+    fps = float(fps or _owner_fps(U))
     base = {k: U[k].default_value for k in READ}
-    fi, fo = max(1, int(round(ease_in * fps))), max(1, int(round(ease_out * fps)))
+
+    def smooth(x):
+        x = min(1.0, max(0.0, x))
+        return x * x * (3.0 - 2.0 * x)
     for f in range(int(start), int(end) + 1, frame_step):
-        k01 = min(1.0, (f - start) / fi, (end - f) / fo)
-        k01 = max(0.0, k01)
+        t, t0, t1 = f / fps, start / fps, end / fps
+        k01 = min(smooth((t - t0) / ease_in), 1.0 - smooth((t - (t1 - ease_out)) / ease_out))
         for k, v in READ.items():
             U[k].default_value = base[k] + (v - base[k]) * k01
             _key(U[k], f)
@@ -272,7 +299,7 @@ def make(scene, o, stage='aeropittura', layer='over'):
     fps = scene.render.fps / scene.render.fps_base
     gap = gap_frames(fps)
     height = scene.render.resolution_y * scene.render.resolution_percentage / 100.0
-    grp = build(height)
+    grp = build(height, kuwahara=o.get('kuwahara', 'own'))
     t = chain.tree(scene)
     node = t.nodes.new('CompositorNodeGroup')
     node.node_tree = grp
@@ -280,6 +307,7 @@ def make(scene, o, stage='aeropittura', layer='over'):
     chain.add_stage(scene, layer, stage, node)
     D.drive_exposure(scene, node.inputs['Exposure'])
     D.sync(scene)
+    D.keep_synced()                                    # before each render / save, if the view changes later
     h = HI.History(scene, f'{stage}_in', tree=t, rider_of=stage)
     chain.relink(scene)
     for k in range(1, 5):
@@ -314,15 +342,26 @@ def _ins():
     return ins
 
 
-def build(height=1080, rebuild=False):
-    """The pass as one node group per render height (the underpainting radius and the cell sizes follow it)."""
+KUWAHARA = ('own', 'blender')
+
+
+def build(height=1080, rebuild=False, kuwahara='own'):
+    """The pass as one node group per render height: the height sets the underpainting's tap count (round(8 S),
+    a loop unrolled into nodes). Everything else sizes itself from the frame as it composites (the taps' spacing,
+    the stroke cells, every pixel offset), so the group also paints a frame rendered at another size, a probe capped
+    smaller than the film, as the film's picture.
+    kuwahara: 'own' (the pass's anisotropic Kuwahara, ported) or 'blender' (Blender's Kuwahara node: faster, and a
+    different filter: further from the WebGPU picture, measured in postprocessing.md)."""
+    if kuwahara not in KUWAHARA:
+        raise ValueError(f'aeropittura: kuwahara {kuwahara!r}: one of {KUWAHARA}')
     S = float(height) / 1080.0
-    # version 2: the focal / spare guards (a file's older group is rebuilt)
-    return fn(f'{GROUP}_h{int(round(height))}', _ins(), [('Image', 'C')], lambda g, a: _aero(g, a, S),
-              rebuild=rebuild, version=2)
+    # version 4: the stroke cells and the Kuwahara's spacing follow the frame's size (version 3: the pass's own
+    # Kuwahara; version 2: the focal / spare guards); a file's older group is rebuilt
+    name = f'{GROUP}_h{int(round(height))}' + ('' if kuwahara == 'own' else '_bk')
+    return fn(name, _ins(), [('Image', 'C')], lambda g, a: _aero(g, a, S, kuwahara), rebuild=rebuild, version=4)
 
 
-def _aero(g, a, S_const):
+def _aero(g, a, S_const, kuwahara='own'):
     img = a['Image']
     co = g.coords(img)
     W, H, S = co.W, co.H, co.S
@@ -370,50 +409,24 @@ def _aero(g, a, S_const):
     s1 = g.rgba(col1, g.smoothstep(0.03, 0.25, mv))
     s1_rgb = g.c(s1)
 
-    # ---- B: colour structure tensor (Sobel per channel): E, F, G
-    def at(src, dx, dy):
-        return g.tap(src, uv + g.vec(dx * S / W, dy * S / H)) if (dx, dy) != (0, 0) else g.tap(src, uv)
-    A_ = {(dx, dy): at(s1, dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)}
-    ca, cb, cc = A_[(-1, -1)], A_[(0, -1)], A_[(1, -1)]
-    cd, cf = A_[(-1, 0)], A_[(1, 0)]
-    cg, ch, ci = A_[(-1, 1)], A_[(0, 1)], A_[(1, 1)]
-    gx = (cc + cf * 2.0 + ci - ca - cd * 2.0 - cg) * 0.25
-    gy = (cg + ch * 2.0 + ci - ca - cb * 2.0 - cc) * 0.25
-    s2 = g.image(g.vec(g.dot(gx, gx), g.dot(gx, gy), g.dot(gy, gy)))
+    # ---- B, C: the colour structure tensor and the flow field
+    flow = flow_field(g, s1, co, a['brush_angle'])
 
-    # ---- C: the flow field: smoothed tensor -> stroke direction t, anisotropy A, edge energy
-    taps = ((0, 0, 4), (3, 0, 2), (-3, 0, 2), (0, 3, 2), (0, -3, 2), (3, 3, 1), (-3, 3, 1), (3, -3, 1), (-3, -3, 1),
-            (6, 0, 1), (-6, 0, 1), (0, 6, 1), (0, -6, 1))
-    wsum = float(sum(w for _x, _y, w in taps))
-    acc = None
-    for dx, dy, w in taps:
-        term = at(s2, dx, dy) * (w / wsum)
-        acc = term if acc is None else acc + term
-    E, F, G_ = acc.x, acc.y, acc.z
-    disc = g.sqrt(g.max((E - G_) * (E - G_) + F * F * 4.0, 0.0))
-    l1, l2 = (E + G_ + disc) * 0.5, (E + G_ - disc) * 0.5
-    tv0x, tv0y = l1 - E, -F
-    defx, defy = g.cos(a['brush_angle']), g.sin(a['brush_angle'])
-    sgn = g.mix(-1.0, 1.0, g.step(0.0, tv0x * defx + tv0y * defy))     # same sign as the default
-    tvx, tvy = tv0x * sgn, tv0y * sgn
-    energy = E + G_
-    kk = g.smoothstep(2e-5, 6e-4, energy) * g.step(1e-12, tvx * tvx + tvy * tvy)
-    tn = g.normalize(g.vec(tvx + 1e-9, tvy))
-    tmix = g.normalize(g.mix(g.vec(defx, defy), tn, kk) + g.v((1e-6, 0.0, 0.0)))
-    Aniso = (l1 - l2) / (l1 + l2 + 1e-9) * kk
-    flow = g.rgba(g.vec(tmix.x, tmix.y, Aniso), energy)               # (t.x, t.y, A) + energy in alpha
-
-    # ---- D: the underpainting (Blender's anisotropic Kuwahara on A's picture)
-    kw = g.node('CompositorNodeKuwahara')
-    kw.inputs['Type'].default_value = 'Anisotropic'
-    kw.inputs['Size'].default_value = max(3.0, round(8.0 * S_const))
-    kw.inputs['Uniformity'].default_value = max(1, int(round(4 * S_const)))
-    kw.inputs['Sharpness'].default_value = 1.0
-    kw.inputs['Eccentricity'].default_value = 1.0
-    kw.inputs['High Precision'].default_value = True
-    g.link(s1, kw.inputs['Image'])
+    # ---- D: the underpainting: the pass's own anisotropic Kuwahara on A's picture, oriented by the flow field
+    RAD = max(3, int(round(8.0 * S_const)))            # the tap count; their spacing follows the frame's size
+    if kuwahara == 'blender':                          # Blender's Kuwahara node: fast, but a different filter
+        kw = g.node('CompositorNodeKuwahara')
+        kw.inputs['Type'].default_value = 'Anisotropic'
+        g.link(g.max(3.0, S * 8.0), kw.inputs['Size'])  # 8 px at 1080p, at whatever size the frame renders
+        kw.inputs['Uniformity'].default_value = max(1, int(round(4 * S_const)))
+        kw.inputs['Sharpness'].default_value = 0.5
+        kw.inputs['Eccentricity'].default_value = 1.0
+        g.link(s1, kw.inputs['Image'])
+        kw_rgb = g.c(kw.outputs['Image'])
+    else:
+        kw_rgb = kuwahara_aniso(g, s1, flow, RAD)
     under_w = g.clamp(W_('under'), 0.0, 1.0)
-    s3_rgb = g.mix(s1_rgb, g.c(kw.outputs['Image']), under_w)
+    s3_rgb = g.mix(s1_rgb, kw_rgb, under_w)
     s3 = g.image(s3_rgb)
 
     # ---- E: the light field (only real light sources: display value > ~0.8) and the halo directions
@@ -442,7 +455,9 @@ def _aero(g, a, S_const):
     strokesW, haloW = W_('strokes'), W_('halo')
     cell_fn = _cell_fn()
     layers = []
-    for C, Wk, salt in ((14.0 * S_const, 0.40, 101), (6.0 * S_const, 0.38, 211)):
+    # the stroke cells, 14 and 6 px at 1080p: sized from the frame being composited (WebGPU's 14 S and 6 S, S = H /
+    # 1080 of the render), so a probe rendered smaller than the film paints the same strokes, smaller
+    for C, Wk, salt in ((S * 14.0, 0.40, 101), (S * 6.0, 0.38, 211)):
         best, sc, cov = -1.0, g.v((0.0, 0.0, 0.0)), 0.0
         for dy in range(-2, 3):
             for dx in range(-2, 3):
@@ -461,6 +476,144 @@ def _aero(g, a, S_const):
 
     # ---- G: planes, lines of force, palette, canvas, back to linear
     return {'Image': g.rgba(_final(g, a, co, S, aspect, t, frame, uv, toQ, flow, s4, spared, force), 1.0)}
+
+
+# ------------------------------------------------------------------------------------------------- the flow field
+def flow_field(g, s1, co, brush_angle):
+    """aeropittura.js stages B and C on the display-space picture s1 (an image; co: its Coords): the colour structure
+    tensor (a Sobel per channel, taps S px apart), smoothed by 13 taps 3 S and 6 S px out, then the stroke direction
+    t (the minor eigenvector, signed like the default brush_angle direction, which also fills flat areas), the
+    anisotropy A and the edge energy. Returns an image: rgb = (t.x, t.y, A), alpha = energy."""
+    uv, S, W, H = co.uv, co.S, co.W, co.H
+
+    def at(src, dx, dy):
+        return g.tap(src, uv + g.vec(dx * S / W, dy * S / H)) if (dx, dy) != (0, 0) else g.tap(src, uv)
+    A_ = {(dx, dy): at(s1, dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)}
+    ca, cb, cc = A_[(-1, -1)], A_[(0, -1)], A_[(1, -1)]
+    cd, cf = A_[(-1, 0)], A_[(1, 0)]
+    cg, ch, ci = A_[(-1, 1)], A_[(0, 1)], A_[(1, 1)]
+    gx = (cc + cf * 2.0 + ci - ca - cd * 2.0 - cg) * 0.25
+    gy = (cg + ch * 2.0 + ci - ca - cb * 2.0 - cc) * 0.25
+    s2 = g.image(g.vec(g.dot(gx, gx), g.dot(gx, gy), g.dot(gy, gy)))
+    taps = ((0, 0, 4), (3, 0, 2), (-3, 0, 2), (0, 3, 2), (0, -3, 2), (3, 3, 1), (-3, 3, 1), (3, -3, 1), (-3, -3, 1),
+            (6, 0, 1), (-6, 0, 1), (0, 6, 1), (0, -6, 1))
+    wsum = float(sum(w for _x, _y, w in taps))
+    acc = None
+    for dx, dy, w in taps:
+        term = at(s2, dx, dy) * (w / wsum)
+        acc = term if acc is None else acc + term
+    E, F, G_ = acc.x, acc.y, acc.z
+    disc = g.sqrt(g.max((E - G_) * (E - G_) + F * F * 4.0, 0.0))
+    l1, l2 = (E + G_ + disc) * 0.5, (E + G_ - disc) * 0.5
+    tv0x, tv0y = l1 - E, -F
+    defx, defy = g.cos(brush_angle), g.sin(brush_angle)
+    sgn = g.mix(-1.0, 1.0, g.step(0.0, tv0x * defx + tv0y * defy))     # same sign as the default
+    tvx, tvy = tv0x * sgn, tv0y * sgn
+    energy = E + G_
+    kk = g.smoothstep(2e-5, 6e-4, energy) * g.step(1e-12, tvx * tvx + tvy * tvy)
+    tn = g.normalize(g.vec(tvx + 1e-9, tvy))
+    tmix = g.normalize(g.mix(g.vec(defx, defy), tn, kk) + g.v((1e-6, 0.0, 0.0)))
+    Aniso = (l1 - l2) / (l1 + l2 + 1e-9) * kk
+    return g.rgba(g.vec(tmix.x, tmix.y, Aniso), energy)               # (t.x, t.y, A) + energy in alpha
+
+
+# ------------------------------------------------------------------------------------------------- the underpainting
+_ACC = [f'M{k}' for k in range(8)] + [f'S{k}' for k in range(8)] + [f'W{k}' for k in range(8)]
+
+
+def _acc_specs():
+    return [(n, 'V' if n[0] in 'MS' else 'S', (0.0, 0.0, 0.0) if n[0] in 'MS' else 0.0) for n in _ACC]
+
+
+def _kuwa_tap_fn():
+    """One tap d = (DX, DY) of the anisotropic Kuwahara (aeropittura.js stage D's loop body), Step pixels per unit of
+    d: the tap's colour, its eight polynomial sector weights (zeta = 2 / RAD, eta = 0.33) times the radial Gaussian
+    exp(-3.125 |v|^2), divided by their sum, inside the flow's ellipse only (|v| <= 1), added into each sector's sums
+    of c, c^2 and the weights (M, S, W)."""
+    def body(g, a):
+        src = a['Src']
+        co = g.coords(src)
+        dx, dy, step = a['DX'], a['DY'], a['Step']
+        cphi, sphi, ia, ib, zeta = a['Cphi'], a['Sphi'], a['IA'], a['IB'], a['Zeta']
+        eta = 0.33
+        vx = (dx * cphi + dy * sphi) * ia
+        vy = (dy * cphi - dx * sphi) * ib
+        vv = vx * vx + vy * vy
+        inside = 1.0 - g.math('GREATER_THAN', vv, 1.0)                      # If(dot(v, v) <= 1)
+        c = g.tap(src, co.uv + g.vec(dx * step * co.pxu, dy * step * co.pxv))
+        cc = c * c
+        vxx, vyy = zeta - vx * vx * eta, zeta - vy * vy * eta
+        z = [g.max(vy + vxx, 0.0), None, g.max(vyy - vx, 0.0), None, g.max(vxx - vy, 0.0), None,
+             g.max(vx + vyy, 0.0), None]
+        rx, ry = (vx - vy) * 0.70710678, (vx + vy) * 0.70710678
+        rxx, ryy = zeta - rx * rx * eta, zeta - ry * ry * eta
+        z[1], z[3], z[5], z[7] = g.max(ry + rxx, 0.0), g.max(ryy - rx, 0.0), g.max(rxx - ry, 0.0), g.max(rx + ryy, 0.0)
+        ws = [q * q for q in z]
+        tot = ws[0]
+        for q in ws[1:]:
+            tot = tot + q
+        gw = g.exp(vv * -3.125) / (tot + 1e-6) * inside
+        out = {}
+        for k in range(8):
+            wk = ws[k] * gw
+            out[f'M{k}'] = a[f'M{k}'] + c * wk
+            out[f'S{k}'] = a[f'S{k}'] + cc * wk
+            out[f'W{k}'] = a[f'W{k}'] + wk
+        return out
+    ins = [('Src', 'C', (0, 0, 0, 1)), ('DX', 'S', 0.0), ('DY', 'S', 0.0), ('Step', 'S', 1.0), ('Cphi', 'S', 1.0),
+           ('Sphi', 'S', 0.0), ('IA', 'S', 0.125), ('IB', 'S', 0.125), ('Zeta', 'S', 0.25)] + _acc_specs()
+    outs = [(n, 'V' if n[0] in 'MS' else 'S') for n in _ACC]
+    return fn('eido_aero_kuwa_tap', ins, outs, body, version=2)
+
+
+def _kuwa_row_fn(rad):
+    """One row (DY) of taps, DX = -rad .. rad: the tap group called 2 rad + 1 times, its sums handed along."""
+    def body(g, a):
+        tap = _kuwa_tap_fn()
+        acc = {n: a[n] for n in _ACC}
+        for dx in range(-rad, rad + 1):
+            o = g.call(tap, Src=a['Src'], DX=float(dx), DY=a['DY'], Step=a['Step'], Cphi=a['Cphi'], Sphi=a['Sphi'],
+                       IA=a['IA'], IB=a['IB'], Zeta=a['Zeta'], **acc)
+            acc = {n: o[n] for n in _ACC}
+        return acc
+    ins = [('Src', 'C', (0, 0, 0, 1)), ('DY', 'S', 0.0), ('Step', 'S', 1.0), ('Cphi', 'S', 1.0), ('Sphi', 'S', 0.0),
+           ('IA', 'S', 0.125), ('IB', 'S', 0.125), ('Zeta', 'S', 0.25)] + _acc_specs()
+    outs = [(n, 'V' if n[0] in 'MS' else 'S') for n in _ACC]
+    return fn(f'eido_aero_kuwa_row{rad}', ins, outs, body, version=2)
+
+
+def kuwahara_aniso(g, src, flow, rad, step=None):
+    """aeropittura.js stage D: the anisotropic Kuwahara of `src` (an image), 8 sectors with polynomial weights
+    (Kyprianidis et al. 2009 / 2011), over the ellipse a = rad (A + 1), b = rad / (A + 1) turned to the flow's stroke
+    direction (flow: an image, rgb = (t.x, t.y, A) as stage C writes it), taps over the square [-rad, rad]^2 (the
+    WebGPU loop's, which clips the long axis at rad); each sector's mean weighted by 1 / ((255 sum var)^4 + 1).
+    Returns the filtered colour (a V).
+    rad = round(8 S) at the height the pass is built for: the number of taps. step: pixels between taps; None = 8 S /
+    rad with S the frame's own H / 1080 when it composites, so the brush covers 8 S px whatever size the frame renders
+    at (1 px between taps at 1080p and 540p). (WebGPU sampled its taps d x S px out on top of rad = round(8 S), so
+    below 1080p its brush shrank twice over; this keeps the 1080p look, and a probe rendered smaller than the size
+    the pass was built for paints the film's picture.)"""
+    fl = g.c(flow)
+    cphi, sphi, A = fl.x, fl.y, fl.z
+    ia = 1.0 / ((A + 1.0) * float(rad))                                # 1 / a
+    ib = (A + 1.0) / float(rad)                                        # 1 / b
+    if step is None:
+        step = g.coords(src).S * (8.0 / float(rad))
+    acc = {n: ((0.0, 0.0, 0.0) if n[0] in 'MS' else 0.0) for n in _ACC}
+    row = _kuwa_row_fn(int(rad))
+    for dy in range(-rad, rad + 1):
+        o = g.call(row, Src=src, DY=float(dy), Step=step, Cphi=cphi, Sphi=sphi, IA=ia, IB=ib, Zeta=2.0 / rad, **acc)
+        acc = {n: o[n] for n in _ACC}
+    num, den = None, None
+    for k in range(8):
+        wk = acc[f'W{k}'] + 1e-6
+        mk = acc[f'M{k}'] / wk
+        vk = g.abs(acc[f'S{k}'] / wk - mk * mk)
+        sv = (vk.x + vk.y + vk.z) * 255.0
+        al = 1.0 / (g.pow(sv, 4.0) + 1.0)
+        num = mk * al if num is None else num + mk * al
+        den = al if den is None else den + al
+    return num / (den + 1e-6)
 
 
 def _cell_fn():

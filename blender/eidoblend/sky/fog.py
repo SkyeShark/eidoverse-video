@@ -4,11 +4,16 @@ The WebGPU sky never owns fog density (the scene does) but writes the fog COLOUR
 weathered horizon (applyToLights: horizon * fog tint * (0.5 + int * 0.12)). Here the compositor blends
 the rendered geometry toward that keyed colour by the Depth pass, with three's FogExp2 (1 - exp(-(d z)^2))
 or linear Fog ((z - near) / (far - near)), and leaves the sky itself unfogged (three's domes use fog: false).
+The sky elements are unfogged too, as WebGPU's are (fog: false on every ring and moon material): the shattered moon's
+materials write 1 to the 'eido_sky_element' AOV (sky_view.mark_sky_element), which the fog reads; the ringworld's
+band reaches the frame inside the sky's camera layer, where the depth is the sky's.
 
 The fog is spliced in right after Render Layers: whatever read the render image before (another family's
 glare or grade chain, or the tree's output) now reads the fogged image, so a post chain stays connected.
 """
 import bpy
+
+from .sky_view import SKY_ELEMENT_AOV
 
 TREE = 'eido_sky_fog'
 
@@ -21,6 +26,10 @@ def setup_fog(scene, density=0.0004, kind='exp2', near=1.0, far=1000.0):
     scene.render.use_compositing = True
     for vl in scene.view_layers:
         vl.use_pass_z = True
+        if not any(a.name == SKY_ELEMENT_AOV for a in vl.aovs):
+            aov = vl.aovs.add()
+            aov.name = SKY_ELEMENT_AOV
+            aov.type = 'VALUE'
     tree = scene.compositing_node_group
     if tree is None:
         tree = bpy.data.node_groups.new(TREE, 'CompositorNodeTree')
@@ -72,6 +81,9 @@ def setup_fog(scene, density=0.0004, kind='exp2', near=1.0, far=1000.0):
     f = math('MINIMUM', math('MAXIMUM', f, 0.0, 'eido_fog_lo'), 1.0, 'eido_fog_hi')
     geometry = math('LESS_THAN', depth, 1e8, 'eido_fog_geometry')          # the sky keeps its own colour
     fk = math('MULTIPLY', f, geometry, 'eido_fog_k')
+    sky_el = rl.outputs.get(SKY_ELEMENT_AOV)
+    if sky_el is not None:                                                   # and so do the sky elements
+        fk = math('MULTIPLY', fk, math('SUBTRACT', 1.0, sky_el, 'eido_fog_not_sky_element'), 'eido_fog_k_local')
     col = node('CompositorNodeRGB', 'eido_fog_color')
     mix = node('ShaderNodeMix', 'eido_fog_mix', data_type='RGBA')
     L.new(fk, mix.inputs['Factor'])

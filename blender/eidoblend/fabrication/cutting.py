@@ -19,7 +19,8 @@
                                             Geometry Nodes pool on the removal events: each chip's arc is a function
                                             of physical time, so a frame shows the same chips however it is reached.
                                             -> {group (the object), emission_events, particle_count, set_time(t),
-                                            set_color, dispose}
+                                            set_color, dispose, bounds (a hidden box of where chips can fly, which
+                                            framing counts, as the WebGPU geometry bounds)}
 """
 
 from __future__ import annotations
@@ -259,11 +260,29 @@ DUST = [(-.5, 0, -.5), (.5, 0, -.5), (.5, 0, .5), (-.5, 0, .5)]
 DUST_TRIS = [(0, 2, 1), (0, 3, 2)]
 
 
-def _template(name, pts, tris, collection):
+def _template(name, pts, tris, collection, size):
+    """The chip (or dust flake) at its nominal size in metres: the pool scales each instance by its random factor
+    only. (A unit-sized template would be a hidden 1 m mesh in the robot's hierarchy, and every framing box that
+    counts hidden meshes, as three's expandByObject does, would grow by it.)"""
     import bpy
     from ._axes import t2b
     me = bpy.data.meshes.new(name)
-    me.from_pydata([t2b(p) for p in pts], [], tris)
+    me.from_pydata([t2b(tuple(c * size for c in p)) for p in pts], [], tris)
+    me.update()
+    ob = bpy.data.objects.new(name, me)
+    collection.objects.link(ob)
+    ob.hide_render = ob.hide_viewport = True
+    return ob
+
+
+def _bounds_object(name, stock, collection):
+    """cutting.js sets the chips' geometry bounds to where chips can fly (stock +- .22 m across, -.04 .. height + .09 m
+    up) so that framing and placement tools count them: here a hidden mesh of that box's eight corners in the chips'
+    frame, which world boxes count the same way."""
+    import bpy
+    w, d, h = stock['width'] / 2 + .22, stock['depth'] / 2 + .22, stock['height']
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([(x, y, z) for x in (-w, w) for y in (-d, d) for z in (-.04, h + .09)], [], [])
     me.update()
     ob = bpy.data.objects.new(name, me)
     collection.objects.link(ob)
@@ -357,7 +376,7 @@ def _debris_tree(name, events_ob, template, profile, stock, count, per_event, se
     age = time - etime
     a = b.clamp(age, 0.0, ttl)
     spin = theta + a * (5.0 if dust else 27.0)
-    size = (rnd(4) * .8 + .4) * (profile.chip_size * (.16 if dust else 1.0))
+    size = rnd(4) * .8 + .4                     # times the template's nominal chip_size (* .16 for dust)
     if dust:
         travel = (1.0 - b.exp(a * -14.0)) / 14.0
         drop = (a - travel) * (9.81 / 14)
@@ -381,6 +400,14 @@ def _debris_tree(name, events_ob, template, profile, stock, count, per_event, se
     op.inputs['Name'].default_value = 'chip_opacity'
     b.link((1.0 - a / ttl) * .28 if dust else 1.0, op.inputs['Value'])
     last = op.outputs['Geometry']
+    # the chip's persistent id (event x per_event + k): Blender's instancing takes a point attribute 'id' as the
+    # instances' id, so a chip keeps its identity across motion-blur steps while the pool's points are renumbered as
+    # chips are born and die
+    pid = b.node('GeometryNodeStoreNamedAttribute', data_type='INT', domain='POINT')
+    b.link(last, pid.inputs['Geometry'])
+    pid.inputs['Name'].default_value = 'id'
+    b.link(event * float(per_event) + k, pid.inputs['Value'])
+    last = pid.outputs['Geometry']
     inst = b.node('GeometryNodeInstanceOnPoints')
     b.link(last, inst.inputs['Points'])
     b.link(alive, inst.inputs['Selection'])
@@ -416,7 +443,8 @@ def cutting_debris(removal, profile, stock, max_particles=1200, seed=7319, dust=
         if not count:
             return
         label = 'Wood fines' if is_dust else ('Wood shavings' if profile.kind == 'wood' else 'Metal swarf')
-        tmpl = _template(f'{label} | template', DUST if is_dust else CHIP, DUST_TRIS if is_dust else CHIP_TRIS, col)
+        tmpl = _template(f'{label} | template', DUST if is_dust else CHIP, DUST_TRIS if is_dust else CHIP_TRIS, col,
+                         profile.chip_size * (.16 if is_dust else 1.0))
         tmpl.parent = group
         tmpl.data.materials.append(_chip_material(f'{label} | {name}', profile, is_dust))
         me = bpy.data.meshes.new(label)
@@ -430,29 +458,53 @@ def cutting_debris(removal, profile, stock, max_particles=1200, seed=7319, dust=
     make(False)
     if profile.kind == 'wood' and dust:
         make(True)
+    bounds = None
+    if pools:
+        bounds = _bounds_object(f'{name} | trajectory bounds', stock, col)
+        bounds.parent = group
     from ._nodes import modifier_input
 
     def set_time(t):
         for p in pools:
             modifier_input(p.modifier, 'Time').value = float(t)
+            p.object.update_tag()                # (a Python-set modifier input does not tag its object in 5.2)
 
     def set_color(c):
         for p in pools:
             for m in p.template.data.materials:
                 m.node_tree.nodes['chip_color'].outputs[0].default_value = color_linear(c) + (1.0,)
 
+    def remove_object(ob):
+        """The object and its mesh (when nothing else uses it); nothing when it is already gone (its robot's
+        dispose may have taken it first)."""
+        try:
+            me = ob.data
+            bpy.data.objects.remove(ob)
+            if me is not None and me.users == 0:
+                bpy.data.meshes.remove(me)
+        except ReferenceError:
+            pass
+
     def dispose():
         for p in pools:
-            for m in list(p.template.data.materials):
-                bpy.data.materials.remove(m)
-            ng = p.modifier.node_group
-            bpy.data.objects.remove(p.object)
-            bpy.data.objects.remove(p.template)
-            bpy.data.node_groups.remove(ng)
-        bpy.data.objects.remove(events_ob)
-        bpy.data.objects.remove(group)
+            try:
+                mats = list(p.template.data.materials)
+                ng = p.modifier.node_group
+            except ReferenceError:
+                mats, ng = [], None
+            remove_object(p.object)
+            remove_object(p.template)
+            for m in mats:
+                if m is not None and m.users == 0:
+                    bpy.data.materials.remove(m)
+            if ng is not None and ng.users == 0:
+                bpy.data.node_groups.remove(ng)
+        pools.clear()
+        for ob in (bounds, events_ob, group):
+            if ob is not None:
+                remove_object(ob)
 
-    api = Rec(group=group, events_object=events_ob, pools=pools, emission_events=len(removal.events),
+    api = Rec(group=group, events_object=events_ob, pools=pools, bounds=bounds, emission_events=len(removal.events),
               particle_count=sum(p.count for p in pools), set_time=set_time, set_color=set_color, dispose=dispose,
               children=[Rec(name=p.name) for p in pools])
     set_time(-1.0)

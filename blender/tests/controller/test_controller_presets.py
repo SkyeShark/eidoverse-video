@@ -34,8 +34,9 @@ from eidoblend.course import PRESETS  # noqa: E402
 ARGS = T.argv()
 PRESET = T.arg(ARGS, '--preset', 'stairs_small')
 VRM = T.arg(ARGS, '--vrm', 'aletheia')
-R = T.Report(T.arg(ARGS, '--tag', f'presets_{PRESET}'))
-R['vrm'], R['preset'] = VRM, PRESET
+LEG_IK = T.arg(ARGS, '--leg-ik', 'default')          # 'none': attachLocomotion without leg IK (the noik scenes)
+R = T.Report(T.arg(ARGS, '--tag', f'presets_{PRESET}' + ('_noik' if LEG_IK == 'none' else '')))
+R['vrm'], R['preset'], R['leg_ik'] = VRM, PRESET, LEG_IK
 
 
 def plan(loco, course, cfg):
@@ -76,7 +77,9 @@ def main():
     course = T.course(cfg)
     me = load_vrm(VRM, name=VRM)
     world = CollisionWorld()
-    loco = Locomotion(me, world, start=(0.0, -5.0, 0.0), heading=math.pi, log=R.log)
+    loco = Locomotion(me, world, start=(0.0, -5.0, 0.0), heading=math.pi, log=R.log,
+                      leg_ik=None if LEG_IK == 'none' else 'default')
+    R['leg_ik_attached'] = loco.ctrl._leg_ik is not None
     marks = plan(loco, course, cfg)
     t0 = time.time()
     rep = loco.bake(f0=1)
@@ -123,12 +126,22 @@ def main():
         R['bump_leads'] = sorted(x for x in bump_leads if x)
         R.check('the bumps and the dome are walked (isolated obstacles keep the walk)', 'walk' in bump_leads,
                 f'{R["bump_leads"]}')
+        dome = next((s for s in course.segments if s['kind'] == 'dome'), None)
+        if dome is not None:
+            over = [r for r in recs if dome['y0'] - 0.6 <= r['feet_world'][1] <= dome['y1'] + 0.6]
+            hop = [r['f'] for r in over if not r['grounded'] or r['lead'] == 'fallIdle']
+            R.check('the dome is stepped over, not hopped (grounded, no fallIdle, from 0.6 m before it to 0.6 m after)',
+                    not hop, f'{len(hop)} airborne frames {hop[:8]}')
+    if LEG_IK == 'none':
+        R.check('attachLocomotion without leg IK: none attached, the film plant places the feet', not
+                R['leg_ik_attached'], f'leg IK {"attached" if R["leg_ik_attached"] else "none"}')
     R['worst'] = rep['worst']
     R['pelvis_lowered_mm'] = rep['pelvis_lowered_mm']
     R['released'] = rep.get('released')
     if T.arg(ARGS, '--dump'):
         T.dump_frames(R, rep, [tuple(int(v) for v in rg.split('-')) for rg in T.arg(ARGS, '--dump').split(',')])
     T.keyed_matches(R, me, frames)
+    T.mesh_feet_check(R, me, f0, f1)
     shots(sc, me, recs, segs)
 
 

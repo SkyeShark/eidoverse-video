@@ -1,0 +1,32 @@
+step 50 (0.50 Myr): max 512 m, mean 223 m, 161 levels, 198 ms/step
+step 100 (1.00 Myr): max 984 m, mean 394 m, 161 levels, 189 ms/step
+step 150 (1.50 Myr): max 1431 m, mean 530 m, 160 levels, 184 ms/step
+step 200 (2.00 Myr): max 1854 m, mean 634 m, 158 levels, 178 ms/step
+step 250 (2.50 Myr): max 2248 m, mean 714 m, 159 levels, 172 ms/step
+step 300 (3.00 Myr): max 2624 m, mean 774 m, 158 levels, 169 ms/step
+step 350 (3.50 Myr): max 2958 m, mean 822 m, 156 levels, 164 ms/step
+step 400 (4.00 Myr): max 3226 m, mean 859 m, 154 levels, 166 ms/step
+step 450 (4.50 Myr): max 3424 m, mean 887 m, 153 levels, 162 ms/step
+step 500 (5.00 Myr): max 3580 m, mean 907 m, 154 levels, 166 ms/step
+{
+ "pixel_m": 78.125,
+ "extent_km": 20.0,
+ "relief_m": 3342.4592202907916,
+ "hypsometric_integral": 0.2534458064640622,
+ "slope_p10": 2.568627954569937,
+ "slope_p50": 27.106303493506687,
+ "slope_p90": 35.69409986577935,
+ "slope_p99": 40.53470752842011,
+ "frac_slope_lt5": 0.1581268310546875,
+ "frac_slope_gt30": 0.38671875,
+ "frac_slope_gt40": 0.0130615234375,
+ "frac_slope_gt50": 0.0,
+ "depression_area_frac": 0.0,
+ "depressions_per_100km2": 0.0,
+ "steps": 500,
+ "dt_years": 10000.0,
+ "seconds": 82.9,
+ "ms_per_step": 165.8,
+ "plain_op_ms": 1.773,
+ "step_cost_in_plain_ops": 94.0
+}

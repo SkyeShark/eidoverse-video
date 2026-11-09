@@ -66,29 +66,39 @@ def refine_crossings(dist_fn, start, ax, d0, d1, voxel, iso=0.0, iterations=3):
 
     Linear interpolation of the corner values is exact only where the field is linear along the edge. Near a crease
     (a box edge, a boolean cut, a panel gap) the SDF bends inside the edge and the interpolated crossing lands up to
-    a third of a voxel off, which rounds every sharp feature. Each iteration is one batch evaluation."""
+    a third of a voxel off, which rounds every sharp feature. Each iteration is one batch evaluation.
+
+    start (E, 3) is each edge's lower corner and ax its axis: only that coordinate moves, so the points evaluated
+    live in one float32 array updated in place (a mesh of tens of millions of crossings keeps a few arrays, not a
+    fresh (E, 3) set per iteration)."""
     t = d0 / (d0 - d1)
     if iterations <= 0 or len(t) == 0:
         return t
-    a, fa = np.zeros_like(t), d0.copy()
-    b, fb = np.ones_like(t), d1.copy()
+    a, fa = np.zeros_like(t), np.array(d0, np.float64)
+    b, fb = np.ones_like(t), np.array(d1, np.float64)
     last = np.zeros(len(t), np.int8)
-    step = np.zeros((len(t), 3))
-    step[np.arange(len(t)), ax] = voxel
+    rows = np.arange(len(t))
+    base = np.asarray(start, np.float64)[rows, ax]          # the moving coordinate, float64 as the corner had it
+    pts = np.array(start, np.float32)                        # what the field sees (float32, as the GPU takes it)
     for _ in range(int(iterations)):
-        ft = np.asarray(dist_fn((start + step * t[:, None]).astype(np.float32)), np.float64) - iso
+        pts[rows, ax] = base + voxel * t
+        ft = np.asarray(dist_fn(pts), np.float64) - iso
         keep_b = (ft < 0) == (fa < 0)                       # the root lies in [t, b]: t replaces a
-        a = np.where(keep_b, t, a)
-        fa = np.where(keep_b, ft, fa)
-        b = np.where(keep_b, b, t)
-        fb = np.where(keep_b, fb, ft)
+        np.copyto(a, t, where=keep_b)
+        np.copyto(fa, ft, where=keep_b)
+        np.copyto(b, t, where=~keep_b)
+        np.copyto(fb, ft, where=~keep_b)
         # Illinois: an end kept twice in a row has its value halved, so the bracket shrinks from both sides
-        fb = np.where(keep_b & (last == 1), fb * 0.5, fb)
-        fa = np.where(~keep_b & (last == -1), fa * 0.5, fa)
+        fb[keep_b & (last == 1)] *= 0.5
+        fa[~keep_b & (last == -1)] *= 0.5
         last = np.where(keep_b, 1, -1).astype(np.int8)
+        del keep_b
         den = fb - fa
-        t_new = np.where(np.abs(den) > 1e-30, (a * fb - b * fa) / np.where(np.abs(den) > 1e-30, den, 1.0), 0.5 * (a + b))
+        ok = np.abs(den) > 1e-30
+        t_new = np.where(ok, (a * fb - b * fa) / np.where(ok, den, 1.0), 0.5 * (a + b))
+        del den, ok
         t = np.where(ft == 0.0, t, np.clip(t_new, a, b))
+        del t_new, ft
     return t
 
 
@@ -145,37 +155,43 @@ def dual_contour(dist_fn, grad_fn, bmin, bmax, voxel, brick=8, lipschitz=1.5, qe
             gi = base[b_, 0] + i_
             gj = base[b_, 1] + j_
             gk = base[b_, 2] + k_
-            e_key.append(np.stack([gi, gj, gk], -1))
+            e_key.append(np.stack([gi, gj, gk], -1).astype(np.int32))      # grid indices: int32 is plenty
             e_ax.append(np.full(len(gi), ax, np.int8))
             e_d0.append(D[lo][b_, i_, j_, k_])
             e_d1.append(D[tuple(hi)][b_, i_, j_, k_])
+    del cpos, D, neg                                         # the last chunk's corners (about 140 MB)
     stats['corners'] = int(n_eval)
     if not e_key:
         return _empty(voxel, dims, bmin, stats, t_start)
+    # Memory: a fine fractal or a large car has tens of millions of crossings, so every per-crossing array is freed
+    # as soon as it is spent (about 200 bytes a crossing at the peak, not 530)
     e_ijk = np.concatenate(e_key)
     e_ax = np.concatenate(e_ax)
     e_d0 = np.concatenate(e_d0)
     e_d1 = np.concatenate(e_d1)
+    del e_key
     e_in = e_d0 < 0
-    e_start = bmin + e_ijk * voxel
-    t = refine_crossings(dist_fn, e_start, e_ax.astype(np.int64), e_d0, e_d1, voxel, iso, refine)
-    e_p = e_start.copy()
-    e_p[np.arange(len(t)), e_ax] += t * voxel
+    E = len(e_ijk)
+    rows = np.arange(E)
+    e_p = bmin + e_ijk * voxel                          # each edge's lower corner, then its crossing (in place)
+    t = refine_crossings(dist_fn, e_p, e_ax, e_d0, e_d1, voxel, iso, refine)
+    del e_d0, e_d1
+    e_p[rows, e_ax] += t * voxel
+    del t, rows
     t_sample = time.perf_counter()
-    stats['edges'] = int(len(e_ijk))
+    stats['edges'] = int(E)
 
     # Hermite normals: a narrow stencil, or crossings near a crease average both faces' normals and round it off
     gh = grad_h if grad_h is not None else max(2e-5, 0.04 * voxel)
-    g = np.asarray(grad_fn(e_p.astype(np.float32), gh), np.float64)
-    gl = np.linalg.norm(g, axis=1)
-    e_n = g / np.maximum(gl, 1e-20)[:, None]
+    e_n = np.asarray(grad_fn(e_p.astype(np.float32), gh), np.float64)
+    gl = np.linalg.norm(e_n, axis=1)
+    e_n /= np.maximum(gl, 1e-20)[:, None]
     bad = ~np.isfinite(e_n).all(axis=1) | (gl < 1e-12)
     e_n[bad] = 0.0
+    del gl, bad
     t_grad = time.perf_counter()
 
-    # cells around each crossing edge: their keys, column by column (no (E, 4, 3) array: a fine fractal or a large
-    # car has tens of millions of crossings)
-    E = len(e_ijk)
+    # cells around each crossing edge: their keys, column by column (no (E, 4, 3) array)
     offs = np.array([[_EDGE_CELLS[ax][c] for c in range(4)] for ax in range(3)], np.int64)   # (axis, corner, 3)
     keys = np.empty((E, 4), np.int64)
     cell_ok = np.empty((E, 4), bool)
@@ -184,9 +200,23 @@ def dual_contour(dist_fn, grad_fn, bmin, bmax, voxel, brick=8, lipschitz=1.5, qe
         cell_ok[:, c] = ((cij >= 0) & (cij < dims)).all(axis=1)
         keys[:, c] = cij[:, 0] + SX * (cij[:, 1] + SY * cij[:, 2])
         del cij
-    cells, inv = np.unique(keys[cell_ok], return_inverse=True)
+    del e_ijk
+    # np.unique(return_inverse=True) holds five copies of the keys; one argsort and an int32 scatter do the same job
+    k = keys[cell_ok]
+    del keys
+    order = np.argsort(k)
+    k = k[order]
+    first = np.empty(len(k), bool)
+    if len(k):
+        first[0] = True
+        np.not_equal(k[1:], k[:-1], out=first[1:])
+    cells = k[first]
+    del k
+    inv = np.empty(len(order), np.int32)
+    inv[order] = np.cumsum(first, dtype=np.int32) - 1
+    del order, first
     nC = len(cells)
-    vid = np.full((E, 4), -1, np.int64)
+    vid = np.full((E, 4), -1, np.int32)
     vid[cell_ok] = inv
     del inv
 
@@ -205,33 +235,37 @@ def dual_contour(dist_fn, grad_fn, bmin, bmax, voxel, brick=8, lipschitz=1.5, qe
     axz = acc(lambda s: e_n[s, 0] * e_n[s, 2])
     ayz = acc(lambda s: e_n[s, 1] * e_n[s, 2])
     bx, by, bz = (acc(lambda s, a=a: e_n[s, a] * nd[s]) for a in range(3))
-    del nd
-    # rhs = A^T b - A^T A mass; (A^T A + lambda I) x = rhs by Cramer's rule (symmetric positive definite: lambda > 0)
-    mx, my, mz = mass[:, 0], mass[:, 1], mass[:, 2]
-    rx = bx - (axx * mx + axy * my + axz * mz)
-    ry = by - (axy * mx + ayy * my + ayz * mz)
-    rz = bz - (axz * mx + ayz * my + azz * mz)
-    lam = qef_lambda * np.maximum(cnt, 1.0)
-    a, d, f = axx + lam, ayy + lam, azz + lam          # [[a, b, c], [b, d, e], [c, e, f]]
-    b_, c_, e_ = axy, axz, ayz
-    co0 = d * f - e_ * e_
-    co1 = c_ * e_ - b_ * f
-    co2 = b_ * e_ - c_ * d
-    det = a * co0 + b_ * co1 + c_ * co2
-    det = np.where(np.abs(det) > 1e-30, det, 1e-30)
-    xs = np.stack([(co0 * rx + co1 * ry + co2 * rz),
-                   (co1 * rx + (a * f - c_ * c_) * ry + (b_ * c_ - a * e_) * rz),
-                   (co2 * rx + (b_ * c_ - a * e_) * ry + (a * d - b_ * b_) * rz)], -1) / det[:, None]
-    del axx, ayy, azz, axy, axz, ayz, bx, by, bz, rx, ry, rz, co0, co1, co2, det, a, d, f
-    verts = mass + xs
-    del xs
-    cxi = cells % SX
-    cyi = (cells // SX) % SY
-    czi = cells // (SX * SY)
-    cmin = bmin + np.stack([cxi, cyi, czi], -1) * voxel
-    verts = np.minimum(np.maximum(verts, cmin), cmin + voxel)
-    bad = ~np.isfinite(verts).all(axis=1)
-    verts[bad] = mass[bad]
+    del nd, e_p, e_n
+    # rhs = A^T b - A^T A mass; (A^T A + lambda I) x = rhs by Cramer's rule (symmetric positive definite: lambda > 0),
+    # per cell, so it runs in chunks of cells and its dozen temporaries stay small
+    verts = np.empty((nC, 3), np.float64)
+    for s0 in range(0, nC, 1 << 20):
+        sl = slice(s0, min(nC, s0 + (1 << 20)))
+        m_ = mass[sl]
+        mx, my, mz = m_[:, 0], m_[:, 1], m_[:, 2]
+        Axx, Ayy, Azz, Axy, Axz, Ayz = axx[sl], ayy[sl], azz[sl], axy[sl], axz[sl], ayz[sl]
+        rx = bx[sl] - (Axx * mx + Axy * my + Axz * mz)
+        ry = by[sl] - (Axy * mx + Ayy * my + Ayz * mz)
+        rz = bz[sl] - (Axz * mx + Ayz * my + Azz * mz)
+        lam = qef_lambda * np.maximum(cnt[sl], 1.0)
+        a, d, f = Axx + lam, Ayy + lam, Azz + lam          # [[a, b, c], [b, d, e], [c, e, f]]
+        b_, c_, e_ = Axy, Axz, Ayz
+        co0 = d * f - e_ * e_
+        co1 = c_ * e_ - b_ * f
+        co2 = b_ * e_ - c_ * d
+        det = a * co0 + b_ * co1 + c_ * co2
+        det = np.where(np.abs(det) > 1e-30, det, 1e-30)
+        xs = np.stack([(co0 * rx + co1 * ry + co2 * rz),
+                       (co1 * rx + (a * f - c_ * c_) * ry + (b_ * c_ - a * e_) * rz),
+                       (co2 * rx + (b_ * c_ - a * e_) * ry + (a * d - b_ * b_) * rz)], -1) / det[:, None]
+        v = m_ + xs
+        cs = cells[sl]
+        cmin = bmin + np.stack([cs % SX, (cs // SX) % SY, cs // (SX * SY)], -1) * voxel
+        v = np.minimum(np.maximum(v, cmin), cmin + voxel)
+        bad = ~np.isfinite(v).all(axis=1)
+        v[bad] = m_[bad]
+        verts[sl] = v
+    del axx, ayy, azz, axy, axz, ayz, bx, by, bz, mass, cnt
     t_qef = time.perf_counter()
 
     full = cell_ok.all(axis=1)

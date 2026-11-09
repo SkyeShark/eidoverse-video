@@ -92,10 +92,34 @@ time, then quads and voxel size):
 | explosion | 4.4 s | 270k | 16.4 mm |
 | Sierpinski tetrahedron | 13 s | 1.2 M | 5.5 mm |
 | ultra mandelbulb | 61 s | 3.8 M | 3.9 mm |
+| Menger sponge ('balanced', its default) | 59 s | 6.7 M | 8.0 mm |
+| Menger sponge, `quality='high'` | 160 to 325 s on a loaded machine | 15.1 M | 5.3 mm |
+
+A mesh past ten million quads is heavy: built and rendered once, the
+'high' Menger sponge peaked at 11.6 GB of RAM, near the 12 GB a shared
+GPU slot allows, which is why the example defaults to 'balanced'. Seen
+whole the two look alike; in a close-up the fifth level's 8 mm holes,
+one voxel across at 'balanced', come out skewed or rounded, and 'high'
+makes them square.
+
+The Menger sponge also shows what real light changes. The engine's march
+lit the inner walls of every tunnel (its shade had no shadows), so its
+holes read as see-through lattices. In EEVEE the sun cannot reach down an
+8 to 25 mm tunnel, and the same holes read as dark recesses. The geometry
+is the same: `test_mesh_depth_parity.py` casts every pixel's ray at the
+mesh of a four-level sponge and marches the same ray through its field,
+stopping at the 'high' preset's surfEps (0.0005). They hit the same pixels
+(98.7 %), agree in depth wherever no rim is near, and at the rims match
+within one neighbouring pixel (97.6 %). A march at 'balanced' (surfEps
+0.001) stops a few millimetres short of the rims and agrees with the mesh
+on only 88 % of rim pixels: a coarse march is no measure of the mesh.
 
 The QEF is accumulated straight from the edge arrays and solved in closed
-form per cell, so a mesh of tens of millions of crossings stays inside a
-few GB.
+form per cell, a million cells at a time. Every per-crossing array is
+freed once it is spent, and the corner normals are evaluated a million
+quads at a time, so memory follows the mesh, not its temporaries: the
+mesher peaks at about 220 bytes a crossing (3.3 M crossings in 0.67 GiB,
+where it had needed 1.44 GiB, with the same mesh to the bit).
 
 ### `surface()`: what EEVEE renders
 
@@ -127,8 +151,11 @@ quality preset's `maxSteps`, `surfEps`, `stepScale` and `maxDist`, the
 bounds-box entry and the same hit test. It returns a linear image, so the
 EEVEE render can be judged against the original. Every example's probe
 in `blender/tests/sdf/` renders both side by side. It also compares the
-mesh's silhouette with the march's: intersection over union is 0.97 to
-0.997.
+mesh's silhouette with the march's: intersection over union is 0.96 to
+0.997, 0.944 for the explosion's displaced field and 0.938 for Mr. Hege
+at 1.7 % of the frame. `test_transforms.py` does the same for objects
+turned, tilted and scaled unevenly (0.974 and 0.975), seated on a glossy
+floor and half hidden behind a box.
 
 A spec in the engine's own contract, `map` and `shade` with no
 `surface`, still renders: `shade()` becomes the material. Its colour,
@@ -189,8 +216,16 @@ plus keyword overrides:
 - `materials={2: bpy_material}` gives every face whose material id is 2
   that Blender material. The baked material covers the rest.
 - `time` is the build time in seconds (`uTime`). `cache_dir` (default
-  `//sdf_cache`) receives the atlases and frame caches. `pack_images`
-  packs the atlases into the .blend.
+  `//sdf_cache`) receives the atlases and frame caches. They are named
+  for the object (`sdf.stem`), which Blender keeps unique: a second
+  `EXAMPLES['explosion'].make()` is `explosion.001` and writes its own
+  files, so objects of one example never overwrite each other's atlases
+  or frames. `//` is beside the open .blend, and a harness build saves its
+  .blend only at the end, so until then `//sdf_cache` is the working
+  directory, shared by every build run from there (a note is printed when
+  that happens): in a scene script pass
+  `cache_dir=os.path.join(ctx.out_dir, 'sdf_cache')` so the build keeps
+  its own files. `pack_images` packs the atlases into the .blend.
 - `location`, `rotation`, `scale`, `name`, `scene`, `collection`, and
   `build=False` to build later with `.build(t)`.
 
@@ -216,22 +251,32 @@ pass `voxel=`.
 ```python
 hege = EXAMPLES['mr_hege'].make(cache_dir='//sdf_cache')
 hege.bake(1, 120)                                   # uTime = (frame - 1) / fps
-hege.bake(1, 120, step=2, time_scale=0.5,           # every other frame, half speed,
-          controls=lambda frame, t: {'uRadius': 0.2 + 0.1 * t})   # uniforms keyed per frame
+boom = EXAMPLES['explosion'].make(cache_dir='//sdf_cache')
+boom.bake(1, 120, step=2, time_scale=0.5,           # every other frame, half speed,
+          controls=lambda frame, t: {'uNoiseAmp': -0.5 - 0.1 * t})   # uniforms keyed per frame
 ```
 
-`bake()` re-meshes the SDF once per frame into `<name>_####.ply`. A
+`bake()` re-meshes the SDF once per frame into `<stem>_####.ply`. A
 Geometry Nodes player on the object imports the current frame's file, so
 the saved .blend plays and renders any frame on its own. Frames skipped by
-`step` hold a copy of the previous frame. The surface channels travel as
-PLY vertex properties (`carrier='vertex'`, the default for animation).
-With `carrier='atlas_sequence'` they travel as one atlas set per frame,
-played as image sequences. Each sequence gets a hold copy at
+`step` hold a copy of the previous frame. A frame with no surface inside
+the bounds is an empty mesh: the explosion's radius goes through zero for
+part of its 25 s cycle (from about 16.5 s to 21.5 s at speed 1), and
+`build(t)` at such a time empties the object too. The surface channels
+travel as PLY vertex properties (`carrier='vertex'`, the default for
+animation). With `carrier='atlas_sequence'` they travel as one atlas set
+per frame, played as image sequences. Each sequence gets a hold copy at
 `frame_start - 1`, because an image sequence shows that file before its
-range. The first frame decides which atlas images the sequence carries,
-and its constant channels become the material's values. A channel left
-at the Principled default would show: the default Emission Color is
-white, and the stylized blob glowed white until the constants went in.
+range. The first frame with a surface decides which atlas images the
+sequence carries, and its constant channels become the material's values.
+A channel left at the Principled default would show: the default Emission
+Color is white, and the stylized blob glowed white until the constants
+went in.
+
+Each baked frame is a mesh of its own topology, so EEVEE's motion blur
+blurs only the object's own movement, not the shape's: a tentacle waving
+inside a still object renders sharp (`test_transforms.py` renders the
+shoggoth's frame 2 with and without blur, and they match).
 
 ### SDFs written in Python
 
@@ -259,6 +304,20 @@ def bob(p):
 
 o = create_sdf_object(map=bob, uniforms={'uR': 0.18}, bounds=..., carrier='vertex')
 o.bake(1, 72, controls=lambda frame, t: {'uR': 0.1 + 0.002 * frame})
+```
+
+The TSL shade took a fourth argument, `ctx`, and a Python `shade` or
+`surface` may too: `shade(p, n, mat, ctx)` gets `ctx.ro` (the viewer in
+the local frame), `ctx.rd`, `ctx.softShadow(ro, rd, mint, maxt, k)` and
+`ctx.calcNormal(p)` (also as `soft_shadow` and `calc_normal`), which
+march and differentiate the SDF's own map. In a bake the viewer stands
+straight along each normal, as `cameraPosition` does in the GLSL, so
+`ro = p + n * 1000` and a fresnel term reads head-on:
+
+```python
+def shade(p, n, mat, ctx):
+    lit = ctx.softShadow(p + n * 0.002, S.vec3(0.0, 1.0, 0.0), 0.01, 3.0, 12.0)
+    return S.vec3(0.7, 0.5, 0.3) * (0.3 + 0.7 * lit)[:, None]
 ```
 
 The rest of TSL's builder set has no Python counterpart because Python
@@ -291,7 +350,7 @@ does too.
 | `mr_hege` | Mr. Hege, the octopus man in a wool suit, animated | 10 materials: subsurface skin, wool sheen, metal buckle, coated eyes |
 | `red_shoggoth` | the red shoggoth with the blue angry mask, 48 blinking eyes, animated | from the engine's GLSL backup, like Mr. Hege |
 | `explosion` | the pyroclastic fireball: a displaced sphere pulsing on a 25 s cycle, animated | the displacement rides the material channel; its hot share is emission, its smoky share a lit surface; `make(speed=, noise_freq=, noise_amp=)` |
-| `mandelbulb`, `sierpinski_tetra`, `menger_sponge`, `gyroid` | the screen recipes as placeable solids | coloured by the recipes' palette, which drifts with `uTime`; the gyroid is `cut_by_bounds`, the Menger sponge is 'high' so its fifth level's 8 mm holes open |
+| `mandelbulb`, `sierpinski_tetra`, `menger_sponge`, `gyroid` | the screen recipes as placeable solids | coloured by the recipes' palette, which drifts with `uTime`; the gyroid is `cut_by_bounds`; the Menger sponge is 'balanced' (6.7 M quads, its fifth level's 8 mm holes one voxel across) and `make(quality='high')` opens those holes for close-ups (15.1 M quads, channels per vertex) |
 
 Mr. Hege and the red shoggoth are the two examples the engine's TSL
 migration dropped. They come from its GLSL backup, as written. The only
@@ -301,6 +360,18 @@ did elsewhere. Each helper's material dispatch is also shared by `shade()`
 and `surface()`. The red shoggoth's look comes from `red_shoggoth.png`,
 the meme it was modelled on: red skin, eyes over body and tentacles, the
 blue frowning mask on a strap.
+
+The WebGL engine's own check scenes for the two (`sdf_all_examples`,
+`sdf_hege_closeup` in the production workspace's `_reality_check`) are
+rebuilt in `test_engine_check_scenes.py` from their scripts' numbers and
+set beside the frames the engine rendered. Mr. Hege and the shoggoth
+stand where the engine drew them, at its size (their red skin's centre
+within 8 px of the engine's); the suit's weave rings, the stitched belt
+and the tentacles read the same up close. What differs is light: the
+SDFs now cast shadows on the ground (the engine's could not), the floor
+reflects them as a 0.3-rough floor does rather than as the engine's
+screen-space mirror, and AgX is gentler than the engine's ACES, so the
+navy suit reads a shade lighter.
 
 Every animated example bakes and plays (`test_animated_examples.py`): the
 shoggoth's tentacles wave and its eyes blink, the explosion's radius
@@ -386,7 +457,10 @@ Two contracts, both GLSL in the local frame, with the library and `extra`:
   `density = -ln(1 - alpha) / step` that emits `color · density` per metre.
   The engine's colour was already lit, so there is no scattering. The
   probe marches rays through the written grids and compares them with the
-  engine's march on the GPU: opacity and light agree. `sample_as='albedo'`
+  engine's march on the GPU: opacity and light agree (0.04 % alpha, 0.12 %
+  radiance). In a render, 0.9 m cubes of medium in front of a white
+  backdrop give the closed-form transmittance and emission within 0.3 % in
+  Cycles and 2.2 % in EEVEE (`test_volume_density.py`). `sample_as='albedo'`
   reads the colour as the scattering colour instead, with no emission: a
   smoke whose engine colour was a hand-lit grey then takes the scene's
   light and casts volume shadows.
@@ -451,10 +525,57 @@ and the orbiting camera's fragment main. The engine's WebGPU edition could
 no longer run them, because a GLSL ShaderMaterial renders black there.
 Blender's GPU module runs GLSL, so here they render again. `custom_de` and
 `custom_shade` replace the estimator or the shade (GLSL), and
-`set_uniform('power', 4.0)` changes a uniform. The texture holds what the
-engine's 8-bit sRGB target held: the shader's values, clamped, read as
-sRGB. camelCase options (`cameraOrbitRadius`, `customDe`) are accepted as
-the engine spelled them. `samples` adds jittered passes per frame.
+`set_uniform('power', 4.0)` changes a uniform. The texture is an 8-bit
+sRGB image of the shader's values, clamped, made to read back as the
+engine's did. The WebGL engine tagged its 8-bit render target sRGB, so
+the GPU encoded each value on write and decoded it on read: its texels
+held the shader's values as linear light. That is the engine's look and
+the default (`encoding='linear'`): bright skies behind the fractals, as
+the engine's own smoke-test frames show (the production workspace's
+`sdf_tex_smoketest`, rebuilt in `test_engine_check_scenes.py`: each
+screen within 12 % of the engine's mean brightness). `encoding='srgb'`
+reads the values as display colours instead, as the shadertoy-style
+shaders were written: darker skies, deeper colour, about half the
+engine's brightness (`test_robustness.py` renders both,
+`out/robust_screen_encoding.png`). `update(t)` packs its frame into the
+.blend, so a build saved now and rendered later still shows it.
+camelCase options (`cameraOrbitRadius`, `customDe`) are accepted as the
+engine spelled them. `samples` adds jittered passes per frame.
+`bake(controls=lambda frame, t: {'power': ...})` sets uniforms before each
+frame it renders, as the engine's per-frame `setUniform` calls did.
+
+### The detonation screen — `make_explosion_texture`
+
+The engine's GLSL edition also had `makeExplosionTexture`: one
+self-contained fragment shader that raymarches a mushroom cloud, with its
+own camera, fire ramp, night sky and tone curve, into a texture. The TSL
+migration dropped it (a GLSL shader rendered black on WebGPU) and sent
+blasts to the volumetric examples. Blender runs GLSL, so it runs again
+here, from the backup as written:
+
+```python
+import math
+from eidoblend.sdf import make_explosion_texture
+
+blast = make_explosion_texture(width=640, height=360, camera_pos=(18, 7, 22), camera_target=(0, 5, 0))
+blast.bake(1, 360, controls=lambda frame, t: {'uCamPos': (26 * math.sin(0.1 * t), 7, 26 * math.cos(0.1 * t))})
+monitor.data.materials.append(blast.material(emission_strength=1.2))
+```
+
+The animation is a 15-second loop: the flash and the cap forming at the
+ground (to 0.75 s), the cap climbing its stem (to 6 s), the cloud
+billowing (to 12.75 s), then the fade. `time_scale` and `time_offset` set
+the shader's clock (t × scale + offset), `update_every` holds frames, and
+`set_camera_pos` / `set_camera_target` move its camera, as the engine's
+did. The camera and the cloud live in the shader's own frame (y up): the
+texture is a picture of an explosion for a screen, not an explosion in the
+scene. For a blast in the scene, use the `explosion` example or the
+volumetric ones. `encoding` works as for the recipes. The shader ends in
+its own 1/2.2 gamma, so the engine's sRGB target applied it twice: the
+default shows that pale, washed detonation, as the engine's
+`sdf_explosion_smoketest` frames have it (its sky within 0.08 of the
+engine's), and `encoding='srgb'` shows the shader as it was written, a
+deep night sky and a dark brown cloud.
 
 ## Rhombic dodecahedron voxels
 
@@ -545,13 +666,24 @@ engine's `SdfRaymarchLoader.help()`.
 `blender/tests/sdf/`: `test_library_parity.py` (GLSL against numpy, the
 mesher on exact shapes), `test_examples_compile.py`,
 `test_examples_render.py -- examples=a,b` (EEVEE beside the engine's
-march, silhouette IoU), `test_animated_bake.py` (the saved .blend reopened
+march, silhouette IoU), `test_mesh_depth_parity.py` (every pixel's hit
+distance through the mesh against the field's march: the mesh keeps the
+field's holes), `test_animated_bake.py` (the saved .blend reopened
 and rendered), `test_animated_examples.py` (every animated example baked
 and played), `test_help_recipes.py` (the help()'s samples and patterns),
 `test_volume.py`, `test_volume_density.py` (EEVEE and Cycles against the
 closed-form transmittance and emission), `test_sdf_texture.py`,
-`test_options.py`, `test_rd_parity.py` (deno runs the JS) and
-`test_rhombic_render.py`. Each script's docstring gives its command.
+`test_explosion_texture.py` (the four beats of the detonation, a monitor
+playing its baked sequence), `test_options.py`, `test_rd_parity.py` (deno
+runs the JS), `test_rhombic_render.py`, `test_robustness.py` (two objects
+of one example saved and reopened, the explosion baked through its
+collapse, the screens' encoding, the TSL `ctx` form) and
+`test_transforms.py` (turned, tilted and unevenly scaled solids against
+the march, on a glossy floor behind a box, and a baked frame under
+motion blur) and `test_engine_check_scenes.py` (the engine's own check
+scenes and screen smoke tests from the production workspace, rebuilt in
+EEVEE beside the frames the WebGL engine rendered of them). Each
+script's docstring gives its command.
 
 ## Not yet ported
 
@@ -564,20 +696,24 @@ closed-form transmittance and emission), `test_sdf_texture.py`,
   Volumes). A Python `sample()` / `medium()` has no reference march.
 - The mesher's grid is uniform within the bounds (sparse, not adaptive). A
   shape with millimetre detail over metres needs fine voxels everywhere it
-  has surface.
+  has surface: the Menger sponge's 8 mm holes over 2 m take 15 M quads, and
+  its flat faces keep every quad (coplanar quads are not merged).
 - Distance-estimator fractals carry sheets finer than a voxel, where one
   dual vertex joins several. 1 to 3 % of their edges are shared by four
   quads. They render cleanly, but the mesh is not a 2-manifold.
 - `anisotropy` of `make_sdf_texture` has no per-image counterpart: Blender
   filters images by its own settings. Its `renderTarget`, `material`,
-  `scene` and `camera` were the WebGL plumbing of one render target; here
-  the image is the target.
+  `scene` and `camera` were the WebGL plumbing of one render target, as
+  were `make_explosion_texture`'s; here the image is the target.
 - The engine's `passType`/MRT G-buffer plumbing, the proxy-box depth write,
   the shadow scene and the renderer patch (`registerSdfHelper`'s render and
   renderAsync hooks, `_isPostPassQuadScene`) do not apply: EEVEE renders
   the real geometry into every pass. The magenta placeholder the WebGPU
   engine returned for GLSL specs does not apply either: GLSL is this
   edition's contract.
+- Baked SDF animation has no deformation motion blur: each frame's mesh
+  has its own topology, so EEVEE blurs only the object's own movement.
+  (The engine's march had no motion blur at all.)
 - A baked mesh has no per-pixel camera, so the view-dependent terms of a
   `shade()` (fresnel rims, wrap lighting) become Principled layers chosen
   per example (sheen, coat, subsurface) rather than the hand formula.

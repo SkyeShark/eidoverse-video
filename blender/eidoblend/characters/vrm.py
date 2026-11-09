@@ -20,8 +20,8 @@ pose and every robot_dof table read the same here as in the WebGPU edition. (Pro
 through read_pose, bends the knees about +X; tests/characters/test_robot_walk.py records it.)
 
 Materials: the robot (claude_robot.vrm) is plain glTF PBR (Principled, normal map, ORM), which EEVEE lights as it is:
-episode 3's film used exactly these. The MToon cast keeps the add-on's MToon node setup (look='mtoon'); the 'pbr' look
-for them is NOT YET PORTED (characters.md lists it).
+episode 3's film used exactly these. The MToon cast keeps the add-on's MToon node setup (look='mtoon'); look='pbr'
+renders them through a Principled BSDF (claudesona.look.set_look).
 """
 
 import json
@@ -164,10 +164,10 @@ class VRMHandle:
 
 def load_vrm(path, name=None, location=(0.0, 0.0, 0.0), rotation=0.0, collection=None, scene=None, look='asis'):
     """import a VRM (a cast name or a path) and return its VRMHandle; rotation: heading deg about +Z (0 faces -Y), an
-    Euler in deg, or a Quaternion. look: 'asis' (the file's own materials: PBR for the robot, MToon for the rest) or
-    'mtoon'; 'pbr' for an MToon VRM is not ported yet and raises."""
-    if look not in ('asis', 'mtoon'):
-        raise NotImplementedError(f"load_vrm look={look!r}: only 'asis' / 'mtoon' are ported (characters.md, Not yet ported)")
+    Euler in deg, or a Quaternion. look: 'asis' (the file's own materials: PBR for the robot, MToon for the rest),
+    'mtoon', or 'pbr' (an MToon VRM through a Principled BSDF: claudesona.look.set_look)."""
+    if look not in ('asis', 'mtoon', 'pbr'):
+        raise NotImplementedError(f"load_vrm look={look!r}: one of 'asis', 'mtoon', 'pbr'")
     enable_addon()
     scene = scene or bpy.context.scene
     path = vrm_path(path)
@@ -204,6 +204,9 @@ def load_vrm(path, name=None, location=(0.0, 0.0, 0.0), rotation=0.0, collection
             col.objects.link(o)
     arm.matrix_world = Matrix.Translation(Vector(location)) @ _turn(rotation).to_matrix().to_4x4()
     h = VRMHandle(arm, new, col, path, name)
+    if look == 'pbr':
+        from .claudesona.look import set_look
+        set_look(h, 'pbr')
     h.zero_pose()
     bpy.context.view_layer.update()
     if (scene.view_settings.view_transform, scene.view_settings.look) != view0:

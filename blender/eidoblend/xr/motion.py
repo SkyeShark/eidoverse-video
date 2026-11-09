@@ -172,11 +172,13 @@ def instances_to_objects(source, scene=None, frames=None, step=1, collection=Non
             col.objects.link(ob)
             ob.rotation_mode = 'QUATERNION'
             zero = Matrix.Diagonal((1e-4, 1e-4, 1e-4, 1.0))
-            last = None
+            # while it does not exist: collapsed where it last stood, or (before it first appears) where it will appear,
+            # so it grows in place instead of flying in from the origin between two samples
+            last = d[min(d)]
             for f in fr:
                 m = d.get(f)
                 if m is None:
-                    m = (last or Matrix.Identity(4)) @ zero
+                    m = last @ zero
                 else:
                     last = m
                 _key_matrix(ob, m, f)
@@ -342,9 +344,58 @@ def emission_socket(tree, data_path):
     return None
 
 
+# ------------------------------------------------------------------------------------------------ light units ---
+
+def area_light_size(ob):
+    """(width, height, area) of an area light in metres, its object's scale applied; a disk or an ellipse as the
+    rectangle of the same area (three's RectAreaLight is a rectangle)."""
+    li = ob.data
+    sx, sy, _sz = ob.matrix_world.to_scale()
+    w = li.size * abs(sx)
+    h = (li.size_y if li.shape in ('RECTANGLE', 'ELLIPSE') else li.size) * abs(sy)
+    if li.shape in ('DISK', 'ELLIPSE'):
+        k = math.sqrt(math.pi / 4)
+        return w * k, h * k, math.pi * w * h / 4
+    return w, h, w * h
+
+
+def light_power(ob):
+    """A light's power as the glTF exporter reads it: energy x 2^exposure, and x its area when Normalize is off
+    (Blender then means the energy per unit of the light's area, so a bigger light gives more). W (a sun: W/m2)."""
+    li = ob.data
+    p = li.energy * (2 ** getattr(li, 'exposure', 0.0))
+    if not getattr(li, 'normalize', True):
+        p *= area_light_size(ob)[2] if li.type == 'AREA' else li.area(matrix_world=ob.matrix_world)
+    return p
+
+
+def light_intensity(ob):
+    """The intensity a three.js light takes for a Blender light, in the units the exporter's COMPAT mode writes and
+    three's physical lights read as Blender means them: a sun's W/m2 as lux, a point's or a spot's W / 4 pi as
+    candela (a spot is specified as a point in both), an area light's radiance P / (pi A) as a RectAreaLight's."""
+    li = ob.data
+    p = light_power(ob)
+    if li.type == 'SUN':
+        return p
+    if li.type == 'AREA':
+        return p / (math.pi * max(area_light_size(ob)[2], 1e-12))
+    return p / (4 * math.pi)
+
+
+def light_color(ob):
+    """A light's linear colour with its blackbody temperature folded in (three has no temperature)."""
+    li = ob.data
+    c = list(li.color)
+    if getattr(li, 'use_temperature', False):
+        tc = li.temperature_color
+        c = [c[0] * tc[0], c[1] * tc[1], c[2] * tc[2]]
+    return c
+
+
 def property_tracks(scene, frames=None, step=1):
     """Sample the values glTF cannot carry into tracks the page applies by name:
-    {'lights': {light object: {'t': [...], 'intensity': [...] (glTF units, COMPAT), 'color': [[r, g, b], ...]}},
+    {'lights': {light object: {'t': [...], 'intensity': [...] (light_intensity: the exporter's COMPAT units; an area
+     light's RectAreaLight radiance), 'color': [[r, g, b], ...]}},
      'emission': {material: {'t': [...], 'strength': [...]}}, 'visible': {object: {'t': [...], 'v': [0/1 ...]}}}"""
     sc = scene
     fr = _frames(sc, step, frames)
@@ -373,17 +424,10 @@ def property_tracks(scene, frames=None, step=1):
             sc.frame_set(f)
             t = (f - sc.frame_start) / fps
             for name, ob in lights.items():
-                li = ob.data
-                e = li.energy * (2 ** li.exposure if hasattr(li, 'exposure') else 1.0)
-                inten = e if li.type == 'SUN' else e / (4 * math.pi)
-                c = list(li.color)
-                if getattr(li, 'use_temperature', False):
-                    tc = li.temperature_color
-                    c = [c[0] * tc[0], c[1] * tc[1], c[2] * tc[2]]
                 d = out['lights'].setdefault(name, {'t': [], 'intensity': [], 'color': []})
                 d['t'].append(round(t, 4))
-                d['intensity'].append(round(inten, 5))
-                d['color'].append([round(x, 4) for x in c])
+                d['intensity'].append(round(light_intensity(ob), 5))
+                d['color'].append([round(x, 4) for x in light_color(ob)])
             for name, (m, sock) in mats.items():
                 d = out['emission'].setdefault(name, {'t': [], 'strength': []})
                 d['t'].append(round(t, 4))

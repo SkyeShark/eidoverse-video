@@ -1,12 +1,13 @@
 """The harness scene scripts blender/eidoblend/fabrication/rotary/scenes/rotary.py and rotary_metal.py, run the way the
 runner runs them (setup(ctx)), with a short duration and the outputs in out/scene_scripts/ (the real runner writes
 beside its outputVideo). Checks every frame is keyed and has its stock file, and that the build plays from a saved
-.blend reopened from disk. Nothing renders.
+.blend reopened from disk, its motion-blur sub-frames showing their nearest frame's stock file. Nothing renders.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/fabrication_rotary/test_rotary_scene_scripts.py
 """
 
 import importlib.util
+import math
 import os
 import sys
 
@@ -68,4 +69,15 @@ for name in ('rotary', 'rotary_metal'):
     check(f'scenes/{name}.py: reopened from disk, the stock meshes at frames 1, 18, 36 ({counts} vertices) from '
           f'its file sequence ({vol.frame_duration} files, path {vol.filepath[:22]}...)',
           all(c > 1000 for c in counts) and vol.frame_duration == 36 and vol.filepath.startswith('//'))
+    sub = []
+    for x in (17.6, 18.0, 18.4):
+        sc.frame_set(int(math.floor(x)), subframe=x - math.floor(x))
+        me = stock.evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+        co = [0.0] * (3 * len(me.vertices))
+        me.vertices.foreach_get('co', co)
+        sub.append((len(me.vertices), round(sum(co), 6)))
+    drv = vol.animation_data.drivers.find('frame_offset') if vol.animation_data else None
+    check(f'scenes/{name}.py: reopened, the motion-blur sub-frames 17.6 and 18.4 show frame 18\'s file (the sequence\'s '
+          'nearest-frame driver, a simple expression, survives the save)',
+          len(set(sub)) == 1 and drv is not None and drv.driver.is_simple_expression, f'{[s[0] for s in sub]}')
 print('\n%d FAIL' % len(FAILS) if FAILS else '\nALL PASS')

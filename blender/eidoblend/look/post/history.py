@@ -16,7 +16,11 @@ Output of frame n is on disk before frame n + 1 composites, so a tap reads the f
 emissive sphere's position at frame n - 1, every frame, and again in a single still render of a frame after them).
 Where the earlier frame was never rendered the tap is transparent black (`present` 0) and the effect falls back as
 WebGPU did on its first frame. Cuts (timeline markers that switch cameras, camera jumps, any frames given to cut())
-restart a history.
+restart a history: scene_cuts(scene), camera_jumps(scene) (era looks' camJumped(), found ahead of the render),
+camera_of(scene, frame) (the marker camera Blender renders a frame with), evaluated(scene, ob) (an object as the
+scene's own depsgraph has it after a frame_set, also for a scene that is not the window's).
+Checked as a film renders (tests/post_era/test_film_render.py): an animation render in this session and the saved
+.blend rendered by a fresh Blender from the command line give the frames the stills give.
 
 Disk: half float, ZIP (lossless: a feedback trail must not carry a lossy codec's error from frame to frame), about
 0.62 MB a frame at 960x540 (measured 11-07, after_image's trail; DWAA was 0.5 MB but lossy). prune() deletes frames
@@ -258,30 +262,6 @@ def key_fresh(socket, cuts):
         fc.update()
 
 
-def key_since_cut(socket, cuts, frame_end, owner_tree=None):
-    """Key a float socket to the number of frames since the last cut (0 at a cut, +1 a frame), so a group can tell
-    which history taps belong to the current shot."""
-    cuts = sorted(set(int(c) for c in cuts))
-    try:
-        socket.driver_remove('default_value')
-    except (TypeError, RuntimeError):
-        pass
-    for i, c in enumerate(cuts):
-        end = (cuts[i + 1] - 1) if i + 1 < len(cuts) else int(frame_end)
-        socket.default_value = 0.0
-        socket.keyframe_insert('default_value', frame=c)
-        socket.default_value = float(max(end - c, 0))
-        socket.keyframe_insert('default_value', frame=max(end, c))
-    tree = owner_tree or socket.id_data
-    ad = tree.animation_data
-    if ad and ad.action:
-        for fc in _fcurves(ad.action, tree):
-            if fc.data_path.endswith('default_value') and socket.path_from_id() in fc.data_path:
-                for k in fc.keyframe_points:
-                    k.interpolation = 'LINEAR'
-                fc.update()
-
-
 def _fcurves(action, owner):
     """An action's F-curves for `owner` (5.x layered actions: through the slot's channelbag)."""
     try:
@@ -301,32 +281,62 @@ def _remove_fcurve(action, owner, fc):
         action.fcurves.remove(fc)
 
 
+def _camera_markers(scene):
+    """The timeline markers that bind a camera, in frame order (a camera hidden from renders is skipped, as Blender's
+    camera switch skips it)."""
+    return sorted((m for m in scene.timeline_markers if m.camera is not None and not m.camera.hide_render),
+                  key=lambda m: m.frame)
+
+
+def camera_of(scene, frame):
+    """The camera a render of `frame` uses: with camera markers, the one bound by the last marker at or before the
+    frame, and before the first marker the first marker's camera (Blender's camera switch); without, scene.camera."""
+    ms = _camera_markers(scene)
+    if not ms:
+        return scene.camera
+    cam = ms[0].camera
+    for m in ms:
+        if m.frame <= frame:
+            cam = m.camera
+    return cam
+
+
 def scene_cuts(scene, extra=()):
-    """The frames a history restarts at: the scene's first frame, every timeline marker that switches the camera,
-    and `extra` (U.cut() in the WebGPU passes)."""
+    """The frames a history restarts at: the scene's first frame, every timeline marker that switches to another
+    camera (the first marker's camera is the shot's from the start, so it is not a switch), and `extra` (U.cut() in
+    the WebGPU passes)."""
     cuts = {int(scene.frame_start)}
-    for m in scene.timeline_markers:
-        if m.camera is not None:
+    ms = _camera_markers(scene)
+    prev = ms[0].camera if ms else None
+    for m in ms:
+        if m.camera != prev:
             cuts.add(int(m.frame))
+        prev = m.camera
     cuts.update(int(c) for c in extra)
     return sorted(c for c in cuts if c >= scene.frame_start)
 
 
+def evaluated(scene, ob):
+    """`ob` as the scene's own depsgraph evaluated it (after scene.frame_set): its world matrix, pose and data at
+    that frame. Blender writes the evaluated values back onto the original objects only for the active depsgraph
+    (the window's scene), so a scene that is not the active one must be read this way."""
+    vl = bpy.context.view_layer if scene == bpy.context.scene else scene.view_layers[0]
+    return ob.evaluated_get(vl.depsgraph)
+
+
 def _camera_at(scene, frame):
     """The active camera's (object, world matrix) at `frame`. A camera with no parent, constraints or drivers is
-    read from its own F-curves (no scene evaluation); any other is read after a frame_set."""
+    read from its own F-curves (no scene evaluation); any other is read after a frame_set, from the scene's own
+    depsgraph (evaluated(): right for a scene that is not the active one too)."""
     from mathutils import Euler, Matrix, Quaternion, Vector
-    cam = scene.camera
-    for m in sorted((m for m in scene.timeline_markers if m.camera is not None), key=lambda m: m.frame):
-        if m.frame <= frame:
-            cam = m.camera
+    cam = camera_of(scene, frame)
     if cam is None:
         return None, None
     ad = cam.animation_data
     simple = cam.parent is None and not cam.constraints and not (ad and ad.drivers)
     if not simple:
         scene.frame_set(frame)
-        return cam, cam.matrix_world.copy()
+        return cam, evaluated(scene, cam).matrix_world.copy()
     loc, rot_e, rot_q, scl = Vector(cam.location), Euler(cam.rotation_euler, cam.rotation_mode
                                                           if cam.rotation_mode in ('XYZ', 'XZY', 'YXZ', 'YZX',
                                                                                    'ZXY', 'ZYX') else 'XYZ'), \

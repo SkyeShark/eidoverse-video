@@ -324,9 +324,9 @@ def registry_chain(name='era_probe', frame=8):
                            'rgb_shift': {'amount': 0.004}}, scene_name='post_chain')
     W, H = m['res']
     hud = bpy.data.images.new('hud', W, H, alpha=True, float_buffer=True)
-    px = np.zeros((H, W, 4), np.float32)
-    px[int(H * 0.82):int(H * 0.92), int(W * 0.06):int(W * 0.5)] = (0.9, 0.9, 0.9, 1.0)    # a lower third
-    px[int(H * 0.84):int(H * 0.90), int(W * 0.08):int(W * 0.12)] = (0.02, 0.6, 0.7, 1.0)  # a teal badge on it
+    # a lower third: a dark translucent bar, a teal badge, two lines of text (the overlay a film puts between them)
+    px = SC.hud_pixels(W, H, ['C64 UNDER THIS HUD', 'GLITCH + RGB SHIFT OVER IT'], bar=(0.06, 0.82, 0.62, 0.92),
+                       badge=(0.08, 0.84, 0.12, 0.90))
     hud.pixels.foreach_set(px[::-1].ravel())
     hn = sc.compositing_node_group.nodes.new('CompositorNodeImage')
     hn.image = hud
@@ -358,10 +358,18 @@ def registry_chain(name='era_probe', frame=8):
     check(float(err.mean()) < 1e-4 and off < 1e-3,
           f'era_looks under the overlay: the film above the HUD is the c64 look exactly (mean |blender - numpy| '
           f'{float(err.mean()):.1e}, {off * 100:.3f}% of pixels off by > 0.02)')
+    # the HUD's text is the overlay's own white: the era look under it never touched it
+    tx0, tx1 = int(W * 0.13), int(W * 0.6)
+    txt = a[int(H * 0.83):int(H * 0.91), tx0:tx1, :3].max(axis=2)
+    check(float(txt.max()) > 0.97, f'era_looks under the overlay: the HUD text is its own white (brightest '
+                                   f'{float(txt.max()):.3f})')
+    p_off = os.path.join(OUT, 'chain_era_under_hud.png')
+    SC.render_png(sc, p_off, frame)
     U['glitch_bars']['opacity'].default_value = 0.85
     U['rgb_shift']['amount'].default_value = 0.004
-    FS.sheet([os.path.join(SRC, name, f'src_plain_{frame:04d}.png'), p], os.path.join(OUT, 'chain_sheet.jpg'),
-             cols=2, tile=800, labels=['plain', "era_looks (c64_1982) under a HUD; glitch_bars + rgb_shift over it"])
+    FS.sheet([os.path.join(SRC, name, f'src_plain_{frame:04d}.png'), p_off, p], os.path.join(OUT, 'chain_sheet.jpg'),
+             cols=3, tile=640, labels=['plain', 'era_looks (c64_1982) under a HUD: the HUD crisp over the C64 world',
+                                       'the same, glitch_bars + rgb_shift over the HUD: the signal tears it too'])
 
 
 # ------------------------------------------------------------------------------------------------- cost

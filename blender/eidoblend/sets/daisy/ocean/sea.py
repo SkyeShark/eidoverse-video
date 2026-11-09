@@ -1,7 +1,7 @@
 """ocean/sea.py: THE OCEAN OF FACES (port of eidoverse/sets/ocean/sea.js).
 
-A night sea whose swells are made of faces. The long swell has a period of exactly two bars (3.75 s at 128 BPM), so
-every sung line is one swell rolling in. As a crest passes, the faces in it SURFACE: a sculpted relief rises out of
+A night sea whose swells are made of faces. The long swell rolls in every 3.75 s (MAIN_T); three shorter swells and
+six glitter ripples ride on it. As a crest passes, the faces in it SURFACE: a sculpted relief rises out of
 the water (brow, closed lids, nose, lips, chin: the analytic LAYOUT shared with faces_atlas.py) and its drawn lines
 glow warm from under the surface; as the crest moves on, each face sinks back and dims. Faces are laid out
 anamorphically around the claudesona's eye point (log-polar rows, constant lateral width), so from the rise every face
@@ -23,13 +23,13 @@ How the WebGPU edition maps here:
                                      reads only a few Attribute (Object) values, GPU_MAX_UNIFORM_ATTR; the sea has 16)
     three's TSL hash() (PCG, uint)   exact per-cell lookup tables (float images, Closest): shader nodes have no integer
                                      maths, so the per-face draws (which face, scale, tilt, presence, hue) are computed in
-                                     numpy with the same PCG and fetched texel for texel: the same crowd as the film
+                                     numpy with the same PCG and fetched texel for texel: the same crowd as WebGPU
     texture(atlas).grad(gx, gy)      the atlas's mip chain as separate images sampled with Cubic (Blender's cubic is 4
                                      textureLod(0) taps: no screen derivatives, so no seams at the fract()'d cell
                                      borders) and blended at an LOD computed from the same analytic gradients, with
                                      the screen footprint from the camera (a driver reads its vertical angle)
 
-U: t (film s), reveal (0..1 sweep), glow, relief, calm, moonW (world dir), moonCol, moonI, zen / hor (sky palette,
+U: t (the swells' clock, s), reveal (0..1 sweep), glow, relief, calm, moonW (world dir), moonCol, moonI, zen / hor (sky palette,
 linear), porchW / porch / porchCol (world pos / intensity / colour), winW / win, fog.
 """
 
@@ -42,13 +42,13 @@ import numpy as np
 from .faces_atlas import LAYOUT
 
 G = 9.81
-MAIN_T = 3.75                                                     # two bars at 128 BPM
+MAIN_T = 3.75                                                     # the long swell's period (s)
 # swells in the DESIGN frame (three x, z); +z is landward. [dirX, dirZ, wavelength or None (= main), amplitude,
 # steepness, phase]
 SWELLS = [
-    [-0.40, 1.0, None, 0.30, 0.55, 0.0],                          # the two-bar swell (wavelength ~21.9 m)
+    [-0.40, 1.0, None, 0.30, 0.55, 0.0],                          # the long swell (wavelength ~21.9 m)
     [-0.05, 1.0, 9.2, 0.10, 0.45, 1.7],
-    [-0.80, 1.0, 5.49, 0.055, 0.40, 4.2],                         # one-bar period
+    [-0.80, 1.0, 5.49, 0.055, 0.40, 4.2],                         # half the long swell's period
     [0.35, 1.0, 3.3, 0.030, 0.35, 2.9],
 ]
 RIPPLES = [                                                       # fragment-only glitter ripples

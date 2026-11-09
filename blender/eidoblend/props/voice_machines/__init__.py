@@ -26,15 +26,15 @@ eidoblend.media.screens: update() draws a new frame only when the drawing change
 between hold the last drawing, and after the last one Blender holds it. So the saved .blend plays and renders any
 frame on its own.
 
-    c64.show_scene('sam_1982', (1, 90), t0=cue)   # an era canvas scene (era_screens_*.js) on the tube over a range
+    c64.show_scene('sam_1982', (1, 90))           # an era canvas scene (era_screens_*.js) on the tube over a range
 
 The era-2 kit (the JS kept an identical copy in speakspell, c64, mac1984, dectalk and desktop2001): rng, lin, the
 tiling noise, triplanar, the baked / metal / glow / LED / screen / plastic materials (write_curvature, curvature and
-bump_normal for plastic), pixel_angle (the screens' footprint, measured in the shader), load_glb, EraScreen,
-SceneLayer, Channel, Lamp and the Machine base class; the canvas-2D core (make_canvas -> Canvas2D, rr, speckle) with
-canvas_texture, build_mips and flip_uv; and the geometry builders on BMesh for new props in the same style (rbox,
-keycap, rr_points, loft_rings, rounded_rect_shape + shape_geometry, bake, merge, smooth, planar_uv,
-planar_uv_facing, rounded_polyline + wire, mesh). Guide: tools-guides/voice-machines.md.
+bump_normal for plastic), pixel_footprint and pixel_angle (the screens' footprint, measured in the shader),
+load_glb, EraScreen, SceneLayer, Channel, Lamp and the Machine base class; the canvas-2D core (make_canvas ->
+Canvas2D, rr, speckle) with canvas_texture, build_mips and flip_uv; and the geometry builders on BMesh for new props
+in the same style (rbox, keycap, rr_points, loft_rings, rounded_rect_shape + shape_geometry, bake, merge, smooth,
+planar_uv, planar_uv_facing, rounded_polyline + wire, mesh). Guide: tools-guides/voice-machines.md.
 """
 from __future__ import annotations
 
@@ -209,7 +209,8 @@ NOISE_NAME = 'eido_vm_noise'
 @lru_cache(maxsize=1)
 def noise_data(n: int = 256) -> np.ndarray:
     """The kit's one shared tiling noise: 4 independent periodic fBm channels (R period 4, G 8, B 32, A 64 cells
-    per tile), uint8 (n, n, 4), row 0 at v = 0. Bit-exact with the JS noiseTexture()."""
+    per tile), uint8 (n, n, 4), row 0 at v = 0. Bit-exact with the JS noiseTexture() (its lattices are float32
+    arrays, the arithmetic doubles: the same here)."""
     chans = ((4, 5, 11), (8, 4, 23), (32, 3, 37), (64, 2, 53))
     out = np.empty((n, n, 4), np.uint8)
     idx = np.arange(n, dtype=np.float64)
@@ -218,7 +219,7 @@ def noise_data(n: int = 256) -> np.ndarray:
         lats = []
         for o in range(octaves):
             p = period << o
-            lats.append((p, np.array([r() for _ in range(p * p)], np.float64)))
+            lats.append((p, np.array([r() for _ in range(p * p)], np.float32).astype(np.float64)))
         v = np.zeros((n, n))
         amp, tot = 0.5, 0.0
         for p, L in lats:
@@ -253,6 +254,9 @@ def noise_image():
     img.pixels.foreach_set((data.astype(np.float32) / 255.0).ravel())
     img.pack()
     return img
+
+
+noise_texture = noise_image           # the JS name (noiseTexture)
 
 
 # ------------------------------------------------------------------------------------------- a node graph helper ---
@@ -604,6 +608,9 @@ def plastic_material(name, *, color='#d6ccb0', aged=None, age_amt=0.3, grime='#3
     return m
 
 
+plastic = plastic_material            # the JS name (the kit's plastic(o))
+
+
 def drive_path(socket, idb, id_type, data_path, path='default_value'):
     """Drive socket.<path> by any property of an ID (an AVERAGE driver of one variable: no Python runs)."""
     fc = socket.driver_add(path)
@@ -620,6 +627,22 @@ def drive_path(socket, idb, id_type, data_path, path='default_value'):
     return fc
 
 
+def _pixels_from_centre(nb: Nodes, scene, tc):
+    """|2 wx - 1| W + |2 wy - 1| H: a shading point's distance from the frame's centre in pixels along x plus along
+    y, with W x H the render size (three one-variable drivers on the scene's resolution x, y and percentage: no
+    Python)."""
+    wx, wy, _ = nb.sep(tc.outputs['Window'])
+    res = []
+    for prop in ('resolution_x', 'resolution_y', 'resolution_percentage'):
+        s = nb.value(float(getattr(scene.render, prop)), prop)
+        drive_path(s, scene, 'SCENE', f'render.{prop}')
+        res.append(s)
+    k = nb.div(res[2], 100.0)
+    dx = nb.mul(nb.abs(nb.sub(nb.mul(wx, 2.0), 1.0)), nb.mul(res[0], k))
+    dy = nb.mul(nb.abs(nb.sub(nb.mul(wy, 2.0), 1.0)), nb.mul(res[1], k))
+    return nb.add(dx, dy)
+
+
 def pixel_angle(nb: Nodes, scene, fallback=1.0 / 1500.0):
     """The camera's angle per pixel at the frame's centre (radians: a pixel's size on the image plane one metre
     out), the stand-in for the engine's fwidth() where a shader needs a footprint. Measured in the shader, with no
@@ -631,23 +654,34 @@ def pixel_angle(nb: Nodes, scene, fallback=1.0 / 1500.0):
     with W x H the render size in pixels (three one-variable drivers on the scene's resolution x, y and percentage:
     no Python). It follows camera cuts and animated lenses and reads the same in a blend opened with scripts off.
     Exact for a perspective camera with square pixels and no lens shift; within a pixel of the frame's centre
-    (where both sides vanish) it blends toward `fallback`."""
+    (where both sides vanish) it blends toward `fallback`. An orthographic camera has no angle per pixel: use
+    pixel_footprint, which measures metres per pixel under either."""
     tc = nb.node('ShaderNodeTexCoord')
-    wx, wy, _ = nb.sep(tc.outputs['Window'])
     cam = nb.node('ShaderNodeCameraData')
     vx, vy, vz = nb.sep(cam.outputs['View Vector'])
-    res = []
-    for prop in ('resolution_x', 'resolution_y', 'resolution_percentage'):
-        s = nb.value(float(getattr(scene.render, prop)), prop)
-        drive_path(s, scene, 'SCENE', f'render.{prop}')
-        res.append(s)
-    k = nb.div(res[2], 100.0)
-    dx = nb.mul(nb.abs(nb.sub(nb.mul(wx, 2.0), 1.0)), nb.mul(res[0], k))          # pixels from the centre
-    dy = nb.mul(nb.abs(nb.sub(nb.mul(wy, 2.0), 1.0)), nb.mul(res[1], k))
-    den = nb.add(dx, dy)
+    den = _pixels_from_centre(nb, scene, tc)
     num = nb.div(nb.mul(nb.add(nb.abs(vx), nb.abs(vy)), 2.0), nb.max(nb.abs(vz), 1e-6))
     near_centre = nb.max(nb.sub(1.0, den), 0.0)
     return nb.div(nb.add(num, nb.mul(near_centre, fallback)), nb.max(den, 1.0))
+
+
+def pixel_footprint(nb: Nodes, scene, fallback=1.0 / 1500.0):
+    """The metres one pixel spans at the shading point, across the view: the depth times the pixel angle through a
+    perspective camera, ortho_scale / width through an orthographic one. Measured in the shader like pixel_angle,
+    from the point's camera-space position (x, y) against its Window position: |x| = |2 wx - 1| W f / 2 and
+    |y| = |2 wy - 1| H f / 2 for a footprint f under either projection, so
+
+        footprint = 2 (|x| + |y|) / (|2 wx - 1| W + |2 wy - 1| H)
+
+    Exact for square pixels and no lens shift; within a pixel of the frame's centre it blends toward
+    `fallback` x the view depth (a perspective camera's pixel angle there)."""
+    tc = nb.node('ShaderNodeTexCoord')
+    cx, cy, _ = nb.sep(tc.outputs['Camera'])
+    depth = nb.node('ShaderNodeCameraData').outputs['View Z Depth']
+    den = _pixels_from_centre(nb, scene, tc)
+    num = nb.mul(nb.add(nb.abs(cx), nb.abs(cy)), 2.0)
+    near_centre = nb.max(nb.sub(1.0, den), 0.0)
+    return nb.div(nb.add(num, nb.mul(nb.mul(near_centre, fallback), depth)), nb.max(den, 1.0))
 
 
 def screen_material(name, screen, root, *, power='power', gain='gain', gain_k=1.0, glass='#0b0d0c', rough=0.32,
@@ -665,11 +699,12 @@ def screen_material(name, screen, root, *, power='power', gain='gain', gain_k=1.
     gives the UVs the engine's flipUV made, so the JS windows carry over unchanged, and Blender images are stored
     bottom-up like those UVs, so the image samples upright (the JS's flipV); flip=True flips it for odd UVs.
     parallax (m): the image recessed behind the glass, over face_size (m). barrel: CRT pincushion. scan: scanline
-    count (scan_amt deep), faded where the lines get finer than a pixel (the engine's fwidth, from the camera's
-    pixel angle and tube_height, the UV square's height in metres). corner: the tube mask's rounded corners (fraction
-    of the window). vignette, tint (hex), bleed (horizontal phosphor smear, in u), glow (hex: a faint lit-phosphor
-    floor inside the mask). crt_on: the raster opens from a bright line as power rises. color_node / roughness_node
-    / coat_node: callables (nb, principled) -> socket that replace the glass colour, roughness and coat weight."""
+    count (scan_amt deep), faded where the lines get finer than a pixel (the engine's fwidth, from the pixel's
+    footprint, pixel_footprint, and tube_height, the UV square's height in metres). corner: the tube mask's
+    rounded corners (fraction of the window). vignette, tint (hex), bleed (horizontal phosphor smear, in u), glow
+    (hex: a faint lit-phosphor floor inside the mask). crt_on: the raster opens from a bright line as power rises.
+    color_node / roughness_node / coat_node: callables (nb, principled) -> socket that replace the glass colour,
+    roughness and coat weight."""
     scene = scene or bpy.context.scene
     m, b = new_material(name)
     nb = Nodes(m.node_tree)
@@ -710,13 +745,12 @@ def screen_material(name, screen, root, *, power='power', gain='gain', gain_k=1.
     foot = []
 
     def footprint():
-        """Metres of the screen one image pixel covers: the camera's pixel angle x the depth / the tilt (the stand-in
-        for the engine's screen-space derivatives)."""
+        """Metres of the screen one image pixel covers: the pixel's footprint across the view / the tilt (the
+        stand-in for the engine's screen-space derivatives; perspective or orthographic)."""
         if not foot:
             geo = nb.node('ShaderNodeNewGeometry')
-            cam = nb.node('ShaderNodeCameraData')
             tilt = nb.max(nb.abs(nb.vmath('DOT_PRODUCT', geo.outputs['Normal'], geo.outputs['Incoming'])), 0.25)
-            foot.append(nb.div(nb.mul(cam.outputs['View Z Depth'], pixel_angle(nb, scene)), tilt))
+            foot.append(nb.div(pixel_footprint(nb, scene), tilt))
         return foot[0]
 
     def sample(scr, vec, nearest):
@@ -2068,15 +2102,20 @@ class Machine:
         default the machine's canvas scaled to about 1024 px wide), and mixed over the machine's own drawing by a
         CONSTANT-keyed root property scene_<k> (1 inside the range), through the same glass, raster, scanlines,
         switch-on, power and gain. Before and after the range the machine's own drawing shows. t0: the scene's
-        start in film seconds (DAISY's cues: canvas_scenes.DAISY_CUES); lyrics / cues / bpm / modules / art_fps /
-        prewarm as bake_canvas_scene. source= puts any frames instead (a <name>_0001.png sequence, a still, a
-        movie), as make_screen(source=...). Returns the layer's media Screen."""
+        start in film seconds; by default the time of the range's first frame, so the scene plays from its own
+        beginning wherever the range sits in the film (with a ``cues`` table and no t0, the scene's cue decides).
+        lyrics / cues / bpm / modules / art_fps / prewarm as bake_canvas_scene. source= puts any frames instead (a
+        <name>_0001.png sequence, a still, a movie), as make_screen(source=...). Returns the layer's media
+        Screen."""
         if not self._tubes:
             raise ValueError(f'[{self.name}] has no screen to show a scene on')
         from eidoblend.media import screens
+        from eidoblend.media.timebase import Timebase
         spec = self._tubes[tube]
         scr = spec['screen']
         a, b = (int(frames[0]), int(frames[1])) if frames else (self.scene.frame_start, self.scene.frame_end)
+        if t0 is None and not cues:
+            t0 = Timebase.of(self.scene).t(a)
         k = len(spec['layers'])
         label = scene_name or Path(str(source)).stem
         prefix = re.sub(r'[^A-Za-z0-9_-]+', '_', f'{self.group.name}_{label}')
@@ -2207,10 +2246,11 @@ class Machine:
 
 
 __all__ = ['MACHINES', 'NAMES', 'load_machine', 'build_machine', 'rng', 'lin', 'hex_rgb', 'srgb_to_linear',
-           'noise_data', 'noise_image', 'Nodes', 'drive', 'new_material', 'triplanar', 'baked_material',
-           'metal_material', 'glow_material', 'led_material', 'screen_material', 'pixel_angle', 'load_glb',
+           'noise_data', 'noise_image', 'noise_texture', 'Nodes', 'drive', 'new_material', 'triplanar',
+           'baked_material', 'metal_material', 'glow_material', 'led_material', 'screen_material', 'pixel_angle',
+           'pixel_footprint', 'load_glb',
            'EraScreen', 'SceneLayer', 'Channel', 'Lamp', 'Machine', 'key_prop', 'font', 'font_file', 'js_round',
-           'PACK', 'plastic_material', 'write_curvature', 'CURVATURE', 'curvature', 'bump_normal',
+           'PACK', 'plastic_material', 'plastic', 'write_curvature', 'CURVATURE', 'curvature', 'bump_normal',
            # the canvas-2D core, canvas textures and mips
            'CANVAS_SS', 'css_rgba', 'Gradient', 'Canvas2D', 'make_canvas', 'quad', 'rr', 'speckle', 'build_mips',
            'bleed_alpha', 'CanvasTexture', 'canvas_texture', 'refresh_canvas_texture', 'flip_uv',

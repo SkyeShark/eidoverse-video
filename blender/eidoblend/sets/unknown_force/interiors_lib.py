@@ -27,18 +27,27 @@ The Blender half:
               merge_static (one mesh per material, as mergeStatic), and SetBuilder.emit, which makes the Blender
               objects once: three (x, y, z) -> Blender (x, -z, y), meshes, Empties, lights with Track To targets
   environment equirect_env(W, H, paint): the LDR equirect painted from a direction function, as the set's World
+              (light=False: seen by the camera only); env_levels(world): its prefiltered levels (three's PMREM) for
+              the materials' own env light (ShaderGraph.env_light, MaterialKit(env_light='material'));
+              env_switch(scene, sets): several sets lit by their env as the World in one scene, switched with
+              their cuts (show(visible, frame) keys it); a set's probe always bakes with its set alone
   materials   ShaderGraph + V: TSL written as shader nodes (uv(), position_local(), texture(), mix, smoothstep, ...),
               uniforms as custom properties on the set's root read through one-variable drivers, and
-              material_kit(env) with tri / keyed / envd / pbr / solid, the recipes both interiors use
+              material_kit(env, env_light) with tri / keyed / envd / pbr / solid, the recipes both interiors use
+              (envd: three's envMap at its envMapIntensity, carried by the material's emission in 'material' mode,
+              looked up in the set's own space so the env turns with the set)
   lights      LightNode in three's units: candela -> W = 4 pi cd (pixel parity, measured: a 4 pi W point at 1 m on
               white diffuse renders 0.3145, three's 1 cd renders 1 / pi), lux -> sun strength 1:1; three's spot cone
               and penumbra -> spot_size and an exact spot_blend; distance -> custom cutoff distance (EEVEE's window
               is three's); decay != 2 -> inverse square matched at the light's target
   keys        Keyer: what update() changes, keyed at a frame (LINEAR), through ctx.key when a scene ctx is given
   the set     InteriorSet: what both builds return (a dict of the engine's contract whose keys read as attributes,
-              show / make_camera / eevee_settings / bake_probes / dispose); scene_and_ctx (build(ctx) or
-              build(scene)); make_camera + cam_to_blender (set cams, vertical fov); camera_pixel_angle (fwidth's
-              scale for a camera)
+              show / show_part / make_camera / eevee_settings / bake_probes / dispose, and animate: the set keyed
+              over a frame range on its own clock); scene_and_ctx (build(ctx) or build(scene)); make_camera +
+              cam_to_blender (set cams, vertical fov); camera_pixel_angle (fwidth's scale for a camera)
+  options     a new piece's own use of the sets: state_curve and frame_list (animate's curves and frames),
+              override_canvas + check_art (build(art={canvas: painter, image or array}) redraws any of a set's
+              canvases), media_image (a movie, an image sequence or a still for a screen)
 
 Axes: geometry and the scene graph work in three.js's axes (+Y up), so the sets port number for number; emission
 converts each point once, (x, y, z) -> Blender (x, -z, y), and object transforms likewise (common.from_three).
@@ -2811,6 +2820,124 @@ def scene_and_ctx(first=None, scene=None):
     return scene or bpy.context.scene, ctx
 
 
+# ------------------------------------------------------------------------------------------------ the asset's options
+def frame_list(frames):
+    """animate()'s frames: a (first, last) pair of ints (inclusive), a range, or any iterable of frame numbers."""
+    if isinstance(frames, tuple) and len(frames) == 2 and all(isinstance(v, (int, np.integer)) for v in frames):
+        fs = list(range(int(frames[0]), int(frames[1]) + 1))
+    else:
+        fs = [int(f) for f in frames]
+    if not fs:
+        raise ValueError('animate: no frames')
+    return fs
+
+
+def state_curve(spec, default=0.0):
+    """One state key over time, for animate(): None (its default), a number (held), (start, end) seconds on the
+    set's clock (0 -> 1, linear between them, held outside), (start, end, from, to) (from -> to), or a function of t
+    (an eased ramp: lambda t: smooth(ramp(t, 2.0, 4.0)))."""
+    if spec is None:
+        v = float(default)
+        return lambda t: v
+    if callable(spec):
+        return spec
+    if isinstance(spec, (tuple, list)):
+        if len(spec) == 2:
+            a, b, v0, v1 = float(spec[0]), float(spec[1]), 0.0, 1.0
+        elif len(spec) == 4:
+            a, b, v0, v1 = (float(x) for x in spec)
+        else:
+            raise ValueError(f'state_curve: (start, end) or (start, end, from, to), not {spec!r}')
+        if b <= a:
+            return lambda t: v1 if t >= a else v0
+        return lambda t: v0 + (v1 - v0) * ramp(t, a, b)
+    v = float(spec)
+    return lambda t: v
+
+
+def override_canvas(o, W, H, fonts=None):
+    """A piece's own art for one of a set's canvases (build(art={key: o})), as a W x H Canvas: a painter
+    o(ctx, W, H) drawn on a fresh transparent canvas (the marker kit and the UF fonts work there), an image file
+    (str or Path), a Pillow image, a uint8 RGBA / RGB array (row 0 at the top) or a Canvas. Pictures are resized to
+    W x H (with premultiplied alpha): the set's UVs and the maps it derives from a canvas (a board's ink roughness)
+    are laid out for that size. Plain Python (Pillow + numpy)."""
+    from PIL import Image
+    if isinstance(o, Canvas) and (o.width, o.height) == (int(W), int(H)):
+        return o
+    if callable(o) and not isinstance(o, Canvas):
+        cv, ctx = canvas(fonts or napi(), W, H)
+        o(ctx, W, H)
+        return cv
+    if isinstance(o, Canvas):
+        im = Image.fromarray(o.rgba8(), 'RGBA')
+    elif isinstance(o, (str, os.PathLike)):
+        if not Path(o).is_file():
+            raise FileNotFoundError(f'override_canvas: no image at {o}')
+        im = Image.open(o)
+    elif isinstance(o, Image.Image):
+        im = o
+    else:
+        a = np.asarray(o)
+        if a.dtype != np.uint8 or a.ndim != 3 or a.shape[2] not in (3, 4):
+            raise TypeError('override_canvas: a painter, an image path, a Pillow image, a uint8 RGB(A) array or a '
+                            f'Canvas, not {type(o).__name__}')
+        im = Image.fromarray(a, 'RGBA' if a.shape[2] == 4 else 'RGB')
+    im = im.convert('RGBA')
+    if im.size != (int(W), int(H)):
+        im = im.convert('RGBa').resize((int(W), int(H)), Image.LANCZOS).convert('RGBA')
+    a = np.asarray(im, np.float32) / 255.0
+    cv = Canvas(W, H, fonts)
+    cv.buf[..., :3] = a[..., :3] * a[..., 3:4]
+    cv.buf[..., 3] = a[..., 3]
+    return cv
+
+
+def check_art(art, canvases, where):
+    """build(art=...)'s keys must name the set's canvases (a typo would silently keep the set's own art)."""
+    bad = sorted(set(art or {}) - set(canvases))
+    if bad:
+        raise KeyError(f'{where}: no canvas {", ".join(map(repr, bad))} (canvases: {", ".join(canvases)})')
+
+
+_SEQ_RE = re.compile(r'^(.*?)(\d+)(\.[A-Za-z0-9]+)$')
+
+
+def media_image(path, name=None):
+    """A clip for a screen: a movie (anything Blender's FFmpeg reads), an image sequence (name its first numbered
+    file: the run of consecutive numbers from there, same digit count, is the clip) or a still. -> (bpy Image,
+    {'frames': its length (1 for a still), 'offset': the image user's frame_offset that puts the named file on the
+    clip's first frame, 'size': (w, h) or None when Blender has not read it}). sRGB, not packed (it plays from disk)."""
+    bpy = _bpy()
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f'media_image: no file at {p}')
+    img = bpy.data.images.load(str(p), check_existing=False)
+    if name:
+        img.name = name
+    info = {'frames': 1, 'offset': 0, 'size': None}
+    try:                                     # read while it is one file: a SEQUENCE reports 0 x 0 until it plays
+        w, h = img.size[:]
+        if w > 0 and h > 0:
+            info['size'] = (int(w), int(h))
+    except (RuntimeError, ValueError):
+        pass
+    if img.source == 'MOVIE':
+        info['frames'] = int(img.frame_duration)
+    else:
+        m = _SEQ_RE.match(p.name)
+        if m:
+            pre, num, ext = m.groups()
+            pat = re.compile(re.escape(pre) + r'(\d{%d})' % len(num) + re.escape(ext) + r'$')
+            have = {int(mm.group(1)) for f in p.parent.iterdir() for mm in [pat.match(f.name)] if mm}
+            first = k = int(num)
+            while k in have:
+                k += 1
+            if k - first > 1:
+                img.source = 'SEQUENCE'
+                info['frames'], info['offset'] = k - first, first - 1
+    return img, info
+
+
 class InteriorSet(dict):
     """An interior as the engine returned it: a dict of its contract (group, collection, parts, update, dispose,
     cams, cams_three, mark, focal, env, probe, ...), whose keys also read as attributes (room.parts is
@@ -2818,12 +2945,18 @@ class InteriorSet(dict):
 
     CLIP_END = 1000.0
 
+    STATE = {}                 # the set's update() keys and their defaults (each set says)
+    STATE_ALIASES = {}         # snake_case spellings of the engine's keys (ship_t -> shipT)
+
     def __init__(self, sb, ctx=None):
         super().__init__()
         self.sb, self.ctx, self.keyer = sb, ctx, None
+        self._env_switch = None                  # the shared World (env_switch) when several sets share the scene
+        sb.root_ob['uf_env_on'] = 1.0            # this set's weight in a shared World: show() keys it with the cut
+        _LIVE_SETS.append(weakref.ref(self))     # the sets built in this session: a bake hides the others
         self['group'] = self['root'] = sb.root_ob
         self['collection'] = sb.coll
-        for k in ('update', 'dispose', 'make_camera', 'eevee_settings', 'bake_probes', 'show', 'show_part'):
+        for k in ('update', 'animate', 'dispose', 'make_camera', 'eevee_settings', 'bake_probes', 'show', 'show_part'):
             self[k] = getattr(self, k)
 
     def __getattr__(self, k):
@@ -2854,10 +2987,36 @@ class InteriorSet(dict):
     def update(self, t, state=None, frame=None, ctx=None, key=True):
         raise NotImplementedError
 
+    def animate(self, frames, t0=0.0, fps=None, ctx=None, update_kw=None, **state):
+        """Key the set over `frames` on its own clock: frame f plays time t = t0 + (f - first frame) / fps (fps: the
+        scene's), and each state key given follows its curve (state_curve: a number, (start, end) seconds for
+        0 -> 1, (start, end, from, to), or a function of t); keys not given hold their defaults (STATE). Every frame
+        goes through update(), keyed, so the saved .blend plays on its own. update_kw: more update() arguments (a
+        dict, or a function of the frame). Returns {frame: t}."""
+        fs = frame_list(frames)
+        sc = self.sb.scene
+        fps = float(fps or sc.render.fps / sc.render.fps_base)
+        curves = {}
+        for k, spec in state.items():
+            name = self.STATE_ALIASES.get(k, k)
+            if name not in self.STATE:
+                raise TypeError(f'animate: no state key {k!r} (keys: {", ".join(self.STATE)})')
+            curves[name] = state_curve(spec, self.STATE[name])
+        out = {}
+        for f in fs:
+            t = float(t0) + (f - fs[0]) / fps
+            kw = update_kw(f) if callable(update_kw) else dict(update_kw or {})
+            self.update(t, {k: c(t) for k, c in curves.items()}, frame=f, ctx=ctx, **kw)
+            out[f] = t
+        self._keyer(ctx).finish()
+        return out
+
     def show(self, visible=True, frame=None, ctx=None):
         """Hide the whole set (its lights stop lighting; hide it when it is off screen) or show it; with a frame
         the switch is keyed (CONSTANT: a cut). The first keyed switch also keys the state before it on the frame
-        before (an F-curve holds its first key backwards, which would switch the set off from the film's start)."""
+        before (an F-curve holds its first key backwards, which would switch the set off from the first frame).
+        The set's env follows: its weight in a shared World (env_switch, several sets in one scene) is keyed with
+        the cut, so each set is lit by its own env while it is on screen."""
         if not hasattr(self, '_vis_keyed'):
             self._vis_keyed = set()
         k = self._keyer(ctx) if frame is not None else None
@@ -2873,6 +3032,13 @@ class InteriorSet(dict):
             if frame is not None:
                 k.key(ob, 'hide_render', frame, interpolation='CONSTANT')
                 k.key(ob, 'hide_viewport', frame, interpolation='CONSTANT')
+        root = self.sb.root_ob
+        if frame is not None and ('uf_env_on', root.as_pointer()) not in self._vis_keyed:
+            self._vis_keyed.add(('uf_env_on', root.as_pointer()))
+            k.key(root, '["uf_env_on"]', frame - 1, interpolation='CONSTANT')
+        root['uf_env_on'] = 1.0 if visible else 0.0
+        if frame is not None:
+            k.key(root, '["uf_env_on"]', frame, interpolation='CONSTANT')
 
     def show_part(self, part, visible=True, frame=None, ctx=None):
         """three's part.visible = false, which hides a whole subtree: a part (its name in parts, an object, or a
@@ -2913,10 +3079,10 @@ class InteriorSet(dict):
     def eevee_settings(self, scene=None, reflections=None):
         """The interior's EEVEE settings: fast GI off (indoors it lit floor contacts with the world through the
         walls; the baked probe carries the bounce), shadows on, and the reflections:
-          'env' (default): what the film rendered. It ran with SSR off, so every gloss and chrome in the engine
+          'env' (default): the engine's picture. The sets were made with SSR off, so every gloss and chrome there
                  reflected the set's own painted env (its envMap): the showroom's softboxes in the toaster, the
-                 altar glow in the quiet room's glass. In EEVEE that is ray tracing off: reflections come from the
-                 World, which is the set's env (room.env).
+                 altar glow in the quiet room's glass. In EEVEE that is ray tracing off: the only reflections are
+                 the env's (each material's own env light, or the World under env_light='world').
           'traced': screen-traced reflections (max roughness 0.5): what is on screen reflects (the void in the
                  chrome, the LED wall in the polished stage), and the World where the rays miss."""
         sc = scene or self.sb.scene
@@ -2932,23 +3098,35 @@ class InteriorSet(dict):
         return ee
 
     def bake_probes(self, scene=None):
-        """Bake the set's volume probe (a GPU job: run it through heavy.sh). Returns {probe: seconds}."""
+        """Bake the set's volume probe (a GPU job: run it through heavy.sh). Returns {probe: seconds}. In a scene
+        several sets share (env_switch), the bake sees this set alone, lit by its own env (the others hidden, their
+        env weights 0, any keys on those switches muted for the bake), and the scene is left as it was."""
         from ...look import lighting as LL
         if self.get('probe') is None:
             return {}
-        return LL.bake_light_probes(scene or self.sb.scene, probes=[self['probe']])
+        sc = scene or self.sb.scene
+        others = [s for s in _live_sets(sc) if s is not self]
+        if not others:
+            return LL.bake_light_probes(sc, probes=[self['probe']])
+        with _alone(self, [self] + others):
+            return LL.bake_light_probes(sc, probes=[self['probe']])
 
     def dispose(self):
+        if self._env_switch is not None:
+            _env_switch_drop(self._env_switch, self)
+        _LIVE_SETS[:] = [r for r in _LIVE_SETS if r() is not None and r() is not self]
         self.sb.dispose()
 
 
 # ================================================================================================ environment
-def equirect_env(W, H, paint, name='uf_env', vectorized=True, strength=1.0):
+def equirect_env(W, H, paint, name='uf_env', vectorized=True, strength=1.0, light=True):
     """equirectEnv: an LDR equirect painted from a direction function, as the set's World. paint(dx, dy, dz) gets
     THREE-space directions (+Y up) and returns (r, g, b) in 0..1 sRGB; vectorized=True passes numpy arrays (all the
     pixels at once). The image is laid out for Blender's equirect lookup (each pixel painted with the direction
     Blender's Environment Texture maps it to), so the World shows the same light in the same directions as the
-    engine's envMap. 8-bit sRGB, packed. Returns the World (its image: world['uf_env_image'])."""
+    engine's envMap. 8-bit sRGB, packed. Returns the World (its image: world['uf_env_image']).
+    light=False: the World shows the env to camera rays only and lights nothing (the set's materials carry the env
+    light themselves, as three's per-material envMap did: material_kit(env_light='material'))."""
     bpy = _bpy()
     u = (np.arange(W) + 0.5) / W
     v = (np.arange(H) + 0.5) / H
@@ -2980,10 +3158,263 @@ def equirect_env(W, H, paint, name='uf_env', vectorized=True, strength=1.0):
     bg.inputs['Strength'].default_value = float(strength)
     out = nt.nodes.new('ShaderNodeOutputWorld')
     out.location = (250, 0)
-    nt.links.new(tx.outputs['Color'], bg.inputs['Color'])
+    if light:
+        nt.links.new(tx.outputs['Color'], bg.inputs['Color'])
+    else:
+        lp = nt.nodes.new('ShaderNodeLightPath')
+        lp.location = (-400, 300)
+        sc = nt.nodes.new('ShaderNodeVectorMath')
+        sc.operation = 'SCALE'
+        sc.location = (-150, 0)
+        nt.links.new(tx.outputs['Color'], sc.inputs[0])
+        nt.links.new(lp.outputs['Is Camera Ray'], next(x for x in sc.inputs if x.name == 'Scale'))
+        nt.links.new(sc.outputs[0], bg.inputs['Color'])
     nt.links.new(bg.outputs['Background'], out.inputs['Surface'])
     w['uf_env_image'] = img.name
+    w['uf_env_lights'] = bool(light)
     return w
+
+
+IBL_LEVELS = (0.25, 0.5, 0.75, 1.0)
+
+
+def _equirect_dirs_blender(W, H):
+    """Blender's equirect texel centres (its Environment Texture lookup) -> unit directions in Blender's axes
+    (H * W, 3) and their solid angles (H * W,)."""
+    u = (np.arange(W) + 0.5) / W
+    v = (np.arange(H) + 0.5) / H
+    lat = (v - 0.5) * math.pi
+    phi = (0.5 - u) * 2 * math.pi
+    cl, sl = np.cos(lat)[:, None], np.sin(lat)[:, None]
+    d = np.stack([np.cos(phi)[None, :] * cl, np.sin(phi)[None, :] * cl, np.broadcast_to(sl, (H, W))], -1)
+    dom = np.broadcast_to(np.cos(lat)[:, None] * (math.pi / H) * (2 * math.pi / W), (H, W))
+    return d.reshape(-1, 3), np.ascontiguousarray(dom).reshape(-1)
+
+
+def env_levels(world, levels=IBL_LEVELS, name=None):
+    """three's PMREM of a set's env (an equirect_env World), for its materials' own env light (ShaderGraph.env_light):
+    the sharp map (roughness 0: the env image itself) and, for each roughness r, the radiance averaged over the
+    reflection lobe of GGX with alpha = r^2 (a von Mises-Fisher lobe, kappa = 1 / (2 alpha^2)); the r = 1 level, the
+    one three reads for diffuse irradiance, over the cosine lobe (E / pi). From the 8-bit sRGB texels the engine
+    filtered. Packed float images in Blender's equirect layout: r 0.25 at 128 x 64, the wider ones at 64 x 32.
+    Returns {'levels': [(r, image), ...]}."""
+    bpy = _bpy()
+    img = bpy.data.images[world['uf_env_image']]
+    W, H = img.size
+    px = np.empty(W * H * 4, np.float32)
+    img.pixels.foreach_get(px)                               # an 8-bit image's pixels are its stored sRGB values
+    lin = srgb_to_linear(px.reshape(H, W, 4)[..., :3])
+    nm = name or world.name
+    out = [(0.0, img)]
+    wi, hi = 128, 64                                         # the input, box-filtered from the env's texels (2.8 deg)
+    fy, fx = H // hi, W // wi
+    src = lin[:hi * fy, :wi * fx].reshape(hi, fy, wi, fx, 3).mean((1, 3)).reshape(-1, 3).astype(np.float32)
+    din, dom = (a.astype(np.float32) for a in _equirect_dirs_blender(wi, hi))
+    for r in levels:
+        wo, ho = (128, 64) if r <= 0.25 else (64, 32)
+        dout, _ = _equirect_dirs_blender(wo, ho)
+        dout = dout.astype(np.float32)
+        alpha = max(r * r, 1e-3)
+        kappa = np.float32(1.0 / (2.0 * alpha * alpha))
+        res = np.zeros((len(dout), 3), np.float32)
+        for c0 in range(0, len(dout), 1024):
+            cos = dout[c0:c0 + 1024] @ din.T
+            if r >= 1.0:
+                # three's roughness-1 level (its diffuse irradiance) is a GGX lobe of alpha ~ 1 over the hemisphere
+                # round the normal: the cosine lobe, E / pi (a vMF this wide would pull in the opposite hemisphere)
+                wgt = np.maximum(cos, 0.0) * dom[None, :]
+            else:
+                wgt = np.exp(kappa * (cos - 1.0)) * dom[None, :]
+            res[c0:c0 + 1024] = (wgt @ src) / wgt.sum(1, keepdims=True)
+        rgba = np.concatenate([res.reshape(ho, wo, 3), np.ones((ho, wo, 1))], -1).astype(np.float32)
+        lv = bpy.data.images.new(f'{nm}_r{int(round(r * 100)):03d}', wo, ho, alpha=True, float_buffer=True)
+        lv.colorspace_settings.name = 'Linear Rec.709'
+        if hasattr(lv, 'use_half_precision'):
+            lv.use_half_precision = False
+        lv.pixels.foreach_set(rgba.ravel())                  # row 0 = v 0 (Blender's bottom row), as the env image
+        lv.pack()
+        out.append((float(r), lv))
+    return {'levels': out}
+
+
+def env_switch(scene, sets, name='uf_env_switch'):
+    """Several interiors in one scene, for sets built with env_light='world'. The engine gave every material its own
+    set's envMap, so sets parked side by side in one scene each kept their own light (env_light='material' does
+    that here, under any of their camera-only envs). With the env as the World, Blender has one World per scene
+    and scene.world cannot be keyed, so this World holds every set's env, each weighted by its root's
+    'uf_env_on' (a one-variable driver: no Python runs), and set.show(visible, frame) keys that weight with the
+    set's cut. It becomes the scene's World; returns it. (A set built with env_light='material' joins it for the
+    camera only.) Whatever the mode, a set's bake_probes() bakes with that set alone in the scene.
+
+        room, show = QR.build(scene), SR.build(scene)
+        show.root.location = (60, 0, 0)                                  # park the showroom beside the room
+        L.env_switch(scene, [room, show])
+        room.show(True, frame=1); show.show(False, frame=1)              # the room first ...
+        room.show(False, frame=121); show.show(True, frame=121)          # ... the showroom from frame 121
+        room.bake_probes(); show.bake_probes()
+    """
+    bpy = _bpy()
+    sets = list(sets)
+    for s in sets:
+        if s._env_switch is not None:
+            raise ValueError(f'env_switch: {s.sb.name} already shares a World ({s._env_switch["world"].name})')
+    w = bpy.data.worlds.new(name)
+    w.use_nodes = True
+    nt = w.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputWorld')
+    out.location = (600, 0)
+    bg = nt.nodes.new('ShaderNodeBackground')
+    bg.location = (400, 0)
+    bg.inputs['Strength'].default_value = 1.0
+    sw = {'world': w, 'sets': sets, 'nodes': {}}
+    acc = None
+    lp = None
+    for i, s in enumerate(sets):
+        env = s['env']
+        src_bg = next((n for n in env.node_tree.nodes if n.bl_idname == 'ShaderNodeBackground'), None)
+        strength = float(src_bg.inputs['Strength'].default_value) if src_bg is not None else 1.0
+        if not env.get('uf_env_lights', True):
+            # a set whose materials carry their own env light (env_light='material'): its env is seen, never lights
+            if lp is None:
+                lp = nt.nodes.new('ShaderNodeLightPath')
+                lp.location = (-500, 300)
+            strength = None
+        tx = nt.nodes.new('ShaderNodeTexEnvironment')
+        tx.image = bpy.data.images[env['uf_env_image']]
+        tx.interpolation = 'Linear'
+        tx.location = (-500, -280 * i)
+        sc = nt.nodes.new('ShaderNodeVectorMath')
+        sc.operation = 'SCALE'
+        sc.location = (-200, -280 * i)
+        nt.links.new(tx.outputs['Color'], sc.inputs[0])
+        sock = next(x for x in sc.inputs if x.name == 'Scale')
+        sock.default_value = float(s.root.get('uf_env_on', 1.0))
+        d = sock.driver_add('default_value').driver
+        d.type = 'AVERAGE'
+        var = d.variables.new()
+        var.name = 'on'
+        var.type = 'SINGLE_PROP'
+        var.targets[0].id_type = 'OBJECT'
+        var.targets[0].id = s.root
+        var.targets[0].data_path = '["uf_env_on"]'
+        v = sc.outputs[0]
+        if strength is None or abs(strength - 1.0) > 1e-9:
+            st = nt.nodes.new('ShaderNodeVectorMath')
+            st.operation = 'SCALE'
+            nt.links.new(v, st.inputs[0])
+            k = next(x for x in st.inputs if x.name == 'Scale')
+            if strength is None:
+                nt.links.new(lp.outputs['Is Camera Ray'], k)
+            else:
+                k.default_value = strength
+            v = st.outputs[0]
+        if acc is None:
+            acc = v
+        else:
+            add = nt.nodes.new('ShaderNodeVectorMath')
+            add.operation = 'ADD'
+            add.location = (100, -280 * i)
+            nt.links.new(acc, add.inputs[0])
+            nt.links.new(v, add.inputs[1])
+            acc = add.outputs[0]
+        sw['nodes'][id(s)] = (tx.name, sc.name)
+        s._env_switch = sw
+    if acc is not None:
+        nt.links.new(acc, bg.inputs['Color'])
+    nt.links.new(bg.outputs['Background'], out.inputs['Surface'])
+    scene.world = w
+    return w
+
+
+def _env_switch_drop(sw, s):
+    """A set leaves its shared World (its dispose): its branch goes dark and lets go of its env image; the World
+    goes with the last set."""
+    bpy = _bpy()
+    s._env_switch = None
+    sw['sets'] = [x for x in sw['sets'] if x is not s]
+    try:
+        w = sw['world']
+        nt = w.node_tree
+    except ReferenceError:
+        return
+    names = sw['nodes'].pop(id(s), None)
+    if names:
+        tx, sc = nt.nodes.get(names[0]), nt.nodes.get(names[1])
+        if tx is not None:
+            tx.image = None
+        if sc is not None:
+            sock = next(x for x in sc.inputs if x.name == 'Scale')
+            sock.driver_remove('default_value')
+            sock.default_value = 0.0
+    if not sw['sets']:
+        for sc_ in bpy.data.scenes:
+            if sc_.world == w:
+                sc_.world = None
+        bpy.data.worlds.remove(w)
+
+
+import weakref                             # noqa: E402  (here, below the art-hash marker: the canvas caches stay valid)
+from contextlib import contextmanager      # noqa: E402
+
+_LIVE_SETS = []                            # weak references to the sets built in this session
+
+
+def _live_sets(scene):
+    """The sets built in this session that stand in `scene` now (disposed or deleted ones are dropped)."""
+    out, keep = [], []
+    for ref in _LIVE_SETS:
+        s = ref()
+        if s is None:
+            continue
+        try:
+            root = s.sb.root_ob
+            alive = root.users > 0
+            here = alive and scene.objects.get(root.name) == root
+        except ReferenceError:
+            alive = here = False
+        if alive:
+            keep.append(ref)
+        if here:
+            out.append(s)
+    _LIVE_SETS[:] = keep
+    return out
+
+
+@contextmanager
+def _alone(s, sets):
+    """`s` shown and lit by its own env alone, the other sets hidden, for a bake; everything restored afterwards.
+    The keys on these switches are muted meanwhile (a keyed value would win over the bake's on the next update)."""
+    from bpy_extras import anim_utils
+    paths = ('hide_render', 'hide_viewport', '["uf_env_on"]')
+    saved, muted = [], []
+    try:
+        for x in sets:
+            on = x is s
+            for ob in x.sb.made['objects']:
+                try:
+                    if ob is None or ob.users == 0:
+                        continue
+                except ReferenceError:              # deleted since the build
+                    continue
+                ad = ob.animation_data
+                if ad is not None and ad.action is not None:
+                    cb = anim_utils.action_get_channelbag_for_slot(ad.action, ad.action_slot)
+                    for fc in (cb.fcurves if cb is not None else ()):
+                        if fc.data_path in paths and not fc.mute:
+                            fc.mute = True
+                            muted.append(fc)
+                saved.append((ob, ob.hide_render, ob.hide_viewport, ob.get('uf_env_on')))
+                ob.hide_render = ob.hide_viewport = not on
+            x.root['uf_env_on'] = 1.0 if on else 0.0
+        yield
+    finally:
+        for ob, hr, hv, env_on in saved:
+            ob.hide_render, ob.hide_viewport = hr, hv
+            if env_on is not None:
+                ob['uf_env_on'] = env_on
+        for fc in muted:
+            fc.mute = False
 
 
 # ================================================================================================ shader expressions
@@ -3529,7 +3960,125 @@ class ShaderGraph:
         self.nt.links.new(b.outputs[0], self.out.inputs['Surface'])
         if blend:
             self.mat.surface_render_method = blend
+        self.std = {'bsdf': b, 'color': color, 'roughness': 1.0 if roughness is None else roughness,
+                    'metalness': 0.0 if metalness is None else metalness, 'normal': normal, 'emissive': emissive,
+                    'coat': coat, 'coat_roughness': coat_roughness}
         return b
+
+    # the set's env as three's envMap lit a material ------------------------------------------------------------
+    def env_sample(self, img, d):
+        """An equirect environment (Blender's lookup) toward a world direction d (Blender's axes)."""
+        n = self.node('ShaderNodeTexEnvironment', image=img, interpolation='Linear', projection='EQUIRECTANGULAR')
+        self.put(n.inputs['Vector'], d)
+        return V(self, n.outputs['Color'], 'v')
+
+    def set_space(self, d):
+        """A world direction in the set's own space: turned back by the set root's world rotation (three drivers on
+        it, no Python), so the env turns with the set and a set parked turned keeps its light where its env painted
+        it (three's envMap stayed in world space: turning the group there turned the light away from the set)."""
+        if self.root is None:
+            return self.w(d)
+
+        def make():
+            n = self.node('ShaderNodeCombineXYZ', label='set rotation')
+            for i, ax in enumerate('XYZ'):
+                drv = n.inputs[i].driver_add('default_value').driver
+                drv.type = 'AVERAGE'
+                var = drv.variables.new()
+                var.name = 'r'
+                var.type = 'TRANSFORMS'
+                tg = var.targets[0]
+                tg.id = self.root
+                tg.transform_type = f'ROT_{ax}'
+                tg.transform_space = 'WORLD_SPACE'
+                tg.rotation_mode = 'XYZ'
+            return V(self, n.outputs[0], 'v')
+        rot = self._cached('set_rotation', make)
+        vr = self.node('ShaderNodeVectorRotate', rotation_type='EULER_XYZ', invert=True)
+        self.put(vr.inputs['Vector'], d)
+        self.put(vr.inputs['Rotation'], rot)
+        return V(self, vr.outputs['Vector'], 'v')
+
+    def env_rough(self, env_set, d, rough):
+        """The env prefiltered for a roughness (env_levels): its levels mixed by hat weights; a constant roughness
+        samples only the one or two levels it needs."""
+        levels = env_set['levels']
+        rs = [r for r, _img in levels]
+        r = self.w(rough)
+        acc = None
+        if r.const and isinstance(r.s, float):
+            x = min(max(r.s, rs[0]), rs[-1])
+            for i, (ri, img) in enumerate(levels):
+                lo = rs[i - 1] if i else None
+                hi = rs[i + 1] if i + 1 < len(rs) else None
+                if abs(x - ri) < 1e-9:
+                    wgt = 1.0
+                elif lo is not None and lo < x < ri:
+                    wgt = (x - lo) / (ri - lo)
+                elif hi is not None and ri < x < hi:
+                    wgt = (hi - x) / (hi - ri)
+                else:
+                    wgt = 0.0
+                if wgt > 1e-6:
+                    s = self.env_sample(img, d) * wgt
+                    acc = s if acc is None else acc + s
+            return acc
+        rc = self.clamp(r, rs[0], rs[-1])
+        for i, (ri, img) in enumerate(levels):
+            lo = rs[i - 1] if i else ri - 1.0
+            hi = rs[i + 1] if i + 1 < len(rs) else ri + 1.0
+            wgt = self.min(self.clamp((rc - lo) / (ri - lo)), self.clamp((hi - rc) / (hi - ri)))
+            s = self.env_sample(img, d) * wgt
+            acc = s if acc is None else acc + s
+        return acc
+
+    def dfg(self, rough, ndv):
+        """three's DFGApprox (Karis): the split-sum environment BRDF's scale A and bias B for F0."""
+        r = self.w(rough)
+        rx, ry = 1.0 - r, r * -0.0275 + 0.0425
+        rz, rw = r * -0.572 + 1.04, r * 0.022 - 0.04
+        a004 = self.min(rx * rx, self.exp(self.w(ndv) * (-9.28 * math.log(2.0)))) * rx + ry
+        return a004 * -1.04 + rz, a004 * 1.04 + rw
+
+    def env_light(self, env_set, color, rough, metal, normal=None, coat=None, coat_rough=None):
+        """three's envMap light on a MeshStandard / MeshPhysical material (its EnvironmentNode and the physical
+        lighting model's indirect terms, single scattering), before envMapIntensity: the diffuse albedo
+        (1 - metalness) x the roughness-1 level toward the normal, plus the level for the roughness toward the
+        reflection x (F0 A + B), F0 = mix(0.04, albedo, metalness); a clearcoat adds its own layer. Unoccluded, as
+        in three."""
+        geo = self._geometry()
+        n = self.w(normal) if normal is not None else V(self, geo.outputs['Normal'], 'v')
+        v = V(self, geo.outputs['Incoming'], 'v')            # toward the eye, world (Blender's axes)
+        ndv = self.clamp(self.dot(n, v), 1e-4, 1.0)
+        refl = self.set_space(n * (ndv * 2.0) - v)           # looked up in the set's space: the env turns with it
+        a, b = self.dfg(rough, ndv)
+        col = self.w(color)
+        met = self.w(metal)
+        f0 = self.mix((0.04, 0.04, 0.04), col, met)
+        out = self.env_rough(env_set, refl, rough) * (f0 * a + b)
+        if not (met.const and isinstance(met.s, float) and met.s >= 1.0):
+            out = out + col * (1.0 - met) * self.env_rough(env_set, self.set_space(n), 1.0)
+        cw = self.w(coat) if coat is not None else None
+        if cw is not None and not (cw.const and isinstance(cw.s, float) and cw.s == 0.0):
+            cr = 0.0 if coat_rough is None else coat_rough
+            ca, cb = self.dfg(cr, ndv)
+            out = out + self.env_rough(env_set, refl, cr) * ((ca * 0.04 + cb) * cw)
+        return out
+
+    def add_env_light(self, env_set, intensity):
+        """The material's own env light (env_light x three's envMapIntensity) added to its Principled emission:
+        what its envMap gave it in the engine, whatever the scene's World is."""
+        s = getattr(self, 'std', None)
+        if s is None or not intensity:
+            return None
+        b = s['bsdf']
+        col = s['color'] if s['color'] is not None else tuple(b.inputs['Base Color'].default_value[:3])
+        light = self.env_light(env_set, col, s['roughness'], s['metalness'], s['normal'], s['coat'],
+                               s['coat_roughness']) * float(intensity)
+        em = light if s['emissive'] is None else self.w(s['emissive']) + light
+        self.put(b.inputs['Emission Color'], em)
+        b.inputs['Emission Strength'].default_value = 1.0
+        return light
 
     def basic(self, color, opacity=None, additive=False):
         """MeshBasic -> unlit: an Emission of the colour (strength 1). opacity mixes with a Transparent BSDF, additive
@@ -3561,28 +4110,46 @@ class ShaderGraph:
 # ================================================================================================ the material kit
 class MaterialKit:
     """materialKit: the recipe both interiors use. Every material is its own Blender material named
-    '<prefix>-<name>' (keyed), lists the SET's env intensity it was given (envd: three's envMapIntensity; EEVEE lights
-    every material from the one World and the probes, so it is recorded, mat['uf_env_intensity'], not applied), and
-    gets triplanar breakup of value and roughness from the shared noise (tri), never a flat colour.
+    '<prefix>-<name>' (keyed), is lit by the SET's env at the intensity it was given (envd: three's envMap and
+    envMapIntensity, recorded as mat['uf_env_intensity']), and gets triplanar breakup of value and roughness from the
+    shared noise (tri), never a flat colour.
+
+    env_light: 'material' (the engine's model: each material carries its own env light, env_light x its intensity,
+    from the env's prefiltered levels (env_levels), and the set's World lights nothing) or 'world' (the env is the
+    World and lights everything in the scene at one intensity, with EEVEE's occlusion; the intensity is recorded,
+    not applied).
 
         K = L.MaterialKit(sb, env=world, prefix='ufsr')
         steel = K.pbr('steel', L.acg('Metal027'), tint=(0.55, 0.56, 0.6), tile=1 / 0.8, rough=0.9, metal=1)
         black = K.solid('black', (0.012, 0.012, 0.014), rough=0.8, vary=0.3, scale=1.5)
-        m, g = K.new('custom'); n = K.tri(g, 3.0); g.standard(color=g.vec3(0.8) * (n.z * 0.1 + 0.95))
+        m, g = K.new('custom'); n = K.tri(g, 3.0); g.standard(color=g.vec3(0.8) * (n.z * 0.1 + 0.95)); K.envd(m, 0.7)
     """
 
-    def __init__(self, sb, env=None, prefix='uf', track=None):
+    ENV_LIGHTS = ('material', 'world')
+
+    def __init__(self, sb, env=None, prefix='uf', track=None, env_light='world'):
+        if env_light not in self.ENV_LIGHTS:
+            raise ValueError(f"material_kit: env_light={env_light!r} (want 'material' or 'world')")
         self.sb, self.env, self.prefix = sb, env, prefix
+        self.env_light = env_light
         self.NOISE = noise_texture()
         self._track = track
         self.n = 0
+        self._graphs = {}
+        self.env_set = None
+        if env is not None and env_light == 'material':
+            self.env_set = env_levels(env)
+            for _r, img in self.env_set['levels'][1:]:
+                sb.track(img)
 
     def new(self, name):
         """(material, ShaderGraph) for a custom recipe."""
         bpy = _bpy()
         m = bpy.data.materials.new(f'{self.prefix}-{name}')
         self.keyed(m, name)
-        return m, ShaderGraph(m, self.sb.root_ob, self.sb.scene)
+        g = ShaderGraph(m, self.sb.root_ob, self.sb.scene)
+        self._graphs[m.as_pointer()] = g
+        return m, g
 
     def tri(self, g, scale):
         """object-space triplanar noise (vec4: four independent fBm channels), positionLocal * scale, weighted by
@@ -3604,8 +4171,13 @@ class MaterialKit:
         return m
 
     def envd(self, m, i=1.0):
+        """three's envd(m, i): the set's env lights the material at intensity i (call it after the recipe's
+        standard()): with env_light 'material' its emission carries env_light x i."""
         if self.env is not None:
             m['uf_env_intensity'] = float(i)
+            g = self._graphs.get(m.as_pointer())
+            if self.env_set is not None and g is not None:
+                g.add_env_light(self.env_set, float(i))
         return m
 
     @staticmethod
@@ -3635,7 +4207,9 @@ class MaterialKit:
         r0 = g.texture(set['roughnessMap'], tuv).r if 'roughnessMap' in set else g.float(0.6)
         rgh = g.clamp(r0 * float(rough) + float(rough_add) + (n.y - 0.5) * 0.16, 0.03, 1.0)
         nrm = g.normal_map(g.texture(set['normalMap'], tuv).rgb, n_scale) if 'normalMap' in set else None
-        g.standard(color=col, roughness=rgh, metalness=float(metal), normal=nrm, **self._extra(extra))
+        # a set with a metalness map: metalnessNode = its red channel x metal (the AmbientCG sets here have none)
+        met = g.texture(set['metalnessMap'], tuv).r * float(metal) if 'metalnessMap' in set else float(metal)
+        g.standard(color=col, roughness=rgh, metalness=met, normal=nrm, **self._extra(extra))
         return self.envd(m, env_i)
 
     def solid(self, name, col, rough=0.5, rough_var=0.25, metal=0.0, vary=0.2, scale=2.0, env_i=1.0, physical=False,
@@ -3652,9 +4226,10 @@ class MaterialKit:
         return self.envd(m, env_i)
 
 
-def material_kit(sb, env=None, prefix='uf', track=None):
-    """interiors_lib.js's materialKit(THREE, {env, prefix, track}) -> the kit (tri, keyed, envd, pbr, solid)."""
-    return MaterialKit(sb, env=env, prefix=prefix, track=track)
+def material_kit(sb, env=None, prefix='uf', track=None, env_light='world'):
+    """interiors_lib.js's materialKit(THREE, {env, prefix, track}) -> the kit (tri, keyed, envd, pbr, solid);
+    env_light 'material' or 'world' (MaterialKit)."""
+    return MaterialKit(sb, env=env, prefix=prefix, track=track, env_light=env_light)
 
 
 def hide_from_probes(mat, volume=True, sphere=False):

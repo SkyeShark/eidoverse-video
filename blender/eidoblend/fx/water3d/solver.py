@@ -186,23 +186,22 @@ class WaterSolver:
                 col[k] += '.0'
         self.kInitPhi = self._kernel(K.INIT_PHI, extra=col)
         self.kExtrap = self._kernel(K.EXTRAP, samplers=['phiTex', 'src'])
-        ex = o.get('extrapolation', 'phi')
-        if ex not in ('phi', 'bfs'):
-            raise ValueError(f"water3d: extrapolation must be 'phi' or 'bfs', not {ex!r}")
-        if ex == 'bfs':
-            self.kExtrapInit = self._kernel(K.EXTRAP_BFS_INIT, samplers=['phiTex', 'src'])
-            self.kExtrapBfs = self._kernel(K.EXTRAP_BFS, samplers=['src'])
+        self._check_solver_options()
+        # both extrapolations and both redistancing kernels are built, so a scene can switch the solver between
+        # frames (WaterSim.set_solver: the engine's for a pour, DROP_SOLVER for a body dropped onto the pool)
+        self.kExtrapInit = self._kernel(K.EXTRAP_BFS_INIT, samplers=['phiTex', 'src'])
+        self.kExtrapBfs = self._kernel(K.EXTRAP_BFS, samplers=['src'])
         self.kAdvectVel = self._kernel(K.ADVECT_VEL, samplers=['velA', 'phiTex'], trace=True, solid=True,
                                        emit=True, push=[(F, 'uDt'), (F, 'uGravity'), (F, 'uVelDamping')])
         self.kPhiFwd = self._kernel(K.PHI_FWD, samplers=['velA', 'src'], trace=True, push=[(F, 'uDt')])
         self.kPhiCorr = self._kernel(K.PHI_CORR, samplers=['velA', 'src', 'phiHat'], trace=True, emit=True,
                                      push=[(F, 'uDt')])
-        scheme = o.get('reinit_scheme', 'central')
-        if scheme not in ('central', 'godunov'):
-            raise ValueError(f"water3d: reinit_scheme must be 'central' or 'godunov', not {scheme!r}")
-        self.kReinit = self._kernel(K.REINIT_GODUNOV if scheme == 'godunov' else K.REINIT, samplers=['src'])
+        self.kReinitGodunov = self._kernel(K.REINIT_GODUNOV, samplers=['src'])
+        self.kReinitCentral = self._kernel(K.REINIT, samplers=['src'])
         ext = o.get('extend_phi_into_solids')
-        self.extend_phi = bool(ext) if ext is not None else (self.solidTex is not None or self.NSPH > 0)
+        # on by default with baked colliders (a basin's walls), into the static solids only: spheres keep the
+        # engine's phi (see PHI_SOLID_EXTEND), so walls-only and sphere scenes run the engine's solver exactly
+        self.extend_phi = bool(ext) if ext is not None else (self.solidTex is not None)
         if self.extend_phi:
             self.kPhiExt1 = self._kernel(K.PHI_SOLID_EXTEND, samplers=['src'], solid=True, extra={'PASS1': 1})
             self.kPhiExt2 = self._kernel(K.PHI_SOLID_EXTEND, samplers=['src'], solid=True, extra={'PASS1': 0})
@@ -216,6 +215,23 @@ class WaterSolver:
         self._build_multigrid()
         self._build_volume()
         self._kernels_built = True
+
+    def _check_solver_options(self):
+        o = self.o
+        o.setdefault('extrapolation', 'phi')
+        o.setdefault('reinit_scheme', 'central')
+        if o['extrapolation'] not in ('phi', 'bfs'):
+            raise ValueError(f"water3d: extrapolation must be 'phi' or 'bfs', not {o['extrapolation']!r}")
+        if o['reinit_scheme'] not in ('central', 'godunov'):
+            raise ValueError(f"water3d: reinit_scheme must be 'central' or 'godunov', not {o['reinit_scheme']!r}")
+
+    def set_solver(self, reinit_every=None, reinit_scheme=None, extrapolation=None, reinit_iters=None):
+        """Switch the redistancing and the velocity extrapolation from the next substep (every kernel is built)."""
+        for k, v in (('reinit_every', reinit_every), ('reinit_scheme', reinit_scheme),
+                     ('extrapolation', extrapolation), ('reinit_iters', reinit_iters)):
+            if v is not None:
+                self.o[k] = v
+        self._check_solver_options()
 
     def _build_multigrid(self):
         """Paper section 3.7: levels while every dim halves exactly and stays >= 4. Level 0 smooths prsA/prsB
@@ -431,7 +447,7 @@ class WaterSolver:
             self._log_config()
         self._upload_arrays()
         # 1) velocity extrapolation into air: pass pairs velA -> velB -> velA
-        if o.get('extrapolation', 'phi') == 'bfs':
+        if o['extrapolation'] == 'bfs':
             # seed (velA -> velB), then an odd number of passes so the result lands back in velA
             self._run(self.kExtrapInit, {'phiTex': self.phi_tex, 'src': self.velA}, self.velB)
             n = int(o['extrapolation_passes'])
@@ -447,10 +463,11 @@ class WaterSolver:
         # 2) reinitialisation (periodic; off by default)
         if (not o.get('__no_reinit') and int(o['reinit_every']) > 0
                 and self.frame_count % int(o['reinit_every']) == 0 and self.frame_count > 0):
+            k_reinit = self.kReinitGodunov if o['reinit_scheme'] == 'godunov' else self.kReinitCentral
             for _ in range(0, int(o['reinit_iters']), 2):
                 for _pass in range(2):
                     src, dst = (self.phiA, self.phiB) if self.phi_in_a else (self.phiB, self.phiA)
-                    self._run(self.kReinit, {'src': src}, dst)
+                    self._run(k_reinit, {'src': src}, dst)
                     self.phi_in_a = not self.phi_in_a
         # volume control: sensor + controller every vc_every substeps, the loop closed on the GPU
         if o['volume_control'] and self.frame_count % int(o['vc_every']) == 0:

@@ -1,0 +1,115 @@
+{
+ "top": {
+  "view": "top",
+  "resolution": [
+   540,
+   540
+  ],
+  "tile_extent_m": [
+   8000.0,
+   8000.0
+  ],
+  "z_origin_m": 530.27001953125,
+  "camera": [
+   0.0,
+   0.0,
+   32000.0
+  ],
+  "target": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "up": "north",
+  "lens_mm": 146.93878173828125,
+  "sun_compass_deg": 315.0,
+  "sun_dir": [
+   -0.5591532588005066,
+   0.5591532588005066,
+   0.6121235489845276
+  ],
+  "sun_elevation_deg": 37.74320827374035,
+  "sky": {
+   "world": "earth",
+   "hours": 15.5,
+   "clouds": "cumulus",
+   "shadows": false
+  }
+ },
+ "aerial": {
+  "view": "aerial",
+  "resolution": [
+   960,
+   540
+  ],
+  "tile_extent_m": [
+   8000.0,
+   8000.0
+  ],
+  "z_origin_m": 530.27001953125,
+  "camera": [
+   -3510.271,
+   -9644.389,
+   10317.987
+  ],
+  "target": [
+   -382.584,
+   -1051.14,
+   54.643
+  ],
+  "lens_mm": 35.0,
+  "azimuth_deg": 200,
+  "elevation_deg": 45.0,
+  "sun_left_of_view_deg": 70.0,
+  "sun_dir": [
+   -0.6057589650154114,
+   0.5082920789718628,
+   0.6121235489845276
+  ],
+  "sun_elevation_deg": 37.74320827374035,
+  "sky": {
+   "world": "earth",
+   "hours": 15.5,
+   "clouds": "cumulus",
+   "shadows": false
+  }
+ },
+ "eye": {
+  "view": "eye",
+  "resolution": [
+   960,
+   540
+  ],
+  "tile_extent_m": [
+   8000.0,
+   8000.0
+  ],
+  "z_origin_m": 530.27001953125,
+  "camera": [
+   105.024,
+   -84.509,
+   92.702
+  ],
+  "ground_z": 91.002197265625,
+  "target": [
+   555.299,
+   -2964.472,
+   140.308
+  ],
+  "lens_mm": 50.0,
+  "sun_left_of_view_deg": 70.0,
+  "earth_curvature_R_eff_m": 7432843.600000001,
+  "sun_dir": [
+   0.7759321331977844,
+   -0.15242715179920197,
+   0.6121235489845276
+  ],
+  "sun_elevation_deg": 37.74320827374035,
+  "sky": {
+   "world": "earth",
+   "hours": 15.5,
+   "clouds": "cumulus",
+   "shadows": false
+  }
+ }
+}

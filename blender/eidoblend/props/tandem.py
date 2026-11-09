@@ -33,10 +33,14 @@ Blender translations:
   the spokes   the engine smeared them through the shutter (it had no motion blur): trailing vertices swing back by the
                angle the wheel turns while the shutter is open, and their coverage falls to wire width / swept arc. Here
                a Geometry Nodes rotation and the spoke material do the same from the keyed 'sweep'; the root property
-               'spoke_smear' (1 / 0) switches it, and build() sets it off when the scene renders EEVEE motion blur,
-               which blurs the keyed wheels for real (smear and motion blur together would blur twice).
+               'spoke_smear' (1 / 0, set by set_spoke_smear) switches it, and build() sets it off when the scene
+               renders EEVEE motion blur, which blurs the keyed wheels for real (smear and motion blur together would
+               blur twice).
   pose_rider   writes the VRM's normalized humanoid rotations (characters.VRMHandle.write_pose) and keys them; the
-               engine's spring pre-roll is the characters family's bake_springs, run over the film after posing.
+               engine's spring pre-roll runs in bake_rider_springs, over the film once every frame is posed.
+  the teapot   the glaze's crazing fades as the camera's pixel grows past its line width (three's screen derivatives
+               of the view position); here the pixel is the view depth times the camera's angle per pixel, measured
+               in the shader (the voice-machine kit's pixel_angle), so it holds for any camera, cut or lens.
 """
 
 from __future__ import annotations
@@ -294,7 +298,8 @@ PART_NODES = {
 
 class Tandem(K.Machine):
     """tandem.build()'s result: group, root (the GLB's 'tandem' node: the bike frame), parts, layout, extras, state,
-    chains {timing, drive} (Belt), update(t, state), set_pedal_pitch(pedal, crank_angle, pitch), dispose()."""
+    chains {timing, drive} (Belt), update(t, state), set_pedal_pitch(pedal, crank_angle, pitch), set_spoke_smear(on),
+    dispose()."""
     name = 'tandem'
 
     def _update(self, t, st):
@@ -348,6 +353,23 @@ class Tandem(K.Machine):
             del _RIGS[k]
         super().dispose()
 
+    def set_spoke_smear(self, on, t=None, frame=None, ctx=None, key=False):
+        """Switch the spoke smear: the root property 'spoke_smear' (1 smears the spokes through the shutter, 0 leaves
+        them sharp for EEVEE motion blur). A bare property write from Python reaches the Geometry Nodes and the spoke
+        material only at the next frame change; this tags the bike so it shows at once. key=True keys the switch
+        (CONSTANT) at the frame of t / frame (or the current frame): a shot with motion blur after one without."""
+        g = self.group
+        g['spoke_smear'] = 1.0 if on else 0.0
+        g.update_tag()
+        for w in (self.parts['front_wheel'], self.parts['rear_wheel']):
+            for o in w.children_recursive:
+                if o.type == 'MESH' and o.modifiers.get('spoke_smear') is not None:
+                    o.update_tag()
+        if key:
+            ctx = ctx or self.ctx
+            f = frame if frame is not None else (self.frame_at(t, ctx) if t is not None else self.scene.frame_current)
+            self.keyer.key(g, '["spoke_smear"]', frame=f, ctx=ctx, interpolation='CONSTANT')
+
     def set_pedal_pitch(self, pedal, crank_angle, pitch, t=None, frame=None, ctx=None, key=True):
         """tandem.js setPedalPitch: the pedal pitched by a sole (its rotation = crank_angle - pitch), keyed at the
         frame of t / frame (or the current frame)."""
@@ -363,7 +385,7 @@ def build(glb=None, name='tandem_1896', collection=None, scene=None, location=(0
           ctx=None):
     """tandem.js build(THREE, opts): opts.glb, another GLB as a path or as its bytes (the engine's Uint8Array /
     ArrayBuffer, e.g. ASSETS.tandem); without it the pack's tandem_1896/tandem.glb. spoke_smear: True / False, or
-    None = on unless the scene renders EEVEE motion blur (the root property 'spoke_smear' switches it any time).
+    None = on unless the scene renders EEVEE motion blur (bike.set_spoke_smear(on) switches it any time, keyed or not).
     ctx: a scene's ctx (its scene, and the default route of every key update / pose_rider make). Returns a Tandem."""
     scene = scene or (ctx.scene if ctx is not None else bpy.context.scene)
     tmp = None
@@ -1033,22 +1055,14 @@ def _teapot_material(name, color, scene):
     b = K.principled(nb)
     P = nb.texcoord('Object')
     _px, _py, pz = nb.sep(P)
-    # the camera's pixel footprint at the surface (three's max(|dFdx(positionView)|, |dFdy(positionView)|))
-    pix = nb.new('ShaderNodeValue')
-    pix.label = 'pixel angle'
-    pix.outputs[0].default_value = 1.0 / 1500.0
-    d = pix.outputs[0].driver_add('default_value').driver
-    d.type = 'SCRIPTED'
-    for vn, path in (('a', 'camera.data.angle'), ('rx', 'render.resolution_x'), ('ry', 'render.resolution_y'),
-                     ('p', 'render.resolution_percentage')):
-        v = d.variables.new()
-        v.name, v.type = vn, 'SINGLE_PROP'
-        v.targets[0].id_type = 'SCENE'
-        v.targets[0].id = scene
-        v.targets[0].data_path = path
-    d.expression = '2*tan(a/2)*100/(max(rx, ry)*p)'
+    # the camera's pixel footprint at the surface (three's max(|dFdx(positionView)|, |dFdy(positionView)|)): the view
+    # depth times the camera's angle per pixel, measured in the shader by the voice-machine kit's pixel_angle (no
+    # driver on scene.camera, which stays invalid when the teapot is built before the scene has a camera: the crazing
+    # then never faded with distance); it follows camera cuts and lens changes
+    from .voice_machines import Nodes, pixel_angle
+    pa = pixel_angle(Nodes(t), scene)
     cam = nb.new('ShaderNodeCameraData')
-    px = nb.mul(cam.outputs['View Z Depth'], pix.outputs[0])
+    px = nb.mul(cam.outputs['View Z Depth'], pa)
 
     def craze(scale, offset, width, f0, f1):
         vor = []

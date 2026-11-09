@@ -97,7 +97,11 @@ def load_clip(h, slot, scene=None):
     scene = scene or bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
     key = (h.arm.name, slot, fps)
-    if key in _CACHE and _CACHE[key].action.name in bpy.data.actions:
+    try:
+        hit = key in _CACHE and _CACHE[key].action.name in bpy.data.actions
+    except ReferenceError:      # the action was removed (a file reloaded)
+        _CACHE.pop(key, None); hit = False
+    if hit:
         return _CACHE[key]
     path = vrma_path(slot)
     arm = h.arm
@@ -166,9 +170,9 @@ def play_vrma(h, clip, t=0.0, loop=True, until=None, fade=0.0, time_scale=1.0, p
         strip.repeat = 1.0
         strip.extrapolation = 'HOLD_FORWARD'
     strip.blend_type = 'REPLACE'
+    strip.use_auto_blend = False
     if fade > 0:
         strip.blend_in = fade * fps
-    strip.use_auto_blend = False
     return strip
 
 

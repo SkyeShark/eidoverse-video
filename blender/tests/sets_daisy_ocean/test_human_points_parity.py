@@ -60,7 +60,7 @@ me.attributes['center'].data.foreach_get('vector', cen)
 cen = cen.reshape(-1, 3)[::4]
 b3 = np.stack([cen[:, 0], cen[:, 2], -cen[:, 1]], 1)                  # Blender -> three
 d = np.linalg.norm(b3 - jc, axis=1)
-ck.check('build_apparitions puts the film\'s points on its mesh (holder-local)', d.max() < 1e-4,
+ck.check('build_apparitions puts the WebGPU edition\'s points on its mesh (holder-local)', d.max() < 1e-4,
          f'max {d.max() * 1000:.4f} mm (float32 attribute)')
 ok = ck.summary()
 with open(os.path.join(C.OUT, 'test_human_points_parity.json'), 'w') as f:

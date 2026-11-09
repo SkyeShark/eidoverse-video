@@ -50,7 +50,8 @@ if A.get('phase', '1') == '1':
     exr0 = os.path.join(CACHE, 'blob_anim_0000_base.exr')
     C.check('atlas sequence with its hold copy', os.path.exists(exr0) and
             os.path.exists(os.path.join(CACHE, 'blob_anim_0005_normal.exr')), 'blob_anim_0000..0005 *.exr')
-    cam = C.camera((0.9, -4.6, 1.35), (0.45, 0.0, 1.0), lens=45)
+    # Mr. Hege stands 3 m tall and his head sway is the motion to see: this frame holds z = -0.2 .. 3.3 m
+    cam = C.camera((0.9, -7.2, 1.6), (0.45, 0.0, 1.45), lens=40)
 
     def verts_at(obj, f):
         sc.frame_set(f)

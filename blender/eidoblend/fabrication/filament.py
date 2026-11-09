@@ -231,6 +231,9 @@ def _tube_material(name, color, opacity):
     bsdf.inputs['Base Color'].default_value = color_linear(color) + (1.0,)
     bsdf.inputs['Roughness'].default_value = .34
     bsdf.inputs['Metallic'].default_value = 0.0
+    # filament.js draws the tube FrontSide: the far wall's inside never shows through the milky near wall (drawn
+    # double-sided, a blended tube shows its ring seams as notches along the silhouette)
+    m.use_backface_culling = True
     if opacity < 1:
         bsdf.inputs['Alpha'].default_value = float(opacity)
         m.surface_render_method = 'BLENDED'
@@ -293,6 +296,7 @@ class PTFETube:
         for i, p in enumerate(nxt):
             self._slot(f'P{i}').value = tuple(float(x) for x in p)
         self._slot('N0').value = tuple(float(x) for x in self._initial)
+        self.mesh.update_tag()                  # (a Python-set modifier input does not tag its object in 5.2)
         return self
 
     def normal_at(self, u):
@@ -318,6 +322,7 @@ class PTFETube:
         n = n - t * float(n @ t)
         self._initial = n / np.linalg.norm(n)
         self._slot('N0').value = tuple(float(x) for x in self._initial)
+        self.mesh.update_tag()
 
     @property
     def points(self):
@@ -352,6 +357,9 @@ class PTFETube:
                 bpy.data.materials.remove(mat)
         except ReferenceError:
             pass
+        group = bpy.data.node_groups.get('eido.ptfe_tube')         # shared by every tube: goes with the last one
+        if group is not None and group.users == 0:
+            bpy.data.node_groups.remove(group)
 
 
 def create_ptfe_tube(**options):

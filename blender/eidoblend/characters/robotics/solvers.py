@@ -5,8 +5,8 @@ kit's native authoring axes (Blender's +Z up, metres, radians): the WebGPU editi
 +Y up, this edition uses them as they are.
 
     grasp_values(g, t)              grasp.js graspValues: interaction.json mobile.hand.grasp at phase t (0..1)
-    scara                           scara.js: L1, L2, Z, GRIP_TCP (gripTCP), LIMITS (limits), forward(q, tcp),
-                                    inverse(x, y, z, yaw, tcp, seed, min_z), demo(t)
+    scara                           scara.js: L1, L2, Z, grip_tcp (gripTCP), limits, forward(q, tcp),
+                                    inverse(x, y, z, yaw, tcp, seed, min_z), demo(t); GRIP_TCP / LIMITS are aliases
     SerialArm(report, tip)          serial_arm.js: the A650's chain from metadata/articulated.json; forward(q,
                                     with_jacobian) -> 4x4 rows (or {'transform', 'jacobian'}), inverse(target, seed):
                                     bounded damped least squares, None when unreachable
@@ -49,9 +49,10 @@ class _Scara:
     tool-root datum by 9 mm, calibrated against the delivered s500_tool transform at zero travel."""
 
     L1, L2, Z = 0.245, 0.255, 0.341
-    GRIP_TCP = (0.0, 0.0, -0.1641)
-    LIMITS = ((-125 * math.pi / 180, 125 * math.pi / 180), (-145 * math.pi / 180, 145 * math.pi / 180),
-              (0.0, 0.14), (-math.pi, math.pi))
+    grip_tcp = (0.0, 0.0, -0.1641)                                  # scara.js gripTCP
+    limits = ((-125 * math.pi / 180, 125 * math.pi / 180), (-145 * math.pi / 180, 145 * math.pi / 180),
+              (0.0, 0.14), (-math.pi, math.pi))                     # scara.js limits
+    GRIP_TCP, LIMITS = grip_tcp, limits                             # the first edition's names, kept as aliases
 
     @staticmethod
     def wrap(a):
@@ -84,7 +85,7 @@ class _Scara:
         for b in ((angle, -angle) if angle > 1e-9 else (0.0,)):
             a = self.wrap(math.atan2(y, x) - math.atan2(L2 * math.sin(b), L1 + L2 * math.cos(b)))
             q = [a, b, self.Z + tz - z, self.wrap(yaw - a - b)]
-            if all(self.LIMITS[i][0] - 1e-9 <= v <= self.LIMITS[i][1] + 1e-9 for i, v in enumerate(q)):
+            if all(self.limits[i][0] - 1e-9 <= v <= self.limits[i][1] + 1e-9 for i, v in enumerate(q)):
                 result.append(q)
         if seed:
             def distance(q):
@@ -96,7 +97,7 @@ class _Scara:
         """the 'joints' sample's SCARA path at phase t (an ellipse with a bobbing quill, elbow on the positive side)"""
         a = t * 2 * math.pi
         sols = self.inverse(0.32 + 0.08 * math.cos(a), 0.12 * math.sin(a), 0.102 + 0.025 * math.cos(a * 2), 0.0,
-                            self.GRIP_TCP, None, 0.055)
+                            self.grip_tcp, None, 0.055)
         q = next((q for q in sols if q[1] >= 0), None)
         if q is None:
             raise RuntimeError('SCARA path is unreachable')

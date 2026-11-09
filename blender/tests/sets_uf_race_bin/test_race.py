@@ -1,13 +1,15 @@
-"""test_race.py: builds THE RACE (eidoblend.sets.unknown_force.race) headless, keys the film's cut (suggest) at a set of
-probe frames, checks what it keyed against the pure state (race_state) after jumping to each frame, and renders the
-probes from the film's cameras into out/race_<n>_<shot>.png.
+"""test_race.py: builds THE RACE (eidoblend.sets.unknown_force.race) headless as a reusable set, keys asset states at
+probe frames (the screens, the car on its run, through the works and over the edge, the march's shadows, the boot)
+with the set's own cameras, checks what it keyed against the pure state (race_state) after jumping to each frame, and
+renders stills of the set into out/race_<camera>_<what>.png.
+
+Then the set's invariants: moved (its root translated) it renders the same pictures, since everything reads set-local
+coordinates; a saved .blend renders a keyed frame on its own; and an options build (no mirror, no sky, no towers, no
+rain, dim lamps) builds and renders after the full set's dispose().
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sets_uf_race_bin/test_race.py -- [--build-only] [--shots a,b] [--res 960x540]
-        [--samples 16] [--blend] [--no-rain] [--cycles name] [--singer [--vrm path]] [--film]
-
---singer puts the claudesona on her mark at the film's scale (claude_suit by default, --vrm for the film's own suit)
-and tags the probes _singer; --film keys the whole section on the film's cut and renders nothing.
+        <worktree>/blender/tests/sets_uf_race_bin/test_race.py -- [--build-only] [--shots tag,tag] [--res 960x540]
+        [--samples 16] [--no-rain] [--cycles <tag>] [--no-invariants]
 
 Prints PASS / FAIL lines; exits 1 on a FAIL.
 """
@@ -20,10 +22,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..', '..')))
 
 import bpy  # noqa: E402
+import numpy as np  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 from eidoblend import common  # noqa: E402
 from eidoblend.sets.unknown_force import race as R  # noqa: E402
+from eidoblend.sets.unknown_force.race import NB, V  # noqa: E402
 
 args = common.script_args()
 OUT = os.path.join(HERE, 'out')
@@ -46,33 +50,64 @@ def check(name, ok, info=''):
         fails.append(name)
 
 
-# the probe shots: (song time, camera) -- the film's cut (suggest) at its moments, plus the craft and wide views
+PATH = R.car_path()
+
+
+def s_at(z):
+    """The car's path distance where it stands at three's z (metres down the road)."""
+    return R._path_at_z(PATH, z)
+
+
+CRASHED = {'car_t': 1.0, 'crash': 1.0}           # the car settled in the drain (out of the deck shots)
+# a high view of the works, the broken deck, the gap and the drain, the billboards far behind (not one of race.js's
+# cameras: the layout and the scale at a glance)
+OVERVIEW = {'pos': [46.0, 34.0, 150.0], 'target': [6.0, -6.0, 75.0], 'fov': 50}
+# (tag, camera, t, state): the set's own cameras on asset states (seconds on the probe's clock; t drives the rain,
+# the screens' flow, the engine's shake and the march's lockstep)
 SHOTS = [
-    (142.6, 'billA'), (145.2, 'billB'), (148.9, 'billboards'), (150.8, 'singer'), (153.3, 'carPass'),
-    (155.25, 'carTrack'), (157.4, 'carChase'), (158.45, 'carChase'), (159.9, 'crashLow'), (160.8, 'crashLow'),
-    (161.6, 'crashLow'), (161.5, 'shadows'), (162.3, 'heel'), (162.5, 'heel'), (162.45, 'heelTop'),
-    (160.5, 'crash'), (161.5, 'shadowsWide'), (154.0, 'carSide'), (154.0, 'carFront'), (154.0, 'carRear'),
+    ('gold_screen', 'billA', 1.0, dict(CRASHED)),
+    ('red_screen_tearing', 'billB', 2.0, dict(CRASHED)),
+    ('faces_glancing_across', 'billboards', 3.2, dict(CRASHED, gaze=R.glance(3.2, 2.0))),
+    ('performer_mark_under_red_screen', 'singer', 4.0, dict(CRASHED)),
+    ('car_out_between_billboards', 'carPass', 5.0, {'car_s': s_at(-34.0)}),
+    ('car_beside_the_mark', 'carTrack', 6.0, {'car_t': 0.776}),
+    ('car_into_the_drum_taper', 'carChase', 7.0, {'car_s': s_at(44.0)}),
+    ('barricades_flying', 'carChase', 8.0, {'car_s': s_at(70.0)}),
+    ('car_over_the_edge', 'crashLow', 9.0, {'car_t': 1.0, 'crash': 0.15}),
+    ('nose_into_the_drain', 'crashLow', 10.0, {'car_t': 1.0, 'crash': 0.45}),
+    ('over_on_its_back', 'crashLow', 11.0, {'car_t': 1.0, 'crash': 0.72}),
+    ('settled_wheels_up_steam', 'crashLow', 12.0, dict(CRASHED)),
+    ('whole_trajectory', 'crash', 13.0, {'car_t': 1.0, 'crash': 0.35}),
+    ('march_on_the_wall', 'shadows', 14.0, dict(CRASHED, march=1.0, march_t=1.6)),
+    ('march_wide_caption_room', 'shadowsWide', 15.0, dict(CRASHED, march=1.0, march_t=2.3)),
+    ('boot_hovering', 'heel', 16.0, dict(CRASHED, heel=0.55)),
+    ('boot_struck_toe_down', 'heel', 17.0, dict(CRASHED, heel=0.8)),
+    ('heel_on_the_manifesto', 'heelTop', 18.0, dict(CRASHED, heel=0.7)),
+    ('craft_side', 'carSide', 19.0, {'car_s': s_at(22.0)}),
+    ('craft_front', 'carFront', 19.0, {'car_s': s_at(22.0)}),
+    ('craft_rear', 'carRear', 19.0, {'car_s': s_at(22.0)}),
+    ('overview_works_gap_drain', 'overview', 20.0, dict(CRASHED)),
 ]
 only = arg('--shots')
 if only and only is not True:
     keep = set(only.split(','))
-    SHOTS = [s for s in SHOTS if s[1] in keep or f'{s[0]}' in keep]
-if arg('--film'):            # the whole section, every frame at 24 fps on the film's own cut (nothing renders)
-    SHOTS = [(142.1 + i / 24.0, R.suggest(142.1 + i / 24.0)['cam']) for i in range(int(20.7 * 24) + 1)]
+    SHOTS = [s for s in SHOTS if s[0] in keep or s[1] in keep]
 
 scene = bpy.context.scene
 for o in list(bpy.data.objects):
     bpy.data.objects.remove(o, do_unlink=True)
-res = arg('--res', '960x540')
-W, H = (int(v) for v in res.split('x'))
+W, H = (int(v) for v in arg('--res', '960x540').split('x'))
 scene.render.resolution_x, scene.render.resolution_y, scene.render.resolution_percentage = W, H, 100
 scene.render.fps = 24
 t0 = time.time()
 race = R.build(scene, rain=not arg('--no-rain'))
+race.cams['overview'] = R.cam_to_blender(OVERVIEW)
 print(f'[test_race] build {time.time() - t0:.1f} s, objects {len(race.objects)}', flush=True)
 check('build: car path length', abs(race.path.length() - R.CAR_LEN) < 0.01, f'{race.path.length():.3f}')
 check('build: 38 sodium lamps', len(race.parts['lights']['sodium']) == 38)
 check('build: 4 debris pieces', len(race.debris_obs) == 4)
+check('the set, not the video: no song clock in the module (CUES, suggest, film_state, film_cut, FILM_SPANS)',
+      not any(hasattr(R, k) for k in ('CUES', 'suggest', 'film_state', 'film_cut', 'FILM_SPANS')))
 n_tri = sum(len(o.data.polygons) for o in race.objects if o.type == 'MESH')
 print(f'[test_race] triangles {n_tri}', flush=True)
 nr = [race.parts['lamps']['cones'], race.parts.get('rain'), race.parts['splash'], race.car['shadow']]
@@ -83,12 +118,14 @@ check("the road stays out of its own planar mirror's capture (else every puddle 
       'reflector' not in race.parts or race.parts['road'].hide_probe_plane)
 check("the screens' glow lights light the set without specular (their reflections are the screens themselves)",
       all(race.lights[k].data.specular_factor == 0.0 for k in ('glow_a', 'glow_b')))
+wn = [n for n in race.mats['towers'].node_tree.nodes if n.bl_idname == 'ShaderNodeTexWhiteNoise']
+check("the windows' hash reads a rounded seed (TSL's toUint): solid windows, no speckle that shimmers as the camera moves",
+      wn and all(n.inputs['W'].is_linked and n.inputs['W'].links[0].from_node.operation == 'FLOOR' for n in wn), f'{len(wn)} hashes')
 
 # geometry parity: every mesh's vertex count and position sum (three's axes) against race.js's own (the dump)
 pj = os.path.join(OUT, 'parity', 'race.json')
 if os.path.isfile(pj):
     import json
-    import numpy as np
     js = {}
     for k, v in json.load(open(pj))['meshes'].items():
         js.setdefault(k.split('#')[0], []).append(v)
@@ -130,6 +167,7 @@ if os.path.isfile(pj):
                 continue
         n_ok += 1
     check('geometry parity with race.js (vertex counts, mean positions)', not bad, f'{n_ok} meshes match; ' + '; '.join(bad[:6]))
+
 
 # the lamp field the materials' doses, the rain and the splash read (Race._fields, built as nodes) against race.js's
 # lampField / workField computed here in plain Python at the same points: on the deck, under it (occluded), under the
@@ -178,9 +216,6 @@ def work_field_js(P, N):
     return acc
 
 
-import numpy as np  # noqa: E402
-from eidoblend.sets.unknown_force.race import NB, V  # noqa: E402
-
 FP = [((3.6, 0.6, 0.0), (0, 1, 0)), ((5.0, 1.0, 20.0), (1, 0, 0)), ((3.0, -5.0, 10.0), (0, 1, 0)),
       ((3.0, -5.0, 110.0), (0, 1, 0)), ((0.5, 0.3, 88.0), (0, 0.6, 0.8)), ((-0.55, 0.2, 9.6), (-0.7, 0.3, 0.6))]
 me = bpy.data.meshes.new('field_probe')
@@ -219,47 +254,26 @@ bpy.data.objects.remove(fob, do_unlink=True)
 bpy.data.meshes.remove(me)
 bpy.data.node_groups.remove(tree)
 
-if arg('--singer'):          # the claudesona on her mark, at the film's scale (the cameras are framed for her)
-    try:
-        from eidoblend.characters import load_vrm, play_vrma_default
-        h = load_vrm(arg('--vrm', 'claude_suit'), scene=scene)      # --vrm <path>: the film's own suit
-        h.arm.parent = race.group
-        h.arm.matrix_parent_inverse.identity()
-        h.arm.location, h.arm.scale = (0.0, 0.0, 0.0), (0.87, 0.87, 0.87)
-        play_vrma_default(h, 'sing_low', t=0.0)
-        print(f"[test_race] singer on the mark ({os.path.basename(str(arg('--vrm', 'claude_suit')))} x 0.87, sing_low)", flush=True)
-    except Exception as e:                      # a probe aid: the set renders without her
-        print('[test_race] singer not loaded:', e, flush=True)
 cam = bpy.data.objects.new('probe_cam', bpy.data.cameras.new('probe_cam'))
 scene.collection.objects.link(cam)
 scene.camera = cam
 t1 = time.time()
 frames = []
-REPLAY = 260.0              # break 2: the march replays under shadowsWide (the film's setState('race') for t > 258)
-if not arg('--film') and (not isinstance(only, str) or 'replay' in only):
-    SHOTS.append((REPLAY, 'shadowsWide'))
-rp = R.film_state(REPLAY)
-check('film_state: break 2 replays the march (the column phase of 161.6 s, car parked, no boot)',
-      rp['march'] == 1 and abs(rp['march_t'] - (161.6 + REPLAY - 258.6)) < 1e-9 and rp['car_t'] == 0 and rp['heel'] == 0
-      and R.film_cut(REPLAY) == 'shadowsWide' and R.film_cut(150.8) == 'singer' and R.film_state(150.8) == R.suggest(150.8)['state'])
-for i, (t, name) in enumerate(SHOTS):
+for i, (tag, name, t, st) in enumerate(SHOTS):
     f = i + 1
-    st = R.film_state(t)                        # the film's state: suggest(t) in the verses, the replay in break 2
-    if name in ('carSide', 'carFront', 'carRear'):
-        st['heel'] = 0
     race.update(t, st, frame=f)
     race.key_camera(cam, name, t, st, frame=f)
-    frames.append((f, t, name, st))
+    frames.append((f, t, tag, name, st))
 nk = race.finish()
 print(f'[test_race] keyed {len(SHOTS)} frames in {time.time() - t1:.1f} s ({nk} keys made linear / constant)', flush=True)
-scene.frame_start, scene.frame_end = 1, len(SHOTS)
+scene.frame_start, scene.frame_end = 1, max(1, len(SHOTS))
 print('[test_race] render settings:', race.apply_render_settings(scene), flush=True)
 scene.eevee.taa_render_samples = int(arg('--samples', 16))
 
 # jump to each frame: the keyed scene must show what race_state says (the .blend plays on its own)
 worst = {'car': 0.0, 'heel': 0.0, 'wheel': 0.0, 'debris': 0.0, 'uniform': 0.0}
 bad_vis = 0
-for f, t, name, st in reversed(frames):
+for f, t, tag, name, st in reversed(frames):
     scene.frame_set(f)
     rs = R.race_state(t, st, race.path, race.debris)
     g = race.car['group']
@@ -275,36 +289,109 @@ for f, t, name, st in reversed(frames):
         bad_vis += 1
 for k, v in worst.items():
     check(f'keyed {k} at its frame', v < 1e-3, f'max err {v:.2e}')
-check('keyed visibility (the boot only in its shot)', bad_vis == 0, f'{bad_vis} wrong')
+check('keyed visibility (the boot only where heel > 0)', bad_vis == 0, f'{bad_vis} wrong')
 dg = bpy.context.evaluated_depsgraph_get()
 if 'rain' in race.parts:
     ev = race.parts['rain'].evaluated_get(dg)
     zs = [v.co.z for v in ev.data.vertices]
     check('rain GN: drops placed round the camera', len(zs) == 4 * 5200 and (max(zs) - min(zs)) > 5, f'z range {min(zs):.1f}..{max(zs):.1f}')
-if arg('--blend'):
-    p = os.path.join(OUT, 'race_probe.blend')
-    bpy.ops.wm.save_as_mainfile(filepath=p, compress=True)
-    print('[test_race] saved', p)
 
+
+def img(path):
+    from PIL import Image
+    return np.asarray(Image.open(path).convert('RGB'), np.float32) / 255.0
+
+
+def render(path):
+    scene.render.filepath = path
+    t2 = time.time()
+    bpy.ops.render.render(write_still=True)
+    return os.path.isfile(path), time.time() - t2
+
+
+def same(a, b):
+    d = np.abs(img(a) - img(b))
+    return float(d.mean()), float((d.max(-1) > 0.08).mean())
+
+
+done = {}
 if not arg('--build-only'):
     scene.render.image_settings.file_format = 'PNG'
-    cyc = arg('--cycles')
-    tag = '_singer' if arg('--singer') else ''
-    for f, t, name, st in frames:
+    for f, t, tag, name, st in frames:
         scene.frame_set(f)
-        path = os.path.join(OUT, f'race_{f:02d}_{name}_{t:.2f}{tag}.png')
-        scene.render.filepath = path
-        t2 = time.time()
-        bpy.ops.render.render(write_still=True)
-        ok = os.path.isfile(path)
-        check(f'render {name} @ {t}', ok, f'{time.time() - t2:.1f} s')
-    if cyc and cyc is not True:              # the same frame path traced (round one's look.probe.render_reference)
+        path = os.path.join(OUT, f'race_{name}_{tag}.png')
+        ok, secs = render(path)
+        check(f'render {name}: {tag}', ok, f'{secs:.1f} s')
+        done[tag] = (f, path)
+    cyc = arg('--cycles')
+    if cyc and cyc is not True and cyc in done:        # the same frame path traced (round one's look.probe)
         from eidoblend.look.probe import render_reference
-        for f, t, name, st in frames:
-            if name != cyc:
-                continue
-            path = os.path.join(OUT, f'race_{f:02d}_{name}_{t:.2f}_cycles.png')
-            secs = render_reference(scene, path, frame=f, samples=128, bounces=6)
-            check(f'cycles reference {name} @ {t}', os.path.isfile(path), f'{secs:.1f} s')
+        f, p = done[cyc]
+        path = p.replace('.png', '_cycles.png')
+        secs = render_reference(scene, path, frame=f, samples=128, bounces=6)
+        check(f'cycles reference {cyc}', os.path.isfile(path), f'{secs:.1f} s')
+
+if not arg('--build-only') and not arg('--no-invariants'):
+    # 1. moved: the root translated, the cameras re-keyed through it; every material, light, effect and camera reads
+    #    set-local coordinates, so each still must come out the same
+    probe = [tg for tg in ('faces_glancing_across', 'car_beside_the_mark', 'heel_on_the_manifesto', 'march_on_the_wall')
+             if tg in done]
+    race.group.location = (37.0, -12.0, 4.0)
+    bpy.context.view_layer.update()
+    by_tag = {fr[2]: fr for fr in frames}
+    for tg in probe:
+        f, t, _tag, name, st = by_tag[tg]
+        race.key_camera(cam, name, t, st, frame=f)
+        scene.frame_set(f)
+        p = os.path.join(OUT, f'race_{name}_{tg}_set_moved.png')
+        ok, secs = render(p)
+        mad, frac = same(done[tg][1], p) if ok else (1.0, 1.0)
+        check(f'moved set renders the same still: {tg}', ok and mad < 0.004 and frac < 0.005,
+              f'mean abs diff {mad:.4f}, pixels off by > 0.08: {frac * 100:.2f}%')
+    race.group.location = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    for tg in probe:
+        f, t, _tag, name, st = by_tag[tg]
+        race.key_camera(cam, name, t, st, frame=f)
+    # 2. the keyed .blend on its own (reopened below, after the options build)
+    blend = os.path.join(OUT, 'race_keyed_probe_frames.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
+    # 3. dispose(), then an options build in the same file: no mirror, no sky (world), no towers, no rain, dim lamps
+    race.dispose()
+    left = [d.name for coll in (bpy.data.objects, bpy.data.meshes, bpy.data.materials, bpy.data.images,
+                                bpy.data.node_groups, bpy.data.lights, bpy.data.worlds, bpy.data.lightprobes,
+                                bpy.data.collections, bpy.data.actions)
+            for d in coll if d.name.startswith(('race:', 'set:race'))]
+    check('dispose(): nothing of the set left (keys and actions included; the caller\'s camera stays)', not left,
+          ', '.join(left[:8]))
+    ro = R.build(scene, reflect=False, sky=False, towers=False, rain=False, lamp_i=40.0, amounts=('$7', 'NOT YET'))
+    check('options build: no mirror, no world, no towers, no rain',
+          all(k not in ro.parts for k in ('reflector', 'rain', 'towers')) and getattr(ro, 'world', None) is None,
+          f"parts {sorted(ro.parts)}")
+    check('options build: lamp_i drives the sodium heads', abs(ro.lights['sodium'].energy - R.cd(40.0)) < 1e-3,
+          f'{ro.lights["sodium"].energy:.1f} W')
+    check('options build: amounts writes the screens\' bands', [ro.parts['billboards'][k]['amount'] for k in 'ab'] == ['$7', 'NOT YET'])
+    st = {'car_t': 0.776, 'gaze': 0.6}
+    ro.update(6.0, st, frame=1)
+    ro.key_camera(cam, 'billboards', 6.0, st, frame=1)
+    ro.finish()
+    scene.world = None
+    scene.frame_set(1)
+    p = os.path.join(OUT, 'race_billboards_options_amounts_nomirror_nosky_notowers_norain_lamps40.png')
+    ok, secs = render(p)
+    check('render the options build', ok, f'{secs:.1f} s')
+    # 4. reopen the keyed .blend: its frames render what this session rendered
+    keep = [(tg, done[tg]) for tg in ('car_beside_the_mark', 'nose_into_the_drain') if tg in done]
+    bpy.ops.wm.open_mainfile(filepath=blend)
+    scene = bpy.context.scene
+    scene.render.image_settings.file_format = 'PNG'
+    for tg, (f, p0) in keep:
+        scene.frame_set(f)
+        p = p0.replace('.png', '_reopened.png')
+        ok, secs = render(p)
+        mad, frac = same(p0, p) if ok else (1.0, 1.0)
+        check(f'the saved .blend renders the keyed frame on its own: {tg}', ok and mad < 0.004 and frac < 0.005,
+              f'mean abs diff {mad:.4f}, pixels off by > 0.08: {frac * 100:.2f}%')
+    os.remove(blend)
 print('[test_race]', 'ALL PASS' if not fails else f'{len(fails)} FAIL: {fails}', flush=True)
 sys.exit(1 if fails else 0)

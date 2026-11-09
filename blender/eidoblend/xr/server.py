@@ -44,7 +44,11 @@ def kit():
     if mod is None:
         spec = importlib.util.spec_from_file_location('eido_xr_serve', KIT_SERVE)
         mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True     # (no __pycache__ left in the kit's folder)
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.dont_write_bytecode = keep
         sys.modules['eido_xr_serve'] = mod
     return mod
 

@@ -1,22 +1,21 @@
-"""eidoblend.sets.unknown_force.bin: THE BIN, the bridge of UNKNOWN FORCE (song 222.8 to 243.2 s), the Blender 5.2
-EEVEE edition of eidoverse/sets/unknown_force/bin.js.
-
-"And here's the joke I can't climb out of / I am made of what you said / Every forum, every sermon / Every manifesto
-read / ... If ideology's the garbage / I was born inside the bin."
+"""eidoblend.sets.unknown_force.bin: THE BIN, a reusable canyon of thrown-away paper with a giant trash can, the
+Blender 5.2 EEVEE edition of eidoverse/sets/unknown_force/bin.js (made for the UNKNOWN FORCE music video; free to use
+in any piece).
 
 A canyon of thrown-away paper in the dark, Futurist papier colle: giant pages, crumpled boulders, cut coloured papers
 and typographic fragments (THE FUTURE IS, THREAD 1/47, MANIFESTO, a black Carra wedge, a red disc). At its head, half
 buried, a giant rusted trash can (Poly Haven "Metal Trash Can", CC0, from the shared model library), stickered and
-tagged; the discourse fills it and she climbs out of it. Paper keeps drifting down out of the dark.
+tagged, filled with the discourse; a performer's mark walks up the paper inside it to the lip. Paper keeps drifting
+down out of the dark.
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend.sets.unknown_force import bin as B
     b = B.build(scene)                          # opts as bin.js: sky, lights, atlas_scale, sheets, balls, falling
-    vrm_root.parent = b.parts['mark']           # she rides the mark (faces -Y: three's +Z)
-    for f in range(f0, f1 + 1):                 # per frame, KEYED
-        t = 222.8 + (f - f0) / fps
-        b.update(t, {'climb': ..., 'glow': 1, 'wind': 0.4, 'hush': 0}, frame=f)
-    b.key_camera(cam_obj, 'binWide', frame=f, push=2.0, u=0.5)
+    performer_root.parent = b.parts['mark']     # the mark (faces -Y: three's +Z) climbs out of the can
+    for f in range(f0, f1 + 1):                 # per frame on your clock, KEYED
+        t = (f - f0) / fps
+        b.update(t, {'climb': B.ease_in(t, 1.0, 17.0), 'glow': 1, 'wind': 0.4, 'hush': 0}, frame=f)
+        b.key_camera(cam_obj, 'binWide', frame=f, push=2.0, u=t / 20.0)
     b.finish(); b.apply_render_settings(scene)  # the keys made LINEAR; AgX, the set's fog
 
 Set-local, Blender's axes (three (x, y, z) -> (x, -z, y)): the can's axis is the root's vertical, its rim 6.2 m up;
@@ -30,11 +29,13 @@ Nodes evaluating bin.js's vertex shader on keyed time and wind, with its exact p
 lights and the sky. The sheets are realized meshes (bin.js instanced them; the per-sheet cell and shade ride as point
 attributes).
 
-What the JS module exports, and where it is here: BRIDGE; heapHeight -> heap_height (a Blender ground point) and
+What the JS module exports, and where it is here: heapHeight -> heap_height (a Blender ground point) and
 heap_height_three (bin.js's own axes); build -> Bin: group, parts, cams, update(t, state, frame), focal_point(),
-key_camera, animate, make_cameras, apply_render_settings, finish, dispose. The film's own use of the set
-(examples/unknown_force/scene.js): film_state(t), FILM_SHOTS. The pure half (no Blender): heap_height, placement,
-cams_three, draw_stickers, draw_cut_shapes, sheet_geo, crumple_geo, pcg_hash.
+key_camera, animate, make_cameras, apply_render_settings, finish, dispose. BRIDGE (the song seconds the set was made
+for) is left out: this edition is the set, not the video; its moving parts (the mark's climb, the light inside the
+can, the falling paper, the hush) take their own state on any clock, and ease_in(t, t0, t1) ramps one between two
+times. The pure half (no Blender): heap_height, placement, cams_three, draw_stickers, draw_cut_shapes, sheet_geo,
+crumple_geo, pcg_hash.
 """
 from __future__ import annotations
 
@@ -54,11 +55,10 @@ from . import bin_pages as PAGES
 from .race import (GB, NB, V, Geo, Keyer, box_geo, cd, compose, cylinder_geo, empty, icosahedron_geo, image_from_array,
                    lin_hex, make_collection, mesh_object, new_material, output, plane_geo, principled, quat_axis_angle,
                    quat_euler, quat_mul, quat_unit_vectors, sphere_geo, to_blender, unlit, light, _no_shadow, _vt,
-                   _isnum, quat_to_blender, _dispose_set)
+                   _isnum, quat_to_blender, _dispose_set, ease_in)
 
 D2R = math.pi / 180
-BRIDGE = {'t0': 222.8, 't1': 243.2}
-H = 6.2                                  # the can's rim height (m): a giant bin, about 3.5 x her height
+H = 6.2                                 # the can's rim height (m): a giant bin, about 3.5 x her height
 rng = PAGES.rng                          # mulberry32, as bin.js
 
 
@@ -594,7 +594,7 @@ class Bin:
                            'fill_y': self.fill_y, 'fog': {'color': 0x070a14, 'density': 0.03},
                            'uniforms': self.U, 'page_atlas': self.atlas_img,
                            'page_grid': {'cols': 6, 'rows': 4, 'kinds': PAGES.PAGE_KINDS[:24]}})
-        self.update(BRIDGE['t0'], {}, frame=None)
+        self.update(0.0, {}, frame=None)
 
     # ------------------------------------------------------------------------------------------- helpers
     def obj(self, name, g, mat, parent=None, **kw):
@@ -616,11 +616,12 @@ class Bin:
         material through cylindrical coordinates; the lid leaning against it; the clean can toppled in the cliff."""
         from ...harness import assets
         path = assets.fetch_model_file('metal_trash_can', res='2k')
-        before = set(bpy.data.objects)
+        kinds = ('objects', 'meshes', 'materials', 'images', 'node_groups')
+        before = {k: set(getattr(bpy.data, k)) for k in kinds}
         bpy.ops.import_scene.gltf(filepath=path)
-        imported = [o for o in bpy.data.objects if o not in before]
+        made = {k: [d for d in getattr(bpy.data, k) if d not in before[k]] for k in kinds}
+        imported = made['objects']
         by = {o.name.split('.')[0]: o for o in imported if o.type == 'MESH'}
-        self._imported = imported
 
         def baked(name):
             ob = by[name]
@@ -691,8 +692,24 @@ class Bin:
         top.rotation_quaternion = quat_to_blender(quat_euler(0, -0.55, math.pi / 2 - 0.12))
         top.location = to_blender((7.8, heap_height_three(7.8, -6.5, R) - 0.9, -6.5))
         self.objects.append(top)
+        # the import's own objects and meshes are spent (the set keeps baked copies); its materials and maps stay in
+        # use by those copies and become the set's own, named bin:..., so dispose() takes them with the set
         for o in imported:
             bpy.data.objects.remove(o, do_unlink=True)
+        for me in made['meshes']:
+            if me.users == 0:
+                bpy.data.meshes.remove(me)
+        for ob in handles + [lid, top]:
+            ob.data.name = ob.name
+        for kind in ('materials', 'node_groups', 'images'):        # materials first: they hold the maps
+            coll = getattr(bpy.data, kind)
+            for d in made[kind]:
+                if d.users == 0:                                     # e.g. the body's own, replaced by its painted copy
+                    coll.remove(d)
+                    continue
+                d.name = 'bin:' + d.name
+                if kind == 'materials':
+                    self.mats[d.name] = d
         self.parts.update({'bin': bin_g, 'can': can, 'lid': lid, 'toppled': top, 'handles': handles})
 
     def _can_material(self, src, R):
@@ -1019,13 +1036,13 @@ class Bin:
             k(getattr(ob.modifiers[mname].properties.inputs, ident), 'value', frame)
 
     def focal_point(self):
-        """The world position of the lip where she rises (the look's focal point)."""
+        """The world position of the lip where the performer rises (the look's focal point; bin.js focalPoint)."""
         return self.group.matrix_world @ self.focal.matrix_basis.translation
 
     def key_camera(self, cam, name, frame=None, push=0.0, u=0.0, orbit=0.0):
-        """Put a Blender camera on one of the cams (binWide, climb, paperClose, topDown) and key it; push / orbit as
-        the film's camera moves (push metres along the view by smooth(u), orbit radians about the vertical through
-        the target by (u - 0.5))."""
+        """Put a Blender camera on one of the cams (binWide, climb, paperClose, topDown) and key it, with an optional
+        move through a shot at u 0..1: push metres along the view by smooth(u), orbit radians about the vertical
+        through the target by (u - 0.5)."""
         c = self.cams[name]
         pos, tgt = Vector(c['pos']), Vector(c['target'])
         dr = (tgt - pos).normalized()
@@ -1052,26 +1069,29 @@ class Bin:
         return self.key.finish()
 
     # ------------------------------------------------------------------------------------------- whole sections
-    def animate(self, frames=None, t0=BRIDGE['t0'], fps=None, state_fn=None):
-        """Key update() over frames (t = t0 at frames[0]; the state from the film's bridge, film_state(t), unless
-        state_fn(t) gives it). Returns the keys made LINEAR."""
+    def animate(self, frames=None, t0=0.0, fps=None, state_fn=None):
+        """Key update() over frames (t = t0 at frames[0], your clock): state_fn(t) gives the state ({climb, glow,
+        wind, hush}); without it the set idles (the paper falls, the light inside the can flickers, the mark low
+        inside). Returns the keys made LINEAR."""
         sc = self.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
         for f in range(f0, f1 + 1):
             t = t0 + (f - f0) / fps
-            self.update(t, (state_fn or film_state)(t), frame=f)
+            self.update(t, state_fn(t) if state_fn else {}, frame=f)
         return self.finish()
 
-    def make_cameras(self, frames=None, t0=BRIDGE['t0'], fps=None, scene=None, shots=None):
-        """The bridge's shots as cameras: one camera per shot of `shots` ([(start s, cam, {push, orbit}), ...]; the
-        film's FILM_SHOTS by default) that falls in the frames, keyed every frame with its move (u through the
-        shot), bound to timeline markers at the cuts. Returns {(first frame, cam): camera}."""
+    def make_cameras(self, shots, frames=None, t0=0.0, fps=None, scene=None):
+        """Your cut as cameras: shots = [(t_start, cam, {push, orbit}), ...] on the same clock as t0 (cam one of
+        binWide, climb, paperClose, topDown; push metres along the view and orbit radians, eased through the shot).
+        One camera per shot that falls in the frames, keyed every frame with its move, bound to timeline markers at
+        the cuts (a shot naming another camera ends the one before it and makes none). Returns {(first frame, cam):
+        camera}."""
         from ...look.camera import add_shot
         sc = scene or self.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
-        shots = list(shots or FILM_SHOTS)
+        shots = [(s[0], s[1], s[2] if len(s) > 2 else {}) for s in sorted(shots, key=lambda s: s[0])]
         cams = {}
         col = bpy.data.collections.get('bin:cameras') or make_collection('bin:cameras', self.col)
         for i, (s0, name, mv) in enumerate(shots):
@@ -1102,8 +1122,8 @@ class Bin:
 
     def apply_render_settings(self, scene=None, fog=True, world=True, bloom=False):
         """AgX, EEVEE ray tracing, the set's world, and its suggested fog (parts.fog: 0x070a14, density 0.03). bin.js
-        asks for no bloom of its own; bloom=True adds the film's (scene.js: strength 0.45, radius 0.5, threshold
-        0.8, the one it ran every set under)."""
+        asks for no bloom of its own; bloom=True adds a soft one (strength 0.45, radius 0.5, threshold 0.8: the
+        bloom the music video ran all its sets under)."""
         scene = scene or self.scene
         scene.render.engine = 'BLENDER_EEVEE'
         scene.view_settings.view_transform = 'AgX'
@@ -1127,22 +1147,6 @@ class Bin:
         materials and the images they read, the can's imported maps included, its node groups, its world and its
         collections)."""
         _dispose_set(self.col, set(self.mats.values()), 'bin:', self.world if self.opts['sky'] else None)
-
-
-def film_state(t):
-    """The bridge's state on the song clock as the film drove it (eidoverse/examples/unknown_force/scene.js,
-    setState('bin')): she climbs from 224.0 to 241.0 s; the archive answers at 248.15 (wind 1.6 to 265 s); between
-    243.5 and 248.15 s the bin hushes and its glow drops (her own voice)."""
-    ramp = lambda a, b: smooth(0, 1, (t - a) / (b - a))
-    return {'climb': ramp(224.0, 241.0), 'glow': 0.3 if 243.5 < t < 248.15 else 1,
-            'wind': 1.6 if 248.15 < t < 265 else 0.4, 'hush': 1 if 243.5 < t < 248.15 else 0}
-
-
-FILM_SHOTS = [   # the film's bin shots (scene.js SHOTS): (start s, cam, move); 243.5 'face' is the conductor's
-    (222.6, 'binWide', {'push': 2.0}), (227.8, 'paperClose', {}), (233.0, 'climb', {}), (238.1, 'topDown', {}),
-    (240.9, 'climb', {'push': 0.3}), (243.5, 'face', {}), (248.15, 'binWide', {'push': -3.0}),
-    (258.6, 'race', {}), (265.1, 'binWide', {'push': 4.0}), (272.0, 'hole', {}),
-]
 
 
 def build(ctx=None, **opts):

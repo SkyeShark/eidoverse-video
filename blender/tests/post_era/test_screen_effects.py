@@ -1,10 +1,15 @@
 """tests/post_era/test_screen_effects.py: the registry's smaller screen-space effects (look/post/screen_effects.py) on
 real frames: each at its WebGPU defaults and with options turned, sheets; opacity 0 gives the plain frame; the
 deterministic ones against their shaders in numpy (wavy, kaleidoscope, dithering, chromatic_aberration_alpha,
-bw_halftone, bleach_bypass); the time-driven ones change from frame to frame. Uses test_era_looks.py's saved
-sources (run its --stage sources first).
+bw_halftone, bleach_bypass); the time-driven ones change from frame to frame.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py
+  --stage saved   every effect over test_era_looks.py's saved sources (run its --stage sources first)
+  --stage live    on a live render of the era probe scene: underwater with its bubbles (frames 1 and 24), the
+                  registry's own two-effect example (effects ['underwater', 'vhs_tape']: world under, signal over),
+                  retro_wireframe in green, amber and multicolor, and its cleanup
+Run from the main checkout (the GPU slot), each stage in its own Blender:
+    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage saved
+    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage live
 """
 import json
 import os
@@ -20,6 +25,8 @@ import ref_era as REF                                          # noqa: E402
 
 from eidoblend.look import frame_stats as FS                    # noqa: E402
 
+A = SC.args()
+STAGE = SC.arg(A, '--stage', 'saved')
 OUT = os.path.join(SC.OUT, 'screen')
 SRC = os.path.join(SC.OUT, 'era', 'src')
 FAIL, REPORT = [], {}
@@ -63,9 +70,15 @@ def source_camera(name, frame):
     return sc.camera.matrix_world.copy(), cd.angle_y, cd.clip_start, cd.clip_end
 
 
+def _png(p):
+    return np.asarray(__import__('PIL.Image', fromlist=['Image']).open(p).convert('RGB')).astype(float)
+
+
 def live_underwater():
     """underwater on a live render (not saved frames): the era probe scene with the pass, its Depth and Normal from the
-    Render Layers, and the bubbles rising round the camera (Geometry Nodes), frames 1 and 24."""
+    Render Layers, and the bubbles rising round the camera (Geometry Nodes), frames 1 and 24; then the registry's own
+    example, effects ['underwater', 'vhs_tape'] in one call (custom_effects_deno.js's header), then retro_wireframe."""
+    from eidoblend.look.post import chain
     from eidoblend.look.post import custom_effects as CFX
     from eidoblend.look.post import history as HI
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -79,17 +92,34 @@ def live_underwater():
         p = os.path.join(OUT, f'live_underwater_f{f:02d}.png')
         SC.render_png(sc, p, f)
         paths.append(p)
-    a = [np.asarray(__import__('PIL.Image', fromlist=['Image']).open(p).convert('RGB')).astype(float) for p in paths]
+    a = [_png(p) for p in paths]
     moved = float((np.abs(a[0] - a[1]).max(axis=2) > 6).mean())
     check(moved > 0.02, f'underwater (live): caustics, rays and bubbles move between frames 1 and 24 ({moved * 100:.1f}% '
                         f'of pixels)')
-    FS.sheet(paths, os.path.join(OUT, 'live_underwater_sheet.jpg'), cols=2, tile=640,
-             labels=['underwater live, frame 1', 'underwater live, frame 24 (the bubbles have risen)'])
+    # the registry's own example (custom_effects_deno.js header): effects: ['underwater', 'vhs_tape'] with opts for
+    # both, in one call. The world effect goes under the overlay, the signal effect over it, each in the given order.
+    CFX.clear(sc)
+    e2 = CFX.apply_to(sc, ['underwater', 'vhs_tape'], {'underwater': {'bubble_count': 600, 'fog_density': 0.1},
+                                                         'vhs_tape': {'intensity': 1.0}})
+    st = [(s, n) for s, n, _x in chain.stages(sc)]
+    check(st == [('under', 'underwater'), ('over', 'vhs_tape')] and set(e2.uniforms) == {'underwater', 'vhs_tape'},
+          f"effects ['underwater', 'vhs_tape']: underwater under the overlay, vhs_tape over it ({st}); uniforms by "
+          f"effect name")
+    p2 = os.path.join(OUT, 'live_underwater_vhs_tape_f24.png')
+    SC.render_png(sc, p2, 24)
+    paths.append(p2)
+    d = float((np.abs(_png(p2) - a[1]).max(axis=2) > 6).mean())
+    check(d > 0.05, f"['underwater', 'vhs_tape'] differs from underwater alone at frame 24 on {d * 100:.1f}% of pixels "
+                    f"(the tape's wobble, noise and tint over the water)")
+    FS.sheet(paths, os.path.join(OUT, 'live_underwater_sheet.jpg'), cols=3, tile=560,
+             labels=['underwater live, frame 1', 'underwater live, frame 24 (the bubbles have risen)',
+                     "effects ['underwater', 'vhs_tape'], frame 24 (the registry's example)"])
     # retro_wireframe: a material override on the live scene (geometry-side: no compositor stage). The same scene,
-    # underwater taken off (a second era_probe build in one session trips the characters' clip cache: hooks_needed)
+    # the water taken off (one character build per Blender session: hooks_needed, the characters' clip cache)
     from eidoblend.look.post import screen_effects as SE
     CFX.clear(sc)
-    bpy.data.objects.remove(bpy.data.objects['uw_bubbles'], do_unlink=True)
+    check('uw_bubbles' not in bpy.data.objects and not chain.stages(sc),
+          'clear(): the passes and the bubbles round the camera are gone (the scene as it was)')
     w = CFX.apply_to(sc, 'retro_wireframe', {'retro_wireframe': {'color': 'green', 'line_width': 1.5}})
     wp = []
     for name in ('green', 'amber', 'multicolor'):
@@ -228,6 +258,19 @@ def run():
                 SC.render_png(sc, p, frame)
                 paths.append(p)
                 labels.append(f'{eff} {o if o else "(WebGPU defaults)"}')
+                if name == 'meadow' and eff == 'full_toon' and tag == 'defaults':
+                    # the sky (nothing drawn: the Normal pass is 0 there) is cel-shaded, not inked in the outline
+                    # colour: WebGPU's cleared normal buffer gave no normal edge between background pixels
+                    dep = load_exr(m['paths']['Depth'].replace(f"{m['frames'][0]:04d}", f'{frame:04d}'))[..., 0]
+                    sky = dep > 0.99 * c_end
+                    got = exr(sc, frame)[..., :3]
+                    ink = np.abs(got - np.array([0.05, 0.05, 0.08])).max(axis=2) < 0.01
+                    share = float(ink[sky].mean()) if sky.any() else 1.0
+                    REPORT['full_toon_sky_inked'] = {'sky_share_of_frame': round(float(sky.mean()), 4),
+                                                     'inked_share_of_sky': round(share, 5)}
+                    check(sky.mean() > 0.1 and share < 0.01, f'full_toon: the sky ({sky.mean() * 100:.0f}% of the '
+                                                             f'frame) is cel-shaded, not inked: {share * 100:.2f}% '
+                                                             f'of it in the outline colour')
                 if name == 'meadow':
                     want = ref(eff, src, {k: v for k, v in o.items() if k != 'repeats'})
                     if want is not None:
@@ -262,17 +305,18 @@ def run():
         FS.sheet(paths[12:24], os.path.join(OUT, f'{name}_screen_sheet_b.jpg'), cols=3, tile=560,
                  labels=labels[12:24])
         FS.sheet(paths[24:], os.path.join(OUT, f'{name}_screen_sheet_c.jpg'), cols=3, tile=560, labels=labels[24:])
-    live_underwater()
 
 
-if not SC.already_done(OUT, 'all', os.path.abspath(__file__)):
+if STAGE not in ('saved', 'live'):
+    raise SystemExit(f'test_screen_effects: --stage saved | live, not {STAGE!r}')
+if not SC.already_done(OUT, STAGE, os.path.abspath(__file__)):
     try:
-        run()
+        run() if STAGE == 'saved' else live_underwater()
     except Exception:
         traceback.print_exc()
         FAIL.append('exception: ' + traceback.format_exc().splitlines()[-1])
     REPORT['fail'] = FAIL
-    with open(os.path.join(OUT, 'report.json'), 'w') as f:
+    with open(os.path.join(OUT, f'report_{STAGE}.json'), 'w') as f:
         json.dump(REPORT, f, indent=1, default=str)
-    SC.mark_done(OUT, 'all')
+    SC.mark_done(OUT, STAGE)
     print(f"[screen] {'FAIL ' + str(len(FAIL)) if FAIL else 'PASS'}", flush=True)

@@ -15,7 +15,7 @@ import bpy
 import numpy as np
 
 from .nodes import Graph, keyed_values_group
-from .sky_view import overlay_opaque
+from .sky_view import mark_sky_element, overlay_opaque
 
 KEYS = 'eido_moon_keys'
 
@@ -89,6 +89,7 @@ def fragment_material(ob):
         surf = overlay_opaque(g, _emission(g, col))
         out = g.node('ShaderNodeOutputMaterial')
         g.link(_faded(g, surf, k['fade']), out.inputs['Surface'])
+        mark_sky_element(g)                          # JS fog: false: use_fog leaves the fragments clear
     ob.data.materials.clear()
     ob.data.materials.append(m)
     return m
@@ -110,6 +111,7 @@ def speck_material():
     col = g.vscale(g.vmul((0.42, 0.38, 0.34), k['sun_col']), g.mul(lit, k['gain']))
     out = g.node('ShaderNodeOutputMaterial')
     g.link(_faded(g, overlay_opaque(g, _emission(g, col)), k['fade']), out.inputs['Surface'])
+    mark_sky_element(g)                              # JS fog: false
     return m
 
 
@@ -139,6 +141,7 @@ def asteroid_material(ob, baked_path, normal_path=None):
     col = g.vscale(g.vmul(alb, k['sun_col']), g.mul(lit, k['gain']))
     out = g.node('ShaderNodeOutputMaterial')
     g.link(_emission(g, col), out.inputs['Surface'])
+    mark_sky_element(g)                              # JS fog: false
     ob.data.materials.clear()
     ob.data.materials.append(m)
     return m

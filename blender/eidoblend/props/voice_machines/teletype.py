@@ -545,13 +545,24 @@ class Teletype(K.Machine):
     name = 'teletype'
 
     def dispose(self, files=False):
-        """voder.Machine.dispose, and with files=True the character buffer's PNG folder too (as the era-2 machines'
-        dispose(files=True) removes their screens' folders)."""
-        d = getattr(getattr(self, 'buffer', None), 'dir', None)
+        """voder.Machine.dispose, and with files=True the character buffer's PNG frames too (as the era-2 machines'
+        dispose(files=True) removes their screens): this machine's own frames, then the folder once it is empty, so
+        a second teletype printing into the same buffer_dir keeps its paper."""
+        buf = getattr(self, 'buffer', None)
+        d, prefix = getattr(buf, 'dir', None), getattr(buf, 'prefix', None)
         super().dispose()
         if files and d is not None and os.path.isdir(d):
-            import shutil
-            shutil.rmtree(d, ignore_errors=True)
+            import glob
+            from pathlib import Path
+            for p in Path(d).glob(f'{glob.escape(prefix)}_[0-9][0-9][0-9][0-9].png*'):     # frames, the hold, .part
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            try:
+                os.rmdir(d)                                  # only when nothing else is left in it
+            except OSError:
+                pass
 
     def _buffer_put(self, f, buf):
         """The buffer from frame f on (the frames since the last drawing hold it; see EraScreen.put)."""
@@ -599,14 +610,23 @@ class Teletype(K.Machine):
 def build(glb=None, power=1.0, paper_color=0xf0dfa4, name='teletype', collection=None, scene=None,
           location=(0.0, 0.0, 0.0), buffer_dir=None, ctx=None):
     """teletype.js build(THREE, opts): opts.glb (another GLB path), opts.power, opts.paperColor (paper_color).
-    buffer_dir: where the character buffer's PNG frames go (default: <ctx.out_dir>/screens/<name> with a scene's ctx,
-    else beside the saved blend, else a temp folder). ctx: a scene's ctx (its scene, and the default route of every
-    update's keys)."""
+    buffer_dir: where the character buffer's PNG frames go (default: <ctx.out_dir>/screens/<root name> with a scene's
+    ctx, else beside the saved blend, else a temp folder). The frames are named after the root, which Blender keeps
+    unique ('teletype', 'teletype.001'), so two teletypes in one film never share a buffer, even in one buffer_dir.
+    ctx: a scene's ctx (its scene, and the default route of every update's keys). `power` holds until the first
+    update sets one (teletype.js's own build-time update(0, {}) put its uniform back to 1 at once)."""
     scene = scene or (ctx.scene if ctx is not None else bpy.context.scene)
-    if buffer_dir is None and ctx is not None:
-        buffer_dir = os.path.join(ctx.out_dir, 'screens', name)
     path = glb or os.path.join(K.PACK, 'teletype.glb')
     root, nodes, col = K.import_glb(path, name, collection, scene)
+    if buffer_dir is None and ctx is not None:
+        buffer_dir = os.path.join(ctx.out_dir, 'screens', root.name)
+    if isinstance(buffer_dir, str) and buffer_dir.startswith('//'):        # Blender-relative: beside the saved blend
+        if bpy.data.filepath:
+            buffer_dir = bpy.path.abspath(buffer_dir)
+        else:              # an unsaved blend gives '//' no anchor (and on Windows a '//' path reads as a network share)
+            print(f'[teletype] buffer_dir {buffer_dir!r} is relative to a blend that is not saved yet; the buffer '
+                  'frames go to a folder of their own under the system temp folder')
+            buffer_dir = None
     root.location = location
     L = K.json_load('teletype_layout.json')
     tt = Teletype(root, col, scene, ctx=ctx)
@@ -775,7 +795,7 @@ def build(glb=None, power=1.0, paper_color=0xf0dfa4, name='teletype', collection
     from . import EraScreen
     tt.buffer_writes = 0
     blank = np.zeros((ROWS, BUF_W, 4), np.uint8)
-    tt.buffer = EraScreen(tt, f'{n}_paper_buffer', 2.0, 1.0, BUF_W, lambda w, h: _pil(blank), nearest=True,
+    tt.buffer = EraScreen(tt, f'{root.name}_paper_buffer', 2.0, 1.0, BUF_W, lambda w, h: _pil(blank), nearest=True,
                           out_dir=buffer_dir)
     tt.buffer.image.colorspace_settings.name = 'Non-Color'
     tt.buffer.image.alpha_mode = 'CHANNEL_PACKED'

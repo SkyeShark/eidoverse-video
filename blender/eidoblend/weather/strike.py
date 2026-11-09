@@ -158,7 +158,9 @@ def make_bolt(event, collection, material, frames, recs):
 # ------------------------------------------------------------------------------------------ impact objects ---
 
 def _octahedron(b):
-    """OctahedronGeometry(1, 0): two open square pyramids, apexes on +-Z, equator on the X and Y axes."""
+    """OctahedronGeometry(1, 0): two open square pyramids, apexes on +-Z, equator on the X and Y axes, every face
+    facing out (the mirrored lower pyramid's faces are flipped back: the sparks draw front faces only, as three's
+    FrontSide does)."""
     cone = b.node('GeometryNodeMeshCone', fill_type='NONE')
     cone.inputs['Vertices'].default_value = 4
     cone.inputs['Radius Top'].default_value = 0.0
@@ -170,8 +172,10 @@ def _octahedron(b):
     down = b.node('GeometryNodeTransform')
     b.links.new(up.outputs['Geometry'], down.inputs['Geometry'])
     down.inputs['Scale'].default_value = (1, 1, -1)
+    flip = b.node('GeometryNodeFlipFaces')
+    b.links.new(down.outputs['Geometry'], flip.inputs['Mesh'])
     join = b.node('GeometryNodeJoinGeometry')
-    b.links.new(down.outputs['Geometry'], join.inputs[0])
+    b.links.new(flip.outputs['Mesh'], join.inputs[0])
     b.links.new(up.outputs['Geometry'], join.inputs[0])
     return join.outputs['Geometry']
 
@@ -230,7 +234,7 @@ def spark_material():
     nt = m.node_tree
     nt.nodes.clear()
     m.surface_render_method = 'BLENDED'
-    m.use_backface_culling = False
+    m.use_backface_culling = True            # three's FrontSide: an additive octahedron adds its near faces only
     b = G(nt)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     a = b.node('ShaderNodeAttribute', attribute_type='GEOMETRY')
@@ -306,7 +310,7 @@ def puff_material():
     nt = m.node_tree
     nt.nodes.clear()
     m.surface_render_method = 'BLENDED'
-    m.use_backface_culling = False
+    m.use_backface_culling = True            # three's FrontSide: one layer of smoke per puff, not its back face too
     b = G(nt, x0=-3000, y0=1200)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     out.location = (800, 0)
@@ -534,9 +538,9 @@ def make_impact(impact, collection, frames, times, recs_cam, scene_offset):
 
 # --------------------------------------------------------------------------------- the local-strike ray cast ---
 
-def _blocked(ob):
+def _blocked(ob, materials=True):
     """blockedStrikeReceiver: hidden, flagged, named like an emitter / decal / plant (up the parent chain and its
-    collections), or a transparent first material."""
+    collections), or a transparent first material (materials=False skips that: an instancer's own material)."""
     node = ob
     while node is not None:
         if node.hide_render or node.get('eido_noLightningStrike') or BLOCKED_NAMES.search(node.name or ''):
@@ -545,6 +549,8 @@ def _blocked(ob):
     for c in ob.users_collection:
         if BLOCKED_NAMES.search(c.name or ''):
             return True
+    if not materials:
+        return False
     mats = [s.material for s in ob.material_slots if s.material]
     if mats:
         m = mats[0]
@@ -557,15 +563,17 @@ def _blocked(ob):
     return False
 
 
-def resolve_targets(targets):
-    """strikeTargets (objects, collections, or a callable returning them) -> mesh objects."""
+def _target_list(targets):
     value = targets() if callable(targets) else targets
     if value is None:
         return []
-    if not isinstance(value, (list, tuple, set)):
-        value = [value]
+    return list(value) if isinstance(value, (list, tuple, set)) else [value]
+
+
+def resolve_targets(targets):
+    """strikeTargets (objects, collections, or a callable returning them) -> mesh objects."""
     out = []
-    for v in value:
+    for v in _target_list(targets):
         if isinstance(v, bpy.types.Collection):
             out.extend(o for o in v.all_objects if o.type == 'MESH')
         elif isinstance(v, bpy.types.Object) and v.type == 'MESH':
@@ -573,12 +581,92 @@ def resolve_targets(targets):
     return [o for o in out if not o.name.startswith('eido_')]
 
 
+def _target_roots(targets):
+    """Every object the targets name, of any type: meshes, and the instancers (collection-instance empties, objects
+    whose Geometry Nodes make instances) whose instances are targets too."""
+    out = set()
+    for v in _target_list(targets):
+        if isinstance(v, bpy.types.Collection):
+            out.update(o for o in v.all_objects)
+        elif isinstance(v, bpy.types.Object):
+            out.add(v)
+    return {o for o in out if not o.name.startswith('eido_')}
+
+
+def _strike_meshes(targets):
+    """[(receiver, instancer or None, BVHTree)] of target_surfaces: what the local-strike columns are cast through."""
+    return [(r, o, BVHTree.FromPolygons(w.tolist(), p)) for r, o, w, p in target_surfaces(targets) if p]
+
+
+def target_surfaces(targets):
+    """The world-space surfaces the targets put in the scene, as [(receiver, instancer or None, world vertices
+    (n, 3) float64, polygons)]: each target mesh, and each instance a target makes (a collection instance, Geometry
+    Nodes instances) through its own world matrix, as findLocalStrike casts an InstancedMesh's instances through
+    theirs. The receiver is the mesh the surface belongs to (its name, parents, collections and material go through
+    the JS receiver rules); the instancer is the scene object that made the instance. The rain-exposure capture reads
+    the same surfaces, so the drops (which realize the occluders' instances), the strikes and the dry ground agree."""
+    import numpy as np
+    roots = _target_roots(targets)
+    if not roots:
+        return []
+    dg = bpy.context.evaluated_depsgraph_get()
+    local = {}
+    found = []
+    for inst in dg.object_instances:                 # instance data is valid only while iterating: copy it out
+        ob = inst.object
+        if ob is None or ob.type != 'MESH':
+            continue
+        if inst.is_instance:
+            owner = inst.parent.original if inst.parent is not None else None
+            if owner is None or owner not in roots:
+                continue
+        else:
+            owner = None
+            if ob.original not in roots:
+                continue
+        me = ob.data
+        key = me.as_pointer()
+        if key not in local:
+            nv, nl, npoly = len(me.vertices), len(me.loops), len(me.polygons)
+            co = np.empty(nv * 3, np.float64)
+            me.vertices.foreach_get('co', co)
+            lv = np.empty(nl, np.int64)
+            me.loops.foreach_get('vertex_index', lv)
+            ls = np.empty(npoly, np.int64)
+            me.polygons.foreach_get('loop_start', ls)
+            lt = np.empty(npoly, np.int64)
+            me.polygons.foreach_get('loop_total', lt)
+            local[key] = (co.reshape(-1, 3), [lv[s:s + t].tolist() for s, t in zip(ls, lt)])
+        found.append((ob.original, owner, key, np.array(inst.matrix_world, np.float64)))
+    seen = {f[0] for f in found if f[1] is None}
+    for ob in resolve_targets(targets):              # a target mesh the viewport graph leaves out (hide_viewport)
+        if ob in seen or ob.hide_render:
+            continue
+        ev = ob.evaluated_get(dg)
+        me = ev.to_mesh()
+        co = np.array([v.co[:] for v in me.vertices], np.float64).reshape(-1, 3)
+        local[('mesh', ob.name)] = (co, [list(p.vertices) for p in me.polygons])
+        ev.to_mesh_clear()
+        found.append((ob, None, ('mesh', ob.name), np.array(ob.matrix_world, np.float64)))
+    out = []
+    for receiver, owner, key, mw in found:
+        co, polys = local[key]
+        if not polys:
+            continue
+        world = co @ mw[:3, :3].T + mw[:3, 3]
+        if np.linalg.det(mw[:3, :3]) < 0:            # a mirrored instance: keep its faces' normals pointing out
+            polys = [p[::-1] for p in polys]
+        out.append((receiver, owner, world, polys))
+    return out
+
+
 def make_strike_finder(targets, strike_height_at=None):
     """find_local_strike(interval, cam, sky, prefer_forward) for the scheduler: candidates from lightning.py, every
-    surface along each column (downward rays, world-space BVH of the evaluated meshes), the JS receiver rules."""
-    def column_hits(trees, x, y, top_z, far):
+    surface along each column (downward rays through world-space BVHs of the evaluated target meshes and of their
+    instances), the JS receiver rules."""
+    def column_hits(meshes, x, y, top_z, far):
         hits = []
-        for ob, bvh in trees:
+        for receiver, owner, bvh in meshes:
             origin = Vector((x, y, top_z))
             d = Vector((0.0, 0.0, -1.0))
             travelled = 0.0
@@ -587,31 +675,20 @@ def make_strike_finder(targets, strike_height_at=None):
                 if loc is None:
                     break
                 travelled += dist
-                hits.append((travelled, loc.copy(), nrm.normalized(), ob))
+                hits.append((travelled, loc.copy(), nrm.normalized(), receiver, owner))
                 origin = loc + d * 1e-4
                 travelled += 1e-4
         return sorted(hits, key=lambda h: h[0])
 
     def find(interval, cam, sky, prefer_forward):
-        objs = resolve_targets(targets)
-        dg = bpy.context.evaluated_depsgraph_get()
-        trees = []
-        for ob in objs:
-            ev = ob.evaluated_get(dg)
-            me = ev.to_mesh()
-            mw = ev.matrix_world
-            verts = [mw @ v.co for v in me.vertices]
-            polys = [tuple(p.vertices) for p in me.polygons]
-            ev.to_mesh_clear()
-            if polys:
-                trees.append((ob, BVHTree.FromPolygons(verts, polys)))
+        meshes = _strike_meshes(targets)
         cloud_top = float(sky['cloudStart']) + float(sky['cloudHeight']) + 100
         cp = cam['pos']
         top_y = max(cloud_top, cp[1] + 700)
         far = max(2400.0, top_y + 1200)
         for x3, z3 in L.strike_candidates(interval, cp, cam['forward'], prefer_forward):
-            for _dist, loc, nrm, ob in column_hits(trees, x3, -z3, top_y, far):
-                if _blocked(ob):
+            for _dist, loc, nrm, ob, owner in column_hits(meshes, x3, -z3, top_y, far):
+                if _blocked(ob) or (owner is not None and _blocked(owner, materials=False)):
                     continue
                 n3 = t3(nrm)
                 if n3[1] < L.UPWARD_NORMAL_MIN:
@@ -619,7 +696,8 @@ def make_strike_finder(targets, strike_height_at=None):
                 p3 = t3(loc)
                 if math.hypot(p3[0] - cp[0], p3[2] - cp[2]) < L.LOCAL_STRIKE_PLAYER_GUARD:
                     continue
-                return dict(point=p3, normal=n3, kind=ob.name or 'upward_surface', object=ob)
+                return dict(point=p3, normal=n3, kind=ob.name or 'upward_surface',
+                            object=owner if owner is not None else ob)
             hit = _terrain_fallback(strike_height_at, x3, z3, cp)
             if hit:
                 return hit

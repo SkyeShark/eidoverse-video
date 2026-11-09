@@ -39,7 +39,7 @@ import os
 import numpy as np
 
 from .gpu_eval import SdfProgram
-from .spec import _bounds, sdf_collection
+from .spec import _bounds, file_stem, resolve_cache_dir, sdf_collection
 
 VOLUME_QUALITY = {'fast': 96, 'balanced': 160, 'high': 256, 'ultra': 384}
 
@@ -125,8 +125,7 @@ class SdfVolume:
         self.voxel = spec.voxel_size()
         self.lo, self.hi = blender_box(spec.bounds_min, spec.bounds_max)
         self.dims = np.maximum(1, np.ceil((self.hi - self.lo) / self.voxel - 1e-9).astype(np.int64))
-        self.cache_dir = os.path.normpath(bpy.path.abspath(spec.cache_dir)) if spec.cache_dir.startswith('//') \
-            else spec.cache_dir
+        self.cache_dir = resolve_cache_dir(spec.cache_dir)
         self.grid_info = {'dims': tuple(int(x) for x in self.dims), 'voxel': self.voxel}
         vd = bpy.data.volumes.new(self.name)
         self.object = bpy.data.objects.new(self.name, vd)
@@ -137,6 +136,9 @@ class SdfVolume:
         self.object.scale = tuple(s)
         self.object['sdf_volume'] = self.mode
         self.material = None
+        # the .vdb files are named for the object, which Blender keeps unique: two volumes of one example keep
+        # their own grids
+        self.stem = file_stem(self.object.name)
         from .helper import track
         track(self)
 
@@ -263,10 +265,12 @@ class SdfVolume:
 
     # ------------------------------------------------------------------------------------------------ building --
     def build(self, t=None, log=print):
-        """Sample the volume at time t (seconds; None keeps uTime) into <cache_dir>/<name>.vdb and show it."""
+        """Sample the volume at time t (seconds; None keeps uTime) into <cache_dir>/<stem>_t<milliseconds>.vdb (the
+        stem is the object's name) and show it. A file per time: Blender keeps the grids it loaded from a path, so a
+        second build into one file would render the first build's grids."""
         t = self.spec.time if t is None else t
         grids = self.sample_grids(t)
-        path = os.path.join(self.cache_dir, f'{self.name}.vdb')
+        path = os.path.join(self.cache_dir, f'{self.stem}_t{int(round(float(t) * 1000)):07d}.vdb')
         self.write_vdb(path, grids)
         vd = self.object.data
         vd.filepath = path
@@ -288,7 +292,7 @@ class SdfVolume:
         grids = None
         last = None
         for f in range(fs, fe + 1):
-            path = os.path.join(self.cache_dir, f'{self.name}_{f:04d}.vdb')
+            path = os.path.join(self.cache_dir, f'{self.stem}_{f:04d}.vdb')
             if (f - fs) % max(1, int(step)) == 0 or last is None:
                 t = time_offset + time_scale * (f - fs) / fps
                 if controls:
@@ -303,7 +307,7 @@ class SdfVolume:
             if log:
                 log(f'[sdf.volume] {self.name}: frame {f}, max density {self.grid_info["max_density"]:.3g}/m')
         vd = self.object.data
-        vd.filepath = os.path.join(self.cache_dir, f'{self.name}_{fs:04d}.vdb')
+        vd.filepath = os.path.join(self.cache_dir, f'{self.stem}_{fs:04d}.vdb')
         vd.is_sequence = True
         vd.frame_start = fs
         vd.frame_duration = fe - fs + 1

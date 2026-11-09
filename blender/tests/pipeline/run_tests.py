@@ -24,6 +24,8 @@ samples or fewer, a few seconds of film), so on a shared GPU run them through th
     T15 a plan file the script reads (undeclared): an edit to it rebuilds the scene; unchanged, the build is reused
     T16 two shots: LINEAR and CONSTANT keys in the saved .blend, the keyed lamp step holds, nothing changed without
         a key, and shot B's framing measures what its camera sees
+    T17 a Geometry Nodes modifier (Blender 5.2 keeps its inputs as RNA, not ID properties): the build's un-keyed check
+        reads it, a keyed input plays from the saved .blend, an input set without a key is named
 
 Outputs land in blender/tests/pipeline/out/ (git-ignored). Library textures and models come from the shared cache:
 set EIDO_ASSET_CACHE to a checkout that has them and EIDO_NO_FETCH=1 to forbid downloads. Exit 0 when every test
@@ -48,6 +50,8 @@ BRIDGE = os.path.join(HERE, 'placement_bridge', 'scene.json')
 KIT = os.path.join(HERE, 'kit', 'scene.json')
 NAV = os.path.join(HERE, 'nav', 'scene.json')
 BAKE = os.path.join(HERE, 'bake', 'scene.json')
+GN = os.path.join(HERE, 'gn_keying', 'scene.json')
+GN_UNKEYED = os.path.join(HERE, 'gn_keying', 'scene_unkeyed.json')
 STALE = os.path.join(HERE, 'stale', 'scene.json')
 SHOTS = os.path.join(HERE, 'shots', 'scene.json')
 results = []
@@ -437,8 +441,39 @@ def t16():
     check('T16', len(pngs) == 4, f'stills both sides of the cut (LOOK at them): {[os.path.basename(p) for p in pngs]}')
 
 
+def t17():
+    rc, out = run(['build', GN, '--rebuild', '--force'])
+    d = digest(os.path.join(OUT, 'gn_keying_build.audit.json'))
+    check('T17', rc == 0 and d['status'] == 'normal completion',
+          f"a scene with a Geometry Nodes modifier builds (exit {rc}, digest '{d['status']}')")
+    read = [l for l in out.splitlines() if 'grow inputs as the snapshot reads them' in l]
+    check('T17', read and "Height (Socket_2)" in read[0] and "Twist (Socket_3)" in read[0],
+          f"keying.node_inputs reads the modifier's inputs by their socket names: {read[0][-130:] if read else out[-300:]}")
+    uk = records(d, 'build.unkeyed')
+    check('T17', uk and uk[0]['outcome'] == 'PASS', f"the keyed input is not flagged: {uk[0]['message'][:100] if uk else ''}")
+    path = 'modifiers["grow"].properties.inputs.Socket_2.value'
+    q = query(os.path.join(OUT, 'gn_keying.blend'), {'frames': [0, 24, 47], 'paths': {'pillar': [path]},
+                                                     'dims': ['pillar']})
+    if not q:
+        return check('T17', False, 'query_blend.py gave nothing')
+    h = {f: q['frames'][f]['paths']['pillar'][path] for f in ('0', '24', '47')}
+    z = {f: q['frames'][f]['dims']['pillar'][2] for f in ('0', '24', '47')}
+    want = {'0': 0.5, '24': 1.5, '47': 0.5 + 47 / 24}
+    check('T17', all(abs(h[f] - want[f]) < 1e-4 for f in want),
+          'the saved .blend plays the keyed Height (0.5 + t): ' + ', '.join(f'frame {f} {h[f]:.3f}' for f in h))
+    check('T17', all(abs(z[f] - 1.01 * want[f]) < 1e-3 for f in want),
+          "and the evaluated pillar is that tall (the modifier's output, 1.01 m x Height): "
+          + ', '.join(f'frame {f} {z[f]:.3f} m' for f in z))
+    rc, _ = run(['build', GN_UNKEYED, '--rebuild', '--force'])
+    d = digest(os.path.join(OUT, 'gn_unkeyed_build.audit.json'))
+    uk = [r for r in warns(d) if r['check'] == 'build.unkeyed']
+    check('T17', rc == 0 and uk and "'pillar'/'grow' input 'Twist (Socket_3)'" in uk[0]['message']
+          and 'properties.inputs.Socket_3.value' in uk[0]['message'],
+          f"an input set without a key is named, with the ctx.key call that fixes it: {uk[0]['message'][:240] if uk else 'no WARN'}")
+
+
 TESTS = {'T0': t0, 'T7': t7, 'T1': t1, 'T6': t6, 'T2': t2, 'T3': t3, 'T4': t4, 'T5': t5, 'T8': t8, 'T9': t9,
-         'T10': t10, 'T11': t11, 'T12': t12, 'T13': t13, 'T14': t14, 'T15': t15, 'T16': t16}
+         'T10': t10, 'T11': t11, 'T12': t12, 'T13': t13, 'T14': t14, 'T15': t15, 'T16': t16, 'T17': t17}
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)

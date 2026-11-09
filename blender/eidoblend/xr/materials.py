@@ -79,12 +79,14 @@ def _image_chain_ok(socket):
     for n in _upstream(socket):
         t = n.type
         if t in PASS_THROUGH:
-            if t == 'TEX_IMAGE':
-                if n.image is None or n.projection != 'FLAT':
-                    return False
-                v = n.inputs['Vector']
-                if v.is_linked and v.links[0].from_node.type == 'TEX_COORD' and v.links[0].from_socket.name != 'UV':
-                    return False
+            if t == 'TEX_IMAGE' and (n.image is None or n.projection != 'FLAT'):
+                return False
+            # texture coordinates other than the UVs (Object, Generated, Window ...), into an image or through a Mapping
+            # node: the exporter writes the image on the UVs regardless
+            for s in n.inputs:
+                for lk in (s.links if s.is_linked else ()):
+                    if lk.from_node.type == 'TEX_COORD' and lk.from_socket.name != 'UV':
+                        return False
             continue
         if t == 'MIX' and n.blend_type == 'MULTIPLY':
             linked = [s for s in n.inputs if s.enabled and s.is_linked]
@@ -101,6 +103,16 @@ def _image_chain_ok(socket):
 
 def _from(socket):
     return socket.links[0].from_socket if socket.is_linked else None
+
+
+def volume_only(mat):
+    """True for a volume material with no surface (a haze or fog box: Principled Volume into the output's Volume, nothing
+    into its Surface). glTF has no volumes, and Blender's exporter writes such a mesh with a default OPAQUE material: a
+    grey box round the set."""
+    if mat is None or not mat.use_nodes or mat.node_tree is None:
+        return False
+    out = _active_output(mat.node_tree)
+    return out is not None and not out.inputs['Surface'].is_linked and out.inputs['Volume'].is_linked
 
 
 def classify(mat):
@@ -386,6 +398,29 @@ def used_materials(ob):
     return out
 
 
+def ensure_vrm_addon(log=print):
+    """Enable the VRM add-on when the file holds a VRM cast's MToon materials (nodes the add-on names 'Mtoon1...').
+    A .blend opened headless (export_cli.py) starts without add-ons: its MToon materials are then node groups this
+    module cannot read (they would go out unconverted) and the add-on's UV drivers look like animated material
+    values. True when the add-on is on (or nothing needs it)."""
+    needs = any(n.name.startswith('Mtoon1') for m in bpy.data.materials if m.node_tree is not None
+                for n in m.node_tree.nodes)
+    if not needs:
+        return True
+    try:
+        import addon_utils
+        from ..characters.vrm import ADDON, enable_addon
+        if not addon_utils.check(ADDON)[1]:
+            enable_addon()
+            if log:
+                log('[xr.materials] the VRM add-on enabled: the cast\'s MToon materials are read as MToon')
+        return bool(addon_utils.check(ADDON)[1])
+    except Exception as e:                                # not installed: the materials go out as the exporter sees them
+        if log:
+            log(f'[xr.materials] the VRM add-on could not be enabled ({e}): MToon materials are not converted')
+        return False
+
+
 def mtoon(mat):
     """The VRM add-on's MToon settings of a material (its glTF-shaped mtoon1 group), or None."""
     ext = getattr(mat, 'vrm_addon_extension', None) if mat is not None else None
@@ -535,13 +570,59 @@ def fallback_material(ob, name=None):
     return m
 
 
+def _tree_images(tree, seen_trees):
+    """Every image an Image Texture node of a node tree (and the groups in it) reads."""
+    for n in tree.nodes:
+        if n.type == 'TEX_IMAGE' and n.image is not None:
+            yield n.image
+        elif n.type == 'GROUP' and n.node_tree is not None and n.node_tree.name not in seen_trees:
+            seen_trees.add(n.node_tree.name)
+            yield from _tree_images(n.node_tree, seen_trees)
+
+
+def cap_images(objects, max_size=2048, log=print):
+    """Scale the images the objects' materials read down to max_size pixels on the long side: the headset uploads every
+    texture uncompressed (a 4096 RGBA map with its mips is about 90 MB of its GPU memory). In memory only (an export
+    runs on a .blend it does not save): each image is scaled and its pixels written back, which marks it changed, so
+    the glTF exporter encodes the scaled pixels (a JPEG as JPEG, anything else as PNG, or --images' format) instead of
+    copying the file. Images already within the cap, sequences, movies and UDIM sets are left as they are. Returns
+    [(image, (w, h) before, (w, h) after)]."""
+    import numpy as np
+    done, trees, out = set(), set(), []
+    for ob in objects:
+        if ob.type != 'MESH':
+            continue
+        for m in used_materials(ob):
+            if m.node_tree is None:
+                continue
+            for img in _tree_images(m.node_tree, trees):
+                if img.name in done:
+                    continue
+                done.add(img.name)
+                if img.source not in ('FILE', 'GENERATED') or img.type != 'IMAGE':
+                    continue
+                w, h = img.size
+                if not w or not h or max(w, h) <= max_size:
+                    continue
+                k = max_size / max(w, h)
+                nw, nh = max(1, round(w * k)), max(1, round(h * k))
+                img.scale(nw, nh)
+                px = np.empty(len(img.pixels), np.float32)
+                img.pixels.foreach_get(px)
+                img.pixels.foreach_set(px)             # a scale alone leaves is_dirty off (the exporter's T95616 note)
+                out.append((img.name, (w, h), (nw, nh)))
+    if log and out:
+        log(f'[xr.materials] {len(out)} image(s) scaled to {max_size} px at most: '
+            + ', '.join(f'{n} {a[0]}x{a[1]} -> {b[0]}x{b[1]}' for n, a, b in out[:8]) + (' ...' if len(out) > 8 else ''))
+    return out
+
+
 def bake_for_gltf(objects, out_dir, *, texel_density=24.0, min_size=256, max_size=2048, samples=4, margin=8,
                   device='GPU', bake_all=False, log=print):
     """Bake the channels the glTF exporter would drop on `objects` (meshes), into PNGs in out_dir. Returns
     {'baked': {object: {'size', 'channels', 'kind', 'images'}}, 'kept': [objects already exportable],
     'fallback': [objects with xr_material], 'seconds'}."""
     import time
-    import numpy as np
     t0 = time.time()
     sc = bpy.context.scene
     keep_engine, keep_samples = sc.render.engine, sc.cycles.samples
@@ -571,6 +652,8 @@ def bake_for_gltf(objects, out_dir, *, texel_density=24.0, min_size=256, max_siz
         return rep
     dev = _bl.cycles_gpu(sc, log) if device == 'GPU' else 'CPU'
     sc.render.engine = 'CYCLES'
+    if dev == 'CPU':                                           # (a film saved with Cycles on the GPU stays off it)
+        sc.cycles.device = 'CPU'
     sc.cycles.samples = int(samples)
     sc.render.bake.margin_type = 'EXTEND'
     try:
@@ -598,6 +681,14 @@ def _bake_object(ob, out_dir, texel_density, min_size, max_size, margin, log):
     import numpy as np
     size = texture_size(ob, texel_density, min_size, max_size)
     ensure_bake_uv(ob, log=log)
+    # the bake's UV map becomes the mesh's ACTIVE one (its active render map, which the film's own image textures read,
+    # stays). Blender 5.2's tangent-space normal bake writes its texels on the bake's uv_layer but in the tangent frame
+    # of the ACTIVE map (measured: three maps turned against each other, the bake follows the active one), and the glTF
+    # exporter computes the GLB's TANGENT attribute on the active map too. Left on the film's own map, the two agreed
+    # with each other but not with the texture's own texCoord: right in three while the GLB carries its tangents, half a
+    # turn wrong on a plane (bumps read as dents) wherever tangents are made again from the normal texture's UVs, as
+    # glTF prescribes (a viewer, or a compressor that drops them). On the bake's map all three agree
+    ob.data.uv_layers.active = ob.data.uv_layers[UV_NAME]
     mats = used_materials(ob)
     infos = {m.name: classify(m) for m in mats}
     kinds = {i['kind'] for i in infos.values()}

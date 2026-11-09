@@ -13,13 +13,17 @@ The authored RINGWORLDskyelement.glb is dressed for alien skies, as in WebGPU:
   - the band's OWN TWO LIGHTS, the underground sun at full strength and the planetshine: Blender sun lamps,
     light-linked to the band alone (WebGPU's per-material lightsNode), while the scene's sun is linked away from it;
   - the ARC LIGHT + AERIAL PERSPECTIVE (arcShade): per pixel in every ring material, from keyed per-frame values.
-EEVEE renders it as real geometry; every material composites the sky's shield and clouds over itself for camera
-rays (sky_view.overlay_group), so the local clouds always draw in front of the arc, as the WebGPU draw order did.
+EEVEE renders the band, its walls and its cloud sheet as real geometry in a scene of their own, the PLATE
+(make_plate): Sky.bake renders it per frame from the bake camera and composites it into the sky's camera layer, the
+local clouds over it. So the band sits behind every local object and under the clouds, as WebGPU's depthless band
+(renderOrder -99, drawn before the cloud dome and every local opaque) and Eanpa's private sky depth layer have it.
+The fog and rain walls stay in the main scene: local haze, depth-tested against the local geometry.
 
     ring = make_ringworld(scene, assets, opts, cache_dir)    # built by make_sky(world='ringworld')
     ring.bind_weather(wx, sky)
     vals = ring.update(t)        # per frame: arc light, haze, cloud coupling, band lamps
     ring.key(frame, vals)        # keyed data: the .blend plays any frame on its own
+    ring.make_plate()            # make_sky does this: the band, walls, sheet and lamps move to 'eido_ring_plate'
 """
 import math
 import os
@@ -34,6 +38,10 @@ CLOUD_H = 280.0                    # Eanpa: the sheet clears the displaced relie
 PROXY_OFFSET = 25.0                # the eclipse proxy's radius over the band's
 DAYLIGHT = (1.0, 0.97, 0.92)       # the colour the band's sun holds at local night
 RING_GROUP = 'eido_ring_keys'
+PLATE_SCENE = 'eido_ring_plate'    # the scene the band, walls, sheet and band lamps render in (make_plate)
+PLATE_COLLECTION = 'eido_ring_plate_elements'
+PLATE_CAMERA = 'eido_ring_plate_camera'
+PLATE_NEAR = 20.0                  # Eanpa's sky depth layer near plane: the nearest ring element is 800 m out
 
 
 def _smooth(e0, e1, x):
@@ -287,6 +295,89 @@ def ring_cloud_field(width=8192, height=256):
     return (macro * 0.62 + fil * 0.55).astype(np.float32)
 
 
+# ----------------------------------------------------------------------------------- Eanpa's v4 band relief ---
+
+RELIEF_MAGIC = 0x464C5245              # 'ERLF', little endian
+RELIEF_FILES = dict(relief='ring_relief_v4.bin.gz', albedo='ring_albedo_v4.png', water='ring_relief_v3.bin.gz')
+
+
+def decode_ring_relief(buffer):
+    """Eanpa src/ring_relief.js decodeRingRelief: the ERLF v1 container, a 16-byte header (magic, version, width,
+    height) then r16float heights and rgba8 normal + AO, rows bottom-to-top as stored. Raises on a truncated or foreign
+    buffer, as the JS does. Returns dict(width, height, height_data (h, w) float32, normal_ao_data (h, w, 4) uint8)."""
+    import struct
+    b = bytes(buffer)
+    if len(b) < 16:
+        raise ValueError('Truncated ring relief header')
+    magic, version, w, h = struct.unpack('<4I', b[:16])
+    if magic != RELIEF_MAGIC or version != 1:
+        raise ValueError('Unsupported ring relief format')
+    if not w or not h or w > 8192 or h > 8192 or len(b) != 16 + w * h * 6:
+        raise ValueError('Invalid ring relief dimensions or payload length')
+    heights = np.frombuffer(b, np.float16, w * h, 16).astype(np.float32).reshape(h, w)
+    normal_ao = np.frombuffer(b, np.uint8, w * h * 4, 16 + w * h * 2).reshape(h, w, 4)
+    return dict(width=w, height=h, height_data=heights, normal_ao_data=normal_ao)
+
+
+def _read_relief(path):
+    import gzip
+    raw = open(path, 'rb').read()
+    return decode_ring_relief(gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw)
+
+
+def _write_png_rgba8(path, data_bottom_up):
+    """uint8 (h, w, 4), rows bottom-up (Blender's pixel order), to a PNG exactly as given (OpenImageIO, bundled with
+    Blender): no alpha association, so a packed AO in alpha stays data."""
+    import OpenImageIO as oiio
+    data = np.ascontiguousarray(data_bottom_up[::-1])                  # PNG rows run top-down
+    h, w, c = data.shape
+    out = oiio.ImageOutput.create(path)
+    if out is None:
+        raise RuntimeError('cannot write ' + path)
+    out.open(path, oiio.ImageSpec(w, h, c, 'uint8'))
+    out.write_image(data)
+    out.close()
+
+
+def load_ring_relief(folder, cache_dir):
+    """Eanpa src/ring_relief.js loadRingRelief: Eanpa's newest band, the eroded v4 relief (ring_relief_v4.bin.gz: 4344 x
+    1448 heights with its own normals and AO, 8 repeats around as the colour map), its matching albedo
+    (ring_albedo_v4.png) and the v3 relief's normals, kept for the water waves (ring_relief_v3.bin.gz). Gzip or raw.
+
+    The normal + AO maps are written once into cache_dir as PNGs: the stored bottom-to-top rows are Blender's pixel
+    order, and their convention (x = -dH/du, y = +dH/drow, AO in alpha) is the repo's band maps', so the band
+    material reads them unchanged. Returns the JS keys: bandHeight (heights, rows top-down as displayed), bandNormal and
+    bandAO (the same RGBA PNG), bandColor (the albedo PNG), waterWaveNormal (a PNG, or None without the v3 file)."""
+    rel = _read_relief(os.path.join(folder, RELIEF_FILES['relief']))
+    albedo = os.path.join(folder, RELIEF_FILES['albedo'])
+    if not os.path.exists(albedo):
+        raise FileNotFoundError('load_ring_relief: %s has the v4 relief but not its albedo %s'
+                                % (folder, RELIEF_FILES['albedo']))
+    os.makedirs(cache_dir, exist_ok=True)
+    nrm = os.path.join(cache_dir, 'ring_relief_v4_normal_ao.png')
+    if not os.path.exists(nrm):
+        _write_png_rgba8(nrm, rel['normal_ao_data'])
+    water = None
+    wpath = os.path.join(folder, RELIEF_FILES['water'])
+    if os.path.exists(wpath):
+        water = os.path.join(cache_dir, 'ring_relief_v3_water_normal.png')
+        if not os.path.exists(water):
+            _write_png_rgba8(water, _read_relief(wpath)['normal_ao_data'])
+    return dict(bandHeight=np.ascontiguousarray(rel['height_data'][::-1]), bandNormal=nrm, bandAO=nrm,
+                bandColor=albedo, waterWaveNormal=water, width=rel['width'], height=rel['height'], folder=folder)
+
+
+def _upsample_to(img, shape):
+    """Bilinear resample of a (rows top-down) field to another shape, wrapping around the ring (axis 1)."""
+    if img.shape[:2] == tuple(shape[:2]):
+        return img
+    H, W = shape[:2]
+    u = (np.arange(W) + 0.5) / W
+    v = (np.arange(H) + 0.5) / H
+    U, V = np.meshgrid(u, v)
+    return _sample(img, U, V)
+
+
 # ---------------------------------------------------------------------------------------------- the system ---
 
 class Ringworld:
@@ -315,6 +406,7 @@ class Ringworld:
         self.sky = None
         self.objects = {}
         self.info = dict(radius=R_REF, tile=self.tile, halfWidth=HALF_WIDTH, repeat=8)
+        self.plate_scene = self.plate_camera = self.plate_collection = None     # make_plate
         self._build()
 
     # ---- build ----
@@ -371,6 +463,22 @@ class Ringworld:
         self.info['phase'] = phase
         cache = self.cache_dir
         os.makedirs(cache, exist_ok=True)
+        # Eanpa's newest band (src/ring_relief.js loadRingRelief): the eroded v4 relief with its own normals and AO, its
+        # matching albedo and the v3 water normals, from reliefDir when the set is there (make_sky looks in the repo's
+        # celestial folder). Without it the band keeps the repo's v1 height, normal and AO maps and the GLB's colour
+        # map, as sky_worlds.js has it.
+        self.relief = None
+        rd = self.opts.get('reliefDir', self.A.get('reliefDir'))
+        if rd and os.path.exists(os.path.join(rd, RELIEF_FILES['relief'])):
+            self.relief = load_ring_relief(rd, cache)
+            self.A = dict(self.A, bandNormal=self.relief['bandNormal'], bandAO=self.relief['bandAO'],
+                          bandColor=self.relief['bandColor'])
+            if self.relief['waterWaveNormal']:
+                self.A['waterWaveNormal'] = self.relief['waterWaveNormal']
+            # Eanpa's ringsky host reads the v4 maps at their own strength, the AO packed in the normal map's alpha
+            self.opts.setdefault('bandNormalScale', 1.0)
+            self.opts.setdefault('bandAOPackedNormal', True)
+        self.info['relief'] = 'v4' if self.relief is not None else 'v1'
         self.map_path = os.path.join(cache, 'ring_band_albedo.png')
         if self.map_image is not None and not os.path.exists(self.map_path):
             self.map_image.save(filepath=self.map_path)
@@ -390,12 +498,19 @@ class Ringworld:
         self.info['localReliefBlend'] = lrb
         # GEOMETRY RELIEF (Eanpa's default): the band's height field displaced into real stitched geometry. With
         # geometryRelief=False the GLB's own flat terrain mesh stays, shaded by its normal map alone.
-        self.authored_band = not (_opt_on(self.opts, 'geometryRelief', True) and self.A.get('bandHeight'))
+        self.authored_band = not (_opt_on(self.opts, 'geometryRelief', True)
+                                  and (self.A.get('bandHeight') or self.relief is not None))
         if not self.authored_band:
             land = np.clip((soft - 0.30) / 0.40, 0.0, 1.0)
             land = land * land * (3 - 2 * land)
-            height = load_image_rgba(self.A['bandHeight'], srgb=False)[::-1, :, 0].astype(np.float64)
-            height = (height - height.min()) / max(1e-9, height.max() - height.min())
+            if self.relief is not None:
+                # the v4 heights as stored (x heightMeters, as Eanpa's geometry reads them), at twice the mask's
+                # resolution: the land mask follows them there and still holds the lakes level
+                height = self.relief['bandHeight'].astype(np.float64)
+                land = _upsample_to(land, height.shape)
+            else:
+                height = load_image_rgba(self.A['bandHeight'], srgb=False)[::-1, :, 0].astype(np.float64)
+                height = (height - height.min()) / max(1e-9, height.max() - height.min())
             hm = float(self.opts.get('terrainHeightMeters', self.opts.get('heightMeters', 85.0)))
             verts, uv, tris, ginfo = ring_terrain_arrays(
                 height, land, height_meters=hm,
@@ -564,6 +679,63 @@ class Ringworld:
                     bpy.data.lights.remove(data)
         self.band_sun = self.band_shine = None
         return self
+
+    # ---- the plate: the band behind every local object ----
+    def make_plate(self):
+        """Move the ring's visible sky elements into a scene of their own, which Sky.bake renders per frame as a
+        PLATE into the sky's camera layer, so every local object draws over the band. WebGPU draws the band without
+        depth before every local opaque (sky_worlds.js: "foreground opaques draw later, painting over the depthless
+        band"); Eanpa composites its private sky depth layer behind local geometry. In EEVEE's one depth buffer the band,
+        at its authored placement, meets an eye-level view about 875 m out along the ring (its walls about 960 m out
+        at 30 degrees), so a terrain or a set reaching past that inside a 60 degree wedge each way along the ring
+        would lie behind it.
+
+        The plate scene ('eido_ring_plate') holds the band, its walls and cloud sheet, the band's two lamps and the
+        plate camera, and shares two objects with the main scene: the group they hang from and the eclipse proxy, which
+        shadows both suns. The fog and rain walls stay in the main scene: local haze, depth-tested against the local
+        geometry, over the band. Its film is transparent and it takes the main scene's world, which lights the band as
+        before. Returns the plate scene."""
+        import bpy
+        plate = bpy.data.scenes.get(PLATE_SCENE) or bpy.data.scenes.new(PLATE_SCENE)
+        coll = bpy.data.collections.get(PLATE_COLLECTION) or bpy.data.collections.new(PLATE_COLLECTION)
+        if coll.name not in plate.collection.children:
+            plate.collection.children.link(coll)
+        moving = [o for o in (self.band, self.walls, self.clouds, self.band_sun, self.band_shine) if o is not None]
+        for ob in moving + [o for o in (self.group, self.eclipse_proxy) if o is not None]:
+            if ob.name not in coll.objects:
+                coll.objects.link(ob)
+        # out of the main scene's collections only: the light-linking collections (the band lamps' receivers, the
+        # suns' blockers) hold these objects too, and stay as they are
+        main = {self.scene.collection} | set(self.scene.collection.children_recursive)
+        for ob in moving:
+            for c in list(ob.users_collection):
+                if c in main:
+                    c.objects.unlink(ob)
+        cam = bpy.data.objects.get(PLATE_CAMERA)
+        if cam is None:
+            cam = bpy.data.objects.new(PLATE_CAMERA, bpy.data.cameras.new(PLATE_CAMERA))
+        if cam.name not in coll.objects:
+            coll.objects.link(cam)
+        cd = cam.data
+        cd.type = 'PERSP'
+        cd.sensor_fit = 'HORIZONTAL'
+        cd.shift_x = cd.shift_y = 0.0
+        cd.clip_start, cd.clip_end = PLATE_NEAR, 4.0 * R_REF
+        plate.camera = cam
+        r = plate.render
+        r.engine = 'BLENDER_EEVEE'
+        r.film_transparent = True
+        r.use_compositing = False
+        r.use_sequencer = False
+        r.use_motion_blur = False
+        r.resolution_percentage = 100
+        ims = r.image_settings
+        ims.media_type = 'IMAGE'
+        ims.file_format = 'OPEN_EXR'
+        ims.color_mode = 'RGBA'
+        ims.color_depth = '16'
+        self.plate_scene, self.plate_camera, self.plate_collection = plate, cam, coll
+        return plate
 
     def ring_center_three(self):
         c = self.band.matrix_world.translation
@@ -837,7 +1009,10 @@ def make_ringworld(scene, assets, opts=None, cache_dir=None, collection=None):
       analytic   litBand (True; False: the emissive comparison path), nightTint, nightSat (1.3), nightLevel (1.2)
       geometry   geometryRelief (True), terrainHeightMeters / heightMeters (85), localReliefBlend ((700, 2000) m of
                  arc), around (4096), across (512), panelTile (60), centerY; reliefPrefilter (True, the Blender
-                 edition's: the relief filtered to each row's vertex spacing, see ring_terrain_arrays)
+                 edition's: the relief filtered to each row's vertex spacing, see ring_terrain_arrays); reliefDir (a
+                 folder holding Eanpa's v4 set, ring_relief_v4.bin.gz + ring_albedo_v4.png [+ ring_relief_v3.bin.gz]:
+                 load_ring_relief; the band then displaces the eroded v4 heights and wears its albedo, normals and AO,
+                 with bandNormalScale 1 and bandAOPackedNormal as Eanpa's host sets them)
       lamps      bandLights, bandSunIntensity (3.2), bandShineIntensity (0.55), bandCastShadow (False, Eanpa's),
                  bandShadowMapSize (4096) or bandShadowTexel (metres)
       elements   ringClouds, cloudHeight (280), cloudAtlas ((8192, 256) or {width, height}), fogWall, rainWall,

@@ -247,7 +247,8 @@ C.check('register_sdf_helper binds the HDRI', res['env'] is not None and two.pro
 CHROME = r"""
 vec3 shade(vec3 p, vec3 n, float mat) { return sampleEnvMap(sdfReflectWorld(p, n)); }"""
 two.program.shade = CHROME
-cam = C.camera((0.0, -5.2, 1.3), (0.0, 0.0, 0.45), lens=40)
+# the five stand from x = -3.2 to 3.4 m: this frame holds +-3.5 m at the line
+cam = C.camera((0.0, -7.4, 1.6), (0.0, 0.0, 0.45), lens=38)
 ref = two.raymarch_reference(cam, 640, 270, samples=1)
 hit = ref[..., 3] > 0.5
 C.check('sampleEnvMap reads the sky', hit.any() and float(ref[hit][:, 2].mean()) > 0.05,

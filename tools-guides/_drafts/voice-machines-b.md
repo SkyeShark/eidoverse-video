@@ -2,9 +2,12 @@
 
 [Main instructions](../../AGENTS.md) · [Tool inventory](../../docs/TOOLS.md)
 
-This is the Blender edition (Blender 5.2, EEVEE, AgX) of five props from the
-DAISY film: four historical voice machines and the finale's bicycle built for
-two. The modules live in `blender/eidoblend/props/voice_machines/`
+This is the Blender edition (Blender 5.2, EEVEE, AgX) of five free, reusable
+props: four historical voice machines and an 1896 bicycle built for two, with
+a rider rig and a teapot stoker. They were first made for the DAISY music
+video; here each is an asset for any new piece, with its own moving parts,
+screens and time controls (nothing in them is tied to that song's clock).
+The modules live in `blender/eidoblend/props/voice_machines/`
 (`voder.py`, `mainframe.py`, `teletype.py`, `speakspell.py`) and
 `blender/eidoblend/props/tandem.py`; the probes that show each one working are
 in `blender/tests/voice_machines_b/` (they render into its `out/` folder). The
@@ -112,10 +115,10 @@ null there); `grille` is the speaker tower, which carries the cloth slot.
 from eidoblend.props.voice_machines import mainframe
 
 room = mainframe.build()                 # 4.58 x 2.81 x 1.87 m: four 729 drives, cabinets, the console
-def daisy(t):                            # nominal, then (1 - x)^1.6 to a stop
+def run_down(t):                         # nominal, then (1 - x)^1.6 to a stop
     x = max(0.0, (t - 2.0) / 2.0)
     return {'tapeSpeed': 1.0 if t < 2 else max(0.0, 1 - x) ** 1.6, 'voice': 0.6 if 1 < t < 3.5 else 0.0}
-room.animate(daisy, frames=(1, 120))
+room.animate(run_down, frames=(1, 120))
 room.update(t, {'tape_stop': {'at': 2.0, 'duration': 1.5, 'curve': 2}})      # or analytic
 room.update(t, {'tape_pos': 3.2})                                              # or metres of tape
 room.update(t, {'power': 0.12})                                                # the lights dying
@@ -160,7 +163,14 @@ character buffer (glyph, jitter, weight, ink per texel), byte for byte equal
 to teletype.js's `writeBuffer`. The buffer is a PNG sequence (through the
 voice-machine kit's `EraScreen`): 48 small files for 96 frames of typing,
 holds hard-linked; with a scene's `ctx` it goes to
-`<ctx.out_dir>/screens/<name>`. The engine sampled the glyph atlas with
+`<ctx.out_dir>/screens/<root name>`. The frames are named after the
+machine's root, which Blender keeps unique (`teletype`, `teletype.001`), so
+two teletypes in one film each print their own text, even when they are
+given the same `buffer_dir`; `dispose(files=True)` takes a machine's own
+frames, and the folder once nothing else is in it. A Blender-relative
+`buffer_dir` (`'//screens/tty'`) lands beside the saved blend; in a blend not
+saved yet it falls back to a folder of its own under the system temp folder.
+The engine sampled the glyph atlas with
 explicit gradients to avoid mip seams between cells; EEVEE has no gradient
 sampling, so the atlas is read with four nearest taps blended by hand
 (bilinear without mips), smooth when magnified, with no seams. Each of the 53
@@ -222,7 +232,10 @@ unwrapped phase; the instances land on the CPU walk to 0.000 mm
 over the shutter and fade to wire width / swept arc) is a Geometry Nodes
 rotation plus the spoke material, switched by the root property
 `spoke_smear`; `build` turns it off when the scene renders EEVEE motion blur
-(the harness default), which blurs the keyed wheels for real. `glb=` takes
+(the harness default), which blurs the keyed wheels for real.
+`bike.set_spoke_smear(on, frame=f, key=True)` switches it later (a shot with
+motion blur after one without); it shows at once, where a bare write of the
+property waits for the next frame change. `glb=` takes
 another GLB as a path or as its bytes (the engine's `ASSETS.tandem`).
 `dispose()` leaves a seated rider or a mounted teapot in the scene where it
 is.
@@ -251,7 +264,11 @@ them (`remove_springs(vrm)` takes them off).
 The teapot is three's `TeapotGeometry` ported (Newell's 32 patches, Blinn's
 squash undone; its vertices, normals, UVs and triangles equal three r184's),
 glazed with a two-scale Worley crazing that fades as the
-camera's pixel grows past the line width; `build_teapot_rider` takes the
+camera's pixel grows past the line width (the engine measured the pixel with
+screen derivatives; here it is the view depth times the camera's angle per
+pixel, measured in the shader by the voice-machine kit's `pixel_angle`, so it
+holds for a teapot built before the scene has a camera, and across camera
+cuts and lens changes); `build_teapot_rider` takes the
 engine's `height`, `segments`, `color`, `pitch`, `roll`, `contact` and
 `seat_offset`.
 
@@ -259,9 +276,9 @@ engine's `height`, `segments`, `color`, `pitch`, `roll`, `contact` and
 
 ```
 cd <main checkout>
-bash run_blender.sh <worktree>/blender/tests/voice_machines_b/run_all.py                    # 139 checks, ~4 min
+bash run_blender.sh <worktree>/blender/tests/voice_machines_b/run_all.py                    # 154 checks, ~5 min
 HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-    <worktree>/blender/tests/voice_machines_b/run_all.py --render                           # + the stills
+    <worktree>/blender/tests/voice_machines_b/run_all.py --render                           # + 34 stills, 158 checks
 deno run --no-config --no-lock -A blender/tests/voice_machines_b/parity_dump.mjs \
     blender/tests/voice_machines_b/out/parity_js.json                                       # the engine's numbers
 deno run --no-config --no-lock -A blender/tests/voice_machines_b/geometry_parity_dump.mjs \
@@ -272,7 +289,15 @@ deno run --no-config --no-lock -A blender/tests/voice_machines_b/geometry_parity
 `ctx` (the harness's own `Ctx`), animates them through `ctx.key`, saves the
 `.blend`, reopens it and checks that frame 30 shows the same nine values
 (keys, properties, the buffer sequence on disk), then renders the reopened
-file.
+file. `test_two_teletypes.py` builds two ASR-33s with one `ctx` and the
+default name (and two more into one shared `buffer_dir`) and checks that each
+paper prints its own text and that `dispose(files=True)` takes only its own
+frames; it also runs the Blender-relative `buffer_dir` of the example above in
+an unsaved and a saved blend. `test_dark_room_and_back_views.py` lights the
+Voder, the Speak & Spell and the 7090 console only by their own glow, voice on
+and then power off, and counts the glowing pixels in each pair of stills; it
+also renders the Voder from behind and the tandem from its left (non-drive)
+side at speed, where the smeared spokes must shade without sparkle.
 
 ## Not yet ported
 

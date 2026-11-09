@@ -167,45 +167,61 @@ check('rain: streaks below the ground are sheltered by it (%d)' % below.sum(), n
 # ---- the cell gate through the weather map, mid-transition (canopy half sealed, rain falling) ----
 from eidoblend.sky.bake.baker import weather_map  # noqa: E402
 FM = 17
-sc.frame_set(FM)
-rm = wx._rows[FM]
-dg = bpy.context.evaluated_depsgraph_get()
-me2 = bpy.data.objects['eido_rain'].evaluated_get(dg).data
-al2 = np.empty(len(me2.vertices), np.float32)
-me2.attributes['eido_alpha'].data.foreach_get('value', al2)
-al2 = al2.reshape(N, 4)[:, 0]
-cx2, cy2, cz2 = (f32(v) for v in rm['cam3'])
-wox2, woz2 = f32(rm['wind_offset'][0]), f32(rm['wind_offset'][2])
-px2 = cx2 + (fract(h1 + (wox2 - cx2) / P) - f32(0.5)) * P
-pz2 = cz2 + (fract(h2 + (woz2 - cz2) / P) - f32(0.5)) * P
-py2 = cy2 + (fract(h3 - f32(rm['fall_phase']) / H - cy2 / H) - f32(0.35)) * H
-kk = np.maximum(rm['cloud_start'] - py2.astype(np.float64), 0) / max(rm['fall'], 1.0)
-sx2 = px2 - rm['wind'][0] * kk
-sz2 = pz2 - rm['wind'][2] * kk
 wm = weather_map()[..., 0].astype(np.float64)
-nn = wm.shape[0]
-s_ = -0.00005 * rm['w_scale']
-pu = ((sz2 - rm['cloud_drift'][2]) * s_) * nn - 0.5
-pv = ((sx2 - rm['cloud_drift'][0]) * s_) * nn - 0.5
-iu, iv = np.floor(pu).astype(np.int64), np.floor(pv).astype(np.int64)
-fu, fv = pu - iu, pv - iv
-g_ = lambda a_, b_: wm[b_ % nn, a_ % nn]
-cov = np.clip(((g_(iu, iv) * (1 - fu) + g_(iu + 1, iv) * fu) * (1 - fv) + (g_(iu, iv + 1) * (1 - fu)
-                + g_(iu + 1, iv + 1) * fu) * fv - rm['large_t']) * rm['large_a'], 0, 2)
-tt = np.clip((cov - rm['cell_lo']) / (rm['cell_hi'] - rm['cell_lo']), 0, 1)
-can = min(1.0, max(0.0, rm['storm_canopy']))
-gate2 = tt * tt * (3 - 2 * tt)
-gate2 = gate2 + (h4 * 0.18 + 0.82 - gate2) * can
-d2 = np.linalg.norm(np.stack([px2, py2, pz2], 1) - np.array(rm['cam3'], np.float32), axis=1)
-nf2 = np.clip((d2 - 0.9) / 1.7, 0, 1)
-nf2 = nf2 * nf2 * (3 - 2 * nf2)
-q2 = np.clip((np.hypot(px2 - cx2, pz2 - cz2) - P / 2 * 0.7) / (P / 2 * 0.3), 0, 1)
-ff2 = 1 - q2 * q2 * (3 - 2 * q2)
-rk2 = rm['rain_k']
-cg2 = np.clip((rk2 - h1) / 0.001, 0, 1)
-cg2 = cg2 * cg2 * (3 - 2 * cg2)
-want2 = (nf2 * ff2 * gate2 * (h3 * 0.125 + 0.075) * rm['dense_a'] * cg2 * min(1, rk2 * 2)
-         * (1 + 0.28 * can * min(1, rk2)))
+
+
+def coverage3(rm, x3, z3):
+    """tslCoverage at three (x, z): the weather map, bilinear at GPU texel centres, repeat-wrapped."""
+    nn = wm.shape[0]
+    s_ = -0.00005 * rm['w_scale']
+    pu = ((z3 - rm['cloud_drift'][2]) * s_) * nn - 0.5
+    pv = ((x3 - rm['cloud_drift'][0]) * s_) * nn - 0.5
+    iu, iv = np.floor(pu).astype(np.int64), np.floor(pv).astype(np.int64)
+    fu, fv = pu - iu, pv - iv
+    g_ = lambda a_, b_: wm[b_ % nn, a_ % nn]
+    return np.clip(((g_(iu, iv) * (1 - fu) + g_(iu + 1, iv) * fu) * (1 - fv) + (g_(iu, iv + 1) * (1 - fu)
+                    + g_(iu + 1, iv + 1) * fu) * fv - rm['large_t']) * rm['large_a'], 0, 2)
+
+
+def rain_alpha_at(fm):
+    """The eido_alpha the rain generator evaluates at frame fm, one value per streak."""
+    sc.frame_set(fm)
+    me_ = bpy.data.objects['eido_rain'].evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+    a_ = np.empty(len(me_.vertices), np.float32)
+    me_.attributes['eido_alpha'].data.foreach_get('value', a_)
+    return a_.reshape(N, 4)[:, 0]
+
+
+def want_rain_alpha(rm, upwind):
+    """weather_system.js's streak opacity at a frame record: the cell gate at the column the drops fell from (upwind,
+    Eanpa's rainCellAt) or at the drop's own column (eidoverse), opened under the canopy. Returns (alpha, coverage)."""
+    cx2, cy2, cz2 = (f32(v) for v in rm['cam3'])
+    wox2, woz2 = f32(rm['wind_offset'][0]), f32(rm['wind_offset'][2])
+    px2 = cx2 + (fract(h1 + (wox2 - cx2) / P) - f32(0.5)) * P
+    pz2 = cz2 + (fract(h2 + (woz2 - cz2) / P) - f32(0.5)) * P
+    py2 = cy2 + (fract(h3 - f32(rm['fall_phase']) / H - cy2 / H) - f32(0.35)) * H
+    kk = np.maximum(rm['cloud_start'] - py2.astype(np.float64), 0) / max(rm['fall'], 1.0) * (1.0 if upwind else 0.0)
+    cov = coverage3(rm, px2 - rm['wind'][0] * kk, pz2 - rm['wind'][2] * kk)
+    tt = np.clip((cov - rm['cell_lo']) / (rm['cell_hi'] - rm['cell_lo']), 0, 1)
+    can = min(1.0, max(0.0, rm['storm_canopy']))
+    gate2 = tt * tt * (3 - 2 * tt)
+    gate2 = gate2 + (h4 * 0.18 + 0.82 - gate2) * can
+    d2 = np.linalg.norm(np.stack([px2, py2, pz2], 1) - np.array(rm['cam3'], np.float32), axis=1)
+    nf2 = np.clip((d2 - 0.9) / 1.7, 0, 1)
+    nf2 = nf2 * nf2 * (3 - 2 * nf2)
+    q2 = np.clip((np.hypot(px2 - cx2, pz2 - cz2) - P / 2 * 0.7) / (P / 2 * 0.3), 0, 1)
+    ff2 = 1 - q2 * q2 * (3 - 2 * q2)
+    rk2 = rm['rain_k']
+    cg2 = np.clip((rk2 - h1) / 0.001, 0, 1)
+    cg2 = cg2 * cg2 * (3 - 2 * cg2)
+    return (nf2 * ff2 * gate2 * (h3 * 0.125 + 0.075) * rm['dense_a'] * cg2 * min(1, rk2 * 2)
+            * (1 + 0.28 * can * min(1, rk2))), cov
+
+
+rm = wx._rows[FM]
+al2 = rain_alpha_at(FM)
+want2, cov = want_rain_alpha(rm, upwind=True)
+can, rk2 = min(1.0, max(0.0, rm['storm_canopy'])), rm['rain_k']
 op2 = al2 > 0
 check('rain: mid-transition opacity through the weather-map cell gate (canopy %.2f, rainK %.2f, coverage %.2f-%.2f)'
       % (can, rk2, cov[op2].min() if op2.any() else 0, cov[op2].max() if op2.any() else 0),
@@ -485,4 +501,136 @@ for gs in (0.42, 1.0):
 sc.frame_end = 72
 check('lightning_gap_scale: 0.42 (film) strikes more often than 1.0 (realtime) over 90 s', counts[0.42] > counts[1.0]
       and counts[1.0] >= 1, counts)
+
+# ---- rain_cells: 'column' is eidoverse's own-column gate; the transition diagnostics; the registry rules ----
+try:
+    make_weather_system(sc, sky, rain_cells='sideways', moisture=False, log=lambda *a: None)
+    check('rain_cells: an unknown value raises', False)
+except ValueError as e:
+    check('rain_cells: an unknown value raises', 'rain_cells' in str(e), str(e)[:72])
+w5 = make_weather_system(sc, sky, rain_cells='column', log=lambda *a: None)
+w5.plan(frame_end=FM)
+T5 = dict(w5.diagnostics['transition'])
+check('diagnostics.transition mid-morph: from, target, elapsed, raw and eased progress as the JS records them',
+      T5['active'] and T5['from'] == 'overcast' and T5['target'] == 'darkstorm' and abs(T5['durationSeconds'] - 1) < 1e-9
+      and 0 < T5['rawProgress'] < 1 and abs(T5['rawProgress'] - T5['elapsedSeconds']) < 1e-9
+      and abs(T5['easedProgress'] - T5['rawProgress'] ** 2 * (3 - 2 * T5['rawProgress'])) < 1e-9, T5)
+UNIFORMS = ('time', 'camPos', 'camRight', 'camUp', 'rainK', 'fallSpeed', 'fallMul', 'windVec', 'fallPhase', 'windOffset',
+            'streakLen', 'streakW', 'dashK', 'rainColor', 'rainLight', 'wetness', 'wetTint', 'puddleK', 'cellLo', 'cellHi',
+            'denseA')
+check('uniforms: every name of the WebGPU u table (fallSpeed, and streakW, which its shader never reads)',
+      all(k in w5.uniforms for k in UNIFORMS), [k for k in UNIFORMS if k not in w5.uniforms])
+rows5 = w5.bake(bake_sky=False)
+T5b = dict(w5.diagnostics['transition'])
+check('diagnostics.transition after the morph: inactive, from and target kept, progress 1',
+      not T5b['active'] and T5b['from'] == 'overcast' and T5b['target'] == 'darkstorm' and T5b['rawProgress'] == 1.0
+      and T5b['easedProgress'] == 1.0 and T5b['elapsedSeconds'] >= 1.0 - 1e-9, T5b)
+check('diagnostics.lightning carries the palette weights and the cadence tables',
+      w5.diagnostics['lightning']['paletteWeights'] is L.LIGHTNING_PALETTES
+      and w5.diagnostics['lightning']['cadence'] is L.LIGHTNING_CADENCE)
+al5 = rain_alpha_at(FM)
+want5, cov5 = want_rain_alpha(w5._rows[FM], upwind=False)
+op5 = al5 > 0
+check("rain_cells='column': each drop is gated by the cell straight above it, eidoverse's sky.tslCoverage(px, pz) "
+      '(coverage %.2f-%.2f)' % (cov5[op5].min() if op5.any() else 0, cov5[op5].max() if op5.any() else 0),
+      op5.sum() > 100 and np.allclose(al5[op5], want5[op5], atol=3e-3),
+      'max diff %.5f over %d streaks' % (np.abs(al5[op5] - want5[op5]).max() if op5.any() else -1, op5.sum()))
+gx, gy = np.meshgrid(np.linspace(-300, 300, 13), np.linspace(-300, 300, 13))
+rl = rows5[-1]
+tt5 = np.clip((coverage3(rl, gx.ravel(), -gy.ravel()) - rl['cell_lo']) / (rl['cell_hi'] - rl['cell_lo']), 0, 1)
+g5 = tt5 * tt5 * (3 - 2 * tt5)
+want_cell = g5 + (1 - g5) * min(1.0, max(0.0, rl['storm_canopy']))
+got_cell = w5._cell_at(gx.ravel(), gy.ravel())
+check("rain_cells='column': the moisture history reads the same column as the drops",
+      np.allclose(got_cell, want_cell, atol=1e-6), 'max diff %.2e' % float(np.abs(got_cell - want_cell).max()))
+w6 = make_weather_system(sc, sky, moisture=False, log=lambda *a: None)
+check('a second weather system on the scene disposes the first: its update() returns False (the JS registry)',
+      w5.update(1.0) is False and w5._disposed)
+w6.dispose()
+check('dispose twice: the second call does nothing', w6.dispose() is False and w6.update(1.0) is False)
+# in an open storm (no canopy) the upwind gate is the own-column gate moved upwind by the wind x the fall time
+sky7 = make_sky(sc, camera=cam, hours=15.0, weather='storm', cache_dir=os.path.join(OUT, 'cache_storm'),
+                quality='draft')
+w7 = make_weather_system(sc, sky7, moisture=False, log=lambda *a: None)
+gx, gy = np.meshgrid(np.linspace(-1500, 1500, 61), np.linspace(-1500, 1500, 61))
+g_up = w7._cell_at(gx.ravel(), gy.ravel())
+w7._upwind = 0.0                                         # what rain_cells='column' sets
+g_col = w7._cell_at(gx.ravel(), gy.ravel())
+uu, UU = sky7.wx.u, sky7.sky.U
+kf = float(UU['cloudStart']) / max(w7.opts['fall_speed'] * float(uu['fallMul']), 1.0)
+wv7 = uu['windVec']
+g_shift = w7._cell_at(gx.ravel() - wv7[0] * kf, gy.ravel() + wv7[2] * kf)
+check('rain_cells: in an open storm the two gates differ, and the upwind one is the column one moved %.0f m upwind'
+      % (math.hypot(wv7[0], wv7[2]) * kf),
+      float(np.abs(g_up - g_col).max()) > 0.2 and np.allclose(g_up, g_shift, atol=1e-9),
+      'largest difference %.2f, shift error %.1e' % (float(np.abs(g_up - g_col).max()),
+                                                     float(np.abs(g_up - g_shift).max())))
+w7.dispose()
+
+# ---- a strike target made of instances: a collection instance, rotated and scaled, is cast through its own matrix
+# (findLocalStrike casts an InstancedMesh's instances through their instance matrices) ----
+kit = bpy.data.collections.new('kit_platform')              # not linked to the scene: only its instance renders
+pm = bpy.data.meshes.new('platform')
+pv = [(x, y, z) for z in (0.0, 2.0) for x, y in ((-10, -10), (10, -10), (10, 10), (-10, 10))]
+pm.from_pydata(pv, [], [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)])
+pm.materials.append(brick)
+kit.objects.link(bpy.data.objects.new('platform', pm))
+plat = bpy.data.objects.new('platform_instance', None)
+plat.instance_type = 'COLLECTION'
+plat.instance_collection = kit
+plat.location = (0.0, 36.0, 0.0)
+plat.rotation_euler = (0.0, 0.0, math.radians(30.0))
+plat.scale = (3.0, 3.0, 1.5)
+sc.collection.objects.link(plat)
+w8 = make_weather_system(sc, sky, strike_targets=[plat], moisture=False, log=lambda *a: None)
+w8.debug_force_local_strike(at=0.5)
+w8.plan()
+imp8 = w8.sched.impacts[0] if w8.sched.impacts else None
+rec8 = w8.state.get('lastImpact')
+check('strike_targets: a collection instance (rotated 30 degrees, scaled 3 x 3 x 1.5) is struck on its top at 3.0 m, '
+      'normal up', imp8 is not None and abs(imp8['point'][1] - 3.0) < 1e-3 and rec8 is not None
+      and abs(rec8['normal'][2] - 1.0) < 1e-6, (imp8 or {}).get('point'))
+check('  ... the strike record goes on the instancer, as the JS writes it on the InstancedMesh',
+      plat.get('eido_lightning_strikes') == 1 and rec8 is not None and rec8['kind'] == 'platform',
+      (plat.get('eido_lightning_strikes'), (rec8 or {}).get('kind')))
+w8.dispose()
+bpy.data.objects.remove(plat, do_unlink=True)
+
+# ---- an instanced occluder keeps the ground dry under it: the rain-exposure capture reads the same surfaces (the
+# occluders' instances included) as the drops' ray cast, which realizes them ----
+ckit = bpy.data.collections.new('kit_canopy')
+cm = bpy.data.meshes.new('canopy')
+cv = [(x, y, z) for z in (4.0, 4.2) for x, y in ((-5, -5), (5, -5), (5, 5), (-5, 5))]
+cm.from_pydata(cv, [], [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)])
+cm.materials.append(brick)
+ckit.objects.link(bpy.data.objects.new('canopy', cm))
+occl = bpy.data.collections.new('occluders_with_instances')
+sc.collection.children.link(occl)
+gm = bpy.data.meshes.new('lot')
+gm.from_pydata([(40, 40, 0), (80, 40, 0), (80, 80, 0), (40, 80, 0)], [], [(0, 1, 2, 3)])
+gm.materials.append(asphalt)
+occl.objects.link(bpy.data.objects.new('lot', gm))
+cinst = bpy.data.objects.new('canopy_instance', None)
+cinst.instance_type = 'COLLECTION'
+cinst.instance_collection = ckit
+cinst.location = (60.0, 60.0, 0.0)
+occl.objects.link(cinst)
+w9 = make_weather_system(sc, sky, occluders=occl, moisture=False, log=lambda *a: None)
+w9.wrap_scene()
+w9.bake(bake_sky=False)
+meta9 = w9.shelter
+
+
+def read_exr9(name):
+    buf = oiio.ImageBuf(os.path.join(w9.cache_dir, name))
+    return np.asarray(buf.get_pixels(oiio.FLOAT)).reshape(meta9['h'], meta9['w'], 4)[::-1]
+
+
+e9, s9 = read_exr9('rain_exposure.exr'), read_exr9('rain_exposure_soft.exr')
+d9 = meta9['d']
+under = exposure_at(60.0 + 4.1 * (-d9[0] / d9[2]), 60.0 + 4.1 * (-d9[1] / d9[2]), 0.0, 1.0, e9, meta9, s9)
+open9 = exposure_at(45.0, 75.0, 0.0, 1.0, e9, meta9, s9)
+check('rain shadow: the ground under an instanced canopy stays dry, open ground beside it is exposed',
+      under < 0.01 and open9 > 0.999, 'under %.3f, open %.3f' % (under, open9))
+w9.dispose()
 print('RESULT', 'PASS' if not fails else 'FAIL (%d)' % len(fails), flush=True)

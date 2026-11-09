@@ -11,7 +11,9 @@
 
 THE FIELD. As in the WebGPU edition: a clamped signed distance (negative inside the stock) on a vertex-centred grid
 over the blank plus a two-cell pad: resolution (nx, ny, nz) counts samples along the stock's X (length), Y (width)
-and Z (height); eps = max(L / (nx - 4), W / (ny - 4), H / (nz - 4)), pad 2 eps, values clamped to +-3 eps. It starts
+and Z (height), Blender's axis order; eps = max(L / (nx - 4), W / (ny - 4), H / (nz - 4)), pad 2 eps, values clamped
+to +-3 eps. The WebGPU [nx, ny, nz] counted three's axes (length, height, width): a non-square resolution ported
+from a scene file swaps its last two numbers (WebGPU [256, 80, 96] is (256, 96, 80) here). It starts
 as the prepared blank (box, centre seat and pilot) and takes, for every cutting stroke up to the sampled one (that
 one only to its fraction), the maximum with minus the swept cutter's distance. Strokes only ever remove, so an
 update applies the strokes since the last one; going back in time rebuilds from the blank. The WebGPU edition did
@@ -20,13 +22,16 @@ marching a proxy box; here numpy evaluates the same distances in float64 (each s
 can reach), and the surface is a real mesh: Blender's OpenVDB volume-to-mesh of the field, so it casts and takes
 shadows, has real depth, blurs as it turns with the chuck, and renders under every light. Its object space is the
 stock frame; its finish (fabrication.cutting.finish_stock) reads the stock point as (z, y, x) in three's axes, the
-WebGPU stock's swizzle, through swizzle_finish.
+WebGPU stock's swizzle, through swizzle_finish, and fades its fine patterns by their true screen footprint, the
+WebGPU fwidth(phase), through filter_finish.
 
 PLAYBACK. Nothing runs at render time. write_frame(frame) stores the field as an OpenVDB grid ('density' = minus the
 distance, positive inside, pruned to tiles) in <cache_dir>/<name>_<frame:04d>.vdb; the stock's Volume datablock plays
 that file sequence (EXTEND: the first and last held outside it) and the stock mesh object's Volume to Mesh modifier
-meshes the current file at the zero level. Write every frame the film shows; a saved .blend then plays and renders
-any frame on its own, with the cache folder beside it.
+meshes the current file at the zero level. Blender shows a file sequence at floor(time); a driver on the sequence's
+frame offset makes every time within half a frame of a written frame show that frame's file, so the motion-blur
+samples of a frame (and its sub-frame keys, carve.RotaryJob.key) all see the same carved surface. Write every frame
+the film shows; a saved .blend then plays and renders any frame on its own, with the cache folder beside it.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from .sweeps import cutter_frame, index_rotary_sweeps, stroke_bounds, sweep_core
 
 GRID_NAME = 'density'
 GRAIN_NODE = 'rotary grain (z, y, x)'
+FOOTPRINT_NODE = 'exact footprint'
 
 
 def swizzle_finish(material):
@@ -85,6 +91,129 @@ def swizzle_finish(material):
             nt.links.new(comb.outputs[0], to)
             n += 1
     return n
+
+
+# finish_stock's fine patterns, by the frequency it multiplies its footprint estimate with
+PATTERNS = {4200.0: 'growth rings', 18000.0: 'wood fibre', 83000.0: 'metal brushing'}
+
+
+def _footprint_uses(nt):
+    """[(node, input index, frequency)] for each of finish_stock's fades: MULTIPLY(footprint, k), where footprint =
+    (View Distance * pixel_angle) * 1.4 is its estimate of a pattern's screen footprint per unit of phase."""
+    pix = nt.nodes.get('pixel_angle')
+    if pix is None:
+        return []
+
+    def outs(node):
+        return [lk for lk in nt.links if lk.from_node == node]
+
+    def mult(node):
+        return node.type == 'MATH' and node.operation == 'MULTIPLY'
+
+    uses = []
+    for l1 in outs(pix):
+        if not mult(l1.to_node):
+            continue
+        for l2 in outs(l1.to_node):
+            if not mult(l2.to_node):
+                continue
+            for l3 in outs(l2.to_node):
+                c = l3.to_node
+                if not mult(c):
+                    continue
+                i = list(c.inputs).index(l3.to_socket)
+                other = c.inputs[1 - i]
+                if not other.is_linked:
+                    uses.append((c, i, float(other.default_value)))
+    return uses
+
+
+def filter_finish(material):
+    """Fade the finish's fine patterns by their true screen footprint: the WebGPU finishStock's fwidth(phase).
+
+    finish_stock estimates fwidth(phase) as (view distance * pixel angle * 1.4) times the pattern's frequency. That is
+    right only where the pattern's gradient lies in the surface, across the screen. On a turned part the growth
+    rings' gradient runs nearly along the surface normal on the sides that face the camera, so there the rings and the
+    fibre stay wide on screen while the estimate faded the rings to a quarter and the fibre to nothing. This reroutes
+    each fade to the exact derivative: the pattern's 3D gradient g (the rings, fibre and brushing as finish_stock
+    defines them; the broad noise's gradient by finite differences) taken through the pixel's footprint on the
+    surface, dP/dx = t a (e_x - (e_x . N) / (I . N) I) for the screen axes e_x, e_y (t the view distance, a the pixel
+    angle, N the normal, I the direction to the eye), and fwidth = |g . dP/dx| + |g . dP/dy|. Needs swizzle_finish
+    first (it reads the stock point there). Returns the number of fades rerouted: 2 for wood (rings, fibre), 1 for
+    metal (brushing), 0 when there is nothing to do (no swizzle, no footprint fades, or already filtered: a node
+    named FOOTPRINT_NODE, which finish_stock may one day make itself)."""
+    from .._nodes import V, Builder
+    nt = material.node_tree
+    if nt is None or FOOTPRINT_NODE in nt.nodes:
+        return 0
+    comb = nt.nodes.get(GRAIN_NODE)
+    uses = _footprint_uses(nt)
+    if comb is None or not uses:
+        return 0
+    unknown = sorted({k for _c, _i, k in uses} - set(PATTERNS))
+    if unknown:
+        raise RuntimeError(f'finish_stock fades a pattern of frequency {unknown} this filter does not know: '
+                           'teach stock.filter_finish its gradient')
+    marker = nt.nodes.new('NodeFrame')
+    marker.name = marker.label = FOOTPRINT_NODE
+    marker.location = (comb.location.x + 400, comb.location.y - 300)
+    b = Builder(nt, x0=comb.location.x + 400, y0=comb.location.y - 360)
+    bx, by, bz = b.sep(comb.outputs[0])
+    px, py, pz = bx, bz, -by                                  # three's (x, y, z), as finish_stock reads them
+    geo = b.node('ShaderNodeNewGeometry')
+    normal, eye = V(b, geo.outputs['Normal']), V(b, geo.outputs['Incoming'])
+    cam = b.node('ShaderNodeCameraData')
+    metres_per_pixel = b.s(cam.outputs['View Distance']) * b.s(nt.nodes['pixel_angle'].outputs[0])
+
+    def screen_axis(v):
+        n = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
+        n.inputs[0].default_value = v
+        return V(b, n.outputs[0])
+
+    ex, ey = screen_axis((1.0, 0.0, 0.0)), screen_axis((0.0, 1.0, 0.0))
+    i_n = b.dot(eye, normal)
+    inv_i_n = i_n / b.max(i_n * i_n, 1e-6)                    # 1 / (I . N), bounded at the silhouette
+    rx, ry = b.dot(ex, normal) * inv_i_n, b.dot(ey, normal) * inv_i_n
+
+    def fwidth(g_three):
+        gx, gy, gz = b.sep(g_three)
+        g_object = b.vec(gz, -gx, gy)                          # through the swizzle: p = (-oy, oz, ox)
+        tw = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='OBJECT', convert_to='WORLD')
+        b.link(g_object, tw.inputs[0])
+        g = V(b, tw.outputs[0])
+        gi = b.dot(g, eye)
+        return (b.abs(b.dot(g, ex) - gi * rx) + b.abs(b.dot(g, ey) - gi * ry)) * metres_per_pixel
+
+    grads = {}
+    if {4200.0, 18000.0} & {k for _c, _i, k in uses}:
+        def broad_at(d=(0.0, 0.0, 0.0)):
+            """finish_stock's broad noise, mx_noise(p * (38, 27, 19)), at p + d"""
+            n = b.node('ShaderNodeTexNoise', noise_dimensions='3D', normalize=True)
+            n.inputs['Scale'].default_value = 1.0
+            n.inputs['Detail'].default_value = 0.0
+            n.inputs['Roughness'].default_value = 0.5
+            n.inputs['Distortion'].default_value = 0.0
+            q = [c * k + k * dc if dc else c * k for c, k, dc in zip((px, py, pz), (38.0, 27.0, 19.0), d)]
+            b.link(b.vec(*q), n.inputs['Vector'])
+            return (b.s(n.outputs['Fac']) - 0.5) * 2.0
+
+        h = 5e-5
+        broad = broad_at()
+        gb = b.vec(*[(broad_at(tuple(h if j == k else 0.0 for j in range(3))) - broad) * (1.0 / h) for k in range(3)])
+        warp = b.sin(pz * 38.0) * .004 + broad * .002
+        u = px + .049 + warp
+        w = (py + .024) * 1.18
+        r = b.max(b.sqrt(u * u + w * w), 1e-6)
+        gu = b.vec(1.0, 0.0, b.cos(pz * 38.0) * .152) + b.vscale(gb, .002)      # d(px + .049 + warp) / dp
+        grads[4200.0] = b.vscale(b.vscale(gu, u) + b.vec(0.0, w * 1.18, 0.0), 4200.0 / r) + b.vscale(gb, 2.8)
+        grads[18000.0] = b.vscale(gu, 18000.0)
+    if 83000.0 in {k for _c, _i, k in uses}:
+        grads[83000.0] = b.vec(b.cos(px * 270.0) * 189.0, 0.0, 83000.0)
+    for c, i, k in uses:
+        for lk in [lk for lk in nt.links if lk.to_socket == c.inputs[i]]:
+            nt.links.remove(lk)
+        b.link(fwidth(grads[k]) * (1.0 / k), c.inputs[i])     # footprint * k becomes the exact fwidth(phase)
+    return len(uses)
 
 
 def check_resolution(resolution):
@@ -208,10 +337,13 @@ class StockField:
 
     @property
     def layout(self):
-        nx, ny, nz = self.resolution
+        """The WebGPU api.layout of the tiled target (tiled()), key for key in its own terms, three's axes: nx the
+        length, ny the height and nz the width count (this resolution is Blender's (length, width, height)), cols x
+        rows tiles of the nz width slices, each nx wide and ny high."""
+        nx, ny, nz = self.resolution                    # Blender: length, width, height
         cols = math.ceil(math.sqrt(ny))
         rows = math.ceil(ny / cols)
-        return {'width': nx * cols, 'height': nz * rows, 'cols': cols, 'nx': nx, 'ny': ny, 'nz': nz}
+        return {'width': nx * cols, 'height': nz * rows, 'cols': cols, 'nx': nx, 'ny': nz, 'nz': ny}
 
     def grid(self):
         """The current field as an OpenVDB FloatGrid named 'density': minus the distance (positive inside), the
@@ -277,6 +409,7 @@ class RotaryStock(StockField):
         mod.adaptivity = 0.0
         mod.use_smooth_shade = True
         self.finish = None
+        self.footprint_fades = 0
         if material is None:
             from ..cutting import stock_material, stock_profile
             material, self.finish = stock_material(name + ' finish', stock_profile(settings.get('material', 'wood')),
@@ -284,15 +417,25 @@ class RotaryStock(StockField):
             if not swizzle_finish(material):
                 raise RuntimeError('finish_stock no longer reads Object texture coordinates: the rotary grain '
                                    'swizzle (stock.swizzle_finish) needs updating')
+            self.footprint_fades = filter_finish(material)
+            if not self.footprint_fades and FOOTPRINT_NODE not in material.node_tree.nodes:
+                raise RuntimeError("finish_stock's footprint fades changed: the rotary stock's exact filter "
+                                   '(stock.filter_finish) needs updating')
         self.material = material
         me.materials.append(material)
         self.mesh['eidoverse_rotary_stock'] = True
+        self._last_file = None
         self.hold()                                     # the prepared blank shows until frames are written
 
     @property
     def texture(self):
-        """The WebGPU edition's current render-target texture: here the current frame's VDB file (or None)."""
-        return self.frame_path(self.frames_written[-1]) if self.frames_written else None
+        """The WebGPU edition's render-target texture: here the VDB file written last (by write_frame or hold), the
+        field as it was then (None before any). An update() without a write leaves it describing the earlier field."""
+        return self._last_file
+
+    @property
+    def hold_path(self):
+        return os.path.join(self.cache_dir, '%s_hold.vdb' % _safe(self.name))
 
     def frame_path(self, frame):
         return os.path.join(self.cache_dir, '%s_%04d.vdb' % (_safe(self.name), int(frame)))
@@ -309,6 +452,7 @@ class RotaryStock(StockField):
             self.frames_written.append(int(frame))
             self.frames_written.sort()
         self._sequence()
+        self._last_file = p
         return p
 
     def _sequence(self):
@@ -318,21 +462,25 @@ class RotaryStock(StockField):
         v.is_sequence = True
         v.frame_start = first
         v.frame_duration = last - first + 1
-        v.frame_offset = first - 1
+        v.frame_offset = first - 1                      # whole frames; the driver adds the half-frame rounding
         v.sequence_mode = 'EXTEND'
+        _nearest_frame_driver(v, first, last)
         v.grids.load()
 
     def hold(self):
         """Show the current field on every frame (the job stopped): one file, no sequence."""
         import openvdb as vdb
         os.makedirs(self.cache_dir, exist_ok=True)
-        p = os.path.join(self.cache_dir, '%s_hold.vdb' % _safe(self.name))
+        p = self.hold_path
         vdb.write(p + '.tmp', grids=[self.grid()])
         os.replace(p + '.tmp', p)
         v = self.volume_data
+        if v.animation_data is not None and v.animation_data.drivers.find('frame_offset') is not None:
+            v.driver_remove('frame_offset')
         v.is_sequence = False
         v.filepath = _blend_path(p)
         v.grids.load()
+        self._last_file = p
         return p
 
     def readback(self):
@@ -357,7 +505,8 @@ class RotaryStock(StockField):
         return ob
 
     def dispose(self, files=False):
-        """Remove the stock's objects and datablocks (and its cache files when files=True)."""
+        """Remove the stock's objects and datablocks; with files=True also every file it wrote (each frame's, the
+        hold file) and the cache folder when nothing else is left in it."""
         import bpy
         for ob in (self.mesh, self.volume_object):
             if ob is not None and ob.name in bpy.data.objects:
@@ -369,11 +518,16 @@ class RotaryStock(StockField):
             bpy.data.materials.remove(self.material)
         self.mesh = self.volume_object = None
         if files:
-            for f in self.frames_written:
+            for p in [self.frame_path(f) for f in self.frames_written] + [self.hold_path]:
                 try:
-                    os.remove(self.frame_path(f))
+                    os.remove(p)
                 except OSError:
                     pass
+            try:
+                os.rmdir(self.cache_dir)                # only when empty: never another job's files
+            except OSError:
+                pass
+            self._last_file = None
 
 
 def create_rotary_stock(path, settings, parent=None, resolution=(256, 96, 96), color=None,
@@ -381,6 +535,23 @@ def create_rotary_stock(path, settings, parent=None, resolution=(256, 96, 96), c
     """createRotaryStock (see the module docstring). parent: the object the stock rides on (the job's stock frame, which
     turns with the chuck); color overrides the material preset's colour."""
     return RotaryStock(path, settings, parent, tuple(resolution), color, name, cache_dir, collection, material)
+
+
+def _nearest_frame_driver(volume, first, last):
+    """Blender plays a volume file sequence at floor(time), so a motion-blur sample a quarter frame before frame F
+    shows file F - 1. Drive the sequence's frame offset (first - 1 at whole frames) one further from half a frame
+    before each written frame, inside the sequence, so every time within half a frame of F shows file F and the
+    ends still hold (EXTEND). A simple expression: it evaluates without Python, in any saved file."""
+    fc = volume.animation_data.drivers.find('frame_offset') if volume.animation_data is not None else None
+    if fc is None:
+        fc = volume.driver_add('frame_offset')
+    d = fc.driver
+    d.type = 'SCRIPTED'
+    for var in list(d.variables):
+        d.variables.remove(var)
+    d.expression = ('%d + (floor(frame + 0.5) - floor(frame)) * min(1, max(0, floor(frame) - %d)) '
+                    '* min(1, max(0, %d - floor(frame)))') % (first - 1, first - 1, last)
+    return fc
 
 
 def _blend_path(p):

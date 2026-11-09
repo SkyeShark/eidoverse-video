@@ -1,23 +1,31 @@
 """examples/obstacle_course.js, the controller's full vocabulary on one course, directed as the WebGPU example directs it:
 
-    test_controller_maneuvers.py [--vrm aletheia] [--tag NAME]
+    test_controller_maneuvers.py [--vrm aporia] [--tag NAME]
 
-The course is the example's TERRAIN_CONFIG (eidoblend.course.EXAMPLES['obstacle_course']), the controller
-terrain_base's (CONTROLLER_PRESETS['terrain_base']), and the example's renderFrame script becomes film commands:
+The example's character (obstacle_course.json: aporia.vrm), its course (TERRAIN_CONFIG: eidoblend.course.EXAMPLES
+['obstacle_course']), the controller terrain_base's (CONTROLLER_PRESETS['terrain_base']), and its renderFrame script
+as film commands:
     walk: the bump, 8 deg ramps, small stairs up and down, the low cover VAULT (auto), the 1.15 m wall MOUNT (auto),
           across its top and off its far edge (a fall, fallLand)
     run (segments 15 to 23): stairs up, the 1.1 m GAP JUMP (auto), stairs down, the chest-high cover VAULT (auto)
     walk: the 2.2 m wall CLIMB (auto: climbWallUp), its top and the drop (fallLand)
     the sit stop: auto maneuvers off near the bench, routed around it (the example's three waypoints), squared up to
-          the course heading, seated (stand_to_sit), held, stood (the clip reversed at 1.25x), stopEmote
+          the course heading, seated on the bench through eidoblend.characters.emotes.seat_on (stand_to_sit, the seat
+          settled on the pan as its seatOn does, the take baked by emotes.bake), held, stood (the clip reversed at
+          1.25x), stopEmote
     a cheer gesture while walking (segment 27), stopped before the ladder
     the LADDER (explicit climbLadder, 2.5 m: the rung loop chained into the mantle over the top)
-    the finale: walk to the platform's middle, salute facing the camera's side
+    the finale: walk to the platform's middle, salute toward the camera
+and its camera: the full-side follow camera (5.2 m off, 3.4 m while maneuvering or sitting, eased at 2.5 / s), swung to
+a rear three-quarter 46 deg for the ladder and the finale (eased at 1.8 / s), keyed on every frame of the saved film.
 
-Prints PASS / FAIL: every maneuver the example has played (vault x2, mount x2, the gap jump, the ladder and its mantle,
-fallLand), the contact IK touching what it grabs (the vault's prop hand on the cover top, the hands on the lip
-during the mounts, the hands on the rungs), checks.feet on the walking and running stretches, the sit, the gesture,
-the salute, the finale on the top platform, the keyed armature against the bake.
+Prints PASS / FAIL: every maneuver the example plays (vault x2, mount x2, the gap jump, the ladder and its mantle,
+fallLand); each vault rises over its cover and plants its prop hand on the top; the hands on the lip during each
+mount, its crouched feet resting on the top; the hands and the balls of the feet on the rungs through the ladder; no
+foot inside a solid in any maneuver (the visible foot mesh measured, FootMesh); checks.feet on the walking, running and
+seated stretches; the seated feet on the floor and the seat's underside on the bench; the gesture; the salute; the
+finale on the top platform; the keyed armature against the bake. Stills (render_shots.py): the example's camera at
+the middle of each stretch and through each maneuver, and close-ups of the contacts.
 """
 
 import math
@@ -31,16 +39,21 @@ import _ctrl_stage as T  # noqa: E402
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
+from mathutils import Vector  # noqa: E402
 
+from eidoblend.characters import emotes as E  # noqa: E402
 from eidoblend.characters import load_vrm  # noqa: E402
 from eidoblend.characters.controller import CollisionWorld, Locomotion  # noqa: E402
 from eidoblend.course import EXAMPLES, add_bench  # noqa: E402
 
 ARGS = T.argv()
-VRM = T.arg(ARGS, '--vrm', 'aletheia')
+EX = EXAMPLES['obstacle_course']
+VRM = T.arg(ARGS, '--vrm', EX.get('character', 'aporia'))     # the example's own character (obstacle_course.json)
 R = T.Report(T.arg(ARGS, '--tag', f'maneuvers_{VRM}'))
 R['vrm'] = VRM
-EX = EXAMPLES['obstacle_course']
+_cam = EX.get('camera') or {}                                    # the example's follow camera
+CAM_R, CAM_R_NEAR, CAM_SWING_DEG = (_cam.get('radius', 5.2), _cam.get('radius_close', 3.4),
+                                    _cam.get('ladder_angle_deg', 46.0))
 
 
 def main():
@@ -53,7 +66,9 @@ def main():
     fixtures = [o for o in course.objects if o.get('eido_course_role') in ('rail', 'rung')]
     world = CollisionWorld(exclude=fixtures)
     R['fixtures_excluded'] = len(fixtures)
-    loco = Locomotion(me, world, start=course.start, heading=math.pi, preset='terrain_base', log=R.log)
+    # the maneuvers' feet stay out of every solid, the rungs and rails too (contact_world)
+    loco = Locomotion(me, world, start=course.start, heading=math.pi, preset='terrain_base', log=R.log,
+                      controller_opts={'contact_world': CollisionWorld()})
     c = loco.ctrl
     z = EX['zones']
     run0, run1 = seg(z['run'][0])['y0'], seg(z['run'][1])['y1']
@@ -75,7 +90,10 @@ def main():
     loco.follow_path(route, gait='walk')
     loco.turn_to(180.0)                                          # square up to the course heading (three's pi)
     st = EX['sit_timing']
-    loco.sit(hold=st['hold'], down=st['sit_down'], up=st['stand_up'], reverse=True, reverse_speed=st['reverse_speed'])
+    # the example's seatOn(vrm, bench, {transition: 'stand_to_sit', faceY: Math.PI}) through the controller, its hold,
+    # endSeated({reverse: true, reverseSpeed: 1.25}): eidoblend.characters.emotes' cohesive path
+    E.seat_on(loco, bench, face=math.pi, hold=st['hold'], stand={'reverse': True, 'reverse_speed': st['reverse_speed']})
+    seat_cmd = loco._queue[-1]
     loco.call(auto(True))
     loco.follow_path([(0.0, ges['y0'])], gait='walk', stop=False)
     loco.gesture(EX['gesture']['name'], weight=EX['gesture']['weight'])
@@ -89,10 +107,12 @@ def main():
     loco.call(auto(True))
     loco.move_to((0.0, (top['y0'] + top['y1']) / 2), gait='walk')
     loco.wait(EX['finale']['delay'])
-    loco.emote(EX['finale']['emote'], fade_in=EX['finale']['fade_in'], facing=90.0)   # toward the side camera (+X)
+    # the example salutes toward its camera, which has swung to its rear three-quarter (46 deg) by the finale: the
+    # heading toward (cos 46, -sin 46) is 90 - 46 deg
+    loco.emote(EX['finale']['emote'], fade_in=EX['finale']['fade_in'], facing=90.0 - CAM_SWING_DEG)
     loco.wait(0.5)
     t0 = time.time()
-    rep = loco.bake(f0=1)
+    rep = E.bake(loco, f0=1)                                     # Locomotion.bake with the seat's frames handed over
     R['timing_s']['bake'] = round(time.time() - t0, 1)
     recs, frames = rep['_records'], rep['_frames']
     f0, f1 = rep['frames_baked']
@@ -120,50 +140,122 @@ def main():
     R.check('the ladder chains into the mantle (a mount right after the ladder)', bool(runs.get('ladder')) and any(
         a == runs['ladder'][-1][1] + 1 for a, _b in runs.get('mount', [])), f'ladder {runs.get("ladder")}, mount '
         f'{runs.get("mount")}')
-    # the contact IK: the hands where the grab puts them
+    # the contact IK, judged on what the camera sees: the bones where Blender's keyed pose puts them, the visible feet
+    # (FootMesh: the skinned foot vertices against every solid, rungs included)
+    fm = T.FootMesh(me)
     hand = {s: me.humanoid[s + 'Hand'] for s in ('left', 'right')}
+    hips = me.humanoid['hips']
 
-    def hand_z(f):
+    def bone_at(f, b):
         sc.frame_set(f)
-        return {s: (me.arm.matrix_world @ me.arm.pose.bones[b].head) for s, b in hand.items()}
-    for k, label, height_of in (('vault', 'the vault\'s prop hand on the cover top', 'cover'),
-                                ('mount', 'a hand on the lip / the top during the mount', 'top')):
-        best = []
-        for a, b in runs.get(k, []):
-            d_min = 9.9
-            for f in range(a, b + 1, 2):
-                rr = recs[f - f0]
-                hz = hand_z(f)
-                y = rr['feet_world'][1]
-                tops = [o for o in course.objects if o.type == 'MESH' and 'wall' in o.name.lower()]
-                for o in tops:
-                    lo, hi = [o.matrix_world @ v.co for v in o.data.vertices], None
-                    zmax = max(v.z for v in lo)
-                    ymin, ymax = min(v.y for v in lo), max(v.y for v in lo)
-                    for s in hz:
-                        p = hz[s]
-                        if ymin - 0.1 <= p.y <= ymax + 0.1:
-                            d_min = min(d_min, abs(p.z - zmax))
-            best.append(round(d_min, 3))
-        R.check(f'{label} (the nearest hand within 6 cm of the surface)', bool(best) and min(best) < 0.06,
-                f'closest per {k}: {best} m')
-    # the hands on the rungs through the ladder's loop (a rung is a bar along X: the distance to its line)
+        return me.arm.matrix_world @ me.arm.pose.bones[b].head
+
+    def box(o):
+        V = [o.matrix_world @ v.co for v in o.data.vertices]
+        return (min(v.x for v in V), max(v.x for v in V), min(v.y for v in V), max(v.y for v in V), max(v.z for v in V))
+    walls = [box(o) for o in course.objects if o.type == 'MESH' and o.get('eido_course_role') in ('wall', 'ladder')]
+
+    def crossed(a, b):
+        """the wall box the body crosses in frames a..b (the one its feet's y span overlaps most)"""
+        ys = [recs[f - f0]['feet_world'][1] for f in range(a, b + 1)]
+        lo, hi = min(ys) - 0.3, max(ys) + 0.3
+        cand = [w for w in walls if w[3] > lo and w[2] < hi]
+        return max(cand, key=lambda w: min(w[3], hi) - max(w[2], lo)) if cand else None
+    R['vault_detail'], R['mount_detail'] = [], []
+    for j, (a, b) in enumerate(runs.get('vault', [])):
+        w = crossed(a, b)
+        if w is None:
+            R.check(f'vault {j + 1}: a cover crossed', False, f'frames {a}-{b}')
+            continue
+        tz = w[4]
+        hz = max(bone_at(f, hips).z for f in range(a, b + 1))
+        R.check(f'vault {j + 1} (frames {a}-{b}) rises over its cover: the hips {hz - tz:.2f} m over its {tz:.2f} m top',
+                hz - tz > 0.25, f'peak hips {hz:.2f} m')
+        best = 9.9
+        for f in range(a, b + 1):
+            for s, bn in hand.items():
+                p = bone_at(f, bn)
+                if w[0] - 0.02 <= p.x <= w[1] + 0.02 and w[2] - 0.02 <= p.y <= w[3] + 0.02:
+                    best = min(best, abs(p.z - (tz + 0.025)))
+        R['vault_detail'].append({'frames': [a, b], 'top': round(tz, 3), 'hips_over_top': round(hz - tz, 3),
+                                  'prop_hand_off_top_m': round(best, 3)})
+        R.check(f'vault {j + 1}: the prop hand plants on the cover\'s top (its wrist within 3.5 cm of resting on it)',
+                best < 0.035, f'{best * 100:.1f} cm')
+    for j, (a, b) in enumerate(runs.get('mount', [])):
+        w = crossed(a, b)
+        if w is None:
+            R.check(f'mount {j + 1}: a wall climbed', False, f'frames {a}-{b}')
+            continue
+        tz = w[4]
+        best = min(abs(bone_at(f, bn).z - (tz + 0.025)) for f in range(a, b + 1, 2) for bn in hand.values())
+        m_end = fm.at(b)
+        low = min(v['zmin'] for v in m_end.values())
+        R['mount_detail'].append({'frames': [a, b], 'top': round(tz, 3), 'hand_off_top_m': round(best, 3),
+                                  'feet_low_over_top_m_at_end': round(low - tz, 3)})
+        R.check(f'mount {j + 1} (frames {a}-{b}): a hand on the lip / the top (within 6 cm)', best < 0.06,
+                f'{best * 100:.1f} cm')
+        R.check(f'mount {j + 1}: the crouched feet rest on the top at its end (the lower foot 0-3 cm over it)',
+                -0.006 <= low - tz <= 0.03, f'{(low - tz) * 100:+.1f} cm')
+    # no foot inside a solid through any maneuver (and the settle after it)
+    pen = {}
+    for k, rs in runs.items():
+        worst = (0.0, None)
+        for a, b in rs:
+            for f in list(range(a, b + 1, 2)) + list(range(b + 1, min(f1, b + 8) + 1, 2)):
+                m = fm.at(f)
+                for s, v in m.items():
+                    if v['pen_mm'] > worst[0]:
+                        worst = (v['pen_mm'], [f, s])
+        pen[k] = worst
+        R.check(f'{k}: no foot inside a solid (the visible foot mesh, every 2nd frame)', worst[0] <= 10.0,
+                f'deepest {worst[0]} mm at {worst[1]}')
+    R['maneuver_foot_penetration_mm'] = pen
+    # the ladder: hands and the balls of the feet on the rungs (a rung is a bar along X)
     rungs = [o.matrix_world.translation.copy() for o in course.objects if o.get('eido_course_role') == 'rung']
-    near = []
+    hd, fd = [], []
     for a, b in runs.get('ladder', []):
-        for f in range(a, b + 1, 3):
-            hz = hand_z(f)
-            d = min((math.hypot(p.y - q.y, p.z - q.z) for p in hz.values() for q in rungs if abs(p.x - q.x) < 0.3),
-                    default=9.9)
-            near.append(d)
-    R['ladder_hand_to_rung_m'] = [round(d, 3) for d in near]
-    R.check('the hands latch the rungs through the ladder (a hand within 6 cm of a rung in most sampled frames)',
-            bool(near) and float(np.mean(np.array(near) < 0.06)) > 0.5,
-            f'{sum(1 for d in near if d < 0.06)} of {len(near)} sampled frames; median {np.median(near) if near else 9.9:.3f} m')
-    # the walking and running stretches
+        for f in range(a + int(0.2 * (b - a)), a + int(0.95 * (b - a)) + 1, 2):
+            hs = [bone_at(f, bn) for bn in hand.values()]
+            hd.append(min((math.hypot(p.y - q.y, p.z - q.z) for p in hs for q in rungs if abs(p.x - q.x) < 0.3),
+                          default=9.9))
+            m = fm.at(f)
+            best = 9.9
+            for v in m.values():
+                P = v['P']
+                for q in rungs:
+                    sel = np.abs(P[:, 0] - q.x) < 0.25
+                    if sel.any():
+                        d = np.hypot(P[sel, 1] - q.y, P[sel, 2] - q.z) - 0.028
+                        best = min(best, float(np.abs(d).min()))
+            fd.append(best)
+    R['ladder_hand_to_rung_m'] = [round(d, 3) for d in hd]
+    R['ladder_foot_to_rung_m'] = [round(d, 3) for d in fd]
+    R.check('the hands grip the rungs through the climb (a wrist within 6 cm of a rung\'s line in 85 % of the frames)',
+            bool(hd) and float(np.mean(np.array(hd) < 0.06)) >= 0.85,
+            f'{sum(1 for d in hd if d < 0.06)} of {len(hd)}; median {np.median(hd) if hd else 9.9:.3f} m')
+    R.check('the feet stand on the rungs through the climb (a boot within 1.5 cm of a rung in 75 % of the frames)',
+            bool(fd) and float(np.mean(np.array(fd) < 0.015)) >= 0.75,
+            f'{sum(1 for d in fd if d < 0.015)} of {len(fd)}; median {np.median(fd) if fd else 9.9:.3f} m')
+    # the walking, running and seated stretches
     T.gait_checks(R, rep)
-    seated = [r for r in recs if r['mode'] == 'seated']
-    R.check('the sit stop: seated on the bench', len(seated) > 30, f'{len(seated)} seated frames')
+    seated = [r for r in recs if r['mode'] in ('seated', 'seat')]     # 'seat': the frames emotes.bake hands over
+    spans = (rep.get('seated') or {}).get('spans') or []
+    R['seated_spans'] = spans
+    R.check('the sit stop: seated on the bench', len(seated) > 30 and len(spans) == 1,
+            f'{len(seated)} seated frames, spans {spans}')
+    if seated:
+        fa, fb = seated[0]['f'], seated[-1]['f']
+        hold = range(fa + (fb - fa) // 3, fb - (fb - fa) // 3 + 1, 6)
+        floor = seated[0]['feet_world'][2]
+        lows = [min(v['zmin'] for v in fm.at(f).values()) - floor for f in hold]
+        R.check('the seated feet stand on the floor (the visible boots within -6 / +10 mm of it through the hold)',
+                all(-0.006 <= z <= 0.010 for z in lows), f'{[round(z * 1000, 1) for z in lows]} mm')
+        from eidoblend.characters.emotes.verbs import skin_lowest
+        sc.frame_set((fa + fb) // 2)
+        und = skin_lowest(me, seat_cmd.pan, seat_cmd.seat_here - 0.25)
+        gap = (und - seat_cmd.seat_here) if und is not None else 9.9
+        R.check('the seat rests on the bench (the seated skin within 1.5 cm of its top, seatOn\'s settle)',
+                abs(gap) < 0.015, f'{gap * 100:+.1f} cm')
     gw = max((r['weights'].get('cheer', 0.0) for r in recs), default=0.0)
     R.check('the cheer gesture over the walk', gw > 1.0, f'weight up to {gw:.2f}')
     em = [r for r in recs if r['mode'] == 'emote' and r['weights'].get('salute', 0) > 0.5]
@@ -174,37 +266,113 @@ def main():
             f'{top["floor0"]:.2f} m from y {top["y0"]:.2f} to {top["y1"]:.2f}')
     R['worst'] = rep['worst']
     T.keyed_matches(R, me, frames)
-    shots(sc, me, recs, segs, runs)
+    cam = follow_camera(sc, loco.ctrl, recs, lad['y0'])
+    shots(sc, me, recs, segs, runs, cam)
 
 
-def shots(sc, me, recs, segs, runs):
+def follow_camera(sc, c, recs, ladder_y0):
+    """the example's camera, keyed on every frame: beside the body (+X, the course runs along +Y) 5.2 m off, 3.4 m while
+    a maneuver plays or the body sits (eased at 2.5 / s), swung 46 deg to a rear three-quarter from 2.2 m before the
+    ladder (eased at 1.8 / s); 0.45 + 0.07 x the distance over the body's centre, looking 0.30 m under it; 45 deg
+    vertical field (terrain_base's camera: 24.4 mm on a 36 mm sensor at 16:9) -> {frame: (pos, target)}"""
+    cd = bpy.data.cameras.new('example_cam')
+    cd.lens, cd.clip_start, cd.clip_end = 24.4, 0.1, 200.0
+    cam = bpy.data.objects.new('example_cam', cd)
+    sc.collection.objects.link(cam)
+    sc.camera = cam
+    cam.rotation_mode = 'QUATERNION'
+    lift = c.hip_y + c.half_height + c.vrm_foot_y
+    dt = 1.0 / 30.0
+    Rr, A = CAM_R, 0.0
+    out = {}
+    for i, r in enumerate(recs):
+        bx, by, bz = r['feet_world'][0], r['feet_world'][1], r['feet_world'][2] + lift
+        near = r['mode'] in ('maneuver', 'seated', 'seat') or r.get('cmd') == 'Sit'
+        want_r = CAM_R_NEAR if near else CAM_R
+        want_a = math.radians(CAM_SWING_DEG) if by >= ladder_y0 - 2.2 else 0.0
+        if i:
+            Rr += (want_r - Rr) * (1 - math.exp(-2.5 * dt))
+            A += (want_a - A) * (1 - math.exp(-1.8 * dt))
+        pos = Vector((bx + Rr * math.cos(A), by - Rr * math.sin(A), bz + 0.45 + 0.07 * Rr))
+        tgt = Vector((bx, by, bz - 0.30))
+        cam.location = pos
+        cam.rotation_quaternion = (tgt - pos).to_track_quat('-Z', 'Y')
+        cam.keyframe_insert('location', frame=r['f'])
+        cam.keyframe_insert('rotation_quaternion', frame=r['f'])
+        out[r['f']] = (tuple(pos), tuple(tgt))
+    return out
+
+
+def shots(sc, me, recs, segs, runs, cam):
+    """the example's camera at the middle of each stretch, eight frames through each maneuver (the strips), close-ups
+    of the contacts (the vault's prop hand, the mount's end crouch, the feet on the rungs, the seated feet)"""
     T.light(sc)
     S, sheets = [], {'sheet': []}
     r0 = recs[0]['f']
+
+    def at(f, name):
+        pos, tgt = cam[f]
+        return {'name': name, 'frame': f, 'pos': pos, 'target': tgt, 'lens': 24.4}
     for s_ in segs:
         a, b = s_['frames']
         if b - a < 8:
             continue
         f = (a + b) // 2
-        sc.frame_set(f)
         name = f'{s_["gait"].replace(":", "-")}_f{f:03d}'
-        S.append(T.side_shot(me, recs[f - r0], name, dist=5.2, lens=35.0, height=0.45))
+        S.append(at(f, name))
         sheets['sheet'].append(name)
     for k, rs in runs.items():
         for j, (a, b) in enumerate(rs[:2]):
-            a2, b2 = max(r0, a - 6), b + 10
+            a2, b2 = max(r0, a - 6), min(recs[-1]['f'], b + 10)
             fs = [int(a2 + (b2 - a2) * i / 7) for i in range(8)]
-            mid = fs[4]
-            sc.frame_set(mid)
-            cam = T.side_shot(me, recs[mid - r0], 'x', dist=4.0, lead=0.0, height=0.5)
             names = []
             for i, f in enumerate(fs):
                 nm = f'strip_{k}{j}_{i}'
-                S.append(dict(cam, name=nm, frame=f))
+                S.append(at(f, nm))
                 names.append(nm)
             sheets[f'strip_{k}{j}'] = names
-    T.save(R, sc, S, sheets)
+    # close-ups: a fixed camera 1.6 m to the side of the contact, level with it
+    hand = me.humanoid['rightHand']
 
+    def close(f, name, z_off=0.0, side=1.6, lens=50.0, back=0.0):
+        sc.frame_set(f)
+        p = recs[f - r0]['feet_world']
+        tgt = Vector((p[0], p[1] + back, p[2] + z_off))
+        return {'name': name, 'frame': f, 'pos': (tgt.x + side, tgt.y - 0.25, tgt.z + 0.15), 'target': tuple(tgt),
+                'lens': lens}
+    for j, (a, b) in enumerate(runs.get('vault', [])[:2]):
+        names = []
+        for i, f in enumerate(range(a, b + 1, max(1, (b - a) // 5))):
+            nm = f'close_vault{j}_{i}'
+            S.append(close(f, nm, z_off=0.7, side=2.2, lens=35.0))
+            names.append(nm)
+        sheets[f'close_vault{j}'] = names
+    for j, (a, b) in enumerate(runs.get('mount', [])[:2]):
+        names = []
+        for i, f in enumerate(range(a + (b - a) // 2, b + 9, max(1, (b - a) // 8))):
+            nm = f'close_mount{j}_{i}'
+            S.append(close(min(f, recs[-1]['f']), nm, z_off=0.3, side=1.8, lens=40.0))
+            names.append(nm)
+        sheets[f'close_mount{j}'] = names
+    for a, b in runs.get('ladder', [])[:1]:
+        names = []
+        for i, f in enumerate(range(a + (b - a) // 4, b, max(1, (b - a) // 8))):
+            nm = f'close_ladder_{i}'
+            sc.frame_set(f)
+            p = recs[f - r0]['feet_world']
+            S.append({'name': nm, 'frame': f, 'pos': (p[0] + 1.5, p[1] - 0.9, p[2] + 0.9),
+                      'target': (p[0], p[1] + 0.35, p[2] + 0.7), 'lens': 35.0})
+            names.append(nm)
+        sheets['close_ladder'] = names
+    seated = [r['f'] for r in recs if r['mode'] in ('seated', 'seat')]
+    if seated:
+        names = []
+        for i, f in enumerate(range(seated[0], seated[-1] + 1, max(1, (seated[-1] - seated[0]) // 5))):
+            nm = f'close_sit_{i}'
+            S.append(close(f, nm, z_off=0.35, side=1.7, lens=40.0))
+            names.append(nm)
+        sheets['close_sit'] = names
+    T.save(R, sc, S, sheets)
 
 try:
     main()

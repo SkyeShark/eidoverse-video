@@ -16,8 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _stage as S  # noqa: E402
 
-TESTS = ['test_kit_geometry', 'test_voder', 'test_mainframe', 'test_teletype', 'test_speakspell', 'test_tandem',
-         'test_museum_reload']
+TESTS = ['test_kit_geometry', 'test_voder', 'test_mainframe', 'test_teletype', 'test_two_teletypes', 'test_speakspell',
+         'test_tandem', 'test_dark_room_and_back_views', 'test_museum_reload']
 
 
 def main():

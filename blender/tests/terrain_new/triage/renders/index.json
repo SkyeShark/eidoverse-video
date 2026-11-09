@@ -1,0 +1,4172 @@
+{
+ "mountainRange_alpine": {
+  "group": "landform",
+  "promise": "alpine range: sharp aretes, horns, glacial valleys",
+  "W": 6000.0,
+  "relief_m": 649.3979302235579,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    1179.4,
+    165.7,
+    344.0
+   ],
+   "look_m": [
+    2006.8,
+    993.2,
+    618.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 10.5
+ },
+ "canyon": {
+  "group": "landform",
+  "promise": "meandering canyon in stratified plateau, stepped walls",
+  "W": 3000.0,
+  "relief_m": 596.873678784445,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -558.1,
+    -250.5,
+    3.3
+   ],
+   "look_m": [
+    2441.9,
+    -250.5,
+    3.3
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.7
+ },
+ "volcano": {
+  "group": "landform",
+  "promise": "stratovolcano: concave flanks, summit crater (Fuji)",
+  "W": 10000.0,
+  "relief_m": 1981.5423308324382,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3756.0,
+    -2017.7,
+    32.9
+   ],
+   "look_m": [
+    -786.1,
+    952.1,
+    1854.2
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.4
+ },
+ "duneField_star": {
+  "group": "landform",
+  "promise": "star dunes: tall pyramids, radiating arms",
+  "W": 5000.0,
+  "relief_m": 174.54689409721766,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    1121.1,
+    -973.6,
+    19.5
+   ],
+   "look_m": [
+    1545.4,
+    -549.3,
+    157.9
+   ],
+   "pitch_deg": 7.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.0
+ },
+ "real_fuji": {
+  "group": "reference",
+  "promise": "REAL: Mt Fuji, stratovolcano",
+  "W": 30000.0,
+  "relief_m": 3642.795310974121,
+  "texel_m": 29.296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -7838.2,
+    -7838.2,
+    455.0
+   ],
+   "look_m": [
+    278.3,
+    278.3,
+    3425.8
+   ],
+   "pitch_deg": 8.5
+  },
+  "render_s": 5.8
+ },
+ "crater": {
+  "group": "landform",
+  "promise": "simple bowl impact crater, raised rim, ejecta (Meteor Crater)",
+  "W": 2000.0,
+  "relief_m": 105.6524108712824,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -100.0,
+    -100.0,
+    4.6
+   ],
+   "look_m": [
+    240.0,
+    240.0,
+    29.0
+   ],
+   "pitch_deg": -3.1
+  },
+  "render_s": 6.2
+ },
+ "mountain": {
+  "group": "landform",
+  "promise": "one mountain massif with ridges and spurs",
+  "W": 6000.0,
+  "relief_m": 1457.2619314721576,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1614.9,
+    -1831.7,
+    157.1
+   ],
+   "look_m": [
+    167.0,
+    -49.8,
+    1427.1
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.8
+ },
+ "mountain_basic": {
+  "group": "landform",
+  "promise": "mountain, basic style",
+  "W": 6000.0,
+  "relief_m": 1457.4422003160855,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1609.1,
+    -1837.6,
+    155.9
+   ],
+   "look_m": [
+    172.9,
+    -55.7,
+    1427.6
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.8
+ },
+ "mountain_old": {
+  "group": "landform",
+  "promise": "old, worn-down mountain",
+  "W": 6000.0,
+  "relief_m": 1459.3925382837501,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1609.1,
+    -1837.6,
+    155.7
+   ],
+   "look_m": [
+    172.9,
+    -55.7,
+    1430.3
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 8.1
+ },
+ "mountain_alpine": {
+  "group": "landform",
+  "promise": "alpine peak: aretes, cirques, horns",
+  "W": 6000.0,
+  "relief_m": 1463.352896530834,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1714.5,
+    -1515.3,
+    223.6
+   ],
+   "look_m": [
+    67.4,
+    266.6,
+    1438.2
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 7.4
+ },
+ "mountain_strata": {
+  "group": "landform",
+  "promise": "layered (stratified) mountain",
+  "W": 6000.0,
+  "relief_m": 1448.6309657360787,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1562.2,
+    -1872.7,
+    169.7
+   ],
+   "look_m": [
+    219.7,
+    -90.8,
+    1429.9
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 12.0
+ },
+ "mountainRange": {
+  "group": "landform",
+  "promise": "eroded mountain range with drainage",
+  "W": 6000.0,
+  "relief_m": 542.920372641291,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2097.9,
+    867.0,
+    262.9
+   ],
+   "look_m": [
+    -1432.6,
+    1532.2,
+    476.6
+   ],
+   "pitch_deg": 6.8,
+   "tiled_3x3": true
+  },
+  "render_s": 16.5
+ },
+ "mountainRange_basic": {
+  "group": "landform",
+  "promise": "mountain range, basic",
+  "W": 6000.0,
+  "relief_m": 529.1769380077304,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2085.4,
+    873.6,
+    245.2
+   ],
+   "look_m": [
+    -1426.8,
+    1532.2,
+    460.7
+   ],
+   "pitch_deg": 7.0,
+   "tiled_3x3": true
+  },
+  "render_s": 14.3
+ },
+ "mountainRange_stratified": {
+  "group": "landform",
+  "promise": "stratified mountain range (bedded ridges)",
+  "W": 6000.0,
+  "relief_m": 552.0275066022392,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2148.4,
+    810.5,
+    334.5
+   ],
+   "look_m": [
+    -1420.9,
+    1538.1,
+    519.2
+   ],
+   "pitch_deg": 4.2,
+   "tiled_3x3": true
+  },
+  "render_s": 17.6
+ },
+ "canyon_classic": {
+  "group": "landform",
+  "promise": "canyon, classic style",
+  "W": 3000.0,
+  "relief_m": 596.9948322005303,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -558.1,
+    -250.5,
+    3.3
+   ],
+   "look_m": [
+    2441.9,
+    -250.5,
+    3.3
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.8
+ },
+ "canyon_strata": {
+  "group": "landform",
+  "promise": "canyon with strata benches",
+  "W": 3000.0,
+  "relief_m": 596.873678784445,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -558.1,
+    -250.5,
+    3.3
+   ],
+   "look_m": [
+    2441.9,
+    -250.5,
+    3.3
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 21.3
+ },
+ "canyon_narrow": {
+  "group": "landform",
+  "promise": "a narrower, tighter-meandering canyon (scale 0.2, 3 meanders), a fair second look",
+  "W": 3000.0,
+  "relief_m": 591.3312335125729,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -543.5,
+    288.6,
+    4.7
+   ],
+   "look_m": [
+    2456.5,
+    288.6,
+    4.7
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 16.9
+ },
+ "island": {
+  "group": "landform",
+  "promise": "volcanic island: coastline, interior peaks, beach shelf",
+  "W": 8000.0,
+  "relief_m": 1312.4533943770525,
+  "texel_m": 7.8125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1840.7,
+    -3680.0,
+    1.7
+   ],
+   "look_m": [
+    535.2,
+    -1308.6,
+    1268.8
+   ],
+   "pitch_deg": 14.7
+  },
+  "render_s": 10.2
+ },
+ "volcano_cone": {
+  "group": "landform",
+  "promise": "volcanic cone",
+  "W": 10000.0,
+  "relief_m": 2202.569252218782,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3736.5,
+    -1959.1,
+    123.2
+   ],
+   "look_m": [
+    -766.6,
+    1010.7,
+    2084.0
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 10.0
+ },
+ "volcano_shield": {
+  "group": "landform",
+  "promise": "shield volcano: broad, gentle (Hawaii)",
+  "W": 10000.0,
+  "relief_m": 2377.6985281723214,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3756.0,
+    -1929.8,
+    426.5
+   ],
+   "look_m": [
+    -786.1,
+    1040.0,
+    2235.5
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 5.3
+ },
+ "volcano_pyroclasticShield": {
+  "group": "landform",
+  "promise": "pyroclastic shield: low broad ignimbrite shield",
+  "W": 10000.0,
+  "relief_m": 2278.8061166192165,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3746.2,
+    -1949.3,
+    208.9
+   ],
+   "look_m": [
+    -776.4,
+    1020.5,
+    2159.8
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 5.6
+ },
+ "volcano_smooth": {
+  "group": "landform",
+  "promise": "the volcano's bare profile (surface smooth: no built-in erosion), a fair second look",
+  "W": 10000.0,
+  "relief_m": 1946.9881900648752,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3765.7,
+    -2027.5,
+    11.6
+   ],
+   "look_m": [
+    -795.9,
+    942.4,
+    1834.2
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 5.1
+ },
+ "rugged": {
+  "group": "landform",
+  "promise": "rocky surface on any terrain, shape kept",
+  "W": 2000.0,
+  "relief_m": 323.05533678998415,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -38.7,
+    -107.1,
+    129.4
+   ],
+   "look_m": [
+    411.1,
+    342.8,
+    257.1
+   ],
+   "pitch_deg": 5.4,
+   "tiled_3x3": true
+  },
+  "render_s": 5.3
+ },
+ "caldera": {
+  "group": "landform",
+  "promise": "collapse caldera: ring fault walls, flat floor (Crater Lake)",
+  "W": 12000.0,
+  "relief_m": 1244.217370937821,
+  "texel_m": 11.71875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -960.0,
+    -960.0,
+    130.6
+   ],
+   "look_m": [
+    1440.0,
+    1440.0,
+    132.3
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 5.3
+ },
+ "impactCrater": {
+  "group": "landform",
+  "promise": "complex impact crater: terraced walls, central peak",
+  "W": 20000.0,
+  "relief_m": 1210.5858359916258,
+  "texel_m": 19.53125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1400.0,
+    -1800.0,
+    21.9
+   ],
+   "look_m": [
+    0.0,
+    0.0,
+    303.5
+   ],
+   "pitch_deg": 1.0
+  },
+  "render_s": 6.3
+ },
+ "cinderConeField": {
+  "group": "landform",
+  "promise": "cinder cones at angle of repose, summit craters, lava flows (SP Crater field)",
+  "W": 5000.0,
+  "relief_m": 82.42684488483478,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1334.9,
+    -1559.5,
+    1.7
+   ],
+   "look_m": [
+    -910.6,
+    -1135.3,
+    79.1
+   ],
+   "pitch_deg": 1.4,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "maar": {
+  "group": "landform",
+  "promise": "maar: below-ground crater, low tuff ring",
+  "W": 3000.0,
+  "relief_m": 98.68918383571967,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -150.0,
+    -150.0,
+    2.1
+   ],
+   "look_m": [
+    360.0,
+    360.0,
+    30.7
+   ],
+   "pitch_deg": -3.7
+  },
+  "render_s": 6.4
+ },
+ "maar_tuffRing": {
+  "group": "landform",
+  "promise": "tuff ring: wide low rim",
+  "W": 3000.0,
+  "relief_m": 148.88800412334913,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -150.0,
+    -150.0,
+    2.1
+   ],
+   "look_m": [
+    360.0,
+    360.0,
+    30.7
+   ],
+   "pitch_deg": -3.7
+  },
+  "render_s": 7.7
+ },
+ "maar_tuffCone": {
+  "group": "landform",
+  "promise": "tuff cone: steeper, higher cone",
+  "W": 3000.0,
+  "relief_m": 245.93905667943284,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -150.0,
+    -150.0,
+    2.1
+   ],
+   "look_m": [
+    360.0,
+    360.0,
+    30.7
+   ],
+   "pitch_deg": -3.7
+  },
+  "render_s": 8.3
+ },
+ "cirque": {
+  "group": "landform",
+  "promise": "glacial cirques: amphitheatre basins in mountains, aretes",
+  "W": 6000.0,
+  "relief_m": 307.4695712952298,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -682.0,
+    952.8,
+    254.0
+   ],
+   "look_m": [
+    -172.9,
+    1461.9,
+    289.4
+   ],
+   "pitch_deg": -3.2,
+   "tiled_3x3": true
+  },
+  "render_s": 31.3
+ },
+ "basinField": {
+  "group": "landform",
+  "promise": "field of closed depressions (dolines, pans)",
+  "W": 1000.0,
+  "relief_m": 19.09056860954991,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -383.2,
+    -303.1,
+    20.6
+   ],
+   "look_m": [
+    -298.3,
+    -218.3,
+    18.9
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 23.0
+ },
+ "moundField": {
+  "group": "landform",
+  "promise": "pingos / earth mounds, some with summit craters",
+  "W": 2000.0,
+  "relief_m": 33.85626426095516,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -703.9,
+    -784.0,
+    1.7
+   ],
+   "look_m": [
+    -534.2,
+    -614.3,
+    32.4
+   ],
+   "pitch_deg": 1.3,
+   "tiled_3x3": true
+  },
+  "render_s": 8.6
+ },
+ "volcanicPlug": {
+  "group": "landform",
+  "promise": "volcanic neck with radiating dikes (Shiprock)",
+  "W": 4000.0,
+  "relief_m": 772.0073591190012,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1217.2,
+    -1189.9,
+    1.7
+   ],
+   "look_m": [
+    -29.3,
+    -2.0,
+    679.8
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.0
+ },
+ "lavaDome": {
+  "group": "landform",
+  "promise": "steep bulbous lava dome, blocky talus apron",
+  "W": 2500.0,
+  "relief_m": 263.0391450314826,
+  "texel_m": 2.44140625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -726.6,
+    -675.3,
+    1.7
+   ],
+   "look_m": [
+    15.9,
+    67.1,
+    262.4
+   ],
+   "pitch_deg": 7.9
+  },
+  "render_s": 6.2
+ },
+ "mesa": {
+  "group": "landform",
+  "promise": "mesa: flat caprock, cliff, talus slope, apron (Monument Valley)",
+  "W": 3000.0,
+  "relief_m": 309.3839780126963,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -762.0,
+    -1265.9,
+    1.9
+   ],
+   "look_m": [
+    109.9,
+    -394.0,
+    307.6
+   ],
+   "pitch_deg": 7.9
+  },
+  "render_s": 7.7
+ },
+ "glacialTrough": {
+  "group": "landform",
+  "promise": "U-shaped glacial valley, truncated spurs, hanging valleys (Yosemite)",
+  "W": 6000.0,
+  "relief_m": 473.49692031374167,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1086.9,
+    -366.2,
+    77.1
+   ],
+   "look_m": [
+    4913.1,
+    -366.2,
+    77.1
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.0
+ },
+ "meanderBelt": {
+  "group": "landform",
+  "promise": "meandering river: cut banks, point bars, oxbows",
+  "W": 1500.0,
+  "relief_m": 51.697084807319364,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -252.5,
+    94.6,
+    38.4
+   ],
+   "look_m": [
+    -125.2,
+    221.9,
+    48.0
+   ],
+   "pitch_deg": -3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 9.0
+ },
+ "faultScarp": {
+  "group": "landform",
+  "promise": "fault scarp: fresh step across the land, facets",
+  "W": 600.0,
+  "relief_m": 21.599999999999998,
+  "texel_m": 0.5859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    80.8,
+    -14.7,
+    3.1
+   ],
+   "look_m": [
+    142.1,
+    46.6,
+    21.6
+   ],
+   "pitch_deg": 6.1,
+   "tiled_3x3": true
+  },
+  "render_s": 11.6
+ },
+ "graben": {
+  "group": "landform",
+  "promise": "graben: down-dropped block between two faults",
+  "W": 4000.0,
+  "relief_m": 184.66737075458659,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1710.7,
+    570.5,
+    2.8
+   ],
+   "look_m": [
+    -1193.4,
+    1087.9,
+    183.8
+   ],
+   "pitch_deg": 7.9,
+   "tiled_3x3": true
+  },
+  "render_s": 9.8
+ },
+ "graben_halfGraben": {
+  "group": "landform",
+  "promise": "half-graben: tilted block",
+  "W": 4000.0,
+  "relief_m": 176.7774817023878,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1625.3,
+    655.9,
+    45.1
+   ],
+   "look_m": [
+    -1193.4,
+    1087.9,
+    175.9
+   ],
+   "pitch_deg": 6.1,
+   "tiled_3x3": true
+  },
+  "render_s": 10.9
+ },
+ "graben_horstGraben": {
+  "group": "landform",
+  "promise": "horst-and-graben ranges",
+  "W": 4000.0,
+  "relief_m": 260.2673707545866,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1840.0,
+    360.3,
+    2.6
+   ],
+   "look_m": [
+    -1193.4,
+    1091.8,
+    259.3
+   ],
+   "pitch_deg": 8.7,
+   "tiled_3x3": true
+  },
+  "render_s": 6.5
+ },
+ "graben_pullApart": {
+  "group": "landform",
+  "promise": "pull-apart basin",
+  "W": 4000.0,
+  "relief_m": 364.519241214438,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1840.0,
+    330.1,
+    5.4
+   ],
+   "look_m": [
+    -1193.4,
+    1091.8,
+    363.5
+   ],
+   "pitch_deg": 13.7,
+   "tiled_3x3": true
+  },
+  "render_s": 10.7
+ },
+ "dipSlope": {
+  "group": "landform",
+  "promise": "cuestas / hogbacks: gentle dip slope, steep scarp",
+  "W": 3000.0,
+  "relief_m": 110.11936992494363,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    288.7,
+    -229.9,
+    1.7
+   ],
+   "look_m": [
+    572.8,
+    54.2,
+    100.2
+   ],
+   "pitch_deg": 7.8,
+   "tiled_3x3": true
+  },
+  "render_s": 10.1
+ },
+ "esker": {
+  "group": "landform",
+  "promise": "esker: sinuous gravel ridge",
+  "W": 1000.0,
+  "relief_m": 30.244834916064793,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -12.1,
+    -2.3,
+    7.0
+   ],
+   "look_m": [
+    72.8,
+    82.5,
+    26.9
+   ],
+   "pitch_deg": 3.4,
+   "tiled_3x3": true
+  },
+  "render_s": 31.0
+ },
+ "moraineSet": {
+  "group": "landform",
+  "promise": "lateral / terminal / recessional moraines",
+  "W": 3000.0,
+  "relief_m": 59.476081212566484,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    555.5,
+    350.4,
+    40.4
+   ],
+   "look_m": [
+    810.1,
+    605.0,
+    57.9
+   ],
+   "pitch_deg": -3.2,
+   "tiled_3x3": true
+  },
+  "render_s": 40.4
+ },
+ "streamform": {
+  "group": "landform",
+  "promise": "drumlin field: streamlined hills",
+  "W": 2000.0,
+  "relief_m": 44.78648573551539,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -37.9,
+    530.5,
+    1.7
+   ],
+   "look_m": [
+    131.8,
+    700.2,
+    23.4
+   ],
+   "pitch_deg": -0.8,
+   "tiled_3x3": true
+  },
+  "render_s": 39.3
+ },
+ "streamform_rocheMoutonnee": {
+  "group": "landform",
+  "promise": "roches moutonnees: smooth stoss, plucked lee",
+  "W": 500.0,
+  "relief_m": 11.196620902469402,
+  "texel_m": 0.48828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -10.4,
+    132.6,
+    1.7
+   ],
+   "look_m": [
+    32.0,
+    175.0,
+    5.7
+   ],
+   "pitch_deg": -2.2,
+   "tiled_3x3": true
+  },
+  "render_s": 15.7
+ },
+ "streamform_whaleback": {
+  "group": "landform",
+  "promise": "whalebacks",
+  "W": 500.0,
+  "relief_m": 11.196621433878848,
+  "texel_m": 0.48828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -10.0,
+    132.6,
+    1.7
+   ],
+   "look_m": [
+    32.5,
+    175.0,
+    5.8
+   ],
+   "pitch_deg": -2.1,
+   "tiled_3x3": true
+  },
+  "render_s": 9.7
+ },
+ "streamform_yardang": {
+  "group": "landform",
+  "promise": "yardangs: wind-carved ridges",
+  "W": 1000.0,
+  "relief_m": 40.4562714625915,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -277.7,
+    -340.2,
+    1.9
+   ],
+   "look_m": [
+    -182.1,
+    -244.6,
+    33.9
+   ],
+   "pitch_deg": 7.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.6
+ },
+ "oceanRidge": {
+  "group": "landform",
+  "promise": "mid-ocean ridge: rift valley, transform faults",
+  "W": 200000.0,
+  "relief_m": 15685.38364463739,
+  "texel_m": 195.3125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    14425.8,
+    -26394.5,
+    10726.2
+   ],
+   "look_m": [
+    48925.8,
+    8105.5,
+    15546.1
+   ],
+   "pitch_deg": -0.4,
+   "tiled_3x3": true
+  },
+  "render_s": 7.3
+ },
+ "oceanRidge_trench": {
+  "group": "landform",
+  "promise": "ocean trench",
+  "W": 200000.0,
+  "relief_m": 25175.1556456046,
+  "texel_m": 195.3125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -77875.3,
+    -89984.7,
+    23918.9
+   ],
+   "look_m": [
+    -38378.9,
+    -50488.3,
+    25163.0
+   ],
+   "pitch_deg": -4.7,
+   "tiled_3x3": true
+  },
+  "render_s": 65.9
+ },
+ "oceanRidge_abyssalPlain": {
+  "group": "landform",
+  "promise": "abyssal plain",
+  "W": 200000.0,
+  "relief_m": 285.1036709406442,
+  "texel_m": 195.3125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    13205.2,
+    -56521.3,
+    164.5
+   ],
+   "look_m": [
+    30175.8,
+    -39550.8,
+    240.8
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 26.2
+ },
+ "invertedChannel": {
+  "group": "landform",
+  "promise": "inverted river channel: sinuous flat-topped ridge",
+  "W": 1500.0,
+  "relief_m": 32.164722593147516,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -589.4,
+    -208.6,
+    1.9
+   ],
+   "look_m": [
+    -462.2,
+    -81.3,
+    31.8
+   ],
+   "pitch_deg": 3.4,
+   "tiled_3x3": true
+  },
+  "render_s": 6.8
+ },
+ "terraceStair": {
+  "group": "landform",
+  "promise": "river terraces: flat treads, steep risers",
+  "W": 1500.0,
+  "relief_m": 487.2965038646757,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    0.0,
+    -375.0,
+    198.9
+   ],
+   "look_m": [
+    0.0,
+    180.0,
+    96.8
+   ],
+   "pitch_deg": 4.0,
+   "tiled_3x3": true
+  },
+  "render_s": 5.9
+ },
+ "waveCutPlatform": {
+  "group": "landform",
+  "promise": "sea cliff above a wave-cut platform",
+  "W": 500.0,
+  "relief_m": 82.92367137698015,
+  "texel_m": 0.48828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    224.4,
+    -50.0,
+    6.3
+   ],
+   "look_m": [
+    -275.6,
+    -50.0,
+    6.3
+   ],
+   "pitch_deg": 4.0
+  },
+  "render_s": 3.1
+ },
+ "playa": {
+  "group": "landform",
+  "promise": "playa: dead-flat dry lake floor, bajada",
+  "W": 5000.0,
+  "relief_m": 264.0026301269445,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    471.2,
+    832.5,
+    5.3
+   ],
+   "look_m": [
+    4006.7,
+    4368.1,
+    5.3
+   ],
+   "pitch_deg": 2.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.7
+ },
+ "playa_saltPan": {
+  "group": "landform",
+  "promise": "salt pan",
+  "W": 5000.0,
+  "relief_m": 264.0026301269445,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    857.5,
+    -573.2,
+    257.8
+   ],
+   "look_m": [
+    1281.7,
+    -148.9,
+    263.6
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.7
+ },
+ "playa_polje": {
+  "group": "landform",
+  "promise": "polje: flat karst basin, steep sides",
+  "W": 5000.0,
+  "relief_m": 264.00479838262936,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    857.5,
+    -573.2,
+    257.8
+   ],
+   "look_m": [
+    1281.7,
+    -148.9,
+    263.6
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 8.2
+ },
+ "playa_lacustrinePlain": {
+  "group": "landform",
+  "promise": "lake plain",
+  "W": 5000.0,
+  "relief_m": 264.00479838262936,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    857.5,
+    -573.2,
+    257.8
+   ],
+   "look_m": [
+    1281.7,
+    -148.9,
+    263.6
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 9.6
+ },
+ "playa_chott": {
+  "group": "landform",
+  "promise": "chott: salt lake basin",
+  "W": 5000.0,
+  "relief_m": 264.0026301269445,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    857.5,
+    -573.2,
+    257.8
+   ],
+   "look_m": [
+    1281.7,
+    -148.9,
+    263.6
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 9.7
+ },
+ "planationSurface": {
+  "group": "landform",
+  "promise": "planation surface with residual hills",
+  "W": 5000.0,
+  "relief_m": 414.22956068683027,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1213.8,
+    31.3,
+    23.3
+   ],
+   "look_m": [
+    -105.0,
+    1140.1,
+    413.4
+   ],
+   "pitch_deg": 8.0,
+   "tiled_3x3": true
+  },
+  "render_s": 10.4
+ },
+ "towerKarst": {
+  "group": "landform",
+  "promise": "tower karst: steep limestone towers on a plain (Guilin)",
+  "W": 1500.0,
+  "relief_m": 221.55436504284245,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -386.2,
+    -418.4,
+    144.0
+   ],
+   "look_m": [
+    59.3,
+    27.1,
+    220.5
+   ],
+   "pitch_deg": 0.9,
+   "tiled_3x3": true
+  },
+  "render_s": 27.6
+ },
+ "cockpitKarst": {
+  "group": "landform",
+  "promise": "cockpit karst: cones between star-shaped pits",
+  "W": 4000.0,
+  "relief_m": 468.0014883764502,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1307.5,
+    -162.9,
+    246.6
+   ],
+   "look_m": [
+    -603.5,
+    541.0,
+    395.5
+   ],
+   "pitch_deg": 2.5,
+   "tiled_3x3": true
+  },
+  "render_s": 44.1
+ },
+ "limestonePavement": {
+  "group": "landform",
+  "promise": "limestone pavement: clints and grikes",
+  "W": 40.0,
+  "relief_m": 0.3643824354536318,
+  "texel_m": 0.0390625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    10.6,
+    3.1,
+    2.0
+   ],
+   "look_m": [
+    14.0,
+    6.5,
+    0.3
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 12.4
+ },
+ "bornhardt": {
+  "group": "landform",
+  "promise": "bornhardt / inselberg: bare granite dome (Uluru)",
+  "W": 3000.0,
+  "relief_m": 325.97487374427965,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -511.6,
+    -775.2,
+    1.7
+   ],
+   "look_m": [
+    379.4,
+    115.7,
+    324.9
+   ],
+   "pitch_deg": 8.4
+  },
+  "render_s": 7.3
+ },
+ "badlands": {
+  "group": "landform",
+  "promise": "badlands: dense rills, gullies, buttes",
+  "W": 1000.0,
+  "relief_m": 192.61108455658945,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    80.2,
+    -36.9,
+    92.0
+   ],
+   "look_m": [
+    350.1,
+    232.9,
+    151.2
+   ],
+   "pitch_deg": 2.8,
+   "tiled_3x3": true
+  },
+  "render_s": 5.8
+ },
+ "patternedGround": {
+  "group": "landform",
+  "promise": "patterned ground: sorted circles to stripes",
+  "W": 25.0,
+  "relief_m": 4.0179482878780535,
+  "texel_m": 0.0244140625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -11.5,
+    -11.5,
+    5.3
+   ],
+   "look_m": [
+    -8.8,
+    -8.8,
+    3.2
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 3.2
+ },
+ "duneField": {
+  "group": "landform",
+  "promise": "barchan dunes: crescents, horns downwind",
+  "W": 1000.0,
+  "relief_m": 20.25714213993469,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -24.8,
+    235.0,
+    1.7
+   ],
+   "look_m": [
+    60.1,
+    319.8,
+    16.1
+   ],
+   "pitch_deg": 0.8,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "duneField_transverse": {
+  "group": "landform",
+  "promise": "transverse dunes",
+  "W": 1500.0,
+  "relief_m": 43.36326849773546,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    195.7,
+    -495.7,
+    1.7
+   ],
+   "look_m": [
+    323.0,
+    -368.4,
+    36.5
+   ],
+   "pitch_deg": 4.9,
+   "tiled_3x3": true
+  },
+  "render_s": 5.8
+ },
+ "duneField_barchanoid": {
+  "group": "landform",
+  "promise": "barchanoid ridges",
+  "W": 1500.0,
+  "relief_m": 43.36326849773546,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    195.7,
+    -495.7,
+    1.7
+   ],
+   "look_m": [
+    323.0,
+    -368.4,
+    36.5
+   ],
+   "pitch_deg": 4.9,
+   "tiled_3x3": true
+  },
+  "render_s": 8.6
+ },
+ "duneField_linear": {
+  "group": "landform",
+  "promise": "linear (seif) dunes",
+  "W": 5000.0,
+  "relief_m": 135.33082031171298,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1964.8,
+    -456.0,
+    33.2
+   ],
+   "look_m": [
+    -1540.5,
+    -31.7,
+    130.3
+   ],
+   "pitch_deg": 3.2,
+   "tiled_3x3": true
+  },
+  "render_s": 8.0
+ },
+ "duneField_star_f9": {
+  "group": "landform",
+  "promise": "star dunes at Ekigar's own suggested frequency (~9), a fair second look",
+  "W": 5000.0,
+  "relief_m": 186.1056193698414,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1383.7,
+    164.1,
+    110.4
+   ],
+   "look_m": [
+    -959.5,
+    588.4,
+    159.0
+   ],
+   "pitch_deg": -1.4,
+   "tiled_3x3": true
+  },
+  "render_s": 5.1
+ },
+ "duneField_dome": {
+  "group": "landform",
+  "promise": "dome dunes",
+  "W": 1000.0,
+  "relief_m": 28.731255123195737,
+  "texel_m": 0.9765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    165.6,
+    -306.0,
+    6.3
+   ],
+   "look_m": [
+    250.5,
+    -221.2,
+    28.3
+   ],
+   "pitch_deg": 4.4,
+   "tiled_3x3": true
+  },
+  "render_s": 5.0
+ },
+ "duneField_parabolic": {
+  "group": "landform",
+  "promise": "parabolic dunes, arms upwind",
+  "W": 1500.0,
+  "relief_m": 30.445665813014408,
+  "texel_m": 1.46484375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -48.9,
+    351.0,
+    1.7
+   ],
+   "look_m": [
+    78.4,
+    478.3,
+    22.4
+   ],
+   "pitch_deg": 0.6,
+   "tiled_3x3": true
+  },
+  "render_s": 4.7
+ },
+ "alluvialFan": {
+  "group": "landform",
+  "promise": "alluvial fan: cone of sediment from a canyon mouth",
+  "W": 5000.0,
+  "relief_m": 174.3991866179857,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -150.0,
+    -750.0,
+    1.7
+   ],
+   "look_m": [
+    -150.0,
+    1500.0,
+    0.0
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 4.9
+ },
+ "sandur": {
+  "group": "landform",
+  "promise": "outwash plain: braided channels",
+  "W": 10000.0,
+  "relief_m": 167.29352241931628,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -648.3,
+    2652.4,
+    151.1
+   ],
+   "look_m": [
+    200.2,
+    3501.0,
+    158.8
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 4.9
+ },
+ "delta": {
+  "group": "landform",
+  "promise": "river delta: distributaries, levees, lobes",
+  "W": 20000.0,
+  "relief_m": 327.5983828975401,
+  "texel_m": 19.53125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3600.0,
+    -1000.0,
+    59.1
+   ],
+   "look_m": [
+    -1000.0,
+    7000.0,
+    56.3
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 5.1
+ },
+ "spitBar": {
+  "group": "landform",
+  "promise": "sand spit with recurved tip, lagoon",
+  "W": 3000.0,
+  "relief_m": 109.46308648105378,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -833.2,
+    -59.7,
+    28.7
+   ],
+   "look_m": [
+    -578.6,
+    194.8,
+    65.1
+   ],
+   "pitch_deg": -0.2
+  },
+  "render_s": 4.7
+ },
+ "spitBar_baymouth": {
+  "group": "landform",
+  "promise": "baymouth bar",
+  "W": 3000.0,
+  "relief_m": 109.46308648105378,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -833.2,
+    -59.7,
+    28.7
+   ],
+   "look_m": [
+    -578.6,
+    194.8,
+    65.1
+   ],
+   "pitch_deg": -0.2
+  },
+  "render_s": 4.9
+ },
+ "spitBar_tombolo": {
+  "group": "landform",
+  "promise": "tombolo: bar tying an island to shore",
+  "W": 3000.0,
+  "relief_m": 109.46308648105378,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -833.2,
+    -59.7,
+    28.7
+   ],
+   "look_m": [
+    -578.6,
+    194.8,
+    65.1
+   ],
+   "pitch_deg": -0.2
+  },
+  "render_s": 4.9
+ },
+ "spitBar_barrier": {
+  "group": "landform",
+  "promise": "barrier island",
+  "W": 3000.0,
+  "relief_m": 109.43797327062619,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -839.0,
+    297.7,
+    28.7
+   ],
+   "look_m": [
+    -584.5,
+    552.2,
+    65.1
+   ],
+   "pitch_deg": -0.2
+  },
+  "render_s": 5.5
+ },
+ "spitBar_cuspate": {
+  "group": "landform",
+  "promise": "cuspate foreland",
+  "W": 3000.0,
+  "relief_m": 109.46308648105378,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    133.6,
+    -130.0,
+    28.7
+   ],
+   "look_m": [
+    388.2,
+    124.5,
+    74.8
+   ],
+   "pitch_deg": 1.3
+  },
+  "render_s": 5.4
+ },
+ "reefRing": {
+  "group": "landform",
+  "promise": "atoll / barrier reef ring, lagoon, passes",
+  "W": 10000.0,
+  "relief_m": 1207.6476055166497,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2965.0,
+    -2965.0,
+    1.7
+   ],
+   "look_m": [
+    4.9,
+    4.9,
+    1074.5
+   ],
+   "pitch_deg": 8.3
+  },
+  "render_s": 5.7
+ },
+ "beachCusps": {
+  "group": "landform",
+  "promise": "beach cusps: regular horns along the swash line",
+  "W": 400.0,
+  "relief_m": 76.16660706403447,
+  "texel_m": 0.390625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -8.0,
+    -100.0,
+    54.7
+   ],
+   "look_m": [
+    48.0,
+    40.0,
+    54.7
+   ],
+   "pitch_deg": 0.0
+  },
+  "render_s": 3.3
+ },
+ "lavaField": {
+  "group": "landform",
+  "promise": "lava flow field: lobes, levees, pressure ridges",
+  "W": 3000.0,
+  "relief_m": 445.0422357489434,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -450.0,
+    150.0,
+    246.5
+   ],
+   "look_m": [
+    -150.0,
+    1050.0,
+    155.7
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 5.8
+ },
+ "rockGlacier": {
+  "group": "landform",
+  "promise": "rock glacier: lobate debris tongue, arcuate ridges",
+  "W": 2000.0,
+  "relief_m": 81.67922759825427,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    169.0,
+    180.7,
+    33.3
+   ],
+   "look_m": [
+    391.6,
+    403.3,
+    78.5
+   ],
+   "pitch_deg": 2.2
+  },
+  "render_s": 5.5
+ },
+ "fixture_detailed_base": {
+  "group": "operator",
+  "promise": "Ekigar's detailed-base fixture every operator below is applied to",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 10.1
+ },
+ "default_project": {
+  "group": "operator",
+  "promise": "Ekigar's starter: fBm under Phacelle",
+  "W": 2000.0,
+  "relief_m": 37.39511961338754,
+  "texel_m": 1.953125,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    530.5,
+    -225.4,
+    32.4
+   ],
+   "look_m": [
+    700.2,
+    -55.7,
+    33.2
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.6
+ },
+ "op_constant": {
+  "group": "operator",
+  "promise": "flat value",
+  "W": 2000.0,
+  "relief_m": 0.0,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -869.9,
+    -869.9,
+    1.7
+   ],
+   "look_m": [
+    -700.2,
+    -700.2,
+    0.0
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 8.8
+ },
+ "op_gradient": {
+  "group": "operator",
+  "promise": "linear ramp",
+  "W": 2000.0,
+  "relief_m": 599.4140625,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    106.2,
+    -920.0,
+    333.3
+   ],
+   "look_m": [
+    700.2,
+    -700.2,
+    509.8
+   ],
+   "pitch_deg": 9.6
+  },
+  "render_s": 3.7
+ },
+ "op_radialGradient": {
+  "group": "operator",
+  "promise": "radial falloff",
+  "W": 2000.0,
+  "relief_m": 598.5275391797604,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -594.9,
+    -594.9,
+    9.3
+   ],
+   "look_m": [
+    -1.0,
+    -1.0,
+    598.5
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.7
+ },
+ "op_fbm": {
+  "group": "operator",
+  "promise": "fBm noise base terrain",
+  "W": 2000.0,
+  "relief_m": 36.27698689062346,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    530.5,
+    -221.5,
+    31.5
+   ],
+   "look_m": [
+    700.2,
+    -51.8,
+    34.5
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.5
+ },
+ "op_ridged": {
+  "group": "operator",
+  "promise": "ridged noise: sharp ridgelines",
+  "W": 2000.0,
+  "relief_m": 71.07323774837818,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -526.2,
+    147.7,
+    46.4
+   ],
+   "look_m": [
+    -356.4,
+    317.4,
+    66.1
+   ],
+   "pitch_deg": -1.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "op_voronoi": {
+  "group": "operator",
+  "promise": "cellular distance: mesas, plates",
+  "W": 2000.0,
+  "relief_m": 190.7968445725502,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -920.0,
+    160.6,
+    62.0
+   ],
+   "look_m": [
+    -565.4,
+    536.1,
+    178.5
+   ],
+   "pitch_deg": 6.7,
+   "tiled_3x3": true
+  },
+  "render_s": 8.7
+ },
+ "op_perlin": {
+  "group": "operator",
+  "promise": "coherent noise",
+  "W": 2000.0,
+  "relief_m": 91.97816180193803,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    530.5,
+    -869.9,
+    82.8
+   ],
+   "look_m": [
+    700.2,
+    -700.2,
+    86.9
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "op_cellular": {
+  "group": "operator",
+  "promise": "cell patterns",
+  "W": 2000.0,
+  "relief_m": 299.99982989297126,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -920.0,
+    -210.2,
+    64.6
+   ],
+   "look_m": [
+    -598.6,
+    383.8,
+    297.5
+   ],
+   "pitch_deg": 13.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "op_dotNoise": {
+  "group": "operator",
+  "promise": "dots / speckles",
+  "W": 2000.0,
+  "relief_m": 158.79550391395318,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -602.7,
+    -778.4,
+    23.4
+   ],
+   "look_m": [
+    -417.0,
+    -592.8,
+    65.5
+   ],
+   "pitch_deg": 3.1,
+   "tiled_3x3": true
+  },
+  "render_s": 5.4
+ },
+ "op_lineNoise": {
+  "group": "operator",
+  "promise": "line sets",
+  "W": 2000.0,
+  "relief_m": 209.87433751561377,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -920.0,
+    -442.7,
+    98.7
+   ],
+   "look_m": [
+    -672.9,
+    147.5,
+    208.1
+   ],
+   "pitch_deg": 3.7,
+   "tiled_3x3": true
+  },
+  "render_s": 5.5
+ },
+ "op_cracks": {
+  "group": "operator",
+  "promise": "crack network",
+  "W": 2000.0,
+  "relief_m": 269.2472158377398,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -341.9,
+    -818.4,
+    259.1
+   ],
+   "look_m": [
+    -135.7,
+    -612.3,
+    269.2
+   ],
+   "pitch_deg": -4.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.2
+ },
+ "op_shape": {
+  "group": "operator",
+  "promise": "geometric primitive",
+  "W": 2000.0,
+  "relief_m": 300.0,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -311.7,
+    -920.0,
+    1.7
+   ],
+   "look_m": [
+    282.2,
+    -456.1,
+    300.0
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 7.7
+ },
+ "op_cone": {
+  "group": "operator",
+  "promise": "cone",
+  "W": 2000.0,
+  "relief_m": 359.447572827198,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -594.9,
+    -594.9,
+    25.1
+   ],
+   "look_m": [
+    -1.0,
+    -1.0,
+    359.4
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 10.0
+ },
+ "op_hemisphere": {
+  "group": "operator",
+  "promise": "dome",
+  "W": 2000.0,
+  "relief_m": 359.99957614449875,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -593.0,
+    -594.9,
+    130.9
+   ],
+   "look_m": [
+    1.0,
+    -1.0,
+    360.0
+   ],
+   "pitch_deg": 9.3
+  },
+  "render_s": 6.5
+ },
+ "op_pattern": {
+  "group": "operator",
+  "promise": "repeating pattern",
+  "W": 2000.0,
+  "relief_m": 176.484375,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -778.1,
+    -869.9,
+    1.7
+   ],
+   "look_m": [
+    -608.4,
+    -700.2,
+    0.0
+   ],
+   "pitch_deg": -5.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.7
+ },
+ "op_phacelle": {
+  "group": "operator",
+  "promise": "erosion: gullies cut downhill, ridges sharpened",
+  "W": 2000.0,
+  "relief_m": 326.6166258827139,
+  "texel_m": 1.953125,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -167.9,
+    -777.3,
+    110.3
+   ],
+   "look_m": [
+    333.0,
+    -276.4,
+    279.3
+   ],
+   "pitch_deg": 7.4,
+   "tiled_3x3": true
+  },
+  "render_s": 13.2
+ },
+ "op_thermal": {
+  "group": "operator",
+  "promise": "thermal erosion: talus aprons at the angle of repose",
+  "W": 2000.0,
+  "relief_m": 315.9137301250742,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -157.0,
+    -772.2,
+    92.3
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    271.9
+   ],
+   "pitch_deg": 8.4,
+   "tiled_3x3": true
+  },
+  "render_s": 12.3
+ },
+ "op_snow": {
+  "group": "operator",
+  "promise": "snow accumulation smoothing high, shelterd ground",
+  "W": 2000.0,
+  "relief_m": 338.0648661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -208.3,
+    -823.5,
+    69.1
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    290.3
+   ],
+   "pitch_deg": 10.0,
+   "tiled_3x3": true
+  },
+  "render_s": 14.5
+ },
+ "op_terrace": {
+  "group": "operator",
+  "promise": "terraced steps",
+  "W": 2000.0,
+  "relief_m": 337.7361410874781,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -39.0,
+    -109.3,
+    138.1
+   ],
+   "look_m": [
+    417.0,
+    346.7,
+    286.4
+   ],
+   "pitch_deg": 7.0,
+   "tiled_3x3": true
+  },
+  "render_s": 18.1
+ },
+ "op_stratify": {
+  "group": "operator",
+  "promise": "sedimentary beds: flat treads, risers",
+  "W": 2000.0,
+  "relief_m": 340.5820649584092,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -220.4,
+    -839.5,
+    59.5
+   ],
+   "look_m": [
+    338.9,
+    -280.3,
+    296.9
+   ],
+   "pitch_deg": 10.7,
+   "tiled_3x3": true
+  },
+  "render_s": 12.2
+ },
+ "op_roughen": {
+  "group": "operator",
+  "promise": "high-frequency detail",
+  "W": 2000.0,
+  "relief_m": 319.9154146615114,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -205.8,
+    -785.8,
+    97.8
+   ],
+   "look_m": [
+    309.6,
+    -270.5,
+    277.6
+   ],
+   "pitch_deg": 7.9,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "op_steps": {
+  "group": "operator",
+  "promise": "hard steps, unequal risers",
+  "W": 2000.0,
+  "relief_m": 300.0,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -65.3,
+    -139.5,
+    130.3
+   ],
+   "look_m": [
+    420.9,
+    346.7,
+    257.1
+   ],
+   "pitch_deg": 4.5,
+   "tiled_3x3": true
+  },
+  "render_s": 5.6
+ },
+ "op_fractalTerraces": {
+  "group": "operator",
+  "promise": "terraces within terraces",
+  "W": 2000.0,
+  "relief_m": 325.14567541650786,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -168.6,
+    -785.7,
+    107.3
+   ],
+   "look_m": [
+    342.8,
+    -274.4,
+    285.7
+   ],
+   "pitch_deg": 7.9,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "op_sandstone": {
+  "group": "operator",
+  "promise": "sandstone bedding",
+  "W": 2000.0,
+  "relief_m": 338.26812064027297,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    29.6,
+    -58.3,
+    121.3
+   ],
+   "look_m": [
+    481.4,
+    393.6,
+    259.2
+   ],
+   "pitch_deg": 6.2,
+   "tiled_3x3": true
+  },
+  "render_s": 5.5
+ },
+ "op_sand": {
+  "group": "operator",
+  "promise": "sand ripples / dunes on the terrain",
+  "W": 2000.0,
+  "relief_m": 325.19600603921776,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -150.4,
+    -769.6,
+    94.3
+   ],
+   "look_m": [
+    342.8,
+    -276.4,
+    275.1
+   ],
+   "pitch_deg": 8.5,
+   "tiled_3x3": true
+  },
+  "render_s": 5.6
+ },
+ "op_curves": {
+  "group": "operator",
+  "promise": "height curve",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 5.6
+ },
+ "op_clampOp": {
+  "group": "operator",
+  "promise": "floor / ceiling",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 5.2
+ },
+ "op_warp": {
+  "group": "operator",
+  "promise": "domain warp",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 5.5
+ },
+ "op_invert": {
+  "group": "operator",
+  "promise": "flip height",
+  "W": 2000.0,
+  "relief_m": 315.92486617145715,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -920.0,
+    -55.1,
+    136.6
+   ],
+   "look_m": [
+    -659.2,
+    405.3,
+    300.3
+   ],
+   "pitch_deg": 11.2,
+   "tiled_3x3": true
+  },
+  "render_s": 5.1
+ },
+ "op_clip": {
+  "group": "operator",
+  "promise": "clip and rescale",
+  "W": 2000.0,
+  "relief_m": 451.321237387796,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -255.1,
+    -870.3,
+    100.0
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    389.1
+   ],
+   "pitch_deg": 13.0,
+   "tiled_3x3": true
+  },
+  "render_s": 4.8
+ },
+ "op_threshold": {
+  "group": "operator",
+  "promise": "keep above level",
+  "W": 2000.0,
+  "relief_m": 478.16783058150287,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    247.9
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    434.6
+   ],
+   "pitch_deg": 8.9,
+   "tiled_3x3": true
+  },
+  "render_s": 5.6
+ },
+ "op_softClip": {
+  "group": "operator",
+  "promise": "soft clip",
+  "W": 2000.0,
+  "relief_m": 233.2073847644052,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    49.1,
+    -19.3,
+    155.2
+   ],
+   "look_m": [
+    415.0,
+    346.7,
+    226.1
+   ],
+   "pitch_deg": 1.8,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "op_gamma": {
+  "group": "operator",
+  "promise": "gamma",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.5
+ },
+ "op_fold": {
+  "group": "operator",
+  "promise": "fold height range",
+  "W": 2000.0,
+  "relief_m": 599.9999986807338,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -255.1,
+    -870.3,
+    263.8
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    584.6
+   ],
+   "pitch_deg": 14.9,
+   "tiled_3x3": true
+  },
+  "render_s": 7.3
+ },
+ "op_blur": {
+  "group": "operator",
+  "promise": "blur",
+  "W": 2000.0,
+  "relief_m": 315.20815120238274,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -157.2,
+    -772.5,
+    92.2
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    271.7
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 9.5
+ },
+ "op_sharpen": {
+  "group": "operator",
+  "promise": "sharpen",
+  "W": 2000.0,
+  "relief_m": 316.34565184497944,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -157.5,
+    -774.7,
+    92.2
+   ],
+   "look_m": [
+    340.8,
+    -276.4,
+    272.9
+   ],
+   "pitch_deg": 8.4,
+   "tiled_3x3": true
+  },
+  "render_s": 9.2
+ },
+ "op_median": {
+  "group": "operator",
+  "promise": "median filter",
+  "W": 2000.0,
+  "relief_m": 315.08931937296103,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.4,
+    -773.7,
+    93.3
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.0
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 8.3
+ },
+ "op_dilate": {
+  "group": "operator",
+  "promise": "grow features",
+  "W": 2000.0,
+  "relief_m": 315.4911737173264,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -159.0,
+    -772.3,
+    100.0
+   ],
+   "look_m": [
+    338.9,
+    -274.4,
+    275.1
+   ],
+   "pitch_deg": 8.0,
+   "tiled_3x3": true
+  },
+  "render_s": 8.6
+ },
+ "op_recurve": {
+  "group": "operator",
+  "promise": "curvature expander",
+  "W": 2000.0,
+  "relief_m": 319.96303046932513,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -163.9,
+    -781.1,
+    99.7
+   ],
+   "look_m": [
+    340.8,
+    -276.4,
+    276.4
+   ],
+   "pitch_deg": 7.9,
+   "tiled_3x3": true
+  },
+  "render_s": 10.3
+ },
+ "op_combine": {
+  "group": "operator",
+  "promise": "blend fields",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 10.3
+ },
+ "op_seamless": {
+  "group": "operator",
+  "promise": "make tileable",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 7.5
+ },
+ "op_edgeFade": {
+  "group": "operator",
+  "promise": "fade borders",
+  "W": 2000.0,
+  "relief_m": 268.4807825775584,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -126.9,
+    -742.2,
+    90.2
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    264.7
+   ],
+   "pitch_deg": 8.8,
+   "tiled_3x3": true
+  },
+  "render_s": 7.1
+ },
+ "op_math": {
+  "group": "operator",
+  "promise": "arithmetic",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.5
+ },
+ "op_route": {
+  "group": "operator",
+  "promise": "route input",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.6
+ },
+ "op_switchOp": {
+  "group": "operator",
+  "promise": "switch input",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.9
+ },
+ "op_compare": {
+  "group": "operator",
+  "promise": "side-by-side review",
+  "W": 2000.0,
+  "relief_m": 422.48017366673685,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -920.0,
+    -534.4,
+    327.1
+   ],
+   "look_m": [
+    -694.3,
+    59.6,
+    416.7
+   ],
+   "pitch_deg": 2.0
+  },
+  "render_s": 6.6
+ },
+ "graph_alpine_valley": {
+  "group": "graph",
+  "promise": "an alpine valley built as a film terrain would be: range, glacial trough, erosion, snow",
+  "W": 4000.0,
+  "relief_m": 994.6162311269753,
+  "texel_m": 3.90625,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -724.6,
+    -5.9,
+    70.4
+   ],
+   "look_m": [
+    3275.4,
+    -5.9,
+    70.4
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.5
+ },
+ "graph_range_then_trough": {
+  "group": "graph",
+  "promise": "a glacial trough cut INTO a mountain range",
+  "W": 6000.0,
+  "relief_m": 1492.8532208407578,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1086.9,
+    -366.2,
+    77.1
+   ],
+   "look_m": [
+    4913.1,
+    -366.2,
+    77.1
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 8.9
+ },
+ "graph_range_then_canyon": {
+  "group": "graph",
+  "promise": "a canyon carved into existing terrain",
+  "W": 3000.0,
+  "relief_m": 721.3623631740431,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -552.2,
+    -256.3,
+    2.6
+   ],
+   "look_m": [
+    2447.8,
+    -256.3,
+    2.6
+   ],
+   "pitch_deg": 3.0,
+   "tiled_3x3": true
+  },
+  "render_s": 8.4
+ },
+ "graph_fbm_then_volcano": {
+  "group": "graph",
+  "promise": "a volcano standing on rolling terrain",
+  "W": 10000.0,
+  "relief_m": 2059.096114496427,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -4117.3,
+    -3355.6,
+    36.5
+   ],
+   "look_m": [
+    -1147.5,
+    -385.7,
+    2001.7
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.7
+ },
+ "graph_star_dunes_roughen": {
+  "group": "graph",
+  "promise": "star dunes with surface detail",
+  "W": 5000.0,
+  "relief_m": 309.9442328063475,
+  "texel_m": 4.8828125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1101.6,
+    973.6,
+    64.4
+   ],
+   "look_m": [
+    -520.0,
+    1555.2,
+    306.1
+   ],
+   "pitch_deg": 10.4,
+   "tiled_3x3": true
+  },
+  "render_s": 8.8
+ },
+ "real_goosenecks": {
+  "group": "reference",
+  "promise": "REAL: Goosenecks of the San Juan, meander canyon",
+  "W": 4000.0,
+  "relief_m": 400.527099609375,
+  "texel_m": 3.90625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -525.4,
+    185.5,
+    5.6
+   ],
+   "look_m": [
+    2303.0,
+    3014.0,
+    5.6
+   ],
+   "pitch_deg": 4.0
+  },
+  "render_s": 8.4
+ },
+ "real_great_sand_dunes": {
+  "group": "reference",
+  "promise": "REAL: Great Sand Dunes, star dunes",
+  "W": 6000.0,
+  "relief_m": 297.403564453125,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1200.0,
+    -900.0,
+    51.1
+   ],
+   "look_m": [
+    600.0,
+    600.0,
+    171.7
+   ],
+   "pitch_deg": -3.1
+  },
+  "render_s": 7.0
+ },
+ "real_yosemite": {
+  "group": "reference",
+  "promise": "REAL: Yosemite Valley, glacial trough",
+  "W": 10000.0,
+  "relief_m": 1554.349609375,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3999.0,
+    -991.2,
+    15.1
+   ],
+   "look_m": [
+    5660.2,
+    1597.0,
+    15.1
+   ],
+   "pitch_deg": 4.0
+  },
+  "render_s": 8.1
+ },
+ "real_sp_crater": {
+  "group": "reference",
+  "promise": "REAL: SP Crater, cinder cone field",
+  "W": 8000.0,
+  "relief_m": 433.7852783203125,
+  "texel_m": 7.8125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -1600.0,
+    -1600.0,
+    215.3
+   ],
+   "look_m": [
+    0.0,
+    640.0,
+    122.6
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 5.8
+ },
+ "real_meteor_crater": {
+  "group": "reference",
+  "promise": "REAL: Meteor Crater, simple impact crater",
+  "W": 3000.0,
+  "relief_m": 188.1058349609375,
+  "texel_m": 2.9296875,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    48.3,
+    -16.1,
+    1.8
+   ],
+   "look_m": [
+    2169.7,
+    2105.2,
+    1.8
+   ],
+   "pitch_deg": 6.0
+  },
+  "render_s": 9.3
+ },
+ "real_monument_valley": {
+  "group": "reference",
+  "promise": "REAL: Monument Valley, mesas and buttes",
+  "W": 6000.0,
+  "relief_m": 477.3095703125,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -600.0,
+    -1200.0,
+    96.2
+   ],
+   "look_m": [
+    360.0,
+    660.0,
+    56.4
+   ],
+   "pitch_deg": -5.0
+  },
+  "render_s": 6.1
+ },
+ "real_badlands": {
+  "group": "reference",
+  "promise": "REAL: Badlands NP, rills and gullies",
+  "W": 2000.0,
+  "relief_m": 154.634765625,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -197.4,
+    -381.0,
+    18.5
+   ],
+   "look_m": [
+    186.5,
+    2.9,
+    150.0
+   ],
+   "pitch_deg": 7.6
+  },
+  "render_s": 5.1
+ },
+ "real_alps": {
+  "group": "reference",
+  "promise": "REAL: Bernese Alps, alpine range",
+  "W": 10000.0,
+  "relief_m": 3288.3878173828125,
+  "texel_m": 9.765625,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2125.1,
+    -4600.0,
+    1512.3
+   ],
+   "look_m": [
+    844.7,
+    -1987.3,
+    3254.9
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 6.3
+ },
+ "op_heightMask": {
+  "group": "mask",
+  "promise": "altitude band mask",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 7.0
+ },
+ "op_slopeMask": {
+  "group": "mask",
+  "promise": "steep ground mask (cliffs)",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "op_angleMask": {
+  "group": "mask",
+  "promise": "aspect mask (facing a direction)",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   2.4167223777737945e-11,
+   0.9999999999873315
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 5.9
+ },
+ "op_curvatureMask": {
+  "group": "mask",
+  "promise": "concave ground mask",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "op_peaksMask": {
+  "group": "mask",
+  "promise": "ridges and summits",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 5.9
+ },
+ "op_textureBase": {
+  "group": "mask",
+  "promise": "material band classes",
+  "W": 2000.0,
+  "relief_m": 315.9248661714572,
+  "texel_m": 1.953125,
+  "warnings": [],
+  "ov_range": [
+   0.0,
+   0.6735098552184061
+  ],
+  "eye": {
+   "at_m": [
+    -158.5,
+    -773.7,
+    93.7
+   ],
+   "look_m": [
+    338.9,
+    -276.4,
+    272.4
+   ],
+   "pitch_deg": 8.3,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "ero_hemisphere_phacelle": {
+  "group": "erosion",
+  "promise": "a smooth dome under erosion: gullies must run straight downhill, radially",
+  "W": 3000.0,
+  "relief_m": 551.3829581457816,
+  "texel_m": 2.9296875,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -918.8,
+    -880.7,
+    184.4
+   ],
+   "look_m": [
+    -27.8,
+    10.3,
+    548.8
+   ],
+   "pitch_deg": 10.1
+  },
+  "render_s": 5.9
+ },
+ "ero_volcano_smooth_phacelle": {
+  "group": "erosion",
+  "promise": "a smooth cone under erosion: radial gullies (barrancos)",
+  "W": 10000.0,
+  "relief_m": 2077.591407597997,
+  "texel_m": 9.765625,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -3814.6,
+    -2076.3,
+    34.9
+   ],
+   "look_m": [
+    -844.7,
+    893.6,
+    1932.3
+   ],
+   "pitch_deg": 15.0
+  },
+  "render_s": 7.2
+ },
+ "ero_mountainRange_basic": {
+  "group": "erosion",
+  "promise": "the uneroded range (before)",
+  "W": 6000.0,
+  "relief_m": 529.1769380077304,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2085.4,
+    873.6,
+    245.2
+   ],
+   "look_m": [
+    -1426.8,
+    1532.2,
+    460.7
+   ],
+   "pitch_deg": 7.0,
+   "tiled_3x3": true
+  },
+  "render_s": 7.3
+ },
+ "ero_mountainRange_phacelle": {
+  "group": "erosion",
+  "promise": "the range under default Phacelle (after): dendritic valleys",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.8
+ },
+ "ero_mountainRange_phacelle_strong": {
+  "group": "erosion",
+  "promise": "strong Phacelle",
+  "W": 6000.0,
+  "relief_m": 722.0832314062006,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2124.8,
+    810.7,
+    413.7
+   ],
+   "look_m": [
+    -1403.3,
+    1532.2,
+    572.7
+   ],
+   "pitch_deg": 2.9,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "ero_mountainRange_thermal": {
+  "group": "erosion",
+  "promise": "thermal erosion: scree slopes at the angle of repose",
+  "W": 6000.0,
+  "relief_m": 519.7382382808419,
+  "texel_m": 5.859375,
+  "warnings": [],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    -2088.8,
+    870.2,
+    245.2
+   ],
+   "look_m": [
+    -1426.8,
+    1532.2,
+    460.7
+   ],
+   "pitch_deg": 7.0,
+   "tiled_3x3": true
+  },
+  "render_s": 6.0
+ },
+ "ero_terrace_then_phacelle": {
+  "group": "erosion",
+  "promise": "erosion after an operator that changes the height: does the carried gradient still point downhill?",
+  "W": 6000.0,
+  "relief_m": 642.6041788636556,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": null,
+  "eye": {
+   "at_m": [
+    1468.7,
+    794.8,
+    419.4
+   ],
+   "look_m": [
+    2100.6,
+    1426.8,
+    460.4
+   ],
+   "pitch_deg": -3.4,
+   "tiled_3x3": true
+  },
+  "render_s": 6.2
+ },
+ "mask_slope": {
+  "group": "maskstudy",
+  "promise": "slope mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.00027785136085920967,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 7.1
+ },
+ "mask_curvProfile": {
+  "group": "maskstudy",
+  "promise": "curvProfile mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.3
+ },
+ "mask_curvPlan": {
+  "group": "maskstudy",
+  "promise": "curvPlan mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 7.4
+ },
+ "mask_concave": {
+  "group": "maskstudy",
+  "promise": "concave mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "mask_convex": {
+  "group": "maskstudy",
+  "promise": "convex mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 7.0
+ },
+ "mask_ridge": {
+  "group": "maskstudy",
+  "promise": "ridge mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   8.638783276171402e-06,
+   0.9999968351715136
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.4
+ },
+ "mask_height": {
+  "group": "maskstudy",
+  "promise": "height mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.26449015172705437,
+   0.5712844307068892
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 5.7
+ },
+ "mask_wear": {
+  "group": "maskstudy",
+  "promise": "wear mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   0.2949005249740502
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 7.5
+ },
+ "mask_flow": {
+  "group": "maskstudy",
+  "promise": "flow mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   0.5176216468354348
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.9
+ },
+ "mask_accumulation": {
+  "group": "maskstudy",
+  "promise": "accumulation mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.7
+ },
+ "mask_channels": {
+  "group": "maskstudy",
+  "promise": "channels mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.9
+ },
+ "mask_wetness": {
+  "group": "maskstudy",
+  "promise": "wetness mask on the eroded range",
+  "W": 6000.0,
+  "relief_m": 552.2297021637027,
+  "texel_m": 5.859375,
+  "warnings": [
+   "Erosion: erosion scale 0.1500 gives a 9.524-cell period; snapped to 0.142857 (10 cells)"
+  ],
+  "ov_range": [
+   0.0,
+   1.0
+  ],
+  "eye": {
+   "at_m": [
+    -2082.0,
+    871.1,
+    250.8
+   ],
+   "look_m": [
+    -1415.0,
+    1538.1,
+    471.4
+   ],
+   "pitch_deg": 7.2,
+   "tiled_3x3": true
+  },
+  "render_s": 6.6
+ }
+}

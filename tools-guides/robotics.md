@@ -278,7 +278,8 @@ joints `set_joints` moved).
   bounded damped least squares, and an unreachable target raises.
 - S500: `scara_joints([shoulder, elbow, quill, tool])` and
   `move_scara((x, y, z), yaw, tcp=(0, 0, 0), seed=None)`; `robot.scara` is the
-  analytic solver (`forward`, `inverse`, `demo`, `LIMITS`, `GRIP_TCP`).
+  analytic solver (`forward`, `inverse`, `demo`, `limits`, `grip_tcp`: scara.js's
+  `limits` and `gripTCP`; the first edition's `LIMITS` and `GRIP_TCP` are aliases).
 - G430: `axes((x, y, z))` uses machine XYZ travel (the lead screws turn with
   it); `move_tool((x, y, height))` is in the gantry base's frame with the height
   above the bed; `tool_tip()` returns that frame, `tool_tip(world=True)` a world
@@ -292,16 +293,21 @@ The solvers are importable on their own (plain Python): `scara`, `SerialArm`,
 ### Joint sliders
 
 ```python
-from eidoblend.characters.robotics.rig import rig_joints, set_slider, unrig_joints
+from eidoblend.characters.robotics.rig import measure_joints, rig_joints, set_slider, unrig_joints
 rig_joints(arm)                         # one custom property per joint on arm.group: 'joint:a650_j2' ...
 set_slider(arm, 'a650_j2', 0.6)         # or drag it in the N panel; keyable like any property
 unrig_joints(arm)
+rig_joints(arm, measure_joints(arm))    # the sliders start where the joints are on screen: the pose stays
 ```
 
 Every revolute and prismatic joint with limits (and the rotary fixture's "A axis
 / chuck") gets a slider with its limits as the range, driving its module through
 a simple-expression driver (no Python driver, so it evaluates with auto-run
-off). A robot with sliders is in manual mode: unrig it before `play()`.
+off). The sliders start at `robot.state` (what `set_joints` set) unless given
+values; `measure_joints(robot)` reads each one off its module's current
+transform (the turn about the axis from rest, or the travel along it, clamped to
+the range), so rigging a robot mid-clip keeps the pose a keyed or sampled clip
+gave it. A robot with sliders is in manual mode: unrig it before `play()`.
 
 ## Studio and framing
 
@@ -311,8 +317,31 @@ camera sees `#c6cfd1`; the light is three's RoomEnvironment at intensity 0.9
 equirect, as the PMREM generator sees it, blurred by its 0.04 rad), a hemisphere
 light (sky `#e6f2ff`, ground `#485654`: a world split at the horizon gives
 three's exact irradiance mix), a sun `#fff3e4` at 2.3 from three's (2, 5, 3),
-and the 8 m, 80-division grid. The WebGPU studio's sun casts no shadow
-(`shadows=True` turns it on). The view transform is AgX, the film contract.
+and the 8 m, 80-division grid (centre lines `#748b91`, the rest `#acb9bd`). The
+WebGPU studio's sun casts no shadow (`shadows=True` turns it on). The view
+transform is AgX, the film contract.
+
+**The grid is one pixel wide at any distance**, as WebGPU draws its line
+primitives, so it stays the visible floor of every still. A strip of fixed world
+width cannot do that (a 1.2 mm line is a tenth of a pixel at the motion
+example's camera, 9.6 m away), so the grid is a plane 1 mm under the floor whose
+`BLENDED` shader covers the pixels within half a pixel of a line. The screen
+distance to the nearest line comes from the camera's projection at the shading
+point (world x and y through Vector Transform to camera space: their
+Jacobian), and the pixels per unit come from drivers on the scene's camera
+(lens, sensor, sensor fit, type, ortho scale) and the render size, so it stays
+one pixel when the camera, the resolution or its percentage changes, a
+render-time probe cap included. The plane lights nothing, casts nothing and
+stays out of the light probes.
+
+**The unlit colours look as the WebGPU film shows them.** The WebGPU examples
+render with ACES tone mapping, which reaches the clear colour and the grid lines
+too: the film shows the background as (204, 208, 209). AgX would show `#c6cfd1`
+as (175, 179, 180). The lit robots stay AgX, but the background and the two line
+colours get the radiance that the scene's colour management displays as three's
+ACES of their colour (found by Newton steps on what `Image.save_render` writes).
+`studio()` solves this for the settings it finds; after changing the view
+transform, look, exposure or gamma, call `match_display(scene)`.
 
 `frame_camera(camera, objects, direction=(0.9, −1.5, 0.55), margin=1.25)`
 places the camera on `direction` far enough that the world box of the objects
@@ -322,7 +351,9 @@ is that box (three's `Box3.expandByObject`: hidden meshes count too);
 `visible_only=True` on either leaves out meshes hidden from the render and the
 inspector's overlays, as the inspector's fit does. Objects disabled in the
 viewports keep a stale `matrix_world` in Blender (the depsgraph skips them), so
-the box composes their matrix from the parent chain instead.
+the box composes their matrix from the parent chain instead. A mesh whose
+modifiers make or change its geometry (the rotary job's Volume to Mesh stock, a
+Geometry Nodes strand) counts with its evaluated bounds.
 
 ```python
 from eidoblend.characters.robotics import load_part, frame_camera, make_camera
@@ -354,7 +385,7 @@ bpy.ops.wm.save_as_mainfile(filepath='hand_inspector.blend')
 | --- | --- |
 | asset list | `load(model)` |
 | motion list, `setMotion` | `clips()`, `set_motion(clip)` (keys the clip over the 20 s) |
-| time slider, `setTime`, Reset, Play | `set_time(t)` (the keyed timeline, sub-frames included), `reset()`, `play()` |
+| time slider, `setTime`, Reset, Play | `set_time(t)` (the job seeks t, the keyed timeline shows it, sub-frames included), `reset()`, `play()` |
 | Frame, Inspect workpiece | `fit()`, `frame_work()` |
 | Body / Accent / Filament pickers | `set_colors(primary, accent)`, `set_filament_color(c)` |
 | Wireframe, Hand grasp cylinder | `set_wireframe(on)`, `set_reference(on)` |
@@ -363,21 +394,41 @@ bpy.ops.wm.save_as_mainfile(filepath='hand_inspector.blend')
 | joint sliders | `set_joint(name, value)` (rig.py's drivers) |
 | stock material, rotary blank | `set_stock(material, preset, length, width, height)` |
 | process playback, workpiece source, `setSource` | `set_timing('lapse' / 'physical')`, `set_source(obj or 'handle' / 'bracket' / 'ring')` |
-| process state line | `process_state()` |
+| process state line, workpiece-source line | `process_state()`, `source_info()` (also `insp['state']`, `insp['source_info']` and the scene's `inspector_process_state`, `inspector_source_info`) |
 
 It keeps the inspector's camera fit (the sweep of walk, drive-circle, flight and
 the runs, over the visible meshes), the part picker's triangle count and the UV
 split view (a metadata texture binding or a material's map, with the UV
-triangles of the batch, material or part drawn over it). A machine with a tool
-opens on `process`, as there: the job is `eidoblend.fabrication`'s (`print` of
-the inspector's 6 mm lathe ring at 40 mm with 25 % infill, `mill`, `carve` of the
-relief, `rotary_carve`), time lapse 18 s (32 s on the rotary machine), keyed over
-its duration. Physical timing keys the job's own time frame by frame, so it is
-refused past `MAX_KEYED_FRAMES` (25 min at 24 fps): the pocket mill machines for
-20 min and the print for 15, but the relief for 7.8 hours (time lapse, or
-`process_options={'duration': seconds}`, instead). The rotary job writes its
-stock cache next to the saved `.blend`: save first, or pass
-`process_options={'cache_dir': ...}`. A local STL or GLB is imported with
+triangles of the batch, material or part drawn over it). The wireframe is
+three's `WireframeGeometry` drawn one pixel wide at any size: a copy of each mesh
+at its own matrix whose blended material is the Wireframe node in pixel size, so
+the surface hides the edges behind it as the WebGPU lines' depth test does.
+
+The time slider works as viewer.js's `sample()`: `set_time(t)` seeks the job to
+t (so the state line, `'extrude | 473.2 mm fed | 0.00 mm retracted'` at 9 s of
+the print, is the job's at t) and shows the keyed frame. A joint slider puts the
+inspector in manual mode: the motion's keys stop (the job stays), every slider
+starts where its joint is on screen (`measure_joints`), so only the moved joint
+changes, and its value is clamped to the joint's range. The time slider, Reset
+and Play leave manual mode: the drivers go, the motion is keyed again, and Reset
+shows its pose at 0 s without moving the camera.
+
+A machine with a tool opens on `process`, as there: the job is
+`eidoblend.fabrication`'s (`print` of the inspector's 6 mm lathe ring at 40 mm
+with 25 % infill, `mill`, `carve` of the relief, `rotary_carve`), time lapse 18 s
+(32 s on the rotary machine), keyed over its duration. The workpiece-source line
+follows viewer.js: the invitation to load a mesh without one, the slicing note on
+the FDM machine, the relief note on the ball-nose machine, and on the rotary
+machine the program's report (`'handle. 1,040 source triangles; 12 indexed
+views. Some regions exceed tool reach and retain material. Undercuts and holding
+ends may remain.'`). Physical timing keys the job's own time frame by frame, so
+it is refused past `MAX_KEYED_FRAMES` (25 min at 24 fps): the pocket mill
+machines for 20 min and the print for 15, but the relief for 7.8 hours (time
+lapse, or `process_options={'duration': seconds}`, instead). The rotary job
+writes one stock file per keyed frame next to the saved `.blend`: save first, or
+pass `process_options={'cache_dir': ...}` (a coarser `resolution` and a lower
+`fps` keep the cache small; the test uses 128 x 48 x 48 at 4 fps). "Inspect
+workpiece" frames its carved stock. A local STL or GLB is imported with
 Blender's own importer and handed to `set_source`.
 
 ## Examples
@@ -400,9 +451,9 @@ python eido_blender.py render blender/eidoblend/characters/robotics/scenes/motio
 sensor ports, both playing `joints`. `mantis`: MANTIS driving its circle, the
 camera carried with the body. `motion`: the humanoid and quadruped running
 their circles, the hand drone flying, the tracked arm driving. They declare
-`_no_auto_enhance`: their studio light is the presentation. Small harness
-configs for checking them (640 x 360, 16 samples, outputs in the test folder)
-are `blender/tests/robotics/harness_{assembly,mantis,motion}.json`:
+`_no_auto_enhance`: their studio light is the presentation. Probe-size harness
+configs for checking them against the WebGPU frames (960 x 540, 16 samples,
+outputs in the test folder) are `blender/tests/robotics/harness_{assembly,mantis,motion}.json`:
 `python eido_blender.py render blender/tests/robotics/harness_mantis.json --at 6`.
 
 ## MechParts and RoboticArm
@@ -445,14 +496,17 @@ relief and rotary carving, the PTFE feed tubes and the live filament) are
 function in `eidoblend.characters.robotics.INSTALLERS` at the end of a load (as
 index.js runs `installFilament`), and `RoboticsKit.create_ptfe_tube` /
 `service_loop` forward to `facade.FABRICATION`: importing `eidoblend.fabrication`
-registers its live filament and its tubes there, so import it before loading
-`fdm` or `filament_spool` when the strand matters. Without it, a dispenser's
-`filament-feed` sample says so instead of guessing.
+registers its live filament and its tubes there. index.js imports filament.js
+unconditionally, so here a dispenser's load (a robot with a filament stand and
+reel: `fdm`, `filament_spool`) imports the fabrication package itself, and so
+does the first `create_ptfe_tube` or `service_loop`: a plain
+`make_robot('filament_spool')` has its live strand. A loaded dispenser's stats
+count filament.js's tubes and strand, as the WebGPU stats do (the fdm: 20,581
+triangles, 3,088 of them filament.js's; the catalog's figures are the GLB's own).
 
 ```python
-import eidoblend.fabrication                          # registers the live filament for the loads that follow
 from eidoblend.characters.robotics import make_robot, RoboticsKit
-spool = make_robot('filament_spool', filament='#da642c')
+spool = make_robot('filament_spool', filament='#da642c')   # loads with its live filament
 spool.play('filament-feed')                           # the reel turns and the strand pays out, keyed
 tube = RoboticsKit.create_ptfe_tube(points=[(0, 0, 0), (0, 0, .1), (.1, 0, .1), (.1, 0, 0)])
 ```
@@ -481,8 +535,14 @@ The render tests (`render_all.sh`) render every catalog entry
 (`out/catalog/`), every clip on the robots that carry it (`out/motion/`),
 single parts taken out with `load_part` (`out/parts/`), the normal-map parity
 probe, the three examples (and a reopened `.blend`), the inspector (motions,
-picking, the UV view, the FDM and CNC processes) and MechParts / RoboticArm (the
-lineup, each generator alone in `out/mech_parts/`, each tool close up). Every
+picking, the UV view, manual mode and Reset, the state and source lines, the
+FDM, CNC, relief and rotary processes) and MechParts / RoboticArm (the lineup,
+each generator alone in `out/mech_parts/`, each tool close up).
+`test_studio_render.py` checks the studio's unlit colours against three's ACES
+and its grid drivers against the camera, then renders the empty studio from the
+three examples' cameras and compares it block by block with the WebGPU frames
+(`out/verify/webgpu/`, when present): the grid lines land on the same pixels and
+darken the floor as much. Every
 render test also runs build-only (`-- --no-render`: everything built, keyed,
 posed and checked, nothing rendered; the results go to
 `out/<name>.norender.json`), which needs no GPU slot.
@@ -507,8 +567,9 @@ scan licenses and excluded proprietary authoring tools are recorded in
   inspector is a `.blend`).
 - **Owned elsewhere**: the fabrication processes, the live filament and the PTFE
   tubes are `eidoblend.fabrication`'s; the kit loads them through `INSTALLERS`
-  and `facade.FABRICATION` once that package is imported (without it, a
-  dispenser shows its GLB without the strand, and `filament-feed` says why).
-- **The inspector's rotary process** is wired to `eidoblend.fabrication`'s
-  `rotary_carve` with the viewer's settings but has not been run from the
-  inspector (its volumetric stock writes one cache file per keyed frame).
+  and `facade.FABRICATION`, importing that package when a dispenser loads or a
+  tube is made (only an edition without the package shows a dispenser without
+  its strand, and then `filament-feed` says why).
+- **Physical-timing process playback past 25 minutes**: the relief's 7.8 hours
+  would be 675,637 keyed frames, so the inspector refuses it and says so (the
+  time lapse plays the same program).

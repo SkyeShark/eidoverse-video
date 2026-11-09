@@ -327,6 +327,16 @@ class PaintRig:
         if frame is not None:
             self.arm.keyframe_insert(f'["{self.prop}"]', frame=frame)
             _constant_path(self.arm, f'["{self.prop}"]')
+            tag_keyed(self.arm)
+
+
+def tag_keyed(idb):
+    """tag an ID after keying it. An action that keyframe_insert CREATES on an ID which already has animation data
+    (the armature carries its clips as NLA strips) is not evaluated by the session's depsgraph until the ID is tagged
+    (measured: a TuTa bake after play_vrma_default read its own glow keys back as the last Python value on every
+    frame). Renders build their own depsgraph and were right; Python reads after frame_set, and any bake that reads
+    the evaluated scene (the springs, the gaze, the TuTa's neon), were not."""
+    idb.update_tag()
 
 
 def _as_vec(b, v):
@@ -338,13 +348,16 @@ def _as_vec(b, v):
 
 
 def _constant_path(idb, path):
+    """every key on `path` CONSTANT, EVERY array index of it (fcurves.find(path) is index 0 alone: the boater's
+    location y/z, rotation and scale then eased Bezier toward the next outfit's hat, sliding and squashing it
+    through the cyclist's block)"""
     from bpy_extras import anim_utils
     ad = idb.animation_data
     if ad is None or ad.action is None:
         return
     for slot in ad.action.slots:
         cb = anim_utils.action_get_channelbag_for_slot(ad.action, slot)
-        fc = cb.fcurves.find(path) if cb else None
-        if fc is not None:
-            for kp in fc.keyframe_points:
-                kp.interpolation = 'CONSTANT'
+        for fc in (cb.fcurves if cb else []):
+            if fc.data_path == path:
+                for kp in fc.keyframe_points:
+                    kp.interpolation = 'CONSTANT'

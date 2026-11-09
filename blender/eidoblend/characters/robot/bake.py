@@ -23,8 +23,12 @@ frame in film order:
              so that foot lands on the standing left foot; over `fade` frames the pose crossfades from the standing one
              with that foot held where it stands (two-bone IK on the blend) and the right foot lifting into its swing
   STOPPING   a walk followed by standing ends at the mid-stance nearest the place the body stopped (the route is run on
-             `extend` m past it so that stance can lie a little beyond); the standing span is placed so its clip's foot
-             on that side lands on the walk's planted one, and over `fade` frames the other foot comes down beside it
+             `extend` m past it so that stance can lie a little beyond, over the goal's own level only: by an edge the
+             stop stands back from it); the standing span is placed so its clip's foot on that side lands on the walk's
+             planted one, and over `fade` frames the other foot comes down beside it
+  MOVES      a maneuver (vault, jump, climb_ledge, climb_ladder: RobotLegs._start_maneuver) is the controller family's
+             move played again from where the keyed body stands, my feet stepping to its stance over `fade` frames,
+             its planted frames through my passes after
 The stateful passes (the wrists' turn limit, the shoulders' pitch rate, the thumbs, the head, the crown) run exactly once
 per film frame. A walk's frame count is walk_path's for the route (its average speed is the body's): the film runs on
 from where it ends, so later spans may land a frame or two from the frames the live run stepped them on (report['map']).
@@ -48,8 +52,10 @@ UP = Vector((0.0, 0.0, 1.0))
 
 
 def _segments(rec, min_stand):
-    """the record's frames as spans [{'kind': 'stand' | 'walk', 'a', 'b', 'clip'}] (b exclusive)"""
-    kind = ['walk' if r['state'] in ('walk', 'run') else 'stand' for r in rec]
+    """the record's frames as spans [{'kind': 'stand' | 'walk' | 'maneuver', 'a', 'b', 'clip'}] (b exclusive; a
+    maneuver span is one move, 'clip' its index in the legs' _maneuvers)"""
+    kind = [('walk' if r['state'] in ('walk', 'run') else
+             (('maneuver', r['maneuver']) if r['state'] == 'maneuver' else 'stand')) for r in rec]
     runs = []
     for i, k in enumerate(kind):
         if runs and runs[-1][0] == k:
@@ -71,6 +77,9 @@ def _segments(rec, min_stand):
         if k == 'walk':
             spans.append({'kind': 'walk', 'a': a, 'b': b, 'clip': None})
             continue
+        if isinstance(k, tuple):
+            spans.append({'kind': 'maneuver', 'a': a, 'b': b, 'clip': k[1]})
+            continue
         # a standing run split by its clip (the idle, an emote, a seated clip)
         cur = None
         for i in range(a, b):
@@ -83,8 +92,57 @@ def _segments(rec, min_stand):
     return spans
 
 
+EDGE_REACH = 0.4    # how far ahead of my root my standing feet reach (a stop's leading foot and its toes), m
+JOIN_DEG = 15.0     # a walk that starts off the live run's line joins it at most this steeply, deg
+
+
+def _level_run_on(ground, p, d, extend, step=0.05, toe=0.45, rise=0.04, look=1.0):
+    """how far (m, up to `extend`) a walk's route may run on past its goal p along d over the goal's own level: it stops
+    `toe` short of the first ground more than `rise` above or below it (a drop, a ditch, a step, a wall's foot: walk_path
+    plants the leading foot up to a step and a toe ahead of the route's end, and a foot planted over the edge drags its
+    pelvis, smoothed over the stances, toward that ground) -> (the run-on, the edge's distance from p (inf: level for
+    `look` m on)). Near an edge the walk may so stop up to a step short of its goal: on the safe side"""
+    g0 = float(ground.h(np.array([p[0]]), np.array([p[1]]))[0])
+    n = int(round(max(extend + toe, look) / step))
+    for k in range(1, n + 1):
+        s = k * step
+        g = float(ground.h(np.array([p[0] + s * d.x]), np.array([p[1] + s * d.y]))[0])
+        if abs(g - g0) > rise:
+            return max(0.0, min(extend, s - step - toe)), s - step
+    return extend, math.inf
+
+
 def _place(x, y, z, heading):
     return Matrix.Translation(Vector((x, y, z))) @ Quaternion((0.0, 0.0, 1.0), heading).to_matrix().to_4x4()
+
+
+def _aim(target, head, heading):
+    """robot_body.js's _updateHeadTargetFromLookAt, unclamped: the (yaw, pitch) that faces `target` from `head` for a
+    body facing `heading` (yaw + toward the body's left, pitch + looking down)"""
+    d = Vector(target) - Vector(head)
+    f = Vector((math.sin(heading), -math.cos(heading)))
+    lz = d.x * f.x + d.y * f.y
+    lx = d.x * -f.y + d.y * f.x
+    return math.atan2(lx, lz), -math.atan2(d.z, math.hypot(lx, lz))
+
+
+def _aimed_gaze(rig, raw, r):
+    """the gaze a frame recorded live, re-aimed for the keyed body: the JS aims the head at a look-at target from the
+    head and the heading it renders, and the keyed body can stand a little off the live run (a walk's stop on a
+    mid-stance at the goal where the live run stopped within arrive_radius; a stand placed on the walk's planted foot).
+    The aim's change from the live head and heading to the keyed ones is added to the live gaze (its rate-limited turn
+    kept), clamped at the body's limits. A frame without a look-at target (a scan, the neutral head) is the live gaze"""
+    g, lk = r.get('gaze'), r.get('look')
+    if g is None or lk is None or raw.get('M') is None:
+        return g
+    target, head0, h0, ylim, plim = lk
+    head1, _W = rig.bone_world(raw, 'head')
+    q = raw['M'].to_quaternion()
+    y0, p0 = _aim(target, head0, h0)
+    y1, p1 = _aim(target, head1, 2.0 * math.atan2(q.z, q.w))
+    yaw = g[0] + math.remainder(y1 - y0, 2 * math.pi)
+    pitch = g[1] + (p1 - p0)
+    return (max(-ylim, min(ylim, yaw)), max(-plim, min(plim, pitch)))
 
 
 def _sole_xy(rig, rec, side):
@@ -105,10 +163,13 @@ def _solve_feet(rig, N, off, M, targets, ground, keep_up=None):
     ph, Wh = body.hips(M, off, N)
     for s, (T, W) in targets.items():
         body.solve_leg(s, ph, Wh, N, T, W, swivel=1.0)
-    p3 = {n: q_to_three(q) for n, q in N.items()}
-    dof.apply_hardware_dof(p3, dof.LEG_JOINTS, rig.legs)
-    stages = {s: {k: q_from_three(v) for k, v in o.items()} for s, o in rig.legs.out.items() if o}
-    rec = {'N': {n: q_from_three(q) for n, q in p3.items()}, 'off': off, 'M': M, 'stages': stages}
+    if rig.legs is not None:
+        p3 = {n: q_to_three(q) for n, q in N.items()}
+        dof.apply_hardware_dof(p3, dof.LEG_JOINTS, rig.legs)
+        stages = {s: {k: q_from_three(v) for k, v in o.items()} for s, o in rig.legs.out.items() if o}
+        rec = {'N': {n: q_from_three(q) for n, q in p3.items()}, 'off': off, 'M': M, 'stages': stages}
+    else:                                            # a plain rig (any VRM but my body): the legs as the IK solved them
+        rec = {'N': dict(N), 'off': off, 'M': M, 'stages': {}}
     if keep_up is not None:
         P = rig.feet_world(rec)[keep_up]
         gap = float(np.min(P[:, 2] - ground.h(P[:, 0], P[:, 1])))
@@ -154,6 +215,102 @@ def _blend(rig, A, B, u, pin, pin_from, ground, lift=0.05):
     return _solve_feet(rig, N, off, M, targets, ground, keep_up=other)
 
 
+def _step_in(rig, A, B, j, n, ground, lift=0.035, state=None):
+    """frame j of n of a hand-over from my standing record A to another solver's standing start B (a move's first
+    frames) whose feet stand elsewhere: the pose crossfades A -> B over the n frames, and the feet STEP from A's places
+    to B's, one at a time (the one with farther to go first, the other planted), each lifted up to `lift` on its way;
+    a foot within 1 cm of its place stays put. state: {} on the first call (the order is chosen there)"""
+    u = (j + 1) / (n + 1)
+    N = {}
+    for nm, qb in B['N'].items():
+        qa = A['N'].get(nm, qb)
+        if qa.dot(qb) < 0:
+            qa = -qa
+        N[nm] = qa.slerp(qb, u)
+    off = A['off'].lerp(B['off'], u)
+    la, ra, _s = A['M'].decompose()
+    lb, rb, _s = B['M'].decompose()
+    if ra.dot(rb) < 0:
+        ra = -ra
+    M = Matrix.Translation(la.lerp(lb, u)) @ ra.slerp(rb, u).to_matrix().to_4x4()
+    FA, FB = _fk_feet(rig, A), _fk_feet(rig, B)
+    if state is not None and 'order' not in state:
+        far = {s: (FB[s]['p_an'] - FA[s]['p_an']).length for s in SIDES}
+        state['order'] = [s for s in sorted(SIDES, key=lambda s_: -far[s_]) if far[s] > 0.01]
+        state['far'] = far
+    order = state['order'] if state is not None else list(SIDES)
+    half = max(1, n // max(1, len(order))) if order else n
+    targets = {}
+    moving = None
+    for s in SIDES:
+        fa, fb = FA[s], FB[s]
+        wa, wb = fa['W_ft'], fb['W_ft']
+        if wa.dot(wb) < 0:
+            wa = -wa
+        if s not in order:
+            targets[s] = (fa['p_an'].copy(), fa['W_ft'].copy())
+            continue
+        k0 = order.index(s) * half
+        v = min(1.0, max(0.0, (j + 1 - k0) / float(half)))
+        T = fa['p_an'].lerp(fb['p_an'], ease(v)) + UP * (lift * math.sin(math.pi * v))
+        if 0.0 < v < 1.0:
+            moving = s
+        targets[s] = (T, wa.slerp(wb, ease(v)))
+    return _solve_feet(rig, N, off, M, targets, ground, keep_up=moving)
+
+
+def _inside_depth(bvh, p):
+    """how far p is inside the closed solids of bvh (m, 0 outside) and the face's outward normal there: the nearest
+    face's side, then an upward ray's crossings to tell a point inside from one beside a concave corner"""
+    q, n, _i, d = bvh.find_nearest(p)
+    if q is None or (p - q).dot(n) >= 0:
+        return 0.0, None
+    hits, o = 0, p.copy()
+    for _ in range(16):
+        h = bvh.ray_cast(o, UP, 50.0)
+        if h[0] is None:
+            break
+        hits += 1
+        o = h[0] + UP * 1e-4
+    return (d, n) if hits % 2 == 1 else (0.0, None)
+
+
+def _feet_out_of_solids(rig, rec, bvh, ground, tol=0.003, rounds=6, report=None):
+    """a move's frame with each foot that is inside a solid (a climb's foot in the face it climbs) pushed out along that
+    face's normal until its deepest sole point is on it, the leg re-solved and clamped (the other foot as it is); what
+    the leg cannot reach after `rounds - 1` tries moves the whole body out instead -> rec (unchanged when nothing is
+    inside). report: {'max_in_m': the deepest before the push, 'body_moved_m': the largest body move}"""
+    out = rec
+    for _r in range(rounds):
+        soles = rig.feet_world(out)
+        push = {}
+        for s, P in soles.items():
+            best = (0.0, None)
+            for p in P[::2]:
+                d, n = _inside_depth(bvh, Vector(p))
+                if d > best[0]:
+                    best = (d, n)
+            if best[0] > tol:
+                push[s] = best[1] * (best[0] + 0.002)
+                if report is not None and _r == 0:
+                    report['max_in_m'] = max(report.get('max_in_m', 0.0), best[0])
+        if not push:
+            return out
+        if _r == rounds - 1:
+            # the leg cannot take the foot out by itself (the move holds my hips too close to the face): the whole body
+            # moves out along the face by what is left, its hands with it
+            v = max(push.values(), key=lambda p_: p_.length)
+            if report is not None:
+                report['body_moved_m'] = max(report.get('body_moved_m', 0.0), v.length)
+            out = dict(out, M=Matrix.Translation(v) @ out['M'])
+            return out
+        F = _fk_feet(rig, out)
+        targets = {s: ((F[s]['p_an'] + push[s]) if s in push else F[s]['p_an'].copy(), F[s]['W_ft'].copy())
+                   for s in SIDES}
+        out = dict(out, **_solve_feet(rig, dict(out['N']), out['off'], out['M'], targets, ground))
+    return out
+
+
 def _settle(rig, A, B, v, ground):
     """B's pose with both feet eased from where A has them to B's own (v 0 -> 1): after a standing hand-over"""
     FA, FB = _fk_feet(rig, A), _fk_feet(rig, B)
@@ -170,7 +327,7 @@ LIFT = 0.025        # a standing clip's foot whose lowest point is this far over
                     # relaxed foot hovers up to 11 mm in the stock idle on my legs: RobotRig.rest_feet's reach)
 
 
-def _hold_follow(rig, held, raw, u, ground, state):
+def _hold_follow(rig, held, raw, u, ground, state, settle=False):
     """a new standing clip where the body stands: the pose crossfades from `held` (the last frame before) to the clip's
     (u 0 -> 1), and each foot is PLANTED where it stands while the clip's own foot is down (its own slide on the floor is
     not passed on), and carried as the clip carries it while the clip lifts it (over LIFT), landing where that motion
@@ -210,7 +367,12 @@ def _hold_follow(rig, held, raw, u, ground, state):
     if ra.dot(rb) < 0:
         ra = -ra
     M = Matrix.Translation(la.lerp(lb, u)) @ ra.slerp(rb, u).to_matrix().to_4x4()
-    return _solve_feet(rig, N, held['off'].lerp(raw['off'], u), M, targets, ground)
+    out = _solve_feet(rig, N, held['off'].lerp(raw['off'], u), M, targets, ground)
+    if settle:
+        # the hardware clamp after the solve can tip a planted sole a few mm off the floor: settled back down (a
+        # stepping foot is over LIFT, past rest_feet's reach, and left alone)
+        rig.rest_feet(out, ground)
+    return out
 
 
 TURN_STEP = math.radians(45.0)     # a standing turn steps at most this far at a time
@@ -313,7 +475,9 @@ def _stance_score(an, tc):
 
 
 def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=None, fade=8, action_name=None, key=True,
-             log=print, min_stand=12, extend=0.4, rest_feet=True):
+             log=print, min_stand=12, extend=0.4, rest_feet=True, keep_feet_out=True):
+    """the legs' record keyed (the module's doc) -> report. keep_feet_out: through a move, a foot the move puts inside a
+    collision mesh is pushed out onto its face (_feet_out_of_solids)"""
     rig, h = legs.rig, legs.h
     rec = legs.record
     sc = bpy.context.scene
@@ -321,8 +485,20 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
     dt = 1.0 / fps
     if not rec:
         return {'frames': 0}
-    if ground is None:
-        ground = legs.world.as_ground() if legs.world is not None else Ground(fn=lambda x, y: 0.0 * np.asarray(x))
+    fixed_ground, grounds = ground, {}
+
+    def ground_at(z):
+        """the ground a span's feet read: the caller's, else the collision meshes probed from that level plus a step
+        (a foot by a tall solid reads the floor it stands on, never the solid's top)"""
+        if fixed_ground is not None:
+            return fixed_ground
+        if legs.world is None:
+            return Ground(fn=lambda x, y: 0.0 * np.asarray(x))
+        k_ = round(float(z), 2)
+        if k_ not in grounds:
+            grounds[k_] = legs.world.as_ground(z_from=k_ + 0.45)
+        return grounds[k_]
+    ground = ground_at(rec[0]['z'])
     spans = _segments(rec, min_stand)
     clips, ans = {}, {}
     walk_body = getattr(legs, '_walk_body', None) or Body(h)
@@ -342,8 +518,10 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
     sim_of = []                       # the record index each film frame stands for
     reports = []
     turns = []                        # the standing turns: their first film frame, angle, steps, frames
+    moves = []                        # the maneuvers: their film frames, the hand-in's shift
     prev_last = None                  # the last placed raw record (for a hand-over)
     prev_kind = None
+    prev_move = False                 # the span before was a move (its own standing hands over)
     stop_side = None
     probes = {}
 
@@ -368,6 +546,94 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
 
     for si, sp in enumerate(spans):
         nxt = spans[si + 1] if si + 1 < len(spans) else None
+        ground = ground_at(rec[sp['a']]['z'])            # the level this span starts on
+        if sp['kind'] == 'maneuver':
+            # A MOVE (RobotLegs._start_maneuver): the controller family's planted frames, my body's DOF pass already
+            # run on them (its plant). The keyed body stands where its walk's planted feet stopped it, which can be a
+            # part of a stride from where the live run stood, so the move is played again from where I stand (its
+            # scan of the cover, the lip, the ladder fitted to where I really am; the film runs on by any frames it
+            # differs). Over `fade` frames the pose crossfades from my standing one with both my feet held; where the
+            # crossfade lets them go, the move's own feet must be mine: the controller's standing feet sit a few cm
+            # off its start point, so the move is played once more from a start moved by that offset, and the small
+            # rest is a shift of the whole move on the ground (least squares over both feet). The move's own standing
+            # after its landing hands over to the next span as any standing does
+            mv = legs._maneuvers[sp['clip']]
+            mf, mr, played, replayed = mv['frames'], mv['records'], mv['played'], None
+            ks = [rec[i]['maneuver_k'] for i in range(sp['a'], sp['b'])]
+
+            def feet_offset(frames_, k_):
+                """my standing feet less the move's at its frame k_ (the ground plane)"""
+                fk = frames_[min(k_, len(frames_) - 1)]
+                fk = {'N': fk['N'], 'off': fk['off'], 'M': fk['M']}
+                d = Vector((0.0, 0.0, 0.0))
+                for sd in SIDES:
+                    d += _sole_xy(rig, prev_last, sd)[1] - _sole_xy(rig, fk, sd)[1]
+                d /= 2.0
+                d.z = 0.0
+                return d
+            if prev_last is not None:
+                lp, rp, _s = prev_last['M'].decompose()
+                h_here = 2.0 * math.atan2(rp.z, rp.w)
+                x0, y0, z0, h0 = mv['start']
+                moved = math.hypot(lp.x - x0, lp.y - y0)
+                same = moved <= 0.01 and abs(math.remainder(h_here - h0, 2 * math.pi)) <= math.radians(0.5)
+                off_ = feet_offset(mf, ks[min(fade, len(ks) - 1)]) if same else None
+                if not same or off_.length >= 0.01:
+                    start = (Vector((x0, y0, z0)) + off_) if same else Vector((lp.x, lp.y, z0))
+                    replayed = {'from_live_m': round(moved, 3), 'played': None}
+                    for rnd in range(2):
+                        sim = legs.simulate_maneuver(mv['name'], mv['kw'], tuple(start), h_here)
+                        if not sim['played']:
+                            replayed['refused_round_%d' % rnd] = sim['said'][-3:]
+                            break
+                        mf, mr, played = sim['frames'], sim['records'], sim['played']
+                        ks = list(range(len(mf)))
+                        replayed['played'] = played
+                        off_ = feet_offset(mf, fade)
+                        replayed['round_%d_offset_m' % rnd] = round(off_.length, 4)
+                        if off_.length < 0.01:
+                            break
+                        start = start + off_
+                    if replayed['played'] is None:
+                        log(f'[robot bake] {mv["name"]}: the move does not fit where the keyed body stands '
+                            f'({moved:.2f} m from the live run): its live frames, shifted')
+            delta = feet_offset(mf, ks[min(fade, len(ks) - 1)]) if prev_last is not None else Vector((0.0, 0.0, 0.0))
+            f_in = f0 + len(out)
+            n_sim = sp['b'] - sp['a']
+            step_state, guard = {}, {}
+            bvh_w = legs.world.bvh if legs.world is not None else None
+            k_landed = max((k for k in ks if mr[k].get('mode') == 'maneuver'), default=None)
+            for j, k in enumerate(ks):
+                fr = mf[k]
+                raw = {'N': fr['N'], 'off': fr['off'], 'M': Matrix.Translation(delta) @ fr['M'],
+                       'stages': fr.get('stages') or {}}
+                if prev_last is not None and j < fade:
+                    # the feet step from where I stand to where the move stands (its idle's stance is its own)
+                    raw = _step_in(rig, prev_last, raw, j, fade, ground, state=step_state)
+                elif bvh_w is not None and keep_feet_out:
+                    # a climb's foot never goes into the face it climbs: pushed out onto it, the leg re-solved
+                    raw = _feet_out_of_solids(rig, raw, bvh_w, ground, report=guard)
+                if rest_feet and k_landed is not None and k > k_landed:
+                    # landed and standing on the level it landed on: both feet down (its plant's clearance)
+                    rig.rest_feet(raw, ground_at(mr[k]['feet_world'][2]))
+                i = min(sp['b'] - 1, sp['a'] + int(round(j * n_sim / max(1, len(ks)))))
+                t_film = len(out) * dt
+                out.append(rig.finish(raw, dt, face(t_film) if face else None, _aimed_gaze(rig, raw, rec[i]),
+                                      crown_state, head_state))
+                out[-1]['M'] = raw['M']
+                out[-1]['src'] = ('maneuver', mv['name'], 'in' if (prev_last is not None and j < fade) else None)
+                out[-1]['move'] = mr[k].get('maneuver') or mr[k].get('mode')
+                sim_of.append(i)
+                prev_raw = raw
+            moves.append({'name': mv['name'], 'played': played, 'film_frames': [f_in, f0 + len(out) - 1],
+                          'shift_m': round(delta.length, 4), 'replayed': replayed, 'controller': mv['report'],
+                          'step_in_m': {s: round(v, 3) for s, v in step_state.get('far', {}).items()},
+                          'feet_pushed_out_m': round(guard.get('max_in_m', 0.0), 3),
+                          'body_moved_out_m': round(guard.get('body_moved_m', 0.0), 3),
+                          'frames_live': n_sim, 'frames_keyed': len(ks),
+                          '_frames': [mf[k] for k in ks], '_shift': delta.copy()})
+            prev_last, prev_kind, prev_move = prev_raw, 'stand', True
+            continue
         if sp['kind'] == 'stand':
             slot = sp['clip'] or legs.slots['idle']
             c = clip(slot)
@@ -400,7 +666,12 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
             if rig.clear is not None:
                 rig.clear.reset()
             held, plan, planted, hold_state = prev_last, None, None, {}
+            after_move = prev_move                    # holding a move's own landing stance: its soles settled
             n_frames = sp['b'] - sp['a']
+            if mode == 'stop':
+                n_frames = max(n_frames, fade)        # the other foot comes all the way down first (the film runs on):
+                #                                       what follows (a move's step-in, a turn, a clip) starts from both
+                #                                       feet down
             if mode == 'turn':
                 plan = turn_plan(prev_heading, heading, fps)
                 FP = _fk_feet(rig, prev_last)
@@ -434,6 +705,8 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
                     raw = _blend(rig, prev_last, raw, (k + 1) / fade, stop_side, prev_last, ground)
                     tag = 'stop'
                     if k == fade - 1:
+                        if rest_feet:
+                            rig.rest_feet(raw, ground)        # landed: the clamp's tip of the sole settled
                         held = raw                            # stopped: the feet stay where the stop set them
                         hold_state = {}
                 elif mode == 'turn' and k < plan['frames']:
@@ -448,14 +721,15 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
                     # taking the clip's hips onto them, as the engine's foot IK holds a standing body's feet through an
                     # emote; the pose crossfades in
                     u = min(1.0, (k + 1) / (fade + 1)) if mode == 'both' else 1.0
-                    raw = _hold_follow(rig, held, raw, u, ground, hold_state)
+                    raw = _hold_follow(rig, held, raw, u, ground, hold_state, settle=after_move)
                     tag = 'hold' if mode == 'both' and k < fade else None
-                out.append(rig.finish(raw, dt, face(t_film) if face else None, r.get('gaze'), crown_state, head_state))
+                out.append(rig.finish(raw, dt, face(t_film) if face else None, _aimed_gaze(rig, raw, r), crown_state,
+                                      head_state))
                 out[-1]['M'] = raw['M']
                 out[-1]['src'] = ('stand', slot, tag)
                 sim_of.append(i)
                 prev_raw = raw
-            prev_last, prev_kind = prev_raw, 'stand'
+            prev_last, prev_kind, prev_move = prev_raw, 'stand', after_move
             continue
         # ---- a walk
         r0 = rec[sp['a']]
@@ -475,15 +749,22 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
             # starts from standing, both feet down: its left foot lands on the standing left one)
             if not is_run:
                 side0 = min(SIDES, key=lambda sd: (_foot_rel(rig, prev_last, sd) - walk_rel(slot, sd, speed)).length)
-        # the route from where the standing body is (the stand's placement can sit a few cm off the run's line): it
-        # joins the run's line 35 cm ahead, so it never doubles back and its first heading stays within a few degrees
-        # of the line's (a kink at the start would turn the first planted foot on the ground)
+        # the route from where the standing body is (the stand's placement can sit off the run's line: a few cm, or a
+        # few dm after stepped turns and an aimed emote): it joins the run's line ahead, at least 35 cm and far enough
+        # that the course correction is at most JOIN_DEG (a kink near the start would turn a planted foot on the
+        # ground, and a sharp one breaks walk_path's planted feet), so it never doubles back
         d0 = (math.sin(r0['heading']), -math.cos(r0['heading']))
         ahead = not starting
+        join = 0.35
+        if starting:
+            live = [(rec[i]['x'], rec[i]['y']) for i in range(sp['a'], sp['b'])]
+            lat = min((math.hypot(q[0] - pts[0][0], q[1] - pts[0][1]) for q in live[:40]), default=0.0)
+            run_len = sum(math.hypot(b_[0] - a_[0], b_[1] - a_[1]) for a_, b_ in zip(live[:-1], live[1:]))
+            join = max(0.35, min(lat / math.tan(math.radians(JOIN_DEG)), 0.6 * run_len))
         for i in range(sp['a'], sp['b']):
             q = (rec[i]['x'], rec[i]['y'])
             if not ahead:
-                if (q[0] - pts[0][0]) * d0[0] + (q[1] - pts[0][1]) * d0[1] < 0.35:
+                if (q[0] - pts[0][0]) * d0[0] + (q[1] - pts[0][1]) * d0[1] < join:
                     continue
                 ahead = True
             if math.hypot(q[0] - pts[-1][0], q[1] - pts[-1][1]) > 0.02:
@@ -510,16 +791,25 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
                     f'is WALKED at the run\'s speed instead')
                 is_run = False
                 c, an = clip(legs.slots['walk']), analysis(legs.slots['walk'])
+        edge = None                                       # (the goal, the way on, how far its level runs on)
         if not is_run:
             if stopping and extend > 0:
                 d_ = Vector(pts[-1]) - Vector(pts[-2])
                 d_ = (d_.normalized() if d_.length > 1e-6
                       else Vector((math.sin(last['heading']), -math.cos(last['heading']))))
-                pts.append((pts[-1][0] + extend * d_.x, pts[-1][1] + extend * d_.y))
+                ext, s_edge = _level_run_on(ground, pts[-1], d_, extend)
+                edge = (Vector((pts[-1][0], pts[-1][1], 0.0)), Vector((d_.x, d_.y, 0.0)), s_edge)
+                if ext > 0.02:
+                    pts.append((pts[-1][0] + ext * d_.x, pts[-1][1] + ext * d_.y))
             phase = (_mid_stance(an, side0) if starting
                      else (len(out) * dt * speed / max(1e-6, an['v_clip'])) % an['period'])
             wrep = walk_path(h, c, pts, ground, f0=1, speed=speed, phase=phase, face=None, body=walk_body, key=False,
                              preroll=0.0, log=log)
+            wrep['route_in'] = {'pts': [(round(p[0], 4), round(p[1], 4)) for p in pts], 'speed': speed,
+                                'phase': round(phase, 5), 'clip': c.name if hasattr(c, 'name') else str(slot)}
+            if (wrep.get('worst') or {}).get('ankle_err_mm', 0.0) > 20.0:
+                log(f'[robot bake] WALK FAILED its planted feet (an ankle {wrep["worst"]["ankle_err_mm"]} mm off its '
+                    f'target): walk_path input {wrep["route_in"]}')
             wf = wrep['_frames']
         # the start: the whole walk moved so its planted foot lands on the standing one
         if starting:
@@ -540,6 +830,12 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
             best = None
             for j, fr in enumerate(wf):
                 sc_ = _stance_score(an, fr['tc'])
+                if edge is not None and math.isfinite(edge[2]):
+                    # by an edge (a drop, a step up, a wall's foot) the stop stands back from it: my standing feet
+                    # reach EDGE_REACH ahead of my root
+                    lc = fr['M'].translation
+                    if (Vector((lc.x, lc.y, 0.0)) - edge[0]).dot(edge[1]) > edge[2] - EDGE_REACH:
+                        continue
                 for sd in SIDES:
                     if sc_[sd] > 0.06:
                         continue
@@ -566,16 +862,17 @@ def bake_run(legs, f0=1, ground=None, face=None, crown_state=None, head_state=No
                 raw = _blend(rig, prev_last, raw, (k + 1) / (fade + 1), side0, raw, ground)
             i = min(sp['b'] - 1, sp['a'] + int(round(k * n_sim / max(1, len(wf)))))
             t_film = len(out) * dt
-            out.append(rig.finish(raw, dt, face(t_film) if face else None, rec[i].get('gaze'), crown_state, head_state))
+            out.append(rig.finish(raw, dt, face(t_film) if face else None, _aimed_gaze(rig, raw, rec[i]), crown_state,
+                                  head_state))
             out[-1]['M'] = raw['M']
             out[-1]['src'] = ('walk', slot, 'start' if (starting and k < fade) else None)
             sim_of.append(i)
             prev_raw = raw
-        prev_last, prev_kind = prev_raw, 'walk'
+        prev_last, prev_kind, prev_move = prev_raw, 'walk', False
     for j, r in enumerate(out):
         r['f'] = f0 + j
     rep = {'frames': [f0, f0 + len(out) - 1], 'spans': [{k: v for k, v in s.items()} for s in spans], 'walks': reports,
-           'turns': turns, 'map': sim_of}
+           'turns': turns, 'maneuvers': moves, 'map': sim_of}
     if key:
         rep['action'] = key_robot(h, out, action_name or f'{h.name}|robot_run')
         rep['face'] = key_face_track(h, face_track(out)) if face else {}

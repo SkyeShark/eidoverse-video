@@ -356,22 +356,59 @@ cleanup = template.cleanup                    # writes the telemetry and its sum
 It loads the VRM at the start, facing +Y, and the controller walks it: the
 Blender port of the engine's `VRMCharacterController` with the template's
 own options (`template.TERRAIN_BASE_CONTROLLER`) and its foot IK, in a
-`CollisionWorld` over the course's meshes, simulated frame by frame and
-keyed (`driver='controller'`, the default; its gait tree takes the steps,
-ramps and bumps by itself). `driver='walk_path'` walks round one's
-`walk_path` instead (faster to build, no stair adaptation), and
-`driver(course, handle, scene) -> report` anything else. The walk stops
-0.6 m before the first wall, gap or ladder: those are maneuvers, the course
-example's direction. Camera modes: `'side'` (5 m to the side, 0.2 m over
-the hips), `'three_quarter'` (35° toward her front, 1 m up),
-`'hands_closeup'` (0.8 m from the left hand) and `'follow'` (the course
-example's damped side camera that swings to 46° at the ladder). Telemetry
-is `LOCOMOTION_TELEMETRY`'s port (its camelCase keys work): per frame the
-segment, the body, each sole's lowest point and its gap over the course
-surface, vertical velocity and jerk, and the controller's own state (speed
-and input speed, speed scale, grounded, support mode, signed climb angle,
-climb blocked, tread run, the six actions' weights); the summary is the
-engine's (max and mean per metric, overall and per segment).
+`CollisionWorld` over the course's colliders (the ladder's rails and rungs
+are visual, as the engine's were), simulated frame by frame and keyed
+(`driver='controller'`, the default; its gait tree takes the steps, ramps
+and bumps by itself). `driver='walk_path'` walks round one's `walk_path`
+instead (faster to build, no stair adaptation), and
+`driver(course, handle, scene) -> report` anything else. A plain walk stops
+0.6 m before the first wall, gap or ladder: those are maneuvers. The
+engine's template also handed the controller `requireConfirmedStairClips`,
+but to its constructor, which never reads it, so its own walks ran without
+it. The template applies it where it takes effect, as the scene meant it
+(`template.TERRAIN_BASE_LOCOMOTION`): without it the controller port's bake
+sinks her at the expanded course's dome (the keyed hips 0.5 m low, soles up
+to 0.6 m under the surface), with it every sole sample of that walk stays
+within 1 cm. `locomotion_opts={}` reproduces the engine literally.
+
+Camera modes ride the engine's body point, the controller's capsule centre
+(hip height plus half the upper body; with `walk_path`, the hips lifted by
+that half): `'side'` (5 m to the side, 0.2 m over it), `'three_quarter'`
+(35° toward her front, 1 m up), `'hands_closeup'` (0.8 m from the left hand)
+and `'follow'` (the course example's damped side camera: 5.2 m, in to
+3.4 m while she maneuvers or sits, swinging to 46° from 2.2 m before the
+ladder). Telemetry is `LOCOMOTION_TELEMETRY`'s port (its camelCase keys
+work). With the controller driving, every field the engine recorded is read
+off the controller port and its foot IK after each simulated frame: the
+body's support state (centre, feet, the three speeds, grounded, ground
+heights, support mode and records), the ahead probes (`aheadProbeSpread`,
+`stairShape` and their kin), each action's weight, time scale and time, and
+the foot IK's contexts and, per limb, its target, hit, reach, swing state,
+stair-ascent nudges, toe angle and speeds (positions in Blender axes). On
+top, each keyed sole's lowest point and its gap over the course surface.
+The summary is the engine's (bodyJerkY, speedError and per side the IK's
+TargetError, TargetErrorXZ, SoleGapY, TargetSpeed, HitSpeed; max and mean,
+overall and per segment) plus each side's `MeshSoleGapY`.
+
+The course example plays whole:
+
+```python
+def setup(ctx):
+    template.setup(ctx, example='obstacle_course')     # its course, bench, character (aporia) and follow camera
+```
+
+`examples/obstacle_course.js` steered the controller from its renderFrame;
+`CourseScene.direct_example` gives the same direction to the controller
+port as film commands. She walks the bump, the 8° ramps and the small
+stairs, vaults the low cover and mounts the 1.15 m wall and drops off it
+(the controller's own maneuvers, which the example left on), runs segments
+15 to 23 (stairs up, the 1.1 m gap jump, stairs down, the chest-high
+vault), climbs the 2.2 m wall and drops, routes round the bench by the
+example's three waypoints, squares up and sits on it, cheers while walking
+on, climbs the ladder (an explicit 2.5 m climb from 0.55 m before its face:
+the port's own trigger reads the ladder block as a wall to scramble, so it
+is off for the approach) and salutes toward the camera on the top platform.
+`direct=False` walks the example's course like a preset instead.
 
 Field notes:
 - The ramps are the engine's 0.5 m tilted slabs: where a ramp meets a slab,
@@ -381,14 +418,19 @@ Field notes:
   dome, to its facets' 3 mm).
 - The controller walks the expanded course from the start to the top of the
   small stairs (412 frames, about 2.5 minutes of simulation and bake) with
-  planted soles within 0.6 mm of the surface (90th percentile) on flats,
-  bumps and ramps, and on the stairs and over the dome no sole sample more
-  than 1 cm inside a step (the worst 1 mm); its gait tree switches to the
-  stair clips by itself. One frame's swinging toe clips the 10 cm bump's
-  leading edge (1.5 cm into its riser). `walk_path` builds faster and
-  crosses flats, bumps and ramps as cleanly, but has no stair adaptation:
-  about a fifth of its sole samples on stairs and the dome sit more than
-  1 cm inside a step, the worst 15 cm.
+  planted soles within 0.8 mm of the surface (90th percentile) on flats,
+  bumps and ramps, and no sole sample anywhere more than 1 cm inside the
+  course (the worst 1.7 mm); its gait tree switches to the stair clips by
+  itself. `walk_path` builds faster and crosses flats, bumps and ramps as
+  cleanly, but has no stair adaptation: about a fifth of its sole samples on
+  stairs and the dome sit more than 1 cm inside a step, the worst 15 cm.
+- The course example's whole run is 1,722 frames (57.4 s): about 75 s of
+  simulation and bake, then a few minutes keying the camera and recording
+  the telemetry frame by frame. No keyed sole goes more than 2 mm into the
+  course in any phase (walk, run, vaults, mounts, the jump, the ladder, the
+  sit, the finale). The foot IK's own target errors and speeds jump to metres
+  during the maneuvers, when the IK stands aside; read the engine's IK
+  metrics per terrain segment, on the walking stretches.
 - The template's cameras are the engine's review framings: at 5 m the
   three-quarter view keeps her whole body and the terrain around her feet
   in frame, and the harness's framing audit calls her small in it. For a
@@ -397,28 +439,30 @@ Field notes:
 Probes: `blender/tests/terrain_extras/test_course.py` (every preset on a
 contact sheet, the course example whole, close and dressed with generated
 materials, every variant scene built, the controller's walk through the
-camera modes: bake it on the CPU with `--parts walk --no-render --save`,
-render its stills through the GPU slot with `--parts walk_render`),
-`test_course_parity.py` (against `terrain_base.js` under deno), and
-`course_scene/` (the template through the harness, 10 s of the expanded
-course: `python eido_blender.py build blender/tests/terrain_extras/course_scene/scene.json`).
+camera modes with the engine's telemetry checked: bake it on the CPU with
+`--parts walk --no-render --save`, render its stills through the GPU slot
+with `--parts walk_render`; the course example's whole run the same way,
+`--parts example_run` then `--parts example_run_render`: every maneuver,
+the sit, the gesture, the salute and the follow camera's push-in checked,
+stills through that camera; `--parts variants`: the first 4 s of every
+variant scene with its character, a still each through its own camera),
+`test_course_parity.py` (against
+`terrain_base.js` under deno), `course_scene/` (the template through the
+harness, 10 s of the expanded course:
+`python eido_blender.py build blender/tests/terrain_extras/course_scene/scene.json`)
+and `course_example_scene/` (the course example through the harness; see
+below).
 
 ## Not yet ported
 
 - `loft.from_outline` takes a point list, not a `THREE.Shape`.
 - `load_kit` takes a GLB path or imported objects, not a loaded gltf.
-- The course example's scripted run (`examples/obstacle_course.js`): the
-  vaults, the mount and drop, the gap jump, the wall climb, the ladder, the
-  run zone, sitting on the bench, the gesture and the finale salute. Its
-  course, bench, zones and follow camera are ported; the template's walk
-  stops 0.6 m before the first wall, gap or ladder, because carrying her
-  over them is the controller port's maneuver work (a probe driving the
-  example's first vault wall and mount with the controller's automatic
-  maneuvers had not finished after 10 minutes of simulation).
-- The telemetry's IK internals: per limb the IK target, hit, reach and swing
-  state, the stair-ascent nudges and the toe angle, and the summary's
-  target-error and target / hit speed metrics; the controller's probe fields
-  (`aheadHighestDelta`, `aheadProbeSpread`, `stairShape` and their kin) and
-  each action's time scale and time. The controller port does not hand them
-  out per frame yet; the template records what it does.
-- The clouds variants' volumetric clouds and shafts (the sky family's).
+- The clouds variants' post effect: `volumetric_clouds` with cloud shafts,
+  from the effects library those POC scenes loaded. It is not in the public
+  `eidoverse/effects_tsl`, nor in `eidoblend.look.post`'s registry, so the
+  template names it and renders the variants without it.
+- The course example through the harness (`course_example_scene/`): the
+  harness's per-frame snapshot (`harness/keying.py`) raises on Blender 5.2's
+  Geometry Nodes modifiers (`NodesModifier.keys()` is gone), and aporia's
+  MToon outlines are such modifiers, so the build stops there. The same run
+  plays through `template.CourseScene` (`test_course.py --parts example_run`).

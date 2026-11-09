@@ -107,10 +107,12 @@ if sky.ring is not None:
     tw = bpy.data.objects.get('eido_sky_cloud_shadow_caster_band')
     blk = bs.light_linking.blocker_collection
     ons = []
-    if tw is not None:
-        for fr in frames:
-            sc.frame_set(fr['frame'])
-            ons.append(float(tw.get('eido_band_caster_on', -1)))
+    if tw is not None and tw.animation_data and tw.animation_data.action:
+        # the twin lives in the band's plate scene, which is not the active one, so its keyed property is read from
+        # its F-curve rather than from the object after a frame change
+        from eidoblend.sky.world_nodes import _fcurves
+        fc = next((c for c in _fcurves(tw.animation_data) if c.data_path == '["eido_band_caster_on"]'), None)
+        ons = [float(fc.evaluate(fr['frame'])) for fr in frames] if fc is not None else []
     check('the near band takes the local deck\'s cloud shadow by day only (the band-sun caster twin)',
           tw is not None and tw.name in blk.objects and 1.0 in ons and 0.0 in ons,
           'on per frame %s' % ons)

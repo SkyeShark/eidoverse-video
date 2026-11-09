@@ -51,27 +51,39 @@ def gust_scale(direction):
     return min(1.0, max(0.0, h / max(abs(dz), 1e-6) / 0.2))
 
 
-def capture(objects, direction, bounds, texel=0.15, top=None, log=print, lowest=False):
+def capture(objects, direction, bounds, texel=0.15, top=None, log=print, lowest=False, surfaces=None):
     """(map RGBA float32 [rows = y, cols = x], meta) of the first surface along `direction` over bounds
-    (x0, y0, x1, y1) on the z = 0 plane. objects: mesh objects (evaluated, world space). lowest=True also returns
-    the lowest surface along each line (z, NO_HIT where none): (map, meta, z_low)."""
+    (x0, y0, x1, y1) on the z = 0 plane. objects: mesh objects (evaluated, world space); or surfaces: records whose
+    last two fields are world-space vertices (n, 3) and polygons (strike.target_surfaces, instances included).
+    lowest=True also returns the lowest surface along each line (z, NO_HIT where none): (map, meta, z_low)."""
     import bpy
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
-    dg = bpy.context.evaluated_depsgraph_get()
     verts, polys, zmax, zmin = [], [], 0.0, 0.0
-    for ob in objects:
-        ev = ob.evaluated_get(dg)
-        me = ev.to_mesh()
-        mw = ev.matrix_world
-        base = len(verts)
-        for v in me.vertices:
-            w = mw @ v.co
-            verts.append(w)
-            zmax = max(zmax, w.z)
-            zmin = min(zmin, w.z)
-        polys.extend(tuple(base + i for i in p.vertices) for p in me.polygons)
-        ev.to_mesh_clear()
+    if surfaces is not None:
+        for rec in surfaces:
+            world, ps = np.asarray(rec[-2], np.float64), rec[-1]
+            if not len(ps):
+                continue
+            base = len(verts)
+            verts.extend(map(tuple, world.tolist()))
+            zmax = max(zmax, float(world[:, 2].max()))
+            zmin = min(zmin, float(world[:, 2].min()))
+            polys.extend([base + i for i in p] for p in ps)
+    else:
+        dg = bpy.context.evaluated_depsgraph_get()
+        for ob in objects:
+            ev = ob.evaluated_get(dg)
+            me = ev.to_mesh()
+            mw = ev.matrix_world
+            base = len(verts)
+            for v in me.vertices:
+                w = mw @ v.co
+                verts.append(w)
+                zmax = max(zmax, w.z)
+                zmin = min(zmin, w.z)
+            polys.extend(tuple(base + i for i in p.vertices) for p in me.polygons)
+            ev.to_mesh_clear()
     d = Vector(direction).normalized()
     if d.z > -0.05:
         raise ValueError('shelter.capture: the rain direction must fall (z < 0)')

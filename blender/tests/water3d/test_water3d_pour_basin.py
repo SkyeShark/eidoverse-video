@@ -7,6 +7,9 @@ driven while water is added (the engine's documented filling workflow).
 A bronze spout on a stone wall pours into an empty fountain basin (a lathe on a pedestal, voxelised as the
 collider) standing on paving stones (a ground slab, also a collider). At 5.5 s a bucket-sized slug falls from above
 the frame into the filled basin: the splash. Lit by the sky panorama, lit shading (refraction, depth colour, foam).
+The pour runs on the engine's solver (the defaults); the frame the slug is thrown, the scene switches to DROP_SOLVER
+(water.set_solver), which keeps a dropped body falling where the engine's flattens it into a disc (solver=drop runs
+DROP_SOLVER throughout, solver=engine the engine's throughout).
 
 Checks (PASS/FAIL): the colliders voxelise (solid cells in the basin wall and the slab, none in the basin's
 hollow), water collects in the basin (the volume inside the bowl grows while the spout runs and stays after it
@@ -26,7 +29,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _scene as S  # noqa: E402
-from eidoblend.fx.water3d import create_water_sim, configure_eevee, ENGINE_SOLVER  # noqa: E402
+from eidoblend.fx.water3d import create_water_sim, configure_eevee, DROP_SOLVER  # noqa: E402
 
 A = S.args()
 FPS = 24
@@ -85,7 +88,8 @@ water = create_water_sim(
     smooth_surface=True, shading='lit',
     shallow_color='#a8d4cc', deep_color='#2a5c5f', absorption=2.6, surface_opacity=0.9,
     foam_strength=0.35, foam_shore=0.0, foam_churn=0.35, churn_speed=2.6, roughness=0.03,
-    **(ENGINE_SOLVER if A.get('solver') == 'engine' else {}))
+    **(DROP_SOLVER if A.get('solver') == 'drop' else {}))
+SOLVER = A.get('solver', 'switch')          # switch: the engine's for the pour, DROP_SOLVER from the slug's throw
 ok = True
 S0 = water.solver
 occ = S0.solid_np
@@ -143,6 +147,8 @@ def bowl_volume(w):
 
 
 def controls(frame, t, w):
+    if SOLVER == 'switch' and DUMP_T0 <= t < DUMP_T1:
+        w.set_solver(**DROP_SOLVER)                   # a body of water is dropped: keep it falling until it lands
     w.set_emitters([POUR if t < POUR_END else None, DUMP if DUMP_T0 <= t < DUMP_T1 else None])
     poured['v'] += w.emitter_flux() / FPS
     if frame % 12 == 0:

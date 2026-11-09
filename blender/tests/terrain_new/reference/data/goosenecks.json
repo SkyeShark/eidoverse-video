@@ -1,0 +1,69 @@
+{
+ "name": "goosenecks",
+ "role": "main",
+ "title": "Goosenecks of the San Juan River, Utah, USA",
+ "landform": "incised (entrenched) meanders",
+ "note": "The San Juan River entrenched about 300 m into flat-lying layered rock, looping back on itself below Goosenecks State Park: some 10 km of river for 2.4 km of westward progress, the canyon walls stepped in ledges and slopes.",
+ "centre_lat": 37.172,
+ "centre_lon": -109.927,
+ "pixel_size_m": 6.0,
+ "extent_m": [
+  6000,
+  6000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "source": {
+  "dataset": "USGS 3D Elevation Program (3DEP), best-available DEM (3DEPElevation ImageServer)",
+  "publisher": "U.S. Geological Survey",
+  "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+  "native_resolution_m": "1 m lidar where the projects in lidar_1m_products_here cover the tile, elsewhere 1/3 arc-second (~10 m)",
+  "vertical_datum": "NAVD88",
+  "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+  "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+  "kind": "usgs3dep",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 3,
+  "resampling": "Gaussian low-pass (sigma 0.90 source px) then bilinear",
+  "no_data_fraction": 0.0,
+  "request": {
+   "bbox": "-109.96222631624437,37.14393599803844,-109.89177368375566,37.200058795348205",
+   "bboxSR": 4326,
+   "imageSR": 4326,
+   "size": "2084,2080",
+   "format": "tiff",
+   "pixelType": "F32",
+   "noData": -9999,
+   "noDataInterpretation": "esriNoDataMatchAny",
+   "interpolation": "RSP_BilinearInterpolation",
+   "f": "json"
+  },
+  "export_size": [
+   2084,
+   2080
+  ],
+  "export_pixel_m": 3,
+  "lidar_1m_products_here": [
+   "USGS 1 Meter 12 x59y412 UT_WestEast_B22"
+  ]
+ },
+ "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+ "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 414.87,
+  "mean_m": 1442.38,
+  "hypsometric_integral": 0.5855,
+  "slope_deg_p10": 1.77,
+  "slope_deg_p50": 14.91,
+  "slope_deg_p90": 41.64,
+  "slope_deg_p99": 69.04,
+  "slope_deg_mean": 18.99
+ },
+ "height_png": "goosenecks.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 1199.46,
+ "height_max_m": 1614.34,
+ "height_step_m": 0.00633066300450141,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

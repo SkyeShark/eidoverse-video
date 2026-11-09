@@ -10,9 +10,10 @@ fabrication port's (eidoblend.fabrication).
 
 The Blender edition's own: the loader's option checks; play() keys reproduce sample() at every frame and stop() removes
 them; the joint sliders (rig.py) drive the modules exactly as set_joints does (a mirrored module and a prismatic jaw
-included); track_travel / spin_rotors / fold / cooling_fan / rotary_setup / move_tool edge cases; the facade; and,
-last, with the fabrication port imported (its hooks): create_ptfe_tube / service_loop forwarded, the dispenser's live
-filament installed at load, and its 'filament-feed' keyed with the strand's Geometry Nodes inputs.
+included); track_travel / spin_rotors / fold / cooling_fan / rotary_setup / move_tool edge cases; the facade; first,
+in a session that has not imported the fabrication port, that a dispenser's load imports it and gets its live filament
+(index.js always runs installFilament); and, last, with the port's hooks: create_ptfe_tube / service_loop forwarded,
+the dispenser's live filament installed at load, and its 'filament-feed' keyed with the strand's Geometry Nodes inputs.
 
     cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
     bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_runtime.py
@@ -41,6 +42,23 @@ def raises(fn, text):
     except Exception as e:  # noqa: BLE001
         return text in str(e), str(e)
     return False, 'no error'
+
+
+def dispenser_imports_fabrication():
+    """index.js imports filament.js, so every load of a dispenser installs its live filament: here the load imports
+    the fabrication port when a robot has a filament stand and reel (and nothing else does)"""
+    if 'eidoblend.fabrication' in sys.modules:
+        print('SKIP dispenser_imports_fabrication: the fabrication port was imported before the test', flush=True)
+        return
+    K.clean_scene()
+    g = make_robot('gripper', textures=False)
+    K.check('a robot without a filament stand does not import the fabrication port',
+            'eidoblend.fabrication' not in sys.modules)
+    g.dispose()
+    s = make_robot('filament_spool', textures=False)
+    K.check(f"a plain make_robot('filament_spool') imports the port and loads the live filament ({s.clips[:1]})",
+            'eidoblend.fabrication' in sys.modules and s.filament is not None and s.clips[0] == 'filament-feed')
+    s.dispose()
 
 
 def parts_ownership():
@@ -216,8 +234,9 @@ def loader_options():
     K.check('RoboticsKit facade: version, ready, catalog, load', RoboticsKit.version == 1 and RoboticsKit.ready()
             and 'models' in RoboticsKit.catalog() and r.id == 'foundations/tooling')
     r.dispose()
-    ok, msg = raises(lambda: RoboticsKit.create_ptfe_tube(points=[[0, 0, 0]] * 4), 'filament.js')
-    K.check(f'create_ptfe_tube names its owner until the fabrication port registers it ({msg[:60]})', ok)
+    ok, msg = raises(lambda: RoboticsKit.create_ptfe_tube(points=[[0, 0, 0]] * 4), 'Degenerate Bezier')
+    K.check('create_ptfe_tube reaches filament.js\'s port on first use, as index.js re-exports it (the port imported '
+            f'on demand refuses degenerate points itself: {msg[:60]})', ok)
 
 
 def keyed_play():
@@ -491,7 +510,8 @@ def with_fabrication():
     spool.dispose()
 
 
-for fn in (parts_ownership, catalog_content, upright_camera, mirrored_legs, humanoid_limbs, solvers_vs_meshes,
+for fn in (dispenser_imports_fabrication, parts_ownership, catalog_content, upright_camera, mirrored_legs,
+           humanoid_limbs, solvers_vs_meshes,
            loader_options, keyed_play, sliders, controls, framing, loader_subassembly_and_filament, saved_file_plays,
            with_fabrication):
     try:

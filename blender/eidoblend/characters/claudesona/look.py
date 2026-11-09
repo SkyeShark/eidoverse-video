@@ -13,9 +13,14 @@ MToon. The PBR look adds its own EEVEE output fed by a Principled BSDF, and mute
 outline on a lit PBR surface reads as a cartoon). The Principled takes:
     Base Color   MToon's Lit Color x Lit Color Texture Color (whatever feeds them: the wardrobe's paints included;
                  refresh_pbr re-reads them after a repaint)
-    Metallic, Roughness, IOR, Normal    the glTF-compatible shader's own (the VRM's pbrMetallicRoughness, its normal map)
-    Emission     MToon's Emissive Factor x Emissive Texture at Emissive Strength
+    Metallic, Roughness, IOR    the glTF-compatible shader's own (the VRM's pbrMetallicRoughness)
+    Normal       the glTF-compatible shader's (the VRM's normal map), or the bump this package's surfaces put on MToon's
+                 Normal (the TuTa's weave, seams and piping: a node named 'cs.*')
+    Emission     MToon's Emissive Factor x Emissive Texture at Emissive Strength, and the DRIVER on Emissive Strength
+                 when it has one (the TuTa's badges glow by a driver: snaps, flight flicker, neon)
     Alpha        Lit Color Alpha x the texture's alpha, for materials whose MToon alpha mode is not opaque
+A value MToon takes from a driver is driven the same way on the Principled side (_feed copies the driver), so every
+keyed switch of the wardrobe and the TuTa animates in both looks.
 """
 
 import bpy
@@ -27,11 +32,54 @@ def _mtoon(m):
     return m.node_tree.nodes.get('Mtoon1Material.Mtoon1Output') if (m and m.node_tree) else None
 
 
+def _drivers_of(nt, sock):
+    """the driver fcurves on a socket's default_value ([] when it has none)"""
+    ad = nt.animation_data
+    if ad is None:
+        return []
+    try:
+        path = sock.path_from_id('default_value')
+    except (ValueError, TypeError):
+        return []
+    return [fc for fc in ad.drivers if fc.data_path == path]
+
+
+def _copy_driver(nt, src_socket, dst_socket):
+    """dst's default_value driven as src's is (any old driver on dst removed first); returns how many were copied"""
+    for fc in _drivers_of(nt, dst_socket):
+        nt.animation_data.drivers.remove(fc)
+    n = 0
+    for fc in _drivers_of(nt, src_socket):
+        multi = hasattr(dst_socket.default_value, '__len__')
+        nf = dst_socket.driver_add('default_value', fc.array_index) if multi else dst_socket.driver_add('default_value')
+        s, d = fc.driver, nf.driver
+        d.type = s.type
+        for v in list(d.variables):
+            d.variables.remove(v)
+        for sv in s.variables:
+            v = d.variables.new()
+            v.name, v.type = sv.name, sv.type
+            for st, t in zip(sv.targets, v.targets):
+                if sv.type == 'SINGLE_PROP':
+                    t.id_type = st.id_type
+                t.id = st.id
+                t.data_path = st.data_path
+                t.bone_target, t.transform_type, t.transform_space = st.bone_target, st.transform_type, st.transform_space
+                t.rotation_mode = st.rotation_mode
+        if s.type == 'SCRIPTED':
+            d.expression = s.expression
+        d.is_valid = True
+        n += 1
+    return n
+
+
 def _feed(nt, src_socket, dst_socket):
-    """dst takes what feeds src: its link's source, or its value"""
+    """dst takes what feeds src: its link's source, or its value and the driver on it"""
     for l in list(dst_socket.links):
         nt.links.remove(l)
     if src_socket.is_linked:
+        for fc in _drivers_of(nt, dst_socket):
+            nt.animation_data.drivers.remove(fc)
         nt.links.new(src_socket.links[0].from_socket, dst_socket)
     else:
         v = src_socket.default_value
@@ -39,6 +87,17 @@ def _feed(nt, src_socket, dst_socket):
             dst_socket.default_value = v
         except (TypeError, ValueError):
             dst_socket.default_value = tuple(v)[:len(dst_socket.default_value)]
+        _copy_driver(nt, src_socket, dst_socket)
+
+
+def _normal_source(nt, mo):
+    """what the Principled's Normal takes: a 'cs.*' bump on MToon's Normal (this package's surfaces), else the
+    glTF-compatible shader's normal (the VRM's normal map)"""
+    nrm = mo.inputs.get('Normal')
+    if nrm is not None and nrm.is_linked and nrm.links[0].from_node.name.startswith('cs.'):
+        return nrm
+    cs = nt.nodes.get('Mtoon1Material.CompatibleShader')
+    return cs.inputs['Normal'] if cs is not None else None
 
 
 def _sock(sockets, ident):
@@ -75,33 +134,38 @@ def to_pbr(m):
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     nt.links.new(_sock(base.outputs, 'Result_Color'), bsdf.inputs['Base Color'])
     nt.links.new(_sock(emis.outputs, 'Result_Color'), bsdf.inputs['Emission Color'])
-    refresh_pbr(m)
     cs = nt.nodes.get('Mtoon1Material.CompatibleShader')
     if cs is not None:
-        for nm in ('Metallic', 'Roughness', 'IOR', 'Normal'):
+        for nm in ('Metallic', 'Roughness', 'IOR'):
             _feed(nt, cs.inputs[nm], bsdf.inputs[nm])
-    _feed(nt, mo.inputs['Emissive Strength'], bsdf.inputs['Emission Strength'])
     am = mo.inputs.get('Alpha Mode')
     if am is not None and not am.is_linked and int(round(am.default_value)) != 0:
         nt.links.new(alpha.outputs['Value'], bsdf.inputs['Alpha'])
+    refresh_pbr(m)
     out.is_active_output = True
     mo.mute = True
     return True
 
 
 def refresh_pbr(m):
-    """the PBR path re-reads MToon's colour inputs (after a wardrobe repaint); a no-op without the PBR path"""
+    """the PBR path re-reads what MToon takes (after a wardrobe repaint or a TuTa surface): colours, emission and its
+    strength (with its driver), the bump normal; a no-op without the PBR path"""
     mo = _mtoon(m)
     if mo is None or (PBR + 'base') not in m.node_tree.nodes:
         return
     nt = m.node_tree
     base, emis, alpha = nt.nodes[PBR + 'base'], nt.nodes[PBR + 'emission'], nt.nodes[PBR + 'alpha']
+    bsdf = nt.nodes[PBR + 'bsdf']
     _feed(nt, mo.inputs['Lit Color'], _sock(base.inputs, 'A_Color'))
     _feed(nt, mo.inputs['Lit Color Texture Color'], _sock(base.inputs, 'B_Color'))
     _feed(nt, mo.inputs['Emissive Factor'], _sock(emis.inputs, 'A_Color'))
     _feed(nt, mo.inputs['Emissive Texture'], _sock(emis.inputs, 'B_Color'))
+    _feed(nt, mo.inputs['Emissive Strength'], bsdf.inputs['Emission Strength'])
     _feed(nt, mo.inputs['Lit Color Alpha'], alpha.inputs[0])
     _feed(nt, mo.inputs['Lit Color Texture Alpha'], alpha.inputs[1])
+    src = _normal_source(nt, mo)
+    if src is not None:
+        _feed(nt, src, bsdf.inputs['Normal'])
 
 
 def to_mtoon(m):

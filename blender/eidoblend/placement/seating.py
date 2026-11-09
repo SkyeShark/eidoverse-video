@@ -171,6 +171,35 @@ def _body_bvh(h):
     return W.world_bvh(meshes, W.depsgraph())                      # the posed body, built fresh (not cached)
 
 
+def _support_bvh(h):
+    """The posed body's skin that can bear it on the ground, as a world BVH (sit_on_ground's measure). The polygons
+    the spring chains carry (tails, hair, a coat's tails: bake_springs swings them afterwards, through whatever they
+    were measured against) and the loose layers that hang over the body (a coat's hem) are left out, as
+    eidoblend.characters.emotes leaves them (_support_skin): measured with them, on her tails Aletheia lay propped
+    ~15 cm up, and on her coat's hem she sat 6 cm up. A rig that is not a VRM handle is measured whole (_body_bvh)."""
+    if not (hasattr(h, 'humanoid') and hasattr(h, 'meshes')):
+        return _body_bvh(h)
+    from mathutils.bvhtree import BVHTree
+    from ..characters.emotes.verbs import _support_skin
+    W.update()
+    dg = W.depsgraph()
+    verts, polys = [], []
+    for o, keep in _support_skin(h):
+        if not keep or not W.visible(o):
+            continue
+        ev = o.evaluated_get(dg)
+        me = ev.to_mesh()
+        M = ev.matrix_world
+        base = len(verts)
+        verts.extend(M @ v.co for v in me.vertices)
+        mp = me.polygons
+        polys.extend(tuple(base + i for i in mp[k].vertices) for k in keep if k < len(mp))
+        ev.to_mesh_clear()
+    if not polys:
+        return _body_bvh(h)
+    return BVHTree.FromPolygons(verts, polys)
+
+
 def _lowest_up(bvh, pts, z0, reach):
     lowest = None
     if bvh is None:
@@ -257,7 +286,8 @@ def seat_on(h, chair, clip=SIT_CLIP, face=None, sink=None, transition=None, t=0.
     the descent: from 40 % in, a one-sided clamp lifts her whenever her underside would dip below the seat (it never
     pushes her down), and at the clip's end a settle recentres her hips over the pan (biased toward the backrest)
     and rests the lowest of her underside on it (sink 0). The last pose holds, as the engine's did; then=<slot> plays
-    a seated loop after it (crossfaded)."""
+    a seated loop after it (crossfaded over 0.25 s, the root keyed again where the crossfade ends so the loop's pose,
+    whose hips sit over its root, is settled on the pan too)."""
     from ..characters.vrma import load_clip, play_vrma, play_vrma_default
     scene = bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
@@ -328,6 +358,18 @@ def _rest_hips_on_seat(h, chair, seat, sink):
     arm.location.z += (seat_here - lowest) - (sink or 0.0) if lowest is not None else 0.09
 
 
+THEN_FADE = 0.25            # s: the crossfade from a sit-down into its seated loop (then=)
+
+
+def _fade_in(strip, fade, fps):
+    """A strip's crossfade in, set with auto-blend off first: characters.vrma.play_vrma sets blend_in while the
+    strip still auto-blends, which leaves it 0 (a pop instead of a crossfade)."""
+    if strip is not None and fade and fade > 0:
+        strip.use_auto_blend = False
+        strip.blend_in = fade * fps
+    return strip
+
+
 def _seat_transition(h, chair, seat, th, transition, t, fade, dur, hip_back, sink, then, load_clip, play_vrma, fps):
     scene = bpy.context.scene
     arm = _arm(h)
@@ -336,9 +378,10 @@ def _seat_transition(h, chair, seat, th, transition, t, fade, dur, hip_back, sin
     arm.location.x, arm.location.y = seat['x'] + fwd.x * hip_back, seat['y'] + fwd.y * hip_back   # its own z kept
     tr = load_clip(h, transition)
     dur = tr.duration if dur is None else dur
-    play_vrma(h, tr, t=t, loop=False, fade=fade)
+    _fade_in(play_vrma(h, tr, t=t, loop=False, fade=fade), fade, fps)
+    then_strip = None
     if then:
-        play_vrma(h, load_clip(h, then), t=t + dur, loop=True, fade=0.25)
+        then_strip = _fade_in(play_vrma(h, load_clip(h, then), t=t + dur, loop=True, fade=THEN_FADE), THEN_FADE, fps)
     f0 = 1 + int(round(t * fps))
     f_clamp = f0 + int(round(max(0.1, dur * 0.4) * fps))
     f_final = f0 + int(round(max(0.1, dur - 0.05) * fps))
@@ -356,9 +399,24 @@ def _seat_transition(h, chair, seat, th, transition, t, fade, dur, hip_back, sin
     scene.frame_set(f_final)
     _rest_hips_on_seat(h, chair, seat, sink)
     _key_root(arm, f_final)
+    then_note = ''
+    if then_strip is not None:
+        # The seated loop carries its hips over its root, where the sit-down's own hip travel had carried them
+        # about 0.4 m back: left on the sit-down's root, she would end on the pan's front edge, in the air. Hold
+        # the root through the crossfade's start, settle the loop's pose on the pan where the crossfade is done,
+        # and key it there: LINEAR keys over the same frames as the linear blend keep the hips still through it.
+        fa = int(round(then_strip.frame_start))
+        fb = int(math.ceil(then_strip.frame_start + then_strip.blend_in))
+        if fa > f_final:
+            _key_root(arm, fa)
+        scene.frame_set(fb)
+        _rest_hips_on_seat(h, chair, seat, sink)
+        _key_root(arm, fb)
+        then_note = f"; '{then}' from frame {fa}, its pose settled on the pan by frame {fb}"
     W.update()
     _log('seat_on', f"'{arm.name}' lowers into '{chair.name}' over frames {f0}-{f_final} ({transition}, "
-                    f'{dur:.2f} s; the clamp lifted her on {lifts} frame(s)), settled on the pan at {seat["z"]:.3f} m')
+                    f'{dur:.2f} s; the clamp lifted her on {lifts} frame(s)), settled on the pan at {seat["z"]:.3f} m'
+                    + then_note)
     _mark_seated(h, chair)
     return seat['z']
 
@@ -403,7 +461,7 @@ def sit_on_ground(h, at=None, clip=GROUND_CLIP, ground=None, z=0.0, sink=0.005, 
         arm.location.z += (floor + 0.25) - hp.z                   # rough lift: her mesh above the floor
         hp = _hips(h)
         pts = [(hp.x + dx * 0.175, hp.y + dy * 0.175) for dx in range(-2, 3) for dy in range(-2, 3)]
-        lowest = _lowest_up(_body_bvh(h), pts, floor - 0.6, 1.5)
+        lowest = _lowest_up(_support_bvh(h), pts, floor - 0.6, 1.5)   # the skin that bears her: no tails, no hem
         if lowest is not None:
             arm.location.z += (floor - lowest) + sink              # the lowest underside on the floor
         else:

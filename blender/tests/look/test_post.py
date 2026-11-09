@@ -80,10 +80,11 @@ if abs(REPORT['camel_case_tint'][2] - 0.6) > 1e-6:
 # ---- the stage's lenses: glare
 st = [shot(STAGE, 1.25, 30, 'stage_plain'),
       shot(STAGE, 1.25, 30, 'stage_bloom', 'bloom', {'bloom': {'strength': 0.6, 'radius': 0.6, 'threshold': 1.0}}),
-      shot(STAGE, 1.25, 30, 'stage_anamorphic', 'anamorphic_flare', {'anamorphic_flare': {'threshold': 1.0, 'strength': 0.6}}),
+      shot(STAGE, 1.25, 30, 'stage_anamorphic', 'anamorphic_flare', {'anamorphic_flare': {'threshold': 2.0, 'strength': 0.6}}),
       shot(STAGE, 1.25, 30, 'stage_lensflare', 'lensflare', {'lensflare': {'threshold': 1.0, 'strength': 0.6}})]
 FS.sheet(st, os.path.join(OUT, 'post_stage_sheet.jpg'), cols=2, tile=640,
-         labels=['plain', 'bloom (Glare)', 'anamorphic_flare (Glare Streaks, blue)', 'lensflare (Glare Ghosts)'])
+         labels=['plain', 'bloom (Glare)', "anamorphic_flare (three's AnamorphicNode, blue)",
+                 "lensflare (three's LensflareNode)"])
 
 # ---- the meadow: the compositor groups, a keyed burst, native fog
 try:

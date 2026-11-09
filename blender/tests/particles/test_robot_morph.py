@@ -34,6 +34,7 @@ from eidoblend.fx import particle_targets as PT  # noqa: E402
 
 N = int(S.arg('count', 60000))
 BLEND = S.arg('blend', 'normal')
+GAIN = 1.0 if BLEND == 'normal' else 0.9           # additive light adds up: a little less of it per particle
 RES = tuple(int(x) for x in S.arg('res', '960x540').split('x'))
 SAMPLES = int(S.arg('samples', 16))
 MODEL = S.arg('model', 'alarm_clock_01:2k')
@@ -103,7 +104,7 @@ def main():
     net = PT.target('neural_net', N, width=3.2, height=2.0, at=CENTER).tinted(0x58d6ff)
     word = PT.target('text:CLAUDE', N, width=3.6, at=CENTER).tinted(0xff9466)
     m = PM.make_particle_morph(count=N, targets=[body, model, net, word], blending=BLEND, size=0.022,
-                               curl={'scale': 1.5, 'strength': 0.55}, gain=1.0 if BLEND == 'normal' else 0.9,
+                               curl={'scale': 1.5, 'strength': 0.55}, gain=GAIN,
                                opacity=1.0, center=CENTER, name='robot_cloud', seed=5)
     # the keyed film: fade the cloud in over the walking body, swap at the dissolve, then the chain
     m.key_hold(0, 1)
@@ -126,7 +127,7 @@ def main():
     P_prev = body.live.points(F_DISSOLVE - 8)
     S.check('the live body moved before the dissolve (walking)', float(np.abs(P_prev - body.live.points(F_DISSOLVE))
                                                                        .max()) > 0.1)
-    S.check('the cloud in my colours at the dissolve', np.abs(C - body.colors).max() < 1e-4,
+    S.check('the cloud in my colours at the dissolve (times the gain)', np.abs(C - body.colors * GAIN).max() < 1e-4,
             str(C.mean(0).round(3)))
     for f, t, nm in ((F_FORMED + 4, model, 'the Poly Haven model'), (F_NET1 + 4, net, 'the neural net'),
                      (F_WORD1 + 6, word, 'the word CLAUDE')):

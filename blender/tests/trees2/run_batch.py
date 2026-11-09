@@ -23,7 +23,9 @@ def main():
     report = []
     base_argv = sys.argv[:sys.argv.index('--')] if '--' in sys.argv else sys.argv[:]
     for item in items:
-        script, _, args = item.partition(':')
+        drive = item[:2] if len(item) > 2 and item[1] == ':' and item[2] in '\\/' else ''   # C:/... on Windows
+        script, _, args = item[len(drive):].partition(':')
+        script = drive + script
         path = script if os.path.isabs(script) else os.path.join(HERE, script)
         argv = base_argv + ['--'] + ([a for a in args.split(',') if a] if args else [])
         S = sys.modules.get('_scene')

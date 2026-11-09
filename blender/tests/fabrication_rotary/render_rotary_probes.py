@@ -4,8 +4,11 @@ the build's own camera or from extra close-up cameras. Several builds render in 
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/fabrication_rotary/render_rotary_probes.py -- blend=out/rotary_example.blend \
-        [frames=1,37,73] [scale=50] [samples=16] [tag=rotary] [views=scene,close,side] [size=WxH]
+        [frames=1,37,73] [scale=50] [samples=16] [tag=rotary] [views=scene,close,side] [size=WxH] [blur=0.5]
     ... render_rotary_probes.py -- jobs="out/rotary_example.blend@73,241@close@rotary;out/rotary_mesh_example.blend@1,97@scene"
+
+blur=<shutter>: render with the harness film's motion blur (that shutter in frames, centred, one step); the builds
+alone have it off.
 
 jobs: ';'-separated <blend>@<frames>@<views>[@<tag>] (frames and views as below), one after another in this run.
 views: 'scene' the build's camera; 'close' a 3/4 close-up on the stock from the cutter's side; 'side' straight at the
@@ -55,6 +58,11 @@ def render(blend, frames, views, tag):
         sc.render.resolution_percentage = int(args.get('scale', 50))
     sc.render.image_settings.file_format = 'PNG'
     sc.view_settings.view_transform = 'AgX'
+    if args.get('blur'):
+        sc.render.use_motion_blur = True
+        sc.render.motion_blur_shutter = float(args['blur'])
+        sc.render.motion_blur_position = 'CENTER'
+        sc.eevee.motion_blur_steps = 1
     scene_cam = sc.camera
     frame_ob = bpy.data.objects.get('Rotary stock frame')
     cams = {}

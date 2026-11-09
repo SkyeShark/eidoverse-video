@@ -7,7 +7,11 @@ The engine's system is stateless: each particle's position is a closed-form func
 so it ports to one Geometry Nodes graph driven by Scene Time, with no bake: a point per particle carrying
 its emit offset, launch velocity and seed, a camera-facing quad instanced on each point (the active camera's
 rotation, or a given camera's, plus the flame preset's per-particle spin), size over life, and the per-particle
-phase, twinkle, opacity and colour stored for the material. Scrubbing, re-rendering and motion blur all just work.
+phase, twinkle, opacity and colour stored for the material. Scrubbing and re-rendering just work. Motion blur
+follows EEVEE's rule for transparent surfaces: normal-blended (DITHERED) sprites write velocity and blur with the
+default single time step; additive sprites are BLENDED surfaces, which write none, so they blur only when
+scene.eevee.motion_blur_steps is above 1 (each step renders the frame at another time and the steps accumulate;
+measured in tests/particles/test_camera_cut_and_motion_blur.py).
 
 The engine's live uniforms (size, opacity, color, origin) are keyable here: size, opacity and colour are the
 Geometry Nodes modifier's inputs, origin is the object's location. Particles.uniforms holds them as Uniform

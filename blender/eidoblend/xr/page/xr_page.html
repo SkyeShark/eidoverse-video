@@ -102,10 +102,18 @@ try {
     }
     if (o.isLight && SHADOWS && (o.isDirectionalLight || o.isSpotLight)) {
       o.castShadow = true; o.shadow.mapSize.set(2048, 2048); o.shadow.bias = -0.0005;
-      if (o.isDirectionalLight) { const c = o.shadow.camera; c.left = c.bottom = -40; c.right = c.top = 40; c.far = 400; }
     }
   });
+  // the film's textures filtered anisotropically (8x, or the GPU's most): a floor at a grazing angle stays as sharp as
+  // EEVEE draws it (at three's default 1x it blurs to streaks a few metres away)
+  const ANISO = Math.min(8, renderer.getMaxAnisotropy ? renderer.getMaxAnisotropy() : 1);
+  gltf.scene.traverse((o) => {
+    if (o.isMesh) for (const m of (Array.isArray(o.material) ? o.material : [o.material]))
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap'])
+        if (m[k]) m[k].anisotropy = ANISO;
+  });
   // area lights (glTF has none): three's RectAreaLight from the manifest, radiance P / (pi A) as Blender's
+  const rects = {};                                            // by name: their keyed energy plays from choreo.json too
   if (man.rect_lights && man.rect_lights.length) {
     THREE.RectAreaLightNode.setLTC(RectAreaLightTexturesLib.init());
     for (const r of man.rect_lights) {
@@ -114,8 +122,62 @@ try {
       li.position.set(...r.position);
       li.quaternion.set(...r.quaternion);
       stage.add(li);                                           // Blender's area light and three's both face their local -z
+      rects[r.name] = li;
     }
   }
+  // the light at any stage scale. The stage scales the set (a 1:25 table, a street at 25 cm a unit) and the lights in
+  // it, but light does not scale on its own: a point or spot light's candela falls off with the square of the distance,
+  // which the stage shrinks (on a 1:25 table a lamp would light the set 625 times brighter), and a RectAreaLight's
+  // width and height are not scaled by its parents (three takes only its rotation). So each frame, s = the stage's
+  // scale: point and spot lights shine with their intensity x s^2 (their range x s), area lights are s times their
+  // size (the same solid angle, so the same light), and spot shadow cameras cover s times their range. Sun, sky and
+  // emission do not change with scale. At s = 1 (life size, or a camera= still) nothing changes.
+  const falloff = new Map();                                   // point / spot light -> { base intensity (tracks set it), range }
+  const shadowed = [];
+  gltf.scene.traverse((o) => {
+    if (o.isPointLight || o.isSpotLight) falloff.set(o, { base: o.intensity, range: o.distance });
+    if (o.isLight && o.castShadow) shadowed.push(o);
+  });
+  const setIntensity = (L, v) => { const f = falloff.get(L); if (f) f.base = v; else L.intensity = v; };
+  // a sun's shadow box, framed on the set. three draws a directional light's shadow from a camera AT the light, looking
+  // along it, but a Blender sun has no place: eidoblend's robot example and the flora tests leave theirs at the origin,
+  // under the set, where a fixed box round the light saw nothing above the ground (no shadow at all). So each frame the
+  // box is fitted round the set's bounds as the light sees them, its near and far included, wherever the light stands
+  // and at any stage scale or turn
+  const setCorners = bounds.isEmpty() ? [] : [0, 1, 2, 3, 4, 5, 6, 7].map((i) => new THREE.Vector3(
+    i & 1 ? bounds.max.x : bounds.min.x, i & 2 ? bounds.max.y : bounds.min.y, i & 4 ? bounds.max.z : bounds.min.z));
+  const _p = new THREE.Vector3(), _box = new THREE.Box3();
+  const fitSun = (L) => {
+    const c = L.shadow.camera;
+    L.updateWorldMatrix(true, true);                           // the stage, the light and its target, as drawn this frame
+    c.position.setFromMatrixPosition(L.matrixWorld);
+    c.lookAt(_p.setFromMatrixPosition(L.target.matrixWorld));
+    c.updateMatrixWorld(true);
+    _box.makeEmpty();
+    for (const q of setCorners) _box.expandByPoint(_p.copy(q).applyMatrix4(stage.matrixWorld).applyMatrix4(c.matrixWorldInverse));
+    if (_box.isEmpty()) return;
+    const pad = 0.02 * _box.getSize(_p).length() + 1e-4;
+    c.left = _box.min.x - pad; c.right = _box.max.x + pad; c.bottom = _box.min.y - pad; c.top = _box.max.y + pad;
+    c.near = -_box.max.z - pad; c.far = -_box.min.z + pad;    // (a negative near: the set behind the light is in it too)
+    // the bias in the box's own measure, as the box changes with the set and the scale: a shadow texel's width in the
+    // room (m), two of them off the surface along its normal and one in depth (three's bias is a fraction of the box's
+    // depth): a low sun across a fitted box no longer streaks the lit ground and balls with acne
+    const texel = Math.max(c.right - c.left, c.top - c.bottom) / L.shadow.mapSize.x;
+    L.shadow.normalBias = 2 * texel;
+    L.shadow.bias = -texel / (c.far - c.near);
+  };
+  const relight = () => {
+    const s = stage.scale.x;
+    for (const [L, f] of falloff) { L.intensity = f.base * s * s; L.distance = f.range * s; }
+    for (const r of man.rect_lights || []) { const li = rects[r.name]; li.width = r.width * s; li.height = r.height * s; }
+    for (const L of shadowed) {
+      const c = L.shadow.camera;
+      if (L.isDirectionalLight) fitSun(L);
+      else { c.near = 0.5 * s; c.far = 500 * s; }
+      c.updateProjectionMatrix();
+    }
+    return s;
+  };
   // the sky: the world's equirect on a dome round your head (in no stage, so it never scales; it turns with it)
   let sky = null;
   if (man.world && man.world.equirect) {
@@ -128,10 +190,24 @@ try {
     sky.frustumCulled = false; sky.renderOrder = -1;
     scene.add(sky);
   } else {
-    // no world.hdr (--no-world): the world's flat colour lights the set as Blender's would. A uniform world of radiance
-    // L gives a diffuse surface the irradiance pi L; three's ambient light adds its colour x intensity as irradiance
-    const bg = new THREE.Color().setRGB(...man.background, THREE.LinearSRGBColorSpace);
-    if (bg.r + bg.g + bg.b > 0) scene.add(new THREE.AmbientLight(bg, Math.PI));
+    // no world.hdr (--no-world): the world's flat colour (its mean radiance) as a uniform environment, which lights the
+    // set as a uniform world does in Blender: a diffuse surface gets the irradiance pi L (three's IBL irradiance is
+    // pi x the environment), and a glossy or metal one reflects L (an ambient light would light diffuse only and
+    // leave every metal black)
+    const [r, g, b] = man.background;
+    if (r + g + b > 0) {
+      // 256 x 128: three's PMREM sizes its cube from the image (width / 4) and needs at least 16 px (its LOD_MIN);
+      // a smaller image leaves it empty, and the set unlit by its world
+      const W = 256, H = 128, px = new Float32Array(W * H * 4);
+      for (let i = 0; i < W * H; i++) px.set([r, g, b, 1], i * 4);
+      const env = new THREE.DataTexture(px, W, H, THREE.RGBAFormat, THREE.FloatType);
+      env.mapping = THREE.EquirectangularReflectionMapping;
+      env.colorSpace = THREE.LinearSRGBColorSpace;
+      env.magFilter = env.minFilter = THREE.NearestFilter;      // (float textures need not filter on every GPU)
+      env.generateMipmaps = false;
+      env.needsUpdate = true;
+      scene.environment = env;
+    }
   }
   // the timeline: every clip from t = 0 (the first frame), looped; stills set it once
   const mixer = new THREE.AnimationMixer(gltf.scene);
@@ -152,8 +228,9 @@ try {
   const applyTracks = (t) => {
     if (!tracks || !tracks.props) return;
     for (const [name, tr] of Object.entries(tracks.props.lights || {})) {
-      const li = named(name); const L = li && (li.isLight ? li : li.children.find((c) => c.isLight));
-      if (L) { L.intensity = at(tr, 'intensity', t); L.color.setRGB(...at(tr, 'color', t), THREE.LinearSRGBColorSpace); }
+      let L = rects[name];                                     // an area light (the manifest's), else the GLB's light
+      if (!L) { const li = named(name); L = li && (li.isLight ? li : li.children.find((c) => c.isLight)); }
+      if (L) { setIntensity(L, at(tr, 'intensity', t)); L.color.setRGB(...at(tr, 'color', t), THREE.LinearSRGBColorSpace); }
     }
     for (const [name, tr] of Object.entries(tracks.props.emission || {})) if (mats[name]) mats[name].emissiveIntensity = at(tr, 'strength', t);
     for (const [name, tr] of Object.entries(tracks.props.visible || {})) {
@@ -248,10 +325,17 @@ try {
       veil.follow(H);
       if (sky) { sky.position.copy(H); sky.rotation.y = stage.rotation.y; }
       scene.environmentRotation.y = stage.rotation.y;
+      const s = relight();                                     // after the rig and the tracks have had their say
       if (STILL) {
         window.__shotInfo = { t, clips: gltf.animations.length, duration: +duration.toFixed(3), meshes: nMeshes,
           pageMaterials: nTagged, rect: (man.rect_lights || []).length, world: !!sky, tris, calls, camera: viaCamera,
-          mode: viaCamera ? 'camera' : rig.mode, toneMapping: man.view.tone_mapping };
+          mode: viaCamera ? 'camera' : rig.mode, toneMapping: man.view.tone_mapping, stageScale: s, shadows: SHADOWS,
+          environment: scene.environment ? (sky ? 'world.hdr' : 'uniform') : null, anisotropy: ANISO,
+          sunShadow: shadowed.filter((L) => L.isDirectionalLight).map((L) => { const c = L.shadow.camera;
+            return [c.left, c.right, c.bottom, c.top, c.near, c.far].map((x) => +x.toFixed(4)); }),
+          rectIntensity: Object.fromEntries(Object.entries(rects).map(([n, l]) => [n, +l.intensity.toFixed(4)])),
+          rectSize: Object.fromEntries(Object.entries(rects).map(([n, l]) => [n, [+l.width.toFixed(5), +l.height.toFixed(5)]])),
+          pointIntensity: Object.fromEntries([...falloff].map(([L, fo]) => [L.name, [+L.intensity.toPrecision(6), +fo.base.toPrecision(6)]])) };
         // three resets renderer.info as each animation frame starts (before onFrame): read the counts once it is drawn
         setTimeout(() => { tris = renderer.info.render.triangles; calls = renderer.info.render.drawCalls;
           Object.assign(window.__shotInfo, { tris, calls }); }, 0);

@@ -7,9 +7,12 @@
   dispose           every datablock a build made is removed
   plaza screen      set_canvas (a still), set_canvas(frames=...) (a keyed sequence), reset (keyed back to the sun)
   tickers           set_canvas
-  set_lights        a conductor's light added after the build is made to skip the city (light linking EXCLUDE)
+  set_lights        a light added after the build is made to skip the city (light linking EXCLUDE)
   set_focal         keyed
-  update            the rain's velocity from a camera, by finite difference between calls, keyed
+  update            the rain's velocity from a camera, by finite difference between calls, keyed; a still's controls
+  animate           on your own clock: state(t) controls (the focal light on the dive's focal point, an object to
+                    follow, turn_down, a flash as a step), the rain along the camera that renders each frame, the
+                    clock; make_cameras (the dive; the hole's moves), the standalone hole's reel and clock
 Prints PASS / FAIL.
 """
 import sys
@@ -99,9 +102,9 @@ check('plaza set_canvas(frames=...): a keyed sequence', len(seq) == 1 and seq[0]
 pz['reset'](frame=800)
 check('plaza reset (keyed): the sun is back', nodes['custom'].outputs[0].default_value == 0.0 and
       pz['material'].node_tree.animation_data is not None)
-# set_lights: a conductor's key light added after the build skips the city
-key_d = bpy.data.lights.new('conductor_key', 'SPOT')
-key = bpy.data.objects.new('conductor_key', key_d)
+# set_lights: a key light added after the build skips the city
+key_d = bpy.data.lights.new('piece_key', 'SPOT')
+key = bpy.data.objects.new('piece_key', key_d)
 scene.collection.objects.link(key)
 P['set_lights']([P['lights']['moon']])
 rc = key.light_linking.receiver_collection
@@ -110,7 +113,7 @@ if rc is not None:
     for i, cc in enumerate(rc.children):
         if cc == P['collection']:
             st = rc.collection_children[i].light_linking.link_state
-check('set_lights: the conductor\'s light excludes the city', st == 'EXCLUDE', str(st))
+check('set_lights: a light added later excludes the city', st == 'EXCLUDE', str(st))
 # set_focal keyed, update with a camera (finite difference) keyed
 P['set_focal']((10.0, -5.0, 20.0), gain=2.0, frame=50)
 U = P['uniforms']
@@ -123,7 +126,7 @@ check('update: the rain\'s velocity from the camera, keyed', abs(U['cam_vel'][1]
 # dispose
 city['dispose']()
 n_after = {k: len(getattr(bpy.data, k)) for k in n_before}
-mine = {'objects': 2}                           # this test's camera and the conductor's light
+mine = {'objects': 2}                           # this test's camera and its key light
 leak = {k: n_after[k] - n_before[k] - mine.get(k, 0) for k in n_before if n_after[k] - n_before[k] - mine.get(k, 0)}
 check('dispose removes what the build made', not leak, f'left: {leak}')
 
@@ -185,32 +188,71 @@ dc = cams.get('dive')
 n_cam_keys = sum(1 for k in hctx.keys if k[0] == (dc.name if dc else '') and k[1] == 'location')
 check('make_cameras(): the dive, keyed through ctx.key, cut at the start', dc is not None and n_cam_keys == 980 and
       bool(hctx.cuts) and hctx.cuts[0] == (scene.frame_start, dc.name), f'{n_cam_keys} location keys, cuts {hctx.cuts[:2]}')
-a0, a1 = cs.animate(range(1, 50))
-scene.frame_set(25)
-dg = bpy.context.evaluated_depsgraph_get()
-Ue = U.tree.evaluated_get(dg).nodes
-t25 = Ue['u_time'].outputs[0].default_value
-fp = [Ue['u_focal_pos_' + c].outputs[0].default_value for c in 'xyz']
-check('animate(dive): the clock and the focal light keyed as the conductor drove them',
-      abs(t25 - 1.0) < 1e-4 and max(abs(a - b) for a, b in zip(fp, C.dive_focal(1.0))) < 1e-3, f't {t25:.4f}, focal {fp}')
-dcp = dc.evaluated_get(dg).matrix_world.translation
+a0, a1 = cs.animate(lambda t: {'focal': C.dive_focal(t)}, frames=(1, 49))
+
+
+def uvals(frame, *names):
+    scene.frame_set(frame)
+    nodes = U.tree.evaluated_get(bpy.context.evaluated_depsgraph_get()).nodes
+    out = []
+    for n in names:
+        if n in KIT.U_VECTORS:
+            out.append(tuple(nodes[f'u_{n}_{c}'].outputs[0].default_value for c in KIT.U_VECTORS[n][1]))
+        else:
+            out.append(nodes['u_' + n].outputs[0].default_value)
+    return out if len(out) > 1 else out[0]
+
+
+t25, fp, cv = uvals(25, 'time', 'focal_pos', 'cam_vel')
+check('animate(state, frames): the clock and the focal light on your own clock (the dive\'s focal point)',
+      (a0, a1) == (1, 49) and abs(t25 - 1.0) < 1e-4 and max(abs(a - b) for a, b in zip(fp, C.dive_focal(1.0))) < 1e-3,
+      f't {t25:.4f}, focal {tuple(round(v, 3) for v in fp)}')
+cv_want = KIT.cam_velocity(C.dive_cam, 1.0)
+cv_err = max(abs(a - b) for a, b in zip(cv, cv_want)) / max(1e-6, max(abs(v) for v in cv_want))
+check('animate: the rain streaks along the camera that renders the frame (the keyed dive, by its marker)',
+      cv_err < 0.03, f'{tuple(round(v, 2) for v in cv)} vs {tuple(round(v, 2) for v in cv_want)}')
+dcp = dc.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world.translation
 check('the dive camera at frame 25 = dive_cam(1.0)', max(abs(a - b) for a, b in zip(dcp, C.dive_cam(1.0)['pos'])) < 1e-3)
-F0 = 3000                                    # the outro: song 295 s at frame 3000
-cs.animate(range(F0, F0 + 24 * 30), t0=295.0, section='hole')
-fo = F0 + int(round((318.5 - 295.0) * 24))
-scene.frame_set(fo)
-dg = bpy.context.evaluated_depsgraph_get()
-Ue = U.tree.evaluated_get(dg).nodes
-pw = Ue['u_power'].outputs[0].default_value
-want_pw = 1 - 0.85 * KIT.smooth((318.5 - 300) / 24)
-fpo = [Ue['u_focal_pos_' + c].outputs[0].default_value for c in 'xyz']
-check('animate(outro): the turn-down keyed (power 1 - 0.85 smooth((t - 300) / 24)), focal on her chest',
+F0 = 3000                                    # the lights going out one by one, 5 s into a 30 s stretch
+cs.animate(lambda t: {'power': C.turn_down(t, 5.0, 24.0), 'focal': H.chest()}, frames=(F0, F0 + 24 * 30))
+pw, fpo = uvals(F0 + int(round(23.5 * 24)), 'power', 'focal_pos')
+want_pw = 1 - 0.85 * KIT.smooth((23.5 - 5.0) / 24)
+check('animate: turn_down(t, start, length) keyed (1 - 0.85 smooth((t - start) / length)), the focal held on chest()',
       abs(pw - want_pw) < 2e-3 and max(abs(a - b) for a, b in zip(fpo, H.chest())) < 1e-4, f'{pw:.4f} vs {want_pw:.4f}')
+hold = uvals(F0 + 60, 'power')
+n_pw = sum(1 for k in hctx.keys if k[1] == 'nodes["u_power"].outputs[0].default_value' and F0 <= k[2] <= F0 + 720)
+check('animate: a held value is not ramped (power exactly 1 before the turn-down) and holds take two keys',
+      hold == 1.0 and n_pw < 24 * 24 + 8, f'power {hold} at 2.5 s, {n_pw} power keys over 721 frames')
+cs.animate(lambda t: {'flash': 1.0 if 1.0 <= t < 1.125 else 0.0}, frames=(4000, 4048))
+fl = [round(uvals(f, 'flash'), 4) for f in (4012, 4023, 4024, 4026, 4027, 4040)]
+check('animate: a step (a lightning flash) stays a step', fl == [0.0, 0.0, 1.0, 1.0, 0.0, 0.0], str(fl))
+mover = bpy.data.objects.new('focal_mover', None)
+scene.collection.objects.link(mover)
+mover.location = (0.0, 0.0, 20.0)
+mover.keyframe_insert('location', frame=4500)
+mover.location = (24.0, 0.0, 20.0)
+mover.keyframe_insert('location', frame=4524)
+KIT._set_interp(mover, 'location', 4500, 'LINEAR')
+KIT._set_interp(mover, 'location', 4524, 'LINEAR')
+cs.animate({'focal': mover}, frames=(4500, 4524), camera=False)
+fm = uvals(4512, 'focal_pos')
+check('animate: the focal light follows an object', abs(fm[0] - 12.0) < 1e-3 and abs(fm[2] - 20.0) < 1e-3, str(fm))
+try:
+    cs.animate({'sparkle': 1.0}, frames=(4600, 4601))
+    check('animate: an unknown control is refused', False)
+except KeyError as e:
+    check('animate: an unknown control is refused', 'sparkle' in str(e))
+cs.update(2.0, {'power': 0.5, 'focal': (1.0, 2.0, 3.0), 'focal_col': '#ff8800'})
+check('update(t, state): a still sets the controls the state names', abs(U['power'] - 0.5) < 1e-6 and
+      max(abs(a - b) for a, b in zip(U['focal_pos'], (1, 2, 3))) < 1e-6 and
+      abs(U['focal_col'][1] - KIT.srgb_lin('#ff8800')[1]) < 1e-6)
+U['power'] = 1.0
+bpy.data.objects.remove(mover)
 shots = cs.make_cameras(shots=[('spiral', 5000, 5288), ('close_sing', 5289, 5529)])
 scene.frame_set(5000 + 144)
 dg = bpy.context.evaluated_depsgraph_get()
 sp = shots['spiral'].evaluated_get(dg).matrix_world.translation
-check('make_cameras(shots): chorus cameras keyed and cut', set(shots) == {'spiral', 'closeSing'} and
+check('make_cameras(shots): the hole\'s camera moves keyed and cut', set(shots) == {'spiral', 'closeSing'} and
       max(abs(a - b) for a, b in zip(sp, H.hole_cam('spiral', 6.0)['pos'])) < 1e-3 and
       (5000, shots['spiral'].name) in hctx.cuts and (5289, shots['closeSing'].name) in hctx.cuts, str(hctx.cuts))
 pz = cs.parts.plaza_screen
@@ -226,10 +268,13 @@ check('set_focal(pos, {gain, radius}) as city.js', abs(U['focal_gain'] - 0.6) < 
 cs.dispose()
 hs = SETS.build('unknown_force.hole', hctx)
 reel = hs.make_cameras()
-check('the standalone hole: make_cameras() keys all eight chorus shots back to back', len(reel) == 8 and
+check('the standalone hole: make_cameras() keys all eight camera moves back to back', len(reel) == 8 and
       list(reel) == H.HOLE_CAMS, ', '.join(reel))
-ha = hs.animate(range(100, 130))
-check('the standalone hole: animate() keys its clock (song 80 s on)', ha == (100, 129))
+ha = hs.animate(range(100, 130))                 # frames first, as the other sets take them
+U = hs.parts.uniforms
+t_h = uvals(124, 'time')
+check('the standalone hole: animate(frames) keys its own clock (0 s at the first frame)', ha == (100, 129) and
+      abs(t_h - 1.0) < 1e-4, f'{ha}, t {t_h:.4f} at frame 124')
 hs.dispose()
 fails = [n for n, ok in results if not ok]
 print(f'[uf-options] {len(results) - len(fails)}/{len(results)} passed' + (f'; FAILED: {fails}' if fails else ''))

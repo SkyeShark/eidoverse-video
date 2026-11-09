@@ -115,9 +115,20 @@ C.check('the lights come back golden (u 31.5)', root['golden'] > 0.95 and F.pend
         f"golden {root['golden']:.3f}, pendant {F.pend_spots[0][0].data.energy:.0f} W")
 at(1.0)
 vis_b = not F.bridge.objects[0].hide_render and F.room_objects[0].hide_render
+# (the haze is made after the section's keys, by post.apply; post.animate keys its density to 0 on the bridge, the
+# JS depth_fog's opacity 0 there)
+shown_on_bridge = [o.name for o in F.room_objects if not o.hide_render and o.name != 'funeral:haze']
 at(5.0)
 vis_r = F.bridge.objects[0].hide_render and not F.room_objects[0].hide_render
+hidden_in_room = [o.name for o in F.room_objects if o.hide_render]
 C.check('the bridge shows for bars 0-1, the room after', vis_b and vis_r)
+# every part of the room follows the keyed steps, the raven too (its clip player clears the active action of every
+# object under it: played after the keys, it dropped the raven's steps and left it hidden for the whole film)
+raven = F.parts.get('raven')
+C.check('every room part (the raven too) is keyed: hidden on the bridge, shown in the room',
+        not shown_on_bridge and not hidden_in_room and (raven is None or not raven.hide_render),
+        f'{len(F.room_objects)} room objects; shown on the bridge {shown_on_bridge[:4]}, hidden in the room '
+        f'{hidden_in_room[:4]}')
 # the crowd's arms: hanging in the vigil, overhead at ERUPT (the evaluated Geometry Nodes)
 crowd = F.parts.get('crowd')
 if crowd is not None:
@@ -169,6 +180,13 @@ C.check('material sides as the JS (enamel, brick FrontSide; lace, petal DoubleSi
         and sides.get('funeral:brick') is True and sides.get('funeral:lace') is False and sides.get('funeral:petal') is False,
         str(sides))
 
+# a close look at the raven on Opus 4's shoulder (no film shot cuts to it): it must show, and idle, in the saved file
+from eidoblend.look import camera as LC                     # noqa: E402
+rp = F.anchors['raven_perch']
+raven_cam = LC.make_camera('funeral:raven_cam', fov=30)
+raven_cam.matrix_world = LC.look_matrix(F.group.matrix_world @ FU.V(rp[0] + 1.25, rp[1] + 0.3, rp[2] + 1.55),
+                                        F.group.matrix_world @ FU.V(rp[0], rp[1] + 0.05, rp[2]))
+
 blend = os.path.join(OUT, 'funeral.blend')
 bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
 C.check('saved .blend', os.path.isfile(blend), f'{os.path.getsize(blend) / 1e6:.1f} MB')
@@ -180,10 +198,17 @@ stills = [(f'shot{i:02d}_bar{s[0]:02d}', 0.5 * (s[0] + s[1]) * FU.BAR) for i, s 
 stills += [('veil_in', B['bridge_end'] - 0.25), ('breaker', B['breaker'] + 0.3), ('line2', B['lines'][1][2] - 0.4),
            ('erupt', B['erupt'] + 0.35)]
 stills = [(n, u, C.frame_of(u, U0, F0, FPS)) for n, u in stills]
+stills.append(('raven', 5.5, C.frame_of(5.5, U0, F0, FPS), raven_cam.name))     # through its own camera
 C.write_stills(OUT, stills)
 if 'no-render' not in A['flags']:
-    for name, u, f in C.select_stills(stills, A.get('only')):
+    # the film's shots first (their marker cameras), then the stills through a camera of their own, markers gone
+    for s in sorted(C.select_stills(stills, A.get('only')), key=lambda s: len(s) > 3):
+        name, u, f = s[:3]
         path = os.path.join(OUT, f'funeral_{name}.png')
+        if len(s) > 3:
+            for mk in list(sc.timeline_markers):
+                sc.timeline_markers.remove(mk)
+            sc.camera = bpy.data.objects[s[3]]
         ok, dt = C.render_still(sc, f, path)
         st = C.image_stats(path) if ok else {'mean': 0, 'max': 0, 'magenta': 1}
         C.check(f'still {name} (u {u:.2f}, frame {f})', ok and st['magenta'] < 0.001 and st['max'] > 0.05,

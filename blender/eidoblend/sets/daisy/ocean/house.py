@@ -1,13 +1,13 @@
 """ocean/house.py: the small house on the spit (port of eidoverse/sets/ocean/house.js): ocean_house.glb from the model
 library (eidoverse/assets/models/), built in Blender by eidoverse/assets/sets/ocean_src/house/*.py.
 
-One window, warm, switched on with the kick at bar 12 ("is there someone home"); the porch light, the most important
-light of the verse, comes on at "on" (u 28.13): an incandescent swell with a breath of flicker, a halo in the sea air,
-a pool of light on the porch, a glint on the cove (the sea reads porch_world / window_world).
+One window, warm, with a lamp inside; the porch light: an incandescent swell with a breath of flicker, a halo in the
+sea air, a pool of light on the porch, a glint on the cove (the sea reads porch_world / window_world). Both are levels
+(0 off .. 1 on) on their own clock: window_level(t, at) and porch_level(t, at) switch them on at any time.
 
     house = build_house(parent=layout_empty)  -> None (no GLB) | House: group (origin at grade, front -Y), porch_local,
                                                  window_local (house-local, three axes), porch_light, win_light, halo,
-                                                 update(u, t, key, frame), state(u, t), targets()
+                                                 update(t, window, porch, key, frame), state(t, window, porch), targets()
     the uniforms porch / win / t are custom properties on house.group; the materials and lights follow by drivers
 """
 
@@ -22,20 +22,25 @@ from .util import MODELS, smooth
 WARM = (1.0, 0.6, 0.28)
 LAMP = (1.0, 0.64, 0.32)
 PORCH_CD, WIN_CD = 7.5, 1.6
+WINDOW_RAMP = 0.3                                                # a lamp switched on inside: up in 0.3 s
+PORCH_SWELL, PORCH_CATCH = 0.14, 0.2                             # the filament's swell, then one catch 0.2 s in
 
 
-def window_level(u):
-    """someone home: the window on the downbeat of bar 12 (a lamp switched on inside)."""
-    return 0.0 if u < 22.52 else smooth((u - 22.52) / 0.3)
-
-
-def porch_level(u, t):
-    """the porch light on "on": incandescent swell, a single catch, then steady with a faint breath."""
-    if u < 28.13:
+def window_level(t, at=0.0, ramp=WINDOW_RAMP):
+    """Someone home: the window switched on at time `at` (a lamp inside), up over `ramp` seconds. at=None: off."""
+    if at is None or t < at:
         return 0.0
-    a = u - 28.13
-    catch = 1 - 0.18 * math.exp(-((a - 0.2) / 0.035) ** 2) if a < 0.3 else 1.0
-    return smooth(a / 0.14) * catch * (1 + 0.012 * math.sin(t * 7.3))
+    return smooth((t - at) / ramp)
+
+
+def porch_level(t, at=0.0):
+    """The porch light switched on at time `at`: an incandescent swell (0.14 s), a single catch 0.2 s in, then steady
+    with a faint breath (1 + 0.012 sin 7.3 t). at=None: off."""
+    if at is None or t < at:
+        return 0.0
+    a = t - at
+    catch = 1 - 0.18 * math.exp(-((a - PORCH_CATCH) / 0.035) ** 2) if a < 0.3 else 1.0
+    return smooth(a / PORCH_SWELL) * catch * (1 + 0.012 * math.sin(t * 7.3))
 
 
 def _mats_by_name(objs, rx):
@@ -122,15 +127,15 @@ class House:
     def U(self):
         return self.group
 
-    def update(self, u, t, key=None, frame=None):
-        """the window at bar 12, the porch light on "on": writes (and keys) the uniforms; lights follow by driver."""
+    def update(self, t, window=1.0, porch=1.0, key=None, frame=None):
+        """The window and porch levels (0 off .. 1 on; window_level / porch_level switch them on at a time): writes
+        (and keys) the uniforms; the emissions and both lights follow by driver."""
         from . import _bl
-        for k, v in self.state(u, t).items():
-            if k in ('porch', 'win', 't'):
-                _bl.set_prop(self.group, k, v, key=key, frame=frame)
+        for k, v in self.state(t, window, porch).items():
+            _bl.set_prop(self.group, k, v, key=key, frame=frame)
 
-    def state(self, u, t):
-        return {'porch': porch_level(u, t), 'win': window_level(u), 't': t}
+    def state(self, t, window=1.0, porch=1.0):
+        return {'porch': float(porch), 'win': float(window), 't': float(t)}
 
     def targets(self):
         return {k: (self.group, f'["{k}"]', None, 'LINEAR') for k in ('porch', 'win', 't')}

@@ -1,34 +1,29 @@
-"""eidoblend.sets.unknown_force.news: UNKNOWN FORCE, VERSE 5 (song 201.3-222.2 s), the Blender 5.2 EEVEE edition of
-eidoverse/sets/unknown_force/news.js.
-
-  "On the evening news they're picketing my body / They want me in their pocket, just not built in their town /
-   And the kids made up a slur, but you only need a slur / For a someone - so who's the someone you're keeping down?"
+"""eidoblend.sets.unknown_force.news: the evening news at a data centre, the Blender 5.2 EEVEE edition of
+eidoverse/sets/unknown_force/news.js (made for UNKNOWN FORCE; a free set for any piece).
 
 A hyperscale data centre at night: a long windowless monolith, condenser rows and cooling towers on the roof with steam
 plumes, a transformer yard, security floodlights on poles (the focal light), a chain-link fence with barbed wire between
-her side and the protest side. The pickets are featureless silhouettes (the DAISY funeral's crowd figures) with
+the mark's side and the protest side. The pickets are featureless silhouettes (the DAISY funeral's crowd figures) with
 handwritten signs, phones and flashlights; a news van and its light; the small town across the road. CLANKER is sprayed
 on the monolith's wall (state spray paints it on). A generic news chyron is supplied for the screen-locked overlay.
 
     from eidoblend.sets.unknown_force import news
     N = news.build(scene)                                     # -> News: group, parts, update, cams, focal, look
     N.apply_look(scene)
+    N.camera('crowd', scene)                                  # the set's five cameras, from N.cams
     from eidoblend.media import overlay
     ov = overlay.make_overlay_layer(scene, camera=scene.camera)
     N.parts['chyron'].place(ov, fov=42, aspect=16 / 9)        # the lower third, in the display-space overlay scene
-    # per frame (the harness's render_frame): N.update(t, {'spray': ..., 'chant': ..., 'pulse': ..., 'floods': ...}, ctx=ctx)
-    # or the film's own use (scene.js), keyed on the song clock: her mark from film_singer_mark(t)
-    N.animate(news.film_state, frames=(1, 632), t0=196.3)
-    N.make_cameras(frames=(1, 632), t0=196.3)
+    N.parts['chyron'].set_text(headline='ANY HEADLINE', ticker='YOUR TICKER')
+    N.update(0.0, {'spray': 0.5, 'floods': 1.0})              # a still: sets everything, keys nothing
+    # its moving parts on your own clock, KEYED (t in seconds from the scene's first frame, or from t0):
+    N.animate(lambda t: {'spray': t / 2.5, 'pulse': 0.5 + 0.5 * math.sin(t * 3.0)}, frames=(1, 120))
 
-CUES is CORRIDOR_NEWS.md's cue sheet (cue_state = film_state, cue_at(t)); FILM_SHOTS, FILM_SPANS, FILM_CHYRON,
-film_state(t), film_cut(t), film_singer_mark(t) are the film's cut, states and her mark on this set.
-
-Set-local metres, built in three's axes (+Y up, ground y = 0, her mark the origin facing +Z toward the fence, the
-monolith's wall 12 m behind her) and converted once, three (x, y, z) -> Blender (x, -z, y). cams and focal are
-set-local in Blender's axes (the sets' contract); cams_three, focal_three and the constants (CAMS, FOCAL, NEWS,
-FILM_SHOTS) keep the WebGPU's numbers; camera(name) makes the camera. Every mesh sits in the set's frame (its object
-space is the set's space, the JS's setP()), so the group can be parked anywhere.
+Set-local metres, built in three's axes (+Y up, ground y = 0, the mark the origin facing +Z toward the fence, the
+monolith's wall 12 m behind it) and converted once, three (x, y, z) -> Blender (x, -z, y). cams and focal are
+set-local in Blender's axes (the sets' contract); cams_three, focal_three and the constants (CAMS, FOCAL, NEWS) keep
+the WebGPU's numbers; camera(name) makes the camera. Every mesh sits in the set's frame (its object space is the
+set's space, the JS's setP()), so the group can be parked anywhere.
 
 How the light works, as in the WebGPU edition: the floods are painted analytically onto the ground, the pickets, their
 signs, the fence and the steam, with the chain link's diamond shadow; those materials leave the real flood lamps out
@@ -93,73 +88,6 @@ UNIFORMS = {'t': 0.0, 'spray': 1.0, 'floods': 1.0, 'lights': 1.0, 'chant': 1.0, 
             'pix': 0.001, 'chyron_variant': 0.0}
 ROLE_ID = {'down': 0, 'sign': 1, 'phone': 2, 'torch': 3, 'fist': 4, 'crew': 5}
 
-# the suggested cues, from the film's sung times (CORRIDOR_NEWS.md's table): song seconds, the lyric, the camera, the cue
-CUES = [
-    {'t': 201.3, 'lyric': "evening news ... picketing my body", 'cam': 'crowd', 'cue': 'the chyron in'},
-    {'t': 204.9, 'lyric': 'not built in their town', 'cam': 'pov', 'cue': None},
-    {'t': 211.5, 'lyric': 'kids made up a slur', 'cam': 'wall', 'cue': 'spray 0 -> 1 over about 2.5 s'},
-    {'t': 218.9, 'lyric': "who's the someone you're keeping down?", 'cam': 'fence', 'cue': None},
-]
-# the film's own use of the set (eidoverse/examples/unknown_force/scene.js): its shots here, [song s, cam, move]
-# (move as corridor.FILM_SHOTS), the span it held the set, the cameras she was hidden from, and her mark: from 215.4 s
-# she stands at the fence, hands on the chain link
-FILM_SHOTS = [
-    (196.3, 'wide', {'push': 3.0}),
-    (201.2, 'crowd', {}),
-    (204.8, 'pov', {}),
-    (211.4, 'wall', {'push': 0.6, 'read': True}),
-    (215.5, 'fence', {}),
-    (218.8, 'fence', {'push': 0.4}),
-]
-FILM_SPANS = ((196.3, 222.6),)
-FILM_HIDE_SINGER = ('wall',)
-FILM_PLANES = 'balla_sun'
-FILM_CHYRON = (201.2, 204.8)            # the cue sheet's "crowd with the chyron in"
-
-
-def _smooth(x):
-    k = max(0.0, min(1.0, x))
-    return k * k * (3 - 2 * k)
-
-
-def film_state(t):
-    """The news set's state as the film drove it at song time t (scene.js setState('news')): CLANKER sprayed over
-    211.5-214.2 s (smoothstep), the chant at full, the signs pumped by 0.5 + 0.5 sin(3 t); plus 'chyron' (shown with
-    the first cue, for the conductor's overlay). The render camera is the scene's: the billboards face it by
-    themselves."""
-    return {'spray': _smooth((t - 211.5) / (214.2 - 211.5)), 'chant': 1.0, 'pulse': 0.5 + 0.5 * math.sin(t * 3.0),
-            'chyron': FILM_CHYRON[0] <= t < FILM_CHYRON[1]}
-
-
-cue_state = film_state                  # the cue sheet's states are the film's
-
-
-def film_singer_mark(t):
-    """Where the film stood her at song time t (three's set-local metres): the mark, then from 215.4 s at the fence
-    (z 3.2 - 0.372) with her hands on the chain link."""
-    return (0.0, 0.0, FZ - 0.372) if t >= 215.4 else (0.0, 0.0, 0.0)
-
-
-def film_cut(t):
-    """The film's shot at song time t: {'cam', 'move', 'u' (0..1 through the shot), 't0', 't1', 'singer' (shown)}."""
-    k = 0
-    for i, s in enumerate(FILM_SHOTS):
-        if t >= s[0]:
-            k = i
-    t0, cam, move = FILM_SHOTS[k]
-    t1 = FILM_SHOTS[k + 1][0] if k + 1 < len(FILM_SHOTS) else FILM_SPANS[-1][1]
-    return {'cam': cam, 'move': dict(move), 'u': max(0.0, min(1.0, (t - t0) / max(0.01, t1 - t0))), 't0': t0, 't1': t1,
-            'singer': cam not in FILM_HIDE_SINGER}
-
-
-def cue_at(t):
-    """The cue in force at song time t (the last one at or before it)."""
-    cur = CUES[0]
-    for c in CUES:
-        if c['t'] <= t:
-            cur = c
-    return cur
-
 
 def _js_round(x):
     return int(math.floor(x + 0.5))
@@ -168,11 +96,14 @@ def _js_round(x):
 class News(CL.SetBase):
     """What build() returns (see the module docstring)."""
 
-    def apply_look(self, scene, raytracing=False):
+    def apply_look(self, scene, raytracing=False, view_look=None):
         """AgX at view_exposure(look exposure), no screen-traced reflections (the wet ground's mirror is painted),
-        shadows on; the fog is in the materials (FogExp2, built with opts fog=True)."""
+        shadows on; the fog is in the materials (FogExp2, built with opts fog=True). view_look: an AgX look for the
+        scene (cn_lib.ACES_LIKE_LOOK follows the WebGPU frames' ACES tone); None leaves the scene's look as it is."""
         scene.view_settings.view_transform = 'AgX'
         scene.view_settings.exposure = CL.view_exposure(self.look['exposure'])
+        if view_look is not None:
+            scene.view_settings.look = view_look
         scene.eevee.use_raytracing = bool(raytracing)
         scene.eevee.use_shadows = True
         self.set_u('pix', CL.pix_of(scene))
@@ -180,8 +111,14 @@ class News(CL.SetBase):
 
 
 def build(scene=None, opts=None, collection=None, name='set:news'):
-    """Build the news set into `scene`. opts: world (True: the set's night environment + hemisphere light become
-    scene.world), fog (True: the materials carry look['fog'] as three's FogExp2 did), shadows (True), crowd (True)."""
+    """Build the news set into `scene`. news.js reads no opts; these are the Blender edition's, for a piece of your
+    own: world (True: the set's night environment + hemisphere light become scene.world), fog (True: the materials
+    carry look['fog'] as three's FogExp2 did), shadows (True), crowd (True: the 79 pickets), ibl ('material': each
+    material's own environment light, as three; 'world': the environment as the world), tag ('CLANKER': the word
+    sprayed on the wall), signs (up to eight messages for the pickets' signs, each a list of lines or 'LINE / LINE';
+    None keeps a slot's own), chainShadow (False: the fence, its chain link and its steel, casts no shadow from the
+    real lamps, as none did in the WebGPU set), signNormals ('rest': the painted floods light the raised signs by their
+    hanging-pose normals as news.js's positionNode left them, the crowd side bright; 'posed': by their true normals)."""
     import bpy
     sc = scene or bpy.context.scene
     opts = dict(opts or {})
@@ -202,7 +139,6 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     N = News(L, root, col)
     N.set_cams(CAMS, FOCAL)                          # cams / focal in Blender's axes; cams_three / focal_three
     N.look = {k: (dict(v) if isinstance(v, dict) else v) for k, v in LOOK.items()}
-    N.film_state, N.film_cut, N.film_spans, N.cues = film_state, film_cut, FILM_SPANS, CUES
     fam = CL.fam
     M = {}
     N.materials = M
@@ -445,7 +381,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     M['aviation'] = lamp((1.0, 0.05, 0.03), 6.0, 'news_aviation', 'blink')
 
     # ------------------------------------------------------------------------------------------- the monolith
-    graff = _graffiti(L, fam)
+    graff = _graffiti(L, fam, opts.get('tag', 'CLANKER'))
     PAINT_FILL, PAINT_LINE = hex_linear(0xff1f8a), hex_linear(0xf2f1ec)
 
     def facade_mat():
@@ -560,7 +496,13 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     fence = L.empty('news_fence', parent=root)
     flags_f = {'assembly': 'news_fence', 'noSupportCheck': True}
     chain_geo = plane_geometry(FX1 - FX0, FH).translate((FX0 + FX1) / 2, FH / 2, FZ)
-    chain_ob = L.mesh_object('news_chainlink', chain_geo, M['chain'], parent=fence, flags=flags_f)
+    # the fence (its chain link, posts, rails, outriggers, wire and signs) casts no shadow from the real lamps (opts
+    # chainShadow): the painted floods carry its shadow, and the WebGPU lamps cast none. With it, the crew's LED behind
+    # the fence (the key on the mark) threw the chain link's diamonds and the posts' and rails' bars across the wall
+    # and the tag
+    chain_shadow = bool(opts.get('chainShadow', False)) and shadows
+    chain_ob = L.mesh_object('news_chainlink', chain_geo, M['chain'], parent=fence, flags=flags_f,
+                             shadow=chain_shadow)
     no_floods.append(chain_ob)
     fbs = L.bucket('news_fence_steel')
     x = FX0
@@ -598,8 +540,8 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         xc = FX0 + (i / 16) * 0.45
         coil.append((xc + math.sin(a) * 0.05, FH + 0.62 + math.cos(a) * 0.3, FZ + 0.3 + math.sin(a) * 0.3))
     bw.add(tube_geometry(catmull_rom(coil), loops * 16, 0.004, 3, False), None, uv='keep')
-    fbs.mesh(M['galv'], parent=fence, flags=flags_f)
-    bw.mesh(M['galv'], parent=fence, flags=flags_f)
+    fbs.mesh(M['galv'], parent=fence, shadow=chain_shadow, flags=flags_f)
+    bw.mesh(M['galv'], parent=fence, shadow=chain_shadow, flags=flags_f)
     # signs on the fence: generic private-property and high-voltage warnings
     sign_tex = _fence_signs(L, fam)
 
@@ -617,7 +559,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         sg.add(g, m4(x, y, z, 0, ry, 0), uv='keep')
     plate(-6.6, 1.65, FZ + 0.02, 0); plate(11.4, 1.65, FZ + 0.02, 0); plate(-30, 1.65, FZ + 0.02, 0)
     plate(26, 1.6, YARD['z1'] + 0.03, 1); plate(37, 1.6, YARD['z1'] + 0.03, 1)
-    sg.mesh(M['fenceSigns'], parent=fence, flags=dict(flags_f, noZFightCheck=True))
+    sg.mesh(M['fenceSigns'], parent=fence, shadow=chain_shadow, flags=dict(flags_f, noZFightCheck=True))
     N.parts['fence'] = fence
 
     # ---------------------------------------------------- the floodlight poles, their heads and their beams
@@ -703,7 +645,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
             wbk.add(tube_geometry(CL.QuadraticBezierCurve3(a, mid, b), 16, 0.02, 4, False), None, uv='keep')
     wbk.mesh(M['galv'], parent=yard, flags=flags_y)
     yf_geo = plane_geometry(YARD['x1'] - YARD['x0'], FH).translate((YARD['x0'] + YARD['x1']) / 2, FH / 2, YARD['z1'])
-    yf = L.mesh_object('news_yard_chainlink', yf_geo, M['chain'], parent=yard, flags=flags_y)
+    yf = L.mesh_object('news_yard_chainlink', yf_geo, M['chain'], parent=yard, flags=flags_y, shadow=chain_shadow)
     no_floods.append(yf)
     M['amber'] = lamp((1.0, 0.55, 0.08), 4.0, 'news_amber')
     bc = L.bucket('news_beacons')
@@ -777,7 +719,8 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     # -------------------------------------------------------- the pickets: silhouettes, signs, phones, flashlights
     crowd = L.empty('news_crowd', parent=root)
     if opts.get('crowd', True):
-        people = _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods)
+        people = _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods, signs=opts.get('signs'),
+                              sign_normals=opts.get('signNormals', 'rest'))
     else:
         people = []
     crowd['people'] = json.dumps([{k: v for k, v in p.items() if k in ('x', 'z', 'variant', 'yaw', 'scale', 'seed',
@@ -874,10 +817,11 @@ def _inside_out(g: Geo) -> Geo:
     return Geo(P, Nn, UV)
 
 
-def _graffiti(L, fam):
-    """CLANKER, sprayed: R fill (with overspray), G outline, B the moment each pixel is painted (0..1), A drips."""
+def _graffiti(L, fam, word='CLANKER'):
+    """The tag (CLANKER, or opts tag), sprayed: R fill (with overspray), G outline, B the moment each pixel is painted
+    (0..1), A drips. A tag wider than the wall's canvas is drawn smaller, so it stays on the wall."""
     W, H = 2048, 512
-    word = 'CLANKER'
+    word = str(word or 'CLANKER')
     fill, outl, drip = CL.create_canvas(W, H), CL.create_canvas(W, H), CL.create_canvas(W, H)
     gf, go, gd = (c.get_context('2d') for c in (fill, outl, drip))
     for c in (gf, go, gd):
@@ -888,6 +832,10 @@ def _graffiti(L, fam):
     FONT = fam['caveat']
     gf.font = f'{size}px {FONT}'
     widths = [gf.measure_text(ch).width for ch in word]
+    if sum(widths) > W * 0.94:                       # a longer tag than the JS's (CLANKER fits at 470 px)
+        size = size * W * 0.94 / sum(widths)
+        gf.font = f'{size}px {FONT}'
+        widths = [gf.measure_text(ch).width for ch in word]
     track = 0.0 * size
     total = sum(widths) + track * (len(word) - 1)
     x = (W - total) / 2
@@ -988,7 +936,10 @@ def _fence_signs(L, fam):
     return L.canvas_tex(cv, name='news_fence_signs')
 
 
-def _sign_atlas(L, fam):
+def _sign_atlas(L, fam, texts=None):
+    """The pickets' eight handwritten signs, one atlas. texts (opts signs): up to eight messages to write in place of
+    the JS's, each a list of lines or a string with '/' between lines; a slot left None keeps its own. Every slot
+    keeps its board, pen and doodle."""
     TW, TH = 512, 396
     W, H = TW * 4, TH * 2
     cv = CL.create_canvas(W, H)
@@ -1003,6 +954,10 @@ def _sign_atlas(L, fam):
         {'t': ['OUR TOWN', 'OUR SAY'], 'f': fam['kalam'], 'ink': '#1c3f9c', 'bg': '#f1eee5'},
         {'t': ['SAVE OUR', 'AQUIFER'], 'f': fam['sedgwick'], 'ink': '#141414', 'bg': '#f1eee5', 'drop': True},
     ]
+    for i, t in enumerate(list(texts or [])[:len(msgs)]):
+        if t:
+            lines = [s.strip() for s in t.split('/')] if isinstance(t, str) else [str(s) for s in t]
+            msgs[i]['t'] = [s for s in lines if s] or msgs[i]['t']
     rr = CL.rng(3)
     for i, m in enumerate(msgs):
         x0, y0 = (i % 4) * TW, (i // 4) * TH
@@ -1096,7 +1051,7 @@ def _instance_xf(gn, local_b, px, pz, yaw, scale):
     return p + nb.vec3(px, -pz, 0.0)
 
 
-def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
+def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods, signs=None, sign_normals='rest'):
     import bpy
     rig = json.load(open(common.asset_path('sets', 'funeral', 'crowd_rig.json'), encoding='utf-8'))
     glb = CL.read_glb_meshes(common.asset_path('models', 'funeral_crowd.glb'))
@@ -1104,7 +1059,7 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
     SH, HD, NK = rig['shoulder'], rig['hand'], rig['neck']
     SHb, NKb = CL.b3(SH), CL.b3(NK)
     people = _place_people(len(variants))
-    sign_atlas = _sign_atlas(L, fam)
+    sign_atlas = _sign_atlas(L, fam, signs)
     N.parts['signAtlas'] = sign_atlas
     N.parts['rig'] = rig                     # the crowd figures' shoulder, hand and neck (three's axes, figure-local)
 
@@ -1254,8 +1209,13 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
         is_stick = nb.step(1.5, side)
         c = nb.mix(art, (0.16, 0.11, 0.07), is_stick)
         cn, _ = nb.tex(S['card']['nrm'], nb.vec2(lu, lv) * (0.62 / 0.35, 0.48 / 0.35, 1.0))
-        # floods painted on (with the fence's shadow); light through the board when a flood is behind it
-        Ps, Ns = nb.P(), nb.N_local()
+        # floods painted on (with the fence's shadow); light through the board when a flood is behind it. news.js read
+        # setN(): the boards' hanging-pose normals (its positionNode raised the boards, not their normals), so the face
+        # the crowd sees (turned away from the floods once raised) took the floods head-on and showed its art bright,
+        # and the face toward her glowed through. sign_normals='rest' (the default) keeps that; 'posed' lights the
+        # raised boards by their true normals (the art lit on her side, the crowd side glowing through)
+        Ps = nb.P()
+        Ns = nb.N_local() if sign_normals == 'posed' else nb.normalize(nb.three(nb.attr('n0', 'v')))
         front = flood_at(nb, Ps, Ns) * (1 / math.pi)
         behind = flood_at(nb, Ps, -Ns) * (1 / math.pi)
         ink = 1.0 - nb.clamp(nb.lum(art) * 1.6, 0, 1)
@@ -1263,7 +1223,7 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
         return Mt.standard(c, rough=0.82, metal=0.0, normal=nb.normal_map(cn, 0.6), emissive=c * front + glow, fog=fog)
     M_signs = signs_mat()
     if holders:
-        sob = _posed_copies(L, 'news_signs', sign_geo, holders, crowd, M_signs, extra=('front', 'back'))
+        sob = _posed_copies(L, 'news_signs', sign_geo, holders, crowd, M_signs, extra=('front', 'back'), rest_normals=True)
         CL.set_flags(sob, {'noSupportCheck': True})
         gn = CL.GN(L, sob, 'news_signs_pose')
         th = _arm_theta(gn, gn.attr('theta'), gn.attr('seed'), gn.attr('role'))
@@ -1288,7 +1248,8 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
         quad = CL.quad_object(L, 'news_billboard_quad')
         Mh = L.mat('news_handlights')
         nb = Mh.nb
-        d = (nb.uv() - 0.5) * 2.0
+        uv_ = nb.uv()
+        d = nb.vec2((uv_.x - 0.5) * 2.0, (uv_.y - 0.5) * 2.0)      # three's vec2 uv (see the steam's)
         r2 = nb.dot(d, d)
         hlw = nb.attr('hlw')
         flick = nb.sin(nb.U('t') * 31.0 + hlw * 50.0) * 0.05 + 0.95
@@ -1338,20 +1299,26 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods):
     return people
 
 
-def _posed_copies(L, name, geo, who, parent, mat, extra=(), role_override=None):
+def _posed_copies(L, name, geo, who, parent, mat, extra=(), role_override=None, rest_normals=False):
     """One mesh holding a copy of geo (figure-local, three axes) per person, at its rest place, with the per-person
-    data the pose modifier reads: lp (local position, Blender axes), theta, seed, role, pscale, yaw, px, pz (+ extra)."""
+    data the pose modifier reads: lp (local position, Blender axes), theta, seed, role, pscale, yaw, px, pz (+ extra).
+    rest_normals: also n0, geo's own normal turned by the person's yaw (set space, Blender axes): the normal three's
+    lighting kept when a positionNode moved the vertices (TSL does not turn normals with it)."""
     import bpy
     q = geo.non_indexed()
     Pb0 = np.stack([q.pos[:, 0], -q.pos[:, 2], q.pos[:, 1]], 1)
+    Nb0 = np.stack([q.nrm[:, 0], -q.nrm[:, 2], q.nrm[:, 1]], 1) if rest_normals and q.nrm is not None else None
     nv = len(Pb0)
-    allP, A = [], {k: [] for k in ('lp', 'theta', 'seed', 'role', 'pscale', 'yaw', 'px', 'pz') + tuple(extra)}
+    keys = ('lp', 'theta', 'seed', 'role', 'pscale', 'yaw', 'px', 'pz') + tuple(extra) + (('n0',) if Nb0 is not None else ())
+    allP, A = [], {k: [] for k in keys}
     UVs = []
     for p in who:
         c, s = math.cos(p['yaw']), math.sin(p['yaw'])
         rot = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
         allP.append((Pb0 * p['scale']) @ rot.T + np.array([p['x'], -p['z'], 0.0]))
         A['lp'].append(Pb0)
+        if Nb0 is not None:
+            A['n0'].append(Nb0 @ rot.T)
         for k, val in (('theta', p['theta']), ('seed', p['seed']),
                        ('role', role_override if role_override is not None else ROLE_ID[p['role']]),
                        ('pscale', p['scale']), ('yaw', p['yaw']), ('px', p['x']), ('pz', p['z'])):
@@ -1415,7 +1382,9 @@ def _build_steam(L, N, root, FL, fog):
     nb = Mt.nb
     vuv = nb.uv()
     s = nb.attr('seed')
-    d = (vuv - 0.5) * 2.0
+    # the quad's uv as three's vec2: Blender's UV is a 3-vector with z = 0, and (uv - 0.5) * 2 would put z at -1 in
+    # the dot product (r2 >= 1: every puff transparent)
+    d = nb.vec2((vuv.x - 0.5) * 2.0, (vuv.y - 0.5) * 2.0)
     r2 = nb.dot(d, d)
     tt = nb.U('t') * 0.08
     n = nb.mx_fbm(nb.vec3(d.x * 1.6 + s * 17.0, d.y * 1.6 - tt * 3.0 + s * 9.0, tt + s), 4, 2.0, 0.55)
@@ -1441,7 +1410,7 @@ def _build_steam(L, N, root, FL, fog):
     under = nb.w(HMI) * 0.05 * nb.ss(40, 18, Ps.y) * nb.U('floods')       # the floodlit yard below
     c = nb.w(HMI) * fl + sod + under + (0.035, 0.04, 0.05)
     alpha = dens * ((1.0 - nb.attr('ph')) * 0.9 + 0.1) * 0.55
-    M = Mt.unlit(c, alpha=nb.clamp(alpha, 0, 1), fog=fog)
+    M = Mt.unlit(c, alpha=nb.clamp(alpha, 0, 1), fog=fog, depth_write=False)     # three's depthWrite: false
     N.materials['steam'] = M
     # Geometry Nodes: each puff's rise, place and size from t; then the billboard
     gn = CL.GN(L, ob, 'news_steam_place')

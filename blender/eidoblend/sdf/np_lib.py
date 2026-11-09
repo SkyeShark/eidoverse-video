@@ -3,7 +3,9 @@
 The WebGPU engine let a scene author write map(p) / shade(p, n, mat) in its host language (JavaScript building TSL
 nodes). The Blender edition's host language is Python: the same primitives, combinators, rotations, mirrors and
 hash / vnoise / fbm / fbm6, with the same names in snake_case, take (N, 3) float32 arrays and return (N,) arrays.
-They are float32 throughout, like the GPU, and `test_np_parity.py` checks them against the GLSL library.
+They are float32 throughout, like the GPU, and tests/sdf/test_library_parity.py checks them against the GLSL library.
+A shade(p, n, mat) or surface(p, n, mat) may take the engine's 4th argument, ctx (ShadeContext: ro, rd,
+soft_shadow / softShadow, calc_normal / calcNormal), as the TSL shade did.
 
     from eidoblend.sdf import SDF_NP as S, create_sdf_object
     def my_map(p):
@@ -451,6 +453,77 @@ def grad(prog, points, h):
     return d, m, g / F(4.0 * h)
 
 
+class ShadeContext:
+    """The engine's 4th shade argument, ctx = {softShadow, calcNormal, ro, rd}, for a Python shade(p, n, mat, ctx) or
+    surface(p, n, mat, ctx). ro is the viewer in the SDF's local frame and rd the view ray. In a bake the viewer stands
+    straight along each normal (as cameraPosition does in the GLSL), so ro = p + n * 1000 and rd = -n, and a fresnel
+    term reads head-on. soft_shadow(ro, rd, mint, maxt, k) marches and calc_normal(p) differentiates the SDF's own
+    map, as the engine's did (also under the engine's names, softShadow and calcNormal)."""
+
+    def __init__(self, prog, p, n):
+        self.prog = prog
+        p, n = _a(p), _a(n)
+        self.ro = p + n * F(1000.0)
+        self.rd = -n
+
+    def _dist(self, p):
+        prog = self.prog
+        if callable(prog.map):
+            return call_map(prog.map, p)[0]
+        return prog.dist(p)[0]                      # a GLSL map: its dist kernel on the GPU
+
+    def calc_normal(self, p):
+        """The engine's calcNormal: the tetrahedral difference of map at h = 0.0004, normalised."""
+        p = _a(p).reshape(-1, 3)
+        g = np.zeros_like(p)
+        for k in _K:
+            g += k * self._dist(p + k * F(0.0004))[:, None]
+        return normalize(g)
+
+    def soft_shadow(self, ro, rd, mint, maxt, k):
+        """The engine's softShadow: 48 sphere-traced steps from ro along rd; 0 on a hit under 0.0005, else the
+        min of k * h / t, clamped to [0, 1]."""
+        ro = _a(ro).reshape(-1, 3)
+        rd = np.broadcast_to(_a(rd), ro.shape)
+        res = np.ones(len(ro), F)
+        t = np.full(len(ro), F(mint))
+        live = np.ones(len(ro), bool)
+        for _ in range(48):
+            idx = np.nonzero(live)[0]
+            if len(idx) == 0:
+                break
+            h = self._dist(ro[idx] + rd[idx] * t[idx, None])
+            hit = h < F(0.0005)
+            res[idx[hit]] = F(0.0)
+            go = idx[~hit]
+            res[go] = np.minimum(res[go], F(k) * h[~hit] / t[go])
+            t[go] += h[~hit]
+            live[idx[hit]] = False
+            live[go[t[go] >= F(maxt)]] = False
+        return clamp(res, 0.0, 1.0)
+
+    softShadow = soft_shadow
+    calcNormal = calc_normal
+
+
+def _takes_ctx(fn):
+    """Whether a Python shade / surface takes the engine's 4th argument, ctx."""
+    import inspect
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    pos = [q for q in params if q.kind in (q.POSITIONAL_ONLY, q.POSITIONAL_OR_KEYWORD)]
+    return len(pos) >= 4 or any(q.kind == q.VAR_POSITIONAL for q in params)
+
+
+def call_shading(fn, prog, p, n, m):
+    """A Python shade(p, n, mat) or surface(p, n, mat), or the engine's TSL form with ctx: shade(p, n, mat, ctx)."""
+    if _takes_ctx(fn):
+        return fn(p, n, m, ShadeContext(prog, p, n))
+    return fn(p, n, m)
+
+
 def surface(prog, points, project, grad_h, normal_h):
     p = np.asarray(points, F).reshape(-1, 3).copy()
     iso = F(prog.values.get('sdfIso', 0.0))
@@ -462,9 +535,9 @@ def surface(prog, points, project, grad_h, normal_h):
     n = normalize(g)
     with current(prog):
         if callable(prog.surface):
-            s = prog.surface(p, n, m)
+            s = call_shading(prog.surface, prog, p, n, m)
         elif getattr(prog, 'surface_from_shade', False) and callable(prog.shade):
-            s = shade_surface(prog.shade(p, n, m), prog.shade_as)
+            s = shade_surface(call_shading(prog.shade, prog, p, n, m), prog.shade_as)
         else:
             s = {}
     out = surface_channels(s, len(p))

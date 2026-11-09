@@ -1,7 +1,7 @@
 """Render controller tests' stills from their saved, keyed .blend files (the bakes ran on the CPU; only this takes the GPU
 slot, once for any number of tests).
 
-    render_shots.py <out/TAG_shots.json> [<out/TAG2_shots.json> ...] [--only NAME_PREFIX] [--sheet-cols 4]
+    render_shots.py <out/TAG_shots.json> [<out/TAG2_shots.json> ...] [--only PREFIX[,PREFIX...]] [--sheet-cols 4]
 
 Each shot: a camera at `pos` looking at `target` with `lens`, at `frame` (with `action` assigned first when the shot
 names another bake of the same armature) -> out/<tag>_<name>.png (960x540, 16 samples, EEVEE, the light saved in the
@@ -21,7 +21,7 @@ import bpy
 from mathutils import Vector
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-ONLY = ARGS[ARGS.index('--only') + 1] if '--only' in ARGS else None
+ONLY = tuple(ARGS[ARGS.index('--only') + 1].split(',')) if '--only' in ARGS else None   # name prefixes, comma separated
 COLS = int(ARGS[ARGS.index('--sheet-cols') + 1]) if '--sheet-cols' in ARGS else 4
 SPECS = [a for a in ARGS if a.endswith('.json')]
 

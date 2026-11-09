@@ -1,5 +1,6 @@
 """Probe: THE HOLE built on its own (hole.build() with no kit: its own sky, rain, clouds, signs and street disc), its
-screens and tickers redrawn through their API, a chorus shot keyed, and stills rendered from the chorus cameras.
+screens and tickers redrawn through their API, one of its camera moves keyed, and stills rendered from its eight
+camera moves.
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
         bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_hole_render.py [--no-render] [--shots a,b]
@@ -8,10 +9,11 @@ screens and tickers redrawn through their API, a chorus shot keyed, and stills r
 Checks: the standalone extras; the light map painted with the hole's share only; billboards[0].set_canvas (a still),
 billboards[1].set_canvas(frames=...) (a keyed PNG sequence with its hold file), billboards[0].reset(), tickers[1]
 .set_items and its keyed speed; key_hole_cam ('spiral', 12 s at 24 fps) against hole_cam; the U.power turn-down. Then
-the screens and tickers go back to their camps, and the renders use the chorus cameras (spiral, riseUp, closeSing,
-orbit, low, nadir, screens, enter) at mid-shot, driven as the film's probe stage drove its standalone hole (focal light
-at (0, 0, 3), gain 0.35 over 70 m; song time 80 s + the shot's time). --compare writes out/compare_hole_alone_low.png
-beside the film's fin_standalone_hole.png (from --refs, default <cwd>/work/unknown_force/sets/probes).
+the screens and tickers go back to their camps, and the renders use the camera moves (spiral, riseUp, closeSing,
+orbit, low, nadir, screens, enter) at mid-move, lit as the WebGPU probe stage lit its standalone hole (focal light at
+(0, 0, 3), gain 0.35 over 70 m; the clock at 80 s + the move's time). --her puts a performer on the mark (a VRM) for
+scale and for the performer-only lights. --compare writes out/compare_hole_alone_low.png beside the WebGPU probe
+stage's fin_standalone_hole.png (from --refs, default <cwd>/work/unknown_force/sets/probes).
 """
 import sys
 import time
@@ -84,6 +86,13 @@ ctr = lm[int(KIT.LM_R * s), int(KIT.LM_R * s), :3]
 far = lm[int((KIT.LM_R + 300) * s), int((KIT.LM_R + 300) * s), :3]
 check('light map: the hole\'s share only (lit centre, dark city)', ctr.min() > 100 and far.max() == 0,
       f'centre {ctr.tolist()}, 300 m out {far.tolist()}')
+want_ll = {P['her'].name: 'INCLUDE', hole['collection'].name: 'EXCLUDE'}
+got_ll = {}
+for k in ('screen0', 'screen1', 'screen2', 'screen3', 'kickL', 'kickR'):
+    rcl = P['lights'][k].light_linking.receiver_collection
+    got_ll[k] = {c.name: rcl.collection_children[i].light_linking.link_state for i, c in enumerate(rcl.children)}
+check('screen and kicker lights: the performer only, never the set (even with nobody on the mark)',
+      all(v == want_ll for v in got_ll.values()), str(got_ll['screen0']))
 
 # the screens' API
 bb = P['billboards']
@@ -129,7 +138,7 @@ tk['speed'].default_value = 0.05
 tk['material'].node_tree.keyframe_insert('nodes["speed"].outputs[0].default_value', frame=1)
 check('ticker set_items + keyable speed', tk['material'].node_tree.animation_data is not None)
 
-# a chorus shot keyed
+# one of the camera moves keyed
 cam_d = bpy.data.cameras.new('probe_cam')
 cam_d.clip_start, cam_d.clip_end = 0.05, 6000.0
 cam = bpy.data.objects.new('probe_cam', cam_d)
@@ -144,30 +153,30 @@ got = cam.evaluated_get(dg).matrix_world.translation
 check('keyed spiral = hole_cam(spiral, 6 s)', (got - Vector(want['pos'])).length < 1e-3, str(tuple(round(v, 3) for v in got)))
 fwd = -(cam.evaluated_get(dg).matrix_world.to_3x3() @ Vector((0, 0, 1)))
 to_t = (Vector(want['target']) - Vector(want['pos'])).normalized()
-check('keyed spiral looks at her', fwd.dot(to_t) > 0.9999, f'{fwd.dot(to_t):.6f}')
+check('keyed spiral looks at the mark', fwd.dot(to_t) > 0.9999, f'{fwd.dot(to_t):.6f}')
 KIT.U_ALIASES  # (camelCase uniform names are accepted too)
 U['power'] = 0.5
 check('uniform aliases (camelCase)', abs(U['focalR'] - 230.0) < 1e-6 and U['power'] == 0.5)
 U['power'] = float(opt('--power', 1.0))
 
-# the singer (optional): the claudesona on her mark, lit by the screens and kickers through light linking
+# a performer on the mark (optional), lit by the screens and kickers through light linking
 if '--her' in args:
     try:
         from eidoblend.characters import load_vrm, play_vrma_default
         hits = [Path(opt('--vrm'))] if opt('--vrm') else list(Path(ASSETS_DIR).rglob('claude_suit.vrm'))
         before = set(bpy.data.objects)
         her_h = load_vrm(str(hits[0]), name='uf_singer')
-        play_vrma_default(her_h, 'idle', t=0.0)        # the film's probe stage played the default idle on her
+        play_vrma_default(her_h, 'idle', t=0.0)        # idling, as the WebGPU probe stage posed its figure
         new = [o for o in bpy.data.objects if o not in before]
         for o in new:
             if o.type == 'MESH':
                 P['her'].objects.link(o)
-        # a loaded VRM faces -Y (the characters family's convention): her mark's front, three's +Z
-        check('the claudesona on her mark, idling', bool(new), hits[0].name)
+        # a loaded VRM faces -Y (the characters family's convention): the mark's front, three's +Z
+        check('a performer on the mark, idling', bool(new), hits[0].name)
         done, left = KIT.fog_objects(K, [o for o in new if o.type == 'MESH'])
         check('her materials take the haze, as scene.fogNode gave it', done > 0, f'{done} wrapped, {left} left')
     except Exception as e:                              # noqa: BLE001
-        check('the claudesona on her mark', False, repr(e))
+        check('a performer on the mark', False, repr(e))
 
 cam2_d = bpy.data.cameras.new('probe_cam_still')
 cam2_d.clip_start, cam2_d.clip_end = 0.05, 6000.0
@@ -176,7 +185,7 @@ scene.collection.objects.link(cam2)
 shots = [n for n in H.HOLE_CAMS]
 if opt('--shots'):
     shots = [n for n in shots if any(k in n for k in opt('--shots').split(','))]
-# back to the camps for the renders (the film's default screens and tickers, its scroll speeds)
+# back to the camps for the renders (the set's default screens and tickers, their scroll speeds)
 bb[1]['reset']()
 tk['set_items'](H.TICKERS[1])
 tk['material'].node_tree.animation_data_clear()
@@ -190,7 +199,7 @@ if RENDER:
         KIT.apply_cam(cam2, H.hole_cam(n, tt))
         scene.frame_set(1)
         hole['update'](80.0 + tt, {'cam_vel': (0, 0, 0)})
-        P['set_focal']((0.0, 0.0, 3.0), {'gain': 0.35, 'radius': 70.0})    # the film's probe stage, as its stills
+        P['set_focal']((0.0, 0.0, 3.0), {'gain': 0.35, 'radius': 70.0})    # as the WebGPU probe stage lit its stills
         path = OUT / f'probe_hole_alone_{n}.png'
         scene.render.filepath = str(path)
         ts = time.perf_counter()
@@ -216,10 +225,10 @@ if RENDER and '--compare' in args:
         sheet.paste(a, (0, 28))
         sheet.paste(b, (a.width + 8, 28))
         d = ImageDraw.Draw(sheet)
-        d.text((8, 7), 'WebGPU (the film\'s probe stage): fin_standalone_hole.png', fill=(230, 230, 230))
+        d.text((8, 7), 'WebGPU (the probe stage): fin_standalone_hole.png', fill=(230, 230, 230))
         d.text((a.width + 16, 7), 'Blender 5.2 EEVEE: probe_hole_alone_low.png', fill=(230, 230, 230))
         sheet.save(OUT / 'compare_hole_alone_low.png')
-    check('compare sheet beside the film\'s standalone hole', (OUT / 'compare_hole_alone_low.png').exists(), str(ref))
+    check('compare sheet beside the WebGPU standalone hole', (OUT / 'compare_hole_alone_low.png').exists(), str(ref))
 fails = [n for n, ok in results if not ok]
 print(f'[uf-hole] {len(results) - len(fails)}/{len(results)} passed' + (f'; FAILED: {fails}' if fails else '') +
       (f'; renders {np.mean(times):.1f} s each' if times else ''), flush=True)

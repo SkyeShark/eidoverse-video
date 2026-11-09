@@ -15,16 +15,14 @@ frame, so every GLSL original runs unchanged.
 
 from __future__ import annotations
 
-import math
 import os
-import struct
 
 import numpy as np
 
 from . import materials as M
-from .gpu_eval import SdfProgram, normalize_uniforms
+from .gpu_eval import SdfProgram
 from .mesher import drop_small_components, dual_contour, quad_corner_points
-from .spec import QUALITY_PRESETS, SdfSpec, sdf_collection
+from .spec import SdfSpec, file_stem, resolve_cache_dir, sdf_collection
 
 T2B = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], np.float32)    # three (x, y, z) -> Blender (x, -z, y)
 
@@ -35,9 +33,7 @@ def three_to_blender(v):
 
 
 def _abspath(p):
-    import bpy
-    p = bpy.path.abspath(p) if p.startswith('//') else p
-    return os.path.normpath(p)
+    return resolve_cache_dir(p)
 
 
 def _morton_order(points):
@@ -145,6 +141,9 @@ class SdfObject:
         self.object['sdf_bounds_max'] = list(spec.bounds_max)
         self.object['sdf_voxel'] = self.voxel
         self.cache_dir = _abspath(spec.cache_dir)
+        # the cache files are named for the object, which Blender keeps unique: a second EXAMPLES['x'].make() is
+        # 'x.001' and writes its own atlases and frames instead of over the first one's
+        self.stem = file_stem(self.object.name)
         from .helper import track
         track(self)
 
@@ -173,16 +172,28 @@ class SdfObject:
         self.stats.update(c.stats)
         return c
 
-    def _corner_normals(self, c):
-        pts = quad_corner_points(c.verts, c.quads, 0.3).reshape(-1, 3)
+    def _corner_normals(self, c, chunk=1 << 20):
+        """Crease-keeping normals, one per quad corner (the field's gradient just inside each corner), in Blender
+        axes as float32 (4 Q, 3). Evaluated a million quads at a time into one array: a mesh of fifteen million quads
+        (the Menger sponge at 'high') would otherwise hold about 400 bytes of temporaries a quad, 6 GB."""
         h = max(0.0004, 0.25 * self.voxel)
-        g = self.program.grad(pts, h)[2]
-        n = g / np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-20)
-        return n
+        Q = len(c.quads)
+        out = np.empty((Q * 4, 3), np.float32)
+        for s in range(0, Q, chunk):
+            e = min(Q, s + chunk)
+            pts = quad_corner_points(c.verts, c.quads[s:e], 0.3).reshape(-1, 3)
+            g = self.program.grad(pts, h)[2]
+            del pts
+            out[s * 4:e * 4] = three_to_blender(g / np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-20))
+        return out
 
-    def _normals_at(self, points, h):
-        g = self.program.grad(points, h)[2]
-        return g / np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-20)
+    def _normals_at(self, points, h, chunk=1 << 22):
+        """Unit gradients at points (the SDF's frame, float32), four million at a time."""
+        out = np.empty((len(points), 3), np.float32)
+        for s in range(0, len(points), chunk):
+            g = self.program.grad(points[s:s + chunk], h)[2]
+            out[s:s + chunk] = g / np.maximum(np.linalg.norm(g, axis=1, keepdims=True), 1e-20)
+        return out
 
     def _vertex_normals(self, c):
         return self._normals_at(c.verts, max(0.0004, 0.5 * self.voxel))
@@ -200,7 +211,17 @@ class SdfObject:
             self.program.values['uTime'] = float(t)
         c = self._contour(log)
         if len(c.quads) == 0:
+            # nothing to show (the explosion's radius collapses for part of its cycle): the object empties, as the
+            # engine's march drew nothing; the last surface must not stay on screen
             print(f'[sdf] {self.name}: no surface inside the bounds at t={self.program.values["uTime"]}')
+            old = self.object.data
+            me = bpy.data.meshes.new(self.name)
+            for mat in old.materials:
+                me.materials.append(mat)
+            self.object.data = me
+            if old.users == 0:
+                bpy.data.meshes.remove(old)
+            self.stats['carrier'] = None
             return self
         carrier = self.spec.carrier
         if carrier == 'atlas' and not self.atlas_fits(len(c.quads)):
@@ -246,7 +267,7 @@ class SdfObject:
         at.data.foreach_set('vector', np.ascontiguousarray(normals, np.float32).ravel())
 
     def _set_corner_normals(self, me, c):
-        self.set_custom_normals(me, three_to_blender(self._corner_normals(c)).reshape(-1, 3), 'CORNER')
+        self.set_custom_normals(me, self._corner_normals(c), 'CORNER')
 
     def _mesh_vertex(self, c, log):
         verts_b = three_to_blender(c.verts)
@@ -348,7 +369,7 @@ class SdfObject:
         Y = (by[:, None, None] + fj[None]).ravel()
         SRC = (np.arange(Q)[:, None, None] * (k * k) + (cj * k + ci)[None]).ravel()
         paths = {}
-        tag = self.name if frame is None else f'{self.name}_{frame:04d}'
+        tag = self.stem if frame is None else f'{self.stem}_{frame:04d}'
         for key, layout in M.ATLAS_PACK.items():
             if (key not in keys) if keys is not None else all(name in const for name, _w in layout):
                 continue
@@ -422,9 +443,10 @@ class SdfObject:
     def bake(self, frame_start=None, frame_end=None, step=1, time_scale=1.0, time_offset=0.0, controls=None,
              carrier=None, log=print):
         """Re-mesh the SDF once per frame (uTime = time_offset + time_scale * (frame - frame_start) / fps) into
-        <cache_dir>/<name>_####.ply and play the sequence with a Geometry Nodes Import PLY on the object; the
-        surface channels travel as PLY vertex properties ('vertex', default) or as a per-frame atlas image
-        sequence ('atlas'). controls(frame, t) -> {uniform: value} keys uniforms per frame."""
+        <cache_dir>/<stem>_####.ply (the stem is the object's name) and play the sequence with a Geometry Nodes
+        Import PLY on the object; the surface channels travel as PLY vertex properties ('vertex', default) or as a
+        per-frame atlas image sequence ('atlas'). controls(frame, t) -> {uniform: value} keys uniforms per frame.
+        A frame with no surface inside the bounds is an empty mesh."""
         import bpy
         sc = self.scene
         fs = sc.frame_start if frame_start is None else int(frame_start)
@@ -432,20 +454,24 @@ class SdfObject:
         fps = sc.render.fps / sc.render.fps_base
         carrier = carrier or ('vertex' if self.spec.carrier != 'atlas_sequence' else 'atlas')
         os.makedirs(self.cache_dir, exist_ok=True)
-        names = None
+        import shutil
         k = self.spec.texels
         step = max(1, int(step))
         last = None
         seq_keys, seq_const = None, {}
+        decided = False              # the atlas budget is judged on the first frame that has a surface
+        atlas_frames = []            # frames whose atlas images this bake wrote (or held)
+        empty_frames = 0
+        n = len(self.stem)
         for f in range(fs, fe + 1):
             if (f - fs) % step and last is not None:
                 # held frame: the last computed frame's files under this frame's number
-                import shutil
                 for src in last:
-                    # <name>_<frame>.ply / <name>_<frame>_<key>.exr: swap the frame right after the name
+                    # <stem>_<frame>.ply / <stem>_<frame>_<key>.exr: swap the frame right after the stem
                     d, b = os.path.split(src)
-                    n = len(self.name)
                     shutil.copyfile(src, os.path.join(d, f'{b[:n]}_{f:04d}{b[n + 5:]}'))
+                if len(last) > 1:
+                    atlas_frames.append(f)
                 continue
             t = time_offset + time_scale * (f - fs) / fps
             self.program.values['uTime'] = float(t)
@@ -453,16 +479,28 @@ class SdfObject:
                 for name, v in (controls(f, t) or {}).items():
                     self.program.set_uniform(name, v)
             c = self._contour(log=None)
-            if carrier == 'atlas' and f == fs and not self.atlas_fits(len(c.quads)):
+            ply = os.path.join(self.cache_dir, f'{self.stem}_{f:04d}.ply')
+            last = [ply]
+            if len(c.quads) == 0:
+                # no surface this frame (the explosion's radius collapses through zero for part of its cycle): an
+                # empty mesh, as the engine's march drew nothing
+                write_ply(ply, np.zeros((0, 3), np.float32), np.zeros((0, 3), np.float32), np.zeros((0, 4), np.int32),
+                          {}, uvs=np.zeros((0, 2), np.float32) if carrier == 'atlas' else None)
+                empty_frames += 1
+                if log:
+                    log(f'[sdf] {self.name}: frame {f} t={t:.3f}s no surface')
+                continue
+            if carrier == 'atlas' and not decided and not self.atlas_fits(len(c.quads)):
                 if log:
                     log(f'[sdf] {self.name}: {len(c.quads)} quads pass the atlas budget: the sequence carries its '
                         f'channels per vertex')
                 carrier = 'vertex'
+            decided = True
             if carrier == 'atlas':
                 k = self.atlas_texels(len(c.quads))
-                # the first frame decides which packs the sequence carries; its constant channels become the
-                # material's values (a pack left out would leave its BSDF inputs at the defaults: the Principled
-                # default Emission Color is white, so a missing 'emit' pack made the whole object glow)
+                # the first frame with a surface decides which packs the sequence carries; its constant channels
+                # become the material's values (a pack left out would leave its BSDF inputs at the defaults: the
+                # Principled default Emission Color is white, so a missing 'emit' pack made the whole object glow)
                 uvs, paths, const, _m = self._atlas_bake(c, k, frame=f, keys=seq_keys)
                 if seq_keys is None:
                     seq_keys = {key for key in paths if key != 'normal'}
@@ -471,8 +509,9 @@ class SdfObject:
                 verts = c.verts[c.quads].reshape(-1, 3)
                 faces = np.arange(len(verts), dtype=np.int32).reshape(-1, 4)
                 nrm = self._normals_at(verts, max(0.0004, 0.5 * self.voxel))
-                write_ply(os.path.join(self.cache_dir, f'{self.name}_{f:04d}.ply'), three_to_blender(verts),
-                          three_to_blender(nrm), faces, {}, uvs=uvs)
+                write_ply(ply, three_to_blender(verts), three_to_blender(nrm), faces, {}, uvs=uvs)
+                last += list(paths.values())
+                atlas_frames.append(f)
             else:
                 ch = self._surface_at(c.verts, self.voxel)
                 nrm = self._vertex_normals(c)
@@ -485,27 +524,32 @@ class SdfObject:
                     else:
                         attrs[f'sdf_{name}'] = a[:, 0]
                 attrs['sdf_mat'] = ch['mat']
-                write_ply(os.path.join(self.cache_dir, f'{self.name}_{f:04d}.ply'), three_to_blender(c.verts),
-                          three_to_blender(nrm), c.quads, attrs)
-                names = attrs
-            last_f = f
-            last = [os.path.join(self.cache_dir, f'{self.name}_{f:04d}.ply')]
-            if carrier == 'atlas':
-                last += list(paths.values())
+                write_ply(ply, three_to_blender(c.verts), three_to_blender(nrm), c.quads, attrs)
             if log:
                 log(f'[sdf] {self.name}: frame {f} t={t:.3f}s {len(c.quads)} quads')
-        if carrier == 'atlas':
+        keys = []
+        if carrier == 'atlas' and atlas_frames:
+            keys = sorted(seq_keys) + ['normal']
+            # every frame of an image sequence needs its file: an empty frame (no surface, so its images never
+            # show) takes the nearest atlas frame's, the one before it when there is one
+            have = set(atlas_frames)
+            for f in range(fs, fe + 1):
+                if f in have:
+                    continue
+                before = [g for g in atlas_frames if g < f]
+                src_f = before[-1] if before else atlas_frames[0]
+                for key in keys:
+                    shutil.copyfile(os.path.join(self.cache_dir, f'{self.stem}_{src_f:04d}_{key}.exr'),
+                                    os.path.join(self.cache_dir, f'{self.stem}_{f:04d}_{key}.exr'))
             # an image sequence shows file <first - 1> before its range: hold the first frame there
-            import shutil
-            for key in list(M.ATLAS_PACK) + ['normal']:
-                src = os.path.join(self.cache_dir, f'{self.name}_{fs:04d}_{key}.exr')
-                if os.path.exists(src):
-                    shutil.copyfile(src, os.path.join(self.cache_dir, f'{self.name}_{fs - 1:04d}_{key}.exr'))
-        self._player(bpy, carrier, fs, fe, k, constants=seq_const)
-        self.stats.update(baked=(fs, fe), carrier=carrier)
+            for key in keys:
+                shutil.copyfile(os.path.join(self.cache_dir, f'{self.stem}_{fs:04d}_{key}.exr'),
+                                os.path.join(self.cache_dir, f'{self.stem}_{fs - 1:04d}_{key}.exr'))
+        self._player(bpy, carrier, fs, fe, k, constants=seq_const, keys=keys)
+        self.stats.update(baked=(fs, fe), carrier=carrier, empty_frames=empty_frames)
         return self
 
-    def _player(self, bpy, carrier, fs, fe, k, constants=None):
+    def _player(self, bpy, carrier, fs, fe, k, constants=None, keys=()):
         """GN tree: Import PLY of the current frame's file, colour channels recombined, shaded smooth."""
         tree = bpy.data.node_groups.new(self.name + '.player', 'GeometryNodeTree')
         tree.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
@@ -524,7 +568,7 @@ class SdfObject:
         L.new(clampn.outputs['Result'], vts.inputs['Value'])
         join = N.new('GeometryNodeStringJoin')
         a = N.new('FunctionNodeInputString')
-        a.string = os.path.join(self.cache_dir, self.name + '_')
+        a.string = os.path.join(self.cache_dir, self.stem + '_')
         b = N.new('FunctionNodeInputString')
         b.string = '.ply'
         # Join Strings concatenates its multi-input links in reverse creation order (5.2): suffix first
@@ -558,11 +602,10 @@ class SdfObject:
             mat = M.vertex_material(self.name + '_surface', {}, self.spec.material_settings)
         else:
             images = {}
-            for key in list(M.ATLAS_PACK) + ['normal']:
-                first = os.path.join(self.cache_dir, f'{self.name}_{fs:04d}_{key}.exr')
-                if os.path.exists(first):
-                    img = M.load_atlas_image(first, f'{self.name}_{key}_seq', sequence=(fs, fe - fs + 1))
-                    images[key] = img
+            for key in keys:
+                # the packs this bake wrote (a file left by an earlier bake of another layout is not one of them)
+                first = os.path.join(self.cache_dir, f'{self.stem}_{fs:04d}_{key}.exr')
+                images[key] = M.load_atlas_image(first, f'{self.name}_{key}_seq', sequence=(fs, fe - fs + 1))
             mat = M.atlas_material(self.name + '_surface', {k_: v for k_, v in images.items() if k_ != 'normal'},
                                    dict(constants or {}), self.spec.material_settings,
                                    normal_image=images.get('normal'))

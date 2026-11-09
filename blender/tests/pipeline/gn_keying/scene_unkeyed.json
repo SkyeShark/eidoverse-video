@@ -1,0 +1,8 @@
+{
+    "width": 640, "height": 360, "fps": 24, "duration": 2, "frame_start": 0,
+    "script": "blender/tests/pipeline/gn_keying/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/gn_unkeyed.mp4",
+    "render": {"samples": 16},
+    "_unkeyed": true,
+    "notes": "T17: as scene.json, plus the Twist input set every frame WITHOUT a key (the build must name it)"
+}

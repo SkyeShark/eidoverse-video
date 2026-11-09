@@ -204,11 +204,16 @@ another and a floating instance is named like any object.
   *Verified on its recorded support* means the support's real surface is
   under the object, within 6 cm of its base (`SEATED_GAP`): an 11 x 11 ray
   grid over its footprint first, then, for thin supports the rays slip
-  between (a wire rack, slats), every triangle of the support clipped to the
-  footprint. The engine fell back to the support's bounding box instead,
-  which counted a clock as still on a stool that had been moved 0.3 m: the
-  stool's splayed legs kept its box under the clock while the seat was gone.
-  That clock is now named, 0.43 m in the air.
+  between (a wire rack, slats), every load-bearing triangle of the support
+  (one facing up or down within 60 degrees of level, either winding) clipped
+  to the footprint. The engine fell back to the support's bounding box
+  instead, which counted a clock as still on a stool that had been moved
+  0.3 m: the stool's splayed legs kept its box under the clock while the
+  seat was gone. That clock is now named, 0.43 m in the air. Steep and
+  vertical faces never count: a book lifted 0.25 m off a rack's board beside
+  its post, or a cushion lifted 0.3 m off a seat against the backrest, is
+  named, though the post and the backrest rise past its base inside its
+  footprint.
 - **`check_z_fighting(scene)`** — a thin object (under 6 cm on an axis: a
   panel, decal, quad) with a face within 2 mm of another object's face and
   overlapping it on the other two axes. EEVEE z-fights too: offset flat
@@ -312,7 +317,13 @@ face_camera(friend, offset=0.4)                     # a three-quarter turn towar
   would dip below the seat (it never pushes her down), and at the clip's end
   a settle puts her hips over the pan, biased toward the backrest, and her
   lowest underside on it. The last pose holds, as the engine's did, or
-  `then=` plays a seated loop after it.
+  `then=` crossfades into a seated loop after it (0.25 s). The loop carries
+  its hips over its root, where the sit-down's own hip travel had carried
+  them about 0.4 m back, so the root is keyed again where the crossfade ends,
+  that pose settled on the pan the same way: measured on the corner chair,
+  her hips stay 6 cm behind the pan's centre through the crossfade and the
+  loop, her lowest underside on the pan (left on the sit-down's root, the
+  loop sat her on the pan's front edge, 3 cm in the air).
 - `sit_on_ground(h, at, clip='sitting_on_ground', ground=None)` uses a
   ground-sit clip (a chair clip on the floor dangles the legs through it)
   and rests her lowest underside (up-rays at the hips ± 0.35 m) 5 mm above

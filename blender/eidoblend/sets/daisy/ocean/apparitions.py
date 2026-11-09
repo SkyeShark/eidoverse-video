@@ -4,11 +4,13 @@ eidoverse/sets/ocean/apparitions.js). Two figures rise out of the ocean of faces
     fragment's edge burning the faces' gold, and sinks as it goes; its lenses and lamps glow (red eyes, amber lights);
   the HUMAN OF LIGHT (ocean_human.glb): a figure of glowing points sampled from its surface plus a faint fresnel
     shell; it comes apart into rising sparks.
-Both GLBs come from the model library (eidoverse/assets/models/); a missing file adds nothing.
+Both GLBs come from the model library (eidoverse/assets/models/); a missing file adds nothing. Each figure is driven
+by levels on its own clock: rise (0 under the sea .. 1 standing knee-deep) and dissolve (0 whole .. 1 gone), the robot
+also by its eyes; robot_envelope(t, at) / human_envelope(t, at) give the whole rise and fall from a start time.
 
     app = build_apparitions(base=(x, y, z) design three, yaw=..., parent=layout_empty)
         -> Apparitions: group, robot / human ({'holder', 'H'} or None), U (custom properties on the holders),
-           update(u, t, key, frame), state(u, t), targets()
+           update(t, robot, human, key, frame), state(t, robot, human), targets()
 """
 
 from __future__ import annotations
@@ -18,23 +20,42 @@ import re
 
 import numpy as np
 
-from .util import MODELS, rng, smooth
+from .util import MODELS, rng, smooth, clamp01
 
 RIM, GOLD = (0.62, 0.72, 1.0), (1.0, 0.6, 0.24)
 LENS, LAMP = (5.0, 0.4, 0.2), (2.5, 1.375, 0.375)               # (1, .08, .04) x 5 and (1, .55, .15) x 2.5
 ROBOT_H, HUMAN_H = 10.5, 8.5
 
 
-def robot_state(u, base_y=0.0):
-    rise, diss = smooth((u - 15.0) / 0.65), smooth((u - 15.95) / 0.7)
-    y = base_y - 1.3 - (1 - rise) * ROBOT_H * 0.75 - diss * 1.6       # knee-deep in the sea
-    eyes = rise * (min(1.0, (u - 15.2) / 0.25) if u < 15.9 else 1.0)   # the eyes come on as it stands
-    return {'visible': 14.95 < u < 16.8, 'y': y, 'rDiss': diss, 'rEyes': eyes}
+def robot_pose(rise, dissolve=0.0, eyes=None, base_y=0.0):
+    """The robot at rise 0..1 (up out of the sea to knee-deep) and dissolve 0..1 (breaking up top-down, sinking 1.6 m
+    as it goes); eyes 0..1 (default: the rise). -> {'visible', 'y' (design height of its feet), 'rDiss', 'rEyes'}"""
+    rise, dissolve = clamp01(rise), clamp01(dissolve)
+    y = base_y - 1.3 - (1 - rise) * ROBOT_H * 0.75 - dissolve * 1.6     # knee-deep in the sea
+    return {'visible': rise > 0.0 and dissolve < 1.0, 'y': y, 'rDiss': dissolve,
+            'rEyes': rise if eyes is None else clamp01(eyes)}
 
 
-def human_state(u, base_y=0.0):
-    rise, diss = smooth((u - 16.45) / 0.5), smooth((u - 17.2) / 0.75)
-    return {'visible': 16.4 < u < 18.3, 'y': base_y - 0.9 - (1 - rise) * HUMAN_H * 0.7, 'hDiss': diss}
+def human_pose(rise, dissolve=0.0, base_y=0.0):
+    """The human of light at rise 0..1 and dissolve 0..1 (its points lift and drift apart). -> {'visible', 'y', 'hDiss'}"""
+    rise, dissolve = clamp01(rise), clamp01(dissolve)
+    return {'visible': rise > 0.0 and dissolve < 1.0, 'y': base_y - 0.9 - (1 - rise) * HUMAN_H * 0.7, 'hDiss': dissolve}
+
+
+def robot_envelope(t, at):
+    """The robot's rise and fall from time `at`: up in 0.65 s, its eyes coming on 0.2 s in (over 0.25 s), breaking up
+    from 0.95 s in (over 0.7 s), gone at 1.8 s. -> {'rise', 'dissolve', 'eyes', 'visible'} for robot_pose."""
+    a = t - at
+    rise, diss = smooth(a / 0.65), smooth((a - 0.95) / 0.7)
+    eyes = rise * (clamp01((a - 0.2) / 0.25) if a < 0.9 else 1.0)
+    return {'rise': rise, 'dissolve': diss, 'eyes': eyes, 'visible': -0.05 < a < 1.8}
+
+
+def human_envelope(t, at):
+    """The human of light's rise and fall from time `at`: up in 0.5 s, coming apart from 0.75 s in (over 0.75 s),
+    gone at 1.85 s. -> {'rise', 'dissolve', 'visible'} for human_pose."""
+    a = t - at
+    return {'rise': smooth(a / 0.5), 'dissolve': smooth((a - 0.75) / 0.75), 'visible': -0.05 < a < 1.85}
 
 
 def sample_surface(tris, n, seed=5):
@@ -286,18 +307,24 @@ class Apparitions:
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
-    def state(self, u, t):
+    def state(self, t, robot=None, human=None):
+        """robot / human: None (under the sea, hidden) or {'rise', 'dissolve'[, 'eyes'][, 'visible']} (an envelope's
+        output works as it is)."""
         out = {'t': t}
         by = self.base[1]
         if self.robot:
-            r = robot_state(u, by)
-            out.update({'robot.visible': r['visible'], 'robot.z': r['y'], 'robot.rDiss': r['rDiss'], 'robot.rEyes': r['rEyes']})
+            rb = robot or {}
+            r = robot_pose(rb.get('rise', 0.0), rb.get('dissolve', 0.0), rb.get('eyes'), base_y=by)
+            vis = bool(rb.get('visible', r['visible'])) if robot else False
+            out.update({'robot.visible': vis, 'robot.z': r['y'], 'robot.rDiss': r['rDiss'], 'robot.rEyes': r['rEyes']})
             # rBase / rTop: the holder's world height (the dissolve's 0 at the feet .. 1 at the head)
             wz = self._world_z(self.robot['holder'], r['y'])
             out['robot.rBase'], out['robot.rTop'] = wz, wz + ROBOT_H
         if self.human:
-            h = human_state(u, by)
-            out.update({'human.visible': h['visible'], 'human.z': h['y'], 'human.hDiss': h['hDiss']})
+            hm = human or {}
+            h = human_pose(hm.get('rise', 0.0), hm.get('dissolve', 0.0), base_y=by)
+            vis = bool(hm.get('visible', h['visible'])) if human else False
+            out.update({'human.visible': vis, 'human.z': h['y'], 'human.hDiss': h['hDiss']})
         return out
 
     def _world_z(self, holder, y_design):
@@ -321,9 +348,9 @@ class Apparitions:
             m['t'] = (h, '["t"]', None, 'LINEAR')
         return m
 
-    def update(self, u, t, key=None, frame=None):
+    def update(self, t, robot=None, human=None, key=None, frame=None):
         from . import _bl
-        for k, v in self.state(u, t).items():
+        for k, v in self.state(t, robot, human).items():
             tgt = self.targets().get(k)
             if tgt is None:
                 continue
@@ -333,6 +360,7 @@ class Apparitions:
                     o.hide_render = o.hide_viewport = not v
                     if key:
                         o.keyframe_insert('hide_render', frame=frame)
+                        o.keyframe_insert('hide_viewport', frame=frame)
                 continue
             if path == 'location':
                 idb.location.z = v
@@ -402,7 +430,7 @@ def build_apparitions(base=(0.0, 0.0, 0.0), yaw=0.0, dir_prefix=None, parent=Non
             o.data.materials.clear()
             o.data.materials.append(shell)
             o.visible_shadow = False
-        # points of light on its surface, holder-local: the film's own points (the GLB's triangles as three.js reads
+        # points of light on its surface, holder-local: the WebGPU edition's own points (the GLB's triangles as three.js reads
         # them, shifted by -box.min.y as apparitions.js does, then sampled with the same rng(13) draws); Blender's
         # imported triangles only when the file is not a plain GLB
         g3 = glb_triangles(prefix + 'human.glb')

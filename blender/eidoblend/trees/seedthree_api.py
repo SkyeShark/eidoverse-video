@@ -27,6 +27,11 @@ billboard by camera distance, and make_seed_tree.forest_ring(tree) plants the ap
 (the leaf backlight's sun, and the sun the billboards cast-only from) and
 make_seed_tree.light_probe(trees) (EEVEE's occluded sky inside the crowns).
 
+The leaf backlight: make_seed_tree.set_backlight('translucent') (the default, round one's
+Translucent BSDF: every lamp reaches the leaves) or 'glow' (opt-in: the app's own term from
+the bound sun alone, out to the crown's silhouette, with the ambient scatter on sunlit
+leaves; for sunlit shots without other lamps; a heavy shader, so check the first render).
+
 The app's scenes: make_seed_tree.demo_scene('joshuaTree', seed=7) builds its whole
 demo (biome terrain, sky, rocks, grass / scrub, clouds, haze, grove, soundscape);
 make_seed_tree.example('reference_turntable', species='paperBirch') its reference
@@ -171,8 +176,20 @@ def _demo_scene(species='whiteOak', seed=1, dials=None, **kwargs):
     terrain and sky, rocks, fallen limbs, grass or scrub, clouds, the tree with every level and
     its billboard switched by camera distance, the 64-tree grove, the ring haze, the soundscape
     and the camera framed as the app frames a species. kwargs: sun_az, sun_el, forest_count,
-    haze, clouds, decoration, audio, scale_ref, autorotate, frames, wind, resolution, samples."""
+    haze (off: the app's range fog), ao, spom, clouds, decoration, audio, scale_ref, autorotate,
+    frames, wind, resolution, samples. make_seed_tree.set_fog(scene, haze=True, on=True) switches
+    the fog of a built demo scene."""
     return raw().build_demo_scene(species, seed, controls=dials, **kwargs)
+
+
+def _set_fog(scene=None, haze=True, on=True):
+    """The demo scene's fog: haze=True the ring haze, False the app's classic range fog;
+    on=False neither."""
+    raw()
+    import bpy
+    from seedthree.scene.atmosphere import set_haze_enabled, set_fog_on
+    scene = scene or bpy.context.scene
+    return set_haze_enabled(scene, haze) and set_fog_on(scene, on)
 
 
 def _example(name, **kwargs):
@@ -198,6 +215,7 @@ def _set_billboard_distance(forest, dist):
 
 make_seed_tree.set_backlight = lambda mode: raw().set_backlight(mode)
 make_seed_tree.demo_scene = _demo_scene
+make_seed_tree.set_fog = _set_fog
 make_seed_tree.example = _example
 make_seed_tree.tools = _tools
 make_seed_tree.set_billboard_distance = _set_billboard_distance

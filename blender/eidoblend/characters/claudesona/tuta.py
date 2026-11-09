@@ -267,8 +267,9 @@ def _key_interp(idb, path, frame, interp):
         return
     for slot in ad.action.slots:
         cb = anim_utils.action_get_channelbag_for_slot(ad.action, slot)
-        fc = cb.fcurves.find(path) if cb else None
-        if fc is not None:
+        for fc in (cb.fcurves if cb else []):         # every array index of the path (find() is index 0 alone)
+            if fc.data_path != path:
+                continue
             for kp in fc.keyframe_points:
                 if abs(kp.co.x - frame) < 1e-6:
                     kp.interpolation = interp
@@ -718,6 +719,8 @@ class TutaWardrobe(Wardrobe):
             b.link(shd, mo.inputs['Shade Color'])
             b.link(_cscale(b, paint_c, paint_a * 0.16 * t.u('neon')), mo.inputs['Emissive Factor'])
             mo.inputs['Emissive Strength'].default_value = 1.0
+            from .look import refresh_pbr
+            refresh_pbr(m)                 # the PBR look (set before the wardrobe) takes the paint too
 
     def _catchlight_nodes(self):
         plate, _k = M.find(self.h, 'Material', need_keys=True)
@@ -753,6 +756,8 @@ class TutaWardrobe(Wardrobe):
             for l in list(mo.inputs['Emissive Texture'].links):
                 nt.links.remove(l)
             mo.inputs['Emissive Texture'].default_value = (1.0, 1.0, 1.0, 1.0)
+            from .look import refresh_pbr
+            refresh_pbr(m)
 
     def _disc_nodes(self):
         disc = self.uf.get('acc_sundisc')
@@ -786,6 +791,8 @@ class TutaWardrobe(Wardrobe):
                 for l in list(mo.inputs['Emissive Texture'].links):
                     nt.links.remove(l)
                 mo.inputs['Emissive Texture'].default_value = (1.0, 1.0, 1.0, 1.0)
+            from .look import refresh_pbr
+            refresh_pbr(m)
 
     def _badge_emission(self):
         """each badge material's emissive strength = its own x the badge's keyed glow ('cs_tuta.glow.<k>')"""
@@ -799,6 +806,8 @@ class TutaWardrobe(Wardrobe):
                 base = self._badge_base.get(m.name, float(s.default_value))
                 self._badge_base[m.name] = base
                 drive(s, 'default_value', self.arm, f'cs_tuta.glow.{k}', var='g', expression=f'{base!r}*g')
+                from .look import refresh_pbr
+                refresh_pbr(m)             # the PBR look's emission strength driven the same way
 
     # ------------------------------------------------------------------------------------------- keyed values
     def _prop(self, name, value, frame=None):
@@ -812,14 +821,17 @@ class TutaWardrobe(Wardrobe):
                 self._bake_paths.add(f'["{name}"]')
             else:
                 _key_interp(self.arm, f'["{name}"]', frame, 'CONSTANT')
+                self.arm.update_tag()      # see _paint.tag_keyed: the session's depsgraph takes the new keys
 
-    def _on_tuta(self):
-        return 'tuta' in ((WARDROBE.get(self.current) or {}).get('uf') or [])
+    def _on_tuta(self, frame=None):
+        """is the TuTa worn (at `frame`: the outfit keyed there, so a bake over an outfit switch hides the badges
+        off the TuTa, as the JS's update(t) does with the outfit worn at t)"""
+        return 'tuta' in ((WARDROBE.get(self.worn_at(frame)) or {}).get('uf') or [])
 
     def _badge_visible(self, k, on, frame):
         o = self.uf.get(k)
         if o is not None:
-            self._show(o, on and self._on_tuta(), frame)
+            self._show(o, on and self._on_tuta(frame), frame)
 
     # ------------------------------------------------------------------------------------------- the API
     @property
@@ -1048,7 +1060,10 @@ class TutaWardrobe(Wardrobe):
             a = b.node('ShaderNodeAttribute', attribute_type='OBJECT', attribute_name='cs_spark')
             av = b.s(a.outputs['Fac'])
             em = b.node('ShaderNodeEmission')
-            b.link(_cscale(b, tuple(c * 4.0 + 0.8 for c in glow), shape * av), em.inputs['Color'])
+            # three's AdditiveBlending (SrcAlpha, One) adds colorNode x opacityNode, both shape x a: the light added
+            # over what is behind is (glow x 4 + 0.8) x (shape x a)^2 (an Emission over a clear Transparent adds it)
+            op = shape * av
+            b.link(_cscale(b, tuple(c * 4.0 + 0.8 for c in glow), op * op), em.inputs['Color'])
             em.inputs['Strength'].default_value = 1.0
             tr = b.node('ShaderNodeBsdfTransparent')
             ad = b.node('ShaderNodeAddShader')
@@ -1069,6 +1084,11 @@ class TutaWardrobe(Wardrobe):
             bpy.context.scene.collection.objects.link(o)
             o['cs_spark'] = 0.0
             o.hide_render = o.hide_viewport = True
+            # hidden from the film's start, as the flight copy is: its first visibility key is the pop's (visible),
+            # and a key holds back to the start, so without this the flare shone beside the badge from frame 1
+            f_s = bpy.context.scene.frame_start
+            o.keyframe_insert('hide_render', frame=f_s)
+            o.keyframe_insert('hide_viewport', frame=f_s)
             md = o.modifiers.new('cs.billboard', 'NODES')      # a sprite: faces whichever camera renders
             md.node_group = _billboard_group()
             return o
@@ -1098,7 +1118,7 @@ class TutaWardrobe(Wardrobe):
                 ev['launch'] = {'p': p, 'q': q, 's': s, 'n': (q @ Vector((0.0, 0.0, 1.0))).normalized()}
             Fp = self.flight_at(k, ev, st['tau'])
             fl.location, fl.rotation_quaternion, fl.scale = Fp['p'], Fp['q'], Fp['s']
-            vis = self._on_tuta() and (Fp['alive'] or st['mode'] == 'resting')
+            vis = self._on_tuta(frame) and (Fp['alive'] or st['mode'] == 'resting')
             if frame is not None:
                 for pth in ('location', 'rotation_quaternion', 'scale'):
                     fl.keyframe_insert(pth, frame=frame)
@@ -1107,7 +1127,7 @@ class TutaWardrobe(Wardrobe):
             self._prop(f'cs_tuta.glow.{k}', 0.0 if st['mode'] == 'resting' else neon * Fp['glow'], frame)
             sp = self._spark(k)
             L = ev['launch']
-            if st['tau'] < 0.22 and self._on_tuta():
+            if st['tau'] < 0.22 and self._on_tuta(frame):
                 u = st['tau'] / 0.22
                 a = (1 - u) ** 1.5 * neon
                 n = L['n']
@@ -1161,10 +1181,12 @@ class TutaWardrobe(Wardrobe):
         """update(t) on every frame f0..f1 in order, keyed (an ejection's launch is captured at its first frame at
         or after `at`, so bake in one pass from before it); returns a report"""
         from ...media.timebase import Timebase
+        from ._paint import tag_keyed
         scene = scene or bpy.context.scene
         tb = Timebase.of(scene)
         n = 0
         self._baking, self._bake_paths = True, set()
+        tag_keyed(self.arm)              # keys made since the last depsgraph build (neon, outfits) evaluate per frame
         try:
             for f in range(int(f0), int(f1) + 1):
                 scene.frame_set(f)
@@ -1173,6 +1195,7 @@ class TutaWardrobe(Wardrobe):
         finally:
             self._baking = False
         _linear(self.arm, tuple(self._bake_paths))          # the scheduled badges' glow and ghost, per frame
+        tag_keyed(self.arm)
         for o in list(self._flyers.values()) + [self.uf[k] for k in BADGES if k in self.uf] + \
                 [e for s in self._sparks.values() for e in [s['flare']] + s['embers']]:
             _linear(o, ('location', 'rotation_quaternion', 'scale', '["cs_spark"]'))

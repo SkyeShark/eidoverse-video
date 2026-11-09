@@ -1,5 +1,5 @@
-"""ocean/util.py against eidoverse/sets/ocean/util.js itself (run in deno by util_dump.mjs): the rng streams, the shot
-maths (clamp01 smooth lerp seg ease), buildMips byte for byte on an odd-sized image, and the asset roots.
+"""ocean/util.py against eidoverse/sets/ocean/util.js itself (run in deno by util_dump.mjs): the rng streams, the
+easing (clamp01 smooth lerp seg ease), buildMips byte for byte on an odd-sized image, and the asset roots.
 
     python <worktree>/blender/tests/sets_daisy_ocean/test_util_parity.py        (system Python: no Blender needed)
 """

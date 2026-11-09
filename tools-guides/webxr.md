@@ -19,8 +19,8 @@ package is `blender/eidoblend/xr/`.
 
 The work that stays is making the set light enough for the headset: fewer,
 bigger meshes, no post effects (they do not run in XR here), glowing colours
-brightened instead of bloomed. The export reports what a set costs; it never
-cuts it.
+brightened instead of bloomed. The export reports what a set costs and cuts
+nothing unless asked (`max_image` scales its textures down for the headset).
 
 ## A Blender scene in the headset
 
@@ -47,9 +47,12 @@ bash run_blender.sh blender/eidoblend/xr/export_cli.py work/<id>/scene.blend wor
 ```
 
 `export_cli.py` also takes `--facing X,Y`, `--name`, `--shadows`,
-`--texel-density N`, `--max-texture N`, `--no-bake`, `--no-motion`,
+`--texel-density N`, `--max-texture N`, `--max-image N`, `--no-bake`,
+`--no-motion` (instances and deformation go out still, at the first frame),
 `--no-world`, `--world-frame F` and `--world-width W` (its docstring has them
-all). Then serve the bundle and open it in the headset:
+all). A `.blend` opened headless starts without add-ons: the export turns the
+VRM add-on on itself when the file holds a cast, so its MToon materials are
+read as MToon. Then serve the bundle and open it in the headset:
 
 ```sh
 python blender/eidoblend/xr/server.py --home /work/<id>/vr/index.html --log work/<id>/vr/results.jsonl
@@ -59,17 +62,22 @@ python3 eidoverse/xr/quest.py open https://<lan-ip>:8892/work/<id>/vr/index.html
 `set_xr` saves the scene's XR settings with the `.blend` (in Blender's axes):
 `street` is room metres per Blender unit when you stand in it (1.0: life
 size), `table` metres per unit on the table (left out: the set's width fits
-about 0.6 m), `start` and `facing` where you stand first (left out: the scene
-camera's ground point), `table_centre` the point in the middle of the table,
-`eye_height`, `name`, and `shadows` (the page casts sun and spot shadows: a
-desktop cost, off by default). It also writes the same two places as VR
-landmarks for Blender's own VR session (below).
+about 0.6 m), `start` and `facing` where you stand first (left out: where the
+scene camera stands, looking where it looks, levelled), `table_centre` the
+point in the middle of the table, `eye_height`, `name`, and `shadows` (the
+page casts sun and spot shadows: a desktop cost, off by default). It also
+writes the same two places as VR landmarks for Blender's own VR session
+(below). `export_xr(out_dir, scene)` and `survey_xr(scene)` take any scene of
+the file: it is made the context scene while they run (`context_scene`), as
+the glTF exporter, the depsgraph and the bakes all read the context's.
 
 `survey_xr(scene)` (and `--survey`) is cheap — no bake, no GLB — and says
 what an export would do: objects by type, what glTF cannot hold, which
 materials would be baked and which channels, the motion it would convert, the
-animated values it carries or cannot, the lights, the world, the view, and the
-triangles rendering now. Run it on a film before exporting it.
+animated values it carries or cannot, the lights, the world, the view, the
+triangles rendering now, and the film's own image textures as the headset
+would hold them, graded (`over` asks for `max_image`). Run it on a film before
+exporting it.
 
 ### What the export writes
 
@@ -88,8 +96,8 @@ triangles rendering now. Run it on a film before exporting it.
 | --- | --- |
 | keyed transforms, NLA strips, VRMA clips on a VRM, drivers, constraints (Follow Path, Track To, Child Of ...), parenting | sampled every frame from the evaluated scene: TRS channels, skins with their joints |
 | shape-key values | morph target weights |
-| Geometry Nodes or particle instances that move | `instances_to_objects`: one object per instance, keyed every frame, the mesh shared |
-| a still scatter | linked duplicates under one empty: `EXT_mesh_gpu_instancing` (one draw, three's InstancedMesh) |
+| Geometry Nodes, particle or collection instances that move | `instances_to_objects`: one object per instance, keyed every frame, the mesh shared |
+| a still scatter (or kit pieces placed by collection instances) | linked duplicates under one empty: `EXT_mesh_gpu_instancing` (one draw, three's InstancedMesh) |
 | a mesh deformed by Geometry Nodes, Wave, a cloth or ocean cache | `deform_to_shape_keys`: a shape key per sampled frame (48 at most, 64 MB of morph data at most), cross-faded: morph targets |
 | metaballs | their surface at the export frame, as a mesh |
 | curves, surfaces, text | the exporter's own conversion to meshes |
@@ -101,9 +109,10 @@ triangles rendering now. Run it on a film before exporting it.
 | sun, point, spot lights | `KHR_lights_punctual` in Blender's own watts (lighting mode COMPAT, below) |
 | area lights | three `RectAreaLight`s from the manifest (glTF has no area light) |
 | light energy / colour, emission strength, visibility, keyed | `choreo.json` tracks the page applies every frame |
-| the world | `world.hdr` (or, with `--no-world`, its flat colour as the background and an ambient light) |
+| the world | `world.hdr` (or, with `--no-world`, one flat colour, its radiance averaged over the sphere — measured with a 64 × 32 Cycles render when it is procedural — as the background and a uniform environment, which lights metals too) |
 | an object tagged `xr_material` | drawn by the page with its own TSL material (below) |
-| volumes, Grease Pencil, hair curves, strand particles, speakers, light probes | not glTF: named in the warnings |
+| a haze or fog box (a mesh whose materials are volumes only) | left out and named in the warnings: the exporter would write it as an opaque grey box round the set |
+| volume objects, Grease Pencil, hair curves, strand particles, speakers, light probes | not glTF: named in the warnings |
 
 Two faults of Blender 5.2's glTF exporter are handled inside `export_xr`.
 When it folds still instances into `EXT_mesh_gpu_instancing` it renumbers the
@@ -117,11 +126,27 @@ its own instance nodes (`export_gn_mesh`) double what it meshes itself — Blend
 slide-to-zero pass: with the motion bake every instance is an object already,
 so that option is off.
 
+A baked normal map needs one tangent frame from end to end. Blender 5.2's
+tangent-space normal bake writes its texels on the bake's UV map but in the
+tangent frame of the mesh's *active* UV map (measured with three maps turned
+against each other), and the exporter computes the GLB's `TANGENT` attribute
+on the active map too. So `bake_for_gltf` makes its `gltf_bake` map the active
+one (the active *render* map, which the film's own image textures read, stays):
+the normal map, the GLB's tangents and the normal texture's own `texCoord`
+then agree, and the page lights a baked bump's slopes as EEVEE does — on a
+mesh with its own UV map too, in a viewer that makes its tangents again from
+the texture's UVs as glTF prescribes, and through Draco.
+
 Nothing is decimated. The manifest's `counts` (triangles, draws, texture
 megabytes on the GPU, joints, morph targets) and `quest` grade the set against
 the budgets measured in the performance notes below: triangles ok to 1.5 M
 (heavy to 2.2 M), draws ok to 60 (heavy to 150), textures ok to 256 MB (heavy
-to 512).
+to 512). Textures are the one budget the export can meet for you without
+touching the set: `max_image=2048` (`--max-image 2048`) scales the film's own
+image textures down to 2048 px on the long side for the bundle (in memory; the
+`.blend` is not saved), since the headset uploads every texture uncompressed —
+a 4096 px map with its mips is about 90 MB of its memory. My robot body's 4K
+maps grade its walk `over` (783 MB) as they are, and `ok` (246 MB) at 2048.
 
 The pieces work on their own too:
 
@@ -134,7 +159,9 @@ MO.instances_to_objects(bpy.data.objects['crowd'])
 MO.deform_to_shape_keys(bpy.data.objects['flag'], max_keys=48)
 M.convert_mtoon(objects)            # a cast's MToon -> glTF-shaped Principled stand-ins
 M.bake_for_gltf(meshes, 'work/<id>/vr/textures', texel_density=24)   # Cycles on the GPU: a GPU job
+M.cap_images(meshes, max_size=2048)  # their image textures scaled down for the headset (in memory)
 W.bake_world_equirect(scene, 'work/<id>/vr/world.hdr', width=2048)  # also a GPU job
+MO.light_intensity(bpy.data.objects['key'])   # what a three light takes: lux, candela, or an area light's radiance
 ```
 
 ### Light, colour and the sky
@@ -147,11 +174,42 @@ W.bake_world_equirect(scene, 'work/<id>/vr/world.hdr', width=2048)  # also a GPU
   irradiance in both. A Blender area light of P W and area A is a one-sided
   Lambertian emitter of radiance P / (π A), which is a three
   `RectAreaLight`'s intensity. A light's colour temperature is folded into
-  its colour.
+  its colour; with Normalize off, its power is multiplied by its area, as the
+  exporter does. Keyed energy and colour play on the page for every kind,
+  area lights included (`choreo.json`).
+- **Area lights face where they face in Blender.** Blender's area light and
+  three's `RectAreaLight` both shine down their local -z with the width along
+  their local x, so the light keeps its own axes in three's world: its rotation
+  there is M R (M the Blender-to-three turn), not the M R M⁻¹ a mesh's node
+  takes (that leaves the light shining 90° off, at the sky). The glTF exporter
+  corrects cameras and lights the same way; `choreo.quat_to_three` does it for
+  the tracks.
+- **Light at any scale.** The stage scales the set and the lights in it, but
+  light does not scale by itself: a point or spot light falls off with the
+  square of the distance the stage shrinks (on a 1:25 table a lamp would light
+  the set 625 times brighter), and three sizes a `RectAreaLight` without its
+  parents' scale. So every frame the page gives point and spot lights their
+  intensity × s² (their range × s), area lights s times their size, and the
+  spot lights' shadow cameras s times their range, s being the stage's scale:
+  the table view is lit as the set is at life size (the tests hold the 1:25
+  table against EEVEE through a camera 25 times farther away).
+- **A sun's shadow is framed on the set.** three draws a directional light's
+  shadow from a camera *at* the light, looking along it, but a Blender sun has
+  no place: eidoblend's robot example and the flora tests leave theirs at the
+  origin, under the set, where a box round the light sees nothing above the
+  ground (no shadow at all). So each frame the page fits the sun's shadow box
+  round the set's bounds as the light sees them (its near plane may lie
+  behind the light), at any stage scale or turn, with its bias measured in
+  shadow texels (two along the surface normal, one in depth), so a low sun
+  across the fitted box leaves no acne.
+- **Textures are filtered anisotropically** (8x, or the GPU's most): a film's
+  floor at a grazing angle stays as sharp as EEVEE draws it.
 - **The view transform.** The page tone-maps as the scene does: Standard →
   none, AgX → `AgXToneMapping`, Khronos PBR Neutral → `NeutralToneMapping`,
   Filmic → ACES (the nearest; a warning); the exposure carries over. Looks are
-  not carried (a warning).
+  not carried (a warning). three's AgX is Filament's fit of the earlier AgX,
+  not Blender 5.2's: it draws darks a little lighter (a dusk sky Blender shows
+  at 58 of 255 comes out at 71; mid-tones within about 5).
 - **The sky.** `world.hdr` is the world at the export's first frame (or
   `world_frame`), linear and unclipped. The page draws it on a dome round your
   head that turns with the stage, and lights with it (`scene.environment`,
@@ -237,6 +295,11 @@ data = choreo.sample_tracks(scene, ['crow_peck', 'crow_caw', 'cam'], step=2, rot
 choreo.markers(scene)                    # [{'name', 't', 'frame', 'camera'}]: cuts and cues
 choreo.write(scene, 'work/<id>/vr/choreo.json', names=['crow_peck', 'cam'])   # + markers + property tracks
 ```
+
+A track's rotation is the one a three object of that kind takes: a camera's
+or a light's is the one a three camera or light takes (it looks down its own
+-z: `camera.quaternion.set(qx, qy, qz, qw)` as it is); anything else's is the
+one its converted geometry takes (a GLB node's).
 
 ## The kit
 
@@ -378,11 +441,19 @@ render.
 The tests (`blender/tests/xr/`, `run_all.sh` runs them in order) cover the
 path end to end: the kit's example rebuilt in Blender against the original
 page; a lit, animated set with one of each thing glTF must be taught, number
-by number against Blender; three films round one built (a product shot, two
-crows, my robot walking); every function and option of `xr_kit.js` on an
-exported stage (`kit_check.html`, with a stand-in session for the loop, the
-pads and the rig in a session); the servers; and every `quest.py` command
-against a stand-in adb.
+by number against Blender, and its 1:25 table view against EEVEE at life size;
+a bump baked on meshes with UV maps of their own under a low sun left at the
+origin (the baked normals read back the glTF way, the page's shadows and
+ridges against EEVEE's), and an export of a scene that is not the context
+scene; four films round one built (a product shot lit by two area lights, two
+crows, my robot walking with its maps capped at 2048 px, the look family's
+theatre with its spot lights, haze and a camera cut), each photographed in
+the page through the camera it shows at each time beside EEVEE's frame (EEVEE
+with no compositor and no volumes, as the page has neither); the compressed
+bundles; every `export_cli.py` option; `survey_xr` on five films; every
+function and option of `xr_kit.js` on an exported stage (`kit_check.html`,
+with a stand-in session for the loop, the pads and the rig in a session); the
+servers; and every `quest.py` command against a stand-in adb.
 
 ## Performance notes (Quest 3)
 
@@ -416,18 +487,28 @@ a crowd moves first.
 - **MToon's toon look**: shade colour, rim, matcap and outlines (the page draws
   the Principled stand-in; three-vrm's MToon material would draw the real one).
 - **Volumes, Grease Pencil, hair curves, strand particles**: not glTF; the
-  export names them and the page shows nothing there.
+  export names them and the page shows nothing there (a haze box's light
+  shafts and a theatre's beams included).
+- **Blender's AgX on the page**: three's `AgXToneMapping` is a fit of the
+  earlier AgX, so darks come out a little lighter than in EEVEE (above).
+- **Occlusion of the world's light**: the page lights with `world.hdr`
+  unoccluded and has no ambient occlusion, so the contacts EEVEE darkens (under
+  a walker's feet, in corners) are lighter on the page; its sun shadows are
+  there, and soften less than EEVEE's.
 - **A deforming mesh over the morph budget** (more than about 1.3 million
   vertices, or a vertex count that changes): exported still, at its first
   frame, with a warning. Wind on a big meadow wants a page-side material.
 - **Post effects** (bloom, depth of field, motion blur, the compositor): the
   page has none, by the kit's rules.
 - **Audio**: the film's sound is not exported with the page.
-- **Area light spread** under 180°, light shapes other than a rectangle (a disk
-  becomes a rectangle of the same area), and lights' shadow softness.
-- **Texture compression** (KTX2 / Basis) **and a texture size cap for the
-  headset**: images go in as PNG, JPEG or WebP at their own size (my robot
-  body's 4K maps grade its walk `over` on textures: about 780 MB on the GPU).
+- **Area light shadows**: three's `RectAreaLight` casts none, so what an area
+  light shades in EEVEE (a stool's soft shadow on the floor, a crow's on the
+  boards) is lit on the page; and area light spread under 180°, light shapes
+  other than a rectangle (a disk becomes a rectangle of the same area),
+  point lights' shadows (the page casts sun and spot shadows only), and
+  punctual lights' shadow softness (the page's shadow maps are hard).
+- **Texture compression** (KTX2 / Basis): images go in as PNG, JPEG or WebP
+  and are uploaded uncompressed; `max_image` caps their size instead.
 - **The kit's controls in Blender's own VR session**: the add-on's action maps
   drive it (teleport, fly, grab); its rays are light or dark, not the kit's
   orange laser, and it has no veil.

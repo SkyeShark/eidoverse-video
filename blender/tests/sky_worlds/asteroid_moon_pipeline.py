@@ -100,4 +100,29 @@ for name, sun in (('lit', (0.6, -0.5, 0.62)), ('terminator', (1.0, 0.15, 0.1))):
     cam.rotation_euler = (math.radians(90), 0.0, 0.0)
     sc.render.filepath = os.path.join(OUT, 'asteroid_moon_%s.png' % name)
     bpy.ops.render.render(write_still=True)
+
+# ---- every bake option (small bakes, nothing written): detail, hiSub, seed, squash, reliefAmp, tile ----
+small = dict(bakeSize=128, detail=6, hiSub=2)
+ref = bake_asteroid_moon(height, albedo, opts=small)
+ok &= check('detail sets the runtime icosahedron (20 (d + 1)^2 faces)', ref['runtime_vertices'] == 20 * 49 * 3,
+            '%d vertices at detail 6' % ref['runtime_vertices'])
+ok &= check('hiSub sets the high poly (hiSub^2 sub-triangles per base face)', ref['bake_triangles'] == 20 * 49 * 4,
+            '%d triangles at hiSub 2' % ref['bake_triangles'])
+ok &= check('bakeSize sets the atlases', ref['albedo'].shape[:2] == (128, 128) == ref['normal_atlas'].shape[:2])
+
+
+def spread(p):
+    e = p.max(0) - p.min(0)
+    return e / e.max()
+
+
+for name, extra, test in (
+        ('seed', dict(seed=11), lambda r: np.abs(r['positions'] - ref['positions']).max() > 0.01),
+        ('squash', dict(squash=(1.0, 1.0, 1.0)),
+         lambda r: np.abs(spread(r['positions']) - 1).max() < np.abs(spread(ref['positions']) - 1).max() - 0.05),
+        ('reliefAmp', dict(reliefAmp=0.0),
+         lambda r: np.abs(r['positions'] - ref['positions']).max() > 0.005),
+        ('tile', dict(tile=4.4), lambda r: np.abs(r['albedo'] - ref['albedo']).mean() > 0.005)):
+    res2 = bake_asteroid_moon(height, albedo, opts=dict(small, **extra))
+    ok &= check('%s changes the bake (%s)' % (name, extra), test(res2))
 print('PASS asteroid pipeline' if ok else 'FAIL asteroid pipeline')

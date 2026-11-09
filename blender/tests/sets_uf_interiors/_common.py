@@ -1,5 +1,5 @@
 """Shared helpers of the interiors' Blender tests: PASS / FAIL lines, the render setup the WebGPU probes used (their
-bloom 0.55 / 0.5 / 0.7, the claudesona at her mark playing idle), image statistics, a contact sheet."""
+bloom 0.55 / 0.5 / 0.7), the claudesona at the mark for scale (opt-in), image statistics, a contact sheet."""
 import math
 import os
 import sys
@@ -44,11 +44,10 @@ def args(defaults):
 
 
 PROBE_BLOOM = {'strength': 0.55, 'radius': 0.5, 'threshold': 0.7}     # the WebGPU set probes' bloom
-FILM_BLOOM = {'strength': 0.45, 'radius': 0.5, 'threshold': 0.8}      # the film's (scene.js _bloomParams)
 
 
 def render_setup(scene, res=(960, 540), samples=16, bloom=True, look='None', exposure=0.0, bloom_opts=None):
-    """EEVEE, AgX, the probes' bloom (bloom_opts: another, e.g. FILM_BLOOM); small probes (the GPU is shared)."""
+    """EEVEE, AgX, the probes' bloom (bloom_opts: another); small probes (the GPU is shared)."""
     r = scene.render
     r.engine = 'BLENDER_EEVEE'
     r.resolution_x, r.resolution_y = res
@@ -66,8 +65,9 @@ def render_setup(scene, res=(960, 540), samples=16, bloom=True, look='None', exp
 
 
 def load_singer(location, heading_deg=0.0, scale=0.87, parent=None, vrm='claude_suit', wear=None):
-    """the claudesona (claude_suit.vrm) at her mark, at the sets' scale, playing idle (as the WebGPU probes).
-    vrm='claude_suit_wardrobe', wear='tuta': the film's outfit (characters.claudesona.make_wardrobe)."""
+    """the claudesona (claude_suit.vrm) at the mark, at the scale the sets' cams are framed for, playing idle (a
+    scale figure, as in the WebGPU probes). vrm='claude_suit_wardrobe', wear='tuta': the TuTa outfit
+    (characters.claudesona.make_wardrobe)."""
     from eidoblend.characters.vrm import load_vrm
     from eidoblend.characters.vrma import play_vrma_default
     h = load_vrm(vrm, location=location, rotation=heading_deg)
@@ -85,10 +85,10 @@ def load_singer(location, heading_deg=0.0, scale=0.87, parent=None, vrm='claude_
     return h
 
 
-def film_look(scene, look='argue', palette=None):
-    """The film's post pass (look/post/aeropittura.py) under the HUD, as the WebGPU probes ran it; `palette`
-    overrides the look's palette weight (the showroom's 'cold': argue with the palette at 0.22). Returns its
-    uniforms."""
+def apply_look(scene, look='argue', palette=None):
+    """An aeropittura look (look/post/aeropittura.py) under the HUD, as the WebGPU probes ran it; `palette`
+    overrides the look's palette weight (on the white showroom 0.22 keeps the stage white: 'argue, cold'). Returns
+    its uniforms."""
     from eidoblend.look.post import custom_effects as fx, aeropittura as AP
     e = fx.apply_to(scene, 'aeropittura', {'aeropittura': {'layer': 'under'}})
     U = e.uniforms['aeropittura']

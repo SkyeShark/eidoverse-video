@@ -18,13 +18,15 @@ Modules (each mirrors its eidoverse/robotics/ source, MIT):
     materials   materials.js: the linear mask recolour, the palette, textures=False
     io          io.js: the shared caches (json_file, glb_json, glb_accessor, shared_image, check_anisotropy,
                 cache_stats, asset_root)
-    studio      studio.js: studio(scene, grid), frame_camera(camera, objects, direction, margin), world_box, make_camera
+    studio      studio.js: studio(scene, grid), frame_camera(camera, objects, direction, margin), world_box, make_camera,
+                match_display (the unlit background and one-pixel grid shown as the WebGPU film shows them)
     facade      robotics_kit.js: RoboticsKit (version, ready, catalog, load, load_part, connect, create_ptfe_tube,
                 service_loop), make_bot
     inspector   inspector/viewer.js: inspector_scene(model) -> Inspector, the scene that plays the inspector's role
                 (motions, time, colours, wireframe, part picking by ray cast, UV split view, joint sliders, the
                 fabrication process with its stock / timing / workpiece controls)
-    rig         the inspector's joint sliders: rig_joints / set_slider / unrig_joints (simple-expression drivers)
+    rig         the inspector's joint sliders: rig_joints / measure_joints / set_slider / unrig_joints
+                (simple-expression drivers)
     examples    examples/robotics/{assembly,mantis,motion}.scene.js: EXAMPLES['assembly'] ... (scenes/*.py + .json
                 run them through the harness)
     mech_parts  the older production engine's mech_parts.js (MechParts): procedural mechanical part generators
@@ -39,6 +41,6 @@ from .motion import track_frame  # noqa: F401
 from .running import RunningController, create_running_controller  # noqa: F401
 from .solvers import (SerialArm, articulated_demo, constrain_gantry_pose, gantry_demo, grasp_values,  # noqa: F401
                       rotary_fixture_setup, scara)
-from .studio import frame_camera, make_camera, studio, world_box  # noqa: F401
+from .studio import frame_camera, make_camera, match_display, studio, world_box  # noqa: F401
 
 ASSET_ROOT = asset_root()          # index.js assetRoot: eidoverse/assets/robotics/

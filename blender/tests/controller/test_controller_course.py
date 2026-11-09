@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _ctrl_stage as T  # noqa: E402
 
 import numpy as np  # noqa: E402
+from mathutils import Vector  # noqa: E402
 
 from eidoblend.characters import load_vrm  # noqa: E402
 from eidoblend.characters.controller import CollisionWorld, Locomotion  # noqa: E402
@@ -174,7 +175,11 @@ def main():
         R.check(f'turn on the spot {k + 1} stays on the spot', moved < 0.02, f'the root moved {moved * 100:.1f} cm')
     R['stance_ankle_err_over_2mm'] = [x for x in rep['ankle_err_mm'] if x[1] > 2.0]
     R['swing_ankle_err_mm_max'] = rep['worst'].get('swing_ankle_err_mm')
+    if T.arg(ARGS, '--dump'):
+        T.dump_frames(R, rep, [tuple(int(v) for v in rg.split('-')) for rg in T.arg(ARGS, '--dump').split(',')])
     T.keyed_matches(R, me, frames)
+    fm = T.mesh_feet_check(R, me, f0, f1)
+    turn_feet(R, fm, recs, runs)
     R['worst'] = rep['worst']
     R['flight_frames'] = len(rep['flight'])
     R['double_support_frames'] = len(rep['double_support'])
@@ -182,6 +187,23 @@ def main():
     R['action'] = rep['action']
     R['support_modes'] = sorted(modes)
     shots(sc, me, recs, segs)
+
+
+def turn_feet(R, fm, recs, runs):
+    """a turn on the spot steps round on its feet: in every frame of every turn a visible boot touches the ground
+    (FootMesh: its nearest point within 3 mm of a surface), and neither boot is in it"""
+    for k, (ia, ib) in enumerate(runs):
+        fa, fb = recs[ia]['f'], recs[ib]['f']
+        lifted, worst_gap = [], 0.0
+        for f in range(fa, fb + 1):
+            m = fm.at(f)
+            g = min(v['gap_mm'] for v in m.values())        # the nearer boot's distance to a surface (- inside)
+            worst_gap = max(worst_gap, g)
+            if g > 3.0:
+                lifted.append([f, g])
+        R.check(f'turn on the spot {k + 1}: a foot on the ground in every frame (a visible boot within 3 mm of it)',
+                not lifted, f'{len(lifted)} of {fb - fa + 1} frames with both boots off it; the lower boot at most '
+                            f'{worst_gap:.1f} mm away')
 
 
 def shots(sc, me, recs, segs):
@@ -226,6 +248,21 @@ def shots(sc, me, recs, segs):
             names.append(nm)
         sheets['feet'] = names
     S.append(T.fixed_shot('wide', recs[len(recs) // 3]['f'], (7.5, 4.0, 4.5), (0.0, 9.0, 0.3), lens=24.0))
+    # the first turn on the spot, close on the feet from beside them (a boot must touch the floor in every frame)
+    tr = [r for r in recs if r['mode'] == 'turn']
+    if tr:
+        a = tr[0]['f']
+        b = next((r['f'] for r in recs if r['f'] > a and r['mode'] != 'turn'), tr[-1]['f'])
+        p = recs[a - r0]['feet_world']
+        h = recs[a - r0]['heading']
+        left = Vector((math.cos(h), math.sin(h), 0.0))
+        names = []
+        for k, f in enumerate(range(a, b + 1, max(1, (b - a) // 11))):
+            nm = f'turn_feet_{k:02d}'
+            S.append(T.fixed_shot(nm, f, (p[0] + left.x * 1.5, p[1] + left.y * 1.5, p[2] + 0.22),
+                                  (p[0], p[1], p[2] + 0.08), lens=50.0))
+            names.append(nm)
+        sheets['turn_feet'] = names
     T.save(R, sc, S, sheets)
 
 

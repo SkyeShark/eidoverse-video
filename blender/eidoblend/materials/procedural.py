@@ -161,7 +161,8 @@ def weave(w=512, h=512, opts=None, name='pm_weave', **kw):
 
 
 def grain(w=512, h=512, opts=None, name='pm_grain', **kw):
-    """Directional grain: wood, leather, brushed metal. scale 4, stretch 8 (elongation along v), contrast 1.2."""
+    """Directional grain: wood, leather, brushed metal. scale 4, stretch 8 (the fBm's frequency along v times
+    stretch: the grain runs along u), contrast 1.2."""
     o = _opts(opts, kw)
     return image_from_canvas(_gen.grain(w, h, o.get('scale'), o.get('stretch'), o.get('contrast')), name,
                              kind='grain')
@@ -238,13 +239,22 @@ class _Mat:
         return nm
 
 
+MESH_MATERIAL_KEYS = ('color', 'map', 'roughness', 'roughness_map', 'metalness', 'metalness_map', 'normal_map',
+                      'normal_scale', 'clearcoat', 'clearcoat_roughness', 'clearcoat_roughness_map', 'transmission',
+                      'thickness', 'ior', 'ao_map')
+
+
 def mesh_material(opts=None, name='pm_material', repeat=(1.0, 1.0), uv_map=None, **kw):
     """three's MeshStandardMaterial / MeshPhysicalMaterial options -> a Principled material (what a recipe that
     builds its own material from generated maps uses). Takes: color, map, roughness, roughness_map, metalness,
     metalness_map, normal_map, normal_scale (number or (x, y): Blender's Normal Map has one strength, x is used),
     clearcoat, clearcoat_roughness, clearcoat_roughness_map, transmission (made subsurface: see create_skin),
-    thickness, ior, ao_map (unwired: EEVEE shades its own occlusion)."""
+    thickness, ior, ao_map (unwired: EEVEE shades its own occlusion). Any other key is ignored with three's warning
+    ("'rougness' is not a property")."""
     o = _opts(opts, kw)
+    for k in o:
+        if k not in MESH_MATERIAL_KEYS:
+            print("[procedural] mesh_material: '%s' is not a property of the material (ignored)" % k)
     m = _Mat(name, repeat, uv_map)
     m.color(o.get('color'), o.get('map'))
     m.scalar('Roughness', o.get('roughness', 1.0), o.get('roughness_map'), 1)

@@ -381,6 +381,6 @@ if __name__ == "__main__":
     with open(args.output, "w") as f:
         json.dump(lines, f, indent=2)
 
-    print(f"Aligned {len(lines)} lines → {args.output}")
+    print(f"Aligned {len(lines)} lines -> {args.output}")
     for line in lines:
         print(f"  [{line['start']:.1f}s - {line['end']:.1f}s] {line['text']}")

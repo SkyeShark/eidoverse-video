@@ -1,0 +1,302 @@
+{
+ "machine": "RTX 5090 Laptop GPU, Blender 5.2.0 headless, OpenGL 4.6 compute (gpu.compute.dispatch), 2026-11-08",
+ "gpu_bench2": {
+  "platform": [
+   "NVIDIA Corporation",
+   "NVIDIA GeForce RTX 5090 Laptop GPU/PCIe/SSE2",
+   "4.6.0 NVIDIA 621.14"
+  ],
+  "512": {
+   "ms_per_step": 0.0162,
+   "python_issue_ms_per_step": 0.0053,
+   "readback_ms": 7.6,
+   "finite": true
+  },
+  "1024": {
+   "ms_per_step": 0.0611,
+   "python_issue_ms_per_step": 0.0035,
+   "readback_ms": 18.5,
+   "finite": true
+  },
+  "2048": {
+   "ms_per_step": 0.2315,
+   "python_issue_ms_per_step": 0.01,
+   "readback_ms": 148.1,
+   "finite": true
+  },
+  "4096": {
+   "ms_per_step": 0.4872,
+   "python_issue_ms_per_step": 0.004,
+   "readback_ms": 485.0,
+   "finite": true
+  },
+  "numpy_512": {
+   "ms_per_step": 55.1
+  },
+  "numpy_1024": {
+   "ms_per_step": 592.4
+  }
+ },
+ "gpu_spl": {
+  "direct1024": {
+   "sec": 1.17,
+   "steps": 8000,
+   "creep_sub": 1,
+   "D": 0.003375,
+   "max": 4033.929931640625
+  },
+  "c2f_256": {
+   "sec": 0.04,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.030000000000000002,
+   "max": 2346.002685546875
+  },
+  "c2f_512": {
+   "sec": 0.08,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.007500000000000001,
+   "max": 2386.440673828125
+  },
+  "c2f_1024": {
+   "sec": 0.29,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.0018750000000000001,
+   "max": 2615.64013671875
+  },
+  "direct2048": {
+   "sec": 12.82,
+   "steps": 16000,
+   "creep_sub": 1,
+   "D": 0.00084375,
+   "max": 5595.1064453125
+  }
+ },
+ "gpu_spl2": {
+  "T_direct1024": {
+   "sec": 3.28,
+   "steps": 8000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 3968.73388671875
+  },
+  "T_c2f_256": {
+   "sec": 0.1,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2308.91552734375
+  },
+  "T_c2f_512": {
+   "sec": 0.1,
+   "steps": 1000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2293.909912109375
+  },
+  "T_c2f_1024": {
+   "sec": 0.77,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2760.71142578125
+  },
+  "T_c2f_2048": {
+   "sec": 4.35,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 3250.69091796875
+  }
+ },
+ "gpu_spl3": {
+  "Dconst_256": {
+   "sec": 0.08,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2594.224365234375
+  },
+  "Dconst_512": {
+   "sec": 0.1,
+   "steps": 1000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2556.173828125
+  },
+  "Dconst_1024": {
+   "sec": 0.74,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2981.5068359375
+  },
+  "Dconst_2048": {
+   "sec": 3.9,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 3344.79150390625
+  },
+  "Dshrink_256": {
+   "sec": 0.08,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2594.224365234375
+  },
+  "Dshrink_512": {
+   "sec": 0.1,
+   "steps": 1000,
+   "creep_sub": 1,
+   "D": 0.03,
+   "max": 2556.173828125
+  },
+  "Dshrink_1024": {
+   "sec": 0.72,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.0075,
+   "max": 2980.68115234375
+  },
+  "Dshrink_2048": {
+   "sec": 4.69,
+   "steps": 2000,
+   "creep_sub": 1,
+   "D": 0.002,
+   "max": 3358.8828125
+  }
+ },
+ "metrics": {
+  "direct1024": {
+   "pixel_m": 19.5312,
+   "extent_km": 20.0,
+   "relief_m": 3613.7549,
+   "hypsometric_integral": 0.292,
+   "slope_p10": 5.8896,
+   "slope_p50": 42.1219,
+   "slope_p90": 72.8717,
+   "slope_p99": 81.4531,
+   "frac_slope_lt5": 0.0914,
+   "frac_slope_gt30": 0.6643,
+   "frac_slope_gt40": 0.5248,
+   "frac_slope_gt50": 0.4153,
+   "depression_area_frac": 0.0409,
+   "depressions_per_100km2": 1.25
+  },
+  "c2f_1024": {
+   "pixel_m": 19.5312,
+   "extent_km": 20.0,
+   "relief_m": 2399.7147,
+   "hypsometric_integral": 0.2831,
+   "slope_p10": 5.7214,
+   "slope_p50": 53.0189,
+   "slope_p90": 72.8435,
+   "slope_p99": 77.785,
+   "frac_slope_lt5": 0.0926,
+   "frac_slope_gt30": 0.7164,
+   "frac_slope_gt40": 0.6274,
+   "frac_slope_gt50": 0.5336,
+   "depression_area_frac": 0.0263,
+   "depressions_per_100km2": 6.75
+  },
+  "direct2048": {
+   "pixel_m": 9.7656,
+   "extent_km": 20.0,
+   "relief_m": 5285.0397,
+   "hypsometric_integral": 0.3063,
+   "slope_p10": 12.3345,
+   "slope_p50": 61.0771,
+   "slope_p90": 81.7426,
+   "slope_p99": 86.4672,
+   "frac_slope_lt5": 0.0611,
+   "frac_slope_gt30": 0.7981,
+   "frac_slope_gt40": 0.7037,
+   "frac_slope_gt50": 0.6165,
+   "depression_area_frac": 0.0757,
+   "depressions_per_100km2": 4.5
+  },
+  "T_direct1024": {
+   "pixel_m": 19.5312,
+   "extent_km": 20.0,
+   "relief_m": 3726.3145,
+   "hypsometric_integral": 0.3389,
+   "slope_p10": 4.6791,
+   "slope_p50": 32.6941,
+   "slope_p90": 48.7155,
+   "slope_p99": 54.1506,
+   "frac_slope_lt5": 0.1039,
+   "frac_slope_gt30": 0.5531,
+   "frac_slope_gt40": 0.3528,
+   "frac_slope_gt50": 0.0681,
+   "depression_area_frac": 0.0263,
+   "depressions_per_100km2": 0.75
+  },
+  "T_c2f_1024": {
+   "pixel_m": 19.5312,
+   "extent_km": 20.0,
+   "relief_m": 2539.7116,
+   "hypsometric_integral": 0.3444,
+   "slope_p10": 3.9342,
+   "slope_p50": 31.4393,
+   "slope_p90": 41.3674,
+   "slope_p99": 46.2674,
+   "frac_slope_lt5": 0.1162,
+   "frac_slope_gt30": 0.5423,
+   "frac_slope_gt40": 0.1515,
+   "frac_slope_gt50": 0.0019,
+   "depression_area_frac": 0.0295,
+   "depressions_per_100km2": 1.75
+  },
+  "T_c2f_2048": {
+   "pixel_m": 9.7656,
+   "extent_km": 20.0,
+   "relief_m": 3023.3344,
+   "hypsometric_integral": 0.3583,
+   "slope_p10": 5.001,
+   "slope_p50": 32.0615,
+   "slope_p90": 42.6861,
+   "slope_p99": 47.7586,
+   "frac_slope_lt5": 0.1,
+   "frac_slope_gt30": 0.5616,
+   "frac_slope_gt40": 0.1995,
+   "frac_slope_gt50": 0.0012,
+   "depression_area_frac": 0.015,
+   "depressions_per_100km2": 1.75
+  },
+  "Dconst_2048": {
+   "pixel_m": 9.7656,
+   "extent_km": 20.0,
+   "relief_m": 3115.495,
+   "hypsometric_integral": 0.3517,
+   "slope_p10": 6.5828,
+   "slope_p50": 33.5053,
+   "slope_p90": 44.149,
+   "slope_p99": 48.5891,
+   "frac_slope_lt5": 0.085,
+   "frac_slope_gt30": 0.609,
+   "frac_slope_gt40": 0.2548,
+   "frac_slope_gt50": 0.0035,
+   "depression_area_frac": 0.0014,
+   "depressions_per_100km2": 0.25
+  },
+  "Dshrink_2048": {
+   "pixel_m": 9.7656,
+   "extent_km": 20.0,
+   "relief_m": 3111.2998,
+   "hypsometric_integral": 0.3446,
+   "slope_p10": 10.4771,
+   "slope_p50": 40.7354,
+   "slope_p90": 48.5265,
+   "slope_p99": 52.539,
+   "frac_slope_lt5": 0.0661,
+   "frac_slope_gt30": 0.7858,
+   "frac_slope_gt40": 0.5454,
+   "frac_slope_gt50": 0.0515,
+   "depression_area_frac": 0.0041,
+   "depressions_per_100km2": 3.0
+  }
+ }
+}

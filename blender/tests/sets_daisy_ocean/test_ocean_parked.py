@@ -1,5 +1,6 @@
 """The set parked anywhere (ctx['matrix']): built once at the world origin and once moved 120 m and turned 35 degrees,
-her mark, the cameras (and their keys), the moon and the sea's moon uniform must move with it, and her daisies (the
+the mark and the eye point, a figure stood on the mark, the moon (its lamp and the sea's moon uniform), the fill aimed
+at a camera, the porch lamp's glint on the cove, a placed page and its keys must all move with it, and her daisies (the
 flora field lives in world space, planted through the set's matrix) must stand round the parked mark. No render.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy_ocean/test_ocean_parked.py
@@ -22,39 +23,40 @@ from eidoblend.sets.daisy import ocean  # noqa: E402
 ck = C.Checks('parked')
 sc = bpy.context.scene
 sc.render.fps = 24
-PARTS = ('daisies', 'sea', 'lights', 'pages', 'world')
+PARTS = ('daisies', 'sea', 'lights', 'pages', 'house', 'world')
 M = Matrix.Translation((120.0, -45.0, 3.5)) @ Matrix.Rotation(math.radians(35.0), 4, 'Z')
 
 
 def build(matrix, name):
     reset_flora_occupancy()
+    O = ocean.build({'scene': sc, 'parts': PARTS, 'matrix': matrix, 'name': f'set_ocean_{name}'})
+    g = O.group.matrix_world
     cam = bpy.data.objects.new(f'cam_{name}', bpy.data.cameras.new(f'cam_{name}'))
     sc.collection.objects.link(cam)
-    O = ocean.build({'scene': sc, 'parts': PARTS, 'matrix': matrix, 'name': f'set_ocean_{name}'})
-    O.key_verse(frame_start=1, fps=24, u0=0.0, u1=6.0, camera_obj=cam, log=lambda *a: None)
-    return O, cam
+    cam.location = g @ Vector(O.to_set((-1.2, O.coast.markY + 1.3, 2.3)))      # the same spot in each set's frame
+    fig = bpy.data.objects.new(f'fig_{name}', None)
+    sc.collection.objects.link(fig)
+    O.stand(fig, facing='house')
+    bpy.context.view_layer.update()
+    P = g @ Vector(O.to_set((0.5, O.coast.markY + 1.4, 0.4)))
+    F = g @ Vector(O.E)
+    O.animate({'page_2026': lambda t: {'pos': tuple(P + g.to_3x3() @ Vector((0.0, 0.0, 0.1 * t))), 'face': tuple(F)},
+               'camera': cam, 'reveal': lambda t: ocean.ease(t, 0.0, 2.0)}, frames=(1, 49), fps=24)
+    return O, cam, fig
 
 
-O0, cam0 = build(None, 'origin')
-O1, cam1 = build(M, 'parked')
+O0, cam0, fig0 = build(None, 'origin')
+O1, cam1, fig1 = build(M, 'parked')
 bpy.context.view_layer.update()
 g0, g1 = O0.group.matrix_world, O1.group.matrix_world
-ck.check('the set root takes the matrix', (g1 - M).is_identity is False and all(abs(a - b) < 1e-5 for ra, rb in zip(g1, M) for a, b in zip(ra, rb)))
-d = (g1 @ Vector(O1.mark) - M @ (g0 @ Vector(O0.mark))).length
-ck.check('her mark moves with the set', d < 1e-5, f'{d * 1000:.4f} mm')
-worst = 0.0
-for u in (0.5, 4.2, 9.0, 12.5, 16.0, 20.0, 25.0, 29.0, 32.0):
-    c0, c1 = O0.camera(u), O1.camera(u)
-    worst = max(worst, (g1 @ Vector(c1['pos']) - M @ (g0 @ Vector(c0['pos']))).length,
-                (g1 @ Vector(c1['target']) - M @ (g0 @ Vector(c0['target']))).length)
-ck.check('camera(u) moves with the set (pos and target, every shot)', worst < 1e-4, f'{worst * 1000:.4f} mm')
-kd, ka = 0.0, 0.0
-for f in (1, 30, 60, 100, 140):
-    sc.frame_set(f)
-    a, b = cam0.matrix_world, cam1.matrix_world
-    kd = max(kd, ((M @ a).translation - b.translation).length)
-    ka = max(ka, math.degrees((M.to_3x3() @ a.to_3x3()).to_quaternion().rotation_difference(b.to_3x3().to_quaternion()).angle))
-ck.check('the keyed camera moves and turns with the set', kd < 1e-4 and ka < 1e-3, f'{kd * 1000:.4f} mm, {ka:.5f} deg')
+ck.check('the set root takes the matrix', all(abs(a - b) < 1e-5 for ra, rb in zip(g1, M) for a, b in zip(ra, rb)))
+d = max((g1 @ Vector(O1.mark) - M @ (g0 @ Vector(O0.mark))).length, (g1 @ Vector(O1.E) - M @ (g0 @ Vector(O0.E))).length)
+ck.check('the mark and the eye point move with the set', d < 1e-5, f'{d * 1000:.4f} mm')
+fa, fb = fig0.matrix_world, fig1.matrix_world
+da = ((M @ fa).translation - fb.translation).length
+aa = math.degrees((M.to_3x3() @ fa.to_3x3()).to_quaternion().rotation_difference(fb.to_3x3().to_quaternion()).angle)
+ck.check('a figure stood on the mark (facing the house) moves and turns with the set', da < 1e-5 and aa < 1e-3,
+         f'{da * 1000:.4f} mm, {aa:.5f} deg')
 m0, m1 = Vector(O0.moon), Vector(O1.moon)
 a = math.degrees((M.to_3x3() @ m0).angle(m1))
 ck.check("the moon turns with the set (the set's own moon, the sea's moonW)", a < 1e-3 and (Vector(O1.sea.get('moonW')) - m1).length < 1e-6,
@@ -62,6 +64,20 @@ ck.check("the moon turns with the set (the set's own moon, the sea's moonW)", a 
 lamp0, lamp1 = O0.lights['moon'].matrix_world.to_3x3(), O1.lights['moon'].matrix_world.to_3x3()
 a = math.degrees((M.to_3x3() @ (lamp0 @ Vector((0, 0, -1)))).angle(lamp1 @ Vector((0, 0, -1))))
 ck.check('the moon lamp shines from the turned moon', a < 1e-3, f'{a:.5f} deg')
+kd, kp, ka = 0.0, 0.0, 0.0
+for f in (1, 13, 25, 49):
+    sc.frame_set(f)
+    a0, a1 = O0.lights['fill'].matrix_world, O1.lights['fill'].matrix_world
+    kd = max(kd, ((M @ a0).translation - a1.translation).length)
+    p0, p1 = O0.pages.p26.holder.matrix_world, O1.pages.p26.holder.matrix_world
+    kp = max(kp, ((M @ p0).translation - p1.translation).length)
+    ka = max(ka, math.degrees((M.to_3x3() @ p0.to_3x3()).to_quaternion().rotation_difference(p1.to_3x3().to_quaternion()).angle))
+ck.check('the keyed fill (aimed at the camera) moves with the set', kd < 1e-4, f'{kd * 1000:.4f} mm')
+ck.check('the keyed page moves and turns with the set', kp < 1e-4 and ka < 1e-3, f'{kp * 1000:.4f} mm, {ka:.5f} deg')
+pw0, pw1 = Vector(O0.sea.get('porchW')), Vector(O1.sea.get('porchW'))
+d = (M @ pw0 - pw1).length
+ck.check("the porch lamp's glint on the cove follows the parked house", d < 1e-4 and (pw1 - O1.house.porch_world()).length < 1e-4,
+         f'{d * 1000:.4f} mm')
 # her daisies: the field's plant roots, in the parked set's design frame
 fld = O1.land.daisies.group
 pts = np.zeros(len(fld.data.vertices) * 3, np.float32)

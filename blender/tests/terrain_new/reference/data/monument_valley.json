@@ -1,0 +1,72 @@
+{
+ "name": "monument_valley",
+ "role": "main",
+ "title": "Monument Valley, Arizona / Utah, USA",
+ "landform": "mesas and buttes",
+ "note": "The Mittens and Merrick Butte: sandstone buttes 150-300 m tall with sheer walls over talus aprons, on a broad sandy floor.",
+ "centre_lat": 36.983,
+ "centre_lon": -110.099,
+ "pixel_size_m": 8.0,
+ "extent_m": [
+  8000,
+  8000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "data_note": "3DEP serves 1 m lidar only north of the Utah border (the top ~quarter of the tile); the Arizona part, with the Mittens and Merrick Butte, is 1/3 arc-second (~10 m): the butte walls are softer and less sheer there than they are.",
+ "source": {
+  "dataset": "USGS 3D Elevation Program (3DEP), best-available DEM (3DEPElevation ImageServer)",
+  "publisher": "U.S. Geological Survey",
+  "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+  "native_resolution_m": "1/3 arc-second (~10 m) over the Arizona part (most of the tile); 1 m lidar only north of the Utah border",
+  "vertical_datum": "NAVD88",
+  "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+  "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+  "kind": "usgs3dep",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 4,
+  "resampling": "Gaussian low-pass (sigma 0.90 source px) then bilinear",
+  "no_data_fraction": 0.0,
+  "request": {
+   "bbox": "-110.14585713246805,36.94557908171275,-110.05214286753197,37.02041172713093",
+   "bboxSR": 4326,
+   "imageSR": 4326,
+   "size": "2084,2080",
+   "format": "tiff",
+   "pixelType": "F32",
+   "noData": -9999,
+   "noDataInterpretation": "esriNoDataMatchAny",
+   "interpolation": "RSP_BilinearInterpolation",
+   "f": "json"
+  },
+  "export_size": [
+   2084,
+   2080
+  ],
+  "export_pixel_m": 4,
+  "lidar_1m_products_here": [
+   "USGS 1 Meter 12 x57y410 UT_StatewideSouth_2020_A20",
+   "USGS 1 Meter 12 x57y410 UT_WestEast_B22",
+   "USGS 1 Meter 12 x58y410 UT_WestEast_B22"
+  ]
+ },
+ "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+ "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 487.6,
+  "mean_m": 1646.78,
+  "hypsometric_integral": 0.2609,
+  "slope_deg_p10": 1.28,
+  "slope_deg_p50": 3.61,
+  "slope_deg_p90": 24.47,
+  "slope_deg_p99": 73.24,
+  "slope_deg_mean": 8.65
+ },
+ "height_png": "monument_valley.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 1519.57,
+ "height_max_m": 2007.18,
+ "height_step_m": 0.007440451667048144,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

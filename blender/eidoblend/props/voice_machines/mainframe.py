@@ -415,7 +415,9 @@ def _panel_frame(P):
 
 def tape_position(state, t, mem):
     """mainframe.js tapePosition: metres of tape at t. mem holds the integrator ({last_t, last_speed, pos}); call in
-    time order (an earlier t restarts the integral from 0)."""
+    time order (an earlier t restarts the integral from 0, and so does the first update after build: the engine's
+    build-time update(0, {}) left (t 0, speed 1) behind for its first trapezoid, which only matters to a first update
+    at t > 0 with a tape speed other than 1)."""
     s = state
     if isinstance(s.get('tape_pos'), (int, float)):
         return float(s['tape_pos'])
@@ -469,7 +471,8 @@ class Mainframe(K.Machine):
 
 def build(glb=None, power=1.0, name='mainframe_room', collection=None, scene=None, location=(0.0, 0.0, 0.0), ctx=None):
     """mainframe.js build(THREE, opts): opts.glb (another GLB path), opts.power. ctx: a scene's ctx (its scene, and the
-    default route of every update's keys). Returns a Mainframe."""
+    default route of every update's keys). Returns a Mainframe. `power` holds until the first update sets one
+    (mainframe.js's own build-time update(0, {}) put its uniform back to 1 at once)."""
     scene = scene or (ctx.scene if ctx is not None else bpy.context.scene)
     path = glb or os.path.join(K.PACK, 'mainframe.glb')
     root, nodes, col = K.import_glb(path, name, collection, scene)

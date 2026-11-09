@@ -157,6 +157,35 @@ def register_example(name, kind='solid', make=None, description='', **fields):
     return ex
 
 
+def file_stem(name):
+    """The stem of an SDF's cache files (atlases, frame meshes, grids, screen frames): the name of its Blender
+    datablock. Blender keeps object names, and image names, unique in a file ('mr_hege', 'mr_hege.001'), so two SDFs
+    of one example never write over each other's files; characters a file name cannot hold become '_'."""
+    import re
+    return re.sub(r'[\\/:*?"<>|\s]+', '_', str(name)).strip('_') or 'sdf'
+
+
+_WARNED_UNSAVED = set()
+
+
+def resolve_cache_dir(path):
+    """A cache_dir as an absolute folder. '//x' is beside the open .blend; before the file is saved (a harness build
+    saves it only at the end) that is the working directory, which every build run from there shares, so it says so
+    once: two builds there that each make a 'mr_hege' write the same files, and the first build's .blend then plays
+    the second's. A scene keeps its own with cache_dir=os.path.join(ctx.out_dir, 'sdf_cache')."""
+    import os
+    import bpy
+    if not path.startswith('//'):
+        return os.path.normpath(os.path.abspath(path))
+    out = os.path.normpath(os.path.abspath(bpy.path.abspath(path)))
+    if not bpy.data.filepath and out not in _WARNED_UNSAVED:
+        _WARNED_UNSAVED.add(out)
+        print(f"[sdf] cache_dir {path!r}: the .blend is not saved yet, so the files go to {out}, shared by every "
+              f"unsaved build run from this folder; pass cache_dir=os.path.join(ctx.out_dir, 'sdf_cache') to keep a "
+              f"scene's own", flush=True)
+    return out
+
+
 def sdf_collection(scene=None, name='SDF'):
     """The collection every SDF object and volume is linked into (the engine's helper-owned SDF scene)."""
     import bpy

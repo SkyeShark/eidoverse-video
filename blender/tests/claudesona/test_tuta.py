@@ -175,14 +175,19 @@ def parity(C, R):
             covj = R3 @ np.array(js['cov']) @ R3.T
             worst['c_mm'] = max(worst['c_mm'], 1000 * float(np.linalg.norm(st['c'] - cj)))
             worst['cov_rel'] = max(worst['cov_rel'], float(np.linalg.norm(st['cov'] - covj) / np.linalg.norm(covj)))
-        for k, js in fr['sparks'].items():
+        # every frame, every badge with sparks on either side: before the JS makes a badge's sparks (its first pop)
+        # they do not exist there, so they must be hidden here (each card: the flare and the eight embers)
+        for k in sorted(set(fr['sparks']) | set(wd._sparks)):
+            js = fr['sparks'].get(k, {'vis': False})
             sp = wd._sparks.get(k)
             if sp is None:
-                spark_bad.append((f, k, 'no sparks'))
+                if js['vis']:
+                    spark_bad.append((f, k, 'no sparks'))
                 continue
+            cards_vis = {not o.hide_render for o in [sp['flare']] + sp['embers']}
             vis = not sp['flare'].hide_render
-            if vis != js['vis']:
-                spark_bad.append((f, k, vis, js['vis']))
+            if len(cards_vis) > 1 or vis != js['vis']:
+                spark_bad.append((f, k, sorted(cards_vis), js['vis']))
                 continue
             if not vis:
                 continue
@@ -199,7 +204,8 @@ def parity(C, R):
     C.check("every badge's glow and ghost equal the JS's (emissive / ufEmissive, U.ghost)",
             worst['glow'] < 1e-4 and worst['ghost'] < 1e-4, f"glow {worst['glow']:.2e}, ghost {worst['ghost']:.2e}")
     R['spark_mm'] = round(spark_mm, 4)
-    C.check("the pop's sparks: the same frames, the flare and eight embers within 1 mm, sized as the JS's",
+    C.check("the pop's sparks: the same frames (every frame, hidden before the first pop as the JS has none yet), the "
+            "flare and eight embers within 1 mm, sized as the JS's",
             not spark_bad and spark_mm < 1.0, f'{spark_mm:.4f} mm' + ('' if not spark_bad else f'; {spark_bad[:5]}'))
     # after the run
     sc.frame_set(F1)

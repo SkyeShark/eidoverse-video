@@ -27,8 +27,11 @@ its root motion (and, for a turn, with its hips' yaw); each ankle and each sole 
                  90th percentile of every ankle's speed over the treadmill), grown through the heel strike and the toe
                  roll while some low point of its sole (within 1 cm of its lowest) still moves with it, runs shorter than
                  50 ms dropped. A walk-like gait (walk, stairsUp, stairsDown) has no flight: where neither foot is down,
-                 the foot that was down last stays down. A turn plants a foot while some low sole point is still (a
-                 pivot). A stationary clip (idle, an emote) plants both feet throughout
+                 the foot that was down last stays down. A turn (the library's shuffle the feet 1-4 cm off the floor,
+                 the planted ankle circling its ball at 0.2-0.3 m/s) steps a foot where it rides 6 mm or more over the
+                 other while it moves, or where its ankle sweeps faster than 0.55 m/s; elsewhere the foot is planted
+                 and pivots, and where neither would be, the lower one stays down. A stationary clip (idle, an emote)
+                 plants both feet throughout
   THE SUPPORT    the root's velocity over the ground (forward, to its left, up) = its own root motion less the planted
                  contact's velocity, shared by the feet's load; through a run's flight the planted pace carries on
     stance / p / u          per foot and sample: planted?, how far through its stance, how far through its swing
@@ -64,8 +67,12 @@ UPPER_BODY = ['spine', 'chest', 'upperChest', 'neck', 'head', 'leftShoulder', 'l
               'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand']
 FINGER_WORDS = ('Thumb', 'Index', 'Middle', 'Ring', 'Little')
 TOL = 0.28                          # a planted ankle moves with the treadmill within this fraction of the swing speed
-PIVOT = 0.15                        # a turn's foot is planted while some low sole point moves slower than this (m/s)
 LIFT_SPEED = 0.35                   # a planted ankle (flat stance) / contact point (rockers) rises or sinks slower (m/s)
+# a turn on the spot's step (analyze): the library's turns shuffle, lifting a stepping foot only 1-4 cm while the
+# planted foot's ankle circles its ball at 0.2-0.3 m/s, so neither a height band nor a speed limit alone tells them apart
+TURN_LIFT, TURN_LIFT_END = 0.006, 0.003     # a step rides this much higher than the other foot (m), until under the end
+TURN_MOVING = 0.15                          # ... while its ankle moves (m/s)
+TURN_SWEEP, TURN_SWEEP_END = 0.55, 0.35     # or its ankle sweeps faster than a pivot carries it (m/s), until under the end
 
 
 def twist_z(q):
@@ -241,6 +248,19 @@ def _periodic_hann(x, r):
     return sum(wk * np.roll(x, -k, axis=0) for wk, k in zip(w, range(-r, r + 1)))
 
 
+def _hysteresis(start, keep):
+    """each run of `start` grown both ways through the neighbouring samples where `keep` holds"""
+    out = start.copy()
+    n = len(out)
+    for k in range(1, n):
+        if out[k - 1] and keep[k]:
+            out[k] = True
+    for k in range(n - 2, -1, -1):
+        if out[k + 1] and keep[k]:
+            out[k] = True
+    return out
+
+
 def _clean_runs(m, min_run, periodic):
     """drop runs (True or False) shorter than min_run samples"""
     m = m.copy()
@@ -379,11 +399,14 @@ def analyze(body, cclip, cyclic=None, tol=TOL):
             st = np.ones(n, dtype=bool)                              # a stationary clip: both feet stand
             core = st.copy()
         elif turn:
-            # a turn pivots on its feet: planted while some low sole point is still, near the foot's lowest
-            sp = np.linalg.norm(VP[s], axis=2)
-            sp[rel[s] > 0.01] = np.inf
-            low = Z[s] <= Z[s].min() + 0.03
-            core = (sp.min(axis=1) < PIVOT) & low
+            # a turn steps round on its feet: a foot steps where it rides higher than the other while it moves, or
+            # where its ankle sweeps faster than a pivot carries it; anywhere else it is planted and pivots on it
+            other = 'right' if s == 'left' else 'left'
+            hi = Z[s] - Z[other]
+            va = np.linalg.norm(Va[s][:, :2], axis=1)
+            step = _hysteresis((hi > TURN_LIFT) & (va > TURN_MOVING), hi > TURN_LIFT_END) | \
+                _hysteresis(va > TURN_SWEEP, va > TURN_SWEEP_END)
+            core = ~step
             st = _clean_runs(core, min_run, False)
         else:
             z = Z[s]
@@ -410,6 +433,12 @@ def analyze(body, cclip, cyclic=None, tol=TOL):
         g.core[s], g.stance[s] = core, st
     if cyclic and cclip.slot in WALK_LIKE:
         g.stance = _no_flight(g.stance, True)
+    if turn:
+        # a turn on the spot has no flight: where both feet would be stepping, the lower one stays down
+        both = ~g.stance['left'] & ~g.stance['right']
+        low_l = Z['left'] <= Z['right']
+        g.stance['left'] = g.stance['left'] | (both & low_l)
+        g.stance['right'] = g.stance['right'] | (both & ~low_l)
     g.u, g.p = {}, {}
     for s in SIDES:
         g.u[s], g.p[s] = _phases(g.stance[s], cyclic)

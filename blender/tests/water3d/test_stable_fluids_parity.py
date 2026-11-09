@@ -66,8 +66,11 @@ for case in ('motion', 'colour', 'novort'):
         continue
     meta = json.load(open(meta_p))
     s = run_port(case, meta['frames'])
+    # pressure too: the package's pressureNode (fluid_sim.js reaches it through _raw), the port's FluidSimulation.pressure
     for name, mine, chans in (('velocity', s.velocity, (0, 1)), ('density', s.density, (0, 1, 2)),
-                              ('dye', s.dye, (0, 1, 2))):
+                              ('dye', s.dye, (0, 1, 2)), ('pressure', s.pressure, (0,))):
+        if name not in meta['shapes']:
+            continue
         shp = meta['shapes'][name]
         eng = np.fromfile(os.path.join(OUT, f'engine_fluid2d_{case}_{name}.f32'), dtype='<f4').reshape(shp)
         if eng.shape != mine.shape:

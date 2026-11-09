@@ -54,6 +54,17 @@ bool isSolid(vec3 p) {
   return s;
 }
 bool faceBlocked(vec3 p, vec3 cellOff) { return isSolid(p) || isSolid(p + cellOff); }
+// the static layers only (analytic walls and the baked field), for the edition's phi extension into solids
+bool isSolidStatic(vec3 p) {
+  bool s = false;
+#if WALLS
+  s = s || isSolidWalls(p);
+#endif
+#if SOLIDTEX
+  s = s || (textureLod(solidTex, p, 0.0).r > 0.5);
+#endif
+  return s;
+}
 """
 
 # the shared semi-Lagrangian trace (needs sampler velA): cell-centred velocity = the mean of the cell's two
@@ -241,13 +252,16 @@ void main() {
 # wall contact and could not fill. Here a solid cell takes the mean phi of its non-solid neighbours (a zero-
 # gradient contact: the waterline meets the wall square), so a trace into a wall reads the water or air that is
 # actually beside it. .y marks a defined value; pass 2 reaches the second solid layer from the first.
+# Static solids only (walls and the baked field): a moving sphere's cells keep the engine's phi. Extended into the
+# spheretest's ball, the pool lost 5.5 % more water than the engine's by 10 s (volume control off), where without
+# it the two traces agree within 0.6 % (test_water3d_spheretest_parity.py).
 PHI_SOLID_EXTEND = r"""
 void main() {
   ivec3 c = ivec3(gl_GlobalInvocationID);
   if (!INSIDE(c)) return;
   vec3 p = uvw_of(c);
   vec4 here = textureLod(src, p, 0.0);
-  if (!isSolid(p)) { imageStore(dst, c, vec4(here.x, 1.0, 0.0, 1.0)); return; }
+  if (!isSolidStatic(p)) { imageStore(dst, c, vec4(here.x, 1.0, 0.0, 1.0)); return; }
 #if PASS1
   float defined = 0.0;     // pass 1: the stored phi of solid cells is stale, of non-solid cells exact
 #else
@@ -261,7 +275,7 @@ void main() {
     if (any(lessThan(pn, vec3(0.0))) || any(greaterThan(pn, vec3(1.0)))) continue;
     vec4 q = textureLod(src, pn, 0.0);
 #if PASS1
-    bool ok = !isSolid(pn);
+    bool ok = !isSolidStatic(pn);
 #else
     bool ok = q.y > 0.5;
 #endif

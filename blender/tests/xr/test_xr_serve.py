@@ -54,6 +54,23 @@ def get(url, method='GET', data=None, ctx=None, follow=True):
         return e.code, {k.title(): v for k, v in e.headers.items()}, e.read()
 
 
+def post_announcing(url, n):
+    """A POST that announces n bytes (Content-Length) and sends none of them: serve.py refuses an oversized report
+    from the header alone, before it reads. (Sending the whole megabyte races the refusal: the server answers and
+    closes while the client is still writing, and on Windows the client then sees the connection aborted.)"""
+    import http.client
+    import urllib.parse
+    p = urllib.parse.urlsplit(url)
+    c = http.client.HTTPConnection(p.hostname, p.port, timeout=20)
+    try:
+        c.putrequest('POST', p.path)
+        c.putheader('Content-Length', str(n))
+        c.endheaders()
+        return c.getresponse().status
+    finally:
+        c.close()
+
+
 k = server.kit()
 ip = k.lan_ip()
 check('lan_ip(): an IPv4 address', ip.count('.') == 3, ip)
@@ -98,7 +115,7 @@ try:
         check(f'refused: {bad} (outside the folders, or not a served type)', st == 404, st)
     st, _, _ = get(u + '/report', 'POST', json.dumps({'test': 'serve_check', 'phase': 'hb', 'frames': 3}).encode())
     st2, _, _ = get(u + '/report', 'POST', b'not json')
-    st3, _, _ = get(u + '/report', 'POST', b'x' * ((1 << 20) + 10))
+    st3 = post_announcing(u + '/report', (1 << 20) + 10)
     st4, _, _ = get(u + '/elsewhere', 'POST', b'{}')
     lines = [json.loads(x) for x in open(log, encoding='utf-8')] if os.path.exists(log) else []
     check('POST /report: one stamped line per report (204)', st == 204 and any(r.get('test') == 'serve_check'
@@ -113,8 +130,9 @@ try:
 finally:
     srv.stop()
 
-# the command lines themselves: eidoverse/xr/serve.py unchanged (it serves the repo it lives in; this worktree has no
-# node_modules, so it says so), and eidoblend/xr/server.py with --node-modules and --allow
+# the command lines themselves: eidoverse/xr/serve.py unchanged (it serves the repo it lives in, and says so when that
+# repo has no node_modules yet: a worktree until it is bootstrapped), and eidoblend/xr/server.py with --node-modules
+# and --allow
 import socket       # noqa: E402
 import time         # noqa: E402
 
@@ -172,6 +190,11 @@ for label, script, extra in (
             check(f'{label}: three from --node-modules, /blender/ served', st3 == 200 and st4 == 200, (st3, st4))
         elif '--allow' in extra:
             check(f'{label}: --allow adds a folder (the Blender page template now served)', st4 == 200, st4)
+        elif os.path.isdir(os.path.join(WORKTREE, 'node_modules', 'three')):
+            # the worktree has been bootstrapped (`python eido.py bootstrap` made its own node_modules): serve.py serves
+            # three from it, as it does in a checkout
+            check(f'{label}: serves three from the repo it lives in (bootstrapped here); /blender/ is not its folder',
+                  st3 == 200 and st4 == 404 and not any('bootstrap' in x for x in out), (st3, st4, out[:1]))
         else:
             check(f'{label}: says three is missing here and 404s it; /blender/ is not its folder',
                   st3 == 404 and st4 == 404 and any('bootstrap' in x for x in out), (st3, st4, out[:1]))

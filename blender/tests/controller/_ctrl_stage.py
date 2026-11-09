@@ -200,6 +200,145 @@ def keyed_matches(R, me, frames, every=None):
     return worst
 
 
+class FootMesh:
+    """the VISIBLE feet measured against the scene's solids (not the plant's rigid sole points): every evaluated vertex
+    of the skinned meshes whose strongest weight is a foot or toes bone, thinned to 5 mm, against every visible mesh
+    that is not skinned (rungs and rails included):
+
+        fm = FootMesh(me)
+        m = fm.at(frame)        # {side: {'pen_mm': deepest inside a solid, 'gap_mm': nearest surface (- inside),
+                                #         'zmin': lowest point, 'P': the points}}
+
+    inside = behind the nearest face along its normal AND an odd count of crossings on a tilted ray up"""
+
+    RAY = Vector((0.0123, 0.0217, 1.0)).normalized()
+
+    def __init__(self, me, voxel=0.005):
+        import numpy as np
+        from mathutils.bvhtree import BVHTree
+        self.np = np
+        sc = bpy.context.scene
+        self.me = me
+        arm = me.arm
+        skinned = [o for o in sc.objects if o.type == 'MESH' and any(m.type == 'ARMATURE' and m.object == arm
+                                                                        for m in o.modifiers)]
+        side_of = {}
+        for s in ('left', 'right'):
+            for b in ('Foot', 'Toes'):
+                if (s + b) in me.humanoid:
+                    side_of[me.humanoid[s + b]] = s
+        self.sel = []
+        for o in skinned:
+            idx = {g.index: g.name for g in o.vertex_groups}
+            L, Rr = [], []
+            for v in o.data.vertices:
+                best, bw = None, -1.0
+                for g in v.groups:
+                    if g.weight > bw:
+                        bw, best = g.weight, g.group
+                n = idx.get(best)
+                if n in side_of:
+                    (L if side_of[n] == 'left' else Rr).append(v.index)
+            if L or Rr:
+                self.sel.append((o, np.array(L, dtype=np.int64), np.array(Rr, dtype=np.int64)))
+        dg = bpy.context.evaluated_depsgraph_get()
+        self.solids = []
+        for o in sc.objects:
+            if o.type != 'MESH' or o in skinned or o.hide_render or o.hide_get() or o.parent == arm:
+                continue
+            oe = o.evaluated_get(dg)
+            mesh = oe.to_mesh()
+            M = o.matrix_world
+            verts = [M @ v.co for v in mesh.vertices]
+            polys = [tuple(p.vertices) for p in mesh.polygons]
+            oe.to_mesh_clear()
+            if polys:
+                V = np.array([tuple(v) for v in verts])
+                self.solids.append((o.name, BVHTree.FromPolygons(verts, polys), V.min(axis=0), V.max(axis=0)))
+        self.voxel = voxel
+        self.keep = {}
+
+    def _inside(self, bvh, p):
+        n, org = 0, p.copy()
+        for _ in range(16):
+            hit = bvh.ray_cast(org, self.RAY, 100.0)
+            if hit[0] is None:
+                break
+            n += 1
+            org = hit[0] + self.RAY * 1e-5
+        return n % 2 == 1
+
+    def _signed(self, P):
+        np = self.np
+        lo, hi = P.min(axis=0) - 0.05, P.max(axis=0) + 0.05
+        cand = [s for s in self.solids if np.all(s[3] >= lo) and np.all(s[2] <= hi)]
+        d = np.full(len(P), 9.0)
+        for _n, bvh, _lo, _hi in cand:
+            for i, p in enumerate(P):
+                v = Vector(p)
+                loc, nrm, _idx, dist = bvh.find_nearest(v, 0.30)
+                if loc is None:
+                    continue
+                sd = -dist if ((v - loc).dot(nrm) < 0 and self._inside(bvh, v)) else dist
+                if sd < 0 and (d[i] > 0 or sd < d[i]):
+                    d[i] = sd
+                elif d[i] > 0 and sd < d[i]:
+                    d[i] = sd
+        return d
+
+    def at(self, f):
+        np = self.np
+        sc = bpy.context.scene
+        sc.frame_set(f)
+        dg = bpy.context.evaluated_depsgraph_get()
+        pts = {'left': [], 'right': []}
+        for o, L, Rr in self.sel:
+            oe = o.evaluated_get(dg)
+            n = len(oe.data.vertices)
+            co = np.empty(n * 3, dtype=np.float64)
+            oe.data.vertices.foreach_get('co', co)
+            co = co.reshape(-1, 3)
+            M = np.array(o.matrix_world)
+            W = co @ M[:3, :3].T + M[:3, 3]
+            if len(L):
+                pts['left'].append(W[L])
+            if len(Rr):
+                pts['right'].append(W[Rr])
+        out = {}
+        for s in ('left', 'right'):
+            if not pts[s]:
+                continue
+            P = np.concatenate(pts[s])
+            if s not in self.keep:
+                key = np.floor(P / self.voxel).astype(np.int64)
+                _u, first = np.unique(key, axis=0, return_index=True)
+                self.keep[s] = np.sort(first)
+            P = P[self.keep[s]]
+            d = self._signed(P)
+            out[s] = {'pen_mm': round(max(0.0, -float(d.min())) * 1000, 1), 'gap_mm': round(float(d.min()) * 1000, 1),
+                      'zmin': round(float(P[:, 2].min()), 4), 'P': P}
+        return out
+
+
+def mesh_feet_check(R, me, f0, f1, step=2, limit_mm=10.0, label='the whole take', skip=None):
+    """the visible feet (FootMesh) every `step` frames of [f0, f1]: no foot deeper than limit_mm inside a solid
+    (skip(f) -> True leaves a frame out). -> the FootMesh"""
+    fm = FootMesh(me)
+    over, worst = [], (0.0, None)
+    for f in range(f0, f1 + 1, step):
+        if skip is not None and skip(f):
+            continue
+        for s, v in fm.at(f).items():
+            if v['pen_mm'] > worst[0]:
+                worst = (v['pen_mm'], [f, s])
+            if v['pen_mm'] > limit_mm:
+                over.append([f, s, v['pen_mm']])
+    R['mesh_feet_over_limit'] = over[:40]
+    R.check(f'{label}: no visible foot deeper than {limit_mm:g} mm inside a solid (FootMesh, every {step} frames)',
+            not over, f'deepest {worst[0]} mm at {worst[1]}; {len(over)} foot-frames over')
+    return fm
+
+
 def dump_frames(R, rep, ranges):
     """a compact per-frame table of the bake over frame ranges [(f0, f1), ...] into the report: what led, the support,
     each foot's planted flag, gap, slip from the last frame and yaw, the ankle's miss (diagnosis)"""

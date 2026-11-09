@@ -302,14 +302,19 @@ def _clip_poly(poly, axis, value, keep_ge):
     return out
 
 
-def surface_top_in_footprint(objs, box, top_z, dg=None):
-    """The highest point of objs' REAL surfaces inside box's xy footprint, at or below top_z, or None.
+LOAD_BEARING_NZ = 0.5       # |normal.z| of a face that can carry what rests on it (a slope under 60 degrees)
 
-    Every triangle of the evaluated geometry is clipped to the footprint (the four vertical planes of the box's
-    xy rectangle, so a slanted or vertical face is cut exactly); a clipped piece reaching up past top_z counts
-    as top_z (it touches or holds the object). Unlike a ray grid, nothing thin slips between samples (a wire
-    rack, a slatted bench); unlike the support's bounding box, nothing off to the side counts (a stool's splayed
-    legs reach under a clock its seat no longer holds)."""
+
+def surface_top_in_footprint(objs, box, top_z, dg=None, min_nz=LOAD_BEARING_NZ):
+    """The highest point of objs' REAL load-bearing surfaces inside box's xy footprint, at or below top_z, or None.
+
+    Every triangle of the evaluated geometry that faces up or down (|normal.z| >= min_nz: a top, a board, a wire's
+    crown, a slope under 60 degrees; either winding, as imported models come) is clipped to the footprint (the
+    four vertical planes of the box's xy rectangle); a clipped piece reaching up past top_z counts as top_z (the
+    object's base is in contact with it). Unlike a ray grid, nothing thin slips between samples (a wire rack, a
+    slatted bench); unlike the support's bounding box, nothing off to the side counts (a stool's splayed legs reach
+    under a clock its seat no longer holds). Steep and vertical faces never count: a rack's post or a chair's
+    backrest standing inside a lifted book's or cushion's footprint rises past its base but holds nothing up."""
     dg = dg or depsgraph()
     x0, y0, x1, y1 = box[0].x, box[0].y, box[1].x, box[1].y
     best = None
@@ -318,7 +323,10 @@ def surface_top_in_footprint(objs, box, top_z, dg=None):
         if not len(tri):
             continue
         P = co[tri]                                          # (M, 3, 3)
-        sel = ((P[:, :, 0].max(1) >= x0) & (P[:, :, 0].min(1) <= x1) & (P[:, :, 1].max(1) >= y0)
+        n = np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0])
+        ln = np.linalg.norm(n, axis=1)
+        flat = np.abs(n[:, 2]) >= min_nz * np.maximum(ln, 1e-30)
+        sel = (flat & (ln > 0) & (P[:, :, 0].max(1) >= x0) & (P[:, :, 0].min(1) <= x1) & (P[:, :, 1].max(1) >= y0)
                & (P[:, :, 1].min(1) <= y1) & (P[:, :, 2].min(1) <= top_z))
         if best is not None:
             sel &= P[:, :, 2].max(1) > best                   # cannot beat what was found

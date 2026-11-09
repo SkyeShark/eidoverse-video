@@ -55,22 +55,23 @@ def main():
     summ = json.load(open(os.path.join(DUMP, '_summary.json'), encoding='utf-8'))['solvers']
     sc = S.scara
     w = max(worst(sc.forward(c['q']), c['tcp0']) for c in summ['scara_forward'])
-    w = max(w, max(worst(sc.forward(c['q'], sc.GRIP_TCP), c['tcp']) for c in summ['scara_forward']))
+    w = max(w, max(worst(sc.forward(c['q'], sc.grip_tcp), c['tcp']) for c in summ['scara_forward']))
     check('scara.forward matches scara.js (plain and grip TCP)', w < 1e-12, f'worst {w:.2e}')
     worst_inv, counts = 0.0, True
     for c in summ['scara_inverse']:
         x, y, z, yaw = c['args']
         for got, want in ((sc.inverse(x, y, z, yaw), c['plain']),
-                          (sc.inverse(x, y, z, yaw, sc.GRIP_TCP, [0.1, 0.5, 0.05, 0]), c['tcp']),
-                          (sc.inverse(x, y, z, yaw, sc.GRIP_TCP, None, 0.055), c['minZ'])):
+                          (sc.inverse(x, y, z, yaw, sc.grip_tcp, [0.1, 0.5, 0.05, 0]), c['tcp']),
+                          (sc.inverse(x, y, z, yaw, sc.grip_tcp, None, 0.055), c['minZ'])):
             counts &= len(got) == len(want)
             worst_inv = max(worst_inv, worst(got, want))
     check('scara.inverse matches (solution count, order, values; seed and minZ)', counts and worst_inv < 1e-12,
           f'worst {worst_inv:.2e}')
     w = max(worst(sc.demo(c['t']), c['q']) for c in summ['scara_demo'])
     check('scara.demo matches', w < 1e-12, f'worst {w:.2e}')
-    check('scara limits and gripTCP match', worst(sc.LIMITS, summ['scara_limits']) < 1e-15
-          and worst(sc.GRIP_TCP, summ['scara_gripTCP']) == 0)
+    check('scara.limits and scara.grip_tcp (scara.js limits, gripTCP) match; GRIP_TCP / LIMITS are the same tuples',
+          worst(sc.limits, summ['scara_limits']) < 1e-15 and worst(sc.grip_tcp, summ['scara_gripTCP']) == 0
+          and sc.GRIP_TCP is sc.grip_tcp and sc.LIMITS is sc.limits)
     w = max(worst(S.articulated_demo(c['t']), c['q']) for c in summ['articulatedDemo'])
     check('articulatedDemo matches', w < 1e-12, f'worst {w:.2e}')
     w = max(worst(S.gantry_demo(c['t'], c['tool'], c['tipRestZ']), c['xyz']) for c in summ['gantryDemo'])

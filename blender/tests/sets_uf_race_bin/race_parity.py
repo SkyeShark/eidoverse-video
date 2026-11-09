@@ -1,6 +1,9 @@
-"""race_parity.py: the Blender race's pure half (eidoblend/sets/unknown_force/race.py: suggest, the car path, the
-crash, the debris, the boot, update()'s state, camAt, focal, the lamp heads, the noise atlas and the night
-environment) against what the WebGPU race.js computes (race_parity_dump.mjs writes out/parity/race.json first).
+"""race_parity.py: the Blender race's pure half (eidoblend/sets/unknown_force/race.py: the moving parts' time controls,
+the car path, the crash, the debris, the boot, update()'s state, camAt, focal, the lamp heads, the noise atlas and the
+night environment) against what the WebGPU race.js computes (race_parity_dump.mjs writes out/parity/race.json first).
+race.js's suggest(t), its cut on the music video's clock, is not ported; it serves here as the test vector for the
+time controls that replace it (sequence() at the same event times must give the same car, screens, gaze, march and
+boot).
 
     cd <worktree> && deno run --no-config --no-lock --cached-only -A blender/tests/sets_uf_race_bin/race_parity_dump.mjs
     python blender/tests/sets_uf_race_bin/race_parity.py
@@ -60,17 +63,31 @@ for d, e in zip(deb, J['debris']):
 check('debris specs', ok and worst < 1e-9, f'{len(deb)} pieces, max err {worst:.2e}')
 heads = [h[:3] for h in R.lamp_heads()]
 check('lamp heads', len(heads) == len(J['heads']) and close(heads, J['heads'], 1e-9)[0], f'{len(heads)} heads')
-bad = 0
+C = J['CUES']                    # race.js's event times on the video's clock: test vectors, not part of the port
+EVENTS = dict(bill_a_on=(C['v3'] - 0.4, C['v3'] + 0.5), bill_b_on=(C['prevent'] - 2.4, C['prevent'] - 1.6),
+              glance_from=C['machineGod'], car_edge=C['bow'] - 0.12,
+              march_on=(C['lastTime'] + 0.5, C['blackShirts'] - 0.1),
+              heel_strike=C['heel'] - 1.5 + R.HEEL['strike'] * R.HEEL['dur'])
+worst_s, n_s = 0.0, 0
+keymap = {'carT': 'car_t', 'billA': 'bill_a', 'billB': 'bill_b'}
 for s in J['suggest']:
-    m = R.suggest(s['t'])
-    st = s['state']
-    keymap = {'carT': 'car_t', 'billA': 'bill_a', 'billB': 'bill_b'}
-    for k, v in st.items():
-        if abs(m['state'][keymap.get(k, k)] - v) > 1e-9:
-            bad += 1
-    if m['cam'] != s['cam']:
-        bad += 1
-check('suggest(t) over 141..163 s', bad == 0, f'{len(J["suggest"])} times, {bad} mismatches')
+    m = R.sequence(s['t'], **EVENTS)
+    for k, v in s['state'].items():
+        kk = keymap.get(k, k)
+        if kk in ('rain', 'billboards', 'lamps'):            # constants of suggest's, update()'s defaults
+            continue
+        if kk == 'heel' and s['cam'] != 'heel':              # suggest hid the boot outside its own shot (the cut)
+            continue
+        worst_s = max(worst_s, abs(m.get(kk, 0.0) - v))
+        n_s += 1
+check("the time controls (sequence: ease_in, glance, car_drive, heel_stamp) are race.js's suggest at its event times",
+      worst_s < 1e-9, f'{n_s} values over {len(J["suggest"])} times, max err {worst_s:.1e}')
+check('no music-video clock in the module (CUES, suggest, film_state, film_cut, FILM_SPANS left out)',
+      not any(hasattr(R, k) for k in ('CUES', 'suggest', 'film_state', 'film_cut', 'FILM_SPANS')))
+d = R.car_drive(10.0, 12.0, 30.0)
+check('car_drive: another speed reaches the edge on time and carries its own car_v; heel_stamp strikes on time',
+      abs(d['car_t'] - (R.CAR_LEN - 60.0) / R.CAR_LEN) < 1e-12 and d['car_v'] == 30.0 and d['crash'] == 0.0
+      and R.car_drive(13.5, 12.0)['crash'] == 0.5 and R.heel_stamp(5.0, 5.0) == R.HEEL['strike'])
 
 # update(): every case
 UK = {'time': 'time', 'rain': 'rain', 'wet': 'wet', 'lamps': 'lamps', 'billA': 'bill_a', 'billB': 'bill_b', 'gaze': 'gaze',

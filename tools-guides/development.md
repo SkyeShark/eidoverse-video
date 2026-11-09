@@ -133,6 +133,15 @@ still check that the files it expected exist. `run_scene.py` turns bytecode off
   stale until that scene is evaluated. Size it from its mesh's `bound_box`.
 - Blender 5's compositor has no MixRGB: mix with `ShaderNodeMix`
   (`data_type = 'RGBA'`, inputs 6 and 7 are A and B, output 2 the result).
+- An NLA strip ignores `blend_in` / `blend_out` set while `use_auto_blend`
+  is on (a new strip's default): set `use_auto_blend = False` FIRST, or the
+  crossfade reads 0 and the clip pops in (measured: 6 frames set, 0.0 read
+  back; 6.0 with the order swapped).
+- Mesh triangles' winding is not to be trusted in imported models: a test
+  for "a face that can carry weight" reads `|normal.z|`, either sign
+  (placement's real-surface fallback counts faces within 60 degrees of
+  level, so a rack's post or a backrest beside a lifted item holds nothing
+  up).
 
 ## Documentation changes
 
@@ -211,18 +220,19 @@ The second suite covers the rest of the harness and the placement family,
 measured against the engine's own JavaScript where there is any:
 
 ```bash
-python blender/tests/pipeline2/run_tests.py          # U0-U5
+python blender/tests/pipeline2/run_tests.py          # U0-U6
 python blender/tests/pipeline2/test_plain.py         # U0 alone: no Blender (Deno for the parity parts)
 ```
 
 | Test | Checks |
 | --- | --- |
 | U0 | `audit_core_test.mjs` and `gpu_check_test.mjs` run under Deno, and their cases on the Python ports (`harness.ledger`, `harness.gpu_check`); `[KIT_INFO]` against `fetch_model.py`'s own preview script; `getCameraAtTime` and `alphaComposite` against `render_common.mjs`'s source; the `html_mesh` painter; the showpiece nudge |
-| U1 | (Blender, no render) `audit_core`'s 14 cases as Blender scenes; the hovering fix (a clock left over a moved stool is named, a book on a wire rack the rays slip through is seated); kit islands and instances seated through their geometry; `play_model_animations` against three's `AnimationMixer` on the same GLB; clones with their own actions; the post hooks' order; `render_common` in Blender |
-| U2 | the hovering before and after, a supplies kit stacked with a mounted `html_mesh` sign, interior windows on a brick facade from two angles (LOOK at `out/renders/`) |
+| U1 | (Blender, no render) `audit_core`'s 14 cases as Blender scenes; the hovering fix (a clock left over a moved stool is named, a book on a wire rack the rays slip through is seated, a book lifted beside a rack post and a cushion lifted against a backrest are named); kit islands and instances seated through their geometry; `play_model_animations` against three's `AnimationMixer` on the same GLB; clones with their own actions; the post hooks' order and the overlay's authored and graded routes; `render_common` in Blender; seating (the pan, the facing, `seat_on` instant, sit-down and sit-down into a seated loop, `sit_on_ground`, `face_camera`, `emote`); the locomotion and lipsync trackers; `preflight.sequencer` |
+| U2 | the hovering before and after, a supplies kit stacked with a mounted `html_mesh` sign, interior windows on a brick facade from two angles, placement.md's recipes, shelf and stairs, three sitters, the crow's layered clips and clones, `setup_scene`'s rig (LOOK at `out/renders/`) |
 | U3 | `model_preview.py` on five models and the lines it prints (LOOK at `out/previews/`) |
 | U4 | the runner: the overlay layer between the colour hook and the screen hook, measured on a still |
 | U5 | the runner: a build that never imports the placement family is audited by it, gets the showpiece nudge and records its post stack |
+| U6 | the runner: a lower third sliding in on the overlay layer over a graded shot; its ink lands as drawn, and the vignette (the screen hook) darkens the corners against the same frame without it (LOOK at the stills) |
 
 Tests render: keep them small (960x540 or less, 16 samples or fewer, a few
 seconds of film) and run one render at a time on a shared GPU. A test's

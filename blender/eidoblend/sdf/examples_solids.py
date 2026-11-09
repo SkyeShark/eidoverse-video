@@ -1451,8 +1451,10 @@ _recipe_solid('mandelbulb', {'min': [-1.25, -1.25, -1.25], 'max': [1.25, 1.25, 1
 _recipe_solid('sierpinski_tetra', {'min': [-1.05, -1.05, -1.05], 'max': [1.05, 1.05, 1.05]}, iso=0.004,
               min_component=8, quality='high',
               description='the Sierpinski tetrahedron recipe (12 folds of scale 2) as a placeable solid')
-# 'high': the fifth level's holes are 8 mm across, a 'balanced' voxel; at 5.3 mm they open
-_recipe_solid('menger_sponge', {'min': [-1.02, -1.02, -1.02], 'max': [1.02, 1.02, 1.02]}, quality='high',
+# 'balanced' (8 mm voxels, 6.7 M quads): the sponge as it is usually seen, whole. Its fifth level's holes are 8 mm
+# across, one voxel, so a close-up wants make(quality='high'): at 5.3 mm they open, at 15.1 M quads, near the 12 GB
+# of a GPU slot together with its render
+_recipe_solid('menger_sponge', {'min': [-1.02, -1.02, -1.02], 'max': [1.02, 1.02, 1.02]}, quality='balanced',
               description='the Menger sponge recipe (5 levels) as a placeable solid')
 _recipe_solid('gyroid', {'min': [-1.0, -1.0, -1.0], 'max': [1.0, 1.0, 1.0]}, quality='high', cut_by_bounds=True,
               description='the gyroid recipe (scale 3.5) as a placeable solid: one labyrinth of the TPMS, cut to '

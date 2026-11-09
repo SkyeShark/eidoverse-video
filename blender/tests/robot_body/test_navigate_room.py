@@ -15,7 +15,8 @@ Checks (PASS / FAIL):
   - clearance: the keyed root keeps 0.3 m from every wall and obstacle; no hand or foot bone inside one
   - the walk: round one's walk report on every walk span (planted slip, swing clearance), and the hand-overs (start and
     stop) hold the planted foot: the least-moving sole point in contact moves at most 2 mm a frame anywhere in the film
-  - the gaze: the head's pan follows the scan (both ways past 35 deg) and settles on the lamp
+  - the gaze: the head's pan follows the scan (both ways past 35 deg) and settles on the lamp (the keyed head's facing
+    within 10 deg of it before the wave)
 Stills: out/nav_room_overview_f<k>.png (the map, the route and the rays over the room), nav_room_follow_f<k>.png (the body
 walking), nav_room_feet_*.png (the start and the stop, low); out/nav_room.json, out/nav_room.blend.
 
@@ -344,7 +345,20 @@ try:
         n3 = q_to_three(fr['N']['neck'])
         pans.append(math.degrees(euler_from_quat(n3, 'YXZ')[1]))
     R['neck_pan_deg'] = [round(min(pans), 1), round(max(pans), 1)]
-    check('gaze_follows', min(pans) < -35 and max(pans) > 35, f'the neck pans {R["neck_pan_deg"]} deg through the film')
+    # ... and settles on the lamp: between the walk's end and the wave my head's facing (the keyed head bone's -Y) comes
+    # onto the lamp (the look re-aimed from where my keyed body stands: bake._aimed_gaze)
+    lamp_v = Vector(LAMP)
+    last_walk = max(fr['f'] for fr in frames if fr['src'][0] == 'walk')
+    wave_from = min((fr['f'] for fr in frames if fr['src'][1] == 'wave_goodbye'), default=frames[-1]['f'])
+    on_lamp = []
+    for fr in frames:
+        if last_walk < fr['f'] < wave_from:
+            p_, W_ = rig.bone_world(fr, 'head')
+            on_lamp.append((round(math.degrees((W_ @ Vector((0.0, -1.0, 0.0))).angle(lamp_v - p_)), 2), fr['f']))
+    R['head_on_lamp_deg'] = min(on_lamp) if on_lamp else None
+    check('gaze_follows', min(pans) < -35 and max(pans) > 35 and bool(on_lamp) and min(on_lamp)[0] < 10.0,
+          f'the neck pans {R["neck_pan_deg"]} deg through the film; between the walk and the wave my head comes to '
+          f'{R["head_on_lamp_deg"]} (deg, frame) of the lamp')
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, 'nav_room.blend'), compress=True)
 
     if RENDER:

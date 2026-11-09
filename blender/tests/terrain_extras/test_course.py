@@ -1,12 +1,16 @@
 """The locomotion course (eidoblend.course, terrain_base.js): every preset and the course example built and checked,
 the example rendered whole (the engine's materials and a dressed variant), every preset on a contact sheet, every
-variant scene built, and the template's character walk on the expanded course seen through its camera modes.
+variant scene built, the template's character walk on the expanded course seen through its camera modes with the
+engine's telemetry, the course example's whole run (examples/obstacle_course.js), and every variant scene run.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain_extras/test_course.py [--no-render]
-        [--parts presets,example,walk,walk_render] [--walk-to 14.0] [--driver controller|walk_path] [--save]
+        [--parts presets,example,walk,walk_render,example_run,example_run_render,variants] [--walk-to 14.0]
+        [--driver controller|walk_path] [--engine-literal] [--save]
     (renders through heavy.sh). The walk's bake is CPU work: run it outside the GPU slot with
     --parts walk --no-render --save (it saves out/course_walk.blend), then render its stills through the slot with
-    --parts walk_render.
+    --parts walk_render; the course example the same way (example_run, then example_run_render). --engine-literal
+    walks without the stair-clip flags the engine's constructor never read. variants bakes 4 s of each variant scene
+    and renders a still of each (short bakes: run it in the slot).
 
 Checks (PASS/FAIL): piece counts and roles against plan_course; height_at against the geometry (rays straight down
 onto the built meshes at 400 points per course, which must agree to 0.1 mm off the risers' edges); segment_at; the
@@ -340,8 +344,9 @@ def part_walk():
     tag_d = '' if driver == 'controller' else '_' + driver
     tel = os.path.join(OUT, 'course_walk%s_telemetry.json' % tag_d)
     t0 = time.time()
+    lo = {} if '--engine-literal' in ARGS else None      # the engine's constructor never read the stair-clip flags
     cs = template.CourseScene(sc, PRESETS['obstacle_course_expanded'], character='claude_robot',
-                              camera_mode='side', walk_to=walk_to, driver=driver,
+                              camera_mode='side', walk_to=walk_to, driver=driver, locomotion_opts=lo,
                               telemetry={'enabled': True, 'output_path': tel})
     cs.setup(frame_start=1)
     print('[walk] setup %.1f s; report keys %s' % (time.time() - t0, list(cs.report.keys())[:12]
@@ -388,9 +393,10 @@ def part_walk():
                  float(hard.min())))
     if driver == 'controller':
         acts = [f.get('actions') for f in cs.frames if f.get('actions')]
-        led = sorted({max(a, key=lambda k: (a[k] or {}).get('weight', 0)) for a in acts})
+        led = sorted({max(a, key=lambda k: (a[k] or {}).get('weight') or 0) for a in acts})
         check(len(acts) == len(cs.frames) and 'walk' in led and ('stairsUp' in led or 'stairsDown' in led),
               'the controller drove the walk: its state on every telemetry frame, leading clips %s' % led)
+        check_engine_telemetry(cs, summ)
     labels = sorted(summ['byTerrain'].keys())
     print('[walk] terrain segments walked:', labels)
     check(any('stairs' in k for k in labels) and any('dome' in k for k in labels) and any('ramp' in k for k in labels),
@@ -424,6 +430,181 @@ def part_walk():
         print('[walk] saved course_walk%s.blend for --parts walk_render' % tag_d)
 
 
+def check_engine_telemetry(cs, summ):
+    """the engine's _locRecordTelemetry fields on the controller's frames: the IK per limb, the ahead probes, the
+    actions' time scales, and the summary's IK metrics; the template's cameras ride the capsule centre"""
+    fr = cs.frames
+    ik_ok = [f for f in fr if (f.get('ik') or {}).get('left') and (f.get('ik') or {}).get('right')]
+    errs = [f['ik'][s]['targetError'] for f in ik_ok for s in ('left', 'right') if f['ik'][s]['targetError'] is not None]
+    sup = [f for f in fr if (f.get('support') or {}).get('aheadProbeSpread') is not None]
+    ts = [f for f in fr if ((f.get('actions') or {}).get('walk') or {}).get('timeScale') is not None]
+    shapes = sorted({(f.get('support') or {}).get('stairShape') for f in fr} - {None})
+    check(len(ik_ok) == len(fr) and len(errs) > len(fr) // 2 and len(sup) == len(fr) and len(ts) == len(fr),
+          'engine telemetry on every frame: the foot IK per limb (%d target errors, median %.4f m), the ahead '
+          'probes, the actions\' time scales; stair shapes seen %s' % (len(errs), float(np.median(errs)) if errs
+                                                                       else -1, shapes))
+    m = summ['metrics']
+    have = [k for k in ('leftTargetError', 'rightTargetErrorXZ', 'leftSoleGapY', 'rightTargetSpeed', 'leftHitSpeed',
+                        'leftMeshSoleGapY', 'bodyJerkY', 'speedError') if k in m]
+    check(len(have) == 8, 'summary: the engine\'s metrics (%s) plus the mesh soles' % ', '.join(have))
+    f = fr[len(fr) // 2]
+    c, hips = f['body']['center'], f['body'].get('hips')
+    check(hips is not None and 0.25 < c[2] - hips[2] < 0.6,
+          'the cameras\' body point is the capsule centre (%.3f m), %.3f m over the hips' % (c[2], c[2] - hips[2]))
+
+
+def part_example_run():
+    """examples/obstacle_course.js whole, through the template: the controller directed as the example's renderFrame
+    directs it, baked on the CPU, its follow camera keyed, saved for --parts example_run_render"""
+    sc = new_scene('example_run', 960, 540, 16)
+    sc.render.fps = 30
+    tel = os.path.join(OUT, 'course_example_run_telemetry.json')
+    t0 = time.time()
+    cs = template.CourseScene(sc, example='obstacle_course', telemetry={'enabled': True, 'output_path': tel})
+    cs.setup(frame_start=1)
+    t_bake = time.time() - t0
+    ad = cs.h.arm.animation_data
+    f0, f1 = (int(v) for v in ad.action.frame_range)
+    sc.frame_start, sc.frame_end = f0, f1
+    for f in range(f0, f1 + 1):
+        sc.frame_set(f)
+        cs.frame(None, (f - f0) / 30.0, f)
+    cs.cleanup()
+    print('[example_run] bake %.1f s, %d frames (%.1f s of film)' % (t_bake, f1 - f0 + 1, (f1 - f0 + 1) / 30.0))
+    check(cs.camera_mode == 'follow' and cs.character == 'aporia' and cs.course.bench is not None,
+          'the example\'s own camera (follow), character (aporia) and bench')
+    fixtures = [o for o in cs.course.objects if o.get('eido_course_role') in ('rail', 'rung')]
+    check(fixtures and not any(o in cs.colliders() for o in fixtures) and cs.course.bench in cs.colliders(),
+          'the ladder\'s %d rails and rungs are visual (no colliders), the bench is solid' % len(fixtures))
+    runs = {}
+    for f in range(f0, f1 + 1):
+        m = (cs.flags.get(f) or {}).get('maneuver')
+        if not m:
+            continue
+        rs = runs.setdefault(m, [])
+        if rs and rs[-1][1] == f - 1:
+            rs[-1][1] = f
+        else:
+            rs.append([f, f])
+    print('[example_run] maneuvers', runs)
+    for k, n in (('vault', 2), ('mount', 2), ('jump', 1), ('ladder', 1), ('land', 1)):
+        check(len(runs.get(k, [])) >= n, 'the example\'s %s plays (%d or more): %s' % (k, n, runs.get(k)))
+    recs = cs.records
+    seated = [f for f in recs if recs[f]['mode'] == 'seated']
+    check(len(seated) > 30, 'the sit stop: seated on the bench for %d frames' % len(seated))
+    if seated:
+        fs = seated[len(seated) // 2]
+        sc.frame_set(fs)
+        hz = cs.hips_world()
+        b = cs.course.bench
+        top = b.location.z + b.dimensions.z / 2
+        check(abs(hz.y - b.location.y) < 0.35 and 0.0 < hz.z - top < 0.35,
+              'seated: the hips over the bench pan (%.2f m along the course from its middle, %.2f m over the pan)'
+              % (hz.y - b.location.y, hz.z - top))
+    gw = max((recs[f]['weights'].get('cheer', 0.0) for f in recs), default=0.0)
+    check(gw > 1.0, 'the cheer gesture over the walk (weight up to %.2f)' % gw)
+    sal = [f for f in recs if recs[f]['mode'] == 'emote' and recs[f]['weights'].get('salute', 0.0) > 0.5]
+    check(len(sal) > 10, 'the finale salute (%d frames)' % len(sal))
+    top_seg = cs.course.segment(EXAMPLES['obstacle_course']['zones']['finale'])
+    end = recs[max(recs)]['feet_world']
+    check(top_seg['y0'] < end[1] < top_seg['y1'] and abs(end[2] - top_seg['floor0']) < 0.08,
+          'the finale stands on the ladder\'s top platform (feet at %s; the platform %.2f m up)'
+          % (tuple(round(v, 2) for v in end), top_seg['floor0']))
+    # the follow camera pushes in while she maneuvers or sits, and stands off at 5.2 m on the plain walk
+    cam = cs.stage.camera
+    near, far = [], []
+    for f in range(f0, f1 + 1, 3):
+        sc.frame_set(f)
+        b = cs.body(f)
+        d = math.hypot(cam.matrix_world.translation.x - b.x, cam.matrix_world.translation.y - b.y)
+        if (cs.flags.get(f) or {}).get('phase') == 'sit' and (cs.flags.get(f - 45) or {}).get('phase') == 'sit':
+            near.append(d)
+        elif not cs.follow_close(f) and all(not cs.follow_close(g) for g in range(max(f0, f - 60), f)):
+            far.append(d)
+    check(near and far and max(near) < 3.6 and min(far) > 5.0,
+          'follow camera: %.2f to %.2f m from her while seated, %.2f to %.2f m on the plain walk'
+          % (min(near or [0]), max(near or [0]), min(far or [0]), max(far or [0])))
+    # stills along the run, through the template's own keyed follow camera
+    picks = []
+    for k, i in (('vault', 0), ('mount', 0), ('jump', 0), ('vault', 1), ('mount', 1), ('ladder', 0)):
+        if len(runs.get(k, [])) > i:
+            a, b2 = runs[k][i]
+            picks.append(('%s%d' % (k, i + 1), (a + b2) // 2))
+    if seated:
+        picks.append(('seated', seated[len(seated) // 2]))
+    ges = [f for f in recs if recs[f]['weights'].get('cheer', 0.0) > 1.0]
+    if ges:
+        picks.append(('cheer', ges[len(ges) // 2]))
+    if sal:
+        picks.append(('salute', sal[len(sal) // 2]))
+    shots = [{'path': 'course_example_run_%s_f%04d.png' % (t, f), 'frame': f} for t, f in picks]
+    sc['eido_example_shots'] = json.dumps(shots)
+    print('[example_run] picks', picks)
+    if RENDER:
+        for s in shots:
+            sc.frame_set(s['frame'])
+            render(sc, os.path.join(OUT, s['path']))
+    if '--save' in ARGS:
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'course_example_run.blend'), compress=True)
+        print('[example_run] saved course_example_run.blend for --parts example_run_render')
+
+
+def part_variants():
+    """every variant scene (presets.SCENES) run for its first 4 s with its character, and a still through its own
+    camera mode at 3.5 s: its recolour, its expression, the hand camera, the raw animation of the noik scene"""
+    from eidoblend.course import SCENES
+    sheet = []
+    for vname, spec in SCENES.items():
+        sc = new_scene('variant_run_' + vname, 640, 360, 16)
+        sc.render.fps = 30
+        tel = None
+        if spec.get('telemetry'):
+            tel = dict(spec['telemetry'], output_path=os.path.join(OUT, 'course_variant_%s_telemetry.json' % vname))
+        t0 = time.time()
+        cs = template.CourseScene(sc, variant=vname, duration=4.0, telemetry=tel, log=lambda *a: None)
+        cs.setup(frame_start=1)
+        ad = cs.h.arm.animation_data
+        f0, f1 = (int(v) for v in ad.action.frame_range)
+        sc.frame_start, sc.frame_end = f0, f1
+        for f in range(f0, f1 + 1):
+            sc.frame_set(f)
+            cs.frame(None, (f - f0) / 30.0, f)
+        if tel:
+            cs.cleanup()
+        fs = min(f1, f0 + 105)
+        sc.frame_set(fs)
+        b = cs.body(fs)
+        seg = cs.course.segment_at(b.y)
+        check(cs.h is not None and f1 - f0 > 60 and b.y > cs.course.start[1] + 3.0,
+              'variant %-30s %s, %s camera, %d frames baked in %.0f s; at 3.5 s %.1f m along (%s)'
+              % (vname, cs.character, cs.camera_mode, f1 - f0 + 1, time.time() - t0, b.y - cs.course.start[1],
+                 seg['label'] if seg else 'on the course'))
+        path = os.path.join(OUT, 'course_variant_%s.png' % vname)
+        render(sc, path)
+        sheet.append((vname, path))
+    if RENDER:
+        from PIL import Image, ImageDraw
+        cols = 4
+        rows = (len(sheet) + cols - 1) // cols
+        S = Image.new('RGB', (cols * 640, rows * 380), (12, 14, 18))
+        dr = ImageDraw.Draw(S)
+        for i, (name, p) in enumerate(sheet):
+            r, c = divmod(i, cols)
+            if os.path.exists(p):
+                S.paste(Image.open(p).convert('RGB'), (c * 640, r * 380))
+            dr.text((c * 640 + 8, r * 380 + 362), name, fill=(220, 220, 220))
+        S.save(os.path.join(OUT, 'course_variants_sheet.png'))
+
+
+def part_example_run_render():
+    """render a saved example run's stills (the GPU half of --parts example_run --no-render --save)"""
+    bpy.ops.wm.open_mainfile(filepath=os.path.join(OUT, 'course_example_run.blend'))
+    sc = bpy.context.scene
+    for s in json.loads(sc['eido_example_shots']):
+        sc.frame_set(s['frame'])
+        render(sc, os.path.join(OUT, s['path']))
+
+
 def render_shots(sc, cam, shots):
     for s in shots:
         sc.frame_set(s['frame'])
@@ -451,6 +632,12 @@ def main():
         part_walk()
     if 'walk_render' in PARTS:
         part_walk_render()
+    if 'example_run' in PARTS:
+        part_example_run()
+    if 'example_run_render' in PARTS:
+        part_example_run_render()
+    if 'variants' in PARTS:
+        part_variants()
     print('%s: %d failing (%.1f s)' % ('FAIL' if FAILS else 'PASS', len(FAILS), time.time() - t0))
 
 

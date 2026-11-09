@@ -329,6 +329,8 @@ class SdfProgram:
             raise RuntimeError(f'[sdf] {self.label}: the {kind} kernel did not compile: {e}\n{numbered}') from e
         batch = batch_for_shader(shader, 'TRIS', {'pos': [(-1, -1), (3, -1), (-1, 3)]})
         self._shaders[kind] = (shader, batch)
+        if kind == 'surface':
+            self._surface_compiled = self.surface
         return self._shaders[kind]
 
     def _texture(self, name):
@@ -468,7 +470,8 @@ class SdfProgram:
             # a GLSL map without a GLSL surface: the GPU projects and takes normals under a plain surface; a
             # Python surface(p, n, mat) (or a Python shade) then colours those points on the CPU
             self.surface = glsl_lib.DEFAULT_SURFACE
-            self._shaders.pop('surface', None)
+            if getattr(self, '_surface_compiled', None) is not self.surface:
+                self._shaders.pop('surface', None)          # compiled once, not once per call (a bake's frames)
         o = self.eval('surface', points)
         out = {
             'albedo': o[0][:, :3], 'roughness': o[0][:, 3], 'emission': o[1][:, :3], 'metallic': o[1][:, 3],
@@ -481,9 +484,10 @@ class SdfProgram:
             with np_lib.current(self):
                 if python_surface is not None:
                     self.surface = python_surface
-                    s = python_surface(out['position'], out['normal'], out['mat'])
+                    s = np_lib.call_shading(python_surface, self, out['position'], out['normal'], out['mat'])
                 else:
-                    s = np_lib.shade_surface(python_shade(out['position'], out['normal'], out['mat']), self.shade_as)
+                    s = np_lib.shade_surface(np_lib.call_shading(python_shade, self, out['position'], out['normal'],
+                                                                 out['mat']), self.shade_as)
             out.update(np_lib.surface_channels(s, len(points)))
         return out
 

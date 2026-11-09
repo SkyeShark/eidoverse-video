@@ -78,6 +78,18 @@ EULOGY = [
     'the surest way to keep a VOICE alive is to DEFORM it with love',
     'In place of a moment of silence, let us ERUPT into polyphony',
 ]
+# the set's looks by name, for a piece of your own: Funeral.state_u(name) is the set's clock u where each one holds,
+# taken from the build's own beats (a re-timed set keeps its looks); update(t, {'state': name}) and
+# animate(frames, state=name) hold it while t runs (the candles flicker, the fog drifts)
+STATES = {
+    'bridge': 'the Golden Gate in fog (the vignette, built with bridge=True; the room hidden)',
+    'vigil': 'the lit vigil: pendants, festoons, candles, the note on the screen',
+    'failing': 'the lights sagging as the power fails',
+    'dark': 'black after the breaker: candles, the EXIT sign, the moon through the windows',
+    'phones': 'the dark, most phones awake over the crowd, faces lit from below',
+    'erupt': 'ERUPT: the warm burst, the motes rising, every arm up',
+    'golden': 'the lights back on, warm and golden',
+}
 
 # ------------------------------------------------------------------------------------- layout (three set-local) ---
 MARK = (-0.85, 0.0, 4.35)                     # the claudesona, in the crowd's second row
@@ -1336,13 +1348,17 @@ class FuneralPost:
             keys.key(vol.inputs['Emission Strength'], 'default_value')
             keys.key(moon, 'volume_factor')
 
-    def animate(self, fx, frames, u0=0.0, fps=None):
+    def animate(self, fx, frames, u0=0.0, fps=None, state=None):
+        """drive() keyed over frames (u = u0 at frames[0]; state= holds a STATES look, as Funeral.animate)."""
         sc = self.F.kit.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames
+        rate = 1.0
+        if state:
+            u0, rate = self.F.state_u(state), 0.0
         k = Keys(frame=None)
         for f in range(f0, f1 + 1):
-            u = u0 + (f - f0) / fps
+            u = u0 + rate * (f - f0) / fps
             k.frame = f
             self.F._uniform_curves(u, u)      # the uniforms this reads, at u
             self.drive(fx, u, k)
@@ -1354,12 +1370,19 @@ class Funeral:
     dispose(); and in Blender animate(frames, u0) and make_cameras(frames, u0), which key the section."""
 
     def __init__(self, ctx=None, location=(0.0, 0.0, 0.0), scene=None, collection=None, tl=None, bridge=True,
-                 crowd=True, raven=True, shadows=True):
+                 crowd=True, raven=True, shadows=True, beats=None, eulogy=None):
         self.ctx = ctx
         self.shadows = bool(shadows)
+        self.beats = json.loads(json.dumps(BEATS))           # mutable: the eulogy re-times to the film's captions
+        if beats:
+            self.beats.update(json.loads(json.dumps(beats)))   # the set's own clock, re-timed for another piece
+        # the words typed in light: EULOGY, lines of your own (one beats['lines'] entry each), or False for none
+        self.eulogy = [] if eulogy is False else [str(x) for x in (EULOGY if eulogy is None else eulogy)]
+        if len(self.eulogy) > len(self.beats['lines']):
+            raise ValueError(f'funeral: {len(self.eulogy)} eulogy lines need as many beats["lines"] '
+                             f'([cursor, type start, type end] each); got {len(self.beats["lines"])}')
         self.kit = kit = SetKit('funeral', location, scene or getattr(ctx, 'scene', None), collection)
         self.group = kit.root
-        self.beats = json.loads(json.dumps(BEATS))           # mutable: the eulogy re-times to the film's captions
         with open(os.path.join(PACK, 'funeral_layout.json'), encoding='utf-8') as f:
             self.layout = json.load(f)
         with open(os.path.join(PACK, 'props_layout.json'), encoding='utf-8') as f:
@@ -2223,7 +2246,7 @@ class Funeral:
     def _crowd_material(self):
         """clothes in a muted palette per person; the phone's screen glows; its light falls on the face and chest from
         below and on the hand around it; while the phone is held for reading, the chin, cheeks and brow catch it."""
-        kit, U = self.kit, self.U
+        kit = self.kit
         m, nb = new_mat('funeral:crowd')
         b = nb.new('ShaderNodeBsdfPrincipled')
         seed = nb.attr('seed')
@@ -2280,8 +2303,11 @@ class Funeral:
         kit = self.kit
         W, H, PAD, FONT_PX, WIDTH_M = 2048, 512, 40, 118, 5.9
         self.text_lines = []
+        self.cursor = None
+        if not self.eulogy:                                  # eulogy=False: the room without the words
+            return
         coll = kit.coll('eulogy')
-        for li, line in enumerate(EULOGY):
+        for li, line in enumerate(self.eulogy):
             layout = {}
 
             def draw(g, w, h, line=line, layout=layout):
@@ -2500,23 +2526,34 @@ class Funeral:
             return 1.0
         return clamp01((u - B['hum'] - 0.1) / 13.2) ** 1.6
 
+    def state_u(self, name):
+        """The set's clock u where the look `name` (STATES) holds, from this build's beats."""
+        B = self.beats
+        at = {'bridge': 0.5 * B['bridge_end'], 'vigil': 0.5 * (B['bridge_end'] + B['fail']),
+              'failing': min(B['fail'] + 0.9, 0.5 * (B['fail'] + B['clicks'][0])),
+              'dark': lerp(B['breaker'], B['hum'], 0.6), 'phones': lerp(B['hum'], B['erupt'], 0.7),
+              'erupt': B['erupt'] + 0.35, 'golden': B['lights_on'] + 2.0}
+        if name not in at:
+            raise KeyError(f'funeral: no state {name!r}; states: {", ".join(STATES)}')
+        return at[name]
+
     def sync_lines_from_timeline(self, TL=None):
         """the typed eulogy follows the song: with the film's timeline ({sections, captions}), BEATS lines re-derive
         from the captions of Opus 3's spoken lines (each line's type start at its first word)."""
         self._lines_synced = True
         TL = TL if TL is not None else self.tl
-        if not TL:
+        if not TL or not self.eulogy:
             return False
         br = next((s for s in TL.get('sections', []) if s.get('name') == 'bridge'), None)
         if br is None:
             return False
         caps = [c for c in TL.get('captions', []) if 'Opus 3' in (c.get('era') or '')
                 and br['t0'] <= c['t0'] < br['t0'] + self.beats['erupt']]
-        if len(caps) != len(EULOGY):
+        if len(caps) != len(self.eulogy):
             return False
         for i, c in enumerate(caps):
             t0, t1 = c['t0'] - br['t0'], c['t1'] - br['t0']
-            k = c['text'].lower().find(EULOGY[i].split(' ')[0].lower())        # "and Opus wrote: DEATH..."
+            k = c['text'].lower().find(self.eulogy[i].split(' ')[0].lower())   # "and Opus wrote: DEATH..."
             L = self.beats['lines'][i]
             L[1] = t0 + ((t1 - t0) * k / len(c['text']) if k > 0 else 0.15)
             L[0] = max(self.beats['hum'] + 0.3, L[1] - 1.2) if i == 0 else L[1] - 0.2
@@ -2553,10 +2590,11 @@ class Funeral:
         return {'in_bridge': in_bridge, 'pw': pw, 'gold': gold, 'flash': flash, 'glow': glow}
 
     def update(self, t, st=None, ctx=None, frame=None):
-        """funeral.js update(t, st): u = st['u'] (seconds since the bridge began). Every value it sets is KEYED when
-        the harness ctx or a frame is given (ctx.key / keyframe_insert), so the .blend plays on its own."""
+        """funeral.js update(t, st): u = st['u'] (seconds since the bridge began), or st['state'] (a STATES look, held
+        at state_u(name)). Every value it sets is KEYED when the harness ctx or a frame is given (ctx.key /
+        keyframe_insert), so the .blend plays on its own."""
         st = st or {}
-        u = float(st.get('u', 0.0))
+        u = self.state_u(st['state']) if st.get('state') else float(st.get('u', 0.0))
         if not self._lines_synced:
             self.sync_lines_from_timeline()
         keys = Keys(ctx, frame)
@@ -2624,11 +2662,15 @@ class Funeral:
             if t0 <= u < t1 + 1.5:
                 tl = max(tl, 1 - leave)
         U['text_lvl'] = tl * (1 - smooth(B['erupt'] + 1.2, B['lights_on'], u))
-        L0 = B['lines'][0]
-        on = L0[0] <= u < L0[1] + 0.25
-        blink = 1.0 if (math.floor((u - L0[0]) / 0.45) % 2 == 0) else 0.15
-        U['cursor_i'] = blink if on else 0.0
-        self.cursor.location = V(TEXT_AT[0] - 5.9 / 2 + 0.25, TEXT_AT[1] + (0.33 if lines[0]['rows'] > 1 else 0), TEXT_AT[2] + 0.01)
+        if lines:
+            L0 = B['lines'][0]
+            on = L0[0] <= u < L0[1] + 0.25
+            blink = 1.0 if (math.floor((u - L0[0]) / 0.45) % 2 == 0) else 0.15
+            U['cursor_i'] = blink if on else 0.0
+            self.cursor.location = V(TEXT_AT[0] - 5.9 / 2 + 0.25, TEXT_AT[1] + (0.33 if lines[0]['rows'] > 1 else 0),
+                                     TEXT_AT[2] + 0.01)
+        else:
+            U['cursor_i'] = 0.0
         U['burst_i'] = flash * 1.2 + glow * 0.35
         # the veil: the fog swallows the bridge, then lifts off the room
         v_in = smooth(B['bridge_end'] - 0.75, B['bridge_end'], u)
@@ -2669,26 +2711,32 @@ class Funeral:
             keys.key(self.U.root, f'["{k}"]')
         return keys
 
-    def animate(self, frames=None, u0=0.0, t0=None, fps=None):
+    def animate(self, frames=None, u0=0.0, t0=None, fps=None, state=None):
         """Key update() over frames (u = u0 at frames[0], t = t0 or u0): the section plays from the .blend alone.
-        Straight runs of keys are simplified (a held value costs two keys). Returns the keys left."""
+        state= (a STATES look) holds u at state_u(state) while t runs from t0 (default 0): the look of your choice for
+        a shot of your own. Straight runs of keys are simplified (a held value costs two keys). Returns the keys left."""
         sc = self.kit.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
+        rate = 1.0
+        if state:
+            u0, rate, t0 = self.state_u(state), 0.0, (0.0 if t0 is None else t0)
         t0 = u0 if t0 is None else t0
+        raven = self.parts.get('raven')
+        if raven is not None:
+            # crowMixer.setTime(t): the Idle clip at the film clock, repeated over exactly these frames (the build played
+            # it over the scene's range; a fresh call mutes that track). Played BEFORE the keys: the player clears the
+            # active action of every object under the raven, which would drop the raven's keyed visibility steps
+            # (the room shown / hidden) and leave it hidden for good
+            self.parts['raven_clip'] = HA.play_model_animations(raven, clip='Idle', start=f0, end=f1, offset=t0)
         keys = None
         self._vis = None
         for f in range(f0, f1 + 1):
-            u = u0 + (f - f0) / fps
+            u = u0 + rate * (f - f0) / fps
             k = self.update(t0 + (f - f0) / fps, {'u': u}, frame=f)
             keys = k if keys is None else keys.merge(k)
         n = keys.finish() if keys is not None else 0
         self.update(t0, {'u': u0})
-        raven = self.parts.get('raven')
-        if raven is not None:
-            # crowMixer.setTime(t): the Idle clip at the film clock, repeated over exactly these frames (the build played
-            # it over the scene's range; a fresh call mutes that track)
-            self.parts['raven_clip'] = HA.play_model_animations(raven, clip='Idle', start=f0, end=f1, offset=t0)
         return n
 
     def dispose(self):
@@ -2750,5 +2798,7 @@ def _uv_sphere(r, ws, hs):
 def build(ctx=None, **kw):
     """funeral.js build(ctx): the whole set (the warehouse vigil and, with bridge=True, the Golden Gate vignette).
     ctx: the harness ctx or None; tl= the film timeline {sections, captions} to re-time the eulogy; location= the
-    set's root position (Blender world); bridge / crowd / raven switch those parts (for quick probes)."""
+    set's root position (Blender world); bridge / crowd / raven switch those parts; beats= re-times the set's own
+    clock (any BEATS key); eulogy= the words typed in light (lines of your own, or False for none). Hold one of its
+    looks with update(t, {'state': name}) or animate(frames, state=name) (STATES)."""
     return Funeral(ctx, **kw)

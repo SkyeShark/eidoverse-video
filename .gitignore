@@ -32,3 +32,11 @@ eidoverse/assets/cache/
 # Blender edition: each family's test renders, builds and digests (regenerate with its tests), and Blender's backups
 blender/tests/*/out/
 *.blend1
+
+# The terrain build's triage renders, sheets, research images and fetched real elevation data (regenerate them with
+# the scripts beside them: triage/render.py, reference/fetch_references.py + render_references.py)
+blender/tests/terrain_new/**/*.png
+blender/tests/terrain_new/**/*.jpg
+blender/tests/terrain_new/**/*.npz
+blender/tests/terrain_new/**/*.npy
+blender/tests/terrain_new/**/*.exr

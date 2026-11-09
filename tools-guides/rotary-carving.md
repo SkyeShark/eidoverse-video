@@ -152,7 +152,11 @@ review queries; `sweep_distance_np` takes arrays.
 ## The carved stock
 
 The stock is a clamped signed distance on a grid over the blank plus a
-two-cell pad (`resolution`, default 256 × 96 × 96 samples along X, Y, Z). It
+two-cell pad (`resolution`, default 256 × 96 × 96 samples along X, Y, Z:
+length, width, height). The WebGPU edition counted `[nx, ny, nz]` in three's
+axes, length, height, width, so a non-square resolution from a WebGPU scene
+swaps its last two numbers here: `[256, 80, 96]` there is `(256, 96, 80)`.
+`engagement_resolution` counts the same way. It
 starts as the prepared blank and takes, for every cutting stroke up to the
 moment shown (that one to its fraction), the maximum with minus the swept
 cutter's distance. Strokes only remove, so going forward applies only the
@@ -170,7 +174,12 @@ inside, half floats, constant blocks pruned to tiles) to
 stock's Volume datablock plays that file sequence, holding the first and last
 outside it, and the stock object's Volume to Mesh modifier meshes the current
 file at the zero level: a closed surface of about 100,000 vertices with every
-face outward. It casts and receives shadows like any mesh. Keep the cache
+face outward. It casts and receives shadows like any mesh. Blender shows a
+file sequence at `floor(time)`, so a motion-blur sample a quarter frame early
+would show the previous frame's cut; a driver on the sequence's frame offset (a
+simple expression, no Python at render time) makes every time within half a
+frame of a written frame show that frame's file, so every sample of a
+frame's shutter sees one surface. Keep the cache
 folder beside the `.blend`; `cache_dir` relative to an unsaved file is refused
 rather than written somewhere unexpected.
 
@@ -188,29 +197,55 @@ Carved to the end, the wood example's part lies within 0.13 mm of its target
 
 The stock's surface uses the fabrication family's `finish_stock`: hardwood's
 3D growth rings and fibre (birch plywood's plies), or brushed metal with
-patina, filtered by their screen footprint. The finish reads the stock point
-the way the WebGPU stock handed it over, `(z, y, x)` in three's axes, so the
-long grain and the rings run along the rotary axis and the pattern is the
-WebGPU one exactly. That swizzle is a reflection, so it lives in the material:
-`swizzle_finish(material)` puts it into any `finish_stock` material (the stock
-does this to its own; do it to a material you pass as `material=` or to a
-snapshot you shade separately).
+patina. The finish reads the stock point the way the WebGPU stock handed it
+over, `(z, y, x)` in three's axes, so the long grain and the rings run along
+the rotary axis and the pattern sits in the wood exactly where the WebGPU put
+it. That swizzle is a reflection, so it lives in the material:
+`swizzle_finish(material)` puts it into any `finish_stock` material.
+
+The fine patterns fade where they would shimmer, as the WebGPU's did by
+`fwidth(phase)`, the phase's change from one pixel to the next.
+`filter_finish(material)` gives the finish that true derivative: each
+pattern's 3D gradient taken through the pixel's footprint on the surface.
+`finish_stock` alone estimates it as the footprint times the pattern's
+frequency, which only holds where the gradient lies in the surface; on a
+turned part the rings' gradient runs nearly along the normal on the sides
+facing the camera, and there the estimate faded the rings to a quarter and
+the fibre to nothing at the examples' distance. Measured in a render against
+the phase's own pixel differences (`test_rotary_finish_footprint.py`: median
+ratio 1.01 for rings, fibre and brushing, where the estimate ran 1.6 to 2
+times high and up to 14 times at the 90th percentile), the exact fades keep
+the share of each pattern that `fwidth` keeps (rings 0.213 against 0.213
+from the examples' camera at 450 pixels; the estimate kept none). The stock does
+both to its own material; do both, in that order, to a material you pass as
+`material=` or to a snapshot you shade separately.
+
+The wood still reads softer at film distance than in the WebGPU frames, and
+the view transform is why: the WebGPU example tone-maps with ACES Filmic, the
+Blender edition with AgX. Measured on the finished part from the example's
+camera (high-pass luminance on the wood, 960 × 675), the WebGPU frame scores
+5.51, EEVEE under AgX 3.60, and the same EEVEE frame under Blender's
+higher-contrast Standard transform 5.58, with the same elliptical rings on
+the side facing the camera. One shading sample per pixel, as the WebGPU
+shaded, adds about 0.8 more under either transform; EEVEE's 16 to 64 samples
+average a ring pattern two to four pixels apart.
 
 ```python
 from eidoblend.fabrication.cutting import stock_material, stock_profile
-from eidoblend.fabrication.rotary import swizzle_finish
+from eidoblend.fabrication.rotary import filter_finish, swizzle_finish
 mat, finish = stock_material('brass part', stock_profile('brass'))
 swizzle_finish(mat)             # the rotary stock's grain coordinates
+filter_finish(mat)              # its patterns fade by their true screen footprint
 ```
 
 ## Playback
 
 ```python
 job.seek(14.0)            # the machine, A axis, spindle, stock and chips at 14 s of playback
-job.key(frame)            # key that pose (LINEAR) and write the stock's file for the frame
+job.key(frame, rate=1)    # key that pose (LINEAR, the shutter bracketed) and write the stock's file for the frame
 job.play(start=0, speed=1)  # seek and key every frame of the scene's range
 job.stop()                # remove the job's keys; the stock holds as it is
-job.dispose(files=True)   # remove everything the job made, cache files too
+job.dispose(files=True)   # remove everything the job made: its files, and the cache folder once empty
 ```
 
 `duration` changes playback speed only: playback time maps linearly onto the
@@ -224,6 +259,41 @@ when the job gets there (again only after a seek has taken it back from the
 end). In a harness scene, seek and key from `render_frame`, or let `play()` key
 the whole range in `setup`. After `play()`, a manual `seek` shows until the
 next depsgraph update; then the keys win, as for any animated property.
+
+### Motion blur and the shutter
+
+The harness films render with motion blur (a half-frame shutter, centred).
+In a time lapse one frame is seconds of program after the last, so keys at
+whole frames alone would blur the straight line between two poses that far
+apart: the spindle head ghosting across centimetres, the chuck swinging
+through an index. `key` brackets each frame's exposure with sub-frame keys
+instead (`shutter_offsets(scene)`: 31/64 of a frame either side for a centred
+shutter, 31/32 after a START or before an END one), posing the machine where
+a real-time camera would see it during its exposure: the frame's program
+moment plus `offset / fps` seconds times `rate`. `rate` is program seconds per
+film second around the frame, capped at 1, so a time-lapse frame exposes like
+a real-time camera (crisp, as the WebGPU frames were) and real-time cutting
+blurs as it really moves; 0 holds a frame still; below 1 (slow motion) the
+exposure shortens with it. `play` measures it from its own clock;
+`job.clock_rate(clock, t)` measures any playback clock (film seconds to job
+seconds, as passed to `seek`), so a scene with its own clock keys like this:
+
+```python
+clock = lambda t: max(0.0, t - 1)          # a one-second hold, then the job
+for f in range(scene.frame_start, scene.frame_end + 1):
+    t = (f - scene.frame_start) / fps
+    job.seek(clock(t))
+    job.key(f, rate=job.clock_rate(clock, t))
+```
+
+Any shutter up to 31/32 of a frame then blurs only real motion
+(`test_rotary_shutter.py`: inside every shutter the cutter tip is within
+0.01 mm of the program at the exposure's moments; a hold does not move). The
+spindle and the chips hold their frame's state through the bracket (see
+Not yet ported), and a camera cut keyed CONSTANT goes midway between two
+frames' brackets (`cut_offset(scene)`, half a frame before the cut for a
+centred shutter), so no shutter sees both shots. The bracket follows the
+scene's shutter position at key time; change the position, key again.
 
 Chips come from a one-time volumetric engagement sample
 (`rotary_removal(path, settings, resolution)`, default 96 × 28 × 28): each
@@ -278,6 +348,12 @@ rec = EXAMPLES['rotary_metal'](scene, frames=[1, 49, 241, 721], cache_dir='//met
   to the finished part; the camera cuts in close for the cutting and back out
   at 28 s. Set `material='brass'` for brass.
 
+Each keys its frames at its own clock's rate, so under the harness's motion
+blur the time lapses are crisp, the real-time cutting blurs as it moves, the
+holds are still, and the metal study's cuts (keyed half a frame before frames
+49 and 673) and its clock's jump from setup to the first chip stay outside
+every shutter.
+
 Both use the robotics studio (its ported room environment, without the grid).
 `frames=` keys only some frames (render only those). A full film writes one
 stock file per frame: `rotary`'s 744 frames take 0.9 GB (1.2 MB a frame;
@@ -290,6 +366,8 @@ bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_parity.py      
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_js_tests.py      # the Deno tests, ported
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_carve_options.py # every rotary_carve option, the job API, every refusal
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_stock_field.py
+bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_shutter.py         # what every frame's shutter sees, both examples
+bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_finish_footprint.py  # renders: the pattern fades against fwidth
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_scene_scripts.py   # the two scene files, as the runner calls them
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_examples.py        # builds both examples at probe frames
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_examples.py -- examples=rotary_metal material=brass suffix=_brass
@@ -317,20 +395,27 @@ Renders go through the shared GPU slot (`heavy.sh`), the builds do not need it.
 
 - **The WebGPU stock pass and its renderer.** The field is computed by numpy
   and meshed by OpenVDB instead of a fragment pass ray-marched on a proxy box;
-  there is no `renderer` option. `stock.texture` is the current frame's VDB
-  file, `readback()` returns the 3D field (`tiled()` gives the WebGPU tiled
-  layout of it).
+  there is no `renderer` option. `stock.texture` is the VDB file written last
+  (a frame's, or the hold file after `stop`), `readback()` returns the 3D
+  field, `tiled()` the WebGPU tiled layout of it and `layout` that layout's
+  description key for key, in three's axes (`ny` the height count, `nz` the
+  width count).
 - **The flat end's sub-surface values.** Below a sloped stroke the flat end's
   distance is the JS's normalised bound; the WebGPU edition evaluated it over
   its coarse bins, this edition over each stroke's box. The surface (the zero
   level) is the same; field values a few cells under a sloped floor can
   differ, and like there they depend on the frames sampled.
 - **No deformation motion blur on the cutting front.** The stock's surface is
-  re-meshed each frame; its turn with the chuck blurs as object motion, the
+  re-meshed each frame and every sample of a frame's shutter shows that
+  frame's surface; its turn with the chuck blurs as object motion, the
   advancing cut does not.
-- **The spindle under motion blur.** The rotor is keyed each frame at its
-  physical angle, as the WebGPU edition set it each frame; at 18,000 rpm that
-  is 12.5 turns between frames, so with motion blur on, the interpolated rotor
-  turns slowly instead of blurring into a disc.
+- **The spindle does not blur into a disc.** The rotor is keyed at its
+  physical angle each frame, as the WebGPU edition set it, and held through
+  the shutter: 18,000 rpm turns it six times in a 1/48 s exposure, more than
+  any motion-blur step count resolves, so it renders crisp at that angle.
+- **Chips do not streak.** They hold their frame's positions through the
+  shutter: the shared chip pool renumbers its instances as chips are born and
+  die, so their motion vectors would join unrelated chips. Streaks need stable
+  chip ids in `cutting_debris`.
 - Fixture, workholding and tool-envelope collisions are not checked (a valid
   XYZ path is not collision checking), as in the WebGPU edition.

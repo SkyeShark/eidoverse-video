@@ -40,7 +40,7 @@ from mathutils import Vector
 from ..ground import SIDES
 from ..locomotion import _path, key_frames
 from .controller import VRMCharacterController
-from .plant import plant, sub_report
+from .plant import FLIGHT_SLOTS, plant, sub_report
 
 ACCEL = {'walk': 1.8, 'run': 3.5}
 DECEL = {'walk': 2.2, 'run': 4.0}
@@ -296,27 +296,172 @@ class Gesture(_Cmd):
         c.play_gesture(self.slot, weight=self.weight)
 
 
+SEAT_BONES = ('hips', 'leftUpperLeg', 'rightUpperLeg')
+
+
+def _seat_skin(h):
+    """the meshes that are the skin over the pelvis and thighs: of the meshes carrying thigh-weighted vertices, the one
+    whose vertices sit tightest round the thigh bones at rest (and any within 1.3 x of it). A coat or a skirt skinned to
+    the thighs hangs looser, and in a seat its skinned hem goes through the pan: it is not what rests on it ->
+    [(mesh, {vertex index: True})], cached on the handle"""
+    cache = getattr(h, '_seat_skin', None)
+    if cache is not None:
+        return cache
+    want = {h.humanoid[b] for b in SEAT_BONES if b in h.humanoid}
+    thighs = {}
+    for s in ('left', 'right'):
+        b = h.humanoid.get(s + 'UpperLeg')
+        if b:
+            bone = h.arm.data.bones[b]
+            thighs[b] = (bone.head_local.copy(), (bone.tail_local - bone.head_local).normalized())
+    cand = []
+    for o in h.meshes:
+        idx = {g.index: g.name for g in o.vertex_groups}
+        if not any(nm in want for nm in idx.values()):
+            continue
+        M = h.arm.matrix_world.inverted() @ o.matrix_world
+        keep, dist = {}, []
+        for v in o.data.vertices:
+            best, bw = None, -1.0
+            for g in v.groups:
+                if g.weight > bw:
+                    bw, best = g.weight, g.group
+            nm = idx.get(best)
+            if nm in want:
+                keep[v.index] = True
+                if nm in thighs:
+                    a, u = thighs[nm]
+                    p = M @ v.co - a
+                    dist.append((p - u * p.dot(u)).length)
+        if keep and dist:
+            cand.append((float(np.median(dist)), o, keep))
+    if not cand:
+        h._seat_skin = []
+        return []
+    tight = min(c[0] for c in cand)
+    h._seat_skin = [(o, keep) for d, o, keep in cand if d <= 1.3 * tight]
+    return h._seat_skin
+
+
+def seat_underside(h, xy, z0, half=0.15, n=7):
+    """the seated body's underside under the pelvis: the lowest point, over a grid of up-rays (half m either way of xy,
+    n x n, from z0), of the posed skin over the pelvis and thighs (_seat_skin: the vertices whose strongest weight is the
+    hips' or a thigh's, on the skin's mesh: hair, tentacles, a coat's hem or a calf over the pan are not what rests on
+    it) -> z or None"""
+    from mathutils.bvhtree import BVHTree
+    dg = bpy.context.evaluated_depsgraph_get()
+    verts, polys = [], []
+    for o, keep in _seat_skin(h):
+        ev = o.evaluated_get(dg)
+        me = ev.to_mesh()
+        M = o.matrix_world
+        base = len(verts)
+        verts.extend(M @ v.co for v in me.vertices)
+        for p in me.polygons:
+            if all(i in keep for i in p.vertices):
+                polys.append(tuple(base + i for i in p.vertices))
+        ev.to_mesh_clear()
+    if not polys:
+        return None
+    bvh = BVHTree.FromPolygons(verts, polys)
+    low = None
+    for i in range(n):
+        for j in range(n):
+            x = xy[0] - half + 2 * half * i / (n - 1)
+            y = xy[1] - half + 2 * half * j / (n - 1)
+            loc, _n, _k, _d = bvh.ray_cast(Vector((x, y, z0)), Vector((0.0, 0.0, 1.0)), 1.5)
+            if loc is not None and (low is None or loc.z < low):
+                low = loc.z
+    return low
+
+
+def seat_gap(h, body, cclip, M, seat):
+    """how far the seated clip's underside rides over a seat's pan (m; negative: sunk into it): the clip's end pose
+    (the held seat) put on the armature at the root M, its underside under the pelvis (seat_underside) less the pan's
+    height (eidoblend.placement.seating's findSeatSurface). The armature is put back as it was. -> (gap, the pan's
+    height)"""
+    from ...placement import seating as SE
+    arm = h.arm
+    ad = arm.animation_data
+    act = ad.action if ad is not None else None
+    saved = {pb.name: (pb.rotation_mode, pb.rotation_quaternion.copy(), pb.location.copy()) for pb in arm.pose.bones}
+    mw = arm.matrix_world.copy()
+    try:
+        if ad is not None:
+            ad.action = None
+        N, off = cclip.sample(cclip.duration, loop=False)
+        for nm, b in h.humanoid.items():
+            pb = arm.pose.bones[b]
+            pb.rotation_mode = 'QUATERNION'
+            q = N.get(nm)
+            pb.rotation_quaternion = h.basis_from_normalized(b, q) if q is not None else (1.0, 0.0, 0.0, 0.0)
+        hb = h.humanoid['hips']
+        arm.pose.bones[hb].location = h.rest_q[hb].inverted() @ (off if off is not None else Vector())
+        arm.matrix_world = M
+        bpy.context.view_layer.update()
+        pan = SE.find_seat_surface(seat)
+        hp = arm.matrix_world @ arm.pose.bones[hb].head
+        lowest = seat_underside(h, (hp.x, hp.y), pan['z'] - 0.35)
+    finally:
+        for pb in arm.pose.bones:
+            rm, q, loc = saved[pb.name]
+            pb.rotation_mode = rm
+            pb.rotation_quaternion = q
+            pb.location = loc
+        arm.matrix_world = mw
+        if ad is not None:
+            ad.action = act
+        bpy.context.view_layer.update()
+    if lowest is None:
+        return None, pan['z']
+    return lowest - pan['z'], pan['z']
+
+
 class Sit(_Cmd):
     """beginSeated / endSeated as the WebGPU course example drives them: the seated clip plays from where the body
     stands (the root holds; the clip's own hip travel carries the hips back onto the seat), `down` seconds to sit (default:
     the clip), `hold` seated, then endSeated (reverse=True plays the seated clip backwards at reverse_speed, else
-    stand_clip forward), `up` seconds to stand (default: the clip's remaining time), stopEmote, and the walk resumes"""
+    stand_clip forward), `up` seconds to stand (default: the clip's remaining time), stopEmote, and the walk resumes.
+    seat: the seat object (the example's seatOn): the clip's held seat is measured on the posed mesh (seat_gap) and the
+    root rises or sinks by that gap so the underside rests on the pan, eased in over the descent's second half and out
+    over the first 60 % of the stand-up. The feet stand on the floor under the seated body (the plant)"""
 
     def __init__(self, hold=2.2, clip='stand_to_sit', stand_clip='sit_to_stand', reverse=True, reverse_speed=1.25,
-                 down=None, up=None, fade_in=0.25, fade_out=0.3):
+                 down=None, up=None, fade_in=0.25, fade_out=0.3, seat=None):
         self.hold, self.clip, self.stand_clip, self.reverse, self.reverse_speed = hold, clip, stand_clip, reverse, \
             reverse_speed
-        self.down, self.up, self.fade_in, self.fade_out = down, up, fade_in, fade_out
+        self.down, self.up, self.fade_in, self.fade_out, self.seat = down, up, fade_in, fade_out, seat
+        self.settle = 0.0
 
     def start(self, loco):
         c = loco.ctrl
         dur = c.begin_seated(self.clip, fade_in=self.fade_in)
         self.phase, self.left = 'down', (self.down if self.down is not None else (dur or 0.0))
+        self.span = self.left
+        if self.seat is not None:
+            gap, pan_z = seat_gap(c.h, c.body, c._emote_clip(self.clip), c.pose.M.copy(), self.seat)
+            self.settle = -gap if gap is not None else 0.0
+            self.gap = gap
+            loco.log(f'[film] sit: the held seat\'s underside {"(not over the pan)" if gap is None else f"{gap * 100:+.1f} cm"}'
+                     f' over the pan at {pan_z:.3f} m: the root {"holds" if gap is None else f"moves {self.settle * 100:+.1f} cm"}')
+
+    def _seat_dz(self):
+        frac = 1.0 - max(0.0, self.left) / max(1e-6, self.span)
+        if self.phase == 'down':
+            k = min(1.0, max(0.0, (frac - 0.5) / 0.5))
+        elif self.phase == 'hold':
+            k = 1.0
+        elif self.phase == 'up':
+            k = 1.0 - min(1.0, frac / 0.6)
+        else:
+            k = 0.0
+        return self.settle * k * k * (3.0 - 2.0 * k)
 
     def step(self, loco, dt):
         c = loco.ctrl
         self.left -= dt
         if self.left > 0:
+            c.seat_dz = self._seat_dz()
             return (0.0, 0.0)
         if self.phase == 'down':
             self.phase, self.left = 'hold', self.hold
@@ -328,7 +473,10 @@ class Sit(_Cmd):
             c.stop_emote(fade_out=self.fade_out)
             self.phase, self.left = 'out', self.fade_out + 0.1
         else:
+            c.seat_dz = 0.0
             return None
+        self.span = max(self.left, 1e-6)
+        c.seat_dz = self._seat_dz()
         return (0.0, 0.0)
 
 
@@ -364,7 +512,7 @@ class Locomotion:
             from .controller import PRESETS
             co = dict(PRESETS[preset]) if preset else {}
             co.update(start_position=tuple(start), start_heading=heading, enable_turning=True, land_on_contact=True,
-                      log=log)
+                      ground_past_steep=True, log=log)
             co.update(controller_opts or {})
             ctrl = VRMCharacterController(h, world, **co)
             ctrl.load_standard_animations()
@@ -438,9 +586,10 @@ class Locomotion:
         self._queue.append(Maneuver('climb_wall', **kw))
         return self
 
-    def sit(self, hold=2.2, **kw):
-        """sit down where the body stands (Sit: beginSeated, hold, endSeated, stopEmote)"""
-        self._queue.append(Sit(hold=hold, **kw))
+    def sit(self, hold=2.2, seat=None, **kw):
+        """sit down where the body stands (Sit: beginSeated, hold, endSeated, stopEmote); seat: the seat object, so the
+        seated underside rests on its pan (seatOn's settle)"""
+        self._queue.append(Sit(hold=hold, seat=seat, **kw))
         return self
 
     def seat_spot(self, seat_xy, heading_deg, clip='stand_to_sit'):
@@ -521,6 +670,7 @@ class Locomotion:
                 seg['checks_feet'] = {'ok': ok, 'failures': bad}
         if key:
             rep['action'] = key_frames(self.h, body, frames, action_name or f'{self.h.name}|controller')
+        self.h.arm['eido_controller'] = True         # the audits' motion.locomotion: this rig's travel is driven
         rep['timing_s'] = {'simulate': round(t1 - t0, 2), 'plant': round(t2 - t1, 2), 'key': round(time.time() - t2, 2)}
         rep['frames_baked'] = [recs[0]['f'], recs[-1]['f']] if recs else None
         rep['_frames'] = frames
@@ -575,6 +725,7 @@ def record(c, f, t):
             'target_speed': getattr(c, 'target_forward_speed', None), 'smooth_speed': getattr(c, '_smooth_fwd_speed', None),
             'tread_run': c.ahead_tread_run, 'spread': c.ahead_probe_spread, 'stair_shape': c.ahead_stair_shape,
             'backward': bool(c.backward), 'feet_world': tuple(c.feet_world_position),
+            'hand_contact': dict(getattr(c, 'hand_contact', None) or {}),
             'M_ik': c.pose.M.copy(), 'N_ik': {k: q.copy() for k, q in c.pose.N.items()}}
 
 
@@ -592,7 +743,7 @@ def segments(recs):
     return out
 
 
-FLIGHT_GAITS = ('run', 'stairsRunUp', 'stairsRunDown', 'fallIdle')
+FLIGHT_GAITS = FLIGHT_SLOTS
 
 
 def check_segment(rep, seg):

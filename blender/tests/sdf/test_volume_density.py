@@ -3,13 +3,14 @@
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
         <worktree>/blender/tests/sdf/test_volume_density.py
 
-Three 0.9 m slabs of constant medium in front of a white emissive backdrop, seen straight on:
-  A  medium(): a pure absorber, density 2 /m           -> transmittance exp(-1.8)
-  B  sample(): the engine contract, alpha 0.01 per 0.01 m -> density -ln(0.99) / 0.01, transmittance exp(-0.9045)
+Three 0.9 m cubes of constant medium in a row in front of a white emissive backdrop. The camera ray through a
+cube's centre crosses s = 0.9 m / cos(its angle off the axis): 0.928 m for A (2.25 m off-axis), 0.903 m for B and C.
+  A  medium(): a pure absorber, density 2 /m           -> transmittance exp(-2 s)
+  B  sample(): the engine contract, alpha 0.01 per 0.01 m -> density -ln(0.99) / 0.01, transmittance exp(-1.005 s)
   C  medium(): a pure emitter-absorber, density 1 /m, emission (1, 0.5, 0.25) /m
-     -> E (1 - exp(-0.9)) + backdrop exp(-0.9)
+     -> E (1 - exp(-s)) + backdrop exp(-s)
   D  medium(): a scattering slab (density 4 /m, albedo 0.9) under a sun: measured in both engines and printed
-The renders go to linear EXR ('Standard' view) and the centre pixels are compared with those numbers.
+The renders go to linear EXR ('Standard' view) and the centre pixels are compared with those numbers (within 3 %).
 out/vol_density_eevee.png and _cycles.png show the probe. Before them, without rendering (`-- render=0` runs only
 these): sample_as='albedo' grids, and Python sample() / medium() stages against their GLSL twins.
 """
@@ -55,10 +56,20 @@ SdfMedium medium(vec3 p) {
 }"""
 L = 0.9
 BACK = 1.0
+
+
+def path(i):
+    """The medium the camera ray through slab i's centre crosses: the slabs stand at x = (i - 1.5) * 1.5 and the
+    camera 9 m back on the axis, so an outer slab is seen 14 degrees off-axis and the ray runs 0.9 / cos(angle)
+    through it (0.928 m for A, 0.903 m for B and C)."""
+    x = (i - 1.5) * 1.5
+    return L * math.sqrt(x * x + 81.0) / 9.0
+
+
 EXPECT = {
-    'A': np.full(3, BACK * math.exp(-2.0 * L)),
-    'B': np.full(3, BACK * math.exp(-(-math.log(0.99) / 0.01) * L)),
-    'C': np.array([1.0, 0.5, 0.25]) * (1.0 - math.exp(-L)) + BACK * math.exp(-L),
+    'A': np.full(3, BACK * math.exp(-2.0 * path(0))),
+    'B': np.full(3, BACK * math.exp(-(-math.log(0.99) / 0.01) * path(1))),
+    'C': np.array([1.0, 0.5, 0.25]) * (1.0 - math.exp(-path(2))) + BACK * math.exp(-path(2)),
 }
 SLABS = (('A', {'medium': ABSORB}), ('B', {'sample': ENGINE}), ('C', {'medium': EMIT}), ('D', {'medium': SCATTER}))
 
@@ -179,7 +190,7 @@ for engine in (('BLENDER_EEVEE', 'CYCLES') if C.args().get('render', '1') == '1'
     got = centres(exr)
     for key in 'ABC':
         rel = float(np.max(np.abs(got[key] - EXPECT[key]) / EXPECT[key]))
-        C.check(f'{tag} slab {key}', rel < 0.06, f'got {got[key].round(4).tolist()}, expected {EXPECT[key].round(4).tolist()} '
+        C.check(f'{tag} slab {key}', rel < 0.03, f'got {got[key].round(4).tolist()}, expected {EXPECT[key].round(4).tolist()} '
                 f'(worst channel {rel * 100:.1f}% off)')
     scattered[tag] = got['D']
     print(f'[density] {tag} slab D (scattering, sunlit): {got["D"].round(4).tolist()}', flush=True)

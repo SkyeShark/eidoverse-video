@@ -165,13 +165,25 @@ if '1' in PARTS and RENDER:
     ok &= S.render(sc, 75, p_sc)
     im = S.read_png(p_sc).astype(np.float32)
     H_, W_ = im.shape[:2]
-    left = im[:, : W_ // 3]
+    # the left blob (the red splat at uv 0.30): its saturated core, inside a box round it that the yellow trail
+    # (which starts past 0.42 of the width) never enters
+    left = im[int(0.3 * H_):int(0.7 * H_), int(0.15 * W_):int(0.42 * W_)]
     lum = left.sum(axis=2)
     ys, xs = np.nonzero(lum > 0.85 * lum.max())
     wide = (np.ptp(xs) + 1) / max(np.ptp(ys) + 1, 1)
-    ok &= S.check('showcase: the left blob is wider than tall, red over blue (the engine preview)',
-                  wide > 1.3 and left[..., 0].mean() > left[..., 2].mean(),
-                  f'core {np.ptp(xs) + 1} x {np.ptp(ys) + 1} px, left third rgb {left.mean(axis=(0, 1)).round(1)}')
+    ok &= S.check('showcase: the left blob is wider than tall (a round splat in the square sim, stretched over 16:9 '
+                  'as in the engine) with a red rim', wide > 1.3 and left[..., 0].mean() > left[..., 2].mean(),
+                  f'core {np.ptp(xs) + 1} x {np.ptp(ys) + 1} px, box rgb {left.mean(axis=(0, 1)).round(1)}')
+    # the engine's own field (engine_run_stable_fluids.mjs case=showcase): its preview.jpg went through the engine's
+    # render pipeline's post (a wide glow), so the density itself is the reference
+    ref_p = os.path.join(S.OUT, 'engine_fluid2d_showcase_density.f32')
+    if os.path.exists(ref_p):
+        from eidoblend.fx._util import read_exr
+        eng = np.fromfile(ref_p, dtype='<f4').reshape(512, 512, 4)
+        mine = read_exr(os.path.join(CACHE, 'showcase_density_0075.exr'))[::-1]       # row 0 = top, as the WGSL
+        rel = float(np.sqrt(np.mean((mine[..., :3] - eng[..., :3]) ** 2)) / np.sqrt(np.mean(eng[..., :3] ** 2)))
+        ok &= S.check('showcase: the baked density matches the package run on WebGPU (relative RMS < 5 %)',
+                      rel < 0.05, f'{rel * 100:.2f} %')
     bpy.data.objects.remove(panel, do_unlink=True)
     bpy.data.objects.remove(cam, do_unlink=True)
     # all five panels side by side
@@ -222,6 +234,9 @@ if '2' in PARTS:
 if '2' in PARTS and RENDER:
     scene_img = bpy.data.images.load(os.path.join(S.HERE, '..', '..', '..', 'eidoverse', 'assets', 'sky',
                                                   'kloppenheim_puresky_ldr.png'), check_existing=True)
+    # the distortions move a scene texture's lookup by a few pixels (simple: density.rg * 3e-4 of the frame), which a
+    # smooth sky hides: they warp the paving stones' edges instead
+    edge_img = bpy.data.images.load(S.TEXCACHE + '/PavingStones128_1k/PavingStones128_Color.jpg', check_existing=True)
     effects = [('overlay', s) for s in OVERLAY_STYLES] + [('overlay', 'densityTint')] + \
         [('distortion', d) for d in DISTORTIONS]
     cols, pw, ph, gap = 5, 3.2, 1.8, 0.12
@@ -229,7 +244,7 @@ if '2' in PARTS and RENDER:
         if kind == 'overlay':
             mat = cursor.overlay_node(scene_img, style=nm)
         else:
-            mat = cursor.distortion(scene_img, 1.0, kind=nm)
+            mat = cursor.distortion(edge_img, 1.0, kind=nm)
         r, c = divmod(i, cols)
         _plane(sc, f'fx_{nm}', (pw, ph), ((c - (cols - 1) / 2) * (pw + gap), 0.0,
                                           ((len(effects) // cols - 1) / 2 - r) * (ph + gap)),
@@ -240,8 +255,9 @@ if '2' in PARTS and RENDER:
     img = S.read_png(p_fx).astype(np.float32)
     H, Wd = img.shape[:2]
     plain_mat = cursor.material(lambda g: g.tap('scene', *g.uv), 'plain_scene', scene_src=scene_img)
+    plain_edges = cursor.material(lambda g: g.tap('scene', *g.uv), 'plain_edges', scene_src=edge_img)
     for ob in [o for o in sc.objects if o.name.startswith('fx_')]:
-        ob.data.materials[0] = plain_mat
+        ob.data.materials[0] = plain_edges if ob.name[3:] in DISTORTIONS else plain_mat
     p_plain = os.path.join(S.OUT, 'sf_effects_plain.png')
     S.render(sc, END2, p_plain)
     plain = S.read_png(p_plain).astype(np.float32)
@@ -251,10 +267,12 @@ if '2' in PARTS and RENDER:
         r, c = divmod(i, cols)
         y0, y1 = int(r * H / rows) + 8, int((r + 1) * H / rows) - 8
         x0, x1 = int(c * Wd / cols) + 8, int((c + 1) * Wd / cols) - 8
-        diffs.append((nm, float(np.abs(img[y0:y1, x0:x1] - plain[y0:y1, x0:x1]).mean())))
-    flat = [nm for nm, d in diffs if d < 0.5]
-    ok &= S.check('every effect changes its panel', not flat,
-                  ', '.join(f'{nm} {d:.1f}' for nm, d in diffs) if not flat else f'unchanged: {flat}')
+        d = np.abs(img[y0:y1, x0:x1] - plain[y0:y1, x0:x1]).max(axis=2)
+        # the effects act along the stroke only: the share of the panel visibly changed (more than 8 of 255)
+        diffs.append((nm, float((d > 8).mean()) * 100))
+    flat = [nm for nm, d in diffs if d < 0.75]
+    ok &= S.check('every effect visibly changes its panel along the stroke (> 0.75 % of it by more than 8/255)',
+                  not flat, ', '.join(f'{nm} {d:.1f} %' for nm, d in diffs) if not flat else f'unchanged: {flat}')
     clear_objects()
 
 # ---- 3. post-processing over a render (compositor) ---------------------------------------------------------

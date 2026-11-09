@@ -1,6 +1,9 @@
 """look/post/chain.py: the compositor graph in a fixed order, the WebGPU post chain's order kept.
 
-    source (Render Layers) -> bloom (Glare) -> 'under' effects -> overlay (Alpha Over: a HUD) -> 'over' effects -> Output
+    source (Render Layers) -> 'prebloom' effects -> bloom (Glare) -> 'under' effects -> overlay (Alpha Over: a HUD)
+        -> 'over' effects -> Output
+
+('prebloom' is WebGPU's _autoEnhancePreBloomHook: lensflare and anamorphic_flare, which the bloom then softens.)
 
 All of it works on scene-linear light; AgX (the scene's view transform) applies after the whole graph, as three's tone
 map applied after its overlay and its effect hooks (which all ran on the lit HDR frame).
@@ -24,7 +27,7 @@ cannot tell the difference, so a look can be re-graded over a rendered film with
 """
 import bpy
 
-SLOTS = ('bloom', 'under', 'overlay', 'over')
+SLOTS = ('prebloom', 'bloom', 'under', 'overlay', 'over')
 TREE = 'look_post'
 SOURCE = 'look:render'
 _PASS_PROP = {'Depth': 'use_pass_z', 'Normal': 'use_pass_normal', 'Vector': 'use_pass_vector',

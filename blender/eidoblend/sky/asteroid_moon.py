@@ -167,10 +167,14 @@ class ShatteredMoon:
         roots = [ob for ob in new if ob.parent is None]
         group = bpy.data.objects.new('eido_shattered_moon', None)
         coll.objects.link(group)
+        group.scale = (self.scale,) * 3          # a placed cluster starts at its scale; the shieldworld keys its own
         for r in roots:
             r.parent = group
             r.matrix_parent_inverse.identity()
         self.group, self.pieces = group, pieces
+        # placed: the scene (not the shieldworld's orbit) positions, scales and animates the group, as the JS
+        # makeShatteredMoon leaves it to the scene; update(t) then reads the group's world matrix and never keys it
+        self.placed = False
         self.source_images = {img for ob in pieces for m in ob.data.materials if m and m.node_tree
                               for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image for img in [n.image]}
         # the pieces in the cluster's three.js frame
@@ -206,9 +210,13 @@ class ShatteredMoon:
             MM.fragment_material(ob)
             ob.visible_shadow = False
             ob['eido_sky_element'] = 'shieldworld'
+            ob['eido_dry'] = 1                     # a sky body: the weather's wetness never wraps it (JS noWet)
         self.specks = MM.speck_system(self, scene)
         self.specks['eido_sky_element'] = 'shieldworld'
-        self.uniforms = dict(sun_dir=(0.0, 0.4, -0.9), sun_col=(1.0, 1.0, 1.0), gain=2.0)
+        # the JS uniforms {sunDir, sunCol, gain} (+ the fade the shieldworld adds), sun_dir in BLENDER world space:
+        # three's default (0, 0.4, -0.9) normalised. A placed cluster's update(t) reads them; the shieldworld writes them
+        self.uniforms = dict(sun_dir=P.three_to_blender(_norm((0.0, 0.4, -0.9))), sun_col=(1.0, 1.0, 1.0), gain=2.0,
+                             fade=1.0)
 
     # ---- what the sky shader compiles for the dust ----
     def dust_glsl(self):
@@ -223,26 +231,52 @@ class ShatteredMoon:
                 bpy.data.images.remove(img)
         self.source_images = set()
 
-    # ---- per frame (the Eanpa shieldworld frame block's moon half) ----
-    def update(self, t, hours, sky_sun_dir, night_k, sun_col=(1.0, 0.62, 0.35)):
-        """The moon's orbit on the sky's clock (rises 22.3 h, transits in 6.2 h, outside the 21 km shield at every
-        point), its tumble, the fragments' drift, the dust uniforms, the night-only elevation-gated visibility."""
-        th = (((hours - 22.3) + 24) % 24) / 6.2 * math.pi
-        p3 = (math.cos(th) * 34000.0, math.sin(th) * 22000.0 + 2000.0, -12000.0)
-        euler = (t * 0.01, t * 0.017, 0.0)
-        M3, R3 = _three_matrix(p3, euler, self.scale)
-        elev = p3[1] / max(math.sqrt(sum(c * c for c in p3)), 1.0)
-        ext = max(0.0, min(1.0, (elev - 0.36) / 0.14))
-        ext_e = ext * ext * (3 - 2 * ext)
-        night_e = night_k * night_k * (3 - 2 * night_k)
-        visibility = night_e * ext_e
-        gain = 2.0 * ext_e
+    # ---- per frame ----
+    def update(self, t, hours=None, sky_sun_dir=None, night_k=None, sun_col=None):
+        """One frame of the cluster: the fragments' drift and tumble, the dust uniforms, the shading values.
+
+        The SHIELDWORLD (hours given; the Eanpa shieldworld frame block's moon half): the moon's orbit on the sky's
+        clock (rises 22.3 h, transits in 6.2 h, outside the 21 km shield at every point), its tumble, the night-only
+        elevation-gated visibility, lit by sky_sun_dir (three.js) in the giant's amber sun_col.
+        A PLACED cluster (hours None: the JS update(t) of a custom celestial cluster): the scene places, scales and
+        animates the group; the dust follows the fragments through the group's current world matrix. It is lit by
+        sky_sun_dir when a sky passes its true sun (Sky.attach_cluster), else by self.uniforms (sun_dir in Blender world
+        space, sun_col, gain, fade), as the JS scene copies its sun into cluster.uniforms.sunDir.
+        Returns the frame's values for key()."""
+        if hours is None:
+            mw = np.array(self.group.matrix_world)
+            M3 = np.eye(4)
+            M3[:3, :3] = _C.T @ mw[:3, :3] @ _C
+            M3[:3, 3] = _C.T @ mw[:3, 3]
+            scale = float(np.cbrt(abs(np.linalg.det(M3[:3, :3])))) or 1.0
+            R3 = M3[:3, :3] / scale
+            sun3 = _norm(sky_sun_dir if sky_sun_dir is not None else P.blender_to_three(self.uniforms['sun_dir']))
+            col = tuple(sun_col if sun_col is not None else self.uniforms['sun_col'])
+            gain = float(self.uniforms['gain'])
+            visibility = float(self.uniforms.get('fade', 1.0))
+            p3 = euler = None
+            moon_up = float(M3[1, 3])
+        else:
+            th = (((hours - 22.3) + 24) % 24) / 6.2 * math.pi
+            p3 = (math.cos(th) * 34000.0, math.sin(th) * 22000.0 + 2000.0, -12000.0)
+            euler = (t * 0.01, t * 0.017, 0.0)
+            M3, R3 = _three_matrix(p3, euler, self.scale)
+            scale = self.scale
+            elev = p3[1] / max(math.sqrt(sum(c * c for c in p3)), 1.0)
+            ext = max(0.0, min(1.0, (elev - 0.36) / 0.14))
+            ext_e = ext * ext * (3 - 2 * ext)
+            night_e = night_k * night_k * (3 - 2 * night_k)
+            visibility = night_e * ext_e
+            gain = 2.0 * ext_e
+            sun3 = _norm(sky_sun_dir)
+            col = tuple(sun_col if sun_col is not None else (1.0, 0.62, 0.35))
+            moon_up = p3[1]
         pos, quat = self.motion.update(t)
         hero = self.motion.hero_index
         hp = np.array(pos[hero])
         dust_origin = (M3 @ np.append(hp, 1.0))[:3]
-        to_local = R3.T / self.scale                     # world -> dust-local (columns go to the shader)
-        sun_l = _norm(tuple(R3.T @ np.array(_norm(sky_sun_dir))))
+        to_local = R3.T / scale                          # world -> dust-local (columns go to the shader)
+        sun_l = _norm(tuple(R3.T @ np.array(sun3)))
         plumes = []
         for a, b in self.plume_pairs:
             m = (np.array(pos[a]) + np.array(pos[b])) * 0.5 - hp
@@ -250,24 +284,26 @@ class ShatteredMoon:
         pieces_l = [tuple(np.array(p) - hp) + (0.0,) for p in pos]
         pieces_l += [(0.0, 999.0, 0.0, 0.0)] * (16 - len(pieces_l))
         U = dict(dustOrigin=tuple(dust_origin), dustM0=tuple(to_local[:, 0]), dustM1=tuple(to_local[:, 1]),
-                 dustM2=tuple(to_local[:, 2]), dustSunL=sun_l, dustT=float(t), dustSunCol=tuple(sun_col),
+                 dustM2=tuple(to_local[:, 2]), dustSunL=sun_l, dustT=float(t), dustSunCol=col,
                  dustGain=gain, dustFade=visibility, plumes=plumes, pieces=pieces_l[:16])
-        self.uniforms = dict(sun_dir=tuple(_norm(sky_sun_dir)), sun_col=tuple(sun_col), gain=gain)
+        self.uniforms = dict(sun_dir=P.three_to_blender(sun3), sun_col=col, gain=gain, fade=visibility)
         return dict(position3=p3, euler3=euler, rot3=R3, pieces=pos, quats=quat, visibility=visibility, gain=gain,
-                    sun_col=tuple(sun_col), sun_dir3=tuple(_norm(sky_sun_dir)), U=U, moon_up=p3[1])
+                    sun_col=col, sun_dir3=tuple(sun3), U=U, moon_up=moon_up, placed=p3 is None)
 
     def key(self, frame, v):
-        """Key one frame: the group's orbit and tumble, every fragment, and the shading values."""
+        """Key one frame: the group's orbit and tumble (the shieldworld only: a placed cluster's group is the scene's),
+        every fragment, and the shading values."""
         from mathutils import Matrix, Quaternion, Vector
         from .nodes import key_values
         g = self.group
-        RB = _C @ v['rot3'] @ _C.T
-        g.rotation_mode = 'QUATERNION'
-        g.location = Vector(P.three_to_blender(v['position3']))
-        g.rotation_quaternion = Matrix([list(r) for r in RB]).to_quaternion()
-        g.scale = (self.scale,) * 3
-        for path in ('location', 'rotation_quaternion', 'scale'):
-            g.keyframe_insert(path, frame=frame)
+        if v.get('position3') is not None:
+            RB = _C @ v['rot3'] @ _C.T
+            g.rotation_mode = 'QUATERNION'
+            g.location = Vector(P.three_to_blender(v['position3']))
+            g.rotation_quaternion = Matrix([list(r) for r in RB]).to_quaternion()
+            g.scale = (self.scale,) * 3
+            for path in ('location', 'rotation_quaternion', 'scale'):
+                g.keyframe_insert(path, frame=frame)
         for ob, p, q in zip(self.pieces, v['pieces'], v['quats']):
             ob.rotation_mode = 'QUATERNION'
             ob.location = Vector(P.three_to_blender(p))
@@ -281,12 +317,53 @@ class ShatteredMoon:
     def finish_keys(self):
         from .nodes import set_interpolation
         set_interpolation(self.keys_tree, 'LINEAR')
-        for ob in [self.group] + list(self.pieces):
+        for ob in ([] if self.placed else [self.group]) + list(self.pieces):
             set_interpolation(ob, 'LINEAR')
+
+    def clear_keys(self):
+        """Drop the keys a previous bake wrote (the scene's own animation of a placed group stays)."""
+        for idd in [self.keys_tree] + ([] if self.placed else [self.group]) + list(self.pieces):
+            if idd.animation_data:
+                idd.animation_data_clear()
+        return self
+
+    def bake(self, frame_start=None, frame_end=None, sun_dir=None):
+        """A placed cluster with no sky: run update(t) per frame of the scene (the scene on that frame, so an
+        animated group is followed) and key it. sun_dir (Blender world space) overrides uniforms['sun_dir']. The
+        accretion dust is marched in a sky's shader, so it appears with Sky.attach_cluster (a cluster without a sky
+        shows its fragments and debris river). Returns the per-frame values."""
+        if getattr(self, 'world_owned', False):
+            raise ValueError('ShatteredMoon.bake: this is the shieldworld\'s own moon; its sky bakes it')
+        sc = self.scene
+        fs = sc.frame_start if frame_start is None else int(frame_start)
+        fe = sc.frame_end if frame_end is None else int(frame_end)
+        fps = sc.render.fps / sc.render.fps_base
+        if sun_dir is not None:
+            self.uniforms['sun_dir'] = tuple(sun_dir)
+        self.placed = True
+        self.clear_keys()
+        before = (sc.frame_current, sc.frame_subframe)
+        out = []
+        try:
+            for f in range(fs, fe + 1):
+                sc.frame_set(f)
+                v = self.update((f - sc.frame_start) / fps)
+                self.key(f, v)
+                out.append(v)
+        finally:
+            sc.frame_set(before[0], subframe=before[1])
+        self.finish_keys()
+        return out
 
 
 def make_shattered_moon(scene, glb_path, spread=1.75, scale=1400.0, collection=None):
-    """makeShatteredMoon({glbBytes, spread}): the cluster, its materials, motion, dust and debris river."""
+    """makeShatteredMoon({glbBytes, spread}): the cluster, its materials, motion, dust and debris river.
+
+    Inside make_sky(world='shieldworld') the world owns it (its orbit, fade and light). For a CUSTOM celestial cluster
+    the scene places and scales cluster.group (scale= is its starting scale) and either hands it to a sky
+    (sky.attach_cluster(cluster): lit by the sky's true sun, its dust marched in the sky's shader, the sky's clouds
+    over it) or drives it alone (cluster.bake(sun_dir=...)). One cluster per scene: its materials and keys are
+    shared by name."""
     return ShatteredMoon(scene, glb_path, spread, scale, collection)
 
 

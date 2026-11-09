@@ -1,0 +1,60 @@
+{
+ "name": "namib_linear_dunes",
+ "role": "main",
+ "title": "Namib linear dunes south of Gobabeb, Namibia",
+ "landform": "linear (seif) dunes",
+ "note": "Linear dunes about 2 km apart running north-south for tens of kilometres, with Y-junctions, in the northern Namib Sand Sea south of the Kuiseb River near the Gobabeb research station.",
+ "centre_lat": -23.65,
+ "centre_lon": 14.98,
+ "pixel_size_m": 10.0,
+ "extent_m": [
+  10000,
+  10000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "data_note": "Copernicus GLO-30 is a 30 m radar surface model: upsampled here, so the crests are softer than the real sharp crests and the interdune corridors keep a faint speckle.",
+ "source": {
+  "dataset": "Copernicus DEM GLO-30 (public), 1 arc-second, AWS Open Data copernicus-dem-30m",
+  "publisher": "European Space Agency / Copernicus programme",
+  "url": "https://copernicus-dem-30m.s3.amazonaws.com/",
+  "native_resolution_m": 30,
+  "vertical_datum": "EGM2008 geoid",
+  "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+  "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+  "caveat": "A digital SURFACE model: it includes forest canopy and buildings.",
+  "kind": "copernicus",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 29.57,
+  "resampling": "bicubic (upsampled 3.0x from the source grid: no detail finer than the native resolution), then Gaussian sigma 0.60 source px (17.7 m) against the radar speckle and the source lattice",
+  "no_data_fraction": 0.0,
+  "tiles": [
+   "-24,14",
+   "-24,15"
+  ],
+  "arcsec": [
+   1.0,
+   1.0
+  ],
+  "pixel_is_point": true
+ },
+ "licence": "Copernicus DEM licence for GLO-30 Public: free, worldwide, any lawful use, attribution required; https://spacedata.copernicus.eu/documents/20123/122407/GEO1988-CopernicusDEM-SPE-002_ProductHandbook_I5.0+%281%29.pdf",
+ "attribution": "Produced using Copernicus WorldDEM-30 (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+ "water": [],
+ "shape_stats": {
+  "relief_m": 153.85,
+  "mean_m": 436.01,
+  "hypsometric_integral": 0.3716,
+  "slope_deg_p10": 0.73,
+  "slope_deg_p50": 3.41,
+  "slope_deg_p90": 11.52,
+  "slope_deg_p99": 19.37,
+  "slope_deg_mean": 4.93
+ },
+ "height_png": "namib_linear_dunes.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 378.83,
+ "height_max_m": 532.69,
+ "height_step_m": 0.0023477531090257127,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

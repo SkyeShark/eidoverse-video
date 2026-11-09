@@ -1,0 +1,98 @@
+{
+ "name": "crater_lake_context",
+ "role": "context",
+ "title": "Crater Lake, Oregon, USA",
+ "landform": "caldera",
+ "note": "The collapsed summit of Mount Mazama: a 8 x 10 km caldera, its walls 500-600 m above the lake, Wizard Island (a cinder cone) in the west of the lake.",
+ "centre_lat": 42.942,
+ "centre_lon": -122.108,
+ "pixel_size_m": 42.0,
+ "extent_m": [
+  42000,
+  42000
+ ],
+ "grid": "local azimuthal equidistant (sphere R=6371008.8 m) centred on centre_lat/centre_lon; x east, y north; row 0 = north edge; pixel centre x = (col + 0.5 - cols/2) * pixel_size_m, y = (rows/2 - row - 0.5) * pixel_size_m",
+ "context_of": "crater_lake",
+ "source": {
+  "dataset": "USGS 3D Elevation Program (3DEP), best-available DEM (3DEPElevation ImageServer)",
+  "publisher": "U.S. Geological Survey",
+  "url": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
+  "native_resolution_m": "1 m lidar where the projects in lidar_1m_products_here cover the tile, elsewhere 1/3 arc-second (~10 m)",
+  "vertical_datum": "NAVD88",
+  "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+  "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+  "kind": "usgs3dep",
+  "fetched": "2026-11-08",
+  "mosaic_pixel_m": 42,
+  "resampling": "bilinear",
+  "no_data_fraction": 0.0,
+  "request": {
+   "bbox": "-122.37716461864588,42.74527651545166,-121.83883538135416,43.13841156743744",
+   "bboxSR": 4326,
+   "imageSR": 4326,
+   "size": "1045,1041",
+   "format": "tiff",
+   "pixelType": "F32",
+   "noData": -9999,
+   "noDataInterpretation": "esriNoDataMatchAny",
+   "interpolation": "RSP_BilinearInterpolation",
+   "f": "json"
+  },
+  "export_size": [
+   1045,
+   1041
+  ],
+  "export_pixel_m": 42,
+  "lidar_1m_products_here": [
+   "USGS 1 Meter 10 x55y474 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x55y475 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x55y476 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x55y477 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x56y474 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x56y475 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x56y476 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x56y477 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y474 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y474 OR_WesternWildfires_A22",
+   "USGS 1 Meter 10 x57y475 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y476 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y477 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y478 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x57y478 OR_SouthwestCentralSycan_2021_B21",
+   "USGS 1 Meter 10 x58y474 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x58y474 OR_SouthwestCentralSycan_2021_B21",
+   "USGS 1 Meter 10 x58y474 OR_WesternWildfires_A22",
+   "USGS 1 Meter 10 x58y475 OR_SouthEast_D22",
+   "USGS 1 Meter 10 x58y475 OR_SouthwestCentralSycan_2021_B21"
+  ]
+ },
+ "licence": "Public domain (U.S. Government work); https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+ "attribution": "Courtesy of the U.S. Geological Survey, 3D Elevation Program (3DEP)",
+ "water": [
+  {
+   "kind": "lake",
+   "name": "Crater Lake",
+   "seed": [
+    42.9446,
+    -122.109
+   ]
+  }
+ ],
+ "shape_stats": {
+  "relief_m": 1742.93,
+  "mean_m": 1667.94,
+  "hypsometric_integral": 0.4051,
+  "slope_deg_p10": 0.59,
+  "slope_deg_p50": 4.56,
+  "slope_deg_p90": 17.87,
+  "slope_deg_p99": 34.25,
+  "slope_deg_mean": 7.24
+ },
+ "height_png": "crater_lake_context.png",
+ "rows": 1000,
+ "cols": 1000,
+ "height_min_m": 961.79,
+ "height_max_m": 2704.73,
+ "height_step_m": 0.026595559624628062,
+ "encoding": "16-bit greyscale PNG: height_m = height_min_m + v / 65535 * (height_max_m - height_min_m)"
+}

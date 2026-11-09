@@ -425,6 +425,14 @@ def check_fabric_over_scan():
           '(%dx%d, the scan\'s size)' % tuple(rough_img[0].image.size) if rough_img else 'create_fabric over a scan')
     txt = PM.help()
     check('create_painted_metal' in txt and 'computer_plastic_90s' in txt, 'help() prints the reference card')
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mm = PM.mesh_material(color=0x808080, rougness=0.2, name='pm_typo')
+    check("'rougness' is not a property" in buf.getvalue()
+          and abs(mm.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value - 1.0) < 1e-6,
+          'mesh_material: a misspelt option is ignored with three\'s warning (%s)' % buf.getvalue().strip())
     return m
 
 

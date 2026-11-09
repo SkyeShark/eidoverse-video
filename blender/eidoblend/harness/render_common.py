@@ -104,7 +104,10 @@ DEFAULT_LIGHTS = (                                   # setupScene's rig when the
     {'type': 'point', 'color': '#8888ff', 'intensity': 1.5, 'position': [-2, 2, 1]},
     {'type': 'point', 'color': '#ff2d95', 'intensity': 1.0, 'position': [0, 2, -3]},
 )
-POINT_WATTS = 4 * 3.141592653589793 / 0.683          # three point candela -> Blender watts (683 lm/W, 4 pi sr)
+# three point candela -> Blender watts: P = 4 pi I (the glTF importer's COMPAT conversion). The sun takes three's
+# directional intensity as its strength unchanged (COMPAT too), so the rig keeps three's balance of key to points;
+# a 683 lm/W factor belongs to both (the importer's SPEC mode, the look family's lighting.py) or to neither.
+POINT_WATTS = 4 * 3.141592653589793
 
 
 def setup_scene(config: dict, scene=None):

@@ -140,6 +140,7 @@ class VRMRobotBody:
         self._head_yaw_target = self._head_pitch_target = 0.0
         self._head_yaw_current = self._head_pitch_current = 0.0
         self._look_at_world_target = None
+        self._aim_basis = None         # (the head's place, the heading) the last look-at aim was taken from
         self._pending_action = None
         self._current_path = None
         self._current_goal = None
@@ -156,6 +157,7 @@ class VRMRobotBody:
         self._stuck_check = None
         self._script = None
         self._waiting = None
+        self._timers = []              # wait() / until(): (t, predicate, Pending)
         self.log = []                  # (t, event) for a scene's report: plans, replans, resolutions, rejections
         self.readings = []             # (frame_count, t, reading): every sense, for RobotDebug and the checks
         self.paths = []                # (frame_count, path or None): every plan and replan
@@ -312,18 +314,22 @@ class VRMRobotBody:
             p.reject(RuntimeError(f'clip failed to play: {clip_name}'))
         return p
 
-    # parkour: passed through to the legs (RobotLegs has no maneuvers: False, as the JS answers for a controller
-    # without them; a legs_class that has them answers for itself)
+    # parkour, passed through to the legs as the JS passes it to the engine's charCtrl: the move ahead along the heading,
+    # played by the controller family's VRMCharacterController from where I stand (RobotLegs._start_maneuver) -> True
+    # when it started (False: nothing it fits ahead, or moving: a move starts from standing here). It lasts while
+    # is_maneuvering(); the body senses on from where the move carries it
     def vault(self):
         return self.controller.vault()
 
     def jump(self, opts=None):
+        """opts: {'distance': m, 'height': m} (1.4 and 0.45 by default)"""
         return self.controller.jump(opts)
 
     def climb_ledge(self):
         return self.controller.climb_ledge()
 
     def climb_ladder(self, opts=None):
+        """opts: {'height', 'rate', 'firstRung', 'rungSpacing', 'timeScale'} (snake_case keys too)"""
         return self.controller.climb_ladder(opts)
 
     def set_running(self, v):
@@ -394,6 +400,30 @@ class VRMRobotBody:
         self._script = script
         self._step_script(None)
 
+    def wait(self, seconds):
+        """a Pending that resolves `seconds` on (a JS scene's `await sleep(ms)`): `yield body.wait(0.5)` in a script"""
+        p = Pending('waiting')
+        self._timers.append((self._time_accum + seconds, None, p))
+        return p
+
+    def until(self, predicate):
+        """a Pending that resolves on the first update where predicate() is true: `yield body.until(lambda: not
+        body.is_maneuvering())` waits out a move"""
+        p = Pending('waiting')
+        self._timers.append((None, predicate, p))
+        return p
+
+    def _resolve_timers(self, t):
+        keep = []
+        for until_t, pred, p in self._timers:
+            if p.done:
+                continue
+            if (until_t is not None and t >= until_t - 1e-9) or (pred is not None and pred()):
+                p.resolve()
+            else:
+                keep.append((until_t, pred, p))
+        self._timers = keep
+
     def _step_script(self, last):
         if self._script is None:
             return
@@ -416,6 +446,8 @@ class VRMRobotBody:
     def update(self, t, dt):
         self._time_accum = t
         self.frame_count += 1
+        if self._timers:
+            self._resolve_timers(t)
         if self._scan:
             self._update_scan()
         if self._look_at_world_target is not None:
@@ -471,15 +503,26 @@ class VRMRobotBody:
         pitch = -math.atan2(d.z, math.hypot(lx, lz))     # below the head looks down: + (as the JS)
         self._head_yaw_target = max(-self.yaw_limit, min(self.yaw_limit, yaw))
         self._head_pitch_target = max(-self.pitch_limit, min(self.pitch_limit, pitch))
+        self._aim_basis = (hp.copy(), hh)
 
     def _apply_head_override(self, dt):
         """the head's turn REPLACED by (yaw, pitch) each frame: recorded on the legs' frame for the bake (rig.apply_gaze
-        splits it onto my neck's pan and my head's nod)"""
+        splits it onto my neck's pan and my head's nod). With a look-at target the frame also records the target and the
+        head's place and heading the aim was taken from: the keyed body can stand a little off the live one (a walk's
+        stop lands on a mid-stance at the goal, the live run stops within arrive_radius), and the bake re-aims the head
+        from where the keyed body really is (bake._aimed_gaze), as the JS aims it from the head it renders"""
         if self.head_bone is None:
             return
         legs = self.controller.char_ctrl
         if hasattr(legs, 'set_gaze'):
-            legs.set_gaze(self._head_yaw_current, self._head_pitch_current)
+            look = None
+            if self._look_at_world_target is not None and self._aim_basis is not None:
+                look = (self._look_at_world_target.copy(), self._aim_basis[0], self._aim_basis[1], self.yaw_limit,
+                        self.pitch_limit)
+            try:
+                legs.set_gaze(self._head_yaw_current, self._head_pitch_current, look=look)
+            except TypeError:                         # a legs_class whose set_gaze takes the gaze alone
+                legs.set_gaze(self._head_yaw_current, self._head_pitch_current)
 
     def _remaining_path(self, pos):
         if not self._current_path:

@@ -410,7 +410,8 @@ def test_recipes():
           and abs(mug_lo.z - desk_hi.z) < 0.03, f'desk top {desk_hi.z:.3f}, laptop {lap_lo.z:.3f}, mug {mug_lo.z:.3f}')
     kit = placement_kit(os.path.join(LOCAL, 'scifi_barrels_group_of_four.glb'))
     isl = kit.islands()
-    check('recipes: the barrel group kit splits into its islands (placement.load_kit)', len(isl) >= 1,
+    check('recipes: the barrel group (one mesh of four barrels) is one part and one island, as the engine\'s '
+          'islands() groups parts, not the pieces of one mesh (placement.load_kit)', kit.count == 1 and len(isl) == 1,
           f'{kit.count} parts, {len(isl)} island(s)')
     for k, e in enumerate(isl[:4]):
         e.location = (-2.1 + 0.75 * k, -1.6, 0.0)
@@ -507,7 +508,7 @@ def test_stairs():
     from eidoblend.placement import _world as W
     sc = fresh()
     sc.render.fps = 24
-    floor, wall = room_set('Concrete034', 'PaintedPlaster015', size=8.0, wall_y=0.2)
+    floor, wall = room_set('Concrete034', 'PaintedPlaster015', size=20.0, wall_y=0.2)   # wide: the lens looks +X
     stone = pbr('Concrete047A')
     stair1 = box('stair1', (1.0, -2.0, 0.0), (3.0, -1.7, 0.17), stone)
     stair2 = box('stair2', (1.0, -1.7, 0.0), (3.0, -1.4, 0.34), stone)
@@ -544,7 +545,8 @@ def test_seat():
     sc.render.fps = 24
     sc.frame_start, sc.frame_end = 1, 96
     floor, wall = room_set('WoodFloor064', 'PaintedPlaster015', size=8.0, wall_y=1.1)
-    camera((0.35, -4.3, 1.25), (0.35, 0.0, 0.62), 35)              # before face_camera, which turns toward it
+    camera((0.35, -4.3, 1.25), (0.35, 0.0, 0.62), 28)              # before face_camera, which turns toward it; 28 mm
+                                                                   # keeps the floor sitter at x -1.75 in frame
     chair = local('corner_chair')
     place_on(chair, floor, xy=(-0.55, 0.25))
     chair2 = local('corner_chair')
@@ -604,7 +606,7 @@ def test_clips():
     area('key', (-1.2, -1.6, 1.4), (0, 0, 0.15), 160, 0.8, (1.0, 0.93, 0.84))
     area('fill', (1.4, -1.2, 0.8), (0, 0, 0.15), 35, 1.5, (0.82, 0.9, 1.0))
     world((0.30, 0.36, 0.42), 0.6)
-    camera((0.05, -2.3, 0.55), (0.05, 0.05, 0.18), 50)
+    camera((0.05, -2.3, 0.55), (0.05, 0.05, 0.18), 40)             # all three crows whole in frame
     for f in (6, 12, 18, 24):
         sc.frame_set(f)
         render(sc, f'clips_f{f:03d}.png')

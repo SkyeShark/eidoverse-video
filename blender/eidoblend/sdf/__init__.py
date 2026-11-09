@@ -3,9 +3,15 @@
 The engine raymarched each SDF per pixel inside a proxy box. Here an SDF becomes real scene content: a solid is
 its GLSL map() evaluated on the GPU and dual-contoured into a quad mesh, with its surface() baked to textures; a
 volume is its sample() / medium() evaluated into OpenVDB grids played by a Volume object; a screen is the SDF
-raymarched into an image (make_sdf_texture). Guide: tools-guides/sdf-volumes.md.
+raymarched into an image (make_sdf_texture, make_explosion_texture). Guides: tools-guides/sdf-volumes.md,
+tools-guides/sdf-explosions.md.
 
     from eidoblend.sdf import create_sdf_object, create_sdf_volume, make_sdf_texture, EXAMPLES, SDF_NP
+    from eidoblend.sdf import light_from_emission, fit_volume_range, nuclear_explosion   # the volumes' tools
+
+The examples_<family>.py files (solids, vehicles, volumes) register their EXAMPLES on import; the vehicles' builders
+are the subpackage eidoblend.sdf.vehicles (tools-guides/sdf-vehicles.md), the mushroom cloud is nuclear_explosion
+(NuclearExplosionFX, and look.post's registry effect 'nuclear_explosion').
 """
 
 from .glsl_lib import SDF_PRIMITIVES
@@ -15,7 +21,8 @@ from .gpu_eval import SdfProgram
 from .mesher import dual_contour
 from .solid import create_sdf_object, SdfObject, three_to_blender
 from .volume import create_sdf_volume, SdfVolume, SdfVolumeSpec, volume_render_settings, VOLUME_QUALITY
-from .texture import make_sdf_texture, SdfTexture, SDF_TEX_RECIPES
+from .texture import (make_sdf_texture, SdfTexture, SDF_TEX_RECIPES, make_explosion_texture, ExplosionTexture,
+                      EXPLOSION_FRAGMENT_SHADER)
 from .helper import register_sdf_helper, help  # noqa: A004 - the engine's name
 from .rhombic_dodecahedron import (create_rhombic_dodecahedron, fill_volume_rd, fill_sphere_rd, voxelize_mesh_rd,
                                    RdVoxels)
@@ -45,3 +52,12 @@ def _register_examples():
 
 
 _register_examples()
+
+# the volumes family's tools (examples_volumes.py: the lamps from emission, the froxel range, the stills) and the
+# mushroom cloud; left out (with the warning above) when examples_volumes.py did not load
+if 'examples_volumes' not in EXAMPLE_IMPORT_ERRORS:
+    from .examples_volumes import (light_from_emission, light_from_surface, fit_volume_range, build_still,  # noqa: E402
+                                   escape_transmittance, escape_fraction, emission_stats, EmissionLights, LiveUniforms,
+                                   GRID_BOUNDS, LIGHT_COUNT, VOLUME_EXAMPLES)
+    from . import nuclear_explosion  # noqa: E402
+    from .nuclear_explosion import NuclearExplosionFX  # noqa: E402

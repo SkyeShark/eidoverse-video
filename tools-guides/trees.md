@@ -140,7 +140,15 @@ make_seed_tree.set_sun(sun)            # after the sun exists: backlight + billb
   themselves is what looks bad): the key sun skips the cards and a shadowless
   twin of it lights them, by light linking. The twin follows the sun's
   rotation, energy, colour and angle. `bake_impostor(tree, cast_shadow=False)`
-  casts nothing.
+  casts nothing. Unshadowed and lit through its dome normal, the billboard
+  reads lighter and flatter than the self-shadowed LOD0 crown
+  (`blender/tests/trees2/out/cards_whiteOak_far70_*.png`), so keep the switch
+  out of shot: a tree that crosses it in view pops brighter. The card carries no
+  specular: under a sun behind the tree, its smooth dome normal used to catch
+  one grazing glint over the whole card, and a back-lit grove rendered white.
+  `blender/tests/trees2/billboard_light_match.py` measures the billboard against
+  LOD0 with the sun in front, beside and behind (the white oak's billboard:
+  1.25 / 1.67 / 0.99 × LOD0's luminance).
 - `auto_lod(tree, camera=None, lod1Dist=, lod2Dist=, billboardDist=)` drives
   every level's visibility from the camera distance, so a saved .blend switches
   on its own. The app's switches use a 5 % hysteresis that needs the previous
@@ -214,14 +222,43 @@ Make both after the sky and sun are final.
     distortion 0.3, power 6, scale 3, ambient 0.16), against the bound sun:
     `k = saturate(V·−normalize(L + 0.3N))^6 × 3 + 0.16`, glow
     `k × translucency × per-leaf thickness × species transmit × sun`. It is
-    shadowed by the canopy, as the JS's shadow map does.
-  - By default the glow also carries the leaf's Lambert factor, `max(0, −N·L)`,
-    so it fades at the very silhouette of the crown, where the JS keeps it.
-    EEVEE drops the leaf's diffuse light when a translucent closure uses another
-    normal, so that backlight must share the leaf's normal. And a leaf card lit
-    from behind at a grazing angle (the sun more than about 45° off the card's
-    own normal) is self-shadowed by EEVEE and does not glow.
-    `blender/tests/trees/backlight_check.py` measures all of this.
+    shadowed by the canopy, as the JS's shadow map does. Two routes,
+    `make_seed_tree.set_backlight(mode)` for plants grown from then on (the
+    add-on: Light > Backlight):
+    - `'translucent'` (the default): a Translucent BSDF on the leaf's own
+      normal, the term × the leaf's Lambert factor `max(0, −N·L)`, so the glow
+      fades at the silhouette, and front-lit leaves get none of it. Every lamp
+      reaches it. EEVEE drops the leaf's diffuse light when a translucent
+      closure uses another normal, so this backlight must share the leaf's.
+    - `'glow'` (opt-in): the JS term itself. Lit from behind, the crown glows
+      out to its silhouette; front-lit, every sunlit leaf carries the ambient
+      scatter (`0.16 × tcol × sun`), which is what makes the app's canopy read
+      light yellow-green (`blender/tests/trees2/out/glow_oak_front_glow.png`
+      against `glow_oak_front_translucent.png`). EEVEE gives no lamp's light alone, so the shared
+      group "SeedThree Sun Direct" reads it through Shader to RGB of four white
+      Translucent BSDFs and cancels the world and light-probe part (EEVEE's
+      diffuse sky light is an L1 spherical harmonic, affine in the normal);
+      measured, a bright world changes the glow by nothing. The glow joins the
+      leaf as emission. Other lamps also reach those reads, weighted by their
+      angle to the sun, so keep it to sunlit shots (or light-link the lamps
+      away from the plants); with no sun lamp bound there is no glow. It is a
+      heavy shader: each Shader-to-RGB read inlines EEVEE's light loop. In the
+      trees2 batch, a 12 GB memory-capped Blender holding the whole demo scene,
+      the GPU driver ran out of memory linking the leaf and card shaders, and
+      EEVEE drew the leaves missing and the cards magenta; it compiled in the
+      smaller scenes. Check the first render of a glow shot.
+  - Every leaf, card, frond and spine part carries the app's shadow
+    `normalBias` (0.04 m) as EEVEE's shadow terminator offset, applied at every
+    angle. EEVEE shadows a card lit from behind at a grazing angle (the sun more
+    than about 45° off the card's normal) with the card itself; the bias gives
+    that light back in part. Measured with the trees tests' settings (2 shadow
+    rays, 8 steps), a card lit from behind 54° off its normal keeps 96 %
+    (translucent) / 71 % (glow) of its light, 72° off 14 % / 0 %, 85° off
+    24 % / 76 %. 0.1 m would keep more (100 %, 94 %, 54 % in the translucent
+    route) but visibly flattens the leaf-on-leaf contact shadows of a close-up,
+    so the parts keep the app's value; `materials.shadow_bias(ob, metres)`
+    changes one part. `blender/tests/trees2/glow_silhouette.py` measures both
+    routes on cards in linear light and renders the meadow oak in each.
 - Joshua fronds: the green → dry → driest texture ramp by distance from the
   nearest green crown, with the frond tints and dryness, and the JS's dim frond
   backlight (0.2 / 8 / 1.2 / 0.03). The mobile ladder's thatch bark blends the
@@ -246,7 +283,21 @@ Make both after the sky and sun are final.
   dropped 0.55 × the card height (no normal points down, so the trunk base is
   never black) plus 0.55 × the baked detail, and only the app's flat ambient
   scatter (0.16 × 0.7 × translucency × the species transmit): no directional
-  backlit bloom on a flat far card.
+  backlit bloom on a flat far card, and no specular (see Far trees). The
+  scatter follows the plant's backlight route, so the switch keeps the leaves'
+  brightness: in `'translucent'` it reaches the card's far side as the leaves'
+  does, in `'glow'` it is the JS term exactly, the sun's unshadowed light on
+  every side (the card receives no shadow). The Joshua tree, the yuccas and
+  the saguaro scatter their own fronds' or spines' colour at their 0.03 floor;
+  the app gives their billboards the broadleaf green at 0.16, since they have no
+  foliage transmit. The bake
+  turns the normals of thin cut-out parts (leaves, fronds, spines) away from the
+  plant's centre, so the detail of the leaves facing a bake camera leans toward
+  it, as their visible side does, and both cards bake the same normal where they
+  cross (the raw sign is only the generator's winding: the Joshua tree's leaned
+  away, and its billboard lit up under a sun behind it). At render the detail
+  turns with the card (a rotated plant, a grove slot's yaw; the app leaves it
+  unturned) and mirrors across the card on its back face.
 
 ## Export (.glb)
 
@@ -273,16 +324,53 @@ leaf green, bug f).
   tree with every level and its billboard switched by camera distance, the
   64-tree grove, the ring haze (a compositor pass), the ambient soundscape
   (wind bed + bird calls in the sequencer) and the camera framed as the app
-  frames a species. `sun_az`, `sun_el`, `forest_count`, `haze`, `audio`,
+  frames a species. `sun_az`, `sun_el`, `forest_count`, `haze`, `ao`, `audio`,
   `scale_ref` (the 1.8 m box), `autorotate` (a keyed orbit) and `frames` are
   the app's Environment and Camera folders. Desert species get the desert
-  biome.
+  biome. The app's tone map, three's ACES at exposure 1.3, becomes AgX with
+  its 'High Contrast' look at log2(1.3) + 0.23 stops: the same display values
+  on a neutral ramp (mean difference 0.008; `seedthree.scene.tonemap.aces_view`).
+  The app's sun colour is its HSL triple taken as linear, as three r184 does. `spom=True` is the app's optional parallax-occlusion terrain (its
+  Environment toggle, off by default as in the app): the 48-step march and the
+  12-step relief self-shadow, unrolled into shader nodes, with the app's depth,
+  per-layer push and 22-90 m fade. At eye height on the desert floor its relief
+  streaks into spikes, toward the horizon and in the foreground too (a grazing
+  march with the app's constants: `minViewZ` 0.12, 48 layers, the desert pushes
+  up to 1.4); keep it for higher or steeper views
+  (`blender/tests/trees2/out/spom_*`). The march follows three's
+  ParallaxOcclusion step for step (its tangent frame, layer count and
+  refinement), but it has not been compared with the app's own render.
+- The ring haze is a compositor pass over EEVEE's Position pass. The frame
+  renders with a transparent film and the sky comes back from the Environment
+  pass, so the haze mixes only the geometry's share of each pixel:
+  `image × (1 − f) + haze × f × alpha + sky × (1 − alpha)`. Each pixel takes
+  the factor of its own position, as the app fogs per fragment, so a leaf in
+  front of hazed hills keeps its colour. The Position pass is not antialiased:
+  where the image blends the hazed terrain rim into the sky, the pass can hold
+  the sky's empty position, and only those pixels take their 2 px
+  neighbourhood's factor (no dark rim line, no haze-coloured blocks on the
+  leaves; `blender/tests/trees2/haze_edge_check.py`). With the haze off, the
+  app's Distance fog toggle, `set_haze_enabled(scene, False)` gives the app's
+  fallback, its classic range fog (`smoothstep(95, 300 m, view depth)` toward
+  the sky's colour; desert 55-230 m). `set_fog_on(scene, False)` drops both.
+  The demo's sky needs its compositor: do not switch compositing off.
+- The soundscape lays the app's schedule over the shot: the biome's looping
+  wind bed end to end (a linear 1.6 s fade under the master's 0.35 s approach)
+  and a bird call every 6-18 s (desert 8-24 s), each a random variant at rate
+  0.96-1.05, peak 0.06-0.14, panned ±0.7, with the JS's exponential fades keyed
+  on every frame. A seeded RNG replaces `Math.random`, so the audio repeats run
+  to run. Blender pans a mono strip equal-power (−3 dB per channel at the
+  centre) where the app's unpanned bed plays at full level on both, so the bed
+  strip carries √2. `blender/tests/trees2/ambience_mixdown.py` mixes a minute of
+  each biome down to WAV and measures the bed level and every call.
 - `make_seed_tree.example('reference_turntable', species='paperBirch', seed=1)`
   is the app's neutral reference turntable (`scripts/reference`): LOD0, wind
   off, a 47° camera fitted with a 12 % margin swinging from the left
-  three-quarter to the right; `shot['probe_frames']` are the three it compares.
+  three-quarter to the right, against its flat 0xaeb9bf backdrop;
+  `shot['probe_frames']` are the three it compares.
   `example('example_scene')` is the app's film hookup example (white oak seed 42
-  under the shadow-ready sun, an orbiting camera).
+  under the shadow-ready sun, an orbiting camera; a plain ground and sky stand
+  in for the film's own).
 
 ## Asset tools (`scripts/`)
 
@@ -332,18 +420,55 @@ stays within 2 levels. `gen_wind` needs a running ComfyUI with Stable Audio 3.
   - The demo scene's scatter (terrain noise to 1e-12, rocks, limbs, grass,
     scrub, clouds, forest slots), the asset tools (37 checks), and the app's own
     unit tests for the ladder, card thinning, willow sheets and shrub fruit.
+- The Blender side renders in `blender/tests/trees2/` (run them through the GPU
+  slot; `run_batch.py` runs several in one Blender): `cards_lod_probe.py`
+  (the card LOD2 and the billboard against LOD0 at 24 m and 70 m),
+  `mobile_ladder.py`, `forest_export_lod.py` (the grove, the .glb and its
+  re-import, distance switching), `glow_silhouette.py` (both backlight routes
+  on cards in linear light, the meadow oak in each), `demo_scene.py`,
+  `examples_probe.py`, `spom_probe.py`, `addon_gpu.py` (the add-on's bake,
+  export and preview operators), `billboard_light_match.py` (LOD0, the card
+  LOD2 and the billboard under a sun in front, beside and behind, and the grove
+  of billboards), `haze_edge_check.py` (the haze pass at silhouettes and its
+  range-fog fallback, against the frame without fog), `reopen_saved_demo.py`
+  (a saved demo .blend reopened in a Blender that never loads the add-on,
+  rendered at other frames: every driver a simple expression) and
+  `ambience_mixdown.py` (no GPU: a minute of each biome's soundscape mixed down
+  and measured).
 - Cost: 30 ms to 1 s per plant in Python, and 0.3-2 s to build in Blender.
 - The SeedThree add-on itself installs as a Blender 5.2 extension (validated,
   built, installed and grown from in a throwaway user folder by its
   `blender/tests/test_extension.py`). Its sidebar has the app's folders: the
   dials, Optimization / LODs (preview level, mobile target, distances, budgets,
-  bakes), Environment (sun, haze, scale reference, forest; Build demo scene),
-  Wind, Light, Camera (auto-rotate), Export (.glb, PNG) and Save & Load.
+  bakes), Environment (sun, haze, scale reference, parallax terrain, ambient
+  occlusion, forest; Build demo scene; the toggles act on the scene at once, as
+  in the app), Wind, Light, Camera (auto-rotate: a keyed orbit of the scene
+  camera), Export (.glb, PNG) and Save & Load.
 
 ## Not yet ported
 
-- The JS backlight's orientation-free response at the crown's silhouette by
-  default (see Materials: EEVEE keeps one diffuse-type closure per normal).
-- The app's optional parallax-occlusion terrain (SPOM). The demo terrain is the
-  app's default splat material.
-- The GitHub fallback when no checkout is found.
+- The app's backlight look by default. The default route keeps the leaf's
+  Lambert factor; the app's own term is the opt-in `'glow'` route, whose
+  shader the GPU driver failed to link once under the shared machine's memory
+  cap (see Materials).
+- A card lit from behind more than ~45° off its normal keeps only part of its
+  backlight in either route (see the shadow bias under Materials; in the glow
+  route its shadow read is pushed along the sun's direction, nearly parallel
+  to the card). In a backlit shot those cards are close to edge-on to the
+  camera.
+- The JS's glow from lamps other than the sun (it sums the term over every
+  direct light). The glow route is built for the bound sun: other lamps also
+  reach its reads, weighted by their angle to the sun (a lamp opposite the sun
+  counts about 1.4 times, one at right angles subtracts), so grow lamp-lit
+  plants with `'translucent'`. With no sun lamp bound, the glow is off.
+- The GitHub fallback when no checkout is found (eidoverse's bridge imports the
+  JS API from GitHub). The Blender edition finds a local SeedThree checkout
+  with the `blender` branch, or says how to clone one.
+- The demo scene's volumetric clouds as the app shows them. Their noise,
+  places and sizes are the app's, and each cloud volume now carries the app's
+  emission + absorption recipe (EEVEE drew the Geometry Nodes volumes with its
+  default grey volume shader before, as dark smudges). But EEVEE 5.2 brings
+  them to the frame at a few percent of their expected strength: close up, a
+  core dense enough to read white adds about 1 % over the sky, and neither the
+  volume range nor the slice count changed that. In the demo's skies they are
+  close to invisible. Light a film's sky with the sky family instead.

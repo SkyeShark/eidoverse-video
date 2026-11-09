@@ -11,7 +11,11 @@ Walls (3 x 2.4 m, Bricks097, 3 x 2.4 tiles, 3 cm deep), left to right:
   sample+silhouette    both on the same region: the tiling relief ends cleanly at u = 1.5
   debug_silhouette     the cut region painted magenta instead of cut
 And world-UV merged boxes (an L of two blocks and a step) with face_bounds: one brick course runs across the
-blocks' coplanar faces, each face displaces along its own normal, so the outline notches at the corners.
+blocks' coplanar faces, each face displaces along its own normal, so the outline notches at the corners. And two floor
+tiles, silhouette True and False, a 20 cm cube standing at z = 0 on each: both carve inward (the engine's flat SPOM and
+its interior POM), so the cubes stand on the peaks; measured from the side in film-transparent renders
+(relief_bounds_alpha_floor_*) and shown in relief_bounds_floor_contact.png. Also checked: the engine's hex colours,
+face_bounds replacing silhouette_bounds' cut.
 Renders: relief_bounds_front.png (the walls straight on), relief_bounds_graze.png (along them, the cut edges'
 depth), relief_bounds_boxes.png (the merged boxes' corner), relief_bounds_march.png (debug_march's fract(uv)).
 Checks (PASS/FAIL, numeric): the cut walls' alpha clip and shadow mode, the clamp nodes, the face attributes match
@@ -152,6 +156,52 @@ except TypeError:
 check('eido_ao_map_unwired' in cc and raised,
       'camelCase march options accepted, ao_map recorded unwired, a misspelt option (silhuette_bounds) raises')
 
+# --- the engine's colours, face_bounds replacing the bounds' cut, the inward carve with and without a silhouette
+hx = relief.create_parallax_material(tex['displacement'], depth_metres=0.02, color=0x808080, name='hex_relief')
+hs = relief.create_parallax_material(tex['displacement'], depth_metres=0.02, color='#808080', name='hexs_relief')
+lin = ((0x80 / 255 + 0.055) / 1.055) ** 2.4
+cols = [m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value[0] for m in (hx, hs)]
+check(all(abs(c - lin) < 1e-5 for c in cols), 'color=0x808080 and \'#808080\' (the engine\'s sRGB hex) -> linear '
+      '%.4f (%s)' % (lin, ', '.join('%.4f' % c for c in cols)))
+fb = relief.create_parallax_material(tex['displacement'], depth_metres=0.02, face_bounds=True,
+                                     silhouette_bounds=[[0.2, 0.8], [0.2, 0.8]], name='fb_relief')
+check(not any(n.bl_idname == 'ShaderNodeBsdfTransparent' for n in fb.node_tree.nodes),
+      'face_bounds replaces silhouette_bounds\' cut, as the engine\'s libSil = sil && !faceBounds')
+
+
+def midlevel(m):
+    return [n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeDisplacement'][0].inputs['Midlevel'].default_value
+
+
+fl_t = relief.create_parallax_material(tex['displacement'], tex['color'], tex['normal'], uv_scale=1.2,
+                                       depth_metres=0.03, silhouette=True, name='floor_sil_true')
+fl_f = relief.create_parallax_material(tex['displacement'], tex['color'], tex['normal'], uv_scale=1.2,
+                                       depth_metres=0.03, silhouette=False, name='floor_sil_false')
+check(abs(midlevel(fl_t) - 1.0) < 1e-6 and abs(midlevel(fl_f) - 1.0) < 1e-6,
+      'silhouette False carves inward as True does (Midlevel at the contrast top, 1.0): the peaks on the polygon, '
+      'as the engine\'s interior POM')
+# two 1.2 m floor tiles with a 20 cm cube standing at z = 0 on each (measured and rendered below), off the main
+# floor, over a dark plane 6 cm below them
+bpy.ops.mesh.primitive_plane_add(size=5.0, location=(30.75, 0.0, -0.06))
+under = bpy.context.active_object
+under.name = 'floor_tiles_under'
+under.data.materials.append(fm)
+tiles = {}
+for i, (sil, m_) in enumerate(((True, fl_t), (False, fl_f))):
+    bpy.ops.mesh.primitive_plane_add(size=1.2, location=(30.0 + 1.5 * i, 0.0, 0.0))
+    t_ = bpy.context.active_object
+    t_.name = 'floor_tile_sil_%s' % sil
+    t_.data.materials.append(m_)
+    relief.subdivide(t_, edge=0.005)
+    bpy.ops.mesh.primitive_cube_add(size=0.2, location=(30.0 + 1.5 * i, 0.0, 0.1))
+    cb_ = bpy.context.active_object
+    cb_.name = 'floor_cube_sil_%s' % sil
+    gm = bpy.data.materials.new('cube_grey_%d' % i)
+    gm.use_nodes = True
+    gm.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.55, 0.55, 0.55, 1)
+    cb_.data.materials.append(gm)
+    tiles[sil] = (t_, cb_)
+
 # --- the library's coverage formula, evaluated in Python on the node graph's constants
 def coverage(u, v, b, feather=0.02):
     (u0, u1), (v0, v1) = relief._bounds(b)
@@ -273,6 +323,25 @@ def measured_renders():
     check(opened > 50 and grown < opened / 4,
           'face_bounds in the render: the displaced corner opens %d pixels the bump-only outline covers (the '
           'notches), and adds %d' % (opened, grown))
+    # 3. each floor tile alone from the side (orthographic, 0.3 m across 480 px): the topmost opaque row is the
+    #    relief's peak, the lowest its deepest well: peaks on the polygon (z 0) with silhouette True and False alike
+    cam.data.type = 'ORTHO'
+    cam.data.ortho_scale = 0.3
+    sc.render.resolution_x, sc.render.resolution_y = 480, 480
+    px = 0.3 / 480
+    for sil, (t_, _c) in tiles.items():
+        only(t_)
+        cam.location = (t_.location.x, -4.0, 0.0)
+        cam.rotation_euler = (math.radians(90), 0, 0)
+        p = OUT / ('relief_bounds_alpha_floor_silhouette_%s.png' % str(sil).lower())
+        sc.render.filepath = str(p)
+        bpy.ops.render.render(write_still=True)
+        rows = np.nonzero((alpha_of(p) > 0.5).any(axis=1))[0]          # Blender's rows run bottom-up
+        z_top = -0.15 + (rows.max() + 0.5) * px if len(rows) else float('nan')
+        z_low = -0.15 + (rows.min() + 0.5) * px if len(rows) else float('nan')
+        check(abs(z_top) < 0.0015 and -0.03 < z_low < -0.015,
+              'silhouette %s in the render: the floor relief\'s peaks at %+.1f mm, its wells down to %+.1f mm '
+              '(a cube on the polygon stands on the peaks)' % (sil, z_top * 1000, z_low * 1000))
     bpy.data.objects.remove(cam)
     for o in sc.objects:
         o.hide_render = hidden.get(o.name, o.hide_render)
@@ -310,6 +379,8 @@ if RENDER:
          (2.9, 2.4, 2.7), (5.0, 6.6, 1.0), 30)
     shot('boxes_corner', 'face_bounds: the L\'s outer corner close, against the sky', (3.6, 9.9, 1.0),
          (4.55, 9.0, 1.15), 45)
+    shot('floor_contact', 'floor tiles, silhouette True (left) and False (right): the cubes stand on the peaks',
+         (30.75, -2.1, 0.16), (30.75, 0.0, 0.0), 35)
     # debug_march on the plain wall
     dm = relief.create_parallax_material(tex['displacement'], tex['color'], tex['normal'], uv_scale=(3.0, 2.4),
                                          depth_metres=0.03, debug_march=True, name='debug_march')

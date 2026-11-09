@@ -82,7 +82,10 @@ def draw_code(c, value, w, h):
 def read_code(a, x0, y0, x1, y1):
     """Decode NBITS cells inside the pixel rect of a grey image: (value, cell means)."""
     cw = (x1 - x0) / NBITS
+    H, W = a.shape[:2]
     yc = int(round(y0 + (y1 - y0) * 0.62))
+    if not (1 <= yc < H - 1 and 1 <= x0 and x1 < W - 1):
+        raise ValueError(f'code rect {x0:.0f},{y0:.0f} .. {x1:.0f},{y1:.0f} is off the {W}x{H} frame')
     means = []
     for j in range(NBITS):
         xc = int(round(x0 + (j + 0.5) * cw))
@@ -210,7 +213,9 @@ def build_atlas():
     loop.obj.location = (0.7, 0, 0)
     S.camera(sc, (0, -5.0, 0), (0, 0, 0), lens=50)
     sc.view_settings.view_transform = 'Standard'          # read the code cleanly
+    bpy.context.view_layer.update()                       # matrix_world is stale until the depsgraph runs
     r1, r2 = panel_rect(sc, once.obj), panel_rect(sc, loop.obj)
+    print(f'[atlas] panel rects: once {[round(v) for v in r1]}, loop {[round(v) for v in r2]}', flush=True)
     n = info['totalFrames']
     bad = []
     for f in (1, 5, 9, 10, 11, 30, 49, 50, 55, 60):

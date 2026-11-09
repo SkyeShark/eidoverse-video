@@ -1,16 +1,16 @@
-"""test_showroom.py: the showroom (UNKNOWN FORCE pre-chorus 2) built in Blender 5.2 EEVEE, checked, and rendered from
-the film's cams with the claudesona on the turntable.
+"""test_showroom.py: the showroom built in Blender 5.2 EEVEE, checked, and rendered from the set's cams: the set
+alone (--vrm stands the claudesona on the turntable, at the scale the cams are framed for).
 
     cd blender && python -c "import sys; sys.path.insert(0, '.'); from eidoblend.sets.unknown_force import \
         showroom as SR; SR.draw_canvases('tests/sets_uf_interiors/out/art_cache')"
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_showroom.py -- [--cams reveal,toaster,...] [--no_render]
-        [--samples 16] [--res 960x540] [--no_vrm] [--probe_samples 512] [--probe_spacing 0.6] [--cycles toaster]
+        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.6] [--cycles toaster]
 
 Checks: the build's contents (280 folded seats + 28 row ends, the toaster's CSG slots really open into the body,
 the LED wall's pixel-footprint driver, the void seen by the camera only), three's light units and the one shadow
-map, keyed update() (spin, lights, beams, screen, seq) read back at its frames, cams aimed, each render's
-exposure. Stills: out/sr/sr_<cam>.png and a contact sheet.
+map, keyed update() and animate() (spin, lights, beams, screen, seq) read back at their frames, cams aimed, each
+render's exposure. Stills: out/sr/sr_<cam>.png and a contact sheet.
 """
 import math
 import os
@@ -28,26 +28,27 @@ from eidoblend.sets.unknown_force import interiors_lib as L  # noqa: E402
 from eidoblend.sets.unknown_force import showroom as SR  # noqa: E402
 
 A = T.args({'cams': 'reveal,toaster,emptySeats,close,wall,reveal_dim,reveal_blackout', 'samples': 16,
-            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.6, 'no_render': False, 'no_vrm': False,
+            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.6, 'no_render': False, 'vrm': False,
             'save': False, 'no_bloom': False, 'cycles': '', 'look': '', 'look_cams': 'reveal,close'})
 OUT = os.path.join(T.OUT, 'sr')
 os.makedirs(OUT, exist_ok=True)
 
 
 def spin_at(t):
-    return (t - 163.1) * 0.35
+    return 0.35 * t                     # the engine's turntable rate, 0.35 rad/s, on the set's clock
 
 
-# the shots: name -> (cam, song time, state); the last two show the state keys a default render never moves
+# the stills: name -> (cam, t on the set's clock, state); the last two show the state keys a default render never
+# moves
 SHOTS = {
-    'reveal': ('reveal', 163.6, {}),
-    'close': ('close', 165.2, {}),
-    'wall': ('wall', 166.6, {}),
-    'toaster': ('toaster', 168.9, {}),
-    'emptySeats': ('emptySeats', 171.6, {}),
-    'reveal_dim': ('reveal', 166.0, {'seq': 0.3, 'screen': 0.45, 'beams': 0.0}),   # the bar at 30 %, the wall
-    #                                                                                 dimmed, the beam cones off
-    'reveal_blackout': ('reveal', 166.5, {'lights': 0.0}),                          # a blackout: the LED wall stays
+    'reveal': ('reveal', 0.5, {}),
+    'close': ('close', 2.1, {}),
+    'wall': ('wall', 3.5, {}),
+    'toaster': ('toaster', 5.8, {}),
+    'emptySeats': ('emptySeats', 8.5, {}),
+    'reveal_dim': ('reveal', 2.9, {'seq': 0.3, 'screen': 0.45, 'beams': 0.0}),   # the bar at 30 %, the wall
+    #                                                                               dimmed, the beam cones off
+    'reveal_blackout': ('reveal', 3.4, {'lights': 0.0}),                          # a blackout: the LED wall stays
 }
 
 
@@ -147,8 +148,8 @@ def main():
 
     # ---------------------------------------------------------------------------------------- keyed update
     frames = list(range(201, 210))
-    states = [(163.1 + i * 1.2, {'spin': spin_at(163.1 + i * 1.2), 'lights': 1 - i / 8, 'beams': i / 8,
-                                 'seq': 0.5 + i / 16, 'screen': 1.0}) for i in range(9)]
+    states = [(i * 1.2, {'spin': spin_at(i * 1.2), 'lights': 1 - i / 8, 'beams': i / 8,
+                         'seq': 0.5 + i / 16, 'screen': 1.0}) for i in range(9)]
     for f, (t, st) in zip(frames, states):
         show.update(t, st, frame=f)
     bad = []
@@ -169,7 +170,7 @@ def main():
                 bad.append((u, f))
     T.check('update() keyed: spin, lights (blackout to full), beams, seq, screen read back at 9 frames', not bad,
             f'{bad}' if bad else 'all 9')
-    # the singer rides the platter: a child of it turns with it
+    # whatever stands on the mark rides the platter: a child of it turns with it
     probe_ob = bpy.data.objects.new('rider', None)
     scene.collection.objects.link(probe_ob)
     probe_ob.parent = show.parts['turntable']['platter']
@@ -177,7 +178,7 @@ def main():
     scene.frame_set(205)
     bpy.context.view_layer.update()
     a = math.atan2(probe_ob.matrix_world.translation.y, probe_ob.matrix_world.translation.x)
-    T.check('a child of the platter turns with the spin (her mark rides it)', abs(a - states[4][1]['spin']) < 1e-3 or
+    T.check('a child of the platter turns with the spin (the mark rides it)', abs(a - states[4][1]['spin']) < 1e-3 or
             abs(abs(a - states[4][1]['spin']) - 2 * math.pi) < 1e-3, f'{math.degrees(a):.2f} deg')
     bpy.data.objects.remove(probe_ob)
 
@@ -197,6 +198,31 @@ def main():
     scene.frame_set(300)
     T.check('update(camera=) keys the shot camera\'s pixel angle (the LED wall\'s fwidth scale)',
             abs(show.root['uPixelAngle'] - want_pa) < 1e-8, f'{show.root["uPixelAngle"]:.4e} rad (want {want_pa:.4e})')
+    # animate(): the set on its own clock (spin a function of t, seq a span, lights a 4-tuple blackout), the LED
+    # wall's camera switching at a cut (camera as a function of the frame)
+    fps = 30.0
+    cut = lambda f: cams['wall'] if f < 430 else cams['close']                    # noqa: E731
+    keyed = show.animate((401, 460), t0=10.0, fps=fps, spin=spin_at, seq=(10.2, 11.2),
+                         lights=(11.0, 11.5, 1.0, 0.0), camera=cut)
+    bad = []
+    for f in (401, 420, 429, 430, 445, 460):
+        scene.frame_set(f)
+        t = 10.0 + (f - 401) / fps
+        lv = 1.0 - min(1.0, max(0.0, (t - 11.0) / 0.5))
+        seq = min(1.0, max(0.0, (t - 10.2) / 1.0))
+        cam = cut(f)
+        pa = 2 * math.tan(cam.data.angle_y / 2) / H
+        if abs(show.parts['turntable']['platter'].rotation_euler.z - spin_at(t)) > 1e-4:
+            bad.append(('spin', f))
+        if abs(show.root['uSeq'] - seq) > 1e-5 or abs(show.root['uLights'] - lv) > 1e-5 or abs(keyed[f] - t) > 1e-9:
+            bad.append(('uniform', f))
+        if abs(lt['key'].data.energy - show._lights['key'].watts(1.5 * lv)) > 1e-3:
+            bad.append(('key light', f))
+        if abs(show.root['uPixelAngle'] - pa) > 1e-8:
+            bad.append(('pixel angle', f))
+    T.check("animate(): 60 frames keyed on the set's own clock (spin(t), seq span, a blackout 4-tuple), the LED "
+            "wall's camera switched at the cut, read back", not bad and len(keyed) == 60,
+            f'mismatch at {bad}' if bad else '')
 
     # the registry builds it as the integration does (ctx first), and dispose() takes everything back out
     from eidoblend import sets as SETS
@@ -218,7 +244,7 @@ def main():
     T.render_setup(scene, (W, H), int(A['samples']), bloom=not A['no_bloom'])
     scene.world = show.env
     show.eevee_settings(scene)
-    if not A['no_vrm']:
+    if A['vrm']:
         T.load_singer(L.to_blender(SR.MARK['pos']), 0.0, SR.SUIT_SCALE, parent=show.parts['turntable']['platter'])
     tb = time.perf_counter()
     secs = show.bake_probes(scene)
@@ -234,7 +260,8 @@ def main():
         T.render_still(scene, cams[cam], f, path)
         mean, clip, black = T.stats(path)
         lum[nm] = mean
-        T.check(f'{nm}: exposed (mean luma 0.02..0.6, clipped < 4 %)', 0.02 < mean < 0.6 and clip < 0.04,
+        hi = 0.75 if cam in ('close', 'wall') else 0.6      # the white ENGINE sheet fills these (no performer)
+        T.check(f'{nm}: exposed (mean luma 0.02..{hi}, clipped < 4 %)', 0.02 < mean < hi and clip < 0.04,
                 f'mean {mean:.3f}, clipped {100 * clip:.2f} %, black {100 * black:.1f} %')
         stills.append(path)
     if {'reveal', 'reveal_dim', 'reveal_blackout'} <= set(lum):
@@ -242,10 +269,10 @@ def main():
                 lum['reveal'] > lum['reveal_dim'] > lum['reveal_blackout'],
                 f"{lum['reveal']:.3f} > {lum['reveal_dim']:.3f} > {lum['reveal_blackout']:.3f}")
     if A['look']:
-        # the film's look: INTERIORS.md's note: under argue every near-white lands between the ramp's orange and white
-        # stops (the stage paints peach), so the section plays argue with the palette weight pulled back to 0.22
-        # (sr_final_reveal_cold in the WebGPU probes); the sun cones come from her face height
-        U = T.film_look(scene, A['look'], palette=0.22 if A['look'] == 'argue' else None)
+        # an aeropittura look (INTERIORS.md's note: under argue every near-white lands between the ramp's orange and
+        # white stops, so the stage paints peach; the palette weight pulled back to 0.22 keeps it white, as
+        # sr_final_reveal_cold in the WebGPU probes); the sun cones come from the face height on the mark
+        U = T.apply_look(scene, A['look'], palette=0.22 if A['look'] == 'argue' else None)
         for nm in [c for c in A['look_cams'].split(',') if c in want]:
             ok = T.aim_look(scene, U, cams[nm], show.focal)
             path = os.path.join(OUT, f'sr_{nm}_{A["look"]}_cold.png')

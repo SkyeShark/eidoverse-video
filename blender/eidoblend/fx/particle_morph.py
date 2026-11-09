@@ -28,15 +28,20 @@ In Blender
     particle to a point of the object's evaluated (posed, skinned) surface, sampled in the graph at every frame: a
     dissolve leaves a walking body from the pose it has on that frame and a reform lands on the pose it has then.
 
-Beyond the engine (each off by default, so the defaults are the engine's look):
-  - targets in their own colours (sampled from the model's materials and textures): own_colors mixes them in;
+Beyond the engine (the defaults keep the engine's look for the engine's own targets):
+  - targets in their own colours (sampled from the model's materials and textures): own_colors (on by default) shows
+    them; the engine's generators (point lists: from_mesh, from_text, neural_net ...) carry none, so a cloud made
+    the engine's way keeps color -> color2;
   - render='sphere' (small icospheres) or 'points' (a point cloud: EEVEE draws spheres) besides 'billboard';
   - stagger: particles leave and land in turn (random, or a wipe along an axis: 'down' = head first);
   - pairing: 'height' / 'space' so a particle goes to a corresponding part of the next shape (a cleaner reform);
   - align='centroid': static targets moved onto the first target's centroid (the engine's "share centroids").
 
-Also here: ascii_panel, the engine's makeAsciiPanel (ascii_panel.js, the glowing terminal the text example put under
-its cloud), on the same text rasteriser as from_text; and figlet / ascii_banner for big block banners.
+Also here: ascii_panel, the engine's first makeAsciiPanel (ascii_panel.js: glow, CRT scanlines, the bg / fontSize
+options), the glowing terminal the text example (work/morph_text_verify) put under its cloud, on the same text
+rasteriser as from_text; and figlet / ascii_banner for big block banners. The engine later replaced ascii_panel.js
+with a makeAsciiPanel in screen.js (a teletype reveal and a blinking cursor over makeScreen): that one is
+eidoblend.media.make_ascii_panel.
 
 Randomness. The engine drew from Math.random(). Here the engine's generators take a JSRandom (mulberry32, vectorised)
 or a seed and draw in the engine's order, so a Math.random() replaced by the same stream gives the engine's own
@@ -182,7 +187,26 @@ _FAMILIES = {
 }
 _GENERIC = {'monospace': 'mono', 'courier': 'mono', 'courier new': 'mono', 'consolas': 'mono', 'menlo': 'mono',
             'sans-serif': 'sans', 'arial': 'sans', 'helvetica': 'sans', 'system-ui': 'sans', 'inter': 'sans',
-            'serif': 'serif', 'times': 'serif', 'times new roman': 'serif', 'georgia': 'serif'}
+            'serif': 'serif', 'times': 'serif', 'times new roman': 'serif'}
+# installed system families a canvas finds by name (the films ask for 'Georgia', 'Arial Black' ...): (regular files,
+# bold files), Windows names first, then the usual macOS / Linux file names
+_SYSTEM_FAMILIES = {
+    'arial black': (('ariblk.ttf', 'Arial Black.ttf'), ('ariblk.ttf', 'Arial Black.ttf')),
+    'georgia': (('georgia.ttf', 'Georgia.ttf'), ('georgiab.ttf', 'Georgia Bold.ttf')),
+    'impact': (('impact.ttf', 'Impact.ttf'), ('impact.ttf', 'Impact.ttf')),
+    'verdana': (('verdana.ttf', 'Verdana.ttf'), ('verdanab.ttf', 'Verdana Bold.ttf')),
+    'tahoma': (('tahoma.ttf', 'Tahoma.ttf'), ('tahomabd.ttf', 'Tahoma Bold.ttf')),
+    'trebuchet ms': (('trebuc.ttf', 'Trebuchet MS.ttf'), ('trebucbd.ttf', 'Trebuchet MS Bold.ttf')),
+    'comic sans ms': (('comic.ttf', 'Comic Sans MS.ttf'), ('comicbd.ttf', 'Comic Sans MS Bold.ttf')),
+    'segoe ui': (('segoeui.ttf',), ('segoeuib.ttf',)),
+    'calibri': (('calibri.ttf',), ('calibrib.ttf',)),
+    'cambria': (('cambria.ttc',), ('cambriab.ttf',)),
+    'garamond': (('GARA.TTF', 'gara.ttf'), ('GARABD.TTF', 'garabd.ttf')),
+    'palatino linotype': (('pala.ttf',), ('palab.ttf',)),
+    'dejavu sans': (('DejaVuSans.ttf',), ('DejaVuSans-Bold.ttf',)),
+    'dejavu serif': (('DejaVuSerif.ttf',), ('DejaVuSerif-Bold.ttf',)),
+    'dejavu sans mono': (('DejaVuSansMono.ttf',), ('DejaVuSansMono-Bold.ttf',)),
+}
 _FONT_IDS = {}
 
 
@@ -216,10 +240,41 @@ def _library_font(fam, bold):
     return os.path.join(d, (reg or pref)[0])
 
 
+def _system_font(fam, bold):
+    """An installed font by family name: the _SYSTEM_FAMILIES table, then any file in the system font folders whose
+    name starts with the family ('Noto Sans' -> NotoSans-Regular.ttf / NotoSans-Bold.ttf)."""
+    known = _SYSTEM_FAMILIES.get(fam.lower())
+    if known:
+        for fname in known[1 if bold else 0] + known[0]:
+            p = _find_font_file(fname)
+            if p:
+                return p
+        return None
+    key = fam.lower().replace(' ', '').replace('-', '').replace('_', '')
+    if len(key) < 3:
+        return None
+    for d in _FONT_DIRS:
+        if not os.path.isdir(d):
+            continue
+        try:
+            names = sorted(f for f in os.listdir(d) if f.lower().endswith(('.ttf', '.otf', '.ttc')))
+        except OSError:
+            continue
+        cands = [f for f in names if f.lower().replace('-', '').replace('_', '').replace(' ', '').startswith(key)]
+        if not cands:
+            continue
+        tag = lambda f: f.lower()[len(key):]                                         # noqa: E731
+        bolds = [f for f in cands if 'bold' in tag(f) or tag(f).split('.')[0] in ('bd', 'b')]
+        plain = [f for f in cands if f not in bolds and ('regular' in tag(f) or tag(f).split('.')[0] == '')]
+        pick = (bolds if bold else plain) or plain or cands
+        return os.path.join(d, pick[0])
+    return None
+
+
 def font_file(family, weight='normal'):
-    """The font file for a CSS-like family list ('Arial, sans-serif', 'monospace', 'Orbitron', or a path to a .ttf /
-    .otf / .woff2): the first family found (a path, the repo's display fonts in eidoverse/assets/fonts, then the
-    system's), then Blender's own Inter / DejaVu Sans Mono."""
+    """The font file for a CSS-like family list ('Arial, sans-serif', 'monospace', 'Orbitron', 'Georgia', or a path
+    to a .ttf / .otf / .woff2): the first family found (a path, the repo's display fonts in eidoverse/assets/fonts,
+    an installed system family by name, a generic family), then Blender's own Inter / DejaVu Sans Mono."""
     import bpy
     w = 'bold' if str(weight).lower() in ('bold', '700', '800', '900', 'bolder') else 'normal'
     for fam in [f.strip().strip('"\'') for f in str(family).split(',')]:
@@ -227,7 +282,7 @@ def font_file(family, weight='normal'):
             return fam
         kind = _GENERIC.get(fam.lower())
         if kind is None:
-            lib = _library_font(fam, w == 'bold')
+            lib = _library_font(fam, w == 'bold') or _system_font(fam, w == 'bold')
             if lib:
                 return lib
             continue
@@ -861,6 +916,11 @@ class ParticleMorphSystem:
         at the dissolve frame) or a live Target. idx may be one past the last target (adds one). The .blend keeps one
         set of points per target index for the whole film: to change a target mid-film, add it as a new index and
         key the segment to it."""
+        idx = int(idx)
+        if not 0 <= idx <= len(self.targets):
+            raise IndexError(f'[particle_morph] update_target({idx}): {len(self.targets)} targets; an index from 0 to '
+                             f'{len(self.targets)} (one past the last adds one). The engine allowed a gap (a hole its '
+                             f'morph skipped); a .blend needs every index filled, so add targets in order')
         rnd = random if random is not None else JSRandom(self._values['seed'] + 7919 * (idx + 1))
         t = self._resolve(pts, rnd)
         if idx == len(self.targets):
@@ -871,9 +931,11 @@ class ParticleMorphSystem:
         self._build_graph()
 
     def set_targets(self, arr, random=None):
-        """Replace every target (each resampled to count)."""
+        """The engine's setTargets: targets[i] = arr[i] for each i of arr (each resampled to count). Targets past the
+        end of arr stay, as in the engine; a longer arr adds targets."""
         rnd = random if random is not None else JSRandom(self._values['seed'] + 104729)
-        self.targets = [self._resolve(t, rnd) for t in arr]
+        new = [self._resolve(t, rnd) for t in arr]
+        self.targets = new + self.targets[len(new):]
         self._write_targets()
         self._build_graph()
 
@@ -1275,7 +1337,9 @@ def make_particle_morph(scene=None, camera=None, count=40000, targets=(), map=No
     The Blender edition's: own_colors (targets with colours of their own, sampled from their materials, show them;
     a number 0..1 blends toward color/color2) · gain (emission multiplier) · render 'billboard' | 'sphere' |
     'points' · lit (sphere/points with 'normal' blending: a Principled bead the scene lights) · realize (one mesh, not
-    instances: for motion blur) · align 'centroid' (static targets onto the first's centroid at align_frame) or a
+    instances; motion blur does not need it: normal-blended instances blur too, additive particles need
+    scene.eevee.motion_blur_steps above 1 either way) · align 'centroid' (static targets onto the first's centroid at
+    align_frame) or a
     point · pairing 'index' | 'height' | 'space' | 'random' · stagger 0..0.9 with stagger_by 'random' | 'down' |
     'up' | ... · shadows (cast them) · center: the vertical axis spin and vortex turn about (None: the world origin,
     as the engine; 'auto': the first target's centroid; or a point) · seed · collection (link the cloud there, not

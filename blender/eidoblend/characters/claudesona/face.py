@@ -549,7 +549,13 @@ def _build_viseme_targets(parts, shapes, standoff, feature_standoff, blush_stand
 
 
 class VisemeFace(_FaceBase):
-    """installVisemeMouth's handle: set({'viseme': {AA: 0.7, ...}, 'mouth': 0..1, <face key>: w})"""
+    """installVisemeMouth's handle: set({'viseme': {AA: 0.7, ...}, 'mouth': 0..1, <face key>: w}); idx"""
+
+    @property
+    def idx(self):
+        """installVisemeMouth's idx (each shape's morph target): here {shape: the plate's shape key name}"""
+        p = KEY_PREFIX + 'viseme.'
+        return {kb.name[len(p):]: kb.name for kb in self.plate.data.shape_keys.key_blocks if kb.name.startswith(p)}
 
     def _mouth(self, weights, out):
         vis = weights.get('viseme') or {}

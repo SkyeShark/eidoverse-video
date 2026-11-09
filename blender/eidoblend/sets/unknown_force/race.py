@@ -1,36 +1,36 @@
-"""eidoblend.sets.unknown_force.race: THE RACE, verses 3 and 4 of UNKNOWN FORCE (sung 142.48 to 162.76 s), the
-Blender 5.2 EEVEE edition of eidoverse/sets/unknown_force/race.js.
-
-"A hundred million says I'm a race to win ... Last time that poem ended in black shirts and a heel."
+"""eidoblend.sets.unknown_force.race: THE RACE, a reusable night-highway set, the Blender 5.2 EEVEE edition of
+eidoverse/sets/unknown_force/race.js (made for the UNKNOWN FORCE music video; free to use in any piece).
 
 An elevated wet highway at night between dark Sant'Elia towers. Two giant billboards face each other across the road,
 $100,000,000 in gold (worship) and $20,000,000 in red (fear), both showing the same machine-god face. Marinetti's
 1908-pattern racing car tears past with two goggled cosplayers, smashes through the roadworks that close the right
-carriageway and flies off the broken end of the deck into the factory drain below, wheels in the air. On "black
-shirts" the shadows of a marching column, thrown by a roadworks floodlight, cross a blank tower wall; on "heel" a boot
-comes down on the 1909 manifesto lying in a puddle. No files are loaded: every mesh, material and drawing is built here.
+carriageway and flies off the broken end of the deck into the factory drain below, wheels in the air. A roadworks
+floodlight throws the shadows of a marching column across a blank tower wall, and a boot comes down on the 1909
+manifesto lying in a puddle. No files are loaded: every mesh, material and drawing is built here.
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend.sets.unknown_force import race as R
     race = R.build(scene)                                    # opts as race.js: reflect, sky, towers, rain, rain_count, lamp_i
-    for f in range(f0, f1 + 1):                              # the song clock -> frames; each call KEYS the frame
-        t = 142.1 + (f - f0) / fps
-        st = R.suggest(t)                                    # the film's cut: {'state', 'cam'}
-        race.update(t, st['state'], frame=f)
-        race.key_camera(cam_obj, st['cam'], t, st['state'], frame=f)
+    for f in range(f0, f1 + 1):                              # your clock -> frames; each call KEYS the frame
+        t = (f - f0) / fps
+        st = R.sequence(t, car_edge=6.0, march_on=(7.0, 7.6), heel_strike=9.0)   # the moving parts, on your times
+        race.update(t, st, frame=f)
+        race.key_camera(cam_obj, 'carTrack' if t < 5 else 'crashLow', t, st, frame=f)
     race.finish()                                            # the keys made LINEAR (CONSTANT for switches)
     race.apply_render_settings(scene)                        # AgX, ray tracing, the set's fog and bloom
 
 What the JS module exports, and where it is here:
   LAYOUT           the set's dimensions, in race.js's own numbers (three's axes: +Y up, the road runs along +Z).
                    Everything this module returns is in Blender's axes: three (x, y, z) -> Blender (x, -z, y).
-  CUES, suggest    the film's sung word times and its cut (suggest(t) -> {'state', 'cam'}); pure Python.
   build            -> Race: group (the set's root Empty), parts, update(t, state, frame), cams, cam_at, focal,
                    set_active, uniforms, key_camera, animate, make_cameras, finish, dispose.
-The film's own use of the set (examples/unknown_force/scene.js): film_state(t), film_cut(t), FILM_SPANS (the verses
-and break 2's replay of the march). The pure half (no Blender): race_state, crash_pose, car_path, debris_specs,
-heel_pose, cam_at_three, lamp_heads, noise_atlas, night_env, and the canvases (march_canvas, radiator_number_canvas,
-Race.billboard_canvas, Race.manifesto_canvas).
+  CUES, suggest    the music video's sung word times and its cut on the song clock: left out (this edition is the
+                   set, not the video). Their moving parts keep their own time controls instead: ease_in (a screen
+                   powering on, the march coming up), glance (the irises), car_drive (the run and the crash),
+                   heel_stamp (the boot), and sequence(t, ...) that combines them into update()'s state.
+The pure half (no Blender): race_state, crash_pose, car_path, debris_specs, heel_pose, cam_at_three, lamp_heads,
+noise_atlas, night_env, and the canvases (march_canvas, radiator_number_canvas, Race.billboard_canvas,
+Race.manifesto_canvas).
 
 Lighting. race.js lit its set ANALYTICALLY inside its materials (two rows of sodium lamps, the bridge works' floods,
 glints), because a three.js light costs every material in the film. EEVEE lights hundreds of real lights at once, so
@@ -84,16 +84,10 @@ D = {
     'works': {'taper0': [-1.3, 28], 'taper1': [8.7, 58], 'board': [0.2, 63.5], 'barrier': 67},
 }
 LAYOUT = D
-"""race.js's LAYOUT in its own numbers: three's set-local metres, +Y up, the deck surface at y = 0, the singer's
-mark at the origin facing +Z (down the road). In Blender (x, y, z)_three sits at (x, -z, y): she faces -Y."""
+"""race.js's LAYOUT in its own numbers: three's set-local metres, +Y up, the deck surface at y = 0, the performer's
+mark (the 'singer' camera's subject, lit by the key, the back rim and the barrier's neon) at the origin facing +Z,
+down the road. In Blender (x, y, z)_three sits at (x, -z, y): the mark faces -Y."""
 CAR_LEN = 390.45                     # the car path's length (checked against the path in build)
-
-CUES = {
-    'v3': 142.48, 'race': 143.52, 'prevent': 146.42, 'machine_god': 148.64, 'ends': 151.68,
-    'v4': 152.18, 'marinetti': 153.98, 'speed': 156.10, 'steel': 156.94, 'manifesto': 157.46, 'bow': 159.56,
-    'last_time': 160.16, 'black_shirts': 161.42, 'heel': 162.42, 'end': 162.80,
-}
-"""The film's sung word times (seconds on the song clock), race.js's CUES in snake_case."""
 
 
 def _ease(x):
@@ -105,64 +99,71 @@ def _lin(t, a, b):
     return min(1.0, max(0.0, (t - a) / (b - a)))
 
 
-def suggest(t):
-    """The working cut of the two verses on the song clock: {'state': {...}, 'cam': name}. The state carries car_t,
-    never car_s (update() prefers car_s, so a conductor overriding car_t would otherwise be ignored)."""
-    C = CUES
-    st = {'rain': 1, 'billboards': 1, 'lamps': 1, 'gaze': 0, 'car_t': 0, 'crash': 0, 'march': 0, 'heel': 0}
-    st['bill_a'] = _ease(_lin(t, C['v3'] - 0.4, C['v3'] + 0.5))
-    st['bill_b'] = _ease(_lin(t, C['prevent'] - 2.4, C['prevent'] - 1.6))
-    st['gaze'] = math.sin(max(0.0, t - C['machine_god']) * 1.3) * _ease(_lin(t, C['machine_god'], C['machine_god'] + 1))
-    t_launch = C['bow'] - 0.12
-    st['car_t'] = min(1.0, max(0.0, CAR_LEN - 22 * (t_launch - t)) / CAR_LEN)
-    if t >= t_launch:
-        st['crash'] = min(1.0, (t - t_launch) / 3.0)
-    st['march'] = _ease(_lin(t, C['last_time'] + 0.5, C['black_shirts'] - 0.1))
-    st['heel'] = min(1.0, max(0.0, (t - (C['heel'] - 1.5)) / 2.2))
-    cam = 'billA'
-    if t >= C['v3'] + 1.85:
-        cam = 'billB'
-    if t >= C['machine_god'] - 1.5:
-        cam = 'billboards'
-    if t >= C['ends'] - 1.85:
-        cam = 'singer'
-    if t >= C['v4']:
-        cam = 'carPass'
-    if t >= C['marinetti'] + 0.9:
-        cam = 'carTrack'
-    if t >= C['speed'] + 0.1:
-        cam = 'carChase'
-    if t >= t_launch - 0.15:
-        cam = 'crashLow'
-    if t >= C['black_shirts'] - 0.02:
-        cam = 'shadows'
-    if t >= C['heel'] - 0.27:
-        cam = 'heel'
-    if cam != 'heel':
-        st['heel'] = 0
-    return {'state': st, 'cam': cam}
+# ================================================================================ the moving parts' own clocks ===
+# update(t, state) drives every moving part from its state keys. race.js's suggest(t) set those keys from the music
+# video's sung word times; here each moving part has its own time control instead, on any clock (seconds): give the
+# times things happen and these return update()'s keys. sequence() combines them. Their formulas are suggest's,
+# number for number (race_parity.py checks them against race.js run at the video's times).
+
+def ease_in(t, t0, t1):
+    """0 before t0, 1 after t1, a smoothstep between (race.js's ease(lin(t, t0, t1))): a screen powering on
+    (bill_a, bill_b), the floodlight and the column coming up (march)."""
+    if t1 <= t0:
+        return 1.0 if t >= t0 else 0.0
+    return _ease(_lin(t, t0, t1))
 
 
-FILM_SPANS = ((141.6, 163.0), (258.6, 265.1))
-"""Where the film showed the race (eidoverse/examples/unknown_force/scene.js SHOTS): the two verses on the set's own
-cut, and break 2's replay of the march under shadowsWide ("Marinetti, 1924: the column fills the top, his words the
-bottom")."""
+def glance(t, t0):
+    """gaze for the screens' irises: from t0 they swing over to the other screen within a second and keep swinging
+    (sin 1.3 (t - t0)), -1..1."""
+    return math.sin(max(0.0, t - t0) * 1.3) * ease_in(t, t0, t0 + 1.0)
 
 
-def film_state(t):
-    """The race's state as the film drove it (scene.js setState('race')): the set's own cut, suggest(t), through the
-    verses (held at 163.0 s), and in break 2 (t > 258 s) the march replaying exactly as on "black shirts" (the same
-    column phase: march_t = 161.6 + (t - 258.6)) with the car parked at the start of its path and no boot."""
-    if t > 258.0:
-        st = dict(suggest(161.6)['state'])
-        st.update(march=1, march_t=161.6 + (t - 258.6), car_t=0, crash=0, heel=0)
-        return st
-    return dict(suggest(min(t, 163.0))['state'])
+def car_drive(t, t_edge, speed=22.0):
+    """The car on its own clock: it runs its path at `speed` (m/s; 22, the speed its crash is modelled at) so that its
+    front wheels reach the broken edge at t_edge, waiting at the start of the path until it is due, then goes over the
+    edge (crash 0..1 over 3 s: nose in at 0.437, on its back by 0.65, settled by 0.9). Returns update()'s car_t and
+    crash (car_t rather than car_s, so a later car_t of yours still wins), and car_v when `speed` is not 22."""
+    s = CAR_LEN - speed * (t_edge - t)
+    st = {'car_t': min(1.0, max(0.0, s / CAR_LEN)), 'crash': 0.0}
+    if t >= t_edge:
+        st['crash'] = min(1.0, (t - t_edge) / CR['t_end'])
+    elif speed != CR['v'] and 0.0 < s < CAR_LEN:
+        st['car_v'] = float(speed)
+    return st
 
 
-def film_cut(t):
-    """The film's race camera at song time t: suggest(t)'s through the verses, shadowsWide in break 2's replay."""
-    return 'shadowsWide' if t >= FILM_SPANS[1][0] else suggest(min(t, 163.0))['cam']
+def heel_stamp(t, t_strike):
+    """The boot on its own clock (heel 0..1 over 2.2 s): it comes down from knee height, hovers, strikes the page at
+    t_strike (heel 0.68), the toe slaps down, and it stays planted. 0 (no boot) until it starts, 1.5 s before."""
+    return min(1.0, max(0.0, (t - t_strike) / HEEL['dur'] + HEEL['strike']))
+
+
+def sequence(t, bill_a_on=None, bill_b_on=None, glance_from=None, car_edge=None, car_speed=22.0, march_on=None,
+             heel_strike=None, **keys):
+    """update()'s state at time t from the times things happen on your clock; every part is optional and keeps
+    update()'s default when not given (the screens on, the car parked at the start of its path, no march, no boot):
+      bill_a_on, bill_b_on  (t0, t1): that screen powers on (ease_in)
+      glance_from           the irises start glancing across (glance)
+      car_edge, car_speed   the car reaches the broken edge at car_edge and goes over (car_drive)
+      march_on              (t0, t1): the floodlight and the marching shadows come up (ease_in)
+      heel_strike           the boot's strike lands (heel_stamp)
+    Any other update() key passes through as given (rain, wet, lamps, march_t, headlamps, back_rim, car ...)."""
+    st = {}
+    if bill_a_on is not None:
+        st['bill_a'] = ease_in(t, *bill_a_on)
+    if bill_b_on is not None:
+        st['bill_b'] = ease_in(t, *bill_b_on)
+    if glance_from is not None:
+        st['gaze'] = glance(t, glance_from)
+    if car_edge is not None:
+        st.update(car_drive(t, car_edge, car_speed))
+    if march_on is not None:
+        st['march'] = ease_in(t, *march_on)
+    if heel_strike is not None:
+        st['heel'] = heel_stamp(t, heel_strike)
+    st.update(keys)
+    return st
 
 
 # ======================================================================================== the set kit (pure) ===
@@ -1060,9 +1061,15 @@ def empty(name, parent=None, collection=None, pos=(0, 0, 0), q=None):
     return ob
 
 
-def image_from_array(name, arr, colorspace='sRGB', top_first=True, pack=True, alpha_mode='STRAIGHT'):
+def image_from_array(name, arr, colorspace='sRGB', top_first=True, pack=True, alpha_mode=None, float_buffer=False):
     """A packed bpy Image from (h, w, 3|4) floats in 0..1 (or uint8). top_first: row 0 is the image's top (a canvas);
-    else row 0 is the bottom (three's DataTexture)."""
+    else row 0 is the bottom (three's DataTexture). alpha_mode: STRAIGHT for colour with coverage alpha; a Non-Color
+    image is data (independent channels, as three's DataTexture held them) and defaults to CHANNEL_PACKED.
+    float_buffer: give it to an image that Geometry Nodes sample. Sampling a byte image, Geometry Nodes make a float
+    copy that is premultiplied (RGB x A) in the session that built the set and straight once the .blend is reopened,
+    so the drain's waves came out different in the two; a float image is read as stored in both."""
+    if alpha_mode is None:
+        alpha_mode = 'CHANNEL_PACKED' if colorspace == 'Non-Color' else 'STRAIGHT'
     a = np.asarray(arr)
     if a.dtype == np.uint8:
         a = a.astype(np.float32) / 255.0
@@ -1071,7 +1078,7 @@ def image_from_array(name, arr, colorspace='sRGB', top_first=True, pack=True, al
         a = np.concatenate([a, np.ones((h, w, 1), np.float32)], 2)
     if top_first:
         a = a[::-1]
-    img = bpy.data.images.new(name, w, h, alpha=True)
+    img = bpy.data.images.new(name, w, h, alpha=True, float_buffer=float_buffer)
     img.colorspace_settings.name = colorspace
     img.alpha_mode = alpha_mode
     img.pixels.foreach_set(np.ascontiguousarray(a, np.float32).ravel())
@@ -1329,9 +1336,13 @@ class NB:
         return self.vmath('CROSS_PRODUCT', a, b)
 
     def hash(self, a):
-        """A uniform [0, 1) value per input value (TSL's hash(); a White Noise of the value: same role, other bits)."""
+        """A uniform [0, 1) value per integer seed (TSL's hash(); a White Noise of the seed: same role, other bits).
+        TSL reads its seed as an integer (toUint) and every seed the sets hash is an integer by construction (a
+        per-window or per-cell number), so the seed is rounded first: a per-face attribute interpolates to
+        1000.0000001 here and 999.9999999 there, and White Noise of the raw float would speckle each window and
+        shimmer whenever the camera or the set moves."""
         n = self.node('ShaderNodeTexWhiteNoise', noise_dimensions='1D')
-        self.put(a, n.inputs['W'])
+        self.put(math.floor(a + 0.5) if _isnum(a) else self.floor(a + 0.5), n.inputs['W'])
         return V(self, n.outputs['Value'], False)
 
     def tex(self, image, uv, interp='Linear', ext='REPEAT'):
@@ -1465,8 +1476,9 @@ class Uniforms:
 
 
 class Keyer:
-    """Keys a property at a frame; remembers what it keyed so finish() can make the keys LINEAR (switches CONSTANT).
-    Pass the harness's ctx.key instead (it does the same at the end of the build)."""
+    """Keys a property at a frame; remembers each key's interpolation so finish() can give it (LINEAR by default,
+    CONSTANT for switches; a property may mix both, as a light's level does where the set is parked). Pass the
+    harness's ctx.key instead (it does the same at the end of the build)."""
 
     def __init__(self, fn=None):
         self.fn = fn
@@ -1481,11 +1493,12 @@ class Keyer:
             full = target.path_from_id(path)
         except (ValueError, TypeError, AttributeError):
             full = path
-        self.ids.setdefault(idb.as_pointer(), [idb, {}])[1][full] = interp
+        self.ids.setdefault(idb.as_pointer(), [idb, {}])[1].setdefault(full, {})[round(float(frame), 3)] = interp
         return ok
 
     def finish(self):
-        """Every key this keyer made gets its interpolation (Blender 5.2's keyframe_insert makes BEZIER keys)."""
+        """Every key this keyer made gets its interpolation (Blender 5.2's keyframe_insert makes BEZIER keys); a key on
+        the same property that this keyer did not make takes the property's last one."""
         from bpy_extras import anim_utils
         n = 0
         for idb, paths in self.ids.values():
@@ -1499,13 +1512,39 @@ class Keyer:
             if cb is None:
                 continue
             for fc in cb.fcurves:
-                want = paths.get(fc.data_path)
-                if want is None:
+                per = paths.get(fc.data_path)
+                if per is None:
                     continue
+                last = next(reversed(per.values()))
                 for kp in fc.keyframe_points:
-                    kp.interpolation = want
+                    kp.interpolation = per.get(round(kp.co.x, 3), last)
                     n += 1
         return n
+
+    @staticmethod
+    def keyed_before(target, path, frame):
+        """True when target's `path` already has a key before `frame` (any index)."""
+        from bpy_extras import anim_utils
+        ad = getattr(target.id_data, 'animation_data', None)
+        if ad is None or ad.action is None:
+            return False
+        try:
+            cb = anim_utils.action_get_channelbag_for_slot(ad.action, ad.action_slot)
+            full = target.path_from_id(path)
+        except (AttributeError, TypeError, RuntimeError, ValueError):
+            return False
+        if cb is None:
+            return False
+        return any(fc.data_path == full and any(kp.co.x < frame - 1e-6 for kp in fc.keyframe_points) for fc in cb.fcurves)
+
+    def step(self, target, path, value, frame):
+        """A switch keyed as a step at `frame`: the property's value before the call is held up to it (keyed at
+        frame - 1 when nothing earlier is keyed, else a lone key would hold the new value backwards too), and `value`
+        holds from it on (CONSTANT) until the next key."""
+        if not self.keyed_before(target, path, frame):
+            self(target, path, frame - 1, interp='CONSTANT')
+        setattr(target, path, value)
+        self(target, path, frame, interp='CONSTANT')
 
 
 # ------------------------------------------------------------------------------------------- materials --
@@ -2197,10 +2236,10 @@ class Race:
     set_active, key_camera, finish, dispose. Build it with build()."""
 
     def __init__(self, scene=None, reflect=True, reflect_scale=0.5, sky=True, towers=True, rain=True, rain_count=5200,
-                 lamp_i=140.0, name='race', keyer=None, collection=None):
+                 lamp_i=140.0, amounts=('$100,000,000', '$20,000,000'), name='race', keyer=None, collection=None):
         self.scene = scene or bpy.context.scene
         self.opts = dict(reflect=reflect, reflect_scale=reflect_scale, sky=sky, towers=towers, rain=rain,
-                         rain_count=rain_count, lamp_i=lamp_i)
+                         rain_count=rain_count, lamp_i=lamp_i, amounts=tuple(amounts))
         self.key = keyer if isinstance(keyer, Keyer) else Keyer(keyer)
         self.col = collection or make_collection(f'set:{name}', self.scene.collection)
         self.group = empty(f'set:{name}', collection=self.col)
@@ -2272,7 +2311,8 @@ class Race:
 
     # ------------------------------------------------------------------------------------------- textures
     def _textures(self):
-        self.noise_img = image_from_array('race:noise', noise_atlas(), 'Non-Color', top_first=False)
+        # float: the drain's waves sample it in Geometry Nodes (see image_from_array)
+        self.noise_img = image_from_array('race:noise', noise_atlas(), 'Non-Color', top_first=False, float_buffer=True)
         self.env_img = image_from_array('race:night_env', night_env(), 'sRGB', top_first=False)
 
     # ------------------------------------------------------------------------------------------- materials
@@ -2959,8 +2999,9 @@ class Race:
         F = self.FACE
         self.EYE = [(F['cx'] + (x - 512) * F['s'], F['cy'] + (y - 540) * F['s']) for x, y in ((415, 470), (609, 470))]
         out = {}
-        for key, B, amount, tint_hex, mode, pk in (('a', D['bill_a'], '$100,000,000', '#ffb43c', 'worship', 'bill_a'),
-                                                  ('b', D['bill_b'], '$20,000,000', '#ff2a1a', 'fear', 'bill_b')):
+        am_a, am_b = self.opts['amounts']
+        for key, B, amount, tint_hex, mode, pk in (('a', D['bill_a'], am_a, '#ffb43c', 'worship', 'bill_a'),
+                                                  ('b', D['bill_b'], am_b, '#ff2a1a', 'fear', 'bill_b')):
             arr = self.billboard_canvas(amount)
             img = image_from_array(f'race:billboard_{key}', arr, 'Non-Color', top_first=False)
             grp = empty(f'race:billboard_{key}', parent=self.group, collection=self.col, pos=(B['x'], 0, B['z']),
@@ -4267,9 +4308,10 @@ class Race:
         return out
 
     def update(self, t, state=None, frame=None):
-        """Set the set for song time t and state (race.js's keys in snake_case: car_t, car_s, car_v, crash, car,
-        headlamps, bill_a, bill_b, billboards, gaze, march, march_t, heel, rain, wet, lamps, back_rim) and KEY it at
-        `frame` (default: the scene's current frame; None at build time sets without keying)."""
+        """Set the set for time t (seconds on your clock: the rain, the screens, the engine's shake, the march's
+        lockstep) and state (race.js's keys in snake_case: car_t, car_s, car_v, crash, car, headlamps, bill_a, bill_b,
+        billboards, gaze, march, march_t, heel, rain, wet, lamps, back_rim; sequence() makes them from event times)
+        and KEY it at `frame`; frame=None sets without keying (a still)."""
         state = dict(state or {})
         rs = race_state(t, state, self.path, self.debris, self._active)
         f = frame
@@ -4346,30 +4388,35 @@ class Race:
         return rs
 
     def set_active(self, on, frame=None):
-        """race.js setActive: park the set outside its section. Every mesh is hidden and every light kept, at 0 (both
-        keyed at frame); with on, the set shows again and the next update() brings its lights back."""
+        """race.js setActive: park the set outside its section. Every mesh is hidden and every light kept, at 0; with
+        on, the set shows again and the next update() brings its lights back. With a frame, each switch is keyed as a
+        step there (Keyer.step): the set stays as it was up to the frame and parked from it until the next key, so a
+        set parked at frame 200 still shows on frames 1 to 199, and its lights stay off while it is parked."""
         self._active = bool(on)
         f = frame
         always = [o for o in self.objects if o not in self._descendants(self.car['group'])
                   and o not in self._descendants(self.heel['root']) and o is not self.car['shadow']]
         for ob in always:
-            ob.hide_render = not self._active
-            ob.hide_viewport = not self._active
-            if f is not None:
-                self.key(ob, 'hide_render', f, interp='CONSTANT')
-                self.key(ob, 'hide_viewport', f, interp='CONSTANT')
+            for p in ('hide_render', 'hide_viewport'):
+                if f is not None:
+                    self.key.step(ob, p, not self._active, f)
+                else:
+                    setattr(ob, p, not self._active)
         if not self._active:
             L = self.lights
             datas = [L[k].data for k in ('key', 'glow_a', 'glow_b', 'rim', 'back_rim', 'neon_fill', 'beam', 'heel_key')]
             datas += [w.data for w in L['works']] + [L['sodium']]
             for d in datas:
-                d.energy = 0.0
                 if f is not None:
-                    self.key(d, 'energy', f)
+                    self.key.step(d, 'energy', 0.0, f)
+                else:
+                    d.energy = 0.0
             if self.opts['sky']:
-                self._hemi_value.outputs[0].default_value = 0.0
+                hv = self._hemi_value.outputs[0]
                 if f is not None:
-                    self.key(self._hemi_value.outputs[0], 'default_value', f)
+                    self.key.step(hv, 'default_value', 0.0, f)
+                else:
+                    hv.default_value = 0.0
 
     # ------------------------------------------------------------------------------------------- cameras
     def cam_at(self, name, t, state=None):
@@ -4399,10 +4446,13 @@ class Race:
         return self.group.matrix_world @ m
 
     def key_camera(self, cam, name, t, state=None, frame=None, scene=None):
-        """Put a Blender camera on the shot `name` at song time t (cam_at for the moving cameras, else cams) and
-        key it at frame: location, rotation, the vertical fov (three's), and the LED-cell pixel angle."""
+        """Put a Blender camera on the shot `name` at time t (cam_at for the moving cameras, else cams) and key it at
+        frame: location, rotation, the vertical fov (three's), and the LED-cell pixel angle."""
         scene = scene or self.scene
-        c = self.cam_at(name, t, state) or self.cams[name]
+        c = self.cam_at(name, t, state) or self.cams.get(name)
+        if c is None:
+            raise ValueError(f'race.key_camera: {name!r} follows the car, which is hidden or in its crash at this state '
+                             f'(cam_at gives None); static cameras: {", ".join(self.cams)}')
         cam.rotation_mode = 'QUATERNION'
         cam.matrix_world = self.camera_matrix(c)
         cam.data.sensor_fit = 'VERTICAL'
@@ -4421,29 +4471,34 @@ class Race:
         return c
 
     # ------------------------------------------------------------------------------------------- whole sections
-    def animate(self, frames=None, t0=142.1, fps=None, state_fn=None):
-        """Key update() over frames (t = t0 at frames[0]; the state from the film's cut, suggest(t), unless state_fn(t)
-        gives it): the section plays from the .blend alone. Returns the keys made LINEAR / CONSTANT."""
+    def animate(self, frames=None, t0=0.0, fps=None, state_fn=None):
+        """Key update() over frames (t = t0 at frames[0], your clock): state_fn(t) gives the state (sequence() makes one
+        from event times); without it the set idles on its own clock (rain, screens, lamps; the car parked). The
+        section then plays from the .blend alone. Returns the keys made LINEAR / CONSTANT."""
         sc = self.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
         for f in range(f0, f1 + 1):
             t = t0 + (f - f0) / fps
-            self.update(t, state_fn(t) if state_fn else suggest(t)['state'], frame=f)
+            self.update(t, state_fn(t) if state_fn else {}, frame=f)
         return self.finish()
 
-    def make_cameras(self, frames=None, t0=142.1, fps=None, scene=None, cut=None, state_fn=None):
-        """The film's cut as cameras: one camera per shot (a run of frames on the same cam of suggest(t), or of
-        cut(t) -> name), keyed every frame of its shot (cam_at for the moving ones), bound to timeline markers at the
-        cuts. Returns {(first frame, name): camera}."""
+    def make_cameras(self, cut, frames=None, t0=0.0, fps=None, scene=None, state_fn=None):
+        """Your cut as cameras: `cut` is cut(t) -> camera name, or [(t_start, name), ...] on the same clock as t0.
+        One camera per shot (a run of frames on the same name), keyed every frame of its shot (cam_at follows the car
+        for the moving ones, with state_fn(t)'s state), bound to timeline markers at the cuts.
+        Returns {(first frame, name): camera}."""
         from ...look.camera import add_shot
         sc = scene or self.scene
         fps = fps or sc.render.fps / sc.render.fps_base
         f0, f1 = frames or (sc.frame_start, sc.frame_end)
+        if not callable(cut):
+            plan = sorted(cut)
+            cut = lambda t: next((n for s, n in reversed(plan) if t >= s - 1e-9), plan[0][1])
         runs = []
         for f in range(f0, f1 + 1):
             t = t0 + (f - f0) / fps
-            name = cut(t) if cut else suggest(t)['cam']
+            name = cut(t)
             if not runs or runs[-1][0] != name:
                 runs.append((name, []))
             runs[-1][1].append((f, t))
@@ -4453,7 +4508,7 @@ class Race:
             cam = bpy.data.objects.new(f'race:cam_{name}_{lst[0][0]}', bpy.data.cameras.new(f'race:cam_{name}_{lst[0][0]}'))
             col.objects.link(cam)
             for f, t in lst:
-                st = state_fn(t) if state_fn else suggest(t)['state']
+                st = state_fn(t) if state_fn else {}
                 self.key_camera(cam, name, t, st, frame=f, scene=sc)
             add_shot(sc, f'race_{name}_{lst[0][0]}', lst[0][0], cam)
             cams[(lst[0][0], name)] = cam
@@ -4486,7 +4541,7 @@ class Race:
     def apply_render_settings(self, scene=None, fog=True, bloom=True, world=True):
         """The set's renderer settings (RACE.md): AgX, EEVEE ray tracing (the wet road's reflections, with the deck's
         planar probe; race.js carried its own mirror and kept SSR off), no AO, bloom {strength 0.55, threshold 0.7},
-        the film's fog FogExp2(0x0c0f16, 0.0062), and the set's world."""
+        the set's fog FogExp2(0x0c0f16, 0.0062), and the set's world."""
         scene = scene or self.scene
         scene.render.engine = 'BLENDER_EEVEE'
         scene.view_settings.view_transform = 'AgX'
@@ -4532,7 +4587,8 @@ def build(ctx=None, **opts):
     """race.js build(THREE, opts) -> Race. ctx: the harness ctx (its scene and ctx.key keyer), a scene, or None (the
     current scene). opts (race.js's, snake_case): reflect (True: the deck's planar probe), reflect_scale (kept for the
     API; EEVEE sizes its own probe), sky (True: the set's night world), towers, rain, rain_count (5200), lamp_i (140: a
-    250 W sodium head in three's candela), keyer (a keyer instead of ctx.key)."""
+    250 W sodium head in three's candela), keyer (a keyer instead of ctx.key); and, for a new piece, amounts (the text
+    in the two screens' bands, gold then red: ('$100,000,000', '$20,000,000'), race.js's own)."""
     scene, keyer = _ctx_scene_keyer(ctx, opts)
     return Race(scene, keyer=keyer, **opts)
 
@@ -4561,7 +4617,7 @@ def _no_shadow(ob):
 def _dispose_set(col, mats, prefix, world=None):
     """Remove a built set: every object in its collection (child collections included) with its mesh, light, probe or
     camera data, the materials those objects and `mats` use and the images they read (once nothing else uses them),
-    the node groups named with the set's prefix, its world, and its collections."""
+    the node groups named with the set's prefix, its world, its collections, and the actions its keys made."""
     obs = list(col.all_objects)
     mats = set(mats)
     for ob in obs:
@@ -4580,6 +4636,14 @@ def _dispose_set(col, mats, prefix, world=None):
         imgs |= images_of(world.node_tree)
     imgs |= {i for i in bpy.data.images if i.name.startswith(prefix)}
     datas = [ob.data for ob in obs if ob.data is not None]
+    keyed = obs + datas + list(mats) + [m.node_tree for m in mats if m.node_tree is not None] + groups
+    if world is not None:
+        keyed += [world, world.node_tree]
+    acts = set()
+    for idb in keyed:
+        ad = getattr(idb, 'animation_data', None)
+        if ad is not None and ad.action is not None:
+            acts.add(ad.action)
     for ob in obs:
         bpy.data.objects.remove(ob, do_unlink=True)
     kinds = ((bpy.types.Mesh, bpy.data.meshes), (bpy.types.Light, bpy.data.lights),
@@ -4618,6 +4682,12 @@ def _dispose_set(col, mats, prefix, world=None):
         return out + [c]
     for c in colls(col):
         bpy.data.collections.remove(c)
+    for a in acts:
+        try:
+            if a.users == 0:
+                bpy.data.actions.remove(a)
+        except ReferenceError:
+            pass
 
 
 def _no_reflection(ob):
