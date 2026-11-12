@@ -19,13 +19,17 @@ subpackages load on first use.
 
 | Source or tool | Role | Instructions |
 | --- | --- | --- |
-| [eido_blender.py](../eido_blender.py) | CLI: `doctor`, `build`, `render` (`--probe`, `--at`), `bench`, `open` | [scene-format](../tools-guides/scene-format.md) |
+| [eido_blender.py](../eido_blender.py) | CLI: `doctor` (Blender, bash, ffmpeg, an EEVEE render, Deno and its npm cache), `build`, `render` (`--probe`, `--at`), `bench`, `open` | [scene-format](../tools-guides/scene-format.md) |
 | [run_blender.sh](../run_blender.sh) | CLI utility: isolated headless Blender (every runner call goes through it) | [blender](../tools-guides/blender.md), [development](../tools-guides/development.md) |
 | [blender/README.md](../blender/README.md) | The edition's layout, families and tests | [development](../tools-guides/development.md) |
 | [blender/tools/vrm_turntable.py](../blender/tools/vrm_turntable.py) | Blender CLI: VRM outfit, clip, face and PBR sheets, spin reels | [claudesona](../tools-guides/claudesona.md) |
 | [blender/examples/obstacle_course/scene.py](../blender/examples/obstacle_course/scene.py) | Scene example: the walking course (`eidoverse/examples/obstacle_course.js`), aporia driven by the character controller through `course.template` | [geometry](../tools-guides/geometry.md), [controller](../tools-guides/controller.md) |
+| [blender/examples/claude_robot/scene.py](../blender/examples/claude_robot/scene.py) | Scene example: the robot body's example (`eidoverse/examples/claude_robot.js`) as a film through the runner, `claude_robot_example()` at its own 30 fps and 8 s | [robot-body](../tools-guides/robot-body.md) |
 | [blender/tests/run_all.py](../blender/tests/run_all.py) | Test runner: every area's tests in one run, PASS / FAIL per test (`--kinds imports` checks the package's wiring in seconds) | [development](../tools-guides/development.md) |
-| [blender/tests/pipeline/run_tests.py](../blender/tests/pipeline/run_tests.py) | Test suite: the runner end to end (T0–T17; most render) | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/run_tests.py](../blender/tests/pipeline/run_tests.py) | Test suite: the runner end to end (T0–T19; most render) | [development](../tools-guides/development.md) |
+| [blender/tests/pipeline/swept/scene.py](../blender/tests/pipeline/swept/scene.py) | Test scene: rotors and a scanning radar against their neighbours (`motion.swept_clearance`) | [render-review](../tools-guides/render-review.md) |
+| [blender/tests/pipeline/leadin/scene.py](../blender/tests/pipeline/leadin/scene.py) | Test scene: `--at` stills of shots whose post effect reads earlier frames (after_image's trail; `scene_crt.py`: the era looks' CRT persistence), against the film | [scene-format](../tools-guides/scene-format.md) |
+| [blender/tests/harness/](../blender/tests/harness/) | The harness's own checks: the loaded-asset mark (`test_asset_marks.py`), the swept clearance without the runner (`test_swept_clearance.py`), what the fetchers and the doctor print (`test_fetch_hints.py`), `fetch_model.py`'s Blender previews (`test_fetch_preview.py`) | [development](../tools-guides/development.md) |
 | [blender/tests/pipeline2/run_tests.py](../blender/tests/pipeline2/run_tests.py) | Test suite: the harness's own scene API, the post stack and its hooks, the overlay layer (U0–U6) | [development](../tools-guides/development.md) |
 | [blender/tests/pipeline/query_blend.py](../blender/tests/pipeline/query_blend.py) | Test helper: what a saved build shows at given frames (positions, light values, key interpolations), no render | [development](../tools-guides/development.md) |
 | [blender/tests/pipeline/check_docs.py](../blender/tests/pipeline/check_docs.py) | Docs check: links resolve, every module inventoried, the guide index complete (no Blender) | [development](../tools-guides/development.md) |
@@ -59,18 +63,18 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [harness/\_\_init\_\_.py](../blender/eidoblend/harness/__init__.py) | The harness's module map (lazy) | [development](../tools-guides/development.md) |
 | [harness/config.py](../blender/eidoblend/harness/config.py) | scene.json → checked config, output names (no bpy) | [scene-format](../tools-guides/scene-format.md) |
 | [harness/run_scene.py](../blender/eidoblend/harness/run_scene.py) | The script `eido_blender.py` runs inside Blender | [scene-format](../tools-guides/scene-format.md) |
-| [harness/runner.py](../blender/eidoblend/harness/runner.py) | Build (setup, `render_frame` keyed, caches stretched and baked, audits, `.blend`, its inputs incl. files the script read; images painted during the build kept beside the `.blend`) then render | [scene-format](../tools-guides/scene-format.md) |
+| [harness/runner.py](../blender/eidoblend/harness/runner.py) | Build (setup, `render_frame` keyed, caches stretched and baked, audits, `.blend`, its inputs incl. files the script read; images painted during the build and the post chain's records of earlier frames kept beside the `.blend`) then render; `--at` stills render the frames a trail or persistence reads first | [scene-format](../tools-guides/scene-format.md) |
 | [harness/context.py](../blender/eidoblend/harness/context.py) | `ctx`: what `setup` / `render_frame` / `cleanup` receive | [scene-format](../tools-guides/scene-format.md) |
 | [harness/keying.py](../blender/eidoblend/harness/keying.py) | `ctx.key`'s keys made LINEAR (or as asked); changes `render_frame` made without a key, found and named (Geometry Nodes inputs too) | [scene-format](../tools-guides/scene-format.md) |
 | [harness/settings.py](../blender/eidoblend/harness/settings.py) | The film and probe EEVEE presets, the `render` block, bloom | [scene-format](../tools-guides/scene-format.md) |
-| [harness/output.py](../blender/eidoblend/harness/output.py) | H.264 straight from EEVEE, PNG stills, `.part`/`.prev`, probe frames, progress lines, `RENDER_CQ` / `RENDER_BITRATE` / `RENDER_CODEC` | [scene-format](../tools-guides/scene-format.md) |
+| [harness/output.py](../blender/eidoblend/harness/output.py) | H.264 straight from EEVEE, PNG stills, `.part`/`.prev`, probe frames, progress lines, `RENDER_CQ` / `RENDER_BITRATE` / `RENDER_CODEC`; the post chain's records of earlier frames: which a still reads (`post_histories`, `history_lead_in`), its lead-in, pruning | [scene-format](../tools-guides/scene-format.md) |
 | [harness/post.py](../blender/eidoblend/harness/post.py) | The engine's auto-enhance stack on EEVEE, its hooks, and the overlay layer, which lands as drawn | [scene-format](../tools-guides/scene-format.md) |
 | [harness/render_common.py](../blender/eidoblend/harness/render_common.py) | What `render_common.mjs` (the render tools' shared kit) means in Blender | [scene-format](../tools-guides/scene-format.md) |
 | [harness/ledger.py](../blender/eidoblend/harness/ledger.py) | Audit ledger, flags and digest: `audit_core.js` ported whole (no bpy) | [render-review](../tools-guides/render-review.md) |
-| [harness/audits.py](../blender/eidoblend/harness/audits.py) | Preflight (the sequencer included), coverage, motion (locomotion, lipsync), framing, palette and asset checks | [render-review](../tools-guides/render-review.md) |
+| [harness/audits.py](../blender/eidoblend/harness/audits.py) | Preflight (the sequencer included), coverage, motion (the swept clearance of parts that turn in place, locomotion, lipsync), framing, palette and asset checks | [render-review](../tools-guides/render-review.md) |
 | [harness/showpiece.py](../blender/eidoblend/harness/showpiece.py) | The palette report's showpiece nudge (plain Python) | [production](../tools-guides/production.md) |
-| [harness/assets.py](../blender/eidoblend/harness/assets.py) | Scene API: `load_image_texture`, `fetch_pbr`, `load_pbr`, `fetch_model_file`, `import_model`, `play_model_animations`, `clone_model`, `load_kit`, `load_hdri`, `make_glass`; clip names and file order, clip weights, clones that play, `Kit.islands` | [assets](../tools-guides/assets.md) |
-| [harness/model_preview.py](../blender/eidoblend/harness/model_preview.py) | CLI: a model's orientation preview (`fetch_model.py`'s), rendered in Blender | [assets](../tools-guides/assets.md) |
+| [harness/assets.py](../blender/eidoblend/harness/assets.py) | Scene API: `load_image_texture`, `fetch_pbr`, `load_pbr`, `fetch_model_file`, `import_model`, `play_model_animations`, `clone_model`, `load_kit`, `load_hdri`, `make_glass`; clip names and file order, clip weights, clones that play, `Kit.islands`; imports marked `eido_loaded_asset` (the surface tools skip them) | [assets](../tools-guides/assets.md) |
+| [harness/model_preview.py](../blender/eidoblend/harness/model_preview.py) | CLI: a model's orientation preview, rendered in Blender (`fetch_model.py` runs it on every fetch and for `--build-previews`) | [assets](../tools-guides/assets.md) |
 | [harness/html_mesh.py](../blender/eidoblend/harness/html_mesh.py) | HTMLMesh: a UI element tree styled with CSS (titles, lower thirds, HUD chips, panels) painted onto a panel in the world | [assets](../tools-guides/assets.md) |
 | [harness/interior_window.py](../blender/eidoblend/harness/interior_window.py) | Interior-mapped windows (a room seen behind a flat pane) and room pictures, as an EEVEE material | [assets](../tools-guides/assets.md) |
 | [harness/navigation.py](../blender/eidoblend/harness/navigation.py) | Scene API: `RobotSensors`, `RobotMemory`, `RobotPlanner`, `timed_route`, `debug_overlay` (the `robot_*.js` sensing, memory and planning) | [navigation](../tools-guides/navigation.md) |
@@ -90,21 +94,21 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [performance.py](../blender/eidoblend/characters/performance.py) | A stationary clip performed through the body's own frame order, baked to keys | [characters](../tools-guides/characters.md) |
 | [checks.py](../blender/eidoblend/characters/checks.py) | The family's checks as functions: T-pose, slide, a face that never moved | [characters](../tools-guides/characters.md) |
 | [\_math.py](../blender/eidoblend/characters/_math.py) | The family's shared maths (mathutils, no bpy) | [characters](../tools-guides/characters.md) |
-| [clippy.py](../blender/eidoblend/characters/clippy.py) | `make_clippy`: the paperclip, his morphs and his 43 clips (`clippy.js`) | [clippy](../tools-guides/clippy.md) |
-| [springs.py](../blender/eidoblend/characters/springs.py) | Spring bones simulated once, in frame order, baked to keys (`bake_springs`, `SpringRig`) | [claudesona](../tools-guides/claudesona.md) |
+| [clippy.py](../blender/eidoblend/characters/clippy.py) | `make_clippy`: the paperclip, his morphs and his 43 clips (`clippy.js`); `set_weight` overrides one morph at a frame | [clippy](../tools-guides/clippy.md) |
+| [springs.py](../blender/eidoblend/characters/springs.py) | Spring bones simulated once, in frame order, baked to keys (`bake_springs`, `SpringRig`); on a body moving through a set they rest on the ground and stay out of its solids (`ground=`, `solids=`), and a cut settles them on the new pose (`reset_preroll=`) | [claudesona](../tools-guides/claudesona.md), [characters](../tools-guides/characters.md), [controller](../tools-guides/controller.md) |
 | [lookat.py](../blender/eidoblend/characters/lookat.py) | Eyes on a target, as three-vrm's VRMLookAt drives them, baked to keys | [claudesona](../tools-guides/claudesona.md) |
 | [lipsync.py](../blender/eidoblend/characters/lipsync.py) | A VRM's mouth keyed from audio (`key_lipsync`, `visemes_from_audio`) | [claudesona](../tools-guides/claudesona.md), [audio](../tools-guides/audio.md) |
 | [claudesona/\_\_init\_\_.py](../blender/eidoblend/characters/claudesona/__init__.py) | The claudesona: its face, wardrobe, TuTa and look | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/face.py](../blender/eidoblend/characters/claudesona/face.py) | `claudesona_face.js`: the mouths, the lipsync drivers, an emotion track keyed to words | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/wardrobe.py](../blender/eidoblend/characters/claudesona/wardrobe.py) | `claudesona_wardrobe.js`'s garment layers shown, hidden and repainted, keyed | [claudesona](../tools-guides/claudesona.md) |
-| [claudesona/tuta.py](../blender/eidoblend/characters/claudesona/tuta.py) | The TuTa: badges pinned and thrown, face paint, the sun disc, neon, eye lights | [claudesona](../tools-guides/claudesona.md) |
+| [claudesona/tuta.py](../blender/eidoblend/characters/claudesona/tuta.py) | The TuTa: badges pinned and thrown, face paint, the sun disc, neon, eye lights; its seams and stitches anti-aliased by the pixel's footprint | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/look.py](../blender/eidoblend/characters/claudesona/look.py) | MToon as the VRM add-on imports it, or a PBR look, switchable | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/\_mesh.py](../blender/eidoblend/characters/claudesona/_mesh.py) | The claudesona's meshes read as the WebGPU runtime reads them | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/\_paint.py](../blender/eidoblend/characters/claudesona/_paint.py) | The wardrobe's paints as shader nodes, switched by a keyed property | [claudesona](../tools-guides/claudesona.md) |
 | [controller/\_\_init\_\_.py](../blender/eidoblend/characters/controller/__init__.py) | The character controller for film: `VRMCharacterController`, `VRMFootControllerIK`, `Locomotion`, `CollisionWorld` (`character_controller.js` / `foot_ik.js`) | [controller](../tools-guides/controller.md) |
-| [controller/controller.py](../blender/eidoblend/characters/controller/controller.py) | `VRMCharacterController`: the controller's state machine, gaits, stairs and ramps | [controller](../tools-guides/controller.md) |
+| [controller/controller.py](../blender/eidoblend/characters/controller/controller.py) | `VRMCharacterController`: the controller's state machine, gaits, stairs and ramps; `place`, the teleport | [controller](../tools-guides/controller.md) |
 | [controller/foot_ik.py](../blender/eidoblend/characters/controller/foot_ik.py) | `VRMFootControllerIK`: raycast foot planting | [controller](../tools-guides/controller.md) |
-| [controller/film.py](../blender/eidoblend/characters/controller/film.py) | `Locomotion`: directing the controller for a film, and the bake that keys what it did | [controller](../tools-guides/controller.md) |
+| [controller/film.py](../blender/eidoblend/characters/controller/film.py) | `Locomotion`: directing the controller for a film (`steer` and `follow`: steered frame by frame from scene logic, or after a keyed object), and the bake that keys what it did, the spring chains with it (`bake_springs`, `take_resets`) | [controller](../tools-guides/controller.md) |
 | [controller/maneuvers.py](../blender/eidoblend/characters/controller/maneuvers.py) | The controller's parkour moves: vault, climb a ledge, jump, ladder, wall, and the auto-trigger | [controller](../tools-guides/controller.md) |
 | [controller/plant.py](../blender/eidoblend/characters/controller/plant.py) | The film bake's feet, planted on whatever the controller walked over | [controller](../tools-guides/controller.md) |
 | [controller/pose.py](../blender/eidoblend/characters/controller/pose.py) | One frame's pose as the controller and its foot IK see it | [controller](../tools-guides/controller.md) |
@@ -112,7 +116,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [controller/clips.py](../blender/eidoblend/characters/controller/clips.py) | The controller's clip library and what it measures in each clip on a body | [controller](../tools-guides/controller.md) |
 | [controller/mixer.py](../blender/eidoblend/characters/controller/mixer.py) | three.js's AnimationMixer, for the controller's build-time simulation | [controller](../tools-guides/controller.md) |
 | [emotes/\_\_init\_\_.py](../blender/eidoblend/characters/emotes/__init__.py) | The character verbs on the controller: `seat_on`, `stand_up`, `sit_on_ground`, `emote`, `face_camera`, `unseat`, `bake`, `seat_plan`, the keyed seated exemption | [maneuvers](../tools-guides/maneuvers.md) |
-| [emotes/verbs.py](../blender/eidoblend/characters/emotes/verbs.py) | The verbs for a body the controller drives, routed to `placement.seating` when nothing drives it | [maneuvers](../tools-guides/maneuvers.md) |
+| [emotes/verbs.py](../blender/eidoblend/characters/emotes/verbs.py) | The verbs for a body the controller drives, routed to `placement.seating` when nothing drives it; `seat_on(instant=True)`, a shot that opens seated | [maneuvers](../tools-guides/maneuvers.md) |
 | [emotes/catalog.py](../blender/eidoblend/characters/emotes/catalog.py) | The library's expressive and sitting clips, each measured on the body | [maneuvers](../tools-guides/maneuvers.md) |
 | [maneuvers/\_\_init\_\_.py](../blender/eidoblend/characters/maneuvers/__init__.py) | Moves aimed at scene objects: `vault_over`, `climb_onto`, `scramble_up`, `climb_ladder`, `jump_across`, `cross` | [maneuvers](../tools-guides/maneuvers.md) |
 | [maneuvers/verbs.py](../blender/eidoblend/characters/maneuvers/verbs.py) | The aimed moves themselves | [maneuvers](../tools-guides/maneuvers.md) |
@@ -122,9 +126,9 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [robot/\_\_init\_\_.py](../blender/eidoblend/characters/robot/__init__.py) | My robot body in Blender: its runtime, its hands, the embodied robot for any VRM | [robot-body](../tools-guides/robot-body.md) |
 | [robot/rig.py](../blender/eidoblend/characters/robot/rig.py) | `RobotRig`: my robot body's runtime on one VRM, the example's frame order, keyed | [robot-body](../tools-guides/robot-body.md) |
 | [robot/hands.py](../blender/eidoblend/characters/robot/hands.py) | My hands' work: reach, grasp until each finger touches, hold, set down (round or flat-sided props, either hand) | [robot-body](../tools-guides/robot-body.md) |
-| [robot/body.py](../blender/eidoblend/characters/robot/body.py) | `VRMRobotBody` (`robot_body.js`): sensing, memory, A*, walks, runs, vault / jump / climb_ledge / climb_ladder | [robot-body](../tools-guides/robot-body.md) |
-| [robot/controller.py](../blender/eidoblend/characters/robot/controller.py) | `EidoverseRobotController` (`robot_controller.js`) and the legs it drives | [robot-body](../tools-guides/robot-body.md) |
-| [robot/bake.py](../blender/eidoblend/characters/robot/bake.py) | A run the legs recorded, keyed through my body's passes | [robot-body](../tools-guides/robot-body.md) |
+| [robot/body.py](../blender/eidoblend/characters/robot/body.py) | `VRMRobotBody` (`robot_body.js`): sensing (moving objects too), memory, A*, walks, runs, turns, aimed emotes, seats, `play_gesture`, vault / jump / climb_ledge / climb_ladder | [robot-body](../tools-guides/robot-body.md) |
+| [robot/controller.py](../blender/eidoblend/characters/robot/controller.py) | `EidoverseRobotController` (`robot_controller.js`) over `RobotLegs`: the controller family's character controller stepped frame by frame (stairs, ramps, moves en route); `CollisionWorld`, the JS's colliders | [robot-body](../tools-guides/robot-body.md) |
+| [robot/bake.py](../blender/eidoblend/characters/robot/bake.py) | The legs' take baked as the controller family bakes its own, then keyed through my body's passes | [robot-body](../tools-guides/robot-body.md) |
 | [robot/debug.py](../blender/eidoblend/characters/robot/debug.py) | `RobotDebug` (`robot_debug.js`): what the robot sees and knows, as keyed geometry | [robot-body](../tools-guides/robot-body.md) |
 | [robot/example.py](../blender/eidoblend/characters/robot/example.py) | `eidoverse/examples/claude_robot.js`, the whole scene | [robot-body](../tools-guides/robot-body.md) |
 | [robotics/\_\_init\_\_.py](../blender/eidoblend/characters/robotics/__init__.py) | The modular robotics kit: kit, motion, solvers, running, materials, io, studio, facade, inspector, rig, examples | [robotics](../tools-guides/robotics.md) |
@@ -167,6 +171,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [fab\_sim.py](../blender/eidoblend/fabrication/fab_sim.py) | `FabSim`: the G430 CNC / FDM facade (`fab_sim.js`) | [fabrication](../tools-guides/fabrication.md) |
 | [processes.py](../blender/eidoblend/fabrication/processes.py) | Additive printing, pocket milling and three-axis relief machining (`fabrication.js`) | [fabrication](../tools-guides/fabrication.md) |
 | [machine.py](../blender/eidoblend/fabrication/machine.py) | The G430 gantry's controls a job drives | [fabrication](../tools-guides/fabrication.md) |
+| [physical.py](../blender/eidoblend/fabrication/physical.py) | A job keyed at its program's events instead of every frame, so it plays at its own speed however long it is | [fabrication](../tools-guides/fabrication.md), [robotics](../tools-guides/robotics.md) |
 | [feed\_path.py](../blender/eidoblend/fabrication/feed_path.py) | 2.5D process geometry and feed timing, in metres and seconds (`feed_path.js`) | [fabrication](../tools-guides/fabrication.md) |
 | [filament.py](../blender/eidoblend/fabrication/filament.py) | Bézier service tubing and physically metered filament delivery (`filament.js`) | [fabrication](../tools-guides/fabrication.md) |
 | [filament\_path.py](../blender/eidoblend/fabrication/filament_path.py) | Retraction and prime dwells, conserved filament volume (`filament_path.js`) | [fabrication](../tools-guides/fabrication.md) |
@@ -231,14 +236,14 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [water3d/\_kernels.py](../blender/eidoblend/fx/water3d/_kernels.py) | The solver's compute kernels as GLSL | [free-surface-water](../tools-guides/free-surface-water.md) |
 | [water3d/surface.py](../blender/eidoblend/fx/water3d/surface.py) | The surface each baked frame, as a mesh | [free-surface-water](../tools-guides/free-surface-water.md) |
 | [water3d/material.py](../blender/eidoblend/fx/water3d/material.py) | The water's look in EEVEE | [free-surface-water](../tools-guides/free-surface-water.md) |
-| [fire.py](../blender/eidoblend/fx/fire.py) | Volume fire and smoke from burning mesh emitters (`fluid_grid.js`) | [volume-fire](../tools-guides/volume-fire.md) |
+| [fire.py](../blender/eidoblend/fx/fire.py) | Volume fire and smoke from burning mesh emitters (`fluid_grid.js`), and the smoke's shadow on the ground (`shadow_floor`) | [volume-fire](../tools-guides/volume-fire.md) |
 | [\_gpu.py](../blender/eidoblend/fx/_gpu.py) | GLSL compute through Blender's `gpu` module: the family's GPU bakes | [volume-fire](../tools-guides/volume-fire.md), [free-surface-water](../tools-guides/free-surface-water.md) |
 | [\_noise.py](../blender/eidoblend/fx/_noise.py) | The engine's noise functions, number for number (numpy) | [volume-fire](../tools-guides/volume-fire.md) |
-| [cloth.py](../blender/eidoblend/fx/cloth.py) | `create_cloth_panel`: mass-spring cloth panels (`cloth_sim.js`) | [cloth](../tools-guides/cloth.md) |
+| [cloth.py](../blender/eidoblend/fx/cloth.py) | `create_cloth_panel`: mass-spring cloth panels (`cloth_sim.js`), the default fabric (`fabric_material`) and a graphic on the fabric (`map=`, `apply_decal`) | [cloth](../tools-guides/cloth.md) |
 | [particles.py](../blender/eidoblend/fx/particles.py) | `make_particles`: billboard particles on the 80-sprite library (`particles.js`) | [particles-fx](../tools-guides/particles-fx.md) |
 | [particle\_morph.py](../blender/eidoblend/fx/particle_morph.py) | `make_particle_morph`, `ParticleMorph`, `ascii_panel` (`particle_morph.js`, `ascii_panel.js`) | [particles-fx](../tools-guides/particles-fx.md) |
 | [particle\_targets.py](../blender/eidoblend/fx/particle_targets.py) | Morph targets from anything (objects, files, VRMs and their clips, images, text, shapes), in their own colours | [particles-fx](../tools-guides/particles-fx.md) |
-| [iso\_field.py](../blender/eidoblend/fx/iso_field.py) | `make_iso_field`: CPU-written scalar fields as isosurfaces (`iso_field.js`) | [sdf-volumes](../tools-guides/sdf-volumes.md) |
+| [iso\_field.py](../blender/eidoblend/fx/iso_field.py) | `make_iso_field`: CPU-written scalar fields as isosurfaces (`iso_field.js`), with its colour, roughness and emissive hooks | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [\_look.py](../blender/eidoblend/fx/_look.py) | The engine's display, matched under the film's view transform | [particles-fx](../tools-guides/particles-fx.md), [volume-fire](../tools-guides/volume-fire.md) |
 | [\_nodes.py](../blender/eidoblend/fx/_nodes.py) | An expression layer over node trees, so a TSL shader ports as code | [particles-fx](../tools-guides/particles-fx.md) |
 | [\_util.py](../blender/eidoblend/fx/_util.py) | Private helpers: axes, colours, the scene clock, seeded randomness, cache files | [liquids](../tools-guides/liquids.md) |
@@ -249,7 +254,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | --- | --- | --- |
 | [\_\_init\_\_.py](../blender/eidoblend/look/__init__.py) | Cameras, lights, the EEVEE look presets, the post chain, exposure, review tools | [camera-lighting](../tools-guides/camera-lighting.md) |
 | [camera.py](../blender/eidoblend/look/camera.py) | Cameras for film shots: targets and framing, moves baked to keys, depth of field and focus pulls | [camera-lighting](../tools-guides/camera-lighting.md) |
-| [camera\_safety.py](../blender/eidoblend/look/camera_safety.py) | `CameraSafety`: sightlines, clearance, the whole animated path checked | [camera-lighting](../tools-guides/camera-lighting.md) |
+| [camera\_safety.py](../blender/eidoblend/look/camera_safety.py) | `CameraSafety`: sightlines, clearance, the whole animated path checked; `CameraSafety.help()` prints its API reference | [camera-lighting](../tools-guides/camera-lighting.md) |
 | [camera\_audit.py](../blender/eidoblend/look/camera_audit.py) | The camera audits per shot: bounce, framing, focus | [render-review](../tools-guides/render-review.md) |
 | [lighting.py](../blender/eidoblend/look/lighting.py) | Lights for EEVEE: units, the sun, key / fill / rim, practicals, ray-traced lighting, light probes and their bake | [camera-lighting](../tools-guides/camera-lighting.md) |
 | [stage\_rig.py](../blender/eidoblend/look/stage_rig.py) | Stage lights built with their fixtures, aimed by construction | [camera-lighting](../tools-guides/camera-lighting.md) |
@@ -284,14 +289,14 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | Module | Role | Instructions |
 | --- | --- | --- |
 | [\_\_init\_\_.py](../blender/eidoblend/media/__init__.py) | Screens, type, overlays, subtitles, books and sound | [motion-graphics](../tools-guides/motion-graphics.md) |
-| [screens.py](../blender/eidoblend/media/screens.py) | In-world screens: canvas content and video atlases on real displays (`screen.js`) | [motion-graphics](../tools-guides/motion-graphics.md) |
+| [screens.py](../blender/eidoblend/media/screens.py) | In-world screens: canvas content and video atlases on real displays (`screen.js`); a video's playhead driven by `frame_map` and `set_frame` | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [canvas\_scenes.py](../blender/eidoblend/media/canvas_scenes.py) | The canvas screen scenes without Blender: list, preview, contact sheets, bench, NaN sweep | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [raster.py](../blender/eidoblend/media/raster.py) | 2D drawing for screens and textures: canvases, the bundled fonts, `draw_text_fit` | [motion-graphics](../tools-guides/motion-graphics.md) |
-| [overlay.py](../blender/eidoblend/media/overlay.py) | The overlay layer (`makeOverlayLayer`), subtitles and the edit scene; `chain_overlay` | [motion-graphics](../tools-guides/motion-graphics.md) |
+| [overlay.py](../blender/eidoblend/media/overlay.py) | The overlay layer (`makeOverlayLayer`), subtitles and the edit scene; `chain_overlay`; `take_signal_effects`: the signal effects over the edit (a COMPOSITOR strip modifier), exact ink under them | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [parole.py](../blender/eidoblend/media/parole.py) | Parole-in-libertà lyric captions and quotes in the overlay layer | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [lyrics.py](../blender/eidoblend/media/lyrics.py) | Lyric subtitles drawn on frames (`lyric_renderer.py`'s `LyricRenderer`) | [motion-graphics](../tools-guides/motion-graphics.md) |
-| [text3d.py](../blender/eidoblend/media/text3d.py) | Extruded type with real materials (`text_3d.js`), and title cards | [motion-graphics](../tools-guides/motion-graphics.md) |
-| [book.py](../blender/eidoblend/media/book.py) | Hardcover books: the engine's own rig (`book_core.js`), posed in Deno, built and cached in Blender | [books](../tools-guides/books.md) |
+| [text3d.py](../blender/eidoblend/media/text3d.py) | Extruded type with real materials (`text_3d.js`: its bevel, `bevel_offset` too), and title cards | [motion-graphics](../tools-guides/motion-graphics.md) |
+| [book.py](../blender/eidoblend/media/book.py) | Hardcover books: the engine's own rig (`book_core.js`), posed in Deno, built and cached in Blender; a chosen sweep and leaf angle, the case's shape and trim cloth from data | [books](../tools-guides/books.md) |
 | [audio.py](../blender/eidoblend/media/audio.py) | Sound strips, markers, mixdown, and visemes keyed onto a VRM's face | [audio](../tools-guides/audio.md) |
 | [weather\_audio.py](../blender/eidoblend/media/weather_audio.py) | The weather-audio recorder over Blender frames (`weather_audio.js`) | [weather-effects](../tools-guides/weather-effects.md), [audio](../tools-guides/audio.md) |
 | [timebase.py](../blender/eidoblend/media/timebase.py) | Frames and film seconds, and the timing files the media tools read (no bpy) | [audio](../tools-guides/audio.md) |
@@ -339,7 +344,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [gpu\_eval.py](../blender/eidoblend/sdf/gpu_eval.py) | `SdfProgram`: an example's GLSL compiled into Blender's GPU module, evaluated over points | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [glsl\_lib.py](../blender/eidoblend/sdf/glsl_lib.py) | The engine's GLSL primitive library and the edition's prelude | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [np\_lib.py](../blender/eidoblend/sdf/np_lib.py) | The primitive library over numpy, for SDFs written in Python | [sdf-volumes](../tools-guides/sdf-volumes.md) |
-| [materials.py](../blender/eidoblend/sdf/materials.py) | The Principled material a solid renders with, its `surface()` channels baked | [sdf-volumes](../tools-guides/sdf-volumes.md) |
+| [materials.py](../blender/eidoblend/sdf/materials.py) | The Principled material a solid renders with, its `surface()` channels baked, and `shade()`'s view-dependent terms per pixel (`view_terms`, `apply_view_terms`) | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [spec.py](../blender/eidoblend/sdf/spec.py) | The SDF spec, the quality presets, the `EXAMPLES` registry | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [examples\_solids.py](../blender/eidoblend/sdf/examples_solids.py) | The solid `EXAMPLES` | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [texture.py](../blender/eidoblend/sdf/texture.py) | `make_sdf_texture` and `make_explosion_texture`: SDFs raymarched into images | [sdf-volumes](../tools-guides/sdf-volumes.md) |
@@ -347,7 +352,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [rhombic\_dodecahedron.py](../blender/eidoblend/sdf/rhombic_dodecahedron.py) | Rhombic dodecahedron voxels (`rhombic_dodecahedron.js`) | [sdf-volumes](../tools-guides/sdf-volumes.md), [geometry](../tools-guides/geometry.md) |
 | [helper.py](../blender/eidoblend/sdf/helper.py) | `register_sdf_helper` and `help()`, the engine's discoverable API reference | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [examples\_volumes.py](../blender/eidoblend/sdf/examples_volumes.py) | The volume `EXAMPLES` (explosions, fire, smoke), the lamps their emission casts, the froxel range | [sdf-explosions](../tools-guides/sdf-explosions.md) |
-| [nuclear\_explosion.py](../blender/eidoblend/sdf/nuclear_explosion.py) | The mushroom cloud as volumes, baked over the scene's range, glow lamps keyed | [sdf-explosions](../tools-guides/sdf-explosions.md) |
+| [nuclear\_explosion.py](../blender/eidoblend/sdf/nuclear_explosion.py) | The mushroom cloud as volumes, baked over the scene's range, glow lamps keyed; metal reflects it through light probes (`reflections`, `reflect_in`) | [sdf-explosions](../tools-guides/sdf-explosions.md) |
 | [examples\_vehicles.py](../blender/eidoblend/sdf/examples_vehicles.py) | The vehicle `EXAMPLES` | [sdf-vehicles](../tools-guides/sdf-vehicles.md) |
 | [vehicles/\_\_init\_\_.py](../blender/eidoblend/sdf/vehicles/__init__.py) | The four vehicles, built for EEVEE | [sdf-vehicles](../tools-guides/sdf-vehicles.md) |
 | [vehicles/vehicle.py](../blender/eidoblend/sdf/vehicles/vehicle.py) | The vehicles' `make()`: a film-ready Blender object | [sdf-vehicles](../tools-guides/sdf-vehicles.md) |
@@ -388,15 +393,15 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [unknown\_force/\_\_init\_\_.py](../blender/eidoblend/sets/unknown_force/__init__.py) | The UNKNOWN FORCE scenes' table (`SETS`), each loaded on first use | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/city.py](../blender/eidoblend/sets/unknown_force/city.py) | A dark cyberpunk megacity at night painted by a Futurist | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/hole.py](../blender/eidoblend/sets/unknown_force/hole.py) | A stage at the bottom of a sunken well in the city's centre | [props-and-sets](../tools-guides/props-and-sets.md) |
-| [unknown\_force/citykit.py](../blender/eidoblend/sets/unknown_force/citykit.py) | The kit the city and the well share: towers, signs, rain, the cloud deck, the pillar of light | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [unknown\_force/citykit.py](../blender/eidoblend/sets/unknown_force/citykit.py) | The kit the city and the well share: towers, signs, rain, the cloud deck, the pillar of light; a set's haze wrapped round your own objects' materials, see-through ones keeping their alpha (`fog_objects`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/quiet\_room.py](../blender/eidoblend/sets/unknown_force/quiet_room.py) | The quiet room | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/quiet\_room\_art.py](../blender/eidoblend/sets/unknown_force/quiet_room_art.py) | The quiet room's whiteboards, drawn in marker | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/showroom.py](../blender/eidoblend/sets/unknown_force/showroom.py) | The showroom | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/showroom\_art.py](../blender/eidoblend/sets/unknown_force/showroom_art.py) | The showroom's printed and displayed matter | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/interiors\_lib.py](../blender/eidoblend/sets/unknown_force/interiors_lib.py) | The quiet room's and the showroom's shared kit | [props-and-sets](../tools-guides/props-and-sets.md) |
-| [unknown\_force/corridor.py](../blender/eidoblend/sets/unknown_force/corridor.py) | A gold corridor of power | [props-and-sets](../tools-guides/props-and-sets.md) |
-| [unknown\_force/news.py](../blender/eidoblend/sets/unknown_force/news.py) | The evening news at a data centre | [props-and-sets](../tools-guides/props-and-sets.md) |
-| [unknown\_force/cn\_lib.py](../blender/eidoblend/sets/unknown_force/cn_lib.py) | The corridor's and the news' shared helpers, the ACES-like look | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [unknown\_force/corridor.py](../blender/eidoblend/sets/unknown_force/corridor.py) | A gold corridor of power, its marble floor a mirror (a planar light probe) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [unknown\_force/news.py](../blender/eidoblend/sets/unknown_force/news.py) | The evening news at a data centre; its night haze on your own performer, crowd or props (`fog_objects`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [unknown\_force/cn\_lib.py](../blender/eidoblend/sets/unknown_force/cn_lib.py) | The corridor's and the news' shared helpers, the ACES-like look, the sets' FogExp2 as a node group (`fog_group`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/race.py](../blender/eidoblend/sets/unknown_force/race.py) | A night highway: Sant'Elia towers, billboards, a 1908 racing car, the roadworks | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/bin.py](../blender/eidoblend/sets/unknown_force/bin.py) | A canyon of thrown-away paper with a giant trash can | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/bin\_pages.py](../blender/eidoblend/sets/unknown_force/bin_pages.py) | The canyon's paper: an atlas of invented pages | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -405,7 +410,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Module | Role | Instructions |
 | --- | --- | --- |
-| [sky/\_\_init\_\_.py](../blender/eidoblend/sky/__init__.py) | `make_sky`: the Earth sky, the ringworld (band rendered as a plate behind local geometry, eclipse, ring clouds) and shieldworld (red giant, hex shield, shattered moon) packages, the sun corona, the asteroid moon pipeline, custom celestial clusters, the cloud dome, and weather | [sky-weather](../tools-guides/sky-weather.md) |
+| [sky/\_\_init\_\_.py](../blender/eidoblend/sky/__init__.py) | `make_sky`: the Earth sky, the ringworld (band rendered as a plate behind local geometry, eclipse, ring clouds) and shieldworld (red giant, hex shield, shattered moon) packages, the sun corona, the asteroid moon pipeline, custom celestial clusters, the cloud dome, and weather, with its own weather system (`weather_fx`); `celestial=` bodies and `textures=` star and moon maps in any sky, the engine options (`earthRadius`, the ring deck, the march counts), `sun_coverage_dim`, `cloud_shadow_strength` | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/worlds.py](../blender/eidoblend/sky/worlds.py) | The three sky worlds; one key selects a whole world | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/sky\_system.py](../blender/eidoblend/sky/sky_system.py) | The sky's state machine: time of day, cloud presets and transitions, colour channels, lights | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/palette.py](../blender/eidoblend/sky/palette.py) | The time-of-day palette, cloud presets and sun / moon paths | [sky-weather](../tools-guides/sky-weather.md) |
@@ -416,19 +421,19 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [sky/bake/sky.glsl](../blender/eidoblend/sky/bake/sky.glsl) | The cloud and celestial shader, ported line for line | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/world\_nodes.py](../blender/eidoblend/sky/world_nodes.py) | The EEVEE world that shows the baked sky and lights the scene with it | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/sky\_view.py](../blender/eidoblend/sky/sky_view.py) | The bake camera's projection, shared by every material that reads a camera layer | [sky-weather](../tools-guides/sky-weather.md) |
-| [sky/cloud\_shadows.py](../blender/eidoblend/sky/cloud_shadows.py) | Cloud shadows carried by EEVEE's own sun shadows | [sky-weather](../tools-guides/sky-weather.md) |
+| [sky/cloud\_shadows.py](../blender/eidoblend/sky/cloud_shadows.py) | Cloud shadows carried by EEVEE's own sun shadows; objects marked `eido_noCloudShadow` lit by the sun's twin (`link_opt_outs`) | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/cloud\_dome.py](../blender/eidoblend/sky/cloud_dome.py) | The cloud dome over distant geometry | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/cloud\_spatial.py](../blender/eidoblend/sky/cloud_spatial.py) | The balanced tier's spatial sky downsample | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/fog.py](../blender/eidoblend/sky/fog.py) | Distance fog in the sky's colour | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/nodes.py](../blender/eidoblend/sky/nodes.py) | Shader-node building for the sky worlds' materials | [sky-weather](../tools-guides/sky-weather.md) |
-| [sky/ringworld.py](../blender/eidoblend/sky/ringworld.py) | The ringworld band | [sky-weather](../tools-guides/sky-weather.md) |
+| [sky/ringworld.py](../blender/eidoblend/sky/ringworld.py) | The ringworld band; its haze walls drawn under the cloud dome (`order_walls_under_dome`) | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/ring\_materials.py](../blender/eidoblend/sky/ring_materials.py) | The ringworld's materials | [sky-weather](../tools-guides/sky-weather.md) |
-| [sky/redgiant.py](../blender/eidoblend/sky/redgiant.py) | The shieldworld's red giant and planetary shield | [sky-weather](../tools-guides/sky-weather.md) |
+| [sky/redgiant.py](../blender/eidoblend/sky/redgiant.py) | The shieldworld's red giant and planetary shield, and a red giant for any sky (`make_sky(celestial=...)`) | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/asteroid\_moon.py](../blender/eidoblend/sky/asteroid_moon.py) | The asteroid moon pipeline and the shattered moon | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/moon\_materials.py](../blender/eidoblend/sky/moon_materials.py) | The shattered moon's materials and its debris river | [sky-weather](../tools-guides/sky-weather.md) |
 | [sky/sun\_corona.py](../blender/eidoblend/sky/sun_corona.py) | A corona of light-petals around the sun (`sun_corona.js`) | [sky-weather](../tools-guides/sky-weather.md) |
 | [weather/\_\_init\_\_.py](../blender/eidoblend/weather/__init__.py) | `make_weather_system`, `make_weather_audio`: rain streaks and splashes, wet ground and puddles, lightning, the weather audio track | [weather-effects](../tools-guides/weather-effects.md) |
-| [weather/system.py](../blender/eidoblend/weather/system.py) | `make_weather_system` on top of the sky package (`weather_system.js`) | [weather-effects](../tools-guides/weather-effects.md) |
+| [weather/system.py](../blender/eidoblend/weather/system.py) | `make_weather_system` on top of the sky package (`weather_system.js`), or without a sky on its own clock (`weather_clock`) | [weather-effects](../tools-guides/weather-effects.md) |
 | [weather/rain.py](../blender/eidoblend/weather/rain.py) | World-space rain streaks and ground splashes, as Geometry Nodes | [weather-effects](../tools-guides/weather-effects.md) |
 | [weather/wet.py](../blender/eidoblend/weather/wet.py) | Wetness and puddles in front of each Principled BSDF | [weather-effects](../tools-guides/weather-effects.md) |
 | [weather/moisture.py](../blender/eidoblend/weather/moisture.py) | The 2D moisture history (numpy) | [weather-effects](../tools-guides/weather-effects.md) |
@@ -474,9 +479,9 @@ system Python, outside Blender, and serve either edition.
 
 | Source or tool | Role | Instructions |
 | --- | --- | --- |
-| [fetch_model.py](../fetch_model.py) | CLI: one query over local models, Poly Haven, Smithsonian, NASA and NIH 3D (`--cache`: the shared model library) | [assets](../tools-guides/assets.md) |
-| [fetch_texture.py](../fetch_texture.py) | CLI: CC0 PBR sets (`--cache`: the shared texture library) | [assets](../tools-guides/assets.md) |
-| [fetch_hdri.py](../fetch_hdri.py) | CLI: environment HDRIs | [assets](../tools-guides/assets.md) |
+| [fetch_model.py](../fetch_model.py) | CLI: one query over local models, Poly Haven, Smithsonian, NASA and NIH 3D (`--cache`: the shared model library); each delivery previewed in Blender (`model_preview.py`), with its size, pivot, kit and nose-axis lines in Blender's words | [assets](../tools-guides/assets.md) |
+| [fetch_texture.py](../fetch_texture.py) | CLI: CC0 PBR sets (`--cache`: the shared texture library); ends with the `load_pbr` / `load_image_texture` lines for the set | [assets](../tools-guides/assets.md) |
+| [fetch_hdri.py](../fetch_hdri.py) | CLI: environment HDRIs; ends with the `load_hdri` line | [assets](../tools-guides/assets.md) |
 | [contact_sheet.py](../contact_sheet.py) | CLI: labelled contact sheets of a video | [render-review](../tools-guides/render-review.md) |
 | [align_lyrics.py](../align_lyrics.py) | CLI: lyric timestamps from a vocal | [audio](../tools-guides/audio.md) |
 | [lipsync.py](../lipsync.py) | Python audio module: per-frame viseme timelines from vocal audio; no CLI | [audio](../tools-guides/audio.md), [claudesona](../tools-guides/claudesona.md) |
@@ -600,7 +605,7 @@ installed.
 | [eidoverse/effects_tsl/vhs_tape.js](../eidoverse/effects_tsl/vhs_tape.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/effects_tsl/wavy.js](../eidoverse/effects_tsl/wavy.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/basic_vrm.js](../eidoverse/examples/basic_vrm.js) | Scene example/template (Blender's: `blender/tests/claudesona/basic_vrm/`) | [claudesona](../tools-guides/claudesona.md) |
-| [eidoverse/examples/claude_robot.js](../eidoverse/examples/claude_robot.js) | Scene example/template: the robot body, its face and a clip through its joints | [robot-body](../tools-guides/robot-body.md) |
+| [eidoverse/examples/claude_robot.js](../eidoverse/examples/claude_robot.js) | Scene example/template: the robot body, its face and a clip through its joints (Blender's: `blender/examples/claude_robot/`) | [robot-body](../tools-guides/robot-body.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template: the walking course (Blender's: `blender/examples/obstacle_course/`) | [geometry](../tools-guides/geometry.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [robotics](../tools-guides/robotics.md) |

@@ -383,6 +383,9 @@ pos = cs.safe_position(desired, target)
 
 `check_path` and `safe_position` are the WebGPU API: issues with a severity
 and a suggested clear position on a sphere round the target.
+`CameraSafety.help()` prints (and returns) the API reference with its
+gotchas, as the engine's did; `test_camera_checks.py` checks it names every
+public method.
 `test_camera_checks.py` drives a dolly through a wall (flagged at the frames
 where the lens meets it), a camera under the ground, and a planned key behind
 the wall. `safe_position` during motion jumps as occluders change. Prefer

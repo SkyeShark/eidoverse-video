@@ -26,6 +26,11 @@ samples or fewer, a few seconds of film), so on a shared GPU run them through th
         a key, and shot B's framing measures what its camera sees
     T17 a Geometry Nodes modifier (Blender 5.2 keeps its inputs as RNA, not ID properties): the build's un-keyed check
         reads it, a keyed input plays from the saved .blend, an input set without a key is named
+    T18 parts that turn in place (motion.swept_clearance): a rotor sunk in its drum and one whose blades cut a cabinet
+        are named, a clear rotor and a radar scanning short of a pole are not (a still: LOOK at it)
+    T19 --at stills of shots whose post effect reads earlier frames: after_image's trail (from the shot's start) and
+        the era looks' CRT persistence (seven frames back) match the film's own frames, the records cleared first
+    T7  (doctor) also reports Deno, its version and its npm packages imported offline
 
 Outputs land in blender/tests/pipeline/out/ (git-ignored). Library textures and models come from the shared cache:
 set EIDO_ASSET_CACHE to a checkout that has them and EIDO_NO_FETCH=1 to forbid downloads. Exit 0 when every test
@@ -54,6 +59,9 @@ GN = os.path.join(HERE, 'gn_keying', 'scene.json')
 GN_UNKEYED = os.path.join(HERE, 'gn_keying', 'scene_unkeyed.json')
 STALE = os.path.join(HERE, 'stale', 'scene.json')
 SHOTS = os.path.join(HERE, 'shots', 'scene.json')
+SWEPT = os.path.join(HERE, 'swept', 'scene.json')
+LEADIN = os.path.join(HERE, 'leadin', 'scene.json')
+LEADIN_CRT = os.path.join(HERE, 'leadin', 'scene_crt.json')
 results = []
 
 
@@ -150,6 +158,10 @@ def t0():
 def t7():
     rc, out = run(['doctor'])
     check('T7', rc == 0, f'doctor exit {rc}')
+    deno = [l for l in out.splitlines() if l.startswith(('[ok ] Deno', '[-- ] Deno'))]
+    check('T7', len(deno) >= 1 and (len(deno) == 2 or deno[0].startswith('[-- ]')),
+          "doctor reports Deno (the canvas screens', books' and parole's), its version and its npm packages imported "
+          f'offline: {deno}')
 
 
 def t1():
@@ -472,8 +484,93 @@ def t17():
           f"an input set without a key is named, with the ctx.key call that fixes it: {uk[0]['message'][:240] if uk else 'no WARN'}")
 
 
+def t18():
+    for p in glob.glob(os.path.join(OUT, 'swept_probe_at*.png')):
+        os.remove(p)
+    rc, _ = run(['render', SWEPT, '--at', '0.5', '--rebuild', '--force'])
+    check('T18', rc == 0, f'build + still exit {rc}')
+    d = digest(os.path.join(OUT, 'swept_probe.audit.json'))
+    by = {r['bodies'][0]: r for r in records(d, 'motion.swept_clearance') if r['outcome'] == 'WARN' and r['bodies']}
+    b, c = by.get('rotor_B'), by.get('rotor_C')
+    check('T18', b and b['bodies'] == ['rotor_B', 'mount_B'] and b['metrics']['angles_hit'] == 12
+          and 'sits inside' in b['message'],
+          f"rotor_B, sunk in its drum, sits inside mount_B at every angle: {b['message'][:150] if b else 'not named'}")
+    check('T18', c and c['bodies'] == ['rotor_C', 'cabinet_C'] and 0 < c['metrics']['angles_hit'] < 12,
+          f"rotor_C sweeps through cabinet_C at some angles: {c['message'][:150] if c else 'not named'}")
+    check('T18', 'rotor_A' not in by and 'radar' not in by,
+          'the clear rotor and the radar scanning short of the pole are not named: ' + str(sorted(by)))
+    # the placement family sees the sunk rotor too, as a part substantially inside another at the first frame
+    sunk = [r for r in warns(d) if r['check'] == 'placement.clipping' and 'mount_B / rotor_B' in r['message']]
+    other = [r['check'] + ': ' + r['message'][:90] for r in warns(d)
+             if r['check'] != 'motion.swept_clearance' and r not in sunk]
+    check('T18', not other, 'nothing else warns on the four mechanisms (the placement family names the sunk rotor '
+          f"too: {bool(sunk)}): " + ('; '.join(other) or 'none'))
+    check('T18', os.path.exists(os.path.join(OUT, 'swept_probe_at0.50s.png')),
+          'a still of the four mechanisms (LOOK at it)')
+
+
+def _film_frame(video, idx, dst):
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', video, '-vf', f'select=eq(n\\,{idx})', '-fps_mode',
+                    'vfr', '-frames:v', '1', dst], check=True)
+
+
+def _lum(path):
+    import numpy as np
+    from PIL import Image
+    return np.asarray(Image.open(path).convert('L'), np.float64)
+
+
+def t19():
+    import numpy as np
+    for cfg, tag, depth, want_lead in ((LEADIN, 'leadin', 1, 29), (LEADIN_CRT, 'leadin_crt', 7, 14)):
+        hist = os.path.join(OUT, f'{tag}_post_history')
+        shutil.rmtree(hist, ignore_errors=True)
+        video = os.path.join(OUT, f'{tag}.mp4')
+        rc, _ = run(['render', cfg, '--rebuild', '--force'])
+        if not check('T19', rc == 0 and os.path.exists(video), f'{tag}: the film (36 frames) rendered, exit {rc}'):
+            continue
+        left = sorted(glob.glob(os.path.join(hist, '*', '*.exr')))
+        check('T19', len(left) == depth, f"{tag}: the film pruned its records as it rendered: {len(left)} left "
+              f"(the last {depth}): {[os.path.basename(p) for p in left][:8]}")
+        shutil.rmtree(hist, ignore_errors=True)               # from here a still rendered alone would read nothing
+        for p in glob.glob(os.path.join(OUT, f'{tag}_probe_at*.png')):
+            os.remove(p)
+        rc, _ = run(['render', cfg, '--at', '0.75', '--at', '1.25'])
+        d = digest(os.path.join(OUT, f'{tag}_probe.audit.json'))
+        cap = records(d, 'render.capture')
+        lead = cap[0]['metrics'].get('lead_in_frames') if cap else None
+        check('T19', rc == 0 and lead == want_lead, f'{tag}: {lead} lead-in frames rendered before the stills (want '
+              f"{want_lead}): {cap[0]['message'][:230] if cap else 'no render.capture record'}")
+        tmp = os.path.join(OUT, f'_t19_{tag}')
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(tmp)
+        for idx, t in ((18, '0.75'), (30, '1.25')):
+            frame = os.path.join(tmp, f'f{idx}.png')
+            _film_frame(video, idx, frame)
+            still = os.path.join(OUT, f'{tag}_probe_at{t}s.png')
+            if not check('T19', os.path.exists(still), f'{tag}: {still} written (LOOK at it)'):
+                continue
+            check('T19', psnr(still, frame) > 35.0, f'{tag} --at {t} s against the film frame {idx}: PSNR '
+                  f'{psnr(still, frame):.1f} dB')
+        if tag == 'leadin':
+            # the trail itself: where the ball was nine frames before the still, film frame 1 shows the dark wall and
+            # the still shows the trail it left (a still with no records would show the wall there too)
+            _film_frame(video, 9, os.path.join(tmp, 'f9.png'))
+            _film_frame(video, 0, os.path.join(tmp, 'f0.png'))
+            f9 = _lum(os.path.join(tmp, 'f9.png'))
+            ys, xs = np.nonzero(f9 >= 0.9 * f9.max())
+            y, x = int(ys.mean()), int(xs.mean())
+            patch = (slice(max(0, y - 2), y + 3), slice(max(0, x - 2), x + 3))
+            wall = _lum(os.path.join(tmp, 'f0.png'))[patch].mean()
+            trail = _lum(os.path.join(OUT, 'leadin_probe_at0.75s.png'))[patch].mean()
+            check('T19', trail > wall + 25.0, f'the still at 0.75 s holds the ball\'s trail where it was at frame 10 '
+                  f'(pixel {x}, {y}): {trail:.0f} against the bare wall\'s {wall:.0f} (of 255)')
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 TESTS = {'T0': t0, 'T7': t7, 'T1': t1, 'T6': t6, 'T2': t2, 'T3': t3, 'T4': t4, 'T5': t5, 'T8': t8, 'T9': t9,
-         'T10': t10, 'T11': t11, 'T12': t12, 'T13': t13, 'T14': t14, 'T15': t15, 'T16': t16, 'T17': t17}
+         'T10': t10, 'T11': t11, 'T12': t12, 'T13': t13, 'T14': t14, 'T15': t15, 'T16': t16, 'T17': t17,
+         'T18': t18, 'T19': t19}
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)

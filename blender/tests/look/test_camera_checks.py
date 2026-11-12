@@ -16,7 +16,7 @@ A wall, a ground, a statue-sized subject. Bad shots that each check must flag, a
                                                     not excluded, still blocks; a scatter's unrendered source has no
                                                     clearance
   - set_fov / fov_of, three_to_blender, look_at_object, rack focus distances (view depth), point_in_frame,
-    track's held height with follow='xy'
+    track's held height with follow='xy'; CameraSafety.help() names every public method
     bash run_blender.sh blender/tests/look/test_camera_checks.py
 """
 import math
@@ -84,6 +84,14 @@ check('dof_limits sane (near < 4 < far)', dl['near'] < 4.0 < dl['far'], {k: roun
 
 cs = CameraSafety(sc, padding=0.5, min_distance=0.3)
 cs.exclude(subject, sightline_only=True)
+
+# ---- the API reference an agent discovers: every public method named, the gotchas there
+ref = CameraSafety.help()
+public = sorted(n for n in dir(CameraSafety) if not n.startswith('_') and callable(getattr(CameraSafety, n))
+                and n != 'help')
+missing = [n for n in public if f'{n}(' not in ref]
+check('CameraSafety.help() returns the reference naming every public method', isinstance(ref, str) and not missing
+      and 'sightline_only' in ref and 'Common gotchas' in ref, f'{len(public)} methods, missing {missing}')
 
 # ---- a dolly straight through the wall
 c1 = C.make_camera('cam_through_wall', fov=40, scene=sc)

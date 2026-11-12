@@ -295,7 +295,8 @@ AgX's inverse of saturated colours comes back short, because AgX cannot
 display them. Through Blender's own OCIO config: `#ffd400` returns 50/255
 off, pure blue 67, pure red 26, `#ff2d95` 21, cyan `#00d4ff` 16. Neutrals and
 the teal return within 2. When such ink must land exactly and no signal
-effect runs over it, take the display route.
+effect runs over it, take the display route; with signal effects over it,
+take them over the edit ([below](#signal-effects-over-the-edit-exact-ink-under-the-signal)).
 
 `authored=False` alpha-overs the overlay's linear colours (the chain's own
 Alpha Over) and AgX grades them with the film, as the engine graded a plain
@@ -318,6 +319,62 @@ The registry (`look/post/custom_effects.py`) keeps the engine's default
 layers: every effect starts 'over' except `depth_fog` and `retro_wireframe`
 ('under', switchable), and `nuclear_explosion`, `godrays` and `underwater`
 are locked 'under'. `opts[name]['layer']` switches the rest, as above.
+
+### Signal effects over the edit: exact ink under the signal
+
+`authored=True` keeps saturated ink only as close as AgX can show it. When
+such ink must land exactly and signal effects still run over it, take the
+effects out of the film's chain and run them over the edit, after the view
+transform, as Blender 5.2's COMPOSITOR strip modifier:
+
+```python
+from eidoblend.look.post import custom_effects as fx
+from eidoblend.media import overlay
+
+ov = overlay.make_overlay_layer(film_scene, filter_size=0)
+ov.panel(draw=lower_third, x=-0.25, y=0.33, w=0.42, h=0.16, px=800, frames=(1, 240), out_dir='work/<id>/lt')
+fx.apply_to(film_scene, 'rgb_shift,glitch_bars', {'rgb_shift': {'amount': 0.004}})   # 'over', keyed as usual
+sig = overlay.take_signal_effects(film_scene)    # the 'over' stages leave the film's chain, keys and all
+# ... render the film (no signal effects in it now) ...
+frames_dir = overlay.render_overlay(ov, 'work/<id>/overlay')
+edit = overlay.make_edit_scene(film='work/<id>/film.mp4', overlays=[frames_dir], signal=sig, like=film_scene)
+overlay.render_edit(edit, 'work/<id>/final.mp4')
+```
+
+- `take_signal_effects(film)` moves the chain's 'over' stages, in order,
+  with their keys, into one compositor group, and drops the chain's overlay
+  stage (the edit lays the overlay). Call it before the film renders. The
+  film scene records the group's name (`overlay.SIGNAL_PROP`).
+- `make_edit_scene(..., signal=group)` puts an adjustment strip over the film
+  and the overlays, holding the group as its COMPOSITOR modifier. Subtitles
+  stay above it, clean.
+- The modifier hands its group the strips in linear light (the sRGB transfer
+  undone) and encodes the result again, exactly: `#ffd400`, pure blue, the
+  teal and a 50 % grey came back to the level through a group that passes the
+  image straight on. So the
+  effects run on the display's light, where the chain ran them on scene light
+  before AgX: a channel split or a glitch bar moves pixels the same way, while
+  grain and tint amounts read a little differently against the picture.
+- In an animation render (`render_edit`'s) the group sees each frame's Scene
+  Time and its keyed inputs, frame for frame (measured below: the glitch keyed
+  on at frame 4, its bars scrolling from frame to frame).
+- A stage that needs the film's render cannot move: one reading the Depth or
+  Normal pass (`full_toon`, `blueprint`, `cross_hatch`, the screen modes of
+  `depth_fog` and `focus_blur`), earlier frames (`after_image`, the era looks,
+  `aeropittura`), a driver on the film, or the view transform. Then nothing
+  moves and the error names the stage; put that effect 'under'.
+- Measured (`test_overlay_routes.py --only signal`: colour bars on the wall,
+  the lower third above, rgb_shift 0.004 and glitch_bars keyed on from frame
+  4). At frame 3, under rgb_shift, `#ffd400` landed (255, 212, 0), white and
+  `#101418` exact, the teal within 1 level. The chain's signal route gave
+  (204, 178, 43) for the yellow and (63, 223, 162) for the teal: there the
+  split runs before AgX, which mixes the shifted channels. The HUD's white
+  edge split (red 3 px early, blue 4 px late). At frame 5 the glitch moved
+  3.0 % of the frame (0.00 % without the signal: film and HUD stand still),
+  its bars scrolled from frame 5 to 6 (3.4 %), and inside the colour bars the
+  film kept its pixels (median difference 0). `out/overlay_signal_sheet.png`
+  shows the chain's route, the edit route at frames 3 and 5, and the display
+  route.
 
 ## Lyric subtitles — `LyricRenderer`
 
@@ -444,6 +501,49 @@ a looping native 12-frame movie reads 8 at frame 5 and 4 at frame 25
 (`screens_hold_f005/015/025.png`). `apply_to`, `glass`, `strength` and `spill`
 work as for any screen; `spill` decodes the movie at 8 × 8 with ffmpeg for its
 colours.
+
+**The scene drives the playhead** (`makeVideoScreen`'s `setFrame(n)`, and
+`auto: false` with the scene's own `update`): freeze a TV on one frame, scrub,
+play backwards, jump the clip to a cue on a beat.
+
+```python
+tv = screens.make_video_screen('work/<id>/clip.mp4', width=1.6, out_dir='//screens/frozen',
+                               frame_map=[(1, 0), (48, 0)])                                # frozen
+tv = screens.make_video_screen('work/<id>/clip.mp4', width=1.6, out_dir='//screens/backwards',
+                               frame_map=[(1, 47), (48, 0)])                               # backwards
+tv = screens.make_video_screen('work/<id>/clip.mp4', width=1.6, out_dir='//screens/cue',
+                               frame_map=lambda f: f - 1 if f < 96 else 240 + (f - 96))   # the cue at frame 96
+tv.set_frame(130, 12)               # film frame 130 shows movie frame 12
+tv.set_frame((150, 170), 300)       # a freeze over 150 .. 170
+```
+
+- `frame_map` is a function film frame → movie frame (0-based), or keyed
+  `(film frame, movie frame)` pairs, linear between keys and held outside
+  them. Each value is floored and wraps with `loop` or clamps to the movie
+  (`screens.video_frame`, `setFrame`'s rule); `start_frame` and `speed` are
+  not used. The movie is decoded once at its own rate into a PNG sequence
+  over the scene's range (and the keys'), whatever its rate, as the retime
+  above. `make_atlas_screen(..., frame_map=...)` takes the same map in tiles.
+- `set_frame(film_frame, movie_frame)` is the handle's `setFrame` at one
+  film frame, or a `(first, last)` freeze; the frames around keep the
+  screen's own playback. On a native movie screen it keys the ImageUser's
+  `frame_offset` (CONSTANT) on every texture node showing the movie (a
+  material made later gets the same keys). On a sequence screen (retimed, a
+  `frame_map`, an atlas) it rewrites those film frames' files from the movie
+  or the atlas, inside the frames the screen was built over. A drawn screen
+  raises: it draws its own frames. The spill light follows.
+- Measured (`check_screens_api.py`, bit-coded 72-frame movies at 24 and 30
+  fps): freeze, reverse, a keyed scrub, a cue jump (wrapped) and a clamped
+  map showed the mapped movie frame on all 72 film frames. `set_frame` on a
+  native movie read back from the evaluated material (Blender's own frame
+  bookkeeping, offset keys included) showed the set frames on 20, 40 … 44 and
+  50 (75 wrapped to 3) and its own playback everywhere else, on its panel and
+  on a material made after. A retimed and an atlas screen rewrote exactly the
+  set frames, the hold before the range with them. The spill light lit frame
+  10 with the set frame's colour.
+- In EEVEE (`test_screens.py --only playhead`, `screens_playhead_f020.png`,
+  `_f037.png`): at frame 37 the frozen native movie reads 5, the backward map
+  36 and the cue map 58, as their rules say.
 
 **A sprite atlas made for the engine** (`video_to_sprite.mjs`'s JPEG of
 tiles and its `*_info.json`) plays by `makeVideoScreen({texture, info})`'s
@@ -651,6 +751,16 @@ conversion reads the TTF (measured: an 'H' at size 1 stands exactly the
 font's cap height for Audiowide, Michroma and Anton; depth exact).
 `stand_up=False` leaves it lying in the XY plane facing +Z.
 
+`bevel_offset` (three's `bevelOffset`, metres like `bevel_size`) grows (+)
+or shrinks (−) the letter outline before the bevel: the front face sits at
+the outline + `bevel_offset`, the sides at + `bevel_size` + `bevel_offset`.
+`bevel_offset=-bevel_size` keeps the sides on the font's own outline, so a
+heavy bevel does not fatten the word. As in three it needs the bevel on. It is
+Blender's curve offset, which works in object units like the bevel (measured,
+`test_text3d.py`: −0.02 under a 0.02 bevel gave the unbevelled width to
+0.1 mm, +0.01 widened an 'H' by 0.02 with its depth and centring unchanged;
+`out/text3d_bevel_offset_f040.png` shows 'Aa' shrunk, as is and grown).
+
 `text3d.material(preset, **over)` gives real surfaces: `enamel`, `plastic`,
 `chrome`, `brushed` (a roughness and bump grain along the text), `gold`,
 `copper`, `paper`, `neon` (emissive); override `color`, `metallic`,
@@ -708,6 +818,18 @@ Any image can be drawn into a screen: `c.image.paste(Image.open(path))` or
   moderately saturated colours, but not for saturated ones: AgX cannot display
   them, and the round trip comes back short (`#ffd400` by 50/255, pure blue
   by 67).
+- The sequencer's COMPOSITOR strip modifier hands its node group the strips
+  decoded to linear light and encodes its image output again, exactly (50 %
+  grey, `#ffd400`, pure blue and `#27e0a0` came back to the level). An output
+  that is a single value with no image behind it (an RGB node alone) is taken
+  as a display value instead.
+- In an animation render the modifier's group follows the frame: Scene Time
+  and its keyed inputs. A still (`write_still`) of a scene that is not the
+  context scene, after `scene.frame_set`, kept frame 1's.
+- An ImageUser's `frame_offset` is added after the frame is wrapped or
+  clamped, so keying it reaches any frame of a movie; the evaluated
+  material's `image_user.frame_current` reports the frame Blender reads (the
+  original's stays 0).
 
 ## Not yet ported
 
@@ -715,10 +837,13 @@ Any image can be drawn into a screen: `c.image.paste(Image.open(path))` or
   passed to `parole.js` unchanged but have not yet been through a Blender
   probe. Glows are drawn at 0.8 of their colour in display space, where the
   engine put them through ACES, so a faint glow may read a touch flatter.
-- The signal route keeps saturated ink only as close as AgX can show it (the
-  table above). Exact saturated ink under signal effects would need the
-  effects in display space: a COMPOSITOR strip modifier over the edit scene
-  (Blender 5.2 has one) running the look family's groups. Not built.
+- The runner (`eido_blender.py`) composites a scene's overlay layer in the
+  film's chain (`chain_overlay(authored=True)`), so under its screen hook
+  saturated ink lands only as close as AgX can show it (the table above).
+  Exact ink there needs the runner to render the film, the overlay and an
+  edit pass with the hook taken over the edit
+  ([signal effects over the edit](#signal-effects-over-the-edit-exact-ink-under-the-signal)).
+  A script does that with `media.overlay` today; the runner does not yet.
 - Legacy, not ported: `satori_ui.mjs`. It is a standalone demo with its own
   three.js r170 renderer, Docker font paths and nvenc, and nothing in the
   engine runs it ([TOOLS.md](../docs/TOOLS.md) lists it as legacy).

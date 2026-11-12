@@ -195,6 +195,11 @@ def stack(blocks):
 def run_judge(recipe, spec, seed, samples):
     out = os.path.join(OUT, 'judge', recipe)
     os.makedirs(out, exist_ok=True)
+    # a Blender job that dies leaves the last run's renders and result behind: clear them, so a sheet never shows them
+    for f in glob.glob(os.path.join(out, f'{recipe}_seed*')) + [os.path.join(out, 'blender_job_result.json'),
+                                                                os.path.join(out, 'verdicts.json')]:
+        if os.path.isfile(f):
+            os.remove(f)
     argv = ['run.py', '--recipe', recipe, '--reference', spec['ref'], '--seeds', str(seed), '--textured',
             '--samples', str(samples), '--out', out]
     for k, v in (spec.get('params') or {}).items():

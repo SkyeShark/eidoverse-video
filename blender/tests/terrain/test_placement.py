@@ -111,8 +111,18 @@ def mesh_height(x, y):
     return float(a[i, 2] + u[i] * (b[i, 2] - a[i, 2]) + v[i] * (c[i, 2] - a[i, 2]))
 
 
+def slope_at(x, y):
+    return math.hypot(height_at(x + 0.05, y) - height_at(x - 0.05, y),
+                      height_at(x, y + 0.05) - height_at(x, y - 0.05)) / 0.1
+
+
+# four posts on the swells round the clearing: of the candidates (rings 7.5-12.5 m out, every 10 degrees, offset off
+# the vertex lattice) the four whose ground slopes most
+CANDIDATES = [(r * math.cos(math.radians(a)) + 0.137, r * math.sin(math.radians(a)) - 0.071)
+              for r in (7.5, 9.0, 10.5, 12.0, 12.5) for a in range(0, 360, 10)]
+POSTS = sorted(CANDIDATES, key=lambda p: -slope_at(*p))[:4]
 errs, gaps, slopes = [], [], []
-for k, (x, y) in enumerate([(-5.537, -3.071), (9.377, -7.871), (-8.467, 6.531), (5.213, 4.887)]):
+for k, (x, y) in enumerate(POSTS):
     bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=1.2, location=(x, y, 5.0))
     post = bpy.context.active_object
     post.name = 'post_%d' % k
@@ -120,10 +130,9 @@ for k, (x, y) in enumerate([(-5.537, -3.071), (9.377, -7.871), (-8.467, 6.531), 
     pb = tight_box(post)
     errs.append(abs(pb[0].z - mesh_height(x, y)))
     gaps.append(abs(mesh_height(x, y) - height_at(x, y)))
-    slopes.append(math.hypot(height_at(x + 0.05, y) - height_at(x - 0.05, y),
-                             height_at(x, y + 0.05) - height_at(x, y - 0.05)) / 0.1)
+    slopes.append(slope_at(x, y))
 check('snap_to_ground lands on the mesh (off the vertex grid, on slopes %s)' % ', '.join('%.2f' % s for s in slopes),
-      max(errs) < 1e-4 and min(slopes) > 0.05, 'max |post - mesh| %.6f m' % max(errs))
+      len(POSTS) == 4 and max(errs) < 1e-4 and min(slopes) > 0.05, 'max |post - mesh| %.6f m' % max(errs))
 # make_terrain's height_at evaluates the rendered triangles themselves (the ring mesh's split rule)
 check('height_at lies on the mesh between vertices', max(gaps) < 1e-4, 'max |mesh - height_at| %.6f m' % max(gaps))
 

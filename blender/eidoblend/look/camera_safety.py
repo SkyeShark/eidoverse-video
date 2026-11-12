@@ -27,6 +27,8 @@ renders on its own, or through an instancer that is not excluded, its hits are t
 per frame. Clearance uses mathutils BVH trees of the evaluated meshes near the camera that render (an object in an
 excluded collection, such as a scatter's sources, is not there), deforming meshes rebuilt per frame when the camera is
 near them. Instanced geometry has no clearance test: exclude it, or check it in the probe stills.
+
+CameraSafety.help() prints (and returns) the API reference below, as the WebGPU CameraSafety.help() did.
 """
 import math
 
@@ -45,6 +47,56 @@ def _deforms(o):
         return True
     sk = getattr(o.data, 'shape_keys', None)
     return bool(sk and sk.animation_data)
+
+
+HELP = """---------- eidoblend.look.camera_safety (CameraSafety) API reference ----------
+
+Checks a camera against the scene before anything renders: sightlines (scene.ray_cast on the evaluated scene,
+instances included) and clearance (the nearest rendering surface to the lens). It catches a camera inside a wall,
+under the ground, closer to a surface than its near clip, or looking at its subject through a prop.
+
+-- Construction --
+  from eidoblend.look.camera_safety import CameraSafety
+  cs = CameraSafety(scene, padding=0.5, min_distance=0.3)
+  cs.exclude(*grass_scatters, haze_box)       # never an obstruction, never a clearance hit (with what they instance)
+  cs.exclude(subject, sightline_only=True)    # the subject: not an obstruction of its own sightline, still clearance
+
+-- check_camera: the real, keyed path, walked frame by frame --
+  issues = cs.check_camera(cam, (1, 240), target=chest, every=1)
+  # issues = [{kind, object, frames: [first, last], worst, at}], one per run of frames:
+  #   'inside'  the lens is behind a surface (inside a closed mesh, under the ground)
+  #   'clip'    a surface is nearer than the lens's near clip (the frame would show a cut)
+  #   'tight'   a surface is nearer than min_distance
+  #   'blocked' / 'tight_sightline'   something sits on the sightline from the target back to the lens
+  # target: a point, an Object, (armature, 'bone'), {'object': o, 'y_bias': b}, {'point': p} or a callable;
+  # default: the camera's DOF focus object, else the point focus_distance (or 3 m) down its view axis.
+
+-- check_path: a planned path, before it is keyed --
+  issues = cs.check_path([{'time': 0, 'position': (2, -7, 1.6), 'target': (0, -3, 1.2)},
+                          {'time': 2, 'position': (0, 3, 1.6), 'target': (0, -3, 1.2)}], samples_per_segment=12)
+  # issues = [{index (-1 between keys), time, position, target, obstruction, hit_distance, desired_distance,
+  #            severity 'blocked' | 'tight', suggestion}]; [] = clear. suggestion: the nearest clear position at
+  #            the same distance round the target (None when there is none). Fix the keys, then key the path.
+
+-- safe_position: a last resort for a move you cannot plan --
+  pos = cs.safe_position(desired, target)     # pulled in toward the target until its sightline is clear
+
+-- Other methods --
+  cs.is_clear(pos, target)      {clear, distance, object}: one sightline
+  cs.clearance(pos, radius=)    {distance, object, behind, point} of the nearest surface, or None
+  cs.refresh()                  forget the cached trees and the instance index (after adding or moving meshes or
+                                scatters, or changing what they instance)
+
+-- Common gotchas --
+  * Exclude what the camera may pass through: grass and plant scatters (their instances go with them), sky
+    domes and haze or fog volumes (a camera is always inside those). Keep the ground: it is what flags a camera
+    under the ground.
+  * Give the subject sightline_only=True: excluded outright it would also lose its clearance test.
+  * Instanced geometry has no clearance test (a camera inside a scattered rock is not 'inside'); sightlines do see
+    instances. Check those shots in the probe stills.
+  * Check the path in setup and fix the keys (check_path, then check_camera on the keyed shot). safe_position
+    jumps as occluders change: use it only for moves you cannot plan, then review the rendered sequence.
+"""
 
 
 def _tkey(m):
@@ -80,6 +132,12 @@ class CameraSafety:
         self._sight_only = set()        # names ignored by sightlines, kept for clearance (the subject)
         self._trees = {}
         self.refresh()
+
+    @staticmethod
+    def help():  # noqa: A003 - the engine's CameraSafety.help()
+        """Print (and return) the API reference (HELP)."""
+        print(HELP)
+        return HELP
 
     # ------------------------------------------------------------------ scene
     def exclude(self, *items, sightline_only=False):

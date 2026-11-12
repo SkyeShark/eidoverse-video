@@ -69,12 +69,14 @@ def classify_kit(names) -> str | None:
         return (f'[KIT_INFO] LIKELY A MODULAR KIT / ASSET-LIBRARY: {len(parts)} named parts'
                 + (f', {pct}% in repeated variant-families' if pct >= 50 else '') + f' ({fam_str}). '
                 'These are parts laid out for ASSEMBLY, not one finished model: placing the whole import scatters '
-                'them. Use eidoblend.harness.assets.load_kit(path): kit.list() / kit.get(name) / kit.family(prefix) / '
-                'kit.islands() give named parts standing on their own base, to place / array / combine. Pick one, or '
-                'build from several.')
+                'them. Use eidoblend.harness.assets.load_kit(path) (collection instances standing on their own base) '
+                'or eidoblend.placement.load_kit(path) (copies resting on z = 0, centred in x and y): kit.list() / '
+                'kit.get(name) / kit.family(prefix) / kit.islands() give the named parts to place / array / combine. '
+                'Pick one, or build from several.')
     return (f'[KIT_INFO] {len(parts)} named parts ({fam_str}). Could be a finished assembly (place it whole) OR a '
             'small set to split: JUDGE FROM THIS PREVIEW. If the parts should be used separately, '
-            'eidoblend.harness.assets.load_kit(path) gives them one by one (each standing on its base).')
+            'eidoblend.harness.assets.load_kit(path) or eidoblend.placement.load_kit(path) gives them one by one '
+            '(each standing on its base).')
 
 
 def _cls(lo, hi, size):
@@ -240,9 +242,19 @@ def _overlay(png, out, cam, scene, centre, lo, hi, max_dim, title, subtitle, siz
             continue
         d.text(p, text, font=f, fill=LABEL_COLOURS[ax], anchor='mm', stroke_width=max(2, size // 128),
                stroke_fill=(0, 0, 0, 216))
-    ft = raster.font('SpaceMono-Bold', max(10, int(size * 0.031)))
-    fs = raster.font('SpaceMono-Regular', max(9, int(size * 0.024)))
     pad = max(6, size // 42)
+    room = W - 4 * pad                                           # the plate stays inside the picture
+    px = max(10, int(size * 0.031))
+    ft = raster.font('SpaceMono-Bold', px)
+    while ft.getlength(title) > room and px > 10:                # a long file name: a smaller title first,
+        px -= 1
+        ft = raster.font('SpaceMono-Bold', px)
+    if ft.getlength(title) > room:                               # then its middle cut ('crow_bird…walking.glb')
+        keep = len(title)
+        while keep > 8 and ft.getlength(title[:keep // 2] + '…' + title[len(title) - keep // 2:]) > room:
+            keep -= 2
+        title = title[:keep // 2] + '…' + title[len(title) - keep // 2:]
+    fs = raster.font('SpaceMono-Regular', max(9, int(size * 0.024)))
     tw = max(ft.getlength(title), fs.getlength(subtitle))
     th = ft.size + fs.size + pad // 2
     x0, y0 = pad, pad

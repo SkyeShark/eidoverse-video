@@ -90,8 +90,11 @@ python eido_blender.py render work/<id>/scene.json                          # th
 ```
 
 `--at` stills render at the film's settings, so a still you approve is the
-frame the film will have. `--probe` applies the probe caps (at most 960x540,
-16 samples) for checking motion cheaply. For scale: the pipeline's example
+frame the film will have. A post effect that reads earlier frames has those
+frames rendered first: the era looks' CRT persistence its last seven, an
+after_image trail its whole shot up to the still, which costs that much render
+time ([scene format](scene-format.md#outputs)). `--probe` applies the probe
+caps (at most 960x540, 16 samples) for checking motion cheaply. For scale: the pipeline's example
 room renders 960x540 at 16 samples in about 0.2 s a frame; a lit interior at
 1920x1080 with volumetric haze at 32 samples takes about 2.5 s a frame.
 Volumes, many lights and dense hair or foliage cost the most; `bench` tells

@@ -1,6 +1,7 @@
 """Graphics on the frame: the overlay layer, subtitles and the edit scene (makeOverlayLayer, ported).
 
-Two routes put the overlay on the film; both start from the same overlay layer.
+Two routes put the overlay on the film, and signal effects can follow it over the edit; all start from the same
+overlay layer.
 
 The display route (the default): graphics are laid over the finished film in display space, after the film's own
 view transform, in the edit scene, the way DAISY's burned-in ASS subtitles were: colours land exactly as authored.
@@ -30,6 +31,14 @@ display route: the lyric's glow ring within 1-2 levels, where a per-pixel invers
 AgX cannot show every display colour: neutrals and moderately saturated ink (teal #27e0a0) come back within 2/255,
 saturated colours do not (cyan #00d4ff 16/255 off, #ff2d95 21, pure red 26, #ffd400 50, pure blue 67). When such
 ink must be exact and no signal effect runs over it, use the display route.
+
+The signal over the edit: when such ink must be exact AND signal effects run over it, the effects leave the film's
+chain for the edit scene, where they run over the film and the overlay together, after the view transform:
+
+    sig = overlay.take_signal_effects(film_scene)          # the 'over' stages (and their keys) leave the chain
+    # render the film; frames_dir = overlay.render_overlay(ov, ...)
+    edit = overlay.make_edit_scene(film=..., overlays=[frames_dir], signal=sig)   # a COMPOSITOR strip modifier
+    overlay.render_edit(edit, 'work/<id>/final.mp4')
 
 An overlay plane sits at z = -1 under the overlay camera, whose field of view is the film camera's, so the frame is
 2 * half_w x 2 * half_h there; ``ov.place(obj, x, y)`` takes frame fractions (-0.5 .. 0.5, centre origin, y up).
@@ -333,6 +342,26 @@ def _drive_exposure(film, socket):
     return fc
 
 
+def _drop_overlay_stage(film):
+    """Take the film chain's overlay stage out, with its source node and its exposure driver. Returns True if there
+    was one."""
+    from ..look.post import chain
+    t = film.compositing_node_group
+    if t is None:
+        return False
+    found = False
+    for _s, nm, n in chain.stages(film):
+        if nm == 'overlay':
+            ad = t.animation_data                        # the old stage's exposure driver goes with it
+            for fc in [fc for fc in (ad.drivers if ad else ()) if fc.data_path.startswith(f'nodes["{n.name}"]')]:
+                ad.drivers.remove(fc)
+            chain.remove_stage(film, 'overlay')
+            found = True
+    for n in [n for n in t.nodes if n.name.startswith(SOURCE_NODE)]:
+        t.nodes.remove(n)
+    return found
+
+
 def chain_overlay(ov, film_scene=None, authored=True, source=None, factor=1.0):
     """The signal route: put the overlay layer into the film's post chain at its overlay slot (look/post/chain.py),
     the WebGPU layering: world effects ('under') below it, signal effects ('over': vhs, glitch, rgb_shift, grain)
@@ -354,14 +383,7 @@ def chain_overlay(ov, film_scene=None, authored=True, source=None, factor=1.0):
     sc = ov.scene if isinstance(ov, Overlay) else ov
     film = film_scene or (ov.film if isinstance(ov, Overlay) else bpy.context.scene)
     t = chain.tree(film)
-    for _s, nm, n in chain.stages(film):
-        if nm == 'overlay':
-            ad = t.animation_data                        # the old stage's exposure driver goes with it
-            for fc in [fc for fc in (ad.drivers if ad else ()) if fc.data_path.startswith(f'nodes["{n.name}"]')]:
-                ad.drivers.remove(fc)
-            chain.remove_stage(film, 'overlay')
-    for n in [n for n in t.nodes if n.name.startswith(SOURCE_NODE)]:
-        t.nodes.remove(n)
+    _drop_overlay_stage(film)
     if source is None:
         fg = t.nodes.new('CompositorNodeRLayers')
         fg.scene = sc
@@ -404,6 +426,160 @@ def chain_overlay(ov, film_scene=None, authored=True, source=None, factor=1.0):
         stage = chain.set_overlay(film, fg, factor=factor)
     film.render.use_compositing = True
     return {'foreground': fg, 'stage': stage, 'factor': stage.inputs['Factor'], 'authored': grp}
+
+
+# ---------------------------------------------------------------------------------------------------- signal over the edit
+SIGNAL_PROP = 'eido_signal_group'      # film scene custom property: the group take_signal_effects made from its chain
+_NODE_SKIP = {'rna_type', 'name', 'label', 'location', 'location_absolute', 'width', 'height', 'dimensions', 'select',
+              'parent', 'color', 'color_tag', 'use_custom_color', 'hide', 'show_options', 'show_preview',
+              'show_texture', 'inputs', 'outputs', 'internal_links', 'type', 'bl_idname', 'bl_label',
+              'bl_description', 'bl_icon', 'bl_static_type', 'bl_width_default', 'bl_width_min', 'bl_width_max',
+              'bl_height_default', 'bl_height_min', 'bl_height_max', 'warning_propagation'}
+
+
+def _tree_has(tree, test, seen=None):
+    seen = seen if seen is not None else set()
+    if tree is None or tree.name in seen:
+        return False
+    seen.add(tree.name)
+    for n in tree.nodes:
+        if test(n) or (getattr(n, 'node_tree', None) is not None and _tree_has(n.node_tree, test, seen)):
+            return True
+    return False
+
+
+def _why_not_movable(t, name, node):
+    """Why a chain stage cannot run over the edit scene (None when it can)."""
+    from ..look.post import chain, display
+    img = chain._img_in(node)
+    for s in node.inputs:
+        if s.is_linked and s.identifier != img.identifier:
+            return (f'its {s.name!r} input comes from {s.links[0].from_node.name!r} (a pass of the film\'s render or a '
+                    f'record of earlier frames), which the edit scene does not have')
+    if any(n.get('look_input_of') == name for n in t.nodes):
+        return 'it reads earlier frames (a history writer rides with it)'
+    ad = t.animation_data
+    if ad is not None and any(d.data_path.startswith(f'nodes["{node.name}"]') for d in ad.drivers):
+        return 'a driver sets one of its inputs from the film scene'
+    if _tree_has(getattr(node, 'node_tree', None), lambda n: n.get(display.TAG) or n.bl_idname == 'CompositorNodeRLayers'):
+        return 'it works through the film\'s view transform (display space) or renders a scene of its own'
+    return None
+
+
+def _copy_node(src, tree):
+    """``src`` (a chain stage) made again in ``tree``: its node tree or settings, its unlinked input values, its name,
+    label and custom properties."""
+    n = tree.nodes.new(src.bl_idname)
+    if src.bl_idname == 'CompositorNodeGroup':
+        n.node_tree = src.node_tree
+    else:
+        for p in src.bl_rna.properties:
+            if p.is_readonly or p.identifier in _NODE_SKIP:
+                continue
+            try:
+                setattr(n, p.identifier, getattr(src, p.identifier))
+            except (AttributeError, TypeError, ValueError):
+                pass
+    for a, b in zip(src.inputs, n.inputs):
+        if not a.is_linked and hasattr(a, 'default_value'):
+            try:
+                b.default_value = a.default_value
+            except (AttributeError, TypeError, ValueError):
+                pass
+    n.name, n.label, n.mute = src.name, src.label, src.mute
+    for k in src.keys():
+        n[k] = src[k]
+    return n
+
+
+def _copy_keys(src_tree, dst_tree, node_name):
+    """Copy the keys on node ``node_name``'s inputs from one compositor tree to the same-named node of another
+    (values, interpolation, easing, handles). Returns the number of F-curves copied."""
+    from .screens import action_fcurves
+    ad = src_tree.animation_data
+    if ad is None or ad.action is None:
+        return 0
+    prefix = f'nodes["{node_name}"]'
+    done = 0
+    for fc in [fc for fc in action_fcurves(ad.action, getattr(ad, 'action_slot', None))
+               if fc.data_path.startswith(prefix)]:
+        owner_path, _, prop = fc.data_path.rpartition('.')
+        owner = dst_tree.path_resolve(owner_path)
+        rp = owner.bl_rna.properties[prop]
+        idx = fc.array_index if rp.is_array else -1
+        for kp in fc.keyframe_points:
+            v = kp.co[1]
+            v = int(round(v)) if rp.type == 'INT' else (v >= 0.5 if rp.type == 'BOOLEAN' else v)
+            if rp.is_array:
+                getattr(owner, prop)[fc.array_index] = v
+            else:
+                setattr(owner, prop, v)
+            owner.keyframe_insert(prop, index=idx, frame=kp.co[0])
+        dad = dst_tree.animation_data
+        dst = next(f for f in action_fcurves(dad.action, getattr(dad, 'action_slot', None))
+                   if f.data_path == fc.data_path and f.array_index == fc.array_index)
+        for a, b in zip(fc.keyframe_points, dst.keyframe_points):
+            b.interpolation, b.easing = a.interpolation, a.easing
+            b.handle_left_type, b.handle_right_type = a.handle_left_type, a.handle_right_type
+            b.handle_left, b.handle_right = a.handle_left, a.handle_right
+        dst.update()
+        done += 1
+    return done
+
+
+def take_signal_effects(film_scene=None, name='eido_signal'):
+    """The edit route for signal effects: the film chain's 'over' stages (vhs_tape, glitch_bars, rgb_shift, a screen
+    hook ...) leave it for one compositor group, which make_edit_scene(..., signal=group) runs over the film and the
+    overlay together, in display light, as a COMPOSITOR strip modifier. The HUD lands exactly as drawn, saturated ink
+    included, and the effects still process it as part of the signal.
+
+    Call it after the film's effects are applied and before the film renders: the stages go, with their keys, in
+    chain order, and so does a chain overlay stage (the edit lays the overlay instead). A stage that needs the film's
+    render (its Depth / Normal passes, its earlier frames, a driver on the film, the view transform) cannot move: then
+    nothing moves and the error names it (put such an effect 'under'). Returns the group (None when the chain has no
+    'over' stage); the film scene records its name in SIGNAL_PROP."""
+    from ..look.post import chain
+    from .screens import action_fcurves, remove_fcurves
+    film = film_scene or bpy.context.scene
+    t = film.compositing_node_group
+    over = [(nm, n) for s, nm, n in chain.stages(film) if s == 'over'] if t is not None else []
+    if not over:
+        print(f"[overlay] {film.name}: no 'over' stage in its post chain, nothing to take", flush=True)
+        return None
+    bad = [(nm, why) for nm, n in over if (why := _why_not_movable(t, nm, n))]
+    if bad:
+        raise ValueError(f'take_signal_effects({film.name!r}): ' + '; '.join(f'{nm!r} cannot run over the edit: {why}'
+                                                                             for nm, why in bad))
+    g = bpy.data.node_groups.new(name, 'CompositorNodeTree')
+    g.interface.new_socket(name='Image', in_out='INPUT', socket_type='NodeSocketColor')
+    g.interface.new_socket(name='Image', in_out='OUTPUT', socket_type='NodeSocketColor')
+    gi, go = g.nodes.new('NodeGroupInput'), g.nodes.new('NodeGroupOutput')
+    gi.location = (-300, 0)
+    src, x, keyed = gi.outputs['Image'], 0, 0
+    for nm, n in over:
+        c = _copy_node(n, g)
+        c.location = (x, 0)
+        x += 260
+        g.links.new(src, chain._img_in(c))
+        src = chain._img_out(c)
+        keyed += _copy_keys(t, g, n.name)
+    go.location = (x, 0)
+    g.links.new(src, go.inputs['Image'])
+    for nm, n in over:
+        path = f'nodes["{n.name}"]'
+        ad = t.animation_data
+        if ad is not None and ad.action is not None:
+            for p in {fc.data_path for fc in action_fcurves(ad.action, getattr(ad, 'action_slot', None))
+                      if fc.data_path.startswith(path)}:
+                remove_fcurves(t, p)
+        chain.remove_stage(film, nm)
+    dropped = _drop_overlay_stage(film)
+    g['eido_signal_from'] = film.name
+    film[SIGNAL_PROP] = g.name
+    print(f"[overlay] {film.name}: took {', '.join(nm for nm, _n in over)} out of its chain ({keyed} keyed inputs)"
+          + (', and its overlay stage' if dropped else '') + f": make_edit_scene(..., signal=bpy.data.node_groups"
+          f"[{g.name!r}]) runs them over the film and the overlay", flush=True)
+    return g
 
 
 # ---------------------------------------------------------------------------------------------------- subtitles
@@ -502,12 +678,16 @@ def _strip_from(strips, name, src, channel, frame_start):
 
 
 def make_edit_scene(film, overlays=(), subtitles=None, sounds=(), name='edit', like=None, frame_start=None,
-                    subtitle_style=None):
+                    subtitle_style=None, signal=None):
     """A sequencer scene that lays the graphics over the rendered film in display space and carries the sound:
     view Standard, sequencer colour space sRGB, so the film's AgX pixels pass through and the graphics land as
     authored. ``film``: a movie or a PNG sequence (directory or first file); ``overlays``: RGBA sequences laid
     ALPHA_OVER in order; ``subtitles``: cues [(text, t0, t1)] (subtitle_cues); ``sounds``: [(path, frame)] or
-    [(path, frame, volume)]. ``like``: the film scene, for resolution, rate and frame range."""
+    [(path, frame, volume)]. ``like``: the film scene, for resolution, rate and frame range.
+    ``signal``: the group take_signal_effects took from the film's chain: an adjustment strip over the film and the
+    overlays runs it as a COMPOSITOR strip modifier, so the signal effects process picture and HUD together, on the
+    display's light (the modifier hands its group the strips with the sRGB transfer undone, and encodes the result
+    again, exactly: measured). Subtitles stay above it, clean."""
     like = like or bpy.context.scene
     sc = bpy.data.scenes.new(name)
     r, lr = sc.render, like.render
@@ -533,6 +713,11 @@ def make_edit_scene(film, overlays=(), subtitles=None, sounds=(), name='edit', l
         s.blend_type = 'ALPHA_OVER'
         s.colorspace_settings.name = 'sRGB'
         s.alpha_mode = 'STRAIGHT'
+    if signal is not None:
+        adj = strips.new_effect(name='signal', type='ADJUSTMENT', channel=2 + len(overlays), frame_start=f0,
+                                length=end - f0 + 1)
+        mod = adj.modifiers.new(name='signal', type='COMPOSITOR')
+        mod.node_group = signal
     if subtitles:
         add_subtitles(sc, subtitles, channel=2 + len(overlays) + 1, **(subtitle_style or {}))
     for j, snd in enumerate(sounds):

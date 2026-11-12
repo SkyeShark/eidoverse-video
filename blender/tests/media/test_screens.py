@@ -17,6 +17,8 @@ hold  screens whose range starts mid-film (frames 10..20 of 1..30), at frames 5,
 spill the spill light: a 1.0 x 0.6 m screen (strength 1, spill 1) over a white floor, three frame colours; its
       power and colour from the frame, the floor it lights with the screen in view and out of view -> numbers
       (PASS / FAIL) and a contact sheet
+playhead  the scene driving a video's playhead: a native movie frozen by set_frame, frame_map backwards and
+      jumping to a cue, counter movies read at frames 20 and 37 -> screens_playhead_f020.png, _f037.png
 Writes blender/tests/media/out/screens_*.png and prints what each probe checked.
 """
 import math
@@ -35,7 +37,8 @@ import _stage as S  # noqa: E402
 from eidoblend.media import overlay, raster, screens  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-ONLY = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else {'mac', 'wall', 'av', 'hold', 'spill'}
+ONLY = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else {'mac', 'wall', 'av', 'hold', 'spill',
+                                                                                'playhead'}
 OUT = S.OUT
 WORK = OUT / 'screens_work'
 
@@ -283,6 +286,31 @@ def probe_hold():
         Image.open(Path(d) / f'ov_{f:04d}.png').save(OUT / f'screens_hold_overlay_f{f:03d}.png')
 
 
+def probe_playhead():
+    """The scene drives the playhead (makeVideoScreen's setFrame): three panels of a counter movie (movie frame i
+    reads i + 1), rendered at frames 20 and 37: a native movie frozen by set_frame((30, 45), 4), frame_map playing
+    it backwards [(1, 71), (72, 0)], and frame_map jumping to frame 50 on a cue at film frame 30 (a function)."""
+    sc = S.fresh_scene(frames=(1, 72))
+    S.box(sc, 'backwall', (8, 0.1, 5), (0, 0.15, 1.6), S.plain_material('backwall', (0.18, 0.18, 0.19), 0.8))
+    P = WORK / 'playhead'
+    m24 = counter_movie(P / 'counter24.mp4', 72, 24)
+    nat = screens.make_video_screen(m24, width=1.2, start_frame=1, name='ph_native')
+    nat.set_frame((30, 45), 4)
+    rev = screens.make_video_screen(m24, width=1.2, frame_map=[(1, 71), (72, 0)], out_dir=P / 'reverse',
+                                    name='ph_reverse')
+    cue = screens.make_video_screen(m24, width=1.2, frame_map=lambda f: f - 1 if f < 30 else 50 + (f - 30),
+                                    out_dir=P / 'cue', name='ph_cue')
+    for scr, x in ((nat, -1.35), (rev, 0.0), (cue, 1.35)):
+        scr.obj.location = (x, 0.05, 1.75)
+    S.area_light(sc, (0, -2.5, 3.6), (0, -1.5, 0), 20.0, size=1.5, name='ceiling')
+    cam = S.camera(sc, (0.0, -3.0, 1.75), (0.0, 0, 1.75), lens=50)
+    cam.data.type = 'ORTHO'
+    cam.data.ortho_scale = 4.2
+    for f, want in ((20, '20 | 53 | 20'), (37, '5 | 36 | 58')):
+        S.render_still(sc, f, OUT / f'screens_playhead_f{f:03d}.png')
+        print(f'[playhead] frame {f}: expect native set_frame | frame_map reverse | frame_map cue = {want}')
+
+
 def _render(sc, path, exr=True):
     """Render a still: an EXR read back as scene-linear RGB (rows top-down), or a display PNG."""
     r = sc.render
@@ -382,4 +410,6 @@ if 'hold' in ONLY:
     probe_hold()
 if 'spill' in ONLY:
     probe_spill()
+if 'playhead' in ONLY:
+    probe_playhead()
 print('[test_screens] done', sorted(ONLY))

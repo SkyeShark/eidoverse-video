@@ -21,6 +21,9 @@ it, is written beside the sequence: Blender shows that file on every frame befor
 A screen's ImageUser settings travel with its image (custom properties), so a prop can sample the same screen in
 its own node tree: ``node = ui.texture_node(tree)`` or ``screens.configure_user(node.image_user, ui.image)``.
 
+A video screen's playhead can be driven, as makeVideoScreen's setFrame was: ``frame_map=`` when it is made (freeze,
+scrub, play backwards, jump to a cue), ``tv.set_frame(film_frame, movie_frame)`` afterwards.
+
 Colour: a screen is an emitter filmed by the camera, so it goes through AgX like the rest of the frame. Emission
 strength 1 lands sRGB white near 197/255 at exposure 0; set ``strength`` by probe against the room's light.
 """
@@ -89,6 +92,21 @@ def set_interpolation(id_data, kind='CONSTANT', path_filter=None):
     return n
 
 
+def remove_fcurves(id_data, path):
+    """Remove an ID's F-curves on ``path`` (every layer, strip and slot of its action)."""
+    ad = getattr(id_data, 'animation_data', None)
+    if ad is None or ad.action is None:
+        return 0
+    n = 0
+    for ly in ad.action.layers:
+        for st in ly.strips:
+            for cb in st.channelbags:
+                for fc in [fc for fc in cb.fcurves if fc.data_path == path]:
+                    cb.fcurves.remove(fc)
+                    n += 1
+    return n
+
+
 def _frame_range(frames, scene):
     if frames is None:
         return scene.frame_start, scene.frame_end
@@ -108,8 +126,12 @@ def _link_collection(obj, near=None, scene=None):
 
 
 # ---------------------------------------------------------------------------------------------------- the image side
+FRAME_KEYS = 'eido_frame_keys'   # a movie screen's set_frame frames, {film frame: movie frame} as JSON, on its image
+
+
 def configure_user(image_user, image):
-    """Point an ImageUser (an Image Texture node's ``image_user``) at a screen image's frames."""
+    """Point an ImageUser (an Image Texture node's ``image_user``) at a screen image's frames, with the film frames
+    Screen.set_frame keyed on a movie screen."""
     fs, fd = image.get('eido_frame_start'), image.get('eido_frame_duration')
     if image.source in ('SEQUENCE', 'MOVIE') and fs is not None:
         image_user.frame_start = int(fs)
@@ -117,7 +139,53 @@ def configure_user(image_user, image):
         image_user.frame_offset = int(image.get('eido_frame_offset', 0))
         image_user.use_cyclic = bool(image.get('eido_cyclic', False))
         image_user.use_auto_refresh = True
+        if image.get(FRAME_KEYS):
+            _key_frame_offsets(image_user, image)
     return image_user
+
+
+def image_frame(cfra, start, duration, cyclic):
+    """The file (sequence) or frame (movie, 1-based) an ImageUser reads at scene frame ``cfra``, before its offset:
+    Blender's BKE_image_user_frame_get (wrapped when cyclic, else 0 before the start and the last after the end).
+    The offset is added after this, so a keyed offset reaches any frame."""
+    if duration <= 0:
+        return 0
+    c = cfra - start + 1
+    if cyclic:
+        c %= duration
+        if c == 0:
+            c = duration
+    return min(max(c, 0), duration)
+
+
+def _key_frame_offsets(iu, image):
+    """Key an ImageUser's frame_offset so each film frame set_frame named shows its movie frame (CONSTANT), the
+    frames either side back on the screen's own offset. The previous keys go first; with none named, none stay."""
+    tree = iu.id_data
+    path = iu.path_from_id('frame_offset')
+    remove_fcurves(tree, path)
+    base = int(image.get('eido_frame_offset', 0))
+    iu.frame_offset = base
+    named = {int(f): int(m) for f, m in json.loads(image.get(FRAME_KEYS) or '{}').items()}
+    if not named:
+        return
+    keys = {f: m + 1 - image_frame(f, iu.frame_start, iu.frame_duration, iu.use_cyclic) for f, m in named.items()}
+    for f in named:
+        for g in (f - 1, f + 1):
+            keys.setdefault(g, base)
+    for f in sorted(keys):
+        iu.frame_offset = keys[f]
+        iu.keyframe_insert('frame_offset', frame=f)
+    set_interpolation(tree, 'CONSTANT', path)
+    iu.frame_offset = base
+
+
+def _texture_nodes(image):
+    """Every Image Texture node showing ``image`` (materials, worlds, shader node groups)."""
+    trees = [m.node_tree for m in bpy.data.materials if m.node_tree is not None]
+    trees += [w.node_tree for w in bpy.data.worlds if w.node_tree is not None]
+    trees += [g for g in bpy.data.node_groups if g.bl_idname == 'ShaderNodeTree']
+    return [n for t in trees for n in t.nodes if n.bl_idname == 'ShaderNodeTexImage' and n.image == image]
 
 
 HOLD_KEY = 'eido_hold'           # the PNG text chunk that marks a hold file (written by _write_hold, never a frame)
@@ -346,7 +414,8 @@ class Screen:
     """A baked screen. ``image`` holds the frames; ``frame_start`` shows the first file, ``frame_duration`` files
     follow (the first held before, the last after). ``obj`` is the standalone panel or the mesh taken over;
     ``light`` the spill light. ``means``: each frame's mean linear colour from ``means_start`` (default
-    frame_start), for the spill."""
+    frame_start), for the spill. ``video``: what a video screen plays (make_video_screen, make_atlas_screen), so
+    set_frame can show any of its frames; None on a drawn screen."""
 
     def __init__(self, image, *, width, height, px_size, name, opts, means=None, means_start=None):
         self.image = image
@@ -359,6 +428,8 @@ class Screen:
         self.material = None
         self.obj = None
         self.light = None
+        self.video = None
+        self._spill_power = None
 
     @property
     def frame_start(self):
@@ -381,6 +452,64 @@ class Screen:
             'lit', 'transparent', 'glass', 'strength', 'window', 'flip', 'mirror_x', 'interpolation', 'double_sided')}
         o.update(over)
         return build_material(self.name, self.image, **o)
+
+    def set_frame(self, film_frame, movie_frame):
+        """makeVideoScreen's setFrame(n), keyed: on ``film_frame`` (or every frame of (first, last): a freeze) the
+        screen shows movie frame ``movie_frame`` (0-based; wrapped when the screen loops, else clamped to the movie,
+        as setFrame did); the frames around keep the screen's own playback. For video screens (make_video_screen,
+        make_atlas_screen); a drawn screen draws its own frames. A native movie screen keys its ImageUsers'
+        frame_offset (CONSTANT; a material made later for it gets the same keys). A sequence screen (retimed, a
+        frame_map, an atlas) rewrites those film frames' files from the movie or the atlas, inside the frames it was
+        built over. The spill light follows. Returns the screen."""
+        v = self.video
+        if v is None:
+            raise ValueError(f'{self.name}: set_frame plays a video: a screen from make_video_screen or '
+                             f'make_atlas_screen (a drawn screen draws its own frames)')
+        a, b = ((int(film_frame[0]), int(film_frame[1])) if isinstance(film_frame, (tuple, list))
+                else (int(film_frame), int(film_frame)))
+        m = video_frame(movie_frame, v['n'], v['loop'])
+        frames = range(a, b + 1)
+        mean = None
+        if self.image.source == 'MOVIE':
+            named = json.loads(self.image.get(FRAME_KEYS) or '{}')
+            named.update({str(f): m for f in frames})
+            self.image[FRAME_KEYS] = json.dumps(named)
+            for n in _texture_nodes(self.image):
+                _key_frame_offsets(n.image_user, self.image)
+            if v.get('means') is not None:
+                mean = v['means'][min(m, len(v['means']) - 1)]
+        else:
+            fs, fd = self.frame_start, self.frame_duration
+            if a < fs or b > fs + fd - 1:
+                raise ValueError(f'{self.name}: film frames {a}..{b} lie outside the frames it was built over, '
+                                 f'{fs}..{fs + fd - 1} (build it over a longer range)')
+            paths = [self.file_at(f) for f in frames]
+            if v['kind'] == 'movie':
+                _retime_frames(v['path'], v['info'], paths, [m] * len(paths))
+            else:
+                tile = atlas_tile(raster.Image.open(v['atlas']).convert('RGB'), v['info'], m)
+                for p in paths:
+                    raster.save_png(tile, p)
+            if a == fs:
+                _write_hold(paths[0])                     # the hold before the range copies the first file
+            self.image.reload()
+            if self.means is not None:
+                mean = _means_of(paths[:1])[0]
+        if self.light is not None and self.means is not None and mean is not None:
+            ms = self.frame_start if self.means_start is None else self.means_start
+            for f in frames:
+                if 0 <= f - ms < len(self.means):
+                    self.means[f - ms] = mean
+            self._key_spill()
+        return self
+
+    def file_at(self, film_frame):
+        """The file a sequence screen shows on ``film_frame`` (inside its range: the first file before it, the last
+        after it)."""
+        first = _abspath(self.image.filepath)
+        head, num, nd = _seq_split(first)
+        k = min(max(int(film_frame) - self.frame_start, 0), self.frame_duration - 1)
+        return first.with_name(f'{head}{num + k:0{nd}d}{first.suffix}')
 
     def apply_to(self, target, window=None, glass=True, flip=False, mirror_x=False, strength=None, spill=None,
                  slot=None, spill_reach=None):
@@ -440,12 +569,23 @@ class Screen:
         lo.matrix_world = mw
         area = ld.size * ld.size_y
         strength = self.opts['strength'] if strength is None else strength
+        self.light = lo
+        self._spill_power = math.pi * area * strength * gain
+        self._key_spill()
+        return lo
+
+    def _key_spill(self):
+        """Key the spill light's power and colour (CONSTANT) on each frame whose mean differs from the frame
+        before: power pi * area * strength * gain * max(m), colour m / max(m). Run again after the means change."""
+        ld = self.light.data
+        if ld.animation_data is not None:
+            ld.animation_data_clear()
         f0 = self.frame_start if self.means_start is None else self.means_start
         last = None
         for k, m in enumerate(self.means):
             peak = float(max(np.max(m), 0.0))
             rgb = tuple(float(c) / peak for c in m) if peak > 1e-6 else (1.0, 1.0, 1.0)
-            watts = math.pi * area * strength * peak * gain
+            watts = self._spill_power * peak
             cur = (round(watts, 5),) + tuple(round(c, 3) for c in rgb)
             if cur == last:
                 continue
@@ -455,8 +595,6 @@ class Screen:
             ld.keyframe_insert('energy', frame=f0 + k)
             ld.keyframe_insert('color', frame=f0 + k)
         set_interpolation(ld, 'CONSTANT')
-        self.light = lo
-        return lo
 
 
 def _find_display(target):
@@ -769,28 +907,62 @@ def _probe_movie(path):
             'pix_fmt': s.get('pix_fmt', '')}
 
 
+def video_frame(movie_frame, n, loop=True):
+    """makeVideoScreen's setFrame(f) rule (screen.js): the movie frame shown for a requested one, floored, wrapped
+    with ``loop`` (((f % n) + n) % n, also below 0) or clamped to the movie's n frames. 0-based."""
+    i = math.floor(float(movie_frame) + 1e-6)
+    return i % n if loop else min(max(i, 0), n - 1)
+
+
 def engine_movie_frame(k, film_fps, movie_fps, speed, n, loop=True):
     """makeVideoScreen's frame rule (screen.js): film frame k after the screen's start shows movie frame
     floor(t * fps * speed), t = k / film fps; looping it wraps (also before the start, ((f % n) + n) % n), else it
     clamps to the movie. 0-based movie frames."""
-    i = math.floor(k / film_fps * movie_fps * speed + 1e-6)
-    return i % n if loop else min(max(i, 0), n - 1)
+    return video_frame(k / film_fps * movie_fps * speed, n, loop)
 
 
-def _retime_frames(path, info, out, name, ks, film_fps, speed, loop):
-    """Write <name>_0001.png … for the film frames ks (counted from the screen's start), each showing the movie
-    frame engine_movie_frame picks. One ffmpeg decode at the movie's own rate, piped as raw pixels: each needed
-    movie frame is encoded once and copied to every film frame that shows it. (An ffmpeg fps filter picks the
-    nearest frame where the engine floors: one frame early on many film frames.)"""
-    n = max(1, int(info['frames']))
+def frame_map_fn(frame_map):
+    """A screen's frame_map as a function film frame -> movie frame (before video_frame wraps or clamps it):
+    a function as it is, or keyed (film frame, movie frame) pairs, linear between keys and held outside them (the
+    later of two keys on one frame wins). A keyed map carries .keys, its sorted pairs."""
+    if callable(frame_map):
+        return frame_map
+    keys = sorted({int(f): float(m) for f, m in frame_map}.items())
+    if not keys:
+        raise ValueError('frame_map: a function of the film frame, or (film frame, movie frame) pairs')
+
+    def fn(f):
+        if f <= keys[0][0]:
+            return keys[0][1]
+        for (f0, m0), (f1, m1) in zip(keys, keys[1:]):
+            if f0 <= f < f1:
+                return m0 + (m1 - m0) * (f - f0) / (f1 - f0)
+        return keys[-1][1]
+    fn.keys = keys
+    return fn
+
+
+def _map_range(fn, scene):
+    """The film frames a frame_map screen is built over: the scene's range, and a keyed map's keys."""
+    keys = getattr(fn, 'keys', None)
+    if keys:
+        return min(scene.frame_start, keys[0][0]), max(scene.frame_end, keys[-1][0])
+    return scene.frame_start, scene.frame_end
+
+
+def _retime_frames(path, info, paths, frames):
+    """Write each of ``paths`` showing its movie frame (``frames``, 0-based, one per path). One ffmpeg decode at the
+    movie's own rate, piped as raw pixels: each needed movie frame is encoded once and copied to every path that
+    shows it. (An ffmpeg fps filter picks the nearest frame where the engine floors: one frame early on many film
+    frames.)"""
     want = {}
-    for j, k in enumerate(ks):
-        want.setdefault(engine_movie_frame(k, film_fps, info['fps'], speed, n, loop), []).append(j)
+    for j, i in enumerate(frames):
+        want.setdefault(int(i), []).append(j)
     alpha = 'a' in info.get('pix_fmt', '').replace('gray', '').replace('bayer', '')    # yuva420p, rgba, ya8, pal8 …
     mode, ch, fmt = ('RGBA', 4, 'rgba') if alpha else ('RGB', 3, 'rgb24')
     w, h = info['w'], info['h']
     size = w * h * ch
-    paths = [out / f'{name}_{j + 1:04d}.png' for j in range(len(ks))]
+    paths = [Path(p) for p in paths]
     cmd = ['ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:v:0', '-fps_mode', 'passthrough',
            '-frames:v', str(max(want) + 1), '-f', 'rawvideo', '-pix_fmt', fmt, '-']
     done, last, i = set(), None, 0
@@ -810,9 +982,10 @@ def _retime_frames(path, info, out, name, ks, film_fps, speed, loop):
             i += 1
     if last is None:
         raise RuntimeError(f'{path}: ffmpeg decoded no frames')
-    rest = [j for j in range(len(ks)) if j not in done]
+    rest = [j for j in range(len(paths)) if j not in done]
     if rest:                                          # the movie ran shorter than ffprobe counted: hold its end
-        print(f'[screens] {Path(path).name}: {i} frames decoded of {n} counted; {len(rest)} film frames hold the last')
+        print(f'[screens] {Path(path).name}: {i} frames decoded of {info["frames"]} counted; {len(rest)} film '
+              f'frames hold the last')
         raster.save_png(raster.Image.frombytes(mode, (w, h), last), paths[rest[0]])
         data = paths[rest[0]].read_bytes()
         for j in rest[1:]:
@@ -830,7 +1003,7 @@ def _movie_means(path, n_expected=None):
 
 
 def make_video_screen(path, width=1.6, height=None, start_frame=None, speed=1.0, loop=True, out_dir=None,
-                      name='video_screen', scene=None, spill=0.0, standalone=True, **kw):
+                      name='video_screen', scene=None, spill=0.0, standalone=True, frame_map=None, **kw):
     """A movie playing on a panel (makeVideoScreen, ported: a native movie texture, no sprite atlas).
 
     The movie's first frame shows at ``start_frame`` (default the scene's first frame); film frame k after it shows
@@ -839,7 +1012,14 @@ def make_video_screen(path, width=1.6, height=None, start_frame=None, speed=1.0,
     frame rate is the film's and speed is 1 it plays as a MOVIE image (cyclic with ``loop``); otherwise the movie
     is decoded once and retimed into a PNG sequence at the film's rate (``out_dir``; with ``loop`` it covers the
     scene's range at build time), since a movie image steps one movie frame per scene frame. Other keywords go to
-    make_screen (glass, strength, window, interpolation …)."""
+    make_screen (glass, strength, window, interpolation …).
+
+    ``frame_map``: the scene drives the playhead (the engine's auto: false with setFrame each frame): a function
+    film frame -> movie frame, or keyed (film frame, movie frame) pairs, linear between keys and held outside them.
+    [(1, 0), (48, 0)] freezes on the first frame, [(1, 47), (48, 0)] plays those 48 frames backwards, a function
+    jumps to a cue on a beat. Each value is floored and wrapped with ``loop`` or clamped (video_frame); start_frame
+    and speed are not used. The movie is decoded once at its own rate into a PNG sequence over the scene's range
+    (and the keys'), whatever its rate. Screen.set_frame changes single frames afterwards."""
     scene = scene or bpy.context.scene
     tb = Timebase.of(scene)
     path = _abspath(path)
@@ -847,6 +1027,23 @@ def make_video_screen(path, width=1.6, height=None, start_frame=None, speed=1.0,
     f0 = scene.frame_start if start_frame is None else int(start_frame)
     height = height or width * info['h'] / info['w']
     name = _unique_name(name)
+    if frame_map is not None:
+        if start_frame is not None or abs(speed - 1.0) > 1e-9:
+            print(f'[screens] {name}: frame_map sets the movie frame of every film frame; start_frame / speed are '
+                  f'not used', flush=True)
+        pick = frame_map_fn(frame_map)
+        n = max(1, info['frames'])
+        fa, fb = _map_range(pick, scene)
+        out = _abspath(out_dir) if out_dir else _default_dir(name)
+        out.mkdir(parents=True, exist_ok=True)
+        for old in out.glob(f'{glob.escape(name)}_[0-9][0-9][0-9][0-9].png'):
+            old.unlink()
+        _retime_frames(path, info, [out / f'{name}_{j + 1:04d}.png' for j in range(fb - fa + 1)],
+                       [video_frame(pick(f), n, loop) for f in range(fa, fb + 1)])
+        scr = make_screen(width=width, height=height, source=out / f'{name}_0001.png', frames=(fa, fb),
+                          name=name, scene=scene, spill=spill, standalone=standalone, **kw)
+        scr.video = {'kind': 'movie', 'path': str(path), 'info': info, 'n': n, 'loop': bool(loop)}
+        return scr
     if abs(info['fps'] - tb.fps) < 1e-3 and abs(speed - 1.0) < 1e-9:
         img = bpy.data.images.load(_stored_path(path), check_existing=False)
         img.name = name
@@ -869,6 +1066,8 @@ def make_video_screen(path, width=1.6, height=None, start_frame=None, speed=1.0,
                                interpolation=kw.get('interpolation', 'Linear'),
                                double_sided=kw.get('double_sided', False), spill=spill,
                                spill_reach=kw.get('spill_reach', 30.0)))
+        scr.video = {'kind': 'movie', 'path': str(path), 'info': info, 'n': n, 'loop': bool(loop),
+                     'means': m if spill else None}
         if standalone:
             me = _plane(name, width, height)
             obj = bpy.data.objects.new(name, me)
@@ -893,9 +1092,12 @@ def make_video_screen(path, width=1.6, height=None, start_frame=None, speed=1.0,
         while r > 0 and engine_movie_frame(k_end, tb.fps, info['fps'], speed, n, False) < n - 1:
             k_end += 1
         fa, fb = f0, min(f0 + k_end, max(scene.frame_end, f0))
-    _retime_frames(path, info, out, name, range(fa - f0, fb - f0 + 1), tb.fps, speed, loop)
-    return make_screen(width=width, height=height, source=out / f'{name}_0001.png', frames=(fa, fb),
-                       name=name, scene=scene, spill=spill, standalone=standalone, **kw)
+    _retime_frames(path, info, [out / f'{name}_{j + 1:04d}.png' for j in range(fb - fa + 1)],
+                   [engine_movie_frame(k, tb.fps, info['fps'], speed, n, loop) for k in range(fa - f0, fb - f0 + 1)])
+    scr = make_screen(width=width, height=height, source=out / f'{name}_0001.png', frames=(fa, fb),
+                      name=name, scene=scene, spill=spill, standalone=standalone, **kw)
+    scr.video = {'kind': 'movie', 'path': str(path), 'info': info, 'n': n, 'loop': bool(loop)}
+    return scr
 
 
 def read_atlas_info(info):
@@ -922,12 +1124,14 @@ def atlas_tile(atlas, info, i):
 
 
 def make_atlas_screen(atlas, info, width=1.6, height=None, start_frame=None, speed=1.0, loop=True, out_dir=None,
-                      name='video_screen', scene=None, **kw):
+                      name='video_screen', scene=None, frame_map=None, **kw):
     """makeVideoScreen({texture, info}), the sprite-atlas form: an atlas video_to_sprite.mjs made (a JPEG of tiles +
     its *_info.json) playing on a panel by screen.js's rule: film frame k after ``start_frame`` shows tile
     floor(t * info.fps * speed), t = k / film fps, wrapping with ``loop`` (also before the start) or clamped.
     The tiles are cut once and laid out per film frame as a PNG sequence (``out_dir``), then shown by make_screen
     (other keywords: glass, strength, spill, window, transparent ...). The height defaults to the tile's aspect.
+    ``frame_map``: the scene drives the playhead, as for make_video_screen (a function film frame -> tile, or keyed
+    pairs; over the scene's range and the keys'). Screen.set_frame changes single frames afterwards.
     For a movie file, make_video_screen plays it natively, frame-exact, with no atlas."""
     scene = scene or bpy.context.scene
     tb = Timebase.of(scene)
@@ -943,16 +1147,24 @@ def make_atlas_screen(atlas, info, width=1.6, height=None, start_frame=None, spe
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob(f'{glob.escape(name)}_[0-9][0-9][0-9][0-9].png'):
         old.unlink()
-    if loop:
-        fa, fb = min(scene.frame_start, f0), max(scene.frame_end, f0)
+    if frame_map is not None:
+        if start_frame is not None or abs(speed - 1.0) > 1e-9:
+            print(f'[screens] {name}: frame_map sets the tile of every film frame; start_frame / speed are not used',
+                  flush=True)
+        pick = frame_map_fn(frame_map)
+        fa, fb = _map_range(pick, scene)
+        shown = [video_frame(pick(f), n, loop) for f in range(fa, fb + 1)]
     else:
-        k_end = 0
-        while engine_movie_frame(k_end, tb.fps, fps, speed, n, False) < n - 1 and f0 + k_end < scene.frame_end:
-            k_end += 1
-        fa, fb = f0, f0 + k_end
+        if loop:
+            fa, fb = min(scene.frame_start, f0), max(scene.frame_end, f0)
+        else:
+            k_end = 0
+            while engine_movie_frame(k_end, tb.fps, fps, speed, n, False) < n - 1 and f0 + k_end < scene.frame_end:
+                k_end += 1
+            fa, fb = f0, f0 + k_end
+        shown = [engine_movie_frame(f - f0, tb.fps, fps, speed, n, loop) for f in range(fa, fb + 1)]
     tiles = {}
-    for j, f in enumerate(range(fa, fb + 1)):
-        i = engine_movie_frame(f - f0, tb.fps, fps, speed, n, loop)
+    for j, i in enumerate(shown):
         dst = out / f'{name}_{j + 1:04d}.png'
         if i in tiles:
             dst.write_bytes(tiles[i].read_bytes())
@@ -962,6 +1174,7 @@ def make_atlas_screen(atlas, info, width=1.6, height=None, start_frame=None, spe
     scr = make_screen(width=width, height=height, source=out / f'{name}_0001.png', frames=(fa, fb), name=name,
                       scene=scene, **kw)
     scr.atlas_info = info
+    scr.video = {'kind': 'atlas', 'atlas': str(_abspath(atlas)), 'info': info, 'n': n, 'loop': bool(loop)}
     return scr
 
 

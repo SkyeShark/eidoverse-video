@@ -1,0 +1,6 @@
+{
+    "width": 480, "height": 270, "fps": 24, "duration": 1.5,
+    "script": "blender/tests/pipeline/leadin/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/leadin.mp4",
+    "render": {"samples": 16}
+}

@@ -6,7 +6,8 @@
     title.location = (0, 0, 0.25)                # stands up, reads from -Y (three's +Z-facing text, mapped)
 
 Sizes are three.js TextGeometry's: ``size`` is the em, ``depth`` the extrusion before bevel, the bevel adds
-``bevel_thickness`` front and back and grows the outline by ``bevel_size``. Blender's own size is the font's
+``bevel_thickness`` front and back and grows the outline by ``bevel_size``, after ``bevel_offset`` grows or shrinks
+it (the curve's own offset). Blender's own size is the font's
 (ascent - descent), so the conversion reads the TTF's hhea and head tables. The text is a FONT object (kerning,
 bevel, resolution are Blender's), centred on its geometric box like three's ``geo.center()``.
 
@@ -148,11 +149,14 @@ def material(preset='enamel', name=None, fade=False, **over):
 
 # ---------------------------------------------------------------------------------------------------- the type
 def create_text_3d(text, font='Audiowide', size=1.0, depth=0.15, curve_segments=6, bevel=True,
-                   bevel_thickness=0.02, bevel_size=0.015, bevel_segments=3, material=None, center=True,
-                   name='text3d', align='CENTER', line_spacing=1.0, stand_up=True, scene=None, collection=None,
-                   reveal=None):
-    """A FONT object with three's TextGeometry measures (see the module doc). ``align``: LEFT / CENTER / RIGHT
-    for multi-line text. ``stand_up``: rotate it upright, facing -Y (else it lies in the XY plane facing +Z).
+                   bevel_thickness=0.02, bevel_size=0.015, bevel_segments=3, bevel_offset=0.0, material=None,
+                   center=True, name='text3d', align='CENTER', line_spacing=1.0, stand_up=True, scene=None,
+                   collection=None, reveal=None):
+    """A FONT object with three's TextGeometry measures (see the module doc). ``bevel_offset`` (three's
+    bevelOffset, metres like bevel_size): grows (+) or shrinks (-) the letter outline before the bevel, so the front
+    face sits at the outline + bevel_offset and the sides at + bevel_size + bevel_offset; -bevel_size keeps the
+    sides on the font's own outline. As in three it needs the bevel on. ``align``: LEFT / CENTER / RIGHT for
+    multi-line text. ``stand_up``: rotate it upright, facing -Y (else it lies in the XY plane facing +Z).
     ``reveal=(first_frame, chars_per_second)`` types it on (single line), glyph by glyph."""
     scene = scene or bpy.context.scene
     cu = bpy.data.curves.new(name, 'FONT')
@@ -172,6 +176,13 @@ def create_text_3d(text, font='Audiowide', size=1.0, depth=0.15, curve_segments=
     cu.bevel_resolution = max(0, int(bevel_segments) - 1) if bevel else 0
     cu.extrude = max(0.0, depth / 2 + bt - bs)
     cu.fill_mode = 'BOTH'
+    # the curve's offset moves the outline along its normals in object units, before the bevel (measured: +0.01
+    # widens an 'H' by 0.02 at any size; with a bevel the front face is the outline + offset, the sides + bevel +
+    # offset): three's bevelOffset, which only exists with the bevel on
+    if bevel_offset and not bevel:
+        print(f'[text3d] {name}: bevel_offset {bevel_offset} ignored with bevel=False (three applies it in the bevel)',
+              flush=True)
+    cu.offset = float(bevel_offset) if bevel else 0.0
     obj = bpy.data.objects.new(name, cu)
     (collection or scene.collection).objects.link(obj)
     if material is not None:

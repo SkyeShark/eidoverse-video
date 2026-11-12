@@ -17,6 +17,7 @@ Each item gets <label>_top_hillshade.png, _aerial_45deg.png, _eye_1p7m.png (the 
 <label>_views.json; a built terrain also <label>_hero_eye.png and, textured, <label>_tex_aerial.png and
 <label>_tex_eye.png. Progress and errors go to stdout; a failed item is recorded and the job goes on.
 """
+import gc
 import json
 import os
 import sys
@@ -83,24 +84,31 @@ def recipe_item(job, ref, item, log):
     # the hero-level eye view (and the textured row): the ring mesh built with the focus on the eye spot
     wx, wy = eye['world'].eye[0], eye['world'].eye[1]
     centre = (lv.x0 + lv.side / 2.0, lv.y0 + lv.side / 2.0)
+    levels = [dict(role=v.role, cell=v.cell, side=v.side) for v in t.levels]
+    del t, fields                               # a film terrain's levels and masks hold gigabytes: one at a time
     errors = {}
-    # the textured views at the palettes' own exposure (surfacing/render_places.py: -0.5; the clay keeps the rig's)
-    for palette, tag, vws, exposure in ((None, 'hero', ('eye',), None), ('auto', 'tex', ('aerial', 'eye'), TEX_EXPOSURE)):
-        if palette == 'auto' and not item.get('textured'):
-            continue
+    # the textured views at the palettes' own exposure (surfacing/render_places.py: -0.5; the clay keeps the rig's).
+    # Each view in a scene of its own: make_sky keys its sun, moon and layers to the one camera it is made for
+    passes = [(None, 'hero', 'eye', None)]
+    if item.get('textured'):
+        passes += [('auto', 'tex', 'aerial', TEX_EXPOSURE), ('auto', 'tex', 'eye', TEX_EXPOSURE)]
+    tb = None
+    for palette, tag, vw, exposure in passes:
         try:                                    # the field and the clay probes stand even when a build fails
+            tb = None                           # the last build's arrays go before the next one is made
+            gc.collect()
             bpy.ops.wm.read_factory_settings(use_empty=True)
             tb = A.make_terrain(item['recipe'], focus=(wx, wy), name=f'{label}_{tag}', **dict(kw, palette=palette))
             r = views.render_object_views(tb.height_at, lv.side, centre, ref, eye, out, job['cache_root'],
-                                          f'{label}_{tag}', views=vws, samples=job.get('samples', 16),
+                                          f'{label}_{tag}', views=(vw,), samples=job.get('samples', 16),
                                           exposure=exposure)
             recs.update({f'{tag}_{k}': v for k, v in r.items()})
         except Exception as e:                  # noqa: BLE001 - recorded in the result, the job goes on
             traceback.print_exc()
-            errors[tag] = f'{type(e).__name__}: {e}'
-        secs[tag] = round(time.time() - t0 - sum(secs.values()), 1)
+            errors[f'{tag}_{vw}'] = f'{type(e).__name__}: {e}'
+        secs[f'{tag}_{vw}'] = round(time.time() - t0 - sum(secs.values()), 1)
     return dict(eye={k: v for k, v in eye.items() if k != 'world'}, views=recs, seconds=secs, errors=errors,
-                levels=[dict(role=v.role, cell=v.cell, side=v.side) for v in t.levels])
+                levels=levels)
 
 
 def main():

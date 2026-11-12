@@ -10,10 +10,16 @@ names     two screens on the defaults get their own names, folders and pixels; t
 retime    make_video_screen against screen.js's rule floor(k / film fps * fps * speed), wrapped or clamped: bit-coded
           counter movies at 24, 25 and 30 fps, speeds 0.5, 1 and 1.5, looping and not, started at frame 10 of a
           1..72 film; every film frame's file is found the way Blender finds it and decoded
+playhead  the scene drives a video's playhead (makeVideoScreen's setFrame): frame_map freezing, reversing,
+          scrubbing (keyed, linear, held), jumping to a cue (a function, wrapped) and clamping, decoded per film frame;
+          set_frame on a native movie (its ImageUser's frame read back from the evaluated material, a material made
+          after it too), on a retimed screen (files and the hold rewritten), on an atlas screen; a drawn screen
+          refuses it; the spill light follows it
 overlay   ov.panel(frames=(10, 20)) is keyed hidden outside its range
 spill     the spill light's power and colour for a saturated frame: colour m / max(m), power pi A S max(m) gain
 Prints one line per check and '[check_screens_api] ALL OK' when every check passed.
 """
+import math
 import shutil
 import subprocess
 import sys
@@ -169,6 +175,111 @@ for fps in (24, 25, 30):
             check(f'retime {fps} fps x {speed} {"looping" if loop else "once"}: film frames 1..72 match the engine',
                   not bad, f'{len(bad)} differ' + (f', first (frame, shown, engine) {bad[:4]}' if bad else '') +
                   f'; sequence {v.frame_start} + {v.frame_duration}')
+
+# ---------------------------------------------------------------------------------------------------- playhead
+# the scene drives the playhead (makeVideoScreen's setFrame): frame_map when made, set_frame afterwards
+sc = S.fresh_scene(frames=(1, 72))
+m24, m30 = W / 'code_24.mp4', W / 'code_30.mp4'
+
+
+def scrub(f):                                          # (1, 0) -> (24, 69) -> (48, 10), linear, held outside
+    if f < 24:
+        return math.floor(69 * (f - 1) / 23 + 1e-6)
+    if f < 48:
+        return math.floor(69 - 59 * (f - 24) / 24 + 1e-6)
+    return 10
+
+
+cases = [('freeze', m24, [(1, 5), (72, 5)], True, lambda f: 5),
+         ('reverse', m24, [(1, 71), (72, 0)], True, lambda f: 72 - f),
+         ('scrub', m30, [(1, 0), (24, 69), (48, 10)], False, scrub),
+         ('cue', m30, lambda f: f - 1 if f < 30 else 50 + (f - 30), True,
+          lambda f: (f - 1 if f < 30 else 50 + (f - 30)) % N),
+         ('clamped', m24, lambda f: 2 * f, False, lambda f: min(2 * f, N - 1))]
+for tag, mp4, fm, loop, want in cases:
+    v = screens.make_video_screen(mp4, width=0.5, frame_map=fm, loop=loop, out_dir=W / f'ph_{tag}', name=f'ph_{tag}',
+                                  standalone=False)
+    bad = []
+    for f in range(1, 73):
+        got = decode(file_for(v.image, blender_file(f, v.image)))
+        if got != want(f):
+            bad.append((f, got, want(f)))
+    check(f'frame_map {tag} ({mp4.stem}, {"looping" if loop else "clamped"}): film frames 1..72 show the mapped '
+          f'movie frame', not bad, f'{len(bad)} differ' + (f', first (frame, shown, mapped) {bad[:4]}' if bad else ''))
+
+
+def plane(name):
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([(0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)], [], [(0, 1, 2, 3)])
+    me.uv_layers.new(name='UVMap')
+    o = bpy.data.objects.new(name, me)
+    sc.collection.objects.link(o)
+    return o
+
+
+def shown(mat, f):
+    """The movie frame Blender reads on ``mat`` at film frame f (its evaluated ImageUser, offset keys included)."""
+    sc.frame_set(f)
+    ev = mat.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    return next(n for n in ev.node_tree.nodes if n.bl_idname == 'ShaderNodeTexImage').image_user.frame_current - 1
+
+
+nat = screens.make_video_screen(m24, width=0.5, start_frame=1, loop=True, name='ph_native')
+nat.set_frame(20, 5)
+nat.set_frame((40, 44), 60)
+nat.set_frame(50, 75)                                  # past the movie: wraps (loop) to 3
+later = nat.apply_to(plane('ph_later'), glass=False)   # a material made after set_frame carries the keys
+over = {20: 5, 50: 3, **{f: 60 for f in range(40, 45)}}
+for mat, what in ((nat.obj.data.materials[0], 'its panel'),
+                  (later.material_slots[0].material, 'a material made after')):
+    bad = [(f, shown(mat, f), over.get(f, (f - 1) % N)) for f in range(1, 73)
+           if shown(mat, f) != over.get(f, (f - 1) % N)]
+    check(f'set_frame on a native movie screen ({what}): frames 20, 40..44 and 50 show 5, 60 and 3 (75 wrapped), '
+          f'every other frame its own playback', nat.image.source == 'MOVIE' and not bad,
+          f'{len(bad)} differ' + (f', first (frame, read, want) {bad[:4]}' if bad else ''))
+half = screens.make_video_screen(m24, width=0.5, start_frame=1, speed=0.5, loop=True, out_dir=W / 'ph_half',
+                                 name='ph_half', standalone=False)
+half.set_frame(30, 66)
+half.set_frame((1, 3), 40)                             # the first frames: the hold before the range follows
+want_h = {30: 66, 1: 40, 2: 40, 3: 40}
+bad = [(f, decode(half.file_at(f)), want_h.get(f, screens.engine_movie_frame(f - 1, 24, 24, 0.5, N, True)))
+       for f in range(1, 73)
+       if decode(half.file_at(f)) != want_h.get(f, screens.engine_movie_frame(f - 1, 24, 24, 0.5, N, True))]
+hold = file_for(half.image, 0)
+check('set_frame on a retimed screen rewrites those frames\' files from the movie, the rest as retimed',
+      not bad and decode(hold) == 40 and screens._is_hold(hold),
+      f'{len(bad)} differ' + (f', first {bad[:4]}' if bad else '') + f'; hold file reads {decode(hold)}')
+# an atlas of the 72 code frames (8 x 9 tiles), played forward by a keyed map, one frame set
+tiles = [Image.open(cdir / f'c_{k + 1:04d}.png').convert('RGB') for k in range(N)]
+tw, th = tiles[0].size
+sheet = Image.new('RGB', (8 * tw, 9 * th))
+for k, tile in enumerate(tiles):
+    sheet.paste(tile, ((k % 8) * tw, (k // 8) * th))
+sheet.save(W / 'code_atlas.png')
+ainfo = {'cols': 8, 'rows': 9, 'totalFrames': N, 'fps': 12, 'frameWidth': tw, 'frameHeight': th}
+at = screens.make_atlas_screen(W / 'code_atlas.png', ainfo, width=0.5, frame_map=[(1, 0), (72, 71)], loop=True,
+                               out_dir=W / 'ph_atlas', name='ph_atlas', standalone=False)
+at.set_frame(5, 33)
+bad = [(f, decode(at.file_at(f))) for f in range(1, 73) if decode(at.file_at(f)) != (33 if f == 5 else f - 1)]
+check('an atlas screen: frame_map plays the tiles, set_frame cuts tile 33 onto frame 5', not bad,
+      f'{len(bad)} differ' + (f', first {bad[:4]}' if bad else ''))
+drawn = screens.make_screen(draw=lambda c, t, w, h: c.clear('#ff0000'), frames=(1, 3), out_dir=W / 'ph_drawn',
+                            name='ph_drawn')
+try:
+    drawn.set_frame(2, 1)
+    raised = False
+except ValueError:
+    raised = True
+check('set_frame on a drawn screen raises (it draws its own frames)', raised)
+sp = screens.make_video_screen(m24, width=1.0, start_frame=1, loop=True, name='ph_spill', spill=1.0)
+sp.set_frame(10, 63)
+fc = next(c for c in screens.action_fcurves(sp.light.data.animation_data.action) if c.data_path == 'energy')
+w10, w11 = fc.evaluate(10), fc.evaluate(11)
+mm = sp.video['means']
+p63, p10 = sp._spill_power * float(mm[63].max()), sp._spill_power * float(mm[10].max())
+check('the spill light follows set_frame: frame 10 lights with movie frame 63, frame 11 with its own (10)',
+      abs(w10 - p63) < 1e-4 and abs(w11 - p10) < 1e-4 and abs(p63 - p10) > 1e-3,
+      f'{w10:.4f} W at 10 (movie frame 63: {p63:.4f}), {w11:.4f} W at 11 (movie frame 10: {p10:.4f})')
 
 # ---------------------------------------------------------------------------------------------------- overlay keys
 sc = S.fresh_scene(frames=(1, 30))

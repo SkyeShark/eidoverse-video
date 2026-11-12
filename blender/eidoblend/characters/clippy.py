@@ -3,6 +3,7 @@
     from eidoblend.characters.clippy import make_clippy
     clippy = make_clippy(height=1.2, location=(2, 1, 0))
     clippy.play('IdleAtom', 2.0)            # any of the 43 original Microsoft Agent clip names, at scene second 2
+    clippy.set_weight('blink', 1.0, 30)     # setWeight: one morph on one frame, over the sequencer
     clippy.bake(1, 240)                     # key every frame: the shape keys and the inner transform
 
 The same character, made the same way: every transformation is the WHOLE character re-evaluated (the wire's centreline
@@ -725,6 +726,21 @@ class Clippy:
         self.active = []
         self.clips = list(CLIPS)
         self.morphs = list(MORPHS)
+        self.overrides = {}                 # (morph, film frame) -> weight: set_weight's one-frame overrides
+
+    def set_weight(self, name, w, frame):
+        """setWeight(n, w), keyed: morph ``name`` at weight ``w`` on film frame ``frame`` only, in place of what the
+        clips and the idle fidgets give it there. bake() keys it, stepping in at ``frame`` and out at ``frame + 1``
+        (CONSTANT), the sequencer's own value on the frames either side. The weight is clamped -1 .. 1.25, as three
+        clamps an influence; w=None takes the override back. Call it for each frame of a longer hold, then bake."""
+        if name not in MORPHS:
+            raise KeyError(f'clippy has no morph {name!r} ({", ".join(MORPHS)})')
+        f = int(frame)
+        if w is None:
+            self.overrides.pop((name, f), None)
+        else:
+            self.overrides[(name, f)] = min(max(float(w), -1.0), 1.25)
+        return self
 
     def play(self, name, t0=0.0):
         """schedule a clip at scene second t0 (frame = frame_start + t0 * fps); an unknown name raises"""
@@ -783,7 +799,8 @@ class Clippy:
         return {n: min(max(w, -1.0), 1.25) for n, w in W.items()}, tr
 
     def bake(self, f0, f1, scene=None):
-        """key every frame f0..f1 (LINEAR): the shape keys and the inner object's transform"""
+        """key every frame f0..f1 (LINEAR): the shape keys and the inner object's transform; set_weight's overrides
+        replace the sequencer's weight on their frames (CONSTANT into and out of them)"""
         from bpy_extras import anim_utils
         scene = scene or bpy.context.scene
         fps = scene.render.fps / scene.render.fps_base
@@ -798,10 +815,17 @@ class Clippy:
         ia.action_slot = ia.action.slots.new(id_type='OBJECT', name=self.inner.name)
         cbi = anim_utils.action_ensure_channelbag_for_slot(ia.action, ia.action_slot)
         self.inner.rotation_mode = 'XYZ'
+        over = {}
+        for (n, f), w in self.overrides.items():
+            over.setdefault(f, {})[n] = w
+        outside = sorted((n, f) for (n, f) in self.overrides if not f0 <= f <= f1)
+        if outside:
+            print(f'[clippy] set_weight overrides outside the baked frames {f0}..{f1}, not keyed: {outside}', flush=True)
         series = {}
         for f in range(f0, f1 + 1):
             t = (f - start) / fps
             W, tr = self.state(t)
+            W.update(over.get(f, {}))
             for n, w in W.items():
                 series.setdefault((cb, f'key_blocks["{n}"].value', 0), []).append((f, w))
             loc = (tr['x'], 0.0, tr['y'])                    # three (x, y, z) -> Blender (x, -z, y)
@@ -810,14 +834,20 @@ class Clippy:
                 series.setdefault((cbi, 'location', i), []).append((f, loc[i]))
                 series.setdefault((cbi, 'rotation_euler', i), []).append((f, rot[i]))
                 series.setdefault((cbi, 'scale', i), []).append((f, tr['scale']))
+        steps = {}                          # shape-key path -> the key indices that step (an override and the one before)
+        for (n, f) in self.overrides:
+            if f0 <= f <= f1:
+                steps.setdefault(f'key_blocks["{n}"].value', set()).update(i for i in (f - f0 - 1, f - f0) if i >= 0)
         for (bag, path, idx), kv in series.items():
             fc = bag.fcurves.new(path, index=idx)
             fc.keyframe_points.add(len(kv))
             fc.keyframe_points.foreach_set('co', [c for f, v in kv for c in (f, v)])
-            for kp in fc.keyframe_points:
-                kp.interpolation = 'LINEAR'
+            step = steps.get(path, ())
+            for i, kp in enumerate(fc.keyframe_points):
+                kp.interpolation = 'CONSTANT' if i in step else 'LINEAR'
             fc.update()
-        return {'frames': [f0, f1], 'fcurves': len(series)}
+        return {'frames': [f0, f1], 'fcurves': len(series),
+                'overrides': sorted([n, f, w] for (n, f), w in self.overrides.items() if f0 <= f <= f1)}
 
 
 def make_clippy(height=1.2, wire_radius=0.031, name='clippy', location=(0.0, 0.0, 0.0), rotation=0.0, collection=None,

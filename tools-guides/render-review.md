@@ -68,6 +68,18 @@ pixels with a channel at 250 or above, and the worst grid cell
   of frames before each still (no rendering), for state with a short memory:
   unbaked simulations, spring bones, frame-change handlers that keep state.
   `--replay` evaluates every frame from the start.
+- **A post effect that reads earlier frames needs them rendered.**
+  after_image's trail, the era looks' CRT persistence and aeropittura's echoes
+  read records the compositor writes as each frame composites
+  ([post-processing](postprocessing.md)). `eido_blender.py render --at`
+  renders the frames a still reads first, in order, keeping only the records:
+  a trail fed by its own last frame from its shot's first frame (its cut), the
+  CRT persistence its last seven frames and aeropittura's echoes their last
+  four (at 24 fps).
+  The digest's `render.capture` says how many. `probe_cli.py`'s `--preroll`
+  and `--replay` evaluate frames without rendering them, so their stills of
+  such a shot read missing or stale records: take those stills with
+  `eido_blender.py render --at`.
 - `--compare T` renders frame T alone, then again after its previous frame,
   and reports the difference. EEVEE keeps no history between final renders,
   so they match to within a level of noise.
@@ -196,6 +208,7 @@ all the names it writes:
 | `placement.density` | the number of distinct top-level objects placed (an observation, never a demand) |
 | `repair` | the opt-in placement repair ran before the audits (`_auto_fix_placement`) |
 | `motion.envelope` | a spin about the wrong pivot, sinking below the ground, a teleport, scale drift |
+| `motion.swept_clearance` | a part that turns in place (a rotor, a wheel in its fork, a fan, a radar dish), checked against the static top-level objects beside it at every angle it turns through: a full revolution in 12 steps when it turns that far (or faster than a quarter turn between samples), else its own sweep every 30°. WARN when it sits inside a neighbour at every angle (seated INTO its mount: `placement.mount_on(part, mount, standoff=...)`), or sweeps through one at some angles. A part parented under its mount is not checked against it; a rig or a skinned body is left out; `obj['no_motion_check']` opts out |
 | `motion.sideways` | a long body travelling sideways |
 | `motion.camera` | a bouncing camera |
 | `motion.rig_pose` | a humanoid that never leaves its pose: a statue |
@@ -206,7 +219,7 @@ all the names it writes:
 | `assets.reads`, `assets.orphans` | declared assets the script never read; models beside the script that the config never declares |
 | `render.auto_enhance` | the post stack and the hooks installed |
 | `render.preset`, `render.settings` | the preset and the EEVEE settings the frames rendered with |
-| `render.capture` | the stills written (`--at`), their frames and any preroll |
+| `render.capture` | the stills written (`--at`), their frames, any preroll, and the lead-in frames rendered first for a post effect that reads earlier frames (which effects, and how far back each reads) |
 | `render.video` | the film written: frames, seconds a frame, the file |
 | `render.probe_frames` | SKIPPED when the film's probe frames could not be extracted (no ffmpeg): view frames yourself |
 | `render.bench` | `bench`'s seconds a frame and the film's estimate |

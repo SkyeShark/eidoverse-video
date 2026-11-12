@@ -1,0 +1,8 @@
+{
+    "width": 960, "height": 540, "fps": 30, "duration": 8,
+    "script": "blender/examples/claude_robot/scene.py",
+    "outputVideo": "blender/examples/out/claude_robot.mp4",
+    "assets": {},
+    "render": {"samples": 16},
+    "notes": "eidoverse/examples/claude_robot.js: the robot body idles through its hardware limits, its OLED face runs through a blink, happy, a spoken hello, surprised and relaxed, its eyes look left then right, the camera eases in"
+}

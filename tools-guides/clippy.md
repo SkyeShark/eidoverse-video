@@ -14,6 +14,7 @@ from eidoblend.characters.clippy import make_clippy, CLIPS, MORPHS
 clippy = make_clippy(height=1.2, location=(2.0, 1.0, 0.0), rotation=0.0)   # heading deg about +Z; he faces -Y
 print(clippy.clips, clippy.morphs)
 clippy.play('IdleAtom', 2.0)            # start at scene second 2 (frame = frame_start + 2 * fps)
+clippy.set_weight('blink', 1.0, 30)     # setWeight: the eyes shut on frame 30 only, over the clips
 clippy.bake(1, 240)                     # key every frame: the shape keys and the inner object
 ```
 
@@ -32,6 +33,19 @@ runs at render time. The objects are a root (`clippy_root`: put world placement
 here), its child the inner object the clips move (`clippy_inner`), and the mesh
 (`clippy`, scale = height). Schedule every clip first, then bake once: a second
 bake replaces the first's actions.
+
+`set_weight(name, w, frame)` is the WebGPU edition's `setWeight(n, w)`, a
+one-frame override of one morph on top of the clip sequencer: `bake` keys `w`
+on that film frame in place of what the clips and the idle fidgets give it,
+stepping in at the frame and out at the next (CONSTANT keys), with the
+sequencer's own value on the frames either side. The weight is clamped −1 …
+1.25 like the sliders, an unknown morph raises, `w=None` takes the override
+back, and an override outside the baked frames is printed, not keyed. Call it
+for each frame of a longer hold, before `bake`. Measured
+(`test_clippy_set_weight.py`): mid-Greeting, blink 1 on frame 30 keyed 1.000
+there and the sequencer's 0 on frames 29, 29.5, 31 (no ramp), the other keys
+stayed LINEAR, and shapeAtom 1 on frame 40 re-bent the whole wire into the
+atom for that frame only (`out/clippy_set_weight_f039/040/041.png`).
 
 **What is the same as the WebGPU edition.** The geometry is clippy.js's, line for
 line: the gem clip's segments (narrow end up, both free ends curled out as
@@ -57,5 +71,4 @@ Congratulate) on the studio floor.
 
 ## Not yet ported
 
-- `setWeight(n, w)` (a one-frame override in the WebGPU edition, reset by the
-  sequencer each update): key the shape key yourself after `bake`.
+Nothing: every call of `clippy.js`'s handle has its Blender counterpart above.

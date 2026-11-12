@@ -519,13 +519,19 @@ def _on_gltf_uv(src, name, double_sided=None):
 
 def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(), pdf=None, lining=None, edges=None,
               pages=None, open_at=1, name='book', scene=None, cloth_roughness=0.82, rig=None, wrap_res=4096,
-              pdf_page_height=1200, gltf=None, angle=180, page_angle=179, page_glow=0.55, code=False):
+              pdf_page_height=1200, gltf=None, angle=180, page_angle=179, page_glow=0.55, code=False, board_th=None,
+              lip=None, round=None, u_joint=None):  # noqa: A002 - round: makeBookFromSpec's own name for the spine round
     """Export the rig over ``frames`` (a schedule) and build the book under an empty ``name`` at the origin.
 
     makeBookFromSpec, ported: size: (width, height, thickness) of the closed book in metres (thickness None:
     estimated from the pages). cover: {front, back, spine, color} images (composed into the arc-length wrap by
-    the rig's own composer) or {wrap: <image>, color}. spreads: two-page images in reading order; or pdf=<file>.
-    lining / edges: an image or an sRGB hex. rig: a raw makeBookRig spec instead.
+    the rig's own composer) or {wrap: <image>, color}, plus an optional trim: the cloth on the rims and turn-ins,
+    an image or an sRGB hex (default: flat cover color, as a composed wrap has no plain region to sample).
+    spreads: two-page images in reading order; or pdf=<file>. lining / edges: an image or an sRGB hex. The case's
+    shape, makeBookFromSpec's input (None: its defaults): board_th (board + cloth, 0.0025 m), lip (how far the
+    spine cloth runs flat past the board: max(0.003, 0.21 x thickness)), round (how far the spine bulges past the
+    lip: max(0.0015, 0.09 x thickness)), u_joint (the wrap's U at the back joint: solved so the texels are even
+    along the cross-section). rig: a raw makeBookRig spec instead.
 
     makeBook(gltf), ported: ``gltf`` = a book GLB's path (or its imported root object). Its dimensions and the
     wrap-U landmark are measured off the asset (measure_book_glb), the rig rides in the asset's own frame, and the
@@ -534,8 +540,12 @@ def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(),
     pieces (boards, spine, block, pages) stay, hidden, as ``book.source``, laid flat with the rig (the engine kept
     them to measure and seat by). ``pages`` defaults to 26 there, ``spreads`` / ``pdf`` load as loadSpreads did.
 
-    angle / page_angle: the case's opening sweep and where a turned leaf lies (degrees). page_glow: the engine's
-    paper glow (an emissive proxy for light through the sheet) becomes real translucency, 0.4 x page_glow.
+    angle / page_angle (every path): the case's opening sweep at open 1 (180 lies flat; 110 opens it on a
+    lectern) and where a turned leaf lies, measured against a flat-open cover: it sits page_angle - 180 degrees
+    off the cover wherever the cover is (179, the default, lays it on the cover; 150 stands it 30 degrees off).
+    The rig lets the front board fall past the sweep by its prop (asin(groove height / hinge radius)), which
+    depends on the case and the page open, not on the angle. page_glow: the engine's paper glow (an emissive proxy
+    for light through the sheet) becomes real translucency, 0.4 x page_glow.
     open_at: the rig's openAt (the leaves already on the left when the book opens). code: opts.code, the gate on
     Book.code_surfaces() (the module's CODE_SURFACES opens it for every book)."""
     scene = scene or bpy.context.scene
@@ -552,15 +562,24 @@ def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(),
         gpart = _book_parts(gltf_root)
         gmats = _glb_materials(gpart)
         rig = dict(measure_book_glb(gltf_root), pages=pages or 26, openAt=open_at, angle=angle, pageAngle=page_angle)
+    elif rig:
+        rig = dict(rig)
+        rig.setdefault('angle', angle)                   # makeBookRig's own defaults are make_book's (180 / 179)
+        rig.setdefault('pageAngle', page_angle)
+    # makeBookFromSpec's input: what book_export.mjs reads (its own defaults for the shape keys left out)
     spec = {'size': {'width': size[0], 'height': size[1]}, 'spreads': len(spreads), 'openAt': open_at,
-            'wrapRes': wrap_res}
+            'wrapRes': wrap_res, 'angle': angle, 'pageAngle': page_angle}
+    for key, val in (('boardTh', board_th), ('lip', lip), ('round', round), ('uJoint', u_joint)):
+        if val is not None:
+            spec[key] = float(val)
     if size[2]:
         spec['size']['thickness'] = size[2]
     if pages:
         spec['pages'] = pages
     if pdf_pages:
         spec['pdfPages'] = pdf_pages
-    spec['cover'] = {k: (str(_abspath(v)) if k in ('front', 'back', 'spine', 'wrap') else v) for k, v in cover.items()}
+    spec['cover'] = {k: (str(_abspath(v)) if k in ('front', 'back', 'spine', 'wrap') else v) for k, v in cover.items()
+                     if k in ('front', 'back', 'spine', 'wrap', 'color')}   # the trim is dressed here, not composed
     job = {'out': str(out), 'frames': frames}
     if rig:
         job['rig'] = rig
@@ -595,8 +614,14 @@ def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(),
         wrap = cover.get('wrap') or (out / info['images']['wrap'] if info['images'].get('wrap') else None)
         mats['cloth'], _ = _principled(f'{name}_cloth', color=cloth_lin, image=_img(wrap) if wrap else None,
                                        roughness=cloth_roughness, sheen=0.5, bump=0.25, bump_scale=2400.0)
-        mats['trim'], _ = _principled(f'{name}_trim', color=cloth_lin, roughness=cloth_roughness, sheen=0.5,
-                                      bump=0.25, bump_scale=2400.0, double_sided=True)
+        # the trim (rims and turn-ins): cover['trim'], an image or a hex, else the flat cover colour (book.js: a
+        # composed wrap has no plain region to sample, so the trim is a cloth of its own)
+        trim = cover.get('trim')
+        trim_img = _img(trim) if trim and not str(trim).startswith('#') else None
+        trim_lin = (tuple(float(raster.srgb_to_linear(c / 255)) for c in raster.color(trim)[:3])
+                    if trim and trim_img is None else cloth_lin)
+        mats['trim'], _ = _principled(f'{name}_trim', color=trim_lin, image=trim_img, roughness=cloth_roughness,
+                                      sheen=0.5, bump=0.25, bump_scale=2400.0, double_sided=True)
 
         def surface(nm, src, default_hex, **kw):
             if src and not str(src).startswith('#'):
