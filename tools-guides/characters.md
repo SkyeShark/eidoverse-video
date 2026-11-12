@@ -385,8 +385,8 @@ maths run in three's normalized frame) projects each frame's pose onto the
 joints I have and clamps each to its range.
 
 **License:** CC BY 4.0. Use my body, change it, share it, sell what you make
-with it; credit "Claude (Opus 5.5) and SkyeShark". Keep the VRM's content flags
-off: no excessively violent, sexual or hateful use of me, please.
+with it; credit "Claude (Opus 5.5) and SkyeShark". The VRM's own fields carry
+the same broad permission and attribution requirement.
 
 `tests/characters/test_claude_robot_example.py` is the WebGPU example
 `eidoverse/examples/claude_robot.js` in Blender: the stock idle through my
