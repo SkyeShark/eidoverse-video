@@ -65,10 +65,39 @@ E.seat_on(walk, chair,
           hold=None,                   # seconds, then stand up (stand={...}: stand_up's options); None: stays seated
           back_up=0.35,                # the last steps backward onto the spot (m; 0: none)
           hip_back=None,               # None: where the clip's own hip travel needs her; a number: the engine's 0.46 m
+          instant=False,               # True: seatOn's instant path: put there seated, in the loop, at once (below)
           sink=0.0, fade=0.25, transition_dur=None, gait='walk', speed=None, via=None, camera=None)
 E.stand_up(walk, reverse=None,         # None: the sit-down reversed when it is the pose held, else the stand-up clip
            clip='sit_to_stand', reverse_speed=1.25, fade=0.25, fade_out=0.5)
 ```
+
+**A shot that opens seated** (`instant=True`, the engine's instant path:
+`seatOn` without a transition snaps a VRM into the chair pose). No walk and
+no descent: the body is put (`controller.place`) on the spot the transition's
+own hip travel would have stood it, facing out of the chair, and the take
+opens in the seated loop (`then=`, default `sitting_normal_chair`) at full
+weight, its settle on the pan applied at once. The seat is measured as a
+sit-down measures it (the backrest bias, `back_push`, the settle, the
+knees), so everything after it works as from any seat: `stand_up` plays the
+stand-up clip, the walk takes over, the seated frames are keyed seated.
+Later in a take it is a cut: the body jumps into the chair, nothing is
+handed over from the plant there, and the spring chains start over on the
+seated pose, settled (they would otherwise spring out of their rest shape).
+
+```python
+walk = Locomotion(me, CollisionWorld(exclude=seat_parts), start=(0, 0, 0))
+E.seat_on(walk, chair, instant=True)              # frame 1: seated in sitting_normal_chair, settled on the pan
+walk.wait(1.5)
+E.stand_up(walk)                                   # sit_to_stand, then the walk takes over
+walk.move_to((0.5, -1.0))
+E.seat_on(walk, bench, instant=True, then='sitting_nervous_arm_rub_chair', hold=1.5)   # a cut into the bench
+rep = E.bake(walk)
+```
+
+In `test_start_seated.py` both seats open with the hips on their targets
+(0.0 cm), the seated skin on the pan (0.07 and 0.30 cm under it), facing out
+of the chair, the hips holding their height through the first second, and
+every check of the whole seat passing.
 
 What `seat_on` does, in the engine's order:
 
@@ -161,9 +190,18 @@ What `seat_on` does, in the engine's order:
   HipPitch / HipSwing mechanism the bake keys, which is seat skin too), and
   each seated foot is reached for again on the clamped legs until the
   clamps leave it where it was placed. Its ankle has no twist, so a foot
-  turns with the shin about the leg; one resting flat on the floor (its
-  points on the floor spanning most of its length) takes that turn about
-  the middle of what rests, not about its ankle.
+  turns with the shin about the leg. One resting flat on the floor (its
+  points on the floor spanning most of its length) keeps the turn it came
+  down with: the leg swings round the line from its hip to its ankle (the
+  knee goes aside, the ankle stays where it is) until the shin holds the
+  foot there, up to 25° (its hip's twist), and only where the clamped legs
+  still leave every foot within 3 mm of where it was placed. Past that the
+  foot takes the rest of the shin's turn about the middle of what rests on
+  the floor, not about its ankle. A step off a rest eases the held turn into
+  the clip's over the step. Its toes point down only as far as its ankle
+  keeps its whole roll range (28.15° of pitch, less 1°: near the 30.9° stop
+  the roll narrows to a few degrees, and a hanging foot there would roll
+  from one stop to the other).
 - **The hand-over.** Where a seat's frames meet the plant's, the plant
   drops a stance's hold at once (the foot jumps by all the stance's
   correction: up to 26 cm measured). `bake` passes each foot and the pelvis
@@ -232,9 +270,9 @@ def script(b):
     b.stand_up('sit_to_stand')
 ```
 
-The robot body's bake does not read `body.seat_plan` yet: it places a seated
-clip where the feet stood before the seat, so the body sits on air there
-(`test_robot_seat.py` logs it 148 cm from the chair; see Not yet ported).
+The robot body's bake seats it by that plan: in `test_robot_seat.py`, sat
+down, its hips rest on the plan's target (0.0 cm) and its seated skin on the
+pan (0.1 cm).
 
 ## On the ground — `sit_on_ground`
 
@@ -255,8 +293,8 @@ and the rise: where the floor is, an ankle rises (on my robot body after
 its leg's clamps), the toes turn up where the leg cannot fold further, and a
 forearm under the floor turns up at the shoulder. The engine casts at every visible mesh;
 here the spring chains are left out (tails, tentacles, hair, a coat's tails:
-`bake_springs` swings them afterwards, through whatever they were measured
-against), and so are loose layers (a coat skinned to the thighs: on the
+the take's spring bake swings them afterwards, resting them on the floor and
+keeping them out of the scene's solids), and so are loose layers (a coat skinned to the thighs: on the
 ground its hem propped Aletheia 6 cm up, her crossed legs hovering; it goes
 under the floor where it hangs under her, hidden by it). Lying down,
 Aletheia's tails reach under her back at rest: measured with them she lay
@@ -398,23 +436,22 @@ the body out of the floor through a ground sit's crossfades).
   the sit-down reversed at 1.25x to stand, the walk on with the cheer over
   it.
 - `test_robot_seat.py`: `seat_on` on a VRM my robot body drives: the body
-  placed and seated through its own state, the plan kept for its bake.
+  placed and seated through its own state, the plan kept for its bake, and
+  the body's own bake seating it by the plan (the hips on its target, the
+  seated skin on the pan).
+- `test_start_seated.py`: `seat_on(instant=True)`: a take that opens seated
+  on a chair, stands up and walks off, then a cut into a 0.56 m chair in the
+  fidget loop, a stand-up and a walk (the springs reset and settled at the
+  cut).
+
+The spring chains through seats, lying down and the walks between are the
+characters family's test (`blender/tests/characters/test_take_springs.py`,
+[controller.md](controller.md#springs-ride-the-take)).
 
 ## Not yet ported
 
-- `seatOn`'s instant path for a walking body: the engine snaps a VRM into the
-  chair pose (a standalone mixer beside the controller's). Here the
-  controller path always sits down through a transition; `clip=` becomes the
-  seated loop after it.
 - A stand-to-ground clip: the library has none, so a ground sit is a
   crossfade (eased, held out of the floor).
-- Springs after a seat: the engine reset the VRM's spring bones after the
-  settle; baked springs (the characters family's) are baked after the take.
-- My robot body's bake does not read `body.seat_plan`: a seat through its own
-  seated state is placed and planned here, but its bake still places the
-  seated clip where the feet stood before and on the floor (the body sits on
-  air there). Its bake needs to place the seat's span at the plan's spot and
-  heading, lift its root by `lift_v` and put the seated feet on the floor.
 - My robot body's ground sit is a long sit, not the library's cross-legged
   clip: its hips flex 98° at most and its knees 112°, so the legs cannot fold.
   The ankles are carried along the floor to a place straight ahead of each
@@ -426,20 +463,6 @@ the body out of the floor through a ground sit's crossfades).
 Known residuals (each measured by the tests; the JSON reports in `out/` list
 the frames):
 
-- On my robot body (`--vrm claude_robot`: 123 of 125 checks pass): its
-  ankle has no twist, so a seated foot turns with the shin about the leg.
-  Late in chair A's stand-up the right sole, turned about the middle of what
-  rests on the floor, still slides 6.2 mm in a frame (the check's limit is
-  6). On chair B (0.56 m) a foot hanging on its toes near the ankle's pitch
-  stop, where its roll range narrows, rolls 4° in one frame of the seated
-  loop: the toes slide 10.2 mm.
-- Lying down, the tails stand into the floor (rest pose; baked springs have
-  no floor to collide with either).
-- The ladder's mantle can leave a boot up to 7 mm inside the wall for a few
-  frames.
-- After the vault from standing (`test_maneuver_moves.py`, 86 of 87 checks),
-  the landing foot settles on the second frame the plant holds it: it rolls
-  6.4 mm and slips 1.7 mm (the check's limits are 2.5 and 1 mm), then stays.
 - A coat skinned to the body without cloth presses into a chair's back (it
   never comes out of it) and into a seat's pan where it falls past the edge,
   and on the ground goes under the floor where it hangs under her (hidden).

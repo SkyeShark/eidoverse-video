@@ -11,12 +11,16 @@ writes, in out_dir:
                      punctual lights in Blender's own watts (lighting mode COMPAT, which three's physical lights read
                      as Blender means them: a sun's W/m2 is three's lux, a point's W / 4 pi its candela), cameras, the
                      page's xr_* custom properties as extras, materials as the exporter writes them after the bake
-                     below. Two faults of the 5.2 exporter are handled: its EXT_mesh_gpu_instancing pass leaves
+                     below. Three faults of the 5.2 exporter are handled: its EXT_mesh_gpu_instancing pass leaves
                      animation channels on stale node indices (_GpuInstancingChannelFix re-points them while it runs;
-                     check_channels reads the GLB back), and its own instance nodes (export_gn_mesh) are left off:
-                     every instance is made an object first (keyed with the motion bake, still at the first frame
-                     without it)
-    world.hdr        the world, equirectangular, three's convention (eidoblend.xr.world): the page's sky and its IBL
+                     check_channels reads the GLB back), its KHR_animation_pointer pass loses a keyed material on an
+                     object with modifiers (_PointerMaterialFix hands it the original), and its own instance nodes
+                     (export_gn_mesh) are left off: every instance is made an object first (keyed with the motion
+                     bake, still at the first frame without it)
+    world.hdr        the world, equirectangular, three's convention (eidoblend.xr.world): the page's sky and its IBL;
+                     world_NNN.hdr instead when the world changes over the film (a timed sequence, world_changes)
+    vrm/<cast>.vrm   each VRM cast as the VRM add-on writes it: the page draws its MToon on the GLB's character
+    audio.mp3        the film's sound strips mixed down (eidoblend.media.audio.mixdown), played on the page's clock
     textures/        what bake_for_gltf baked (eidoblend.xr.materials)
     choreo.json      markers and the property tracks glTF cannot carry (eidoblend.xr.motion.property_tracks)
     scene.xr.json    the manifest the page reads: XR scales and start, view transform, lights glTF has no type for
@@ -185,7 +189,7 @@ def export_objects(scene):
 NOT_IN_GLTF = {'VOLUME': 'a volume (smoke, fire, clouds): glTF has no volumes; the page shows nothing there',
                'GREASEPENCIL': 'Grease Pencil strokes: not glTF',
                'CURVES': 'hair curves: not glTF (a mesh card version would be)',
-               'SPEAKER': 'a speaker: the page has no sound',
+               'SPEAKER': 'a speaker: the page plays the film\'s mixdown (audio.mp3), not positional sound',
                'LIGHT_PROBE': "a light probe: the page lights with world.hdr and the GLB's lights"}
 
 
@@ -316,6 +320,9 @@ def survey_xr(scene=None):
         'animated': sorted({(k, getattr(o, 'name', '?'), p) for k, o, p in props}),
         'lights': sorted((o.name, o.data.type) for o in objs if o.type == 'LIGHT'),
         'world': sc.world.name if sc.world else None,
+        'world_changes': world_changes(sc),
+        'vrm_casts': [a.name for a, _m in vrm_casts(objs)],
+        'sound_strips': len(sound_strips(sc)),
         'view': (sc.view_settings.view_transform, sc.view_settings.look, sc.view_settings.exposure),
         'triangles_now': tri, 'xr': xr,
         'textures': {'images': len(imgs), 'largest': max((max(s) for s in imgs.values()), default=0),
@@ -424,16 +431,62 @@ class _GpuInstancingChannelFix:
             self.cls.manage_gpu_instancing_nodes = self.orig
 
 
+class _PointerMaterialFix:
+    """Blender 5.2's glTF exporter records a material whose values are keyed (for KHR_animation_pointer) by the Python
+    id of the material it meets on the mesh. With export_apply an object with modifiers (a skinned character's
+    armature included) is exported from its evaluated mesh, so that material is the evaluated copy, and the scene
+    animation then looks for that id among bpy.data.materials, finds nothing and stops the export. The exporter keeps
+    each copy's original (export_settings['material_identifiers']) but reads that map in its NLA mode only. While this
+    is active, every material's Python object is held (a material's id is its Python object's, which Blender keeps only
+    while something holds it), and the recorded materials are re-keyed to their originals just before the animations
+    are gathered, so the channels animate the original's glTF material."""
+
+    def __enter__(self):
+        self.mod = self.orig = None
+        self.held = list(bpy.data.materials)
+        try:
+            from io_scene_gltf2.blender.exp import gather as GA
+        except ImportError:
+            return self
+        orig = getattr(GA, 'gather_animations', None)
+        if orig is None:
+            return self
+
+        def fixed(export_settings):
+            table = (export_settings.get('KHR_animation_pointer') or {}).get('materials') or {}
+            originals = export_settings.get('material_identifiers') or {}
+            self.held += [m for m in bpy.data.materials if m not in self.held]
+            in_data = {id(m) for m in self.held}
+            for key in [k for k in table if k not in in_data]:
+                m = originals.get(key)
+                if m is None or not isinstance(m, bpy.types.Material) or id(m) not in in_data:
+                    continue
+                entry = table.pop(key)
+                table.setdefault(id(m), entry)
+            return orig(export_settings)
+
+        self.mod, self.orig = GA, orig
+        GA.gather_animations = fixed
+        return self
+
+    def __exit__(self, *exc):
+        if self.mod is not None:
+            self.mod.gather_animations = self.orig
+        self.held = []
+
+
 def check_channels(g, scene, objects):
     """[problems] of an exported GLB's animation: channels on nodes that do not exist, and objects that move in Blender
     (their world matrix differs between the first, middle and last frames) with no channel on their node (the
-    exporter's own index slips show up here)."""
+    exporter's own index slips show up here). KHR_animation_pointer channels target no node and are not counted."""
     js = g.json
     nodes = js.get('nodes', [])
     targeted = set()
     out = []
     for a in js.get('animations', []):
         for ch in a['channels']:
+            if ch['target'].get('path') == 'pointer':
+                continue
             i = ch['target'].get('node')
             if i is None or i >= len(nodes):
                 out.append(f"a {ch['target'].get('path')} channel targets node {i}, past the {len(nodes)} nodes")
@@ -464,6 +517,128 @@ def check_channels(g, scene, objects):
     return out
 
 
+def vrm_casts(objects):
+    """[(armature, [meshes])]: the armatures whose meshes wear MToon (a VRM cast, its materials as the VRM add-on keeps
+    them)"""
+    from .materials import mtoon, used_materials
+    out = []
+    for arm in [o for o in objects if o.type == 'ARMATURE']:
+        meshes = [o for o in objects if o.type == 'MESH' and (o.parent == arm or any(
+            m.type == 'ARMATURE' and m.object == arm for m in o.modifiers))]
+        if any(mtoon(m) is not None for o in meshes for m in used_materials(o)):
+            out.append((arm, meshes))
+    return out
+
+
+def export_vrm_casts(objects, out_dir, log=print):
+    """Each VRM cast as a .vrm in out_dir/vrm/, written by the VRM add-on's exporter (its MToon materials, outlines
+    included, as the add-on keeps them): the page draws the GLB's stand-ins of those materials with three-vrm's MToon.
+    Each cast is written alone (its armature and meshes selected, the exporter's export_only_selections; without it the
+    add-on writes every visible object of the scene into each cast's file). Run before the stand-ins replace them
+    (convert_mtoon). -> ([{'file', 'armature', 'materials'}], [warnings])"""
+    from .materials import _slug, mtoon, used_materials
+    made, warnings = [], []
+    vl = bpy.context.view_layer
+    selected, active = [o for o in vl.objects if o.select_get()], vl.objects.active
+    for arm, meshes in vrm_casts(objects):
+        rel = f'vrm/{_slug(arm.name)}.vrm'
+        path = os.path.join(out_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        names = sorted({m.name for o in meshes for m in used_materials(o) if mtoon(m) is not None})
+        cast = [arm] + meshes
+        try:
+            for o in selected:
+                o.select_set(False)
+            for o in cast:
+                o.select_set(True)
+            vl.objects.active = arm
+            bpy.ops.export_scene.vrm(filepath=path, armature_object_name=arm.name, export_invisibles=False,
+                                     export_only_selections=True, ignore_warning=True)
+        except Exception as e:                              # the add-on refused the cast: the stand-ins stay
+            warnings.append(f'{arm.name}: its .vrm could not be written ({str(e)[:160]}): its MToon materials are '
+                            'drawn as their PBR stand-ins')
+            continue
+        finally:
+            for o in cast:
+                o.select_set(False)
+            for o in selected:
+                o.select_set(True)
+            vl.objects.active = active
+        if not os.path.exists(path):
+            warnings.append(f'{arm.name}: the VRM exporter wrote nothing: its MToon materials are drawn as their PBR '
+                            'stand-ins')
+            continue
+        made.append({'file': rel, 'armature': arm.name, 'materials': names, 'bytes': os.path.getsize(path)})
+        if log:
+            log(f'[xr] {arm.name}: {rel} ({os.path.getsize(path) / 1e6:.1f} MB, {len(names)} MToon materials)')
+    return made, warnings
+
+
+def world_changes(scene):
+    """Whether the world's look changes over the film: keyed or driven world node values (eidoblend.sky keys its
+    world as it bakes), or an image sequence or a movie in the world's nodes."""
+    from . import motion as MO
+    from .materials import _tree_images
+    w = scene.world
+    if w is None or w.node_tree is None:
+        return False
+    if any(k == 'world' for k, _o, _p in MO.animated_properties(scene)):
+        return True
+    return any(img.source in ('SEQUENCE', 'MOVIE') for img in _tree_images(w.node_tree, set()))
+
+
+def world_sequence_frames(scene, step=1.0, most=32):
+    """The frames a changing world is baked at: every `step` seconds over the film, `most` at most, both ends in."""
+    fs, fe = scene.frame_start, scene.frame_end
+    fps = scene.render.fps / scene.render.fps_base
+    n = max(2, min(int(most), int(math.ceil((fe - fs) / fps / max(step, 1e-3))) + 1))
+    return sorted({int(round(fs + (fe - fs) * i / (n - 1))) for i in range(n)})
+
+
+def world_gpu_mb(width, count=1):
+    """The GPU memory (MB) the page gives `count` world images `width` wide: each equirect as three's HDRLoader
+    uploads it (half-float RGBA, no mips) and its prefiltered environment (three's PMREM: a 3 max(c, 112) x 4 c
+    half-float target, c the power of two at or below width / 4). A 1024-wide image takes 10.5 MB, 2048 wide 41.9 MB."""
+    if count <= 0 or width <= 0:
+        return 0.0
+    c = 2 ** int(math.floor(math.log2(max(16.0, width / 4))))
+    return round(count * (width * (width // 2) + 3 * max(c, 112) * 4 * c) * 8 / 1e6, 1)
+
+
+def sound_strips(scene):
+    """The scene's sound strips (the film's sound)."""
+    se = scene.sequence_editor
+    if se is None:
+        return []
+    return [s for s in (getattr(se, 'strips_all', None) or getattr(se, 'sequences_all', None) or [])
+            if s.type == 'SOUND' and not s.mute]
+
+
+def pointer_targets(g):
+    """{'materials': {names}, 'cameras': {names}, 'lights': {names}, 'count': n}: what the GLB's KHR_animation_pointer
+    channels animate, by the glTF names the exporter gave them (Blender's material, camera and light names)."""
+    js = g.json
+    out = {'materials': set(), 'cameras': set(), 'lights': set(), 'count': 0}
+    lights = (js.get('extensions') or {}).get('KHR_lights_punctual', {}).get('lights', [])
+    for a in js.get('animations', []):
+        for ch in a['channels']:
+            ptr = ((ch['target'].get('extensions') or {}).get('KHR_animation_pointer') or {}).get('pointer')
+            if ch['target'].get('path') != 'pointer' or not ptr:
+                continue
+            out['count'] += 1
+            p = ptr.split('/')
+            try:
+                if p[1] == 'materials':
+                    out['materials'].add(js['materials'][int(p[2])].get('name'))
+                elif p[1] == 'cameras':
+                    out['cameras'].add(js['cameras'][int(p[2])].get('name'))
+                elif p[1] == 'extensions' and p[2] == 'KHR_lights_punctual':
+                    out['lights'].add(lights[int(p[4])].get('name'))
+            except (IndexError, ValueError, KeyError):
+                pass
+    return out
+
+
 def write_page(out_dir, manifest_name='scene.xr.json', template=PAGE_TEMPLATE):
     """index.html in out_dir: the page template, reading `manifest_name` beside it."""
     with open(template, encoding='utf-8') as f:
@@ -480,14 +655,19 @@ def write_page(out_dir, manifest_name='scene.xr.json', template=PAGE_TEMPLATE):
 @_on_its_scene
 def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_density=24.0, max_texture=2048,
               max_image=None, bake_motion=True, motion_step=1, max_shape_keys=48, world=True, world_width=2048,
-              world_frame=None, world_samples=32, image_format='AUTO', compress=None, cameras=True, page=True,
-              choreo_names=(), log=print):
+              world_frame=None, world_samples=32, world_step=1.0, world_sequence_max=32, world_sequence_width=1024,
+              image_format='AUTO', compress=None, cameras=True, page=True, choreo_names=(), vrm=True, audio=True,
+              log=print):
     """Export `scene` for an XR page into out_dir (see the module doc). Returns the manifest (a dict) with
     'report': what was baked, converted, skipped, and the GLB's own counts read back. Any scene (default the context
     scene): it is made the context scene while it exports (context_scene), the window's own put back after.
     max_texture caps the bakes; max_image (None: off) scales the film's own image textures down to that many pixels
     on the long side (materials.cap_images), for the headset's texture budget. bake_motion False sends instances and
-    deformation out still, at the first frame (keys, constraints, armatures and shape keys still play)."""
+    deformation out still, at the first frame (keys, constraints, armatures and shape keys still play).
+    A world that changes over the film (world_changes) is baked every world_step seconds (world_sequence_max images at
+    most, world_sequence_width wide) into a timed sequence the page cross-fades; vrm writes each VRM cast's .vrm for
+    the page's MToon (export_vrm_casts); audio writes the film's sound strips' mixdown (audio.mp3) the page plays on
+    its clock."""
     t0 = time.time()
     sc = scene or bpy.context.scene
     out_dir = os.path.abspath(out_dir)
@@ -512,11 +692,26 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
         o.hide_render = True
     rep['metaballs'] = metaballs_to_meshes(sc, objs, log=log)
     objs = export_objects(sc)
+    # the film's sound, and each VRM cast's .vrm (its MToon for the page), before anything below changes the scene
+    rep['audio'] = None
+    if audio and sound_strips(sc):
+        from ..media.audio import mixdown
+        try:
+            mixdown(sc, os.path.join(out_dir, 'audio.mp3'), bitrate=192)
+            rep['audio'] = {'file': 'audio.mp3', 'offset': 0.0, 'strips': len(sound_strips(sc))}
+        except Exception as e:
+            rep['warnings'].append(f'the film\'s sound could not be mixed down ({str(e)[:160]}): the page is silent')
+    rep['vrm'] = []
+    if vrm:
+        rep['vrm'], vw = export_vrm_casts(objs, out_dir, log=log)
+        rep['warnings'] += vw
     rep['mtoon_outlines_off'] = M.drop_mtoon_outlines(objs, log=log)
     rep['mtoon'] = M.convert_mtoon(objs, log=log)            # a conversion, not a bake: done with or without bakes
-    if rep['mtoon']:
-        rep['warnings'].append(f"{len(rep['mtoon'])} MToon material(s) drawn as a PBR stand-in (base colour, normal, "
-                               'emission, alpha); the toon ramp is not glTF' +
+    in_vrm = {n for v in rep['vrm'] for n in v['materials']}
+    stand_ins = [n for n in rep['mtoon'] if n not in in_vrm]
+    if stand_ins:
+        rep['warnings'].append(f"{len(stand_ins)} MToon material(s) drawn as a PBR stand-in (base colour, normal, "
+                               'emission, alpha): no .vrm carries them' +
                                (f", outlines off on {len(rep['mtoon_outlines_off'])} mesh(es)"
                                 if rep['mtoon_outlines_off'] else ''))
     # 1. motion glTF cannot carry. Instances always become objects (the exporter's own instance nodes break its
@@ -554,9 +749,6 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
         tracks = choreo.write(sc, os.path.join(out_dir, 'choreo.json'), names=choreo_names, step=2)
         rep['tracks'] = {'lights': sorted(tracks['props']['lights']), 'emission': sorted(tracks['props']['emission']),
                          'visible': sorted(tracks['props']['visible']), 'markers': len(tracks['markers'])}
-        for k, o, p in props:
-            if k in ('camera', 'world') or (k == 'material' and MO.emission_socket(o, p) is None):
-                rep['warnings'].append(f'{k} {getattr(o, "name", "?")}.{p} is animated: the page does not play it')
     # objects whose visibility is keyed go into the GLB shown; the page's visibility track hides them in time
     for k, o, p in props:
         if k == 'visibility':
@@ -587,14 +779,28 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
         if r['spread'] < 179.0:
             rep['warnings'].append(f"area light {r['name']}: spread {r['spread']:.0f} deg is drawn at 180 "
                                    '(three RectAreaLight has no spread)')
-    # 5. the world
+    # 5. the world: one image, or a timed sequence when it changes over the film
     world_info = None
     if world and sc.world is not None:
         from . import world as W
-        wf = world_frame if world_frame is not None else sc.frame_start
-        wi = W.bake_world_equirect(sc, os.path.join(out_dir, 'world.hdr'), width=world_width, samples=world_samples,
-                                   frame=wf, log=log)
-        world_info = {'equirect': 'world.hdr', 'frame': wf, 'mean': wi['mean'], 'max': wi['max']}
+        if world_frame is None and world_changes(sc):
+            seq = []
+            for i, f in enumerate(world_sequence_frames(sc, world_step, world_sequence_max)):
+                fn = f'world_{i:03d}.hdr'
+                wi = W.bake_world_equirect(sc, os.path.join(out_dir, fn), width=world_sequence_width,
+                                           samples=world_samples, frame=f, log=log)
+                seq.append({'t': round((f - sc.frame_start) / fps, 5), 'frame': f, 'file': fn, 'mean': wi['mean'],
+                            'max': wi['max']})
+            world_info = {'equirect': seq[0]['file'], 'frame': seq[0]['frame'], 'mean': seq[0]['mean'],
+                          'max': max(s['max'] for s in seq), 'sequence': seq}
+            rep['world_sequence'] = len(seq)
+            rep['world_mb_gpu'] = world_gpu_mb(world_sequence_width, len(seq))
+        else:
+            wf = world_frame if world_frame is not None else sc.frame_start
+            wi = W.bake_world_equirect(sc, os.path.join(out_dir, 'world.hdr'), width=world_width,
+                                       samples=world_samples, frame=wf, log=log)
+            world_info = {'equirect': 'world.hdr', 'frame': wf, 'mean': wi['mean'], 'max': wi['max']}
+            rep['world_mb_gpu'] = world_gpu_mb(world_width)
     # 6. the GLB
     glb_path = os.path.join(out_dir, f'{name}.glb')
     any_normal = any('normal' in v.get('images', {}) for v in rep['materials'].get('baked', {}).values())
@@ -611,13 +817,13 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
               export_frame_step=int(motion_step), export_anim_slide_to_zero=True, export_bake_animation=True,
               export_optimize_animation_size=True, export_skins=True, export_morph=True, export_morph_normal=True,
               export_morph_animation=True, export_gpu_instances=True, export_gn_mesh=False,
-              export_vertex_color='MATERIAL', will_save_settings=False)
+              export_vertex_color='MATERIAL', export_pointer_animation=True, will_save_settings=False)
     if compress == 'draco':
         kw.update(export_draco_mesh_compression_enable=True)
     elif compress == 'meshopt':
         kw.update(export_meshopt_compression_enable=True)
     sc.frame_set(sc.frame_start)
-    with _GpuInstancingChannelFix():
+    with _GpuInstancingChannelFix(), _PointerMaterialFix():
         bpy.ops.export_scene.gltf(**kw)
     sc.frame_set(keep_frame)
     if not os.path.exists(glb_path):
@@ -626,12 +832,37 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
     rep['channel_problems'] = check_channels(g, sc, export_objects(sc))
     for p in rep['channel_problems']:
         rep['warnings'].append(f'GLB animation: {p}')
+    # animated values: the GLB's KHR_animation_pointer channels carry material factors, camera lenses and light values
+    # (the page plays them); what none carries is named, unless choreo.json or the world sequence plays it
+    pt = pointer_targets(g)
+    rep['pointer_tracks'] = pt['count']
+    for k, o, p in props:
+        if k == 'world':
+            if world_info is None or not world_info.get('sequence'):
+                rep['warnings'].append(f'world {getattr(o, "name", "?")}.{p} is animated: the page shows the world at '
+                                       'one frame (world_frame, or world=False)')
+        elif k == 'camera' and o.name not in pt['cameras']:
+            rep['warnings'].append(f'camera {o.name}.{p} is animated: the GLB carries no channel for it')
+        elif k == 'material' and MO.emission_socket(o, p) is None:
+            mat = next((m for m in bpy.data.materials if m.node_tree == o), None)
+            if mat is None or mat.name not in pt['materials']:
+                rep['warnings'].append(f'material {getattr(mat, "name", "?")}: {p} is animated: no glTF factor carries '
+                                       'it (a value inside a procedural graph, or a baked channel), the page does not '
+                                       'play it')
     saved = G.strip_extras(g, keep=('xr_',))                 # only the page's own extras ride along
     if saved > 0:
         G.write(g, glb_path)
         g = G.read(glb_path)
         rep['extras_stripped_bytes'] = saved
     summ = G.summary(g)
+    # the headset's texture memory: the GLB's images and the world's (its images and their prefiltered light)
+    world_mb = rep.get('world_mb_gpu', 0.0)
+    quest = dict(summ['quest'], textures=G.budget({'triangles': 0, 'draws': 0,
+                                                   'texture_mb_gpu': summ['texture_mb_gpu'] + world_mb})['textures'])
+    if world_info and world_info.get('sequence') and quest['textures'] != summ['quest']['textures']:
+        rep['warnings'].append(f"the sky's {len(world_info['sequence'])} images and their prefiltered light take "
+                               f"{world_mb:.0f} MB of the headset's GPU memory, grading its textures {quest['textures']} "
+                               '(fewer with world_step, world_sequence_max or world_sequence_width)')
     # 7. the manifest + the page
     page_mats = {}
     for ob in objs:
@@ -663,12 +894,14 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
                                            log=log),
         'rect_lights': rect, 'page_materials': page_mats,
         'tracks': 'choreo.json' if tracks is not None else None,
+        'pointer_tracks': rep['pointer_tracks'], 'vrm': rep['vrm'], 'audio': rep['audio'],
         'camera': sc.camera.name if sc.camera else None,
         'cameras': [c['name'] for c in summ['cameras']],
         'compression': compress,
-        'counts': {k: summ[k] for k in ('nodes', 'mesh_nodes', 'triangles', 'draws', 'texture_mb_gpu', 'duration',
-                                        'skins', 'joints', 'morph_targets', 'gpu_instanced_nodes', 'bytes')},
-        'quest': summ['quest'], 'extensions': summ['extensions_used'],
+        'counts': dict({k: summ[k] for k in ('nodes', 'mesh_nodes', 'triangles', 'draws', 'texture_mb_gpu', 'duration',
+                                             'skins', 'joints', 'morph_targets', 'gpu_instanced_nodes', 'bytes')},
+                       world_mb_gpu=world_mb),
+        'quest': quest, 'extensions': summ['extensions_used'],
         'source': {'blend': keep_path, 'scene': sc.name, 'exported': datetime.datetime.now().isoformat(
             timespec='seconds'), 'blender': bpy.app.version_string},
         'warnings': rep['warnings'],
@@ -683,7 +916,8 @@ def export_xr(out_dir, scene=None, *, name='scene', bake_materials=True, texel_d
     if log:
         log(f"[xr] {glb_path}: {summ['triangles']} triangles, {summ['draws']} draws, {summ['duration']:.2f} s of "
             f"animation, {len(summ['materials'])} materials, {len(summ['lights'])} lights + {len(rect)} rect, "
-            f"Quest {summ['quest']} ({man['seconds']} s)")
+            f"{summ['texture_mb_gpu'] + world_mb:.0f} MB of textures with the world's, Quest {quest} "
+            f"({man['seconds']} s)")
         for w in rep['warnings']:
             log(f'[xr] warning: {w}')
     return man

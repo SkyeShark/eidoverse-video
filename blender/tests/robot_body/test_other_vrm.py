@@ -1,7 +1,7 @@
-"""VRMRobotBody on a VRM that is not my robot body: robot_body.js drives ANY VRM (the engine's controller under it knows
-nothing of my hardware), so here Aletheia (aletheia.vrm) senses, plans and walks with a plain RobotRig: her clips as
-they are, the body's gaze on her head bone exactly as _applyHeadOverride sets it, her feet set down, and none of my
-body's passes (joint limits, leg and arm clearances, head states, crown).
+"""VRMRobotBody on a VRM that is not my robot body: robot_body.js drives ANY VRM through the engine's controller, which
+knows nothing of my hardware, so here Aletheia (aletheia.vrm) senses, plans and walks on the controller family's legs
+with a plain RobotRig: her clips as the controller plays them, the body's gaze on her head bone exactly as
+_applyHeadOverride sets it, and none of my body's passes (joint limits, clearances, head states, crown).
 
 The room (7 x 5 m): a crate across her way and a lamp on a shelf. The scene's direction, awaited action by action:
 
@@ -9,45 +9,42 @@ The room (7 x 5 m): a crate across her way and a lamp on a shelf. The scene's di
         -> look_at(the lamp, hold) -> wait(1 s) -> perform_action('wave_goodbye', 2 s)
 
 Checks (PASS / FAIL):
-  - plain_rig: the rig knows she is not my body (hardware False), no correction was made to any joint (its stats empty),
-    and on every standing frame after a hand-over her keyed arms, hands, fingers, spine, neck and hips are the clip's own
-    pose (within 0.01 deg): no turn-out, no clamp, no re-homed clavicle
-  - arrived: the walk_to resolved and the keyed body ends within 0.5 m of the goal, round the crate it saw
+  - plain_rig: the rig knows she is not my body (hardware False), no correction was made to any joint (its stats
+    empty), and on every frame her keyed arms, hands, fingers, spine and chest are the controller's own pose (within
+    0.01 deg): no turn-out, no clamp, no re-homed clavicle
+  - arrived: the walk_to resolved and the walk stops within 0.1 m of the goal, round the crate it saw
   - gaze_is_the_js: on every frame her head bone's own turn is _applyHeadOverride's Euler(pitch, yaw, 0, 'YXZ') of the
-    body's gaze (re-aimed from where the keyed body stands: bake._aimed_gaze), her neck the clip's; holding the lamp her
-    face is off it by no more than the clip's torso and neck turn her head (+2 deg): the JS aims the head bone from the
-    body's heading alone
-  - feet: the walks' planted feet (walk_path's report: slip <= 1 mm a frame, no swing touching) and both feet on the floor
-    on the standing frames after each hand-over (within 3 mm: an emote may roll a planted foot a little onto its edge)
+    body's gaze (re-aimed from where the keyed body stands: bake._aimed_gaze), her neck the controller's; holding the
+    lamp her face is off it by no more than the clip's torso and neck turn her head (+2 deg): the JS aims the head bone
+    from the body's heading alone
+  - feet: the controller family's checks.feet on every gait, both feet on the floor standing (within 3 mm)
   - keyed: the saved action alone puts her head bone where the bake's records do (within 1 mm, evaluated)
+  - springs: her spring chains (her hair) baked over the whole keyed take, no NaN (the engine steps them every frame)
   - hands_refused: my hands' work (hands.HandModel) refuses her plainly instead of failing deep inside
-Stills: out/other_vrm_<moment>_f<k>.png; out/other_vrm.json, out/other_vrm.blend.
+Stills: out/other_vrm_<moment>_<k>_f<frame>.png (low side cameras over her walk's start and stop and her turn; her
+face on the lamp); out/other_vrm.json, out/other_vrm.blend.
 
     cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_other_vrm.py [--no-render]
+    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_other_vrm.py --no-render
 """
 
 import math
 import os
 import sys
-import time
 import traceback
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _stage as S  # noqa: E402
 
-import bmesh  # noqa: E402
 import bpy  # noqa: E402
-import numpy as np  # noqa: E402
-from mathutils import Vector  # noqa: E402
+from mathutils import Quaternion, Vector  # noqa: E402
 
-from eidoblend.characters import Ground, load_vrm  # noqa: E402
-from eidoblend.characters._math import q_from_three  # noqa: E402
+from eidoblend.characters import load_vrm  # noqa: E402
+from eidoblend.characters._math import q_from_three, quat_from_euler  # noqa: E402
 from eidoblend.characters.robot import RobotDebug, RobotRig, VRMRobotBody, hands  # noqa: E402
+from eidoblend.characters.robot.bake import _aimed_gaze  # noqa: E402
 from eidoblend.characters.robot.controller import heading_of  # noqa: E402
-from eidoblend.characters.vrma import load_clip  # noqa: E402
 
 ARGS = S.argv()
 RENDER = '--no-render' not in ARGS
@@ -55,87 +52,22 @@ CAST = next((a for a in ARGS if not a.startswith('--')), 'aletheia')
 FPS = 24
 START, GOAL = (-2.6, -0.2), (2.4, 0.3)
 LAMP = (3.2, 1.25, 1.52)
-R = {'started': time.strftime('%Y-%m-%d %H:%M:%S'), 'cast': CAST}
-T0 = time.time()
-OK = True
+R = S.Report('other_vrm')
+R['cast'] = CAST
 
 
-def log(*a):
-    print('[other_vrm]', *a, flush=True)
-
-
-def check(name, good, detail):
-    global OK
-    OK &= bool(good)
-    R.setdefault('checks', {})[name] = {'pass': bool(good), 'detail': detail}
-    print(f'{"PASS" if good else "FAIL"} {name}: {detail}', flush=True)
-
-
-def material(name, tex, scale=1.0, tint=None, colour=(0.5, 0.5, 0.5, 1.0)):
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    nt = mat.node_tree
-    bsdf = nt.nodes['Principled BSDF']
-    ts = S.C.texture_set(tex) if tex else None
-    if not ts:
-        bsdf.inputs['Base Color'].default_value = colour
-        return mat
-    tc = nt.nodes.new('ShaderNodeTexCoord')
-    mp = nt.nodes.new('ShaderNodeMapping')
-    mp.inputs['Scale'].default_value = (scale, scale, scale)
-    nt.links.new(tc.outputs['Object'], mp.inputs['Vector'])
-    for role, sock in (('color', 'Base Color'), ('rough', 'Roughness'), ('normal', None)):
-        if not ts.get(role):
-            continue
-        n = nt.nodes.new('ShaderNodeTexImage')
-        n.image = bpy.data.images.load(ts[role], check_existing=True)
-        n.image.colorspace_settings.name = 'sRGB' if role == 'color' else 'Non-Color'
-        n.projection, n.projection_blend = 'BOX', 0.2
-        nt.links.new(mp.outputs['Vector'], n.inputs['Vector'])
-        if role == 'color' and tint:
-            mx = nt.nodes.new('ShaderNodeMix')
-            mx.data_type, mx.blend_type = 'RGBA', 'MULTIPLY'
-            mx.inputs['Factor'].default_value = 1.0
-            nt.links.new(n.outputs['Color'], mx.inputs['A'])
-            mx.inputs['B'].default_value = tint
-            nt.links.new(mx.outputs['Result'], bsdf.inputs['Base Color'])
-        elif sock:
-            nt.links.new(n.outputs['Color'], bsdf.inputs[sock])
-        else:
-            nm = nt.nodes.new('ShaderNodeNormalMap')
-            nt.links.new(n.outputs['Color'], nm.inputs['Color'])
-            nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
-    return mat
-
-
-def box(name, x0, x1, y0, y1, z0, z1, mat, bevel=0.0):
-    me = bpy.data.meshes.new(name)
-    bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1.0)
-    bmesh.ops.scale(bm, vec=(x1 - x0, y1 - y0, z1 - z0), verts=bm.verts)
-    bmesh.ops.translate(bm, vec=((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), verts=bm.verts)
-    if bevel:
-        bmesh.ops.bevel(bm, geom=list(bm.edges), offset=bevel, segments=2, affect='EDGES')
-    bm.to_mesh(me)
-    bm.free()
-    ob = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(ob)
-    me.materials.append(mat)
-    return ob
-
-
-try:
+def main():
     sc = S.C.clean_scene(FPS)
-    floor_m = material('floor_wood', 'WoodFloor064_2k', 0.6)
-    wall_m = material('walls_plaster', 'PaintedPlaster017_2k', 0.5, tint=(0.82, 0.8, 0.76, 1.0))
-    crate_m = material('crate_card', 'Cardboard002_1k', 1.5)
-    shelf_m = material('shelf_metal', 'PaintedMetal012_1k', 1.0, tint=(0.42, 0.45, 0.5, 1.0))
-    floor = box('floor', -3.5, 3.5, -2.5, 2.5, -0.05, 0.0, floor_m)
+    floor_m = S.textured('floor_wood', 'WoodFloor064_2k', 0.6)
+    wall_m = S.textured('walls_plaster', 'PaintedPlaster017_2k', 0.5, tint=(0.82, 0.8, 0.76, 1.0))
+    crate_m = S.textured('crate_card', 'Cardboard002_1k', 1.5)
+    shelf_m = S.textured('shelf_metal', 'PaintedMetal012_1k', 1.0, tint=(0.42, 0.45, 0.5, 1.0))
+    floor = S.box('floor', -3.5, 3.5, -2.5, 2.5, -0.05, 0.0, floor_m)
     H = 2.6
-    obs = [box('wall_s', -3.6, 3.6, -2.6, -2.5, 0.0, H, wall_m), box('wall_n', -3.6, 3.6, 2.5, 2.6, 0.0, H, wall_m),
-           box('wall_w', -3.6, -3.5, -2.5, 2.5, 0.0, H, wall_m), box('wall_e', 3.5, 3.6, -2.5, 2.5, 0.0, H, wall_m),
-           box('crate', -0.45, 0.35, -0.9, 0.7, 0.0, 0.85, crate_m, 0.01),
-           box('shelf', 2.9, 3.45, 0.8, 1.7, 0.0, 1.4, shelf_m, 0.006)]
+    obs = [S.box('wall_s', -3.6, 3.6, -2.6, -2.5, 0.0, H, wall_m), S.box('wall_n', -3.6, 3.6, 2.5, 2.6, 0.0, H, wall_m),
+           S.box('wall_w', -3.6, -3.5, -2.5, 2.5, 0.0, H, wall_m), S.box('wall_e', 3.5, 3.6, -2.5, 2.5, 0.0, H, wall_m),
+           S.box('crate', -0.45, 0.35, -0.9, 0.7, 0.0, 0.85, crate_m, 0.01),
+           S.box('shelf', 2.9, 3.45, 0.8, 1.7, 0.0, 1.4, shelf_m, 0.006)]
     lamp_m = bpy.data.materials.new('lamp_glow')
     lamp_m.use_nodes = True
     b_ = lamp_m.node_tree.nodes['Principled BSDF']
@@ -149,12 +81,8 @@ try:
     obs.append(lamp)
     from eidoblend.characters.robot.example import studio_environment
     studio_environment(sc, 0.35, None)
-    for name, loc, energy in (('ceiling_w', (-1.8, 0.0, 2.45), 260.0), ('ceiling_e', (1.8, 0.4, 2.45), 260.0)):
-        ld = bpy.data.lights.new(name, 'AREA')
-        ld.energy, ld.size, ld.color = energy, 1.2, (1.0, 0.93, 0.85)
-        ob = bpy.data.objects.new(name, ld)
-        ob.location = loc
-        sc.collection.objects.link(ob)
+    S.area_light(sc, 'ceiling_w', (-1.8, 0.0, 2.45), 260.0, 1.2, (1.0, 0.93, 0.85))
+    S.area_light(sc, 'ceiling_e', (1.8, 0.4, 2.45), 260.0, 1.2, (1.0, 0.93, 0.85))
     ld = bpy.data.lights.new('lamp_light', 'POINT')
     ld.energy, ld.color, ld.shadow_soft_size = 40.0, (1.0, 0.75, 0.45), 0.12
     ob = bpy.data.objects.new('lamp_light', ld)
@@ -174,15 +102,15 @@ try:
     dbg = RobotDebug(body)
     for k in ('rays', 'map', 'path'):
         getattr(dbg, 'show_' + k)(True)
-    outcome = {}
-    marks = {}
+    outcome, marks = {}, {}
 
     def script(b):
         a = yield b.scan_area(yaw_range=90, duration=1.5)
         outcome['scan'] = a.state
         a = yield b.walk_to(*GOAL)
         outcome['walk_to'] = (a.state, str(a.error) if a.error else None)
-        p_ = b.get_position()                         # she turns (on her feet, in the bake) to have the lamp 25 deg left
+        marks['arrived'] = b.frame_count
+        p_ = b.get_position()                         # she turns on the spot to have the lamp 25 deg to her left
         a = yield b.face_direction(heading_of(LAMP[0] - p_['x'], LAMP[1] - p_['y']) - math.radians(25.0))
         outcome['face_direction'] = a.state
         a = yield b.look_at(*LAMP, hold=True)
@@ -204,143 +132,112 @@ try:
             break
     R['run'] = {'frames': body.frame_count, 'outcome': outcome, 'marks': marks,
                 'log': [(round(t, 2), e) for t, e in body.log]}
-    log('run', R['run'])
-    rep = body.bake(f0=1, ground=Ground(fn=lambda x, y: 0.0 * np.asarray(x)), face=lambda t: {'happy': 0.3},
-                    action_name=f'{CAST}|other_vrm')
+    R.log('run', R['run'])
+    rep = body.bake(face=lambda t: {'happy': 0.3}, action_name=f'{CAST}|other_vrm')
     sc.frame_start, sc.frame_end = rep['frames']
-    objs = dbg.build(rep)
-    frames = rep['_frames']
-    R['bake'] = {k: v for k, v in rep.items() if not k.startswith('_') and k not in ('map', 'walks')}
+    dbg.build(rep)
+    frames, recs = rep['_frames'], rep['_records']
+    f0 = rep['frames'][0]
+    R['bake'] = {k: v for k, v in rep.items() if not k.startswith('_') and k not in ('map', 'stances', 'swings')}
 
-    # ---- plain_rig: her clips as they are
-    clip = load_clip(me, 'idle')
-    kept = ('hips', 'spine', 'chest', 'upperChest', 'neck', 'leftShoulder', 'rightShoulder', 'leftUpperArm',
-            'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand', 'leftIndexProximal',
-            'rightThumbProximal', 'leftLittleDistal')
+    # ---- plain_rig: her pose is the controller's own (my passes touch only her head bone's gaze)
+    kept = ('spine', 'chest', 'upperChest', 'leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm',
+            'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand', 'leftIndexProximal', 'rightThumbProximal',
+            'leftLittleDistal')
     kept = [n for n in kept if n in me.humanoid]
-    worst, judged = (0.0, None, None), 0
-    per_bone = {}
-    for fr in frames:
-        if fr['src'] != ('stand', 'idle', None):
-            continue
-        tc = (fr['f'] - rep['frames'][0]) * dt + dt         # the bake's idle clock: the film's time plus one step
-        p3, _off = rig.clip_pose(clip, tc)                  # (as the bake sums it: at a loop's seam the last bit counts)
-        judged += 1
+    worst = (0.0, None, None)
+    for fr, r in zip(frames, recs):
         for n in kept:
-            a = math.degrees(fr['N'][n].rotation_difference(q_from_three(p3[n])).angle)
-            per_bone[n] = max(per_bone.get(n, 0.0), round(a, 5))
+            a = math.degrees(fr['N'][n].rotation_difference(r['N'][n]).angle) if n in r['N'] else 0.0
             if a > worst[0]:
                 worst = (a, fr['f'], n)
-    R['plain_rig'] = {'hardware': rig.hardware, 'stats': rig.stats, 'standing_frames_judged': judged,
-                      'worst_deg': [round(worst[0], 5), worst[1], worst[2]], 'per_bone_deg': per_bone,
-                      'src_around_worst': [(fr['f'], fr['src']) for fr in frames
-                                           if worst[1] and abs(fr['f'] - worst[1]) <= 3]}
-    check('plain_rig', rig.hardware is False and not rig.stats and judged > 20 and worst[0] < 0.01,
-          f'hardware {rig.hardware}, joint corrections {rig.stats or "none"}; on {judged} standing frames her keyed '
-          f'{", ".join(kept[:6])} ... are the idle\'s own within {worst[0]:.5f} deg (worst at frame {worst[1]}, {worst[2]})')
+    R['plain_rig'] = {'hardware': rig.hardware, 'stats': rig.stats, 'frames': len(frames),
+                      'worst_deg': [round(worst[0], 5), worst[1], worst[2]]}
+    R.check('plain_rig', rig.hardware is False and not rig.stats and worst[0] < 0.01,
+            f'hardware {rig.hardware}, joint corrections {rig.stats or "none"}; on all {len(frames)} frames her keyed '
+            f'{", ".join(kept[:6])} ... are the controller\'s own pose within {worst[0]:.5f} deg (worst at frame '
+            f'{worst[1]}, {worst[2]})')
 
-    # ---- arrived
-    walk_frames = [fr for fr in frames if fr['src'][0] == 'walk']
-    last = (walk_frames[-1] if walk_frames else frames[-1])['M'].translation
-    end = frames[-1]['M'].translation
-    dgoal = math.hypot(end.x - GOAL[0], end.y - GOAL[1])
+    # ---- arrived, round the crate
+    stop = recs[marks['arrived'] - 1]['feet_world']
+    dgoal = math.hypot(stop[0] - GOAL[0], stop[1] - GOAL[1])
     crate_min = math.inf
-    for fr in walk_frames:
+    for fr in frames:
         p = fr['M'].translation
         dx = max(-0.45 - p.x, 0.0, p.x - 0.35)
         dy = max(-0.9 - p.y, 0.0, p.y - 0.7)
         crate_min = min(crate_min, math.hypot(dx, dy))
     R['arrived'] = {'from_goal_m': round(dgoal, 3), 'root_to_crate_min_m': round(crate_min, 3)}
-    check('arrived', outcome.get('walk_to', ('',))[0] == 'resolved' and dgoal < 0.5 and crate_min > 0.25,
-          f'walk_to {outcome.get("walk_to")}; the keyed body ends {dgoal:.3f} m from the goal, its root at least '
-          f'{crate_min:.3f} m from the crate it walked round')
+    R.check('arrived', outcome.get('walk_to', ('',))[0] == 'resolved' and dgoal < 0.1 and crate_min > 0.25,
+            f'walk_to {outcome.get("walk_to")}; the walk stops {dgoal:.3f} m from the goal, the root at least '
+            f'{crate_min:.3f} m from the crate it walked round')
 
     # ---- the gaze: robot_body.js's _applyHeadOverride on her head bone, every frame, and on the lamp while it holds
-    from eidoblend.characters._math import quat_from_euler
     lamp_p = Vector(LAMP)
-    legs_rec = body.controller.char_ctrl.record
-    f_map = rep['map']
-    film_of = {}
-    for j, i in enumerate(f_map):
-        film_of.setdefault(i, rep['frames'][0] + j)
-    from eidoblend.characters.robot.bake import _aimed_gaze
-    head_err = (0.0, None)
-    for j, fr in enumerate(frames):
-        g = _aimed_gaze(rig, fr, legs_rec[f_map[j]])        # the live gaze, re-aimed from where the keyed body stands
+    head_err, neck_off = (0.0, None), 0.0
+    for fr, r in zip(frames, recs):
+        # (a bone no clip binds stays at rest in the controller's pose: identity)
+        neck_off = max(neck_off, math.degrees(fr['N'].get('neck', Quaternion()).rotation_difference(
+            r['N'].get('neck', Quaternion())).angle))
+        g = _aimed_gaze(rig, fr, r)                       # the live gaze, re-aimed from where the keyed body stands
         if g is None:
             continue
         want = q_from_three(quat_from_euler(g[1], g[0], 0.0, 'YXZ'))
         a = math.degrees(fr['N']['head'].rotation_difference(want).angle)
         if a > head_err[0]:
             head_err = (a, fr['f'])
-    fa = film_of.get(marks.get('look_from', 0) + 2)
-    fb = film_of.get(marks.get('look_to', 0) - 1)
-    offs, chain, neck_off, aim_err, live_err = [], [], 0.0, [], []
-    for fr in frames:
-        if fa is None or fb is None or not (fa <= fr['f'] <= fb):
-            continue
+    fa, fb = f0 + marks.get('look_from', 0) + 1, f0 + marks.get('look_to', 0) - 2
+    offs, chain = [], []
+    for fr in frames[fa - f0:fb - f0 + 1]:
         p, W = rig.bone_world(fr, 'head')
-        fwd = W @ Vector((0.0, -1.0, 0.0))
-        offs.append((round(math.degrees(fwd.angle(lamp_p - p)), 2), fr['f']))
-        # the part of that the clip's own torso and neck make (the JS aims the head from the body's heading alone)
+        offs.append((round(math.degrees((W @ Vector((0.0, -1.0, 0.0))).angle(lamp_p - p)), 2), fr['f']))
         _pn, Wn = rig.bone_world(fr, 'neck')
-        Mq = fr['M'].to_quaternion()
-        chain.append(round(math.degrees((Mq.inverted() @ Wn).angle), 2))
-        hk = 2.0 * math.atan2(Mq.z, Mq.w)
-        fv = Vector((math.sin(hk), -math.cos(hk)))
-        d_ = lamp_p - p
-        lz_, lx_ = d_.x * fv.x + d_.y * fv.y, d_.x * (-fv.y) + d_.y * fv.x
-        g = _aimed_gaze(rig, fr, legs_rec[f_map[fr['f'] - rep['frames'][0]]]) or (0.0, 0.0)
-        g_live = legs_rec[f_map[fr['f'] - rep['frames'][0]]].get('gaze') or (0.0, 0.0)
-        live_err.append(round(math.degrees(math.atan2(lx_, lz_) - g_live[0]), 2))
-        aim_err.append((round(math.degrees(math.atan2(lx_, lz_) - g[0]), 2),
-                        round(math.degrees(-math.atan2(d_.z, math.hypot(lx_, lz_)) - g[1]), 2), fr['f']))
-        tc = (fr['f'] - rep['frames'][0]) * dt + dt
-        if fr['src'] == ('stand', 'idle', None):
-            p3, _o = rig.clip_pose(clip, tc)
-            neck_off = max(neck_off, math.degrees(fr['N']['neck'].rotation_difference(q_from_three(p3['neck'])).angle))
+        chain.append(round(math.degrees((fr['M'].to_quaternion().inverted() @ Wn).angle), 2))
     R['gaze'] = {'head_local_vs_js_deg': [round(head_err[0], 5), head_err[1]], 'frames': [fa, fb],
-                 'facing_off_lamp_deg': offs, 'torso_and_neck_turn_deg': chain, 'neck_vs_clip_deg': round(neck_off, 5),
-                 'keyed_aim_less_applied_gaze_deg': aim_err, 'keyed_aim_less_live_gaze_yaw_deg': live_err}
-    check('gaze_is_the_js', head_err[0] < 0.01 and bool(offs) and neck_off < 0.01 and max(offs)[0] <= max(chain) + 2.0,
-          f'on every frame her head bone\'s own turn is _applyHeadOverride\'s Euler(pitch, yaw, 0, YXZ) of the body\'s '
-          f'gaze (re-aimed from where the keyed body stands: the live run aimed it {min(live_err)}-{max(live_err)} deg '
-          f'off for this body) within {head_err[0]:.5f} deg; her neck stays the clip\'s within {neck_off:.5f} deg; '
-          f'holding the lamp (frames {fa}-{fb}) her face is {min(offs)[0]}-{max(offs)[0]} deg off it, no more than the '
-          f'clip\'s torso and neck turn her head ({min(chain)}-{max(chain)} deg: the JS aims the head bone from the '
-          f'body\'s heading alone)')
+                 'facing_off_lamp_deg': offs, 'torso_and_neck_turn_deg': chain, 'neck_vs_controller_deg': round(neck_off, 5)}
+    R.check('gaze_is_the_js', head_err[0] < 0.01 and bool(offs) and neck_off < 0.01 and max(offs)[0] <= max(chain) + 2.0,
+            f'on every frame her head bone\'s own turn is _applyHeadOverride\'s Euler(pitch, yaw, 0, YXZ) of the body\'s '
+            f'gaze within {head_err[0]:.5f} deg; her neck stays the controller\'s within {neck_off:.5f} deg; holding the '
+            f'lamp (frames {fa}-{fb}) her face is {min(offs)[0] if offs else None}-{max(offs)[0] if offs else None} deg '
+            f'off it, no more than the clip\'s torso and neck turn her head ({min(chain) if chain else None}-'
+            f'{max(chain) if chain else None} deg)')
 
     # ---- feet
-    wr = rep['walks']
-    worst_walk = max((w['worst'].get('slip_mm_per_frame_max', 0.0) for w in wr), default=0.0)
-    touches = sum(w['worst'].get('swing_touch_frames', 0) for w in wr)
+    fails = S.plant_failures(rep)
+    R['controller_checks_feet'] = fails
     stand_gap, gap_at = 0.0, None
-    for fr in frames:
-        if fr['src'][0] != 'stand' or fr['src'][2] is not None:
+    for fr, r in zip(frames, recs):
+        if not (r['mode'] == 'loco' and r.get('lead') == 'idle' and r['speed'] < 0.02):
             continue
         for s, P in rig.feet_world(fr).items():
             g_ = float(P[:, 2].min())
             if abs(g_) > stand_gap:
-                stand_gap, gap_at = abs(g_), (fr['f'], s, round(1000 * g_, 2), fr['src'])
-    R['feet'] = {'walk_slip_mm': worst_walk, 'swing_touch_frames': touches, 'standing_gap_mm': round(1000 * stand_gap, 2),
-                 'standing_gap_at': gap_at}
-    check('feet', worst_walk <= 1.0 and touches == 0 and stand_gap < 0.003,
-          f'{len(wr)} walk(s): planted slip at most {worst_walk} mm a frame, {touches} swing frames touching; standing, '
-          f'each foot\'s lowest sole point within {1000 * stand_gap:.2f} mm of the floor')
+                stand_gap, gap_at = abs(g_), (fr['f'], s, round(1000 * g_, 2))
+    R['feet'] = {'standing_gap_mm': round(1000 * stand_gap, 2), 'standing_gap_at': gap_at}
+    R.check('feet', not fails and stand_gap < 0.003,
+            f'the controller family\'s checks.feet: {len(rep["segments"]) - len(fails)} of {len(rep["segments"])} gaits '
+            f'pass {[(f[0], f[1], f[2][:1]) for f in fails]}; standing, each foot\'s lowest sole point within '
+            f'{1000 * stand_gap:.2f} mm of the floor')
 
     # ---- keyed: the action alone puts the head where the records do
     hb = me.humanoid['head']
     err = (0.0, None)
-    for f in (1, frames[len(frames) // 3]['f'], frames[2 * len(frames) // 3]['f'], frames[-1]['f']):
+    for f in (f0, frames[len(frames) // 3]['f'], frames[2 * len(frames) // 3]['f'], frames[-1]['f']):
         sc.frame_set(f)
         got = me.arm.matrix_world @ me.arm.pose.bones[hb].head
-        want, _W = rig.bone_world(frames[f - rep['frames'][0]], 'head')
+        want, _W = rig.bone_world(frames[f - f0], 'head')
         e = (got - want).length
         if e > err[0]:
             err = (e, f)
     R['keyed_head_err_mm'] = [round(1000 * err[0], 3), err[1]]
-    check('keyed', err[0] < 0.001, f'the evaluated head bone is within {1000 * err[0]:.3f} mm of the bake\'s record '
-                                   f'(worst frame {err[1]})')
+    R.check('keyed', err[0] < 0.001, f'the evaluated head bone is within {1000 * err[0]:.3f} mm of the bake\'s record '
+                                     f'(worst frame {err[1]})')
+
+    # ---- her spring chains (her hair) baked over the keyed take, as the engine's vrm.update steps them
+    sp = rep.get('springs') or {}
+    R['springs'] = {k: sp.get(k) for k in ('springs', 'joints', 'frames', 'keys', 'nan', 'max_tail_speed_mps', 'track')}
+    R.check('springs', sp.get('springs', 0) > 0 and sp.get('nan') == 0 and sp.get('frames') == list(rep['frames']),
+            f'{R["springs"]} (the controller family\'s bake_springs over the take my bake keyed)')
 
     # ---- my hands' work refuses her plainly
     try:
@@ -348,52 +245,33 @@ try:
         refused = None
     except ValueError as e:
         refused = str(e)
-    check('hands_refused', refused is not None, f'HandModel on {CAST}: {refused}')
-    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, 'other_vrm.blend'), compress=True)
+    R.check('hands_refused', refused is not None, f'HandModel on {CAST}: {refused}')
 
+    # ---- the stills: a low side camera held over her walk's start, its stop and her turn on the spot, every two
+    # frames (the debug overlays left out); her face on the lamp
+    vbvh = S.solids_bvh([o for o in obs if o.name != 'lamp'])
+    walk = [f0 + i for i, r in enumerate(recs) if r['mode'] == 'loco' and r.get('lead') == 'walk']
+    shots, last = [], f0 + len(frames) - 1
+    spans = [('walk_start', walk[0] - 6, walk[0] + 30), ('walk_stop', walk[-1] - 24, walk[-1] + 12)] if walk else []
+    spans += [(f'turn{k + 1}', a - 3, b + 3) for k, (a, b, _d) in enumerate(rep['turns'][:2])]
+    hide = [o.name for o in bpy.data.objects if o.name.startswith('robot_debug')]
+    for name, a_, b_ in spans:
+        a_, b_ = max(f0, a_), min(last, b_)
+        shots += [dict(s, hide=hide) for s in S.strip(name, S.side_view(vbvh, frames, f0, a_, b_), a_, b_,
+                                                       n=min(18, (b_ - a_) // 2 + 1))]
+    if offs:
+        ph, _W = rig.bone_world(frames[fb - f0], 'head')
+        shots.append({'name': 'head_on_lamp', 'frame': int(fb), 'cam': [LAMP[0] + 0.15, GOAL[1] - 0.45, 1.65],
+                      'target': list(ph.lerp(lamp_p, 0.5)), 'lens': 22.0})
+    S.write_json('other_vrm_shots.json', shots)
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, 'other_vrm.blend'), compress=True)
     if RENDER:
-        from eidoblend.look import render_settings as rs
-        rs.apply_auto_enhance(sc, 'probe')
-        sc.view_settings.exposure = 0.0
-        shots = {}
-        cam = S.C.camera('cam', 30.0)
-        wf = [fr['f'] for fr in walk_frames]
-        picks = {'walk': (wf[0] + wf[-1]) // 2 if wf else 1, 'look': fb or frames[-1]['f'],
-                 'wave': frames[-1]['f'] - FPS}
-        # the overview with what she sees and knows (the rays, the map, the path); the shots of her without the rays
-        S.C.aim(cam, (0.0, -2.0, 9.0), (0.0, 0.0, 0.0))
-        p = os.path.join(S.OUT, f'other_vrm_overview_walk_f{picks["walk"]:03d}.png')
-        shots[os.path.basename(p)] = S.C.still(sc, cam, picks['walk'], p)
-        dbg.show_rays(False)
-        wide = S.C.camera('wide', 26.0)                     # lens mm
-        vbvh = S.solids_bvh([o for o in obs if o.name != 'lamp'])
-        for name in ('walk', 'wave'):
-            f = picks[name]
-            fr = frames[f - rep['frames'][0]]
-            pp = fr['M'].translation
-            hd = fr['M'].to_quaternion() @ Vector((0.0, -1.0, 0.0))
-            side = Vector((-hd.y, hd.x, 0.0))
-            tgt = pp + Vector((0.0, 0.0, 0.8))
-            cpos = S.best_view(vbvh, tgt, [pp + s_ * side * 2.2 + hd * 1.0 + Vector((0, 0, 1.4)) for s_ in (1, -1)])
-            S.C.aim(wide, cpos, tgt)
-            p = os.path.join(S.OUT, f'other_vrm_{name}_f{f:03d}.png')
-            shots[os.path.basename(p)] = S.C.still(sc, wide, f, p)
-        # her face turned to the lamp: from beside the shelf, south of the lamp (she faces east-north-east at the goal,
-        # the lamp 25 deg to her left), her face and the lamp in one frame
-        f = picks['look']
-        fr = frames[f - rep['frames'][0]]
-        ph, _W = rig.bone_world(fr, 'head')
-        mid = ph.lerp(lamp_p, 0.5)
-        face_cam = S.C.camera('face', 22.0)
-        S.C.aim(face_cam, Vector((LAMP[0] + 0.15, GOAL[1] - 0.45, 1.65)), mid)
-        p = os.path.join(S.OUT, f'other_vrm_head_on_lamp_f{f:03d}.png')
-        shots[os.path.basename(p)] = S.C.still(sc, face_cam, f, p)
-        R['renders'] = shots
-    R['ok'] = OK
+        R['renders'] = S.render_shots(sc, 'other_vrm', shots)
+
+
+try:
+    main()
 except Exception:  # noqa: BLE001
-    R['ok'] = False
-    R['error'] = traceback.format_exc()
-    log(R['error'])
-R['seconds'] = round(time.time() - T0, 1)
-S.write_json('other_vrm.json', R)
-log('done', R['ok'], R['seconds'], 's')
+    R.finish(traceback.format_exc())
+else:
+    R.finish()

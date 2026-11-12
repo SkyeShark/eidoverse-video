@@ -8,8 +8,9 @@ BEHIND the clouds (sky_back), the dome adds them; the sky elements keep composit
 where they are nearer than the dome (sky_view.overlay_group).
 
 The dome is Blended; EEVEE draws Blended objects farthest ORIGIN first (probe_eevee_facts.py F4), so its origin is
-parked far ahead of the camera: the dome draws first, under every other blended surface (the ringworld's cloud sheet
-composites the clouds over itself, its haze walls draw over the clouds, as in WebGPU's draw order).
+parked far ahead of the camera: the dome draws under every other blended surface (blended sky elements composite the
+clouds over themselves) except the ringworld's haze walls, whose copies ride farther ahead still, so the dome lays
+the clouds over them, as WebGPU's dome (-98) draws over its walls (-99) (Ringworld.order_walls_under_dome).
 """
 import math
 
@@ -21,17 +22,25 @@ from .sky_view import project
 
 DOME_R = 3200.0 * 0.96
 ORIGIN_AHEAD = 1.0e6
+DOME = 'eido_sky_cloud_dome'
+
+
+def remove_cloud_dome():
+    """Remove the dome a bake built (a sky baked again without one). Returns whether there was one."""
+    old = bpy.data.objects.get(DOME)
+    if old is None:
+        return False
+    me_old = old.data
+    bpy.data.objects.remove(old, do_unlink=True)
+    if me_old.users == 0:
+        bpy.data.meshes.remove(me_old)
+    return True
 
 
 def build_cloud_dome(scene, camera, cloud_img, frame_start, n_frames, radius=DOME_R, collection=None):
     from .world_nodes import _set_user
-    name = 'eido_sky_cloud_dome'
-    old = bpy.data.objects.get(name)
-    if old is not None:
-        me_old = old.data
-        bpy.data.objects.remove(old, do_unlink=True)
-        if me_old.users == 0:
-            bpy.data.meshes.remove(me_old)
+    name = DOME
+    remove_cloud_dome()
     # a UV sphere about the camera, in the object's frame whose origin sits ORIGIN_AHEAD down the view axis
     seg, rings = 96, 48
     verts = [(0.0, 0.0, radius)]

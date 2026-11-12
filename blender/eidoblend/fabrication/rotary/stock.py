@@ -21,9 +21,9 @@ this per frame in a fragment pass over a 3D field tiled into 2D half-float targe
 marching a proxy box; here numpy evaluates the same distances in float64 (each stroke over only the voxels its sweep
 can reach), and the surface is a real mesh: Blender's OpenVDB volume-to-mesh of the field, so it casts and takes
 shadows, has real depth, blurs as it turns with the chuck, and renders under every light. Its object space is the
-stock frame; its finish (fabrication.cutting.finish_stock) reads the stock point as (z, y, x) in three's axes, the
-WebGPU stock's swizzle, through swizzle_finish, and fades its fine patterns by their true screen footprint, the
-WebGPU fwidth(phase), through filter_finish.
+stock frame; its finish (fabrication.cutting.finish_stock with axes='rotary') reads the stock point as (z, y, x) in
+three's axes, the WebGPU stock's swizzle, and fades its fine patterns by their exact screen footprint, the WebGPU
+fwidth(phase).
 
 PLAYBACK. Nothing runs at render time. write_frame(frame) stores the field as an OpenVDB grid ('density' = minus the
 distance, positive inside, pruned to tiles) in <cache_dir>/<name>_<frame:04d>.vdb; the stock's Volume datablock plays
@@ -32,6 +32,8 @@ meshes the current file at the zero level. Blender shows a file sequence at floo
 frame offset makes every time within half a frame of a written frame show that frame's file, so the motion-blur
 samples of a frame (and its sub-frame keys, carve.RotaryJob.key) all see the same carved surface. Write every frame
 the film shows; a saved .blend then plays and renders any frame on its own, with the cache folder beside it.
+show_frames(first, last) plays a written stretch alone instead, its ends held around it (a job keyed at its own speed
+writes the stretch it plays: carve.RotaryJob.write_stock).
 """
 
 from __future__ import annotations
@@ -46,174 +48,6 @@ from .removal import blank_distance_np
 from .sweeps import cutter_frame, index_rotary_sweeps, stroke_bounds, sweep_core
 
 GRID_NAME = 'density'
-GRAIN_NODE = 'rotary grain (z, y, x)'
-FOOTPRINT_NODE = 'exact footprint'
-
-
-def swizzle_finish(material):
-    """Give the stock's finish the point the WebGPU rotary stock gave finishStock: its stock-local hit point as
-    (z, y, x) in three's axes, so the long grain and the growth rings run along the rotary axis.
-
-    finish_stock (eidoblend.fabrication.cutting) reads three's (x, y, z) from the Texture Coordinate node's Object
-    output o as (ox, oz, -oy). With the stock surface's object space equal to stock space s, feeding it
-    (-sy, -sx, sz) makes it read (-sy, sz, sx): three's (z, y, x), exactly. That swizzle is a reflection, so it lives
-    in the material (Separate XYZ, two negations, Combine XYZ), not in the object's transform. Returns the number of
-    links rerouted (0 when the material has no Object coordinates, or already has the swizzle)."""
-    nt = material.node_tree
-    if nt is None or GRAIN_NODE in nt.nodes:
-        return 0
-    n = 0
-    for tc in [nd for nd in nt.nodes if nd.type == 'TEX_COORD']:
-        links = [lk for lk in nt.links if lk.from_node == tc and lk.from_socket.identifier == 'Object']
-        if not links:
-            continue
-        x0, y0 = tc.location.x + 180, tc.location.y - 220
-        sep = nt.nodes.new('ShaderNodeSeparateXYZ')
-        sep.location = (x0, y0)
-        neg = []
-        for k, axis in enumerate(('X', 'Y')):
-            m = nt.nodes.new('ShaderNodeMath')
-            m.operation = 'MULTIPLY'
-            m.inputs[1].default_value = -1.0
-            m.location = (x0 + 170, y0 - 90 * k)
-            nt.links.new(sep.outputs[axis], m.inputs[0])
-            neg.append(m)
-        comb = nt.nodes.new('ShaderNodeCombineXYZ')
-        comb.name = comb.label = GRAIN_NODE
-        comb.location = (x0 + 340, y0)
-        nt.links.new(tc.outputs['Object'], sep.inputs[0])
-        nt.links.new(neg[1].outputs[0], comb.inputs['X'])          # -sy
-        nt.links.new(neg[0].outputs[0], comb.inputs['Y'])          # -sx
-        nt.links.new(sep.outputs['Z'], comb.inputs['Z'])           # sz
-        for lk in links:
-            to = lk.to_socket
-            nt.links.remove(lk)
-            nt.links.new(comb.outputs[0], to)
-            n += 1
-    return n
-
-
-# finish_stock's fine patterns, by the frequency it multiplies its footprint estimate with
-PATTERNS = {4200.0: 'growth rings', 18000.0: 'wood fibre', 83000.0: 'metal brushing'}
-
-
-def _footprint_uses(nt):
-    """[(node, input index, frequency)] for each of finish_stock's fades: MULTIPLY(footprint, k), where footprint =
-    (View Distance * pixel_angle) * 1.4 is its estimate of a pattern's screen footprint per unit of phase."""
-    pix = nt.nodes.get('pixel_angle')
-    if pix is None:
-        return []
-
-    def outs(node):
-        return [lk for lk in nt.links if lk.from_node == node]
-
-    def mult(node):
-        return node.type == 'MATH' and node.operation == 'MULTIPLY'
-
-    uses = []
-    for l1 in outs(pix):
-        if not mult(l1.to_node):
-            continue
-        for l2 in outs(l1.to_node):
-            if not mult(l2.to_node):
-                continue
-            for l3 in outs(l2.to_node):
-                c = l3.to_node
-                if not mult(c):
-                    continue
-                i = list(c.inputs).index(l3.to_socket)
-                other = c.inputs[1 - i]
-                if not other.is_linked:
-                    uses.append((c, i, float(other.default_value)))
-    return uses
-
-
-def filter_finish(material):
-    """Fade the finish's fine patterns by their true screen footprint: the WebGPU finishStock's fwidth(phase).
-
-    finish_stock estimates fwidth(phase) as (view distance * pixel angle * 1.4) times the pattern's frequency. That is
-    right only where the pattern's gradient lies in the surface, across the screen. On a turned part the growth
-    rings' gradient runs nearly along the surface normal on the sides that face the camera, so there the rings and the
-    fibre stay wide on screen while the estimate faded the rings to a quarter and the fibre to nothing. This reroutes
-    each fade to the exact derivative: the pattern's 3D gradient g (the rings, fibre and brushing as finish_stock
-    defines them; the broad noise's gradient by finite differences) taken through the pixel's footprint on the
-    surface, dP/dx = t a (e_x - (e_x . N) / (I . N) I) for the screen axes e_x, e_y (t the view distance, a the pixel
-    angle, N the normal, I the direction to the eye), and fwidth = |g . dP/dx| + |g . dP/dy|. Needs swizzle_finish
-    first (it reads the stock point there). Returns the number of fades rerouted: 2 for wood (rings, fibre), 1 for
-    metal (brushing), 0 when there is nothing to do (no swizzle, no footprint fades, or already filtered: a node
-    named FOOTPRINT_NODE, which finish_stock may one day make itself)."""
-    from .._nodes import V, Builder
-    nt = material.node_tree
-    if nt is None or FOOTPRINT_NODE in nt.nodes:
-        return 0
-    comb = nt.nodes.get(GRAIN_NODE)
-    uses = _footprint_uses(nt)
-    if comb is None or not uses:
-        return 0
-    unknown = sorted({k for _c, _i, k in uses} - set(PATTERNS))
-    if unknown:
-        raise RuntimeError(f'finish_stock fades a pattern of frequency {unknown} this filter does not know: '
-                           'teach stock.filter_finish its gradient')
-    marker = nt.nodes.new('NodeFrame')
-    marker.name = marker.label = FOOTPRINT_NODE
-    marker.location = (comb.location.x + 400, comb.location.y - 300)
-    b = Builder(nt, x0=comb.location.x + 400, y0=comb.location.y - 360)
-    bx, by, bz = b.sep(comb.outputs[0])
-    px, py, pz = bx, bz, -by                                  # three's (x, y, z), as finish_stock reads them
-    geo = b.node('ShaderNodeNewGeometry')
-    normal, eye = V(b, geo.outputs['Normal']), V(b, geo.outputs['Incoming'])
-    cam = b.node('ShaderNodeCameraData')
-    metres_per_pixel = b.s(cam.outputs['View Distance']) * b.s(nt.nodes['pixel_angle'].outputs[0])
-
-    def screen_axis(v):
-        n = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
-        n.inputs[0].default_value = v
-        return V(b, n.outputs[0])
-
-    ex, ey = screen_axis((1.0, 0.0, 0.0)), screen_axis((0.0, 1.0, 0.0))
-    i_n = b.dot(eye, normal)
-    inv_i_n = i_n / b.max(i_n * i_n, 1e-6)                    # 1 / (I . N), bounded at the silhouette
-    rx, ry = b.dot(ex, normal) * inv_i_n, b.dot(ey, normal) * inv_i_n
-
-    def fwidth(g_three):
-        gx, gy, gz = b.sep(g_three)
-        g_object = b.vec(gz, -gx, gy)                          # through the swizzle: p = (-oy, oz, ox)
-        tw = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='OBJECT', convert_to='WORLD')
-        b.link(g_object, tw.inputs[0])
-        g = V(b, tw.outputs[0])
-        gi = b.dot(g, eye)
-        return (b.abs(b.dot(g, ex) - gi * rx) + b.abs(b.dot(g, ey) - gi * ry)) * metres_per_pixel
-
-    grads = {}
-    if {4200.0, 18000.0} & {k for _c, _i, k in uses}:
-        def broad_at(d=(0.0, 0.0, 0.0)):
-            """finish_stock's broad noise, mx_noise(p * (38, 27, 19)), at p + d"""
-            n = b.node('ShaderNodeTexNoise', noise_dimensions='3D', normalize=True)
-            n.inputs['Scale'].default_value = 1.0
-            n.inputs['Detail'].default_value = 0.0
-            n.inputs['Roughness'].default_value = 0.5
-            n.inputs['Distortion'].default_value = 0.0
-            q = [c * k + k * dc if dc else c * k for c, k, dc in zip((px, py, pz), (38.0, 27.0, 19.0), d)]
-            b.link(b.vec(*q), n.inputs['Vector'])
-            return (b.s(n.outputs['Fac']) - 0.5) * 2.0
-
-        h = 5e-5
-        broad = broad_at()
-        gb = b.vec(*[(broad_at(tuple(h if j == k else 0.0 for j in range(3))) - broad) * (1.0 / h) for k in range(3)])
-        warp = b.sin(pz * 38.0) * .004 + broad * .002
-        u = px + .049 + warp
-        w = (py + .024) * 1.18
-        r = b.max(b.sqrt(u * u + w * w), 1e-6)
-        gu = b.vec(1.0, 0.0, b.cos(pz * 38.0) * .152) + b.vscale(gb, .002)      # d(px + .049 + warp) / dp
-        grads[4200.0] = b.vscale(b.vscale(gu, u) + b.vec(0.0, w * 1.18, 0.0), 4200.0 / r) + b.vscale(gb, 2.8)
-        grads[18000.0] = b.vscale(gu, 18000.0)
-    if 83000.0 in {k for _c, _i, k in uses}:
-        grads[83000.0] = b.vec(b.cos(px * 270.0) * 189.0, 0.0, 83000.0)
-    for c, i, k in uses:
-        for lk in [lk for lk in nt.links if lk.to_socket == c.inputs[i]]:
-            nt.links.remove(lk)
-        b.link(fwidth(grads[k]) * (1.0 / k), c.inputs[i])     # footprint * k becomes the exact fwidth(phase)
-    return len(uses)
 
 
 def check_resolution(resolution):
@@ -386,6 +220,7 @@ class RotaryStock(StockField):
         self.name = name
         self.cache_dir = _abspath(cache_dir or ('//' + _safe(name) + '_cache'))
         self.frames_written = []
+        self.run = None                                 # (first, last): the frames the file sequence plays
         col = collection or (parent.users_collection[0] if parent is not None else bpy.context.scene.collection)
         self.volume_data = bpy.data.volumes.new(name + ' field')
         self.volume_object = bpy.data.objects.new(name + ' field', self.volume_data)
@@ -409,18 +244,10 @@ class RotaryStock(StockField):
         mod.adaptivity = 0.0
         mod.use_smooth_shade = True
         self.finish = None
-        self.footprint_fades = 0
         if material is None:
             from ..cutting import stock_material, stock_profile
             material, self.finish = stock_material(name + ' finish', stock_profile(settings.get('material', 'wood')),
-                                                   color)
-            if not swizzle_finish(material):
-                raise RuntimeError('finish_stock no longer reads Object texture coordinates: the rotary grain '
-                                   'swizzle (stock.swizzle_finish) needs updating')
-            self.footprint_fades = filter_finish(material)
-            if not self.footprint_fades and FOOTPRINT_NODE not in material.node_tree.nodes:
-                raise RuntimeError("finish_stock's footprint fades changed: the rotary stock's exact filter "
-                                   '(stock.filter_finish) needs updating')
+                                                   color, axes='rotary')
         self.material = material
         me.materials.append(material)
         self.mesh['eidoverse_rotary_stock'] = True
@@ -441,22 +268,39 @@ class RotaryStock(StockField):
         return os.path.join(self.cache_dir, '%s_%04d.vdb' % (_safe(self.name), int(frame)))
 
     def write_frame(self, frame):
-        """Store the current field for this frame and extend the stock's file sequence over it."""
+        """Store the current field for this frame and extend the stock's file sequence over it: the sequence plays
+        every frame from the first written to the last (a frame between them without its file shows no stock, so a
+        film keyed at chosen frames renders those frames)."""
         import openvdb as vdb
         os.makedirs(self.cache_dir, exist_ok=True)
-        p = self.frame_path(frame)
+        f = int(frame)
+        p = self.frame_path(f)
         tmp = p + '.tmp'
         vdb.write(tmp, grids=[self.grid()])
         os.replace(tmp, p)
-        if frame not in self.frames_written:
-            self.frames_written.append(int(frame))
+        if f not in self.frames_written:
+            self.frames_written.append(f)
             self.frames_written.sort()
+        self.run = (self.frames_written[0], self.frames_written[-1])
         self._sequence()
         self._last_file = p
         return p
 
+    def show_frames(self, first, last):
+        """Play only the written frames first .. last (each must have its file), holding the stretch's ends before and
+        after it: a stretch of a job keyed at its own speed (RotaryJob.write_stock) shows its stock at every frame,
+        and every frame around it the nearer end, never an empty stock."""
+        first, last = int(first), int(last)
+        have = set(self.frames_written)
+        missing = [f for f in range(first, last + 1) if f not in have]
+        if last < first or missing:
+            raise ValueError(f'show_frames: frames {first} .. {last} need their files ({len(missing)} not written: '
+                             f'{missing[:5]})')
+        self.run = (first, last)
+        self._sequence()
+
     def _sequence(self):
-        first, last = self.frames_written[0], self.frames_written[-1]
+        first, last = self.run
         v = self.volume_data
         v.filepath = _blend_path(self.frame_path(first))
         v.is_sequence = True
@@ -481,6 +325,7 @@ class RotaryStock(StockField):
         v.filepath = _blend_path(p)
         v.grids.load()
         self._last_file = p
+        self.run = None
         return p
 
     def readback(self):

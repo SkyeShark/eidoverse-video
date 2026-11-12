@@ -2,8 +2,8 @@
 
 What is here: the WEATHER table (every state carries its cloud preset), setWeather / transitionTo with
 the same eased lerp of every uniform they touch, the per-frame sky greying (mixG, horMul, greyTint),
-wetness / surface-water time constants, the integrated wind, sunDim / hemiDim. Rain particles, splashes,
-puddles and lightning are listed as not yet ported in tools-guides/sky-weather.md.
+wetness / surface-water time constants, the integrated wind, sunDim / hemiDim. Rain streaks, splashes, puddles
+and lightning are eidoblend.weather's, which make_sky builds when its weather rains, strikes or wets.
 """
 import math
 

@@ -336,7 +336,10 @@ def build(ctx=None, **kw):
       parts                      a subset of PARTS
       sky                        a Sky from eidoblend.sky: the set turns it to its hour; call O.wrap_world() after its bake
       hours, azimuth             the engine sky's clock and base azimuth (SKY): the layout turns to meet that moon
-      matrix                     the set root's world matrix: set it here, the flora field is planted through it"""
+      matrix                     the set root's world matrix, the moon (its lamp, its glint on the sea, the night's glow)
+                                 turned with it. Moving or turning O.group after the build carries the set, her daisies
+                                 and the porch's and window's glints on the cove included; the moon's glint on the sea
+                                 and the night's glow keep the moon of the build, as ocean.js's uniforms did"""
     import bpy
     from mathutils import Matrix, Vector
     from . import _bl
@@ -425,6 +428,9 @@ def build(ctx=None, **kw):
             H = coast.house
             house.group.location = B3((H['x'], H['grade'], H['z']))
             house.group.rotation_euler = (0.0, 0.0, H['yaw'])
+            if sea is not None:              # the porch's and the window's glints on the cove read where they are now
+                _bl.drive_world_location(sea.mesh, 'porchW', house.porch_point)
+                _bl.drive_world_location(sea.mesh, 'winW', house.window_point)
     APP_BASE = (math.sin(D_MOON) * 25, 0.0, math.cos(D_MOON) * 25)  # out on the water in the moon path, 25 m off
     if 'apparitions' in parts:
         from .apparitions import build_apparitions
@@ -648,8 +654,6 @@ def build(ctx=None, **kw):
             if name in tg:
                 _write(tg[name], v, key, f)
         _daisies(vals, t, bool(key), f)
-        if house is not None:
-            _sync_house_glints()
         return vals
 
     def animate(state_=None, frames=None, t0=0.0, fps=None):
@@ -678,16 +682,7 @@ def build(ctx=None, **kw):
             D = land.daisies
             for f, t, v in dz[1:] if changed else ():
                 D.update(None, {k.split('.')[1]: v[k] for k in changed}, frame=f)
-        if house is not None:
-            _sync_house_glints()
         return {'frames': (int(f0), int(f1)), 'channels': len(series)}
-
-    def _sync_house_glints():
-        if sea is None or house is None:
-            return
-        bpy.context.view_layer.update()
-        sea.set('porchW', tuple(house.porch_world()))
-        sea.set('winW', tuple(house.window_world()))
 
     def dispose():
         """Removes the set's objects and its collection (images, materials and node groups stay for reuse)."""

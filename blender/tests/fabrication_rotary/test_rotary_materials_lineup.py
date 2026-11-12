@@ -25,9 +25,10 @@ sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..', '..')))
 from eidoblend.characters.robotics import studio                                          # noqa: E402
 from eidoblend.characters.robotics.studio import make_camera                               # noqa: E402
 from eidoblend.fabrication.cutting import stock_material, stock_profile                    # noqa: E402
-from eidoblend.fabrication.rotary import StockField, rotary_program, sample_rotary, swizzle_finish   # noqa: E402
+from eidoblend.fabrication.rotary import StockField, rotary_program, sample_rotary                    # noqa: E402
 
 OUT = os.path.join(HERE, 'out')
+os.makedirs(OUT, exist_ok=True)
 FAILS = []
 MATERIALS = ('wood', 'plywood', 'aluminum', 'brass', 'steel')
 
@@ -80,8 +81,7 @@ for k, name in enumerate(MATERIALS):
     me.from_pydata(pts.tolist(), [], faces)
     me.update()
     me.shade_smooth()
-    mat, _finish = stock_material(f'{name} stock finish', stock_profile(name))
-    swizzle_finish(mat)
+    mat, _finish = stock_material(f'{name} stock finish', stock_profile(name), axes='rotary')
     me.materials.append(mat)
     ob = bpy.data.objects.new(f'carved {name}', me)
     sc.collection.objects.link(ob)

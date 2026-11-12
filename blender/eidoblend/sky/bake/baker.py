@@ -110,8 +110,12 @@ def _srgb_to_linear(c):
     return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
+LINEAR_FILES = ('.exr', '.hdr')
+
+
 def load_image_rgba(path, srgb):
-    """Pixels of an image file as float32 (H, W, 4), row 0 at the bottom (Blender/GL order), linear."""
+    """Pixels of an image file as float32 (H, W, 4), row 0 at the bottom (Blender/GL order), linear. srgb: a colour
+    map (JPEG, PNG ...) is decoded from sRGB; an OpenEXR or Radiance HDR file is linear already and read as stored."""
     import bpy
     img = bpy.data.images.load(path, check_existing=True)
     img.colorspace_settings.name = 'Non-Color'          # raw stored values; linearize ourselves
@@ -119,7 +123,7 @@ def load_image_rgba(path, srgb):
     px = np.empty(w * h * 4, np.float32)
     img.pixels.foreach_get(px)
     px = px.reshape(h, w, 4)
-    if srgb:
+    if srgb and not path.lower().endswith(LINEAR_FILES):
         px[..., :3] = _srgb_to_linear(px[..., :3])
     bpy.data.images.remove(img)
     return px
@@ -135,12 +139,15 @@ class SkyBaker:
     def __init__(self, stars=None, moon=None, cirrus=None, n_march=60, n_light=20, m_pass=8, n_storm_steps=12,
                  n_cloud_shadow=64, phase_soften=0.0, ms_floor=0.008, strip_rows=48, defines=None, celestial='',
                  dust='', ring_map=None, ring_mask=None):
-        """defines: the sky world's switches and constants (sky.glsl's RING_ON, HAS_GIANT ...); celestial / dust:
-        GLSL from bake/celestial.py; ring_map / ring_mask: the band's albedo map and land mask for the analytic
-        band in the environment (HAS_RING_ENV)."""
+        """defines: the sky world's switches and constants (sky.glsl's RING_ON, HAS_CELESTIAL, R_EARTH ...); celestial
+        / dust: GLSL (bake/celestial.py generates the red giant's and the dust's); ring_map / ring_mask: the band's
+        albedo map and land mask for the analytic band in the environment (HAS_RING_ENV). n_storm_steps: the storm
+        layer's march (opts.stormSamples, at least 4; the JS's two interleaved passes stay); n_cloud_shadow: the
+        cloud-shadow march (opts.cloudShadowSamples, Eanpa's 32-64)."""
         self.paths = dict(stars=stars, moon=moon, cirrus=cirrus, ring_map=ring_map, ring_mask=ring_mask)
-        self.defines = dict(N_MARCH=n_march, N_LIGHT=n_light, M_PASS=max(1, m_pass), N_STORM_STEPS=n_storm_steps,
-                            N_STORM_PASSES=2, N_CLOUD_SHADOW=max(32, min(64, n_cloud_shadow)), N_SHIELD_OCC=24)
+        self.defines = dict(N_MARCH=n_march, N_LIGHT=n_light, M_PASS=max(1, m_pass),
+                            N_STORM_STEPS=max(4, int(round(n_storm_steps))), N_STORM_PASSES=2,
+                            N_CLOUD_SHADOW=max(32, min(64, int(round(n_cloud_shadow)))), N_SHIELD_OCC=24)
         self.defines.update(defines or {})
         self.celestial_src = celestial
         self.dust_src = dust

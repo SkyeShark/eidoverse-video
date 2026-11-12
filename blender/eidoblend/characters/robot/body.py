@@ -15,9 +15,13 @@
 The body never sees the scene's meshes or colliders: its sensor cone (eidoblend.harness.navigation.RobotSensors, cast
 from its head along the head's own direction) is its only contact with the geometry; what it sees goes into an occupancy
 grid and landmarks (RobotMemory); A* (RobotPlanner) plans over that memory; the legs follow the plan
-(EidoverseRobotController over RobotLegs). The head pans and nods on its own (the depth camera's mount), at headRate,
-inside yawLimit / pitchLimit (which are my neck's pan and nod stops), and its gaze replaces the clip's head each frame
-(the JS's _applyHeadOverride, recorded for the bake).
+(EidoverseRobotController over RobotLegs: the controller family's character controller, the engine's, with its stairs,
+ramps and moves). The head pans and nods on its own (the depth camera's mount), at headRate, inside yawLimit /
+pitchLimit (which are my neck's pan and nod stops), and its gaze replaces the clip's head each frame (the JS's
+_applyHeadOverride, recorded for the bake). update(t, dt) is the frame at t of the scene's timeline: where the sensed
+world has moving objects (a door opening, a cart, another character: anything keyed, driven or parented to something
+keyed), each sense first sets the scene to that frame and, where one has moved since the last sense, the sensors rebuild
+their view of it, as the JS's raycaster reads the live scene.
 
 Actions return a Pending (the JS returns a Promise): .state 'pending' / 'resolved' / 'rejected', .error, .kind,
 .then(on_ok, on_err). They resolve as frames advance in update(); body.run(generator) sequences them the way an async
@@ -92,8 +96,12 @@ class VRMRobotBody:
         """create(vrm, mixer, scene, opts). opts (the JS's, snake_case): sensors (RobotSensors: h_fov, v_fov, range,
         h_rays, v_rays), memory (RobotMemory: size, cell_size, origin_x, origin_y, bayesian), motion (agent_radius,
         agent_height, walk_speed, run_speed, start_x, start_y, start_heading, max_turn_rate, collision_meshes, ground_z),
-        planner (RobotPlanner: optimistic, unknown_penalty, clearance_margin, ...), head_rate, yaw_limit, pitch_limit,
-        sense_period, character_controller_overrides ({'idle' | 'walk' | 'run': slot}), legs_class"""
+        planner (RobotPlanner: optimistic, unknown_penalty, clearance_margin, max_step_height, ...), head_rate,
+        yaw_limit, pitch_limit, sense_period, character_controller_overrides (the JS's: {'standard_animation_overrides':
+        {'vrma_library': {slot: .vrma path}}}), legs_class; and this edition's controller_opts (the JS adapter's
+        opts.controllerOpts, which robot_body.js does not pass on: any VRMCharacterController option for the legs, e.g.
+        {'auto_maneuvers': False}) and frame_start (the film frame of t = 0: the frame the scene is set to for a sense of
+        moving objects, and bake()'s default f0; default the scene's frame_start)"""
         import bpy
         scene = scene or bpy.context.scene
         opts = dict(opts or {})
@@ -104,7 +112,7 @@ class VRMRobotBody:
                  'collision_meshes': opts.get('collision_meshes') or motion.get('collision_meshes') or [],
                  'trimesh_colliders': opts.get('trimesh_colliders', motion.get('trimesh_colliders', False)),
                  'ground_z': motion.get('ground_z', 0.0), 'max_turn_rate': motion.get('max_turn_rate'),
-                 'agent_radius': 0.85 * motion.get('agent_radius', 0.35)}
+                 'controller_opts': opts.get('controller_opts')}
         for k in ('walk_speed', 'run_speed'):
             if k in motion:
                 copts[k] = motion[k]
@@ -161,6 +169,12 @@ class VRMRobotBody:
         self.log = []                  # (t, event) for a scene's report: plans, replans, resolutions, rejections
         self.readings = []             # (frame_count, t, reading): every sense, for RobotDebug and the checks
         self.paths = []                # (frame_count, path or None): every plan and replan
+        self.frame_start = int(opts.get('frame_start', scene.frame_start if scene is not None else 1))
+        self._movers = None            # the sensed objects the scene moves (found at the first sense)
+        self._deforming = {}           # mover name -> deformed by an armature or shape keys (rebuilt every sense)
+        self._seen_state = None        # the movers' places at the last rebuild of the sensors' view
+        self.refreshes = 0             # how many times a sense rebuilt the sensors' view (a mover had moved)
+        self._seat_plan_used = None
         self.controller.on_pre_vrm_update = self._apply_head_override
 
     # ------------------------------------------------------------------------------------------------- public info
@@ -202,11 +216,16 @@ class VRMRobotBody:
         return Vector((math.sin(hh) * math.cos(p), -math.cos(hh) * math.cos(p), -math.sin(p)))
 
     def get_head_position(self):
-        """the head bone's world position (its rest place carried by the body's place and heading; the clip's bob of a
-        couple of cm is not in it); without a head bone, agent_height over the feet"""
+        """the head bone's world position in the frame last stepped (the JS's headBone.getWorldPosition: the legs' pose,
+        its gait's bob, a stair's height and a move's place in it); without a head bone, agent_height over the feet. A
+        legs object that cannot say: the head's rest place carried by the body's place and heading"""
         pos = self.get_position()
         if self._head_rest is None:
             return Vector((pos['x'], pos['y'], pos['z'] + self.agent_height))
+        hw = getattr(self.controller.char_ctrl, 'head_world', None)
+        p = hw() if hw is not None else None
+        if p is not None:
+            return p
         hd = self._head_rest
         f = heading_vector(self.controller.heading)
         # the rest head in the armature's frame (the VRM faces -Y): x across, -y forward
@@ -249,6 +268,7 @@ class VRMRobotBody:
         self._blocked_since = -1.0
         self._stall_since = -1.0
         self._stall_replanned = False
+        self._stuck_check = None                     # progress is measured from here (the legs set off from standing)
         p = Pending('running' if mode == 'run' else 'walking')
         p.mode = mode
         self._pending_action = p
@@ -276,14 +296,24 @@ class VRMRobotBody:
 
     def face_direction(self, heading):
         """the whole body to a heading (rad, 0 faces -Y). The JS snaps the controller's heading (its own note: the
-        standing turn would need the waypoint state machine); so does this, and the bake turns the standing body round
-        over its crossfade (a turn in place on the turn clips is not built)"""
+        standing turn would need the waypoint state machine); here the legs turn on the spot on the controller's turn
+        clips (a walk in hand stops first), and the action resolves when the body faces `heading`, as the JS's has at
+        once. Seated or in an emote: rejected"""
         self._cancel_pending_action('superseded')
         d = (heading - self.controller.heading + math.pi) % (2 * math.pi) - math.pi
         if abs(d) < 0.05:
             return resolved('turning')
-        self.controller.heading = heading
-        return resolved('turning')
+        self._current_path = None
+        self._current_goal = None
+        if hasattr(self.controller, 'turn_to'):
+            if self.controller.turn_to(self.controller.heading + d) is False:
+                return rejected(RuntimeError('cannot turn on the spot: seated or playing an emote'), 'turning')
+        else:
+            self.controller.heading = heading
+            return resolved('turning')
+        p = Pending('turning')
+        self._pending_action = p
+        return p
 
     def scan_area(self, yaw_range=90.0, duration=1.5, center_yaw=0.0, passes=1, pitch_range=0.0):
         """a smooth head sweep over yaw_range deg about the body's forward (center_yaw rad off it), `passes` times,
@@ -315,9 +345,10 @@ class VRMRobotBody:
         return p
 
     # parkour, passed through to the legs as the JS passes it to the engine's charCtrl: the move ahead along the heading,
-    # played by the controller family's VRMCharacterController from where I stand (RobotLegs._start_maneuver) -> True
-    # when it started (False: nothing it fits ahead, or moving: a move starts from standing here). It lasts while
-    # is_maneuvering(); the body senses on from where the move carries it
+    # played by the controller family's VRMCharacterController from wherever I am (standing, walking or running: out of
+    # the stride) -> True when it started (False: nothing it fits ahead; seated, in an emote or turning on the spot). It
+    # lasts while is_maneuvering(); a walk in hand goes on from where the move lands me, and the body senses on through
+    # it. The moves the engine starts on its own en route (low cover, a ledge, a gap, a big drop) need no call
     def vault(self):
         return self.controller.vault()
 
@@ -339,19 +370,39 @@ class VRMRobotBody:
         return bool(self.controller.is_maneuvering)
 
     def begin_seated(self, slot='stand_to_sit', **opts):
-        """the SEATED state: the seated clip plays (and holds) where the body stands; the caller owns the root's place
-        (the JS's seatOn raycasts the seat: not ported here)"""
+        """the SEATED state, until stand_up. Through seatOn (eidoblend.characters.emotes.seat_on(vrm, chair,
+        transition=slot): it puts me on the spot it measured and keeps its measures as body.seat_plan) the legs sit
+        down onto that seat (emotes.SeatOn: the hips settled on the pan, the feet on the floor). chair=<the chair>: they
+        walk up to it, turn out of it and back onto the spot first. Neither: the JS's, the seated clip plays where I
+        stand and the root holds (the caller owns the seat) -> the clip's duration"""
+        plan = getattr(self, 'seat_plan', None)
+        if plan is not None and plan is not self._seat_plan_used and 'seat' not in opts and 'chair' not in opts:
+            opts['seat'] = plan
+            self._seat_plan_used = plan
         return self.controller.begin_seated(slot, opts)
 
     def stand_up(self, slot='sit_to_stand', **opts):
+        """leave SEATED: `slot` the stand-up clip (None: the sit-down played backwards, the example's), then standing;
+        resolves nothing (the JS's), the controller's state is 'performing' until the stand-up is done"""
         return self.controller.end_seated(slot, opts)
 
     def set_emote_facing(self, ry):
         """aim STANDING emotes (perform_action) at a fixed world heading (rad, 0 faces -Y), as the JS sets the engine
-        controller's _emoteFacingY: the body steps round to it as the emote starts and back to its own heading after.
-        None restores the default (the body's heading). Locomotion and the seated facing are not affected"""
+        controller's _emoteFacingY: within 15 deg of my heading the emote's root pivots to it during its fade-in (the
+        engine's), further I turn on the spot to it first (my planted feet cannot follow a root pivoting further:
+        controller.PIVOT_MAX), play it, and turn back to my own heading after it. None restores the default (my
+        heading). Locomotion and the seated facing are not affected"""
         legs = self.controller.char_ctrl
         legs._emote_facing = ry
+
+    def play_gesture(self, slot, weight=2.5, loop=True):
+        """playGesture on the inner controller (the JS's body.controller.charCtrl.playGesture): `slot` masked to my upper
+        body and blended over whatever my legs do (a walk, a run, the stairs, standing) until stop_gesture(); faded out
+        through turns on the spot, moves and emotes"""
+        return self.controller.play_gesture(slot, weight=weight, loop=loop)
+
+    def stop_gesture(self):
+        return self.controller.stop_gesture()
 
     def stop(self):
         self._cancel_pending_action('stopped')
@@ -464,6 +515,7 @@ class VRMRobotBody:
         should = (self._sense_phase % self.sense_period) == 0
         self._sense_phase += 1
         if should:
+            self._see_the_frame(t)
             hp = self.get_head_position()
             reading = self.sensors.sense(hp, self.controller.heading + self._head_yaw_current, self._head_pitch_current)
             self.last_reading = reading
@@ -477,6 +529,40 @@ class VRMRobotBody:
         self.controller.update(t, dt)
         self._resolve_pending_action()
         self._poll_script()
+
+    def movers(self):
+        """the objects the sensors see that the scene moves (_moves: keyed, driven, constrained or deformed, or under
+        something that is) -> [objects]; found once, at the first sense"""
+        if self._movers is None:
+            excl = set()
+            for o in self.sensors.exclude_objects:
+                excl.add(o.name)
+                excl.update(c.name for c in o.children_recursive)
+            self._movers = [o for o in self.scene.objects if o.type == 'MESH' and o.name not in excl
+                            and not o.hide_render and _moves(o)]
+            if self._movers:
+                self.log.append((self._time_accum, f'sensing {len(self._movers)} moving objects frame by frame: '
+                                                   f'{[o.name for o in self._movers[:8]]}'))
+        return self._movers
+
+    def _see_the_frame(self, t):
+        """the scene at the frame for t, and the sensors' view of it rebuilt where anything they see has moved since the
+        last sense (the JS's raycaster casts against the live scene each sense): a mover's place compared, and a mesh an
+        armature or its shape keys deform taken as moved every sense"""
+        if not self.movers():
+            return
+        f = self.frame_start + int(round(t * self.scene.render.fps / self.scene.render.fps_base))
+        if self.scene.frame_current != f:
+            self.scene.frame_set(f)
+        state = []
+        for o in self._movers:
+            if o.name not in self._deforming:
+                self._deforming[o.name] = _deforms(o)
+            state.append(None if self._deforming[o.name] else tuple(round(v, 6) for row in o.matrix_world for v in row))
+        if None in state or state != self._seen_state:
+            self.sensors.refresh()
+            self.refreshes += 1
+        self._seen_state = state
 
     def _update_scan(self):
         s = self._scan
@@ -557,7 +643,9 @@ class VRMRobotBody:
         self._blocked_since = -1.0
 
     def _check_stuck(self, t, dt):
-        if self._stuck_check is None:
+        if self._stuck_check is None or self.is_maneuvering() or self.controller.is_turning():
+            # a move (a mount, a ladder: up more than along) and a turn on the spot (a route's start, on my body) make
+            # no progress over the ground and are not stuck: the window starts again after them
             self._stuck_check = {'last_pos': self.get_position(), 'last_time': t}
             return
         pa = self._pending_action
@@ -631,8 +719,45 @@ class VRMRobotBody:
             if cs != 'performing':
                 self._pending_action = None
                 a.resolve()
+        elif a.kind == 'turning':
+            if not self.controller.is_turning():
+                self._pending_action = None
+                a.resolve()
 
     # ------------------------------------------------------------------------------------------------- the film
     def bake(self, **kw):
-        """the whole run keyed (RobotLegs.bake: walk_path for the walks, the example's frame order for the rest)"""
+        """the whole run keyed from frame f0 (default frame_start): the controller family's bake of what the legs did,
+        then my body's passes (eidoblend.characters.robot.bake), then the VRM's spring chains over the keyed take ->
+        its report. face=lambda t: {expression: weight}, crown_state, head_state, action_name, springs (False: none)"""
+        kw.setdefault('f0', self.frame_start)
         return self.controller.bake(**kw)
+
+
+def _deforms(ob):
+    """can this mover's shape change from frame to frame (its shape keys keyed or driven, or any modifier: an armature
+    that moves, a keyed modifier's setting): then its place alone does not say whether the sensors' view of it changed"""
+    sk = getattr(getattr(ob, 'data', None), 'shape_keys', None)
+    ad = getattr(sk, 'animation_data', None)
+    if ad is not None and (ad.action is not None or len(ad.nla_tracks) or len(ad.drivers)):
+        return True
+    return len(getattr(ob, 'modifiers', ())) > 0
+
+
+def _moves(ob):
+    """does the scene move this object over its frames: keyed or driven (its own animation, its data's shape keys),
+    constrained, deformed by an armature that is, or under a parent that does"""
+    seen, stack = set(), [ob]
+    while stack:
+        o = stack.pop()
+        if o is None or o.name in seen:
+            continue
+        seen.add(o.name)
+        for ad in (o.animation_data, getattr(getattr(getattr(o, 'data', None), 'shape_keys', None), 'animation_data',
+                                             None)):
+            if ad is not None and (ad.action is not None or len(ad.nla_tracks) or len(ad.drivers)):
+                return True
+        if len(o.constraints):
+            return True
+        stack.extend(m.object for m in getattr(o, 'modifiers', ()) if m.type == 'ARMATURE')
+        stack.append(o.parent)
+    return False

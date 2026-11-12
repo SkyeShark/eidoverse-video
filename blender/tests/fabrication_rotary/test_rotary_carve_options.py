@@ -219,9 +219,10 @@ check('max_particles, dust=False: one pool of wood shavings, at most 300 chips',
       len(job.debris.pools) == 1 and job.debris.pools[0].name == 'Wood shavings' and job.debris.particle_count <= 300)
 mine = {job.mesh.name, job.stock.mesh.name, job.stock.volume_object.name, job.debris.group.name}
 check('collection: the job\'s frame, stock, field and chips go into it', mine <= {o.name for o in coll.objects})
-grain = job.stock.material.node_tree.nodes.get('rotary grain (z, y, x)')
-check('the stock finish reads the WebGPU rotary point (z, y, x): the grain swizzle is in its material',
-      grain is not None and grain.outputs[0].is_linked)
+point = job.stock.material.node_tree.nodes.get('stock point rotary')
+check("the stock finish reads the WebGPU rotary point (z, y, x): finish_stock's 'rotary' axes, from the stock's "
+      'object coordinates', point is not None and point.inputs[0].is_linked
+      and point.inputs[0].links[0].from_socket.name == 'Object' and any(s.is_linked for s in point.outputs))
 job.dispose(files=True)
 
 

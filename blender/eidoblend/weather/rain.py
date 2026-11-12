@@ -10,6 +10,9 @@ texture's alpha, the world cell gate and the rain amount (a per-drop population 
 
 Splashes: expanding rings at the ground, tiled like the streaks, each on its own hash phase (2.4 Hz).
 
+Sky: 1 with the procedural sky, 0 without (the JS's `sky ? ... : ...` fallbacks): without a sky every column rains
+(the cell gate is 1) and the drops take no sun glint.
+
 Blender additions, where the WebGPU edition had a flat groundY: with `occluders` (a collection), each streak is
 hidden when a roof lies between it and the sky along the rain, and each splash sits on the first surface the rain
 reaches (Raycast), on its slope, and only where that surface faces up. The geometry is built in three.js space
@@ -34,7 +37,7 @@ RAIN_INPUTS = [
     ('Storm Canopy', 'NodeSocketFloat', 0.0), ('Sun Dir', 'NodeSocketVector', None),
     ('Cloud Start', 'NodeSocketFloat', 700.0), ('Cloud Drift', 'NodeSocketVector', None),
     ('Weather Scale', 'NodeSocketFloat', 1.0), ('Large T', 'NodeSocketFloat', 0.18), ('Large A', 'NodeSocketFloat', 3.0),
-    ('Shelter Length', 'NodeSocketFloat', 600.0), ('Upwind', 'NodeSocketFloat', 1.0),
+    ('Shelter Length', 'NodeSocketFloat', 600.0), ('Upwind', 'NodeSocketFloat', 1.0), ('Sky', 'NodeSocketFloat', 1.0),
 ]
 SPLASH_INPUTS = [
     ('Count', 'NodeSocketInt', 1200), ('Radius', 'NodeSocketFloat', 45.0), ('Camera', 'NodeSocketVector', None),
@@ -43,7 +46,7 @@ SPLASH_INPUTS = [
     ('Cell Hi', 'NodeSocketFloat', 1.45), ('Storm Canopy', 'NodeSocketFloat', 0.0),
     ('Cloud Start', 'NodeSocketFloat', 700.0), ('Cloud Drift', 'NodeSocketVector', None),
     ('Weather Scale', 'NodeSocketFloat', 1.0), ('Large T', 'NodeSocketFloat', 0.18), ('Large A', 'NodeSocketFloat', 3.0),
-    ('Upwind', 'NodeSocketFloat', 1.0),
+    ('Upwind', 'NodeSocketFloat', 1.0), ('Sky', 'NodeSocketFloat', 1.0),
 ]
 RAIN_CELLS = {'upwind': 1.0, 'column': 0.0}
 
@@ -60,10 +63,11 @@ def _coverage(b, weather_map, x, z, I):
 def _cell_gate(b, weather_map, x, y, z, I, wx, wz, fall, storm_h):
     """rainCellAt: the coverage at the upwind column the drops fell from, through cellLo..cellHi, opened under a
     sealed storm canopy (there each drop keeps its own 0.82-1 storm gate). Upwind 0 samples the drop's own column
-    (eidoverse's sky.tslCoverage(px, pz)), Upwind 1 the column it fell from (Eanpa's rainCellAt)."""
+    (eidoverse's sky.tslCoverage(px, pz)), Upwind 1 the column it fell from (Eanpa's rainCellAt). Without a sky
+    (Sky 0) the ordinary gate is 1."""
     k = b.max(b.s(I['Cloud Start']) - y, 0.0) / b.max(fall, 1.0) * I['Upwind']
     cov = _coverage(b, weather_map, x - wx * k, z - wz * k, I)
-    ordinary = b.sstep(I['Cell Lo'], I['Cell Hi'], cov)
+    ordinary = b.lerp(1.0, b.sstep(I['Cell Lo'], I['Cell Hi'], cov), b.s(I['Sky']))
     canopy = b.clamp(I['Storm Canopy'])
     return b.lerp(ordinary, storm_h * 0.18 + 0.82, canopy), canopy
 
@@ -93,7 +97,7 @@ def build_rain_tree(weather_map, rain_material, occluders=None):
     length = b.s(I['Streak Length']) * (h1 * h1 * 1.1 + 0.45)
     width = length * 0.125 * (h2 * 0.8 + 0.55) * (dist * 0.012 + 1.0)
     view = b.normalize(base - cam)
-    glint_raw = b.pow(b.max(b.dot(view, I['Sun Dir']), 0.0), 6.0) * 1.6 + 0.6
+    glint_raw = b.lerp(1.0, b.pow(b.max(b.dot(view, I['Sun Dir']), 0.0), 6.0) * 1.6 + 0.6, b.s(I['Sky']))
     gate, canopy = _cell_gate(b, weather_map, px, py, pz, I, wx, wz, fall, h4)
     glint = b.lerp(glint_raw, 1.0, canopy) * (h4 + 0.5) * 1.08
     rain_k = b.s(I['Rain K'])

@@ -8,44 +8,39 @@
         ctl.update((f - 1) / fps, 1 / fps)       # VRMRobotBody calls this; a scene that walks waypoints alone may too
     rep = ctl.bake(f0=1)                          # the run keyed: one action, every frame renders alone
 
-The WebGPU adapter presents the waypoint contract VRMRobotBody was written against (set_waypoints, update(t, dt),
-get_state / get_heading / get_position, heading, walk_speed / run_speed, force_action, is_stalled, begin_seated /
-end_seated, on_pre_vrm_update) over the engine's physics character controller: each frame the current waypoint becomes
-a unit direction for charCtrl.locomote (which turns the facing toward it at maxTurnRate and walks forward along the
-facing at the tread-synced speed), arrival within arrive_radius moves to the next waypoint, a collision stall (six frames
-of move-and-slide cancelling the step) latches the input to zero, and emotes / seated clips suspend the walk. That logic
-is ported line for line (update, set_waypoints, force_action, is_stalled, begin_seated, end_seated, the accessors).
+robot_controller.js adapts the engine's physics character controller (character_controller.js's VRMCharacterController:
+the gait tree, the ground and stair probes, the foot IK, the moves) to the waypoint contract VRMRobotBody was written
+against: each frame the current waypoint becomes a unit direction for charCtrl.locomote, arrival within arrive_radius
+moves to the next one, a collision stall (six frames of move-and-slide cancelling the step) latches the input to zero,
+emotes and seated clips suspend the walk. That logic is ported line for line (update, set_waypoints, force_action,
+is_stalled, begin_seated, end_seated, the accessors).
 
-THE LEGS. The engine's charCtrl (VRMCharacterController: Rapier, the gait tree, foot IK) runs live in the browser. In a
-film the run is solved at build time and keyed, so the legs here, RobotLegs, are two passes:
-  1. live, frame by frame, while VRMRobotBody senses, plans and decides: a kinematic body. The adapter hands it the
-     waypoints; it walks them along a route it can actually walk: each corner rounded by an arc of radius speed /
-     max_turn_rate whose middle passes THROUGH the planned corner (the corner is pushed out along its bisector first, so
-     the arc keeps the planner's clearance instead of cutting inside it), a start that turns from the current facing on
-     the same radius. It moves at the gait's speed, stops where its cylinder (agent_radius) would meet a collision mesh
-     (the stall the adapter latches on), records each frame (state, place, facing, the clip, the gaze the body set).
-  2. bake(): the record keyed through my body's passes. Each standing span plays the idle (or the emote, or the seated
-     clip) through the example's frame order (eidoblend.characters.robot.rig); each walking span is round one's walk_path
-     along the route it travelled (planted feet, the swing's clearance, the corners' arcs), then the hands, the wrists'
-     stages, the gaze, the head and the crown (rig.post_pass); a walk starts at its stance foot's mid-stance and stops at
-     the nearest one, and the hand-over between standing and walking crossfades with that foot held where it stands.
-  THE MOVES (vault, jump, climb_ledge, climb_ladder: the JS passes them to the engine's charCtrl) are the controller
-     family's own: when the body calls one, the controller family's VRMCharacterController plays it from where my body
-     stands (its scan ahead, its clips, its contact IK on the cover, the lip and the rungs) and plants it; the live run
-     follows its root frame by frame and the bake keys its frames (bake.bake_run).
-legs_class: any object with this contract may stand in (the controller family's VRMCharacterController port, when it has
-locomote and bake). The JS's VRMUtils merge (fewer skinned draws in three) and the Rapier world do not apply in Blender.
+THE LEGS (RobotLegs, the charCtrl) are the controller family's VRMCharacterController (eidoblend.characters.controller),
+set up as its Locomotion sets one up for a film (the robot preset, the stock clips, the gait tree at this body's measured
+paces, distance matching), on the colliders the JS gives Rapier (CollisionWorld), and stepped frame by frame while the
+body senses and decides. Each frame they run the command in hand, the controller family's own: a route (film.FollowPath:
+from standing a turn on the spot first where the way is more than 25 deg off my heading, then it accelerates, follows the
+route with its corners rounded at the controller's max_turn_rate, 3.5 rad/s, and slows down to stop on the goal), an
+emote (emotes.EmoteCmd), a turn on the spot (film.TurnTo), a seat (emotes.SeatOn and StandUp); and they record the frame
+(film.record). Whatever the engine's controller does on its own while it walks or runs happens here on its own: stairs
+and ramps, low cover vaulted, a ledge climbed, a gap jumped, a big drop landed (fallLand). A move called while walking or
+running starts out of the stride; upper-body gestures play over the gait. bake() bakes the take as the controller family
+bakes its own (emotes.bake: the plant, the seats' feet) and runs my body's passes over it (eidoblend.characters.robot.bake).
+legs_class: any object with this contract may stand in. The JS's VRMUtils merge (fewer skinned draws in three) does not
+apply in Blender, and Rapier's world is a BVH over the same colliders.
 """
 
 import math
 
 import bpy
-import numpy as np
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
-from .._math import D2R, wrap_pi
-from ..ground import Ground
+from .. import robot_dof as dof
+from .._math import q_from_three, q_to_three, wrap_pi
+from ..controller.film import DECEL, Call, FollowPath, Locomotion, TurnTo, Wait, record
+from ..controller.pose import Pose
+from ..controller.world import CollisionWorld as _ControllerWorld
 
 FWD = Vector((0.0, -1.0, 0.0))            # a VRM faces -Y: heading 0 (the same number as three's rotation.y)
 
@@ -60,183 +55,53 @@ def heading_of(dx, dy):
     return math.atan2(dx, -dy)
 
 
-# ------------------------------------------------------------------------------------------------------------ routes
-def build_route(p0, h0, points, radius, ds=0.02):
-    """a route the legs can walk from p0 (facing h0) through `points`: a start arc of `radius` from the facing toward the
-    first point, then each corner rounded by an arc of `radius` that passes through the corner (the corner pushed out
-    along its bisector by r (sec(phi / 2) - 1), capped at r) -> {'P': (n, 2), 'H': (n,) headings, 'S': (n,) arc length,
-    'total'}"""
-    P = [np.array(p0[:2], dtype=float)]
-    for q in points:
-        q = np.array(q[:2], dtype=float)
-        if np.linalg.norm(q - P[-1]) > 1e-4:
-            P.append(q)
-    out_p, out_h = [P[0].copy()], [h0]
-    if len(P) < 2:
-        return _route(out_p, out_h)
-    r = max(1e-3, float(radius))
-    # the start: an arc tangent to the facing, turning toward the first point until the tangent meets it
-    f0 = np.array([math.sin(h0), -math.cos(h0)])
-    d = P[1] - P[0]
-    turn = math.atan2(f0[0] * d[1] - f0[1] * d[0], float(f0 @ d))
-    cur, hc = P[0].copy(), h0
-    if abs(turn) > 2 * D2R:
-        s = 1.0 if turn > 0 else -1.0                        # + turns left (counter-clockwise)
-        n = np.array([-f0[1], f0[0]]) * s
-        c = P[0] + n * r
-        dist = np.linalg.norm(P[1] - c)
-        if dist > r * 1.02:
-            # the tangent point T on the circle whose tangent (in the turning sense) points at P1
-            ang_c = math.atan2(P[1][1] - c[1], P[1][0] - c[0])
-            beta = math.acos(min(1.0, r / dist))
-            tang = ang_c - s * beta
-            a0 = math.atan2(P[0][1] - c[1], P[0][0] - c[0])
-            sweep = wrap_pi(tang - a0)
-            if s > 0 and sweep < 0:
-                sweep += 2 * math.pi
-            if s < 0 and sweep > 0:
-                sweep -= 2 * math.pi
-            m = max(1, int(abs(sweep) * r / ds))
-            for k in range(1, m + 1):
-                a = a0 + sweep * k / m
-                out_p.append(c + r * np.array([math.cos(a), math.sin(a)]))
-                out_h.append(h0 + sweep * k / m)
-            cur, hc = out_p[-1].copy(), out_h[-1]
-    pts = [cur] + P[1:]
-    if len(pts) >= 3:
-        # the corners pushed out so their arcs pass through them
-        Q = [pts[0]]
-        for j in range(1, len(pts) - 1):
-            a, b, cpt = pts[j - 1], pts[j], pts[j + 1]
-            u, v = b - a, cpt - b
-            lu, lv = np.linalg.norm(u), np.linalg.norm(v)
-            if lu < 1e-6 or lv < 1e-6:
-                Q.append(b)
-                continue
-            u, v = u / lu, v / lv
-            phi = math.atan2(u[0] * v[1] - u[1] * v[0], float(u @ v))
-            if abs(phi) < 1e-3:
-                Q.append(b)
-                continue
-            bis_in = v - u
-            bis_in /= max(1e-9, np.linalg.norm(bis_in))
-            delta = min(r, r * (1.0 / math.cos(abs(phi) / 2) - 1.0))
-            Q.append(b - bis_in * delta)
-        Q.append(pts[-1])
-        pts = Q
-    # straight runs and fillets, sampled
-    for j in range(len(pts) - 1):
-        a, b = pts[j], pts[j + 1]
-        u = b - a
-        L = float(np.linalg.norm(u))
-        if L < 1e-6:
-            continue
-        u /= L
-        t_in = 0.0
-        if j > 0:
-            t_in = _trim(pts[j - 1], a, b, r)
-        t_out = _trim(a, b, pts[j + 2], r) if j + 2 < len(pts) else 0.0
-        hseg = heading_of(u[0], u[1])
-        s0, s1 = t_in, L - t_out
-        m = max(1, int((s1 - s0) / ds))
-        for k in range(0, m + 1):
-            p = a + u * (s0 + (s1 - s0) * k / m)
-            if np.linalg.norm(p - out_p[-1]) > 1e-6:
-                out_p.append(p)
-                out_h.append(_unwrap(out_h[-1], hseg))
-        if j + 2 < len(pts):
-            c_ = pts[j + 2]
-            v = c_ - b
-            v /= max(1e-9, np.linalg.norm(v))
-            phi = math.atan2(u[0] * v[1] - u[1] * v[0], float(u @ v))
-            t = _trim(a, b, c_, r)
-            rr = t / math.tan(abs(phi) / 2) if abs(phi) > 1e-3 else 0.0
-            if rr > 1e-4:
-                start = b - u * t
-                s_ = 1.0 if phi > 0 else -1.0
-                nrm = np.array([-u[1], u[0]]) * s_
-                cc = start + nrm * rr
-                a0 = math.atan2(start[1] - cc[1], start[0] - cc[0])
-                m = max(1, int(abs(phi) * rr / ds))
-                for k in range(1, m + 1):
-                    ang = a0 + phi * k / m
-                    p = cc + rr * np.array([math.cos(ang), math.sin(ang)])
-                    out_p.append(p)
-                    out_h.append(_unwrap(out_h[-1], hseg + phi * k / m))
-    return _route(out_p, out_h)
-
-
-def _trim(a, b, c, r):
-    """how far before corner b the arc of radius r starts (shrunk to half of each side)"""
-    u, v = b - a, c - b
-    lu, lv = float(np.linalg.norm(u)), float(np.linalg.norm(v))
-    if lu < 1e-6 or lv < 1e-6:
-        return 0.0
-    u, v = u / lu, v / lv
-    phi = abs(math.atan2(u[0] * v[1] - u[1] * v[0], float(u @ v)))
-    if phi < 1e-3:
-        return 0.0
-    return min(r * math.tan(phi / 2), 0.5 * lu, 0.5 * lv)
-
-
-def _unwrap(prev, h):
-    return prev + wrap_pi(h - prev)
-
-
-def _route(P, H):
-    P = np.array(P, dtype=float).reshape(-1, 2)
-    H = np.array(H, dtype=float)
-    S = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]) if len(P) > 1 else np.zeros(1)
-    return {'P': P, 'H': H, 'S': S, 'total': float(S[-1])}
-
-
-def route_at(route, s):
-    """(x, y, heading) at arc length s along a route"""
-    S, P, H = route['S'], route['P'], route['H']
-    if len(S) == 1 or s <= 0:
-        return float(P[0][0]), float(P[0][1]), float(H[0])
-    if s >= S[-1]:
-        return float(P[-1][0]), float(P[-1][1]), float(H[-1])
-    k = int(np.searchsorted(S, s, side='right')) - 1
-    u = (s - S[k]) / max(1e-12, S[k + 1] - S[k])
-    p = P[k] + (P[k + 1] - P[k]) * u
-    return float(p[0]), float(p[1]), float(H[k] + (H[k + 1] - H[k]) * u)
-
-
 # ------------------------------------------------------------------------------------------------------------ the world
 MIN_HALF = 0.05          # robot_controller.js: a flat mesh's box gets this half-thickness, its top kept at the mesh's top
+SLAB = 60.0              # robot_controller.js: no collider at all -> a flat ground slab, 120 m square, at ground_z
 
 
-class CollisionWorld:
-    """the meshes the body walks on and against (robot_controller.js: opts.collisionMeshes), built as the adapter builds
-    its Rapier colliders, then one BVH over them in world space:
+class CollisionWorld(_ControllerWorld):
+    """the colliders robot_controller.js gives Rapier from opts.collisionMeshes, as the controller family's walkable world
+    (its probes, its move-and-slide, the maneuvers' scans and the plant all read it):
 
-      - a mesh flagged ob['trimesh_collider'] (the JS's userData.trimeshCollider: terrain, ramps, any shaped ground), or
-        every mesh when trimesh_colliders=True: its own triangles (its mesh children's too, as three's traverse)
+      - a mesh flagged ob['trimesh_collider'] (the JS's userData.trimeshCollider: terrain, ramps, stairs, any shaped
+        ground), or every mesh when trimesh_colliders=True: its own triangles (its mesh children's too, as three's
+        traverse)
       - any other mesh: the axis-aligned box round it and its mesh children (three's Box3.setFromObject), a flat one
         (a floor plane) given a MIN_HALF half-thickness downward so its top stays the visible surface. A box turns a
-        slope into a block at its highest point, as in the WebGPU edition: flag shaped ground trimesh
-      - a mesh flagged ob['no_walkable'] (the JS's userData.noWalkable: vegetation, effects): never a collider
-      - nothing at all: a flat ground at ground_z (the JS's 120 m slab at groundY)
+        slope or a flight of stairs into a block at its highest point, as in the WebGPU edition: flag shaped ground
+      - a mesh flagged ob['no_walkable'] (the JS's userData.noWalkable: vegetation, effects, a ladder's rungs): never a
+        collider
+      - nothing at all: a flat slab at ground_z (the JS's 120 m slab at groundY)
 
-    -> .bvh (None for the flat fallback), .names, .kinds {name: 'trimesh' | 'aabb'}"""
+    -> the controller family's CollisionWorld (ray_cast, ground_vector, move_and_slide, h, ...) over those colliders,
+    with .names (the meshes made colliders) and .kinds {name: 'trimesh' | 'aabb'}"""
 
     def __init__(self, meshes, ground_z=0.0, trimesh_colliders=False):
-        dg = bpy.context.evaluated_depsgraph_get()
-        verts, polys = [], []
+        self.ground_z = float(ground_z)
+        self.trimesh_colliders = bool(trimesh_colliders)
         self.names, self.kinds = [], {}
-        for ob in meshes:
-            if ob.type != 'MESH' or ob.get('no_walkable'):
+        super().__init__(objects=list(meshes or []))
+
+    def refresh(self):
+        """the colliders built again from the meshes' evaluated geometry (call after the scene changes)"""
+        dg = bpy.context.evaluated_depsgraph_get()
+        verts, polys, owner = [], [], []
+        self.names, self.kinds, self.objects = [], {}, []
+        for ob in self._explicit or []:
+            if ob is None or ob.type != 'MESH' or ob.get('no_walkable'):
                 continue
             parts = [ob] + [c for c in ob.children_recursive if c.type == 'MESH' and not c.get('no_walkable')]
-            if ob.get('trimesh_collider') or trimesh_colliders:
+            if ob.get('trimesh_collider') or self.trimesh_colliders:
                 for o in parts:
                     ev = o.evaluated_get(dg)
                     me = ev.to_mesh()
                     base = len(verts)
                     mw = ev.matrix_world
                     verts.extend(mw @ v.co for v in me.vertices)
-                    polys.extend([base + i for i in p.vertices] for p in me.polygons)
+                    for p in me.polygons:
+                        polys.append(tuple(base + i for i in p.vertices))
+                        owner.append(o)
                     ev.to_mesh_clear()
                 self.kinds[ob.name] = 'trimesh'
             else:
@@ -246,237 +111,327 @@ class CollisionWorld:
                 s = hi - lo
                 if (s.x < 1e-4 and s.z < 1e-4) or (s.y < 1e-4 and s.z < 1e-4) or (s.x < 1e-4 and s.y < 1e-4):
                     continue                                              # a point or a line: no collider
-                hz = max(s.z / 2, MIN_HALF)
-                hx, hy = max(s.x / 2, MIN_HALF), max(s.y / 2, MIN_HALF)
-                cx, cy, cz = (lo.x + hi.x) / 2, (lo.y + hi.y) / 2, hi.z - hz
-                base = len(verts)
-                verts.extend(Vector((cx + sx * hx, cy + sy * hy, cz + sz * hz))
-                             for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1))
-                polys.extend([[base + i for i in f] for f in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6),
-                                                                  (0, 2, 6, 4), (1, 5, 7, 3))])
+                self._box(verts, polys, owner, ob, (lo.x + hi.x) / 2, (lo.y + hi.y) / 2, hi.z,
+                          max(s.x / 2, MIN_HALF), max(s.y / 2, MIN_HALF), max(s.z / 2, MIN_HALF))
                 self.kinds[ob.name] = 'aabb'
             self.names.append(ob.name)
-        self.bvh = BVHTree.FromPolygons(verts, polys, all_triangles=False) if polys else None
-        self.ground_z = ground_z
-        if self.bvh is None:
-            print(f'[robot] no collision meshes: a flat ground at z={ground_z}', flush=True)
+            self.objects.append(ob)
+        if not polys:
+            print(f'[eidoverse-robot] no collision meshes: a flat ground slab at z={self.ground_z}', flush=True)
+            self._box(verts, polys, owner, None, 0.0, 0.0, self.ground_z, SLAB, SLAB, MIN_HALF)
+        self.tree = BVHTree.FromPolygons(verts, polys)
+        self._poly_obj = owner
+        self.top = max(v.z for v in verts)
+        self.casts = 0
+        return self
 
-    def ground(self, x, y, z_from):
-        """the walkable surface under (x, y) from z_from down (the controller's ground probe), or ground_z"""
-        if self.bvh is None:
-            return self.ground_z
-        hit = self.bvh.ray_cast(Vector((x, y, z_from)), Vector((0.0, 0.0, -1.0)), 10.0)
-        if hit[0] is None or hit[1].z < 0.5:
-            return self.ground_z
-        return hit[0].z
-
-    def blocked(self, x0, y0, x1, y1, z, radius, heights=(0.25, 0.7, 1.2, 1.6)):
-        """does the body's cylinder (radius) moving from (x0, y0) to (x1, y1), standing at z, meet a wall: rays along the
-        step at each height from the cylinder's front and both sides, and a ring round the new place"""
-        if self.bvh is None:
-            return False
-        d = Vector((x1 - x0, y1 - y0, 0.0))
-        L = d.length
-        dirs = []
-        if L > 1e-9:
-            d /= L
-            side = Vector((-d.y, d.x, 0.0))
-            for hz in heights:
-                for off in (0.0, 0.7, -0.7):
-                    o = Vector((x0, y0, z + hz)) + side * radius * off
-                    hit = self.bvh.ray_cast(o, d, L + radius * math.sqrt(1 - off * off))
-                    if hit[0] is not None and abs(hit[1].z) < 0.6:
-                        return True
-        for hz in heights:
-            o = Vector((x1, y1, z + hz))
-            for k in range(8):
-                a = k * math.pi / 4
-                dirs = Vector((math.cos(a), math.sin(a), 0.0))
-                hit = self.bvh.ray_cast(o, dirs, radius)
-                if hit[0] is not None and abs(hit[1].z) < 0.6:
-                    return True
-        return False
-
-    def as_ground(self, z_from=3.0):
-        """a round-one Ground over the same meshes (the walk's feet read it), probed down from z_from: give a level's
-        height plus a step (the bake's per-span level) so a foot by a tall solid reads the floor it stands on, not the
-        solid's top (from inside a box the probe meets its underside and reads the ground below)"""
-        w = self
-
-        def fn(xs, ys):
-            xs, ys = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
-            out = np.empty(xs.shape)
-            for i, (x, y) in enumerate(zip(xs.ravel(), ys.ravel())):
-                out.flat[i] = w.ground(float(x), float(y), z_from)
-            return out
-        return Ground(fn=fn)
+    @staticmethod
+    def _box(verts, polys, owner, ob, cx, cy, top, hx, hy, hz):
+        """a box (half sizes hx, hy, hz) whose top face is at `top` over (cx, cy)"""
+        cz = top - hz
+        base = len(verts)
+        verts.extend(Vector((cx + sx * hx, cy + sy * hy, cz + sz * hz)) for sx in (-1, 1) for sy in (-1, 1)
+                     for sz in (-1, 1))
+        for f in ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)):
+            polys.append(tuple(base + i for i in f))
+            owner.append(ob)
 
 
 # ------------------------------------------------------------------------------------------------------------ the legs
-# a route starting this far off the facing begins with a turn on the spot (a walk that starts on an arc from standing
-# turns its first planted foot on the ground: 5 deg a frame on a 45 deg start)
-START_TURN = math.radians(25.0)
-# rad/s while walking. The engine controller turns at 3.5 (VRMCharacterController's maxTurnRate) and its foot IK slides
-# through the tight arcs that makes (0.26 m at 0.9 m/s); the film's planted feet (walk_path, verified on arcs of
-# speed / 1.0) miss their targets by 6 cm on 0.26 m, and at speed / 1.5 a planted foot turns 2 deg a frame on the
-# ground in a 90 deg corner. So the legs walk arcs of speed / 1.0, and make the big turns (over START_TURN) on the
-# spot: max_turn_rate=3.5 is the engine's exactly
-MAX_TURN_RATE = 1.0
-# a maneuver is simulated from this much standing before it (the bake crossfades my standing pose into it there) and
-# this much after it lands (it settles to standing before the legs walk on), s
-MANEUVER_PRE_S = 0.35
-MANEUVER_POST_S = 0.6
+class _Take(Locomotion):
+    """the legs' Locomotion: set up as the controller family sets one up for a film, and its take is the frames the legs
+    recorded live, so its bake (and emotes.bake, which bakes the seats with it) bakes what the body did"""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.live = []
+
+    def simulate(self, f0=1, max_seconds=600.0, fps=None):
+        for i, r in enumerate(self.live):
+            r['f'] = f0 + i
+        self.records = list(self.live)
+        return self.records
 
 
 class RobotLegs:
-    """the charCtrl the adapter drives (VRMCharacterController's contract as robot_controller.js uses it), solved at
-    build time and keyed by bake(). Live state: feet_world_position, _heading, running, _blocked_frames, is_maneuvering,
-    _seated; the record: one dict per locomote() call (see the module doc).
+    """the charCtrl the adapter drives: the controller family's VRMCharacterController (self.ctrl, of self.loco: the
+    Locomotion that set it up), stepped frame by frame (locomote), every frame recorded (self.record: film.record's
+    fields plus the gaze VRMRobotBody set and the command in hand). See the module doc.
 
-    Turning: while walking the facing turns at max_turn_rate (MAX_TURN_RATE: 1.0 rad/s, the engine's 3.5 on request), so
-    a route's corners are arcs of radius speed / max_turn_rate. A route that starts more than START_TURN (25 deg) off the
-    facing, and an emote aimed
-    away from it (set_emote_facing), begin with a turn on the spot instead (the record stands at the new heading for the
-    turn's frames; the bake steps it round on my feet: bake.turn_plan), as a body turns to face its way before walking
-    off; the engine's walk does the same by turning while its speed builds from standing."""
+    Turning: a route's corners are the controller's (max_turn_rate, 3.5 rad/s, the engine's), its start from standing
+    more than 25 deg off my heading a turn on the spot on the turn clips (film.FollowPath's rule for my robot body: the
+    hip's yaw ring turns a planted leg only so far about its own axis; 60 deg on any other VRM). An emote aimed by
+    set_emote_facing pivots during its fade-in, as the engine's does, where the pivot is under PIVOT_MAX; past it the
+    planted feet cannot follow a root that pivots so far (the plant keeps them where they stand), so the body turns on
+    the spot to the aim first, plays the emote, and turns back to its own heading after it."""
 
-    def __init__(self, h, rig=None, world=None, start_position=(0.0, 0.0, 0.0), start_heading=0.0, walk_speed=1.0,
-                 run_speed=3.6, max_turn_rate=MAX_TURN_RATE, agent_radius=0.3, idle='idle', walk='walk', run='run'):
+    def __init__(self, h, rig=None, world=None, start_position=(0.0, 0.0, 0.0), start_heading=0.0, walk_speed=None,
+                 run_speed=None, max_turn_rate=None, controller_opts=None, vrma_library=None):
         from .rig import RobotRig
         self.h = h
         self.rig = rig or RobotRig(h)
-        self.world = world
-        self.pos = Vector((start_position[0], start_position[1], start_position[2] if len(start_position) > 2 else 0.0))
-        if world is not None:
-            self.pos.z = world.ground(self.pos.x, self.pos.y, self.pos.z + 1.0)
-        self._heading = float(start_heading)
-        self._flat_speed = float(walk_speed)
-        self._run_speed = float(run_speed)
-        self.max_turn_rate = float(max_turn_rate)
-        self.agent_radius = float(agent_radius)
-        self.running = False
-        self._blocked_frames = 0
-        self._seated = False
-        self.slots = {'idle': idle, 'walk': walk, 'run': run}
-        self.route = None
-        self.route_s = 0.0
-        self._emote = None
-        self._emote_actions = {}
+        self.world = world if world is not None else CollisionWorld([])
+        self.said = []                       # what the controller logged: (its time, the line)
+        co = {}
+        if max_turn_rate is not None:
+            co['max_turn_rate'] = float(max_turn_rate)
+        co.update(controller_opts or {})
+        p = tuple(start_position) + (0.0,) * (3 - len(tuple(start_position)))
+        self.loco = _Take(h, self.world, start=p, heading=float(start_heading), controller_opts=co, log=self._said)
+        self.ctrl = c = self.loco.ctrl
+        if vrma_library:
+            # the JS's standardAnimationOverrides: these slots played from other files; the gait tree measured again
+            c.load_standard_animations(vrma_library=dict(vrma_library))
+            c.attach_locomotion(leg_ik='default', flat_speed=None, run_speed=None, native_walk_speed=None,
+                                native_run_speed=None, gait_sync='distance')
+            self.loco.native = {'walk': c._native_walk_speed, 'run': c._native_run_speed}
+            self.loco.run_threshold = 0.5 * (self.loco.native['walk'] + self.loco.native['run'])
+        self.walk_speed = float(walk_speed) if walk_speed is not None else self.loco.native['walk']
+        self.run_speed = float(run_speed) if run_speed is not None else self.loco.native['run']
+        self._run = False
+        self._cmd = None                     # the command in hand: {'kind', 'cmd', ...}
+        self._next_route = None              # a route handed over while a turn clip plays: taken when it ends
         self._emote_facing = None            # the engine controller's _emoteFacingY: a standing emote's world heading
-        self._pre_turn = None                # a turn on the spot in progress: {'heading', 'left' (frames)}
-        self.record = []
+        self._seat = None                    # the seat in hand: 'seat' (emotes.SeatOn) | 'plain' (beginSeated alone)
+        self.maneuver_log = []               # the moves the controller did not start: (time, name, what it said)
+        self._auto_held = None               # the legs' auto_maneuvers setting while a route holds it (_moves_en_route)
+        self.record = self.loco.live
         self._gaze = None
-        self._maneuver = None                # a maneuver in flight (see _start_maneuver)
-        self._maneuvers = []                 # every maneuver made, in order (the bake keys each from its own frames)
-        self.maneuver_log = []               # what the controller family said about a move it could not start
-        self.t = 0.0
+        self.pos = self.ctrl.feet_world_position
+        self._placed = (self.pos.copy(), c._heading)
         sc = bpy.context.scene
         self.fps = sc.render.fps / sc.render.fps_base
 
-    # the contract
+    def _said(self, *a):
+        self.said.append((round(getattr(getattr(self, 'ctrl', None), 'time', 0.0), 4), ' '.join(str(x) for x in a)))
+
+    # ------------------------------------------------------------------------------------------------- the contract
     @property
     def feet_world_position(self):
-        return self.pos.copy()
+        self._sync_place()
+        return self.ctrl.feet_world_position
+
+    @property
+    def _heading(self):
+        return self.ctrl._heading
+
+    @_heading.setter
+    def _heading(self, h):
+        self._sync_place()
+        self.place(heading=h)
+
+    @property
+    def _blocked_frames(self):
+        return self.ctrl._blocked_frames
+
+    @_blocked_frames.setter
+    def _blocked_frames(self, v):
+        self.ctrl._blocked_frames = v
+
+    @property
+    def _flat_speed(self):
+        return self.walk_speed
+
+    @_flat_speed.setter
+    def _flat_speed(self, v):
+        self.walk_speed = float(v)
+
+    @property
+    def _run_speed(self):
+        return self.run_speed
+
+    @_run_speed.setter
+    def _run_speed(self, v):
+        self.run_speed = float(v)
+
+    @property
+    def running(self):
+        return self._run
+
+    @running.setter
+    def running(self, v):
+        """the gait of the routes from now; a route in hand changes gait from where the body is"""
+        v = bool(v)
+        if v != self._run:
+            self._run = v
+            k = self._cmd
+            if k is not None and k['kind'] == 'route' and not k.get('stopping'):
+                self._start_route(k['points'])
 
     @property
     def is_maneuvering(self):
-        return self._maneuver is not None
+        return self.ctrl.is_maneuvering
+
+    @property
+    def is_turning(self):
+        """a turn on the spot in hand (face_direction, a route's start, an aimed emote's turn in or out)"""
+        k = self._cmd
+        if self.ctrl.is_turning or (k is not None and k['kind'] == 'turn'):
+            return True
+        return k is not None and (isinstance(k['cmd'], TurnTo) or getattr(k['cmd'], 'sub', None) is not None)
 
     @property
     def is_emoting(self):
-        return self._emote is not None
+        return self.ctrl.is_emoting
 
-    def speed(self):
-        return self._run_speed if self.running else self._flat_speed
+    @property
+    def travelling(self):
+        """a route in hand (it ends stopped on its goal), or one waiting for a turn clip to end"""
+        return self._next_route is not None or (self._cmd is not None and self._cmd['kind'] == 'route')
 
-    def turn_on_spot(self, heading):
-        """turn to `heading` (rad) where the body stands: the facing is the new one from now, and the next frames stand
-        while the bake steps the body round -> the turn's frames (0: already facing it)"""
-        from .bake import turn_plan
-        n = turn_plan(self._heading, heading, self.fps)['frames'] if abs(wrap_pi(heading - self._heading)) > 0.02 else 0
-        if n:
-            self._heading = self._heading + wrap_pi(heading - self._heading)
-            self._pre_turn = {'heading': self._heading, 'left': n}
-        return n
+    @property
+    def performing(self):
+        """an emote, or a stand-up, still in its playing time (the adapter's 'performing'): its turn in, its seconds"""
+        k = self._cmd
+        if k is None or k['kind'] not in ('emote', 'stand'):
+            return False
+        if k['kind'] == 'stand':
+            return True
+        return k['phase'] in ('in', 'play')
 
-    def set_route(self, waypoints):
-        """the polyline the adapter is following (its remaining waypoints), as a route from here and this facing; a
-        route starting more than START_TURN off the facing begins with a turn on the spot (a replan while one is under
-        way keeps it, unless the new route starts off that turn's heading too)"""
-        if not waypoints:
-            self.route = None
-            return
-        pts = [(w['x'], w['y']) for w in waypoints]
-        first = next((p for p in pts if math.hypot(p[0] - self.pos.x, p[1] - self.pos.y) > 0.05), None)
-        if first is not None and not self._seated and self._emote is None:
-            d = heading_of(first[0] - self.pos.x, first[1] - self.pos.y)
-            if abs(wrap_pi(d - self._heading)) > START_TURN:
-                self.turn_on_spot(d)
-        r = self.speed() / max(1e-3, self.max_turn_rate)
-        self.route = build_route((self.pos.x, self.pos.y), self._heading, pts, r)
-        self.route_s = 0.0
+    @property
+    def _seated(self):
+        return self._seat is not None
 
+    def head_world(self):
+        """my head bone's world place in the frame last stepped, where VRMRobotBody senses from (the JS's
+        headBone.getWorldPosition: the head the body renders): the controller's pose (its gait's bob, its height on a
+        stair, a move's place) with my torso as my hardware holds it (robot_dof.rehome_body: my single waist joint does
+        not take a clip's chest bend, which carried the clip's head up to half a metre off mine in a vault)"""
+        if 'head' not in self.h.humanoid:
+            return None
+        p = self.ctrl.pose
+        if not self.rig.hardware:
+            return p.world_pos('head').copy()
+        p3 = {n: q_to_three(q) for n, q in p.N.items()}
+        dof.rehome_body(p3)
+        return Pose(p.body, p.M, {n: q_from_three(q) for n, q in p3.items()}, p.off).world_pos('head').copy()
+
+    def place(self, x=None, y=None, heading=None):
+        """the body moved where it stands (seatOn's snap: the engine sets the VRM's position and the capsule's,
+        rb.setTranslation): the controller's place (its feet, capsule and root, standing still there); a heading alone
+        is robot_controller.js's heading setter (charCtrl._heading), the root turned with it"""
+        c = self.ctrl
+        if x is not None or y is not None:
+            p = c.feet_world_position
+            c.place((p.x if x is None else float(x), p.y if y is None else float(y), p.z), heading)
+        elif heading is not None:
+            c._heading = float(heading)
+            c._place_root(c._heading)
+        self.pos = c.feet_world_position
+        self._placed = (self.pos.copy(), c._heading)
+
+    def _sync_place(self):
+        """an outside move of `pos` (seatOn's snap writes legs.pos.x / .y) carried to the controller"""
+        p0, _h0 = self._placed
+        if (self.pos.xy - p0.xy).length > 1e-6:
+            self.place(self.pos.x, self.pos.y)
+
+    # ------------------------------------------------------------------------------------------------- the frame
     def locomote(self, dt, inp):
-        """one frame: the input a unit direction on the ground plane ({'x', 'y'}; zero stands). With a route, a non-zero
-        input walks the route; without one it steers the facing toward the input at max_turn_rate and walks forward (the
-        engine controller's turning model). A step the collision world blocks is not taken (_blocked_frames counts). A
-        turn on the spot in progress stands its frames out first"""
-        self.t += dt
-        if self._maneuver is not None:
-            return self._follow_maneuver(dt)          # a maneuver in flight owns the frame (the input is not read)
+        """one frame: the input a unit direction on the ground plane ({'x', 'y'} or (x, y); zero stands). The command in
+        hand steps and gives the controller its input (a route walks while the input is not zero: the adapter's zero
+        is an arrival or a collision stall, and stops it); with no command a non-zero input steers the facing toward it
+        at max_turn_rate and walks forward (the engine controller's own turning). Then the controller runs one frame
+        (VRMCharacterController.locomote) and the frame is recorded -> the record"""
+        self._sync_place()
+        c = self.ctrl
         x, y = (inp.get('x', 0.0), inp.get('y', 0.0)) if isinstance(inp, dict) else (inp[0], inp[1])
-        turning = self._pre_turn is not None and self._pre_turn['left'] > 0
-        if turning:
-            self._pre_turn['left'] -= 1
-            if self._pre_turn['left'] <= 0:
-                self._pre_turn = None
-        moving = math.hypot(x, y) > 1e-4 and not self._seated and self._emote is None and not turning
-        state = 'seated' if self._seated else ('emote' if self._emote is not None else 'idle')
-        if state == 'emote' and self.t - dt < self._emote['t0']:
-            state = 'idle'                                   # an aimed emote's turn before it plays
-        step = 0.0
-        if moving:
-            v = self.speed()
-            if self.route is not None and self.route_s < self.route['total'] - 1e-6:
-                s1 = min(self.route['total'], self.route_s + v * dt)
-                nx, ny, nh = route_at(self.route, s1)
-            else:
-                tgt = heading_of(x, y)
-                dh = wrap_pi(tgt - self._heading)
-                mx = self.max_turn_rate * dt
-                nh = self._heading + max(-mx, min(mx, dh))
-                f = heading_vector(nh)
-                nx, ny = self.pos.x + f.x * v * dt, self.pos.y + f.y * v * dt
-                s1 = None
-            if self.world is not None and self.world.blocked(self.pos.x, self.pos.y, nx, ny, self.pos.z, self.agent_radius):
-                self._blocked_frames += 1
-                state = 'idle' if self._blocked_frames >= 6 else ('run' if self.running else 'walk')
-                moving = state != 'idle'
-            else:
-                step = math.hypot(nx - self.pos.x, ny - self.pos.y)
-                self.pos.x, self.pos.y, self._heading = nx, ny, nh
-                if s1 is not None:
-                    self.route_s = s1
-                if self.world is not None:
-                    self.pos.z = self.world.ground(nx, ny, self.pos.z + 0.6)
-                if step > 0.05 * v * dt:
-                    self._blocked_frames = 0
-                state = 'run' if self.running else 'walk'
-        rec = {'t': self.t - dt, 'state': state, 'x': self.pos.x, 'y': self.pos.y, 'z': self.pos.z,
-               'heading': self._heading, 'step': step, 'speed': self.speed(), 'clip': None, 'gaze': None,
-               'goal': (tuple(self.route['P'][-1]) if self.route is not None else None)}
-        if self._emote is not None and self._emote.get('facing') is not None and not self._seated:
-            rec['heading'] = self._emote['facing']          # the emote aimed (set_emote_facing); the walk's own after
-        if state == 'emote':
-            rec['clip'] = self._emote['slot']
-            rec['clip_t'] = self.t - dt - self._emote['t0']
-            rec['loop'] = self._emote['loop']
-        elif state == 'seated':
-            rec['clip'] = self._emote['slot'] if self._emote else self._seat_slot
-            rec['clip_t'] = self.t - dt - self._seat_t0
-            rec['loop'] = False
+        go = math.hypot(x, y) > 1e-6
+        if not go and not c.is_maneuvering and self.travelling:
+            self._next_route = None                        # stopped by the adapter: a collision stall, a stop
+            if self._cmd is not None and self._cmd['kind'] == 'route':
+                self._drop()
+        if self._next_route is not None and not c.is_turning:
+            pts, self._next_route = self._next_route, None
+            self._start_route(pts)
+        k = self._cmd
+        if k is None or k['kind'] != 'route':
+            self._auto_back()                              # before another command starts (a seat turns them off)
+        step = (0.0, 0.0)
+        if k is not None:
+            step = self._step(k, dt)
+        elif go and self._seat is None:
+            step = (x, y)
+        self._moves_en_route(self._cmd, step)
+        t = c.time
+        c.locomote(dt, step)
+        rec = record(c, len(self.record) + 1, t)
+        rec['cmd'] = k['kind'] if k is not None else None
+        rec['gaze'] = None
         self.record.append(rec)
+        self.pos = c.feet_world_position
+        self._placed = (self.pos.copy(), c._heading)
         return rec
+
+    def _moves_en_route(self, k, step):
+        """the moves the controller starts on its own (auto_maneuvers) are for what lies ON the route: cover, a ledge, a
+        gap between me and the goal. The JS's adapter stops pushing the controller within arrive_radius of the last
+        waypoint, so a wall just past the goal never draws a move there; my legs slow down to stop on the goal under
+        their own input, so while a route is in hand the controller's own scan of the path ahead (the one it triggers
+        from) is read here once the goal is within its reach, and the moves are held while the nearest thing they would
+        start for lies past the goal. The setting the legs were given comes back when the route ends (_auto_back)"""
+        c = self.ctrl
+        cmd = k['cmd'] if (k is not None and k['kind'] == 'route') else None
+        if not isinstance(cmd, FollowPath) or not hasattr(cmd, 'total'):
+            if cmd is None:
+                self._auto_back()
+            return
+        if self._auto_held is None:
+            self._auto_held = c.auto_maneuvers
+        on = self._auto_held
+        remain = max(0.0, cmd.total - cmd.s)
+        if on and remain < c.maneuver_scan_range and getattr(cmd, 'sub', None) is None:
+            if c._turning_enabled:
+                fx, fy = math.sin(c._heading), -math.cos(c._heading)
+            else:
+                ln = math.hypot(step[0], step[1])
+                fx, fy = (step[0] / ln, step[1] / ln) if ln > 1e-6 else (math.sin(c._heading), -math.cos(c._heading))
+            cl = c._classify_path_ahead(c._scan_path_ahead(fx, fy))
+            near = [d for d in ((cl['obstacle'] or {}).get('face_d', (cl['obstacle'] or {}).get('start_d')),
+                                (cl['gap'] or {}).get('start_d')) if d is not None]
+            on = not near or min(near) < remain
+        c.auto_maneuvers = on
+
+    def _auto_back(self):
+        """the legs' own auto_maneuvers setting, held while a route was in hand, given back"""
+        if self._auto_held is not None:
+            self.ctrl.auto_maneuvers, self._auto_held = self._auto_held, None
+
+    def _hand(self, kind, *cmds, **extra):
+        """a command in hand: the first of `cmds` runs, the rest follow it in order"""
+        self._cmd = dict(extra, kind=kind, cmd=cmds[0], parts=list(cmds[1:]))
+        return self._cmd
+
+    def _step(self, k, dt):
+        """the command in hand stepped -> its input for the controller this frame. A part that ends hands over to the
+        next in the same frame (as Locomotion.simulate runs its queue); the last one ending drops the command (a seat
+        stays: seated until the stand-up)"""
+        while True:
+            cmd = k['cmd']
+            if not cmd.started:
+                cmd.start(self.loco)
+                cmd.started = True
+            inp = cmd.step(self.loco, dt)
+            if k['kind'] == 'emote':
+                k['phase'] = self._emote_phase(k)
+            if inp is not None:
+                return inp
+            if not k['parts']:
+                break
+            k['cmd'] = k['parts'].pop(0)
+        if k['kind'] == 'emote':
+            k['phase'] = 'done'
+        self._cmd = None
+        return (0.0, 0.0)
+
+    def _drop(self):
+        """the command in hand given up (another one takes the body): an emote stopped (its clip faded out)"""
+        k, self._cmd = self._cmd, None
+        if k is None:
+            return
+        if k['kind'] == 'emote' and self.ctrl.is_emoting:
+            self.ctrl.stop_emote(fade_out=0.3)
 
     def set_gaze(self, yaw, pitch, look=None):
         """the body's head override for the frame just stepped (VRMRobotBody._applyHeadOverride); look: (the look-at
@@ -487,148 +442,227 @@ class RobotLegs:
             if look is not None:
                 self.record[-1]['look'] = look
 
-    def load_emote(self, slot, loop=False):
-        from ..vrma import load_clip
-        if slot not in self._emote_actions:
-            self._emote_actions[slot] = load_clip(self.h, slot)
-        return self._emote_actions[slot]
+    # ------------------------------------------------------------------------------------------------- routes
+    def set_route(self, waypoints):
+        """the polyline the adapter is following (its remaining waypoints), walked or run from where the body is
+        (film.FollowPath at walk_speed or run_speed, stopping on the last point); none stops the body: a walk or a run
+        in hand slows down to a stop straight ahead (film.FollowPath's own deceleration, as a body stops when told to)"""
+        if not waypoints:
+            self._next_route = None
+            k, c = self._cmd, self.ctrl
+            if k is not None and k['kind'] == 'route':
+                v = c.speed_actual
+                if v > 0.3 and not c.is_maneuvering and not k.get('stopping'):
+                    gait = 'run' if c.running else 'walk'
+                    d = v * v / (2.0 * DECEL[gait]) + 0.05
+                    f, p = heading_vector(c._heading), c.feet_world_position
+                    pt = (p.x + f.x * d, p.y + f.y * d)
+                    self._hand('route', FollowPath([pt], speed=v, gait=gait, turn_first=False), points=[pt],
+                               stopping=True)
+                elif not k.get('stopping'):
+                    self._drop()
+            return
+        pts = [(float(w['x']), float(w['y'])) for w in waypoints]
+        if self._seat is not None:
+            return
+        if self.ctrl.is_turning:
+            self._next_route = pts                         # a turn clip plays: the new route from where it ends
+            return
+        self._start_route(pts)
 
-    def play_emote(self, slot, loop=False, aim=True):
-        """a standing clip from now (aim: at _emote_facing when it is set; the seated clips are not aimed). An aimed
-        emote first turns on the spot to its facing and plays after the turn: -> the emote, with 'lead_s' (the turn)"""
-        if slot not in self._emote_actions:
-            self.load_emote(slot)
-        facing = self._emote_facing if aim else None
-        lead = 0.0
-        if facing is not None:
-            from .bake import turn_plan
-            facing = self._heading + wrap_pi(facing - self._heading)
-            if abs(facing - self._heading) > 0.02:
-                lead = turn_plan(self._heading, facing, self.fps)['frames'] / self.fps
-            else:
-                facing = None
-        self._emote = {'slot': slot, 't0': self.t + lead, 'loop': loop, 'facing': facing, 'lead_s': lead}
-        return self._emote
+    def _start_route(self, pts):
+        if self._cmd is not None and self._cmd['kind'] != 'route':
+            self._drop()
+        gait, v = ('run', self.run_speed) if self._run else ('walk', self.walk_speed)
+        self._hand('route', FollowPath(pts, speed=v, gait=gait), points=list(pts))
+
+    def turn_to(self, heading):
+        """a turn on the spot to `heading` (rad; film.TurnTo: the turn clips, split into equal turns past one clip's
+        turn; under 20 deg the facing eases round) -> started? An emote going out finishes first (the turn takes the
+        place of its turn back from an aim), and a walk slowing to a stop; not while seated or while an emote plays"""
+        k = self._cmd
+        if self._seat is not None or self.performing or (k is not None and k['kind'] in ('stand', 'seat')):
+            return False
+        self._next_route = None
+        if k is not None and (k['kind'] == 'emote' or k.get('stopping')):
+            k['parts'] = [TurnTo(heading=float(heading))]
+            k['kind'] = 'turn'
+            return True
+        self._drop()
+        self._hand('turn', TurnTo(heading=float(heading)))
+        return True
+
+    # ------------------------------------------------------------------------------------------------- emotes
+    def load_emote(self, slot, loop=False):
+        acts = getattr(self.ctrl, '_emote_actions', {})
+        if slot not in acts:
+            self.ctrl.load_emote(slot, loop=loop)
+        a = getattr(self.ctrl, '_emote_actions', {}).get(slot)
+        if a is None:
+            raise FileNotFoundError(f'no {slot!r} clip in the library')
+        return a
+
+    def play_emote(self, slot, seconds=None, aim=True):
+        """a standing clip from now for `seconds` (emotes.EmoteCmd: in at the walk's own fade, out through the standing
+        pose), aimed at _emote_facing (set_emote_facing) when it is set: within PIVOT_MAX of my heading the emote's root
+        pivots there during its fade-in (the engine's), else a turn on the spot to it first and back to my heading after
+        -> the command"""
+        from ..emotes.verbs import EmoteCmd
+        if self._seat is not None or (self._cmd is not None and self._cmd['kind'] in ('stand', 'seat')):
+            raise RuntimeError('seated: an emote plays standing (stand_up first)')
+        self.load_emote(slot)
+        self._drop()
+        self._next_route = None
+        h0 = self.ctrl._heading
+        d = wrap_pi(self._emote_facing - h0) if (aim and self._emote_facing is not None) else 0.0
+        if abs(d) <= PIVOT_MAX:
+            em = EmoteCmd(slot, seconds, facing=math.degrees(h0 + d) if d else 'keep')
+            return self._hand('emote', em, slot=slot, emote=em, phase='in')
+        em = EmoteCmd(slot, seconds, facing='keep')
+        return self._hand('emote', TurnTo(heading=h0 + d), em, TurnTo(heading=h0), slot=slot, emote=em, phase='in')
+
+    @staticmethod
+    def _emote_phase(k):
+        em = k['emote']
+        if not em.started:
+            return 'in'                                    # turning to the aim first
+        return 'play' if getattr(em, 'phase', 'in') in ('in', 'play') else 'out'
 
     def stop_emote(self):
-        """the emote ends; an aimed one turns back on the spot to the body's own heading"""
-        em, self._emote = self._emote, None
-        if em is not None and em.get('facing') is not None:
-            from .bake import turn_plan
-            self._pre_turn = {'heading': self._heading, 'left': turn_plan(em['facing'], self._heading, self.fps)['frames']}
+        """the emote ends now (it goes out through the standing pose, then turns back from an aim)"""
+        k = self._cmd
+        if k is not None and k['kind'] == 'emote' and k['emote'].started and k['emote'].phase in ('in', 'play'):
+            k['emote'].left = 0.0
+            k['cmd'] = k['emote']
 
+    # ------------------------------------------------------------------------------------------------- seats
     def begin_seated(self, slot='stand_to_sit', opts=None):
-        self._seated = True
-        self._seat_slot = slot
-        self._seat_t0 = self.t
-        self.load_emote(slot)
-        self._emote = None
-        return self._emote_actions[slot].duration
+        """beginSeated: the seated state. With a seat (opts['seat']: emotes.seat_plan's measures, which seat_on keeps on
+        the body, or opts['chair']: a chair to walk to) the controller family's sit-down (emotes.SeatOn: from where the
+        body stands, or walked up to the chair, turned out of it and backed onto its spot; the hips settled on the pan,
+        the feet on the floor) and seated until stand_up. Without one the JS's: the seated clip plays where the body
+        stands and the root holds (the caller owns the seat) -> the clip's duration"""
+        from ..emotes.verbs import SeatOn
+        o = dict(opts or {})
+        self._sync_place()                                 # seatOn's snap onto its spot, made just before
+        self._drop()
+        self._next_route = None
+        plan, chair = o.get('seat'), o.get('chair')
+        a = self.load_emote(slot)
+        fade = o.get('fadeIn', o.get('fade', 0.25))
+        if plan is not None or chair is not None:
+            ch = chair if chair is not None else plan['chair']
+            face = plan['heading'] if plan is not None else o.get('face')
+            self._hand('seat', SeatOn(ch, transition=slot, face=face, hold=None, fade=fade, sink=o.get('sink', 0.0),
+                                      back_up=0.0 if plan is not None else o.get('back_up', 0.35),
+                                      hip_back=o.get('hip_back'), camera=o.get('camera'), speed=self.walk_speed))
+            self._seat = 'seat'
+            return a.clip.duration
+        self._seat = 'plain'
+        return self.ctrl.begin_seated(slot, fade_in=fade)
 
     def end_seated(self, slot='sit_to_stand', opts=None):
-        self._seated = False
-        if slot:
-            self.play_emote(slot, aim=False)
-        return None
+        """endSeated: a seat taken through emotes.SeatOn stands up through its StandUp (slot: the stand-up clip; None
+        reverses the sit-down); a plain seat plays the stand-up clip where it sits (the controller hands the root back
+        once the clip has carried the hips over the feet), then stopEmote -> the stand-up's length (s), or None"""
+        from ..emotes.verbs import StandUp
+        o = dict(opts or {})
+        fade = o.get('fadeIn', o.get('fade', 0.25))
+        if self._seat is None:
+            return None
+        if self._seat == 'seat':
+            self._seat = None
+            up = StandUp(reverse=None if slot is None else False, clip=slot or 'sit_to_stand', fade=fade)
+            k = self._cmd
+            if k is not None and k['kind'] == 'seat':
+                k['parts'].append(up)                      # still sitting down: up once it is seated
+                k['kind'] = 'stand'
+            else:
+                self._hand('stand', up)
+            return None
+        self._seat = None
+        rem = self.ctrl.end_seated(slot, fade_in=fade, reverse=slot is None) or 1.8
+        self._hand('stand', Wait(rem), Call(lambda c: c.stop_emote(fade_out=0.3)), Wait(0.4))
+        return rem
 
-    # ---- the maneuvers: robot_controller.js passes vault / jump / climbLedge / climbLadder through to the engine's
-    # charCtrl (VRMCharacterController). Here that controller is the controller family's port: each move is played by
-    # it from where my body stands, facing its heading, on the same collision meshes, at the moment it is called (its
-    # scan of the meshes ahead decides whether the move fits, as the engine's does: False when it does not)
+    # ------------------------------------------------------------------------------------------------- gestures
+    def load_gesture(self, slot, loop=True):
+        return self.ctrl.load_gesture(slot, loop=loop)
+
+    def play_gesture(self, slot, weight=2.5, loop=True):
+        """playGesture: `slot` masked to the upper body, blended over whatever the legs do (walk, run, stairs, standing)
+        until stop_gesture; the controller fades it out through turns on the spot, moves and emotes"""
+        if slot not in getattr(self.ctrl, '_gesture_actions', {}):
+            if self.ctrl.load_gesture(slot, loop=loop) is None:
+                return None
+        return self.ctrl.play_gesture(slot, weight=weight)
+
+    def stop_gesture(self):
+        self.ctrl.stop_gesture()
+
+    # ------------------------------------------------------------------------------------------------- the moves
+    # robot_controller.js passes vault / jump / climbLedge / climbLadder through to the engine's charCtrl: here the
+    # controller family's, from wherever the body is: standing, walking or running (a move out of the stride), facing
+    # its heading, its scan of the colliders ahead deciding whether the move fits (False when it does not)
     def vault(self):
         """vault the cover ahead along the heading (a wall 0.42 to 1.15 m high, with ground to land on beyond)"""
-        return self._start_maneuver('vault')
+        return self._move('vault')
 
     def jump(self, opts=None):
         """jump({distance, height}): a leap forward along the heading (1.4 m and 0.45 m by default), the landing probed"""
         o = dict(opts or {})
-        return self._start_maneuver('jump', distance=o.get('distance', 1.4), height=o.get('height', 0.45))
+        return self._move('jump', distance=o.get('distance', 1.4), height=o.get('height', 0.45))
 
     def climb_ledge(self):
         """mount the block ahead (climbLedge; climbWallUp over 1.35 m)"""
-        return self._start_maneuver('climb_ledge')
+        return self._move('climb_ledge')
 
     def climb_ladder(self, opts=None):
         """climbLadder({height, rate, firstRung, rungSpacing, timeScale}): up the ladder on the face ahead, the rung loop
         chained into the mantle over its top (height: the ladder's, else the face's the scan measures). This edition
-        also takes rungRadius (my palms close over rungs that thick; default terrain_base's)"""
+        also takes rungRadius (my palms close over rungs that thick) and standoff"""
         o = dict(opts or {})
         kw = {k: o[j] for j, k in (('height', 'height'), ('rate', 'rate'), ('firstRung', 'first_rung'),
                                    ('first_rung', 'first_rung'), ('rungSpacing', 'rung_spacing'),
                                    ('rung_spacing', 'rung_spacing'), ('timeScale', 'time_scale'),
                                    ('time_scale', 'time_scale'), ('rungRadius', 'rung_radius'),
-                                   ('rung_radius', 'rung_radius')) if j in o}
-        return self._start_maneuver('climb_ladder', **kw)
+                                   ('rung_radius', 'rung_radius'), ('standoff', 'standoff')) if j in o}
+        return self._move('climb_ladder', **kw)
 
-    def _start_maneuver(self, name, **kw):
-        """the move simulated now through the controller family (eidoblend.characters.controller.Locomotion: its
-        VRMCharacterController, the robot preset, the clips, the move's planner and its contact IK), from MANEUVER_PRE_S
-        of standing to MANEUVER_POST_S of standing after the landing, and planted (its plant: the feet, my body's DOF
-        pass). The live run then follows its root frame by frame (_follow_maneuver: the body senses on from where the
-        move carries it) and the bake keys its frames (bake.bake_run) -> started?"""
-        if self._maneuver is not None or self._seated or self._emote is not None or self._pre_turn is not None:
+    def _move(self, name, **kw):
+        """the controller's own move now -> started? A seated, emoting or turning body answers False (its clips own the
+        frame); a move in flight too, as the engine's"""
+        c = self.ctrl
+        why = None
+        if self._seat is not None:
+            why = 'seated'
+        elif c.is_emoting or (self._cmd is not None and self._cmd['kind'] in ('emote', 'stand')):
+            why = 'an emote plays'
+        elif self.is_turning:
+            why = 'turning on the spot'
+        if why is not None:
+            self.maneuver_log.append((round(c.time, 3), name, [why]))
             return False
-        if self.record and self.record[-1]['state'] in ('walk', 'run'):
-            # the engine also vaults out of a walk or a run (its auto-maneuvers); here a move starts from standing
-            self.maneuver_log.append((self.t, name, ['moving: a move starts from standing (stop first)']))
-            return False
-        sim = self.simulate_maneuver(name, kw, (self.pos.x, self.pos.y, self.pos.z), self._heading)
-        if not sim['played']:
-            self.maneuver_log.append((self.t, name, sim['said'][-3:]))
-            return False
-        mv = dict(sim, id=len(self._maneuvers), name=name, kw=kw, k=0, t0=self.t,
-                  start=(self.pos.x, self.pos.y, self.pos.z, self._heading))
-        self._maneuvers.append(mv)
-        self._maneuver = mv
-        return True
-
-    def simulate_maneuver(self, name, kw, start, heading):
-        """one move through the controller family from `start` (x, y, z: the feet) facing `heading`: MANEUVER_PRE_S of
-        standing, the move, MANEUVER_POST_S of standing, planted -> {'frames' (the plant's: N, off, M, stages in
-        Blender's axes), 'records' (the controller's: feet_world, heading, mode, maneuver), 'played' (the maneuver
-        types it played), 'report', 'said' (its log)}. The bake runs it again from where the keyed body stands"""
-        from ..controller import CollisionWorld as ControllerWorld, Locomotion
-        names = self.world.names if self.world is not None else []
-        objs = [bpy.data.objects[n] for n in names if n in bpy.data.objects]
-        world = ControllerWorld(objs) if objs else ControllerWorld()
-        said = []
-        loco = Locomotion(self.h, world, start=tuple(start), heading=heading,
-                          log=lambda *a: said.append(' '.join(str(x) for x in a)))
-        loco.wait(MANEUVER_PRE_S)
-        getattr(loco, name)(**kw)
-        loco.wait(MANEUVER_POST_S)
-        rep = loco.bake(f0=1, key=False)
-        recs = rep['_records']
-        return {'frames': rep['_frames'], 'records': recs, 'said': said,
-                'played': sorted({r['maneuver'] for r in recs if r.get('maneuver')}),
-                'report': {k: v for k, v in rep.items() if k in ('segments', 'worst', 'timing_s')}}
-
-    def _follow_maneuver(self, dt):
-        mv = self._maneuver
-        k = mv['k']
-        r, fr = mv['records'][k], mv['frames'][k]
-        fw = r['feet_world']
-        self.pos.x, self.pos.y, self.pos.z = fw[0], fw[1], fw[2]
-        _l, rq, _s = fr['M'].decompose()
-        self._heading = 2.0 * math.atan2(rq.z, rq.w)         # the keyed root's facing (the bake reads it so)
-        rec = {'t': self.t - dt, 'state': 'maneuver', 'x': self.pos.x, 'y': self.pos.y, 'z': self.pos.z,
-               'heading': self._heading, 'step': 0.0, 'speed': 0.0, 'clip': None, 'gaze': None, 'goal': None,
-               'maneuver': mv['id'], 'maneuver_k': k, 'move': r.get('maneuver') or r.get('mode')}
-        self.record.append(rec)
-        mv['k'] = k + 1
-        if mv['k'] >= len(mv['records']):
-            self._maneuver = None                # landed and settled: the legs walk on from here
-            self.route = None
-            self._blocked_frames = 0
-        return rec
+        n0 = len(self.said)
+        ok = bool(getattr(c, name)(**kw))
+        if not ok:
+            self.maneuver_log.append((round(c.time, 3), name, [s for _t, s in self.said[n0:]][-3:]))
+        return ok
 
     # ------------------------------------------------------------------------------------------------------ the bake
-    def bake(self, f0=1, ground=None, face=None, crown_state=None, head_state=None, fade=8, action_name=None,
-             key=True, log=print, keep_feet_out=True):
-        """the record keyed through my body's passes (see the module doc) -> report"""
+    def bake(self, f0=None, face=None, crown_state=None, head_state=None, action_name=None, key=True, springs=True,
+             log=print):
+        """the take baked (eidoblend.characters.robot.bake) -> report"""
         from . import bake as B
-        return B.bake_run(self, f0=f0, ground=ground, face=face, crown_state=crown_state, head_state=head_state, fade=fade,
-                          action_name=action_name, key=key, log=log, keep_feet_out=keep_feet_out)
+        return B.bake_run(self, f0=f0, face=face, crown_state=crown_state, head_state=head_state,
+                          action_name=action_name, key=key, springs=springs, log=log)
+
+
+# an aimed emote pivots during its fade-in up to this far off my heading; further, I turn on the spot first. Measured on
+# my body through the plant, pivoting right after a walk's stop with the walk's last stance planted: 10 and 15 deg hold
+# both feet both ways; 20 deg to the left turns the planted left foot 4.3 deg in a frame, 60 deg slides it 26 mm in a
+# frame and 75 deg 178 mm (my hip's yaw ring cannot twist a planted leg that far)
+PIVOT_MAX = math.radians(15.0)
 
 
 # ------------------------------------------------------------------------------------------------------------ the adapter
@@ -638,11 +672,13 @@ class EidoverseRobotController:
     @classmethod
     def create(cls, h, overrides=None, opts=None, rig=None, legs_class=None):
         """create(vrm, mixer, overrides, opts): opts start_position (x, y[, z]), start_heading (rad, 0 faces -Y),
-        walk_speed, run_speed, max_turn_rate, arrive_radius, agent_radius, collision_meshes (the walkable world: every
-        surface walked on and every solid walked round; none: a flat ground at ground_z, as the JS), trimesh_colliders
-        (every collision mesh as its triangles instead of its box: CollisionWorld), ground_z. overrides: {'idle': slot,
-        'walk': slot, 'run': slot} (the clips' slots; the JS's standardAnimationOverrides). The JS's VRMUtils merge
-        (fewer skinned draws for three's renderer) does not apply in Blender"""
+        walk_speed, run_speed (the routes' paces; default this body's measured native ones), max_turn_rate (default the
+        controller's 3.5 rad/s), arrive_radius, collision_meshes (the walkable world: every surface walked on and every
+        solid walked round; none: a flat ground at ground_z, as the JS), trimesh_colliders (every collision mesh as its
+        triangles instead of its box: CollisionWorld), ground_z, controller_opts (the JS's opts.controllerOpts: any
+        VRMCharacterController option, e.g. {'auto_maneuvers': False, 'vault_max_rise': 1.0}). overrides: the JS's
+        {'standard_animation_overrides': {'vrma_library': {slot: .vrma path}}} (the stock slots played from other
+        files). The JS's VRMUtils merge (fewer skinned draws for three's renderer) does not apply in Blender"""
         opts = dict(opts or {})
         overrides = dict(overrides or {})
         mine = {o.name for o in h.objects} | {h.arm.name}
@@ -651,12 +687,12 @@ class EidoverseRobotController:
             print('[eidoverse-robot] no collision_meshes provided: using a flat ground plane at z='
                   f'{opts.get("ground_z", 0.0)}', flush=True)
         world = CollisionWorld(meshes, opts.get('ground_z', 0.0), opts.get('trimesh_colliders', False))
+        lib = (overrides.get('standard_animation_overrides') or {}).get('vrma_library')
         Legs = legs_class or RobotLegs
         legs = Legs(h, rig=rig, world=world, start_position=opts.get('start_position', (0.0, 0.0, 0.0)),
-                    start_heading=opts.get('start_heading', 0.0), walk_speed=opts.get('walk_speed', 1.5),
-                    run_speed=opts.get('run_speed', 3.6), max_turn_rate=opts.get('max_turn_rate') or MAX_TURN_RATE,
-                    agent_radius=opts.get('agent_radius', 0.3), idle=overrides.get('idle', 'idle'),
-                    walk=overrides.get('walk', 'walk'), run=overrides.get('run', 'run'))
+                    start_heading=opts.get('start_heading', 0.0), walk_speed=opts.get('walk_speed'),
+                    run_speed=opts.get('run_speed'), max_turn_rate=opts.get('max_turn_rate'),
+                    controller_opts=opts.get('controller_opts'), vrma_library=lib)
         return cls(h, legs, opts)
 
     def __init__(self, h, char_ctrl, opts=None):
@@ -666,8 +702,8 @@ class EidoverseRobotController:
         self.waypoints = []
         self.waypoint_index = 0
         self.state = 'idle'                  # 'idle' | 'walking' | 'running' | 'performing' | 'seated'
-        self.walk_speed = opts.get('walk_speed', 1.5)
-        self.run_speed = opts.get('run_speed', 3.6)
+        self.walk_speed = getattr(char_ctrl, 'walk_speed', None) or opts.get('walk_speed', 1.5)
+        self.run_speed = getattr(char_ctrl, 'run_speed', None) or opts.get('run_speed', 3.6)
         self.arrive_radius = opts.get('arrive_radius', 0.28)
         self.actions = {}                    # VRMRobotBody reads this; emotes go through force_action
         self.current_action = None
@@ -716,6 +752,10 @@ class EidoverseRobotController:
     def is_maneuvering(self):
         return bool(getattr(self.char_ctrl, 'is_maneuvering', False))
 
+    def is_turning(self):
+        """this edition's: a turn on the spot in hand (face_direction, a route's or an aimed emote's)"""
+        return bool(getattr(self.char_ctrl, 'is_turning', False))
+
     # parkour passthroughs (scripted moments; a legs object without a move answers False, as the JS's ?? false)
     def vault(self):
         return getattr(self.char_ctrl, 'vault', lambda: False)()
@@ -729,6 +769,22 @@ class EidoverseRobotController:
     def climb_ladder(self, opts=None):
         return getattr(self.char_ctrl, 'climb_ladder', lambda o=None: False)(opts)
 
+    # this edition's: playGesture on the inner controller, and a turn on the spot (face_direction)
+    def play_gesture(self, slot, weight=2.5, loop=True):
+        return getattr(self.char_ctrl, 'play_gesture', lambda *a, **k: None)(slot, weight=weight, loop=loop)
+
+    def stop_gesture(self):
+        return getattr(self.char_ctrl, 'stop_gesture', lambda: None)()
+
+    def turn_to(self, heading):
+        """turn on the spot to `heading` (rad) -> started?; a legs object without turn_to snaps it (the JS's
+        faceDirection)"""
+        self.set_waypoints([])
+        if hasattr(self.char_ctrl, 'turn_to'):
+            return self.char_ctrl.turn_to(heading)
+        self.char_ctrl._heading = heading
+        return True
+
     def set_waypoints(self, waypoints):
         """keeps each waypoint's `action` ('run' runs to it); clears the stall latch so a fresh path resumes"""
         self.waypoints = [({'x': w[0], 'y': w[1]} if isinstance(w, (list, tuple)) else
@@ -739,13 +795,17 @@ class EidoverseRobotController:
             self.state = 'walking' if self.waypoints else 'idle'
         if self.waypoints and any(w.get('action') == 'run' for w in self.waypoints):
             self.char_ctrl.running = self.waypoints[0].get('action') == 'run'
-        if hasattr(self.char_ctrl, 'set_route'):
+        elif self.waypoints:
+            self.char_ctrl.running = False
+        if hasattr(self.char_ctrl, 'set_route') and self.state != 'performing':
             self.char_ctrl.set_route(self.waypoints)
 
     def force_action(self, name, duration=None):
         """a stationary expressive clip through the legs' emote system: 'performing' at once (a caller polling the
         state right after must not see the old one), the clip loaded and played for `duration` (1.5 s by default);
-        False (and the state restored) when it cannot be loaded"""
+        False (and the state restored) when it cannot be loaded. The JS counts `duration` from the call (the engine
+        pivots to an aimed facing during the fade-in); an emote aimed further than the legs pivot turns on the spot
+        first, and its `duration` starts when it plays"""
         prev = self.state
         self.current_action = name
         self.state = 'performing'
@@ -756,11 +816,8 @@ class EidoverseRobotController:
                 self._emotes_loaded[name] = True
             if self.current_action != name or self.state != 'performing':
                 return False
-            em = self.char_ctrl.play_emote(name)
-            # the JS plays `duration` from the call (the engine pivots to an aimed facing during the fade-in); the legs
-            # here turn on the spot first, so the emote's own time starts after that turn
-            lead = em.get('lead_s', 0.0) if isinstance(em, dict) else 0.0
-            self._emote_until = self._t + (1.5 if duration is None else duration) + lead
+            self.char_ctrl.play_emote(name, 1.5 if duration is None else duration)
+            self._emote_until = self._t + (1.5 if duration is None else duration)
             return True
         except Exception as e:  # noqa: BLE001 (the JS: an unknown emote degrades to a no-op)
             print(f'[eidoverse-robot] force_action({name}) failed: {e}', flush=True)
@@ -786,7 +843,7 @@ class EidoverseRobotController:
     def end_seated(self, slot='sit_to_stand', opts=None):
         opts = opts or {}
         try:
-            if slot:
+            if slot or getattr(self.char_ctrl, 'performing', None) is not None:
                 self.current_action = slot
                 self.state = 'performing'
                 self._emote_until = self._t + opts.get('duration', 1.8)
@@ -796,26 +853,35 @@ class EidoverseRobotController:
         except Exception as e:  # noqa: BLE001
             print(f'[eidoverse-robot] end_seated failed: {e}', flush=True)
 
+    def _performing(self, t):
+        """the performing window: the legs' own emote or stand-up while they say it plays, else the JS's timer"""
+        p = getattr(self.char_ctrl, 'performing', None)
+        return bool(p) if p is not None else t < self._emote_until
+
     def update(self, t, dt):
         self._t = t
+        legs = self.char_ctrl
         if self.state in ('performing', 'seated'):
-            if self.state == 'performing' and t >= self._emote_until:
+            if self.state == 'performing' and not self._performing(t):
                 self.current_action = None
                 self.state = 'walking' if self.waypoint_index < len(self.waypoints) else 'idle'
-                if hasattr(self.char_ctrl, 'stop_emote'):
-                    self.char_ctrl.stop_emote()
-            self.char_ctrl.locomote(dt, {'x': 0.0, 'y': 0.0})
-            if self.on_pre_vrm_update:
-                self.on_pre_vrm_update(dt)
-            return
+                if hasattr(legs, 'set_route') and self.waypoint_index < len(self.waypoints):
+                    legs.set_route(self.waypoints[self.waypoint_index:])     # the walk resumes from where it was
+                elif hasattr(legs, 'stop_emote') and getattr(legs, 'performing', None) is None:
+                    legs.stop_emote()
+            if self.state in ('performing', 'seated'):
+                legs.locomote(dt, {'x': 0.0, 'y': 0.0})
+                if self.on_pre_vrm_update:
+                    self.on_pre_vrm_update(dt)
+                return
         dx_, dy_ = 0.0, 0.0
         if self.waypoint_index < len(self.waypoints):
-            pos = self.char_ctrl.feet_world_position
+            pos = legs.feet_world_position
             wp = self.waypoints[self.waypoint_index]
             dx, dy = wp['x'] - pos.x, wp['y'] - pos.y
             dist = math.hypot(dx, dy)
             running = wp.get('action') == 'run'
-            self.char_ctrl.running = running
+            legs.running = running
             if dist <= self.arrive_radius:
                 self.waypoint_index += 1
                 if self.waypoint_index >= len(self.waypoints):
@@ -825,11 +891,24 @@ class EidoverseRobotController:
                 self.state = 'running' if running else 'walking'
         else:
             self.state = 'idle'
-            self.char_ctrl.running = False
-        if not self.is_maneuvering and self.char_ctrl._blocked_frames >= 6:
+        stalled = not self.is_maneuvering and legs._blocked_frames >= 6
+        if stalled:
             dx_, dy_ = 0.0, 0.0
             self.state = 'idle'
-        self.char_ctrl.locomote(dt, {'x': dx_, 'y': dy_})
+        elif getattr(legs, 'travelling', False):
+            # this edition's: the legs slow down to stop ON the goal (film.FollowPath): the walk goes on until they
+            # have, and a waypoint the route's rounded corner passed farther than arrive_radius from is passed
+            if self.state == 'idle':
+                self.state = 'running' if legs.running else 'walking'
+            if dx_ == 0.0 and dy_ == 0.0:
+                f = heading_vector(legs._heading)
+                dx_, dy_ = f.x, f.y
+        elif self.waypoints and hasattr(legs, 'travelling') and self.state in ('walking', 'running'):
+            # the route is over (stopped on its goal): every waypoint is behind
+            self.waypoint_index = len(self.waypoints)
+            self.state = 'idle'
+            dx_, dy_ = 0.0, 0.0
+        legs.locomote(dt, {'x': dx_, 'y': dy_})
         if self.on_pre_vrm_update:
             self.on_pre_vrm_update(dt)
 

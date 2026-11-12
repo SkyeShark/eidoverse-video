@@ -10,7 +10,8 @@
                                              mid-print, then "Inspect workpiece"
     inspector_fdm_bracket_t12_work.png       set_source('bracket'): the fork bracket printing
     inspector_cnc_process_t10.png            the CNC 'process' (a pocket mill) in brass, after set_stock
-    inspector_relief_process_t12(_work).png  the ball-nose relief carve (physical timing refused: 7.8 hours keyed)
+    inspector_relief_process_t12(_work).png  the ball-nose relief carve (its 7.8 hours of physical timing: see
+                                             test_inspector_physical.py)
     inspector_spool_wire_t8.png              the dispenser's wireframe following the live strand
     inspector_rotary_t16(_work).png          the rotary machine's 'process' (the sample turned in wood), then
                                              "Inspect workpiece" on its stock
@@ -282,8 +283,8 @@ def cnc_process():
 
 
 def relief_process():
-    """the ball-nose machine's 'process': the fabrication port's relief carve of the original sample; physical timing
-    (7.8 hours of machining, every frame keyed) is refused with the numbers"""
+    """the ball-nose machine's 'process': the fabrication port's relief carve of the original sample; its physical
+    timing (7.8 hours of machining) plays, keyed at the program's events (test_inspector_physical.py measures it)"""
     sc = K.clean_scene()
     insp = inspector_scene('cnc_relief', scene=sc, resolution=(640, 360))
     K.probe_render(sc, (640, 360), 16)
@@ -293,11 +294,10 @@ def relief_process():
     shot(sc, 'inspector_relief_process_t12.png', 12.0)
     insp.frame_work()
     shot(sc, 'inspector_relief_process_t12_work.png', 12.0)
-    try:
-        insp.set_timing('physical')
-        K.check('physical timing of the relief is refused', False, 'accepted')
-    except ValueError as e:
-        K.check(f'physical timing of the relief is refused ({str(e)[:70]})', 'keyed frames' in str(e))
+    insp.set_timing('physical')
+    job = insp['job']
+    K.check(f"physical timing of the relief plays: {job.duration / 3600:.1f} hours, {job.event_keys['events']:,} "
+            'events keyed', job.duration > 7 * 3600 and job.event_keys['events'] > 0)
 
 
 def rotary_process():

@@ -9,18 +9,70 @@ the Blender edition's own exact union with the same contract, written for slices
         outside its holes), as closed rings with collinear points removed: outer rings counter-clockwise (positive
         area), holes clockwise, each ring starting at its lowest-x (then lowest-y) point.
 
-Method: every edge is split where it crosses or touches an edge of another polygon (collinear overlaps included); each
-piece is kept when the union's inside lies on exactly one side of it (probed a hair either side of its midpoint),
-turned so the inside is on its left, and the kept pieces are linked into rings (at a vertex where two rings touch, the
-walk takes the first piece clockwise from the way it came in, so each ring hugs its own inside).
+Method: every coordinate is first snapped as polygon-clipping snaps it (PtRounder: an x or a y within about an ulp of
+one seen before in the same union becomes that one, so near-equal points coincide and points an ulp off a line lie on
+it), and so is every crossing point the union computes. Then every edge is split where it crosses or touches an edge
+of another polygon (collinear overlaps included); each piece is kept when the union's inside lies on exactly one side
+of it (probed a hair either side of its midpoint), turned so the inside is on its left, and the kept pieces are linked
+into rings (at a vertex where two rings touch, the walk takes the first piece clockwise from the way it came in, so
+each ring hugs its own inside). polygon-clipping meets the crossing points in its sweep's order and this union in its
+own, so a crossing point flp-equal to two values seen before can snap to the other one.
 """
 
 from __future__ import annotations
 
+import bisect
 import math
 from fractions import Fraction
 
 import numpy as np
+
+EPSILON = 2.0 ** -52                    # Number.EPSILON
+EPSILON_SQ = EPSILON * EPSILON
+
+
+def flp_cmp(a, b):
+    """polygon-clipping's floating-point comparator: 0 when a and b are both within EPSILON of zero, or equal to about
+    an ulp ((a - b)^2 < EPSILON^2 a b); else -1 or 1."""
+    if -EPSILON < a < EPSILON and -EPSILON < b < EPSILON:
+        return 0
+    ab = a - b
+    if ab * ab < EPSILON_SQ * a * b:
+        return 0
+    return -1 if a < b else 1
+
+
+class CoordRounder:
+    """polygon-clipping's CoordRounder: a value is snapped to the value before it in sorted order when the two are
+    flp-equal, else to the one after it, else kept and remembered (its splay tree, as a sorted list). Seeded with 0."""
+
+    def __init__(self):
+        self.keys = []
+        self.round(0.0)
+
+    def round(self, v):
+        v = float(v)
+        keys = self.keys
+        i = bisect.bisect_left(keys, v)
+        if not (i < len(keys) and keys[i] == v):
+            keys.insert(i, v)
+        if i > 0 and flp_cmp(v, keys[i - 1]) == 0:
+            del keys[i]
+            return keys[i - 1]
+        if i + 1 < len(keys) and flp_cmp(v, keys[i + 1]) == 0:
+            del keys[i]
+            return keys[i]
+        return v
+
+
+class PtRounder:
+    """polygon-clipping's PtRounder: x and y snapped separately (a CoordRounder each), reset for every union."""
+
+    def __init__(self):
+        self.x, self.y = CoordRounder(), CoordRounder()
+
+    def round(self, p):
+        return (self.x.round(p[0]), self.y.round(p[1]))
 
 
 def _area(r):
@@ -125,6 +177,8 @@ def union(*polygons):
     polys = [p for p in polygons if p and len(p[0]) >= 3]
     if not polys:
         return []
+    rounder = PtRounder()                    # every input point, in polygon-clipping's reading order
+    polys = [[[rounder.round(pt) for pt in ring] for ring in poly] for poly in polys]
     allp = np.concatenate([np.asarray(r, dtype=np.float64) for p in polys for r in p])
     extent = float(np.hypot(*(allp.max(axis=0) - allp.min(axis=0)))) or 1.0
     eps = max(1e-15, extent * 1e-12)
@@ -153,12 +207,12 @@ def union(*polygons):
             if p:
                 out.append(p)
         else:
-            out.extend(_union_cluster(group, extent, eps))
+            out.extend(_union_cluster(group, extent, eps, rounder))
     out.sort(key=lambda p: (p[0][0][0], p[0][0][1]))
     return out
 
 
-def _union_cluster(polys, extent, eps):
+def _union_cluster(polys, extent, eps, rounder):
     # edges per polygon
     edges = []          # (ax, ay, bx, by, polygon)
     for pi, poly in enumerate(polys):
@@ -211,7 +265,7 @@ def _union_cluster(polys, extent, eps):
                 elif t >= 1 - tol:
                     p = (bx, by)
                 else:
-                    p = (ax + t * ux, ay + t * uy)
+                    p = rounder.round((ax + t * ux, ay + t * uy))
                 if tol < t < 1 - tol:
                     splits[e1].append((t, p))
                 if tol < u < 1 - tol:

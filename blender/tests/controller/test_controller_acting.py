@@ -15,8 +15,9 @@ cheer while walking, the sit stop on a bench, the salute) plus the falls and the
     6 a jog (gait 'slowRun') on a curve, then a sprint (gait 'fastRun'), slowing to a walk and a stop
 
 Prints PASS / FAIL: checks.feet on every gait's frames, the gesture's weight while the legs walk, the emote's facing,
-the hips over the bench at the bench's height, the seated skin resting on the pan and the seated boots on the floor
-(the visible mesh), the fall and the landing clip, the backward walk's facing against its travel, the jog's and the
+the hips over the bench at the bench's height, the seated skin resting on the pan and never more than 1 cm into the
+bench sitting down, held or standing up (the clamp), the seated boots on the floor (the visible mesh), the fall and the
+landing clip, the backward walk's facing against its travel, the jog's and the
 sprint's paces, the stops on their marks, the keyed armature against the bake.
 """
 
@@ -180,6 +181,22 @@ def main():
         R['seat']['underside_over_pan_m'] = round(gap, 4)
         R.check('the seat settles onto a bench 5 cm higher than the clip\'s (the skin\'s underside within 1.5 cm of '
                 'the pan)', abs(gap) < 0.015, f'{gap * 100:+.1f} cm')
+        # the clamp: sitting down, held and standing up, no seated skin goes into the bench (up-rays over its top only)
+        from eidoblend.characters.emotes.verbs import skin_lowest
+        bb = [bn.matrix_world @ Vector(cn) for cn in bn.bound_box]
+        x0, x1 = min(v.x for v in bb) + 0.02, max(v.x for v in bb) - 0.02
+        y0, y1 = min(v.y for v in bb) + 0.02, max(v.y for v in bb) - 0.02
+        pts = [(x0 + (x1 - x0) * i / 8.0, y0 + (y1 - y0) * j / 16.0) for i in range(9) for j in range(17)]
+        worst = (0.0, None)
+        for f in range(fa, fb + 1, 2):
+            sc.frame_set(f)
+            u = skin_lowest(me, pts, top - 0.25)
+            if u is not None and u - top < worst[0]:
+                worst = (u - top, f)
+        R['seat']['deepest_in_bench_m'] = [round(worst[0], 4), worst[1]]
+        R.check('the clamp: no seated skin more than 1 cm into the bench sitting down, held or standing up (up-rays '
+                'over its top, every 2nd frame)', worst[0] > -0.01,
+                f'deepest {worst[0] * 100:+.2f} cm at f{worst[1]}')
         fm = T.FootMesh(me)
         floor = seated[0]['feet_world'][2]
         lows = [min(v['zmin'] for v in fm.at(f).values()) - floor for f in range(fa + (fb - fa) // 3,

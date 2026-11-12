@@ -45,6 +45,19 @@ the valid ones.
 `weather=None` is the default and keeps your cloud preset. The WebGPU facade defaults to `'clear'`,
 which empties a cumulus sky.
 
+As `makeSky` does, the sky also brings the weather that falls on the ground: rain and splashes, wet
+ground and puddles, lightning and the weather audio ([weather effects](weather-effects.md)). It builds
+that system as soon as its direction names a weather that rains, strikes or wets, and wraps the scene's
+materials for wetness then. See [Weather](#weather).
+
+```python
+sky = make_sky(scene, camera=cam, hours=17.0, weather='storm', cache_dir='C:/films/street/sky_cache',
+               weather_fx={'strike_targets': [street], 'occluders': street})   # optional: the weather's options
+sky.bake()                    # the weather's bake: every frame planned, the sky baked with the flashes, all keyed
+bpy.ops.render.render(animation=True)
+sky.weather_fx.bake_audio('C:/films/street/weather.wav')
+```
+
 ## Direct the sky
 
 Every direction call applies now, or at media time `at` (seconds, `(frame - scene.frame_start) / fps`).
@@ -74,12 +87,26 @@ lights.
 - `sun_dir` and `moon_dir` are the true unit directions in Blender world space (Z up). After dusk the sun
   lamp follows the moon. When something must follow the sun itself, such as a flare or flowers turning
   to it, read `sky.sun_dir`, not the lamp.
+- `sun_coverage_dim(x, y, strength=0.7)` is `sunCoverageDim`: a 0-to-1 "sun behind cloud" factor at the
+  ground point `(x, y)`, to drive a lamp's or an effect's intensity. It reads the weather field's coverage
+  where the key light's ray from that point meets the cloud base, `k = (coverage − 0.35) / 1.05` clamped,
+  and returns `1 − k·strength`: 1 under a clear column, `1 − strength` under full cover. Key it inside
+  `frame_states()` (an `on_frame` callback runs before the frame's update):
+
+  ```python
+  for f, t, _ in sky.frame_states():
+      lamp.data.energy = 800 * sky.sun_coverage_dim(lamp.location.x, lamp.location.y)
+      lamp.data.keyframe_insert('energy', frame=f)
+  ```
 - `bake(frame_start=None, frame_end=None, overscan=0.08, layer_scale=1.0, plate_scale=1.0)` renders and
   keys the frames. A camera layer belongs to its camera: bake again after changing the camera's
   animation, the frame range or any direction call. The world is built for the range baked. Before that
   range it holds the first baked frame's sky, and after it the last's. On the ringworld it also renders
   the band's plate per frame (`plate_scale` against the frame), and `bake_plates()` renders the plates
   again for the last bake after a change to the band (see [Sky elements](#sky-elements-and-the-clouds-in-front-of-them)).
+  With the weather the sky built (`sky.weather_fx`), the bake is the weather's: it plans every frame from
+  the scene's first, bakes the sky with the lightning in it and keys the rain, the wet ground and the audio
+  contract. It returns the sky's frame records either way.
 - `frame_states(frame_start=None, frame_end=None)` yields `(frame, t, lights)` per frame, with the scene
   on that frame and the sky in that frame's state. It is the state a bake renders, without rendering:
   use it to make something follow the weather or the sun frame by frame.
@@ -93,9 +120,12 @@ lights.
   (`sky`, `wx`, `band`, `celestial`, `moon`: for engine work, not for scenes) mirror the JS getters.
   `apply_to_lights()` returns the frame's lamp values; `update(t)` computes them every frame, because
   lighting is not opt-in. As in Eanpa, the weather's skylight dim (`hemiDim`) greys the fog colour too.
-  `wrap_scene()`, `audio_timeline()` and `audio` reach the weather system attached to this sky
-  (`eidoblend.weather.make_weather_system` sets `sky.weather_fx`; [weather effects](weather-effects.md)): wetness wrapping, the weather-audio
-  timeline and its carrier, or nothing and `None` without one. `make_sky(audio=False)` silences the
+  `wrap_scene()`, `audio_timeline()` and `audio` reach the sky's weather system (`sky.weather_fx`: the one
+  `make_sky` built, or one `eidoblend.weather.make_weather_system` attached; [weather effects](weather-effects.md)): wetness wrapping, the weather-audio
+  timeline and its carrier, or nothing and `None` without one. The weather wraps the scene when it is
+  built, and the one `make_sky` built wraps it again at each bake, so geometry added later gets wet too
+  (an object marked `eido_dry` stays dry); with a weather of your own, call `wrap_scene()` again after
+  adding geometry. `make_sky(audio=False)` silences the
   timeline. `enable_reflections()` does nothing: EEVEE ray-traces reflections without a hook. makeSky's
   `renderer` and `hemi` have no counterpart: the bake renders in Blender's own GPU module, and the EEVEE
   world is the hemisphere light.
@@ -163,6 +193,25 @@ The scene also receives:
   `make_sky(shadow_height=, shadow_ground=0)` puts it `shadow_height` metres above `shadow_ground`
   instead. Like Eanpa, the shadows dim only the sun lamp: shaded ground keeps its sky light.
   `make_sky(..., shadows=False)` leaves the caster out.
+- `make_sky(cloud_shadow_strength=1.0)` (0 to 1) chooses how much the clouds take from the sun:
+  `1 − (1 − T)·strength`, as `wrapCloudShadows(scene, strength)` does. 1 is Eanpa's full shadow; eidoverse's
+  weather wrapped its scenes at 0.5. Below 1 the sun is split: the sun lamp keeps `strength` of the
+  palette's light and takes the clouds' shadow, and a twin with the rest, `eido_sky_sun_clear_share`
+  (its own light data, keyed with the lamp's colour, parented to it), passes the clouds: its blockers leave
+  the caster out. The caster thus keeps the transmittance as it is, and the shade carries no more
+  transparent-shadow grain than at full strength, for the price of a second sun shadow. The shield's own
+  cloud occlusion keeps its full value.
+- An object with the custom property `eido_noCloudShadow = 1` (WebGPU's `userData.noCloudShadow`) keeps the
+  sun as if no cloud were overhead. EEVEE's light linking lights it with a twin of the sun lamp,
+  `eido_sky_sun_no_cloud_shadow`: the lamp's own light data, parented to it, so it carries every key the
+  bake gives the lamp. The twin's blockers leave the caster out, and the sun lamp's receivers leave the
+  object out. Every other object still blocks both lamps, so the object keeps its ordinary shadows, cast and
+  received (with a strength below 1 it takes the clear share's light too). Each bake reads the marks again;
+  with none, the twin is removed. `sky_options_render.py` measures it: two white spheres in one cloud
+  shadow, the marked one lit exactly as with `shadows=False`, and a pillar's shadow still across it.
+- Both twins keep the sun lamp's own light linking, the ringworld's or one your scene set on `sky.sun`:
+  their blockers are copies of the lamp's with the caster left out, and the clear share lights what the
+  lamp lights. Each bake copies them again.
 
 **`ambient` (default 1.0)** scales the world's diffuse light against the sky the camera sees.
 Reflections always see the sky at its own radiance, whatever `ambient` is. In `probe_reflection.py` a
@@ -209,9 +258,23 @@ Ported, but not yet judged in a render of their own:
 - the wetness and surface-water time constants, as numbers the weather effects read.
 
 Rain streaks and splashes, wet ground, lightning and the weather audio are in `eidoblend.weather`
-([weather effects](weather-effects.md)): it attaches itself to a sky (`sky.weather_fx`), drives the
+([weather effects](weather-effects.md)). The weather system sits on the sky (`sky.weather_fx`), drives the
 sky's flash through `on_frame`, and answers the facade's `wrap_scene()` and `audio_timeline()`.
-Without it a rain state has no falling drops and darkstorm no flashes.
+`make_sky(weather_fx=...)` decides where it comes from:
+
+| `weather_fx` | The sky's weather system |
+| --- | --- |
+| `None` (default) | Built as soon as the direction names a weather that rains, strikes or wets (`sunshower`, `overcast`, `rain`, `storm`, `cyclone`, `darkstorm`, through `weather=`, `set_weather` or `transition_to`), and the scene's materials wrapped then. `clear` and `fair` alone build none (so `fair`'s light wind bed in the weather audio needs `True`) |
+| `True` | Built now, whatever the weather (the JS always builds it) |
+| a dict | Built now with those `make_weather_system` options: `strike_targets`, `occluders`, `rain_count` ... |
+| `False` | None. Attach your own with `make_weather_system(scene, sky, ...)` and bake through it |
+
+The system the sky built is the sky's: `sky.bake()` hands the bake to it (`WeatherFX.bake`), which plans
+every frame from the scene's first, bakes the sky with the flashes in it, and keys the rain, wet ground,
+lightning and audio contract. One `make_weather_system(scene, sky)` call replaces it (the old one is
+disposed); that one is the scene's, and `wx.bake()` bakes through it. A film that bakes its sky per still,
+after one weather plan of the whole range (`storm_street.py`), builds with `weather_fx=False`: a sky bake
+handed to the weather replans every frame from the first.
 
 **Wind direction.** Clouds drift *with* `skyWind`, as in Eanpa: the density is sampled at `p` minus the
 integrated displacement (`cloud_motion`). This repo's older WebGPU `eidoverse/sky_system.js` samples at
@@ -376,11 +439,19 @@ of the ground about 780 m away and crests 9.8 km overhead.
   covered system of the field reads as an even grey sheet over the lit arc. **The fog boundary** (1250 m) and
   **the rain wall** (1380 m, only in real rain) ring the stage in the weathered horizon colour. They stay
   in the main scene, depth-tested against the local geometry, so a terrain past them takes their haze, and
-  they veil the band's plate. They also veil the clouds behind them, where WebGPU draws its cloud dome over
-  them. The clouds' overlay cannot go on them here: a wall cannot tell sky behind it from a mesa behind it,
-  and would paint clouds onto the mesa. The difference is a veil over the cloud bases in the bottom fifth
-  of the sky in rain, and at the horizon line: under a storm at 10:30, a mean of 3.9/255 over the frame,
-  29/255 at most along the horizon (out/verify/haze_order).
+  they veil the band's plate. WebGPU draws its cloud dome after them (the walls hang from the band at
+  draw slot −99, the dome is −98), so its clouds lie over the walls. With `make_sky(cloud_dome=True)` the
+  bake draws them the same way (`Ringworld.order_walls_under_dome`): EEVEE draws Blended objects farthest
+  origin first, so each wall is drawn by a copy whose origin rides 2000 km down the view axis, beyond the
+  dome's 1000 km. The copy's Geometry Nodes take the wall through an Object Info in Relative space, so its
+  surface stays where the wall stands (within 0.2 m). The dome then lays the clouds over the walls wherever
+  it shows, and the walls still veil a mesa between them and the dome. `ring_haze_under_clouds.py` measures
+  it under a storm at 10:30: where the clouds are opaque the walls no longer show through (0.0001 linear,
+  against 0.027 when the walls draw after the dome), and in clear sky they show as before. Without the
+  dome the clouds are in the world, behind every surface, and the walls veil them: a veil over the cloud
+  bases in the bottom fifth of the sky in rain and along the horizon line, a mean of 3.7/255 over the frame
+  and up to 30/255 along the horizon. A wall alone cannot take the clouds' overlay, as the other sky
+  elements do: it cannot tell sky behind it from a mesa behind it, and would paint clouds onto the mesa.
 - **The sky** runs ring-native (`ringCurve` 5000): the deck's rounded-corner chord profile (flat 450 m
   over the local scene, a 350 m circular fillet by the crest), its containment strip, the slope shear,
   the slab march window, the storm layer's bisection: the `RING_*` constants in `sky.glsl`.
@@ -460,8 +531,44 @@ sky.bake()      # the band keeps its look: the far arc is at its own noon while 
 `make_sky(..., redGiant={...})` passes `angularRadius`, `granScale`, `plasmaSpeed`, `hexScale`,
 `shieldRadius`, `flares`, `flareBoost`, `starColor`, `shieldColor`, `paletteTint`. `flares=[]` means no
 prominences and no sunspot events, as the JS's `opts.flares ?? FLARES` does. The shieldworld always has
-its shield, because `sky_worlds.js` forces it; for engine work, `make_red_giant({'shield': False})` leaves
-it out. `redgiant_options.py` renders each option against the default.
+its shield, because `sky_worlds.js` forces it; `make_red_giant({'shield': False})` leaves it out, for
+another world's sky (below). `redgiant_options.py` renders each option against the default.
+
+### Celestial bodies and star and moon maps of your own
+
+`makeSkySystem` takes a celestial body (`opts.celestial`) and its own textures in any sky; `make_sky` does
+too, on the Earth and ringworld skies:
+
+```python
+from eidoblend.sky.redgiant import make_red_giant
+sky = make_sky(scene, camera=cam, world='earth', hours=17.2, celestial=make_red_giant({'shield': False}),
+               cache_dir=...)                       # a red giant is the sun, its warm palette tints the sky
+sky = make_sky(scene, camera=cam, hours=0.0, clouds='clear', cache_dir=...,
+               textures={'stars': 'C:/maps/nebula_stars.png', 'moon': 'celestial/rock_giant.png'})
+```
+
+- **`celestial=`** shades a body inside the sky shader, so the visible sky and the environment get it
+  from one function, behind the clouds and through their weather gate (`celestialVisibility`). The red
+  giant rides the sun with the default disc and glow lobes off, as on the shieldworld, and its
+  `palette_tint` tints the sky unless you pass `paletteTint`. `set_colors({'star': ...})` recolours it.
+  The shieldworld refuses a second body: its red giant is its own.
+- **A body of your own** keeps the same contract. Only `celestial_glsl()` is required: GLSL defining
+  `vec3 celestial(vec3 dir, vec3 col)` in three.js space (Y up), which returns the sky colour `col` with
+  the body over it, for the view direction `dir`. It may read the sky shader's uniforms (`uSunDir`,
+  `uTime`, the red giant's `uStarDir` / `uStarRight` / `uStarUp` / `uStarT`, which the body can write into
+  the sky's `U` from `update`). Optional: `shader_defines()` (constants for the shader), `palette_tint`,
+  `attach(sky_system)` and `update(t)` (called each frame after the sky's own update), `has_shield` (the
+  hex shield layer, with `HEXSCALE` and `SHIELD_R` defines). A star may replace `col` inside its disc: it
+  outshines the air in front of it. A body lit by the sun adds its light to that air instead, the sky's
+  own gradient `mix(uHorizon, uZenith, ...)` as the sky's moon does, so its night side takes the sky's
+  colour by day and hides the stars behind it by night. `sky_options_render.py` hangs a banded gas giant
+  in an Earth afternoon this way, in about twenty lines of GLSL.
+- **`textures={'stars': path, 'moon': path}`** replaces the world's star map and moon map. A path is
+  absolute or under `eidoverse/assets/sky/`. The star map is an equirect, the moon map a lon/lat albedo,
+  as the world's are; a JPEG or PNG is read as sRGB colour, an EXR or HDR as linear. The size of the moon
+  stays `moonAngularDeg`, and on the ringworld the planetshine keeps the rock giant's warm white. The
+  shieldworld refuses a moon map: its moon is the shattered cluster, and a map would hang a second moon
+  beside it. Another key raises.
 
 ### The cloud dome
 
@@ -473,7 +580,9 @@ composited into it, and the dome draws the clouds over both). Opaque sky element
 the shield, and the clouds wherever they are nearer than the dome (the overlay's `Color` / `Alpha`).
 The dome is Blended, and EEVEE draws Blended objects farthest origin first (`probe_eevee_facts.py` F4),
 so its origin is parked a thousand kilometres ahead of the camera and it draws under every other
-transparent surface. A blended sky element with the overlay therefore lands on the dome's clouds
+transparent surface but the ringworld's haze walls, which draw before it as in WebGPU (see
+[The ringworld](#the-ringworld)). A bake without the dome removes the one an earlier bake built.
+A blended sky element with the overlay therefore lands on the dome's clouds
 and composites every cloud over itself (`ColorAll` / `AlphaAll`): `c·(1 − a) + α·C` over
 `(1 − α)·(C + (1 − a)·B)` is exactly `C + (1 − a)·(c + (1 − α)·B)`, the clouds over the element over the
 sky. `dome_and_spatial.py` renders a ridge 9 km out with and without it.
@@ -576,6 +685,20 @@ These are what the facade composes, for toolkit work. The first six do not impor
 - `maxElevationDeg`, `azSpanK`, `moonAngularDeg` (the moon's angular radius), `sourceAngularRadiusDeg`,
   `paletteTint`, `cloudPhaseSoften`, `cloudMultiScatterFloor`, `moonLightColor`, `moonLightIntensity`,
   `cloudLightScale`, `cloudAmbScale`, `cloudFadeDist`, `shafts`, `shaftDensity`;
+- `earthRadius` (6 371 000 m): the planet the cloud layers wrap. On a smaller planet the deck curves down
+  to the horizon (on a 3 km planet a 700 m cloud base meets it about 2 km out), so the low clouds come
+  near: big cells right down to the horizon, where Earth's crowd into far, flattened streaks. The ground
+  you build stays the scene's own; the curvature is the sky's;
+- the ringworld's deck: `ringCloudBase` (450 m over the local scene), `ringCloudThick` (280 m),
+  `ringLocalHalf` (4000 m, the deck's half-width across the ring) and `ringWispCurveHalf` (half of
+  `ringLocalHalf`, where the arc climbs). The cloud-shadow casters follow the reshaped deck. `ringBandHalf`
+  has no counterpart: both JS editions set its uniform and no shader reads it. The environment traces the
+  band at the ring's own radius and half-width (`ring.info`, 5000 and 483 m), as `sky_worlds.js`'s
+  `bakeEnv` passes them;
+- `stormSamples` (12, at least 4): the steps of the darkstorm layer's march, in the JS's two interleaved
+  passes. Too few smear a speckled band along the horizon, where the rays graze the layer (4 shows it
+  plainly, 12 faintly, 32 not); `cloudShadowSamples` (the main march's 60 steps, within Eanpa's 32-64): the
+  cloud-shadow march;
 - `cirrus_atlas=` points at an ice-trail atlas.
 
 ## Tests
@@ -602,6 +725,16 @@ shared GPU. They write to `blender/tests/sky/out/`.
   base (brightness spread 31 levels). With the old fixed 150 m plane it gets none (3 levels).
 - `state_and_wiring.py` (no GPU): re-bake and partial-bake replay, the camera window against Blender's
   sensor-fit rules, the fog splice, the caster height.
+- `test_sky_options.py` (no GPU): `earthRadius`, the ring deck options and the band's half-width, the
+  sample counts and their bounds, `textures` (and its refusals), `celestial` (the red giant over Earth, a
+  body of your own, the shieldworld's refusal), `sun_coverage_dim` against an independent evaluation of
+  `sunCoverageDim` at 160 points, keyed onto a lamp, `cloud_shadow_strength` and the `eido_noCloudShadow`
+  light linking.
+- `sky_options_render.py [--parts planet,ring,storm,shadowmarch,textures,celestial,shadows]`: each of those
+  on screen, one labelled sheet per part (`out/options/sheet_<part>.png`): the deck on a 10 km and a 3 km
+  planet, the lifted ring deck, the storm march at 4 / 12 / 32 steps, the cloud-shadow maps at 32 and 64
+  steps, a scene's own star map and moon map, a red giant over Earth and the ringworld and a gas giant of
+  the scene's own, and the cloud-shadow strength and opt-out against `shadows=False`.
 - `inspect_exr.py`: layer statistics and previews.
 
 `blender/tests/sky_worlds/` covers the sky worlds, written to `blender/tests/sky_worlds/out/`:
@@ -629,7 +762,8 @@ shared GPU. They write to `blender/tests/sky/out/`.
   Eanpa sources to 1e-9. The ring relief decoder matches Eanpa's `decodeRingRelief` exactly on the real v4
   set, texels and refusals.
 - `probe_eevee_facts.py`: F1 light linking, F2 `Is Camera Ray` in a material, F3 the blended over,
-  F4 the Blended draw order, F5 shadow linking.
+  F4 the Blended draw order, F5 shadow linking, F6 that nothing in Blender 5.2 scales a surface's indirect
+  light alone (it fails the day something does: then the band's `aoNode` can be ported).
 - `asteroid_moon_pipeline.py`: the bake-once tool and the runtime loader, end to end, then every bake
   option (`detail`, `hiSub`, `bakeSize`, `seed`, `squash`, `reliefAmp`, `tile`) on small bakes.
 - `redgiant_options.py`: every `redGiant={...}` option rendered against the default, over the frame or
@@ -654,24 +788,31 @@ shared GPU. They write to `blender/tests/sky/out/`.
 - `ring_band_behind_local.py`: the ringworld over a 12 km desert with five mesas 1.5–4 km out. Every
   mesa draws in front of the band (the band's plate), the band shows above them, `bake_plates()`
   reproduces the bake's frame, and `use_fog` fogs a far mesa but not the band.
+- `ring_haze_under_clouds.py`: a storm at 10:30 with the cloud dome, up and across the ring. Read through
+  the frame's own cloud layer, the haze walls must not show through opaque cloud when they draw before the
+  dome, and must show as before in clear sky; the walls drawn after the dome, and the default sky without
+  it, give the veil for comparison (`out/haze_under_clouds/sheet.png`).
 
 ## Not yet ported
 
-- **`makeSky` building the weather itself.** `make_sky` returns the sky alone; attach the weather with
-  `eidoblend.weather.make_weather_system(scene, sky)` ([weather effects](weather-effects.md)).
+- **A photographed sky under the procedural one** (`makeSkySystem`'s `textures.hdri`, blended under the
+  procedural layers by `hdriMix` and dimmed through `hdriDim`). [Assets](assets.md) keeps photographed
+  skies out of sets that need a sky, so it is not ported while that rule stands; `textures={'hdri': ...}`
+  raises.
 - **Ringworld, Eanpa's v4 relief files.** The code is ported (`load_ring_relief`, `reliefDir`), but the
   files are not in this repo: `ring_relief_v4.bin.gz`, `ring_albedo_v4.png` and `ring_relief_v3.bin.gz` live
   in Eanpa Engine's `assets/ringworld/`. Without them the band displaces the repo's v1 height map and
   keeps the authored colour map, as `sky_worlds.js` does. Copying the three files into
   `eidoverse/assets/sky/celestial/` switches every ringworld to the v4 band with no code change.
   The rain curtains stay off in ring mode, as in the JS.
-- **Ringworld, baked night AO.** WebGPU's `aoNode` darkens only indirect light; EEVEE has no such input,
-  so the band keeps the cavity AO in its albedo and EEVEE's own horizon scan on the real relief.
+- **Ringworld, baked night AO.** WebGPU's `aoNode` darkens only indirect light. Blender 5.2 has nothing
+  that does that for a texture (`probe_eevee_facts.py` F6): none of its BSDF nodes takes an occlusion input,
+  the Ambient Occlusion node only returns a value, and the World takes no light linking, so no copy of the
+  band could take the world's light on its own. The band keeps the cavity AO in its albedo, where it also
+  darkens the band's two lamps, and EEVEE's own horizon scan occludes the indirect light of the real relief.
 - **Cirrus atlas.** Eanpa's ice-trail atlas (`cirrus_ice_trails.png`) is not in this repo, so cirrus
   draws the in-repo eidoverse mares'-tail plumes. Copying the atlas into `eidoverse/assets/sky/`
   switches to it with no code change.
-- **Ringworld, the haze walls under the clouds.** WebGPU draws its cloud dome over the fog and rain walls;
-  here the walls veil the clouds behind them (see the ringworld's walls above for why, and how much).
 - **The band in the main scene's viewport.** The band renders through its plate, so the main scene's
   solid viewport has no band; look through the camera in Rendered mode after a bake, or at the
   `eido_ring_plate` scene.
@@ -683,4 +824,4 @@ shared GPU. They write to `blender/tests/sky/out/`.
   (the EEVEE world is both the visible sky and the environment, so the bake always builds it). Eanpa's
   `sky_geometry_layer` / `sky.depthLayers` are ported as the ring's plate (above); the shattered moon,
   34 km out, needs no private layer. The repo copy's `RING*` environment knobs are the `ring={...}`
-  options above. `hdriMix` is dropped too.
+  options above.

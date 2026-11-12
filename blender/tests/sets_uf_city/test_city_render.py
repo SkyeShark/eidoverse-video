@@ -281,8 +281,8 @@ if '--her' in args:
         meshes_her = [o for o in her_objs if o.type == 'MESH']
         done, left = KIT.fog_objects(K, meshes_her)
         P['apply_atmosphere'](scene, objects=meshes_her)              # (idempotent: wrapped once)
-        check('her materials take the haze, as scene.fogNode gave it', done > 0,
-              f'{done} wrapped, {left} see-through left as they are')
+        check('her materials take the haze, as scene.fogNode gave it (see-through ones keeping their alpha)',
+              done > 0 and left == 0, f'{done} wrapped, {left} left')
     except Exception as e:                              # noqa: BLE001
         check('a performer on the mark', False, repr(e))
 

@@ -1,4 +1,5 @@
-"""My robot body navigating a room to a goal with its own sensors (VRMRobotBody + EidoverseRobotController + RobotDebug).
+"""My robot body navigating a room to a goal with its own sensors (VRMRobotBody + EidoverseRobotController + RobotDebug),
+walking on the controller family's legs.
 
 The room (8 x 6 m, walls 2.6 m): a partition across it with a 1.3 m doorway, a table, a crate standing just behind the
 doorway (out of sight until the body is at the door), a shelf with a lamp. I start in the far corner facing the goal
@@ -9,20 +10,21 @@ and know nothing but the floor under my feet. The scene's direction is the JS's,
 Everything I learn comes through the sensor cone on my head (RobotSensors): the scan maps the partition and its doorway,
 the plan goes through the doorway, the crate behind it is seen from the door and the route is replanned round it.
 Checks (PASS / FAIL):
-  - arrived: the walk_to resolved, and the keyed body stands within 0.5 m of the goal
+  - arrived: the walk_to resolved, and the keyed body stands within 0.1 m of the goal (the walk stops on it)
   - replanned on what it saw: at least one replan after the walk began (the crate)
   - the memory is the room: the blocked cells lie on the real geometry (within 0.15 m of a surface), none in the open
   - clearance: the keyed root keeps 0.3 m from every wall and obstacle; no hand or foot bone inside one
-  - the walk: round one's walk report on every walk span (planted slip, swing clearance), and the hand-overs (start and
-    stop) hold the planted foot: the least-moving sole point in contact moves at most 2 mm a frame anywhere in the film
+  - the walk: the controller family's checks.feet on every gait it played, and on the keyed result the least-moving
+    sole point in contact moves at most 2 mm a frame anywhere in the film; the corners turn at most the controller's
+    max_turn_rate (3.5 rad/s)
   - the gaze: the head's pan follows the scan (both ways past 35 deg) and settles on the lamp (the keyed head's facing
     within 10 deg of it before the wave)
-Stills: out/nav_room_overview_f<k>.png (the map, the route and the rays over the room), nav_room_follow_f<k>.png (the body
-walking), nav_room_feet_*.png (the start and the stop, low); out/nav_room.json, out/nav_room.blend.
+  - the senses come from my head as the take has it (across within 1 cm; up by the plant's pelvis, set after the run)
+Stills: out/nav_room_<moment>_<k>_f<frame>.png (the map, the route and the rays over the room from above; the body
+walking; the start and the stop, low); out/nav_room.json, out/nav_room.blend.
 
     cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_navigate_room.py [--no-render]
+    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_navigate_room.py --no-render
 """
 
 import math
@@ -40,7 +42,7 @@ import numpy as np  # noqa: E402
 from mathutils import Vector  # noqa: E402
 from mathutils.bvhtree import BVHTree  # noqa: E402
 
-from eidoblend.characters import Ground, load_vrm  # noqa: E402
+from eidoblend.characters import load_vrm  # noqa: E402
 from eidoblend.characters.robot import RobotDebug, RobotRig, VRMRobotBody  # noqa: E402
 from eidoblend.characters.robot.controller import heading_of  # noqa: E402
 from eidoblend.harness.navigation import STATE_BLOCKED  # noqa: E402
@@ -50,106 +52,31 @@ RENDER = '--no-render' not in ARGS
 FPS = 24
 START, GOAL = (-3.0, -2.0), (2.7, 2.1)
 LAMP = (3.55, 1.0, 1.95)
-R = {'started': time.strftime('%Y-%m-%d %H:%M:%S')}
-T0 = time.time()
-OK = True
-
-
-def log(*a):
-    print('[nav_room]', *a, flush=True)
-
-
-def check(name, good, detail):
-    global OK
-    OK &= bool(good)
-    R.setdefault('checks', {})[name] = {'pass': bool(good), 'detail': detail}
-    print(f'{"PASS" if good else "FAIL"} {name}: {detail}', flush=True)
-
-
-def textured(name, tex, scale=1.0, tint=None, rough=None):
-    mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
-    nt = mat.node_tree
-    bsdf = nt.nodes['Principled BSDF']
-    ts = S.C.texture_set(tex)
-    if not ts:
-        bsdf.inputs['Base Color'].default_value = tint or (0.5, 0.5, 0.5, 1.0)
-        return mat
-    tc = nt.nodes.new('ShaderNodeTexCoord')
-    mp = nt.nodes.new('ShaderNodeMapping')
-    mp.inputs['Scale'].default_value = (scale, scale, scale)
-    nt.links.new(tc.outputs['Object'], mp.inputs['Vector'])
-
-    def img(role, colour):
-        if not ts.get(role):
-            return None
-        n = nt.nodes.new('ShaderNodeTexImage')
-        n.image = bpy.data.images.load(ts[role], check_existing=True)
-        n.image.colorspace_settings.name = 'sRGB' if colour else 'Non-Color'
-        n.projection = 'BOX'
-        n.projection_blend = 0.2
-        nt.links.new(mp.outputs['Vector'], n.inputs['Vector'])
-        return n
-    c, r, nrm = img('color', True), img('rough', False), img('normal', False)
-    if c:
-        if tint:
-            mul = nt.nodes.new('ShaderNodeMix')
-            mul.data_type, mul.blend_type = 'RGBA', 'MULTIPLY'
-            mul.inputs['Factor'].default_value = 1.0
-            nt.links.new(c.outputs['Color'], mul.inputs['A'])
-            mul.inputs['B'].default_value = tint
-            nt.links.new(mul.outputs['Result'], bsdf.inputs['Base Color'])
-        else:
-            nt.links.new(c.outputs['Color'], bsdf.inputs['Base Color'])
-    if r and rough is None:
-        nt.links.new(r.outputs['Color'], bsdf.inputs['Roughness'])
-    elif rough is not None:
-        bsdf.inputs['Roughness'].default_value = rough
-    if nrm:
-        nm = nt.nodes.new('ShaderNodeNormalMap')
-        nt.links.new(nrm.outputs['Color'], nm.inputs['Color'])
-        nt.links.new(nm.outputs['Normal'], bsdf.inputs['Normal'])
-    return mat
-
-
-def box(name, x0, x1, y0, y1, z0, z1, mat, bevel=0.0):
-    import bmesh
-    me = bpy.data.meshes.new(name)
-    bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1.0)
-    bmesh.ops.scale(bm, vec=(x1 - x0, y1 - y0, z1 - z0), verts=bm.verts)
-    bmesh.ops.translate(bm, vec=((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), verts=bm.verts)
-    if bevel:
-        bmesh.ops.bevel(bm, geom=list(bm.edges), offset=bevel, segments=2, affect='EDGES')
-    bm.to_mesh(me)
-    bm.free()
-    ob = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(ob)
-    me.materials.append(mat)
-    return ob
+R = S.Report('nav_room')
 
 
 def room():
-    floor_m = textured('floor_wood', 'WoodFloor064_2k', 0.6)
-    wall_m = textured('walls_plaster', 'PaintedPlaster017_2k', 0.5, tint=(0.82, 0.8, 0.76, 1.0))
-    wood_m = textured('table_wood', 'Wood066_1k', 1.2)
-    crate_m = textured('crate_card', 'Cardboard002_1k', 1.5)
-    metal_m = textured('shelf_metal', 'PaintedMetal012_1k', 1.0, tint=(0.42, 0.45, 0.5, 1.0))   # a grey steel shelf
+    floor_m = S.textured('floor_wood', 'WoodFloor064_2k', 0.6)
+    wall_m = S.textured('walls_plaster', 'PaintedPlaster017_2k', 0.5, tint=(0.82, 0.8, 0.76, 1.0))
+    wood_m = S.textured('table_wood', 'Wood066_1k', 1.2)
+    crate_m = S.textured('crate_card', 'Cardboard002_1k', 1.5)
+    metal_m = S.textured('shelf_metal', 'PaintedMetal012_1k', 1.0, tint=(0.42, 0.45, 0.5, 1.0))   # a grey steel shelf
     obs = []
-    floor = box('floor', -4.0, 4.0, -3.0, 3.0, -0.05, 0.0, floor_m)
-    H, T = 2.6, 0.1
-    obs += [box('wall_s', -4.1, 4.1, -3.1, -3.0, 0.0, H, wall_m), box('wall_n', -4.1, 4.1, 3.0, 3.1, 0.0, H, wall_m),
-            box('wall_w', -4.1, -4.0, -3.0, 3.0, 0.0, H, wall_m), box('wall_e', 4.0, 4.1, -3.0, 3.0, 0.0, H, wall_m)]
+    floor = S.box('floor', -4.0, 4.0, -3.0, 3.0, -0.05, 0.0, floor_m)
+    H = 2.6
+    obs += [S.box('wall_s', -4.1, 4.1, -3.1, -3.0, 0.0, H, wall_m), S.box('wall_n', -4.1, 4.1, 3.0, 3.1, 0.0, H, wall_m),
+            S.box('wall_w', -4.1, -4.0, -3.0, 3.0, 0.0, H, wall_m), S.box('wall_e', 4.0, 4.1, -3.0, 3.0, 0.0, H, wall_m)]
     # the partition with its doorway (y 0.6 .. 1.9)
-    obs += [box('partition_a', 0.45, 0.55, -3.0, 0.6, 0.0, H, wall_m), box('partition_b', 0.45, 0.55, 1.9, 3.0, 0.0, H, wall_m)]
+    obs += [S.box('partition_a', 0.45, 0.55, -3.0, 0.6, 0.0, H, wall_m),
+            S.box('partition_b', 0.45, 0.55, 1.9, 3.0, 0.0, H, wall_m)]
     # the table (a top on four legs), the crate behind the doorway, a crate in the west half, the shelf with its lamp
-    tb = [box('table_top', -2.1, -0.9, 0.45, 1.15, 0.72, 0.76, wood_m, 0.004)]
+    tb = [S.box('table_top', -2.1, -0.9, 0.45, 1.15, 0.72, 0.76, wood_m, 0.004)]
     for lx, ly in ((-2.05, 0.5), (-0.95, 0.5), (-2.05, 1.1), (-0.95, 1.1)):
-        tb.append(box('table_leg', lx - 0.03, lx + 0.03, ly - 0.03, ly + 0.03, 0.0, 0.72, wood_m))
+        tb.append(S.box('table_leg', lx - 0.03, lx + 0.03, ly - 0.03, ly + 0.03, 0.0, 0.72, wood_m))
     obs += tb
-    obs.append(box('crate_behind_door', 1.6, 2.2, 0.95, 1.55, 0.0, 0.62, crate_m, 0.01))
-    obs.append(box('crate_west', -1.9, -1.3, -1.9, -1.3, 0.0, 0.55, crate_m, 0.01))
-    obs.append(box('shelf', 3.4, 3.95, 0.3, 1.7, 0.0, 1.8, metal_m, 0.006))
+    obs.append(S.box('crate_behind_door', 1.6, 2.2, 0.95, 1.55, 0.0, 0.62, crate_m, 0.01))
+    obs.append(S.box('crate_west', -1.9, -1.3, -1.9, -1.3, 0.0, 0.55, crate_m, 0.01))
+    obs.append(S.box('shelf', 3.4, 3.95, 0.3, 1.7, 0.0, 1.8, metal_m, 0.006))
     lamp_m = bpy.data.materials.new('lamp_glow')
     lamp_m.use_nodes = True
     b = lamp_m.node_tree.nodes['Principled BSDF']
@@ -169,13 +96,7 @@ def lights(sc):
     studio_environment(sc, 0.35, None)
     for name, loc, energy in (('ceiling_w', (-2.0, 0.0, 2.45), 260.0), ('ceiling_e', (2.4, 0.5, 2.45), 260.0),
                               ('ceiling_door', (0.5, 1.25, 2.45), 120.0)):
-        ld = bpy.data.lights.new(name, 'AREA')
-        ld.energy = energy
-        ld.size = 1.2
-        ld.color = (1.0, 0.93, 0.85)
-        ob = bpy.data.objects.new(name, ld)
-        ob.location = loc
-        sc.collection.objects.link(ob)
+        S.area_light(sc, name, loc, energy, 1.2, (1.0, 0.93, 0.85))
     ld = bpy.data.lights.new('lamp_light', 'POINT')
     ld.energy = 40.0
     ld.color = (1.0, 0.75, 0.45)
@@ -209,7 +130,7 @@ def blocked_on_geometry(memory, obs):
     return bvh, np.array(d)
 
 
-try:
+def main():
     sc = S.C.clean_scene(FPS)
     floor, obs = room()
     lights(sc)
@@ -226,16 +147,19 @@ try:
     for k in ('rays', 'map', 'path', 'landmarks'):
         getattr(dbg, 'show_' + k)(True)
     body.tag_landmark('door', 0.5, 1.25)
-    outcome = {}
+    outcome, marks = {}, {}
 
     def script(b):
         a = yield b.scan_area(yaw_range=100, duration=2.0)
         outcome['scan'] = a.state
+        marks['walk'] = b.frame_count
         a = yield b.walk_to(*GOAL)
         outcome['walk_to'] = (a.state, str(a.error) if a.error else None)
+        marks['arrived'] = b.frame_count
         b.tag_landmark('goal', *GOAL)
         a = yield b.look_at(*LAMP)
         outcome['look_at'] = a.state
+        marks['wave'] = b.frame_count
         a = yield b.perform_action('wave_goodbye', 2.0)
         outcome['wave'] = a.state
     body.run(script(body))
@@ -250,171 +174,134 @@ try:
         if f_done is not None and k >= f_done + FPS // 2:
             break
     R['run'] = {'frames': body.frame_count, 'seconds': round(time.time() - t_sim, 2), 'outcome': outcome,
-                'log': [(round(t, 2), e) for t, e in body.log], 'senses': len(body.readings),
+                'marks': marks, 'log': [(round(t, 2), e) for t, e in body.log], 'senses': len(body.readings),
                 'explored_m2': round(body.memory.get_explored_area(), 2)}
-    log('run', R['run'])
+    R.log('run', R['run'])
     t_b = time.time()
-    rep = body.bake(f0=1, ground=Ground(fn=lambda x, y: 0.0 * np.asarray(x)), face=lambda t: {'happy': 0.25},
-                    action_name='claude|nav_room')
-    R['bake'] = {k: v for k, v in rep.items() if not k.startswith('_') and k != 'map'}
+    rep = body.bake(face=lambda t: {'happy': 0.25}, action_name='claude|nav_room')
+    R['bake'] = {k: v for k, v in rep.items() if not k.startswith('_') and k not in ('map', 'stances', 'swings')}
     R['bake_s'] = round(time.time() - t_b, 1)
     sc.frame_start, sc.frame_end = rep['frames']
     objs = dbg.build(rep)
     R['debug_objects'] = {k: (o.name if o else None) for k, o in objs.items()}
-    frames = rep['_frames']
+    frames, recs = rep['_frames'], rep['_records']
+    f0 = rep['frames'][0]
 
     # ---- checks
-    last = frames[-1]['M'].translation
-    dgoal = math.hypot(last.x - GOAL[0], last.y - GOAL[1])
-    check('arrived', outcome.get('walk_to', ('',))[0] == 'resolved' and dgoal < 0.5,
-          f'walk_to {outcome.get("walk_to")}; the keyed body ends {dgoal:.3f} m from the goal')
+    stop = recs[marks['arrived'] - 1]['feet_world'] if marks.get('arrived') else recs[-1]['feet_world']
+    dgoal = math.hypot(stop[0] - GOAL[0], stop[1] - GOAL[1])
+    R.check('arrived', outcome.get('walk_to', ('',))[0] == 'resolved' and dgoal < 0.1,
+            f'walk_to {outcome.get("walk_to")}; the walk stops {dgoal:.3f} m from the goal')
     walk_t = next((t for t, e in body.log if e.startswith('walk_to')), 0.0)
     replans = [(t, e) for t, e in body.log if e.startswith('replan') and t > walk_t]
-    check('replanned_on_sight', len(replans) >= 1, f'{len(replans)} replans after the walk began: {replans[:4]}')
+    R.check('replanned_on_sight', len(replans) >= 1, f'{len(replans)} replans after the walk began: {replans[:4]}')
     bvh, dblk = blocked_on_geometry(body.memory, obs)
     good = float(np.mean(dblk <= 0.15)) if len(dblk) else 0.0
     R['memory'] = {'blocked_cells': int(len(dblk)), 'on_geometry_frac': round(good, 4),
                    'off_by_m_p95': round(float(np.percentile(dblk, 95)), 3) if len(dblk) else None,
                    'explored_m2': round(body.memory.get_explored_area(), 2)}
-    check('memory_is_the_room', len(dblk) > 50 and good >= 0.97,
-          f'{len(dblk)} blocked cells, {100 * good:.1f}% within 0.15 m of a real surface (95th pct {R["memory"]["off_by_m_p95"]} m); '
-          f'explored {R["memory"]["explored_m2"]} m2')
+    R.check('memory_is_the_room', len(dblk) > 50 and good >= 0.97,
+            f'{len(dblk)} blocked cells, {100 * good:.1f}% within 0.15 m of a real surface (95th pct '
+            f'{R["memory"]["off_by_m_p95"]} m); explored {R["memory"]["explored_m2"]} m2')
     # clearance on the keyed result
     walls = [o for o in obs if o.name != 'lamp']
     _bvh_w, _d = blocked_on_geometry(body.memory, walls)
-    root_min, limb_min = math.inf, math.inf
-    root_at = None
+    root_min, root_at = math.inf, None
+    limb = (math.inf, None, None)                         # (the signed distance, frame, bone): - inside a solid
     for fr in frames:
         p = fr['M'].translation
         for z in (0.3, 0.8, 1.3):
             hit = _bvh_w.find_nearest(Vector((p.x, p.y, z)))
             if hit[0] is not None and (hit[0] - Vector((p.x, p.y, z))).xy.length < root_min:
                 root_min = (hit[0] - Vector((p.x, p.y, z))).xy.length
-                root_at = (fr['f'], fr['src'][0], round(p.x, 3), round(p.y, 3), [round(c, 3) for c in hit[0]])
+                root_at = (fr['f'], fr['mode'], round(p.x, 3), round(p.y, 3), [round(c, 3) for c in hit[0]])
         for n in ('leftHand', 'rightHand', 'leftFoot', 'rightFoot', 'leftLowerArm', 'rightLowerArm'):
             q, _W = rig.bone_world(fr, n)
-            hit = _bvh_w.find_nearest(q)
-            if hit[0] is not None:
-                inside = (hit[0] - q).dot(hit[1]) > 0       # the nearest face's normal points away from q: q is behind it
-                limb_min = min(limb_min, -1.0 if inside else (hit[0] - q).length)
-    R['clearance_m'] = {'root_min': round(root_min, 3), 'limbs_min': round(limb_min, 3), 'root_min_at': root_at}
-    R['run_track'] = [(i, r['state'], round(r['x'], 2), round(r['y'], 2), round(math.degrees(r['heading']), 1))
-                      for i, r in enumerate(body.controller.char_ctrl.record)][::6]
+            depth = S.depth_in(_bvh_w, q)
+            d = -depth if depth > 0 else (_bvh_w.find_nearest(q)[0] - q).length
+            if d < limb[0]:
+                limb = (d, fr['f'], n)
+    R['clearance_m'] = {'root_min': round(root_min, 3), 'limbs_min': [round(limb[0], 3), limb[1], limb[2]],
+                        'root_min_at': root_at}
     R['plans'] = [(f, None if p is None else [(round(q['x'], 2), round(q['y'], 2)) for q in p]) for f, p in body.paths]
-    check('clearance', root_min >= 0.3 and limb_min > 0.0,
-          f'the keyed root keeps {root_min:.3f} m from walls and obstacles; hands, forearms and feet at least {limb_min:.3f} m')
-    # the walk and the hand-overs
-    wr = rep['walks']
-    R['walks'] = [{k: v for k, v in w.items() if k in ('worst', 'stop', 'start', 'frames', 'speed', 'path_m')}
-                  for w in wr]
+    R.check('clearance', root_min >= 0.3 and limb[0] > 0.0,
+            f'the keyed root keeps {root_min:.3f} m from walls and obstacles; hands, forearms and feet at least '
+            f'{R["clearance_m"]["limbs_min"]} (m, frame, bone)')
+    # the walk: the controller family's checks.feet, the slip on the keyed result, the corners' rate
     slip = {}
     for s in ('left', 'right'):
         prev = None
         for fr in frames:
             P = rig.feet_world(fr)[s]
             low = P[:, 2] < 0.0025
-            # the standing frames and the hand-overs (walk_path measures its own walk frames: its report below)
-            judged = fr['src'][0] == 'stand' or fr['src'][2] is not None
-            if judged and prev is not None and low.any() and prev[1].any():
+            if prev is not None and low.any() and prev[1].any():
                 both = low & prev[1]
                 if both.any():
                     d = float(np.min(np.linalg.norm(P[both, :2] - prev[0][both, :2], axis=1)))
                     if d > slip.get(s, (0, 0))[0]:
-                        slip[s] = (d, fr['f'], fr['src'][2])
+                        slip[s] = (d, fr['f'], fr['mode'], fr['lead'])
             prev = (P, low)
-    R['planted_slip_mm'] = {s: [round(1000 * v[0], 3), v[1], v[2]] for s, v in slip.items()}
-    wf_ = max(slip.values())[1] if slip else None
-    if wf_:
-        R['feet_around_the_worst'] = []
-        for fr in frames[max(0, wf_ - 6):wf_ + 2]:
-            row = [fr['f'], fr['src']]
-            for s in ('left', 'right'):
-                P = rig.feet_world(fr)[s]
-                row += [s, round(1000 * float(P[:, 2].min()), 2), [round(float(c), 4) for c in P[:, :2].mean(axis=0)]]
-            R['feet_around_the_worst'].append(row)
-    worst_walk = max((w['worst'].get('slip_mm_per_frame_max', 0.0) for w in wr), default=0.0)
-    touches = sum(w['worst'].get('swing_touch_frames', 0) for w in wr)
-    check('feet_hold', all(v[0] < 0.002 for v in slip.values()) and worst_walk <= 1.0 and touches == 0,
-          f'standing and the hand-overs: the least-moving sole point in contact two frames running moves at most '
-          f'{R["planted_slip_mm"]} (mm, frame, hand-over); the walks (walk_path\'s report): planted slip at most '
-          f'{worst_walk} mm a frame, {touches} swing frames touching')
+    R['planted_slip_mm'] = {s: [round(1000 * v[0], 3)] + list(v[1:]) for s, v in slip.items()}
+    hd = [r['heading'] for r in recs]
+    rate = max((abs(math.remainder(hd[i + 1] - hd[i], 2 * math.pi)) * FPS for i in range(len(hd) - 1)
+                if recs[i]['mode'] == 'loco' and recs[i + 1]['mode'] == 'loco'), default=0.0)
+    fails = S.plant_failures(rep)
+    R['controller_checks_feet'] = fails
+    R.check('feet_hold', not fails and all(v[0] < 0.002 for v in slip.values()) and rate <= 3.5 * 1.02,
+            f'the controller family\'s checks.feet: {len(rep["segments"]) - len(fails)} of {len(rep["segments"])} '
+            f'gaits pass {[(f[0], f[1], f[2][:1]) for f in fails]}; on the keyed result the least-moving sole point in '
+            f'contact two frames running moves at most {R["planted_slip_mm"]} (mm, frame, mode, gait); the heading '
+            f'turns at most {rate:.2f} rad/s walking')
     # the gaze: the neck's pan through the scan and onto the lamp
     from eidoblend.characters._math import euler_from_quat, q_to_three
-    pans = []
-    for fr in frames:
-        n3 = q_to_three(fr['N']['neck'])
-        pans.append(math.degrees(euler_from_quat(n3, 'YXZ')[1]))
+    pans = [math.degrees(euler_from_quat(q_to_three(fr['N']['neck']), 'YXZ')[1]) for fr in frames]
     R['neck_pan_deg'] = [round(min(pans), 1), round(max(pans), 1)]
-    # ... and settles on the lamp: between the walk's end and the wave my head's facing (the keyed head bone's -Y) comes
-    # onto the lamp (the look re-aimed from where my keyed body stands: bake._aimed_gaze)
     lamp_v = Vector(LAMP)
-    last_walk = max(fr['f'] for fr in frames if fr['src'][0] == 'walk')
-    wave_from = min((fr['f'] for fr in frames if fr['src'][1] == 'wave_goodbye'), default=frames[-1]['f'])
     on_lamp = []
-    for fr in frames:
-        if last_walk < fr['f'] < wave_from:
-            p_, W_ = rig.bone_world(fr, 'head')
-            on_lamp.append((round(math.degrees((W_ @ Vector((0.0, -1.0, 0.0))).angle(lamp_v - p_)), 2), fr['f']))
+    for fr in frames[marks['arrived'] - 1:marks['wave'] - 1]:
+        p_, W_ = rig.bone_world(fr, 'head')
+        on_lamp.append((round(math.degrees((W_ @ Vector((0.0, -1.0, 0.0))).angle(lamp_v - p_)), 2), fr['f']))
     R['head_on_lamp_deg'] = min(on_lamp) if on_lamp else None
-    check('gaze_follows', min(pans) < -35 and max(pans) > 35 and bool(on_lamp) and min(on_lamp)[0] < 10.0,
-          f'the neck pans {R["neck_pan_deg"]} deg through the film; between the walk and the wave my head comes to '
-          f'{R["head_on_lamp_deg"]} (deg, frame) of the lamp')
+    R.check('gaze_follows', min(pans) < -35 and max(pans) > 35 and bool(on_lamp) and min(on_lamp)[0] < 10.0,
+            f'the neck pans {R["neck_pan_deg"]} deg through the film; between the walk and the wave my head comes to '
+            f'{R["head_on_lamp_deg"]} (deg, frame) of the lamp')
+    sh = S.sense_heads(body, rep)
+    up_less_pelvis = max(abs(u - dz) for _a, u, dz, _f in sh)
+    R['sense_head'] = {'senses': len(sh), 'across_max_m': round(sh[-1][0], 4),
+                       'up_max_m': round(max(abs(u) for _a, u, _dz, _f in sh), 4),
+                       'up_less_the_plant_pelvis_max_m': round(up_less_pelvis, 4)}
+    R.check('senses from my head where the take has it', sh[-1][0] < 0.01 and up_less_pelvis < 0.01, f'{R["sense_head"]}')
+    # the stills
+    vbvh = S.solids_bvh(obs)
+    shots = []
+    walk_f = [f0 + i for i, r in enumerate(recs) if r['mode'] == 'loco' and r.get('lead') == 'walk']
+    for name, f in (('scan', f0 + FPS), ('door', next((f0 + i for i, r in enumerate(recs) if r['feet_world'][0] > 0.2),
+                                                       None)), ('arrive', marks.get('arrived')),
+                    ('wave', f0 + len(frames) - FPS)):
+        if f is not None:
+            shots.append({'name': f'overview_{name}', 'frame': int(f), 'cam': [0.0, -2.6, 10.5], 'target': [0.0, 0.15, 0.0],
+                          'lens': 30.0})
+    # a low side camera held over the walk's start, its stop on the goal, and each turn on the spot, every two frames,
+    # the debug overlays left out of them
+    last = f0 + len(frames) - 1
+    spans = []
+    if walk_f:
+        spans += [('feet_start', walk_f[0] - 6, walk_f[0] + 30), ('feet_stop', walk_f[-1] - 24, walk_f[-1] + 12)]
+    spans += [(f'turn{k + 1}', a - 3, b + 3) for k, (a, b, _d) in enumerate(rep['turns'][:3])]
+    hide = [n for n in R['debug_objects'].values() if n]
+    for name, fa, fb in spans:
+        fa, fb = max(f0, fa), min(last, fb)
+        shots += [dict(s, hide=hide) for s in S.strip(name, S.side_view(vbvh, frames, f0, fa, fb), fa, fb,
+                                                       n=min(18, (fb - fa) // 2 + 1))]
+    S.write_json('nav_room_shots.json', shots)
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(S.OUT, 'nav_room.blend'), compress=True)
-
     if RENDER:
-        from eidoblend.look import render_settings as rs
-        rs.apply_auto_enhance(sc, 'probe')
-        sc.view_settings.exposure = 0.0
-        cam = S.C.camera('cam', 30.0)
-        rs_ = {}
-        walk_frames = [fr['f'] for fr in frames if fr['src'][0] == 'walk']
-        wa, wb = walk_frames[0], walk_frames[-1]
-        picks = {'scan': 1 + FPS, 'walk': (wa + wb) // 2 - 30, 'door': None, 'arrive': wb + 4, 'wave': frames[-1]['f'] - FPS}
-        for fr in frames:                                   # the frame the body passes the doorway
-            p = fr['M'].translation
-            if picks['door'] is None and fr['src'][0] == 'walk' and p.x > 0.2:
-                picks['door'] = fr['f']
-        for name, f in picks.items():
-            if f is None:
-                continue
-            S.C.aim(cam, (0.0, -2.6, 10.5), (0.0, 0.15, 0.0))     # from above: both halves, the door, the crate
-            p = os.path.join(S.OUT, f'nav_room_overview_{name}_f{f:03d}.png')
-            rs_[os.path.basename(p)] = S.C.still(sc, cam, f, p)
-        cam2 = S.C.camera('follow', 32.0)
-        vbvh = S.solids_bvh(obs)
-        for name in ('walk', 'door', 'arrive'):
-            f = picks[name]
-            if f is None:
-                continue
-            fr = frames[f - 1]
-            p = fr['M'].translation
-            hd = fr['M'].to_quaternion() @ Vector((0.0, -1.0, 0.0))
-            side = Vector((-hd.y, hd.x, 0.0))
-            tgt = p + Vector((0, 0, 1.0))
-            # (the side with the room's space: a camera never behind a wall or the partition)
-            cpos = S.best_view(vbvh, tgt, [p + s_ * side * 2.8 - hd * 0.6 + Vector((0, 0, 1.25)) for s_ in (1, -1)])
-            S.C.aim(cam2, cpos, tgt)
-            pth = os.path.join(S.OUT, f'nav_room_follow_{name}_f{f:03d}.png')
-            rs_[os.path.basename(pth)] = S.C.still(sc, cam2, f, pth)
-        # the start and the stop, low and close on the feet (one camera side per hand-over, held for its frames)
-        for name, f0_ in (('start', wa), ('stop', wb)):
-            fr = frames[f0_ - 1]
-            p = fr['M'].translation
-            hd = fr['M'].to_quaternion() @ Vector((0.0, -1.0, 0.0))
-            side = Vector((-hd.y, hd.x, 0.0))
-            tgt = p + Vector((0, 0, 0.25))
-            cpos = S.best_view(vbvh, tgt, [p + s_ * side * 1.6 + hd * 0.4 + Vector((0, 0, 0.35)) for s_ in (1, -1)])
-            for k in (-2, 2, 6, 10):
-                f = max(1, min(frames[-1]['f'], f0_ + k))
-                S.C.aim(cam2, cpos, tgt)
-                pth = os.path.join(S.OUT, f'nav_room_feet_{name}_f{f:03d}.png')
-                rs_[os.path.basename(pth)] = S.C.still(sc, cam2, f, pth)
-        R['renders'] = rs_
-    R['ok'] = OK
+        R['renders'] = S.render_shots(sc, 'nav_room', shots)
+
+
+try:
+    main()
 except Exception:  # noqa: BLE001
-    R['ok'] = False
-    R['error'] = traceback.format_exc()
-    log(R['error'])
-R['seconds'] = round(time.time() - T0, 1)
-S.write_json('nav_room.json', R)
-log('done', R['ok'], R['seconds'], 's')
+    R.finish(traceback.format_exc())
+else:
+    R.finish()

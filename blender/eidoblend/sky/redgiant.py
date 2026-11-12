@@ -12,6 +12,9 @@ activations, more and harder while a flare peaks. As in the JS, the system is th
     rg.attach(sky)                                  # sky: a SkySystem; registers rg for set_colors(shield/star)
     rg.update(t)                                    # per frame, after sky.update(t)
 
+make_sky(world='shieldworld') builds and drives its own; make_sky(celestial=make_red_giant({'shield': False})) puts
+one in the Earth or ringworld sky, where it is the sun.
+
 Options (the JS names): angularRadius (rad, 0.28 = a 32 deg disc), granScale (52), plasmaSpeed (0.5), shield (True),
 hexScale (22), shieldRadius (21000), flares (slot list), flareBoost (0; 1 forces eruption 0 to its peak),
 starColor ([1, 1, 1]), shieldColor ([0.38, 0.95, 1.3], linear HDR), paletteTint. No bpy here.
@@ -82,7 +85,7 @@ class RedGiant:
         return red_giant_glsl(self.flares, self.angular_radius, self.gran_scale, self.plasma_speed)
 
     def shader_defines(self):
-        d = dict(HAS_GIANT=1)
+        d = dict(HAS_CELESTIAL=1)
         if self.has_shield:
             d.update(HAS_SHIELD=1, HEXSCALE=float(self.hex_scale), SHIELD_R=float(self.shield_radius))
         return d

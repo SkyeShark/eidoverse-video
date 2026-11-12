@@ -25,9 +25,9 @@ from eidoblend.characters.robotics import studio                                
 from eidoblend.characters.robotics.studio import make_camera                               # noqa: E402
 from eidoblend.fabrication.cutting import stock_material, stock_profile                    # noqa: E402
 from eidoblend.fabrication.rotary import StockField, rotary_program, rotary_surface, sample_rotary   # noqa: E402
-from eidoblend.fabrication.rotary.stock import swizzle_finish                              # noqa: E402
 
 OUT = os.path.join(HERE, 'out')
+os.makedirs(OUT, exist_ok=True)
 FAILS = []
 
 
@@ -46,8 +46,9 @@ p = rotary_program(sample_rotary, material='wood', tool='flat', flute_length=.01
 s = p.settings
 field = StockField(p.path, s, (256, 96, 96))
 field.update(p.path.sample(p.path.duration))
-mat, _finish = stock_material('target and carved finish', stock_profile('wood'))
-check('the stock finish takes the WebGPU rotary swizzle (z, y, x)', swizzle_finish(mat) == 1)
+mat, _finish = stock_material('target and carved finish', stock_profile('wood'), axes='rotary')
+check("the stock finish reads the WebGPU rotary stock's point (z, y, x), its fades by their exact footprint",
+      all(n in mat.node_tree.nodes for n in ('phase growth rings', 'fwidth growth rings', 'fwidth wood fibre')))
 
 
 def place(name, me, y):

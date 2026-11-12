@@ -188,13 +188,12 @@ for name, (src, opts) in sources.items():
             and U.near(extrude, ref['extrude'], 1e-9 * max(1, ref['extrude'])) and worst < 1e-9,
             f"{spec['layers']} layers, {len(spec['contours'])} contours, extrude {extrude:.9f} vs {ref['extrude']:.9f}, "
             f"worst layer {worst:.1e}")
-    # moves match exactly, except where a placement goes through sin / cos: CPython's libm and V8's fdlibm differ by
-    # an ulp now and then (sin(pi / 4) here), and an ulp decides whether a quad diagonal's slice point is exactly in
-    # line with its neighbours (kept or merged); lengths and travel stay equal to 1e-9
+    # moves match exactly, the rotated handle's too: CPython's libm and V8's fdlibm differ by an ulp now and then
+    # (sin(pi / 4) in its placement), and the union snaps such near-equal coordinates together as polygon-clipping does,
+    # so a quad diagonal's slice point an ulp off its neighbours' line is merged in both
     moves = sum(p['type'] == 'extrude' for p in spec['points'])
-    slack = 2 if name == 'handle' else 0
     U.check(f"slice {name}: extrusion moves, points and travel",
-            abs(moves - ref['extrudes']) <= slack and abs(len(spec['points']) - ref['points']) <= slack
+            moves == ref['extrudes'] and len(spec['points']) == ref['points']
             and U.near(rapid, ref['rapid'], 1e-9 * max(1, ref['rapid'])),
             f"{sum(p['type'] == 'extrude' for p in spec['points'])} vs {ref['extrudes']} moves, {len(spec['points'])} vs "
             f"{ref['points']} points; travel {rapid:.9f} vs {ref['rapid']:.9f} m")

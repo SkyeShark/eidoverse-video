@@ -18,13 +18,15 @@ clips (the clip library stripped as the controller strips it, each clip measured
 pose (Pose: the frame's scene graph), foot_ik (VRMFootControllerIK, CastType, RotationType), controller
 (VRMCharacterController: probes, stairs and ramps, the gait tree, emotes, gestures, seating, the maneuver engine, turns on
 the spot, the backward walk), maneuvers (the parkour moves and their contact IK, the feet kept out of solids), plant
-(the film bake's planted feet), film (Locomotion: move_to / follow_path / turn_to / wait / emote / gesture / sit and bake;
-GAITS; seat_gap).
+(the film bake's planted feet), film (Locomotion: move_to / follow_path / turn_to / wait / emote / gesture / sit / steer /
+follow and bake, the VRM's spring chains baked with the take; GAITS; seat_gap and planted_legs, a seat measured on the
+legs the bake plants; KeyedPlace; take_resets).
 """
 
 from .clips import ControllerClip, GaitAnalysis, analyze, load_standard_animations  # noqa: F401
 from .controller import PRESETS as CONTROLLER_PRESETS, VRMCharacterController  # noqa: F401
-from .film import GAITS, Locomotion, check_segment, seat_gap, segments  # noqa: F401
+from .film import (GAITS, KeyedPlace, Locomotion, check_segment, planted_legs, seat_gap, segments,  # noqa: F401
+                   take_resets)
 from .maneuvers import (clip_tuck, feet_out_of_solids, ladder_standoff, lean_to_reach, limb_grips,  # noqa: F401
                         vault_window)
 from .foot_ik import CastType, Limb, RotationType, VRMFootControllerIK  # noqa: F401

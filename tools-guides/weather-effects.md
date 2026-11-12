@@ -17,25 +17,29 @@ draws what the states make happen on the ground:
 Everything is keyed Blender data. After `bake()` a plain render plays the weather with no Python in the loop, and a
 saved `.blend` renders any frame on its own (its `sky_cache` folder must stay beside it).
 
+As `sky_worlds.js`'s `makeSky` does, `make_sky` builds the weather itself as soon as its direction names a weather
+that rains, strikes or wets, wraps the scene's materials, and bakes it with the sky
+([sky-weather.md](sky-weather.md#weather) has the `weather_fx` table). One call is the whole storm:
+
 ```python
 import sys; sys.path.insert(0, '<repo>/blender')
 import bpy
 from eidoblend.sky import make_sky
-from eidoblend.weather import make_weather_system
 
 scene = bpy.context.scene
-sky = make_sky(scene, camera=cam, hours=17.0, weather='rain', cache_dir='C:/films/street/sky_cache')
+sky = make_sky(scene, camera=cam, hours=17.0, weather='rain', cache_dir='C:/films/street/sky_cache',
+               weather_fx={'strike_targets': [street],      # objects or collections local strikes may hit
+                           'occluders': street})            # roofs and awnings that keep the rain off
 sky.transition_to('darkstorm', 1.0, 9.0, at=39.0)         # direction calls stay on the sky
-
-wx = make_weather_system(scene, sky,
-                         strike_targets=[street],          # objects or collections local strikes may hit
-                         occluders=street)                 # roofs and awnings that keep the rain off
-wx.wrap_scene()                                            # eido_wet in front of every Principled BSDF
-wx.bake(frame_start=913, frame_end=1392)                   # plan, bake the sky with the flashes, key it all
+sky.bake(frame_start=913, frame_end=1392)                  # the weather's bake: plan, the sky with its flashes, keys
 bpy.ops.render.render(animation=True)
+wx = sky.weather_fx
 wx.bake_audio('C:/films/street/weather.wav', frame_start=913)
 wx.merge_av('street_video.mp4', 'C:/films/street/weather.wav', 'street_final.mp4')
 ```
+
+By hand, `make_sky(..., weather_fx=False)` and then `make_weather_system(scene, sky, ...)`, `wx.wrap_scene()` and
+`wx.bake(...)`: the same system, which the scene owns and bakes through.
 
 `bake()` plans every frame from the scene's first, so frames before `frame_start` are a pre-roll: the weather runs
 through them as state only. Here 38 seconds of rain wet the street and fill its puddles before the shot opens, and
@@ -99,6 +103,32 @@ Blender additions:
   `wet_model='eidoverse'` and `rain_cells='column'` the rain and the wet ground are eidoverse's, formula for formula.
 - `moisture` (default on), `moisture_radius` 1024 and `moisture_resolution` 256 (Eanpa's values).
 - `cache_dir`: default `<sky cache>/weather`.
+
+## Without the sky
+
+`makeWeatherSystem({scene, sky})` guards every sky access, so rain falls over a scene that keeps its own world and
+lighting. `make_weather_system(scene, None, ...)` does the same:
+
+```python
+wx = make_weather_system(scene, None, cache_dir='C:/films/stage/weather', occluders=set_collection)
+wx.wrap_scene()
+wx.set_weather('rain')
+wx.transition_to('storm', 1.0, 20.0, at=10.0)
+wx.bake()                                  # plan and key; there is no sky to bake
+```
+
+The weather then runs on its own clock (`weather_clock`: the sky package's state machine and direction recipe, a
+`Sky` that is state only, with no lamp, no world and nothing to bake), on the scene camera. It makes no sun lamp and
+leaves the scene's world alone. It keeps the JS's sky-less fallbacks:
+
+- every column rains: the cell gate is 1, for the drops, the rings and the moisture alike, and there is no storm
+  canopy;
+- the rain keeps its base colour (0.72, 0.78, 0.86) and light (1), with no sun glint; the rain colour multiplier
+  still applies (`rain_color`, `set_colors({'rain': ...})`), which the JS drops without a sky;
+- no lightning, in any weather: the JS schedules it only inside its sky branch.
+
+Wetness, puddles, the moisture history, the rain shadow of `occluders` and the weather audio work as with a sky.
+`cache_dir` is needed unless the `.blend` is saved (then `//weather_cache`).
 
 ## Direction
 
@@ -184,7 +214,8 @@ effects (`eidoblend.look.post`, [postprocessing.md](postprocessing.md)).
 ## Wet surfaces and puddles: `eido_wet`
 
 `wrap_scene()` puts a wetness group in front of every Principled BSDF in the scene. It skips the weather's own objects
-and objects marked `eido_dry`. `wrap_material(mat)` wraps one material.
+and objects marked `eido_dry`. `wrap_material(mat)` wraps one material. The weather `make_sky` built wraps the scene
+when it is built and again at each `sky.bake()`, so a set added after the sky gets wet too.
 
 The group takes over the Base Color, Roughness, Metallic, Normal and IOR inputs. It feeds them from their original
 sources, so textures and normal maps keep working under it. `unwrap_material(mat)` (or `dispose()`) restores every
@@ -282,9 +313,12 @@ What it draws:
 
 - **The strike light**: the JS PointLight of 12000 cd, range 900 m, no shadows, 10 m over a local strike or 120 m
   over a distant one. In Blender that is 4π × 12000 W: a Blender point of 4π·I watts lights a diffuse plane like
-  I candela (0.986 in EEVEE, `probe_eevee_facts.py` F5). EEVEE's custom 900 m cutoff
-  is on; it is a hard edge, where three fades the light over its range (the window is 0.88 at 450 m, 0.40 at
-  700 m), so a strike 450-900 m out lights the scene a little more than in WebGPU.
+  I candela (0.986 in EEVEE, `probe_eevee_facts.py` F5). Its custom distance of 900 m is three's range: EEVEE
+  fades a light to its influence radius by the same window three uses, `(1 − (r / 900)⁴)²` (0.88 at 450 m, 0.40 at
+  700 m, 0 from 900 m), on top of the inverse square. `probe_strike_light_falloff.py` measures it over a white
+  plane: within 0.002 of three's window for the light 120 m up, within 0.027 for the one 10 m over the road (at
+  grazing light), nothing past 900 m. Without the custom distance EEVEE would end the light where it falls under the
+  scene's `light_threshold`: about 390 m at the default 0.01.
 - **The bolt**: rebuildBolt's ribbon. A 12-anchor trunk leaves the deck at 1.04 × the cloud base, gets three passes
   of midpoint displacement (89 points) and 2-4 forks with sub-forks, and lands exactly on the strike. It faces the
   camera the event began with. Its additive material has a white-hot core and a wide glow in the strike's colour,
@@ -402,6 +436,14 @@ These run in Blender with `bash run_blender.sh <test>`; tests that render run on
 - `test_facade_records.py` (no render): the facade's records in Blender axes, `make_weather_audio` in a loop of its
   own against the baked timeline, the profile's names, the front-face-only sparks, puffs and rings, and the plain
   options at values other than their defaults.
+- `test_weather_sky_wiring.py` (no render): which weathers make `make_sky` build its weather (`weather=`,
+  `set_weather`, `transition_to`), `weather_fx` True / False / a dict, the wrap at build, the replacement by a
+  scene's own system, the bake handed from the sky to the weather and back without a loop; and the weather without
+  a sky: no lamp, the world untouched, the generators' `Sky` input at 0, every column raining in the base colour, no
+  lightning even in darkstorm, the ground wetting, and the clock's refusals.
+- `make_sky_weather.py`: the one-call storm on screen (`make_sky(weather='storm')` and `sky.bake()`: rain, wet
+  ground and the sky together), and the rain over a scene with its own world and sun and no sky.
+- `probe_strike_light_falloff.py`: the strike light's range window in EEVEE against three's (see Lightning).
 - `probe_strike_on_sand.py`: a forced strike on pale open ground, close: the flash, sparks, white-hot puffs, grey
   smoke and the scorch, from the side and from above.
 - `rain_ab_webgpu_scene.js` with `rain_ab_blender.py`: the rain against WebGPU itself (see
@@ -428,10 +470,6 @@ The test street (`street_set.py`) is built from the shared CC0 library, with int
   for gusts, above). Moving occluders, and wind that turns during a bake, do not move the dry patches.
 - **The listener exposure** (`weather_listener.js`, Eanpa's standalone): rain muffled when the camera is under a
   roof. eidoverse's audio never had it.
-- **three's smooth light range window** on the strike light: EEVEE has a hard custom cutoff only (see Lightning).
-- **makeSky's own weather.** `sky_worlds.js` builds the weather system inside `makeSky` and wraps the scene; here
-  `make_sky` builds the sky alone and `make_weather_system(scene, sky)` attaches the weather to it. Until then a rain
-  state has no falling drops (the sky's curtains and greying are there).
 - **WebGPU-only machinery, dropped**: G-buffer exclusion (`mrtNode`: EEVEE draws Blended surfaces forward, after its
   G-buffer), the budgeted wrap queue (EEVEE compiles at render), pipeline warm-up (`pipeline_warmup_objects()`
   returns the weather's objects as an inventory), fixed bolt buffers (each bolt is its own mesh), `noSupportCheck`.

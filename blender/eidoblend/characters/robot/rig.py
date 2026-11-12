@@ -25,8 +25,8 @@ and returns one frame record (Blender's axes): N (every humanoid bone's normaliz
 (the armature's world matrix), stages (the hips' pitch / swing), helpers (the shoulders' pitch, rad), wrists (the roll and
 flex stages), rotors (the thumbs' rotor stages), petals (the twelve folds, deg). key_robot keys a list of them into ONE
 action on the armature (LINEAR, every frame: any frame renders alone), and perform_robot is the example's loop over a
-clip. post_pass is the same order for a pose another solver made (round one's walk_path): the arms and hands clamped
-where that solver did not, the gaze, the head and the crown.
+clip. post_pass is the same order for a pose another solver made (the controller family's plant, round one's
+walk_path): the arms and hands clamped where that solver did not, the gaze, the head and the crown.
 """
 
 import math
@@ -168,10 +168,11 @@ class RobotRig:
 
     def post_pass(self, N, off, dt, weights=None, gaze=None, crown_state=None, head_state=None, state_weight=1.0,
                   legs_out=None, arms=True):
-        """the frame order's remainder on a pose another solver made and clamped its own way (N Blender's axes: round
-        one's walk_path, which clamps the legs and the arms but not the hands, and keys no wrist or thumb stage): the arms
-        re-solved without the turn-out (the pass is a projection there, so the walk's arms stay; it gives the wrist
-        stages), the hands, the gaze, the head and the crown. legs_out: the solver's own hip stages (Blender's axes)"""
+        """the frame order's remainder on a pose another solver made and clamped its own way (N Blender's axes: the
+        controller family's plant or round one's walk_path, which clamp the legs and the arms but not the hands, and key
+        no wrist or thumb stage): the arms re-solved without the turn-out (the pass is a projection there, so the
+        solver's arms stay; it gives the wrist stages), the hands, the gaze, the head and the crown. legs_out: the
+        solver's own hip stages (Blender's axes)"""
         p3 = {n: q_to_three(q) for n, q in N.items()}
         if arms and self.arms is not None:
             dof.apply_arm_dof(self.arms, p3, dt, 0.0, self.stats)

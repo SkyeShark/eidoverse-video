@@ -399,9 +399,18 @@ def save(R, sc, shots, sheets=None, blend=True):
     [shot names]} composed after the render"""
     path = os.path.join(OUT, f'{R.tag}.blend')
     if blend:
-        bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
-        if os.path.exists(path + '1'):
+        for attempt in range(3):
+            try:
+                bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+                break
+            except RuntimeError:                     # a synced folder can hold the file a moment: try again
+                if attempt == 2:
+                    raise
+                time.sleep(2.0)
+        try:
             os.remove(path + '1')                    # the previous save's backup: regenerable
+        except FileNotFoundError:
+            pass
     with open(os.path.join(OUT, f'{R.tag}_shots.json'), 'w', encoding='utf-8') as fh:
         json.dump({'blend': path, 'tag': R.tag, 'shots': shots, 'sheets': sheets or {}}, fh, indent=1)
     R['shots'] = len(shots)

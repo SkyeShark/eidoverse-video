@@ -71,8 +71,7 @@ read against the WebGPU docs, and everything a set hands back is in
 Blender's axes.
 
 - `group` (or `root`): the set's root Empty. Every part sits under it; park
-  the set anywhere by moving or turning it (the ocean's daisies are planted
-  through `matrix=` at build time; see its section).
+  the set anywhere by moving or turning it, before or after the build.
 - `parts`: the engine's parts as Blender objects, under the same keys.
 - `update(t, state, frame=None, ctx=None)`: the set at time `t` with the
   controls `state`. With a `frame`, or the harness ctx, it **keys** every
@@ -167,8 +166,8 @@ in range.
 | `positionNode` vertex motion | Geometry Nodes reading the keyed clock |
 | CPU-placed billboards | Geometry Nodes points instanced as quads facing the active camera |
 | `lightsNode` light lists | light linking (receiver collections) |
-| `Reflector` | a planar light probe and EEVEE's ray tracing; the mirrored surface itself hidden from the probe |
-| scene fog | fog in the set's own materials, or a fog volume |
+| `Reflector`, and a mirror floor painted with its emitters' reflections | a planar light probe and EEVEE's ray tracing; the mirrored surface itself hidden from the probe |
+| scene fog | fog in the set's own materials and wrapped round your own objects' (`fog_objects`: a see-through material keeps its alpha), or a fog volume |
 | `polygonOffset` | a physical offset of a fraction of a millimetre |
 | `depthWrite: false` | Transparency Overlap on, so every layer of the object blends |
 | hashes in shaders | three's exact hash where the argument is known at build time (an instance attribute); Blender's White Noise per pixel (the same share, other cells) |
@@ -516,12 +515,19 @@ builds it too.
 | `coast`, `land`, `sea`, `echoes`, `pages`, `house`, `apparitions`, `lights`, `world`, `parts` | the pieces |
 | `dispose()` | removes the set's objects and collection |
 
-Park the set with `matrix` at build time: the daisies are a flora field in
-world space, planted through it, so moving the root afterwards leaves them
-behind. Everything else follows the root, the moon included: a turned set
-turns its moon (the lamp, the sea's glint, the reflected moon) with it.
-Under the engine sky, park it without a turn so the layout keeps meeting
-the sky's moon.
+Park the set with `matrix` at build time, or move and turn `O.group`
+afterwards: everything follows the root, her daisies included (the flora
+field is planted in world space, then parented to the land with its place
+kept, as daisies.js's field sat in ocean.js's group; it sways in its own
+space, so a move leaves its sway as it was). The porch lamp's and the
+window's glints on the cove follow the house wherever it goes: the sea reads
+the world places of the house's `porch_point` and `window_point` by driver,
+as ocean.js copied them from the house on every update. A set built turned
+turns its moon (the lamp, its glint on the sea, the night's glow) with it.
+Turned after the build it turns the lamp, while the moon's glint on the sea
+and the night's glow keep the moon of the build, as ocean.js's uniforms
+did: aim the moon with `matrix`. Under the engine sky, park it without a
+turn so the layout keeps meeting the sky's moon.
 
 #### Controls
 
@@ -1036,9 +1042,19 @@ and core are drawn analytically.
   height-graded haze and the cloud deck, lit from below by the street).
   three's `scene.fogNode` fogged every material in the scene; here
   `apply_atmosphere(scene, objects=meshes)` wraps your own objects in the same
-  haze (`KIT.fog_objects`; `KIT.unfog_material` takes it out). Seen from the
-  top of `riseUp` (190 m up the well) a performer on the mark is a quarter
-  fogged (factor 0.26), as in the WebGPU engine.
+  haze (`KIT.fog_objects`; `KIT.unfog_material` takes one out, and the set's
+  `dispose()` takes them all out before its haze group goes). Each surface S
+  becomes Mix(factor, S, Mix(alpha, Transparent, Emission(colour))), alpha
+  being the surface's own coverage (its Principled Alpha, its mixes with a
+  Transparent BSDF or a Holdout): a see-through material (a hair card, a
+  decal, an alpha-cut leaf, a blended veil) fogs only what it covers and
+  keeps its alpha, as three fogged a fragment's colour, and an additive glow
+  fades by 1 − factor. The surface wrapped is the one EEVEE renders: for a
+  VRM's MToon material, the VRM add-on's output group's own EEVEE output, in
+  one copy of that group for each haze. Only a node group that hides a
+  transparency of its own is left out (`fog_objects` counts it). Seen from the top of `riseUp` (190 m
+  up the well) a performer on the mark is a quarter fogged (factor 0.26), as
+  in the WebGPU engine.
 - **The hole's lights** (`hole.parts.lights`: `ring`, `screen0..3`, `kickL`,
   `kickR`) are light linked, as the engine's light lists were: the quiet ring
   lights the hole and the performer, the screens and the neon kickers light
@@ -1611,6 +1627,30 @@ ceiling) with a volume probe fitted inside it; `COR.build` takes the options
 `probe` (default True), `probe_spacing` (0.6 m) and `probe_samples` (1024),
 and `C.bake_probes(scene)` bakes the probe before rendering.
 
+Its polished marble floor is a mirror: a planar light probe covers it wall
+to wall and end to end (`parts['mirror']`, the option `mirror`, default
+True), and `apply_look` turns on the screen-traced reflections that read it
+(EEVEE traces a planar probe under its Screen-Trace method only;
+`apply_look(scene, raytracing=False)` finds reflections in the light probes
+alone, and the floor then shows their soft light, no mirror). The floor
+itself stays out of the probe's capture: it lies on the probe's plane. So
+the floor mirrors the whole room, softened by the marble's roughness and
+broken by its veins and gold joints: the pilasters and their gilding, the
+lanterns, the sconces' fans, the LED wall and its post, the door and the
+blaze when it opens. The probe needs no bake (EEVEE renders it with the
+frame), and a still at 960 × 540 and 16 samples renders in about a second
+with it or without it. Dimming the set's lights dims their reflections with
+them. Beside the WebGPU frames the floor reads as the same black veined
+marble in the `cap` camera and darker in the long views: three's floor also
+reflected its environment map, a brighter stand-in for the room, where the
+probe mirrors the room as it is lit.
+
+A VRM performer in MToon is not in the floor's mirror: the VRM add-on's
+MToon output shows its surface to camera rays (and `characters/vrm.py`
+adds shadow rays), while EEVEE captures a planar probe with glossy rays,
+which see it transparent. With `mirror=False`, screen tracing reflects
+her where she stands in frame, and misses what is out of it.
+
 ```python
 import sys; sys.path.insert(0, '<repo>/blender')
 import bpy
@@ -1620,7 +1660,7 @@ scene = bpy.context.scene
 C = COR.build(scene, {'postText': 'AMERICANISM, NOT EFFECTIVE ALTRUISM',    # the post on the LED wall
                       'tally': [49, 39, 12],                                # the poll board's counts
                       'plaque': ('SUPREME', 'INTELLIGENCE')})               # the two lines over the door
-C.apply_look(scene)                          # AgX at the set's exposure, Fast GI, probe reflections, shadows on
+C.apply_look(scene)                          # AgX at the set's exposure, Fast GI, the floor's mirror, shadows on
 # C.apply_look(scene, view_look=cn_lib.ACES_LIKE_LOOK)   # the WebGPU frames' tone instead (see Light, tone and the world)
 C.bake_probes(scene)                         # the corridor's volume probe, before rendering (a GPU job)
 C.camera('door', scene)                      # the five cameras: door, corridorWide, postWall, poll, cap
@@ -1665,9 +1705,8 @@ C.apply_post(scene)                          # the suggested look: bloom and the
 Build options: `postText`, `tally`, `capFitPos`, `capFitRot`, `capFitScale`
 (the JS's), and the Blender edition's `plaque` (the two engraved lines),
 `world` (True: the set's environment and hemisphere light become the scene's
-world), `shadows` (True) and `ibl` (`'material'`: each material lit by its own
-environment, as three's per-material `envMap`; `'world'`: the environment as
-the world for everything).
+world), `shadows` (True), `mirror` (True: the floor's planar light probe)
+and the volume probe's `probe`, `probe_spacing` and `probe_samples`.
 
 `parts`: `doors` (`group`, `left`, `right` the hinge pivots, `leafL`, `leafR`,
 `seam`), `postWall` (`mesh`, `set_text(str, name=, meta=, stats=, reveal=)`,
@@ -1677,7 +1716,8 @@ c, title=, sub=, names=, footnote=, stamp=)`, `tally`, `options`;
 row under 60 % of the leader), `cap` (origin the bottom of the headband, visor
 toward three's +Z), `capRest`, `capFit` (`pos`, `rot`, `scale` in head-bone
 space), `patch`, `uniform`, `pedestal`, `cushion`, `plaque`, `beyond`,
-`shafts`, `sconces`, `room`, `marble`, `env` (the room's light as an
+`shafts`, `sconces`, `room`, `marble`, `mirror` (the floor's planar light
+probe), `probe` (the volume probe), `env` (the room's light as an
 equirect), `lights` (`key`, `doorL`, `doorR`, `plaque`, `beyond`, `poll`,
 `cap`, `uniform`, `screen`, `fill`, and `hemi`, the world's hemisphere term),
 `uniforms` (the root Empty, whose custom properties every material reads
@@ -1723,13 +1763,14 @@ Build options: news.js reads none; the Blender edition's are `tag` (the word
 sprayed, `'CLANKER'`; a longer word is drawn smaller so it stays on the wall),
 `signs` (up to eight messages for the pickets' signs, each a list of lines or
 `'LINE / LINE'`; each sign keeps its board, pen and doodle), `world`, `fog`
-(True: the materials carry the look's FogExp2), `shadows` (True: the real
-lamps cast EEVEE shadows, which the WebGPU lamps did not), `chainShadow`
-(False: the whole fence casts no lamp shadow, so the crew's LED behind the
-fence keys the mark clean; the painted floods carry the fence's shadow either
-way), `signNormals` (`'rest'`, the default: the painted floods light the
-raised signs as news.js did; `'posed'`: by the boards' true normals), `crowd`
-(True: the 79 pickets) and `ibl`.
+(True: the materials carry the look's FogExp2, and `fog_objects` gives your
+own objects the same), `shadows` (True: the real lamps cast EEVEE shadows,
+which the WebGPU lamps did not), `chainShadow` (False: the whole fence casts
+no lamp shadow, so the crew's LED behind the fence keys the mark clean; the
+painted floods carry the fence's shadow either way), `signNormals`
+(`'rest'`, the default: the painted floods light the raised signs as news.js
+did; `'posed'`: by the boards' true normals) and `crowd` (True: the 79
+pickets).
 
 `parts`: `ground`, `fence`, `poles`, `beams`, `monolith`, `yard`, `street`,
 `van`, `sky` (hide it under a sky of your own), `steam` (110 puffs), `signs`,
@@ -1742,7 +1783,35 @@ and neck), `signAtlas`, `graffiti` (`texture`, `rect`, `uniform`), `chyron`
 `graffiti`, `hemi`), `flood_receivers`, `uniforms`, `materials`. `focal` is
 the flood behind the mark, Blender (−3.9, 6.5, 7.4) = three (−3.9, 7.4, −6.5);
 `look.fog` is FogExp2(0x0b1018, 0.011), carried by the materials (the sky
-takes none).
+takes none); `N.fog` is the fog they were built with (None for `fog=False`).
+
+**Your own objects in the haze.** three's `scene.fog` fogged every material
+in the scene, a performer, a crowd or props you added included. Here the
+haze lives in the set's materials, so give it to yours after loading them:
+
+```python
+from eidoblend.characters import vrm as V
+her = V.load_vrm('claude_suit'); her.arm.scale = (0.87,) * 3
+N.fog_objects([o for o in her.objects if o.type == 'MESH'])   # -> (wrapped, left)
+```
+
+Each material is wrapped once in the set's FogExp2 (`N.fog_group()`, the
+numbers the set's materials mix in), the same wrap the city kit gives its
+own (`KIT.fog_material`): a see-through material keeps its alpha and fogs
+only what it covers (a hair card, a decal, an alpha-cut leaf, a blended
+veil, an MToon cut-out). A VRM's MToon material renders through the VRM
+add-on's output group, which carries its own EEVEE output; the wrap goes
+there, in one copy of that group for each haze, so the add-on's own group
+and every character left out stay as they are.
+`KIT.unfog_material(mat)` takes one out, and `N.dispose()` takes them all
+out before the set's haze group goes. Measured in a linear EXR from the
+`wide` camera, cards of your own at 5, 20 and 45 m of view depth take
+0.35 %, 4.74 % and 21.76 % of haze where FogExp2 gives 0.30 %, 4.72 % and
+21.73 %, and match the set's own fogged card to under 0.001 %; an alpha-cut
+card's open half shows what stands behind it unveiled. The chain link, the
+set's own see-through material, fogs its wire the same way, so in the
+`wide` shot its open diamonds show the yard beyond it with no veil of haze
+over the fence's length.
 
 The pickets are the WebGPU's: the same rng, so the same 79 people stand in
 the same places with the same roles, signs and arms (29 signs, 12 phones, 5
@@ -1842,7 +1911,11 @@ quad's centre is built from x and y alone (`nb.vec2(u.x - 0.5, u.y - 0.5)`).
 **The set base.** `update`, `animate(state, frames, t0=)`, `camera(name)`,
 `apply_look`, `apply_post(frames=)` (its focal keyed through the scene's
 camera on every frame, so it follows cuts made with camera markers),
-`focal_world`, `set_u`, `dispose`, and the dict reading of the contract.
+`focal_world`, `set_u`, `fog_objects(objects)` and `fog_group()` (the set's
+haze on your own objects: the news set's, above; the corridor has no fog, so
+it wraps nothing), `dispose`, and the dict reading of the contract.
+`Mat.standard(alpha=, fog=)` fogs only what a see-through surface covers:
+Mix(f, S, Mix(alpha, Transparent, Emission(fog colour))).
 
 Costs, measured headless: the corridor builds in 17 to 53 s,
 the news in 25 to 76 s (the WebGPU builds took 1.8 and 3.5 s); most of it is
@@ -1907,6 +1980,13 @@ wet road's planar mirror), `reflect_scale`, `sky` (the set's night world),
 intensity), and, for a new piece, `amounts`: the text in the two screens'
 bands, gold then red (race.js's own `'$100,000,000'` and `'$20,000,000'` by
 default), drawn in the same Impact band under the same face.
+
+The night sky and its faint clouds are the World, read by camera rays on
+the world direction. race.js's 2400 m dome sat in the set's group, but its
+colour read `normalize(positionWorld - cameraPosition)`, never the set's
+frame (`setInv`, which every lit material of race.js reads), so in both
+editions a moved or turned race keeps its clouds where they were in the
+world while the set and its cameras turn under them.
 
 `make_cameras(cut, ...)` takes the cut as `[(t_start, camera), ...]` on the
 same clock, or a function `cut(t)`; it makes one camera per shot, keys it
@@ -2287,7 +2367,7 @@ python blender/tests/sets_daisy_ocean/parity_atlas.py                    # the a
 python blender/tests/sets_daisy_ocean/test_util_parity.py                # rng, easing, buildMips vs util.js
 bash run_blender.sh blender/tests/sets_daisy_ocean/test_sea_math.py      # hash, GN displacement
 bash run_blender.sh blender/tests/sets_daisy_ocean/test_ocean_set.py     # vs ocean.js's numbers; the controls
-bash run_blender.sh blender/tests/sets_daisy_ocean/test_ocean_parked.py  # the set parked and turned
+bash run_blender.sh blender/tests/sets_daisy_ocean/test_ocean_parked.py  # parked and turned, at the build and after
 bash run_blender.sh blender/tests/sets_daisy_ocean/test_perform_parity.py         # the gestures vs perform.js
 bash run_blender.sh blender/tests/sets_daisy_ocean/test_human_points_parity.py    # the human's points vs apparitions.js
 bash run_blender.sh blender/tests/sets_daisy_ocean/test_daisies.py --no-render    # every daisies.js option
@@ -2386,6 +2466,9 @@ bash run_blender.sh blender/tests/sets_uf_corridor_news/test_cn_lib.py
 bash run_blender.sh blender/tests/sets_uf_corridor_news/test_parity.py
 bash run_blender.sh blender/tests/sets_uf_corridor_news/test_corridor.py
 bash run_blender.sh blender/tests/sets_uf_corridor_news/test_news.py
+# your own objects in the news set's haze: what wraps and how (no render); with --render the gate, cards at 5 / 20 /
+# 45 m in the wide camera read from a linear EXR, and the claudesona and Aletheia on the mark, wrapped and not
+bash run_blender.sh blender/tests/sets_uf_corridor_news/test_news_fog_objects.py [--render]
 # stills from the sets' cameras: every camera, the states and options, the look on (both sets in one run)
 bash run_blender.sh blender/tests/sets_uf_corridor_news/render_shots.py both --her
 # the news set's billboards alone on black (the steam, the hand lights): that they draw at all
@@ -2418,7 +2501,8 @@ sets paint against the WebGPU edition's own, compared at the scale a sheet is
 seen at, an 8 px box filter: within 0.7 % mean difference there;
 `out/parity/cmp_<name>.png` puts each pair side by side); `test_race.py` and
 `test_bin.py` (the sets built and compared mesh by mesh, the node-built lamp
-and works field at six points against race.js's formulas, asset states keyed
+and works field at six points against race.js's formulas, the night sky on
+the world direction as race.js's dome read it, asset states keyed
 and checked at each keyed frame, stills from the sets' own cameras into
 `out/<set>_<camera>_<what>.png`, then the invariants: a moved set renders the
 same stills, the saved .blend renders a keyed frame on its own, `dispose()`
@@ -2486,11 +2570,6 @@ pieces, and what was left out:
   and show more of the city than the WebGPU dive's frames; the only WebGPU
   frames there carry a post look, so the two have not been compared like for
   like.
-- **The haze on your own see-through materials.** The city's `fog_objects`
-  leaves blended and alpha-cut materials (decals, hair cards) out of its haze,
-  and the news' FogExp2 lives in its own materials, so a character dropped
-  into the news set is not fogged (0.3 % at 5 m, 5 % at 20 m, 22 % at 45 m in
-  the `wide` camera).
 - **Light shapes.** three's spots that fall off as 1 / d^1.3–1.6 are matched
   to inverse square at their targets: nearer, a light is brighter than the
   engine's, beyond it dimmer (the showroom's seat spill lights the front row
@@ -2509,18 +2588,23 @@ pieces, and what was left out:
   corridor and news' `pbr_mat` defaults to `side='double'` where three's
   `pbrMat` defaulted to FrontSide (pass `side='front'` for three's on an open
   mesh). The race's `reflect_scale` is accepted with no effect: EEVEE 5.2's
-  planar probe has no resolution of its own. A turned race keeps its sky's
-  faint clouds where they were (the night sky is the World, where race.js's
-  dome was in the group). The funeral's haze is a real fog volume where the
-  WebGPU used a screen-space depth fog, so a wide shot's far ceiling reads a
-  little hazier.
-- **Moving parts.** The ocean's daisies are planted in world space: park the
-  set with `matrix` at build time. SeedThree's wind phases its sway by world
-  position, so a parked corner camp's trees sway a few centimetres
-  differently from an origin build's. The race's drain water sparkles at 16
-  samples (its sodium heads are real lights that glint on the rippled
-  water); more samples smooth it. The corridor's final open-door state has no
-  WebGPU frame to compare against.
+  planar probe has no resolution of its own. The funeral's haze is a real
+  fog volume where the WebGPU used a screen-space depth fog, so a wide shot's
+  far ceiling reads a little hazier.
+- **Performers in the planar mirrors.** A VRM performer in MToon is not in
+  a set's planar mirror (the corridor's marble floor, the race's wet road,
+  where three's Reflector drew her): the VRM add-on's MToon output shows its
+  surface to camera and shadow rays only (`characters/vrm.py`), and EEVEE
+  captures a planar probe with glossy rays. From a low camera in the
+  corridor the claudesona and Aletheia, on the marble, reflect under screen
+  tracing alone (`mirror=False`) and not in the probe; in the corridor's own
+  shots the performer stands on the runner, which mirrors nothing.
+- **Moving parts.** SeedThree's wind phases its sway by world position, so a
+  parked corner camp's trees sway a few centimetres differently from an
+  origin build's. The race's drain water sparkles at 16 samples (its sodium
+  heads are real lights that glint on the rippled water); more samples smooth
+  it. The corridor's final open-door state has no WebGPU frame to compare
+  against.
 - **Not carried over (no Blender counterpart, not needed):** `noMRT`,
   `renderOrder` (except the city's cloud deck, above), `frustumCulled`,
   `customProgramCacheKey`, `userData.noMips`,

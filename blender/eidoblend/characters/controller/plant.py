@@ -9,13 +9,16 @@ blend of clips at any speed):
   THE STANCE    a foot is down where the clips playing (at their weights and their own clip times) have it down: each
                 clip's measured stance (clips.analyze), blended; idle, the emotes and a seat stand on both feet (a seat's
                 pelvis stays where the seat puts it, its feet go onto the floor under it); a fall and a maneuver leave
-                the feet to the clip (the maneuver's contact IK places them). Neither foot down is a flight only where a
+                the feet to the clip (the maneuver's contact IK places them), and a foot they hand back is planted once
+                the blend sets it down (LAND_GAP, LAND_TURN). Neither foot down is a flight only where a
                 gait with one leads (FLIGHT_SLOTS); anywhere else the report lists it as airborne. A swing of two frames
                 between two stances is the crossfade's noise where the foot lands back where it stood: it stays down;
                 one that carries the foot on starts earlier, to last SWING_MIN_FRAMES while the other foot stands
-  THE STEPS     a planted foot the body has walked on from is let go (an early toe-off); where the other foot is still
-                in its swing then, that swing is brought forward to land by then (its own motion relative to the body,
-                played faster: a quicker step, _land_by / _retime), so a walk keeps a foot down
+  THE STEPS     a planted foot the body has walked on from is let go (an early toe-off; a stance the walk has already
+                ended, held on by a stair clip blending in, as soon as it would pull the hips down: TRAIL_LATE); where
+                the other foot is still in its swing then, that swing is brought forward to land by then (its own
+                motion relative to the body, played faster: a quicker step, _land_by / _retime), so a walk keeps a
+                foot down
   THE LOCK      through a stance the sole's points in contact in this frame and the last do not slip and the foot does
                 not turn on the ground (in a turn on the spot it pivots about its contact: that is a turn). The heading
                 it lands with is turned on by the free foot's own turn up to mid-stance (centred: on a curve the hips
@@ -67,6 +70,9 @@ BOOT_FIT = 0.04                      # the most more it moves to take the boot o
 SWEEP_RATE = 1.2                     # the swing's clearance envelope rises toward an obstacle at most this fast (m/s)
 STEP_NOISE = 0.08                    # a two-frame swing landing within this of where its foot stood is a blend's noise (m)
 SWING_MIN_FRAMES = 4                 # a short swing that carries its foot on is started earlier to last this many frames
+LAND_GAP = 0.015                     # a foot handed back from a maneuver or a fall is planted once its sole is this near
+LAND_TURN = 3.0 * D2R                # the ground and the blend turns it less than this a frame...
+LAND_MAX = 6                         # ...at most this many frames after the hand-over
 LOAD_FRAMES = 4
 TRAIL_FULL = 0.55                    # a planted foot within this share of its leg's reach from the hip (along the
 TRAIL_NONE = 0.85                    # ground) carries its load; past this share none (the body walked on from it)
@@ -74,6 +80,12 @@ LOAD_MIN = 0.3                       # under this much carried load the pelvis e
 TRAIL_BEHIND = 0.12                  # a planted foot this far behind its hip along the travel...
 TRAIL_DIP = 0.25                     # ...that the pelvis reaches only this far under the controller's own: left behind
 #                                      (0.15 also caught a stair's ordinary dip: a 6-frame hop off the last tread)
+TRAIL_LATE = 0.7                     # past this share of its stance a planted foot behind its hip that the walk (or the
+TRAIL_GROUND_SHARE = 0.25            # run), still carrying this share of the weight, has already lifted is left behind
+TRAIL_DIP_LATE = 0.12                # where the pelvis reaches it only this far under the controller's own
+TRAIL_DOUBLE = 3                     # and the other foot has stood this many frames (the weight crosses first)
+TRAIL_STAIR_SHARE = 0.15             # the stair clips' share of the blend's weight that holds such a stance on
+STAIR_CLIPS = ('stairsUp', 'stairsDown', 'stairsRunUp', 'stairsRunDown')
 
 
 KNEE_MAX_HUMAN = 150.0 * D2R          # a human knee folds past round one's 112 deg (my robot's hardware stop): a run's
@@ -389,7 +401,9 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         ph, Wh = pb.hips(M, r['off'], N)
         rec = {'f': r['f'], 'M': M, 'Qr': Qr, 'psi': r['heading'], 'N': N, 'off': r['off'], 'ph0': ph, 'helpers': helpers,
                'mode': r['mode'], 'maneuver': r.get('maneuver'), 'feet': {}, 'z0': M.translation.z,
-               'grounded': r['grounded'], 'lead': r.get('lead')}
+               'grounded': r['grounded'], 'lead': r.get('lead'), 'backward': bool(r.get('backward')),
+               'ground_stance': r.get('ground_stance') or {s: 1.0 for s in SIDES},
+               'ground_share': r.get('ground_share', 0.0), 'stair_share': r.get('stair_share', 0.0)}
         fks = {s: pb.leg_fk(s, ph, Wh, N) for s in SIDES}
         # my robot's feet are wider than a human's (robot_dof LEG_CLEARANCE.width): carried out from the clip's narrow
         # track where its ankles come closer than 18-23 cm, as round one's walk_path does
@@ -419,6 +433,33 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         A.append(rec)
     for (s, _a), (a, L, g, E) in sorted((retime or {}).items(), key=lambda kv: kv[1][0]):
         _retime(pb, world, A, recs, s, a, L, g, E, released)
+    # a foot handed back from the clip (a maneuver's or a fall's frames just before) is planted once the blend has set
+    # it down: its sole within LAND_GAP of the ground and turning under LAND_TURN a frame, at most LAND_MAX frames on,
+    # while the other foot stands and its own stance goes on. Until then it ends its swing (a vault's landing foot is
+    # still turning as the move fades out: it is planted flat, not mid-roll). Where the blend never sets it down in
+    # that time it is planted at the hand-over (a running jump's landing: the stance is short, and the run lifts that
+    # foot again)
+    for s in SIDES:
+        o = 'right' if s == 'left' else 'left'
+        for i in range(1, n):
+            if not (A[i - 1]['feet'][s]['free'] and A[i]['feet'][s]['stance']) or A[i - 1]['mode'] == 'seat':
+                continue                                  # (a seat hands its feet back its own way: _seat_handover)
+            j, down = i, False
+            while j < min(n - 1, i + LAND_MAX):
+                fj, fn = A[j]['feet'][s], A[j + 1]['feet'][s]
+                if not fj['stance'] or not fn['stance'] or not A[j]['feet'][o]['stance'] or A[j]['feet'][o]['free']:
+                    break
+                G = _ground(world, fj['P'])
+                ok = G > -1e8
+                gap = float(np.min(fj['P'][ok, 2] - G[ok])) if ok.any() else 0.0
+                turn = (fj['W_ft'] @ Vector((0.0, 0.0, 1.0))).angle(fn['W_ft'] @ Vector((0.0, 0.0, 1.0)), 0.0)
+                if gap <= LAND_GAP and turn <= LAND_TURN:
+                    down = True
+                    break
+                j += 1
+            if down:
+                for k in range(i, j):
+                    A[k]['feet'][s]['stance'] = False
     # stance runs of one frame (and swings of one frame) are blend noise: dropped. A swing of two frames between two
     # stances is too where the foot lands back where it stood (a crossfade's stance weights dipping under a half): no
     # foot lifts, travels and lands in 0.07 s; it stays down. One that carries the foot on (a stair clip coming in
@@ -521,6 +562,12 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
                 delta, theta = d0 * (1.0 - u) + d1 * u, t0 + wrap_pi(t1 - t0) * u
                 fd['lock'] = None
             fd['delta'], fd['theta'] = delta.copy(), theta
+
+    for s in SIDES:                     # how many frames each foot has stood so far (the early toe-off's double support)
+        run = 0
+        for r in A:
+            run = run + 1 if r['feet'][s]['lock'] is not None else 0
+            r['feet'][s]['locked_for'] = run
 
     # ---- 3: each foot's target turn and xy (round one's pass C)
     def tilt_w(s, i):
@@ -672,7 +719,21 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         fwd = Vector((math.sin(r['psi']), -math.cos(r['psi'])))
         p_th = r['ph0'] + (r['Qr'] @ r['N']['hips']) @ body.leg[s]['hip']
         behind = (fd['T'].xy - p_th.xy).dot(fwd) < -TRAIL_BEHIND
-        return behind and leg_dz(r, s, R_ - REACH_MARGIN) < -TRAIL_DIP
+        if not behind:
+            return False
+        dip = -leg_dz(r, s, R_ - REACH_MARGIN)
+        # a stance the walk (or the run) has already ended, held on only by a stair clip blending in (a step up onto a
+        # low block: the stair clip's long stance keeps the walk's trailing foot down after the walk lifted it): a
+        # trailing foot late in it toes off as the walk lifts it rather than pull the hips down. Only in a forward walk
+        # the walk still carries (TRAIL_GROUND_SHARE: on a 45 deg ramp the stair clip leads and its long trailing
+        # stance is the climb's own), with a stair clip in the blend
+        # (TRAIL_STAIR_SHARE: at a stop the idle coming in holds both feet down, and the trailing one stays), once the
+        # other foot has stood TRAIL_DOUBLE frames (the weight crosses first)
+        o = 'right' if s == 'left' else 'left'
+        late = (r['mode'] == 'loco' and not r['backward'] and r['ground_share'] >= TRAIL_GROUND_SHARE and
+                r['stair_share'] >= TRAIL_STAIR_SHARE and r['ground_stance'][s] < 0.5 and fd['p'] >= TRAIL_LATE and
+                r['feet'][o].get('locked_for', 0) >= TRAIL_DOUBLE)
+        return dip > TRAIL_DIP or (late and dip > TRAIL_DIP_LATE)
 
     def carried(r, s):
         """the share of the body's load leg s's planted foot can carry by where it stands: all of it within TRAIL_FULL

@@ -1,8 +1,10 @@
 """make_weather_system: the Blender makeWeatherSystem (eidoverse/weather_system.js), on top of the sky package.
 
+make_sky builds one itself when its weather rains, strikes or wets (make_sky(weather_fx=...)). By hand, with options:
+
     from eidoblend.sky import make_sky
     from eidoblend.weather import make_weather_system
-    sky = make_sky(scene, camera=cam, hours=17.0, weather='overcast', cache_dir=cache)
+    sky = make_sky(scene, camera=cam, hours=17.0, weather='overcast', cache_dir=cache, weather_fx=False)
     wx = make_weather_system(scene, sky, strike_targets=[street], occluders=street)
     wx.wrap_scene()                                  # eido_wet in front of every Principled BSDF
     wx.transition_to('darkstorm', 1.0, 12.0, at=3.0)   # direction calls go to the sky's recipe
@@ -17,6 +19,11 @@ shader values (rainK, rainLight, rainColor, wetness, surface water, time, rain d
 strike light, one bolt per event, impact objects per local strike, the moisture sequence, and the eido_weather
 object's custom properties (the weather-audio contract). The lightning flash goes into the sky's own bake through an
 on_frame callback (zenith / horizon flash, sheet flash, the cloud glow at the strike).
+
+Without a sky (make_weather_system(scene, None, cache_dir=...)) the scene keeps its own world and lighting. The
+weather then runs on its own clock (the sky package's state machine and direction recipe, drawing nothing), with the
+JS's sky-less fallbacks: every column rains (the cell gate is 1), the rain keeps its base colour and light, and there
+is no lightning, which the JS schedules only with a sky.
 """
 import json
 import math
@@ -25,7 +32,7 @@ import os
 import numpy as np
 
 from . import lightning as L
-from .frame import rain_light
+from .frame import rain_light, WATER_BASE
 
 _REGISTRY = {}
 ASSET_DROP = ('sky', 'rain_streak.png')
@@ -43,6 +50,15 @@ def _b3(v):
 def _sstep(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
+
+
+def _alive(idb):
+    """Whether a Blender ID is still there (a file reload or read_factory_settings frees the old ones)."""
+    try:
+        idb.name
+        return True
+    except ReferenceError:
+        return False
 
 
 def _strike_b(st):
@@ -79,16 +95,20 @@ class WeatherFX:
                  wet_model='moisture', wet_exposure=True, rain_cells='upwind', cache_dir=None, log=print):
         import bpy
         if sky is None:
-            raise ValueError('make_weather_system: pass the scene\'s Sky (eidoblend.sky.make_sky): the weather reads '
-                             'its state machine, palette and weather field')
+            raise ValueError('WeatherFX: pass the scene\'s Sky, or the weather\'s own clock '
+                             '(make_weather_system(scene, None) builds it)')
         from .rain import RAIN_CELLS
         if rain_cells not in RAIN_CELLS:
             raise ValueError("make_weather_system: rain_cells must be one of %s, not '%s'"
                              % (' | '.join(RAIN_CELLS), rain_cells))
-        old = _REGISTRY.get(scene.name)
-        if old is not None:
-            old.dispose()
+        old = _REGISTRY.pop(scene.name, None)
+        if old is not None and _alive(old.scene) and old.scene == scene:
+            old.dispose()                 # the JS registry is a WeakMap on the scene: a reloaded file's is not this one
         self.scene, self.sky, self.log = scene, sky, log
+        # the procedural sky (False: the weather's own clock, make_weather_system(scene, None): the JS's sky = null)
+        self.sky_drawn = not getattr(sky, 'state_only', False)
+        self.owned_by_sky = False         # True for the weather make_sky built: the sky's bake() hands over to bake()
+        self.sky_frames = None            # the sky's frame records of the last bake
         self._disposed = False
         self.rain_cells = rain_cells
         self._upwind = RAIN_CELLS[rain_cells]
@@ -144,6 +164,10 @@ class WeatherFX:
         from . import rain as R
         self.objects.update(R.build_rain_objects(coll, self.weather_map, self.drop_image, occluders,
                                                  rain_count, rain_radius, rain_height, splash_count, rain_cells))
+        if not self.sky_drawn:
+            from ._graph import set_input
+            for gen in (self.objects['eido_rain'], self.objects['eido_splashes']):
+                set_input(gen['modifier'], gen['ids']['Sky'], 0.0)
         from .strike import strike_light, bolt_material
         self.light = strike_light(coll)
         self.bolt_material = bolt_material(self.bolt_image)
@@ -156,7 +180,8 @@ class WeatherFX:
                                     ('shield', shield_color)) if v is not None}
         if colors:
             self.set_colors(colors)
-        sky.on_frame(self._on_frame)
+        if self.sky_drawn:
+            sky.on_frame(self._on_frame)       # the lightning flash into the sky's bake
         sky.weather_fx = self                  # for the sky facade's audio_timeline (the WebGPU api.audioTimeline)
         _REGISTRY[scene.name] = self
 
@@ -308,7 +333,9 @@ class WeatherFX:
 
     def _cell_at(self, x, y, height=0.0):
         """rainCellAt over Blender (x, y) arrays at a height (0: the moisture columns' reference); with
-        rain_cells='column' the drop's own column, as eidoverse gates its drops."""
+        rain_cells='column' the drop's own column, as eidoverse gates its drops. Without a sky, 1 everywhere."""
+        if not self.sky_drawn:
+            return np.ones(np.broadcast(np.asarray(x, np.float64), np.asarray(y, np.float64)).shape)
         u = self.sky.wx.u
         U = self.sky.sky.U
         x3, z3 = np.asarray(x, np.float64), -np.asarray(y, np.float64)
@@ -365,13 +392,24 @@ class WeatherFX:
 
         cam3 = dict(pos=_t3(pos_b), forward=_t3(unit(tuple(-c for c in back_b))))
         right3, up3 = _t3(unit(right_b)), _t3(unit(up_b))
-        bk = sky.baker()
-        sky_d = dict(cloudStart=float(U['cloudStart']), cloudHeight=float(U['cloudHeight']),
-                     weather_at=lambda x, z: bk.weather_at(U, x, z))
-        r = self.sched.step(t, w, k, tr['toName'] if tr else None, cam3, sky_d)
-        pal = sky.sky.state['palette']
-        light, lit, rcol = rain_light(pal, w, U['stormCanopy'], u['rainK'], r['flash'], r['flash_d'], r['color'],
-                                      wx.color['rain'])
+        if self.sky_drawn:
+            bk = sky.baker()
+            sky_d = dict(cloudStart=float(U['cloudStart']), cloudHeight=float(U['cloudHeight']),
+                         weather_at=lambda x, z: bk.weather_at(U, x, z))
+            r = self.sched.step(t, w, k, tr['toName'] if tr else None, cam3, sky_d)
+            pal = sky.sky.state['palette']
+            light, lit, rcol = rain_light(pal, w, U['stormCanopy'], u['rainK'], r['flash'], r['flash_d'], r['color'],
+                                          wx.color['rain'])
+            canopy = float(U['stormCanopy'])
+        else:
+            # no sky: the JS schedules lightning only inside its sky branch, and its rain keeps the base colour (the
+            # colour multiplier still applies) and light, with no storm canopy
+            sky_d = dict(cloudStart=float(U['cloudStart']), cloudHeight=float(U['cloudHeight']),
+                         weather_at=lambda x, z: 0.0)
+            r = self.sched.step(t, dict(w, lightning=0.0), k, None, cam3, sky_d)
+            light, lit = 1.0, tuple(WATER_BASE)
+            rcol = tuple(WATER_BASE[i] * wx.color['rain'][i] for i in range(3))
+            canopy = 0.0
         rain_vis = float(u['rainK']) > 0.001
         if tr:
             rain_vis = rain_vis or tr['fromDef']['rain'] * tr['fromK'] > 0.001 or tr['toDef']['rain'] * tr['toK'] > 0.001
@@ -400,7 +438,7 @@ class WeatherFX:
                    wind=tuple(wv), wind_len=math.sqrt(sum(c * c for c in wv)), fall=fall,
                    streak_len=float(u['streakLen']), rain_k=float(u['rainK']), dense_a=float(u['denseA']),
                    dash_k=float(u['dashK']), cell_lo=float(u['cellLo']), cell_hi=float(u['cellHi']),
-                   storm_canopy=float(U['stormCanopy']), sun_dir=tuple(U['sunDir']),
+                   storm_canopy=canopy, sun_dir=tuple(U['sunDir']),
                    cloud_start=float(U['cloudStart']), cloud_drift=tuple(U['cloudDisplacement']),
                    w_scale=float(U['wScale']), large_t=float(U['largeT']), large_a=float(U['largeA']),
                    rain_light=light, lit_rain=lit, rain_color=rcol, wetness=float(u['wetness']),
@@ -512,9 +550,10 @@ class WeatherFX:
         self.rows = rows
         return rows
 
-    def bake(self, frame_start=None, frame_end=None, bake_sky=True, keys=True):
+    def bake(self, frame_start=None, frame_end=None, bake_sky=True, keys=True, sky_bake=None):
         """Plan, bake the sky layers with the lightning in them (bake_sky=False when you bake the sky yourself after
-        this), then key everything. Returns the frame records."""
+        this; sky_bake: Sky.bake's options, overscan, layer_scale, plate_scale, log), then key everything. Without a
+        sky there is no sky to bake. Returns the frame records (the sky's are in sky_frames)."""
         import time
         t0 = time.time()
         fs = self.scene.frame_start if frame_start is None else int(frame_start)
@@ -522,11 +561,12 @@ class WeatherFX:
         self.log('[weather] planned %d frames in %.1fs: %d lightning events, %d local strikes'
                  % (len(rows), time.time() - t0, len(self.sched.events), len(self.sched.impacts)))
         self._active = True
-        if bake_sky:
-            self._baking = True              # a sky whose bake() hands itself to its weather_fx bakes itself here
+        self.sky_frames = None
+        if bake_sky and self.sky_drawn:
+            self._baking = True              # the sky's bake() hands itself to the weather it built: not again here
             try:
                 with self._generators_off():
-                    self.sky.bake(frame_start, frame_end)
+                    self.sky_frames = self.sky.bake(frame_start, frame_end, **dict(sky_bake or {}))
             finally:
                 self._baking = False
         if keys:
@@ -774,8 +814,28 @@ class WeatherFX:
         return True
 
 
+def weather_clock(scene, cache_dir=None):
+    """The weather's own clock for a scene without the procedural sky: the sky package's state machine and direction
+    recipe (an eidoblend.sky.Sky that is state only: no lamp, no world, nothing to bake), on the scene's camera. The
+    weather reads its states, wind and wetness from it; its cloud and light values reach nothing. cache_dir: the
+    weather's cache (default //weather_cache beside the saved .blend)."""
+    import bpy
+    from ..sky import Sky
+    if cache_dir is None and bpy.data.filepath:
+        cache_dir = bpy.path.abspath('//weather_cache')
+    if not cache_dir:
+        raise ValueError('make_weather_system: without a sky, pass cache_dir= (the .blend is unsaved, so there is no '
+                         '// to write the weather beside)')
+    if scene.camera is None:
+        raise ValueError('make_weather_system: the rain falls around the scene camera; set scene.camera')
+    return Sky(scene, scene.camera, 'earth', 12.0, 'clear', None, 1.0, None, cache_dir, 'draft', 1.0, False, {},
+               state_only=True)
+
+
 def make_weather_system(scene=None, sky=None, **opts):
-    """The Blender makeWeatherSystem({scene, sky, opts}). Options, by their WebGPU names in snake_case:
+    """The Blender makeWeatherSystem({scene, sky, opts}). sky: the scene's Sky (eidoblend.sky.make_sky), or None for
+    a scene that keeps its own world and lighting (the weather then runs on weather_clock, with the JS's sky-less
+    fallbacks; pass cache_dir= unless the .blend is saved). Options, by their WebGPU names in snake_case:
 
     rain_count 16000, rain_radius 45 (world tile half-extent, m), rain_height 24 (vertical recycle, m),
     splash_count 1200, ground_y 0 (the splash plane's height when there are no occluders), fall_speed 11 (m/s),
@@ -793,4 +853,6 @@ def make_weather_system(scene=None, sky=None, **opts):
     """
     import bpy
     scene = scene or bpy.context.scene
+    if sky is None:
+        sky = weather_clock(scene, opts.get('cache_dir'))
     return WeatherFX(scene, sky, **opts)

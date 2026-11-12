@@ -11,9 +11,8 @@ Prints PASS / FAIL: seat_on returns the pan's height; the body is placed at the 
 the chair (the engine moves the VRM there and syncs its capsule); its controller enters the seated state; the plan
 (body.seat_plan) is kept for the bake: its lift curve starts at 0 and ends on the settle, never under the clamp; the
 audits' exemption is set; the stationary path is not taken (no clip strips added on the armature). Then the run is baked
-by the body's own bake (eidoblend.characters.robot) and the seated hips are measured over the seat: the bake places a
-seated clip with its feet on the floor (it does not read body.seat_plan yet: a hook in robot/bake.py), so how far the
-seated skin sits from the pan is reported, not judged. Stills: a strip of the sit.
+by the body's own bake (eidoblend.characters.robot, which seats the body by its plan) and, sat down, the seated hips
+rest on the plan's target and the seated skin on the pan. Stills: a strip of the sit.
 """
 
 import math
@@ -27,7 +26,7 @@ import _mnv_stage as T  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-from eidoblend.characters import Ground, load_vrm  # noqa: E402
+from eidoblend.characters import load_vrm  # noqa: E402
 from eidoblend.characters import emotes as E  # noqa: E402
 from eidoblend.characters.robot import RobotRig, VRMRobotBody  # noqa: E402
 
@@ -95,7 +94,7 @@ def main():
             f'{nla0} -> {nla1} tracks')
     # the body's own bake
     t0 = time.time()
-    rep = body.bake(f0=1, ground=Ground(fn=lambda x, y: 0.0 * np.asarray(x)), action_name='claude|robot_seat')
+    rep = body.bake(f0=1, action_name='claude|robot_seat')       # the body's legs stand on its own walking world
     R['timing_s']['bake'] = round(time.time() - t0, 1)
     f0, f1 = rep['frames']
     sc.frame_start, sc.frame_end = f0, f1
@@ -107,9 +106,10 @@ def main():
     gap = None if und is None else (und - plan['seat']['z']) * 100
     R['seated_after_bake'] = {'frame': fs, 'hips_to_target_cm': round(dxy * 100, 1),
                               'seat_skin_to_pan_cm': None if gap is None else round(gap, 1)}
-    R.log(f"after the body's own bake (reported, not judged: robot/bake.py does not read body.seat_plan yet, and places "
-          f'a seated clip where the feet stood before the seat): the seated hips {dxy * 100:.1f} cm from the target at '
-          f'f{fs}, the seat skin {gap if gap is None else round(gap, 1)} cm from the pan')
+    R.check("the body's own bake seats it by the plan: the hips on its target (within 4 cm)", dxy < 0.04,
+            f'{dxy * 100:.1f} cm at f{fs}')
+    R.check("the body's own bake seats it by the plan: the seated skin on the pan (within 1.5 cm)",
+            gap is not None and abs(gap) < 1.5, f'{gap if gap is None else round(gap, 2)} cm at f{fs}')
     T.light(sc)
     S, sheets = [], {}
     names = []

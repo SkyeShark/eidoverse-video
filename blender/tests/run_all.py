@@ -144,15 +144,15 @@ M += [bl('controller', 'test_controller_presets.py', '--preset', 'stairs_small',
 M += [bl('maneuvers', s, timeout=3600) for s in ('test_emotes.py', 'test_example_bench.py', 'test_maneuver_moves.py',
                                                  'test_robot_seat.py', 'test_seating.py', 'test_start_seated.py')]
 M += [bl('robot_body', 'test_api_coverage.py'), bl('robot_body', 'test_dof_parity.py')]
-M += [bl('robot_body', s, NR, timeout=3600) for s in ('test_body_api.py', 'test_body_maneuvers.py',
-                                                      'test_body_moving.py', 'test_body_route.py', 'test_body_seat.py',
-                                                      'test_claude_robot_example.py', 'test_crown_head_states.py',
-                                                      'test_navigate_room.py', 'test_other_vrm.py', 'test_pick_up.py',
-                                                      'test_pose_bake.py')]
+M += [bl('robot_body', s, NR, timeout=3600) for s in ('test_body_aimed_emote.py', 'test_body_api.py',
+                                                      'test_body_maneuvers.py', 'test_body_moving.py', 'test_body_route.py',
+                                                      'test_body_seat.py', 'test_claude_robot_example.py',
+                                                      'test_crown_head_states.py', 'test_navigate_room.py',
+                                                      'test_other_vrm.py', 'test_pick_up.py', 'test_pose_bake.py')]
 M += [bl('robot_body', 'test_body_route.py', NR, '--vrm', 'aletheia', timeout=3600)]
 M += [py('robotics', 'test_solvers_parity.py'), bl('robotics', 'test_attachment_frames.py'),
       bl('robotics', 'test_js_parity.py'), bl('robotics', 'test_runtime.py'),
-      bl('robotics', 'test_inspector_physical.py', timeout=3600),
+      bl('robotics', 'test_rig_drive_module.py'), bl('robotics', 'test_inspector_physical.py', timeout=3600),
       T('gsh', 'robotics', 'render_all.sh', timeout=5400, why='catalog, motion, parts, normal parity, examples, '
                                                                'inspector, mech parts, studio: one slot')]
 M += [bl('fabrication', s) for s in ('test_fabrication_feed.py', 'test_fabrication_parity.py',
@@ -172,7 +172,7 @@ M += [bl('flora', s, NR) for s in ('t_backlit.py', 't_close.py', 't_meadow.py', 
 M += [gpu('flora', s) for s in ('t_lookdev.py', 't_motion.py', 't_scale.py', 't_species.py', 't_walk.py')]
 M += [bl('fx', 'test_noise_parity.py'), bl('fx', 'test_swe_erosion.py', 'render=0', 'end=720'),
       bl('fx', 'test_iso_field.py', NR), bl('fx', 'test_cloth_map.py', NR),
-      bl('fx', 'test_fire_shadows.py', 'cases=options,caster')]
+      bl('fx', 'test_fire_shadows.py', 'cases=options,caster'), bl('fx', 'test_fire_glow.py')]
 M += [gpu('fx', s) for s in ('test_cloth.py', 'test_cloth_map.py', 'test_fire_teapot.py', 'test_iso_field.py',
                              'test_particles_campfire.py',
                              'test_swe_basin.py')]
@@ -298,7 +298,7 @@ M += [py('voice_machines_a', 'test_screens_parity.py'),
       bl('voice_machines_a', 'test_machines.py', NR), bl('voice_machines_a', 'test_instances_clock_ortho.py', NR),
       bl('voice_machines_b', 'run_all.py', why='every voice-machines-b test in one Blender process (checks)')]
 M += [py('xr', 'test_xr_serve.py'), py('xr', 'test_xr_quest.py'),
-      bl('xr', 'test_xr_survey.py'),
+      bl('xr', 'test_xr_survey.py'), bl('xr', 'test_xr_pointer_tracks.py'),
       bl('xr', 'test_xr_city.py', NR), bl('xr', 'test_xr_features.py', NR, cap=16),
       bl('xr', 'test_xr_films.py', NR, cap=16), bl('xr', 'test_xr_tangents_shadows.py', NR),
       T('gsh', 'xr', 'run_all.sh', cap=16, vram=6, timeout=7200, why='the xr steps in order, with their renders'),

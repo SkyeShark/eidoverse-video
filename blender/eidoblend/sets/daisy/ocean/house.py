@@ -2,11 +2,13 @@
 library (eidoverse/assets/models/), built in Blender by eidoverse/assets/sets/ocean_src/house/*.py.
 
 One window, warm, with a lamp inside; the porch light: an incandescent swell with a breath of flicker, a halo in the
-sea air, a pool of light on the porch, a glint on the cove (the sea reads porch_world / window_world). Both are levels
-(0 off .. 1 on) on their own clock: window_level(t, at) and porch_level(t, at) switch them on at any time.
+sea air, a pool of light on the porch, a glint on the cove (the sea reads the world places of porch_point and
+window_point). Both are levels (0 off .. 1 on) on their own clock: window_level(t, at) and porch_level(t, at) switch
+them on at any time.
 
     house = build_house(parent=layout_empty)  -> None (no GLB) | House: group (origin at grade, front -Y), porch_local,
-                                                 window_local (house-local, three axes), porch_light, win_light, halo,
+                                                 window_local (house-local, three axes), porch_point, window_point
+                                                 (Empties there), porch_light, win_light, halo,
                                                  update(t, window, porch, key, frame), state(t, window, porch), targets()
     the uniforms porch / win / t are custom properties on house.group; the materials and lights follow by drivers
 """
@@ -234,6 +236,11 @@ def build_house(path=None, parent=None, collection=None):
         return (p.x, p.z, -p.y)
     porch_local = local3('lamp_light_point', (0.7, 2.0, 2.3))
     window_local = local3('window_light_point', (-1.1, 1.9, 1.6))
+    # the same two points as Empties in the house: the sea's glints on the cove read their world places by driver
+    porch_point = _bl.empty('ocean_porch_point', parent=root, collection=col, size=0.1)
+    porch_point.location = (porch_local[0], -porch_local[2], porch_local[1])
+    window_point = _bl.empty('ocean_window_point', parent=root, collection=col, size=0.1)
+    window_point.location = (window_local[0], -window_local[2], window_local[1])
 
     def point(name, color, pos3, cutoff, cd, prop):
         ld = bpy.data.lights.new(name, 'POINT')
@@ -279,8 +286,8 @@ def build_house(path=None, parent=None, collection=None):
     halo.visible_shadow = False
     mod = halo.modifiers.new('billboard', 'NODES')
     mod.node_group = _halo_group()
-    return House(group=root, objects=objs, porch_local=porch_local, window_local=window_local, porch_light=porch_light,
-                 win_light=win_light, halo=halo)
+    return House(group=root, objects=objs, porch_local=porch_local, window_local=window_local, porch_point=porch_point,
+                 window_point=window_point, porch_light=porch_light, win_light=win_light, halo=halo)
 
 
 def _halo_group():

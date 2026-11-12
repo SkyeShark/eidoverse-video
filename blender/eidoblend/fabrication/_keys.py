@@ -3,6 +3,7 @@ layered actions), LINEAR by default, instead of one keyframe_insert per value.
 
     write(id_or_struct, 'location', frames, values)            # values (n, 3) for an array property, (n,) for one
     write(mod_slot, 'value', frames, values)                    # a nodes-modifier input slot (path resolved from its ID)
+    write_hermite(ob, '["joint:gantry_x"]', frames, values, slopes)   # BEZIER keys exact for cubic motion between them
     quaternions_continuous(qs, before=None)                     # flip signs so neighbours stay in one hemisphere
     value_before(id, data_path, frame, size)                    # the curve's last key value before `frame`, or None
     clear(id, data_path_prefixes, frame_range=None)             # drop the job's keys again (job.stop())
@@ -97,6 +98,51 @@ def write(target, data_path, frames, values, interpolation='LINEAR', replace=Tru
         interp[start:] = _INTERP[interpolation]
         pts.foreach_set('interpolation', interp)
         fc.update()                              # sorts the keys by frame and sets their handles
+    return act
+
+
+_HANDLE_FREE = 0                                # the FREE keyframe handle (the raw enum value foreach_set takes)
+
+
+def write_hermite(target, data_path, frames, values, slopes, replace=True):
+    """Key one scalar property at `frames` with BEZIER keys whose FREE handles lie a third of the way to each
+    neighbouring key along `slopes` (value per frame at each key). Between two keys the curve is then the cubic with
+    those end values and end slopes: the motion itself wherever the motion is a polynomial of degree three or less in
+    time (a feed's constant acceleration, its cruise, an index turn's smoothstep). replace as write(). Frames must
+    rise strictly (as float32: the keys store float32 frames)."""
+    idb, path = _owner_and_path(target, data_path)
+    act = _action(idb)
+    f = np.asarray(frames, dtype=np.float64)
+    v = np.asarray(values, dtype=np.float64)
+    s = np.asarray(slopes, dtype=np.float64)
+    n = len(f)
+    if not n:
+        return act
+    if n > 1 and not np.all(np.diff(f.astype(np.float32)) > 0):
+        raise ValueError('write_hermite: frames must rise strictly (as float32)')
+    gaps = np.diff(f)
+    before = np.concatenate([[gaps[0] if n > 1 else 1.0], gaps])        # the first key's left handle mirrors its right
+    after = np.concatenate([gaps, [gaps[-1] if n > 1 else 1.0]])
+    fc = act.fcurve_ensure_for_datablock(idb, path, index=0)
+    pts = fc.keyframe_points
+    if replace:
+        _remove_range(pts, float(f.min()) - _EPS, float(f.max()) + _EPS)
+    start = len(pts)
+    pts.add(n)
+    m = start + n
+
+    def put(attr, new, width=2, dtype=np.float32):
+        a = np.empty(width * m, dtype=dtype)
+        pts.foreach_get(attr, a)
+        a[width * start:] = new.ravel()
+        pts.foreach_set(attr, a)
+    put('co', np.stack([f, v], 1))
+    put('handle_left', np.stack([f - before / 3, v - s * before / 3], 1))
+    put('handle_right', np.stack([f + after / 3, v + s * after / 3], 1))
+    for attr, value in (('handle_left_type', _HANDLE_FREE), ('handle_right_type', _HANDLE_FREE),
+                        ('interpolation', _INTERP['BEZIER'])):
+        put(attr, np.full(n, value), width=1, dtype=np.int32)
+    fc.update()                                  # sorts the keys; FREE handles keep where they were put
     return act
 
 

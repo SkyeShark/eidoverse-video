@@ -571,9 +571,9 @@ def fallback_material(ob, name=None):
 
 
 def _tree_images(tree, seen_trees):
-    """Every image an Image Texture node of a node tree (and the groups in it) reads."""
+    """Every image an Image Texture or Environment Texture node of a node tree (and the groups in it) reads."""
     for n in tree.nodes:
-        if n.type == 'TEX_IMAGE' and n.image is not None:
+        if n.type in ('TEX_IMAGE', 'TEX_ENVIRONMENT') and n.image is not None:
             yield n.image
         elif n.type == 'GROUP' and n.node_tree is not None and n.node_tree.name not in seen_trees:
             seen_trees.add(n.node_tree.name)

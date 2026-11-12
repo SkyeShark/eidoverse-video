@@ -310,6 +310,23 @@ transform (the turn about the axis from rest, or the travel along it, clamped to
 the range), so rigging a robot mid-clip keeps the pose a keyed or sampled clip
 gave it. A robot with sliders is in manual mode: unrig it before `play()`.
 
+```python
+from eidoblend.characters.robotics.rig import drive_module
+cnc.group['joint:gantry_x'] = 0.0                                       # the property first (keyable)
+drive_module(cnc, 'gantry_x', 'joint:gantry_x')                         # the module follows it
+drive_module(cnc, 'gantry_x_screw', 'joint:gantry_x', 'q * 785.398')    # its lead screw turning with it
+drive_module(cnc, 'spindle_rotor', None, '(frame - 1) * 69.81')         # 16,000 rpm at 24 fps, no property
+cnc.joint_sliders = {'gantry_x': 'joint:gantry_x', 'gantry_x_screw': None, 'spindle_rotor': None}
+```
+
+`drive_module(robot, joint, prop=None, value='q')` drives one module from any
+simple expression of `q` (the property `robot.group[prop]`, which must exist
+before the driver first evaluates) and `frame`, set from its rest as the
+sliders are. A fabrication job keyed at its own speed rigs its machine this way
+([fabrication](fabrication.md#print), `key_events`). `unrig_joints` removes the
+drivers of the joints `robot.joint_sliders` lists (`{joint: property or None}`)
+and their properties: list yours there to have them removed with it.
+
 ## Studio and framing
 
 `studio(scene, grid=True, shadows=False)` is studio.js's presentation: the
@@ -386,7 +403,7 @@ bpy.ops.wm.save_as_mainfile(filepath='hand_inspector.blend')
 | --- | --- |
 | asset list | `load(model)` |
 | motion list, `setMotion` | `clips()`, `set_motion(clip)` (keys the clip over the 20 s) |
-| time slider, `setTime`, Reset, Play | `set_time(t)` (the job seeks t, the keyed timeline shows it, sub-frames included), `reset()`, `play()` |
+| time slider, `setTime`, Reset, Play | `set_time(t)` (the job seeks t, the keyed timeline shows it, sub-frames included), `reset()`, `play()` (`play(start=, seconds=)`: that stretch as the preview range) |
 | Frame, Inspect workpiece | `fit()`, `frame_work()` |
 | Body / Accent / Filament pickers | `set_colors(primary, accent)`, `set_filament_color(c)` |
 | Wireframe, Hand grasp cylinder | `set_wireframe(on)`, `set_reference(on)` |
@@ -422,15 +439,24 @@ follows viewer.js: the invitation to load a mesh without one, the slicing note o
 the FDM machine, the relief note on the ball-nose machine, and on the rotary
 machine the program's report (`'handle. 1,040 source triangles; 12 indexed
 views. Some regions exceed tool reach and retain material. Undercuts and holding
-ends may remain.'`). Physical timing keys the job's own time frame by frame, so
-it is refused past `MAX_KEYED_FRAMES` (25 min at 24 fps): the pocket mill
-machines for 20 min and the print for 15, but the relief for 7.8 hours (time
-lapse, or `process_options={'duration': seconds}`, instead). The rotary job
-writes one stock file per keyed frame next to the saved `.blend`: save first, or
-pass `process_options={'cache_dir': ...}` (a coarser `resolution` and a lower
-`fps` keep the cache small; the test uses 128 x 48 x 48 at 4 fps). "Inspect
-workpiece" frames its carved stock. A local STL or GLB is imported with
-Blender's own importer and handed to `set_source`.
+ends may remain.'`). `set_timing('physical')` plays the job at its own speed,
+however long: the pocket mill machines for 20 minutes, the print for 15, the
+rotary sample for 38 and the relief for 7.8 hours (675,637 frames at 24 fps).
+The job is keyed at its program's events instead of every frame
+(`job.key_events`, [fabrication](fabrication.md#print): the machine's joint
+sliders with keys exact between events, the screws, spindle and fans driven),
+so the relief keys its 103,982 events in two minutes or so and saves as 48 MB, and
+the time slider and the saved file show the program exactly at any moment. The
+inspector refuses a program of more than `MAX_PROGRAM_EVENTS` (250,000) events,
+and a job that would end past Blender's last frame, 1,048,574 (12.1 hours at
+24 fps; it names the fps that fits). The rotary job writes one stock file per
+frame next to the saved `.blend`: save first, or pass
+`process_options={'cache_dir': ...}` (a coarser `resolution` and a lower `fps`
+keep the cache small; the test uses 128 x 48 x 48 at 4 fps). At physical timing
+it writes the frame the time slider shows, and `play(start=, seconds=)` writes
+the stretch it plays and sets the preview range to it (a whole 38-minute carve
+would be 54,781 files). "Inspect workpiece" frames its carved stock. A local
+STL or GLB is imported with Blender's own importer and handed to `set_source`.
 
 ## Examples
 
@@ -523,12 +549,14 @@ python blender/tests/robotics/test_solvers_parity.py
 bash run_blender.sh blender/tests/robotics/test_js_parity.py         # the whole catalog, every clip, number for number
 bash run_blender.sh blender/tests/robotics/test_attachment_frames.py
 bash run_blender.sh blender/tests/robotics/test_runtime.py
+bash run_blender.sh blender/tests/robotics/test_rig_drive_module.py  # drive_module: a slider, a lead screw, a rotor
+bash run_blender.sh blender/tests/robotics/test_inspector_physical.py   # physical timing, keyed at the events (-- --render: stills)
 bash blender/tests/robotics/render_all.sh                            # the renders (one at a time on a shared GPU)
 ```
 
 `js_parity_dump.mjs` runs the WebGPU kit in Deno and records, for all 89
 entries, the roots, ports, stats and every node's world matrix at rest and in
-every clip; `test_js_parity.py` loads the same models and compares them (1317
+every clip; `test_js_parity.py` loads the same models and compares them (1320
 checks). The ports of `attachment_frames_test.mjs` and `runtime_test.mjs` (its
 fabrication case is the fabrication package's) check the flanges from the
 triangles, load_part, the catalog, mirrored legs, independent limbs, the solvers
@@ -573,6 +601,12 @@ scan licenses and excluded proprietary authoring tools are recorded in
   and `facade.FABRICATION`, importing that package when a dispenser loads or a
   tube is made (only an edition without the package shows a dispenser without
   its strand, and then `filament-feed` says why).
-- **Physical-timing process playback past 25 minutes**: the relief's 7.8 hours
-  would be 675,637 keyed frames, so the inspector refuses it and says so (the
-  time lapse plays the same program).
+- **The rotary stock over a whole job at physical timing**: the carved stock is
+  a VDB file per frame (0.6 to 1.7 MB, about 0.1 s to write, at the default
+  field: 73 GB for the 38-minute sample at 24 fps), so the inspector writes it
+  for the frame its slider shows and the stretch `play` plays, where the WebGPU
+  page re-carved it every frame
+  ([rotary carving](rotary-carving.md#not-yet-ported)).
+- **Physical timing past Blender's last frame**: a job longer than 12.1 hours at
+  24 fps ends past frame 1,048,574 (the steel rotary sample's 44.7 hours does);
+  the inspector refuses it and names the fps that fits.

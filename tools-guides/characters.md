@@ -13,7 +13,9 @@ Blender `(x, −z, y)`. Set the scene's fps before loading any clip.
 mixers, IK and springs every frame while it renders. Here a scene is a build
 script, then a saved `.blend`, then an EEVEE render, and **every per-frame
 system is simulated once, in frame order, at the scene's fps, and keyed**: the
-walk, my body's joint limits, my head and crown, the face. No handler runs at
+walk, my body's joint limits, my head and crown, the face, the spring chains
+(hair, tails, tentacles, a coat's tails: `springs.bake_springs` over the body's
+keyed motion; a controller take bakes them with itself). No handler runs at
 render time, so any frame renders alone and a render farm can split the shot.
 Stationary clips that need no per-frame pass are NLA strips.
 
@@ -36,7 +38,10 @@ family has its own guides:
 - **[The character controller](controller.md)** (`characters.controller`): a
   directed take on any ground: walks, runs, stairs and ramps found by its own
   probes, turns on the spot, stops on a mark, gestures, vaults, mounts, jumps,
-  ladders, the foot IK.
+  ladders, steering from scene logic and following a moving object, the foot
+  IK; the VRM's spring chains ride the take ([springs ride the
+  take](controller.md#springs-ride-the-take): they rest on the floor and stay
+  out of the scene's solids).
 - **[Maneuvers, sitting and emotes](maneuvers.md)** (`characters.emotes`,
   `characters.maneuvers`): a walking body's seats, ground sits and emotes, and
   moves aimed at scene objects (vault over this wall, climb that ladder).
@@ -385,6 +390,32 @@ The TuTa, the claudesona's outfit with its badges, face paint and sun disc,
 is a preset of `claudesona.make_wardrobe` on `claude_suit_wardrobe.vrm`
 (`TutaWardrobe`: pin, unpin and eject badges, the neon, the eye lights, each
 keyed at its frame): [the TuTa](claudesona.md#the-tuta--claudesonatutapy).
+
+## Spring chains on a body that moves through a scene
+
+`springs.bake_springs` (its solver, three-vrm's, and its parity:
+[claudesona](claudesona.md#spring-bones--charactersspringspy)) simulates the
+chains over whatever the body's keys do. A body walking through a set needs
+more, each an option:
+
+```python
+from eidoblend.characters.springs import bake_springs, use_springs
+from eidoblend.characters.controller import CollisionWorld
+rep = bake_springs(me, 1, 720,
+                   ground=CollisionWorld(exclude=seats),   # what they rest on: each moving point kept over the surface under it
+                   solids=CollisionWorld(),                # what they stay out of: no joint crosses a face (a chair's back, its pan)
+                   resets=[361], reset_preroll=1.0,        # a cut at 361: the chains start over there, settled on the new pose
+                   action_name='me|take_2|springs')        # this take's springs under its own name
+rep['ground_frames']                                       # frames where the ground or a solid held a chain
+use_springs(me, 'me|take_1|springs')                       # another take's springs back on the track, with its action
+```
+
+`ground` and `solids` each take a `CollisionWorld`, a `BVHTree` or meshes.
+With neither (the default) the chains know only the body's own colliders, as
+in the engine: a tail lying down hangs through the floor, and through a chair
+behind it; and a reset springs the chains out of their rest shape
+(`reset_preroll=0`). A controller take passes all of them ([springs ride the
+take](controller.md#springs-ride-the-take)).
 
 ## `claude_robot.vrm` — my robot body
 
