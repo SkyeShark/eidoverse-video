@@ -1,5 +1,5 @@
-"""Every solid EXAMPLE's GLSL compiles in Blender's GPU module and evaluates: dist, grad, surface and the reference
-raymarch kernel, plus the four make_sdf_texture recipes. No render, no mesh.
+"""Every solid EXAMPLE's GLSL compiles in Blender's GPU module and evaluates: dist, grad, surface and the engine's
+raymarch with its shade() (engine_march), plus the four make_sdf_texture recipes. No render, no mesh.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_examples_compile.py
 
@@ -15,6 +15,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 from eidoblend import sdf  # noqa: E402
 from eidoblend.sdf.gpu_eval import SdfProgram  # noqa: E402
 
@@ -41,10 +42,11 @@ for name in sdf.EXAMPLES.solids():
         ok = np.isfinite(alb).all() and alb.min() >= -1e-4 and alb.max() <= 1.5 and np.isfinite(ch['roughness']).all()
         C.check(f'{name}: surface kernel', ok,
                 f'{len(near)} pts, albedo mean {alb.mean(axis=0).round(3).tolist()}, roughness {ch["roughness"].mean():.2f}')
-        prog.values.update({'sdfCameraUniform': (0.0, 0.5, 4.0), 'sdfCamFwd': (0.0, 0.0, -1.0), 'sdfImageSize': (64.0, 36.0),
-                            'sdfClipMin': tuple(float(x) for x in lo), 'sdfClipMax': tuple(float(x) for x in hi),
-                            'uMaxSteps': 128.0, 'uSurfEps': 0.001, 'uStepScale': 0.8, 'uMaxDist': 100.0})
-        img = prog.eval('raymarch', np.zeros((64 * 36, 3), np.float32), width=64)[0]
+        march = EM.MarchProgram(prog)
+        march.values.update({'sdfCameraUniform': (0.0, 0.5, 4.0), 'sdfCamFwd': (0.0, 0.0, -1.0), 'sdfImageSize': (64.0, 36.0),
+                             'sdfClipMin': tuple(float(x) for x in lo), 'sdfClipMax': tuple(float(x) for x in hi),
+                             'uMaxSteps': 128.0, 'uSurfEps': 0.001, 'uStepScale': 0.8, 'uMaxDist': 100.0})
+        img = march.eval('raymarch', np.zeros((64 * 36, 3), np.float32), width=64)[0]
         C.check(f'{name}: raymarch kernel', np.isfinite(img).all() and img[:, 3].max() > 0,
                 f'coverage {img[:, 3].mean() * 100:.1f}%')
     except Exception as e:  # a compile error prints the numbered source

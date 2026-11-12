@@ -15,15 +15,15 @@
                                and exhaust struts, bubble canopy, emissive plumes, wing AAMs and a centreline bomb;
                                make(camo='silver' | 'sky' | 'desert' | 'forest')
 
-They come from the engine's GLSL backup (the TSL port of 2026-07-04 kept their geometry and swapped the HDRI lookup
-for procedural sky stand-ins). Every map(), shade() and helper is the engine's GLSL as written. Two changes, neither
+They come from the engine's GLSL backup (its TSL edition kept their geometry and swapped the HDRI lookup for
+procedural sky stand-ins). Every map(), shade() and helper is the engine's GLSL as written. Two changes, neither
 of which alters a result: reversed-edge smoothstep(hi, lo, x) is written 1.0 - smoothstep(lo, hi, x) (the same
 curve; the TSL port's rstep), and two pure colour helpers (the cyberpunk's stripeMaskFn, the jet's _jetCamoColor)
 moved from shade into extra so surface() can call them too. (The badge branch's texture2D compiles as it is.)
 One change follows the public engine where its TSL differs from the backup: the jet's canted fins. The TSL turns
 them with (x c - y s, x s + y c), splayed outward as the comment's "F-18 style" says; the backup's
-`pFin.xy *= _jetRot2(0.2)` multiplied the row vector by the matrix, the opposite turn, and leaned them inward (as the
-April check frames show). Every other map() number of the two editions is the same.
+`pFin.xy *= _jetRot2(0.2)` multiplied the row vector by the matrix, the opposite turn, and leaned them inward. Every
+other map() number of the two editions is the same.
 
 Two ways to build one:
   EXAMPLES['stylized_cyberpunk_sedan'].make(paint_color=0xff2bd6)     the film build (vehicles.vehicle): the mesh
@@ -33,8 +33,8 @@ Two ways to build one:
   create_sdf_object(EXAMPLES['stylized_cyberpunk_sedan'])             the engine's generic path: surface() below
         baked into an atlas or the vertices, like every other SDF example (coarser: patterns at texel size)
 
-shade() stays for the reference raymarch (SdfObject.raymarch_reference) the EEVEE render is judged against; bound to
-the world's HDRI by register_sdf_helper, its sampleEnvMap sees what EEVEE lights with.
+shade() is the engine's own lit look, part of the spec as the engine wrote it; bound to the world's HDRI by
+register_sdf_helper, its sampleEnvMap sees what EEVEE lights with.
 """
 
 from __future__ import annotations

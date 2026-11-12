@@ -143,11 +143,11 @@ news) sets the ACES-like look on the scene, so it holds for every set in it;
 measure exposure with `look.exposure` ([cameras and lighting](camera-lighting.md#exposure-measured)).
 
 **One world.** Many WebGPU materials carried their own environment at their
-own intensity. Blender has one World, and each set handles that its own way:
-the ocean splits the world by ray (camera rays see the sky, every other ray
-the set's night), the interiors and the corridor and news give each material
-its own image-based light, and the city and the race light every material by
-one World at one strength. Each set's section says which.
+own intensity. Blender has one World, and the sets light every material by it
+at one strength (the interiors, the corridor and news, the city and the race;
+an interior through its baked room probe). The ocean splits its World by ray
+(camera rays see the sky, every other ray the set's night). Each set's
+section gives its strength.
 
 **Several sets in one file.** Every set builds its own datablocks (materials,
 uniforms, node groups, canvases, its World), named with Blender's `.001`
@@ -379,7 +379,14 @@ from eidoblend.sets.daisy import corner
 C = corner.build()                            # trees=, grass=, particles=, march=, tree_level='LOD0'
 C.animate(frames=(1, 675), u0=corner.B(18), out_dir='//screens')   # keys + the chat and notebook sequences
 C.make_cameras(frames=(1, 675), u0=corner.B(18))
+C.bake_probes(frame=1)                         # the room's volume probe, baked with the room on screen (a GPU job)
 ```
+
+The room's walls, floor and ceiling are closed 0.25 m solid blocks, with a
+volume probe fitted inside them (`look.lighting.add_room_probe`) and parented
+to the room; `C.bake_probes(frame=)` bakes it with the room on screen, and
+`render_saved.py` bakes an unbaked one at the frame its set noted. Fast GI is
+on.
 
 | Area | What is in it |
 | --- | --- |
@@ -1095,8 +1102,9 @@ view ray meets the face), so the panes resolve where the WebGPU ones did.
 
 #### Render settings and costs
 
-`KIT.eevee_settings(scene, samples)` sets EEVEE, AgX, screen-traced
-reflections up to roughness 0.5 and the 6 km clip range. The
+`KIT.eevee_settings(scene, samples)` sets EEVEE, AgX, Fast GI on, screen-traced
+reflections up to roughness 0.5 (`raytrace=False`: from the light probes, the
+ray tracing that hosts Fast GI still on) and the 6 km clip range. The
 WebGPU post (bloom 0.55 / 0.5 / 0.7, aeropittura) is the look's, not the
 set's: `eidoblend.look.post.chain.set_bloom(scene, strength=0.55, size=0.5,
 threshold=0.7)` gives the bloom (the compositor's Glare on scene-linear light
@@ -1139,7 +1147,7 @@ from eidoblend.sets.unknown_force import quiet_room as QR
 scene = bpy.context.scene
 scene.render.fps = 30
 room = QR.build(scene)                         # its collection, its root Empty, lights, probe, cams (set-local)
-scene.world = room.env                         # its env for the camera; its materials carry its light (the engine's envMap)
+scene.world = room.env                         # its env is the World: it lights the room through the room's probe
 room.eevee_settings(scene)                     # GI on (Fast GI over the room probe), the reflections of the room's env
 room.bake_probes()                             # the room-fitted volume probe (a GPU job)
 scene.camera = room.make_camera('hatch')       # a camera at one of the set's cams, parented to the set
@@ -1149,8 +1157,8 @@ room.animate((1, 120), ship_t=(1.0, 3.0), sale=(2.8, 3.6))   # the crate ships o
 #### Their contract
 
 `build(ctx=None, scene=None, singer_scale=None, collection=None, name=...,
-art_cache=None, probe=True, probe_spacing=..., probe_samples=1024, art=None,
-env_light='material')` (the showroom adds `screen_media`, `screen_fit` and
+art_cache=None, probe=True, probe_spacing=..., probe_samples=1024, art=None)`
+(the showroom adds `screen_media`, `screen_fit` and
 `seq_bar`) takes the harness `ctx` first, as `eidoblend.sets.build(name, ctx)`
 calls it (its keys then go through `ctx.key`), or a bpy Scene there, or
 nothing (the context scene). `singerScale` is accepted as the engine spelled
@@ -1160,7 +1168,7 @@ contract whose keys also read as attributes (`room['parts']` is
 
 | Field | What |
 | --- | --- |
-| `group` (`root`), `collection` | the set's root Empty (park the set anywhere by moving or turning it; cams, lights, probe and marks are its children, and the materials' env light turns with it) and its collection |
+| `group` (`root`), `collection` | the set's root Empty (park the set anywhere by moving or turning it; cams, lights, probe and marks are its children, and its World's lookup turns with it) and its collection |
 | `parts` | the engine's parts as Blender objects (tables below); `update` / `set` entries are methods that key |
 | `update(t, state, frame=None, ctx=None, key=True)` | the set at time `t` (seconds on your clock: flicker, sweeps, scans), keyed at `frame` (else `ctx.frame_at(t)` through the harness's `ctx.key`, else the current frame); `key=False` only sets values (a still) |
 | `animate(frames, t0=0.0, fps=None, ctx=None, **state)` | `update()` for every frame of a range on the set's own clock: frame f plays t = t0 + (f − first) / fps; each state key follows a curve (below); returns `{frame: t}` |
@@ -1169,8 +1177,8 @@ contract whose keys also read as attributes (`room['parts']` is
 | `make_camera(name)` | a Blender camera at that cam (vertical sensor fit, three's fov), parented to the set |
 | `mark`, `MARK`, `SUIT_SCALE` | where a performer stands, in Blender axes (`{'pos', 'yaw'}`, yaw about +Z, 0 facing −Y; the showroom's adds `'parent'`, the platter), the engine's `MARK` (three's axes) and the scale the face-height cams are framed for (0.87, the claudesona at human height) |
 | `focal` | the set's focal point for the aeropittura post pass: an Empty (the altar board / the face height on the mark) |
-| `env` | the set's World: the engine's LDR equirect, painted for Blender's lookup; with `env_light='material'` (the default) the camera sees it and it lights nothing, because every material carries the env's light at its own intensity (below) |
-| `kit` | the set's material kit: `kit.new(name)` / `kit.envd(m, i)` give a piece's own material the set's env light |
+| `env` | the set's World: the engine's LDR equirect, painted for Blender's lookup. EEVEE lights the set with it: the room's probe bakes it and the probes reflect it (below) |
+| `kit` | the set's material kit: `kit.new(name)` gives a piece's own material in the set's recipes, disposed with the set and lit by its World |
 | `probe`, `bake_probes()` | the volume probe fitted to the set, and its bake (with the set alone in the scene: other sets built in the session are hidden for it) |
 | `eevee_settings(scene, reflections='env')` | global illumination on (Fast GI over the set's baked room probe), shadows on, and the reflections: `'env'` (the default: reflections from the light probes alone, EEVEE's Light Probe tracing, so every gloss and chrome reflects the set's env and the room's probes, as the engine's materials reflected their env) or `'traced'` (screen-traced: what is on screen reflects too) |
 | `show(visible, frame=None)` | hide the whole set (its lights stop lighting); with a frame it is keyed (a cut: the state before holds up to the frame before), its env's weight in a shared World (`env_switch`) with it |
@@ -1292,24 +1300,19 @@ play_vrma_default(me, 'idle')
 
 #### Both sets in one scene
 
-With the default `env_light='material'`, each material is lit by its own
-set's env, as in the engine: park the sets apart, key `show()` at the cuts,
-keep a World that lights nothing (either set's `env`), and each set is lit by
-its own env. `bake_probes()` bakes with its set alone in the scene (the other
-sets built in the session are hidden, their keyed switches muted for the
-bake, then put back), so a sun of the showroom never lands in the quiet
-room's probe.
-
-With `env_light='world'` the env is the World, and a scene has one World that
-cannot be keyed: `interiors_lib.env_switch(scene, sets)` then makes one World
-holding each set's env, weighted by a property on the set's root, and
-`show(visible, frame)` keys that weight with the set's cut (a set built with
-`'material'` joins it for the camera only).
+Each set's env is its World, and a scene has one World that cannot be keyed:
+`interiors_lib.env_switch(scene, sets)` makes one World holding each set's env
+(each turning with its set), weighted by a property on the set's root, and
+`show(visible, frame)` keys that weight with the set's cut. Park the sets
+apart and key `show()` at the cuts. `bake_probes()` bakes with its set alone
+in the scene, lit by its own env (the other sets built in the session are
+hidden, their keyed switches muted for the bake, then put back), so a sun of
+the showroom never lands in the quiet room's probe.
 
 ```python
 room, show = QR.build(scene), SR.build(scene)
 show.root.location = (80.0, 0.0, 0.0)                    # parked beside the room (its void hides the city)
-L.env_switch(scene, [room, show])                        # one World with both envs (needed for env_light='world')
+L.env_switch(scene, [room, show])                        # one World with both envs
 room.show(True, frame=1); show.show(False, frame=1)      # the room first ...
 room.show(False, frame=121); show.show(True, frame=121)  # ... the showroom from frame 121
 room.bake_probes(); show.bake_probes()                   # each with its set alone
@@ -1378,7 +1381,7 @@ border; a 44 × 22 × 46 m black void.
 
 `parts`: `turntable` `{group, platter, setSpin(a)}` · `screen` `{mesh, uniforms: {seq, brightness}, image, media, seq_bar}` ·
 `toaster` · `plinth` · `seats` · `rig` · `beams` · `lights` `{key, rim, toasterSpot, seatSpill, fill, top}` · `focal` (the
-face height on the mark) · `toasterFocus` · `probe` · `uniforms` (`uT uSeq uLights uBeams uScreen`, and `uPixelAngle`).
+face height on the mark) · `toasterFocus` · `probe` · `toasterProbe` (the toaster's sphere probe) · `uniforms` (`uT uSeq uLights uBeams uScreen`, and `uPixelAngle`).
 
 `cams`: `reveal` (from the audience: stage, wall, turntable, toaster, empty
 rows), `toaster` (the toaster and its placard against the drape),
@@ -1411,33 +1414,23 @@ targets with Track To constraints, so moving a target re-aims them.
 
 **The set's environment.** Every engine material carried the set's own LDR
 equirect as its envMap, each at its own `envMapIntensity` (the toaster's
-chrome × 2.2, the lacquer × 1.6, the glass × 1.5, the seats × 0.25, the
-auditorium carpet × 0.2). The equirect is painted pixel by pixel for
-Blender's equirect lookup from the engine's direction function. With
-`env_light='material'` (the default) each material carries that light itself,
-as three's `EnvironmentNode` gave it: `interiors_lib.env_levels` prefilters
-the env as three's PMREM does (the sharp map, a lobe of α = r² for r 0.25, 0.5
-and 0.75, and the cosine lobe for r = 1, the level three reads for diffuse
-light), and `ShaderGraph.env_light` adds to the material's emission the
-diffuse albedo × (1 − metalness) × the r = 1 level toward the normal plus the
-level for its roughness toward the reflection × (F0·A + B) (three's
-`DFGApprox`), and a clearcoat's own layer, times its intensity (`K.envd` after
-the recipe's `standard()`). Unoccluded, as in three. The lookups are made in
-the set's own space (`ShaderGraph.set_space`: three drivers on the root's
-world rotation), so a set parked turned keeps its light where its env painted
-it. The set's World (`room.env`) then shows the env to camera rays only and
-lights nothing: make it the scene's World while the set is on screen, and the
-set is lit by its own env alone; a World that lights would add its light on
-top. With `env_light='world'` the env is the World instead: one intensity for
-everything in the scene (your own props too), with EEVEE's occlusion; the
-intensities are recorded (`mat['uf_env_intensity']`), not applied. Your own
-material can take a set's env light as the set's do:
+chrome × 2.2, the seats × 0.25). Here the equirect, painted pixel by pixel
+for Blender's equirect lookup from the engine's direction function, is the
+set's World (`room.env`), and EEVEE lights every material with it: the set's
+volume probe bakes it (through the quiet room's glass, round the showroom's
+void) and the probes reflect it, with EEVEE's occlusion, so the floor between
+the pews takes less of it than an open face. One World strength serves every
+material; the engine's per-material intensities have no counterpart, and the
+sets read as they did without them. The World's lookup turns with the set
+(`interiors_lib.env_turn`: three drivers on the root's world rotation), so a
+set parked turned keeps its light where its env painted it. Make `room.env`
+the scene's World while the set is on screen. A piece's own prop made through
+the set's kit is lit by it like the set's own:
 
 ```python
-K = show.kit                                   # the set's material kit (its env levels, its noise)
+K = show.kit                                   # the set's material kit (its noise, its naming)
 m, g = K.new('my-chrome')                      # disposed with the set
 g.standard(color=(0.95, 0.95, 0.96), roughness=0.05, metalness=1.0)
-K.envd(m, 2.2)                                 # three's envMap at envMapIntensity 2.2
 ```
 
 The showroom's void and the quiet room's backdrop are seen by the camera
@@ -1445,20 +1438,33 @@ only: they are left out of the probes, so the bake and the reflections see
 the env, as the engine's materials saw their envMap.
 
 **Reflections.** The sets were made with SSR off, so everything glossy in the
-engine reflected that env and nothing else: the toaster's chrome shows the
-softboxes painted into the showroom's env, not the black void around it.
-`eevee_settings()` reproduces that by default (`reflections='env'`).
-`reflections='traced'` adds screen-traced reflections: physically closer (the
-polished stage mirrors the LED wall, the chrome mirrors the dark drapes), but
-not the engine's picture.
+engine reflected that env and nothing else. `eevee_settings()` keeps the
+reflections to the light probes by default (`reflections='env'`): the World
+(the env, seen through the void), the room's probe, and the toaster's own
+sphere probe, so the chrome mirrors the plinth and the stage round it and the
+env beyond (see Probes). `reflections='traced'` adds screen-traced
+reflections: the polished stage mirrors the LED wall, the chrome mirrors the
+dark drapes.
 
 **Probes.** Each set adds a volume probe fitted to it (the quiet room's with
 `look.lighting.add_room_probe`, its outermost samples inside the solid floor
 and ceiling slabs and the core wall), baked once at the default state, under
-Fast GI (`bake_probes`, 1.4–5 s at the tests' 0.5 m and 512 samples).
+Fast GI (`bake_probes`). The tests space the quiet room's samples 0.45 m (its
+0.3 m slabs take spacings up to 0.48 m; `add_room_probe` refuses wider) and the
+showroom's 0.6 m, at 512 samples.
 Emitters whose light the set's real lights already give (the hell pits, the
 signs, the LED strips and wall, the lenses, the beams) and everything animated
-are left out of the bake: a probe is static.
+are left out of the bake: a probe is static. The showroom also gives its
+toaster a sphere probe of its own, its box influence fitted round the toaster
+and a child of it (`parts['toasterProbe']`, no bake: EEVEE refreshes sphere
+probes): the chrome mirrors what stands round it, the lit plinth top along
+its base and the drapes above, where the World alone gives it the env's dark
+void and it reads as gunmetal. The probe sits inside the toaster, so the
+toaster's meshes are hidden from sphere captures (Object > Visibility > Light
+Probes > Sphere; a sphere probe added for the stage does not show the toaster
+either) and its clip start is 2 cm; its parallax is a custom ellipsoid
+reaching 2 m out along its longest axis, the stage round the plinth, not the
+tight influence box (that smears the plinth over the whole body).
 
 **Uniforms and keys.** `update()` computes what the engine computed and keys
 the uniforms, the light powers and the moving objects (shutter, crate,
@@ -1471,7 +1477,8 @@ image user (frame start, cyclic, auto refresh), so it needs no keys.
 reading positions and normals in three's axes so the engine's maths ports as
 written (`g.position_local()`, `g.texture(img, uv)`, `g.mix`, `g.smoothstep`,
 `g.uniform('uT')` ...), and `MaterialKit` ports `materialKit`: `tri` (the
-triplanar noise), `pbr`, `solid`, `keyed`, `envd`. `g.hash()` is Blender's
+triplanar noise), `pbr`, `solid`, `keyed` (its `envd` has no counterpart: the
+World lights every material). `g.hash()` is Blender's
 White Noise: the same distribution as three's PCG hash, other values, because
 shader nodes have no integer bit operations. Where the argument is known at
 build time (a hash of `instanceIndex`), the set computes three's exact value
@@ -1546,10 +1553,10 @@ sb.emit()                                            # Blender objects, lights a
 ```
 
 Costs, measured on an RTX 5090 Laptop: the quiet room builds in 8–33 s
-from cached canvases, the showroom in 4–18 s, and the per-material env light
-adds about 4 s to either; drawing every canvas cold takes about 2 min in the
-system Python (the centre board 15–38 s), so pre-draw them; the room probes
-bake in 1.4–5 s at the tests' 0.5 m and 512 samples; a 960 × 540, 16-sample
+from cached canvases, the showroom in 4–18 s; drawing every canvas cold takes
+about 2 min in the system Python (the centre board 15–38 s), so pre-draw them;
+the room probes bake in 15–80 s at the tests' spacings (0.45 m and 0.6 m) and
+512 samples, the GPU shared with other jobs; a 960 × 540, 16-sample
 still renders in 0.5–2 s, about 3 s under an aeropittura look. Keying is
 cheap: 621 frames of the quiet room keyed in 0.2 s.
 
@@ -1599,6 +1606,11 @@ as a dict too: `C['parts']` is `C.parts`, `C['update']` is `C.update`,
 
 #### The corridor
 
+The corridor is a closed 0.4 m shell (its walls run past the floor and the
+ceiling) with a volume probe fitted inside it; `COR.build` takes the options
+`probe` (default True), `probe_spacing` (0.6 m) and `probe_samples` (1024),
+and `C.bake_probes(scene)` bakes the probe before rendering.
+
 ```python
 import sys; sys.path.insert(0, '<repo>/blender')
 import bpy
@@ -1608,8 +1620,9 @@ scene = bpy.context.scene
 C = COR.build(scene, {'postText': 'AMERICANISM, NOT EFFECTIVE ALTRUISM',    # the post on the LED wall
                       'tally': [49, 39, 12],                                # the poll board's counts
                       'plaque': ('SUPREME', 'INTELLIGENCE')})               # the two lines over the door
-C.apply_look(scene)                          # AgX at the set's exposure, shadows on, no screen-traced mirrors
+C.apply_look(scene)                          # AgX at the set's exposure, Fast GI, probe reflections, shadows on
 # C.apply_look(scene, view_look=cn_lib.ACES_LIKE_LOOK)   # the WebGPU frames' tone instead (see Light, tone and the world)
+C.bake_probes(scene)                         # the corridor's volume probe, before rendering (a GPU job)
 C.camera('door', scene)                      # the five cameras: door, corridorWide, postWall, poll, cap
 C.parts['postWall'].set_text('A NEW POST', name='MINISTRY OF ANYTHING', meta='just now')
 C.parts['poll'].set_tally(512000, 418000, 141000, stamp='LOSING BADLY')
@@ -1684,7 +1697,7 @@ from eidoblend.media import overlay
 
 N = NEWS.build(scene, {'tag': 'CLANKER',                                  # the word sprayed on the wall
                        'signs': ['NOT IN / OUR TOWN', None, 'WHO PAYS / THE BILL?']})   # None keeps a sign's own
-N.apply_look(scene)
+N.apply_look(scene)                          # Fast GI on, probe reflections (raytracing=True screen-traces them)
 cam = N.camera('crowd', scene)               # the five cameras: fence, crowd, wall, wide, pov
 ov = overlay.make_overlay_layer(scene, camera=cam)
 N.parts['chyron'].place(ov, fov=N.cams['crowd']['fov'], aspect=16 / 9)   # the lower third, display space
@@ -1808,16 +1821,15 @@ with the set's fog), and `L.pbr_mat(S, tile=, tint=, recolor=, macro=, rough=,
 metal=, nrm=, post=, physical=, sheen=, clearcoat=, side=, ...)` is the JS
 `pbrMat`. `GN(L, ob, name)` writes a Geometry Nodes modifier the same way.
 
-**The image-based light.** Each material's own image-based light (`NB.ibl`)
-is three r184's indirect terms: the set's environment prefiltered for
-roughness (`prefilter_env`, the GGX lobe of α = r²) × the single scattering,
-plus the multiple scattering × the irradiance (dielectric and metal mixed by
-metalness), the diffuse from the rough level less the dielectric's
-scattering, the clearcoat's layer, the sheen's layer (`IBLSheenBRDF`) with its
-energy compensation, at the material's intensity, added as emission. The AO
-maps occlude that light as three's did (the lamps are untouched, as there).
-The world carries only the hemisphere term (`ibl='world'`: the environment as
-the world for everything, at 0.75 / 0.7).
+**The environment's light.** The set's environment, three's envMap, is the
+World (`make_world`: at 0.75 in the corridor, 0.7 in the news set, with the
+hemisphere term), and EEVEE lights every material with it, a figure in the
+set too: the corridor through its baked volume probe (its closed shell keeps
+the outside out, so its own lamps light it), the news set's open yard
+directly, the reflections through the probes. One strength serves every
+material (the engine's per-material envMapIntensity has no counterpart), and
+EEVEE's AO and probes occlude it, so the texture sets' AO maps are not
+loaded.
 
 **Transparency.** `depthWrite: false` (the shafts, the seam, the beams, the
 steam, the hand lights, the torch beams) is Transparency Overlap on
@@ -1886,7 +1898,7 @@ frames = (1, 12 * 24)
 race.animate(frames, t0=0.0, state_fn=lambda t: R.sequence(t, **events))      # update() KEYED every frame
 race.make_cameras([(0.0, 'billA'), (3.0, 'carPass'), (5.0, 'carTrack'), (7.6, 'crashLow'), (9.0, 'shadows'),
                    (10.4, 'heel')], frames, t0=0.0, state_fn=lambda t: R.sequence(t, **events))
-print(race.apply_render_settings(scene))      # AgX, ray tracing, bloom, the set's fog, the set's world
+print(race.apply_render_settings(scene))      # AgX, ray tracing with Fast GI, bloom, the set's fog, the set's world
 ```
 
 `R.build(ctx, **opts)` takes race.js's options in snake_case: `reflect` (the
@@ -2022,7 +2034,7 @@ b.animate(frames, t0=0.0, state_fn=lambda t: {'climb': B.ease_in(t, 2.0, 18.0), 
                                                'hush': 1.0 if 12.0 <= t < 15.0 else 0.0})       # KEYED
 b.make_cameras([(0.0, 'binWide', {'push': 2.0}), (6.0, 'paperClose'), (10.0, 'climb', {'orbit': 0.3}),
                 (15.0, 'topDown')], frames, t0=0.0)
-b.apply_render_settings(scene)              # AgX, ray tracing, the set's world and fog (0x070a14, 0.03);
+b.apply_render_settings(scene)              # AgX, ray tracing with Fast GI, the set's world and fog (0x070a14, 0.03);
                                             # bloom=True adds a soft one (0.45, radius 0.5, threshold 0.8)
 # or by hand: b.update(t, {'climb': c, 'glow': 1, 'wind': 0.4, 'hush': 0}, frame=f)
 #             b.key_camera(cam, 'binWide', frame=f, push=2.0, u=0.5)
@@ -2438,15 +2450,9 @@ pieces, and what was left out:
   every material at the facades' 0.32 (the street's 0.85, the marble's 1.0,
   the paving's and lamps' 0.6 are not per material), the race at 1 (its
   paint's 1.4, the boot's 1.8, the road's 0.35, the core's 0.6 are not), the
-  ocean's night at 0.65 (its 0.5–0.8). The interiors and the corridor and news
-  carry each material's own image-based light instead, with three's split-sum
-  terms but single scattering only in the interiors (no multiple-scattering
-  term, no clearcoat attenuation of the base layer, no sheen on the black
-  velvet), von Mises–Fisher lobes where three r184 chains GGX passes (so
-  mid-roughness reflections may be a little softer), Karis's DFG fit where
-  three reads a table, no clearcoat Fresnel dimming of the layer under it, and
-  no occlusion beyond an AO map. Under the interiors' `env_light='world'` the
-  intensities are recorded, not applied, and the World stays in world space.
+  ocean's night at 0.65 (its 0.5–0.8). The interiors light every material by
+  their env at 1 (the toaster's chrome 2.2 and the seats' 0.25 are not per
+  material), the corridor at 0.75 and the news set at 0.7, the same way.
 - **The post looks the WebGPU frames were graded with** belong to the look
   family, not to the sets: bloom and the aeropittura pass
   ([postprocessing](postprocessing.md)); the bloom and the aeropittura's Balla

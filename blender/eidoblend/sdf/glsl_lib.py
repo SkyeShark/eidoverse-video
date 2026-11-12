@@ -4,8 +4,8 @@ the Blender edition's own prelude (the uniform block, the surface record, calcNo
 SDF_PRIMITIVES is sdf_raymarch_loader.js's SDF_PRIMITIVES_GLSL (the library the GLSL EXAMPLES were written against
 and that SDF_TSL ports) with one change: _hash's arithmetic is declared `precise`. Without it the GPU compiler, after
 inlining vnoise's eight corners, folds each corner's +1 offset into the hash's additive constant differently, so one
-lattice point hashes to different values from the cells around it and the noise tears along cell faces (measured:
-1.5 % of face crossings jump, by up to 0.99; the engine's own raymarch shows the seams). `precise` holds the
+lattice point hashes to different values from the cells around it and the noise tears along cell faces (about 1.5 %
+of face crossings jump, by up to 0.99). `precise` holds the
 compiler to the arithmetic as written: the same hash, now one value per lattice point. An example's `extra`, `map`,
 `shade`, `surface` and `sample` are GLSL source in the same dialect, so the engine's GLSL originals (mrHege,
 redShoggoth, the recipes) run as they were written.
@@ -196,8 +196,8 @@ SdfMedium sdfMedium(float density, vec3 albedo, vec3 emission) {
 }
 """
 
-# calcNormal / softShadow exactly as the engine's fragment shader defined them (calcNormal's step `h` is the
-# engine's 0.0004 in the reference raymarch; the bake kernels pass their own through sdfNormalH).
+# calcNormal / softShadow exactly as the engine's fragment shader defined them (the engine's calcNormal step `h` was
+# 0.0004; the bake kernels pass their own through sdfNormalH).
 NORMAL_AND_SHADOW = r"""
 vec3 calcNormal(vec3 p) {
     const vec2 k = vec2(1.0, -1.0);
@@ -224,8 +224,8 @@ float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float k) {
 }
 """
 
-# The engine's HDRI helpers. sampleEnvMap reads an equirect bound as sdfEnvMap (the scene world's image when the
-# reference raymarch is given one) and returns the engine's mid grey when none is bound.
+# The engine's HDRI helpers. sampleEnvMap reads an equirect bound as sdfEnvMap (the scene world's image, bound by
+# register_sdf_helper or SdfProgram.set_env_map) and returns the engine's mid grey when none is bound.
 ENV_HELPERS = r"""
 vec3 sampleEnvMap(vec3 worldDir) {
     if (uEnvMapStrength <= 0.0) return vec3(0.5);
@@ -270,8 +270,8 @@ vec4 sdfFetchPoint() { return texelFetch(sdfPoints, ivec2(gl_FragCoord.xy), 0); 
 
 # `cameraPosition` in an example's GLSL is the viewer, in the SDF's local frame (the originals mixed it with local p,
 # which only agreed for an unrotated object at the origin; the TSL port made it ctx.ro, the local camera). Each
-# kernel sets it per invocation: the reference raymarch from the Blender camera; the surface bake from straight
-# along the normal, so view-dependent terms (rims, fresnel tints) read as seen head-on and stay out of the textures.
+# kernel sets it per invocation: the surface bake from straight along the normal, so view-dependent terms (rims,
+# fresnel tints) read as seen head-on and stay out of the textures.
 VIEW_PRELUDE = r"""
 vec3 sdfViewPos;
 #define cameraPosition sdfViewPos
@@ -341,90 +341,5 @@ void main() {
     SdfMedium m = medium(q.xyz);
     out0 = vec4(m.emission, m.density);
     out1 = vec4(m.albedo, m.temperature);
-}
-"""
-
-# createSdfVolume's march, from a Blender camera in the volume's local three frame: front-to-back premultiplied
-# accumulation through the bounds box, the sample's own alpha and step, early out at 0.99, the optional post(sum),
-# and the engine's discard below 0.01. The reference an EEVEE volume is judged against.
-KERNEL_VOLUME_RAYMARCH = r"""
-void main() {
-    vec2 px = gl_FragCoord.xy + 0.5 * sdfJitter;
-    vec2 ndc = px / sdfImageSize * 2.0 - 1.0;
-    vec3 ro = sdfCameraUniform;
-    sdfViewPos = ro;
-    vec3 rd = normalize(sdfCamFwd + ndc.x * sdfCamTan.x * sdfCamRight + ndc.y * sdfCamTan.y * sdfCamUp);
-    vec3 inv = 1.0 / rd;
-    vec3 t0v = (sdfClipMin - ro) * inv, t1v = (sdfClipMax - ro) * inv;
-    vec3 tn = min(t0v, t1v), tx = max(t0v, t1v);
-    float t0 = max(max(max(tn.x, tn.y), tn.z), 0.0);
-    float t1 = min(min(tx.x, tx.y), tx.z);
-    if (t1 <= t0) { out0 = vec4(0.0); return; }
-    vec4 sum = vec4(0.0);
-    float t = t0;
-    for (int i = 0; i < 4096; i++) {
-        if (float(i) >= sdfVolSteps) break;
-        if (t > t1 || sum.w >= 0.99) break;
-        vec3 p = ro + rd * t;
-#ifdef SDF_VOLUME_MEDIUM
-        SdfMedium m = medium(p);
-        float dt = sdfMediumStep;
-        float a = 1.0 - exp(-max(m.density, 0.0) * dt);
-        // emission, plus the scattering colour under a flat ambient (no shadowing: the reference shows the medium's
-        // shape and opacity; the scene's real light on it is EEVEE's)
-        vec3 c = m.density > 1e-6 ? m.emission / m.density + m.albedo * sdfMediumAmbient : vec3(0.0);
-        float stp = dt;
-#else
-        SdfSample smp = sample(p);
-        float a = clamp(smp.alpha, 0.0, 1.0);
-        vec3 c = smp.color;
-        float stp = smp.step;
-#endif
-        float contrib = a * (1.0 - sum.w);
-        sum = vec4(sum.xyz + c * contrib, sum.w + contrib);
-        t += max(stp, 1e-4);
-    }
-    if (sum.w < 0.01) { out0 = vec4(0.0); return; }
-#ifdef SDF_HAS_POST
-    sum = post(sum);
-#endif
-    out0 = sum;
-}
-"""
-
-# The engine's raymarch (createSdfObject's fragment shader) with the example's own shade(), from a Blender camera
-# moved into the object's local three frame: the reference the EEVEE port is judged against. With sdfUseClip on (an
-# example cut_by_bounds, whose surface runs past its box on purpose) it marches the field cut by the bounds box, the
-# solid the mesh is; the engine's own march walked back out of the box there and drew the uncut surface in front.
-KERNEL_RAYMARCH = r"""
-void main() {
-    vec2 px = gl_FragCoord.xy + 0.5 * sdfJitter;
-    vec2 ndc = px / sdfImageSize * 2.0 - 1.0;
-    vec3 roLocal = sdfCameraUniform;
-    sdfViewPos = roLocal;
-    vec3 rdLocal = normalize(sdfCamFwd + ndc.x * sdfCamTan.x * sdfCamRight + ndc.y * sdfCamTan.y * sdfCamUp);
-    float t = 0.001;
-    vec2 res = vec2(9999.0, 0.0);
-    bool hit = false;
-    // the engine's bounds-box entry: rays start where they enter the box (the proxy box's fragment)
-    vec3 inv = 1.0 / rdLocal;
-    vec3 t0v = (sdfClipMin - roLocal) * inv, t1v = (sdfClipMax - roLocal) * inv;
-    vec3 tn = min(t0v, t1v), tx = max(t0v, t1v);
-    float tEnter = max(max(tn.x, tn.y), tn.z), tExit = min(min(tx.x, tx.y), tx.z);
-    if (tExit <= max(tEnter, 0.0)) { out0 = vec4(0.0); return; }
-    t = max(tEnter, 0.001);
-    for (int i = 0; i < 1024; i++) {
-        if (float(i) >= uMaxSteps) break;
-        vec3 p = roLocal + rdLocal * t;
-        res = sdfMapClipped(p);
-        if (abs(res.x) < uSurfEps * max(t, 1.0)) { hit = true; break; }
-        t += res.x * uStepScale;
-        if (t > uMaxDist || t > tExit) break;
-    }
-    if (!hit) { out0 = vec4(0.0); return; }
-    vec3 hitLocal = roLocal + rdLocal * t;
-    vec3 nLocal = sdfUseClip > 0.5 ? normalize(sdfGrad(hitLocal, sdfNormalH)) : calcNormal(hitLocal);
-    vec3 col = shade(hitLocal, nLocal, res.y);
-    out0 = vec4(col, 1.0);
 }
 """

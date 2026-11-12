@@ -168,11 +168,16 @@ anything else.
 - **A VRM imports facing −Y** (glTF's +Z forward). The humanoid bone mapping
   is snake_case on the add-on's property group (`human_bones.left_foot`); the
   bone names themselves are VRM's camelCase.
-- **MToon and shadows:** the add-on's 'MToon 1.0 Output' group returns a
-  Transparent BSDF for rays that are not camera rays. With the material's
+- **MToon and shadows:** the add-on's 'MToon 1.0 Output' group mixes in a
+  Transparent BSDF by its opacity × Is Camera Ray, so every ray that is not a
+  camera ray sees the surface transparent. With the material's
   `use_transparent_shadow` on (Blender 5.2's default), EEVEE's shadow pass
-  sees it as transparent and the character casts no sun shadow; an opaque
-  MToon material casts its shadow with `use_transparent_shadow = False`.
+  evaluates that and the character casts no sun shadow. EEVEE's Light Path
+  sets Is Shadow Ray in the shadow pass, so the group's opacity read as
+  max(Is Camera Ray, Is Shadow Ray) gives the shadow pass the alpha clip the
+  camera sees; an opaque material needs no transparency in its shadow
+  (`use_transparent_shadow = False`). `load_vrm` does both
+  ([characters](characters.md#loading-a-vrm)).
 
 ## Rendering
 

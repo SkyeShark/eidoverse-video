@@ -31,10 +31,8 @@ What the JS file holds, and where it went:
                   (positions, normals, uvs, index), prep, box_uv (box-projected metre UVs), bucket (merge, then one
                   mesh), m4 (three's Matrix4.compose), all in three's axes; meshes are converted when they are made.
   environment     env_tex(fn, W, H): the procedural HDR environment as a float equirect bpy Image in Blender's
-                  convention (fn is called with three-space directions, as the JS callback). ibl_env(fn) adds its
-                  prefiltered levels (prefilter_env: three's PMREM, the GGX lobe of alpha = r^2) and NB.ibl lights a
-                  material by them at its own envMapIntensity (Mat.standard(ibl=...), pbr_mat(env_i=...)), as three's
-                  per-material envMap did; the world keeps only the hemisphere term.
+                  convention (fn is called with three-space directions, as the JS callback); make_world makes it the
+                  set's World with three's hemisphere term, and EEVEE lights every material with it.
   TSL helpers     NB, an expression layer that writes shader (and Geometry Nodes) math as nodes, with hash21,
                   lum, hex, the MaterialX noises (Blender's Noise Texture computes them exactly), uniforms (a node
                   group of keyed values every material of a set reads), pixel footprints for fwidth.
@@ -2593,112 +2591,6 @@ class NB:
         d = self.view_z() * float(density)
         return 1.0 - self.exp(-(d * d))
 
-    # ---------------------------------------------------------------------------------- image-based light
-    def env_sample(self, img, d3):
-        """The radiance of an equirect environment (Blender's convention) toward a three-axes direction."""
-        n = self.node('ShaderNodeTexEnvironment', image=img, interpolation='Linear', projection='EQUIRECTANGULAR')
-        self.put(n.inputs['Vector'], self.blender(d3))
-        return X(self, n.outputs['Color'], 'v')
-
-    def env_rough(self, env_set, d3, rough):
-        """The environment prefiltered for a roughness: its levels (r 0, 0.25, 0.5, 0.75, 1) mixed by hat weights (a
-        constant roughness samples only the one or two levels it needs)."""
-        levels = env_set['levels']
-        rs = [r for r, _img in levels]
-        r = self.w(rough)
-        if r.is_const:
-            x = min(max(float(r.v), rs[0]), rs[-1])
-            acc = None
-            for i, (ri, img) in enumerate(levels):
-                lo = rs[i - 1] if i else ri
-                hi = rs[i + 1] if i + 1 < len(rs) else ri
-                if x == ri:
-                    wgt = 1.0
-                elif lo < x < ri:
-                    wgt = (x - lo) / (ri - lo)
-                elif ri < x < hi:
-                    wgt = (hi - x) / (hi - ri)
-                else:
-                    wgt = 0.0
-                if wgt > 1e-6:
-                    s = self.env_sample(img, d3) * wgt
-                    acc = s if acc is None else acc + s
-            return acc
-        acc = None
-        step = rs[1] - rs[0]
-        for ri, img in levels:
-            wgt = self.max(1.0 - self.abs(r - ri) / step, 0.0)
-            s = self.env_sample(img, d3) * wgt
-            acc = s if acc is None else acc + s
-        return acc
-
-    def dfg(self, rough, ndv):
-        """three's DFGApprox (Karis): the split-sum environment BRDF's scale and bias for F0."""
-        r = self.w(rough)
-        rx = r * -1.0 + 1.0
-        ry = r * -0.0275 + 0.0425
-        rz = r * -0.572 + 1.04
-        rw = r * 0.022 - 0.04
-        a004 = self.min(rx * rx, self.exp(ndv * (-9.28 * math.log(2.0)))) * rx + ry
-        return a004 * -1.04 + rz, a004 * 1.04 + rw
-
-    def sheen_dg(self, sheen_rough, ndv):
-        """three's IBLSheenBRDF: the Charlie sheen lobe integrated over the hemisphere (Estevez and Kulla's fit)."""
-        r = self.w(sheen_rough)
-        r2 = r * r
-        r_inv = 1.0 / (r + 0.1)
-        a = r * 1.0678 + r2 * 0.4573 - r_inv * 0.8469 - 1.9362
-        b = r * 0.5538 - r2 * 0.4670 - r_inv * 0.1255 - 0.6014
-        return self.clamp(self.exp(a * ndv + b), 0.0, 1.0)
-
-    def ibl(self, env_set, albedo, rough, metal, normal=None, coat=None, coat_rough=0.03, ao=None, sheen=None,
-            sheen_color=(1.0, 1.0, 1.0), sheen_rough=0.3):
-        """three r184's environment light for a standard / physical material, in its own units (x envMapIntensity by
-        the caller). Indirect specular: the prefiltered radiance toward the reflection x the single scattering
-        (F0 A + B) plus the multiple scattering (computeMultiscattering) x the irradiance, dielectric (F0 0.04) and
-        metal (F0 the albedo) mixed by metalness; indirect diffuse: the albedo (1 - metal) x (1 - the dielectric's
-        total scattering) x the roughness-1 level toward the normal (getIBLIrradiance's pi x radiance x Lambert's
-        1 / pi). A clearcoat adds its own layer; a sheen adds its layer (IBLSheenBRDF) and scales the rest by its
-        energy compensation. ao (an AO map's value): three's ambientOcclusion, the diffuse, coat and sheen x ao, the
-        specular x its specular occlusion. A, B are the DFG fit (three r184 reads a DFG table: within a few %)."""
-        n3 = self.three(normal) if normal is not None else self.N_world()
-        n3 = self.normalize(n3)
-        v3 = self.incoming()
-        ndv = self.clamp(self.dot(n3, v3), 1e-4, 1.0)
-        R = n3 * (ndv * 2.0) - v3
-        A, B = self.dfg(rough, ndv)
-        ems = 1.0 - (A + B)
-
-        def scatter(f0):
-            fss = self.w(f0) * A + B                                 # FssEss
-            favg = self.w(f0) * (1.0 - 0.047619) + 0.047619
-            return fss, fss * favg / (1.0 - ems * favg) * ems        # Fms x Ems
-        ss_d, ms_d = scatter((0.04, 0.04, 0.04))
-        ss_m, ms_m = scatter(albedo)
-        irr = self.env_rough(env_set, n3, 1.0)
-        spec = (self.env_rough(env_set, R, rough) * self.mix(ss_d, ss_m, metal)
-                + self.mix(ms_d, ms_m, metal) * irr)
-        diff = self.w(albedo) * (1.0 - self.w(metal)) * (1.0 - (ss_d + ms_d)) * irr
-        extra = None
-        if sheen is not None and not (self.w(sheen).is_const and self.w(sheen).v == 0.0):
-            sc = self.w(sheen_color) * sheen                         # three's sheen node: sheenColor x sheen
-            dg = self.sheen_dg(sheen_rough, ndv)
-            comp = 1.0 - self.max(self.max(sc.x, sc.y), sc.z) * dg
-            spec, diff = spec * comp, diff * comp
-            extra = irr * sc * dg                                    # sheenSpecularIndirect / pi
-        if coat is not None and not (self.w(coat).is_const and self.w(coat).v == 0.0):
-            ca, cb = self.dfg(coat_rough, ndv)
-            c_l = self.env_rough(env_set, R, coat_rough) * ((ca * 0.04 + cb) * coat)
-            extra = c_l if extra is None else extra + c_l
-        if ao is not None:
-            a_ = self.w(ao)
-            spec = spec * self.clamp(self.pow(ndv + a_, self.pow(2.0, self.w(rough) * -16.0 - 1.0)) - 1.0 + a_, 0.0, 1.0)
-            diff = diff * a_
-            if extra is not None:
-                extra = extra * a_
-        out = spec + diff
-        return out if extra is None else out + extra
-
 
 def drive_socket(sock, owner, prop, path='default_value'):
     """sock.<path> follows owner[prop] through a one-variable AVERAGE driver (no Python runs: it evaluates in a blend
@@ -2758,11 +2650,9 @@ class Mat:
 
     def standard(self, color, rough=1.0, metal=0.0, normal=None, emissive=None, alpha=None, sheen=None,
                  sheen_rough=0.3, sheen_color=(1.0, 1.0, 1.0), coat=None, coat_rough=0.03, side='double',
-                 method=None, fog=None, emissive_scale=SPEC, ibl=None, ao=None):
+                 method=None, fog=None, emissive_scale=SPEC):
         """emissive in three's numbers (x SPEC here). side: 'front' culls back faces (three's FrontSide on an open
-        surface), 'double' draws both. ibl: (env set, intensity): the material's own environment map, three's
-        envMap / envMapIntensity, added as its image-based light (NB.ibl, with the sheen and coat layers given here).
-        ao: three's aoNode (an AO map's value): it occludes that image-based light as three's did (NB.ibl)."""
+        surface), 'double' draws both. The set's environment lights the material through the World (make_world)."""
         nb = self.nb
         b = nb.node('ShaderNodeBsdfPrincipled')
         b.hide = False
@@ -2773,10 +2663,6 @@ class Mat:
         nb.put(b.inputs['Metallic'], metal)
         if normal is not None:
             nb.put(b.inputs['Normal'], normal)
-        if ibl is not None and ibl[0] is not None and ibl[1]:
-            light = nb.ibl(ibl[0], color, rough_c, metal, normal=normal, coat=coat, coat_rough=coat_rough, ao=ao,
-                           sheen=sheen, sheen_color=sheen_color, sheen_rough=sheen_rough) * float(ibl[1])
-            emissive = light if emissive is None else nb.w(emissive) + light
         if emissive is not None:
             nb.put(b.inputs['Emission Color'], nb.w(emissive) * emissive_scale)
             nb.put(b.inputs['Emission Strength'], 1.0)
@@ -2830,46 +2716,6 @@ class Mat:
 
 
 # --------------------------------------------------------------------------------------- textures that change ---
-
-IBL_LEVELS = (0.25, 0.5, 0.75, 1.0)
-
-
-def _equirect_dirs(W, H):
-    """Blender's equirect texel centres -> three-axes unit directions (H, W, 3) and solid angles (H, W)."""
-    u = (np.arange(W) + 0.5) / W
-    v = (np.arange(H) + 0.5) / H
-    lat = (v - 0.5) * math.pi
-    phi = (0.5 - u) * 2 * math.pi
-    cl, sl = np.cos(lat)[:, None], np.sin(lat)[:, None]
-    bx, by, bz = np.cos(phi)[None, :] * cl, np.sin(phi)[None, :] * cl, np.broadcast_to(sl, (H, W))
-    d3 = np.stack([bx, bz, -by], -1)
-    dom = np.broadcast_to(np.cos(lat)[:, None] * (math.pi / H) * (2 * math.pi / W), (H, W))
-    return d3, dom
-
-
-def prefilter_env(fn, levels=IBL_LEVELS, w_in=128, h_in=64):
-    """three's PMREM levels of a procedural environment, for NB.ibl: for each roughness r, the radiance averaged over
-    the reflection lobe of GGX with alpha = r^2 (a von Mises-Fisher lobe of width sqrt(2) alpha), as Blender equirect
-    float arrays (r 0.25 at 128 x 64, the wider ones at 64 x 32). fn(three-axes direction) -> (r, g, b)."""
-    din, dom = _equirect_dirs(w_in, h_in)
-    Lin = np.array([[fn(tuple(din[j, i])) for i in range(w_in)] for j in range(h_in)], np.float64).reshape(-1, 3)
-    din = din.reshape(-1, 3)
-    dom = dom.reshape(-1)
-    out = []
-    for r in levels:
-        W, H = (128, 64) if r <= 0.25 else (64, 32)
-        dout, _ = _equirect_dirs(W, H)
-        dout = dout.reshape(-1, 3)
-        alpha = max(r * r, 1e-3)
-        kappa = 1.0 / (2.0 * alpha * alpha)
-        res = np.zeros((len(dout), 3))
-        for c0 in range(0, len(dout), 1024):
-            dd = dout[c0:c0 + 1024] @ din.T
-            w = np.exp(kappa * (dd - 1.0)) * dom[None, :]
-            res[c0:c0 + 1024] = (w @ Lin) / w.sum(1, keepdims=True)
-        out.append((r, res.reshape(H, W, 3).astype(np.float32)))
-    return out
-
 
 class ImageVariants:
     """A texture the WebGPU edition redrew while it ran (a new post, a recount, a new chyron) becomes a list of
@@ -3128,7 +2974,6 @@ class Lib:
         self.prep, self.box_uv, self.m4 = prep, box_uv, m4
         self.hash21, self.lum, self.hex = hash21_np, lum, hex_linear
         self.register_font, self.fit_text = register_font, fit_text
-        self.env_set = None                  # ibl_env(): the environment the materials' envMap light comes from
 
     # ownership
     def own(self, x):
@@ -3262,51 +3107,23 @@ class Lib:
         img.colorspace_settings.name = 'Linear Rec.709' if 'Linear Rec.709' in _colorspaces() else 'Non-Color'
         return self.own(img)
 
-    def ibl_env(self, fn, env_img=None, name=None):
-        """The set's environment as three's materials saw it through their envMap: the sharp map (env_img, or made
-        from fn) and its prefiltered levels (prefilter_env), packed float images. Kept as self.env_set: pbr_mat and
-        Mat.standard(ibl=(env_set, intensity)) light a material by it."""
-        nm = name or f'{self.name}_env'
-        sharp = env_img if env_img is not None else self.env_tex(fn, name=nm)
-        levels = [(0.0, sharp)]
-        for r, arr in prefilter_env(fn):
-            H, W = arr.shape[:2]
-            rgba = np.concatenate([arr, np.ones((H, W, 1), np.float32)], -1)
-            img = image_from_rgba(f'{nm}_r{int(round(r * 100)):03d}', rgba, srgb=False, top_down=False,
-                                  alpha_mode='STRAIGHT')
-            img.colorspace_settings.name = 'Linear Rec.709' if 'Linear Rec.709' in _colorspaces() else 'Non-Color'
-            levels.append((r, self.own(img)))
-        self.env_set = {'levels': levels}
-        return self.env_set
-
-    def ibl(self, intensity):
-        """Mat.standard's ibl for a material whose three envMapIntensity is `intensity` (None without an env set)."""
-        return (self.env_set, float(intensity)) if self.env_set is not None and intensity else None
-
-    def env_i(self, intensity):
-        """pbr_mat's env_i: the intensity when the lib lights materials by their envMap, else None."""
-        return float(intensity) if self.env_set is not None else None
-
     # materials
     def mat(self, name):
         return Mat(self, name)
 
     def pbr_mat(self, S, name=None, tile=1.0, uv=None, offset=(0.0, 0.0), P=None, tint=None, recolor=None, macro=None,
-                macro_scale=0.35, rough=None, metal=0.0, nrm=1.0, ao=True, ao_amt=1.0, post=None, physical=False,
+                macro_scale=0.35, rough=None, metal=0.0, nrm=1.0, post=None, physical=False,
                 sheen=None, sheen_roughness=None, sheen_color=None, clearcoat=None, clearcoat_roughness=None,
-                side='double', transparent=False, opacity=None, alpha_test=None, env=None, env_i=None, fog=None,
+                side='double', transparent=False, opacity=None, alpha_test=None, fog=None,
                 method=None, depth_write=None):
         """The JS pbrMat: a textured material from a set S. tile (metres per tile, number | (u, v)); uv: an X (default
         the mesh uv); tint (hex | rgb); recolor(col, nb) -> col; macro: 0..1 large albedo variation (fBm of P at
         macro_scale); rough: (mul, add); metal: number | 'map'; nrm: the normal strength;
         post(dict(col, rough, metal, uvN, P, nb)) -> dict(col?, rough?, metal?, emissive?, normal?, opacity?).
-        env / env_i: three's envMap / envMapIntensity: the material's own image-based light (Mat.standard's ibl) from
-        `env` (an ibl_env set) or the lib's env_set, at env_i; no env_i, no environment light (as a three material
-        without an envMap). ao / ao_amt: three's aoNode, the set's AO map (when S has one and ao is not False) mixed
-        in by ao_amt; three darkened only the indirect light with it, so it occludes the image-based light here (the
-        lamps are untouched, as there). side: 'double' (the default here; three's was FrontSide: a closed mesh looks
-        the same, an open one keeps its inside) or 'front'. depth_write: three's depthWrite on a blended material
-        (False: every layer of the object blends, EEVEE's Transparency Overlap)."""
+        The set's environment (three's envMap) lights it through the World, and EEVEE's AO and probes occlude it
+        (three's aoNode, the set's AO map, has no part here). side: 'double' (the default here; three's was
+        FrontSide: a closed mesh looks the same, an open one keeps its inside) or 'front'. depth_write: three's
+        depthWrite on a blended material (False: every layer of the object blends, EEVEE's Transparency Overlap)."""
         M = Mat(self, name or S['id'])
         nb = M.nb
         tu, tv = tile if isinstance(tile, (tuple, list)) else (tile, tile)
@@ -3345,17 +3162,12 @@ class Lib:
         alpha = op if op is not None else opacity
         if alpha_test is not None and alpha is not None:
             alpha = nb.step(alpha_test, alpha)
-        ao_n = None
-        if ao is not False and S.get('ao') is not None and env_i:
-            at, _ = nb.tex(S['ao'], uvN)
-            ao_n = at.x * float(ao_amt) + (1.0 - float(ao_amt))
         m = M.standard(col, rough=nb.clamp(r_, 0.03, 1.0), metal=met_, normal=normal, emissive=emissive, alpha=alpha,
                        sheen=sheen if physical else None, sheen_rough=sheen_roughness if sheen_roughness is not None else 0.3,
                        sheen_color=hex_linear(sheen_color) if sheen_color is not None else (1.0, 1.0, 1.0),
                        coat=clearcoat if physical else None,
                        coat_rough=clearcoat_roughness if clearcoat_roughness is not None else 0.03,
-                       side=side, method=method or ('BLENDED' if transparent and alpha_test is None else None), fog=fog,
-                       ibl=((env if isinstance(env, dict) else self.env_set), env_i) if env_i else None, ao=ao_n)
+                       side=side, method=method or ('BLENDED' if transparent and alpha_test is None else None), fog=fog)
         if depth_write is not None and m.surface_render_method == 'BLENDED':
             m.use_transparency_overlap = not depth_write
         return m
@@ -3458,8 +3270,9 @@ def point(lib, name, color, cd, pos3, parent=None, shadow=True, radius=0.05, cut
 
 
 def make_world(lib, name, env_img=None, env_i=1.0, hemi=None, scene=None):
-    """The set's world: its environment (the metals' envMap; with env_i its strength) plus three's HemisphereLight
-    (sky / ground colours x intensity / pi as radiance gives three's irradiance exactly), all x SPEC."""
+    """The set's world: its environment (three's envMap, at envMapIntensity env_i) plus three's HemisphereLight
+    (sky / ground colours x intensity / pi as radiance gives three's irradiance exactly), all x SPEC. EEVEE lights
+    every material in the scene with it: a room through its volume probe, the reflections through the probes."""
     import bpy
     w = bpy.data.worlds.new(name)
     lib.own(w)

@@ -17,7 +17,7 @@ NODES_VERSION = 4
 # thinness mask. The WebGPU edition's 2.2 x sss scaled a Barre-Brisebois lobe; the gain re-levels it for EEVEE's
 # Translucent BSDF (calibrated by eye on backlit probes, tests/flora/t_lookdev.py)
 TRANSL_GAIN = 4.0
-# energy (verifier, 11-07): the Translucent lobe is added on top of the full Principled diffuse, so a bright sheet
+# energy: the Translucent lobe is added on top of the full Principled diffuse, so a bright sheet
 # (white daisy rays, albedo ~0.88, map x gain clamped to 1) reflects ~0.88 AND transmits ~0.88. 'normalize' scales
 # reflection and transmission together (one factor from the brightest channel, so the hue holds) whenever their sum
 # would pass 0.95; darker sheets (grass, leaves: a + T well under 0.95) are untouched. Default None, the by-eye
@@ -494,7 +494,7 @@ def leaf_material(name, maps, *, rough=0.6, sss=0.5, translucency=1.0, normal_mo
     if SPEC_FACING:
         # a shading normal turned away from the camera (the back of a light-gather card, a curled or normal-mapped
         # edge seen edge-on) has no specular the camera could see, yet EEVEE's lobe still answers it, and under a
-        # sun behind the plant it lights white specks (backlit sunflower heads, verifier 11-07): fade the specular
+        # sun behind the plant it lights white specks (on backlit sunflower heads): fade the specular
         # out as N.V falls from 0.1 to 0
         vis = b.smoothstep(0.0, 0.1, b.dot(shade_n, geo.outputs['Incoming']))
         spec_lvl = b.math('MULTIPLY', spec_lvl, vis)

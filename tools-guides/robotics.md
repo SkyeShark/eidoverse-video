@@ -452,7 +452,8 @@ python eido_blender.py render blender/eidoblend/characters/robotics/scenes/motio
 sensor ports, both playing `joints`. `mantis`: MANTIS driving its circle, the
 camera carried with the body. `motion`: the humanoid and quadruped running
 their circles, the hand drone flying, the tracked arm driving. They declare
-`_no_auto_enhance`: their studio light is the presentation. Probe-size harness
+`_no_auto_enhance`: their studio light is the presentation, and they render
+with EEVEE's Fast GI on. Probe-size harness
 configs for checking them against the WebGPU frames (960 x 540, 16 samples,
 outputs in the test folder) are `blender/tests/robotics/harness_{assembly,mantis,motion}.json`:
 `python eido_blender.py render blender/tests/robotics/harness_mantis.json --at 6`.

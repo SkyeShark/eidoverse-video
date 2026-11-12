@@ -28,7 +28,8 @@ Options (the effect's, snake_case; the camelCase spelling is accepted):
     loop_seconds   cycle period (20)
     opacity        the effect's mix over the frame -> a keyable multiplier on the media's density and emission, and
                    (each lamp's energy is a driver over it) on the glow lamps
-    vol_steps      the volume march's step count -> the reference march's (the grids hold the whole cloud)
+    vol_steps      the volume march's step count -> the volumes' `steps`, as the engine set it (the grids sample
+                   every voxel and march nothing)
     surf_steps, reflect_steps, max_t, width, height: the screen march's budgets and size (see OPTION_NOTES)
     disable_for_perf_test   the volumes are built hidden and nothing is baked (the effect's no-hook mode)
 Extra here: quality ('fast' | 'balanced' | 'high': voxel 0.16 / 0.08 / 0.055 original units, x scale), voxel,
@@ -100,8 +101,8 @@ QUALITY_VOXEL = {'fast': 0.16, 'balanced': 0.08, 'high': 0.055}
 OPTION_NOTES = {
     'max_t': "the screen march's longest view ray (80 units). The cloud is in the scene, drawn at any distance; "
              "EEVEE's froxel range is fitted round it instead (fit_volume_range)",
-    'surf_steps': "the entry march to the SDF before the volume march; the reference march starts at the grids' "
-                  "box instead, and EEVEE needs none",
+    'surf_steps': "the entry march to the SDF before the volume march; the grids fill the volumes' boxes, so EEVEE "
+                  "needs none",
     'reflect_steps': "the metal-reflection march; reflections of the cloud are EEVEE's own (ray traced / probes)",
     'width': "the screen pass's resolution (iResolution, unused by its shader): a volume has none",
     'height': "the screen pass's resolution (iResolution, unused by its shader): a volume has none",
@@ -181,7 +182,7 @@ def _blender_origin(o3):
 class NuclearExplosion:
     """What apply_to returns: .volumes (SdfVolume: [surge, mushroom], or one), .objects, .lights (EmissionLights
     per volume), .uniforms, update(t) (the frame at t, the effect's update), bake(fs, fe), set_opacity(v),
-    key_opacity(frame, v), raymarch_reference(camera, ...), remove()."""
+    key_opacity(frame, v), remove()."""
 
     def __init__(self, scene, camera, o):
         from .volume import create_sdf_volume
@@ -385,19 +386,6 @@ class NuclearExplosion:
         (it makes sure every light has its driver)."""
         self._drive_lights()
         return self
-
-    # ------------------------------------------------------------------------------------------------ review --
-    def raymarch_reference(self, camera, width=480, height=270, samples=2, t=None):
-        """The effect's own march of the cloud from a Blender camera (premultiplied linear (H, W, 4)): each volume's
-        reference march, composited front to back by the camera distance of its box centre."""
-        from mathutils import Vector
-        cam = camera.matrix_world.translation
-        order = sorted(self.volumes, key=lambda v: (v.object.matrix_world @ Vector(0.5 * (v.lo + v.hi)) - cam).length)
-        out = None
-        for vol in order:
-            img = vol.raymarch_reference(camera, width, height, samples, t=t)
-            out = img if out is None else out + img * (1.0 - out[..., 3:4])
-        return out
 
     def remove(self):
         """Take the effect out of the scene: its volumes, their materials and lights."""

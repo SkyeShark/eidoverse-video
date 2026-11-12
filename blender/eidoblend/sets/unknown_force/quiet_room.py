@@ -11,7 +11,7 @@ piece can redraw (build(art=...)); the crate run, the launch lights and the glow
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend.sets.unknown_force import quiet_room as QR
     room = QR.build(scene, singer_scale=0.87)         # -> QuietRoom: group (root Empty), parts, update, cams, mark ...
-    scene.world = room.env                            # the room's env for the camera (its materials carry its light)
+    scene.world = room.env                            # the room's env: the World, lighting it through its probe
     room.eevee_settings(scene)                        # interior: fast GI on, reflections of the room's env
     room.bake_probes()                                # the room-fitted volume probe (a GPU job)
     scene.camera = room.make_camera('altar')          # a Blender camera at a set cam, parented to the set
@@ -26,12 +26,9 @@ How the engine's pieces became Blender data:
   uniforms     uT, uHell, uSale, uRoll, uBeacon: float custom properties on the root Empty; every material reads them
                through a one-variable driver. update() keys them, with every light power and moving object it sets
                (LINEAR keys at the frame), so any frame renders on its own.
-  env          the room's LDR equirect (red altar glow + city), as three's envMap: every material carries its own
-               light from it at its own envMapIntensity (env_light='material', the default: the env's prefiltered
-               levels, interiors_lib.env_levels, in the material's emission), and room.env is a World that shows
-               the env to the camera and lights nothing: make it the scene's world while the set is on screen.
-               env_light='world' makes the env the World instead (one intensity for everything in the scene,
-               EEVEE's occlusion; the intensities are recorded, mat['uf_env_intensity'], not applied).
+  env          the room's LDR equirect (red altar glow + city) is the World (room.env: make it the scene's world while
+               the set is on screen): the room's probe bakes it through the glass and the probes reflect it, so every
+               surface takes it with EEVEE's occlusion. Its lookup turns with the set (interiors_lib.env_turn).
   light        three's units: candela -> 4 pi cd W, lux -> sun strength (measured pixel parity; interiors_lib).
                The one shadow map (the red key down the nave) is the one light with use_shadow; the casters are the
                engine's (objects' visible_shadow).
@@ -614,7 +611,7 @@ class QuietRoom(L.InteriorSet):
 
 
 def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:quiet_room', art_cache=None,
-          probe=True, probe_spacing=0.35, probe_samples=1024, singerScale=None, art=None, env_light='material'):
+          probe=True, probe_spacing=0.35, probe_samples=1024, singerScale=None, art=None):
     """build(THREE, opts) -> the quiet room (QuietRoom: a dict whose keys read as attributes). ctx: the harness ctx
     (its keys then go through ctx.key) or a bpy Scene (the registry, eidoblend.sets.build, passes ctx first);
     scene: where its collection goes (default: ctx's, else the context scene); singer_scale (singerScale): the
@@ -622,13 +619,10 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     probe: add the room-fitted volume probe (bake it with bake_probes); art: {canvas key: the piece's own art} for
     any of CANVASES (board_center ... board_want, essay, pulpit_fall, booklet, register, slogan, ship_sign, label,
     stencil_side, stencil_front, hazard, exit): a painter fn(ctx, W, H), an image path, a Pillow image or an array
-    (canvas_for). A board's ink roughness is derived from whatever is drawn on it. env_light: 'material' (each
-    material lit by the room's env at its own intensity, as the engine's envMap; the World lights nothing) or
-    'world' (the env as the World, lighting the whole scene at one intensity, with EEVEE's occlusion)."""
+    (canvas_for). A board's ink roughness is derived from whatever is drawn on it. The room's env is its World
+    (room.env), lighting it through the room's probe."""
     import bpy
     L.check_art(art, CANVASES, 'quiet_room.build(art=...)')
-    if env_light not in L.MaterialKit.ENV_LIGHTS:
-        raise ValueError(f"quiet_room.build: env_light={env_light!r} (want 'material' or 'world')")
     scene, ctx = L.scene_and_ctx(ctx, scene)
     ss = singer_scale if singer_scale is not None else singerScale
     singer_scale = SUIT_SCALE if ss is None else ss
@@ -640,9 +634,9 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         sb.uniform(u, v)
 
     # ---------------------------------------------------------------------------------------- the room's light (env)
-    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufqr_env', light=env_light == 'world'))
+    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufqr_env', root=sb.root_ob))
     sb.track(bpy.data.images[ENV['uf_env_image']])
-    K = L.material_kit(sb, env=ENV, prefix='ufqr', env_light=env_light)
+    K = L.material_kit(sb, prefix='ufqr')
     out.kit = K                                              # the room's material kit: a piece's own props lit alike
     tri = K.tri
 
@@ -673,7 +667,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         * ((n.z - 0.5) * 0.3 + 1)
     g.standard(color=col, roughness=g.texture(S['Carpet012']['roughnessMap'], tuv).r * 0.15 + 0.85,
                normal=g.normal_map(g.texture(S['Carpet012']['normalMap'], tuv).rgb, 0.9))
-    K.envd(carpet_mat, 0.4)
     # the aisle runner: deep red pile with a black-and-brass bound edge
     runner_mat, g = K.new('runner')
     p = g.uv()                                               # u across the runner (-0.6..0.6), v along it (metres)
@@ -687,34 +680,30 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     g.standard(color=g.mix(g.mix(pile, brass, border), (0.015, 0.012, 0.012), binding),
                roughness=g.mix(0.95, 0.55, border),
                normal=g.normal_map(g.texture(S['Carpet013']['normalMap'], tuv).rgb, 1.0))
-    K.envd(runner_mat, 0.4)
-    concrete_mat = pbr('concrete', S['Concrete017'], tint=(0.30, 0.31, 0.33), tile=1 / 2.2, rough=1.0, vary=0.25,
-                       env_i=0.5)
-    terrazzo_mat = pbr('terrazzo', S['Terrazzo003'], tint=(0.55, 0.55, 0.58), tile=1 / 1.1, rough=0.55, env_i=1.2)
-    steel_mat = pbr('steel', S['Metal027'], tint=(0.55, 0.56, 0.60), tile=1 / 0.8, rough=0.9, metal=1, vary=0.25,
-                    env_i=1.0)
-    felt_mat = pbr('felt', S['Fabric031'], tint=(0.22, 0.22, 0.25), tile=1 / 0.45, rough=1, env_i=0.25)
-    alum_mat = pbr('alum', S['Metal009'], tint=(0.92, 0.93, 0.96), tile=1 / 0.35, rough=0.7, metal=1, env_i=1.4)
-    walnut_mat = pbr('walnut', S['Wood027'], tint=(0.55, 0.42, 0.36), tile=1 / 0.9, rough=0.75, env_i=0.9)
-    pine_mat = pbr('pine', S['Wood096'], tint=(0.95, 0.88, 0.78), tile=1 / 0.7, rough=1.0, env_i=0.4)
+    concrete_mat = pbr('concrete', S['Concrete017'], tint=(0.30, 0.31, 0.33), tile=1 / 2.2, rough=1.0, vary=0.25)
+    terrazzo_mat = pbr('terrazzo', S['Terrazzo003'], tint=(0.55, 0.55, 0.58), tile=1 / 1.1, rough=0.55)
+    steel_mat = pbr('steel', S['Metal027'], tint=(0.55, 0.56, 0.60), tile=1 / 0.8, rough=0.9, metal=1, vary=0.25)
+    felt_mat = pbr('felt', S['Fabric031'], tint=(0.22, 0.22, 0.25), tile=1 / 0.45, rough=1)
+    alum_mat = pbr('alum', S['Metal009'], tint=(0.92, 0.93, 0.96), tile=1 / 0.35, rough=0.7, metal=1)
+    walnut_mat = pbr('walnut', S['Wood027'], tint=(0.55, 0.42, 0.36), tile=1 / 0.9, rough=0.75)
+    pine_mat = pbr('pine', S['Wood096'], tint=(0.95, 0.88, 0.78), tile=1 / 0.7, rough=1.0)
     # (the engine also defines osbMat, galvMat and chromeMat and never puts them on a mesh: not built here, where
     # an unused material would be an orphan; the crate's OSB is crate_mat('crateosb') below)
     black_lacquer = solid('lacquer', (0.012, 0.011, 0.012), rough=0.18, rough_var=0.10, vary=0.4, scale=1.2,
-                          physical=True, env_i=1.6, extra={'clearcoat': 0.8, 'clearcoatRoughness': 0.12})
-    plastic_mat = solid('plastic', (0.022, 0.022, 0.025), rough=0.48, rough_var=0.18, vary=0.3, scale=6, env_i=0.9)
-    pol_alum = solid('polalum', (0.74, 0.75, 0.77), rough=0.34, rough_var=0.10, metal=1, vary=0.08, scale=5, env_i=1.3)
+                          physical=True, extra={'clearcoat': 0.8, 'clearcoatRoughness': 0.12})
+    plastic_mat = solid('plastic', (0.022, 0.022, 0.025), rough=0.48, rough_var=0.18, vary=0.3, scale=6)
+    pol_alum = solid('polalum', (0.74, 0.75, 0.77), rough=0.34, rough_var=0.10, metal=1, vary=0.08, scale=5)
     mesh_back = solid('boardback', (0.30, 0.31, 0.32), rough=0.6, rough_var=0.15, vary=0.15, scale=3)
     rubber_mat = solid('rubber', (0.015, 0.015, 0.016), rough=0.85, rough_var=0.1, vary=0.2, scale=8)
     # chair fabric: woven charcoal, the per-chair tone comes from the instance colour
     fabric_mat = pbr('fabric', S['Fabric031'], tint=(0.16, 0.165, 0.18), tile=1 / 0.16, rough=1.0, n_scale=1.3,
-                     vary=0.15, vary_scale=2.0, env_i=0.35, instance_color=True)
+                     vary=0.15, vary_scale=2.0, instance_color=True)
     # glass: thin, reflective, faintly teal; a grime film that is thicker at the bottom and the corners
     glass_mat, g = K.new('glass')
     n = tri(g, 0.8)
     grime = g.smoothstep(0.9, 0.0, g.position_local().y) * 0.6 + n.x * 0.3
     g.standard(color=(0.55, 0.70, 0.72), roughness=g.clamp(0.03 + grime * 0.18, 0.02, 1.0), metalness=0.0,
                opacity=g.clamp(0.07 + grime * 0.09, 0.0, 1.0), blend='BLENDED')
-    K.envd(glass_mat, 1.5)
 
     # ---------------------------------------------------------------------------------------- helpers
     def add(geo, mat, pos=(0, 0, 0), rot=(0, 0, 0), parent=None, cast=True, recv=True, keep=False, name=''):
@@ -862,7 +851,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         m, gr_ = K.new('board-' + bname)
         gr_.standard(color=gr_.texture(albedo, gr_.uv()).rgb * 0.92, roughness=gr_.texture(rough, gr_.uv()).r,
                      metalness=0.0)
-        K.envd(m, 1.0)
         face = add(L.plane_geometry(w, h), m, (0, 0, 0.012), parent=g_, keep=True, cast=False, name='boardface:' + bname)
         add(box(w + 0.02, h + 0.02, 0.02), mesh_back, parent=g_)
         fw, fd = 0.032, 0.034
@@ -920,7 +908,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     bt, _cv = img('register')
     bm, g = K.new('register')
     g.standard(color=g.texture(bt, g.uv()).rgb, roughness=0.85, metalness=0.0)
-    K.envd(bm, 0.6)
     pg = L.plane_geometry(0.62, 0.39, 8, 1)
     pg.pos[:, 2] = 0.025 * np.power(np.abs(pg.pos[:, 0]) / 0.31, 0.6)
     pg.compute_vertex_normals()
@@ -983,7 +970,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     et, _cv = img('essay')
     em, g = K.new('essay')
     g.standard(color=g.texture(et, g.uv()).rgb, roughness=0.9, metalness=0.0)
-    K.envd(em, 0.5)
     page = L.plane_geometry(0.297, 0.42, 1, 6)
     page.pos[:, 2] = 0.006 * np.sin((page.pos[:, 1] / 0.42 + 0.5) * math.pi)
     page.compute_vertex_normals()
@@ -998,7 +984,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     fs = g.texture(ft, g.uv())
     gold = g.smoothstep(0.35, 0.6, fs.y)
     g.standard(color=fs.rgb * (nfab.x * 0.25 + 0.85), roughness=g.mix(0.95, 0.45, gold), metalness=gold * 0.6)
-    K.envd(fm, 0.4)
     fall = L.plane_geometry(0.40, 0.62, 10, 1)
     fall.pos[:, 2] = 0.008 * np.cos(fall.pos[:, 0] / 0.40 * math.pi * 5)
     fall.compute_vertex_normals()
@@ -1087,7 +1072,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     ct, _cv = img('booklet')
     bkm, g = K.new('booklet')
     g.standard(color=g.texture(ct, g.uv()).rgb, roughness=0.7, metalness=0.0)
-    K.envd(bkm, 0.5)
     bgeo = L.plane_geometry(0.15, 0.21).rotate_x(-math.pi / 2)
     r = L.rng(5150)
     picks = [i for i in range(nch) if r() < 0.34]
@@ -1124,7 +1108,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     ship_g = grp('qr:shipping')
     length = CONV['z1'] - CONV['z0']
     cz = (CONV['z0'] + CONV['z1']) / 2
-    rail_mat = pbr('rail', S['Metal027'], tint=(0.30, 0.32, 0.36), tile=1 / 0.6, rough=0.8, metal=1, env_i=1.0)
+    rail_mat = pbr('rail', S['Metal027'], tint=(0.30, 0.32, 0.36), tile=1 / 0.6, rough=0.8, metal=1)
     for sx in (-1, 1):
         add(box(0.05, 0.13, length), rail_mat, (CONV['x'] + sx * (CONV['w'] / 2 + 0.03), CONV['top'] - 0.035, cz),
             parent=ship_g)
@@ -1150,7 +1134,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     rn = tri(g, 14.0)
     g.standard(color=g.vec3(0.62, 0.64, 0.68) * (1.0 - streak * 0.5) * (rn.x * 0.3 + 0.85),
                roughness=g.clamp(0.32 + streak * 0.3 + (rn.y - 0.5) * 0.2, 0.05, 1.0), metalness=1.0)
-    K.envd(roller_mat, 1.2)
     zs = []
     z = CONV['z0'] + 0.08
     while z < CONV['z1'] - 0.05:
@@ -1163,7 +1146,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     # the tunnel behind the hatch (dark, with the backlight that comes on as the crate arrives)
     tz0, tz1 = RZ1 + 0.3, CONV['z1'] + 0.4
     tcz, tl = (tz0 + tz1) / 2, tz1 - tz0
-    tunnel_mat = solid('tunnel', (0.05, 0.05, 0.055), rough=0.8, vary=0.35, scale=1.5, env_i=0.3)
+    tunnel_mat = solid('tunnel', (0.05, 0.05, 0.055), rough=0.8, vary=0.35, scale=1.5)
     add(box(HATCH['x1'] - HATCH['x0'] + 0.4, 0.05, tl), tunnel_mat, (CONV['x'], HATCH['y1'] + 0.2, tcz), parent=ship_g)
     add(box(HATCH['x1'] - HATCH['x0'] + 0.4, 0.05, tl), tunnel_mat, (CONV['x'], 0.02, tcz), parent=ship_g)
     add(box(0.05, HATCH['y1'] + 0.2, tl), tunnel_mat, (HATCH['x0'] - 0.2, (HATCH['y1'] + 0.2) / 2, tcz), parent=ship_g)
@@ -1176,7 +1159,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     n = tri(g, 6.0)
     g.standard(color=g.texture(ht, g.uv() * (2.2, 1.0, 1.0)).rgb * (n.x * 0.5 + 0.6),
                roughness=g.clamp(0.5 + (n.y - 0.5) * 0.5, 0.1, 1.0), metalness=0.2)
-    K.envd(hm, 0.6)
     fz, t_ = RZ1 - 0.02, 0.11
 
     def strip(w, h_, pos, rot_z):
@@ -1205,7 +1187,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
                * (n.x * 0.4 + 0.8),
                roughness=g.clamp(g.texture(S['CorrugatedSteel005']['roughnessMap'], p / 0.9).r + (n.y - 0.5) * 0.3,
                                  0.1, 1.0), metalness=0.85)
-    K.envd(sm, 1.0)
     add(sgeo, sm, parent=shutter, keep=True, name='shutterleaf')
     # the crate on its pallet: OSB panels, pine battens and cross braces, steel straps. The stencils are SPRAYED:
     # projected through the crate's own materials along X (long sides) and -Z (the leading end), so the paint runs
@@ -1241,7 +1222,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         g_.standard(color=g_.mix(base, ink, a_),
                     roughness=g_.mix(g_.clamp(r0 + (n_.y - 0.5) * 0.2, 0.3, 1.0), 0.62, a_),
                     normal=g_.normal_map(g_.texture(set_['normalMap'], tuv_).rgb, 1.0))
-        return K.envd(m, 0.4)
+        return m
     c_osb = crate_mat('crateosb', S['Chipboard004'], (0.92, 0.84, 0.72), 1 / 0.9, 1.0)
     c_pine = crate_mat('cratepine', S['Wood096'], (0.95, 0.88, 0.78), 1 / 0.7, 1.0)
     add(box(CW, CH, CL), c_osb, (0, y0 + CH / 2, 0), parent=crate_body)
@@ -1265,7 +1246,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         add(box(bt_, CH, bd), c_pine, (CW / 2 - bt_ / 2 + bd, y0 + CH / 2, z_), parent=crate_body)
         add(box(bt_, CH, bd), c_pine, (-CW / 2 + bt_ / 2 - bd, y0 + CH / 2, z_), parent=crate_body)
     add(box(CW + 0.01, 0.012, CL * 0.86), c_pine, (0, y0 + CH + 0.006, 0), parent=crate_body)
-    strap = solid('strap', (0.05, 0.05, 0.055), rough=0.35, metal=1, scale=10, env_i=1.2)       # steel straps
+    strap = solid('strap', (0.05, 0.05, 0.055), rough=0.35, metal=1, scale=10)       # steel straps
     for sz in (-0.3, 0.3):
         add(box(CW + 0.06, 0.003, 0.025), strap, (0, y0 + CH + 0.014, sz), parent=crate_body)
         for sx in (-1, 1):
@@ -1274,7 +1255,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     lt, _cv = img('label')
     lm, g = K.new('label')
     g.standard(color=g.texture(lt, g.uv()).rgb, roughness=0.7, metalness=0.0)
-    K.envd(lm, 0.4)
     lb = add(L.plane_geometry(0.24, 0.16), lm, (-CW / 2 - 0.004, y0 + CH * 0.23, CL * 0.27), (0, -math.pi / 2, 0.03),
              crate, keep=True, cast=False, name='label')
     lb.render_order = 3
@@ -1317,7 +1297,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     n = tri(g, 25.0)
     g.standard(color=g.vec3(0.78, 0.58, 0.30) * (n.x * 0.3 + 0.8), roughness=0.35, metalness=1.0,
                opacity=g.texture(wt, g.uv()).a, blend='BLENDED')
-    K.envd(slm, 1.5)
     sl = add(L.plane_geometry(4.6, 0.36), slm, (-0.4, 2.95, RZ1 - 0.01), (0, math.pi, 0), group, keep=True,
              cast=False, name='slogan')
     sl.render_order = 3
@@ -1337,7 +1316,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     u_sale = g.uniform('uSale')
     g.standard(color=g.vec3(0.30, 0.31, 0.33) * (n.x * 0.2 + 0.9), roughness=0.4, metalness=0.0,
                emissive=g.vec3(0.85, 0.93, 1.0) * (u_sale * u_sale * 8.0))
-    K.envd(strip_mat, 0.5)
     L.hide_from_probes(strip_mat)
     for x_ in (-2.4, 0, 2.4):
         add(box(0.09, 0.04, RZ1 - RZ0 - 1.0), strip_mat, (x_, RH - 0.40, (RZ0 + RZ1) / 2), parent=sale_g, cast=False)

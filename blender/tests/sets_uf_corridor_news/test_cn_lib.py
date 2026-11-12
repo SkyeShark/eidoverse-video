@@ -1,7 +1,7 @@
 """cn_lib's API the two sets do not happen to call, exercised on its own (no renders): dyn_canvas, pbr_mat's offset /
-uv / P / opacity / alpha_test / transparent / ao / depth_write options, register_font, lum, bucket + box_uv metre
-UVs, slice_tris, make_world's hemisphere, spot / point lights, make_camera, the image-based light (prefiltered levels,
-the sheen layer), the stroker and the fill rules.
+uv / P / opacity / alpha_test / transparent / depth_write options, register_font, lum, bucket + box_uv metre
+UVs, slice_tris, make_world's environment and hemisphere (the only way the environment lights a material), spot /
+point lights, make_camera, the stroker and the fill rules.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_cn_lib.py
 """
@@ -96,36 +96,12 @@ check('spot: 300 cd at 4 pi x 300 W, aimed at its target, a custom cut-off', abs
 cam = CL.make_camera(L, 'cnapi_cam', {'pos': [0.55, 1.25, 6.2], 'target': [0, 4.6, -24], 'fov': 38}, parent=root)
 check('make_camera: vertical fov 38 deg', abs(math.degrees(cam.data.angle_y) - 38) < 1e-6 and cam.data.sensor_fit == 'VERTICAL')
 
-# image-based light: prefiltered levels keep a uniform environment uniform and widen a bright spot with roughness
-lv = CL.prefilter_env(lambda d: (1.0, 1.0, 1.0))
-check('prefilter_env: a uniform environment stays 1 at every roughness', all(abs(a.min() - 1) < 1e-6 and abs(a.max() - 1) < 1e-6
-                                                                            for _r, a in lv))
-spot_fn = lambda d: (math.exp(80.0 * (d[1] - 1.0)),) * 3            # noqa: E731  a small bright cap overhead (+Y)
-lv = CL.prefilter_env(spot_fn)
-tops = [a[-1, :, 0].mean() / a[:, :, 0].mean() for _r, a in lv]       # the zenith row against the mean
-check('prefilter_env: the overhead spot spreads as roughness grows (zenith / mean falls)', all(
-    tops[i] > tops[i + 1] for i in range(len(tops) - 1)), ' '.join(f'{v:.1f}' for v in tops))
-es = L.ibl_env(spot_fn, name='cnapi_ibl')
-Mi = L.mat('cnapi_ibl_mat')
-n0 = len(Mi.m.node_tree.nodes)
-mi = Mi.standard((0.8, 0.6, 0.3), rough=0.3, metal=1.0, ibl=L.ibl(0.7))
-envs = [n for n in mi.node_tree.nodes if n.bl_idname == 'ShaderNodeTexEnvironment']
-check('Mat.standard(ibl): the material samples its prefiltered environment (two levels for r 0.3, one for r 1) and '
-      'adds it as emission', len(es['levels']) == 5 and len(envs) == 3 and bsdf(mi).inputs['Emission Color'].is_linked,
-      f'{len(envs)} samples')
-# pbr_mat's ao / ao_amt (three's aoNode: it occludes the image-based light), sheen's own image-based layer, depth_write
-Sa = L.pbr('PaintedMetal012', ao=True)
-uses = lambda m, img: any(n.bl_idname == 'ShaderNodeTexImage' and n.image == img for n in m.node_tree.nodes)  # noqa: E731
-ma = L.pbr_mat(Sa, name='cnapi_ao', ao_amt=0.6, env_i=L.env_i(0.5))
-mn = L.pbr_mat(Sa, name='cnapi_ao_off', ao=False, env_i=L.env_i(0.5))
-mz = L.pbr_mat(Sa, name='cnapi_ao_no_env')
-check('pbr_mat ao: the set\'s AO map occludes its image-based light (ao=False or no envMap: not sampled)',
-      Sa.get('ao') is not None and uses(ma, Sa['ao']) and not uses(mn, Sa['ao']) and not uses(mz, Sa['ao']))
-n_plain = len(L.mat('cnapi_nosheen').standard((0.3, 0.02, 0.03), rough=0.5, ibl=L.ibl(0.4)).node_tree.nodes)
-n_sheen = len(L.mat('cnapi_sheen').standard((0.3, 0.02, 0.03), rough=0.5, sheen=1.0, sheen_color=(0.35, 0.02, 0.03),
-                                            sheen_rough=0.35, ibl=L.ibl(0.4)).node_tree.nodes)
-check('Mat.standard(ibl, sheen): the sheen adds its image-based layer (IBLSheenBRDF) and its energy compensation',
-      n_sheen > n_plain + 8, f'{n_plain} -> {n_sheen} nodes')
+# the environment lights through the World alone: a material samples no environment and emits nothing of its own
+mi = L.mat('cnapi_env_mat').standard((0.8, 0.6, 0.3), rough=0.3, metal=1.0, sheen=1.0, coat=0.5)
+mp = L.pbr_mat(S, name='cnapi_env_pbr')
+check('Mat.standard / pbr_mat: no per-material environment (no Environment Texture, no emission): the World lights '
+      'them', not any(n.bl_idname == 'ShaderNodeTexEnvironment' for m in (mi, mp) for n in m.node_tree.nodes)
+      and not bsdf(mi).inputs['Emission Color'].is_linked and bsdf(mi).inputs['Emission Strength'].default_value == 0.0)
 md = L.pbr_mat(S, name='cnapi_depthwrite', transparent=True, opacity=0.5, depth_write=False)
 check('pbr_mat depth_write=False: a blended material blends every layer (Transparency Overlap)',
       md.surface_render_method == 'BLENDED' and md.use_transparency_overlap)

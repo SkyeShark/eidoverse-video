@@ -424,9 +424,7 @@ register_example('my_fire', kind='volume', bounds=..., steps=96,
 ```
 
 `make(opts)` options that the engine took as camelCase (`paintColor`) map
-onto uniforms inside the example's own `make`. Inside the GLSL,
-`SDF_VIEW_DEPENDENT` is 0 for the bake, which keeps a view term out of a
-shared helper.
+onto uniforms inside the example's own `make`.
 
 ## Volumes — `create_sdf_volume`
 

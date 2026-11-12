@@ -63,7 +63,7 @@ LIVE_UNIFORMS = {'modern': ('uPaint', 'uRough'), 'cyber': ('uPaint', 'uRough'),
 
 class LiveUniforms:
     """The engine's mesh.userData.sdfLiveUniforms: car.live_uniforms['uPaint'] reads the live value (linear), and
-    car.live_uniforms['uPaint'] = 0xff2d95 sets it (materials, lamps and the reference raymarch follow)."""
+    car.live_uniforms['uPaint'] = 0xff2d95 sets it (the materials, the lamps and the SDF program follow)."""
 
     def __init__(self, car):
         self._car = car
@@ -149,7 +149,7 @@ class VehicleSdf(SdfObject):
         return self.set_uniform('uCamoMode', camo)
 
     def set_decal_text(self, text):
-        """make({decalText}) after the fact: redraw the badge canvas, for the material and the reference march."""
+        """make({decalText}) after the fact: redraw the badge canvas, for the material and the SDF program."""
         if self.kind != 'cyber':
             raise ValueError(f'{self.name}: only the cyberpunk sedan has a badge decal')
         from .badge import badge_image, decal_texture_array

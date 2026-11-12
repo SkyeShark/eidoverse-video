@@ -121,6 +121,7 @@ M += [eb('examples', 'blender/examples/obstacle_course/scene.json', tag='the wal
 M += [bl('assets', 'import_all.py', timeout=3600)]
 M += [bl('characters', s, NR) for s in ('test_vrma_clips.py', 'test_robot_walk.py', 'test_claude_robot_example.py',
                                         'test_clippy.py', 'test_robotics_arm.py')]
+M += [bl('characters', 'test_vrm_shadows.py'), gpu('characters', 'test_vrm_shadows.py', '--render')]
 M += [bl('claudesona', s, NR) for s in ('test_face.py', 'test_keyed_film.py', 'test_lipsync.py', 'test_lookat.py',
                                         'test_pbr_tuta.py', 'test_springs.py', 'test_tuta.py', 'test_wardrobe.py')]
 M += [bl('claudesona', 'test_face_geometry.py'), gpu('claudesona', 'test_basic_vrm.py'),

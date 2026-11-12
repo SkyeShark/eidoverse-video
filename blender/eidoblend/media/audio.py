@@ -105,7 +105,7 @@ def mixdown(scene, path, codec='PCM', fmt='S24', mixrate=48000, bitrate=320, tim
     once the file is complete.
 
     Blender 5.2 runs a mixdown as a window-manager job on a thread of its own: the operator returns FINISHED before
-    the file exists (measured 11-07: 8 ms; 0.4 s later 15 s of 48 kHz stereo was written), and without an event loop
+    the file exists (in 8 ms; 0.4 s later 15 s of 48 kHz stereo is written), and without an event loop
     (a background run, or a script that keeps the UI busy) the job is never ended, so only a session's first mixdown
     writes anything: every later one wrote nothing at all. So the mixdown runs in a child Blender on a copy of this
     file: one mixdown each, waited for until the file is complete."""

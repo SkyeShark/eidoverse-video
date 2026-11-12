@@ -1,5 +1,5 @@
 """eidoblend.sets.daisy.ocean: the ocean of faces, a headland at night above a sea made of faces, in Blender 5.2 EEVEE
-(port of eidoverse/sets/ocean.js and eidoverse/sets/ocean/*.js). Guide: tools-guides/_drafts/sets-daisy-ocean.md.
+(port of eidoverse/sets/ocean.js and eidoverse/sets/ocean/*.js). Guide: tools-guides/props-and-sets.md (The ocean).
 
     from eidoblend.sets.daisy import ocean
     O = ocean.build({'scene': scene})                # land, grass, daisies, sea, echoes, pages, house, apparitions, lights

@@ -107,7 +107,7 @@ def exposure_sweep(scene, out_dir, stops=DEFAULT_STOPS, name='sweep', render=Tru
 
 def mid_grey_luma(scene=None, grey=0.18):
     """The display value (0..255) the scene's view transform and look give scene-linear `grey` at exposure 0: AgX Base
-    Contrast puts 18 % grey at 117.6, Punchy at 88.3 (measured through Blender's own OCIO config, 11-07). Falls back to
+    Contrast puts 18 % grey at 117.6, Punchy at 88.3 (measured through Blender's own OCIO config). Falls back to
     117.6 when PyOpenColorIO is not there."""
     try:
         import PyOpenColorIO as ocio

@@ -1,5 +1,5 @@
 """eidoblend.sets.unknown_force: the UNKNOWN FORCE sets, the Blender 5.2 EEVEE edition of
-eidoverse/sets/unknown_force/. They were made for the UNKNOWN FORCE music video (2026-10), one room for every camp of
+eidoverse/sets/unknown_force/. They were made for the UNKNOWN FORCE music video, one room for every camp of
 the AI argument, painted for the futurist post pass; here each is a free set for any piece, with its own controls and
 its moving parts on your own clock.
 
@@ -18,9 +18,9 @@ The set contract, in Blender terms: build(...) returns a dict with group (the ro
 frame]) (frame keys what it sets), dispose() and cams (set-local pos / target / vertical fov, Blender axes). Every
 control is free: drive the sets on your own clock (their animate(...) keys it into the .blend).
 
-The interiors (quiet_room, showroom): build(env_light='material' (each material lit by its set's env, as the engine's
-envMap) or 'world', art={canvas: painter or image}, screen_media=... (the showroom)) and animate(frames, t0, **state)
-on their own clock.
+The interiors (quiet_room, showroom): build(art={canvas: painter or image}, screen_media=... (the showroom)), the
+set's env as the World (set.env) lighting it through its room probe, and animate(frames, t0, **state) on their own
+clock.
 """
 from __future__ import annotations
 

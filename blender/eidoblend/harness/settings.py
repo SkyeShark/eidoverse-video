@@ -1,7 +1,7 @@
 """eidoblend.harness.settings: EEVEE render presets and the scene config's "render" block.
 
-The presets are my films' settings (episode three's house.blend, read 11-07, and the render-time overrides
-render_h264.py measured on it):
+The presets are a finished interior film's settings (its set's saved .blend and the render-time overrides measured on
+it):
 
   film   EEVEE, AgX ('AgX - Base Contrast'); ray tracing on (screen traces, full resolution, spatial + temporal +
          bilateral denoise, trace quality 0.5, thickness 0.05, max roughness 0.5); fast GI (global illumination,

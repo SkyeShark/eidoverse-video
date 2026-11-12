@@ -27,15 +27,15 @@ import numpy as np
 
 from . import glsl_lib
 
-# kernel name -> (GLSL main, number of colour targets)
+# kernel name -> (GLSL main, number of colour targets, the program's stages it runs, in order, after the shared
+# prelude): 'field' the map with calcNormal / softShadow and the clip helpers, 'surface' the surface (with the shade
+# it is made from), 'shade' the shade, 'sample' / 'medium' the volume stage, 'post' the post stage when there is one
 KERNELS = {
-    'dist': (glsl_lib.KERNEL_DIST, 1),
-    'grad': (glsl_lib.KERNEL_GRAD, 2),
-    'surface': (glsl_lib.KERNEL_SURFACE, 6),
-    'sample': (glsl_lib.KERNEL_SAMPLE, 2),
-    'medium': (glsl_lib.KERNEL_MEDIUM, 2),
-    'raymarch': (glsl_lib.KERNEL_RAYMARCH, 1),
-    'volume_raymarch': (glsl_lib.KERNEL_VOLUME_RAYMARCH, 1),
+    'dist': (glsl_lib.KERNEL_DIST, 1, ('field',)),
+    'grad': (glsl_lib.KERNEL_GRAD, 2, ('field',)),
+    'surface': (glsl_lib.KERNEL_SURFACE, 6, ('field', 'surface')),
+    'sample': (glsl_lib.KERNEL_SAMPLE, 2, ('sample',)),
+    'medium': (glsl_lib.KERNEL_MEDIUM, 2, ('medium',)),
 }
 
 # engine uniforms every program carries: (name, type, default)
@@ -48,23 +48,10 @@ ENGINE_UNIFORMS = [
     ('sdfUseClip', 'float', 0.0),
     ('sdfClipMin', 'vec3', (-1e4, -1e4, -1e4)),
     ('sdfClipMax', 'vec3', (1e4, 1e4, 1e4)),
-    ('uMaxSteps', 'float', 128.0),
-    ('uSurfEps', 'float', 0.001),
-    ('uStepScale', 'float', 0.85),
-    ('uMaxDist', 'float', 100.0),
-    ('sdfVolSteps', 'float', 96.0),
-    ('sdfMediumStep', 'float', 0.01),
-    ('sdfMediumAmbient', 'vec3', (0.0, 0.0, 0.0)),
     ('uEnvMapStrength', 'float', 0.0),
     ('uModelMatrix', 'mat4', None),
     ('sdfCameraUniform', 'vec3', (0.0, 0.0, 0.0)),
     ('cameraPositionWorld', 'vec3', (0.0, 0.0, 0.0)),
-    ('sdfCamFwd', 'vec3', (0.0, 0.0, -1.0)),
-    ('sdfCamRight', 'vec3', (1.0, 0.0, 0.0)),
-    ('sdfCamUp', 'vec3', (0.0, 1.0, 0.0)),
-    ('sdfCamTan', 'vec2', (0.5, 0.5)),
-    ('sdfImageSize', 'vec2', (1.0, 1.0)),
-    ('sdfJitter', 'vec2', (0.0, 0.0)),
 ]
 
 _SLOTS = {'float': 1, 'int': 1, 'bool': 1, 'vec2': 1, 'vec3': 1, 'vec4': 1, 'color': 1, 'mat4': 4}
@@ -132,7 +119,10 @@ def _coerce(t, val):
 
 
 class SdfProgram:
-    """GLSL stages of one SDF (extra, map, shade, surface, sample, medium, post) and their compiled kernels."""
+    """GLSL stages of one SDF (extra, map, shade, surface, sample, medium, post) and their compiled kernels
+    (KERNELS: what each kernel runs)."""
+
+    KERNELS = KERNELS
 
     def __init__(self, map=None, surface=None, shade=None, sample=None, medium=None, extra='', uniforms=None,
                  textures=None, defines=None, label='sdf', post=None, shade_as='albedo'):
@@ -246,49 +236,40 @@ class SdfProgram:
     # ------------------------------------------------------------------------------------------- sources -----
     def source(self, kind):
         """The full fragment source of one kernel (for reading, and for compile-error messages)."""
-        if kind in ('dist', 'grad', 'surface', 'raymarch') and not _is_glsl(self.map):
+        main, _n, stages = self.KERNELS[kind]
+        if 'field' in stages and not _is_glsl(self.map):
             raise TypeError('map is not GLSL')
-        volume_kind = kind in ('sample', 'medium') or kind == 'volume_raymarch'
-        parts = [
-            '#define SDF_KERNEL_%s 1' % kind.upper(),
-            '#define SDF_VIEW_DEPENDENT %d' % (1 if kind in ('raymarch', 'volume_raymarch') else 0),
-        ]
-        if kind == 'volume_raymarch' and self.sample is None and self.medium is not None:
-            parts.append('#define SDF_VOLUME_MEDIUM 1')
-        if kind == 'volume_raymarch' and _is_glsl(self.post):
-            parts.append('#define SDF_HAS_POST 1')
+        volume_kind = 'sample' in stages or 'medium' in stages
+        parts = ['#define SDF_KERNEL_%s 1' % kind.upper()]
         parts += ['#define %s %s' % (k, v) for k, v in self.defines.items()]
         # the original's order: uniforms, sampleEnvMap / sdfReflectWorld, the primitives, extra, map, calcNormal /
         # softShadow, shade (an example's extra may call the env helpers)
         parts += [self._macros(), glsl_lib.VIEW_PRELUDE, glsl_lib.ENV_HELPERS, glsl_lib.SDF_PRIMITIVES,
                   glsl_lib.SURFACE_RECORD, glsl_lib.VOLUME_RECORDS, self.extra]
-        if volume_kind:
-            parts.append('vec4 sdfFetchPoint() { return texelFetch(sdfPoints, ivec2(gl_FragCoord.xy), 0); }')
-            if kind == 'sample' or (kind == 'volume_raymarch' and self.sample is not None):
-                if not _is_glsl(self.sample):
-                    raise TypeError('sample is not GLSL')
-                parts.append(self.sample)
-            else:
-                if not _is_glsl(self.medium):
-                    raise TypeError('medium is not GLSL')
-                parts.append(self.medium)
-            if kind == 'volume_raymarch' and _is_glsl(self.post):
-                parts.append(self.post)
-        elif kind in ('dist', 'grad', 'surface', 'raymarch'):
-            parts.append(self.map)
-            parts.append(glsl_lib.NORMAL_AND_SHADOW)
-            parts.append(glsl_lib.KERNEL_COMMON)
-            if kind == 'surface':
+        for stage in stages:
+            if stage == 'field':
+                parts += [self.map, glsl_lib.NORMAL_AND_SHADOW, glsl_lib.KERNEL_COMMON]
+            elif stage == 'surface':
                 if not _is_glsl(self.surface):
                     raise TypeError('surface is not GLSL')
                 if self.surface_from_shade and _is_glsl(self.shade):
                     parts.append(self.shade)
                 parts.append(self.surface)
-            if kind == 'raymarch':
+            elif stage == 'shade':
                 if not _is_glsl(self.shade):
                     raise TypeError('shade is not GLSL')
                 parts.append(self.shade)
-        parts.append(KERNELS[kind][0])
+            elif stage in ('sample', 'medium'):
+                code = self.sample if stage == 'sample' else self.medium
+                if not _is_glsl(code):
+                    raise TypeError(f'{stage} is not GLSL')
+                parts += ['vec4 sdfFetchPoint() { return texelFetch(sdfPoints, ivec2(gl_FragCoord.xy), 0); }', code]
+            elif stage == 'post':
+                if _is_glsl(self.post):
+                    parts.append(self.post)
+            else:
+                raise ValueError(f'{self.label}: kernel {kind!r} names an unknown stage {stage!r}')
+        parts.append(main)
         src = '\n'.join(p for p in parts if p)
         if volume_kind:
             # `sample` is a reserved word in desktop GLSL 4.x (the per-sample interpolation qualifier): the engine's
@@ -308,7 +289,7 @@ class SdfProgram:
         import gpu
         from gpu_extras.batch import batch_for_shader
         _ensure_gpu()
-        nout = KERNELS[kind][1]
+        nout = self.KERNELS[kind][1]
         info = gpu.types.GPUShaderCreateInfo()
         info.typedef_source('struct SdfParams { vec4 v[%d]; };' % max(1, self.n_slots))
         info.uniform_buf(0, 'SdfParams', 'sdf_U')
@@ -365,7 +346,7 @@ class SdfProgram:
         """Run one kernel over (N, 3) points (the SDF's local three frame); returns a list of (N, 4) arrays."""
         pts = np.ascontiguousarray(np.asarray(points, dtype=np.float32).reshape(-1, 3))
         n = len(pts)
-        nout = KERNELS[kind][1]
+        nout = self.KERNELS[kind][1]
         outs = [np.empty((n, 4), np.float32) for _ in range(nout)]
         if n == 0:
             return outs
@@ -382,7 +363,7 @@ class SdfProgram:
     def _eval_batch(self, kind, pts, width, target_ms):
         import gpu
         shader, batch = self._shader(kind)
-        nout = KERNELS[kind][1]
+        nout = self.KERNELS[kind][1]
         n = len(pts)
         w = min(width, n)
         h = int(math.ceil(n / w))

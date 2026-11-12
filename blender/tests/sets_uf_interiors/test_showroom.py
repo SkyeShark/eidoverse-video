@@ -111,6 +111,21 @@ def main():
         T.check("the stage probe's lowest samples lie inside the auditorium's floor slab, the floor a spacing clear "
                 "of the probe's edge", SR.FLOOR_Y - SR.FLOOR_SLAB < z_low < SR.FLOOR_Y and
                 SR.FLOOR_Y - plo.z > 1.2 * psp, f'lowest samples z {z_low:.3f}, floor {SR.FLOOR_Y}, spacing {psp:.3f}')
+        tp, tob = show.parts['toasterProbe'], show.parts['toaster']
+        tmeshes = [o for o in tob.children_recursive if o.type == 'MESH']
+        body = next(o for o in tmeshes if o.name.endswith(':toaster-body'))
+        bpy.context.view_layer.update()
+        inside = tp.matrix_world.inverted() @ body.matrix_world @ Vector(
+            [sum(c[i] for c in body.bound_box) / 8 for i in range(3)])
+        reach = max(tp.scale) * tp.data.parallax_distance
+        T.check("the toaster's sphere probe: a child of the toaster, its box influence round the body, the toaster's "
+                "meshes hidden from sphere captures, clip start 2 cm, parallax an ellipsoid reaching 2 m",
+                tp.data.type == 'SPHERE' and tp.parent == tob and tp.data.influence_type == 'BOX' and
+                max(abs(v) for v in inside) < 0.05 and len(tmeshes) >= 6 and
+                all(o.hide_probe_sphere for o in tmeshes) and abs(tp.data.clip_start - 0.02) < 1e-6 and
+                tp.data.use_custom_parallax and tp.data.parallax_type == 'ELIPSOID' and abs(reach - 2.0) < 1e-3,
+                f'{len(tmeshes)} meshes, body centre in the probe {tuple(round(v, 3) for v in inside)}, '
+                f'box {tuple(round(2 * v, 3) for v in tp.scale)} m, parallax reach {reach:.2f} m')
     on_meshes = {m.name for o in made['objects'] if o.type == 'MESH' for m in o.data.materials if m}
     need = {'ufsr-stage', 'ufsr-toast', 'ufsr-rubber', 'ufsr-bakelite', 'ufsr-velvet', 'ufsr-tt-top', 'ufsr-warning',
             'ufsr-dial', 'ufsr-ratingplate', 'ufsr-beam', 'ufsr-lens', 'ufsr-truss', 'ufsr-seat-fabric'}

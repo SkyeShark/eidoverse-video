@@ -87,6 +87,22 @@ answers the key light. `look='pbr'` renders an MToon VRM through a Principled
 BSDF under real light (`claudesona.look.set_look`, in either order with the
 wardrobe): [MToon or PBR](claudesona.md#mtoon-or-pbr--claudesonalookpy).
 
+**Shadows.** The add-on's MToon output shows the surface to camera rays only
+(a Transparent BSDF for every other ray, its opacity × Is Camera Ray), so with
+Blender's Transparent Shadows on an MToon VRM would cast nothing. `load_vrm`
+sets its MToon materials up for EEVEE's shadow pass (`vrm.mtoon_shadows`): the
+output group's shadow rays see the material's own opacity too (its outline
+shells stay out of the shadows), an alpha-clipped material (MASK: the skin,
+the clothes and the hair hide their unused parts this way) keeps Transparent
+Shadows and casts the clipped shape, a blended one (BLEND: lashes, brows,
+highlights) casts its alpha, and an opaque one takes opaque shadows. The probe
+bakes and the probes' reflections still see the surface transparent, as the
+add-on made it. My robot body's glTF PBR materials are left as they are; they
+cast as any Principled material does. `tests/characters/test_vrm_shadows.py`
+checks the flags and the group, through a save and a reopen, and with
+`--render` that Aletheia and my robot both darken the floor where their
+shadows fall.
+
 ## The cast — `eidoverse/assets/vrms/`
 
 Read the `<name>_preview.jpg` next to each `.vrm` before picking:
@@ -517,8 +533,13 @@ bash run_blender.sh blender/tests/characters/test_robot_walk.py      # from the 
 - `test_claude_robot_example.py` — the WebGPU example scene, ported.
 - `test_vrma_clips.py` — the clip library on the claudesona: NLA strips,
   a one-shot crossfaded in, its hold cut on its last frame.
+- `test_vrm_shadows.py` — `load_vrm`'s MToon shadow setup (the flags, the
+  output group, through a save and a reopen); `-- --render` puts Aletheia and
+  my robot side by side under a sun and checks that each one's shadow darkens
+  the floor (`out/vrm_shadows_sheet.jpg`).
 
-Each writes `out/<test>.json` (the report and the checks) and its `.blend`.
+Each writes `out/<test>.json` (the report and the checks) and its `.blend`;
+`test_vrm_shadows.py` writes `out/vrm_shadows.blend` and its stills.
 
 ## Not yet ported
 
@@ -537,12 +558,6 @@ not yet:
   example's frame order:** my feet's clearance from each other inside a clip
   (`walk_path` places the feet apart itself) and the finger pins. Both run in
   `characters.robot.RobotRig` / `perform_robot` ([robot body](robot-body.md)).
-- **An MToon character's sun shadow.** As the VRM add-on imports them, MToon
-  materials keep `use_transparent_shadow` on, and EEVEE's shadow pass sees
-  the add-on's output group as transparent: an MToon VRM (aletheia, aporia,
-  the claudesona) casts no sun shadow until its opaque materials get
-  `use_transparent_shadow = False`, which `load_vrm` does not set yet
-  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)).
 - **The rest of the family keeps its own lists:** the controller's (a sneak
   with no crouched-walk clip, the backward walk on stairs, the stress course's
   stair hand-overs: [controller](controller.md#not-yet-ported)), the

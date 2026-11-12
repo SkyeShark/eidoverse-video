@@ -157,7 +157,7 @@ SCANNED_KINDS = {
 
 
 def scanned_dir():
-    """Where the Poly Haven plant sets live: $EIDOBLEND_PH_ASSETS, else the lead's fetch folder in the main checkout
+    """Where the Poly Haven plant sets live: $EIDOBLEND_PH_ASSETS, else the fetch folder in the main checkout
     (work/claude_body/film/tools/dlss5nr/bmeadow/assets, fetched with its fetch_ph.py)."""
     d = os.environ.get(SCANNED_DIR_ENV)
     if d:

@@ -573,7 +573,7 @@ def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(),
 
     # ---- materials
     paper_col = PAPER
-    translucent = 0.4 * page_glow                     # the engine's 0.55 glow -> 0.22 translucency (round one's)
+    translucent = 0.4 * page_glow                     # the engine's 0.55 glow -> 0.22 translucency
     paper_rough = 0.9
     mats = {}
     if gltf_root is not None:
@@ -609,8 +609,8 @@ def make_book(out_dir, frames, size=(0.15, 0.222, None), cover=None, spreads=(),
     mats['inlay'], _ = _principled(f'{name}_inlay', image=_img(out / info['images']['inlay']), roughness=0.96)
     mats['mull'], _ = _principled(f'{name}_mull', image=_img(out / info['images']['mull']), roughness=0.96,
                                   double_sided=True)
-    # no paper bump: a 0.25 mm tooth is sub-pixel at reading distance and aliased into a stipple wherever the light
-    # grazed the page (seen 11-07 in the turn's shadow)
+    # no paper bump: a 0.25 mm tooth is sub-pixel at reading distance and aliases into a stipple wherever the light
+    # grazes the page (as in the turn's shadow)
     mats['paper'], _ = _principled(f'{name}_paper', color=paper_col, roughness=paper_rough, translucent=translucent)
 
     # the three window leaves: recto / verso sample one spread sequence, the file keyed to the page

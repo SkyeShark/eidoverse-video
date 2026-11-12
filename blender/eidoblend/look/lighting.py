@@ -182,9 +182,9 @@ def key_fill_rim(scene, subject, camera, key_w=250.0, fill_ratio=0.25, rim_w=200
 
 def practical(scene, emitter, watts, kelvin_k=2700, strength=None, kind='POINT', size=None, aim=None, name=None,
               collection=None):
-    """A practical light: the fixture's emitting surface glows AND a real light of the same size and colour sits on it
-    (episode three's film_face_light pattern). An emission alone lights nothing reliably in EEVEE (only through probes
-    and the screen-space GI); a light alone is light from nowhere. emitter: the object whose material is the lit
+    """A practical light: the fixture's emitting surface glows AND a real light of the same size and colour sits on it.
+    An emission alone lights nothing reliably in EEVEE (only through probes and the screen-space GI); a light alone is
+    light from nowhere. emitter: the object whose material is the lit
     part (a bulb, a lampshade, a screen). Its emission colour and strength are set (strength default: chosen so
     the surface reads a little brighter than what it lights). kind POINT (a bulb), AREA (a panel / screen), SPOT."""
     ob = bpy.data.objects[emitter] if isinstance(emitter, str) else emitter
@@ -359,9 +359,8 @@ def add_sphere_probe(scene, name, centre, radius=2.0, falloff=0.2, box=None, col
 
 
 def bake_light_probes(scene, probes=None, exclude=()):
-    """Bake volume probes (a GPU job: run through heavy.sh). One probe at a time, `exclude` objects / collections hidden
-    from the bake (episode three left out the room's haze, 'air'). Returns seconds per probe. Sphere probes need no
-    bake: EEVEE refreshes them itself."""
+    """Bake volume probes (a GPU job). One probe at a time, `exclude` objects / collections hidden from the bake (a
+    room's haze volume, say). Returns seconds per probe. Sphere probes need no bake: EEVEE refreshes them itself."""
     import time
     vols = probes or [o for o in scene.objects if o.type == 'LIGHT_PROBE' and o.data.type == 'VOLUME']
     hidden = []
@@ -453,7 +452,7 @@ def debug_passes(scene, out_dir, passes=('diffuse_light', 'specular_light', 'sha
             absent.append(nm)
             continue
         # ONE File Output node per pass: in 5.2.0 a node with several items writes only its first one into the
-        # multilayer EXR (measured 11-07: Shadow + Diffuse Direct + Normal items -> a file with Shadow.V alone)
+        # multilayer EXR (Shadow + Diffuse Direct + Normal items give a file with Shadow.V alone)
         fo = t.nodes.new('CompositorNodeOutputFile')
         fo.name = f'look:pass:{nm}'
         fo.location = (200, -400 - 120 * i)

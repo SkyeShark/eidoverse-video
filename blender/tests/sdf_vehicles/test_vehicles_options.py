@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _vcommon as V  # noqa: E402
+import engine_march as EM  # noqa: E402  (tests/sdf, on sys.path through _vcommon)
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -188,7 +189,7 @@ if 'live' in PARTS_RUN:
     img = [n for n in car.parts['badge'].node_tree.nodes if n.type == 'TEX_IMAGE'][0].image
     after = np.array(img.pixels[:]).reshape(B.CANVAS_H, B.CANVAS_W, 4)
     want = B.decal_texture_array('HELLO')
-    V.check('set_decal_text: the badge image is the new canvas; the reference march gets it too',
+    V.check('set_decal_text: the badge image is the new canvas; the SDF program gets it too',
             np.array_equal(after[..., 3] > 0.5, want[..., 3] > 0.5) and not np.array_equal(before.reshape(after.shape),
             after) and np.array_equal(car.program.textures['uDecal'], want), f"text {car.decal_text!r}")
     tgt = V.three(0.834, 1.15, -0.95)
@@ -320,7 +321,7 @@ if 'sheets' in PARTS_RUN:
                      name='cam_grille')
     sc.camera = cam
     g = render_to('_opt_grille_eevee.png')
-    ref = parts.raymarch_reference(cam, W, H, samples=4)
+    ref = EM.march(parts, cam, W, H, samples=4)
     gr = V.save_linear_png(os.path.join(V.OUT, '_opt_grille_ref.png'), ref)
     V.sheet([a], os.path.join(V.OUT, 'opt_cyber_baked.png'), cols=1)
     V.sheet([g, gr], os.path.join(V.OUT, 'opt_grille.png'), cols=2)

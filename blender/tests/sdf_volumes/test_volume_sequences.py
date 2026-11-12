@@ -20,6 +20,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _vcommon as V  # noqa: E402
+import engine_march as EM  # noqa: E402  (tests/sdf, on sys.path through _vcommon)
 
 import bpy  # noqa: E402
 
@@ -102,8 +103,10 @@ for name in NAMES:
         V.check(f'{name}: visible at t={t}', float((diff > 0.03).mean()) > 0.002,
                 f'{(diff > 0.03).mean() * 100:.2f}% of the frame changed')
         # the engine's march of the same sample(), composited over the same empty stage (the floor and sky EEVEE
-        # rendered without the volume), so the two differ only by the volume
-        refi = vol.raymarch_reference(cam, W, H, samples=2, t=t)
+        # rendered without the volume), so the two differ only by the volume; the explosion ring marched as the
+        # engine drew it, its sample() unfolded and its post on (its grids fold the post in through uFoldGamma)
+        unfolded = {'uFoldGamma': 1.0} if 'uFoldGamma' in vol.program.values else None
+        refi = EM.march(vol, cam, W, H, samples=2, t=t, values=unfolded)
         stage_lin = V.read_exr(empty_exr)[::-1, :, :3]
         ref = refi[..., :3] + stage_lin * (1.0 - refi[..., 3:4])
         pr = V.save_linear_png(os.path.join(V.OUT, f'seq_{name}_life{i}_ref.png'), ref)

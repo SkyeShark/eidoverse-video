@@ -61,7 +61,7 @@ Two keys are new:
 | `preset` | `film` (default) or `probe`: `probe` renders this scene at the probe caps every time (applied at render time, never saved) |
 | `samples` | EEVEE render samples |
 | `motion_blur`, `shutter` | motion blur on/off; shutter in frames (0.5 = a 180° shutter) |
-| `raytracing` | EEVEE ray tracing (on in both presets: it carries the reflections and the Fast GI that runs inside it, so leave it on) |
+| `raytracing` | how EEVEE's ray tracing finds reflections and refraction: `true` (both presets) screen-traces them; `false` takes them from the light probes alone. The ray tracing itself, and the Fast GI that runs inside it, stay on either way |
 | `volume_tile`, `volume_samples` | volumetric tile size (px) and samples |
 | `exposure`, `look` | view exposure (stops) and AgX look (`AgX - Base Contrast`, `AgX - Punchy`, `None`) |
 | `bloom` | `true` or `{"threshold": 1, "size": 0.5, "strength": 1}`: a compositor Glare pass. A hot emitter in the dark blooms across the whole frame at strength 1; start near 0.3 for a lens's glow |
@@ -313,6 +313,12 @@ def setup(ctx):
     _overlay.add(title_plane)                       # screen-locked at z = -1 (half_w, half_h: the frame there)
 ```
 
+`_ao_params` and `_ssr_params` set EEVEE, not post passes: `_ao_params`
+`{'enabled': False}` leaves Fast GI on (it is the renderer's global
+illumination; the ledger notes the request), and `_ssr_params`
+`{'enabled': False}` takes the reflections from the light probes, the ray
+tracing still on.
+
 A hook gets the scene and its compositor tree and returns a node;
 `chain.source_pass(scene, 'Depth')` (or `'Normal'`) gives it the passes the
 engine's hooks received. `_auto_enhance_pre_bloom_hook` runs just before the
@@ -339,7 +345,8 @@ Saturated ink comes back only as close as AgX can show it; for such ink with
 no screen hook, the media family's display-space edit pass is exact
 ([motion graphics](motion-graphics.md)).
 `_no_auto_enhance = True` (or `NO_AUTOENHANCE=1`) adds no runner stages; a
-scene's own chain stages stay.
+scene's own chain stages stay, and EEVEE's Fast GI and ray tracing stay as
+the scene set them.
 The digest's `render.auto_enhance` record says what was installed, like the
 engine's `[auto-enhance] TSL pipeline: ...` line.
 

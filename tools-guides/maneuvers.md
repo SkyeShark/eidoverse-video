@@ -148,13 +148,22 @@ What `seat_on` does, in the engine's order:
   4 cm leg went 2-3 cm and stayed on it), the way kept from frame to frame
   unless another is clearly shorter, smoothed over nine frames, in up to
   four rounds. A foot that moves between two seated poses (a crossfade into
-  or out of a loop) steps, lifted, instead of sliding.
+  or out of a loop) steps, lifted, instead of sliding. A seated foot resting
+  on the floor (within 4 mm) is held where it rests, its place and turn; a
+  foot lifting off it without a step eases back to the clip's place over 8
+  frames. Where the feet bear the body (sitting down, standing up) one foot
+  steps at a time: where both feet's steps overlap there, the longer is
+  taken and the other foot stays where it rests. Seated on the pan the feet
+  carry nothing, and both step together, each lifted.
 - **My robot body** (`claude_robot`) carries joint clamps on its legs, which
   the plant applies to every frame it keys: the measures pose its legs
   through them and through its hips' stages (`body.project_legs`: the
   HipPitch / HipSwing mechanism the bake keys, which is seat skin too), and
   each seated foot is reached for again on the clamped legs until the
-  clamps leave it where it was placed.
+  clamps leave it where it was placed. Its ankle has no twist, so a foot
+  turns with the shin about the leg; one resting flat on the floor (its
+  points on the floor spanning most of its length) takes that turn about
+  the middle of what rests, not about its ankle.
 - **The hand-over.** Where a seat's frames meet the plant's, the plant
   drops a stance's hold at once (the foot jumps by all the stance's
   correction: up to 26 cm measured). `bake` passes each foot and the pelvis
@@ -238,8 +247,13 @@ E.sit_on_ground(walk, clip='sitting_on_ground',   # or 'sit_laying_on_ground' to
 
 The library has no stand-to-ground clip, so the crossfade is the sit-down:
 the ground clip crossfaded in from the standing pose by hand over `fade`,
-eased, the body's lowest point within 0.35 m of the hips (the engine's grid of
-up-rays) rested 5 mm over the floor. The engine casts at every visible mesh;
+eased, the lowest of the skin within 0.35 m of the hips rested on the floor
+(the engine reads a 5 × 5 grid of up-rays there, which can pass between a
+body's parts). The boots, and on my
+robot body the arms, stay out of the floor through the crossfades, the hold
+and the rise: where the floor is, an ankle rises (on my robot body after
+its leg's clamps), the toes turn up where the leg cannot fold further, and a
+forearm under the floor turns up at the shoulder. The engine casts at every visible mesh;
 here the spring chains are left out (tails, tentacles, hair, a coat's tails:
 `bake_springs` swings them afterwards, through whatever they were measured
 against), and so are loose layers (a coat skinned to the thighs: on the
@@ -404,25 +418,28 @@ the body out of the floor through a ground sit's crossfades).
 - My robot body's ground sit is a long sit, not the library's cross-legged
   clip: its hips flex 98° at most and its knees 112°, so the legs cannot fold.
   The ankles are carried along the floor to a place straight ahead of each
-  hip, each leg solved to it with the knee toward forward-and-up, the knees
-  bent 12°, heels down, in the settle, the crossfades and the keyed frames.
-  The library has no floor clip the robot's joints can hold.
+  hip, each leg solved to it on its own bones with the knee's hinge turned
+  from the clip's to across the body, the knees bent 12°, each heel resting
+  on the floor, in the settle, the crossfades and the keyed frames. The
+  library has no floor clip the robot's joints can hold.
 
 Known residuals (each measured by the tests; the JSON reports in `out/` list
 the frames):
 
-- On my robot body (`--vrm claude_robot`: 114 of 121 checks pass): a sole
-  slides 8 and 10 mm a frame in chair A's and chair B's sits, at the seat's
-  hand-over to the plant at the end of the stand-up; after each stand-up the
-  walk's first step leaves the planted foot out of its straight leg's reach
-  (the plant releases it: 8 frames with no foot down); the long sit's
-  sit-down crossfade dips the body 7 cm under the floor for a frame, and its
-  rise from the ground pops (a 13 cm heave); lying down, something of it goes
-  2.5 cm under the floor midway through the crossfade.
+- On my robot body (`--vrm claude_robot`: 123 of 125 checks pass): its
+  ankle has no twist, so a seated foot turns with the shin about the leg.
+  Late in chair A's stand-up the right sole, turned about the middle of what
+  rests on the floor, still slides 6.2 mm in a frame (the check's limit is
+  6). On chair B (0.56 m) a foot hanging on its toes near the ankle's pitch
+  stop, where its roll range narrows, rolls 4° in one frame of the seated
+  loop: the toes slide 10.2 mm.
 - Lying down, the tails stand into the floor (rest pose; baked springs have
   no floor to collide with either).
 - The ladder's mantle can leave a boot up to 7 mm inside the wall for a few
   frames.
+- After the vault from standing (`test_maneuver_moves.py`, 86 of 87 checks),
+  the landing foot settles on the second frame the plant holds it: it rolls
+  6.4 mm and slips 1.7 mm (the check's limits are 2.5 and 1 mm), then stays.
 - A coat skinned to the body without cloth presses into a chair's back (it
   never comes out of it) and into a seat's pan where it falls past the edge,
   and on the ground goes under the floor where it hangs under her (hidden).

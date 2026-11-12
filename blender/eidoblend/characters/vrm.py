@@ -19,9 +19,10 @@ NORMALIZED rotations are three-vrm's: rest = identity, world-aligned axes, compo
 pose and every robot_dof table read the same here as in the WebGPU edition. (Proof: the add-on's own VRMA import, read back
 through read_pose, bends the knees about +X; tests/characters/test_robot_walk.py records it.)
 
-Materials: the robot (claude_robot.vrm) is plain glTF PBR (Principled, normal map, ORM), which EEVEE lights as it is:
-episode 3's film used exactly these. The MToon cast keeps the add-on's MToon node setup (look='mtoon'); look='pbr'
-renders them through a Principled BSDF (claudesona.look.set_look).
+Materials: the robot (claude_robot.vrm) is plain glTF PBR (Principled, normal map, ORM), which EEVEE lights as it is.
+The MToon cast keeps the add-on's MToon node setup (look='mtoon'); look='pbr' renders them through a Principled BSDF
+(claudesona.look.set_look). Their shadows are set up at load (mtoon_shadows): the add-on's MToon output shows the
+surface to camera rays only, so its shadow rays are given the material's own opacity as well.
 """
 
 import json
@@ -204,6 +205,7 @@ def load_vrm(path, name=None, location=(0.0, 0.0, 0.0), rotation=0.0, collection
             col.objects.link(o)
     arm.matrix_world = Matrix.Translation(Vector(location)) @ _turn(rotation).to_matrix().to_4x4()
     h = VRMHandle(arm, new, col, path, name)
+    mtoon_shadows(h.meshes)
     if look == 'pbr':
         from .claudesona.look import set_look
         set_look(h, 'pbr')
@@ -212,6 +214,77 @@ def load_vrm(path, name=None, location=(0.0, 0.0, 0.0), rotation=0.0, collection
     if (scene.view_settings.view_transform, scene.view_settings.look) != view0:
         raise RuntimeError(f'load_vrm: the import changed the colour management {view0}')
     return h
+
+
+MTOON_OUTPUT = 'VRM Add-on MToon 1.0 Output'     # the add-on's MToon output node group (its name, before the revision)
+
+
+def mtoon_shadows(meshes):
+    """A VRM's MToon materials set up for EEVEE's shadows. The add-on's MToon output mixes the surface with a
+    Transparent BSDF by its opacity x Is Camera Ray, so every other ray sees it fully transparent, the shadow pass
+    included, and with Transparent Shadows on (Blender's default) the character would cast no shadow. Here the
+    output's shadow rays see the material's opacity too (_shadow_rays: once per output group; the outline shells cast
+    none), and each material takes the shadow flag its alpha mode needs: an alpha-clipped one (MASK: the skin, the
+    clothes and the hair hide their unused parts this way) keeps Transparent Shadows, so it casts the clipped shape;
+    a blended one (BLEND: lashes, brows, highlights) casts its alpha; an opaque one (OPAQUE) takes opaque shadows,
+    Transparent Shadows off. Other rays (the probe bakes, the probes' reflections) still see the surface transparent,
+    as the add-on made it. Returns {'groups': [output groups changed], 'opaque' / 'clipped' / 'blended': [materials]}."""
+    out = {'groups': [], 'opaque': [], 'clipped': [], 'blended': []}
+    seen = set()
+    for ob in meshes:
+        for slot in ob.material_slots:
+            m = slot.material
+            if m is None or m.name in seen or m.node_tree is None:
+                continue
+            seen.add(m.name)
+            mt = getattr(getattr(m, 'vrm_addon_extension', None), 'mtoon1', None)
+            if mt is None or not mt.enabled:
+                continue
+            for n in m.node_tree.nodes:
+                g = n.node_tree if n.bl_idname == 'ShaderNodeGroup' else None
+                if g is not None and g.name.startswith(MTOON_OUTPUT) and _shadow_rays(g):
+                    out['groups'].append(g.name)
+            m.use_transparent_shadow = mt.alpha_mode != 'OPAQUE'
+            out[{'OPAQUE': 'opaque', 'MASK': 'clipped'}.get(mt.alpha_mode, 'blended')].append(m)
+    return out
+
+
+def _shadow_rays(g):
+    """In the add-on's MToon output group: every use of Light Path's Is Camera Ray becomes
+    max(Is Camera Ray, Is Shadow Ray x (1 - Is Outline)), so the shadow pass sees the opacity the camera sees and the
+    outline shells (Is Outline) stay out of it. Once per group (g['eido_shadow_rays']); True when it changed g."""
+    if g.get('eido_shadow_rays'):
+        return False
+    uses = [lk for lk in g.links if lk.from_node.bl_idname == 'ShaderNodeLightPath'
+            and lk.from_socket.name == 'Is Camera Ray']
+    gi = next((n for n in g.nodes if n.bl_idname == 'NodeGroupInput' and n.outputs.get('Is Outline') is not None), None)
+    for lk in uses:
+        lp, dst = lk.from_node, lk.to_socket
+        shadow = lp.outputs['Is Shadow Ray']
+        if gi is not None:
+            keep = g.nodes.new('ShaderNodeMath')
+            keep.operation = 'SUBTRACT'
+            keep.label = 'not an outline'
+            keep.inputs[0].default_value = 1.0
+            keep.location = (lp.location.x + 200, lp.location.y - 220)
+            g.links.new(gi.outputs['Is Outline'], keep.inputs[1])
+            mul = g.nodes.new('ShaderNodeMath')
+            mul.operation = 'MULTIPLY'
+            mul.label = 'shadow ray, not an outline'
+            mul.location = (lp.location.x + 380, lp.location.y - 160)
+            g.links.new(shadow, mul.inputs[0])
+            g.links.new(keep.outputs[0], mul.inputs[1])
+            shadow = mul.outputs[0]
+        seen = g.nodes.new('ShaderNodeMath')
+        seen.operation = 'MAXIMUM'
+        seen.label = 'camera or shadow ray'
+        seen.location = (lp.location.x + 560, lp.location.y)
+        g.links.remove(lk)
+        g.links.new(lp.outputs['Is Camera Ray'], seen.inputs[0])
+        g.links.new(shadow, seen.inputs[1])
+        g.links.new(seen.outputs[0], dst)
+    g['eido_shadow_rays'] = True
+    return bool(uses)
 
 
 def joints_record(h):

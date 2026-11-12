@@ -122,6 +122,10 @@ rt = L.create_rt_lighting(scene, shadows=True, gi=True, reflections=True, refl_m
 rt.update(); rt.reset_history()          # no-ops, kept so ported scenes run
 ```
 
+Fast GI is always on: `gi=False` raises. `reflections=False` takes the
+reflections from the light probes alone (EEVEE's Light Probe tracing), the
+ray tracing that hosts Fast GI still on.
+
 | `rt_lighting.js` | EEVEE |
 | --- | --- |
 | traced soft shadows, 8 light slots, `rtRadius` | every light shadows: `shadow_ray_count` × `shadow_step_count`; radius = the light's size |
@@ -441,11 +445,6 @@ None of these proves composition. View the probe stills.
   per-frame correction pass does not).
 - Clearance against instanced geometry (a camera inside a scattered rock is
   not flagged `inside`; sightlines do see instances).
-- Shadows of a VRM's MToon materials: as the VRM add-on imports them, an
-  MToon character casts no sun shadow until its opaque materials get
-  `use_transparent_shadow = False`
-  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)); `load_vrm` does
-  not set it yet.
 - A chrome sphere's reflection of what lies behind the camera, in a closed
   test room, shows thin bluish lines in the pattern of the room's edges: the
   sphere-probe setup for off-screen mirror reflections indoors is not settled.

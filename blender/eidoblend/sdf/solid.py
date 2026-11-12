@@ -658,15 +658,6 @@ class SdfObject:
                 'bounds_max': bmax.tolist(), 'clipped': clipped,
                 'gap_min': (lo - bmin).round(4).tolist(), 'gap_max': (bmax - hi).round(4).tolist()}
 
-    # ------------------------------------------------------------------------------------------ reference ----
-    def raymarch_reference(self, camera, width=480, height=270, samples=4, t=None):
-        """The engine's own raymarch of this SDF (its quality preset, its shade()) seen from a Blender camera: a
-        linear float image (H, W, 4), row 0 at the bottom. The original look, to judge the EEVEE port against."""
-        from .reference import raymarch_image
-        if t is not None:
-            self.program.values['uTime'] = float(t)
-        return raymarch_image(self, camera, width, height, samples)
-
 
 def create_sdf_object(spec=None, **kwargs):
     """The engine's createSdfObject(spec): spec is a dict (or an EXAMPLES entry) with map / surface / shade /

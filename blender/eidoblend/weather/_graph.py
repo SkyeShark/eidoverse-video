@@ -1,4 +1,4 @@
-"""Node-graph helpers for the weather port: round one's expression builder (eidoblend.fx._nodes) plus the Geometry
+"""Node-graph helpers for the weather port: the toolkit's expression builder (eidoblend.fx._nodes) plus the Geometry
 Nodes pieces and the hash / noise functions of weather_system.js, so the TSL ports as code.
 
     b = G(tree)

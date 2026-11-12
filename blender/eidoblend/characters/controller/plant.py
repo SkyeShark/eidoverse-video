@@ -11,7 +11,8 @@ blend of clips at any speed):
                 pelvis stays where the seat puts it, its feet go onto the floor under it); a fall and a maneuver leave
                 the feet to the clip (the maneuver's contact IK places them). Neither foot down is a flight only where a
                 gait with one leads (FLIGHT_SLOTS); anywhere else the report lists it as airborne. A swing of two frames
-                between two stances is the crossfade's noise: the foot stays down
+                between two stances is the crossfade's noise where the foot lands back where it stood: it stays down;
+                one that carries the foot on starts earlier, to last SWING_MIN_FRAMES while the other foot stands
   THE STEPS     a planted foot the body has walked on from is let go (an early toe-off); where the other foot is still
                 in its swing then, that swing is brought forward to land by then (its own motion relative to the body,
                 played faster: a quicker step, _land_by / _retime), so a walk keeps a foot down
@@ -64,6 +65,8 @@ FIT_RANGE = 0.12                     # the most a landing moves along the foot t
 SURFACE_DROP = 0.05                  # a planted sole's surface lies no further under the ground it landed on (m)
 BOOT_FIT = 0.04                      # the most more it moves to take the boot out of a riser (a heel's tuck) (m)
 SWEEP_RATE = 1.2                     # the swing's clearance envelope rises toward an obstacle at most this fast (m/s)
+STEP_NOISE = 0.08                    # a two-frame swing landing within this of where its foot stood is a blend's noise (m)
+SWING_MIN_FRAMES = 4                 # a short swing that carries its foot on is started earlier to last this many frames
 LOAD_FRAMES = 4
 TRAIL_FULL = 0.55                    # a planted foot within this share of its leg's reach from the hip (along the
 TRAIL_NONE = 0.85                    # ground) carries its load; past this share none (the body walked on from it)
@@ -417,10 +420,14 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
     for (s, _a), (a, L, g, E) in sorted((retime or {}).items(), key=lambda kv: kv[1][0]):
         _retime(pb, world, A, recs, s, a, L, g, E, released)
     # stance runs of one frame (and swings of one frame) are blend noise: dropped. A swing of two frames between two
-    # stances is too (a crossfade's stance weights dipping under a half): no foot lifts, travels and lands in 0.07 s;
-    # the foot stays down
+    # stances is too where the foot lands back where it stood (a crossfade's stance weights dipping under a half): no
+    # foot lifts, travels and lands in 0.07 s; it stays down. One that carries the foot on (a stair clip coming in
+    # with that foot's next stance a step ahead of where it stands) is a step: it starts earlier, to last
+    # SWING_MIN_FRAMES, while the other foot stands
     for s in SIDES:
+        o = 'right' if s == 'left' else 'left'
         fl = [r['feet'][s]['stance'] for r in A]
+        fo = [r['feet'][o]['stance'] for r in A]
         for _ in range(2):
             for i in range(1, n - 1):
                 if fl[i] != fl[i - 1] and fl[i] != fl[i + 1]:
@@ -429,7 +436,16 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             if fl[i - 1] and not fl[i] and not fl[i + 1] and fl[i + 2] and \
                     not any(A[k]['feet'][s]['free'] for k in (i, i + 1)) and \
                     not any(recs[k]['f'] in released.get(s, ()) for k in (i, i + 1)):
-                fl[i] = fl[i + 1] = True
+                a0 = i - 1
+                while a0 > 0 and fl[a0 - 1]:
+                    a0 -= 1
+                if (A[i + 2]['feet'][s]['p_an'].xy - A[a0]['feet'][s]['p_an'].xy).length < STEP_NOISE:
+                    fl[i] = fl[i + 1] = True
+                    continue
+                for k in range(i - 1, i + 1 - SWING_MIN_FRAMES, -1):
+                    if k <= a0 + 1 or not fo[k]:
+                        break
+                    fl[k] = False
         for r, v in zip(A, fl):
             r['feet'][s]['stance'] = v
     intervals = {s: _intervals([r['feet'][s]['stance'] for r in A]) for s in SIDES}
