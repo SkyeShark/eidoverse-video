@@ -38,7 +38,8 @@ RENDER_KEYS = {
     'samples': 'EEVEE render samples (taa_render_samples)',
     'motion_blur': 'true/false',
     'shutter': 'motion blur shutter, in frames (0.5 = a 180-degree shutter)',
-    'raytracing': 'true/false: EEVEE ray tracing (screen-space traces + denoise)',
+    'raytracing': 'true/false: screen-traced reflections and refraction (false: from the light probes; fast GI '
+                  'stays on)',
     'volume_tile': 'volumetric tile size in pixels (1, 2, 4, 8, 16)',
     'volume_samples': 'volumetric samples',
     'exposure': 'view exposure in stops',

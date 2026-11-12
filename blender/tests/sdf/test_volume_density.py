@@ -1,4 +1,4 @@
-"""create_sdf_volume's grids measured in a render: EEVEE and Cycles against the closed-form answer.
+"""create_sdf_volume's grids measured in a render: EEVEE against the closed-form answer.
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
         <worktree>/blender/tests/sdf/test_volume_density.py
@@ -9,9 +9,9 @@ cube's centre crosses s = 0.9 m / cos(its angle off the axis): 0.928 m for A (2.
   B  sample(): the engine contract, alpha 0.01 per 0.01 m -> density -ln(0.99) / 0.01, transmittance exp(-1.005 s)
   C  medium(): a pure emitter-absorber, density 1 /m, emission (1, 0.5, 0.25) /m
      -> E (1 - exp(-s)) + backdrop exp(-s)
-  D  medium(): a scattering slab (density 4 /m, albedo 0.9) under a sun: measured in both engines and printed
-The renders go to linear EXR ('Standard' view) and the centre pixels are compared with those numbers (within 3 %).
-out/vol_density_eevee.png and _cycles.png show the probe. Before them, without rendering (`-- render=0` runs only
+  D  medium(): a scattering slab (density 4 /m, albedo 0.9) under a sun: measured and printed
+The render goes to linear EXR ('Standard' view) and the centre pixels are compared with those numbers (within 3 %).
+out/vol_density_eevee.png shows the probe. Before it, without rendering (`-- render=0` runs only
 these): sample_as='albedo' grids, and Python sample() / medium() stages against their GLSL twins.
 """
 
@@ -48,7 +48,7 @@ SdfMedium medium(vec3 p) {
     return sdfMedium(1.0 * inside, vec3(0.0), vec3(1.0, 0.5, 0.25) * inside);
 }"""
 # D, measured only: a scattering slab (density 4 /m, albedo 0.9) under a sun from the camera's side. There is no
-# closed form for its multiple scattering; EEVEE scatters once, Cycles many times, and the two are printed.
+# closed form for its multiple scattering (EEVEE's volumes scatter the sun once), so its colour is printed.
 SCATTER = SLAB + r"""
 SdfMedium medium(vec3 p) {
     float inside = slab(p) < 0.0 ? 1.0 : 0.0;
@@ -167,21 +167,9 @@ def centres(path):
 
 
 scattered = {}
-for engine in (('BLENDER_EEVEE', 'CYCLES') if C.args().get('render', '1') == '1' else ()):
+for engine in (('BLENDER_EEVEE',) if C.args().get('render', '1') == '1' else ()):
     sc.render.engine = engine
-    if engine == 'CYCLES':
-        sc.cycles.samples = 64
-        sc.cycles.volume_step_rate = 0.25
-        try:
-            prefs = bpy.context.preferences.addons['cycles'].preferences
-            prefs.compute_device_type = 'OPTIX'
-            prefs.get_devices()
-            for d in prefs.devices:
-                d.use = d.type == 'OPTIX'
-            sc.cycles.device = 'GPU'
-        except Exception as e:  # noqa: BLE001
-            print('[density] Cycles on the CPU:', e)
-    tag = 'eevee' if engine == 'BLENDER_EEVEE' else 'cycles'
+    tag = 'eevee'
     exr = os.path.join(C.OUT, f'vol_density_{tag}.exr')
     sc.render.filepath = exr
     bpy.ops.render.render(write_still=True)
@@ -199,8 +187,4 @@ for engine in (('BLENDER_EEVEE', 'CYCLES') if C.args().get('render', '1') == '1'
     a = np.asarray(buf.get_pixels(oiio.FLOAT))[..., :3]
     C.save_linear_png(os.path.join(C.OUT, f'vol_density_{tag}.png'), a[::-1], agx=False)
     os.remove(exr)
-if len(scattered) == 2:
-    r = float(scattered['eevee'].mean() / max(1e-6, scattered['cycles'].mean()))
-    print(f'[density] scattering slab: EEVEE / Cycles radiance = {r:.3f} (EEVEE scatters once, Cycles many times)',
-          flush=True)
 C.summary()

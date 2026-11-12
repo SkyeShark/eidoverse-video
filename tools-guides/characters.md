@@ -319,7 +319,7 @@ mound, 6 cm rolls, 2 cm foot-sized ripples), at 1.56 m/s:
 - **Double support.** Both feet are down together on 20 frames; no frame has
   both feet off the ground.
 
-The verifier's 45° bend gives the same: slips at most 0.7 mm a frame, the root
+A 45° bend gives the same: slips at most 0.7 mm a frame, the root
 turning at most 2.8° a frame, the IK on target. So does a 0.9 m/s walk: slips at
 most 0.4 mm a frame.
 
@@ -510,7 +510,7 @@ bash run_blender.sh blender/tests/characters/test_robot_walk.py      # from the 
     and over the rolls before it);
   - two double supports, low and close.
 
-  Its options: `--path bend` is the verifier's 45° bend, with the corner from
+  Its options: `--path bend` is a 45° bend, with the corner from
   above, a following camera, and my outer foot through its stance in the turn.
   `--speed 0.9` walks slower; `--flat` walks on a level floor; `--tag` names
   the outputs.
@@ -537,9 +537,15 @@ not yet:
   example's frame order:** my feet's clearance from each other inside a clip
   (`walk_path` places the feet apart itself) and the finger pins. Both run in
   `characters.robot.RobotRig` / `perform_robot` ([robot body](robot-body.md)).
+- **An MToon character's sun shadow.** As the VRM add-on imports them, MToon
+  materials keep `use_transparent_shadow` on, and EEVEE's shadow pass sees
+  the add-on's output group as transparent: an MToon VRM (aletheia, aporia,
+  the claudesona) casts no sun shadow until its opaque materials get
+  `use_transparent_shadow = False`, which `load_vrm` does not set yet
+  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)).
 - **The rest of the family keeps its own lists:** the controller's (a sneak
   with no crouched-walk clip, the backward walk on stairs, the stress course's
-  stair and ramp pops: [controller](controller.md#not-yet-ported)), the
+  stair hand-overs: [controller](controller.md#not-yet-ported)), the
   maneuvers' and seats' ([maneuvers](maneuvers.md#not-yet-ported)), my robot
   body's ([robot body](robot-body.md#not-yet-ported)) and the claudesona's
   ([claudesona](claudesona.md#not-yet-ported)).

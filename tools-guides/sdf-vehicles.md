@@ -128,11 +128,9 @@ switch (the engine set `uCamoMode` to 0, 1, 2 or 3, never between), and a
 LINEAR key from silver to forest would pass through sky and desert, so its
 keys hold (CONSTANT) unless `interpolation=` says otherwise.
 
-`set_uniform` also updates the SDF program, so `raymarch_reference()` (the
-engine's own march with its `shade()`) shows the same livery. Each object
-owns its uniforms, as the GLSL original's per-instance uniforms did. The
-TSL port shared one `_u` per example, so a second `make()` repainted the
-first car; here a lineup of four liveries is four independent cars.
+`set_uniform` also updates the SDF program. Each object owns its uniforms,
+as the GLSL original's per-instance uniforms did, so a lineup of four
+liveries is four independent cars.
 
 ## The parts
 
@@ -250,8 +248,7 @@ headlights throw two pools each onto the road from about a metre ahead of
 the bumper, the tail lamps a red glow behind, the underglow a magenta or
 cyan wash under the sills, and the afterburners a wide orange pool under
 the jet's tail. Every lamp sits one to six centimetres outside its own
-lamp part, so its body never shadows it, and Cycles renders the same file
-alike.
+lamp part, so its body never shadows it.
 
 ## The baked path
 
@@ -333,7 +330,7 @@ shadows, which the engine's could not cast. Tone mapping is AgX, not ACES.
 ## Tests
 
 `blender/tests/sdf_vehicles/`. Each script's docstring gives its command,
-run through the GPU slot.
+one render at a time on a shared GPU.
 
 - `test_vehicles_compile.py` checks the specs. Every kernel compiles; the
   surface carries the ids the part tables map; the shapes stay inside
@@ -360,8 +357,7 @@ run through the GPU slot.
   ahead of each car, the underglow tints the road beside the cyberpunk's
   sills and the afterburners light the ground under the jet's tail. It also
   drives a car along keyed locations with a keyed repaint (the lamps and
-  the underglow colour follow), renders the jet from behind, and sets EEVEE
-  beside Cycles on the same file.
+  the underglow colour follow), and renders the jet from behind.
 
 ## Not yet ported
 

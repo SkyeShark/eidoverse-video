@@ -359,7 +359,7 @@ own options (`template.TERRAIN_BASE_CONTROLLER`) and its foot IK, in a
 `CollisionWorld` over the course's colliders (the ladder's rails and rungs
 are visual, as the engine's were), simulated frame by frame and keyed
 (`driver='controller'`, the default; its gait tree takes the steps, ramps
-and bumps by itself). `driver='walk_path'` walks round one's `walk_path`
+and bumps by itself). `driver='walk_path'` walks the characters family's `walk_path`
 instead (faster to build, no stair adaptation), and
 `driver(course, handle, scene) -> report` anything else. A plain walk stops
 0.6 m before the first wall, gap or ladder: those are maneuvers. The
@@ -440,7 +440,7 @@ Probes: `blender/tests/terrain_extras/test_course.py` (every preset on a
 contact sheet, the course example whole, close and dressed with generated
 materials, every variant scene built, the controller's walk through the
 camera modes with the engine's telemetry checked: bake it on the CPU with
-`--parts walk --no-render --save`, render its stills through the GPU slot
+`--parts walk --no-render --save`, render its stills (one render at a time)
 with `--parts walk_render`; the course example's whole run the same way,
 `--parts example_run` then `--parts example_run_render`: every maneuver,
 the sit, the gesture, the salute and the follow camera's push-in checked,

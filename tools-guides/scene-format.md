@@ -52,7 +52,7 @@ script the config never declares, are findings in the digest.
 
 Two keys are new:
 
-- `frame_start` (default 1, as in my films). `t = (frame - frame_start) / fps`.
+- `frame_start` (default 1). `t = (frame - frame_start) / fps`.
 - `render`, applied **after** `setup()`, so it overrides what the script set:
   use it for per-run choices, and set the look in the script.
 
@@ -61,7 +61,7 @@ Two keys are new:
 | `preset` | `film` (default) or `probe`: `probe` renders this scene at the probe caps every time (applied at render time, never saved) |
 | `samples` | EEVEE render samples |
 | `motion_blur`, `shutter` | motion blur on/off; shutter in frames (0.5 = a 180° shutter) |
-| `raytracing` | EEVEE ray tracing on/off |
+| `raytracing` | EEVEE ray tracing (on in both presets: it carries the reflections and the Fast GI that runs inside it, so leave it on) |
 | `volume_tile`, `volume_samples` | volumetric tile size (px) and samples |
 | `exposure`, `look` | view exposure (stops) and AgX look (`AgX - Base Contrast`, `AgX - Punchy`, `None`) |
 | `bloom` | `true` or `{"threshold": 1, "size": 0.5, "strength": 1}`: a compositor Glare pass. A hot emitter in the dark blooms across the whole frame at strength 1; start near 0.3 for a lens's glow |
@@ -262,8 +262,8 @@ light only, never a stand-in for the sky.
 | **film** (default) | EEVEE, AgX `AgX - Base Contrast`; ray tracing (screen traces at full resolution, spatial/temporal/bilateral denoise, quality 0.5, thickness 0.05, max roughness 0.5); fast GI (global illumination, resolution 2, 8 steps, 2 rays, 0.6 m); shadows 2 rays x 12 steps; volumes 16 px tiles x 32 samples, ray depth 16, volumetric shadows; indirect clamp 10; 32 samples; motion blur, shutter 0.5; filter 1.5 px |
 | **probe** | the film's look, cheaper: at most 960x540 (aspect kept), at most 16 samples, traces at half resolution |
 
-These are my films' settings (episode three's house, and the render-time
-volumes measured there to look like 4 px x 128 at 60 % of the time). `--probe`
+These are film settings measured on a lit interior, the volumes at 16 px x 32
+samples reading like 4 px x 128 at 60 % of the time. `--probe`
 applies the probe caps at render time; `--preset probe` does the same for
 `--at` or a full render. Render-time changes are never saved into the build.
 
@@ -338,8 +338,8 @@ grades; a scene that called `chain_overlay` itself keeps its own stage.
 Saturated ink comes back only as close as AgX can show it; for such ink with
 no screen hook, the media family's display-space edit pass is exact
 ([motion graphics](motion-graphics.md)).
-`_no_auto_enhance = True` (or `NO_AUTOENHANCE=1`) turns EEVEE's ray tracing
-and fast GI off and adds no runner stages; a scene's own chain stages stay.
+`_no_auto_enhance = True` (or `NO_AUTOENHANCE=1`) adds no runner stages; a
+scene's own chain stages stay.
 The digest's `render.auto_enhance` record says what was installed, like the
 engine's `[auto-enhance] TSL pipeline: ...` line.
 

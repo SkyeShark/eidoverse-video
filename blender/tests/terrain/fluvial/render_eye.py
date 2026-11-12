@@ -15,8 +15,8 @@ fluvial_range  generate() without a focus; on its main level a 30-45 degree hill
                900 m onto the eye: the hero rings and their seams)
 rolling_hills  a standing point on high ground looking about 350 m across the hills (the Palouse reference's
                kind of view): <tag>_across, <tag>_down, <tag>_hero_aerial
-meadow         the old meadow probe's cameras (tests/terrain/test_meadow.py: eye at (0, -7) 1.6 m up looking north,
-               'over', 'ground') and its 8 m clearing (flatten), the meadow palette and the probe's test grass:
+meadow         the meadow film probe's cameras (eye at (0, -7) 1.6 m up looking north, 'over', 'ground') and its
+               8 m clearing (flatten), the meadow palette and the probe's test grass:
                <tag>_eye, <tag>_over, <tag>_ground
 --clay renders the clay versions (palette None, the references' grey); --textured the recipe's palette (and rocks
 near the focus): <tag>_<view>_tex. Writes into blender/tests/terrain/out/fluvial/renders/ with <tag>_views.json.

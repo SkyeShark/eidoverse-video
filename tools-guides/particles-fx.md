@@ -79,7 +79,7 @@ Stage each preset the way it is used. The probes in
 - fire above whatever it burns on. The sprites are depth-tested, as in the
   engine, and the preset's 0.5 m flame quads reach below the emitter, so a
   bare floor cuts them along straight grey lines. Set the fire on logs, as
-  round one's campfire test (`blender/tests/fx`) does, or lift the emitter.
+  the campfire test in `blender/tests/fx` does, or lift the emitter.
 - fire's tongues: the preset's `rotate: 0.35` starts every sprite at a random
   angle over the whole circle, as the engine's code does, so about a third of
   the tongues are turned more than 120 degrees from upright and a lone fire

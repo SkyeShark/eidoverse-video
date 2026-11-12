@@ -31,8 +31,8 @@ create_fire_compose(scene, fire)                          # saturation 1.1, then
 Set the scene's view transform, display and exposure before
 `create_volume_fire`: its look is matched to them when it is built.
 
-The bake runs on the GPU, so run it through the shared slot like a render
-(`heavy.sh`). The full 100 × 200 × 100 grid bakes in seconds: 400 warmup
+The bake runs on the GPU, so on a shared GPU run it one at a time, like a
+render. The full 100 × 200 × 100 grid bakes in seconds: 400 warmup
 substeps plus 48 frames took 4.5 s. Each frame writes about 2.7 MB of `.vdb`.
 
 Every frame advances 1/fps × `sim_speed` seconds of simulation, at any frame

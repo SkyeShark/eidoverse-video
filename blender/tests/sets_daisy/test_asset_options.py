@@ -125,12 +125,12 @@ R.dispose()
 
 
 # ============================================================================================ the looks, rendered
-def render_looks(name, build, looks, cam_of, post=False, interior=True):
+def render_looks(name, build, looks, cam_of, post=False):
     """one still per look: each look keyed on a frame of its own (t running), through cam_of(set, look) -> (pos, target,
-    fov) set-local Blender axes."""
+    fov) set-local Blender axes. A set with a room probe bakes it first."""
     out = os.path.join(C.OUT, 'looks')
     os.makedirs(out, exist_ok=True)
-    C.probe_look(sc, interior=interior)
+    C.probe_look(sc)
     sc.eevee.shadow_pool_size = '2048'
     S = build()
     fx = S.post.apply(sc) if post else None
@@ -142,6 +142,9 @@ def render_looks(name, build, looks, cam_of, post=False, interior=True):
         keys = k if keys is None else keys.merge(k)
     keys.finish()
     bpy.context.view_layer.update()
+    if hasattr(S, 'bake_probes'):
+        sc.frame_start, sc.frame_end = 1, len(looks)
+        print(f'[looks] {name}: probe baked {S.bake_probes(sc)}', flush=True)
     M = S.kit.root.matrix_world
     for i, look in enumerate(looks):
         pos, tgt, fov = cam_of(S, look)

@@ -1,34 +1,58 @@
-# Stack notes — Blender 5.2 / EEVEE behavior and observed issues
+# Blender and EEVEE notes
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Blender](blender.md) · [Cameras and lighting](camera-lighting.md)
 
-These notes collect the Blender edition's integration facts and issues observed
-in its renders. They are for Blender 5.2.0 LTS, run headless through
-`run_blender.sh`, rendering with EEVEE. Treat a workaround as a diagnosis to
-verify in the current scene, rather than assuming every dark frame has the
-same cause. Each note says how it was established.
+Facts about Blender 5.2 and EEVEE, run headless through `run_blender.sh`,
+that are worth knowing before you script them. The toolkit is built on them;
+a scene of your own meets them too. EEVEE is a mature engine: when a frame
+looks wrong, check the scene's setup against these notes and Blender's
+manual (its geometry, probes, lights, materials and render settings) before
+anything else.
 
-## Running Blender
+## Running Blender headless
 
+- **Headless Blender runs GPU compute shaders.** In background mode, call
+  `gpu.init()` once, describe the kernel with `gpu.types.GPUShaderCreateInfo`
+  and run it with `gpu.compute.dispatch`. Kernels read `sampler2D` /
+  `sampler3D` textures (hardware filtered when the texture's filter is on) and
+  write `image2D` / `image3D`; Blender inserts a texture-fetch and
+  image-access barrier after every dispatch, so kernels chain in the order
+  they are submitted. Python has no storage buffers, so per-point data
+  travels in a float texture read with `texelFetch`. The sky's baker, the
+  volume fire, the free-surface water, the SDF mesher and the terrain
+  solvers all run this way, thousands of times faster than numpy on the same
+  grid; `eido_blender.py doctor` checks a dispatch's readback.
 - **Blender exits 0 even when the script raises.** Check that every output
   exists, and give command-line tools their own exit code.
   `look/probe_cli.py` catches the failure, prints the traceback and calls
-  `os._exit(code)`.
-- **Run headless through `run_blender.sh`.** It starts with `--factory-startup`
-  in an isolated user folder, so a run can't strip your installed extensions'
-  packages. Scripts enable the add-ons they need:
+  `os._exit(code)`; the runner checks its outputs and the digest's status.
+- **Run headless through `run_blender.sh`.** It starts with
+  `--factory-startup` in an isolated user folder, so a run can't strip your
+  installed extensions' packages. Scripts enable the add-ons they need:
   `bpy.ops.preferences.addon_enable(module='bl_ext.blender_org.vrm')`.
-- **Every render goes through the shared GPU slot** (`heavy.sh`). It refuses
-  to start when another heavy job holds it or when VRAM or RAM is short: wait
-  and retry.
+- **The first frame of a Blender process takes longer**: EEVEE compiles its
+  shaders. Time a render from its second frame (`eido_blender.py bench` does).
 - **`bpy.ops.object.transform_apply` applies location and rotation too unless
   told not to.** All three default to True. A script that only means to apply
-  scale must pass `location=False, rotation=False, scale=True`. Otherwise the
-  origin moves to the world origin, which breaks any later code that reads
-  `matrix_world.translation` as the object's centre (seen 11-07 in a test).
-- **A blend saved by a newer build** warns "expect loss of data!" in the 5.2.0
-  binary (episode three's house: file subversion 45). It reads fine; don't save
-  it back from the older binary.
+  scale must pass `location=False, rotation=False, scale=True`, or the origin
+  moves to the world origin.
+- **A `.blend` saved by a newer build** warns "expect loss of data!" in an
+  older binary. It reads fine; don't save it back from the older binary.
+
+## Keys, actions and modifiers
+
+- **Actions are layered in 5.2** (slots, layers, strips, channel bags).
+  `keyframe_insert` works as before; to write a whole channel at once, get the
+  slot's channel bag (`bpy_extras.anim_utils.action_ensure_channelbag_for_slot`)
+  and fill an F-curve's `keyframe_points` in one call (`weather/keys.py`,
+  `fabrication/_keys.py`).
+- **A Geometry Nodes modifier's inputs are RNA in 5.2**:
+  `modifiers["GN"].properties.inputs.<Socket_N>.value`, keyable at that data
+  path. The modifier holds no ID properties: `m.keys()` and `m["Socket_N"]`
+  raise `TypeError` (`harness.keying.node_inputs` reads both forms). The VRM
+  add-on's MToon outlines are such modifiers.
+- **An NLA strip's fades:** set `strip.use_auto_blend = False` before
+  `blend_in` / `blend_out`; while auto-blend is on, Blender ignores them.
 
 ## Output and the compositor
 
@@ -36,10 +60,8 @@ same cause. Each note says how it was established.
   compositor File Output node: `scene.compositing_node_group` is a
   `CompositorNodeTree`, then `fo.file_output_items.new(type, name)` and a
   link to `fo.inputs[name]`, with `save_as_render=False` for data.
-- **A File Output node writes only its FIRST item into the multilayer EXR.**
-  Measured 11-07: Shadow + Diffuse Direct + Normal items on one node wrote a
-  file holding Shadow.V alone; three nodes with one item each wrote all three.
-  `lighting.debug_passes` uses one node per pass.
+- **A File Output node writes only its first item into a multilayer EXR.**
+  Use one node per pass (`lighting.debug_passes` does).
 - **A Render Layers node keeps the pass sockets it had when it was made.**
   Switch the passes on first, then create the node. An older node's sockets for
   new passes are unavailable: linked, they write nothing.
@@ -62,71 +84,71 @@ same cause. Each note says how it was established.
 - **Convert To Display carries its own view settings** (default Standard, not
   the scene's), and its exposure and gamma are read-only. Copy the scene's
   transform and look into it, and carry the exposure with Exposure nodes. The
-  round trip through it and its inverse came back within 6 levels at the worst
-  pixel.
+  round trip through it and its inverse comes back within 6 levels at the
+  worst pixel.
 - **Map UV reads the UV's Z as coverage** (the UV pass's alpha). A Combine XYZ
   feeding it needs Z = 1, or every pixel is masked out to black.
 - **Image Coordinates: `Pixel` is the integer pixel, `Normalized` its centre**,
-  (pixel + 0.5) / size (measured on a 64 × 36 render). One pixel in normalised
-  units is therefore `Normalized / (Pixel + 0.5)`, exact at every pixel.
+  (pixel + 0.5) / size. One pixel in normalised units is therefore
+  `Normalized / (Pixel + 0.5)`, exact at every pixel.
 - **Translate moves the image's domain; it does not resample it.** A channel
   translated and combined with untranslated ones gives the combine the shifted
   domain. With 'Clip' the uncovered edge is black, and with 'Extend' it is
-  clamped, but the untranslated channels are clamped there too (measured:
-  +3 px on a ramp). Sample offsets through Map UV with 'Extend' instead
-  (`post/custom_effects.py` does).
+  clamped, but the untranslated channels are clamped there too. Sample offsets
+  through Map UV with 'Extend' instead (`post/custom_effects.py` does).
 - **`Image.save_render(path, scene=scene)` applies the scene's colour
   management at save time.** One render's Render Result can be saved at many
-  exposures (`look.exposure`'s sweep), exactly on flat areas but only
-  approximately along high-contrast edges: EEVEE's film accumulation sees the
-  view exposure. On the meadow, the exposure-0 render saved at +2.25 differed
-  from a render made at +2.25 by up to 56 levels at single pixels (6.3% of
-  pixels over 2), on silhouettes, shadow edges and the horizon. On the corner
-  room, real renders passed the highlight check at +2.00 and +2.25 where the
-  sweep's saves had failed. `auto_expose` confirms its pick and its ceiling with
-  real renders.
+  exposures (`look.exposure`'s sweep): exactly on flat areas, approximately
+  along high-contrast edges, because EEVEE's film accumulation sees the view
+  exposure. Confirm an exposure picked from saves with a real render
+  (`auto_expose` does).
 
 ## World, sky and volumes
 
-- **EEVEE draws no sun disc from the Sky Texture.** With `sun_disc` on, the
-  render had no sun and no shadows. Pair the sky with a sun light from the same
-  direction.
+- **EEVEE draws no sun disc from the Sky Texture** and casts no shadow from
+  it. Pair the sky with a sun light from the same direction (the sky
+  family's `make_sky` does).
 - **The Sky Texture's sun sits at azimuth = `sun_rotation`, from +Y toward
-  +X.** Measured with four sky-only views: rotation 0 puts the glow due +Y,
-  60° puts it 60° toward +X.
-- **An infinite world volume extinguishes the sun and the sky.** At
-  0.012/m, a meadow frame went black apart from emission. Fog is a finite
-  volume (a box with a top), with `use_volume_custom_range` and
-  `volumetric_end` covering it so its froxels aren't spread over the camera's
-  whole clip range.
+  +X**: rotation 0 puts the glow due +Y, 60° puts it 60° toward +X.
+- **A world volume fills everything to infinity**: even a thin one (0.012/m)
+  extinguishes the sun and the sky. Fog is a finite volume (a box with a top).
+- **EEVEE spreads its volume froxels over the camera's clip range** unless
+  `use_volume_custom_range` is on; `volumetric_start` / `volumetric_end` take
+  effect only then. Cover the scene's volumes with them, and use a smaller
+  `volumetric_tile_size` for a small volume far away
+  (`sdf.volume_render_settings()` and `fit_volume_range` set both).
+- **The Principled Volume's Density Attribute defaults to `density`.** On a
+  volume whose shader already reads its density grid, clear it: the grid
+  would multiply absorption and scattering a second time (not emission).
 - **`world.use_nodes` is deprecated;** a new world may already have its node
   tree. Check `world.node_tree` before setting it.
-- **Indoors, a volume probe is the difference between a room and a lit
-  void.** Without one, the world lights the interior through the walls.
-- **A volume probe's samples are cell-centred, and beyond the outermost ones
-  EEVEE fades to the world's light.** A probe sized to the corner room's
-  interior left its walls, floor and the spheres' undersides lit by the world:
-  pale blue walls, and a dark cap on a white sphere where its top reached the
-  samples. A box ending at the mid-wall rows did the same. A probe whose
-  outermost rows sit in the middle of the walls (`lighting.add_room_probe`)
-  gave the walls the room's light. 14 × 13 × 9 samples at 1024 baked in about
-  1.2 s.
-- **Fast GI leaks the world indoors.** Its screen-space scan fills the
-  directions it can't resolve from the world, through the walls: a blue
-  crescent under a white sphere at its floor contact, bright strips along the
-  wall bases, and grain that took 64 samples to clear. AO-only mode did the
-  same. With fast GI off and a baked room probe, the corner room matched Cycles
-  and a white sphere was clean at 16 samples.
-- **Cycles is the reference.** `probe.render_reference` path traces the same
-  still on the GPU (OptiX on this machine; about 6 s at 960 × 540, 512 samples,
-  denoised). Both indoor faults above showed in one comparison.
-- **Thin glass: dithered, ray-traced refraction, slab thickness.** A 1.5 cm
-  pane as BLENDED with ray-traced refraction rendered as a dark panel with
-  bright sparkles. `surface_render_method = 'DITHERED'`,
-  `use_raytrace_refraction = True`, `thickness_mode = 'SLAB'` and 0.015 into
-  the Material Output's Thickness made it read as Cycles does, the floor seen
-  through it. Cycles also draws the pane's top edge as a thin dark line, which
-  EEVEE doesn't.
+
+## Light, probes and interiors
+
+- **Global illumination is on everywhere**: ray tracing, Fast GI and light
+  probes together. An interior holds its light when it is built to: walls,
+  floor and ceiling with real thickness, and a volume probe that covers the
+  room.
+- **A volume probe lays an axis's N samples at (i + 1) / (N + 1) of its
+  box**, one spacing in from the faces, and a surface within about 0.75 of a
+  spacing of the box's faces, or outside the box, is lit by the world. Reach
+  a room's probe past its inside faces, so its outermost samples sit inside
+  the walls (`look.lighting.add_room_probe` does, and refuses walls too thin
+  for its spacing). A probe is baked once and static: leave animated
+  emitters out of the bake and let their real lights move.
+- **Thin glass** reads as a pane with `surface_render_method = 'DITHERED'`,
+  `use_raytrace_refraction = True`, `thickness_mode = 'SLAB'` and the pane's
+  thickness (0.015 for 1.5 cm) into the Material Output's Thickness. A thin
+  translucent sheet (a leaf, paper) wants its Thickness linked to 0.
+- **EEVEE draws blended objects back to front by their origins' depth along
+  the view**; there is no render order. Move an origin to change where an
+  object sorts (the city's cloud deck rides far down the camera's view so it
+  is drawn first).
+- **Light linking ignores an include collection that holds no objects**:
+  such a light lights everything. Keep a placeholder in the receivers, or
+  exclude the set's own collections as well.
+- **EEVEE has no Pointiness.** Bake curvature into an attribute for a
+  material that wants edge wear (`voice_machines.write_curvature`).
 
 ## Colour
 
@@ -138,26 +160,25 @@ same cause. Each note says how it was established.
 - **Looks are named by OCIO:** 'AgX - Base Contrast', 'AgX - Punchy', ... The
   enum is dynamic (listing it without a scene returns only 'NONE'); set the
   string.
-- **The VRM add-on switches the view to Standard on import** unless
+
+## VRMs and the VRM add-on
+
+- **The add-on switches the view to Standard on import** unless
   `set_view_transform_to_standard_on_import=False`.
+- **A VRM imports facing −Y** (glTF's +Z forward). The humanoid bone mapping
+  is snake_case on the add-on's property group (`human_bones.left_foot`); the
+  bone names themselves are VRM's camelCase.
+- **MToon and shadows:** the add-on's 'MToon 1.0 Output' group returns a
+  Transparent BSDF for rays that are not camera rays. With the material's
+  `use_transparent_shadow` on (Blender 5.2's default), EEVEE's shadow pass
+  sees it as transparent and the character casts no sun shadow; an opaque
+  MToon material casts its shadow with `use_transparent_shadow = False`.
 
 ## Rendering
 
 - **EEVEE keeps no history between final renders.** A frame rendered alone
-  matched the same frame rendered after its previous frame to within 1 level
-  (0 in one run, 1 in another: noise; `test_probe_modes.py`). Probes jump; no
-  warm-up, no history reset on cuts.
-- **Grain in a dim interior: suspect fast GI before the sample count.** A
-  white sphere was grainy at 16 and 32 samples and clean only at 64 with fast
-  GI on. With it off (and a baked room probe), it was clean at 16.
-- **Probe costs measured on this machine (RTX 5090 Laptop, 960 × 540, 16
-  samples):**
-  - The meadow (a 108k-triangle VRM, about 16,000 scanned grass instances):
-    0.4 to 0.8 s a frame.
-  - The corner room: 0.2 s with fast GI off (0.3 s with it on).
-  - Its Cycles reference: about 6 s at 512 samples, denoised.
-  - The hazy stage: 0.2 to 0.3 s.
-  - A 29-exposure sweep: one render plus about 3 s of saves.
+  matches the same frame rendered after its previous frame. Stills can jump
+  to any time: no warm-up, no history reset on cuts.
 - **Instanced geometry and ray casts:** `scene.ray_cast` hits instances (a
   Geometry Nodes scatter blocks sightlines), and reports a hit as the
   INSTANCED object (the scatter's source, e.g. `grass_medium_02_d`), with the
@@ -167,10 +188,12 @@ same cause. Each note says how it was established.
   see only real objects. `scene.objects` includes objects in collections
   excluded from the view layer (a scatter's sources), so filter by what
   renders. `look.camera_safety` does both.
-- **The VRM add-on imports `claude_robot.vrm` facing -Y** (glTF's +Z forward),
-  with Principled BSDF materials. Its humanoid bone mapping is snake_case on
-  the add-on's property group (`human_bones.left_foot`); the bone names
-  themselves are VRM's camelCase.
+- **Probe costs on an RTX 5090 Laptop (960 × 540, 16 samples):**
+  - a meadow (a 108k-triangle VRM, about 16,000 scanned grass instances):
+    0.4 to 0.8 s a frame;
+  - a lit room with its volume probe: about 0.3 s;
+  - a hazy stage: 0.2 to 0.3 s;
+  - a 29-exposure sweep: one render plus about 3 s of saves.
 
 ## Encoding and delivery copies
 
@@ -178,11 +201,10 @@ If a render already contains macroblocking, encoding that MP4 at a higher
 bitrate cannot recover the lost detail. Re-render, or encode again from a
 higher-quality master if one exists.
 
-Blender can render straight to H.264 (episode two's `render_h264.py`):
-`media_type = 'VIDEO'`, FFMPEG, MPEG4, H264, `constant_rate_factor =
-'PERC_LOSSLESS'`, preset GOOD, GOP 24, chunks starting on a keyframe. Deliver a
-copy re-encoded by the system ffmpeg as H.264 High, yuv420p, with AAC sound,
-so it plays everywhere:
+Blender renders straight to H.264 (the runner does): `media_type = 'VIDEO'`,
+FFMPEG, MPEG4, H264, `constant_rate_factor = 'PERC_LOSSLESS'`, preset GOOD,
+GOP 24, chunks starting on a keyframe. Deliver a copy re-encoded by the system
+ffmpeg as H.264 High, yuv420p, with AAC sound, so it plays everywhere:
 
 ```bash
 ffmpeg -i master.mp4 -c:v libx264 -profile:v high -crf 18 -preset slow -pix_fmt yuv420p -c:a aac -b:a 192k delivery.mp4
@@ -191,32 +213,17 @@ ffmpeg -i master.mp4 -c:v libx264 -profile:v high -crf 18 -preset slow -pix_fmt 
 Lower CRF generally means higher quality and a larger file. These values are
 starting points, not a guarantee for every resolution or motion pattern.
 Review busy areas and gradients in the encoded copy, and retain the master.
-Measure before optimising: a guess about where a slow frame's time goes has
-been wrong here more than once.
+Measure where a slow frame's time goes before optimising it.
 
-## Not carried over
+## Not yet ported
 
-These WebGPU notes have no counterpart in Blender and were dropped on purpose:
-
-- The adapter and doctor checks.
-- NodeMaterial vs non-Node materials.
-- `VolumeNodeMaterial` under Naga.
-- Texture orientation per loader path.
-- VRMs only through `GLTFLoader`.
-- Transparency through alpha opacity.
-- The auto-enhance MRT G-buffer and transparent quads.
-- Depth-keyed screen effects over particle quads (fog is a real volume now).
-- nvenc bitrates.
-- 16-bit float render targets and readback strides.
-- Binding limits.
-- `_rawRenderAsync`.
-- Motion-vector MRT naming.
-- Compute-written index buffers.
-- Timestamp queries.
-- The draw-count note.
-- The close-up scene's placement-audit hang and the console-capture note.
-
-For Blender's own transparency, see the material settings:
-`surface_render_method` DITHERED or BLENDED, `use_raytrace_refraction` with
-`thickness_mode`, `use_transparent_shadow`. The corner test's glass pane uses
-BLENDED with ray-traced refraction. It has not been judged closely yet.
+Nothing here waits for a port. The WebGPU engine's own stack notes have no
+Blender counterpart and are not carried over: the adapter and doctor checks
+of Deno's WebGPU (Blender's GPU check is `eidoblend.harness.gpu_check`),
+NodeMaterial against non-node materials, `VolumeNodeMaterial` under Naga,
+texture orientation per loader path, VRMs only through `GLTFLoader`,
+transparency through alpha opacity, the auto-enhance MRT G-buffer and
+transparent quads, depth-keyed screen effects over particle quads, NVENC
+bitrates, 16-bit float render targets and readback strides, binding limits,
+`_rawRenderAsync`, motion-vector MRT naming, compute-written index buffers,
+timestamp queries and the draw count.

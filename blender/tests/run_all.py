@@ -55,7 +55,7 @@ if not os.path.isfile(os.path.join(MAIN, 'run_blender.sh')):
 SLOT_DIR = os.path.join(MAIN, 'work', 'claude_body', 'work', 'tmp')
 SLOTS = [s for s in ('heavy.sh', 'heavy2.sh', 'heavy3.sh') if os.path.isfile(os.path.join(SLOT_DIR, s))]
 MEMCAP = os.path.join(SLOT_DIR, 'memcap.py')
-LEAVE_OUT = {'terrain', 'terrain_new', 'terrain_ekigar'}    # the terrain build's own suites run on their own
+LEAVE_OUT = {'terrain'}     # the terrain family's suites run on their own: terrain/integration/run_tests.py
 
 
 # ------------------------------------------------------------------------------------------------ the manifest ---
@@ -170,7 +170,7 @@ M += [gpu('water3d', s, cap=16 if s == 'test_water3d_pour_basin.py' else 12) for
     'test_water3d_options.py', 'test_water3d_pour_basin.py', 'test_water3d_spheretest.py',
     'test_water3d_spouts_wader.py', 'test_water_flat.py', 'probe_foam_pick.py', 'probe_lit_palette.py',
     'probe_refraction_thickness.py', 'probe_water_mesh_mirror.py', 'probe_water_mesh_normals.py',
-    'probe_water_compute_saved.py')]
+    'probe_water_compute_saved.py', 'probe_partial_transmission.py')]
 M += [gpu('water3d', 'test_reopen_saved_blend.py',
           f'blend={os.path.join(HERE, "water3d", "out", "verify", "wc_saved.blend")}', tag='the saved water compute')]
 M += [bl('look', 'test_camera_checks.py'), bl('look', 'test_overlap_audit.py'),

@@ -42,6 +42,13 @@ def render_set(name):
     bpy.ops.wm.open_mainfile(filepath=blend)
     print(f'[render_saved] {name}: opened in {time.time() - t0:.1f} s, {len(stills)} stills', flush=True)
     sc = bpy.context.scene
+    # a room's volume probe saved before its bake (the build ran outside the GPU slot): baked here, at the frame its
+    # set noted (one that shows the room)
+    for pr in [o for o in sc.objects if o.type == 'LIGHT_PROBE' and o.data.type == 'VOLUME' and 'bake_frame' in o
+               and not o.get('baked')]:
+        from eidoblend.look import lighting as LL
+        sc.frame_set(int(pr['bake_frame']))
+        C.check(f'{name}: {pr.name} baked at frame {pr["bake_frame"]}', bool(LL.bake_light_probes(sc, probes=[pr])))
     # stills through the timeline's own cameras first, then the ones naming a camera of their own (whose render needs
     # the markers gone: the render pipeline re-applies the marker cameras at the frame)
     stills.sort(key=lambda s: 1 if s.get('camera') else 0)

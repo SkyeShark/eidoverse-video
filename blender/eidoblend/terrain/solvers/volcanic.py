@@ -44,7 +44,7 @@ _BIG = 1.0e9                                  # an "absent" height for the smoot
 
 
 # ====================================================================== shared world-space shape helpers
-# (impact.py uses these too; they move to core/world_noise.py and core/compose.py when those land)
+# (impact.py uses these too)
 
 def polar(x, y, centre):
     """(r, azimuth) of world points about centre: r in metres, azimuth in radians clockwise from north."""

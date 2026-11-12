@@ -84,7 +84,7 @@ exporting it.
 | File | What it is |
 | --- | --- |
 | `scene.glb` | Blender's glTF exporter: the whole timeline as ONE glTF animation sampled every frame (`export_animation_mode='SCENE'`), punctual lights, cameras, materials as below; only the page's own `xr_*` custom properties ride along as extras |
-| `world.hdr` | the world rendered alone as an equirectangular Radiance image (Cycles), in three's equirect convention: the page's sky dome and its image-based light |
+| `world.hdr` | the world baked alone into an equirectangular Radiance image (Blender bakes with Cycles; this export is that bake's one use), in three's equirect convention: the page's sky dome and its image-based light |
 | `textures/` | the bakes (base colour + alpha, metallic-roughness, normal, emission) |
 | `choreo.json` | timeline markers, the property tracks glTF cannot carry, and any `--choreo` object tracks |
 | `scene.xr.json` | the manifest the page reads: the XR settings in three's axes, the view transform, area lights, page-side materials, counts and Quest grades, warnings |
@@ -109,7 +109,7 @@ exporting it.
 | sun, point, spot lights | `KHR_lights_punctual` in Blender's own watts (lighting mode COMPAT, below) |
 | area lights | three `RectAreaLight`s from the manifest (glTF has no area light) |
 | light energy / colour, emission strength, visibility, keyed | `choreo.json` tracks the page applies every frame |
-| the world | `world.hdr` (or, with `--no-world`, one flat colour, its radiance averaged over the sphere — measured with a 64 × 32 Cycles render when it is procedural — as the background and a uniform environment, which lights metals too) |
+| the world | `world.hdr` (or, with `--no-world`, one flat colour, its radiance averaged over the sphere — baked at 64 × 32 when it is procedural — as the background and a uniform environment, which lights metals too) |
 | an object tagged `xr_material` | drawn by the page with its own TSL material (below) |
 | a haze or fog box (a mesh whose materials are volumes only) | left out and named in the warnings: the exporter would write it as an opaque grey box round the set |
 | volume objects, Grease Pencil, hair curves, strand particles, speakers, light probes | not glTF: named in the warnings |
@@ -435,7 +435,7 @@ every still).
 Stills show the geometry, the colours and where things are — not the frame
 rate, the comfort of the motion, or anything only a headset shows. Try it in
 the headset before calling it done, and read the session's reports. Shots draw
-on the GPU: on a shared machine, run them through the GPU slot like any
+on the GPU: on a shared machine, run them one at a time like any
 render.
 
 The tests (`blender/tests/xr/`, `run_all.sh` runs them in order) cover the
@@ -445,7 +445,7 @@ by number against Blender, and its 1:25 table view against EEVEE at life size;
 a bump baked on meshes with UV maps of their own under a low sun left at the
 origin (the baked normals read back the glTF way, the page's shadows and
 ridges against EEVEE's), and an export of a scene that is not the context
-scene; four films round one built (a product shot lit by two area lights, two
+scene; four test films (a product shot lit by two area lights, two
 crows, my robot walking with its maps capped at 2048 px, the look family's
 theatre with its spot lights, haze and a camera cut), each photographed in
 the page through the camera it shows at each time beside EEVEE's frame (EEVEE

@@ -4540,20 +4540,21 @@ class Race:
 
     def apply_render_settings(self, scene=None, fog=True, bloom=True, world=True):
         """The set's renderer settings (RACE.md): AgX, EEVEE ray tracing (the wet road's reflections, with the deck's
-        planar probe; race.js carried its own mirror and kept SSR off), no AO, bloom {strength 0.55, threshold 0.7},
-        the set's fog FogExp2(0x0c0f16, 0.0062), and the set's world."""
+        planar probe; race.js carried its own mirror and kept SSR off) and global illumination (fast GI), bloom
+        {strength 0.55, threshold 0.7}, the set's fog FogExp2(0x0c0f16, 0.0062), and the set's world."""
         scene = scene or self.scene
         scene.render.engine = 'BLENDER_EEVEE'
         scene.view_settings.view_transform = 'AgX'
         ee = scene.eevee
         ee.use_raytracing = True
         ee.ray_tracing_method = 'SCREEN'
-        ee.use_fast_gi = False
+        ee.use_fast_gi = True
+        ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
         ee.clamp_surface_indirect = 10.0
         ee.shadow_pool_size = '1536'
         if world and self.opts['sky']:
             scene.world = self.world
-        done = ['AgX', 'ray tracing']
+        done = ['AgX', 'ray tracing', 'fast GI']
         if bloom:                                   # first: the fog splices in after Render Layers, before the bloom
             from ...harness.settings import add_bloom
             done.append(add_bloom(scene, {'threshold': 0.7, 'size': 0.5, 'strength': 0.55}))

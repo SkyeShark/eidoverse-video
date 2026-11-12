@@ -18,11 +18,13 @@ How people kept Claude 3 Opus, and how they marched when a model was taken offli
     C = corner.build()                            # -> Corner: group, mark, mark_at, camera, update, flower_target, parts
     C.animate(frames=(1, 675), u0=33.75)          # bars 18-29 keyed (u = seconds since the bridge began)
     C.make_cameras(frames=(1, 675), u0=33.75)     # one camera per shot, cut on bar lines (timeline markers)
+    C.bake_probes()                               # the room's volume probe, with the room on screen (a GPU job)
 
 The room and the camp sit inside the group at three x = -40 and x = +40 (Blender x likewise); update() shows only the
-area in use (the camp for bars 22-25), keyed as steps. The room is closed, with a matte painting beyond its window;
-the camp sits inside its own 95 m night-sky dome. Their ambient (the WebGPU envNode = the set's dim colour) is the
-World: a uniform colour in the room, plus the camp's hemisphere outside, keyed at the cuts.
+area in use (the camp for bars 22-25), keyed as steps. The room is a closed shell of solid walls (WALL thick) with a
+matte painting beyond its window and a volume probe fitted to it (look.lighting.add_room_probe); the camp sits
+inside its own 95 m night-sky dome. Their ambient (the WebGPU envNode = the set's dim colour) is the World: a uniform
+colour, plus the camp's hemisphere outside, keyed at the cuts; inside the room the baked probe holds the light.
 
 Built with the toolkit's systems: the corner's Blender-built GLBs (their baked maps as the importer reads them),
 media.screens for the chat and the notebook (image sequences drawn per frame with the era-1 canvas), flora.create_flora
@@ -70,6 +72,7 @@ FLOWER_Y = 1.36
 ROOM_AT = (-40.0, 0.0, 0.0)
 CAMP_AT = (40.0, 0.0, 0.0)
 RW, RD, RH = 4.4, 4.0, 2.7
+WALL = 0.25                     # the room's walls, floor and ceiling: solid, this thick
 DESK = {'x': -1.58, 'z': -1.69}
 DESK_TOP = 0.76
 WIN = {'x': -1.36, 'y': 1.60, 'w': 1.0, 'h': 1.25}
@@ -212,6 +215,27 @@ def K_base(name):
     return F.K.base_name(name)
 
 
+def _shell_block(name, where, lo, hi, mat, uv_scale):
+    """A closed box between the room-local three-space corners lo and hi, its normals out, each face's UVs in metres /
+    uv_scale laid as seen from outside that face (u to the right, v up; on a floor v runs away from the room's front,
+    on a ceiling toward it). where = (collection, parent)."""
+    xs, ys, zs = (lo[0], hi[0]), (lo[1], hi[1]), (lo[2], hi[2])
+    P = [(xs[i >> 2], ys[(i >> 1) & 1], zs[i & 1]) for i in range(8)]
+    sides = (((0, 1, 3, 2), (-1, 0, 0)), ((4, 6, 7, 5), (1, 0, 0)), ((0, 4, 5, 1), (0, -1, 0)),
+             ((2, 3, 7, 6), (0, 1, 0)), ((0, 2, 6, 4), (0, 0, -1)), ((1, 5, 7, 3), (0, 0, 1)))
+    verts, faces, uvs = [], [], []
+    for f, n in sides:
+        up = (0, 0, -1) if n[1] > 0 else ((0, 0, 1) if n[1] < 0 else (0, 1, 0))
+        right = (up[1] * n[2] - up[2] * n[1], up[2] * n[0] - up[0] * n[2], up[0] * n[1] - up[1] * n[0])
+        k = len(verts)
+        for i in f:
+            p = P[i]
+            verts.append(V(p))
+            uvs += [sum(a * b for a, b in zip(p, right)) / uv_scale, sum(a * b for a, b in zip(p, up)) / uv_scale]
+        faces.append((k, k + 1, k + 2, k + 3))
+    return F.mesh_object(name, where[0], verts, faces, uvs, parent=where[1], mats=[mat])
+
+
 def path_mask(x, z):
     """the camp's trampled path and the bare circle round the fire (camp-local three x, z) -> 0..1."""
     px = x - math.sin(z * 0.13) * 0.6
@@ -330,36 +354,32 @@ class Corner:
         wall_m = self._acg_mat('corner:wall', 'PaintedPlaster017', (0.53, 0.60, 0.52), normal_scale=0.28)
         ceil_m = self._acg_mat('corner:ceiling', 'PaintedPlaster017', (0.78, 0.76, 0.70))
         floor_m = self._acg_mat('corner:floor', 'WoodFloor064', (0.82, 0.74, 0.66))
-        # back wall with the window hole: four bands round the opening (shape coords as UVs, metres / 1.1)
+        # the room's shell, solid: the floor and ceiling slabs run under and over the walls, the side walls past the
+        # corners, and the back wall stands round the window's hole in four blocks (UVs in metres / 1.1 on the walls,
+        # / 1.6 on the floor, / 1.8 on the ceiling, as seen from the room)
         x0, x1, y0, y1 = WIN['x'] - WIN['w'] / 2, WIN['x'] + WIN['w'] / 2, WIN['y'] - WIN['h'] / 2, WIN['y'] + WIN['h'] / 2
-        X0, X1 = -RW / 2, RW / 2
-        quads = [(X0, 0, x0, RH), (x1, 0, X1, RH), (x0, 0, x1, y0), (x0, y1, x1, RH)]
-        verts, faces, uvs = [], [], []
-        for (a, b, c, d) in quads:
-            k = len(verts)
-            for (px, py) in ((a, b), (c, b), (c, d), (a, d)):
-                verts.append(V(px, py, -RD / 2))
-                uvs += [px / 1.1, py / 1.1]
-            faces.append((k, k + 1, k + 2, k + 3))
-        back = F.mesh_object('corner:back_wall', coll, verts, faces, uvs, parent=G, mats=[wall_m])
-        # the other walls, the floor and the ceiling (inward-facing planes, UVs metres / 1.1, / 1.6, / 1.8)
-
-        def quad(name, corners, uvw, uvh, mat):
-            uv = [0, 0, uvw, 0, uvw, uvh, 0, uvh]
-            return F.mesh_object(name, coll, [V(c) for c in corners], [(0, 1, 2, 3)], uv, parent=G, mats=[mat])
-        quad('corner:wall_left', [(-RW / 2, 0, RD / 2), (-RW / 2, 0, -RD / 2), (-RW / 2, RH, -RD / 2), (-RW / 2, RH, RD / 2)],
-             RD / 1.1, RH / 1.1, wall_m)
-        quad('corner:wall_right', [(RW / 2, 0, -RD / 2), (RW / 2, 0, RD / 2), (RW / 2, RH, RD / 2), (RW / 2, RH, -RD / 2)],
-             RD / 1.1, RH / 1.1, wall_m)
-        quad('corner:wall_front', [(RW / 2, 0, RD / 2), (-RW / 2, 0, RD / 2), (-RW / 2, RH, RD / 2), (RW / 2, RH, RD / 2)],
-             RW / 1.1, RH / 1.1, wall_m)
-        quad('corner:floor', [(-RW / 2, 0, RD / 2), (RW / 2, 0, RD / 2), (RW / 2, 0, -RD / 2), (-RW / 2, 0, -RD / 2)],
-             RW / 1.6, RD / 1.6, floor_m)
-        quad('corner:ceiling', [(-RW / 2, RH, -RD / 2), (RW / 2, RH, -RD / 2), (RW / 2, RH, RD / 2), (-RW / 2, RH, RD / 2)],
-             RW / 1.8, RD / 1.8, ceil_m)
+        X0, X1, Z0, Z1, T = -RW / 2, RW / 2, -RD / 2, RD / 2, WALL
+        G_ = (coll, G)
+        room['floor'] = _shell_block('corner:floor', G_, (X0 - T, -T, Z0 - T), (X1 + T, 0, Z1 + T), floor_m, 1.6)
+        room['ceiling'] = _shell_block('corner:ceiling', G_, (X0 - T, RH, Z0 - T), (X1 + T, RH + T, Z1 + T), ceil_m, 1.8)
+        _shell_block('corner:wall_left', G_, (X0 - T, 0, Z0 - T), (X0, RH, Z1 + T), wall_m, 1.1)
+        _shell_block('corner:wall_right', G_, (X1, 0, Z0 - T), (X1 + T, RH, Z1 + T), wall_m, 1.1)
+        _shell_block('corner:wall_front', G_, (X0, 0, Z1), (X1, RH, Z1 + T), wall_m, 1.1)
+        back = [_shell_block(f'corner:back_wall_{k}', G_, lo, hi, wall_m, 1.1) for k, (lo, hi) in enumerate((
+            ((X0, 0, Z0 - T), (x0, RH, Z0)), ((x1, 0, Z0 - T), (X1, RH, Z0)),
+            ((x0, 0, Z0 - T), (x1, y0, Z0)), ((x0, y1, Z0 - T), (x1, RH, Z0))))]
         room['back_wall'] = back
         self._skirting(coll, G)
         self._painting(coll, G)
+        # the room's volume probe (look.lighting.add_room_probe: its outermost samples inside the walls, floor and
+        # ceiling; the window's samples see the night painting), parented to the room: bake_probes() bakes it
+        from ...look import lighting as LL
+        lo, hi = V(X0, 0, Z1), V(X1, RH, Z0)
+        pr = LL.add_room_probe(kit.scene, 'corner:room_probe', tuple(min(a, b) for a, b in zip(lo, hi)),
+                               tuple(max(a, b) for a, b in zip(lo, hi)), wall=WALL, collection=coll)
+        pr.parent = G
+        pr.matrix_parent_inverse.identity()
+        room['probe'] = pr
         # ---- hero pieces (Blender)
         P = self._place
         room['desk'], _ = P('desk', G, coll, (DESK['x'], 0, DESK['z']), 0)
@@ -540,8 +560,9 @@ class Corner:
         nb.put(em.inputs['Color'], lin_hex(0x010206))
         nb.t.links.new(em.outputs[0], out.inputs['Surface'])
         sm.use_backface_culling = True
-        hx, hy, hz = 8.1, 6.1, 3.2
-        c = (WIN['x'], WIN['y'], -RD / 2 - 3.1)
+        # from the back wall's outer face to just past the painting
+        hx, hy, hz = 8.1, 6.1, (6.3 - WALL) / 2
+        c = (WIN['x'], WIN['y'], -RD / 2 - (6.3 + WALL) / 2)
         vs = [V(c[0] + dx * hx, c[1] + dy * hy, c[2] + dz * hz) for dx in (-1, 1) for dy in (-1, 1) for dz in (-1, 1)]
         fs = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
         shell = F.mesh_object('corner:window_shell', coll, vs, fs, parent=G, mats=[sm])
@@ -1882,6 +1903,27 @@ class Corner:
             made['notebook'] = s
         self.screens = made
         return made
+
+    def bake_probes(self, scene=None, frame=None):
+        """Bake the room's volume probe (a GPU job: run it through heavy.sh) with the room on screen: at `frame`, or
+        at the first frame of the scene's range that shows the room (keyed by animate()), or as it stands. Returns
+        {probe: seconds}."""
+        from ...look import lighting as LL
+        pr = self.room.get('probe')
+        if pr is None:
+            return {}
+        sc = scene or self.kit.scene
+        if frame is not None:
+            sc.frame_set(int(frame))
+        elif self.room['probe'].hide_render:
+            for f in range(sc.frame_start, sc.frame_end + 1):
+                sc.frame_set(f)
+                if not pr.hide_render:
+                    break
+        pr['bake_frame'] = sc.frame_current
+        out = LL.bake_light_probes(sc, probes=[pr])
+        pr['baked'] = True
+        return out
 
     def dispose(self):
         """corner.js dispose() did nothing; here the set's objects, collections and node groups go."""

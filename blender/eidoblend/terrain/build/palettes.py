@@ -69,7 +69,7 @@ import numpy as np
 # ------------------------------------------------------------------------------------------- the options ---
 
 DEFAULT_OPTIONS = dict(
-    # moved unchanged from the old film material (heightfield.py, measured with the shimmer probe 11-07)
+    # the film material's settings, measured with the shimmer probe (tests/terrain/surfacing/test_shimmer.py)
     anti_tile=True,                 # a second sample per map at an unrelated scale and offset, switched by noise
     detile_patch=1.2,               # the switch's patches, in tiles
     height_blend=0.5,               # a_i = w_i + height_i * height_blend
@@ -366,7 +366,7 @@ PALETTES = {
     ),
     'meadow': dict(
         title="Meadow: the old meadow film's soil, withered thatch on the high ground, sand on the banks",
-        # the old film material's 'soil' variant (tests/terrain/test_meadow.py) with its engine weights as masks:
+        # the meadow film's soil, its layer weights written as masks:
         # mid = smooth((h - high_start + breakup * amplitude) / (0.5 amplitude)), steep over 18-26 degrees
         layers=[
             dict(name='soil', set='Ground106', tile_m=2.3, roughness=1.35, weight='1'),

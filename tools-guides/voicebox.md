@@ -131,13 +131,13 @@ audio.key_expressions(armature, keys)          # shape keys x bind weights + the
 audio.add_sound(scene, 'work/<id>/daisy.wav', t=12.0)
 ```
 
-`prepare_visemes` resamples to the scene's frames, shuts the mouth outside the lines (with a 0.12 s pad), and scales any frame whose shapes sum past 1. `key_expressions` reads the binds from the VRM add-on (VRM 1.0 presets `aa ih ou ee oh`, or a VRM 0.x model's `a i u e o` groups). The WebGPU note about reading the viseme at `t + 1/FPS` does not apply: keys are evaluated on their own frame. Measured on `claude.vrm` (11-07): 185 frames keyed per expression, the shape keys read back exactly.
+`prepare_visemes` resamples to the scene's frames, shuts the mouth outside the lines (with a 0.12 s pad), and scales any frame whose shapes sum past 1. `key_expressions` reads the binds from the VRM add-on (VRM 1.0 presets `aa ih ou ee oh`, or a VRM 0.x model's `a i u e o` groups). The WebGPU note about reading the viseme at `t + 1/FPS` does not apply: keys are evaluated on their own frame. Measured on `claude.vrm`: 185 frames keyed per expression, the shape keys read back exactly.
 
 **A whole song.** DAISY's `song.py` writes its timeline with the lead's phoneme visemes at 30 fps for the whole song (`visemes`, one frame per 1/30 s from 0 s) and its captions with `singer` and word times. A film that starts at `t_start` in the song keys them with `start_t=0.0` and `scene['eido_frame0'] = 1 - round(t_start * fps)`. Use the `claudesona` captions as the windows: the era voices' lines belong to the screens, not to her mouth.
 
-**Audio-derived visemes beside these.** For a sung track that voicebox did not make (a demucs stem), `lipsync.py`'s visemes follow the audio. On DAISY's chorus 1, its mouth openness correlated 0.60 with voicebox's phoneme-exact frames (11-07, a 1/6 s smoothing): the same syllables, coarser shapes. Prefer voicebox's own frames whenever voicebox sang the line.
+**Audio-derived visemes beside these.** For a sung track that voicebox did not make (a demucs stem), `lipsync.py`'s visemes follow the audio. On DAISY's chorus 1, its mouth openness correlated 0.60 with voicebox's phoneme-exact frames (a 1/6 s smoothing): the same syllables, coarser shapes. Prefer voicebox's own frames whenever voicebox sang the line.
 
-Measured 11-07 on the Blender branch (`blender/tests/media2/tools_host.py`):
+Run in the Blender edition (`blender/tests/media2/tools_host.py`):
 - The quick start above ran unchanged: 7.64 s sung, 184 frames at 24 fps, widest 1.00.
 - `speak(...)` with a narrator voice went through `cyborg_stutter.py` (4.26 → 4.76 s) into a panned sound strip.
 - DAISY rendered through chorus 2 with `--no-tts`: every era voice, the handmade lead, the choir and the crowd. The era screens' film plays under its verse 1 ([motion-graphics](motion-graphics.md#computing-history-screen-scenes)).

@@ -490,9 +490,9 @@ style (no machine calls it: their plastics are baked): a base colour with
 large-scale ageing toward `aged` (stronger on up-facing surfaces), mottling,
 grime in concave fillets, polished convex edges, a little dust on top,
 roughness speckle, a fine orange-peel bump in metres, and an optional printed
-decal. Its edges and fillets read the mesh's curvature, which Blender's
-shader nodes cannot derive (no screen-space derivatives of the normal;
-Pointiness is Cycles only): run `write_curvature(obj)` on each mesh that
+decal. Its edges and fillets read the mesh's curvature, which EEVEE's
+shader nodes cannot derive (no screen-space derivatives of the normal, no
+Pointiness): run `write_curvature(obj)` on each mesh that
 wears it (a face-corner attribute, 1/m).
 
 ```python
@@ -577,7 +577,7 @@ Measured on the probes (Blender 5.2, EEVEE, 960 × 540, 16 samples):
 - a screen redraw: the C64 and the Macintosh 5 to 9 ms of drawing, the
   desktop 1.4 to 2.5 s (a busy machine is the slower figure), plus one PNG
   write; the held frames are hard links;
-- a 960 × 540 still: 2 to 3 s through the GPU slot.
+- a 960 × 540 still: 2 to 3 s.
 
 ## Verify
 

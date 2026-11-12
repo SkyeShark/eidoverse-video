@@ -29,7 +29,7 @@ b.root.location = (0.0, 0.0, desk_top)      # the closed book's underside sits o
 `None` is estimated from the pages, as `makeBookFromSpec` does. The book lies
 on its back board, spine toward −X, as the rig's `layFlat` laid it (three's
 axes mapped to Blender's: (x, y, z) → (x, −z, y)). Rotate `b.root` to place
-it. Measured 11-07 (`blender/tests/media/test_book.py`): the Mesh Cache reads
+it. Measured (`blender/tests/media/test_book.py`): the Mesh Cache reads
 back the exported pose exactly, and the underside stays within 0.13 mm of the
 desk while the book opens (the rig rides on its own spine).
 
@@ -66,7 +66,7 @@ cross-section (back fore-edge → spine → front fore-edge), Y out through the
 front cover and Z along the turning axis, with its origin at the back board's
 fore-edge on the back cover's outer face; `page_frame` sits at the gutter.
 Parent a prop to one, or read a point in its axes with
-`b.frames['case_frame'].matrix_world.inverted() @ p`. Measured 11-07 on the
+`b.frames['case_frame'].matrix_world.inverted() @ p`. Measured on the
 janus book, closed: `case_frame`'s origin on the fore-edge (0.00 mm) and
 0.18 mm above the underside, its Z along the spine; `page_frame` inside the
 block at the gutter, 155 mm from the fore-edge.
@@ -106,7 +106,7 @@ The system Python's pymupdf rasterises the pages (`BOOK_PYTHON` picks the
 executable, as before; height `pdf_page_height`, default 1200 px) and Pillow
 composes the spreads: spread 0 is blank | page 1. Leaf count and thickness
 follow the page count as in `makeBookFromSpec` (the binding holds up to 502
-leaves). Measured 11-07 (`test_book_pdf.py`): the 351-page janus PDF became
+leaves). Measured (`test_book_pdf.py`): the 351-page janus PDF became
 176 spreads on 178 leaves, 25.6 mm thick; opened at page 60 it shows PDF
 page 120 ("gpt-3 on coherent extrapolated volition") on the right and the
 blank page before that chapter on the left, exactly the document's own
@@ -169,7 +169,7 @@ The rig's other surfaces:
   call in;
 - `b.code_surfaces(False)` puts the real materials back.
 
-Measured 11-07 (`blender/tests/media2/test_book_glb.py`):
+Measured (`blender/tests/media2/test_book_glb.py`):
 - **The measure:** the engine's own `makeBook` (book.js in Deno,
   `book_glb_parity.mjs`) and `measure_book_glb` read the same eight numbers
   off the GLB: halfT 0.01322, halfH 0.11095, boardLen 0.1504, jointX 0.0727,
@@ -183,7 +183,7 @@ Measured 11-07 (`blender/tests/media2/test_book_glb.py`):
   the closed rig, the film, and the colour-coded surfaces mid-turn.
 - **The saved file:** the same book saved as a .blend and opened in a fresh
   Blender rendered frames 41 and 64 identically to the building session
-  (`test_reopen.py`, 11-08, mean difference 0.000). The poses live in the PC2
+  (`test_reopen.py`, mean difference 0.000). The poses live in the PC2
   caches and keys, not in the session.
 
 ## A raw rig spec — `makeBookRig`
@@ -203,7 +203,7 @@ b = book.make_book('work/<id>/rigbook', plan, rig=RIG, spreads=spreads, cover={'
                    name='rigbook')
 ```
 
-Measured 11-07 (`blender/tests/media2/test_book_rig.py`): the rig took the
+Measured (`blender/tests/media2/test_book_rig.py`): the rig took the
 spec to the last digit (`b.metrics`: BOARD_LEN 0.1504, HALF_T 0.01322, 16
 leaves), 6 spreads gave max page 5, the underside stayed within 0.13 mm of
 the desk through the open, the turn and the close, and `b.frames` held both
@@ -213,14 +213,11 @@ and shut again.
 ## Rendering
 
 - Soft light across thin paper: raise EEVEE's shadow rays. At 16 samples
-  Blender's default (1 ray, 6 steps) stippled the turning leaf's penumbra on the
-  page beneath. `scene.eevee.shadow_ray_count = 4` with
-  `shadow_step_count = 12` reduces the grain a lot but does not clear it: a
-  faint grain stays in the shadowed band beside the spine at 16 samples (11-07,
-  `book_pdf_stipple_variants.png`). It is shadow sampling, not GI. Neither 16
-  steps, nor a light `shadow_filter_radius` of 3, nor turning raytracing or fast
-  GI off changed it. More render samples are the remaining lever; that is not
-  measured here, because probes stay at 16.
+  Blender's default (1 ray, 6 steps) stipples the turning leaf's penumbra on
+  the page beneath. `scene.eevee.shadow_ray_count = 4` with
+  `shadow_step_count = 12` reduces the grain a lot; a faint grain stays in the
+  shadowed band beside the spine at 16 samples. It is shadow sampling: raise
+  the render samples for the film.
 - Paper has no bump: a 0.25 mm tooth is sub-pixel at reading distance.
 - Check cover, page and desk contact through the whole move, in motion.
 

@@ -21,8 +21,9 @@ direction toward the current waypoint into locomote(), arrival within a radius),
               it runs. Each gait's speed defaults to its clip's native pace on this body
   paths       corners rounded into arcs of radius speed / max_turn_rate (round one's walk_path does the same), followed
               with a pure-pursuit look-ahead of 0.6 s of travel
-  turns       a heading change of more than turn_threshold (60 deg) from standing is a turn on the spot first; turn_to
-              turns on the spot (larger than the clip's own turn: split into equal turns); under 20 deg a settling turn
+  turns       a heading change of more than turn_threshold (60 deg; 25 deg on my robot body, whose hip turns a planted
+              leg only so far about its own axis) from standing is a turn on the spot first; turn_to turns on the spot
+              (larger than the clip's own turn: split into equal turns); under 20 deg a settling turn
   distance    the controller runs with gait_sync='distance' (distance matching) unless bake(gait_sync='stride')
 
 Every frame is recorded (the root, the blended normalized pose before the foot IK, the clips' weights and times, each
@@ -45,6 +46,10 @@ from .plant import FLIGHT_SLOTS, plant, sub_report
 ACCEL = {'walk': 1.8, 'run': 3.5}
 DECEL = {'walk': 2.2, 'run': 4.0}
 TURN_THRESHOLD = 60.0 * math.pi / 180.0
+# my robot body: the hip's yaw ring turns the thigh about its own axis +-40 deg at most, less with the hip abducted
+# (robot_dof.LEG_JOINTS), and the foot it stands on as it sets off holds its heading: a walk setting off more than this
+# off the body's heading turns on the spot first
+TURN_THRESHOLD_ROBOT = 25.0 * math.pi / 180.0
 SETTLE_LIMIT = 20.0 * math.pi / 180.0
 # the gaits by name: the clip family the controller plays (its running flag) and the pace as a fraction of that family's
 # native pace on this body. walk and run are the controller's own; the library has no slowRun / fastRun / walkBackward
@@ -201,7 +206,8 @@ class FollowPath(_Cmd):
         if self.turn_first and not self.turned:
             self.turned = True
             want = heading_of(*self.d0) + (math.pi if self.backward else 0.0)
-            if c.speed_actual < 0.3 and abs(_wrap(want - c._heading)) > TURN_THRESHOLD:
+            thr = TURN_THRESHOLD_ROBOT if getattr(c.body, 'robot', False) else TURN_THRESHOLD
+            if c.speed_actual < 0.3 and abs(_wrap(want - c._heading)) > thr:
                 self.sub = TurnTo(heading=want)
                 self.sub.start(loco)
         if getattr(self, 'sub', None) is not None:

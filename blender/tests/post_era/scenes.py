@@ -235,7 +235,6 @@ def neon_night(fps=24, frames=(1, 48)):
         cam.location = p
         cam.keyframe_insert('location', frame=f)
     look_settings(sc, exposure=0.5)
-    sc.eevee.use_fast_gi = False
     return sc, h
 
 

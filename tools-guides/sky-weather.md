@@ -14,7 +14,7 @@ transitions, weather, integrated wind. EEVEE then uses what they produce nativel
 - the compositor blends distance fog toward the sky's fog colour.
 
 ```python
-import sys; sys.path.insert(0, '<worktree>/blender')
+import sys; sys.path.insert(0, '<repo>/blender')
 import bpy
 from eidoblend.sky import make_sky
 
@@ -94,7 +94,7 @@ lights.
   `apply_to_lights()` returns the frame's lamp values; `update(t)` computes them every frame, because
   lighting is not opt-in. As in Eanpa, the weather's skylight dim (`hemiDim`) greys the fog colour too.
   `wrap_scene()`, `audio_timeline()` and `audio` reach the weather system attached to this sky
-  (`eidoblend.weather.make_weather_system` sets `sky.weather_fx`): wetness wrapping, the weather-audio
+  (`eidoblend.weather.make_weather_system` sets `sky.weather_fx`; [weather effects](weather-effects.md)): wetness wrapping, the weather-audio
   timeline and its carrier, or nothing and `None` without one. `make_sky(audio=False)` silences the
   timeline. `enable_reflections()` does nothing: EEVEE ray-traces reflections without a hook. makeSky's
   `renderer` and `hemi` have no counterpart: the bake renders in Blender's own GPU module, and the EEVEE
@@ -206,11 +206,12 @@ Ported, but not yet judged in a render of their own:
 
 - the rain curtains under dense cells (`precipK`, in the sky shader);
 - the below-cloud shafts (`shafts=`, off by default as in WebGPU);
-- the wetness and surface-water time constants. These run as numbers only; nothing wets a material
-  yet.
+- the wetness and surface-water time constants, as numbers the weather effects read.
 
-Rain streaks, splashes, puddles and lightning are not yet ported (see below). A rain state therefore
-has no falling drops yet, and darkstorm has no flashes.
+Rain streaks and splashes, wet ground, lightning and the weather audio are in `eidoblend.weather`
+([weather effects](weather-effects.md)): it attaches itself to a sky (`sky.weather_fx`), drives the
+sky's flash through `on_frame`, and answers the facade's `wrap_scene()` and `audio_timeline()`.
+Without it a rain state has no falling drops and darkstorm no flashes.
 
 **Wind direction.** Clouds drift *with* `skyWind`, as in Eanpa: the density is sampled at `p` minus the
 integrated displacement (`cloud_motion`). This repo's older WebGPU `eidoverse/sky_system.js` samples at
@@ -579,8 +580,8 @@ These are what the facade composes, for toolkit work. The first six do not impor
 
 ## Tests
 
-`blender/tests/sky/`. Run each with `bash run_blender.sh <test> [args]`, and every render through the
-shared GPU slot. They write to `blender/tests/sky/out/`.
+`blender/tests/sky/`. Run each with `bash run_blender.sh <test> [args]`, one render at a time on a
+shared GPU. They write to `blender/tests/sky/out/`.
 
 - `meadow_cumulus.py` (`--views up,sun,level,high`): the first-priority probe. A cumulus late afternoon
   (16:30, sun at 23.7°) over a meadow made from our blade atlas, with white, grey and chrome spheres. It
@@ -656,10 +657,8 @@ shared GPU slot. They write to `blender/tests/sky/out/`.
 
 ## Not yet ported
 
-- **Rain, lightning, wetness and the weather audio** are not the sky's: they live in `eidoblend.weather`,
-  which attaches itself to a sky (`sky.weather_fx`), drives the sky's flash through `on_frame`, and
-  answers the facade's `wrap_scene()` and `audio_timeline()`. Without it a rain state has no falling
-  drops and `audio_timeline()` returns `None`.
+- **`makeSky` building the weather itself.** `make_sky` returns the sky alone; attach the weather with
+  `eidoblend.weather.make_weather_system(scene, sky)` ([weather effects](weather-effects.md)).
 - **Ringworld, Eanpa's v4 relief files.** The code is ported (`load_ring_relief`, `reliefDir`), but the
   files are not in this repo: `ring_relief_v4.bin.gz`, `ring_albedo_v4.png` and `ring_relief_v3.bin.gz` live
   in Eanpa Engine's `assets/ringworld/`. Without them the band displaces the repo's v1 height map and

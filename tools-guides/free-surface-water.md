@@ -262,10 +262,9 @@ given thickness. The material output's Thickness is the baked `exit` path,
 cut to three quarters of it over a solid, so the refracted ray leaves the
 slab just above a basin's floor and finds the floor
 (`refraction_thickness='slab'`; `'sphere'` uses EEVEE's round-body model
-instead, and `'none'` leaves the Thickness unlinked).
-Left unlinked, EEVEE's own default made the same settled pool render bright
-in one frame and dark in the next. Linked, the dam break matches a Cycles
-render of the same file.
+instead, and `'none'` leaves the Thickness unlinked). Keep it linked: the
+Thickness tells EEVEE how far a refracted ray travels through the water, so
+a settled pool reads the same from frame to frame.
 
 All of the water refracts, and the depth tint, weighted by
 `surface_opacity`, colours the light that passes through it (`body='tint'`):
@@ -391,8 +390,7 @@ its own options, so their settings carry over as written:
   target without `fill_target`.
 - `probe_refraction_thickness.py` reopens a baked probe `.blend` and renders
   the same frames with EEVEE's own thickness, with the baked path as a slab
-  or sphere, and with shares of it over a bed, beside a Cycles render of the
-  same file.
+  or sphere, and with shares of it over a bed.
 - `probe_foam_pick.py` renders the pour's stream and splash with the
   per-sample pick, the lace pick and no churn foam, with ray tracing at
   half and at full resolution.

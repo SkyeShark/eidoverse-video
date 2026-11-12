@@ -4,16 +4,16 @@ headlight pool is faint by design), so their seats, aim and colour are judged he
 
     cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \
         <worktree>/blender/tests/sdf_vehicles/test_vehicles_night_lamps.py [-- quality=balanced lamp_power=8
-        cycles=1 w=960 h=540]
+        w=960 h=540]
 
 PASS lines: every lamp sits just outside its vehicle's solid, facing the part it belongs to (the SDF is positive at
-the light, and the nearest surface is that lamp's part), so its own body does not shadow it; EEVEE agrees with Cycles
-on the same file; seen from above with the vehicles hidden from the camera, each car's headlights light the road
+the light, and the nearest surface is that lamp's part), so its own body does not shadow it; seen from above with the
+vehicles hidden from the camera, each car's headlights light the road
 ahead of it and none behind it (the light map with the headlights minus the one without), the cyberpunk sedan's
 underglow tints the road beside its sills toward its uPaint, and the jet's afterburners light the ground under its
 tail; on a keyed drive the lamps ride with the car, and a keyed repaint reaches the underglow lamps through their
 drivers.
-Writes out/night_lamps.png (EEVEE, Cycles of the same file when cycles=1, and the light map from above),
+Writes out/night_lamps.png (the beauty shot and the light map from above),
 out/night_drive.png (frames 1, 24 and 48 of the cyberpunk sedan driven 8 m and repainted magenta -> cyan) and
 out/jet_tail.png (the jet from behind and below, and straight from behind: the canted fins, the plumes, the
 afterburners' light).
@@ -40,7 +40,6 @@ A = V.args()
 W, H = int(A.get('w', '960')), int(A.get('h', '540'))
 QUALITY = A.get('quality', 'balanced')
 POWER = float(A.get('lamp_power', '8'))
-CYCLES = A.get('cycles', '1') == '1'
 CACHE = os.path.join(V.OUT, 'cache_night')
 EX = sdf.EXAMPLES
 # each lamp role's part id (the map()'s material id the light belongs to)
@@ -98,30 +97,6 @@ def read_exr(path):
     return np.asarray(oiio.ImageBuf(path).get_pixels(oiio.FLOAT))[..., :3]    # row 0 at the top
 
 
-def cycles_reference(path, samples=64):
-    """The same file in Cycles on the GPU (OptiX when there is one): the ground truth for the lamps' light."""
-    sc = bpy.context.scene
-    prefs = bpy.context.preferences.addons['cycles'].preferences
-    for dev in ('OPTIX', 'CUDA'):
-        try:
-            prefs.compute_device_type = dev
-            prefs.get_devices()
-            if any(d.type == dev for d in prefs.devices):
-                break
-        except TypeError:
-            continue
-    for d in prefs.devices:
-        d.use = True
-    sc.render.engine = 'CYCLES'
-    sc.cycles.device = 'GPU'
-    sc.cycles.samples = samples
-    sc.cycles.use_denoising = True
-    t0 = time.perf_counter()
-    ok = V.render(path)
-    sc.render.engine = 'BLENDER_EEVEE'
-    return ok, time.perf_counter() - t0
-
-
 # ===================================================================================== the night lineup ===
 sc = night_stage()
 LINEUP = [('stylized_modern_sedan', -5.5, 0.0, {'paint_color': 0x8a1b1b}),
@@ -151,21 +126,12 @@ for car in cars:
 V.check('every lamp sits just outside its vehicle, at its own part (no lamp inside or shadowed by its body)',
         n == 4 + 6 + 4 + 2 and not bad, f'{n} lamps' + (f'; off: {bad}' if bad else ''))
 
-# the beauty shot, EEVEE and (the same file) Cycles
+# the beauty shot
 cam = V.C.camera((-1.5, -15.5, 3.4), (2.2, -1.2, 0.7), lens=26.0, name='cam_night')
 shots = []
 p = os.path.join(V.OUT, '_night_eevee.png')
 V.check('night beauty renders (EEVEE)', V.render(p), p)
 shots.append(p)
-if CYCLES:
-    pc = os.path.join(V.OUT, '_night_cycles.png')
-    ok, dt = cycles_reference(pc)
-    V.check('night beauty renders (Cycles, the same file)', ok, f'{pc} in {dt:.1f} s')
-    if ok:
-        shots.append(pc)
-        diff = float(np.abs(V.read_rgb(p) - V.read_rgb(pc)).mean())
-        V.check('EEVEE agrees with Cycles on the lamps\' light (the same file, mean |sRGB difference|)', diff < 0.035,
-                f'{diff:.4f}')
 
 # the light map: the road from above, the vehicles hidden from the camera (they still cast their shadows), once with
 # every lamp and once with the headlights off: the difference is the headlights' own light

@@ -211,7 +211,7 @@ def quiet_room():
     board_cv = L.override_canvas(my_board, *QR.CANVASES['board_center'][:2])        # a Canvas, drawn once here
     sign = my_sign_array()
     tb = time.perf_counter()
-    room = QR.build(sc, art_cache=T.ART, probe_spacing=0.5, probe_samples=512,
+    room = QR.build(sc, art_cache=T.ART, probe_spacing=0.45, probe_samples=512,
                     art={'board_center': board_cv, 'essay': essay, 'ship_sign': sign})
     T.check('quiet room built with its own centre board (a Canvas), essay (a picture file) and sign (an array)', True,
             f'{time.perf_counter() - tb:.1f} s')

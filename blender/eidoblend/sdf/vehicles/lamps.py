@@ -110,7 +110,8 @@ def add_lamps(car, power=1.0, collection=None):
             ld.size, ld.size_y = sx, sy
         else:
             ld.shadow_soft_size = extra.get('radius', 0.03)
-        # a weak lamp is culled by the scene's light_threshold: a custom cutoff keeps it (round one's lesson)
+        # the lamp's reach, its custom influence distance (a weak light's own reach ends where its power falls under
+        # the scene's light_threshold)
         try:
             ld.use_custom_distance = True
             ld.cutoff_distance = 40.0

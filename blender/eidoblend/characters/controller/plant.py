@@ -10,12 +10,18 @@ blend of clips at any speed):
                 clip's measured stance (clips.analyze), blended; idle, the emotes and a seat stand on both feet (a seat's
                 pelvis stays where the seat puts it, its feet go onto the floor under it); a fall and a maneuver leave
                 the feet to the clip (the maneuver's contact IK places them). Neither foot down is a flight only where a
-                gait with one leads (FLIGHT_SLOTS); anywhere else the report lists it as airborne
+                gait with one leads (FLIGHT_SLOTS); anywhere else the report lists it as airborne. A swing of two frames
+                between two stances is the crossfade's noise: the foot stays down
+  THE STEPS     a planted foot the body has walked on from is let go (an early toe-off); where the other foot is still
+                in its swing then, that swing is brought forward to land by then (its own motion relative to the body,
+                played faster: a quicker step, _land_by / _retime), so a walk keeps a foot down
   THE LOCK      through a stance the sole's points in contact in this frame and the last do not slip and the foot does
                 not turn on the ground (in a turn on the spot it pivots about its contact: that is a turn). The heading
                 it lands with is turned on by the free foot's own turn up to mid-stance (centred: on a curve the hips
                 take the turn). On a stair or an edge the landing is moved along the foot (at most 12 cm) to where most
-                of the sole is supported
+                of the sole is supported; a stance whose sole reaches into a riser or a dome's side at any of its
+                frames is moved along the travel as little as keeps it out (_tuck_shift). The first stance after a
+                seat stands where the seat left the foot
   THE TARGET    tilted onto the ground's plane under the sole, set flat when within 1.5 deg of flat (not into the
                 heel-off), inside the ankle's range for my robot body, toes flat on the ground through the toe roll
   THE HEIGHT    in stance the lowest sole point on the ground. In swing the straight line between the two plants plus
@@ -46,7 +52,7 @@ from ..locomotion import CONTACT, FLAT, FWD, LOCK_BAND, NEED, REACH_MARGIN, WIDT
 LOCK_ROUNDS = 14                     # round one's 8 rounds converge for one clip at its own pace; a blend of clips at the
 #                                      controller's pace corrects more each frame (a stair clip on a stair it was not
 #                                      made for): more rounds, each frame's last ones settling the slip
-from .pose import dof_pass
+from .pose import Pose, dof_pass
 
 CLEARANCE = 0.03
 FLIGHT_SLOTS = ('run', 'stairsRunUp', 'stairsRunDown', 'fallIdle')   # the gaits whose frames may have neither foot down
@@ -55,6 +61,7 @@ STANCE_DROP_MAX = 0.45              # a stance whose ground lies this far under 
 STEP_FIT_MAX = 0.30                  # a landing's fit may move it onto a tread at most this far down (a stair's rise)
 TWO_POINT_MAX = 3.0 * D2R            # the most the two-point support turns a planted sole in one round
 FIT_RANGE = 0.12                     # the most a landing moves along the foot to find its support (m)
+SURFACE_DROP = 0.05                  # a planted sole's surface lies no further under the ground it landed on (m)
 BOOT_FIT = 0.04                      # the most more it moves to take the boot out of a riser (a heel's tuck) (m)
 SWEEP_RATE = 1.2                     # the swing's clearance envelope rises toward an obstacle at most this fast (m/s)
 LOAD_FRAMES = 4
@@ -129,22 +136,29 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
     late = {s: set(v) for s, v in (released or {}).items()}
     for s in SIDES:
         late.setdefault(s, set())
-    frames, rep = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, late)
+    retime = {}
+    frames, rep = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, late,
+                         retime)
     for _round in range(3):
         # out of reach, or lifted off by its own toe meeting a riser as it rolls (the trailing foot at a stair's foot):
         # from the first such frame in the stance's second half to its end, the foot is let go (an early toe-off)
         more = {s: set() for s in SIDES}
+        more_rt = {}
         f00 = frames[0]['f']
         for s in SIDES:
             other = 'right' if s == 'left' else 'left'
             for row in rep['stances'][s]:
                 a, b = row['frames']
                 # left behind (the pelvis no longer comes down to it): let go from there whatever the other foot does,
-                # an early toe-off (held, the stretched leg dragged it 4-6 cm a frame; the old pelvis knelt for it).
-                # Where the other foot is in its swing, a few frames have neither foot down
+                # an early toe-off. A walk has a foot down at every frame: where the other foot is still in its swing
+                # there, that swing is brought forward to land by then (_land_by: the faster step a body moving on
+                # faster than the clip's stride takes)
                 gone = next((f for f in range(a, b + 1) if frames[f - f00]['meas'][s].get('behind')), None)
                 if gone is not None:
                     more[s].update(range(gone, b + 1))
+                    rt = _land_by(frames, recs, other, gone - f00)
+                    if rt is not None and retime.get((other, rt[0])) != rt:
+                        more_rt[(other, rt[0])] = rt
                     continue
                 for f in range(a + (b - a + 1) // 2, b + 1):
                     m = frames[f - f00]['meas'][s]
@@ -152,25 +166,198 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
                         # let go from the first frame on with the other foot down: a walk does not lift both feet at
                         # once (until the other lands the pelvis comes down to this one instead). Down stairs the
                         # trailing foot leaves the tread above before the other lands (a lower pelvis cannot reach a
-                        # foot above it), and a run may fly. (Held on instead until the other foot stays down, my robot
-                        # body's foot after a stand-up, 6-10 cm out of its reach, was dragged for 20 frames)
+                        # foot above it), and a run may fly
                         start = next((x for x in range(f, b + 1) if frames[x - f00]['meas'][other]['stance'] or
                                       recs[x - f00].get('lead') in FLIGHT_SLOTS + STAIR_SLOTS), None)
                         if start is not None:
                             more[s].update(range(start, b + 1))
                         break
-        if not any(more.values()):
+        if not any(more[s] - late[s] for s in SIDES) and not more_rt:
             break
         for s in SIDES:
             late[s] |= more[s]
+        retime.update(more_rt)
         log(f'[plant] released at the end of their stances (out of reach): '
-            f'{ {s: sorted(v) for s, v in more.items() if v} }')
-        frames, rep = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, late)
+            f'{ {s: sorted(v) for s, v in more.items() if v} }' +
+            (f'; swings brought forward to land by then: '
+             f'{ {k[0]: [recs[i]["f"] for i in v] for k, v in more_rt.items()} }' if more_rt else ''))
+        frames, rep = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, late,
+                             retime)
+    # a planted sole that reaches into a riser or a dome's side at any frame of its stance (the landing's fit sees the
+    # heel strike; the toes come down into the step ahead as the foot rolls flat, the heel into the step behind as it
+    # comes down a stair): the whole stance moved along the foot, as little as keeps every frame out (_tuck_shift)
+    tucks = {}
+
+    def rows_by_start(rep_):
+        f0_ = frames[0]['f']
+        return {(s, row['frames'][0] - f0_): row for s in SIDES for row in rep_['stances'][s]}
+
+    def worse(new, old):
+        """a moved stance that came out worse than it was: it now slips, or its sole reads deeper"""
+        return new is None or new['slip_mm_per_frame_max'] > max(1.0, old['slip_mm_per_frame_max']) + 0.5 or \
+            new['gap_mm'][0] < old['gap_mm'][0]
+    for _round in range(2):
+        more_t = {}
+        f00 = frames[0]['f']
+        before = rows_by_start(rep)
+        for s in SIDES:
+            for row in rep['stances'][s]:
+                if row['gap_mm'][0] >= -TUCK_TOL * 1000:
+                    continue
+                ia, ib = row['frames'][0] - f00, row['frames'][1] - f00
+                d = _tuck_shift(world, frames, s, ia, ib)
+                if d is not None:
+                    more_t[(s, ia)] = tucks.get((s, ia), Vector((0.0, 0.0))) + d
+        if not more_t:
+            break
+        kept_t = dict(tucks)
+        tucks.update(more_t)
+        moved = {k[0] + ' f' + str(recs[k[1]]['f']): round(1000 * v.length, 1) for k, v in more_t.items()}
+        log(f'[plant] stances moved out of a riser (mm): {moved}')
+        frames2, rep2 = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log,
+                               late, retime, tucks)
+        after = rows_by_start(rep2)
+        undo = [k for k in more_t if worse(after.get(k), before[k])]
+        if undo:
+            # a move out of a riser that costs the stance its hold (a sole on a dome's curve rolling as it leaves) is
+            # not kept: that stance stays where it landed
+            for k in undo:
+                if k in kept_t:
+                    tucks[k] = kept_t[k]
+                else:
+                    tucks.pop(k, None)
+            log(f'[plant] moves not kept (the stance held worse): '
+                f'{[k[0] + " f" + str(recs[k[1]]["f"]) for k in undo]}')
+            frames2, rep2 = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log,
+                                   late, retime, tucks)
+        frames, rep = frames2, rep2
+        if undo and len(undo) == len(more_t):
+            break
     rep['released'] = {s: sorted(v) for s, v in late.items()}
+    rep['landed_early'] = {k[0] + f' f{recs[k[1]]["f"]}': [recs[i]['f'] for i in v] for k, v in retime.items()}
+    rep['tucks_mm'] = {k[0] + f' f{recs[k[1]]["f"]}': round(1000 * v.length, 1) for k, v in tucks.items()}
     return frames, rep
 
 
-def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, released):
+TUCK_TOL = 0.0015                     # m: a planted sole point this far under the ground it stands on is in it
+TUCK_MAX = 0.06                       # m: the most a stance is moved along its foot out of a riser
+
+
+def _tuck_shift(world, frames, s, ia, ib):
+    """the least move of stance [ia, ib] of foot s along the body's travel (square to a stair's edges; 5 mm steps, at
+    most TUCK_MAX, back or forth) that keeps every frame's sole points (as solved) out of the ground they are over (a
+    riser's step, a dome's side) and keeps as much of the sole on what it stands on (at least 80 % of it) -> Vector
+    (xy) or None"""
+    psi = frames[(ia + ib) // 2]['psi']
+    f = np.array([math.sin(psi), -math.cos(psi)])
+    Ps = [frames[i]['meas'][s]['P'] for i in range(ia, ib + 1)]
+    mid = Ps[len(Ps) // 2]
+
+    def on(G):
+        """the share of the sole standing on the ground under it (within 1 cm over it, not in it)"""
+        gap = mid[:, 2] - G
+        return float(np.mean((G > -1e8) & (gap < 0.01) & (gap >= -TUCK_TOL)))
+    on0 = on(world.h(mid[:, 0], mid[:, 1], z_from=mid[:, 2] + 0.6))
+
+    def deepest(d):
+        lo = 1.0
+        for P in Ps:
+            Q = P[:, :2] + f * d
+            G = world.h(Q[:, 0], Q[:, 1], z_from=P[:, 2] + 0.6)
+            ok = G > -1e8
+            if ok.any():
+                lo = min(lo, float(np.min(P[ok, 2] - G[ok])))
+        return lo
+
+    def supported(d):
+        Q = mid[:, :2] + f * d
+        return on(world.h(Q[:, 0], Q[:, 1], z_from=mid[:, 2] + 0.6)) >= 0.8 * on0
+    if deepest(0.0) >= -TUCK_TOL:
+        return None
+    for k in range(1, int(TUCK_MAX / 0.005) + 1):
+        for d in (-0.005 * k, 0.005 * k):
+            if deepest(d) >= -TUCK_TOL and supported(d):
+                return Vector((f[0] * d, f[1] * d))
+    return None
+
+
+SWING_MIN = 5                         # a swing brought forward keeps at least this many frames...
+SWING_SHORT = 0.5                     # ...and this share of its own
+
+
+def _land_by(frames, recs, o, g):
+    """the swing of foot o going on over frame index g (where the other foot is let go) brought forward to land there:
+    (a, L, g, E): the swing's first frame, its own landing, g, and the end of the stance it lands into (indices). None
+    where o is down at g, a flight gait leads (a run flies), the swing leads into a seat, a maneuver or a fall, or it
+    would keep under SWING_SHORT of its frames"""
+    n = len(frames)
+    m = frames[g]['meas'][o]
+    if m['stance'] or m['free'] or recs[g].get('lead') in FLIGHT_SLOTS:
+        return None
+    a = g
+    while a > 0 and not frames[a - 1]['meas'][o]['stance'] and not frames[a - 1]['meas'][o]['free']:
+        a -= 1
+    L = g
+    while L < n and not frames[L]['meas'][o]['stance']:
+        if frames[L]['meas'][o]['free']:
+            return None
+        L += 1
+    if L >= n or a == 0:
+        return None
+    E = L
+    while E + 1 < n and frames[E + 1]['meas'][o]['stance']:
+        E += 1
+    if g - a < max(SWING_MIN, SWING_SHORT * (L - a)):
+        return None
+    return (a, L, g, E)
+
+
+def _retime(pb, world, A, recs, s, a, L, g, E, released):
+    """foot s's swing [a, L) brought forward to land at g and its stance [L, E] stretched over [g, E]: each frame takes
+    the foot's place and turn relative to the root from the clip warped in time (piecewise linear: a -> a, g -> L,
+    E -> E), so the swing is the clip's own played faster and lands where the clip lands it relative to the body, the
+    stance rolls over the frames it gained"""
+    rel = []
+    for i in range(a, E + 1):
+        r, fd = A[i], A[i]['feet'][s]
+        Mi, Qi = r['M'].inverted(), r['Qr'].inverted()
+        rel.append({'p_an': Mi @ fd['p_an'], 'p_th': Mi @ fd['p_th'], 'w_off': Qi @ fd['w_off'],
+                    'W_ft': Qi @ fd['W_ft'], 'W_to': Qi @ fd['W_to'], 'W_sh': Qi @ fd['W_sh'], 'Ntoes': fd['Ntoes']})
+
+    def at(tau):
+        k = min(max(tau - a, 0.0), float(E - a))
+        i0 = int(math.floor(k))
+        i1 = min(i0 + 1, E - a)
+        u = k - i0
+        x, y = rel[i0], rel[i1]
+        out = {key: x[key].lerp(y[key], u) for key in ('p_an', 'p_th', 'w_off')}
+        for key in ('W_ft', 'W_to', 'W_sh', 'Ntoes'):
+            q1 = y[key] if x[key].dot(y[key]) >= 0.0 else -y[key]
+            out[key] = x[key].slerp(q1, u)
+        return out
+    for j in range(a, E + 1):
+        if j <= g:
+            tau = a + (j - a) * (L - a) / float(g - a)
+        else:
+            tau = L + (j - g) * (E - L) / float(E - g)
+        v = at(tau)
+        r = A[j]
+        M, Q = r['M'], r['Qr']
+        fd = r['feet'][s]
+        fd['p_an'], fd['p_th'], fd['w_off'] = M @ v['p_an'], M @ v['p_th'], Q @ v['w_off']
+        fd['W_ft'], fd['W_to'], fd['W_sh'], fd['Ntoes'] = Q @ v['W_ft'], Q @ v['W_to'], Q @ v['W_sh'], v['Ntoes']
+        fd['P'] = pb.sole(s, fd['p_an'], fd['W_ft'], fd['W_to'])
+        fd['zlow'] = float(fd['P'][:, 2].min())
+        fd['dclip'] = (fd['p_an'] - fd['p_th']).length
+        rr = recs[j]
+        planted = j >= g and rr['grounded'] and feet_down_mode(rr) and rr['f'] not in released.get(s, ())
+        if planted and float(np.max(_ground(world, fd['P']))) < M.translation.z - STANCE_DROP_MAX:
+            planted = False
+        fd['stance'] = planted
+
+
+def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, released,
+           retime=None, tucks=None):
     import types
     dt = 1.0 / fps
     pb = copy.copy(body)
@@ -188,6 +375,12 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             # IK put them, through the hardware
             hc = {s: w for s, w in (r.get('hand_contact') or {}).items() if w > 0.01}
             N, helpers = dof_pass(body, N, dt, reach={'M': r['M'], 'off': r['off'], 'hands': hc} if hc else None)
+        if r.get('after_hardware') is not None:
+            # what the frame's maker asks of the pose as the hardware leaves it (a ground sit: the limbs resting on
+            # the floor rather than in it)
+            pp = Pose(body, r['M'], N, r['off'])
+            r['after_hardware'](pp)
+            N = pp.N
         M = r['M']
         Qr = M.to_quaternion()
         ph, Wh = pb.hips(M, r['off'], N)
@@ -203,9 +396,11 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             w_eff = WIDTH * (1.0 - smooth(NEED[0], NEED[1], sep))
         for s in SIDES:
             fk = fks[s]
+            w_off = Vector((0.0, 0.0, 0.0))
             if w_eff > 0:
                 fk = dict(fk)
-                fk['p_an'] = fk['p_an'] + Qr @ Vector((w_eff if s == 'left' else -w_eff, 0.0, 0.0))
+                w_off = Qr @ Vector((w_eff if s == 'left' else -w_eff, 0.0, 0.0))
+                fk['p_an'] = fk['p_an'] + w_off
             P = pb.sole(s, fk['p_an'], fk['W_ft'], fk['W_to'])
             st = r['stance'][s]
             planted = (st >= 0.5) and r['grounded'] and feet_down_mode(r) and r['f'] not in released.get(s, ())
@@ -217,15 +412,24 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             rec['feet'][s] = {'p_an': fk['p_an'], 'p_th': fk['p_th'], 'W_ft': fk['W_ft'], 'W_to': fk['W_to'],
                               'W_sh': fk['W_sh'], 'P': P, 'zlow': float(P[:, 2].min()), 'stance': planted, 'free': free,
                               'Ntoes': N[s + 'Toes'] if (s + 'Toes') in N else Quaternion(),
-                              'dclip': (fk['p_an'] - fk['p_th']).length, 'p': 0.0, 'u': 0.0}
+                              'dclip': (fk['p_an'] - fk['p_th']).length, 'p': 0.0, 'u': 0.0, 'w_off': w_off}
         A.append(rec)
-    # stance runs of one frame (and swings of one frame) are blend noise: dropped
+    for (s, _a), (a, L, g, E) in sorted((retime or {}).items(), key=lambda kv: kv[1][0]):
+        _retime(pb, world, A, recs, s, a, L, g, E, released)
+    # stance runs of one frame (and swings of one frame) are blend noise: dropped. A swing of two frames between two
+    # stances is too (a crossfade's stance weights dipping under a half): no foot lifts, travels and lands in 0.07 s;
+    # the foot stays down
     for s in SIDES:
         fl = [r['feet'][s]['stance'] for r in A]
         for _ in range(2):
             for i in range(1, n - 1):
                 if fl[i] != fl[i - 1] and fl[i] != fl[i + 1]:
                     fl[i] = fl[i - 1]
+        for i in range(1, n - 2):
+            if fl[i - 1] and not fl[i] and not fl[i + 1] and fl[i + 2] and \
+                    not any(A[k]['feet'][s]['free'] for k in (i, i + 1)) and \
+                    not any(recs[k]['f'] in released.get(s, ()) for k in (i, i + 1)):
+                fl[i] = fl[i + 1] = True
         for r, v in zip(A, fl):
             r['feet'][s]['stance'] = v
     intervals = {s: _intervals([r['feet'][s]['stance'] for r in A]) for s in SIDES}
@@ -248,9 +452,17 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         yaw_free = [foot_yaw(r['feet'][s]['W_ft'], r['feet'][s]['W_to']) for r in A]
         th0, fit = {}, {}
         for a, b in iv:
+            if a > 0 and A[a - 1]['mode'] == 'seat' and A[a - 1]['feet'][s]['free']:
+                # the first stance after a seat stands where the seat left the foot (its place and heading): the
+                # stand-up's feet stay put, no hand-over step or slide back to where the standing pose has them
+                fp = A[a - 1]['feet'][s]
+                fit[a] = (fp['p_an'] - fp['w_off']).xy - A[a]['feet'][s]['p_an'].xy
+                th0[a] = wrap_pi(yaw_free[a - 1] - yaw_free[a])
+                continue
             th0[a] = wrap_pi(yaw_free[(a + b) // 2] - yaw_free[a]) if A[a]['mode'] != 'turn' else 0.0
             fit[a] = _support_fit(world, A[a]['feet'][s], th0[a], boot=(pb, s)) if A[a]['mode'] == 'loco' else \
                 Vector((0.0, 0.0))
+            fit[a] = fit[a] + (tucks or {}).get((s, a), Vector((0.0, 0.0)))
         delta, theta = Vector((0.0, 0.0)), 0.0
         lift = None
         for i, r in enumerate(A):
@@ -350,11 +562,16 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         # turning the planted sole) does not lift the foot onto that edge. That surface is the landing's own plane: a
         # tread's level, or a slope's incline (a level there would sink a foot planted on a 45 deg ramp into it)
         for a, b in intervals[s]:
-            plane = landing_surface(A[a]['feet'][s]['P_plan'], A[a]['feet'][s]['G'])
+            Ga = A[a]['feet'][s]['G']
+            plane = landing_surface(A[a]['feet'][s]['P_plan'], Ga)
+            # nowhere under the ground the landing stood on, less SURFACE_DROP: a plane fitted where a floor meets a
+            # dome's foot runs steeply down past the footprint, and a rolling sole reaches out over it
+            lo = float(np.min(Ga[Ga > -1e8])) - SURFACE_DROP if (Ga > -1e8).any() else -np.inf
             for i in range(a, b + 1):
                 fd = A[i]['feet'][s]
                 fd['surface'] = plane
-                lim = plane_z(plane, fd['P_plan']) + 0.01
+                fd['surface_lo'] = lo
+                lim = np.maximum(plane_z(plane, fd['P_plan']) + 0.01, lo)
                 if np.any(fd['G'] > lim):
                     fd['G'] = np.minimum(fd['G'], lim)
                     fd['z_stance'] = float(np.max(fd['G'] - fd['P_plan'][:, 2]))
@@ -794,7 +1011,8 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
             P = body.sole(s, fk['p_an'], fk['W_ft'], fk['W_to'])
             G = _ground(world, P)
             if st_now[s] and 'surface' in fd:
-                G = np.minimum(G, plane_z(fd['surface'], P) + 0.01)   # the surface it landed on, not an edge it crept over
+                # the surface it landed on, not an edge it crept over
+                G = np.minimum(G, np.maximum(plane_z(fd['surface'], P) + 0.01, fd.get('surface_lo', -np.inf)))
             gap = P[:, 2] - G
             pv = prev[s]
             if st_now[s] and pv is not None and pv['stance']:

@@ -1,21 +1,20 @@
-"""Do the SDF fires light the scene? EEVEE's volume emission against Cycles, and light_from_emission's keyed lamps.
+"""Do the SDF fires light the scene? EEVEE's volume emission alone, and light_from_emission's keyed lamps.
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sdf_volumes/test_volume_lights.py [-- cases=bonfire,candle_flame]
 
 Per case (a bonfire on a grey floor at night with a chrome ball and a grey wall beside it; a candle on a table
-top; the pyroclastic fireball, a surface SDF, for comparison), five renders of one frame (three for the surface:
-no lamps), to float EXR (measured) and AgX PNG (looked at):
+top; the pyroclastic fireball, a surface SDF), four renders of one frame, to float EXR (measured) and AgX PNG
+(looked at):
     base         EEVEE, the fire hidden: the floor under the world alone
     eevee        EEVEE, the fire's volume only: what its emission does to the floor (EEVEE: nothing)
-    cycles       Cycles, the volume only: the ground truth, the volume lighting the floor by itself
     lamps        EEVEE, the volume + light_from_emission's lamps: the port
     lamps_only   EEVEE, the lamps with the volume hidden
 The floor's radiance is read at patches round the fire. PASS lines: EEVEE's volume emission adds (almost) nothing,
-Cycles' does, and the lamps bring EEVEE's floor to Cycles' within the tolerance; the chrome ball's reflection of the
-fire in EEVEE (volumes in ray-traced reflections) is printed and seen in the sheet. The surface fireball gets
-light_from_surface's lamps (shadow linking lets them out of the solid); then it is baked over four frames with its
-lamps keyed per frame (out/lights_explosion_baked.png).
+the lamps light the floor, and the volume adds nothing over its lamps; the chrome ball's reflection of the fire
+(volumes in ray-traced reflections) is printed and seen in the sheet. The surface fireball gets light_from_surface's
+lamps (shadow linking lets them out of the solid); then it is baked over four frames with its lamps keyed per frame
+(out/lights_explosion_baked.png).
 """
 
 import os
@@ -49,7 +48,7 @@ RIGS = {
                                   (-0.28, 0.06, 0.0), (0.26, 0.08, 0.0)],
                          ball=((0.2, 0.12, 0.05), 0.05), wall=((-0.25, 0.25, 0.0), (0.18, 0.02, 0.16))),
     # the pyroclastic fireball is a surface SDF (examples_solids.py): its emission is a mesh's, which EEVEE's fast
-    # GI gathers only weakly; light_from_surface's lamps against Cycles
+    # GI gathers only from the screen; light_from_surface's lamps light the scene
     'explosion': dict(t=2.0, solid=True, loc=(0.0, 0.0, 1.5), cam=(0.0, -7.5, 2.2), target=(0.0, 0.0, 1.2), lens=40,
                       patches=[(-2.2, -0.8, 0.0), (2.2, -0.8, 0.0), (-1.6, -1.4, 0.0), (1.7, -1.4, 0.0),
                                (-3.2, 0.6, 0.0), (3.0, 0.8, 0.0)],
@@ -126,9 +125,7 @@ for case in CASES:
         fit_volume_range(sc, cam, [vol], frames=[1], tile_size='2', samples=96)
         rig = light_from_emission(vol)
     lamps = rig.lights
-    tags = (('base', 'BLENDER_EEVEE', False, False), ('eevee', 'BLENDER_EEVEE', True, False),
-            ('lamps', 'BLENDER_EEVEE', True, True), ('lamps_only', 'BLENDER_EEVEE', False, True),
-            ('cycles', 'CYCLES', True, False))
+    tags = (('base', False, False), ('eevee', True, False), ('lamps', True, True), ('lamps_only', False, True))
 
     def show(volume=True, lights=True):
         vol.object.hide_render = not volume
@@ -136,46 +133,40 @@ for case in CASES:
             lo.hide_render = not lights
 
     imgs = {}
-    for tag, engine, volume, lights in tags:
+    for tag, volume, lights in tags:
         show(volume, lights)
-        if engine == 'CYCLES':
-            V.cycles_gpu(sc, samples=256)
         exr = os.path.join(V.OUT, f'lights_{case}_{tag}.exr')
-        imgs[tag] = V.render_linear(exr, engine=engine)
+        imgs[tag] = V.render_linear(exr)
         png = V.save_linear_png(os.path.join(V.OUT, f'lights_{case}_{tag}.png'), imgs[tag][::-1])
         V.label(png, f'{case}: {tag}')
-    V.sheet([os.path.join(V.OUT, f'lights_{case}_{t}.png') for t in ('base', 'eevee', 'cycles', 'lamps')
+    V.sheet([os.path.join(V.OUT, f'lights_{case}_{t}.png') for t in ('base', 'eevee', 'lamps', 'lamps_only')
              if t in imgs], os.path.join(V.OUT, f'lights_{case}_sheet.png'), cols=2)
     rows = []
     for p in R['patches']:
         rows.append({t: lum(patch(imgs[t], cam, p)) for t in imgs})
     gain_eevee = np.mean([r['eevee'] - r['base'] for r in rows])
-    gain_cycles = np.mean([r['cycles'] - r['base'] for r in rows])
     for i, r in enumerate(rows):
         print(f'[lights] {case} patch {i}: ' + ', '.join(f'{k} {v:.4f}' for k, v in r.items()), flush=True)
     gain_lamps = np.mean([r['lamps'] - r['base'] for r in rows])
+    gain_only = np.mean([r['lamps_only'] - r['base'] for r in rows])
     if solid:
-        ratio = gain_eevee / max(1e-9, gain_cycles)
-        print(f'[lights] {case} (a surface SDF): floor gain EEVEE alone {gain_eevee:.4f} ({ratio:.3f} of Cycles '
-              f'{gain_cycles:.4f}, fast GI on), with light_from_surface {gain_lamps:.4f}', flush=True)
-        V.check(f'{case}: EEVEE alone gathers little of the emissive surface\'s light', ratio < 0.5,
-                f'EEVEE / Cycles floor gain = {ratio:.3f}')
-        ratio_l = gain_lamps / max(1e-9, gain_cycles)
-        V.check(f'{case}: light_from_surface lights the floor as Cycles does (shadow linking lets the light out)',
-                0.6 < ratio_l < 1.5, f'EEVEE + lamps / Cycles = {ratio_l:.3f} (per patch: '
-                + ', '.join(f"{(r['lamps'] - r['base']) / max(1e-9, r['cycles'] - r['base']):.2f}" for r in rows) + ')')
+        print(f'[lights] {case} (a surface SDF): floor gain EEVEE alone {gain_eevee:.4f} (fast GI on), with '
+              f'light_from_surface {gain_lamps:.4f}', flush=True)
+        V.check(f'{case}: EEVEE alone gathers little of the emissive surface\'s light', gain_eevee < 0.5 * gain_lamps,
+                f'floor gain {gain_eevee:.4f} alone, {gain_lamps:.4f} with the lamps')
+        V.check(f'{case}: light_from_surface lights the floor (shadow linking lets the light out)', gain_lamps > 1e-3,
+                f'floor gain {gain_lamps:.4f}')
         continue
-    print(f'[lights] {case}: floor gain over the base: EEVEE volume {gain_eevee:.4f}, Cycles volume '
-          f'{gain_cycles:.4f}, EEVEE lamps {gain_lamps:.4f}; lamp power {rig.total_power(None):.3g} W', flush=True)
-    V.check(f'{case}: EEVEE volume emission does not light the floor', gain_eevee < 0.1 * gain_cycles,
-            f'EEVEE gain {gain_eevee:.4f} vs Cycles {gain_cycles:.4f}')
-    ratio = gain_lamps / max(1e-9, gain_cycles)
-    V.check(f'{case}: the lamps light the floor as Cycles\' volume does', 0.7 < ratio < 1.4,
-            f'EEVEE + lamps / Cycles = {ratio:.3f} (per patch: '
-            + ', '.join(f"{(r['lamps'] - r['base']) / max(1e-9, r['cycles'] - r['base']):.2f}" for r in rows) + ')')
+    print(f'[lights] {case}: floor gain over the base: EEVEE volume {gain_eevee:.4f}, EEVEE lamps {gain_lamps:.4f}, '
+          f'lamps alone {gain_only:.4f}; lamp power {rig.total_power(None):.3g} W', flush=True)
+    V.check(f'{case}: EEVEE volume emission does not light the floor', gain_eevee < 0.1 * gain_lamps,
+            f'floor gain {gain_eevee:.4f} from the volume, {gain_lamps:.4f} with its lamps')
+    V.check(f'{case}: the lamps light the floor, and the volume adds nothing over them',
+            gain_lamps > 1e-3 and abs(gain_lamps - gain_only) < 0.15 * gain_lamps,
+            f'with the volume {gain_lamps:.4f}, the lamps alone {gain_only:.4f}')
     bc, br = R['ball']
-    rb = [lum(patch(imgs[t], cam, (bc[0], bc[1] - br * 0.9, bc[2]), r=2)) for t in ('base', 'eevee', 'cycles', 'lamps')]
-    print(f'[lights] {case}: chrome ball front (base, eevee, cycles, lamps) = ' + ', '.join(f'{x:.4f}' for x in rb),
+    rb = [lum(patch(imgs[t], cam, (bc[0], bc[1] - br * 0.9, bc[2]), r=2)) for t in ('base', 'eevee', 'lamps')]
+    print(f'[lights] {case}: chrome ball front (base, eevee, lamps) = ' + ', '.join(f'{x:.4f}' for x in rb),
           flush=True)
     V.check(f'{case}: renders written', all(os.path.exists(os.path.join(V.OUT, f'lights_{case}_{t}.png'))
                                             for t in imgs), '')

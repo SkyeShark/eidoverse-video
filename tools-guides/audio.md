@@ -6,8 +6,7 @@ Choose music, ambience, voice, physical sound effects or silence for the
 piece. Plan sound and image together, including intentional gaps. When voice
 needs to be intelligible, listen to its balance against the actual bed; a
 fixed gain difference is only a starting point, not a universal mix standard.
-Real recorded foley (CC0, e.g. freesound) comes before generated effects:
-the episode mixes are built from recorded clips.
+Real recorded foley (CC0, e.g. freesound) comes before generated effects.
 
 ## In the Blender edition
 
@@ -22,7 +21,7 @@ these never run inside Blender. They write WAV and JSON, and
 
 | Job | Blender edition |
 | --- | --- |
-| Put a sound on the timeline | `audio.add_sound(scene, path, t=…)`, a sound strip. A sequencer holding only sound strips leaves the 3D render in place (measured 11-07). |
+| Put a sound on the timeline | `audio.add_sound(scene, path, t=…)`, a sound strip. A sequencer holding only sound strips leaves the 3D render in place. |
 | A mix's event list (foley hits, page turns) | `audio.place_events(scene, [{t, clip, gain, pan}])` |
 | Beats and cues | `audio.add_markers(scene, times, prefix='kick')` |
 | Sound in the render | `audio.mux_settings(scene)` before a video render: H.264 with AAC 320k, 48 kHz, in one pass. Or stay video-only and use `merge_av.py`. |
@@ -39,11 +38,10 @@ earlier.
 
 **`audio.mixdown` runs in a child Blender.** Blender 5.2 runs
 `bpy.ops.sound.mixdown` as a window-manager job on its own thread. The
-operator returns FINISHED before the file exists: measured 11-07, it took
-8 ms, and 15 s of 48 kHz stereo was on disk 0.4 s later. Without an event
-loop (a background run, or a script that keeps the UI busy) the job is never
-ended, so only a session's first mixdown writes anything; every later one in
-the same session wrote no file at all. So `mixdown` saves a copy of the
+operator returns FINISHED before the file exists (in milliseconds; 15 s of
+48 kHz stereo lands on disk about 0.4 s later). Without an event loop (a
+background run, or a script that keeps the UI busy) the job is never ended,
+so only a session's first mixdown writes anything. So `mixdown` saves a copy of the
 .blend, runs one mixdown in a child Blender (the same binary, with
 `--factory-startup` when this session had it), waits until the file is
 complete and returns. Measured: WAV S24, FLAC, MP3 and WAV S16 in a row from
@@ -53,14 +51,14 @@ second one.
 
 ### Every tool, run on this branch
 
-Measured 11-07 on the Blender branch, unchanged, with Blender-edition
+Run on this branch, unchanged, with Blender-edition
 outputs (`blender/tests/media2/tools_host.py`, then
 `test_tools_film.py` in Blender):
 
 | Tool | What ran | Into the Blender film |
 | --- | --- | --- |
 | [synthkit](synthkit.md) | its guide's quick start: an 8-bar loop at 128 BPM, mastered, 17.0 s, 32 kick times (9.8 s to render) | a sound strip; the kick times as 32 markers |
-| [voicebox](voicebox.md) | its guide's quick start: "Daisy Daisy give me your answer do", handmade, 7.64 s, 184 viseme frames at 24 fps | as round one's probe: keyed onto claude.vrm |
+| [voicebox](voicebox.md) | its guide's quick start: "Daisy Daisy give me your answer do", handmade, 7.64 s, 184 viseme frames at 24 fps | keyed onto claude.vrm |
 | `eidoverse/examples/daisy/` | `song.py --upto chorus2 --no-tts` (168.7 s, −14.0 LUFS, peak −2.2 dBFS), `captions.py` (43 captions to ASS; `--preview`, the CQT lyric video), `analyze.py` (LUFS per stem and section; `--asr` below) | the era screens' timeline and captions; the song under the EEVEE film; its ASS burned onto it |
 | `lipsync.py` | `get_viseme_timeline` on DAISY's lead stem, chorus 1 (69–84 s): 450 frames at 30 fps in 0.1 s, values capped at 0.35. Mouth openness correlates 0.60 with the song's own phoneme-exact visemes (a 1/6 s smoothing) | keyed onto claude.vrm with `divide=0.35`, gated to `align_lyrics.py`'s lines: 362 frames per expression, read back exactly, open at 70.46 s, shut between lines |
 | `align_lyrics.py` | the same excerpt and its four lines, Whisper medium (the default), chunked, on the CPU: 14 s, coverage 0.94, line starts within 0.48 s of the song's own (mean 0.29). Whisper small heard less (coverage 0.56) and placed "Daisy Daisy" 3.1 s late | the visemes' windows |
@@ -78,7 +76,7 @@ pipe raises after its work is done; `align_lyrics.py` prints ASCII, and for
 any other tool `PYTHONIOENCODING=utf-8` (or `python -X utf8`) avoids it.
 
 The options those runs leave at their defaults, each run on this branch
-(`tools_host.py --only options`, CPU only, 11-07):
+(`tools_host.py --only options`, CPU only):
 
 | Tool and options | Result |
 | --- | --- |
@@ -313,13 +311,13 @@ audio.add_markers(scene, [l['start'] for l in lines], prefix='line')
 audio.mux_settings(scene)                                    # then render to video: picture and sound in one file
 ```
 
-The lead's films keep the mix outside Blender (`mix_ep3.py`: clips placed by
-frame, LUFS and true peak measured) and render chunks video-only; the cut
+A long film can instead keep its mix outside Blender (clips placed by frame,
+LUFS and true peak measured) and render chunks video-only; the cut
 concatenates and muxes once. Both routes work; a one-pass render suits a short
 piece or a probe. `make_edit_scene` in [motion graphics](motion-graphics.md)
-carries the sound when graphics go over the film. Measured 11-07: a one-pass
-render of a sung line wrote H.264 plus a 48 kHz stereo AAC stream, and the
-strip's mixdown came back at 48 kHz stereo.
+carries the sound when graphics go over the film. A one-pass render writes
+H.264 plus a 48 kHz stereo AAC stream, and the strips' mixdown comes back at
+48 kHz stereo.
 
 ## Merging onto the render — `merge_av.py`
 
@@ -410,8 +408,8 @@ keys = audio.prepare_visemes(vis, scene, start_t=0.0, divide=0.35,    # lipsync.
 audio.key_expressions(armature, keys)
 ```
 
-- `divide=0.35` for `lipsync.py`'s audio-derived values (the lead's unboxing
-  face did the same); voicebox's are 0..1 already, so `divide=1`.
+- `divide=0.35` for `lipsync.py`'s audio-derived values; voicebox's are 0..1
+  already, so `divide=1`.
 - `windows` gates the mouth to the sung lines, which is the gating above.
 - Each frame's shapes are scaled to sum to at most 1, and every frame of the
   range is keyed (zeros included), so nothing persists between lines.
@@ -499,17 +497,18 @@ ffmpeg -i work/<id>/film.mp4 -i work/<id>/song_excerpt.wav \
 ```
 
 Run it from the repository root: the filter's paths are relative, because a
-Windows drive colon breaks its argument parsing. Measured 11-07
-(`test_tools_film.py --only captions`): verse 1's era lines appeared on the
+Windows drive colon breaks its argument parsing. In
+`test_tools_film.py --only captions`, verse 1's era lines appear on the
 EEVEE wall at 25.75 s and 29.75 s of the song, each in its era's style ("Bell
 Labs · 1961" in the corner, the line in typewriter type).
 
 ## Not yet ported
 
-- No generation was run on this branch: `generate_song.py` and
-  `generate_sfx.py` answered their probes. A real generation loads weights
-  onto the shared GPU and wants the collaborator's yes. Their output is an
-  MP3 that `audio.add_sound` places like any other.
+- Nothing in the sound tools needs a port: they run outside Blender, and
+  what they make becomes sound strips. `generate_song.py` and
+  `generate_sfx.py` are checked here by their probes, not by a generation (a
+  real one loads weights onto the GPU); their output is an MP3 that
+  `audio.add_sound` places like any other.
 
 External music/SFX availability depends on the selected ComfyUI workflow and
 installed models. A connectivity probe does not prove all generators work.

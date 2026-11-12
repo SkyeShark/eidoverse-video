@@ -18,8 +18,10 @@ the seated loop's crossfade, no pop when the root returns after sit_to_stand, th
 resting on the floor, the camera facings, eido_seated keyed on the seated frames only, checks.feet on the walks, the
 keyed armature against the bake; and through each WHOLE seat (_mnv_stage.whole_seat_checks / floor_checks): the seat
 skin on the pan through the stand-up too, nothing of the body in a chair's back and nothing of it or its coat out
-behind it, the body out of the pan and the legs, the body out of the floor through a ground sit's crossfades. Stills:
-strips of each sit, close-ups of the seats, the scene camera's salute.
+behind it, the body out of the pan and the legs, the body out of the floor through a ground sit's crossfades (near
+the hips, and the whole of it: the legs and boots laid out in front). The ground sits rest the lowest of the skin near
+the hips on the floor (the engine's grid of up-rays is reported beside it). Stills: strips of each sit, close-ups of the
+seats, the scene camera's salute.
 """
 
 import math
@@ -243,12 +245,14 @@ def main():
     a, b = spans[2]
     fg = a + int(cmd_g.fade * fps) + 20
     sc.frame_set(fg)
-    from eidoblend.characters.emotes.verbs import _body_lowest
+    from eidoblend.characters.emotes.verbs import _body_lowest, _lowest_near, skin_points
     hp = hips()
     pts = [(hp.x + i * 0.175, hp.y + j * 0.175) for i in range(-2, 3) for j in range(-2, 3)]
-    low = _body_lowest(me, pts, -0.6)
-    R.check('the ground sit rests on the floor (its lowest underside within -1 / +2 cm of it)',
-            low is not None and -0.01 <= low - fm_floor <= 0.02, f'{(low or 0) * 100:+.2f} cm at f{fg}')
+    grid = _body_lowest(me, pts, -0.6)
+    low = _lowest_near(skin_points(me, loose=False), (hp.x, hp.y))
+    R.check('the ground sit rests on the floor (the lowest of the skin near the hips, its coat left out, within '
+            '-1 / +2 cm of it)', low is not None and -0.01 <= low - fm_floor <= 0.02,
+            f'{(low or 0) * 100:+.2f} cm at f{fg} (the engine\'s grid of up-rays reads {(grid or 0) * 100:+.2f} cm)')
     R.check('the ground sit: eido_seated keyed on', bool(arm.get('eido_seated')), f"{arm.get('eido_seated')}")
     p = cam.matrix_world.translation
     want = math.atan2(p.x - hp.x, -(p.y - hp.y))
@@ -407,11 +411,14 @@ def options_take(sc, me):
     a3, b3 = spans[2]
     fg = a3 + 60
     sc.frame_set(fg)
-    from eidoblend.characters.emotes.verbs import _body_lowest
+    from eidoblend.characters.emotes.verbs import _body_lowest, _lowest_near, skin_points
     hp = T.bone_world(me, 'hips')
-    low = _body_lowest(me, [(hp.x + i * 0.175, hp.y + j * 0.175) for i in range(-2, 3) for j in range(-2, 3)], -0.6)
-    R.check("options: 'sit_laying_on_ground' through the controller rests on the floor (within -1 / +2 cm)",
-            low is not None and -0.01 <= low <= 0.02, f'{low * 100:+.2f} cm' if low is not None else 'none')
+    grid = _body_lowest(me, [(hp.x + i * 0.175, hp.y + j * 0.175) for i in range(-2, 3) for j in range(-2, 3)], -0.6)
+    low = _lowest_near(skin_points(me, loose=False), (hp.x, hp.y))
+    R.check("options: 'sit_laying_on_ground' through the controller rests on the floor (the lowest of the skin near "
+            "the hips within -1 / +2 cm)", low is not None and -0.01 <= low <= 0.02,
+            (f'{low * 100:+.2f} cm' if low is not None else 'none') +
+            (f" (the engine's grid of up-rays reads {grid * 100:+.2f} cm)" if grid is not None else ''))
     # face_camera toward a named camera
     sc.frame_set(recs[-1]['f'])
     p = cam2.matrix_world.translation

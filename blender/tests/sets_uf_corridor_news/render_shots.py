@@ -111,6 +111,9 @@ def corridor():
     C = COR.build(sc, {'postText': 'AMERICANISM, NOT EFFECTIVE ALTRUISM'})
     C.apply_look(sc)
     C.apply_post(sc, aeropittura=False)        # the look's bloom on every still, as the WebGPU probes had it
+    if not DRY:
+        C.update(0.0, {'post': 1.0})
+        print(f'[shots] corridor probe baked: {C.bake_probes(sc)}', flush=True)
     print(f'[shots] corridor built in {clock():.1f}s', flush=True)
     names = []
 

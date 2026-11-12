@@ -40,10 +40,11 @@ controller: the stationary ports in eidoblend.placement.seating, round one's). W
                 here the root follows the hips so the feet stay where they stand); then the standing pose, stopEmote,
                 the walk resumes
   sit_on_ground sitOnGround's clip (sitting_on_ground, sit_laying_on_ground) crossfaded in where the body stands (or
-                after a walk to at=), facing face=, else the camera (the engine's default); the lowest of the posed body
-                within 0.35 m of the hips rested on the floor 5 mm above it (the engine's grid of up-rays; its spring
-                chains left out: _support_skin), eased in with the crossfade. The library has no stand-to-ground clip:
-                the crossfade IS the sit-down (fade=, 1 s)
+                after a walk to at=), facing face=, else the camera (the engine's default); the lowest of the posed skin
+                within 0.35 m of the hips (the engine's footprint; its spring chains and a coat left out) rested on the
+                floor 5 mm above it, eased in with the crossfade; the boots kept on the floor through it, the crossfade
+                and the rise (_boots_over_floor). The library has no stand-to-ground clip: the crossfade IS the
+                sit-down (fade=, 1 s)
   face_camera   faceCamera: a turn on the spot toward the camera (+offset rad) at the frame it starts
   emote         emote for a walking body: playEmote (locomotion suspended), facing= 'keep' / 'camera' / a heading in
                 degrees / None (the engine's default, three's rotation.y = pi); in at the walk's own fade, out through
@@ -51,10 +52,12 @@ controller: the stationary ports in eidoblend.placement.seating, round one's). W
   unseat        from here the audits judge the body again, seated or not
   bake          Locomotion.bake with the seats' frames taken from the plant before it runs (_seat_records: the seated
                 feet put on the floor here, the knee kept over its seated height, the toes pointing down on a high seat,
-                the boots as the armature deforms them moved out of each chair part, smoothed in time; a foot moving
-                between two seated poses lifted through the move; my robot body's legs through its joint clamps) and handed
-                back after it (_seat_handover: the feet and the pelvis passed between the plant's and the seat's over
-                12 frames), then key_seated: arm['eido_seated'] keyed 1 on the seated frames and 0 elsewhere
+                the boots as the armature deforms them moved out of each chair part, smoothed in time; a foot resting
+                on the floor held where it rests; a foot moving between two seated poses stepped through the move, one
+                foot at a time; on the ground the boots and arms kept out of the floor; my robot body's legs through its
+                joint clamps) and handed back after it (_seat_handover: the feet and the pelvis passed between the
+                plant's and the seat's over 12 frames; the plant's first stance after a seat stands where the seat left
+                the foot), then key_seated: arm['eido_seated'] keyed 1 on the seated frames and 0 elsewhere
                 (CONSTANT), so the clipping and hovering audits and the support sensor leave a seated body alone exactly
                 while it sits (the engine's _seatedVRMs set), and the engine's deferred facing check 1.5 s into each seat
 
@@ -188,8 +191,12 @@ def route_around(start, goal, box, margin=0.35):
 
 
 LONG_SIT_KNEE = math.radians(12.0)     # my robot body's ground sit: the knees this little bent...
-LONG_SIT_ANKLE = 0.07                  # ...and its ankles this far over the floor (the heels down, toes up)
+LONG_SIT_ANKLE = 0.07                  # ...its ankles first put this far over the floor, then each moved so its heel
+#                                        rests on it (LONG_SIT_REST over it)
+LONG_SIT_REST = 0.002
 LONG_SIT_EASE = 0.6                    # its legs taken in over this much of the ground pose's share of a crossfade
+BOOT_FLOOR_TOL = 0.002                 # on the ground, a boot this far under the floor is resting on it
+BOOT_TURN = math.radians(30.0)         # the most a boot on the ground turns about its width to come out of the floor
 
 
 def long_sit(body, clip):
@@ -199,20 +206,154 @@ def long_sit(body, clip):
     return body is not None and getattr(body, 'robot', False) and clip == GROUND_CLIP
 
 
+def _leg_aim(p, body, side, A, hinge):
+    """the leg of the Pose p solved to put its ankle at A on the rest legs' own bones (a thigh or a shank need not run
+    straight down at rest): the knee a hinge about its X, bent as far as the distance needs (Body.knee_for), the thigh
+    turned so the leg so bent points from the hip to A with the thigh's X along `hinge` (made square to the leg)
+    -> the knee angle, or None"""
+    up_n, lo_n = side + 'UpperLeg', side + 'LowerLeg'
+    L = body.leg[side]
+    b = A - p.world_pos(up_n)
+    if b.length < 1e-6:
+        return None
+    k = body.knee_for(side, b.length)
+    a = L['u'] + Quaternion((1.0, 0.0, 0.0), k) @ L['w']
+
+    def frame(z, x):
+        z = z.normalized()
+        x = x - z * x.dot(z)
+        if x.length < 1e-6:
+            return None
+        x.normalize()
+        return Matrix((x, z.cross(x), z)).transposed()
+    F0, F1 = frame(a, Vector((1.0, 0.0, 0.0))), frame(b, hinge)
+    if F0 is None or F1 is None:
+        return None
+    p.set_world_quat(up_n, (F1 @ F0.transposed()).to_quaternion())
+    p.N[lo_n] = Quaternion((1.0, 0.0, 0.0), k)
+    p.invalidate()
+    return k
+
+
+def _boot_low(p, body, side):
+    """the lowest point of the boot (_boot_pts: the skin the foot and toes carry) in the Pose p, or None"""
+    P = _boot_pts(p, body, side)
+    return None if P is None or not len(P) else float(P[:, 2].min())
+
+
+def _boots_over_floor(p, body, floor_z, tol=BOOT_FLOOR_TOL, rounds=4):
+    """on the ground, each boot of the Pose p kept out of the floor at floor_z: where the boot's lowest point is under
+    it, the ankle is raised by as much (the two-bone leg, the foot keeping its world turn) until it rests on it, on my
+    robot body through its leg clamps (the plant runs them after). A ground clip crossfaded in from standing swings the
+    legs from straight down to along the floor while the hips come down, so the blend of the two can carry a foot
+    through the floor; the foot rests on it and slides instead -> the deepest left under the floor (m, >= 0)"""
+    from ..controller.pose import leg_clamps
+    left = 0.0
+    if body.robot:
+        # measured on the legs as my hardware holds them: the ankle's stops turn a foot laid along the floor by up to
+        # 27 deg from the clip's own
+        p.N.update(leg_clamps(body, dict(p.N)))
+        p.invalidate()
+    for s in ('left', 'right'):
+        if s + 'Foot' not in body.h.humanoid:
+            continue
+        for _ in range(rounds):
+            low = _boot_low(p, body, s)
+            if low is None or low >= floor_z - tol:
+                break
+            an = p.world_pos(s + 'Foot').copy()
+            _leg_reach(p, s, an + Vector((0.0, 0.0, floor_z - low)))
+            if body.robot:
+                w_ft = p.world_quat(s + 'Foot').copy()
+                p.N.update(leg_clamps(body, dict(p.N)))
+                p.invalidate()
+                p.set_world_quat(s + 'Foot', w_ft)
+                p.N.update(leg_clamps(body, dict(p.N)))
+                p.invalidate()
+        low = _boot_low(p, body, s)
+        if low is not None and low < floor_z - tol:
+            # a leg that cannot fold any further (my robot body's knee and ankle stops): the foot turns its toes up off
+            # the floor about its own width (lying, a leg laid out along the floor points its toes into it)
+            w_ft = p.world_quat(s + 'Foot').copy()
+            lat = w_ft @ Vector((1.0, 0.0, 0.0))
+            best = (low, None)
+            for k in range(1, 11):
+                for sg in (1.0, -1.0):
+                    p.set_world_quat(s + 'Foot', Quaternion(lat, sg * k * BOOT_TURN / 10) @ w_ft)
+                    if body.robot:
+                        p.N.update(leg_clamps(body, dict(p.N)))
+                        p.invalidate()
+                    lw = _boot_low(p, body, s)
+                    if lw is not None and lw > best[0] + 1e-4:
+                        best = (lw, sg * k * BOOT_TURN / 10)
+                if best[0] >= floor_z - tol:
+                    break
+            p.set_world_quat(s + 'Foot', Quaternion(lat, best[1] or 0.0) @ w_ft)
+            if body.robot:
+                p.N.update(leg_clamps(body, dict(p.N)))
+                p.invalidate()
+            low = _boot_low(p, body, s)
+        if low is not None:
+            left = max(left, floor_z - low)
+    return max(0.0, left)
+
+
+ARM_LIFT_MAX = math.radians(25.0)      # the most an arm laid on the floor turns up at the shoulder to come out of it
+
+
+def _arms_over_floor(p, body, floor_z, tol=BOOT_FLOOR_TOL, rounds=3):
+    """on the ground, each arm of the Pose p (_arm_skin: the upper arm, the forearm, the hand) kept out of the floor at
+    floor_z: where its lowest point is under it, the arm turns up at the shoulder (about the level axis square to the
+    shoulder-to-that-point line) as little as lifts that point onto the floor. A forearm the clip lays on the floor
+    beside the body rests on it; on a body whose arms are longer or thicker than the clip's actor's it would otherwise
+    lie in it -> the deepest left under the floor (m, >= 0)"""
+    left = 0.0
+    for s in ('left', 'right'):
+        up_n = s + 'UpperArm'
+        if up_n not in body.h.humanoid:
+            continue
+        sk = _arm_skin(body).get(s)
+        for _ in range(rounds):
+            P = _skin_pts(p, body, sk)
+            if P is None or not len(P):
+                break
+            k = int(np.argmin(P[:, 2]))
+            d = floor_z - float(P[k, 2])
+            if d <= tol:
+                break
+            sh = p.world_pos(up_n)
+            v = Vector(P[k]) - sh
+            axis = v.cross(Vector((0.0, 0.0, 1.0)))
+            if axis.length < 1e-6:
+                break
+            axis.normalize()
+            lo, hi = 0.0, ARM_LIFT_MAX
+            for _b in range(20):
+                mid = 0.5 * (lo + hi)
+                if (Quaternion(axis, mid) @ v).z + sh.z < floor_z:
+                    lo = mid
+                else:
+                    hi = mid
+            p.apply_world_delta(up_n, Quaternion(axis, hi))
+        P = _skin_pts(p, body, sk)
+        if P is not None and len(P):
+            left = max(left, floor_z - float(P[:, 2].min()))
+    return max(0.0, left)
+
+
 def _long_sit_legs(h, body, N, off, M, floor_z, w):
-    """the legs of a pose taken w of the way to the long sit on the floor at floor_z: each ankle carried along the
-    floor from where the pose has it to its long-sit place (straight ahead of its hip along the root's heading, the
-    knee bent LONG_SIT_KNEE, the ankle LONG_SIT_ANKLE over the floor: the heel down, the toes up) and the leg solved
-    to it, its knee toward forward-and-up (forward standing, up sitting); the foot from flat to at rest on the shank.
-    (Turned joint by joint instead, half way the ankles arced under the floor: the crossfade's lift heaved the body
-    20 cm and dropped it.) -> a new N"""
+    """the legs of a pose taken w of the way to the long sit on the floor at floor_z: each ankle carried from where the
+    pose has it to its long-sit place (straight ahead of its hip along the root's heading, the knee bent LONG_SIT_KNEE,
+    the heel resting on the floor, the toes up) and the leg solved to it (_leg_aim), the knee's hinge turned from the
+    clip's own to across the body (the knee toward forward-and-up: forward standing, up sitting); the foot from the
+    clip's turn to at rest on the shank; every boot kept out of the floor on the way (_boots_over_floor). The ankle is
+    carried, not the joints turned: a blend of joint turns arcs the ankle through the floor -> a new N"""
     from ..controller.pose import Pose
     if w <= 1e-4:
         return N
     # taken in over the first LONG_SIT_EASE of the ground pose's share (out over its last): the feet slide along the
     # floor while the hips go down (come up)
     w = min(1.0, w / LONG_SIT_EASE)
-    out = dict(N)
     p = Pose(body, M, {nm: N.get(nm, Quaternion()).copy() for nm in h.humanoid}, off)
     q = M.to_quaternion()
     fwd = q @ Vector((0.0, -1.0, 0.0))
@@ -222,62 +363,47 @@ def _long_sit_legs(h, body, N, off, M, floor_z, w):
     fwd.normalize()
     left = Vector((-fwd.y, fwd.x, 0.0))
     up = Vector((0.0, 0.0, 1.0))
-
-    def turn_to(d):
-        """the world turn that points a leg bone (at rest along -Z, its knee's hinge along X) along d, the hinge along
-        the body's width"""
-        z = -d.normalized()
-        y = z.cross(left).normalized()
-        x = y.cross(z).normalized()
-        return Matrix((x, y, z)).transposed().to_quaternion()
-    flat = Quaternion((0.0, 0.0, 1.0), math.atan2(fwd.x, -fwd.y))      # a foot flat on the floor, facing fwd
     for s in ('left', 'right'):
         up_n, lo_n, ft_n, to_n = s + 'UpperLeg', s + 'LowerLeg', s + 'Foot', s + 'Toes'
         if any(nm not in h.humanoid for nm in (up_n, lo_n, ft_n)):
             continue
         hip = p.world_pos(up_n).copy()
-        lu, ll = body.leg[s]['u'].length, body.leg[s]['w'].length
-        need = (floor_z + LONG_SIT_ANKLE) - hip.z                 # the long sit's ankle under (-) the hip
-        k = LONG_SIT_KNEE
-
-        def drop(a):                                              # the thigh up a over level, the shank k - a down
-            return lu * math.sin(a) - ll * math.sin(k - a)
-        lo, hi = -1.45, k
-        for _ in range(40):
-            mid = 0.5 * (lo + hi)
-            if drop(mid) < need:
-                lo = mid
-            else:
-                hi = mid
-        a = 0.5 * (lo + hi)
-        A1 = hip + fwd * (lu * math.cos(a) + ll * math.cos(k - a)) + up * need
         A0 = p.world_pos(ft_n).copy()
-        A0.z = max(A0.z, floor_z + LONG_SIT_ANKLE)
-        A = A0.lerp(A1, w)
-        # the leg solved to A in the plane through the hip, A and the pole (forward and up)
-        d_v = A - hip
-        d = min(max(d_v.length, abs(lu - ll) + 0.01), lu + ll - 0.002)
-        u = d_v.normalized()
-        pole = (fwd + up).normalized()
-        v = pole - u * pole.dot(u)
-        v = v.normalized() if v.length > 1e-6 else up
-        along = (lu * lu - ll * ll + d * d) / (2.0 * d)
-        K = hip + u * along + v * math.sqrt(max(0.0, lu * lu - along * along))
-        p.set_world_quat(up_n, turn_to(K - hip))
-        p.set_world_quat(lo_n, turn_to(hip + u * d - K))
-        w_sh = p.world_quat(lo_n).copy()
-        if flat.dot(w_sh) < 0.0:
-            w_sh = -w_sh
-        p.set_world_quat(ft_n, flat.slerp(w_sh, w))
-        if to_n in p.N:
-            p.N[to_n] = Quaternion()
-        for nm in (up_n, lo_n, ft_n, to_n):
+        w_ft0 = p.world_quat(ft_n).copy()
+        x_clip = p.world_quat(up_n) @ Vector((1.0, 0.0, 0.0))
+        nt0 = p.N.get(to_n, Quaternion()).copy()
+        L = body.leg[s]
+        d1 = (L['u'] + Quaternion((1.0, 0.0, 0.0), LONG_SIT_KNEE) @ L['w']).length
+
+        def place(A, ww):
+            """the leg to A, the hinge and the foot ww of the way from the clip's to the long sit's"""
+            hinge = x_clip.lerp(left, ww)
+            _leg_aim(p, body, s, A, hinge if hinge.length > 1e-6 else left)
+            w_sh = p.world_quat(lo_n).copy()
+            if w_ft0.dot(w_sh) < 0.0:
+                w_sh = -w_sh
+            p.set_world_quat(ft_n, w_ft0.slerp(w_sh, ww))
+            if to_n in p.N:
+                p.N[to_n] = nt0.slerp(Quaternion(), ww)
+                p.invalidate()
+        # the long sit's ankle: d1 from the hip straight ahead, its height found so the heel rests on the floor
+        za = floor_z + LONG_SIT_ANKLE
+        A1 = None
+        for _ in range(4):
+            dz = min(za - hip.z, 0.0)
+            A1 = hip + fwd * math.sqrt(max(d1 * d1 - dz * dz, 0.0)) + up * dz
+            place(A1, 1.0)
+            low = _boot_low(p, body, s)
+            if low is None or abs(low - (floor_z + LONG_SIT_REST)) < 0.001:
+                break
+            za += (floor_z + LONG_SIT_REST) - low
+        place(A0.lerp(A1, w), w)
+    _boots_over_floor(p, body, floor_z)
+    out = dict(N)
+    for s in ('left', 'right'):
+        for nm in (s + 'UpperLeg', s + 'LowerLeg', s + 'Foot', s + 'Toes'):
             if nm in p.N:
-                a0 = N.get(nm, Quaternion())
-                b0 = p.N[nm]
-                if a0.dot(b0) < 0.0:
-                    b0 = -b0
-                out[nm] = a0.slerp(b0, min(1.0, w))
+                out[nm] = p.N[nm].copy()
     return out
 
 
@@ -286,12 +412,14 @@ class _Posed:
     back as it was on exit (pose, root, action and its slot). body: the controller's Body: on my robot body the legs
     go through its joint clamps first, as the bake's plant will put them (a clamped leg folds or reaches otherwise).
     long_sit: (floor z, 'a' | 'b' | 'all'): my robot body's ground sit (_long_sit_legs) on the ground clip's share of
-    the pose (a crossfade's first or second clip, or the whole pose)"""
+    the pose (a crossfade's first or second clip, or the whole pose). ground: the floor's z under a ground sit: the
+    boots and the arms kept out of it as the bake keeps them (_boots_over_floor, _arms_over_floor)"""
 
-    def __init__(self, h, body=None, long_sit=None):
+    def __init__(self, h, body=None, long_sit=None, ground=None):
         self.h = h
         self.body = body
         self.long_sit = long_sit
+        self.ground = ground
 
     def __enter__(self):
         arm = self.h.arm
@@ -322,12 +450,18 @@ class _Posed:
         """a normalized pose posed at the root M: on my robot body through its legs' hardware first, the clamps and
         the hip stages (body.project_legs, the HipPitch / HipSwing helper bones keyed as the bake keys them: left at
         rest, the measures missed the hip mechanism going 2 cm into a pan); with long_sit set, its ground sit's legs on
-        ground_w of the pose"""
+        ground_w of the pose; with ground set, the boots and the arms out of that floor"""
         h = self.h
         arm = h.arm
         stages = {}
         if self.long_sit is not None and ground_w:
             N = _long_sit_legs(h, self.body, N, off, M, self.long_sit[0], ground_w)
+        if self.ground is not None and self.body is not None:
+            from ..controller.pose import Pose
+            p = Pose(self.body, M, {nm: N.get(nm, Quaternion()).copy() for nm in h.humanoid}, off)
+            _boots_over_floor(p, self.body, self.ground)
+            _arms_over_floor(p, self.body, self.ground)
+            N = p.N
         if self.body is not None and getattr(self.body, 'robot', False):
             N = {nm: N.get(nm, Quaternion()) for nm in h.humanoid}
             stages = self.body.project_legs(N, stages=True)
@@ -742,7 +876,7 @@ def _ground_lift(c, ca, ta0, cb, tb0, M, floor, span, weight_of, dz_of, long_sit
     wt = np.array([weight_of(min(t, span)) for t in tf])
     clamp = np.full(len(tf), -1e9)
     Mt = M.copy()
-    with _Posed(c.h, c.body, long_sit=(floor, long_sit_side) if long_sit_side else None) as posed:
+    with _Posed(c.h, c.body, long_sit=(floor, long_sit_side) if long_sit_side else None, ground=floor) as posed:
         for i, t in enumerate(tf):
             Mt.translation = M.translation.copy()
             posed.pose_blend(ca, ta0 + t, cb, tb0 + t, float(wt[i]), Mt)
@@ -919,6 +1053,8 @@ def _logged(log, t):
 
 STEP_SPEED = 0.003          # m a frame: a seated foot moving faster than this (a crossfade between two seated poses)...
 STEP_MIN = 0.03             # ...over this far in all is lifted through it (a step), not slid
+SEAT_DOWN = 0.004           # m: a seated sole this near the floor rests on it (held where it rests, as it rests)
+CARRY = 8                   # frames: a held foot lifting off the floor without a step eases back to the clip's place
 STEP_LIFT = (0.25, 0.06, 0.025)    # the step's lift: this fraction of how far it goes, at most / at least this high
 PUSH_ROUNDS = 4             # rounds of the smoothed move of the boots out of a chair's solids
 
@@ -943,6 +1079,7 @@ def _seat_records(loco, recs):
             held.append((i, w))
     lift = {}
     chair = [(i, w) for i, w in held if w[2] == 'chair']
+    steps = []
     for s in ('left', 'right'):
         xy = {}
         for i, w in chair:
@@ -957,12 +1094,8 @@ def _seat_records(loco, recs):
                 return
             a, b = run[0], run[-1]
             go = (xy[b] - xy[a - 1] if (a - 1) in xy else xy[b] - xy[a]).length
-            if go < STEP_MIN:
-                return
-            hgt = max(STEP_LIFT[2], min(STEP_LIFT[1], STEP_LIFT[0] * go))
-            n = b - a + 2
-            for k, j in enumerate(range(a, b + 1)):
-                lift[(j, s)] = hgt * math.sin(math.pi * (k + 1) / n)
+            if go >= STEP_MIN:
+                steps.append((go, s, a, b))
         for i in idx:
             moving = (i - 1) in xy and (xy[i] - xy[i - 1]).length > STEP_SPEED
             if moving and run and i - run[-1] <= 3:
@@ -971,6 +1104,18 @@ def _seat_records(loco, recs):
                 close(run)
                 run = [i]
         close(run)
+    # one foot steps at a time: where both feet's steps overlap (a clip shuffling both as it stands), the longer step
+    # is taken and the other foot stays where it rests (held below)
+    kept = []
+    for go, s, a, b in sorted(steps, reverse=True):
+        if any(s2 != s and a <= b2 + 2 and a2 <= b + 2 for _g, s2, a2, b2 in kept):
+            continue
+        kept.append((go, s, a, b))
+    for go, s, a, b in kept:
+        hgt = max(STEP_LIFT[2], min(STEP_LIFT[1], STEP_LIFT[0] * go))
+        n = b - a + 2
+        for k, j in enumerate(range(a, b + 1)):
+            lift[(j, s)] = hgt * math.sin(math.pi * (k + 1) / n)
     solids = {}
     poses, push, held_on, kf = {}, {'left': {}, 'right': {}}, {}, {}
     last_way = {}
@@ -1038,6 +1183,50 @@ def _seat_records(loco, recs):
                                    knee_floor=kf[i].get(s), sideways=False)
                 push[s][i] = _push_needed(p, c, s, solids[id(cmd)],
                                           prefer=v.normalized() if v is not None and v.length > 1e-6 else None)
+    # a seated foot resting on the floor stays where it rests: through each run of frames it rests there (no step), it
+    # keeps the place and the turn of the run's first frame, whatever the clip's small shuffles, the recentring's
+    # remainder or the knee's give would do to it frame by frame; a step (lift) carries it from where it rested to
+    # where the clip puts it at the step's end
+    step_of = {(j, s): (a, b) for _go, s, a, b in kept for j in range(a, b + 1)}
+    for s in ('left', 'right'):
+        hold, prev, start, carry, own_prev = None, None, None, None, None
+        for i, w in chair:
+            p, cmd = poses[i], w[3]
+            st = step_of.get((i, s))
+            an = p.world_pos(s + 'Foot').copy()
+            if st is not None:
+                # the clip's own step, set off from where the foot rested (the difference eased out over the step)
+                a, b = st
+                if i == a:
+                    start = Vector((hold[0].x - own_prev.x, hold[0].y - own_prev.y, 0.0)) \
+                        if (hold is not None and prev == i - 1 and own_prev is not None) else None
+                if start is not None:
+                    e = _smooth((i - a + 1) / float(b - a + 1))
+                    w_ft = p.world_quat(s + 'Foot').copy()
+                    _leg_reach(p, s, an + start * (1.0 - e))
+                    p.set_world_quat(s + 'Foot', w_ft)
+                hold, carry = None, None
+            elif _gap(p, c.body, s, cmd.root0.z) < SEAT_DOWN:
+                if hold is not None and prev == i - 1:
+                    _leg_reach(p, s, hold[0])
+                    p.set_world_quat(s + 'Foot', hold[1])
+                else:
+                    hold = (an, p.world_quat(s + 'Foot').copy())
+                carry = None
+            else:
+                # off the floor (a foot hanging from a high seat): it goes back to the clip's place over CARRY frames
+                if hold is not None and prev == i - 1:
+                    carry = (i, Vector((hold[0].x - an.x, hold[0].y - an.y, 0.0)), hold[1])
+                if carry is not None and prev == i - 1 and i - carry[0] < CARRY:
+                    k = 1.0 - _smooth((i - carry[0] + 1) / float(CARRY))
+                    w_ft = p.world_quat(s + 'Foot').copy()
+                    q = carry[2] if carry[2].dot(w_ft) >= 0.0 else -carry[2]
+                    _leg_reach(p, s, an + carry[1] * k)
+                    p.set_world_quat(s + 'Foot', w_ft.slerp(q, k))
+                else:
+                    carry = None
+                hold = None
+            prev, own_prev = i, an
     inside = []
     for i, w in chair:
         r, p, cmd = recs[i], poses[i], w[3]
@@ -1066,22 +1255,32 @@ def _seat_records(loco, recs):
             p.invalidate()
         r['N'] = {k_: q.copy() for k_, q in p.N.items()}
         r['N_ik'] = {k_: q.copy() for k_, q in p.N.items()}
-    # my robot body's ground sit: its legs out in front along the floor (long_sit) on the ground clip's share of each
-    # frame of the window (the crossfade down, the hold, the rise)
+    # a ground sit, every frame of the window (the crossfade down, the hold, the rise): my robot body's legs out in
+    # front along the floor (long_sit) on the ground clip's share of the frame; on any body the boots and the arms
+    # resting on the floor where the pose would carry them under it (_boots_over_floor, _arms_over_floor)
     for w in wins:
         cmd = w[3]
-        if w[2] != 'ground' or not getattr(cmd, 'long_sit', False):
+        if w[2] != 'ground':
             continue
+        ls = getattr(cmd, 'long_sit', False)
         for r in recs:
             if r['t'] < w[0] - 1e-6 or (w[1] is not None and r['t'] > w[1] + 1e-6):
                 continue
+            N2 = r['N']
             tot = sum(r['weights'].values())
             gw = r['weights'].get(cmd.clip, 0.0) / tot if tot > 1e-6 else 0.0
-            if gw <= 1e-3:
-                continue
-            N2 = _long_sit_legs(c.h, c.body, r['N'], r['off'], r['M'], cmd.floor, gw)
-            r['N'] = {k_: q.copy() for k_, q in N2.items()}
-            r['N_ik'] = {k_: q.copy() for k_, q in N2.items()}
+            if ls and gw > 1e-3:
+                N2 = _long_sit_legs(c.h, c.body, N2, r['off'], r['M'], cmd.floor, gw)
+            p = Pose(c.body, r['M'], {k_: q.copy() for k_, q in N2.items()}, r['off'])
+            _boots_over_floor(p, c.body, cmd.floor)
+            _arms_over_floor(p, c.body, cmd.floor)
+            r['N'] = {k_: q.copy() for k_, q in p.N.items()}
+            r['N_ik'] = {k_: q.copy() for k_, q in p.N.items()}
+            if c.body.robot:
+                # my robot body's hardware pass (the plant's) re-poses the arms and clamps the ankles: the limbs are
+                # kept out of the floor again on what it leaves
+                r['after_hardware'] = (lambda pp, b=c.body, fz=cmd.floor:
+                                       (_boots_over_floor(pp, b, fz), _arms_over_floor(pp, b, fz)))
     for i, w in held:
         recs[i]['mode'] = 'seat'
     if inside:
@@ -1096,7 +1295,23 @@ def _boot_skin(c):
     bones (a weight on any other bone counted on its nearest humanoid parent). The rigid foot points the maneuvers use
     missed the boot's ankle, which the shin's weights carry: a chair leg stood 14 mm into it where they read clear
     -> {side: (V rest points in the armature's space (n, 3), {humanoid name: weights (n,)}) or None}, cached"""
-    cache = getattr(c, '_boot_skin', None)
+    return _limb_skin(c, ('Foot', 'Toes'), '_boot_skin')
+
+
+ARM_PARTS = ('UpperArm', 'LowerArm', 'Hand')
+
+
+def _arm_skin(c):
+    """the arms as the armature deforms them (the vertices whose strongest weight is the upper arm, the forearm, the
+    hand or a finger: _limb_skin), for keeping a forearm laid on the floor out of it, cached"""
+    return _limb_skin(c, ARM_PARTS, '_arm_skin', descendants=True)
+
+
+def _limb_skin(c, parts, attr, descendants=False):
+    """per side, the skin a limb carries: the vertices whose strongest weight is that side's humanoid bones `parts`
+    (descendants: and every bone under them, a hand's fingers), thinned to 5 mm at rest, with their weights over the
+    humanoid bones (a weight on any other bone counted on its nearest humanoid parent), cached on c as `attr`"""
+    cache = getattr(c, attr, None)
     if cache is not None:
         return cache
     h = c.h
@@ -1111,7 +1326,11 @@ def _boot_skin(c):
     inv = h.arm.matrix_world.inverted()
     out = {}
     for s in ('left', 'right'):
-        want = {h.humanoid.get(s + 'Foot'), h.humanoid.get(s + 'Toes')} - {None}
+        want = {h.humanoid.get(s + part) for part in parts} - {None}
+        if descendants:
+            for b in list(want):
+                if b in bones:
+                    want |= {d.name for d in bones[b].children_recursive}
         V, WL = [], []
         for o in h.meshes:
             if not o.vertex_groups:
@@ -1146,14 +1365,18 @@ def _boot_skin(c):
         V, WL = V[first], [WL[i] for i in first]
         names = sorted({k for d in WL for k in d})
         out[s] = (V, {nm: np.array([d.get(nm, 0.0) for d in WL]) for nm in names})
-    c._boot_skin = out
+    setattr(c, attr, out)
     return out
 
 
 def _boot_pts(p, c, side):
     """the boot's points (_boot_skin) where the Pose p deforms them (linear blend skinning, as the armature does): (n, 3)
     world, or None"""
-    sk = _boot_skin(c).get(side)
+    return _skin_pts(p, c, _boot_skin(c).get(side))
+
+
+def _skin_pts(p, c, sk):
+    """a limb's skin (_limb_skin's (V, weights)) where the Pose p deforms it: (n, 3) world, or None"""
     if sk is None:
         return None
     V, W = sk
@@ -1892,11 +2115,16 @@ class SitOnGround(_Composite):
         if self.long_sit:
             _log(loco, f"[sitOnGround] my robot body cannot fold into '{self.clip}' (hips flex 98 deg, knees 112): "
                        'it sits with its legs out in front along the floor')
-        with _Posed(c.h, c.body, long_sit=(self.floor, 'all') if self.long_sit else None) as posed:
+        with _Posed(c.h, c.body, long_sit=(self.floor, 'all') if self.long_sit else None, ground=self.floor) as posed:
             posed.pose(cc, min(0.5, cc.duration), M)
             hp = posed.hips()
             pts = [(hp.x + i * GROUND_GRID, hp.y + j * GROUND_GRID) for i in range(-2, 3) for j in range(-2, 3)]
-            low = _body_lowest(c.h, pts, self.floor - 0.6, 1.5)
+            # the lowest of the skin itself within the grid's reach (the crossfade's clamp measures the same skin): the
+            # engine's grid of up-rays passes between a hip's frame or a forearm laid on the floor and reads the body
+            # higher than it is; the grid stays the measure where no skin is found
+            low = _lowest_near(skin_points(c.h, loose=False), (hp.x, hp.y), half=2 * GROUND_GRID)
+            if low is None:
+                low = _body_lowest(c.h, pts, self.floor - 0.6, 1.5)
             hz = hp.z
         if low is not None:
             self.settle = (self.floor - low) + self.sink

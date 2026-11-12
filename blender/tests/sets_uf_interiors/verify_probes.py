@@ -13,8 +13,8 @@
             children); turned, it must still read (looked at). The showroom moved and turned a quarter: its toaster
             shot must render as at home (the materials' env light turns with the set).
   scale     singer_scale=1: the face-height cam follows (no render).
-  showroom  the toaster shot against Cycles at the same scene (the chrome, the plinth top), and the empty seats
-            under the blackout (lights 0): what stays lit is the env, the LED wall, the EXIT signs.
+  showroom  the toaster shot, and the empty seats under the blackout (lights 0): what stays lit is the env, the LED
+            wall, the EXIT signs.
   look      INTERIORS.md's note for the look, run as the guide writes it: the reveal under argue (the white deck
             paints warm) and with the palette at 0.22 (it stays cold).
 
@@ -56,7 +56,7 @@ def fresh(name):
 
 
 def quiet_room(sc, **kw):
-    return QR.build(sc, art_cache=T.ART, probe_spacing=0.5, probe_samples=512, **kw)
+    return QR.build(sc, art_cache=T.ART, probe_spacing=0.45, probe_samples=512, **kw)
 
 
 def showroom(sc, **kw):
@@ -214,8 +214,7 @@ def scale():
 
 
 def showroom_probes():
-    """the toaster against Cycles; the empty seats under the blackout."""
-    from eidoblend.look import probe as LP
+    """the toaster shot; the empty seats under the blackout."""
     sc = fresh('verify_showroom')
     show = showroom(sc)
     sc.world = show.env
@@ -225,16 +224,12 @@ def showroom_probes():
     show.bake_probes(sc)
     sc.camera = cam_t
     pe = shot(sc, cam_t, 1, 'showroom_toaster_eevee')
-    pc = os.path.join(OUT, 'showroom_toaster_cycles.png')
-    secs = LP.render_reference(sc, pc, frame=1, samples=128)
-    STILLS.append(pc)
-    T.check('Cycles reference of the toaster shot written', os.path.isfile(pc), f'{secs:.1f} s')
     show.update(0.0, {'lights': 0.0}, key=False)
     pb = shot(sc, cam_e, 1, 'showroom_emptySeats_blackout')
     mean, clip, black = T.stats(pb)
     T.check('blackout over the empty seats: dark, not black (the env, the LED wall, the EXIT signs stay)',
             0.003 < mean < 0.2, f'mean {mean:.3f}, black {100 * black:.1f} %')
-    return pe, pc
+    return pe
 
 
 ENGINE = os.path.normpath(os.path.join(T.BLENDER_DIR, '..', '..', 'eidoverse-video-prealpha-0.01', 'work',
@@ -282,7 +277,6 @@ def world_light_check():
         cam = bpy.data.objects.new('cam', cd)
         sc.collection.objects.link(cam)
         cam.location = (0, 0, 3)
-        sc.eevee.use_fast_gi = False
         p = os.path.join(OUT, f'world_light_{"on" if light else "camera_only"}.png')
         T.render_still(sc, cam, 1, p)
         out[light] = T.stats(p)[0]

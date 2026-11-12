@@ -3077,24 +3077,27 @@ class InteriorSet(dict):
     REFLECTIONS = 'env'
 
     def eevee_settings(self, scene=None, reflections=None):
-        """The interior's EEVEE settings: fast GI off (indoors it lit floor contacts with the world through the
-        walls; the baked probe carries the bounce), shadows on, and the reflections:
+        """The interior's EEVEE settings: global illumination on (fast GI over the set's baked room probe: bake it
+        with bake_probes), shadows on, and the reflections:
           'env' (default): the engine's picture. The sets were made with SSR off, so every gloss and chrome there
                  reflected the set's own painted env (its envMap): the showroom's softboxes in the toaster, the
-                 altar glow in the quiet room's glass. In EEVEE that is ray tracing off: the only reflections are
-                 the env's (each material's own env light, or the World under env_light='world').
+                 altar glow in the quiet room's glass. In EEVEE those are reflections from the light probes alone
+                 (the Light Probe tracing method): the env's (each material's own env light, or the World under
+                 env_light='world') and the room's probes.
           'traced': screen-traced reflections (max roughness 0.5): what is on screen reflects (the void in the
-                 chrome, the LED wall in the polished stage), and the World where the rays miss."""
+                 chrome, the LED wall in the polished stage), and the probes where the rays miss.
+        Fast GI runs inside EEVEE's ray tracing, so the ray tracing is on in both."""
         sc = scene or self.sb.scene
         mode = reflections or self.REFLECTIONS
         if mode not in ('env', 'traced'):
             raise ValueError(f"eevee_settings: reflections={mode!r} (want 'env' or 'traced')")
         ee = sc.eevee
-        ee.use_fast_gi = False
         ee.use_shadows = True
-        ee.use_raytracing = mode == 'traced'
-        ee.ray_tracing_method = 'SCREEN'
+        ee.use_raytracing = True
+        ee.ray_tracing_method = 'SCREEN' if mode == 'traced' else 'PROBE'
         ee.ray_tracing_options.trace_max_roughness = 0.5
+        ee.use_fast_gi = True
+        ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
         return ee
 
     def bake_probes(self, scene=None):

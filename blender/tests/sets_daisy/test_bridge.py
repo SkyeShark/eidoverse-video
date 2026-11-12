@@ -32,7 +32,7 @@ F0, F1 = 1, 113
 OUT = os.path.join(C.OUT, 'bridge')
 os.makedirs(OUT, exist_ok=True)
 sc = C.clean_scene(FPS, (F0, F1))
-C.probe_look(sc, interior=False, exposure=float(A.get('exposure', 0.0)))
+C.probe_look(sc, exposure=float(A.get('exposure', 0.0)))
 
 Bv = BR.build()
 nk = Bv.animate((F0, F1), 0.0)

@@ -17,7 +17,7 @@ grove, the `.glb` export, the app's demo scene and example scenes, and its asset
 tools. Coordinates: Blender, Z up, metres.
 
 ```python
-import sys; sys.path.insert(0, '<worktree>/blender')
+import sys; sys.path.insert(0, '<repo>/blender')
 from eidoblend.trees import make_seed_tree
 MEADOW_OAK = {'height': 14.5, 'levels': 4, 'trunks': 1, 'trunkThickness': 1.4, 'crownShape': 2,
               'branchDensity': 24, 'branchAngle': 64, 'gnarliness': 80, 'leafSize': 0.38,
@@ -330,16 +330,21 @@ leaf green, bug f).
   biome. The app's tone map, three's ACES at exposure 1.3, becomes AgX with
   its 'High Contrast' look at log2(1.3) + 0.23 stops: the same display values
   on a neutral ramp (mean difference 0.008; `seedthree.scene.tonemap.aces_view`).
-  The app's sun colour is its HSL triple taken as linear, as three r184 does. `spom=True` is the app's optional parallax-occlusion terrain (its
-  Environment toggle, off by default as in the app): the 48-step march and the
-  12-step relief self-shadow, unrolled into shader nodes, with the app's depth,
-  per-layer push and 22-90 m fade. At eye height on the desert floor its relief
-  streaks into spikes, toward the horizon and in the foreground too (a grazing
-  march with the app's constants: `minViewZ` 0.12, 48 layers, the desert pushes
-  up to 1.4); keep it for higher or steeper views
-  (`blender/tests/trees2/out/spom_*`). The march follows three's
-  ParallaxOcclusion step for step (its tangent frame, layer count and
-  refinement), but it has not been compared with the app's own render.
+  The app's sun colour is its HSL triple taken as linear, as three r184 does.
+  The clouds are the app's: their noise, places and sizes, shaded as the
+  app's march shades them (`cloud_probe.py` holds them within 0.03 of the
+  app's own march over the sky). `spom=True` is the app's optional
+  parallax-occlusion terrain (its Environment toggle, off by default as in
+  the app): the 48-step march and the 12-step relief self-shadow, unrolled
+  into shader nodes, with the app's 22-90 m fade. What it marches departs
+  from the app. The app's height maps are streaky noise that does not follow
+  the stones and cracks of their own albedo and normal maps, and at eye
+  height its march draws a bed of needles from them. The default relief
+  (`heights='normals'`) is integrated from each layer's own normal map,
+  1.8-6.9 cm deep; the six DirectX-convention normal maps are read with
+  green flipped; the desert floor keeps its 4 m tile.
+  `seedthree.scene.spom.spom_terrain_material(biome, species, heights='app')`
+  keeps the app's own look (`blender/tests/trees2/out/spom_*_strip_off_app_relief.png`).
 - The ring haze is a compositor pass over EEVEE's Position pass. The frame
   renders with a transparent film and the sky comes back from the Environment
   pass, so the haze mixes only the geometry's share of each pixel:
@@ -448,9 +453,8 @@ stays within 2 levels. `gen_wind` needs a running ComfyUI with Stable Audio 3.
 ## Not yet ported
 
 - The app's backlight look by default. The default route keeps the leaf's
-  Lambert factor; the app's own term is the opt-in `'glow'` route, whose
-  shader the GPU driver failed to link once under the shared machine's memory
-  cap (see Materials).
+  Lambert factor; the app's own term is the opt-in `'glow'` route (see
+  Materials).
 - A card lit from behind more than ~45° off its normal keeps only part of its
   backlight in either route (see the shadow bias under Materials; in the glow
   route its shadow read is pushed along the sun's direction, nearly parallel
@@ -464,11 +468,7 @@ stays within 2 levels. `gen_wind` needs a running ComfyUI with Stable Audio 3.
 - The GitHub fallback when no checkout is found (eidoverse's bridge imports the
   JS API from GitHub). The Blender edition finds a local SeedThree checkout
   with the `blender` branch, or says how to clone one.
-- The demo scene's volumetric clouds as the app shows them. Their noise,
-  places and sizes are the app's, and each cloud volume now carries the app's
-  emission + absorption recipe (EEVEE drew the Geometry Nodes volumes with its
-  default grey volume shader before, as dark smudges). But EEVEE 5.2 brings
-  them to the frame at a few percent of their expected strength: close up, a
-  core dense enough to read white adds about 1 % over the sky, and neither the
-  volume range nor the slice count changed that. In the demo's skies they are
-  close to invisible. Light a film's sky with the sky family instead.
+- The demo's thin cloud wisps read slightly brighter than the app's: three
+  blends its premultiplied march by its alpha a second time, where EEVEE
+  integrates the volume once. A cloud rescaled after `build_clouds` needs a
+  rebuild, because its ray scale is stored in its own material.

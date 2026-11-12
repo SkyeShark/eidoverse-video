@@ -1418,16 +1418,25 @@ class VRMCharacterController:
                 nearest = min(trans) if trans else None
                 reset = (not self._stair_phase_lock_active or self._stair_phase_lock_dir != direction or
                          self._stair_phase_lock_shape != self.ahead_stair_shape)
+                cyc = max(0.01, 2 * run)
+                off = self._small_stair_descent_phase_offset if direction == 'down' else self._small_stair_ascent_phase_offset
                 if reset:
                     self._stair_phase_distance = euclidean_modulo(run - nearest, run) if nearest is not None else 0.0
+                    if self.gait_sync == 'distance' and pa.clip.gait is not None:
+                        # the edge fixes the stair clip's phase to one tread's run, half its cycle: of the two feet
+                        # that can take the next tread, the one the walk has at the same point of its step (this
+                        # edition's: the foot the walk just put down stays down, the trailing one takes the tread)
+                        def walk_gap(d):
+                            ph = pa.clip.phase_at_time(euclidean_modulo(d / cyc + off, 1.0) * pa.clip.duration)
+                            return abs(euclidean_modulo(ph - self._gait_phase + 0.5, 1.0) - 0.5)
+                        if walk_gap(self._stair_phase_distance + run) < walk_gap(self._stair_phase_distance):
+                            self._stair_phase_distance += run
                     self._stair_phase_lock_active = True
                     self._stair_phase_lock_dir = direction
                     self._stair_phase_lock_shape = self.ahead_stair_shape
                 else:
                     self._stair_phase_distance += max(0.0, speed * dt)
                 dur = pa.clip.duration
-                cyc = max(0.01, 2 * run)
-                off = self._small_stair_descent_phase_offset if direction == 'down' else self._small_stair_ascent_phase_offset
                 tn = euclidean_modulo(self._stair_phase_distance / cyc + off, 1.0)
                 tt = tn * dur
                 pre = euclidean_modulo(tt - (pa.time_scale or 1.0) * dt, dur)

@@ -97,15 +97,15 @@ class News(CL.SetBase):
     """What build() returns (see the module docstring)."""
 
     def apply_look(self, scene, raytracing=False, view_look=None):
-        """AgX at view_exposure(look exposure), no screen-traced reflections (the wet ground's mirror is painted),
-        shadows on; the fog is in the materials (FogExp2, built with opts fog=True). view_look: an AgX look for the
-        scene (cn_lib.ACES_LIKE_LOOK follows the WebGPU frames' ACES tone); None leaves the scene's look as it is."""
+        """AgX at view_exposure(look exposure), global illumination (fast GI), reflections from the light probes (the
+        wet ground's mirror is painted; raytracing=True screen-traces them instead), shadows on; the fog is in the
+        materials (FogExp2, built with opts fog=True). view_look: an AgX look for the scene (cn_lib.ACES_LIKE_LOOK
+        follows the WebGPU frames' ACES tone); None leaves the scene's look as it is."""
         scene.view_settings.view_transform = 'AgX'
         scene.view_settings.exposure = CL.view_exposure(self.look['exposure'])
         if view_look is not None:
             scene.view_settings.look = view_look
-        scene.eevee.use_raytracing = bool(raytracing)
-        scene.eevee.use_shadows = True
+        CL.eevee_gi(scene, raytracing)
         self.set_u('pix', CL.pix_of(scene))
         return scene
 

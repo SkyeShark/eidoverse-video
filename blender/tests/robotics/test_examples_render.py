@@ -1,6 +1,7 @@
 """The three robotics examples (eidoverse/examples/robotics/{assembly,mantis,motion}.scene.js), built by
 examples.EXAMPLES at a probe size and rendered at three times each, with the scene scripts' own look
-(_no_auto_enhance: ray tracing and fast GI off, as the harness turns them off for these scenes). The mantis example is
+(_no_auto_enhance: no runner stages; EEVEE's ray tracing and fast GI stay on, as the harness leaves them). The mantis
+example is
 also saved as a .blend, reopened, and one frame rendered again from the file alone: it must match the frame rendered
 before saving (the keyed-data contract: a saved file plays and renders any frame on its own).
 
@@ -33,9 +34,7 @@ KEEP = '--keep' in K.argv()
 
 
 def look(sc):
-    K.probe_render(sc, (640, 360), 16)
-    sc.eevee.use_raytracing = False                  # _no_auto_enhance, as the harness applies it
-    sc.eevee.use_fast_gi = False
+    K.probe_render(sc, (640, 360), 16)               # ray tracing and fast GI on: _no_auto_enhance leaves them
 
 
 def png(path):

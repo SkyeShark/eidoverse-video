@@ -311,12 +311,12 @@ uses is an artistic call; both are kept.
 ## Turntable sheets — `blender/tools/vrm_turntable.py`
 
 ```bash
-cd <main checkout> && bash run_blender.sh <worktree>/blender/tools/vrm_turntable.py -- \
+bash run_blender.sh blender/tools/vrm_turntable.py -- \
     --outfits lab_coat_1961,mourning,cyclist_1892:nofold --frames head,body --views 0,35,90,150,180 \
     --out work/turntable/sheet.png
-bash run_blender.sh <worktree>/blender/tools/vrm_turntable.py -- --vrm eidoverse/assets/vrms/aletheia.vrm \
+bash run_blender.sh blender/tools/vrm_turntable.py -- --vrm eidoverse/assets/vrms/aletheia.vrm \
     --outfits - --anim idle,cheer --frames chest --look pbr --out work/turntable/aletheia.png
-bash run_blender.sh <worktree>/blender/tools/vrm_turntable.py -- --outfits tuta --frames body --views 0 \
+bash run_blender.sh blender/tools/vrm_turntable.py -- --outfits tuta --frames body --views 0 \
     --hold 48 --spin --video work/turntable/tuta_spin.mp4
 ```
 
@@ -348,14 +348,9 @@ python eido_blender.py render blender/tests/claudesona/basic_vrm/scene.json --at
 python eido_blender.py render blender/tests/claudesona/basic_vrm/scene_claudesona.json --at 2
 ```
 
-The runner currently stops this scene (and any scene with an MToon VRM) at its keying
-snapshot: `harness/keying.py` reads Geometry Nodes modifier inputs with `keys()`,
-which Blender 5.2's modifiers no longer have, and the VRM add-on's outlines are
-Geometry Nodes modifiers. Until that is fixed, `tests/claudesona/test_basic_vrm.py`
-runs the same `setup` and `render_frame` with a ctx that keys as the runner's
-does, and renders the stills.
+`tests/claudesona/test_basic_vrm.py` builds and renders the same scene.
 
-## Blender facts these modules depend on (measured)
+## Blender facts these modules depend on
 
 - **A custom property added from Python is not copied to the evaluated
   object until something tags it.** Keying it on an action the object already
@@ -375,28 +370,26 @@ does, and renders the stills.
 - **An action that `keyframe_insert` creates on an object which already has
   animation data is not evaluated by the session's depsgraph until the object
   is tagged.** The armature carries its clips as NLA strips, so the first
-  keyed switch after `play_vrma_default` (a TuTa bake, a paint, a turn) made
-  an action that `frame_set` never played: Python read the last value it had
-  set on every frame. Renders build their own depsgraph and were right; any
-  bake that reads the evaluated scene (the springs, the gaze, the TuTa's neon)
-  was not. Every keyed setter and bake here tags the armature
-  (`_paint.tag_keyed`); `tests/claudesona/test_pbr_tuta.py` plays the clip
-  first on purpose.
+  keyed switch after `play_vrma_default` (a TuTa bake, a paint, a turn) makes
+  such an action: a render builds its own depsgraph and sees it, but a bake
+  that reads the evaluated scene (the springs, the gaze, the TuTa's neon)
+  does not until the armature is tagged. Every keyed setter and bake here
+  tags it (`_paint.tag_keyed`); `tests/claudesona/test_pbr_tuta.py` plays the
+  clip first on purpose.
 
 ## Tests — `blender/tests/claudesona/`
 
 Each writes its PASS / FAIL lines, a JSON beside its probes in `out/`, and
-renders through the GPU slot:
+renders (one render at a time on a shared GPU):
 
 ```bash
-cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/claudesona/test_face.py
+bash run_blender.sh blender/tests/claudesona/test_face.py
 #   test_lipsync.py   (python blender/tests/claudesona/sung_line_host.py first: the sung line, system Python)
 #   test_springs.py   test_lookat.py   test_wardrobe.py   test_tuta.py   [--no-render]
 #   test_turntable.py   test_basic_vrm.py
 #   test_pbr_tuta.py  (the PBR look on the TuTa: glow drivers, bump, face paint, both orders)   [--no-render]
 #   test_keyed_film.py  (three outfits, the TuTa's badges and an ejection, springs: saved, reopened, re-rendered)
-bash run_blender.sh <worktree>/blender/tests/claudesona/test_face_geometry.py     # no render: the face vs the JS's
+bash run_blender.sh blender/tests/claudesona/test_face_geometry.py     # no render: the face vs the JS's
 ```
 
 The references are the WebGPU modules themselves, run in deno on the CPU with

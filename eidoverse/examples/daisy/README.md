@@ -36,9 +36,13 @@ Outputs go to `work/daisy/out/` and a content-keyed vocal cache to
 a mix change rerenders quickly. The neural-era lines use online TTS re-sung on the melody. Pass
 `--no-tts` to stand the handmade voice in for them offline.
 
-To drive a character from `daisy_timeline.json`, feed its visemes to
-`makeSuitMouth` in `eidoverse/claudesona_face.js` (the claudesona) or to the
-expression path for other VRMs; see the [characters guide](../../../tools-guides/characters.md).
+To drive a character from `daisy_timeline.json` in the Blender edition: for the
+claudesona, `eidoblend.characters.claudesona.face` (`install_suit_mouth(me)`
+once, then `make_suit_mouth(input_max=1.0)` fed the timeline's visemes through
+`face.bake(...)`, the WebGPU `makeSuitMouth` in `eidoverse/claudesona_face.js`);
+for any other VRM, `eidoblend.media.audio.prepare_visemes` +
+`audio.key_expressions`. See [voicebox.md](../../../tools-guides/voicebox.md#in-a-blender-film)
+("A whole song") and the [claudesona guide](../../../tools-guides/claudesona.md).
 
 ## Credits
 

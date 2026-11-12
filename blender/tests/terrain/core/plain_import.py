@@ -1,8 +1,7 @@
-"""Load the new terrain core without the rest of the terrain package, in plain Python or in Blender.
+"""Load the terrain core without the rest of the terrain package, in plain Python or in Blender.
 
-eidoblend/terrain/__init__.py imports bpy (the old make_terrain, surface_layers), and while the packages are being
-built it may import modules that are half-written. The core needs neither: install() puts a bare package object in
-sys.modules for `eidoblend.terrain` (its __path__ is the real folder), so
+A test of the core imports exactly the modules it names, nothing the package's __init__ would reach: install() puts
+a bare package object in sys.modules for `eidoblend.terrain` (its __path__ is the real folder), so
 
     import plain_import; plain_import.install()
     from eidoblend.terrain.core import twins, levels, metrics       # numpy only

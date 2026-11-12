@@ -40,7 +40,7 @@ F1 = F0 + int(round((U1 - U0) * FPS)) - 1
 OUT = os.path.join(C.OUT, 'corner')
 os.makedirs(OUT, exist_ok=True)
 sc = C.clean_scene(FPS, (F0, F1))
-C.probe_look(sc, interior=True, exposure=float(A.get('exposure', 0.0)))
+C.probe_look(sc, exposure=float(A.get('exposure', 0.0)))
 sc.eevee.shadow_pool_size = '2048'
 lite = 'lite' in A['flags']
 
@@ -171,6 +171,20 @@ except Exception as e:                                      # noqa: BLE001 (a FA
     traceback.print_exc()
     C.check('the spark re-times to the sung word (caption words)', False, repr(e))
 
+pr = CR.room.get('probe')
+C.check("the room's volume probe: fitted to the solid shell (its outermost samples inside the walls)",
+        pr is not None and pr.data.type == 'VOLUME' and pr.parent == CR.roomG, pr.name if pr else 'missing')
+ee = sc.eevee
+C.check('global illumination on (fast GI inside the ray tracing)', ee.use_fast_gi and ee.use_raytracing,
+        f'fast GI {ee.use_fast_gi}, ray tracing {ee.use_raytracing}')
+if 'no-render' not in A['flags']:
+    # the bake, in the GPU slot, before the save: the saved file carries it (render_saved.py bakes a file saved
+    # without it, at the probe's bake_frame)
+    C.check("the room's probe baked with the room on screen", bool(CR.bake_probes(sc)),
+            f"at frame {pr.get('bake_frame') if pr else None}")
+elif pr is not None:
+    sc.frame_set(F0)
+    pr['bake_frame'] = F0                                  # bar 18: the room
 blend = os.path.join(OUT, 'corner.blend')
 bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
 C.check('saved .blend', os.path.isfile(blend), f'{os.path.getsize(blend) / 1e6:.1f} MB')

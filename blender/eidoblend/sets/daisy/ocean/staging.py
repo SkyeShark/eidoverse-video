@@ -717,12 +717,13 @@ def build(ctx=None, **kw):
 
 def render_settings(scene):
     """What EEVEE needs for this set (the rest is the piece's): a shadow pool that holds the moon's clipmaps over a
-    3 km view (the default 512 MB overflows: 'Shadow buffer full'), and no fast GI (outdoors at night its screen-space
-    pass lifts the land with the world)."""
+    3 km view (the default 512 MB overflows: 'Shadow buffer full'), and global illumination (fast GI, inside the ray
+    tracing)."""
     ee = scene.eevee
     if int(ee.shadow_pool_size) < 1024:
         ee.shadow_pool_size = '1024'
-    ee.use_fast_gi = False
+    ee.use_raytracing = True
+    ee.use_fast_gi = True
     return scene
 
 

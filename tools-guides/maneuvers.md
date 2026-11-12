@@ -225,8 +225,7 @@ def script(b):
 
 The robot body's bake does not read `body.seat_plan` yet: it places a seated
 clip where the feet stood before the seat, so the body sits on air there
-(`test_robot_seat.py` logs it 148 cm from the chair). That is the robot
-step's hook (below, Not yet ported).
+(`test_robot_seat.py` logs it 148 cm from the chair; see Not yet ported).
 
 ## On the ground — `sit_on_ground`
 
@@ -253,8 +252,8 @@ alone put her feet and shins 16 cm into the floor. The body is kept out of
 the floor through it (`_ground_lift`: the lowest of the body near the hips
 on the floor, every frame of the blend measured before the take), handing
 over to the engine's settle at the end (my robot body's legs cannot fold
-cross-legged; the engine lets them go under the floor rather than hold it
-up). The engine's `sitOnGround` snaps into the pose; for a take that should
+cross-legged, so it sits with its legs out along the floor: see Not yet
+ported). The engine's `sitOnGround` snaps into the pose; for a take that should
 not show a sit-down, start the shot seated. `stand_up` crossfades back over
 the same fade, out of the floor the same way. With no ground clip in the
 library, the engine's fallback: the chair clip, with its warning.
@@ -318,7 +317,7 @@ alone; with it forced off in the same frame, it names the pair.
 MV.vault_over(walk, cover)                    # vault(): the clip's take-off and landing fitted to the cover
 MV.climb_onto(walk, block)                    # climbLedge (to 1.35 m), the climbWallUp route (to 2.3 m)
 MV.scramble_up(walk, wall, rate=0.45, time_scale=1.25)   # climbWall: the scramble, then the mantle
-MV.climb_ladder(walk, rungs, wall)            # climbLadder with the measured height, first rung and spacing
+MV.climb_ladder(walk, rungs, wall)            # climbLadder with the measured height, first rung, spacing and rung radius
 MV.jump_across(walk, landing, height=0.5)     # jump(): from 15 cm before the edge, the measured distance
 MV.cross(walk, cover, gait='run')             # through it: the auto-trigger picks the move (a walkTo's)
 ```
@@ -337,7 +336,9 @@ explicit move with the measured numbers.
   through it its depth, a ray down past it the landing.
 - `measure_ladder(rungs, wall)`: the rungs' heights, first rung, spacing,
   their axis (from the bars' own vertices: a turned ladder's rungs are
-  diagonal), the wall's face and top. The controller grips rungs 9 cm in
+  diagonal) and their radius (`rung_radius`, which `climb_ladder` passes on,
+  so palms close over and soles stand on rungs of their real thickness), the
+  wall's face and top. The controller grips rungs 9 cm in
   front of the wall (terrain_base's build); `climb_ladder` warns when the
   measured gap differs. Keep rungs and rails out of the walking world (their
   wall is what the controller walks against); the feet stay out of the rungs
@@ -348,12 +349,12 @@ explicit move with the measured numbers.
 ## Tests — `blender/tests/maneuvers/`
 
 ```bash
-cd <main checkout> && bash run_blender.sh <repo>/blender/tests/maneuvers/test_seating.py --vrm aletheia
+bash run_blender.sh <repo>/blender/tests/maneuvers/test_seating.py --vrm aletheia
 bash run_blender.sh <repo>/blender/tests/maneuvers/test_maneuver_moves.py --vrm aletheia [--only parkour,ladder]
 bash run_blender.sh <repo>/blender/tests/maneuvers/test_emotes.py --vrm aletheia
 bash run_blender.sh <repo>/blender/tests/maneuvers/test_example_bench.py --vrm aporia
 bash run_blender.sh <repo>/blender/tests/maneuvers/test_robot_seat.py
-bash <repo>/blender/tests/controller/gpu_slot.sh <repo>/blender/tests/controller/render_shots.py      <repo>/blender/tests/maneuvers/out/seating_aletheia_shots.json      # the stills (GPU slot)
+bash run_blender.sh <repo>/blender/tests/controller/render_shots.py <repo>/blender/tests/maneuvers/out/seating_aletheia_shots.json   # the stills (renders)
 ```
 
 Each builds simple geometry (`_mnv_stage.py`: chairs with backrests and
@@ -398,32 +399,30 @@ the body out of the floor through a ground sit's crossfades).
 - My robot body's bake does not read `body.seat_plan`: a seat through its own
   seated state is placed and planned here, but its bake still places the
   seated clip where the feet stood before and on the floor (the body sits on
-  air there). The robot step's bake is to place the seat's span at the plan's
-  spot and heading, lift its root by `lift_v` and put the seated feet on the
-  floor.
+  air there). Its bake needs to place the seat's span at the plan's spot and
+  heading, lift its root by `lift_v` and put the seated feet on the floor.
+- My robot body's ground sit is a long sit, not the library's cross-legged
+  clip: its hips flex 98° at most and its knees 112°, so the legs cannot fold.
+  The ankles are carried along the floor to a place straight ahead of each
+  hip, each leg solved to it with the knee toward forward-and-up, the knees
+  bent 12°, heels down, in the settle, the crossfades and the keyed frames.
+  The library has no floor clip the robot's joints can hold.
 
 Known residuals (each measured by the tests; the JSON reports in `out/` list
 the frames):
 
-- On my robot body (`--vrm claude_robot`: 115 of 121 checks pass): a sole
-  slides 8 and 10 mm a frame in chair A's and chair B's sits; after each
-  stand-up the walk's first step leaves the planted foot out of its straight
-  leg's reach (the plant releases it: 8 frames with no foot down); its legs
-  cannot fold cross-legged, so on the ground they go 21 cm under the floor
-  (the engine lets them; held over it instead, the body hovered 21 cm), and
-  lying down something of it goes 2.5 cm under the floor midway through the
-  crossfade.
+- On my robot body (`--vrm claude_robot`: 114 of 121 checks pass): a sole
+  slides 8 and 10 mm a frame in chair A's and chair B's sits, at the seat's
+  hand-over to the plant at the end of the stand-up; after each stand-up the
+  walk's first step leaves the planted foot out of its straight leg's reach
+  (the plant releases it: 8 frames with no foot down); the long sit's
+  sit-down crossfade dips the body 7 cm under the floor for a frame, and its
+  rise from the ground pops (a 13 cm heave); lying down, something of it goes
+  2.5 cm under the floor midway through the crossfade.
 - Lying down, the tails stand into the floor (rest pose; baked springs have
   no floor to collide with either).
-- The controller's moves on this edition's geometry (its files, its step):
-  the ladder's mantle leaves a boot up to 2.6 cm inside the wall for a few
-  frames (its own log: "a foot still inside a solid"); the scramble's first
-  frame kicks a boot 3 cm into the wall's face (its path always walks the
-  root to `radius + 0.20` m from the face, wherever the body starts).
-- Every take on an armature that already played one must start from rest
-  (`_mnv_stage.at_rest`): the controller measures the body's height and
-  lowest point from the posed mesh (`measure_vrm`), and built while the last
-  take held a ground sit, my robot body's second take ran 0.4 m off.
+- The ladder's mantle can leave a boot up to 7 mm inside the wall for a few
+  frames.
 - A coat skinned to the body without cloth presses into a chair's back (it
   never comes out of it) and into a seat's pan where it falls past the edge,
   and on the ground goes under the floor where it hangs under her (hidden).

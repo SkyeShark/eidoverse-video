@@ -81,7 +81,7 @@ def probe_render(sc, res=(960, 540), samples=16, look='None'):
     ee.use_raytracing = True
     ee.ray_tracing_method = 'SCREEN'
     ee.use_shadows = True
-    ee.use_fast_gi = False
+    ee.use_fast_gi = True
     r.film_transparent = False
     vs = sc.view_settings
     vs.view_transform = 'AgX'

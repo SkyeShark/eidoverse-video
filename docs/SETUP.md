@@ -1,204 +1,134 @@
-# Setup
+# Setup (Blender edition)
 
-Everything runs in your environment: Deno renders through hardware WebGPU
-when GPU access is available, or software WebGPU when it is not. ffmpeg
-encodes, and the Python tools are optional extras. **The whole
-render dependency list is Deno + ffmpeg.**
+Everything runs on your machine: Blender 5.2 builds every scene and renders
+it with EEVEE on your GPU, ffmpeg checks and muxes, and Python runs the runner
+and the tool scripts. **The render stack is Blender 5.2, bash and ffmpeg.**
+The rest below is for the systems that need it.
 
-(A containerized edition — Docker render image + the autonomous
-agent-loop runner — lives on the `auto` branch; see its docs if you want
-the sandboxed/subagent setup instead.)
+(The containerized edition, a Docker render image plus an autonomous
+agent-loop runner, lives on the `auto-blender` branch; see its docs for the
+sandboxed or subagent setup instead.)
 
 ## 0. Prerequisites
 
-- **WebGPU runtime/driver** — use a hardware GPU whenever GPU access is
-  available; NVIDIA recommended. Windows uses D3D12; native Linux normally
-  uses Vulkan; macOS uses Metal. WSL 2 needs the
-  [explicit GPU setup below](#gpu-setup-for-wsl-2). Environments without
-  GPU access can use [software WebGPU fallback](#software-fallback).
-- **Python 3.10+** (the `eido.py` runner is stdlib-only).
-- A few GB of disk for node_modules + working space.
+- **A GPU EEVEE runs on.** NVIDIA recommended. Blender chooses the GPU when
+  it starts; use the vendor's current driver.
+- **Python 3.10+** (`eido_blender.py` is stdlib only).
+- A few GB of disk for Blender, the shared texture and model caches, and
+  working space.
 
-## 1. Install Deno 2.8.1 or 2.9.5 + ffmpeg
+## 1. Blender 5.2
 
-Use **Deno 2.8.1 or 2.9.5**. A version check or a successful render does
-not establish hardware acceleration: run the GPU health check in the same
-shell and OS you will render from, then inspect a probe frame with effects.
+Install Blender 5.2 from [blender.org](https://www.blender.org/download/)
+(the installer or the portable archive). The runner and `run_blender.sh` find
+it the same way:
+
+1. `BLENDER`, the path to the executable, when set;
+2. `blender` on `PATH`;
+3. the usual install folders, newest version first:
+   `~/Blender/<version>/blender.exe` and
+   `C:\Program Files\Blender Foundation\<version>\blender.exe` on Windows,
+   `/Applications/Blender.app` on macOS, `/usr/bin/blender` or the snap on
+   Linux.
+
+`python eido_blender.py doctor` reports the version it found. The edition is
+built and checked on 5.2, and the doctor fails on another version.
+
+## 2. bash
+
+Every Blender run goes through `run_blender.sh`, which starts Blender
+headless (`--background --factory-startup`) in an isolated user folder, so a
+run never touches your installed add-ons. On Windows install
+[Git for Windows](https://git-scm.com/download/win); the runner finds its Git
+Bash (or the bash named by `EIDO_BASH`) and never uses WSL's bash, which sees
+Windows paths differently. Linux and macOS use their own bash.
+
+## 3. ffmpeg and ffprobe
+
+Both on `PATH`. Blender writes the film's H.264 itself; ffmpeg and ffprobe
+make the probe frames, the checks and the delivery copies, and mux sound.
+
+## 4. The VRM Add-on for Blender
+
+For scenes with VRM characters. Install it once in normal Blender:
+Edit > Preferences > Get Extensions, search for **VRM format** (extension id
+`vrm`), Install. `run_blender.sh` copies your installed copy into its sandbox,
+again whenever yours changes; `BLENDER_EXTS="vrm other"` copies more
+extensions. Scripts enable it with
+`bpy.ops.preferences.addon_enable(module='bl_ext.blender_org.vrm')`.
+
+## 5. SeedThree, for trees
+
+`make_seed_tree` runs SeedThree's own Blender add-on. Check out SeedThree's
+`blender` branch beside this repository:
+
+```bash
+git clone -b blender https://github.com/SkyeShark/SeedThree ../SeedThree-blender
+```
+
+The trees family looks in `SEEDTHREE_DIR`, then `../SeedThree-blender`,
+`../SeedThree` and `./SeedThree` (the first that holds `blender/seedthree/`).
+
+## 6. Deno and its npm cache
+
+A few systems run the WebGPU engine's own JavaScript while a scene builds:
+the canvas screens and the computing-history screen scenes, the books' rig
+and the parole captions. The WebXR pages import three.js from
+`node_modules`. Both need **Deno 2.8.1 or 2.9.5** and the npm cache that
+bootstrap fills:
 
 ```powershell
 # Windows
 irm https://deno.land/install.ps1 | iex
 deno upgrade 2.9.5
-deno --version
 ```
 ```bash
-# Linux/mac/WSL
+# Linux / macOS
 curl -fsSL https://deno.land/install.sh | sh -s v2.9.5   # needs unzip or 7z
 ```
 
-Have `ffmpeg` on PATH. On a hardware (or unverified) adapter the renderer
-encodes with `h264_nvenc` when ffmpeg lists it and a one-frame test encode
-succeeds; otherwise it warns and uses `libx264` (CPU **video encoding**). A
-software adapter uses `libx264` without testing. `RENDER_CODEC` overrides the
-choice, for example `RENDER_CODEC=h264_videotoolbox` for Apple's encoder. The
-video encoder does not select the rendering backend: hardware or software
-WebGPU is reported separately by `doctor` and renderer startup.
-
-### GPU setup for WSL 2
-
-WSL seeing a GPU in `nvidia-smi` is not enough. CUDA, Vulkan and OpenGL use
-different driver paths. A Linux Deno process can select Mesa's software
-Vulkan renderer (`llvmpipe`/lavapipe) even while the NVIDIA card is visible.
-`powerPreference: 'high-performance'` does not prevent that selection.
-
-The verified WSL route is **Deno WebGPU → wgpu GL backend → Mesa D3D12 →
-the Windows hardware GPU**. The scene API remains WebGPU/TSL. This route
-does not need a Linux NVIDIA kernel driver or a Vulkan Dozen (`dzn`) ICD.
-
-1. Use WSL **2**, a current Windows GPU driver supporting WSL GPU access,
-   and current WSL/WSLg. Check `wsl --list --verbose` in PowerShell. If WSL
-   needs updating, use `wsl --update`; restart it after saving active work.
-   See [Microsoft's WSL GPU prerequisites](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps).
-2. In Ubuntu, ensure Mesa's EGL/D3D12 support is available. The distro
-   packages are `libgl1-mesa-dri`, `libegl-mesa0` and `libegl1`:
-
-   ```bash
-   sudo apt update
-   sudo apt install libgl1-mesa-dri libegl-mesa0 libegl1
-   test -e /dev/dxg && echo 'WSL GPU device present'
-   ```
-
-   `/dev/dxg` confirms access to the host GPU; the Deno probe below checks
-   whether the selected rendering driver actually uses it.
-3. Select the hardware backend **in the WSL shell used for both checks
-   and renders**:
-
-   ```bash
-   export PATH="$HOME/.deno/bin:$HOME/.local/bin:$PATH"
-   export DENO_WEBGPU_BACKEND=gl
-   export GALLIUM_DRIVER=d3d12
-   export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
-   unset LIBGL_ALWAYS_SOFTWARE
-   python3 eido.py doctor --gpu-only
-   ```
-
-   Change `NVIDIA` to a substring of your intended GPU's name for Intel/AMD.
-   Mesa documents this selection in its
-   [D3D12 driver instructions](https://docs.mesa3d.org/drivers/d3d12.html).
-   Deno reads `DENO_WEBGPU_BACKEND` when creating its GPU instance; set it
-   before launching Deno, not inside scene code.
-4. On a machine with GPU access, look for a named hardware adapter,
-   `"backend":"hardware"`, `"isFallbackAdapter":false`, and
-   `"computeReadback":"passed"`. If `llvmpipe`, lavapipe or SwiftShader
-   is selected despite an accessible GPU, correct the driver/backend
-   configuration. After hardware works, keep the three backend/adapter
-   exports in your WSL shell profile or render launcher. Software fallback
-   remains available in environments without GPU access, as described below.
-5. Bootstrap and run a scene probe from that shell. Keep a separate checkout
-   and `node_modules/` for native Linux/WSL runs and Windows runs. Native
-   binaries and `.bin` shims differ by OS; sharing a dependency store can
-   break either installation. An agent working in WSL can instead launch
-   the Windows Python/Deno runner from PowerShell against its Windows
-   checkout; that uses Windows D3D12 and Windows dependencies.
-
-The WSL route above was checked on an RTX 5090 Laptop GPU with Deno 2.9.5:
-hardware selection, GPU compute/readback, and an inspected Three.js/TSL
-render. This is a setup check, not a guarantee that every effect or GPU
-simulation fits that backend's capabilities. Always inspect the scene probe.
-An alternative hardware Vulkan driver can also work, but must pass the
-same checks; installing `mesa-vulkan-drivers` alone does not establish it.
-
-**Known limit of the WSL GL/D3D12 route** (2026-09-14, RTX 5090 Laptop,
-Mesa 26.0.3, deno 2.8.1 and 2.9.5): wgpu's GLSL backend declares every
-`texture_depth_2d` as `sampler2DShadow`, so a depth buffer can only be
-*compared* there, never read. Any pass that reads depth fails at pipeline
-creation with `GPUInternalError` (`WGSL textureLoad from depth textures is
-not supported in GLSL`; a non-comparison `textureSampleLevel` fails the same
-way in Mesa's compiler). Three's TSL turns nearest-filtered depth `sample()`
-into `textureLoad`, so this covers N8AO, SSR, the N8AO depth copy and any
-depth-fog / depth-of-field effect. Shadow maps (comparison sampling), bloom,
-FXAA, fog and the overlay work. The renderer's MSAA resolve (`antialias:
-true`) also blacks every frame on this route, and the kit's own
-`eidoverse/examples/robotics/manufacturing.json` renders black there for the
-same reason. The `auto` branch's Docker route sets `GALLIUM_DRIVER=d3d12` and
-the adapter name but not `DENO_WEBGPU_BACKEND=gl`; it was not tested from
-this checkout, so how it differs is unverified.
-
-What to do: for full auto-enhance at GPU speed use the Windows Deno (native
-D3D12) from Git Bash; on WSL either accept `_aoParams = {enabled:false}`,
-`_ssrParams = {enabled:false}` and `antialias:false`, or force the Vulkan
-software adapter (`DENO_WEBGPU_BACKEND=vulkan`) and budget CPU time. Capture
-the exact failure with `GPU_DEVICE.addEventListener('uncapturederror', ...)`
-in `setup()`, or compile a dumped WGSL module standalone with
-`device.createRenderPipelineAsync` to read the backend's message.
-
-### Software fallback
-
-With no GPU access, Deno's WebGPU can still render on the CPU through a
-software adapter such as Mesa's `llvmpipe`/lavapipe on Linux. Nothing needs
-to be switched on in the kit; the adapter request in
-`eidoverse/gpu_check.mjs` handles both cases:
-
-- It asks for a `high-performance` adapter first and, if none is returned,
-  retries with `forceFallbackAdapter: true`. Only when both fail does it stop
-  with `No WebGPU adapter found`.
-- It classifies the adapter as `software` when the runtime flags it as a
-  fallback adapter or its name matches `llvmpipe`, `lavapipe`, `SwiftShader`,
-  `softpipe`, `WARP`, "Basic Render" or "software"; as `hardware` when it is
-  named and not flagged; otherwise as `unknown`.
-- A software adapter prints `[gpu] WARNING: Software WebGPU fallback: …` and
-  an unknown one `[gpu] WARNING: Cannot verify the WebGPU adapter type: …`.
-  These are warnings, not failures. `python eido.py doctor` then runs the
-  same compute dispatch/readback on it and keeps the warning in its output.
-- Renderer startup logs `[render_common] WebGPU software: …` (or `hardware`).
-  On a software adapter the default video encoder is `libx264`, with no NVENC
-  test; `RENDER_CODEC` still overrides that choice.
-
-Expect frames to take much longer on the CPU. Probe short and small first,
-and inspect the effects you rely on, because a software driver's
-capabilities are its own. If the warning appears on a machine that does have
-a GPU, the hardware path is misconfigured — see
-[Troubleshooting](#troubleshooting).
-
-## 2. Bootstrap JS dependencies
-
-`node_modules/` is not committed; it regenerates from `deno.lock`:
-
 ```bash
-python eido.py bootstrap          # add --fresh to rebuild from scratch
+python eido.py bootstrap          # fills the npm cache and node_modules; add --fresh to rebuild from scratch
 ```
 
-This runs `deno cache --node-modules-dir=auto` against the engine entry
-points and pre-caches `@dimforge/rapier3d-compat` (the physics engine the
-character controller imports). Re-run after any `deno.lock` change.
+The build-time scripts run offline from that cache
+(`--cached-only --node-modules-dir=none`) and write nothing into the
+repository. Re-run bootstrap after any `deno.lock` change. Keep a separate
+checkout and `node_modules/` for native Linux or WSL runs and Windows runs:
+native binaries differ by OS.
 
-## 3. Health check
-
-```bash
-python eido.py doctor
-```
-
-Checks: Deno version, the selected hardware/software WebGPU adapter plus
-a real compute dispatch/readback, ffmpeg/nvenc, node_modules + Rapier materialized,
-ComfyUI reachable (reported, not required), embeddings key set (reported,
-not required). Use `python eido.py doctor --gpu-only` for the GPU check alone;
-it needs no scene assets or bootstrap. Failures return a nonzero exit code.
-Both the check and renderer startup report software fallback with a warning;
-it is not a failure if the adapter works. Missing adapters or failed compute
-checks remain errors. Direct renderer invocations report the backend too.
-
-## 4. Smoke test
+## 7. Health check
 
 ```bash
-python eido.py render eidoverse/examples/basic_vrm.json
+python eido_blender.py doctor
 ```
 
-A 10-second, 1280×720 orbit of the sample character with volumetric
-clouds should land at `eidoverse/examples/basic_vrm.mp4`. Runtime varies
-with hardware, shader compilation, effects and encoding. Inspect frame
-progress and logs before deciding that a slow first render is stuck.
+Checks: Blender's version, bash, the VRM extension (optional), ffmpeg and
+ffprobe, then one 64 × 64 EEVEE render of a lit cube at 1 sample and the GPU
+check: the renderer Blender chose, classified hardware or software, and a
+compute dispatch whose readback must be exact. ComfyUI and an embeddings key
+are reported, not required. `--no-render` skips the render. Failures return
+a nonzero exit code.
 
-## 5. Optional backends
+A **software renderer** (Mesa llvmpipe or lavapipe, Microsoft WARP) runs
+everything on the CPU, many times slower, and the doctor warns. On a machine
+that has a GPU, fix the driver setup before rendering.
+
+## 8. Smoke test
+
+```bash
+python eido_blender.py render blender/tests/pipeline/example/scene.json --at 0 --at 1.5 --at 3
+python eido_blender.py render blender/tests/pipeline/example/scene.json
+```
+
+The first builds the example (a stool, a clock, a push-in) into its `.blend`
+and writes three PNG stills; the second renders the 3-second film to
+`blender/tests/pipeline/out/example.mp4`. A Blender process's first frame
+takes longer while EEVEE compiles its shaders. Look at the stills before you
+judge the run. `python blender/tests/run_all.py --kinds imports` checks that
+every module of the package imports and wires, in seconds.
+
+## 9. Optional backends
 
 - **ComfyUI (music + SFX)** — **MiniMax Music 3 is the recommended music
   model**; use Stable Audio for sound effects. Install the corresponding
@@ -212,61 +142,52 @@ progress and logs before deciding that a slow first render is stuck.
   host ComfyUI to a container client. It listens on `0.0.0.0:8188` by default
   and discovers the upstream in `SCAN_PORTS` (default `8000-8020`).
   `BRIDGE_PORT` and `COMFY_HOST` configure the exposed port and upstream host.
-  It is a separate service, not a native rendering prerequisite.
-
+  It is a separate service, not a rendering prerequisite.
 - **Semantic theme ranking** — set `JINA_AI_KEY` (free tier) or point
   `EIDOVERSE_EMBED_URL` / `EIDOVERSE_EMBED_MODEL` / `EIDOVERSE_EMBED_KEY`
   at any OpenAI-compatible `/v1/embeddings` endpoint. Without a key,
   `fetch_model.py` ranks by relevance only (still works).
 - **Python tool tiers** — see `requirements-local.txt`: the fetchers need
-  only `requests`; the TTS/lipsync chain is a few audio libs; demucs
-  pulls PyTorch. Install what you use.
+  only `requests`; the TTS/lipsync chain is a few audio libs; voicebox and
+  synthkit need numpy, scipy and numba; demucs pulls PyTorch. Install what
+  you use, into the system Python (Blender's own Python runs the package and
+  needs nothing installed).
 
 ## Platform notes
 
-- **Windows**: native D3D12 WebGPU — the path this release was verified
-  on.
-- **Native Linux**: normally Vulkan with the GPU vendor's hardware driver
-  and distro ffmpeg. Run the GPU check to identify the selected adapter.
-  Mesa's software Vulkan driver supports the CPU fallback. The WSL hardware
-  test does not establish native Linux hardware Vulkan support.
-- **WSL 2**: use the [hardware backend setup](#gpu-setup-for-wsl-2) above.
-  The default adapter can be a CPU renderer even with a working host GPU.
-- **macOS**: wgpu → Metal. No nvenc — the renderer falls back to `libx264`
-  on its own; set `RENDER_CODEC=h264_videotoolbox` for Apple's encoder. Same caveat: unverified, judge by frames.
-- **Fonts**: the 19 display fonts live at `eidoverse/assets/fonts/`. For
-  `text_3d`, point `fontPath` at `eidoverse/assets/fonts/<name>.ttf`
-  (relative paths work) or install them system-wide.
+- **Windows**: the platform this edition is built and render-checked on
+  (Blender 5.2, NVIDIA RTX, Git Bash).
+- **Linux**: Blender's Linux build with the GPU vendor's driver. The
+  `auto-blender` branch's container (Ubuntu) renders EEVEE this way.
+- **WSL 2**: running the Windows Blender from the Windows side is the
+  simplest route. A Linux Blender inside WSL reaches the host GPU through
+  Mesa's d3d12 driver (`GALLIUM_DRIVER=d3d12`, with `/dev/dxg` present);
+  the `auto-blender` container renders that way under `xvfb-run`. Run the
+  doctor in the same shell you will render from.
+- **macOS**: Blender on Metal. Same caveat: unverified here, judge by frames.
+- **Fonts**: the 19 display fonts live at `eidoverse/assets/fonts/`; the
+  media family reaches them by name.
 
 ## Troubleshooting
 
-- **`navigator.gpu missing`** — include `--unstable-webgpu` when invoking
-  Deno directly and use Deno 2.8.1 or 2.9.5. `eido.py` adds the flag.
-- **Software fallback warning when a GPU is available** — run
-  `python eido.py doctor --gpu-only` in the render shell. On WSL, check the
-  three backend/adapter exports above and Mesa's D3D12 driver. On native
-  Linux, check the hardware Vulkan driver. A visible GPU in `nvidia-smi`
-  and a passing ffmpeg/NVENC check do not verify Deno's rendering adapter.
-- **`No WebGPU adapter found`** — neither a hardware nor a software adapter
-  is exposed by this runtime. Check the driver setup; GPU-less environments
-  need a compatible [software WebGPU driver](#software-fallback).
-- **`GPU compute check failed` / timeout** — an adapter was selected but
-  could not complete the compute/readback probe. Inspect the driver error
-  before rendering; do not treat adapter enumeration alone as success.
-- **Rapier import error at controller creation** — bootstrap didn't
-  materialize node_modules; re-run step 2 (add `--fresh` if node_modules
-  came from another OS).
-- **Black frames** — check device/adapter selection, the pinned versions,
-  asset loading, lights, exposure and material conversion. Construct the
-  renderer with `adapter: GPU_ADAPTER, device: GPU_DEVICE`; then consult
-  [stack notes](../tools-guides/stack-notes.md) for the affected render path.
-- **`generate_song.py --probe` fails** — inspect the reported
-  connection error or missing node/model names. Check ComfyUI's address,
-  version and model folders against the audio guide. A passing dependency
-  probe still needs a real generation to check weight loading and GPU memory.
-- **Banded gradients despite a successful exit** — check the Deno version
-  and a small scene probe with the same effects enabled. Stay on Deno 2.8.1
-  or 2.9.5 and judge the rendered frame as well as the logs.
-- **`node_modules\.bin\...: The file cannot be accessed by the system
-  (os error 1920)`** on Windows — the shims were written by a Linux/WSL
-  deno run on the same checkout. Delete `node_modules/.bin` and retry.
+- **`run_blender.sh: Blender not found`** — set `BLENDER=/path/to/blender`,
+  or put `blender` on `PATH`.
+- **`no bash found`** — install Git for Windows, or set `EIDO_BASH` to its
+  `bash.exe`.
+- **`extension 'vrm' is not installed in your Blender`** — install the VRM
+  add-on once (step 4); VRM scenes need it.
+- **Blender exited 0 but nothing came out** — Blender returns 0 after a script
+  raises. The runner checks every output and the digest's status, and says
+  what is missing: read the log above it for the traceback.
+- **`[trees] no SeedThree checkout with blender/seedthree found`** — step 5.
+- **`deno not found on PATH`**, or a canvas screen, book or parole build that
+  fails on a missing npm package — install Deno and run
+  `python eido.py bootstrap` (step 6).
+- **`fetch_pbr <id> (1k) is not in the library`** — fetch the set into the
+  shared library: `python fetch_texture.py <id> 1k --cache`.
+  `EIDO_NO_FETCH=1` makes every missing asset an error instead of a fetch.
+- **The doctor warns of a software renderer on a machine with a GPU** — the
+  driver or backend setup is wrong; on WSL, see the platform notes.
+- **Black or pink frames** — check the world, the lights, the exposure and
+  missing images ([render review](../tools-guides/render-review.md)); the
+  audit digest's `preflight.*` records name missing images and libraries.

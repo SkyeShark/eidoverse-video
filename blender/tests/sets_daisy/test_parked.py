@@ -38,7 +38,7 @@ os.makedirs(OUT, exist_ok=True)
 render = 'no-render' not in A['flags']
 only = A.get('only')
 sc = C.clean_scene(FPS, (1, 60))
-C.probe_look(sc, interior=True)
+C.probe_look(sc)
 sc.eevee.shadow_pool_size = '2048'
 
 PARK = {'funeral': Vector((137.0, -251.0, 12.0)), 'corner': Vector((800.0, -800.0, 0.0))}   # corner: three (800, 0, 800)

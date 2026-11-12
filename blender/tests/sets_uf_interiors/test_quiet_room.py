@@ -7,12 +7,13 @@ alone (--vrm stands the claudesona at the mark, at the scale the cams are framed
     # build, check, bake the room probe, render (from the main checkout, through the GPU slot):
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_quiet_room.py -- [--cams altar,pews,...] [--no_render]
-        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.5] [--save]
+        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.45] [--save]
 
 Checks (PASS / FAIL lines): the build's contents (merged meshes, the 56 chairs, the 360-tower backdrop's
 survivors, every board image at 960 texels per metre), three's light units, the probe fitted to the room, keyed
 update() and animate() read back at their frames (crate, shutter, beacon, launch lights, hell flicker), cams aimed
-at their targets, and each render's exposure. Stills: out/qr/qr_<cam>_<state>.png and a contact sheet.
+at their targets, global illumination on, and each render's exposure. Stills: out/qr/qr_<cam>_<state>.png and a
+contact sheet.
 """
 import math
 import os
@@ -30,8 +31,8 @@ from eidoblend.sets.unknown_force import interiors_lib as L  # noqa: E402
 from eidoblend.sets.unknown_force import quiet_room as QR  # noqa: E402
 
 A = T.args({'cams': 'altar,pews,crate,close,board,hatch,lectern,essay,altar_launch,altar_hell0', 'samples': 16,
-            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.5, 'no_render': False, 'vrm': False,
-            'save': False, 'no_bloom': False, 'cycles': '', 'look': '', 'look_cams': 'altar,crate'})
+            'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.45, 'no_render': False, 'vrm': False,
+            'save': False, 'no_bloom': False, 'look': '', 'look_cams': 'altar,crate'})
 OUT = os.path.join(T.OUT, 'qr')
 os.makedirs(OUT, exist_ok=True)
 
@@ -149,7 +150,7 @@ def main():
     aim = -(ks.matrix_world.to_3x3() @ Vector((0, 0, 1)))
     to_t = (room.parts['singerLights']['kickerTarget'].matrix_world.translation - ks.matrix_world.translation).normalized()
     T.check('kicker aimed at its target (Track To)', aim.dot(to_t) > 0.9999, f'cos {aim.dot(to_t):.6f}')
-    # the probe: fitted to the room, its outer samples mid-wall
+    # the probe: fitted to the room, its outermost samples inside the slabs and the core wall
     pr = room.probe
     lo = pr.matrix_world.translation - Vector(pr.scale)
     hi = pr.matrix_world.translation + Vector(pr.scale)
@@ -157,6 +158,13 @@ def main():
             lo.x < -6 and hi.x > 6 and lo.y < -6.2 and hi.y > 9 and lo.z < 0 and hi.z > 3.9,
             f'{tuple(round(v, 2) for v in lo)} .. {tuple(round(v, 2) for v in hi)}, res '
             f'{pr.data.resolution_x}x{pr.data.resolution_y}x{pr.data.resolution_z}')
+    # EEVEE lays an axis's N samples at (i + 1) / (N + 1) of the box
+    res = (pr.data.resolution_x, pr.data.resolution_y, pr.data.resolution_z)
+    sp = [(hi[i] - lo[i]) / (res[i] + 1) for i in range(3)]
+    z_lo, z_hi, y_core = lo.z + sp[2], hi.z - sp[2], lo.y + sp[1]
+    T.check('its outermost samples lie inside the floor and ceiling slabs and the core wall',
+            -QR.SLAB < z_lo < 0 and QR.RH < z_hi < QR.RH + QR.SLAB and -QR.RZ1 - QR.SLAB < y_core < -QR.RZ1,
+            f'z {z_lo:.3f} / {z_hi:.3f}, core wall y {y_core:.3f}; spacing {[round(s, 3) for s in sp]}')
 
     # ---------------------------------------------------------------------------------------- keyed update
     # a sweep of shipT and sale keyed on frames 101..111, read back after jumping to each frame
@@ -293,7 +301,10 @@ def main():
     # ---------------------------------------------------------------------------------------- render
     T.render_setup(scene, (W, H), int(A['samples']), bloom=not A['no_bloom'])
     scene.world = room.env
-    room.eevee_settings(scene)
+    ee = room.eevee_settings(scene)
+    T.check('global illumination on (fast GI inside the ray tracing; reflections from the probes)',
+            ee.use_fast_gi and ee.use_raytracing and ee.ray_tracing_method == 'PROBE',
+            f'fast GI {ee.use_fast_gi}, ray tracing {ee.use_raytracing} ({ee.ray_tracing_method})')
     if A['vrm']:
         T.load_singer(L.to_blender(QR.MARK['pos']), 0.0, QR.SUIT_SCALE)
     tb = time.perf_counter()
@@ -336,15 +347,6 @@ def main():
             T.check(f'{nm} under the {A["look"]} look: focal projected, exposed', ok and 0.03 < mean < 0.7,
                     f'mean {mean:.3f}, clipped {100 * clip:.2f} %')
             stills.append(path)
-    if A['cycles']:
-        nm = A['cycles']
-        idx = want.index(nm) if nm in want else 0
-        scene.render.engine = 'CYCLES'
-        scene.cycles.device = 'GPU'
-        scene.cycles.samples = 128
-        p = os.path.join(OUT, f'qr_{nm}_cycles_reference.png')
-        T.render_still(scene, cams[SHOTS[nm][0]], 1 + idx, p)
-        scene.render.engine = 'BLENDER_EEVEE'
     T.sheet(stills, os.path.join(OUT, 'qr_sheet.jpg'))
     if A['save']:
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'quiet_room_probe.blend'), compress=True)

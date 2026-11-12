@@ -1121,17 +1121,18 @@ class Bin:
         return ['group', 'parts', 'update', 'dispose', 'cams', 'focal_point']
 
     def apply_render_settings(self, scene=None, fog=True, world=True, bloom=False):
-        """AgX, EEVEE ray tracing, the set's world, and its suggested fog (parts.fog: 0x070a14, density 0.03). bin.js
-        asks for no bloom of its own; bloom=True adds a soft one (strength 0.45, radius 0.5, threshold 0.8: the
-        bloom the music video ran all its sets under)."""
+        """AgX, EEVEE ray tracing and global illumination (fast GI), the set's world, and its suggested fog (parts.fog:
+        0x070a14, density 0.03). bin.js asks for no bloom of its own; bloom=True adds a soft one (strength 0.45,
+        radius 0.5, threshold 0.8: the bloom the music video ran all its sets under)."""
         scene = scene or self.scene
         scene.render.engine = 'BLENDER_EEVEE'
         scene.view_settings.view_transform = 'AgX'
         scene.eevee.use_raytracing = True
-        scene.eevee.use_fast_gi = False
+        scene.eevee.use_fast_gi = True
+        scene.eevee.fast_gi_method = 'GLOBAL_ILLUMINATION'
         if world and self.opts['sky']:
             scene.world = self.world
-        done = ['AgX', 'ray tracing']
+        done = ['AgX', 'ray tracing', 'fast GI']
         if bloom:                                   # first: the fog splices in after Render Layers, before the bloom
             from ...harness.settings import add_bloom
             done.append(add_bloom(scene, {'threshold': 0.8, 'size': 0.5, 'strength': 0.45}))

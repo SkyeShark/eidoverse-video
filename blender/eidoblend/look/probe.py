@@ -78,40 +78,6 @@ def render_still(scene, path, frame=None, mode='jump', preroll_s=1.0):
     return dt
 
 
-def render_reference(scene, path, frame=None, samples=512, bounces=8, device='GPU'):
-    """The same still path traced in Cycles: the ground truth for EEVEE's approximations (volume probes, fast GI,
-    sphere probes), with the same camera, lights, materials and colour management. A GPU job: run it through heavy.sh.
-    Restores the engine. Returns wall seconds. On the corner room it took 6 s at 960 x 540, 512 samples, and showed
-    the room EEVEE had lit from the world through its walls."""
-    r = scene.render
-    keep = (r.engine, scene.cycles.samples, scene.cycles.use_denoising, scene.cycles.max_bounces, scene.cycles.device)
-    try:
-        r.engine = 'CYCLES'
-        if device == 'GPU':
-            try:
-                prefs = bpy.context.preferences.addons['cycles'].preferences
-                for kind in ('OPTIX', 'CUDA', 'HIP', 'METAL', 'ONEAPI'):
-                    try:
-                        prefs.compute_device_type = kind
-                    except TypeError:
-                        continue
-                    prefs.get_devices()
-                    if any(d.type == kind for d in prefs.devices):
-                        break
-                for d in prefs.devices:
-                    d.use = d.type != 'CPU'
-                scene.cycles.device = 'GPU'
-            except Exception as e:                       # no GPU backend: Cycles on the CPU, slower, same answer
-                print(f'[probe] Cycles GPU unavailable ({e}); rendering the reference on the CPU', flush=True)
-                scene.cycles.device = 'CPU'
-        scene.cycles.samples = int(samples)
-        scene.cycles.use_denoising = True
-        scene.cycles.max_bounces = int(bounces)
-        return render_still(scene, path, frame)
-    finally:
-        r.engine, scene.cycles.samples, scene.cycles.use_denoising, scene.cycles.max_bounces, scene.cycles.device = keep
-
-
 def render_stills(scene, at=(), frames=(), out_dir='.', name='probe', mode='jump', preroll_s=1.0, samples=None,
                   resolution=None, percentage=None, stats=True, region_fn=None, log=True, report=True):
     """Render probe stills at times `at` (seconds from frame_start) and/or `frames`. samples / resolution /

@@ -2026,6 +2026,20 @@ def view_exposure(three_exposure=1.0) -> float:
     return math.log2(float(three_exposure))
 
 
+def eevee_gi(scene, traced=False, max_roughness=0.5):
+    """The sets' EEVEE lighting: global illumination (fast GI, which runs inside EEVEE's ray tracing, so the ray
+    tracing is on), shadows on, and the reflections: from the light probes ('PROBE', the WebGPU editions' SSR-off
+    picture: painted mirrors and env reflections) or screen-traced (traced=True). Returns scene.eevee."""
+    ee = scene.eevee
+    ee.use_shadows = True
+    ee.use_raytracing = True
+    ee.ray_tracing_method = 'SCREEN' if traced else 'PROBE'
+    ee.ray_tracing_options.trace_max_roughness = float(max_roughness)
+    ee.use_fast_gi = True
+    ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
+    return ee
+
+
 # The AgX look nearest three's ACESFilmicToneMapping (its x exposure / 0.6 included), the WebGPU frames' tone. Measured
 # in Blender 5.2 (sRGB 8-bit for scene-linear grey 0.01 / 0.05 / 0.18 / 1 / 5): three's ACES 8 / 50 / 127 / 226 / 251,
 # this look 10 / 49 / 118 / 208 / 248, plain AgX 18 / 58 / 118 / 197 / 237 (twice as light in the deep darks, which is
@@ -3354,6 +3368,7 @@ class Lib:
             'Image': bpy.data.images, 'Light': bpy.data.lights, 'Camera': bpy.data.cameras,
             'World': bpy.data.worlds, 'Collection': bpy.data.collections,
             'GeometryNodeTree': bpy.data.node_groups, 'ShaderNodeTree': bpy.data.node_groups,
+            'LightProbe': bpy.data.lightprobes, 'LightProbeVolume': bpy.data.lightprobes,
         }
         for x in reversed(self.owned):
             try:
@@ -3633,13 +3648,23 @@ class SetBase:
     def update(self, t, state=None, ctx=None, frame=None):
         raise NotImplementedError
 
+    def bake_probes(self, scene=None):
+        """Bake the set's volume probe (parts['probe'], when it has one: a GPU job, run it through heavy.sh) at the
+        set's current state. Returns {probe: seconds}."""
+        import bpy
+        from ...look import lighting as LL
+        pr = self.parts.get('probe')
+        if pr is None:
+            return {}
+        return LL.bake_light_probes(scene or bpy.context.scene, probes=[pr])
+
     def dispose(self):
         self.lib.dispose_all()
 
     # the sets' contract reads build()'s result as a dict too (eidoblend.sets.unknown_force: group, parts, update,
     # dispose, cams ...): S['parts'] is S.parts
     _KEYS = ('group', 'parts', 'update', 'dispose', 'cams', 'cams_three', 'focal', 'focal_three', 'look', 'uniforms',
-             'materials', 'camera', 'animate', 'apply_look', 'apply_post', 'focal_world')
+             'materials', 'camera', 'animate', 'apply_look', 'apply_post', 'focal_world', 'bake_probes')
 
     def keys(self):
         return [k for k in self._KEYS if hasattr(self, k)]

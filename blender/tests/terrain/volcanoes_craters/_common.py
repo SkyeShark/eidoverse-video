@@ -1,11 +1,12 @@
 """Shared by package 9's tests and sheets (volcanoes and craters, the analytic profiles).
 
-- import_solvers(): eidoblend.terrain's __init__ imports bpy (the old make_terrain), so outside Blender the package is
-  registered by its path alone and the solver modules import as usual; inside Blender the real package loads.
+- import_solvers(): outside Blender the package is registered by its path alone and the solver modules import as
+  usual (no package __init__ runs); inside Blender the real package loads.
 - load_reference(name): a reference DEM in the design frame (row 0 south, x east / y north of the tile centre).
-- load_sp_crater(): the triage's Terrain Tiles cache of SP Crater (8 km at 7.8 m), until package 2 fetches 3DEP 1 m.
+- load_sp_crater(): the triage's Terrain Tiles cache of SP Crater (8 km at 7.8 m); the judge's sp_crater reference
+  is the 3DEP tile.
 - generated(name): the analytic shape set on its reference (same extent, same pixel, the preset's parameters), on a
-  placeholder base of low world noise (the recipes' surroundings come from the fluvial stage, later).
+  placeholder base of low world noise (in the recipes the surroundings come from their fluvial stages).
 - the measures: radial profiles, slopes, rim crests per azimuth, outline harmonics.
 """
 import json
@@ -31,7 +32,7 @@ def import_solvers():
         sys.path.insert(0, BLENDER_DIR)
     if 'eidoblend.terrain' not in sys.modules:
         try:
-            import bpy  # noqa: F401  (inside Blender the real package loads, old make_terrain and all)
+            import bpy  # noqa: F401  (inside Blender the real package loads)
         except ImportError:
             import eidoblend  # noqa: F401  (its __init__ imports nothing)
             pkg = types.ModuleType('eidoblend.terrain')        # outside: the package by its path alone

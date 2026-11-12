@@ -335,16 +335,23 @@ def whole_seat_checks(R, me, tag, cmd, span, sc, step=2):
 
 def floor_checks(R, me, tag, span, sc, floor=0.0, step=2, pad=(4, 20)):
     """the ground sit's crossfades: the lowest of the body near the hips (its coat left out: emotes.verbs's ground
-    measure) never more than 1 cm under the floor from the sit-down through the rise"""
+    measure) never more than 1 cm under the floor from the sit-down through the rise; and the whole body (the legs and
+    the boots out past that footprint) too"""
     from eidoblend.characters.emotes.verbs import _lowest_near, skin_points
     a, b = span
-    worst = (1.0, None)
+    worst, whole = (1.0, None), (1.0, None)
     for f in range(a - pad[0], b + pad[1], step):
         sc.frame_set(f)
         hp = bone_world(me, 'hips')
-        z = _lowest_near(skin_points(me, loose=False), (hp.x, hp.y))
+        P = skin_points(me, loose=False)
+        z = _lowest_near(P, (hp.x, hp.y))
         if z is not None and z - floor < worst[0]:
             worst = (z - floor, f)
+        if len(P) and float(P[:, 2].min()) - floor < whole[0]:
+            whole = (float(P[:, 2].min()) - floor, f)
     R.check(f'{tag}: the body stays out of the floor sitting down and getting up (the lowest of it near the hips, its '
             'coat left out, no more than 1 cm under)', worst[0] > -0.01, f'lowest {worst[0] * 100:+.2f} cm at '
             f'f{worst[1]}')
+    R.check(f'{tag}: the whole body, the legs and boots out in front included, stays out of the floor sitting down, '
+            'sitting and getting up (its coat left out, no more than 1 cm under)', whole[0] > -0.01,
+            f'lowest {whole[0] * 100:+.2f} cm at f{whole[1]}')

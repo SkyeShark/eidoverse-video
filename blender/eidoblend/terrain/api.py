@@ -14,8 +14,8 @@ checked; the defaults come from the recipe, its DEM (real_place) and the quality
 around the focus; the cache is read, or the level runner (terrain/run.py: run_levels) runs the stages and writes
 it; the exact flatten pass; the masks; the ring mesh with the masks as point attributes; then, in Blender, the
 object, the palette's material (palette=None: grey clay), lake and sea surfaces, and rocks near the focus. One
-summary line is printed, naming any stage whose op is not registered yet (the runner skips it). The runner's
-kernels need Blender's GPU module: run it in Blender (through a GPU slot on this machine).
+summary line is printed, naming any stage whose op is not registered (the runner skips it). The runner's
+kernels need Blender's GPU module: run it in Blender.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from .core import levels as _levels
 from .core.fields import Fields
 
 API_VERSION = 1
-ARGS =('recipe', 'size', 'resolution', 'seed', 'params', 'focus', 'hero_cell', 'context', 'flatten', 'sea_level',
+ARGS = ('recipe', 'size', 'resolution', 'seed', 'params', 'focus', 'hero_cell', 'context', 'flatten', 'sea_level',
         'base_elevation_m', 'palette', 'dress', 'quality', 'cache', 'name', 'collection', 'mesh_res', 'log')
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -632,7 +632,6 @@ def _assemble_terrain(R, values, plan, fields, stack, info):
 # --------------------------------------------------------------------------------------------- in Blender ---
 
 def _build_blender(t, name, collection, palette, dress, log):
-    import bpy
     from .build import water as _water
     info = t.info
     info['name'] = name
@@ -646,22 +645,11 @@ def _build_blender(t, name, collection, palette, dress, log):
         sea_level=info['sea_level'], base_elevation_m=info['base_elevation_m'], api_version=API_VERSION)))
     obj['eido_terrain_mesh'] = json.dumps(t.ring.layout())
     # the material
-    try:
-        from .build import surfacing as _surf
-    except ImportError:
-        _surf = None
+    from .build import surfacing as _surf
     pal = palette
     if palette == 'auto' and info.get('place'):
         pal = info.get('palette') or 'auto'
-    if _surf is None:
-        log('[make_terrain] build/surfacing.py is not in yet: the terrain is grey clay')
-        mat = bpy.data.materials.new(name + '_clay')
-        mat.use_nodes = True
-        b = mat.node_tree.nodes['Principled BSDF']
-        b.inputs['Base Color'].default_value = (0.18, 0.18, 0.18, 1.0)
-        b.inputs['Roughness'].default_value = 0.9
-        obj.data.materials.append(mat)
-    elif pal is None:
+    if pal is None:
         obj.data.materials.append(_surf.clay_material(name + '_clay'))
     else:
         strata = None
@@ -676,7 +664,7 @@ def _build_blender(t, name, collection, palette, dress, log):
            if info.get('sea_level') is not None else None)
     t.water = {'lakes': lakes, 'sea': sea}
     # rocks near the focus
-    if dress and info.get('focus') and pal is not None and _surf is not None:
+    if dress and info.get('focus') and pal is not None:
         try:
             from .build import dressing as _dress
             from .build import palettes as _pal
@@ -701,7 +689,7 @@ def _summary(t, log):
     lv = t.levels
     s = i['seconds']
     parts = ', '.join(f'{k} {v}' for k, v in s.items() if k not in ('total', 'generate'))
-    skipped = f"; stages not run (their solver is not in yet): {', '.join(i['skipped_stages'])}" \
+    skipped = f"; stages skipped (no op of that name is registered): {', '.join(i['skipped_stages'])}" \
         if i['skipped_stages'] else ''
     log(f"[make_terrain] {t.recipe.name}{' ' + repr(t.knobs.get('dem')) if 'dem' in t.knobs else ''}: "
         f"{len(lv)} levels ({lv[0].side / 1000:g} km @ {lv[0].cell:.3g} m .. {lv[-1].side:g} m @ {lv[-1].cell:.3g} m), "
@@ -717,13 +705,13 @@ def recipes():
 
 
 def describe(recipe, log=print):
-    """Print (and return) a recipe's stages, knobs (unit, default, range, what each does) and references, with the
-    stages whose op is not registered yet marked."""
+    """Print (and return) a recipe's stages, knobs (unit, default, range, what each does) and references, with any
+    stage whose op is not registered marked."""
     R = _registry.resolve(recipe)
     text = R.describe()
     missing = [s.op for s in R.stages if not _registry.has_op(s.op)]
     if missing:
-        text += '\n  ops not registered yet (skipped until their package lands): ' + ', '.join(dict.fromkeys(missing))
+        text += '\n  ops not registered (the runner skips these stages): ' + ', '.join(dict.fromkeys(missing))
     if R.name == 'real_place':
         from .recipes import real_place as _rp
         text += '\n  DEMs here: ' + ', '.join(_rp.dem_names())
@@ -738,7 +726,7 @@ def terrain_height_at(obj):
     p = obj.get('eido_terrain')
     if p is None:
         raise ValueError(f"'{obj.name}' was not made by make_terrain (no eido_terrain property)")
-    ring =_mesh.rebuild(json.loads(obj['eido_terrain_mesh']), _mesh.read_vertices(obj))
+    ring = _mesh.rebuild(json.loads(obj['eido_terrain_mesh']), _mesh.read_vertices(obj))
     loc = obj.matrix_world.translation
     rot_scale = obj.matrix_world.to_3x3()
     if any(abs(rot_scale[i][j] - (1.0 if i == j else 0.0)) > 1e-9 for i in range(3) for j in range(3)):

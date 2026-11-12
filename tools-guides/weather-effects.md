@@ -18,7 +18,7 @@ Everything is keyed Blender data. After `bake()` a plain render plays the weathe
 saved `.blend` renders any frame on its own (its `sky_cache` folder must stay beside it).
 
 ```python
-import sys; sys.path.insert(0, '<worktree>/blender')
+import sys; sys.path.insert(0, '<repo>/blender')
 import bpy
 from eidoblend.sky import make_sky
 from eidoblend.weather import make_weather_system
@@ -281,8 +281,8 @@ impact and thunderclap comes from the event index through `jsHash`, so the same 
 What it draws:
 
 - **The strike light**: the JS PointLight of 12000 cd, range 900 m, no shadows, 10 m over a local strike or 120 m
-  over a distant one. In Blender that is 4π × 12000 W. `probe_eevee_facts.py` F5 measured a Blender point of
-  4π·I watts lighting a diffuse plane like I candela: 0.998 in Cycles, 0.986 in EEVEE. EEVEE's custom 900 m cutoff
+  over a distant one. In Blender that is 4π × 12000 W: a Blender point of 4π·I watts lights a diffuse plane like
+  I candela (0.986 in EEVEE, `probe_eevee_facts.py` F5). EEVEE's custom 900 m cutoff
   is on; it is a hard edge, where three fades the light over its range (the window is 0.88 at 450 m, 0.40 at
   700 m), so a strike 450-900 m out lights the scene a little more than in WebGPU.
 - **The bolt**: rebuildBolt's ribbon. A 12-anchor trunk leaves the deck at 1.04 × the cloud base, gets three passes
@@ -382,7 +382,7 @@ They live in `blender/tests/weather/`. The first three need no Blender:
 - `python -B blender/tests/weather/test_audio_tools.py`: `bake_weather_audio.py` and `merge_av.py` as the port runs
   them, refusals included, and the recorder's options.
 
-These run in Blender with `bash run_blender.sh <test>`; tests that render go through the GPU slot:
+These run in Blender with `bash run_blender.sh <test>`; tests that render run one at a time on a shared GPU:
 
 - `test_blender_build.py` (no render): the generators against the JS (both `rain_cells` gates), shelter, splash
   placement, the lightning objects, keys, wrap and unwrap, the receiver flags, the rain shadow (dry under the
@@ -406,15 +406,16 @@ These run in Blender with `bash run_blender.sh <test>`; tests that render go thr
   smoke and the scorch, from the side and from above.
 - `rain_ab_webgpu_scene.js` with `rain_ab_blender.py`: the rain against WebGPU itself (see
   [Rain and splashes](#rain-and-splashes)). The first renders eidoverse's own `makeSky` weather in deno, from the
-  worktree root: `RENDER_CODEC=libx264 RENDER_CQ=1 deno run --allow-all --unstable-webgpu --no-lock
-  eidoverse/render_scene.mjs blender/tests/weather/rain_ab_webgpu.json` (through the GPU slot); the second renders
+  repository root: `RENDER_CODEC=libx264 RENDER_CQ=1 deno run --allow-all --unstable-webgpu --no-lock
+  eidoverse/render_scene.mjs blender/tests/weather/rain_ab_webgpu.json` (a GPU job); the second renders
   the same set in EEVEE and compares.
 
 `weather_states.py`, `weather_examples.py` and `probe_puddles.py` take `--dry`: they plan, key and check with no sky
-bake and no render, so they need no GPU slot. `storm_street.py --mode check` is the same for the film.
+bake and no render. `storm_street.py --mode check` is the same for the film; it needs the `PavingStones128` set in
+the shared texture library (`python fetch_texture.py PavingStones128 1k --cache`).
 
-The test street (`street_set.py`) is built from the shared CC0 library, with round one's interior-window rooms behind
-its lit windows and shop fronts.
+The test street (`street_set.py`) is built from the shared CC0 library, with interior-window rooms
+(`harness.interior_window`) behind its lit windows and shop fronts.
 
 ## Not yet ported
 

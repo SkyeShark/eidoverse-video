@@ -5,12 +5,13 @@ alone (--vrm stands the claudesona on the turntable, at the scale the cams are f
         showroom as SR; SR.draw_canvases('tests/sets_uf_interiors/out/art_cache')"
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_showroom.py -- [--cams reveal,toaster,...] [--no_render]
-        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.6] [--cycles toaster]
+        [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.6]
 
 Checks: the build's contents (280 folded seats + 28 row ends, the toaster's CSG slots really open into the body,
 the LED wall's pixel-footprint driver, the void seen by the camera only), three's light units and the one shadow
-map, keyed update() and animate() (spin, lights, beams, screen, seq) read back at their frames, cams aimed, each
-render's exposure. Stills: out/sr/sr_<cam>.png and a contact sheet.
+map, keyed update() and animate() (spin, lights, beams, screen, seq) read back at their frames, cams aimed, the
+probe's lowest samples inside the floor slab, global illumination on, each render's exposure. Stills:
+out/sr/sr_<cam>.png and a contact sheet.
 """
 import math
 import os
@@ -29,7 +30,7 @@ from eidoblend.sets.unknown_force import showroom as SR  # noqa: E402
 
 A = T.args({'cams': 'reveal,toaster,emptySeats,close,wall,reveal_dim,reveal_blackout', 'samples': 16,
             'res': '960x540', 'probe_samples': 512, 'probe_spacing': 0.6, 'no_render': False, 'vrm': False,
-            'save': False, 'no_bloom': False, 'cycles': '', 'look': '', 'look_cams': 'reveal,close'})
+            'save': False, 'no_bloom': False, 'look': '', 'look_cams': 'reveal,close'})
 OUT = os.path.join(T.OUT, 'sr')
 os.makedirs(OUT, exist_ok=True)
 
@@ -102,6 +103,14 @@ def main():
     void = next(o for o in made['objects'] if o.name.endswith(':void'))
     T.check('the void: seen by the camera, left out of the probes (they see the env, as the engine materials did)',
             void.visible_camera and void.hide_probe_volume and void.hide_probe_sphere)
+    pr = show.probe
+    if pr is not None:
+        plo = pr.matrix_world.translation - Vector(pr.scale)
+        psp = 2 * pr.scale.z / (pr.data.resolution_z + 1)            # EEVEE: N samples at (i + 1) / (N + 1)
+        z_low = plo.z + psp
+        T.check("the stage probe's lowest samples lie inside the auditorium's floor slab, the floor a spacing clear "
+                "of the probe's edge", SR.FLOOR_Y - SR.FLOOR_SLAB < z_low < SR.FLOOR_Y and
+                SR.FLOOR_Y - plo.z > 1.2 * psp, f'lowest samples z {z_low:.3f}, floor {SR.FLOOR_Y}, spacing {psp:.3f}')
     on_meshes = {m.name for o in made['objects'] if o.type == 'MESH' for m in o.data.materials if m}
     need = {'ufsr-stage', 'ufsr-toast', 'ufsr-rubber', 'ufsr-bakelite', 'ufsr-velvet', 'ufsr-tt-top', 'ufsr-warning',
             'ufsr-dial', 'ufsr-ratingplate', 'ufsr-beam', 'ufsr-lens', 'ufsr-truss', 'ufsr-seat-fabric'}
@@ -243,7 +252,10 @@ def main():
     # ---------------------------------------------------------------------------------------- render
     T.render_setup(scene, (W, H), int(A['samples']), bloom=not A['no_bloom'])
     scene.world = show.env
-    show.eevee_settings(scene)
+    ee = show.eevee_settings(scene)
+    T.check('global illumination on (fast GI inside the ray tracing; reflections from the probes)',
+            ee.use_fast_gi and ee.use_raytracing and ee.ray_tracing_method == 'PROBE',
+            f'fast GI {ee.use_fast_gi}, ray tracing {ee.use_raytracing} ({ee.ray_tracing_method})')
     if A['vrm']:
         T.load_singer(L.to_blender(SR.MARK['pos']), 0.0, SR.SUIT_SCALE, parent=show.parts['turntable']['platter'])
     tb = time.perf_counter()
@@ -281,14 +293,6 @@ def main():
             T.check(f'{nm} under the cold {A["look"]} look: focal projected, exposed', ok and 0.02 < mean < 0.7,
                     f'mean {mean:.3f}, clipped {100 * clip:.2f} %')
             stills.append(path)
-    if A['cycles']:
-        nm = A['cycles']
-        idx = want.index(nm) if nm in want else 0
-        scene.render.engine = 'CYCLES'
-        scene.cycles.device = 'GPU'
-        scene.cycles.samples = 128
-        T.render_still(scene, cams[nm], 1 + idx, os.path.join(OUT, f'sr_{nm}_cycles_reference.png'))
-        scene.render.engine = 'BLENDER_EEVEE'
     T.sheet(stills, os.path.join(OUT, 'sr_sheet.jpg'))
     if A['save']:
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, 'showroom_probe.blend'), compress=True)

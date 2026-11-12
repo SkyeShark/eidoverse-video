@@ -409,13 +409,14 @@ class Screen:
     def _spill(self, obj, gain, window=None, strength=None, reach=None):
         """An area light the size of the display (its ``window``), just in front of it, keyed per frame (CONSTANT)
         to the frame's mean colour m at the display's own radiance: colour m / max(m), power
-        pi * area * strength * max(m) * gain (Blender multiplies colour by power unnormalised; measured against
-        Cycles 11-07, test_screens.py --only spill). EEVEE's screen-space GI only sees emitters that are on screen,
-        and light probes don't follow animated content, so this is what lights a face or a desk from a screen.
+        pi * area * strength * max(m) * gain (Blender multiplies colour by power unnormalised; test_screens.py
+        --only spill checks the power and the floor it lights). EEVEE's screen-space GI only sees emitters that are
+        on screen, and light probes don't follow animated content, so this is what lights a face or a desk from a
+        screen.
         While the display itself is in frame EEVEE's GI adds about a quarter of its light on top (measured, see
         the guide). ``reach`` (metres, default the screen's spill_reach, 30): the light's custom cutoff distance.
-        Without it EEVEE culls a light where its power falls under scene.eevee.light_threshold (0.01), and a
-        screen's few watts reached little or nothing of the room (11-07 verify: a 0.25 W blue spill lit 0 %)."""
+        Without it EEVEE culls a light where its power falls under scene.eevee.light_threshold (0.01), so a
+        screen's few watts would reach little or nothing of the room."""
         if self.means is None:
             raise ValueError('spill needs per-frame means: bake with spill=..., or pass means=')
         centre, normal, ax_u, ax_v, (su, sv) = _display_frame(obj)

@@ -10,8 +10,8 @@ ray-traced refraction and reflections, real fresnel. The engine's terms keep the
              mix(shallow, deep, 1 - exp(-thick * absorption)), weighted by opacity = clamp(surface_opacity + glow *
              emissive_strength * 0.3), colours the light that passes: thick water deep, thin water near clear.
              body='stochastic' is the shallow-water port's split instead: an opaque depth-tinted body with
-             probability (1 - exp(-thick * absorption)) * opacity, else clear water tinted as it thickens (grainy
-             where that probability is middling: a basin at 64 samples still read as sand)
+             probability (1 - exp(-thick * absorption)) * opacity, else clear water tinted as it thickens (picked
+             per sample, so a middling probability needs more samples to settle, as dithered transparency does)
     foam     band = max(ring^2, shore^2 * foam_shore), shore = 1 - smoothstep(0, foam_width, thick), times
              foam_strength (the engine's contact and shore foam), plus the Blender edition's churn foam,
              smoothstep(0.25, 1, shear / churn_speed) * foam_churn: rough white water where the flow shears (fast
@@ -19,18 +19,19 @@ ray-traced refraction and reflections, real fresnel. The engine's terms keep the
     glow     emission emissive_color * strength over the body by (1 - exp(-thick * falloff)) * min(strength, 1)
     sparkle  the engine's hash glints on uvw * sparkle_scale, animated by time * sparkle_speed, gated by fresnel
 
-    EEVEE keeps ONE of refraction or diffuse per pixel; a fractional transmission or a Mix Shader of BSDFs is
-    resolved with a fixed per-pixel pattern that never converges (round one's measured sandpaper grain). So water /
-    foam is picked and one Principled renders the pick with transmission exactly 0 or 1. foam_pick='lace' (the
-    default) fixes the pick per surface point with a 3D noise of the position (foam_scale per metre), so foam forms
-    coherent lace whose edges alone dither; 'dither' picks per sample with a white-noise hash, which stayed grainy
-    under churn foam at 64 samples (measured). body='stochastic' always picks per sample. With body='tint' only
-    foam is picked, so open water renders clean.
+    EEVEE renders a pixel's refraction or its opaque closures, not a blend of the two: a fractional Transmission
+    Weight, or a Mix Shader of a refracting and an opaque BSDF, shows a fixed per-pixel pattern and loses the
+    refraction at any sample count (tests/water3d/probe_partial_transmission.py). So water and foam (and the body)
+    are picked, as EEVEE's own dithered transparency picks: one Principled renders the pick with transmission
+    exactly 0 or 1, and the samples average the picks. foam_pick='lace' (the default) fixes the pick per surface
+    point with a 3D noise of the position (foam_scale per metre), so foam forms coherent lace whose edges alone
+    dither; 'dither' picks per sample with a white-noise hash, which needs more samples under churn foam.
+    body='stochastic' always picks per sample. With body='tint' only foam is picked, so open water renders clean.
 
     thickness  the material output's Thickness is the baked water path to where it leaves the water (surface.py's
              'exit'), cut to BED_SHARE of it where the path ends on a solid ('bed'): EEVEE refracts through a slab
-             (refraction_thickness='slab', or 'sphere') of that thickness. Unlinked, EEVEE's own default rendered
-             the same settled pool bright in one frame and dark in the next; linked, the dam break matches Cycles.
+             (refraction_thickness='slab', or 'sphere') of that thickness, so a settled pool shows its bed at the
+             depth the water has, frame after frame.
 
 shading='engine' (the WebGPU look, unlit, for matching the engine's frames). fluid_water.js's colorNode, term for
 term, on the mesh: fresnel = (1 - max(n.v, 0))^3 * 0.85 + 0.04, depthTint = mix(shallow, deep, 1 - exp(-thick *
@@ -64,7 +65,7 @@ def _srgb_encode(c):
 
 def display_matched(scene, rgb_linear):
     """The scene-linear colour the scene's view shows as the engine's sRGB canvas showed `rgb_linear` (no tone
-    mapping there): round one's SceneView inverse of the view (fx/_look.py)."""
+    mapping there): SceneView's inverse of the view (fx/_look.py)."""
     from .._look import SceneView
     view = SceneView(scene)
     x = view.from_display(_srgb_encode(rgb_linear).reshape(1, 3))
@@ -225,8 +226,7 @@ def build_water_material(name, o, world3, center3, fps, frame_start, time_offset
         pick_v = b.clamp((b.s(lace.outputs['Fac']) - 0.32) / 0.36)
     if o.get('body', 'tint') == 'stochastic':
         # the shallow-water port's split: an opaque depth-tinted body with probability absorb * opacity, picked per
-        # shading sample (grainy where that probability is middling: measured, a 128^3 basin still sandy at 64
-        # samples)
+        # shading sample (a middling probability needs more samples to settle)
         body = absorb * op
         clear_tint = b.rgb_mix((1, 1, 1, 1), tint, b.min(absorb * 1.6, 1.0))
     else:
@@ -296,9 +296,8 @@ BED_SHARE = 0.75
 
 def _link_refraction_thickness(mat, b, out, mode, attr):
     """The material output's Thickness from the baked water path (surface.py's 'exit' and 'bed'): EEVEE models the
-    refraction through it as a slab (or a sphere) of that thickness. Left unlinked, EEVEE uses a default of its own,
-    and the same settled pool rendered bright in one frame and dark in the next (measured on the dam break, the
-    linked slab matching Cycles there). 'none' leaves it unlinked."""
+    refraction through it as a slab (or a sphere) of that thickness, the water's own. 'none' leaves it unlinked
+    (EEVEE then estimates a thickness of its own, which knows nothing of the water behind the surface)."""
     if mode in (None, 'none'):
         return
     if mode not in ('slab', 'sphere'):

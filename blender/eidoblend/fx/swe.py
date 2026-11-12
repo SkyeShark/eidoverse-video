@@ -630,14 +630,14 @@ class WaterSWE:
             muddy = b.smoothstep(0.004, 0.10, silt)
             tint = b.rgb_mix(tint, (*color(self.solver.EK['siltWaterColor']), 1), muddy * 0.85)
         rough = 0.02 + 0.5 / max(o['specPow'], 1.0) ** 0.5            # specPow 90 -> 0.07, gel 260 -> 0.05, mud 18 -> 0.14
-        # Clear water refracts (transmission); the tinted body and the foam are diffuse. EEVEE's G-buffer keeps
-        # either a refraction or a diffuse closure per pixel: given both (a transmission weight between 0 and 1,
-        # or Principled BSDFs mixed by Mix Shader) it picks one with a per-pixel pattern that stays the same
-        # every sample, and the water shows a sandpaper grain that 64 samples do not converge. So the choice is
-        # made here, per shading sample, with the engine's weights: a white-noise hash of the shaded position
-        # (new at every sample, since EEVEE jitters each sample's projection) picks clear water with probability
-        # (1 - body)(1 - foam), else body-or-foam, and ONE Principled renders the pick with transmission
-        # exactly 0 or 1. The samples then average to the engine's blend, like hashed transparency does.
+        # Clear water refracts (transmission); the tinted body and the foam are diffuse. EEVEE renders a pixel's
+        # refraction or its opaque closures, not a blend of the two: given both (a transmission weight between 0
+        # and 1, or Principled BSDFs mixed by Mix Shader) it shows a fixed per-pixel pattern without the refraction,
+        # at any sample count (tests/water3d/probe_partial_transmission.py). So the choice is made here, per
+        # shading sample, with the engine's weights, as EEVEE's own dithered transparency chooses: a white-noise
+        # hash of the shaded position (new at every sample, since EEVEE jitters each sample's projection) picks
+        # clear water with probability (1 - body)(1 - foam), else body-or-foam, and ONE Principled renders the pick
+        # with transmission exactly 0 or 1. The samples then average to the engine's blend.
         body = absorb * o['surfaceOpacity']                         # the body (tinted, opaque) share of the water
         clear_tint = b.rgb_mix((1, 1, 1, 1), tint, b.min(absorb * 1.6, 1.0))
         fv = b.clamp(f * o['foamStrength'], 0.0, 1.2)

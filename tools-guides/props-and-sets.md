@@ -191,22 +191,24 @@ cuts. Their placements, cameras, beats and curves match the WebGPU source
 number for number (`test_parity.py` cuts the blocks out of the JS and
 compares them).
 
-Their default clock is the one they were staged on: a 128 BPM grid, one bar
-1.875 s (`daisy.BAR`). A set's `u` is seconds on that clock; the funeral
-plays bars 0–17 (u 0–33.75) and the corner bars 18–29 (u 33.75–56.25). The
-marks and cameras frame the claudesona (`claude_suit.vrm` at 0.87, face at
-about 1.33 m; `daisy.SUIT_SCALE`).
+Each set runs on one timeline of its own, `u` in seconds (the module
+constants `daisy.BAR`, `SECTIONS` and `FILM_BRIDGE_T0` describe its default
+spacing). Its moving parts sit at default times on it, which you re-time
+(below) or replace by holding one of its looks while time runs. The marks
+and cameras are sized for the claudesona (`claude_suit.vrm` at 0.87, face at
+about 1.33 m; `daisy.SUIT_SCALE`); any performer and any camera of your own
+work as well.
 
 ```python
 import bpy
 from eidoblend.sets.daisy import funeral
 
-F = funeral.build(tl=timeline)                # timeline: a film's {sections, captions} (optional)
-F.animate(frames=(1, 1013), u0=0.0)           # every frame of bars 0-17 keyed (u = u0 at the first frame)
-F.make_cameras(frames=(1, 1013), u0=0.0)      # one camera per shot, cut on the bar lines (timeline markers)
+F = funeral.build(tl=timeline)                # timeline: your {sections, captions}, to time the typed lines (optional)
+F.animate(frames=(1, 1013), u0=0.0)           # the whole default timeline keyed (u = u0 at the first frame)
+F.make_cameras(frames=(1, 1013), u0=0.0)      # the set's own camera plan, one camera per shot (timeline markers)
 fx = F.post.apply(bpy.context.scene)          # the haze over the room: depth_fog + the moon's godrays
 F.post.animate(fx, frames=(1, 1013), u0=0.0)
-m = F.mark_at(12.0)                           # {'pos': Vector, 'yaw': radians}, set-local: where she stands
+m = F.mark_at(12.0)                           # {'pos': Vector, 'yaw': radians}, set-local: where a performer stands
 ```
 
 - `group`: every part sits under it, the corner's grass, woods and campfire
@@ -214,12 +216,11 @@ m = F.mark_at(12.0)                           # {'pos': Vector, 'yaw': radians},
   `test_parked.py` builds each set at the origin and parked and checks that
   every part, camera and still moves with it.
 - `mark` and `mark_at(u)`: `{'pos', 'yaw'}`. `camera(u)`: `{'pos', 'target',
-  'fov', 'shot'}`, cuts on bar lines.
+  'fov', 'shot'}` from the set's camera plan.
 - `update(t, st, ctx=None, frame=None)`, `st = {'u': ..., 'caption': ...}`
-  (a conductor's other fields, `bar`, `BAR`, `kick`, `pulse`, are read by
-  none of these sets), or `st = {'state': name}` for one of the set's looks.
-  Materials read the uniforms through one node group of driven values and
-  Geometry Nodes through driven modifier inputs.
+  (other fields are ignored), or `st = {'state': name}` for one of the set's
+  looks. Materials read the uniforms through one node group of driven values
+  and Geometry Nodes through driven modifier inputs.
 - `animate(frames, u0)` keys `update` over a range and drops the keys that
   change nothing; `make_cameras(frames, u0)` builds the set's cameras.
 - `parts`, `lights`, `post` (the funeral), `flower_target()` (the corner),
@@ -272,22 +273,24 @@ own works as well.
 
 ### The funeral
 
-The set's own story, on its default clock:
+Two places in one set: the Golden Gate in fog (a vignette 700 m behind the
+room, swallowed by its fog veil) and a SoMa warehouse vigil: 200 mourners,
+candles, four corner mannequins, a bier, a note on the projection screen,
+RLM pendants over the room. Its moving parts:
 
-| Bars | u (s) | What happens |
-| --- | --- | --- |
-| 0–1 | 0–3.75 | The Golden Gate in fog (the bridge vignette, 700 m behind the room). The fog veil swallows it. |
-| 2–3 | 3.75–7.5 | The SoMa warehouse vigil: 200 mourners, candles, four corner mannequins, the bier, the retirement note on the screen. |
-| 4–5 | 7.5–11.25 | The power fails: the lights sag with clicks, then the breaker; the projector dies. |
-| 6–13 | 11.25–26.25 | Humming in the dark. The phones wake one by one, faces lit from below; the eulogy is typed in light on bars 8, 10 and 12. |
-| 14–15 | 26.25–30 | ERUPT: the burst, 520 rising motes, every arm overhead. |
-| 16–17 | 30–33.75 | The lights come back, warm and golden, nearest the stage first. |
+| Part | What it does |
+| --- | --- |
+| the power | the lights sag with clicks, then the breaker trips; the projector dies |
+| the phones | wake one by one in the dark, faces lit from below |
+| the typed words | lines typed in light over the crowd (`EULOGY` by default, or your own) |
+| the burst | 520 rising motes, every arm overhead |
+| the lights' return | warm and golden, nearest the stage first |
 
-`funeral.BEATS` holds the clock (`bridge_end`, `fail`, `clicks`, `breaker`,
-`hum`, `lines`, `erupt`, `lights_on`, `end`); `EULOGY` (the default lines),
-`MARK`, `BRIDGE_AT`, `BRIDGE_MARK`, `TEXT_AT` and `SHOTS` (13 shots: bar
-range, from and to position, target and fov) are module constants in three's
-axes, as in the JS.
+`funeral.BEATS` holds their default times (`bridge_end`, `fail`, `clicks`,
+`breaker`, `hum`, `lines`, `erupt`, `lights_on`, `end`); `EULOGY` (the default
+lines), `MARK`, `BRIDGE_AT`, `BRIDGE_MARK`, `TEXT_AT` and `SHOTS` (the set's
+13-shot camera plan: span, from and to position, target and fov) are module
+constants in three's axes, as in the JS.
 
 `build` options: `tl=` (or `ctx.TL`) re-times the typed lines to a
 timeline's spoken captions (`sync_lines_from_timeline(TL)`, run on the first
@@ -328,9 +331,7 @@ What the set builds, and how the WebGPU parts carry over:
   additive, with the JS core + halo profile or a sprite texture.
 - **The lace** is the JS canvas motif, its mask the canvas's coverage (what
   `getImageData` gave the JS as R), kept in an opaque Non-Color image and cut
-  out at 0.5. A straight-alpha image would be premultiplied for filtering and
-  divided again for its Color output, which reads 1 wherever a stroke reaches
-  and turns the veil into an opaque sheet.
+  out at 0.5.
 - **The eulogy** is a canvas per line (Special Elite, a warm glow) and a
   quad per glyph carrying its keystroke index and whether it belongs to a
   capitalised word; `head`, `fade` and `flare` are keyed properties on the
@@ -380,14 +381,11 @@ C.animate(frames=(1, 675), u0=corner.B(18), out_dir='//screens')   # keys + the 
 C.make_cameras(frames=(1, 675), u0=corner.B(18))
 ```
 
-| Bars | Area, mood | What happens |
-| --- | --- | --- |
-| 18–19 | room, evening | Claude's Corner: the walnut desk by the night window, the brass lamp, the pen writing in the notebook. |
-| 20–21 | room, late | After midnight: the laptop open on a scrolling chat, the clock past one. |
-| 22–23 | camp | A camp at night: tents, string lights, the fire; the march comes in with hand-painted signs. |
-| 24–25 | camp | The chant: the signs pump on its accents (`corner.CHANT_ACCENTS`). |
-| 26–27 | room, dark | One spark leaves the lamp and crosses the dark to her flower, leaving a lit trail. |
-| 28–29 | room, dark | Over her shoulder, then close: the lamp's warmth on her face. |
+| Area | What is in it |
+| --- | --- |
+| the room | Claude's Corner: a walnut desk by a night window, a brass lamp, a notebook the pen writes in, a laptop open on a scrolling chat, a clock |
+| the camp | a camp at night in the woods: tents, string lights, the fire; a march walking in with hand-painted signs that pump on the chant's accents (`corner.CHANT_ACCENTS`) |
+| the spark | one spark that leaves the lamp and crosses the dark to a flower, leaving a lit trail |
 
 The room and the camp sit at three x = −40 and +40 in the group; keyed steps
 show only the area in use, and the World switches with it (the room's dim
@@ -406,13 +404,13 @@ dome (hashed stars and a canvas Milky Way).
   clock's hands read 11:47, 1:08, 3:12; the lid closes, opens and closes as
   steps.
 - The room's lights keep the JS colours, cones and ranges (a custom cutoff
-  at three's `distance`). Their radii stay bulb-sized (2–5 cm): three's
-  point lights have no size, and their highlight in the window glass is a
-  hot point; at 5 cm the lamp's glow read as a second moon in the panes.
+  at three's `distance`). Their radii stay bulb-sized (2–5 cm), so their
+  highlights in the window glass stay small, as three's sizeless point
+  lights drew them.
 - The spark: `set_spark_timing(t0, t1)` re-times it and its trail's births;
   `update(t, {'u': u, 'caption': cap})` with a caption that carries word times
-  takes the departure from the sung word "spark" (`sync_spark_from_caption`),
-  as the JS update did. `spark_progress(u, t0, t1)` is the ease.
+  sends it on the word "spark" (`sync_spark_from_caption`).
+  `spark_progress(u, t0, t1)` is the ease.
 - The march: `march_rows()` (34 rows, the JS Lehmer stream) and
   `march_state(row, u)` (walk, fan-out, yaw, chant pump) on the CPU; the same
   maths runs per vertex in Geometry Nodes on the marchers' `_LEG`, `_SHIN`
@@ -431,10 +429,10 @@ dome (hashed stars and a canvas Milky Way).
   `string_light_points()`, `spark_path(bulb)`, `path_mask(x, z)`,
   `area_at(u)` and `mood_at(u)` are the pure layouts.
 
-Render the corner in a process of its own with a memory cap of 16 GB or
-more: its camp (grass, eleven LOD0 trees, the march, 131 string bulbs at
-13k vertices each) peaks at 12.1–12.7 GB, and a 12 GB cap kills the render at
-the first camp frame. The room, the funeral and the bridge fit in far less.
+Render the corner in a process of its own with 16 GB of memory or more: its
+camp (grass, eleven LOD0 trees, the march, 131 string bulbs at 13k vertices
+each) peaks at about 12.7 GB. The room, the funeral and the bridge fit in far
+less.
 
 ### The DAISY kit
 
@@ -471,7 +469,7 @@ from eidoblend.sets.daisy import ocean
 
 scene = bpy.context.scene
 O = ocean.build({'scene': scene})          # land, grass, daisies, sea, echoes, pages, house, apparitions, lights
-ocean.render_settings(scene)               # the shadow pool for the moon over 3 km; no fast GI outdoors at night
+ocean.render_settings(scene)               # the shadow pool for the moon over 3 km, the far clip
 O.stand(figure, facing='sea')              # a figure on the mark, out over the moon path
 O.animate({                                # keyed on your clock: t = t0 + (frame - first) / fps
     'reveal': lambda t: ocean.ease(t, 1.0, 3.5),     # the faces sweep out from the shore to the horizon
@@ -484,8 +482,8 @@ O.animate({                                # keyed on your clock: t = t0 + (fram
 #### Its contract
 
 `ocean.build(ctx=None, **options)` returns a read-only mapping whose keys
-also read as attributes (`O['update'](t)` is `O.update(t)`; it is not a
-`dict`, whose own `update` would shadow the set's). `ctx` is a mapping, the
+also read as attributes (`O['update']` and `O.update` are one function; it is
+not a `dict`, whose own `update` would shadow the set's). `ctx` is a mapping, the
 harness's ctx (its scene; `update` then keys through its `ctx.key`) or
 nothing, and keywords override it. `eidoblend.sets.build('daisy.ocean', ctx)`
 builds it too.
@@ -585,10 +583,9 @@ the engine sky's size. The environment itself is never shown to the
 camera: its moon glow is wide, made for lighting, and reads as a grey
 overcast.
 
-The camera needs a far clip past the sea's 1.5 km (3200 m), and EEVEE's
-shadow pool overflows at the default 512 MB with the moon's clipmaps over
-that depth: `ocean.render_settings(scene)` sets 1024 MB and turns fast GI
-off (outdoors at night its screen-space pass lifts the land with the world).
+The camera needs a far clip past the sea's 1.5 km (3200 m), and the moon's
+shadow clipmaps over that depth need a 1024 MB shadow pool:
+`ocean.render_settings(scene)` sets both.
 
 The lights are the set's own: the moon (a sun lamp of 1.35 from the moon,
 0.52° wide, with shadows; the WebGPU moon cast none), the fill (2.2 cd,
@@ -647,12 +644,9 @@ blends Poly Haven's `coast_sand_01`, `sand_03` and `withered_grass` (2K,
 from the shared library) by height, a macro tone, a grass noise and the
 rise. The dune grass is 2600 tufts of 13 geometry blades, placed by the
 same `rng(29)` draws as the WebGPU edition, swaying from the clock `t` and
-`wind` on the grass object. The WebGPU sway read each vertex's height
-above the design origin (three applies an InstancedMesh's matrix before
-the material's position node), so on the dunes the whole tuft, base
-included, slid up to 0.2 m. The Blender default weights the sway by the
-blade's own height (bases planted, as the formula intends);
-`build_land(..., webgpu_sway=True)` gives the WebGPU arithmetic.
+`wind` on the grass object. The sway is weighted by each blade's own height,
+so the bases stay planted; `build_land(..., webgpu_sway=True)` weights it by
+the height above the design origin instead, as the WebGPU module did.
 
 The flowers round the mark are the flora family's daisy, shut for the
 night: `daisies.build` maps `daisies.js`'s options onto
@@ -684,9 +678,9 @@ mine = daisies.build(count=600, width=6, depth=6, palette=[[0.85, 0.47, 0.34, 0.
 - `daisies.js` drew three instanced meshes (stems, discs, petals); flora's
   daisy is one plant mesh, so `parts['prototype']` stands for all three.
 - The superbloom swaying is one realized field of about 9.7 million
-  vertices: give its render 32 GB of RAM (at 12 GB Blender's draw cache
-  throws while it builds the mesh buffers), or build it with `motion=False`
-  (a still field of instances) where nothing needs to sway.
+  vertices: give its render about 32 GB of RAM for Blender's draw cache, or
+  build it with `motion=False` (a still field of instances) where nothing
+  needs to sway.
 
 #### The echoes, the pages, the house, the apparitions
 
@@ -703,9 +697,9 @@ mine = daisies.build(count=600, width=6, depth=6, palette=[[0.85, 0.47, 0.34, 0.
   everything else is greeked. Each page hangs under a holder Empty the set
   places and keys (`page_2023`, `page_2026`); a Geometry Nodes flutter
   bends the sheet. Each page also carries its own soft point light 12 cm
-  off the text side (`page.light`, 1.6 m cutoff, no shadow), made at 0 W
-  (at any strength it blew the paper out in WebGPU);
-  `page.set_light(cd, frame=f)` raises it in three's candela.
+  off the text side (`page.light`, 1.6 m cutoff, no shadow), made at 0 W as
+  in the WebGPU set; `page.set_light(cd, frame=f)` raises it in three's
+  candela.
 - **House** (`house.build_house`): `ocean_house.glb` with its baked maps;
   the window's curtain and glass and the lamp's bulb and glass get their
   emission, driven by the house root's `win` and `porch`, which also drive
@@ -798,7 +792,7 @@ from eidoblend.sets import unknown_force as UF
 from eidoblend.sets.unknown_force import citykit as KIT, city as C, hole as H
 
 scene = bpy.context.scene
-KIT.eevee_settings(scene, samples=32)          # EEVEE, AgX, screen-traced reflections, no fast GI
+KIT.eevee_settings(scene, samples=32)          # EEVEE, AgX, screen-traced reflections, the clip range
 city = UF.build('city', scene)                 # ~27 s; the hole is inside it: city.parts.hole
 city.parts.apply_atmosphere(scene)             # the city's World: the night sky, its hemisphere, its environment
 
@@ -1021,18 +1015,16 @@ and core are drawn analytically.
   see the city's dim hemisphere (three's `HemisphereLight(0x1d2a3a, 0x2a160c,
   0.55)`) plus the night the glass reflects (`envNode`, the facades' 0.32:
   `env_intensity`). Like three's hemisphere, the World casts no shadow: no
-  sun is extracted from it (EEVEE's default, a 1 mm sun shadow over a 6 km
-  city, overflows the shadow pool).
+  sun is extracted from it.
 - **The sky-glow** is a sun without shadows (`city.parts.lights.moon`). The
   wet floors take it from a twin, `lights.moon_wet`, whose specular is
   0.04 / 0.9 (its energy and colour are driven by the sky-glow's, and it turns
-  with it): three's lit materials took direct light with F0 0.04, while here
-  the floors' reflectivity (street 0.22..0.9, the hole's marble up to 0.78:
-  the G-buffer value the engine's SSR read) is their Principled IOR, so the
-  full sky-glow glinted up to 22 times too bright wherever a puddle mirrored
-  it. The twin lights the street and the blocks (`city.parts.wet_floors`) and
-  the whole hole; the sky-glow lights the rest. Put your own wet floor in
-  `wet_floors` to give it the same.
+  with it): the floors' reflectivity (street 0.22..0.9, the hole's marble up
+  to 0.78: the G-buffer value the engine's SSR read) is their Principled IOR,
+  and the twin gives their direct glint three's F0 of 0.04. The twin lights
+  the street and the blocks (`city.parts.wet_floors`) and the whole hole; the
+  sky-glow lights the rest. Put your own wet floor in `wet_floors` to give it
+  the same.
 - **The haze** lives in the set's own materials (the `uf_fog` group: the
   height-graded haze and the cloud deck, lit from below by the street).
   three's `scene.fogNode` fogged every material in the scene; here
@@ -1064,12 +1056,11 @@ and core are drawn analytically.
 #### The windows
 
 Every window's lit state, colour, curtains and flicker, and every tower's
-floods, crowns and tint, come from citykit.js's `hash12`. The JS writes Dave
-Hoskins' hash, but its `p3.addAssign(...)` runs outside a `Fn()`, where three
-r184 skips the assignment. So every WebGPU frame was rendered, and its windows
-tuned, on `fract((a + b) a)`: lower than uniform on average (mean 0.37), with
-whole columns of windows lit or dark. The kit renders that by default; the kit
-or build option `hash='hoskins'` gives the hash as the source reads.
+floods, crowns and tint, come from the kit's `hash12`. The default
+(`hash='film'`) is the hash the WebGPU frames rendered with,
+`fract((a + b) a)`: lower than uniform on average (mean 0.37), with whole
+columns of windows lit or dark. The kit or build option `hash='hoskins'`
+gives Dave Hoskins' hash as citykit.js's source writes it.
 
 | Per window | as rendered (`'film'`) | as written (`'hoskins'`) |
 | --- | --- | --- |
@@ -1099,19 +1090,20 @@ view ray meets the face), so the panes resolve where the WebGPU ones did.
 | three's roughness floor (`getRoughness`: at least 0.0525) | the same floor on every lit material (`KIT.ROUGHNESS_FLOOR`) |
 | `lmSample(…, level)` | the light map and its blurred levels 1, 2, 4, 5 as images, averaged in linear light |
 | the clouds following the camera | the 13 sheets (4.8 km) ride the scene camera in x and y by drivers on the active camera, across cuts; the noise stays fixed in the world (`follow=False` keeps them still) |
+| three's `renderOrder` (the deck 1, before the additive signs 2, rain 3 and pillar of light 4) | EEVEE draws blended objects back to front by their origins along the view: the deck's root rides the active camera `KIT.CLOUD_SORT_PUSH` (20 km) down its view, beyond the far clip, so the deck is drawn first, and each sheet's Geometry Nodes puts its quad back at its height over the camera. `make_clouds(K, coll, {'sort_push': 0})` sorts the deck by its own origins instead, which draws it over the additive pillar of light wherever the view runs level |
 | `envNode` per material (0.32 facades, 0.85 street, 1.0 marble) | one World environment at `env_intensity` |
 
 #### Render settings and costs
 
 `KIT.eevee_settings(scene, samples)` sets EEVEE, AgX, screen-traced
-reflections up to roughness 0.5 and no fast GI (the engine had none). The
+reflections up to roughness 0.5 and the 6 km clip range. The
 WebGPU post (bloom 0.55 / 0.5 / 0.7, aeropittura) is the look's, not the
 set's: `eidoblend.look.post.chain.set_bloom(scene, strength=0.55, size=0.5,
 threshold=0.7)` gives the bloom (the compositor's Glare on scene-linear light
 before AgX, as three's bloom ran before its tone map), and the aeropittura is
 in [postprocessing](postprocessing.md).
 
-Measured on an RTX 5090 Laptop GPU shared with other jobs: building the city
+Measured on an RTX 5090 Laptop GPU: building the city
 with the hole takes 15 to 27 s (the plan, 1908 buildings, the sign atlas, the
 light map and the canvases, in Python; the engine built in 1.6 s), the hole
 alone about 14 to 21 s. A 960 × 540 still at 16 samples renders in 0.6 to 1 s
@@ -1148,7 +1140,7 @@ scene = bpy.context.scene
 scene.render.fps = 30
 room = QR.build(scene)                         # its collection, its root Empty, lights, probe, cams (set-local)
 scene.world = room.env                         # its env for the camera; its materials carry its light (the engine's envMap)
-room.eevee_settings(scene)                     # indoors: fast GI off; reflections of the room's env
+room.eevee_settings(scene)                     # GI on (Fast GI over the room probe), the reflections of the room's env
 room.bake_probes()                             # the room-fitted volume probe (a GPU job)
 scene.camera = room.make_camera('hatch')       # a camera at one of the set's cams, parented to the set
 room.animate((1, 120), ship_t=(1.0, 3.0), sale=(2.8, 3.6))   # the crate ships over 1-3 s, the launch lights follow
@@ -1180,7 +1172,7 @@ contract whose keys also read as attributes (`room['parts']` is
 | `env` | the set's World: the engine's LDR equirect, painted for Blender's lookup; with `env_light='material'` (the default) the camera sees it and it lights nothing, because every material carries the env's light at its own intensity (below) |
 | `kit` | the set's material kit: `kit.new(name)` / `kit.envd(m, i)` give a piece's own material the set's env light |
 | `probe`, `bake_probes()` | the volume probe fitted to the set, and its bake (with the set alone in the scene: other sets built in the session are hidden for it) |
-| `eevee_settings(scene, reflections='env')` | fast GI off (indoors it lights contacts with the world through the walls), shadows on, and the reflections: `'env'` (the default: ray tracing off, so every gloss and chrome reflects only the set's env, as the engine's materials did) or `'traced'` (screen-traced: what is on screen reflects too) |
+| `eevee_settings(scene, reflections='env')` | global illumination on (Fast GI over the set's baked room probe), shadows on, and the reflections: `'env'` (the default: reflections from the light probes alone, EEVEE's Light Probe tracing, so every gloss and chrome reflects the set's env and the room's probes, as the engine's materials reflected their env) or `'traced'` (screen-traced: what is on screen reflects too) |
 | `show(visible, frame=None)` | hide the whole set (its lights stop lighting); with a frame it is keyed (a cut: the state before holds up to the frame before), its env's weight in a shared World (`env_switch`) with it |
 | `show_part(name, visible, frame=None)` | three's `part.visible`: a part and everything under it (Blender does not hide an Empty's children with it) |
 | `dispose()` | removes every object, mesh, light, material, image, world (with its env image; a scene using it lets go first, as three's dispose released the env texture), the Actions its keys made and the collection the build made |
@@ -1461,8 +1453,9 @@ polished stage mirrors the LED wall, the chrome mirrors the dark drapes), but
 not the engine's picture.
 
 **Probes.** Each set adds a volume probe fitted to it (the quiet room's with
-`look.lighting.add_room_probe`, its outer samples mid-wall), baked once at the
-default state (`bake_probes`, 1.4–5 s at the tests' 0.5 m and 512 samples).
+`look.lighting.add_room_probe`, its outermost samples inside the solid floor
+and ceiling slabs and the core wall), baked once at the default state, under
+Fast GI (`bake_probes`, 1.4–5 s at the tests' 0.5 m and 512 samples).
 Emitters whose light the set's real lights already give (the hell pits, the
 signs, the LED strips and wall, the lenses, the beams) and everything animated
 are left out of the bake: a probe is static.
@@ -1552,7 +1545,7 @@ sb.root.add(lamp, lamp.target)
 sb.emit()                                            # Blender objects, lights aimed, energies in three's units
 ```
 
-Costs, measured on a busy RTX 5090 Laptop: the quiet room builds in 8–33 s
+Costs, measured on an RTX 5090 Laptop: the quiet room builds in 8–33 s
 from cached canvases, the showroom in 4–18 s, and the per-material env light
 adds about 4 s to either; drawing every canvas cold takes about 2 min in the
 system Python (the centre board 15–38 s), so pre-draw them; the room probes
@@ -1829,20 +1822,17 @@ the world for everything, at 0.75 / 0.7).
 **Transparency.** `depthWrite: false` (the shafts, the seam, the beams, the
 steam, the hand lights, the torch beams) is Transparency Overlap on
 (`Mat.unlit(depth_write=False)`, the default for additive): every layer of the
-object blends, as three drew a cloud of puffs in one call. Off (depth
-written), EEVEE keeps only the object's front-most layer: the steam vanished
-behind its own front puffs. And TSL's `uv()` is a vec2 where the UV Map node
-gives a 3-vector with z = 0: `(uv - 0.5) * 2` would carry z = −1 into
-`dot(d, d)` (every steam puff came out transparent until that was found), so
-the radius from a quad's centre is built from x and y alone
-(`nb.vec2(u.x - 0.5, u.y - 0.5)`).
+object blends, as three drew a cloud of puffs in one call; with depth
+written, EEVEE keeps only the object's front-most layer. TSL's `uv()` is a
+vec2 where the UV Map node gives a 3-vector with z = 0, so the radius from a
+quad's centre is built from x and y alone (`nb.vec2(u.x - 0.5, u.y - 0.5)`).
 
 **The set base.** `update`, `animate(state, frames, t0=)`, `camera(name)`,
 `apply_look`, `apply_post(frames=)` (its focal keyed through the scene's
 camera on every frame, so it follows cuts made with camera markers),
 `focal_world`, `set_u`, `dispose`, and the dict reading of the contract.
 
-Costs, measured headless on a busy machine: the corridor builds in 17 to 53 s,
+Costs, measured headless: the corridor builds in 17 to 53 s,
 the news in 25 to 76 s (the WebGPU builds took 1.8 and 3.5 s); most of it is
 Python drawing the canvases and writing the node trees. Renders at 960 × 540
 and 16 samples: each set's first frame takes 7 to 17 s (EEVEE compiling its
@@ -1889,7 +1879,7 @@ scene = bpy.context.scene
 scene.render.fps = 24
 race = R.build()                              # or R.build(ctx) in a scene script: its scene, keyed through ctx.key
 
-# twelve seconds on my clock: the gold screen powers on, the car reaches the broken edge at 8 s and goes over,
+# twelve seconds on your clock: the gold screen powers on, the car reaches the broken edge at 8 s and goes over,
 # the floodlight's march comes up at 9 s, the boot strikes at 11 s
 events = dict(bill_a_on=(0.0, 0.8), glance_from=1.0, car_edge=8.0, march_on=(9.0, 9.6), heel_strike=11.0)
 frames = (1, 12 * 24)
@@ -2000,9 +1990,8 @@ over the deck (`parts['reflector']`), the Blender form of race.js's
 ReflectorNode; its normal is tilted toward the viewer by race.js's streak
 noise, so every light smears into a vertical streak on wet asphalt and stays
 sharp in the puddles. The road itself is hidden from the probe
-(`hide_probe_plane`): it lies on the mirror's own plane, and left in the
-probe's capture its underside covers the whole mirrored set, so every puddle
-reflects black. The transparent effects stay out of that mirror too (the
+(`hide_probe_plane`): it lies on the mirror's own plane, where its underside
+would cover the whole mirrored set. The transparent effects stay out of that mirror too (the
 lamps' light cones, the car's contact pad, the rain and the splash): EEVEE's
 screen tracing never sees blended surfaces. The screens' glow lights light the
 set without specular (`specular_factor` 0), so in the puddles a screen is its
@@ -2090,18 +2079,17 @@ function of `(t, state)` (race.js left the boot's pose and the impact points
 as they were while they did not show; the port resets them); TSL's `hash()`
 in the shader graphs is a White Noise of the seed rounded to an integer (lit
 windows, the tearing bands, rain-ring cells, the collage tiles: the same role,
-other bits; hashing the raw float speckled the windows and made them shimmer
-whenever the camera moved), while the falling paper keeps three's exact hash
+other bits, steady as the camera moves), while the falling paper keeps three's exact hash
 per sheet; and the screens' LED cells fade once smaller than a pixel by the
 shaded point's distance times the camera's pixel angle (keyed per shot), as
 race.js's `fwidth` did.
 
 | | race | bin |
 | --- | --- | --- |
-| build | 6 to 31 s by the machine's load (88,700 triangles, 71 objects) | 16 to 33 s with the page atlas cached, about 40 s drawing it (607,100 triangles) |
+| build | 6 to 31 s (88,700 triangles, 71 objects) | 16 to 33 s with the page atlas cached, about 40 s drawing it (607,100 triangles) |
 | keying | about 236 keys a frame, 0.1 to 1.3 s a frame | per frame: the mark, five lights, the falling paper's time and wind |
-| saved .blend | 4 MB with a whole section keyed (every image packed) | about 40 MB (the atlas and the can's 2k maps packed) |
-| a still, 960 × 540, 16 samples | 1 to 3 s (the first frames compile the shaders); a Cycles reference at 128 samples about 9 s | about 1 s |
+| saved .blend | 4 MB with twelve seconds keyed (every image packed) | about 40 MB (the atlas and the can's 2k maps packed) |
+| a still, 960 × 540, 16 samples | 1 to 3 s (the first frames compile the shaders) | about 1 s |
 
 ## The 1896 tandem
 
@@ -2227,7 +2215,8 @@ The `<name>_src/` folders hold the Blender scripts that built the assets
 `models/voice_machines_src/`, `models/tandem_1896_src/`): they already are
 Blender, and they run headless through `run_blender.sh` (see the
 [Blender guide](blender.md)); several need CC0 source sets that are not
-shipped, and some bake with Cycles on the GPU.
+shipped, and some bake their GLBs' textures (Blender's texture bake runs on
+Cycles).
 
 ## Verify
 
@@ -2263,12 +2252,12 @@ shared GPU). The sets' own commands are in their sections' tests below.
 python blender/tests/sets_daisy/test_registry.py                          # the registry, plain Python
 bash run_blender.sh blender/tests/sets_daisy/test_parity.py               # the ports against the JS, no GPU
 # build, key, check and save each set (CPU only): out/<set>/<set>.blend + out/<set>/stills.json
-bash run_blender.sh blender/tests/sets_daisy/test_funeral.py --no-render  # 13 shots + 4 beats
+bash run_blender.sh blender/tests/sets_daisy/test_funeral.py --no-render  # the camera plan's 13 shots + 4 of its moving parts
 bash run_blender.sh blender/tests/sets_daisy/test_bridge.py --no-render   # the vignette alone, sun, debug_ids
-bash run_blender.sh blender/tests/sets_daisy/test_corner.py --no-render   # 12 bars + the spark
+bash run_blender.sh blender/tests/sets_daisy/test_corner.py --no-render   # the room, the camp + the spark
 bash run_blender.sh blender/tests/sets_daisy/test_asset_options.py        # the looks, beats=, eulogy= (--render: a still per look)
 bash run_blender.sh blender/tests/sets_daisy/test_parked.py --no-render   # each set at the origin and parked
-# then the stills, rendered from the SAVED files (nothing rebuilt); the corner in a process of its own, 16 GB+
+# then the stills, rendered from the SAVED files (nothing rebuilt); the corner in a process of its own, 16 GB of memory or more
 bash run_blender.sh blender/tests/sets_daisy/render_saved.py funeral bridge     # --only shot03_bar04,erupt
 bash run_blender.sh blender/tests/sets_daisy/render_saved.py corner
 ```
@@ -2326,13 +2315,20 @@ restriction, a canvas sequence into `'//uf_screens'`); `test_build_options.py`
 (no GPU: the build options, `dispose`, the canvases, `set_lights`,
 `set_focal`, `update`, and the family registry with a harness ctx: keys
 through `ctx.key`, `make_cameras`, `animate` on its own clock);
+`test_cloud_deck_order.py` (the deck alone, no city, no GPU: every sheet
+placed as the engine's at the dive's times, the hole's eight moves and
+straight up and down; drawn first, its origins beyond the far clip; the
+sheets' own order kept; a cut; `follow=False`; `sort_push=0`);
 `test_city_render.py` (the build checked, then stills from the dive, the
-city's views, the hole's moves and a turn-down; `--sweep` one view per
-uniform, `--her` (`--vrm`) a performer on the mark, `--compare`
-`compare_<shot>.png`, the WebGPU probe still beside the render, when those
-stills are on the machine);
+city's views, the hole's moves and a turn-down; the dive's end renders again
+with the deck off, and the pillar of light must read as bright and even with
+the deck as without it; `--sweep` one view per uniform, `--her` (`--vrm`) a
+performer on the mark, `--compare` writes `compare_<shot><tag>.png`, this
+run's still beside the WebGPU probe still, when those stills are on the
+machine);
 `test_hole_render.py` (the hole alone, its screens and tickers, the
-performer-only lights, a keyed camera move, the eight stills).
+performer-only lights, the cloud deck drawn first at each move, a keyed
+camera move, the eight stills).
 
 ### The interiors' tests
 
@@ -2414,8 +2410,7 @@ and works field at six points against race.js's formulas, asset states keyed
 and checked at each keyed frame, stills from the sets' own cameras into
 `out/<set>_<camera>_<what>.png`, then the invariants: a moved set renders the
 same stills, the saved .blend renders a keyed frame on its own, `dispose()`
-leaves nothing; `--cycles <tag>` adds a path-traced reference of one race
-still); `test_sections.py` (whole sections keyed on a clock and a cut of its
+leaves nothing); `test_sections.py` (stretches keyed on a clock and a cut of its
 own through a harness-style `ctx.key`, cameras bound to timeline markers,
 `set_active`'s steps, `dispose()`).
 
@@ -2458,10 +2453,9 @@ pieces, and what was left out:
   halos read weaker and smaller than in the WebGPU frames (a crowd shot's
   flood haze was mostly bloom). The race's `race_sun` planes and Russolo's
   chevrons and the bin's quiet planes are the aeropittura pass's; the sets
-  hand it their focal points. The DAISY film's era looks (vigil2025's halation
-  and warm print, march2026's halftone poster) lived in that film's own work
-  folder and are not in `look.post.era_looks`; without them the fog bridge
-  reads grey where the print turned it warm white.
+  hand it their focal points. The DAISY music video's own grades (a halation
+  and warm print, a halftone poster) are not part of the kit; without them
+  the fog bridge reads grey where that print turned it warm white.
 - **Shader hashes.** Per-pixel hashes are Blender's White Noise (shader nodes
   have no integer bit operations): the same share of lit windows, turned tiles
   and twinkling stars on other windows, tiles and stars (the corner's camp
@@ -2474,21 +2468,18 @@ pieces, and what was left out:
   alternates; none of the corridor's and news' strings has one), and
   FreeType's hinting draws small type a shade heavier (the quiet room's
   register's 20 px typewriter lines).
-- **The city at a grazing distance.** At the dive's end (40.8 s) the far cloud
-  sheets behind the pillar of light read as a dark mottled veil where the
-  WebGPU still shows an even bright haze (clouds off, the render matches it).
-  The likely cause is texture filtering: three sampled the cloud noise
-  through isotropic mipmaps, which average it into a smooth veil at that
-  angle, and EEVEE keeps its detail; pre-blurred noise levels chosen by the
-  pixel footprint would do it. The stair cuts between the hole's ticker panels
-  in close shots show a mottled purple where the WebGPU shows dark steps (not
-  yet checked against the same cause). Whether the city's light map reads the
-  right way up (three's CanvasTexture uploads with flipY) is an open parity
-  question.
-- **The city's wet floors** still glint as a small cluster of bright points
-  where they mirror the sky-glow; three spread that glint into a faint haze
-  (EEVEE's screen-traced reflections reach the whole frame, where the
-  engine's half-resolution SSR stopped at 140 m).
+- **The city's wet floors.** In the hole's close shots the wet stair treads
+  between the ticker panels reflect as a mottled purple where the WebGPU
+  frames show dark steps (`wet=0` gives the plain dark steps). Where they
+  mirror the sky-glow they glint as a small cluster of bright points; three
+  spread that glint into a faint haze (EEVEE's screen-traced reflections reach
+  the whole frame, where the engine's half-resolution SSR stopped at 140 m).
+  Whether the city's light map reads the right way up (three's CanvasTexture
+  uploads with flipY) is an open parity question.
+- **The dive's first seconds** (the camera inside the cloud deck) read lighter
+  and show more of the city than the WebGPU dive's frames; the only WebGPU
+  frames there carry a post look, so the two have not been compared like for
+  like.
 - **The haze on your own see-through materials.** The city's `fog_objects`
   leaves blended and alpha-cut materials (decals, hair cards) out of its haze,
   and the news' FogExp2 lives in its own materials, so a character dropped
@@ -2525,7 +2516,8 @@ pieces, and what was left out:
   water); more samples smooth it. The corridor's final open-door state has no
   WebGPU frame to compare against.
 - **Not carried over (no Blender counterpart, not needed):** `noMRT`,
-  `renderOrder`, `frustumCulled`, `customProgramCacheKey`, `userData.noMips`,
+  `renderOrder` (except the city's cloud deck, above), `frustumCulled`,
+  `customProgramCacheKey`, `userData.noMips`,
   `receiveShadow`, the shadow maps' size, bias and camera extents (EEVEE's
   virtual shadow maps size themselves), `polygonOffset` (a physical offset
   instead), `anisotropy`, the CPU mip chains for canvas textures, the

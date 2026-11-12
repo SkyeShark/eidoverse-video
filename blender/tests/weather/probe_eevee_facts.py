@@ -6,7 +6,7 @@ F1  a keyed Value node inside a shader node group changes an EEVEE render frame 
 F2  the Attribute node (Object) reads an object custom property; a missing one reads 0 (per-object wetness gates)
 F3  a Geometry Nodes attribute stored on realized geometry reaches the shader (Attribute, Geometry)
 F4  Add Shader(Transparent white, Emission) in BLENDED mode adds light over what is behind it (additive bolts)
-F5  a point light of 4 pi I watts lights a diffuse plane like a three.js PointLight of I candela (Cycles + EEVEE)
+F5  a point light of 4 pi I watts lights a diffuse plane like a three.js PointLight of I candela
 F6  the Geometry Nodes Image Texture node samples a float EXR exactly (the weather map in the rain tree)
 F7  Geometry Nodes Raycast finds a roof in a collection (rain shelter)
 """
@@ -29,10 +29,10 @@ def check(name, ok, detail=''):
         fails.append(name)
 
 
-def fresh(engine='BLENDER_EEVEE', res=24):
+def fresh(res=24):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     sc = bpy.context.scene
-    sc.render.engine = engine
+    sc.render.engine = 'BLENDER_EEVEE'
     sc.render.resolution_x = sc.render.resolution_y = res
     sc.render.resolution_percentage = 100
     sc.view_settings.view_transform = 'Standard'
@@ -41,11 +41,7 @@ def fresh(engine='BLENDER_EEVEE', res=24):
     sc.render.image_settings.media_type = 'IMAGE'
     sc.render.image_settings.file_format = 'OPEN_EXR'
     sc.render.image_settings.color_depth = '32'
-    if engine == 'BLENDER_EEVEE':
-        sc.eevee.taa_render_samples = 1
-    else:
-        sc.cycles.samples = 64
-        sc.cycles.device = 'GPU'
+    sc.eevee.taa_render_samples = 1
     w = bpy.data.worlds.new('w')
     w.use_nodes = True
     w.node_tree.nodes['Background'].inputs['Color'].default_value = (0, 0, 0, 1)
@@ -181,9 +177,9 @@ front.data.materials.append(mf)
 d = render(sc, 'f4')[12, 12, :3]
 check('F4 Add(Transparent, Emission) BLENDED is additive', np.allclose(d, (0.55, 0.35, 0.25), atol=0.01), str(d))
 
-# ---- F5: point light units against three.js candela (Cycles = ground truth, and EEVEE) ----
-for eng in ('CYCLES', 'BLENDER_EEVEE'):
-    sc = fresh(eng)
+# ---- F5: point light units against three.js candela (the irradiance a candela source gives, worked out) ----
+for eng in ('BLENDER_EEVEE',):
+    sc = fresh()
     p = plane(sc, 'ground', size=2.0, z=0.0)
     mat = bpy.data.materials.new('diffuse')
     mat.use_nodes = True

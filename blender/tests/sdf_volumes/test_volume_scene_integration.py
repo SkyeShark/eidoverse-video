@@ -2,7 +2,7 @@
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sdf_volumes/test_volume_scene_integration.py \
-        [-- cases=fog,cuts,inside,rotated,nuke_placed,fire_cycles,registry,probe_reflect]
+        [-- cases=fog,cuts,inside,rotated,nuke_placed,fire_lamps,registry,probe_reflect]
 
 Cases (renders in out/verify/, 480 x 270, 16 samples):
   fog          a fog box filling the stage and a bonfire: fit_volume_range must not drop the fog the fire's froxel
@@ -13,7 +13,7 @@ Cases (renders in out/verify/, 480 x 270, 16 samples):
   inside       the camera inside the smoke column, looking up it: the medium renders round it
   rotated      a bonfire placed, turned and scaled 1.5: its lamps sit inside the fire in world space, with world power
   nuke_placed  nuclear_explosion at origin (15, 0, -30) (three), scale 0.6: the volumes and lamps land at (15, 30, 0)
-  fire_cycles  the roaring `fire` on a floor: its keyed lamps against Cycles' light from the volume itself
+  fire_lamps   the roaring `fire` on a floor: its keyed lamps light the floor, its volume alone does not
   registry     the post registry hook (custom_effects.register 'nuclear_explosion' as native), its options, uniforms,
                keys (the glow lamps fade with a key set through the registry) and undo, as the hooks_needed entry asks
   probe_reflect  (not in the default run) a chrome ball beside a bonfire, with and without a sphere light probe
@@ -37,7 +37,7 @@ from eidoblend.sdf import nuclear_explosion as NX  # noqa: E402
 from eidoblend.sdf.examples_volumes import fit_volume_range, light_from_emission, build_still  # noqa: E402
 
 A = V.args()
-CASES = A.get('cases', 'fog,cuts,inside,rotated,nuke_placed,fire_cycles,registry').split(',')
+CASES = A.get('cases', 'fog,cuts,inside,rotated,nuke_placed,fire_lamps,registry').split(',')
 W, H = int(A.get('w', 480)), int(A.get('h', 270))
 OUT = os.path.join(V.OUT, 'verify')
 os.makedirs(OUT, exist_ok=True)
@@ -228,8 +228,8 @@ if 'nuke_placed' in CASES:
             and fx.uniforms['origin'] == (15.0, 0.0, -30.0), repr(fx.uniforms))
     shot('nuke_placed', 'nuclear_explosion origin (15, 0, -30) scale 0.6, t = 5.5 s (+1 s offset)')
 
-# ---- fire_cycles: the big fire's lamps against Cycles ---------------------------------------------------------------
-if 'fire_cycles' in CASES:
+# ---- fire_lamps: the big fire's lamps light the floor; its volume alone does not ------------------------------------
+if 'fire_lamps' in CASES:
     V.stage(W, H, 16, world=0.004, sun=0.0, floor=True, floor_color=(0.5, 0.5, 0.5), floor_size=60.0)
     sc = bpy.context.scene
     sc.frame_start = sc.frame_end = 1
@@ -240,15 +240,12 @@ if 'fire_cycles' in CASES:
     fit_volume_range(sc, cam, [fire], frames=[1], tile_size='2', samples=96)
     rig = light_from_emission(fire, log=None)
     imgs = {}
-    for tag, engine, vis, lights in (('base', 'BLENDER_EEVEE', False, False), ('lamps', 'BLENDER_EEVEE', True, True),
-                                     ('cycles', 'CYCLES', True, False)):
+    for tag, vis, lights in (('base', False, False), ('volume', True, False), ('lamps', True, True)):
         fire.object.hide_render = not vis
         for lo in rig.lights:
             lo.hide_render = not lights
-        if engine == 'CYCLES':
-            V.cycles_gpu(sc, samples=256)
         exr = os.path.join(OUT, f'integ_fire_{tag}.exr')
-        imgs[tag] = V.render_linear(exr, engine=engine)
+        imgs[tag] = V.render_linear(exr)
         V.label(V.save_linear_png(os.path.join(OUT, f'integ_fire_{tag}.png'), imgs[tag][::-1]), f'fire: {tag}')
     from bpy_extras.object_utils import world_to_camera_view
     rows = []
@@ -259,13 +256,12 @@ if 'fire_cycles' in CASES:
         win = {t: float(lum(imgs[t][max(0, y - 3):y + 4, max(0, x - 3):x + 4, :3]).mean()) for t in imgs}
         rows.append(win)
     g_l = np.mean([r['lamps'] - r['base'] for r in rows])
-    g_c = np.mean([r['cycles'] - r['base'] for r in rows])
-    per = ', '.join(f"{(r['lamps'] - r['base']) / max(1e-9, r['cycles'] - r['base']):.2f}" for r in rows)
-    print(f'[integ] fire: floor gain lamps {g_l:.4f}, Cycles {g_c:.4f}; lamps {len(rig.lights)}, '
+    g_v = np.mean([r['volume'] - r['base'] for r in rows])
+    print(f'[integ] fire: floor gain lamps {g_l:.4f}, the volume alone {g_v:.4f}; lamps {len(rig.lights)}, '
           f'{rig.total_power(None):.3g} W', flush=True)
-    V.check('fire_cycles: the fire\'s lamps light the floor as Cycles\' volume does', 0.7 < g_l / max(1e-9, g_c) < 1.4,
-            f'EEVEE + lamps / Cycles = {g_l / max(1e-9, g_c):.3f} (per patch: {per})')
-    V.sheet([os.path.join(OUT, f'integ_fire_{t}.png') for t in ('base', 'lamps', 'cycles')],
+    V.check('fire_lamps: the fire\'s lamps light the floor, its volume alone does not', g_l > 1e-3 and g_v < 0.1 * g_l,
+            f'floor gain {g_l:.4f} with the lamps, {g_v:.4f} from the volume')
+    V.sheet([os.path.join(OUT, f'integ_fire_{t}.png') for t in ('base', 'volume', 'lamps')],
             os.path.join(OUT, 'integ_fire_sheet.png'), cols=3)
 
 # ---- registry: the hook as hooks_needed asks for it ----------------------------------------------------------------

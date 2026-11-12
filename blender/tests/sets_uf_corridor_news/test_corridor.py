@@ -58,6 +58,24 @@ F.check('key light: 300 cd -> 300 x 4 pi W', abs(lit['key'].data.energy - 300 * 
         f"{lit['key'].data.energy:.4f} W")
 F.check('apply_look: AgX at 0 stops (three exposure 1, the lamps W = 4 pi cd)', sc.view_settings.view_transform == 'AgX'
         and abs(sc.view_settings.exposure) < 1e-9, f'{sc.view_settings.exposure:.3f}')
+ee = sc.eevee
+F.check('apply_look: global illumination on (fast GI inside the ray tracing), reflections from the probes',
+        ee.use_fast_gi and ee.use_raytracing and ee.ray_tracing_method == 'PROBE',
+        f'fast GI {ee.use_fast_gi}, ray tracing {ee.use_raytracing} ({ee.ray_tracing_method})')
+pr = C.parts.get('probe')
+if pr is not None:
+    bpy.context.view_layer.update()
+    plo = pr.matrix_world.translation - Vector(pr.scale)
+    phi = pr.matrix_world.translation + Vector(pr.scale)
+    res = (pr.data.resolution_x, pr.data.resolution_y, pr.data.resolution_z)
+    sp = [(phi[i] - plo[i]) / (res[i] + 1) for i in range(3)]        # EEVEE: N samples at (i + 1) / (N + 1)
+    outer = [(plo[i] + sp[i], phi[i] - sp[i]) for i in range(3)]
+    inside = (-COR.HW - COR.SLAB < outer[0][0] < -COR.HW and COR.HW < outer[0][1] < COR.HW + COR.SLAB
+              and -COR.SLAB < outer[2][0] < 0 and COR.HC < outer[2][1] < COR.HC + COR.SLAB)
+    F.check("the corridor's volume probe: its outermost samples inside the 0.4 m walls, floor and ceiling", inside,
+            f'x {outer[0][0]:.3f} / {outer[0][1]:.3f}, z {outer[2][0]:.3f} / {outer[2][1]:.3f}, res {res}')
+else:
+    F.check("the corridor's volume probe", False, 'parts.probe missing')
 C.apply_look(sc, view_look=CL.ACES_LIKE_LOOK)
 F.check("apply_look(view_look=ACES_LIKE_LOOK): the AgX look that follows the WebGPU frames' ACES tone",
         sc.view_settings.view_transform == 'AgX' and sc.view_settings.look == CL.ACES_LIKE_LOOK, sc.view_settings.look)

@@ -2747,7 +2747,7 @@ class Funeral:
 
 def dispose_kit(kit, mat_prefixes, group_prefixes):
     """A set's dispose(): its objects and collections, then (until nothing changes) its unused materials, node groups,
-    meshes, curves, lights and images."""
+    meshes, curves, lights, light probes and images."""
     for o in list(kit.top.all_objects):
         bpy.data.objects.remove(o, do_unlink=True)
     for c in list(kit.top.children_recursive) + [kit.top]:
@@ -2756,7 +2756,7 @@ def dispose_kit(kit, mat_prefixes, group_prefixes):
     for _ in range(4):
         n = 0
         for coll in (bpy.data.materials, bpy.data.node_groups, bpy.data.meshes, bpy.data.curves, bpy.data.lights,
-                     bpy.data.images):
+                     bpy.data.lightprobes, bpy.data.images):
             for idb in list(coll):
                 if idb.users == 0 and idb.name.startswith(pre):
                     coll.remove(idb)

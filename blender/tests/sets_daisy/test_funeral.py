@@ -38,7 +38,7 @@ F1 = F0 + int(round((U1 - U0) * FPS)) - 1
 OUT = os.path.join(C.OUT, 'funeral')
 os.makedirs(OUT, exist_ok=True)
 sc = C.clean_scene(FPS, (F0, F1))
-C.probe_look(sc, interior=True, exposure=float(A.get('exposure', 0.0)))
+C.probe_look(sc, exposure=float(A.get('exposure', 0.0)))
 sc.eevee.shadow_pool_size = '2048'                         # the vigil's shadowed lights fill 1024 MB of tiles
 
 # the film's own timeline (outside the repo, read if present): the eulogy re-times to Opus 3's spoken captions, so the

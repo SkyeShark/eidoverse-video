@@ -3167,18 +3167,19 @@ def key_shot(camera, pose_fn, frames, *, t_of_frame, K=None, cam_vel=True):
 
 # ------------------------------------------------------------------------------------------------ render settings
 def eevee_settings(scene, *, samples=None, raytrace=True, max_roughness=0.5):
-    """What the city's look needs from EEVEE: AgX, ray-traced (screen) reflections for the wet streets and the glass
-    (the engine's SSR), no fast GI (the engine had none), clip range for a 2.5 km city."""
+    """What the city's look needs from EEVEE: AgX, global illumination (fast GI), reflections for the wet streets and
+    the glass screen-traced (the engine's SSR; raytrace=False: from the light probes alone, the ray tracing that hosts
+    fast GI staying on)."""
     scene.render.engine = 'BLENDER_EEVEE'
     ee = scene.eevee
     if samples:
         ee.taa_render_samples = int(samples)
-    ee.use_raytracing = bool(raytrace)
-    if raytrace:
-        ee.ray_tracing_method = 'SCREEN'
-        o = ee.ray_tracing_options
-        o.trace_max_roughness = float(max_roughness)
-        o.use_denoise = True
-    ee.use_fast_gi = False
+    ee.use_raytracing = True
+    ee.ray_tracing_method = 'SCREEN' if raytrace else 'PROBE'
+    o = ee.ray_tracing_options
+    o.trace_max_roughness = float(max_roughness)
+    o.use_denoise = True
+    ee.use_fast_gi = True
+    ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
     scene.view_settings.view_transform = 'AgX'
     return scene

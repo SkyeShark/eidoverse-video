@@ -268,7 +268,7 @@ heading is radians about +Z, 0 facing −Y (the same number as three's `rotation
   neck 37.5° toward the lamp where the keyed body needs 49.8°; re-aimed, my head's facing comes to 5.8° of the lamp.
 
 **Any VRM, not only mine.** robot_body.js drives any VRM through the engine's own controller, which knows nothing of my
-hardware, and so does this one: `RobotRig(h)` knows my body by its hips' stage bones (round one's rule) and on any
+hardware, and so does this one: `RobotRig(h)` knows my body by its hips' stage bones and on any
 other VRM is a plain rig: its clips as they are, the gaze on its head bone exactly as `_applyHeadOverride` sets it
 (its neck the clip's), its feet set down; no joint limits, clearances, head states or crown. `test_other_vrm.py`
 walks Aletheia round a crate to a lamp: her standing arms, spine and neck are the idle's own to 0.00001°, her head
@@ -321,7 +321,7 @@ The engine's legs are a physics controller that runs live in the browser. Here t
    - **Standing**: the span's clip (the idle, an emote, a seated clip) through the example's frame order, set down,
      both feet rested. A new clip where I stand crossfades in with each foot held where it stands, moved only when the
      clip itself lifts it (a planted foot stays put through a wave; a clip that steps carries its foot and lands it).
-   - **Walking**: round one's `walk_path` along the route travelled (planted feet, the stance's rockers, the swing's
+   - **Walking**: the characters family's `walk_path` along the route travelled (planted feet, the stance's rockers, the swing's
      clearance), then the hands, wrists, gaze, head and crown. A walk starts from the standing foot's mid-stance (from
      where my keyed body stands, joining the live run's route at most 15° steeply) and stops on the stance nearest the
      goal, the other foot set down beside it before anything else plays, and both held after.
@@ -350,7 +350,7 @@ def script(b):
     if b.jump({'distance': 1.4, 'height': 0.45}):
         yield b.until(lambda: not b.is_maneuvering())
     ...                                          # b.climb_ledge(): onto the 1 m step ahead
-    ...                                          # b.climb_ladder({'height': 1.9}): up the ladder ahead, over its top
+    ...                                          # b.climb_ladder({'height': 1.9, 'rungRadius': 0.016}): up the ladder, over its top
 ```
 
 The JS passes these to the engine's character controller; here they are the controller family's own
@@ -374,10 +374,15 @@ leg cannot take it out alone (the ladder holds my hips too close to the face) th
 its mantle), I sense on through each, the refusals answer `False`, and I end on the tower's top. On every keyed frame
 no sole point is more than 4 mm inside a solid, and standing, both feet are within 1 mm of what they stand on. The
 step-ins hold: each move lands within 1.1 cm of where I stand, a planted sole point moves at most 0.75 mm a frame, and
-where the move takes over the feet move 0.3 mm. My passes keep the controller's hands exactly; its contact IK does not
-put them on what they hold on my body (the vault's knuckles pass about 0.24 m over the wall's top, on the ladder they
-are a median 0.16 m from a rung), and the test reports that as its own FAIL until the controller family's contact IK
-holds on my proportions.
+where the move takes over the feet move 0.3 mm.
+
+**My hands hold what the move holds.** My hardware pass rehomes my torso (my single waist joint cannot take the clip's
+chest bend), which would swing a planted hand away from what it holds. So each hand the move holds (the record's
+`hand_contact` weight: the vault's prop hand, the ladder's grips) is solved again from the rehomed shoulder and run
+through my arm pass (`dof_pass(reach=)`), over a few rounds that pre-compensate what my joint clamps and pitch rate take
+off. In the test the vault's knuckles land 3.7 cm off the wall's top, and on the ladder a knuckle is a median 4.9 cm
+from its rung; `climb_ladder({'rungRadius': ...})` gives the rungs' real thickness, so my palms close over them. The
+free arm the vault raises is the clip's own (Aletheia's vault on the same clip raises it too).
 
 ### Seeing what it knows: `RobotDebug`
 
@@ -420,11 +425,10 @@ exact), a JS bake read here, and plays the shipped ska band bake: the trumpet pl
 ## Tests — `blender/tests/robot_body/`
 
 ```bash
-cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01      # the shared GPU slot lives there
-HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <repo>/blender/tests/robot_body/test_pick_up.py
+bash run_blender.sh blender/tests/robot_body/test_pick_up.py          # renders: one at a time on a shared GPU
 #   ... test_navigate_room.py | test_body_maneuvers.py | test_body_api.py | test_claude_robot_example.py
 #   ... test_crown_head_states.py | test_pose_bake.py | test_dof_parity.py | test_other_vrm.py
-#   --no-render builds, checks and saves only (no GPU slot needed)
+#   --no-render builds, checks and saves only
 ```
 
 - `test_pick_up.py` — me picking up a can from a counter, looking it over and setting it back: the fingers touch and
@@ -459,8 +463,15 @@ Each writes `out/<test>.json` (the report and its PASS / FAIL checks), its `.ble
 - **A move out of a walk or a run**, and the moves the engine starts on its own en route (its auto-maneuvers: low
   cover vaulted, a gap jumped while walking a route). Here a move starts from standing: the body's walks are
   `walk_path`'s, which has no moves, and the planner routes round what the memory holds as blocked.
-- **The moves' hands on my body**: the controller family's contact IK leaves my hands off the wall's top and the rungs
-  (numbers above); my bake keeps the feet out of the faces, the hands are theirs to place.
+- **My hands on a move are a few centimetres off**: the vault's knuckles about 3.7 cm off the wall's top, a ladder
+  grip a median 4.9 cm from its rung (above).
+- **My seats' residuals.** Sitting on the ground I do a long sit, my legs out along the floor (my hips flex 98° at most
+  and my knees 112°, so I cannot fold into the library's cross-legged clip); its sit-down crossfade dips me 7 cm under
+  the floor for a frame and the rise pops ([maneuvers](maneuvers.md#not-yet-ported)). In a chair a sole slides 8 to
+  10 mm a frame where the seat hands over to the plant at the end of the stand-up, and the walk's first step after a
+  stand-up has 8 frames with no foot down: the foot planted after the stand-up is 6 to 10 cm out of my reach, so the
+  plant lets it go while the other swings. My bake does not read `seat_plan` yet, so a seat through my own seated
+  state sits on air where I stood.
 - **My left hand's set-down is less exact than my right's.** From the mirrored stance the left grasp sits near my
   wrist's extension stop, and setting the can down my hardware leaves the hand up to 4.4° off its planned turn (6.6°
   on the frame it opens) against the right's 1.3°: the can lands that far off upright and tips onto its base over

@@ -109,7 +109,7 @@ Markers land on the nearest frame (film convention: frame 1 = 0 s). Beat-synced 
 
 When the song starts before the film, place it in the song's time: with `scene['eido_frame0'] = 1 - round(t_start * fps)`, `audio.add_sound(scene, 'work/<id>/song.wav', t=0.0)` puts the song's 0 s where it belongs, and markers from `hit_times()` land on their beats.
 
-Measured 11-07 on the Blender branch (`blender/tests/media2/tools_host.py`, then `test_tools_film.py`):
+Run in the Blender edition (`blender/tests/media2/tools_host.py`, then `test_tools_film.py`):
 - The quick start above ran unchanged: 17.0 s of mastered loop and 32 kick times in 9.8 s (the first run compiles numba's kernels).
 - In Blender the loop became a sound strip with its 32 kicks as timeline markers, alongside a voicebox lead, in a one-pass H.264 + AAC render and a 15 s mixdown.
 - DAISY's `song.py --upto chorus2 --no-tts` (synthkit's band under voicebox's voices) mastered at −14.0 LUFS with peaks at −2.2 dBFS, and played under the EEVEE film of the era screens ([motion-graphics](motion-graphics.md#computing-history-screen-scenes)).

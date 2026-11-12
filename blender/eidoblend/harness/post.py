@@ -13,7 +13,8 @@ passes, and the hooks become stages of the compositor chain (eidoblend.look.post
     the overlay pass (_overlayScene)          chain slot 'overlay': the overlay scene's Render Layers, alpha over
     _autoEnhanceScreenHook                    chain slot 'over' (after the overlay: a HUD is part of the signal)
     renderOutput + FXAA                       AgX after the compositor; EEVEE's pixel filter antialiases
-    _noAutoEnhance / NO_AUTOENHANCE=1         ray tracing and fast GI off, no runner stages (the scene's own stay)
+    _noAutoEnhance / NO_AUTOENHANCE=1         no runner stages (the scene's own stay); EEVEE's ray tracing and fast GI
+                                              are the renderer's lighting, not post passes, and stay as set
 
 A scene script names them at module level, as the engine's globals were named (snake_case; the JS spelling is read
 too), or makes them in setup() with `global`:
@@ -38,6 +39,9 @@ What does not carry over, and why:
     _autoEnhanceCloudReflectHook / BlurHook    the sky family's world (make_sky) lights metals and glass itself.
     the alpha-to-coverage / depthWrite fixes   three.js render-state repairs; EEVEE's render methods have none to make.
     _aoParams intensity / distanceFalloff      EEVEE's occlusion is physical: no strength or falloff knob exists.
+    _aoParams enabled: false                   fast GI is EEVEE's global illumination, not a post pass: it stays on.
+    _ssrParams enabled: false                  reflections from the light probes alone (EEVEE's Light Probe tracing);
+                                               the ray tracing stays on, as fast GI runs inside it.
     _ssrParams maxDistance                     EEVEE's screen traces have no length limit to set.
 
 Colour: the engine mixed the overlay in before renderOutput, and the runner's renderer tone-mapped nothing (three's
@@ -151,9 +155,8 @@ def overlay_scene_of(scene, ns=None):
 
 def _set_ao(ee, p, notes):
     if p.get('enabled') is False:
-        ee.use_fast_gi = False
-        notes.append('ao off (fast GI off)')
-        return
+        notes.append('ao enabled=false: no EEVEE counterpart (fast GI is the renderer\'s global illumination), '
+                     'fast GI stays on')
     if 'half_res' in p or 'halfRes' in p:
         ee.fast_gi_resolution = '2' if (p.get('half_res', p.get('halfRes'))) else '1'
     q = p.get('quality')
@@ -169,11 +172,11 @@ def _set_ao(ee, p, notes):
 
 
 def _set_ssr(ee, p, notes):
-    if p.get('enabled') is False:
-        ee.use_raytracing = False
-        notes.append('ssr off (ray tracing off)')
-        return
     ee.use_raytracing = True
+    if p.get('enabled') is False:
+        ee.ray_tracing_method = 'PROBE'
+        notes.append('ssr off (reflections from the light probes; the ray tracing that hosts fast GI stays on)')
+        return
     o = ee.ray_tracing_options
     if 'thickness' in p:
         o.screen_trace_thickness = float(p['thickness'])
@@ -209,11 +212,9 @@ def apply(scene, ns=None, led=None):
     ignored = [k for k in ('pre_ssr', 'cloud_reflect') if _get(ns, scene, k) is not None]
     if off:
         ee = scene.eevee
-        ee.use_raytracing = False
-        ee.use_fast_gi = False
-        _record(led, 'PASS', 'auto-enhance OFF (the scene set _no_auto_enhance, or NO_AUTOENHANCE=1): EEVEE ray '
-                             'tracing and fast GI off, no runner stages; the scene\'s own compositor stages stay',
-                {'added': []})
+        _record(led, 'PASS', 'auto-enhance OFF (the scene set _no_auto_enhance, or NO_AUTOENHANCE=1): no runner '
+                             'stages; the scene\'s own compositor stages stay, and EEVEE\'s lighting as set (ray '
+                             f'tracing {ee.use_raytracing}, fast GI {ee.use_fast_gi})', {'added': []})
         return []
     ee = scene.eevee
     ao, ssr = _get(ns, scene, 'ao'), _get(ns, scene, 'ssr')

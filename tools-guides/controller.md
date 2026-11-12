@@ -134,6 +134,15 @@ What the film bake decides, frame by frame over the recorded take:
   heading is read from its forward and up vectors together, in the frame of
   the ground it stands on, steady from heel strike to toe-off on a cross
   slope too.
+- **Load by reach.** Each planted leg carries the body's load by how far its
+  foot stands from its hip along the ground: all of it within `TRAIL_FULL`
+  (0.55) of the leg's reach, none past `TRAIL_NONE` (0.85) (`plant.py`). A
+  foot the body has walked on from, past `TRAIL_NONE` or behind the hip and
+  reachable only with the pelvis more than `TRAIL_DIP` (0.25 m) under the
+  controller's own height, neither pulls the pelvis down nor caps it, and is
+  let go there (an early toe-off). A stair clip's bent stance knee on a foot
+  the body has already walked away from therefore never drags the hips
+  toward the floor.
 - **A foot out of reach** at the end of its stance (the trailing foot on a
   stair, the hips already risen) is let go early, but not while the other
   foot is in the air: until the other lands, the pelvis comes down to it.
@@ -144,8 +153,9 @@ What the film bake decides, frame by frame over the recorded take:
   sweep, and never in contact while they travel faster than 0.8 m/s (a
   toe-off, a backward walk's lift). A swing that ends in a fall or a
   maneuver hands its foot to the clip by then.
-- **The pelvis** goes where the planted legs have the clip's own length,
-  capped so every loaded leg reaches. `pelvis='controller'` keeps the
+- **The pelvis** goes where the loaded legs have the clip's own length,
+  capped so every loaded leg reaches (the presets test checks it never sinks
+  more than 30 cm under the controller's height). `pelvis='controller'` keeps the
   controller's height, capped for reach and floored where a planted leg is
   folded to its knee stop. A seat's pelvis is the seat's (the controller's
   root, settled onto the pan with `seat=`).
@@ -307,20 +317,39 @@ on the body and the clip instead:
   (`clip_tuck`: how far the clip's crouch draws these feet up), not the
   original's 0.65 m, so the crouched feet rest on the top.
 - **The ladder** hangs the hips a third of their standing height behind the
-  rungs' line (`ladder_standoff`, 0.30 m on a 0.9 m hip; the original's
-  standoff left the library clip's feet half a metre behind the rungs: the
-  clip climbs a leaning ladder). Each hand and foot grips through its clip's
-  hold (`limb_grips`: any time but its one reach a cycle) and is latched to
-  the rung nearest where it arrives at full weight, the wrist on the rung's
-  line, the ball of the foot on its top; a flat face (the scramble) gets
-  palm and toe holds at the height they arrive. The top rung is the last one
-  terrain_base builds (the original counted one past it).
+  rungs' line (`ladder_standoff`, 0.30 m on a 0.9 m hip; the library clip
+  climbs a leaning ladder, so the original's standoff would leave its feet
+  half a metre behind the rungs). On a vertical ladder the clip's torso lean
+  (25° on Aletheia, 34° on my robot body) is stood up to `LADDER_LEAN_KEEP`
+  (3°), eased in over the approach and out before the mantle, so the
+  shoulders stay about 25 cm off the rungs and the arms can reach them. Each
+  hand and foot grips through its clip's hold (`limb_grips`: any time but its
+  one reach a cycle) and is latched to a rung within the arm's reach that is
+  still above the shoulder when the hold ends. A hand closes over its rung as
+  the clip holds it, palm-down with the fingers over the far side: the point
+  under the palm (between the wrist and the middle knuckle) on the rung's
+  axis. Between holds a reaching hand is kept in front of the rungs, pitched
+  fingers-up at the wrist first. The ball of the foot stands on the rung's
+  top. `climb_ladder(..., rung_radius=None)` takes the rungs' real
+  thickness, so palms close over and soles stand on rungs of that radius
+  ([maneuvers](maneuvers.md) measures it). A flat face (the scramble)
+  gets palm and toe holds at the height they arrive. The top rung is the last
+  one terrain_base builds.
 - **No foot inside a solid** (`feet_out_of_solids`, the last pass of every
   maneuver frame): the whole boot every 12 mm, inside by a parity ray, moved
-  out the shorter way, up or back out of the face the travel meets, by a leg
-  solve or, folded against the hip, a swing of the whole leg. The solids are
+  out the shorter way, up or back out of the face the travel meets; where
+  neither straight move frees it (a boot wedged between a rung and the
+  wall), the least move in the travel's plane (searched on a 3 cm, then a
+  1 cm grid), keeping the boot's world turn through the leg solve or,
+  folded against the hip, a swing of the whole leg. The solids are
   `c.contact_world` (default the walking world; pass one with the ladder's
   rungs and rails in it, as the course example does: they are not walked on).
+- **On my robot body** the hardware pass (`dof_pass`) clamps the clip to the
+  joints it has; a hand the move holds (a vault's prop hand, a ladder grip:
+  the record's `hand_contact` weight) is solved again from the rehomed
+  shoulder and run through the arm pass (`dof_pass(reach=)`), so the hand
+  still plants on the top or the rung through the passage
+  ([robot body](robot-body.md)).
 
 A drop deeper than `fall_land_min_drop` (0.85 m) plays fallLand; the film
 plant stands the landing on the ground it reached. Register your own moves in
@@ -386,9 +415,7 @@ vault's take-off and landing (`vault_window`), the mount's end crouch
 
 Each test bakes on the CPU, saves its keyed `.blend` and a shot list; one
 `render_shots.py` run renders the stills of any number of tests. Run it
-through `run_blender.sh`, one render at a time on a shared GPU
-(`gpu_slot.sh` is the studio machine's queue for it: it needs that machine's
-GPU slot scripts).
+through `run_blender.sh`, one render at a time on a shared GPU.
 Besides checks.feet (the plant's own report, on rigid sole points), the
 tests measure what the camera sees: `FootMesh` in `_ctrl_stage.py` takes the
 skinned boot's every vertex against every solid (inside by a parity ray), so
@@ -431,8 +458,9 @@ course with Aporia and her follow camera through the runner:
   `blender/examples/obstacle_course/` builds the same film through the runner
   (`eido_blender.py`, about 200 s); its stills from the follow camera at
   14.4 s, 40 s and 51.6 s match the WebGPU film's frames of the same moments
-  in composition, scale and stride. In those runner stills Aporia casts no sun
-  shadow; the cause is not traced yet.
+  in composition, scale and stride. Aporia casts no sun shadow in them: the
+  VRM add-on's MToon materials keep `use_transparent_shadow` on
+  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)).
 
 Known residuals of the film bake (each found by the tests; the JSON reports
 in `out/` list the frames under `stance_issues`, `swing_issues` and
@@ -444,16 +472,21 @@ in `out/` list the frames under `stance_issues`, `swing_issues` and
   rigid sole points read up to 170 mm under the tread above them; the
   visible boot stays within 10 mm of the surface on the course and the stair
   presets.
-- The stress course (`obstacle_course_expanded`): on its large stairs and
-  its 22 and 25 degree ramps the stair clip leads stances far longer than the
-  travel; single frames put a planted boot up to 13 cm into a step, and
-  stepping onto the dome's near side has eight frames with neither foot down.
-  (The committed port on the same course: 70 foot-frames over 10 mm, the
-  worst 26 cm.)
+- A trailing foot let go early costs a short flight: each stair preset has
+  one 3 to 5 frame stretch with no foot down where a long stride steps off a
+  flight, and the course example and the acting test one frame each.
+- The stress course (`obstacle_course_expanded`): the stair clips keep their
+  own clock (0.33 m/s on this body), so at the walk-to-stairs hand-overs
+  their stances outlast the travel. Planted soles tuck 8 to 15 cm under a
+  stair's nose; the dome, the 22° ramp's foot and the 22 cm stairs have 2 to
+  7 frame flights; the pelvis dips up to 25 cm (30 cm for one frame where the
+  leading foot lands at the foot of the 10 cm stairs); the deepest visible
+  foot is 14 mm into a surface.
 - A 45 degree ramp: one stair-clip stance slips 32 mm in a frame (the
-  visible boot 12 mm into the slope at worst; 18 cm before).
-- The course example's mantle off the ladder: one frame with a toe 23 mm
-  into the block's face.
+  visible boot 12 mm into the slope at worst).
+- The course example's first mount: one frame with a toe 13 mm into the
+  block's top (the sampled points of the rigid foot miss that edge of the
+  visible boot).
 - Aletheia down the course example's small stairs: for a few frames the leg
   IK misses a planted ankle's target by up to 43 mm (Aporia's run of the
   same take misses by 2 mm).

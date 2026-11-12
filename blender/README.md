@@ -24,17 +24,24 @@ blender/
     __init__.py                 imports nothing
     common.py                   paths, three.js Y-up -> Blender Z-up, frame/time, small tools (no bpy)
     harness/                    the runner, the audits, the asset loaders (the pipeline family)
-    characters/ flora/ fx/ look/ media/ placement/ sky/ terrain/ trees/    one subpackage per family
+    characters/ course/ fabrication/ flora/ fx/ look/ materials/ media/ placement/
+    props/ sdf/ sets/ sky/ terrain/ trees/ weather/ xr/     one subpackage per family (18 with harness/)
   tests/<family>/               each family's headless tests; renders land in out/ (git-ignored)
+  tests/run_all.py              every family's tests in one run, PASS / FAIL per test
 eidoverse/                      the WebGPU engine (the port's reference) and the shared assets
 tools-guides/                   one guide per system, describing this edition, each with a Not yet ported list
+docs/TOOLS.md                   every eidoblend module and CLI, mapped to its guide
 ```
 
 The rules every family keeps:
 
-- **Self-contained subpackages.** A family imports only its own subpackage,
-  `eidoblend.common` and Blender's modules, never another family's. A scene
-  script imports whichever families it uses; that is where they meet.
+- **Families build on each other.** Sets use characters, flora, terrain and
+  media; weather uses fx, media and sky; course uses characters and terrain.
+  The node-graph and curve helpers are shared too: `terrain._nodes`,
+  `terrain._pbr`, `fx._nodes` and `placement._curves` are imported by other
+  families, so a change there is checked with
+  `python blender/tests/run_all.py --kinds imports`. A scene script imports
+  whichever families it uses.
 - **Names mirror the WebGPU API in snake_case** (`makeSky` → `make_sky`,
   `createFlora` → `create_flora`), so a guide translates one to one.
 - **Z-up, metres, AgX.** three.js `(x, y, z)` is Blender `(x, -z, y)`
@@ -52,6 +59,8 @@ build a small scene with the family's system and render probe stills into
 `tests/<family>/out/`. The pipeline family's suite runs the runner end to end:
 
 ```bash
+python blender/tests/run_all.py                      # every family's tests, each in its no-render mode where it
+                                                     # has one (--list, --areas, --kinds, --only, --failed)
 python blender/tests/pipeline/run_tests.py           # T0-T16: the config, stills, the H.264 film, --at against
                                                      # the film, planted defects, build reuse and hand edits, a
                                                      # model's clips, the placement bridge, bench, kits, navigation,
@@ -70,48 +79,19 @@ may have been installed after it: don't rely on it). Outside Blender use the
 system Python (`eido_blender.py`, `config.py`, `ledger.py` and `common.py`
 import no bpy).
 
-## For the `blender-auto` edition (agents + Docker)
+## The `auto-blender` edition (agents + Docker)
 
-The `auto` branch runs the WebGPU edition in a container for a parent agent
-(`eido.py agent`: brief and context in, `_capabilities.json`, the repo
-mounted read-write with per-file read-only binds over the engine, Docker with
-`--gpus all`, plus `/dev/dxg` on WSL 2, a timeout, artifacts collected into
-`runs/<ts>/run.json`). A `blender-auto` branch built on this edition needs, in
-its AGENTS.md and its tooling (not written here; that branch is not edited
-from this one):
+The `auto-blender` branch is this edition plus a container for a parent agent.
+Its `eido_docker.py` and `docker/` run `doctor`, `build`, `render` and `bench`
+inside the render image unless `--local` is given, and add `bootstrap`,
+`shell`, `agent` and `cleanup`. Its `docs/AGENT_LOOP.md` is the agent loop:
+brief and context in, `_capabilities.json` (with `renderer: blender-eevee`),
+the engine bound read-only, artifacts (`.mp4`, stills, the audit, `scene.py`
+and the built `.blend`) collected into `runs/<ts>/`.
 
-1. **The image.** Blender 5.2 LTS for Linux, pinned (the official tarball and
-   its checksum), on PATH as `blender`; the VRM add-on installed into the
-   image's Blender user folder (`~/.config/blender/5.2/extensions/blender_org/vrm/`),
-   where `run_blender.sh` finds it and copies it into its sandbox; ffmpeg and
-   ffprobe. Deno, Mesa and Node stay only if the WebXR pages are served.
-2. **EEVEE needs a graphics context on the GPU,** not just compute: the NVIDIA
-   container runtime with `NVIDIA_DRIVER_CAPABILITIES=all` (graphics, not only
-   `compute,utility`) so Blender's headless EGL path finds the GPU. On WSL 2
-   (`/dev/dxg`, Mesa's d3d12 driver) EEVEE is **unverified**: run
-   `python eido_blender.py doctor` inside the container first; it renders a
-   64x64 EEVEE frame and fails loudly if it cannot.
-3. **The brief's working loop** in its AGENTS.md: the agent writes
-   `work/<id>/scene.json` and `scene.py` (Python with `setup(ctx)`, not a
-   `.js` scene), checks stills with `render --at`, renders the film with
-   `render`, reads `<out>.audit.txt`, and looks at the probe PNGs before it
-   reports. The exit code is honest (0 done, 1 failed, 3 refused) and
-   `<out>.audit.json` carries `status: normal completion` only for a run that
-   finished.
-4. **Read-only binds** over this edition's engine: `eido_blender.py`,
-   `run_blender.sh`, `blender/eidoblend/**`, `AGENTS.md`, `tools-guides/**`,
-   plus the existing `eidoverse/**` sources and `eidoverse/assets` (one
-   directory mount). `work/` stays writable; the texture/model library
-   (`eidoverse/assets/cache/`) must be writable or pre-fetched, since
-   `fetch_pbr` / `fetch_model_file` fetch on first use (`EIDO_NO_FETCH=1`
-   makes a missing ID an error instead).
-5. **`_capabilities.json`** gains `blender` (the version `doctor` found),
-   `eevee_gpu` (the doctor render passed) and `vrm_extension`.
-6. **Collection** adds `work/**/scene.py`, `*.audit.txt`, `*.audit.json`,
-   `*.build.json` and the built `*.blend` (the parent can open the very scene
-   that rendered), alongside the `.mp4` and `.png` files.
-7. **Budgets:** the probe preset (960x540, 16 samples) for checks; the film
-   preset's 32 samples for the film. `eido_blender.py bench` estimates a
-   film's render time before the agent commits to it.
-8. **Not ported from the WebGPU auto edition:** the palette report's showpiece
-   nudge (it read `_brief.txt`).
+The image is Ubuntu 26.04 with Blender 5.2.0 from Blender's mirrors
+(checksummed), the VRM extension, ffmpeg, Deno and Node, and Mesa for the GPU.
+On WSL 2 (Docker Desktop with `--gpus all`, `/dev/dxg` and `/usr/lib/wsl`
+mounted, `GALLIUM_DRIVER=d3d12`) EEVEE renders on the NVIDIA GPU through Mesa's
+d3d12 driver; `docker/blender_gpu_check.py` (run by `doctor`) prints the
+renderer and fails if Blender fell back to a software renderer.

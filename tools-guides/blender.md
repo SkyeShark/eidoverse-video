@@ -1,14 +1,17 @@
-# Blender — building assets for the kit
+# Blender — headless runs and asset authoring
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Scene format](scene-format.md) · [Blender and EEVEE notes](stack-notes.md)
 
-Blender is an authoring tool here: model, weight, bake and export in it, then
-judge the result in the engine. EEVEE is not the truth for these assets. The
-engine's MToon, node materials, ACES tone mapping and post passes are, so
-every Blender change is reviewed in an engine render. Everything below was
-run headless on Blender 5.2 LTS. VRM and VRMA work needs the VRM Add-on for
-Blender, installed once in normal Blender from extensions.blender.org
-(extension id `vrm`).
+In this edition Blender is both the studio's renderer and its workshop. The
+runner builds and renders every scene in Blender 5.2 with EEVEE
+([scene format](scene-format.md)); this guide covers running your own Blender
+scripts headless and authoring assets for the library: garments and
+accessories for VRMs, VRMA animation clips, hard-surface props exported as
+GLBs, and trim sheets. Judge every asset in an EEVEE render of the scene it is
+for, from the angles the shot will see it. The library's assets are shared
+with the WebGPU editions, where they were first made; an asset meant for both
+is checked in each. VRM and VRMA work needs the VRM Add-on for Blender
+(extension id `vrm`, [setup](../docs/SETUP.md#4-the-vrm-add-on-for-blender)).
 
 ## Run Blender headless — `run_blender.sh`
 
@@ -29,7 +32,8 @@ installed extensions depend on. `run_blender.sh` avoids that:
   folders, newest first.
 
 Arguments after the script reach it after Blender's `--`. Scripts enable
-what they use and find the repository root themselves:
+what they use and find the repository root themselves; with the root on
+`sys.path` as `<repo>/blender`, the whole `eidoblend` package is importable:
 
 ```python
 import os, sys
@@ -37,10 +41,17 @@ import bpy
 
 bpy.ops.preferences.addon_enable(module='bl_ext.blender_org.vrm')   # only when the script needs VRM
 REPO = os.path.dirname(os.path.abspath(__file__))
-while REPO != os.path.dirname(REPO) and not os.path.exists(os.path.join(REPO, 'eido.py')):
+while REPO != os.path.dirname(REPO) and not os.path.exists(os.path.join(REPO, 'eido_blender.py')):
     REPO = os.path.dirname(REPO)
+sys.path.insert(0, os.path.join(REPO, 'blender'))
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ```
+
+Blender returns 0 even when a script raises: check that every output exists,
+and give a command-line tool its own exit code (`look/probe_cli.py` prints
+the traceback and calls `os._exit(code)`). A scene for the runner needs none
+of this: `eido_blender.py` runs `setup(ctx)` and `render_frame(ctx, t, i)` for
+you.
 
 Keep working files (stage `.blend`s, bake renders, look renders) under
 `work/`. A library asset keeps its editable source in an `<asset>_src/`
@@ -54,7 +65,9 @@ render never loads half a file.
 
 ## Clothes and accessories for a VRM
 
-Import with `bpy.ops.import_scene.vrm(filepath=...)`. Export every layer,
+Import with `bpy.ops.import_scene.vrm(filepath=...)`
+(`set_view_transform_to_standard_on_import=False` keeps the scene's AgX), or
+with the characters family's `load_vrm` in a scene. Export every layer,
 hidden ones included:
 
 ```python
@@ -74,7 +87,7 @@ res = bpy.ops.export_scene.vrm(filepath=tmp, export_invisibles=True, export_only
   through as coloured lines on dark paint. Wear the source garment
   underneath, painted to match.
 - **Give every paintable surface its own named MToon material,** because
-  runtime code paints by material name. The add-on exposes MToon on
+  the wardrobe paints by material name. The add-on exposes MToon on
   `material.vrm_addon_extension.mtoon1`:
   ```python
   ext = m.vrm_addon_extension.mtoon1
@@ -88,13 +101,16 @@ res = bpy.ops.export_scene.vrm(filepath=tmp, export_invisibles=True, export_only
   mt.parametric_rim_color_factor = (0.0, 0.0, 0.0)   # a grey rim washes out small dark accessories
   ```
 
-Review a garment in the engine with `vrm_turntable.py`
-([characters](characters.md), "Turntable sheets"). The claudesona's wardrobe
-is the worked example: `eidoverse/assets/vrms/claude_suit_wardrobe_src/`.
-Its last stage, `build_tuta.py`, builds a whole outfit (the TuTa) by script
-from that `.blend` and exports the library VRM: it welds digi's split seams before pushing the
+Review a garment with `blender/tools/vrm_turntable.py`: outfit, clip, face
+and PBR sheets, and spin reels
+([claudesona](claudesona.md#turntable-sheets--blendertoolsvrm_turntablepy)).
+The claudesona's wardrobe is the worked example:
+`eidoverse/assets/vrms/claude_suit_wardrobe_src/`. Its last stage,
+`build_tuta.py`, builds a whole outfit (the TuTa) by script from that `.blend`
+and exports the library VRM: it welds digi's split seams before pushing the
 garment out, places bone-parented badges from a JSON spec, and leaves the
-surface (seams, piping, colour blocking) to TSL in the runtime.
+surface (seams, piping, colour blocking) to the wardrobe's shaders
+(`characters.claudesona.tuta`).
 
 ## VRM animation clips (`.vrma`)
 
@@ -120,7 +136,8 @@ The add-on exports a baked action as VRMA:
   finger direction and elbow pole. Plant the feet by leg IK on one shared
   stance, so any two clips crossfade without sliding.
 - Check the exported file, not the intent. Run forward kinematics on the
-  `.vrma`'s own rest skeleton, then look at it in the engine.
+  `.vrma`'s own rest skeleton, then play it on the character in a short
+  probe (`characters.vrma`, [characters](characters.md#vrma-animations)).
 
 `eidoverse/assets/animations/performance_src/` holds the complete authoring
 script and a checker. Its README and the script's CONVENTIONS block describe
@@ -141,7 +158,7 @@ When the tempo gives no whole frame rate, sample in beats.
 - Model in masses: profile prisms, lofts, EXACT booleans and angle-limited
   bevels.
 - Several overlapping cutters joined into one operand need `use_self=True`,
-  or the target can come back silently empty. Log vertex counts per boolean.
+  or the target can come back empty. Log vertex counts per boolean.
 - A fine bevel after a boolean can send a few vertices to millions of metres.
   Snapshot the mesh, compare bounds after the bevel, and retry gentler.
 - Custom normals are interpolated across the sliver triangles that a boolean
@@ -151,22 +168,24 @@ When the tempo gives no whole frame rate, sample in beats.
   fix it after the booleans.
 - A dished top made from stacked insets folds along a diagonal. Build it from
   concentric scaled rings down to a centre vertex.
-- Bake with Cycles on the CPU: colour at 2048, roughness, normal and AO at
-  1024. Never bake the normal pass at 1 sample. A scan bump finer than a
-  texel then becomes per-texel noise that reads as granite under a grazing
-  light; 16 samples average it into texel-scale relief.
+- Bake the textures a GLB carries (Blender's texture bake runs on Cycles, so
+  switch the scene's engine for the bake): colour at 2048, roughness, normal
+  and AO at 1024. Bake the normal pass with 16 samples or more: a scan bump
+  finer than a texel otherwise becomes per-texel noise that reads as granite
+  under a grazing light.
 - Labels and logos are images projected onto the surface, not geometry.
-- Export one GLB. A module loads it with `GLTFLoader` and rebuilds node
-  materials from the baked maps; name objects for their runtime roles
-  (`screen_*`, `led_*`, `metal_*`). The props built this way and their modules
-  are in [props and sets](props-and-sets.md).
+- Export one GLB, its objects named for their runtime roles (`screen_*`,
+  `led_*`, `metal_*`). `harness.assets.import_model` loads it with its maps
+  ([assets](assets.md)); the props built this way, and the Blender modules
+  that give them their runtime parts (screens, LEDs, grilles), are in
+  [props and sets](props-and-sets.md) and [voice machines](voice-machines.md).
 
-Colours through the engine: three's ACES multiplies by exposure / 0.6 before
-the curve, so emissive screens land about 1.7× brighter and paler than
-authored. Pre-compensate the gain. Match printed colours to a reference photo
-under the same exposure rather than by hex. Dark gloss plastic turns scan
-micro-variation into glitter under a spotlight, so keep its texture mix and
-bump tiny and its roughness band narrow.
+Colours: the films render under AgX, which rolls bright emitters toward
+white. Judge an emissive screen's colour in an EEVEE render at the film's
+exposure, and match printed colours to a reference photo under the same
+exposure rather than by hex. Dark gloss plastic turns scan micro-variation
+into glitter under a spotlight, so keep its texture mix and bump tiny and its
+roughness band narrow.
 
 ## Trim sheets rendered from models
 
@@ -182,4 +201,12 @@ to it:
   envelope into a fit file that the geometry generator reads.
 
 `eidoverse/assets/grass/daisy_src/` is the worked example behind
-`createFlora`'s daisy ([vegetation](vegetation.md)).
+`create_flora`'s daisy ([vegetation](vegetation.md)).
+
+## Not yet ported
+
+- Nothing is missing from this guide's tools: `run_blender.sh`, the add-on
+  operators and the authoring scripts are Blender already. The WebGPU
+  edition's habit of judging an asset in its own render (three's MToon, its
+  node materials and its ACES tone map) applies only where an asset is also
+  meant for that edition.

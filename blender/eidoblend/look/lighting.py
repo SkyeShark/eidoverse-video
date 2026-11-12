@@ -11,7 +11,7 @@ Relative levels port this way; absolute levels are judged again by eye (and by l
     rig = L.key_fill_rim(scene, subject=arm, camera=cam, key_w=300)              # area lights round a subject
     lamp = L.practical(scene, bpy.data.objects['LampBulb'], watts=6, kelvin_k=2700)   # the bulb glows AND lights
     rt = L.create_rt_lighting(scene, refl_max_rough=0.6)                          # rt_lighting.js's three effects
-    L.add_room_probe(scene, 'room', (-2.2, -2.0, 0.0), (2.2, 2.0, 2.7), wall=0.12)   # its outer samples in the walls
+    L.add_room_probe(scene, 'room', (-2.2, -2.0, 0.0), (2.2, 2.0, 2.7), wall=0.3)    # its outer samples in the walls
     L.log_lights(scene)
 """
 import math
@@ -157,7 +157,7 @@ def key_fill_rim(scene, subject, camera, key_w=250.0, fill_ratio=0.25, rim_w=200
     """A three-point rig round a subject, placed from the camera: the key (a softbox: an area light with a 120 deg
     spread) `key_deg` to the camera's side and above, the fill (wider, softer) on the other side at fill_ratio of the
     key, the rim behind and high: a SPOT with a narrow cone, so it edges the silhouette instead of flooding the floor
-    behind (an area light there did exactly that, test_key_fill_rim.py 11-07). Lights a person or a prop the studio
+    behind. Lights a person or a prop the studio
     way; outdoors the sun is the key and the sky the fill, so use it there only as a bounce or a kicker."""
     tgt = C.focus_point(subject, y_bias) if not callable(subject) else Vector(subject())
     cpos = camera.matrix_world.translation
@@ -239,12 +239,12 @@ def create_rt_lighting(scene, shadows=True, gi=True, reflections=True, refl_max_
                    shadow_soft_size (area: size; sun: angle). light_radius sets every point / spot that is still at
                    Blender's default 0.25 m. castShadow=false -> obj.visible_shadow = False.
       gi           fast GI (GLOBAL_ILLUMINATION, screen space, dynamic) on top of baked volume probes (static: bake
-                   them, bake_light_probes). keepFill has no counterpart: a broad fill must be real lights or
-                   emissive panels plus a baked probe. INDOORS, with a baked room probe, gi=False: fast GI's scan
-                   (in either mode, GI or AO only) lit the corner room's floor contacts and wall bases with the world
-                   through the walls (a blue crescent under a white sphere, bright strips, grain), and with it off
-                   EEVEE agreed with Cycles (measured 11-07; probe.render_reference is the check).
-      reflections  ray tracing up to refl_max_rough (rougher lobes come from sphere probes / the world).
+                   them, bake_light_probes); indoors with a room-fitted probe (add_room_probe). Always on: gi=False
+                   raises. keepFill has no counterpart: a broad fill must be real lights or emissive panels plus a
+                   baked probe.
+      reflections  ray tracing up to refl_max_rough (rougher lobes come from sphere probes / the world). Off, the
+                   reflections come from the probes alone (EEVEE's Light Probe tracing method): fast GI runs inside
+                   EEVEE's ray tracing, so the ray tracing itself stays on.
       denoise      the ray tracing denoiser (spatial + temporal + bilateral). OIDN is the compositor Denoise node,
                    for low-sample previews only.
     Returns an RTLighting handle (update / reset_history are no-ops)."""
@@ -256,30 +256,33 @@ def create_rt_lighting(scene, shadows=True, gi=True, reflections=True, refl_max_
         for o in scene.objects:
             if o.type == 'LIGHT' and o.data.type in ('POINT', 'SPOT') and abs(o.data.shadow_soft_size - 0.25) < 1e-6:
                 o.data.shadow_soft_size = float(light_radius)
-    ee.use_fast_gi = bool(gi)
-    if gi:
-        ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
-        if gi_distance is not None:
-            ee.fast_gi_distance = float(gi_distance)
+    if not gi:
+        raise ValueError('create_rt_lighting: fast GI stays on (EEVEE\'s global illumination, interiors included: a '
+                         'room gets a baked volume probe, add_room_probe)')
+    ee.use_fast_gi = True
+    ee.fast_gi_method = 'GLOBAL_ILLUMINATION'
+    if gi_distance is not None:
+        ee.fast_gi_distance = float(gi_distance)
     done['gi'] = ee.use_fast_gi
-    ee.use_raytracing = bool(reflections)
-    if reflections:
-        ee.ray_tracing_method = method
-        o = ee.ray_tracing_options
-        o.trace_max_roughness = float(refl_max_rough)
-        o.use_denoise = bool(denoise)
-        o.denoise_spatial = o.denoise_temporal = o.denoise_bilateral = bool(denoise)
-    done['reflections'] = {'on': ee.use_raytracing, 'max_roughness': refl_max_rough, 'method': method}
+    ee.use_raytracing = True
+    ee.ray_tracing_method = method if reflections else 'PROBE'
+    o = ee.ray_tracing_options
+    o.trace_max_roughness = float(refl_max_rough)
+    o.use_denoise = bool(denoise)
+    o.denoise_spatial = o.denoise_temporal = o.denoise_bilateral = bool(denoise)
+    done['reflections'] = {'traced': bool(reflections), 'max_roughness': refl_max_rough,
+                           'method': ee.ray_tracing_method}
     return RTLighting(scene, done)
 
 
 # ---------------------------------------------------------------------------------------------------------- probes
 def add_volume_probe(scene, name, centre, size, resolution=(16, 16, 8), samples=1024, clamp_indirect=10.0,
                      collection=None):
-    """A volume light probe (baked indirect light for a room or a set): centre, size (x, y, z) metres; resolution the
-    grid of samples inside it (cell-centred: the outermost sit half a cell inside the box). Surfaces beyond the
-    outermost samples fade to the WORLD's light, as if nothing stood between them and the sky: a room's probe must
-    reach into its walls (add_room_probe), not stop at them."""
+    """A volume light probe (baked indirect light for a room or a set): centre, size (x, y, z) metres, resolution the
+    number of samples along each axis. EEVEE lays an axis's N samples at (i + 1) / (N + 1) of the box, a spacing of
+    size / (N + 1) apart, the outermost one spacing in from the faces. A surface within about 0.75 of a spacing of
+    the box's faces, or outside the box, is lit by the World instead: an interior's probe reaches past its walls
+    (add_room_probe)."""
     d = bpy.data.lightprobes.new(name, 'VOLUME')
     ob = bpy.data.objects.new(name, d)
     (collection or scene.collection).objects.link(ob)
@@ -292,34 +295,63 @@ def add_volume_probe(scene, name, centre, size, resolution=(16, 16, 8), samples=
     return ob
 
 
-def add_room_probe(scene, name, inner_min, inner_max, wall=0.12, spacing=0.35, samples=1024, clamp_indirect=10.0,
+def room_probe_layout(inner_min, inner_max, wall=0.25, spacing=None):
+    """The volume probe add_room_probe makes for a room: {'centre', 'size', 'resolution', 'spacing', 'escape'}
+    (per axis). spacing (default: the wall's thickness, at most 0.4 m) is the distance between samples. The outermost
+    samples sit half a spacing into the walls, so the walls must be thicker than that: spacing at most 1.6 x wall."""
+    s0 = float(min(wall, 0.4) if spacing is None else spacing)
+    lo, hi = Vector(inner_min), Vector(inner_max)
+    res, sp = [], []
+    for i in range(3):
+        n = max(3, int(round((hi[i] - lo[i]) / s0)) + 2)
+        res.append(n)
+        sp.append((hi[i] - lo[i]) / (n - 2))
+    if 0.5 * max(sp) > 0.8 * wall:
+        raise ValueError(f'room probe: samples {max(sp):.3f} m apart need walls over {0.625 * max(sp):.3f} m thick '
+                         f'(these are {wall} m): the outermost samples must lie inside the walls')
+    size = [hi[i] - lo[i] + 3 * sp[i] for i in range(3)]
+    escape = 0.45 * min(min(0.5 * s, wall - 0.5 * s) for s in sp)
+    return {'centre': tuple((lo + hi) * 0.5), 'size': size, 'resolution': res, 'spacing': sp, 'escape': escape}
+
+
+def add_room_probe(scene, name, inner_min, inner_max, wall=0.25, spacing=None, samples=1024, clamp_indirect=10.0,
                    collection=None):
     """A volume probe for a room: inner_min / inner_max are the room's inside corners (floor to ceiling), wall the
-    thickness of its walls, floor and ceiling. The outermost rows of samples sit in the middle of the walls, about
-    `spacing` apart, so every interior surface lies BETWEEN rows of samples. The samples inside the walls see
-    backfaces: EEVEE marks them invalid and fills them from the room side (validity, dilation). A window's hole has
-    no wall: its samples see the sky, as the room does there.
+    thickness of its walls, floor and ceiling. The room is a closed shell of solid walls: the floor and ceiling run
+    under and over the walls, the walls meet at the corners, and every piece is a closed mesh with its normals out.
 
-    Why: EEVEE fades a volume probe to the world's light beyond its outermost samples. Measured 11-07 on the corner
-    room, a probe sized to the room's interior lit the walls, the floor and the spheres' lower halves with the uniform
-    world as if there were no walls: pale blue walls, and a white sphere with a dark cap where its top reached the
-    probe's samples. Cycles, path traced, shows that room warm and the sphere evenly lit. Returns the probe."""
-    lo = Vector(inner_min) - Vector((wall / 2,) * 3)
-    hi = Vector(inner_max) + Vector((wall / 2,) * 3)
-    res = [max(2, int(round((hi[i] - lo[i]) / spacing)) + 1) for i in range(3)]
-    cell = [(hi[i] - lo[i]) / (res[i] - 1) for i in range(3)]
-    size = [hi[i] - lo[i] + cell[i] for i in range(3)]
-    return add_volume_probe(scene, name, (lo + hi) * 0.5, size, resolution=res, samples=samples,
-                            clamp_indirect=clamp_indirect, collection=collection)
+    The box reaches 1.5 sample spacings past every inside face (room_probe_layout), so the outermost samples sit half
+    a spacing inside the walls, where they see only the walls' back faces and the bake rejects them (validity: they
+    are dilated from the room side), the next samples sit half a spacing into the room, and every inside surface lies
+    between room samples, a full spacing clear of the box's faded edge. The capture-position search (escape_bias)
+    stays shorter than a wall sample's distance to either face of its wall, so no sample inside a wall moves out
+    through its far side. A window's hole has no wall: its samples see the sky, as the room does there. A glass wall
+    is not solid: what stands beyond it is the room's outside, and lights the room through it. Bake the probe
+    (bake_light_probes) before rendering. Returns the probe."""
+    lay = room_probe_layout(inner_min, inner_max, wall, spacing)
+    ob = add_volume_probe(scene, name, lay['centre'], lay['size'], resolution=lay['resolution'], samples=samples,
+                          clamp_indirect=clamp_indirect, collection=collection)
+    d = ob.data
+    if hasattr(d, 'escape_bias'):
+        d.escape_bias = min(d.escape_bias, lay['escape'])
+    ob['room_inner'] = [list(inner_min), list(inner_max)]
+    return ob
 
 
-def add_sphere_probe(scene, name, centre, radius=2.0, falloff=0.2, collection=None):
-    """A sphere probe (reflections for the surroundings of `centre`): captures the scene round it."""
+def add_sphere_probe(scene, name, centre, radius=2.0, falloff=0.2, box=None, collection=None):
+    """A sphere probe (reflections for the surroundings of `centre`): captures the scene round it. radius: its
+    influence, a sphere. box=(x, y, z): a box of that size centred on it instead, which is also its parallax volume:
+    a room's reflections (the centre in the room, the box reaching into its walls, so the falloff lies inside them).
+    Surfaces outside every sphere probe reflect the World."""
     d = bpy.data.lightprobes.new(name, 'SPHERE')
     ob = bpy.data.objects.new(name, d)
     (collection or scene.collection).objects.link(ob)
     ob.location = centre
-    if hasattr(d, 'influence_distance'):
+    if box is not None:
+        d.influence_type = 'BOX'
+        d.influence_distance = 1.0
+        ob.scale = (box[0] / 2, box[1] / 2, box[2] / 2)
+    elif hasattr(d, 'influence_distance'):
         d.influence_distance = float(radius)
     if hasattr(d, 'falloff'):
         d.falloff = float(falloff)

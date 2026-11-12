@@ -70,11 +70,11 @@ def clean_scene(fps=30, frames=(1, 2), res=(960, 540)):
     return sc
 
 
-def probe_look(sc, interior=True, exposure=0.0, bloom=True, samples=16):
-    """the look family's probe preset (960 x 540, 16 samples), fast GI off indoors, a Glare bloom for the HDR glows."""
+def probe_look(sc, exposure=0.0, bloom=True, samples=16):
+    """the look family's probe preset (960 x 540, 16 samples, global illumination on: rooms carry baked volume
+    probes), a Glare bloom for the HDR glows."""
     from eidoblend.look import render_settings as RS
     done = RS.apply_auto_enhance(sc, 'probe', samples=samples, exposure=exposure,
-                                 ao=False if interior else None,
                                  bloom={'strength': 0.3, 'threshold': 1.2, 'size': 0.6} if bloom else False,
                                  motion_blur=False)
     sc.view_settings.view_transform = 'AgX'

@@ -1,6 +1,6 @@
 """Scaffolding of the SDF-volume tests: the SDF tests' helpers (tests/sdf/_common.py: PASS/FAIL lines, the probe
 stage, camera, render, contact sheets, AgX PNGs of a linear image) with this folder's out/, plus what the volume
-tests share: a dusk stage, image statistics, Cycles on the GPU, the reference march composited over the world.
+tests share: a dusk stage, image statistics, the reference march composited over the world.
 """
 
 from __future__ import annotations
@@ -47,54 +47,28 @@ def read_exr(path):
     return np.asarray(buf.get_pixels(oiio.FLOAT))
 
 
-def render_linear(path_exr, engine='BLENDER_EEVEE', samples=None):
-    """Render the scene to a linear float EXR (view transform Standard is not involved: an EXR holds scene-linear
-    values). Returns the (H, W, 4) array."""
+def render_linear(path_exr, samples=None):
+    """Render the scene (EEVEE) to a linear float EXR (view transform Standard is not involved: an EXR holds
+    scene-linear values). Returns the (H, W, 4) array."""
     import bpy
     sc = bpy.context.scene
     r = sc.render
-    keep = (r.engine, r.image_settings.media_type if hasattr(r.image_settings, 'media_type') else None,
+    keep = (r.image_settings.media_type if hasattr(r.image_settings, 'media_type') else None,
             r.image_settings.file_format, r.image_settings.color_depth)
     try:
-        r.engine = engine
         if hasattr(r.image_settings, 'media_type'):
             r.image_settings.media_type = 'IMAGE'
         r.image_settings.file_format = 'OPEN_EXR'
         r.image_settings.color_depth = '32'
         if samples is not None:
-            if engine == 'CYCLES':
-                sc.cycles.samples = int(samples)
-            else:
-                sc.eevee.taa_render_samples = int(samples)
+            sc.eevee.taa_render_samples = int(samples)
         C.render(path_exr)
     finally:
-        r.engine = keep[0]
-        if keep[1] is not None:
-            r.image_settings.media_type = keep[1]
-        r.image_settings.file_format = keep[2]
-        r.image_settings.color_depth = keep[3]
+        if keep[0] is not None:
+            r.image_settings.media_type = keep[0]
+        r.image_settings.file_format = keep[1]
+        r.image_settings.color_depth = keep[2]
     return read_exr(path_exr)
-
-
-def cycles_gpu(scene, samples=128):
-    """Cycles on the GPU (OptiX first), denoised: the ground truth of the same file."""
-    import bpy
-    prefs = bpy.context.preferences.addons['cycles'].preferences
-    for kind in ('OPTIX', 'CUDA'):
-        try:
-            prefs.compute_device_type = kind
-        except TypeError:
-            continue
-        prefs.get_devices()
-        if any(d.type == kind for d in prefs.devices):
-            break
-    for d in prefs.devices:
-        d.use = d.type != 'CPU'
-    scene.cycles.device = 'GPU'
-    scene.cycles.samples = int(samples)
-    scene.cycles.use_denoising = True
-    scene.cycles.volume_step_rate = 1.0
-    return scene
 
 
 def reference_over(vol_or_fx, cam, width, height, world, samples=2, t=None):

@@ -31,6 +31,8 @@ import numpy as np  # noqa: E402
 from judge import refs, views  # noqa: E402
 from judge.refs import grid  # noqa: E402
 
+TEX_EXPOSURE = -0.5         # the surfacing package's exposure for textured views (its render_places.py default)
+
 
 def argv():
     a = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
@@ -82,14 +84,16 @@ def recipe_item(job, ref, item, log):
     wx, wy = eye['world'].eye[0], eye['world'].eye[1]
     centre = (lv.x0 + lv.side / 2.0, lv.y0 + lv.side / 2.0)
     errors = {}
-    for palette, tag, vws in ((None, 'hero', ('eye',)), ('auto', 'tex', ('aerial', 'eye'))):
+    # the textured views at the palettes' own exposure (surfacing/render_places.py: -0.5; the clay keeps the rig's)
+    for palette, tag, vws, exposure in ((None, 'hero', ('eye',), None), ('auto', 'tex', ('aerial', 'eye'), TEX_EXPOSURE)):
         if palette == 'auto' and not item.get('textured'):
             continue
         try:                                    # the field and the clay probes stand even when a build fails
             bpy.ops.wm.read_factory_settings(use_empty=True)
             tb = A.make_terrain(item['recipe'], focus=(wx, wy), name=f'{label}_{tag}', **dict(kw, palette=palette))
             r = views.render_object_views(tb.height_at, lv.side, centre, ref, eye, out, job['cache_root'],
-                                          f'{label}_{tag}', views=vws, samples=job.get('samples', 16))
+                                          f'{label}_{tag}', views=vws, samples=job.get('samples', 16),
+                                          exposure=exposure)
             recs.update({f'{tag}_{k}': v for k, v in r.items()})
         except Exception as e:                  # noqa: BLE001 - recorded in the result, the job goes on
             traceback.print_exc()

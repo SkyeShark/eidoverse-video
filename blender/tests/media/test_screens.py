@@ -14,8 +14,9 @@ av    an ASCII panel (teletype reveal, cursor) beside two video screens made fro
 hold  screens whose range starts mid-film (frames 10..20 of 1..30), at frames 5, 15 and 25: a drawn screen, a
       source sequence, a native movie, a half-speed retime and a looping 30 fps retime -> 3 stills; and an overlay
       panel over the same range, rendered 5..25 (it must exist only on 10..20)
-spill the spill light against Cycles: a 1.0 x 0.6 m screen (strength 1, spill 1) over a white floor, three frame
-      colours; floor radiance with the screen in view and out of view -> numbers and a contact sheet
+spill the spill light: a 1.0 x 0.6 m screen (strength 1, spill 1) over a white floor, three frame colours; its
+      power and colour from the frame, the floor it lights with the screen in view and out of view -> numbers
+      (PASS / FAIL) and a contact sheet
 Writes blender/tests/media/out/screens_*.png and prints what each probe checked.
 """
 import math
@@ -282,26 +283,6 @@ def probe_hold():
         Image.open(Path(d) / f'ov_{f:04d}.png').save(OUT / f'screens_hold_overlay_f{f:03d}.png')
 
 
-def _cycles(sc, samples=128):
-    sc.render.engine = 'CYCLES'
-    sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
-    prefs = bpy.context.preferences.addons['cycles'].preferences
-    for dt in ('OPTIX', 'CUDA'):
-        try:
-            prefs.compute_device_type = dt
-        except TypeError:
-            continue
-        prefs.get_devices()
-        if any(d.type == dt for d in prefs.devices):
-            for d in prefs.devices:
-                d.use = d.type == dt
-            sc.cycles.device = 'GPU'
-            return dt
-    sc.cycles.device = 'CPU'
-    return 'CPU'
-
-
 def _render(sc, path, exr=True):
     """Render a still: an EXR read back as scene-linear RGB (rows top-down), or a display PNG."""
     r = sc.render
@@ -324,11 +305,11 @@ def _render(sc, path, exr=True):
 
 
 def probe_spill():
-    """The spill light against Cycles. Ground truth: Cycles with the screen's own (front-side) emission lighting a
-    white floor, the spill light hidden. Measured on a floor patch in front of the screen (x -0.4..0.4,
-    y -1.0..-0.4): Cycles with the spill light alone (the formula), EEVEE with the spill alone, EEVEE with the
-    emission alone (its own GI) and EEVEE as shipped (both), from camera A (the screen in view) and camera B
-    (straight down over the patch, the screen out of view)."""
+    """The spill light: a 1.0 x 0.6 m screen (strength 1, spill 1) over a white floor in a dark world, three frame
+    colours. Its power is a Lambertian panel's (pi x area x the display's radiance) and its colour the frame's mean;
+    in EEVEE the floor patch in front of the screen (x -0.4..0.4, y -1.0..-0.4), seen from camera A (the screen in
+    view) and camera B (straight down, the screen out of view), takes the screen's colour from the spill light, and
+    keeps only what fast GI gathers from the panel's emission without it."""
     res = (480, 270)
     W = WORK / 'spill'
     W.mkdir(parents=True, exist_ok=True)
@@ -340,24 +321,15 @@ def probe_spill():
         scr = screens.make_screen(width=1.0, height=0.6, px=64, draw=lambda c, t, w, h, col=hexcol: c.clear(col),
                                   frames=(1, 1), out_dir=W / tag, name=f'spill_{tag}', strength=1.0, spill=1.0)
         scr.obj.location = (0, 0, 0.8)
-        # the panel emits from its front only (Cycles' Emission is two-sided; a display and the area light are not)
-        t = scr.material.node_tree
-        em = next(n for n in t.nodes if n.type == 'EMISSION')
-        geo = t.nodes.new('ShaderNodeNewGeometry')
-        front = t.nodes.new('ShaderNodeMath')
-        front.operation = 'SUBTRACT'
-        front.inputs[0].default_value = 1.0
-        t.links.new(geo.outputs['Backfacing'], front.inputs[1])
-        gain = t.nodes.new('ShaderNodeMath')
-        gain.operation = 'MULTIPLY'
-        gain.inputs[1].default_value = 1.0
-        t.links.new(front.outputs[0], gain.inputs[0])
-        t.links.new(gain.outputs[0], em.inputs['Strength'])
         lt = scr.light
-        m = scr.means[0]
-        print(f'[spill] {tag} {hexcol}: frame mean linear {np.round(m, 4).tolist()} -> light {lt.data.energy:.4f} W '
-              f'colour {tuple(round(c, 3) for c in lt.data.color)} size {lt.data.size:.2f} x {lt.data.size_y:.2f} '
-              f'cutoff {lt.data.cutoff_distance} m (custom {lt.data.use_custom_distance})')
+        m = np.asarray(scr.means[0], np.float64)
+        want_w = math.pi * lt.data.size * lt.data.size_y * float(m.max())
+        want_c = m / max(float(m.max()), 1e-9)
+        ok = abs(lt.data.energy - want_w) <= 1e-3 * want_w and np.allclose(lt.data.color, want_c, atol=1e-3)
+        print(f'[spill] {"PASS" if ok else "FAIL"} {tag} {hexcol}: frame mean linear {np.round(m, 4).tolist()} -> '
+              f'light {lt.data.energy:.4f} W (pi x area x radiance: {want_w:.4f}), colour '
+              f'{tuple(round(c, 3) for c in lt.data.color)}, cutoff {lt.data.cutoff_distance} m '
+              f'(custom {lt.data.use_custom_distance})')
         cams = {'A': S.camera(sc, (1.7, -2.6, 1.4), (0, -0.6, 0.35), lens=32, name='camA'),
                 'B': S.camera(sc, (0, -0.7, 2.0), (0, -0.66, 0), lens=35, name='camB')}
         bpy.context.view_layer.update()
@@ -370,45 +342,34 @@ def probe_spill():
 
             def patch(a):
                 return a[y0:y1, x0:x1].reshape(-1, 3).mean(axis=0)
-            dev = _cycles(sc)
-            lt.hide_render, gain.inputs[1].default_value = True, 1.0
-            r = {'cycles_truth': patch(_render(sc, W / f'{tag}_{cname}_cycles_truth.exr'))}
-            _render(sc, W / f'{tag}_{cname}_cycles_truth.png', exr=False)
-            if cname == 'A':
-                lt.hide_render, gain.inputs[1].default_value = False, 0.0
-                r['cycles_spill'] = patch(_render(sc, W / f'{tag}_{cname}_cycles_spill.exr'))
-            sc.render.engine = 'BLENDER_EEVEE'
-            lt.hide_render, gain.inputs[1].default_value = False, 0.0
-            r['eevee_spill'] = patch(_render(sc, W / f'{tag}_{cname}_eevee_spill.exr'))
-            lt.hide_render, gain.inputs[1].default_value = True, 1.0
-            r['eevee_emission'] = patch(_render(sc, W / f'{tag}_{cname}_eevee_emission.exr'))
-            lt.hide_render, gain.inputs[1].default_value = False, 1.0
-            r['eevee_shipped'] = patch(_render(sc, W / f'{tag}_{cname}_eevee_shipped.exr'))
-            _render(sc, W / f'{tag}_{cname}_eevee_shipped.png', exr=False)
-            gt = r['cycles_truth']
-            print(f'[spill] {tag}, camera {cname} ({"screen in view" if cname == "A" else "screen out of view"}; '
-                  f'Cycles on {dev}), floor patch ({x0},{y0})-({x1},{y1}), ratio to the Cycles truth per channel:')
-            for k, v in r.items():
-                print(f'    {k:15s} linear {np.round(v, 5).tolist()}  ratio '
-                      f'{np.round(v / np.maximum(gt, 1e-9), 3).tolist()}')
-            row += [W / f'{tag}_{cname}_cycles_truth.png', W / f'{tag}_{cname}_eevee_shipped.png']
+            lt.hide_render = True
+            off = patch(_render(sc, W / f'{tag}_{cname}_no_spill.exr'))
+            lt.hide_render = False
+            on = patch(_render(sc, W / f'{tag}_{cname}_spill.exr'))
+            _render(sc, W / f'{tag}_{cname}_spill.png', exr=False)
+            hue = (on - off) / max(float((on - off).max()), 1e-9)
+            ok = float((on - off).max()) > 0 and np.allclose(hue, want_c, atol=0.08)
+            print(f'[spill] {"PASS" if ok else "FAIL"} {tag}, camera {cname} '
+                  f'({"screen in view" if cname == "A" else "screen out of view"}): floor patch linear '
+                  f'{np.round(off, 5).tolist()} without the spill -> {np.round(on, 5).tolist()} with it; the spill\'s '
+                  f'light in the screen\'s colour {np.round(hue, 3).tolist()}')
+            row.append(W / f'{tag}_{cname}_spill.png')
         sheet_rows.append((tag, row))
-    # contact sheet: per colour, camera B truth | shipped, camera A truth | shipped
+    # contact sheet: per colour, camera B | camera A
     tw, th = res
-    sheet = Image.new('RGB', (tw * 4, (th + 22) * len(sheet_rows) + 22), (24, 24, 24))
+    sheet = Image.new('RGB', (tw * 2, (th + 22) * len(sheet_rows) + 22), (24, 24, 24))
     d = ImageDraw.Draw(sheet)
     f = raster.font('Share Tech Mono', 16)
-    order = (2, 3, 0, 1)
-    for j, name in enumerate(('B: Cycles truth', 'B: EEVEE emission + spill', 'A: Cycles truth',
-                              'A: EEVEE emission + spill')):
+    order = (1, 0)
+    for j, name in enumerate(('B: the screen out of view', 'A: the screen in view')):
         d.text((j * tw + 6, 3), name, font=f, fill=(230, 230, 230))
     for i, (tag, row) in enumerate(sheet_rows):
         y = 22 + i * (th + 22)
         d.text((6, y + 2), tag, font=f, fill=(230, 230, 230))
         for j, k in enumerate(order):
             sheet.paste(Image.open(row[k]).convert('RGB'), (j * tw, y + 22))
-    sheet.save(OUT / 'screens_spill_calibration.png')
-    print('[spill] contact sheet', OUT / 'screens_spill_calibration.png')
+    sheet.save(OUT / 'screens_spill.png')
+    print('[spill] contact sheet', OUT / 'screens_spill.png')
 
 
 if 'mac' in ONLY:

@@ -58,9 +58,12 @@ def apply_auto_enhance(scene, preset='film', *, resolution=None, percentage=100,
                        filter_size=None, fps=None, keep_sequencer=False):
     """Set the scene's EEVEE look from a preset, with per-knob overrides. Returns what it set (log it).
 
-    ao           dict(distance=, method='GLOBAL_ILLUMINATION'|'AMBIENT_OCCLUSION_ONLY', quality=, ...) or False (fast GI off)
+    ao           dict(distance=, method='GLOBAL_ILLUMINATION'|'AMBIENT_OCCLUSION_ONLY', quality=, ...): EEVEE's fast GI,
+                 which is always on (indoors too, with a baked room probe: look.lighting.add_room_probe)
                  -- N8AO's lesson: contact scale. 0.3-0.6 m for people and props, metres for architecture.
     ssr          dict(max_roughness=, quality=, thickness=, resolution_scale=, method='SCREEN'|'PROBE') or False
+                 (False: reflections from the light probes alone, EEVEE's 'PROBE' tracing; the ray tracing stays on,
+                 since fast GI runs inside it)
     bloom        dict(strength=, size=, threshold=, type='Bloom'|'Fog Glow') or False / None (off, as in the house)
     motion_blur  dict(shutter=, position=, steps=) or False
     volumes      dict(tile=, samples=, distribution=, shadows=, shadow_samples=)
@@ -85,43 +88,41 @@ def apply_auto_enhance(scene, preset='film', *, resolution=None, percentage=100,
         ee.overscan_size = float(P['overscan'])
         done['overscan'] = ee.overscan_size
 
-    # ray tracing: the SSR + reflections + refraction path
+    # ray tracing: the SSR + reflections + refraction path, and fast GI's host (EEVEE runs fast GI inside it)
     rt = dict(P['raytracing'])
+    rt.update(ssr or {})
     if ssr is False:
-        ee.use_raytracing = False
-        done['raytracing'] = False
-    else:
-        rt.update(ssr or {})
-        ee.use_raytracing = True
-        ee.ray_tracing_method = rt['method']
-        o = ee.ray_tracing_options
-        o.resolution_scale = str(rt['resolution_scale'])
-        o.trace_max_roughness = float(rt['max_roughness'])
-        o.screen_trace_quality = float(rt['quality'])
-        o.screen_trace_thickness = float(rt['thickness'])
-        o.use_backface_hit = bool(rt['backface_hit'])
-        o.use_denoise = bool(rt['denoise'])
-        o.denoise_spatial = bool(rt['denoise_spatial'])
-        o.denoise_temporal = bool(rt['denoise_temporal'])
-        o.denoise_bilateral = bool(rt['denoise_bilateral'])
-        done['raytracing'] = rt
+        rt['method'] = 'PROBE'
+    ee.use_raytracing = True
+    ee.ray_tracing_method = rt['method']
+    o = ee.ray_tracing_options
+    o.resolution_scale = str(rt['resolution_scale'])
+    o.trace_max_roughness = float(rt['max_roughness'])
+    o.screen_trace_quality = float(rt['quality'])
+    o.screen_trace_thickness = float(rt['thickness'])
+    o.use_backface_hit = bool(rt['backface_hit'])
+    o.use_denoise = bool(rt['denoise'])
+    o.denoise_spatial = bool(rt['denoise_spatial'])
+    o.denoise_temporal = bool(rt['denoise_temporal'])
+    o.denoise_bilateral = bool(rt['denoise_bilateral'])
+    done['raytracing'] = rt
 
-    # fast GI: N8AO's job (contact darkening) plus a screen-space bounce
-    gi = dict(P['fast_gi'])
+    # fast GI: N8AO's job (contact darkening) plus a screen-space bounce, on in every preset
     if ao is False:
-        ee.use_fast_gi = False
-        done['fast_gi'] = False
-    else:
-        gi.update(ao or {})
-        ee.use_fast_gi = True
-        ee.fast_gi_method = gi['method']
-        ee.fast_gi_resolution = str(gi['resolution'])
-        ee.fast_gi_ray_count = int(gi['ray_count'])
-        ee.fast_gi_step_count = int(gi['step_count'])
-        ee.fast_gi_distance = float(gi['distance'])
-        ee.fast_gi_quality = float(gi['quality'])
-        ee.fast_gi_bias = float(gi['bias'])
-        done['fast_gi'] = gi
+        raise ValueError('apply_auto_enhance: fast GI stays on (EEVEE\'s global illumination, interiors included: '
+                         'a room gets a baked volume probe, look.lighting.add_room_probe); ao takes a dict of its '
+                         'settings')
+    gi = dict(P['fast_gi'])
+    gi.update(ao or {})
+    ee.use_fast_gi = True
+    ee.fast_gi_method = gi['method']
+    ee.fast_gi_resolution = str(gi['resolution'])
+    ee.fast_gi_ray_count = int(gi['ray_count'])
+    ee.fast_gi_step_count = int(gi['step_count'])
+    ee.fast_gi_distance = float(gi['distance'])
+    ee.fast_gi_quality = float(gi['quality'])
+    ee.fast_gi_bias = float(gi['bias'])
+    done['fast_gi'] = gi
     ee.clamp_surface_indirect = float(P['clamp_surface_indirect'])
 
     sh = dict(P['shadows'])

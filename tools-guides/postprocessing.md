@@ -33,7 +33,7 @@ EEVEE does those jobs in the renderer:
 
 | WebGPU | EEVEE |
 | --- | --- |
-| N8AO (`_aoParams`, radius 0.3 m) | fast GI, `GLOBAL_ILLUMINATION` (or `AMBIENT_OCCLUSION_ONLY`); `fast_gi_distance` is the contact scale. Indoors with a baked room probe, `ao=False`: either mode lit floor contacts with the world through the walls |
+| N8AO (`_aoParams`, radius 0.3 m) | fast GI, `GLOBAL_ILLUMINATION`: contact darkening and the screen-space bounce, indoors and out; `fast_gi_distance` is the contact scale |
 | SSR, edge fade | ray tracing (SCREEN), `trace_max_roughness`; misses fall back to sphere probes and the world; `use_overscan` keeps the frame edges |
 | UnrealBloom | the compositor's Glare 'Bloom' (off by default) |
 | TRAA, FXAA | `taa_render_samples` jittered samples per frame through a 1.5 px filter: supersampled; no history between frames |
@@ -42,29 +42,26 @@ EEVEE does those jobs in the renderer:
 
 ```python
 from eidoblend.look import render_settings as RS
-RS.apply_auto_enhance(scene, 'film')                    # 1920x1080, 32 samples: episode three's measured look
+RS.apply_auto_enhance(scene, 'film')                    # 1920x1080, 32 samples
 RS.apply_auto_enhance(scene, 'probe')                   # the same look at 960x540, 16 samples
 RS.apply_auto_enhance(scene, 'film', ao={'distance': 0.4}, ssr={'max_roughness': 0.6}, bloom={'strength': 0.2, 'threshold': 3.0})
 print(RS.summary(scene))                                # log the look actually set, before every render
 ```
 
-`'film'` is read from episode three's house: ray tracing SCREEN with max
-roughness 0.5 and all three denoisers; fast GI 0.6 m; shadows 2 rays × 12
-steps; volumes at tile 16 × 32 samples (measured on the house to look the same
-as 4 × 128 at 2.5 s a frame instead of 4.1); motion blur, shutter 0.5,
-centred; filter 1.5; overscan 3%; AgX Base Contrast. Exposure is the scene's
-own, not the preset's: the corner room took +2.25, the meadow fixture's sun
-+0.50.
+`'film'` is ray tracing SCREEN with max roughness 0.5 and all three
+denoisers; fast GI 0.6 m; shadows 2 rays × 12 steps; volumes at tile 16 × 32
+samples (which reads the same as 4 × 128 on a hazy interior, at 2.5 s a frame
+instead of 4.1); motion blur, shutter 0.5, centred; filter 1.5; overscan 3%;
+AgX Base Contrast. Exposure is the scene's own, not the preset's: a lamp-lit
+room took +2.25, a sunlit meadow +0.50.
 Measure it ([exposure](camera-lighting.md#exposure-measured)).
 `apply_auto_enhance` turns `use_sequencer` off unless `keep_sequencer=True`:
 with strips in the VSE, Blender renders the strips instead of the 3D view.
 
-Samples: 16 is enough to judge a sunlit exterior. In a dim interior, a white
-sphere showed grain at 16 and 32 samples and was clean only at 64. The grain
-was fast GI's: with fast GI off (`ao=False`) and a baked room probe it was
-clean at 16, and the room matched Cycles. Indoors, turn fast GI off
-([probes](camera-lighting.md#ray-traced-lighting-eevee)); then raise samples
-before reaching for a denoiser.
+Samples: 16 is enough to judge a sunlit exterior. A dim interior needs more
+for a clean film (64 cleared a lamp-lit room's grain): raise the samples
+before reaching for a denoiser, and build the room to hold its light
+([interiors](camera-lighting.md#interiors)).
 
 ## The post chain — `post/chain.py`
 

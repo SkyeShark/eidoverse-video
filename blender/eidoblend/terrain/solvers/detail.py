@@ -26,7 +26,7 @@ Scales by level: the strength sees every feature the level resolves (r(size / ce
 relief adds only the band the parent level cannot resolve (r(size / cell) - r(size / (2 cell))), so a feature's relief
 is applied once across the levels that inherit it, and nothing the DEM pixel already holds is added to a real place.
 
-Gully octave. Ekigar's Phacelle filter (moved from ekigar/phacelle.py): stripe noise whose stripes run along a
+Gully octave. Ekigar's Phacelle filter: stripe noise whose stripes run along a
 direction, each octave steered by the one before so the finer gullies run into the coarser. Here the direction is the
 flow (the routed MFD direction where a flow vector is given, else down the surface smoothed at the octave's scale),
 the stripes are world-space, the amplitude is metres, and it is masked to soil slopes between 10 and 35 degrees.
@@ -420,7 +420,7 @@ def op_breakup(fields, level, params=None, seed=0, log=None, backend='gpu', ctx=
 # --------------------------------------------------------------------------------------------- gully ---
 
 def phacelle_noise(px, py, dx, dy, freq, offset, normalization, lattice_offset=(0, 0)):
-    """Ekigar's phacelle_noise (ekigar/phacelle.py) on lattice coordinates (px, py) with a direction field (dx, dy):
+    """Ekigar's phacelle_noise on lattice coordinates (px, py) with a direction field (dx, dy):
     (cos, sin, side x, side y). The stripes run ALONG (dx, dy); `freq` stripes per lattice cell."""
     sdx = -dy * freq * TAU
     sdy = dx * freq * TAU

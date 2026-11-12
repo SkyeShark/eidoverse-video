@@ -785,10 +785,26 @@ def test_p():
           rec[0]['message'] and 'screenHook' in rec[0]['message'], rec[0]['message'][:160] if rec else '')
     sc2 = fresh()
     sc2.eevee.use_raytracing = True
+    sc2.eevee.use_fast_gi = True
     led2 = L.create_ledger()
     post.apply(sc2, {'_no_auto_enhance': True, '_auto_enhance_color_hook': hue}, led2)
-    check('P5 _no_auto_enhance: ray tracing and fast GI off, no runner stages',
-          not sc2.eevee.use_raytracing and not sc2.eevee.use_fast_gi and not chain.stages(sc2), '')
+    check('P5 _no_auto_enhance: no runner stages; EEVEE\'s ray tracing and fast GI (its lighting) stay on',
+          sc2.eevee.use_raytracing and sc2.eevee.use_fast_gi and not chain.stages(sc2), '')
+    sc2b = fresh()
+    sc2b.eevee.use_raytracing = True
+    sc2b.eevee.use_fast_gi = True
+    post.apply(sc2b, {'_ao_params': {'enabled': False}, '_ssr_params': {'enabled': False}}, L.create_ledger())
+    check('P5b _ao_params / _ssr_params enabled false: fast GI stays on, reflections come from the light probes',
+          sc2b.eevee.use_raytracing and sc2b.eevee.use_fast_gi and sc2b.eevee.ray_tracing_method == 'PROBE',
+          f'ray tracing {sc2b.eevee.use_raytracing} ({sc2b.eevee.ray_tracing_method}), fast GI {sc2b.eevee.use_fast_gi}')
+    from eidoblend.harness import settings as HS
+    sc2c = fresh()
+    sc2c.eevee.use_raytracing = True
+    sc2c.eevee.use_fast_gi = True
+    HS.apply_render_block(sc2c, {'raytracing': False})
+    check('P5c the render block\'s "raytracing": false: reflections from the light probes, fast GI stays on',
+          sc2c.eevee.use_raytracing and sc2c.eevee.use_fast_gi and sc2c.eevee.ray_tracing_method == 'PROBE',
+          f'ray tracing {sc2c.eevee.use_raytracing} ({sc2c.eevee.ray_tracing_method}), fast GI {sc2c.eevee.use_fast_gi}')
     sc3 = fresh()
 
     def broken(scene, tree):

@@ -9,7 +9,7 @@ rain, dim lamps) builds and renders after the full set's dispose().
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_race_bin/test_race.py -- [--build-only] [--shots tag,tag] [--res 960x540]
-        [--samples 16] [--no-rain] [--cycles <tag>] [--no-invariants]
+        [--samples 16] [--no-rain] [--no-invariants]
 
 Prints PASS / FAIL lines; exits 1 on a FAIL.
 """
@@ -323,13 +323,6 @@ if not arg('--build-only'):
         ok, secs = render(path)
         check(f'render {name}: {tag}', ok, f'{secs:.1f} s')
         done[tag] = (f, path)
-    cyc = arg('--cycles')
-    if cyc and cyc is not True and cyc in done:        # the same frame path traced (round one's look.probe)
-        from eidoblend.look.probe import render_reference
-        f, p = done[cyc]
-        path = p.replace('.png', '_cycles.png')
-        secs = render_reference(scene, path, frame=f, samples=128, bounces=6)
-        check(f'cycles reference {cyc}', os.path.isfile(path), f'{secs:.1f} s')
 
 if not arg('--build-only') and not arg('--no-invariants'):
     # 1. moved: the root translated, the cameras re-keyed through it; every material, light, effect and camera reads

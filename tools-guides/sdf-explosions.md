@@ -120,23 +120,18 @@ scattering medium of the same density, so it takes the moon, the sun and the
 fire's own lamps, and it casts volume shadows. Its albedo is the engine's
 smoke colour, lifted so that each example's brightest smoke scatters about
 0.75 of the light, keeping the engine's gradient: × 2 for the bonfire and
-× 2.5 for the fire and the candle. The engine's greys taken as albedos
-unchanged made a sooty smoke that vanished against a night sky. The blast's
-smoke band (0.012 to 0.18) is too dark for that, and tripled it still read
-as black soot, so its cooled cloud is dust in the band's hue, with an albedo
-of 0.3 to 0.6. The one-medium examples (`smoke`,
+× 2.5 for the fire and the candle (the engine's greys, taken as albedos as
+they are, read as soot against a night sky). The blast's smoke band (0.012 to
+0.18) is darker still, so its cooled cloud is dust in the band's hue, with an
+albedo of 0.3 to 0.6. The one-medium examples (`smoke`,
 `explosion_ring`, `flame`, `gyroid_fireball`) take `sample_as='albedo'` for
 the same effect.
 
 ## Light on the scene
 
-EEVEE draws volume emission but never lets it light a surface. The probe
-`test_volume_lights.py` renders a bonfire and a candle on a grey floor at
-night, five ways, to float EXR. The floor beside the fire gains **exactly
-0** from the volume in EEVEE. In Cycles the same volume lights the floor by
-itself.
-
-`light_from_emission(vol)` puts that light back. For every baked frame it
+EEVEE draws volume emission but does not let it light a surface: in EEVEE
+the light a fire casts on the scene is a light. `light_from_emission(vol)`
+gives a volume its lamps. For every baked frame it
 reads the frame's density and emission grids back from the `.vdb`. It finds
 the light that escapes the medium: each voxel's emission, times its mean
 transmittance to the box along the six axes, times its volume, times 4π.
@@ -146,13 +141,10 @@ spread, parented to the volume object so they follow it. `count=3` splits
 the light over three k-means lobes, which suits a spread-out medium like the
 cap and the ring of the blast. Each light's cutoff distance is set where its
 largest power fades to 10⁻⁴ W/m², so the scene's light threshold does not
-cull the glow on distant walls.
-
-Against Cycles, where the volume lights the floor by itself, the lamps bring
-EEVEE's floor to **0.88** of Cycles for the bonfire and **0.91** for the
-candle, mean over six floor patches. The patches range from 0.66 to 1.17
-round the asymmetric bonfire. One point light cannot carry a flame's
-angular shape.
+cull the glow on distant walls. One point light cannot carry a flame's
+angular shape; round an asymmetric fire, more lobes (`count=`) follow it
+more closely. `test_volume_lights.py` renders a bonfire and a candle on a
+grey floor at night with their lamps.
 
 ```python
 rig = light_from_emission(fire, count=1, energy_scale=1.0, radius_scale=0.6, shadows=True)
@@ -161,13 +153,10 @@ rig.frames[24]           # [{'power': (r, g, b) W, 'centre', 'radius', 'share'}]
 rig.remove()
 ```
 
-The lamps are an EEVEE device. Cycles lights the scene from the volume
-itself, so hide them (`hide_render`) in a Cycles render.
-
-The pyroclastic `explosion` is a surface, and EEVEE barely lights the scene
-from an emissive mesh either. With its fast GI on (the default) the floor
-beside the fireball got about 6 % of the light Cycles puts there.
-`light_from_surface(sdf)` does for an emissive SDF solid what
+The pyroclastic `explosion` is a surface. An emissive mesh lights the scene
+in EEVEE only through Fast GI's screen-space pass and the probes, so a
+glowing solid wants lamps too: `light_from_surface(sdf)` does for an
+emissive SDF solid what
 `light_from_emission` does for a volume. Per frame it reads the evaluated
 mesh's faces and each face's emitted radiance: a baked frame carries
 `sdf_emission` per vertex, and a still is evaluated with the SDF's own
@@ -178,10 +167,8 @@ is weighted by its escape fraction: 16 cosine-weighted rays per face,
 sphere-traced through the SDF on 4096 faces drawn by power. The lights sit
 at the emitting skin's centroid, inside the solid, so shadow linking takes
 the solid out of their shadows; otherwise its own surface would block them.
-EEVEE honours the linking. Against Cycles the floor beside the fireball gets
-**1.02** of Cycles' light (0.91 to 1.13 over five patches, 1.42 at the far
-one), where π × radiance × area alone gave 1.66. The lights carry no
-specular, because EEVEE's ray tracing already reflects the glowing mesh.
+The lights carry no specular, because EEVEE's ray tracing already reflects
+the glowing mesh.
 `time_scale` / `time_offset` are the ones the solid's `bake()` used: the
 escape is traced through the SDF at each frame's time. Baked over four
 frames of its growth, the fireball's keyed lamps rise from 38 to 66 W, and
@@ -194,10 +181,9 @@ light_from_surface(boom, count=1)
 ```
 
 **Reflections.** EEVEE draws no volume in its ray-traced reflections: a
-chrome ball beside the fire shows the lamp's round highlight, while in
-Cycles it reflects the flame's shape. The engine's `nuclear_explosion`
-marched reflected rays through its cloud for metal surfaces. Here that is
-Cycles' job, or the lamps' highlight in EEVEE.
+chrome ball beside the fire shows the lamp's round highlight. The engine's
+`nuclear_explosion` marched reflected rays through its cloud for metal
+surfaces; here the lamps give metals their highlight.
 
 ## EEVEE's froxels
 
@@ -294,8 +280,8 @@ fit its box; the effect runs it to 20 × scale, the 2 km ring.
 | `scale` | the size (1 unit ≈ 100 m: scale 1 is a ~900 m cap); it sets the grids' boxes, so pass it to `apply_to` |
 | `timeOffset`, `loopSeconds` | the shader's phase and period (uniforms; `nuke.uniforms['time_offset'] = 3`, then bake) |
 | `opacity` | one Value node in a shader group that both volumes' materials use, multiplying density and emission; each lamp's energy is a driver, its keyed power (`glow_power`) × that socket. `key_opacity(frame, v)` keys it (`nuke.opacity_socket` is the socket), and a key set on the socket any other way fades the lamps too. Exact for thin smoke; the dense core fades later than the screen mix did |
-| `volSteps` | the reference march's step count |
-| `surfSteps`, `reflectSteps`, `maxT`, `width`, `height` | the screen march's budgets and size: accepted and reported. The cloud is drawn at any distance, and its reflections are EEVEE's or Cycles' |
+| `volSteps` | accepted: the grids hold the whole cloud, so no step count limits it |
+| `surfSteps`, `reflectSteps`, `maxT`, `width`, `height` | the screen march's budgets and size: accepted and reported. The cloud is drawn at any distance, and its reflections are EEVEE's |
 | `disableForPerfTest` | the volumes are built hidden and nothing is baked |
 | (extra) `quality` | `'fast'` / `'balanced'` / `'high'`: voxels of 0.16 / 0.08 / 0.055 original units × scale |
 | (extra) `lights`, `light_scale` | glow lamps per frame (3: the surge, the stem and the cap), and their multiplier |
@@ -306,9 +292,7 @@ of boxes, beside the effect's own march: the flash and the young ring, the
 orange surge round a white cap, the wide grey ring, the cooling orange cap,
 the dark dispersing cloud. EEVEE follows the march at every stage. The glow
 lamps light the ground and the buildings' faces, and the buildings occlude
-the ring. At t = 8.5 s a Cycles frame of the same file, with the volumes
-lighting the town by themselves, matches the EEVEE frame with its lamps,
-except in the chrome ball, which reflects the cloud only in Cycles.
+the ring.
 
 `nuke.uniforms` is the effect's returned `uniforms`: `time`, `origin`,
 `scale`, `time_offset`, `loop_seconds` and `opacity`, read and set by name.
@@ -341,24 +325,24 @@ remains, and only makes sure every lamp has its driver.
   and seed, strength and heat change it. `look='lit'` gives the same medium,
   split. With `fit=1` it refits the explosion ring's post fold, and with
   `timing=1` it times the bakes.
-- `test_volume_lights.py`: EEVEE's volume emission against Cycles and the
-  keyed lamps (bonfire, candle). The surface fireball's light with and
-  without `light_from_surface`, and the fireball baked with its lamps keyed
-  per frame.
+- `test_volume_lights.py`: the keyed lamps of a bonfire and a candle on a
+  floor at night, the surface fireball's light with and without
+  `light_from_surface`, and the fireball baked with its lamps keyed per
+  frame.
 - `test_volume_sequences.py`: every example's life over its loop (EEVEE
   above the engine's march, both over the same empty stage) and six
   consecutive frames with the lamps keyed. With `lit=1` it adds the
   `look='lit'` comparison.
 - `test_nuclear_explosion.py`: the effect's options, the uncapped ring, its
-  life beside its own march over a town, a Cycles frame, its motion, the
-  keyed opacity (lamps included, keyed through the socket as well) and the
-  registry hooks.
+  life beside its own march over a town, its motion, the keyed opacity
+  (lamps included, keyed through the socket as well) and the registry
+  hooks.
 - `test_volume_scene_integration.py`: the volumes in a real scene.
   - A fog box and a world volume kept in the fitted froxel range.
   - Timeline-marker camera cuts.
   - The camera inside the smoke.
   - A turned and scaled fire's lamps, and a placed, scaled blast.
-  - The roaring `fire`'s lamps against Cycles (0.83).
+  - The roaring `fire`'s lamps.
   - The post-registry hook registered as written: build, keys and undo.
   - `probe_reflect`: whether a sphere probe carries a volume into
     reflections. It does not.
@@ -368,16 +352,15 @@ remains, and only makes sure every lamp has its driver.
 
 ## Not yet ported
 
-- Volume emission does not light surfaces in EEVEE; the keyed lamps stand in
-  for it, as one to four point lights. The light's angular shape (a flame
-  leaning one way) and its flicker within a frame are lost.
+- A volume's light on the scene is its keyed lamps, one to four point
+  lights: the light's angular shape (a flame leaning one way) and its
+  flicker within a frame are not carried.
 - EEVEE's ray-traced reflections show no volume, and a sphere light probe
-  round the reflecting object does not carry one either (measured:
-  `test_volume_scene_integration.py -- cases=probe_reflect`). So the
-  engine's `nuclear_explosion` reflection pass has no EEVEE counterpart but
-  the lamps' highlight. That pass marched the cloud along the reflected
-  rays of metal surfaces and blurred it by roughness. Cycles reflects the
-  cloud.
+  round the reflecting object does not carry one either
+  (`test_volume_scene_integration.py -- cases=probe_reflect`). So the
+  engine's `nuclear_explosion` reflection pass, which marched the cloud
+  along the reflected rays of metal surfaces and blurred it by roughness,
+  has no EEVEE counterpart but the lamps' highlight.
 - Detail finer than two voxels: the grid holds what its `cells` resolve. The
   engine sampled per pixel.
 - `post(sum)` is folded per sample (a power on the density, then scales),

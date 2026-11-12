@@ -12,6 +12,7 @@ uniform on a tailor's stand, a peaked cap on a velvet cushion, and the AI FORCE 
     C.parts['postWall'].set_text('A NEW POST', name='MINISTRY OF ANYTHING')   # the LED wall reposts
     C.parts['poll'].set_tally(512000, 418000, 141000, stamp=False)         # a recount
     C.apply_look(scene)                                          # view exposure, EEVEE settings the set was lit for
+    C.bake_probes(scene)                                         # the corridor's volume probe (a GPU job)
     cam = C.camera('door', scene)                                # the set's five cameras, from C.cams
     C.update(0.0, {'open': 0.4, 'post': 0.5})                    # a still: sets everything, keys nothing
     # its moving parts on your own clock, KEYED (t in seconds from the scene's first frame, or from t0):
@@ -43,6 +44,7 @@ from .cn_lib import (Geo, box_geometry, cylinder_geometry, lathe_geometry, torus
 HW = 5.0                     # half width: the wall faces are x = +-5
 HC = 12.0                    # ceiling
 ZN, ZD = 22.0, -24.0         # near end wall, door wall
+SLAB = 0.4                   # the walls', floor's and ceiling's thickness (a closed shell)
 PIL = [18, 14, 10, 6, 2, -2, -6, -10, -14, -18, -22]
 SCR = {'z0': -16.6, 'z1': -3.4, 'y0': 1.5, 'y1': 7.5}         # the LED wall on the right (+x) wall
 SCR_SKIP = {-6, -10, -14}                                      # right-wall pilasters behind it
@@ -101,18 +103,17 @@ class Corridor(CL.SetBase):
     """What build() returns (see the module docstring)."""
 
     def apply_look(self, scene, raytracing=False, view_look=None):
-        """The settings the set was lit for: AgX at view_exposure(look exposure); EEVEE without screen-traced
-        reflections (the floor's mirror is painted, analytically, as in the WebGPU edition, and the metals reflect the
-        set's environment, its world), shadows on. view_look: an AgX look for the scene ('AgX - Medium High Contrast'
-        follows three's ACES Filmic, the WebGPU frames' tone, to a few levels: cn_lib.ACES_LIKE_LOOK); None leaves
-        the scene's look as it is (the pipeline's plain AgX)."""
+        """The settings the set was lit for: AgX at view_exposure(look exposure); EEVEE with global illumination
+        (fast GI over the corridor's baked probe: bake_probes()) and reflections from the light probes (the floor's
+        mirror is painted, analytically, as in the WebGPU edition, and the metals reflect the set's environment);
+        raytracing=True screen-traces the reflections instead; shadows on. view_look: an AgX look for the scene
+        ('AgX - Medium High Contrast' follows three's ACES Filmic, the WebGPU frames' tone, to a few levels:
+        cn_lib.ACES_LIKE_LOOK); None leaves the scene's look as it is (the pipeline's plain AgX)."""
         scene.view_settings.view_transform = 'AgX'
         scene.view_settings.exposure = CL.view_exposure(self.look['exposure'])
         if view_look is not None:
             scene.view_settings.look = view_look
-        ee = scene.eevee
-        ee.use_raytracing = bool(raytracing)
-        ee.use_shadows = True
+        CL.eevee_gi(scene, raytracing)
         self.set_u('pix', CL.pix_of(scene))
         return scene
 
@@ -413,9 +414,10 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     B = {k: L.bucket(f'corridor_{k}') for k in ('marble', 'gold', 'flute', 'trim', 'bronze', 'glass')}
     B['flute'].name = 'corridor_gold_fluted'
     LEN, ZM = ZN - ZD, (ZN + ZD) / 2
-    # walls (a 0.4 m slab behind each face), the near end wall, the door wall around its opening
+    # walls (a 0.4 m slab behind each face, running past the end walls so the corners are closed), the near end wall,
+    # the door wall around its opening
     for s in (-1, 1):
-        B['marble'].box(0.4, HC, LEN, s * (HW + 0.2), HC / 2, ZM)
+        B['marble'].box(0.4, HC, LEN + 0.8, s * (HW + 0.2), HC / 2, ZM)
     B['marble'].box(2 * HW, HC, 0.4, 0, HC / 2, ZN + 0.2)
     B['marble'].box(HW - DOOR_HW, HC, 0.4, -(HW + DOOR_HW) / 2, HC / 2, ZD - 0.2)
     B['marble'].box(HW - DOOR_HW, HC, 0.4, (HW + DOOR_HW) / 2, HC / 2, ZD - 0.2)
@@ -447,8 +449,9 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     for zp in PIL:
         B['gold'].box(2 * HW, 0.75, 0.6, 0, HC - 0.375, zp)
         B['gold'].box(2 * HW - 1.4, 0.24, 0.34, 0, HC - 0.87, zp)
-    ceilB = L.bucket('corridor_ceiling').box(2 * HW, 0.3, LEN, 0, HC + 0.15, ZM)
-    floorB = L.bucket('corridor_floor').box(2 * HW, 0.2, LEN + 0.4, 0, -0.1, ZM - 0.2)
+    # the ceiling and floor slabs (0.4 m, as the walls), running over and under the walls
+    ceilB = L.bucket('corridor_ceiling').box(2 * HW + 0.8, SLAB, LEN + 0.8, 0, HC + SLAB / 2, ZM)
+    floorB = L.bucket('corridor_floor').box(2 * HW + 0.8, SLAB, LEN + 0.8, 0, -SLAB / 2, ZM)
     # the runner (2.8 m wide), from the near end to the door's threshold
     carpetB = L.bucket('corridor_carpet').box(2.8, 0.014, ZN - (ZD + 0.35), 0, 0.007, (ZN + ZD + 0.35) / 2, scale=1)
 
@@ -883,6 +886,20 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
                    plaque=plaque_ob, beyond=beyond, shafts=shafts, sconces=sconce_glass, marble=m_marble)
     C.parts['uniforms'] = root
     C.parts['materials'] = M
+    # the corridor's volume probe (look.lighting.add_room_probe: its outermost samples inside the 0.4 m shell, the
+    # door's opening onto the room beyond), parented to the set: C.bake_probes() bakes it
+    if opts.get('probe', True):
+        from ...look import lighting as LL
+        a, b = CL.b3((-HW, 0.0, ZN)), CL.b3((HW, HC, ZD))
+        pr = LL.add_room_probe(sc, f'{name}:probe', tuple(min(p, q) for p, q in zip(a, b)),
+                               tuple(max(p, q) for p, q in zip(a, b)), wall=SLAB,
+                               spacing=float(opts.get('probe_spacing', 0.6)),
+                               samples=int(opts.get('probe_samples', 1024)), collection=col)
+        pr.parent = root
+        pr.matrix_parent_inverse = Matrix.Identity(4)
+        L.own(pr.data)
+        L.own(pr)
+        C.parts['probe'] = pr
 
     # --------------------------------------------------------------------------------------------- per frame
     last = {'post': None, 'tally': None}

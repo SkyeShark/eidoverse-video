@@ -107,8 +107,11 @@ def apply_render_block(scene, block: dict) -> list:
         r.motion_blur_shutter = float(block['shutter'])
         done.append(f'shutter {r.motion_blur_shutter}')
     if 'raytracing' in block:
-        ee.use_raytracing = bool(block['raytracing'])
-        done.append(f'raytracing {ee.use_raytracing}')
+        # false: reflections and refraction from the light probes, no screen traces; EEVEE's ray tracing itself
+        # stays on, since fast GI runs inside it
+        ee.use_raytracing = True
+        ee.ray_tracing_method = 'SCREEN' if block['raytracing'] else 'PROBE'
+        done.append(f'raytracing {ee.ray_tracing_method}')
     if 'volume_tile' in block:
         ee.volumetric_tile_size = str(int(block['volume_tile']))
         done.append(f'volume tile {ee.volumetric_tile_size}')

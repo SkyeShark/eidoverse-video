@@ -23,7 +23,7 @@ same in any order and in any chunk. Time follows the film convention: frame 1
 is 0 s (`eidoblend.media.timebase.Timebase`; a scene may move it with
 `scene['eido_frame0']`).
 
-Measured 11-08 (`blender/tests/media2/test_reopen.py`): a verse-1 film (an era
+Measured (`blender/tests/media2/test_reopen.py`): a verse-1 film (an era
 playlist on an LED wall with spill, and a HUD in the post chain that draws its
 own frame number as a bit code) was rendered out of order (60, 10, 49, 48),
 saved, and opened in a fresh Blender. Every frame read its own number and
@@ -55,7 +55,7 @@ range the first drawing holds, after it the last. Blender shows file
 `<first − 1>` on every frame before a sequence starts (it clamps to 0, then
 adds the offset), so `make_screen` writes `<name>_0000.png` beside the
 sequence, a copy of file 1 marked as a hold in a PNG text chunk (without it a
-screen showed the missing-texture magenta until its range began; 11-07). It
+screen shows the missing-texture magenta until its range begins). It
 does the same beside a `source=` sequence (file `<first − 1>`, unless the
 source already has a real frame there). Encoding such a folder with ffmpeg,
 pass `-start_number 1`: ffmpeg's image2 reader starts at file 0 by default and
@@ -100,8 +100,8 @@ flipUV'd glTF UVs, which is what Blender's glTF importer gives, so the numbers
 carry over unchanged.
 
 - Blender's glTF importer already turns glTF's v-down UVs upright, so an
-  imported display shows the image upright with no flip (seen on `mac1984.glb`'s
-  `screen_crt`, 11-07). Render and look; `flip` / `mirror_x` are there for a
+  imported display shows the image upright with no flip (`mac1984.glb`'s
+  `screen_crt`). Render and look; `flip` / `mirror_x` are there for a
   model with odd UVs.
 - `window = (u0, v0, u1, v1)` puts the image in that part of the mesh's UV
   square: the Mac's 512 × 342 raster inside its tube; outside it is glass.
@@ -125,21 +125,18 @@ colour m (CONSTANT keys), at the display's own radiance: colour m / max(m),
 power π · area · strength · max(m) · gain (Blender multiplies colour by power
 without normalising it). EEVEE's screen-space GI only sees emitters on screen,
 and light probes do not follow animated content, so this is what lights a face
-or a desk. DAISY lit its walls with tinted point lights by hand; this does it
-from the frames.
+or a desk, from the frames themselves.
 
-The light carries a custom cutoff distance (`spill_reach`, 30 m by default).
-Without it EEVEE culls a light where its power falls under
-`scene.eevee.light_threshold` (0.01): a screen's few watts lit a third of the
-truth for white and nothing at all for a saturated blue frame (11-07).
+The light carries a custom cutoff distance (`spill_reach`, 30 m by default),
+because EEVEE culls a light where its power falls under
+`scene.eevee.light_threshold` (0.01), and a screen's light is a few watts.
 
-Measured 11-07 against Cycles (`test_screens.py --only spill`: a 1.0 × 0.6 m
-screen, strength 1, gain 1, over a white floor, white, blue and orange
-frames). EEVEE's spill alone lands within 1 % of the truth: 1.004–1.009 with
-the screen in view or out of it, every colour. With the screen out of view
-EEVEE adds nothing of its own, so the shipped look is right (1.009). While the
-display itself is in frame, EEVEE's GI adds about a quarter on top (0.27 of the
-truth), so those shots read a little hot at gain 1; about 0.75 evens them out.
+The spill carries a screen's light onto the room at its physical level
+(`test_screens.py --only spill`: a 1.0 × 0.6 m screen, strength 1, gain 1,
+over a white floor, white, blue and orange frames). While the display itself
+is in frame, EEVEE's GI adds the emission's own bounce on top, about a
+quarter more, so those shots read a little hot at gain 1; about 0.75 evens
+them out.
 In the Voder room at gain 1 the spill doubles the light on the stool's seat
 and lifts the floor, and the stool casts soft shadows toward the camera
 (`screens_wall_spill_only_f060.png` beside `screens_wall_no_spill_f060.png`).
@@ -192,7 +189,7 @@ Standard on a transparent film, and the edit scene (view Standard, sequencer
 colour space sRGB) lays it over the film's own AgX pixels, as DAISY's
 burned-in ASS subtitles did. Both scenes render with `dither_intensity = 0`:
 Blender dithers float to 8-bit by default, which puts solid ink ±1 off.
-Measured 11-07 (`test_overlay_routes.py`): teal `#27e0a0`, white, `#ffd400`
+Measured (`test_overlay_routes.py`): teal `#27e0a0`, white, `#ffd400`
 and `#101418` all landed on their exact values.
 
 `make_overlay_layer(..., filter_size=0)` renders drawn graphics at their own
@@ -210,14 +207,14 @@ take frame fractions (−0.5 … 0.5, centre origin, y up). Anything can live
 there: drawn panels, 3D type, the parole layer's sprites. A panel exists only
 in its `frames`: outside them it is keyed hidden from the render (CONSTANT
 `hide_render` keys, `overlay.key_render_range`), where an in-world screen
-holds its first and last drawings. Measured 11-07: a lower third over frames
+holds its first and last drawings. Measured: a lower third over frames
 10..20 rendered on exactly those 11 frames of 5..25, its teal bar landing on
 (39, 224, 160).
 
 **Subtitles.** `add_subtitles` makes one TEXT strip per cue, font from file,
 `size` as a fraction of the frame height, outline, shadow, backing box, wrap
 width. Strip colours are display values: the authored hex goes in as is
-(a linearised colour renders darker: '#ffd400' came out orange, 11-07).
+(a linearised colour renders darker: '#ffd400' comes out orange).
 `subtitle_cues(lines)` turns `timebase.load_lines` lines (align_lyrics.py
 output, captions, voicebox's `Sung.lines`) into cues held until the next line,
 and can split long lines. For karaoke styling (`\kf` sweeps, one style per
@@ -226,8 +223,8 @@ burn-in at the cut.
 
 **The edit scene** takes the film as a movie or a PNG sequence, overlays as
 RGBA sequences (ALPHA_OVER, in order), subtitles, and sound strips. It fits
-the lead's chunked renders: render the film's chunks as now, then one edit
-render over the joined film; or overlay with ffmpeg at the cut instead.
+a film rendered in chunks: render the chunks, then one edit render over the
+joined film; or overlay with ffmpeg at the cut instead.
 
 ### The signal route: the overlay inside the post chain
 
@@ -269,7 +266,7 @@ material cannot see the film under it. The compositor can. The overlay stage
 takes the film at the overlay slot into display space with the film's own
 view transform (Convert To Display, the view exposure applied by a driver),
 lays the overlay over it there by its alpha, and brings the mix back to scene
-light through the inverse, before the 'over' effects and AgX. Measured 11-07
+light through the inverse, before the 'over' effects and AgX. Measured
 (`test_overlay_routes.py`, frame 3; ink is the mean over a 5 × 5 patch):
 
 | Ink | Display route | Signal route, `authored=True` | Signal route, `authored=False` |
@@ -362,7 +359,7 @@ Docker paths. Any other bundled font name or a path works too. 'dejavu' and
 'noto' resolve when the system has them. A name that does not resolve falls
 back to Rajdhani Bold, as the original did, and says so.
 
-Measured 11-07 (`test_lyrics_parity.py`, system Python): against the
+Measured (`test_lyrics_parity.py`, system Python): against the
 original module, its font table pointed at the same files, DAISY's 43 lines
 gave identical display timing under four option sets. 60 moments each
 (inside lines, in fades, in filled gaps) gave byte-identical frames, PIL and
@@ -410,7 +407,7 @@ Pass-through: `opts` (`styleOverrides`, `preheardDefault`, `spare`),
 recipe (head bone + 0.1 m, the radius from a point 0.24 m to the camera's
 right, ×1.15, clamped) through `world_to_camera_view`.
 
-Measured 11-07 (`blender/tests/media/test_parole.py`): the first chorus line
+Measured (`blender/tests/media/test_parole.py`): the first chorus line
 with its default pre-heard guesses and a thrown title, 23 sprites in 2
 groups over 96 frames, exported in 0.3 s; rendered over the Voder film, the
 title lands on Depero's wedge, the camps' guesses (spray, neon, gold,
@@ -436,10 +433,9 @@ rate, each needed movie frame encoded once. A movie image steps one movie frame
 per scene frame, so it cannot be retimed in place. The retimed sequence covers
 the scene's range at build time, so re-run it if the range grows. An ffmpeg
 `fps` filter is not used, because it rounds to the nearest movie frame where
-the engine floors: up to 63 of 72 film frames showed a different frame
-(11-07 verify).
+the engine floors: up to 63 of 72 film frames would show a different frame.
 
-Frame-exact (11-07). `check_screens_api.py` decodes bit-coded counter movies
+Frame-exact: `check_screens_api.py` decodes bit-coded counter movies
 at 24, 25 and 30 fps, at speeds 0.5, 1 and 1.5, looping and not, started at
 frame 10: all 72 film frames match the engine's rule in every case. The renders
 read the same: at frame 37 a drawn panel and the native movie read 37 and the
@@ -471,7 +467,7 @@ the top left, as ffmpeg's tile filter lays them out) and laid out per film
 frame as a PNG sequence. `screens.read_atlas_info` checks the info file. For
 a movie file, `make_video_screen` is the better path: native, frame-exact, no
 JPEG. The atlas form is for atlases the engine's scenes already ship. Measured
-11-07 (`test_overlay_routes.py --only atlas`):
+(`test_overlay_routes.py --only atlas`):
 - `video_to_sprite.mjs` (node, unchanged) made a 48-tile atlas of the EEVEE
   era film.
 - Tiles 0, 7, 23 and 47 matched the movie's own frames within a mean of 4.5
@@ -479,7 +475,7 @@ JPEG. The atlas form is for atlases the engine's scenes already ship. Measured
 - Film frames 1, 2, 30 and 60 showed tiles 0, 0, 14 and 29, the engine's rule.
 - `out/atlas_tv_f040.png` shows the film playing, letterboxed, on `c64.glb`'s
   monitor.
-- Read back from the renders themselves (`test_reopen.py`, 11-08): a 30-tile
+- Read back from the renders themselves (`test_reopen.py`): a 30-tile
   atlas whose tiles carry their own number as a bit code, played once at
   1.5× from frame 10 and looping at 0.5× from frame 20, showed the engine's
   tile on all ten frames rendered between 1 and 60. The once copy held tile 0
@@ -550,7 +546,7 @@ pl['spans']                                     # [('voder_1939', 1, 45), ('bell
 ```
 
 A cue may also be `{t0, dur}`, as for `bake_canvas_scene`; its `dur` reaches
-the scene's progress. Measured 11-07 (`check_canvas_bake.py`): a playlist with
+the scene's progress. Measured (`check_canvas_bake.py`): a playlist with
 `bell_1961` cued as `{t0, dur: 4}` gave the same frames as baking that scene
 alone with the same cue.
 
@@ -582,7 +578,7 @@ canvas sheet with the EEVEE renders beside its rows
 (`test_canvas_tools.py`'s `out/canvas_tools/era_canvas_sheet.png`) matches
 each scene to its render.
 
-The draw costs below were measured 11-07 by `cs.bench` at 1920 × 800, after
+The draw costs below were measured by `cs.bench` at 1920 × 800, after
 each module's prewarm (1.0 s and 0.66 s). Each figure is the quietest of three
 45-frame passes; "first" is the worst frame of the first play.
 
@@ -627,7 +623,7 @@ cs.nan_sweep(lyrics=..., cues=cs.DAISY_CUES)      # {'ok': True, 'draws': 58500,
 `refs` is a folder of `<scene prefix>_*.png|jpg` reference images, drawn
 beside each sheet row. Feed it your EEVEE renders and the sheet compares the
 canvas with the screen. Run `nan_sweep` after editing a scene and before
-baking new captions. Measured 11-07 with DAISY's captions: 58,500 draws of
+baking new captions. Measured with DAISY's captions: 58,500 draws of
 the fifteen scenes at three canvas sizes, 24.3 M guarded canvas calls, 0
 failures, 106 s. The command-line tools are the same:
 
@@ -651,7 +647,7 @@ three.js TextGeometry's measures: `size` is the em, `depth` the extrusion
 before the bevel, the bevel adds `bevel_thickness` front and back and grows
 the outline by `bevel_size`; centred on its geometric box like `geo.center()`.
 Blender scales a font so its head-table bounding box is one unit, so the
-conversion reads the TTF (measured 11-07: an 'H' at size 1 stands exactly the
+conversion reads the TTF (measured: an 'H' at size 1 stands exactly the
 font's cap height for Audiowide, Michroma and Anton; depth exact).
 `stand_up=False` leaves it lying in the XY plane facing +Z.
 
@@ -666,10 +662,9 @@ emission=2.0)` parents type to the camera (so it holds frame), sizes it by cap
 height as a fraction of the frame, and fades it in and out through its
 material (LINEAR keys; front surface only, so a fading solid word does not
 show its own back faces). Under AgX a bright emissive title fades late: at a
-quarter of its fade an emission-2 title still measured 191/255 against 228
-at full (11-07). Ease the keys or lower the emission for a fade that reads
-even. The lead's end cards key an Emission strength instead
-(`series_title.py`, `opening_ep3.py`); both work.
+quarter of its fade an emission-2 title still measures 191/255 against 228
+at full. Ease the keys or lower the emission for a fade that reads even, or
+key the Emission strength instead; both work.
 
 **Typewriter.** `reveal=(first_frame, chars_per_second)` types one line on,
 glyph by glyph: a Geometry Nodes modifier deletes the faces right of a keyed X

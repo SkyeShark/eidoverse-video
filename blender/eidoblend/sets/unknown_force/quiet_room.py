@@ -12,7 +12,7 @@ piece can redraw (build(art=...)); the crate run, the launch lights and the glow
     from eidoblend.sets.unknown_force import quiet_room as QR
     room = QR.build(scene, singer_scale=0.87)         # -> QuietRoom: group (root Empty), parts, update, cams, mark ...
     scene.world = room.env                            # the room's env for the camera (its materials carry its light)
-    room.eevee_settings(scene)                        # interior: fast GI off, reflections of the room's env
+    room.eevee_settings(scene)                        # interior: fast GI on, reflections of the room's env
     room.bake_probes()                                # the room-fitted volume probe (a GPU job)
     scene.camera = room.make_camera('altar')          # a Blender camera at a set cam, parented to the set
     room.animate((1, 120), ship_t=(1.0, 3.0), sale=(2.8, 3.6))    # keyed: the saved .blend plays on its own
@@ -35,9 +35,10 @@ How the engine's pieces became Blender data:
   light        three's units: candela -> 4 pi cd W, lux -> sun strength (measured pixel parity; interiors_lib).
                The one shadow map (the red key down the nave) is the one light with use_shadow; the casters are the
                engine's (objects' visible_shadow).
-  probes       a room-fitted volume probe (look.lighting.add_room_probe: its outer samples mid-wall), baked once at
-               the default state; fast GI off indoors. Emitters (hell pits, signs, LED strips) and the backdrop are
-               left out of the bake (their light is the set's real lights, as in the engine; a probe is static).
+  probes       a room-fitted volume probe (look.lighting.add_room_probe: its outermost samples inside the solid floor
+               and ceiling slabs and the core wall), baked once at the default state, under fast GI. Emitters (hell
+               pits, signs, LED strips) and the backdrop are left out of the bake (their light is the set's real
+               lights, as in the engine; a probe is static).
   static merge every static mesh merges into one mesh per material (mergeStatic), as in the engine.
   canvases     the boards, the essay, the register, the pulpit fall, the booklet, the stencils, the label, the signs
                and the slogan are drawn with interiors_lib's canvas (pure Python): CANVASES lists them all, and
@@ -62,6 +63,7 @@ MARK = {'pos': [0, 0.006, 0], 'yaw': 0}       # on the aisle runner (three's axe
 
 # layout (metres, three's axes)
 RX, RZ0, RZ1, RH = 6.0, -9.0, 6.2, 3.9          # glass at x = +-6 and z = -9; core wall at z = +6.2
+SLAB = 0.3                                       # the tower's floor and ceiling slabs and its core wall (solid)
 DAIS = {'z0': -8.85, 'z1': -5.6, 'x': 4.6, 'h': 0.15}
 ALTAR = {'w': 2.4, 'd': 0.6, 'z': -6.9, 'y0': 0.23, 'y1': 1.16}
 GRATE = {'z0': -6.45, 'z1': -6.02, 'x': 1.45}
@@ -746,9 +748,10 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
 
     # ======================================================================================== ARCHITECTURE
     arch = grp('qr:arch')
-    # floor: carpet tiles, the dais in black terrazzo, the runner down the aisle
-    fl = L.plane_geometry(2 * RX, RZ1 - RZ0).rotate_x(-math.pi / 2).translate(0, 0, (RZ0 + RZ1) / 2)
-    add(L.box_uv(fl, 1), carpet_mat, parent=arch, cast=False, name='floor')
+    # floor: carpet tiles on the tower's slab (solid, running under the core wall), the dais in black terrazzo, the
+    # runner down the aisle
+    add(box(2 * RX, SLAB, RZ1 + SLAB - RZ0), carpet_mat, (0, -SLAB / 2, (RZ0 + RZ1 + SLAB) / 2), parent=arch,
+        cast=False, name='floor')
     top = L.Shape()
     top.move_to(-DAIS['x'], -DAIS['z1']).line_to(DAIS['x'], -DAIS['z1']).line_to(DAIS['x'], -DAIS['z0'])
     top.line_to(-DAIS['x'], -DAIS['z0']).line_to(-DAIS['x'], -DAIS['z1'])
@@ -772,21 +775,21 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     rg.uv = np.stack([(rg.uv[:, 0] - 0.5) * 1.2, rg.uv[:, 1] * abs(rl)], axis=1)
     add(rg, runner_mat, (0, 0.006, (DAIS['z1'] - 0.05 + RZ1 - 0.45) / 2), parent=arch, cast=False, keep=True,
         name='runner')
-    # ceiling + transverse acoustic baffles (the room's rhythm, like a nave's vault ribs)
-    cg = L.plane_geometry(2 * RX, RZ1 - RZ0).rotate_x(math.pi / 2).translate(0, RH, (RZ0 + RZ1) / 2)
-    add(L.box_uv(cg, 1), felt_mat, parent=arch, cast=False, name='ceiling')
+    # ceiling (felt under the slab above) + transverse acoustic baffles (the room's rhythm, like a nave's vault ribs)
+    add(box(2 * RX, SLAB, RZ1 + SLAB - RZ0), felt_mat, (0, RH + SLAB / 2, (RZ0 + RZ1 + SLAB) / 2), parent=arch,
+        cast=False, name='ceiling')
     z = RZ0 + 0.35
     while z < RZ1 - 0.2:
         add(box(2 * RX - 0.3, 0.34, 0.045), felt_mat, (0, RH - 0.17, z), parent=arch, cast=False)
         z += 0.6
     # core wall at +Z: exposed concrete with the hatch opening; a door; the house slogan
-    wz = RZ1 + 0.15
+    wz = RZ1 + SLAB / 2
     W0, W1 = -RX, RX
-    add(box(HATCH['x0'] - W0, RH, 0.3), concrete_mat, ((W0 + HATCH['x0']) / 2, RH / 2, wz), parent=arch)
-    add(box(W1 - HATCH['x1'], RH, 0.3), concrete_mat, ((HATCH['x1'] + W1) / 2, RH / 2, wz), parent=arch)
-    add(box(HATCH['x1'] - HATCH['x0'], HATCH['y0'], 0.3), concrete_mat,
+    add(box(HATCH['x0'] - W0, RH, SLAB), concrete_mat, ((W0 + HATCH['x0']) / 2, RH / 2, wz), parent=arch)
+    add(box(W1 - HATCH['x1'], RH, SLAB), concrete_mat, ((HATCH['x1'] + W1) / 2, RH / 2, wz), parent=arch)
+    add(box(HATCH['x1'] - HATCH['x0'], HATCH['y0'], SLAB), concrete_mat,
         ((HATCH['x0'] + HATCH['x1']) / 2, HATCH['y0'] / 2, wz), parent=arch)
-    add(box(HATCH['x1'] - HATCH['x0'], RH - HATCH['y1'], 0.3), concrete_mat,
+    add(box(HATCH['x1'] - HATCH['x0'], RH - HATCH['y1'], SLAB), concrete_mat,
         ((HATCH['x0'] + HATCH['x1']) / 2, (HATCH['y1'] + RH) / 2, wz), parent=arch)
     # the door (dark steel leaf in a frame) at x = -3.6
     add(box(1.06, 2.16, 0.06), steel_mat, (-3.6, 1.08, RZ1 + 0.0), parent=arch)
@@ -1575,7 +1578,8 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
     }
     out.nodes = {'group': group, 'boards': boards, 'crate': crate, 'shutter': shutter, 'beacon': beacon,
                  'chairs': chair_meshes, 'backdrop': backdrop, 'seats': seats, 'towers': towers}
-    # the room-fitted volume probe (outer samples mid-wall: look.lighting.add_room_probe), parented to the set
+    # the room-fitted volume probe (look.lighting.add_room_probe: its outermost samples inside the floor and ceiling
+    # slabs and the core wall, beyond the glass in the open air the glass lets in), parented to the set
     out['probe'] = None
     if probe:
         from ...look import lighting as LL
@@ -1583,7 +1587,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:qu
         lo = L.to_blender((-RX, 0.0, RZ1))
         hi = L.to_blender((RX, RH, RZ0))
         pr = LL.add_room_probe(sb.scene, f'{name}:probe', (min(lo[0], hi[0]), min(lo[1], hi[1]), min(lo[2], hi[2])),
-                               (max(lo[0], hi[0]), max(lo[1], hi[1]), max(lo[2], hi[2])), wall=0.12,
+                               (max(lo[0], hi[0]), max(lo[1], hi[1]), max(lo[2], hi[2])), wall=SLAB,
                                spacing=probe_spacing, samples=probe_samples, collection=sb.coll)
         sb.made['objects'].append(pr)
         sb.made['probes'].append(pr.data)

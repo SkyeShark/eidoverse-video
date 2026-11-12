@@ -40,15 +40,15 @@ computed in sample(); there is nothing to memoise or reset. Each volume keeps it
 shared by every instance of an example: make({speed}) changed them all). bake() samples uTime = frame time, one grid
 per frame.
 
-LIGHT ON THE SCENE. EEVEE draws volume emission but never lets it light a surface (measured in
-tests/sdf_volumes/test_volume_lights.py: the floor beside a bonfire gains nothing from it, where Cycles lights it).
-light_from_emission() reads each baked frame's grids back and keys point lights from them: power = 4 pi x the
+LIGHT ON THE SCENE. EEVEE draws a volume's emission but does not light surfaces with it (the floor beside a bonfire
+takes nothing from its flames: tests/sdf_volumes/test_volume_lights.py), so a fire lights its surroundings with
+lights. light_from_emission() reads each baked frame's grids back and keys point lights from them: power = 4 pi x the
 emission that escapes the volume (each voxel's emission x its mean transmittance to the box along the six axes, x
 its volume), placed at the escaping light's centroid, sized to its spread, coloured by it; several lights for a
-spread-out medium (the mushroom cloud's cap and ring). Against Cycles, where the volume lights the floor by itself:
-0.88 (bonfire), 0.91 (candle). light_from_surface() does the same for an emissive SDF solid (the pyroclastic
-`explosion`), whose glow EEVEE's fast GI gathers only weakly (~6 % of Cycles): pi x radiance x area x each face's
-escape fraction, the lamps inside the solid with the solid taken out of their shadows (shadow linking): 1.02.
+spread-out medium (the mushroom cloud's cap and ring). light_from_surface() does the same for an emissive SDF solid
+(the pyroclastic `explosion`), whose glow EEVEE's fast GI gathers only from what is on screen: pi x radiance x area
+x each face's escape fraction, the lamps inside the solid with the solid taken out of their shadows (shadow
+linking).
 """
 
 from __future__ import annotations
@@ -1069,9 +1069,7 @@ def light_from_emission(vol, frames=None, count=None, energy_scale=1.0, radius_s
     (radius_scale x the emission's RMS spread, at least min_radius, a voxel by default). energy_scale multiplies the
     power. specular / volume_factor set the lights' specular and volume factors. Returns EmissionLights.
 
-    The lights are an EEVEE device: Cycles lights the scene from the volume itself, so a Cycles render leaves them
-    out (hide_render) or passes energy_scale=0. A second call replaces the volume's lamps (replace=False keeps
-    both rigs)."""
+    A second call replaces the volume's lamps (replace=False keeps both rigs)."""
     import bpy
     _replace_rig(vol, replace)
     if frames is None:
@@ -1207,8 +1205,8 @@ def light_from_surface(sdf, frames=None, count=1, energy_scale=1.0, radius_scale
                        shadows=True, specular=0.0, volume_factor=1.0, name=None, time_scale=1.0, time_offset=0.0,
                        escape_samples=4096, replace=True, log=print):
     """Keyed point lights for an emissive SDF SOLID (create_sdf_object; the pyroclastic `explosion`): EEVEE's ray
-    tracing and fast GI gather an emissive mesh's light only from what is on screen, and weakly (measured: ~4 % of
-    what Cycles puts on the floor beside the fireball, tests/sdf_volumes/test_volume_lights.py). Per frame
+    tracing and fast GI gather an emissive mesh's light only from what is on screen, and a lit scene needs it off
+    screen too. Per frame
     (default: the frames sdf.bake() wrote; a still: the mesh as it is) the evaluated mesh's faces are read, the
     SDF's own surface() gives each face's emitted radiance at its centre, and the power is pi x radiance x area (a
     Lambertian emitter) x the material's emission strength. The lights sit at the emitting surface's centroid,

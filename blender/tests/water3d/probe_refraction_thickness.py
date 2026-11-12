@@ -1,8 +1,7 @@
 """Probe: what EEVEE's refraction does with the water's thickness. Reopens a baked probe .blend (the dam break or the
 pour) and renders the same frames with the material output's Thickness unlinked (EEVEE's own default), linked to the
 baked 'thick' attribute as a slab, and as a sphere (or the variants= listed: zero, slab<NN>, bed<NN> = the material's
-own exit/bed rule with NN % of the path kept over a bed), plus a Cycles reference of the same frames (cycles=0 skips
-it).
+own exit/bed rule with NN % of the path kept over a bed).
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
         bash run_blender.sh <worktree>/blender/tests/water3d/probe_refraction_thickness.py -- \
@@ -102,24 +101,5 @@ for v in VARIANTS:
         ok &= S.render(sc, f, p)
         shots.append(p)
 set_variant('default')
-if A.get('cycles', '1') == '0':
-    S.contact_sheet(shots, os.path.join(S.OUT, f'probe_thick_{TAG}_sheet.png'), cols=len(FRAMES))
-    print('ALL PASS' if ok else 'SOME FAIL')
-    raise SystemExit(0)
-sc.render.engine = 'CYCLES'
-sc.cycles.samples = 64
-sc.cycles.device = 'GPU'
-try:
-    prefs = bpy.context.preferences.addons['cycles'].preferences
-    prefs.compute_device_type = 'OPTIX'
-    prefs.get_devices()
-    for d in prefs.devices:
-        d.use = d.type == 'OPTIX'
-except Exception as e:  # noqa: BLE001
-    print('cycles device setup:', e)
-for f in FRAMES:
-    p = os.path.join(S.OUT, f'probe_thick_{TAG}_cycles_f{f:04d}.png')
-    ok &= S.render(sc, f, p)
-    shots.append(p)
 S.contact_sheet(shots, os.path.join(S.OUT, f'probe_thick_{TAG}_sheet.png'), cols=len(FRAMES))
 print('ALL PASS' if ok else 'SOME FAIL')

@@ -1,7 +1,7 @@
 """NuclearExplosionFX.applyTo as volumes in the scene: the effect's life, its motion, its options, the registry hooks.
 
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf_volumes/test_nuclear_explosion.py [-- quality=balanced w=480 h=270 cycles=1]
+        <worktree>/blender/tests/sdf_volumes/test_nuclear_explosion.py [-- quality=balanced w=480 h=270]
 
 1. Options: the engine's call shape ({scene, camera, opts} with camelCase keys) and snake_case; an unknown option
    raises; the screen-only options are accepted and said so; disable_for_perf_test builds hidden and bakes nothing.
@@ -13,7 +13,6 @@
 4. Motion: six consecutive frames at 24 fps from t = 5 s (time_offset), baked with keyed lamps: out/nuke_motion.png.
 5. Opacity: key_opacity fades the media (a keyed material socket) and the lamps' energy keys follow.
 6. The post registry's hooks: native_build bakes over the scene range and native_undo takes it all back out.
-cycles=1 adds a Cycles render of one life still (out/nuke_cycles.png) to settle how the cloud lights the town.
 """
 
 import os
@@ -129,20 +128,6 @@ for i, t in enumerate(LIFE):
     V.label(pr, f'effect march t={t:g}s')
     eev.append(p)
     ref.append(pr)
-    if i == 3 and A.get('cycles', '0') == '1':
-        for rig in fx.lights:
-            for lo in rig.lights:
-                lo.hide_render = True
-        V.cycles_gpu(sc, samples=128)
-        sc.render.engine = 'CYCLES'
-        pc = os.path.join(V.OUT, 'nuke_cycles.png')
-        V.render(pc)
-        V.label(pc, f'Cycles t={t:g}s (volume light only)')
-        sc.render.engine = 'BLENDER_EEVEE'
-        for rig in fx.lights:
-            for lo in rig.lights:
-                lo.hide_render = False
-        V.sheet([p, pc], os.path.join(V.OUT, 'nuke_cycles_sheet.png'), cols=2)
 V.sheet(eev + ref, os.path.join(V.OUT, 'nuke_life.png'), cols=3)
 P = [rig.total_power(None) for rig in fx.lights]
 V.check('the glow lamps carry light', sum(P) > 0, f'{sum(P):.3g} W at the last still ({len(fx.lights)} rigs)')

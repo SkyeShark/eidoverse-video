@@ -65,11 +65,9 @@ Arguments after the script reach it after Blender's `--`
 sandboxes (`BLENDER_SANDBOX`).
 
 Blender 5.2's Python is 3.13 with **numpy**, **OpenImageIO** and
-**requests**; there is no scipy and no cv2. This machine's Blender also
-imports **Pillow 12.3.0** from its own `5.2/python/Lib/site-packages`, but its
-`pillow-12.3.0.dist-info` is half an hour newer than numpy's, so it may have
-been installed after Blender rather than shipped with it: shared code should
-not rely on it. Read and write images with `bpy.data.images` or OpenImageIO;
+**requests**; there is no scipy and no cv2, and Pillow is not part of
+Blender's own distribution, so shared code must not rely on it inside
+Blender. Read and write images with `bpy.data.images` or OpenImageIO;
 dilate, filter and solve with numpy. Outside Blender, the system Python has
 numpy, Pillow and cv2.
 
@@ -142,9 +140,8 @@ still check that the files it expected exist. `run_scene.py` turns bytecode off
 - Blender 5's compositor has no MixRGB: mix with `ShaderNodeMix`
   (`data_type = 'RGBA'`, inputs 6 and 7 are A and B, output 2 the result).
 - An NLA strip ignores `blend_in` / `blend_out` set while `use_auto_blend`
-  is on (a new strip's default): set `use_auto_blend = False` FIRST, or the
-  crossfade reads 0 and the clip pops in (measured: 6 frames set, 0.0 read
-  back; 6.0 with the order swapped).
+  is on (a new strip's default): set `use_auto_blend = False` first, or the
+  crossfade reads 0 and the clip pops in.
 - Mesh triangles' winding is not to be trusted in imported models: a test
   for "a face that can carry weight" reads `|normal.z|`, either sign
   (placement's real-surface fallback counts faces within 60 degrees of
@@ -185,8 +182,8 @@ When adding or porting a system:
 6. Preserve the branch's relationship between collaborators. On this edition,
    as on `main`, the agent is a filmmaker working with a human collaborator;
    ideas may come from either. The auto editions' parent-agent workflow belongs
-   on their branches ([blender/README.md](../blender/README.md) lists what a
-   `blender-auto` branch must add). Technical requirements explain actual
+   on their branches (`auto-blender` for this edition; [blender/README.md](../blender/README.md)
+   lists what the containerized edition adds). Technical requirements explain actual
    behavior; artistic recipes leave room for judgment and experimentation.
 
 ## Validation
@@ -292,13 +289,8 @@ the [WebXR](webxr.md) pages.
 - `comfy_bridge.py` is not ported because it needs nothing: it is a plain
   Python TCP proxy for the music and sound tools' ComfyUI and never touches a
   renderer, so every edition runs it as it is ([audio](audio.md)).
-- The production engine's `shape_report.js` / `shape_verify.js` (a mesh
-  "touch sensor": radial profiles, connectors and `snapConnectors`, pipe
-  ports, symmetry, `verify.loadPath`) are a research thread on structured
-  spatial sensing for robots, not film tools, and are deliberately left out
-  of the toolkit. The film-side needs they touched are the placement family's: support and
+- A mesh "touch sensor" (radial profiles, connectors, pipe ports, symmetry)
+  belongs to robotics research, not to film, and is not part of the toolkit.
+  The film-side needs it touched are the placement family's: support and
   floaters (`check_hovering`), clipping, `mount_on` / `place_touching` for
-  flush joints. `render_scene_deno.mjs` / `render_common_deno.mjs` there are
-  older copies of the public runner, superseded by it (their only extra
-  globals are other families' systems and `createInteriorWindowMaterial`,
-  ported in `harness/interior_window.py`).
+  flush joints.

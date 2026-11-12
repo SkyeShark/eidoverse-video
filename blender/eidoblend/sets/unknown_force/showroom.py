@@ -54,6 +54,7 @@ MARK = {'pos': [0, 0, 0], 'yaw': 0, 'parent': 'turntable.platter'}
 
 STAGE = {'y': -0.14, 'x': 9.0, 'z0': -6.4, 'z1': 3.4}
 FLOOR_Y = -1.04
+FLOOR_SLAB = 0.5               # the auditorium's floor slab, solid under the stage and the seats
 TT = {'r': 1.5}
 SCR = {'w': SCREEN['w'], 'h': SCREEN['h'], 'y0': 0.45, 'z': -5.7}
 PLINTH = {'x': -3.2, 'z': 0.45, 'w': 0.56, 'h': 1.06}
@@ -432,8 +433,9 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     add(_flip(L.box_geometry(44, 22, 46).translate(0, 8, 8)), void_mat, cast=False, recv=False, keep=True, name='void')
     stage_g = grp('sr:stage')
     sw, sd = 2 * STAGE['x'], STAGE['z1'] - STAGE['z0']
-    top = L.plane_geometry(sw, sd).rotate_x(-math.pi / 2).translate(0, STAGE['y'], (STAGE['z0'] + STAGE['z1']) / 2)
-    add(L.box_uv(top, 1), stage_mat, parent=stage_g, cast=False, name='stage')
+    # the stage: a solid platform from the auditorium floor up to its deck
+    add(box(sw, STAGE['y'] - FLOOR_Y, sd), stage_mat, (0, (STAGE['y'] + FLOOR_Y) / 2, (STAGE['z0'] + STAGE['z1']) / 2),
+        parent=stage_g, cast=False, name='stage')
     # the stage's front fascia: matte black with a cold LED line under the nosing
     add(box(sw, STAGE['y'] - FLOOR_Y, 0.04), black_mat, (0, (STAGE['y'] + FLOOR_Y) / 2, STAGE['z1'] + 0.02), parent=stage_g)
     add(box(sw + 0.02, 0.03, 0.06), brushed, (0, STAGE['y'] - 0.015, STAGE['z1'] + 0.01), parent=stage_g)
@@ -442,9 +444,10 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     L.hide_from_probes(led_m)
     add(box(sw, 0.012, 0.012), led_m, (0, STAGE['y'] - 0.045, STAGE['z1'] + 0.045), parent=stage_g, cast=False,
         keep=True, name='stage-led')
-    # auditorium floor and the risers the seats stand on
-    af = L.plane_geometry(2 * STAGE['x'] + 2, 22).rotate_x(-math.pi / 2).translate(0, FLOOR_Y, STAGE['z1'] + 11)
-    add(L.box_uv(af, 1), floor_mat, parent=stage_g, cast=False, name='aud-floor')
+    # auditorium floor (its slab runs under the stage too) and the risers the seats stand on
+    fz0, fz1 = STAGE['z0'] - 0.5, STAGE['z1'] + 22
+    add(box(2 * STAGE['x'] + 2, FLOOR_SLAB, fz1 - fz0), floor_mat, (0, FLOOR_Y - FLOOR_SLAB / 2, (fz0 + fz1) / 2),
+        parent=stage_g, cast=False, name='aud-floor')
     for k_ in range(1, ROWS):
         z0 = ROW0 + k_ * ROWP - 0.55
         zz = 22.5 - z0
@@ -883,18 +886,17 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
                  'fixtures': fixtures, 'platter': platter}
     out['probe'] = None
     if probe:
-        # the stage, the turntable, the plinth and the first rows (the void is left out of the bake: beyond the
-        # outermost samples EEVEE fades to the World, which is the set's env, as the engine's materials saw it)
+        # the stage, the turntable, the plinth and the first rows, fitted as a room is (look.lighting.add_room_probe):
+        # its lowest samples inside the auditorium's floor slab, the floor a full spacing clear of the probe's edge.
+        # The void is left out of the bake: the samples past the stage's sides see the set's env, as the engine's
+        # materials saw it.
         from ...look import lighting as LL
         from mathutils import Matrix
-        lo = np.array(L.to_blender((-STAGE['x'] - 0.5, FLOOR_Y - 0.1, 12.0)))
+        lo = np.array(L.to_blender((-STAGE['x'] - 0.5, FLOOR_Y, 12.0)))
         hi = np.array(L.to_blender((STAGE['x'] + 0.5, 6.0, STAGE['z0'] - 0.5)))
         mn, mx = np.minimum(lo, hi), np.maximum(lo, hi)
-        res = [max(2, int(round((mx[i] - mn[i]) / probe_spacing)) + 1) for i in range(3)]
-        cell = [(mx[i] - mn[i]) / (res[i] - 1) for i in range(3)]
-        pr = LL.add_volume_probe(sb.scene, f'{name}:probe', tuple((mn + mx) / 2),
-                                 tuple(mx[i] - mn[i] + cell[i] for i in range(3)), resolution=res,
-                                 samples=probe_samples, collection=sb.coll)
+        pr = LL.add_room_probe(sb.scene, f'{name}:probe', tuple(mn), tuple(mx), wall=FLOOR_SLAB, spacing=probe_spacing,
+                               samples=probe_samples, collection=sb.coll)
         sb.made['objects'].append(pr)
         sb.made['probes'].append(pr.data)
         pr.parent = sb.root_ob

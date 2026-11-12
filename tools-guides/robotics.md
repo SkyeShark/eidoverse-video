@@ -547,7 +547,7 @@ three examples' cameras and compares it block by block with the WebGPU frames
 darken the floor as much. Every
 render test also runs build-only (`-- --no-render`: everything built, keyed,
 posed and checked, nothing rendered; the results go to
-`out/<name>.norender.json`), which needs no GPU slot.
+`out/<name>.norender.json`), which needs no GPU.
 
 Original runtime: MIT. Original geometry and authored materials: CC0. Source
 scan licenses and excluded proprietary authoring tools are recorded in

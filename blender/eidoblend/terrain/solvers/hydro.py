@@ -22,11 +22,10 @@ lake and flat toward its outlet, so the water crosses lakes) from the fluvial ru
 relative change over 128 iterations is under 1e-4. A child's border cells receive the parent's flow that crosses its
 window edge (A_in, m^2; qs_in, m^3/yr): rivers entering the window carry their upstream catchment with them.
 
-Moved from Ekigar's hydrology.py (design section 3; the triage found its fill and routing accurate):
-fill_depressions (exact, on the graph of D8 basins; default wrap is now (False, False): the new levels are open
-windows), route (D8 / D-infinity / MFD receivers on a filled surface, flats crossed by breadth-first distance),
-accumulate (topological waves), horizon_occlusion (radius in metres), box_blur, flat_average, neighbour_table.
-Its hydrology() mask set was tied to Ekigar's Heightfield and is replaced by masks.py.
+From Ekigar's hydrology (its fill and routing are accurate): fill_depressions (exact, on the graph of D8 basins;
+default wrap (False, False): the levels are open windows), route (D8 / D-infinity / MFD receivers on a filled
+surface, flats crossed by breadth-first distance), accumulate (topological waves), horizon_occlusion (radius in
+metres), box_blur, flat_average, neighbour_table. The masks built on them are masks.py's.
 """
 from __future__ import annotations
 

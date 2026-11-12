@@ -96,8 +96,8 @@ time, then quads and voxel size):
 | Menger sponge, `quality='high'` | 160 to 325 s on a loaded machine | 15.1 M | 5.3 mm |
 
 A mesh past ten million quads is heavy: built and rendered once, the
-'high' Menger sponge peaked at 11.6 GB of RAM, near the 12 GB a shared
-GPU slot allows, which is why the example defaults to 'balanced'. Seen
+'high' Menger sponge peaked at 11.6 GB of RAM, which is why the example
+defaults to 'balanced'. Seen
 whole the two look alike; in a close-up the fifth level's 8 mm holes,
 one voxel across at 'balanced', come out skewed or rounded, and 'high'
 makes them square.
@@ -118,8 +118,7 @@ The QEF is accumulated straight from the edge arrays and solved in closed
 form per cell, a million cells at a time. Every per-crossing array is
 freed once it is spent, and the corner normals are evaluated a million
 quads at a time, so memory follows the mesh, not its temporaries: the
-mesher peaks at about 220 bytes a crossing (3.3 M crossings in 0.67 GiB,
-where it had needed 1.44 GiB, with the same mesh to the bit).
+mesher peaks at about 220 bytes a crossing (3.3 M crossings in 0.67 GiB).
 
 ### `surface()`: what EEVEE renders
 
@@ -145,17 +144,13 @@ term inside a helper reads as seen head-on and stays out of the textures.
 `subsurface_scale`, `ior`, `coat_roughness`, `sheen_roughness`,
 `emission_strength`, `normal_strength`, and `interpolation`.
 
-Keep `shade()` too. `blob.raymarch_reference(camera)` runs the engine's
-own march with the engine's `shade()` from a Blender camera. It uses the
-quality preset's `maxSteps`, `surfEps`, `stepScale` and `maxDist`, the
-bounds-box entry and the same hit test. It returns a linear image, so the
-EEVEE render can be judged against the original. Every example's probe
-in `blender/tests/sdf/` renders both side by side. It also compares the
-mesh's silhouette with the march's: intersection over union is 0.96 to
-0.997, 0.944 for the explosion's displaced field and 0.938 for Mr. Hege
-at 1.7 % of the frame. `test_transforms.py` does the same for objects
-turned, tilted and scaled unevenly (0.974 and 0.975), seated on a glossy
-floor and half hidden behind a box.
+The mesh is the engine's field: in `blender/tests/sdf/`, each example's
+silhouette against the engine's own march of the same field gives an
+intersection over union of 0.96 to 0.997 (0.944 for the explosion's
+displaced field, 0.938 for Mr. Hege at 1.7 % of the frame), and
+`test_transforms.py` holds it for objects turned, tilted and scaled
+unevenly (0.974 and 0.975), seated on a glossy floor and half hidden
+behind a box.
 
 A spec in the engine's own contract, `map` and `shade` with no
 `surface`, still renders: `shade()` becomes the material. Its colour,
@@ -177,8 +172,8 @@ plus keyword overrides:
   (below). `extra` holds helpers, `#define`s and material functions, and
   goes in before `map`.
 - `bounds`, `quality` (`'fast'`, `'balanced'`, `'high'` or `'ultra'`), and
-  `max_steps`, `max_dist`, `step_scale`, `surf_eps` (the engine's
-  `maxSteps` and the rest, for the reference march).
+  `max_steps`, `max_dist`, `step_scale`, `surf_eps` (the engine's march
+  settings, `maxSteps` and the rest: accepted as a spec carries them).
 - `uniforms`: `{'uRadius': 0.4, 'uTint': ('color', '#3cbf6a')}`. A number
   is a float, a 3-sequence a vec3, and `('color', hex or 0xRRGGBB)` a
   linear colour. `textures={'uChecker': array, image or path}` adds
@@ -198,10 +193,7 @@ plus keyword overrides:
 - `shade_as` (`'albedo'`, `'emission'` or `None`) turns a `shade()` into
   the material when there is no `surface()` (above).
 - `cut_by_bounds=True` says the shape runs past its bounds on purpose (a
-  gyroid, a repeating fence): the bounds box cuts it into a closed solid,
-  and the reference march marches the same cut field. Without it the
-  reference is the engine's own march, which walked back out of the box
-  and drew the uncut surface in front of it.
+  gyroid, a repeating fence): the bounds box cuts it into a closed solid.
 - `carrier='atlas'` (texture atlas, the default) or `'vertex'` (point
   attributes); `normals='corner'` (crease-keeping) or `'vertex'`.
 - `iso` meshes the level set `map = iso` instead of zero. Use it for
@@ -420,7 +412,7 @@ register_example('my_car', kind='solid', description='...',
     uniforms={'uPaint': ('color', 0xc8c8d2), 'uRough': 0.45},       # live: make(...).set_uniform('paint', ...)
     extra=HELPERS_GLSL,                # #defines, helper SDFs, per-material functions
     map=MAP_GLSL,                      # vec2 map(vec3 p): the engine's map
-    shade=SHADE_GLSL,                  # vec3 shade(vec3 p, vec3 n, float mat): the engine's look, for the reference
+    shade=SHADE_GLSL,                  # vec3 shade(vec3 p, vec3 n, float mat): the engine's look (shade_as, when there is no surface)
     surface=SURFACE_GLSL,              # SdfSurface surface(vec3 p, vec3 n, float mat): what EEVEE renders
     animated=False,                    # True when map / surface read uTime: bake() per frame
     make=None)                         # optional factory(example, **opts) -> object (the engine's make(opts))
@@ -428,13 +420,13 @@ register_example('my_car', kind='solid', description='...',
 register_example('my_fire', kind='volume', bounds=..., steps=96,
     sample=SAMPLE_GLSL,                # SdfSample sample(vec3 p) -> sdfSample(color, alpha, step), or
     medium=None,                       # SdfMedium medium(vec3 p) -> sdfMedium(density, albedo, emission)
-    post=POST_GLSL)                    # vec4 post(vec4 sum): the reference march only (see Volumes)
+    post=POST_GLSL)                    # vec4 post(vec4 sum): the engine's pixel remap (see Volumes)
 ```
 
 `make(opts)` options that the engine took as camelCase (`paintColor`) map
 onto uniforms inside the example's own `make`. Inside the GLSL,
-`SDF_VIEW_DEPENDENT` is 1 only in the reference march. It keeps a view
-term out of a shared helper.
+`SDF_VIEW_DEPENDENT` is 0 for the bake, which keeps a view term out of a
+shared helper.
 
 ## Volumes — `create_sdf_volume`
 
@@ -461,8 +453,8 @@ Two contracts, both GLSL in the local frame, with the library and `extra`:
   probe marches rays through the written grids and compares them with the
   engine's march on the GPU: opacity and light agree (0.04 % alpha, 0.12 %
   radiance). In a render, 0.9 m cubes of medium in front of a white
-  backdrop give the closed-form transmittance and emission within 0.3 % in
-  Cycles and 2.2 % in EEVEE (`test_volume_density.py`). `sample_as='albedo'`
+  backdrop give the closed-form transmittance and emission within 2.2 % in
+  EEVEE (`test_volume_density.py`). `sample_as='albedo'`
   reads the colour as the scattering colour instead, with no emission: a
   smoke whose engine colour was a hand-lit grey then takes the scene's
   light and casts volume shadows.
@@ -481,8 +473,7 @@ the engine's TSL `sample` was a JavaScript function. `sample(p)` returns
 `{'color', 'alpha', 'step'}` (or the tuple), `medium(p)` returns
 `{'density', 'albedo', 'emission', 'temperature'}` (albedo defaults to
 0.8 grey), and both read `S.time` and `S.uniform()`. A Python stage gives
-the same grids as its GLSL twin; it has no reference march, which runs
-GLSL.
+the same grids as its GLSL twin.
 
 The grids `density`, `emission`, `albedo` and `temperature` go into one
 OpenVDB file per frame, voxel-centred, with near-empty voxels pruned. A
@@ -490,19 +481,16 @@ Volume object plays them through a Principled Volume. `cells` (or `voxel`,
 or `quality`: 96, 160, 256 or 384 cells) sets the resolution.
 `material_settings` takes `density_scale`, `emission_scale`, a constant
 `albedo`, `anisotropy`, `blackbody_intensity` and `blackbody_tint`.
-`vol.raymarch_reference(camera)` is the engine's own march of the same
-`sample()`, followed by `post()`.
 
 `post(sum)` reshaped the composited pixel: a contrast curve or an alpha
-remap. A physical volume has no composited pixel to reshape, so `post`
-runs only in the reference march. A volume example folds its post into
-its colours and densities, or applies it in the compositor. The engine's
+remap. A physical volume has no composited pixel to reshape, so a volume
+example folds its post into its colours and densities, or applies it in
+the compositor. The engine's
 other volume limits fall away: the camera may enter the box, and
 overlapping volumes mix physically, so they need no per-frame sort
 (the engine's `sortSdfVolumesForCamera`). The engine's march also stopped
 after `steps` samples; the grids hold the whole box, so a volume longer
 than `steps × step` shows its far part here where the engine cut it off.
-`steps` still drives the reference march.
 
 EEVEE's froxel grid is screen-space. A small volume far away needs a small
 `tile_size`, and volume shadows need `use_volumetric_shadows`.
@@ -658,9 +646,8 @@ iso.bake(1, 120, update=update)         # one PLY per frame, played by Geometry 
 mainScene)`. The engine's helper was a renderer patch: it drew the proxy
 boxes, faked G-buffer passes and re-sorted volumes. All of that is native
 in Blender. What is left: it links the SDF collection into the scene, and
-binds the world's Environment Texture image as every SDF's `uEnvMap`. A
-reference march's `sampleEnvMap()` then sees the HDRI EEVEE lights with.
-`help()` prints the API reference and the registered EXAMPLES, like the
+binds the world's Environment Texture image as every SDF's `uEnvMap`, so
+an SDF's `sampleEnvMap()` sees the HDRI EEVEE lights with. `help()` prints the API reference and the registered EXAMPLES, like the
 engine's `SdfRaymarchLoader.help()`.
 
 ## Probes
@@ -673,8 +660,8 @@ distance through the mesh against the field's march: the mesh keeps the
 field's holes), `test_animated_bake.py` (the saved .blend reopened
 and rendered), `test_animated_examples.py` (every animated example baked
 and played), `test_help_recipes.py` (the help()'s samples and patterns),
-`test_volume.py`, `test_volume_density.py` (EEVEE and Cycles against the
-closed-form transmittance and emission), `test_sdf_texture.py`,
+`test_volume.py`, `test_volume_density.py` (EEVEE against the closed-form
+transmittance and emission), `test_sdf_texture.py`,
 `test_explosion_texture.py` (the four beats of the detonation, a monitor
 playing its baked sequence), `test_options.py`, `test_rd_parity.py` (deno
 runs the JS), `test_rhombic_render.py`, `test_robustness.py` (two objects
@@ -689,8 +676,9 @@ script's docstring gives its command.
 
 ## Not yet ported
 
-- `post(sum)` of a volume renders only in the reference march (see
-  Volumes). A Python `sample()` / `medium()` has no reference march.
+- `post(sum)` of a volume, the engine's remap of the composited pixel, has
+  no counterpart on a physical volume: fold it into the colours and
+  densities, or apply it in the compositor (see Volumes).
 - The mesher's grid is uniform within the bounds (sparse, not adaptive). A
   shape with millimetre detail over metres needs fine voxels everywhere it
   has surface: the Menger sponge's 8 mm holes over 2 m take 15 M quads, and

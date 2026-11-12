@@ -20,10 +20,8 @@ when that is the intended look.
   belongs to the [scene format](scene-format.md). A test with no sky of its own
   uses a neutral uniform world and a sun light, not a stock sky standing in for
   ours (the look family's own tests do), and exposure numbers measured under
-  it are the test's, not a film's. The world is also the room's light leak:
-  wherever a volume probe doesn't reach, EEVEE lights an interior from the
-  world as if the walls weren't there (see
-  [probes](#ray-traced-lighting-eevee)).
+  it are the test's, not a film's. Indoors, the room's thick walls and its
+  volume probe keep the world's light outside ([interiors](#interiors)).
 - Add lights where they help the image: a key, a rim, a nearby display or a
   lamp. A point light near a wall brightens that wall with less spill on a
   distant subject; a sun has no distance falloff.
@@ -42,10 +40,9 @@ when that is the intended look.
   that must not block light gets `obj.visible_shadow = False` (three's
   `castShadow = false`).
 - Coarse smooth-shaded geometry close to a light can self-shadow into
-  triangle-aligned bands (seen in WebGPU on the robotics kit's cast parts). In
-  Blender the knobs are the object's `shadow_terminator_normal_offset` and
-  `shadow_terminator_geometry_offset`. Leave the materials alone. Not yet
-  re-measured on the kit in EEVEE.
+  triangle-aligned bands. The object's `shadow_terminator_normal_offset` and
+  `shadow_terminator_geometry_offset` are EEVEE's settings for it; leave the
+  materials alone.
 - If a metal looks black, check the world, the probes and ray tracing
   (`trace_max_roughness`) before the material. Don't lower authored metalness
   to disguise a lighting problem.
@@ -77,14 +74,13 @@ lamp = L.practical(scene, bpy.data.objects['LampBulb'], watts=6, kelvin_k=2700, 
 L.log_lights(scene)                     # once at setup: name, type, power, size, temperature, shadow
 ```
 
-A practical is an emitting surface AND a real light of the same size and colour
-(episode three's `film_face_light` pattern). An emission alone lights nothing
-reliably in EEVEE; it reaches other surfaces only through probes and
-screen-space GI. A light alone is light from nowhere. `practical()` makes the
-emitter glow, puts a light at its centre, and turns off the emitter's
-`visible_shadow` so it never shadows its own light. A lampshade around a bulb
-SHOULD cast shadows: that makes the pool below and the scallop above, the job
-the WebGPU corner set faked with two spots and a glow (`test_corner_room.py`).
+A practical is an emitting surface AND a real light of the same size and
+colour. An emission alone lights nothing reliably in EEVEE; it reaches other
+surfaces only through probes and screen-space GI. A light alone is light from
+nowhere. `practical()` makes the emitter glow, puts a light at its centre, and
+turns off the emitter's `visible_shadow` so it never shadows its own light. A
+lampshade around a bulb SHOULD cast shadows: that makes the pool below and the
+scallop above (`test_corner_room.py`).
 
 A sky shader has no sun disc in EEVEE: pair the sky family's sky with a sun
 light from the same direction. `lighting.sun` takes its azimuth from +Y toward
@@ -118,20 +114,18 @@ that `clears()` rejects painting the whole arch.
 `rt_lighting.js` traced shadows, one bounce of GI and reflections against a
 proxy, then denoised. EEVEE does all three in the renderer, and traces every
 final frame from scratch: no history, no warm-up, no `resetHistory` on cuts.
-A frame rendered alone matched the same frame rendered after its previous
-frame to within 1 level, noise (`test_probe_modes.py`: max 0 in one run, 1 in
-another).
+A frame rendered alone matches the same frame rendered after its previous
+frame (`test_probe_modes.py`).
 
 ```python
 rt = L.create_rt_lighting(scene, shadows=True, gi=True, reflections=True, refl_max_rough=0.6, gi_distance=0.6)
-rt = L.create_rt_lighting(scene, refl_max_rough=0.6, gi=False)   # indoors, with a baked room probe (below)
 rt.update(); rt.reset_history()          # no-ops, kept so ported scenes run
 ```
 
 | `rt_lighting.js` | EEVEE |
 | --- | --- |
 | traced soft shadows, 8 light slots, `rtRadius` | every light shadows: `shadow_ray_count` × `shadow_step_count`; radius = the light's size |
-| one-bounce GI, `keepFill` | a baked volume probe (static bounce) + fast GI `GLOBAL_ILLUMINATION` (screen space, dynamic; off indoors, below) |
+| one-bounce GI, `keepFill` | fast GI `GLOBAL_ILLUMINATION` (screen space, dynamic) over baked volume probes (static bounce), indoors and out |
 | reflections up to `reflMaxRough` | `use_raytracing`, `trace_max_roughness`; rougher lobes and misses fall back to sphere probes and the world |
 | SVGF / OIDN / the WebGPU U-Net | the ray-tracing denoiser (spatial, temporal, bilateral); OIDN is the compositor Denoise node, for low-sample previews only |
 | debug views | `lighting.debug_passes(scene, out_dir, passes)`: light passes as EXRs |
@@ -148,55 +142,44 @@ The lessons carry over:
   would: a practical special on it (a riser top-light), not shadows or GI
   turned down.
 
-**Probes.** Indirect light indoors comes from a baked volume probe. Reflections
-come from ray tracing plus sphere probes, which EEVEE refreshes itself.
+**Probes.** Volume probes carry the static bounce; reflections come from ray
+tracing plus sphere probes, which EEVEE refreshes itself. Bake the volume
+probes once the scene's static light is in place, with what moves and the
+haze left out (`exclude=`): a probe is static, and moving emitters carry
+their light with real lights.
+
+### Interiors
+
+An interior holds its light as a real room does, with global illumination
+on, Fast GI included:
+
+- **Walls with real thickness.** Build the room as a closed shell of solid
+  walls: the floor and ceiling run under and over the walls, the walls meet
+  at the corners, and every piece is a closed mesh with its normals out (a
+  box per wall, or a Solidify modifier), never single-sided planes, so the
+  probe and the screen-space GI both see a closed room. A window is a hole in
+  a wall; a glass wall is not solid, and what stands beyond it lights the
+  room through it.
+- **A volume probe that covers the room.** EEVEE lays a volume probe's
+  samples inside its box and lights a surface near the box's faces, or
+  outside it, from the world. `add_room_probe(scene, name, inner_min,
+  inner_max, wall=)` takes the room's inside corners and its walls'
+  thickness and reaches the box past every inside face: the outermost
+  samples sit half a spacing inside the walls (the bake rejects them, as
+  they see only the walls' back faces), and every inside surface lies
+  between the room's own samples. The spacing defaults to the walls'
+  thickness (at most 0.4 m); walls thinner than about 0.6 × the spacing are
+  refused. `add_volume_probe` takes a box directly when the set isn't a
+  room.
+- **Real light sources.** A window lets the sun and sky in through its
+  opening; a lamp is a light with its fixture (above). Light the room the way
+  it would be lit, then measure the exposure.
 
 ```python
-L.add_room_probe(scene, 'room', inner_min=(-2.2, -2.0, 0.0), inner_max=(2.2, 2.0, 2.7), wall=0.12)  # samples ~0.35 m apart
+L.add_room_probe(scene, 'room', inner_min=(-2.2, -2.0, 0.0), inner_max=(2.2, 2.0, 2.7), wall=0.3)  # 0.3 m walls, samples 0.3 m apart
 L.add_sphere_probe(scene, 'room_refl', centre=(-0.5, 0.6, 1.0), radius=3.0)
-L.bake_light_probes(scene, exclude=[haze_collection])     # a GPU job: run it through heavy.sh
-P.render_reference(scene, 'out/room_cycles.png', frame=36)   # the same still path traced: the ground truth
+L.bake_light_probes(scene, exclude=[haze_collection])     # a GPU job: one render at a time
 ```
-
-**A room's probe reaches into its walls.** EEVEE fades a volume probe to the
-world's light beyond its outermost samples, which sit half a cell inside the
-probe's box. A probe sized to the room's interior therefore left every wall,
-the floor and the lower halves of the spheres lit by the uniform world, as if
-there were no walls. The walls came out pale blue, and a white sphere had a
-dark cap where its top reached the probe's samples. A denser probe only moved
-the edge. Cycles, path traced from the same file, showed the room warm (the
-lamp, the sun patch, the oak's bounce) and the sphere evenly lit.
-`add_room_probe` puts the outermost rows of samples in the middle of the walls,
-floor and ceiling (12 cm walls here), so every interior surface lies between
-rows. Measured against Cycles (frame median 40), mid-wall rows gave the walls
-the room's light (34). Rows 3 cm into the walls from the room side lit the room
-bluish (61), and walls thickened to 1 m lit it 1.5 stops too bright (111).
-`add_volume_probe` takes a box directly when the set isn't a room.
-
-**Fast GI off indoors.** With the probe fixed, a blue crescent stayed under the
-white sphere, with bright strips along the wall bases and grain on the walls.
-Fast GI's screen-space scan fills the directions it can't resolve from the
-world, through the walls, and its AO-only mode did the same. With fast GI off
-(`create_rt_lighting(gi=False)`, `apply_auto_enhance(ao=False)`), all three
-went, and EEVEE matched Cycles: the sphere evenly lit, frame medians 25 against
-Cycles' 28 on the spheres, 29 against 40 on the wide shot, which is a little
-dark. The baked probe carries the bounce. Outdoors there are no walls to see
-through, and fast GI stays: it is episode three's look.
-
-**Open: a mirror's off-screen reflection.** In the corner room, the chrome
-sphere's upper half reflects what lies behind and above the camera. EEVEE
-shows a network of thin bluish lines there, in the pattern of the room's
-edges, over a dark speckle. Cycles shows the walls and the neighbouring
-spheres. Neither a 2048 sphere-probe resolution nor a second sphere probe at
-the spheres changed the lines. The on-screen half (the window, the rug)
-reflects correctly.
-
-When EEVEE's light looks wrong, render the same still with
-`probe.render_reference` (Cycles on the GPU, about 6 s at 960 × 540 and 512
-samples). It answers in one render whether the fault is EEVEE's approximation
-or the scene's light; it found both of the faults above. Episode three baked
-one probe at a time with the haze excluded (`bake_house_ep3.py`), which
-`bake_light_probes` follows.
 
 **Light passes.** `debug_passes` writes Diffuse Direct, Glossy Direct,
 Shadow, Ambient Occlusion, Normal, Depth (and Vector, with motion blur off)
@@ -214,7 +197,11 @@ Contrast at exposure 0:
 | display (of 255) | 32 | 82 | 117.6 | 154 | 197 | 233 | 245 | 254.6 |
 
 A grey channel reaches 250 about 6 stops above 18% grey; a saturated one
-sooner. The highlight rule: in a delivered frame, the share of pixels with any
+sooner. Against three's ACES Filmic, plain AgX lifts the deep darks and holds
+the highlights lower; the look `AgX - Medium High Contrast`
+(`sets.unknown_force.cn_lib.ACES_LIKE_LOOK`) comes closest to the WebGPU
+frames' tones, for every scene in the file (the table is in
+[props and sets](props-and-sets.md#light-tone-and-the-world)). The highlight rule: in a delivered frame, the share of pixels with any
 channel at 250 or above stays near zero (0.1% by default). No 16 × 9 grid cell
 may hold a clipped region (2%): a glint is small, an overlit wall fills a
 cell.
@@ -449,13 +436,18 @@ None of these proves composition. View the probe stills.
 
 - `scene_placement.js`'s camera helpers beyond `focusPoint` / `lookAtObject`
   (none of the others are camera-specific).
-- The terminator-offset fix, re-measured on the robotics kit in EEVEE.
+- The terminator offsets on the robotics kit's cast parts, checked in EEVEE.
 - A per-frame `safe_position` follower (`safe_position` exists; a smoothed
   per-frame correction pass does not).
 - Clearance against instanced geometry (a camera inside a scattered rock is
   not flagged `inside`; sightlines do see instances).
-- Spot-light shadows on a VRM's MToon material in EEVEE: not checked.
-  `claude_robot.vrm` imports with Principled BSDF materials, so the stage test
-  didn't exercise MToon.
+- Shadows of a VRM's MToon materials: as the VRM add-on imports them, an
+  MToon character casts no sun shadow until its opaque materials get
+  `use_transparent_shadow = False`
+  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)); `load_vrm` does
+  not set it yet.
+- A chrome sphere's reflection of what lies behind the camera, in a closed
+  test room, shows thin bluish lines in the pattern of the room's edges: the
+  sphere-probe setup for off-screen mirror reflections indoors is not settled.
 - `oidn.js`, `nn_denoise.js` and their weights: Blender's denoisers are native
   (the compositor Denoise node), so these are dropped rather than ported.
