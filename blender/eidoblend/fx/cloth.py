@@ -10,6 +10,11 @@ Bake and playback: bake() steps the panel over the shot and writes a .pc2 point 
 modifier plays on the panel's grid mesh (Subdivision Surface and smooth shading on top), so the .blend needs
 no Python at render time.
 
+The look: material= is the panel's material; without one the panel gets the engine's default fabric (0xcccccc,
+roughness 0.6, metalness 0, both faces drawn). map= (or its alias texture=) puts a graphic on the fabric, as the
+engine's opts.map did: an Image Texture on the panel's 'UVMap' times the material's base colour, so text and logos
+ride the folds. It is set only where nothing feeds the Principled BSDF's Base Color yet (three's `!mat.map`).
+
 Differences from the engine, on purpose:
   - Jacobi for real: the GPU kernel read its neighbours from the same buffer it was writing (a race the
     engine's comment calls race-free); here every pass reads the previous pass's positions;
@@ -28,12 +33,13 @@ import struct
 
 import numpy as np
 
-from ._util import abspath
+from ._util import abspath, color
 
 DEFAULTS = dict(width=3.0, height=2.0, cols=40, rows=28, stiffness=0.9, damping=0.97,
                 gravity=(0.0, 0.0, -0.0006), wind=0.0004, wind_bias=0.15, wind_dir=(0.0, -1.0, 0.0),
                 pin='top', settle_steps=0, iterations=3, thickness=0.03, floor=None,
-                steps_per_frame=1, steps_per_second=None)
+                steps_per_frame=1, steps_per_second=None, map=None, texture=None)
+FABRIC = dict(color=0xcccccc, roughness=0.6, metalness=0.0)     # the engine's default MeshStandardNodeMaterial
 
 
 def _t3(v):
@@ -57,6 +63,7 @@ class ClothPanel:
         self.scene = scene
         self.o = o
         self.name = name
+        self.material = material
         self.cache_dir = abspath(cache_dir)
         C, R = int(o['cols']), int(o['rows'])
         self.C, self.R, self.N = C, R, C * R
@@ -342,11 +349,85 @@ def _write_pc2(path, frames, start):
     os.replace(tmp, path)
 
 
+def fabric_material(name='cloth_fabric'):
+    """The engine's default cloth material, MeshStandardNodeMaterial({color: 0xcccccc, roughness: 0.6, metalness: 0,
+    side: DoubleSide}): a Principled BSDF with the colour in linear, both faces drawn."""
+    import bpy
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    bsdf.inputs['Base Color'].default_value = (*color(FABRIC['color']), 1.0)
+    bsdf.inputs['Roughness'].default_value = FABRIC['roughness']
+    bsdf.inputs['Metallic'].default_value = FABRIC['metalness']
+    mat.use_backface_culling = False
+    return mat
+
+
+def _decal_image(decal, name):
+    """opts.map / opts.texture as a bpy Image: an Image as it is; a file path ('//' beside the .blend) loaded through
+    harness.assets.load_image_texture (sRGB); a drawing (a media.raster.Canvas, a PIL image, or an (h, w, 3|4) uint8
+    array with its top row first) made into a packed sRGB image."""
+    import bpy
+    if isinstance(decal, bpy.types.Image):
+        return decal
+    if isinstance(decal, (str, os.PathLike)):
+        from ..harness.assets import load_image_texture
+        return load_image_texture(abspath(os.fspath(decal)), srgb=True)
+    if hasattr(decal, 'result') and hasattr(decal, 'image'):          # media.raster.Canvas
+        decal = decal.result()
+    if hasattr(decal, 'convert'):                                      # a PIL image
+        decal = decal.convert('RGBA')
+    px = np.asarray(decal)
+    if px.ndim != 3 or px.shape[2] not in (3, 4) or px.dtype != np.uint8:
+        raise TypeError('[fx.cloth] map: a bpy Image, an image file path, a media.raster.Canvas, a PIL image or an '
+                        f'(h, w, 3|4) uint8 array, not {type(decal).__name__}')
+    from ..materials.procedural import image_from_canvas
+    return image_from_canvas(px, name, srgb=True, kind='cloth_map')
+
+
+def apply_decal(material, decal, name='cloth_map'):
+    """The engine's `if (decal && !mat.map) mat.map = decal`: an Image Texture of `decal` on the panel's 'UVMap',
+    times the material's base colour (three's color x map), into the Principled BSDF's Base Color. A material whose
+    Base Color something already feeds keeps it. Returns the Image Texture node, or None when the material kept
+    its own."""
+    nt = material.node_tree
+    bsdf = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None) if nt else None
+    if bsdf is None:
+        raise ValueError(f'[fx.cloth] map: material {material.name!r} has no Principled BSDF to take it; '
+                         'put an Image Texture on the UVMap in the material yourself')
+    base = bsdf.inputs['Base Color']
+    if base.is_linked:
+        return None
+    img = _decal_image(decal, name)
+    x, y = bsdf.location.x, bsdf.location.y
+    uv = nt.nodes.new('ShaderNodeUVMap')
+    uv.uv_map = 'UVMap'
+    uv.location = (x - 760, y - 120)
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.name = tex.label = 'cloth_map'
+    tex.image = img
+    tex.interpolation = 'Linear'
+    tex.extension = 'EXTEND'                      # three's ClampToEdgeWrapping
+    tex.location = (x - 560, y - 120)
+    mul = nt.nodes.new('ShaderNodeMix')
+    mul.data_type, mul.blend_type, mul.clamp_factor = 'RGBA', 'MULTIPLY', True
+    mul.location = (x - 240, y - 60)
+    ins = {s.identifier: s for s in mul.inputs}
+    ins['Factor_Float'].default_value = 1.0
+    ins['A_Color'].default_value = tuple(base.default_value)
+    nt.links.new(uv.outputs['UV'], tex.inputs['Vector'])
+    nt.links.new(tex.outputs['Color'], ins['B_Color'])
+    nt.links.new(next(s for s in mul.outputs if s.identifier == 'Result_Color'), base)
+    return tex
+
+
 def create_cloth_panel(scene=None, material=None, name='cloth', cache_dir='//cloth_cache', location=(0, 0, 0),
                        **options):
     """The engine's createClothPanel. The panel hangs in Blender's XZ plane (its face looks along -Y, the
     engine's +Z), row 0 at the top; gravity, wind_dir and colliders are Blender axes, panel units as the
-    engine's (gravity and wind are per-step impulses: 0.0006 and 0.0003-0.001)."""
+    engine's (gravity and wind are per-step impulses: 0.0006 and 0.0003-0.001). material=None gives the engine's
+    default fabric (fabric_material); map= or texture= puts a graphic on it (apply_decal): a bpy Image, an image
+    file path, a media.raster.Canvas, a PIL image or an (h, w, 3|4) uint8 array, top row at the panel's top."""
     import bpy
     o = dict(DEFAULTS)
     bad = set(options) - set(o)
@@ -354,4 +435,9 @@ def create_cloth_panel(scene=None, material=None, name='cloth', cache_dir='//clo
         raise TypeError('[fx.cloth] unknown options: ' + ', '.join(sorted(bad)))
     o.update(options)
     sc = scene or bpy.context.scene
+    if material is None:
+        material = fabric_material(name + '_fabric')
+    decal = o['map'] if o['map'] is not None else o['texture']
+    if decal is not None:
+        apply_decal(material, decal, name + '_map')
     return ClothPanel(sc, o, material, name, cache_dir, location)

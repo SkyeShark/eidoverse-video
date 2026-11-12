@@ -6,8 +6,16 @@ marched every pixel's view ray through the cloud's SDF (an entry march to the su
 second hook marched the reflected rays of metal surfaces through it, and a third blurred those by roughness. In
 Blender the cloud is in the scene: two Volume objects (the wide, thin base surge and the tall mushroom over it, so no
 voxel is spent on the air round the cap) hold the same density, heat and palette per frame, EEVEE draws them with
-depth, fog and other volumes, reflections and refractions see them, and keyed lamps carry their glow onto the
-ground (light_from_emission: EEVEE's volume emission lights no surface).
+depth, fog and other volumes, and keyed lamps carry their glow onto the ground (light_from_emission: EEVEE's volume
+emission lights no surface).
+
+Reflections: EEVEE's ray tracing and its light probes draw no volume. With reflections=True each volume gets a
+stand-in for the probes: its own density grid's surface (Geometry Nodes Grid to Mesh at reflection_density, live from
+the Volume object, so it follows every baked frame), emitting the medium's source function (emission / density,
+what an optically thick medium shows) x the effect's opacity, seen by light probes only (camera and shadow rays off,
+kept out of volume probes). reflect_in(objects) puts a sphere light probe round each metal object, its near clip just
+outside the object and its parallax at the cloud's distance, so chrome and wet metal show the cloud, blurred by their
+roughness through the probe's filtering.
 
     from eidoblend.sdf import nuclear_explosion as NX
     nuke = NX.apply_to(scene, camera, {'origin': [0, 0, -120], 'scale': 3.0, 'time_offset': 2.0},
@@ -34,7 +42,8 @@ Options (the effect's, snake_case; the camelCase spelling is accepted):
     disable_for_perf_test   the volumes are built hidden and nothing is baked (the effect's no-hook mode)
 Extra here: quality ('fast' | 'balanced' | 'high': voxel 0.16 / 0.08 / 0.055 original units, x scale), voxel,
 cache_dir, name, lights (lamps per frame from the emission, 3: cap, stem, surge), light_scale, bake ((fs, fe) or
-'scene': bake now).
+'scene': bake now), reflections (the probes' stand-ins, above), reflection_density (where their surface sits: the
+medium's density per metre, 0.75).
 """
 
 from __future__ import annotations
@@ -92,7 +101,7 @@ SdfSample sample(vec3 pw) {
 DEFAULTS = dict(origin=(0.0, 0.0, 0.0), scale=1.0, time_offset=0.0, loop_seconds=20.0, max_t=80.0, surf_steps=64,
                 vol_steps=96, reflect_steps=48, opacity=1.0, width=None, height=None, disable_for_perf_test=False)
 EXTRA = dict(quality='balanced', voxel=None, cache_dir='//sdf_cache', name='nuclear_explosion', lights=3,
-             light_scale=1.0, bake=None, split=True)
+             light_scale=1.0, bake=None, split=True, reflections=False, reflection_density=0.75)
 _CAMEL = {'timeOffset': 'time_offset', 'loopSeconds': 'loop_seconds', 'maxT': 'max_t', 'surfSteps': 'surf_steps',
           'volSteps': 'vol_steps', 'reflectSteps': 'reflect_steps', 'disableForPerfTest': 'disable_for_perf_test'}
 QUALITY_VOXEL = {'fast': 0.16, 'balanced': 0.08, 'high': 0.055}
@@ -103,7 +112,8 @@ OPTION_NOTES = {
              "EEVEE's froxel range is fitted round it instead (fit_volume_range)",
     'surf_steps': "the entry march to the SDF before the volume march; the grids fill the volumes' boxes, so EEVEE "
                   "needs none",
-    'reflect_steps': "the metal-reflection march; reflections of the cloud are EEVEE's own (ray traced / probes)",
+    'reflect_steps': "the metal-reflection march; here metal reflects the cloud through light probes "
+                     "(reflections=True and reflect_in(objects))",
     'width': "the screen pass's resolution (iResolution, unused by its shader): a volume has none",
     'height': "the screen pass's resolution (iResolution, unused by its shader): a volume has none",
 }
@@ -209,6 +219,8 @@ class NuclearExplosion:
         self.lights = []
         self.opacity_socket = None
         self.uniforms = _Uniforms(self)
+        self.reflection_objects, self.reflection_probes = [], []
+        self._probe_hidden = {}                  # reflect_in's objects: their sphere-probe visibility before it
         for k, why in OPTION_NOTES.items():
             if k in o.get('_given', ()):
                 print(f'[nuclear_explosion] option {k!r}: {why}', flush=True)
@@ -216,6 +228,8 @@ class NuclearExplosion:
             for ob in self.objects:
                 ob.hide_render = True
                 ob.hide_viewport = True
+        elif o['reflections']:
+            self._reflection_stand_ins()
 
     # ---------------------------------------------------------------------------------------------- building --
     def update(self, t, log=print):
@@ -387,12 +401,181 @@ class NuclearExplosion:
         self._drive_lights()
         return self
 
+    # -------------------------------------------------------------------------------------------- reflections --
+    def _stand_in_material(self):
+        """emission = the stand-in's 'nx_source' (the medium's source function) x the effect's opacity"""
+        import bpy
+        m = bpy.data.materials.new(f"{self.o['name']}_reflection")
+        m.use_nodes = True
+        nt = m.node_tree
+        nt.nodes.clear()
+        at = nt.nodes.new('ShaderNodeAttribute')
+        at.attribute_type, at.attribute_name = 'GEOMETRY', 'nx_source'
+        at.location = (-600, 100)
+        grp = nt.nodes.new('ShaderNodeGroup')
+        grp.node_tree = self._opacity_group()
+        grp.name = grp.label = 'nx_opacity'
+        grp.location = (-600, -150)
+        em = nt.nodes.new('ShaderNodeEmission')
+        em.location = (-200, 0)
+        out = nt.nodes.new('ShaderNodeOutputMaterial')
+        out.location = (100, 0)
+        nt.links.new(at.outputs['Color'], em.inputs['Color'])
+        nt.links.new(grp.outputs[0], em.inputs['Strength'])
+        nt.links.new(em.outputs[0], out.inputs['Surface'])
+        return m
+
+    def _reflection_stand_ins(self):
+        """Per volume, the light probes' stand-in of the medium: a mesh object whose Geometry Nodes take the Volume
+        object's density grid to a mesh at reflection_density (per metre) and store, at each vertex, emission /
+        density sampled a voxel inside it; visible to sphere and planar light probes only."""
+        import bpy
+        mat = self._stand_in_material()
+        for vol in self.volumes:
+            vo = vol.object
+            name = f'{vo.name}_reflection'
+            tree = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+            tree.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+            tree.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            N, L = tree.nodes, tree.links
+            go = N.new('NodeGroupOutput')
+            go.location = (1600, 0)
+            oi = N.new('GeometryNodeObjectInfo')
+            oi.transform_space = 'RELATIVE'
+            oi.inputs['Object'].default_value = vo
+            grids = {}
+            for gname, dtype in (('density', 'FLOAT'), ('emission', 'VECTOR')):
+                g = N.new('GeometryNodeGetNamedGrid')
+                g.data_type = dtype
+                g.inputs['Name'].default_value = gname
+                L.new(oi.outputs['Geometry'], g.inputs['Volume'])
+                grids[gname] = g.outputs['Grid']
+            gm = N.new('GeometryNodeGridToMesh')
+            gm.inputs['Threshold'].default_value = float(self.o['reflection_density'])
+            L.new(grids['density'], gm.inputs['Grid'])
+            nrm = N.new('GeometryNodeInputNormal')
+            inward = N.new('ShaderNodeVectorMath')
+            inward.operation = 'SCALE'
+            inward.inputs['Scale'].default_value = -float(vol.voxel)
+            L.new(nrm.outputs[0], inward.inputs[0])
+            pos = N.new('GeometryNodeInputPosition')
+            at_p = N.new('ShaderNodeVectorMath')
+            at_p.operation = 'ADD'
+            L.new(pos.outputs[0], at_p.inputs[0])
+            L.new(inward.outputs[0], at_p.inputs[1])
+            samples = {}
+            for gname, dtype in (('density', 'FLOAT'), ('emission', 'VECTOR')):
+                s = N.new('GeometryNodeSampleGrid')
+                s.data_type = dtype
+                L.new(grids[gname], s.inputs['Grid'])
+                L.new(at_p.outputs[0], s.inputs['Position'])
+                samples[gname] = s.outputs[0]
+            dmax = N.new('ShaderNodeMath')
+            dmax.operation = 'MAXIMUM'
+            dmax.inputs[1].default_value = 1e-3
+            L.new(samples['density'], dmax.inputs[0])
+            dv = N.new('ShaderNodeVectorMath')
+            dv.operation = 'SCALE'
+            inv = N.new('ShaderNodeMath')
+            inv.operation = 'DIVIDE'
+            inv.inputs[0].default_value = 1.0
+            L.new(dmax.outputs[0], inv.inputs[1])
+            L.new(samples['emission'], dv.inputs[0])
+            L.new(inv.outputs[0], dv.inputs['Scale'])
+            st = N.new('GeometryNodeStoreNamedAttribute')
+            st.data_type, st.domain = 'FLOAT_COLOR', 'POINT'
+            st.inputs['Name'].default_value = 'nx_source'
+            L.new(gm.outputs['Mesh'], st.inputs['Geometry'])
+            L.new(dv.outputs[0], st.inputs['Value'])
+            sm = N.new('GeometryNodeSetMaterial')
+            sm.inputs['Material'].default_value = mat
+            L.new(st.outputs['Geometry'], sm.inputs['Geometry'])
+            L.new(sm.outputs['Geometry'], go.inputs[0])
+            for i, n in enumerate(N):
+                if n is not go:
+                    n.location = (i * 160 - 200, (i % 4) * -160)
+            me = bpy.data.meshes.new(name)
+            ob = bpy.data.objects.new(name, me)
+            for c in vo.users_collection:
+                c.objects.link(ob)
+            ob.parent = vo
+            ob['nuclear_explosion'] = 'reflection'
+            md = ob.modifiers.new('nx_reflection', 'NODES')
+            md.node_group = tree
+            ob.visible_camera = False
+            ob.visible_shadow = False
+            ob.hide_probe_volume = True                 # the glow lamps carry its light on the scene
+            self.reflection_objects.append(ob)
+        return self.reflection_objects
+
+    def reflect_in(self, objects, parallax=None, margin=0.1):
+        """A sphere light probe round each of these objects (chrome, wet metal, glass), so they reflect the cloud
+        through the stand-ins (reflections=True): centred on the object's bounds, its influence wide enough that the
+        object takes the probe at full weight (plus `margin`), and its parallax a sphere at the cloud's distance from
+        it (or `parallax` metres), where the probe's picture of the cloud belongs. Each object leaves the sphere
+        probes (its Light Probes > Sphere visibility; remove() gives it back), so it does not hide its own probe's
+        view, and the probe's near clip stays at 1 cm: the ground the object stands on stays in the picture (a probe
+        clips with a plane per cube face, so a clip at the object's reach cuts away the ground under it). Returns the
+        probes."""
+        import bpy
+        from mathutils import Vector
+        objs = list(objects) if isinstance(objects, (list, tuple, set)) else [objects]
+        if not self.reflection_objects:
+            print('[nuclear_explosion] reflect_in: no stand-ins (reflections=False), so the probes show no cloud',
+                  flush=True)
+        cloud = sum((ob.matrix_world.translation for ob in self.objects), Vector()) / max(len(self.objects), 1)
+        dg = bpy.context.evaluated_depsgraph_get()
+        out = []
+        for ob in objs:
+            cs = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
+            centre = sum(cs, Vector()) / 8.0
+            radius = max((c - centre).length for c in cs)
+            ev = ob.evaluated_get(dg)
+            if ob.type == 'MESH' and len(ev.data.vertices):     # the mesh's own reach: a box's corners overshoot
+                mw = ob.matrix_world
+                radius = max((mw @ v.co - centre).length for v in ev.data.vertices)
+            pd = bpy.data.lightprobes.new(f'{ob.name}_nx_probe', 'SPHERE')
+            po = bpy.data.objects.new(f'{ob.name}_nx_probe', pd)
+            self.scene.collection.objects.link(po)
+            po.location = centre
+            # the object inside the probe's full weight: the influence fades out over its last `falloff` share
+            pd.influence_distance = radius / max(1.0 - float(pd.falloff), 0.05) + float(margin)
+            self._probe_hidden.setdefault(ob.name, ob.hide_probe_sphere)
+            ob.hide_probe_sphere = True
+            pd.clip_start = 0.01
+            pd.clip_end = max(1000.0, (cloud - centre).length * 4.0)
+            pd.use_custom_parallax = True
+            pd.parallax_type = 'ELIPSOID'
+            pd.parallax_distance = float(parallax) if parallax else max((cloud - centre).length, radius * 2.0)
+            out.append(po)
+        self.reflection_probes.extend(out)
+        return out
+
     def remove(self):
-        """Take the effect out of the scene: its volumes, their materials and lights."""
+        """Take the effect out of the scene: its volumes, their materials and lights, the probes' stand-ins and the
+        probes reflect_in made (its objects get their sphere-probe visibility back)."""
         import bpy
         for rig in self.lights:
             rig.remove()
         self.lights = []
+        for name, hidden in self._probe_hidden.items():
+            ob = bpy.data.objects.get(name)
+            if ob is not None:
+                ob.hide_probe_sphere = hidden
+        self._probe_hidden = {}
+        for ob in list(self.reflection_objects) + list(self.reflection_probes):
+            data = ob.data
+            md = ob.modifiers.get('nx_reflection')
+            tree = md.node_group if md is not None else None
+            bpy.data.objects.remove(ob, do_unlink=True)
+            if tree is not None and tree.users == 0:
+                bpy.data.node_groups.remove(tree)
+            if data is not None and data.users == 0:
+                (bpy.data.lightprobes if isinstance(data, bpy.types.LightProbe) else bpy.data.meshes).remove(data)
+        m = bpy.data.materials.get(f"{self.o['name']}_reflection")
+        if m is not None and m.users == 0:
+            bpy.data.materials.remove(m)
+        self.reflection_objects, self.reflection_probes = [], []
         for vol in self.volumes:
             ob = vol.object
             vd = ob.data
@@ -454,31 +637,43 @@ def native_build(scene, o):
     o.setdefault('bake', 'scene')
     o.pop('layer', None)                              # the registry's layer rule: a volume is in the render itself
     fx = apply_to(scene, scene.camera, o)
-    scene[NATIVE_KEY] = [ob.name for ob in fx.objects] + [lo.name for rig in fx.lights for lo in rig.lights]
+    scene[NATIVE_KEY] = ([ob.name for ob in fx.reflection_objects] + [ob.name for ob in fx.objects]
+                         + [lo.name for rig in fx.lights for lo in rig.lights])
     if getattr(fx, '_opacity_tree', None) is not None:
         scene[NATIVE_KEY + '_group'] = fx._opacity_tree.name
+    if fx.reflection_objects:
+        scene[NATIVE_KEY + '_reflection'] = f"{fx.o['name']}_reflection"
     return fx.objects[-1], ({'opacity': fx.opacity_socket} if fx.opacity_socket is not None else {})
 
 
 def native_undo(scene):
-    """Take a registry-applied cloud back out (its volumes, materials, lights and opacity group)."""
+    """Take a registry-applied cloud back out (its volumes, materials, lights, the probes' stand-ins and the opacity
+    group)."""
     import bpy
     group = scene.get(NATIVE_KEY + '_group')
+    store = {bpy.types.Volume: bpy.data.volumes, bpy.types.Light: bpy.data.lights, bpy.types.Mesh: bpy.data.meshes}
     for name in list(scene.get(NATIVE_KEY, [])):
         ob = bpy.data.objects.get(name)
         if ob is None:
             continue
         data = ob.data
         mats = [m for m in getattr(data, 'materials', []) if m is not None]
+        md = ob.modifiers.get('nx_reflection')
+        tree = md.node_group if md is not None else None
         bpy.data.objects.remove(ob, do_unlink=True)
+        if tree is not None and tree.users == 0:
+            bpy.data.node_groups.remove(tree)
         if data is not None and data.users == 0:
-            (bpy.data.volumes if isinstance(data, bpy.types.Volume) else bpy.data.lights).remove(data)
+            next(c for t, c in store.items() if isinstance(data, t)).remove(data)
         for m in mats:
             if m.users == 0:
                 bpy.data.materials.remove(m)
+    rm = bpy.data.materials.get(scene.get(NATIVE_KEY + '_reflection', ''))
+    if rm is not None and rm.users == 0:
+        bpy.data.materials.remove(rm)
     g = bpy.data.node_groups.get(group) if group else None
     if g is not None and g.users == 0:
         bpy.data.node_groups.remove(g)
-    for k in (NATIVE_KEY, NATIVE_KEY + '_group'):
+    for k in (NATIVE_KEY, NATIVE_KEY + '_group', NATIVE_KEY + '_reflection'):
         if k in scene:
             del scene[k]

@@ -60,10 +60,41 @@ at vertex resolution, so for a thin protrusion (a pole) keep `cols` and
 `rows` high or raise `thickness`. Register colliders before `settle()`, so
 the pre-roll drapes over them.
 
-**Text or a logo on the fabric goes in its material**, through an Image
-Texture on the panel's `UVMap`. It rides the folds and sway because the UVs
-are intact. A separate rigid plane floated in front of the cloth detaches,
-z-fights, and doesn't move with the fabric.
+**The fabric.** `material=` is the panel's material. Without one the panel
+gets the engine's default fabric, `fabric_material()`: base colour
+`0xcccccc` (linear 0.604), roughness 0.6, metalness 0, both faces drawn.
+`cloth.material` is the material in use.
+
+**Text or a logo goes on the fabric itself**: hand the graphic to the panel
+as `map=` (or `texture=`, the engine's other name for it). It rides the
+folds and sway because the panel's `UVMap` is intact, top row of the
+graphic along the panel's top edge, read from the front (−Y). A separate
+rigid plane floated in front of the cloth detaches, z-fights, and doesn't
+move with the fabric.
+
+```python
+from eidoblend.media.raster import Canvas
+
+art = Canvas(1024, 512, ss=2, background='#16141d')
+art.text_fit('EIDOVERSE', x=art.w / 2, y=art.h * 0.3, max_width=art.w * 0.86, font='Anton', px=260,
+             fill='#f4efe6')
+banner = create_cloth_panel(name='banner', map=art, width=3, height=1.5, location=(0, 0, 2.3))
+flag = create_cloth_panel(name='flag', texture='//flags/harbour.png', material=flag_cloth, pin='left')
+```
+
+`map` takes a `bpy` Image, an image file path (loaded as sRGB), a
+`media.raster.Canvas`, a PIL image, or an (h, w, 3 or 4) uint8 array with
+its top row first. As in the engine, the graphic multiplies the
+material's base colour (three's `color × map`): on the default fabric it
+shows at 0.6 of its brightness, so for the graphic's own colours give a
+white material. The alpha is not used: the cloth stays opaque. The map
+goes on only where nothing feeds the Principled BSDF's Base Color yet
+(three set `mat.map` only when the material had none), and a material with
+no Principled BSDF refuses it. `apply_decal(material, graphic)` does the
+same to any material.
+`blender/tests/fx/test_cloth_map.py` checks all of it, and renders a
+painted banner draped over a ball beside a plain panel and a banner on its
+own material with a file texture.
 
 **Pick wind by what the fabric is doing**: a hanging banner is not a flag.
 - Hanging banner, tapestry or curtain: `wind` 0.0003–0.0006, `wind_bias`
