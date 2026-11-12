@@ -27,11 +27,17 @@ both editions as it is.
 ## Quickstart
 
 ```bash
-# 1. Install Blender 5.2, ffmpeg and (on Windows) Git for Windows    → docs/SETUP.md
-python eido_blender.py doctor          # Blender, bash, the VRM add-on, ffmpeg, an EEVEE render and a GPU compute check
-python eido_blender.py render blender/tests/pipeline/example/scene.json --at 1.5   # one still, as a PNG
-python eido_blender.py render blender/tests/pipeline/example/scene.json            # the film, H.264
+# 1. Install Docker (Docker Desktop with WSL 2 on Windows) with GPU support    → docs/AGENT_LOOP.md
+python eido_blender.py bootstrap       # build the render image (Blender 5.2, the VRM add-on, ffmpeg, Mesa) and cache the JS deps
+python eido_blender.py doctor          # inside the image: the GPU renderer, an EEVEE render and a GPU compute check
+python eido_blender.py render blender/tests/pipeline/example/scene.json --at 1.5   # one still, rendered in the container
+python eido_blender.py agent --brief brief.txt [--context context.txt] [--agent claude|codex|opencode]
+                                       # a brief in, a finished film and its artifacts back (runs/<utc-ts>/)
 ```
+
+`build`, `render`, `bench` and `doctor` run inside the render image; add
+`--local` to run one on this machine instead (Blender 5.2 installed locally,
+as on the `blender` branch).
 
 Then open the repo in your agent (Claude Code, codex, opencode). It reads
 [AGENTS.md](AGENTS.md), then opens the relevant guides in its
@@ -41,11 +47,11 @@ Working rhythm: [docs/HARNESS_MODE.md](docs/HARNESS_MODE.md).
 
 ## Branches
 
-- **`blender`** (this branch) — the Blender 5.2 EEVEE edition, interactive:
-  Blender on your machine, no containers.
-- **`auto-blender`** — the same edition in a container, wrapped as a
-  **subagent for autonomous agentic loops**: a parent orchestrator hands in a
-  brief and gets back a finished film.
+- **`blender`** — the Blender 5.2 EEVEE edition, interactive: Blender on your
+  machine, no containers.
+- **`auto-blender`** (this branch) — the same edition in a container, wrapped
+  as a **subagent for autonomous agentic loops**: a parent orchestrator hands
+  in a brief and gets back a finished film.
 - **`main`** and **`auto`** — the WebGPU editions (Deno + WebGPU +
   three.js/TSL, the second containerized), where the systems were first
   built.
