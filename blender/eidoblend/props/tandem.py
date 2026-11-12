@@ -39,8 +39,9 @@ Blender translations:
   pose_rider   writes the VRM's normalized humanoid rotations (characters.VRMHandle.write_pose) and keys them; the
                engine's spring pre-roll runs in bake_rider_springs, over the film once every frame is posed.
   the teapot   the glaze's crazing fades as the camera's pixel grows past its line width (three's screen derivatives
-               of the view position); here the pixel is the view depth times the camera's angle per pixel, measured
-               in the shader (the voice-machine kit's pixel_angle), so it holds for any camera, cut or lens.
+               of the view position); here the pixel is the metres a pixel spans at the surface, measured in the
+               shader (the voice-machine kit's pixel_footprint: perspective or orthographic), so it holds for any
+               camera, cut or lens.
 """
 
 from __future__ import annotations
@@ -1055,14 +1056,13 @@ def _teapot_material(name, color, scene):
     b = K.principled(nb)
     P = nb.texcoord('Object')
     _px, _py, pz = nb.sep(P)
-    # the camera's pixel footprint at the surface (three's max(|dFdx(positionView)|, |dFdy(positionView)|)): the view
-    # depth times the camera's angle per pixel, measured in the shader by the voice-machine kit's pixel_angle (no
-    # driver on scene.camera, which stays invalid when the teapot is built before the scene has a camera: the crazing
-    # then never faded with distance); it follows camera cuts and lens changes
-    from .voice_machines import Nodes, pixel_angle
-    pa = pixel_angle(Nodes(t), scene)
-    cam = nb.new('ShaderNodeCameraData')
-    px = nb.mul(cam.outputs['View Z Depth'], pa)
+    # the camera's pixel footprint at the surface (three's max(|dFdx(positionView)|, |dFdy(positionView)|)), measured
+    # in the shader by the voice-machine kit's pixel_footprint: the view depth times the angle per pixel under a
+    # perspective camera, ortho_scale / width under an orthographic one (no driver on scene.camera, which stays invalid
+    # when the teapot is built before the scene has a camera: the crazing then never faded with distance); it follows
+    # camera cuts and lens changes
+    from .voice_machines import Nodes, pixel_footprint
+    px = pixel_footprint(Nodes(t), scene)
 
     def craze(scale, offset, width, f0, f1):
         vor = []

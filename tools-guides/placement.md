@@ -358,18 +358,18 @@ escalator). `obj['no_intrusion_check']` declares an intentional intrusion.
 
 ## Not yet ported
 
-- The seating helpers' hand-off to a walking character's controller: the
-  engine played a sit-down through a controlled VRM's own mixer
-  (`beginSeated`, crossfading from her walk). Here `seat_on` sits a planted
-  VRM; a character the controller walks up to a seat is the characters
-  family's `controller.Locomotion` (`seat_spot`). After seating, the engine
-  reset the VRM's spring bones; keyed or baked springs are the characters
-  family's, so re-bake them after a seat if the scene uses them.
+- A walking body's seats, ground sits and emotes: `eidoblend.characters.emotes`
+  ([maneuvers.md](maneuvers.md)); these verbs call `placement.seating` for a
+  VRM nothing drives. After seating, the engine reset the VRM's spring bones;
+  keyed or baked springs are the characters family's, so re-bake them after a
+  seat if the scene uses them.
 - `focusPoint` / `lookAtObject` are the look family's `focus_point` /
   `look_at_object` ([camera-lighting.md](camera-lighting.md)).
 - Geometry Nodes instances (a scatter made in a node tree) are not expanded
   into the ray targets, as collection instances are: mark a scattered field
   `no_clipping_check` / `no_support_check`, or realise the instances you need
   to place on. The harness's coverage records count them as leaves.
-- `placeRelativeTo` (the engine's deprecated alias) is not carried over;
-  use `place_against`.
+- The settle's ray grid is world-axis (±0.20 x, ±0.22 y), exactly as the
+  engine's: on a turned chair it can take in the shins below the pan's front
+  edge (on a chair turned 140°, its lowest read lay 0.22 m low at one frame),
+  though the settle itself landed right.

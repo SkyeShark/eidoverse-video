@@ -157,7 +157,11 @@ node = ui.texture_node(my_material.node_tree)                 # an Image Texture
 `make_ascii_panel(text, color='#27e0a0', background='#050a08', width=1.2,
 reveal=24, font='VT323')` is `makeAsciiPanel`: multi-line monospace text on a
 terminal panel, a teletype reveal in characters per second and a blinking
-block cursor, in a real monospace font.
+block cursor, in a real monospace font. The engine's first `makeAsciiPanel`
+(`ascii_panel.js`: glow and CRT scanlines), which the particle text example
+puts under its cloud, is `ascii_panel` in
+[particles-fx.md](particles-fx.md#the-ascii-terminal-panel), with point-cloud
+lettering (`from_text`, `'text:HELLO'`).
 
 ## Frame overlays
 
@@ -727,5 +731,10 @@ Any image can be drawn into a screen: `c.image.paste(Image.open(path))` or
   (`render_common.mjs`'s `rasterizeUI`, called by no scene). A UI on the frame
   is an overlay panel drawn with `raster` (Pillow), a canvas-2D module baked
   with `bake_canvas_scene(draw_module=...)`, a `LyricRenderer`, or TEXT
-  strips.
+  strips; an HTML + CSS card in the world is `eidoblend.harness.html_mesh`
+  ([assets](assets.md#ui-panels-html_mesh)). The harness's own overlay layer
+  ([scene format](scene-format.md#the-post-stack-its-hooks-and-the-overlay-layer))
+  composites through `media.overlay.chain_overlay(authored=True)`, the same
+  display-space route as `media.overlay`'s edit above, so its ink lands as
+  drawn.
 - Superseded, not ported: `loadCanvasImage` (Pillow opens images).

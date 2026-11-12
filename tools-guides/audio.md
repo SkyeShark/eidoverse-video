@@ -73,9 +73,9 @@ outputs (`blender/tests/media2/tools_host.py`, then
 
 The strips in the song's time (frame 1 = 69 s) went into a one-pass render
 (H.264 + 48 kHz stereo AAC, 2.0 s) and a mixdown. On Windows, a pipe's
-console encoding is cp1252, and `align_lyrics.py`'s last print (a "→") then
-raises after the JSON is written, with exit 1. Run it with
-`PYTHONIOENCODING=utf-8` (or `python -X utf8`) when its output is piped.
+console encoding is cp1252, so a tool that prints a non-ASCII character to a
+pipe raises after its work is done; `align_lyrics.py` prints ASCII, and for
+any other tool `PYTHONIOENCODING=utf-8` (or `python -X utf8`) avoids it.
 
 The options those runs leave at their defaults, each run on this branch
 (`tools_host.py --only options`, CPU only, 11-07):
@@ -465,10 +465,13 @@ captions, a fixed shot count and a fadeout are not prerequisites for a video.
   By default it reads the weather from custom properties keyed on an object
   named `eido_weather` (`rainK`, `denseA`, `windK` or `wind_len`, `strike_id`,
   `strike_x/y/z`, `strike_flash`, `strike_local`, Blender metres); pass
-  `read=` to read them elsewhere. That object is a proposal to the sky-weather
-  family's port. `blender/tests/media/test_weather_audio_parity.py` feeds a
-  synthetic storm to both recorders: the timelines match exactly (11-07), and
-  the baker renders the port's.
+  `read=` to read them elsewhere. `eidoblend.weather` keys it on every bake,
+  and its `audio_timeline()` / `bake_audio()` (or `make_weather_audio` in a
+  loop of your own) record the same timeline from the planned frames
+  ([weather-effects](weather-effects.md#weather-audio)).
+  `blender/tests/media/test_weather_audio_parity.py` feeds a synthetic storm
+  to both recorders: the timelines match exactly, and the baker renders the
+  port's.
 - `eidoverse/comfy_bridge.py` is an optional TCP bridge for a container client
   that needs to reach a host ComfyUI. Native rendering can use the backend
   directly. The bridge listens on all interfaces by default; starting it is a
@@ -503,8 +506,6 @@ Labs · 1961" in the corner, the line in typewriter type).
 
 ## Not yet ported
 
-- The weather object `eido_weather` is a proposed contract; the sky-weather
-  family's port decides where rain, wind and strikes are exposed.
 - No generation was run on this branch: `generate_song.py` and
   `generate_sfx.py` answered their probes. A real generation loads weights
   onto the shared GPU and wants the collaborator's yes. Their output is an

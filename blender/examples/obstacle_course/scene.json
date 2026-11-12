@@ -1,0 +1,8 @@
+{
+    "width": 960, "height": 540, "fps": 30, "duration": 58,
+    "script": "blender/examples/obstacle_course/scene.py",
+    "outputVideo": "blender/examples/out/obstacle_course.mp4",
+    "assets": {"character_vrm": "eidoverse/assets/vrms/aporia.vrm"},
+    "render": {"samples": 16},
+    "notes": "eidoverse/examples/obstacle_course.js: aporia walks, runs, vaults, climbs, sits and salutes on the course"
+}

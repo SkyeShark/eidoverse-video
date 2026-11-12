@@ -262,7 +262,8 @@ seated clip on the controller's mixer while the root holds, raised by
 seat's underside on the posed skin over the pelvis and thighs, the mesh that
 sits tightest round the thigh bones, so a coat's hem or a tail hanging
 through the pan is not what rests on it). Every loader takes
-`vrma_library={slot: path}` (the original's `vrmaLibrary`).
+`vrma_library={slot: path}` (the original's `vrmaLibrary`). Aimed at scene
+objects, and seats for a walking body: [maneuvers.md](maneuvers.md).
 
 **Maneuvers** (`maneuvers.py`). While the body walks or runs, the controller
 scans the path ahead (`_scan_path_ahead`: probes every 15 cm to 2.6 m),
@@ -326,7 +327,8 @@ plant stands the landing on the ground it reached. Register your own moves in
 `c.maneuvers`, extra planners in `c.maneuver_planners`, contact IK by grab
 type in `c.maneuver_hand_ik`; `auto_maneuvers=False` (or `c.auto_maneuvers =
 False` from a `call`) stops the auto-trigger near things that look like cover
-but are not (the course example's bench).
+but are not (the course example's bench). Aimed at scene objects, and seats
+for a walking body: [maneuvers.md](maneuvers.md).
 
 ## The world — `CollisionWorld`
 
@@ -383,8 +385,10 @@ vault's take-off and landing (`vault_window`), the mount's end crouch
 ## Tests — `blender/tests/controller/`
 
 Each test bakes on the CPU, saves its keyed `.blend` and a shot list; one
-`render_shots.py` run through the GPU slots renders the stills of any number
-of tests (`gpu_slot.sh` tries the three slots in turn and waits for one).
+`render_shots.py` run renders the stills of any number of tests. Run it
+through `run_blender.sh`, one render at a time on a shared GPU
+(`gpu_slot.sh` is the studio machine's queue for it: it needs that machine's
+GPU slot scripts).
 Besides checks.feet (the plant's own report, on rigid sole points), the
 tests measure what the camera sees: `FootMesh` in `_ctrl_stage.py` takes the
 skinned boot's every vertex against every solid (inside by a parity ray), so
@@ -392,11 +396,15 @@ a foot in a wall, a turn's lifted boots or a seated boot under the floor fail
 whatever the plant believed.
 
 ```bash
-cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-bash run_blender.sh <repo>/blender/tests/controller/test_controller_course.py --vrm claude_robot
-bash <repo>/blender/tests/controller/gpu_slot.sh <repo>/blender/tests/controller/render_shots.py \
-     <repo>/blender/tests/controller/out/course_claude_robot_shots.json
+bash run_blender.sh blender/tests/controller/test_controller_course.py --vrm claude_robot     # from the repository root
+bash run_blender.sh blender/tests/controller/render_shots.py blender/tests/controller/out/course_claude_robot_shots.json
 ```
+
+The walking course example scene
+([blender/examples/obstacle_course/](../blender/examples/obstacle_course/scene.py),
+the counterpart of `eidoverse/examples/obstacle_course.js`) builds the same
+course with Aporia and her follow camera through the runner:
+`python eido_blender.py render blender/examples/obstacle_course/scene.json --at 14.4 --at 40 --at 51.6`.
 
 | Test | What it walks |
 |---|---|
@@ -418,9 +426,13 @@ bash <repo>/blender/tests/controller/gpu_slot.sh <repo>/blender/tests/controller
   ported (`sit(seat=...)`).
 - The backward walk on stairs: walkBackward is for the flat and ramps; the
   stair clips play forward only.
-- The example's whole 62 s film at 1280 x 720: the maneuvers test keys its
-  camera into the saved film (`example_cam`), so rendering every frame is one
-  render of that .blend; the tests render stills only.
+- The example's whole 62 s film at 1280 x 720 has not been rendered. The
+  maneuvers test keys its camera into the saved film (`example_cam`), and
+  `blender/examples/obstacle_course/` builds the same film through the runner
+  (`eido_blender.py`, about 200 s); its stills from the follow camera at
+  14.4 s, 40 s and 51.6 s match the WebGPU film's frames of the same moments
+  in composition, scale and stride. In those runner stills Aporia casts no sun
+  shadow; the cause is not traced yet.
 
 Known residuals of the film bake (each found by the tests; the JSON reports
 in `out/` list the frames under `stance_issues`, `swing_issues` and

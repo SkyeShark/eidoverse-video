@@ -17,6 +17,10 @@ building the city never pulls in the race, and a set still being ported never br
 The set contract, in Blender terms: build(...) returns a dict with group (the root Empty), parts, update(t, state[,
 frame]) (frame keys what it sets), dispose() and cams (set-local pos / target / vertical fov, Blender axes). Every
 control is free: drive the sets on your own clock (their animate(...) keys it into the .blend).
+
+The interiors (quiet_room, showroom): build(env_light='material' (each material lit by its set's env, as the engine's
+envMap) or 'world', art={canvas: painter or image}, screen_media=... (the showroom)) and animate(frames, t0, **state)
+on their own clock.
 """
 from __future__ import annotations
 
@@ -51,7 +55,8 @@ SETS = {
              'focal': 'a set-local point (the floodlight behind her)', 'libs': ('cn_lib',),
              'what': 'the evening news: a data centre, a fence, pickets, a tag'},
     'bin': {'module': 'bin', 'doc': 'BIN.md',
-            'focal': 'focal_point(v): the world position of the lip where she rises', 'libs': ('bin_pages',),
+            'focal': 'focal_point(): the world position of the lip where the performer rises (Blender axes)',
+            'libs': ('bin_pages',),
             'what': 'a canyon of thrown-away paper and a giant trash can'},
 }
 LIBS = ('citykit', 'interiors_lib', 'quiet_room_art', 'showroom_art', 'cn_lib', 'bin_pages')

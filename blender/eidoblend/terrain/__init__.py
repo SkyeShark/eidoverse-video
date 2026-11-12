@@ -8,7 +8,7 @@
 
     from eidoblend.terrain import layer_surface   # the surface tools for built geometry, unchanged
 
-Guide: tools-guides/terrain-surfaces.md; design: blender/tests/terrain_new/DESIGN.md. Self-contained: imports no
+Guide: tools-guides/terrain-surfaces.md; design: blender/tests/terrain/DESIGN.md. Self-contained: imports no
 other family's subpackage.
 
 Names are resolved on first use, so importing a numeric module of the family (core, masks, the solvers, the recipes)

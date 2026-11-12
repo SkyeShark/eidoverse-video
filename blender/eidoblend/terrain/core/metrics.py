@@ -33,15 +33,11 @@ metrics() keys (degrees, metres, fractions of the area):
 
 from __future__ import annotations
 
-import importlib.util
 import math
-import os
 
 import numpy as np
 
 from . import grid
-
-HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 # -------------------------------------------------------------------------------------------- pixel matching ---
@@ -68,22 +64,9 @@ def slope_stats(h, cell):
 # ------------------------------------------------------------------------------------ closed depressions ---
 
 def _fill_function():
-    """hydro.fill_depressions (solvers/hydro.py, the moved Ekigar fill) when it exists, else Ekigar's own
-    hydrology.py loaded by its path (until the move; it imports only numpy)."""
-    try:
-        from ..solvers import hydro                                  # noqa: WPS433 - optional, owned elsewhere
-        if hasattr(hydro, 'fill_depressions'):
-            return hydro.fill_depressions
-    except Exception:                                                # noqa: BLE001 - not there yet, or broken
-        pass
-    path = os.path.normpath(os.path.join(HERE, '..', 'ekigar', 'hydrology.py'))
-    if os.path.exists(path):
-        spec = importlib.util.spec_from_file_location('_eidoterrain_ekigar_hydrology', path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.fill_depressions
-    raise RuntimeError('closed depressions need solvers/hydro.fill_depressions (or Ekigar\'s hydrology.py until it '
-                       'moves there)')
+    """hydro.fill_depressions (solvers/hydro.py: exact, on the graph of D8 basins; numpy only)."""
+    from ..solvers import hydro                                      # noqa: WPS433 - owned elsewhere
+    return hydro.fill_depressions
 
 
 _FILL = []

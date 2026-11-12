@@ -16,8 +16,8 @@ a different heading (the axes of the original are three's; these runs turn every
              with a one-shot 'raise'
 
 Prints PASS / FAIL per take: every move plays as the controller names it; the contacts the moves hold (the vault's
-prop hand on the cover top, the mount's hands on the lip and feet on the top, the ladder's hands and boots on the
-rungs, the scramble ending on top, the jumps landing beyond the trench, the drop's fallLand); no visible boot inside
+prop hand on the cover top, the mount's hands on the lip and feet on the top, the ladder's hands (their knuckles) and
+boots on the rungs and its hands out of the wall behind them, the scramble ending on top, the jumps landing beyond the trench, the drop's fallLand); no visible boot inside
 any solid (FootMesh, rungs included); checks.feet on the walking and running stretches; the gestures' weights while
 the legs walk; the keyed armature against the bake. Stills: a strip of each move and contact close-ups.
 """
@@ -240,15 +240,33 @@ def t_ladder(me, G, S, sheets):
         n_h = n_f = n = 0
         span = range(l[0] + int(0.15 * (l[1] - l[0])), l[1] - 3, 3)
         fm = T.FootMesh(me)
+        face = line - nrm * (lad.get('wall_gap') or 0.09)
+        past = (0.0, None)
+        for f in range(l[0], l[1] + 1):
+            # the hands out of the wall behind the rungs through the whole climb (the wrist, the middle knuckle, its
+            # fingertip): the library clip reaches for a leaning ladder's next rung and went 15-33 cm into the wall
+            sc.frame_set(f)
+            for s in ('left', 'right'):
+                pts = [bone(me, s + 'Hand'), bone(me, s + 'MiddleProximal')]
+                if s + 'MiddleDistal' in me.humanoid:
+                    a_, b_ = bone(me, s + 'MiddleIntermediate'), bone(me, s + 'MiddleDistal')
+                    pts.append(b_ + (b_ - a_) * 0.8)
+                d = max((face - p).dot(nrm) for p in pts)
+                if d > past[0]:
+                    past = (d, (f, s))
+        R.check('ladder: the hands stay out of the wall behind the rungs (wrist, knuckle, fingertip: none more than '
+                '5 mm past its face through the climb)', past[0] <= 0.005, f'{past[0] * 1000:.1f} mm at {past[1]}')
         for f in span:
             sc.frame_set(f)
             n += 1
             got = 0
             for s in ('left', 'right'):
-                hp = bone(me, s + 'Hand')
-                d_line = abs((hp - line).dot(nrm))
-                d_rung = min(abs(hp.z - z) for z in zs)
-                got += math.hypot(d_line, d_rung) < 0.07
+                # the grip: the middle knuckle on a rung's axis (the palm closed over the bar), as my robot body's test
+                # measures it; the wrist on the axis ran the rung through the palm
+                kp = bone(me, s + 'MiddleProximal')
+                d_line = abs((kp - line).dot(nrm))
+                d_rung = min(abs(kp.z - z) for z in zs)
+                got += math.hypot(d_line, d_rung) < 0.06
             n_h += got > 0
             got = 0
             for s, v in fm.at(f).items():
@@ -258,8 +276,8 @@ def t_ladder(me, G, S, sheets):
                     got += 1
             n_f += got > 0
         R['ladder_contact'] = {'frames': n, 'a_hand_on_a_rung': n_h, 'a_boot_on_a_rung': n_f}
-        R.check('ladder: a hand grips a rung through the climb (a wrist within 7 cm of one in 70 % of its frames; the '
-                'other reaches)', n and n_h / n >= 0.7, f'{n_h} of {n}')
+        R.check('ladder: a hand grips a rung through the climb (its middle knuckle within 6 cm of a rung\'s axis in 70 % '
+                'of its frames; the other reaches)', n and n_h / n >= 0.7, f'{n_h} of {n}')
         R.check('ladder: a boot stands on a rung through the climb (a sole on a rung\'s top within 2.5 cm in 70 % of '
                 'its frames)', n and n_f / n >= 0.7, f'{n_f} of {n}')
     common('ladder', me, rep)

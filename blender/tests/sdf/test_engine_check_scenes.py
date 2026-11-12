@@ -8,7 +8,9 @@ with the frames it rendered (three.js, ACES tone mapping). Two use this step's e
   sdf_hege_closeup    Mr. Hege's jacket close up, under the city HDRI, a 1.4 key light from (5, 9, 4), a grey
                       ground (roughness 0.3, metalness 0.2) at y = -1.35, a 28 degree camera 2.4 m from (0, 0.3, 0)
   sdf_all_examples    Mr. Hege and the red shoggoth (and two sedans, the vehicles step's) on that ground, the camera
-                      at (0, 3.5, 14) looking at (0, 0.4, 0), 38 degrees
+                      at (0, 3.5, 14) looking at (0, 0.4, 0), 38 degrees (blender/tests/sdf_vehicles/
+                      test_vehicles_check_scenes.py rebuilds this scene with the sedans, and the engine's ten other
+                      vehicle check scenes, the SDF + GLB + VRM + underwater smoke test among them)
 Each is rebuilt from the scene script's numbers, converted to Blender's axes, with the examples placed by the
 engine's own rule (bounds.min on the ground), and rendered in EEVEE under AgX. out/engine_<scene>.png: EEVEE left,
 the engine's frame right. The engine's SDF shade() lit itself with hand lights and the HDRI; here the scene's sun

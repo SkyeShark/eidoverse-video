@@ -24,6 +24,10 @@ Parameters of 'river_path' (metres, degrees, m/m):
     sinuosity 2.5 (or theta0_deg)  'kinoshita': arc length / down-valley length (theta0 is solved for it)
     skew 0.03, flat 0.0          'kinoshita': Js (bends lean downstream) and Jf (flattened, boxy bends)
     vary 0.15                    'kinoshita': the slow variation of the amplitude and wavelength along the course
+    growth 1.0, growth_stages 6  'kinoshita': the bends' amplitude when the base-level fall starts, as a fraction
+                                 of the final; it grows to 1 over the fall, every bend keeping its down-valley place,
+                                 so the channel sweeps outward while it cuts down (undercut outer walls, long slip-off
+                                 slopes inside the loops: incised meanders' asymmetry); 1: a fixed course
     width_m 60                   the channel's width (at least 1.5 cells, so it is connected on every level)
     bed_m 0                      the final bed's height (relative h) at `through`
     gradient 0.0015              the bed's fall per metre downstream
@@ -44,7 +48,7 @@ F32 = np.float32
 DEFAULTS = dict(kind='walk', points=None, through=(0.0, 0.0), flow_azimuth_deg=90.0, length_m=None, wiggle_deg=12.0,
                 wiggle_wavelength_m=3000.0, wavelength_m=1200.0, sinuosity=2.5, theta0_deg=None, skew=0.03, flat=0.0,
                 vary=0.15, width_m=60.0, bed_m=0.0, gradient=0.0015, schedule=((0.0, 0.0), (1.0, 1.0)),
-                step_m=None, seed=0)
+                step_m=None, seed=0, growth=1.0, growth_stages=6)
 MIN_CELLS = 1.5                         # the channel is at least this many cells wide (8-connected on every level)
 
 
@@ -273,27 +277,57 @@ class River:
     """A course with its channel width, final bed profile and schedule (what 'river_path' keeps in ctx.shared).
     The bed at arc length s, at the fraction f of the fall done:
         bed(s, f) = top(s) - f (top(s) - final(s)),   final(s) = bed_m - gradient (s - s_through)
-    top(s) is the starting surface along the course (sampled once, on the level where the run starts)."""
+    top(s) is the starting surface along the course (sampled once, on the level where the run starts).
+    stages: [(f, points, s_through), ...] a growing course (growth < 1): the course used at a fall fraction f is the
+    last stage whose f is at most it; the final course is `points`."""
 
-    def __init__(self, points, width_m, bed_m, gradient, schedule, s_through, top=None, spec=None):
-        self.points = np.asarray(points, np.float64)
-        self.s = arc_length(self.points)
+    def __init__(self, points, width_m, bed_m, gradient, schedule, s_through, top=None, spec=None, stages=None):
         self.width_m = float(width_m)
         self.bed_m = float(bed_m)
         self.gradient = float(gradient)
         self.schedule = [list(map(float, r)) for r in schedule]
-        self.s_through = float(s_through)
-        self.top = None if top is None else np.asarray(top, np.float64)
         self.spec = dict(spec or {})
+        self.final_course = (np.asarray(points, np.float64), float(s_through))
+        self.stages = [(float(f), np.asarray(p, np.float64), float(s0)) for f, p, s0 in (stages or [])]
+        self.top_field = None
+        self._use(self.final_course[0], self.final_course[1])
+        self.top = None if top is None else np.asarray(top, np.float64)
+
+    def _use(self, points, s_through):
+        self.points = points
+        self.s = arc_length(points)
+        self.s_through = s_through
+        self.top = None
+        if self.top_field is not None:
+            self._sample()
+
+    def course_at(self, f):
+        """Switch to the course of fall fraction f (a growing river); True when it changed."""
+        if not self.stages:
+            return False
+        pick = self.final_course
+        if f < 1.0 - 1e-9:
+            for fk, p, s0 in self.stages:
+                if fk <= f + 1e-9:
+                    pick = (p, s0)
+        if pick[0] is self.points:
+            return False
+        self._use(*pick)
+        return True
 
     def final(self, s):
         return self.bed_m - self.gradient * (np.asarray(s, np.float64) - self.s_through)
 
-    def sample_top(self, level, h):
-        """top(s): the surface h of `level` along the course (bilinear, clamped to the window)."""
+    def _sample(self):
         from ..core import grid as Gd
-        self.top = Gd.sample_bilinear(np.asarray(h, np.float64), level.x0, level.y0, level.cell, self.points[:, 0],
-                                      self.points[:, 1])
+        h, x0, y0, cell = self.top_field
+        self.top = Gd.sample_bilinear(h, x0, y0, cell, self.points[:, 0], self.points[:, 1])
+
+    def sample_top(self, level, h):
+        """top(s): the surface h of `level` along the course (bilinear, clamped to the window); kept, so a growing
+        course's later stages sample the same starting surface."""
+        self.top_field = (np.asarray(h, np.float64), level.x0, level.y0, level.cell)
+        self._sample()
         return self.top
 
     def bed(self, s, f):
@@ -304,10 +338,14 @@ class River:
         top = np.maximum(top, fin)
         return top - float(f) * (top - fin)
 
-    def pins(self, level, base_pins, f, cache=None):
+    def pins(self, level, base_pins, f, cache=None, hold=None):
         """base_pins (pin_w, pin_h, A_in, qs_in dict) with the channel pinned at bed(s, f). `cache` (a dict) keeps
-        the level's channel cells between calls."""
-        key = (level.x0, level.y0, level.cell, level.n)
+        the level's channel cells between calls. hold: a child level's border-band weights (1 at its edge, 0 from
+        16 cells in): there the channel's pin eases from the parent's surface (the base pin) to the bed, so the
+        channel meets its parent's coarser channel at the seam exactly (the bed alone left steps of up to 18 m
+        where the two channels' margins fall on different cells)."""
+        self.course_at(f)
+        key = (level.x0, level.y0, level.cell, level.n, id(self.points))
         if cache is not None and cache.get('key') == key:
             m, s = cache['mask'], cache['s']
         else:
@@ -318,8 +356,12 @@ class River:
         w = np.array(base_pins['pin_w'], F32, copy=True)
         ph = np.array(base_pins['pin_h'], F32, copy=True)
         if m.any():
+            bed = self.bed(s[m], f)
+            if hold is not None:
+                wb = np.clip(np.asarray(hold, np.float64)[m], 0.0, 1.0)
+                bed = wb * np.asarray(base_pins['pin_h'], np.float64)[m] + (1.0 - wb) * bed
             w[m] = 1.0
-            ph[m] = self.bed(s[m], f).astype(F32)
+            ph[m] = bed.astype(F32)
         out['pin_w'] = w
         out['pin_h'] = ph
         return out, m
@@ -357,11 +399,35 @@ def course(params, seed=0, extent_m=10000.0):
     return pts, float(s[int(np.argmin(d))])
 
 
+def growth_courses(params, seed=0, extent_m=10000.0):
+    """A growing Kinoshita course's stages [(f, points, s_through)]: the bend amplitude theta0 from growth x its
+    final value to the final, the arc wavelength scaled with the sinuosity so every bend keeps its down-valley place
+    (the train's noise is a function of arc length over wavelength, so it is the same bend by bend)."""
+    g0 = float(_p(params, 'growth'))
+    k = max(int(_p(params, 'growth_stages')), 2)
+    if _p(params, 'kind') != 'kinoshita' or g0 >= 1.0:
+        return []
+    skew, flat = float(_p(params, 'skew')), float(_p(params, 'flat'))
+    th_f = (math.radians(float(_p(params, 'theta0_deg'))) if _p(params, 'theta0_deg') is not None else
+            theta0_for(float(_p(params, 'sinuosity')), skew, flat))
+    sig_f = kinoshita_sinuosity(th_f, skew, flat)
+    wl_dv = float(_p(params, 'wavelength_m')) / sig_f
+    out = []
+    for i in range(k - 1):                                   # the last stage is the final course itself
+        f = i / (k - 1)
+        th = th_f * (g0 + (1.0 - g0) * f)
+        sig = kinoshita_sinuosity(th, skew, flat)
+        p = dict(params or {}, theta0_deg=math.degrees(th), wavelength_m=wl_dv * sig, growth=1.0)
+        pts, s0 = course(p, seed, extent_m)
+        out.append((f, pts, s0))
+    return out
+
+
 def make_river(params, seed=0, extent_m=10000.0):
     pts, s0 = course(params, seed, extent_m)
     sch = _p(params, 'schedule')
     return River(pts, float(_p(params, 'width_m')), float(_p(params, 'bed_m')), float(_p(params, 'gradient')),
-                 sch, s0, spec=dict(params or {}))
+                 sch, s0, spec=dict(params or {}), stages=growth_courses(params, seed, extent_m))
 
 
 # ------------------------------------------------------------------------------------------------- the op ---
@@ -382,7 +448,8 @@ def op_river_path(fields, level, params, seed=0, ctx=None):
         rv.sample_top(level, fields['h'])
     base = ctx.pins if ctx.pins is not None else FL.edge_pins(level.n, np.asarray(fields['h'], F32)
                                                               if 'h' in fields else None, ctx.sea_level)
-    ctx.pins, m = rv.pins(level, base, 1.0)
+    # a child level (its pins are its parent's border band): the channel eases into the parent's at the seam
+    ctx.pins, m = rv.pins(level, base, 1.0, hold=base['pin_w'] if ctx.role == 'refine' else None)
     fields['river'] = m.astype(F32)
     ctx.log(f"[terrain.rivers] {params.get('kind', DEFAULTS['kind'])} course, {rv.s[-1] / 1000:.1f} km, "
             f"channel {rv.width_m:g} m: {int(m.sum())} cells on {level.n}^2 @ {level.cell:.3g} m")

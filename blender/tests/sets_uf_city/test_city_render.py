@@ -470,7 +470,8 @@ if RENDER and '--compare' in args:
     ref_dir = Path(opt('--refs', str(Path.cwd() / 'work' / 'unknown_force' / 'sets' / 'probes')))
     made = 0
     for shot, ref in REFS.items():
-        mine, theirs = OUT / f'probe_{shot}.png', ref_dir / ref
+        # this run's still (with --tag, the variant's: never an older untagged render beside the WebGPU's)
+        mine, theirs = OUT / f'probe_{shot}{TAG}.png', ref_dir / ref
         if not (mine.exists() and theirs.exists()):
             continue
         a = Image.open(theirs).convert('RGB')
@@ -480,8 +481,8 @@ if RENDER and '--compare' in args:
         sheet.paste(b, (a.width + 8, 28))
         d = ImageDraw.Draw(sheet)
         d.text((8, 7), f'WebGPU (the probe stage): {ref}', fill=(230, 230, 230))
-        d.text((a.width + 16, 7), f'Blender 5.2 EEVEE: probe_{shot}.png', fill=(230, 230, 230))
-        sheet.save(OUT / f'compare_{shot}.png')
+        d.text((a.width + 16, 7), f'Blender 5.2 EEVEE: {mine.name}', fill=(230, 230, 230))
+        sheet.save(OUT / f'compare_{shot}{TAG}.png')
         made += 1
     check('compare sheets beside the WebGPU stills', made > 0, f'{made} written from {ref_dir}')
 if '--save' in args:

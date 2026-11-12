@@ -296,7 +296,7 @@ try:
         outcome['walk_ladder'] = (a.state, str(a.error) if a.error else None)
         a = yield b.face_direction(H0)
         a = yield wait(b, 0.3)
-        ok, n0 = move(b, 'climb_ladder', lambda: b.climb_ladder({'height': TOWER[2] - STEP[2]}))
+        ok, n0 = move(b, 'climb_ladder', lambda: b.climb_ladder({'height': TOWER[2] - STEP[2], 'rungRadius': 0.016}))
         if ok:
             a = yield until_landed(b)
         outcome['climb_ladder_senses'] = len(b.readings) - n0

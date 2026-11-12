@@ -90,6 +90,14 @@ def main():
     segs = rep['segments']
     R['segments'] = segs
     T.gait_checks(R, rep)
+    # the pelvis against the controller's own body height: a planted foot the body had walked on from dragged it down
+    # (she knelt off the plain stairs for 20 frames and fell into the splits on the stress course) while every foot
+    # check passed: the feet were planted
+    dz = (rep.get('_root') or {}).get('dz') or []
+    if dz:
+        k = int(np.argmin(dz))
+        R.check('the pelvis never sinks more than 30 cm under the controller\'s own height (the plant\'s lowering)',
+                dz[k] > -0.30, f'lowest {dz[k] * 100:+.1f} cm at f{recs[k]["f"]}')
     stops = [i for i in range(1, len(recs)) if recs[i - 1]['speed'] > 0.05 and recs[i]['speed'] <= 0.05]
     stop_pts = [recs[i]['feet_world'] for i in stops]
     for k, m in enumerate(marks):

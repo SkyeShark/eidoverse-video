@@ -1,6 +1,10 @@
-# Vegetation and trees
+# Vegetation — the flora brush
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Trees (SeedThree)](trees.md)
+
+Trees and plants grown by SeedThree are [trees.md](trees.md) (`make_seed_tree`);
+this guide is the vegetation brush.
+
 
 **`create_flora`** — the VEGETATION BRUSH, Blender 5.2 EEVEE edition
 (`blender/eidoblend/flora/`): asset-driven species with real map sets
@@ -14,7 +18,7 @@ motion blur and shadows all see it, and a saved film `.blend` renders any frame
 in a fresh background Blender (no frame handlers). One call paints one stand
 ("stroke"); layer strokes to dress a scene. Blender coordinates: Z up, metres.
 ```python
-import sys; sys.path.insert(0, '<worktree>/blender')
+import sys; sys.path.insert(0, '<repo>/blender')
 from eidoblend.flora import create_flora
 f = create_flora('grass', size=30, height=0.45, color='copper', height_fn=terrain_z)
 # walkers part the plants: an object, an (armature, bone[, radius]) pair or a point (x, y, z[, r])
@@ -248,9 +252,9 @@ f.set_pushers([(body, 'leftFoot', 0.32), (body, 'rightFoot', 0.32), (body, 'hips
   `variants=['mid', 'tall']` (or `['a', 'b']` on the lettered sets) keeps
   those name prefixes. A set is appended once per .blend: other LODs and
   filters reuse its objects, materials and maps. The sets are read from
-  `$EIDOBLEND_PH_ASSETS`, else the main checkout's
-  `work/claude_body/film/tools/dlss5nr/bmeadow/assets/` (fetched there with
-  its `fetch_ph.py`). Scanned plants are plants; skies, terrain and our own
+  `$EIDOBLEND_PH_ASSETS` (set it to a folder holding the six Poly Haven
+  sets as `.blend` downloads); without it the module looks in one studio
+  machine's work folder. Scanned plants are plants; skies, terrain and our own
   species stay ours. They are short: in a 0.4 m meadow they vanish, so give
   them a path, a mown edge or the meadow's foot (`t_mix.py` grows them in a
   trodden path; `t_scanned.py` lines up all six on bare ground).
@@ -263,77 +267,23 @@ f.set_pushers([(body, 'leftFoot', 0.32), (body, 'rightFoot', 0.32), (body, 'hips
   with a wind-off control), `t_close.py` (keyed dusk close + frame purity of
   the saved .blend), `t_species.py` (with a `webgpu_heading` check),
   `t_mix.py`, `t_scanned.py`, `t_scale.py`. Run through `run_blender.sh`
-  (renders through the GPU slot); `--no-render` builds without rendering.
-  The tests' lights are test lights (`_scene.lights`), not the sky family's
-  look: judge final looks again under the real sky.
-- Not yet ported, or dropped on purpose:
-  - Shrub bit-exactness: blackbrush/creosote/sagebrush match the JS in vertex
-    and triangle counts, but their skeletons tie exactly on a distance test,
-    and V8's Math.sin/cos (glibc-derived) and the C library's differ by one
-    ulp now and then, so a tie can break the other way and a seed grows a
-    different (equally valid) shrub. Exactness would need V8's trig in Python
-    (fdlibm matches its acos, not its sin/cos). Grass, galleta, yucca, corn,
-    sunflower and daisy match the JS exactly.
-  - The daisy far-LOD impostor and its `lod` distances: dropped (above).
-  - The emissive fill, the backlit fallback for species without a
-    translucency map, the N8AO `_aoParams` advice and `sunDir`: EEVEE's GI,
-    shadows and translucency do that work; `sun_dir` is accepted and ignored.
-  - The WebGPU loader shim, `update(t)`, the `uniforms` object and
-    `dispose()`: replaced by the import, Scene Time, `set_wind`/`set_close`
-    and `remove()`.
-  - The retired card/tuft/rosette builders: not ported (no species uses them).
-  - Pushers act in plan (x, y) as in the WebGPU edition: their height is
-    ignored, so a hand at waist height parts the grass under it.
-  - Still strokes (`motion=False`) skip the daisy round-head fix (it is a
-    per-vertex offset, and a still stroke's instances are never realized), so
-    their heads keep the instance's ±15 % vertical stretch. They are meant
-    for the far field, where a 4-6 cm head's stretch is a pixel or two.
-  - No viewport-playback path: a moving stroke is realized and deformed
-    every frame, which suits renders (0.1 s for 10 M vertices, 0.6 s per
-    frame change at 39 M) but makes viewport scrubbing of a big meadow slow.
-    Build layout passes with `motion=False` strokes (instanced, quick to
-    scrub) and the render build with moving ones.
-  - Scanned plants have no per-plant shade, no added translucency (their
-    scanned materials as shipped) and a height-ramp wind weight.
+  (one render at a time on a shared GPU); `--no-render` builds without
+  rendering. The tests' lights are test lights (`_scene.lights`), not the sky
+  family's look: judge final looks again under the real sky.
 
-## `makeSeedTree` — real procedural trees & plants
+## Trees and plants grown by SeedThree
 
-SeedThree's headless agent API (github.com/SkyeShark/SeedThree — same
-three/TSL stack; a tree grown here is identical to one grown in the
-SeedThree app, and presets round-trip with its Save/Load panel). Seed-first
-design: iterate `seed` and read `stats` before touching any dial; open knob
-folders on demand.
-
-```js
-const oak = await makeSeedTree({ species: 'whiteOak', seed: 1737, scene, sunLight: sun });
-console.log(oak.stats.summary);                       // height/width/lod0Triangles
-await makeSeedTree.describe();                        // species menu
-await makeSeedTree.describe('joshuaTree', 'shape');   // ONE folder of dials
-```
-
-Verified gotchas: leave `globalThis._autoFixPlacement` unset in tree
-scenes — the opt-in placement repair pass dismembers intentionally-overlapping
-tree geometry (`makeSeedTree` warns when a scene has opted in; the audits are
-warn-only by default). Trees sway by default (`makeSeedTree.setWind({strength, speed})`).
-Judge shadowed trees from frame ≥2. Source: a `SEEDTHREE_DIR` / `../SeedThree`
-/ `./SeedThree` checkout gives the textured tier; no checkout falls back to
-GitHub import at geometry tier (placeholder materials).
-
-Choose a species and silhouette for the setting, or use a suitable existing
-tree asset. Inspect branch structure, foliage density, shadows and wind at
-the camera distances the piece uses.
-
+Trees and plants: see [trees.md](trees.md) (`make_seed_tree`).
 
 ## Loading and reuse
 
-`create_flora` imports from `eidoblend.flora` (put `<worktree>/blender` on
+`create_flora` imports from `eidoblend.flora` (put `<repo>/blender` on
 `sys.path`); its planning half (species, generators, placement:
 `vegetation.py`, `plan_flora`) runs without Blender, so it can be tested in a
 plain Python. Reuse its instancing, shared maps and geometry-nodes wind rather
 than cloning every leaf into an independent mesh: strokes share the
 `EB Flora Field` node group, the sheet materials and images, and the gust
-texture (packed into the .blend). `makeSeedTree` is also injected; check its
-reported species/options and local checkout availability.
+texture (packed into the .blend).
 
 Use a terrain height function or `surface=` with
 [terrain-surfaces.md](terrain-surfaces.md). `create_flora` has no general
@@ -354,3 +304,35 @@ generators behind this API (ports of the `.js` files of the same names, on
 `three_math.py`'s three.js Vector3/Quaternion semantics and `jsmath.py`'s
 RNGs). Scene authors call `create_flora`; the generators return plants in the
 WebGPU edition's Y-up space, converted once into Blender's.
+
+## Not yet ported
+
+What the WebGPU brush had that this one does not, or dropped on purpose:
+
+- Shrub bit-exactness: blackbrush/creosote/sagebrush match the JS in vertex
+  and triangle counts, but their skeletons tie exactly on a distance test,
+  and V8's Math.sin/cos (glibc-derived) and the C library's differ by one ulp
+  now and then, so a tie can break the other way and a seed grows a
+  different (equally valid) shrub. Exactness would need V8's trig in Python
+  (fdlibm matches its acos, not its sin/cos). Grass, galleta, yucca, corn,
+  sunflower and daisy match the JS exactly.
+- The daisy far-LOD impostor and its `lod` distances: dropped (above).
+- The emissive fill, the backlit fallback for species without a translucency
+  map, the N8AO `_aoParams` advice and `sunDir`: EEVEE's GI, shadows and
+  translucency do that work; `sun_dir` is accepted and ignored.
+- The WebGPU loader shim, `update(t)`, the `uniforms` object and `dispose()`:
+  replaced by the import, Scene Time, `set_wind` / `set_close` and `remove()`.
+- Pushers act in plan (x, y) as in the WebGPU edition: their height is
+  ignored, so a hand at waist height parts the grass under it.
+- Still strokes (`motion=False`) skip the daisy round-head fix (it is a
+  per-vertex offset, and a still stroke's instances are never realized), so
+  their heads keep the instance's ±15 % vertical stretch. They are meant for
+  the far field, where a 4-6 cm head's stretch is a pixel or two.
+- No viewport-playback path: a moving stroke is realized and deformed every
+  frame, which suits renders (0.1 s for 10 M vertices, 0.6 s per frame change
+  at 39 M) but makes viewport scrubbing of a big meadow slow. Build layout
+  passes with `motion=False` strokes (instanced, quick to scrub) and the
+  render build with moving ones.
+- Scanned plants have no per-plant shade, no added translucency (their
+  scanned materials as shipped) and a height-ramp wind weight.
+- `create_flora` has no general biological-growth control (above).

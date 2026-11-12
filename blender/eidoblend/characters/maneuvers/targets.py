@@ -127,15 +127,17 @@ def measure_ladder(objs, wall=None, ground_z=0.0):
     rungs), sorted up -> {'rungs': [z...], 'first_rung' (over ground_z), 'rung_spacing' (the median step), 'line' (a
     Vector on the rungs' axis line at ground height), 'along' (the rungs' horizontal axis), 'normal' (from the wall out
     through the rungs: the climber faces -normal), 'heading', 'width', 'height' (the wall's top over ground_z, else the
-    top rung's + one spacing), 'wall_gap' (the rungs' line to the wall's face)} for the controller's climb_ladder"""
+    top rung's + one spacing), 'wall_gap' (the rungs' line to the wall's face), 'rung_radius' (half a bar's height: the
+    palms close over it)} for the controller's climb_ladder"""
     from ...placement import _world as W
     dg = W.depsgraph()
     obs = _meshes(objs)
     rungs = [o for o in obs if _is_rung(o)] or obs
-    cs, axes, widths = [], [], []
+    cs, axes, widths, radii = [], [], [], []
     for o in rungs:
         a, b = W.box_of_object(o, dg)
         cs.append((a + b) / 2)
+        radii.append(0.5 * float(b.z - a.z))
         ax = Vector((1.0, 0.0, 0.0)) if (b.x - a.x) >= (b.y - a.y) else Vector((0.0, 1.0, 0.0))
         co = W.world_verts(o, dg)
         if len(co) >= 2:                               # the bar's own long axis (a turned ladder's rungs are diagonal)
@@ -152,7 +154,8 @@ def measure_ladder(objs, wall=None, ground_z=0.0):
     mid = sum(cs, Vector()) / len(cs)
     spacing = float(np.median(np.diff(zs))) if len(zs) > 1 else 0.28
     out = {'rungs': zs, 'first_rung': zs[0] - ground_z, 'rung_spacing': spacing, 'along': along,
-           'line': Vector((mid.x, mid.y, ground_z)), 'width': float(np.median(widths))}
+           'line': Vector((mid.x, mid.y, ground_z)), 'width': float(np.median(widths)),
+           'rung_radius': float(np.median(radii))}
     # the wall behind the rungs: the side of the rungs' line the wall is on
     nrm = Vector((-along.y, along.x, 0.0))
     if wall is not None:

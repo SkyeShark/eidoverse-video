@@ -1,6 +1,6 @@
 # Modular robotics and G430 fabrication (Blender edition)
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Characters](characters.md) · [Blender](blender.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Characters](characters.md) · [Blender](blender.md) · [Fabrication](fabrication.md) · [Rotary carving](rotary-carving.md)
 
 Use the baked modular kit, reusable interfaces and shared maps to assemble
 industrial, mobile and humanoid robots. This is the Blender 5.2 EEVEE edition:
@@ -273,6 +273,7 @@ joints `set_joints` moved).
   `rotary_setup(stock_length, stock_width, stock_height, quill)` sets the
   rotary fixture's tailstock, quill, handwheel and jaws for a blank (80-180 mm
   long, 18-50 mm wide and high); the `stock-setup` sample sweeps it.
+  Carving on this machine: [Rotary carving](rotary-carving.md).
 - A650: `joints([q1, ..., q6])`, `move_to(target, seed)` and `robot.ik`
   (`SerialArm`). `target` is a 4x4 Matrix in the robot's frame; the solver is
   bounded damped least squares, and an unreachable target raises.
@@ -503,6 +504,7 @@ does the first `create_ptfe_tube` or `service_loop`: a plain
 `make_robot('filament_spool')` has its live strand. A loaded dispenser's stats
 count filament.js's tubes and strand, as the WebGPU stats do (the fdm: 20,581
 triangles, 3,088 of them filament.js's; the catalog's figures are the GLB's own).
+The processes' own guide is [fabrication.md](fabrication.md).
 
 ```python
 from eidoblend.characters.robotics import make_robot, RoboticsKit
@@ -516,11 +518,11 @@ tube = RoboticsKit.create_ptfe_tube(points=[(0, 0, 0), (0, 0, .1), (.1, 0, .1), 
 ```powershell
 # the pure solvers against the WebGPU edition (plain Python; run js_parity_dump.mjs first, see its header)
 python blender/tests/robotics/test_solvers_parity.py
-# from the main checkout (its run_blender.sh):
-bash run_blender.sh <repo>/blender/tests/robotics/test_js_parity.py         # the whole catalog, every clip, number for number
-bash run_blender.sh <repo>/blender/tests/robotics/test_attachment_frames.py
-bash run_blender.sh <repo>/blender/tests/robotics/test_runtime.py
-HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash <repo>/blender/tests/robotics/render_all.sh
+# from the repository root:
+bash run_blender.sh blender/tests/robotics/test_js_parity.py         # the whole catalog, every clip, number for number
+bash run_blender.sh blender/tests/robotics/test_attachment_frames.py
+bash run_blender.sh blender/tests/robotics/test_runtime.py
+bash blender/tests/robotics/render_all.sh                            # the renders (one at a time on a shared GPU)
 ```
 
 `js_parity_dump.mjs` runs the WebGPU kit in Deno and records, for all 89

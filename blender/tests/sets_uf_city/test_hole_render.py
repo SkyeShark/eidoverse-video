@@ -8,7 +8,8 @@ camera moves.
 
 Checks: the standalone extras; the light map painted with the hole's share only; billboards[0].set_canvas (a still),
 billboards[1].set_canvas(frames=...) (a keyed PNG sequence with its hold file), billboards[0].reset(), tickers[1]
-.set_items and its keyed speed; key_hole_cam ('spiral', 12 s at 24 fps) against hole_cam; the U.power turn-down. Then
+.set_items and its keyed speed; key_hole_cam ('spiral', 12 s at 24 fps) against hole_cam; the U.power turn-down; the
+cloud deck drawn before every other blended object at each of the eight moves (three's renderOrder 1). Then
 the screens and tickers go back to their camps, and the renders use the camera moves (spiral, riseUp, closeSing,
 orbit, low, nadir, screens, enter) at mid-move, lit as the WebGPU probe stage lit its standalone hole (focal light at
 (0, 0, 3), gain 0.35 over 70 m; the clock at 80 s + the move's time). --her puts a performer on the mark (a VRM) for
@@ -182,6 +183,33 @@ cam2_d = bpy.data.cameras.new('probe_cam_still')
 cam2_d.clip_start, cam2_d.clip_end = 0.05, 6000.0
 cam2 = bpy.data.objects.new('probe_cam_still', cam2_d)
 scene.collection.objects.link(cam2)
+# The cloud deck drawn first, as three's renderOrder 1 drew it, at each of the eight moves. EEVEE draws blended objects
+# back to front by their origins along the view; in its own order the deck veiled the additive pillar of light where
+# the view runs level (enter: a dark mottled patch where the pillar meets the far deck).
+deck = ex['clouds']['sheets']
+scene.camera = cam2
+order = {}
+for n in H.HOLE_CAMS:
+    KIT.apply_cam(cam2, H.hole_cam(n, H.HOLE_CAM_DUR[n] * 0.5))
+    dg = bpy.context.evaluated_depsgraph_get()
+    m = cam2.evaluated_get(dg).matrix_world
+    cp, fw = m.translation.copy(), -(m.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+    others = {}
+    for o in scene.objects:
+        if o.type != 'MESH' or o.hide_render or o in deck:
+            continue
+        ms = [sl.material for sl in o.material_slots if sl.material]
+        ms += [mt for mt in getattr(o.evaluated_get(dg).data, 'materials', []) if mt]
+        if any(getattr(mt, 'surface_render_method', '') == 'BLENDED' for mt in ms):
+            others[o.name] = (o.evaluated_get(dg).matrix_world.translation - cp).dot(fw)
+    order[n] = (min((s.evaluated_get(dg).matrix_world.translation - cp).dot(fw) for s in deck), others)
+check('the cloud deck is drawn first at every move (its origins deeper along the view than every other blended '
+      'object\'s, as three\'s renderOrder 1 drew it)',
+      all(v[1] and v[0] > max(v[1].values()) for v in order.values()),
+      'deck >= %.0f m; others <= %.0f m (%s)' % (min(v[0] for v in order.values()),
+                                                  max(max(v[1].values(), default=0.0) for v in order.values()),
+                                                  ', '.join(sorted(order['enter'][1]))))
+scene.camera = cam
 shots = [n for n in H.HOLE_CAMS]
 if opt('--shots'):
     shots = [n for n in shots if any(k in n for k in opt('--shots').split(','))]

@@ -241,7 +241,7 @@ deeper than the flutes and an incompatible clamp setup are refused.
 For all-around carving the stock-rotating machine has its own package,
 `eidoblend.fabrication.rotary` (`rotary_carve`, `rotary_program`,
 `rotary_mesh_program`, `sample_rotary`); `fab.rotary_carve` and
-`FabSim.rotary_carve` forward to it.
+`FabSim.rotary_carve` forward to it. See [Rotary carving](rotary-carving.md).
 
 ## Facade, samples and examples
 
@@ -259,8 +259,9 @@ timing, stock material, workpiece and sample-mesh choices) is the robotics
 kit's inspector scene, `eidoblend.characters.robotics.inspector`, which makes
 its jobs with this package.
 
-The examples build and key whole scenes (`eidoblend/fabrication/examples.py`,
-`EXAMPLES[name](scene)`), and run as films through `scenes/<name>.json`:
+The examples build and key whole scenes (`eidoblend/fabrication/examples.py`:
+`EXAMPLES[name]`, called with the scene), and run as films through
+`scenes/<name>.json`:
 
 ```bash
 python eido_blender.py render blender/eidoblend/fabrication/scenes/manufacturing.json
@@ -305,3 +306,16 @@ behind, and that the example's wide camera frames as the WebGPU one).
   with its fine rim only on sampled heightfields and meshes; a height function
   `f(x, y)` with vertical steps gets the move check alone (and the eight-ring
   kernel's under-reading at the rim).
+- **The finish's exact screen footprint.** `finish_stock` fades its fine
+  patterns by the pixel footprint times the pattern's scale, which overstates
+  the WebGPU `fwidth(phase)` wherever a pattern's gradient leaves the surface
+  (1.6 to 2 times at the median, measured), so the wood's fine grain fades a
+  little early. The exact screen derivative is built in rotary's
+  `filter_finish`; moving it into `finish_stock` has to carry the rotary
+  stock's coordinate swizzle with it, a change to make in both packages
+  together, with render checks.
+- **Chip streaks.** The chip pool stores a persistent `id` per chip (event ×
+  per-event + k), which Blender's instancing reads as each instance's
+  identity; that it holds a chip's identity through motion blur is not yet
+  confirmed in a render, and the rotary job still holds its chips through the
+  shutter ([rotary carving](rotary-carving.md#not-yet-ported)).

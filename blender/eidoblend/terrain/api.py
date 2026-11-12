@@ -16,9 +16,6 @@ it; the exact flatten pass; the masks; the ring mesh with the masks as point att
 object, the palette's material (palette=None: grey clay), lake and sea surfaces, and rocks near the focus. One
 summary line is printed, naming any stage whose op is not registered yet (the runner skips it). The runner's
 kernels need Blender's GPU module: run it in Blender (through a GPU slot on this machine).
-
-Legacy: a call with the old engine-parity keywords (segments, amplitude, flat_radius, layers ...) still builds the
-old noise heightfield (heightfield.py) and returns its (obj, height_at), until integration deletes both.
 """
 from __future__ import annotations
 
@@ -39,9 +36,7 @@ from .core import levels as _levels
 from .core.fields import Fields
 
 API_VERSION = 1
-LEGACY_KEYS = {'segments', 'amplitude', 'layers', 'flat_radius', 'flat_height', 'slope_steep', 'high_start',
-               'octaves', 'frequency', 'shading', 'material_options'}
-ARGS = ('recipe', 'size', 'resolution', 'seed', 'params', 'focus', 'hero_cell', 'context', 'flatten', 'sea_level',
+ARGS =('recipe', 'size', 'resolution', 'seed', 'params', 'focus', 'hero_cell', 'context', 'flatten', 'sea_level',
         'base_elevation_m', 'palette', 'dress', 'quality', 'cache', 'name', 'collection', 'mesh_res', 'log')
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -486,7 +481,7 @@ def _scaled_resolution(res, quality):
 
 def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None, focus=None, hero_cell=None,
                  context=None, flatten=None, sea_level=None, base_elevation_m=None, palette='auto', dress=True,
-                 quality='film', cache=True, name='terrain', collection=None, mesh_res=None, log=print, **legacy):
+                 quality='film', cache=True, name='terrain', collection=None, mesh_res=None, log=print, **unknown):
     """A terrain (design section 8). Returns a Terrain; `obj, height_at, masks = make_terrain(...)` also works.
 
     recipe       a name from recipes(), a Recipe, a recipe dict (recipe.to_dict(), edited) or a list of stages
@@ -508,20 +503,9 @@ def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None
     mesh_res     vertices per side each level is drawn at (default 512: about 3.3M triangles for seven levels)
     """
     t0 = time.perf_counter()
-    if legacy:
-        unknown = set(legacy) - LEGACY_KEYS
-        if unknown:
-            k = sorted(unknown)[0]
-            raise TypeError(f'make_terrain() got an unexpected keyword {k!r}' + _nearest(k, ARGS))
-        if recipe is not None:
-            raise TypeError(f'make_terrain: {sorted(legacy)} are the old noise terrain\'s options; a recipe takes '
-                            f'params= (its knobs) instead')
-        from . import heightfield as _old             # until integration deletes heightfield.py with this route
-        kw = dict(legacy)
-        for k, v in (('size', size), ('seed', seed), ('name', name), ('collection', collection)):
-            if v is not None:
-                kw[k] = v
-        return _old.make_terrain(**kw)
+    if unknown:
+        k = sorted(unknown)[0]
+        raise TypeError(f'make_terrain() got an unexpected keyword {k!r}' + _nearest(k, ARGS))
     if recipe is None:
         raise TypeError('make_terrain needs a recipe: one of ' + ', '.join(_registry.names()))
     if quality not in _levels.QUALITY:
@@ -750,15 +734,11 @@ def describe(recipe, log=print):
 
 def terrain_height_at(obj):
     """height_at for a terrain object after its .blend is reopened: the ring layout stored on the object and its own
-    vertices rebuild the exact sampler (no cache and no regeneration needed). Works for the old noise terrain too,
-    until integration removes it."""
+    vertices rebuild the exact sampler (no cache and no regeneration needed)."""
     p = obj.get('eido_terrain')
     if p is None:
         raise ValueError(f"'{obj.name}' was not made by make_terrain (no eido_terrain property)")
-    if not isinstance(p, str):
-        from . import heightfield as _old
-        return _old.terrain_height_at(obj)
-    ring = _mesh.rebuild(json.loads(obj['eido_terrain_mesh']), _mesh.read_vertices(obj))
+    ring =_mesh.rebuild(json.loads(obj['eido_terrain_mesh']), _mesh.read_vertices(obj))
     loc = obj.matrix_world.translation
     rot_scale = obj.matrix_world.to_3x3()
     if any(abs(rot_scale[i][j] - (1.0 if i == j else 0.0)) > 1e-9 for i in range(3) for j in range(3)):

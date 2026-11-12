@@ -187,8 +187,6 @@ contact on stairs, slopes and obstacles still needs looking at.
 
 ## Not yet ported
 
-- `terrain_base.js`, the WebGPU locomotion scene template (the controller
-  family's `make_obstacle_course` builds its courses).
 - Stairs and ramps under the body's own walks, and its moves out of a walk
   (the engine's auto-maneuvers en route). Its scripted moves (`vault`,
   `jump`, `climb_ledge`, `climb_ladder`) are ported, the controller family

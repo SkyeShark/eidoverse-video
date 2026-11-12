@@ -58,6 +58,12 @@ FIT_RANGE = 0.12                     # the most a landing moves along the foot t
 BOOT_FIT = 0.04                      # the most more it moves to take the boot out of a riser (a heel's tuck) (m)
 SWEEP_RATE = 1.2                     # the swing's clearance envelope rises toward an obstacle at most this fast (m/s)
 LOAD_FRAMES = 4
+TRAIL_FULL = 0.55                    # a planted foot within this share of its leg's reach from the hip (along the
+TRAIL_NONE = 0.85                    # ground) carries its load; past this share none (the body walked on from it)
+LOAD_MIN = 0.3                       # under this much carried load the pelvis eases to the controller's own height
+TRAIL_BEHIND = 0.12                  # a planted foot this far behind its hip along the travel...
+TRAIL_DIP = 0.25                     # ...that the pelvis reaches only this far under the controller's own: left behind
+#                                      (0.15 also caught a stair's ordinary dip: a 6-frame hop off the last tread)
 
 
 KNEE_MAX_HUMAN = 150.0 * D2R          # a human knee folds past round one's 112 deg (my robot's hardware stop): a run's
@@ -133,13 +139,21 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
             other = 'right' if s == 'left' else 'left'
             for row in rep['stances'][s]:
                 a, b = row['frames']
+                # left behind (the pelvis no longer comes down to it): let go from there whatever the other foot does,
+                # an early toe-off (held, the stretched leg dragged it 4-6 cm a frame; the old pelvis knelt for it).
+                # Where the other foot is in its swing, a few frames have neither foot down
+                gone = next((f for f in range(a, b + 1) if frames[f - f00]['meas'][s].get('behind')), None)
+                if gone is not None:
+                    more[s].update(range(gone, b + 1))
+                    continue
                 for f in range(a + (b - a + 1) // 2, b + 1):
                     m = frames[f - f00]['meas'][s]
                     if m['ankle_err'] > 0.003 or m['gap'] > 0.002:
                         # let go from the first frame on with the other foot down: a walk does not lift both feet at
                         # once (until the other lands the pelvis comes down to this one instead). Down stairs the
                         # trailing foot leaves the tread above before the other lands (a lower pelvis cannot reach a
-                        # foot above it), and a run may fly
+                        # foot above it), and a run may fly. (Held on instead until the other foot stays down, my robot
+                        # body's foot after a stand-up, 6-10 cm out of its reach, was dragged for 20 frames)
                         start = next((x for x in range(f, b + 1) if frames[x - f00]['meas'][other]['stance'] or
                                       recs[x - f00].get('lead') in FLIGHT_SLOTS + STAIR_SLOTS), None)
                         if start is not None:
@@ -170,7 +184,10 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         N = {nm: r['N'].get(nm, Quaternion()).copy() for nm in body.h.humanoid}
         helpers = {}
         if body.robot:
-            N, helpers = dof_pass(body, N, dt)
+            # a maneuver's held hands (the record's hand_contact: the contact IK's weight on each) go back where its
+            # IK put them, through the hardware
+            hc = {s: w for s, w in (r.get('hand_contact') or {}).items() if w > 0.01}
+            N, helpers = dof_pass(body, N, dt, reach={'M': r['M'], 'off': r['off'], 'hands': hc} if hc else None)
         M = r['M']
         Qr = M.to_quaternion()
         ph, Wh = pb.hips(M, r['off'], N)
@@ -395,12 +412,46 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             fd['T'] = Vector((fd['xy'].x, fd['xy'].y, fd['z_an']))
 
     # ---- 5: the pelvis
+    def leg_dxy(r, s):
+        """how far leg s's target lies from its hip, along the ground"""
+        fd = r['feet'][s]
+        p_th = r['ph0'] + (r['Qr'] @ r['N']['hips']) @ body.leg[s]['hip']
+        return math.hypot(fd['T'].x - p_th.x, fd['T'].y - p_th.y)
+
     def leg_dz(r, s, L):
         """the root's rise (from where the controller put it) at which leg s is L from its target"""
         fd = r['feet'][s]
         p_th = r['ph0'] + (r['Qr'] @ r['N']['hips']) @ body.leg[s]['hip']
         dxy = math.hypot(fd['T'].x - p_th.x, fd['T'].y - p_th.y)
         return fd['T'].z - p_th.z + (math.sqrt(L * L - dxy * dxy) if dxy < L else 0.0)
+
+    def left_behind(r, s):
+        """a planted foot the body has walked on from: farther from its hip along the ground than TRAIL_NONE of the
+        leg's reach, or behind the hip and reachable only with the pelvis more than TRAIL_DIP under the controller's
+        own (a stair clip's long stance kept it planted while the body climbed on: the trailing foot on the floor 0.6 m
+        behind a body 28 cm up the 22 cm stairs). It carries no load: it neither pulls the pelvis down nor caps it; out
+        of reach, the release rounds let it go (an early toe-off)"""
+        dxy = leg_dxy(r, s)
+        R_ = body.leg[s]['reach']
+        if dxy > TRAIL_NONE * R_:
+            return True
+        fd = r['feet'][s]
+        fwd = Vector((math.sin(r['psi']), -math.cos(r['psi'])))
+        p_th = r['ph0'] + (r['Qr'] @ r['N']['hips']) @ body.leg[s]['hip']
+        behind = (fd['T'].xy - p_th.xy).dot(fwd) < -TRAIL_BEHIND
+        return behind and leg_dz(r, s, R_ - REACH_MARGIN) < -TRAIL_DIP
+
+    def carried(r, s):
+        """the share of the body's load leg s's planted foot can carry by where it stands: all of it within TRAIL_FULL
+        of the leg's reach from its hip along the ground, none past TRAIL_NONE or left behind (a double support hands
+        the load to the leading leg as the body moves on; the trailing foot toes off)"""
+        if left_behind(r, s):
+            return 0.0
+        R_ = body.leg[s]['reach']
+        return 1.0 - smooth(TRAIL_FULL * R_, TRAIL_NONE * R_, leg_dxy(r, s))
+    for r in A:
+        for s in SIDES:
+            r['feet'][s]['behind'] = r['feet'][s]['lock'] is not None and left_behind(r, s)
     load = {s: hann_smooth([1.0 if r['feet'][s]['lock'] is not None else 0.0 for r in A], LOAD_FRAMES) for s in SIDES}
     # the shortest each leg can be: hip to ankle with the knee at its stop (the floor under the pelvis='controller'
     # root: a body lower than that cannot fold the planted leg any more, its sole would go into the ground)
@@ -417,8 +468,14 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             dz_nom.append(dz if own else None)
             has.append(own)
             continue
-        ws = {s: max(v, 1e-6) for s, v in w.items()}
-        dz_nom.append(sum(ws[s] * leg_dz(r, s, r['feet'][s]['dclip']) for s in ws) / sum(ws.values()))
+        # each planted leg weighs by its load and by where its foot stands (carried): a stair clip's bent stance knee
+        # on a foot the body had walked 0.5-0.8 m on from dragged the pelvis 35-70 cm down (the stress course: she
+        # knelt and fell into the splits between the stairs and the ramp); no leg carrying the body (a lone stance foot
+        # left behind): the controller's own height
+        ws = {s: max(v, 1e-6) * max(0.02, carried(r, s)) for s, v in w.items()}
+        tot = sum(ws.values())
+        nom = sum(ws[s] * leg_dz(r, s, r['feet'][s]['dclip']) for s in ws) / tot
+        dz_nom.append(nom * min(1.0, tot / LOAD_MIN))
         has.append(True)
     idx = np.arange(n)
     ok = np.array(has)
@@ -433,7 +490,8 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         c = 1e9
         for s in SIDES:
             fd = r['feet'][s]
-            if fd['wt'] > 0.0 and not fd['free']:
+            # a foot left behind is not reached for, planted or just let go (its swing starts back there)
+            if fd['wt'] > 0.0 and not fd['free'] and not left_behind(r, s):
                 c = min(c, leg_dz(r, s, body.leg[s]['reach'] - REACH_MARGIN))
         cap.append(c)
     down, upr = 0.4 / fps, 0.5 / fps
@@ -469,11 +527,12 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
     lowered = []
     for _round in range(4):
         short = []
-        for fr in frames:
+        for i, fr in enumerate(frames):
             d = 0.0
             for s in SIDES:
                 m = fr['meas'][s]
-                if m['stance'] and fr['N'][s + 'LowerLeg'].to_axis_angle()[1] < 3.0 * D2R:
+                if m['stance'] and fr['N'][s + 'LowerLeg'].to_axis_angle()[1] < 3.0 * D2R and \
+                        not left_behind(A[i], s):
                     d = max(d, m['gap'], 0.5 * m['ankle_err_xy'])
             short.append(min(d, 0.03))
         if max(short) < 0.0005:
@@ -796,6 +855,7 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
         meas[s] = {'gap': float(gap.min()), 'P': P, 'gaps': gap, 'ankle_err': (fk['p_an'] - T[s]).length,
                    'T': T[s].copy(), 'ankle': fk['p_an'].copy(),
                    'ankle_err_xy': (fk['p_an'] - T[s]).xy.length, 'stance': st_now[s], 'free': free[s],
+                   'behind': bool(r['feet'][s].get('behind')),
                    'yaw': ground_yaw(fk['W_ft'], fk['W_to'], _surface_normal(r['feet'][s], st_now[s])),
                    'lift_min': r['feet'][s]['lift_min'], 'mode': r['mode']}
         prev[s] = meas[s]

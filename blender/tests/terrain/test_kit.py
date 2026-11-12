@@ -1,7 +1,8 @@
 """Probe: load_kit on a parts-library GLB (the funeral's props: a bier, candles, a mannequin ...),
 parts pulled by name, by family and as islands, placed on a terrain.
 
-    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain/test_kit.py [--no-render]
+    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
+        bash run_blender.sh <worktree>/blender/tests/terrain/test_kit.py [--no-render]
 
 (The funeral GLB carries no textures: its role materials were applied at runtime in WebGPU, so the
 parts render in the importer's plain materials.)
@@ -13,14 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fixture as F  # noqa: E402
 
 import bpy  # noqa: E402
-from eidoblend.terrain import make_terrain  # noqa: E402
 from eidoblend.placement import load_kit, place_on, tight_box, run_placement_audits  # noqa: E402
 
 F.clean_scene()
 F.render_settings(960, 540, 16)
 F.test_daylight(sun_elevation=34, sun_azimuth=210)
-ground, h = make_terrain(size=20, segments=80, amplitude=0.3, seed=4, flat_radius=7,
-                         layers=[{'set': 'Ground106', 'tile_metres': 2.3, 'roughness': 1.35}])
+ground, h = F.ground(size=20, seed=4, clearing_m=7, relief_m=0.6)
 kit = load_kit(F.WORKTREE / 'eidoverse' / 'assets' / 'models' / 'funeral_props.glb')
 print('[kit-test] %d parts: %s' % (kit.count, kit.list()))
 ok = kit.count > 1

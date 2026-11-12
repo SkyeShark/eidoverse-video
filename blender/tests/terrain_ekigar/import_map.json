@@ -1,5 +1,0 @@
-{
-  "imports": {
-    "three/tsl": "./tsl_cpu_shim.mjs"
-  }
-}

@@ -1,83 +1,39 @@
-# Creatures — make_creature (Blender edition: not yet ported)
+# Creatures (Blender edition: the creature creator is not ported)
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Characters](characters.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Characters](characters.md) · [Assets](assets.md)
 
-**Status.** The universal procedural creature builder has not been ported to
-the Blender edition yet: there is no `make_creature` in
-`blender/eidoblend/characters/` today. Do not stand a stock model or another
-rig in for it; a scene that needs a creature waits for the port, or is made in
-the WebGPU edition. This page keeps the builder's vocabulary (the port's
-specification, from `eidoverse/creature_builder.js`, 2,856 lines) and the plan
-the port follows, so nothing is silently dropped.
+**Status.** The WebGPU edition's procedural creature builder
+(`makeCreature`, `eidoverse/creature_builder.js`) is not ported to the
+Blender edition, and it will not be: a new creature creator is being made,
+and it comes to this edition in its place. There is no `make_creature` in
+`blender/eidoblend/` today.
 
-## What the port must carry over
+Until it lands:
 
-One spine + parts + gait system parameterized into any morphology (Spore-style),
-auto-rigged (a real skeleton, analytic weights), gaits that carry body
-language: human pelvis / weight-shift / heel-toe roll with settle-on-stop, quad
-strike bob + head nod, arthropod skitter.
-
-- **Stances:** `quad` (+ `legPairs` 2–4), `biped` (arms, optional hands),
-  `bird` (horizontal body, hooked two-mandible beak, two-segment folding wings,
-  walk head-bob), `serpent` (ground-fixed path following: the S-curves stay
-  planted while the body slides through them; tongue flicks), `octopus`
-  (mantle + 8 wave-animated tentacles), `insect` (tripod gait, compound eyes,
-  antennae, buzzing translucent wings; `wings: 4` = dragonfly), `spider`
-  (alternating-tetrapod gait, fanned legs, abdomen bulb, 8-eye cluster,
-  chelicerae), `snail` (slug glide, eye stalks, spiral shell; `shell: true` on
-  any creature), `fish` (tail-amplified swim wave, fins, banks into turns,
-  hovers at `swimDepth`).
-- **Flight** (`fly(alt)` / `land()`): fast downstroke, lagging hand segment,
-  pitch into climbs, banking. Quads pick a 4-beat lateral walk at low speed and
-  a diagonal trot above ~0.75 m/s (`gait` overrides; phases blend).
-- **Faces and feet:** a lofted `muzzle` with the hinged talking jaw;
-  iris / pupil eyes with hooded lids (`eyeColor`, `pupil: 'slit'`), `ears`
-  (`point` / `flop` / `round`, flick-animated), `fangs`, `tusks`, `horns` +
-  `hornStyle` (`spike` / `ram` / `antler` / `moose` / `narwhal`); `feet`
-  (`shoe` / `paw` / `hoof` / `webbed` / `lizard` / `talon`), ankles planted at
-  foot height.
-- **Everything mixes** (parts gated by options, not stance): beak + webbed +
-  `tailStyle: 'paddle'` = platypus; `trunk` + `tusks` + big round ears =
-  elephant; `neck: 1.3` + `legLength: 1.15` = giraffe; wings on anything =
-  dragons. More: `wingType` (`bat` / `butterfly`), `nose: 'star'`, `buckTeeth`,
-  `beakWidth`, `spikes`, `armor`, `gills`, `claws`, `antennae`, `squid`,
-  `build: 'feminine'` + `hair: 'long'`, `tailCarry`, `whiskers`, `tailRadius`,
-  `finScale`, `eyelids`.
-- **Accessories:** `hat` (`cap` / `top` / `beanie` / `cowboy` / `officer`),
-  `helmet` (`space` / `hardhat`), `glasses`, `sunglasses`, `mask`, `tie`.
-  **Cyborgs:** `robot: true` (panel plating, LED iris eyes, joint caps),
-  `robotParts`. **Humans:** `makeCreature.human()` (sculpted skull head, jaw,
-  brows, hair, shoulders, shirt treatment); `makeCreature.random(seed)`.
-- **Skins:** procedural TSL patterns (`pattern`, colours) over the bind pose,
-  clothing bands (`outfit: { shirt, pants, shoes }`), or image maps (tube UVs
-  u-around / v-along); add-on parts are named meshes (`parts('shell')`).
-- **Talking:** every jawed head is hinged: `say(text | {duration, energy})`,
-  `talking`, `setTalkEnvelope((t) => amp01)` for an audio envelope
-  (`lipsync.py get_mouth_openness`), `hasJaw`.
-- **Steering:** `walkTo` / `setHeading` / `speed`; the gait owns heading.
-- **Dismemberment manifest:** `dismemberManifest` and `dismemberCoverage`
-  (weighted and rigid cut keys, deterministic across seeds), the destruction
-  family's interface.
-
-## The plan (how it ports, as the rest of this family does)
-
-- `make_creature(**opts)` builds the same geometry from the same maths with
-  numpy (`from_pydata`, vertex groups with the analytic weights) and one
-  armature whose bones take three's rest frames turned into Blender's axes
-  (three `(x, y, z)` → Blender `(x, −z, y)`).
-- The TSL patterns become shader node groups on a rest-position attribute
-  (`Object.add_rest_position_attribute`), materials Principled under EEVEE.
-- The gait, flight, steering and the talking jaw are simulated once, in frame
-  order, at the scene's fps, and keyed (the family's rule: no handler at render
-  time); feet plant on the ground the way `walk_path` plants mine.
-- The dismember manifest is emitted unchanged, for the destruction family.
+- A creature that a library or fetched model already is (a crow, a wren, a
+  scanned animal) is fine as what it is. The animated birds and their clips
+  are in [assets](assets.md#the-animated-birds--crow--cactus-wren);
+  `fetch_model.py` finds others ([assets](assets.md)). Check the licence and
+  the clips before you cast one.
+- A character with a face, a voice and a body to direct is a VRM
+  ([characters](characters.md)): the controller walks it, the claudesona's
+  tools give it a mouth, and my robot body moves through its real joints.
+- Do not dress another rig up as one of the builder's creatures: a scene
+  that needs the builder's own morphologies (a talking octopus, a dragon
+  with folding wings, a platypus from mixed parts) waits for the new creator,
+  or is made in the WebGPU edition, where `makeCreature` runs as it is.
 
 ## Not yet ported
 
-- `make_creature` and everything above: stances, parts, accessories, skins,
-  gaits, flight, steering, talking, the dismember manifest and coverage.
-- `make_realistic_creature` / `makeSpecimen` / `buildRealisticSpec`: they need
-  `work/creaturelab/` (`sculpt_creature.py`, `fur_bake.py` and its cache), which
-  exists in neither checkout. Report that prerequisite missing; never substitute
-  a different creature.
-- The Bestiary (Claude's creatures) lives on another fork, not on this branch.
+- `makeCreature` and everything it builds: the stances (quad, biped, bird,
+  serpent, octopus, insect, spider, snail, fish), the parts that mix across
+  them (muzzles and hinged talking jaws, eyes and lids, ears, horns, tusks,
+  trunks, beaks, wings, tails, feet), accessories and cyborg parts, the
+  procedural skins, the gaits and flight, steering, `say` /
+  `setTalkEnvelope`, `makeCreature.human()` / `random(seed)`, and the
+  dismember manifest and coverage the destruction family reads. A new
+  creature creator replaces it here.
+- `makeRealisticCreature` / `makeSpecimen` / `buildRealisticSpec`: they need
+  an external sculpting and fur-baking backend that is not in this
+  repository. Report that prerequisite missing; never substitute a different
+  creature.

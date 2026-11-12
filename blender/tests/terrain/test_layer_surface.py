@@ -23,8 +23,7 @@ import _fixture as F  # noqa: E402
 import bmesh  # noqa: E402
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
-from eidoblend.terrain import (make_terrain, make_layered_material, layer_surface, find_set,  # noqa: E402
-                               add_curvature)
+from eidoblend.terrain import make_layered_material, layer_surface, find_set, add_curvature  # noqa: E402
 from eidoblend.placement import place_on  # noqa: E402
 
 
@@ -73,8 +72,7 @@ def bevelled_box(name, size, loc, width=0.035, segments=4):
 F.clean_scene()
 F.render_settings(960, 540, 16)
 F.test_daylight(sun_elevation=38, sun_azimuth=215)
-ground, height_at = make_terrain(size=24, segments=96, amplitude=0.4, seed=3, flat_radius=9,
-                                 layers=[{'set': 'Ground106', 'tile_metres': 2.3, 'roughness': 1.35}])
+ground, height_at = F.ground(size=24, seed=3, clearing_m=9, relief_m=0.8)
 
 steps = [bevelled_box('step_%d' % i, (3.4 - 0.7 * i, 3.4 - 0.7 * i, 0.32), (2.6, 0.6, 0.16 + 0.32 * i))
          for i in range(3)]

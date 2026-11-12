@@ -29,7 +29,7 @@ Seams. A ring's outermost vertex row lies on its parent ring's hole edge and tak
 shared vertex. The parent's quads along the hole are drawn as fans through the child's in-between vertices, so no
 T-junction is left. A fan lies in the plane of the triangle it replaces (to the float32 rounding of its in-between
 vertices, which height_at follows exactly). A seam creases no more than an ordinary lattice line of the coarser ring
-(tests/terrain_new/mesh_api/test_seam_crease.py); blending a ring toward its parent's surface near its border
+(tests/terrain/mesh_api/test_seam_crease.py); blending a ring toward its parent's surface near its border
 (geomorphing) was measured and made the seam itself sharper, because it carries the parent's coarser facets inside.
 
 Skirt. The outermost ring hangs a vertical skirt from its border (its own vertices, so the border's smooth shading

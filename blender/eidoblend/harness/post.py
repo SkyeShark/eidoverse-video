@@ -244,7 +244,7 @@ def apply(scene, ns=None, led=None):
             notes.append('bloom off (strength 0)')
     failed = []
 
-    def install(key, what, slot, stage, label, before_glare=False):
+    def install(key, what, slot, stage, label):
         """One hook as a chain stage; a hook that raises is reported and skipped, as the engine warned and went on
         ('[auto-enhance] color-hook failed: ...')."""
         if not callable(hooks[key]):
@@ -258,13 +258,9 @@ def apply(scene, ns=None, led=None):
         if n is None:
             return
         chain.add_stage(scene, slot, stage, n)
-        if before_glare:
-            glare = next((g for _s, nm, g in chain.stages(scene) if nm == 'bloom'), None)
-            if glare is not None:                           # the hook runs BEFORE the Glare, as the engine's did
-                n['look_order'], glare['look_order'] = glare['look_order'], n['look_order']
-                chain.relink(scene)
         added.append(label)
-    install('pre_bloom', '_auto_enhance_pre_bloom_hook', 'bloom', 'pre_bloom_hook', 'preBloom-hook', True)
+    # the chain's own slot before the bloom: the engine's _autoEnhancePreBloomHook ran BEFORE its bloom
+    install('pre_bloom', '_auto_enhance_pre_bloom_hook', 'prebloom', 'pre_bloom_hook', 'preBloom-hook')
     install('color', '_auto_enhance_color_hook', 'under', 'color_hook', 'hook')
     if ovs is not None:
         cam = _get(ns, scene, 'overlay_camera')

@@ -2,29 +2,42 @@
 sheltered bays, stacks where the retreat isolates a strong knob of rock.
 
     stage ops (OPS; called by run.py as op(fields, level, params, seed, ctx=...)):
-      'coast_land'  the land the sea will cut into: an uplift field U (m/yr) rising inland from an original coastline,
-                    and on a fresh level the rough start surface (land above sea level inland of that line, a shallow
-                    shelf below it). The fluvial backbone (package 3) then carves it with the sea as base level, so
-                    its valleys run down to the sea: the Seven Sisters' dry valleys, Moher's plateau streams.
+      'coast_land'  the land the sea will cut into, as a function of s0 (metres inland of an original coastline:
+                    a line facing azimuth_deg, offset_m + retreat_m seaward of the main tile's centre, bent into
+                    headlands and bays by wiggle noise): the shape (land_shape) rises inland from coast_frac at that
+                    line to the uplands and falls seaward to base level kilometres out (the coastal plain of the low
+                    sea levels the land was carved under, drowned and planed since). It writes U (U_m_per_yr x the
+                    shape; sea_cliffs uses none: an old surface the rivers cut into), the start surface on a fresh
+                    level, and coast_s0. The fluvial backbone (package 3) then carves the land toward that distant
+                    base level, so its valleys reach the present cliff line high above the beach and are cut across:
+                    the Seven Sisters' hanging dry valleys, Moher's plateau streams. (With the sea pinned at the
+                    original coast instead, 300 m from the cliff, every valley graded to it and the cliff tops stood
+                    16 m high where the reference's stand 63 m.)
       'coast'       the sea's work, on every level (the cliff is rebuilt sharp at each level's own cells):
         1. sea level: cells at or below it are sea;
-        2. on the first level it runs on, the shore plan: the open-water fetch over 16 directions from every shore
-           cell (FETCH, a ray march over the sea mask up to fetch_max_m, 20 km), normalised to the exposure 0..1
-           (0.5 on a straight open coast), carried to every cell by jump flooding (JFA) from the shoreline at
-           sub-cell precision together with the signed distance to that shoreline; both are fields (coast_E,
-           coast_d0) that every finer level inherits, so all levels cut the same cliff line;
+        2. on the first level it runs on, the shore plan from the original shoreline: coast_land's s0 = 0 line where
+           the land stage made one, else the surface's sea-level line, counting as sea only the water that reaches
+           the window's edge (a hollow below sea level inland is land to the coast: sea_phi). The open-water fetch
+           over 16 directions from every shore cell (the fetch kernel: an exact grid traversal over the sea mask
+           up to fetch_max_m, 20 km) is normalised to the exposure 0..1 (0.5 on a straight open coast) and carried
+           to every cell by jump flooding (JFA) from the shoreline at sub-cell precision together with the signed
+           distance to that shoreline; both are fields (coast_E, coast_d0) that every finer level inherits, so all
+           levels cut the same cliff line;
         3. the retreat distance R = retreat_m (E / 0.5)^exposure_power w(x): exposure times rock weakness (w =
            exp(weakness n), world-space noise: weak rock retreats into coves, strong rock stands as headlands;
-           a strong knob on a headland cut from both sides stays as a stack) plus a few metres of crenellation (the
+           a strong knob on a headland cut from both sides stays as a stack, its walls at stack_face_deg, near
+           vertical, so a narrow one stands as a column, not a pyramid) plus a few metres of crenellation (the
            cliff line's buttresses and recesses). Land closer than R to the original shore is cut away; cut regions
            that do not reach the sea or the window edge are filled back (the sea cannot get there);
         4. the cliff foot is the zero line of d0 - R; the signed distance s to it (JFA again, sub-cell) shapes the
-           ground: inland the face, Z(s) = foot + s tan(face) (chalk 74-82 degrees), or a rock column's stepped face
-           (Moher: sandstone ledges at 84 degrees over siltstone at 58), meeting the land at a rounded edge, so the
-           cliff stands as high as the land is there; seaward the wave-cut platform (platform_top_m at the foot,
-           falling at platform_slope_deg, rough by a few decimetres), with a talus apron at 35 degrees under the face
-           (its height a share of the cliff's), a shingle toe on exposed coast, and in sheltered bays (low exposure)
-           a sand beach: a berm, the beach face, and the Dean profile h = -A y^(2/3) below the waterline (A 0.1);
+           ground: inland the face, Z(s) = foot + s tan(face) (chalk 74-82 degrees, the angle of the nearest point
+           of the foot line, so a face profile never turns down), or a rock column's stepped face (Moher: sandstone
+           ledges at 84 degrees over siltstone at 58), meeting the land at a rounded edge, so the cliff stands as
+           high as the land is there; seaward the wave-cut platform (platform_top_m at the foot, falling at
+           platform_slope_deg to the sea floor sea_floor_m down, rough by a few decimetres), with a talus apron at
+           35 degrees under the face (its height a share of the cliff's), a shingle toe on exposed coast, and in
+           sheltered bays (low exposure) a sand beach: a berm, the beach face, and the Dean profile h = -A y^(2/3)
+           below the waterline (A 0.1);
         5. wear (the rock cut away), talus (the apron), deposit (beach and shingle), bed (the rock surface) and Sc
            (the face's angle, for the detail package's breakup on the hero levels) are written; a child level's
            border band blends to its parent's surface.
@@ -33,7 +46,8 @@ Every input is a function of world position (metres) or a field inherited from t
 level's cliff line lies where its parent's does, at sub-cell precision.
 
 Kernels (inline here, each with its numpy twin; core/gpu.py compiles them with common.glsl prefixed):
-    coast_fetch  exposure of every shore sea cell (the 16-direction fetch, normalised); -1 elsewhere
+    coast_fetch  exposure of every shore sea cell (the 16-direction fetch, normalised; each ray walks every cell it
+                 passes, so it cannot slip between two land cells meeting at a corner); -1 elsewhere
     coast_seed   the jump-flood seeds of a level set phi (< 0 seaward): every cell next to a sign change gets the
                  nearest zero crossing on its 8 neighbour segments (sub-cell), and the payload of the crossing's
                  seaward cell
@@ -74,6 +88,8 @@ DEFAULTS = dict(
     weakness_scales_m=(900.0, 300.0, 100.0),
     stacks=0.0,                 # strong knobs (0..1): where a headland is cut from both sides around one, a stack
     stack_scale_m=140.0,
+    stack_face_deg=86.0,        # a knob stands because its rock is strong: its walls near vertical (with the
+                                # coast's 74 degree bedded face a narrow knob converged to a pyramid, not a column)
     crenel_m=3.0,               # the cliff line's buttresses and recesses, metres (std)
     crenel_scales_m=(45.0, 15.0),
     face_deg=78.0,              # the cliff face (a single rock: chalk 74-82 degrees)
@@ -88,9 +104,11 @@ DEFAULTS = dict(
     talus_frac=0.07,            # the apron under the face: this share of the cliff's height, by noise 0.3-1.7 x
     talus_max_m=14.0,
     talus_deg=35.0,
-    platform_top_m=0.2,         # the wave-cut platform at the cliff foot, metres above sea level
-    platform_slope_deg=0.7,     # it falls seaward at this angle (to meet the shelf: the shallower of the two wins)
-    platform_rough_m=0.25,      # its runnels and steps (std, metres; 20 m and 6 m)
+    platform_top_m=-0.2,        # the wave-cut platform at the cliff foot, metres above sea level (intertidal: under
+                                # the 0.3 m the references count as sea, so its runnels do not speckle the shore)
+    platform_slope_deg=0.7,     # it falls seaward at this angle ...
+    sea_floor_m=15.0,           # ... down to the sea floor this deep, which it meets in a smooth curve
+    platform_rough_m=0.15,      # its runnels and steps (std, metres; 20 m and 6 m)
     shingle_m=1.3,              # the shingle toe at the foot of an exposed cliff: height and width
     shingle_w_m=14.0,
     beach_exposure=(0.30, 0.42),  # exposure where sand beaches take over (full beach below the first)
@@ -108,18 +126,23 @@ LAND_DEFAULTS = dict(
     retreat_m=300.0,            # (the coast stage's): the original coastline lies this much further seaward
     wiggle_m=120.0,             # the original coastline's headlands and bays (std, metres) ...
     wiggle_scale_m=2500.0,      # ... and their wavelength
-    rise_m=250.0,               # the land's uplift rises over this distance inland of the original coast
-    inland_gain=0.35,           # the uplift changes by this share between the coast and tilt_m inland
-    tilt_m=5000.0,              # (negative gain: a dip slope falling inland, Moher)
+    coast_frac=0.5,             # the land's height at the original coast, as a share of the uplands'
+    rise_m=1500.0,              # inland of the original coast the land rises to the uplands over this distance ...
+    inland_gain=0.35,           # ... then changes by this share toward tilt_m inland (negative: a dip slope, Moher)
+    tilt_m=5000.0,
     texture=0.3,                # multi-scale texture of the uplift and the start (share)
-    texture_scales_m=(3000.0, 900.0, 300.0),
-    shelf_m=12.0,               # the sea floor's depth far offshore (the start; the sea is rigid base level)
-    shelf_w_m=1500.0,
-    U_m_per_yr=2e-4,
-    start_m=150.0,
-    start_roughness=0.3,
+    texture_scales_m=(3000.0, 1200.0),
+    U_m_per_yr=0.0,             # uplift, m/yr x the shape (0: an old surface the rivers cut into, sea_cliffs' land)
+    start_m=150.0,              # the start surface: the shape scaled to this height ...
+    start_roughness=0.25,       # ... with this much noise (keep its gradients under the regional slope when U = 0,
+    start_scales_m=(2400.0, 900.0),     # or its hollows outlast a short run)
     seed=0,
 )
+# Seaward of the original coast the land goes on down to base level (land_shape): the coastal plain of the low sea
+# levels the downs were carved under, drowned since and planed by the waves. So the rivers' base level lies km out,
+# and the valleys reach the present cliff line high above the beach, cut across: the Seven Sisters' hanging dry
+# valleys (a sea pinned at the original coast instead graded every valley to it, 300 m from the cliff, and left the
+# cliff tops 16 m high where the reference's stand 63 m).
 
 # Rock columns for the stepped face: (thickness_m, face angle in degrees), from column_base_m up, repeated.
 # Moher (Gull Island Formation over the Clare shales): sandstone beds standing near vertical, siltstone and shale
@@ -153,13 +176,24 @@ def _dirs(n):
     return np.stack([np.cos(a), np.sin(a)], 1).astype(F32)
 
 
+def _inv_dirs(n):
+    """1 / |direction| per axis, float32 (the ray parameter between two grid lines on that axis, in cells)."""
+    return (1.0 / np.abs(_dirs(n).astype(np.float64))).astype(F32)
+
+
 def _fetch_source(ndirs):
-    d = _dirs(ndirs)
+    d, inv = _dirs(ndirs), _inv_dirs(ndirs)
     table = ', '.join(f'vec2({float(x)!r}, {float(y)!r})' for x, y in d)
+    itab = ', '.join(f'vec2({float(x)!r}, {float(y)!r})' for x, y in inv)
     return (r'''//! sampler seaT        x: 1 sea, 0 land
 //! image   outE r32f     x: the exposure (mean fetch / the longest fetch, 0..1) of a shore sea cell; -1 elsewhere
 //! uniform float uMaxCells   the longest fetch, cells
-''' + f'const int NDIR = {ndirs};\nconst vec2 DIRS[{ndirs}] = vec2[{ndirs}]({table});\n' + r'''
+''' + f'const int NDIR = {ndirs};\nconst vec2 DIRS[{ndirs}] = vec2[{ndirs}]({table});\n'
+            f'const vec2 INV[{ndirs}] = vec2[{ndirs}]({itab});\n' + r'''
+/* Each ray walks every cell it passes through, in order (an exact grid traversal, Amanatides & Woo 1987: the k-th
+   vertical grid line it crosses lies at t = (k + 0.5) / |dx| from the cell centre), so it cannot slip between two
+   land cells that meet at a corner. The fetch is t where it enters the first land cell; leaving the grid over water
+   or running past the longest fetch counts as open sea. */
 void main() {
   ivec2 p = ivec2(gl_GlobalInvocationID.xy);
   ivec2 n = textureSize(seaT, 0);
@@ -176,17 +210,30 @@ void main() {
     return;
   }
   float acc = 0.0;
-  int steps = 2 * int(uMaxCells);                      /* half-cell steps: a ray does not jump a land corner */
-  vec2 pc = vec2(p);
+  int maxIt = int(1.5 * uMaxCells) + 4;               /* a ray crosses at most |dx| + |dy| <= 1.42 lines per cell */
   for (int d = 0; d < NDIR; d++) {
+    ivec2 st = ivec2(DIRS[d].x > 0.0 ? 1 : -1, DIRS[d].y > 0.0 ? 1 : -1);
+    ivec2 c = p;
+    int kx = 0;
+    int ky = 0;
     float f = uMaxCells;
-    for (int t = 1; t <= steps; t++) {
-      float tt = 0.5 * float(t);
-      precise vec2 q = pc + DIRS[d] * tt;
-      ivec2 qi = ivec2(floor(q + 0.5));
-      if (!inside(qi, n)) break;                       /* off the grid over water: open sea, the longest fetch */
-      if (texelFetch(seaT, qi, 0).x < 0.5) {
-        f = tt;
+    for (int it = 0; it < maxIt; it++) {
+      precise float tx = (float(kx) + 0.5) * INV[d].x;
+      precise float ty = (float(ky) + 0.5) * INV[d].y;
+      float t;
+      if (tx < ty) {
+        t = tx;
+        c.x += st.x;
+        kx++;
+      } else {
+        t = ty;
+        c.y += st.y;
+        ky++;
+      }
+      if (t > uMaxCells) break;
+      if (!inside(c, n)) break;
+      if (texelFetch(seaT, c, 0).x < 0.5) {
+        f = max(t, 0.5);
         break;
       }
     }
@@ -218,36 +265,44 @@ def shore_cells(sea):
 
 
 def _fetch_twin(s, u, ndirs):
+    """The fetch kernel's exact grid traversal, vectorised over the shore cells (float32 as the kernel)."""
     sea = s['seaT'][..., 0] > 0.5
     H, W = sea.shape
     maxc = F32(u['uMaxCells'])
-    steps = 2 * int(maxc)
+    max_it = int(F32(1.5) * maxc) + 4
     out = np.full((H, W), F32(-1.0))
     jj, ii = np.nonzero(shore_cells(sea))
     if jj.size == 0:
         return {'outE': out[..., None]}
-    pc = np.stack([ii, jj], 1).astype(F32)
     acc = np.zeros(jj.size, F32)
-    for d in _dirs(ndirs):
+    for d, inv in zip(_dirs(ndirs), _inv_dirs(ndirs)):
+        sx, sy = (1 if d[0] > 0 else -1), (1 if d[1] > 0 else -1)
+        ci, cj = ii.astype(np.int64), jj.astype(np.int64)
+        kx = np.zeros(jj.size, np.int64)
+        ky = np.zeros(jj.size, np.int64)
         f = np.full(jj.size, maxc, F32)
-        live = np.ones(jj.size, bool)
-        for t in range(1, steps + 1):
-            if not live.any():
+        live = np.arange(jj.size)
+        for _ in range(max_it):
+            if live.size == 0:
                 break
-            tt = F32(0.5) * F32(t)
-            q = pc[live] + d[None, :] * tt
-            qi = np.floor(q + F32(0.5)).astype(np.int64)
-            ins = (qi[:, 0] >= 0) & (qi[:, 1] >= 0) & (qi[:, 0] < W) & (qi[:, 1] < H)
-            idx = np.nonzero(live)[0]
-            gone = idx[~ins]                                   # off the grid: open sea
-            live[gone] = False
-            idx_in = idx[ins]
-            qi = qi[ins]
-            land = ~sea[qi[:, 1], qi[:, 0]]
-            hit = idx_in[land]
-            f[hit] = tt
-            live[hit] = False
-        acc = acc + f
+            tx = ((kx[live].astype(F32) + F32(0.5)) * inv[0]).astype(F32)
+            ty = ((ky[live].astype(F32) + F32(0.5)) * inv[1]).astype(F32)
+            xs = tx < ty
+            t = np.where(xs, tx, ty)
+            ci[live] += np.where(xs, sx, 0)
+            cj[live] += np.where(xs, 0, sy)
+            kx[live] += xs
+            ky[live] += ~xs
+            go = (t <= maxc)
+            c_i, c_j = ci[live], cj[live]
+            ins = (c_i >= 0) & (c_j >= 0) & (c_i < W) & (c_j < H)
+            go &= ins
+            land = np.zeros(live.size, bool)
+            land[go] = ~sea[c_j[go], c_i[go]]
+            hit = live[land]
+            f[hit] = np.maximum(t[land], F32(0.5))
+            live = live[go & ~land]
+        acc = (acc + f).astype(F32)
     out[jj, ii] = acc / (F32(ndirs) * maxc)
     return {'outE': out[..., None]}
 
@@ -329,14 +384,14 @@ def coast_seed(s, u):
         b, ok = T.neighbour(phi, k, T.BOUND_OPEN)
         pq, _ = T.neighbour(pay, k, T.BOUND_OPEN)
         cross = ok & ((b < 0) != neg)
-        with np.errstate(divide='ignore', invalid='ignore'):
+        with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
             t = (phi / (phi - b)).astype(F32)
-        dd = (t * T.LEN[k]).astype(F32)
-        dd = (dd * dd).astype(F32)
-        take = cross & (dd < bd)
-        bd = np.where(take, dd, bd)
-        x = (pi + t * F32(dx)).astype(F32)
-        y = (pj + t * F32(dy)).astype(F32)
+            dd = (t * T.LEN[k]).astype(F32)
+            dd = (dd * dd).astype(F32)
+            take = cross & (dd < bd)
+            bd = np.where(take, dd, bd)
+            x = (pi + t * F32(dx)).astype(F32)
+            y = (pj + t * F32(dy)).astype(F32)
         v = np.where(neg, pay, pq)
         for c, a in enumerate((x, y, v, np.ones_like(x))):
             best[..., c] = np.where(take, a, best[..., c])
@@ -509,19 +564,26 @@ def shore_coordinate(level, P, seed, dev, centre):
 
 
 def land_shape(s0, P, tex=None):
-    """The uplift and start shape on land (s0 >= 0): rising over rise_m from the original coast, then changing by
-    inland_gain toward tilt_m inland (negative: a dip slope), roughened by the texture; 0 at sea."""
-    s = np.maximum(np.asarray(s0, np.float64), 0.0)
-    rise = 1.0 - np.exp(-s / max(float(P['rise_m']), 1.0))
-    tilt = 1.0 + float(P['inland_gain']) * np.clip(s / max(float(P['tilt_m']), 1.0), 0.0, 1.0)
-    shape = rise * np.maximum(tilt, 0.05)
+    """The uplift and start shape (about 0..1) at s0 metres inland of the original coast: coast_frac at the coast,
+    rising inland to 1 over rise_m (1 - (1 - c) e^(-s / rise)), then changing by inland_gain toward tilt_m inland
+    (negative: a dip slope); seaward falling to 0 as c e^(s / L), L = c rise / (1 - c), which meets the inland side
+    with the same slope (no crease along the old coast). Roughened by the texture."""
+    s = np.asarray(s0, np.float64)
+    c = float(np.clip(P['coast_frac'], 0.02, 0.98))
+    rise = max(float(P['rise_m']), 1.0)
+    inland = 1.0 - (1.0 - c) * np.exp(-np.maximum(s, 0.0) / rise)
+    inland = inland * np.maximum(1.0 + float(P['inland_gain']) * np.clip(s / max(float(P['tilt_m']), 1.0), 0.0, 1.0),
+                                 0.05)
+    seaward = c * np.exp(np.minimum(s, 0.0) / (c * rise / (1.0 - c)))
+    shape = np.where(s >= 0.0, inland, seaward)
     if tex is not None:
         shape = shape * np.maximum(1.0 + float(P['texture']) * tex, 0.1)
-    return np.where(np.asarray(s0) > 0, shape, 0.0)
+    return shape
 
 
 def op_coast_land(fields, level, params, seed=0, ctx=None):
-    """Stage 'coast_land' (module doc): U on the growing level, and the start surface on a fresh one."""
+    """Stage 'coast_land' (module doc): U on the growing level, the start surface on a fresh one, and coast_s0 (metres
+    inland of the original coastline, the coast stage's shore plan) on every pass."""
     ctx = ctx or FL.standalone_context(fields, level)
     dev = ctx.device or FL.device()
     P = params_for(params, LAND_DEFAULTS)
@@ -533,12 +595,11 @@ def op_coast_land(fields, level, params, seed=0, ctx=None):
     if ctx.role == 'grow' or ctx.fresh:
         fields['U'] = (float(P['U_m_per_yr']) * shape).astype(F32)
     if ctx.fresh:
-        rough = _unit_noise((900.0, 300.0, 100.0), level, s, dev, 1301)
-        land = float(P['start_m']) * shape * (1.0 + float(P['start_roughness']) * rough)
-        sea = -0.5 - float(P['shelf_m']) * (1.0 - np.exp(np.minimum(s0, 0.0) / max(float(P['shelf_w_m']), 1.0)))
-        h0 = np.where(s0 > 0, np.maximum(land, 0.05), sea)
+        rough = _unit_noise(P['start_scales_m'], level, s, dev, 1301)
+        h0 = np.maximum(float(P['start_m']) * shape * (1.0 + float(P['start_roughness']) * rough), 0.05)
         fields['h'] = h0.astype(F32)
         fields['bed'] = h0.astype(F32)
+    fields['coast_s0'] = s0.astype(F32)
     return fields
 
 
@@ -570,7 +631,10 @@ def face_profile(s, foot, theta_deg, column=None, col_off=None):
     zs_t, run_t = column
     off = 0.0 if col_off is None else col_off
     r0 = np.interp(foot - off, zs_t, run_t)
-    return np.interp(r0 + s, run_t, zs_t) + off
+    z = np.interp(r0 + s, run_t, zs_t) + off
+    # seaward of the foot the face goes straight down under the platform: the table's interpolation clamps at its
+    # lowest bed (-60 m) and, where the beds' dip offset passed 60 m, held a flat shelf above the sea kilometres out
+    return np.where(s < 0.0, foot + s * 10.0, z)
 
 
 def beach_profile(y, P, amount):
@@ -619,12 +683,33 @@ def _connected(cut, sea0):
     return keep[lab]
 
 
-def plan_shore(dev, land, sea_level, cell, P, smooth_cells=None):
-    """The shore plan of a level: (d0, E) - the signed distance (metres, + inland) of every cell to the original
-    shoreline (the zero line of land - sea level, sub-cell), and the exposure of the nearest shore, smoothed along
-    the shore by exposure_smooth_m."""
+def sea_phi(land, sea_level):
+    """The original shoreline of a surface as a level set (< 0 at sea): land - sea level, where only the sea that
+    reaches the window's edge (or, when none does, the largest body) is sea; a hollow below sea level inland is
+    land to the coast (the sea cannot get there; without this every such cell became a cut pit of its own)."""
+    from ..core.metrics import label
     phi = np.asarray(land, np.float64) - sea_level
-    sea = phi <= 0.0
+    wet = phi <= 0.0
+    if wet.any():
+        lab, n = label(wet)
+        edge = Gd.edge_distance(wet.shape) < 1
+        keep = np.zeros(n + 1, bool)
+        keep[np.unique(lab[edge & wet])] = True
+        keep[0] = False
+        if not keep.any():
+            counts = np.bincount(lab.ravel(), minlength=n + 1)
+            counts[0] = 0
+            keep[int(np.argmax(counts))] = True
+        wet = keep[lab]
+    return np.where(wet, np.minimum(phi, -1e-4), np.maximum(phi, 1e-4))
+
+
+def plan_shore(dev, phi, cell, P, smooth_cells=None):
+    """The shore plan of a level: (d0, E, info) - the signed distance (metres, + inland) of every cell to the
+    original shoreline (the zero line of the level set phi, < 0 at sea: coast_land's s0, or sea_phi of a surface;
+    sub-cell), and the exposure of the nearest shore, smoothed along the shore by exposure_smooth_m."""
+    phi = np.asarray(phi, np.float64)
+    sea = phi < 0.0
     phi = np.where(sea, np.minimum(phi, -1e-4), np.maximum(phi, 1e-4))
     if not sea.any() or sea.all():
         far = -1e7 if sea.all() else 1e7
@@ -644,7 +729,17 @@ def plan_shore(dev, land, sea_level, cell, P, smooth_cells=None):
     return d0.astype(F32), E.astype(F32), info
 
 
-def retreat_field(E, level, P, seed, dev):
+def stack_weight(level, P, seed, dev):
+    """0..1: the strong knobs (ridged world noise at stack_scale_m) that stand as stacks when the retreat passes
+    both sides of them; 0 everywhere when stacks is 0."""
+    if float(P['stacks']) <= 0:
+        return np.zeros((level.n, level.n))
+    k = _field({'kind': 'ridged', 'wavelength_m': float(P['stack_scale_m']), 'octaves': 2, 'seed': 1451},
+               level, seed, dev)
+    return float(P['stacks']) * _smoothstep(0.55, 0.8, k)
+
+
+def retreat_field(E, level, P, seed, dev, stack_w=None):
     """R (metres): retreat_m x the exposure factor x the rock weakness, plus the crenellation."""
     f = np.clip((np.asarray(E, np.float64) / E_REF), 1e-3, None) ** float(P['exposure_power'])
     f = np.clip(f, *P['exposure_clamp'])
@@ -652,10 +747,9 @@ def retreat_field(E, level, P, seed, dev):
     if float(P['weakness']) > 0:
         w = np.exp(float(P['weakness']) * _unit_noise(P['weakness_scales_m'], level, seed, dev, 1401))
     R = float(P['retreat_m']) * f * w
-    if float(P['stacks']) > 0:
-        k = _field({'kind': 'ridged', 'wavelength_m': float(P['stack_scale_m']), 'octaves': 2, 'seed': 1451},
-                   level, seed, dev)
-        R = R * (1.0 - 0.85 * float(P['stacks']) * _smoothstep(0.55, 0.8, k))
+    if stack_w is None:
+        stack_w = stack_weight(level, P, seed, dev)
+    R = R * (1.0 - 0.85 * stack_w)
     if float(P['crenel_m']) > 0:
         R = R + float(P['crenel_m']) * _unit_noise(P['crenel_scales_m'], level, seed, dev, 1501)
     return R
@@ -713,28 +807,54 @@ def op_coast(fields, level, params, seed=0, ctx=None):
         E = np.asarray(fields['coast_E'], np.float64)
     else:
         land = np.asarray(fields['h'], np.float64)
-        d0, E, info = plan_shore(dev, land, sea_level, cell, P)
+        # the original shoreline: coast_land's (the land was carved to a base level far out, so its own sea-level
+        # contour is not the coast the sea attacked), else the surface's sea level line; either way only the sea
+        # that reaches the window's edge (the bent coastline closed off a patch of 'sea' inland once, and the sea
+        # cut a ring-walled hole there)
+        phi0 = (sea_phi(np.asarray(fields['coast_s0'], np.float64), 0.0) if 'coast_s0' in fields
+                else sea_phi(land, sea_level))
+        d0, E, info = plan_shore(dev, phi0, cell, P)
         d0 = d0.astype(np.float64)
         E = E.astype(np.float64)
     bed_in = np.asarray(fields['bed'], np.float64) if 'bed' in fields else land.copy()
     H = land - sea_level
 
     # the retreat and the cliff foot line
-    R = retreat_field(E, lv, P, s, dev)
+    stack_w = stack_weight(lv, P, s, dev)
+    R = retreat_field(E, lv, P, s, dev, stack_w)
     phi = d0 - R
     cut = phi < 0.0
     if P['connect']:
         cut = _connected(cut, d0 < 0.0)
     phi = np.where(cut, np.minimum(phi, -1e-3), np.maximum(phi, 1e-3))
+    # the face angle belongs to the cliff line: evaluated per cell it changed across one face (with a wide spread,
+    # 88 degrees on a cell and 30 a cell inland made the profile fall inland: pits on the face), so every cell takes
+    # the angle at its nearest point of the foot line, carried by the jump flood. (Clamped below 90 degrees: a value
+    # past it turned tan negative and the face into a pit kilometres inland.)
+    theta = np.clip(float(P['face_deg']) + float(P['face_spread_deg']) * _unit_noise([P['face_scale_m']], lv, s, dev,
+                                                                                        1601), 30.0, 88.5)
+    # stacks: land the cut has detached from the mainland (and a few cells of sea around it, where its foot line
+    # lies) take the knob's near-vertical wall; a strong knob still joined to a headland keeps the coast's face
+    sw = np.zeros(theta.shape)
+    if float(P['stacks']) > 0 and cut.any():
+        from ..core.metrics import label
+        lab, nlab = label(~cut)
+        if nlab > 1:
+            counts = np.bincount(lab.ravel(), minlength=nlab + 1)
+            counts[0] = 0
+            detached = (lab > 0) & (lab != int(np.argmax(counts)))
+            if detached.any():
+                sw = _max_filter(detached, 3).astype(np.float64)
+    theta = theta + (float(P['stack_face_deg']) - theta) * sw
     if cut.any() and (~cut).any():
-        dist, _ = nearest_crossing(dev, phi)
+        dist, theta_foot = nearest_crossing(dev, phi, theta)
         sd = np.where(cut, -dist, dist) * cell                       # metres from the cliff foot, + inland
+        theta = np.where(np.isfinite(dist), theta_foot, theta)
     else:
         sd = np.where(cut, -1e7, 1e7)
     sd = np.where(np.isfinite(sd), sd, np.where(cut, -1e7, 1e7))
 
     # the face
-    theta = float(P['face_deg']) + float(P['face_spread_deg']) * _unit_noise([P['face_scale_m']], lv, s, dev, 1601)
     talus_n = np.clip(1.0 + 0.45 * _unit_noise([180.0, 60.0], lv, s, dev, 1651), 0.3, 1.7)
     t_h = np.clip(float(P['talus_frac']) * np.maximum(H, 0.0) * talus_n, 0.0, float(P['talus_max_m']))
     col = None
@@ -747,12 +867,15 @@ def op_coast(fields, level, params, seed=0, ctx=None):
         col_off = -dip * (X * dx_ + Y * dy_)                         # the beds fall toward the dip azimuth
     foot = sea_level + float(P['platform_top_m']) + t_h
     face = face_profile(sd, foot - sea_level, theta, col, col_off) + sea_level
+    if col is not None and sw.any():
+        # under a strong knob the bedded face gives way to the knob's own near-vertical wall
+        face = face + sw * (face_profile(sd, foot - sea_level, theta) + sea_level - face)
 
     # erosion: the land above the face and the wave-cut platform is cut away, the cliff top rounded
     y = np.maximum(-sd, 0.0)
     rough = float(P['platform_rough_m']) * _unit_noise([20.0, 6.0], lv, s, dev, 1701, min_cells=2.0)
-    platform = sea_level + float(P['platform_top_m']) - y * math.tan(math.radians(float(P['platform_slope_deg']))) \
-        + rough
+    platform = sea_level + float(P['platform_top_m']) - y * math.tan(math.radians(float(P['platform_slope_deg'])))
+    platform = C.smooth_max(platform, sea_level - float(P['sea_floor_m']), 4.0) + rough
     k = float(P['top_round_m'])
     cut_prof = np.maximum(face, platform)
     rock = C.smooth_min(land, cut_prof, k) if k > 0 else np.minimum(land, cut_prof)
@@ -766,7 +889,8 @@ def op_coast(fields, level, params, seed=0, ctx=None):
     beach_amt = 1.0 - _smoothstep(P['beach_exposure'][0], P['beach_exposure'][1], E)
     exposed = 1.0 - beach_amt
     wsh = max(float(P['shingle_w_m']), 1e-3)
-    shingle = sea_level + exposed * float(P['shingle_m']) * (1.0 - (y / wsh) ** 2) - back
+    sh_t = exposed * float(P['shingle_m']) * (1.0 - (y / wsh) ** 2)       # its thickness above sea level
+    shingle = np.where(sh_t > 0.0, sea_level + sh_t - back, -np.inf)        # none beyond its width or in a bay
     beach = sea_level + beach_profile(y, P, np.ones_like(y)) - back
     h = np.maximum(rock, np.maximum(apron, shingle))
     h = h + beach_amt * np.maximum(beach - h, 0.0)

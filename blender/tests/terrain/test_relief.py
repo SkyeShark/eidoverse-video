@@ -21,14 +21,13 @@ import _fixture as F  # noqa: E402
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
-from eidoblend.terrain import make_terrain, find_set, relief  # noqa: E402
+from eidoblend.terrain import find_set, relief  # noqa: E402
 from eidoblend.placement import place_on  # noqa: E402
 
 F.clean_scene()
 F.render_settings(960, 540, 16)
 F.test_daylight(sun_elevation=22, sun_azimuth=255)        # raking from the left
-ground, h = make_terrain(size=24, segments=96, amplitude=0.3, seed=9, flat_radius=8,
-                         layers=[{'set': 'Ground106', 'tile_metres': 2.3, 'roughness': 1.35}])
+ground, h = F.ground(size=24, seed=9, clearing_m=8, relief_m=0.6)
 tex = find_set('Bricks097')
 
 

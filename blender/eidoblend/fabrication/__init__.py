@@ -38,8 +38,16 @@ _register_with_kit()            # robots loaded from now on get their live filam
 
 def __getattr__(name):
     """rotary_carve, rotary_program, rotary_mesh_program, sample_rotary, rotary_surface: fabrication.js re-exports
-    them from rotary.js; here they come from eidoblend.fabrication.rotary (its own step), on first use."""
+    them from rotary.js; here they come from eidoblend.fabrication.rotary (its own step), on first use. The
+    subpackage itself (fabrication.rotary) and the examples (fabrication.EXAMPLES, fabrication.examples) load on first
+    access too."""
     if name in ('rotary_carve', 'rotary_program', 'rotary_mesh_program', 'sample_rotary', 'rotary_surface'):
         from . import rotary
         return getattr(rotary, name)
-    raise AttributeError(name)
+    if name in ('rotary', 'examples'):
+        import importlib
+        return importlib.import_module(f'{__name__}.{name}')
+    if name == 'EXAMPLES':
+        from .examples import EXAMPLES
+        return EXAMPLES
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

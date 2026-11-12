@@ -3,10 +3,10 @@
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
         bash run_blender.sh <worktree>/blender/tests/terrain/test_placement.py [--no-render]
 
-Builds a small terrain with a clearing, then:
+Builds a small terrain with a clearing (make_terrain's meadow, _fixture.ground), then:
   place_on      a crate on the clearing, a second crate stacked on it, a third on the slope
   snap_to_ground  posts off the vertex grid on the hills, checked against the mesh's own triangle
-                under each (and the mesh against the analytic height_at between vertices)
+                under each (and height_at against that triangle: it is exact on the mesh)
   scatter_on    concrete chunks, sunk and tilted, deterministic per seed
   drive_along   a barrel keyed along a path (heading checked against the path's tangent)
   find_clear_spot  a bench near the crates on the clearing, then place_on there: it must overlap nothing
@@ -24,7 +24,6 @@ import _fixture as F  # noqa: E402
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 from mathutils import Vector  # noqa: E402
-from eidoblend.terrain import make_terrain  # noqa: E402
 from eidoblend.placement import (place_on, snap_to_ground, scatter_on, drive_along, tight_box,  # noqa: E402
                                  run_placement_audits, place_against, face_toward, hinge, find_clear_spot)
 
@@ -68,11 +67,8 @@ def duplicate(root, name):
 F.clean_scene()
 F.render_settings(960, 540, 16)
 F.test_daylight(sun_elevation=34, sun_azimuth=220)
-terrain, height_at = make_terrain(size=28, segments=280, amplitude=1.4, seed=11, frequency=2.0,
-                                  flat_radius=4.5, layers=[{'set': 'Ground106', 'tile_metres': 2.3, 'roughness': 1.35},
-                                                           {'set': 'withered_grass', 'tile_metres': 2.0,
-                                                            'tint': (0.6, 0.58, 0.52)}],
-                                  high_start=0.1)
+terrain, height_at = F.ground(size=28, seed=11, clearing_m=4.5, relief_m=2.5, valley_spacing_m=14.0,
+                              name='terrain')
 
 # ── place_on: a crate on the clearing, a second stacked on it, a third on the slope ──
 green = import_glb('crate_large_green', 'crate_green')
@@ -128,8 +124,8 @@ for k, (x, y) in enumerate([(-5.537, -3.071), (9.377, -7.871), (-8.467, 6.531), 
                              height_at(x, y + 0.05) - height_at(x, y - 0.05)) / 0.1)
 check('snap_to_ground lands on the mesh (off the vertex grid, on slopes %s)' % ', '.join('%.2f' % s for s in slopes),
       max(errs) < 1e-4 and min(slopes) > 0.05, 'max |post - mesh| %.6f m' % max(errs))
-# between vertices the mesh is flat where height_at curves: 0.1 m spacing keeps them within ~1 mm
-check('the mesh follows height_at between vertices', max(gaps) < 0.002, 'max |mesh - height_at| %.5f m' % max(gaps))
+# make_terrain's height_at evaluates the rendered triangles themselves (the ring mesh's split rule)
+check('height_at lies on the mesh between vertices', max(gaps) < 1e-4, 'max |mesh - height_at| %.6f m' % max(gaps))
 
 # ── scatter_on: concrete chunks, sunk and tilted ──
 chunk = import_glb('apocalyptic_destroyed_rubble_debris_concrete_rebar_chunk', 'chunk_0')

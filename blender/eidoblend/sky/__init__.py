@@ -354,8 +354,10 @@ class Sky:
 
     @property
     def audio(self):
-        """The weather-audio carrier (the attached weather system, which records the timeline), or None."""
-        return getattr(self, 'weather_fx', None) if self.audio_on else None
+        """sky_worlds.js `get audio()`: the attached weather system's weather-audio object for its planned frames
+        (stats, timeline(), to_json(): WeatherFX.audio), or None without one or with make_sky(audio=False)."""
+        fx = getattr(self, 'weather_fx', None)
+        return fx.audio if (fx is not None and self.audio_on) else None
 
     # ---- the true sun / moon directions (Blender world space) ----
     @property

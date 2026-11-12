@@ -1,6 +1,8 @@
 """Test fixtures for the terrain family's probes: an empty scene, a TEST daylight (a sun lamp plus a
 Sky Texture world: a fixture only, never shipped as a sky; the sky family ports ours), cameras,
-render settings at probe size. Imported by the probe scripts next to it.
+render settings at probe size, and the probes' ground (make_terrain's meadow recipe, small, with a
+level clearing). Imported by the probe scripts next to it. The ground needs the terrain's GPU
+kernels: run the probes through a GPU slot.
 """
 import math
 import os
@@ -22,6 +24,19 @@ def args():
     """Arguments after Blender's `--`."""
     a = sys.argv
     return a[a.index('--') + 1:] if '--' in a else []
+
+
+def ground(size=24.0, seed=3, clearing_m=8.0, relief_m=0.8, valley_spacing_m=16.0, name='ground'):
+    """The probes' ground: make_terrain('meadow') `size` metres across (draft quality: no hero levels),
+    its swales `valley_spacing_m` apart and `relief_m` high, with a level clearing of radius
+    `clearing_m` at the origin (blended over 0.6 x the radius), in the meadow palette. Returns
+    (obj, height_at); height_at is exact on the mesh's triangles."""
+    from eidoblend.terrain import make_terrain
+    t = make_terrain('meadow', size=size, seed=seed, quality='draft', palette='meadow', dress=False,
+                     params={'relief_m': relief_m, 'valley_spacing_m': valley_spacing_m},
+                     flatten=[{'at': (0.0, 0.0), 'radius': clearing_m, 'falloff': 0.6 * clearing_m}],
+                     name=name)
+    return t.obj, t.height_at
 
 
 def clean_scene():

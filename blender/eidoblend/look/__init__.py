@@ -1,7 +1,8 @@
 """eidoblend.look: the look family of the Blender edition (Blender 5.2, EEVEE). Cameras, lights, the EEVEE look presets,
 the post chain, exposure by measurement, and the review tools.
 
-Modules (import the one you need; this package imports none of them, so frame_stats runs outside Blender too):
+Modules (import the one you need, or reach it as look.<name>: this package imports none of them until then, so
+frame_stats runs outside Blender too):
     render_settings  apply_auto_enhance(scene, 'film'|'probe'|'preview', ...), set_view, summary
     exposure         exposure_sweep, pick_exposure, auto_expose: one render, every exposure measured
     frame_stats      the highlight check (share of pixels with a channel >= 250), sequence checks, contact sheets
@@ -22,3 +23,19 @@ Modules (import the one you need; this package imports none of them, so frame_st
 
 Guides: tools-guides/camera-lighting.md, postprocessing.md, render-review.md, stack-notes.md.
 """
+
+import importlib
+
+MODULES = ('render_settings', 'exposure', 'frame_stats', 'camera', 'camera_safety', 'camera_audit', 'lighting',
+           'stage_rig', 'post', 'probe', 'probe_cli', 'audit', 'overlap')
+
+
+def __getattr__(name):
+    """look.post, look.camera ...: the modules, imported on first use."""
+    if name in MODULES:
+        return importlib.import_module(f'{__name__}.{name}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
+
+def __dir__():
+    return sorted(set(globals()) | set(MODULES))

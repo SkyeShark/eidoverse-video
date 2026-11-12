@@ -57,3 +57,10 @@ def build(prop: str, opts: dict = None, /, **kw):
         from . import voice_machines
         return voice_machines.build_machine(prop, o)
     return call_build(load(prop).build, o)
+
+
+def __getattr__(name):
+    """props.voice_machines (the subpackage) and props.tandem (its module), imported on first access."""
+    if name in ('voice_machines', 'tandem'):
+        return importlib.import_module(f'{__name__}.{name}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

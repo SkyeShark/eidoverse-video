@@ -4,7 +4,7 @@ on the hero levels. Its test is that the hero levels add detail without moving t
     t = make_terrain('real_place', params={'dem': 'lauterbrunnen'}, focus=(480, 1640))
     t = make_terrain('real_place', params={'dem': 'C:/dems/my_place.json'})   # a reference-style DEM of your own
 
-The DEM. A name is one of the references (blender/tests/terrain_new/reference/data, or the folders listed in the
+The DEM. A name is one of the references (blender/tests/terrain/reference/data, or the folders listed in the
 EIDO_TERRAIN_DEMS environment variable): a 16-bit PNG and a JSON with the grid (a north-up square, pixel_size_m,
 centred on the place), the height range, the source and its licence. A path names such a JSON (or its PNG); a .npy
 of metres (row 0 north) needs pixel_m. Its _context files, where they exist, are the wider surround.
@@ -42,7 +42,7 @@ from ..core.recipe import Knob, Recipe, Stage
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _BLENDER = os.path.normpath(os.path.join(_HERE, '..', '..', '..'))
-DEM_DIRS = [os.path.join(_BLENDER, 'tests', 'terrain_new', 'reference', 'data'),
+DEM_DIRS = [os.path.join(_BLENDER, 'tests', 'terrain', 'reference', 'data'),
             os.path.join(_BLENDER, 'tests', 'terrain', 'reference', 'data')]
 LAKE_SLOPE = 0.15                 # the lake bowl's side: depth rises 0.15 m per metre from the shore
 _CACHE = {}

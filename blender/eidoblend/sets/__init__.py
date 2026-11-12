@@ -1,9 +1,16 @@
 """eidoblend.sets: the film sets of the DAISY and UNKNOWN FORCE music videos (eidoverse/sets/), ported to Blender 5.2.
 
-A set is one section's world: self-contained, parked anywhere, driven by one clock. Its module's build(ctx, **kw)
-returns the set (group = its root Empty, set-local metres, Blender axes), with the WebGPU contract in snake_case:
-mark / mark_at(u), camera(u) or cams, update(t, st) (keyed: ctx.key in the harness, or a frame), parts, dispose();
-and the Blender additions animate(frames, u0) and make_cameras(frames, u0), which key a whole section into the .blend.
+The sets were made for those films; here each is a free, reusable world: self-contained, parked anywhere, every
+moving part on the piece's own clock. Its module's build(ctx, **kw) returns the set (group = its root Empty, set-local
+metres, Blender axes), with the WebGPU contract in snake_case: parts, update(t, state, ...) (keyed when given a frame,
+or through ctx.key when given the harness ctx), dispose(), and its marks and cameras (mark / mark_at(u), camera(u) or
+cams). The Blender addition animate(...) keys a set's moving parts into the .blend on your own clock: animate(state,
+frames, t0, fps) with a state function of seconds or a dict of controls (the ocean, the city and the hole; the city and
+the hole take frames first too), animate(frames, u0 | state=) on the DAISY bridge's bars (the funeral, the corner),
+animate(state, frames, scene=None, ctx=None, t0=None) (the corridor, the news), animate(frames, t0=0.0, fps=None,
+ctx=None, **state) (the quiet room, the showroom), animate(frames, t0, fps, state_fn) (the race, the bin). Sets with
+camera plans of their own also have make_cameras (the funeral, the bridge, the corner, the city, the hole, the race,
+the bin), and the UNKNOWN FORCE interiors make_camera(name) for each set cam.
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend import sets
@@ -14,7 +21,8 @@ and the Blender additions animate(frames, u0) and make_cameras(frames, u0), whic
     sets.register('daisy.my_set', 'my_pkg.my_set') # a set of your own, by module path
 
 Importing this package imports nothing: each set (bpy and the families it stands on) loads on first use, so listing
-the sets works in plain Python too. Availability is read from the files, without importing them.
+the sets works in plain Python too. Availability is read from the files, without importing them. The two films'
+packages, sets.daisy (its clock: BAR, SECTIONS) and sets.unknown_force (its SETS table), load on first access too.
 """
 
 from __future__ import annotations
@@ -110,7 +118,7 @@ def get(name):
 def build(name, ctx=None, **kw):
     """Build a set: get(name)'s entry (build) called with its options. The harness ctx goes where the builder takes
     it: as ctx= when its build() has a ctx parameter, else as scene=ctx.scene when it takes a scene (the UNKNOWN FORCE
-    corridor and news), else not at all (the city and the hole take opts). Read the module's build() for its options."""
+    corridor and news), else not at all. Read the module's build() for its options."""
     import inspect
     r = REGISTRY.get(name)
     if r is not None and r['kind'] != 'set':
@@ -129,3 +137,13 @@ def build(name, ctx=None, **kw):
         elif 'scene' in params and getattr(ctx, 'scene', None) is not None:
             kw.setdefault('scene', ctx.scene)
     return fn(**kw)
+
+
+FILMS = ('daisy', 'unknown_force')
+
+
+def __getattr__(name):
+    """sets.daisy, sets.unknown_force: the films' packages, imported on first access (neither imports a set)."""
+    if name in FILMS:
+        return importlib.import_module(f'{__name__}.{name}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

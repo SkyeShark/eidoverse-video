@@ -761,7 +761,7 @@ def test_p():
     led = L.create_ledger()
     added = post.apply(sc, ns, led)
     order = [f'{s}:{n}' for s, n, _x in chain.stages(sc)]
-    want = ['bloom:pre_bloom_hook', 'bloom:bloom', 'under:color_hook', 'overlay:overlay', 'over:screen_hook']
+    want = ['prebloom:pre_bloom_hook', 'bloom:bloom', 'under:color_hook', 'overlay:overlay', 'over:screen_hook']
     check('P1 the hooks land in the engine\'s order: pre-bloom, bloom, colour, overlay, screen', order == want,
           f'{order}')
     t = sc.compositing_node_group
@@ -1106,9 +1106,12 @@ def test_q():
     fz = sit_on_ground(floor_sitter, at=(-1.5, 0.5), ground=[floor])
     sc.frame_set(13)
     pts = [(x, y) for x in (-1.9, -1.7, -1.5, -1.3, -1.1) for y in (0.1, 0.3, 0.5, 0.7, 0.9)]
-    low_g = SE._lowest_up(SE._body_bvh(floor_sitter), pts, fz - 0.6, 1.5)
-    check('Q5 sit_on_ground: her lowest underside 5 mm above the floor', low_g is not None and abs(low_g - (fz + 0.005))
-          < 0.01, f'floor {fz:.3f}, lowest {low_g if low_g is None else round(low_g, 4)}')
+    # measured on the skin that bears her, as sit_on_ground measures it (seating._support_bvh: no spring chains, no
+    # loose layer such as a coat's hem, which hangs into the floor under her, hidden by her)
+    low_g = SE._lowest_up(SE._support_bvh(floor_sitter), pts, fz - 0.6, 1.5)
+    check('Q5 sit_on_ground: the lowest underside of the skin that bears her 5 mm above the floor',
+          low_g is not None and abs(low_g - (fz + 0.005)) < 0.01,
+          f'floor {fz:.3f}, lowest {low_g if low_g is None else round(low_g, 4)}')
     cam = bpy.data.objects.new('cam', bpy.data.cameras.new('cam'))
     sc.collection.objects.link(cam)
     cam.location = (3.0, -5.0, 1.5)

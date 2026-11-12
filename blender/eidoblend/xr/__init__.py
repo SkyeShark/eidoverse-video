@@ -35,5 +35,24 @@ Modules (bpy only where it must be; server, shots and glb are plain Python):
     page/xr_page.html   the page export_xr copies: the GLB on the kit's rig, controls and telemetry
 
 The kit itself (eidoverse/xr/xr_kit.js, serve.py, quest.py, shot.mjs) is used as it is.
-Importing this package imports nothing (so the plain-Python modules work outside Blender).
+Importing this package imports nothing (so the plain-Python modules work outside Blender): a module, or one of the
+names set_xr / get_xr / survey_xr / export_xr (export) and EXAMPLES (examples), is imported on first access
+(xr.export_xr(...), `from eidoblend.xr import export_xr`).
 """
+
+import importlib
+
+MODULES = ('export', 'materials', 'motion', 'world', 'choreo', 'landmarks', 'examples', 'glb', 'server', 'shots')
+_NAMES = {'set_xr': 'export', 'get_xr': 'export', 'survey_xr': 'export', 'export_xr': 'export', 'EXAMPLES': 'examples'}
+
+
+def __getattr__(name):
+    if name in MODULES:
+        return importlib.import_module(f'{__name__}.{name}')
+    if name in _NAMES:
+        return getattr(importlib.import_module(f'{__name__}.{_NAMES[name]}'), name)
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
+
+def __dir__():
+    return sorted(set(globals()) | set(MODULES) | set(_NAMES))

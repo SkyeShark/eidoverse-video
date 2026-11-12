@@ -161,7 +161,7 @@ def band(size_m, cell):
 # ----------------------------------------------------------------------------------------- the term table ---
 
 JOINT_ZERO_SPACING = 0.6          # gradient noise crosses zero about every 0.6 lattice cells along a line
-JOINT_SLOPE = 1.6                 # |dn/d(lattice)| at a zero crossing, about (measured: tests/terrain_new/detail)
+JOINT_SLOPE = 1.6                 # |dn/d(lattice)| at a zero crossing, about (measured: tests/terrain/detail)
 
 
 def breakup_terms(p, level, seed):

@@ -440,8 +440,11 @@ class CourseScene:
         from ..characters.controller import CollisionWorld, Locomotion
         world = CollisionWorld(self.colliders())
         foot_ik = self.variant.get('foot_ik', True)
+        # the maneuvers' feet stay out of every solid, the ladder's rails and rungs too (which the walk does not stand
+        # on: they are visual, as the engine's were): the controller's contact_world
+        opts = dict(TERRAIN_BASE_CONTROLLER, contact_world=CollisionWorld())
         self.loco = Locomotion(self.h, world, start=self.course.start, heading=math.pi,
-                               leg_ik='default' if foot_ik else None, controller_opts=dict(TERRAIN_BASE_CONTROLLER),
+                               leg_ik='default' if foot_ik else None, controller_opts=opts,
                                locomotion_opts=dict(self.locomotion_opts), log=self.log)
         self._hook(self.loco.ctrl)
         y0 = self.course.start[1]
@@ -512,7 +515,7 @@ class CourseScene:
         loco.turn_to(180.0)       # square up to the course heading (three's pi: Blender +Y), damped at 8 / s as the
         loco.call(phase('sit'))   # example's settle (its 0.45 s is what that damping takes over a few degrees)
         loco.sit(hold=st['hold'], down=st['sit_down'], up=st['stand_up'], reverse=True,
-                 reverse_speed=st['reverse_speed'])
+                 reverse_speed=st['reverse_speed'], seat=course.bench)     # seatOn's settle: the seat on the pan
         loco.call(phase(None))
         loco.call(auto(True))
         loco.follow_path([(0.0, ges['y0'])], gait='walk', stop=False)

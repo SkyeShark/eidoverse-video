@@ -245,7 +245,11 @@ def main():
             f'{len(seated)} seated frames, spans {spans}')
     if seated:
         fa, fb = seated[0]['f'], seated[-1]['f']
-        hold = range(fa + (fb - fa) // 3, fb - (fb - fa) // 3 + 1, 6)
+        # the hold itself: from the sit-down's end to the stand-up (seat_on's seated frames also carry its descent,
+        # whose last step lifts a boot, and its stand-up: their middle third began in the descent)
+        h0 = fa + int(round(getattr(seat_cmd, 'span', 0.0) * 30)) + 6
+        h1 = min(fb, h0 + int(round(st['hold'] * 30)) - 12)
+        hold = range(h0, h1 + 1, 6) if h1 > h0 else range(fa + (fb - fa) // 3, fb - (fb - fa) // 3 + 1, 6)
         floor = seated[0]['feet_world'][2]
         lows = [min(v['zmin'] for v in fm.at(f).values()) - floor for f in hold]
         R.check('the seated feet stand on the floor (the visible boots within -6 / +10 mm of it through the hold)',

@@ -12,6 +12,7 @@
     ledger          eidoverse/audit_core.js, whole: the ledger, inventory, declarations, coverage, digest (plain Python)
     audits          preflight, coverage (audit_core on the scene), motion (+ locomotion on sliding feet, lipsync),
                     framing, palette (+ the showpiece nudge), asset checks
+    showpiece       the palette audit's showpiece nudge
     assets          textures, PBR sets, models, clips (each file's own names and order, per-clip weights mixed in
                     the file's order), clones (that play, with their own actions if asked), kits (+ islands), glass,
                     HDRIs for lookdev
@@ -25,5 +26,22 @@
     navigation      robot sensors, occupancy memory and the A* planner (the robot_*.js port)
     doctor          the in-Blender half of `eido_blender.py doctor`
 
-Importing this package imports nothing: bpy is imported only by the modules that run inside Blender.
+Importing this package imports nothing: bpy is imported only by the modules that run inside Blender. A module is
+imported when it is first imported or reached as harness.<name> (run_scene and doctor are scripts: run them, do not
+import them).
 """
+
+import importlib
+
+MODULES = ('config', 'runner', 'context', 'keying', 'settings', 'post', 'output', 'ledger', 'audits', 'showpiece',
+           'assets', 'model_preview', 'render_common', 'gpu_check', 'html_mesh', 'interior_window', 'navigation')
+
+
+def __getattr__(name):
+    if name in MODULES:
+        return importlib.import_module(f'{__name__}.{name}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
+
+def __dir__():
+    return sorted(set(globals()) | set(MODULES))

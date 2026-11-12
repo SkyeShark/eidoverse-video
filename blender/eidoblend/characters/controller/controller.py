@@ -1753,9 +1753,10 @@ class VRMCharacterController:
     def jump(self, distance=1.4, height=0.45):
         return MV.jump(self, distance=distance, height=height)
 
-    def climb_ladder(self, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0, standoff=None):
+    def climb_ladder(self, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0, standoff=None,
+                     rung_radius=None):
         return MV.climb_ladder(self, height=height, rate=rate, first_rung=first_rung, rung_spacing=rung_spacing,
-                               time_scale=time_scale, standoff=standoff)
+                               time_scale=time_scale, standoff=standoff, rung_radius=rung_radius)
 
     def climb_wall(self, rate=0.34, time_scale=1.1):
         return MV.climb_wall(self, rate=rate, time_scale=time_scale)

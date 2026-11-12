@@ -29,11 +29,19 @@ is their work too: the runner refuses to rebuild over it without `--force`.
   `HELPER_MODULES` list into globals; here a scene script imports what it
   uses (`from eidoblend.sky import make_sky`), at the top of the file. The
   runner also adds the script's own folder to `sys.path`.
-- **One subpackage per family, self-contained:** `eidoblend.harness`,
-  `characters`, `flora`, `fx`, `look`, `media`, `placement`, `sky`, `terrain`,
-  `trees`. A family imports only itself, `eidoblend.common` and Blender's
-  modules. `blender/eidoblend/__init__.py` imports nothing, so importing one
-  family never loads another. Families meet in scene scripts.
+- **One subpackage per family:** `eidoblend.harness`, `characters`, `course`,
+  `fabrication`, `flora`, `fx`, `look`, `materials`, `media`, `placement`,
+  `props` (the DAISY props; it builds on `media`'s screens), `sdf`, `sets`,
+  `sky`, `terrain`, `trees`, `weather`, `xr`. `blender/eidoblend/__init__.py`
+  imports nothing, and every family loads its subpackages on first use
+  (module `__getattr__`), so importing one family never loads another and
+  `import eidoblend` costs nothing. A family imports itself, `eidoblend.common`
+  and Blender's modules; where one stands on another, its package docstring
+  names it (the robot body drives `harness.navigation` and plays through
+  `characters.controller`; the controller's sits read `placement`; the
+  robotics kit loads `fabrication` for a dispenser; the sets build on `flora`,
+  `trees`, `fx`, `media` and the look family; the weather attaches to a
+  `sky`). Families meet in scene scripts.
 - **Plain-Python halves stay plain.** Modules that plan rather than build
   (`harness/config.py`, `harness/ledger.py`, `common.py`, several families'
   planners) import no `bpy`, so the system Python can run them and test them.
@@ -184,11 +192,26 @@ When adding or porting a system:
 ## Validation
 
 For a docs-only change, run the docs check; no render is needed. For behavior
-changes, run the affected family's tests in `blender/tests/<family>/` and
-inspect their probe stills. The runner's own suite:
+changes, run the affected family's tests in `blender/tests/<area>/` and
+inspect their probe stills. Every area's tests run from one command:
 
 ```bash
-python blender/tests/pipeline/run_tests.py          # T0-T16 (most render)
+python blender/tests/run_all.py                       # the import smoke, then every area's tests, PASS / FAIL each
+python blender/tests/run_all.py --kinds imports,py,bl # no renders: the wiring, plain Python, Blender on the CPU
+python blender/tests/run_all.py --areas sdf,weather   # some areas; --only <text>, --failed, --resume, --list
+```
+
+Each test runs in the mode that checks it without rendering where it has one
+(`--no-render`, `--build-only`, `--stage build` ...); renders run one at a
+time (`--gpu-jobs 1`), and `--gpu-budget N` starts no render after N
+minutes. The import smoke reaches every family's subpackages through its
+parent's exports and runs every `eidoblend` import of every test file, in
+seconds. Logs and `summary.json` go to `blender/tests/out/run_all/`
+(git-ignored). A PASS there is not a visual review: look at the areas'
+stills in their `out/` folders. The runner's own suite:
+
+```bash
+python blender/tests/pipeline/run_tests.py          # T0-T17 (most render)
 python blender/tests/pipeline/run_tests.py T3       # one test
 ```
 
@@ -211,6 +234,7 @@ python blender/tests/pipeline/run_tests.py T3       # one test
 | T14 | a 300-frame rigid-body film: the cache stretched past Blender's default 250, baked 1-300, the crates knocked after frame 250 (read back from the saved `.blend`) |
 | T15 | a plan file the script reads, undeclared: unchanged, the build is reused; edited, it rebuilds from the new plan |
 | T16 | two shots: LINEAR and CONSTANT keys in the saved `.blend`, the lamp's keyed step at the cut, nothing changed without a key, shot B's framing measures what its camera sees |
+| T17 | a Geometry Nodes modifier (Blender 5.2 keeps its inputs as RNA, not ID properties): a pillar grown by a keyed input builds, its keyed input is not flagged, and an unkeyed one is named in `build.unkeyed` |
 
 `blender/tests/pipeline/query_blend.py` reads a saved build without rendering
 (positions and light values at given frames, key interpolations): T14 and T16

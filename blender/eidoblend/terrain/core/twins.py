@@ -31,7 +31,7 @@ The primitives below mirror common.glsl one for one: OFF, LEN, WISO, WISO_SUM, o
 neighbour / shift (array shifts), pin_apply, world_xy, tan_deg, pcg / pcg2 / pcg3 / pcg4, u01, cell_hash. The PCG
 hashes and u01 are bit-exact against the GPU; the float arithmetic agrees to rounding.
 
-This module imports no bpy: twins run in plain Python (see blender/tests/terrain_new/core/plain_import.py for
+This module imports no bpy: twins run in plain Python (see blender/tests/terrain/core/plain_import.py for
 loading the terrain core outside Blender).
 """
 

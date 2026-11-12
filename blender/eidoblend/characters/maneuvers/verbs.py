@@ -139,7 +139,7 @@ def climb_ladder(loco, rungs, wall=None, rate=0.55, time_scale=1.0, standoff=Non
     def kw(info):
         lad = info['ladder']
         out = {'height': lad['height'], 'first_rung': lad['first_rung'], 'rung_spacing': lad['rung_spacing'],
-               'rate': rate, 'time_scale': time_scale}
+               'rate': rate, 'time_scale': time_scale, 'rung_radius': lad['rung_radius']}
         if standoff is not None:
             out['standoff'] = standoff
         return out

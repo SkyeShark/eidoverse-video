@@ -159,6 +159,7 @@ check('ringworld: the band, its walls, cloud sheet and lamps render as a plate i
 class _FakeWeather:
     def __init__(self):
         self.wrapped = 0
+        self.audio = object()            # WeatherFX.audio: the weather-audio object of the planned frames
 
     def wrap_scene(self):
         self.wrapped += 1
@@ -170,8 +171,9 @@ class _FakeWeather:
 fx = _FakeWeather()
 sky.weather_fx = fx
 sky.wrap_scene()
-check('facade: wrap_scene and audio_timeline delegate to the attached weather system',
-      fx.wrapped == 1 and sky.audio_timeline() == {'events': ['thunder'], 'kw': {}} and sky.audio is fx)
+check('facade: wrap_scene, audio_timeline and audio (sky_worlds.js get audio(): the weather-audio object) delegate to '
+      'the attached weather system',
+      fx.wrapped == 1 and sky.audio_timeline() == {'events': ['thunder'], 'kw': {}} and sky.audio is fx.audio)
 sky.audio_on = False
 check('facade: audio=False silences the timeline', sky.audio_timeline() is None and sky.audio is None)
 sky.audio_on = True

@@ -111,6 +111,17 @@ def main():
     cam.location = (p.x, p.y, smp.height_xy(p.x, p.y) + 1.7)
     cam.rotation_euler = (Vector((0, 0, h * 0.5)) - cam.location).to_track_quat('-Z', 'Y').to_euler()
     S.render(scene, os.path.join(S.OUT, 'demo_%s_backlit.png' % which))
+    # the clouds in the scene: 30 m behind the plant from the nearest cloud, eye height, looking
+    # 12 degrees up toward it (the plant and the grove below, the cloud above)
+    clouds = demo.get('clouds') or []
+    if clouds:
+        c0 = min(clouds, key=lambda c: c.location.to_2d().length)
+        toward = c0.location.to_2d().normalized()
+        p = -toward * 30.0
+        cam.location = (p.x, p.y, smp.height_xy(p.x, p.y) + 1.7)
+        look = Vector((toward.x * math.cos(math.radians(12)), toward.y * math.cos(math.radians(12)), math.sin(math.radians(12))))
+        cam.rotation_euler = look.to_track_quat('-Z', 'Y').to_euler()
+        S.render(scene, os.path.join(S.OUT, 'demo_%s_clouds.png' % which))
     S.summary('demo_scene')
 
 

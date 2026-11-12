@@ -5,7 +5,7 @@ Frames
     Arrays are [row j, column i] with row 0 the SOUTH edge. A cell centre is at
         x = x0 + (i + 0.5) * cell,   y = y0 + (j + 0.5) * cell.
     A window is square: (x0, y0, side, cell, n) with side = n * cell (core/levels.py).
-    The reference loader (tests/terrain_new/reference/landform_refs.py) returns row 0 = NORTH: flip it once on load
+    The reference loader (tests/terrain/reference/landform_refs.py) returns row 0 = NORTH: flip it once on load
     (from_north_up), and back for PNGs other tools read top-down (to_north_up).
 
 Units, in every public parameter: metres (heights, sizes, spacings), years (durations), degrees (angles; their

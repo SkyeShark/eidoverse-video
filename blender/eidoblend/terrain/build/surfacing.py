@@ -21,7 +21,7 @@ What the node group does, per pixel:
      across (the old two-sample de-tiling). Albedo and height are 'Auto' filtered: Cubic (the full-resolution image,
      sharp at grazing angles) within detail_distance of the camera, mipmapped Linear beyond, so distant ground holds
      still in motion (the old interpolation='Auto', measured with the shimmer probe, which moved to
-     tests/terrain_new/surfacing/). Normal, roughness and AO are mipmapped Linear (half the texture reads; see the
+     tests/terrain/surfacing/). Normal, roughness and AO are mipmapped Linear (half the texture reads; see the
      package report for the cost). With far_scale, the albedo and height are read once more at far_scale x the tile,
      blended in over far_distance, so slopes hundreds of metres off do not show a fine regular knit of repeats.
   4. Planar layers read world XY and their normal maps in that tangent frame (built in the shader from the shading

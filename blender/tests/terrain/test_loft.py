@@ -2,6 +2,7 @@
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain/test_loft.py --no-render
     HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh .../test_loft.py
+    (the probe still's ground is make_terrain's: its kernels need the GPU slot)
 
 Parity: Node runs eidoverse/loft.js (three from node_modules: this checkout's, else the main
 checkout's) for the same sweeps; the walls' vertices must agree to float32 precision after the axis
@@ -21,7 +22,7 @@ import _fixture as F  # noqa: E402
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
-from eidoblend.terrain import loft, make_terrain  # noqa: E402
+from eidoblend.terrain import loft  # noqa: E402
 from eidoblend.placement import place_on  # noqa: E402
 
 
@@ -89,8 +90,7 @@ if '--no-render' not in F.args():
     F.clean_scene()
     F.render_settings(960, 540, 16)
     F.test_daylight(sun_elevation=35, sun_azimuth=210)
-    ground, h = make_terrain(size=20, segments=80, amplitude=0.3, seed=5, flat_radius=7,
-                             layers=[{'set': 'Ground106', 'tile_metres': 2.3, 'roughness': 1.35}])
+    ground, h = F.ground(size=20, seed=5, clearing_m=7, relief_m=0.6)
     brass = bpy.data.materials.new('brass')
     bs = brass.node_tree.nodes['Principled BSDF']
     bs.inputs['Base Color'].default_value = (0.75, 0.55, 0.25, 1)

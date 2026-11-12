@@ -550,12 +550,14 @@ class RobotLegs:
 
     def climb_ladder(self, opts=None):
         """climbLadder({height, rate, firstRung, rungSpacing, timeScale}): up the ladder on the face ahead, the rung loop
-        chained into the mantle over its top (height: the ladder's, else the face's the scan measures)"""
+        chained into the mantle over its top (height: the ladder's, else the face's the scan measures). This edition
+        also takes rungRadius (my palms close over rungs that thick; default terrain_base's)"""
         o = dict(opts or {})
         kw = {k: o[j] for j, k in (('height', 'height'), ('rate', 'rate'), ('firstRung', 'first_rung'),
                                    ('first_rung', 'first_rung'), ('rungSpacing', 'rung_spacing'),
                                    ('rung_spacing', 'rung_spacing'), ('timeScale', 'time_scale'),
-                                   ('time_scale', 'time_scale')) if j in o}
+                                   ('time_scale', 'time_scale'), ('rungRadius', 'rung_radius'),
+                                   ('rung_radius', 'rung_radius')) if j in o}
         return self._start_maneuver('climb_ladder', **kw)
 
     def _start_maneuver(self, name, **kw):

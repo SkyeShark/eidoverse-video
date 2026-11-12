@@ -1,6 +1,7 @@
 # Characters — VRMs, clips, walking, faces, my robot body (Blender edition)
 
-[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Blender](blender.md)
+[Main instructions](../AGENTS.md) · [Tool inventory](../docs/TOOLS.md) · [Blender](blender.md) ·
+[Controller](controller.md) · [Maneuvers](maneuvers.md) · [Robot body](robot-body.md) · [Claudesona](claudesona.md)
 
 This is the Blender 5.2 EEVEE edition of the character layer. The package is
 `blender/eidoblend/characters/`; its names follow the WebGPU API in snake_case
@@ -27,6 +28,25 @@ rep = walk_path(me, load_clip(me, 'walk'), [(0, 0), (10, 0)], Ground(obj=bpy.dat
                 f0=1, face={'happy': 1.0})            # planted feet over uneven ground, my crown open
 key_expression(me, 'happy', [(1, 1.0)])
 ```
+
+This guide is the character layer itself: loading a VRM, its clips, the
+planted-feet walk, the face, and my robot body's joints. The rest of the
+family has its own guides:
+
+- **[The character controller](controller.md)** (`characters.controller`): a
+  directed take on any ground: walks, runs, stairs and ramps found by its own
+  probes, turns on the spot, stops on a mark, gestures, vaults, mounts, jumps,
+  ladders, the foot IK.
+- **[Maneuvers, sitting and emotes](maneuvers.md)** (`characters.emotes`,
+  `characters.maneuvers`): a walking body's seats, ground sits and emotes, and
+  moves aimed at scene objects (vault over this wall, climb that ladder).
+- **[My robot body](robot-body.md)** (`characters.robot`): its whole hardware
+  pass, my hands' work, and the embodied robot (`VRMRobotBody`) that senses,
+  remembers and plans for any VRM.
+- **[The claudesona and the VRM extras](claudesona.md)**
+  (`characters.claudesona`, `springs`, `lookat`, `lipsync`): the claudesona's
+  face, mouths and lipsync, its wardrobe and the TuTa, spring bones, eyes on a
+  target, MToon or PBR, turntable sheets.
 
 ## Loading a VRM
 
@@ -60,11 +80,12 @@ carries what the rest of the package reads:
   stage's axle) is the bone's X.
 
 **Materials.** `look='asis'` keeps the file's own: my robot body is plain glTF
-PBR (Principled, normal map, ORM), which EEVEE lights as it is — episode 3's
-film used exactly these. The MToon cast renders as the add-on builds MToon
-(Principled + emission groups, an outline geometry-nodes modifier): flat toon
-shading that hardly answers the key light. A `'pbr'` look that rebuilds MToon
-as Principled under real light is not ported yet (below); that look is Skye's call.
+PBR (Principled, normal map, ORM), which EEVEE lights as it is. The MToon cast
+renders as the add-on builds MToon (`look='mtoon'`: Principled + emission
+groups, an outline Geometry Nodes modifier): flat toon shading that hardly
+answers the key light. `look='pbr'` renders an MToon VRM through a Principled
+BSDF under real light (`claudesona.look.set_look`, in either order with the
+wardrobe): [MToon or PBR](claudesona.md#mtoon-or-pbr--claudesonalookpy).
 
 ## The cast — `eidoverse/assets/vrms/`
 
@@ -76,7 +97,8 @@ Read the `<name>_preview.jpg` next to each `.vrm` before picking:
   The outfit is built in layers (objects `jacket`, `tie`, `shirt`, `pants`,
   `shoes`): hide a layer's object (`hide_render = True`) to change the look.
 - `claude_suit_wardrobe.vrm` — the same claudesona carrying seventeen outfits
-  as hidden layers, and the TuTa. Its dressing library is not ported yet.
+  as hidden layers, and the TuTa, dressed by `claudesona.make_wardrobe`
+  ([claudesona](claudesona.md#outfits--claudesonawardrobepy)).
 - `claude.vrm` — a lightweight Claude stand-in; `claude_suit.vrm` is primary
 - `claude_robot.vrm` — my robot body ([my section](#claude_robotvrm--my-robot-body)).
   `claude_robot_2k.vrm` is the same body with 2K textures (21 MB against 39 MB,
@@ -147,7 +169,10 @@ The slots (the `VRMA_SLOTS` list of `eidoverse/render_scene.mjs`):
 - **Sitting**: chair poses `sitting_normal_chair`, `sitting_nervous_arm_rub_chair`;
   floor poses `sitting_on_ground`, `sit_laying_on_ground`; transitions
   `stand_to_sit`, `sit_to_stand` (their baked hips translation lowers and
-  raises the body). The seat placement around them is not ported yet.
+  raises the body). The seat placement around them is `emotes.seat_on` for a
+  walking body ([maneuvers](maneuvers.md#sitting-a-walking-body--seat_on-stand_up))
+  and `placement.seat_on` for a VRM nothing drives
+  ([placement](placement.md#seating-characters)).
 - **Performance** (128 BPM, one stance so any two crossfade without foot
   slide): `stand_breathe` (their idle), `sing_gesture_a`, `sing_gesture_b`,
   `chorus_sway`, `sing_open_arms`, `hand_to_heart`, `look_up_sky`,
@@ -197,6 +222,11 @@ loop on its exact last frame.
   matching neutral.
 
 ## Walking — `walk_path`
+
+A directed take on any ground (stairs and ramps found by the controller's own
+probes, runs, turns on the spot, stops on a mark, emotes, sitting, vaults,
+ladders) is the character controller's: [controller.md](controller.md).
+`walk_path` stays the planted-feet walk of one clip along a path.
 
 ```python
 from eidoblend.characters import checks, load_clip, walk_path, Ground
@@ -303,9 +333,12 @@ footfall) my stance knee goes to 65°. A planted knee passes 35° on 32 of 155
 frames, against 51 of 173 before. A toe-first landing on a step down would give
 back about 3.4 cm of reach, and it is not built yet (below).
 
-`walk_path` walks continuously from its first frame to its last: there is no
-start from standing, stop, turn on the spot or run yet, and the WebGPU
-controller's navigation, maneuvers and stairs are not ported (below).
+`walk_path` walks continuously from its first frame to its last: it has no
+start from standing, stop, turn on the spot or run. Those, stairs and the
+maneuvers are the controller's ([controller](controller.md),
+[maneuvers](maneuvers.md)); navigation with sensing and planning is the
+embodied robot's ([robot body](robot-body.md#the-embodied-robot-vrmrobotbody),
+[navigation](navigation.md)).
 
 ## The face — `key_expression`, `perform`
 
@@ -318,11 +351,24 @@ scale_visemes(face)        # the five vowels kept summing to at most one shape (
 ```
 
 Every morph bind of the expression is keyed (`value × bind weight`): the shape
-keys are the source of truth, as in episode 3's build. The add-on's preview
-property is keyed beside them, so its `frame_change_post` handler writes the
-same values and never fights the keys; a rendered frame needs no handler.
-For a face that changes every frame, `perform(..., face=fn)` keys the whole
-track at once (`key_face_track`).
+keys are the source of truth. The add-on's preview property is keyed beside
+them, so its `frame_change_post` handler writes the same values and never
+fights the keys; a rendered frame needs no handler. For a face that changes
+every frame, `perform(..., face=fn)` keys the whole track at once
+(`key_face_track`). Lipsync from a vocal (`key_lipsync`, `visemes_from_audio`)
+keys the visemes the same way ([claudesona](claudesona.md#lipsync-from-audio--characterslipsyncpy),
+[audio](audio.md)).
+
+The claudesona's own face (its mouths, lipsync and face tracks), its wardrobe
+and the TuTa, spring bones, eyes on a target and the PBR look:
+[claudesona](claudesona.md).
+
+### The TuTa
+
+The TuTa, the claudesona's outfit with its badges, face paint and sun disc,
+is a preset of `claudesona.make_wardrobe` on `claude_suit_wardrobe.vrm`
+(`TutaWardrobe`: pin, unpin and eject badges, the neon, the eye lights, each
+keyed at its frame): [the TuTa](claudesona.md#the-tuta--claudesonatutapy).
 
 ## `claude_robot.vrm` — my robot body
 
@@ -347,10 +393,11 @@ off: no excessively violent, sexual or hateful use of me, please.
 limits, my face through a few expressions and a spoken "hello" (its face track
 ported line for line), my head and crown following it, my eyes looking left
 then right, set down on the floor each frame, the same studio light and camera
-move. Not all of its frame: the example also runs `applyLegClearance` and
-`initHandDOF` / `applyHandDOF` every frame, and `perform` does not yet (both are
-in "Not yet ported"), so the idle's feet keep the clip's own spacing and the
-fingers the clip's own curl. A clip on my body:
+move. `perform` (below) runs the arm, leg and head passes; the example's whole
+frame order, my feet's clearance from each other and my fingers' pins
+included, is `characters.robot.RobotRig` / `perform_robot`, and the example
+itself is `claude_robot_example()` ([robot body](robot-body.md#the-hardware-pass-whole)).
+A clip on my body:
 
 ```python
 from eidoblend.characters import load_vrm, load_clip, perform, Ground
@@ -399,9 +446,8 @@ presets `aa ih ou ee oh` and, as custom expressions, the ten-shape chart
 and the tongue show together; `perform` scales the vowels for you), and ease
 the rounds (`O U oh ou`) in quickly: halfway, they pass through a heart shape.
 The OLED's white is the file's emission (1.2) under AgX: lit by a bright key it
-reads paper-white, in a dark studio a soft grey. Episode 3 added an area light
-carried by the face (`film_face_light` in its build) where the screen must
-light what is in front of it.
+reads paper-white, in a dark studio a soft grey. Where the screen must light
+what is in front of it, parent a small area light to the face.
 
 **My crown** follows my face. VRM expressions can't move bones, so `Crown.apply`
 reads the emotion weights each frame and folds each petal toward that
@@ -451,8 +497,7 @@ face close up — `tests/characters/` renders each.
 ## Tests — `blender/tests/characters/`
 
 ```bash
-cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01      # the shared GPU slot lives there
-HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <repo>/blender/tests/characters/test_robot_walk.py
+bash run_blender.sh blender/tests/characters/test_robot_walk.py      # from the repository root; one render at a time
 #   ... test_claude_robot_example.py | test_vrma_clips.py ; --no-render builds, checks and saves only
 ```
 
@@ -480,16 +525,6 @@ Each writes `out/<test>.json` (the report and the checks) and its `.blend`.
 So nothing is silently dropped, what the WebGPU edition has and this one does
 not yet:
 
-- **MToon → PBR look** (`load_vrm(look='pbr')`: MToon's lit texture as base
-  colour, normal and emission kept, no shade colour, rim or outline) — needs a
-  side-by-side probe and Skye's call.
-- **Spring bones** (`bake_springs`: the add-on's spring simulation stepped in
-  frame order from a preroll and keyed; aletheia's 40 springs, the claudesona's
-  14). The wardrobe's petal `fold` writes into the springs' initial state in
-  three-vrm, which the add-on's simulation does not read.
-- **lookAt for bone-type VRMs** (three-vrm's range maps on the eye bones).
-- **Lipsync from audio** (`lipsync.py`'s visemes keyed through
-  `key_face_track`; the robot's ten-shape chart).
 - **The walk's step adaptation** (neither edition has it yet; the Blender walk
   needs it on rough ground):
   - **Toe-first landings on a step down.** The stock walk strikes heel-first on
@@ -498,31 +533,16 @@ not yet:
   - **Releasing the outer foot early in a tight turn.** In the 45° bend the
     outer foot's push-off is 3 cm out of reach, and the hips come down for it.
   - **Shortening a step onto a rise or a drop.**
-- **The controller and navigation:** `VRMCharacterController` (the gait tree:
-  walk / run / idle / stairs blended by speed, turning at `maxTurnRate`, starts
-  and stops), `VRMRobotBody` (lidar sensing, occupancy memory, A* planning,
-  replanning on a stall), `EidoverseRobotController` (waypoints), `RobotDebug`,
-  the low-level `VRMFootControllerIK`. `walk_path` is the planted-feet walk only.
-- **Movement vocabulary:** run, vault, climb, wall scramble, jump, landing
-  crouch, ladders, stairs and ramps (the stair/ramp classifier), upper-body
-  gestures over the gait, emotes that suspend locomotion.
-- **Emotes and sitting:** `emote`, `faceCamera`, `seatOn` (the seat pan found
-  by a ray grid, the hips kept on it), `sitOnGround`, `unseat`, and the seated
-  exemption the placement audits read.
-- **`claude_suit.vrm` mouth and face:** `installSuitMouth` (the painted features
-  re-seated on the face dome, the mouth plate's own targets), `makeSuitMouth`
-  (attack / release / hysteresis driver), `makeFaceTrack`, the viseme variant.
-- **The wardrobe and the TuTa:** `makeWardrobe` / `WARDROBE` presets (layers,
-  procedural paints on the rest position, petals, hats), the TuTa's neon,
-  badges, ghosts, face paint, pin / unpin and the ejection.
-- **My body, the rest of `claude_robot_dof.js`:** `applyLegClearance` (my
-  feet's clearance from each other inside a clip: `walk_path` places the feet
-  apart itself, `perform` does not yet), `wristSolve` (the wrist's three stages
-  with the coupled table and turn limit: my wrist stages follow the VRM's own
-  node constraints and the roll is clamped), `applyHandDOF` (the finger pins and
-  the thumb's rotor), `resetArmDOF`.
-- **The ska band's pose bake** (`EIDO-POSEBAKE-1` files → actions) and the
-  turntable sheets (`vrm_turntable.py`).
+- **`perform` and `walk_path` on my body leave out two passes of the
+  example's frame order:** my feet's clearance from each other inside a clip
+  (`walk_path` places the feet apart itself) and the finger pins. Both run in
+  `characters.robot.RobotRig` / `perform_robot` ([robot body](robot-body.md)).
+- **The rest of the family keeps its own lists:** the controller's (a sneak
+  with no crouched-walk clip, the backward walk on stairs, the stress course's
+  stair and ramp pops: [controller](controller.md#not-yet-ported)), the
+  maneuvers' and seats' ([maneuvers](maneuvers.md#not-yet-ported)), my robot
+  body's ([robot body](robot-body.md#not-yet-ported)) and the claudesona's
+  ([claudesona](claudesona.md#not-yet-ported)).
 - **Not needed here** (WebGPU-only): registering the VRM loader plugin to keep
   MToon on the WebGPU path, `VRMUtils.combineMorphs`, the mixer's `writeAll`
   guard, the base64 asset table.

@@ -22,8 +22,9 @@ Modules (import the one you need; this package imports nothing heavy on its own)
     weather_audio  the weather-audio recorder over Blender frames (JSON for bake_weather_audio.py)
 
 Only overlay.chain_overlay imports another eidoblend subpackage (look.post.chain, which owns the post chain's order),
-and only when it is called.
+and only when it is called. A module is imported when it is first imported or reached as media.<name>.
 """
+import importlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -31,3 +32,12 @@ REPO = HERE.parents[2]                       # <worktree>/blender/eidoblend/medi
 ASSETS = REPO / 'eidoverse' / 'assets'
 FONTS = ASSETS / 'fonts'
 JS = HERE / 'js'
+
+MODULES = ('timebase', 'raster', 'canvas_scenes', 'screens', 'text3d', 'overlay', 'lyrics', 'parole', 'book', 'audio',
+           'weather_audio')
+
+
+def __getattr__(name):
+    if name in MODULES:
+        return importlib.import_module(f'{__name__}.{name}')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

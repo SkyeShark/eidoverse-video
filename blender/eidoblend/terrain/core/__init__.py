@@ -1,4 +1,4 @@
-"""eidoblend.terrain.core: the new make_terrain's core (blender/tests/terrain_new/DESIGN.md, sections 2 and 10).
+"""eidoblend.terrain.core: the new make_terrain's core (blender/tests/terrain/DESIGN.md, sections 2 and 10).
 
 Import the module you need; this file imports nothing, so plain-Python tests load only what they name.
 
@@ -18,5 +18,5 @@ Import the module you need; this file imports nothing, so plain-Python tests loa
     metrics      the judge's generic numbers (section 10, item 2)
 
 Nothing here imports bpy at module level; gpu.py imports it when init() runs. Tests that load the core without the
-rest of the terrain package use blender/tests/terrain_new/core/plain_import.py.
+rest of the terrain package use blender/tests/terrain/core/plain_import.py.
 """

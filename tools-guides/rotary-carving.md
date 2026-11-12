@@ -380,7 +380,8 @@ bash run_blender.sh blender/tests/fabrication_rotary/render_rotary_probes.py -- 
 ```
 
 `rotary_js_dump.mjs` writes the JSON the parity test reads (run it once in Deno
-from the main checkout; its header has the command). The two examples also
+where the WebGPU engine's `node_modules` are installed; its header has the
+command). The two examples also
 build through the harness itself from three-second scene files whose outputs
 land in the test folder:
 
@@ -389,7 +390,7 @@ python eido_blender.py build blender/tests/fabrication_rotary/harness_scenes/rot
 python eido_blender.py build blender/tests/fabrication_rotary/harness_scenes/rotary_metal_harness_probe.json --no-probe-bake
 ```
 
-Renders go through the shared GPU slot (`heavy.sh`), the builds do not need it.
+Renders need the GPU (one at a time on a shared machine); the builds do not.
 
 ## Not yet ported
 
@@ -414,8 +415,16 @@ Renders go through the shared GPU slot (`heavy.sh`), the builds do not need it.
   the shutter: 18,000 rpm turns it six times in a 1/48 s exposure, more than
   any motion-blur step count resolves, so it renders crisp at that angle.
 - **Chips do not streak.** They hold their frame's positions through the
-  shutter: the shared chip pool renumbers its instances as chips are born and
-  die, so their motion vectors would join unrelated chips. Streaks need stable
-  chip ids in `cutting_debris`.
+  shutter: the shared chip pool renumbered its instances as chips were born
+  and died, so their motion vectors would join unrelated chips. The pool now
+  stores a persistent `id` per chip (`fabrication.cutting`), which Blender's
+  instancing reads as the instances' identity; `RotaryJob.key` does not yet
+  key the chips' clock at the shutter's physical moments, and the id has not
+  been confirmed in a motion-blur render.
+- **The 2.5D finish's footprint.** This package's `filter_finish` builds the
+  exact screen derivative of the finish's patterns; the fabrication
+  package's own `finish_stock` still fades by footprint × pattern scale (see
+  [fabrication](fabrication.md#not-yet-ported)). Folding the two into one
+  needs the swizzle's Jacobian carried through, a joint change.
 - Fixture, workholding and tool-envelope collisions are not checked (a valid
   XYZ path is not collision checking), as in the WebGPU edition.

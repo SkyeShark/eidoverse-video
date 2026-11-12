@@ -187,7 +187,7 @@ plus keyword overrides:
   in `extra`). Keep those lines: a declaration gives the uniform its
   type, a value the spec does not set starts at zero, a declared sampler
   the spec does not give reads black, and the values arrive through the
-  engine's uniform block. All four GLSL vehicles compile unchanged.
+  engine's uniform block. All four GLSL vehicles compile unchanged ([SDF vehicles](sdf-vehicles.md)).
 - `voxel`, or `cells` along the longest side, sets the mesh resolution.
   `texels` per quad side and `atlas_budget` (16 M texels by default, about
   128 MB of VRAM per image) set the atlas. A very large mesh gets fewer
@@ -349,7 +349,9 @@ does too.
 | `fractal_core` | mandelbulb, power 8, 'ultra' | `iso` 1.5 mm, the march's own stop distance |
 | `mr_hege` | Mr. Hege, the octopus man in a wool suit, animated | 10 materials: subsurface skin, wool sheen, metal buckle, coated eyes |
 | `red_shoggoth` | the red shoggoth with the blue angry mask, 48 blinking eyes, animated | from the engine's GLSL backup, like Mr. Hege |
-| `explosion` | the pyroclastic fireball: a displaced sphere pulsing on a 25 s cycle, animated | the displacement rides the material channel; its hot share is emission, its smoky share a lit surface; `make(speed=, noise_freq=, noise_amp=)` |
+| `explosion` | the pyroclastic fireball: a displaced sphere pulsing on a 25 s cycle, animated | the displacement rides the material channel; its hot share is emission, its smoky share a lit surface; `make(speed=, noise_freq=, noise_amp=)`; its glow on the scene: `light_from_surface` ([sdf-explosions.md](sdf-explosions.md)) |
+| `stylized_modern_sedan`, `stylized_cyberpunk_sedan`, `stylized_sci_fi_sleek_car`, `stylized_fighter_jet` | the two sedans, the sci-fi car and the fighter jet | `make()` builds them with part materials, live liveries and real lamps: [SDF vehicles](sdf-vehicles.md) |
+| `explosion_ring`, `flame`, `smoke`, `gyroid_fireball`, `bonfire`, `candle_flame`, `fire`, `nuclear_blast` | the volume examples | `make()` returns an `SdfVolume`; their lamps and the froxel range: [SDF explosions, fire and smoke](sdf-explosions.md) |
 | `mandelbulb`, `sierpinski_tetra`, `menger_sponge`, `gyroid` | the screen recipes as placeable solids | coloured by the recipes' palette, which drifts with `uTime`; the gyroid is `cut_by_bounds`; the Menger sponge is 'balanced' (6.7 M quads, its fifth level's 8 mm holes one voxel across) and `make(quality='high')` opens those holes for close-ups (15.1 M quads, channels per vertex) |
 
 Mr. Hege and the red shoggoth are the two examples the engine's TSL
@@ -687,11 +689,6 @@ script's docstring gives its command.
 
 ## Not yet ported
 
-- **The vehicle and volume EXAMPLES** (`stylizedModernSedan`,
-  `stylizedCyberpunkSedan`, `stylizedSciFiSleekCar`, `stylizedFighterJet`;
-  `explosionRing`, `flame`, `smoke`, `gyroidFireball`, `bonfire`,
-  `candleFlame`, `fire`, `nuclearBlast`) are added on this engine by the
-  vehicles and volumes steps.
 - `post(sum)` of a volume renders only in the reference march (see
   Volumes). A Python `sample()` / `medium()` has no reference march.
 - The mesher's grid is uniform within the bounds (sparse, not adaptive). A

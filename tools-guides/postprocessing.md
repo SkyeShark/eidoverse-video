@@ -35,7 +35,7 @@ EEVEE does those jobs in the renderer:
 | --- | --- |
 | N8AO (`_aoParams`, radius 0.3 m) | fast GI, `GLOBAL_ILLUMINATION` (or `AMBIENT_OCCLUSION_ONLY`); `fast_gi_distance` is the contact scale. Indoors with a baked room probe, `ao=False`: either mode lit floor contacts with the world through the walls |
 | SSR, edge fade | ray tracing (SCREEN), `trace_max_roughness`; misses fall back to sphere probes and the world; `use_overscan` keeps the frame edges |
-| UnrealBloom | the compositor's Glare 'Bloom' (off by default, as in episode three's house) |
+| UnrealBloom | the compositor's Glare 'Bloom' (off by default) |
 | TRAA, FXAA | `taa_render_samples` jittered samples per frame through a 1.5 px filter: supersampled; no history between frames |
 | ACES (`renderOutput`) | the view transform: AgX, its look, exposure, white balance |
 | the gradient env fallback | the world (the sky family's, or a neutral colour) |
@@ -82,7 +82,7 @@ All of it works on scene-linear light. AgX, the scene's view transform,
 applies once after the whole graph, as three's tone map applied after its
 overlay. Stages are nodes named `<slot>:<name>`, kept in order and relinked
 whenever one is added or removed. With no stages the scene renders with no
-compositor at all, as the house did: EEVEE + AgX + motion blur + DOF.
+compositor at all: EEVEE + AgX + motion blur + DOF.
 
 ```python
 from eidoblend.look.post import chain
@@ -94,6 +94,12 @@ chain.save_frames_passes(scene, '//raw', ('Depth', 'Normal'), name='frame')    #
 chain.use_saved_frames(scene, '//raw/frame_0001_combined.exr',
                        passes={'Depth': '//raw/frame_0001_depth.exr', 'Normal': '//raw/frame_0001_normal.exr'})
 ```
+
+The overlay layer itself goes in with `eidoblend.media.overlay.chain_overlay(ov, scene)`:
+the overlay scene's Render Layers (or its PNGs), laid over the film in display
+space and brought back through the inverse of the view transform, so HUD ink,
+glows and fades land as drawn
+([motion-graphics.md](motion-graphics.md#the-signal-route-the-overlay-inside-the-post-chain)).
 
 Bloom's threshold is scene-linear light before AgX, the same domain as three's.
 The Glare node's Clamp and Maximum keep a stray NaN/Inf or a firefly from
@@ -124,8 +130,9 @@ The registry keeps `custom_effects_deno.js`'s rules:
 - `effects` is a name, a comma string or a list. Every name must be
   registered: an unknown one raises a KeyError naming them all, before
   anything is built. Every one of WebGPU's 33 names is ported
-  (`nuclear_explosion` through the SDF volumes' module, which checks its own
-  options: `register(..., passthrough=True)` hands them on as given).
+  (`nuclear_explosion` through the SDF volumes' module,
+  [sdf-explosions.md](sdf-explosions.md), which checks its own options:
+  `register(..., passthrough=True)` hands them on as given).
 - Effects chain in the order given, each seeing its predecessor's output. The
   WebGPU registry needed `rtt()` render targets between stages; here every
   stage is a node in one compositor graph, so any number chain.
@@ -209,7 +216,7 @@ Native first: what EEVEE does in the render is done there, not faked in post.
 | `sepia` | `amount`, `opacity` | three's sepia matrix (glfx.js) | rendered |
 | `old_bw_film` | `opacity`; `width`, `height` warned | the silent-film pass: 12 fps cadence, gate weave, dust in drifting regions on the frames whose seed falls in a band, exposure flicker, vignette, jump cut at 7.7–8.2 s of a 24 s loop, BT.601 luma, in WebGPU's uv (y down). The dust is the shader's simplex noise (`screen_effects._simplex_fn`): its skewed lattice (cells tilted 30°, so the thresholded specks have no axis-aligned grid, the reason the shader chose it), the (0.5 − d²)⁴ corner kernels, ×70/2 + ½; each corner's gradient comes from Blender's White Noise of the integer lattice point where WebGPU hashed it in u32 arithmetic, so the specks fall elsewhere with the same statistics | rendered over 48 frames, the dust frames looked at full size; the noise field's statistics held to the shader's (numpy) |
 | `neon_edges` | `glow_color`, `threshold`, `strength`, `opacity`; `width`, `height` warned | 4-tap Laplacian of BT.601 luma; core + half the halo in `glow_color` (hot pink by default), added over the frame (alpha 1, as `glitch_bars`) | rendered |
-| `nuclear_explosion` | the SDF volumes' module's (`origin` in three's axes, `scale`, `time_offset`, `loop_seconds`, `opacity`, `quality`, `bake`, `disable_for_perf_test`, ...), checked there | always under the overlay. WebGPU's screen raymarcher of the mushroom cloud, as Volume objects in the scene: [`eidoblend.sdf.nuclear_explosion`](sdf-volumes.md) (cap, stem, trail, base surge, its heat palette, keyed glow lamps), baked over the scene's frames from its camera; the registry passes the options through to it, and `remove` / `clear` take the volumes and lamps out | through the registry: built (unbaked) and removed |
+| `nuclear_explosion` | the SDF volumes' module's (`origin` in three's axes, `scale`, `time_offset`, `loop_seconds`, `opacity`, `quality`, `bake`, `disable_for_perf_test`, ...), checked there | always under the overlay. WebGPU's screen raymarcher of the mushroom cloud, as Volume objects in the scene: [`eidoblend.sdf.nuclear_explosion`](sdf-explosions.md) (cap, stem, trail, base surge, its heat palette, keyed glow lamps), baked over the scene's frames from its camera; the registry passes the options through to it, and `remove` / `clear` take the volumes and lamps out | through the registry: built (unbaked) and removed |
 | bloom (UnrealBloom) | `strength`, `radius` (= Glare Size), `threshold` | Glare 'Bloom' | rendered |
 | `lensflare` | `threshold`, `ghost_tint`, `ghost_spacing`, `ghost_attenuation`, `strength`, `opacity`; `ghost_samples` (built in) | three's `LensflareNode`, ported: `ghost_samples` copies of the highlights above `threshold`, mirrored through the centre `ghost_spacing` apart (wrapped at the edges), each faded by (1 − distance to centre)^`ghost_attenuation` and tinted; computed at the node's quarter resolution (its four quarter-size texel centres round each pixel, blended as its bilinear read-back); added × `strength` in the 'prebloom' slot | rendered, parity (1e-9) |
 | `anamorphic_flare` | `threshold`, `scale`, `strength`, `color` (blue by default), `opacity`; `samples` (built in) | three's `AnamorphicNode`, ported: a horizontal streak of `samples` taps `scale` px apart through every highlight, each the colour × its luminance's excess over `threshold` × a linear falloff, tinted `color`; added × `strength` in the 'prebloom' slot. Its luminance is three's `luminance()` of the RGBA sample, which TSL computes as dot(rgba, (0.2126, 0.7152, 0.0722, **1**)): Y + alpha. So on an opaque frame the default threshold 3 streaks everything above Y = 2, and a threshold of 1 streaks the whole frame; on a transparent film the sky (alpha 0) streaks from Y > 3. At the defaults the streak reaches 24 px each way: a short smear, not a frame-wide line; a highlight smaller than `scale` streaks dotted, as the taps fall | rendered, parity on an opaque and a transparent film |

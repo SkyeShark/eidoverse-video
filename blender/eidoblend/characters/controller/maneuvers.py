@@ -39,7 +39,11 @@ VAULT_CLEAR = 0.06          # the vault's tucked feet clear the cover's top by t
 VAULT_SETTLE = 0.12         # the vault's crouch at the take-off is eased in over this (s)
 RUNG_RADIUS = 0.028         # terrain_base's rungs (and the course package's)
 GRIP_EASE = 0.08            # a ladder limb's grip eases in and out over this (s)
+PALM_THICK = 0.014          # a hand's palm, from the middle knuckle's joint line to the skin a bar rests on (m)
+HAND_CLEAR = 0.012          # a reaching hand keeps this off the wall behind a ladder and off its rungs (m)
 SOLID_PASSES = 3            # the feet-out-of-solids solve's rounds
+SOLID_REACH = 0.24          # the farthest the feet-out-of-solids search looks for a clear place for a foot (m)
+SOLID_GRID = 0.01           # its step (m)
 
 
 def _rm(c, slot):
@@ -145,6 +149,47 @@ def limb_grips(c, cl):
         out[lb] = ~reach
     cl._limb_grips = out
     return out
+
+
+LADDER_LEAN_KEEP = 3.0      # the torso's lean toward a vertical ladder that the clip keeps (deg): the shoulders some
+#                             25 cm off the rungs, the face 12-15 cm (8 deg hung the face 5-10 cm from them)
+
+
+def clip_lean(c, cl):
+    """a climbing clip's torso lean on this body: the mean over its cycle of the hips -> shoulders' angle from vertical
+    toward the climb (deg; + leans in), cached on the clip. (climbLadder leans 25 deg on Aletheia, 34 on my robot body:
+    it climbs a ladder leaning away from the climber)"""
+    v = getattr(cl, '_lean_deg', None)
+    if v is not None:
+        return v
+    from .pose import Pose
+    out = []
+    for k in range(24):
+        N, _h = cl.sample(k / 24 * cl.duration, loop=True)
+        full = {nm: N.get(nm, Quaternion()) for nm in c.h.humanoid}
+        p = Pose(c.body, Matrix.Identity(4), full, Vector())
+        if 'leftUpperArm' not in c.h.humanoid or 'rightUpperArm' not in c.h.humanoid:
+            return 0.0
+        d = 0.5 * (p.world_pos('leftUpperArm') + p.world_pos('rightUpperArm')) - p.world_pos('hips')
+        out.append(math.degrees(math.atan2(-d.y, d.z)))          # the armature's forward is -Y
+    cl._lean_deg = float(np.mean(out))
+    return cl._lean_deg
+
+
+def _stand_upright(c, m, g, u):
+    """a vertical ladder's climb stands the torso up: the spine turned back about the body's width by the clip's mean
+    lean less LADDER_LEAN_KEEP (its own sway kept), eased in over the approach and out over the climb's last 8 %, into
+    the mantle. (With the clip's lean the shoulders hung 13 cm from the rungs, every grip within reach of the arm solve's
+    18 cm guard; a climber on a vertical ladder keeps the torso parallel to it, the shoulders some 30 cm off the rungs)"""
+    corr = g.get('upright', 0.0)
+    if corr <= 0.0 or 'spine' not in c.h.humanoid:
+        return
+    u1 = max(1e-3, g.get('u_climb', 0.1))
+    k = _smoothstep(u / u1) * (1.0 - _smoothstep((u - 0.92) / 0.08))
+    if k <= 1e-4:
+        return
+    left = Vector((-g['fy'], g['fx'], 0.0))
+    c.pose.apply_world_delta('spine', Quaternion(left, -corr * k))
 
 
 def _grip_at(grips, lb, cl, t):
@@ -393,11 +438,13 @@ def ladder_standoff(c):
     return min(0.42, max(0.24, 0.33 * c.body.H['hips'].z))
 
 
-def climb_ladder(c, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0, standoff=None):
+def climb_ladder(c, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, time_scale=1.0, standoff=None,
+                 rung_radius=None):
     """climbLadder: the climbLadder clip looped at its own pace while the root rises at `rate` until the chest reaches
     the lip, then chained into the mount's mantle; hands and feet grip the rungs (first_rung up, every rung_spacing,
     their line 0.09 m out from the face) through their holds. standoff: the hips behind the rungs' line (m; default
-    ladder_standoff)"""
+    ladder_standoff); rung_radius: the rungs' (m; default terrain_base's RUNG_RADIUS): the palms close over them and the
+    balls of the feet stand on them"""
     if c._maneuver:
         return False
     fx, fy = _dir(c)
@@ -429,7 +476,11 @@ def climb_ladder(c, height=None, rate=0.55, first_rung=0.25, rung_spacing=0.28, 
             'x': cur.x + fx * (face_start - 0.09), 'y': cur.y + fy * (face_start - 0.09),
             'base_rung': feet + first_rung, 'rung_spacing': rung_spacing,
             'max_rung': int(math.floor((height - 0.05 - first_rung) / rung_spacing - 1e-9)),
-            'face_x': cur.x + fx * face_start, 'face_y': cur.y + fy * face_start}
+            'face_x': cur.x + fx * face_start, 'face_y': cur.y + fy * face_start,
+            'rung_radius': RUNG_RADIUS if rung_radius is None else rung_radius, 'u_climb': u1}
+    cl = _clip_of(c, 'climbLadder')
+    if cl is not None:
+        grab['upright'] = math.radians(max(0.0, clip_lean(c, cl) - LADDER_LEAN_KEEP))
 
     def chain():
         f_now = _feet(c)
@@ -471,7 +522,15 @@ def apply_hand_ik(c, m, u):
     def bone(name):
         return p.world_pos(name).copy() if name in H else None
     w0, w1 = g['window']
+    if g['type'] == 'ladder':
+        _stand_upright(c, m, g, u)
     if u < w0 or u > w1:
+        if g['type'] == 'ladder':
+            # before the grips (the approach) and after them: the clip's reaching hands kept off the wall and the rungs
+            f3 = Vector((g['fx'], g['fy'], 0.0))
+            for side in SIDES:
+                if side + 'Hand' in H:
+                    _hand_off_ladder(c, m, g, side, f3, g.get('rung_radius', RUNG_RADIUS), g.get('rung_spacing'), 1.0)
         return
 
     def ramp(a, b, max_w):
@@ -589,6 +648,7 @@ def apply_hand_ik(c, m, u):
         step = m.get('_dt', 1.0 / 30.0) / GRIP_EASE
         gws = m.setdefault('_gw', {})
         f3 = Vector((fx, fy, 0.0))
+        rr = g.get('rung_radius', RUNG_RADIUS)
         for lb in LIMBS:
             if lb not in H:
                 continue
@@ -600,16 +660,22 @@ def apply_hand_ik(c, m, u):
             gws[lb] = gw
             key = lb + 'Hold'
             hold = m.get(key)
+            if hand and gw * w_gate < 0.99:
+                # its reach (and the ease into and out of a hold, the grips' gate at the climb's start): what the
+                # hold does not place is kept off the wall and the rungs (the clip's hands reach into the wall)
+                _hand_off_ladder(c, m, g, side, f3, rr, spacing, 1.0 - gw * w_gate)
             if gripping and (hold is None or not hold.get('on')):
                 lat = lat_of(pt, g['x'], g['y'], 0.24 if hand else 0.15)
                 if hand:
-                    z_ref = pt.z + 0.05
+                    z_ref = _grip_point(c, side, rr).z if spacing else pt.z + 0.05
                 else:
                     P = _foot_world(c, side, c.body.feet)
                     z_ref = float(P[:, 2].min())
                 if spacing:
                     k = int(round((z_ref - g['base_rung']) / spacing))
                     k = max(1, min(max_r, k)) if hand else max(0, min(max_r - 3, k))
+                    if hand:
+                        k = _hand_rung(c, m, g, side, grips[lb], cl, t_clip, k, max_r)
                     hz = g['base_rung'] + k * spacing
                 else:
                     k, hz = None, (pt.z + 0.02 if hand else z_ref)
@@ -621,9 +687,24 @@ def apply_hand_ik(c, m, u):
                 continue
             base = Vector((g['x'] + px * hold['lat'], g['y'] + py * hold['lat'], 0.0))
             if hand:
-                tgt = base - f3 * 0.02
-                tgt.z = hold['z']
-                c._solve_arm_ik(side, c._smooth_limb_target(m, key, tgt, 0.6), gw * w_gate)
+                w = gw * w_gate
+                if spacing:
+                    # a rung: the hand closes over it as the clip's holds do (palm down on the bar, the fingers curled
+                    # over its far side): the bar's axis under the palm (_grip_point), not the wrist on the axis (the
+                    # original's contact point ran the rung through the palm)
+                    axis = base.copy()
+                    axis.z = hold['z']
+                    wr = c.pose.world_pos(side + 'Hand').copy()
+                    tgt = wr + (axis - _grip_point(c, side, rr))
+                    c._solve_arm_ik(side, _off_guard(c, side, c._smooth_limb_target(m, key, tgt, 0.6)), w)
+                    if w > 0.95:                     # the forearm turned the hand: once more, the rest of the way
+                        miss = axis - _grip_point(c, side, rr)
+                        if miss.length > 0.004:
+                            c._solve_arm_ik(side, _off_guard(c, side, c.pose.world_pos(side + 'Hand') + miss), 1.0)
+                else:
+                    tgt = base - f3 * 0.02           # a flat face (the scramble): the palm against it
+                    tgt.z = hold['z']
+                    c._solve_arm_ik(side, c._smooth_limb_target(m, key, tgt, 0.6), w)
                 continue
             # a foot: where its ankle goes for the ball (a rung) or the toe (a face) to touch the hold
             for _it in range(2):
@@ -636,7 +717,7 @@ def apply_hand_ik(c, m, u):
                     q = P[front]
                     ball = q[q[:, 2] <= q[:, 2].min() + 0.01].mean(axis=0)
                     want = base + f3 * 0.01
-                    want.z = hold['z'] + RUNG_RADIUS + 0.004
+                    want.z = hold['z'] + rr + 0.004
                     tgt = an + (want - Vector(ball))
                 else:
                     toe = P[int(np.argmax(along_f))]
@@ -645,6 +726,140 @@ def apply_hand_ik(c, m, u):
                     tgt = an + f3 * d_face
                     tgt.z = hold['z'] + (an.z - float(P[:, 2].min()))
                 c._solve_leg_ik(side, c._smooth_limb_target(m, key, tgt, 0.6) if _it == 0 else tgt, gw * w_gate)
+
+
+HAND_OVER_SHOULDER = 0.10  # a ladder hold's rung stays at least this far over the shoulder to the hold's end (m)
+HAND_FROM_SHOULDER = 0.21  # ... and at least this far from it (the arm solve leaves a target within 18 cm alone)
+
+
+def _hand_rung(c, m, g, side, grip, cl, t_clip, k_clip, max_r):
+    """the rung a hand takes hold of on a vertical ladder: within the arm's reach of the shoulder now, and still
+    HAND_OVER_SHOULDER over it and HAND_FROM_SHOULDER from it when the hold ends (the body climbs on through the hold);
+    of those the nearest to the clip's own (k_clip). (The library clip holds a leaning ladder's rungs at shoulder
+    height: on a vertical one its shoulder came within 13 cm of the rung, an arm folded shut, and the solve gave up and
+    left the hand in the wall.) None fits: the nearest to the hold's end height that the arm reaches"""
+    sp, base = g['rung_spacing'], g['base_rung']
+    sh = c.pose.world_pos(side + 'UpperArm')
+    reach = 0.94 * ((sh - c.pose.world_pos(side + 'LowerArm')).length +
+                    (c.pose.world_pos(side + 'LowerArm') - c.pose.world_pos(side + 'Hand')).length)
+    f3 = Vector((g['fx'], g['fy'], 0.0))
+    hd = abs((sh - Vector((g['x'], g['y'], 0.0))).dot(f3))       # the shoulder's distance from the rungs' line
+    n = len(grip)
+    j0 = int((t_clip % cl.duration) / cl.duration * n)
+    left = 0
+    while left < n and grip[(j0 + left) % n]:
+        left += 1
+    hold_s = left / n * cl.duration / max(1e-6, m.get('time_scale', 1.0))
+    u_now = min(1.0, m['t'] / m['duration'])
+    u_end = min(1.0, (m['t'] + hold_s) / m['duration'])
+    a, b = c._sample_maneuver_path(m['path'], u_now), c._sample_maneuver_path(m['path'], u_end)
+    rise = b['z'] - a['z']
+    hd_end = max(0.0, hd - ((b['x'] - a['x']) * f3.x + (b['y'] - a['y']) * f3.y))   # it may still approach the rungs
+    low = sh.z + rise + math.sqrt(max(HAND_OVER_SHOULDER ** 2, HAND_FROM_SHOULDER ** 2 - hd_end * hd_end))
+    ok = [k for k in range(1, max_r + 1)
+          if base + k * sp >= low and math.hypot(hd, base + k * sp - sh.z) <= reach]
+    if ok:
+        return min(ok, key=lambda k: abs(k - k_clip))
+    within = [k for k in range(1, max_r + 1) if math.hypot(hd, base + k * sp - sh.z) <= reach] or [k_clip]
+    return min(within, key=lambda k: abs(base + k * sp - low))
+
+
+def _hand_points(c, side):
+    """a hand's wrist, middle knuckle and middle fingertip where the controller's pose puts them (the wrist alone on a
+    VRM without finger bones)"""
+    p = c.pose
+    H = c.h.humanoid
+    out = [p.world_pos(side + 'Hand').copy()]
+    kn, mid, tip = side + 'MiddleProximal', side + 'MiddleIntermediate', side + 'MiddleDistal'
+    if kn in H:
+        out.append(p.world_pos(kn).copy())
+    if tip in H and mid in H:
+        a, b = p.world_pos(mid), p.world_pos(tip)
+        d = b - a
+        out.append(b + (d.normalized() * 0.8 * d.length if d.length > 1e-6 else Vector()))
+    return out
+
+
+def _grip_point(c, side, rr):
+    """where a bar of radius rr lies in a hand closed over it from above, as the ladder clip's holds close it (palm down
+    on the bar, the fingers curled over its far side): under the palm, a quarter of the way from the middle knuckle to
+    the wrist, the bar's radius and the palm's thickness below the joint line. Without finger bones: the wrist"""
+    p = c.pose
+    kn = side + 'MiddleProximal'
+    wr = p.world_pos(side + 'Hand').copy()
+    if kn not in c.h.humanoid:
+        return wr
+    palm = p.world_quat(side + 'Hand') @ Vector((0.0, 0.0, -1.0))     # the rest pose's palms face down (-Z)
+    return wr * 0.25 + p.world_pos(kn) * 0.75 + palm * (rr + PALM_THICK)
+
+
+def _hand_off_ladder(c, m, g, side, f3, rr, spacing, w):
+    """a hand between its holds (the clip owns its reach) kept off what it climbs: on a ladder none of its points (the
+    wrist, the middle knuckle, the fingertip) past the front of the rungs less HAND_CLEAR (a climber's hand comes back
+    off a rung and goes up in front of the rungs to the next; the 6 cm behind them is no room for a hand), on a flat
+    face none nearer it than HAND_CLEAR. (The library clip reaches for a leaning ladder's next rung half a metre ahead:
+    on a vertical ladder its hand went 15-33 cm into the wall.) The arm moves straight back as far as the deepest point
+    needs, at weight w, the push let go over a few frames once clear (no pop)"""
+    if spacing:
+        face = Vector((g['x'], g['y'], 0.0)) - f3 * rr                # the rungs' front
+    else:
+        face = Vector((g['face_x'], g['face_y'], 0.0)) if 'face_x' in g else Vector((g['x'], g['y'], 0.0))
+
+    def need_now():
+        return max(0.0, max((q - face).dot(f3) + HAND_CLEAR for q in _hand_points(c, side)))
+    if w > 0.01:
+        _pitch_hand_up(c, m, side, f3, need_now, w)
+    need = need_now()
+    pushes = m.setdefault('_hand_push', {})
+    push = max(need, pushes.get(side, 0.0) * 0.55)
+    pushes[side] = push if push > 0.001 else 0.0
+    if pushes[side] <= 0.0 or w <= 0.01:
+        return
+    c._solve_arm_ik(side, _off_guard(c, side, c.pose.world_pos(side + 'Hand') - f3 * pushes[side]), min(1.0, w))
+
+
+ARM_GUARD = 0.19            # the arm solve leaves alone a target within 18 cm of the shoulder: kept this far out
+
+
+def _off_guard(c, side, tgt):
+    """a hand target moved out from the shoulder to ARM_GUARD where it lies nearer (the controller's arm solve skips a
+    target within 18 cm of the shoulder, leaving the clip's hand where it was: in a wall, on the ladder)"""
+    sh = c.pose.world_pos(side + 'UpperArm')
+    d = tgt - sh
+    if d.length >= ARM_GUARD:
+        return tgt
+    if d.length < 1e-6:
+        d = Vector((0.0, 0.0, 1.0))
+    return sh + d.normalized() * ARM_GUARD
+
+
+def _pitch_hand_up(c, m, side, f3, need_fn, w, max_deg=80):
+    """a reaching hand whose fingers point into the wall (the leaning ladder's clip reaches forward): turned at the
+    wrist about the body's width, fingers up, as little as clears them (5 deg steps to max_deg, the least need if none
+    does), times the weight w; the turn let go over a few frames (no snap): a climber's open hand goes up the ladder
+    fingers first"""
+    p = c.pose
+    nm = side + 'Hand'
+    axis = Vector((-f3.y, f3.x, 0.0))
+    q0 = p.N[nm].copy()
+    best = (need_fn(), 0.0)
+    if best[0] > 0.0:
+        for deg in range(5, max_deg + 1, 5):
+            p.N[nm] = q0.copy()
+            p.invalidate()
+            p.apply_world_delta(nm, Quaternion(axis, -math.radians(deg)))
+            n = need_fn()
+            if n < best[0] - 1e-4:
+                best = (n, math.radians(deg))
+            if n <= 0.0:
+                break
+        p.N[nm] = q0
+        p.invalidate()
+    pitches = m.setdefault('_hand_pitch', {})
+    ang = max(best[1], pitches.get(side, 0.0) * 0.6)
+    pitches[side] = ang if ang > math.radians(0.5) else 0.0
+    if pitches[side] > 0.0:
+        p.apply_world_delta(nm, Quaternion(axis, -pitches[side] * min(1.0, w)))
 
 
 def lean_to_reach(c, side, tgt, w, max_deg=28.0):
@@ -762,11 +977,13 @@ def _pitch_foot_out(c, side, pts, world, f3, max_deg=70):
     return best[1]
 
 
-def _leg_to(c, side, target):
+def _leg_to(c, side, target, keep_turn=False):
     """the two-bone leg solve (the controller's _solve_limb_ik at full weight) without its 18 cm guard: a foot folded
-    up against the hip must still come out of a face"""
+    up against the hip must still come out of a face. keep_turn: the foot keeps its world turn (the move is the boot's
+    own translation, as the solids search tested it)"""
     p = c.pose
     up, mid, end = side + 'UpperLeg', side + 'LowerLeg', side + 'Foot'
+    w_ft = p.world_quat(end).copy() if keep_turn else None
     a, b, e = p.world_pos(up).copy(), p.world_pos(mid).copy(), p.world_pos(end).copy()
     lu, ll = (a - b).length, (b - e).length
     dist = min(max((a - target).length, abs(lu - ll) + 0.02), lu + ll - 0.005)
@@ -778,7 +995,74 @@ def _leg_to(c, side, target):
     e2 = p.world_pos(end).copy()
     if (e2 - a).length > 1e-6 and (target - a).length > 1e-6:
         p.apply_world_delta(up, (e2 - a).normalized().rotation_difference((target - a).normalized()))
+    if w_ft is not None:
+        p.set_world_quat(end, w_ft)
     p.invalidate()
+
+
+def _inside_mask(world, P, idx, top):
+    """which of the points P[idx] lie inside a closed solid of the world: under a surface (a ray down from over it all)
+    and inside by the parity ray -> bool array over P"""
+    out = np.zeros(len(P), dtype=bool)
+    if not len(idx):
+        return out
+    G = world.h(P[idx, 0], P[idx, 1], z_from=top)
+    for k in np.flatnonzero((G > -1e8) & (G - P[idx, 2] > 0.002)):
+        out[idx[k]] = _inside(world, P[idx[k]])
+    return out
+
+
+def _clear_move(world, P, ins, f3, first=(), prefer=None):
+    """the least move of a whole foot in the travel's plane (back off the face or toward it, up or down, out to
+    SOLID_REACH) that leaves every one of its points outside the solids, those the move would carry into one included.
+    A boot wedged between a ladder's rung and the wall behind it comes out of neither by a move straight back or straight
+    up (back takes it out of the wall into the rung, up out of the rung into the wall): the search finds the rung's top
+    or the space before it. `first`: moves tried before the search (taken if clear); the search runs on a 3 cm grid
+    over the foot's points thinned to 2 cm (each inside point kept), then 1 cm round the best, each candidate checked on
+    every point. prefer: the move chosen on the last frame, kept unless another is clearly shorter (a foot set on a rung
+    one frame and before it the next shakes) -> Vector or None"""
+    top = (world.top + 1.0) if getattr(world, 'top', None) is not None else float(P[:, 2].max()) + 50.0
+    near = np.empty(len(P))
+    for i, p in enumerate(P):
+        hit = world.tree.find_nearest(Vector(p), SOLID_REACH + 0.05)
+        near[i] = hit[3] if hit[0] is not None else 9.0
+    near[ins] = 0.0
+
+    def clear(v, idx_all):
+        idx = idx_all[near[idx_all] <= v.length + 0.004]
+        return not _inside_mask(world, P + np.array(v), idx, top).any()
+    every = np.arange(len(P))
+    for v in first:
+        if clear(v, every):
+            return v
+    _u, keep = np.unique(np.floor(P / 0.02).astype(np.int64), axis=0, return_index=True)
+    thin = np.union1d(keep, np.asarray(ins, dtype=np.int64))
+
+    def cost(v):
+        L = v.length
+        if prefer is None or prefer.length < 1e-6 or L < 1e-9:
+            return L
+        return L * (1.0 + 0.6 * (1.0 - v.normalized().dot(prefer.normalized())))
+
+    def grid(step, lo, hi, c0=Vector()):
+        out = []
+        for i in range(lo, hi + 1):            # i > 0: back off the face (-f3); i < 0: toward it
+            for j in range(lo, hi + 1):        # j > 0: up; j < 0: down
+                v = c0 + Vector((-f3.x * i * step, -f3.y * i * step, j * step))
+                if v.length > 1e-9 and v.length <= SOLID_REACH + 1e-9:
+                    out.append(v)
+        return sorted(out, key=cost)
+    best = None
+    for v in grid(0.03, -2, int(round(SOLID_REACH / 0.03))):
+        if clear(v, thin) and clear(v, every):
+            best = v
+            break
+    if best is None:
+        return None
+    for v in grid(SOLID_GRID, -2, 2, best):
+        if cost(v) < cost(best) - 1e-9 and clear(v, every):
+            return v
+    return best
 
 
 def _contact_feet(c):
@@ -801,12 +1085,14 @@ def feet_out_of_solids(c, m):
     """this edition's last word on a maneuver frame's feet: no part of a foot inside a solid. The clip owns the legs and
     the contact IK pulls them at partial weight, so a kick into a wall face, a toe into the cover a vault crosses, a
     crouch sunk into the top a mount ends on, a boot through a rung all happen; here each foot with points inside a
-    solid (the whole foot every 12 mm and its sole; under a surface, confirmed by a parity ray) moves out the shorter
-    way, up out of the solid or back out of the face the travel meets. Into a face, the foot first turns its sole
-    against it at the ankle (a mantle's high step points its toes into the wall); then a full-weight two-bone solve
-    folds or moves the leg (_leg_to: no 18 cm guard, a foot folded to the hip still comes out). SOLID_PASSES rounds
-    (the foot turns with the shin). The solids are c.contact_world's (default the walking world: pass one with the
-    ladder's rungs in it)"""
+    solid (the whole foot every 12 mm and its sole; under a surface, confirmed by a parity ray) moves out. Into a face,
+    the foot first turns its sole against it at the ankle (a mantle's high step points its toes into the wall); then
+    the whole boot takes the least move in the travel's plane that leaves it clear (_clear_move: back off the face or
+    up out of the solid, or both, as a boot wedged between a ladder's rung and the wall needs), the same way as on the
+    last frame unless another is clearly shorter, and a full-weight two-bone solve moves the leg there with the foot's
+    world turn kept (_leg_to: no 18 cm guard, a foot folded to the hip still comes out). Where nothing within
+    SOLID_REACH is clear, the shorter of straight up and straight back. SOLID_PASSES rounds. The solids are
+    c.contact_world's (default the walking world: pass one with the ladder's rungs in it)"""
     pts = _contact_feet(c)
     world = getattr(c, 'contact_world', None) or c.world
     g = m.get('grab') or {}
@@ -816,15 +1102,16 @@ def feet_out_of_solids(c, m):
         f3 = Vector((math.sin(c._heading), -math.cos(c._heading), 0.0))
     moved = 0.0
     left = {}
+    prev = m.setdefault('_solid_move', {})
     for side in SIDES:
         if pts.get(side) is None:
             continue
+        took = None
         for rnd in range(SOLID_PASSES + 1):
             P = _foot_world(c, side, pts)
-            G = world.h(P[:, 0], P[:, 1], z_from=_over(world, P))
-            cand = np.flatnonzero((G > -1e8) & (G - P[:, 2] > 0.002))
-            ins = [i for i in cand if _inside(world, P[i])]
-            if not ins:
+            top = _over(world, P)
+            ins = np.flatnonzero(_inside_mask(world, P, np.arange(len(P)), top))
+            if not len(ins):
                 left.pop(side, None)
                 break
             up_need = back_need = 0.0
@@ -834,9 +1121,6 @@ def feet_out_of_solids(c, m):
                 hb = world.ray_cast(p, -f3, 1.0)
                 up_need = max(up_need, hu.distance if hu.hit else math.inf)
                 back_need = max(back_need, hb.distance if hb.hit else math.inf)
-            if not math.isfinite(min(up_need, back_need)):
-                break
-            v = Vector((0.0, 0.0, up_need + 0.004)) if up_need <= back_need else -f3 * (back_need + 0.004)
             left[side] = round(1000 * min(up_need, back_need), 1)
             if rnd == SOLID_PASSES:
                 break
@@ -845,9 +1129,20 @@ def feet_out_of_solids(c, m):
                 if _pitch_foot_out(c, side, pts, world, f3):
                     moved = max(moved, 0.001)
                     continue
+            axis = None
+            if math.isfinite(min(up_need, back_need)):
+                axis = Vector((0.0, 0.0, up_need + 0.004)) if up_need <= back_need else -f3 * (back_need + 0.004)
+            v = _clear_move(world, P, ins, f3, first=[axis] if axis is not None else [], prefer=prev.get(side))
+            if v is None:
+                if axis is None:
+                    break
+                v = axis
             an = c.pose.world_pos(side + 'Foot').copy()
-            _leg_to(c, side, an + v)
+            _leg_to(c, side, an + v, keep_turn=True)
+            took = v if took is None else took + v
             moved = max(moved, v.length)
+        if took is not None:
+            prev[side] = took
     m['_solids_moved'] = moved
     if left:
         m.setdefault('_solids_left', []).append((round(m.get('t', 0.0), 3), dict(left)))
