@@ -1,5 +1,6 @@
-"""The gold corridor in Blender: build it, check the parts and the keyed update numerically, and (--render) render the
-set's five cameras plus the states (doors open, the post typing, the cap on a head, a recount).
+"""The gold corridor in Blender: build it, check the parts (the volume probe, the floor's planar probe and a floor that
+paints no reflection of its own) and the keyed update numerically, dispose it and build it without its mirror, and
+(--render) render the set's five cameras plus the states (doors open, the post typing, the cap on a head, a recount).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_corridor.py
     cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
@@ -59,9 +60,37 @@ F.check('key light: 300 cd -> 300 x 4 pi W', abs(lit['key'].data.energy - 300 * 
 F.check('apply_look: AgX at 0 stops (three exposure 1, the lamps W = 4 pi cd)', sc.view_settings.view_transform == 'AgX'
         and abs(sc.view_settings.exposure) < 1e-9, f'{sc.view_settings.exposure:.3f}')
 ee = sc.eevee
-F.check('apply_look: global illumination on (fast GI inside the ray tracing), reflections from the probes',
-        ee.use_fast_gi and ee.use_raytracing and ee.ray_tracing_method == 'PROBE',
+F.check("apply_look: global illumination on (fast GI inside the ray tracing), reflections screen-traced (EEVEE "
+        "traces the floor's planar probe only then)",
+        ee.use_fast_gi and ee.use_raytracing and ee.ray_tracing_method == 'SCREEN',
         f'fast GI {ee.use_fast_gi}, ray tracing {ee.use_raytracing} ({ee.ray_tracing_method})')
+# the mirror floor: a planar light probe over the whole floor, the floor itself out of its capture, and no painted
+# reflection left in the floor's material (no camera-space ray, no blurred copies of the LED wall's post)
+mir = C.parts.get('mirror')
+bpy.context.view_layer.update()
+if mir is not None:
+    lo = mir.matrix_world @ Vector((-1.0, -1.0, 0.0))
+    hi = mir.matrix_world @ Vector((1.0, 1.0, 0.0))
+    F.check("the floor's mirror: a planar light probe on the floor (z = 0) covering it wall to wall and end to end",
+            mir.type == 'LIGHT_PROBE' and mir.data.type == 'PLANE' and mir.parent == C.group
+            and abs(lo.z) < 1e-6 and abs(hi.z) < 1e-6 and abs(lo.x + COR.HW) < 1e-6 and abs(hi.x - COR.HW) < 1e-6
+            and abs(lo.y + COR.ZN) < 1e-6 and abs(hi.y + COR.ZD) < 1e-6,
+            f'x {lo.x:.2f}..{hi.x:.2f}, y {lo.y:.2f}..{hi.y:.2f}, z {lo.z:.3f}')
+else:
+    F.check("the floor's mirror: a planar light probe", False, 'parts.mirror missing')
+hidden = sorted(o.name for o in C.collection.all_objects if getattr(o, 'hide_probe_plane', False))
+F.check("only the floor stays out of its own mirror (it lies on the probe's plane)", hidden == ['corridor_floor'],
+        str(hidden))
+fl = C.materials['floor'].node_tree
+F.check("the floor's material paints no reflection: no camera-space ray, no image of the LED wall",
+        not any(n.bl_idname in ('ShaderNodeVectorTransform', 'ShaderNodeCameraData') for n in fl.nodes)
+        and not any('post' in (getattr(getattr(n, 'image', None), 'name', '') or '')
+                    or 'post' in (getattr(getattr(n, 'node_tree', None), 'name', '') or '') for n in fl.nodes),
+        f'{len(fl.nodes)} nodes')
+post_keys = {k for k in C.parts['postWall']['variants'].items[0] if not k.startswith('_')}
+F.check("the LED wall's post: colour, typing order and cursor (no blurred copies for a painted mirror)",
+        post_keys == {'color', 'order', 'cursor'} and not any(i.name.startswith('corridor_post_blur')
+                                                               for i in bpy.data.images), str(sorted(post_keys)))
 pr = C.parts.get('probe')
 if pr is not None:
     bpy.context.view_layer.update()
@@ -214,4 +243,15 @@ if RENDER:
         sc.frame_set(96)
         C.camera('poll', sc)
         F.render_still(OUT / 'corridor_poll_recount_f96.png', sc)
+
+# ------------------------------------------------------------------ dispose takes the mirror; opts mirror=False
+probe_data = [mir.data.name] if mir is not None else []
+C.dispose()
+F.check("dispose(): the floor's planar probe and its data go with the set",
+        'set:corridor:floor_mirror' not in bpy.data.objects and not any(n in bpy.data.lightprobes for n in probe_data))
+C2 = COR.build(sc, {'mirror': False, 'probe': False}, name='set:corridor_plain')
+F.check("opts mirror=False: no planar probe (the floor reflects through screen tracing and the World alone)",
+        C2.parts.get('mirror') is None and not any(o.type == 'LIGHT_PROBE' for o in C2.collection.all_objects)
+        and not any(getattr(o, 'hide_probe_plane', False) for o in C2.collection.all_objects))
+C2.dispose()
 F.summary()

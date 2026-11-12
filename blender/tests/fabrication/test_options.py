@@ -178,6 +178,35 @@ g_plain = worst_gouge(fab.relief_program(bracket), gx, gy)
 g_lift = worst_gouge(fab.relief_program(bracket, lift_over_steps=True), gx, gy)
 check('lift_over_steps keeps the cutter out of a walled mesh (the plain planner cuts in, as the WebGPU one does)',
       g_plain > .003 and g_lift < .00025, f'worst gouge {g_plain * 1000:.2f} mm plain, {g_lift * 1000:.3f} mm lifted')
+
+
+def walled(x, y):
+    """a height function with walls of no width: a 16 mm block on a 6 mm land, and a 10 mm step across a diagonal"""
+    if abs(x) < .012 and abs(y) < .02:
+        return .016
+    return .010 if x + 0.6 * y > .02 else .006
+
+
+# measured off the walls' own lines (a grid point on a wall reads either side of the jump)
+fx, fy = np.linspace(-.03, .03, 241) + 1.37e-5, np.linspace(-.054, .054, 433) + 1.91e-5
+f_plain = worst_gouge(fab.relief_program(walled), fx, fy)
+f_lift = worst_gouge(fab.relief_program(walled, lift_over_steps=True), fx, fy)
+check('lift_over_steps keeps the cutter out of a height function\'s walls too: its rim read where this sample\'s or a '
+      'neighbouring sample\'s ball rides a wall, its moves checked every 0.1 mm',
+      f_plain > .005 and f_lift < .00025, f'worst gouge {f_plain * 1000:.2f} mm plain, {f_lift * 1000:.3f} mm lifted')
+
+# the slicer's union snaps near-equal coordinates as polygon-clipping's rounder does
+from eidoblend.fabrication.polygon_union import CoordRounder, union  # noqa: E402
+rd = CoordRounder()
+snapped = [rd.round(v) for v in (1.0, 1.0 + 2 ** -52, 2.0, 2.0 - 2 ** -52, 1e-17, -1e-17, 1.5)]
+check(f'CoordRounder: values an ulp from one seen before take it, values within EPSILON of zero are zero ({snapped})',
+      snapped == [1.0, 1.0, 2.0, 2.0, 0.0, 0.0, 1.5])
+x0, x1 = .1, float(np.nextafter(.1, 1.0))
+left = [[(0.0, 0.0), (x0, 0.0), (x0, .1), (0.0, .1), (0.0, 0.0)]]
+right = [[(x1, 0.0), (.2, 0.0), (.2, .1), (x1, .1), (x1, 0.0)]]
+u = union(left, right)
+check(f'two squares an ulp apart unite into one rectangle of four corners ({[len(r) - 1 for p in u for r in p]} corners)',
+      len(u) == 1 and len(u[0]) == 1 and len(u[0][0]) == 5)
 cols, rows = 129, 193
 sx, sy = np.meshgrid((np.arange(cols) / (cols - 1) - .5) * .078, (np.arange(rows) / (rows - 1) - .5) * .128)
 smooth = {'width': .078, 'depth': .128, 'columns': cols, 'rows': rows,

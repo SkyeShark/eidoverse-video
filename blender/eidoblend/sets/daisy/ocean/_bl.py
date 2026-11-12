@@ -1,5 +1,6 @@
 """ocean/_bl.py: Blender plumbing shared by the ocean modules: meshes from arrays, attributes, keys (one at a time
-or a whole F-curve at once), drivers that read a custom property, GLB import under one root."""
+or a whole F-curve at once), drivers that read a custom property or an object's world location, GLB import under one
+root."""
 
 from __future__ import annotations
 
@@ -63,6 +64,28 @@ def empty(name, parent=None, collection=None, display='PLAIN_AXES', size=1.0):
     if parent is not None:
         e.parent = parent
     return e
+
+
+def world_matrix(ob):
+    """An object's world matrix from its parent chain's own matrices (valid before the depsgraph has run)."""
+    from mathutils import Matrix
+    chain = []
+    while ob is not None:
+        chain.append(ob)
+        ob = ob.parent
+    M = Matrix.Identity(4)
+    for o in reversed(chain):
+        M = M @ (o.matrix_parent_inverse if o.parent is not None else Matrix.Identity(4)) @ o.matrix_basis
+    return M
+
+
+def parent_keep_world(ob, parent):
+    """Parent ob to parent where ob stands now: its world placement is kept through the parent inverse, and from
+    here on it follows the parent rigidly."""
+    W = world_matrix(ob)
+    ob.parent = parent
+    ob.matrix_parent_inverse = world_matrix(parent).inverted() @ W @ ob.matrix_basis.inverted()
+    return ob
 
 
 # ------------------------------------------------------------------------------------------------- keys
@@ -182,6 +205,28 @@ def drive(target, data_path, source, prop, expr='x', index=-1):
         idx = f'[{i}]' if len(fcs) > 1 else ''
         v.targets[0].data_path = f'["{prop}"]{idx}'
         d.expression = expr
+    return fcs
+
+
+def drive_world_location(target, prop, source):
+    """target["prop"], a 3-vector custom property, driven by source's world location component by component
+    (Transform Channel variables in world space, simple expressions): it follows the source wherever its parents
+    carry it, at every evaluation, with nothing to sync."""
+    fcs = []
+    for i, axis in enumerate('XYZ'):
+        fc = target.driver_add(f'["{prop}"]', i)
+        d = fc.driver
+        d.type = 'SCRIPTED'
+        for v in list(d.variables):
+            d.variables.remove(v)
+        v = d.variables.new()
+        v.name = 'x'
+        v.type = 'TRANSFORMS'
+        v.targets[0].id = source
+        v.targets[0].transform_type = f'LOC_{axis}'
+        v.targets[0].transform_space = 'WORLD_SPACE'
+        d.expression = 'x'
+        fcs.append(fc)
     return fcs
 
 

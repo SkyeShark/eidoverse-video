@@ -1,13 +1,19 @@
 """eidoblend.weather: the weather effects of eidoverse/weather_system.js and weather_audio.js in Blender 5.2 EEVEE.
 
+make_sky builds this weather itself as soon as its weather rains, strikes or wets (make_sky(weather_fx=...)), and its
+bake() bakes it. By hand, with the scene owning it:
+
     from eidoblend.sky import make_sky
     from eidoblend.weather import make_weather_system
-    sky = make_sky(scene, camera=cam, hours=17.0, weather='overcast', cache_dir='C:/films/street/sky_cache')
+    sky = make_sky(scene, camera=cam, hours=17.0, weather='overcast', cache_dir='C:/films/street/sky_cache',
+                   weather_fx=False)
     wx = make_weather_system(scene, sky, strike_targets=[street], occluders=street)
     wx.wrap_scene()
     wx.transition_to('darkstorm', 1.0, 12.0, at=3.0)
     wx.bake()
     wx.bake_audio('C:/films/street/wx.wav')
+
+make_weather_system(scene, None, cache_dir=...) rains over a scene that keeps its own world and lighting.
 
 The sky package (eidoblend.sky) runs the weather state machine and the sky side (cloud cover, greying, sun dim).
 This package ports the rest: rain streaks and splashes, wetness and puddles (the eido_wet group) with the 2D moisture

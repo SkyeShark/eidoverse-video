@@ -11,7 +11,9 @@ html,body{margin:0;height:100%;background:#05030b;overflow:hidden}
   "three": "/node_modules/three/build/three.webgpu.js",
   "three/webgpu": "/node_modules/three/build/three.webgpu.js",
   "three/tsl": "/node_modules/three/build/three.tsl.js",
-  "three/addons/": "/node_modules/three/examples/jsm/"
+  "three/addons/": "/node_modules/three/examples/jsm/",
+  "@pixiv/three-vrm": "/node_modules/@pixiv/three-vrm/lib/three-vrm.module.js",
+  "@pixiv/three-vrm-materials-mtoon/nodes": "/node_modules/@pixiv/three-vrm-materials-mtoon/lib/nodes/index.module.js"
 } }
 </script>
 </head><body><div id="s">loading…</div>
@@ -27,7 +29,7 @@ html,body{margin:0;height:100%;background:#05030b;overflow:hidden}
 //             the facing you stand with (the stage, its sky and its light turn with it).
 import * as THREE from 'three';
 import { float, vec2, mix, abs, fract, min, max, clamp, fwidth, smoothstep, color, positionLocal, texture,
-  equirectUV } from 'three/tsl';
+  equirectUV, uniform, pmremTexture } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -61,6 +63,44 @@ const PAGE_MATERIALS = {
   },
 };
 
+// ------------------------------------------------ KHR_animation_pointer: the film's animated material values, camera
+// lenses and light values (Blender's glTF exporter writes them as pointer channels; three's GLTFLoader reads only node
+// channels and skips these). Read here as tracks, sampled on the film's clock by applyPointers below.
+class AnimationPointerPlugin {
+  constructor(parser) { this.parser = parser; this.name = 'KHR_animation_pointer'; }
+  async afterRoot(result) {
+    const json = this.parser.json, tracks = [];
+    for (const anim of json.animations || []) for (const ch of anim.channels) {
+      const ext = ch.target.extensions && ch.target.extensions.KHR_animation_pointer;
+      if (ch.target.path !== 'pointer' || !ext) continue;
+      const s = anim.samplers[ch.sampler];
+      const [input, output] = await Promise.all([this.parser.getDependency('accessor', s.input),
+        this.parser.getDependency('accessor', s.output)]);
+      tracks.push({ pointer: ext.pointer, t: input.array, v: output.array, size: output.itemSize,
+        interp: s.interpolation || 'LINEAR' });
+    }
+    result.userData.pointerTracks = tracks;
+  }
+}
+const sampleTrack = (tr, t, out) => {                         // a glTF sampler at t (held at the ends)
+  const ts = tr.t, n = tr.size, cubic = tr.interp === 'CUBICSPLINE', stride = cubic ? 3 * n : n, k0 = cubic ? n : 0;
+  const last = ts.length - 1;
+  if (t <= ts[0] || last === 0) { for (let j = 0; j < n; j++) out[j] = tr.v[k0 + j]; return out; }
+  if (t >= ts[last]) { for (let j = 0; j < n; j++) out[j] = tr.v[last * stride + k0 + j]; return out; }
+  let lo = 0, hi = last;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (ts[mid] <= t) lo = mid; else hi = mid; }
+  const dt = ts[hi] - ts[lo], u = (t - ts[lo]) / dt;
+  for (let j = 0; j < n; j++) {
+    const a = tr.v[lo * stride + k0 + j], b = tr.v[hi * stride + k0 + j];
+    if (tr.interp === 'STEP') out[j] = a;
+    else if (cubic) {
+      const ma = tr.v[lo * stride + 2 * n + j] * dt, mb = tr.v[hi * stride + j] * dt, u2 = u * u, u3 = u2 * u;
+      out[j] = (2 * u3 - 3 * u2 + 1) * a + (u3 - 2 * u2 + u) * ma + (-2 * u3 + 3 * u2) * b + (u3 - u2) * mb;
+    } else out[j] = a + (b - a) * u;
+  }
+  return out;
+};
+
 try {
   const man = await (await fetch(MANIFEST)).json();
   const report = telemetry('xr_' + man.name);
@@ -82,8 +122,49 @@ try {
   const loader = new GLTFLoader();
   loader.setDRACOLoader(new DRACOLoader().setDecoderPath('/node_modules/three/examples/jsm/libs/draco/gltf/'));
   loader.setMeshoptDecoder(MeshoptDecoder);
+  let gltfParser = null;
+  loader.register((parser) => { gltfParser = parser; return new AnimationPointerPlugin(parser); });
   const gltf = await loader.loadAsync(man.glb);
   stage.add(gltf.scene);
+  // a VRM cast in MToon: the export wrote each character's .vrm beside the GLB (its MToon materials as the VRM add-on
+  // keeps them); the GLB carries the character's motion and stand-in materials that name the MToon material they
+  // stand for (userData.xr_mtoon_from). three-vrm's MToon (its node material, for this renderer) replaces each stand-in,
+  // with its outline where the MToon has one (the outline drawn as a second pass of the same geometry, as three-vrm
+  // draws it). Nothing else of the .vrm is used: the GLB's own joints play the film's motion, springs included
+  const mtoon = { materials: 0, outlines: 0, files: [] };
+  if (man.vrm && man.vrm.length) {
+    const { VRMLoaderPlugin, MToonMaterialLoaderPlugin } = await import('@pixiv/three-vrm');
+    const { MToonNodeMaterial } = await import('@pixiv/three-vrm-materials-mtoon/nodes');
+    const byName = {};
+    for (const v of man.vrm) {
+      const vl = new GLTFLoader();
+      vl.register((parser) => new VRMLoaderPlugin(parser, {
+        mtoonMaterialPlugin: new MToonMaterialLoaderPlugin(parser, { materialType: MToonNodeMaterial }) }));
+      const vg = await vl.loadAsync(v.file);
+      mtoon.files.push(v.file);
+      vg.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+          if (!m || !m.isMToonNodeMaterial) continue;
+          const name = m.isOutline ? m.name.replace(/ \(Outline\)$/, '') : m.name;
+          const e = byName[name] || (byName[name] = {});
+          if (m.isOutline) e.outline = m; else e.surface = m;
+        }
+      });
+    }
+    gltf.scene.traverse((o) => {
+      if (!o.isMesh || Array.isArray(o.material)) return;
+      const e = byName[o.material.userData && o.material.userData.xr_mtoon_from];
+      if (!e || !e.surface) return;
+      mtoon.materials++;
+      if (e.outline) {
+        const g = o.geometry, n = g.index ? g.index.count : g.attributes.position.count;
+        g.clearGroups(); g.addGroup(0, n, 0); g.addGroup(0, n, 1);
+        o.material = [e.surface, e.outline];
+        mtoon.outlines++;
+      } else o.material = e.surface;
+    });
+  }
   // the set's ground extent in stage units (as the example keeps its pointer inside its 55-unit square)
   const bounds = new THREE.Box3().setFromObject(gltf.scene);
   const onSet = (p) => p.x >= bounds.min.x && p.x <= bounds.max.x && p.z >= bounds.min.z && p.z <= bounds.max.z;
@@ -178,17 +259,36 @@ try {
     }
     return s;
   };
-  // the sky: the world's equirect on a dome round your head (in no stage, so it never scales; it turns with it)
-  let sky = null;
+  // the sky: the world's equirect on a dome round your head (in no stage, so it never scales; it turns with it). A
+  // world that changes over the film comes as a timed sequence (man.world.sequence: [{t, file}]): the dome cross-fades
+  // between the two images either side of the film's time, and the image-based light steps to the nearer one through
+  // one environment node whose image changes (each image's prefiltered environment is made once, at load, and no
+  // material is rebuilt when the light steps; scene.environment stays set, as three turns the light by
+  // scene.environmentRotation while it is)
+  let sky = null, skySeq = null;
   if (man.world && man.world.equirect) {
-    const env = await new HDRLoader().loadAsync(man.world.equirect);
-    env.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = env;
+    const load = async (f) => { const e = await new HDRLoader().loadAsync(f); e.mapping = THREE.EquirectangularReflectionMapping; return e; };
+    const seq = man.world.sequence && man.world.sequence.length > 1 ? man.world.sequence : null;
+    const maps = await Promise.all((seq || [{ file: man.world.equirect }]).map((s) => load(s.file)));
+    scene.environment = maps[0];
     const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
-    m.colorNode = texture(env, equirectUV(positionLocal.normalize()));
+    const dir = equirectUV(positionLocal.normalize());
+    if (seq) {
+      // the two texture nodes start on two different images: three gives texture nodes that hold the same image one
+      // uniform (its hash is the image's), so they stay two samplers whatever images they hold later
+      const texA = texture(maps[0], dir), texB = texture(maps[1], dir), skyMix = uniform(0);
+      m.colorNode = mix(texA, texB, skyMix);
+      const envLight = pmremTexture(maps[0]);
+      scene.environmentNode = envLight;
+      skySeq = { t: seq.map((s) => s.t), maps, texA, texB, skyMix, envLight, shown: -1, at: 0 };
+    } else m.colorNode = texture(maps[0], dir);
     sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 64, 32), m);
     sky.frustumCulled = false; sky.renderOrder = -1;
     scene.add(sky);
+    if (seq) {
+      for (const e of maps) { skySeq.envLight.value = e; renderer.render(scene, camera); }   // each image's light, once
+      skySeq.envLight.value = maps[0];
+    }
   } else {
     // no world.hdr (--no-world): the world's flat colour (its mean radiance) as a uniform environment, which lights the
     // set as a uniform world does in Blender: a diffuse surface gets the irradiance pi L (three's IBL irradiance is
@@ -239,7 +339,96 @@ try {
       o.visible = !!tr.v[i];
     }
   };
-  const setTime = (t) => { mixer.setTime(t); applyTracks(t); };
+  // the pointer tracks' targets: glTF materials (and the copies GLTFLoader makes of them), cameras and lights, by index
+  const assoc = (o) => gltfParser && gltfParser.associations.get(o);
+  const byIndex = { materials: {}, cameras: {}, lights: {} };
+  const put = (kind, i, x) => { (byIndex[kind][i] || (byIndex[kind][i] = [])).includes(x) || byIndex[kind][i].push(x); };
+  gltf.scene.traverse((o) => {
+    if (o.isMesh) for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+      const a = assoc(m); if (a && a.materials !== undefined) put('materials', a.materials, m);
+    }
+    const a = assoc(o), nd = a && a.nodes !== undefined ? gltfParser.json.nodes[a.nodes] : null;
+    if (!nd) return;
+    const find = (pred) => (pred(o) ? o : o.children.find(pred));
+    if (nd.camera !== undefined) { const c = find((x) => x.isCamera); if (c) put('cameras', nd.camera, c); }
+    const li = nd.extensions && nd.extensions.KHR_lights_punctual;
+    if (li) { const L = find((x) => x.isLight); if (L) put('lights', li.light, L); }
+  });
+  const MAPS = { 'pbrMetallicRoughness/baseColorTexture': ['map'], normalTexture: ['normalMap'], emissiveTexture: ['emissiveMap'],
+    occlusionTexture: ['aoMap'], 'pbrMetallicRoughness/metallicRoughnessTexture': ['roughnessMap', 'metalnessMap'] };
+  const EXT = { transmissionFactor: 'transmission', ior: 'ior', clearcoatFactor: 'clearcoat', clearcoatRoughnessFactor:
+    'clearcoatRoughness', sheenRoughnessFactor: 'sheenRoughness', specularFactor: 'specularIntensity', thicknessFactor:
+    'thickness', attenuationDistance: 'attenuationDistance', iridescenceFactor: 'iridescence', iridescenceIor: 'iridescenceIOR',
+    anisotropyStrength: 'anisotropy', anisotropyRotation: 'anisotropyRotation', dispersion: 'dispersion' };
+  const EXT_COLOR = { sheenColorFactor: 'sheenColor', specularColorFactor: 'specularColor', attenuationColor: 'attenuationColor' };
+  const LIN = THREE.LinearSRGBColorSpace;
+  // each track's setter: what the value does to its targets (null: a pointer the page does not know, reported)
+  const pointerSetter = (ptr) => {
+    const p = ptr.split('/').slice(1), kind = p[0], targets = (byIndex[kind] || {})[p[1]] || [], rest = p.slice(2).join('/');
+    const each = (f) => (v) => { for (const x of targets) f(x, v); };
+    if (kind === 'materials') {
+      const tt = rest.match(/^(.*)\/extensions\/KHR_texture_transform\/(offset|rotation|scale)$/);
+      if (tt) return each((m, v) => { for (const k of MAPS[tt[1]] || []) { const tex = m[k]; if (!tex) continue;
+        if (tt[2] === 'offset') tex.offset.set(v[0], v[1]); else if (tt[2] === 'rotation') tex.rotation = v[0]; else tex.repeat.set(v[0], v[1]); } });
+      if (rest === 'pbrMetallicRoughness/baseColorFactor') return each((m, v) => { m.color.setRGB(v[0], v[1], v[2], LIN); m.opacity = v[3]; });
+      if (rest === 'pbrMetallicRoughness/metallicFactor') return each((m, v) => { m.metalness = v[0]; });
+      if (rest === 'pbrMetallicRoughness/roughnessFactor') return each((m, v) => { m.roughness = v[0]; });
+      if (rest === 'emissiveFactor') return each((m, v) => { m.emissive.setRGB(v[0], v[1], v[2], LIN); });
+      if (rest === 'extensions/KHR_materials_emissive_strength/emissiveStrength') return each((m, v) => { m.emissiveIntensity = v[0]; });
+      if (rest === 'alphaCutoff') return each((m, v) => { m.alphaTest = v[0]; });
+      if (rest === 'occlusionTexture/strength') return each((m, v) => { m.aoMapIntensity = v[0]; });
+      if (rest === 'normalTexture/scale') return each((m, v) => { m.normalScale.set(v[0], Math.sign(m.normalScale.y || 1) * v[0]); });
+      const ex = rest.match(/^extensions\/KHR_materials_\w+\/(\w+)$/);
+      if (ex && EXT[ex[1]]) return each((m, v) => { m[EXT[ex[1]]] = v[0]; });
+      if (ex && EXT_COLOR[ex[1]]) return each((m, v) => { if (m[EXT_COLOR[ex[1]]]) m[EXT_COLOR[ex[1]]].setRGB(v[0], v[1], v[2], LIN); });
+    } else if (kind === 'cameras') {
+      const f = { 'perspective/yfov': (c, v) => { c.fov = THREE.MathUtils.radToDeg(v[0]); }, 'perspective/znear': (c, v) => { c.near = v[0]; },
+        'perspective/zfar': (c, v) => { c.far = v[0]; }, 'orthographic/xmag': (c, v) => { c.left = -v[0]; c.right = v[0]; },
+        'orthographic/ymag': (c, v) => { c.bottom = -v[0]; c.top = v[0]; }, 'orthographic/znear': (c, v) => { c.near = v[0]; },
+        'orthographic/zfar': (c, v) => { c.far = v[0]; } }[rest];
+      if (f) return each((c, v) => { f(c, v); c.updateProjectionMatrix(); });
+    } else if (p[0] === 'extensions' && p[1] === 'KHR_lights_punctual') {
+      const ls = byIndex.lights[p[3]] || [], sub = p.slice(4).join('/');
+      const eachL = (f) => (v) => { for (const L of ls) f(L, v); };
+      if (sub === 'color') return eachL((L, v) => L.color.setRGB(v[0], v[1], v[2], LIN));
+      if (sub === 'intensity') return eachL((L, v) => setIntensity(L, v[0]));
+      if (sub === 'range') return eachL((L, v) => { const fo = falloff.get(L); if (fo) fo.range = v[0]; else L.distance = v[0]; });
+      if (sub === 'spot/outerConeAngle') return eachL((L, v) => { L.userData.inner = L.userData.inner ?? L.angle * (1 - L.penumbra); L.angle = v[0]; L.penumbra = 1 - L.userData.inner / v[0]; });
+      if (sub === 'spot/innerConeAngle') return eachL((L, v) => { L.userData.inner = v[0]; L.penumbra = 1 - v[0] / L.angle; });
+    }
+    return null;
+  };
+  const pointers = (gltf.userData.pointerTracks || []).map((tr) => ({ ...tr, set: pointerSetter(tr.pointer), out: new Array(tr.size) }));
+  const unknownPointers = pointers.filter((p) => !p.set).map((p) => p.pointer);
+  if (unknownPointers.length) report({ phase: 'warn', what: 'animation pointers the page does not play', pointers: unknownPointers.slice(0, 20) });
+  const applyPointers = (t) => { for (const p of pointers) if (p.set) p.set(sampleTrack(p, t, p.out)); };
+  const applySky = (t) => {
+    if (!skySeq) return;
+    const ts = skySeq.t, last = ts.length - 1;
+    let i = 0; while (i < last - 1 && ts[i + 1] <= t) i++;
+    const k = Math.min(1, Math.max(0, (t - ts[i]) / (ts[i + 1] - ts[i])));
+    skySeq.texA.value = skySeq.maps[i]; skySeq.texB.value = skySeq.maps[i + 1]; skySeq.skyMix.value = k;
+    const near = k < 0.5 ? i : i + 1;
+    if (near !== skySeq.shown) { skySeq.envLight.value = skySeq.maps[near]; skySeq.shown = near; }
+    skySeq.at = i + k;
+  };
+  // the film's sound (man.audio: the scene's mixdown) on the film's clock: it starts with the first touch, click or key
+  // (or the headset session), as browsers only play sound after one, and is pulled back onto the clock whenever it
+  // drifts a tenth of a second, the loop included
+  const audio = man.audio && man.audio.file ? new Audio(man.audio.file) : null;
+  if (audio) {
+    audio.preload = 'auto';
+    if (STILL) await new Promise((r) => { audio.addEventListener('loadedmetadata', r, { once: true });   // (its length
+      audio.addEventListener('error', r, { once: true }); setTimeout(r, 5000); });                    // for the report)
+  }
+  const startAudio = () => { if (audio && audio.paused && !STILL) audio.play().catch(() => {}); };
+  addEventListener('pointerdown', startAudio); addEventListener('keydown', startAudio);
+  const syncAudio = (t) => {
+    if (!audio || audio.paused) return;
+    const want = t + (man.audio.offset || 0);
+    if (Math.abs(audio.currentTime - want) > 0.1) audio.currentTime = want;
+  };
+  const setTime = (t) => { mixer.setTime(t); applyPointers(t); applyTracks(t); applySky(t); };
 
   // ------------------------------------------------ the kit
   const START = new THREE.Vector3(...man.start), TOWARD = new THREE.Vector3(...man.facing);
@@ -289,12 +478,13 @@ try {
   let t = T0, tris = 0, calls = 0;
   startLoop(renderer, scene, camera, {
     report, still: STILL,
-    onSession: () => setTimeout(() => toStreet(), 300),        // once the headset pose is live
+    onSession: () => { setTimeout(() => toStreet(), 300); startAudio(); },   // once the headset pose is live
     heartbeat: () => { const w = rig.where(); return { mode: rig.mode, at: [+w.x.toFixed(2), +w.z.toFixed(2)], t: +t.toFixed(2) }; },
     onFrame: (now, dt, xr) => {
       if (!STILL) {
         t += dt; if (duration > 0 && t > duration) t -= duration;
         setTime(t);                                            // the film's clock, looped (one clip: cheap)
+        syncAudio(t);
       }
       if (xr) {
         pads.poll();
@@ -335,7 +525,11 @@ try {
             return [c.left, c.right, c.bottom, c.top, c.near, c.far].map((x) => +x.toFixed(4)); }),
           rectIntensity: Object.fromEntries(Object.entries(rects).map(([n, l]) => [n, +l.intensity.toFixed(4)])),
           rectSize: Object.fromEntries(Object.entries(rects).map(([n, l]) => [n, [+l.width.toFixed(5), +l.height.toFixed(5)]])),
-          pointIntensity: Object.fromEntries([...falloff].map(([L, fo]) => [L.name, [+L.intensity.toPrecision(6), +fo.base.toPrecision(6)]])) };
+          pointIntensity: Object.fromEntries([...falloff].map(([L, fo]) => [L.name, [+L.intensity.toPrecision(6), +fo.base.toPrecision(6)]])),
+          pointers: pointers.length, pointersPlayed: pointers.filter((p) => p.set).length, unknownPointers,
+          mtoon, sky: skySeq ? { images: skySeq.maps.length, at: +skySeq.at.toFixed(4) } : null,
+          audio: audio ? { file: man.audio.file, duration: +(audio.duration || 0).toFixed(3), ready: audio.readyState } : null,
+          cameraFov: viaCamera ? +camera.fov.toFixed(4) : null };
         // three resets renderer.info as each animation frame starts (before onFrame): read the counts once it is drawn
         setTimeout(() => { tris = renderer.info.render.triangles; calls = renderer.info.render.drawCalls;
           Object.assign(window.__shotInfo, { tris, calls }); }, 0);
@@ -347,7 +541,7 @@ try {
   });
   report({ phase: 'ready', backend: renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2', ua: navigator.userAgent.slice(0, 80),
     clips: gltf.animations.length, duration, meshes: nMeshes });
-  window._xr = { THREE, scene, camera, stage, rig, desk, mixer, gltf, man, setTime };
+  window._xr = { THREE, scene, camera, stage, rig, desk, mixer, gltf, man, setTime, pointers, audio };
 } catch (e) { fail(e); }
 </script>
 </body></html>

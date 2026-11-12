@@ -76,8 +76,10 @@ the queue.
 | `turn_to(deg)`, `turn_by(deg)`, `face(p)` | turn on the spot (turnLeft / turnRight, the root taking the clip's own hip yaw scaled to the angle; over 1.1 × the clip's turn it is split, the parts crossfaded; under 20° a settling turn). The feet step round: one is always down |
 | `emote(slot, seconds=None, facing='keep')` | `playEmote` (locomotion suspended), then `stopEmote`; `facing` a heading in degrees, `'keep'`, or `None` for the WebGPU default (three's π) |
 | `gesture(slot, weight=2.5)` / `stop_gesture()` | `playGesture`: the upper body plays the clip over whatever the legs do |
-| `sit(hold=2.2, seat=None, clip='stand_to_sit', reverse=True, reverse_speed=1.25)` | `beginSeated` where the body stands, hold, `endSeated` (reversed, as the course example does), `stopEmote`; `seat_spot(seat_xy, heading_deg)` says where to stand so the clip's own hip travel ends over the seat. `seat=` the seat object: `seatOn`'s settle, the held seat measured on the posed skin and the body raised or lowered so its underside rests on the pan, whatever the seat's height. The feet stand on the floor under it |
+| `sit(hold=2.2, seat=None, clip='stand_to_sit', reverse=True, reverse_speed=1.25)` | `beginSeated` where the body stands, hold, `endSeated` (reversed, as the course example does), `stopEmote`; `seat_spot(seat_xy, heading_deg)` says where to stand so the clip's own hip travel ends over the seat. `seat=` the seat object: `seatOn`'s settle, the held seat measured on the posed skin with the feet set down where the bake plants them, and the body raised or lowered so its underside rests on the pan, whatever the seat's height; and `seatOn`'s clamp: from 40 % of the clip on, sitting down and (reversed) standing up, the body is never lower than keeps its underside on the pan. The feet stand on the floor under it |
 | `vault()`, `climb_ledge()`, `jump(distance, height)`, `climb_ladder(height)`, `climb_wall()` | the explicit moves from where the body stands, facing its heading (the auto-trigger does the vault, the mounts, the scramble and the gap jump on its own along any path); each lasts while the move and anything it chains are in flight |
+| `steer(fn, seconds=None, speed=None, gait=None, stop=True)` | the body steered frame by frame from scene logic, as a WebGPU scene's `renderFrame` called `locomote(dt, input)`: `fn(t, ctrl)` returns a direction of travel (world x, y; its length, at most 1, scales the pace), `(0, 0)` to stand, `None` to end; `t` is the command's seconds, `walk.frame` the frame being simulated |
+| `follow(target, distance=1.0, speed=None, gait=None, seconds=None, bone=None)` | keep `distance` from a keyed object (another character's armature or one of its bones, a vehicle, an empty), reading where its keys put it at each frame: walk after it, run while it goes faster than the run threshold, and stop `distance` short of it wherever it stops |
 | `set_running(v)`, `call(fn)` | the controller's running flag; any function of the controller, in order (`call(lambda c: setattr(c, 'auto_maneuvers', False))` near a bench) |
 
 **Gaits.** `gait=` names one of `GAITS`, or leave it out and give `speed`: at
@@ -105,14 +107,98 @@ command walks off again from standing. A walk that sets off more than 60°
 off the body's heading turns on the spot first (25° on my robot body: its
 hip turns a planted leg at most ±40° about the leg's axis).
 
+### Steering from scene logic — `steer`, `follow`
+
+```python
+def chase(t, ctrl):                                    # any function of time: a heading from other animation, a path,
+    if t > 6.0:                                        # a reaction to the scene
+        return None                                    # None ends the command
+    a = math.radians(30) + 0.9 * math.sin(2 * math.pi * t / 5)
+    return (math.sin(a), -math.cos(a))                 # a direction of travel; length 1 = the pace, (0, 0) stands
+walk.steer(chase, speed=1.4)                           # speed= / gait= as follow_path (a walk at its own pace by default)
+
+walk.follow(cart, distance=1.8)                        # a keyed object: its place read through its keys at each frame
+walk.follow(other, distance=1.2, bone='hips')          # another character's take (its VRM handle, baked first), its hips
+walk.follow(drone, distance=3.0, seconds=8.0, gait='run')
+rep = walk.bake()                                      # planted and keyed like any command
+```
+
+`steer` takes the direction a function gives each frame and moves the body
+at the gait's pace times its length, reached with the walk's (or run's)
+acceleration and left with its deceleration: a function that jumps from
+standing to full speed starts as a walk starts, and the end (`None`, or
+`seconds` over) slows to a stand along the last direction, its stride spread
+over the ground the slowing covers. A first direction more than the turn
+threshold off the body's heading from standing turns on the spot first, as
+`follow_path` does; `t` runs on through that turn. `follow` is `steer` with
+the function written for you: each frame it reads the target's place at this
+frame and the next (`KeyedPlace`: the depsgraph, a batch of frames at a time,
+so constraints, parents and drivers count), heads for where the target will
+be 0.4 s on, at the target's speed away from it plus 0.8 /s of the distance
+it has fallen behind, never faster than a stop at `distance` allows (v² = 2ad)
+and never faster than `speed` (default the run's pace). With no `gait` it
+walks, runs while the speed it needs reaches the run threshold, and walks
+again under 0.8 of it. `seconds=None` follows until the target's last key has
+passed and the body stands at its distance. In
+`test_controller_follow.py` Aletheia keeps 1.75-1.84 m behind a cart rolling
+at 1.5 m/s (her distance 1.8 m), stops 1.70 m and 1.61 m behind its two
+stops, runs while it races at 2.8 m/s, and steers through a slow S within
+4.3° of its function's heading (90th percentile), every gait's feet planted.
+
+### Springs ride the take
+
+`bake()` ends with the VRM's spring chains (hair, tails, tentacles, a coat's
+tails) simulated over the keyed take and keyed on their own NLA track
+(`walk.bake_springs(rep)`; `characters.springs.bake_springs`, the
+`claudesona.md` guide's solver, three-vrm's maths): the engine stepped them in
+`vrm.update(dt)` every rendered frame, after the body's pose, and here they
+follow the same frames in order, so a walk's start trails them, a turn swings
+them round, a stop throws them forward and a seat or a lie-down settles them.
+The take's action keys no spring bone, so nothing fights the track.
+
+- They start settled on the take's first pose (`preroll`, 1 s held).
+- They rest on the walkable world (`ground=`, the take's `CollisionWorld`):
+  lying down, a tail lies on the floor instead of hanging through it.
+- They stay out of every solid in the scene that stands still (`solids=`,
+  every visible mesh no armature deforms and nothing keys, drives or
+  constrains, seats included): no joint of a chain crosses a face, so a tail
+  hanging behind a chair drapes over its pan rather than through its back.
+  A moving object (a cart she follows) is left out: the solids are one
+  shape for the whole take.
+- Where the take's root jumps (a teleport, an instant seat:
+  `film.take_resets`, faster than 25 m/s or turned more than 90° in a frame)
+  they are reset, `springBoneManager.reset()`, and settled on the new pose
+  for the preroll's time, so a cut opens on them hanging. The engine also
+  reset them at a seat's settle, where it teleported the body onto the pan;
+  here the settle is eased over the descent, so the chains swing on through
+  it.
+- `bake(springs=False)` leaves them out; a dict passes `bake_springs`'
+  options (`{'preroll': 0.0}`, `{'solids': None}`, `{'solver': 'addon'}`). A
+  body with no spring chain (my robot body) is left alone. `emotes.bake`
+  bakes them after its seated keys.
+- Each take's springs are kept under the take's own name
+  (`'<take action>|springs'`); the track plays the last take baked, and
+  `characters.springs.use_springs(me, '<take action>|springs')` puts an
+  earlier take's back beside its action (the controller tests' shot
+  renderer does, shot by shot).
+
+`test_take_springs.py` (`blender/tests/characters/`) runs a walk, a turn, a
+run's stop, a chair and a lie-down on Aporia and on Aletheia: each group's
+moving points travel against the hips while the body moves (Aporia's
+tentacles 1.1-1.5 m/s on average, her hair 0.16-0.46) and settle once she
+stands; lying down, no chain goes under the floor; seated, none goes into
+the chair.
+
 ```python
 rep = walk.bake(f0=1,
                 feet='plant',            # the film's planted feet; 'foot_ik' keys the WebGPU per-frame IK as it is
                 pelvis='stance',         # the hips from the planted legs; 'controller' keeps the controller's height
                 clearance=0.03,          # the swing sole's least height over what it sweeps, mid-swing
+                springs=True,            # the spring chains over the keyed take (below); False, or bake_springs' options
                 key=True, check=True, action_name=None)
 rep['segments']          # [{'gait': 'stairsUp', 'frames': [287, 327], 'checks_feet': {'ok': True, 'failures': []}}, ...]
 rep['worst']             # slip, drift, gap, swing clearance, ankle misses over the whole take
+rep['springs']           # bake_springs' report (None: no chains): joints, keys, resets, ground_frames, nan
 rep['_records']          # every frame: root, pose, weights, stance, support mode, climb angle, speeds, the probes' verdict
 ```
 
@@ -151,11 +237,24 @@ What the film bake decides, frame by frame over the recorded take:
   foot the body has walked on from, past `TRAIL_NONE` or behind the hip and
   reachable only with the pelvis more than `TRAIL_DIP` (0.25 m) under the
   controller's own height, neither pulls the pelvis down nor caps it, and is
-  let go there (an early toe-off). Where the other foot is still in its
-  swing then, that swing is brought forward to land by then: its own motion
-  relative to the body, played faster (a quicker step), so a walk keeps a
-  foot down. A stair clip's bent stance knee on a foot the body has already
-  walked away from therefore never drags the hips toward the floor.
+  let go there (an early toe-off). A stance the walk (or the run) has
+  already ended, held on only by a stair clip blending in (a step up onto a
+  low block: the stair clip's long stance keeps the walk's trailing foot
+  down after the walk has lifted it), is let go sooner, so the hips stay at
+  the walk's height into the step: past 70 % of it (`TRAIL_LATE`), in a
+  forward walk that still carries a quarter of the weight
+  (`TRAIL_GROUND_SHARE`) with a stair clip holding at least 15 % of it
+  (`TRAIL_STAIR_SHARE`), once the other foot has stood three frames
+  (`TRAIL_DOUBLE`: the weight crosses first), a trailing foot goes where
+  the pelvis would come more than 12 cm (`TRAIL_DIP_LATE`) under the
+  controller's. At a stop the idle coming in holds both feet down, and the
+  trailing foot stays planted through it. On a 45° ramp, where the stair
+  clip leads, the long trailing stance is the climb's own and stays. Where
+  the other foot is still in its swing then, that swing is brought forward
+  to land by then: its own motion relative to the body, played faster (a
+  quicker step), so a walk keeps a foot down. A stair clip's bent stance
+  knee on a foot the body has already walked away from therefore never
+  drags the hips toward the floor.
 - **A foot out of reach** at the end of its stance (the trailing foot on a
   stair, the hips already risen) is let go early, but not while the other
   foot is in the air: until the other lands, the pelvis comes down to it.
@@ -175,7 +274,14 @@ What the film bake decides, frame by frame over the recorded take:
 - **Falls and maneuvers** leave the feet to the clip (a maneuver's contact
   IK has placed them) and the root to the controller exactly (the maneuver's
   path: no smoothing reaches into it); a landing (fallLand) stands where it
-  landed.
+  landed. A foot the move hands back still in the air, or still turning as
+  the move fades out, ends its swing first: it is planted once the blend sets
+  it down (its sole within 1.5 cm of the ground and turning under 3° a
+  frame), within 6 frames and while the other foot stands; where the blend
+  does not set it down in its stance (a running jump's landing, the run
+  lifting that foot again) it is planted at the hand-over. So a vault's
+  landing foot, still turning as the move fades out, is planted once it has
+  come down flat, and then holds.
 
 `feet='foot_ik'` is the WebGPU behaviour exactly: the IK follows the animated
 foot's xy, so wherever stride and travel differ (a start, a stop, a turn, a
@@ -201,7 +307,9 @@ for f in range(300):
 ```
 
 `update(dt, velocity)` is the physics step alone (the cylinder, the probes,
-the body's height); `locomote(dt, direction)` is the whole frame. What the
+the body's height); `locomote(dt, direction)` is the whole frame;
+`place((x, y, z), heading)` puts the feet there at once, standing (the
+engine's teleport: the Rapier body's translation set, the VRM moved). What the
 probes say is on the controller as the original exposes it:
 `ahead_step_like`, `ahead_smooth_ramp_like`, `ahead_stair_shape` (small /
 normal / large), `ahead_tread_run`, `ahead_highest_delta` /
@@ -298,7 +406,11 @@ seated clip on the controller's mixer while the root holds, raised by
 `seat_dz` (the film's `sit(seat=...)` sets it: `seat_gap()` measures the held
 seat's underside on the posed skin over the pelvis and thighs, the mesh that
 sits tightest round the thigh bones, so a coat's hem or a tail hanging
-through the pan is not what rests on it). Every loader takes
+through the pan is not what rests on it; `world=` sets the feet down first
+where the bake plants them, `planted_legs()`, since a foot pushed up onto
+the floor raises its knee and turns the thigh under the pelvis down into the
+pan; `t=` measures the clip at that time, which the clamp reads every frame
+from 40 % of the clip on). Every loader takes
 `vrma_library={slot: path}` (the original's `vrmaLibrary`). Aimed at scene
 objects, and seats for a walking body: [maneuvers.md](maneuvers.md).
 
@@ -363,7 +475,10 @@ on the body and the clip instead:
   gets palm and toe holds at the height they arrive. The top rung is the last
   one terrain_base builds.
 - **No foot inside a solid** (`feet_out_of_solids`, the last pass of every
-  maneuver frame): the whole boot every 12 mm, inside by a parity ray, moved
+  maneuver frame): the whole foot every 12 mm and the visible boot as the
+  pose deforms it (its skin's weights over the humanoid bones: a toe cap
+  partly on the toes or a heel partly on the shin bends off the rigid foot
+  in a crouch), inside by a parity ray, moved
   out the shorter way, up or back out of the face the travel meets; where
   neither straight move frees it (a boot wedged between a rung and the
   wall), the least move in the travel's plane (searched on a 3 cm, then a
@@ -459,35 +574,42 @@ The walking course example scene
 the counterpart of `eidoverse/examples/obstacle_course.js`) builds the same
 course with Aporia and her follow camera through the runner:
 `python eido_blender.py render blender/examples/obstacle_course/scene.json --at 14.4 --at 40 --at 51.6`.
+It builds in about five minutes, the spring chains baked with the take. Its
+stills from the follow camera at 14.4 s, 40 s and 51.6 s match the WebGPU
+film's frames of the same moments in composition, scale and stride, and
+Aporia casts her sun shadow in them (`load_vrm` sets the MToon materials up
+for EEVEE's shadow pass: [characters](characters.md#loading-a-vrm)). The
+whole film at the scene's 960 x 540 and 16 samples takes 13-16 s a frame on
+a shared GPU, over six hours for its 1727 frames; with scene.json's width,
+height and samples lowered to 640 x 360 and 4, a look at the whole take
+renders at 1.3 s a frame.
 
 | Test | What it walks |
 |---|---|
 | `test_controller_course.py` | the course: a bump, 8° ramps, small stairs up and down, a run up and down normal stairs, the run slowing to a stop on its mark, turns on the spot (a boot on the floor in every frame), a walk to the side |
 | `test_controller_presets.py --preset NAME [--leg-ik none]` | every TERRAIN_CONFIG of the WebGPU bench (`eidoblend.course.PRESETS`), the stress course among them (its dome stepped over, not hopped); `--leg-ik none` is attachLocomotion without leg IK (the bench's noik scenes) |
 | `test_controller_terrain.py` | rolling ground and rocks, a curved path, a jog, a stop and a turn on the slope |
-| `test_controller_acting.py` | a gesture over the walk, an emote, a sit on a bench 5 cm higher than the clip's seat (settled onto it, the boots on the floor), a 1.44 m drop into fallIdle and fallLand, the backward walk, a jog and a sprint |
+| `test_controller_acting.py` | a gesture over the walk, an emote, a sit on a bench 5 cm higher than the clip's seat (settled onto it, never more than 1 cm into it sitting down or standing up, the boots on the floor), a 1.44 m drop into fallIdle and fallLand, the backward walk, a jog and a sprint |
 | `test_controller_foot_ik.py` | every `VRMFootControllerIK` option on a still body, then the WebGPU per-frame IK against the plant |
 | `test_controller_options.py` | every controller and `attach_locomotion` option, one behaviour each, on the controller's own telemetry; the maneuver planner's choices |
 | `test_controller_maneuvers.py` | `examples/obstacle_course.js` as the WebGPU example directs it, on its own character (Aporia) and with its follow camera keyed into the film: vaults (each rising over its cover, its prop hand on the top), mounts (hands on the lip, the crouch resting on the top), the gap jump, falls and landings, the sit stop at the bench (settled on it), the cheer while walking, the ladder (hands and feet on the rungs), the salute toward the camera; no foot inside anything through any maneuver |
+| `test_controller_follow.py` | `follow` after a keyed cart that rolls off, curves, stops and races off (the body keeps its distance, stops behind it each time, runs while it races), then `steer` through a slow S from a function of time; checks.feet on every gait, the keyed armature against the bake |
+
+The spring chains' test, `test_take_springs.py`, is the characters family's
+(`blender/tests/characters/`): see Springs ride the take, above.
 
 ## Not yet ported
 
 - A sneak: the library has no crouched-walk clip (render_scene.mjs names
   `sneak` in its treadmill guard only).
-- `seatOn`'s recentring of the hips over the pan (biased toward a
-  backrest): `seat_spot()` stands the body where the clip's own hip travel
-  ends over the seat point instead. The settle onto the pan's height is
-  ported (`sit(seat=...)`).
+- `seatOn`'s recentring of the hips over the pan for `sit()`: `sit()` is the
+  course example's `beginSeated` where the body stands, and `seat_spot()`
+  stands it where the clip's own hip travel ends over the seat point; the
+  settle onto the pan's height and the clamp are ported (`sit(seat=...)`).
+  The verb `emotes.seat_on` has the recentring and the backrest bias
+  ([maneuvers.md](maneuvers.md)).
 - The backward walk on stairs: walkBackward is for the flat and ramps; the
   stair clips play forward only.
-- The example's whole 62 s film at 1280 x 720 has not been rendered. The
-  maneuvers test keys its camera into the saved film (`example_cam`), and
-  `blender/examples/obstacle_course/` builds the same film through the runner
-  (`eido_blender.py`, about 200 s); its stills from the follow camera at
-  14.4 s, 40 s and 51.6 s match the WebGPU film's frames of the same moments
-  in composition, scale and stride. Aporia casts no sun shadow in them: the
-  VRM add-on's MToon materials keep `use_transparent_shadow` on
-  ([Blender notes](stack-notes.md#vrms-and-the-vrm-add-on)).
 
 Known residuals of the film bake (each found by the tests; the JSON reports
 in `out/` list the frames under `stance_issues`, `swing_issues` and
@@ -500,18 +622,8 @@ in `out/` list the frames under `stance_issues`, `swing_issues` and
   is 8 mm into a surface. Stepping on and off its flights, and the dome,
   keep a foot down in every frame.
 - The ramp pyramid (`ramp_pyramid`, 12 of 13 checks): where a stair clip
-  plays on the ramps, one stance slips 7 mm in a frame and its sole reads
-  3 mm into the slope.
-- The course example's first mount: one frame with a toe 13 mm into the
-  block's top (the sampled points of the rigid foot miss that edge of the
-  visible boot).
-- The course example's low vault: on the first two frames the plant holds
-  the landing foot (where the move hands it over), it rolls 6.5 mm and
-  slips 1.7 mm.
-- The course example's bench: the seated skin rests 1.9 cm into the pan at
-  the hold (the settle is measured on the clip's own legs; planting the feet
-  then bends them). On a bench 5 cm higher than the clip's seat the acting
-  test's sit rests within 1.5 cm.
+  plays on the ramps, one stance's last frame, the foot rolling onto its
+  toes, slips 7 mm and its toes read 3 mm into the slope.
 - My robot body on a 20 degree cross slope: its ankle's roll range is short
   of the slope, and the joint clamp turns a planted foot 1.6 to 3 degrees a
   frame through the heel-off. Aletheia passes the same walk clean.

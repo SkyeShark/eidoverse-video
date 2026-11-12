@@ -26,11 +26,12 @@ That is right for a relief (sample_relief: the cutter never dips below the targe
 leave the needed tip climbs within one step and the straight move cuts into the wall (4.2 mm into the 12.8 mm walls
 of the fork bracket sample fitted as the inspector fits a supplied mesh). The eight-ring ball kernel adds to it: its
 height steps grow toward the rim, so a wall between two outer rings is under-read by up to 0.48 radius. With
-lift_over_steps=True every move is checked between its ends and the tool lifts over such steps, and on a sampled
-heightfield a tip whose ball rides a wall on its outer rings is read again with a fine rim: 0.1 mm of cut is left on the
-bracket (from 4.2 mm), 0.05 mm on the ring, none on the handle. A program whose moves all pass the check and whose ball
-never rides its outer rings, a smooth relief such as sample_relief, comes out unchanged. A sampled heightfield's
-kernel runs as one numpy call per tip (the same float64 operations, the same values, about 9x faster).
+lift_over_steps=True every move is checked between its ends and the tool lifts over such steps, and a tip whose ball
+rides a wall on its outer rings is read again with a fine rim (a sampled heightfield's in one numpy call, a height
+function's point by point): 0.1 mm of cut is left on the bracket (from 4.2 mm), 0.05 mm on the ring, none on the
+handle. A program whose moves all pass the check and whose ball never rides its outer rings, a smooth relief such as
+sample_relief, comes out unchanged. A sampled heightfield's kernel runs as one numpy call per tip (the same float64
+operations, the same values, about 9x faster).
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ import numpy as np
 from ._axes import positive
 
 INTERPRETATION = 'Upper visible envelope; vertical undercuts are not reachable by this 3-axis tool'
+RIM_SPACING = .0001             # lift_over_steps: the fine rim's points, and a height function's move checks, 0.1 mm apart
 SAMPLING = 'Ball footprint compensation on a finite sampled target; output stock is the actual swept cutter envelope'
 
 
@@ -175,7 +177,7 @@ def relief_program(source, **options):
     ring_of = np.array([0] + [ring for ring in range(1, 9) for _ in range(max(12, ring * 8))])
     lift = bool(o.get('lift_over_steps', False))
     rim = None
-    if lift and many is not None:
+    if lift:
         # the ball's rim, finely (lift_over_steps only): rings from half the radius outward (the kernel's fourth ring),
         # each 1/64 of the radius higher on the ball than the last, points 0.1 mm apart around them. The eight-ring
         # kernel's height steps grow toward the rim (its last rises 0.48 radius), so a wall between two of its outer
@@ -187,7 +189,7 @@ def relief_program(source, **options):
         for k in range(steps + 1):
             h = h0 + (radius - h0) * k / steps
             rho = math.sqrt(max(0.0, radius * radius - (radius - h) ** 2))
-            n = max(24, math.ceil(2 * math.pi * rho / .0001))
+            n = max(24, math.ceil(2 * math.pi * rho / RIM_SPACING))
             for i in range(n):
                 a = i / n * math.pi * 2
                 pts.append((math.cos(a) * rho, -math.sin(a) * rho, h))
@@ -204,28 +206,59 @@ def relief_program(source, **options):
                 raise ValueError('Relief heights must be finite and lie 1 mm or more above the bed, within stock height')
             best = float((values - kb).max())
         else:
-            best = -math.inf
-            for dx, dy, ball in kernel:
-                value = target(x + dx, y + dy)
-                if not (isinstance(value, (int, float, np.floating)) and math.isfinite(value)) or value < .001 \
-                        or value > stock_height + 1e-7:
-                    raise ValueError('Relief heights must be finite and lie 1 mm or more above the bed, within stock '
-                                     'height')
-                best = max(best, value - ball)
+            best, at = -math.inf, 0
+            for i, (dx, dy, ball) in enumerate(kernel):
+                value = height(x + dx, y + dy)
+                if value - ball > best:
+                    best, at = value - ball, i
+            ring_at[k] = int(ring_of[at])            # where the highest point lies (lift_over_steps reads its rim)
         cache[k] = best
         return best
+
+    def height(x, y):
+        """a height function's value, checked as the planner checks every reading"""
+        value = target(x, y)
+        if not (isinstance(value, (int, float, np.floating)) and math.isfinite(value)) or value < .001 \
+                or value > stock_height + 1e-7:
+            raise ValueError('Relief heights must be finite and lie 1 mm or more above the bed, within stock height')
+        return value
 
     def checked(values):
         if not np.isfinite(values).all() or values.min() < .001 or values.max() > stock_height + 1e-7:
             raise ValueError('Relief heights must be finite and lie 1 mm or more above the bed, within stock height')
         return values
 
-    def tips_at(xs, y):
+    ring_at, rim_cache = {}, {}
+
+    def rim_reading(x, y):
+        """a height function read again over the fine rim (lift_over_steps), point by point"""
+        k = f'{x:.8f},{y:.8f}'
+        hit = rim_cache.get(k)
+        if hit is None:
+            hit = max(height(x + dx, y + dy) - h for dx, dy, h in zip(*rim))
+            rim_cache[k] = hit
+        return hit
+
+    def on_outer_rings(x, y):
+        """a height function's tip at (x, y) has its highest kernel point on the ball's outer rings"""
+        tip(x, y)
+        return ring_at[f'{x:.8f},{y:.8f}'] >= 5
+
+    def tips_at(xs, y, near=()):
         """tip at several x on one row (lift_over_steps): for a sampled heightfield one numpy call over every kernel
         point, the same values as tip(); where a tip's highest kernel point lies on the ball's outer rings (a steep
-        wall within reach), the fine rim's reading too"""
+        wall within reach), the fine rim's reading too. A height function's rim is read point by point, and also
+        where a neighbouring sample's highest point (the x in `near`) lies on its outer rings: a function's wall can
+        have no width, so a corner can reach into the ball between the kernel's points with no point of it reading
+        the wall, where the sample beside it does"""
         if many is None:
-            return [tip(x, y) for x in xs]
+            out = []
+            for x in xs:
+                best = tip(x, y)
+                if rim is not None and (on_outer_rings(x, y) or any(on_outer_rings(n, y) for n in near)):
+                    best = max(best, rim_reading(x, y))
+                out.append(best)
+            return out
         xs = np.asarray(xs, dtype=np.float64)
         X = xs[:, None] + kx[None, :]
         d = checked(many(X, y + ky[None, :] + 0.0 * X)) - kb[None, :]
@@ -241,14 +274,13 @@ def relief_program(source, **options):
     # lift_over_steps (this edition's option; off = the WebGPU planner exactly): the planner moves straight between
     # tips sampled sample_step apart, and beside a wall taller than the leave the needed tip climbs steeply between two
     # samples, so the straight move cuts into the wall (up to the wall's height). With the option on, every move is
-    # checked between its ends (a quarter of a heightfield cell apart, or at its quarter points for a height function);
+    # checked between its ends (a quarter of a heightfield cell apart, or RIM_SPACING apart for a height function);
     # where the needed height rises more than the pass's leave above the straight move, the tool lifts to the highest
     # of them before the move and stays there across it, leaving material at the wall's foot instead of a gouge in
-    # it; and on a sampled heightfield a tip whose ball rides a wall on its outer rings is read again with the fine
-    # rim. A program whose moves all pass the check and whose ball never rides its outer rings (a smooth relief,
-    # sample_relief) is unchanged.
+    # it; and a tip whose ball rides a wall on its outer rings is read again with the fine rim. A program whose moves
+    # all pass the check and whose ball never rides its outer rings (a smooth relief, sample_relief) is unchanged.
     cell = getattr(target, 'cell', None)
-    n_sub = max(4, math.ceil(sample_step / (cell / 4))) if (many is not None and cell) else 4
+    n_sub = max(4, math.ceil(sample_step / (cell / 4) if (many is not None and cell) else sample_step / RIM_SPACING))
     subs = [k / n_sub for k in range(1, n_sub)]
 
     nx = math.ceil(width / sample_step)
@@ -287,15 +319,17 @@ def relief_program(source, **options):
             add((prev[0], prev[1], stock_height + clearance), 'rapid')
             add((first_x, y, stock_height + clearance), 'rapid')
             for k in range(nx + 1):
-                x = x_at(nx - k if reverse else k)
+                i = nx - k if reverse else k
+                x = x_at(i)
                 z = max(level, tip(x, y) + leave)
                 if rim is not None:                     # the rim's reading where the ball rides a wall:
-                    fine = tips_at([x], y)[0]           # only past the leave does the coarse reading gouge
+                    near = [x_at(c) for c in (i - 1, i + 1) if 0 <= c <= nx]
+                    fine = tips_at([x], y, near)[0]     # only past the leave does the coarse reading gouge
                     if fine > z:
                         z = max(level, fine + leave)
                 if lift and k > 0:
                     px, _, pz = points[-1]['position']
-                    need = [max(level, t + leave) for t in tips_at([px + (x - px) * f for f in subs], y)]
+                    need = [max(level, t + leave) for t in tips_at([px + (x - px) * f for f in subs], y, (px, x))]
                     if max(nd - (pz + (z - pz) * f) for nd, f in zip(need, subs)) > leave:
                         m = max(pz, z, *need)
                         if pz < m:

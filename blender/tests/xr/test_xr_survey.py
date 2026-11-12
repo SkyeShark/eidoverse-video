@@ -10,6 +10,9 @@ every object's render visibility are the same after the survey; nothing is saved
   meadow       the flora brush's meadow: patches whose wind deforms them, millions of triangles (Quest: over)
   fire_teapot  a volume fire (not glTF: named), keyed fire lights (tracks), animated material values (not played)
   robot_walk   my robot body walking: two skinned meshes, sun lights
+Then world_changes on four worlds (a still colour, a keyed colour, an Environment Texture reading an image sequence,
+one reading a single image) and world_sequence_frames on a 2 s and a 100 s film: when the export writes the sky as a
+timed sequence, and at which frames.
 """
 import json
 import os
@@ -88,6 +91,58 @@ if 'example' in surveys:
     tx = surveys['example'].get('textures', {})
     check('example: its textures counted as the headset would hold them, within the budget', tx.get('images', 0) >= 3
           and tx.get('quest') in ('ok', 'heavy'), tx)
+# what makes the export write a timed sky sequence (world_changes) and when it bakes it (world_sequence_frames)
+ws = bpy.data.scenes.new('world changes')
+ws.render.fps, ws.render.fps_base = 24, 1.0
+ws.frame_start, ws.frame_end = 1, 49
+
+
+def world(name, build):
+    w = bpy.data.worlds.new(name)
+    w.use_nodes = True
+    build(w.node_tree)
+    ws.world = w
+    return X.world_changes(ws)
+
+
+def keyed_colour(nt):
+    bg = next(n for n in nt.nodes if n.type == 'BACKGROUND')
+    for f, c in ((1, (0.1, 0.2, 0.6, 1)), (49, (0.9, 0.5, 0.1, 1))):
+        bg.inputs['Color'].default_value = c
+        bg.inputs['Color'].keyframe_insert('default_value', frame=f)
+
+
+def environment(source):
+    def build(nt):
+        path = os.path.join(OUT, 'sky_0001.png')
+        im = bpy.data.images.new('sky frame', 8, 4)
+        im.filepath_raw = path
+        im.file_format = 'PNG'
+        im.save()
+        img = bpy.data.images.load(path, check_existing=False)
+        img.source = source
+        env = nt.nodes.new('ShaderNodeTexEnvironment')
+        env.image = img
+        nt.links.new(env.outputs['Color'], next(n for n in nt.nodes if n.type == 'BACKGROUND').inputs['Color'])
+    return build
+
+
+changes = {'a still colour': world('still', lambda nt: None), 'a keyed colour': world('keyed', keyed_colour),
+           'an Environment Texture reading an image sequence': world('sequence', environment('SEQUENCE')),
+           'an Environment Texture reading one image': world('one image', environment('FILE'))}
+check(f'world_changes: a keyed world value and an image sequence change the world, a still colour and one image do '
+      f'not ({changes})', changes == {'a still colour': False, 'a keyed colour': True,
+                                      'an Environment Texture reading an image sequence': True,
+                                      'an Environment Texture reading one image': False})
+short = X.world_sequence_frames(ws, step=1.0, most=32)
+ws.frame_end = 1 + 100 * 24
+long = X.world_sequence_frames(ws, step=1.0, most=32)
+check(f'world_sequence_frames: every second over a 2 s film, ends in ({short}); at most 32 over 100 s, ends in '
+      f'({len(long)} frames, {long[0]} .. {long[-1]})', short == [1, 25, 49] and len(long) == 32
+      and long[0] == 1 and long[-1] == 2401)
+mb = (X.world_gpu_mb(1024), X.world_gpu_mb(2048), X.world_gpu_mb(1024, 32), X.world_gpu_mb(1024, 0))
+check(f"world_gpu_mb: a 1024-wide image and its prefiltered light 10.5 MB, 2048 wide 41.9, 32 images 1024 wide 335.5, "
+      f"none 0 ({mb})", mb == (10.5, 41.9, 335.5, 0.0))
 with open(os.path.join(OUT, 'surveys.json'), 'w') as f:
     json.dump(surveys, f, indent=1, default=str)
 n_fail = sum(1 for _, ok, _ in RESULTS if not ok)

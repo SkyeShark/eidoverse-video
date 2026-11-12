@@ -3,9 +3,13 @@
     STOCK_MATERIALS / stock_materials       aluminum, brass, steel, wood (hardwood), plywood: label, kind, colour,
                                             roughness, metalness, rpm, feed, plunge, stepdown, cut_depth, chip_size
     stock_profile(name)                     one of them by id or alias (metal -> aluminum, aluminium, hardwood -> wood)
-    finish_stock(material, profile, color)  the stock's surface in the material's node tree: 3D growth rings, fibre
+    finish_stock(material, profile, color, axes='bed', scene=None)
+                                            the stock's surface in the material's node tree: 3D growth rings, fibre
                                             and plywood plies for wood; fine brushing and patina for metals; the fine
-                                            patterns fade with their screen footprint (no moire). -> {tint, set_color}
+                                            patterns fade by their exact screen footprint, fwidth(phase) (no moire),
+                                            whichever camera renders; axes 'rotary' reads the rotary stock's point.
+                                            -> {tint, set_color}
+    stock_material(name, profile, color, axes='bed', scene=None)   a new material with that finish -> (material, finish)
     distance_time(segment, distance)        the inverse trapezoid: physical time at a distance along a FeedPath segment
     sample_removal(path, width, depth, height, radius, resolution, flute_length=.018, cutter='flat')
                                             the swept cutter against a heightfield of resolution x resolution cells
@@ -58,85 +62,117 @@ def stock_profile(name='aluminum'):
 
 # ------------------------------------------------------------------------------------------------ the surface ---
 
-def _pixel_angle_driver(node, camera=None, scene=None):
-    """The world size of one pixel per metre of view distance: 2 tan(fov / 2) / resolution_y, driven by the camera
-    and the render size so a lens change or a resolution change keeps the fine-pattern filter right."""
-    import bpy
-    scene = scene or bpy.context.scene
-    cam = camera or scene.camera
-    out = node.outputs[0]
-    out.default_value = 2 * math.tan(math.radians(36) / 2) / 1080
-    if cam is None or cam.type != 'CAMERA':
-        return
-    fc = out.driver_add('default_value')
-    d = fc.driver
-    d.type = 'SCRIPTED'
-    a = d.variables.new()
-    a.name, a.type = 'fov', 'SINGLE_PROP'
-    a.targets[0].id_type = 'CAMERA'
-    a.targets[0].id = cam.data
-    a.targets[0].data_path = 'angle_y'
-    r = d.variables.new()
-    r.name, r.type = 'res', 'SINGLE_PROP'
-    r.targets[0].id_type = 'SCENE'
-    r.targets[0].id = scene
-    r.targets[0].data_path = 'render.resolution_y'
-    d.expression = '2*tan(fov/2)/max(res,1)'
+# The stock point finishStock reads, three's (x, y, z), from the stock surface's object coordinates o (Blender's axes):
+# each row picks one axis of o, signed. 'bed': the 2.5D stock's local position, (ox, oz, -oy). 'rotary': the rotary
+# stock's, which the WebGPU edition handed over as its (z, y, x) in three's axes, (-oy, oz, ox), so the long grain and
+# the growth rings run along the rotary axis (a reflection: it lives in the material, not in the object's transform).
+STOCK_AXES = {'bed': ((1, 0, 0), (0, 0, 1), (0, -1, 0)), 'rotary': ((0, -1, 0), (0, 0, 1), (1, 0, 0))}
 
 
-def finish_stock(material, profile, color=None, camera=None):
+def finish_stock(material, profile, color=None, axes='bed', scene=None):
     """Build profile's finish into material (a Blender material with a Principled BSDF): the colour and roughness
-    from object-space position, as finishStock does from the stock's local position. -> {tint, set_color}"""
-    from ._nodes import Builder
+    from object-space position, as finishStock does from the stock's local position (`axes`: STOCK_AXES' 'bed' or
+    'rotary', or three rows of a signed axis permutation). -> {tint, set_color}
+
+    The fine patterns (growth rings, wood fibre, metal brushing) fade by fwidth(phase), as in the WebGPU edition: the
+    phase's change from one pixel to the next. Blender's shader nodes have no screen derivatives, so it is computed
+    exactly from the pattern's 3D gradient g (the broad noise's by finite differences) taken through the pixel's
+    footprint on the surface, dP/dx = f (e_x - (e_x . N) / (I . N) I) for the screen axes e_x, e_y (N the normal, I
+    the direction to the eye, f the metres one pixel spans across the view at the point: its depth times the
+    camera's pixel pitch, measured in the shader by eidoblend.props.voice_machines.pixel_footprint, so it holds for
+    whichever camera renders the frame, a cut, an animated lens, any sensor fit, an orthographic camera, and a stock
+    made before its camera): fwidth = |g . dP/dx| + |g . dP/dy|. `scene` (the context scene by default) gives the
+    render size the footprint reads. The nodes giving each pattern's phase and its fwidth are named
+    'phase <pattern>' and 'fwidth <pattern>'."""
+    import bpy
+    from ..props.voice_machines import Nodes, pixel_footprint
+    from ._nodes import V, Builder
+    rows = STOCK_AXES[axes] if isinstance(axes, str) else tuple(tuple(r) for r in axes)
     nt = material.node_tree
     bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
     b = Builder(nt, x0=-1800, y0=600)
     tc = b.node('ShaderNodeTexCoord')
-    bx, by, bz = b.sep(tc.outputs['Object'])
-    px, py, pz = bx, bz, -by                                  # three's (x, y, z) of the stock's local position
-    cam = b.node('ShaderNodeCameraData')
-    pix = b.node('ShaderNodeValue')
-    pix.name = pix.label = 'pixel_angle'
-    _pixel_angle_driver(pix, camera)
-    footprint = b.s(cam.outputs['View Distance']) * b.s(pix.outputs[0]) * 1.4
+    o = b.sep(tc.outputs['Object'])
+    point = o[0].v.node                                       # the stock point, labelled with the axes it is read by
+    point.name = point.label = 'stock point ' + (axes if isinstance(axes, str) else 'axes ' + str(rows))
 
-    def fwidth(k):
-        return footprint * k
+    def pick(row):
+        j = next(i for i in range(3) if row[i])
+        return o[j] if row[j] > 0 else -o[j]
+    px, py, pz = (pick(r) for r in rows)                     # three's (x, y, z) of the stock's local position
+    metres_per_pixel = b.s(pixel_footprint(Nodes(nt, x=-2400, y=600), scene or bpy.context.scene))
+    metres_per_pixel.v.node.name = metres_per_pixel.v.node.label = 'pixel footprint'
+    geo = b.node('ShaderNodeNewGeometry')
+    normal, eye = V(b, geo.outputs['Normal']), V(b, geo.outputs['Incoming'])
+
+    def screen_axis(v):
+        n = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
+        n.inputs[0].default_value = v
+        return V(b, n.outputs[0])
+    ex, ey = screen_axis((1.0, 0.0, 0.0)), screen_axis((0.0, 1.0, 0.0))
+    i_n = b.dot(eye, normal)
+    inv_i_n = i_n / b.max(i_n * i_n, 1e-6)                    # 1 / (I . N), bounded at the silhouette
+    rx, ry = b.dot(ex, normal) * inv_i_n, b.dot(ey, normal) * inv_i_n
+
+    def name(sock, label):
+        nd = sock.v.node
+        nd.name = nd.label = label
+        return sock
+
+    def fwidth(g_three, pattern):
+        """the exact fwidth of a phase whose gradient in three's axes is g_three"""
+        g3 = b.sep(g_three)
+        src = [next(i for i in range(3) if rows[i][j]) for j in range(3)]      # the gradient back to object space:
+        g_object = b.vec(*[g3[i] if rows[i][j] > 0 else -g3[i] for j, i in enumerate(src)])   # the rows transposed
+        tw = b.node('ShaderNodeVectorTransform', vector_type='VECTOR', convert_from='OBJECT', convert_to='WORLD')
+        b.link(g_object, tw.inputs[0])
+        g = V(b, tw.outputs[0])
+        gi = b.dot(g, eye)
+        return name((b.abs(b.dot(g, ex) - gi * rx) + b.abs(b.dot(g, ey) - gi * ry)) * metres_per_pixel,
+                    'fwidth ' + pattern)
 
     tint = b.node('ShaderNodeRGB')
     tint.name = tint.label = 'stock_tint'
     tint.outputs[0].default_value = color_linear(color or profile.color) + (1.0,)
 
-    def mx_noise(scale_xyz):
-        """MaterialX noise_float (signed, about -1..1) of p * scale, through Blender's Perlin noise."""
+    def mx_noise(scale_xyz, d=(0.0, 0.0, 0.0)):
+        """MaterialX noise_float of p * scale (at p + d): Blender's Noise Texture at Detail 0 is that same Perlin
+        noise (OSL's: the lookup3 hash, the 12 gradients, the quintic fade, x 0.982), as 0.5 + 0.5 x it
+        (test_finish_noise_materialx.py measures it)"""
         n = b.node('ShaderNodeTexNoise', noise_dimensions='3D', normalize=True)
         n.inputs['Scale'].default_value = 1.0
         n.inputs['Detail'].default_value = 0.0
         n.inputs['Roughness'].default_value = 0.5
         n.inputs['Distortion'].default_value = 0.0
-        v = b.vec(px * scale_xyz[0], py * scale_xyz[1], pz * scale_xyz[2])
+        v = b.vec(*[(c + dc) * k if dc else c * k for c, k, dc in zip((px, py, pz), scale_xyz, d)])
         b.link(v, n.inputs['Vector'])
         return (b.s(n.outputs['Fac']) - 0.5) * 2.0
 
     if profile.kind == 'wood':
         broad = mx_noise((38, 27, 19))
+        h = 5e-5
+        gb = b.vec(*[(mx_noise((38, 27, 19), tuple(h if j == k else 0.0 for j in range(3))) - broad) * (1.0 / h)
+                     for k in range(3)])
         warp = b.sin(pz * 38) * .004 + broad * .002
-        radial = b.sqrt(b.pow(px + .049 + warp, 2.0) + b.pow((py + .024) * 1.18, 2.0))
-        phase = radial * 4200 + broad * 2.8
-        rings = b.pow(b.sin(phase) * .5 + .5, 5.0) * (1.0 - b.clamp(fwidth(4200) * .28))
-        fiber_phase = (px + warp) * 18000
-        fiber = b.sin(fiber_phase) * b.sin(pz * 420) * .035 * (1.0 - b.clamp(fwidth(18000) * .3))
+        u = px + .049 + warp
+        w = (py + .024) * 1.18
+        radial = b.sqrt(b.pow(u, 2.0) + b.pow(w, 2.0))
+        phase = name(radial * 4200 + broad * 2.8, 'phase growth rings')
+        gu = b.vec(1.0, 0.0, b.cos(pz * 38.0) * .152) + b.vscale(gb, .002)      # d(px + .049 + warp) / dp
+        g_rings = b.vscale(b.vscale(gu, u) + b.vec(0.0, w * 1.18, 0.0), 4200.0 / b.max(radial, 1e-6)) + \
+            b.vscale(gb, 2.8)
+        rings = b.pow(b.sin(phase) * .5 + .5, 5.0) * (1.0 - b.clamp(fwidth(g_rings, 'growth rings') * .28))
+        fiber_phase = name((px + warp) * 18000, 'phase wood fibre')
+        fiber = b.sin(fiber_phase) * b.sin(pz * 420) * .035 * \
+            (1.0 - b.clamp(fwidth(b.vscale(gu, 18000.0), 'wood fibre') * .3))
         grain = (b.sin(py * (math.pi / .0013)) * .065 + rings * .07) if profile.get('plies') else rings * .22
         k = .92 + broad * .16 - grain + fiber
         rough = .69 + rings * .12
     else:
-        phase = pz * 83000 + b.sin(px * 270) * .7
-        brushing = b.sin(phase) * .017 * (1.0 - b.clamp(fwidth(83000) * .25))
-        n = b.node('ShaderNodeTexNoise', noise_dimensions='3D', normalize=True)
-        n.inputs['Scale'].default_value = 1.0
-        n.inputs['Detail'].default_value = 0.0
-        b.link(b.vec(px * 95, py * 95, pz * 95), n.inputs['Vector'])
-        patina = (b.s(n.outputs['Fac']) - .5) * 2.0 * .008
+        phase = name(pz * 83000 + b.sin(px * 270) * .7, 'phase metal brushing')
+        g_brush = b.vec(b.cos(px * 270.0) * 189.0, 0.0, 83000.0)
+        brushing = b.sin(phase) * .017 * (1.0 - b.clamp(fwidth(g_brush, 'metal brushing') * .25))
+        patina = mx_noise((95, 95, 95)) * .008
         k = .98 + brushing + patina
         rough = profile.roughness + brushing * 1.4 + patina
     col = b.vscale(tint.outputs[0], k)
@@ -149,14 +185,15 @@ def finish_stock(material, profile, color=None, camera=None):
     return Rec(tint=tint, set_color=set_color)
 
 
-def stock_material(name, profile, color=None, camera=None):
+def stock_material(name, profile, color=None, axes='bed', scene=None):
+    """A material with profile's finish (finish_stock), reading the stock point by `axes`. -> (material, finish)"""
     import bpy
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     bsdf = next(n for n in m.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
     bsdf.inputs['Roughness'].default_value = float(profile.roughness)
     bsdf.inputs['Metallic'].default_value = float(profile.metalness)
-    finish = finish_stock(m, profile, color, camera)
+    finish = finish_stock(m, profile, color, axes, scene)
     return m, finish
 
 

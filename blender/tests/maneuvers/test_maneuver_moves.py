@@ -1,7 +1,7 @@
 """The controller's parkour moves on simple geometry built for each, aimed by eidoblend.characters.maneuvers, each take at
 a different heading (the axes of the original are three's; these runs turn every move off the course's one axis):
 
-    test_maneuver_moves.py [--vrm aletheia] [--tag NAME] [--only parkour,ladder,...]
+    test_maneuver_moves.py [--vrm aletheia] [--tag NAME] [--only parkour,ladder,...] [--dump parkour:90-112;ladder:...]
 
     parkour  heading 35 deg: vault_over a 0.55 m cover; climb_onto a 1.2 m block (climbLedge); across its top and off
              its far edge (a 1.2 m drop: fallIdle, then fallLand)
@@ -126,6 +126,10 @@ def take(name, me, G, direct, world=None, contact_world=None):
     R[f'{name}_maneuvers'] = [(m, a, b) for m, a, b in man]
     R[f'{name}_segments'] = rep['segments']
     R.log(f'{name}: maneuvers {[(m, a, b) for m, a, b in man]}')
+    for part in (T.arg(ARGS, '--dump') or '').split(';'):
+        if part.startswith(name + ':'):            # --dump parkour:90-112,140-150;ladder:...
+            T._C.dump_frames(R, rep, [tuple(int(v) for v in rg.split('-')) for rg in part.split(':')[1].split(',')])
+            R[f'{name}_frame_dump'] = R['frame_dump']
     return rep, act, man
 
 

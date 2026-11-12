@@ -1720,97 +1720,236 @@ def make_fog_nodes(K):
 
 
 FOG_TAG = 'uf_fogged'
+_WRAP = 'uf_fog_wrap'                  # the name prefix of every node fog_material adds
 
 
-def _shader_chain(sock, seen):
-    """The nodes feeding a shader socket, through Mix / Add Shader nodes (not the rest of the graph: the VRM add-on
-    keeps unused MToon groups beside the Principled BSDF it actually outputs)."""
-    for link in sock.links:
-        n = link.from_node
-        if n in seen:
-            continue
-        seen.add(n)
-        yield n
-        if n.type in ('MIX_SHADER', 'ADD_SHADER'):
-            for s in n.inputs:
-                if s.type == 'SHADER':
-                    yield from _shader_chain(s, seen)
+def _clear_part(nt, sock, made, seen=()):
+    """How see-through the shader feeding `sock` is (1 - three's alpha): a number, an output socket of nodes added
+    to the material (appended to `made`), or None when a node group hides transparency inside it. A Transparent BSDF
+    and a Holdout are clear, a Principled BSDF is clear by 1 - its Alpha, a Mix Shader mixes its sides by its factor,
+    an Add Shader adds them; every other shader is opaque."""
+    if not sock.is_linked:
+        return 0.0
+    n = sock.links[0].from_node
+    if n in seen:
+        return 0.0
+    seen = tuple(seen) + (n,)
+    if n.type == 'REROUTE':
+        return _clear_part(nt, n.inputs[0], made, seen)
+    if n.type in ('BSDF_TRANSPARENT', 'HOLDOUT'):
+        return 1.0
+    if n.type == 'BSDF_PRINCIPLED':
+        a = n.inputs['Alpha']
+        if not a.is_linked:
+            return 1.0 - min(1.0, max(0.0, float(a.default_value)))
+        m = nt.nodes.new('ShaderNodeMath')
+        m.operation, m.use_clamp = 'SUBTRACT', True
+        m.inputs[0].default_value = 1.0
+        nt.links.new(a.links[0].from_socket, m.inputs[1])
+        made.append(m)
+        return m.outputs[0]
+    if n.type in ('MIX_SHADER', 'ADD_SHADER'):
+        sides = [s for s in n.inputs if s.type == 'SHADER']
+        parts = [_clear_part(nt, s, made, seen) for s in sides]
+        if any(p is None for p in parts):
+            return None
+        if all(isinstance(p, float) for p in parts) and (n.type == 'ADD_SHADER' or not n.inputs[0].is_linked):
+            if n.type == 'ADD_SHADER':
+                return min(1.0, parts[0] + parts[1])
+            f = min(1.0, max(0.0, float(n.inputs[0].default_value)))
+            return parts[0] * (1.0 - f) + parts[1] * f
+        if n.type == 'ADD_SHADER':
+            m = nt.nodes.new('ShaderNodeMath')
+            m.operation, m.use_clamp = 'ADD', True
+            ins = (m.inputs[0], m.inputs[1])
+        else:
+            m = nt.nodes.new('ShaderNodeMix')
+            m.data_type, m.clamp_factor = 'FLOAT', True
+            fac, mf = n.inputs[0], NB._sock(m.inputs, 'Factor_Float')
+            if fac.is_linked:
+                nt.links.new(fac.links[0].from_socket, mf)
+            else:
+                mf.default_value = fac.default_value
+            ins = (NB._sock(m.inputs, 'A_Float'), NB._sock(m.inputs, 'B_Float'))
+        for p, s in zip(parts, ins):
+            if isinstance(p, float):
+                s.default_value = p
+            else:
+                nt.links.new(p, s)
+        made.append(m)
+        return m.outputs[0] if n.type == 'ADD_SHADER' else NB._sock(m.outputs, 'Result_Float')
+    if n.type == 'GROUP' and n.node_tree is not None and any(
+            m.type in ('BSDF_TRANSPARENT', 'HOLDOUT') or (m.type == 'BSDF_PRINCIPLED' and (
+                m.inputs['Alpha'].is_linked or m.inputs['Alpha'].default_value < 1.0)) for m in n.node_tree.nodes):
+        return None
+    return 0.0
 
 
-def _uses_alpha(mat):
-    """Whether a material is see-through (blended, or its output's shader chain has a Transparent BSDF, a Holdout,
-    a Principled BSDF with an alpha below one or linked, or a group with transparency inside)."""
-    if getattr(mat, 'surface_render_method', 'DITHERED') == 'BLENDED':
-        return True
-    outs = [n for n in mat.node_tree.nodes if n.type == 'OUTPUT_MATERIAL']
-    for o in outs:
-        for n in _shader_chain(o.inputs['Surface'], set()):
-            if n.type in ('BSDF_TRANSPARENT', 'HOLDOUT'):
-                return True
-            a = n.inputs.get('Alpha')
-            if a is not None and (a.is_linked or getattr(a, 'default_value', 1.0) < 1.0):
-                return True
-            if n.type == 'GROUP' and n.node_tree is not None and any(
-                    m.type in ('BSDF_TRANSPARENT', 'HOLDOUT') for m in n.node_tree.nodes):
-                return True
-    return False
-
-
-def fog_material(K, mat):
-    """Wrap a material that is not the kit's (the singer's, a prop's) in the city's haze, as three's scene.fogNode
-    fogged every material in the scene: its surface mixed toward the fog colour by the fog factor (the uf_fog group),
-    in place, once. See-through materials are left as they are (a mix toward an opaque fog colour would box their
-    clear areas in haze). Returns True when wrapped. unfog_material(mat) takes it out."""
-    if mat is None or not mat.use_nodes or mat.get(FOG_TAG) or _uses_alpha(mat):
-        return False
+def _render_output(mat):
+    """(the Material Output EEVEE renders this material through, the group node holding it or None). An active
+    output for EEVEE wins over one for every engine, and a node group of the material may carry it: the VRM add-on's
+    MToon output group renders a VRM's MToon materials through its own EEVEE output, past the material's own."""
     nt = mat.node_tree
-    outs = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL']
-    outs = [n for n in outs if n.is_active_output] or outs
-    if not outs or not outs[0].inputs['Surface'].is_linked:
+    own = [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL']
+    active = [n for n in own if n.is_active_output]
+    for o in active:
+        if o.target == 'EEVEE':
+            return o, None
+    for gn in nt.nodes:
+        if gn.type == 'GROUP' and gn.node_tree is not None:
+            for o in gn.node_tree.nodes:
+                if o.type == 'OUTPUT_MATERIAL' and o.is_active_output and o.target == 'EEVEE':
+                    return o, gn
+    for o in active:
+        if o.target == 'ALL':
+            return o, None
+    return ((active or own)[0], None) if own else (None, None)
+
+
+def fog_material(K, mat, group=None):
+    """Wrap a material that is not the set's own (a performer's, a prop's) in the set's haze, as three's scene fog
+    fogged every material in the scene: in place and once, its surface S becomes
+    Mix(factor, S, Mix(alpha, Transparent, Emission(color))), the haze's factor and colour from `group` (a shader node
+    group with outputs factor and color; the city kit's uf_fog by default). alpha is the surface's own coverage (its
+    Principled Alpha, its mixes with a Transparent BSDF or a Holdout), so a see-through material keeps its alpha and
+    fogs only what it covers, as three fogged a fragment's colour and kept its alpha: a hair card, a decal, an
+    alpha-cut leaf, a blended veil, and an additive glow that fades by 1 - factor. The surface wrapped is the one EEVEE
+    renders (_render_output): for a VRM's MToon material, the add-on's MToon output group's own; that group is shared
+    by every MToon material in the file, so the material gets a copy of it with the wrap inside, one copy per output
+    group and haze, shared by the materials wrapped in that haze. Returns True when wrapped (False: no surface, already
+    wrapped, or a node group in its surface hides a transparency of its own). unfog_material(mat) takes it out."""
+    if mat is None or mat.node_tree is None or mat.get(FOG_TAG):
         return False
-    surf = outs[0].inputs['Surface']
-    src = surf.links[0].from_socket
-    g = nt.nodes.new('ShaderNodeGroup')
-    g.node_tree = K.fog_group()
-    g.name = 'uf_fog_wrap_group'
-    e = nt.nodes.new('ShaderNodeEmission')
-    e.name = 'uf_fog_wrap_emit'
-    nt.links.new(g.outputs['color'], e.inputs['Color'])
-    mx = nt.nodes.new('ShaderNodeMixShader')
-    mx.name = 'uf_fog_wrap_mix'
-    nt.links.new(g.outputs['factor'], mx.inputs[0])
-    nt.links.new(src, mx.inputs[1])
-    nt.links.new(e.outputs[0], mx.inputs[2])
-    nt.links.new(mx.outputs[0], surf)
-    x, y = outs[0].location
-    for i, n in enumerate((g, e, mx)):
-        n.location = (x - 220 + 70 * i, y - 260 - 60 * i)
+    haze = group if group is not None else K.fog_group()
+    out, holder = _render_output(mat)
+    if out is None or not out.inputs['Surface'].is_linked:
+        return False
+    if holder is None:
+        if not _wrap_surface(mat.node_tree, out, haze):
+            return False
+    else:
+        orig = holder.node_tree
+        copy = next((g for g in bpy.data.node_groups if g.get(FOG_TAG) == orig.name
+                     and g.get(FOG_TAG + '_haze') == haze.name), None)
+        if copy is None:
+            copy = orig.copy()
+            copy.name = f'{orig.name} ({haze.name})'
+            copy[FOG_TAG] = orig.name                                   # the group it is a fogged copy of
+            copy[FOG_TAG + '_haze'] = haze.name
+            if not _wrap_surface(copy, _render_output_in(copy), haze):
+                bpy.data.node_groups.remove(copy)
+                return False
+        holder.node_tree = copy
     mat[FOG_TAG] = True
     return True
 
 
+def _render_output_in(tree):
+    return next(o for o in tree.nodes if o.type == 'OUTPUT_MATERIAL' and o.is_active_output and o.target == 'EEVEE')
+
+
+def _wrap_surface(nt, out, haze):
+    """fog_material's wrap at one Material Output of the node tree nt (a material's or a group's)."""
+    surf = out.inputs['Surface']
+    src = surf.links[0].from_socket
+    made = []
+    clear = _clear_part(nt, surf, made)
+    if clear is None:
+        for n in made:
+            nt.nodes.remove(n)
+        return False
+    for i, n in enumerate(made):
+        n.name = f'{_WRAP}_cover_{i}'
+    g = nt.nodes.new('ShaderNodeGroup')
+    g.node_tree = haze
+    g.name = f'{_WRAP}_group'
+    e = nt.nodes.new('ShaderNodeEmission')
+    e.name = f'{_WRAP}_emit'
+    nt.links.new(g.outputs['color'], e.inputs['Color'])
+    fogged = e.outputs[0]
+    extra = []
+    if not (isinstance(clear, float) and clear <= 0.0):
+        tr = nt.nodes.new('ShaderNodeBsdfTransparent')        # the haze covers only what the surface covers
+        tr.name = f'{_WRAP}_clear'
+        cov = nt.nodes.new('ShaderNodeMixShader')
+        cov.name = f'{_WRAP}_alpha'
+        if isinstance(clear, float):
+            cov.inputs[0].default_value = 1.0 - clear
+        else:
+            inv = nt.nodes.new('ShaderNodeMath')
+            inv.operation, inv.use_clamp = 'SUBTRACT', True
+            inv.name = f'{_WRAP}_cover'
+            inv.inputs[0].default_value = 1.0
+            nt.links.new(clear, inv.inputs[1])
+            nt.links.new(inv.outputs[0], cov.inputs[0])
+            extra.append(inv)
+        nt.links.new(tr.outputs[0], cov.inputs[1])
+        nt.links.new(e.outputs[0], cov.inputs[2])
+        fogged = cov.outputs[0]
+        extra += [tr, cov]
+    mx = nt.nodes.new('ShaderNodeMixShader')
+    mx.name = f'{_WRAP}_mix'
+    nt.links.new(g.outputs['factor'], mx.inputs[0])
+    nt.links.new(src, mx.inputs[1])
+    nt.links.new(fogged, mx.inputs[2])
+    nt.links.new(mx.outputs[0], surf)
+    x, y = out.location
+    for i, n in enumerate(made + extra + [g, e, mx]):
+        n.location = (x - 420 + 70 * (i % 6), y - 260 - 60 * (i // 6) - 30 * i)
+    return True
+
+
+def _fogged_copy_of(mat):
+    """(the group node, the fogged copy it uses) when fog_material wrapped this material inside a copy of its output
+    group, else (None, None)."""
+    for gn in mat.node_tree.nodes:
+        if gn.type == 'GROUP' and gn.node_tree is not None and gn.node_tree.get(FOG_TAG):
+            return gn, gn.node_tree
+    return None, None
+
+
 def unfog_material(mat):
-    """Take fog_material's wrap out again (the surface back on the output)."""
+    """Take fog_material's wrap out again: the surface back on the output, or the material's own output group back in
+    place of its fogged copy (the copy goes once no material uses it)."""
     if mat is None or not mat.get(FOG_TAG):
         return False
     nt = mat.node_tree
-    mx = nt.nodes.get('uf_fog_wrap_mix')
+    gn, copy = _fogged_copy_of(mat)
+    if gn is not None:
+        orig = bpy.data.node_groups.get(copy[FOG_TAG])
+        if orig is not None:
+            gn.node_tree = orig
+            if copy.users == 0:
+                bpy.data.node_groups.remove(copy)
+    mx = nt.nodes.get(f'{_WRAP}_mix')
     if mx is not None and mx.inputs[1].is_linked:
         src = mx.inputs[1].links[0].from_socket
         for o in [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL']:
             if any(l.from_node == mx for l in o.inputs['Surface'].links):
                 nt.links.new(src, o.inputs['Surface'])
-    for nm in ('uf_fog_wrap_mix', 'uf_fog_wrap_emit', 'uf_fog_wrap_group'):
-        n = nt.nodes.get(nm)
-        if n is not None:
-            nt.nodes.remove(n)
+    for n in [n for n in nt.nodes if n.name.startswith(_WRAP)]:
+        nt.nodes.remove(n)
     del mat[FOG_TAG]
     return True
 
 
-def fog_objects(K, objects):
-    """fog_material on every material of these objects (meshes; others are skipped). Returns (wrapped, left
-    see-through)."""
+def unfog_group(group):
+    """unfog_material on every material wrapped in this haze group: a set's dispose calls it before the group goes,
+    so your own objects keep their own surfaces. Returns how many."""
+    n = 0
+    for m in list(bpy.data.materials):
+        if m.get(FOG_TAG) and m.node_tree is not None:
+            _gn, copy = _fogged_copy_of(m)
+            g = (copy or m.node_tree).nodes.get(f'{_WRAP}_group')
+            if g is not None and g.node_tree == group:
+                n += bool(unfog_material(m))
+    return n
+
+
+def fog_objects(K, objects, group=None):
+    """fog_material on every material of these objects (meshes; others are skipped), see-through ones included.
+    group: the haze's node group (the kit's uf_fog by default). Returns (wrapped, left: materials no wrap could
+    reach, a node group hiding its transparency)."""
     done, left = 0, 0
     seen = set()
     for ob in objects:
@@ -1819,7 +1958,7 @@ def fog_objects(K, objects):
             if m is None or m.name in seen:
                 continue
             seen.add(m.name)
-            if fog_material(K, m):
+            if fog_material(K, m, group):
                 done += 1
             elif not m.get(FOG_TAG):
                 left += 1

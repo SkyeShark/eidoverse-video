@@ -14,6 +14,8 @@ weather_system.py, redgiant.py). The world's geometry (the ringworld band, the s
 (ringworld.py, asteroid_moon.py) whose materials composite the sky's shield and clouds over themselves, so the local
 clouds always draw in front of them, as the WebGPU draw order had it. EEVEE uses the rest natively: the world shows
 the sky and lights with it, the sun lamp is keyed from the palette, a hidden caster plane carries the cloud shadows.
+As makeSky does, the sky builds its weather (eidoblend.weather: rain, wet ground, lightning, the weather audio) as
+soon as its direction names a weather that rains, strikes or wets, and bakes it with the sky.
 See tools-guides/sky-weather.md.
 """
 import json
@@ -24,7 +26,7 @@ import numpy as np
 
 from . import palette as P
 from .sky_system import SkySystem
-from .weather_system import WeatherSystem, WEATHER
+from .weather_system import WeatherSystem, WEATHER, LEGACY_STATES
 from .worlds import WORLDS, SKY_WORLDS, ring_constants
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
@@ -49,6 +51,26 @@ NIGHT_AMBIENT = (0.0685, 0.4910, 1.0)          # 0x4abaff (sRGB) in linear
 MOON_AMBIENT = (0.6308, 0.1441, 0.0452)        # 0xd06a3c (sRGB) in linear
 MOON_KEY = (1.0, 0.62, 0.35)                   # the moon's key: the red giant's spectrum
 CLIP_FOR = dict(ringworld=16000.0, shieldworld=60000.0)
+# the ring deck's shape options (sky_system.js opts) and the ring_constants arguments they set
+RING_DECK_OPTS = dict(ringCloudBase='base', ringCloudThick='thick', ringLocalHalf='local_half',
+                      ringWispCurveHalf='wisp_curve_half')
+TEXTURE_KEYS = ('stars', 'moon')
+
+
+def weather_acts(name, k=1.0):
+    """Whether a weather state puts weather on the ground at strength k: rain, lightning or wetness (its WEATHER
+    entry's rain, lightning, wet). These are the states for which make_sky builds the weather system."""
+    w = WEATHER.get(LEGACY_STATES.get(name, name)) if name else None
+    return bool(w) and float(k) > 0.0001 and (w['rain'] > 0 or w['lightning'] > 0 or w['wet'] > 0)
+
+
+def _asset_file(path, what):
+    """An image path as given (absolute, or relative to the working folder), else under eidoverse/assets/sky/."""
+    for p in (path, os.path.join(ASSETS, path)):
+        if os.path.isfile(p):
+            return os.path.abspath(p)
+    raise FileNotFoundError('make_sky: %s %s is not a file (an absolute path, or one under eidoverse/assets/sky/)'
+                            % (what, path))
 
 
 def _cam_window(cam_obj, scene):
@@ -102,16 +124,25 @@ def _resize_bilinear(img, h, w):
 
 class Sky:
     def __init__(self, scene, camera, world, hours, clouds, weather, weather_k, sun, cache_dir, quality, ambient,
-                 shadows, opts, shadow_height=None, shadow_ground=0.0, cloud_dome=None):
+                 shadows, opts, shadow_height=None, shadow_ground=0.0, cloud_dome=None, celestial=None, textures=None,
+                 cloud_shadow_strength=1.0, weather_fx=None, state_only=False):
         import bpy
         if world not in WORLDS:
             raise ValueError("make_sky: unknown world '%s'. Pick one of: %s" % (world, ' | '.join(WORLDS)))
+        if weather_fx is not None and not isinstance(weather_fx, (bool, dict)):
+            raise ValueError('make_sky: weather_fx is None (built when the weather rains, strikes or wets), True, '
+                             'False or a dict of make_weather_system options')
+        if not 0.0 <= float(cloud_shadow_strength) <= 1.0:
+            raise ValueError('make_sky: cloud_shadow_strength runs from 0 (no cloud shadows) to 1 (full)')
         self.scene = scene
         self.camera = camera or scene.camera
         if self.camera is None:
             raise ValueError('make_sky: pass camera= or set scene.camera')
         self.W = WORLDS[world]
         self.world_key = world
+        # the weather's own clock (eidoblend.weather without a sky): the state machine and the direction recipe, no
+        # lamp, no world, nothing to bake
+        self.state_only = bool(state_only)
         opts = dict(opts or {})
         self.audio_on = bool(opts.pop('audio', True))   # makeSky's audio flag: the weather-audio timeline on or off
         o = dict(self.W['sky'])
@@ -120,12 +151,24 @@ class Sky:
         o.update(hours=hours, clouds=clouds)
         if self.W.get('planetShine') and 'moonLightColor' not in opts:
             o['moonLightColor'] = tuple(self.W['planetShine'])
-        # the world's celestial module FIRST: the red giant's palette goes into the sky it rides
-        self.red_giant = None
+        if o.get('earthRadius') is not None and not float(o['earthRadius']) > 0:
+            raise ValueError('make_sky: earthRadius is the planet\'s radius in metres, above 0')
+        # the celestial body FIRST: the red giant's palette goes into the sky it rides. The shieldworld's is its own
+        # red giant; another world takes one through celestial= (makeSkySystem's opts.celestial)
+        self.celestial = None
         if world == 'shieldworld':
+            if celestial is not None:
+                raise ValueError("make_sky: the shieldworld's celestial body is its own red giant; celestial= puts one "
+                                 'in the other worlds')
             from .redgiant import make_red_giant
-            self.red_giant = make_red_giant(dict(opts.get('redGiant') or {}, shield=True))
-            o.setdefault('paletteTint', self.red_giant.palette_tint)
+            self.celestial = make_red_giant(dict(opts.get('redGiant') or {}, shield=True))
+        elif celestial is not None:
+            if not callable(getattr(celestial, 'celestial_glsl', None)):
+                raise ValueError('make_sky: celestial= takes a body with celestial_glsl() (make_red_giant, or your own '
+                                 'with the same contract: see tools-guides/sky-weather.md)')
+            self.celestial = celestial
+        if self.celestial is not None and getattr(self.celestial, 'palette_tint', None):
+            o.setdefault('paletteTint', self.celestial.palette_tint)
         self._opts0 = o                       # the starting point every bake replays from
         self._weather0 = (weather, weather_k)
         self.q = dict(QUALITY[quality]) if isinstance(quality, str) else dict(quality)
@@ -133,13 +176,16 @@ class Sky:
         self.use_shadows = shadows
         self.shadow_height = shadow_height    # None: just under the lowest cloud base of the bake
         self.shadow_ground = shadow_ground
+        self.cloud_shadow_strength = float(cloud_shadow_strength)
         if cache_dir is None and bpy.data.filepath:
             cache_dir = bpy.path.abspath('//sky_cache')
         self.cache_dir = cache_dir
         if not self.cache_dir:
             raise ValueError('make_sky: pass cache_dir= (the .blend is unsaved, so there is no // to bake beside)')
-        self.sun = sun or self._make_sun_lamp()
-        self.weather_fx = None              # set by eidoblend.weather.make_weather_system
+        self.textures = self._textures(textures)
+        self.sun = None if self.state_only else (sun or self._make_sun_lamp())
+        self.weather_fx = None              # the weather system on this sky (eidoblend.weather.make_weather_system)
+        self._fx_auto = False               # make_sky builds it when the direction first names a weather that acts
         self.fog = None
         self.dome_radius = None
         self.layer_scale = 1.0
@@ -162,6 +208,47 @@ class Sky:
         if cloud_dome:
             self.use_cloud_dome(3072.0 if cloud_dome is True else float(cloud_dome))
         self._reset_state()
+        # makeSky's weather: sky_worlds.js builds makeWeatherSystem inside makeSky and wraps the scene
+        if not self.state_only and weather_fx is not False:
+            if weather_fx is None:
+                self._fx_auto = True
+                if weather_acts(weather, weather_k):
+                    self._build_weather()
+            else:
+                self._build_weather(weather_fx if isinstance(weather_fx, dict) else None)
+
+    def _textures(self, textures):
+        """The star and moon maps: the world's, or the scene's own (make_sky(textures={'stars': path, 'moon': path}),
+        makeSkySystem's textures)."""
+        t = dict(textures or {})
+        bad = sorted(set(t) - set(TEXTURE_KEYS))
+        if bad:
+            raise ValueError("make_sky: textures takes 'stars' and 'moon' (image paths), not %s"
+                             % ', '.join(repr(k) for k in bad))
+        if t.get('moon') and self.W.get('moon'):
+            raise ValueError("make_sky: the %s's moon is its shattered cluster, so a moon map would draw a second moon "
+                             'beside it' % self.world_key)
+        moonmap = self.W.get('moonmap')
+        out = dict(stars=os.path.join(ASSETS, self.W['starmap']), moon=os.path.join(ASSETS, moonmap) if moonmap else None)
+        for key in TEXTURE_KEYS:
+            if t.get(key):
+                out[key] = _asset_file(t[key], "textures['%s']" % key)
+        return out
+
+    # ---- the weather this sky builds ----
+    def _build_weather(self, opts=None):
+        """make_sky's own weather system (eidoblend.weather), with the scene's materials wrapped for wetness. It is the
+        sky's: bake() hands the bake to it, and it bakes the sky with its flashes in it."""
+        from ..weather.system import make_weather_system
+        self._fx_auto = False
+        fx = make_weather_system(self.scene, self, **dict(opts or {}))
+        fx.owned_by_sky = True
+        fx.wrap_scene()
+        return fx
+
+    def _weather_named(self, name, k):
+        if self._fx_auto and not self._replaying and self.weather_fx is None and weather_acts(name, k):
+            self._build_weather()
 
     # ---- the world's geometry ----
     def _build_ring(self, opts):
@@ -181,7 +268,15 @@ class Sky:
         # the band behind every local object (WebGPU's depthless band): its own scene, a plate in the camera layer
         self.ring.make_plate()
         self._plate_job = None
-        self.ring_k = ring_constants(self.W['sky']['ringCurve'])
+        # the deck's shape: the world's ring curve, with sky_system.js's ringCloudBase / ringCloudThick /
+        # ringLocalHalf / ringWispCurveHalf where the scene gives them
+        deck = {}
+        for name, arg in RING_DECK_OPTS.items():
+            if opts.get(name) is not None:
+                if not float(opts[name]) > 0:
+                    raise ValueError('make_sky: %s is in metres, above 0' % name)
+                deck[arg] = float(opts[name])
+        self.ring_k = ring_constants(self.W['sky']['ringCurve'], **deck)
 
     def _build_moon(self):
         from .asteroid_moon import make_shattered_moon
@@ -199,12 +294,16 @@ class Sky:
         self.sky = SkySystem(self._opts0)
         if self.ring is not None:
             self.sky.U['ringDeckBase'] = self.ring_k['RING_BASE']
+            self.sky.U['ringDeckThick'] = self.ring_k['RING_THICK']
             # Eanpa ringsky.js sky.setSolarOcclusion: the eclipse proxy shadows every receiver of the sun lamp, so
             # the lamp is not also dimmed by the camera's visibility (that one still dims the sky)
             self.sky.solar_occlusion = 'ring_eclipse_proxy'
         self.wx = WeatherSystem(self.sky)
-        if self.red_giant is not None:
-            self.red_giant.attach(self.sky)
+        if self.celestial is not None:
+            if callable(getattr(self.celestial, 'attach', None)):
+                self.celestial.attach(self.sky)
+            else:
+                self.sky.celestial_module = self.celestial
         if self.ring is not None:
             self.ring.bind_weather(self.wx, self.sky)
         if self._weather0[0]:
@@ -247,8 +346,11 @@ class Sky:
     def internals(self):
         """Escape hatch for engine work only (sky_worlds.js _internals {sky, wx, band, celestialMod, wxAudio, moon}):
         sky, wx, band, celestial_mod (also as celestial), wx_audio (the attached weather system), moon."""
-        return dict(sky=self.sky, wx=self.wx, band=self.ring, celestial_mod=self.red_giant, celestial=self.red_giant,
+        return dict(sky=self.sky, wx=self.wx, band=self.ring, celestial_mod=self.celestial, celestial=self.celestial,
                     wx_audio=self.weather_fx, moon=self.moon)
+
+    def _has_shield(self):
+        return bool(getattr(self.celestial, 'has_shield', False))
 
     # ---- direction calls (immediate, or at media time `at` seconds) ----
     def _at(self, at, fn):
@@ -282,22 +384,25 @@ class Sky:
         return self._at(at, lambda: self.sky.transition_clouds(kind, seconds))
 
     def set_weather(self, name, k=1.0, at=None):
+        self._weather_named(name, k)
         return self._at(at, lambda: self.wx.set_weather(name, k))
 
     def transition_to(self, name, k=1.0, seconds=45.0, at=None):
+        self._weather_named(name, k)
         return self._at(at, lambda: self.wx.transition_to(name, k, seconds))
 
     def set_colors(self, colors, at=None):
         """Per-channel retints over the package's authored look: cloud, star (or sun), sky, fog, rain, and shield
-        (the red giant only: a world without a shield ignores it, with a warning, as sky_worlds.js does)."""
-        if colors.get('shield') is not None and not self.W.get('shield'):
+        (the red giant only: a sky without a shield ignores it, with a warning, as sky_worlds.js does)."""
+        shield = self._has_shield()
+        if colors.get('shield') is not None and not shield:
             print("[sky_worlds] set_colors: '%s' has no shield, so a shield colour has nothing to apply to; ignored. "
                   'The shield belongs to the red giant package.' % self.world_key)
 
         def fn():
             self.sky.set_colors(dict(cloud=colors.get('cloud'), star=colors.get('star', colors.get('sun')),
                                      sky=colors.get('sky'), fog=colors.get('fog'),
-                                     shield=colors.get('shield') if self.W.get('shield') else None))
+                                     shield=colors.get('shield') if shield else None))
             if colors.get('rain'):
                 self.wx.set_colors(dict(rain=colors['rain']))
         return self._at(at, fn)
@@ -331,9 +436,10 @@ class Sky:
         return self
 
     def wrap_scene(self):
-        """The weather wraps the scene's materials for wetness and puddles: delegated to the weather system attached
-        to this sky (eidoblend.weather.make_weather_system sets sky.weather_fx); without one there is nothing to
-        wrap. Call it again after adding geometry. Returns the sky."""
+        """The weather wraps the scene's materials for wetness and puddles: delegated to the sky's weather system
+        (sky.weather_fx: the one make_sky built, or one eidoblend.weather.make_weather_system attached); without one
+        there is nothing to wrap. The weather wraps the scene when it is built, and the weather make_sky built wraps
+        it again at each bake; call this after adding geometry to a weather of your own. Returns the sky."""
         fx = getattr(self, 'weather_fx', None)
         if fx is not None:
             fx.wrap_scene()
@@ -368,6 +474,20 @@ class Sky:
     def moon_dir(self):
         return P.three_to_blender(self.sky.moon_dir)
 
+    def sun_coverage_dim(self, x, y, strength=0.7):
+        """sunCoverageDim: the 'sun behind cloud' factor at the ground point (x, y) (Blender metres) for the sky's
+        current state. It reads the weather field's coverage where the key light's ray from that point meets the cloud
+        base (the light at least 0.12 up), k = (coverage - 0.35) / 1.05 clamped to 0..1, and returns 1 - k * strength:
+        1 under a clear column, 1 - strength under full cover. It drives a light's or an effect's intensity; read it
+        per frame inside frame_states() (on_frame runs before the frame's update)."""
+        U = self.sky.U
+        L = U['cloudLightDir']
+        dy = max(0.12, float(L[1]))
+        t = float(U['cloudStart']) / dy
+        cov = self.baker().weather_at(U, float(x) + L[0] * t, -float(y) + L[2] * t)
+        k = min(1.0, max(0.0, (cov - 0.35) / 1.05))
+        return 1.0 - k * float(strength)
+
     # ---- one frame of state, in the JS facade's order ----
     def update(self, t):
         while self.schedule and self.schedule[0][0] <= t + 1e-9:
@@ -401,8 +521,8 @@ class Sky:
         self.wx.update(t)
         if self.ring is not None:
             self.ring_vals = self.ring.update(t)
-        if self.red_giant is not None:
-            self.red_giant.update(t)
+        if self.celestial is not None and callable(getattr(self.celestial, 'update', None)):
+            self.celestial.update(t)
         L = self.sky.apply_to_lights()
         L['sun_intensity'] *= self.wx.sun_dim()
         L['hemi_dim'] = self.wx.hemi_dim()
@@ -457,24 +577,30 @@ class Sky:
             # Eanpa's ice-trail atlas when the repo carries it, else the in-repo analytic mares'-tail plumes
             cirrus = self.cirrus_atlas or os.path.join(ASSETS, 'cirrus_ice_trails.png')
             defines, celestial, dust, ring_map, ring_mask = {}, '', '', None, None
+            if o.get('earthRadius') is not None:
+                defines['R_EARTH'] = float(o['earthRadius'])          # sky_system.js opts.earthRadius
             if self.ring is not None:
                 defines.update(self.ring_k)
                 c = self.ring.ring_center_three()
-                defines.update(HAS_RING_ENV=1, RING_CENTER_Y=float(c[1]), RING_BAND_R=5000.0,
-                               RING_HALF_W=483.0, RING_REPEAT=float(self.ring.info['repeat']),
-                               RING_PHASE=float(self.ring.info['phase']))
+                # the environment traces the band at its own size (sky_worlds.js bakeEnv: band.info radius, halfWidth)
+                defines.update(HAS_RING_ENV=1, RING_CENTER_Y=float(c[1]), RING_BAND_R=float(self.ring.info['radius']),
+                               RING_HALF_W=float(self.ring.info['halfWidth']),
+                               RING_REPEAT=float(self.ring.info['repeat']), RING_PHASE=float(self.ring.info['phase']))
                 ring_map, ring_mask = self.ring.map_path, self.ring.info['mask_path']
-            if self.red_giant is not None:
-                defines.update(self.red_giant.shader_defines())
-                celestial = self.red_giant.celestial_glsl()
+            if self.celestial is not None:
+                defines['HAS_CELESTIAL'] = 1
+                if callable(getattr(self.celestial, 'shader_defines', None)):
+                    defines.update(self.celestial.shader_defines())
+                celestial = self.celestial.celestial_glsl()
             if self.moon is not None:
                 defines['HAS_DUST'] = 1
                 dust = self.moon.dust_glsl()
-            moonmap = self.W.get('moonmap')
-            self._baker = SkyBaker(stars=os.path.join(ASSETS, self.W['starmap']),
-                                   moon=os.path.join(ASSETS, moonmap) if moonmap else None,
-                                   cirrus=cirrus,
+            # the storm march (opts.stormSamples, the JS's 12) and the cloud-shadow march (opts.cloudShadowSamples,
+            # Eanpa's default: the main march's step count, within 32-64)
+            self._baker = SkyBaker(stars=self.textures['stars'], moon=self.textures['moon'], cirrus=cirrus,
                                    n_march=self.q['n_march'], n_light=self.q['n_light'], m_pass=self.q['m_pass'],
+                                   n_storm_steps=o.get('stormSamples', 12),
+                                   n_cloud_shadow=o.get('cloudShadowSamples', self.q['n_march']),
                                    phase_soften=o.get('cloudPhaseSoften', 0.0),
                                    ms_floor=o.get('cloudMultiScatterFloor', 0.008), defines=defines,
                                    celestial=celestial, dust=dust, ring_map=ring_map, ring_mask=ring_mask)
@@ -513,7 +639,21 @@ class Sky:
         """Replay the direction calls frame by frame, render the sky layers, key the world, the lamps and the
         world's geometry. On the ringworld, render the band's plate per frame into the camera layer: plate_scale is
         its pixel density against the frame's (1: the frame's own, so the band's textures take the mip levels a
-        direct render gives them; above 1 is crisper, but sharpens the night water's glints)."""
+        direct render gives them; above 1 is crisper, but sharpens the night water's glints).
+
+        With the weather make_sky built (sky.weather_fx), the bake is the weather's: it wraps the materials the
+        scene gained since for wetness, plans every frame from the scene's first, bakes the sky with the lightning
+        in it and keys the rain, wet ground, lightning and audio contract (WeatherFX.bake). Returns the sky's frame
+        records either way."""
+        if self.state_only:
+            raise ValueError("bake: this is the weather's clock (make_weather_system without a sky); there is no sky "
+                             'to bake: bake the weather (wx.bake())')
+        fx = self.weather_fx
+        if fx is not None and getattr(fx, 'owned_by_sky', False) and not getattr(fx, '_baking', False):
+            fx.wrap_scene()                   # geometry added after make_sky gets wet too (eido_dry keeps it out)
+            fx.bake(frame_start, frame_end, sky_bake=dict(overscan=overscan, layer_scale=layer_scale,
+                                                          plate_scale=plate_scale, log=log))
+            return fx.sky_frames
         import time
         import bpy
         from mathutils import Vector
@@ -538,7 +678,7 @@ class Sky:
         want = ['back' if dome else 'cam']
         if layered:
             want.append('cloud')
-            if self.red_giant is not None and self.red_giant.has_shield:
+            if self._has_shield():
                 want.append('shield')
         plate = self._plate_ready()
         if plate:
@@ -611,10 +751,18 @@ class Sky:
             if dome:
                 from .cloud_dome import build_cloud_dome
                 build_cloud_dome(sc, self.camera, cloud_img, fs, n, radius=self.dome_radius)
+            if self.ring is not None:
+                # the haze walls draw before the dome, as WebGPU's walls (-99) before its cloud dome (-98)
+                self.ring.order_walls_under_dome(self.camera, on=dome)
+        if not dome:
+            from .cloud_dome import remove_cloud_dome
+            remove_cloud_dome()                      # without a dome the world shows the clouds: an earlier one goes
+        from . import cloud_shadows
         if self.use_shadows:
-            from . import cloud_shadows
             cloud_shadows.bake_and_key(self, frames, ground_z=self.shadow_ground, caster_height=self.shadow_height,
                                        log=log)
+        cloud_shadows.link_opt_outs(self, log=log)
+        cloud_shadows.key_clear_share(self, frames, log=log)
         if plate:
             # every key the band reads is in place (the world, the ring's values and lamps, the band sun's cloud-shadow
             # twin): render its plate per frame and composite it into the layer the world shows
@@ -762,16 +910,20 @@ class Sky:
                                         origin_three=(org[0], max(2.0, org[1]), org[2]))
 
     def _key_sun(self, frames):
+        """The sun lamp per frame: direction, colour, and the palette's strength times the share the clouds shadow
+        (cloud_shadow_strength; the clear share's twin carries the rest, cloud_shadows.key_clear_share)."""
         from mathutils import Vector
+        from .cloud_shadows import sun_share
         ob = self.sun
         ob.rotation_mode = 'QUATERNION'
         ld = ob.data
+        share = sun_share(self)
         for fr in frames:
             L = fr['lights']
             d = Vector(P.three_to_blender(L['key_dir'])).normalized()
             ob.rotation_quaternion = d.to_track_quat('Z', 'Y')
             ob.keyframe_insert('rotation_quaternion', frame=fr['frame'])
-            ld.energy = L['sun_intensity']
+            ld.energy = L['sun_intensity'] * share
             ld.color = L['sun_color']
             ld.keyframe_insert('energy', frame=fr['frame'])
             ld.keyframe_insert('color', frame=fr['frame'])
@@ -805,7 +957,8 @@ class Sky:
 
 def make_sky(scene=None, camera=None, world='earth', hours=12.0, clouds='cumulus', weather=None, weather_k=1.0,
              sun=None, cache_dir=None, quality='film', ambient=DEFAULT_AMBIENT, shadows=True, shadow_height=None,
-             shadow_ground=0.0, cloud_dome=None, audio=True, **opts):
+             shadow_ground=0.0, cloud_dome=None, audio=True, weather_fx=None, celestial=None, textures=None,
+             cloud_shadow_strength=1.0, **opts):
     """Select a whole sky world: 'earth' | 'ringworld' | 'shieldworld' (SKY_WORLDS). `weather` (a WEATHER state)
     overrides `clouds`; None keeps the cloud preset.
 
@@ -814,12 +967,23 @@ def make_sky(scene=None, camera=None, world='earth', hours=12.0, clouds='cumulus
     layers (default //sky_cache beside the saved .blend; an unsaved .blend must pass one). `quality` 'film'
     (8 march passes) or 'draft' (3). `ambient` scales the world's diffuse light against the visible sky (see
     DEFAULT_AMBIENT). `shadow_height` puts the cloud-shadow caster that many metres above `shadow_ground`
-    (None: just under the lowest cloud base of the bake, so everything below the clouds receives). `cloud_dome`
-    True (3072 m, WebGPU's) or a radius in metres draws the clouds over geometry beyond it (cloud_dome.py).
-    `audio` (makeSky's flag) keeps the weather-audio timeline on: audio_timeline() and `audio` read the weather
-    system attached to this sky (eidoblend.weather), and return None with audio=False.
-    The world's look-dev (assets, bodies, band placement) is not a parameter: it belongs to the world. Engine
-    options pass through: the SkySystem names, `ring={...}` (make_ringworld options), `redGiant={...}`.
+    (None: just under the lowest cloud base of the bake, so everything below the clouds receives).
+    `cloud_shadow_strength` (0-1, default 1) scales how much the clouds take from the sun lamp: 0.5 gives the
+    softer shadows of eidoverse's wrapCloudShadows(scene, 0.5); an object marked eido_noCloudShadow takes none.
+    `cloud_dome` True (3072 m, WebGPU's) or a radius in metres draws the clouds over geometry beyond it (cloud_dome.py).
+    `weather_fx` (makeSky's own weather): None builds eidoblend.weather's system, with the scene's materials wrapped
+    for wetness, as soon as the direction names a weather that rains, strikes or wets (the `weather` argument,
+    set_weather, transition_to); True builds it now; a dict builds it now with those make_weather_system options
+    (strike_targets, occluders ...); False leaves the sky without one (attach your own with make_weather_system).
+    `audio` (makeSky's flag) keeps the weather-audio timeline on: audio_timeline() and `audio` read the sky's
+    weather system, and return None with audio=False.
+    `celestial` puts a celestial body in an Earth or ringworld sky (makeSkySystem's opts.celestial):
+    make_red_giant({'shield': False}), or any body with the same contract (celestial_glsl(); optionally
+    shader_defines(), palette_tint, attach(sky_system), update(t), has_shield). `textures` takes the scene's own
+    star map and moon map ({'stars': path, 'moon': path}, makeSkySystem's textures) over the world's.
+    The world's look-dev (assets, bodies, band placement) is otherwise not a parameter: it belongs to the world.
+    Engine options pass through: the SkySystem names (earthRadius, ringCloudBase, ringCloudThick, ringLocalHalf,
+    ringWispCurveHalf, stormSamples, cloudShadowSamples ...), `ring={...}` (make_ringworld options), `redGiant={...}`.
     makeSky's `renderer` and `hemi` have no counterpart: the bake renders in Blender's own GPU module, and the EEVEE
     world is the hemisphere light (bake() keys its diffuse fill).
     """
@@ -827,7 +991,9 @@ def make_sky(scene=None, camera=None, world='earth', hours=12.0, clouds='cumulus
     scene = scene or bpy.context.scene
     opts['audio'] = audio
     return Sky(scene, camera, world, hours, clouds, weather, weather_k, sun, cache_dir, quality, ambient, shadows,
-               opts, shadow_height=shadow_height, shadow_ground=shadow_ground, cloud_dome=cloud_dome)
+               opts, shadow_height=shadow_height, shadow_ground=shadow_ground, cloud_dome=cloud_dome,
+               celestial=celestial, textures=textures, cloud_shadow_strength=cloud_shadow_strength,
+               weather_fx=weather_fx)
 
 
-__all__ = ['make_sky', 'SKY_WORLDS', 'WORLDS', 'WEATHER', 'Sky']
+__all__ = ['make_sky', 'SKY_WORLDS', 'WORLDS', 'WEATHER', 'Sky', 'weather_acts']

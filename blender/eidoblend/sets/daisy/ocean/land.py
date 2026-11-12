@@ -259,8 +259,9 @@ def build_land(coast, parent=None, collection=None, mesh=True, grass=True, daisi
     """buildLand(THREE, coast): the land mesh with its blended Poly Haven sand / wet sand / withered grass, the dune grass
     (2600 tufts of geometry blades swaying from a keyed clock: custom property 't' on the grass object), and her
     flowers (the flora family's daisy, shut for the night). parent: the layout Empty (design frame).
-    design_to_world(x3, z3, y3=0) / world_to_design(x, y): the flora field lives in world space at the world origin,
-    so it is planted through these. webgpu_sway: the WebGPU edition's grass sway arithmetic (_land_nodes._sway_group)."""
+    design_to_world(x3, z3, y3=0) / world_to_design(x, y): the flora field is planted in world space, through these;
+    then it is parented to the land with its placement kept, so it moves and turns with the set from there on.
+    webgpu_sway: the WebGPU edition's grass sway arithmetic (_land_nodes._sway_group)."""
     import bpy
     from . import _bl, _land_nodes
     col = collection or bpy.context.scene.collection
@@ -299,5 +300,6 @@ def build_land(coast, parent=None, collection=None, mesh=True, grass=True, daisi
                                 clear=[{'a': (-0.25, 0.0), 'b': (0.25, 0.0), 'w': 1.25}], close=1.0,
                                 stem_height=(0.16, 0.28), head_scale=1.2, wind=0.35,
                                 design_to_world=design_to_world, world_to_design=world_to_design, collection=col)
+        _bl.parent_keep_world(flowers.group, group)        # in the set, as daisies.js's field was in its group
     return Land(group=group, land=land, grass=grass_ob, mats=[m for m in (mat, gmat) if m], grass_count=len(blades),
                 daisies=flowers, tuft=tuft, blades=blades)

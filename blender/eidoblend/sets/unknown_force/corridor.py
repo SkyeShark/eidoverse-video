@@ -12,7 +12,8 @@ uniform on a tailor's stand, a peaked cap on a velvet cushion, and the AI FORCE 
     C.parts['postWall'].set_text('A NEW POST', name='MINISTRY OF ANYTHING')   # the LED wall reposts
     C.parts['poll'].set_tally(512000, 418000, 141000, stamp=False)         # a recount
     C.apply_look(scene)                                          # view exposure, EEVEE settings the set was lit for
-    C.bake_probes(scene)                                         # the corridor's volume probe (a GPU job)
+    C.bake_probes(scene)                                         # the corridor's volume probe (a GPU job); the
+                                                                 # floor's planar probe needs no bake
     cam = C.camera('door', scene)                                # the set's five cameras, from C.cams
     C.update(0.0, {'open': 0.4, 'post': 0.5})                    # a still: sets everything, keys nothing
     # its moving parts on your own clock, KEYED (t in seconds from the scene's first frame, or from t0):
@@ -102,11 +103,12 @@ ImageVariants = CL.ImageVariants
 class Corridor(CL.SetBase):
     """What build() returns (see the module docstring)."""
 
-    def apply_look(self, scene, raytracing=False, view_look=None):
+    def apply_look(self, scene, raytracing=True, view_look=None):
         """The settings the set was lit for: AgX at view_exposure(look exposure); EEVEE with global illumination
-        (fast GI over the corridor's baked probe: bake_probes()) and reflections from the light probes (the floor's
-        mirror is painted, analytically, as in the WebGPU edition, and the metals reflect the set's environment);
-        raytracing=True screen-traces the reflections instead; shadows on. view_look: an AgX look for the scene
+        (fast GI over the corridor's baked probe: bake_probes()), shadows on, and ray-traced reflections: the floor
+        mirrors the room through its planar light probe (parts['mirror']) and screen tracing reflects the rest.
+        raytracing=False finds the reflections in the light probes alone, which leaves the floor's planar probe
+        unused: the floor then shows the probes' soft light, no mirror. view_look: an AgX look for the scene
         ('AgX - Medium High Contrast' follows three's ACES Filmic, the WebGPU frames' tone, to a few levels:
         cn_lib.ACES_LIKE_LOOK); None leaves the scene's look as it is (the pipeline's plain AgX)."""
         scene.view_settings.view_transform = 'AgX'
@@ -123,7 +125,8 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     capFitScale (the JS options) and the Blender edition's own: world (True: the set's environment + hemisphere light
     become scene.world, lighting the set through EEVEE), shadows (True: the set's spot lights cast shadows; its
     fixtures never shadow their own light), plaque (('SUPREME', 'INTELLIGENCE'): the two lines engraved over the
-    door)."""
+    door), mirror (True: the floor's planar light probe, parts['mirror']), probe, probe_spacing, probe_samples (the
+    volume probe: True, 0.6 m, 1024)."""
     import bpy
     from mathutils import Matrix, Vector
     sc = scene or bpy.context.scene
@@ -207,18 +210,6 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         off = nb.step(0.0, side) * nb.step(-16.5, zc) * nb.step(zc, -3.5)
         return (cone * ribs * fall + core * 0.45 + below) * (1.0 - off)
 
-    def fan_soft(nb, z, y, side, dist):
-        """The same fan softened for the floor's mirror (no ribs or hot core; blurrier the further the ray goes)."""
-        k = nb.clamp(nb.floor((16.0 - z) / 4.0 + 0.5), 0, 9)
-        zc = 16.0 - k * 4.0
-        dz, dy = z - zc, y - SCONCE_Y
-        blur = nb.clamp(dist * 0.04, 0.05, 0.4)
-        ang = nb.atan2(dz, nb.max(dy, 0.001))
-        cone = (1.0 - nb.ss(0.4 - blur, 0.62 + blur, nb.abs(ang))) * nb.ss(-0.2, 0.6, dy)
-        fall = nb.exp(nb.max(dy, 0.0) * -0.3)
-        off = nb.step(0.0, side) * nb.step(-16.5, zc) * nb.step(zc, -3.5)
-        return cone * fall * 0.8 * (1.0 - off)
-
     def flick(nb):
         return nb.U('flick')
 
@@ -273,13 +264,9 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     M['bronze'] = L.pbr_mat(S['bronze'], name='corridor_bronze', tile=0.9, metal=1, rough=(0.8, 0.1),
                             tint=[0.75, 0.55, 0.35])
 
-    # the LED wall's post exists before the floor (the floor mirrors it): see further down for the wall itself
-    SW, SH = SCR['z1'] - SCR['z0'], SCR['y1'] - SCR['y0']
-    post_vars = ImageVariants(L, 'corridor_post', 'post_variant')
-
     # the floor: diagonal 1.6 m slabs of the same marble with gold inlay joints, a black border band, a Balla
-    # sunburst inlaid before the door; it mirrors the room's light (analytic reflections of the fans, the LED wall,
-    # the lanterns and the door) and the light that leaks under the door.
+    # sunburst inlaid before the door, the light that leaks under the door and the lanterns' pools. Its polish
+    # mirrors the room through the floor's planar light probe (made with the floor, below).
     def floor_mat():
         Mt = L.mat('corridor_floor')
         nb = Mt.nb
@@ -308,50 +295,13 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         rough = nb.mix(r0.x * 0.25 + 0.035 + v * 0.1, 0.16, inlay)
         metal = nb.mix(v * 0.7 * (1.0 - band), 1.0, inlay)
         nt, _ = nb.tex(S['marble']['nrm'], tUV)
-        # ---- analytic reflections of the emitters (a polished floor reads by what it mirrors)
-        cam = nb.cam_local()
-        V = nb.normalize(P - cam)
-        R = nb.vec3(V.x, -V.y, V.z)
-        sx = nb.select(nb.gt(R.x, 0.0), 1.0, -1.0)
-        tW = (sx * (HW - 0.03) - P.x) / nb.select(nb.gt(nb.abs(R.x), 1e-4), R.x, sx * 1e-4)
-        tD = nb.select(nb.lt(R.z, -1e-4), ((ZD + 0.12) - P.z) / nb.min(R.z, -1e-4), 1e4)
-        hitW, hitD = P + R * tW, P + R * tD
-        wall_first = nb.lt(tW, tD)
-        fanR = fan_soft(nb, hitW.z, hitW.y, sx, tW)
-        su = (hitW.z - SCR['z0']) / (SCR['z1'] - SCR['z0'])
-        sv = (hitW.y - SCR['y0']) / (SCR['y1'] - SCR['y0'])
-        in_scr = nb.step(0, su) * nb.step(su, 1) * nb.step(0, sv) * nb.step(sv, 1) * nb.step(0.0, sx)
-        # texture(post).level(lvl), lvl = clamp(tW * 0.35 + 1.5, 1.5, 6): two pre-blurred copies, mixed by level
-        lvl = nb.clamp(tW * 0.35 + 1.5, 1.5, 6.0)
-        b1, _ = post_vars.sample(nb, 'blur1', nb.vec2(su, sv))
-        b2, _ = post_vars.sample(nb, 'blur2', nb.vec2(su, sv))
-        scr_refl = nb.mix(b1, b2, nb.clamp((lvl - 1.5) / 4.5, 0, 1)) * in_scr * nb.U('screen') * 0.9
-        emitW = nb.w(WARM) * fanR * 0.32 + scr_refl
-        # the door: the gap of light down the middle and under it, the lit gold portal, the blaze when it opens
-        dx, dyh = nb.abs(hitD.x), hitD.y
-        seam = nb.exp(dx * dx * -900.0) * nb.step(dyh, DOOR_H) * nb.U('gap')
-        portal = nb.step(dx, 4.3) * nb.step(dyh, 10.9) * 0.06
-        opening = nb.step(dx, nb.U('open') * DOOR_HW) * nb.step(dyh, DOOR_H) * nb.U('beyond') * 2.2
-        emitD = nb.w((1.0, 0.72, 0.4)) * (seam * 1.5 + portal + opening)
-        lanternR = nb.w((0.0, 0.0, 0.0))
-        for zl in LANT:
-            w_ = nb.w((0.0, LANT_Y, float(zl))) - P
-            s_ = nb.dot(w_, R)
-            d2 = nb.dot(w_, w_) - s_ * s_
-            lanternR = lanternR + nb.w((1.0, 0.7, 0.4)) * (nb.exp(d2 * -2.5) * nb.step(0, s_) * 0.45)
-        emit = nb.select(wall_first, emitW, emitD) + lanternR
-        cosv = nb.clamp(-V.y, 0, 1)
-        F = 0.04 + nb.pow(1.0 - cosv, 5.0) * 0.96
-        gloss = nb.clamp(1.0 - rough * 2.2, 0, 1)
-        tint = nb.mix((1.0, 1.0, 1.0), nb.w(goldC) * 1.3, metal)
-        refl = emit * F * gloss * tint
         # light leaking under the door, and pools under the lanterns
         under = (nb.exp(nb.max(P.z - ZD, 0.0) * -5.0) * nb.ss(3.35, 3.0, ax)
                  * (nb.U('gap') * 0.6 + nb.U('open') * nb.U('beyond') * 1.6))
         pools = 0.0
         for zl in LANT:
             pools = pools + nb.exp((P.x * P.x + (P.z - zl) * (P.z - zl)) * -0.22)
-        em = (refl + nb.w((1.0, 0.66, 0.32)) * under * 0.9 + col_ * pools * WARM * 0.04) * nb.U('lights')
+        em = (nb.w((1.0, 0.66, 0.32)) * under * 0.9 + col_ * pools * WARM * 0.04) * nb.U('lights')
         return Mt.standard(col_, rough=nb.clamp(rough, 0.03, 1), metal=metal, normal=nb.normal_map(nt, 0.25),
                            emissive=em)
 
@@ -526,8 +476,21 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     add_mesh(ceilB, M['ceiling'], noSupportCheck=True)
     M['floor'] = floor_mat()
     floor_geo = _tile_uv(floorB.geometry())
-    L.mesh_object('corridor_floor', floor_geo, M['floor'], parent=room)
+    floor_ob = L.mesh_object('corridor_floor', floor_geo, M['floor'], parent=room)
     add_mesh(carpetB, M['carpet'], noZFightCheck=True)
+    # the floor's mirror: a planar light probe over the whole floor, which EEVEE's ray tracing reflects the room in.
+    # The floor lies on the probe's plane and a mirror never shows itself: it stays out of the probe's capture.
+    if opts.get('mirror', True):
+        pd = bpy.data.lightprobes.new(f'{name}:floor_mirror', 'PLANE')
+        mirror = bpy.data.objects.new(f'{name}:floor_mirror', pd)
+        col.objects.link(mirror)
+        mirror.parent = root
+        mirror.location = CL.b3((0.0, 0.0, ZM))
+        mirror.scale = (HW, LEN / 2, 1.0)
+        floor_ob.hide_probe_plane = True
+        L.own(pd)
+        L.own(mirror)
+        C.parts['mirror'] = mirror
 
     # the plaque (on the transom) and the doors (each on its hinge pivot)
     plaque_ob = L.mesh_object('corridor_plaque', plane_geometry(2 * DOOR_HW, 1.7), M['plaque'], parent=room,
@@ -580,6 +543,8 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
                            flags={'noSupportCheck': True})
 
     # --------------------------------------------------------------- the LED wall: a post in capital letters
+    SW, SH = SCR['z1'] - SCR['z0'], SCR['y1'] - SCR['y0']
+    post_vars = ImageVariants(L, 'corridor_post', 'post_variant')
     PW_ = 2048
     PH_ = _js_round(2048 * SH / SW)
     post_state = {'text': '', 'name': 'DEPARTMENT OF WAR', 'meta': 'Official account · now',
@@ -588,7 +553,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
 
     def make_post_variant(text, name_, meta, stats):
         """Draw a post fully revealed (the colour), its typing order (each body character's index, so the shader
-        shows the first n), the cursor's place after every n, and two blurred copies for the floor's mirror."""
+        shows the first n) and the cursor's place after every n."""
         cv = CL.create_canvas(PW_, PH_)
         g = cv.get_context('2d')
         st = {'text': text, 'name': name_, 'meta': meta, 'stats': stats, 'layout': None}
@@ -602,13 +567,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
                                            extension='EXTEND'))
         lut_img = L.own(CL.image_from_rgba(f'corridor_post_cursor_{tag}', lut, srgb=False, top_down=False,
                                            interpolation='Closest', extension='EXTEND'))
-        from PIL import Image as _Im
-        pim = _Im.fromarray(rgba, 'RGBA')
-        b1 = np.asarray(pim.resize((PW_ // 4, PH_ // 4), _Im.Resampling.BOX).resize((PW_ // 8, PH_ // 8), _Im.Resampling.BOX))
-        b2 = np.asarray(pim.resize((PW_ // 32, max(2, PH_ // 32)), _Im.Resampling.BOX))
-        b1_img = L.data_tex(b1, srgb=True, name=f'corridor_post_blur1_{tag}')
-        b2_img = L.data_tex(b2, srgb=True, name=f'corridor_post_blur2_{tag}')
-        return {'color': col_img, 'order': idx_img, 'cursor': lut_img, 'blur1': b1_img, 'blur2': b2_img}, st, (geo_, cv)
+        return {'color': col_img, 'order': idx_img, 'cursor': lut_img}, st, (geo_, cv)
 
     post_meta = {}
 

@@ -175,7 +175,8 @@ if '--her' in args:
         # a loaded VRM faces -Y (the characters family's convention): the mark's front, three's +Z
         check('a performer on the mark, idling', bool(new), hits[0].name)
         done, left = KIT.fog_objects(K, [o for o in new if o.type == 'MESH'])
-        check('her materials take the haze, as scene.fogNode gave it', done > 0, f'{done} wrapped, {left} left')
+        check('her materials take the haze, as scene.fogNode gave it (see-through ones keeping their alpha)',
+              done > 0 and left == 0, f'{done} wrapped, {left} left')
     except Exception as e:                              # noqa: BLE001
         check('a performer on the mark', False, repr(e))
 

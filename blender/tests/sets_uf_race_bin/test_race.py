@@ -121,6 +121,20 @@ check("the screens' glow lights light the set without specular (their reflection
 wn = [n for n in race.mats['towers'].node_tree.nodes if n.bl_idname == 'ShaderNodeTexWhiteNoise']
 check("the windows' hash reads a rounded seed (TSL's toUint): solid windows, no speckle that shimmers as the camera moves",
       wn and all(n.inputs['W'].is_linked and n.inputs['W'].links[0].from_node.operation == 'FLOOR' for n in wn), f'{len(wn)} hashes')
+# the night sky reads the world direction, as race.js's 2400 m dome did: its colorNode takes
+# normalize(positionWorld - cameraPosition) and never the set's frame (setInv, which every lit material reads), so in
+# both editions a turned race keeps its clouds where they were in the world
+js = open(os.path.join(common.EIDOVERSE_DIR, 'sets', 'unknown_force', 'race.js'), encoding='utf-8').read()
+a_ = js.index('if (opts.sky !== false)')
+sky_js = js[a_:js.index("sky.name = 'race:sky'", a_)]
+wt = race.world.node_tree
+tc = [n for n in wt.nodes if n.bl_idname == 'ShaderNodeTexCoord']
+dir_users = {l.to_node.bl_idname for n in tc for l in n.outputs['Generated'].links}
+check("the night sky is the World on the world direction, as race.js's dome's colorNode read it (no set frame)",
+      'normalize(positionWorld.sub(cameraPosition))' in sky_js and 'setInv' not in sky_js and len(tc) == 1
+      and not (wt.animation_data and wt.animation_data.drivers) and dir_users <= {'ShaderNodeVectorMath'}
+      and not any(n.bl_idname in ('ShaderNodeVectorRotate', 'ShaderNodeMapping') for n in wt.nodes),
+      f'Generated feeds {sorted(dir_users)}')
 
 # geometry parity: every mesh's vertex count and position sum (three's axes) against race.js's own (the dump)
 pj = os.path.join(OUT, 'parity', 'race.json')

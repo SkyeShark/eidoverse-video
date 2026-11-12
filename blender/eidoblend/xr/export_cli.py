@@ -16,7 +16,10 @@
     --no-motion         do not turn instances and deformation into glTF animation (they go out still, at the first
                         frame; keys, constraints, armatures and shape keys still play)
     --no-world          no world.hdr (the page uses the world's flat colour)
-    --world-frame F     the frame the world is captured at (default: the first); --world-width W (default 2048)
+    --world-frame F     the frame the world is captured at (default: the first; a world that changes over the film is
+                        baked every --world-step S seconds, default 1, into a sequence); --world-width W (default 2048)
+    --no-vrm            no .vrm of the VRM casts (their MToon materials go out as PBR stand-ins only)
+    --no-audio          no audio.mp3 of the film's sound strips
     --compress meshopt|draco    mesh compression (the page decodes both)
     --images AUTO|JPEG|WEBP     image format inside the GLB (default AUTO: PNG stays PNG, JPEG stays JPEG)
     --choreo a,b,c      objects whose world tracks go into choreo.json (the guide's recipe)
@@ -71,6 +74,8 @@ def main():
                       world='--no-world' not in a,
                       world_frame=int(opt(a, '--world-frame')) if opt(a, '--world-frame') else None,
                       world_width=int(opt(a, '--world-width', 2048)),
+                      world_step=float(opt(a, '--world-step', 1.0)), vrm='--no-vrm' not in a,
+                      audio='--no-audio' not in a,
                       texel_density=float(opt(a, '--texel-density', 24)),
                       max_texture=int(opt(a, '--max-texture', 2048)),
                       max_image=int(opt(a, '--max-image')) if opt(a, '--max-image') else None,

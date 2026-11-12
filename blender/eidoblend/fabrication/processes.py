@@ -8,6 +8,7 @@
                     feed=.025, duration=18, color='#278b79')
     job.seek(4)                 # seconds of playback (0 .. duration): pose the machine, the bead front, reel, tubes
     job.play()                  # key every frame of the scene's range (start=, speed=): the saved .blend plays alone
+    job.key_events()            # key the program's events instead (exact between them): any length, at its own speed
     job.set_color('#da642c')    # deposited bead, spool, live strand and guided cores
 
     cnc = make_robot('cnc')
@@ -293,6 +294,8 @@ class Job:
         self._callback_done = False
         self._keyed = []
         self._objects = set()
+        self._physical = None
+        self.event_keys = None
 
     # the WebGPU job.seek: pose everything for playback second `seconds`
     def seek(self, seconds):
@@ -396,9 +399,19 @@ class Job:
         self.stop()
         return self.key(frame_start, frame_end, start=start, speed=speed, scene=scene)
 
+    def key_events(self, frame_start=None, scene=None):
+        """Key the job at its program's events instead of every frame (eidoblend.fabrication.physical): the axes as
+        the machine's joint sliders with Bezier keys exact between events, the screws, spindle and fans as drivers,
+        the progress at the same events. Playback second t is frame frame_start + t * fps, as play() keys it; a job
+        made without a duration plays at its own physical speed, however long. -> self (self.event_keys: the counts)"""
+        from . import physical
+        return physical.key_job(self, frame_start, scene)
+
     def stop(self):
-        """Remove the keys play() / key() wrote, in the frame ranges they wrote them (keys another job wrote into
-        other frames of the same machine stay); the current pose stays. An action left empty goes too."""
+        """Remove the keys play() / key() / key_events() wrote, in the frame ranges they wrote them (keys another job
+        wrote into other frames of the same machine stay); the current pose stays. An action left empty goes too."""
+        from . import physical
+        physical.unrig(self)
         owners = {}
         for idb, paths, span in self._keyed:
             try:

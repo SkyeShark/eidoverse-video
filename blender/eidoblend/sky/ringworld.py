@@ -632,6 +632,50 @@ class Ringworld:
                              _wave_mode(self.opts) == 'lightweight' and bool(self.A.get('bandNormal'))),
                          mapTex=self.map_image, maskTex=self.A['landmask'], authoredBand=self.authored_band)
 
+    # ---- the haze walls under the cloud dome (WebGPU's draw order) ----
+    def order_walls_under_dome(self, camera, on=True, origin_ahead=2.0e6):
+        """With the cloud dome on, draw the fog and rain walls BEFORE it, as WebGPU does: the walls hang from the band
+        group (renderOrder -99) and the cloud dome draws after them (-98). The dome then lays the clouds over the
+        walls wherever it shows (the sky, and geometry past its radius), and the walls still veil the geometry
+        between them and the dome. EEVEE draws Blended objects farthest ORIGIN first (probe_eevee_facts.py F4), and
+        the dome's origin rides 1000 km down the view axis, so each wall is drawn by a copy whose origin rides
+        `origin_ahead` (2000 km) down it: its Geometry Nodes take the wall's surface through an Object Info in
+        RELATIVE space, so it stays exactly where the wall is. The walls themselves stay as the source, out of the
+        render. on=False removes the copies and gives the walls back to the render. Returns the copies."""
+        import bpy
+        copies = []
+        for wall in (self.fog_wall, self.rain_wall):
+            if wall is None:
+                continue
+            name = wall.name + '_under_dome'
+            old = bpy.data.objects.get(name)
+            if old is not None:
+                me = old.data
+                bpy.data.objects.remove(old, do_unlink=True)
+                if me is not None and me.users == 0:
+                    bpy.data.meshes.remove(me)
+            wall.hide_render = bool(on)
+            if not on:
+                continue
+            ob = bpy.data.objects.new(name, bpy.data.meshes.new(name))
+            for c in wall.users_collection:
+                c.objects.link(ob)
+            ob.parent = camera
+            ob.matrix_parent_inverse.identity()
+            ob.location = (0.0, 0.0, -float(origin_ahead))
+            for attr in ('visible_shadow', 'visible_diffuse', 'visible_glossy', 'visible_transmission',
+                         'visible_volume_scatter'):
+                if hasattr(ob, attr):
+                    setattr(ob, attr, getattr(wall, attr))
+            mod = ob.modifiers.new('eido_world_anchored', 'NODES')
+            mod.node_group = _world_anchored_tree()
+            ident = mod.node_group.interface.items_tree['Source'].identifier
+            getattr(mod.properties.inputs, ident).value = wall      # Blender 5.2: a nodes modifier's inputs live here
+            ob['eido_sky_element'] = 'ringworld'
+            copies.append(ob)
+        self.wall_copies = copies
+        return copies
+
     # ---- the scene's own sun: linked away from the band, as the band's lights are linked to it alone ----
     def unlink_scene_sun(self, sun_obj):
         """The scene's sun lights everything but the band, and the ring's visible sky elements cast no shadow from
@@ -971,6 +1015,29 @@ def _cylinder_z(name, radius, height, segments, coll):
     ob = bpy.data.objects.new(name, me)
     coll.objects.link(ob)
     return ob
+
+
+def _world_anchored_tree():
+    """Geometry Nodes that draw another object's surface where that object is (Object Info in RELATIVE space),
+    whatever this object's own transform: the haze walls' copies under the cloud dome (order_walls_under_dome)."""
+    import bpy
+    name = 'eido_world_anchored'
+    tree = bpy.data.node_groups.get(name)
+    if tree is not None:
+        return tree
+    tree = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+    tree.is_modifier = True
+    tree.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+    tree.interface.new_socket('Source', in_out='INPUT', socket_type='NodeSocketObject')
+    tree.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+    gi = tree.nodes.new('NodeGroupInput')
+    go = tree.nodes.new('NodeGroupOutput')
+    info = tree.nodes.new('GeometryNodeObjectInfo')
+    info.transform_space = 'RELATIVE'
+    gi.location, info.location, go.location = (-400, 0), (-150, 0), (150, 0)
+    tree.links.new(gi.outputs['Source'], info.inputs['Object'])
+    tree.links.new(info.outputs['Geometry'], go.inputs['Geometry'])
+    return tree
 
 
 def _opt_on(o, key, default=True):

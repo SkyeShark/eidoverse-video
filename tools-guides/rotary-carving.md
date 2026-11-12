@@ -200,25 +200,22 @@ The stock's surface uses the fabrication family's `finish_stock`: hardwood's
 patina. The finish reads the stock point the way the WebGPU stock handed it
 over, `(z, y, x)` in three's axes, so the long grain and the rings run along
 the rotary axis and the pattern sits in the wood exactly where the WebGPU put
-it. That swizzle is a reflection, so it lives in the material:
-`swizzle_finish(material)` puts it into any `finish_stock` material.
+it: `finish_stock(..., axes='rotary')`. That swizzle is a reflection, so it
+lives in the material, not in the object's transform.
 
 The fine patterns fade where they would shimmer, as the WebGPU's did by
-`fwidth(phase)`, the phase's change from one pixel to the next.
-`filter_finish(material)` gives the finish that true derivative: each
-pattern's 3D gradient taken through the pixel's footprint on the surface.
-`finish_stock` alone estimates it as the footprint times the pattern's
-frequency, which only holds where the gradient lies in the surface; on a
-turned part the rings' gradient runs nearly along the normal on the sides
-facing the camera, and there the estimate faded the rings to a quarter and
-the fibre to nothing at the examples' distance. Measured in a render against
-the phase's own pixel differences (`test_rotary_finish_footprint.py`: median
-ratio 1.01 for rings, fibre and brushing, where the estimate ran 1.6 to 2
-times high and up to 14 times at the 90th percentile), the exact fades keep
-the share of each pattern that `fwidth` keeps (rings 0.213 against 0.213
-from the examples' camera at 450 pixels; the estimate kept none). The stock does
-both to its own material; do both, in that order, to a material you pass as
-`material=` or to a snapshot you shade separately.
+`fwidth(phase)`, the phase's change from one pixel to the next: `finish_stock`
+builds that derivative exactly, for either stock, from each pattern's 3D
+gradient taken through the pixel's footprint on the surface (see
+[fabrication](fabrication.md#mill-and-carve)). On a turned part the rings'
+gradient runs nearly along the normal on the sides facing the camera, where a
+footprint-times-frequency estimate would fade the rings to a quarter and the
+fibre to nothing. Measured in a render against the phase's own pixel
+differences (`blender/tests/fabrication/test_finish_footprint.py`: median ratio
+1.00 to 1.01 for rings, fibre and brushing), the fades keep the share of each
+pattern that `fwidth` keeps (rings 0.214 against 0.213, fibre 0.120 against
+0.122, from the examples' camera at 450 pixels). Pass `axes='rotary'` to `stock_material` for a material you pass as
+`material=` or for a snapshot you shade separately.
 
 The wood still reads softer at film distance than in the WebGPU frames, and
 the view transform is why: the WebGPU example tone-maps with ACES Filmic, the
@@ -232,10 +229,7 @@ average a ring pattern two to four pixels apart.
 
 ```python
 from eidoblend.fabrication.cutting import stock_material, stock_profile
-from eidoblend.fabrication.rotary import filter_finish, swizzle_finish
-mat, finish = stock_material('brass part', stock_profile('brass'))
-swizzle_finish(mat)             # the rotary stock's grain coordinates
-filter_finish(mat)              # its patterns fade by their true screen footprint
+mat, finish = stock_material('brass part', stock_profile('brass'), axes='rotary')   # the rotary stock's grain
 ```
 
 ## Playback
@@ -249,7 +243,33 @@ job.dispose(files=True)   # remove everything the job made: its files, and the c
 ```
 
 `duration` changes playback speed only: playback time maps linearly onto the
-physical program (`job.physical_duration`). Omit it for physical timing.
+physical program (`job.physical_duration`). Omit it for physical timing, and
+key the program's events instead of every frame, so the job plays at its own
+speed however long it is (the wood sample's 38 minutes are 54,781 frames at
+24 fps):
+
+```python
+job = rotary_carve(machine, sample_rotary, material='wood', cache_dir='//rotary_stock_cache')   # no duration
+job.key_events()                  # 39,246 events: the gantry and the A axis exact between them, an index's ease too
+job.write_stock(600.0, 610.0)     # the carved stock's files for those ten seconds (one VDB file a frame)
+```
+
+`key_events` keys the machine's joint sliders at the program's events with
+Bezier keys exact between them (an index turn's smoothstep is a cubic), drives
+the screws from their axis and the spindle and the chips' clock from the frame,
+holding their frame's state through the shutter as `key` does
+([fabrication](fabrication.md#print) has the method). The carved stock is a
+file per frame: at the default 256 × 96 × 96 field a frame carves from the one
+before in a few milliseconds and writes in about 0.1 s, and its file grows from
+0.6 to 1.7 MB as the carve deepens, so the whole 38 minutes would be 54,781
+files, about 73 GB. `key_events(stock=(start, end))` writes the stock for
+those playback seconds only (the first frame by default) and `write_stock`
+writes another stretch, then plays that stretch alone
+(`job.stock.show_frames(first, last)`): around it, the stock holds the
+stretch's nearer end, never an empty stock. (`write_frame` alone extends the
+file sequence over every frame written, as a film keyed at chosen frames
+renders them.) The robotics inspector writes the frame its time slider shows
+and the stretch its `play(start=, seconds=)` plays.
 Spindle rotation and chip flight use the physical clock even in a time lapse.
 `job.state` carries the sample (`stage`, `type`, `speed`, `angle`, the
 unwrapped A angle) plus `position` (the cutter tip over the bed),
@@ -367,7 +387,7 @@ bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_js_tests.py    
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_carve_options.py # every rotary_carve option, the job API, every refusal
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_stock_field.py
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_shutter.py         # what every frame's shutter sees, both examples
-bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_finish_footprint.py  # renders: the pattern fades against fwidth
+bash run_blender.sh blender/tests/fabrication/test_finish_footprint.py  # renders: the pattern fades against fwidth, both stocks
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_scene_scripts.py   # the two scene files, as the runner calls them
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_examples.py        # builds both examples at probe frames
 bash run_blender.sh blender/tests/fabrication_rotary/test_rotary_examples.py -- examples=rotary_metal material=brass suffix=_brass
@@ -421,10 +441,11 @@ Renders need the GPU (one at a time on a shared machine); the builds do not.
   instancing reads as the instances' identity; `RotaryJob.key` does not yet
   key the chips' clock at the shutter's physical moments, and the id has not
   been confirmed in a motion-blur render.
-- **The 2.5D finish's footprint.** This package's `filter_finish` builds the
-  exact screen derivative of the finish's patterns; the fabrication
-  package's own `finish_stock` still fades by footprint × pattern scale (see
-  [fabrication](fabrication.md#not-yet-ported)). Folding the two into one
-  needs the swizzle's Jacobian carried through, a joint change.
+- **The carved stock at its own speed for a whole job.** The WebGPU edition
+  re-carved the stock in a fragment pass every frame; here each frame's field
+  is a VDB file (0.6 to 1.7 MB, about 0.1 s to write, at the default field), so
+  a job keyed at its own speed writes the stock for the stretch it plays
+  (`write_stock`), not for all of a 38-minute carve's 54,781 frames (about
+  73 GB).
 - Fixture, workholding and tool-envelope collisions are not checked (a valid
   XYZ path is not collision checking), as in the WebGPU edition.

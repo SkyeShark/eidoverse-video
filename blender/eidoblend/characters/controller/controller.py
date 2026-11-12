@@ -1112,6 +1112,20 @@ class VRMCharacterController:
         self.pose.invalidate()
         self.scene_heading = heading
 
+    def place(self, position, heading=None):
+        """this edition's teleport (the engine sets the Rapier body's translation and the VRM's position): the feet at
+        `position` (world x, y, z), facing `heading` (rad) when given, standing still"""
+        x, y, z = position
+        if heading is not None:
+            self._heading = heading
+        self._center = Vector((x, y, z + self.vrm_foot_y + self.hip_y + self.half_height))
+        self._feet_world = Vector((x, y, z))
+        self._last_x, self._last_y = x, y
+        self._last_body_y = None
+        self._velocity_y = 0.0
+        self.speed_actual = 0.0
+        self._place_root(self._heading if self._turning_enabled else self.scene_heading)
+
     def _sync_pose(self):
         """the mixer's blend into the frame's Pose (the bones no clip binds keep last frame's value)"""
         self.pose.N.update(self._mixer.pose)

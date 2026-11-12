@@ -49,7 +49,13 @@ check('both stocks only ever get lower', all(all(x >= y - 1e-7 for x, y in zip(d
 check('the fan turns between frames', len(set(fans.values())) > 1)
 drivers = [fc.driver for m in bpy.data.materials if m.node_tree and m.node_tree.animation_data
            for fc in m.node_tree.animation_data.drivers]
-check('the finish filters drive from the camera with simple expressions (no script trust needed)',
-      drivers and all(d.is_simple_expression and d.is_valid for d in drivers), f'{len(drivers)} drivers')
+finishes = [m for m in bpy.data.materials if m.node_tree and 'stock_tint' in m.node_tree.nodes]
+on_camera = [t.data_path for m in finishes if m.node_tree.animation_data for fc in m.node_tree.animation_data.drivers
+             for v in fc.driver.variables for t in v.targets
+             if t.id_type in ('CAMERA', 'OBJECT') or 'camera' in (t.data_path or '')]
+check("the materials' drivers need no script trust (single properties or simple expressions), all valid; the stock "
+      "finishes' footprint reads the render size, no camera",
+      drivers and finishes and all(d.is_valid and (d.type != 'SCRIPTED' or d.is_simple_expression) for d in drivers)
+      and not on_camera, f'{len(drivers)} drivers, {len(finishes)} stock finishes, camera reads {on_camera}')
 print(f'[saved] {sum(results)} passed, {len(results) - sum(results)} failed', flush=True)
 sys.exit(0 if all(results) else 1)

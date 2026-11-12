@@ -20,6 +20,9 @@ import time
 import bpy
 from mathutils import Vector
 
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')))
+from eidoblend.characters.springs import use_springs  # noqa: E402
+
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ONLY = tuple(ARGS[ARGS.index('--only') + 1].split(',')) if '--only' in ARGS else None   # name prefixes, comma separated
 COLS = int(ARGS[ARGS.index('--sheet-cols') + 1]) if '--sheet-cols' in ARGS else 4
@@ -48,6 +51,8 @@ def render(spec_path):
                     ob.animation_data.action = act
                     if len(act.slots):
                         ob.animation_data.action_slot = act.slots[0]
+                    if bpy.data.actions.get(act.name + '|springs') is not None:
+                        use_springs(ob, act.name + '|springs')      # that take's own spring chains with it
         cd.lens = s.get('lens', 35.0)
         cam.location = Vector(s['pos'])
         cam.rotation_mode = 'QUATERNION'

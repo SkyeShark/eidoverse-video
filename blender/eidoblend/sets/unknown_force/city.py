@@ -788,8 +788,8 @@ def build(first=None, opts=None, ctx=None, **kw):
     def apply_atmosphere(sc=None, objects=None):
         """The scene's atmosphere: the city's World (the night sky, its hemisphere, its environment); the haze lives
         in the set's materials. objects: your own objects in the set (a performer, props) take the haze too, as
-        three's scene.fogNode fogged every material in the scene (KIT.fog_objects; see-through materials are left as
-        they are)."""
+        three's scene.fogNode fogged every material in the scene (KIT.fog_objects: a see-through material keeps its
+        alpha and fogs only what it covers)."""
         sc = sc or scene
         sc.world = sky['world']
         if objects:
@@ -838,6 +838,8 @@ def build(first=None, opts=None, ctx=None, **kw):
     def dispose():
         if hole:
             hole['dispose']()
+        if K._fog is not None:
+            KIT.unfog_group(K._fog)                  # your own objects' materials, before the haze group goes
         K.made.dispose()
     parts = KIT.SetDict({
         'kit': K, 'uniforms': U, 'fog_node': K.fog_group(), 'fog_factor': (K.fog_group(), 'factor'),

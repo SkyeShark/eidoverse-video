@@ -12,6 +12,10 @@ F4  EEVEE draws Blended objects in the order of their ORIGINS along the view axi
 F5  shadow linking works in EEVEE: a sun whose blocker collection INCLUDEs only plate P1 is shadowed by P1 alone;
     plate P2 beside it, outside the collection, casts nothing. (The ringworld's band sun is shadowed by the ring's
     eclipse proxy and cloud sheet alone, never by the local scene or its cloud-shadow caster.)
+F6  no input in Blender 5.2 scales a surface's indirect light alone (no render): no BSDF takes an occlusion input,
+    the Ambient Occlusion node only returns a value, and the World takes no light linking, so no object can take the
+    world's light on its own. (The ringworld band's baked AO, WebGPU's aoNode on indirect light only, stays in its
+    albedo; EEVEE's horizon scan occludes the indirect light of the real relief.) The day this fails, port the aoNode.
 
     bash run_blender.sh blender/tests/sky_worlds/probe_eevee_facts.py
 Prints one PASS/FAIL line per fact; writes out/probe_eevee_facts.png.
@@ -230,6 +234,24 @@ s1, s2, s0 = at(1.5, 1.6), at(3.5, 1.6), at(2.5, 1.6)
 print('floor under P1 shadow', s1, 'under P2 shadow', s2, 'open floor', s0)
 f5 = s0[2] > 0.2 and s1[2] < 0.25 * s0[2] and s2[2] > 0.8 * s0[2]
 print('F5 shadow linking (blocker collection INCLUDE P1 only):', 'PASS' if f5 else 'FAIL')
+# F6: what a surface could use to darken its indirect light alone
+probe = bpy.data.materials.new('f6_inputs')
+probe.use_nodes = True
+bsdfs = [t for t in dir(bpy.types) if t.startswith('ShaderNodeBsdf')]
+occl = {}
+for t in bsdfs:
+    try:
+        n = probe.node_tree.nodes.new(t)
+    except RuntimeError:                      # a node type a material tree does not take
+        continue
+    occl[t] = [i.name for i in n.inputs if 'occlu' in i.name.lower() or i.name.upper() == 'AO']
+ao = probe.node_tree.nodes.new('ShaderNodeAmbientOcclusion')
+world_ll = 'light_linking' in [p.identifier for p in bpy.types.World.bl_rna.properties]
+f6 = not any(occl.values()) and [o.name for o in ao.outputs] == ['Color', 'AO'] and not world_ll
+print('F6 nothing scales indirect light alone (%d BSDF nodes, none with an occlusion input; the AO node outputs %s; '
+      'World light linking %s):' % (len(bsdfs), [o.name for o in ao.outputs], world_ll),
+      'PASS' if f6 else 'FAIL (an indirect-only occlusion exists now: port the band\'s aoNode)')
+bpy.data.materials.remove(probe)
 bpy.data.images.remove(img)
 sc.render.image_settings.file_format = 'PNG'
 sc.render.filepath = os.path.join(OUT, 'probe_eevee_facts.png')

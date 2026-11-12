@@ -18,6 +18,7 @@ on the monolith's wall (state spray paints it on). A generic news chyron is supp
     N.update(0.0, {'spray': 0.5, 'floods': 1.0})              # a still: sets everything, keys nothing
     # its moving parts on your own clock, KEYED (t in seconds from the scene's first frame, or from t0):
     N.animate(lambda t: {'spray': t / 2.5, 'pulse': 0.5 + 0.5 * math.sin(t * 3.0)}, frames=(1, 120))
+    N.fog_objects(her_meshes)                                 # your own performer, crowd or props in the set's haze
 
 Set-local metres, built in three's axes (+Y up, ground y = 0, the mark the origin facing +Z toward the fence, the
 monolith's wall 12 m behind it) and converted once, three (x, y, z) -> Blender (x, -z, y). cams and focal are
@@ -99,8 +100,9 @@ class News(CL.SetBase):
     def apply_look(self, scene, raytracing=False, view_look=None):
         """AgX at view_exposure(look exposure), global illumination (fast GI), reflections from the light probes (the
         wet ground's mirror is painted; raytracing=True screen-traces them instead), shadows on; the fog is in the
-        materials (FogExp2, built with opts fog=True). view_look: an AgX look for the scene (cn_lib.ACES_LIKE_LOOK
-        follows the WebGPU frames' ACES tone); None leaves the scene's look as it is."""
+        materials (FogExp2, built with opts fog=True; fog_objects(objects) gives it to your own). view_look: an AgX
+        look for the scene (cn_lib.ACES_LIKE_LOOK follows the WebGPU frames' ACES tone); None leaves the scene's look
+        as it is."""
         scene.view_settings.view_transform = 'AgX'
         scene.view_settings.exposure = CL.view_exposure(self.look['exposure'])
         if view_look is not None:
@@ -113,7 +115,8 @@ class News(CL.SetBase):
 def build(scene=None, opts=None, collection=None, name='set:news'):
     """Build the news set into `scene`. news.js reads no opts; these are the Blender edition's, for a piece of your
     own: world (True: the set's night environment + hemisphere light become scene.world, lighting the set through
-    EEVEE), fog (True: the materials carry look['fog'] as three's FogExp2 did), shadows (True), crowd (True: the 79
+    EEVEE), fog (True: the materials carry look['fog'] as three's FogExp2 did, and fog_objects gives your own objects
+    the same), shadows (True), crowd (True: the 79
     pickets), tag ('CLANKER': the word sprayed on the wall), signs (up to eight messages for the pickets' signs, each a list of lines or 'LINE / LINE';
     None keeps a slot's own), chainShadow (False: the fence, its chain link and its steel, casts no shadow from the
     real lamps, as none did in the WebGPU set), signNormals ('rest': the painted floods light the raised signs by their
@@ -138,6 +141,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     N = News(L, root, col)
     N.set_cams(CAMS, FOCAL)                          # cams / focal in Blender's axes; cams_three / focal_three
     N.look = {k: (dict(v) if isinstance(v, dict) else v) for k, v in LOOK.items()}
+    N.fog = dict(fog) if fog else None               # the haze the materials carry; N.fog_objects gives it to yours
     fam = CL.fam
     M = {}
     N.materials = M

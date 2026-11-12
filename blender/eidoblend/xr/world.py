@@ -45,6 +45,9 @@ def bake_world_equirect(scene, path, width=2048, samples=32, frame=None, device=
     world = scene.world
     if world is None:
         raise ValueError('bake_world_equirect: the scene has no world')
+    keep = scene.frame_current
+    if frame is not None and int(frame) != keep:
+        scene.frame_set(int(frame))         # the film's world as it is at that frame (its keys and drivers evaluated)
     tmp = bpy.data.scenes.new('_xr_world_bake')
     try:
         tmp.world = world
@@ -98,6 +101,8 @@ def bake_world_equirect(scene, path, width=2048, samples=32, frame=None, device=
             if d is not None and d.users == 0:
                 bpy.data.cameras.remove(d)
         bpy.data.scenes.remove(tmp)
+        if scene.frame_current != keep:
+            scene.frame_set(keep)
     out = {'path': os.path.abspath(path), 'seconds': round(time.time() - t0, 2), 'device': dev, **stats}
     if log:
         log(f'[xr.world] {world.name} -> {path} ({width} x {width // 2}, {out["seconds"]} s, mean {stats["mean"]})')

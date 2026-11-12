@@ -33,7 +33,8 @@ controller: the stationary ports in eidoblend.placement.seating, round one's). W
                 pan's own surface (pan_points), before the take runs, and smoothed into one lift curve.
                 then=<seated loop> crossfades into a chair loop (sitting_normal_chair, sitting_nervous_arm_rub_chair)
                 with the root carried back by the difference of their hips so the hips stay on the seat, its own settle
-                blended in. hold=<s> stands up after it; hold=None stays seated
+                blended in. hold=<s> stands up after it; hold=None stays seated. instant=True (seatOn's instant path):
+                no walk and no descent, the take opens (or cuts) seated in the loop, settled on the pan
   stand_up      endSeated: the transition reversed (the example's reverse mode: the same poses backwards, no hip
                 mismatch), or a stand-up clip (sit_to_stand: VRMRobotBody.standUp's default): the clip's hips travel
                 is taken as root motion (the engine releases the root at 85 % of the clip and the body pops forward;
@@ -1009,9 +1010,31 @@ def _reach_down(p, side, d, knee_floor):
     return lo_d
 
 
+ANKLE_BAND_MARGIN = 1.0     # deg: my robot body's seated tiptoe keeps its ankle this far inside the full-roll pitch band
+
+
+def _ankle_band():
+    """my robot body's ankle pitch (deg) over which its roll keeps its whole range (robot_dof's coupled table: near the
+    pitch stops the roll range narrows to a few degrees, and a foot hanging there rolls from one stop to the other)"""
+    from ..robot_dof import LEG_JOINTS
+    j = LEG_JOINTS[2]
+    c, (z0, z1) = j['coupled'], j['range']['z']
+    xs = [x for x, lo, hi in zip(c['x'], c['zmin'], c['zmax']) if lo <= z0 + 1e-6 and hi >= z1 - 1e-6]
+    return min(xs) + ANKLE_BAND_MARGIN, max(xs) - ANKLE_BAND_MARGIN
+
+
+def _ankle_pitch(p, side):
+    """the ankle's pitch (deg, robot_dof's cardan x: + toes down) in the Pose p"""
+    from .._math import euler_from_quat, q_to_three, twist_about
+    from ..robot_dof import LEG_JOINTS
+    q = q_to_three(p.N[side + 'Foot'])
+    sw = q @ twist_about(q, LEG_JOINTS[2]['noTwist']).inverted()
+    return math.degrees(euler_from_quat(sw, 'XZY')[0])
+
+
 def _tiptoe(p, body, side, floor_z, g, tol=0.002):
-    """a seated foot still short of the floor points its toes down to it (up to 35 deg about its lateral axis): the
-    sole's gap left"""
+    """a seated foot still short of the floor points its toes down to it (up to 35 deg about its lateral axis; on my
+    robot body no further than its ankle's full-roll band, _ankle_band): the sole's gap left"""
     if g <= 0.015:
         return g
     ft = side + 'Foot'
@@ -1021,10 +1044,13 @@ def _tiptoe(p, body, side, floor_z, g, tol=0.002):
         lat = p.M.to_3x3() @ Vector((1.0, 0.0, 0.0))
     lat.normalize()
     w_now = p.world_quat(ft).copy()
+    band = _ankle_band() if getattr(body, 'robot', False) else None
     best_t = (g, 0.0)
     for k in range(1, 8):
         for s in (1.0, -1.0):
             p.set_world_quat(ft, Quaternion(lat, s * k * TIPTOE_MAX / 7) @ w_now)
+            if band is not None and not band[0] <= _ankle_pitch(p, side) <= band[1]:
+                continue
             gt = _gap(p, body, side, floor_z)
             if -tol <= gt < best_t[0]:
                 best_t = (gt, s * k * TIPTOE_MAX / 7)
@@ -1056,6 +1082,10 @@ STEP_MIN = 0.03             # ...over this far in all is lifted through it (a st
 SEAT_DOWN = 0.004           # m: a seated sole this near the floor rests on it (held where it rests, as it rests)
 FLAT_REST = 0.6             # a foot rests flat (not on its toes) where its points on the floor span this much of its length
 CARRY = 8                   # frames: a held foot lifting off the floor without a step eases back to the clip's place
+SWIVEL_MAX = math.radians(25.0)    # my robot body: the most its leg swings round its hip-to-ankle line to hold a foot's turn
+SWIVEL_TOL = math.radians(0.1)
+SWIVEL_ROUNDS = 6
+SWING_KEEP = 0.003                 # m: the swing is kept where the clamped legs leave each foot this near its place
 STEP_LIFT = (0.25, 0.06, 0.025)    # the step's lift: this fraction of how far it goes, at most / at least this high
 PUSH_ROUNDS = 4             # rounds of the smoothed move of the boots out of a chair's solids
 
@@ -1078,6 +1108,11 @@ def _seat_records(loco, recs):
         # a long crossfade's first frame or two are not yet emoting (the controller's threshold): they are the seat's too
         if r['mode'] == 'seated' or (r['mode'] == 'loco' and r['t'] - w[0] < 0.15):
             held.append((i, w))
+    cut = set()
+    for i, w in held:
+        if getattr(w[3], 'instant', False) and id(w) not in cut:
+            cut.add(id(w))
+            recs[i]['cut'] = True                     # an instant seat's first frame: the take cuts into the seat
     lift = {}
     chair = [(i, w) for i, w in held if w[2] == 'chair']
     steps = []
@@ -1233,6 +1268,7 @@ def _seat_records(loco, recs):
                 hold = None
             prev, own_prev = i, an
     inside = []
+    turned = {}                       # my robot body: each foot's (frame index, its turn as keyed, the clip's turn)
     for i, w in chair:
         r, p, cmd = recs[i], poses[i], w[3]
         for s in ('left', 'right'):
@@ -1244,8 +1280,11 @@ def _seat_records(loco, recs):
             # my robot body: the plant runs its joint clamps on these legs. A clamp moves the foot it turns (the knee
             # held to its hinge swings the shin off the solve's plane), so each foot is reached for again where it was
             # placed, on the clamped legs, until the clamps leave it there: what the plant keys is what was placed.
-            # The ankle has no twist, so a foot turns with the shin about the leg: one resting flat on the floor takes
-            # that turn about the middle of the sole it rests on, not about its ankle (measured on the first clamp)
+            # The ankle has no twist, so a foot turns with the shin about the leg. One resting flat on the floor keeps
+            # the turn it came down with: the leg swings round its hip-to-ankle line (the knee aside, the ankle where
+            # it is: _swivel_to) until the shin holds the foot there. Where that would take more than SWIVEL_MAX (the
+            # hip's twist), the foot takes the rest of the shin's turn about the middle of the sole it rests on, not
+            # about its ankle. The step after a rest carries what the swing held into the clip's turn over the step
             from ..controller.plant import foot_yaw
             from ..controller.pose import leg_clamps
             placed = {s: (p.world_pos(s + 'Foot').copy(), p.world_quat(s + 'Foot').copy()) for s in ('left', 'right')}
@@ -1258,27 +1297,73 @@ def _seat_records(loco, recs):
                 along = P[:, :2] @ fw
                 if int(on.sum()) >= 3 and np.ptp(along[on]) >= FLAT_REST * np.ptp(along):
                     flat[s] = Vector((float(P[on, 0].mean()), float(P[on, 1].mean()), 0.0))
-            if flat:
-                q0 = Pose(c.body, p.M, leg_clamps(c.body, dict(p.N)), p.off)
+            q0 = Pose(c.body, p.M, leg_clamps(c.body, dict(p.N)), p.off)
+            clip_yaw = {s: foot_yaw(q0.world_quat(s + 'Foot')) for s in ('left', 'right')}
+            want = {}
+            for s in ('left', 'right'):
+                last = turned.get(s)
+                if last is None or last[0] != i - 1:
+                    continue
+                if s in flat:
+                    want[s] = last[1]                          # resting on: the turn it rests with
+                elif step_of.get((i, s)) is not None:
+                    a, b = step_of[(i, s)]                     # stepping off a rest: the held turn eased into the clip's
+                    if i == a or turned.get(s + '_carry') is not None:
+                        off = turned.get(s + '_carry')
+                        if off is None:
+                            off = _wrap_pi(last[1] - last[2])
+                            turned[s + '_carry'] = off
+                        want[s] = clip_yaw[s] + off * (1.0 - _smooth((i - a + 1) / float(b - a + 1)))
+            N0, base = dict(p.N), dict(placed)
+            for swing in (want, {}):
+                if swing is not want and not want:
+                    break
+                p.N = dict(N0)
+                p.invalidate()
+                placed = dict(base)
                 for s, mid in flat.items():
                     pos, quat = placed[s]
-                    R = Quaternion((0.0, 0.0, 1.0), _wrap_pi(foot_yaw(q0.world_quat(s + 'Foot')) - foot_yaw(quat)))
+                    rest_yaw = swing.get(s, clip_yaw[s])
+                    if abs(_wrap_pi(rest_yaw - clip_yaw[s])) > SWIVEL_MAX:
+                        rest_yaw = clip_yaw[s] + math.copysign(SWIVEL_MAX, _wrap_pi(rest_yaw - clip_yaw[s]))
+                    R = Quaternion((0.0, 0.0, 1.0), _wrap_pi(rest_yaw - foot_yaw(quat)))
                     off = R @ Vector((pos.x - mid.x, pos.y - mid.y, 0.0))
                     placed[s] = (Vector((mid.x + off.x, mid.y + off.y, pos.z)), R @ quat)
                     _leg_reach(p, s, placed[s][0])
                     p.set_world_quat(s + 'Foot', placed[s][1])
-            for _k in range(4):
+                for s in swing:
+                    if s not in flat:
+                        pos, quat = placed[s]
+                        placed[s] = (pos, Quaternion((0.0, 0.0, 1.0), _wrap_pi(swing[s] - foot_yaw(quat))) @ quat)
+                        p.set_world_quat(s + 'Foot', placed[s][1])
+                for _k in range(4):
+                    p.N.update(leg_clamps(c.body, dict(p.N)))
+                    p.invalidate()
+                    miss = 0.0
+                    for s, (pos, quat) in placed.items():
+                        miss = max(miss, (p.world_pos(s + 'Foot') - pos).length)
+                        _leg_reach(p, s, pos)
+                        p.set_world_quat(s + 'Foot', quat)
+                        if s in swing:
+                            _swivel_to(p, c.body, s, foot_yaw(quat))
+                    if miss < 0.001:
+                        break
                 p.N.update(leg_clamps(c.body, dict(p.N)))
                 p.invalidate()
-                miss = 0.0
-                for s, (pos, quat) in placed.items():
-                    miss = max(miss, (p.world_pos(s + 'Foot') - pos).length)
-                    _leg_reach(p, s, pos)
-                    p.set_world_quat(s + 'Foot', quat)
-                if miss < 0.001:
+                # the swing kept only where the clamped legs still put the feet where they were placed (the hip's
+                # twist stop can take the leg round its own axis instead, the ankle with it)
+                if not swing or all((p.world_pos(s + 'Foot') - pos).length < SWING_KEEP for s, (pos, _q) in
+                                    placed.items()):
                     break
-            p.N.update(leg_clamps(c.body, dict(p.N)))
-            p.invalidate()
+            if swing is not want:
+                want = {}
+            for s in ('left', 'right'):
+                if s in flat or s in want:
+                    turned[s] = (i, foot_yaw(p.world_quat(s + 'Foot')), clip_yaw[s])
+                else:
+                    turned.pop(s, None)
+                if step_of.get((i, s)) is None or s not in want:
+                    turned.pop(s + '_carry', None)
         r['N'] = {k_: q.copy() for k_, q in p.N.items()}
         r['N_ik'] = {k_: q.copy() for k_, q in p.N.items()}
     # a ground sit, every frame of the window (the crossfade down, the hold, the rise): my robot body's legs out in
@@ -1550,6 +1635,39 @@ def _leg_reach(p, side, target):
     p.set_world_quat(end, w_ft)
 
 
+def _swivel_to(p, body, side, yaw):
+    """my robot body's leg swung round the line from its hip to its ankle (the knee goes aside, the ankle stays where it
+    is) until, through its joint clamps, its foot faces `yaw` (rad): the ankle has no twist, so the shin's turn is the
+    foot's. At most SWIVEL_MAX; the secant on the clamped foot's turn, SWIVEL_ROUNDS at most -> the turn left over"""
+    from ..controller.plant import foot_yaw
+    from ..controller.pose import Pose, leg_clamps
+    up, ft = side + 'UpperLeg', side + 'Foot'
+    w_ft = p.world_quat(ft).copy()
+
+    def miss():
+        q = Pose(body, p.M, leg_clamps(body, dict(p.N)), p.off)
+        return _wrap_pi(yaw - foot_yaw(q.world_quat(ft)))
+    axis = p.world_pos(ft) - p.world_pos(up)
+    e0 = miss()
+    if axis.length < 1e-6 or abs(e0) < SWIVEL_TOL:
+        return e0
+    axis.normalize()
+    phi0, phi, now = 0.0, max(-SWIVEL_MAX, min(SWIVEL_MAX, e0)), 0.0
+    e = e0
+    for _ in range(SWIVEL_ROUNDS):
+        p.apply_world_delta(up, Quaternion(axis, phi - now))
+        now = phi
+        p.set_world_quat(ft, w_ft)
+        e1 = miss()
+        if abs(e1) < SWIVEL_TOL or abs(e1 - e0) < 1e-9:
+            e = e1
+            break
+        phi0, phi, e0 = phi, phi - e1 * (phi - phi0) / (e1 - e0), e1
+        phi = max(-SWIVEL_MAX, min(SWIVEL_MAX, phi))
+        e = e1
+    return e
+
+
 def _open_window(loco, kind, cmd):
     loco.__dict__.setdefault('_seat_windows', []).append([loco.ctrl.time, None, kind, cmd])
 
@@ -1704,11 +1822,13 @@ class SeatOn(_Composite):
 
     def __init__(self, chair, transition='stand_to_sit', face=None, sink=0.0, hip_back=None, hold=None, fade=0.25,
                  transition_dur=None, gait='walk', speed=None, camera=None, then=None, then_fade=0.5, via=None,
-                 stand=None, back_up=0.35):
+                 stand=None, back_up=0.35, instant=False):
         self.chair, self.transition, self.face, self.sink, self.hip_back = chair, transition, face, sink, hip_back
         self.hold, self.fade, self.transition_dur, self.gait, self.speed = hold, fade, transition_dur, gait, speed
         self.camera, self.then, self.then_fade, self.via, self.stand_opts = camera, then, then_fade, via, stand or {}
-        self.back_up = back_up
+        self.back_up, self.instant = back_up, instant
+        if instant and not then:
+            self.then = SEAT_CLIP                     # seatOn's instant path holds a chair pose: the default seated loop
 
     # ---- the approach
     def start(self, loco):
@@ -1739,6 +1859,10 @@ class SeatOn(_Composite):
             spot = (seat['x'] + fwd.x * self.hip_back, seat['y'] + fwd.y * self.hip_back)
         else:
             spot = loco.seat_spot((tx, ty), math.degrees(th), clip=self.transition)
+        if self.instant:
+            # no walk to it: the floor is the one under the spot
+            z = c._ground_vector(spot[0], spot[1], max(feet.z, seat['z']) + 1.0)
+            feet = Vector((feet.x, feet.y, z if z is not None else feet.z))
         # the backrest: the transition's last pose, settled on the pan where the walk will put her, measured against
         # the chair's parts over the pan; where the skin (a coat included) is inside its back, the target moves
         # forward until it clears it, before the walk (so the spot is right). A sitter turned away from the chair's
@@ -1762,6 +1886,16 @@ class SeatOn(_Composite):
                            f'cm inside its back: the hips\' target moved {push * 100:.1f} cm forward')
         self.spot = spot
         self.subs = []
+        self.auto_was = c.auto_maneuvers
+        if self.instant:
+            z = c._ground_vector(spot[0], spot[1], max(feet.z, seat['z']) + 1.0)
+            self.spot_z = z if z is not None else feet.z
+            c.auto_maneuvers = False
+            self.phase = 'instant'
+            _log(loco, f"[seatOn] '{self.chair.name}': the pan at {seat['z']:.3f} m; the take opens seated in "
+                       f"'{self.then}' facing {math.degrees(th):.1f} deg, put on ({spot[0]:.3f}, {spot[1]:.3f}) for the "
+                       f'hips to rest on ({tx:.3f}, {ty:.3f})')
+            return
         bk = max(0.0, self.back_up)
         # the walk to a point back_up in front of the spot, the turn out of the chair there, and a step or two back onto
         # the spot (walkBackward): a sitter backs up to the seat, and the feet the sit starts on are freshly planted
@@ -1792,7 +1926,6 @@ class SeatOn(_Composite):
         if bk > 0.04:
             self.subs.append(FollowPath([spot], gait='walkBackward', arrive=0.012, turn_first=False))
             self.subs.append(TurnTo(heading=th))         # backing up along a line a little off squares it again
-        self.auto_was = c.auto_maneuvers
         c.auto_maneuvers = False
         self.phase = 'approach'
         parts = {o for o in [self.chair] + list(self.chair.children_recursive)}
@@ -1948,10 +2081,11 @@ class SeatOn(_Composite):
         _open_window(loco, 'chair', self)
         self.extra = Vector((0.0, 0.0))
         arr = math.hypot(self.root0.x - self.spot[0], self.root0.y - self.spot[1])
-        _log(loco, f'[seatOn] sits down over {self.span:.2f} s ({self.transition}), standing {arr * 100:.1f} cm off its '
-                   f'spot: the hips recentred by {self.dxy.length * 100:.1f} cm (the feet held), the underside settled '
-                   f'{self.settle * 100:+.1f} cm onto the pan at '
-                   f'{self.seat_here:.3f} m; the clamp watches {len(self.zl)} samples from {CLAMP_FROM:.0%} in')
+        if not self.instant:
+            _log(loco, f'[seatOn] sits down over {self.span:.2f} s ({self.transition}), standing {arr * 100:.1f} cm '
+                       f'off its spot: the hips recentred by {self.dxy.length * 100:.1f} cm (the feet held), the '
+                       f'underside settled {self.settle * 100:+.1f} cm onto the pan at {self.seat_here:.3f} m; the '
+                       f'clamp watches {len(self.zl)} samples from {CLAMP_FROM:.0%} in')
 
     def _dz_curve(self):
         """the descent's lift, frame by frame: the settle eased in over its second half, never under the clamp (the
@@ -2038,8 +2172,36 @@ class SeatOn(_Composite):
         _log(loco, f"[seatOn] then '{self.then}': the root carried {d.length * 100:.1f} cm so the hips stay on the "
                    f'seat, its underside settled {self.settle_then * 100:+.1f} cm')
 
+    def _begin_instant(self, loco):
+        """seatOn's instant path (the engine snaps a VRM into the chair pose): the body put on the spot facing out of
+        the chair (controller.place), the seat measured as a sit-down measures it (_begin: the root, the recentring,
+        the settle) and the seated loop as a loop after it (_begin_then: the root carried so its hips rest on the seat,
+        its own settle), then the loop held at full weight at once, its settle applied, no descent. stand_up and the
+        walk after it work from here as from any seat; the springs start over on the seated pose"""
+        c = loco.ctrl
+        c.place((self.spot[0], self.spot[1], self.spot_z), self.th)
+        if c.time > 1e-9 and getattr(loco, 'frame', None) is not None:
+            loco.__dict__.setdefault('_spring_resets', []).append(loco.frame)
+        self._begin(loco)
+        self._begin_then(loco)
+        acts = getattr(c, '_emote_actions', {})
+        for k, a in acts.items():
+            if a is not None and k != self.then:
+                a.stop()
+                a.set_effective_weight(0.0)           # a stopped action keeps its last weight otherwise: still 'emoting'
+        acts[self.then].set_effective_weight(1.0)
+        for a in (c._actions or {}).values():
+            if a is not None:
+                a.weight = 0.0
+        self.extra = self.then_shift.copy()
+        self.cur_kf = dict(self.kf_then)
+        self.root(c, 1.0, self.settle_then, phase='seated')
+        self.phase, self.t = 'seated', 0.0
+
     def step(self, loco, dt):
         c = loco.ctrl
+        if self.phase == 'instant':
+            self._begin_instant(loco)
         if self.phase == 'approach':
             inp = self._run_subs(loco, dt)
             if inp is not None:
@@ -2794,19 +2956,23 @@ def face_camera(target, camera=None, offset=0.0, frame=None):
 
 def seat_on(target, chair, clip=None, face=None, sink=None, transition=None, fade=0.25, transition_dur=None,
             hip_back=None, camera=None, t=0.0, then=None, hold=None, gait='walk', speed=None, via=None, stand=None,
-            then_fade=0.5, back_up=0.35):
+            then_fade=0.5, back_up=0.35, instant=False):
     """seatOn. A Locomotion: the controller path (the module's doc): transition (default 'stand_to_sit'), then= (or
     clip=) the seated loop after it, hold= seconds before standing up (None: stays seated until stand_up), stand= the
     stand-up's options, gait / speed / via= the walk to the chair, back_up= the last steps backward onto the spot (m;
-    0: none). A VRM my robot body drives (robot.body's registry), with a transition: the engine's cohesive path through
-    its seated state (_seat_robot_body: placed at the measured spot, begin_seated, body.seat_plan for its bake). Any
-    other VRM handle: eidoblend.placement's seat_on (the instant sit in `clip`, default 'sitting_normal_chair', or the
-    transition from t). Returns the Locomotion, or the seat's height"""
+    0: none); instant=True: the engine's instant path, no walk and no descent: the body put where the transition would
+    have seated it, in the seated loop (then= or clip=, default 'sitting_normal_chair') at once, settled on the pan (a
+    shot that opens seated; stand_up and walks follow as from any seat). A VRM my robot body drives (robot.body's
+    registry), with a transition: the engine's cohesive path through its seated state (_seat_robot_body: placed at
+    the measured spot, begin_seated, body.seat_plan for its bake). Any other VRM handle: eidoblend.placement's seat_on
+    (the instant sit in `clip`, default 'sitting_normal_chair', or the transition from t). Returns the Locomotion, or
+    the seat's height"""
     if is_locomotion(target):
         target._queue.append(SeatOn(chair, transition=transition or 'stand_to_sit', face=face,
                                     sink=0.0 if sink is None else sink, hip_back=hip_back, hold=hold, fade=fade,
                                     transition_dur=transition_dur, gait=gait, speed=speed, camera=camera,
-                                    then=then or clip, then_fade=then_fade, via=via, stand=stand, back_up=back_up))
+                                    then=then or clip, then_fade=then_fade, via=via, stand=stand, back_up=back_up,
+                                    instant=instant))
         return target
     body = robot_body_of(target)
     if body is not None:
@@ -2991,8 +3157,9 @@ def _seat_handover(loco, rep):
         fr['M'], fr['N'] = M, dict(p.N)
 
     for a, b in runs:
-        # v reaches 1 on the hand-over's last frame: the next frame is the seat's (or the plant's) own
-        if a > 0 and not seat[a - 1]:
+        # v reaches 1 on the hand-over's last frame: the next frame is the seat's (or the plant's) own. Where the take
+        # cuts into the seat (an instant seat put the body there) nothing is handed over
+        if a > 0 and not seat[a - 1] and not recs[a].get('cut'):
             js = range(a, min(b + 1, a + HANDOVER))
             g = goes(js, a - 1)
             for k, j in enumerate(js):
@@ -3015,12 +3182,14 @@ def _seat_handover(loco, rep):
     return len(touched)
 
 
-def bake(loco, f0=1, key=True, action_name=None, **kw):
+def bake(loco, f0=1, key=True, action_name=None, springs=True, **kw):
     """Locomotion.bake(f0, **kw) with the seats' frames handed over between the run and the plant (_seat_records: the
     seat's feet, the plant leaving them and the seated root) and back after it (_seat_handover: the feet and pelvis
     passed between the plant's and the seat's), keyed as Locomotion.bake keys; the frames the verbs see (a camera's
-    place when a command starts); then key_seated -> the report, with 'seated' ({'spans', 'facing'}), 'seat_frames' and
-    'handover_frames'"""
+    place when a command starts); then key_seated, and the spring chains over the keyed take (Locomotion.bake_springs;
+    springs=False leaves them out, a dict passes bake_springs' options) -> the report, with 'seated' ({'spans',
+    'facing'}), 'seat_frames', 'handover_frames' and 'springs'"""
+    import time
     import types
     from ..locomotion import key_frames
     loco.f0 = f0
@@ -3041,4 +3210,8 @@ def bake(loco, f0=1, key=True, action_name=None, **kw):
     if key:
         rep['action'] = key_frames(loco.h, loco.ctrl.body, rep['_frames'], action_name or f'{loco.h.name}|controller')
         rep['seated'] = key_seated(loco, rep)
+        if springs:
+            t0 = time.time()
+            rep['springs'] = loco.bake_springs(rep, **(springs if isinstance(springs, dict) else {}))
+            rep.setdefault('timing_s', {})['springs'] = round(time.time() - t0, 2)
     return rep

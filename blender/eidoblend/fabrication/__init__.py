@@ -10,7 +10,8 @@
 Modules (each mirrors its WebGPU file): processes (fabrication.js: slice_geometry, print, pocket_program, mill, carve,
 chords, Job), feed_path (FeedPath), filament_path (FilamentPath), cutter_sweep, cutter_nodes, mesh_slices,
 polygon_union (the slicer's union), source_geometry, relief, cutting, filament, manufacturing_samples, fab_sim
-(FabSim / PrintSim / CNCSim), machine (the G430 controls a job drives), three_geometry (three's primitives, exact),
+(FabSim / PrintSim / CNCSim), machine (the G430 controls a job drives), physical (Job.key_events: a job keyed at
+its program's events, so it plays at its own speed however long), three_geometry (three's primitives, exact),
 examples (EXAMPLES: the manufacturing, relief and mesh_fabrication scenes; scenes/*.json run them as films).
 The stock-rotating machine is the separate subpackage eidoblend.fabrication.rotary; its names are forwarded here when
 it is present.

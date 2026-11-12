@@ -79,7 +79,7 @@ class SkySystem:
         self.cloud_transition = None
         self.cloud_visible = True
         self.solar_occlusion = None
-        self.celestial_module = None       # a world's celestial system (the red giant): set_colors reaches it
+        self.celestial_module = None       # the sky's celestial body (the red giant): set_colors reaches it
         self.set_clouds(opts.get('clouds', 'cumulus'))
         self.set_time(opts.get('hours', 12.0))
 
@@ -170,12 +170,13 @@ class SkySystem:
                          ('fog', c.get('fog')), ('shield', c.get('shield'))):
             if val is not None:
                 self.sky_color[key] = _vec(val)
-        # a package with its own star shader (the red giant) gets the star and shield colours forwarded
+        # a package with its own star shader (the red giant) gets the star and shield colours forwarded, where it
+        # takes them (a custom celestial body may carry neither)
         cm = self.celestial_module
         if cm is not None:
-            if c.get('shield') is not None:
+            if c.get('shield') is not None and hasattr(cm, 'set_shield_color'):
                 cm.set_shield_color(self.sky_color['shield'])
-            if star is not None:
+            if star is not None and hasattr(cm, 'set_star_color'):
                 cm.set_star_color(self.sky_color['sun'])
         self.set_time(self.state['hours'])
         return dict(self.sky_color)

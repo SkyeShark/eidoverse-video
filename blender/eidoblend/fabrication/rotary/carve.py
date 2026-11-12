@@ -188,8 +188,9 @@ class RotaryJob(Rec):
         object.__setattr__(self, '_on_done', on_done)
         object.__setattr__(self, '_called', False)
         object.__setattr__(self, '_keyed', {})
+        object.__setattr__(self, '_physical', None)
 
-    __slots__ = ('_on_done', '_called', '_keyed')
+    __slots__ = ('_on_done', '_called', '_keyed', '_physical')
 
     # ---------------------------------------------------------------------------------------------- the pose ---
     def _pose(self, physical_time):
@@ -306,9 +307,47 @@ class RotaryJob(Rec):
             self.key(f, rate=self.clock_rate(clock, t), scene=sc)
         return self
 
+    def key_events(self, frame_start=None, scene=None, stock=(0.0, 0.0)):
+        """Key the job at its program's events instead of every frame (eidoblend.fabrication.physical): the gantry
+        and the A axis as the machine's joint sliders with Bezier keys exact between events (an index's smoothstep
+        included), the screws, the spindle and the chips' clock as drivers (the spindle and the chips hold their
+        frame's state through the shutter, as key() holds them). A job made without a duration plays at its own
+        physical speed, however long. The carved stock is a file per frame, so it is written for the playback
+        seconds `stock` (start, end) only (write_stock; the default: the first frame). -> self"""
+        from .. import physical
+        import bpy
+        sc = scene or bpy.context.scene
+        physical.key_job(self, frame_start, sc)
+        self.write_stock(stock[0], stock[1], scene=sc)
+        return self
+
+    def write_stock(self, start, end, scene=None):
+        """The carved stock's files for the frames of playback seconds start .. end, on the frames key_events keyed
+        (from the scene's start without it): each frame's field, one VDB file a frame. The stock then plays that
+        stretch alone and holds its nearer end on every frame around it (stock.show_frames). Returns the frames
+        written."""
+        import bpy
+        sc = scene or bpy.context.scene
+        fps = sc.render.fps / sc.render.fps_base
+        f0 = (self._physical or {}).get('frame_start', sc.frame_start)
+        a = max(0.0, min(float(start), float(end), self.duration))
+        b = min(self.duration, max(float(start), float(end)))
+        frames = list(range(int(math.floor(f0 + a * fps + 1e-6)), int(math.floor(f0 + b * fps + 1e-6)) + 1))
+        keep = self.time
+        for f in frames:
+            self.seek((f - f0) / fps)
+            self.stock.write_frame(f)
+        self.seek(keep)
+        if frames:
+            self.stock.show_frames(frames[0], frames[-1])
+        return frames
+
     def stop(self):
-        """Remove the job's keys (what play() and key() made); the machine and the stock stay as they are."""
+        """Remove the job's keys (what play(), key() and key_events() made); the machine and the stock stay as they
+        are."""
+        from .. import physical
         from .._keys import clear
+        physical.unrig(self)
         for target, path, _n in self._channels():
             idb = getattr(target, 'id_data', None) or target
             try:

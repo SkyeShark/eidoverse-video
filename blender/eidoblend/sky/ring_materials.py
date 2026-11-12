@@ -511,11 +511,10 @@ def cloud_sheet_material(ring, ob):
 def haze_wall_material(ring, ob, rain=False):
     """FOG BOUNDARY (a low haze band) or RAIN WALL (up to the cloud base, only in real rain): local haze in the main
     scene, depth-tested against the local geometry, so a terrain past the wall takes its haze, and drawn over the
-    band (which reaches the frame through the sky's camera layer). It is also drawn over the clouds of that layer:
-    WebGPU's draw order puts the cloud dome (-98) over these walls (-99), but the clouds' overlay cannot be laid on
-    them here, because a wall cannot tell sky behind it from a mesa behind it, and the overlay would paint clouds onto
-    the mesa. The difference is the veil over the cloud bases in the bottom fifth of the sky, in rain (rain wall)
-    and at the horizon line (fog wall); see the guide."""
+    band (which reaches the frame through the sky's camera layer). WebGPU's draw order puts its cloud dome (-98) over
+    these walls (-99): with make_sky(cloud_dome=...) the walls draw before the dome (Ringworld.order_walls_under_dome),
+    so the clouds lie over them. Without the dome the clouds are in the world, behind every surface, and the walls
+    veil them (a wall cannot tell sky behind it from a mesa behind it, so no overlay goes on them); see the guide."""
     m = _new_material('eido_ring_rain_wall' if rain else 'eido_ring_fog_wall', 'BLENDED')
     m.use_backface_culling = True
     g = Graph(m.node_tree)

@@ -18,7 +18,13 @@ module it moves (no Python driver, so they evaluate with auto-run off):
                                         sliders move one joint from the pose on screen
     set_slider(robot, joint, value)     the same from a script, with the depsgraph tagged (a Python write to a custom
                                         property alone does not re-evaluate its drivers)
-    unrig_joints(robot)                 removes the drivers and the properties
+    drive_module(robot, joint, prop=None, value='q')
+                                        one module's drivers, its joint value the simple expression `value` in q (the
+                                        property robot.group[prop]) and frame: 'q' for a slider, 'q * 785.398' for a
+                                        lead screw turning with its axis' slider, '(frame - 1) * 4.7' for a rotor at a
+                                        steady rate (a fabrication job keyed at its own speed rigs its machine so)
+    unrig_joints(robot)                 removes the drivers and the properties (robot.joint_sliders: {joint: property
+                                        or None})
 
 The sliders are keyable like any property, so a hand-made animation of the joint values plays from the file. A robot
 with sliders is in "manual" mode, as the inspector is after a slider moves: its play() keys transforms the drivers
@@ -50,12 +56,15 @@ def _driver(ob, path, index, prop, holder, expr):
     fc = ob.driver_add(path, index)
     d = fc.driver
     d.type = 'SCRIPTED'
-    v = d.variables.new()
-    v.name = 'q'
-    v.type = 'SINGLE_PROP'
-    v.targets[0].id_type = 'OBJECT'
-    v.targets[0].id = holder
-    v.targets[0].data_path = f'["{prop}"]'
+    for old in list(d.variables):
+        d.variables.remove(old)
+    if prop is not None:
+        v = d.variables.new()
+        v.name = 'q'
+        v.type = 'SINGLE_PROP'
+        v.targets[0].id_type = 'OBJECT'
+        v.targets[0].id = holder
+        v.targets[0].data_path = f'["{prop}"]'
     d.expression = expr
     if not d.is_simple_expression:
         raise RuntimeError(f'driver {ob.name}.{path}[{index}] is not a simple expression: {expr}')
@@ -103,9 +112,33 @@ def measure_joints(robot):
     return out
 
 
-def rig_joints(robot, values=None):
+def drive_module(robot, joint, prop=None, value='q'):
+    """Drive joint `joint`'s module with SIMPLE-EXPRESSION drivers (module notes): its joint value is the expression
+    `value` in q (robot.group[prop], when prop is given) and frame. The module is set to its rest first."""
     from .kit import decompose_three
-    import math
+    g = robot.group
+    o = robot.roots[joint]
+    st = robot.specs[joint]
+    rest = robot.rest[o.name]
+    loc, q3, _sc = decompose_three(rest)
+    axis = Vector(st.get('axis') or (0, 0, 1)).normalized()
+    o.matrix_basis = rest
+    o.rotation_mode = 'QUATERNION'
+    if st.get('joint_type') == 'prismatic':
+        d = q3 @ axis
+        for i in range(3):
+            _driver(o, 'location', i, prop, g, f'{_num(loc[i])} + {_num(d[i])} * ({value})')
+    else:
+        tail = Quaternion((0.0, 1.0, 0.0, 0.0)) if rest.to_3x3().determinant() < 0 else Quaternion()
+        A = _qmul(_qmul(q3, Quaternion()), tail)
+        B = _qmul(_qmul(q3, Quaternion((0.0, axis.x, axis.y, axis.z))), tail)
+        for i in range(4):
+            _driver(o, 'rotation_quaternion', i, prop, g,
+                    f'{_num(A[i])} * cos(({value}) / 2) + {_num(B[i])} * sin(({value}) / 2)')
+    return o
+
+
+def rig_joints(robot, values=None):
     g = robot.group
     made = {}
     for n in joint_names(robot):
@@ -118,26 +151,8 @@ def rig_joints(robot, values=None):
         ui = g.id_properties_ui(prop)
         ui.update(min=lo, max=hi, soft_min=lo, soft_max=hi, step=0.01 if s.get('joint_type') == 'prismatic' else 1,
                   description=f"{n} ({s.get('joint_type')}, {'m' if s.get('joint_type') == 'prismatic' else 'rad'})")
-        targets = [n] + (['rotary_chuck'] if a_axis and 'rotary_chuck' in robot.roots else [])
-        for t in targets:
-            o = robot.roots[t]
-            st = robot.specs[t]
-            rest = robot.rest[o.name]
-            loc, q3, sc = decompose_three(rest)
-            axis = Vector(st.get('axis') or (0, 0, 1)).normalized()
-            o.matrix_basis = rest
-            o.rotation_mode = 'QUATERNION'
-            if st.get('joint_type') == 'prismatic':
-                d = q3 @ axis
-                for i in range(3):
-                    _driver(o, 'location', i, prop, g, f'{_num(loc[i])} + {_num(d[i])} * q')
-            else:
-                tail = Quaternion((0.0, 1.0, 0.0, 0.0)) if rest.to_3x3().determinant() < 0 else Quaternion()
-                A = _qmul(_qmul(q3, Quaternion()), tail)
-                B = _qmul(_qmul(q3, Quaternion((0.0, axis.x, axis.y, axis.z))), tail)
-                for i in range(4):
-                    _driver(o, 'rotation_quaternion', i, prop, g,
-                            f'{_num(A[i])} * cos(q / 2) + {_num(B[i])} * sin(q / 2)')
+        for t in [n] + (['rotary_chuck'] if a_axis and 'rotary_chuck' in robot.roots else []):
+            drive_module(robot, t, prop)
         made[n] = prop
     robot.joint_sliders = made
     g.update_tag()                         # new drivers are evaluated once their property is tagged: pose them now
@@ -154,7 +169,8 @@ def set_slider(robot, joint, value):
 
 def unrig_joints(robot):
     for n, prop in (getattr(robot, 'joint_sliders', None) or {}).items():
-        targets = [n] + (['rotary_chuck'] if prop.endswith('A axis / chuck') and 'rotary_chuck' in robot.roots else [])
+        a_axis = prop is not None and prop.endswith('A axis / chuck')
+        targets = [n] + (['rotary_chuck'] if a_axis and 'rotary_chuck' in robot.roots else [])
         for t in targets:
             o = robot.roots[t]
             for path in ('location', 'rotation_quaternion'):
@@ -162,7 +178,7 @@ def unrig_joints(robot):
                     o.driver_remove(path)
                 except TypeError:
                     pass
-        if prop in robot.group.keys():
+        if prop is not None and prop in robot.group.keys():
             del robot.group[prop]
     robot.joint_sliders = {}
     bpy.context.view_layer.update()

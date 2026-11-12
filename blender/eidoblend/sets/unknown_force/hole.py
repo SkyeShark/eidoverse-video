@@ -690,7 +690,7 @@ def build(first=None, opts=None, ctx=None, **kw):
 
     def apply_atmosphere(sc=None, objects=None):
         """The scene's World (the kit's night); objects (a performer, props) take the haze as three's scene.fogNode
-        gave it to every material (KIT.fog_objects)."""
+        gave it to every material (KIT.fog_objects, see-through materials keeping their alpha)."""
         sc = sc or scene
         if K.world is not None:
             sc.world = K.world
@@ -722,6 +722,8 @@ def build(first=None, opts=None, ctx=None, **kw):
 
     def dispose():
         if standalone:
+            if K._fog is not None:
+                KIT.unfog_group(K._fog)              # your own objects' materials, before the haze group goes
             K.made.dispose()
     cams = {}
     for nme in HOLE_CAMS:

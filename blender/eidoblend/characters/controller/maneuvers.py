@@ -936,9 +936,19 @@ def _over(world, P):
     return top + 1.0 if top is not None else P[:, 2] + 50.0
 
 
+def _guard_world(c, side, pts):
+    """the points the feet-out-of-solids guard tests: the foot's rigid points (pts) and the visible boot as the pose
+    deforms it (emotes.verbs' boot skin, linear blend skinning over the humanoid bones: a toe cap or a heel weighted
+    partly to the toes or the shin lies off the rigid foot by up to a centimetre in a crouch) -> (n, 3)"""
+    from ..emotes.verbs import _boot_skin, _skin_pts
+    P = _foot_world(c, side, pts)
+    B = _skin_pts(c.pose, c, _boot_skin(c).get(side))
+    return P if B is None else np.concatenate([P, B], axis=0)
+
+
 def _foot_depth(c, side, pts, world, f3):
     """how far a foot's deepest point inside a solid lies behind the face the travel meets (0: none inside)"""
-    P = _foot_world(c, side, pts)
+    P = _guard_world(c, side, pts)
     G = world.h(P[:, 0], P[:, 1], z_from=_over(world, P))
     worst = 0.0
     for i in np.flatnonzero((G > -1e8) & (G - P[:, 2] > 0.002)):
@@ -1085,7 +1095,8 @@ def feet_out_of_solids(c, m):
     """this edition's last word on a maneuver frame's feet: no part of a foot inside a solid. The clip owns the legs and
     the contact IK pulls them at partial weight, so a kick into a wall face, a toe into the cover a vault crosses, a
     crouch sunk into the top a mount ends on, a boot through a rung all happen; here each foot with points inside a
-    solid (the whole foot every 12 mm and its sole; under a surface, confirmed by a parity ray) moves out. Into a face,
+    solid (the whole foot every 12 mm and its sole, and the visible boot as the pose deforms it: _guard_world; under a
+    surface, confirmed by a parity ray) moves out. Into a face,
     the foot first turns its sole against it at the ankle (a mantle's high step points its toes into the wall); then
     the whole boot takes the least move in the travel's plane that leaves it clear (_clear_move: back off the face or
     up out of the solid, or both, as a boot wedged between a ladder's rung and the wall needs), the same way as on the
@@ -1108,7 +1119,7 @@ def feet_out_of_solids(c, m):
             continue
         took = None
         for rnd in range(SOLID_PASSES + 1):
-            P = _foot_world(c, side, pts)
+            P = _guard_world(c, side, pts)
             top = _over(world, P)
             ins = np.flatnonzero(_inside_mask(world, P, np.arange(len(P)), top))
             if not len(ins):

@@ -2628,17 +2628,29 @@ class Mat:
         self.out = nt.nodes.new('ShaderNodeOutputMaterial')
         self.out.location = (400, 0)
 
-    def _finish(self, shader, side, method, fog, fog_color):
+    def _finish(self, shader, side, method, fog, alpha=None):
+        """The output: `shader` fogged by three's FogExp2 when fog is given, then side and render method. A surface
+        with an alpha fogs only what it covers, Mix(f, S, Mix(alpha, Transparent, Emission(fog colour))): three fogged
+        a fragment's colour and kept its alpha, so the chain link's open diamonds show the yard behind them unveiled."""
         nb, m = self.nb, self.m
         if fog:
             f = nb.fog_factor(fog['density'])
             em = nb.node('ShaderNodeEmission')
             nb.put(em.inputs['Color'], hex_linear(fog['color'], SPEC))
             nb.put(em.inputs['Strength'], 1.0)
+            haze = em.outputs[0]
+            a = None if alpha is None else nb.w(alpha)
+            if a is not None and not (a.is_const and a.v >= 1.0):
+                tr = nb.node('ShaderNodeBsdfTransparent')
+                cov = nb.node('ShaderNodeMixShader')
+                nb.put(cov.inputs[0], nb.clamp(a, 0.0, 1.0))
+                nb.t.links.new(tr.outputs[0], cov.inputs[1])
+                nb.t.links.new(em.outputs[0], cov.inputs[2])
+                haze = cov.outputs[0]
             mx = nb.node('ShaderNodeMixShader')
             nb.put(mx.inputs[0], f)
             nb.t.links.new(shader, mx.inputs[1])
-            nb.t.links.new(em.outputs[0], mx.inputs[2])
+            nb.t.links.new(haze, mx.inputs[2])
             shader = mx.outputs[0]
         nb.t.links.new(shader, self.out.inputs['Surface'])
         if side == 'back':
@@ -2677,7 +2689,7 @@ class Mat:
         if coat is not None:
             nb.put(b.inputs['Coat Weight'], coat)
             nb.put(b.inputs['Coat Roughness'], coat_rough)
-        return self._finish(b.outputs[0], side, method, fog, None)
+        return self._finish(b.outputs[0], side, method, fog, alpha)
 
     def unlit(self, color, alpha=None, additive=False, side='double', fog=None, scale=SPEC, method=None,
               depth_write=None):
@@ -2709,7 +2721,7 @@ class Mat:
                 nb.t.links.new(em.outputs[0], mx.inputs[2])
                 shader = mx.outputs[0]
             method = method or 'BLENDED'
-        m = self._finish(shader, side, method, None, None)
+        m = self._finish(shader, side, method, None)
         if method == 'BLENDED':
             m.use_transparency_overlap = bool(additive) if depth_write is None else not depth_write
         return m
@@ -3181,6 +3193,7 @@ class Lib:
             'World': bpy.data.worlds, 'Collection': bpy.data.collections,
             'GeometryNodeTree': bpy.data.node_groups, 'ShaderNodeTree': bpy.data.node_groups,
             'LightProbe': bpy.data.lightprobes, 'LightProbeVolume': bpy.data.lightprobes,
+            'LightProbePlane': bpy.data.lightprobes, 'LightProbeSphere': bpy.data.lightprobes,
         }
         for x in reversed(self.owned):
             try:
@@ -3301,6 +3314,26 @@ def make_world(lib, name, env_img=None, env_i=1.0, hemi=None, scene=None):
     return w
 
 
+def fog_group(lib, fog, name):
+    """A set's fog, three's FogExp2(color, density), as a shader node group with the outputs the city kit's haze has
+    (factor: 1 - exp(-(density z)^2) of the view depth z; color: the fog's colour), the same numbers the set's own
+    materials mix in (Mat(fog=)). SetBase.fog_objects wraps your own objects' materials in it."""
+    import bpy
+    tree = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    lib.own(tree)
+    tree.interface.new_socket('factor', in_out='OUTPUT', socket_type='NodeSocketFloat')
+    tree.interface.new_socket('color', in_out='OUTPUT', socket_type='NodeSocketVector')
+    nb = NB(tree, lib)
+    out = nb.node('NodeGroupOutput')
+    out.hide = False
+    nb.put(out.inputs['factor'], nb.fog_factor(fog['density']))
+    c = nb.node('ShaderNodeCombineXYZ')                       # the fog's colour, linear
+    for s, v in zip(c.inputs, hex_linear(fog['color'], SPEC)):
+        s.default_value = v
+    tree.links.new(c.outputs[0], out.inputs['color'])
+    return tree
+
+
 def make_camera(lib, name, cam, parent=None, clip=(0.05, 2000.0)):
     """A Blender camera from a set's {pos, target, fov} (three space, set-local; fov vertical degrees)."""
     import bpy
@@ -3365,6 +3398,8 @@ class SetBase:
         self.parts, self.cams, self.cams_three, self.materials = {}, {}, {}, {}
         self.focal = self.focal_three = None
         self.look = {}
+        self.fog = None                  # the FogExp2 the set's materials carry ({'color', 'density'}), when they do
+        self._fog_group = None
 
     def set_cams(self, cams_three, focal_three):
         """The cameras and the focal point from the WebGPU's numbers (three axes): cams / focal in Blender's axes,
@@ -3471,13 +3506,37 @@ class SetBase:
             return {}
         return LL.bake_light_probes(scene or bpy.context.scene, probes=[pr])
 
+    def fog_group(self):
+        """The set's fog as a shader node group (outputs factor, color: cn_lib.fog_group), made once; None when the
+        set's materials carry no fog."""
+        if self.fog and self._fog_group is None:
+            self._fog_group = fog_group(self.lib, self.fog, f'{self.group.name}:fog')
+        return self._fog_group
+
+    def fog_objects(self, objects):
+        """Your own objects in the set (a performer, a crowd, props) take the set's haze, as three's scene.fog fogged
+        every material in the scene: each of their materials is wrapped once in the set's FogExp2 (fog_group), the
+        wrap the city kit gives its own (citykit.fog_material), so a see-through material (a hair card, a decal, a
+        blended veil) keeps its alpha and fogs only what it covers. Call it after loading them; citykit's
+        unfog_material(mat) takes one out, and dispose() takes them all out. Returns (wrapped, left); a set built
+        without fog wraps nothing."""
+        g = self.fog_group()
+        if g is None:
+            return 0, 0
+        from . import citykit as KIT
+        return KIT.fog_objects(None, objects, group=g)
+
     def dispose(self):
+        if self._fog_group is not None:
+            from . import citykit as KIT
+            KIT.unfog_group(self._fog_group)          # your objects' materials, before their haze group goes
+            self._fog_group = None
         self.lib.dispose_all()
 
     # the sets' contract reads build()'s result as a dict too (eidoblend.sets.unknown_force: group, parts, update,
     # dispose, cams ...): S['parts'] is S.parts
     _KEYS = ('group', 'parts', 'update', 'dispose', 'cams', 'cams_three', 'focal', 'focal_three', 'look', 'uniforms',
-             'materials', 'camera', 'animate', 'apply_look', 'apply_post', 'focal_world', 'bake_probes')
+             'materials', 'camera', 'animate', 'apply_look', 'apply_post', 'focal_world', 'bake_probes', 'fog_objects')
 
     def keys(self):
         return [k for k in self._KEYS if hasattr(self, k)]

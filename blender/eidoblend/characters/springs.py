@@ -24,6 +24,13 @@ plays and renders any frame on its own:
     -> one action: each joint's rotation_quaternion (and a folded petal's scale) per frame, LINEAR, on the NLA
        track '<name>|springs' (the body's tracks and its active action key no spring bone, so nothing fights it).
 
+A body walking through a set takes three more options (this edition's; the engine's springs know only the body's own
+colliders): ground= what the chains rest on (each moving point kept over the surface under it: a tail lying down stays
+on the floor), solids= what they stay out of (no joint crosses a face: a chair's back, its pan), each a CollisionWorld,
+a BVHTree or meshes; and reset_preroll= seconds that settle the chains on the new pose at a reset, so a cut opens on
+them hanging (0, the engine's reset: a cold start). The character controller's take passes all three
+(controller.film.Locomotion.bake_springs).
+
 The tie limiter is OFF by default because the engine's own is inert: three-vrm 3.5.2 sets matrixAutoUpdate = false on
 every spring joint bone, so the wrapper's write to tie_1.quaternion never reaches tie_1.matrix (its
 updateWorldMatrix(false, true) keeps the spring's matrix) and is overwritten on the next update. Measured with the
@@ -70,6 +77,7 @@ from decimal import ROUND_FLOOR, Decimal
 
 import bpy
 from mathutils import Matrix, Quaternion, Vector
+from mathutils.bvhtree import BVHTree
 
 DEFAULT_TIE_LIMIT_DEG = 10.0      # globalThis._tieSwingMaxDeg's default in render_scene.mjs (opt-in: see above)
 TIE_TIP_LIMIT_DEG = 8.0           # the tip's own cone (min(limit, 8 deg)) in the same wrapper
@@ -150,13 +158,84 @@ def _addon_handler_module():
     return None
 
 
-class SpringRig:
-    """the VRM's springs as three-vrm builds them, over the add-on's data. h: a VRMHandle (characters.vrm)."""
+def ground_tree(ground):
+    """the ground (or the solids) the chains rest on, as a BVH tree in world space: a CollisionWorld (its tree), a
+    BVHTree, or meshes (their evaluated faces) -> BVHTree or None"""
+    if ground is None:
+        return None
+    if isinstance(ground, BVHTree):
+        return ground
+    tree = getattr(ground, 'tree', None)
+    if isinstance(tree, BVHTree):
+        return tree
+    objs = [o for o in ground if getattr(o, 'type', None) == 'MESH']
+    dg = bpy.context.evaluated_depsgraph_get()
+    verts, polys = [], []
+    for o in objs:
+        ev = o.evaluated_get(dg)
+        me = ev.to_mesh()
+        base = len(verts)
+        verts.extend(o.matrix_world @ v.co for v in me.vertices)
+        polys.extend(tuple(base + i for i in p.vertices) for p in me.polygons)
+        ev.to_mesh_clear()
+    return BVHTree.FromPolygons(verts, polys) if polys else None
 
-    def __init__(self, h, tie_limit_deg=None, length='engine'):
+
+GROUND_MIN_NZ = 0.3         # a face under a chain whose normal is steeper than this is a wall, not ground to rest on
+
+
+def _ground_push(tree, tail, bpos, radius, length):
+    """a chain's moving point kept `radius` over the ground under it (a plane collider at the surface the point is
+    over, its normal the surface's), the joint's length restored after it as three-vrm restores it -> the point, or
+    None where the point is clear"""
+    top = max(tail.z, bpos.z) + 0.05
+    loc, nrm, _i, _d = tree.ray_cast(Vector((tail.x, tail.y, top)), Vector((0.0, 0.0, -1.0)), top - tail.z + 1.0)
+    if loc is None:
+        return None
+    n = nrm if nrm.z >= 0.0 else -nrm
+    if n.z < GROUND_MIN_NZ:
+        return None
+    dist = (tail - loc).dot(n) - radius
+    if dist >= 0.0:
+        return None
+    tail = tail - n * dist
+    d = tail - bpos
+    return bpos + d * (length / d.length) if d.length > _EPS else tail
+
+
+def _solid_push(tree, tail, bpos, radius, length):
+    """a chain's moving point kept `radius` on the near side of any solid face its joint would cross (the ray from the
+    joint's head to the point, which hangs from the body outside the solids: a chair's back, its pan, a wall), onto
+    that face's plane, the joint's length restored after it -> the point, or None where nothing is crossed"""
+    v = tail - bpos
+    ln = v.length
+    if ln < _EPS:
+        return None
+    hit, nrm, _i, _d = tree.ray_cast(bpos, v / ln, ln + radius)
+    if hit is None:
+        return None
+    n = nrm if nrm.dot(bpos - hit) >= 0.0 else -nrm
+    depth = radius - (tail - hit).dot(n)
+    if depth <= 0.0:
+        return None
+    tail = tail + n * depth
+    d = tail - bpos
+    return bpos + d * (length / d.length) if d.length > _EPS else tail
+
+
+class SpringRig:
+    """the VRM's springs as three-vrm builds them, over the add-on's data. h: a VRMHandle (characters.vrm). Besides the
+    body's own colliders (None, the engine's, has neither): ground, what the chains rest on (each point kept over the
+    surface under it), and solids, what they stay out of (no joint crosses a face of them): each a CollisionWorld, a
+    BVHTree or meshes (ground_tree)"""
+
+    def __init__(self, h, tie_limit_deg=None, length='engine', ground=None, solids=None):
         if length not in ('true', 'engine'):
             raise ValueError(f"SpringRig length={length!r}: 'true' or 'engine'")
         self.length = length
+        self.ground = ground_tree(ground)
+        self.solids = ground_tree(solids)
+        self.grounded = False             # whether the last step rested a chain on the ground or a solid
         self.h, self.arm = h, h.arm
         sb = self.arm.data.vrm_addon_extension.spring_bone1
         pbs, bones = self.arm.pose.bones, self.arm.data.bones
@@ -336,6 +415,7 @@ class SpringRig:
         if dt <= 0:
             return
         self._cache = {}
+        self.grounded = False
         for j in self.joints:
             pw = self.world(j.parent) if j.parent else self.arm.matrix_world
             init_w = pw @ self._local(j, j.init_basis, j.init_scale)
@@ -362,6 +442,13 @@ class SpringRig:
                     if hit is not nxt:
                         nxt = hit
                         dirv = (nxt - bpos).normalized()
+            for tree, push in ((self.solids, _solid_push), (self.ground, _ground_push)):
+                if tree is not None:
+                    hit = push(tree, nxt, bpos, j.hit_radius, length)
+                    if hit is not None:
+                        nxt = hit
+                        dirv = (nxt - bpos).normalized()
+                        self.grounded = True
             j.prev_tail = j.cur_tail
             j.cur_tail = (c.inverted_safe() @ nxt) if c is not None else nxt.copy()
             # the bone turned toward the tail: from the head -> tail DIRECTION (mathutils is float32: a tail a few
@@ -463,24 +550,28 @@ def _n_steps(t0, t1, rate):
     return max(0, n1 - n0)
 
 
-def _remove_track(h, tname):
+def _remove_track(h, tname, only=None):
+    """the NLA track tname removed, with its strips' actions (only: just the action of that name; the others, a
+    take's own springs, are kept for a shot to put back)"""
     ad = h.arm.animation_data
     if ad is None:
         return
     for tr in list(ad.nla_tracks):
         if tr.name == tname:
             for st in list(tr.strips):
-                if st.action is not None and st.action.users <= 1 + int(st.action.use_fake_user):
+                if st.action is not None and (only is None or st.action.name == only) and \
+                        st.action.users <= 1 + int(st.action.use_fake_user):
                     bpy.data.actions.remove(st.action)
             ad.nla_tracks.remove(tr)
 
 
-def key_track(h, tname, series, f0, scale_bones=()):
-    """series {bone: [(frame, Quaternion, scale)]} -> one action on an NLA track named tname (above the others)"""
+def key_track(h, tname, series, f0, scale_bones=(), action_name=None):
+    """series {bone: [(frame, Quaternion, scale)]} -> one action (named action_name, default tname) on an NLA track
+    named tname (above the others)"""
     from bpy_extras import anim_utils
     arm = h.arm
     ad = arm.animation_data or arm.animation_data_create()
-    act = bpy.data.actions.new(tname)
+    act = bpy.data.actions.new(action_name or tname)
     slot = act.slots.new(id_type='OBJECT', name=arm.name)
     cb = anim_utils.action_ensure_channelbag_for_slot(act, slot)
     n = 0
@@ -510,18 +601,26 @@ def key_track(h, tname, series, f0, scale_bones=()):
 
 
 def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=(), overrides=None, tie_limit_deg=None,
-                 length=None, hide_meshes=True, scene=None, log=None, step_hook=None):
+                 length=None, hide_meshes=True, scene=None, log=None, step_hook=None, ground=None, solids=None,
+                 reset_preroll=0.0, action_name=None):
     """simulate h's springs over frames f0..f1 in order and key them; returns a report:
        solver, rate, frames, springs, joints, steps, preroll_steps, resets, action, track, keys,
        swing_deg {spring: the most its first joint turned from its initial state}, tie_clamped_frames,
-       max_tail_speed_mps, nan (must be 0), spring_list
+       max_tail_speed_mps, nan (must be 0), ground_frames, spring_list
+    resets: frames where the chains start over (springBoneManager.reset(): a teleport, a cut); reset_preroll seconds
+    settle them there on that frame's pose as `preroll` does on f0's (0, the engine's: a cold start, the chains
+    springing out of their rest shape; a cut into a new shot opens on them hanging with it)
     rate: 'frame' (one step per frame, dt = 1/fps: the engine) or steps per second (60: the add-on's viewport)
     overrides: {frame: {bone: {'basis': Quaternion | None, 'scale': float, 'colliders': bool}}} (the wardrobe's petal
     folds; h.spring_overrides when not given); tie_limit_deg: None (default: the free tie every WebGPU film shows, the
     engine's limiter being inert), a cone in degrees, or 'engine' (the wrapper's own 10 deg); length: 'engine'
     (three-vrm's, the default for solver 'three') or 'true' (the bone's real length; the only one solver 'addon' has);
     step_hook: fn(rig, frame), called before every step of solver 'three' (a caller's per-frame change to the
-    SpringRig, e.g. the ocean set's stiffening in sets.daisy.ocean.perform)"""
+    SpringRig, e.g. the ocean set's stiffening in sets.daisy.ocean.perform); ground and solids (solver 'three'; each a
+    CollisionWorld, a BVHTree or meshes): what the chains rest on (a tail lying on the floor stays on it) and what they
+    stay out of (a chair's back, its pan); ground_frames counts the frames where either held a chain; action_name: the
+    keys' action (default the track's name, '<name>|springs'): a take's own name keeps each take's springs when the
+    armature bakes several (the track plays the last; put a take's back with use_springs)"""
     scene = scene or bpy.context.scene
     fps = scene.render.fps / scene.render.fps_base
     dt = 1.0 / fps
@@ -538,6 +637,8 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
                          "use solver='three' (or 'auto')")
     if rate != 'frame' and not (isinstance(rate, (int, float)) and rate > 0):
         raise ValueError(f"bake_springs rate={rate!r}: 'frame' or steps per second")
+    if solver == 'addon' and (ground is not None or solids is not None):
+        raise ValueError("bake_springs: the add-on's solver has no ground or solids; use solver='three'")
     lim = DEFAULT_TIE_LIMIT_DEG if tie_limit_deg in ('engine', 'auto') else tie_limit_deg
     arm = h.arm
     # an action keyframe_insert created on the armature after its clips' NLA strips (root motion, a turn, the
@@ -545,11 +646,14 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
     # read a body that does not move (renders build their own depsgraph, so the film would move without its springs)
     for o in [arm] + [p for p in _parents(arm)]:
         o.update_tag()
-    rig = SpringRig(h, tie_limit_deg=lim, length=length)
+    rig = SpringRig(h, tie_limit_deg=lim, length=length, ground=ground, solids=solids)
     bones = [j.bone for j in rig.joints]
     resets = sorted(set(int(r) for r in resets))
     tname = f'{h.name}|springs'
-    _remove_track(h, tname)
+    aname = action_name or tname
+    _remove_track(h, tname, only=None if aname == tname else aname)
+    if aname != tname and bpy.data.actions.get(aname) is not None:
+        bpy.data.actions.remove(bpy.data.actions[aname])        # this take baked again: its old springs go
     for b in bones:
         pb = arm.pose.bones[b]
         pb.rotation_mode = 'QUATERNION'
@@ -572,7 +676,7 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
                 held.append(fn)
     series = {b: [] for b in bones}
     swing, speeds, prev_tip = {}, [], {}
-    steps, nan, clamped = 0, 0, 0
+    steps, nan, clamped, grounded = 0, 0, 0, 0
     over_frames = sorted(overrides)
 
     def apply_overrides(fr):
@@ -627,11 +731,14 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
         if solver == 'addon':
             addon_reset()
         sdt_frame = dt if rate == 'frame' else 1.0 / rate
-        for k in range(int(round(preroll * fps))):           # frame f0's pose held: the chains settle into it
-            for _ in range(n_for(k * dt, (k + 1) * dt)):
-                step(sdt_frame)
-            if solver == 'three':
-                write_pose()
+
+        def settle(seconds):
+            for k in range(int(round(seconds * fps))):           # this frame's pose held: the chains settle into it
+                for _ in range(n_for(k * dt, (k + 1) * dt)):
+                    step(sdt_frame)
+                if solver == 'three':
+                    write_pose()
+        settle(preroll)
         rep_pre = steps
         t_prev = -dt
         for f in range(f0, f1 + 1):
@@ -644,14 +751,18 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
                     rig.set_init_state([b for b in overrides[f] if b in rig.by_bone])
                 if f in resets:
                     rig.set_init_state()
+                    settle(reset_preroll)
                 for _ in range(n_for(t_prev, t)):
                     step(sdt_frame)
                 if rig.tie and rig.tie_clamped:
                     clamped += 1
+                if rig.grounded:
+                    grounded += 1
                 write_pose()
             else:
                 if f in resets:
                     addon_reset()
+                    settle(reset_preroll)
                 for _ in range(n_for(t_prev, t)):
                     step(sdt_frame)
                 rig.read_pose()
@@ -683,7 +794,7 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
         ext.enable_animation = anim0 if solver != 'addon' else False
         for o in hidden:
             o.hide_viewport = False
-    act, _track, n_keys = key_track(h, tname, series, f0)
+    act, _track, n_keys = key_track(h, tname, series, f0, action_name=aname)
     for b in bones:                       # the track drives these bones now
         arm.pose.bones[b].rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
         arm.pose.bones[b].scale = (1.0, 1.0, 1.0)
@@ -692,7 +803,8 @@ def bake_springs(h, f0, f1, solver='three', rate='frame', preroll=1.0, resets=()
            'joints': len(rig.joints), 'tie_limit_deg': lim if rig.tie else None, 'steps': steps, 'preroll_steps': rep_pre, 'resets': resets,
            'override_frames': over_frames, 'action': act.name, 'track': tname, 'keys': n_keys,
            'swing_deg': {k: round(v, 2) for k, v in swing.items()}, 'tie_clamped_frames': clamped,
-           'max_tail_speed_mps': round(max(speeds), 3) if speeds else 0.0, 'nan': nan, 'spring_list': rig.springs}
+           'max_tail_speed_mps': round(max(speeds), 3) if speeds else 0.0, 'nan': nan, 'ground_frames': grounded,
+           'spring_list': rig.springs}
     if log:
         log(f'[springs] {h.name}: {rep["springs"]} springs, {rep["joints"]} joints, solver {solver}, rate {rate}, '
             f'{steps} steps, {n_keys} keys on {tname}')
@@ -724,6 +836,31 @@ def spring_track(h):
     """the NLA track bake_springs made, or None"""
     ad = h.arm.animation_data
     return ad.nla_tracks.get(f'{h.name}|springs') if ad is not None else None
+
+
+def use_springs(target, action):
+    """a take's own springs (the action bake_springs keyed under action_name=) put on the springs track of target (a
+    VRM handle or its armature): what a shot that plays that take's action needs, when the armature baked several ->
+    the track, or None (no such action)"""
+    act = bpy.data.actions.get(action) if isinstance(action, str) else action
+    arm = getattr(target, 'arm', target)
+    if act is None or arm is None or arm.type != 'ARMATURE':
+        return None
+    ad = arm.animation_data or arm.animation_data_create()
+    tname = f"{getattr(target, 'name', arm.name)}|springs" if hasattr(target, 'arm') else None
+    tr = ad.nla_tracks.get(tname) if tname else next((t for t in ad.nla_tracks if t.name.endswith('|springs')), None)
+    if tr is None:
+        tr = ad.nla_tracks.new()
+        tr.name = tname or f'{arm.name}|springs'
+    for st in list(tr.strips):
+        tr.strips.remove(st)
+    st = tr.strips.new(act.name, int(act.frame_range[0]), act)
+    if hasattr(st, 'action_slot') and len(act.slots):
+        st.action_slot = act.slots[0]
+    st.blend_type = 'REPLACE'
+    st.extrapolation = 'HOLD'
+    st.use_auto_blend = False
+    return tr
 
 
 def remove_springs(h):

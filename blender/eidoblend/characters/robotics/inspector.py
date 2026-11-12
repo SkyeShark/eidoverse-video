@@ -40,8 +40,11 @@ controls. A browser page has no place in a Blender port; the same tool is a scen
                                     slider, it leaves manual mode
         reset()                     Reset: manual mode off (the sliders' drivers removed, the motion keyed again) and
                                     the motion's pose at 0 s, without refitting the camera
-        play(on=True)               Play: leaves manual mode; the scene's playback range is the clip's 20 s (or the
-                                    job's duration)
+        play(on=True, start=None, seconds=None)
+                                    Play: leaves manual mode; the scene's playback range is the clip's 20 s (or the
+                                    job's duration). With start / seconds the preview range plays that stretch; on
+                                    the rotary machine at physical timing the carved stock's files are written for it
+                                    (a file per frame: write_stock)
         fit() / frame_work()        the Frame and "Inspect workpiece" buttons
         set_colors(primary, accent) the Body / Accent pickers; set_filament_color(c) the Filament picker;
                                     pickers() their current values ('#rrggbb')
@@ -53,9 +56,13 @@ controls. A browser page has no place in a Blender port; the same tool is a scen
                                     starts where its joint is on screen, so only this joint moves; the rig's drivers
                                     move the modules; the value is clamped to the joint's range, as the input is)
         set_stock(material=None, preset=None, length=None, width=None, height=None)   the stock controls
-        set_timing('lapse' | 'physical')             the process playback select (18 s / 32 s rotary, or the job's own
-                                    time, keyed frame by frame: refused past MAX_KEYED_FRAMES, 25 min at 24 fps; the
-                                    pocket mill is 20 min, the print 15 min, the relief 7.8 hours)
+        set_timing('lapse' | 'physical')             the process playback select: the time lapse (18 s, 32 s on the
+                                    rotary machine, keyed frame by frame) or the job's own time (the pocket mill 20
+                                    min, the print 15 min, the rotary sample 38 min, the relief 7.8 hours), keyed at
+                                    the program's events (job.key_events: exact between them), so any length plays;
+                                    refused past MAX_PROGRAM_EVENTS events or past Blender's last frame (12.1 hours
+                                    at 24 fps). On the rotary machine the carved stock is a file per frame: set_time
+                                    writes the frame it shows, play(start=, seconds=) the stretch it plays
         set_source(source, name)    setSource: a workpiece for the process (a bpy Object / Mesh / Collection, or a
                                     manufacturing sample name: 'handle', 'bracket', 'ring'; None: the demonstration)
         process_state()             the processState line at the current time
@@ -90,7 +97,7 @@ SWEEP_CLIPS = ('walk', 'drive-circle', 'flight')
 STOCK_MATERIALS = ('aluminum', 'brass', 'steel', 'wood', 'plywood')
 STOCK_PRESETS = {'140,36,36': (140, 36, 36), '100,24,28': (100, 24, 28), '180,44,50': (180, 44, 50)}
 SOURCE_SAMPLES = ('handle', 'bracket', 'ring')
-MAX_KEYED_FRAMES = 36000      # 25 min at 24 fps: physical timing keys every frame (the relief alone is 7.8 hours)
+MAX_PROGRAM_EVENTS = 250_000  # physical timing keys each program event (the relief: 104,000; the rotary sample 38,000)
 NO_SOURCE = 'Load a model or choose a mesh example to generate its actual toolpath.'
 
 
@@ -519,24 +526,37 @@ class Inspector(dict):
         return self
 
     def _checked_job(self):
-        """the process job, refused (and removed) when physical timing would key more than MAX_KEYED_FRAMES"""
+        """the process job; at physical timing refused (and removed) when its program has more than
+        MAX_PROGRAM_EVENTS events or it would end past Blender's last frame"""
         job = self._make_job()
-        frames = int(math.ceil(job.duration * self.fps))
-        if frames > MAX_KEYED_FRAMES:
-            job.dispose()
-            raise ValueError(f'physical timing makes this job {job.duration:.0f} s long, {frames:,} keyed frames '
-                             f'(more than {MAX_KEYED_FRAMES:,}): use the time lapse, or '
-                             "process_options={'duration': seconds}")
+        if self.timing == 'physical':
+            from eidoblend.fabrication.physical import LAST_FRAME, event_count
+            n = event_count(job)
+            last = self.scene.frame_start + job.duration * self.fps
+            why = None
+            if n > MAX_PROGRAM_EVENTS:
+                why = f'its program has {n:,} events (more than {MAX_PROGRAM_EVENTS:,})'
+            elif last > LAST_FRAME:
+                why = (f"it would end at frame {last:,.0f}, past Blender's last frame {LAST_FRAME:,} (at "
+                       f'{math.floor((LAST_FRAME - self.scene.frame_start) / job.duration)} fps or fewer it fits)')
+            if why:
+                job.dispose()
+                raise ValueError(f'physical timing makes this job {job.duration:.0f} s long and {why}: use the time '
+                                 "lapse, or process_options={'duration': seconds}")
         return job
 
     def _key_motion(self):
-        """key the selected motion over its range: the job over its duration, a clip over the slider's 20 s"""
+        """key the selected motion over its range: the job over its duration (at physical timing at its program's
+        events), a clip over the slider's 20 s"""
         sc, clip = self.scene, self['clip']
         if clip == 'process':
             if self['job'] is None:
                 self['job'] = self._checked_job()
             self._range(self['job'].duration)
-            self['job'].play(frame_start=sc.frame_start, frame_end=sc.frame_end, scene=sc)
+            if self.timing == 'physical':
+                self['job'].key_events(frame_start=sc.frame_start, scene=sc)
+            else:
+                self['job'].play(frame_start=sc.frame_start, frame_end=sc.frame_end, scene=sc)
         elif clip:
             self._range(self.duration)
             self.robot.play(clip, frame_start=sc.frame_start, frame_end=sc.frame_end, scene=sc)
@@ -582,10 +602,12 @@ class Inspector(dict):
             raise ValueError('Inspector time must be finite')
         self._leave_manual()
         job = self['job']
-        if job is not None:
-            job.seek(t)                      # the pose it sets is the keys' at frame times; the keys win below
         sc = self.scene
         f = sc.frame_start + t * self.fps
+        if job is not None:
+            if self._stock_files() and not self._stock_has(int(round(f))):
+                job.write_stock(t, t, scene=sc)  # the rotary stock at physical timing: this frame's file
+            job.seek(t)                      # the pose it sets is the keys' at frame times; the keys win below
         sc.frame_set(int(math.floor(f)), subframe=f - math.floor(f))
         self['time'] = t
         line = self.process_state()
@@ -598,13 +620,35 @@ class Inspector(dict):
         motion keyed again if a slider had moved, then the motion's pose at 0 s; the camera stays"""
         return self.set_time(0.0)
 
-    def play(self, on=True):
+    def play(self, on=True, start=None, seconds=None):
         """the Play button: leaves manual mode (the motion keyed again); the scene plays its keyed range from the
-        current frame (open the file and press play, or render the range)"""
+        current frame (open the file and press play, or render the range). start / seconds: the stretch to play, as
+        the scene's preview range (from the current time, to the end, by default); on the rotary machine at physical
+        timing the carved stock's files are written for it first (one a frame)"""
         self.playing = bool(on)
         self._leave_manual()
-        self.scene['inspector_playing'] = self.playing
+        sc = self.scene
+        if on and (start is not None or seconds is not None):
+            a = self['time'] if start is None else max(0.0, float(start))
+            end = (self['job'].duration if self['job'] is not None else self.duration)
+            b = end if seconds is None else min(end, a + max(0.0, float(seconds)))
+            if self._stock_files():
+                self['job'].write_stock(a, b, scene=sc)
+            sc.use_preview_range = True
+            sc.frame_preview_start = int(math.floor(sc.frame_start + a * self.fps + 1e-6))
+            sc.frame_preview_end = int(math.floor(sc.frame_start + b * self.fps + 1e-6))
+            self.set_time(a)
+        sc['inspector_playing'] = self.playing
         return self
+
+    def _stock_files(self):
+        """a job whose carved stock is a file per frame keyed at its events (the rotary machine at physical timing)"""
+        job = self['job']
+        return job is not None and self.timing == 'physical' and callable(getattr(job, 'write_stock', None))
+
+    def _stock_has(self, frame):
+        run = getattr(self['job'].stock, 'run', None)
+        return run is not None and run[0] <= frame <= run[1]
 
     # ------------------------------------------------------------------------------------------------ manual mode
     def _enter_manual(self, from_rest=False):

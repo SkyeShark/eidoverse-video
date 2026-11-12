@@ -51,6 +51,38 @@ take the job's actions away with its keys once they are empty. `on_done=`
 runs when a `seek` reaches the end, which with keys means while `play()` or
 `key()` writes them, not during playback: a saved film plays without Python.
 
+**A job at its own speed.** Leave `duration` out and the job takes its real
+time: the pocket mill 20 minutes, the relief carve 7.8 hours (675,637 frames at
+24 fps). Keying that frame by frame is tens of millions of keys, so
+`job.key_events(frame_start=None, scene=None)` keys the program's events
+instead (`eidoblend.fabrication.physical`; any job, `RotaryJob` included):
+
+```python
+carving = fab.carve(make_robot('cnc_relief'), fab.sample_relief, material='wood')   # no duration: 7.8 hours
+carving.key_events()          # 103,982 events, 416,000 keys, a 48 MB .blend; plays from frame 1 at the real speed
+carving.event_keys            # {'events', 'keys', 'frames': (first, last)}
+```
+
+Between two events of a program every axis moves as a polynomial of degree
+three or less in time: a move accelerates at a constant rate, cruises and
+brakes; an index turn eases by a smoothstep; a dwell retracts at a steady rate.
+A Bezier key at each event, its handles a third of the way to its neighbours
+along the exact velocity there, reproduces that motion exactly at every frame
+and sub-frame (`test_inspector_physical.py`: the tool tip within 3 µm of the
+program at random times, inside accelerations too). The axes are the machine's
+joint sliders (the robotics kit's `rig`, custom properties on the robot's empty
+that move the modules through simple-expression drivers), keyed at the events;
+the lead screws follow their axis' slider and the spindle and the cooling fan
+turn at their rpm with the frame (drivers, nothing keyed); the progress the bead
+or the stock reads is keyed at the same events and the chips' clock at the two
+ends. A print's reel, live strand and feed tubes are posed at the events, at
+most one every `physical.FILAMENT_FRAMES` (4) frames, and keyed LINEAR: the
+ring print's 15 minutes take three to six minutes to key, its 14,462 events
+428,000 keys. A saved file plays the job on its own. Blender's last frame is 1,048,574,
+so at 24 fps a job ends past it after 12.1 hours (`key_events` says which fps
+fits); key frame times are float32, so near frame 675,000 an event lands within
+1/16 frame and the spindle's angle is exact at whole frames.
+
 The source is snapshotted once (`source_geometry`): every visible mesh under
 the object as Blender evaluates it now (modifiers, the armature's pose, shape
 keys, Geometry Nodes and collection instances), placed by its world matrix,
@@ -71,7 +103,13 @@ below, so ledges and roofs close while the interior stays sparse. Travel lifts
 `travel_lift` above the higher end and deposits nothing. Exact toolpath parity
 with the WebGPU slicer is tested (`test_fabrication_parity.py`): layers,
 perimeter and infill lengths per layer, move counts, travel and print time match
-to 1e-9.
+to 1e-9. The union (`polygon_union.py`, this edition's own) snaps coordinates as
+the vendored polygon-clipping does: an x or a y within about an ulp of one seen
+before in the same union becomes that one. So the rotated handle, whose
+placement goes through `sin` and `cos` (CPython's and V8's differ by an ulp now
+and then), slices move for move as the WebGPU path does (2,198 moves; without
+the snapping one quad diagonal's slice point stayed an ulp off its neighbours'
+line and added a move).
 
 The path's feed clock is one acceleration-limited trapezoid per move
 (`FeedPath`: `feed`, `rapid`, `acceleration`, corners blended within
@@ -136,12 +174,29 @@ The material sets the finish and the default feed, plunge, spindle rpm,
 stepdown and pocket depth. Metal gets metallic PBR with fine brushing and patina
 and small folded chips; wood gets three-dimensional growth rings and fibre
 running through the cut walls and floor, larger shavings and fine dust; plywood
-shows its plies on the walls. The fine patterns fade with their pixel footprint
-(the camera's angle per pixel is a driver on the material), so they never moiré.
-The driver reads the camera that is the scene's camera when the job is made
-(and the render height): make the camera first, and when several cameras show
-the stock, make the closest one the scene's camera while making the job.
-These are motion and appearance presets for films, not machining advice:
+shows its plies on the walls. The fine patterns (growth rings, fibre, brushing)
+fade by `fwidth(phase)` as the WebGPU finish does, so they never moiré: shader
+nodes have no screen derivatives, so `finish_stock` builds the exact one from
+each pattern's 3D gradient taken through the pixel's footprint on the surface
+(the metres a pixel spans at the point, the surface normal and the direction
+to the eye). The footprint is measured in the shader, from the point's
+camera-space position against its place in the frame (`pixel_footprint` of
+`eidoblend.props.voice_machines`), so it holds for whichever camera renders
+the frame: a cut between cameras, an animated lens, any sensor fit, an
+orthographic camera, and a stock made before its camera. Measured on the
+carved relief and on the rotary part (`test_finish_footprint.py`, the relief
+also through a marker cut to a plain 50 mm camera holding it off the frame's
+centre), it is the rendered phase's own pixel difference at a median ratio of
+1.0. The broad grain and the patina are MaterialX's `noise_float` exactly:
+Blender's Noise Texture at Detail 0 is the same Perlin noise (OSL's
+lookup3-hashed gradients, quintic fade, scaled by 0.982), measured pixel for
+pixel against a transcription of three's TSL (`test_finish_noise_materialx.py`:
+65,536 pixels of the broad grain within 8.3e-6 of it, the render's own
+precision).
+`finish_stock(material, profile, color, axes='bed', scene=None)` reads the
+stock point in the 2.5D stock's axes (`scene` gives the render size the
+footprint reads; the context scene by default); the rotary stock passes
+`axes='rotary'`. These are motion and appearance presets for films, not machining advice:
 override `feed`, `plunge`, `rpm`, `stepdown`, `cut_depth`, `stepover`,
 `flutes`; a path's own per-move `feed` wins. `job.settings` gives the effective
 values, the cutter diameter and the nominal chip load.
@@ -220,10 +275,16 @@ ball kernel's eight rings add their own error there (its height steps grow
 toward the rim, the last one 0.48 of the radius). For such meshes pass
 `lift_over_steps=True`: each move is checked between its ends and the tool
 lifts over a step before crossing it, leaving material at the wall's foot
-instead, and on a sampled heightfield (a mesh always is one) a tip whose ball
-rides a wall on its outer rings is read again with a fine rim. 0.1 mm of cut
-is left on the bracket, 0.05 mm on the ring and none on the handle, at about
-15 s of planning instead of 1.5 s. A program whose moves all pass the check
+instead, and a tip whose ball rides a wall on its outer rings is read again
+with a fine rim (points 0.1 mm apart). 0.1 mm of cut is left on the bracket,
+0.05 mm on the ring and none on the handle, at about 15 s of planning instead
+of 1.5 s. A height function `f(x, y)` can have walls of no width, unlike a
+sampled heightfield's one-cell slope, so a block's corner can reach into the
+ball between the kernel's points with none of them reading it: its rim is also
+read where a neighbouring sample's ball rides a wall, and its moves are checked
+every 0.1 mm. A 16 mm block on a 6 mm land with a 10 mm step across a diagonal,
+carved as a function: the plain planner cuts 7.1 mm into its walls,
+`lift_over_steps` 0.14 mm. A program whose moves all pass the check
 and whose ball never rides its outer rings, `sample_relief`'s included, comes
 out unchanged.
 
@@ -277,7 +338,12 @@ Tests and probes: `blender/tests/fabrication/` (`test_fabrication_parity.py`
 against the WebGPU planners in Deno; `test_fabrication_feed.py`,
 `test_mesh_input.py` and `test_relief.py` are the three Deno test files with
 their assertions, all their tests, the robotics kit's asset checks included;
-`test_options.py` for every other option and refusal; `test_fabrication_render.py`,
+`test_options.py` for every other option and refusal, the union's snapping and
+`lift_over_steps` on a walled height function; `test_finish_footprint.py` and
+`test_finish_noise_materialx.py` render the finish's fades and its noise against
+the WebGPU's definitions; `blender/tests/robotics/test_inspector_physical.py`
+keys the relief, the print, the pocket and the rotary sample at their own
+speed; `test_fabrication_render.py`,
 `test_presets_render.py` and `test_examples_render.py` build, check and render;
 `test_saved_blend.py` reopens the saved example without the package and checks
 that it plays on its own; `test_growth_feed_mesh_relief_render.py` renders the
@@ -291,29 +357,10 @@ behind, and that the example's wide camera frames as the WebGPU one).
 
 ## Not yet ported
 
-- **Bit-exact slices through rotated placements.** Python's `sin` / `cos` and
-  V8's differ by an ulp now and then; an ulp decides whether a quad diagonal's
-  slice point is exactly in line with its neighbours, so a rotated source can
-  carry a move more or fewer than the WebGPU path (same lengths and times).
-- **The union library.** The slicer's union is this edition's own exact union
-  (`polygon_union.py`), not the vendored polygon-clipping sweep; its output
-  contract and the slicer's results match (rings, orientation, start points,
-  collinear points), its snapping of near-equal coordinates is not reproduced.
-- **MaterialX noise.** The stock finish uses Blender's Perlin noise where the
-  TSL uses MaterialX `noise_float`: the same kind and frequency, not the same
-  pattern (shader nodes have no integer hash to rebuild MaterialX's).
-- **The rim reading for height functions.** `lift_over_steps` re-reads walls
-  with its fine rim only on sampled heightfields and meshes; a height function
-  `f(x, y)` with vertical steps gets the move check alone (and the eight-ring
-  kernel's under-reading at the rim).
-- **The finish's exact screen footprint.** `finish_stock` fades its fine
-  patterns by the pixel footprint times the pattern's scale, which overstates
-  the WebGPU `fwidth(phase)` wherever a pattern's gradient leaves the surface
-  (1.6 to 2 times at the median, measured), so the wood's fine grain fades a
-  little early. The exact screen derivative is built in rotary's
-  `filter_finish`; moving it into `finish_stock` has to carry the rotary
-  stock's coordinate swizzle with it, a change to make in both packages
-  together, with render checks.
+- **The union's crossing points in the sweep's order.** polygon-clipping meets
+  the crossing points it snaps in its sweep's order, this union in its own; a
+  crossing point flp-equal to two values seen before can snap to the other one
+  (no slice of the examples or the samples does).
 - **Chip streaks.** The chip pool stores a persistent `id` per chip (event ×
   per-event + k), which Blender's instancing reads as each instance's
   identity; that it holds a chip's identity through motion blur is not yet
