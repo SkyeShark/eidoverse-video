@@ -229,6 +229,11 @@ def import_model(path: str, name: str = None, collection=None, location=(0, 0, 0
     materials, rig and clips. glTF's +Y up becomes Blender's +Z up (the importer's own conversion): a model's
     nose along glTF +Z faces Blender -Y.
 
+    The Empty, every object the import made and their mesh data carry 'eido_loaded_asset' (the engine's
+    userData._loadedAsset): the tools that rewrite UVs and materials (the terrain family's layer_surface,
+    normalize_texel_density) skip what carries it, so a whole scene root can be handed to them. clone_model's copies
+    and load_kit's parts keep the mark (copied ID properties).
+
     Two material repairs, each logged: alpha and transmission materials get shadows and refraction that respect
     them (fix_see_through_materials); and with fix_glass, a material NAMED glass that is alpha-blended through a
     texture with no alpha (a JPEG: Poly Haven's glTF exports ship their glass this way, opaque) becomes clear thin
@@ -281,6 +286,10 @@ def import_model(path: str, name: str = None, collection=None, location=(0, 0, 0
     root.location = location
     root['eido_src_asset'] = os.path.abspath(path)
     coll['eido_src_asset'] = os.path.abspath(path)
+    for o in [root] + new:
+        o['eido_loaded_asset'] = True
+        if o.data is not None and o.type in ('MESH', 'CURVE', 'SURFACE', 'FONT', 'META'):
+            o.data['eido_loaded_asset'] = True
     order = _importer_clip_order(root)
     if order:
         root['eido_clip_order'] = order                          # clip=<index> keeps the file's order after plays
@@ -819,6 +828,7 @@ class Kit:
         e.location = location
         e.rotation_euler = (0, 0, rotation_z)
         e['eido_src_asset'] = self.root.get('eido_src_asset', '')
+        e['eido_loaded_asset'] = True
         bpy.context.scene.collection.objects.link(e)
         return e
 

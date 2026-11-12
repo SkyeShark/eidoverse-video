@@ -107,10 +107,16 @@ M = []
 
 # the harness: the runner's own suites (they render small films through eido_blender.py: one slot for each suite)
 M += [py('pipeline', 'check_docs.py'),
-      T('gpy', 'pipeline', 'run_tests.py', cap=16, timeout=5400, why='T0-T17: the runner end to end, small films'),
+      T('gpy', 'pipeline', 'run_tests.py', cap=16, timeout=5400, why='T0-T19: the runner end to end, small films'),
       T('gpy', 'pipeline2', 'run_tests.py', cap=16, timeout=5400, why='U0-U6: the harness-rest ports')]
+# the harness's own checks: what the fetchers and the doctor print (no Blender), the loaded-asset mark and the swept
+# clearance (Blender, no render), fetch_model.py's Blender previews (renders)
+M += [py('harness', 'test_fetch_hints.py'), bl('harness', 'test_asset_marks.py'),
+      bl('harness', 'test_swept_clearance.py'),
+      T('gpy', 'harness', 'test_fetch_preview.py', why="fetch_model.py's previews rendered in Blender (LOOK at them)")]
 # the examples through the harness (built, no render)
 M += [eb('examples', 'blender/examples/obstacle_course/scene.json', tag='the walking course example'),
+      eb('examples', 'blender/examples/claude_robot/scene.json', tag='the robot body example'),
       eb('claudesona', 'blender/tests/claudesona/basic_vrm/scene.json', tag='basic_vrm (aletheia, MToon outlines)'),
       eb('claudesona', 'blender/tests/claudesona/basic_vrm/scene_claude.json', tag='basic_vrm (claude.vrm)'),
       eb('robotics', 'blender/eidoblend/characters/robotics/scenes/assembly.json', tag='robotics example: assembly'),
@@ -122,23 +128,31 @@ M += [bl('assets', 'import_all.py', timeout=3600)]
 M += [bl('characters', s, NR) for s in ('test_vrma_clips.py', 'test_robot_walk.py', 'test_claude_robot_example.py',
                                         'test_clippy.py', 'test_robotics_arm.py')]
 M += [bl('characters', 'test_vrm_shadows.py'), gpu('characters', 'test_vrm_shadows.py', '--render')]
+M += [bl('characters', 'test_clippy_set_weight.py'), gpu('characters', 'test_clippy_set_weight.py', '--render')]
+M += [bl('characters', 'test_take_springs.py', NR, '--vrm', vrm, timeout=3600) for vrm in ('aporia', 'aletheia')]
 M += [bl('claudesona', s, NR) for s in ('test_face.py', 'test_keyed_film.py', 'test_lipsync.py', 'test_lookat.py',
-                                        'test_pbr_tuta.py', 'test_springs.py', 'test_tuta.py', 'test_wardrobe.py')]
-M += [bl('claudesona', 'test_face_geometry.py'), gpu('claudesona', 'test_basic_vrm.py'),
-      gpu('claudesona', 'test_turntable.py')]
+                                        'test_pbr_tuta.py', 'test_springs.py', 'test_tuta.py', 'test_tuta_aa.py',
+                                        'test_wardrobe.py')]
+M += [bl('claudesona', 'test_face_geometry.py'), bl('claudesona', 'test_tuta_noise.py'),
+      gpu('claudesona', 'test_basic_vrm.py'), gpu('claudesona', 'test_turntable.py'),
+      gpu('claudesona', 'test_tuta_aa.py', cap=16)]
 M += [bl('controller', s, timeout=3600) for s in ('test_controller_acting.py', 'test_controller_course.py',
-                                                  'test_controller_foot_ik.py', 'test_controller_maneuvers.py',
-                                                  'test_controller_options.py', 'test_controller_terrain.py')]
+                                                  'test_controller_follow.py', 'test_controller_foot_ik.py',
+                                                  'test_controller_maneuvers.py', 'test_controller_options.py',
+                                                  'test_controller_terrain.py')]
 M += [bl('controller', 'test_controller_presets.py', '--preset', 'stairs_small', timeout=3600)]
 M += [bl('maneuvers', s, timeout=3600) for s in ('test_emotes.py', 'test_example_bench.py', 'test_maneuver_moves.py',
-                                                 'test_robot_seat.py', 'test_seating.py')]
+                                                 'test_robot_seat.py', 'test_seating.py', 'test_start_seated.py')]
 M += [bl('robot_body', 'test_api_coverage.py'), bl('robot_body', 'test_dof_parity.py')]
 M += [bl('robot_body', s, NR, timeout=3600) for s in ('test_body_api.py', 'test_body_maneuvers.py',
+                                                      'test_body_moving.py', 'test_body_route.py', 'test_body_seat.py',
                                                       'test_claude_robot_example.py', 'test_crown_head_states.py',
                                                       'test_navigate_room.py', 'test_other_vrm.py', 'test_pick_up.py',
                                                       'test_pose_bake.py')]
+M += [bl('robot_body', 'test_body_route.py', NR, '--vrm', 'aletheia', timeout=3600)]
 M += [py('robotics', 'test_solvers_parity.py'), bl('robotics', 'test_attachment_frames.py'),
       bl('robotics', 'test_js_parity.py'), bl('robotics', 'test_runtime.py'),
+      bl('robotics', 'test_inspector_physical.py', timeout=3600),
       T('gsh', 'robotics', 'render_all.sh', timeout=5400, why='catalog, motion, parts, normal parity, examples, '
                                                                'inspector, mech parts, studio: one slot')]
 M += [bl('fabrication', s) for s in ('test_fabrication_feed.py', 'test_fabrication_parity.py',
@@ -151,14 +165,18 @@ M += [bl('fabrication_rotary', s, timeout=3600) for s in (
     'test_rotary_parity.py', 'test_rotary_js_tests.py', 'test_rotary_stock_field.py', 'test_rotary_carve_options.py',
     'test_rotary_chips.py', 'test_rotary_shutter.py', 'test_rotary_scene_scripts.py', 'test_rotary_target_vs_carved.py',
     'test_rotary_materials_lineup.py', 'test_rotary_mesh_carve.py', 'test_rotary_examples.py')]
-M += [gpu('fabrication_rotary', 'test_rotary_finish_footprint.py')]
+M += [gpu('fabrication', s) for s in ('test_finish_footprint.py', 'test_finish_noise_materialx.py')]
 M += [py('flora', 'parity_check.py')]
 M += [bl('flora', s, NR) for s in ('t_backlit.py', 't_close.py', 't_meadow.py', 't_mix.py', 't_scanned.py',
                                    't_sheen.py')]
 M += [gpu('flora', s) for s in ('t_lookdev.py', 't_motion.py', 't_scale.py', 't_species.py', 't_walk.py')]
-M += [bl('fx', 'test_noise_parity.py'), bl('fx', 'test_swe_erosion.py', 'render=0', 'end=720')]
-M += [gpu('fx', s) for s in ('test_cloth.py', 'test_fire_teapot.py', 'test_iso_field.py', 'test_particles_campfire.py',
+M += [bl('fx', 'test_noise_parity.py'), bl('fx', 'test_swe_erosion.py', 'render=0', 'end=720'),
+      bl('fx', 'test_iso_field.py', NR), bl('fx', 'test_cloth_map.py', NR),
+      bl('fx', 'test_fire_shadows.py', 'cases=options,caster')]
+M += [gpu('fx', s) for s in ('test_cloth.py', 'test_cloth_map.py', 'test_fire_teapot.py', 'test_iso_field.py',
+                             'test_particles_campfire.py',
                              'test_swe_basin.py')]
+M += [gpu('fx', 'test_fire_shadows.py', 'cases=shadows,spokes,fire')]
 M += [bl('particles', 'test_morph_parity.py'), bl('particles', 'test_targets.py', timeout=3600)]
 M += [gpu('particles', s) for s in ('test_particles_presets.py', 'test_display_match_numeric.py',
                                     'test_fire_tongue_rotation.py', 'test_procedural_material_cloud.py',
@@ -191,45 +209,47 @@ M += [gpu('post_effects', s, '--stage', st) for s, st in (
     ('test_verify_probes.py', 'simplex'), ('test_verify_probes.py', 'live'))]
 M += [gpu('post_effects', 'test_live.py')]
 M += [bl('media', 'check_screens_api.py'), py('media', 'test_weather_audio_parity.py'),
-      py('media', 'audio_host.py', why='voicebox on the host (system Python): the audio probe\'s first half')]
+      py('media', 'audio_host.py', why='voicebox on the host (system Python): the audio probe\'s first half'),
+      bl('media', 'test_text3d.py', NR), bl('media', 'test_book_lectern.py', NR)]
 M += [gpu('media', s) for s in ('test_screens.py', 'test_text3d.py', 'test_overlay.py', 'test_parole.py',
-                                'test_book.py', 'test_book_pdf.py', 'test_audio.py')]
+                                'test_book.py', 'test_book_pdf.py', 'test_book_lectern.py', 'test_audio.py')]
 M += [py('media2', 'test_lyrics_parity.py'), py('media2', 'test_canvas_tools.py'), bl('media2', 'check_canvas_bake.py'),
       bl('media2', 'test_book_glb.py', NR), bl('media2', 'test_book_rig.py', NR),
       gpu('media2', 'test_reopen.py'), gpu('media2', 'test_reopen.py', '--reopen'),
       gpu('media2', 'test_overlay_routes.py'), gpu('media2', 'test_era_screens.py'),
       gpu('media2', 'test_tools_film.py')]
 M += [bl('sdf', s) for s in ('test_examples_compile.py', 'test_library_parity.py', 'test_rd_parity.py')]
-M += [bl('sdf', 'test_volume_density.py', 'render=0')]
+M += [bl('sdf', 'test_volume_density.py', 'render=0'), bl('sdf', 'test_view_terms.py', NR)]
 M += [gpu('sdf', s) for s in ('test_volume_density.py', 'test_transforms.py', 'test_options.py', 'test_robustness.py',
                               'test_volume.py', 'test_sdf_texture.py', 'test_explosion_texture.py',
                               'test_rhombic_render.py', 'test_mesh_depth_parity.py', 'test_animated_bake.py',
                               'test_animated_examples.py', 'test_examples_render.py', 'test_help_recipes.py',
-                              'test_engine_check_scenes.py')]
+                              'test_engine_check_scenes.py', 'test_view_terms.py')]
 M += [gpu('sdf_vehicles', 'test_vehicles_compile.py'), gpu('sdf_vehicles', 'test_vehicles_render.py'),
       gpu('sdf_vehicles', 'test_vehicles_options.py', cap=16, vram=6),
       gpu('sdf_vehicles', 'test_vehicles_night_lamps.py', cap=16, vram=6),
       gpu('sdf_vehicles', 'test_vehicles_check_scenes.py', cap=16, vram=8, timeout=5400)]
-M += [bl('sdf_volumes', 'test_volume_examples.py', timeout=3600)]
+M += [bl('sdf_volumes', 'test_volume_examples.py', timeout=3600), bl('sdf_volumes', 'test_volume_reflections.py', NR)]
 M += [gpu('sdf_volumes', s) for s in ('test_volume_lights.py', 'test_volume_sequences.py', 'test_nuclear_explosion.py',
-                                      'test_volume_scene_integration.py')]
+                                      'test_volume_scene_integration.py', 'test_volume_reflections.py')]
 M += [gpu('sdf_volumes', 'test_volume_reopen.py', 'mode=build'), gpu('sdf_volumes', 'test_volume_reopen.py', 'mode=open')]
-M += [bl('sky', 'state_and_wiring.py')]
+M += [bl('sky', 'state_and_wiring.py'), bl('sky', 'test_sky_options.py')]
 M += [gpu('sky', s) for s in ('probe_world_api.py', 'probe_projection.py', 'probe_caster_height.py',
                               'probe_reflection.py', 'probe_subframe.py', 'sky_matrix.py', 'sky_sequence.py',
-                              'meadow_cumulus.py')]
+                              'meadow_cumulus.py', 'sky_options_render.py')]
 M += [bl('sky_worlds', 'state_and_api.py'), bl('sky_worlds', 'ring_relief_v4.py', NR)]
 M += [gpu('sky_worlds', s) for s in ('probe_eevee_facts.py', 'shader_variants.py', 'asteroid_moon_pipeline.py',
                                      'corona_probe.py', 'custom_cluster.py', 'dome_and_spatial.py',
                                      'moving_camera_worlds.py', 'redgiant_options.py', 'ring_band_behind_local.py',
-                                     'ring_options.py')]
+                                     'ring_options.py', 'ring_haze_under_clouds.py')]
 M += [gpu('sky_worlds', 'world_sequence.py', '--world', 'ringworld'),
       gpu('sky_worlds', 'world_views.py', '--world', 'ringworld', '--hours', '11,23', '--views', 'horizon,up')]
 M += [py('weather', s) for s in ('test_lightning_parity.py', 'test_moisture_contract.py', 'test_audio_tools.py')]
 M += [bl('weather', 'test_blender_build.py'), bl('weather', 'test_facade_records.py'),
-      bl('weather', 'storm_street.py', '--mode', 'check')]
+      bl('weather', 'test_weather_sky_wiring.py'), bl('weather', 'storm_street.py', '--mode', 'check')]
 M += [gpu('weather', s) for s in ('probe_eevee_facts.py', 'probe_puddles.py', 'probe_strike_on_sand.py',
-                                  'rain_ab_blender.py', 'weather_examples.py', 'weather_states.py')]
+                                  'rain_ab_blender.py', 'weather_examples.py', 'weather_states.py',
+                                  'probe_strike_light_falloff.py', 'make_sky_weather.py')]
 M += [gpu('weather', 'storm_street.py', '--mode', 'stills')]
 M += [bl('trees2', 'addon_gpu.py'), bl('trees2', 'ambience_mixdown.py')]
 M += [gpu('trees', s) for s in ('backlight_check.py', 'meadow_oak.py', 'species_probes.py', 'treeline.py',
@@ -257,9 +277,11 @@ M += [bl('sets_uf_city', s) for s in ('test_build_options.py', 'test_cloud_deck_
                                       'test_two_sets_one_file.py', 'test_window_footprint.py')]
 M += [bl('sets_uf_city', 'test_city_render.py', NR, timeout=3600), bl('sets_uf_city', 'test_hole_render.py', NR)]
 M += [gpu('sets_uf_city', 'test_city_render.py', timeout=5400), gpu('sets_uf_city', 'test_hole_render.py')]
-M += [bl('sets_uf_corridor_news', s) for s in ('test_cn_lib.py', 'test_corridor.py', 'test_news.py', 'test_parity.py')]
+M += [bl('sets_uf_corridor_news', s) for s in ('test_cn_lib.py', 'test_corridor.py', 'test_news.py', 'test_parity.py',
+                                               'test_news_fog_objects.py')]
 M += [gpu('sets_uf_corridor_news', 'render_shots.py', 'both', tag='the stills of both sets'),
-      gpu('sets_uf_corridor_news', 'verify_probes.py')]
+      gpu('sets_uf_corridor_news', 'verify_probes.py'),
+      gpu('sets_uf_corridor_news', 'test_news_fog_objects.py', '--render', tag="the news set's haze on your own objects")]
 M += [py('sets_uf_interiors', 'test_art_parity.py', cwd='here'),
       py('sets_uf_interiors', 'test_geometry_parity.py', cwd='here'),
       bl('sets_uf_interiors', 'test_geometry_parity.py'), bl('sets_uf_interiors', 'test_lib_example.py'),
@@ -279,7 +301,8 @@ M += [py('xr', 'test_xr_serve.py'), py('xr', 'test_xr_quest.py'),
       bl('xr', 'test_xr_survey.py'),
       bl('xr', 'test_xr_city.py', NR), bl('xr', 'test_xr_features.py', NR, cap=16),
       bl('xr', 'test_xr_films.py', NR, cap=16), bl('xr', 'test_xr_tangents_shadows.py', NR),
-      T('gsh', 'xr', 'run_all.sh', cap=16, vram=6, timeout=7200, why='the xr steps in order, with their renders')]
+      T('gsh', 'xr', 'run_all.sh', cap=16, vram=6, timeout=7200, why='the xr steps in order, with their renders'),
+      gpu('xr', 'test_xr_film_look.py', cap=16, vram=6, timeout=3600)]
 
 # ------------------------------------------------------------------------------------------------- the runner ---
 

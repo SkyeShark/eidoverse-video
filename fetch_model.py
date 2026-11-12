@@ -11,11 +11,16 @@ Searches four sources automatically (in order of speed):
 as USD/Blender/MaterialX, which GLTFLoader can't load. See fetch_texture.py.)
 
 Outputs an embedded .gltf file (textures inlined as data URIs) ready to load
-via render_scene.mjs's `assets` config. Also renders a 512x512 _preview.jpg
-next to the model showing it from a 3/4 iso angle with bounding box, axis
-labels (+X/-X/+Y/+Z/-Z), and the filename + dimensions overlaid as text —
-the agent should READ this preview before placing the model in a scene to
-verify the right thing was downloaded and which way it faces.
+via scene.json's `assets` (eidoblend.harness.assets.import_model). Also
+renders a 512x512 _preview.jpg next to the model, in Blender
+(blender/eidoblend/harness/model_preview.py: the model as Blender imports
+it, Z up) and with the WebGPU edition's renderer when Blender gives none:
+a 3/4 iso angle with bounding box, axis labels (+X/-X/+Y/-Y/+Z), and the
+filename + dimensions overlaid as text — the agent should READ this preview
+before placing the model in a scene to verify the right thing was
+downloaded and which way it faces. It prints the size in Blender's axes
+([PREVIEW_BBOX_BLENDER] X Y Z), where the pivot sits ([ORIGIN_INFO]) and
+whether the model is a parts kit ([KIT_INFO]).
 
 LOCAL models (custom_models / assets/models) are referenced IN PLACE — the
 match prints the canonical absolute path + a cached preview, and is NEVER
@@ -29,7 +34,7 @@ Usage:
     python3 fetch_model.py ArmChair_01
     python3 fetch_model.py "apollo lunar module"
     python3 fetch_model.py --list-local        # catalog of local models (path + dims + preview)
-    python3 fetch_model.py --build-previews     # pre-render cached previews for all local models (run once, GPU)
+    python3 fetch_model.py --build-previews     # pre-render missing previews of the local models (Blender, GPU)
 """
 import requests
 import json
@@ -704,7 +709,7 @@ def _find_deno():
 
 
 def _render_preview(model_path, dims=None):
-    """Best-effort preview: never raises. A missing deno/node/ffmpeg, a
+    """Best-effort preview: never raises. A missing Blender/deno/node/ffmpeg, a
     timeout, or any renderer crash returns None — the downloaded model is
     still delivered (callers must not treat a preview failure as a failed
     download)."""
@@ -715,8 +720,101 @@ def _render_preview(model_path, dims=None):
         return None
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Blender preview (this branch's route): blender/eidoblend/harness/model_preview.py
+# ──────────────────────────────────────────────────────────────────────────
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_BLENDER_PREVIEW = os.path.join(_HERE, "blender", "eidoblend", "harness", "model_preview.py")
+_BLENDER_LINES = ("[PREVIEW_BBOX_BLENDER]", "[ORIGIN_INFO]", "[KIT_INFO]")
+_GLTF_TO_BLENDER_AXIS = {"+x": "+x", "-x": "-x", "+z": "-y", "-z": "+y", "+y": "+z", "-y": "-z"}
+PREVIEW_BATCH = 40           # models a Blender run previews (one Blender start-up for each batch)
+
+
+def _blender_axis(axis):
+    """A curated glTF axis ('+z', the file's own words) in Blender's words, as drive_along / face_toward take them:
+    the importer turns glTF (x, y, z) into Blender (x, -z, y), so a nose along glTF +z points along Blender -y."""
+    return _GLTF_TO_BLENDER_AXIS.get(str(axis).strip().lower())
+
+
+def _find_bash():
+    """Git Bash on Windows (never WSL's), as eido_blender.py finds it; bash on PATH elsewhere."""
+    try:
+        if _HERE not in sys.path:
+            sys.path.insert(0, _HERE)
+        from eido_blender import find_bash
+        return find_bash()
+    except Exception:
+        b = shutil.which("bash")
+        return b if b and "system32" not in b.lower() else None
+
+
+def _blender_preview_run(models, out=None):
+    """Blender's preview of one or more models in ONE Blender run (model_preview.py through run_blender.sh: the model
+    as Blender imports it, Z up, in EEVEE). Each preview lands beside its model as <name>_preview.jpg, or at `out` for
+    a single model. Returns {absolute model path: {'preview', 'dims', 'lines'}} for every model it rendered ('dims':
+    the glTF-order size [PREVIEW_BBOX]; 'lines': [PREVIEW_BBOX_BLENDER], [ORIGIN_INFO], [KIT_INFO]), or {} when this
+    checkout has no Blender route (no bash, no run_blender.sh) or the run failed."""
+    models = [os.path.abspath(m) for m in models]
+    bash = _find_bash()
+    if not models or not bash or not os.path.isfile(_BLENDER_PREVIEW) \
+            or not os.path.isfile(os.path.join(_HERE, "run_blender.sh")):
+        return {}
+    single = out is not None and len(models) == 1
+    cmd = [bash, "run_blender.sh", "blender/eidoblend/harness/model_preview.py"] + models
+    if single:
+        cmd += ["--out", os.path.abspath(out)]
+    try:
+        proc = subprocess.run(cmd, cwd=_HERE, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=300 + 60 * len(models), env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"_render_preview (Blender): {type(e).__name__}: {e}")
+        return {}
+    by_preview = {os.path.normcase(os.path.abspath(out) if single else _local_preview_path(m)): m for m in models}
+    found, block, dims = {}, [], None
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith("[PREVIEW_BBOX] "):
+            block, dims = [], None
+            try:
+                dims = tuple(float(v) for v in line.split()[1:4])
+            except ValueError:
+                pass
+        elif line.startswith(_BLENDER_LINES):
+            block.append(line)
+        elif line.startswith("Preview: "):
+            path = line[len("Preview: "):].strip()
+            m = by_preview.get(os.path.normcase(os.path.abspath(path)))
+            if m is not None and os.path.exists(path):
+                found[m] = {"preview": path, "dims": dims, "lines": block}
+            block, dims = [], None
+        elif line.startswith("[preview] ") and ": failed" in line:
+            print(f"_render_preview (Blender): {line[len('[preview] '):]}")
+    if not found:
+        tail = ((proc.stdout or "") + (proc.stderr or "")).strip().splitlines()[-12:]
+        print(f"_render_preview (Blender): no preview (exit {proc.returncode}):\n  " + "\n  ".join(tail))
+    return found
+
+
 def _render_preview_impl(model_path, dims=None):
-    """Render a 512x512 preview of the model.
+    """Render a 512x512 preview of the model: in Blender (model_preview.py) on this branch, the WebGPU edition's
+    preview when Blender gives none. Returns the preview's path, or None (the model is still usable)."""
+    if not os.path.exists(model_path):
+        return None
+    abs_model = os.path.abspath(model_path)
+    base = os.path.splitext(os.path.basename(model_path))[0]
+    preview_path = os.path.join(os.path.dirname(abs_model) or ".", f"{base}_preview.jpg")
+    got = _blender_preview_run([abs_model], out=preview_path).get(abs_model)
+    if got:
+        for line in got["lines"]:
+            print(line)
+        print(f"Preview: {got['preview']}")
+        return got["preview"]
+    print("_render_preview: no Blender preview; trying the WebGPU edition's preview (Deno)")
+    return _render_preview_webgpu(model_path, dims)
+
+
+def _render_preview_webgpu(model_path, dims=None):
+    """Render a 512x512 preview of the model with the WebGPU edition's renderer (three.js, Y up).
 
     Prefers the Deno + WebGPU eidoverse renderer (render_scene.mjs)
     when available — that's the production path under the current codex
@@ -1289,7 +1387,7 @@ def _deliver_local_model(path):
     work folder that used it bled the disk (the same 2–20 MB glb duplicated per
     scene, repeatedly). Instead: leave the file where it is, ensure a cached
     preview sits beside it, and return the CANONICAL path for the agent to put
-    straight into scene.json `assets` — the Deno harness `loadAssets()` reads
+    straight into scene.json `assets` — the runner (eido_blender.py) reads
     any path, so no local copy is ever needed.
     """
     src = os.path.abspath(path)
@@ -1300,9 +1398,10 @@ def _deliver_local_model(path):
     if preview:
         print(f"Preview: {preview}")
     fwd = _forward_axis_for(src)
-    if fwd:
-        print(f"driveAlong/faceToward forward axis: '{fwd}'  (curated — this model's nose is "
-              f"easy to misread from the preview; pass forward:'{fwd}' so it doesn't drive backward)")
+    if fwd and _blender_axis(fwd):
+        bw = _blender_axis(fwd)
+        print(f"drive_along / face_toward forward axis: '{bw}'  (curated — this model's nose is easy to misread "
+              f"from the preview; pass forward='{bw}' so it doesn't drive backward. The file's glTF axis is {fwd}.)")
     return src
 
 
@@ -1317,21 +1416,40 @@ def _all_local_models():
     return [os.path.abspath(p) for p in found]
 
 
-def build_local_previews():
+def build_local_previews(models=None):
     """Pre-render the cached <name>_preview.jpg for every local model that
-    lacks one. Run ONCE (GPU) so agents never re-render a local preview and
-    never copy a .glb into their work folder. GPU rule: run only when no live
-    render is active."""
-    models = _all_local_models()
+    lacks one (or for each of `models` that lacks one). Run ONCE (GPU) so
+    agents never re-render a local preview and never copy a .glb into their
+    work folder. Blender renders them, PREVIEW_BATCH models a run; a model
+    Blender cannot preview gets the WebGPU edition's preview. GPU rule: run
+    only when no live render is active. Returns {model: preview path}."""
+    models = _all_local_models() if models is None else [os.path.abspath(m) for m in models]
     if not models:
         print("No local models found in: " + ", ".join(_LOCAL_MODEL_DIRS))
-        return
+        return {}
     missing = [m for m in models if not os.path.exists(_local_preview_path(m))]
     print(f"Local models: {len(models)} total, {len(missing)} missing a cached preview.")
-    for i, m in enumerate(missing, 1):
-        print(f"[{i}/{len(missing)}] {os.path.basename(m)}")
-        _ensure_local_preview(m)
-    print(f"Done. Previews cached next to each model in {', '.join(_LOCAL_MODEL_DIRS)}.")
+    made = {}
+    for i in range(0, len(missing), PREVIEW_BATCH):
+        batch = missing[i:i + PREVIEW_BATCH]
+        print(f"[{i + 1}-{i + len(batch)}/{len(missing)}] Blender: {', '.join(os.path.basename(m) for m in batch)}")
+        for m, got in _blender_preview_run(batch).items():
+            made[m] = got["preview"]
+            print(f"  {os.path.basename(m)}: {got['preview']}")
+            for line in got["lines"]:
+                print(f"    {line}")
+    for m in missing:
+        if m not in made:
+            print(f"  {os.path.basename(m)}: no Blender preview; trying the WebGPU edition's preview")
+            try:
+                p = _render_preview_webgpu(m, _measure_glb(m))
+            except Exception as e:
+                print(f"  {os.path.basename(m)}: WebGPU preview skipped ({type(e).__name__}: {e})")
+                p = None
+            if p:
+                made[m] = p
+    print(f"Done: {len(made)}/{len(missing)} preview(s) cached next to their models.")
+    return made
 
 
 def list_local_models():
@@ -1344,12 +1462,12 @@ def list_local_models():
         return
     print(f"LOCAL MODELS ({len(models)}) — reference these paths directly in scene.json `assets`; never copy them:")
     for m in sorted(models):
-        dims = _measure_glb(m)
-        dim_str = (f"{dims[0]:.2f}x{dims[1]:.2f}x{dims[2]:.2f}m" if dims else "dims:?")
+        dims = _measure_glb(m)                       # glTF order (x, y up, z): Blender's X x Y x Z is (x, z, y)
+        dim_str = (f"{dims[0]:.2f}x{dims[2]:.2f}x{dims[1]:.2f}m X x Y x Z up" if dims else "dims:?")
         prev = _local_preview_path(m)
         prev_str = prev if os.path.exists(prev) else "(no preview cached)"
-        fwd = _forward_axis_for(m)
-        fwd_str = f"  forward:'{fwd}'" if fwd else ""
+        fwd = _blender_axis(_forward_axis_for(m) or "")
+        fwd_str = f"  forward='{fwd}'" if fwd else ""
         print(f"  {m}  [{dim_str}]  preview: {prev_str}{fwd_str}")
 
 
@@ -2267,7 +2385,7 @@ if __name__ == "__main__":
         print('       python3 fetch_model.py "search terms" --theme "clean futuristic city"')
         print('              ↑ theme = the video\'s mood/setting; ranks models for theme-fit and')
         print('                pushes condition-clashing props down (no damaged streetlight in a clean scene).')
-        print('       python3 fetch_model.py --build-previews   # pre-render cached previews for all local models (run once, GPU)')
+        print('       python3 fetch_model.py --build-previews   # pre-render missing previews of the local models (Blender, GPU)')
         print('       python3 fetch_model.py --list-local        # catalog of local models (path + dims + preview) for agent context')
         sys.exit(1)
     if sys.argv[1] == "--build-previews":
@@ -2316,7 +2434,8 @@ if __name__ == "__main__":
     if cache:
         # The shared model library: eidoverse/assets/cache/models/<id>_<res>/ (git-ignored; third-party CC0
         # models are fetched, never committed), with the licence sidecar beside the model. An ID already there
-        # is not fetched again. Library code calls globalThis.fetchModelFile(id, { res }), which runs this.
+        # is not fetched again. Library code calls eidoblend.harness.assets.fetch_model_file(id, res=...), which
+        # runs this (the WebGPU edition's globalThis.fetchModelFile(id, { res }) too).
         d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eidoverse", "assets", "cache", "models", f"{query}_{res}")
         have = glob.glob(os.path.join(d, "*_embedded.gltf"))
         if not have:

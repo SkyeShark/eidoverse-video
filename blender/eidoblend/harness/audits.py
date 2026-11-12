@@ -12,7 +12,9 @@ check can already see is wrong.
                                    geometry and each instance a leaf), every object-flag declaration (map_declarations)
                                    and the global disables, as ledger records (ledger.coverage_records)
     motion(scene, cfg, policy)     every 3 frames: the animation envelope (wrong-pivot spin, sinking below the ground,
-                                   teleports, scale drift), sideways travellers; every frame: camera bounce; humanoid
+                                   teleports, scale drift) and the swept clearance of parts that turn in place (a rotor
+                                   seated in its mount, or sweeping through a neighbour at some angles), sideways
+                                   travellers; every frame: camera bounce; humanoid
                                    rigs that never leave their pose; humanoids that travel on sliding feet (locomotion);
                                    VRMs whose mouth never moves (lipsync)
     framing(scene, cfg)            per shot (camera markers), at its middle frame: how much of the frame the dominant
@@ -738,6 +740,8 @@ def motion(led, scene, cfg, policy):
                 if sig != rec['first']:
                     rec['moved'] = True
         _summarize_envelope(led, env, ground or 0.0)
+        with _guard(led, 'motion.swept_clearance'):    # its own guard: a failure here leaves the others standing
+            _summarize_swept(led, scene, env)
         _summarize_sideways(led, side)
         if no_motion:
             pass                                       # coverage() records the global disable as SKIPPED
@@ -853,12 +857,15 @@ def _sample_envelope(S, ob):
             return
         size = max(box[1] - box[0])
         ml = ob.matrix_local if ob.parent else ob.matrix_world
-        S[ob.name] = {'ob': ob, 'q0': ml.to_quaternion(), 'p0': ml.translation.copy(),
+        q0 = ml.to_quaternion()
+        S[ob.name] = {'ob': ob, 'q0': q0, 'p0': ml.translation.copy(),
                       's0': ob.matrix_world.to_scale().x or 1.0, 'size': size, 'rotated': False, 'moving': False,
-                      'drift': 0.0, 'centers': [], 'min_z': box[0].z, 'steps': [], 'last': None, 'scale': 1.0}
+                      'drift': 0.0, 'centers': [], 'min_z': box[0].z, 'steps': [], 'last': None, 'scale': 1.0,
+                      'quats': [q0]}
         return
     ml = ob.matrix_local if ob.parent else ob.matrix_world
     q = ml.to_quaternion()
+    rec['quats'].append(q)                             # its turn, sample by sample (the swept-clearance check)
     ang = 2 * math.acos(min(1.0, abs(q.dot(rec['q0']))))
     if ang > 0.35:
         rec['rotated'] = True
@@ -933,6 +940,173 @@ def _ancestors(ob):
     while p is not None:
         yield p
         p = p.parent
+
+
+# ---- swept-rotation clearance: a part that turns in place clears its static neighbours at every angle it turns through
+
+SWEEP_SAMPLES = 240        # points over a turning part's surface, area-weighted (render_scene.mjs's N_SAMP)
+SWEEP_OUTER = 40           # of those, the ones past 30 % of its reach, turned about its axis
+SWEEP_ANGLES = 12          # angles of a full revolution tested (every 30 degrees)
+SWEEP_STEP = math.pi / 6   # the widest gap between two tested angles of a part that turns through less than a revolution
+
+
+def _twist(q, q0, axis):
+    """The signed angle (rad, -pi..pi) the turn from q0 to q makes about `axis` (the twist part of q @ q0^-1)."""
+    d = q @ q0.inverted()
+    a = 2.0 * math.atan2(d.x * axis.x + d.y * axis.y + d.z * axis.z, d.w)
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _spin_of(rec):
+    """(spin axis in the parent's frame, the angles to test relative to the part's pose at the last frame, a full
+    revolution?) for a part the envelope sampled turning, or None. The axis is that of the turn from the first sample to
+    the sample turned furthest from it (the engine took the last frame's turn, which is none at all after a whole number
+    of revolutions: a turntable keyed 0 -> 360 degrees). A part whose turn spans a revolution, or that turns more than a
+    quarter turn between two samples (a fan seen every 3 frames passes through every angle), is tested at 12 angles of
+    the whole revolution, as the engine tested every spinner; a part that turns through less (a scanning radar, a
+    lever) is tested over the angles it turns through, every 30 degrees and both ends."""
+    qs, q0 = rec['quats'], rec['q0']
+    far = min(qs, key=lambda q: abs(q.dot(q0)))
+    if 2 * math.acos(min(1.0, abs(far.dot(q0)))) < 0.35:
+        return None
+    rel = far @ q0.inverted()
+    axis = Vector(rel.axis).normalized()
+    turn = [_twist(qs[0], q0, axis)]
+    for q in qs[1:]:
+        t = _twist(q, q0, axis)
+        turn.append(turn[-1] + (t - turn[-1] + math.pi) % (2.0 * math.pi) - math.pi)   # unwrapped, sample to sample
+    lo, hi, cur = min(turn), max(turn), turn[-1]
+    full = hi - lo >= 2.0 * math.pi * 11 / 12 or max((abs(b - a) for a, b in zip(turn, turn[1:])), default=0.0) \
+        > math.pi / 2
+    if full:
+        return axis, [2.0 * math.pi * k / SWEEP_ANGLES for k in range(SWEEP_ANGLES)], True
+    n = max(2, int(math.ceil((hi - lo) / SWEEP_STEP)) + 1)
+    return axis, [lo + (hi - lo) * k / (n - 1) - cur for k in range(n)], False
+
+
+def _surface_points(objs, seed, n=SWEEP_SAMPLES, dg=None):
+    """n points spread over the world-space surface of objs by area (render_scene.mjs's barycentric walk: a point
+    every 1/n of the total area, at a random place in its triangle), seeded so a build measures the same points."""
+    import numpy as np
+    from ..placement import _world as W
+    parts = []
+    for m in objs:
+        co, tri = W.world_tris(m, dg)
+        if len(tri):
+            parts.append(co[tri])
+    if not parts:
+        return None
+    P = np.concatenate(parts)
+    area = 0.5 * np.linalg.norm(np.cross(P[:, 1] - P[:, 0], P[:, 2] - P[:, 0]), axis=1)
+    P, area = P[area > 1e-10], area[area > 1e-10]
+    if not len(P):
+        return None
+    cum = np.cumsum(area)
+    idx = np.minimum(np.searchsorted(cum, (np.arange(n) + 0.5) * cum[-1] / n), len(P) - 1)
+    rng = np.random.default_rng(seed)
+    u, w = rng.random(n), rng.random(n)
+    flip = u + w > 1.0
+    u[flip], w[flip] = 1.0 - u[flip], 1.0 - w[flip]
+    T = P[idx]
+    return T[:, 0] + (T[:, 1] - T[:, 0]) * u[:, None] + (T[:, 2] - T[:, 0]) * w[:, None]
+
+
+def _summarize_swept(led, scene, S):
+    """render_scene.mjs's swept-rotation clearance, at the film's last frame: every part that turns in place (the
+    envelope's spinners: turned past 0.35 rad while its origin drifted under max(0.1 m, a fifth of its size)) must
+    clear its static neighbours at every angle it turns through, touching the world only at its bearing. Its surface
+    points past 30 % of its reach (bearing and hub contact excluded by construction) are turned about the measured spin
+    axis through the pivot, analytically (the scene is never moved), and each one inside a neighbour's box is tested
+    for being enclosed by it: 5 of 6 axis rays hit the neighbour, the placement family's deep-clipping test. Neighbours
+    are the other top-level objects that never move, unrelated to the part, whose box meets the part's swept box
+    without holding all of it (a room or a dome around a mechanism is its setting, not its mount). A body that bends
+    as it turns (a rig, a skinned or shape-keyed mesh) is left out: one pose turned through the turn proves nothing."""
+    from mathutils import Matrix
+    import numpy as np
+    import zlib
+    from ..placement import _world as W
+    from ..placement.audits import _AXES
+    dg = W.depsgraph()
+    spinners = []
+    for rec in S.values():
+        if not rec['rotated'] or not rec['moving'] or rec['drift'] >= max(0.1, 0.2 * rec['size']):
+            continue
+        ob = rec['ob']
+        sub = [ob] + list(ob.children_recursive)
+        if any(o.type == 'ARMATURE' or (o.type == 'MESH' and _deforming(o)) for o in sub):
+            continue
+        spin = _spin_of(rec)
+        if spin is not None:
+            spinners.append((ob,) + spin)
+    turning = {sp[0] for sp in spinners}
+    neighbours = []                                    # (root, its geometry, its world box), measured once
+    for o in (scene.objects if spinners else ()):
+        if o.parent is not None or o.type in ('CAMERA', 'LIGHT', 'LIGHT_PROBE', 'SPEAKER') or o in turning \
+                or not render_visible(o) or (S.get(o.name) or {}).get('moving'):
+            continue
+        meshes = W.collect(o)
+        if not meshes:
+            continue
+        nb = None
+        for m in meshes:
+            b = W.box_of_object(m, dg)
+            nb = b if nb is None else (Vector(map(min, nb[0], b[0])), Vector(map(max, nb[1], b[1])))
+        neighbours.append((o, meshes, nb))
+    found, full_n = 0, 0
+    for ob, axis_l, angles, full in spinners:
+        full_n += int(full)
+        pivot = ob.matrix_world.translation.copy()
+        axis = ((ob.parent.matrix_world.to_quaternion() @ axis_l) if ob.parent else axis_l).normalized()
+        pts = _surface_points(W.collect(ob), zlib.crc32(ob.name.encode('utf-8')), dg=dg)
+        if pts is None:
+            continue
+        piv, a = np.array(pivot), np.array(axis)
+        rel = pts - piv
+        radial = np.linalg.norm(rel - np.outer(rel @ a, a), axis=1)
+        reach = float(radial.max())
+        outer = pts[radial > 0.3 * reach]
+        if len(outer) > SWEEP_OUTER:                   # spread over the whole part (the engine took the first 40)
+            outer = outer[np.unique(np.linspace(0, len(outer) - 1, SWEEP_OUTER).round().astype(int))]
+        if len(outer) < 6 or reach < 1e-4:
+            continue
+        r = Vector((reach * 1.05,) * 3)
+        sweep = (pivot - r, pivot + r)
+        turned = [[pivot + Matrix.Rotation(th, 3, axis) @ (Vector(p) - pivot) for p in outer] for th in angles]
+        for root, meshes, nb in neighbours:
+            if W.is_ancestor(root, ob) or not W.boxes_intersect(nb, sweep) or \
+                    all(nb[0][k] <= sweep[0][k] and nb[1][k] >= sweep[1][k] for k in range(3)):
+                continue                               # its own assembly, apart, or a shell around the whole sweep
+            rays, far = W.Rays(meshes, dg), (nb[1] - nb[0]).length
+            hit, worst = 0, 0.0
+            for at in turned:
+                inside = sum(1 for p in at if all(nb[0][k] <= p[k] <= nb[1][k] for k in range(3))
+                             and sum(1 for d in _AXES if rays.cast(p, d, far)) >= 5)
+                if inside:
+                    hit += 1
+                    worst = max(worst, inside / len(outer))
+            if not hit:
+                continue
+            found += 1
+            span = f"{len(angles)} angles of its revolution" if full else \
+                f"{len(angles)} angles it turns through ({math.degrees(max(angles) - min(angles)):.0f} degrees)"
+            m = {'angles_hit': hit, 'angles': len(angles), 'full_revolution': bool(full), 'enclosed_max': round(worst, 3)}
+            if hit == len(angles):
+                msg = (f"'{ob.name}' sits inside '{root.name}' at every one of the {span} (up to "
+                       f"{round(worst * 100)}% of its outer points enclosed): it reads as seated INTO its mount, not "
+                       'turning on a bearing. Stand it off along its spin axis: eidoblend.placement.mount_on(part, '
+                       "mount, standoff=...) seats exactly that joint. Intentional: obj['no_motion_check'] = True.")
+            else:
+                msg = (f"'{ob.name}' sweeps through '{root.name}' at {hit} of the {span}: it clears at some angles "
+                       'and cuts through at others; a small shift along its spin axis (or more standoff at the '
+                       "bearing) frees the whole turn. Intentional: obj['no_motion_check'] = True.")
+            led.record(check='motion.swept_clearance', outcome='WARN', cls='CORRECTNESS', bodies=[ob.name, root.name],
+                       metrics=m, message=msg)
+    if not found:
+        led.record(check='motion.swept_clearance', outcome='PASS', cls='INFO',
+                   metrics={'parts': len(spinners), 'full_revolution': full_n},
+                   message=(f'{len(spinners)} part(s) turning in place clear their static neighbours at every angle '
+                            f'they turn through ({full_n} through a full revolution)') if spinners else
+                   'no part turns in place')
 
 
 def _sample_sideways(M, ob):

@@ -1,0 +1,6 @@
+{
+    "width": 960, "height": 540, "fps": 24, "duration": 2,
+    "script": "blender/tests/pipeline/swept/scene.py",
+    "outputVideo": "blender/tests/pipeline/out/swept.mp4",
+    "render": {"samples": 16}
+}

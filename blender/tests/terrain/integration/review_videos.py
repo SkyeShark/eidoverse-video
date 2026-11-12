@@ -63,12 +63,14 @@ def main():
     ap.add_argument('--no-clay', action='store_true')
     ap.add_argument('--slots', default='heavy.sh,heavy2.sh,heavy3.sh')
     ap.add_argument('--slot-wait', type=float, default=600.0, help='minutes to wait for a free GPU slot per job')
+    ap.add_argument('--index', default='videos.json', help='the record file in out/videos/ (a second pass running '
+                                                           'beside the first keeps its own)')
     a = ap.parse_args()
     JR.SLOTS = tuple(s for s in a.slots.split(',') if s) or ('heavy.sh',)
     names = [r for r in a.recipes.split(',') if r] or list(RECIPES)
-    raw_root = os.path.join(OUT, '_raw')
+    raw_root = os.path.join(OUT, '_raw' if a.index == 'videos.json' else '_raw_' + os.path.splitext(a.index)[0])
     os.makedirs(raw_root, exist_ok=True)
-    idx_path = os.path.join(OUT, 'videos.json')
+    idx_path = os.path.join(OUT, a.index)
     index = json.load(open(idx_path, encoding='utf-8')) if os.path.exists(idx_path) else {}
     for r in names:
         raw = os.path.join(raw_root, r)

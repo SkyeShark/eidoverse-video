@@ -15,10 +15,14 @@ Usage:
 Resolutions: 1k (default), 2k, 4k, 8k. Map keys written to tex_urls.json:
     diff, rough, normal, ao, metal, displacement, arm, opacity, emissive
 
-For Poly Haven the URLs are CDN links — `loadImageTexture(url)` fetches
-them directly. For AmbientCG and TextureCan the zip is downloaded +
-extracted into the current directory and `tex_urls.json` contains absolute
-local file paths that the engine's local-file asset loader picks up.
+For Poly Haven the entries are CDN links; for AmbientCG and TextureCan the
+zip is downloaded + extracted into the current directory and
+`tex_urls.json` contains absolute local file paths. Blender's loaders read
+local files: for a scene, fetch the set into the shared library (--cache)
+and load it by ID with eidoblend.harness.assets.load_pbr(id, res=...,
+maps=(...), repeat=(u, v)); a single local map loads with
+assets.load_image_texture(path). Every fetch ends by printing those lines
+for the set it got (usage_lines).
 """
 import requests, json, sys, os, zipfile, io, re
 from concurrent.futures import ThreadPoolExecutor
@@ -32,20 +36,24 @@ resolution = (_args[1] if len(_args) > 1 else "1k").lower()
 # eidoverse/assets/cache/textures/<ID>_<res>/ (git-ignored; third-party CC0 sets
 # are fetched, never committed), with tex_urls.json + license.json beside them.
 # An ID already there is not fetched again (no network). Library code loads these
-# through globalThis.loadPBR(id, { res }), which runs this on first use.
+# through eidoblend.harness.assets.load_pbr / fetch_pbr (the WebGPU edition's
+# globalThis.loadPBR), which run this on first use.
 CACHE = "--cache" in _flags
 CACHE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eidoverse", "assets", "cache", "textures")
 
 
-def _cache_hit(d):
+def _cache_hit(d, tex_id):
     if os.path.exists(os.path.join(d, "tex_urls.json")):
         print(f"[cache] {os.path.basename(d)}: already in the library -> {d}")
         print(f"CACHE_DIR={d}")
+        try:
+            with open(os.path.join(d, "tex_urls.json"), encoding="utf-8") as f:
+                maps = pbr_maps(json.load(f))
+        except (OSError, ValueError):
+            maps = ("diff", "normal", "rough")
+        print(f"In a scene: from eidoblend.harness import assets; "
+              f"mat = assets.load_pbr('{tex_id}', res='{resolution}', maps={maps!r}, repeat=(1, 1))")
         sys.exit(0)
-
-
-if CACHE:
-    _cache_hit(os.path.join(CACHE_ROOT, f"{query}_{resolution}"))
 
 
 # ───────── source: Poly Haven ─────────
@@ -314,75 +322,115 @@ def _parallel_search(*search_fns):
     return out
 
 
-matches = _parallel_search(polyhaven_search, ambientcg_search, texturecan_search)
-if not matches:
-    print(f"No textures found matching '{query}' on Poly Haven, AmbientCG, or TextureCan.")
-    sys.exit(1)
+# ───────── how to use what was fetched (the Blender edition) ─────────
 
-# Equal-quality matches prefer AmbientCG (the deepest PBR library of the
-# three); cross-source popularity numbers aren't comparable, so source
-# preference outranks popularity.
-matches.sort(key=lambda m: (m[0], m[4] == "ambientcg", m[1]), reverse=True)
-score, _pop, tex_id, disp_name, source, payload = matches[0]
-print(f"Found {len(matches)} matches across sources. Using: {tex_id} ({disp_name}) from {source}")
-if len(matches) > 1:
-    others = [f"{m[2]} ({m[4]})" for m in matches[1:8]]
-    print(f"Other options: {', '.join(others)}")
+def pbr_maps(tex_urls):
+    """The maps to name in load_pbr's `maps=` for a set: colour, normal, roughness and metal when the set has them
+    (the DirectX normal or the packed ARM map when it lacks the plain one), opacity and emission when present.
+    AO is never named: EEVEE's ray-traced GI makes the occlusion."""
+    have = set(tex_urls)
+    maps = [k for k in ("diff", "normal", "rough", "metal") if k in have]
+    if "normal" not in have and "normal_dx" in have:
+        maps.insert(1 if "diff" in have else 0, "normal_dx")
+    if "rough" not in have and "arm" in have:
+        maps.append("arm")
+    maps += [k for k in ("opacity", "emissive") if k in have]
+    return tuple(maps)
 
-if CACHE:
-    cache_dir = os.path.join(CACHE_ROOT, f"{tex_id.replace(':', '_')}_{resolution}")
-    _cache_hit(cache_dir)
-    os.makedirs(cache_dir, exist_ok=True)
-    os.chdir(cache_dir)
 
-if source == "polyhaven":
-    tex_urls = polyhaven_fetch(tex_id, payload, resolution)
-elif source == "texturecan":
-    tex_urls = texturecan_fetch(tex_id, payload, resolution)
-else:
-    tex_urls = ambientcg_fetch(tex_id, payload, resolution)
+def usage_lines(tex_id, source, tex_urls, res, cached, folder="."):
+    """What to do with a fetched set in a Blender scene (printed after every fetch): load_pbr from the shared library
+    (--cache), load_image_texture for a single local file, the relief a height map allows, and tiling."""
+    maps = pbr_maps(tex_urls)
+    load = f"assets.load_pbr('{tex_id}', res='{res}', maps={maps!r}, repeat=(1, 1))"
+    out = []
+    if cached:
+        out.append(f"In a scene: from eidoblend.harness import assets; mat = {load}")
+    else:
+        local = any(isinstance(v, str) and not v.startswith("http") for v in tex_urls.values())
+        if local:
+            out.append(f"{'TextureCan' if source == 'texturecan' else 'AmbientCG'} files were extracted to "
+                       f"{os.path.abspath(folder)}; tex_urls.json holds their absolute paths. One map loads with "
+                       "assets.load_image_texture(path, srgb=True) (colour; srgb=False for normal, roughness and "
+                       "other data maps).")
+        else:
+            out.append("Poly Haven entries in tex_urls.json are CDN URLs: Blender's loaders read local files.")
+        out.append(f"For a material, put the set in the shared library and load it by ID: python fetch_texture.py "
+                   f"{tex_id} {res} --cache, then (from eidoblend.harness import assets) mat = {load}")
+    out.append("Tiling: load_pbr's repeat=(u, v), the tiles across the object's UVs (its Mapping node).")
+    if "displacement" in tex_urls:
+        out.append("displacement: FOUND -> relief available. load_pbr(..., maps=(..., 'displacement'), "
+                   "displacement='bump') for surface detail, displacement='true' on dense geometry; real depth with a "
+                   "silhouette: eidoblend.terrain.relief.create_parallax_material(height, albedo, normal) + "
+                   "relief.subdivide(obj). See tools-guides/terrain-surfaces.md (Relief).")
+    else:
+        out.append("displacement: NONE for this set -> no relief from it (load_pbr's displacement and "
+                   "terrain.relief need a height map). For carved relief, pick a set that ships Displacement (most "
+                   "stone/brick/tile/wood do).")
+    return out
 
-if CACHE:
-    # the library holds files only: Poly Haven's CDN maps are downloaded too
-    for k, v in list(tex_urls.items()):
-        if isinstance(v, str) and v.startswith("http"):
-            fn = f"{tex_id}_{k}{os.path.splitext(v.split('?')[0])[1] or '.jpg'}"
-            r = requests.get(v, timeout=120)
-            r.raise_for_status()
-            with open(fn, "wb") as f:
-                f.write(r.content)
-            tex_urls[k] = os.path.abspath(fn)
-    page = {"polyhaven": f"https://polyhaven.com/a/{tex_id}",
-            "ambientcg": f"https://ambientcg.com/view?id={tex_id}",
-            "texturecan": f"{TC_BASE}/details/{tex_id.split(':')[-1]}/"}[source]
-    with open("license.json", "w") as f:
-        json.dump({"source": source, "id": tex_id, "name": disp_name, "resolution": resolution,
-                   "url": page, "license": "CC0 1.0"}, f, indent=2)
 
-with open("tex_urls.json", "w") as f:
-    json.dump(tex_urls, f, indent=2)
-if CACHE:
-    print(f"CACHE_DIR={os.getcwd()}")
+def main():
+    if CACHE:
+        _cache_hit(os.path.join(CACHE_ROOT, f"{query}_{resolution}"), query)
+    matches = _parallel_search(polyhaven_search, ambientcg_search, texturecan_search)
+    if not matches:
+        print(f"No textures found matching '{query}' on Poly Haven, AmbientCG, or TextureCan.")
+        sys.exit(1)
 
-print(f"\nTexture ID: {tex_id} (source: {source})")
-print(f"Maps ({len(tex_urls)}): {', '.join(tex_urls.keys())}")
-for k, v in tex_urls.items():
-    print(f"  {k}: {v}")
-# SPOM availability — createParallaxMaterial NEEDS a height map (it throws
-# without one), and the height map IS the displacement. Tell the agent up
-# front whether SPOM is possible for this material so it doesn't try + fail.
-if "displacement" in tex_urls:
-    print("displacement: FOUND -> SPOM available. Load it as heightMap and call "
-          "createParallaxMaterial({heightMap, albedoMap, normalMap, depthScale, selfLit}) "
-          "+ geom.computeTangents(). See tools-guides/terrain-surfaces.md (SPOM).")
-else:
-    print("displacement: NONE for this material -> SPOM (createParallaxMaterial) needs a "
-          "height map and will throw without one. For carved relief, pick a material that "
-          "ships Displacement (most stone/brick/tile/wood do).")
+    # Equal-quality matches prefer AmbientCG (the deepest PBR library of the
+    # three); cross-source popularity numbers aren't comparable, so source
+    # preference outranks popularity.
+    matches.sort(key=lambda m: (m[0], m[4] == "ambientcg", m[1]), reverse=True)
+    score, _pop, tex_id, disp_name, source, payload = matches[0]
+    print(f"Found {len(matches)} matches across sources. Using: {tex_id} ({disp_name}) from {source}")
+    if len(matches) > 1:
+        others = [f"{m[2]} ({m[4]})" for m in matches[1:8]]
+        print(f"Other options: {', '.join(others)}")
 
-print(f"\nSaved to tex_urls.json.")
-if source == "polyhaven":
-    print("Poly Haven URLs load directly via the engine's loadImageTexture (CORS open).")
-else:
-    print(f"{'TextureCan' if source == 'texturecan' else 'AmbientCG'} files were extracted to {os.getcwd()}; tex_urls.json holds absolute paths.")
-print("Set texture.wrapS = texture.wrapT = THREE.RepeatWrapping and texture.repeat.set(X, Y) for tiling.")
+    if CACHE:
+        cache_dir = os.path.join(CACHE_ROOT, f"{tex_id.replace(':', '_')}_{resolution}")
+        _cache_hit(cache_dir, tex_id)
+        os.makedirs(cache_dir, exist_ok=True)
+        os.chdir(cache_dir)
+
+    if source == "polyhaven":
+        tex_urls = polyhaven_fetch(tex_id, payload, resolution)
+    elif source == "texturecan":
+        tex_urls = texturecan_fetch(tex_id, payload, resolution)
+    else:
+        tex_urls = ambientcg_fetch(tex_id, payload, resolution)
+
+    if CACHE:
+        # the library holds files only: Poly Haven's CDN maps are downloaded too
+        for k, v in list(tex_urls.items()):
+            if isinstance(v, str) and v.startswith("http"):
+                fn = f"{tex_id}_{k}{os.path.splitext(v.split('?')[0])[1] or '.jpg'}"
+                r = requests.get(v, timeout=120)
+                r.raise_for_status()
+                with open(fn, "wb") as f:
+                    f.write(r.content)
+                tex_urls[k] = os.path.abspath(fn)
+        page = {"polyhaven": f"https://polyhaven.com/a/{tex_id}",
+                "ambientcg": f"https://ambientcg.com/view?id={tex_id}",
+                "texturecan": f"{TC_BASE}/details/{tex_id.split(':')[-1]}/"}[source]
+        with open("license.json", "w") as f:
+            json.dump({"source": source, "id": tex_id, "name": disp_name, "resolution": resolution,
+                       "url": page, "license": "CC0 1.0"}, f, indent=2)
+
+    with open("tex_urls.json", "w") as f:
+        json.dump(tex_urls, f, indent=2)
+    if CACHE:
+        print(f"CACHE_DIR={os.getcwd()}")
+
+    print(f"\nTexture ID: {tex_id} (source: {source})")
+    print(f"Maps ({len(tex_urls)}): {', '.join(tex_urls.keys())}")
+    for k, v in tex_urls.items():
+        print(f"  {k}: {v}")
+    print(f"\nSaved to tex_urls.json.")
+    for line in usage_lines(tex_id, source, tex_urls, resolution, CACHE, os.getcwd()):
+        print(line)
+
+
+if __name__ == "__main__":
+    main()

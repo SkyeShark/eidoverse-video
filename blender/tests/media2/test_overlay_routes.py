@@ -16,6 +16,11 @@ routes   the voder_1939 wall at DAISY's 24.5 s ("I was a hiss and a buzz..."), s
            layered   + sepia 'under' and rgb_shift 'over' (look/post custom_effects): the HUD keeps its ink, its
                      edges split; then sepia moved 'over': the HUD goes sepia with the film
          -> out/overlay_routes_sheet.png and one PNG per route
+signal   the edit route for signal effects (needs no timeline): colour bars on the wall, the same lower third, rgb_shift
+         and glitch_bars (opacity keyed on from frame 4) 'over': the chain's signal route at frame 3, then
+         overlay.take_signal_effects moves them into a COMPOSITOR strip modifier over the edit (film + overlay): every
+         ink patch exact under rgb_shift, saturated #ffd400 included, the HUD edge split, the glitch keyed on at
+         frame 5, the bars' colours kept -> out/overlay_signal_sheet.png
 fade     a white and a teal box fading in (alpha 0, 0.1 .. 1 over frames 1..11) over a dark backdrop and over a lamp
          band brighter than AgX's white: the display route's blend against chain_overlay (authored, graded, and at
          factor 0.5), and chain_overlay(source=PNGs) from an overlay rendered over frames 4..8 only (clear before
@@ -41,7 +46,7 @@ from eidoblend.media import canvas_scenes as cs  # noqa: E402
 from eidoblend.media import lyrics, overlay, raster, screens  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-ONLY = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else {'routes', 'fade', 'atlas'}
+ONLY = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else {'routes', 'signal', 'fade', 'atlas'}
 OUT = HERE / 'out'
 WORK = OUT / 'overlay_work'
 TIMELINE = OUT / 'daisy' / 'out' / 'daisy_timeline_upto_chorus2.json'
@@ -380,6 +385,98 @@ def probe_fade():
     print(f'[sheet] {OUT / "overlay_fade_strip.png"}', flush=True)
 
 
+def colour_bars(c, t, w, h):
+    """Saturated bars (white, yellow, cyan, green, magenta, red, blue) over a grey step strip: the film's wall."""
+    cols = [(235, 235, 235), (235, 235, 16), (16, 235, 235), (16, 235, 16), (235, 16, 235), (235, 16, 16),
+            (16, 16, 235)]
+    d = c.draw
+    for i, col in enumerate(cols):
+        d.rectangle([int(i * w / 7), 0, int((i + 1) * w / 7), int(h * 0.72)], fill=col)
+    for i in range(8):
+        v = int(16 + i * (235 - 16) / 7)
+        d.rectangle([int(i * w / 8), int(h * 0.72), int((i + 1) * w / 8), h], fill=(v, v, v))
+
+
+def probe_signal():
+    """The edit route for signal effects: rgb_shift (0.004) and glitch_bars (opacity keyed 0 on frames 1..3, 1 from
+    4) 'over' a film of colour bars, with the lower third on the overlay layer. First the signal route in the chain
+    (chain_overlay, authored) at frame 3; then overlay.take_signal_effects moves both effects (and their keys) out of
+    the film's chain, the film and the overlay render on their own, and make_edit_scene(..., signal=group) runs the
+    effects as a COMPOSITOR strip modifier over film + HUD. The same edit without the signal is the display route.
+    -> out/overlay_signal_sheet.png"""
+    from eidoblend.look.post import custom_effects as fx
+    sc = S.fresh_scene(res=(W, H), samples=16, fps=FPS, frames=(1, N))
+    sc.name = 'signal_film'
+    sc['eido_frame0'] = 1
+    stage(sc)
+    wall = screens.make_screen(width=4.8, height=2.0, px=960, draw=colour_bars, frames=(1, N), name='sig_bars',
+                               strength=1.25, out_dir=WORK / 'sig_bars')
+    wall.obj.location = (0, 0.0, 1.6)
+    S.area_light(sc, (0.5, -4.0, 4.5), (0, -1.6, 0.5), 45.0, size=2.0, color=(1.0, 0.86, 0.72), name='front_wash')
+    S.camera(sc, (-0.9, -7.4, 1.55), (0.0, 0.0, 1.45), lens=40)
+    ov = overlay.make_overlay_layer(sc, filter_size=0.0)
+    ov.panel(draw=lower_third, px=800, frames=(1, N), name='sig_lt', out_dir=WORK / 'sig_lt', **LT)
+    e = fx.apply_to(sc, 'rgb_shift,glitch_bars', {'rgb_shift': {'amount': 0.004}, 'glitch_bars': {'shift': 0.03}})
+    e.key('glitch_bars', 'opacity', 3, 0.0)
+    e.key('glitch_bars', 'opacity', 4, 1.0)
+    screens.set_interpolation(chain.tree(sc), 'CONSTANT', 'over:glitch_bars')
+    overlay.chain_overlay(ov, sc)
+    chain_route = rgb(render_still(sc, F, OUT / 'overlay_signal_chain_f003.png'))
+
+    g = overlay.take_signal_effects(sc)
+    left = [(s, n) for s, n, _x in chain.stages(sc)]
+    names = sorted(n.name for n in g.nodes if n.name.startswith('over:'))
+    gfc = next((fc for fc in screens.action_fcurves(g.animation_data.action) if 'over:glitch_bars' in fc.data_path),
+               None) if g.animation_data else None
+    check(not left and names == ['over:glitch_bars', 'over:rgb_shift'] and gfc is not None
+          and gfc.evaluate(3) == 0.0 and gfc.evaluate(4) == 1.0 and sc.get(overlay.SIGNAL_PROP) == g.name,
+          f'take_signal_effects: the film chain keeps {left}, the group holds {names}, glitch opacity keys copied '
+          f'(frame 3: {gfc.evaluate(3) if gfc else None}, 4: {gfc.evaluate(4) if gfc else None})')
+    film_files = render_frames(sc, WORK / 'sig_film' / 'f_####.png', 1, N)
+    ov_dir = overlay.render_overlay(ov, WORK / 'sig_ov')
+    edit = overlay.make_edit_scene(film=film_files[0], overlays=[ov_dir], like=sc, signal=g, name='sig_edit')
+    adj = edit.sequence_editor.strips.get('signal')
+    check(adj is not None and adj.type == 'ADJUSTMENT' and adj.modifiers[0].type == 'COMPOSITOR'
+          and adj.modifiers[0].node_group == g, f'the edit scene: an adjustment strip over film + overlay with the '
+                                                 f'group as its COMPOSITOR modifier (channel {adj.channel if adj else None})')
+    overlay.render_edit(edit, WORK / 'sig_edit', video=False)
+    clean = overlay.make_edit_scene(film=film_files[0], overlays=[ov_dir], like=sc, name='sig_clean')
+    overlay.render_edit(clean, WORK / 'sig_clean', video=False)
+    sig = {f: rgb(WORK / 'sig_edit' / f'edit_{f:04d}.png') for f in (F, 5, 6)}
+    cln = {f: rgb(WORK / 'sig_clean' / f'edit_{f:04d}.png') for f in (F, 5)}
+    for k in ('teal', 'white', 'yellow', 'box'):
+        want = np.array(raster.color(INK[k])[:3], float)
+        got, chn = ink_at(sig[F], k), ink_at(chain_route, k)
+        check(np.abs(got - want).max() <= 2.0, f'edit route, frame {F} (rgb_shift on, glitch off): {k} ink '
+                                               f'{np.round(got, 1).tolist()} vs {want.tolist()} (the chain\'s signal '
+                                               f'route: {np.round(chn, 1).tolist()}, max err '
+                                               f'{np.abs(chn - want).max():.1f})')
+    x0, y = hud_px(0.06, 0.30)
+    row_s, row_c = sig[F][y, x0 - 10:x0 + 10], cln[F][y, x0 - 10:x0 + 10]
+    full = lambda ch, row: int(np.argmax(row[:, ch] >= 245))              # noqa: E731
+    es, ec = [full(c, row_s) for c in range(3)], [full(c, row_c) for c in range(3)]
+    check(es[0] < es[1] < es[2] and len(set(ec)) == 1, f'rgb_shift splits the HUD\'s white block edge in the edit: '
+                                                       f'red, green, blue reach white at {es} px ({ec} without it)')
+    # the film and the HUD are still, so frame 5 against frame 3 is the glitch alone (keyed on from frame 4)
+    g5 = float((np.abs(sig[5] - sig[F]).max(axis=-1) > 40).mean())
+    c5 = float((np.abs(cln[5] - cln[F]).max(axis=-1) > 40).mean())
+    check(g5 > 0.01 and c5 < 0.001, f'glitch_bars keyed on from frame 4 runs over the edit: {g5 * 100:.1f} % of the '
+                                    f'frame moved by over 40 levels from frame {F} to 5 ({c5 * 100:.2f} % without the '
+                                    f'signal: the film and the HUD are still)')
+    g6 = float((np.abs(sig[6] - sig[5]).max(axis=-1) > 40).mean())
+    check(g6 > 0.003, f'Scene Time drives the group in the modifier: the glitch bars scroll from frame 5 to 6 '
+                      f'({g6 * 100:.1f} % of the frame moved by over 40 levels)')
+    bars = (slice(int(H * 0.2), int(H * 0.45)), slice(int(W * 0.30), int(W * 0.90)))
+    inner = np.abs(sig[F][bars] - cln[F][bars])
+    check(np.median(inner) <= 1.0, f'the film under rgb_shift keeps its colours inside the bars (median |diff| '
+                                   f'{np.median(inner):.1f}, mean {inner.mean():.2f})')
+    sheet([(OUT / 'overlay_signal_chain_f003.png', 'signal route in the chain, frame 3 (yellow short)'),
+           (WORK / 'sig_edit' / f'edit_{F:04d}.png', 'edit route, frame 3: rgb_shift, ink exact'),
+           (WORK / 'sig_edit' / 'edit_0005.png', 'edit route, frame 5: glitch_bars keyed on'),
+           (WORK / 'sig_clean' / 'edit_0005.png', 'display route, frame 5: no signal effects')],
+          OUT / 'overlay_signal_sheet.png', 'signal effects over the edit: COMPOSITOR strip modifier')
+
+
 def probe_atlas():
     movie = OUT / 'era_film_silent.mp4'
     if not movie.exists():
@@ -453,9 +550,11 @@ def sheet(items, path, title):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    check(TIMELINE.exists(), f'DAISY timeline present ({TIMELINE.name})')
     if 'routes' in ONLY:
+        check(TIMELINE.exists(), f'DAISY timeline present ({TIMELINE.name})')
         probe_routes()
+    if 'signal' in ONLY:
+        probe_signal()
     if 'fade' in ONLY:
         probe_fade()
     if 'atlas' in ONLY:

@@ -371,6 +371,7 @@ size a card as a fraction of `2 * half_w`; and the overlay scene is not the one
 | `render --probe` | `<out>_probe.mp4` and `<out>_probe_probe1..3.png` |
 | `render --at T` | `<out>_probe_at<T>s.png` (T is the frame's own time, two decimals) |
 | every run | `<out>.audit.txt` + `.audit.json` (the digest), `<out>.blend`, `<out>.build.json`, `<out>.job.json` |
+| a render of a scene whose post effect reads earlier frames | `<out>_post_history/<record>/` (half-float EXRs the compositor writes as each frame composites; only the last few are kept) |
 
 Output safety: an existing video is moved to `<out>.mp4.prev`, the render
 writes `<out>.mp4.part`, and only a finished render is renamed into place.
@@ -380,6 +381,23 @@ Sound is muxed afterwards with `merge_av.py` ([audio](audio.md)). A film
 render prints a progress line every 15 frames; `RENDER_CQ`, `RENDER_BITRATE`
 and `RENDER_CODEC` set Blender's writer as they set the engine's ffmpeg pipe
 ([production](production.md#plan-the-render)).
+
+**A still of a shot whose post effect reads earlier frames.** after_image's
+trail, the era looks' CRT persistence and aeropittura's echoes
+([post-processing](postprocessing.md)) read back records the compositor
+writes as each frame composites. The WebGPU runner rendered every `--at` from
+frame 0; this one renders only what each still reads, first, in order,
+keeping the records and no picture: a trail fed by its own last frame needs
+its shot from its cut (after_image's shot is the whole film unless a cut
+restarts it), the CRT persistence its last seven frames at 24 fps,
+aeropittura's echoes their last four. Stills later in one run continue from
+the frames already rendered. So a still matches the film's own frame
+(measured with the records cleared first: 44 dB PSNR against the film's
+frame for after_image's trail, 40 dB for the CRT persistence), and
+the digest's `render.capture` names the effects and counts the lead-in
+frames. The build gives the records a folder beside the outputs,
+`<out>_post_history/`, and a film render deletes each record once no later
+frame reads it.
 
 ## The render_*.mjs helpers
 
@@ -406,7 +424,8 @@ superseded by the media family's canvases and `html_mesh`.
 ## Not yet ported
 
 - `--jump` is accepted and changes nothing: a built scene is a pure function
-  of the frame. `--preroll S` steps the timeline through S seconds before each
+  of the frame (the post chain's records of earlier frames aside, which `--at`
+  renders first, above). `--preroll S` steps the timeline through S seconds before each
   `--at` still, unrendered, for state that is still live at render time (VRM
   spring bones left unbaked: unverified).
 - The WebGPU per-frame registries (`_autoMixers`, particle, screen, creature

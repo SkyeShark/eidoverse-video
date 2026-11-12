@@ -4,6 +4,13 @@ or to PNG stills, and the files land under their names only when they are whole.
 Output safety (as the WebGPU edition): an existing output is moved to <out>.prev first, the render goes to
 <out>.part, and only a finished render is renamed into place; absence of the output means the render did not
 finish. Never review a .prev as the new render.
+
+The post chain's records of earlier frames (look.post.history: after_image's trail, the era looks' CRT persistence,
+aeropittura's echoes) are written by compositor File Outputs as each frame composites and read back by the frames
+after it. post_histories(scene) finds them and what each reads; history_lead_in(scene, frame) is the first frame a
+still of `frame` must render before it, in order (a trail fed by its own last frame: from its shot's start; a fixed
+number of frames back: that many); render_lead_in renders those frames keeping only the records; prune_histories
+deletes the records no later frame reads (a film render prunes as it goes).
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ def render_video(scene, out: str, frame_start: int, frame_end: int, progress: st
     for n in ffmpeg_rate_control(scene):
         print(f'[{progress}] video: {n}', flush=True)
     keep = scene.frame_start, scene.frame_end
+    hist = post_histories(scene)                       # the post chain's records, pruned below as the frames go by
     scene.frame_start, scene.frame_end = int(frame_start), int(frame_end)
     fps = scene.render.fps / scene.render.fps_base
     total = int(frame_end) - int(frame_start) + 1
@@ -80,6 +88,7 @@ def render_video(scene, out: str, frame_start: int, frame_end: int, progress: st
         if sc == scene:
             i = sc.frame_current - int(frame_start)
             log_progress(progress, i, total, i / fps)
+            prune_histories(hist, sc.frame_current)    # a frame's records go once no later frame reads them
     bpy.app.handlers.render_post.append(_progress)
     try:
         bpy.ops.render.render(animation=True)
@@ -104,6 +113,110 @@ def render_still(scene, frame: int, png: str) -> str:
         raise RuntimeError(f'the render wrote no still for frame {frame} ({part} missing)')
     os.replace(part, png)
     return png
+
+
+# ------------------------------------------------------------------------------- the post chain's history ---
+# The look family's frame-history effects (after_image's trail, the era looks' CRT persistence, aeropittura's echoes)
+# read earlier frames back from the records their compositor File Outputs write as each frame composites
+# (look/post/history.py). A frame rendered alone would read records that are missing or left by an older run, so a
+# still renders the frames those records come from first, in order.
+
+def _taps_upstream(sockets):
+    """The histories whose taps (Image nodes reading earlier records) feed these input sockets, through reroutes,
+    muted nodes and node groups (into a group through the output linked, out of it through the group's inputs)."""
+    found, seen = set(), set()
+    stack = [(s, ()) for s in sockets]
+    while stack:
+        sock, ctx = stack.pop()
+        k = (sock.as_pointer(), tuple(g.as_pointer() for g in ctx))
+        if k in seen:
+            continue
+        seen.add(k)
+        for lk in sock.links:
+            if getattr(lk, 'is_muted', False):
+                continue
+            n = lk.from_node
+            if n.bl_idname == 'CompositorNodeImage' and n.get('eido_history') is not None:
+                found.add(str(n['eido_history']))
+            elif n.bl_idname == 'NodeGroupInput':
+                if ctx:
+                    outer = next((i for i in ctx[-1].inputs if i.identifier == lk.from_socket.identifier), None)
+                    if outer is not None:
+                        stack.append((outer, ctx[:-1]))
+            elif getattr(n, 'node_tree', None) is not None and not n.mute and n.bl_idname.endswith('Group'):
+                outs = [o for o in n.node_tree.nodes if o.bl_idname == 'NodeGroupOutput']
+                outs = [o for o in outs if getattr(o, 'is_active_output', False)] or outs
+                for o in outs:
+                    stack.extend((i, ctx + (n,)) for i in o.inputs if i.identifier == lk.from_socket.identifier)
+            else:
+                stack.extend((i, ctx) for i in n.inputs)
+    return found
+
+
+def post_histories(scene) -> list:
+    """The post chain's records of earlier frames in the scene's compositor that something reads back: one dict per
+    history, {'key', 'dir' (the folder its File Output writes), 'depth' (the furthest frame back its taps read),
+    'cuts' (the frames it restarts at: the scene's first frame and the cuts its taps were keyed to), 'feedback' (its
+    record is computed from earlier records: after_image's trail is its own last trail, so a frame depends on every
+    frame of its shot before it)}. [] when the compositor is off or holds none. Each folder is made if it was cleared
+    (the records are rendered again, never kept as inputs)."""
+    tree = getattr(scene, 'compositing_node_group', None)
+    if tree is None or not scene.render.use_compositing:
+        return []
+    writers, taps = {}, {}
+    for n in tree.nodes:
+        key = n.get('eido_history')
+        if key is None or n.mute:
+            continue
+        if n.bl_idname == 'CompositorNodeOutputFile':
+            writers[str(key)] = n
+        elif n.bl_idname == 'CompositorNodeImage' and 'eido_offset' in n:
+            taps.setdefault(str(key), []).append(int(n['eido_offset']))
+    out = []
+    for key, fo in sorted(writers.items()):
+        if key not in taps:
+            continue                                                 # written, never read back
+        cuts = {int(c) for c in tree.get('eido_cuts_' + key, [])} | {int(scene.frame_start)}
+        d = os.path.normpath(bpy.path.abspath(fo.directory))
+        os.makedirs(d, exist_ok=True)
+        out.append({'key': key, 'dir': d, 'depth': max(taps[key]), 'cuts': sorted(cuts),
+                    'feedback': bool(_taps_upstream(list(fo.inputs)))})
+    return out
+
+
+def history_lead_in(scene, frame: int, histories=None) -> int:
+    """The first frame to render, in order, before a still of `frame`, so every history the frame reads holds what a
+    film render gives it: a feedback history from its shot's first frame (its last cut at or before `frame`), a
+    history of fixed depth that many frames back, never before its cut (on a cut frame the effect reads none).
+    `frame` itself when nothing is read back."""
+    hs = post_histories(scene) if histories is None else histories
+    start = int(frame)
+    for h in hs:
+        cut = max([c for c in h['cuts'] if c <= frame] or [int(scene.frame_start)])
+        start = min(start, cut if h['feedback'] else max(cut, int(frame) - h['depth']))
+    return max(int(scene.frame_start), start)
+
+
+def prune_histories(histories, frame: int):
+    """Delete the records no frame after `frame` reads (older than frame + 1 - depth): look.post.history's
+    History.prune, on each writer's own folder (a History made again would re-point its writer)."""
+    if not histories:
+        return
+    from ..look.post import history as HI
+    for h in histories:
+        rec = HI.History.__new__(HI.History)
+        rec.dir, rec.key = h['dir'], h['key']
+        rec.prune(int(frame) + 1 - h['depth'])
+
+
+def render_lead_in(scene, first: int, frame: int, histories=()) -> int:
+    """Render frames first .. frame - 1 in order at the scene's settings, keeping nothing but what the compositor's
+    File Outputs write (the records; no picture is saved), pruning records as they age. Returns the frames rendered."""
+    for g in range(int(first), int(frame)):
+        scene.frame_set(g)
+        bpy.ops.render.render(write_still=False)
+        prune_histories(histories, g)
+    return max(0, int(frame) - int(first))
 
 
 def ffmpeg_exe():

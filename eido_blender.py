@@ -103,6 +103,57 @@ def run_blender(script, args, check_bash=True):
     return subprocess.run(cmd, cwd=ROOT, env=env).returncode
 
 
+DENO_VERSIONS = ('2.8.', '2.9.')            # checked on 2.8.1 and 2.9.5 (docs/SETUP.md)
+MEDIA_JS = os.path.join(ROOT, 'blender', 'eidoblend', 'media', 'js')
+
+
+def media_npm_packages():
+    """The npm packages the media family's Deno scripts import (the canvas screens, the books' rig, parole), as the
+    scripts name them (exact versions): read from blender/eidoblend/media/js/*.mjs."""
+    import re
+    found = set()
+    for p in sorted(glob.glob(os.path.join(MEDIA_JS, '*.mjs'))):
+        with open(p, encoding='utf-8') as f:
+            found.update(re.findall(r"""(?:from|import\()\s*['"](npm:[^'"]+)['"]""", f.read()))
+    return sorted(found)
+
+
+def deno_checks():
+    """[(label, good, detail)] for the Deno the media family runs while a scene builds: the binary it finds
+    (media.canvas_scenes.deno_exe), its version, and its npm packages imported offline (--cached-only, no config, no
+    node_modules: as the build runs them). Optional: a scene without canvas screens, books or parole never runs Deno."""
+    from eidoblend.media import canvas_scenes
+    fix = 'run: python eido.py bootstrap (docs/SETUP.md, step 6)'
+    try:
+        exe = canvas_scenes.deno_exe()
+    except FileNotFoundError:
+        return [('Deno (canvas screens, the books\' rig, parole)', False,
+                 'not on PATH: install 2.8.1 or 2.9.5 (docs/SETUP.md, step 6); only those scenes need it')]
+    try:
+        v = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=60).stdout.split()
+    except (OSError, subprocess.SubprocessError) as e:
+        return [('Deno', False, f'{exe}: {type(e).__name__}: {e}')]
+    ver = v[1] if len(v) > 1 else '?'
+    out = [(f'Deno {ver} (canvas screens, the books\' rig, parole)', ver.startswith(DENO_VERSIONS),
+            exe if ver.startswith(DENO_VERSIONS) else f'{exe}: checked on 2.8.1 and 2.9.5; judge another by a canvas '
+                                                      'screen it bakes')]
+    pkgs = media_npm_packages()
+    if not pkgs:
+        return out
+    code = f'for (const s of {json.dumps(pkgs)}) await import(s);'
+    try:
+        r = subprocess.run([exe, 'eval', '--no-config', '--node-modules-dir=none', '--cached-only', code], cwd=ROOT,
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180,
+                           env=dict(os.environ, NO_COLOR='1'))
+        good, err = r.returncode == 0, (r.stderr or r.stdout).strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        good, err = False, f'{type(e).__name__}: {e}'
+    names = ', '.join(p[len('npm:'):] for p in pkgs)
+    miss = err.splitlines()[0][:160] if err and not good else ''
+    out.append((f'Deno npm cache, offline: {names}', good, '' if good else f'{miss}; {fix}'))
+    return out
+
+
 def load(scene):
     try:
         cfg = cfgmod.load_config(scene)
@@ -186,6 +237,8 @@ def cmd_doctor(a):
         report('EEVEE renders headless (64x64, 1 sample) and the GPU compute check passes',
                rc == 0 and os.path.exists(out),
                '' if rc == 0 else f'Blender exited {rc}: read the lines above')
+    for label, good, detail in deno_checks():
+        report(label, good, detail, optional=True)
     comfy = None
     for port in [8188] + list(range(8000, 8021)):
         try:

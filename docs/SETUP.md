@@ -106,9 +106,13 @@ python eido_blender.py doctor
 Checks: Blender's version, bash, the VRM extension (optional), ffmpeg and
 ffprobe, then one 64 × 64 EEVEE render of a lit cube at 1 sample and the GPU
 check: the renderer Blender chose, classified hardware or software, and a
-compute dispatch whose readback must be exact. ComfyUI and an embeddings key
-are reported, not required. `--no-render` skips the render. Failures return
-a nonzero exit code.
+compute dispatch whose readback must be exact. Then the Deno of step 6, as
+the canvas screens, the books' rig and parole run it: the binary on `PATH`,
+its version (2.8.1 or 2.9.5), and one offline import (`--cached-only`, no
+config, no `node_modules`) of the npm packages their scripts import, three
+and `@napi-rs/canvas`; a miss says to run `python eido.py bootstrap`. Deno,
+ComfyUI and an embeddings key are reported, not required. `--no-render`
+skips the render. Failures return a nonzero exit code.
 
 A **software renderer** (Mesa llvmpipe or lavapipe, Microsoft WARP) runs
 everything on the CPU, many times slower, and the doctor warns. On a machine

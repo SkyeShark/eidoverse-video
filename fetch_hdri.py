@@ -3,7 +3,9 @@
 Searches Poly Haven AND AmbientCG, picks the best-scoring match across both,
 downloads the .hdr file, and writes a base64 sidecar for scene-script injection.
 AmbientCG ships its HDRIs as OpenEXR only; those are converted to Radiance .hdr
-with ffmpeg so hdri.hdr is always a real RGBE file (RGBELoader-compatible).
+with ffmpeg so hdri.hdr is always a real RGBE file (RGBELoader-compatible);
+when the conversion cannot run (no ffmpeg / numpy) the EXR is kept as
+hdri.exr, which Blender reads as it is.
 
 Usage:
     python3 fetch_hdri.py "night urban"           # multi-source search
@@ -12,8 +14,12 @@ Usage:
     python3 fetch_hdri.py AerodynamicsWorkshop    # exact AmbientCG ID
 
 Outputs in the current directory:
-    hdri.hdr      — the HDRI file
-    hdri_b64.txt  — base64 encoded for assets-injection scenes
+    hdri.hdr      — the HDRI file (or hdri.exr, above)
+    hdri_b64.txt  — base64 encoded, the WebGPU edition's assets injection
+
+In a Blender scene: eidoblend.harness.assets.load_hdri(path), for lookdev and
+studio light (a set that needs a sky uses the sky family's make_sky); every
+fetch ends by printing that line (usage_lines).
 
 Resolutions: 1k (default), 2k, 4k, 8k.
 """
@@ -223,48 +229,71 @@ def _parallel_search(*search_fns):
     return out
 
 
-matches = _parallel_search(polyhaven_search, ambientcg_search)
-if not matches:
-    print(f"No HDRIs found matching '{query}'. Falling back to Poly Haven 'studio_small_09'.")
-    hdri_id = "studio_small_09"
-    files = requests.get(f"https://api.polyhaven.com/files/{hdri_id}", timeout=10).json()
-    content = polyhaven_fetch(hdri_id, files, resolution)
-    source = "polyhaven"
-else:
-    # score, then Poly Haven on ties, then popularity (only comparable
-    # within one source — Poly Haven counts downloads, AmbientCG a score).
-    matches.sort(key=lambda m: (m[0], m[4] == "polyhaven", m[1]), reverse=True)
-    score, _pop, hdri_id, disp_name, source, payload = matches[0]
-    print(f"Found {len(matches)} matches across sources. Using: {hdri_id} ({disp_name}) from {source}")
-    if len(matches) > 1:
-        others = [f"{m[2]} ({m[4]})" for m in matches[1:6]]
-        print(f"Other options: {', '.join(others)}")
-    if source == "polyhaven":
-        content = polyhaven_fetch(hdri_id, payload, resolution)
+# ───────── how to use what was fetched (the Blender edition) ─────────
+
+def usage_lines(path):
+    """What to do with a fetched HDRI in a Blender scene (printed after every fetch)."""
+    name = os.path.basename(path)
+    return [f"In a scene: declare it under scene.json \"assets\" (\"hdri\": \"<folder>/{name}\") and light with "
+            "assets.load_hdri(ctx.assets['hdri'], strength=1.0, rotation_deg=0, visible=False) (eidoblend.harness."
+            "assets; Blender reads .hdr and .exr natively; visible=False lights the scene while the camera sees a "
+            "black background). For lookdev, product shots and studio light: a set that needs a sky uses the sky "
+            "family's make_sky, never a photograph of one."]
+
+
+def main():
+    matches = _parallel_search(polyhaven_search, ambientcg_search)
+    if not matches:
+        print(f"No HDRIs found matching '{query}'. Falling back to Poly Haven 'studio_small_09'.")
+        hdri_id = "studio_small_09"
+        files = requests.get(f"https://api.polyhaven.com/files/{hdri_id}", timeout=10).json()
+        content = polyhaven_fetch(hdri_id, files, resolution)
+        source = "polyhaven"
     else:
-        content, ext = ambientcg_fetch(hdri_id, payload, resolution)
-        if ext == "exr":
-            print("  AmbientCG ships OpenEXR — converting to Radiance .hdr (ffmpeg decode + RGBE encode) …")
-            converted = exr_to_hdr(content)
-            if converted is None:
-                with open("hdri.exr", "wb") as f:
-                    f.write(content)
-                print("ERROR: could not convert EXR to .hdr (needs ffmpeg + ffprobe on PATH and numpy). Wrote hdri.exr "
-                      "instead; load it with three's EXRLoader, not RGBELoader/HDRLoader, or pick a "
-                      "Poly Haven HDRI. hdri.hdr / hdri_b64.txt were NOT written.", file=sys.stderr)
-                sys.exit(2)
-            content = converted
+        # score, then Poly Haven on ties, then popularity (only comparable
+        # within one source — Poly Haven counts downloads, AmbientCG a score).
+        matches.sort(key=lambda m: (m[0], m[4] == "polyhaven", m[1]), reverse=True)
+        score, _pop, hdri_id, disp_name, source, payload = matches[0]
+        print(f"Found {len(matches)} matches across sources. Using: {hdri_id} ({disp_name}) from {source}")
+        if len(matches) > 1:
+            others = [f"{m[2]} ({m[4]})" for m in matches[1:6]]
+            print(f"Other options: {', '.join(others)}")
+        if source == "polyhaven":
+            content = polyhaven_fetch(hdri_id, payload, resolution)
+        else:
+            content, ext = ambientcg_fetch(hdri_id, payload, resolution)
+            if ext == "exr":
+                print("  AmbientCG ships OpenEXR — converting to Radiance .hdr (ffmpeg decode + RGBE encode) …")
+                converted = exr_to_hdr(content)
+                if converted is None:
+                    with open("hdri.exr", "wb") as f:
+                        f.write(content)
+                    print(f"Done: hdri.exr ({len(content)} bytes): the EXR could not be converted to .hdr (that needs "
+                          "ffmpeg + ffprobe on PATH and numpy), and Blender reads it as it is. hdri.hdr and "
+                          "hdri_b64.txt (the WebGPU edition's RGBELoader and assets injection) were NOT written.")
+                    print(f"HDRI ID: {hdri_id} (source: {source})")
+                    for line in usage_lines(os.path.abspath("hdri.exr")):
+                        print(line)
+                    return
+                content = converted
 
-if not content.startswith((b"#?RADIANCE", b"#?RGBE")):
-    print(f"ERROR: downloaded file is not a Radiance .hdr (starts {content[:16]!r}); not writing hdri.hdr",
-          file=sys.stderr)
-    sys.exit(2)
+    if not content.startswith((b"#?RADIANCE", b"#?RGBE")):
+        print(f"ERROR: downloaded file is not a Radiance .hdr (starts {content[:16]!r}); not writing hdri.hdr",
+              file=sys.stderr)
+        sys.exit(2)
 
-with open("hdri.hdr", "wb") as f:
-    f.write(content)
-b64 = base64.b64encode(content).decode()
-with open("hdri_b64.txt", "w") as f:
-    f.write(b64)
+    with open("hdri.hdr", "wb") as f:
+        f.write(content)
+    b64 = base64.b64encode(content).decode()
+    with open("hdri_b64.txt", "w") as f:
+        f.write(b64)
 
-print(f"Done: hdri.hdr ({len(content)} bytes), hdri_b64.txt ({len(b64)} chars)")
-print(f"HDRI ID: {hdri_id} (source: {source})")
+    print(f"Done: hdri.hdr ({len(content)} bytes), hdri_b64.txt ({len(b64)} chars: the WebGPU edition's assets "
+          "injection; Blender reads hdri.hdr)")
+    print(f"HDRI ID: {hdri_id} (source: {source})")
+    for line in usage_lines(os.path.abspath("hdri.hdr")):
+        print(line)
+
+
+if __name__ == "__main__":
+    main()

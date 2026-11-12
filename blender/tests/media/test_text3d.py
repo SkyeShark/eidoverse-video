@@ -5,6 +5,9 @@
 
 - the size conversion: an 'H' at three's size 1 must stand the font's cap height (OS/2) tall, for three fonts;
 - centring: the ink box symmetric about the origin;
+- bevel_offset (three's bevelOffset): -bevel_size puts the sides on the font's outline, +0.01 grows the outline 0.01 a
+  side before the bevel, the depth and the centring hold (PASS/FAIL lines; --no-render stops after these measures);
+  'Aa' with the offset shrunk, at 0 and grown -> text3d_bevel_offset_f040.png
 - hero: EIDO (Audiowide, enamel), VOICE (brushed metal), 1939 (gold), a neon tube word, standing on a plank floor
   with their contact shadows, and a line typing itself on (Geometry Nodes reveal) -> text3d_hero_f040.png
 - a title card in front of the camera, mid fade-in and at full -> text3d_title_f008.png, text3d_title_f030.png
@@ -32,6 +35,56 @@ for fname in ('Audiowide', 'Michroma', 'Anton'):
           f'{"OK" if abs(hh - want) < 0.01 else "MISMATCH"}; depth {d:.4f} (want 0.1); '
           f'centre ({(a.x + b.x) / 2:+.4f}, {(a.y + b.y) / 2:+.4f}, {(a.z + b.z) / 2:+.4f})')
     bpy.data.objects.remove(h)
+
+# ---- bevel_offset (three's bevelOffset): the outline grows or shrinks before the bevel
+FAILS = []
+
+
+def check(ok, what):
+    print(f"{'PASS' if ok else 'FAIL'} {what}", flush=True)
+    if not ok:
+        FAILS.append(what)
+
+
+def front_width(obj):
+    """The x extent of the front cap (the vertices at the largest z): three's front face."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    ev = obj.evaluated_get(dg)
+    me = ev.to_mesh()
+    zmax = max(v.co.z for v in me.vertices)
+    xs = [v.co.x for v in me.vertices if abs(v.co.z - zmax) < 1e-6]
+    ev.to_mesh_clear()
+    return max(xs) - min(xs)
+
+
+BS = 0.02
+hs = {k: text3d.create_text_3d('H', font='Audiowide', size=1.0, depth=0.1, bevel_size=BS, bevel_thickness=BS,
+                                bevel_offset=off, name=f'off_{k}', stand_up=False)
+      for k, off in (('minus', -BS), ('zero', 0.0), ('plus', 0.01))}
+hs['flat'] = text3d.create_text_3d('H', font='Audiowide', size=1.0, depth=0.1, bevel=False, name='off_flat',
+                                   stand_up=False)
+sz = {k: text3d.ink_size(o) for k, o in hs.items()}
+cen = {k: tuple(round(float((a + b) / 2), 5) for a, b in zip(*text3d._ink_box(o))) for k, o in hs.items()}
+fw = {k: front_width(o) for k, o in hs.items()}
+print('[bevel_offset] ink w/h/d', {k: tuple(round(v, 4) for v in s) for k, s in sz.items()}, 'front widths',
+      {k: round(v, 4) for k, v in fw.items()})
+check(abs(sz['minus'][0] - sz['flat'][0]) < 1e-4 and abs(sz['minus'][1] - sz['flat'][1]) < 1e-4
+      and abs(fw['minus'] - (sz['flat'][0] - 2 * BS)) < 1e-4,
+      f'bevel_offset = -bevel_size: the sides on the font outline (width {sz["minus"][0]:.4f} vs '
+      f'{sz["flat"][0]:.4f} unbevelled), the front face inset by bevel_size ({fw["minus"]:.4f})')
+check(abs(sz['plus'][0] - sz['zero'][0] - 0.02) < 1e-4 and abs(sz['plus'][1] - sz['zero'][1] - 0.02) < 1e-4
+      and abs(fw['plus'] - fw['zero'] - 0.02) < 1e-4,
+      f'bevel_offset +0.01 grows the outline 0.01 a side before the bevel: width +{sz["plus"][0] - sz["zero"][0]:.4f}, '
+      f'height +{sz["plus"][1] - sz["zero"][1]:.4f}, front face +{fw["plus"] - fw["zero"]:.4f}')
+check(all(abs(sz[k][2] - sz['zero'][2]) < 1e-5 for k in ('minus', 'plus')) and abs(sz['zero'][2] - (0.1 + 2 * BS)) < 1e-4,
+      f'depth unchanged by the offset ({sz["minus"][2]:.4f}, {sz["zero"][2]:.4f}, {sz["plus"][2]:.4f}; want '
+      f'{0.1 + 2 * BS:.4f})')
+check(all(abs(c[0]) < 1e-4 and abs(c[1]) < 1e-4 for c in cen.values()), f'centring holds with the offset: {cen}')
+for o in hs.values():
+    bpy.data.objects.remove(o)
+if '--no-render' in sys.argv:                          # the measures only (no GPU slot needed)
+    print(f'[test_text3d] checks only: {"ALL OK" if not FAILS else f"{len(FAILS)} FAILED"}', flush=True)
+    raise SystemExit(0)
 
 # ---- the set: a plank floor, a dark backdrop
 S.box(sc, 'floor', (6, 6, 0.04), (0, 1.5, -0.02), S.pbr_material('planks', S.cached('textures', 'Planks039_2k'), 0.6))
@@ -86,4 +139,14 @@ for f in (4, 8, 30):
     vals = np.sort(reg.ravel())
     tops[f] = float(vals[-300:].mean())
     print(f'[title] frame {f}: keyed fade {fc.evaluate(f):.3f}, brightest-300 mean in the title band {tops[f]:.1f}')
-print('[text3d] done')
+
+# ---- bevel_offset seen: the same chunky bevel shrunk onto the outline, as is, and grown (left to right)
+for o in (eido, voice, year, neon, typed, title):
+    o.hide_render = True
+for x, off in ((-0.62, -0.012), (0.0, 0.0), (0.62, 0.008)):
+    w = text3d.create_text_3d('Aa', font='Audiowide', size=0.3, depth=0.04, bevel_size=0.012, bevel_thickness=0.012,
+                              bevel_segments=4, bevel_offset=off, material=text3d.material('enamel', color='#b6d8d5'),
+                              name=f'bevel_offset_{off:+.3f}')
+    stand(w, x, 0.3)
+S.render_still(sc, 40, OUT / 'text3d_bevel_offset_f040.png')
+print('[text3d] done' + (f' ({len(FAILS)} FAILED)' if FAILS else ''))

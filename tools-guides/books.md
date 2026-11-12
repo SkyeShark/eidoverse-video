@@ -77,7 +77,10 @@ block at the gutter, 155 mm from the fore-edge.
   the closed book, composed into the arc-length wrap by the rig's own
   composer (`composeWrapTexture`), so the art lands where the strip's
   coordinate puts it; `color` is the plain cloth on the rims and turn-ins.
-  Or `{'wrap': <a full arc-length wrap>, 'color': …}`.
+  Or `{'wrap': <a full arc-length wrap>, 'color': …}`. `trim` (optional) is
+  the rims' and turn-ins' own cloth, an image or a hex; without it they are
+  flat `color`, as in `book.js` (a composed wrap has no plain region to
+  sample).
 - `lining` (the endpaper) and `edges` (the cut edges): an image or a hex.
 - `spreads`: two-page images in reading order, left page | right page, top up
   (resized to the first one's size). A window leaf's recto shows the right
@@ -87,10 +90,59 @@ block at the gutter, 155 mm from the fore-edge.
   page.
 
 Materials are Blender's own: bookcloth with sheen and a fine weave bump, the
-plain trim, the lining, the edges, the kraft inlay and the cotton mull (both
+trim, the lining, the edges, the kraft inlay and the cotton mull (both
 textures drawn by the rig itself and exported), and paper with translucency
 (a thin slab), so the underside of a lifting leaf is lit, which the engine
 faked with an emissive glow.
+
+## Open it on a cradle, shape the case
+
+```python
+plan = book.schedule((1, 48), open=1.0, turns=[(14, 30)])
+b = book.make_book('work/<id>/book', plan, size=(0.15, 0.222, 0.026), angle=110, page_angle=179,
+                   board_th=0.0035, lip=0.0062, round=0.0031,
+                   cover={'front': ..., 'back': ..., 'spine': ..., 'color': '#1e4d2b',
+                          'trim': 'work/<id>/trim_cloth.jpg'},
+                   spreads=spreads, lining='eidoverse/assets/book_template/lining.png')
+```
+
+`angle` and `page_angle` are `makeBookFromSpec`'s options, on every path
+(spec, PDF, GLB, raw rig):
+- `angle` is the case's sweep at `open` 1: 180 lies flat, 110 holds the book
+  in a cradle. The rig then lets the front board fall a little further, by its
+  prop (`asin(groove height / hinge radius)`, the drop that lands a flat-open
+  cover's edge on the desk). The prop depends on the case and on how far into
+  the book it is open, not on the angle: 6.45° for this 26 mm book open near
+  its front, so `angle=110` opens it to 116.45°. Ask for the sweep you want
+  minus the prop.
+- `page_angle` is where a turned leaf lies, measured against a flat-open
+  cover: the leaf sits `page_angle − 180` degrees off the cover, wherever the
+  cover is. 179 (the default) lays it on the cover; 150 stands it 30° off.
+
+The case's shape is `makeBookFromSpec`'s input; leave a keyword out for its
+default:
+- `board_th`: board and cloth, 2.5 mm.
+- `lip`: how far the spine cloth runs flat past the board, max(3 mm, 0.21 ×
+  thickness).
+- `round`: how far the spine bulges past the lip, max(1.5 mm, 0.09 ×
+  thickness).
+- `u_joint`: the wrap's u at the back joint, solved so texels run even along
+  the cross-section.
+
+Measured (`blender/tests/media/test_book_lectern.py`, frame 40, in the
+plane across the spine):
+- Three books from the template, a leaf turned and landed: flat (defaults),
+  lectern (110, 179, a 3.5 mm board, a fabric trim image) and standing (110,
+  150, a `#c9a227` trim).
+- The flat book's boards sweep 186.45° and the standing one's 116.45°: the
+  same case, exactly the 70° asked. The lectern's thicker case props 6.11°.
+- The landed leaf lies 1.20° off the cover at 179 and 30.20° at 150 (the fan
+  adds 0.2° to the top leaf).
+- The back board measures 2.50 mm from cloth to lining at the default and
+  3.50 mm at `board_th=0.0035`.
+- `out/book_lectern_f010/022/040.png` show the lectern book on a wooden
+  cradle fitted to its boards: open on the title page, a leaf mid-turn, the
+  leaf landed on the left cover.
 
 ## Read a PDF
 
@@ -148,7 +200,8 @@ b.root.location = (0.0, 0.0, desk_top)
   Its source pieces (boards, spine, block, pages) stay hidden as `b.source`,
   for measuring and seating, as the engine kept them.
 - **The options** are the engine's: `pages` (26), `open_at` (1), `angle` (the
-  case's sweep, 180), `page_angle` (where a turned leaf lies, 179),
+  case's sweep, 180) and `page_angle` (where a turned leaf lies, 179), as
+  under [Open it on a cradle](#open-it-on-a-cradle-shape-the-case), and
   `page_glow` (0.55: the engine's emissive glow becomes translucency, 0.4 ×
   page_glow).
 - **The schedule** works as for any book. `side` picks which cover the open
@@ -190,8 +243,9 @@ Measured (`blender/tests/media2/test_book_glb.py`):
 
 `rig=` hands `book_core.js` a `makeBookRig` spec as it is, with no
 `makeBookFromSpec` arithmetic and no GLB: the case's own numbers, the leaf
-count and the options. The janus measure written out by hand, as a plain
-blue book:
+count and the options (an `angle` or `pageAngle` it leaves out comes from
+`make_book`'s `angle` / `page_angle`). The janus measure written out by hand,
+as a plain blue book:
 
 ```python
 RIG = {'boardLen': 0.1504, 'jointX': 0.0727, 'foreX': 0.0777, 'halfH': 0.11095, 'halfT': 0.01322,

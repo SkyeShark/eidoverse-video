@@ -460,6 +460,9 @@ def build(run: Run):
         scene = bpy.context.scene
         scene.name = os.path.splitext(os.path.basename(cfg['_scene_json']))[0]
         notes = settings.apply_preset(scene, cfg)
+        # the post chain's records of earlier frames (look.post.history: after_image, the era looks' persistence,
+        # aeropittura) beside the build, not in this Blender's session folder, which is gone when it exits
+        scene['eido_history_dir'] = os.path.splitext(cfg['_output'])[0] + '_post_history'
     assets = _resolve_assets(run)
     ctx = Ctx(scene, cfg, assets, run.led, run.mode)
     ns = {'__name__': 'eido_scene', '__file__': cfg['_script'], 'WIDTH': cfg['width'], 'HEIGHT': cfg['height'],
@@ -984,18 +987,40 @@ def render(run: Run, scene):
         fps = float(cfg['fps'])
         frames = sorted({min(fe, max(fs, common.frame_at(t, fps, fs))) for t in job['at']})
         pre = int(round(float(job.get('preroll') or 0) * fps))
+        # effects that read earlier frames back (look.post.history): each still renders the frames its records come
+        # from first, in order, from its shot's start or as far back as the effect reads, as the film renders them
+        hist = output.post_histories(scene)
+        ran, lead, leads = None, 0, []
         with run.step(f'capture {len(frames)} frame(s)'):
             for f in frames:
-                for g in range(max(fs, f - pre), f):
+                first = output.history_lead_in(scene, f, hist) if hist else f
+                if ran is not None and first <= ran + 1:
+                    first = ran + 1                          # this run already rendered (and recorded) the frames before
+                for g in range(max(fs, f - pre), first):
                     scene.frame_set(g)
+                if first < f:
+                    t0 = time.perf_counter()
+                    n = output.render_lead_in(scene, first, f, hist)
+                    lead += n
+                    leads.append(f'{first}-{f - 1}')
+                    common.log('eido_blender', f'frame {f}: lead-in frames {first}-{f - 1} rendered for the post '
+                               f"chain's records ({', '.join(h['key'] for h in hist)}): {time.perf_counter() - t0:.1f} s")
                 png = cfgmod.capture_png(run.paths['stem'], common.time_at(f, fps, fs))
                 t0 = time.perf_counter()
                 output.render_still(scene, f, png)
+                ran = f
+                output.prune_histories(hist, f)
                 run.outputs.append(png)
                 common.log('eido_blender', f'frame {f} ({common.time_at(f, fps, fs):.2f} s): '
                            f'{time.perf_counter() - t0:.1f} s -> {png}')
+        msg = f'{len(frames)} still(s) at frames {frames}' + (f', {pre}-frame preroll' if pre else '')
+        if hist:
+            kinds = ', '.join(f"{h['key']} ({'its shot from its cut' if h['feedback'] else str(h['depth']) + ' back'})"
+                              for h in hist)
+            msg += (f'; {lead} lead-in frame(s) rendered first, in order ({", ".join(leads) or "none needed"}), so the '
+                    f"post chain's records of earlier frames hold what the film gives each still: {kinds}")
         led.record(check='render.capture', outcome='PASS', cls='INFO',
-                   message=f'{len(frames)} still(s) at frames {frames}' + (f', {pre}-frame preroll' if pre else ''))
+                   metrics={'stills': len(frames), 'lead_in_frames': lead}, message=msg)
         return
     if mode == 'bench':
         n = max(1, int(job.get('frames') or 3))

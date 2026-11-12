@@ -9,6 +9,7 @@
     ... --slots heavy.sh              # the GPU slots it may use, in order (default heavy.sh, heavy2.sh, heavy3.sh)
     ... --out <folder>                # logs and summary.json elsewhere (default out/integration/tests/)
     ... --rejudge                     # the last run's logs read again (no test runs): summary.json rewritten
+    ... --rerun test_mesh,test_karst  # these tests again, the last run's other results carried into summary.json
 
 The runner is blender/tests/run_all.py's (the same logs, PASS / FAIL / SKIP rules, --resume and --failed), given
 the terrain family's manifest below, which run_all.py itself leaves out. The kinds:
@@ -147,6 +148,20 @@ def main():
     R.judge = judge
     if '--rejudge' in argv:
         return rejudge(R.OUT)
+    rerun = _take(argv, '--rerun', '')
+    if rerun:                                  # these tests again, the rest of the last run carried over
+        path = os.path.join(R.OUT, 'summary.json')
+        d = json.load(open(path, encoding='utf-8'))
+        texts = [s for s in rerun.split(',') if s]
+        for r in d['results']:
+            if any(s in r['test'] for s in texts):
+                r['status'], r['detail'] = 'NOT RUN', 'to be run again (--rerun)'
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(d, f, indent=1)
+        partial = os.path.join(R.OUT, 'summary.partial.json')
+        if os.path.exists(partial):
+            os.remove(partial)
+        argv.append('--resume')
     # the GPU slots to use, in order (default all three; --slots heavy.sh keeps to one when the shared ledger in
     # work/.gpu_jobs/ reserves one slot for this work)
     slots = [s for s in _take(argv, '--slots', 'heavy.sh,heavy2.sh,heavy3.sh').split(',') if s]
