@@ -530,7 +530,7 @@ class WaterSim:
         a.string = os.path.join(self.cache_dir, self.name + '_')
         bnode = N.new('FunctionNodeInputString')
         bnode.string = '.ply'
-        # Join Strings concatenates its multi-input links in reverse creation order (round one, checked)
+        # Join Strings concatenates its multi-input links in reverse creation order
         L.new(bnode.outputs[0], join.inputs['Strings'])
         L.new(vts.outputs[0], join.inputs['Strings'])
         L.new(a.outputs[0], join.inputs['Strings'])

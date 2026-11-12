@@ -1,6 +1,6 @@
 """Frames and film seconds, and the timing files the media tools read. No bpy needed.
 
-The film convention (the lead's Blender films): frame 1 is 0 s. A scene may move that with a custom property
+The film convention (the toolkit's Blender films): frame 1 is 0 s. A scene may move that with a custom property
 ``scene['eido_frame0']``; chunked renders change ``scene.frame_start``, so time is never measured from it.
 
     tb = Timebase.of(bpy.context.scene)      # or Timebase(fps=24)

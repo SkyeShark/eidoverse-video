@@ -391,6 +391,9 @@ its own options, so their settings carry over as written:
 - `probe_refraction_thickness.py` reopens a baked probe `.blend` and renders
   the same frames with EEVEE's own thickness, with the baked path as a slab
   or sphere, and with shares of it over a bed.
+- `probe_partial_transmission.py` renders four pools at 16, 64 and 256
+  samples (a fractional Transmission Weight, a Mix Shader, the per-sample
+  pick, clear water): why the water materials pick per sample.
 - `probe_foam_pick.py` renders the pour's stream and splash with the
   per-sample pick, the lace pick and no churn foam, with ray tracing at
   half and at full resolution.

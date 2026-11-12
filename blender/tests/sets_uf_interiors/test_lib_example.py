@@ -1,8 +1,8 @@
 """test_lib_example.py: interiors_lib as a library, outside the two sets: the guide's own example (a SetBuilder, the
 material kit, a TSL-style recipe on a uniform, a mesh and a spot in three's axes, emit) run as written and checked,
 plus the small helpers, a pbr set with a metalness map, the showroom's parts['turntable']['setSpin'] keyed alone, the
-env light per material (env_light='material') or as the World, and two sets sharing one scene (env_switch, the
-keyed cut, a bake's isolation, dispose). No render (no GPU slot):
+env as the World (no material carries an environment; the lookup turns with the set), and two sets sharing one scene
+(env_switch, the keyed cut, a bake's isolation, dispose). No render (no GPU slot):
 
     bash run_blender.sh <worktree>/blender/tests/sets_uf_interiors/test_lib_example.py
 """
@@ -25,7 +25,7 @@ def main():
 
     # ---------------------------------------------------------------- the guide's example, as written there
     sb = L.SetBuilder('my_set', scene)                   # collection + root Empty + scene graph
-    K = L.material_kit(sb, env=None, prefix='mine')
+    K = L.material_kit(sb, prefix='mine')
     steel = K.pbr('steel', L.acg('Metal027'), tint=(0.55, 0.56, 0.6), tile=1 / 0.8, rough=0.9, metal=1)
     m, g = K.new('glow')                                 # a custom recipe, TSL style
     sb.uniform('uT', 0.0)
@@ -121,38 +121,31 @@ def main():
             abs(a - 1.4) < 1e-5, f'{a:.5f} rad at frame 15 (want 1.4)')
 
     # ---------------------------------------------------------------- a piece's own prop lit by the set's env (the guide)
-    K2 = show.kit                                  # the set's material kit (its env levels, its noise)
+    K2 = show.kit                                  # the set's material kit (its noise, its naming)
     mc, gc = K2.new('my-chrome')                   # disposed with the set
     gc.standard(color=(0.95, 0.95, 0.96), roughness=0.05, metalness=1.0)
-    K2.envd(mc, 2.2)                               # three's envMap at envMapIntensity 2.2
-    envs = [nd for nd in mc.node_tree.nodes if nd.bl_idname == 'ShaderNodeTexEnvironment']
-    T.check("a piece's own material takes the set's env light through show.kit (K.envd after standard())",
-            len(envs) == 2 and mc in show.sb.made['materials'] and mc['uf_env_intensity'] == 2.2,
-            f'{len(envs)} env lookups (roughness 0.05: the sharp map and r 0.25)')
+    T.check("a piece's own material made through show.kit is the set's (disposed with it) and lit by its World",
+            mc in show.sb.made['materials'] and mc.name == 'ufsr-my-chrome'
+            and not any(nd.bl_idname == 'ShaderNodeTexEnvironment' for nd in mc.node_tree.nodes))
 
-    # ---------------------------------------------------------------- the env light, per material or as the World
-    lit = SR.build(scene, art_cache=T.ART, probe=False, name='set:showroom_lit', env_light='material')
-    world_mode = SR.build(scene, art_cache=T.ART, probe=False, name='set:showroom_world', env_light='world')
-    lit_mats = [mt for mt in lit.sb.made['materials'] if mt.get('uf_env_intensity') is not None]
-    carry = [mt for mt in lit_mats if any(nd.bl_idname == 'ShaderNodeTexEnvironment' for nd in mt.node_tree.nodes)
-             and next(nd for nd in mt.node_tree.nodes if nd.bl_idname == 'ShaderNodeBsdfPrincipled')
-             .inputs['Emission Color'].is_linked]
-    plain = [mt for mt in world_mode.sb.made['materials'] if any(nd.bl_idname == 'ShaderNodeTexEnvironment'
-                                                                 for nd in mt.node_tree.nodes)]
-    wn = {nd.bl_idname for nd in lit.env.node_tree.nodes}
-    T.check("env_light='material': every material the engine gave the env carries its own env light (its emission), "
-            "the World is seen by the camera only; 'world' leaves the materials alone and its World lights",
-            len(carry) == len(lit_mats) >= 20 and not plain and 'ShaderNodeLightPath' in wn
-            and not lit.env.get('uf_env_lights') and world_mode.env.get('uf_env_lights'),
-            f'{len(carry)} of {len(lit_mats)} materials; World nodes {sorted(wn)}')
-    world_mode.dispose()
-    try:
-        SR.build(scene, probe=False, env_light='both')
-        bad_mode = False
-    except ValueError:
-        bad_mode = True
-    T.check("build(env_light=) refuses a mode it does not have (before it makes anything)",
-            bad_mode and len(L._live_sets(scene)) == 2)
+    # ---------------------------------------------------------------- the env is the World, turning with the set
+    lit = SR.build(scene, art_cache=T.ART, probe=False, name='set:showroom_b')
+    carry = [mt for mt in lit.sb.made['materials'] if any(nd.bl_idname == 'ShaderNodeTexEnvironment'
+                                                          for nd in mt.node_tree.nodes)]
+    env_tx = [nd for nd in lit.env.node_tree.nodes if nd.bl_idname == 'ShaderNodeTexEnvironment']
+    turn = [nd for nd in lit.env.node_tree.nodes if nd.bl_idname == 'ShaderNodeVectorRotate']
+    scene.world = lit.env                          # (a World the scene uses: the depsgraph evaluates its drivers)
+    lit.root.rotation_euler = (0.0, 0.0, math.pi / 2)
+    bpy.context.view_layer.update()
+    we = lit.env.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    rz = [nd.inputs[2].default_value for nd in we.node_tree.nodes if nd.bl_idname == 'ShaderNodeCombineXYZ']
+    lit.root.rotation_euler = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    T.check("the set's env is its World: no material carries an environment of its own, and the World's lookup turns "
+            "with the set's root (its rotation through drivers)",
+            not carry and len(env_tx) == 1 and len(turn) == 1 and turn[0].invert
+            and env_tx[0].inputs['Vector'].is_linked and rz and abs(rz[0] - math.pi / 2) < 1e-5,
+            f'{len(carry)} materials with an environment; turn {rz}')
 
     # ---------------------------------------------------------------- several sets in one scene: env_switch
     lit.root.location = (60.0, 0.0, 0.0)
@@ -174,11 +167,12 @@ def main():
         alone = (show.root.hide_render, lit.root.hide_render, show.root['uf_env_on'], lit.root['uf_env_on'])
     scene.frame_set(15)
     back = (show.root.hide_render, lit.root.hide_render, show.root['uf_env_on'], lit.root['uf_env_on'])
-    T.check("env_switch: one World holds both envs, each switched with its set's keyed cut (the 'material' set's for "
-            "the camera only); a bake sees its set alone and the scene is left as it was",
-            scene.world == w and w5 == [1.0, 0.0] and w15 == [0.0, 1.0] and vis == (True, False)
+    turns = sum(1 for nd in w.node_tree.nodes if nd.bl_idname == 'ShaderNodeVectorRotate')
+    T.check("env_switch: one World holds both envs (each turning with its set), each switched with its set's keyed "
+            "cut; a bake sees its set alone and the scene is left as it was",
+            scene.world == w and w5 == [1.0, 0.0] and w15 == [0.0, 1.0] and vis == (True, False) and turns == 2
             and alone == (False, True, 1.0, 0.0) and back == (True, False, 0.0, 1.0)
-            and {s.sb.name for s in L._live_sets(scene)} == {'set:showroom', 'set:showroom_lit'},
+            and {s.sb.name for s in L._live_sets(scene)} == {'set:showroom', 'set:showroom_b'},
             f'weights f5 {w5}, f15 {w15}; alone {alone}; after {back}')
     n_w = len(bpy.data.worlds)
     lit.dispose()

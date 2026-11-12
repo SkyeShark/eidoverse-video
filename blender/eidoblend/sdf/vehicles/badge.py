@@ -3,7 +3,8 @@
 The engine drew `text` onto a 1024 x 256 canvas from a 5 x 7 pixel font (each '#' a 12 x 12 px square on a 14 px
 grid, a one-cell gap between glyphs, the line centred), wrapped it in a CanvasTexture and sampled its alpha in the
 badge plate's shade branch. Here the same canvas is a numpy array; badge_image() turns it into a packed Blender image
-that the badge material samples per pixel, at any distance, and the reference raymarch binds it as uDecal.
+that the badge material samples per pixel, at any distance, and the SDF program binds as uDecal (the example's
+shade() and surface() read it there).
 
     from eidoblend.sdf.vehicles import build_badge_decal, badge_image, BADGE_GLYPH_ATLAS
     canvas = build_badge_decal('ALETH8APO')     # (256, 1024, 4) float32, row 0 at the TOP (the canvas's rows)

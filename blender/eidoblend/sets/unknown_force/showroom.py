@@ -22,14 +22,17 @@ design). The set is enclosed in its own black void; its lights live in the set's
 Camera far: 60 m is plenty (make_camera uses 100).
 
 How the engine's pieces became Blender data: as quiet_room.py describes (uniforms on the root Empty read through
-drivers, keyed by update(); the env as every material's own light at its own intensity (env_light='material': the
-chrome x 2.2, the seats x 0.25), show.env the World the camera sees; three's light units; static merging; canvases
-drawn by pure Python painters listed in CANVASES and cacheable with draw_canvases). Specific to the showroom:
+drivers, keyed by update(); the env as the World, show.env, lighting the set through its probe and the probes'
+reflections; three's light units; static merging; canvases drawn by pure Python painters listed in CANVASES and
+cacheable with draw_canvases). Specific to the showroom:
   void         the 44 x 22 x 46 m black box is seen by the camera only: it is left out of the probes, so the probe
                bake and the reflections see the set's env (softbox strips, the bounce card, the wall glow, the floor
-               bounce), as every engine material saw its envMap through the void
+               bounce) through the void, as the engine's materials did
   toaster      three-bvh-csg's slots: Blender's exact Boolean (DIFFERENCE), the slot walls in the dark element
-               material; the decals the engine pulled forward with polygonOffset sit 0.6 mm off their surface
+               material; the decals the engine pulled forward with polygonOffset sit 0.6 mm off their surface; a
+               sphere probe of its own (its box influence round the toaster, the toaster's meshes hidden from
+               sphere captures) gives the chrome its surroundings to mirror (the lit plinth top, the stage), where
+               the World alone gives it the env's dark void
   LED wall     the RGB-dot structure fades in where fwidth(px) is small: here the screen-pixel footprint at the
                wall (view distance x the camera's pixel angle / the facing); the pixel angle is the uniform
                uPixelAngle, which update() computes from the shot's camera and keys. screen_media plays a clip
@@ -321,9 +324,10 @@ class Showroom(L.InteriorSet):
 
 def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:showroom', art_cache=None, probe=True,
           probe_spacing=0.5, probe_samples=1024, singerScale=None, art=None, screen_media=None, screen_fit='fit',
-          seq_bar=None, env_light='material'):
+          seq_bar=None):
     """build(THREE, opts) -> the showroom (Showroom: a dict whose keys read as attributes). As quiet_room.build
-    (ctx / scene, singer_scale, art_cache, probe), and a new piece's options:
+    (ctx / scene, singer_scale, art_cache; probe adds the stage's volume probe and the toaster's reflection probe,
+    parts['toasterProbe']), and a new piece's options:
       art           {canvas key: its own art} for any of CANVASES (engine_sheet, warning, platter, dial,
                     rating_plate, toast, exit): a painter fn(ctx, W, H), an image path, a Pillow image or an array,
                     resized to the canvas (canvas_for)
@@ -332,16 +336,11 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
                     on, 1), 'loop' (True), 'offset' (frames skipped, 0), 'aspect' (w / h, when Blender cannot read
                     the size)}. It plays on the scene's frames, under the wall's brightness and LED structure
       screen_fit    'fit' (default: the whole clip, LED black beside it), 'fill' (cropped to cover) or 'stretch'
-      seq_bar       the SEQUENCE COMPLETION bar (uSeq) over the wall: by default only over the set's own sheet
-      env_light     'material' (each material lit by the set's env at its own intensity, as the engine's envMap:
-                    the chrome at x 2.2, the seats at x 0.25; the World lights nothing) or 'world' (the env as the
-                    World, lighting the whole scene at one intensity)"""
+      seq_bar       the SEQUENCE COMPLETION bar (uSeq) over the wall: by default only over the set's own sheet"""
     import bpy
     L.check_art(art, CANVASES, 'showroom.build(art=...)')
     if screen_fit not in SCREEN_FITS:
         raise ValueError(f'showroom.build: screen_fit={screen_fit!r} (want one of {", ".join(SCREEN_FITS)})')
-    if env_light not in L.MaterialKit.ENV_LIGHTS:
-        raise ValueError(f"showroom.build: env_light={env_light!r} (want 'material' or 'world')")
     scene, ctx = L.scene_and_ctx(ctx, scene)
     ss = singer_scale if singer_scale is not None else singerScale
     singer_scale = SUIT_SCALE if ss is None else ss
@@ -352,9 +351,9 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     for u, v in (('uT', 0.0), ('uSeq', 0.997), ('uLights', 1.0), ('uBeams', 1.0), ('uScreen', 0.66),
                  ('uPixelAngle', L.DEFAULT_PIXEL_ANGLE)):
         sb.uniform(u, v)
-    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufsr_env', light=env_light == 'world'))
+    ENV = sb.track(L.equirect_env(512, 256, env_paint, name='ufsr_env', root=sb.root_ob))
     sb.track(bpy.data.images[ENV['uf_env_image']])
-    K = L.material_kit(sb, env=ENV, prefix='ufsr', env_light=env_light)
+    K = L.material_kit(sb, prefix='ufsr')
     out.kit = K                                              # the set's material kit: a piece's own props lit alike
     tri, pbr, solid = K.tri, K.pbr, K.solid
     S = {i: L.acg(i) for i in ('Terrazzo005', 'Terrazzo003', 'Carpet012', 'Fabric031', 'Metal009', 'Metal027')}
@@ -386,7 +385,7 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
         return n_
 
     # ---------------------------------------------------------------------------------------- materials
-    stage_mat = pbr('stage', S['Terrazzo005'], tint=(0.50, 0.52, 0.56), tile=1 / 0.7, rough=0.5, vary=0.10, env_i=0.9)
+    stage_mat = pbr('stage', S['Terrazzo005'], tint=(0.50, 0.52, 0.56), tile=1 / 0.7, rough=0.5, vary=0.10)
     floor_mat, g = K.new('aud-floor')                        # auditorium carpet, darkening with distance from the stage
     tuv = g.uv() * (1 / 0.6)
     pile = g.texture(S['Carpet012']['map'], tuv).rgb
@@ -394,34 +393,29 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     fade = g.exp(g.max(g.position_local().z - 5.0, 0.0) * -0.11)
     g.standard(color=g.vec3(lum) * (0.42, 0.44, 0.50) * (fade * 0.85 + 0.15), roughness=0.95,
                normal=g.normal_map(g.texture(S['Carpet012']['normalMap'], tuv).rgb, 0.8))
-    K.envd(floor_mat, 0.2)
-    black_mat = solid('black', (0.012, 0.012, 0.014), rough=0.8, vary=0.3, scale=1.5, env_i=0.3)
-    brushed = pbr('brushed', S['Metal009'], tint=(0.95, 0.96, 0.98), tile=1 / 0.4, rough=0.55, metal=1, env_i=1.6)
-    truss_mat = pbr('truss', S['Metal009'], tint=(0.80, 0.82, 0.85), tile=1 / 0.25, rough=0.8, metal=1, env_i=1.0)
-    powder = pbr('powder', S['Metal027'], tint=(0.30, 0.31, 0.33), tile=1 / 0.5, rough=1.0, metal=1, env_i=0.8)
+    black_mat = solid('black', (0.012, 0.012, 0.014), rough=0.8, vary=0.3, scale=1.5)
+    brushed = pbr('brushed', S['Metal009'], tint=(0.95, 0.96, 0.98), tile=1 / 0.4, rough=0.55, metal=1)
+    truss_mat = pbr('truss', S['Metal009'], tint=(0.80, 0.82, 0.85), tile=1 / 0.25, rough=0.8, metal=1)
+    powder = pbr('powder', S['Metal027'], tint=(0.30, 0.31, 0.33), tile=1 / 0.5, rough=1.0, metal=1)
     velvet, g = K.new('velvet')
     n = tri(g, 0.8)
     g.standard(color=g.vec3(0.010, 0.010, 0.012) * (n.z * 0.6 + 0.7), roughness=0.95, metalness=0.0, sheen=1.0,
                sheen_tint=(0.10, 0.10, 0.12), sheen_roughness=0.45)
-    K.envd(velvet, 0.3)
     plinth_mat, g = K.new('plinth')                          # white solid surface: soft sheen, faint scuffs low down
     n, n2 = tri(g, 3.0), tri(g, 17.0)
     scuff = g.smoothstep(0.25, 0.0, g.position_local().y + PLINTH['h'] / 2) * n2.x
     g.standard(color=g.vec3(0.86, 0.87, 0.88) * ((n.z - 0.5) * 0.05 + 1) * (1.0 - scuff * 0.25),
                roughness=g.clamp(0.32 + (n.y - 0.5) * 0.12 + (n2.w - 0.5) * 0.08, 0.05, 1.0), metalness=0.0)
-    K.envd(plinth_mat, 1.0)
     chrome, g = K.new('chrome')                              # toaster chrome: mirror with fingerprint and wipe smudges
     n, n2 = tri(g, 14.0), tri(g, 55.0)
     smudge = g.smoothstep(0.55, 0.85, n.x) * 0.6 + g.smoothstep(0.62, 0.9, n2.y) * 0.4
     g.standard(color=g.vec3(0.93, 0.94, 0.96) * (1.0 - smudge * 0.06),
                roughness=g.clamp(0.035 + smudge * 0.16, 0.02, 1.0), metalness=1.0, coat=0.0)
-    K.envd(chrome, 2.2)
-    bakelite = solid('bakelite', (0.012, 0.011, 0.011), rough=0.22, rough_var=0.08, vary=0.25, scale=30, env_i=1.6)
-    rubber = solid('rubber', (0.015, 0.015, 0.016), rough=0.75, rough_var=0.1, vary=0.2, scale=20, env_i=0.5)
+    bakelite = solid('bakelite', (0.012, 0.011, 0.011), rough=0.22, rough_var=0.08, vary=0.25, scale=30)
+    rubber = solid('rubber', (0.015, 0.015, 0.016), rough=0.75, rough_var=0.1, vary=0.2, scale=20)
     slot_mat, g = K.new('toaster-slot')
     wires = g.smoothstep(0.35, 0.5, g.abs(g.fract(g.position_local().y / 0.0065) - 0.5))
     g.standard(color=g.mix((0.012, 0.011, 0.01), (0.18, 0.16, 0.14), wires), roughness=0.6, metalness=0.7)
-    K.envd(slot_mat, 0.8)
 
     # ======================================================================================== VOID, STAGE, AUDITORIUM
     # an enclosing black box (inner faces) so the scene's sky never shows: the launch happens in a void
@@ -557,7 +551,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     g.standard(color=g.texture(ptex, tuv).rgb * ((n.z - 0.5) * 0.04 + 1),
                roughness=g.clamp(g.texture(prough, tuv).r + (n.y - 0.5) * 0.06, 0.04, 1.0), metalness=0.0,
                coat=1.0, coat_roughness=0.05)
-    K.envd(top_m, 1.4)
     add(L.cylinder_geometry(TT['r'], TT['r'], 0.03, 128), top_m, (0, -0.015, 0), parent=platter, keep=True,
         name='tt-top')
     # the platter's polished rim and its running LED dashes (they show the turn)
@@ -583,7 +576,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     n = tri(g, 40.0)
     g.standard(color=g.texture(wt, g.uv()).rgb * (n.x * 0.06 + 0.96),
                roughness=g.clamp(0.42 + (n.y - 0.5) * 0.1, 0.2, 1.0), metalness=0.0)
-    K.envd(wm, 0.6)
     add(box(0.47, 0.632, 0.006), black_mat, (0, PLINTH['h'] * 0.56, PLINTH['w'] / 2 + 0.003), parent=toaster_g)
     add(L.plane_geometry(0.46, 0.62), wm, (0, PLINTH['h'] * 0.56, PLINTH['w'] / 2 + 0.0065), parent=toaster_g,
         keep=True, cast=False, name='warning')
@@ -627,7 +619,6 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     dt, _cv = img('dial')
     dm, g = K.new('dial')
     g.standard(color=g.texture(dt, g.uv()).rgb, roughness=0.4, metalness=0.3)
-    K.envd(dm, 1.0)
     # (the engine drew the dial 0.5 mm inside the end face and won the depth test with polygonOffset; Blender has no
     # depth bias, so the decal sits 0.6 mm outside the surface instead)
     add(L.plane_geometry(0.056, 0.056), dm, (Lx / 2 + 0.0006, 0.06, 0), (0, math.pi / 2, 0), toaster, keep=True,
@@ -635,14 +626,12 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     rt2, _cv = img('rating_plate')                         # the rating plate on the audience side
     rm, g = K.new('ratingplate')
     g.standard(color=g.texture(rt2, g.uv()).rgb, roughness=0.35, metalness=0.6)
-    K.envd(rm, 1.2)
     add(L.plane_geometry(0.06, 0.021), rm, (0.075, 0.045, Dz / 2 + 0.0006), parent=toaster, keep=True, cast=False,
         name='ratingplate')
     # toast: golden slices standing up out of both slots
     bt, _cv = img('toast')
     bm, g = K.new('toast')
     g.standard(color=g.texture(bt, g.uv()).rgb, roughness=0.9, metalness=0.0)
-    K.envd(bm, 0.3)
     sl = L.Shape()
     bw, bh = 0.118, 0.118
     sl.move_to(-bw / 2, 0).line_to(bw / 2, 0).line_to(bw / 2, bh * 0.7)
@@ -688,19 +677,16 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
     g.standard(color=g.texture(S['Fabric031']['map'], tuv).rgb * (0.13, 0.135, 0.16) * ((n.z - 0.5) * 0.3 + 1)
                * (fade * 0.9 + 0.1), roughness=0.95,
                normal=g.normal_map(g.texture(S['Fabric031']['normalMap'], tuv).rgb, 1.2))
-    K.envd(seat_fabric, 0.25)
     seat_shell, g = K.new('seat-shell')
     n = tri(g, 5.0)
     fade = g.exp(g.max(g.position_local().z - 5.0, 0.0) * -0.13)
     g.standard(color=g.vec3(0.03, 0.031, 0.034) * ((n.z - 0.5) * 0.4 + 1) * (fade * 0.9 + 0.1),
                roughness=g.clamp(0.42 + (n.y - 0.5) * 0.2, 0.1, 1.0), metalness=0.0)
-    K.envd(seat_shell, 0.7)
     seat_metal, g = K.new('seat-metal')
     n = tri(g, 6.0)
     fade = g.exp(g.max(g.position_local().z - 5.0, 0.0) * -0.13)
     g.standard(color=g.vec3(0.10, 0.10, 0.11) * ((n.z - 0.5) * 0.4 + 1) * (fade * 0.9 + 0.1),
                roughness=g.clamp(0.55 + (n.y - 0.5) * 0.3, 0.1, 1.0), metalness=1.0)
-    K.envd(seat_metal, 0.8)
     seat_pos, end_pos = [], []
     for k_ in range(ROWS):
         z_, y_ = ROW0 + k_ * ROWP, FLOOR_Y + k_ * RISE
@@ -903,5 +889,34 @@ def build(ctx=None, scene=None, singer_scale=None, collection=None, name='set:sh
         pr.matrix_parent_inverse = Matrix.Identity(4)
         out['probe'] = pr
         out['parts']['probe'] = pr
+        # the toaster's own reflections: a sphere probe whose box influence is fitted round the toaster, a child of
+        # it, so its chrome mirrors what stands round it (the lit plinth top, the stage, the drapes) where the World
+        # alone gives it the env's dark void (EEVEE refreshes a sphere probe itself: no bake). The probe sits inside
+        # the toaster: the toaster's meshes are hidden from sphere captures and the clip start is 2 cm, so the
+        # capture sees the plinth top right under it; its parallax is an ellipsoid reaching 2 m out along its
+        # longest axis (the stage round the plinth), not the tight influence box.
+        from mathutils import Vector
+        bpy.context.view_layer.update()
+        tob, bob = toaster.ob, body_node.ob
+        to_local = tob.matrix_world.inverted() @ bob.matrix_world
+        corners = [to_local @ Vector(c) for c in bob.bound_box]
+        lo_t = Vector([min(c[i] for c in corners) for i in range(3)])
+        hi_t = Vector([max(c[i] for c in corners) for i in range(3)])
+        tp = LL.add_sphere_probe(sb.scene, f'{name}:toaster_probe', (0.0, 0.0, 0.0),
+                                 box=tuple(hi_t[i] - lo_t[i] + 0.12 for i in range(3)), falloff=0.1,
+                                 collection=sb.coll)
+        tp.parent = tob
+        tp.matrix_parent_inverse = Matrix.Identity(4)
+        tp.location = (lo_t + hi_t) * 0.5
+        tp.data.clip_start = 0.02
+        tp.data.use_custom_parallax = True
+        tp.data.parallax_type = 'ELIPSOID'
+        tp.data.parallax_distance = 2.0 / max(tp.scale)        # in the probe's units: its scale is the box's half size
+        for o in tob.children_recursive:
+            if o.type == 'MESH':
+                o.hide_probe_sphere = True
+        sb.made['objects'].append(tp)
+        sb.made['probes'].append(tp.data)
+        out['parts']['toasterProbe'] = tp
     out.update(0.0, {}, key=False)
     return out

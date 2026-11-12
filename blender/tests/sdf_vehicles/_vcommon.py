@@ -155,8 +155,9 @@ def mesh_coverage(obj, cam, w, h):
 
 
 def silhouette_iou(car, cam, w, h):
-    """IoU of the mesh's coverage and the engine's raymarch coverage, at w x h."""
-    ref = car.raymarch_reference(cam, w, h, samples=1)
+    """IoU of the mesh's coverage and the engine's raymarch coverage (engine_march), at w x h."""
+    import engine_march as EM
+    ref = EM.march(car, cam, w, h, samples=1)
     m_ref = ref[::-1, :, 3] > 0.5
     m_mesh = mesh_coverage(car.object, cam, w, h)
     inter = float((m_ref & m_mesh).sum())

@@ -27,7 +27,7 @@ billboard by camera distance, and make_seed_tree.forest_ring(tree) plants the ap
 (the leaf backlight's sun, and the sun the billboards cast-only from) and
 make_seed_tree.light_probe(trees) (EEVEE's occluded sky inside the crowns).
 
-The leaf backlight: make_seed_tree.set_backlight('translucent') (the default, round one's
+The leaf backlight: make_seed_tree.set_backlight('translucent') (the default, a
 Translucent BSDF: every lamp reaches the leaves) or 'glow' (opt-in: the app's own term from
 the bound sun alone, out to the crown's silhouette, with the ambient scatter on sunlit
 leaves; for sunlit shots without other lamps; a heavy shader, so check the first render).

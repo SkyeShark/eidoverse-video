@@ -6,7 +6,7 @@
 Left to right in out/opt_scene.png: a peanut written in PYTHON (SDF_NP map and surface), a GLSL shape on the 'vertex'
 carrier with 'vertex' normals, a two-material SDF whose box takes a Blender material by id (materials={2: mat}), a
 shape textured through a sampler (textures={'uChecker': array}) with a #define, and a live uniform (set_uniform)
-rebuilt bigger. The world is an equirect sky bound by register_sdf_helper, so the reference raymarch's
+rebuilt bigger. The world is an equirect sky bound by register_sdf_helper, so the engine march's (engine_march)
 sampleEnvMap() reads it (out/opt_env_ref.png). PASS lines for each, plus quality presets, bounds_report, a custom
 register_example, help(), and the mesher's own options measured on a box's exact corners (voxel, refine, qef_lambda,
 brick, lipschitz_k, texels). `-- render=0` runs everything but the scene render.
@@ -19,6 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 
 import bpy  # noqa: E402
 
@@ -249,7 +250,7 @@ vec3 shade(vec3 p, vec3 n, float mat) { return sampleEnvMap(sdfReflectWorld(p, n
 two.program.shade = CHROME
 # the five stand from x = -3.2 to 3.4 m: this frame holds +-3.5 m at the line
 cam = C.camera((0.0, -7.4, 1.6), (0.0, 0.0, 0.45), lens=38)
-ref = two.raymarch_reference(cam, 640, 270, samples=1)
+ref = EM.march(two, cam, 640, 270, samples=1)
 hit = ref[..., 3] > 0.5
 C.check('sampleEnvMap reads the sky', hit.any() and float(ref[hit][:, 2].mean()) > 0.05,
         f'mean reflected colour {ref[hit][:, :3].mean(axis=0).round(3).tolist()}')

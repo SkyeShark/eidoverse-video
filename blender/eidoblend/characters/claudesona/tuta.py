@@ -1,4 +1,4 @@
-"""eidoblend.characters.claudesona.tuta: the TuTa (UNKNOWN FORCE, 2026-10) on claude_suit_wardrobe.vrm, ported from
+"""eidoblend.characters.claudesona.tuta: the TuTa (made for UNKNOWN FORCE) on claude_suit_wardrobe.vrm, ported from
 claudesona_wardrobe.js's makeTutaWardrobe (tools-guides/claudesona.md, "The TuTa").
 
     from eidoblend.characters.claudesona import make_wardrobe, FINAL_CHORUS

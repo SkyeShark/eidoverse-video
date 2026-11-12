@@ -1054,6 +1054,7 @@ def _logged(log, t):
 STEP_SPEED = 0.003          # m a frame: a seated foot moving faster than this (a crossfade between two seated poses)...
 STEP_MIN = 0.03             # ...over this far in all is lifted through it (a step), not slid
 SEAT_DOWN = 0.004           # m: a seated sole this near the floor rests on it (held where it rests, as it rests)
+FLAT_REST = 0.6             # a foot rests flat (not on its toes) where its points on the floor span this much of its length
 CARRY = 8                   # frames: a held foot lifting off the floor without a step eases back to the clip's place
 STEP_LIFT = (0.25, 0.06, 0.025)    # the step's lift: this fraction of how far it goes, at most / at least this high
 PUSH_ROUNDS = 4             # rounds of the smoothed move of the boots out of a chair's solids
@@ -1104,11 +1105,15 @@ def _seat_records(loco, recs):
                 close(run)
                 run = [i]
         close(run)
-    # one foot steps at a time: where both feet's steps overlap (a clip shuffling both as it stands), the longer step
-    # is taken and the other foot stays where it rests (held below)
+    # one foot steps at a time where the feet bear the body (sitting down, standing up): where both feet's steps
+    # overlap there (a clip shuffling both as it stands), the longer step is taken and the other foot stays where it
+    # rests (held below). Seated on the pan (HELD_PHASES) the feet carry nothing: both step, each lifted
+    on_pan = {i: _logged(getattr(w[3], 'phase_log', {}), recs[i]['t']) in HELD_PHASES for i, w in chair}
     kept = []
     for go, s, a, b in sorted(steps, reverse=True):
-        if any(s2 != s and a <= b2 + 2 and a2 <= b + 2 for _g, s2, a2, b2 in kept):
+        if any(s2 != s and a <= b2 + 2 and a2 <= b + 2 and
+               not all(on_pan.get(j, False) for j in range(min(max(a, a2), min(b, b2)), max(max(a, a2), min(b, b2)) + 1))
+               for _g, s2, a2, b2 in kept):
             continue
         kept.append((go, s, a, b))
     for go, s, a, b in kept:
@@ -1238,9 +1243,30 @@ def _seat_records(loco, recs):
         if c.body.robot:
             # my robot body: the plant runs its joint clamps on these legs. A clamp moves the foot it turns (the knee
             # held to its hinge swings the shin off the solve's plane), so each foot is reached for again where it was
-            # placed, on the clamped legs, until the clamps leave it there: what the plant keys is what was placed
+            # placed, on the clamped legs, until the clamps leave it there: what the plant keys is what was placed.
+            # The ankle has no twist, so a foot turns with the shin about the leg: one resting flat on the floor takes
+            # that turn about the middle of the sole it rests on, not about its ankle (measured on the first clamp)
+            from ..controller.plant import foot_yaw
             from ..controller.pose import leg_clamps
             placed = {s: (p.world_pos(s + 'Foot').copy(), p.world_quat(s + 'Foot').copy()) for s in ('left', 'right')}
+            flat = {}
+            for s in ('left', 'right'):
+                P = _sole(p, c.body, s)
+                on = P[:, 2] < cmd.root0.z + SEAT_DOWN
+                fw = p.world_quat(s + 'Foot') @ Vector((0.0, -1.0, 0.0))
+                fw = np.array((fw.x, fw.y)) / max(1e-6, math.hypot(fw.x, fw.y))
+                along = P[:, :2] @ fw
+                if int(on.sum()) >= 3 and np.ptp(along[on]) >= FLAT_REST * np.ptp(along):
+                    flat[s] = Vector((float(P[on, 0].mean()), float(P[on, 1].mean()), 0.0))
+            if flat:
+                q0 = Pose(c.body, p.M, leg_clamps(c.body, dict(p.N)), p.off)
+                for s, mid in flat.items():
+                    pos, quat = placed[s]
+                    R = Quaternion((0.0, 0.0, 1.0), _wrap_pi(foot_yaw(q0.world_quat(s + 'Foot')) - foot_yaw(quat)))
+                    off = R @ Vector((pos.x - mid.x, pos.y - mid.y, 0.0))
+                    placed[s] = (Vector((mid.x + off.x, mid.y + off.y, pos.z)), R @ quat)
+                    _leg_reach(p, s, placed[s][0])
+                    p.set_world_quat(s + 'Foot', placed[s][1])
             for _k in range(4):
                 p.N.update(leg_clamps(c.body, dict(p.N)))
                 p.invalidate()

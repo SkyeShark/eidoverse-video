@@ -101,7 +101,9 @@ Speeds: an acceleration from standing (walk 1.8, run 3.5 m/s²) and a
 deceleration that stops on the point (v² = 2ad; walk 2.2, run 4.0), so a
 start reads as one and a stop lands within ~3 cm. A run slowing under the run
 threshold finishes as a walk. A landing (fallLand) stops the body and the
-command walks off again from standing.
+command walks off again from standing. A walk that sets off more than 60°
+off the body's heading turns on the spot first (25° on my robot body: its
+hip turns a planted leg at most ±40° about the leg's axis).
 
 ```python
 rep = walk.bake(f0=1,
@@ -122,7 +124,11 @@ What the film bake decides, frame by frame over the recorded take:
   Idle, the emotes and a seat stand on both feet. Neither foot down is a
   flight only where a gait that has one leads (run, the running stair clips,
   fallIdle); anywhere else the report lists those frames as airborne and
-  checks.feet fails them.
+  checks.feet fails them. A swing of two frames between two stances is a
+  crossfade's noise where the foot lands back where it stood (within 8 cm):
+  the foot stays down. One that carries the foot on (a stair clip coming in
+  with that foot's next stance a step ahead) is a step: it starts earlier,
+  to last 4 frames, while the other foot stands.
 - **Planted feet** do not slip or turn on the ground; a landing slides along
   the foot (at most 12 cm, never onto ground more than a stair's rise below)
   onto the support, and so that no part of the boot is inside a riser (a
@@ -130,7 +136,12 @@ What the film bake decides, frame by frame over the recorded take:
   ground's plane; the toes stay flat through the roll. A planted foot keeps
   the surface it landed on: a tread's level (a heel that creeps over a higher
   edge tucks into it rather than lifting the foot onto it), a ramp's incline,
-  or over a smooth curve (a dome, a boulder) the curve itself. A foot's
+  or over a smooth curve (a dome, a boulder) the curve itself, and never more
+  than 5 cm under the ground it landed on. A stance whose sole reaches into a
+  riser or a dome's side in any of its frames is moved along the travel, as
+  little as clears every frame (at most 6 cm), and kept only where the
+  stance then holds as well as it did. The first stance after a seat starts
+  where the seat left the foot, its place and heading. A foot's
   heading is read from its forward and up vectors together, in the frame of
   the ground it stands on, steady from heel strike to toe-off on a cross
   slope too.
@@ -140,9 +151,11 @@ What the film bake decides, frame by frame over the recorded take:
   foot the body has walked on from, past `TRAIL_NONE` or behind the hip and
   reachable only with the pelvis more than `TRAIL_DIP` (0.25 m) under the
   controller's own height, neither pulls the pelvis down nor caps it, and is
-  let go there (an early toe-off). A stair clip's bent stance knee on a foot
-  the body has already walked away from therefore never drags the hips
-  toward the floor.
+  let go there (an early toe-off). Where the other foot is still in its
+  swing then, that swing is brought forward to land by then: its own motion
+  relative to the body, played faster (a quicker step), so a walk keeps a
+  foot down. A stair clip's bent stance knee on a foot the body has already
+  walked away from therefore never drags the hips toward the floor.
 - **A foot out of reach** at the end of its stance (the trailing foot on a
   stair, the hips already risen) is let go early, but not while the other
   foot is in the air: until the other lands, the pelvis comes down to it.
@@ -213,12 +226,26 @@ on the left strike, so a planted foot moves with the ground at any speed. A
 start from standing begins just before a passing phase; a stop spreads the
 remaining phase over the remaining distance so it lands on one. The stair
 clips lock their phase to the treads (the original's small-stair phase lock,
-here for every shape, both ways), and once a stair clip leads and the walk
-and the run have faded under 10 %, their shared phase follows it, so a
-hand-back from the stairs (the top of a flight, a dome stepped onto)
-re-enters the walk with the same foot down. (Following earlier, mid-
-crossfade, would jump a walk that still carries weight.) `gait_sync='stride'` is the original:
-`timeScale = speed / nativeSpeed` (capped at 1.4).
+here for every shape, both ways). An edge fixes the phase to one tread, half
+the stair cycle, which leaves two halves: which foot takes the next tread.
+The lock takes the half whose phase is nearest the walk's where the stair
+clip takes over the blend (its share past a half), the stair clip going on
+at the tread's pace until then and the walk at the blend's. A new estimate
+of the tread's run on the flight keeps the phase where it is. A stair clip
+that is not playing is held at the shared phase, so it comes in where the
+walk is in its cycle (on rolling ground, where no tread locks it, too). While the stair
+clips carry weight the shared phase goes on at the weight-blended pace of
+every clip playing (a stair cycle is two treads, the walk's stride two to
+three times as long), so the walk's steps quicken as a flight takes over;
+off a flight the stride grows back to the walk's or the run's at
+`STRIDE_GROWTH` (1.5 m of stride per metre walked), so the first step off
+the stairs is as short and quick as theirs and the next is the gait's own.
+Once a stair clip leads and the walk and the run have faded under 10 %,
+their shared phase follows it, so a hand-back from the stairs (the top of a
+flight, a dome stepped onto) re-enters the walk with the same foot down.
+(Following earlier, mid-crossfade, would jump a walk that still carries
+weight.) `gait_sync='stride'` is the original: `timeScale = speed /
+nativeSpeed` (capped at 1.4).
 
 **This edition's additions**, each an option that is off unless asked
 (`Locomotion` turns the first three on), except the maneuvers' last pass,
@@ -466,30 +493,21 @@ Known residuals of the film bake (each found by the tests; the JSON reports
 in `out/` list the frames under `stance_issues`, `swing_issues` and
 `mesh_feet_over_limit`):
 
-- Where a stair flight hands over to the walk (and back), a planted heel or
-  toe tucks into a riser's nose for a frame or two: a planted foot keeps
-  the surface it landed on rather than hopping onto the edge. The plant's
-  rigid sole points read up to 170 mm under the tread above them; the
-  visible boot stays within 10 mm of the surface on the course and the stair
-  presets.
-- A trailing foot let go early costs a short flight: each stair preset has
-  one 3 to 5 frame stretch with no foot down where a long stride steps off a
-  flight, and the course example and the acting test one frame each.
-- The stress course (`obstacle_course_expanded`): the stair clips keep their
-  own clock (0.33 m/s on this body), so at the walk-to-stairs hand-overs
-  their stances outlast the travel. Planted soles tuck 8 to 15 cm under a
-  stair's nose; the dome, the 22° ramp's foot and the 22 cm stairs have 2 to
-  7 frame flights; the pelvis dips up to 25 cm (30 cm for one frame where the
-  leading foot lands at the foot of the 10 cm stairs); the deepest visible
-  foot is 14 mm into a surface.
-- A 45 degree ramp: one stair-clip stance slips 32 mm in a frame (the
-  visible boot 12 mm into the slope at worst).
+- The stress course (`obstacle_course_expanded`, 31 of 32 checks): in the
+  walk after the dome a foot settling flat from its heel strike rolls
+  3.6 mm in one frame (the check's limit is 2.5 mm); the pelvis dips up to
+  27 cm under the controller's height at the dome; the deepest visible foot
+  is 8 mm into a surface. Stepping on and off its flights, and the dome,
+  keep a foot down in every frame.
+- The ramp pyramid (`ramp_pyramid`, 12 of 13 checks): where a stair clip
+  plays on the ramps, one stance slips 7 mm in a frame and its sole reads
+  3 mm into the slope.
 - The course example's first mount: one frame with a toe 13 mm into the
   block's top (the sampled points of the rigid foot miss that edge of the
   visible boot).
-- Aletheia down the course example's small stairs: for a few frames the leg
-  IK misses a planted ankle's target by up to 43 mm (Aporia's run of the
-  same take misses by 2 mm).
+- The course example's low vault: on the first two frames the plant holds
+  the landing foot (where the move hands it over), it rolls 6.5 mm and
+  slips 1.7 mm.
 - The course example's bench: the seated skin rests 1.9 cm into the pan at
   the hold (the settle is measured on the clip's own legs; planting the feet
   then bends them). On a bench 5 cm higher than the clip's seat the acting
@@ -497,9 +515,11 @@ in `out/` list the frames under `stance_issues`, `swing_issues` and
 - My robot body on a 20 degree cross slope: its ankle's roll range is short
   of the slope, and the joint clamp turns a planted foot 1.6 to 3 degrees a
   frame through the heel-off. Aletheia passes the same walk clean.
-- On rolling ground (the terrain test, my robot body), a stance at a rock
-  turns up to 7.7 degrees in a frame and a turn on the slope misses an ankle
-  target by 6 mm.
+- On rolling ground (the terrain test, my robot body: 22 of 27 checks), a
+  stance planted at the foot of a 16 cm rock, before the step onto it, has
+  its toe against the rock's flank (the plant's rigid sole points read up to
+  57 mm under it), a stance where the walk back sets off turns 4.5 degrees
+  in a frame, and the turns on the slope miss an ankle target by up to 6 mm.
 - Stepping onto a boulder over about 20 cm in mid-stride: my robot body's
   swing target outruns its legs for a few frames. The terrain test keeps that
   boulder beside the path.

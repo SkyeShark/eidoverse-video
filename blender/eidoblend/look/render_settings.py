@@ -6,20 +6,20 @@ taa_render_samples jittered samples per frame through a 1.5 px filter are the an
 carries over is the knobs and the lessons; this module sets them.
 
     from eidoblend.look import render_settings as rs
-    rs.apply_auto_enhance(scene, 'film')                       # episode three's measured look (below)
+    rs.apply_auto_enhance(scene, 'film')                       # a finished film's measured look (below)
     rs.apply_auto_enhance(scene, 'probe')                      # the same look, small and quick, for probe stills
     rs.apply_auto_enhance(scene, 'film', exposure=1.0, ao={'distance': 0.4}, ssr={'max_roughness': 0.6})
     rs.apply_auto_enhance(scene, 'film', bloom={'strength': 0.2, 'threshold': 3.0})   # Glare bloom, off by default
 
-'film' is read from episode three's house (work/claude_body/film/home/ep3/set/house_ep3.blend, 11-06): the settings my
-last films rendered with. Exposure is the scene's, not the preset's: it depends on the light (an indoor set took +2 under
-AgX, a physical sky needs far less); measure it with look.exposure.auto_expose.
+'film' is read from a finished interior film's set (its saved .blend): the settings it rendered with. Exposure is the
+scene's, not the preset's: it depends on the light (an indoor set took +2 under AgX, a physical sky needs far less);
+measure it with look.exposure.auto_expose.
 """
 import bpy
 
 FILM = {
     'resolution': (1920, 1080),
-    'samples': 32,                   # the films' renders (render_h264 --samples 32); the house blend keeps 128 for stills
+    'samples': 32,                   # the film's renders at 32; its set's .blend keeps 128 for stills
     'filter_size': 1.5,
     'overscan': 3.0,                 # % of the frame added round the edges: screen-space effects hold at the borders
     'raytracing': {'method': 'SCREEN', 'resolution_scale': '1', 'max_roughness': 0.5, 'quality': 0.5, 'thickness': 0.05,
@@ -29,7 +29,7 @@ FILM = {
                 'quality': 0.25, 'bias': 0.05},
     'clamp_surface_indirect': 10.0,
     'shadows': {'ray_count': 2, 'step_count': 12, 'pool': '1024', 'resolution_scale': 1.0, 'light_threshold': 0.01},
-    # measured 11-06 on the house: volumes at tile 16 x 32 samples look the same as the blend's 4 x 128 (6 px of 2 M
+    # measured on the film's set: volumes at tile 16 x 32 samples look the same as its .blend's 4 x 128 (6 px of 2 M
     # differ) at 2.5 s a frame instead of 4.1
     'volumes': {'tile': '16', 'samples': 32, 'distribution': 0.85, 'shadows': True, 'shadow_samples': 32},
     'motion_blur': {'shutter': 0.5, 'position': 'CENTER', 'steps': 1},

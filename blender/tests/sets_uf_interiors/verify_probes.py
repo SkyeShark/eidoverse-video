@@ -1,17 +1,15 @@
 """verify_probes.py: the independent verifier's probes of the two interiors, the ones the step's own tests do not take.
 
-  ibl       the env light per material (env_light='material', the engine's model: the chrome at x 2.2, the seats at
-            x 0.25) against the env as the World ('world'), both against the engine's look-off probes (region means
-            printed), and the camera-only World checked to light nothing.
+  ibl       the env's light as the World (EEVEE's route: no material samples an environment of its own), the
+            showroom and the quiet room against the engine's look-off probes (region means printed).
   shared    both sets in ONE scene, parked apart, cut from the quiet room to the showroom by keyed show() (the
             engine's way: every set in the conductor's scene, each hidden off screen). env_switch gives each its own
             env while it is shown, and each probe bakes with its set alone; the two shots must render as the same
-            shots in a scene of their own (mean |dRGB| in 8-bit levels). The same room shot under the other set's
-            World renders the same too (its materials carry their own env). Dispose then empties the shared World.
+            shots in a scene of their own (mean |dRGB| in 8-bit levels). Dispose then empties the shared World.
   parked    the quiet room's root moved (and then turned) after the build: the hatch shot through make_camera must
             render as before when moved (cams, lights' targets, the probe and the keyed crate are the set's
             children); turned, it must still read (looked at). The showroom moved and turned a quarter: its toaster
-            shot must render as at home (the materials' env light turns with the set).
+            shot must render as at home (the World's lookup turns with the set, interiors_lib.env_turn).
   scale     singer_scale=1: the face-height cam follows (no render).
   showroom  the toaster shot, and the empty seats under the blackout (lights 0): what stays lit is the env, the LED
             wall, the EXIT signs.
@@ -111,9 +109,6 @@ def shared():
     a_room = shot(sc, cam_r, 5, 'shared_quiet_room_altar_f005')
     a_show = shot(sc, cam_s, 15, 'shared_showroom_toaster_f015')
     sw_world = sc.world
-    sc.world = show.env                                         # one scene.world: the last set's env lights both
-    wrong = shot(sc, cam_r, 5, 'shared_quiet_room_altar_f005_under_showroom_world')
-    sc.world = sw_world
     # dispose: the shared World lets go of each set's env, and goes with the last set
     n_w = len(bpy.data.worlds)
     show.dispose()
@@ -139,13 +134,9 @@ def shared():
     sc.frame_set(1)
     show.bake_probes(sc)
     b_show = shot(sc, cam, 1, 'alone_showroom_toaster')
-    d_room, d_show, d_wrong = mad(a_room, b_room), mad(a_show, b_show), mad(wrong, b_room)
+    d_room, d_show = mad(a_room, b_room), mad(a_show, b_show)
     T.check('two sets in one scene render as each alone (env_switch + keyed show)', d_room < 1.5 and d_show < 1.5,
             f'mean |dRGB| room {d_room:.2f}, showroom {d_show:.2f} / 255')
-    # env_light='material' (the default): the materials carry their own set's env, so even the other set's World
-    # leaves the room as it is (the World is seen by the camera only, and the room's sky dome hides it)
-    T.check("under the other set's World the room still renders as alone (its materials carry its own env light)",
-            d_wrong < 1.5, f'mean |dRGB| {d_wrong:.2f} / 255')
     return b_room
 
 
@@ -181,7 +172,8 @@ def parked():
     want = (tgt.matrix_world.translation - k.matrix_world.translation).normalized()
     T.check('turned 35 degrees: exposed, the lights still aimed at their targets', 0.02 < mean < 0.75 and
             aim.dot(want) > 0.9999, f'mean {mean:.3f}, aim dot {aim.dot(want):.6f}')
-    # the showroom turned a quarter about Z: its env turns with it (the chrome, the plinth, the stage keep their light)
+    # the showroom turned a quarter about Z: its World's lookup turns with it (the chrome, the plinth, the stage keep
+    # their light)
     sc = fresh('verify_parked_showroom')
     show = showroom(sc)
     sc.world = show.env
@@ -258,74 +250,46 @@ def regions(path, cam):
     return out
 
 
-def world_light_check():
-    """equirect_env(light=False): the World shows the env to the camera and lights nothing (EEVEE's Is Camera Ray)."""
-    out = {}
-    for light in (True, False):
-        sc = fresh(f'verify_world_{light}')
-        w = L.equirect_env(512, 256, SR.env_paint, name=f'w_{light}', light=light)
-        sc.world = w
-        me = bpy.data.meshes.new('plane')
-        me.from_pydata([(-4, -4, 0), (4, -4, 0), (4, 4, 0), (-4, 4, 0)], [], [(0, 1, 2, 3)])
-        ob = bpy.data.objects.new('plane', me)
-        sc.collection.objects.link(ob)
-        m = bpy.data.materials.new('white')
-        m.use_nodes = True
-        m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (0.9, 0.9, 0.9, 1)
-        me.materials.append(m)
-        cd = bpy.data.cameras.new('cam')
-        cam = bpy.data.objects.new('cam', cd)
-        sc.collection.objects.link(cam)
-        cam.location = (0, 0, 3)
-        p = os.path.join(OUT, f'world_light_{"on" if light else "camera_only"}.png')
-        T.render_still(sc, cam, 1, p)
-        out[light] = T.stats(p)[0]
-    T.check("equirect_env(light=False): the World lights nothing (a white plane under it renders black)",
-            out[False] < 0.01 < out[True] * 0.5, f'plane mean {out[True]:.3f} lit -> {out[False]:.4f} camera-only')
-
-
 def ibl():
-    """the showroom and the quiet room with each material lit by its own env (env_light='material', the engine's
-    model) against the env as the World ('world'), and against the engine's look-off probes."""
-    world_light_check()
+    """the showroom and the quiet room lit by their env as the World (no material samples an environment of its own),
+    against the engine's look-off probes (region means printed)."""
     rows = {}
-    for mode in ('world', 'material'):
-        sc = fresh(f'verify_ibl_sr_{mode}')
-        tb = time.perf_counter()
-        show = showroom(sc, env_light=mode)
-        dt = time.perf_counter() - tb
-        sc.world = show.env
-        show.eevee_settings(sc)
-        cams = {nm: show.make_camera(nm) for nm in ('toaster', 'emptySeats', 'reveal')}
-        sc.frame_set(1)
-        show.bake_probes(sc)
-        for nm, cam in cams.items():
-            rows[(mode, nm)] = shot(sc, cam, 1, f'ibl_{mode}_showroom_{nm}')
-        print(f'[verify] showroom {mode}: built in {dt:.1f} s', flush=True)
-        sc = fresh(f'verify_ibl_qr_{mode}')
-        room = quiet_room(sc, env_light=mode)
-        sc.world = room.env
-        room.eevee_settings(sc)
-        cams = {nm: room.make_camera(nm) for nm in ('altar', 'pews')}
-        sc.frame_set(1)
-        room.bake_probes(sc)
-        for nm, cam in cams.items():
-            rows[(mode, nm)] = shot(sc, cam, 1, f'ibl_{mode}_quiet_room_{nm}')
-    if mode == 'material':
-        n_ibl = sum(1 for m in bpy.data.materials if m.get('uf_env_intensity') is not None and m.node_tree and any(
-            n.bl_idname == 'ShaderNodeTexEnvironment' for n in m.node_tree.nodes))
-        n_env = sum(1 for m in bpy.data.materials if m.get('uf_env_intensity') is not None)
-        T.check("env_light='material': every material the engine gave the env carries its own env light",
-                n_ibl == n_env and n_env > 20, f'{n_ibl} of {n_env}')
+    sc = fresh('verify_ibl_sr')
+    tb = time.perf_counter()
+    show = showroom(sc)
+    dt = time.perf_counter() - tb
+    sc.world = show.env
+    show.eevee_settings(sc)
+    cams = {nm: show.make_camera(nm) for nm in ('toaster', 'emptySeats', 'reveal')}
+    sc.frame_set(1)
+    show.bake_probes(sc)
+    for nm, cam in cams.items():
+        rows[nm] = shot(sc, cam, 1, f'ibl_showroom_{nm}')
+    print(f'[verify] showroom: built in {dt:.1f} s', flush=True)
+    n_sr = sum(1 for m in show.sb.made['materials'] if m.node_tree and any(
+        n.bl_idname == 'ShaderNodeTexEnvironment' for n in m.node_tree.nodes))
+    sc = fresh('verify_ibl_qr')
+    room = quiet_room(sc)
+    sc.world = room.env
+    room.eevee_settings(sc)
+    cams = {nm: room.make_camera(nm) for nm in ('altar', 'pews')}
+    sc.frame_set(1)
+    room.bake_probes(sc)
+    for nm, cam in cams.items():
+        rows[nm] = shot(sc, cam, 1, f'ibl_quiet_room_{nm}')
+    n_qr = sum(1 for m in room.sb.made['materials'] if m.node_tree and any(
+        n.bl_idname == 'ShaderNodeTexEnvironment' for n in m.node_tree.nodes))
+    T.check('the env lights both sets through the World: no material samples an environment of its own',
+            n_sr == 0 and n_qr == 0, f'showroom {n_sr}, quiet room {n_qr} materials with an environment')
     for cam in ('toaster', 'emptySeats', 'altar'):
         eng = os.path.join(ENGINE, REGIONS[cam]['engine'])
         if not os.path.isfile(eng):
             continue
         e = regions(eng, cam)
-        w_, m_ = regions(rows[('world', cam)], cam), regions(rows[('material', cam)], cam)
+        w_ = regions(rows[cam], cam)
         for k in e:
-            print(f'[verify] {cam:10s} {k:14s} engine {np.round(e[k]).astype(int)}  world {np.round(w_[k]).astype(int)}'
-                  f'  material {np.round(m_[k]).astype(int)}', flush=True)
+            print(f'[verify] {cam:10s} {k:14s} engine {np.round(e[k]).astype(int)}  eevee {np.round(w_[k]).astype(int)}',
+                  flush=True)
     return rows
 
 

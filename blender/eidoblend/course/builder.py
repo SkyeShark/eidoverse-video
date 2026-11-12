@@ -224,7 +224,7 @@ class Course:
         return best if best.shape else float(best)
 
     def ground(self):
-        """a characters.Ground over the course's surface (round one's walk_path takes it)"""
+        """a characters.Ground over the course's surface (characters.locomotion.walk_path takes it)"""
         from ..characters.ground import Ground
         return Ground(fn=lambda xs, ys: self.height_at(xs, ys))
 

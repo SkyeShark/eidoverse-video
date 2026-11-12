@@ -10,10 +10,10 @@ on screen as authored. Here the renderer's tone map is the scene's view transfor
 ev is the scene's exposure, carried as a group input that a driver keeps equal to scene.view_settings.exposure
 (Convert To Display's own exposure is read-only, stack-notes.md). The nodes copy the scene's view transform, look
 and display when built; sync(scene) copies them again (the era and aeropittura passes call it when applied, and
-FX.update() does). A view set later would land paper and ink through the wrong curve (measured 11-08: the poster's
-bare newsprint 16 levels off after the look went from AgX Base Contrast to Punchy, 0.08 once synced), so
+FX.update() does). A view set later would land paper and ink through the wrong curve (measured: the poster's bare
+newsprint 16 levels off after the look goes from AgX Base Contrast to Punchy, 0.08 once synced), so
 keep_synced() (turned on by those passes) syncs each scene before every render and save in this session, and
-stale(scene) lists the nodes that differ. Measured 11-07 on the meadow frame: through Convert To Display and its
+stale(scene) lists the nodes that differ. Measured on the meadow frame: through Convert To Display and its
 inverse, the worst pixel came back within 0.016 (linear); the 'AgX Base sRGB' colour-space pair was 3x worse
 (0.053), so the view node pair it is.
 """

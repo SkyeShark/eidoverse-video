@@ -21,6 +21,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 
 import bpy  # noqa: E402
 
@@ -81,7 +82,7 @@ def mesh_coverage(obj, w, h):
 # silhouettes at half size: the mesh through the object's transform against the engine's march through it
 for o in (hege, shog):
     w2, h2 = W // 2, H // 2
-    ref = o.raymarch_reference(cam, w2, h2, samples=1, t=0.0)
+    ref = EM.march(o, cam, w2, h2, samples=1, t=0.0)
     m_ref = ref[::-1, :, 3] > 0.5
     m_mesh = mesh_coverage(o.object, w2, h2)
     iou = float((m_ref & m_mesh).sum()) / max(1.0, float((m_ref | m_mesh).sum()))

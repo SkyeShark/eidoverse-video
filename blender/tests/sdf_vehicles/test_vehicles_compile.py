@@ -1,5 +1,6 @@
 """The four vehicle EXAMPLES as specs: their GLSL compiles and evaluates in Blender's GPU module (dist, grad, the
-baked surface(), the engine's raymarch with its shade()), the bounds contract holds (the shape stays inside its
+baked surface(), the engine's raymarch with its shade() from tests/sdf/engine_march.py), the bounds contract holds
+(the shape stays inside its
 bounds, and bounds.min.y is its lowest point), the material ids on the surface are the ones the part tables map,
 create_sdf_object(EXAMPLES[...]) builds (the engine's createSdfObject(EXAMPLES.x) path) and help() lists them.
 No render.
@@ -16,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _vcommon as V  # noqa: E402
+import engine_march as EM  # noqa: E402  (tests/sdf, on sys.path through _vcommon)
 
 from eidoblend import sdf  # noqa: E402
 from eidoblend.sdf.gpu_eval import SdfProgram  # noqa: E402
@@ -52,11 +54,12 @@ for name, kind in KIND_OF.items():
     V.check(f'{name}: baked surface() kernel', ok, f'{len(near)} points, albedo mean {alb.mean(axis=0).round(3).tolist()}, '
             f'emission max {ch["emission"].max():.2f}')
     # the raymarch kernel (the engine's shade()), a few pixels from the front
-    prog.values.update({'sdfCameraUniform': (2.5, 1.5, 6.0), 'sdfCamFwd': tuple((-np.array([2.5, 1.0, 6.0]) /
-                        np.linalg.norm([2.5, 1.0, 6.0])).tolist()), 'sdfImageSize': (64.0, 36.0),
-                        'sdfClipMin': tuple(float(x) for x in lo), 'sdfClipMax': tuple(float(x) for x in hi),
-                        'uMaxSteps': 192.0, 'uSurfEps': 0.0005, 'uStepScale': 0.75, 'uMaxDist': 150.0})
-    img = prog.eval('raymarch', np.zeros((64 * 36, 3), np.float32), width=64)[0]
+    march = EM.MarchProgram(prog)
+    march.values.update({'sdfCameraUniform': (2.5, 1.5, 6.0), 'sdfCamFwd': tuple((-np.array([2.5, 1.0, 6.0]) /
+                         np.linalg.norm([2.5, 1.0, 6.0])).tolist()), 'sdfImageSize': (64.0, 36.0),
+                         'sdfClipMin': tuple(float(x) for x in lo), 'sdfClipMax': tuple(float(x) for x in hi),
+                         'uMaxSteps': 192.0, 'uSurfEps': 0.0005, 'uStepScale': 0.75, 'uMaxDist': 150.0})
+    img = march.eval('raymarch', np.zeros((64 * 36, 3), np.float32), width=64)[0]
     V.check(f'{name}: raymarch kernel (shade())', np.isfinite(img).all() and img[:, 3].mean() > 0.05,
             f'coverage {img[:, 3].mean() * 100:.1f}%')
     # the bounds contract: the field is positive on the bounds box (nothing crosses it), and there is solid within

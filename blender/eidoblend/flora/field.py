@@ -24,8 +24,8 @@ from .vegetation import plan_flora, instance_matrices, asset_dir
 PROTO_COLLECTION = 'flora_prototypes'
 BLADE_CURL = 1.4         # blade cross-section curl in the shader (tan of the edge normal's bend, ~54 deg), t_sheen.py
 # blade grasses' roughness x this by default (rough=None): the WebGPU edition's 0.6 x the map (~0.65) is ~0.39, glossy
-# for a GGX blade; under a low sun the gust-bent blades of a wide meadow mirrored it in crisp white lines that read as
-# frost (verifier 11-07). x1.6 (~0.62, a grass blade's usual PBR roughness) keeps a soft sheen and leaves the look at
+# for a GGX blade; under a low sun the gust-bent blades of a wide meadow mirror it in crisp white lines that read as
+# frost. x1.6 (~0.62, a grass blade's usual PBR roughness) keeps a soft sheen and leaves the look at
 # the feet as it was (tests/flora/t_sheen.py --frost)
 BLADE_ROUGH = 1.6
 PUSHER_COLLECTION = 'flora_pushers'
@@ -157,7 +157,7 @@ def _scanned_variants(asset, lod=1, which=None):
     from .vegetation import scanned_dir
     path = os.path.join(scanned_dir(), asset, f'{asset}_2k.blend')
     if not os.path.exists(path):
-        raise FileNotFoundError(f'[flora] {path}: fetch it with the lead\'s bmeadow/fetch_ph.py (model {asset} 2k), '
+        raise FileNotFoundError(f'[flora] {path}: fetch it with bmeadow/fetch_ph.py (model {asset} 2k), '
                                 f'or point ${"EIDOBLEND_PH_ASSETS"} at a folder of Poly Haven plant sets')
     with bpy.data.libraries.load(path, link=False) as (src, dst):
         names = list(src.objects)

@@ -23,6 +23,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _vcommon as V  # noqa: E402
+import engine_march as EM  # noqa: E402  (tests/sdf, on sys.path through _vcommon)
 
 import bpy  # noqa: E402
 
@@ -82,7 +83,7 @@ for kind in WANT:
         V.check(f'{kind}: every part has faces', not missing,
                 f'{ {k: v for k, v in fpm.items() if v} }' + (f' missing {missing}' if missing else ''))
     if REF:
-        sdf.register_sdf_helper(sc)                   # binds the HDRI as the reference march's sampleEnvMap
+        sdf.register_sdf_helper(sc)                   # binds the HDRI as the engine march's sampleEnvMap
     for vi, view in enumerate(VIEW_LIST or [VIEWS[kind]]):
         sfx = TAG + ('' if vi == 0 else f'_v{vi}')
         cam = V.three_quarter(car.object, *view, lens=LENS, name=f'cam{vi}')
@@ -92,7 +93,7 @@ for kind in WANT:
         ok = V.render(eevee)
         V.check(f'{kind}{sfx}: EEVEE render', ok, f'{eevee} in {time.perf_counter() - t1:.1f} s')
         if REF:
-            ref = car.raymarch_reference(cam, W, H, samples=4)
+            ref = EM.march(car, cam, W, H, samples=4)
             refp = V.save_linear_png(os.path.join(V.OUT, f'veh_{kind}{sfx}_ref.png'), ref)
             iou, mm, mr = V.silhouette_iou(car, cam, W // 4, H // 4)
             V.check(f'{kind}{sfx}: silhouette matches the engine march', iou > 0.93,

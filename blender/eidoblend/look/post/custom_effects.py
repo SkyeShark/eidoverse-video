@@ -38,7 +38,7 @@ WebGPU option with no Blender counterpart is ignored with a printed warning sayi
 The compositor groups port each WebGPU shader's maths node for node. They work on scene-linear light before AgX, as
 the WebGPU hooks ran on the lit HDR frame before ACES. Every tap is a Map UV sample with the edges clamped (a WebGPU
 texture's ClampToEdge), at UVs from Image Coordinates (Normalized = (pixel + 0.5) / size, so one pixel is
-Normalized / (Pixel + 0.5), measured 11-07). Translate is not used for taps: it moves the image's domain, and a channel
+Normalized / (Pixel + 0.5), measured). Translate is not used for taps: it moves the image's domain, and a channel
 combined with it inherits the shifted domain (measured: a bar at the frame edge, the unshifted channels clamped too).
     glitch_bars       horizontal bars scrolling (bar_freq, scroll_speed) down the frame; inside each, red and blue split
                       by a sin-driven shift; opacity
@@ -779,8 +779,8 @@ def _fog_undo(scene):
              "screen space, three's depthAwareBlend with edge_radius / edge_strength, opacity; WebGPU's defaults: "
              "density 0.04, color (0.55, 0.62, 0.72), noise_amount 0.4, noise_scale 6)", undo=_fog_undo)
 def _depth_fog(scene, o):
-    """Real fog as a finite layer (a world volume is infinite: it extinguishes the sun and the sky entirely, measured
-    11-07: a black frame at 0.012 / m). The volume range is set to `far` metres so its froxels cover the fog, not the
+    """Real fog as a finite layer (a world volume is infinite: it extinguishes the sun and the sky entirely, a black
+    frame at 0.012 / m). The volume range is set to `far` metres so its froxels cover the fog, not the
     camera's whole clip range. noise_amount > 0 modulates the density with a noise field of noise_scale cells per
     10 m (WebGPU's 2D noise, here in 3D). mode='screen' is the WebGPU pass itself (screen_effects.depth_fog_screen):
     a stage in the chain, not a volume."""

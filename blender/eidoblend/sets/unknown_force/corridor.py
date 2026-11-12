@@ -121,9 +121,9 @@ class Corridor(CL.SetBase):
 def build(scene=None, opts=None, collection=None, name='set:corridor'):
     """Build the corridor into `scene` (default: the context scene). opts: postText, tally, capFitPos, capFitRot,
     capFitScale (the JS options) and the Blender edition's own: world (True: the set's environment + hemisphere light
-    become scene.world), shadows (True: the set's spot lights cast shadows; its fixtures never shadow their own
-    light), ibl ('material': each material's own environment light, as three; 'world': the environment as the
-    world), plaque (('SUPREME', 'INTELLIGENCE'): the two lines engraved over the door)."""
+    become scene.world, lighting the set through EEVEE), shadows (True: the set's spot lights cast shadows; its
+    fixtures never shadow their own light), plaque (('SUPREME', 'INTELLIGENCE'): the two lines engraved over the
+    door)."""
     import bpy
     from mathutils import Matrix, Vector
     sc = scene or bpy.context.scene
@@ -155,7 +155,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         'bronze': L.pbr('Metal008', met=True),           # scratched bronze
         'pile': L.pbr('Fabric023'),                      # cut pile: the runner, the velvet
         'twill': L.pbr('Fabric077'),                     # twill: the uniform
-        'lacq': L.pbr('PaintedMetal012', ao=True),
+        'lacq': L.pbr('PaintedMetal012'),
         'wood': L.pbr('Wood066'),
     }
 
@@ -177,16 +177,10 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         return (r, g, b)
     env = L.env_tex(env_fn, 256, 128, name='corridor_env')
     C.parts['env'] = env
-    # three gave each material this environment as its own envMap at its own intensity, and the scene none (her VRM is
-    # lit by the set's lamps and its hemisphere light only). opts ibl='material' (the default) does the same: each
-    # material adds its image-based light (cn_lib NB.ibl) and the world is the hemisphere term alone. ibl='world':
-    # the environment is the world at 0.75 instead (one intensity for all, and it lights her too).
-    ibl_mode = opts.get('ibl', 'material')
-    if ibl_mode == 'material':
-        L.ibl_env(env_fn, env_img=env, name='corridor_env')
+    # the environment is the World at 0.75, with the hemisphere light: EEVEE lights the corridor's materials (and a
+    # figure in it) with it through the corridor's volume probe and the probes' reflections
     if opts.get('world', True):
-        C.world = CL.make_world(L, 'corridor_world', env if ibl_mode == 'world' else None, env_i=0.75,
-                                hemi=(0x3a2a1a, 0x0a0405, 0.06), scene=sc)
+        C.world = CL.make_world(L, 'corridor_world', env, env_i=0.75, hemi=(0x3a2a1a, 0x0a0405, 0.06), scene=sc)
 
     goldC = hex_linear(0xd8a23f)
 
@@ -248,12 +242,12 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         f = fan(nb, P.z, P.y, side) * on_wall
         em = nb.w(WARM) * f * (nb.lum(col_) * 3.0 + 0.022) * nb.U('lights') * flick(nb)
         return Mt.standard(col_, rough=nb.clamp(r0.x * 0.3 + 0.05 + v * 0.14, 0.04, 1.0), metal=v * 0.75,
-                           normal=nb.normal_map(nt, 0.35), emissive=em, ibl=L.ibl(0.9))
+                           normal=nb.normal_map(nt, 0.35), emissive=em)
     M['marble'] = marble_mat()
 
     # gold: polished hammered gilding (pilasters, frames, ribs, rails)
     M['gold'] = L.pbr_mat(S['goldH'], name='corridor_gold', tile=1.1, metal='map', rough=(0.5, 0.2), macro=0.3,
-                          macro_scale=0.6, tint=[0.78, 0.58, 0.32], nrm=0.7, env_i=L.env_i(0.7))
+                          macro_scale=0.6, tint=[0.78, 0.58, 0.32], nrm=0.7)
     # fluted gold: the pilaster faces carry vertical flutes (period 12.5 cm, aligned to every pilaster)
     flute_cv = CL.create_canvas(64, 4)
     gfl = flute_cv.get_context('2d')
@@ -273,12 +267,11 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         return {'normal': nb.bump(h.x, strength=1.0, distance=nb.view_z() * nb.U('pix') * 0.55
                                   / nb.max(nb.facing(), 0.08))}
     M['goldFluted'] = L.pbr_mat(S['goldH'], name='corridor_gold_fluted', tile=1.1, metal='map', rough=(0.5, 0.22),
-                                tint=[0.78, 0.57, 0.31], macro=0.3, macro_scale=0.6, post=flute_post,
-                                env_i=L.env_i(0.7))
+                                tint=[0.78, 0.57, 0.31], macro=0.3, macro_scale=0.6, post=flute_post)
     M['goldTrim'] = L.pbr_mat(S['goldF'], name='corridor_gold_trim', tile=0.8, metal='map', rough=(0.6, 0.14),
-                              tint=[0.82, 0.64, 0.38], env_i=L.env_i(0.75))
+                              tint=[0.82, 0.64, 0.38])
     M['bronze'] = L.pbr_mat(S['bronze'], name='corridor_bronze', tile=0.9, metal=1, rough=(0.8, 0.1),
-                            tint=[0.75, 0.55, 0.35], env_i=L.env_i(0.9))
+                            tint=[0.75, 0.55, 0.35])
 
     # the LED wall's post exists before the floor (the floor mirrors it): see further down for the wall itself
     SW, SH = SCR['z1'] - SCR['z0'], SCR['y1'] - SCR['y0']
@@ -360,7 +353,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
             pools = pools + nb.exp((P.x * P.x + (P.z - zl) * (P.z - zl)) * -0.22)
         em = (refl + nb.w((1.0, 0.66, 0.32)) * under * 0.9 + col_ * pools * WARM * 0.04) * nb.U('lights')
         return Mt.standard(col_, rough=nb.clamp(rough, 0.03, 1), metal=metal, normal=nb.normal_map(nt, 0.25),
-                           emissive=em, ibl=L.ibl(0.45))
+                           emissive=em)
 
     # the red runner: crimson cut pile with two woven gold border stripes, a walked-flat path, lantern pools
     # (no envMap in the WebGPU set: the runner takes no environment light)
@@ -400,7 +393,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
                 'emissive': nb.w(WARM) * glow * (c * 3.0 + 0.004) * 0.25 * nb.U('lights')}
     M['ceiling'] = L.pbr_mat(S['lacq'], name='corridor_ceiling', tile=2.0,
                              recolor=lambda c, nb: nb.w((0.012, 0.009, 0.007)) * (nb.lum(c) * 1.5 + 0.6),
-                             rough=(0.3, 0.12), nrm=0.4, post=ceiling_post, env_i=L.env_i(0.5))
+                             rough=(0.3, 0.12), nrm=0.4, post=ceiling_post)
 
     # warm frosted glass (sconce fans, lantern panes, torchere bowls): self-lit
     def glass_mat():
@@ -735,7 +728,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         pool = nb.exp((1.0 - u0.y) * -2.2) * (1.0 - nb.abs(u0.x - 0.5) * 0.9)          # its brass picture light
         em = s_rgb * pool * nb.mix(0.3, 0.55, leaf) * (1.0, 0.85, 0.62) * nb.U('lights')
         return Mt.standard(s_rgb, rough=nb.clamp(nb.mix(lr.x * 0.25 + 0.12, gr.x * 0.3 + 0.12, leaf), 0.05, 1),
-                           metal=leaf, normal=nb.normal_map(ln, 0.25), emissive=em, ibl=L.ibl(1.0))
+                           metal=leaf, normal=nb.normal_map(ln, 0.25), emissive=em)
     M['poll'] = poll_mat()
     poll = L.empty('corridor_poll', parent=room,
                    M3=m4(POLL_AT[0], 0, POLL_AT[1], 0, math.atan2(0 - POLL_AT[0], 6 - POLL_AT[1]) + 0.18, 0))
@@ -781,7 +774,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
             em = s_rgb * fan(nb, PATCH['z'] - qd.x, qd.y + PATCH['y'], -1.0) * WARM * 0.35 * nb.U('lights')
         # alphaTest 0.5 on step(0.002, a): a binary cut-out (EEVEE's dithered path draws it exactly)
         return Mt.standard(s_rgb, rough=nb.mix(0.78, 0.32, gl), metal=gl * 0.9, normal=nb.normal_map(pn, 1.0),
-                           emissive=em, alpha=nb.step(0.5, nb.step(0.002, s_a)), side='front', ibl=L.ibl(0.8))
+                           emissive=em, alpha=nb.step(0.5, nb.step(0.002, s_a)), side='front')
     M['patch'] = patch_mat(True)
     M['patchSmall'] = patch_mat(False)
     patch = L.empty('corridor_patch', parent=room, M3=m4(-HW + 0.09, PATCH['y'], PATCH['z'], 0, math.pi / 2, 0))
@@ -797,15 +790,13 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     # ------------------------------------------------------------------------- the uniform on a tailor's stand
     M['wool'] = L.pbr_mat(S['twill'], name='uniform_wool', tile=0.18, nrm=1.0, rough=(0.4, 0.55), physical=True,
                           sheen=0.6, sheen_roughness=0.5, sheen_color=0x1a2440,
-                          recolor=lambda c, nb: nb.w((0.03, 0.038, 0.07)) * (nb.lum(c) * 2.0 + 0.45), env_i=L.env_i(0.45))
+                          recolor=lambda c, nb: nb.w((0.03, 0.038, 0.07)) * (nb.lum(c) * 2.0 + 0.45))
     M['sash'] = L.pbr_mat(S['pile'], name='uniform_sash', tile=0.2, physical=True, sheen=0.8, sheen_roughness=0.4,
                           sheen_color=0x8a1822, recolor=lambda c, nb: nb.w((0.42, 0.03, 0.04)) * (nb.lum(c) * 2.0 + 0.3),
-                          rough=(0.5, 0.35), env_i=L.env_i(0.5))
+                          rough=(0.5, 0.35))
     M['leather'] = L.pbr_mat(S['lacq'], name='uniform_leather', tile=0.4,
-                             recolor=lambda c, nb: nb.w((0.012, 0.01, 0.009)) * (nb.lum(c) * 1.5 + 0.6), rough=(0.3, 0.12),
-                             env_i=L.env_i(0.9))
-    M['wood'] = L.pbr_mat(S['wood'], name='stand_wood', tile=0.6, tint=[0.45, 0.3, 0.22], rough=(0.8, 0.1),
-                          env_i=L.env_i(0.5))
+                             recolor=lambda c, nb: nb.w((0.012, 0.01, 0.009)) * (nb.lum(c) * 1.5 + 0.6), rough=(0.3, 0.12))
+    M['wood'] = L.pbr_mat(S['wood'], name='stand_wood', tile=0.6, tint=[0.45, 0.3, 0.22], rough=(0.8, 0.1))
     uniform_ = L.empty('corridor_uniform', parent=room,
                        M3=m4(UNIFORM_AT[0], 0, UNIFORM_AT[1], 0, math.atan2(0 - UNIFORM_AT[0], 6 - UNIFORM_AT[1]), 0))
     _build_uniform(L, M, uniform_)
@@ -814,10 +805,10 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
     # ----------------------------------------------------- the pedestal, the velvet cushion and the peaked cap
     M['velvet'] = L.pbr_mat(S['pile'], name='cushion_velvet', tile=0.12, physical=True, sheen=1.0, sheen_roughness=0.35,
                             sheen_color=0xa0242c, rough=(0.5, 0.4),
-                            recolor=lambda c, nb: nb.w((0.3, 0.018, 0.026)) * (nb.lum(c) * 2.0 + 0.25), env_i=L.env_i(0.4))
+                            recolor=lambda c, nb: nb.w((0.3, 0.018, 0.026)) * (nb.lum(c) * 2.0 + 0.25))
     M['patent'] = L.pbr_mat(S['lacq'], name='cap_patent', tile=0.3, physical=True, clearcoat=1.0,
                             clearcoat_roughness=0.06, side='double', recolor=lambda c, nb: nb.w((0.006, 0.006, 0.007)),
-                            rough=(0.2, 0.08), nrm=0.15, env_i=L.env_i(1.2))
+                            rough=(0.2, 0.08), nrm=0.15)
     braid_cv = CL.create_canvas(128, 32)
     bg2 = braid_cv.get_context('2d')
     for x in range(-32, 160, 8):
@@ -834,7 +825,7 @@ def build(scene=None, opts=None, collection=None, name='set:corridor'):
         bn, _ = nb.tex(braid_n, nb.uv() * (24.0, 1.0, 1.0))
         return {'normal': nb.normal_map(bn, 1.2)}
     M['braid'] = L.pbr_mat(S['goldF'], name='cap_braid', tile=0.15, metal=1, rough=(0.4, 0.15), tint=[1.0, 0.82, 0.5],
-                           post=braid_post, env_i=L.env_i(1.1))
+                           post=braid_post)
 
     pedestal = L.empty('corridor_pedestal', parent=room, M3=m4(CAP_AT[0], 0, CAP_AT[1], 0, 0.35, 0))
     # the marble material reads the book-matched slab uv (UVBook): the pedestal's box carries its own, as the walls do
@@ -1146,7 +1137,7 @@ def _door_mat(L, S, rel, mirror):
     gr, _ = nb.tex(S['goldI']['rgh'], tuv)
     nt, _ = nb.tex(rel['nrm'], ruv)
     return Mt.standard(nb.mix(gI, gB, dark), rough=nb.clamp(gr.x * 0.45 + 0.22 + dark * 0.3 - h * 0.06, 0.12, 1),
-                       metal=nb.mix(1.0, 0.75, dark), normal=nb.normal_map(nt, 1.0, flip_x=mirror), ibl=L.ibl(0.7))
+                       metal=nb.mix(1.0, 0.75, dark), normal=nb.normal_map(nt, 1.0, flip_x=mirror))
 
 
 def _plaque_relief(L, lines=('SUPREME', 'INTELLIGENCE')):
@@ -1200,7 +1191,7 @@ def _plaque_mat(L, S, plaque):
     nt, _ = nb.tex(plaque['nrm'], u0)
     return Mt.standard(nb.mix(gold * (1.02, 0.86, 0.58), (0.012, 0.01, 0.009), ink),
                        rough=nb.clamp(nb.mix(gr.x * 0.35 + 0.24, 0.45, ink), 0.05, 1), metal=nb.mix(1.0, 0.0, ink),
-                       normal=nb.normal_map(nt, 1.0), ibl=L.ibl(0.75))
+                       normal=nb.normal_map(nt, 1.0))
 
 
 # ------------------------------------------------------------------------------------------------ the post ---
@@ -1747,7 +1738,7 @@ def _build_uniform(L, M, parent):
     rb_img = L.canvas_tex(rb_cv, name='uniform_ribbons')
     Mr = L.mat('uniform_ribbons')
     rbc, _ = Mr.nb.tex(rb_img, Mr.nb.uv())
-    M['ribbons'] = Mr.standard(rbc, rough=0.55, ibl=L.ibl(1.0))
+    M['ribbons'] = Mr.standard(rbc, rough=0.55)
     L.mesh_object('uniform_ribbons', plane_geometry(0.1, 0.038), M['ribbons'], parent=parent,
                   M3=m4(0.075, 1.31, SZ * r_at(1.31) + 0.01, 0, 0.32, 0), flags=flags)
     L.mesh_object('uniform_patch', circle_geometry(0.045, 40), M['patchSmall'], parent=parent,
@@ -1871,6 +1862,6 @@ def _build_cap(L, M, cap, S):
     nb = Mbd.nb
     gc, _ = nb.tex(S['goldF']['col'], nb.uv() * 0.5)
     op, _ = nb.tex(bd_tex, nb.uv())
-    M['badge'] = Mbd.standard(gc * (1.05, 0.86, 0.55), rough=0.22, metal=1.0, alpha=nb.step(0.5, op.x), ibl=L.ibl(1.3))
+    M['badge'] = Mbd.standard(gc * (1.05, 0.86, 0.55), rough=0.22, metal=1.0, alpha=nb.step(0.5, op.x))
     L.mesh_object('cap_badge', plane_geometry(0.075, 0.056), M['badge'], parent=cap, M3=m4(0, 0.093, 0.156, -0.42, 0, 0),
                   flags=flags)

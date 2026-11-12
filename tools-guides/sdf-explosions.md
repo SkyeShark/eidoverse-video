@@ -78,8 +78,7 @@ move it (`time_offset=5.0` starts the blast 5 s in).
 **The step counts.** The engine stopped each ray after `steps` samples
 (`explosionRing` 320, `nuclearBlast` 300). The grids hold the whole box, so
 a long ray through the medium shows its far part here, where the engine cut
-it off. `steps` still drives the reference march (`vol.raymarch_reference`,
-the engine's own march of the same `sample()`).
+it off. A spec keeps `steps` as the engine set it; the grids do not use it.
 
 **`post(sum)`.** Only `explosion_ring` has one. It is a contrast curve on
 the composited pixel: `smoothstep(0, 0.3)` on the colour and `smoothstep(0,
@@ -87,11 +86,11 @@ the composited pixel: `smoothstep(0, 0.3)` on the colour and `smoothstep(0,
 into the medium (`RING_POST_FOLD`). In the grids, each sample's density is
 raised to the power 1.75 (`uFoldGamma`): thin wisps fade and the core
 holds. Then `material_settings` scale the density × 2.1 and the emission ×
-3.0. These numbers were fitted to the reference march with `post`, over 39 k
-covered pixels at five times of the loop (`test_volume_examples.py --
-fit=1`). The power cut the fit's error from 0.143 (scales alone) to 0.122.
-The reference march keeps the engine's `sample()` and `post`:
-`SDF_VIEW_DEPENDENT` is 1 only there.
+3.0. These numbers are fitted to the engine's own march with `post`, over
+39 k covered pixels at five times of the loop (`test_volume_examples.py --
+fit=1`, through the tests' `engine_march.py`). The power takes the fit's
+error from 0.143 (scales alone) to 0.122. `uFoldGamma` 1 is the engine's own
+`sample()`.
 
 **The grid box.** The engine's bounds were raymarch boxes. They were loose,
 because they cost only march steps. A grid spends its voxels over its whole
@@ -216,9 +215,9 @@ wide range spreads the slices thinner; `samples` and the distribution
 The grid is the other resolution. The engine sampled its noise per pixel
 along each ray. Here `cells` voxels span the box's longest side, and detail
 finer than about two voxels is gone: the ring's 350-per-metre octave and the
-candle's 90-per-metre smoke octave are grain the grid cannot hold. The
-renders beside the reference march show the same shapes, colours and smoke,
-softer.
+candle's 90-per-metre smoke octave are grain the grid cannot hold. Beside
+the engine's own march of the same `sample()`, the renders show the same
+shapes, colours and smoke, softer.
 
 What a frame costs, at the probes' resolutions (`test_volume_examples.py --
 timing=1`, sampling on the GPU and writing the `.vdb`):
@@ -296,8 +295,7 @@ the ring.
 
 `nuke.uniforms` is the effect's returned `uniforms`: `time`, `origin`,
 `scale`, `time_offset`, `loop_seconds` and `opacity`, read and set by name.
-`nuke.raymarch_reference(camera)` is the effect's own march of the same
-cloud, both volumes composited. `nuke.remove()` takes it all out. Several
+`nuke.remove()` takes it all out. Several
 blasts need no hook chaining: each is its own pair of volumes, and they mix
 with each other, fog and the sky physically. Each bake fits the froxel range
 round its own cloud and every other volume in the scene, so a second blast

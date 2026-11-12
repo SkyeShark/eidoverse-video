@@ -25,11 +25,10 @@ were JavaScript functions; it reads S.time and S.uniform() like a Python SDF sol
     vol = create_sdf_volume(sample=GLSL, bounds={'min': [-1, 0, -1], 'max': [1, 2, 1]}, cells=160,
                             location=(0, 0, 0), cache_dir='//vol_cache')
     vol.bake(1, 120)                       # animated (uTime): one .vdb per frame
-    img = vol.raymarch_reference(camera)   # the engine's own march of the same sample(), for comparison
 
 post(sum) reshaped the composited pixel (a contrast curve, an alpha remap). A physical volume has no composited
-pixel to reshape, so post runs in the reference march only; a volume example folds what its post did into its
-colours and densities, or applies it in the compositor.
+pixel to reshape, so the grids never run post: a spec may carry it as the engine wrote it, and a volume example
+folds what its post did into its colours and densities, or applies it in the compositor.
 """
 
 from __future__ import annotations
@@ -110,7 +109,7 @@ def blender_box(bmin3, bmax3):
 
 class SdfVolume:
     """What create_sdf_volume returns: .object (a Volume object), .program (the compiled GLSL), .spec, .voxel,
-    .grid_info (dims, origin, the last frame's statistics), build(t), bake(...), raymarch_reference(camera)."""
+    .grid_info (dims, origin, the last frame's statistics), build(t), bake(...)."""
 
     def __init__(self, spec: SdfVolumeSpec, scene=None, collection=None, name=None, location=(0, 0, 0),
                  rotation=(0, 0, 0), scale=1.0):
@@ -377,17 +376,6 @@ class SdfVolume:
         """The engine's mesh.position.y = groundY - bounds.min.y * scale, on Blender's z."""
         self.object.location.z = ground_z - self.spec.bounds_min[1] * self.object.scale.z
         return self
-
-    def raymarch_reference(self, camera, width=480, height=270, samples=4, t=None, medium_step=None,
-                           ambient=(0.0, 0.0, 0.0)):
-        """createSdfVolume's own march of this volume from a Blender camera (linear, premultiplied (H, W, 4)); a
-        medium() volume's scattering colour shows under a flat `ambient` light."""
-        from .reference import volume_raymarch_image
-        if not isinstance(self.spec.sample if self.mode == 'sample' else self.spec.medium, str):
-            raise ValueError(f'{self.name}: the reference march runs GLSL; a Python {self.mode}() has none')
-        if t is not None:
-            self.program.values['uTime'] = float(t)
-        return volume_raymarch_image(self, camera, width, height, samples, medium_step=medium_step, ambient=ambient)
 
 
 def create_sdf_volume(spec=None, **kwargs):

@@ -5,7 +5,7 @@
     key_expression(me, 'blink', [(40, 0), (42, 1), (45, 0)], interpolation='LINEAR')
 
 Every morph bind of the expression (h.expr[name]: mesh, shape key, bind weight) is keyed with weight * value: the shape keys
-are the source of truth, as in episode 3's build. The add-on's own preview property is keyed beside them, so its
+are the source of truth. The add-on's own preview property is keyed beside them, so its
 frame_change_post handler, which writes previews into shape keys, writes the same values and never fights the keys. A
 rendered frame needs no handler: the keys alone carry the face.
 

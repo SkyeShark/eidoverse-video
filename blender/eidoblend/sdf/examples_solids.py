@@ -11,8 +11,8 @@
                       the SDF_TEX_RECIPES distance estimators as placeable solids (their screen form is
                       make_sdf_texture), coloured by the recipes' own palette
 
-mr_hege and red_shoggoth are the two examples the engine's TSL migration dropped on 2026-07-04; they come from its
-GLSL backup. Every map(), shade() and helper here is the engine's GLSL as written. Two things changed, both
+mr_hege and red_shoggoth are not in the engine's TSL edition; they come from its GLSL backup. Every map(), shade()
+and helper here is the engine's GLSL as written. Two things changed, both
 behaviour-preserving: reversed-edge smoothstep(hi, lo, x) calls are written 1.0 - smoothstep(lo, hi, x) (the same
 curve, and defined in every GLSL; the TSL port made the same rewrite), and `cameraPosition` is the viewer in the
 SDF's local frame (see glsl_lib.VIEW_PRELUDE).
@@ -20,7 +20,8 @@ SDF's local frame (see glsl_lib.VIEW_PRELUDE).
 What each example adds for EEVEE is surface(p, n, mat): what its shade() knew about the material (albedo, roughness,
 metal, emissive parts) without its hand-placed lights, plus Principled stand-ins for its view-dependent terms
 (fresnel rims -> sheen, the wrap "SSS" -> subsurface, wet eyes -> coat). The scene's lights do the lighting.
-shade() stays for the reference raymarch (SdfObject.raymarch_reference) the EEVEE render is judged against.
+shade() is the engine's own lit look, part of the spec as the engine wrote it; a spec with no surface() renders it
+(shade_as, see spec.py).
 
     from eidoblend.sdf import EXAMPLES
     hege = EXAMPLES['mr_hege'].make(location=(0, 0, 0))
@@ -1325,7 +1326,7 @@ register_example(
 
 
 # ================================================================================================= explosion ===
-# Pyroclastic fireball (the engine's TSL port, 2026-07-05, of a classic displaced-sphere explosion; it exists only
+# Pyroclastic fireball (the engine's TSL port of a classic displaced-sphere explosion; it exists only
 # as TSL, so this GLSL is written from it node for node). An animated sphere radius carries a rotating-octave fbm
 # displacement; the DISPLACEMENT (not a material id) rides the map's mat channel into the shading, where it drives a
 # hot-white -> yellow -> red -> smoke gradient. The hot core is emissive (HDR up to 4); the smoky rim takes light.

@@ -12,7 +12,8 @@ medium; the make() knobs reach the volume's own uniforms; the explosion ring's p
    instance keeps its own (the engine's E._u were shared); look='lit' makes the fire + smoke examples a medium whose
    smoke scatters (albedo) and whose fire emits.
 4. fit=1: the explosion ring's post(sum) folded into the medium (a power on each sample's density, then density
-   and emission scales), fitted to the reference march with post over the loop (prints RING_POST_FOLD).
+   and emission scales), fitted to the engine's march with post over the loop (tests/sdf/engine_march.py; prints
+   RING_POST_FOLD).
 5. timing=1: three baked frames of every example at the probe resolutions: seconds and MB of .vdb per frame (a
    bake: run it through the GPU slot, heavy.sh).
 """
@@ -24,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _vcommon as V  # noqa: E402
+import engine_march as EM  # noqa: E402  (tests/sdf, on sys.path through _vcommon)
 
 import bpy  # noqa: E402
 
@@ -201,13 +203,12 @@ if A.get('fit', '0') == '1':
     TIMES_FIT = (0.6, 1.4, 2.2, 3.0, 3.8)
 
     def march(post, gamma):
-        """The reference march at the fit times: the engine's (post, gamma 1) or the folded sample (no post)."""
+        """The engine's march at the fit times: the engine's look (its post, gamma 1) or the folded sample (no
+        post)."""
         keep = prog.post
         prog.post = keep if post else None
-        prog.defines['RING_FOLD_IN_REFERENCE'] = 0 if post else 1
-        prog.values['uFoldGamma'] = float(gamma)
-        prog._shaders.clear()
-        out = [ring.raymarch_reference(cam, 240, 135, samples=1, t=t).reshape(-1, 4) for t in TIMES_FIT]
+        out = [EM.march(ring, cam, 240, 135, samples=1, t=t, values={'uFoldGamma': float(gamma)}).reshape(-1, 4)
+               for t in TIMES_FIT]
         prog.post = keep
         return np.concatenate(out)
 

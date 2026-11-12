@@ -4,7 +4,7 @@
     mat = PM.create_worn_metal(paint_color=0x3a5a3a, wear_amount=0.5, repeat=(2, 2))
     tex = PM.noise(512, 512, scale=12, octaves=5, contrast=0.7)  # a packed bpy Image
 
-Guide: tools-guides/_drafts/procedural-materials.md. The numpy core (materials/_gen.py) imports no bpy and matches
+Guide: tools-guides/procedural-materials.md. The numpy core (materials/_gen.py) imports no bpy and matches
 the engine's canvas byte for byte on its per-pixel generators (blender/tests/terrain_extras/test_pm_parity.py).
 """
 from . import procedural  # noqa: F401

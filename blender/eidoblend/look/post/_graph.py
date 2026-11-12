@@ -511,7 +511,7 @@ class G:
 
     def sanitize(self, c, hi=64.0):
         """Clamp a colour to [0, hi] with NaN -> 0 and +Inf -> hi on the GPU and the CPU compositor: the constant is
-        the FIRST operand of Maximum / Minimum (measured 11-07: the CPU device keeps a NaN that comes first, as
+        the FIRST operand of Maximum / Minimum (the CPU device keeps a NaN that comes first, as
         std::max does; the GPU returns the other operand either way)."""
         c = self._vv(c)
         return self.vmath('MINIMUM', (hi, hi, hi), self.vmath('MAXIMUM', (0.0, 0.0, 0.0), c))

@@ -29,8 +29,11 @@ What the WebGPU world gives that Blender has not, and what stands in:
 Additions of this edition, each an option that is off or neutral unless asked (film.py turns them on for a bake):
   gait_sync='stride'      the original: the ground gait's timeScale = speed / native speed. 'distance': the clip's phase
                           from the ground covered (distance matching: walk and run share one phase, aligned on the left
-                          strike; the stairs one cycle per two treads, anchored at the first edge, any shape, both ways;
-                          while a stair clip leads, the walk's phase follows it, so a hand-back keeps the same foot down)
+                          strike; the stairs one cycle per two treads, anchored at the first edge, any shape, both ways,
+                          on the half nearest the walk's phase where the stair clip takes over the blend; a stair clip
+                          not playing held at the shared phase; while stair clips carry weight the phase goes on at the
+                          blend's pace, and off a flight the stride grows back over about a step; while a stair clip
+                          leads, the walk's phase follows it, so a hand-back keeps the same foot down)
   native_walk_speed / native_run_speed=None   measured on this body (the clip's stride / its duration); the WebGPU
                           numbers (1.5, 3.6) were tuned on Aletheia
   land_on_contact         a body already in the air lands when its feet reach the ground
@@ -61,6 +64,8 @@ from .pose import Pose, humanoid_parents, root_matrix
 D2R = math.pi / 180.0
 R2D = 180.0 / math.pi
 FOLLOW_UNDER = 0.1          # the walk's and run's weight under which their phase follows a leading stair clip
+STAIR_REST_UNDER = 1e-3     # a stair clip's weight under which it is not playing: held at the shared phase
+STRIDE_GROWTH = 1.5         # m of stride per m walked: off a flight the stride grows back to the gait's own (about a step)
 
 
 def _wrap(a):
@@ -1034,10 +1039,12 @@ class VRMCharacterController:
         self._stair_phase_lock_dir = None
         self._stair_phase_lock_shape = None
         self._stair_phase_distance = 0.0
+        self._stair_phase_cycle = None
         self._stair_phase_lock_info = None
         # this edition's distance matching state
         self._gait_phase = 0.0
         self._distance = 0.0
+        self._stair_pace = None
         return self
 
     def default_leg_ik(self):
@@ -1424,18 +1431,39 @@ class VRMCharacterController:
                     self._stair_phase_distance = euclidean_modulo(run - nearest, run) if nearest is not None else 0.0
                     if self.gait_sync == 'distance' and pa.clip.gait is not None:
                         # the edge fixes the stair clip's phase to one tread's run, half its cycle: of the two feet
-                        # that can take the next tread, the one the walk has at the same point of its step (this
-                        # edition's: the foot the walk just put down stays down, the trailing one takes the tread)
+                        # that can take the next tread, the one the walk has at the same point of its step where the
+                        # stair clip takes over the blend (its share past a half), the stair clip going on at the
+                        # tread's pace until then and the walk at the blend's (_distance_match). This edition's: the
+                        # foot the walk just put down stays down, the trailing one takes the tread
+                        gg = ground_anim.clip.gait if ground_anim is not None else None
+                        sw = gg.stride if gg is not None and gg.stride > 0.05 else cyc
+                        ws, wg = pa.weight, ground_anim.weight if ground_anim is not None else 0.0
+                        wi = idle_a.weight if idle_a is not None else 0.0
+                        ds_f = max(0.0, speed * dt)
+                        k, adv_w = 0, 0.0
+                        while k < 12 and ws < 0.5 * (ws + wg + wi):
+                            ws, wg, wi = damp_stair(ws, 1.0), damp(wg, 0.0, base_l, dt), damp(wi, 0.0, base_l, dt)
+                            k += 1
+                            adv_w += ds_f * (wg / sw + ws / cyc) / max(wg + ws, 1e-6)
+                        adv_s = k * ds_f / cyc
+
+                        def stair_ph(d):
+                            return pa.clip.phase_at_time(euclidean_modulo(d / cyc + off, 1.0) * pa.clip.duration)
+
                         def walk_gap(d):
-                            ph = pa.clip.phase_at_time(euclidean_modulo(d / cyc + off, 1.0) * pa.clip.duration)
-                            return abs(euclidean_modulo(ph - self._gait_phase + 0.5, 1.0) - 0.5)
+                            return abs(euclidean_modulo(stair_ph(d) + adv_s - self._gait_phase - adv_w + 0.5, 1.0) - 0.5)
                         if walk_gap(self._stair_phase_distance + run) < walk_gap(self._stair_phase_distance):
                             self._stair_phase_distance += run
                     self._stair_phase_lock_active = True
                     self._stair_phase_lock_dir = direction
                     self._stair_phase_lock_shape = self.ahead_stair_shape
                 else:
+                    if self._stair_phase_cycle and abs(cyc - self._stair_phase_cycle) > 1e-9:
+                        # a new tread run (the probes' estimate firming up on the flight) keeps the clip's phase
+                        # where it is: the distance is carried over to the new cycle
+                        self._stair_phase_distance *= cyc / self._stair_phase_cycle
                     self._stair_phase_distance += max(0.0, speed * dt)
+                self._stair_phase_cycle = cyc
                 dur = pa.clip.duration
                 tn = euclidean_modulo(self._stair_phase_distance / cyc + off, 1.0)
                 tt = tn * dur
@@ -1454,6 +1482,7 @@ class VRMCharacterController:
             self._stair_phase_lock_dir = None
             self._stair_phase_lock_shape = None
         if self.gait_sync == 'distance':
+            self._hold_stair_clips(dt, (su_a, sd_a, sru_a, srd_a))
             self._follow_stair_phase(dt, (walk_a, run_a), (su_a, sd_a, sru_a, srd_a))
         # 6.5 gestures; 7. the mixer
         self._update_gesture_weights(dt)
@@ -1614,7 +1643,8 @@ class VRMCharacterController:
     # ================================================================================================ distance matching
     def _distance_match(self, dt, speed, ground, stairs, is_running):
         """gait_sync='distance': walk and run share one normalized phase (0 = the left strike), advanced by the ground
-        covered over the blended stride; each clip's time is set from it (its time_scale only carries the mixer's step).
+        covered over the blended stride (the stair clips' cycle of two treads in the blend while they carry weight);
+        each clip's time is set from it (its time_scale only carries the mixer's step).
         A start from standing begins a little before a passing phase (the swing foot beside the planted one, as the idle
         stands); with self.stop_distance set (the film's follower: the ground left to a stop) the phase is spread over
         that distance so the stop lands on the nearest passing phase (distance matching to a stop). Walking backward
@@ -1629,6 +1659,20 @@ class VRMCharacterController:
             stride = sum(a.clip.gait.stride * w for a, w in act) / wsum
         else:
             stride = a0.clip.gait.stride if (a0 is not None and a0.clip.gait is not None) else 1.0
+        own = stride
+        st_on = sum(a.weight for a in stairs if a is not None and a.clip.gait is not None)
+        crossfade = wsum > 1e-3 and st_on > 1e-3
+        if crossfade:
+            # a crossfade with the stair clips (a cycle of two treads, the walk's stride two to three times as long):
+            # the shared phase goes on at the weight-blended pace of every clip playing, so the walk's steps quicken
+            # as a flight takes over
+            stride = (wsum + st_on) / (wsum / stride + st_on / self._stair_cycle())
+        if self._stair_pace is not None and stride > self._stair_pace:
+            # off a flight the stride grows back to the walk's (or the run's) over about a step: the first step off
+            # the stairs is as quick and short as theirs, so the trailing foot leaves the foot of the flight as the
+            # other lands, and the next step is the gait's own
+            stride = min(stride, self._stair_pace + STRIDE_GROWTH * abs(ds))
+        self._stair_pace = stride if crossfade or (self._stair_pace is not None and stride < own - 1e-6) else None
         dom = max(act, key=lambda x: x[1])[0] if act else None
         lead = dom if dom is not None else a0
         passing = sorted(lead.clip.gait.passing.values()) if (lead is not None and lead.clip.gait is not None and
@@ -1646,7 +1690,7 @@ class VRMCharacterController:
             dphi = min(ok, key=lambda c: abs(c - want))
             step = dphi if abs(ds) >= d_stop else abs(ds) * dphi / max(d_stop, 1e-6)
             self._gait_phase = (self._gait_phase + sgn * step) % 1.0
-        elif dom is not None and dom.weight > 0.9:
+        elif dom is not None and dom.weight > 0.9 and st_on <= 1e-3 and self._stair_pace is None:
             c = dom.clip
             self._gait_phase = c.phase_at_travel(c.travel_at_phase(self._gait_phase) + ds)
         else:
@@ -1656,6 +1700,23 @@ class VRMCharacterController:
                 continue
             a.time = a.clip.time_at_phase(self._gait_phase)
             a.time_scale = 0.0
+
+    def _stair_cycle(self):
+        """the stair clips' cycle along the ground (m): two treads, the tread lock's on a flight, else the smoothed run"""
+        if self._stair_phase_lock_active and self._stair_phase_cycle:
+            return self._stair_phase_cycle
+        return max(0.01, 2.0 * self._smooth_tread_run)
+
+    def _hold_stair_clips(self, dt, stairs):
+        """this edition's (distance matching): a stair clip that is not playing (its weight under STAIR_REST_UNDER) is
+        held at the shared phase, so it comes in where the walk is in its cycle, the same foot down and the same foot
+        swinging; playing, it keeps its own clock (the tread lock's on a flight). Its time is set before the mixer's
+        step, which then carries it onto this frame's phase"""
+        for a in stairs:
+            if a is None or a.clip.gait is None or a.weight >= STAIR_REST_UNDER:
+                continue
+            a.time = euclidean_modulo(a.clip.time_at_phase(self._gait_phase) - (a.time_scale or 0.0) * dt,
+                                      a.clip.duration)
 
     def _follow_stair_phase(self, dt, ground, stairs):
         """this edition's (distance matching): the stair clips keep their own clock (the tread-locked phase), the walk

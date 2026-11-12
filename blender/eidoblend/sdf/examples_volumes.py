@@ -17,8 +17,8 @@ lights their emission casts.
                       dispersal on a 20 s loop, 19 m tall by default (make(speed=, heat=, density=, size=))
     (explosion, the pyroclastic fireball, is a surface SDF: examples_solids.py)
 
-Each sample() is the engine's TSL, written in GLSL node for node, so the volume, its reference march and the engine
-compute the same field. A volume is a real Volume object (eidoblend.sdf.volume): each frame's grids are an OpenVDB
+Each sample() is the engine's TSL, written in GLSL node for node, so the volume and the engine compute the same
+field. A volume is a real Volume object (eidoblend.sdf.volume): each frame's grids are an OpenVDB
 file, EEVEE lights, shadows and mixes it with the scene, and the camera may go inside it.
 
     from eidoblend.sdf import EXAMPLES
@@ -61,23 +61,15 @@ import numpy as np
 from .spec import register_example
 
 # ------------------------------------------------------------------------------------------------ explosion_ring --
-# Expanding smoke-ring detonation (the engine's TSL port, 2026-07-05, of a torus-based volumetric nuke): a torus that
+# Expanding smoke-ring detonation (the engine's TSL port of a torus-based volumetric nuke): a torus that
 # eases outward over a ~4.5 s loop while the volume inside the tube rotates around the tube's own axis (the rolling
 # smoke), density from a 4-octave noise stack in the rotated space, a heat -> colour palette that cools as the loop
 # progresses, and a decay fade. The source's ground shadow / glow, camera shake and vignette were scene-level work
 # and are not part of the placeable. Live knob: uSpeed.
 _RING_EXTRA = r"""
 // post(sum)'s contrast curve, folded into the medium: the grids raise each sample's density to uFoldGamma (thin
-// wisps fade, the core stays), material_settings scale the result. The reference march keeps the engine's sample()
-// and its post (SDF_VIEW_DEPENDENT is 1 only there), unless a fit asks for the fold in it too.
-#ifndef RING_FOLD_IN_REFERENCE
-#define RING_FOLD_IN_REFERENCE 0
-#endif
-#if SDF_VIEW_DEPENDENT && !RING_FOLD_IN_REFERENCE
-#define RING_FOLD_GAMMA 1.0
-#else
+// wisps fade, the core stays), material_settings scale the result; uFoldGamma 1 is the engine's own sample()
 #define RING_FOLD_GAMMA uFoldGamma
-#endif
 struct RingAnim { float t; float rotT; float decay; float radius; float thickness; };
 RingAnim ringAnim() {
     RingAnim A;
@@ -151,7 +143,7 @@ vec4 post(vec4 sum) {
 }"""
 
 # ------------------------------------------------------------------------------------------------------- flame --
-# Torch flame (the engine's TSL port, 2026-07-05, of a classic 2D simplex-fbm flame), REVOLVED around the y axis into
+# Torch flame (the engine's TSL port of a classic 2D simplex-fbm flame), REVOLVED around the y axis into
 # a placeable volumetric fire: the 2D field is symmetric in x, so q.x becomes the radial distance |p.xz| exactly. Its
 # own gradient-simplex noise and rotated-octave fbm (signed: the flame shape depends on it, so not the library's value
 # noise), the teardrop field, the downward-scrolling turbulence, the orange -> yellow -> white palette and the late
@@ -211,7 +203,7 @@ SdfSample sample(vec3 p) {
 }"""
 
 # ------------------------------------------------------------------------------------------------------- smoke --
-# Smoke column (an original volumetric example of the engine, 2026-07-05): a rising, widening plume. Density = a
+# Smoke column (an original volumetric example of the engine): a rising, widening plume. Density = a
 # radial column profile (radius grows with height) gated by two upward-advected fbm fields (one fine, one slow
 # billow), faded in at the base and dissipating at the top. Grey-blue, darker at the base. Knobs: uSpeed, uDensity.
 _SMOKE_SAMPLE = r"""
@@ -233,7 +225,7 @@ SdfSample sample(vec3 p) {
 }"""
 
 # --------------------------------------------------------------------------------------------- gyroid_fireball --
-# Gyroid fireball (the engine's TSL port, 2026-07-23, of a compact cellular-explosion shader): the gyroid fbm
+# Gyroid fireball (the engine's TSL port of a compact cellular-explosion shader): the gyroid fbm
 # "spice" (8 octaves, lacunarity 1.7, running-sum z warp), the lifecycle curves (growth pow .2 / fade pow 9 / burn
 # pow .4 / advance pow .4), the cos(vec3(1, 2, 3) * 5.5 + n.y) palette on the field gradient, the burn-to-smoke blend
 # and radius = .3 * noise * growth with the .05 feather. The source's screen-space cell grid and blue-noise dither
@@ -303,7 +295,7 @@ SdfSample sample(vec3 p) {
 }"""
 
 # ----------------------------------------------------------------------------------------------------- bonfire --
-# Bonfire (the engine's v3, 2026-07-23): the fire is a teardrop ENVELOPE x the ring's cascading vnoise stack advected
+# Bonfire (the engine's third version): the fire is a teardrop ENVELOPE x the ring's cascading vnoise stack advected
 # upward fast, thresholded (the flame shapes come from 3D noise, not from any primitive), with a whole-body sway and
 # width pulse; plus a noise-gated broken smoke plume on a wind-bent axis that dissipates mid-box. Base at y = 0.
 # Knobs: uSpeed, uDensity.
@@ -385,7 +377,7 @@ SdfMedium medium(vec3 p) {
 }"""
 
 # ------------------------------------------------------------------------------------------------ candle_flame --
-# Candle flame (the engine's TSL port, 2026-07-23, of a raymarched candle's flame; the candle / table / plate scene of
+# Candle flame (the engine's TSL port of a raymarched candle's flame; the candle / table / plate scene of
 # the source is not part of it): the teardrop SDF (a sphere in a vertically warped space, radius pinched with
 # height), the HOLLOW BASE subtraction that makes the blue zone above the wick, the three-channel anchored sway noise
 # (base pinned, tip flickers), the blue -> warm height palette and brightness from the SDF's interior depth; plus a
@@ -449,7 +441,7 @@ FireParts candleParts(vec3 p) {
 """
 
 # -------------------------------------------------------------------------------------------------------- fire --
-# Fire: a large roaring blaze (the engine's, 2026-07-23, from a tapered-box volumetric fire and a smoke-column
+# Fire: a large roaring blaze (the engine's, from a tapered-box volumetric fire and a smoke-column
 # shader). Body: the tapered-box FOOTPRINT as an envelope x a cascading vnoise stack advected upward, hard
 # thresholded, a per-sample 3-channel wobble, the outer -> mid -> core palette driven by heat and modulated by the
 # noise. Smoke: a hollow sin^4 shell column torn by height-growing ridged turbulence and swirl, dispersing by y ~ 4.9.
@@ -538,7 +530,7 @@ FireParts fireParts(vec3 p) {
 """
 
 # ------------------------------------------------------------------------------------------------ nuclear_blast --
-# Nuclear blast (the engine's, 2026-07-23): the screen-space SDF mushroom-cloud raymarcher (effects_tsl/
+# Nuclear blast (the engine's): the screen-space SDF mushroom-cloud raymarcher (effects_tsl/
 # nuclear_explosion.js, see nuclear_explosion.py) reborn as a PLACED volume. Cap (squashed sphere, easeOut rise and
 # swell) + stem (WIDER at top) + a trail bulge riding under the cap + the base-surge torus + a ground pad, all
 # sminCubic-fused; noise sampled at ADVECTED positions (weighted cross-section rolls in the cap and the surge ring);
@@ -787,7 +779,7 @@ register_example(
     post=_RING_POST,
     # post(sum) reshaped the engine's composited pixel (a contrast curve on colour and alpha); a physical volume has
     # no composited pixel, so the curve is folded into the medium: each sample's density to a power (thin wisps
-    # fade, the core holds), then denser and brighter (fitted against the reference march with post over the loop:
+    # fade, the core holds), then denser and brighter (fitted against the engine's march with post over the loop:
     # tests/sdf_volumes/test_volume_examples.py fit=1)
     material_settings={'density_scale': RING_POST_FOLD['density_scale'],
                        'emission_scale': RING_POST_FOLD['emission_scale']},
@@ -1324,8 +1316,8 @@ def light_from_surface(sdf, frames=None, count=1, energy_scale=1.0, radius_scale
 
 def build_still(vol, t, log=None):
     """vol.build(t) into a file named for the time (<stem>_t<ms>.vdb). Blender keeps the grids it has loaded from
-    a path, so a second build() of one volume, which rewrites <stem>.vdb, renders the first one's grids (measured:
-    four stills at four times rendered as one); a file per time shows each. Returns vol."""
+    a path, so a second build() of one volume, which rewrites <stem>.vdb, renders the first one's grids; a file per
+    time shows each. Returns vol."""
     base = vol.stem
     vol.stem = f'{base}_t{int(round(float(t) * 1000.0)):07d}'
     try:

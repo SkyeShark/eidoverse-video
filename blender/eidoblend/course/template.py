@@ -21,7 +21,7 @@ every frame (the controller and its foot IK in a Rapier world). Here the same co
 eidoblend.characters.controller: VRMCharacterController with terrain_base's options and its foot IK, in a
 CollisionWorld over the course's colliders: the ladder's rails and rungs are visual, as the engine's were) walks it
 once, frame by frame, and the bake keys it (driver='controller', the default: its gait tree takes the steps, ramps
-and bumps itself). driver='walk_path' walks round one's walk_path instead (planted feet over the course's own height
+and bumps itself). driver='walk_path' walks characters.locomotion.walk_path instead (planted feet over the course's own height
 function, pelvis='lower' when the course has steps: faster to build, no step adaptation), and
 driver(course, handle, scene) -> a report replaces the walk with anything else. A plain walk stops 0.6 m before the
 first wall, gap or ladder (those are maneuvers).

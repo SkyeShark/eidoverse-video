@@ -22,6 +22,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -63,13 +64,12 @@ for j in range(H):
         if hit[0] is not None:
             t_mesh[j, i] = hit[3]
 
-# the march, with its shade() swapped for the hit distance (the reference runs the example's march as written)
+# the march, with its shade() swapped for the hit distance (the engine march runs the example's march as written)
 o.program.shade = DEPTH_SHADE
-o.program._shaders.pop('raymarch', None)
 marches = {}
 for tag, step, steps in (('conservative', 0.3, 1024), ('engine', 0.75, 192)):     # 1024: the kernel's own cap
     o.spec.step_scale, o.spec.max_steps, o.spec.surf_eps = step, steps, 0.0005
-    img = o.raymarch_reference(cam, W, H, samples=1)[::-1]          # top row first, as the rays above
+    img = EM.march(o, cam, W, H, samples=1)[::-1]                   # top row first, as the rays above
     marches[tag] = np.where(img[..., 3] > 0.5, img[..., 0], np.inf)
 
 tol = 1.5 * o.voxel

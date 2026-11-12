@@ -19,6 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -98,7 +99,7 @@ C.stage(480, 270, 4, floor=False, sun=False)
 fire = sdf.create_sdf_volume(sample=FIREBALL, bounds=BOUNDS, steps=200, cells=150, name='vol_fire', cache_dir=CACHE,
                              time=0.0)
 cam = C.camera((0.0, -3.4, 0.75), (0.0, 0.0, 0.62), lens=50)
-ref = fire.raymarch_reference(cam, 96, 54, samples=1)
+ref = EM.march(fire, cam, 96, 54, samples=1)
 grids = fire.sample_grids(0.0)
 # the same camera rays, in the volume's local Blender frame
 sc = bpy.context.scene
@@ -158,7 +159,7 @@ if RENDER:
         cam = C.camera((1.2, -3.0, 1.0), (0.0, 0.0, 0.6), lens=45)
         eevee = os.path.join(C.OUT, f'vol_{name}_eevee.png')
         C.check(f'{name}: EEVEE render', C.render(eevee), eevee)
-        ref = vol.raymarch_reference(cam, 960, 540, samples=2, ambient=(rig['world'] + 0.25 * rig['sun'],) * 3)
+        ref = EM.march(vol, cam, 960, 540, samples=2, ambient=(rig['world'] + 0.25 * rig['sun'],) * 3)
         bg = np.full(ref.shape[:2] + (3,), rig['world'], np.float32)
         comp = ref[..., :3] + bg * (1.0 - ref[..., 3:4])        # premultiplied over the world colour
         refp = C.save_linear_png(os.path.join(C.OUT, f'vol_{name}_ref.png'), comp)

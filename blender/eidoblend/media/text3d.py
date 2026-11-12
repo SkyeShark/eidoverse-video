@@ -53,7 +53,7 @@ def font_metrics(path):
 
 def blender_size(em, font):
     """Blender text size for a three.js TextGeometry size (the em). Blender scales a font so its head-table
-    bounding box (yMax - yMin) is one unit (vfontdata_freetype: scale = 1 / bbox height), measured 11-07 on
+    bounding box (yMax - yMin) is one unit (vfontdata_freetype: scale = 1 / bbox height), measured on
     Audiowide, Michroma and Anton (hhea ascent - descent only matches where a font sets them equal)."""
     m = font_metrics(str(raster.font_path(font)))
     return em * (m['y_max'] - m['y_min']) / m['units_per_em']

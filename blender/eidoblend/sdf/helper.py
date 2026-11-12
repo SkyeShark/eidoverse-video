@@ -7,8 +7,8 @@ HDRI was copied into each SDF's uEnvMap every frame, and transparent volumes wer
 In Blender an SDF solid is a mesh and an SDF volume a Volume object: EEVEE draws them into every pass (depth,
 normals, AO, shadows, reflections, motion vectors) like any other geometry, lights them with the world, and
 integrates overlapping volumes physically. What registering still does here: it links the SDF collection into the
-scene, and binds the world's environment image to every SDF program, so a reference raymarch's sampleEnvMap() sees
-the same HDRI EEVEE lights with (the engine's uEnvMap / uEnvMapStrength).
+scene, and binds the world's environment image to every SDF program, so an example's sampleEnvMap() (in its shade()
+or surface()) sees the same HDRI EEVEE lights with (the engine's uEnvMap / uEnvMapStrength).
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
                  return vec2(smin(a, b, 0.3), 1.0); }''',
         surface='''SdfSurface surface(vec3 p, vec3 n, float mat) {
                  return sdfSurface(vec3(0.85, 0.45, 0.25), 0.5); }''',
-        shade='''vec3 shade(vec3 p, vec3 n, float mat) {     // optional: the engine's lit look, for the reference
+        shade='''vec3 shade(vec3 p, vec3 n, float mat) {     // optional: the engine's lit look, its own contract
                  vec3 L = normalize(vec3(0.5, 0.9, 0.4));
                  return vec3(0.85, 0.45, 0.25) * (0.4 + 0.6 * max(0.0, dot(n, L))); }''',
         location=(0, 0, 1))
@@ -105,7 +105,8 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
 
 == Options of create_sdf_object(spec, **overrides) ==
   map / surface / shade / extra (GLSL or Python), bounds, quality ('fast' | 'balanced' | 'high' | 'ultra'),
-  max_steps / max_dist / step_scale / surf_eps (the reference march), uniforms {'uName': value | (type, value)},
+  max_steps / max_dist / step_scale / surf_eps (the engine's march numbers, kept as set),
+  uniforms {'uName': value | (type, value)},
   textures {sampler: image}, defines, voxel / cells (mesh resolution), texels (atlas texels per quad side),
   carrier ('atlas' | 'vertex'), normals ('corner' | 'vertex'), iso (level set, for distance estimators),
   refine, qef_lambda, min_component, materials {mat id: bpy Material}, material_settings, cache_dir, time,

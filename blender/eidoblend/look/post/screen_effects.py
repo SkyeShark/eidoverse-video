@@ -470,7 +470,7 @@ def old_bw_film(scene=None, o=None):
         vig = g.pow(co.u * (1.0 - co.v) * co.v * (1.0 - co.u) * 15.0, 0.4 + vig_t * 0.05)
         luma = g.dot(g.c(image) * (dirt * vig), LUM601)
         return {'Image': _mix4(g, img, g.splat(luma), g.alpha(image), a['opacity'])}
-    # version 2: the shader's simplex dust in y-down uv (round one's version 1: Blender Perlin, y up)
+    # version 2: the shader's simplex dust in y-down uv (version 1 was Blender's Perlin noise, y up)
     return fn('fx_old_bw_film', _io(OLD_BW_FILM), [('Image', 'C')], body, version=2)
 
 
@@ -820,7 +820,7 @@ def hatch_noise():
     ToInt32 (checked against deno: the same first bytes and checksum), stored flipped so a y-down tap reads its rows
     as the WebGPU DataTexture did, packed in the file. Red, green and blue are its bytes; alpha is held at 1: the
     shader never reads the fourth channel, and the compositor's Image node premultiplies colour by alpha whatever
-    the image's alpha mode (measured 11-08: the noise came out at half its mean, every hatch layer darker)."""
+    the image's alpha mode (with alpha in it the noise comes out at half its mean, every hatch layer darker)."""
     import bpy
     import numpy as np
     name = 'eido_cross_hatch_noise'
@@ -1627,7 +1627,7 @@ def anamorphic_flare(scene=None, o=None):
     tinted `color`; added x strength over the frame before the bloom; mixed by opacity. At the default 32 taps x 1.5 px
     the streak reaches 24 px each way: a short anamorphic smear, not a frame-wide line.
     The luminance is three's luminance() of the RGBA sample: TSL's dot() of a vec4 with the vec3 Rec. 709 weights
-    pads the weights to vec4(w, 1.0) (WGSLNodeBuilder, measured 11-08), so it is Y + alpha. An opaque frame streaks
+    pads the weights to vec4(w, 1.0) (WGSLNodeBuilder), so it is Y + alpha. An opaque frame streaks
     from Y > threshold - 1 (Y > 2 at the default 3), as WebGPU's did; transparent film (alpha 0) from Y > threshold.
     (The WebGPU engine's own frame may carry alpha 2 there: its SSR add pads a vec3 with 1.0 the same way.)"""
     samples = max(1, int(math.floor((o or {}).get('samples', 32))))

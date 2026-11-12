@@ -8,11 +8,11 @@ GLSL EXAMPLES were:
         quality='fast',                                      # QUALITY_PRESETS key
         extra=GLSL,          # helpers, #defines, material functions (optional)
         map=GLSL,            # vec2 map(vec3 p): (distance, material id) -- the engine's map, unchanged
-        shade=GLSL,          # vec3 shade(vec3 p, vec3 n, float mat): the engine's lit colour (reference raymarch)
+        shade=GLSL,          # vec3 shade(vec3 p, vec3 n, float mat): the engine's lit colour (its own look)
         surface=GLSL,        # SdfSurface surface(vec3 p, vec3 n, float mat): what EEVEE renders (PBR)
         uniforms={'uPaint': ('color', '#c8c8d2')},           # live knobs (+ uTime, always there)
         animated=False,      # map/surface read uTime: bake() re-meshes per frame
-        cut_by_bounds=False, # the shape runs past its bounds on purpose (a TPMS): the box cuts it, reference too
+        cut_by_bounds=False, # the shape runs past its bounds on purpose (a TPMS): the box cuts it
         make=None)           # optional factory(**opts) -> SdfObject (the engine's make(opts))
 
   Without surface=, a GLSL (or Python) shade() is the material: its colour seen head-on becomes the base colour
@@ -22,16 +22,15 @@ GLSL EXAMPLES were:
 
   A volume example gives sample=GLSL (SdfSample sample(vec3 p): the engine's {color, alpha, step}) or
   medium=GLSL (SdfMedium medium(vec3 p): density / albedo / emission per metre) instead of map/surface.
-  GLSL inside an example may test SDF_VIEW_DEPENDENT (1 only in the reference raymarch) to keep the original's
-  view-dependent shading terms out of the baked surface.
 
 EXAMPLES['basic_sphere'].make(location=(0, 0, 1)) builds one; create_sdf_object(EXAMPLES['x'], **overrides) too.
 """
 
 from __future__ import annotations
 
-# The engine's presets, its four raymarch numbers unchanged (they drive the reference raymarch), plus what quality
-# means for a mesh: `cells` voxels along the bounds' longest side, `texels` atlas texels along each quad side.
+# The engine's presets, its four raymarch numbers unchanged (a spec carries them as the engine set them; the mesh
+# does not march), plus what quality means for a mesh: `cells` voxels along the bounds' longest side, `texels` atlas
+# texels along each quad side.
 QUALITY_PRESETS = {
     'fast':     {'max_steps': 64,  'surf_eps': 0.0020, 'step_scale': 0.90, 'max_dist': 60.0,  'cells': 128, 'texels': 3},
     'balanced': {'max_steps': 128, 'surf_eps': 0.0010, 'step_scale': 0.85, 'max_dist': 100.0, 'cells': 256, 'texels': 4},

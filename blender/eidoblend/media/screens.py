@@ -141,8 +141,8 @@ def _is_hold(path):
 def _write_hold(first):
     """Write the file numbered one below a sequence's first: a copy of the first, marked as a hold. Blender shows
     file <first - 1> on every frame before an ImageUser's frame_start (BKE_image_user_frame_get clamps the frame to
-    0, then adds the offset), so without it a screen shows the missing-texture magenta until its range starts
-    (11-07 verify). A real frame of a source sequence that already has that number is left as it is."""
+    0, then adds the offset), so without it a screen shows the missing-texture magenta until its range starts. A
+    real frame of a source sequence that already has that number is left as it is."""
     first = Path(first)
     head, num, nd = _seq_split(first)
     hold = first.with_name(f'{head}{num - 1:0{nd}d}{first.suffix}')
@@ -486,7 +486,7 @@ def _display_frame(obj):
     c /= max(a, 1e-12)
     n.normalize()
     # u axis: the world direction of d(position)/du, from a least-squares fit position ~ P0 + U u + V v over the
-    # loops (picking the edge with the largest du chose triangle diagonals: 45 degrees off, 11-07); world X without UVs
+    # loops (the edge with the largest du can be a triangle's diagonal, 45 degrees off); world X without UVs
     ax_u = Vector((1, 0, 0))
     uvl = me.uv_layers.active
     if uvl and len(me.loops) > 2:
@@ -781,7 +781,7 @@ def _retime_frames(path, info, out, name, ks, film_fps, speed, loop):
     """Write <name>_0001.png … for the film frames ks (counted from the screen's start), each showing the movie
     frame engine_movie_frame picks. One ffmpeg decode at the movie's own rate, piped as raw pixels: each needed
     movie frame is encoded once and copied to every film frame that shows it. (An ffmpeg fps filter picks the
-    nearest frame where the engine floors: one frame early on many film frames, 11-07 verify.)"""
+    nearest frame where the engine floors: one frame early on many film frames.)"""
     n = max(1, int(info['frames']))
     want = {}
     for j, k in enumerate(ks):

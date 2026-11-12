@@ -71,11 +71,13 @@ def render_linear(path_exr, samples=None):
     return read_exr(path_exr)
 
 
-def reference_over(vol_or_fx, cam, width, height, world, samples=2, t=None):
-    """The engine's own march of a volume (or a NuclearExplosion) composited over a flat world colour: linear
-    (H, W, 3), row 0 at the bottom (save with save_linear_png)."""
+def reference_over(vol_or_fx, cam, width, height, world, samples=2, t=None, values=None):
+    """The engine's own march of a volume (or a NuclearExplosion; tests/sdf/engine_march.py) composited over a flat
+    world colour: linear (H, W, 3), row 0 at the bottom (save with save_linear_png). values: uniforms for the march
+    alone."""
     import numpy as np
-    ref = vol_or_fx.raymarch_reference(cam, width, height, samples=samples, t=t)
+    import engine_march as EM
+    ref = EM.march(vol_or_fx, cam, width, height, samples=samples, t=t, values=values)
     bg = np.full(ref.shape[:2] + (3,), world, np.float32)
     return ref[..., :3] + bg * (1.0 - ref[..., 3:4])
 

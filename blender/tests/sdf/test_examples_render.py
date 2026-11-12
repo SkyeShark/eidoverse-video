@@ -19,6 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as C  # noqa: E402
+import engine_march as EM  # noqa: E402
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -144,7 +145,7 @@ for name in NAMES:
     eevee = os.path.join(C.OUT, f'ex_{name}{TAG}_eevee.png')
     ok = C.render(eevee)
     C.check(f'{name}: EEVEE render', ok, eevee)
-    ref = obj.raymarch_reference(cam, W, H, samples=4, t=T)
+    ref = EM.march(obj, cam, W, H, samples=4, t=T)
     refp = C.save_linear_png(os.path.join(C.OUT, f'ex_{name}{TAG}_ref.png'), ref)
     # silhouettes: the engine's march (one centred sample) against camera rays cast at the mesh, at quarter size
     # when the subject fills the frame; a distant subject is measured at full size, or its limbs are single pixels
@@ -159,7 +160,7 @@ for name in NAMES:
               f'of them passes the slot; the mesher is checked against the field in test_mesh_depth_parity.py',
               flush=True)
     else:
-        ref4 = obj.raymarch_reference(cam, w4, h4, samples=1, t=T)
+        ref4 = EM.march(obj, cam, w4, h4, samples=1, t=T)
         m_ref = ref4[::-1, :, 3] > 0.5
         m_mesh = mesh_coverage(obj.object, cam, w4, h4)
         iou = float((m_ref & m_mesh).sum()) / max(1.0, float((m_ref | m_mesh).sum()))

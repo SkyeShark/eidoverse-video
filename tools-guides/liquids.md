@@ -196,7 +196,8 @@ reflections come from the world. Set `scene.eevee.use_raytracing = True`.
 The surface material uses dithered transparency with ray-traced refraction.
 
 Clear water refracts, and body or foam is diffuse. EEVEE's G-buffer keeps
-one of refraction or diffuse per pixel. Given both at once (a transmission
+one of refraction or diffuse per pixel (measured in
+`blender/tests/water3d/probe_partial_transmission.py`). Given both at once (a transmission
 weight between 0 and 1, or BSDFs mixed by Mix Shader), it picks one per
 pixel with a pattern that stays the same every sample, and the water shows
 a sandpaper grain that 64 samples do not clear. So the material makes the

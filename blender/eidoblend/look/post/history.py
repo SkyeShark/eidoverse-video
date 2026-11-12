@@ -11,9 +11,9 @@ Blender's compositor has no previous-frame node, so the frames go through the di
 
 A rider (`node['look_input_of'] = stage`) gets the same input as its stage on every chain relink (look/post/chain.py).
 The file name carries '####', which Blender fills with the frame number in a still render as well as in an animation
-(measured 11-07: without it a still render writes '<name>.exr' with no number). During an animation render the File
-Output of frame n is on disk before frame n + 1 composites, so a tap reads the frame just made (measured 11-07: an
-emissive sphere's position at frame n - 1, every frame, and again in a single still render of a frame after them).
+(without it a still render writes '<name>.exr' with no number). During an animation render the File Output of frame n
+is on disk before frame n + 1 composites, so a tap reads the frame just made (measured: an emissive sphere's position
+at frame n - 1, every frame, and again in a single still render of a frame after them).
 Where the earlier frame was never rendered the tap is transparent black (`present` 0) and the effect falls back as
 WebGPU did on its first frame. Cuts (timeline markers that switch cameras, camera jumps, any frames given to cut())
 restart a history: scene_cuts(scene), camera_jumps(scene) (era looks' camJumped(), found ahead of the render),
@@ -23,7 +23,7 @@ Checked as a film renders (tests/post_era/test_film_render.py): an animation ren
 .blend rendered by a fresh Blender from the command line give the frames the stills give.
 
 Disk: half float, ZIP (lossless: a feedback trail must not carry a lossy codec's error from frame to frame), about
-0.62 MB a frame at 960x540 (measured 11-07, after_image's trail; DWAA was 0.5 MB but lossy). prune() deletes frames
+0.62 MB a frame at 960x540 (measured on after_image's trail; DWAA is 0.5 MB but lossy). prune() deletes frames
 older than a history needs; auto_prune() does it after every rendered frame while this Python session renders (a
 .blend rendered elsewhere keeps its files until prune() or clear()).
 """

@@ -251,7 +251,7 @@ def analyze_clip(body, clip, rate=120):
     # THE TREADMILL'S SPEED is the stance ankle's: a human clip on my legs does not keep its stance sole at one height
     # (it rises and falls 3-4 cm through the stance), and its lowest region jumps heel / toe, so neither the sole's
     # height nor its lowest point gives the speed. The ankle does: it moves back steadily at the treadmill's speed
-    # through the flat stance (measured 1.40 m/s on my body: the lead's 1.44), and forward fast in the swing
+    # through the flat stance (about 1.4 m/s on the robot body), and forward fast in the swing
     out = {'n': n, 'dtc': dtc, 'period': clip.duration, 'side': {}}
     vs = []
     for s in SIDES:
@@ -902,7 +902,7 @@ def _report(body, clip, an, frames, intervals, F, fps, zr, clearance):
             mid = [frames[i]['meas'][s]['gap'] for i in range(a, b + 1)
                    if clearance > 0 and frames[i]['meas'][s]['lift_min'] >= 0.5 * clearance]
             # a drag: the swinging sole on the ground mid-swing, or anywhere in the swing moving faster than a toe leaving
-            # the ground at the lift (0.5 m/s) or a heel arriving at the strike does (the verifier's drags: 4.7-5.3 m/s)
+            # the ground at the lift (0.5 m/s) or a heel arriving at the strike does (a drag moves 4.7-5.3 m/s)
             touch = []
             for i in range(max(a, 1), b + 1):
                 m1, m0 = frames[i]['meas'][s], frames[i - 1]['meas'][s]

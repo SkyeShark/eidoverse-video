@@ -342,7 +342,7 @@ def make_glass(m, tint=(1.0, 1.0, 1.0), roughness: float = 0.02, alpha: float = 
 
     thin (default): an alpha-blended sheet with a glass sheen, so what sits just behind a pane stays sharp: a clock
         dial, a gauge, a picture under glass. EEVEE's screen-space refraction loses things a few millimetres behind
-        a pane (tested 11-07 on Poly Haven's alarm clock: refractive glass showed a dark disc, thin glass the dial).
+        a pane (on Poly Haven's alarm clock refractive glass shows a dark disc, thin glass the dial).
     refract=True: transmission 1, ray-traced refraction, SLAB thickness; for glass whose subject is well behind it
         (a window onto a room, a bottle on a table) where bending the view is the point.
     Both cast shadows that let light through."""

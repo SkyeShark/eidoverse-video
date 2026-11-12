@@ -1,6 +1,6 @@
 """examples/obstacle_course.js, the controller's full vocabulary on one course, directed as the WebGPU example directs it:
 
-    test_controller_maneuvers.py [--vrm aporia] [--tag NAME]
+    test_controller_maneuvers.py [--vrm aporia] [--tag NAME] [--dump f0-f1,...]
 
 The example's character (obstacle_course.json: aporia.vrm), its course (TERRAIN_CONFIG: eidoblend.course.EXAMPLES
 ['obstacle_course']), the controller terrain_base's (CONTROLLER_PRESETS['terrain_base']), and its renderFrame script
@@ -269,6 +269,8 @@ def main():
             abs(end[2] - top['floor0']) < 0.08, f'feet at {tuple(round(v, 2) for v in end)}, the platform at '
             f'{top["floor0"]:.2f} m from y {top["y0"]:.2f} to {top["y1"]:.2f}')
     R['worst'] = rep['worst']
+    if T.arg(ARGS, '--dump'):
+        T.dump_frames(R, rep, [tuple(int(v) for v in rg.split('-')) for rg in T.arg(ARGS, '--dump').split(',')])
     T.keyed_matches(R, me, frames)
     cam = follow_camera(sc, loco.ctrl, recs, lad['y0'])
     shots(sc, me, recs, segs, runs, cam)

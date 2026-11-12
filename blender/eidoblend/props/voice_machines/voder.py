@@ -36,7 +36,7 @@ fingerprint and smear breakup), glass, canvas decals, a canvas-2D drawing surfac
 drawn in code, as the engine drew them), small geometry builders (three's RoundedBox, Sphere, Cylinder, Box, Torus,
 Lathe), and the keyer.
 
-EEVEE translations of the engine's material terms (measured choices, see tools-guides/_drafts/voice-machines-b.md):
+EEVEE translations of the engine's material terms (measured choices, see tools-guides/voice-machines.md):
   aoNode            three applies AO to indirect light only. EEVEE's horizon scan already occludes the indirect light
                     at the 30 cm scale, so the R channel is not applied again; the 4 cm cavity term (B), which screen
                     space cannot resolve at a distance, darkens the base colour: albedo *= mix(1, 0.65 + 0.35 cav, ao).

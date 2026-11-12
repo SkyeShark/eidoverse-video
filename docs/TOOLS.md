@@ -44,6 +44,7 @@ subpackages load on first use.
 | [blender/tests/pipeline/hand_edit.py](../blender/tests/pipeline/hand_edit.py) | Test helper: a hand edit of a built `.blend`, done headless | [development](../tools-guides/development.md) |
 | [blender/tests/claudesona/basic_vrm/scene.py](../blender/tests/claudesona/basic_vrm/scene.py) | Scene example: the minimal VRM scene (`eidoverse/examples/basic_vrm.js`; `scene_claude.json` loads its own `claude.vrm`) | [claudesona](../tools-guides/claudesona.md) |
 | [blender/tests/sets_daisy_ocean/](../blender/tests/sets_daisy_ocean/) | The ocean set's parity tests (against the WebGPU modules run in Deno and an independent numpy sea) and its stills | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [blender/tests/sdf/engine\_march.py](../blender/tests/sdf/engine_march.py) | Test helper: the engine's own raymarch of an SDF solid, volume or mushroom cloud from a Blender camera, set beside the EEVEE renders | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [blender/tests/voice_machines_b/](../blender/tests/voice_machines_b/) | Probes and parity: the era-1 machines, the Speak & Spell, the tandem (two teletypes, the dark room) | [voice-machines](../tools-guides/voice-machines.md) |
 
 Each family's tests live in `blender/tests/<area>/` (renders land in its
@@ -343,7 +344,6 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [examples\_solids.py](../blender/eidoblend/sdf/examples_solids.py) | The solid `EXAMPLES` | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [texture.py](../blender/eidoblend/sdf/texture.py) | `make_sdf_texture` and `make_explosion_texture`: SDFs raymarched into images | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [volume.py](../blender/eidoblend/sdf/volume.py) | `create_sdf_volume`: a participating-medium SDF as a Blender Volume | [sdf-volumes](../tools-guides/sdf-volumes.md) |
-| [reference.py](../blender/eidoblend/sdf/reference.py) | The engine's raymarch run from a Blender camera | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [rhombic\_dodecahedron.py](../blender/eidoblend/sdf/rhombic_dodecahedron.py) | Rhombic dodecahedron voxels (`rhombic_dodecahedron.js`) | [sdf-volumes](../tools-guides/sdf-volumes.md), [geometry](../tools-guides/geometry.md) |
 | [helper.py](../blender/eidoblend/sdf/helper.py) | `register_sdf_helper` and `help()`, the engine's discoverable API reference | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [examples\_volumes.py](../blender/eidoblend/sdf/examples_volumes.py) | The volume `EXAMPLES` (explosions, fire, smoke), the lamps their emission casts, the froxel range | [sdf-explosions](../tools-guides/sdf-explosions.md) |

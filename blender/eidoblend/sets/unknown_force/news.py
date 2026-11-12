@@ -112,10 +112,9 @@ class News(CL.SetBase):
 
 def build(scene=None, opts=None, collection=None, name='set:news'):
     """Build the news set into `scene`. news.js reads no opts; these are the Blender edition's, for a piece of your
-    own: world (True: the set's night environment + hemisphere light become scene.world), fog (True: the materials
-    carry look['fog'] as three's FogExp2 did), shadows (True), crowd (True: the 79 pickets), ibl ('material': each
-    material's own environment light, as three; 'world': the environment as the world), tag ('CLANKER': the word
-    sprayed on the wall), signs (up to eight messages for the pickets' signs, each a list of lines or 'LINE / LINE';
+    own: world (True: the set's night environment + hemisphere light become scene.world, lighting the set through
+    EEVEE), fog (True: the materials carry look['fog'] as three's FogExp2 did), shadows (True), crowd (True: the 79
+    pickets), tag ('CLANKER': the word sprayed on the wall), signs (up to eight messages for the pickets' signs, each a list of lines or 'LINE / LINE';
     None keeps a slot's own), chainShadow (False: the fence, its chain link and its steel, casts no shadow from the
     real lamps, as none did in the WebGPU set), signNormals ('rest': the painted floods light the raised signs by their
     hanging-pose normals as news.js's positionNode left them, the crowd side bright; 'posed': by their true normals)."""
@@ -146,19 +145,19 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
 
     # ------------------------------------------------------------------------ texture sets (CC0, the library)
     S = {
-        'asphalt': L.pbr('Asphalt025C', res='2k', ao=True, disp=True),
-        'gravel': L.pbr('Gravel041', ao=True),
+        'asphalt': L.pbr('Asphalt025C', res='2k', disp=True),
+        'gravel': L.pbr('Gravel041'),
         'card': L.pbr('Cardboard002'),
-        'conc': L.pbr('Concrete048', ao=True),
-        'concD': L.pbr('Concrete033', ao=True),
+        'conc': L.pbr('Concrete048'),
+        'concD': L.pbr('Concrete033'),
         'concL': L.pbr('Concrete034', res='2k'),
         'galv': L.pbr('Metal049A', met=True),
-        'paint': L.pbr('PaintedMetal012', ao=True),
-        'corr': L.pbr('CorrugatedSteel009', res='2k', ao=True),
+        'paint': L.pbr('PaintedMetal012'),
+        'corr': L.pbr('CorrugatedSteel009', res='2k'),
         'shingle': L.pbr('Asphalt012'),
-        'grass': L.pbr('Ground037', res='2k', ao=True),
-        'mud': L.pbr('Ground106', res='2k', ao=True),
-        'siding': L.pbr('PaintedWood009C', res='2k', ao=True),
+        'grass': L.pbr('Ground037', res='2k'),
+        'mud': L.pbr('Ground106', res='2k'),
+        'siding': L.pbr('PaintedWood009C', res='2k'),
     }
 
     # a night environment for the metals: cold sky, sodium glow at the horizon, the floods' glare toward -Z
@@ -176,14 +175,9 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         return (r, g, b)
     env = L.env_tex(env_fn, 256, 128, name='news_env')
     N.parts['env'] = env
-    # each material's own envMap light, as in three (opts ibl='material', the default; see corridor.build), the world
-    # the hemisphere term alone; ibl='world': the environment is the world at 0.7 for all
-    ibl_mode = opts.get('ibl', 'material')
-    if ibl_mode == 'material':
-        L.ibl_env(env_fn, env_img=env, name='news_env')
+    # the night environment is the World at 0.7, with the hemisphere light: EEVEE lights every material with it
     if opts.get('world', True):
-        N.world = CL.make_world(L, 'news_world', env if ibl_mode == 'world' else None, env_i=0.7,
-                                hemi=(0x22324a, 0x0a0806, 0.09), scene=sc)
+        N.world = CL.make_world(L, 'news_world', env, env_i=0.7, hemi=(0x22324a, 0x0a0806, 0.09), scene=sc)
 
     # -------------------------------------------------- the floods, as analytic light (with the fence's shadow)
     FL = [{'p': (float(x), POLE_H, float(z)), 'd': (0.0, -math.sin(TILT), math.cos(TILT))} for x, z in POLES]
@@ -258,9 +252,8 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
     Ls['hemi'] = {'sky': 0x22324a, 'ground': 0x0a0806, 'intensity': 0.09, 'world': getattr(N, 'world', None)}
 
     def pm(S_, **o):
-        """news.js's pm: pbrMat with the set's environment at envMapIntensity 0.7 (unless given) and the fog."""
+        """news.js's pm: pbrMat with the set's fog (its environment is the World)."""
         o.setdefault('fog', fog)
-        o.setdefault('env_i', L.env_i(0.7))
         return L.pbr_mat(S_, **o)
 
     # ---------------------------------------------- the ground: compound yard, verge, road, sidewalk, lawns
@@ -339,7 +332,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         refl = refl + nb.w(SODIUM) * (streak(nb, P, V, (8.0, WP_Y, FACADE_Z + 0.35), 0.02, 0.25) * 0.5)
         em = c * flood + refl * (F * 0.6 + 0.03) * wet * nb.U('lights')
         return Mt.standard(c, rough=nb.clamp(rough, 0.03, 1), metal=0.0, normal=nb.normal_map(nrm, 0.8), emissive=em,
-                           fog=fog, ibl=L.ibl(0.8))
+                           fog=fog)
     M['ground'] = ground_mat()
     ground_geo = plane_geometry(260, 190).apply(m4(-5, 0, 18, -math.pi / 2, 0, 0))
     ground = L.mesh_object('news_ground', ground_geo, M['ground'], parent=root)
@@ -355,17 +348,15 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
                    macro=0.3)
     M['concrete'] = pm(S['concD'], name='news_concrete', tile=1.8, rough=(0.8, 0.15), tint=[0.55, 0.55, 0.55])
 
-    def simple(name_, col_fn, rough, metal=0.0, coat=None, env_i=None):
+    def simple(name_, col_fn, rough, metal=0.0, coat=None):
         Mt = L.mat(name_)
         nb = Mt.nb
-        return Mt.standard(col_fn(nb), rough=rough, metal=metal, coat=coat, coat_rough=0.03, fog=fog,
-                           ibl=L.ibl(env_i) if env_i else None)
+        return Mt.standard(col_fn(nb), rough=rough, metal=metal, coat=coat, coat_rough=0.03, fog=fog)
     M['porcelain'] = simple('news_porcelain',
-                            lambda nb: nb.w((0.16, 0.085, 0.05)) * (nb.mx_noise(nb.P() * 8.0) * 0.15 + 1.0), 0.18,
-                            env_i=1.0)
+                            lambda nb: nb.w((0.16, 0.085, 0.05)) * (nb.mx_noise(nb.P() * 8.0) * 0.15 + 1.0), 0.18)
     M['rubber'] = simple('news_rubber', lambda nb: nb.w((0.018, 0.018, 0.02)) * (nb.mx_noise(nb.P() * 30.0) * 0.2 + 1.0),
                          0.85)
-    M['glassDark'] = simple('news_glass_dark', lambda nb: nb.w((0.01, 0.012, 0.016)), 0.06, coat=1.0, env_i=1.4)
+    M['glassDark'] = simple('news_glass_dark', lambda nb: nb.w((0.01, 0.012, 0.016)), 0.06, coat=1.0)
 
     def lamp(rgb, k, name_, *u):
         """Light sources the eye looks into (unlit): rgb x k x the named uniforms."""
@@ -417,7 +408,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
             pools = pools + cone * nb.exp(nb.max(-dy, 0.0) * -0.16) * nb.step(P.y, WP_Y + 0.2)
         em = c * pools * SODIUM * 0.55 * nb.U('lights')
         return Mt.standard(c, rough=nb.clamp(nb.mix(nb.mix(r0.x * 0.5 + 0.45, 0.5, louvre), 0.38, paint_a), 0.05, 1),
-                           metal=louvre * 0.4, normal=nb.normal_map(n0, 0.7), emissive=em, fog=fog, ibl=L.ibl(0.4))
+                           metal=louvre * 0.4, normal=nb.normal_map(n0, 0.7), emissive=em, fog=fog)
     M['facade'] = facade_mat()
     bld = L.empty('news_monolith', parent=root)
     fb = L.bucket('news_facade')
@@ -448,7 +439,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
                   * nb.ss(0.2, 0.4, nb.abs(nb.fract(nb.atan2(q.z, q.x) * (6 / math.pi)) - 0.5)))
         return {'col': nb.mix(d['col'], nb.w((0.02, 0.02, 0.02)) + grille * 0.05, ring * top)}
     M['units'] = pm(S['galv'], name='news_units', tile=1.0, metal=0.6, rough=(0.6, 0.3), tint=[0.42, 0.44, 0.46],
-                    post=units_post, env_i=L.env_i(0.6))
+                    post=units_post)
     ub = L.bucket('news_roof_units')
     for zr in (FACADE_Z - 3.0, FACADE_Z - 6.2):
         x = BX0 + 3
@@ -491,7 +482,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         # wires glint in the floods (lit from either side: thin cylinders), the street's sodium from behind
         em = nb.w(HMI) * flood_at(nb, P, None, False) * 0.005 + nb.w(SODIUM) * 0.002
         return Mt.standard(gc * (0.3, 0.31, 0.33), rough=0.5, metal=0.8, emissive=em, alpha=coverage * sag,
-                           method='BLENDED', fog=fog, ibl=L.ibl(0.6))
+                           method='BLENDED', fog=fog)
     M['chain'] = chain_mat()
     fence = L.empty('news_fence', parent=root)
     flags_f = {'assembly': 'news_fence', 'noSupportCheck': True}
@@ -549,8 +540,7 @@ def build(scene=None, opts=None, collection=None, name='set:news'):
         nb = d['nb']
         return {'emissive': d['col'] * flood_at(nb, nb.P(), None, False) * 0.014}
     M['fenceSigns'] = pm(S['paint'], name='news_fence_signs', tile=0.5, rough=(0.5, 0.2),
-                         recolor=lambda c, nb: nb.tex(sign_tex, nb.uv())[0] * (nb.lum(c) * 0.35 + 0.75), post=fsign_post,
-                         env_i=L.env_i(0.6))
+                         recolor=lambda c, nb: nb.tex(sign_tex, nb.uv())[0] * (nb.lum(c) * 0.35 + 0.75), post=fsign_post)
     sg = L.bucket('news_fence_signs')
 
     def plate(x, y, z, tile, ry=0.0):
@@ -1081,8 +1071,7 @@ def _build_crowd(L, N, crowd, S, fam, flood_at, fog, no_floods, signs=None, sign
         phone_col = nb.mix((0.55, 0.7, 1.0), (1.0, 0.85, 0.6), nb.step(0.7, seed))
         screen = phone_col * wc.y * is_phone * 3.5
         fl = flood_at(nb, nb.P(), nb.N_local()) * (0.5 / math.pi)
-        return Mt.standard(c, rough=0.85, metal=0.0, emissive=c * fl + screen * nb.U('lights'), fog=fog,
-                           ibl=L.ibl(0.3))
+        return Mt.standard(c, rough=0.85, metal=0.0, emissive=c * fl + screen * nb.U('lights'), fog=fog)
 
     objs = []
     for v, vname in enumerate(variants):

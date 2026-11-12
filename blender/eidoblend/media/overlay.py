@@ -25,8 +25,8 @@ so it landed as drawn and left glows and soft edges in display light (the invers
 into a bright box), split by smoothstep(0.55, 0.95, alpha), because a material cannot see the film under it. The
 compositor can: chain_overlay (authored=True) takes the film at the overlay slot into display space with its own
 view transform, lays the overlay over it there exactly as the display route does, and brings the result back to
-scene light through the inverse, so solid ink, glows, soft edges and fades all land as drawn (measured 11-07
-against the display route: the lyric's glow ring within 1-2 levels where the old per-pixel inverse was 46 off).
+scene light through the inverse, so solid ink, glows, soft edges and fades all land as drawn (measured against the
+display route: the lyric's glow ring within 1-2 levels, where a per-pixel inverse is 46 off).
 AgX cannot show every display colour: neutrals and moderately saturated ink (teal #27e0a0) come back within 2/255,
 saturated colours do not (cyan #00d4ff 16/255 off, #ff2d95 21, pure red 26, #ffd400 50, pure blue 67). When such
 ink must be exact and no signal effect runs over it, use the display route.
@@ -438,7 +438,7 @@ def subtitle_cues(lines, pre=0.0, post=0.25, max_chars=None):
 
 def _seq_color(c):
     """An sRGB colour -> a text strip's colour: strips hold display values in the sequencer's sRGB space
-    (measured 11-07: a linearised '#ffd400' rendered orange), so the authored hex goes in as is."""
+    (a linearised '#ffd400' renders orange), so the authored hex goes in as is."""
     r, g, b, a = raster.color(c)
     return (r / 255.0, g / 255.0, b / 255.0, a / 255.0)
 

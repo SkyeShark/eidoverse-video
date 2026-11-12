@@ -466,12 +466,14 @@ Each writes `out/<test>.json` (the report and its PASS / FAIL checks), its `.ble
 - **My hands on a move are a few centimetres off**: the vault's knuckles about 3.7 cm off the wall's top, a ladder
   grip a median 4.9 cm from its rung (above).
 - **My seats' residuals.** Sitting on the ground I do a long sit, my legs out along the floor (my hips flex 98° at most
-  and my knees 112°, so I cannot fold into the library's cross-legged clip); its sit-down crossfade dips me 7 cm under
-  the floor for a frame and the rise pops ([maneuvers](maneuvers.md#not-yet-ported)). In a chair a sole slides 8 to
-  10 mm a frame where the seat hands over to the plant at the end of the stand-up, and the walk's first step after a
-  stand-up has 8 frames with no foot down: the foot planted after the stand-up is 6 to 10 cm out of my reach, so the
-  plant lets it go while the other swings. My bake does not read `seat_plan` yet, so a seat through my own seated
-  state sits on air where I stood.
+  and my knees 112°, so I cannot fold into the library's cross-legged clip), my heels resting on it; my boots and arms
+  stay out of the floor through the sit-down, the hold and the rise, lying down too
+  ([maneuvers](maneuvers.md#not-yet-ported)). My ankle has no twist, so in a chair a resting foot turns with my shin:
+  the controller turns it about the middle of what rests on the floor, and late in chair A's stand-up my right sole
+  still slides 6.2 mm in a frame (the check's limit is 6); on the 0.56 m chair B a foot hanging on its toes near my
+  ankle's pitch stop rolls 4° in one frame of the seated loop, its toes sliding 10.2 mm. A walk that sets off more
+  than 25° off my heading (a stand-up's first steps) turns on the spot first, so one foot is always down. My bake does
+  not read `seat_plan` yet, so a seat through my own seated state sits on air where I stood.
 - **My left hand's set-down is less exact than my right's.** From the mirrored stance the left grasp sits near my
   wrist's extension stop, and setting the can down my hardware leaves the hand up to 4.4° off its planned turn (6.6°
   on the frame it opens) against the right's 1.3°: the can lands that far off upright and tips onto its base over

@@ -179,7 +179,7 @@ def glyph_atlas(font_path=None):
             blf.size(fid, 30)
             blf.color(fid, 1.0, 1.0, 1.0, 1.0)
             # textBaseline 'middle' at gh / 2 + 2 puts one baseline under every glyph. Placed to match the WebGPU
-            # harness's own canvas (@napi-rs/canvas, drawn with this code, 11-07): '@' inks rows 14-40 of 56 (top
+            # harness's own canvas (@napi-rs/canvas, drawn with this code): '@' inks rows 14-40 of 56 (top
             # down) in both; the glyph widths agree within a pixel
             _w, h_full = blf.dimensions(fid, '@')
             base = gh / 2.0 - h_full / 2.0 - 4.0
