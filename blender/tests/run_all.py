@@ -176,7 +176,7 @@ M += [bl('fx', 'test_noise_parity.py'), bl('fx', 'test_swe_erosion.py', 'render=
 M += [gpu('fx', s) for s in ('test_cloth.py', 'test_cloth_map.py', 'test_fire_teapot.py', 'test_iso_field.py',
                              'test_particles_campfire.py',
                              'test_swe_basin.py')]
-M += [gpu('fx', 'test_fire_shadows.py', 'cases=shadows,spokes,fire')]
+M += [gpu('fx', 'test_fire_shadows.py', 'cases=shadows,spokes,fire,heights')]
 M += [bl('particles', 'test_morph_parity.py'), bl('particles', 'test_targets.py', timeout=3600)]
 M += [gpu('particles', s) for s in ('test_particles_presets.py', 'test_display_match_numeric.py',
                                     'test_fire_tongue_rotation.py', 'test_procedural_material_cloud.py',

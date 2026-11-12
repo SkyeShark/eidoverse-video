@@ -179,10 +179,10 @@ boom.bake(1, 120)
 light_from_surface(boom, count=1)
 ```
 
-**Reflections.** EEVEE draws no volume in its ray-traced reflections: a
-chrome ball beside the fire shows the lamp's round highlight. The engine's
-`nuclear_explosion` marched reflected rays through its cloud for metal
-surfaces; here the lamps give metals their highlight.
+**Reflections.** EEVEE draws no volume in its ray-traced reflections or its
+light probes: a chrome ball beside the fire shows the lamp's round
+highlight. The mushroom cloud reaches metal through light probes and
+stand-ins (`reflections=True`, below).
 
 ## EEVEE's froxels
 
@@ -280,11 +280,13 @@ fit its box; the effect runs it to 20 × scale, the 2 km ring.
 | `timeOffset`, `loopSeconds` | the shader's phase and period (uniforms; `nuke.uniforms['time_offset'] = 3`, then bake) |
 | `opacity` | one Value node in a shader group that both volumes' materials use, multiplying density and emission; each lamp's energy is a driver, its keyed power (`glow_power`) × that socket. `key_opacity(frame, v)` keys it (`nuke.opacity_socket` is the socket), and a key set on the socket any other way fades the lamps too. Exact for thin smoke; the dense core fades later than the screen mix did |
 | `volSteps` | accepted: the grids hold the whole cloud, so no step count limits it |
-| `surfSteps`, `reflectSteps`, `maxT`, `width`, `height` | the screen march's budgets and size: accepted and reported. The cloud is drawn at any distance, and its reflections are EEVEE's |
+| `surfSteps`, `maxT`, `width`, `height` | the screen march's budgets and size: accepted and reported. The cloud is drawn at any distance |
+| `reflectSteps` | the reflection march's budget: accepted and reported. The reflections are the light probes' (`reflections`, below) |
 | `disableForPerfTest` | the volumes are built hidden and nothing is baked |
 | (extra) `quality` | `'fast'` / `'balanced'` / `'high'`: voxels of 0.16 / 0.08 / 0.055 original units × scale |
 | (extra) `lights`, `light_scale` | glow lamps per frame (3: the surge, the stem and the cap), and their multiplier |
 | (extra) `bake` | `(fs, fe)` or `'scene'`: bake now |
+| (extra) `reflections`, `reflection_density` | the light probes' stand-ins of the cloud (below), and the medium's density per metre where their surface sits (0.75) |
 
 `test_nuclear_explosion.py` renders six stills through the loop over a town
 of boxes, beside the effect's own march: the flash and the young ring, the
@@ -311,6 +313,53 @@ The lamps' drivers read that socket, so `fx.key('nuclear_explosion',
 `test_volume_scene_integration.py` registers the hook as written and checks
 this: lamp energy 0 at opacity 0, rising with the key. `nuke.sync_lights()`
 remains, and only makes sure every lamp has its driver.
+
+### Chrome and wet metal reflect the cloud
+
+The engine marched the cloud along the reflected rays of metal surfaces.
+EEVEE's ray tracing and its light probes draw no volume, so here the
+reflection goes through a sphere light probe round each piece of metal,
+which captures a stand-in of the cloud that only light probes see:
+
+```python
+nuke = NX.apply_to(scene, camera, {'origin': [0, 0, -120], 'scale': 3.0, 'reflections': True},
+                   cache_dir=os.path.join(out_dir, 'nuke_cache'))
+nuke.reflect_in([car, sign, puddle_rim])     # a sphere probe round each
+nuke.bake(1, 480)
+```
+
+- `reflections=True` gives each volume a stand-in: Geometry Nodes take the
+  Volume object's own density grid to a mesh (Grid to Mesh at
+  `reflection_density`, 0.75 per metre), and each vertex emits the
+  medium's source function, emission ÷ density, sampled a voxel inside.
+  That is the radiance an optically thick medium shows: the cap's cream and
+  orange, the surge's grey. The stand-ins read the Volume objects live, so
+  they follow every baked frame, and their emission takes the effect's
+  `opacity` with the media. Camera and shadow rays are off and volume probes
+  leave them out, so only the reflection probes see them.
+- `reflect_in(objects)` puts a sphere probe round each object, its
+  influence wide enough to take the object at full weight. Each object
+  leaves the sphere probes (Object > Visibility > Light Probes > Sphere;
+  `remove()` gives it back), so it does not block its own probe's view from
+  inside it, and the probe's near clip stays at 1 cm. A probe clips with a
+  plane per cube face, so a clip at the object's reach would cut away the
+  ground it stands on. Its parallax is a sphere at the cloud's distance,
+  where the probe's picture of the cloud belongs. Left at its default, a
+  probe's parallax is its own influence, and a cloud 48 m off reflects twice
+  too large. `reflect_in(objs, parallax=metres)` sets it by hand.
+
+The probe filters its picture by the metal's roughness, as the engine's
+blur did. `test_volume_reflections.py` measures a chrome ball (roughness
+0.05) with the cloud behind the camera, against EEVEE's own render of the
+cloud from the ball's centre looked up along each pixel's reflected ray.
+Without the option the ball shows none of the cloud (98 % error). With it
+the cap, stem and surge are in place at the right size and colour, softer
+than a perfect mirror: 25 % error over the pixels that should show the
+cloud, most of it at the softened edges. The probe's resolution is not what
+softens it: at 2048 (`scene.eevee.gi_cubemap_resolution`) the error is 24 %.
+Its still `reflections_look.png` puts that ball and a brushed one
+(roughness 0.3) on dark ground at dusk: the chrome shows a small, bright
+mushroom on its horizon, the brushed metal a soft warm glow.
 
 ## Probes
 
@@ -347,18 +396,24 @@ remains, and only makes sure every lamp has its driver.
 - `test_volume_reopen.py`: a baked bonfire and blast with keyed lamps and
   keyed opacity, saved, then rendered by a fresh Blender that only opens
   the file. Its frames match the session's exactly, and it plays.
+- `test_volume_reflections.py`: the mushroom cloud in a chrome ball through
+  `reflections=True` and `reflect_in`, against the cloud seen from the ball,
+  with the probe at 512 and at 2048, and the two balls at dusk
+  (`--no-render`: the stand-ins, the probe's settings and `remove()`).
 
 ## Not yet ported
 
 - A volume's light on the scene is its keyed lamps, one to four point
   lights: the light's angular shape (a flame leaning one way) and its
   flicker within a frame are not carried.
-- EEVEE's ray-traced reflections show no volume, and a sphere light probe
-  round the reflecting object does not carry one either
-  (`test_volume_scene_integration.py -- cases=probe_reflect`). So the
-  engine's `nuclear_explosion` reflection pass, which marched the cloud
-  along the reflected rays of metal surfaces and blurred it by roughness,
-  has no EEVEE counterpart but the lamps' highlight.
+- EEVEE's ray-traced reflections and light probes draw no volume
+  (`test_volume_scene_integration.py -- cases=probe_reflect`). The mushroom
+  cloud reaches metal through its probe stand-ins (above), an opaque
+  surface emitting the medium's source function: thin smoke under
+  `reflection_density` is not in the reflection, and wisps reflect with a
+  hard edge, softened only by the metal's roughness. The other volume
+  examples (fires, smoke, explosions) have no stand-ins: metal shows only
+  their lamps' highlight.
 - Detail finer than two voxels: the grid holds what its `cells` resolve. The
   engine sampled per pixel.
 - `post(sum)` is folded per sample (a power on the density, then scales),

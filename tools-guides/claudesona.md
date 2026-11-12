@@ -240,6 +240,32 @@ unsnap, an ejection and a lingering landing: every badge within 0.002 mm of
 the JS's, visible on exactly the same frames, glow and ghost equal; the sparks
 within 0.001 mm.
 
+**Thin details hold still in motion.** The JS anti-aliased every seam,
+stitch and pipe in screen space with `fwidth`: a band thinner than a pixel
+widens to the pixel and dims, so its light stays the same and it does not
+crawl as the character or camera moves. Shader nodes have no screen
+derivatives, so `tuta.py` estimates the same `fwidth` per pixel. It starts
+from the pixel's footprint, `props.voice_machines.pixel_footprint`: the
+metres one pixel spans at the shading point, measured in the shader, so it
+follows camera cuts, lens keys and both projections. It stretches that by
+the surface's tilt to the view (at most 4× near the silhouette), averages
+it over the band's direction on screen, and divides by the model's scale
+into rest metres. The seams, stitches, piping, zip, rip-stop grid, knee
+panels, lightning inlay, pockets, grommet, boots, face paint and
+catchlights all take it; the badges' ghosts take it in badge millimetres,
+and the webbing's ribs in UV units through the strap mesh's measured UV
+density. The catchlights' faint scanline fades out before it aliases, as
+the JS's did. `test_tuta_aa.py` frames the whole figure at 960 × 540 (about
+3 mm of suit a pixel, the 1.1 mm stitches under a pixel) and moves the
+image 0.37 px a frame. On the seams and stitches, each pixel's second
+difference in time drops by a third against the edges drawn at a fixed
+0.2 mm (mean 0.0148 against 0.0218, 99th percentile 0.095 against 0.134),
+close to what a moving edge leaves anyway, and the figure's mean level is
+unchanged. The estimate averages over a band's direction on screen where
+the JS's `fwidth` took each band's own, so near the silhouette a band
+running along the surface's slope can come out up to about three times
+softer than the JS's, with the same light.
+
 ## Spring bones — `characters/springs.py`
 
 ```python
@@ -389,6 +415,8 @@ bash run_blender.sh blender/tests/claudesona/test_face.py
 #   test_turntable.py   test_basic_vrm.py
 #   test_pbr_tuta.py  (the PBR look on the TuTa: glow drivers, bump, face paint, both orders)   [--no-render]
 #   test_keyed_film.py  (three outfits, the TuTa's badges and an ejection, springs: saved, reopened, re-rendered)
+#   test_tuta_aa.py   (the footprint in every TuTa material; the suit's shimmer under a sub-pixel move)   [--no-render]
+#   test_tuta_noise.py  (no render: the TuTa's value noise against the JS's, in distribution and in space)
 bash run_blender.sh blender/tests/claudesona/test_face_geometry.py     # no render: the face vs the JS's
 ```
 
@@ -398,14 +426,16 @@ the engine's three-vrm (`three_vrm_parity.mjs`, `face_parity.mjs`,
 
 ## Not yet ported
 
-- **The TuTa's screen-space anti-aliasing.** The TSL widens a band thinner
-  than a pixel and dims it (fwidth); shader nodes have no screen derivatives,
-  so edges are drawn at a fixed 0.2 mm and EEVEE's samples average them, and
-  the TSL bump from screen derivatives is Blender's Bump node on the same
-  height. Thin stitches shimmer more in motion at low sample counts.
-- **The TuTa's random draws.** Its fleck, slub, grime and fuzz noise uses
-  Blender's White Noise of the same integer cells: the same statistics, not the
-  same fleck positions.
+- **The TuTa's random draws.** Its fleck, slub, grime and fuzz noise is the
+  JS's value noise over the same integer cells, but each cell's value is
+  Blender's White Noise where the JS hashed the cell with three's PCG. Over
+  200,000 points the two are the same noise
+  (`test_tuta_noise.py`: mean 0.4996 against 0.5005, standard deviation
+  0.1849 against 0.1846, the correlation between points 0.25, 0.5 and 1 cell
+  apart equal to three decimals), and a different draw (point to point
+  correlation 0.002): the flecks have the JS's size, spacing and contrast,
+  in other places. Three's hash multiplies and XORs 32-bit integers, and
+  EEVEE's shader nodes have float math only.
 - **`boater_band`**, listed in the JS's optional layers, has no object in
   `claude_suit_wardrobe.vrm` (in either edition).
 - **Aletheia's four cat-tail chains** follow three-vrm within about 10 mm at

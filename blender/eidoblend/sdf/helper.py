@@ -111,6 +111,8 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
   carrier ('atlas' | 'vertex'), normals ('corner' | 'vertex'), iso (level set, for distance estimators),
   refine, qef_lambda, min_component, materials {mat id: bpy Material}, material_settings, cache_dir, time,
   shade_as ('albedo' | 'emission': a map + shade spec with no surface renders its shade() colour),
+  view_terms (b, s) -> {Principled input: value}: shade()'s view-dependent part per pixel (s.n_dot_v, s.fresnel,
+  s.facing, s.normal, s.incoming, s.local, the baked channels s.albedo ... s.emission),
   cut_by_bounds (a shape that runs past its box on purpose), atlas_budget, pack_images,
   location / rotation / scale / name / scene / collection, build.
   Python SDFs read S.time (uTime) and S.uniform('uName') while they are evaluated; a Python shade or surface may
@@ -128,6 +130,7 @@ lights, shadows, reflects and depth-tests it like any mesh. EXAMPLES are templat
   light_from_emission(vol) / light_from_surface(sdf): keyed lamps (EEVEE's volume emission lights no surface)
   fit_volume_range(scene, camera, [vols]): the froxel range over these and every other scene volume; build_still(vol, t)
   nuclear_explosion.apply_to(scene, camera, {origin, scale, timeOffset, loopSeconds, opacity}) -> .bake(fs, fe) .update(t) .key_opacity(f, v)
+  {..., reflections: True} + .reflect_in([metal objects]): chrome and wet metal reflect the cloud through sphere probes
 
 == Screens ==
   make_sdf_texture(recipe='mandelbulb' | 'sierpinski_tetra' | 'menger_sponge' | 'gyroid', width, height, ...)

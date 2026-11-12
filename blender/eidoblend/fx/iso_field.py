@@ -8,7 +8,8 @@ Same field contract as the engine: `field[idx(x, y, z)] = value` with idx = x + 
 engine's axes (y up), a node-centred grid spanning x, z in [-half, half] and y in [0, 2*half] around the
 object's location, the surface where field > iso (high inside).
 
-    iso = make_iso_field(resolution=64, half=0.5, iso=50, color='#9aa2ac', metalness=0.85, roughness=0.35)
+    iso = make_iso_field(resolution=64, half=0.5, iso=50, color_hex='#9aa2ac', metalness=0.85, roughness=0.35,
+                         roughness_node=lambda b, pos, nrm: ...)   # color_node, roughness_node, emissive: TSL hooks
     iso.field[iso.idx(x, y, z)] = 100
     iso.upload()                                          # a static surface, meshed now
     iso.bake(1, 120, update=lambda frame, t, iso: ...)    # or a field per frame -> a PLY sequence
@@ -144,11 +145,13 @@ def _write_ply(path, pts, faces):
 
 
 def make_iso_field(resolution=64, half=0.5, iso=50.0, color_hex='#9aa2ac', metalness=0.85, roughness=0.35,
-                   location=(0.0, 0.0, 0.0), material=None, color_node=None, emissive=None, scene=None,
-                   name='iso_field', cache_dir='//iso_cache'):
-    """The engine's makeIsoField. color_node(builder, position, normal) and emissive(builder, position, normal)
-    are the hooks (they receive the shading point and normal as eidoblend.fx._nodes values, the way the
-    engine's TSL hooks received the hit point and normal) and return an RGB Vec."""
+                   location=(0.0, 0.0, 0.0), material=None, color_node=None, roughness_node=None, emissive=None,
+                   scene=None, name='iso_field', cache_dir='//iso_cache'):
+    """The engine's makeIsoField. color_node(builder, position, normal), roughness_node(builder, position, normal)
+    and emissive(builder, position, normal) are the hooks: they receive the shading point and normal (world space)
+    as eidoblend.fx._nodes values, the way the engine's TSL hooks received the hit point and normal, and return an
+    RGB Vec (color_node, emissive) or a scalar Expr or number (roughness_node). They build the material made here;
+    a `material` passed in is used as it is."""
     import bpy
     from ._nodes import Builder
     if material is None:
@@ -158,12 +161,14 @@ def make_iso_field(resolution=64, half=0.5, iso=50.0, color_hex='#9aa2ac', metal
         bsdf.inputs['Base Color'].default_value = (*color(color_hex), 1)
         bsdf.inputs['Metallic'].default_value = metalness
         bsdf.inputs['Roughness'].default_value = roughness
-        if color_node or emissive:
+        if color_node or roughness_node or emissive:
             b = Builder(material.node_tree)
             geo = b.node('ShaderNodeNewGeometry')
             pos, nrm = b.vec(geo.outputs['Position']), b.vec(geo.outputs['Normal'])
             if color_node:
                 b.link(color_node(b, pos, nrm), bsdf.inputs['Base Color'])
+            if roughness_node:
+                b.link(roughness_node(b, pos, nrm), bsdf.inputs['Roughness'])
             if emissive:
                 b.link(emissive(b, pos, nrm), bsdf.inputs['Emission Color'])
                 bsdf.inputs['Emission Strength'].default_value = 1.0

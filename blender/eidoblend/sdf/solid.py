@@ -290,7 +290,8 @@ class SdfObject:
             self._set_corner_normals(me, c)
         else:
             self.set_custom_normals(me, three_to_blender(self._vertex_normals(c)), 'POINT')
-        mat = M.vertex_material(self.name + '_surface', const, self.spec.material_settings)
+        mat = M.vertex_material(self.name + '_surface', const, self.spec.material_settings,
+                                view_terms=self.spec.view_terms)
         me.materials.append(mat)
         self.material = mat
         self.stats['constants'] = sorted(const)
@@ -417,7 +418,8 @@ class SdfObject:
         for key, p in paths.items():
             self.images[key] = M.load_atlas_image(p, f'{self.name}_{key}')
         mat = M.atlas_material(self.name + '_surface', {k_: v for k_, v in self.images.items() if k_ != 'normal'},
-                               const, self.spec.material_settings, normal_image=self.images.get('normal'))
+                               const, self.spec.material_settings, normal_image=self.images.get('normal'),
+                               view_terms=self.spec.view_terms)
         me.materials.append(mat)
         self.material = mat
         self.stats['constants'] = sorted(const)
@@ -599,7 +601,8 @@ class SdfObject:
         L.new(geo, sm.inputs['Geometry'])
         geo = sm.outputs[0]
         if carrier == 'vertex':
-            mat = M.vertex_material(self.name + '_surface', {}, self.spec.material_settings)
+            mat = M.vertex_material(self.name + '_surface', {}, self.spec.material_settings,
+                                    view_terms=self.spec.view_terms)
         else:
             images = {}
             for key in keys:
@@ -608,7 +611,7 @@ class SdfObject:
                 images[key] = M.load_atlas_image(first, f'{self.name}_{key}_seq', sequence=(fs, fe - fs + 1))
             mat = M.atlas_material(self.name + '_surface', {k_: v for k_, v in images.items() if k_ != 'normal'},
                                    dict(constants or {}), self.spec.material_settings,
-                                   normal_image=images.get('normal'))
+                                   normal_image=images.get('normal'), view_terms=self.spec.view_terms)
             for node in mat.node_tree.nodes:
                 if node.type == 'TEX_IMAGE':
                     iu = node.image_user

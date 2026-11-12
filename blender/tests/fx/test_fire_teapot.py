@@ -8,7 +8,8 @@ looking at (0, 3.6, 0) in three's axes. Bakes on the GPU, renders a few stills a
         bash run_blender.sh <worktree>/blender/tests/fx/test_fire_teapot.py [-- frames=1,24,48 fps=24 end=48]
 
 More args: preset=raw (the engine's own numbers, look=None), match=0|aces|aces_compose (display_match),
-path=, emis=, spread=, endcolor=rrggbb, smoke=, clarity=, lights=, exposure=, look=AgX_-_Punchy, tag=_name.
+path=, emis=, spread=, endcolor=rrggbb, smoke=, clarity=, lights=, exposure=, look=AgX_-_Punchy, tag=_name,
+glow=0 (the teapot without make_fire_glow, the fire's glow on the burning mesh), glow_strength=.
 The teapot spins through a driver on `frame`, so the warmup's pre-roll spins it too, as the engine's did.
 Writes blender/tests/fx/out/fire_teapot<tag>_f####.png and the .vdb cache under out/fire_cache/.
 Reference: E:/eidoverse-video-desktop-work-folder/firetest/fire.mp4 (WebGPU, 1600x900).
@@ -138,6 +139,8 @@ elif args.get('match') in ('aces', 'aces_compose'):
 fire = fxfire.create_volume_fire(teapot, key_light=key, cache_dir=os.path.join(OUT, 'fire_cache'),
                                  look=None if args.get('preset') == 'raw' else 'engine', **opts)
 fire.make_lava_emissive(tm)
+if args.get('glow', '1') != '0':
+    fire.make_fire_glow(tm, strength=float(args.get('glow_strength', 1.0)))   # the fire's glow on the teapot
 t0 = time.time()
 fire.bake(1, END)
 print(f'[test_fire] bake {time.time() - t0:.1f} s; sim time at frame {END}: {fire.sim_time:.3f} s'

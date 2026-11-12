@@ -58,7 +58,7 @@ class SdfSpec:
         voxel=None, cells=None, texels=None, carrier='atlas', normals='corner', brick=4, lipschitz_k=None,
         materials=None, material_settings=None, cache_dir='//sdf_cache', pack_images=False, time=0.0,
         animated=False, iso=0.0, refine=3, qef_lambda=0.01, min_component=0, atlas_budget=16_777_216,
-        shade_as='albedo', cut_by_bounds=False,
+        shade_as='albedo', cut_by_bounds=False, view_terms=None,
     )
 
     def __init__(self, **kw):

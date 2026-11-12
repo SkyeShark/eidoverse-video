@@ -21,7 +21,10 @@ scattering. Kept from the engine: the temperature -> colour ramp (fireRamp, hue,
 formula (fireRamp(T) * T^(6-spread) * intensity * (density + 0.15) * 400/d^2 to the key light), the simplex
 detail noise on density (an exact node port of TSL snoise), the fire's light with its ImprovedNoise flicker,
 sway and colour noise, split into a surface light and a volume light the way the engine's isVolume did, and
-the lava-crack emissive for the burning mesh (Blender's Noise Texture is MaterialX's mx_noise exactly).
+the lava-crack emissive for the burning mesh (Blender's Noise Texture is MaterialX's mx_noise exactly). The
+engine's shadowMesh is a shadow caster over the ground (shadow_floor: EEVEE's volumes shadow no surface), and
+make_fire_glow puts the fire's glow on the burning mesh, which the engine's volume pass, composited with no
+depth test, showed through it.
 
 The engine's look (look='engine', ENGINE_LOOK): the engine showed its fire through three's ACESFilmic, the
 Blender edition through AgX; a display match (_look.py) makes the ramp display under the scene's view as it
@@ -100,9 +103,35 @@ DEFAULTS = dict(
     # when the fire is created (rebuild after changing them)
     display_match=None,
     display_path=2.0,              # metres of flame a pixel's light gathers over (the table's per-pixel guess)
+    # the engine's shadowMesh: the smoke's soft shadow from the key light on the ground at this Blender z (None:
+    # none). EEVEE's volumes cast no shadow on surfaces, so, as the engine did, a separate caster carries it: a plane
+    # shadow_lift metres over the ground (EEVEE's shadow bias lets a caster closer than about 3 cm cast nothing),
+    # seen by shadow rays only, its opacity per texel the smoke's transmittance toward the key light, worked out from
+    # every baked frame's grids (shadow_resolution texels across)
+    shadow_floor=None,
+    shadow_lift=0.05,
+    shadow_resolution=128,
     cache_dir='//fire_cache',
     name='fire',
 )
+
+# fluid_grid.js's raymarch and light-node options that EEVEE's volume rendering has no knob for: passing one says
+# what EEVEE does in its place (volume-fire.md, "Not yet ported")
+_PROJECTION = ("the engine's point light coloured the floor through a light colour node (rotating radial noise); "
+               "EEVEE ignores light node trees")
+ENGINE_ONLY = dict(
+    shadow_absorption="the engine's 2-tap shadow march toward the key light scaled the smoke's self-shadow by it; "
+                      "EEVEE shadows the smoke with its own extinction (smoke_density) under volumetric shadows "
+                      "(configure_eevee_for_fire), and the ground with the same extinction through shadow_floor",
+    shadow_ambient="the least light the engine's self-shadowed smoke kept (added to its shadow); in EEVEE the "
+                   "shadowed smoke takes the World's light",
+    powder_strength="Principled Volume has no powder (edge self-shadowing) term",
+    multi_scattering="Principled Volume has no multiple-scattering octave: EEVEE's volume light is single "
+                     "scattering under volumetric shadows",
+    projection_radius=_PROJECTION, projection_frequency=_PROJECTION, projection_noise_fade=_PROJECTION,
+    projection_center_fade=_PROJECTION,
+)
+GLOW_MODIFIER = 'fire_glow'        # make_fire_glow's Geometry Nodes modifier on the burning mesh
 
 # The engine's LOOK under the Blender edition's AgX (create_volume_fire(look='engine'), the default). The
 # engine's own numbers (DEFAULTS, look=None) render red-salmon here: AgX runs bright red to salmon and pink
@@ -299,6 +328,7 @@ class VolumeFire:
     volume_object   the Volume object playing the baked .vdb sequence (engine: volumeMesh)
     point_light     the fire's light on surfaces (engine: pointLight, isVolume = 0 branch)
     volume_light    the fire's light on the smoke (engine: the same light's isVolume = 1 branch)
+    shadow_mesh     the smoke's shadow caster over the ground, with shadow_floor (engine: shadowMesh), else None
     material        the volume material (engine: volumetricMaterial)
     params          the resolved options (engine: params)
     sim_time        seconds of simulation after the last bake (engine: simTime)
@@ -321,6 +351,7 @@ class VolumeFire:
         self._lava_values = []
         self._build_volume(bpy)
         self._build_lights(bpy)
+        self.shadow_mesh = self._build_shadow_mesh(bpy) if o['shadow_floor'] is not None else None
 
     # ---------------------------------------------------------------------------------------------
     # scene objects
@@ -427,8 +458,9 @@ class VolumeFire:
         return hue(c, math.radians(o['fire_hue']))
 
     def _display_table(self, kind, path, n_t=64, n_s=128, s_range=(-14.0, 10.0)):
-        """(image, s_range, n_t, n_s) of the display match for the fire ('fire') or lava ('lava') colours, or
-        None when display_match is off or the scene's colour pipeline cannot be read."""
+        """(image, s_range, n_t, n_s) of the display match for the fire ('fire'), the burning mesh's glow ('glow':
+        the fire's colours on a surface) or lava ('lava') colours, or None when display_match is off or the
+        scene's colour pipeline cannot be read. One table per colour family and path, shared by its users."""
         o = self.params
         if not o['display_match']:
             return None
@@ -437,18 +469,23 @@ class VolumeFire:
                              f"not {o['display_match']!r}")
         if o['display_match'] == 'aces_compose' and kind == 'fire':
             return None                  # the volume emits the raw ramp; create_fire_compose matches its pass
+        family = 'lava' if kind == 'lava' else 'fire'
+        tables = self.__dict__.setdefault('_tables', {})
+        if (family, float(path)) in tables:
+            return tables[(family, float(path))]
         try:
             view = getattr(self, '_view', None) or _look.SceneView(self.scene)
             self._view = view
-            cols = self._ramp_colors(n_t, sat=o['saturation_amount'] if kind == 'lava' else None)
+            cols = self._ramp_colors(n_t, sat=o['saturation_amount'] if family == 'lava' else None)
             table, emax, emean = _look.match_table(cols, view, path=path, s_range=s_range, n_s=n_s)
         except Exception as e:  # noqa: BLE001
             print(f'[fx.fire] display match unavailable ({e!r}): emitting the raw ramp')
             return None
-        img = _look.table_image(f'{self.name}_look_{kind}', table, self.cache_dir)
-        print(f'[fx.fire] {kind} display match ({view.name}, exposure {view.exposure:+.2f}, path {path} m):'
+        img = _look.table_image(f'{self.name}_look_{family}', table, self.cache_dir)
+        print(f'[fx.fire] {family} display match ({view.name}, exposure {view.exposure:+.2f}, path {path} m):'
               f' max display error {emax * 255:.1f}/255, mean {emean * 255:.2f}/255')
-        return img, s_range, n_t, n_s
+        tables[(family, float(path))] = (img, s_range, n_t, n_s)
+        return tables[(family, float(path))]
 
     def _build_lights(self, bpy):
         o = self.params
@@ -473,6 +510,158 @@ class VolumeFire:
         vo = bpy.data.objects.new(self.name + '_volume_light', vd)
         self.scene.collection.objects.link(vo)
         self.volume_light = vo
+
+    # ---------------------------------------------------------------------------------------------
+    # the smoke's shadow on the ground (the engine's shadowMesh)
+    # ---------------------------------------------------------------------------------------------
+    def _domain_box(self):
+        """the domain's box in Blender world coordinates: (lo, hi)"""
+        WX, WY, WZ = self.W3
+        return self.origin + np.array([-WX / 2, -WZ / 2, 0.0]), self.origin + np.array([WX / 2, WZ / 2, WY])
+
+    def _toward_key(self, P):
+        """(unit directions toward the key light, distances) from the points P (Blender world); a sun is a direction"""
+        kl = self.params['key_light']
+        if kl is not None and kl.type == 'LIGHT' and kl.data.type == 'SUN':
+            d = np.array(kl.matrix_world.to_3x3().col[2], dtype=np.float64)
+            return np.broadcast_to(d / np.linalg.norm(d), P.shape), np.full(len(P), np.inf)
+        D = self._key_light_pos_blender()[None, :] - P
+        dist = np.maximum(np.linalg.norm(D, axis=1), 1e-9)
+        return D / dist[:, None], dist
+
+    def _build_shadow_mesh(self, bpy):
+        """The engine's shadowMesh as EEVEE can have it: a plane shadow_lift over the ground (shadow_floor), seen by
+        shadow rays only, its opacity per texel the smoke's transmittance toward the key light (_write_shadow, per
+        baked frame), so the key light casts the smoke's soft shadow on the ground. It covers the ground the domain's
+        box can shadow from where the key light is when the fire is built (at most 2 x the domain round it)."""
+        z = float(self.params['shadow_floor'])
+        lo, hi = self._domain_box()
+        corners = np.array([(x, y, zz) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for zz in (lo[2], hi[2])])
+        d, _dist = self._toward_key(corners)
+        up = d[:, 2] > 1e-3
+        cast = corners[up] - d[up] * ((corners[up, 2] - z) / d[up, 2])[:, None]       # down the ray onto the ground
+        pts = np.vstack([corners[:, :2], cast[:, :2]])
+        span = max(hi[0] - lo[0], hi[1] - lo[1]) * 2.0
+        cx, cy = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+        x0, x1 = max(pts[:, 0].min(), cx - span), min(pts[:, 0].max(), cx + span)
+        y0, y1 = max(pts[:, 1].min(), cy - span), min(pts[:, 1].max(), cy + span)
+        zz = z + float(self.params['shadow_lift'])
+        self.shadow_extent = (x0, y0, x1, y1, zz)
+        me = bpy.data.meshes.new(self.name + '_shadow')
+        me.from_pydata([(x0, y0, zz), (x1, y0, zz), (x1, y1, zz), (x0, y1, zz)], [], [(0, 1, 2, 3)])
+        uv = me.uv_layers.new(name='UVMap')
+        for i, c in enumerate(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))):
+            uv.data[i].uv = c
+        ob = bpy.data.objects.new(self.name + '_shadow', me)
+        self.scene.collection.objects.link(ob)
+        ob.visible_camera = False
+        for a in ('visible_diffuse', 'visible_glossy', 'visible_transmission', 'visible_volume_scatter'):
+            setattr(ob, a, False)
+        ob.visible_shadow = True
+        ob.hide_probe_volume = ob.hide_probe_sphere = ob.hide_probe_plane = True
+        ob.hide_render = True                    # until a bake gives it the smoke's transmittance
+        m = bpy.data.materials.new(self.name + '_shadow')
+        m.use_nodes = True
+        m.surface_render_method = 'DITHERED'
+        m.use_transparent_shadow = True
+        nt = m.node_tree
+        nt.nodes.clear()
+        tex = nt.nodes.new('ShaderNodeTexImage')
+        tex.name = tex.label = 'smoke_transmittance'
+        tex.interpolation, tex.extension = 'Linear', 'EXTEND'
+        sep = nt.nodes.new('ShaderNodeSeparateColor')
+        mix = nt.nodes.new('ShaderNodeMixShader')
+        dark = nt.nodes.new('ShaderNodeBsdfDiffuse')
+        dark.inputs['Color'].default_value = (0.0, 0.0, 0.0, 1.0)
+        clear = nt.nodes.new('ShaderNodeBsdfTransparent')
+        out = nt.nodes.new('ShaderNodeOutputMaterial')
+        for i, n in enumerate((tex, sep, dark, clear, mix, out)):
+            n.location = (-900 + 220 * i, 0)
+        nt.links.new(tex.outputs['Color'], sep.inputs[0])
+        nt.links.new(sep.outputs[0], mix.inputs['Fac'])                 # transmittance 1: clear, 0: opaque
+        nt.links.new(dark.outputs[0], mix.inputs[1])
+        nt.links.new(clear.outputs[0], mix.inputs[2])
+        nt.links.new(mix.outputs[0], out.inputs['Surface'])
+        me.materials.append(m)
+        return ob
+
+    def _shadow_march(self):
+        """The shadow plane's march toward the key light, which only moves with the key light: for each texel's 64
+        steps across the domain, the eight voxels of its trilinear sample in the grids (flat indices into arr[..., c],
+        8 x texels x 64) and their weights (zero outside the grid), and each texel's step length"""
+        kl = self.params['key_light']
+        if kl is not None and kl.type == 'LIGHT' and kl.data.type == 'SUN':
+            key = ('sun',) + tuple(np.round(np.array(kl.matrix_world.to_3x3().col[2]), 6))
+        else:
+            key = tuple(np.round(self._key_light_pos_blender(), 6))
+        cached = getattr(self, '_march_cache', None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        res = int(self.params['shadow_resolution'])
+        x0, y0, x1, y1, z = self.shadow_extent
+        X, Y = np.meshgrid(np.linspace(x0, x1, res), np.linspace(y0, y1, res))     # row 0 = y0 = the image's bottom
+        P = np.stack([X.ravel(), Y.ravel(), np.full(X.size, z)], -1)
+        d, dist = self._toward_key(P)
+        lo, hi = self._domain_box()
+        inv = 1.0 / np.where(np.abs(d) < 1e-9, 1e-9, d)
+        ta, tb = (lo[None] - P) * inv, (hi[None] - P) * inv
+        t_in = np.clip(np.minimum(ta, tb).max(axis=1), 0.0, None)
+        t_out = np.minimum(np.maximum(ta, tb).min(axis=1), dist)
+        ds = np.clip(t_out - t_in, 0.0, None) / 64
+        Q = P[:, None, :] + d[:, None, :] * (t_in[:, None] + (np.arange(64) + 0.5)[None, :] * ds[:, None])[..., None]
+        GX, GY, GZ = self.G3
+        WX, WY, WZ = self.W3
+        cell = WX / GX
+        rel = Q - self.origin
+        fz, fy, fx = ((-rel[..., 1] + WZ / 2) / cell - 0.5, rel[..., 2] / cell - 0.5, (rel[..., 0] + WX / 2) / cell - 0.5)
+        z0, y0_, x0_ = (np.floor(f).astype(np.int64) for f in (fz, fy, fx))
+        tz, ty, tx = fz - z0, fy - y0_, fx - x0_
+        flat, wts = [], []
+        for dz in (0, 1):
+            for dy in (0, 1):
+                for dx in (0, 1):
+                    zi, yi, xi = z0 + dz, y0_ + dy, x0_ + dx
+                    ok = (zi >= 0) & (zi < GZ) & (yi >= 0) & (yi < GY) & (xi >= 0) & (xi < GX)
+                    w = (tz if dz else 1 - tz) * (ty if dy else 1 - ty) * (tx if dx else 1 - tx) * ok
+                    flat.append(((np.clip(zi, 0, GZ - 1) * GY + np.clip(yi, 0, GY - 1)) * GX
+                                 + np.clip(xi, 0, GX - 1)).astype(np.int32))
+                    wts.append(w.astype(np.float32))
+        self._march_cache = (key, (flat, wts, ds))
+        return self._march_cache[1]
+
+    def _write_shadow(self, frame, arr):
+        """The smoke's transmittance toward the key light from each texel of the shadow plane, through this frame's
+        grids (arr [z3, y3, x3, c], as written to the .vdb) with the volume material's extinction (density x
+        smoke_density, burning gas clearer by flame_clarity, x 0.85 for the detail noise's mean factor when
+        detail_noise is on), 64 steps across the domain: <cache>/<name>_shadow_####.exr"""
+        o = self.params
+        res = int(o['shadow_resolution'])
+        flat, wts, ds = self._shadow_march()
+        dens_f = np.ascontiguousarray(arr[..., 0], np.float32).ravel()
+        temp_f = np.ascontiguousarray(arr[..., 1], np.float32).ravel()
+        dens = sum(wts[k] * dens_f[flat[k]] for k in range(8))
+        temp = sum(wts[k] * temp_f[flat[k]] for k in range(8))
+        clear = 1.0 - smoothstep(0.15, 0.9, temp) * o['flame_clarity']
+        detail = 0.85 if o['detail_noise'] else 1.0          # the material's density x (0.35 snoise + 0.85), on average
+        tau = (np.maximum(dens, 0.0) * clear).sum(axis=1) * ds * o['smoke_density'] * detail
+        T = np.exp(-tau).reshape(res, res)
+        from ._util import write_exr
+        write_exr(frame_file(self.cache_dir, self.name + '_shadow', frame, 'exr'), np.repeat(T[..., None], 3, 2))
+
+    def _attach_shadow_sequence(self, fs, fe):
+        import bpy
+        img = bpy.data.images.load(frame_file(self.cache_dir, self.name + '_shadow', fs, 'exr'), check_existing=False)
+        img.source = 'SEQUENCE'
+        img.colorspace_settings.name = 'Non-Color'
+        tex = self.shadow_mesh.active_material.node_tree.nodes['smoke_transmittance']
+        tex.image = img
+        iu = tex.image_user
+        iu.frame_duration = fe - fs + 1
+        iu.frame_start = fs
+        iu.frame_offset = fs - 1
+        iu.use_auto_refresh = True
+        iu.use_cyclic = False
+        self.shadow_mesh.hide_render = False
 
     # ---------------------------------------------------------------------------------------------
     # emitter
@@ -532,6 +721,17 @@ class VolumeFire:
     def bake(self, frame_start=None, frame_end=None, controls=None, log=print):
         """Warm up, then step once per frame over [frame_start, frame_end] and write <cache>/<name>_####.vdb.
         controls(frame, t) -> dict may override any solver option per frame (wind, densities, colours ...)."""
+        glow = self.mesh.modifiers.get(GLOW_MODIFIER)
+        shown = glow.show_viewport if glow is not None else None
+        if glow is not None:
+            glow.show_viewport = False            # the solver reads the bare mesh; the glow samples what it writes
+        try:
+            return self._bake(frame_start, frame_end, controls, log)
+        finally:
+            if glow is not None:
+                glow.show_viewport = shown
+
+    def _bake(self, frame_start, frame_end, controls, log):
         import bpy
         from ._gpu import ComputeContext, GLSL_SNOISE, GLSL_MX_NOISE
         import openvdb as vdb
@@ -689,6 +889,8 @@ class VolumeFire:
             k_render.run(grid_groups, samplers={'velIn': velA, 'dyeIn': dye_cur}, images={'outTex': rnd})
             arr = ctx.read(rnd)                                   # (GZ, GY, GX, 4): [z3, y3, x3]
             self._write_vdb(vdb, f, arr)
+            if self.shadow_mesh is not None:
+                self._write_shadow(f, arr)
             self._grow_bounds(arr)
             light_keys.append((f, self._light_state(p, temporal, st['sim_time'])))
             if (f - fs) % 12 == 0:
@@ -697,6 +899,8 @@ class VolumeFire:
         self.sim_time = st['sim_time']
         self._key_lights(light_keys)
         self._attach_sequence(fs, fe)
+        if self.shadow_mesh is not None:
+            self._attach_shadow_sequence(fs, fe)
         log(f'[fx.fire] baked frames {fs}..{fe} in {time.time() - t0:.1f} s -> {self.cache_dir}')
         return self
 
@@ -745,6 +949,9 @@ class VolumeFire:
         os.replace(tmp, path)
 
     def _attach_sequence(self, fs, fe):
+        """The Volume plays the baked files, as Blender plays any .vdb sequence: each depsgraph that evaluates it (the
+        viewport's, a render's, in this session or from the saved .blend) reads the frame's file. Nothing is loaded
+        into the datablock itself."""
         vol = self.volume_object.data
         vol.filepath = frame_file(self.cache_dir, self.name, fs, 'vdb')
         vol.is_sequence = True
@@ -752,12 +959,6 @@ class VolumeFire:
         vol.frame_offset = 0
         vol.frame_duration = fe
         vol.sequence_mode = 'CLIP'
-        vol.grids.load()
-        # the evaluated volume was built before the files existed: make the depsgraph read the sequence
-        vol.update_tag()
-        self.volume_object.update_tag()
-        import bpy
-        bpy.context.view_layer.update()
 
     # ---------------------------------------------------------------------------------------------
     # the fire's light (pointLightColor), per frame
@@ -864,6 +1065,105 @@ class VolumeFire:
         bsdf.inputs['Emission Strength'].default_value = 1.0
         return material
 
+    def make_fire_glow(self, material, strength=1.0):
+        """The burning mesh glows with the fire around it: its surface emits what the gas touching it emits, the
+        flame's colour for that temperature over display_path metres of it (the light the volume would gather over
+        the same path, through the same display match), x strength. The engine composited its volume pass with no
+        depth test, so its fire showed through the burning mesh; in EEVEE the mesh hides the gas behind it, and this
+        puts the fire's glow on the mesh itself.
+
+        A Geometry Nodes modifier on the burning mesh (GLOW_MODIFIER) samples the baked grids at every vertex, live
+        from the volume object at each frame, into the point attributes 'fire_temperature' and 'fire_density'; the
+        material adds the emission it makes from them to whatever already feeds its Emission Color, scaled by the
+        Emission Strength it had (then sets the strength to 1). The strength is the material's Value node
+        'fire_glow_strength' (keyable); calling this again on a glowing material sets it. bake() mutes the modifier
+        while the solver reads the mesh. Call it after make_lava_emissive when the material has both (the lava, as
+        the engine's emissiveNode, replaces what feeds Emission Color). Returns the material."""
+        from . import _nodes
+        o = self.params
+        nt = material.node_tree
+        bsdf = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None) if nt else None
+        if bsdf is None:
+            raise ValueError(f'[fx.fire] make_fire_glow: material {material.name!r} has no Principled BSDF')
+        md = self.mesh.modifiers.get(GLOW_MODIFIER) or self.mesh.modifiers.new(GLOW_MODIFIER, 'NODES')
+        md.node_group = self._glow_tree()
+        gain = nt.nodes.get('fire_glow_strength')
+        if gain is not None:                     # already glowing: set its strength
+            gain.outputs[0].default_value = float(strength)
+            return material
+        b = _nodes.Builder(nt, x0=-1600, y0=-1600)
+        gain = b.value(float(strength), label='fire_glow_strength')
+
+        def attr(nm):
+            return b.s(b.node('ShaderNodeAttribute', attribute_name=nm, attribute_type='GEOMETRY').outputs['Fac'])
+
+        temperature, density = b.max(attr('fire_temperature'), 0.0), b.max(attr('fire_density'), 0.0)
+        # the volume material's emission per metre (_build_material), at the surface point
+        power = 6.0 - o['fire_glow_spread']
+        tpow = b.pow(temperature, power) if power != 1.0 else temperature
+        px, py, pz = b.vec(b.node('ShaderNodeNewGeometry').outputs['Position']).xyz()
+        kx, ky, kz = (b.value(float(v), label=f'glow_key_light_{a}') for v, a in zip(self._key_light_pos_blender(), 'xyz'))
+        d2 = (px - kx) * (px - kx) + (py - ky) * (py - ky) + (pz - kz) * (pz - kz)
+        scale = (density + 0.15) * (400.0 / b.max(d2, 1e-4)) * (0.01 * o['emission_scale'])
+        match = self._display_table('glow', o['display_path'])
+        if match is not None:
+            emis = _look.lookup(b, match[0], b.clamp(temperature, 0.0, 1.0), tpow * o['fire_intensity'] * scale,
+                                *match[1:])
+        else:
+            start, mid, end = color(o['fire_start_color']), color(o['fire_mid_color']), color(o['fire_end_color'])
+            ramp = _nodes.fire_ramp(b, b.clamp(temperature, 0.0, 1.0), start, mid, end)
+            fire = _nodes.hue_rotate(b, b.vscale(ramp, tpow * o['fire_intensity']), math.radians(o['fire_hue']))
+            emis = b.vscale(fire, scale)
+        glow = b.vscale(emis, gain * float(o['display_path']))
+        sock, k = bsdf.inputs['Emission Color'], float(bsdf.inputs['Emission Strength'].default_value)
+        if sock.is_linked:
+            glow = b.vscale(b.vec(sock.links[0].from_socket), k) + glow
+        elif k > 0.0:
+            glow = b.combine(*(c * k for c in tuple(sock.default_value)[:3])) + glow
+        b.link(glow, sock)
+        bsdf.inputs['Emission Strength'].default_value = 1.0
+        return material
+
+    def _glow_tree(self):
+        """make_fire_glow's Geometry Nodes: the volume object's density and temperature grids (in the burning mesh's
+        frame) sampled at each vertex into 'fire_density' and 'fire_temperature'"""
+        import bpy
+        name = f'{self.name}_glow'
+        tree = bpy.data.node_groups.get(name)
+        if tree is not None:
+            return tree
+        tree = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+        tree.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+        tree.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        N, L = tree.nodes, tree.links
+        gi, go = N.new('NodeGroupInput'), N.new('NodeGroupOutput')
+        oi = N.new('GeometryNodeObjectInfo')
+        oi.transform_space = 'RELATIVE'
+        oi.inputs['Object'].default_value = self.volume_object
+        pos = N.new('GeometryNodeInputPosition')
+        geo = gi.outputs[0]
+        for i, grid in enumerate(('density', 'temperature')):
+            g = N.new('GeometryNodeGetNamedGrid')
+            g.data_type = 'FLOAT'
+            g.inputs['Name'].default_value = grid
+            L.new(oi.outputs['Geometry'], g.inputs['Volume'])
+            s = N.new('GeometryNodeSampleGrid')
+            s.data_type = 'FLOAT'
+            L.new(g.outputs['Grid'], s.inputs['Grid'])
+            L.new(pos.outputs[0], s.inputs['Position'])
+            st = N.new('GeometryNodeStoreNamedAttribute')
+            st.data_type, st.domain = 'FLOAT', 'POINT'
+            st.inputs['Name'].default_value = 'fire_' + grid
+            L.new(geo, st.inputs['Geometry'])
+            L.new(s.outputs[0], st.inputs['Value'])
+            geo = st.outputs['Geometry']
+            for j, n in enumerate((g, s, st)):
+                n.location = (200 + 220 * j, -260 * i)
+        oi.location, pos.location, gi.location = (-40, 120), (-40, -300), (-40, 300)
+        go.location = (900, 0)
+        L.new(geo, go.inputs[0])
+        return tree
+
 
 def create_volume_fire(mesh, scene=None, look='engine', **options):
     """Build the fire around `mesh` (the object that burns). Returns a VolumeFire; call .bake() before rendering.
@@ -876,6 +1176,10 @@ def create_volume_fire(mesh, scene=None, look='engine', **options):
         raise ValueError('[fx.fire] mesh is required: the thing that burns')
     o = dict(DEFAULTS)
     unknown = set(options) - set(o)
+    snake = {k: ''.join('_' + c.lower() if c.isupper() else c for c in k) for k in unknown}
+    engine_only = sorted(k for k in unknown if snake[k] in ENGINE_ONLY)
+    if engine_only:
+        raise TypeError('[fx.fire] ' + '; '.join(f'{k}: {ENGINE_ONLY[snake[k]]}' for k in engine_only))
     if unknown:
         raise TypeError('[fx.fire] unknown options: ' + ', '.join(sorted(unknown)))
     if look == 'engine':

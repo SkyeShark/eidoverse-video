@@ -163,6 +163,48 @@ and shows in reflections, but takes no light. Write `surface()` when the
 object matters; the help's own peanut renders both ways in
 `test_help_recipes.py`.
 
+### `view_terms`: the view-dependent part, per pixel
+
+The engine ran `shade()` per pixel with the camera in hand, so a
+hand-written SDF could add a fresnel rim or wrap lighting that follows the
+viewer. A bake holds what the surface is, not where it is seen from.
+`view_terms` is that part: a Python hook, like `make_iso_field`'s
+`color_node`, that builds shader nodes per pixel over the baked channels
+and returns `{Principled input name: value}`:
+
+```python
+def rim(b, s):          # shade()'s pow(1 - N.V, 3) lavender rim, unlit, as the engine drew it
+    k = b.pow(1.0 - s.n_dot_v, 3.0) * 0.3
+    return {'Emission Color': s.emission + b.combine(0.9 * k, 0.8 * k, 1.0 * k)}
+
+blob = EXAMPLES['stylized_blob'].make(view_terms=lambda b, s: {**rim(b, s), 'Sheen Weight': 0.0})
+```
+
+`b` is an `eidoblend.fx._nodes` Builder on the material's tree. `s` holds:
+
+| `s.` | what it is |
+|---|---|
+| `n_dot_v` | max(0, N·V): the engine's `max(0, dot(n, normalize(cameraPosition - p)))` |
+| `fresnel`, `facing` | Layer Weight's two outputs on that normal (blend 0.5) |
+| `normal`, `incoming` | the shading normal (the atlas's normal map, the field's gradient, where there is one) and the unit vector to the viewer, world space |
+| `position`, `local` | the shading point in world space, and in the SDF's local frame in three's axes (the engine's `p`) |
+| `albedo`, `roughness`, `metallic`, `emission`, `sheen`, `sheen_tint`, `subsurface`, `coat`, `specular`, `transmission` | the baked channels: whatever fed that Principled input before the hook |
+
+Each returned value replaces what fed its input, so add the baked channel
+back under a term that sits on top of it, as `rim` does. It applies to
+both carriers and to an animated bake's played material. A GLSL `shade()`
+itself cannot run per pixel: EEVEE's materials take nodes, not GLSL. So
+the view-dependent part is rewritten as nodes, once, in the hook. For
+whole hand-made node materials, `materials={mat_id: bpy_material}` gives
+the faces of that material id any node tree (below).
+`blender/tests/sdf/test_view_terms.py` renders a sphere whose `shade()` is
+only that rim. Three or more pixels inside the silhouette, EEVEE's rim
+differs from the engine's own march of the same `shade()` from the same
+camera by 0.11 % of the rim's peak on average and 1.2 % at the 99th
+percentile. The march there runs with a tight hit tolerance: at the
+'fast' preset's `surfEps` it stops 8 mm short of the surface 4 m away,
+which swells its silhouette by 1.3 px and pushes its rim outward with it.
+
 ### Options
 
 `create_sdf_object(spec, **overrides)` takes a dict or an `EXAMPLES` entry,
@@ -192,6 +234,8 @@ plus keyword overrides:
   do this; an atlas of the Menger sponge had come to 460 MB of EXR).
 - `shade_as` (`'albedo'`, `'emission'` or `None`) turns a `shade()` into
   the material when there is no `surface()` (above).
+- `view_terms(b, s)` adds `shade()`'s view-dependent terms per pixel
+  (above).
 - `cut_by_bounds=True` says the shape runs past its bounds on purpose (a
   gyroid, a repeating fence): the bounds box cuts it into a closed solid.
 - `carrier='atlas'` (texture atlas, the default) or `'vertex'` (point
@@ -626,17 +670,31 @@ def update(frame, t, iso):              # or a field that changes every frame
 iso.bake(1, 120, update=update)         # one PLY per frame, played by Geometry Nodes Import PLY
 ```
 
-- `color_node(builder, position, normal)` and `emissive(...)` are the
-  engine's colour and emissive hooks. They receive the shading point and
-  normal as `eidoblend.fx._nodes` values, and return an RGB value built
-  from them. Any other material can be passed as `material`.
+- `color_node(builder, position, normal)`, `roughness_node(...)` and
+  `emissive(...)` are the engine's `colorNode`, `roughnessNode` and
+  `emissive` hooks. They receive the shading point and normal (world
+  space) as `eidoblend.fx._nodes` values, as the engine's received the
+  hit point and normal. `color_node` and `emissive` return an RGB value,
+  `roughness_node` a scalar:
+
+  ```python
+  def rough(b, pos, nrm):                       # polished on top, matte below
+      _x, _y, z = pos.xyz()
+      return b.mix(0.75, 0.08, b.smoothstep(0.25, 0.75, z))
+  iso = make_iso_field(resolution=64, metalness=0.9, roughness_node=rough)
+  ```
+
+  The hooks build the material `make_iso_field` makes. Any other material
+  can be passed as `material`, and is used as it is.
 - A changing field changes topology, so no point cache can hold it.
   `bake()` writes `<name>_####.ply` and a Geometry Nodes player reads the
   frame's file. In Blender 5.2, Join Strings concatenates its multi-input
   links in reverse creation order, and Value to String zero-pads only in
   integer mode. The player is built around both.
 - The probe `blender/tests/fx/test_iso_field.py` animates three metaballs
-  and renders their shadows on a floor.
+  under all three hooks (tinted, polished at the top and matte at the
+  bottom, a faint glow low down) and renders their shadows on a floor.
+  `--no-render` checks the hooks' wiring, the bake and the player alone.
 
 ## The helper and `help()`
 
@@ -669,7 +727,9 @@ collapse, the screens' encoding, the TSL `ctx` form) and
 the march, on a glossy floor behind a box, and a baked frame under
 motion blur) and `test_engine_check_scenes.py` (the engine's own check
 scenes and screen smoke tests from the production workspace, rebuilt in
-EEVEE beside the frames the WebGL engine rendered of them). Each
+EEVEE beside the frames the WebGL engine rendered of them), and
+`test_view_terms.py` (a `view_terms` rim per pixel against the march of
+the same `shade()`; `--no-render` checks the hook's wiring). Each
 script's docstring gives its command.
 
 ## Not yet ported
@@ -697,6 +757,8 @@ script's docstring gives its command.
 - Baked SDF animation has no deformation motion blur: each frame's mesh
   has its own topology, so EEVEE blurs only the object's own movement.
   (The engine's march had no motion blur at all.)
-- A baked mesh has no per-pixel camera, so the view-dependent terms of a
-  `shade()` (fresnel rims, wrap lighting) become Principled layers chosen
-  per example (sheen, coat, subsurface) rather than the hand formula.
+- A GLSL `shade()` does not run per pixel: EEVEE's materials are nodes.
+  Its view-dependent terms (fresnel rims, wrap lighting) are written once
+  as a `view_terms` hook in nodes. The examples keep the Principled
+  layers chosen for them (sheen, coat, subsurface) rather than their
+  originals' hand formulas.
