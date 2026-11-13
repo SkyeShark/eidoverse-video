@@ -63,7 +63,8 @@ cam = S['camera']
 cam.location = (1.6, 22.0, 1.1)
 cam.rotation_euler = (math.radians(72.0), 0, math.radians(-6.0))
 cam.data.lens = 35
-sky = make_sky(sc, camera=cam, hours=18.5, weather='rain', cache_dir=os.path.join(OUT, 'cache'), quality='film')
+sky = make_sky(sc, camera=cam, hours=18.5, weather='rain', cache_dir=os.path.join(OUT, 'cache'), quality='film',
+               weather_fx=False)
 sky.use_fog(density=0.0012)
 sky.set_weather('clear', 1.0, at=90.0)
 wx = make_weather_system(sc, sky, occluders=S['collection'], strike_targets=None)

@@ -461,8 +461,8 @@ try:
     # (judged where the hand is on the prop or carrying it: from the pre-grasp to the hand opening; after it lets go the
     # free hand only has to clear the prop and the counter, which nothing_passes_in measures; its deviation is reported)
     # Three stretches, three bars: AT THE CAN (the pre-grasp to the grasp, and the set-down to the hand opening: where a
-    # millimetre is a finger in the can or a can in the counter) 3 mm and 4 deg (where my wrist's turn limit lags the
-    # plan most, at the set-down, the can lands that far off upright and tips onto its base over 3 frames: the settle);
+    # millimetre is a finger in the can or a can in the counter, and a degree the can landing off upright: it tips onto
+    # its base after, the settle) 3 mm and 4 deg;
     # CARRYING IN THE AIR (the lift to the set-down's start: nothing touches, the path is a choice) 15 mm and 10 deg;
     # after letting go, reported only
     T_ = rep['times']

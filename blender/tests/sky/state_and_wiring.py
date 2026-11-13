@@ -55,7 +55,7 @@ def snapshot(sky, fs=None, fe=None):
 
 # ---------------------------------------------------------------- replay
 sc, cam = fresh_scene()
-sky = make_sky(sc, camera=cam, hours=15.0, clouds='cumulus', cache_dir=TMP, shadows=False)
+sky = make_sky(sc, camera=cam, hours=15.0, clouds='cumulus', cache_dir=TMP, shadows=False, weather_fx=False)
 sky.transition_to('storm', 1.0, 1.0, at=0.5)
 sky.day_cycle(start_hour=15.0, seconds=30.0, at=0.25)
 seen = []
@@ -152,7 +152,8 @@ check('fog: one set of fog keys at integer frames, CONSTANT', len(ours) >= 1 and
 for weather, want in ((None, 0.9 * 700), ('overcast', 0.9 * 520), ('cyclone', 0.9 * 240),
                       ('darkstorm', 0.9 * (500 - 280))):
     sc, cam = fresh_scene(1, 2)
-    sky = make_sky(sc, camera=cam, hours=15.0, clouds='cumulus', weather=weather, cache_dir=TMP, shadows=False)
+    sky = make_sky(sc, camera=cam, hours=15.0, clouds='cumulus', weather=weather, cache_dir=TMP, shadows=False,
+                   weather_fx=False)
     frames = [dict(U=dict(sky.sky.U)) for _ in sky.frame_states()]
     h = cloud_shadows.caster_height_for(frames)
     check('caster height under %-9s %.0f m' % (weather or 'cumulus', h), abs(h - want) < 1e-6)

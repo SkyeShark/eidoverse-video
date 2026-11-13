@@ -96,14 +96,17 @@ class Pose:
 
 REACH_TOL = 0.005           # a held hand within this of where the contact IK put it needs no re-reach (m)
 REACH_ROUNDS = 5            # the re-reach's rounds through the arm pass
+COVER_TOL = 0.002           # a held hand's point this far under the top of the cover it is held over is in it (m)
+COVER_BEND = 6.0            # a held hand my hardware leaves in that cover: the elbow bends this much more a try (deg),
+COVER_TRIES = 12            # at most this many tries
 
 
 def dof_pass(body, N, dt, reach=None):
     """my body's hardware pass on a whole pose (in place on a copy) -> (N, the shoulder helpers' angles).
-    reach: {'M', 'off', 'hands': {side: weight}}: the hands the maneuvers' contact IK put on a hold this frame (a lip,
-    a wall's top, a rung). The pass stiffens the torso (one waist joint: the clip's chest bend is clamped away) and
-    clamps the arm, which carried a planted hand up to a metre off the top it pressed: those hands are solved again
-    through the hardware (_reach_through)"""
+    reach: {'M', 'off', 'hands': {side: weight}, 'covers': {side: the vault's grab}}: the hands the maneuvers' contact
+    IK put on a hold this frame (a lip, a wall's top, a rung) and the vault cover a held hand is over. The pass stiffens
+    the torso (one waist joint: the clip's chest bend is clamped away) and clamps the arm, which carried a planted hand
+    up to a metre off the top it pressed: those hands are solved again through the hardware (_reach_through)"""
     if not body.robot:
         return N, {}
     p3 = {n: q_to_three(q) for n, q in N.items()}
@@ -151,12 +154,25 @@ def _arm_to(p, side, target, w_hand=None):
     p.invalidate()
 
 
+def _bend_elbow(p, side, ang):
+    """the elbow bent ang (rad) more on the Pose p: the forearm turned toward the upper arm about the elbow's hinge, the
+    hand turning with it"""
+    a, b, e = p.world_pos(side + 'UpperArm'), p.world_pos(side + 'LowerArm'), p.world_pos(side + 'Hand')
+    axis = (e - b).cross(a - b)
+    if axis.length_squared > 1e-10:
+        p.apply_world_delta(side + 'LowerArm', Quaternion(axis.normalized(), ang))
+
+
 def _reach_through(body, N_ik, p3, reach, dt):
     """the held hands through my hardware: the arm pass on the rehomed pose as it is; where a held hand lands off the
     place the contact IK gave it (weighted by the hold: at 0 the pass's own hand, at 1 the IK's), the arm is solved
     again toward it from the rehomed shoulder, the hand keeping the IK's world turn, and run through the pass, the aim
     moved by what the pass still takes off each round (its joint clamps and its pitch stage's rate). The arm state the
-    pass carries between frames is put back before each try; the best try's pose and state are kept -> three-frame pose"""
+    pass carries between frames is put back before each try; the best try's pose and state are kept. A held hand left
+    in the vault cover it is held over (reach['covers']: my shoulder at its 60 deg pitch stop, or lagging at its 360
+    deg/s, cannot follow the body passing over the planted hand, and the hand the IK kept on the top ends in it) is
+    lifted out by the elbow, bent a little more each try until no point of the hand is under the top -> three-frame
+    pose"""
     M, off = reach['M'], reach['off']
     sides = [s for s, w in reach['hands'].items() if w > 0.01 and (s + 'Hand') in N_ik]
     P_ik = Pose(body, M, dict(N_ik), off)
@@ -190,8 +206,26 @@ def _reach_through(body, N_ik, p3, reach, dt):
                 break
             for s in sides:
                 aim[s] = aim[s] + miss[s]
-    _set_arm_state(body.arms, best[2])
-    return best[1]
+    out, st = best[1], best[2]
+    covers = {s: g for s, g in (reach.get('covers') or {}).items() if s in sides}
+    if covers:
+        from .maneuvers import hand_points, in_cover
+        P = Pose(body, M, {n: q_from_three(q) for n, q in out.items()}, off)
+        for s, g in covers.items():
+            deep = in_cover(hand_points(P, s), g)
+            base = dict(P.N)
+            for k in range(1, COVER_TRIES + 1):
+                if deep <= COVER_TOL:
+                    break
+                Pk = Pose(body, M, dict(base), off)
+                _bend_elbow(Pk, s, math.radians(COVER_BEND * k))
+                out_k, _got, st_k = run({n: q_to_three(q) for n, q in Pk.N.items()})
+                Pk = Pose(body, M, {n: q_from_three(q) for n, q in out_k.items()}, off)
+                d = in_cover(hand_points(Pk, s), g)
+                if d < deep:
+                    out, st, deep, P = out_k, st_k, d, Pk
+    _set_arm_state(body.arms, st)
+    return out
 
 
 def leg_clamps(body, N):

@@ -23,9 +23,12 @@ set_running; the controller's set_walk_speed, set_run_speed, is_busy, get_state,
   - the aimed salute faces the camera within 3 deg (more than 15 deg off my heading: I turn to it first, then salute)
   - the run: the run clip leads it, the controller family's checks.feet on its frames (a run's flight is its own)
   - no move plays: nothing here lies on a route (the run's goal is 0.4 m short of the pane it faces)
-  - sitting (the JS's plain beginSeated: the seated clip where I stand, the root held): the hips go down by more than
-    0.3 m and come back up; a stool is put where the seated clip puts my hips (the scene's seat: test_body_seat.py sits
-    through seatOn) and the test says so in its JSON
+  - sitting (the JS's plain beginSeated: the seated clip where I stand, the root held; emotes.SeatOn's plain seat): the
+    hips go down by more than 0.3 m and come back up; my feet on the floor through the hold (within 6 mm) and a foot on
+    it at every frame from my hips leaving the seat (2 cm over their seated height) to the walk on; the stand-up clip
+    carries my hips forward, never back (its hips' travel as root
+    motion), and I stand up over the spot I sat down from (within 3 cm); a stool is put where the seated clip puts my
+    hips (the scene's seat: test_body_seat.py sits through seatOn) and the test says so in its JSON
 Stills: out/body_api_<moment>_<k>_f<frame>.png (low side cameras over the turns, the run, the sit and the stand; the
 salute from its camera); out/body_api.json, out/body_api.blend.
 
@@ -285,19 +288,53 @@ def main():
     fails = S.plant_failures(rep)
     R['controller_checks_feet'] = fails
     R.log('the controller family\'s checks.feet failures:', fails)
-    # sitting: the hips go down and back up; a stool goes under them (the scene's seat)
-    seated = [fr for fr in frames if fr['mode'] == 'seated']
+    # sitting: the hips go down and back up; a stool goes under them (the scene's seat). The plain seat is emotes.SeatOn's
+    # (chair=None): its frames are the seat window's ('seat' once the bake hands them over)
+    seated = [fr for fr in frames if fr['mode'] in ('seat', 'seated')]
     hz = [(fr['f'], rig.bone_world(fr, 'hips')[0]) for fr in frames]
     z_stand = hz[0][1].z
     if seated:
         f_low = min(seated, key=lambda fr: rig.bone_world(fr, 'hips')[0].z)
         p_low, _W = rig.bone_world(f_low, 'hips')
-        feet = [float(P[:, 2].min()) for fr in seated[len(seated) // 2:] for P in rig.feet_world(fr).values()]
+        by_f = {fr['f']: fr for fr in frames}
+        low = {fr['f']: {s: float(P[:, 2].min()) for s, P in rig.feet_world(fr).items()} for fr in frames}
+        hold = [f for f in range(marks['sit_a'] + int(2.4 * FPS), marks['stand_a']) if f in by_f]
+        feet = [v for f in hold for v in low[f].values()]
+        # the rise: from my hips leaving the seat (2 cm over their seated height as the stand-up starts; the stand-up
+        # clip shuffles both feet while they are still on it) to the walk on
+        z_seat = rig.bone_world(by_f[marks['stand_a']], 'hips')[0].z if marks['stand_a'] in by_f else 9.9
+        up_f = next((f for f in range(marks['stand_a'], marks['stand_b'] + 1)
+                     if f in by_f and rig.bone_world(by_f[f], 'hips')[0].z > z_seat + 0.02), marks['stand_b'])
+        rise = [f for f in range(up_f, marks['stand_b'] + FPS // 2) if f in by_f]
+        neither = [f for f in rise if min(low[f].values()) > 0.006]
         R['sit'] = {'frames': [seated[0]['f'], seated[-1]['f']], 'hips_drop_m': round(z_stand - p_low.z, 3),
                     'hips_at': [round(c, 3) for c in p_low],
-                    'feet_lowest_mm_held': [round(1000 * min(feet), 1), round(1000 * max(feet), 1)]}
+                    'feet_lowest_mm_held': [round(1000 * min(feet), 1), round(1000 * max(feet), 1)] if feet else None,
+                    'frames_neither_foot_down_rising': len(neither)}
         R.check('sits_and_stands', z_stand - p_low.z > 0.3 and hz[-1][1].z > z_stand - 0.05, f'{R["sit"]}; hips at the '
                 f'end {hz[-1][1].z:.3f} m against {z_stand:.3f} m standing')
+        R.check('the plain seat: my feet on the floor while seated (each foot\'s lowest sole point within 6 mm)',
+                feet and max(abs(v) for v in feet) < 0.006, f'{R["sit"]["feet_lowest_mm_held"]} mm over {len(hold)} '
+                f'frames of the hold')
+        R.check('the plain seat: a foot on the floor at every frame from my hips leaving the seat to the walk on',
+                rise and not neither, f'{len(neither)} of {len(rise)} frames (from f{up_f}) with neither foot within 6 mm '
+                f'of the floor: {neither[:8]}')
+        # the stand-up clip's hips' travel taken as root motion: forward with the clip, never back, over the spot
+        up = [f for f in range(marks['stand_a'], marks['stand_b'] + 1) if f in by_f]
+        hxy = {f: rig.bone_world(by_f[f], 'hips')[0].xy.copy() for f in up}
+        h_sit = heading_of_rec(by_f[marks['sit_a']]) if marks['sit_a'] in by_f else 0.0
+        fwd = Vector((math.sin(h_sit), -math.cos(h_sit)))
+        steps = [hxy[f] - hxy[f - 1] for f in up[1:]]
+        big = max((d.length for d in steps), default=9.9)
+        back = max((-d.dot(fwd) for d in steps), default=9.9)
+        p0 = rig.bone_world(by_f[marks['sit_a']], 'hips')[0].xy if marks['sit_a'] in by_f else None
+        end = (hxy[up[-1]] - p0).length if p0 is not None and up else 9.9
+        R['stand'] = {'step_max_cm': round(big * 100, 2), 'back_max_cm': round(back * 100, 2),
+                      'end_from_sit_spot_cm': round(end * 100, 2)}
+        R.check('the plain seat: the stand-up clip carries my hips forward, never back (at most 2.5 cm a frame, none '
+                'over 0.5 cm back)', big < 0.025 and back < 0.005, f'{R["stand"]}')
+        R.check('the plain seat: I stand up over the spot I sat down from (the hips within 3 cm)', end < 0.03,
+                f'{R["stand"]}')
         seat_top = p_low.z - 0.09
         fwd = f_low['M'].to_quaternion() @ Vector((0.0, -1.0, 0.0))
         c = p_low - fwd * 0.02

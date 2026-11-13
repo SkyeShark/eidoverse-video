@@ -39,6 +39,12 @@ Additions of this edition, each an option that is off or neutral unless asked (f
   land_on_contact         a body already in the air lands when its feet reach the ground
   ground_past_steep       the support probes under the feet look past a face too steep to stand on to the walkable
                           surface under it (the original finds no ground there: the far side of a dome is a take-off)
+  ground_under_overhead (on)   every downward probe (the feet's, the ones ahead, the maneuvers' scan) reads the ground
+                          under a lintel, a beam or a ceiling the body walks beneath, not its top: a surface higher over
+                          the feet than the body is tall, with room under it for the body standing (OVERHEAD_ROOM over
+                          its height), is looked under. Where nothing hangs over the head it changes nothing (the
+                          original drops its probes from 3-5 m over the body, reads the top of a doorway's lintel as
+                          the ground ahead and climbs it)
   turn_on_spot(angle)     a turn on the spot plays turnLeft / turnRight, the root taking the clip's hips yaw (scaled to
                           the angle asked); the original never plays these clips
   seat_dz                 while seated the root rises or sinks by it (the film's sit(seat=...): seatOn's settle)
@@ -66,6 +72,7 @@ R2D = 180.0 / math.pi
 FOLLOW_UNDER = 0.1          # the walk's and run's weight under which their phase follows a leading stair clip
 STAIR_REST_UNDER = 1e-3     # a stair clip's weight under which it is not playing: held at the shared phase
 STRIDE_GROWTH = 1.5         # m of stride per m walked: off a flight the stride grows back to the gait's own (about a step)
+OVERHEAD_ROOM = 0.05        # m over the body's height: the room under a surface that the body walks beneath
 
 
 def _wrap(a):
@@ -317,6 +324,7 @@ class VRMCharacterController:
         self.backward = bool(opts.get('backward', False))   # walk backward: face away from the travel, the clip reversed
         self.land_on_contact = bool(opts.get('land_on_contact', False))   # a fall lands when the feet reach the ground
         self.ground_past_steep = bool(opts.get('ground_past_steep', False))   # a side hit looked past to the ground
+        self.ground_under_overhead = bool(opts.get('ground_under_overhead', True))   # a lintel or a ceiling looked under
         self.mode = 'loco'                  # what the last frame did: loco | emote | seated | turn | maneuver
         self.time = 0.0
         self.pose = Pose(self.body, root_matrix(start[0], start[1], start[2], self._heading), {})
@@ -344,7 +352,26 @@ class VRMCharacterController:
         past_steep (this edition's ground_past_steep, for the two support probes under the feet only): a side hit is
         looked past, down a ray, to the first walkable surface under it (the floor beyond a dome's or a boulder's steep
         far side: a step down, where the original finds no ground and the body takes off). The probes ahead keep the
-        original's answer: a ramp box's steep front edge read past would be a step and the ramp a stair"""
+        original's answer: a ramp box's steep front edge read past would be a step and the ramp a stair.
+        ground_under_overhead (this edition's, on): a surface met higher over the feet than the body is tall, with room
+        under it for the body standing (its height plus OVERHEAD_ROOM down to the next surface), is over the head: the
+        ball is dropped again from just under its underside (a lintel, a beam, a ceiling, a deck the body walks under)"""
+        z = self._drop_ball(x, y, origin_z, past_steep)
+        if not self.ground_under_overhead:
+            return z
+        room = self.vrm_height + OVERHEAD_ROOM
+        feet = self._center.z - self.half_height - self.hip_y
+        for _ in range(4):
+            if z is None or z - feet < room:
+                return z
+            under, below = self.world.underside(x, y, z)
+            if below is None or under - below < room:
+                return z
+            z = self._drop_ball(x, y, under - 0.012, past_steep)
+        return z
+
+    def _drop_ball(self, x, y, origin_z, past_steep):
+        """the 1 cm ball from (x, y, origin_z) -> the contact's z or None (_ground_vector's probe, past_steep as there)"""
         z = self.world.ground_vector(x, y, origin_z, radius=0.01, min_normal=0.5, max_dist=2000.0)
         if z is not None or not past_steep:
             return z
@@ -1150,6 +1177,7 @@ class VRMCharacterController:
         mixer = self._mixer
         self.mode = 'loco'
         self.hand_contact = {}              # this frame's hands the contact IK placed: {side: its weight} (the record's)
+        self.hand_cover = {}                # ... and the vault cover each is over: {side: the vault's grab} (the record's)
         # ---- EMOTE SUSPEND
         if self.is_emoting:
             self.mode = 'seated' if getattr(self, '_seated', False) else 'emote'
@@ -1892,6 +1920,25 @@ class VRMCharacterController:
                 best = h.distance if best is None else min(best, h.distance)
         return best if best is not None else start_d
 
+    def _back_face_distance(self, scan, end_d, rise):
+        """this edition's: an obstacle's far face measured as _face_distance measures its near one, level rays back
+        toward the body at a quarter, a half and three quarters of its rise from a step past its last sample (end_d: the
+        face lies up to maneuver_scan_step past it; a 25 cm wall read 17.7 cm deep, and a hand's knuckle 3 cm into it
+        read as past it) -> the distance (m), or end_d when no face answers"""
+        if 'fx' not in scan:
+            return end_d
+        d = Vector((scan['fx'], scan['fy'], 0.0))
+        span = self.maneuver_scan_step + 0.04
+        best = None
+        for k in (0.25, 0.5, 0.75):
+            z = scan['feet_y'] + min(1.2, max(0.06, k * rise))
+            o = Vector((scan['x'], scan['y'], z)) + d * (end_d - 0.02 + span)
+            h = self.world.ray_cast(o, -d, span)
+            if h.hit and h.normal.dot(d) > 0.5:
+                at = end_d - 0.02 + span - h.distance
+                best = at if best is None else max(best, at)
+        return best if best is not None else end_d
+
     def _classify_path_ahead(self, scan):
         """at most one OBSTACLE (a single-step vertical jump of 0.40 m or more) and one GAP (a deep void back to level)"""
         feet_y, samples = scan['feet_y'], scan['samples']
@@ -1918,7 +1965,8 @@ class VRMCharacterController:
                                 'top_y': top, 'rise': top - feet_y, 'landing_d': landing['d'] if landing else None,
                                 'landing_y': landing['y'] if landing else None,
                                 'plateau': end_d >= last_d - 1e-6 or landing is None,
-                                'face_d': self._face_distance(scan, s['d'], top - feet_y)}
+                                'face_d': self._face_distance(scan, s['d'], top - feet_y),
+                                'back_d': self._back_face_distance(scan, end_d, top - feet_y)}
                     break
             prev = s['y']
         gap = None

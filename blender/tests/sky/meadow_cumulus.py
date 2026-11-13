@@ -346,7 +346,7 @@ if args.shafts is not None:
 if args.shadow_height is not None:
     kw['shadow_height'] = args.shadow_height
 sky = make_sky(sc, camera=cam, world='earth', hours=args.hours, clouds=args.clouds, weather=args.weather,
-               cache_dir=cache, quality=args.quality, shadows=not args.no_shadows, **kw)
+               cache_dir=cache, quality=args.quality, shadows=not args.no_shadows, weather_fx=False, **kw)
 if args.transition:
     nm, secs, at = args.transition.split(':')
     sky.transition_to(nm, 1.0, float(secs), at=float(at))
@@ -376,7 +376,7 @@ for view in args.views.split(','):
     # each view is its own bake: the camera layer belongs to its camera
     sky2 = make_sky(sc, camera=cam, world='earth', hours=args.hours, clouds=args.clouds, weather=args.weather,
                     cache_dir=os.path.join(cache, view), quality=args.quality, shadows=not args.no_shadows,
-                    sun=sky.sun, **kw)
+                    sun=sky.sun, weather_fx=False, **kw)
     if args.transition:
         nm, secs, at = args.transition.split(':')
         sky2.transition_to(nm, 1.0, float(secs), at=float(at))

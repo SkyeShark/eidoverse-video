@@ -76,7 +76,8 @@ cam.location = (0, -10, 1.7)
 cam.rotation_euler = (math.radians(90), 0, 0)
 sc.camera = cam
 
-sky = make_sky(sc, camera=cam, hours=15.0, weather='overcast', cache_dir=os.path.join(OUT, 'cache'), quality='draft')
+sky = make_sky(sc, camera=cam, hours=15.0, weather='overcast', cache_dir=os.path.join(OUT, 'cache'), quality='draft',
+               weather_fx=False)
 sky.transition_to('darkstorm', 1.0, 1.0, at=0.2)
 wx = make_weather_system(sc, sky, occluders=street, strike_targets=[street])
 wx.debug_force_local_strike(at=0.5)
@@ -550,7 +551,7 @@ w6.dispose()
 check('dispose twice: the second call does nothing', w6.dispose() is False and w6.update(1.0) is False)
 # in an open storm (no canopy) the upwind gate is the own-column gate moved upwind by the wind x the fall time
 sky7 = make_sky(sc, camera=cam, hours=15.0, weather='storm', cache_dir=os.path.join(OUT, 'cache_storm'),
-                quality='draft')
+                quality='draft', weather_fx=False)
 w7 = make_weather_system(sc, sky7, moisture=False, log=lambda *a: None)
 gx, gy = np.meshgrid(np.linspace(-1500, 1500, 61), np.linspace(-1500, 1500, 61))
 g_up = w7._cell_at(gx.ravel(), gy.ravel())

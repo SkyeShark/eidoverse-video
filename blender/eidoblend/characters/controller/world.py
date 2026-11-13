@@ -11,6 +11,8 @@ BVH tree over the meshes, in world space, and the same three queries run against
     hit = world.raycast_down(Vector((x, y, z)), 2.0)      # Hit: .hit .point .normal .distance .object
     hit = world.sphere_cast_down(Vector((x, y, z)), 0.015, 2.0)   # the first contact of a falling ball
     z = world.ground_vector(x, y, z_from)                 # the controller's probe: a surface z, or None
+    under, below = world.underside(x, y, z)               # a surface seen from under it: its underside, what lies below
+    world.inside_solid(Vector((x, y, z)))                 # a point inside a solid (by its faces' winding)
     world.h(xs, ys)                                       # heights under points (numpy): a Ground for round one's walk_path
 
 A ball cast is emulated with rays (Blender has no shape sweep): rays at the centre and on two rings (r / 2 and r, eight
@@ -126,6 +128,62 @@ class CollisionWorld:
     def raycast_down(self, origin, dist):
         """castRayAndGetNormal straight down (foot_ik.js raycastDown)"""
         return self.ray_cast(origin, DOWN, dist)
+
+    def underside(self, x, y, z, step=0.002, faces=8):
+        """a surface met at height z over (x, y), seen from under it, straight down: from just under it through the
+        faces that face down (the bottom of the solid it tops, by its faces' winding; a sheet is its own underside) to
+        the first face that faces up -> (the underside's z, that face's z or None where nothing lies under it). Faces
+        that lie on one another count together (a block standing on the floor: its bottom on the floor's top, a ray
+        meets either first): a bottom with a top on it has that top under it, no room between. The space between the
+        two is open air: where its middle lies inside a solid (inside_solid), the face met is inside that solid (the
+        ground plane's face inside a block sunk 2 mm into it, as the course builder stands its blocks) and the ray goes
+        on through it to the solid's bottom"""
+        under = z
+        o = Vector((x, y, z - step))
+        for _ in range(faces):
+            self.casts += 1
+            loc, nrm, _i, _d = self.tree.ray_cast(o, DOWN, 1e4)
+            if loc is None:
+                return under, None
+            here = [n.z for _l, n, _k, _dd in self.tree.find_nearest_range(loc, 1e-4)] + [nrm.z]
+            bottom = any(nz < -0.5 for nz in here)
+            if bottom:
+                under = loc.z
+            if (not bottom or any(nz > 0.5 for nz in here)) and (
+                    under - loc.z < step or not self.inside_solid(Vector((x, y, 0.5 * (under + loc.z))))):
+                return under, loc.z
+            o = Vector((x, y, loc.z - step))
+        return under, None
+
+    def inside_solid(self, p, rays=4, crossings=64):
+        """whether p lies inside a solid, by its faces' winding: along each of `rays` level rays from p (turned off the
+        axes, clear of a box's edges) the faces it leaves through (met from their back) less the faces it enters
+        through (met from their front) count the solids p lies inside; faces lying on one another count together (two
+        blocks built against each other: the ladder block and the platform behind it). Inside where most rays count
+        one or more. A doorway's jambs, a room's walls seen from inside it and open space count none. A ray that meets
+        more than `crossings` faces counts as inside (the surface over p is then kept as the ground, as the original
+        reads it)"""
+        votes = 0
+        for k in range(rays):
+            a = 0.37 + 2.0 * math.pi * k / rays
+            d = Vector((math.cos(a), math.sin(a), 0.0))
+            o, depth = Vector(p), 0
+            for _ in range(crossings):
+                self.casts += 1
+                loc, nrm, idx, _dist = self.tree.ray_cast(o, d, 1e4)
+                if loc is None:
+                    break
+                faces = {i: n for _c, n, i, _dd in self.tree.find_nearest_range(loc, 1e-4)}
+                faces[idx] = nrm
+                for n in faces.values():
+                    s = n.dot(d)
+                    if abs(s) > 1e-3:
+                        depth += 1 if s > 0.0 else -1
+                o = loc + d * 1e-4
+            else:
+                depth = 1
+            votes += depth > 0
+        return 2 * votes > rays
 
     def sphere_cast_down(self, origin, radius, dist, min_normal=0.0):
         """a ball of `radius` dropped from `origin` (its centre) for at most `dist`: the contact point on the surface it

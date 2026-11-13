@@ -327,7 +327,8 @@ def options_take(sc, me):
     recentred), a longer settle (transition_dur), a pressed seat (sink=1 cm), no backing up, a slower walk; the seated
     loop 'sitting_normal_chair' and its pair 'sit_to_stand'; unseat while still seated; a chair sat facing its backrest
     on purpose (the engine's facing check must call it); the lying ground sit through the controller; face_camera
-    toward a named camera"""
+    toward a named camera; the plain seat (chair=None: the engine's beginSeated where she stands) stood up from on
+    the stand-up clip"""
     stool = T.stool('stool', (5.6, -1.0), seat_h=0.62)
     chair_c = T.chair('chair_c', (8.6, 1.2), math.radians(90))
     cam2 = bpy.data.objects.new('cam_side', bpy.data.cameras.new('cam_side'))
@@ -353,6 +354,10 @@ def options_take(sc, me):
                     stand={'ground_fade': 1.6})
     E.face_camera(loco, camera=cam2)
     loco.wait(0.6)
+    # the plain seat (chair=None: the engine's beginSeated where she stands), stood up from on the stand-up clip
+    E.seat_on(loco, None, hold=1.0, stand={'clip': 'sit_to_stand', 'reverse': False})
+    cmd_p = loco._queue[-1]
+    loco.wait(0.6)
     t0 = time.time()
     rep = E.bake(loco, f0=1, action_name=f'{me.name}|options')
     bpy.data.actions[f'{me.name}|options'].use_fake_user = True
@@ -361,8 +366,9 @@ def options_take(sc, me):
     spans = rep['seated']['spans']
     R['options_spans'] = spans
     R['options_facing_check'] = rep['seated']['facing']
-    R.check('options: three seats (the stool, the chair, the lying ground sit)', len(spans) == 3, f'{spans}')
-    if len(spans) < 3:
+    R.check('options: four seats (the stool, the chair, the lying ground sit, the plain seat)', len(spans) == 4,
+            f'{spans}')
+    if len(spans) < 4:
         return [], {}
     # the stool: face= taken (it has no facing), the engine's stand-off recentred, the hips on the target
     a, b = spans[0]
@@ -427,6 +433,41 @@ def options_take(sc, me):
     want = math.atan2(p.x - end_feet.x, -(p.y - end_feet.y))
     R.check('options: face_camera(camera=cam_side) turns her to that camera (within 4 deg)',
             T.ang_deg(T.yaw_of(me), want) < 4.0, f'{T.ang_deg(T.yaw_of(me), want):.1f} deg')
+    # the plain seat (seat_on(loco, None)): the seated clip where she stood, her boots on the floor through the hold and
+    # one on it at every frame from her hips leaving the seat, the stand-up clip carrying her hips forward (never back) to stand over
+    # the spot she sat down from
+    a4, b4 = spans[3]
+    up = [r['f'] for r in recs if a4 <= r['f'] and r['weights'].get('sit_to_stand', 0.0) > 0.01]
+    if not up:
+        R.check('options: the plain seat stands up on the stand-up clip', False, 'no sit_to_stand weight after it')
+    else:
+        up0, f_end = up[0], min(recs[-1]['f'], up[-1] + 6)
+        fm = T.FootMesh(me)
+        hold = range(a4 + int(0.6 * (up0 - a4)), up0, 2)
+        low = {f: {s: v['zmin'] for s, v in fm.at(f).items()} for f in list(hold) + list(range(up0, f_end + 1))}
+        worst = max((abs(z) for f in hold for z in low[f].values()), default=9.9)
+        hx, hz = {}, {}
+        for f in [a4] + list(range(up0 - 1, f_end + 1)):
+            sc.frame_set(f)
+            hp = T.bone_world(me, 'hips')
+            hx[f], hz[f] = hp.xy.copy(), hp.z
+        # from the hips leaving the seat (2 cm over their seated height as the stand-up starts): a boot down
+        off = next((f for f in range(up0, f_end + 1) if hz[f] > hz[up0 - 1] + 0.02), f_end)
+        none_down = [f for f in range(off, f_end + 1) if min(low[f].values()) > 0.010]
+        th = cmd_p.th
+        fwd = Vector((math.sin(th), -math.cos(th)))
+        steps = [hx[f] - hx[f - 1] for f in range(up0, f_end + 1)]
+        back = max(-d.dot(fwd) for d in steps)
+        end = (hx[f_end] - hx[a4]).length
+        R['options_plain_seat'] = {'span': [a4, b4], 'stand_clip_from': up0, 'feet_hold_mm': round(1000 * worst, 1),
+                                   'rise_no_boot_down': none_down[:8], 'hips_back_max_cm': round(back * 100, 2),
+                                   'end_from_sit_spot_cm': round(end * 100, 2)}
+        R.check('options: the plain seat (seat_on(loco, None)): both boots on the floor through the hold and one on it '
+                'at every frame from the hips leaving the seat (within 10 mm)', worst < 0.010 and not none_down,
+                f"{R['options_plain_seat']} (the hips off the seat from f{off})")
+        R.check('options: the plain seat: the stand-up clip carries her hips forward, never back (none over 0.5 cm a '
+                'frame), and she stands over the spot she sat down from (within 3 cm)', back < 0.005 and end < 0.03,
+                f"{R['options_plain_seat']}")
     T.gait_checks(R, rep)
     T.keyed_matches(R, me, rep['_frames'])
     S, sheets = [], {}

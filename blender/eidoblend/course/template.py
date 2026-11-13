@@ -483,7 +483,8 @@ class CourseScene:
         waypoints around the bench, a square-up to the course heading, stand_to_sit back onto the pan, the hold, the
         clip reversed at 1.25x, stopEmote); the cheer gesture over segment 27; the ladder (an explicit 2.5 m climb
         0.55 m from its face; the port's auto trigger reads the ladder block as a wall to scramble, so it is off for
-        the approach); the finale: the top platform's middle, and after 0.7 s a salute toward the follow camera."""
+        the approach); the finale: the top platform's middle, and after 0.7 s a salute toward the follow camera, its
+        last pose held to the end (the example never calls stopEmote)."""
         ex, course = self.example, self.course
         seg = course.segment
         z = ex['zones']
@@ -530,9 +531,11 @@ class CourseScene:
         loco.call(phase('finale'))
         loco.wait(fin['delay'])
         # face the follow camera where it orbits by then (swung to the ladder angle): its offset from the body is
-        # (R cos A, -R sin A); the controller's heading is atan2(dx, -dy), 0 facing -Y
+        # (R cos A, -R sin A); the controller's heading is atan2(dx, -dy), 0 facing -Y. The example never stops the
+        # salute: its last pose holds, facing the camera, through the hold to the end of the film
         A = math.radians(cam.get('ladder_angle_deg', 46.0))
-        loco.emote(fin['emote'], fade_in=fin['fade_in'], facing=math.degrees(math.atan2(math.cos(A), math.sin(A))))
+        loco.emote(fin['emote'], fade_in=fin['fade_in'], facing=math.degrees(math.atan2(math.cos(A), math.sin(A))),
+                   stop=False)
         loco.wait(fin.get('hold', 1.0))
 
     # ------------------------------------------------------------------------------------------- frames ---

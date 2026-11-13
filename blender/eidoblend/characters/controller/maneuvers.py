@@ -37,6 +37,9 @@ SIDES = ('left', 'right')
 LIMBS = ('leftHand', 'rightHand', 'leftFoot', 'rightFoot')
 VAULT_CLEAR = 0.06          # the vault's tucked feet clear the cover's top by this (m)
 VAULT_SETTLE = 0.12         # the vault's crouch at the take-off is eased in over this (s)
+VAULT_HAND_IN = 0.15        # the vault's prop hand takes hold of the top over this share of the move,
+VAULT_HAND_OUT = 0.17       # lets go of it over this share after its hold (to the grab's window end, 0.85),
+VAULT_HAND_LIFT = 0.15      # rising this far off it (m) as it does
 RUNG_RADIUS = 0.028         # terrain_base's rungs (and the course package's)
 GRIP_EASE = 0.08            # a ladder limb's grip eases in and out over this (s)
 PALM_THICK = 0.014          # a hand's palm, from the middle knuckle's joint line to the skin a bar rests on (m)
@@ -285,8 +288,8 @@ def start_vault_over(c, scan, ob, fx, fy):
                 {'u': 1.0, 'x': cur.x + fx * land_d, 'y': cur.y + fy * land_d, 'z': land_z}]
     plant_d = _face(ob) + min(0.22, (ob['end_d'] - _face(ob)) * 0.5)
     grab = {'type': 'vaultGeo', 'window': (0.06, 0.85), 'fx': fx, 'fy': fy, 'perp': (fy, -fx), 'top': ob['top_y'],
-            'd0': _face(ob) - 0.12, 'd1': ob['end_d'] + 0.12, 'ox': cur.x, 'oy': cur.y,
-            'px': cur.x + fx * plant_d, 'py': cur.y + fy * plant_d}
+            'd0': _face(ob) - 0.12, 'd1': ob['end_d'] + 0.12, 'c0': _face(ob), 'c1': ob.get('back_d', ob['end_d']),
+            'ox': cur.x, 'oy': cur.y, 'px': cur.x + fx * plant_d, 'py': cur.y + fy * plant_d}
     return c._start_maneuver({'type': 'vault', 'slot': 'vault', 'slot_fallbacks': ['jump'], 'path': path,
                               'duration': duration, 'landing_ground_y': land_z, 'grab': grab, 'clip_window': (VC0, VC1)})
 
@@ -594,7 +597,7 @@ def apply_hand_ik(c, m, u):
                 c._solve_leg_ik(side, c._smooth_limb_target(m, side + 'FootClimb', tgt, 0.7),
                                 min(0.95, 0.60 + min(0.35, along_f) * 1.5))
     elif g['type'] == 'vaultGeo':
-        if 0.12 < u < 0.68:
+        if 0.12 < u < 0.68 + VAULT_HAND_OUT:
             if not m.get('_prop_side'):
                 best, bd = None, math.inf
                 for side in SIDES:
@@ -615,12 +618,41 @@ def apply_hand_ik(c, m, u):
                 if m.get('_prop_lat') is None:
                     m['_prop_lat'] = lat_of(hp, g['px'], g['py'], 0.32)
                 lat = m['_prop_lat']
-                tgt = Vector((g['px'] + px * lat, g['py'] + py * lat, g['top'] + 0.02))
-                w = _sm(1.25, 1.0, (sh - tgt).length)
+                spot = Vector((g['px'] + px * lat, g['py'] + py * lat, g['top']))
+                # taken hold of over VAULT_HAND_IN of the move from the window's start (at full weight at once the hand
+                # jumped 32 cm onto the top in a frame), let go over VAULT_HAND_OUT after the original's window (0.68),
+                # the palm rising off the top as it does: the clip has flung that hand up by then, and a hold ending in
+                # one frame popped it 58 cm (Aporia's first course vault)
+                out = _smoothstep((u - 0.68) / VAULT_HAND_OUT)
+                w = _sm(1.25, 1.0, (sh - spot).length) * _smoothstep((u - 0.12) / VAULT_HAND_IN) * (1.0 - out)
+                spot.z += VAULT_HAND_LIFT * out
                 if w > 0.02:
+                    # the palm planted flat on the top (palm down, the fingers along it where the clip points them),
+                    # the skin under its knuckles on the top: the wrist goes where that hand puts it. (The original
+                    # aims the wrist 2 cm over the top, and the clip's hand pitched down there ran Aporia's fingertips
+                    # up to 13 cm into the course's covers.) My robot body's wrist bends back 70 deg at most: its hand
+                    # keeps the clip's turn, the wrist 2 cm over the top (a flat palm asked of it, my hardware turned
+                    # the hand about the wrist and left its fingertips 12.7 cm in the top)
+                    if c.body.robot:
+                        flat, tgt = None, spot + Vector((0.0, 0.0, 0.02))
+                    else:
+                        flat = _palm_down(c, side)
+                        tgt = spot + (c.pose.world_pos(side + 'Hand') - _palm_point(c, side, flat))
                     st = c._smooth_limb_target(m, side + 'HandVault', tgt, 0.6)
                     c._solve_arm_ik(side, st, w)
                     lean_to_reach(c, side, st, w)
+                    if flat is not None:
+                        now = c.pose.world_quat(side + 'Hand')
+                        c.pose.set_world_quat(side + 'Hand', now.slerp(flat if flat.dot(now) >= 0.0 else -flat, w))
+                # whatever holds the hand (the hold, or the clip once it lets go), no point of it under the top while
+                # it is over the cover: the clip's hand sweeps down through the cover as the body passes it (Aporia's
+                # second course vault: a fingertip 6 cm in as the hold let go), and the arm lifts it out by as much.
+                # The record carries the cover to my robot body's hardware pass, which keeps the held hand out of it
+                # too (pose.dof_pass)
+                depth = in_cover(hand_points(c.pose, side), g)
+                if depth > 0.002:
+                    c._solve_arm_ik(side, c.pose.world_pos(side + 'Hand') + Vector((0.0, 0.0, depth + 0.002)), 1.0)
+                c.__dict__.setdefault('hand_cover', {})[side] = g
         for side in SIDES:
             fp = bone(side + 'Foot')
             if fp is None:
@@ -764,11 +796,10 @@ def _hand_rung(c, m, g, side, grip, cl, t_clip, k_clip, max_r):
     return min(within, key=lambda k: abs(base + k * sp - low))
 
 
-def _hand_points(c, side):
-    """a hand's wrist, middle knuckle and middle fingertip where the controller's pose puts them (the wrist alone on a
-    VRM without finger bones)"""
-    p = c.pose
-    H = c.h.humanoid
+def hand_points(p, side):
+    """a hand's wrist, middle knuckle and middle fingertip where the Pose p puts them (the controller's, or the plant's
+    through my robot body's hardware; the wrist alone on a VRM without finger bones)"""
+    H = p.body.H
     out = [p.world_pos(side + 'Hand').copy()]
     kn, mid, tip = side + 'MiddleProximal', side + 'MiddleIntermediate', side + 'MiddleDistal'
     if kn in H:
@@ -793,6 +824,32 @@ def _grip_point(c, side, rr):
     return wr * 0.25 + p.world_pos(kn) * 0.75 + palm * (rr + PALM_THICK)
 
 
+def in_cover(points, g):
+    """how deep any of points (hand_points) lies under a vault cover's top where it is over the cover (its near face to
+    its far side along the travel, c0 to c1 from the take-off line: the vault's grab) -> m (0 when none is)"""
+    out = 0.0
+    for p in points:
+        along = (p.x - g['ox']) * g['fx'] + (p.y - g['oy']) * g['fy']
+        if g['c0'] <= along <= g['c1'] and p.z < g['top']:
+            out = max(out, g['top'] - p.z)
+    return out
+
+
+def _palm_down(c, side):
+    """the hand's world turn laid flat: turned the least way that faces its palm straight down (the rest pose's palms
+    face down: -Z), the fingers keeping their heading"""
+    W = c.pose.world_quat(side + 'Hand')
+    palm = W @ Vector((0.0, 0.0, -1.0))
+    return palm.rotation_difference(Vector((0.0, 0.0, -1.0))) @ W
+
+
+def _palm_point(c, side, W):
+    """_grip_point with no bar (the palm's skin under the knuckles) for the hand turned to W about its wrist"""
+    wr = c.pose.world_pos(side + 'Hand').copy()
+    R = W @ c.pose.world_quat(side + 'Hand').inverted()
+    return wr + R @ (_grip_point(c, side, 0.0) - wr)
+
+
 def _hand_off_ladder(c, m, g, side, f3, rr, spacing, w):
     """a hand between its holds (the clip owns its reach) kept off what it climbs: on a ladder none of its points (the
     wrist, the middle knuckle, the fingertip) past the front of the rungs less HAND_CLEAR (a climber's hand comes back
@@ -806,7 +863,7 @@ def _hand_off_ladder(c, m, g, side, f3, rr, spacing, w):
         face = Vector((g['face_x'], g['face_y'], 0.0)) if 'face_x' in g else Vector((g['x'], g['y'], 0.0))
 
     def need_now():
-        return max(0.0, max((q - face).dot(f3) + HAND_CLEAR for q in _hand_points(c, side)))
+        return max(0.0, max((q - face).dot(f3) + HAND_CLEAR for q in hand_points(c.pose, side)))
     if w > 0.01:
         _pitch_hand_up(c, m, side, f3, need_now, w)
     need = need_now()

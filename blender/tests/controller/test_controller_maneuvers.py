@@ -20,7 +20,8 @@ and its camera: the full-side follow camera (5.2 m off, 3.4 m while maneuvering 
 a rear three-quarter 46 deg for the ladder and the finale (eased at 1.8 / s), keyed on every frame of the saved film.
 
 Prints PASS / FAIL: every maneuver the example plays (vault x2, mount x2, the gap jump, the ladder and its mantle,
-fallLand); each vault rises over its cover and plants its prop hand on the top; the hands on the lip during each
+fallLand); each vault rises over its cover and plants its prop hand's palm on the top, no point of a hand in the
+cover, the hold taken and let go without a pop; the hands on the lip during each
 mount, its crouched feet resting on the top; the hands and the balls of the feet on the rungs through the ladder; no
 foot inside a solid in any maneuver (the visible foot mesh measured, FootMesh); checks.feet on the walking, running and
 seated stretches; the seated feet on the floor and the seat's underside on the bench; the gesture; the salute; the
@@ -108,9 +109,9 @@ def main():
     loco.move_to((0.0, (top['y0'] + top['y1']) / 2), gait='walk')
     loco.wait(EX['finale']['delay'])
     # the example salutes toward its camera, which has swung to its rear three-quarter (46 deg) by the finale: the
-    # heading toward (cos 46, -sin 46) is 90 - 46 deg
-    loco.emote(EX['finale']['emote'], fade_in=EX['finale']['fade_in'], facing=90.0 - CAM_SWING_DEG)
-    loco.wait(0.5)
+    # heading toward (cos 46, -sin 46) is 90 - 46 deg. It never stops the salute: the last pose holds, facing the camera
+    loco.emote(EX['finale']['emote'], fade_in=EX['finale']['fade_in'], facing=90.0 - CAM_SWING_DEG, stop=False)
+    loco.wait(EX['finale'].get('hold', 1.0))
     t0 = time.time()
     rep = E.bake(loco, f0=1)                                     # Locomotion.bake with the seat's frames handed over
     R['timing_s']['bake'] = round(time.time() - t0, 1)
@@ -150,6 +151,20 @@ def main():
         sc.frame_set(f)
         return me.arm.matrix_world @ me.arm.pose.bones[b].head
 
+    def hand_points(f, s):
+        """a hand's wrist, middle knuckle, middle fingertip and the palm's skin under its knuckles (the controller's
+        maneuvers._grip_point with no bar) as the keyed pose has them at frame f"""
+        sc.frame_set(f)
+        hb = me.humanoid[s + 'Hand']
+        M = me.arm.matrix_world @ me.arm.pose.bones[hb].matrix
+        W = M.to_quaternion() @ me.rest_q[hb].inverted()
+        pos = {n: me.arm.matrix_world @ me.arm.pose.bones[me.humanoid[s + n]].head
+               for n in ('MiddleProximal', 'MiddleIntermediate', 'MiddleDistal')}
+        wr, kn = M.translation.copy(), pos['MiddleProximal']
+        d = pos['MiddleDistal'] - pos['MiddleIntermediate']
+        tip = pos['MiddleDistal'] + d * 0.8
+        return wr, kn, tip, wr * 0.25 + kn * 0.75 + (W @ Vector((0.0, 0.0, -1.0))) * 0.014
+
     def box(o):
         V = [o.matrix_world @ v.co for v in o.data.vertices]
         return (min(v.x for v in V), max(v.x for v in V), min(v.y for v in V), max(v.y for v in V), max(v.z for v in V))
@@ -171,16 +186,35 @@ def main():
         hz = max(bone_at(f, hips).z for f in range(a, b + 1))
         R.check(f'vault {j + 1} (frames {a}-{b}) rises over its cover: the hips {hz - tz:.2f} m over its {tz:.2f} m top',
                 hz - tz > 0.25, f'peak hips {hz:.2f} m')
-        best = 9.9
+        best, deep, prop = 9.9, (0.0, None, None), None
         for f in range(a, b + 1):
-            for s, bn in hand.items():
-                p = bone_at(f, bn)
-                if w[0] - 0.02 <= p.x <= w[1] + 0.02 and w[2] - 0.02 <= p.y <= w[3] + 0.02:
-                    best = min(best, abs(p.z - (tz + 0.025)))
+            for s in hand:
+                wr, kn, tip, pp = hand_points(f, s)
+                if w[0] - 0.02 <= pp.x <= w[1] + 0.02 and w[2] - 0.02 <= pp.y <= w[3] + 0.02 and abs(pp.z - tz) < best:
+                    best, prop = abs(pp.z - tz), s
+                for nm, q in (('wrist', wr), ('knuckle', kn), ('fingertip', tip)):
+                    d = min(tz - q.z, q.x - w[0], w[1] - q.x, q.y - w[2], w[3] - q.y)    # inside the cover: its nearest face
+                    if d > deep[0]:
+                        deep = (d, f, f'{s} {nm}')
+        # the prop hand taken hold and let go of without a pop: its wrist's change of velocity a frame (the second
+        # difference of its place: a planted hand stands still while the body moves on over it, and a swing changes
+        # its velocity smoothly), the move and the frames after it (a hold taken at full weight at once jumped the hand
+        # 32 cm onto the top, and one ending in one frame left the clip's flung-up hand 58 cm away); the free arm is the
+        # clip's own
+        pw = {f: bone_at(f, hand[prop or 'right']) for f in range(a, b + 7)}
+        jump = max(((pw[f + 1] - 2 * pw[f] + pw[f - 1]).length, f, prop or 'right') for f in range(a + 1, b + 6))
         R['vault_detail'].append({'frames': [a, b], 'top': round(tz, 3), 'hips_over_top': round(hz - tz, 3),
-                                  'prop_hand_off_top_m': round(best, 3)})
-        R.check(f'vault {j + 1}: the prop hand plants on the cover\'s top (its wrist within 3.5 cm of resting on it)',
-                best < 0.035, f'{best * 100:.1f} cm')
+                                  'prop_palm_off_top_m': round(best, 3),
+                                  'hand_into_top_m': [round(deep[0], 3), deep[1], deep[2]],
+                                  'wrist_velocity_change_max_m': [round(jump[0], 3), jump[1], jump[2]]})
+        R.check(f'vault {j + 1}: the prop hand takes hold of the cover and lets go of it without a pop (its wrist\'s '
+                f'velocity changes under 25 cm a frame, a frame: a hold taken at once changed it 32 cm, one let go in a '
+                f'frame 86 cm; the palm landing on the top stops it about 23)', jump[0] < 0.25,
+                f'{jump[0] * 100:.1f} cm ({jump[2]} at f{jump[1]})')
+        R.check(f'vault {j + 1}: the prop hand plants its palm on the cover\'s top (the skin under its knuckles within '
+                f'1.5 cm of it) and no point of the hand goes into it (wrist, knuckle, fingertip: under 1 cm)',
+                best < 0.015 and deep[0] < 0.01, f'the palm {best * 100:.1f} cm off the top at its nearest; the deepest '
+                f'point of a hand under it {deep[0] * 100:.1f} cm ({deep[2]} at f{deep[1]})')
     for j, (a, b) in enumerate(runs.get('mount', [])):
         w = crossed(a, b)
         if w is None:
@@ -264,6 +298,14 @@ def main():
     R.check('the cheer gesture over the walk', gw > 1.0, f'weight up to {gw:.2f}')
     em = [r for r in recs if r['mode'] == 'emote' and r['weights'].get('salute', 0) > 0.5]
     R.check('the finale salute', len(em) > 10, f'{len(em)} frames')
+    if em:
+        aim = math.radians(90.0 - CAM_SWING_DEG)
+        held = [r for r in recs if r['f'] >= em[0]['f'] + 15]
+        dev = max(abs(math.degrees(math.remainder(r['heading'] - aim, 2 * math.pi))) for r in held)
+        R.check('the salute holds to the end, facing the camera (no stopEmote: the last pose kept, no turn back)',
+                recs[-1]['weights'].get('salute', 0.0) > 0.9 and dev < 2.0,
+                f'from 0.5 s into it to the last frame {held[-1]["f"]}: the heading at most {dev:.2f} deg off the aim; '
+                f'the salute\'s weight at the end {recs[-1]["weights"].get("salute", 0.0):.2f}')
     end = recs[-1]['feet_world']
     R.check('the finale stands on the ladder\'s top platform', top['y0'] < end[1] < top['y1'] and
             abs(end[2] - top['floor0']) < 0.08, f'feet at {tuple(round(v, 2) for v in end)}, the platform at '
@@ -353,6 +395,22 @@ def shots(sc, me, recs, segs, runs, cam):
             S.append(close(f, nm, z_off=0.7, side=2.2, lens=35.0))
             names.append(nm)
         sheets[f'close_vault{j}'] = names
+        # the prop hand from its plant on the top to its letting go, every second frame
+        names = []
+        for i, f in enumerate(range(a + (b - a) // 2 - 4, a + (b - a) // 2 + 10, 2)):
+            nm = f'close_vault{j}_hand_{i}'
+            S.append(close(f, nm, z_off=0.75, side=1.4, lens=50.0))
+            names.append(nm)
+        sheets[f'close_vault{j}_hand'] = names
+    # the finale from the example's own camera: the salute to the film's end (held, facing the camera)
+    em = [r['f'] for r in recs if r['mode'] == 'emote' and r['weights'].get('salute', 0) > 0.5]
+    if em:
+        names = []
+        for i, f in enumerate(range(em[0] - 6, recs[-1]['f'] + 1, 6)):
+            nm = f'finale_{i}'
+            S.append(at(f, nm))
+            names.append(nm)
+        sheets['finale'] = names
     for j, (a, b) in enumerate(runs.get('mount', [])[:2]):
         names = []
         for i, f in enumerate(range(a + (b - a) // 2, b + 9, max(1, (b - a) // 8))):

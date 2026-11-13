@@ -46,7 +46,7 @@ def check(name, ok, detail=''):
 # ---- no GPU: the options the views cannot show ----
 rg = make_red_giant({'shield': False})
 check('shield=False leaves the lattice out of the shader (the shieldworld itself always has it)',
-      'HAS_SHIELD' not in rg.shader_defines() and rg.shader_defines().get('HAS_GIANT') == 1)
+      'HAS_SHIELD' not in rg.shader_defines() and rg.shader_defines().get('HAS_CELESTIAL') == 1)
 rg = make_red_giant({'flares': []})
 rg.update(30.0)
 check('flares=[] means no prominences or sunspot events and a zero burst (opts.flares ?? FLARES)',

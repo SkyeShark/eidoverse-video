@@ -92,7 +92,7 @@ paths = []
 for name in states:
     t0 = time.time()
     sky = make_sky(sc, camera=cam, hours=args.hours, weather=name, sun=sun,
-                   cache_dir=os.path.join(OUT, 'cache', name), quality='film')
+                   cache_dir=os.path.join(OUT, 'cache', name), quality='film', weather_fx=False)
     sun = sky.sun
     wx = make_weather_system(sc, sky, strike_targets=[S['collection']], occluders=S['collection'],
                              storm_center=(0.0, 380.0), storm_range=420.0, log=lambda *a: None)

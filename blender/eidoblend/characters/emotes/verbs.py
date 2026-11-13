@@ -72,7 +72,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 
-from ..controller.film import FollowPath, Locomotion, TurnTo, _Cmd, heading_of
+from ..controller.film import FollowPath, Locomotion, TurnTo, _Cmd, heading_of, stand_clip_travel, stand_shift
 from ..controller.film import Emote as _Emote
 from .catalog import GROUND_CLIP, SEAT_CLIP, is_sitting
 
@@ -1591,8 +1591,11 @@ _RAY_UP = Vector((0.0123, 0.0217, 1.0)).normalized()
 def _chair_solid(chair):
     """the chair's visible meshes, each its own world-space BVH with its box: [(bvh, lo, hi)], as the audits test a
     boot against each object. One BVH over all of them read a point deep in a leg as outside: the leg's top and the
-    pan's underside are coplanar, so the parity ray up counts the two as one crossing and then the pan's top"""
+    pan's underside are coplanar, so the parity ray up counts the two as one crossing and then the pan's top. A plain
+    seat (no chair): none"""
     from ...placement import _world as W
+    if chair is None:
+        return []
     meshes = [o for o in [chair] + list(chair.children_recursive) if o.type == 'MESH' and W.visible(o)]
     W.update()
     dg = W.depsgraph()
@@ -1818,7 +1821,10 @@ class Unseat(_Cmd):
 
 
 class SeatOn(_Composite):
-    """seatOn routed through the controller (the module's doc)"""
+    """seatOn routed through the controller (the module's doc). chair=None: the engine's plain beginSeated, the seated
+    clip from where the body stands, facing its heading (no walk, no recentring, no pan to settle on: the root holds,
+    the caller owns the seat), with a seat's own feet (_seat_records: put on the floor, held where they rest, stepped
+    where the clip moves them) and its stand-up (StandUp: the stand-up clip's hip travel taken as root motion)"""
 
     def __init__(self, chair, transition='stand_to_sit', face=None, sink=0.0, hip_back=None, hold=None, fade=0.25,
                  transition_dur=None, gait='walk', speed=None, camera=None, then=None, then_fade=0.5, via=None,
@@ -1831,8 +1837,24 @@ class SeatOn(_Composite):
             self.then = SEAT_CLIP                     # seatOn's instant path holds a chair pose: the default seated loop
 
     # ---- the approach
+    def _start_plain(self, loco):
+        """chair=None: the seat begins where the body stands, facing its heading"""
+        c = loco.ctrl
+        feet = c.feet_world_position
+        self.seat, self.facing, self.th = None, None, c._heading
+        self.fwd = _fwd(self.th)
+        self.target = None                            # _begin: where the clip's own hip travel ends them
+        self.pan, self.parts_up, self.back_ok, self.push = None, [], False, 0.0
+        self.spot = (feet.x, feet.y)
+        self.subs = []
+        self.auto_was = c.auto_maneuvers
+        c.auto_maneuvers = False
+        self.phase = 'approach'
+
     def start(self, loco):
         from ...placement import seating as SE
+        if self.chair is None:
+            return self._start_plain(loco)
         c = loco.ctrl
         self.seat = seat = SE.find_seat_surface(self.chair)
         self.facing = facing = SE.chair_facing(self.chair, seat)
@@ -1978,8 +2000,11 @@ class SeatOn(_Composite):
         """the seat skin's lowest over the pan with the clip at t posed at the root M. The measures pose the body at the
         floor's height, before any lift: on a high seat the seated skin then lies up to 25 cm under the pan, and up-rays
         cast from 25 cm under it (the engine's window, for the lifted body) started inside it on a 0.62 m stool and
-        read it 0.9 cm high. The seat skin is the pelvis and thighs only (no foot to catch): cast from 0.6 m under"""
+        read it 0.9 cm high. The seat skin is the pelvis and thighs only (no foot to catch): cast from 0.6 m under.
+        A plain seat (no chair) has no pan: None"""
         posed.pose(cc, t, M)
+        if not self.pan:
+            return None
         return skin_lowest(c.h, self.pan, self.seat_here - UNDER_FROM, reach=2 * UNDER_FROM)
 
     def _back_push(self, c, slot_or_clip, M, seat_z, times=None, sink=None, poser=None):
@@ -2023,19 +2048,24 @@ class SeatOn(_Composite):
         self.cc = cc
         self.off_end = c.body.H['hips'] + Vector(cc.root_curve[-1])
         hips_end = M @ self.off_end
+        if self.chair is None:
+            self.target = Vector((hips_end.x, hips_end.y))      # a plain seat: where the clip's own hip travel ends
         self.dxy = Vector((self.target.x - hips_end.x, self.target.y - hips_end.y))
         if self.dxy.length > 0.2:
             _log(loco, f'[seatOn] the body stands {self.dxy.length:.2f} m off its spot (blocked on the way?): '
                        'the recentring is held to 0.2 m')
             self.dxy *= 0.2 / self.dxy.length
-        here = _surface_under([self.chair], self.target.x, self.target.y, self.seat['z'] + 0.5)
-        if here is None:
-            _log(loco, "[seatOn] settle: no chair surface beneath the hips' target: resting at the pan's height")
-        self.seat_here = here if here is not None else self.seat['z']
-        self.target_z = self.seat_here - self.sink
-        self.pan = pan_points(self.chair, self.seat)
-        if not self.pan:
-            self.pan = [(self.seat['x'], self.seat['y'])]
+        if self.chair is None:
+            self.seat_here = self.target_z = None
+        else:
+            here = _surface_under([self.chair], self.target.x, self.target.y, self.seat['z'] + 0.5)
+            if here is None:
+                _log(loco, "[seatOn] settle: no chair surface beneath the hips' target: resting at the pan's height")
+            self.seat_here = here if here is not None else self.seat['z']
+            self.target_z = self.seat_here - self.sink
+            self.pan = pan_points(self.chair, self.seat)
+            if not self.pan:
+                self.pan = [(self.seat['x'], self.seat['y'])]
         Mf = M.copy()
         Mf.translation = Vector((self.root0.x + self.dxy.x, self.root0.y + self.dxy.y, self.root0.z))
         if self.parts_up and self.back_ok:
@@ -2066,8 +2096,9 @@ class SeatOn(_Composite):
             self.settle = self.target_z - zl[-1]
         else:
             self.settle = 0.0
-            _log(loco, '[seatOn] could not cast up through the seated skin over the pan: the root holds its height; '
-                       'verify she sits flush')
+            if self.chair is not None:
+                _log(loco, '[seatOn] could not cast up through the seated skin over the pan: the root holds its '
+                           'height; verify she sits flush')
         self.dz_t, self.dz_v = self._dz_curve()
         # the knees of the settled pose (its thighs on the pan): a foot reaching for the floor keeps its knee over this
         self.knee_floor = {s: z + self.settle - KNEE_GIVE for s, z in knees.items()}
@@ -2075,13 +2106,17 @@ class SeatOn(_Composite):
         self.cur_kf = dict(self.knee_floor)
         self.t = 0.0
         self.phase = 'down'
-        loco.__dict__.setdefault('_seats', []).append({'chair': self.chair.name, 't0': c.time, 'heading': self.th,
-                                                       'facing': self.facing, 'kind': 'chair'})
+        loco.__dict__.setdefault('_seats', []).append({'chair': self.chair.name if self.chair is not None else None,
+                                                       't0': c.time, 'heading': self.th, 'facing': self.facing,
+                                                       'kind': 'chair' if self.chair is not None else 'plain'})
         loco._seat = {'kind': 'chair', 'cmd': self}
         _open_window(loco, 'chair', self)
         self.extra = Vector((0.0, 0.0))
         arr = math.hypot(self.root0.x - self.spot[0], self.root0.y - self.spot[1])
-        if not self.instant:
+        if self.chair is None:
+            _log(loco, f'[seatOn] a plain seat: sits down over {self.span:.2f} s ({self.transition}) where the body '
+                       'stands, the root held (no chair: the caller owns the seat)')
+        elif not self.instant:
             _log(loco, f'[seatOn] sits down over {self.span:.2f} s ({self.transition}), standing {arr * 100:.1f} cm '
                        f'off its spot: the hips recentred by {self.dxy.length * 100:.1f} cm (the feet held), the '
                        f'underside settled {self.settle * 100:+.1f} cm onto the pan at {self.seat_here:.3f} m; the '
@@ -2554,10 +2589,7 @@ class StandUp(_Cmd):
             self.rev = True
             return self._begin_up(loco)
         cc = a.clip
-        if not hasattr(cc, '_travel'):
-            cc._travel = cc.P[:, :2] - cc.P[0, :2]
-            cc.P[:, :2] = cc.P[0, :2]
-            cc.root_curve = cc.root_curve.copy()
+        stand_clip_travel(cc)
         st = self.st
         if st.get('then'):
             la = acts.get(st['then'])
@@ -2656,16 +2688,9 @@ class StandUp(_Cmd):
                    f'{float(np.hypot(*cc._travel[-1])) * 100:.1f} cm taken as root motion')
 
     def _clip_base(self, t):
-        """a stand-up clip's shift of the seated root at stand-up time t: the crossfade's carry (the hips kept where the
-        seated pose has them), the clip's hips travel as root motion, the residual eased out over its last half"""
-        cc = self.cc
-        w = min(1.0, t / max(self.fade, 1e-6))
-        tc = min(t, cc.duration)
-        kt = np.linspace(0.0, cc.duration, len(cc._travel))
-        trw = self.R @ Vector((float(np.interp(tc, kt, cc._travel[:, 0])), float(np.interp(tc, kt, cc._travel[:, 1])),
-                               0.0))
-        u = min(1.0, t / max(self.span, 1e-6))
-        return self.extra0 + self.cross * w + Vector((trw.x, trw.y)) - self.resid * _smooth((u - 0.5) / 0.5)
+        """a stand-up clip's shift of the seated root at stand-up time t (controller.film.stand_shift: the crossfade's
+        carry, the clip's hips travel as root motion, the residual eased out over its last half)"""
+        return stand_shift(self.cc, self.R, t, self.fade, self.span, self.cross, self.resid, extra0=self.extra0)
 
     def _lift_curve(self, c, cc, clip_t, xy_of, dz_base, release=0.9, blend_from=None):
         """the stand-up's lift (the seat's dz) frame by frame over its span: dz_base(t) (the seat's lift) let go as the
@@ -2702,7 +2727,8 @@ class StandUp(_Cmd):
                     bc, bt0, bloop = blend_from
                     posed.pose_blend(bc, bt0 + t, cc, clip_t(t), t / max(self.fade, 1e-6), M, loop_a=bloop,
                                      loop_b=False)
-                    z = skin_lowest(c.h, seat.pan, seat.seat_here - UNDER_FROM, reach=2 * UNDER_FROM)
+                    z = skin_lowest(c.h, seat.pan, seat.seat_here - UNDER_FROM, reach=2 * UNDER_FROM) \
+                        if seat.pan else None
                 else:
                     z = seat._underside(c, cc, clip_t(t), M, posed)
                 if z is not None:
@@ -2822,7 +2848,7 @@ def seat_plan(h, chair, transition='stand_to_sit', face=None, camera=None, hip_b
     pose onto the pan, and the descent's lift frame by frame (the settle eased in over its second half, never under the
     clamp from 40 % in) -> {'seat', 'facing', 'heading', 'target', 'spot', 'settle', 'lift_t', 'lift_v', 'push',
     'floor_z', 'transition', 'chair'}: what a body that no Locomotion drives needs to sit as the controller path sits
-    (my robot body's bake rests its seat on the pan with it)"""
+    (seat_on puts my robot body on its spot and its legs sit through SeatOn with it)"""
     from ...placement import seating as SE
     from ..controller import clips as C
     from ..controller.pose import root_matrix
@@ -2904,21 +2930,20 @@ def seat_plan(h, chair, transition='stand_to_sit', face=None, camera=None, hip_b
 def _seat_robot_body(h, body, chair, transition, face, camera, hip_back, sink, fade):
     """seatOn's cohesive path for my robot body (robot_body.js: "seatOn(vrm, chair, {transition}) uses beginSeated
     under the hood"): the body put where the transition's hip travel ends the hips on the seat, facing out of the chair
-    (the engine moves the VRM there and syncs its capsule), its controller's seated state begun, the plan kept on the
-    body (body.seat_plan) for its bake to rest the seat on the pan"""
+    (the engine moves the VRM there and syncs its capsule), the plan kept on the body (body.seat_plan) and its
+    controller's seated state begun: begin_seated hands the plan to the legs, which sit down onto the seat through
+    SeatOn from that spot"""
     plan = seat_plan(h, chair, transition=transition, face=face, camera=camera, hip_back=hip_back,
                      sink=0.0 if sink is None else sink)
-    legs = body.controller.char_ctrl
-    legs.pos.x, legs.pos.y = plan['spot']
-    legs._heading = plan['heading']
+    body.controller.char_ctrl.place(plan['spot'][0], plan['spot'][1], heading=plan['heading'])
     body.seat_plan = plan
     dur = body.begin_seated(transition, fadeIn=fade)
     from ...placement.seating import _mark_seated
     _mark_seated(h, chair)
     _log(None, f"[seatOn] '{chair.name}' through my robot body's seated state: standing at ({plan['spot'][0]:.3f}, "
                f"{plan['spot'][1]:.3f}) facing {math.degrees(plan['heading']):.1f} deg, the pan at "
-               f"{plan['seat']['z']:.3f} m, settle {plan['settle'] * 100:+.1f} cm over the clip's {dur} s: its bake "
-               "rests the seat on the pan with body.seat_plan (lift_t, lift_v)")
+               f"{plan['seat']['z']:.3f} m, settle {plan['settle'] * 100:+.1f} cm over the clip's {dur} s: my legs sit "
+               "down onto it through emotes.SeatOn (body.seat_plan)")
     return plan['seat']['z']
 
 

@@ -62,7 +62,8 @@ cam.location = (0, -10, 3.2)
 cam.rotation_euler = (math.radians(90), 0, math.radians(20))      # looking along +Y, turned 20 degrees left
 sc.camera = cam
 
-sky = make_sky(sc, camera=cam, hours=15.0, weather='darkstorm', cache_dir=os.path.join(OUT, 'cache'), quality='draft')
+sky = make_sky(sc, camera=cam, hours=15.0, weather='darkstorm', cache_dir=os.path.join(OUT, 'cache'), quality='draft',
+               weather_fx=False)
 wx = make_weather_system(sc, sky, strike_targets=[ground_c], moisture=False, log=lambda *a: None)
 wx.wrap_scene()
 wx.debug_force_local_strike(at=1.0)
