@@ -420,7 +420,9 @@ the same `vrm` a second time.
 ESM). For beats the clip library doesn't cover, played OVER a looping clip
 on a stationary VRM — never a controller-driven one (the engine owns
 `vrm.update` for controller-owned VRMs its own way, and a pose track fights
-locomotion exactly like a clip would; park the controller first).
+locomotion exactly like a clip would; park the controller first). Construct
+the track while the character is STANDING at its scene position: the
+planted foot is pinned at runtime to the stance captured at construction.
 
 ```js
 // setup():
@@ -434,25 +436,42 @@ _kneel.apply(k, 1 / FPS);
 
 `makeKneelPlace(vrm)` is a right-knee genuflect-and-place (stand → kneel →
 reach to the ground → rise) whose key poses were derived from the clip
-library and whose contacts were FK-solved on claude_suit.vrm. `cycle()`
-shapes a 0→1→0 envelope around `t0`; `apply(k)` evaluates the pose at path
-position k and commits it for this frame's draw — at k=0 the underlying
-clip is restored exactly, so the beat composes cleanly into a scene.
-`apply()` must run EVERY renderFrame while the beat is in scope (it also
-reduces the engine's post-frame `vrm.update` to a plain commit so spring
-chains don't double-step). Props are scene-owned: attach the object to the
-raw `rightHand` bone and release it during the hold — on short-armed VRMs
-the wrist bottoms out well above the floor, so ease the prop down the last
-stretch yourself.
+library and whose contacts were solved on claude_suit.vrm against the
+skinned MESH (shoe and shin vertices, not joint centers). `cycle()` shapes
+a 0→1→0 envelope around `t0`; `apply(k, dt)` evaluates the pose at path
+position k and commits it for this frame's draw — `dt` defaults to
+`1 / (globalThis.FPS || 30)`, and passing 0 would freeze every spring
+chain (three-vrm skips spring steps when delta ≤ 0). At k = 0 the
+underlying clip is restored exactly and a parked track is a true no-op, so
+two tracks can share a VRM if only one is active at a time. `apply()` must
+run EVERY renderFrame while the beat is in scope (it also reduces the
+engine's post-frame `vrm.update` to a plain commit so spring chains don't
+double-step).
 
-`makePoseTrack(vrm, track)` is the general mechanism: a track is key poses
-along s∈[0,1] (absolute normalized-local bone eulers + hips deltas,
-interpolated C1 monotone-cubic from the live clip sample) plus an optional
-`calm` list that re-tunes named spring chains (drag, gravity) while the
-overlay is active and restores them at k=0. Keep each joint's value
-sequence monotone across keys — zig-zag keys read as the joint
-flip-flopping in motion (see the module header before editing keys).
+Props are scene-owned: attach the object to the raw `rightHand` bone and
+release it during the hold. On claude_suit the lowest point of the
+reaching hand stays ≈ 8 cm above the floor at the hold (short arms), so
+ease the prop down the last stretch yourself.
 
+The PRESET's floor contacts are solved for claude_suit.vrm. On another
+humanoid the heading, shape and timing transfer (joint angles are
+rig-independent; the per-key hips translations auto-scale by leg length,
+and the planted ankle re-pins to the rig's own stance), but FLOOR CONTACTS
+DO NOT — leg proportions differ (on claude.vrm the kneeling knee lands
+~10 cm under the floor). Re-solve the key table for the target rig with
+the offline sampler/composer pipeline before shipping a shot on it.
+
+`makePoseTrack(vrm, track)` is the general mechanism: keys hold absolute
+normalized-local bone eulers + hips deltas with PER-BONE knot vectors (a
+key that omits a bone isn't a knot for it — contact-critical DOFs carry
+dense solver-generated micro-keys while the body keeps a handful of pose
+keys), interpolated C1 monotone-cubic from the live clip sample, plus an
+optional `calm` list that re-tunes named spring chains (drag, gravity)
+while the overlay is active, a `plantLock` spec that pins and servoes the
+planted foot, and an `anchor` reference re-captured at construction. Keep
+each joint's value sequence monotone across keys — zig-zag keys read as
+the joint flip-flopping in motion (see the module header before editing
+keys).
 
 ## T-pose / foot-slide diagnosis
 
