@@ -16,7 +16,8 @@ check can already see is wrong.
                                    seated in its mount, or sweeping through a neighbour at some angles), sideways
                                    travellers; every frame: camera bounce; humanoid
                                    rigs that never leave their pose; humanoids that travel on sliding feet (locomotion);
-                                   VRMs whose mouth never moves (lipsync)
+                                   VRMs whose mouth never moves (lipsync); VRMs whose spring chains nothing keys
+                                   (springs: no baked springs track, so their hair and tails hang still)
     framing(scene, cfg)            per shot (camera markers), at its middle frame: how much of the frame the dominant
                                    mass cluster among what that shot's camera sees covers (a speck warns; a camera that
                                    sees no subject at all warns)
@@ -756,6 +757,8 @@ def motion(led, scene, cfg, policy):
                                    'whole film. Key or play an action on it (or say it is meant to be still).')
         _summarize_locomotion(led, loco, fps, policy['flags'].get('_allow_manual_locomotion'))
         _summarize_lipsync(led, mouths)
+        with _guard(led, 'motion.springs'):
+            _summarize_springs(led, scene)
     scene.frame_set(fs)
 
 
@@ -847,6 +850,63 @@ def _summarize_lipsync(led, mouths):
                                'this character SPEAKS, you forgot to drive lipsync: eidoblend.characters.lipsync '
                                '(visemes_from_audio -> key_lipsync) keys aa/ih/ou/ee/oh from the vocals. A talking head '
                                'with a frozen mouth reads as broken. If the character is meant to be silent, ignore.')
+
+
+def _keyed_bones(arm):
+    """the pose bones keyed in the armature's playing actions: its active action and its unmuted NLA strips', each
+    read through its own slot (Blender 5's layered actions)"""
+    from bpy_extras import anim_utils
+    ad = arm.animation_data
+    if ad is None:
+        return set()
+    plays = [(ad.action, getattr(ad, 'action_slot', None))]
+    plays += [(st.action, getattr(st, 'action_slot', None)) for tr in ad.nla_tracks if not tr.mute
+              for st in tr.strips if not st.mute]
+    out = set()
+    for act, slot in plays:
+        if act is None or slot is None:
+            continue
+        cb = anim_utils.action_get_channelbag_for_slot(act, slot)
+        for fc in (cb.fcurves if cb is not None else ()):
+            m = re.match(r'pose\.bones\["(.+?)"\]', fc.data_path)
+            if m:
+                out.add(m.group(1))
+    return out
+
+
+def _summarize_springs(led, scene):
+    """A VRM whose spring chains (hair, tails, a tie: its VRMC_springBone) nothing keys hangs them in their rest shape
+    for the whole film: characters.springs.bake_springs simulates them over the keyed body and keys them on the
+    armature's '<name>|springs' NLA track (controller.Locomotion.bake and the robot body's bake do it by default). A
+    track named so (as characters.springs.use_springs finds one), or keys on the spring bones themselves (a body keyed
+    by hand), count as moving them. Advisory (REVIEW): a character may be meant to stand still."""
+    import types
+    for arm in scene.objects:
+        if arm.type != 'ARMATURE' or not is_vrm(arm) or not any(
+                c.type == 'MESH' and render_visible(c) for c in arm.children_recursive):
+            continue
+        springs = arm.data.vrm_addon_extension.spring_bone1.springs
+        chains = sum(1 for s in springs if any(j.node.bone_name for j in list(s.joints)[:-1]))
+        if not chains:
+            continue
+        from ..characters.springs import spring_bones
+        bones = set(spring_bones(types.SimpleNamespace(arm=arm)))
+        ad = arm.animation_data
+        track = next((t for t in (ad.nla_tracks if ad is not None else ()) if t.name.endswith('|springs')
+                      and not t.mute and any(st.action is not None and not st.mute for st in t.strips)), None)
+        keyed = bones & _keyed_bones(arm)
+        name = arm.name
+        m = {'chains': chains, 'bones': len(bones), 'keyed_bones': len(keyed), 'track': track.name if track else None}
+        if track is not None or keyed:
+            how = f"baked on its track '{track.name}'" if track is not None else \
+                f'keyed on {len(keyed)} of its {len(bones)} spring bones'
+            led.record(check='motion.springs', outcome='PASS', cls='INFO', bodies=[name], metrics=m,
+                       message=f"VRM '{name}': {chains} spring chain{'s' if chains != 1 else ''} {how}")
+        else:
+            led.record(check='motion.springs', outcome='WARN', cls='REVIEW', bodies=[name], metrics=m,
+                       message=f"VRM '{name}': {chains} spring chain{'s' if chains != 1 else ''} and no baked springs "
+                               'track: its hair and tails will not move; Locomotion.bake bakes them by default, '
+                               'characters.springs.bake_springs for a hand-keyed body')
 
 
 def _sample_envelope(S, ob):

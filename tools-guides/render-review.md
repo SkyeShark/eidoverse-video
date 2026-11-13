@@ -214,6 +214,7 @@ all the names it writes:
 | `motion.rig_pose` | a humanoid that never leaves its pose: a statue |
 | `motion.locomotion` | RE-RENDER REQUIRED: a humanoid that travels more than 1.5 m while its feet slide along with it, the planted foot moving more than 60 % of the body's travel (a walk the characters family keyed plants them, about 15 %); `_allow_manual_locomotion` for a body that is carried |
 | `motion.lipsync` | REVIEW: a VRM whose mouth never moved, read on its viseme expressions and any mouth shape key; ignore it for a silent character |
+| `motion.springs` | REVIEW: a VRM whose spring chains (hair, tails, a tie) nothing moves: no unmuted springs track (`<name>\|springs`, which `characters.springs.bake_springs` keys, and `Locomotion.bake` and the robot body's bake by default) and no keys on its spring bones, so they hang in their rest shape the whole film. Bake them with `characters.springs.bake_springs` over a hand-keyed body; INFO when they are baked or keyed; ignore it for a character meant to stand still |
 | `framing` | per shot: WARN for a speck, or for a camera that sees no candidate at all |
 | `palette`, `palette.showpiece` | what the scene used; a pointer (INFO only) |
 | `assets.reads`, `assets.orphans` | declared assets the script never read; models beside the script that the config never declares |

@@ -92,21 +92,29 @@ answers the key light. `look='pbr'` renders an MToon VRM through a Principled
 BSDF under real light (`claudesona.look.set_look`, in either order with the
 wardrobe): [MToon or PBR](claudesona.md#mtoon-or-pbr--claudesonalookpy).
 
-**Shadows.** The add-on's MToon output shows the surface to camera rays only
-(a Transparent BSDF for every other ray, its opacity × Is Camera Ray), so with
-Blender's Transparent Shadows on an MToon VRM would cast nothing. `load_vrm`
-sets its MToon materials up for EEVEE's shadow pass (`vrm.mtoon_shadows`): the
-output group's shadow rays see the material's own opacity too (its outline
-shells stay out of the shadows), an alpha-clipped material (MASK: the skin,
-the clothes and the hair hide their unused parts this way) keeps Transparent
-Shadows and casts the clipped shape, a blended one (BLEND: lashes, brows,
-highlights) casts its alpha, and an opaque one takes opaque shadows. The probe
-bakes and the probes' reflections still see the surface transparent, as the
-add-on made it. My robot body's glTF PBR materials are left as they are; they
-cast as any Principled material does. `tests/characters/test_vrm_shadows.py`
-checks the flags and the group, through a save and a reopen, and with
-`--render` that Aletheia and my robot both darken the floor where their
-shadows fall.
+**Shadows and light probes.** The add-on's MToon output shows the surface to
+camera rays only (a Transparent BSDF for every other ray, its opacity × Is
+Camera Ray), so with Blender's Transparent Shadows on an MToon VRM would cast
+nothing, and no light probe would capture it. `load_vrm` sets its MToon
+materials up for both (`vrm.mtoon_shadows`): the output group's shadow rays
+see the material's own opacity too (its outline shells stay out of the
+shadows), an alpha-clipped material (MASK: the skin, the clothes and the hair
+hide their unused parts this way) keeps Transparent Shadows and casts the
+clipped shape, a blended one (BLEND: lashes, brows, highlights) casts its
+alpha, and an opaque one takes opaque shadows. Its glossy rays, with which
+EEVEE captures its planar and sphere light probes, see the surface as the
+camera does, outlines included: the character stands in a planar mirror (the
+corridor's marble floor, the race's wet road) and in a sphere probe's
+reflections (the showroom's chrome toaster). Diffuse rays (a volume probe's
+bake) still see it transparent, as the add-on made it. A `.blend` whose cast
+was loaded before the glossy step takes it when `mtoon_shadows(meshes)` meets
+its groups (once per group). My robot body's glTF PBR materials are left as
+they are; they cast and reflect as any Principled material does.
+`tests/characters/test_vrm_shadows.py` checks the flags and the group (and
+that a group set up before takes the glossy step, once), through a save and a
+reopen, and with `--render` that Aletheia and my robot both darken the floor
+where their shadows fall and both stand in a planar mirror over a polished
+floor, their own pixels unchanged.
 
 ## The cast — `eidoverse/assets/vrms/`
 

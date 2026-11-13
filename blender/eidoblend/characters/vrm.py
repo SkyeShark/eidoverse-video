@@ -21,8 +21,9 @@ through read_pose, bends the knees about +X; tests/characters/test_robot_walk.py
 
 Materials: the robot (claude_robot.vrm) is plain glTF PBR (Principled, normal map, ORM), which EEVEE lights as it is.
 The MToon cast keeps the add-on's MToon node setup (look='mtoon'); look='pbr' renders them through a Principled BSDF
-(claudesona.look.set_look). Their shadows are set up at load (mtoon_shadows): the add-on's MToon output shows the
-surface to camera rays only, so its shadow rays are given the material's own opacity as well.
+(claudesona.look.set_look). Their shadows and light probes are set up at load (mtoon_shadows): the add-on's MToon
+output shows the surface to camera rays only, so its shadow rays are given the material's own opacity as well, and
+its glossy rays (EEVEE's planar and sphere probe captures) see the surface as the camera does.
 """
 
 import json
@@ -220,15 +221,17 @@ MTOON_OUTPUT = 'VRM Add-on MToon 1.0 Output'     # the add-on's MToon output nod
 
 
 def mtoon_shadows(meshes):
-    """A VRM's MToon materials set up for EEVEE's shadows. The add-on's MToon output mixes the surface with a
-    Transparent BSDF by its opacity x Is Camera Ray, so every other ray sees it fully transparent, the shadow pass
-    included, and with Transparent Shadows on (Blender's default) the character would cast no shadow. Here the
-    output's shadow rays see the material's opacity too (_shadow_rays: once per output group; the outline shells cast
+    """A VRM's MToon materials set up for EEVEE's shadows and light probes. The add-on's MToon output mixes the surface
+    with a Transparent BSDF by its opacity x Is Camera Ray, so every other ray sees it fully transparent, the shadow
+    pass included, and with Transparent Shadows on (Blender's default) the character would cast no shadow. Here the
+    output's shadow rays see the material's opacity too (_ray_gate: once per output group; the outline shells cast
     none), and each material takes the shadow flag its alpha mode needs: an alpha-clipped one (MASK: the skin, the
     clothes and the hair hide their unused parts this way) keeps Transparent Shadows, so it casts the clipped shape;
     a blended one (BLEND: lashes, brows, highlights) casts its alpha; an opaque one (OPAQUE) takes opaque shadows,
-    Transparent Shadows off. Other rays (the probe bakes, the probes' reflections) still see the surface transparent,
-    as the add-on made it. Returns {'groups': [output groups changed], 'opaque' / 'clipped' / 'blended': [materials]}."""
+    Transparent Shadows off. Glossy rays, with which EEVEE captures its planar and sphere light probes, see the surface
+    as the camera does, outlines included, so the character stands in a planar mirror and in a sphere probe's
+    reflections; diffuse rays (a volume probe's bake) still see it transparent, as the add-on made it. Returns
+    {'groups': [output groups changed], 'opaque' / 'clipped' / 'blended': [materials]}."""
     out = {'groups': [], 'opaque': [], 'clipped': [], 'blended': []}
     seen = set()
     for ob in meshes:
@@ -242,49 +245,73 @@ def mtoon_shadows(meshes):
                 continue
             for n in m.node_tree.nodes:
                 g = n.node_tree if n.bl_idname == 'ShaderNodeGroup' else None
-                if g is not None and g.name.startswith(MTOON_OUTPUT) and _shadow_rays(g):
+                if g is not None and g.name.startswith(MTOON_OUTPUT) and _ray_gate(g):
                     out['groups'].append(g.name)
             m.use_transparent_shadow = mt.alpha_mode != 'OPAQUE'
             out[{'OPAQUE': 'opaque', 'MASK': 'clipped'}.get(mt.alpha_mode, 'blended')].append(m)
     return out
 
 
-def _shadow_rays(g):
+def _ray_gate(g):
     """In the add-on's MToon output group: every use of Light Path's Is Camera Ray becomes
-    max(Is Camera Ray, Is Shadow Ray x (1 - Is Outline)), so the shadow pass sees the opacity the camera sees and the
-    outline shells (Is Outline) stay out of it. Once per group (g['eido_shadow_rays']); True when it changed g."""
-    if g.get('eido_shadow_rays'):
-        return False
-    uses = [lk for lk in g.links if lk.from_node.bl_idname == 'ShaderNodeLightPath'
-            and lk.from_socket.name == 'Is Camera Ray']
-    gi = next((n for n in g.nodes if n.bl_idname == 'NodeGroupInput' and n.outputs.get('Is Outline') is not None), None)
-    for lk in uses:
-        lp, dst = lk.from_node, lk.to_socket
-        shadow = lp.outputs['Is Shadow Ray']
-        if gi is not None:
-            keep = g.nodes.new('ShaderNodeMath')
-            keep.operation = 'SUBTRACT'
-            keep.label = 'not an outline'
-            keep.inputs[0].default_value = 1.0
-            keep.location = (lp.location.x + 200, lp.location.y - 220)
-            g.links.new(gi.outputs['Is Outline'], keep.inputs[1])
-            mul = g.nodes.new('ShaderNodeMath')
-            mul.operation = 'MULTIPLY'
-            mul.label = 'shadow ray, not an outline'
-            mul.location = (lp.location.x + 380, lp.location.y - 160)
-            g.links.new(shadow, mul.inputs[0])
-            g.links.new(keep.outputs[0], mul.inputs[1])
-            shadow = mul.outputs[0]
-        seen = g.nodes.new('ShaderNodeMath')
-        seen.operation = 'MAXIMUM'
-        seen.label = 'camera or shadow ray'
-        seen.location = (lp.location.x + 560, lp.location.y)
-        g.links.remove(lk)
-        g.links.new(lp.outputs['Is Camera Ray'], seen.inputs[0])
-        g.links.new(shadow, seen.inputs[1])
-        g.links.new(seen.outputs[0], dst)
-    g['eido_shadow_rays'] = True
-    return bool(uses)
+    max(Is Camera Ray, Is Glossy Ray, Is Shadow Ray x (1 - Is Outline)). The shadow pass sees the opacity the camera
+    sees with the outline shells (Is Outline) left out of it; EEVEE's planar and sphere light probes, which capture with
+    glossy rays, see the surface (outlines included) as the camera does. Once per group for each ray:
+    g['eido_shadow_rays'], then g['eido_glossy_rays'], so a group set up before the glossy rays were added gets them
+    too. True when it changed g."""
+    changed = False
+    if not g.get('eido_shadow_rays'):
+        uses = [lk for lk in g.links if lk.from_node.bl_idname == 'ShaderNodeLightPath'
+                and lk.from_socket.name == 'Is Camera Ray']
+        gi = next((n for n in g.nodes if n.bl_idname == 'NodeGroupInput' and n.outputs.get('Is Outline') is not None),
+                  None)
+        for lk in uses:
+            lp, dst = lk.from_node, lk.to_socket
+            shadow = lp.outputs['Is Shadow Ray']
+            if gi is not None:
+                keep = g.nodes.new('ShaderNodeMath')
+                keep.operation = 'SUBTRACT'
+                keep.label = 'not an outline'
+                keep.inputs[0].default_value = 1.0
+                keep.location = (lp.location.x + 200, lp.location.y - 220)
+                g.links.new(gi.outputs['Is Outline'], keep.inputs[1])
+                mul = g.nodes.new('ShaderNodeMath')
+                mul.operation = 'MULTIPLY'
+                mul.label = 'shadow ray, not an outline'
+                mul.location = (lp.location.x + 380, lp.location.y - 160)
+                g.links.new(shadow, mul.inputs[0])
+                g.links.new(keep.outputs[0], mul.inputs[1])
+                shadow = mul.outputs[0]
+            seen = g.nodes.new('ShaderNodeMath')
+            seen.operation = 'MAXIMUM'
+            seen.label = 'camera or shadow ray'
+            seen.location = (lp.location.x + 560, lp.location.y)
+            g.links.remove(lk)
+            g.links.new(lp.outputs['Is Camera Ray'], seen.inputs[0])
+            g.links.new(shadow, seen.inputs[1])
+            g.links.new(seen.outputs[0], dst)
+        g['eido_shadow_rays'] = True
+        changed = bool(uses)
+    if not g.get('eido_glossy_rays'):
+        gates = [n for n in g.nodes if n.bl_idname == 'ShaderNodeMath' and n.operation == 'MAXIMUM'
+                 and n.inputs[0].is_linked and n.inputs[0].links[0].from_node.bl_idname == 'ShaderNodeLightPath'
+                 and n.inputs[0].links[0].from_socket.name == 'Is Camera Ray']
+        for seen in gates:
+            lp = seen.inputs[0].links[0].from_node
+            dsts = [lk.to_socket for lk in seen.outputs[0].links]
+            for lk in list(seen.outputs[0].links):
+                g.links.remove(lk)
+            mirror = g.nodes.new('ShaderNodeMath')
+            mirror.operation = 'MAXIMUM'
+            mirror.label = 'camera, glossy or shadow ray'
+            mirror.location = (seen.location.x + 180, seen.location.y)
+            g.links.new(seen.outputs[0], mirror.inputs[0])
+            g.links.new(lp.outputs['Is Glossy Ray'], mirror.inputs[1])
+            for dst in dsts:
+                g.links.new(mirror.outputs[0], dst)
+        g['eido_glossy_rays'] = True
+        changed = changed or bool(gates)
+    return changed
 
 
 def joints_record(h):

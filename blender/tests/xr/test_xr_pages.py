@@ -13,7 +13,8 @@ Checks:
     the key area light's keyed energy is on its RectAreaLight at those times; its 1:25 table view matches EEVEE
     through cam_table_view at life size (the page keeps its lights' look at any stage scale), with point / spot
     intensity x s^2 and the area light s times its size; turning the stage turns its sky and light
-  - the films (example, crows, robot_walk, stage): through the camera each shows at each time they match EEVEE's stills
+  - the films test_xr_films.py exported (example, crows, robot_walk, stage: those whose inputs were there): through
+    the camera each shows at each time they match EEVEE's stills
   - a sun left at the origin casts its shadows on the page as in EEVEE, and a bump baked on a mesh with its own UV map
     lights the same slopes (test_xr_tangents_shadows.py's bundle)
   - the compressed CLI bundles decode (meshopt + WebP, Draco + JPEG); the --no-world one's sky is the world's mean
@@ -227,7 +228,7 @@ try:
     else:
         check('the features bundle exists (run test_xr_features.py first)', False)
 
-    # ------------------------------------------------------------- real films round one built (test_xr_films.py)
+    # ------------------------------------------------- the real films test_xr_films.py exported (out/films/films.json)
     films_json = os.path.join(HERE, 'out', 'films', 'films.json')
     films = json.load(open(films_json)) if os.path.exists(films_json) else {}
     if not films:

@@ -20,8 +20,10 @@ robot_body.js both look down for a positive pitch). Each ray's own ray_pitch, in
 the cone's axis (the memory's "floor ray" rule reads it that way, as the JS did).
 
 The sensors are the only part that touches the scene: one BVH over every visible mesh that is not excluded
-(refresh() rebuilds it after the scene changes; a moving obstacle needs a refresh per sense). Memory and planner
-work only from readings, never from the scene's mesh list.
+(refresh() rebuilds it after the scene changes; a moving obstacle needs a refresh per sense). Given the objects that
+move, refresh(dynamic=movers) splits the view in two, the still part built once and the movers' own BVH, and
+refresh(dynamic=movers, dynamic_only=True) rebuilds only the movers' at each sense. Memory and planner work only from
+readings, never from the scene's mesh list.
 """
 
 from __future__ import annotations
@@ -442,6 +444,41 @@ class RobotPlanner:
 
 # ------------------------------------------------------------------------------------------------- sensors ---
 
+def _names_under(objects):
+    """the names of these objects and of everything parented under them"""
+    out = set()
+    for o in objects:
+        out.add(o.name)
+        out.update(c.name for c in o.children_recursive)
+    return out
+
+
+def _read_view(dg, excluded, skip=frozenset(), only=None):
+    """(BVHTree or None, the owner object of each polygon, meshes read) over the visible meshes, evaluated, in world
+    space: none under an excluded object, none of `skip`, and, given `only`, only those. An instance counts as its own
+    object and as the object that makes it."""
+    from mathutils.bvhtree import BVHTree
+    verts, polys, owners = [], [], []
+    count = 0
+    for inst in dg.object_instances:
+        ob = inst.object
+        if ob.type != 'MESH':
+            continue
+        src = inst.parent.original if inst.is_instance and inst.parent else ob.original
+        names = {ob.original.name, src.name}
+        if names & excluded or names & skip or (only is not None and not names & only) or src.hide_render:
+            continue
+        me = ob.data
+        mw = inst.matrix_world
+        base = len(verts)
+        verts.extend(mw @ v.co for v in me.vertices)
+        for p in me.polygons:
+            polys.append([base + i for i in p.vertices])
+            owners.append(src)
+        count += 1
+    return (BVHTree.FromPolygons(verts, polys, all_triangles=False) if polys else None), owners, count
+
+
 class RobotSensors:
     """A depth-camera-like cone of rays against the scene's visible meshes (minus the excluded ones)."""
 
@@ -456,41 +493,56 @@ class RobotSensors:
             for xi in builtins.range(self.h_rays):
                 yaw = 0.0 if self.h_rays == 1 else -self.h_fov / 2 + xi / (self.h_rays - 1) * self.h_fov
                 self._local.append((yaw, pitch))
+        self._bvh, self._owners = None, []            # the view: everything, or after a split the still part
+        self._bvh_dyn, self._owners_dyn = None, []    # after a split: the moving part
+        self.dynamic = None                           # the names the split gave the moving part (None: no split)
         self.refresh()
 
-    def refresh(self):
-        """Rebuild the BVH over every visible mesh (evaluated, world space) not under an excluded object. Returns
-        the number of meshes. Call it after the scene's geometry moves or changes."""
+    def refresh(self, dynamic=None, dynamic_only=False):
+        """Rebuild the sensors' view of every visible mesh (evaluated, world space) not under an excluded object.
+        Returns the number of meshes read. Call it after the scene's geometry moves or changes.
+
+        dynamic (objects): what moves, and everything parented under it. The view is then two BVHs: the still part
+        (every other mesh) and the moving part (these alone). dynamic_only=True rebuilds only the moving part and keeps
+        the still part as it was built, so a sense where only the movers moved reads only them; with no split yet, or
+        a different set of movers, it builds both. sense() and cast_one() cast both and keep the nearer hit. With
+        dynamic=None (the default) the view is one BVH over everything."""
         import bpy
-        from mathutils.bvhtree import BVHTree
         dg = bpy.context.evaluated_depsgraph_get()
-        excluded = set()
-        for o in self.exclude_objects:
-            excluded.add(o.name)
-            excluded.update(c.name for c in o.children_recursive)
-        verts, polys, owners = [], [], []
+        excluded = _names_under(self.exclude_objects)
+        if dynamic is None:
+            self._bvh, self._owners, count = _read_view(dg, excluded)
+            self._bvh_dyn, self._owners_dyn = None, []
+            self.dynamic = None
+            return count
+        dyn = frozenset(_names_under(dynamic) - excluded)
         count = 0
-        for inst in dg.object_instances:
-            ob = inst.object
-            src = inst.parent.original if inst.is_instance and inst.parent else ob.original
-            if ob.type != 'MESH' or ob.original.name in excluded or src.name in excluded or src.hide_render:
-                continue
-            me = ob.data
-            mw = inst.matrix_world
-            base = len(verts)
-            verts.extend(mw @ v.co for v in me.vertices)
-            for p in me.polygons:
-                polys.append([base + i for i in p.vertices])
-                owners.append(src)
-            count += 1
-        self._owners = owners
-        self._bvh = BVHTree.FromPolygons(verts, polys, all_triangles=False) if polys else None
-        return count
+        if not dynamic_only or dyn != self.dynamic:
+            self._bvh, self._owners, count = _read_view(dg, excluded, skip=dyn)
+        self._bvh_dyn, self._owners_dyn, n_dyn = _read_view(dg, excluded, only=dyn)
+        self.dynamic = dyn
+        return count + n_dyn
 
     def exclude(self, ob):
+        """leave `ob` (and everything under it) out of the view from now on: the view is rebuilt, split as it was"""
         if ob not in self.exclude_objects:
             self.exclude_objects.append(ob)
-            self.refresh()
+            if self.dynamic is None:
+                self.refresh()
+            else:
+                import bpy
+                self.refresh(dynamic=[bpy.data.objects[n] for n in self.dynamic if n in bpy.data.objects])
+
+    def _cast(self, o, d, dist):
+        """the nearer hit of the view's BVHs -> (location, normal, owner object, distance), or Nones"""
+        best = (None, None, None, None)
+        for bvh, owners in ((self._bvh, self._owners), (self._bvh_dyn, self._owners_dyn)):
+            if bvh is None:
+                continue
+            loc, nrm, idx, hd = bvh.ray_cast(o, d, dist)
+            if loc is not None and (best[0] is None or hd < best[3]):
+                best = (loc, nrm, owners[idx], hd)
+        return best
 
     def _basis(self, heading, pitch):
         """forward, left, up of the cone. robot_sensors.js builds forward = (sin h cos p, -sin p, cos h cos p) in
@@ -519,14 +571,12 @@ class RobotSensors:
         for yaw, rp in self._local:
             d = (left * (math.cos(rp) * math.sin(yaw)) + up * math.sin(rp) + f * (math.cos(rp) * math.cos(yaw)))
             d.normalize()
-            loc = nrm = idx = dist = None
-            if self._bvh is not None:
-                loc, nrm, idx, dist = self._bvh.ray_cast(o, d, self.range)
+            loc, nrm, owner, dist = self._cast(o, d, self.range)
             if loc is not None:
                 if nrm.dot(d) > 0:
                     nrm = -nrm                                      # face the ray (BVH normals follow winding)
                 hits.append({'dir': d, 'hit': True, 'distance': dist, 'point': loc, 'normal': nrm,
-                             'object': self._owners[idx], 'ray_yaw': yaw, 'ray_pitch': rp})
+                             'object': owner, 'ray_yaw': yaw, 'ray_pitch': rp})
                 n_hit += 1
             else:
                 hits.append({'dir': d, 'hit': False, 'distance': self.range, 'point': o + d * self.range,
@@ -537,10 +587,9 @@ class RobotSensors:
         from mathutils import Vector
         d = Vector(direction).normalized()
         dist = self.range if max_dist is None else max_dist
-        if self._bvh is not None:
-            loc, nrm, idx, hd = self._bvh.ray_cast(Vector(origin), d, dist)
-            if loc is not None:
-                return {'hit': True, 'distance': hd, 'point': loc, 'normal': nrm, 'object': self._owners[idx]}
+        loc, nrm, owner, hd = self._cast(Vector(origin), d, dist)
+        if loc is not None:
+            return {'hit': True, 'distance': hd, 'point': loc, 'normal': nrm, 'object': owner}
         return {'hit': False, 'distance': dist, 'point': None, 'normal': None, 'object': None}
 
 

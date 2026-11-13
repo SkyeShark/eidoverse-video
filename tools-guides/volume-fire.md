@@ -23,6 +23,7 @@ from eidoblend.fx.fire import create_volume_fire, configure_eevee_for_fire, crea
 
 fire = create_volume_fire(burning_mesh, key_light=key_spot, cache_dir='//fire_cache')   # look='engine'
 fire.make_lava_emissive(burning_mesh.active_material)     # optional: the example's glowing cracks
+fire.make_fire_glow(burning_mesh.active_material)         # optional: the fire's glow on the mesh (below)
 fire.bake(1, 240)                                         # warmup, then one step per frame
 configure_eevee_for_fire(scene, fire, camera)             # froxels, volume shadows, a tight depth range
 create_fire_compose(scene, fire)                          # saturation 1.1, then bloom
@@ -31,9 +32,38 @@ create_fire_compose(scene, fire)                          # saturation 1.1, then
 Set the scene's view transform, display and exposure before
 `create_volume_fire`: its look is matched to them when it is built.
 
+The bake leaves the Volume playing its files as Blender plays any `.vdb`
+sequence: scene frame f reads file f, and frames outside the bake read
+none. Render in the session that baked, or save the `.blend` and render
+that: both read the files. Leave the Volume's grids to the depsgraph and
+never call `fire.volume_object.data.grids.load()`. On the datablock, a load
+reads the frame the datablock last played, which is 0 until the sequence
+has played (right after the first bake, for one), so it asks for
+`<name>_0000.vdb`, a file a bake from frame 1 never writes. Blender keeps
+that failed load's error on the datablock, and every viewport and render
+copy inherits it: the copy reads its frame's grids but reports the load as
+failed and its bounds as empty, and EEVEE draws no volume until the file is
+opened again (`test_fire_bake.py`).
+
+Bake a fire again in the same Blender session and its frames go to
+`<name>_bake2_####.vdb` (then `_bake3`, and so on), with its shadow maps,
+and the Volume plays those; `fire.stem` names them. Blender keeps the grids
+of every `.vdb` it reads for the rest of the session, by the file's path.
+Frames written over files the session has played would go on playing the
+first grids, through the same Volume, a new Volume datablock,
+`VolumeGrids.unload()` or the `.blend` opened again in the same Blender
+alike: an empty bake written over the teapot's frames still played the
+teapot's gas (`test_fire_bake.py`, rebake). The bake takes the first of
+`<name>`, `<name>_bake2` ... that no fire has played in this session and no
+Volume in the open file plays. The earlier frames stay on disk, for any
+Volume still playing them. A new session, with no Volume in its open file
+playing `<name>_####.vdb`, bakes under `<name>` again.
+
 The bake runs on the GPU, so on a shared GPU run it one at a time, like a
-render. The full 100 × 200 × 100 grid bakes in seconds: 400 warmup
-substeps plus 48 frames took 4.5 s. Each frame writes about 2.7 MB of `.vdb`.
+render. The full 100 × 200 × 100 grid bakes in well under a minute: on a
+busy shared GPU the teapot's 400 warmup substeps plus 48 frames took 26 s,
+12 s of it waiting on the GPU and 10 s writing the `.vdb` files, about
+2.8 MB a frame.
 
 Every frame advances 1/fps × `sim_speed` seconds of simulation, at any frame
 rate. The engine's `step()` capped a frame's delta at 1/30 s, and its
@@ -84,11 +114,14 @@ domain's floor, emits little or nothing and reads as a faint glow.
 | `volume_object` | `volumeMesh` | the Volume object playing the `.vdb` sequence (grids `density`, `temperature`, `age`) |
 | `point_light` | `pointLight` (surfaces) | the fire's light on surfaces: no shadows, volume factor 0 |
 | `volume_light` | `pointLight` (volume) | the same light's volume branch: at the flame column's centre, 1.2 m soft radius, volume only |
+| `shadow_mesh` | `shadowMesh` | with `shadow_floor`: the smoke's shadow caster over the ground (below); otherwise `None` |
 | `material` | `volumetricMaterial` | the volume material |
 | `params` | `params` | the resolved options |
 | `sim_time` | `simTime` | seconds of simulation after the last bake |
+| `stem` | (none) | the last bake's frames are `<cache_dir>/<stem>_####.vdb`: the fire's `name`, or `<name>_bake2` ... for a fire baked again in the same session (above) |
 | `bake()` | `warmup()` + `step()` | the whole shot, plus the light keys |
 | `make_lava_emissive(mat)` | `makeLavaEmissive` | adds the lava cracks to a Principled material |
+| `make_fire_glow(mat, strength=1)` | (the volume pass seen through the mesh) | the burning mesh glows with the gas round it (below) |
 
 The engine's light was one light whose colour node took two branches: a
 uniform colour and a soft column attenuation for the volume, and plain
@@ -113,7 +146,36 @@ any of them over the shot, pass a callback:
 fire.bake(1, 240, controls=lambda frame, t: {'wind_strength': 6.5 + 4 * (t > 3), 'emit_density': 7.0})
 ```
 
-Changing an option means baking again. The cache is the fire.
+Eight of the engine's options shaped its own raymarch and light node:
+`shadow_absorption`, `shadow_ambient`, `powder_strength`,
+`multi_scattering` and the four `projection_*`. `create_volume_fire`
+refuses each, in either spelling, with what EEVEE does in its place
+(`fx.fire.ENGINE_ONLY`; see Not yet ported).
+
+Changing an option means baking again. The cache is the fire, and the
+same scene bakes the same grids every time, byte for byte
+(`test_fire_bake.py`: three bakes of the teapot). The engine's emission
+kernel had each emitter point read its voxel, add its gas and write the
+voxel back. Where points share a voxel, the GPU kept whichever store landed
+last, a different one from run to run: three bakes gave frame 1 a peak
+density of 3.26, 3.38 and 3.38. The port emits in two passes. The first
+works out every point's store as the engine's kernel did. The second keeps
+one store per voxel, drawn afresh every substep by a hash of the point's
+index and the substep's number, as the race drew it.
+
+Over the teapot's 48 frames that keeps the race's look: the grids' total
+density and temperature come to 1.04 of the mean of six racy bakes, whose
+own runs spread from 0.97 to 1.05. Over the first 12 frames they come to
+1.09 and 1.06, where the racy runs spread from 0.95 to 1.03. A fixed order
+would not keep the look: keeping the last point in buffer order every time
+gave 0.71, a thinner fire whose smoke sits lower. The teapot renders show
+the same fire either way: the same tongues, plume and drifting smoke. At
+frames 1, 24 and 48 a render of the port's bake differs from a racy bake's
+by 0.012 to 0.016 of full scale per pixel on average, where two racy bakes
+differ by 0.010 to 0.011, and the port's flame and smoke column is a little
+brighter. The second pass costs no measurable time: baking the teapot's 48
+frames with each kernel in turn in one session, the GPU took 11.8 and
+12.2 s with the engine's one pass, 12.1 and 12.8 s with the two.
 
 ## The look in EEVEE
 
@@ -154,6 +216,49 @@ for cam in (wide, close):
     configure_eevee_for_fire(scene, fire, cam)
     bpy.ops.render.render(write_still=True)
 ```
+
+### The smoke's shadow on the ground
+
+EEVEE's volumetric shadows act on volumes, not on surfaces: under a sun, a
+spot or a point light straight above, a 1 m cube of smoke that Beer-Lambert
+puts at 0.135 transmittance passes all of the light to the floor below
+(`test_fire_shadows.py`: 1.000 with volumetric shadows on or off, where the
+same cube made opaque passes 0.002 to 0.004). The engine cast the smoke's shadow
+with a separate object, `shadowMesh`, and the port does the same with what
+EEVEE has:
+
+```python
+fire = create_volume_fire(burning_mesh, key_light=key_spot, shadow_floor=0.8)   # the ground's height (Blender z)
+fire.bake(1, 240)                       # also writes <name>_shadow_####.exr beside the .vdb frames
+```
+
+`fire.shadow_mesh` is a plane `shadow_lift` (5 cm) over the ground, seen by
+shadow rays only. Its material is opaque where the smoke stops the key
+light and clear where it does not, through EEVEE's transparent shadows. For
+every baked frame, the bake marches each of its `shadow_resolution` ×
+`shadow_resolution` texels toward the key light through that frame's grids,
+64 steps across the domain, with the volume material's own extinction
+(`smoke_density`, the burning gas clearer by `flame_clarity`, and the
+detail noise's 0.85 on average), and writes the transmittance as an image
+sequence the plane plays. Under a 2 m slab of smoke at density 1 the march
+gives 0.769 against Beer-Lambert's 0.775. In the teapot scene the map moves
+with the smoke: between frames 12 and 24 its shaded texels change by 0.040
+in transmittance on average. A frame's map takes 0.6 to 0.9 s at 128 × 128;
+the march's sample points are worked out again only when the key light
+moves. The plane covers the ground the domain can shadow from
+where the key light is when the fire is built, up to twice the domain
+round it.
+
+The lift keeps the caster clear of EEVEE's shadow bias. On the teapot
+scene's floor, under the key spot, a caster 0.5 to 10 mm up passes all of
+the light, 2 cm up 0.986 of it, 3 cm 0.914, 5 cm 0.868, 10 cm 0.885 and
+20 cm 0.893, where the map says 0.825 (medians over the shaded floor in
+view; `test_fire_shadows.py -- cases=heights`). Anything standing lower
+than the lift inside the smoke's shadow takes the shadow too. In the
+teapot still, with the fire's own lights on, the shadow is soft and faint:
+on the floor to the right of the pot it takes 9 % of the light at the
+median and 31 % where the smoke is densest (`fire_shadow_still.png`
+against `fire_noshadow_still.png` in `blender/tests/fx/out/fire_shadows/`).
 
 ### The engine's look under AgX
 
@@ -210,17 +315,58 @@ strength 0.1). The engine's half-resolution volume pass, its gaussian
 denoise and its max/add composite existed because its volume was a separate
 raymarch; EEVEE renders the volume in the frame.
 
+### The fire's glow on the burning mesh
+
+In EEVEE the burning mesh hides the gas inside and behind it, which the
+engine's volume pass, composited with no depth test, showed through it.
+`make_fire_glow` puts that light on the mesh itself:
+
+```python
+fire.make_lava_emissive(teapot_mat)     # the engine's lava cracks (they replace what fed Emission Color)
+fire.make_fire_glow(teapot_mat)         # then the glow of the gas round the mesh, added on top
+```
+
+A Geometry Nodes modifier on the burning mesh, `fire_glow`, samples the
+baked density and temperature at every vertex at each frame, live from the
+volume object, into the attributes `fire_density` and `fire_temperature`.
+The material emits what that gas emits per metre, through the flame's own
+colour ramp and display match, over `display_path` metres (2 m): the light
+the hidden gas sends toward the camera. Its strength is the material's
+`fire_glow_strength` Value node, which takes keys; a second
+`make_fire_glow(mat, strength=0.5)` sets it. The bake mutes the modifier
+while the solver reads the mesh.
+
+On the teapot the glow shows as yellow-white and orange patches over the
+red-hot pot where the gas round it is hottest, brightest early in the shot,
+where without it the pot reads as red with the flames standing over it.
+Over the pot's silhouette its mean display colour goes from 0.860, 0.412,
+0.291 to 0.931, 0.610, 0.525 at frame 24, and from 0.881, 0.426, 0.295 to
+0.944, 0.623, 0.520 at frame 48. Both renders come from the same grids (a
+bake repeats exactly), so the glow is the only difference: away from the
+pot the two frames differ by 0.2/255 on average.
+
+`test_fire_glow.py` writes a synthetic frame through the fire's own `.vdb`
+writer and samples it on a sphere moved and turned inside the domain: its
+vertices read the fields exactly, in the mesh's own frame. `test_fire_teapot.py`
+renders the example with the glow, and with `glow=0` without it.
+
 ## Not yet ported
 
-- The projected spoke pattern on surfaces: the engine's light colour node
-  textured the floor with rotating radial noise. EEVEE ignores light node
-  trees.
-- The powder term and the multiple-scattering octave of the smoke shading.
-  EEVEE's scattering replaces them; there is no node equivalent.
-- The `shadowMesh`, the smoke's own soft shadow on the floor. The engine's
-  test scene never shipped it either: it broke r184's shadow pass. EEVEE's
-  volumetric shadows act on the volume. Whether they darken surfaces in 5.2
-  is still unverified.
+- The projected spoke pattern on surfaces (`projection_radius`,
+  `projection_frequency`, `projection_noise_fade`,
+  `projection_center_fade`): the engine's light colour node textured the
+  floor with rotating radial noise. EEVEE ignores light node trees: a
+  checker fed into a point light's Emission changes no pixel of the floor
+  (`test_fire_shadows.py`, spokes).
+- The powder term and the multiple-scattering octave of the smoke shading
+  (`powder_strength`, `multi_scattering`), and the engine's own self-shadow
+  march (`shadow_absorption`, `shadow_ambient`). Principled Volume has no
+  powder or multiple-scattering term: EEVEE's volume light is single
+  scattering under volumetric shadows, from the smoke's own extinction.
+- The smoke's shadow from any light but the key light, and on anything but
+  the ground under `shadow_floor`: the caster is a plane over the ground,
+  its opacity worked out toward the key light. Another shadow-casting light
+  sees the same pattern from its own direction.
 - A `velocity` grid for motion blur on the volume.
 - A numpy reference backend for machines without GPU compute. The kernels
   exist only as GLSL today, and the noise functions they use match their
@@ -228,9 +374,11 @@ raymarch; EEVEE renders the volume in the frame.
 - `onTemporal` as a callback. Animate the mesh with keyframes or drivers
   instead; the bake samples them per substep, the warmup's pre-roll
   included.
-- The engine's fire glowing through the burning mesh: the volume behind the
-  mesh is occluded in EEVEE, so the teapot's base is not the engine's
-  yellow-white ball.
+- The gas inside and behind the burning mesh, as the engine showed it: its
+  volume pass was composited with no depth test. In EEVEE the volume is
+  depth tested like everything else, so the mesh hides that gas.
+  `make_fire_glow` puts the glow of the gas at the mesh's surface on the
+  mesh, over `display_path` metres, not the column behind it.
 - The engine's look under views other than AgX, Standard, Filmic, the ACES
   views and Khronos PBR Neutral on an sRGB display: `aces_compose` needs the
   view's inverse colour space. The table works for any view OCIO can invert.

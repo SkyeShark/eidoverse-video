@@ -100,6 +100,21 @@ rebuilds the BVH after geometry moves (a moving obstacle wants a refresh
 before each sense); `cast_one(origin, direction)` answers a single
 line-of-sight question.
 
+Where only some things move, `refresh(dynamic=movers)` splits the view in
+two: the still part (every other mesh) and a BVH of the movers alone (with
+everything parented under them). `refresh(dynamic=movers, dynamic_only=True)`
+then rebuilds only the movers' part before a sense and keeps the still part as
+it was built (with no split yet, or other movers, it builds both). `sense()`
+and `cast_one()` cast both and keep the nearer hit, so the split view reads
+ray for ray what a full rebuild reads: 5,376 rays at six frames of a sliding
+door, a cart rolling with a crate on it, a shape-keyed panel folding, a
+driven turner and an instanced trolley, every hit on a mover on its surface as
+the frame has it. Beside 2,000 crates and a 250k-vertex ground the movers'
+rebuild takes 11-18 ms against 1.0-1.6 s for a full one, over two runs on a
+busy machine (`tests/harness/test_robot_sensors.py`). Something moved
+outside `dynamic` is seen where the still part was built until a
+`refresh(dynamic=movers)`; `exclude(ob)` keeps the split.
+
 **Memory** is a top-down grid of unknown / free / blocked / cliff / hazard
 cells with a confidence each (consistent observations grow it, conflicting
 ones erode it before a cell flips), the walkable surface height per cell, the

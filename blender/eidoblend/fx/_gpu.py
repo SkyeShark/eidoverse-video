@@ -14,6 +14,10 @@ in submission order like the engine's computeAsync calls.
     k = ctx.kernel(src, samplers=['velA'], images=['velOut'], push=[('FLOAT', 'uDt')], local=(8, 8, 4))
     k.run(groups, samplers={'velA': tex}, images={'velOut': tex2}, uDt=1/120)
     arr = ctx.read(tex)                     # numpy (nz, ny, nx, 4) float32
+
+Images default to write-only RGBA16F 3D; image_specs={name: (format, type, qualifiers)} declares others, e.g. an
+R32UI 'UINT_3D_ATOMIC' image read and written with imageAtomicMax (Blender's atomic image type, which every GPU
+backend supports, Metal included), on a texture from ctx.texture(size, 'R32UI').
 """
 
 from __future__ import annotations
@@ -156,13 +160,19 @@ class ComputeContext:
                 pass                             # already initialised in this process
         self.gpu = gpu
 
-    def texture3d(self, size, fmt='RGBA16F', filt=True, extend='EXTEND'):
+    def texture(self, size, fmt='RGBA16F', filt=True, extend='EXTEND'):
+        """A texture cleared to zero: 3D for (nx, ny, nz), 2D for (w, h). Integer formats (R32UI, RGBA32UI ...) clear
+        as integers and are never filtered (read them with texelFetch or imageLoad)."""
         gpu = self.gpu
         tex = gpu.types.GPUTexture(tuple(int(s) for s in size), format=fmt)
-        tex.clear(format='FLOAT', value=(0.0, 0.0, 0.0, 0.0))
-        tex.filter_mode(bool(filt))
+        kind = 'UINT' if fmt.endswith('UI') else 'INT' if fmt.endswith('I') else 'FLOAT'
+        tex.clear(format=kind, value=(0.0,) * 4 if kind == 'FLOAT' else (0,) * 4)
+        tex.filter_mode(bool(filt) and kind == 'FLOAT')
         tex.extend_mode(extend)
         return tex
+
+    def texture3d(self, size, fmt='RGBA16F', filt=True, extend='EXTEND'):
+        return self.texture(size, fmt, filt, extend)
 
     def texture2d_from(self, arr, fmt='RGBA32F'):
         """Upload an (H, W, 4) float array (row 0 = texel row 0)."""
@@ -180,7 +190,7 @@ class ComputeContext:
         return np.array(buf, dtype=np.float32, copy=True)
 
     def kernel(self, source, samplers=(), images=(), push=(), local=(8, 8, 4), image_type='FLOAT_3D',
-               image_format='RGBA16F', sampler_types=None, defines=None, preamble=''):
+               image_format='RGBA16F', sampler_types=None, image_specs=None, defines=None, preamble=''):
         gpu = self.gpu
         info = gpu.types.GPUShaderCreateInfo()
         info.local_group_size(*local)
@@ -190,7 +200,8 @@ class ComputeContext:
             info.sampler(slot, st, name)
             slot += 1
         for i, name in enumerate(images):
-            info.image(i, image_format, image_type, name, qualifiers={'WRITE'})
+            fmt, typ, qualifiers = (image_specs or {}).get(name, (image_format, image_type, ('WRITE',)))
+            info.image(i, fmt, typ, name, qualifiers=set(qualifiers))
         for t, n in push:
             info.push_constant(t, n)
         for k, v in (defines or {}).items():

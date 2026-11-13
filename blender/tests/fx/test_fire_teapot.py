@@ -152,7 +152,8 @@ fxfire.create_fire_compose(sc, fire)
 
 BLEND = os.path.join(OUT, 'fire_teapot.blend')
 bpy.ops.wm.save_as_mainfile(filepath=BLEND)
-# render from the saved file, as a film would (bake once, render many): a fresh load reads the .vdb sequence
+# render from the saved file, as a film would (bake once, render many): a fresh load reads the .vdb sequence, as the
+# session that baked does (test_fire_shadows.py's fire case renders there)
 bpy.ops.wm.open_mainfile(filepath=BLEND)
 sc = bpy.context.scene
 for f in FRAMES:

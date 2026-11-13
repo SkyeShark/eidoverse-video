@@ -1,15 +1,17 @@
-"""tests/xr/test_xr_films.py: real films built by round one's tests, exported for the headset page.
+"""tests/xr/test_xr_films.py: real films, exported for the headset page.
 
     cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_films.py [example] [crows] [robot_walk]
+        <worktree>/blender/tests/xr/test_xr_films.py [example] [crows] [robot_walk] [stage]
 
-The .blends are other tests' outputs (built by eido_blender / the characters suite), opened here READ ONLY: each is
-rendered with EEVEE at a few times through its camera, then changed by export_xr into out/films/<film>/vr/ and never
-saved. Films:
+Three films are other families' test outputs (eido_blender through the pipeline suite, the look family's stage),
+opened here READ ONLY when they are built and skipped, with the test that builds them, when they are not; my robot's
+walk the test builds itself (tests/xr/_inputs.py). Each is rendered with EEVEE at a few times through its camera,
+then changed by export_xr into out/films/<film>/vr/ and never saved. Films:
   example     tests/pipeline/out/example.blend     Poly Haven product shot: image-textured PBR, two area lights, a world
   crows       tests/pipeline/out/crows.blend       two skinned crows pecking and cawing on a textured floor, dusk world
-  robot_walk  tests/characters/out/robot_walk.blend  my robot body walking a path (keyed every frame), studio suns
-              (it has no camera: the test adds one following the walk, for the EEVEE stills and the page)
+  robot_walk  built here: my robot body walking 7 m across a level floor (the characters family's walk, keyed every
+              frame), two suns (it has no camera: the test adds one following the walk, for the EEVEE stills and the
+              page)
   stage       tests/look/out/stage/stage.blend   the look family's theatre: five spot lights (coloured PARs, follow-spot
               keys), my robot body on the boards, a haze box (a volume material: left out), and a camera cut at a marker
               (cam_house, then cam_reverse from frame 25)
@@ -39,19 +41,20 @@ NO_RENDER = '--no-render' in sys.argv
 OUT = os.path.join(HERE, 'out', 'films_norender' if NO_RENDER else 'films')
 os.makedirs(OUT, exist_ok=True)
 
+sys.path.insert(0, HERE)
 from eidoblend.common import script_args, to_three  # noqa: E402
 from eidoblend.xr import export as X      # noqa: E402
 from eidoblend.xr import glb as G         # noqa: E402
+import _inputs as I                       # noqa: E402
 
 FILMS = {
-    'example': {'blend': os.path.join(TESTS, 'pipeline', 'out', 'example.blend'), 'times': (0.0, 1.5, 2.9)},
-    'crows': {'blend': os.path.join(TESTS, 'pipeline', 'out', 'crows.blend'), 'times': (0.5, 1.58, 2.58)},
+    'example': {'built': 'example', 'times': (0.0, 1.5, 2.9)},
+    'crows': {'built': 'crows', 'times': (0.5, 1.58, 2.58)},
     # my robot body's maps are 4096 px: as they are they grade the walk 'over' the headset's texture budget, so this
     # film is exported with export_xr's image cap (max_image), the headset's option
-    'robot_walk': {'blend': os.path.join(TESTS, 'characters', 'out', 'robot_walk.blend'), 'times': (1.0, 3.0, 5.0),
-                   'export': {'max_image': 2048}},
+    'robot_walk': {'build': I.robot_walk, 'times': (1.0, 2.5, 4.0), 'export': {'max_image': 2048}},
     # the look family's theatre: spot lights, a haze volume, a camera cut at frame 25 (t = 1.0)
-    'stage': {'blend': os.path.join(TESTS, 'look', 'out', 'stage', 'stage.blend'), 'times': (0.5, 1.0, 1.9)},
+    'stage': {'built': 'stage', 'times': (0.5, 1.0, 1.9)},
 }
 RESULTS = []
 C = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))       # glTF (Y-up) -> Blender
@@ -100,7 +103,9 @@ def add_follow_camera(sc):
     c = sum(pts, Vector()) / len(pts)
     aim = bpy.data.objects.new('cam_aim_xr', None)
     sc.collection.objects.link(aim)
-    con = aim.constraints.new('CHILD_OF')
+    # on the hips' head (a Child Of would take its inverse at the first evaluation and hold the Empty on the floor
+    # under the walk's start, swinging with the hips' turn)
+    con = aim.constraints.new('COPY_LOCATION')
     con.target, con.subtarget = arm, hips
     cd = bpy.data.cameras.new('cam_follow')
     cd.lens = 28.0
@@ -116,11 +121,16 @@ def add_follow_camera(sc):
 
 
 def film(name, spec):
-    print(f'=== {name}: {spec["blend"]}', flush=True)
-    if not os.path.exists(spec['blend']):
-        check(f'{name}: the built .blend exists (run its family test first)', False, spec['blend'])
-        return None
-    bpy.ops.wm.open_mainfile(filepath=spec['blend'], load_ui=False)
+    if 'build' in spec:
+        print(f'=== {name}: built here ({spec["build"].__doc__})', flush=True)
+        spec['build']()
+    else:
+        path, why = I.built(spec['built'])
+        if path is None:
+            print(f'[SKIP] {name}: {why}', flush=True)
+            return None
+        print(f'=== {name}: {path}', flush=True)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
     sc = bpy.context.scene
     out = os.path.join(OUT, name)
     os.makedirs(out, exist_ok=True)

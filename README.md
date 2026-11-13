@@ -126,7 +126,9 @@ image, motion and sound inspection.
 - `make_sky` — complete Earth, ringworld or shieldworld packages: our
   volumetric cloud and celestial shaders, ported line for line and run in
   Blender's GPU module once per frame, time of day and day cycles, cloud
-  shadows carried by EEVEE's sun shadows, the sun corona.
+  shadows carried by EEVEE's sun shadows, the sun corona, and its own
+  weather: a sky that rains, strikes or wets brings the rain, the wet ground,
+  the lightning and the weather audio with it.
   [Sky and weather](tools-guides/sky-weather.md).
 - `make_weather_system` — rain streaks and splashes, wet surfaces and
   puddles, lightning with its strike light, sparks and scorch, and the
