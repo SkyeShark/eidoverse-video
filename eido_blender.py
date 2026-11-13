@@ -42,6 +42,10 @@ try:
 except ImportError:
     eido_docker = None
 
+# On Windows every program the runner starts gets a windowless console (CREATE_NO_WINDOW): Blender, bash and Deno run
+# headless and never open a console window on the desktop. Elsewhere the flag is 0.
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
 RUN_SCENE = 'blender/eidoblend/harness/run_scene.py'
 DOCTOR = 'blender/eidoblend/harness/doctor.py'
 EXIT_MEANING = {0: 'done', 1: 'failed', 2: 'bad arguments', 3: 'refused (a hand-edited .blend; see the message)'}
@@ -100,7 +104,7 @@ def run_blender(script, args, check_bash=True):
     cmd = [bash, 'run_blender.sh', script] + [str(a) for a in args]
     print('+', ' '.join(cmd), flush=True)
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-    return subprocess.run(cmd, cwd=ROOT, env=env).returncode
+    return subprocess.run(cmd, cwd=ROOT, env=env, creationflags=NO_WINDOW).returncode
 
 
 DENO_VERSIONS = ('2.8.', '2.9.')            # checked on 2.8.1 and 2.9.5 (docs/SETUP.md)
@@ -130,7 +134,8 @@ def deno_checks():
         return [('Deno (canvas screens, the books\' rig, parole)', False,
                  'not on PATH: install 2.8.1 or 2.9.5 (docs/SETUP.md, step 6); only those scenes need it')]
     try:
-        v = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=60).stdout.split()
+        v = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=60,
+                           creationflags=NO_WINDOW).stdout.split()
     except (OSError, subprocess.SubprocessError) as e:
         return [('Deno', False, f'{exe}: {type(e).__name__}: {e}')]
     ver = v[1] if len(v) > 1 else '?'
@@ -144,7 +149,7 @@ def deno_checks():
     try:
         r = subprocess.run([exe, 'eval', '--no-config', '--node-modules-dir=none', '--cached-only', code], cwd=ROOT,
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=180,
-                           env=dict(os.environ, NO_COLOR='1'))
+                           env=dict(os.environ, NO_COLOR='1'), creationflags=NO_WINDOW)
         good, err = r.returncode == 0, (r.stderr or r.stdout).strip()
     except (OSError, subprocess.SubprocessError) as e:
         good, err = False, f'{type(e).__name__}: {e}'
@@ -213,7 +218,8 @@ def cmd_doctor(a):
 
     bl = find_blender()
     if bl:
-        v = subprocess.run([bl, '--version'], capture_output=True, text=True, timeout=120).stdout.splitlines()
+        v = subprocess.run([bl, '--version'], capture_output=True, text=True, timeout=120,
+                           creationflags=NO_WINDOW).stdout.splitlines()
         ver = v[0] if v else '?'
         report(f'Blender: {ver}', '5.2' in ver, bl if '5.2' in ver else f'{bl}: this edition is built and checked on 5.2')
     else:
@@ -363,7 +369,9 @@ def main():
         eido_docker.add_commands(sub)
 
     a = ap.parse_args()
-    if eido_docker and a.cmd in ('doctor', 'build', 'render', 'bench') and not a.local:
+    # inside the render image itself (an agent working in the container) the command runs right here
+    in_image = bool(eido_docker) and getattr(eido_docker, 'inside_container', lambda: False)()
+    if eido_docker and a.cmd in ('doctor', 'build', 'render', 'bench') and not a.local and not in_image:
         sys.exit(eido_docker.run_in_container(sys.argv[1:], a))
     a.fn(a)
 
