@@ -1,0 +1,12 @@
+[
+ ["a_blk2000_54k", {"iters": 54000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "block": 2000, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["b_blk3000_54k", {"iters": 54000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "block": 3000, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["c_plift06", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "p_lift": 0.06, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["d_hop5", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "hop_cells": 5.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["e_long2", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "long_factor": 2.0, "speedup": 0.5, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["f_blk2000_hop5_54k", {"iters": 54000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "block": 2000, "hop_cells": 5.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["g_s40_blk2000_54k_jit20", {"iters": 54000, "set": {"sand_m": 40, "speed_from_frac": 0.0, "block": 2000, "jitter_deg": 20, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["h_blk4000_72k", {"iters": 72000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "block": 4000, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["i_plift06_blk2000", {"iters": 30000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "p_lift": 0.06, "block": 2000, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["j_shadow12", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "shadow_deg": 12.0, "shadow_lo_deg": 8.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}]
+]

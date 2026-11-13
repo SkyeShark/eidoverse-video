@@ -1,0 +1,18 @@
+[
+ ["k_last", {"set": {"sand_m": 45, "spread_deg": 20.0, "steer_deg": 25.0, "steer_wavelength_m": 2000.0,
+                     "supply_var": 0.9, "supply_wavelength_m": 4000.0, "supply_stretch_m": 1500.0,
+                     "supply_axis_deg": 90.0, "refine_winds": "last", "refine_iters": 1000}}],
+ ["k_cycle_short", {"set": {"sand_m": 45, "spread_deg": 20.0, "steer_deg": 25.0, "steer_wavelength_m": 2000.0,
+                            "supply_var": 0.9, "supply_wavelength_m": 4000.0, "supply_stretch_m": 1500.0,
+                            "supply_axis_deg": 90.0, "refine_winds": "cycle", "refine_block": 200,
+                            "refine_iters": 1200, "refine_average_iters": 200}}],
+ ["k_last_hero_cycle", {"set": {"sand_m": 45, "spread_deg": 20.0, "steer_deg": 25.0, "steer_wavelength_m": 2000.0,
+                                "supply_var": 0.9, "supply_wavelength_m": 4000.0, "supply_stretch_m": 1500.0,
+                                "supply_axis_deg": 90.0, "refine_winds": "last", "refine_iters": 1000,
+                                "hero_winds": "cycle", "hero_block": 150, "hero_iters": 1800,
+                                "hero_average_iters": 100, "hero_smooth_cells": 0.75}}],
+ ["m_mid_last", {"set": {"sand_m": 45, "p_lift": 0.02, "lift_boost": 25.0, "speed_from_frac": 0.06,
+                         "spread_deg": 20.0, "steer_deg": 25.0, "steer_wavelength_m": 2000.0, "supply_var": 0.8,
+                         "supply_wavelength_m": 4000.0, "supply_stretch_m": 1500.0, "supply_axis_deg": 90.0,
+                         "refine_winds": "last", "refine_iters": 1000}}]
+]

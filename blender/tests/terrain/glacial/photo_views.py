@@ -170,8 +170,15 @@ def transfer(vf, f, P, s, floor, cam):
             best = (q, g, a)
             break
     if best is None or want < 20.0:
-        q = pt + vf['side'] * vf['across_m'] * right
-        best = (q, f.height(q[0], q[1]), vf['across_m'])
+        across = vf['across_m']
+        if want < 20.0:
+            # a floor view stays on the floor's middle half: walking out to the reference camera's distance from its
+            # trunk put the camera against a wall where the floor is narrower, and the wall filled the frame
+            edge = next((a for a in np.arange(0.0, 3000.0, 0.25 * f.cell)
+                         if f.height(*(pt + vf['side'] * a * right)) - fl > 10.0), 3000.0)
+            across = min(across, 0.5 * edge)
+        q = pt + vf['side'] * across * right
+        best = (q, f.height(q[0], q[1]), across)
     q, g, a0 = best
     z = g + vf['height_m']
     if want > 20.0 and vf['past_outlet_m'] > 0:            # a mountain viewpoint beyond the tile: the same height
@@ -179,6 +186,10 @@ def transfer(vf, f, P, s, floor, cam):
     if far:                                              # look at the valley the way the reference camera does
         mid = frame_at(P, s, 0.5 * L)[0]
         hd = (heading_of(mid - q) + vf['rel_to_mid_deg']) % 360.0
+    elif vf.get('aim_up_m'):
+        # a view along the trough aims at its floor this far up the trunk (the local direction looked into the
+        # next bend's wall)
+        hd = heading_of(frame_at(P, s, max(at - float(vf['aim_up_m']), 0.0))[0] - q)
     else:
         hd = (heading_of(up) + vf['rel_heading_deg']) % 360.0
     if want > 20.0 and not clear_view(f, q, z, hd, cam['pitch_deg'], cam['lens_mm']):
@@ -207,16 +218,47 @@ def horizon(f, cam, half_deg=70.0, step_deg=0.25, r_eff=6371000.0 * 7.0 / 6.0):
     return az, el
 
 
+# views along the trough, placed by their valley frame (photo_views' transfer) on every terrain: (key, the photograph
+# shown beside them, valley frame, lens and pitch). floor_axis: on the trunk's floor 62 % of the way down the valley,
+# looking at the floor 3 km up it (Lauterbrunnen from the meadows south of the village, photograph 12); aerial_axis:
+# 1.5 km over the floor near the outlet, looking at the floor 3.5 km up the trough (photograph 14 looks down into the
+# cleft from high on its side)
+AXIS_VIEWS = [
+    ('floor_axis', 'raw/lauterbrunnen_12.jpg',
+     dict(frac=0.62, side=1.0, across_m=0.0, ground_above_floor_m=0.0, height_m=EYE, rel_heading_deg=0.0,
+          past_outlet_m=0.0, rel_to_mid_deg=0.0, aim_up_m=3000.0), dict(pitch_deg=4.0, lens_mm=30.0)),
+    ('aerial_axis', 'raw/lauterbrunnen_14.jpg',
+     dict(frac=0.97, side=1.0, across_m=0.0, ground_above_floor_m=0.0, height_m=1500.0, rel_heading_deg=0.0,
+          past_outlet_m=0.0, rel_to_mid_deg=0.0, aim_up_m=3500.0), dict(pitch_deg=-18.0, lens_mm=35.0)),
+]
+
+
+def textured_view(name, cam, field, recipe, params, seed, photo, half=4000.0):
+    """A render_textured.py view of a camera: x, y and its height over the field's ground there (agl); hero levels
+    (focus) when it stands near the ground inside the main tile."""
+    agl = float(cam['z'] - field.height(cam['x'], cam['y']))
+    inside = abs(cam['x']) < half - 300.0 and abs(cam['y']) < half - 300.0
+    return dict(name=name, recipe=recipe, params=params, seed=seed, photo=photo, focus=bool(inside and agl < 30.0),
+                camera=dict(x=float(cam['x']), y=float(cam['y']), agl=agl, heading_deg=float(cam['heading_deg']),
+                            pitch_deg=float(cam['pitch_deg']), lens_mm=float(cam['lens_mm'])))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--gen', action='append', default=[])
     ap.add_argument('--photos')
     ap.add_argument('--job', default=os.path.join(OUT, 'job.json'))
     ap.add_argument('--tag', default='v')
+    ap.add_argument('--textured', help='also write a render_textured.py job here: the same cameras on make_terrain '
+                                       "(the generated npz's recipe and seed from its gen.py record; the reference as "
+                                       'real_place), with palettes and rocks')
+    ap.add_argument('--out', default=OUT, help="the render jobs' out_dir")
+    ap.add_argument('--axis', action='store_true', help='also the views along the trough (AXIS_VIEWS): the same '
+                                                        'place in the valley frame on the reference and every --gen')
     a = ap.parse_args()
     meta = json.load(open(os.path.join(PHOTOS, 'sources.json'), encoding='utf-8'))['photos']
     keys = a.photos.split(',') if a.photos else list(meta)
-    views = []
+    views, tex = [], []
     cache = {}
     for key in keys:
         ph = meta[key]
@@ -227,6 +269,8 @@ def main():
         cam, vf = ref_camera(ph, f, P, s, floor, r.meta)
         views.append(dict(name=f'{a.tag}_{key}_reference', source=dict(reference=ph['reference']), camera=cam,
                           photo=ph['file'], valley_frame=vf))
+        tex.append(textured_view(f'{a.tag}_{key}_reference', cam, f, 'real_place', {'dem': ph['reference']}, 1,
+                                 ph['file']))
         for g in a.gen:
             gf = gen_field(g)
             Pg, sg, flg = trunk(gf)
@@ -234,12 +278,41 @@ def main():
             label = os.path.splitext(os.path.basename(g))[0]
             views.append(dict(name=f'{a.tag}_{key}_{label}', source=dict(npz=os.path.abspath(g)), camera=c2,
                               photo=ph['file'], valley_frame=vf))
+            rp = os.path.splitext(os.path.abspath(g))[0] + '_record.json'
+            item = json.load(open(rp, encoding='utf-8'))['item'] if os.path.exists(rp) else {}
+            tex.append(textured_view(f'{a.tag}_{key}_{label}', c2, gf, item.get('recipe', 'alpine_valley'),
+                                     item.get('params') or {}, int(item.get('seed', 1)), ph['file']))
         print(f"{key}: reference camera ({cam['x']:.0f}, {cam['y']:.0f}) z {cam['z']:.0f} heading "
               f"{cam['heading_deg']:.0f} lens {cam['lens_mm']:.1f}; valley frame {vf}", flush=True)
+    if a.axis:
+        # views placed in the valley frame on every terrain alike (the reference included): the photographs beside
+        # them show the same kind of view of the real place
+        ref_name = meta[keys[0]]['reference']
+        f, r, (P, s, floor) = cache[ref_name]
+        for key, ph_file, vf, look in AXIS_VIEWS:
+            for label, fld, src, tex_args in [('reference', f, dict(reference=ref_name),
+                                               ('real_place', {'dem': ref_name}, 1))] + \
+                    [(os.path.splitext(os.path.basename(g))[0], gen_field(g), dict(npz=os.path.abspath(g)), None)
+                     for g in a.gen]:
+                Pg, sg, flg = (P, s, floor) if label == 'reference' else trunk(fld)
+                c2 = dict(look, **transfer(vf, fld, Pg, sg, flg, look))
+                views.append(dict(name=f'{a.tag}_{key}_{label}', source=src, camera=c2, photo=ph_file,
+                                  valley_frame=vf))
+                if tex_args is None:
+                    g = src['npz']
+                    rp = os.path.splitext(g)[0] + '_record.json'
+                    item = json.load(open(rp, encoding='utf-8'))['item'] if os.path.exists(rp) else {}
+                    tex_args = (item.get('recipe', 'alpine_valley'), item.get('params') or {}, int(item.get('seed', 1)))
+                tex.append(textured_view(f'{a.tag}_{key}_{label}', c2, fld, tex_args[0], tex_args[1], tex_args[2],
+                                         ph_file))
     os.makedirs(os.path.dirname(os.path.abspath(a.job)), exist_ok=True)
     with open(a.job, 'w', encoding='utf-8') as fh:
-        json.dump(dict(out_dir=OUT, views=views), fh, indent=1)
+        json.dump(dict(out_dir=a.out, views=views), fh, indent=1)
     print(a.job)
+    if a.textured:
+        with open(a.textured, 'w', encoding='utf-8') as fh:
+            json.dump(dict(out_dir=a.out, views=tex), fh, indent=1)
+        print(a.textured)
 
 
 if __name__ == '__main__':

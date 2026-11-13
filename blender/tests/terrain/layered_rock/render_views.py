@@ -13,8 +13,11 @@ the references' grey clay. compose_sheets.py sets them beside the photographs.
                      and _clay.png; with --fan, clay renders from every photo position at the FAN headings, to fit
                      each photo's heading, pitch and lens (fan_<photo>_<heading>.png)
 --recipe <name>      generated at the reference's extent (the stage overrides merged into the recipe dict), the
-                     cameras matched, then built with the hero levels around them: <tag>_<view>.png and _clay.png
-Writes blender/tests/terrain/out/layered_rock/views/ and <tag>_views.json (cameras, relations, timings).
+                     cameras matched, then built with the hero levels around them: <reference>_<tag>_<view>.png
+                     and _clay.png
+Writes blender/tests/terrain/out/layered_rock/views/ and <reference>_<tag>_views.json (--real: <reference>_views.json;
+cameras, relations, timings). (Keyed by the tag alone, the Badlands' v1 cameras overwrote Monument Valley's and its
+sheet showed Badlands photographs and renders.)
 """
 import json
 import math
@@ -319,7 +322,7 @@ def generated(a, rec):
             x, y = (slide_to_edge(t.height_at, m['x'], m['y'], m['az']) if c.get('edge') else (m['x'], m['y']))
             z = float(t.height_at(x, y)) + VM.EYE
             aim(cam, x, y, z, m['az'], m['pitch'], m['lens'])
-            render(sc, cam, f"{a['tag']}_{c['name']}{suffix}", sky_root, rec)
+            render(sc, cam, f"{name}_{a['tag']}_{c['name']}{suffix}", sky_root, rec)
     shutil.rmtree(sky_root, ignore_errors=True)
 
 
@@ -338,7 +341,8 @@ def main():
         traceback.print_exc()
         rec['error'] = traceback.format_exc()
     rec['seconds'] = round(time.time() - t0, 1)
-    tag = a['real'] + ('_fan' if a['fan'] else '') if a['real'] else a['tag']
+    rec['reference'] = a['real'] or RECIPE_REF[a['recipe']]
+    tag = a['real'] + ('_fan' if a['fan'] else '') if a['real'] else f"{RECIPE_REF[a['recipe']]}_{a['tag']}"
     with open(os.path.join(OUT, f'{tag}_views.json'), 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1, default=str)
     print('[layered.views] done', rec['seconds'], 's', flush=True)

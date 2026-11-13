@@ -35,7 +35,7 @@ from eidoblend.terrain import run as RUN  # noqa: E402
 from eidoblend.terrain.core import levels as L  # noqa: E402
 
 SAVE = ('h', 'A', 'water', 'wear', 'deposit', 'talus', 'bed', 'Sc', 'ice', 'trough', 'trough_floor', 'trough_wall',
-        'ice_q', 'carve')
+        'ice_q', 'carve', 'valley_fill', 'trunk', 'trough_rho')
 
 
 def argv():

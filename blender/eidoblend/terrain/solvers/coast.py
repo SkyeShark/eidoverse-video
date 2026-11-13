@@ -12,7 +12,10 @@ sheltered bays, stacks where the retreat isolates a strong knob of rock.
                     base level, so its valleys reach the present cliff line high above the beach and are cut across:
                     the Seven Sisters' hanging dry valleys, Moher's plateau streams. (With the sea pinned at the
                     original coast instead, 300 m from the cliff, every valley graded to it and the cliff tops stood
-                    16 m high where the reference's stand 63 m.)
+                    16 m high where the reference's stand 63 m.) Run on 'all' levels with `refine` (a fluvial
+                    stage's parameters), it refines the land on each finer level down to the main one before the
+                    coast stage cuts it (refine_land: the uncut land restored, the band pinned to it, the backbone in
+                    refine mode, the runner's pins put back), so no level's downland is its parent's upsampled
       'coast'       the sea's work, on every level (the cliff is rebuilt sharp at each level's own cells):
         1. sea level: cells at or below it are sea;
         2. on the first level it runs on, the shore plan from the original shoreline: coast_land's s0 = 0 line where
@@ -27,17 +30,22 @@ sheltered bays, stacks where the retreat isolates a strong knob of rock.
            exp(weakness n), world-space noise: weak rock retreats into coves, strong rock stands as headlands;
            a strong knob on a headland cut from both sides stays as a stack, its walls at stack_face_deg, near
            vertical, so a narrow one stands as a column, not a pyramid) plus a few metres of crenellation (the
-           cliff line's buttresses and recesses). Land closer than R to the original shore is cut away; cut regions
-           that do not reach the sea or the window edge are filled back (the sea cannot get there);
+           cliff line's buttresses and recesses) plus the collapse scars' bites (scar_field: a world lattice of
+           scars, each recessing the cliff line 3-12 m over a 20-90 m scallop, a fresh face). Land closer than R
+           to the original shore is cut away; cut regions that do not reach the sea or the window edge are filled
+           back (the sea cannot get there);
         4. the cliff foot is the zero line of d0 - R; the signed distance s to it (JFA again, sub-cell) shapes the
            ground: inland the face, Z(s) = foot + s tan(face) (chalk 74-82 degrees, the angle of the nearest point
            of the foot line, so a face profile never turns down), or a rock column's stepped face (Moher: sandstone
            ledges at 84 degrees over siltstone at 58), meeting the land at a rounded edge, so the cliff stands as
            high as the land is there; seaward the wave-cut platform (platform_top_m at the foot, falling at
            platform_slope_deg to the sea floor sea_floor_m down, rough by a few decimetres), with a talus apron at
-           35 degrees under the face (its height a share of the cliff's), a shingle toe on exposed coast, and in
-           sheltered bays (low exposure) a sand beach: a berm, the beach face, and the Dean profile h = -A y^(2/3)
-           below the waterline (A 0.1);
+           35 degrees under the face (its height a share of the cliff's), a lobe of fallen blocks under each scar
+           (scar_debris of its bite high, falling seaward at debris_deg), a shingle beach on exposed coast (a berm at
+           shingle_m against the foot, then the beach face down to the platform at -0.6 m shingle_w_m out, the width
+           changing along the shore by shingle_var), and in sheltered bays (low exposure) a sand beach: a berm, the
+           beach face, and the Dean profile h = -A y^(2/3) below the waterline (A 0.1). A rock column (Moher's beds,
+           the chalk's beds and flint bands) steps the face, and its stratigraphic height is written as zs;
         5. wear (the rock cut away), talus (the apron), deposit (beach and shingle), bed (the rock surface) and Sc
            (the face's angle, for the detail package's breakup on the hero levels) are written; a child level's
            border band blends to its parent's surface.
@@ -109,8 +117,17 @@ DEFAULTS = dict(
     platform_slope_deg=0.7,     # it falls seaward at this angle ...
     sea_floor_m=15.0,           # ... down to the sea floor this deep, which it meets in a smooth curve
     platform_rough_m=0.15,      # its runnels and steps (std, metres; 20 m and 6 m)
-    shingle_m=1.3,              # the shingle toe at the foot of an exposed cliff: height and width
-    shingle_w_m=14.0,
+    shingle_m=1.3,              # the shingle beach at the foot of an exposed cliff: its crest above sea level ...
+    shingle_w_m=14.0,           # ... and its width from the foot to where it meets the platform (-0.6 m)
+    shingle_berm=0.35,          # the berm: the flat crest's share of the width (then the beach face)
+    shingle_var=0.0,            # the width's change along the shore (ln std; world noise at shingle_scales_m)
+    shingle_scales_m=(700.0, 220.0),
+    scars=0.0,                  # collapse scars (0..1: the share of lattice cells holding one): bites out of the
+    scar_spacing_m=140.0,       # cliff line, fresh faces recessed scar_depth_m over a scar_radius_m disc ...
+    scar_radius_m=(18.0, 45.0),
+    scar_depth_m=(3.0, 12.0),
+    scar_debris=0.6,            # ... with a lobe of fallen blocks at the foot: its height, a share of the bite ...
+    debris_deg=24.0,            # ... falling seaward at this angle
     beach_exposure=(0.30, 0.42),  # exposure where sand beaches take over (full beach below the first)
     beach_berm_m=2.2,           # the berm's height above sea level
     beach_backshore_m=35.0,     # the dry beach between the foot and the berm crest (full beach)
@@ -136,6 +153,12 @@ LAND_DEFAULTS = dict(
     start_m=150.0,              # the start surface: the shape scaled to this height ...
     start_roughness=0.25,       # ... with this much noise (keep its gradients under the regional slope when U = 0,
     start_scales_m=(2400.0, 900.0),     # or its hollows outlast a short run)
+    refine=None,                # child levels: a fluvial stage's parameters to refine the land with before the sea
+                                # cuts it (refine_land); None leaves a child's land its parent's, upsampled
+    refine_min_cell_m=None,     # ... on levels with cells of at least this (None: the main level's cell)
+    refine_creep_m2=0.0,        # ... then linear creep (kappa t, m^2) of the refined land: its crests and valley sides
+                                # rounded at the level's own cells (the downs' broad convex interfluves; the refine
+                                # alone left knife-edged crests and V notches, a mountain range in miniature)
     seed=0,
 )
 # Seaward of the original coast the land goes on down to base level (land_shape): the coastal plain of the low sea
@@ -149,6 +172,11 @@ LAND_DEFAULTS = dict(
 # partings cut back into ledges; the overall face about 74 degrees.
 COLUMNS = {
     'moher': [(9.0, 84.0), (5.0, 58.0), (6.0, 82.0), (3.5, 55.0), (11.0, 85.0), (4.0, 60.0)],
+    # the Seaford and Newhaven chalk of the Seven Sisters: thick beds standing at 79-82 degrees, each topped by a
+    # band of flint nodules the face weathers back a little (a nick at 70-73 degrees): the face's horizontal lines
+    # (the material reads the flint bands from the same stratigraphic height, `zs`); overall about 79 degrees
+    'chalk': [(3.2, 80.0), (0.6, 71.0), (2.4, 82.0), (0.6, 72.0), (4.1, 79.0), (0.6, 70.0), (1.8, 81.0),
+              (0.6, 73.0)],
 }
 
 
@@ -581,13 +609,68 @@ def land_shape(s0, P, tex=None):
     return shape
 
 
+def _band_pins(level):
+    """A child's border band weights without the runner's sea hold: 1 on the outer 2 cells, easing to 0 at band
+    cells in (run.child_pins' ramp)."""
+    d = Gd.edge_distance(level.n).astype(np.float64)
+    t = np.clip((d - 2.0) / float(max(level.band - 2, 1)), 0.0, 1.0)
+    return (1.0 - t * t * (3.0 - 2.0 * t)).astype(F32)
+
+
+def refine_land(fields, level, P, seed, ctx):
+    """On a child level: the land the sea will cut, refined at this level's cells. The uncut land is restored (the
+    parent's land near its cut, coast_land; the inherited surface elsewhere), the border band pinned to it (the
+    runner holds every inherited cell at or under sea level, which here is the parent's cut: the platform and the
+    sea), the fluvial backbone run on it in refine mode (P['refine']: its stage parameters; the lock holds the
+    landform, the level adds the valleys, ridges and slopes it resolves), the result rounded by linear creep
+    (refine_creep_m2), and the runner's pins put back for the coast stage, which then cuts this level's own land.
+    Without it every finer level's downland was its parent's upsampled: on the 5.9 m main level a 4 x Catmull-Rom of
+    23 m cells, blurred, with the coarse grid printed in its curvature."""
+    land, _zone = _child_land(fields, level)
+    pins = ctx.pins
+    keep = None
+    if pins is not None:
+        keep = {k: pins[k] for k in ('pin_w', 'pin_h')}
+        pins['pin_w'] = _band_pins(level)
+        pins['pin_h'] = land.astype(F32)
+    fields['h'] = land.astype(F32)
+    if 'bed' in fields:
+        fields['bed'] = np.minimum(np.asarray(fields['bed'], F32), fields['h'])
+    try:
+        FL.op_fluvial(fields, level, dict(P['refine']), seed, ctx=ctx)
+    finally:
+        if keep is not None:
+            pins.update(keep)
+    kt = float(P.get('refine_creep_m2') or 0.0)
+    if kt > 0:
+        # linear creep (a Gaussian of sigma sqrt(2 kappa t)), the border band held to the restored land
+        from .hillslope import gaussian_blur
+        h = np.asarray(fields['h'], np.float64)
+        hb = gaussian_blur(h, math.sqrt(2.0 * kt) / float(level.cell))
+        w = _band_pins(level).astype(np.float64)
+        fields['h'] = (hb * (1.0 - w) + land * w).astype(F32)
+        if 'bed' in fields:
+            fields['bed'] = np.minimum(np.asarray(fields['bed'], F32), fields['h'])
+    ctx.shared.setdefault('coast_uncut', []).append(int(ctx.index))
+
+
 def op_coast_land(fields, level, params, seed=0, ctx=None):
     """Stage 'coast_land' (module doc): U on the growing level, the start surface on a fresh one, and coast_s0 (metres
-    inland of the original coastline, the coast stage's shore plan) on every pass."""
+    inland of the original coastline, the coast stage's shore plan) on every pass. On a child level (run it on 'all'
+    levels) with `refine` given (a fluvial stage's parameters): the land refined at the child's cells before the
+    coast stage cuts it (refine_land), on levels whose cell is at least refine_min_cell_m (None: the main level's)."""
     ctx = ctx or FL.standalone_context(fields, level)
     dev = ctx.device or FL.device()
     P = params_for(params, LAND_DEFAULTS)
     s = int(seed) + int(P['seed'])
+    if ctx.role == 'refine':
+        if P['refine'] and ctx.prepass is None and 'coast_d0' in fields:
+            main = ctx.main
+            lo = float(P['refine_min_cell_m'] if P['refine_min_cell_m'] is not None else
+                       (main.cell if main is not None else level.cell))
+            if float(level.cell) >= lo * (1.0 - 1e-6):
+                refine_land(fields, level, P, s, ctx)
+        return fields
     centre = _centre(ctx, level)
     s0 = shore_coordinate(level, P, s, dev, centre)
     tex = _unit_noise(P['texture_scales_m'], level, s, dev, 1201)
@@ -739,6 +822,51 @@ def stack_weight(level, P, seed, dev):
     return float(P['stacks']) * _smoothstep(0.55, 0.8, k)
 
 
+def _hash_u(ix, iy, salt):
+    """Four uniform 0..1 numbers per integer lattice point (any sign) and salt: a PCG chain."""
+    def pcg(v):
+        st = v * np.uint32(747796405) + np.uint32(2891336453)
+        w = ((st >> ((st >> np.uint32(28)) + np.uint32(4))) ^ st) * np.uint32(277803737)
+        return (w >> np.uint32(22)) ^ w
+    a = (np.asarray(ix, np.int64) & 0xFFFFFFFF).astype(np.uint32)
+    b = (np.asarray(iy, np.int64) & 0xFFFFFFFF).astype(np.uint32)
+    hsh = pcg(a + pcg(b + np.uint32(salt & 0xFFFFFFFF)))
+    out = []
+    for _ in range(4):
+        hsh = pcg(hsh)
+        out.append((hsh & np.uint32(0xFFFFFF)).astype(np.float64) / float(0xFFFFFF))
+    return out
+
+
+def scar_field(level, P, seed):
+    """Collapse scars, a world-space field (metres): on a lattice of scar_spacing_m, a cell holds a scar with
+    probability `scars` (a hash), jittered inside it, its radius and depth drawn from scar_radius_m and scar_depth_m;
+    the field is the deepest scar's bite at each point, depth (1 - (d / radius)^2)^1.5. Added to the retreat it
+    recesses the cliff line in a scallop wherever a scar sits on it (a fresh face); the coast stage heaps its debris
+    at the foot. Zeros when scars is 0."""
+    n = level.n
+    if float(P['scars']) <= 0:
+        return np.zeros((n, n))
+    X, Y = level.xy()
+    sp = float(P['scar_spacing_m'])
+    gx, gy = X / sp, Y / sp
+    ix, iy = np.floor(gx).astype(np.int64), np.floor(gy).astype(np.int64)
+    r_lo, r_hi = (float(v) for v in P['scar_radius_m'])
+    d_lo, d_hi = (float(v) for v in P['scar_depth_m'])
+    out = np.zeros(X.shape)
+    for dj in (-1, 0, 1):
+        for di in (-1, 0, 1):
+            cx, cy = ix + di, iy + dj
+            ux, uy, ur, ud = _hash_u(cx, cy, int(seed) * 7919 + 1907)
+            keep = _hash_u(cx, cy, int(seed) * 7919 + 1913)[0] < float(P['scars'])
+            px = (cx + 0.1 + 0.8 * ux) * sp
+            py = (cy + 0.1 + 0.8 * uy) * sp
+            r = r_lo + (r_hi - r_lo) * ur
+            q = np.clip(1.0 - ((X - px) ** 2 + (Y - py) ** 2) / (r * r), 0.0, 1.0)
+            out = np.maximum(out, np.where(keep, (d_lo + (d_hi - d_lo) * ud) * q ** 1.5, 0.0))
+    return out
+
+
 def retreat_field(E, level, P, seed, dev, stack_w=None):
     """R (metres): retreat_m x the exposure factor x the rock weakness, plus the crenellation."""
     f = np.clip((np.asarray(E, np.float64) / E_REF), 1e-3, None) ** float(P['exposure_power'])
@@ -802,7 +930,11 @@ def op_coast(fields, level, params, seed=0, ctx=None):
     child = 'coast_d0' in fields
     info = {}
     if child:
-        land, zone = _child_land(fields, lv)
+        if int(ctx.index) in ctx.shared.get('coast_uncut', []):
+            # coast_land refined this level's own land (refine_land): it is the land to cut, everywhere
+            land, zone = np.asarray(fields['h'], np.float64), np.zeros((n, n))
+        else:
+            land, zone = _child_land(fields, lv)
         d0 = np.asarray(fields['coast_d0'], np.float64)
         E = np.asarray(fields['coast_E'], np.float64)
     else:
@@ -819,9 +951,10 @@ def op_coast(fields, level, params, seed=0, ctx=None):
     bed_in = np.asarray(fields['bed'], np.float64) if 'bed' in fields else land.copy()
     H = land - sea_level
 
-    # the retreat and the cliff foot line
+    # the retreat and the cliff foot line (with the collapse scars' bites)
     stack_w = stack_weight(lv, P, s, dev)
-    R = retreat_field(E, lv, P, s, dev, stack_w)
+    bite = scar_field(lv, P, s)
+    R = retreat_field(E, lv, P, s, dev, stack_w) + bite
     phi = d0 - R
     cut = phi < 0.0
     if P['connect']:
@@ -880,17 +1013,31 @@ def op_coast(fields, level, params, seed=0, ctx=None):
     cut_prof = np.maximum(face, platform)
     rock = C.smooth_min(land, cut_prof, k) if k > 0 else np.minimum(land, cut_prof)
     rock = np.minimum(rock, land)
-    # deposition at the foot: the talus apron (35 degrees from the apron's top against the face), the shingle toe
-    # of an exposed cliff, and in sheltered bays sand up to the beach profile (berm, face, Dean), over the cut
-    # platform or the old sea floor alike. Landward of the foot each falls at the repose angle into what is there
+    # deposition at the foot: the talus apron (35 degrees from the apron's top against the face), the debris lobes
+    # under the collapse scars, the shingle beach of an exposed cliff, and in sheltered bays sand up to the beach
+    # profile (berm, face, Dean), over the cut platform or the old sea floor alike. Landward of the foot each falls
+    # at the repose angle into what is there
     tan_r = math.tan(math.radians(float(P['talus_deg'])))
     back = np.maximum(sd, 0.0) * tan_r
     apron = foot - y * tan_r - back
+    if bite.any():
+        # a scar's fallen blocks: heaped against its foot scar_debris x its bite high, falling seaward at debris_deg
+        lobe = (sea_level + float(P['platform_top_m']) + float(P['scar_debris']) * bite
+                - y * math.tan(math.radians(float(P['debris_deg']))) - back)
+        apron = np.maximum(apron, np.where(bite > 0.05, lobe, -np.inf))
     beach_amt = 1.0 - _smoothstep(P['beach_exposure'][0], P['beach_exposure'][1], E)
     exposed = 1.0 - beach_amt
+    # the shingle beach: a berm at shingle_m against the foot, then the beach face down to the platform at -0.6 m
+    # where the beach's width ends; the width changing along the shore
     wsh = max(float(P['shingle_w_m']), 1e-3)
-    sh_t = exposed * float(P['shingle_m']) * (1.0 - (y / wsh) ** 2)       # its thickness above sea level
-    shingle = np.where(sh_t > 0.0, sea_level + sh_t - back, -np.inf)        # none beyond its width or in a bay
+    if float(P['shingle_var']) > 0:
+        wsh = wsh * np.exp(np.clip(float(P['shingle_var']) * _unit_noise(P['shingle_scales_m'], lv, s, dev, 1801),
+                                   -1.2, 0.6))
+    crest = float(P['shingle_m'])
+    berm = float(P['shingle_berm']) * wsh
+    tanf = (crest + 0.6) / np.maximum(wsh - berm, 1e-3)
+    sh_z = np.where(y <= berm, crest, crest - (y - berm) * tanf)
+    shingle = np.where((sh_z > -0.6) & (exposed > 0.0), sea_level + exposed * sh_z - back, -np.inf)
     beach = sea_level + beach_profile(y, P, np.ones_like(y)) - back
     h = np.maximum(rock, np.maximum(apron, shingle))
     h = h + beach_amt * np.maximum(beach - h, 0.0)

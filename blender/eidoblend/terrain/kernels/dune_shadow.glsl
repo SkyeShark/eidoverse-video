@@ -12,11 +12,16 @@
    windward toe up to uReach cells along its stoss; uRiseMode 1, the sand's thickness (Momiji's height), which grows
    from the toe all the way to the crest of a dune on bare ground or a thinner sheet.
 
+   The wind is steered: at each cell it blows along uDir turned by the cell's own angle (the `wind` texture holds the
+   angle's cosine and sine; solvers/aeolian.py's Steering: the regional relief turns each wind by a smooth angle that
+   varies across the field), and the ray looks upwind along that local direction.
+
    Open and pinned grids stop the march where the upwind ray leaves the grid; periodic grids wrap.
    Twin: solvers/aeolian.py, twin 'dune_shadow'. */
 //! sampler st                bed (r) and sand thickness (g), metres
+//! sampler wind              the local turn of the wind: its cosine (r) and sine (g); (1, 0) where it is not turned
 //! image   outShadow rg32f   shadow 0..1 (r), rise above the lowest ground upwind, metres (g)
-//! uniform vec2 uDir         the unit direction the sand moves, (x east, y north)
+//! uniform vec2 uDir         the unit direction the sand moves, (x east, y north), before the local turn
 //! uniform float uTanLo      the tangent where the shadow starts
 //! uniform float uTanHi      the tangent where it is complete
 //! uniform int uReach        how far upwind the ray looks, cells
@@ -36,8 +41,10 @@ void main() {
   float h0 = surface_at(p);
   float best = -1.0e30;
   float lowest = h0;
+  vec2 cs = texelFetch(wind, p, 0).rg;
+  vec2 dir = vec2(cs.x * uDir.x - cs.y * uDir.y, cs.y * uDir.x + cs.x * uDir.y);
   for (int d = 1; d <= uReach; d++) {
-    vec2 q = vec2(p) - float(d) * uDir;          /* texel centres sit at whole numbers */
+    vec2 q = vec2(p) - float(d) * dir;           /* texel centres sit at whole numbers */
     vec2 f = floor(q);
     vec2 t = q - f;
     ivec2 a = ivec2(f);

@@ -19,8 +19,10 @@ OUT = os.path.join(TN, 'out', 'volcanoes_craters', 'acceptance.json')
 
 
 def run_test(name):
+    # no console window on Windows (CREATE_NO_WINDOW): a child Python started without one can open a blank window
+    flags = 0x08000000 if os.name == 'nt' else 0
     p = subprocess.run([sys.executable, os.path.join(HERE, name)], cwd=HERE, capture_output=True, text=True,
-                       timeout=900)
+                       timeout=900, creationflags=flags)
     lines = [ln for ln in p.stdout.splitlines() if ln.startswith(('PASS', 'FAIL', 'INFO')) or 'checks pass' in ln]
     return dict(script=name, exit=p.returncode, summary=lines[-1] if lines else p.stderr[-300:],
                 failures=[ln for ln in lines if ln.startswith('FAIL')])

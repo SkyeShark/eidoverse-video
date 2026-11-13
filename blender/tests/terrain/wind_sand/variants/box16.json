@@ -1,0 +1,23 @@
+[
+ ["s1_plinth_pow2", {"n": 1024, "iters": 24000, "set": {"speed_pow": 2}}],
+ ["s2_uni_s40_pow2", {"n": 1024, "iters": 24000, "set": {"speed_pow": 2, "p_lift": 0.03, "lift_boost": 15.0,
+                                                        "speed_from_frac": 0.1, "sand_m": 40, "supply_var": 0.6,
+                                                        "supply_cap": 1.3, "sheet_smooth_cells": 1.5}}],
+ ["s3_uni_s40_pow3", {"n": 1024, "iters": 24000, "set": {"speed_pow": 3, "p_lift": 0.03, "lift_boost": 15.0,
+                                                        "speed_from_frac": 0.1, "sand_m": 40, "supply_var": 0.6,
+                                                        "supply_cap": 1.3, "sheet_smooth_cells": 1.5}}],
+ ["s4_mid_s45_pow2", {"n": 1024, "iters": 24000, "set": {"speed_pow": 2, "p_lift": 0.02, "lift_boost": 25.0,
+                                                        "speed_from_frac": 0.06, "sand_m": 45, "supply_var": 0.6,
+                                                        "supply_cap": 1.3, "sheet_smooth_cells": 2.0}}],
+ ["s5_uni_s50_pow2", {"n": 1024, "iters": 24000, "set": {"speed_pow": 2, "p_lift": 0.03, "lift_boost": 15.0,
+                                                        "speed_from_frac": 0.1, "sand_m": 50, "supply_var": 0.5,
+                                                        "supply_cap": 1.3, "sheet_smooth_cells": 1.5}}],
+ ["s6_c30_pow2", {"n": 1024, "iters": 24000, "set": {"speed_pow": 2, "sand_m": 30, "bed_m": 20, "p_lift": 0.03,
+                                                    "lift_boost": 15.0, "speed_from_frac": 0.1, "supply_var": 0.35,
+                                                    "supply_stretch_m": 0.0, "supply_cap": 99.0, "spread_deg": 25.0,
+                                                    "steer_deg": 25.0, "sheet_smooth_cells": 1.5}}],
+ ["s7_c30_pow3", {"n": 1024, "iters": 24000, "set": {"speed_pow": 3, "sand_m": 30, "bed_m": 20, "p_lift": 0.03,
+                                                    "lift_boost": 15.0, "speed_from_frac": 0.1, "supply_var": 0.35,
+                                                    "supply_stretch_m": 0.0, "supply_cap": 99.0, "spread_deg": 25.0,
+                                                    "steer_deg": 25.0, "sheet_smooth_cells": 1.5}}]
+]

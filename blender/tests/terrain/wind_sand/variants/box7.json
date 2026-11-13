@@ -1,0 +1,9 @@
+[
+ ["a_kind", {"iters": 24000, "set": {}}],
+ ["b_steer15", {"iters": 24000, "set": {"steer_deg": 15.0}}],
+ ["c_steer25", {"iters": 24000, "set": {"steer_deg": 25.0}}],
+ ["d_steer15_turn15", {"iters": 24000, "set": {"steer_deg": 15.0, "steer_turn_deg": 15.0}}],
+ ["e_steer25_wl2", {"iters": 24000, "set": {"steer_deg": 25.0, "steer_wavelength_m": 2000.0}}],
+ ["f_steer25_spread12", {"iters": 24000, "set": {"steer_deg": 25.0, "spread_deg": 12.0}}],
+ ["g_steer35", {"iters": 24000, "set": {"steer_deg": 35.0}}]
+]

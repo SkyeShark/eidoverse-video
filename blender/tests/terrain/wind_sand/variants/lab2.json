@@ -1,0 +1,4 @@
+[
+ ["s35_sf0_last", {"set": {"sand_m": 35, "speed_from_frac": 0.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5, "refine_winds": "last", "refine_iters": 1000}}],
+ ["plinth_s55_last", {"set": {"sand_m": 55, "speed_from_frac": 0.1, "p_lift": 0.01, "lift_boost": 45.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5, "refine_winds": "last", "refine_iters": 1000}}]
+]

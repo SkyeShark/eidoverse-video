@@ -59,17 +59,49 @@ with roughness_scales_m, k_breakup and breakup_scales_m, deposition 0.5, age_myr
     caprock_zs_m None, caprock_target None, check_every 40    stop the first pass when the share of the main
                                window still at or above the caprock's base height (stratigraphic) falls to the target
     weather_m_per_yr 0         weathering (STRATA_WEATHER, the scarp-retreat process): rock of K factor 1 on a
-                               slope of weather_slope_deg (30) or steeper lowers this fast, any layer by its K factor
-                               (loose cover x weather_loose, 2), whatever drains across it: weak rock under a cliff
-                               wears back, the cliff fails over it and retreats, the strong bed below stays a bench
+                               slope of weather_slope_deg (30) lowers this fast, in proportion to the slope (so every
+                               contour retreats weather_m_per_yr / tan(30 degrees) metres a year horizontally, in
+                               any direction; weather_sat caps the slope term, 1 the old saturated law), any layer by
+                               its K factor (loose cover x weather_loose, 2), whatever drains across it: weak rock
+                               under a cliff wears back, the cliff fails over it and retreats, the strong bed below
+                               stays a bench
     weather_area 0             x (1 + weather_area sqrt(A / 10 ha)): faster where runoff gathers (amphitheatres,
                                side canyons, the escarpment fraying into fingers and buttes)
+    weather_area_slope_deg [20, 35]   the boost ramps in over these slopes: it acts on scarps; on gentle ground
+                               the gathered runoff is the stream-power term's (boosted there, every wash sank a valley
+                               into a floor or bench that should stay a stripped structural surface)
     weather_refine 0           the weathering's factor on the passes under the low-pass lock (it grows the landform;
                                there it only fought the lock, which raised the plateau beside a retreating wall)
+    weather_k_exp 1            the weathering reads K factor^weather_k_exp where the K factor is under 1 (weather_table):
+                               massive cliff rock retreats by failing over its undercut base, not by surface wear, so
+                               2 slows the cliffs' own wear (the Muav x0.16, the Redwall x0.04) and keeps soft rock's
     joints (), joint_gain 0    joint sets (joint_field): K x (1 + joint_gain x the joints' weakness): incision and
                                weathering follow the fractures (straight-sided blocks, mesas and buttes)
-    resist 0, resist_scales_m [1400, 600]   resistant patches: K x exp(-resist n), n unit noise at those scales: a
-                               retreating escarpment leaves the strong patches standing (outliers: mesas, buttes)
+    resist 0, resist_run 0, resist_scales_m [1400, 600]   the rock mass (rock_mass: n, unit noise at those scales,
+                               world space): K x exp(-resist n) and the composite threshold's run of rock
+                               x exp(-resist_run n): a retreating escarpment leaves the strong patches standing
+                               (outliers: mesas, buttes), and a wall is sheer buttresses where the rock is strong,
+                               chutes and talus where it is weak
+    resist_noise 1             the noise part of n is scaled by this (the cores are not): a weakly varying caprock
+                               with a few massive cores (mesas and buttes with flat tops)
+    resist_cores None          strong cores added to n (rock_cores: {'spacing_m', 'radius_m' [lo, hi],
+                               'elongation' [lo, hi], 'angles_deg' (joint directions, compass) or None, 'strength',
+                               'region_m', 'seed', 'exponent' (the outline's superellipse power, 4), 'wobble' (its
+                               radius noise, 0)}): blue-noise blocks of massive rock the escarpment leaves standing
+                               (buttes)
+    dry_basins False           after each pass, fill every closed depression that does not touch the river's channel
+                               with sediment (fill_dry_basins): a desert plateau's basins are dry sinks; the river's
+                               pools stay basins, which the end stage holds as water (recipes with lakes 'lake')
+    sod None                   a grass cover on the hero levels ({'below_deg' 10, 'above_deg' 22, 'k' 0.1, 'hero_only'
+                               True}): K x k where the inherited surface is gentler than below_deg, ramping to x1 at
+                               above_deg (prairies stay smooth sod; the bare walls rill)
+    facies None                the beds' lateral facies change ({'strength' 0.5, 'scale_m' 300, 'scale_z_m' 40,
+                               'weather' 0.5, 'seed'}; facies_spec): a 3D noise f of world position and stratigraphic
+                               height scales the rock's run in the composite threshold by exp(-strength f) and its
+                               weathering rate by exp(-weather f), so each bed is a cliff in one place and a ledgy
+                               slope in another, wears back into alcoves here and stands as a buttress there,
+                               independently of the beds above and below (rock_mass's n is one value through every
+                               bed at a place)
 Fields read: h, bed (else all rock), K_factor, A, qs. Written: h, bed, A, qs, wear, deposit, talus, zs, and U, K, Sc
 (the layer's own tan theta at each cell), G.
 
@@ -113,66 +145,116 @@ COLUMNS = {
     # 1300-1450 m holds 45 % of the tile, the river at 505 m, the rim at 1950 m); the angles against its walls by
     # altitude at 8 m (the Muav and lower Supai ledgy slopes with p50 32-40 degrees and cliff bands at p90 65-75, the
     # Redwall p90 72-78, the Hermit slope 21-30, the Coconino p90 62-68, the Kaibab p50 41-46).
+    # The units are the members as they crop out, thick cliffs and the slopes between them, not a repeating ledge
+    # pattern: with 14-28 m ledge periods (2-3 cells at 8 m) every wall came out as dozens of thin parallel terraces,
+    # the same thickness all along the canyon (the review: Toroweap's benches are few, wide and irregular, between
+    # cliff bands 50-150 m tall). Thicknesses for the western canyon (Muav and Temple Butte thick and cliffy, the
+    # Coconino thin); the Supai as its four members (Watahomigi slope, Manakacha cliff, Wescogame ledges, Esplanade
+    # cliff whose top is the Esplanade bench).
+    # The cliff angles are the rock mass's mean (strata.rock_mass steepens the strong spots to 78-82 degrees): at
+    # 76-82 everywhere the walls were bare and uniform, slope p90 63 degrees against Toroweap's 51 at 8 m. The Muav
+    # is cliffs and ledges of uneven thickness (as one 180 m cliff 93 % of its outcrop was over 51 degrees, where
+    # Toroweap's walls at that height have a median of 43-50); the Redwall stays the one great cliff. The Muav's
+    # ledgy members are thin-bedded dolomitic limestone, not shale (K x0.5): at x0.8-0.9 they wore back beside the
+    # river into bedrock benches 0.6-1 km wide, 15-150 m over it, and every section came out a flat-floored
+    # trapezoid where Toroweap's inner gorge rises straight from the water (half its height within 400 m).
+    # Few, bold members (the review: Toroweap's cliff bands are 50-150 m tall with few, wide, irregular benches): the
+    # Muav as two cliffs 100-110 m tall with ledgy slopes between, the Manakacha one cliff-and-ledge member, the
+    # Toroweap one ledgy member (with eight Muav members and the Toroweap's three, the amphitheatres showed six to
+    # eight thin, evenly spaced bands). The lower Supai members are ledges (48-50 degrees, K x0.5-0.55), not slopes:
+    # Toroweap's Esplanade rim stands at the inner gorge's top, 900 m of near-sheer wall; as slopes (K x0.8-1) they
+    # wore back 450 m under the Esplanade and the gorge was 2 km wide at the bench against Toroweap's 1.2-1.4. The
+    # ledgy members stand at 38-44 degrees, under the talus that covers them (the talus peak at 25-40 degrees).
     'colorado_plateau': [
-        _L('Vishnu schist', 200, 0.35, 62, 'vishnu'),
-        _L('Tapeats sandstone', 60, 0.3, 72, 'tapeats'),
+        _L('Vishnu schist', 200, 0.35, 65, 'vishnu'),
+        _L('Tapeats sandstone', 60, 0.3, 70, 'tapeats'),
         _L('Bright Angel shale', 80, 2.5, 32, 'bright angel'),
-        _L('Muav limestone', 350, 0.45, 40, 'muav',
-           beds=dict(period_m=28.0, ledge_frac=0.35, ledge_K_factor=0.3, ledge_Sc_deg=72.0, jitter=0.35)),
-        _L('Temple Butte limestone', 60, 0.3, 72, 'muav'),
-        _L('Redwall limestone', 170, 0.2, 76, 'redwall'),
-        # (K 0.55: at 0.9 the Supai wore back under the weathering and the inner gorge came out twice Toroweap's
-        # width: its overlook stands 626 m from the river, 869 m above it, a 54-degree wall, the column's own)
-        _L('lower Supai group', 200, 0.55, 34, 'supai',
-           beds=dict(period_m=22.0, ledge_frac=0.4, ledge_K_factor=0.3, ledge_Sc_deg=68.0, jitter=0.45)),
-        _L('Esplanade sandstone', 85, 0.18, 74, 'esplanade'),
-        _L('Hermit shale', 265, 3.5, 28, 'hermit'),
-        _L('Coconino sandstone', 50, 0.25, 78, 'coconino'),
-        _L('Toroweap formation', 100, 0.9, 36, 'toroweap',
-           beds=dict(period_m=14.0, ledge_frac=0.35, ledge_K_factor=0.4, ledge_Sc_deg=66.0, jitter=0.4)),
-        _L('Kaibab limestone', 180, 0.35, 48, 'kaibab',
-           beds=dict(period_m=22.0, ledge_frac=0.4, ledge_K_factor=0.3, ledge_Sc_deg=70.0, jitter=0.35)),
+        _L('Muav limestone, lower cliffs', 110, 0.4, 70, 'muav'),
+        _L('Muav limestone, ledgy middle', 60, 0.55, 38, 'muav'),
+        _L('Muav limestone, upper cliffs', 100, 0.4, 68, 'muav'),
+        _L('Muav limestone, top ledges', 80, 0.5, 40, 'muav'),
+        _L('Temple Butte formation', 60, 0.35, 64, 'muav'),
+        _L('Redwall limestone', 170, 0.2, 74, 'redwall'),
+        _L('Watahomigi formation (lower Supai ledges)', 70, 0.55, 48, 'supai'),
+        _L('Manakacha formation (Supai cliffs and ledges)', 70, 0.4, 62, 'supai'),
+        _L('Wescogame formation (Supai ledges)', 60, 0.5, 50, 'supai'),
+        _L('Esplanade sandstone', 85, 0.18, 72, 'esplanade'),
+        _L('Hermit shale', 265, 3.5, 25, 'hermit'),
+        _L('Coconino sandstone', 50, 0.25, 74, 'coconino'),
+        _L('Toroweap formation', 100, 0.9, 46, 'toroweap'),
+        _L('Kaibab limestone, Fossil Mountain cliff', 90, 0.3, 70, 'kaibab'),
+        _L('Kaibab limestone, Harrisburg ledges', 90, 0.8, 42, 'kaibab'),
     ],
     # The Goosenecks of the San Juan: the Paradox and Honaker Trail formations, limestone ledges and shaly slopes in
     # thin alternation (the walls "stepped in ledges and slopes"), the lower walls the cliffiest, under the
     # Halgaito's red slopes and a resistant bed the plateau is stripped to. Angles against the Goosenecks DEM at 6 m
     # by height above the river: 0-120 m p50 31-43, p90 55-70 degrees; 120-240 m p50 30-35, p90 43-63; above that
     # benches and the plateau with 25-30 degree slopes.
-    # The Paradox's cliff beds are thick (15 m and more) so they stand as cliffs in a 6 m cell: with 5 m beds the
-    # composite averaged them away and the walls' steepest 1 % came out at 48 degrees against the DEM's 69.
+    # The units are cliffs and slopes 20-70 m thick (3-12 cells at 6 m): with 9-30 m ledge periods every slip-off
+    # slope came out as concentric contour terraces, and the 0-150 m above the river had no cliff (p90 44 degrees
+    # against the DEM's 65). The river runs in the Paradox's lower cliff; the rim is the upper Honaker Trail's top
+    # ledge, 280 m over the river (the overlook's bench); the Halgaito's red slope stands back from it under a thin
+    # resistant Cedar Mesa bed the plateau is stripped to (a weak plateau surface was combed by radial gullies).
+    # The Halgaito is soft red siltstone (K x5): at x2.5 its scarp stood 200 m behind the rim, and the whole tile
+    # beyond the canyon was a flat plateau 90 m above the rim, where the ground round the Goosenecks is a broad rough
+    # bench at the rim's level (median 210-250 m over the river from 0.4 to 2.5 km out) with the Halgaito's slopes
+    # and the Cedar Mesa's ledges standing kilometres back. (K x9: at x5 the flat top 300-400 m over the river still
+    # held 41 % of the tile against the Goosenecks' 26 %; with ledges in the Halgaito it never retreated at all and
+    # the tile was one high flat to the rim.) The Cedar Mesa's basal bed is 30 m at 64 degrees, a 15 m run (2.5 cells
+    # at the 6 m main level): at 20 m and 70 degrees it cropped out as a dotted one-cell line round the scarp.
+    # (Tried: the Paradox as one massive cliff with the river 40 m in it and the lower Honaker Trail as ledgy cliffs,
+    # for a sheerer lower wall: the tile became a high flat plateau, HI 0.77 against 0.59, with walls too steep, slope
+    # p90 49 against 42, and from the overlook the river stayed hidden behind the upper slopes.)
     'honaker_trail': [
-        _L('Paradox formation', 120, 0.3, 42, 'limestone',
-           beds=dict(period_m=30.0, ledge_frac=0.5, ledge_K_factor=0.22, ledge_Sc_deg=78.0, jitter=0.35)),
-        _L('lower Honaker Trail formation', 100, 0.45, 36, 'limestone',
-           beds=dict(period_m=18.0, ledge_frac=0.45, ledge_K_factor=0.3, ledge_Sc_deg=72.0, jitter=0.4)),
-        _L('upper Honaker Trail formation', 90, 0.9, 32, 'limestone',
-           beds=dict(period_m=9.0, ledge_frac=0.3, ledge_K_factor=0.4, ledge_Sc_deg=60.0, jitter=0.45)),
-        _L('Halgaito formation', 70, 2.5, 28, 'shale'),
-        _L('Cedar Mesa sandstone (basal bed)', 20, 0.2, 62, 'cedar mesa'),
-        _L('Cedar Mesa sandstone', 80, 0.5, 45, 'cedar mesa'),
+        _L('Paradox formation, lower cliff', 50, 0.25, 76, 'limestone'),
+        _L('Paradox formation, shaly ledge', 20, 0.9, 40, 'shale'),
+        _L('Paradox formation, upper cliff', 70, 0.25, 74, 'limestone'),
+        _L('lower Honaker Trail formation, slope', 25, 1.0, 36, 'shale'),
+        _L('lower Honaker Trail formation, cliff', 35, 0.3, 70, 'limestone'),
+        _L('lower Honaker Trail formation, ledges', 30, 0.9, 42, 'limestone'),
+        _L('upper Honaker Trail formation, cliff', 25, 0.35, 66, 'limestone'),
+        _L('upper Honaker Trail formation, slope', 35, 1.2, 34, 'shale'),
+        _L('upper Honaker Trail formation, rim ledge', 30, 0.3, 66, 'limestone'),
+        _L('Halgaito formation', 80, 9.0, 30, 'shale'),
+        _L('Cedar Mesa sandstone (basal bed)', 30, 0.18, 64, 'cedar mesa'),
+        _L('Cedar Mesa sandstone', 70, 0.5, 45, 'cedar mesa'),
     ],
-    # Monument Valley: the Cedar Mesa sandstone the floor is stripped to, the Organ Rock shale's talus slopes, the
-    # De Chelly sandstone's sheer walls, a thin Moenkopi slope and the Shinarump cap the buttes' tops are.
+    # Monument Valley: the Cedar Mesa sandstone the floor is stripped to (resistant: the floor stays a broad flat,
+    # not a valley network cut into weak shale), the Organ Rock shale's talus pedestals (about 120 m under the
+    # Mittens), the De Chelly sandstone's sheer walls (about 210 m) and the thin conglomerate cap the buttes' flat tops
+    # are (a weak Moenkopi slope on top wore into convex humps with saw-toothed crests).
+    # (the Cedar Mesa at K x0.3 was planed to the wash's level over the run, so the floor lost the dip that lifts
+    # Monument Valley's 150-200 m toward the west: K x0.08 keeps it a stripped structural surface)
+    # The proportions are the Mittens': a De Chelly cliff about 160 m tall on an Organ Rock pedestal about 150 m tall
+    # (on the DEM the caps' edges stand 275-300 m over the floor and the cliffs' feet 100-150 m over it, 100-150 m
+    # out; the pedestal reaches 400 m out). With a 210 m De Chelly over 120 m of Organ Rock the cliff came down to
+    # 70 m over the floor and the talus cone was half Monument Valley's (the review: one wall straight to the floor,
+    # no pedestal).
+    # The Organ Rock has thin sandstone ledges (every 18 m, a fifth of it, 55 degrees): the pedestals' bands under the
+    # Mittens; without them the generated tile had a third less of its caprock and its walls faced four ways (A4 0.10)
     'monument_valley': [
-        _L('Cedar Mesa sandstone', 150, 0.35, 62, 'cedar mesa'),
-        _L('Organ Rock shale', 180, 3.0, 33, 'organ rock'),
-        _L('De Chelly sandstone', 170, 0.1, 84, 'de chelly'),
-        _L('Moenkopi formation', 40, 1.5, 42, 'moenkopi'),
-        _L('Shinarump conglomerate', 20, 0.12, 78, 'shinarump'),
+        _L('Cedar Mesa sandstone', 150, 0.08, 62, 'cedar mesa'),
+        _L('Organ Rock shale', 150, 2.5, 31, 'organ rock',
+           beds=dict(period_m=18.0, ledge_frac=0.2, ledge_K_factor=0.5, ledge_Sc_deg=55.0, jitter=0.5)),
+        _L('De Chelly sandstone', 160, 0.08, 80, 'de chelly'),
+        _L('Shinarump conglomerate', 20, 0.1, 78, 'shinarump'),
     ],
     # The Badlands Wall near Cedar Pass: Chadron clay mounds at the foot, the Brule's banded mudstone with thin
     # sandstone and ash ledges (the Scenic member, then a resistant sandstone the middle surface is stripped to, the
     # Poleslide member), the Rockyford ash and the Sharps formation at the top.
+    # The mudstone stands steep and bare (knife-edge ridges at about 50 degrees with steeper ledges, the Wall's p99
+    # at 3 m about 58, at 1.2 m 69) and hardly creeps: at 46 degrees with creep 0.4 every ridge was rounded into a
+    # pillow; at 51 with 68-degree ledges the 3 m tile's p99 came out 64.
     'badlands': [
-        _L('Chadron formation', 30, 2.0, 30, 'chadron', creep=1.0),
-        _L('Brule formation, Scenic member', 46, 1.2, 46, 'brule',
-           beds=dict(period_m=3.5, ledge_frac=0.25, ledge_K_factor=0.4, ledge_Sc_deg=64.0, jitter=0.5)),
-        _L('Brule formation, channel sandstone', 4, 0.15, 68, 'sandstone'),
-        _L('Brule formation, Poleslide member', 48, 1.0, 48, 'brule',
-           beds=dict(period_m=4.0, ledge_frac=0.25, ledge_K_factor=0.4, ledge_Sc_deg=64.0, jitter=0.5)),
-        _L('Rockyford ash', 6, 0.5, 60, 'ash'),
-        _L('Sharps formation', 40, 1.0, 46, 'sharps',
-           beds=dict(period_m=5.0, ledge_frac=0.2, ledge_K_factor=0.45, ledge_Sc_deg=60.0, jitter=0.5)),
+        _L('Chadron formation', 30, 2.0, 34, 'chadron', creep=1.0),
+        _L('Brule formation, Scenic member', 46, 1.2, 49, 'brule', creep=0.1,
+           beds=dict(period_m=3.5, ledge_frac=0.25, ledge_K_factor=0.4, ledge_Sc_deg=65.0, jitter=0.5)),
+        _L('Brule formation, channel sandstone', 4, 0.15, 70, 'sandstone'),
+        _L('Brule formation, Poleslide member', 48, 1.0, 49, 'brule', creep=0.1,
+           beds=dict(period_m=4.0, ledge_frac=0.25, ledge_K_factor=0.4, ledge_Sc_deg=65.0, jitter=0.5)),
+        _L('Rockyford ash', 6, 0.5, 62, 'ash'),
+        _L('Sharps formation', 40, 1.0, 48, 'sharps', creep=0.15,
+           beds=dict(period_m=5.0, ledge_frac=0.2, ledge_K_factor=0.45, ledge_Sc_deg=62.0, jitter=0.5)),
     ],
     'chalk': [_L('chalk with flint bands', 400, 0.8, 80, 'chalk')],
     'limestone': [_L('limestone', 600, 0.4, 75, 'limestone')],
@@ -481,6 +563,87 @@ def _run_lookup(rtab_z, z, z0, dz):
     return np.where(t <= 0, lo, np.where(t >= tn, hi, mid)).astype(F32)
 
 
+# The facies noise (strata_threshold.glsl and STRATA_WEATHER's facies_noise): two octaves of trilinear value noise on
+# the PCG lattice at (x / L, y / L, zs / Lz), about unit standard deviation; fac = (strength, L, Lz, seed). Each bed's
+# strength varies along the wall and from bed to bed (rock_mass's n is one value through every bed at a place).
+FACIES_GLSL = r'''
+float lattice(ivec3 c, uint s) { return 2.0 * u01(pcg4(uint(c.x), uint(c.y), uint(c.z), s)) - 1.0; }
+float vnoise3(vec3 q, uint s) {
+  vec3 i = floor(q);
+  vec3 f = q - i;
+  vec3 u = f * f * (3.0 - 2.0 * f);
+  ivec3 c = ivec3(i);
+  float a = mix(lattice(c, s), lattice(c + ivec3(1, 0, 0), s), u.x);
+  float b = mix(lattice(c + ivec3(0, 1, 0), s), lattice(c + ivec3(1, 1, 0), s), u.x);
+  float d = mix(lattice(c + ivec3(0, 0, 1), s), lattice(c + ivec3(1, 0, 1), s), u.x);
+  float e = mix(lattice(c + ivec3(0, 1, 1), s), lattice(c + ivec3(1, 1, 1), s), u.x);
+  return mix(mix(a, b, u.y), mix(d, e, u.y), u.z);
+}
+float facies_noise(vec2 xy, float zs, vec4 fac) {
+  vec3 q = vec3(xy / fac.y, zs / fac.z);
+  uint s = uint(fac.w);
+  return (vnoise3(q, s) + 0.5 * vnoise3(2.0 * q + vec3(17.3), s + 1u)) * 2.2;
+}
+'''
+FACIES_OFF = (0.0, 1.0, 1.0, 0.0)
+
+
+def _vnoise3(qx, qy, qz, s):
+    ix, iy, iz = np.floor(qx), np.floor(qy), np.floor(qz)
+    fx, fy, fz = (qx - ix).astype(F32), (qy - iy).astype(F32), (qz - iz).astype(F32)
+    ux, uy, uz = (f * f * (F32(3) - F32(2) * f) for f in (fx, fy, fz))
+    cx, cy, cz = ix.astype(np.int64), iy.astype(np.int64), iz.astype(np.int64)
+
+    def lat(dx, dy, dz):
+        return (F32(2) * T.u01(T.pcg4(cx + dx, cy + dy, cz + dz, s)) - F32(1)).astype(F32)
+
+    def mix(a, b, t):
+        return (a * (F32(1) - t) + b * t).astype(F32)
+    a = mix(lat(0, 0, 0), lat(1, 0, 0), ux)
+    b = mix(lat(0, 1, 0), lat(1, 1, 0), ux)
+    d = mix(lat(0, 0, 1), lat(1, 0, 1), ux)
+    e = mix(lat(0, 1, 1), lat(1, 1, 1), ux)
+    return mix(mix(a, b, uy), mix(d, e, uy), uz)
+
+
+def facies_noise(x, y, zs, fac):
+    """The facies noise at world (x, y) and stratigraphic height zs (float32 arrays), fac = (strength, L, Lz, seed):
+    the kernels' facies_noise."""
+    fac = np.asarray(fac, F32)
+    qx, qy = (np.asarray(x, F32) / fac[1]).astype(F32), (np.asarray(y, F32) / fac[1]).astype(F32)
+    qz = (np.asarray(zs, F32) / fac[2]).astype(F32)
+    s = int(fac[3])
+    o = F32(17.3)
+    n1 = _vnoise3(qx, qy, qz, s)
+    n2 = _vnoise3((F32(2) * qx + o).astype(F32), (F32(2) * qy + o).astype(F32), (F32(2) * qz + o).astype(F32),
+                  s + 1)
+    return ((n1 + F32(0.5) * n2) * F32(2.2)).astype(F32)
+
+
+FACIES_DEFAULTS = dict(strength=0.5, scale_m=300.0, scale_z_m=40.0, weather=0.5, seed=0)
+
+
+def facies_spec(spec, seed=0):
+    """(the threshold's facies, the weathering's facies) as the kernels' uniforms (strength, L, Lz, seed) from a
+    'strata_fluvial' stage's `facies` dict ({'strength', 'scale_m', 'scale_z_m', 'weather', 'seed'}; None: both
+    FACIES_OFF). The same noise drives both, so a weak facies both lies back and wears back."""
+    if not spec:
+        return FACIES_OFF, FACIES_OFF
+    p = dict(FACIES_DEFAULTS)
+    p.update(spec)
+    sd = float((int(seed) * 7 + int(p['seed']) + 9001) % 65536)
+    L, Lz = float(p['scale_m']), float(p['scale_z_m'])
+    return (float(p['strength']), L, Lz, sd), (float(p['weather']), L, Lz, sd)
+
+
+def facies_factor(level, zs, fac):
+    """exp(-strength x facies_noise) on a level's cells at stratigraphic heights zs (float64; 1 with no facies)."""
+    if not fac or float(fac[0]) <= 0.0:
+        return np.ones(np.shape(zs))
+    x, y = T.world_xy(np.shape(zs), (level.x0, level.y0, level.cell))
+    return np.exp(-float(fac[0]) * facies_noise(x, y, np.asarray(zs, F32), fac).astype(np.float64))
+
+
 @T.twin('strata_threshold')
 def strata_threshold(s, u):
     h = s['st'][..., 0]
@@ -498,6 +661,12 @@ def strata_threshold(s, u):
     z0, dz = u['uRZ0'], u['uRDz']
     dR = (np.minimum(span, L) / u['uRepose']).astype(F32)
     rock = (_run_lookup(rt, (zs - L).astype(F32), z0, dz) - _run_lookup(rt, (zs - span).astype(F32), z0, dz))
+    q = s['par'][..., 2]                                         # the rock mass's run factor
+    fac = np.asarray(u['uFac'], F32)
+    if fac[0] > 0:                                              # the facies
+        x, y = T.world_xy(h.shape, u['uLv'])
+        q = (q * np.exp(-fac[0] * facies_noise(x, y, zs, fac))).astype(F32)
+    rock = (q * rock).astype(F32)
     dR = np.where(span > L, dR + rock, dR).astype(F32)
     with np.errstate(divide='ignore', invalid='ignore'):
         phi = np.where((span > 0) & (dR > u['uDx']), F32(1) - u['uDx'] / np.where(dR > 0, dR, F32(1)), F32(0))
@@ -570,10 +739,15 @@ void main() {
 # drains across it. The stream-power term needs drainage area, so on hillslopes it is weak: a weak layer once at its
 # threshold angle never retreated, the cliffs above it never failed, and no bench widened (the Esplanade platform is
 # 45 % of Toroweap's tile). Here a cell lowers by
-#     E = uW f (K / uK0) min(G / uS0, 1),   f = the column's K factor at its zs (loose cover: uLoose)
-# G the upwind gradient magnitude (strata_threshold's), never below its lowest neighbour (no pits). Shale under a
-# cliff wears back fast, the cliff above fails over it (the composite threshold), the strong bed below stays a bench;
-# gentle ground barely wears (the plateau and the benches stay flat). The fine debris leaves (suspended load).
+#     E = uW f (K / uK0) min(G / uS0, uSat),   f = the column's K factor at its zs (loose cover: uLoose)
+# G the upwind gradient magnitude (strata_threshold's), never below its lowest neighbour (no pits). Linear in G (uSat
+# large, the default) it is a level-set motion: every contour retreats uW f / uS0 metres a year horizontally, at any
+# slope, in every direction and at every cell size. (Saturated at G = uS0, uSat 1, a cliff cell lowered at a fixed
+# rate whatever its height, so a cliff retreated a cell per (height / rate): faster on coarse levels, and faster
+# where the grid made its step one cell (axis-aligned) than two (diagonal): the walls ran in straight 0- and
+# 45-degree segments.) Shale under a cliff wears back fast, the cliff above fails over it (the composite threshold),
+# the strong bed below stays a bench; gentle ground barely wears (the plateau and the benches stay flat). The fine
+# debris leaves (suspended load).
 STRATA_WEATHER = FL.Inline('strata_weather', r'''//! sampler st     x: h (m); y, z, w carried
 //! sampler zoff   x: z - zs (m)
 //! sampler ctab   w: the column's K factor (1 row of uTN texels from uTZ0 every uTDz metres)
@@ -585,15 +759,25 @@ STRATA_WEATHER = FL.Inline('strata_weather', r'''//! sampler st     x: h (m); y,
 //! uniform float uDx
 //! uniform float uDt
 //! uniform float uW      lowering rate (m/yr) of K-factor-1 rock on a slope of uS0 or steeper
-//! uniform float uS0     tan of the slope from which the full rate applies
+//! uniform float uS0     tan of the slope at which the rate is uW
+//! uniform float uSat    the slope term's cap, G / uS0 <= uSat (large: linear; 1: the old saturated law)
 //! uniform float uK0     the stage's K: the field's noise is K / uK0
 //! uniform float uWl     lowering rate (m/yr) of loose cover: debris washes away
 // (on the refining passes the rock rate is off and only uWl runs, so failed debris does not drape the cliffs below)
-//! uniform float uAc     the drainage-area boost: x (1 + uAc min(sqrt(A / 1e5 m^2), 30)), A = st.y
+//! uniform float uAc     the drainage-area boost: x (1 + uAc min(sqrt(A / 1e5 m^2), 30) r), A = st.y
+//! uniform float uAs0    r: 0 at this gradient (tan) and below ...
+//! uniform float uAs1    ... 1 at this one and above: runoff gathering at a scarp (amphitheatres, a fraying
+// escarpment) speeds its retreat; on gentle ground (benches, a desert floor) the gathered runoff is the stream-power
+// incision's, not the scarp's (boosted there, every wash lowered its floor into a valley: Monument Valley's floor
+// sank 60 m into the Cedar Mesa sandstone it is stripped to, and lost its westward rise)
 //! uniform float uTZ0
 //! uniform float uTDz
 //! uniform int uTN
+//! uniform vec3 uLv      the level: x0, y0, cell (m), for the cell's world position
+//! uniform vec4 uFacW    the facies (strength, horizontal and vertical wavelength m, seed; strength 0: off): the
+// rock's rate x exp(-strength facies_noise), so weak facies wear back into alcoves and strong ones stand as buttresses
 //! uniform int uBound
+''' + FACIES_GLSL + r'''
 float axis_h(ivec2 p, int k, ivec2 n, float h) {
   ivec2 q;
   return neighbour(p, k, n, uBound, q) ? texelFetch(st, q, 0).x : h;
@@ -633,9 +817,11 @@ void main() {
   float kf = mix(texelFetch(ctab, ivec2(i0, 0), 0).w, texelFetch(ctab, ivec2(i0 + 1, 0), 0).w, t - float(i0));
   vec4 m = texelFetch(mk, p, 0);
   float w = clamp(max(m.w, 0.0), 0.0, 1.0);
+  if (uFacW.x > 0.0) kf *= exp(-uFacW.x * facies_noise(world_xy(p, uLv), zs, uFacW));
   float rate = mix(uW * kf, uWl, w);
-  float boost = 1.0 + uAc * min(sqrt(max(c.y, 0.0) / 1e5), 30.0);
-  float E = rate * (texelFetch(par, p, 0).y / uK0) * min(G / uS0, 1.0) * boost;
+  float ramp = clamp((G - uAs0) / max(uAs1 - uAs0, 1e-6), 0.0, 1.0);
+  float boost = 1.0 + uAc * min(sqrt(max(c.y, 0.0) / 1e5), 30.0) * ramp;
+  float E = rate * (texelFetch(par, p, 0).y / uK0) * min(G / uS0, uSat) * boost;
   float hn = max(h - uDt * E, min(h, hlow));
   m = take(m, h - hn);
   if (uBound == BOUND_PINNED) {
@@ -695,9 +881,14 @@ def strata_weather(s, u):
     fr = (t - i0.astype(F32)).astype(F32)
     kf = tab[i0] * (F32(1) - fr) + tab[i0 + 1] * fr
     w = np.clip(np.maximum(mk[..., 3], F32(0)), F32(0), F32(1))
+    fac = np.asarray(u['uFacW'], F32)
+    if fac[0] > 0:                                              # the facies
+        x, y = T.world_xy(h.shape, u['uLv'])
+        kf = (kf * np.exp(-fac[0] * facies_noise(x, y, zs, fac))).astype(F32)
     rate = (u['uW'] * kf) * (F32(1) - w) + u['uWl'] * w
-    boost = F32(1) + u['uAc'] * np.minimum(np.sqrt(np.maximum(st[..., 1], F32(0)) / F32(1e5)), F32(30))
-    E = rate * (s['par'][..., 1] / u['uK0']) * np.minimum(G / u['uS0'], F32(1)) * boost
+    ramp = np.clip((G - F32(u['uAs0'])) / F32(max(u['uAs1'] - u['uAs0'], 1e-6)), F32(0), F32(1))
+    boost = F32(1) + u['uAc'] * np.minimum(np.sqrt(np.maximum(st[..., 1], F32(0)) / F32(1e5)), F32(30)) * ramp
+    E = rate * (s['par'][..., 1] / u['uK0']) * np.minimum(G / u['uS0'], F32(u['uSat'])) * boost
     hn = np.maximum(h - u['uDt'] * E, np.minimum(h, hlow)).astype(F32)
     wear, dep, tal, loose = _take(mk[..., 0], mk[..., 1], mk[..., 2], mk[..., 3], (h - hn).astype(F32))
     if bound == T.BOUND_PINNED:
@@ -748,35 +939,55 @@ def strata_creep(s, u):
 
 # =============================================================================================== the driver ===
 
+def weather_table(col, k_exp=1.0):
+    """The column's table texture (tan, creep, R, K factor) with the weathering's factor in its fourth channel (what
+    STRATA_WEATHER reads; route_incise reads the K table on its own): the K factor, or K^k_exp where it is under 1.
+    Massive cliff rock retreats by failing when the weak rock under it is cut back, not by its surface wearing down:
+    with the K factor itself (k_exp 1) the Muav's cliffs (0.4) wore back 300 m over the canyon's run and the inner
+    gorge became a 2 km trapezoid with a broad floor, where Toroweap's walls run steep to the river; k_exp 2 keeps soft
+    rock's rate and slows the cliffs' (the Muav x0.16, the Redwall x0.04)."""
+    t = col.table_texture()
+    if float(k_exp) != 1.0:
+        k = t[..., 3].astype(np.float64)
+        t[..., 3] = np.where(k < 1.0, np.power(np.maximum(k, 0.0), float(k_exp)), k).astype(F32)
+    return t
+
+
 class StrataRun(FL.FluvialRun):
     """FluvialRun (solvers/fluvial.py) in layered rock: route_incise with the column's K(zs); creep through
     strata_cell + strata_creep; the threshold as strata_threshold's composite excess, then threshold.glsl's
     isotropic exchange; the lock as the stock driver's."""
 
     def __init__(self, dev, cell, fields, par, pins, col, zoff, lock_h0=None, lock_b=2, repose_tan=0.67,
-                 weather=None):
+                 weather=None, lv=(0.0, 0.0, 1.0), facies=FACIES_OFF, facies_w=FACIES_OFF, weather_k_exp=1.0):
         column = dict(k_factor=np.asarray(col.K, F32), zoff=np.asarray(zoff, F32), z0=col.z0, dz=col.dz)
         super().__init__(dev, cell, fields, par, pins, FL.PINNED, column, lock_h0, lock_b)
         self.column = col                              # (FluvialRun keeps the K table's (z0, dz, n) in self.col)
-        self.ctab = dev.texture(col.table_texture())
+        self.ctab = dev.texture(weather_table(col, weather_k_exp))
         self.tcol = (float(col.z0), float(col.dz), int(len(col.R)))
         self.C = dev.empty(self.shape, 2)
         self.phiS = dev.empty(self.shape, 1)
         self.repose = float(repose_tan)
-        # weathering: (rock rate W m/yr, tan of the full-rate slope, the stage's K0, the loose cover's rate m/yr, the
-        # drainage-area boost) or None
+        # weathering: (rock rate W m/yr, tan of the slope it applies at, the stage's K0, the loose cover's rate m/yr,
+        # the drainage-area boost, the slope term's cap, the boost's slope ramp (tan lo, tan hi)) or None
         self.weather = weather if weather and (float(weather[0]) > 0 or float(weather[3]) > 0) else None
+        # the level's frame (x0, y0, cell) and the facies of the threshold and of the weathering (strength, L, Lz,
+        # seed; FACIES_OFF: none)
+        self.lv = tuple(float(v) for v in lv)
+        self.facies = tuple(float(v) for v in facies)
+        self.facies_w = tuple(float(v) for v in facies_w)
 
     def weather_pass(self, dt):
         if self.weather is None:
             return
-        W, s0, k0, wl, ac = self.weather
+        W, s0, k0, wl, ac, sat, (as0, as1) = self.weather
         z0, dz, nt = self.tcol
         self.dev.run(STRATA_WEATHER, {'st': self.S.src, 'zoff': self.zoff, 'ctab': self.ctab, 'par': self.P,
                                       'pin': self.Q, 'mk': self.M.src},
                      {'outS': self.S.dst, 'outM': self.M.dst},
-                     {'uDx': self.cell, 'uDt': dt, 'uW': W, 'uS0': s0, 'uK0': k0, 'uWl': wl, 'uAc': ac,
-                      'uTZ0': z0, 'uTDz': dz, 'uTN': nt, 'uBound': self.bound})
+                     {'uDx': self.cell, 'uDt': dt, 'uW': W, 'uS0': s0, 'uSat': sat, 'uK0': k0, 'uWl': wl,
+                      'uAc': ac, 'uAs0': as0, 'uAs1': as1, 'uTZ0': z0, 'uTDz': dz, 'uTN': nt,
+                      'uLv': self.lv, 'uFacW': self.facies_w, 'uBound': self.bound})
         self.S.swap()
         self.M.swap()
 
@@ -787,9 +998,11 @@ class StrataRun(FL.FluvialRun):
         dev, S, M, b = self.dev, self.S, self.M, self.bound
         z0, dz, nt = self.tcol
         for _ in range(iters):
-            dev.run('strata_threshold', {'st': S.src, 'zoff': self.zoff, 'mk': M.src, 'rtab': self.ctab},
+            dev.run('strata_threshold', {'st': S.src, 'zoff': self.zoff, 'mk': M.src, 'rtab': self.ctab,
+                                         'par': self.P},
                     {'outP': self.phiS}, {'uDx': self.cell, 'uRZ0': z0, 'uRDz': dz, 'uRN': nt,
-                                          'uRepose': self.repose, 'uBound': b})
+                                          'uRepose': self.repose, 'uLv': self.lv, 'uFac': self.facies,
+                                          'uBound': b})
             dev.run('threshold', {'st': S.src, 'par': self.P, 'pin': self.Q, 'mk': M.src, 'phiT': self.phiS},
                     {'outS': S.dst, 'outM': M.dst},
                     {'uDx': self.cell, 'uRate': rate, 'uLoose': 0, 'uIso': 1, 'uBound': b})
@@ -856,6 +1069,38 @@ def caprock_fraction(h, zoff, level, main, cap_zs):
     return float(np.mean(zs >= float(cap_zs)))
 
 
+def fill_dry_basins(fields, keep=None, hold=0):
+    """Fill every closed depression of a level's surface that does not touch `keep` (a bool mask: the river's
+    channel) with sediment, in place (h and deposit; the bed stays), never within `hold` cells of the edge (a child
+    level's seam stays its parent's). A desert plateau's and bench's closed basins are dry sinks that sand and
+    alluvium fill; the run's end stage holds every depression deeper than its threshold as a lake (with the recipe's
+    lakes 'lake', kept for the river's pools), and without this Toroweap's Esplanade and plateau carried dozens of
+    lakes. The river's pools touch its channel and stay basins (they hold its water). Returns the cells filled."""
+    from ..core import grid as Gd
+    from ..core import metrics as Mx
+    from . import hydro as HY
+    h = np.asarray(fields['h'], np.float64)
+    filled, _info = HY.fill_depressions(h)
+    depth = filled - h
+    lab, n = Mx.label(depth > 1e-4)
+    if not n:
+        return 0
+    kept = np.zeros(n + 1, bool)
+    if keep is not None:
+        k = np.asarray(keep, bool) & (lab > 0)
+        if k.any():
+            kept[np.unique(lab[k])] = True
+    fill = (lab > 0) & ~kept[lab]
+    if hold > 0:
+        fill &= Gd.edge_distance(h.shape) >= hold
+    if not fill.any():
+        return 0
+    add = np.where(fill, depth, 0.0)
+    fields['h'] = (h + add).astype(F32)
+    fields['deposit'] = (np.asarray(fields.get('deposit', np.zeros_like(h)), np.float64) + add).astype(F32)
+    return int(fill.sum())
+
+
 def _ring_inner(h):
     """(n, n): on the outer ring, the height of each ring cell's inward neighbour (the diagonal one at the corners);
     elsewhere h itself."""
@@ -902,6 +1147,127 @@ def joint_field(level, sets, seed=0, dev=None):
     return out
 
 
+def rock_mass(level, scales, seed=0, dev=None):
+    """The rock mass's strength as a function of world position, n about N(0, 1) (float64, clipped at +-2.5): fbm
+    at each of `scales` (metres) the level resolves (3 cells and up), every scale with the same weight on every level
+    (a coarse level lacks the fine scales, it does not reweight the coarse ones). Positive is strong rock: fewer
+    joints, thicker beds, no alteration. 'strata_fluvial' multiplies the erodibility (incision and weathering) by
+    exp(-resist n) and the composite threshold's run of rock by exp(-resist_run n): strong spots stand as sheer
+    buttresses and promontories, weak ones wear back into chutes and embayments, so a wall is a mosaic of cliffs,
+    ledges and talus at every height instead of one ramp at the column's angle."""
+    sc = [float(s) for s in (scales or ())]
+    if not sc:
+        return None
+    amp = 3.0 / math.sqrt(len(sc))                      # fbm's standard deviation is 1/3: unit variance in all
+    out = np.zeros((level.n, level.n))
+    used = 0
+    for k, wl in enumerate(sc):
+        if wl < 3.0 * level.cell:
+            continue
+        out = out + amp * FL._field({'kind': 'fbm', 'wavelength_m': wl, 'octaves': 2, 'seed': 811 + 7 * k},
+                                    level, seed, dev)
+        used += 1
+    if not used:
+        return None
+    return np.clip(out, -2.5, 2.5)
+
+
+CORES_DEFAULTS = dict(spacing_m=1800.0, radius_m=(200.0, 420.0), elongation=(1.0, 2.2), angles_deg=None,
+                      strength=2.5, region_m=40000.0, seed=0, exponent=4.0, wobble=0.0)
+
+
+def core_centres(spec, seed=0):
+    """The strong cores' centres and shapes, world metres: [(x, y, a, b, angle_rad, strength)], blue noise (dart
+    throwing at spacing_m over a square region_m wide around the origin), the same on every level of a terrain."""
+    p = dict(CORES_DEFAULTS)
+    p.update(spec or {})
+    sp = float(p['spacing_m'])
+    half = 0.5 * float(p['region_m'])
+    rng = np.random.default_rng((int(seed) + int(p['seed'])) * 7919 + 4243)
+    cand = rng.uniform(-half, half, (int(25 * (2 * half / sp) ** 2), 2))
+    gcell = sp / math.sqrt(2.0)
+    grid = {}
+    out = []
+    r0, r1 = (float(v) for v in p['radius_m'])
+    e0, e1 = (float(v) for v in p['elongation'])
+    angles = p.get('angles_deg')
+    for x, y in cand:
+        gi, gj = int(math.floor(x / gcell)), int(math.floor(y / gcell))
+        ok = True
+        for di in (-2, -1, 0, 1, 2):
+            for dj in (-2, -1, 0, 1, 2):
+                q = grid.get((gi + di, gj + dj))
+                if q is not None and (q[0] - x) ** 2 + (q[1] - y) ** 2 < sp * sp:
+                    ok = False
+                    break
+            if not ok:
+                break
+        if not ok:
+            continue
+        grid[(gi, gj)] = (x, y)
+        r = rng.uniform(r0, r1)
+        e = rng.uniform(e0, e1)
+        if angles:
+            ang = math.radians(float(angles[int(rng.integers(len(angles)))]) + rng.uniform(-12.0, 12.0))
+        else:
+            ang = rng.uniform(0.0, math.pi)
+        out.append((float(x), float(y), r * math.sqrt(e), r / math.sqrt(e), ang,
+                    float(p['strength']) * rng.uniform(0.75, 1.25)))
+    return out
+
+
+def rock_cores(level, spec, seed=0):
+    """Strong cores of the rock mass (n units, float64, or None): each a rounded block (a superellipse of power
+    `exponent`, semi-axes a and b along its compass angle) of strength n, flat inside, falling off over about a
+    tenth of its size, its outline wobbling by +-`wobble` of its radius (a world-space noise at about 0.7 of its
+    width, so no two cores share a shape). Where the caprock is less jointed (Monument Valley's buttes stand where the
+    De Chelly is massive), the retreating escarpment leaves the cores standing as buttes and mesas. (Power 4 with no
+    wobble made square blocks whose walls faced four ways only: the field's 4-fold aspect harmonic was 8 x Monument
+    Valley's.)"""
+    if not spec:
+        return None
+    p = dict(CORES_DEFAULTS)
+    p.update(spec)
+    pw = max(float(p['exponent']), 1.0)
+    wob = float(p['wobble'])
+    x, y = level.xy()
+    out = np.zeros((level.n, level.n))
+    for k, (cx, cy, a, b, ang, s) in enumerate(core_centres(spec, seed)):
+        reach = 1.6 * (1.0 + wob) * max(a, b)
+        if (cx + reach < level.x0 or cx - reach > level.x0 + level.side or cy + reach < level.y0
+                or cy - reach > level.y0 + level.side):
+            continue
+        i0 = max(int((cx - reach - level.x0) / level.cell), 0)
+        i1 = min(int((cx + reach - level.x0) / level.cell) + 1, level.n)
+        j0 = max(int((cy - reach - level.y0) / level.cell), 0)
+        j1 = min(int((cy + reach - level.y0) / level.cell) + 1, level.n)
+        if i1 <= i0 or j1 <= j0:
+            continue
+        dx = x[j0:j1, i0:i1] - cx
+        dy = y[j0:j1, i0:i1] - cy
+        u = dx * math.sin(ang) + dy * math.cos(ang)              # along the compass angle
+        v = dx * math.cos(ang) - dy * math.sin(ang)
+        d = (np.abs(u / a) ** pw + np.abs(v / b) ** pw) ** (1.0 / pw)
+        if wob > 0.0:
+            # the outline's wobble: a smooth world-space noise sampled on this core's box (seeded per core)
+            d = d / np.maximum(1.0 + wob * _box_noise(x[j0:j1, i0:i1], y[j0:j1, i0:i1], 0.7 * (a + b),
+                                                      int(seed) * 131 + 977 * k + 5), 0.3)
+        out[j0:j1, i0:i1] = np.maximum(out[j0:j1, i0:i1], s * np.exp(-d ** 8))
+    return out
+
+
+def _box_noise(x, y, wavelength, seed):
+    """A smooth noise of about unit amplitude on world points (x, y arrays): a few random plane waves at about
+    `wavelength` metres (numpy only; for small boxes, where a level-wide fbm would be wasted)."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros_like(x, dtype=np.float64)
+    for _ in range(4):
+        th = rng.uniform(0.0, math.pi)
+        lam = wavelength * rng.uniform(0.7, 1.4)
+        out += np.sin(2.0 * math.pi * (x * math.cos(th) + y * math.sin(th)) / lam + rng.uniform(0.0, 2.0 * math.pi))
+    return out / 2.0
+
+
 def _noise_m(scales, level, seed, dev, base):
     """Roughness in metres: [[wavelength_m, amp_m], ...] as fbm (amp the standard deviation), scales the level
     resolves only."""
@@ -930,17 +1296,24 @@ def op_strata(fields, level, params, seed=0, ctx=None):
     return fields
 
 
-PLATEAU_DEFAULTS = dict(surface_zs_m=None, height_m=0.0, follow_strata=True, tilt_deg=0.0, tilt_azimuth_deg=0.0,
-                        roughness=((3000.0, 6.0), (600.0, 2.5), (120.0, 0.8)), edge=None, edges=())
+PLATEAU_DEFAULTS = dict(surface_zs_m=None, height_m=0.0, follow_strata=True, follow_warp=True, tilt_deg=0.0,
+                        tilt_azimuth_deg=0.0, roughness=((3000.0, 6.0), (600.0, 2.5), (120.0, 0.8)), edge=None,
+                        edges=(), roughness_low=1.0, roughness_fade=0.25)
 
 
 def plateau_surface(level, params, seed=0, dev=None, strata=None):
     """The start of 'plateau' on a level's cells (float64): a structural surface at surface_zs_m (following the
-    beds' dip and warp) or a plane at height_m tilted tilt_deg (rising toward tilt_azimuth_deg, counter-clockwise from
-    +x), plus roughness ([[wavelength_m, amp_m], ...]) and optional escarpments, `edge` (one) or `edges` (a list):
-    {'through': [x, y], 'strike_deg' (compass), 'drop_m', 'width_m', 'wiggle_m', 'wiggle_wavelength_m'}: the
-    ground to the right of the strike direction lies drop_m lower, the fall spread over width_m. Each edge's wiggle
-    has its own noise (a badlands wall standing between an upper and a lower prairie is two edges)."""
+    beds' dip, fold, faults and, with follow_warp, their warp; without it the surface is an older erosion surface
+    that truncates the warped beds, so a thin cap bed crops out in patches over the weaker bed below) or a plane at
+    height_m tilted tilt_deg (rising toward tilt_azimuth_deg, counter-clockwise from +x), plus roughness
+    ([[wavelength_m, amp_m], ...]) and optional escarpments, `edge` (one) or `edges` (a list): {'through': [x, y],
+    'strike_deg' (compass), 'drop_m', 'width_m', 'wiggle_m', 'wiggle_wavelength_m'}: the ground to the right of the
+    strike direction lies drop_m lower, the fall spread over width_m. Each edge's wiggle has its own noise (a
+    badlands wall standing between an upper and a lower prairie is two edges). roughness_low: the roughness's factor
+    on the low ground beyond an edge's foot, reached roughness_fade x its width past the foot (1: the same roughness
+    everywhere): the high ground and the flanks keep the roughness that seeds their drainage, while a sod-covered
+    prairie below stays smooth (rough, its pinned edges became low base levels the prairie was cut down to, and the
+    fine levels dimpled it into a field of hummocks)."""
     p = dict(PLATEAU_DEFAULTS)
     p.update(params or {})
     x, y = level.xy()
@@ -948,13 +1321,17 @@ def plateau_surface(level, params, seed=0, dev=None, strata=None):
     if p.get('surface_zs_m') is not None and p.get('follow_strata', True):
         if strata is None:
             raise ValueError("stage 'plateau' with surface_zs_m needs the 'strata' stage before it")
-        h = float(p['surface_zs_m']) + offset(strata, level, seed, dev)
+        sp = strata if p.get('follow_warp', True) else dict(strata, warp=())
+        h = float(p['surface_zs_m']) + offset(sp, level, seed, dev)
     else:
         az = math.radians(float(p.get('tilt_azimuth_deg', 0.0)))
         h = float(p.get('height_m', 0.0)) + math.tan(math.radians(float(p.get('tilt_deg', 0.0)))) * (
             x * math.cos(az) + y * math.sin(az))
-    h = h + _noise_m(p.get('roughness'), level, s, dev, 601)
+    rough = _noise_m(p.get('roughness'), level, s, dev, 601)
     edges = ([p['edge']] if p.get('edge') else []) + list(p.get('edges') or [])
+    low = float(p.get('roughness_low', 1.0))
+    keep = np.ones_like(h)                         # 1 on the high ground and the flanks, 0 on the low ground
+    drops = []
     for k, e in enumerate(edges):
         ax, ay = (float(v) for v in e.get('through', (0.0, 0.0)))
         st = math.radians(float(e.get('strike_deg', 90.0)))
@@ -967,7 +1344,15 @@ def plateau_surface(level, params, seed=0, dev=None, strata=None):
                                                  'octaves': 4, 'seed': 641 + 7 * k}, level, s, dev)
         w = max(float(e.get('width_m', 200.0)), 1e-6)
         t = np.clip(side / w + 0.5, 0.0, 1.0)
-        h = h - float(e.get('drop_m', 100.0)) * t * t * (3.0 - 2.0 * t)
+        drops.append(float(e.get('drop_m', 100.0)) * t * t * (3.0 - 2.0 * t))
+        if low != 1.0:
+            beyond = np.clip((side - 0.5 * w) / max(float(p.get('roughness_fade', 0.25)) * w, 1e-6), 0.0, 1.0)
+            keep = keep * (1.0 - beyond * beyond * (3.0 - 2.0 * beyond))
+    if low != 1.0:
+        rough = rough * (low + (1.0 - low) * keep)
+    h = h + rough
+    for d in drops:
+        h = h - d
     return h
 
 
@@ -991,8 +1376,11 @@ def op_plateau(fields, level, params, seed=0, ctx=None):
 FLUVIAL_DEFAULTS = dict(U_m_per_yr=0.0, threshold_iters=3, threshold_rate=0.12, repose_deg=34.0, later='refine',
                         later_frac=0.25, pin_every=8, caprock_zs_m=None, caprock_target=None, check_every=40,
                         roughness=0.3, deposition=0.5, weather_m_per_yr=0.0, weather_slope_deg=30.0,
-                        weather_loose=2.0, weather_area=0.0, weather_refine=0.0, weather_loose_refine=0.5,
-                        joints=(), joint_gain=0.0, resist=0.0, resist_scales_m=(1400.0, 600.0), edge_follow=True)
+                        weather_sat=1000.0, weather_loose=2.0, weather_area=0.0, weather_area_slope_deg=(20.0, 35.0),
+                        weather_refine=0.0, weather_loose_refine=0.5, weather_k_exp=1.0, joints=(), joint_gain=0.0,
+                        resist=0.0,
+                        resist_run=0.0,
+                        resist_noise=1.0, resist_scales_m=(1400.0, 600.0), edge_follow=True)
 
 
 def _q(params, key):
@@ -1036,21 +1424,38 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
         K = K * np.asarray(fields['K_factor'], np.float64)
     if p.get('joints') and float(_q(p, 'joint_gain')) > 0:
         K = K * (1.0 + float(_q(p, 'joint_gain')) * joint_field(lv, p['joints'], s, dev))
-    if float(_q(p, 'resist')) > 0:
-        # resistant patches: K x exp(-resist n), n unit noise at resist_scales_m (clipped at 2.5 sigma); a retreating
-        # escarpment leaves the strong patches behind as outliers (mesas, buttes)
-        sc = FL._scales(_q(p, 'resist_scales_m'), lv.cell, 3.0)
-        if sc:
-            nz = np.clip(FL._unit_noise(sc, lv, s, dev, 811), -2.5, 2.5)
+    # the rock mass (rock_mass): strong patches erode and weather slower (K x exp(-resist n)) and stand steeper (the
+    # composite threshold's run of rock x exp(-resist_run n), carried in par.z, which route_incise does not read)
+    Q = np.ones((n, n))
+    if float(_q(p, 'resist')) > 0 or float(_q(p, 'resist_run')) > 0:
+        nz = rock_mass(lv, _q(p, 'resist_scales_m'), s, dev)
+        if nz is not None:
+            nz = nz * float(_q(p, 'resist_noise'))
+        cores = rock_cores(lv, p.get('resist_cores'), s)
+        if cores is not None:
+            nz = cores if nz is None else np.clip(nz + cores, -2.5, 3.5)
+        if nz is not None:
             K = K * np.exp(-float(_q(p, 'resist')) * nz)
+            Q = np.exp(-float(_q(p, 'resist_run')) * nz)
+    sod = p.get('sod')
+    if sod and refine and (lv.role == 'hero' or not sod.get('hero_only', True)):
+        # the sod cover (the hero levels): grass holds gentle ground, so the inherited surface's gentle slopes keep
+        # only a fraction of their erodibility (the rills stay on the bare walls; on the prairies at the wall's foot
+        # the hero levels' halved valley spacing cut every bump into a crumple of micro-rills). On the coarser
+        # passes too it froze the band's flanks, gentle at coarse cells, and the dissected band shrank to half
+        gy, gx = np.gradient(np.asarray(h, np.float64), cell)
+        sl = np.degrees(np.arctan(np.hypot(gx, gy)))
+        lo, hi = float(sod.get('below_deg', 10.0)), float(sod.get('above_deg', 22.0))
+        t = np.clip((sl - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+        kmin = float(sod.get('k', 0.1))
+        K = K * (kmin + (1.0 - kmin) * t * t * (3.0 - 2.0 * t))
     U = np.full((n, n), float(_q(p, 'U_m_per_yr')))
     G = np.full((n, n), float(_q(p, 'deposition')))
     rigid = FL._sea_flat(fields, ctx, (n, n))
     if rigid.any():
         U = np.where(rigid, 0.0, U)
         K = np.where(rigid, 0.0, K)
-    Sc_now = col.tan_at(h - zoff)
-    par = T.rgba(U, K, Sc_now, G)
+    par = T.rgba(U, K, Q, G)
 
     # pins: the level's (edge or border band), and the river's channel
     base = ctx.pins if ctx.pins is not None else FL.edge_pins(n, h, ctx.sea_level)
@@ -1097,10 +1502,14 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
     W0 = float(_q(p, 'weather_m_per_yr'))
     wf = float(_q(p, 'weather_refine')) if refine else 1.0
     wl = W0 * float(_q(p, 'weather_loose')) * (float(_q(p, 'weather_loose_refine')) if refine else 1.0)
+    a_lo, a_hi = (math.tan(math.radians(float(v))) for v in _q(p, 'weather_area_slope_deg'))
     weather = (wf * W0, math.tan(math.radians(float(_q(p, 'weather_slope_deg')))), float(FL._p(p, 'K')), wl,
-               float(_q(p, 'weather_area')))
+               float(_q(p, 'weather_area')), float(_q(p, 'weather_sat')), (a_lo, a_hi))
+    fac, fac_w = facies_spec(p.get('facies'), s)
     run = StrataRun(dev, cell, fields, par, pins, col, zoff, lock, lock_b,
-                    math.tan(math.radians(float(_q(p, 'repose_deg')))), weather)
+                    math.tan(math.radians(float(_q(p, 'repose_deg')))), weather,
+                    lv=(lv.x0, lv.y0, lv.cell), facies=fac, facies_w=fac_w,
+                    weather_k_exp=float(_q(p, 'weather_k_exp')))
     iters = int(_q(p, 'threshold_iters'))
     rate = float(_q(p, 'threshold_rate'))
     mexp, nexp, pexp = float(FL._p(p, 'm')), float(FL._p(p, 'n')), float(FL._p(p, 'p'))
@@ -1154,11 +1563,21 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
     for k in ('h', 'A', 'qs', 'wear', 'deposit', 'talus'):
         fields[k] = out[k]
     fields['bed'] = out['h'] - out['loose']
-    zs = np.asarray(out['h'], np.float64) - zoff
+    dry = 0
+    if p.get('dry_basins'):
+        # the basins off the river fill with sand and alluvium (fill_dry_basins); the river's pools stay
+        keep = None
+        if chan is not None:
+            keep = np.asarray(chan, bool)
+            for ax_ in (0, 1):
+                keep = keep | np.roll(keep, 1, ax_) | np.roll(keep, -1, ax_)
+        dry = fill_dry_basins(fields, keep, hold=2 if (ctx.plan and ctx.plan[ctx.index].parent is not None) else 0)
+    zs = np.asarray(fields['h'], np.float64) - zoff
     fields['zs'] = zs.astype(F32)
     fields['U'] = U.astype(F32)
     fields['K'] = (K * col.k_at(zs)).astype(F32)
-    fields['Sc'] = col.tan_at(zs).astype(F32)
+    # the layer's angle where the rock is strong or weak (the rock mass and the facies)
+    fields['Sc'] = (col.tan_at(zs) / (Q * facies_factor(lv, zs, fac))).astype(F32)
     fields['G'] = G.astype(F32)
     if chan is not None:
         fields['river'] = chan.astype(F32)
@@ -1166,7 +1585,7 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
     rec = dict(level=str(lv), prepass=ctx.prepass, role='first' if first else ('refine' if refine else 'evolve'),
                steps=done, dt_yr=round(dt, 2), years=round(done * dt), D=D_used, spacing_m=round(spacing, 1),
                creep_sub=n_sub, lock_block_cells=lock_b if lock is not None else None, lock_m=lock_m,
-               caprock=history[-4:], seconds=round(time.perf_counter() - t0, 3))
+               caprock=history[-4:], dry_basin_cells=dry, seconds=round(time.perf_counter() - t0, 3))
     if cap_zs is not None:
         rec['caprock_frac'] = round(caprock_fraction(out['h'], zoff, lv, main, cap_zs), 4)
     ctx.shared.setdefault('fluvial_log', []).append(rec)

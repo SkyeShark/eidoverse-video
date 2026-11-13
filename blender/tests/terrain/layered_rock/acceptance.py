@@ -1,11 +1,12 @@
 """The layered-rock package's acceptance summary (design section 11, row 10), in plain Python:
 
-    python blender/tests/terrain/layered_rock/acceptance.py [--final <tag>=<recipe> ...]
+    python blender/tests/terrain/layered_rock/acceptance.py [--gen <dir>] [--final <tag>=<recipe> ...]
 
 Reads out/layered_rock/strata_tests.json (the numpy-twin tests: composite threshold, tables, K(z) lookup, meander
 geometry, talus, weathering), out/layered_rock/kernel_tests.json (the GPU kernels against their twins) and, for each
-final generated terrain (gen/<tag>_verdict_<reference>.json and _crop_verdict_*.json, written by judge_fields.py),
-the judge's bands; writes out/layered_rock/acceptance.json and prints one line per check.
+final generated terrain (<gen>/<tag>_verdict_<reference>.json and _crop_verdict_*.json, written by judge_fields.py;
+<gen> defaults to out/layered_rock/gen), the judge's bands; writes out/layered_rock/acceptance.json and prints one
+line per check.
 """
 import glob
 import json
@@ -22,12 +23,15 @@ def load(path):
 
 
 def main():
+    global GEN
     a = sys.argv[1:]
     finals = {}
     for k, v in zip(a[::2], a[1::2]):
         if k == '--final':
             tag, recipe = v.split('=', 1)
             finals[tag] = recipe
+        elif k == '--gen':
+            GEN = v
     rows = []
     for name, path in (('twins', os.path.join(OUT, 'strata_tests.json')),
                        ('gpu kernels', os.path.join(OUT, 'kernel_tests.json'))):

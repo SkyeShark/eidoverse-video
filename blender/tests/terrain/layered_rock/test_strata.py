@@ -20,6 +20,13 @@
      runs along its azimuth; the smoothed walk has no loops
   6. weathering (strata_weather): a strong cap over a weak slope over a strong bench; the cap retreats at least 40 m,
      the bench and the cap's top stay flat (0.5 m), the cap's wall stays a cliff (70+ degrees), the weak slope a slope
+  7. the river's placement and bed: a varied meander train with centre 'axis' has its belt (the course's lateral
+     spread within two down-valley wavelengths) centred on its point within 5 % of the belt's width, for three seeds
+     (with 'course' it is off by up to a loop's amplitude); the pool-and-riffle bed: every pool a closed basin as
+     deep below its lip as pool_depth_m less the bed line's fall over the longest pool (two spacings), every riffle
+     dry above the next pool's lip level and at least
+     half its nominal length, crests pool_spacing_m apart on the median (within 15 %), and the hero levels' smooth
+     trench never rising downstream (no closed basin there)
 Writes blender/tests/terrain/out/layered_rock/strata_tests.json; exit code 1 on a failure.
 """
 import json
@@ -96,13 +103,16 @@ def profile_run(col, h, pin_w, pin_h, cell, carry_off=True, repose_deg=34.0, max
     return st[0, :, 0].astype(np.float64), mk[0], it
 
 
-def excess(col, h, cell, loose=None, repose_deg=34.0):
-    """strata_threshold's twin on a (1, W) or (H, W) field (zoff 0)."""
+def excess(col, h, cell, loose=None, repose_deg=34.0, q=1.0):
+    """strata_threshold's twin on a (1, W) or (H, W) field (zoff 0; q the rock mass's run factor, par.z)."""
     z = np.zeros_like(h, dtype=F32)
     mk = T.rgba(z, z, z, z if loose is None else np.asarray(loose, F32))
-    out = T.run_twin('strata_threshold', {'st': np.asarray(h, F32), 'zoff': z, 'mk': mk, 'rtab': col.table_texture()},
+    par = T.rgba(z, z, z + F32(q), z)
+    out = T.run_twin('strata_threshold', {'st': np.asarray(h, F32), 'zoff': z, 'mk': mk, 'rtab': col.table_texture(),
+                                          'par': par},
                      {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
-                      'uRepose': math.tan(math.radians(repose_deg)), 'uBound': T.BOUND_PINNED})
+                      'uRepose': math.tan(math.radians(repose_deg)), 'uLv': (0.0, 0.0, cell),
+                      'uFac': S.FACIES_OFF, 'uBound': T.BOUND_PINNED})
     return out['outP'][..., 0]
 
 
@@ -129,16 +139,21 @@ def relax_outflow(col, h, pin_w, pin_h, cell, rate=0.3, max_iter=40000, tol=1e-6
     return h[0].astype(np.float64), it
 
 
-def analytic_profile(col, x, x_foot, cell, steeper_deg=0.0):
-    """The column's equilibrium wall x(z) = x_foot - R(z) (each layer at its own angle, or steeper_deg steeper),
-    sampled as h(x) on the cells."""
+def analytic_profile(col, x, x_foot, cell, steeper_deg=0.0, q=1.0):
+    """The column's equilibrium wall x(z) = x_foot - q R(z) (each layer at its own angle, or steeper_deg steeper;
+    q the rock mass's run factor), sampled as h(x) on the cells."""
     zz = np.linspace(0.0, col.top_m, 20001)
     if steeper_deg:
-        ang = np.degrees(np.arctan(col.tan_at(zz))) + steeper_deg
+        # each bed's own angle exactly (tan_at interpolates the table across a contact, which made the wall steeper
+        # than the column for half a metre under every strong bed)
+        edges = np.array([f[0] for f in col.fine])
+        tan_exact = np.array([col.fine[i][3] for i in np.clip(np.searchsorted(edges, zz, side='right') - 1, 0,
+                                                                len(col.fine) - 1)])
+        ang = np.degrees(np.arctan(tan_exact / q)) + steeper_deg
         inv = 1.0 / np.tan(np.radians(np.clip(ang, 1.0, 89.5)))
         R = np.concatenate([[0.0], np.cumsum(0.5 * (inv[1:] + inv[:-1]) * np.diff(zz))])
     else:
-        R = col.run_at(zz) - col.run_at(0.0)
+        R = q * (col.run_at(zz) - col.run_at(0.0))
     xr = x_foot - R                                       # the wall's position at each height
     return np.interp(x * cell, xr[::-1], zz[::-1], left=col.top_m, right=0.0)
 
@@ -152,18 +167,21 @@ def test_profile():
     # the stability limit: the analytic wall x = R(z) stands; 2 degrees steeper in every layer fails in every layer
     stat = []
     ok_static = True
-    for dg in (-2.0, 0.0, 2.0):
-        hp = analytic_profile(col, x, step, cell, dg)[None, :]
-        phi = excess(col, hp, cell)[0]
-        zc = hp[0]
-        per = []
-        for d in col.layers:
-            inner = (zc > d['base_m'] + 2.0) & (zc < d['top_m'] - 2.0) & (x < step)
-            per.append(round(float(phi[inner].max()) if inner.any() else -1.0, 4))
-        good = all(v > 0.01 for v in per) if dg > 0 else all(v <= 0.01 for v in per)
-        ok_static = ok_static and good
-        stat.append(dict(steeper_deg=dg, max_excess_per_layer=per, ok=good))
-    check('composite threshold: the column\'s own wall is exactly its stability limit', ok_static, stat)
+    # q: the rock mass's run factor (strong rock 0.6: the wall stands on 60 % of the column's run; weak 1.5)
+    for q in (1.0, 0.6, 1.5):
+        for dg in (-2.0, 0.0, 2.0):
+            hp = analytic_profile(col, x, step, cell, dg, q)[None, :]
+            phi = excess(col, hp, cell, q=q)[0]
+            zc = hp[0]
+            per = []
+            for d in col.layers:
+                inner = (zc > d['base_m'] + 2.0) & (zc < d['top_m'] - 2.0) & (x < step)
+                per.append(round(float(phi[inner].max()) if inner.any() else -1.0, 4))
+            good = all(v > 0.01 for v in per) if dg > 0 else all(v <= 0.01 for v in per)
+            ok_static = ok_static and good
+            stat.append(dict(q=q, steeper_deg=dg, max_excess_per_layer=per, ok=good))
+    check('composite threshold: the column\'s own wall is exactly its stability limit (also with the rock mass\'s '
+          'run factor q 0.6 and 1.5)', ok_static, stat)
     # the start: the wall 8 degrees steeper than the column in every layer (each layer over its threshold, so each
     # must fail back to its own angle; a vertical step needed 40,000 iterations and 23 s for the same answer)
     h = analytic_profile(col, x, step, cell, 8.0).astype(F32)[None, :]
@@ -250,7 +268,8 @@ def test_weathering():
     pins = dict(pin_w=pw, pin_h=h.copy(), A_in=z, qs_in=z)
     K0 = 1.5e-6
     run = S.StrataRun(dev, cell, {'h': h, 'bed': h.copy()}, T.rgba(z, z + K0, z + 1.0, z), pins, col, z, None, 2,
-                      math.tan(math.radians(34.0)), (5e-4, math.tan(math.radians(30.0)), K0, 1e-3, 0.0))
+                      math.tan(math.radians(34.0)), (5e-4, math.tan(math.radians(30.0)), K0, 1e-3, 0.0, 1000.0,
+                                                     (math.tan(math.radians(20.0)), math.tan(math.radians(35.0)))))
     t0 = time.time()
     for _ in range(2500):
         run.weather_pass(18.0)
@@ -400,9 +419,138 @@ def test_meanders():
     check('meander curve geometry (Kinoshita sinuosity, wavelength, necks; the walk)', ok, rows)
 
 
+def test_river_placement_and_pools():
+    rows = []
+    ok = True
+    # the belt centred on its point (centre 'axis'), the incised_meanders course's own settings
+    p = dict(kind='kinoshita', through=(400.0, -250.0), flow_azimuth_deg=285.0, wavelength_m=6000.0, sinuosity=4.3,
+             skew=0.03, flat=0.02, vary=0.35, vary_scale=1.3, vary_skew=0.05, min_neck_m=250.0, width_m=50.0)
+    az = math.radians(285.0)
+    u = np.array([math.sin(az), math.cos(az)])
+    v = np.array([-u[1], u[0]])
+    for seed in (1, 2, 3):
+        res = {}
+        for centre in ('course', 'axis'):
+            pts, _s0 = RV.course(dict(p, centre=centre), seed, 12000.0)
+            q = pts - np.array([400.0, -250.0])
+            lat, al = q @ v, q @ u
+            wl_dv = 6000.0 / 4.3
+            near = np.abs(al) <= 2.0 * wl_dv
+            lo, hi = np.percentile(lat[near], [5, 95])
+            res[centre] = (float(lo), float(hi))
+        lo, hi = res['axis']
+        good = abs(lo + hi) <= 0.05 * (hi - lo)
+        ok = ok and good
+        rows.append(dict(seed=seed, belt_course_m=[round(x) for x in res['course']],
+                         belt_axis_m=[round(lo), round(hi)], off_centre_frac=round(abs(lo + hi) / (hi - lo), 3),
+                         ok=good))
+    # the pool-and-riffle bed along a walk (the canyon's settings)
+    sp, depth, rif, g = 600.0, 6.0, 0.06, 0.0015
+    rv = RV.make_river(dict(kind='walk', through=(0.0, 0.0), flow_azimuth_deg=235.0, width_m=80.0, gradient=g,
+                            pool_spacing_m=sp, pool_depth_m=depth, pool_riffle=rif), 1, 16000.0)
+    c = rv.crests()
+    inner = c[(c > rv.s[0] + sp) & (c < rv.s[-1] - 3 * sp)]
+    worst_depth, worst_riffle, worst_dry = np.inf, np.inf, np.inf
+    for a, b in zip(inner[:-1], inner[1:]):
+        s = np.linspace(a, b, 400)
+        z = rv.final(s)
+        lip = float(rv.final(b))
+        worst_depth = min(worst_depth, lip - float(z.min()))
+        # the riffle below lip b: dry (above the next pool's lip) for how long
+        nxt = c[np.searchsorted(c, b, side='right')]
+        s2 = np.linspace(b, nxt, 800)
+        z2 = rv.final(s2)
+        lip2 = float(rv.final(nxt))
+        dry = s2[z2 > lip2 + 1e-6]
+        run = float(dry.max() - b) if dry.size else 0.0
+        worst_riffle = min(worst_riffle, run / (rif * (nxt - b)))
+        worst_dry = min(worst_dry, float(z2[0] - lip2))
+    sm = rv.final(np.linspace(rv.s[0], rv.s[-1], 20000), smooth=True)
+    good_p = (worst_depth >= depth - g * 2.0 * sp and worst_riffle >= 0.5 and worst_dry > 0.0
+              and abs(float(np.median(np.diff(c))) / sp - 1.0) <= 0.15 and bool(np.all(np.diff(sm) <= 1e-9)))
+    ok = ok and good_p
+    rows.append(dict(pools=int(len(inner) - 1), crest_spacing_median_m=round(float(np.median(np.diff(c))), 1),
+                     min_pool_depth_m=round(worst_depth, 2), min_riffle_dry_frac=round(worst_riffle, 2),
+                     riffle_over_next_lip_m=round(worst_dry, 3), hero_trench_monotone=bool(np.all(np.diff(sm) <= 1e-9)),
+                     ok=good_p))
+    check("river placement (the belt centred, centre 'axis') and the pool-and-riffle bed", ok, rows)
+
+
+def test_facies():
+    """The facies (strata.facies_noise, the kernels' lateral facies change): about zero mean and unit standard
+    deviation; correlated over its wavelengths (along the ground at a tenth of L, up the column at a tenth of Lz) and
+    not at two wavelengths; the same value for a world point whatever window or cell it is sampled on; and in the
+    composite threshold one uniform layer stands at atan(tan theta / exp(-s f)) cell by cell: no excess on a wall at
+    that angle, excess where it is 2 degrees steeper."""
+    fac = (0.6, 300.0, 40.0, 9001.0)
+    rng = np.random.default_rng(3)
+    x = rng.uniform(-20000, 20000, 200000).astype(F32)
+    y = rng.uniform(-20000, 20000, 200000).astype(F32)
+    z = rng.uniform(0, 2000, 200000).astype(F32)
+    f = S.facies_noise(x, y, z, fac).astype(np.float64)
+
+    def corr(dx, dz):
+        g = S.facies_noise((x + F32(dx)).astype(F32), y, (z + F32(dz)).astype(F32), fac).astype(np.float64)
+        return float(np.corrcoef(f, g)[0, 1])
+    stats = dict(mean=round(float(f.mean()), 3), std=round(float(f.std()), 3),
+                 corr_x_L10=round(corr(30.0, 0.0), 2), corr_x_2L=round(corr(600.0, 0.0), 2),
+                 corr_z_Lz10=round(corr(0.0, 4.0), 2), corr_z_2Lz=round(corr(0.0, 80.0), 2))
+    ok = (abs(stats['mean']) < 0.05 and 0.8 <= stats['std'] <= 1.25 and stats['corr_x_L10'] > 0.8
+          and abs(stats['corr_x_2L']) < 0.25 and stats['corr_z_Lz10'] > 0.8 and abs(stats['corr_z_2Lz']) < 0.25)
+    # a level's cells read the noise at their own world centres (facies_factor against facies_noise at x0 + (i +
+    # 0.5) cell, computed here in float64), on a window off the origin
+    from eidoblend.terrain.core import levels as Lv
+    b = Lv.Level(1, 'hero', -1000.0, -2000.0, 2000.0, 3.90625, 512)
+    fb = S.facies_factor(b, np.full((512, 512), 700.0), fac)
+    xc = (-1000.0 + (np.arange(512) + 0.5) * 3.90625).astype(F32)
+    yc = (-2000.0 + (np.arange(512) + 0.5) * 3.90625).astype(F32)
+    X, Y = np.meshgrid(xc, yc)
+    want = np.exp(-fac[0] * S.facies_noise(X, Y, np.full(X.shape, 700.0, F32), fac).astype(np.float64))
+    same = float(np.max(np.abs(fb - want)))
+    stats['window_max_diff'] = same
+    ok = ok and same < 1e-5
+    # the threshold: one layer (60 degrees), a wall rising along +x with every cell's drop to its west neighbour at
+    # that cell's own facies-scaled angle atan(tan 60 / q) (q at the cell's world position and height: a fixed point,
+    # iterated), the same on every row of a 5-row strip (no cross slope), read on the middle row: no excess; 2 degrees
+    # steeper in every cell: excess everywhere
+    col = S.column([(400.0, 1.0, 60.0, 'test', 'one layer')])
+    n = 96
+    cell = 2.0
+    lv = (-3000.0, 1200.0, cell)
+    xw, yw = T.world_xy((5, n), lv)
+    rows = []
+    for dg in (0.0, 2.0):
+        hr = np.full(n, 200.0, F32)
+        ang = np.zeros(n)
+        for i in range(1, n):
+            # cell i's drop to cell i - 1 at cell i's own angle, the facies read at cell i's height (a small fixed
+            # point per cell: the noise changes little over one step)
+            hi = float(hr[i - 1])
+            for _ in range(12):
+                q = math.exp(-fac[0] * float(S.facies_noise(xw[2, i:i + 1], yw[2, i:i + 1],
+                                                             np.array([hi], F32), fac)[0]))
+                ang[i] = math.degrees(math.atan(math.tan(math.radians(60.0)) / q)) + dg
+                hi = float(hr[i - 1]) + cell * math.tan(math.radians(min(ang[i], 89.0)))
+            hr[i] = hi
+        h = np.repeat(hr[None, :], 5, 0)
+        z0 = np.zeros((5, n), F32)
+        out = T.run_twin('strata_threshold', {'st': T.rgba(h), 'zoff': z0, 'mk': T.rgba(z0, z0, z0, z0),
+                                              'rtab': col.table_texture(), 'par': T.rgba(z0, z0, z0 + 1.0, z0)},
+                         {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
+                          'uRepose': math.tan(math.radians(34.0)), 'uLv': lv, 'uFac': fac,
+                          'uBound': T.BOUND_PINNED})['outP'][2, 2:-2, 0]
+        rows.append(dict(steeper_deg=dg, max_phi=round(float(out.max()), 5), min_phi=round(float(out.min()), 5),
+                         angle_range_deg=[round(float(ang.min()), 1), round(float(ang.max()), 1)]))
+    ok_t = rows[0]['max_phi'] < 1e-3 and rows[1]['min_phi'] > 0.0
+    stats['threshold'] = rows
+    check('facies: unit noise of world position and stratigraphic height, window independent, read by the '
+          'composite threshold cell by cell', ok and ok_t, stats)
+
+
 def main():
     t0 = time.time()
-    for fn in (test_tables, test_route_incise_column, test_meanders, test_profile, test_talus, test_weathering):
+    for fn in (test_tables, test_route_incise_column, test_meanders, test_river_placement_and_pools, test_profile,
+               test_talus, test_weathering, test_facies):
         try:
             fn()
         except Exception as e:                                    # noqa: BLE001

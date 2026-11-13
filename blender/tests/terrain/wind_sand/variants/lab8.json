@@ -1,0 +1,6 @@
+[
+ ["g1_sea80_sf02", {"set": {"sand_m": 80, "speed_from_frac": 0.2, "supply_cap": 1.3, "sheet_top_m": 40.0}}],
+ ["g2_sea70_sf015", {"set": {"sand_m": 70, "speed_from_frac": 0.15, "supply_cap": 1.3, "sheet_top_m": 35.0}}],
+ ["g3_sea80_sf02_mid", {"set": {"sand_m": 80, "speed_from_frac": 0.2, "p_lift": 0.02, "lift_boost": 25.0,
+                                "supply_cap": 1.3, "sheet_top_m": 40.0}}]
+]

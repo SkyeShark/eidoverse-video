@@ -1,0 +1,11 @@
+[
+ ["a_plinth_s55_pl01_b45", {"iters": 24000, "set": {"sand_m": 55, "speed_from_frac": 0.1, "p_lift": 0.01, "lift_boost": 45.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["b_plinth_s55_pl005_b90", {"iters": 24000, "set": {"sand_m": 55, "speed_from_frac": 0.1, "p_lift": 0.005, "lift_boost": 90.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["c_plinth_s65_pl01_b45", {"iters": 24000, "set": {"sand_m": 65, "speed_from_frac": 0.1, "p_lift": 0.01, "lift_boost": 45.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["d_plinth_s55_sv06_pl01_b45", {"iters": 24000, "set": {"sand_m": 55, "supply_var": 0.6, "speed_from_frac": 0.1, "p_lift": 0.01, "lift_boost": 45.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["e_plinth_s45_sf006_pl01_b45", {"iters": 24000, "set": {"sand_m": 45, "speed_from_frac": 0.06, "p_lift": 0.01, "lift_boost": 45.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["f_psand04", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "p_sand": 0.4, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["g_boost30", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "lift_boost": 30.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["h_upwind", {"iters": 24000, "set": {"sand_m": 35, "rise": "upwind", "speed_ref_deg": 10.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["i_plinth_s55_pl01_b45_2w", {"iters": 24000, "set": {"sand_m": 55, "speed_from_frac": 0.1, "p_lift": 0.01, "lift_boost": 45.0, "winds": [[28, 1.0], [148, 0.45], [268, 0.75]], "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}]
+]

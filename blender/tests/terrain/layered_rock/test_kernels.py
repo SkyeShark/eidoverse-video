@@ -5,9 +5,12 @@
 
   1. parity: ONE dispatch of each layered-rock kernel against its numpy twin on a non-square 96 x 80 field with pins,
      in the open, periodic and pinned modes, within 1e-4 x each output channel's range: strata_threshold (the
-     composite excess, with and without loose cover), strata_cell (the layer's tan and creep factor at each cell's
-     zs), strata_creep (creep on soft rock and debris), strata_weather (weathering, with and without the
-     drainage-area boost), and route_incise reading the column's K(zs) (the K(z) lookup)
+     composite excess, with and without loose cover, with the rock mass's run factor varying per cell, without and
+     with the facies noise on a window off the origin), strata_cell
+     (the layer's tan and creep factor at each cell's zs), strata_creep (creep on soft rock and debris),
+     strata_weather (weathering, linear in the slope with and without the drainage-area boost, and saturated, and with
+     the facies), and
+     route_incise reading the column's K(zs) (the K(z) lookup)
   2. the composite threshold on the GPU relaxes a 1D step (a 4-row strip, the column of test_strata.py) to every
      layer's own angle, like the twin
   3. cost: one whole strata_fluvial step (route, weathering, creep, 3 composite threshold iterations) at 1024^2
@@ -82,12 +85,20 @@ def test_parity():
     z0, dz, nt = float(col.z0), float(col.dz), int(len(col.R))
     S1, S2, S4 = shape + (1,), shape + (2,), shape + (4,)
     worst = {}
+    # the composite threshold reads the rock mass's run factor q from par.z (0.4 .. 2.2 here)
+    parq = T.rgba(par[..., 0], par[..., 1], np.exp(T.random_field(shape, -0.9, 0.8, 15, smooth=2)).astype(F32),
+                  par[..., 3])
+    # the level's frame (a window off the origin, negative coordinates: the lattice's sign handling) and the facies
+    # (on: 0.6 strength, 90 m across and 12 m up on 12 m cells, so the noise varies cell to cell)
+    lv = (-5321.5, 2803.25, 12.0)
+    fac_on = (0.6, 90.0, 12.0, 9008.0)
     for mode_name, mode in T.BOUNDARY_CASES:
-        for L, tag in ((np.zeros(shape, F32), 'rock'), (loose, 'loose')):
+        for L, tag, fac in ((np.zeros(shape, F32), 'rock', S.FACIES_OFF), (loose, 'loose', S.FACIES_OFF),
+                            (np.zeros(shape, F32), 'rock, facies', fac_on), (loose, 'loose, facies', fac_on)):
             mkL = T.rgba(mk[..., 0], mk[..., 1], mk[..., 2], L)
-            rep = parity('strata_threshold', {'st': st, 'zoff': zoff, 'mk': mkL, 'rtab': ctab},
+            rep = parity('strata_threshold', {'st': st, 'zoff': zoff, 'mk': mkL, 'rtab': ctab, 'par': parq},
                          {'uDx': 12.0, 'uRZ0': z0, 'uRDz': dz, 'uRN': nt, 'uRepose': math.tan(math.radians(34.0)),
-                          'uBound': mode}, {'outP': S1})
+                          'uLv': lv, 'uFac': fac, 'uBound': mode}, {'outP': S1})
             worst[f'strata_threshold {tag}/{mode_name}'] = rep['worst']
             check(f'parity strata_threshold {tag} {mode_name}', rep['ok'], f"worst {rep['worst']:.3g}")
         rep = parity(S.STRATA_CELL, {'st': st, 'zoff': zoff, 'ctab': ctab}, {'uTZ0': z0, 'uTDz': dz, 'uTN': nt},
@@ -103,13 +114,22 @@ def test_parity():
                      {'uDx': 12.0, 'uDtSub': 50.0, 'uD': 0.02, 'uCap': 5.0, 'uBound': mode}, {'outS': S4})
         worst[f'strata_creep/{mode_name}'] = rep['worst']
         check(f'parity strata_creep {mode_name}', rep['ok'], f"worst {rep['worst']:.3g}")
-        for ac in (0.0, 1.0):
+        # the linear law (uSat 1000, the default) with and without the drainage-area boost (ramped in over 20-35
+        # degrees, the default, or everywhere), and the saturated one
+        t20, t35 = math.tan(math.radians(20.0)), math.tan(math.radians(35.0))
+        for ac, sat, a0, a1, fac in ((0.0, 1000.0, t20, t35, S.FACIES_OFF), (1.0, 1000.0, t20, t35, S.FACIES_OFF),
+                                     (1.0, 1000.0, 0.0, 0.0, S.FACIES_OFF), (1.0, 1.0, t20, t35, S.FACIES_OFF),
+                                     (1.0, 1000.0, t20, t35, fac_on)):
             rep = parity(S.STRATA_WEATHER, {'st': st, 'zoff': zoff, 'ctab': ctab, 'par': par, 'pin': pin, 'mk': mk},
-                         {'uDx': 12.0, 'uDt': 400.0, 'uW': 3e-4, 'uS0': math.tan(math.radians(30.0)), 'uK0': K0,
-                          'uWl': 6e-4, 'uAc': ac, 'uTZ0': z0, 'uTDz': dz, 'uTN': nt, 'uBound': mode},
+                         {'uDx': 12.0, 'uDt': 400.0, 'uW': 3e-4, 'uS0': math.tan(math.radians(30.0)), 'uSat': sat,
+                          'uK0': K0, 'uWl': 6e-4, 'uAc': ac, 'uAs0': a0, 'uAs1': a1, 'uTZ0': z0, 'uTDz': dz,
+                          'uTN': nt, 'uLv': lv, 'uFacW': fac, 'uBound': mode},
                          {'outS': S4, 'outM': S4})
-            worst[f'strata_weather boost {ac:g}/{mode_name}'] = rep['worst']
-            check(f'parity strata_weather (area boost {ac:g}) {mode_name}', rep['ok'], T.report_text(rep).replace('\n', ' | '))
+            ramp = 'everywhere' if a1 <= 0.0 else 'over 20-35 deg'
+            ftag = ', facies' if fac[0] > 0 else ''
+            worst[f'strata_weather boost {ac:g} {ramp} sat {sat:g}{ftag}/{mode_name}'] = rep['worst']
+            check(f'parity strata_weather (area boost {ac:g} {ramp}, slope cap {sat:g}{ftag}) {mode_name}', rep['ok'],
+                  T.report_text(rep).replace('\n', ' | '))
         # the K(z) lookup in route_incise: the column's K table at each cell's zs
         tw = GPU.empty(shape, 1)
         GPU.run('flow_weights', {'st': GPU.texture(st)}, {'outW': tw}, {'uDx': 12.0, 'uP': 1.0, 'uBound': mode})
@@ -143,11 +163,12 @@ def test_profile_gpu():
         h = np.repeat(prof.astype(F32)[None, :], 4, 0)
         z = np.zeros_like(h)
         tex = {'st': GPU.texture(T.rgba(h)), 'zoff': GPU.texture(z), 'mk': GPU.texture(T.rgba(z, z, z, z)),
-               'rtab': GPU.texture(col.table_texture())}
+               'rtab': GPU.texture(col.table_texture()), 'par': GPU.texture(T.rgba(z, z, z + 1.0, z))}
         outP = GPU.empty(h.shape, 1)
         GPU.run('strata_threshold', tex, {'outP': outP},
                 {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
-                 'uRepose': math.tan(math.radians(34.0)), 'uBound': T.BOUND_PINNED})
+                 'uRepose': math.tan(math.radians(34.0)), 'uLv': (0.0, 0.0, cell), 'uFac': S.FACIES_OFF,
+                 'uBound': T.BOUND_PINNED})
         phi = GPU.read(outP)[2, :, 0]
         per = []
         for d in col.layers:
@@ -169,7 +190,9 @@ def test_cost():
         par = T.rgba(z, z + 1.5e-6, z + 1.0, z + 0.1)
         pins = FL.edge_pins(n, h)
         run = S.StrataRun(GPU, 7.8, {'h': h, 'bed': h.copy()}, par, pins, col, z, None, 2,
-                          math.tan(math.radians(34.0)), (3e-4, math.tan(math.radians(30.0)), 1.5e-6, 6e-4, 0.5))
+                          math.tan(math.radians(34.0)), (3e-4, math.tan(math.radians(30.0)), 1.5e-6, 6e-4, 0.5,
+                                                         1000.0, (math.tan(math.radians(20.0)),
+                                                                  math.tan(math.radians(35.0)))))
         for _ in range(20):
             run.step(100.0, 0.005, 1, 3, 0.12, 5.0)
         GPU.read(run.W)

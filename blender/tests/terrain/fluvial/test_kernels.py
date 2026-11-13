@@ -7,7 +7,8 @@
      open, periodic and pinned modes, within 1e-4 x each output channel's range: flow_weights (p 1, 1.3),
      route_incise (n = 1 implicit with D-infinity and with D8; n = 1.5 explicit; a layered-rock column; closed basins
      filled and left), creep (nonlinear cap 5; linear cap 1), threshold_excess, threshold (isotropic and the pair
-     excess, all material and loose only), route_area, and the lock's lock_restrict / lock_apply (blocks 2, 8, 16
+     excess, all material and loose only), route_area, soil_jacobi (the soil hillslopes' step: channels held, the
+     band pinned, with and without the lee asymmetry), and the lock's lock_restrict / lock_apply (blocks 2, 8, 16
      at the block grid's offsets 0 and half a block, edge blocks cut; the second stage on an R32F input)
   2. mass conservation: 300 creep sub-steps and 300 threshold iterations (isotropic, loose only, pair excess) on a
      rough 256^2 field, open and periodic: the sum of h unchanged within 1e-5 (relative)
@@ -161,6 +162,14 @@ def test_parity():
                      {'uDx': 10.0, 'uP': 1.0, 'uBound': mode}, {'outA': S1})
         worst[f'route_area/{mode_name}'] = rep['worst']
         check(f'parity route_area {mode_name}', rep['ok'], f"worst {rep['worst']:.3g}")
+        # the soil hillslopes' Jacobi step: channels held (15 % of the cells, 3 m lower), the border band pinned
+        con = T.rgba((T.random_field(shape, 0, 1, 41) > 0.85).astype(F32), f['h'] - 3.0, f['pw'], f['ph'])
+        for asym in (0.0, 0.4):
+            rep = parity(HS.SOIL, {'st': st, 'con': con},
+                         {'uDx': 10.0, 'uC': 0.003, 'uAsym': asym, 'uWind': (0.6, 0.8), 'uOmega': 0.9,
+                          'uBound': mode}, {'outS': S1})
+            worst[f'soil_jacobi asym {asym:g}/{mode_name}'] = rep['worst']
+            check(f'parity soil_jacobi asymmetry={asym:g} {mode_name}', rep['ok'], f"worst {rep['worst']:.3g}")
     for b in (2, 8, 16):
         for off in ((0, 0), (b // 2, 0), (b // 2, b // 2)):          # the cycling block grid, edge blocks cut
             m0, m1 = shape[0] // b + 1, shape[1] // b + 1

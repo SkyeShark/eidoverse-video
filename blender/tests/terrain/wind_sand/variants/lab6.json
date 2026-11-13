@@ -1,0 +1,9 @@
+[
+ ["e1_plinth_env3000", {"set": {"average_iters": 3000, "refine_average_iters": 400}}],
+ ["e2_uni_s50_env3000", {"set": {"p_lift": 0.03, "lift_boost": 15.0, "speed_from_frac": 0.1, "sand_m": 50,
+                                 "supply_var": 0.6, "supply_cap": 1.3, "sheet_smooth_cells": 1.5,
+                                 "average_iters": 3000, "refine_average_iters": 400}}],
+ ["e3_mid_s50_env3000", {"set": {"p_lift": 0.02, "lift_boost": 25.0, "speed_from_frac": 0.06, "sand_m": 50,
+                                 "supply_var": 0.6, "supply_cap": 1.3, "sheet_smooth_cells": 2.0,
+                                 "average_iters": 3000, "refine_average_iters": 400}}]
+]

@@ -1,0 +1,3 @@
+[
+ ["s35_sf0", {"set": {"sand_m": 35, "speed_from_frac": 0.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}]
+]

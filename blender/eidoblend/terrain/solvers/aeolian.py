@@ -19,8 +19,11 @@ the wind does not touch here) and `sand` (thickness, metres); the surface is h =
                 lower neighbour, a symmetric pair exchange over 16 neighbours (the 8 and the knight's moves, so slip
                 faces stand at one angle whichever way they face) limited by the upper cell's own sand, so bare rock
                 never moves and mass is conserved; `aval_passes` per iteration      AVALANCHE_SRC (this module)
-After a run a Gaussian of `smooth_cells` clears the slab noise (a cell-scale speckle the shadow rule bounds at about
-0.15 cells; a creep strong enough to clear it during the run flattens the dunes too).
+The slab noise (single slabs arriving and leaving: a cell-scale speckle the shadow rule bounds at about 0.15 cells; a
+creep strong enough to clear it during the run flattens the dunes too) is cleared at the end of a run by reading the
+sand time-averaged over the run's last `average_iters` iterations (SandSim.run_averaged: the speckle decorrelates in
+tens of iterations while a dune moves a fraction of a cell in hundreds, so crests and brinks stay as sharp as the
+cells draw them), then a Gaussian of `smooth_cells` (alone, without the average, it rounds a crest by a cell).
 
 The avalanche is a fourth kernel kept as source text here (core/world_noise.py keeps its field kernel the same way):
 the design names "the threshold kernel" (package 3's threshold.glsl), but that limit is the pair's mean Sc, which
@@ -35,7 +38,10 @@ every level runs the same model at its own scale: a coarse level grows the big d
 crests and grows the small dunes on their flanks.
 
 The wind regime is a list of (from_deg, weight), cycled in blocks of `block` iterations per wind (a wind's block is
-weighted by its share, its direction jittered by up to `jitter_deg`), each run ending on a whole cycle. Which dunes
+weighted by its share, its direction jittered by up to `jitter_deg`), each run ending on a whole cycle. With `gust`
+and `spread_deg` a block blows as gusts of `gust` iterations, each from its wind's direction plus a normal scatter of
+spread_deg: a season's wind wanders, and one direction held for a whole block builds planar slip faces meeting in
+straight arms at the regime's fixed angles, where a wandering one curves the faces and the crests. Which dunes
 form is the regime and the sand supply, not a shape parameter (Rubin & Hunter 1987, Courrech du Pont et al. 2014,
 Zhang et al. 2012): one wind and thin sand make barchans; one wind and a sand sheet transverse ridges; two winds more
 than 90 degrees apart linear dunes; three or more of similar weight star dunes. KINDS holds each with its sand,
@@ -47,12 +53,15 @@ A dune field over a level stack (op 'dune_field', design 4.6 "Scale"): Werner du
 dune, and the time to grow them goes as 1 / cell^2, so the field is grown ONCE, periodic, on the coarsest level that
 resolves the target spacing with `cells_per_spacing` cells (the growth level; the recipe's prepare hook records the
 level stack so every level's op finds it). Its start is world-space noise: a gently rolling bed, the sand supply
-(thinner and thicker sheets, `supply_var`), and a seed at `seed_scale` x the target spacing (`seed_frac` of the
-target height), all periodic over the growth window. It runs `grow_iters` iterations (the model is scale-free in
+(thinner and thicker sheets, `supply_var`; drawn out along `supply_axis_deg` by `supply_stretch_m` so the bare floor
+where it runs out is a long pan, and capped at `supply_cap` x the mean), and a seed at `seed_scale` x the target
+spacing (`seed_frac` of the target height), all periodic over the growth window. It runs `grow_iters` iterations (the model is scale-free in
 cells, so one count is one maturity; `grow_phases` can run model changes in turn). Coarser levels average the
 periodic field over their cells (a context window larger than the growth window repeats it); finer levels start
 from their parent (the level runner's inherit) and run `refine_iters` more iterations at their own cell with their
-border band pinned to the parent, which sharpens the crests and slip faces and grows small dunes on the big ones.
+border band pinned to the parent, which sharpens the crests and slip faces and grows small dunes on the big ones:
+under the whole regime (`refine_winds` 'cycle') or its last season only ('last': the big dunes keep the forms the
+whole regime built, and the finer cells show the latest season's fresh slip faces and brinks on them).
 
     from eidoblend.terrain.solvers import aeolian as A
     sim = A.SandSim(bed, sand, cell=5.0, bound=A.T.BOUND_PERIODIC, params={'hop_cells': 3}, seed=1)   # GPU
@@ -88,6 +97,8 @@ DEFAULTS = dict(
     speed_from_m=5.0,        # 'sand': the speed-up starts at this thickness (a thinner sheet is not a dune) ...
     speed_ref_m=40.0,        # ... and is full at this one (a dune field derives both from its target height)
     speed_ref_deg=10.0,      # 'upwind': the full rise is a stoss of this angle over the shadow's reach
+    speed_pow=1,             # the speed-up grows as f^speed_pow (an integer): 2 or 3 make it grow faster toward the
+                             # crest, so a dune's top outruns its base and its flanks stretch into broad aprons
     long_factor=1.0,         # the speed-up as a longer hop as well: the long hop, a multiple of the short (1: off;
                              # long hops overshoot a small dune's shadow, so barchans and linear ridges dissolve)
     speedup=0.0,             # the long hop's chance at full speed-up
@@ -111,20 +122,52 @@ DEFAULTS = dict(
     block=200,               # iterations per wind block (design 4.6)
     jitter_deg=8.0,          # each block's direction varies by up to this much (real winds wander; it also keeps
                              # crests from locking to a lattice direction)
+    gust=0,                  # > 0: a block blows as gusts of this many iterations ...
+    spread_deg=0.0,          # ... each from the block's direction plus a normal scatter of this many degrees
+    steer_deg=0.0,           # the regional relief steers each wind (Steering): the local turn's standard deviation,
+                             # degrees, a different pattern per wind direction (a wind and its reverse alike) ...
+    steer_turn_deg=0.0,      # ... plus one turn every wind shares (the whole regime turns across the field), degrees
 )
 
 # The dune kinds (design 4.6's table): the wind regime as (from_deg, weight), and the sand and spacing they want.
 # The regimes are absolute compass directions; a recipe rotates them with wind_rotate_deg.
 KINDS = {
-    'star': dict(winds=[(28.0, 1.0), (148.0, 0.75), (268.0, 0.55)], sand_m=30.0, spacing_m=1400.0, bed_m=20.0,
-                 model=dict(cells_per_spacing=60.0, lift_boost=15.0, p_lift=0.03, speed_from_frac=0.1,
-                            speed_ref_frac=1.0, aval_passes=8, grow_iters=24000, grow_min_iters=24000,
-                            grow_check=6000, block=1000, seed_scale=1.5),
-                 doc='three winds 120 degrees apart of similar weight: pyramids with radiating arms on broad '
-                     'wind-worked bodies (calibrated on the Namib at Sossusvlei: spacing 1.4 km, 30 m of sand on a '
-                     'gently rolling plain; the winds unequal and off the grid axes, as real winds are). Each wind '
-                     'blows 1000 iterations at a time so it reworks the bodies it does not build (200-iteration '
-                     'blocks leave every face at repose), and the dunes grow 90 cells across'),
+    'star': dict(winds=[(28.0, 1.0), (148.0, 0.75), (268.0, 0.55)], sand_m=45.0, spacing_m=1400.0, bed_m=20.0,
+                 model=dict(cells_per_spacing=60.0, lift_boost=25.0, p_lift=0.02, speed_from_frac=0.06,
+                            speed_ref_frac=1.0, speed_pow=2, aval_passes=14, grow_iters=24000, grow_min_iters=24000,
+                            grow_check=6000, block=1000, seed_scale=1.5, gust=100, spread_deg=30.0,
+                            steer_deg=35.0, steer_wavelength_m=2000.0, supply_var=0.6, supply_wavelength_m=4000.0,
+                            supply_stretch_m=1500.0, supply_axis_deg=90.0, supply_cap=1.3, average_iters=400,
+                            smooth_cells=0.5, sheet_smooth_cells=2.0, refine_winds='last', refine_iters=400,
+                            refine_block=400, refine_average_iters=200, hero_winds='last2', hero_iters=1200,
+                            hero_block=150, hero_average_iters=100),
+                 doc='three winds 120 degrees apart of unequal weight: star dunes with curving arms in masses of '
+                     'sand, long bare pans between the masses (calibrated on the Namib at Sossusvlei: spacing 1.4 km, '
+                     '45 m of sand on a gently rolling plain; the winds off the grid axes, as real winds are). The '
+                     'arms: each wind is a season of 1000 iterations blowing as gusts of 100 that wander 30 degrees '
+                     'about its direction, and the regional relief steers every wind by a smooth turn (35 degrees '
+                     'standard deviation over 2 km) that differs from wind to wind (Steering), so each dune sees its '
+                     'own regime and its arms curve and meet at varying angles (one direction held for a season '
+                     'everywhere built planar faces meeting in three straight arms at a fixed 120 degrees: the 11-12 '
+                     'review; the slopes\' 3-fold aspect harmonic falls from 0.3-0.6 to the Namib\'s 0.06-0.08). The '
+                     'flanks: the speed-up grows as the square of its ramp (speed_pow 2) between 21 m of sand and the '
+                     'target height, at 0.02 x (1 + 25 f^2) a slab an iteration, so a dune\'s top outruns its base and '
+                     'its flanks stretch into broad aprons under a sharp crest zone, the Namib\'s 5-20 degree ground '
+                     '(a linear speed-up only carries each face along at its angle: pyramids at repose, every dune '
+                     '400 m tall). The pans: the supply varies 60 % over 4 km, drawn out east-west by 1.5 km '
+                     '(stretch_periodic) and capped at 1.3 x the mean, so where the sand runs out the floor is a long '
+                     'smooth pan, as Sossusvlei\'s are, and no mass grows a dune above the Namib\'s; the thin sand is '
+                     'smoothed and its margins thin out onto the floor (smooth_sheet: kept as it stood, it was a '
+                     'speckled table with a step at its edge, the review\'s straight-edged plates and pitted sand). '
+                     '14 avalanche passes an iteration hold the slip faces at 31-33 degrees (8 left them at 34-37). '
+                     'The sand is read time-averaged over each run\'s last iterations (the slab speckle goes, crests '
+                     'stay sharp). The main level blows the last season only, 400 iterations: every crest a sharp brink '
+                     'above a fresh slip face (longer, every face turns to that one wind). The hero levels around a '
+                     'camera blow the last two seasons in turns of 150 iterations (refine_winds \'last2\'), which '
+                     'reverses the crest zone: arms steep on both sides, knife-edges above the broad flanks, ribs and '
+                     'small dunes on the flanks (one season left a brink over a gentle stoss, a rounded shoulder at '
+                     '1.7 m; a whole cycle re-planes each big dune into a pyramid of straight-edged facets). The dunes '
+                     'grow 90 cells across'),
     'barchan': dict(winds=[(225.0, 1.0)], sand_m=2.5, spacing_m=250.0, bed_m=1.5,
                     model=dict(lift_boost=0.0, p_lift=0.075),
                     doc='one wind, thin sand on a bare plain: crescents with horns downwind. The thin sheet must '
@@ -190,9 +233,13 @@ def cycle_blocks(winds, block):
     return [(d, max(1, int(round(block * n * w / tot)))) for d, w in winds]
 
 
-def schedule(winds, iterations, block, jitter_deg=0.0, seed=0):
+def schedule(winds, iterations, block, jitter_deg=0.0, seed=0, gust=0, spread_deg=0.0, with_wind=False):
     """[(from_deg, iterations), ...] covering at least `iterations`, in whole cycles of the regime. Each block's
-    direction varies by up to jitter_deg (deterministic per seed)."""
+    direction varies by up to jitter_deg (deterministic per seed). With gust > 0 and spread_deg > 0 a block blows as
+    gusts of `gust` iterations, each from the block's direction plus a normal scatter of spread_deg (a real wind
+    wanders continuously around its season's direction: one direction held for a whole block builds planar slip
+    faces meeting in straight arms; a wandering one curves the faces and the crests). with_wind: triples
+    (from_deg, iterations, the regime's own direction for that wind), the direction the steering is keyed on."""
     blocks = cycle_blocks(winds, block)
     per = sum(b for _, b in blocks)
     cycles = max(1, int(math.ceil(int(iterations) / per)))
@@ -201,16 +248,88 @@ def schedule(winds, iterations, block, jitter_deg=0.0, seed=0):
     for _c in range(cycles):
         for d, b in blocks:
             j = float(rng.uniform(-1.0, 1.0)) * float(jitter_deg) if jitter_deg else 0.0
-            out.append(((d + j) % 360.0, b))
-    return out
+            if gust and spread_deg and int(gust) < b:
+                left = b
+                while left > 0:
+                    g = min(int(gust), left)
+                    out.append(((d + j + float(rng.normal(0.0, float(spread_deg)))) % 360.0, g, d))
+                    left -= g
+            else:
+                out.append(((d + j) % 360.0, b, d))
+    return out if with_wind else [(d, b) for d, b, _w in out]
 
 
 def schedule_length(sched):
-    return sum(b for _, b in sched)
+    return sum(s[1] for s in sched)
 
 
-def uniforms_for(params, cell, from_deg, it, seed, bound):
-    """The uniforms of the four kernels for one iteration: {kernel: {uniform: value}}."""
+def hop_box(hop, long_f=1.0, turn=(0.0, 0.0)):
+    """The integer hop vectors any source can pick (dune_activate's stochastic rounding of its hop, turned by its
+    cell's local angle): ((vx_min, vy_min), (vx_max, vy_max)), the box dune_transport gathers over. hop: the short hop
+    (cells, float32 as the kernels see it); long_f: the long hop's multiple (> 1: long hops too); turn: the least and
+    the most the steering turns this wind anywhere on the grid, radians."""
+    hx, hy = float(np.float32(hop[0])), float(np.float32(hop[1]))
+    r0, phi = math.hypot(hx, hy), math.atan2(hy, hx)
+    lo, hi = float(turn[0]), float(turn[1])
+    ang = np.array([0.0]) if hi <= lo else np.concatenate([np.linspace(lo, hi, 129), [lo, hi]])
+    for ax in (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi, 2.0 * math.pi, -0.5 * math.pi, -math.pi):
+        a = ax - phi                                   # an axis crossing inside the range sets that component's extreme
+        if lo < a < hi:
+            ang = np.append(ang, a)
+    lens = [1.0] + ([float(long_f)] if float(long_f) > 1.0 else [])
+    xs = np.concatenate([r0 * m * np.cos(phi + ang) for m in lens])
+    ys = np.concatenate([r0 * m * np.sin(phi + ang) for m in lens])
+    if hi <= lo:                                       # no steering: exactly the kernels' own float32 hops
+        xs = np.array([hx] + ([float(np.float32(np.float32(hx) * np.float32(long_f)))] if long_f > 1.0 else []))
+        ys = np.array([hy] + ([float(np.float32(np.float32(hy) * np.float32(long_f)))] if long_f > 1.0 else []))
+    eps = 1.0e-3                                       # float32 rounding of the turned hop in the kernel
+    vmin = (int(math.floor(float(xs.min()) - eps)), int(math.floor(float(ys.min()) - eps)))
+    vmax = (int(math.floor(float(xs.max()) + eps)) + 1, int(math.floor(float(ys.max()) + eps)) + 1)
+    return vmin, vmax
+
+
+class Steering:
+    """The regional relief's steering of the wind: the turn of its direction at every cell of a grid. A wind the
+    regime gives from compass theta is turned by
+
+        delta(x, y, theta) = steer x (n1 cos 2 theta + n2 sin 2 theta) + turn x n3        (radians)
+
+    with n1, n2, n3 smooth world-space fields of unit variance clipped at +-2 (steering_for). The 2 theta turns a wind
+    and its reverse alike, as flow steered round relief is; winds from other directions are turned in other
+    patterns, so the regime's shape (the angles between its winds) varies across the field as well as its
+    orientation: each dune sees its own regime, and a long arm curves as the regime turns along it. turn x n3 turns
+    every wind together (the whole regime rotates across the field). for_wind(theta) gives the kernels' `wind` input,
+    (cos, sin) of delta as float32 (H, W, 2), and the least and the most turn on the grid (for hop_box)."""
+
+    def __init__(self, n, steer_deg, turn_deg=0.0):
+        self.n = np.asarray(n, np.float64)
+        if self.n.ndim != 3 or self.n.shape[0] != 3:
+            raise ValueError(f'steering fields must be (3, H, W), got {self.n.shape}')
+        self.shape = self.n.shape[1:]
+        self.steer = math.radians(float(steer_deg))
+        self.turn = math.radians(float(turn_deg))
+        self._cache = {}
+
+    def angle(self, theta_deg):
+        """delta at every cell for a wind from compass theta_deg, radians (float64)."""
+        a = math.radians(2.0 * float(theta_deg))
+        return self.steer * (self.n[0] * math.cos(a) + self.n[1] * math.sin(a)) + self.turn * self.n[2]
+
+    def for_wind(self, theta_deg):
+        """((cos, sin) of delta as float32 (H, W, 2), (least, most) delta in radians), cached per direction."""
+        key = round(float(theta_deg) % 360.0, 6)
+        if key not in self._cache:
+            d = self.angle(key)
+            cs = np.ascontiguousarray(np.stack([np.cos(d), np.sin(d)], -1).astype(np.float32))
+            if len(self._cache) >= 8:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = (cs, (float(d.min()), float(d.max())))
+        return self._cache[key]
+
+
+def uniforms_for(params, cell, from_deg, it, seed, bound, turn=(0.0, 0.0)):
+    """The uniforms of the four kernels for one iteration: {kernel: {uniform: value}}. turn: the least and the most
+    the steering turns this wind on the grid, radians (Steering.for_wind), for the transport's box of hops."""
     p = params
     d = transport_dir(from_deg)
     hop = d * float(p['hop_cells'])
@@ -232,12 +351,13 @@ def uniforms_for(params, cell, from_deg, it, seed, bound):
         'dune_activate': {'uHop': (float(hop[0]), float(hop[1])), 'uLong': long_f,
                           'uSpeedup': float(p['speedup']) if long_f > 1.0 else 0.0,
                           'uLiftBoost': float(p['lift_boost']), 'uSpeedFrom': speed_from, 'uSpeedRef': speed_ref,
+                          'uSpeedPow': max(1, int(p.get('speed_pow') or 1)),
                           'uSlab': slab, 'uMinSand': float(p['min_sand_slabs']) * slab, 'uPLift': float(p['p_lift']),
                           'uPSand': float(p['p_sand']), 'uPRock': float(p['p_rock']),
                           'uMaxHops': int(p['max_hops']), 'uIter': int(it), 'uSeed': int(seed),
                           'uBound': int(bound)},
-        'dune_transport': {'uHop': (float(hop[0]), float(hop[1])), 'uLong': long_f, 'uMaxHops': int(p['max_hops']),
-                           'uBound': int(bound)},
+        'dune_transport': dict(zip(('uVMin', 'uVMax'), hop_box(hop, long_f, turn)), uMaxHops=int(p['max_hops']),
+                               uBound=int(bound)),
         'dune_avalanche': {'uTanRepose': math.tan(math.radians(float(p['repose_deg']))),
                            'uRate': float(p['aval_rate']), 'uCreep': float(p['creep']), 'uCell': float(cell),
                            'uBound': int(bound)},
@@ -333,6 +453,20 @@ def _grid_ij(shape):
     return ii, jj
 
 
+def _turn_of(s, shape):
+    """The local turn of the wind, (cos, sin) float32 arrays, from the 'wind' input ((1, 0) when there is none)."""
+    w = s.get('wind')
+    if w is None:
+        return np.ones(shape, F32), np.zeros(shape, F32)
+    w = np.asarray(w, F32)
+    return w[..., 0], w[..., 1]
+
+
+def _turned(c, sn, x, y):
+    """(x, y) turned by the angle whose cosine and sine are c and sn, in float32 as the kernels compute it."""
+    return (c * x - sn * y).astype(F32), (sn * x + c * y).astype(F32)
+
+
 @T.twin('dune_shadow')
 def twin_shadow(s, u):
     st = s['st']
@@ -340,7 +474,8 @@ def twin_shadow(s, u):
     H, W = h.shape
     ii, jj = _grid_ij(h.shape)
     px, py = ii.astype(F32), jj.astype(F32)
-    dx, dy = F32(u['uDir'][0]), F32(u['uDir'][1])
+    c, sn = _turn_of(s, h.shape)
+    dx, dy = _turned(c, sn, F32(u['uDir'][0]), F32(u['uDir'][1]))
     cell = F32(u['uCell'])
     periodic = int(u['uBound']) == T.BOUND_PERIODIC
     best = np.full(h.shape, F32(-1.0e30), F32)
@@ -388,20 +523,9 @@ def _hop_choice(h, hx, hy):
 
 
 def _hop_vectors(u):
-    """The integer hop vectors the transport gather looks at, in its order: the four corners around the short hop,
-    then those around the long hop that are not among them."""
-    hx, hy = F32(u['uHop'][0]), F32(u['uHop'][1])
-    lg = F32(u.get('uLong', 1.0))
-    fs = (int(np.floor(hx)), int(np.floor(hy)))
-    fl = (int(np.floor(F32(hx * lg))), int(np.floor(F32(hy * lg))))
-    out = []
-    for c in range(8 if lg > 1.0 else 4):
-        base = fs if c < 4 else fl
-        v = (base[0] + (c & 1), base[1] + ((c >> 1) & 1))
-        if c >= 4 and 0 <= v[0] - fs[0] <= 1 and 0 <= v[1] - fs[1] <= 1:
-            continue
-        out.append(v)
-    return out
+    """The integer hop vectors the transport gather looks at, in its order: the box uVMin..uVMax, x fastest."""
+    (x0, y0), (x1, y1) = u['uVMin'], u['uVMax']
+    return [(vx, vy) for vy in range(int(y0), int(y1) + 1) for vx in range(int(x0), int(x1) + 1)]
 
 
 @T.twin('dune_activate')
@@ -412,13 +536,18 @@ def twin_activate(s, u):
     ii, jj = _grid_ij(sand.shape)
     h = T.cell_hash(sand.shape, int(u['uIter']), int(u['uSeed']))
     span = max(F32(F32(u['uSpeedRef']) - F32(u['uSpeedFrom'])), F32(1.0e-6))
-    f = np.clip((rise - F32(u['uSpeedFrom'])) / span, F32(0.0), F32(1.0)).astype(F32)
+    f1 = np.clip((rise - F32(u['uSpeedFrom'])) / span, F32(0.0), F32(1.0)).astype(F32)
+    f = f1
+    for _ in range(1, int(u.get('uSpeedPow', 1))):
+        f = (f * f1).astype(F32)
     plift = (F32(u['uPLift']) * (F32(1.0) + F32(u['uLiftBoost']) * f)).astype(F32)
     lift = (sand > F32(u['uMinSand'])) & (T.u01(h) < plift) & (T.u01(T.pcg2(h, 1)) >= sh)
     plong = (F32(u['uSpeedup']) * f).astype(F32)
     long_ = T.u01(T.pcg2(h, 64)) < plong
     hx, hy, lg = F32(u['uHop'][0]), F32(u['uHop'][1]), F32(u['uLong'])
-    vx, vy = _hop_choice(h, np.where(long_, F32(hx * lg), hx), np.where(long_, F32(hy * lg), hy))
+    c, sn = _turn_of(s, sand.shape)
+    tx, ty = _turned(c, sn, np.where(long_, F32(hx * lg), hx).astype(F32), np.where(long_, F32(hy * lg), hy).astype(F32))
+    vx, vy = _hop_choice(h, tx, ty)
     periodic = int(u['uBound']) == T.BOUND_PERIODIC
     kmax = int(u['uMaxHops'])
     k = np.full(sand.shape, -1, np.int64)
@@ -529,13 +658,16 @@ def scatter_step(st, plan, hop, max_hops, bound):
 class _SimBase:
     """The iteration loop shared by the GPU sim and its numpy twin."""
 
-    def _setup(self, bed, sand, cell, bound, params, seed, pin_w, pin_sand):
+    def _setup(self, bed, sand, cell, bound, params, seed, pin_w, pin_sand, steer=None):
         self.P = params_for(params)
         bed = np.ascontiguousarray(bed, np.float32)
         sand = np.ascontiguousarray(np.maximum(sand, 0.0), np.float32)
         if bed.shape != sand.shape or bed.ndim != 2:
             raise ValueError(f'bed {bed.shape} and sand {sand.shape} must be one 2D shape')
         check_grid(bed.shape, self.P, bound)
+        if steer is not None and tuple(steer.shape) != tuple(bed.shape):
+            raise ValueError(f'the steering {steer.shape} is not on the grid {bed.shape}')
+        self.steer = steer
         self.shape = bed.shape
         self.cell = float(cell)
         self.bound = int(bound)
@@ -553,18 +685,48 @@ class _SimBase:
         check_grid(self.shape, self.P, self.bound)
         self._u = None
 
+    def run_averaged(self, winds, iterations, average_iters, every=10, callback=None, check_every=0):
+        """run() for at least `iterations` (whole cycles), and the sand time-averaged over the run's last
+        `average_iters` iterations (read every `every`): (iterations run, bed, mean sand). The slab model's speckle
+        (single slabs arriving and leaving, about 0.15 cells) decorrelates within tens of iterations while a dune
+        moves a fraction of a cell in hundreds, so the average clears the speckle and keeps the crests and brinks
+        as sharp as the cells draw them; a Gaussian of a cell rounds them by as much. Each sample holds the same
+        total, so the mean does too."""
+        block = int(self.P['block'])
+        per = schedule_length(schedule(winds, 1, block, 0.0))
+        total = per * max(1, int(math.ceil(int(iterations) / per)))
+        start = max(0, total - int(average_iters))
+        acc, k = None, 0
+        every = max(1, int(every))
+
+        def cb(sim, done):
+            nonlocal acc, k
+            if average_iters and done > start and (done - start) % every == 0:
+                s = sim.read()[1].astype(np.float64)
+                acc = s if acc is None else acc + s
+                k += 1
+            if callback is not None and check_every and done % int(check_every) == 0:
+                return callback(sim, done)
+            return False
+        done = self.run(winds, iterations, callback=cb, every=1)
+        bed, sand = self.read()
+        if acc is not None and k > 1 and done == total:
+            sand = (acc / k).astype(np.float32)
+        return done, bed, sand
+
     def run(self, winds, iterations, block=None, jitter_deg=None, callback=None, every=0):
         """Run the regime for at least `iterations`, in whole cycles. callback(sim, done) every `every` iterations
         (a True return stops the run at the end of the current cycle). Returns the iterations run."""
         block = int(block or self.P['block'])
         jit = float(self.P['jitter_deg'] if jitter_deg is None else jitter_deg)
-        sched = schedule(winds, iterations, block, jit, self.seed)
+        sched = schedule(winds, iterations, block, jit, self.seed + self.it, int(self.P.get('gust') or 0),
+                         float(self.P.get('spread_deg') or 0.0), with_wind=True)
         per = schedule_length(schedule(winds, 1, block, 0.0))
         done = 0
         stop = False
-        for d, b in sched:
+        for d, b, w in sched:
             for _ in range(b):
-                self.step(d)
+                self.step(d, w)
                 done += 1
                 if callback is not None and every and done % every == 0 and callback(self, done):
                     stop = True
@@ -573,35 +735,59 @@ class _SimBase:
         return done
 
 
+def unturned(shape):
+    """The `wind` input of a grid where the wind is not turned: (cos, sin) = (1, 0) everywhere, float32 (H, W, 2)."""
+    w = np.zeros(tuple(shape[:2]) + (2,), np.float32)
+    w[..., 0] = 1.0
+    return w
+
+
 class SandSim(_SimBase):
     """The slab model on the GPU (core/gpu.py): bed and sand (metres, row 0 south) on a grid of `cell` metres.
     bound: T.BOUND_PERIODIC, T.BOUND_OPEN or T.BOUND_PINNED (with pin_w 0..1 and pin_sand, the sand held there).
-    step(from_deg) runs one iteration; run(winds, iterations) a regime; read() -> (bed, sand) float32."""
+    steer: a Steering on the same grid (the wind turned cell by cell), or None. step(from_deg, wind_deg) runs one
+    iteration (wind_deg: the regime's own direction for this wind, which the steering is keyed on; default
+    from_deg); run(winds, iterations) a regime; read() -> (bed, sand) float32."""
 
-    def __init__(self, bed, sand, cell, bound=T.BOUND_PERIODIC, params=None, seed=0, pin_w=None, pin_sand=None):
+    def __init__(self, bed, sand, cell, bound=T.BOUND_PERIODIC, params=None, seed=0, pin_w=None, pin_sand=None,
+                 steer=None):
         from ..core import gpu as G
         self.G = G
         G.init()
-        st, pins = self._setup(bed, sand, cell, bound, params, seed, pin_w, pin_sand)
+        st, pins = self._setup(bed, sand, cell, bound, params, seed, pin_w, pin_sand, steer)
         self.k = {n: G.kernel(n) for n in ('dune_shadow', 'dune_activate', 'dune_transport')}
         self.k['dune_avalanche'] = G.kernel(source=AVALANCHE_SRC, name='dune_avalanche')
         self.st = G.PingPong(st)
         self.shadow = G.empty(self.shape, channels=2)
         self.plan = G.empty(self.shape, channels=4)
         self.pins = G.texture(pins)
+        self._wind_tex = {}
         self._u = None
         self._u_dir = None
 
-    def step(self, from_deg):
+    def _wind(self, wind_deg):
+        """The `wind` texture for a wind (the steering's turn, or none) and its range of turns, cached."""
+        key = None if self.steer is None else round(float(wind_deg) % 360.0, 6)
+        if key not in self._wind_tex:
+            if key is None:
+                self._wind_tex[key] = (self.G.texture(unturned(self.shape)), (0.0, 0.0))
+            else:
+                cs, rng = self.steer.for_wind(key)
+                self._wind_tex[key] = (self.G.texture(cs), rng)
+        return self._wind_tex[key]
+
+    def step(self, from_deg, wind_deg=None):
         G = self.G
-        if self._u_dir != from_deg or self._u is None:
-            self._u = uniforms_for(self.P, self.cell, from_deg, self.it, self.seed, self.bound)
-            self._u_dir = from_deg
+        wind_deg = from_deg if wind_deg is None else wind_deg
+        tex, turn = self._wind(wind_deg)
+        if self._u_dir != (from_deg, wind_deg) or self._u is None:
+            self._u = uniforms_for(self.P, self.cell, from_deg, self.it, self.seed, self.bound, turn)
+            self._u_dir = (from_deg, wind_deg)
         u = self._u
         u['dune_activate']['uIter'] = self.it
-        G.run(self.k['dune_shadow'], None, samplers={'st': self.st.src}, images={'outShadow': self.shadow},
-              uniforms=u['dune_shadow'])
-        G.run(self.k['dune_activate'], None, samplers={'st': self.st.src, 'shadow': self.shadow},
+        G.run(self.k['dune_shadow'], None, samplers={'st': self.st.src, 'wind': tex},
+              images={'outShadow': self.shadow}, uniforms=u['dune_shadow'])
+        G.run(self.k['dune_activate'], None, samplers={'st': self.st.src, 'shadow': self.shadow, 'wind': tex},
               images={'outPlan': self.plan}, uniforms=u['dune_activate'])
         G.run(self.k['dune_transport'], None, samplers={'st': self.st.src, 'plan': self.plan},
               images={'outSt': self.st.dst}, uniforms=u['dune_transport'])
@@ -623,18 +809,21 @@ class SandSim(_SimBase):
 class TwinSim(_SimBase):
     """The same model on the numpy twins (test oracle at 64-128 cells; not a production path)."""
 
-    def __init__(self, bed, sand, cell, bound=T.BOUND_PERIODIC, params=None, seed=0, pin_w=None, pin_sand=None):
-        st, pins = self._setup(bed, sand, cell, bound, params, seed, pin_w, pin_sand)
+    def __init__(self, bed, sand, cell, bound=T.BOUND_PERIODIC, params=None, seed=0, pin_w=None, pin_sand=None,
+                 steer=None):
+        st, pins = self._setup(bed, sand, cell, bound, params, seed, pin_w, pin_sand, steer)
         self.st = st
         self.pins = pins
         self.last_plan = None
         self.last_shadow = None
         self._u = None
 
-    def step(self, from_deg):
-        u = uniforms_for(self.P, self.cell, from_deg, self.it, self.seed, self.bound)
-        sh = twin_shadow({'st': self.st}, u['dune_shadow'])['outShadow']
-        plan = twin_activate({'st': self.st, 'shadow': sh}, u['dune_activate'])['outPlan']
+    def step(self, from_deg, wind_deg=None):
+        wind_deg = from_deg if wind_deg is None else wind_deg
+        cs, turn = (unturned(self.shape), (0.0, 0.0)) if self.steer is None else self.steer.for_wind(wind_deg)
+        u = uniforms_for(self.P, self.cell, from_deg, self.it, self.seed, self.bound, turn)
+        sh = twin_shadow({'st': self.st, 'wind': cs}, u['dune_shadow'])['outShadow']
+        plan = twin_activate({'st': self.st, 'shadow': sh, 'wind': cs}, u['dune_activate'])['outPlan']
         st = twin_transport({'st': self.st, 'plan': plan}, u['dune_transport'])['outSt']
         for _ in range(int(self.P['aval_passes'])):
             st = twin_avalanche({'st': st, 'pins': self.pins}, u['dune_avalanche'])['outSt']
@@ -667,6 +856,28 @@ def denoise(sand, sigma_cells, periodic=False, pin_w=None, pin_sand=None):
         w = np.clip(np.asarray(pin_w, np.float64), 0.0, 1.0)
         s = s * (1.0 - w) + np.asarray(pin_sand, np.float64) * w
     return np.maximum(s, 0.0).astype(np.float32)
+
+
+def smooth_sheet(sand, p, periodic=False, pin_w=None, pin_sand=None):
+    """The low-mobility sand sheet smoothed: where the sand is thinner than 1.5 x the speed-up's start (speed_from_m:
+    sand the wind barely lifts, the plinth under the dunes and the interdune sheets) and on the bare floor, a Gaussian
+    of sheet_smooth_cells replaces it, easing to none at 3 x that thickness (the dunes' aprons). Slabs the dunes shed
+    land on such a sheet and stay, a speckle the time-averaged read-out cannot clear because the sheet hardly moves;
+    on real sheets reptation and migrating ripples keep the surface flat. The bare floor takes the Gaussian too, so a
+    sheet's margin thins out onto the floor over a few sigma as a real sand sheet's does (kept bare, the floor left
+    every sheet standing as a table with a step at its edge: the review's straight-edged plates), and single slabs
+    resting on the floor spread into a faint veneer. The dunes are untouched. A read-out blend, not a transport: the
+    total can rise by about a percent where the blur reaches up a dune's toe. float32 (sand unchanged when the
+    parameter is 0 or there is no threshold)."""
+    sig = float(p.get('sheet_smooth_cells') or 0.0)
+    top = float(p.get('sheet_top_m') or p.get('speed_from_m') or 0.0)
+    if sig <= 0 or top <= 0 or p.get('rise', 'sand') != 'sand':
+        return np.asarray(sand, np.float32)
+    s = np.asarray(sand, np.float64)
+    blur = np.asarray(denoise(s, sig, periodic=periodic, pin_w=pin_w, pin_sand=pin_sand), np.float64)
+    t = np.clip((s - 1.5 * top) / (1.5 * top), 0.0, 1.0)
+    w = 1.0 - t * t * (3.0 - 2.0 * t)                          # 1 on the sheet and the floor, 0 from 3 x the threshold
+    return np.maximum(s * (1.0 - w) + blur * w, 0.0).astype(np.float32)
 
 
 # ------------------------------------------------------------------------------------------ measurements ---
@@ -703,25 +914,69 @@ def _periodic_wavelength(w, period):
     return N.snap_wavelength(w, period) if period else float(w)
 
 
+def _fbm(level, wavelength_m, octaves, seed, period_m=None):
+    """World-space fbm at a level's cells (periodic over period_m when given, its wavelength snapped to it), float64:
+    the GPU evaluation in Blender, numpy outside it."""
+    from ..core import world_noise as N
+    wl = _periodic_wavelength(wavelength_m, period_m)
+    spec = {'kind': 'fbm', 'wavelength_m': wl, 'octaves': int(octaves), 'period_m': period_m}
+    try:
+        from ..core import gpu as G                                  # noqa: F401 - Blender: the GPU path
+        return N.field_gpu(spec, level, seed=seed).astype(np.float64)
+    except (RuntimeError, ImportError):
+        x, y = level.xy()
+        return N.field(spec, x, y, seed=seed)
+
+
+def steering_for(level, p, seed, period_m=None):
+    """The Steering at a level's cells (world-space, periodic over period_m when given), or None when p asks for
+    none (steer_deg and steer_turn_deg 0). n1, n2, n3: 3 x fbm at steer_wavelength_m (2 octaves: unit variance),
+    clipped at +-2, so no cell turns more than twice the standard deviation. Every level evaluates the same
+    functions of world position, so a finer level's wind turns as its parent's did."""
+    steer, turn = float(p.get('steer_deg') or 0.0), float(p.get('steer_turn_deg') or 0.0)
+    if steer <= 0.0 and turn <= 0.0:
+        return None
+    wl = float(p.get('steer_wavelength_m') or 2.5 * float(p.get('spacing_m') or 1200.0))
+    n = np.stack([np.clip(3.0 * _fbm(level, wl, 2, int(seed) * 7 + 11 + k, period_m), -2.0, 2.0) for k in range(3)])
+    return Steering(n, steer, turn)
+
+
+def stretch_periodic(a, cell, sigma_m, axis_deg):
+    """A periodic field's features drawn out along one compass direction: a Gaussian of sigma_m metres along
+    axis_deg only (in Fourier space, so it wraps over the period exactly), then rescaled to the field's own mean and
+    standard deviation. float64 (the field unchanged when sigma_m is 0)."""
+    a = np.asarray(a, np.float64)
+    if not sigma_m or sigma_m <= 0:
+        return a
+    ny, nx = a.shape
+    t = math.radians(float(axis_deg))
+    kx = np.fft.rfftfreq(nx, d=float(cell))[None, :]                 # cycles per metre along x (east)
+    ky = np.fft.fftfreq(ny, d=float(cell))[:, None]                  # ... along y (north: row 0 is south)
+    k_along = kx * math.sin(t) + ky * math.cos(t)
+    m = float(a.mean())
+    out = np.fft.irfft2(np.fft.rfft2(a - m) * np.exp(-2.0 * (math.pi * float(sigma_m) * k_along) ** 2), s=a.shape)
+    sd0, sd1 = float(a.std()), float(out.std())
+    return m + out * (sd0 / sd1 if sd1 > 0 else 0.0)
+
+
 def start_fields(level, p, seed, period_m=None):
     """The growth start at a level's cells (world-space, periodic over period_m when given): bed and sand, float32.
     bed: bed_m x fbm at bed_wavelength_m (3 octaves). sand: sand_m x max(0, 1 + supply_var x 3 fbm) at
-    supply_wavelength_m, plus the seed: seed_m x 3 fbm at the target spacing (2 octaves)."""
-    from ..core import world_noise as N
-    x, y = level.xy()
+    supply_wavelength_m, plus the seed: seed_m x 3 fbm at the target spacing (2 octaves). With supply_stretch_m (a
+    periodic start only) the supply's highs and lows are drawn out along supply_axis_deg (stretch_periodic), so
+    where the sand runs out the floor is a long corridor between dune chains, as the Namib's interdune pans are,
+    not a round hole; supply_cap limits the supply's highs (a multiple of sand_m)."""
     per = period_m
 
     def fbm(w, octaves, s):
-        wl = _periodic_wavelength(w, per)
-        spec = {'kind': 'fbm', 'wavelength_m': wl, 'octaves': octaves, 'period_m': per}
-        try:
-            from ..core import gpu as G                              # noqa: F401 - Blender: the GPU path
-            return N.field_gpu(spec, level, seed=s).astype(np.float64)
-        except RuntimeError:
-            return N.field(spec, x, y, seed=s)
+        return _fbm(level, w, octaves, s, per)
     bed = float(p['bed_m']) * 3.0 * fbm(float(p['bed_wavelength_m']), 3, seed * 7 + 1)
-    supply = np.maximum(0.0, 1.0 + float(p['supply_var']) * 3.0 * fbm(float(p['supply_wavelength_m']), 2,
-                                                                     seed * 7 + 2))
+    sn = fbm(float(p['supply_wavelength_m']), 2, seed * 7 + 2)
+    if float(p.get('supply_stretch_m') or 0.0) > 0.0 and per:
+        sn = stretch_periodic(sn, level.cell, float(p['supply_stretch_m']), float(p.get('supply_axis_deg') or 0.0))
+    supply = np.maximum(0.0, 1.0 + float(p['supply_var']) * 3.0 * sn)
+    if p.get('supply_cap'):
+        supply = np.minimum(supply, float(p['supply_cap']))
     sand = float(p['sand_m']) * supply
     if float(p['seed_m']) > 0:
         sand = sand + float(p['seed_m']) * 3.0 * fbm(float(p['spacing_m']) * float(p['seed_scale']), 2, seed * 7 + 3)
@@ -742,7 +997,14 @@ FIELD_DEFAULTS = dict(
     speed_from_frac=0.25,       # the speed-up starts at this share of the target height of sand ...
     speed_ref_frac=2.0,         # ... and is full at this multiple of it
     supply_var=0.35,            # the sand supply's variation: 1 + supply_var x (unit-variance noise)
+    patchiness=None,            # > 0: the recipe's sand_patchiness knob, which sets supply_var over the kind's own
     supply_wavelength_m=None,   # the supply's wavelength (None: 6 x the spacing)
+    supply_stretch_m=0.0,       # > 0: the supply's highs and lows drawn out along supply_axis_deg by a Gaussian of
+    supply_axis_deg=90.0,       # this many metres (stretch_periodic: long interdune corridors); the axis is a compass
+                                # trend, turned with the winds by wind_rotate_deg
+    supply_cap=None,            # the most the sand piles anywhere at the start, a multiple of sand_m (None: no cap): a
+                                # strong supply_var opens bare corridors, and uncapped its highs grow dunes far taller
+                                # than the place's
     bed_m=None,                 # the bed's undulation, metres (standard deviation; None: the kind's, else 6)
     bed_wavelength_m=None,      # its wavelength (None: 5 x the spacing)
     cells_per_spacing=24.0,     # the growth level resolves the spacing with at least this many cells
@@ -752,9 +1014,23 @@ FIELD_DEFAULTS = dict(
     grow_check=3000,            # (iterations between the growth checks, which log the dunes' height and spacing)
     height_reached=1.0,         # ... once the dunes (p99.5 - p0.5 of the sand) stand this share of the target height
     slip_reached=0.002,         # ... and this share of the cells stand at the slip-face angle
-    refine_iters=1200,          # iterations on each level finer than the growth level
+    refine_iters=1200,          # iterations on each level finer than the growth level (whole cycles of its winds)
+    refine_winds='cycle',       # the winds those levels blow: 'cycle' the whole regime, 'last' its last wind (refine)
     refine_hop_cells=None,      # the hop on refinement levels (None: hop_cells)
+    refine_block=None,          # iterations per wind block on those levels (None: block)
+    refine_average_iters=None,  # their time-averaged read-out (None: average_iters; 0: the last state, denoised)
+    refine_smooth_cells=None,   # their read-out Gaussian, cells (None: smooth_cells)
+    hero_winds=None,            # the hero levels' own winds, iterations, block, read-out and Gaussian (None: the
+    hero_iters=None,            # refine_* values). The hero levels hold the last few hundred metres around a
+    hero_block=None,            # camera: at their cells a season moves a big dune's body by metres, so the whole
+    hero_average_iters=None,    # regime there re-cuts the crests (each arm's brink and slip face from the last
+    hero_smooth_cells=None,     # wind that crossed it) and grows the small dunes on the flanks (refine)
     pin_band=16,                # the border band pinned to the parent, cells
+    steer_wavelength_m=None,    # the steering's wavelength (None: 2.5 x the spacing; steer_deg turns it on)
+    sheet_smooth_cells=0.0,     # > 0: sand thinner than the speed-up's start smoothed by this many cells (smooth_sheet)
+    sheet_top_m=None,           # the thickness smooth_sheet calls a sheet (None: the speed-up's start, speed_from_m)
+    average_iters=0,            # > 0: each run's sand is its mean over its last this many iterations ...
+    average_every=10,           # ... read every this many (SandSim.run_averaged): the speckle goes, the crests stay
 )
 HEIGHT_RATIO = {'star': 0.25, 'linear': 0.06, 'transverse': 0.06, 'barchan': 0.08}
 
@@ -785,9 +1061,12 @@ def resolve_params(params):
     for k, v in (K.get('model') or {}).items():
         if k not in given:
             p[k] = v
+    if p.get('patchiness'):
+        p['supply_var'] = float(p['patchiness'])
     winds = p['winds'] if p.get('winds') else K['winds']
     rot = float(p.get('wind_rotate_deg') or 0.0)
     p['winds'] = [((d + rot) % 360.0, w) for d, w in normalise_winds(winds)]
+    p['supply_axis_deg'] = (float(p.get('supply_axis_deg') or 0.0) + rot) % 180.0
     p['sand_m'] = float(p['sand_m'] if p.get('sand_m') else K['sand_m'])
     p['spacing_m'] = float(p['spacing_m'] if p.get('spacing_m') else K['spacing_m'])
     p['bed_m'] = float(p['bed_m'] if p.get('bed_m') else K.get('bed_m', 6.0))
@@ -837,21 +1116,23 @@ def growth_index(plan, spacing_m, cells_per_spacing, warn=None):
 
 
 def _tile_key(lv, p, seed):
-    keep = {k: v for k, v in p.items() if k not in ('refine_iters', 'refine_hop_cells', 'pin_band')}
+    keep = {k: v for k, v in p.items() if not k.startswith(('refine_', 'hero_')) and k != 'pin_band'}
     blob = json.dumps(dict(w=[lv.x0, lv.y0, lv.cell, lv.n], p=keep, seed=int(seed)), sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()
 
 
 def grow_tile(lv, p, seed, log=None):
     """The dune field grown on level lv's window, periodic over it (cached per process): dict(bed, sand, iters,
-    spacing_m, slip_frac, seconds, history)."""
+    spacing_m, slip_frac, seconds, history). The last growth phase reads its sand time-averaged when
+    p['average_iters'] is set (SandSim.run_averaged), then the light Gaussian of smooth_cells."""
     key = _tile_key(lv, p, seed)
     if key in _TILES:
         return _TILES[key]
     t0 = time.perf_counter()
-    bed, sand = start_fields(lv, p, seed, period_m=lv.side)
-    sim = SandSim(bed, sand, lv.cell, T.BOUND_PERIODIC, p, seed=int(seed) * 131 + 7)
     target = float(p['spacing_m'])
+    bed, sand = start_fields(lv, p, seed, period_m=lv.side)
+    sim = SandSim(bed, sand, lv.cell, T.BOUND_PERIODIC, p, seed=int(seed) * 131 + 7,
+                  steer=steering_for(lv, p, seed, period_m=lv.side))
     hist = []
 
     def check(s, done):
@@ -866,16 +1147,21 @@ def grow_tile(lv, p, seed, log=None):
                 f'{sp:.0f} m (target {target:g}), slip faces {100 * sf:.2f} %')
         return done >= int(p['grow_min_iters']) and tall >= float(p['height_reached']) * p['target_height_m'] \
             and sf >= float(p['slip_reached'])
-    phases = p.get('grow_phases')
-    if phases:                                      # [[iterations, {model overrides}], ...] in order
-        iters = 0
-        for n_it, over in phases:
-            sim.set_params(**(over or {}))
+    phases = p.get('grow_phases') or [[int(p['grow_iters']), {}]]      # [[iterations, {model overrides}], ...]
+    avg = int(p.get('average_iters') or 0)
+    iters = 0
+    bed = sand = None
+    for k, (n_it, over) in enumerate(phases):
+        sim.set_params(**(over or {}))
+        if avg and k == len(phases) - 1:
+            d, bed, sand = sim.run_averaged(p['winds'], int(n_it), avg, int(p.get('average_every') or 10),
+                                            callback=check, check_every=int(p['grow_check']))
+            iters += d
+        else:
             iters += sim.run(p['winds'], int(n_it), callback=check, every=int(p['grow_check']))
-    else:
-        iters = sim.run(p['winds'], int(p['grow_iters']), callback=check, every=int(p['grow_check']))
-    bed, sand = sim.read()
-    sand = denoise(sand, float(p['smooth_cells']), periodic=True)
+    if sand is None:
+        bed, sand = sim.read()
+    sand = smooth_sheet(denoise(sand, float(p['smooth_cells']), periodic=True), p, periodic=True)
     h = bed + sand
     out = dict(bed=bed, sand=sand, iters=iters, spacing_m=spacing_peak(h, lv.cell),
                slip_frac=slip_fraction(h, lv.cell, float(p['repose_deg'])),
@@ -909,29 +1195,70 @@ def sample_periodic(a, src, lv):
     return a.astype(np.float32)
 
 
+def refine_winds(p, mode=None):
+    """The winds a level finer than the growth level blows: the whole regime ('cycle'), its last wind alone ('last',
+    the season the growth run ended on), or its last two in turn ('last2'); mode None: p['refine_winds']. The big
+    dunes are the whole regime's work, grown on the growth level; a finer level adds what its cells can draw. On the
+    main level a whole cycle re-planes every big dune into the faces of its winds (a star dune into a pyramid of
+    straight-edged facets), so there the latest season alone shows (fresh slip faces and brinks on the dunes the
+    regime built). On the hero levels two seasons in short turns reverse the crest zone: each builds its slip face on
+    its own lee and cuts back the other's, so a crest stands steep on both sides above the broad flanks, the knife-edge
+    arm of a star dune, where one season leaves a sharp brink over a gentle stoss."""
+    mode = mode or p.get('refine_winds') or 'cycle'
+    if mode == 'last':
+        return [normalise_winds(p['winds'])[-1]]
+    if mode == 'last2':
+        return normalise_winds(p['winds'])[-2:]
+    return p['winds']
+
+
+def refine_settings(p, lv):
+    """A refinement level's run: dict(winds, iters, block, average_iters, smooth_cells). Hero levels take the hero_*
+    values where given; every level falls back on the refine_* values, then on the growth run's own (block,
+    average_iters, smooth_cells)."""
+    hero = getattr(lv, 'role', '') == 'hero'
+
+    def pick(name, fallback):
+        v = p.get('hero_' + name) if hero else None
+        if v is None:
+            v = p.get('refine_' + name)
+        return fallback if v is None else v
+    return dict(winds=refine_winds(p, pick('winds', p.get('refine_winds'))), iters=int(pick('iters', 1200)),
+                block=int(pick('block', p['block'])), average_iters=int(pick('average_iters', p.get('average_iters')
+                                                                                    or 0)),
+                smooth_cells=float(pick('smooth_cells', p['smooth_cells'])))
+
+
 def refine(fields, lv, p, seed, log=None):
     """Run the slab model on one level from its current fields (h and bed; sand = h - bed), its border band pinned
-    to that start (a child level is pinned to its parent). Writes bed, sand and h."""
+    to that start (a child level is pinned to its parent), as refine_settings(p, lv) says. Writes bed, sand and h."""
     t0 = time.perf_counter()
     h = np.asarray(fields['h'], np.float32)
     bed = np.asarray(fields['bed'], np.float32) if 'bed' in fields else \
         (h - np.asarray(fields.get('sand', 0.0), np.float32))
     bed = np.minimum(bed, h)
     sand = np.maximum(h - bed, 0.0).astype(np.float32)
-    q = dict(p)
+    rs = refine_settings(p, lv)
+    q = dict(p, block=rs['block'])
     if p.get('refine_hop_cells'):
         q['hop_cells'] = float(p['refine_hop_cells'])
     w = _grid.border_ramp(lv.n, int(p['pin_band']), 'smooth')
     sim = SandSim(bed, sand, lv.cell, T.BOUND_PINNED, q, seed=int(seed) * 131 + 11 + 977 * int(lv.index),
-                  pin_w=w, pin_sand=sand)
-    iters = sim.run(p['winds'], int(p['refine_iters']))
-    bed2, sand2 = sim.read()
-    sand2 = denoise(sand2, float(q['smooth_cells']), periodic=False, pin_w=w, pin_sand=sand)
+                  pin_w=w, pin_sand=sand, steer=steering_for(lv, q, seed, period_m=p.get('growth_period_m')))
+    if rs['average_iters']:
+        iters, bed2, sand2 = sim.run_averaged(rs['winds'], rs['iters'], rs['average_iters'],
+                                              int(q.get('average_every') or 10))
+    else:
+        iters = sim.run(rs['winds'], rs['iters'])
+        bed2, sand2 = sim.read()
+    sand2 = smooth_sheet(denoise(sand2, rs['smooth_cells'], periodic=False, pin_w=w, pin_sand=sand), q,
+                         periodic=False, pin_w=w, pin_sand=sand)
     fields['bed'] = bed2
     fields['sand'] = sand2
     fields['h'] = bed2 + sand2
     if log:
-        log(f'{LOG_PREFIX} refined {lv}: {iters} iterations, {time.perf_counter() - t0:.2f} s')
+        log(f'{LOG_PREFIX} refined {lv}: {iters} iterations ({len(rs["winds"])} winds, blocks of {rs["block"]}), '
+            f'{time.perf_counter() - t0:.2f} s')
     return iters
 
 
@@ -942,6 +1269,7 @@ def op_dune_field(fields, level, params, seed=0, log=print):
     p = resolve_params(params)
     plan, i = _plan_holding(level)
     g = growth_index(plan, p['spacing_m'], float(p['cells_per_spacing']), warn=lambda m: log(f'{LOG_PREFIX} {m}'))
+    p['growth_period_m'] = float(plan[g].side)          # the steering is periodic over the growth window everywhere
     if i <= g:
         src = plan[g]
         tile = grow_tile(src, p, seed, log=log)
@@ -974,7 +1302,8 @@ def op_aeolian(fields, level, params, seed=0, log=print):
     periodic = bool(p.get('periodic', False))
     w = None if periodic else _grid.border_ramp(level.n, int(p['pin_band']), 'smooth')
     sim = SandSim(bed, sand, level.cell, T.BOUND_PERIODIC if periodic else T.BOUND_PINNED, p,
-                  seed=int(seed) * 131 + 5 + 977 * int(getattr(level, 'index', 0)), pin_w=w, pin_sand=sand)
+                  seed=int(seed) * 131 + 5 + 977 * int(getattr(level, 'index', 0)), pin_w=w, pin_sand=sand,
+                  steer=steering_for(level, p, seed, period_m=level.side if periodic else None))
     iters = sim.run(p['winds'], int(p.get('iterations', p['refine_iters'])))
     b, s = sim.read()
     s = denoise(s, float(p['smooth_cells']), periodic=periodic, pin_w=w, pin_sand=sand)

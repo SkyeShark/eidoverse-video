@@ -1,0 +1,112 @@
+[
+ [
+  "a_s25_wl2500",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2500.0
+   }
+  }
+ ],
+ [
+  "b_s25_wl2_sf03",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "speed_from_frac": 0.03
+   }
+  }
+ ],
+ [
+  "c_s25_wl2_sand55",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "sand_m": 55.0
+   }
+  }
+ ],
+ [
+  "d_s25_wl2_sv06",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "supply_var": 0.6
+   }
+  }
+ ],
+ [
+  "e_s20_wl2_turn10",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 20.0,
+    "steer_turn_deg": 10.0,
+    "steer_wavelength_m": 2000.0
+   }
+  }
+ ],
+ [
+  "f_s30_wl2",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 30.0,
+    "steer_wavelength_m": 2000.0
+   }
+  }
+ ],
+ [
+  "g_s25_wl2_sf03_sand55",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "speed_from_frac": 0.03,
+    "sand_m": 55.0
+   }
+  }
+ ],
+ [
+  "h_s25_wl2_seed2",
+  {
+   "iters": 24000,
+   "seed": 2,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0
+   }
+  }
+ ],
+ [
+  "i_s25_wl2_sand65",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "sand_m": 65.0
+   }
+  }
+ ],
+ [
+  "j_s25_wl2_sand55_sv05",
+  {
+   "iters": 24000,
+   "set": {
+    "steer_deg": 25.0,
+    "steer_wavelength_m": 2000.0,
+    "sand_m": 55.0,
+    "supply_var": 0.5
+   }
+  }
+ ]
+]
