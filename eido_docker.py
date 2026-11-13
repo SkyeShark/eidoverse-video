@@ -68,16 +68,26 @@ DENO_ENTRIES = ['blender/eidoblend/media/js/canvas_bake.mjs', 'blender/eidoblend
 # toolkit folders and files mounted read-only over the read-write repo (folders protect everything beneath them)
 PROTECTED_DIRS = ['blender', 'eidoverse', 'tools-guides', 'docs', 'docker', 'synthkit', 'voicebox']
 PROTECTED_FILE_PATTERNS = ['*.py', '*.sh', 'AGENTS.md', 'CLAUDE.md', 'deno.json', 'deno.lock']
+# On Windows every program this runner starts in the background gets a windowless console (CREATE_NO_WINDOW): docker,
+# the comfy bridge and the agent's container never open a console window on the desktop. Elsewhere the flag is 0.
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+
+def inside_container():
+    """True inside the render image: Docker creates /.dockerenv, and the image sets EIDO_IN_CONTAINER=1. There
+    eido_blender.py runs doctor / build / render / bench right where it is."""
+    return os.path.exists('/.dockerenv') or os.environ.get('EIDO_IN_CONTAINER') == '1'
 MIN_BUILD_FREE_GB = 40
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are a video-production agent in the Eidoverse render sandbox, Blender edition.
-Read /workspace/AGENTS.md COMPLETELY first: it is the full API contract and
-production rulebook. Then read /workspace/_brief.txt (and /workspace/_context.txt
-if it exists) and produce the video it asks for. Check /workspace/_capabilities.json
+Read /workspace/docs/AUTONOMOUS.md COMPLETELY first (how this unattended run works),
+then /workspace/AGENTS.md (the index of the toolkit's guides; open the guides your
+film needs). Then read /workspace/_brief.txt (and /workspace/_context.txt if it
+exists) and produce the video it asks for. Check /workspace/_capabilities.json
 before planning audio. Work in /workspace/work/<short_id>/, render with
-`python3 eido_blender.py render <scene.json> --local` (you are already inside the
-render image), and finish with a playable final mp4 there, or a concrete blocker
+`python3 eido_blender.py render <scene.json>` (inside the render image it renders
+right here), and finish with a playable final mp4 there, or a concrete blocker
 report. Do not ask questions: interpret and ship.
 """
 
@@ -86,19 +96,21 @@ report. Do not ask questions: interpret and ship.
 
 def run(cmd, **kw):
     print('+', ' '.join(str(c) for c in cmd), flush=True)
+    kw.setdefault('creationflags', NO_WINDOW)
     return subprocess.run(cmd, **kw)
 
 
 def docker_ok():
     try:
         return subprocess.run(['docker', 'version', '--format', '{{.Server.Version}}'], capture_output=True,
-                              text=True, timeout=30).returncode == 0
+                              text=True, timeout=30, creationflags=NO_WINDOW).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
 
 def image_exists(tag):
-    return subprocess.run(['docker', 'image', 'inspect', tag], capture_output=True, text=True).returncode == 0
+    return subprocess.run(['docker', 'image', 'inspect', tag], capture_output=True, text=True,
+                          creationflags=NO_WINDOW).returncode == 0
 
 
 def gpu_flags():
@@ -189,7 +201,8 @@ def run_in_container(argv, a):
         args.append(tok)
     if a.cmd == 'doctor':
         r = subprocess.run(container_cmd(tag, f'cd /workspace && {XVFB} blender -b --factory-startup '
-                                              '--python docker/blender_gpu_check.py -- /tmp/gpu_check.png'))
+                                              '--python docker/blender_gpu_check.py -- /tmp/gpu_check.png'),
+                           creationflags=NO_WINDOW)
         print(f"[{'ok ' if r.returncode == 0 else 'FAIL'}] EEVEE on the GPU inside {tag}"
               + ('' if r.returncode == 0 else ': read the [gpu] lines above'))
         if r.returncode:
@@ -239,7 +252,7 @@ def cmd_cleanup(a):
     """Reclaim Docker disk: build cache + dangling images, then report."""
     run(['docker', 'builder', 'prune', '-f'] + ([] if a.all_cache else ['--keep-storage', '10GB']))
     run(['docker', 'image', 'prune', '-f'])
-    r = subprocess.run(['docker', 'system', 'df'], capture_output=True, text=True)
+    r = subprocess.run(['docker', 'system', 'df'], capture_output=True, text=True, creationflags=NO_WINDOW)
     print(r.stdout)
     print('NOTE: space freed INSIDE the Docker VM does not shrink its disk file automatically. If the host drive is '
           "still tight: quit Docker, run 'wsl --shutdown', then compact the VM disk (docs/SETUP.md, 'Disk hygiene').")
@@ -267,7 +280,8 @@ def cmd_agent(a):
             sys.exit('error: --comfy on but no ComfyUI reachable on 8188/8000-8020')
         if comfy_up and comfy_port != 8188:
             bridge = subprocess.Popen([sys.executable, os.path.join(ROOT, 'eidoverse', 'comfy_bridge.py')],
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                      creationflags=NO_WINDOW)
             print(f'comfy_bridge started (pid {bridge.pid}): forwards 8188 to {comfy_port}')
     caps = {'comfyui': bool(comfy_up), 'comfy_url': 'http://host.docker.internal:8188' if comfy_up else None,
             'jina_ai': bool(os.environ.get('JINA_AI_KEY') or os.environ.get('EIDOVERSE_EMBED_KEY')),
@@ -317,12 +331,12 @@ def cmd_agent(a):
     try:
         with open(log_path, 'w', encoding='utf-8', errors='replace') as log:
             print(f'launching {name} (log: {log_path})')
-            proc = subprocess.Popen(docker_cmd, stdout=log, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(docker_cmd, stdout=log, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
             try:
                 exit_code = proc.wait(timeout=a.timeout_min * 60)
             except subprocess.TimeoutExpired:
                 print(f'TIMEOUT after {a.timeout_min} min: stopping {name}')
-                subprocess.run(['docker', 'kill', name], capture_output=True)
+                subprocess.run(['docker', 'kill', name], capture_output=True, creationflags=NO_WINDOW)
                 exit_code = -1
     finally:
         if bridge:

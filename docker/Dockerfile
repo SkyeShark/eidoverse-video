@@ -62,6 +62,8 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video
 ENV GALLIUM_DRIVER=d3d12
 ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib
 ENV MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+# eido_blender.py inside the image runs doctor / build / render / bench right here (eido_docker.inside_container)
+ENV EIDO_IN_CONTAINER=1
 
 # ---------------------------------------------------------------------------
 # Stage 2: the production sandbox: everything a scene and an agent use.
