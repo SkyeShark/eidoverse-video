@@ -19,7 +19,8 @@
   fire     the example's teapot fire (test_fire_teapot.py's scene), baked 24 frames with shadow_floor: the floor lit
            by the key spot alone (the gas and the fire's lights hidden), with the caster and without, where the map
            says the smoke shadows it; the map moving with the smoke between frames 12 and 24 (and the stills with
-           everything on, with and without the caster: out/fire_shadows/fire_shadow_still.png, fire_noshadow_still.png)
+           everything on, with and without the caster: out/fire_shadows/fire_shadow_still.png, fire_noshadow_still.png);
+           the still, rendered in the session that baked, showing the gas over the teapot
   heights  on the fire case's bake (no bake here): the same floor with the caster 0.5 mm to 20 cm over it, against the
            map, for EEVEE's shadow bias (shadow_lift)
 
@@ -363,6 +364,13 @@ if 'fire' in CASES:
         sc.render.filepath = os.path.join(OUT, tag + '.png')
         bpy.ops.render.render(write_still=True)
     sm.hide_render = False
+    # the session that baked renders the gas it baked (a Volume datablock that kept a failed load rendered none here)
+    import OpenImageIO as oiio
+    still = np.asarray(oiio.ImageBuf(os.path.join(OUT, 'fire_shadow_still.png')).get_pixels(oiio.FLOAT))[..., :3]
+    col = still[:int(still.shape[0] * 0.55), int(still.shape[1] * 0.3):int(still.shape[1] * 0.75)]
+    check(col.max() > 0.5 and col.mean() > 0.05,
+          f'the session that baked renders the gas: the flame and smoke column over the teapot peaks at '
+          f'{col.max():.3f}, mean {col.mean():.3f} (without the gas: 0.024 and 0.0004)')
 
 if 'heights' in CASES:
     # the caster's height over the ground against EEVEE's shadow bias, on the fire case's bake (no bake here): the floor

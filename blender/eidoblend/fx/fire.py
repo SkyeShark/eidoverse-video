@@ -6,7 +6,9 @@ samplers, the same dispatch order and the same constants): curl-noise precompute
 substep: advect velocity with buoyancy, thermal and ambient curl turbulence, damping, mesh wind and the border
 fade; divergence; Jacobi pressure (an even count); project; advect dye (density decays at 1/smokeLifespan,
 temperature at 1/fireLifespan, age by nearest neighbour); emit from the burning mesh's vertices (or seeded
-area-weighted samples) with MaterialX-noise flicker.
+area-weighted samples) with MaterialX-noise flicker. Where emitter points share a voxel, the engine's GPU kept
+whichever point's store landed last; here the emission runs in two passes and a hash of the point's index and the
+substep's number draws that point, so a bake gives the same grids every time and the look the race gave.
 
 What changes in Blender is the shape of the work, not the physics:
   build    create_volume_fire(mesh=...) makes the Volume object, its material and the fire's two lights;
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 
 import numpy as np
@@ -132,6 +135,22 @@ ENGINE_ONLY = dict(
     projection_center_fade=_PROJECTION,
 )
 GLOW_MODIFIER = 'fire_glow'        # make_fire_glow's Geometry Nodes modifier on the burning mesh
+
+# (folder, stem) of every frame sequence <folder>/<stem>_####.vdb a fire's Volume was pointed at in this Blender session.
+# Blender keeps the grids of each .vdb it reads for the rest of the session, by the file's path: a file written again
+# at the same path plays the grids read first, through a new Volume datablock, VolumeGrids.unload() or the .blend
+# opened again in the same Blender alike. So a bake never writes over frames this session may have read: a fire baked
+# again in the same session writes <name>_bake2_####.vdb, then _bake3 ... (VolumeFire._fresh_stem)
+_SESSION_SEQUENCES = set()
+
+
+def _sequence_key(path):
+    """(folder, stem) of a frame file <folder>/<stem>_<digits>.<ext>, normalised for comparison; None for any other
+    file name"""
+    m = re.match(r'^(.+)_\d+\.[^.]+$', os.path.basename(path))
+    if m is None:
+        return None
+    return os.path.normcase(os.path.normpath(os.path.dirname(path))), m.group(1)
 
 # The engine's LOOK under the Blender edition's AgX (create_volume_fire(look='engine'), the default). The
 # engine's own numbers (DEFAULTS, look=None) render red-salmon here: AgX runs bright red to salmon and pink
@@ -262,10 +281,35 @@ void main() {
 }
 """
 
+# The engine's emitTeapotPass in two passes, so that a bake gives the same grids every time. The engine's kernel samples
+# the dye at each emitter point (the dye before this substep's advection), adds the point's emission and stores the sum
+# into the point's voxel. Points that share a voxel store at the same time and the GPU keeps one of them, a different
+# one from run to run (three bakes of the teapot gave frame 1 a peak density of 3.26, 3.38 and 3.38). Here the first
+# pass works out each point's store exactly as the engine's kernel does and keeps it in `stores` (a texel per point, the
+# floats' bits as they are), and each point claims its voxel with an atomic max of its claim (_K_CLAIM); the second
+# pass makes the store of the point with the highest claim and nobody else's, and that point resets the claim, so the
+# claims are all zero again for the next substep. The claims are a hash of the point's index salted with the substep's
+# number, so the store kept is drawn afresh among the voxel's points every substep, as the race drew it. A fixed order
+# would not keep the look: the last point in buffer order (what the kernel leaves when its points run one after
+# another) bakes the teapot's two seconds with 30 % less smoke than the race, the first with about twice as much,
+# because a voxel's points sample the dye at different places and a fixed order picks the same place every time.
+_K_CLAIM = r"""
+uint eido_fmix32(uint h) {                       // murmur3's 32-bit finaliser: a bijection of the 32-bit integers
+  h ^= h >> 16; h *= 0x85EBCA6Bu; h ^= h >> 13; h *= 0xC2B2AE35u; h ^= h >> 16;
+  return h;
+}
+// a point's claim on its voxel in one substep: distinct for every point (a bijection of the index, the salt fixed),
+// never 0, the cleared value (the salt's top bit is set and the indices stay below 2^31)
+uint eido_claim(int id, int substep) {
+  return eido_fmix32(uint(id) ^ (eido_fmix32(uint(substep)) | 0x80000000u));
+}
+"""
+
 _K_EMIT = r"""
 void main() {
   int id = int(gl_GlobalInvocationID.x);
   if (id >= uCount) return;
+  uvec4 store = uvec4(0u, 0u, 0u, 0xFFFFFFFFu);        // w: the voxel's flat index, all ones: no store
   vec3 vertexPos = texelFetch(points, ivec2(id % 256, id / 256), 0).xyz;
   vec3 worldPos = (uEmitterMatrix * vec4(vertexPos, 1.0)).xyz;
   vec3 uvw = (worldPos - vec3(0.0, WSIZE.y / 2.0, 0.0)) / WSIZE + 0.5;
@@ -275,15 +319,31 @@ void main() {
     float baseEmission = uEmitTemperature > 0.0 ? 1.0 : 0.0;
     float emissionFactor = baseEmission + uEmitterSpeed * uMotionBoost;
     float densityVal = uEmitDensity * (1.0 / 120.0) * (flicker * 0.85 + 0.15) * emissionFactor;
-    if (densityVal > 0.0) {
+    if (densityVal > 0.0 && INSIDE(coord)) {        // (a store past the grid's last voxel is dropped, as the engine's)
       float tempVal = uEmitTemperature * (1.0 / 120.0) * (flicker * 0.85 + 0.15) * emissionFactor;
       vec4 cur = textureLod(dyeIn, uvw, 0.0);
       float newDensity = cur.r + densityVal;
       float newTemp = clamp(cur.g + tempVal, 0.0, 12.0);
       float newAge = mix(cur.b, 0.0, densityVal / max(newDensity, 0.001));
-      imageStore(dyeOut, coord, vec4(newDensity, newTemp, newAge, 1.0));
+      store = uvec4(floatBitsToUint(newDensity), floatBitsToUint(newTemp), floatBitsToUint(newAge),
+                    (uint(coord.z) * uint(GY) + uint(coord.y)) * uint(GX) + uint(coord.x));
+      imageAtomicMax(claims, coord, eido_claim(id, uSubstep));
     }
   }
+  imageStore(stores, ivec2(id % 256, id / 256), store);
+}
+"""
+
+_K_EMIT_STORE = r"""
+void main() {
+  int id = int(gl_GlobalInvocationID.x);
+  if (id >= uCount) return;
+  uvec4 store = texelFetch(stores, ivec2(id % 256, id / 256), 0);
+  if (store.w == 0xFFFFFFFFu) return;
+  ivec3 coord = ivec3(int(store.w % uint(GX)), int((store.w / uint(GX)) % uint(GY)), int(store.w / uint(GX * GY)));
+  if (imageLoad(claims, coord).x != eido_claim(id, uSubstep)) return;
+  imageStore(claims, coord, uvec4(0u));
+  imageStore(dyeOut, coord, vec4(uintBitsToFloat(store.x), uintBitsToFloat(store.y), uintBitsToFloat(store.z), 1.0));
 }
 """
 
@@ -332,6 +392,8 @@ class VolumeFire:
     material        the volume material (engine: volumetricMaterial)
     params          the resolved options (engine: params)
     sim_time        seconds of simulation after the last bake (engine: simTime)
+    stem            the last bake's frames are <cache_dir>/<stem>_####.vdb: the fire's name, or <name>_bake2, _bake3 ...
+                    for a fire baked again in the same Blender session (_SESSION_SEQUENCES)
     bake()          warmup + one step per frame + .vdb + light keys (engine: warmup() then step(dt) per frame)
     make_lava_emissive(material)   the burning mesh's lava cracks (engine: makeLavaEmissive)
     """
@@ -343,6 +405,7 @@ class VolumeFire:
         self.params = o
         self.sim_time = 0.0
         self.name = o['name']
+        self.stem = self.name
         gb = o['grid_size']
         self.G3 = (int(gb[0]), int(gb[2]), int(gb[1]))          # three grid (x, y, z)
         self.W3 = tuple(float(x) for x in _three_axes(o['world_size']))
@@ -633,7 +696,7 @@ class VolumeFire:
         """The smoke's transmittance toward the key light from each texel of the shadow plane, through this frame's
         grids (arr [z3, y3, x3, c], as written to the .vdb) with the volume material's extinction (density x
         smoke_density, burning gas clearer by flame_clarity, x 0.85 for the detail noise's mean factor when
-        detail_noise is on), 64 steps across the domain: <cache>/<name>_shadow_####.exr"""
+        detail_noise is on), 64 steps across the domain: <cache>/<stem>_shadow_####.exr"""
         o = self.params
         res = int(o['shadow_resolution'])
         flat, wts, ds = self._shadow_march()
@@ -646,11 +709,11 @@ class VolumeFire:
         tau = (np.maximum(dens, 0.0) * clear).sum(axis=1) * ds * o['smoke_density'] * detail
         T = np.exp(-tau).reshape(res, res)
         from ._util import write_exr
-        write_exr(frame_file(self.cache_dir, self.name + '_shadow', frame, 'exr'), np.repeat(T[..., None], 3, 2))
+        write_exr(frame_file(self.cache_dir, self.stem + '_shadow', frame, 'exr'), np.repeat(T[..., None], 3, 2))
 
     def _attach_shadow_sequence(self, fs, fe):
         import bpy
-        img = bpy.data.images.load(frame_file(self.cache_dir, self.name + '_shadow', fs, 'exr'), check_existing=False)
+        img = bpy.data.images.load(frame_file(self.cache_dir, self.stem + '_shadow', fs, 'exr'), check_existing=False)
         img.source = 'SEQUENCE'
         img.colorspace_settings.name = 'Non-Color'
         tex = self.shadow_mesh.active_material.node_tree.nodes['smoke_transmittance']
@@ -741,6 +804,10 @@ class VolumeFire:
         fe = sc.frame_end if frame_end is None else int(frame_end)
         fps = scene_fps(sc)
         os.makedirs(self.cache_dir, exist_ok=True)
+        self.stem = self._fresh_stem()
+        if self.stem != self.name:
+            log(f'[fx.fire] {self.name}_####.vdb may have been read in this Blender session, which keeps the grids '
+                f'of every .vdb it reads: this bake writes {self.stem}_####.vdb')
         GX, GY, GZ = self.G3
         WX, WY, WZ = self.W3
         ctx = ComputeContext()
@@ -762,14 +829,22 @@ class VolumeFire:
         k_proj = ctx.kernel(_K_PROJECT, samplers=['pressIn', 'velIn'], images=['velOut'], defines=defs, preamble=pre)
         k_dye = ctx.kernel(_K_ADVECT_DYE, samplers=['velIn', 'dyeIn'], images=['dyeOut'],
                            push=[(F, 'uDt'), (F, 'uDissipation'), (F, 'uCooling')], defines=defs, preamble=pre)
-        k_emit = ctx.kernel(_K_EMIT, samplers=['dyeIn', 'points'], images=['dyeOut'],
-                            sampler_types={'points': 'FLOAT_2D'}, local=(64, 1, 1),
+        claim = ('R32UI', 'UINT_3D_ATOMIC', ('READ', 'WRITE'))          # a voxel's claim: its points' highest
+        k_emit = ctx.kernel(_K_CLAIM + _K_EMIT, samplers=['dyeIn', 'points'], images=['claims', 'stores'],
+                            sampler_types={'points': 'FLOAT_2D'},
+                            image_specs={'claims': claim, 'stores': ('RGBA32UI', 'UINT_2D', ('WRITE',))},
+                            local=(64, 1, 1),
                             push=[('MAT4', 'uEmitterMatrix'), (F, 'uTime'), (F, 'uEmitTemperature'),
-                                  (F, 'uEmitDensity'), (F, 'uEmitterSpeed'), (F, 'uMotionBoost'), ('INT', 'uCount')],
+                                  (F, 'uEmitDensity'), (F, 'uEmitterSpeed'), (F, 'uMotionBoost'), ('INT', 'uCount'),
+                                  ('INT', 'uSubstep')],
                             defines=defs, preamble=pre)
+        k_store = ctx.kernel(_K_CLAIM + _K_EMIT_STORE, samplers=['stores'], images=['claims', 'dyeOut'],
+                             sampler_types={'stores': 'UINT_2D'}, image_specs={'claims': claim}, local=(64, 1, 1),
+                             push=[('INT', 'uCount'), ('INT', 'uSubstep')], defines=defs, preamble=pre)
         k_render = ctx.kernel(_K_RENDER, samplers=['velIn', 'dyeIn'], images=['outTex'], defines=defs, preamble=pre)
         grid_groups = k_vel.groups_for(size)
         k_curl.run(grid_groups, images={'outTex': curl}, uTurbFreq=o['turb_frequency'])
+        claims = ctx.texture(size, 'R32UI', filt=False)
 
         # emitter points (three-local), fixed over the bake like the engine's buffer
         sc.frame_set(fs)
@@ -780,12 +855,13 @@ class VolumeFire:
         parr = np.zeros((rows, 256, 4), dtype=np.float32)
         parr.reshape(-1, 4)[:npts, :3] = pts
         ptex = ctx.texture2d_from(parr)
+        stores = ctx.texture((256, rows), 'RGBA32UI', filt=False)          # each point's store, for the second pass
         emit_groups = (int(math.ceil(npts / 64)), 1, 1)
         log(f'[fx.fire] grid {GX}x{GY}x{GZ} (three axes) over {WX}x{WY}x{WZ} m, emitter {npts} points '
             + ('(raw vertices)' if o['emitter_points'] is None else '(area-weighted samples)'))
 
         cpu_noise = _noise.ImprovedNoise()
-        st = dict(sim_time=0.0, acc=0.0, dye_in_a=True)
+        st = dict(sim_time=0.0, acc=0.0, dye_in_a=True, substep=0)
         state = {'prev_pos': self._emitter_pos3(), 'pos': self._emitter_pos3(), 'vel': np.zeros(3), 'speed': 0.0}
         temporal = {}
 
@@ -816,11 +892,15 @@ class VolumeFire:
             k_proj.run(grid_groups, samplers={'pressIn': prA, 'velIn': velB}, images={'velOut': velA})
             k_dye.run(grid_groups, samplers={'velIn': velA, 'dyeIn': dye_cur}, images={'dyeOut': dye_nxt},
                       uDt=sim_step, uDissipation=diss, uCooling=cool)
-            k_emit.run(emit_groups, samplers={'dyeIn': dye_cur, 'points': ptex}, images={'dyeOut': dye_nxt},
+            k_emit.run(emit_groups, samplers={'dyeIn': dye_cur, 'points': ptex},
+                       images={'claims': claims, 'stores': stores},
                        uEmitterMatrix=M, uTime=temporal['time'], uEmitTemperature=p['emit_temperature'],
                        uEmitDensity=p['emit_density'], uEmitterSpeed=state['speed'],
-                       uMotionBoost=p['motion_boost'], uCount=npts)
+                       uMotionBoost=p['motion_boost'], uCount=npts, uSubstep=st['substep'])
+            k_store.run(emit_groups, samplers={'stores': stores}, images={'claims': claims, 'dyeOut': dye_nxt},
+                        uCount=npts, uSubstep=st['substep'])
             st['dye_in_a'] = not st['dye_in_a']
+            st['substep'] += 1
 
         # ---- warmup (the engine's warmup): simulation time runs up to warmup_seconds before the shot. The
         # engine's onTemporal kept moving the mesh through it (the example's teapot spins on sim time), so an
@@ -901,7 +981,8 @@ class VolumeFire:
         self._attach_sequence(fs, fe)
         if self.shadow_mesh is not None:
             self._attach_shadow_sequence(fs, fe)
-        log(f'[fx.fire] baked frames {fs}..{fe} in {time.time() - t0:.1f} s -> {self.cache_dir}')
+        log(f'[fx.fire] baked frames {fs}..{fe} in {time.time() - t0:.1f} s -> '
+            f'{os.path.join(self.cache_dir, self.stem)}_####.vdb')
         return self
 
     def _grow_bounds(self, arr):
@@ -926,6 +1007,23 @@ class VolumeFire:
         self.volume_object['fx_bounds_min'] = [float(x) for x in self.bounds[0]]
         self.volume_object['fx_bounds_max'] = [float(x) for x in self.bounds[1]]
 
+    def _fresh_stem(self):
+        """The stem a bake writes its frames under: the fire's name, unless this session may have read frames under
+        it (a fire's Volume was pointed at them in this session, or a Volume in the open file plays them, the
+        fire's own included); then <name>_bake2, _bake3 ..., the first that is neither."""
+        import bpy
+        taken = set(_SESSION_SEQUENCES)
+        for v in bpy.data.volumes:
+            if v.filepath:
+                taken.add(_sequence_key(bpy.path.abspath(v.filepath, library=v.library)))
+        k = 1
+        while _sequence_key(frame_file(self.cache_dir, self._stem_of_bake(k), 1, 'vdb')) in taken:
+            k += 1
+        return self._stem_of_bake(k)
+
+    def _stem_of_bake(self, k):
+        return self.name if k == 1 else f'{self.name}_bake{k}'
+
     def _write_vdb(self, vdb, frame, arr):
         """arr[z3, y3, x3, c] -> Blender grid [x, y, z] with x = x3, y = (GZ-1 - z3), z = y3."""
         GX, GY, GZ = self.G3
@@ -943,21 +1041,25 @@ class VolumeFire:
                  [-WX / 2 + 0.5 * dx, -WZ / 2 + 0.5 * dx, 0.5 * dx, 1]]
             g.transform = vdb.createLinearTransform(m)
             grids.append(g)
-        path = frame_file(self.cache_dir, self.name, frame, 'vdb')
+        path = frame_file(self.cache_dir, self.stem, frame, 'vdb')
         tmp = path + '.tmp'
         vdb.write(tmp, grids=grids)
         os.replace(tmp, path)
 
     def _attach_sequence(self, fs, fe):
         """The Volume plays the baked files, as Blender plays any .vdb sequence: each depsgraph that evaluates it (the
-        viewport's, a render's, in this session or from the saved .blend) reads the frame's file. Nothing is loaded
-        into the datablock itself."""
+        viewport's, a render's, in this session or from the saved .blend) reads the frame's file, scene frame f the file
+        numbered f, and outside fs..fe none. Nothing is loaded into the datablock itself: a load there runs at the frame
+        the datablock last held (0 until it plays a sequence), and Blender keeps a failed load's error on the
+        datablock, where every render's copy inherits it, reports no bounds and draws no volume. The sequence joins
+        _SESSION_SEQUENCES: a later bake in this session writes its frames under another stem."""
         vol = self.volume_object.data
-        vol.filepath = frame_file(self.cache_dir, self.name, fs, 'vdb')
+        _SESSION_SEQUENCES.add(_sequence_key(frame_file(self.cache_dir, self.stem, fs, 'vdb')))
+        vol.filepath = frame_file(self.cache_dir, self.stem, fs, 'vdb')
         vol.is_sequence = True
-        vol.frame_start = 1                      # file number = scene frame
-        vol.frame_offset = 0
-        vol.frame_duration = fe
+        vol.frame_start = fs                     # scene frame fs plays file fs ...
+        vol.frame_offset = fs - 1
+        vol.frame_duration = fe - fs + 1         # ... and fe file fe; before and after, CLIP asks for no file
         vol.sequence_mode = 'CLIP'
 
     # ---------------------------------------------------------------------------------------------

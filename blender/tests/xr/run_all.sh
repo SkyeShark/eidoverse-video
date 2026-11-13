@@ -15,9 +15,11 @@
 #   cli       export_cli.py on the city's .blend: --survey, meshopt + WebP, Draco + JPEG (the page decodes both), the
 #             bake size and world options; on the features' .blend the placement, shadow, no-bake / no-motion /
 #             no-world, image cap and choreo options (CPU only); test_xr_cli.py reads every option back
-#   films     test_xr_films.py      real films round one built (product shot, crows, my robot walking, the theatre
-#             stage with its spot lights, haze and camera cut), exported
-#   survey    test_xr_survey.py     survey_xr on five round-one films, read only (no render)
+#   films     test_xr_films.py      real films (product shot, crows, my robot walking, the theatre stage with its spot
+#             lights, haze and camera cut), exported: the walk built by the test (_inputs.py), the other three read
+#             from their families' test outputs and skipped, with the test that builds them, when those are missing
+#   survey    test_xr_survey.py     survey_xr on five films (no render): a meadow and my walk built by the test, the
+#             product shot, the crows and the fire teapot read when their families' tests have built them
 #   serve     test_xr_serve.py      the kit's serve.py carried over (no GPU)
 #   quest     test_xr_quest.py      the kit's quest.py, every command, against a stand-in adb (no GPU)
 #   pages     test_xr_pages.py      every bundle in the kit page through shot.mjs, against EEVEE and the original

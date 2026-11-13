@@ -1,15 +1,18 @@
-"""tests/xr/test_xr_survey.py: survey_xr on five films round one built, read only, no render (an API run):
+"""tests/xr/test_xr_survey.py: survey_xr on five films, no render (an API run):
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/xr/test_xr_survey.py
 
-survey_xr says what export_xr would do to a film without changing it. Each .blend (another family's test output) is
-opened and surveyed; checked: what each film needs is named, and nothing is changed (the .blend's object count and
-every object's render visibility are the same after the survey; nothing is saved).
-  example      a Poly Haven product shot: image-textured PBR (nothing to bake), two area lights
-  crows        two skinned crows: armatures, skinned meshes, an area light
-  meadow       the flora brush's meadow: patches whose wind deforms them, millions of triangles (Quest: over)
+survey_xr says what export_xr would do to a film without changing it. Each film is surveyed; checked: what each film
+needs is named, and nothing is changed (the object count and every object's render visibility are the same after the
+survey; nothing is saved). Two films the test builds itself (tests/xr/_inputs.py); three are other families' test
+outputs, opened when they are built and skipped, with the test that builds them, when they are not:
+  example      a Poly Haven product shot: image-textured PBR (nothing to bake), two area lights (the pipeline suite's)
+  crows        two skinned crows: armatures, skinned meshes, an area light (the pipeline suite's)
+  meadow       vegetation.md's MEADOW recipe, built here: patches whose wind deforms them, millions of triangles
+               (Quest: over)
   fire_teapot  a volume fire (not glTF: named), keyed fire lights (tracks), animated material values (not played)
-  robot_walk   my robot body walking: two skinned meshes, sun lights
+               (test_fire_teapot.py's GPU fire bake)
+  robot_walk   my robot body walking, built here: two skinned meshes, sun lights, its 4096 px maps
 Then world_changes on four worlds (a still colour, a keyed colour, an Environment Texture reading an image sequence,
 one reading a single image) and world_sequence_frames on a 2 s and a 100 s film: when the export writes the sky as a
 timed sequence, and at which frames.
@@ -27,8 +30,10 @@ TESTS = os.path.join(WORKTREE, 'blender', 'tests')
 OUT = os.path.join(HERE, 'out', 'survey')
 os.makedirs(OUT, exist_ok=True)
 
+sys.path.insert(0, HERE)
 from eidoblend.xr import export as X  # noqa: E402
 from eidoblend.xr import glb as G     # noqa: E402
+import _inputs as I                   # noqa: E402
 
 RESULTS = []
 
@@ -38,16 +43,19 @@ def check(name, ok, detail=''):
     print(f"[check] {'PASS' if ok else 'FAIL'} {name}{': ' + str(detail) if detail else ''}", flush=True)
 
 
-FILMS = {
-    'example': 'pipeline/out/example.blend', 'crows': 'pipeline/out/crows.blend', 'meadow': 'flora/out/meadow.blend',
-    'fire_teapot': 'fx/out/fire_teapot.blend', 'robot_walk': 'characters/out/robot_walk.blend'}
+# a film: built here (a function), or another family's test output (by name in _inputs.BUILT)
+FILMS = {'example': 'example', 'crows': 'crows', 'meadow': I.meadow, 'fire_teapot': 'fire_teapot',
+         'robot_walk': I.robot_walk}
 surveys = {}
-for name, rel in FILMS.items():
-    path = os.path.join(TESTS, rel)
-    if not os.path.exists(path):
-        check(f'{name}: the built .blend exists (its family test makes it)', False, rel)
-        continue
-    bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+for name, src in FILMS.items():
+    if callable(src):
+        src()
+    else:
+        path, why = I.built(src)
+        if path is None:
+            print(f'[SKIP] {name}: {why}', flush=True)
+            continue
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
     sc = bpy.context.scene
     before = (len(bpy.data.objects), sorted((o.name, o.hide_render) for o in bpy.data.objects))
     s = X.survey_xr(sc)

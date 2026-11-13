@@ -109,10 +109,12 @@ M = []
 M += [py('pipeline', 'check_docs.py'),
       T('gpy', 'pipeline', 'run_tests.py', cap=16, timeout=5400, why='T0-T19: the runner end to end, small films'),
       T('gpy', 'pipeline2', 'run_tests.py', cap=16, timeout=5400, why='U0-U6: the harness-rest ports')]
-# the harness's own checks: what the fetchers and the doctor print (no Blender), the loaded-asset mark and the swept
-# clearance (Blender, no render), fetch_model.py's Blender previews (renders)
+# the harness's own checks: what the fetchers and the doctor print (no Blender), the loaded-asset mark, the swept
+# clearance, the robot sensors' split view of what moves and the springs record (Blender, no render),
+# fetch_model.py's Blender previews (renders)
 M += [py('harness', 'test_fetch_hints.py'), bl('harness', 'test_asset_marks.py'),
-      bl('harness', 'test_swept_clearance.py'),
+      bl('harness', 'test_swept_clearance.py'), bl('harness', 'test_robot_sensors.py'),
+      bl('harness', 'test_spring_audit.py'),
       T('gpy', 'harness', 'test_fetch_preview.py', why="fetch_model.py's previews rendered in Blender (LOOK at them)")]
 # the examples through the harness (built, no render)
 M += [eb('examples', 'blender/examples/obstacle_course/scene.json', tag='the walking course example'),
@@ -141,6 +143,8 @@ M += [bl('controller', s, timeout=3600) for s in ('test_controller_acting.py', '
                                                   'test_controller_maneuvers.py', 'test_controller_options.py',
                                                   'test_controller_terrain.py')]
 M += [bl('controller', 'test_controller_presets.py', '--preset', 'stairs_small', timeout=3600)]
+M += [bl('controller', 'test_controller_cross_slope.py', timeout=3600),
+      bl('controller', 'test_controller_cross_slope.py', '--vrm', 'aletheia', timeout=3600)]
 M += [bl('maneuvers', s, timeout=3600) for s in ('test_emotes.py', 'test_example_bench.py', 'test_maneuver_moves.py',
                                                  'test_robot_seat.py', 'test_seating.py', 'test_start_seated.py')]
 M += [bl('robot_body', 'test_api_coverage.py'), bl('robot_body', 'test_dof_parity.py')]
@@ -172,7 +176,8 @@ M += [bl('flora', s, NR) for s in ('t_backlit.py', 't_close.py', 't_meadow.py', 
 M += [gpu('flora', s) for s in ('t_lookdev.py', 't_motion.py', 't_scale.py', 't_species.py', 't_walk.py')]
 M += [bl('fx', 'test_noise_parity.py'), bl('fx', 'test_swe_erosion.py', 'render=0', 'end=720'),
       bl('fx', 'test_iso_field.py', NR), bl('fx', 'test_cloth_map.py', NR),
-      bl('fx', 'test_fire_shadows.py', 'cases=options,caster'), bl('fx', 'test_fire_glow.py')]
+      bl('fx', 'test_fire_shadows.py', 'cases=options,caster'), bl('fx', 'test_fire_glow.py'),
+      bl('fx', 'test_fire_bake.py')]
 M += [gpu('fx', s) for s in ('test_cloth.py', 'test_cloth_map.py', 'test_fire_teapot.py', 'test_iso_field.py',
                              'test_particles_campfire.py',
                              'test_swe_basin.py')]
