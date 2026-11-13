@@ -1,0 +1,10 @@
+[
+ ["a_kind_sheet3", {"set": {"sheet_smooth_cells": 3.0}}],
+ ["b_hero_cycle", {"set": {"sheet_smooth_cells": 3.0, "hero_winds": "cycle", "hero_block": 200, "hero_iters": 1200,
+                           "hero_average_iters": 0, "hero_smooth_cells": 1.0}}],
+ ["c_all_cycle_short", {"set": {"sheet_smooth_cells": 3.0, "refine_winds": "cycle", "refine_block": 200,
+                                "refine_average_iters": 0, "refine_smooth_cells": 0.75, "hero_iters": 1200,
+                                "hero_smooth_cells": 1.0}}],
+ ["d_hero_last_long", {"set": {"sheet_smooth_cells": 3.0, "hero_winds": "last", "hero_iters": 2400,
+                               "hero_average_iters": 0, "hero_smooth_cells": 1.0}}]
+]

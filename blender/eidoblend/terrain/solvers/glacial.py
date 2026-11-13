@@ -6,19 +6,28 @@ defiles, not U-valleys (the research's finding).
       'valley_uplift'  the uplift of a glaciated range around one main valley: a crest across its head and two side
                        ridges along it ('horseshoe', the default: Lauterbrunnen's setting), or a compose.uplift
                        shape (ridge, dome, plateau, massif). U on the coarsest level's passes, the rough start
-                       surface on its first; the fields 'trough' etc. start at 0 so a `where` can read them
+                       surface on its first; the fields 'trough' etc. start at 0 so a `where` can read them. A
+                       horseshoe with a 'trunk' holds the pre-glacial trunk river along the valley's axis as base
+                       level on every pass of the coarsest level (trunk_course, trunk_pins): one river from the
+                       valley head out past the grid's edge, so the range's drainage gathers into ONE main valley
+                       and the ice that later fills it is the trunk glacier, its tributaries hanging above it (left
+                       free, the fluvial network split the valley floor between two or three parallel valleys of
+                       one size, and each became a trough)
       'glacial'        on the coarsest level, once it is fully grown: the ice discharge, the glaciated centrelines,
                        the cirques, the jump flood, the U-carve, the fresh walls' threshold and lateral moraines. On
-                       every finer level: the walls it inherits keep their steep threshold (the recipe keeps the
-                       fluvial refinement off the trough with where='1 - trough'), and fail at it at the level's
-                       own scale where the rock is weak, with fall-line couloirs and ribs (wall_flutes) on the
-                       levels that resolve them. (The carve's seeds cannot reach a finer level: run.py carries fields
-                       only, so a finer level refines the carved surface it inherits rather than re-carving.)
+                       every finer level: the walls it inherits are sharpened to the level's own resolution
+                       (sharpen_walls, from the cross-section the carve left per cell: PROFILE_FIELDS), keep their
+                       steep threshold (the recipe keeps the fluvial refinement off the trough and its shoulders),
+                       and fail at it at the level's own scale where the rock is weak, with fall-line couloirs and
+                       ribs (wall_flutes) on the levels that resolve them. (The carve's seeds cannot reach a finer
+                       level: run.py carries fields only, and caches only some of the shared dict; the per-cell
+                       cross-section rides on the fields.)
 
 The carve, step by step (each a GPU kernel where the work is per cell):
   1. Ice discharge (kernels/ice_flux.glsl, iterated to convergence). Mass balance b(z) = clamp(beta (z - ELA),
-     -b_abl, b_acc) at altitude z = h + base_elevation_m, routed down the D8 receivers of the lake-filled surface
-     (or the water's MFD weights, p_ice > 0): Q = max(0, Q_in + a), a = b cell^2 on accumulating cells and
+     -b_abl, b_acc) at altitude z = h + base_elevation_m, routed down the D8 receivers of the lake-filled surface,
+     flats crossed toward their outlets (drainage_receivers: no cell without a way down), or the water's MFD
+     weights (p_ice > 0): Q = max(0, Q_in + a), a = b cell^2 on accumulating cells and
      b cell L on ablating ones, L = 2 W(Q_in) the tongue's width (a glacier ablates over its width, not over the
      one cell its discharge is routed through: with cell^2 a tongue ran 30 times too far). The same kernel with
      b = 1 everywhere gives the D8 drainage area.
@@ -29,24 +38,39 @@ The carve, step by step (each a GPU kernel where the work is per cell):
      (z_c the channel, d = overdeepen H: depth grows with discharge, not with the floor downstream, so trunks
      overdeepen and tributaries hang above them by d_trunk (1 - f)); W and H wobble along the valley with world
      noise (wobble_*), and the sediment fill (graded_fill) grades every floor down-valley at floor_grade and meets
-     the river below each glacier's end, so no reach of floor is a closed basin.
+     the river below each glacier's end, so no reach of floor is a closed basin. A stream's trough grows in from its
+     head (head_taper).
   3. Cirques (numpy): at glacier heads at or above ELA - cirque_band_m, spaced by blue-noise rejection, a bowl
      backed onto the divide above its head (its headwall reaching the crest there), elongated down-glacier and open
      on that side, its rim lobed, its floor at ELA - 50 m (never more than cirque_depth_m below the head, nor more
-     than cirque_tarn_m below the glacier's trough at its lip). Where they meet, the walls between them stand as
-     aretes and horns.
+     than cirque_tarn_m below the glacier's trough at its lip) and falling toward the lip at cirque_tilt_deg, so the
+     bowl drains into its trough. Where they meet, the walls between them stand as aretes and horns.
   4. Jump flood (kernels/jump_flood.glsl, Rong & Tan 2006, log2 passes + 1): every cell's four best seeds from
      DIFFERENT streams, ranked by the trough's target height there (not by distance: the target is a lower
      envelope, so a trunk's trough wins over a nearer tributary's, and a step in a floor becomes a riegel).
   5. U-carve (kernels/u_carve.glsl): the target T_s(x) = zf + max(H prof(r / W), fillz) per seed, the four joined
      by a smooth minimum (C1, join_m wide: no creases where troughs meet), the cirque bowls likewise, then
      h = smooth_min(h, T, trim_m): the trough cuts into the range and meets it at a trimline. The cross-section
-     prof(rho) is flat on the floor (rho <= floor_frac), the wall ((rho - floor_frac) / (1 - floor_frac))^b up to
-     the lip (rho = r / W = 1), then a shoulder 1 + shoulder_rise ((rho - 1) / shoulder_width)^shoulder_exp and
-     the upper wall: the trough-in-trough of Lauterbrunnen, sheer walls under benches (Muerren, Wengen). fillz is
-     the fill's top, rising floor_rise H from the river to the walls' foot (fans and aprons). Beyond the lip the
-     carve is capped at cut H, easing to 0 at the trimline: benches where the ground was low, truncated spurs where
-     it was high. The bedrock under the fill is T without the fill term, so h - bed is the valley fill.
+     prof(rho) is flat on the floor (rho <= floor_frac), then the wall up to the lip (rho = r / W = 1): a cliff
+     (cliff(t), t = (rho - floor_frac) / (1 - floor_frac)) whose slope ramps up over the toe (wall_toe of its run:
+     the apron at its foot), stands at its steepest across the core and eases off over the lip (wall_lip) into the
+     shoulder 1 + shoulder_rise ((rho - 1) / shoulder_width)^shoulder_exp, then the upper wall: the trough-in-trough
+     of Lauterbrunnen, sheer walls under benches (Muerren, Wengen). The floor's share floor_frac follows from the
+     wall's angle (floor_frac(): the core stands at wall_deg): the walls rise 600 m within about 200 m of the floor,
+     as Lauterbrunnen's and Yosemite's do (the power law ((rho - floor_frac) / (1 - floor_frac))^3 it replaced
+     rose its lower half at 20-50 degrees, a broad concave U whose walls the reviewer measured ramping at 35-45
+     degrees over 1.5-2 km). wall_toe 1, wall_lip 0 and floor_frac 0 give the classic parabola (r / W)^2. fillz is
+     the fill's top, rising floor_rise H from the river to the walls' foot (fans and aprons), times each seed's
+     rise factor (world noise along the valley, rise_noise: the fans differ from reach to reach). A tributary's
+     floor is narrower than the trunk's (floor_frac f^floor_exp): a hanging valley is a U, not a flat slot. Beyond
+     the lip the carve is capped at cut H (1 - q)^2, q = (rho - 1) / cut_width, the most at the lip and 0 at the
+     trimline: truncated spurs where the ground was high. The shoulder cut lowers the old ground beyond the lip by
+     shoulder_cut H (1 - q)^2, q = (rho - 1) / shoulder_cut_width, never below the lip, and the lip stands that much
+     deeper: an old valley floor at the lip's height (which the carve to T leaves untouched) becomes a shoulder
+     rising from the lip, its streams falling over the walls, not a flat strip along the whole trough that its
+     rivers fill with gravel behind a rim (the reviewer's tooled channel). A stream's trough tapers in over
+     head_taper W from its head. The bedrock under the fill is T without the fill term, so h - bed is the fill.
+     The per-seed floor share, rise and shoulder cut reach the kernels in seedC (seed_textures).
   6. Fresh walls: the threshold pass (solvers/hillslope.py) with Sc = tan(wall_deg) x lognormal noise in the
      trough, the range's own Sc outside; the debris lands as talus at the walls' feet (the talus stage after
      this one sets it at 35 degrees).
@@ -54,11 +78,16 @@ The carve, step by step (each a GPU kernel where the work is per cell):
 The level runner's end stage fills what closed basins remain (recipe defaults lakes='sediment': flat floors;
 'lake': ribbon lakes and tarns).
 
-Fields written: h, bed, wear (+ the carve), deposit (+ the fill), talus, Sc (the walls' threshold), ice (the
-glacier's thickness at the carving maximum, m), trough (0..1, the trough and cirque footprint), trough_floor (the
-flat floor), trough_wall (the walls: trough minus floor), carve (the depth the ice removed, m: fresh rock), and on
-the coarsest level ice_q (the ice discharge, m^3/yr) and glacial_streams (the stream id of each centreline cell, -1
-elsewhere).
+Fields written: h, bed, wear (+ the rock the carve bared, where no fill buries it), valley_fill (the old valley fill
+on the trough floors, m: loose, under today's meadows; deposit is zeroed where the ice carved, so the masks' deposit
+means today's river gravel and fans), talus, Sc (the walls' threshold), ice (the glacier's thickness at the carving
+maximum, m), trough (0..1, the trough and cirque footprint), trough_floor (the flat floor), trough_wall (the walls:
+trough minus floor), carve (the depth the ice removed, m), trough_rho (r / W of the nearest trough, 1 at its lip:
+the finer levels' lip band and the recipe's where), PROFILE_FIELDS (the best seed's cross-section per cell:
+trough_zf, trough_H, trough_ff, trough_fill, trough_rise, and trough_sharp, where the finer levels re-evaluate the
+walls from them), and on the coarsest level ice_q (the ice discharge,
+m^3/yr), glacial_streams (the stream id of each centreline cell, -1 elsewhere) and trunk (1 on the trunk river's
+channel cells, valley_uplift).
 
 Parameters (metres, years, degrees; DEFAULTS below):
     ela_m 2400                  the equilibrium-line altitude of the carving glaciation (altitude, not h)
@@ -71,19 +100,37 @@ Parameters (metres, years, degrees; DEFAULTS below):
                                 glacier: 5e7 m^3/yr, 1.5 km wide)
     trough_width_m 1200         the main tile's trunk trough: its width at the lip ...
     trough_depth_m 600          ... and its depth from the flat floor to the lip
-    floor_frac 0.25             the flat floor's share of the trough's half-width (the wall starts at its edge)
-    u_exponent 2.4              the wall's profile H ((rho - floor_frac) / (1 - floor_frac))^b
-    floor_rise 0.06             the fill's rise from the river to the walls' foot, a share of H
-    overdeepen 0.6              the floor's depth below the pre-glacial channel, a share of H
+    floor_frac None             the flat floor's share of the trough's half-width (the wall starts at its edge);
+                                None: what the wall's angle leaves (floor_frac())
+    wall_toe 0.35, wall_lip 0.2 the shares of the wall's run over which its slope ramps up from the floor (the
+                                apron) and eases off into the shoulder (the rounded lip); the core between them
+                                stands at 1 / (1 - (wall_toe + wall_lip) / 2) times the wall's mean slope
+    floor_rise 0.02             the fill's rise from the river to the walls' foot, a share of H
+    rise_noise 0, rise_scale_m 900   each seed's rise times clip(1 + rise_noise n, 0.1, 2.5), n world noise at
+                                rise_scale_m: fans and aprons of different sizes along the walls
+    floor_exp 0                 a seed's floor share is floor_frac f^floor_exp (1: a tributary of half the trunk's
+                                size has half its floor share)
+    head_taper 0                a stream's trough (W, H, the overdeepening) grows in over head_taper W from a tenth
+                                of its size at its head (head_taper_factor; 0: full size at the first seed)
+    overdeepen 0.6, overdeepen_exp 1   the floor's depth below the pre-glacial channel: overdeepen H_trunk f^exp
+                                (f the trough's size relative to the trunk's; exponent 2: tributaries cut far less
+                                than in proportion, so they hang without sinking basins of their own), plus the
+                                shoulder cut's shoulder_cut H
+    shoulder_cut 0, shoulder_cut_width 2   beyond the lip the old ground is lowered by shoulder_cut H (1 - q)^2,
+                                q = (rho - 1) / shoulder_cut_width, never below the lip
+    lip_open_m 0                on every finer level, the rims on the lip band (rho 0.9-1.5, the carve's
+                                trough_rho) come down to the ground around them: lip_open's morphological opening
+                                with a square of this half-width (0: off)
+    cirque_ela_m None           the ELA of the later, smaller glaciations that cut today's cirques (None: ela_m);
+                                cirques form only at glacier heads at or above it less cirque_band_m
     wobble_m 700, wobble_w 0.12, wobble_h 0.1   W and H vary along the valley by world noise at this wavelength
     shoulder_width 0, shoulder_rise 0.25, shoulder_exp 2, upper_wall 1.5
                                 the shoulder beyond the lip: shoulder_width W wide, rising shoulder_rise H (0: none),
                                 then the upper wall rising upper_wall H per W to the trimline
-    cut 0.6, cut_width 2        beyond the lip the ice lowers the ground by at most cut H, easing to 0 at
-                                cut_width W past the lip (the trimline): benches where the ground was low, truncated
-                                spurs where it was high, nothing planed beyond (an uncapped shoulder planed the side
-                                ridges: the main tile lost 1.1 km of relief, and a 56-degree band ran along every
-                                trough)
+    cut 0.6, cut_width 2        beyond the lip the ice lowers the ground by at most cut H (1 - q)^2, q = (rho - 1) /
+                                cut_width, 0 at cut_width W past the lip (the trimline): truncated spurs where the
+                                ground was high, nothing planed beyond (an uncapped shoulder planed the side ridges:
+                                the main tile lost 1.1 km of relief, and a 56-degree band ran along every trough)
     floor_grade 0.012           the valley fill's top falls at least this grade down-valley: overdeepenings fill to
                                 their downstream rim, a glacier's last reach to the river below it, then grade
                                 up-valley (None: no fill)
@@ -96,7 +143,9 @@ Parameters (metres, years, degrees; DEFAULTS below):
     cirque_floor_m 50 (below the ELA), cirque_headwall_m 500, cirque_exp 2, cirque_floor_frac 0.35 (the flat floor's
     share of the bowl), cirque_spacing 1.5 (x the radius), cirque_open 2.5 (the bowl's reach down-glacier, x R_along),
     cirque_tarn_m 40 (the deepest the floor sits below the glacier's trough at the bowl's lip), cirque_lobes 0.15
-    (the rim's lobed irregularity), cirque_headroom_m 0 (the headwall's reach above the crest)
+    (the rim's lobed irregularity), cirque_headroom_m 0 (the headwall's reach above the crest), cirque_tilt_deg 8
+    (the bowl's floor falls toward its lip, so it drains into its trough: level floors held basins that the end
+    stage filled into flat ovals with stamped outlines)
     wall_deg 65, wall_noise 0.15, wall_scales_m [400, 120], wall_iters 64, refine_wall_iters 160
                                 the fresh walls' threshold (lognormal at the wall scales) and its passes on the
                                 carving level and on every finer one
@@ -130,14 +179,17 @@ OPEN, PERIODIC, PINNED = T.BOUND_OPEN, T.BOUND_PERIODIC, T.BOUND_PINNED
 DEFAULTS = dict(
     ela_m=2400.0, beta=0.005, b_acc_m=2.0, b_abl_m=6.0, p_ice=0.0,
     ice_width_m=750.0, ice_width_q=5.0e7, ice_width_exp=0.4, ice_width_max_m=3000.0,
-    trough_width_m=1200.0, trough_depth_m=600.0, floor_frac=0.25, u_exponent=2.4, floor_rise=0.06, overdeepen=0.6,
+    trough_width_m=1200.0, trough_depth_m=600.0, floor_frac=None, wall_toe=0.35, wall_lip=0.2, floor_rise=0.02,
+    floor_exp=0.0, rise_noise=0.0, rise_scale_m=900.0, head_taper=0.0,
+    overdeepen=0.6, overdeepen_exp=1.0, cirque_ela_m=None,
     f_max=1.6, shoulder_width=0.0, shoulder_rise=0.25, shoulder_exp=2.0, upper_wall=1.5, cut=0.6, cut_width=2.0,
+    shoulder_cut=0.0, shoulder_cut_width=2.0, lip_open_m=0.0,
     floor_grade=0.012,
     wobble_m=700.0, wobble_w=0.12, wobble_h=0.1,
     channel_area_m2=1.5e6, min_width_cells=2.0, smooth_cells=6.0, join_m=60.0, trim_m=20.0,
     cirques=True, cirque_band_m=300.0, cirque_radius_m=(400.0, 800.0), cirque_elong=1.35, cirque_depth_m=350.0,
     cirque_floor_m=50.0, cirque_floor_frac=0.35, cirque_exp=2.0, cirque_spacing=1.5, cirque_headroom_m=0.0,
-    cirque_headwall_m=500.0, cirque_open=2.5, cirque_tarn_m=40.0, cirque_lobes=0.15,
+    cirque_headwall_m=500.0, cirque_open=2.5, cirque_tarn_m=40.0, cirque_lobes=0.15, cirque_tilt_deg=8.0,
     wall_deg=65.0, wall_noise=0.15, wall_scales_m=(400.0, 120.0), wall_iters=64, wall_rate=0.12,
     flute_weak=0.9, flute_strong=0.35, flute_scales_m=(80.0, 40.0, 20.0), flute_stretch=5.0, cap_join_m=40.0,
     rock_flutes=0.0, rock_flute_deg=38.0,
@@ -156,24 +208,65 @@ def moraine_at(params):
     """Where the lateral moraine stands, a share of the half-width: given, or just past the flat floor's edge (at the
     foot of the walls, where the last glacier's margin lay)."""
     v = (params or {}).get('moraine_at')
-    return float(v) if v is not None else float(_p(params, 'floor_frac')) + 0.1
+    return float(v) if v is not None else floor_frac(params) + 0.1
+
+
+def core_factor(params):
+    """The cliff's core slope over its mean slope (cliff()): 1 / (1 - (wall_toe + wall_lip) / 2)."""
+    toe, lip = float(_p(params, 'wall_toe')), float(_p(params, 'wall_lip'))
+    return 1.0 / max(1.0 - 0.5 * (toe + lip), 0.5)
+
+
+def floor_frac(params):
+    """The flat floor's share of the trough's half-width: floor_frac when given, else what the wall leaves when its
+    core stands at wall_deg: the wall's run is core_factor H / tan(wall_deg) of the half-width W (trough_width_m / 2,
+    H trough_depth_m; both scale with the discharge, so every trough has the same share). Clamped to 0-0.9."""
+    v = (params or {}).get('floor_frac')
+    if v is None:
+        W = 0.5 * float(_p(params, 'trough_width_m'))
+        H = float(_p(params, 'trough_depth_m'))
+        run = core_factor(params) * H / math.tan(math.radians(min(max(float(_p(params, 'wall_deg')), 5.0), 89.0)))
+        v = 1.0 - run / max(W, 1e-6)
+    return float(min(max(float(v), 0.0), 0.9))
 
 
 # ================================================================================================ the twins ===
 
 def d8_receivers(h, cell, bound=OPEN):
     """Each cell's steepest-descent neighbour k (common.glsl's order) as float32, -1 where none is lower (an open
-    edge's outlet, a pit). Ties go to the lowest k, as a strict > over k = 0..7 does."""
-    h = np.asarray(h, F32)
-    best = np.zeros(h.shape, F32)
+    edge's outlet, a pit). Ties go to the lowest k, as a strict > over k = 0..7 does. The slopes are compared in
+    the surface's own precision (float64 stays float64: a filled surface's sub-millimetre falls survive)."""
+    h = np.asarray(h)
+    dt = np.float64 if h.dtype == np.float64 else F32
+    h = h.astype(dt, copy=False)
+    best = np.zeros(h.shape, dt)
     out = np.full(h.shape, -1.0, F32)
     for k in range(8):
         hq, ok = T.neighbour(h, k, bound)
-        s = (h - hq) / (T.LEN[k] * F32(cell))
+        s = (h - hq) / (dt(T.LEN[k]) * dt(cell))
         better = ok & (s > best)
         best = np.where(better, s, best)
         out = np.where(better, F32(k), out)
     return out
+
+
+def drainage_receivers(h, cell, sea_level=None):
+    """The ice's (and the drainage area's) D8 receivers on h: on the depression-filled surface (hydro.fill_depressions,
+    float64) each cell's steepest strictly lower neighbour, and across a flat (a filled lake, a dead-flat floor) the
+    equal neighbour one breadth-first step nearer the flat's outlet (hydro.flat_distance). Returns (receivers float32
+    as d8_receivers, the filled surface float64). No cell inside the grid is left without a way down: the tilted
+    routing surface (hydro.routing_surface, a few millimetres per step across a flat) can lift a flat above a cell
+    that drains into it by less than that, and a trunk glacier of 9e7 m3/yr ended in such a pit mid-valley, its
+    fill anchored there 450 m above the trough's floor."""
+    filled = HY.fill_depressions(np.asarray(h, np.float64), sea_level=sea_level)[0]
+    dist = HY.flat_distance(filled, sea_level=sea_level)
+    recv = d8_receivers(filled, cell)
+    for k in range(8):
+        fq, ok = T.neighbour(filled, k, OPEN)
+        dq, _ = T.neighbour(dist, k, OPEN, fill=-1.0)
+        take = ok & (recv < 0) & (dist > 0) & (fq == filled) & (dq == dist - 1)
+        recv = np.where(take, F32(k), recv)
+    return recv, filled
 
 
 def wpow(s, e):
@@ -243,32 +336,80 @@ def _seed_lookup(idx, seedA, seedB):
     return valid, seedA[cy, cx], seedB[cy, cx]
 
 
-def prof(rho, u, dtype=F32):
-    """The trough's cross-section above its floor, in units of H (jump_flood.glsl / u_carve.glsl prof), with the
-    profile uniforms u (profile_uniforms): 0 on the floor (rho <= uFloorFrac), ((rho - uFloorFrac) / (1 -
-    uFloorFrac))^uB up the wall to the lip (rho = r / W = 1), then the shoulder 1 + uShH ((rho - 1) / uShW)^uShB
-    (uShW 0: the wall's law continues), then the upper wall 1 + uShH + uOut (rho - 1 - uShW) to the trimline."""
-    rho = np.asarray(rho, dtype)
-    ff = dtype(u['uFloorFrac'])
+SEED_C_DEFAULT = (1.0, 1.0, 0.0, 0.0)
+
+
+def default_seed_c(shape):
+    """A seedC texture that leaves the carve as the uniforms make it: floor share x 1, fans x 1, no shoulder cut."""
+    out = np.zeros(tuple(shape[:2]) + (4,), F32)
+    out[...] = np.asarray(SEED_C_DEFAULT, F32)
+    return out
+
+
+def _seed_c(idx, seedA, seedC):
+    """seedC's texels for candidate indices idx (the defaults where seedC is None)."""
+    if seedC is None:
+        return np.broadcast_to(np.asarray(SEED_C_DEFAULT, F32), np.shape(idx) + (4,))
+    w = seedA.shape[1]
+    ci = np.where(np.asarray(idx) >= 0, idx, 0).astype(np.int64)
+    return seedC[ci // w, ci % w]
+
+
+def seed_floor(u, Cc, dtype=F32):
+    """(ff, rise) of seeds from the profile uniforms and their seedC texels: the floor's share of the half-width
+    clamp(uFloorFrac C.x, 0, 0.95) and the fans' rise uFloorRise C.y (the kernels' per-seed values)."""
+    Cc = np.asarray(Cc)
+    ff = np.clip(dtype(u['uFloorFrac']) * Cc[..., 0].astype(dtype), dtype(0), dtype(0.95)).astype(dtype)
+    return ff, (dtype(u['uFloorRise']) * Cc[..., 1].astype(dtype)).astype(dtype)
+
+
+def cliff(t, toe, lip, dtype=F32):
+    """The wall's rise over its run (jump_flood.glsl / u_carve.glsl cliff), 0 at t = 0 (the floor's edge) to 1 at
+    t = 1 (the lip): its slope ramps up linearly over the toe (t < toe: the apron), stands at its steepest c across
+    the core and falls to 0 over the lip (t > 1 - lip), c = 1 / (1 - (toe + lip) / 2). C1 at both ends."""
+    t = np.clip(np.asarray(t, dtype), dtype(0), dtype(1))
+    toe, lip = dtype(toe), dtype(lip)
+    c = dtype(1) / (dtype(1) - dtype(0.5) * (toe + lip))
     with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
-        inner = np.power(np.maximum(rho - ff, dtype(0)) / (dtype(1) - ff), dtype(u['uB'])).astype(dtype)
+        lower = c * t * t / (dtype(2) * np.maximum(toe, dtype(1e-6)))
+        u = dtype(1) - t
+        upper = dtype(1) - c * u * u / (dtype(2) * np.maximum(lip, dtype(1e-6)))
+        core = c * (t - dtype(0.5) * toe)
+    return np.where(t < toe, lower, np.where(t > dtype(1) - lip, upper, core)).astype(dtype)
+
+
+def prof(rho, u, dtype=F32, ff=None):
+    """The trough's cross-section above its floor, in units of H (jump_flood.glsl / u_carve.glsl prof), with the
+    profile uniforms u (profile_uniforms): 0 on the floor (rho <= ff), cliff((rho - ff) / (1 - ff)) up the wall to
+    the lip (rho = r / W = 1), then the shoulder 1 + uShH ((rho - 1) / uShW)^uShB, then the upper wall
+    1 + uShH + uOut (rho - 1 - uShW) to the trimline (uShW 0: the upper wall from the lip). ff: the floor's share
+    of the half-width, per seed (seed_floor) or None for uFloorFrac."""
+    rho = np.asarray(rho, dtype)
+    ff = dtype(u['uFloorFrac']) if ff is None else np.asarray(ff, dtype)
+    with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
+        inner = cliff((rho - ff) / (dtype(1) - ff), u['uToe'], u['uLip'], dtype)
+        out = dtype(u['uOut'])
         if float(u['uShW']) <= 0.0:
-            return inner
+            return np.where(rho <= 1, inner, dtype(1) + out * (rho - dtype(1))).astype(dtype)
         sw, sh = dtype(u['uShW']), dtype(u['uShH'])
         s = (np.maximum(rho - dtype(1), dtype(0)) / sw).astype(dtype)
         shoulder = (dtype(1) + sh * np.power(s, dtype(u['uShB']))).astype(dtype)
-        upper = (dtype(1) + sh + dtype(u['uOut']) * (rho - dtype(1) - sw)).astype(dtype)
+        upper = (dtype(1) + sh + out * (rho - dtype(1) - sw)).astype(dtype)
     return np.where(rho <= 1, inner, np.where(s <= 1, shoulder, upper)).astype(dtype)
 
 
-def fillz(rho, fill, H, u, dtype=F32):
-    """The valley fill's top above zf (the kernels' fillz): fill + uFloorRise H min(rho / uFloorFrac, 1)^2."""
-    t = np.minimum(np.asarray(rho, dtype) / dtype(max(float(u['uFloorFrac']), 1e-3)), dtype(1))
-    return (np.asarray(fill, dtype) + dtype(u['uFloorRise']) * np.asarray(H, dtype) * t * t).astype(dtype)
+def fillz(rho, fill, H, u, dtype=F32, ff=None, rise=None):
+    """The valley fill's top above zf (the kernels' fillz): fill + rise H min(rho / ff, 1)^2, ff and rise per seed
+    (seed_floor) or None for uFloorFrac and uFloorRise."""
+    ff = dtype(u['uFloorFrac']) if ff is None else np.asarray(ff, dtype)
+    rise = dtype(u['uFloorRise']) if rise is None else np.asarray(rise, dtype)
+    t = np.minimum(np.asarray(rho, dtype) / np.maximum(ff, dtype(1e-3)), dtype(1))
+    return (np.asarray(fill, dtype) + rise * np.asarray(H, dtype) * t * t).astype(dtype)
 
 
-def _metric(xp, yp, A, B, u, mode):
-    """jump_flood.glsl metric(): the target height (mode 0) or the distance (1), float32."""
+def _metric(xp, yp, A, B, u, mode, Cc=None):
+    """jump_flood.glsl metric(): the target height (mode 0) or the distance (1), float32. Cc: the seeds' seedC
+    texels (None: the defaults)."""
     with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
         ddx = (xp - A[..., 0]).astype(F32)
         ddy = (yp - A[..., 1]).astype(F32)
@@ -276,14 +417,15 @@ def _metric(xp, yp, A, B, u, mode):
         if mode == 1:
             return r
         rho = (r / B[..., 0]).astype(F32)
-        wall = A[..., 3] * prof(rho, u)
-        return (A[..., 2] + np.maximum(wall, fillz(rho, B[..., 2], A[..., 3], u))).astype(F32)
+        ff, rise = seed_floor(u, Cc if Cc is not None else np.asarray(SEED_C_DEFAULT, F32))
+        wall = A[..., 3] * prof(rho, u, ff=ff)
+        return (A[..., 2] + np.maximum(wall, fillz(rho, B[..., 2], A[..., 3], u, ff=ff, rise=rise))).astype(F32)
 
 
 @T.twin('jump_flood')
 def jump_flood(s, u):
     """kernels/jump_flood.glsl: one jump-flooding pass at step uStep (module doc, step 4)."""
-    cand, sA, sB = s['candT'], s['seedA'], s['seedB']
+    cand, sA, sB, sC = s['candT'], s['seedA'], s['seedB'], s.get('seedC')
     n0, n1 = cand.shape[:2]
     step, dx, mode = int(u['uStep']), F32(u['uDx']), int(u['uMetric'])
     jj, ii = np.mgrid[0:n0, 0:n1]
@@ -297,7 +439,7 @@ def jump_flood(s, u):
                 cs.append(np.where(ok, sh[..., c], F32(-1)))
     Cc = np.stack(cs, -1)
     valid, A, B = _seed_lookup(Cc, sA, sB)
-    m = np.where(valid, _metric(xp, yp, A, B, u, mode), np.inf)
+    m = np.where(valid, _metric(xp, yp, A, B, u, mode, _seed_c(Cc, sA, sC)), np.inf)
     return {'outC': _top4(Cc, m.astype(F32), np.where(valid, B[..., 1], np.nan))}
 
 
@@ -327,40 +469,53 @@ def _smoothstep(e0, e1, x):
 def u_carve(s, u):
     """kernels/u_carve.glsl: the U-carve (module doc, step 5)."""
     cand, sA, sB, st, cq, pin = s['candT'], s['seedA'], s['seedB'], s['st'], s['cirq'], s['pin']
+    sC = s.get('seedC')
     n0, n1 = cand.shape[:2]
     dx = F32(u['uDx'])
     join, trim = float(u['uJoin']), float(u['uTrim'])
-    ff = F32(u['uFloorFrac'])
     ffc = F32(min(max(float(u['uFloorFrac']), 0.0), 0.95))
     cf = F32(min(max(float(u['uCirqFloor']), 0.0), 0.95))
+    capj = F32(u['uCapJoin'])
     jj, ii = np.mgrid[0:n0, 0:n1]
     xp = (ii.astype(F32) + F32(0.5)) * dx
     yp = (jj.astype(F32) + F32(0.5)) * dx
     big = F32(1.0e30)
+    h, bed = st[..., 0], st[..., 1]
     Tf = np.full((n0, n1), big, F32)
     Tr = np.full((n0, n1), big, F32)
     ice_top = np.full((n0, n1), -big, F32)
     rw0 = np.full((n0, n1), F32(10.0), F32)
+    ffm = np.full((n0, n1), ffc, F32)
     mor = np.zeros((n0, n1), F32)
     cap = np.zeros((n0, n1), F32)
+    cut = np.zeros((n0, n1), F32)
     with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
         for c in range(4):
             valid, A, B = _seed_lookup(cand[..., c], sA, sB)
+            Cc = _seed_c(cand[..., c], sA, sC)
+            ff, rise = seed_floor(u, Cc)
             ddx = (xp - A[..., 0]).astype(F32)
             ddy = (yp - A[..., 1]).astype(F32)
             r = np.sqrt(ddx * ddx + ddy * ddy).astype(F32)
             rw = (r / B[..., 0]).astype(F32)
-            wall = (A[..., 3] * prof(rw, u)).astype(F32)
-            tf = (A[..., 2] + np.maximum(wall, fillz(rw, B[..., 2], A[..., 3], u))).astype(F32)
+            wall = (A[..., 3] * prof(rw, u, ff=ff)).astype(F32)
+            tf = (A[..., 2] + np.maximum(wall, fillz(rw, B[..., 2], A[..., 3], u, ff=ff, rise=rise))).astype(F32)
             tr = (A[..., 2] + wall).astype(F32)
             Tf = np.where(valid, smin(Tf, tf, join) if c else tf, Tf)
             Tr = np.where(valid, smin(Tr, tr, join) if c else tr, Tr)
-            # the cap beyond the lip (module doc, step 5): uCut H, easing to 0 at the trimline
+            # the cap beyond the lip (module doc, step 5): uCut H (1 - q)^2, 0 at the trimline
             tq = np.clip((rw - F32(1)) / F32(max(float(u['uCutW']), 1e-3)), F32(0), F32(1)).astype(F32)
-            cc = np.where(rw <= 1, big, F32(u['uCut']) * A[..., 3] * (F32(1) - tq * tq * (F32(3) - F32(2) * tq)))
+            cc = np.where(rw <= 1, big, F32(u['uCut']) * A[..., 3] * (F32(1) - tq) * (F32(1) - tq))
             cap = np.where(valid, np.maximum(cap, cc), cap).astype(F32)
+            # the shoulder cut (module doc, step 5): seedC.z H (1 - q)^2 beyond the lip, never below the lip
+            ez = Cc[..., 2].astype(F32)
+            sq = np.clip((rw - F32(1)) / F32(max(float(u['uShCutW']), 1e-3)), F32(0), F32(1)).astype(F32)
+            ec = (ez * A[..., 3] * (F32(1) - sq) * (F32(1) - sq)).astype(F32)
+            cc2 = np.maximum(smin(ec, (h - (A[..., 2] + A[..., 3])).astype(F32), capj), F32(0))
+            cut = np.where(valid & (ez > 0), np.maximum(cut, cc2), cut).astype(F32)
             if c == 0:
                 rw0 = np.where(valid, rw, rw0)
+                ffm = np.where(valid, ff, ffm).astype(F32)
                 ice_top = np.where(valid & (rw < F32(1) + F32(u['uShW'])),
                                    A[..., 2] + A[..., 3] * (F32(1) + F32(u['uShH'])), ice_top)
                 # the lateral moraine: a ridge along the trough at uMorAt of its half-width (B.w: its height)
@@ -379,28 +534,31 @@ def u_carve(s, u):
             lobes = (F32(1) + c2[2] * (F32(0.6) * np.sin(F32(3) * th + c2[0]) + F32(0.4) * np.sin(F32(5) * th + c2[1])))
             rho = (np.sqrt(ua * ua + uc * uc) / lobes).astype(F32)
             t = (np.maximum(rho - cf, F32(0)) / (F32(1) - cf)).astype(F32)
-            tc = (c0[2] + c0[3] * np.power(t, F32(u['uCirqExp'])).astype(F32)).astype(F32)
+            tc = (c0[2] + c0[3] * np.power(t, F32(u['uCirqExp'])).astype(F32)
+                  - F32(u['uCirqTilt']) * along).astype(F32)
             Tf = smin(Tf, tc, join)
             Tr = smin(Tr, tc, join)
             ice_top = np.where(rho < 1, np.maximum(ice_top, c0[2] + F32(0.35) * c0[3]), ice_top)
             cap = np.where(rho < 1, big, cap)
             rq = np.where(rho <= cf, rho * ffc / F32(max(float(cf), 1e-3)),
                           ffc + (rho - cf) * (F32(1) - ffc) / (F32(1) - cf)).astype(F32)
+            ffm = np.where(rq < rw0, ffc, ffm).astype(F32)
             rw0 = np.minimum(rw0, rq)
-    h, bed = st[..., 0], st[..., 1]
-    kc = np.minimum(F32(u['uCapJoin']), cap).astype(F32)
+    kc = np.minimum(capj, cap).astype(F32)
     hn = smax(smin(h, Tf, trim), (h - cap).astype(F32), kc)
+    hn = (hn + np.where(h - hn > 0, mor, F32(0))).astype(F32)
+    hn = (h - smax((h - hn).astype(F32), cut, np.minimum(capj, cut).astype(F32))).astype(F32)
     carved = (h - hn).astype(F32)
-    hn = (hn + np.where(carved > 0, mor, F32(0))).astype(F32)
     bn = np.minimum(smax(smin(bed, Tr, trim), (bed - cap).astype(F32), kc), hn).astype(F32)
     if u['uBound'] == PINNED:
         hn = T.pin_apply(hn, pin[..., 0], pin[..., 1])
         bn = np.minimum(bn, hn)
     ice = np.where(ice_top > -big, np.maximum(ice_top - hn, F32(0)), F32(0)).astype(F32)
-    floor = (F32(1) - _smoothstep(ff, ff + F32(0.12), rw0)).astype(F32)
-    trough = (F32(1) - _smoothstep(F32(0.85), F32(1.15), rw0)).astype(F32)
-    return {'outS': T.rgba(hn, bn, Tf, ice), 'outM': T.rgba(np.maximum(carved, F32(0)), floor * trough,
-                                                               trough * (F32(1) - floor), trough)}
+    floor = (F32(1) - np.clip((rw0 - ffm) / F32(0.12), F32(0), F32(1)) ** 2
+             * (F32(3) - F32(2) * np.clip((rw0 - ffm) / F32(0.12), F32(0), F32(1)))).astype(F32)
+    trough = (F32(1) - _smoothstep(F32(1.0), F32(1.3), rw0)).astype(F32)
+    return {'outS': T.rgba(hn, bn, rw0, ice), 'outM': T.rgba(np.maximum(carved, F32(0)), floor * trough,
+                                                                trough * (F32(1) - floor), trough)}
 
 
 # ============================================================================================ mass balance ===
@@ -559,10 +717,7 @@ def centrelines(h, Q, A, recv, level, main, params, base_elevation_m, seed=0):
     channel height zc, discharge q, f, W, H, d, zf, fill, moraine height, and Q_ref. None when no cell qualifies."""
     cell = float(level.cell)
     Wt = 0.5 * float(_p(params, 'trough_width_m'))
-    ff = float(_p(params, 'floor_frac'))
-    b = float(_p(params, 'u_exponent'))
-    Hvis = float(_p(params, 'trough_depth_m'))
-    Ht = Hvis / max(1.0 - ff ** b, 1e-3)
+    Ht = float(_p(params, 'trough_depth_m'))                  # prof(1) = 1: the wall from the floor to the lip
     dt = float(_p(params, 'overdeepen')) * Ht
     Q = np.asarray(Q, np.float64)
     chan = (Q > 0) & (np.asarray(A, np.float64) >= float(_p(params, 'channel_area_m2')))
@@ -587,16 +742,36 @@ def centrelines(h, Q, A, recv, level, main, params, base_elevation_m, seed=0):
     fs = smooth_along(f.ravel()[idx], st, sig)
     W = Wt * fs
     H = Ht * fs
-    d = dt * fs
+    # the depth the ice cuts below its river grows faster than the trough's size (overdeepen_exp): a glacier
+    # quarrying with ten times the discharge cuts far deeper, so trunks overdeepen and tributaries hang; with depth
+    # in proportion (exponent 1) every tributary sank an overdeepened basin that the fill levelled into a long flat
+    # oval behind its lip (the reviewer's stamped side troughs)
+    d = dt * np.power(np.maximum(fs, 0.0), float(_p(params, 'overdeepen_exp')))
     # the walls wander along the valley: W and H vary with world noise at the seeds (no two reaches alike, no
-    # extruded tube), after the smoothing so it is not smoothed away
+    # extruded tube), after the smoothing so it is not smoothed away; the fans and aprons at the walls' foot vary too
     wl, aw, ah = float(_p(params, 'wobble_m')), float(_p(params, 'wobble_w')), float(_p(params, 'wobble_h'))
+    from ..core import world_noise as N
     if wl > 0 and (aw > 0 or ah > 0):
-        from ..core import world_noise as N
         n1 = 3.0 * np.asarray(N.fbm(xy[:, 0], xy[:, 1], wl, 3, seed=int(seed) * 31 + 801), np.float64)
         n2 = 3.0 * np.asarray(N.fbm(xy[:, 0], xy[:, 1], wl, 3, seed=int(seed) * 31 + 802), np.float64)
         W = W * np.clip(1.0 + aw * n1, 0.6, 1.4)
         H = H * np.clip(1.0 + ah * n2, 0.6, 1.4)
+    rv, rl = float(_p(params, 'rise_noise')), float(_p(params, 'rise_scale_m'))
+    rise_f = np.ones(idx.size)
+    if rv > 0 and rl > 0:
+        n3 = 3.0 * np.asarray(N.fbm(xy[:, 0], xy[:, 1], rl, 3, seed=int(seed) * 31 + 803), np.float64)
+        rise_f = np.clip(1.0 + rv * n3, 0.1, 2.5)
+    # a glacier's trough grows in from its head: W, H and the overdeepening taper in over head_taper W of its
+    # stream (cut to full size at the first seed, a trough ended in a semicircular wall around it: the reviewer's
+    # side troughs with smoothly rounded, stamped outlines)
+    ht = float(_p(params, 'head_taper'))
+    if ht > 0:
+        tp = head_taper_factor(head_distance(st, xy[:, 0], xy[:, 1]), W, ht)
+        W, H, d = W * tp, H * tp, d * tp
+    # the shoulder cut (u_carve.glsl): beyond the lip the ice lowers the old ground by shoulder_cut H, so the lip
+    # itself stands that much deeper (else the cliff's top would stand as a rim over the lowered shoulder)
+    sc = float(_p(params, 'shoulder_cut'))
+    d = d + sc * H
     zf = zc - d
     # every stream's end meets the river below it: where the ice ends on the grid, and where it runs off the grid's
     # edge, which is base level (pinned at the river's height). (Exempting the edge left the trunk's fill ungraded
@@ -604,8 +779,44 @@ def centrelines(h, Q, A, recv, level, main, params, base_elevation_m, seed=0):
     fill = graded_fill(zf, np.zeros_like(zf), xy[:, 0], xy[:, 1], st, _p(params, 'floor_grade'), outlet=zc)
     ela_f = float(_p(params, 'ela_m')) - float(base_elevation_m)
     mor = np.where(zc < ela_f, float(_p(params, 'moraine_m')) * fs, 0.0)
+    # the seeds' own floor share (a tributary's floor narrower than the trunk's: (f)^floor_exp of floor_frac, so a
+    # hanging valley is a U, not a flat-floored slot), fans (rise_f) and shoulder cut, as seedC's factors
+    floor_f = np.power(np.clip(fs, 1e-6, 1.0), float(_p(params, 'floor_exp')))
     return dict(streams=st, idx=idx, x=xy[:, 0], y=xy[:, 1], zc=zc, q=Q.ravel()[idx], f=fs, W=W, H=H, d=d, zf=zf,
-                fill=fill, moraine=mor, Q_ref=qref, Ht=Ht, Wt=Wt, dt=dt)
+                fill=fill, moraine=mor, Q_ref=qref, Ht=Ht, Wt=Wt, dt=dt, floor_f=floor_f, rise_f=rise_f,
+                shoulder_cut=np.full(idx.size, sc))
+
+
+HEAD_TAPER_MIN = 0.1
+
+
+def head_taper_factor(dist, W, head_taper):
+    """The factor on a seed's W, H and overdeepening at `dist` metres below its stream's head: from HEAD_TAPER_MIN at
+    the head (a small trough of the same shape) to 1 at head_taper W, smoothstep. Never 0: a seed of no size has a
+    level target (zf + max(0 prof, fill): its floor and nothing rising from it), a plane at its channel's height over
+    the whole grid, which out-ranks the real troughs in the jump flood's lowest-target order and fills every cell's
+    four candidates with stream heads (on 11-13 the main tile got no trough at all, and a head's own cell was cut
+    4 km down to the lowest such plane). W and H scaled alike keep the trough's shape, so its target rises away from
+    the seed as steeply as the full trough's."""
+    q = np.clip(np.asarray(dist, np.float64) / np.maximum(float(head_taper) * np.asarray(W, np.float64), 1e-6),
+                0.0, 1.0)
+    return HEAD_TAPER_MIN + (1.0 - HEAD_TAPER_MIN) * q * q * (3.0 - 2.0 * q)
+
+
+def head_distance(st, x, y):
+    """Each seed's distance (m) up its main stem to its stream's head (0 at a head): the length of the chain of
+    main donors above it."""
+    main = st['main']
+    has = main >= 0
+    mi = np.maximum(main, 0)
+    seg = np.where(has, np.hypot(x - x[mi], y - y[mi]), 0.0)
+    dist = np.zeros(main.size)
+    for _ in range(main.size + 1):
+        new = np.where(has, dist[mi] + seg, 0.0)
+        if np.array_equal(new, dist):
+            break
+        dist = new
+    return dist
 
 
 def graded_fill(zf, fill0, x, y, st, grade, outlet=None, max_iter=100000):
@@ -670,7 +881,8 @@ def cirques(cl, params, base_elevation_m, level, h=None, up=None, seed=0):
         return np.zeros((0, 11))
     cell = float(level.cell)
     st = cl['streams']
-    ela_f = float(_p(params, 'ela_m')) - float(base_elevation_m)
+    # the cirques' ELA: the later glaciations' (cirque_ela_m), else the carving one's
+    ela_f = float(_p(params, 'cirque_ela_m') or _p(params, 'ela_m')) - float(base_elevation_m)
     band = float(_p(params, 'cirque_band_m'))
     heads = np.flatnonzero(st['head'] & (cl['zc'] >= ela_f - band))
     if not heads.size:
@@ -745,22 +957,28 @@ def cirques(cl, params, base_elevation_m, level, h=None, up=None, seed=0):
 # ============================================================================================ the textures ===
 
 def seed_textures(cl, level, shape=None):
-    """The jump flood's inputs on a level's grid: (cand0 (n, n, 4), seedA (n, n, 4), seedB (n, n, 4)) float32.
-    seedA: x, y (metres from the level's corner: the kernels' frame), zf, H; seedB: W, stream id, fill, moraine."""
+    """The jump flood's inputs on a level's grid: (cand0, seedA, seedB, seedC), each (n, n, 4) float32.
+    seedA: x, y (metres from the level's corner: the kernels' frame), zf, H; seedB: W, stream id, fill, moraine;
+    seedC: the floor share's factor, the fans' factor, the shoulder cut (a share of H), 0 (default_seed_c's
+    values where there is no seed)."""
     n0, n1 = shape or (level.n, level.n)
     cand = np.full((n0, n1, 4), -1.0, F32)
     A = np.zeros((n0, n1, 4), F32)
     B = np.zeros((n0, n1, 4), F32)
     B[..., 0] = 1.0
+    Cs = default_seed_c((n0, n1))
     if cl is None:
-        return cand, A, B
+        return cand, A, B, Cs
     idx = cl['idx']
     jj, ii = np.divmod(idx, n1)
     cand[jj, ii, 0] = idx.astype(F32)
     A[jj, ii] = np.stack([cl['x'] - level.x0, cl['y'] - level.y0, cl['zf'], cl['H']], 1).astype(F32)
     B[jj, ii] = np.stack([np.maximum(cl['W'], 1e-3), cl['streams']['sid'].astype(np.float64), cl['fill'],
                           cl['moraine']], 1).astype(F32)
-    return cand, A, B
+    ones = np.ones(idx.size)
+    Cs[jj, ii] = np.stack([cl.get('floor_f', ones), cl.get('rise_f', ones), cl.get('shoulder_cut', 0.0 * ones),
+                           0.0 * ones], 1).astype(F32)
+    return cand, A, B, Cs
 
 
 def cirque_texture(cq, level):
@@ -791,66 +1009,74 @@ def jfa_steps(reach_cells, n):
 
 
 def profile_uniforms(params):
-    """The cross-section's uniforms (jump_flood.glsl, u_carve.glsl): uB, uFloorFrac, uFloorRise, uShW, uShH, uShB."""
-    return {'uB': float(_p(params, 'u_exponent')), 'uFloorFrac': float(_p(params, 'floor_frac')),
+    """The cross-section's uniforms (jump_flood.glsl, u_carve.glsl): uFloorFrac (floor_frac()), uToe, uLip,
+    uFloorRise, uShW, uShH, uShB, uOut."""
+    toe = min(max(float(_p(params, 'wall_toe')), 0.0), 1.0)
+    lip = min(max(float(_p(params, 'wall_lip')), 0.0), 1.0 - toe)
+    return {'uFloorFrac': floor_frac(params), 'uToe': toe, 'uLip': lip,
             'uFloorRise': float(_p(params, 'floor_rise')), 'uShW': float(_p(params, 'shoulder_width')),
             'uShH': float(_p(params, 'shoulder_rise')), 'uShB': float(_p(params, 'shoulder_exp')),
             'uOut': float(_p(params, 'upper_wall'))}
 
 
 def carve_uniforms(params):
-    """profile_uniforms() plus u_carve.glsl's cap beyond the lip: uCut, uCutW, uCapJoin."""
+    """profile_uniforms() plus u_carve.glsl's cap beyond the lip (uCut, uCutW, uCapJoin) and the shoulder cut's
+    reach (uShCutW)."""
     return dict(profile_uniforms(params), uCut=float(_p(params, 'cut')), uCutW=float(_p(params, 'cut_width')),
-                uCapJoin=float(_p(params, 'cap_join_m')))
+                uCapJoin=float(_p(params, 'cap_join_m')), uShCutW=float(_p(params, 'shoulder_cut_width')))
 
 
-def jump_flood_run(dev, cand0, seedA, seedB, cell, prof_u, steps, metric=0):
-    """Every jump-flooding pass on a device; returns the final candidates' texture and the seed textures. prof_u:
-    profile_uniforms()."""
+def jump_flood_run(dev, cand0, seedA, seedB, cell, prof_u, steps, metric=0, seedC=None):
+    """Every jump-flooding pass on a device; returns the final candidates' texture and the seed textures (A, B).
+    prof_u: profile_uniforms(); seedC: the per-seed floor share and fans (seed_textures; None: default_seed_c)."""
     sa, sb = dev.texture(seedA), dev.texture(seedB)
+    sc = dev.texture(np.asarray(seedC if seedC is not None else default_seed_c(cand0.shape), F32))
     src, dst = dev.texture(cand0), dev.empty(cand0.shape[:2], 4)
     for k in steps:
-        dev.run('jump_flood', {'candT': src, 'seedA': sa, 'seedB': sb}, {'outC': dst},
+        dev.run('jump_flood', {'candT': src, 'seedA': sa, 'seedB': sb, 'seedC': sc}, {'outC': dst},
                 dict(prof_u, uStep=int(k), uDx=float(cell), uMetric=int(metric)))
         src, dst = dst, src
     return src, sa, sb
 
 
-def _metric64(r, A, B, prof_u, metric):
+def _metric64(r, A, B, prof_u, metric, Cc=None):
     if metric == 1:
         return r
     rho = r / B[..., 0]
-    return A[..., 2] + np.maximum(A[..., 3] * prof(rho, prof_u, np.float64),
-                                  fillz(rho, B[..., 2], A[..., 3], prof_u, np.float64))
+    ff, rise = seed_floor(prof_u, Cc if Cc is not None else np.asarray(SEED_C_DEFAULT), np.float64)
+    return A[..., 2] + np.maximum(A[..., 3] * prof(rho, prof_u, np.float64, ff=ff),
+                                  fillz(rho, B[..., 2], A[..., 3], prof_u, np.float64, ff=ff, rise=rise))
 
 
-def brute_force(cand_seeds, seedA, seedB, cell, prof_u, metric=0, chunk=2048, per_stream=False):
+def brute_force(cand_seeds, seedA, seedB, cell, prof_u, metric=0, chunk=2048, per_stream=False, seedC=None):
     """The exact lower envelope over EVERY seed (the jump flood's oracle, numpy float64): the best metric per cell
     (n, n); with per_stream, the best metric of each stream at each cell, sorted, as (n, n, 4) (inf where fewer
-    streams). cand_seeds: the seed cells' flat indices. prof_u: profile_uniforms()."""
+    streams). cand_seeds: the seed cells' flat indices. prof_u: profile_uniforms(); seedC as jump_flood_run."""
     n0, n1 = seedA.shape[:2]
     idx = np.asarray(cand_seeds, np.int64)
     jj, ii = np.divmod(idx, n1)
     A = seedA[jj, ii].astype(np.float64)
     B = seedB[jj, ii].astype(np.float64)
+    Cs = (seedC[jj, ii] if seedC is not None else default_seed_c((idx.size, 1))[:, 0]).astype(np.float64)
     gy, gx = np.mgrid[0:n0, 0:n1]
     px = ((gx + 0.5) * cell).ravel()
     py = ((gy + 0.5) * cell).ravel()
     if not per_stream:
         best = np.full(px.size, np.inf)
         for s in range(0, idx.size, chunk):
-            a, bb = A[s:s + chunk], B[s:s + chunk]
+            a, bb, cc = A[s:s + chunk], B[s:s + chunk], Cs[s:s + chunk]
             r = np.hypot(px[:, None] - a[None, :, 0], py[:, None] - a[None, :, 1])
-            best = np.minimum(best, _metric64(r, a[None], bb[None], prof_u, metric).min(axis=1))
+            best = np.minimum(best, _metric64(r, a[None], bb[None], prof_u, metric, cc[None]).min(axis=1))
         return best.reshape(n0, n1)
     sids = np.unique(B[:, 1])
     per = np.full((px.size, sids.size), np.inf)
     for k, sid in enumerate(sids):
         sel = B[:, 1] == sid
-        a, bb = A[sel], B[sel]
+        a, bb, cs = A[sel], B[sel], Cs[sel]
         for s in range(0, a.shape[0], chunk):
             r = np.hypot(px[:, None] - a[None, s:s + chunk, 0], py[:, None] - a[None, s:s + chunk, 1])
-            m = _metric64(r, a[None, s:s + chunk], bb[None, s:s + chunk], prof_u, metric).min(axis=1)
+            m = _metric64(r, a[None, s:s + chunk], bb[None, s:s + chunk], prof_u, metric,
+                          cs[None, s:s + chunk]).min(axis=1)
             per[:, k] = np.minimum(per[:, k], m)
     per.sort(axis=1)
     out = np.full((px.size, 4), np.inf)
@@ -858,7 +1084,7 @@ def brute_force(cand_seeds, seedA, seedB, cell, prof_u, metric=0, chunk=2048, pe
     return out.reshape(n0, n1, 4)
 
 
-def decode_best(cand, seedA, seedB, cell, prof_u, metric=0, slot=None):
+def decode_best(cand, seedA, seedB, cell, prof_u, metric=0, slot=None, seedC=None):
     """The metric of each cell's candidates (inf where none): what the jump flood found. (n, n) for the first
     candidate, or (n, n, 4) for all four with slot='all'."""
     n0, n1 = cand.shape[:2]
@@ -870,8 +1096,9 @@ def decode_best(cand, seedA, seedB, cell, prof_u, metric=0, slot=None):
         valid, A, B = _seed_lookup(cand[..., c], seedA, seedB)
         A = A.astype(np.float64)
         B = B.astype(np.float64)
+        Cc = np.asarray(_seed_c(cand[..., c], seedA, seedC), np.float64)
         r = np.hypot(xp - A[..., 0], yp - A[..., 1])
-        out.append(np.where(valid, _metric64(r, A, B, prof_u, metric), np.inf))
+        out.append(np.where(valid, _metric64(r, A, B, prof_u, metric, Cc), np.inf))
     return np.stack(out, -1) if slot == 'all' else out[0]
 
 
@@ -912,7 +1139,160 @@ def uplift_shape(spec, level, seed, dev):
     return C.uplift(spec, x, y, seed, level=lvl)
 
 
-MASK_FIELDS = ('ice', 'trough', 'trough_floor', 'trough_wall', 'carve')
+# the pre-glacial trunk river of a horseshoe (its 'trunk' entry): where its head lies up-valley of the centre (a
+# share of crest_offset_m), the channel's width, its wander across the valley (a smooth noise of wiggle_m standard
+# deviation at wiggle_wavelength_m), and its bed: bench_m above a line falling `grade` per metre down-valley to
+# outlet_m where the course leaves the grid (the glacial stage's floor_grade: the trough's fill grades from there
+# along that line, so bench_m is the height the trough's walls and the hanging valleys stand above its floor),
+# bench_m easing to 0 over the last taper_m before the edge (the trough's mouth), and steepening into the valley head
+# by head_rise_m over about head_length_m. (A mouth inside the tile, the old floor falling 870 m over 3-6 km there,
+# steepened the drainage toward it so that the range grew two parallel valleys beside the pinned river, each of
+# which became a trough: 11-13, seeds 1 and 2)
+TRUNK = dict(head=0.85, width_m=60.0, wiggle_m=300.0, wiggle_wavelength_m=6000.0, grade=0.012, bench_m=550.0,
+             taper_m=8000.0, head_rise_m=500.0, head_length_m=1000.0, outlet_m=0.0, step_m=20.0)
+
+
+def trunk_course(spec, window, seed):
+    """The trunk river of a horseshoe spec with a 'trunk' entry: (points (N, 2) world metres from its head down the
+    valley past the window's edge, s (N,) arc length, bed (N,) the channel's height there, relative h). window: the
+    coarsest level's (x0, y0, side): the bed reaches outlet_m where the course leaves it. None without a trunk."""
+    from .rivers import arc_length, _smooth_noise_1d
+    s_ = dict(HORSESHOE, **spec)
+    if not s_.get('trunk'):
+        return None
+    tr = dict(TRUNK, **(s_['trunk'] if isinstance(s_['trunk'], dict) else {}))
+    cx, cy = (float(v) for v in s_['centre'])
+    az = math.radians(float(s_['azimuth_deg']))
+    dn = (math.sin(az), math.cos(az))
+    ac = (math.cos(az), -math.sin(az))
+    x0, y0, side = (float(v) for v in window)
+    # the distance from the centre down-valley to the window's edge
+    t_edge = min([((x0 + side - cx) if dn[0] > 0 else (x0 - cx)) / dn[0] if abs(dn[0]) > 1e-9 else math.inf,
+                  ((y0 + side - cy) if dn[1] > 0 else (y0 - cy)) / dn[1] if abs(dn[1]) > 1e-9 else math.inf])
+    head = float(tr['head']) * float(s_['crest_offset_m'])
+    u = np.arange(0.0, head + t_edge + 0.1 * side, float(tr['step_m']))
+    lat = float(tr['wiggle_m']) * _smooth_noise_1d(u, float(tr['wiggle_wavelength_m']), int(seed) * 13 + 77)
+    px = cx - head * dn[0] + u * dn[0] + lat * ac[0]
+    py = cy - head * dn[1] + u * dn[1] + lat * ac[1]
+    pts = np.stack([px, py], 1)
+    s = arc_length(pts)
+    u_edge = head + t_edge
+    left = np.maximum(u_edge - u, 0.0)
+    q = np.clip(left / max(float(tr['taper_m']), 1.0), 0.0, 1.0)
+    bed = (float(tr['outlet_m']) + float(tr['grade']) * left + float(tr['bench_m']) * q * q * (3.0 - 2.0 * q)
+           + float(tr['head_rise_m']) * np.exp(-u / max(float(tr['head_length_m']), 1.0)))
+    return dict(points=pts, s=s, bed=bed, width_m=float(tr['width_m']), spec=tr)
+
+
+def trunk_pins(course, level, base_pins):
+    """base_pins (FL.edge_pins' dict) with the trunk's channel cells (rivers.channel: within max(width_m, 1.5 cells)
+    / 2 of the course) held at its bed: a base-level line the fluvial stage builds the valley around."""
+    from .rivers import channel
+    m, s, _ = channel(level, course['points'], course['width_m'])
+    out = dict(base_pins)
+    w = np.array(base_pins['pin_w'], F32, copy=True)
+    ph = np.array(base_pins['pin_h'], F32, copy=True)
+    if m.any():
+        w[m] = 1.0
+        ph[m] = np.interp(s[m], course['s'], course['bed']).astype(F32)
+    out['pin_w'] = w
+    out['pin_h'] = ph
+    return out, m
+
+
+MASK_FIELDS = ('ice', 'trough', 'trough_floor', 'trough_wall', 'carve', 'valley_fill', 'trough_rho')
+MASK_START = {'trough_rho': 10.0}           # far from any trough until the carve writes it
+# the trough's cross-section per cell, from the best seed there (profile_fields): what every finer level evaluates
+# the walls at its own cells from (sharpen_walls)
+PROFILE_FIELDS = ('trough_zf', 'trough_H', 'trough_ff', 'trough_fill', 'trough_rise', 'trough_sharp')
+
+
+def profile_fields(cand, seedA, seedB, seedC, rho, cell, prof_u, join_m):
+    """The trough's cross-section at every cell from the jump flood's candidates (numpy): dict of (n, n) float32
+    trough_zf, trough_H, trough_ff (the floor's share of the half-width), trough_fill, trough_rise (the fans' rise,
+    a share of H) of the best seed, and trough_sharp, where a finer level may re-evaluate the walls from them: 1
+    where a seed's trough decides the cell, fading to 0 where the second-best stream's target comes within join_m
+    of the best's (confluences, where the smooth minimum joins two troughs) and 0 where a cirque bowl decides it
+    (rho, u_carve's best rho, then falls under the seed's own). The finer levels inherit these bilinearly: rho is a
+    distance over W, linear across a wall, so a level a quarter of the cell size places the cliff within a fraction
+    of its own cell."""
+    n0, n1 = cand.shape[:2]
+    jj, ii = np.mgrid[0:n0, 0:n1]
+    xp = (ii + 0.5) * float(cell)
+    yp = (jj + 0.5) * float(cell)
+    out, T = {}, []
+    for c in range(2):
+        valid, A, B = _seed_lookup(cand[..., c], seedA, seedB)
+        A, B = A.astype(np.float64), B.astype(np.float64)
+        Cc = np.asarray(_seed_c(cand[..., c], seedA, seedC), np.float64)
+        r = np.hypot(xp - A[..., 0], yp - A[..., 1])
+        T.append(np.where(valid, _metric64(r, A, B, prof_u, 0, Cc), np.inf))
+        if c == 0:
+            ff, rise = seed_floor(prof_u, Cc, np.float64)
+            own = r / np.maximum(B[..., 0], 1e-6)
+            keep = valid.astype(np.float64)
+            out = dict(trough_zf=A[..., 2] * keep, trough_H=A[..., 3] * keep, trough_ff=ff * keep,
+                       trough_fill=B[..., 2] * keep, trough_rise=rise * keep)
+            cirque = np.asarray(rho, np.float64) < own - 1e-4
+            first = valid & ~cirque
+    with np.errstate(invalid='ignore'):
+        gap = np.where(np.isfinite(T[1]), (T[1] - T[0]) / max(float(join_m), 1e-6), 1.0)
+    out['trough_sharp'] = np.where(first, np.clip(gap, 0.0, 1.0), 0.0)
+    return {k: np.asarray(v, F32) for k, v in out.items()}
+
+
+def trough_target(rho, zf, H, ff, fill, rise, prof_u, rock=False):
+    """The carve's target from per-cell cross-sections (profile_fields), numpy float64: zf + max(H prof, fillz), or
+    the bedrock zf + H prof with rock (u_carve.glsl's T and T_rock for one seed)."""
+    wall = np.asarray(H, np.float64) * prof(rho, prof_u, np.float64, ff=ff)
+    if rock:
+        return np.asarray(zf, np.float64) + wall
+    return np.asarray(zf, np.float64) + np.maximum(wall, fillz(rho, fill, H, prof_u, np.float64, ff=ff, rise=rise))
+
+
+def sharpen_walls(fields, level, params, pin_w=None):
+    """A finer level's walls at its own resolution: the detail its upsampling lost, put back. The level starts as its
+    parent upsampled (Catmull-Rom), so its walls are the parent's cliffs smoothed over two of the parent's cells; the
+    trough's cross-section (profile_fields, inherited) gives the target T at the level's own cells and at its
+    parent's (the 2 x 2 block means of the inherited values: rho is linear, so they are the parent's), and
+    h += w (T_own - upsample(T_parent)) (the bedrock likewise with T_rock): the toe, the cliff's core and its lip as
+    sharp as the level resolves, and everything else the level inherited (talus, couloirs, the walls' failures, the
+    fill) kept. w: trough_sharp x the wall zone (out to just past the lip, rho 1.0-1.15) x where the ice carved (the
+    carve field, 0-5 m) x off the pinned border band. Returns the largest change (m). numpy."""
+    if any(k not in fields for k in PROFILE_FIELDS + ('trough_rho',)) or np.ndim(fields['trough_rho']) != 2:
+        return 0.0
+    n0, n1 = np.shape(fields['h'])
+    if n0 % 2 or n1 % 2:
+        return 0.0
+    pu = profile_uniforms(params)
+    f = {k: np.asarray(fields[k], np.float64) for k in PROFILE_FIELDS + ('trough_rho',)}
+    arg = ('trough_rho', 'trough_zf', 'trough_H', 'trough_ff', 'trough_fill', 'trough_rise')
+
+    def coarse(a):
+        return a.reshape(n0 // 2, 2, n1 // 2, 2).mean(axis=(1, 3))
+
+    fp = {k: coarse(f[k]) for k in arg}
+    out = {}
+    for rock in (False, True):
+        t_own = trough_target(*(f[k] for k in arg), pu, rock=rock)
+        t_par = Gd.crop_upsample2(trough_target(*(fp[k] for k in arg), pu, rock=rock), 0, 0, n1 // 2, 'catmull',
+                                  mj=n0 // 2).astype(np.float64)
+        out[rock] = t_own - t_par
+    rho = f['trough_rho']
+    t = np.clip((rho - 1.0) / 0.15, 0.0, 1.0)
+    w = np.clip(f['trough_sharp'], 0.0, 1.0) * (1.0 - t * t * (3.0 - 2.0 * t))
+    if 'carve' in fields:
+        c = np.clip(np.asarray(fields['carve'], np.float64) / 5.0, 0.0, 1.0)
+        w = w * c * c * (3.0 - 2.0 * c)
+    if pin_w is not None:
+        w = w * (1.0 - np.clip(np.asarray(pin_w, np.float64), 0.0, 1.0))
+    h = np.asarray(fields['h'], np.float64)
+    dh = w * out[False]
+    fields['h'] = (h + dh).astype(F32)
+    if 'bed' in fields:
+        bed = np.asarray(fields['bed'], np.float64) + w * out[True]
+        fields['bed'] = np.minimum(bed, h + dh).astype(F32)
+    return float(np.abs(dh).max())
 
 
 def op_valley_uplift(fields, level, params, seed=0, ctx=None):
@@ -925,10 +1305,16 @@ def op_valley_uplift(fields, level, params, seed=0, ctx=None):
     s = int(seed) + int(params.get('seed', 0))
     for k in MASK_FIELDS:
         if k not in fields:
-            fields[k] = 0.0
+            fields[k] = MASK_START.get(k, 0.0)
     if ctx.role != 'grow':
         return fields
     u = uplift_shape(spec, level, s, dev)
+    course = None
+    if spec.get('kind') == 'horseshoe' and spec.get('trunk'):
+        # the trunk river (the coarsest level's window decides where its bed reaches outlet_m; the pre-passes share
+        # it, so every pass pins the same river)
+        top = ctx.plan[0] if ctx.plan else level
+        course = trunk_course(spec, (top.x0, top.y0, top.side), s)
     sh = ctx.shared.setdefault('valley_uplift', {})
     if 'peak' not in sh:
         sh.update(peak=float(np.max(u)), spec=spec, seed=s, U=float(params.get('U_m_per_yr', 3e-3)))
@@ -940,6 +1326,15 @@ def op_valley_uplift(fields, level, params, seed=0, ctx=None):
         h0 = float(params.get('start_m', 600.0)) * u / max(sh['peak'], 1e-9) * ((1.0 - r) + r * n)
         fields['h'] = h0.astype(F32)
         fields['bed'] = fields['h']
+    if course is not None:
+        # the trunk river as base level on this pass
+        base = ctx.pins if ctx.pins is not None else FL.edge_pins(level.n, np.asarray(fields['h'], F32),
+                                                                  ctx.sea_level)
+        ctx.pins, m = trunk_pins(course, level, base)
+        fields['trunk'] = m.astype(F32)
+        if ctx.prepass in (None, 0) and ctx.fresh:
+            ctx.log(f"[terrain.glacial] trunk river {course['s'][-1] / 1000:.1f} km from the valley head, bed "
+                    f"{course['bed'][0]:.0f} .. {course['bed'][-1]:.0f} m, {int(m.sum())} cells on {level.n}^2")
     return fields
 
 
@@ -1030,9 +1425,9 @@ def carve_level(fields, level, params, seed, ctx, dev):
     base = float(ctx.base_elevation_m or 0.0)
     h = np.asarray(fields['h'], np.float64)
     bed = np.asarray(fields['bed'], np.float64) if 'bed' in fields else h.copy()
-    # 1. the ice discharge and the D8 drainage area on the lake-filled, tilted surface
-    surf = HY.routing_surface(HY.fill_depressions(h, sea_level=ctx.sea_level)[0], sea_level=ctx.sea_level)
-    recv = d8_receivers(surf, cell)
+    # 1. the ice discharge and the D8 drainage area on the lake-filled surface, flats crossed toward their outlets
+    recv, filled = drainage_receivers(h, cell, ctx.sea_level)
+    surf = filled.astype(F32)
     b = mass_balance(h, base, params)
     if ctx.sea_level is not None:
         b = np.where(h <= ctx.sea_level, -float(_p(params, 'b_abl_m')), b).astype(F32)
@@ -1058,49 +1453,63 @@ def carve_level(fields, level, params, seed, ctx, dev):
         rec.update(seconds=round(time.perf_counter() - t0, 2), carved=False)
         return rec
     # 4. the jump flood
-    cand0, sA, sB = seed_textures(cl, level)
+    cand0, sA, sB, sC = seed_textures(cl, level)
     pu = profile_uniforms(params)
+    cu = carve_uniforms(params)
     wmax = float(np.max(cl['W'])) if cl is not None else 0.0
-    # the jump reaches past the shoulders: the target can lie under the surface out to the trimline
-    steps = jfa_steps((2.0 + 2.0 * pu['uShW']) * wmax / cell, n)
-    cT, saT, sbT = jump_flood_run(dev, cand0, sA, sB, cell, pu, steps)
+    # the jump reaches past the shoulders: the target can lie under the surface out to the trimline, and the cap
+    # and the shoulder cut reach their own widths beyond the lip
+    reach = 1.0 + max(1.0 + 2.0 * pu['uShW'], cu['uCutW'], cu['uShCutW'])
+    steps = jfa_steps(reach * wmax / cell, n)
+    cT, saT, sbT = jump_flood_run(dev, cand0, sA, sB, cell, pu, steps, seedC=sC)
     t2 = time.perf_counter()
-    # 5. the U-carve
-    pins = ctx.pins or FL.edge_pins(n, np.asarray(fields['h'], F32), ctx.sea_level)
+    # 5. the U-carve. Only the grid's edge (and the sea) is held: the trunk river's pins (valley_uplift) belong to
+    # the river the ice replaces; held, they would stand its channel up as a ridge on the trough's floor
+    pins = FL.edge_pins(n, np.asarray(fields['h'], F32), ctx.sea_level) if ctx.role == 'grow' or ctx.pins is None \
+        else ctx.pins
     st = dev.texture(T.rgba(h, bed, None, None))
     cqT = dev.texture(cirque_texture(cq, level))
     pinT = dev.texture(T.rgba(pins['pin_w'], pins['pin_h'], None, None))
+    scT = dev.texture(sC)
     oS, oM = dev.empty((n, n), 4), dev.empty((n, n), 4)
-    dev.run('u_carve', {'candT': cT, 'seedA': saT, 'seedB': sbT, 'st': st, 'cirq': cqT, 'pin': pinT},
+    dev.run('u_carve', {'candT': cT, 'seedA': saT, 'seedB': sbT, 'seedC': scT, 'st': st, 'cirq': cqT, 'pin': pinT},
             {'outS': oS, 'outM': oM},
-            dict(carve_uniforms(params), uDx=cell, uJoin=float(_p(params, 'join_m')), uTrim=float(_p(params, 'trim_m')),
+            dict(cu, uDx=cell, uJoin=float(_p(params, 'join_m')), uTrim=float(_p(params, 'trim_m')),
                  uMorAt=moraine_at(params), uMorW=float(_p(params, 'moraine_width')), uNCirq=int(len(cq)),
                  uCirqExp=float(_p(params, 'cirque_exp')), uCirqFloor=float(_p(params, 'cirque_floor_frac')),
-                 uCirqOpen=float(_p(params, 'cirque_open')), uBound=PINNED))
+                 uCirqOpen=float(_p(params, 'cirque_open')),
+                 uCirqTilt=math.tan(math.radians(float(_p(params, 'cirque_tilt_deg')))), uBound=PINNED))
     S = dev.read(oS)
     M = dev.read(oM)
     h_new, bed_new = S[..., 0].astype(np.float64), S[..., 1].astype(np.float64)
     carved = M[..., 0].astype(np.float64)
-    # the layers: the carve takes the loose cover first, then rock; the fill on the floor is deposit
+    # the layers: the carve takes the loose cover first, then rock. The fill on the floor is the old valley fill
+    # (valley_fill, m: under today's meadows, part of h - bed), not `deposit`, which the masks and palettes read as
+    # today's river gravel and fans (the whole floor came out gravel); the rock the ice took counts as wear (fresh
+    # rock) only where no fill buries it (else the rock mask painted the flat floor as bare rock)
     loose_old = np.maximum(h - bed, 0.0)
     loose_new = np.maximum(h_new - bed_new, 0.0)
     took = np.maximum(h - h_new, 0.0)
-    wear = np.asarray(fields.get('wear', np.zeros((n, n))), np.float64) + np.maximum(took - loose_old, 0.0)
+    bare = 1.0 - np.clip(loose_new / 2.0, 0.0, 1.0)
+    wear = np.asarray(fields.get('wear', np.zeros((n, n))), np.float64) + np.maximum(took - loose_old, 0.0) * bare
     dep_old = np.asarray(fields.get('deposit', np.zeros((n, n))), np.float64)
     tal_old = np.asarray(fields.get('talus', np.zeros((n, n))), np.float64)
     hit = carved > 1e-3
-    deposit = np.where(hit, loose_new, dep_old)
-    talus = np.where(hit, 0.0, tal_old)
+    fill_old = np.asarray(fields.get('valley_fill', np.zeros((n, n))), np.float64)
     fields['h'] = h_new
     fields['bed'] = bed_new
     fields['wear'] = wear
-    fields['deposit'] = deposit
-    fields['talus'] = talus
+    fields['deposit'] = np.where(hit, 0.0, dep_old)
+    fields['talus'] = np.where(hit, 0.0, tal_old)
+    fields['valley_fill'] = np.where(hit, loose_new, fill_old).astype(F32)
     fields['ice'] = S[..., 3]
+    fields['trough_rho'] = S[..., 2]
     fields['trough_floor'] = M[..., 1]
     fields['trough_wall'] = M[..., 2]
     fields['trough'] = M[..., 3]
     fields['carve'] = M[..., 0]
+    # the cross-section per cell, for the finer levels' walls (sharpen_walls)
+    fields.update(profile_fields(dev.read(cT), sA, sB, sC, S[..., 2], cell, pu, float(_p(params, 'join_m'))))
     # 6. the fresh walls: steep in the trough and the cirques, the range's own threshold outside
     wall = np.clip(np.asarray(M[..., 2], np.float64) * 1.5, 0.0, 1.0)
     sc_range = np.asarray(fields['Sc'], np.float64) if 'Sc' in fields else \
@@ -1117,9 +1526,10 @@ def carve_level(fields, level, params, seed, ctx, dev):
 
 
 def refine_level(fields, level, params, seed, ctx, dev):
-    """A finer level (module doc): the walls it inherits keep their steep threshold, and fail at it at this level's
-    scale where the rock is weak. The fluvial refinement (where='1 - trough') left the level's U, K, Sc and G at 0 in
-    the trough: K and G are restored to the level's own outside it, Sc to the walls' threshold."""
+    """A finer level (module doc): the walls it inherits are sharpened to this level's resolution (sharpen_walls),
+    keep their steep threshold, and fail at it at this level's scale where the rock is weak. The fluvial
+    refinement (the recipe's where) left the level's U, K, Sc and G at 0 in the trough: K and G are restored to the
+    level's own outside it, Sc to the walls' threshold."""
     n = level.n
     if 'trough' not in fields or float(np.max(fields['trough'])) <= 0.0:
         return dict(level=str(level), refined=False)
@@ -1135,6 +1545,12 @@ def refine_level(fields, level, params, seed, ctx, dev):
         sc_range = np.where(tr > 0.02, sc_out, np.asarray(fields['Sc'], np.float64))
     else:
         sc_range = np.full((n, n), math.tan(math.radians(35.0)))
+    pins = ctx.pins or FL.edge_pins(n, np.asarray(fields['h'], F32), ctx.sea_level)
+    # the walls at this level's resolution (the upsampling smoothed the parent's cliffs over two of its cells), first:
+    # the thresholds below read the surface's own slopes (a hero level's never stands under them)
+    sharp = sharpen_walls(fields, level, params, pins['pin_w'])
+    if sharp > 0.0:
+        ctx.evolved = True
     h_in = np.asarray(fields['h'], np.float64)
     rf = float(_p(params, 'rock_flutes'))
     range_flutes = np.zeros((n, n))
@@ -1155,13 +1571,59 @@ def refine_level(fields, level, params, seed, ctx, dev):
         Sc = base * np.exp(wall * wall_flutes(h_in, level, params, seed, dev) + (1.0 - wall) * range_flutes)
     else:
         Sc = sc_range * np.exp(range_flutes) * (1.0 - wall) + _wall_sc(level, params, seed, dev, h=h_in) * wall
-    pins = ctx.pins or FL.edge_pins(n, np.asarray(fields['h'], F32), ctx.sea_level)
     iters = int(_p(params, 'refine_wall_iters'))
     if iters > 0:
         _walls(dev, fields, level, Sc, pins, iters, float(_p(params, 'wall_rate')))
         ctx.evolved = True
     fields['Sc'] = Sc.astype(F32)
-    return dict(level=str(level), refined=True, wall_frac=float((wall > 0.5).mean()))
+    rim = 0.0
+    lo_m = float(_p(params, 'lip_open_m'))
+    if lo_m > 0 and 'trough_rho' in fields and np.ndim(fields['trough_rho']) == 2:
+        h1, drop = lip_open(np.asarray(fields['h'], np.float64), np.asarray(fields['trough_rho'], np.float64),
+                            level.cell, lo_m)
+        if drop.max() > 0:
+            # the pins hold the border band to the parent: the opening never moves a pinned cell
+            free = 1.0 - np.clip(np.asarray(pins['pin_w'], np.float64), 0.0, 1.0)
+            h1 = np.asarray(fields['h'], np.float64) - free * drop
+            fields['h'] = h1.astype(F32)
+            if 'bed' in fields:
+                fields['bed'] = np.minimum(np.asarray(fields['bed'], np.float64), h1).astype(F32)
+            rim = float((free * drop).max())
+            ctx.evolved = True
+    return dict(level=str(level), refined=True, wall_frac=float((wall > 0.5).mean()), lip_rim_max_m=round(rim, 1),
+                sharpened_max_m=round(sharp, 1))
+
+
+def _filter1d(a, r, axis, op):
+    """op (np.minimum or np.maximum) over a window of 2r + 1 cells along an axis, the edges repeated."""
+    pad = [(0, 0), (0, 0)]
+    pad[axis] = (r, r)
+    p = np.pad(a, pad, mode='edge')
+    n = a.shape[axis]
+    out = np.take(p, np.arange(0, n), axis=axis)
+    for k in range(1, 2 * r + 1):
+        out = op(out, np.take(p, np.arange(k, k + n), axis=axis))
+    return out
+
+
+def lip_open(h, rho, cell, radius_m, lo=0.9, hi=1.5):
+    """The lip band's rims removed: (h', the drop). On the band from a cliff's rounded top out past its lip (rho =
+    r / W from lo to hi, its edges eased over 0.05 and 0.15), h is lowered to its morphological opening with a square of
+    half-width radius_m (the largest of the minima over the squares that hold the cell): a ridge narrower than the
+    square standing on the band - the lip strip the recipe keeps the fluvial refinement off (where='1 - trough')
+    left standing while the ground behind it was incised - comes down to the ground around it, so the shoulder's
+    streams fall over the lip instead of ending against it in a basin the end stage fills with gravel; the cliff
+    top, a shoulder rising behind it and every slope are their own opening and stay. numpy."""
+    r = max(1, int(round(float(radius_m) / float(cell))))
+    t0 = np.clip((rho - lo) / 0.05, 0.0, 1.0)
+    t1 = np.clip((hi - rho) / 0.15, 0.0, 1.0)
+    band = t0 * t0 * (3.0 - 2.0 * t0) * t1 * t1 * (3.0 - 2.0 * t1)
+    if not (band > 0).any():
+        return h, np.zeros_like(h)
+    er = _filter1d(_filter1d(h, r, 0, np.minimum), r, 1, np.minimum)
+    op = _filter1d(_filter1d(er, r, 0, np.maximum), r, 1, np.maximum)
+    drop = band * np.maximum(h - op, 0.0)
+    return h - drop, drop
 
 
 def op_glacial(fields, level, params, seed=0, ctx=None):

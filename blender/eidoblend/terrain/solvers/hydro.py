@@ -486,11 +486,78 @@ def flat_distance(surface, wrap=NOWRAP, sea_level=None):
 def routing_surface(filled, wrap=NOWRAP, sea_level=None):
     """The surface the drainage area is routed on: the filled surface, tilted across every flat (lakes, filled
     pits, dead-flat ground) by eps per step of its breadth-first distance from the outlet, eps a few float32 steps
-    at the surface's height, so a GPU pass in float32 still sees the way down. float32."""
+    at the surface's height, so a GPU pass in float32 still sees the way down. float32.
+
+    The surface is built along the receiver tree (flow_receivers: the steepest lower neighbour, or across a flat
+    toward its drain), outlets first: every cell at least eps above its receiver. On a flat that is the breadth-first
+    tilt. It also lifts the cells just over a flat's level at its margin (a basin wall a millimetre above the fill
+    line, on gentle ground: a meadow's 0.5 m cells fall 1 mm a cell): tilting the flat alone left them below it,
+    pits of the tilted surface where the routed water stopped (_descend)."""
     filled = np.asarray(filled, np.float64)
     top = float(np.max(np.abs(filled))) if filled.size else 0.0
     eps = max(2e-3, 4.0 * float(np.spacing(np.float32(max(top, 1.0)))))
-    return (filled + eps * flat_distance(filled, wrap, sea_level)).astype(F32)
+    rec = flow_receivers(filled, wrap, sea_level)
+    return _descend(filled, rec, eps).astype(F32)
+
+
+def path_steps(rec):
+    """The number of receiver steps from every cell to its outlet (list ranking by pointer jumping), flat int64."""
+    rec = np.asarray(rec)
+    n = rec.size
+    has = rec >= 0
+    ptr = np.where(has, rec, np.arange(n))
+    d = has.astype(np.int64)
+    for _ in range(64):
+        nd = d + d[ptr]
+        nptr = ptr[ptr]
+        if np.array_equal(nptr, ptr):
+            break
+        d, ptr = nd, nptr
+    return d
+
+
+def _descend(filled, rec, eps):
+    """The filled surface raised along the receiver tree so every cell stands at least eps above its receiver:
+    rs = max(filled, rs(receiver) + eps), cells taken in order of their steps to the outlet."""
+    f = np.asarray(filled, np.float64).ravel()
+    rs = f.copy()
+    steps = path_steps(rec)
+    order = np.argsort(steps, kind='stable')
+    bounds = np.searchsorted(steps[order], np.arange(int(steps.max()) + 2))
+    for k in range(1, int(steps.max()) + 1):
+        idx = order[bounds[k]:bounds[k + 1]]
+        if idx.size:
+            rs[idx] = np.maximum(f[idx], rs[rec[idx]] + eps)
+    return rs.reshape(np.shape(filled))
+
+
+def flow_receivers(filled, wrap=NOWRAP, sea_level=None):
+    """Every cell's receiver on a filled (depression-free) surface, as a flat index (-1: an outlet - an open edge
+    cell or the sea - with no lower neighbour): the steepest strictly lower neighbour (D8), or on a flat the equal
+    neighbour one breadth-first step nearer the flat's drain (flat_distance). Every path ends at an outlet, however
+    gentle the ground (the tilted routing surface's eps can exceed a meadow's slopes)."""
+    from . import fluvial as _FL
+    W = np.asarray(filled, np.float64)
+    ny, nx = W.shape
+    rec = _FL.d8_receivers(W)
+    dist = flat_distance(W, wrap, sea_level).ravel()
+    need = np.nonzero(rec < 0)[0]
+    if need.size:
+        w = W.ravel()
+        j, i = np.divmod(need, nx)
+        best = np.full(need.size, -1, np.int64)
+        for di, dj in T.OFF:
+            jq, iq = j + dj, i + di
+            if wrap[0]:
+                iq = iq % nx
+            if wrap[1]:
+                jq = jq % ny
+            ok = (jq >= 0) & (jq < ny) & (iq >= 0) & (iq < nx)
+            q = np.where(ok, jq * nx + iq, 0)
+            good = (ok & (best < 0) & (dist[need] > 0) & (w[q] == w[need]) & (dist[q] == dist[need] - 1))
+            best = np.where(good, q, best)
+        rec[need] = best
+    return rec
 
 
 def lakes(fields, level, threshold_m, mode='lake', parent=None, sea_level=None, wrap=NOWRAP, band=0, seam_hold=2,

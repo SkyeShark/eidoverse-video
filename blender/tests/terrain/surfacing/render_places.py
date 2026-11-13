@@ -85,8 +85,10 @@ def gpu_utilisation():
     with it."""
     try:
         import subprocess
+        # no console window for the child on Windows (a Blender without a console would open one on Skye's screen)
+        flags = 0x08000000 if os.name == 'nt' else 0                        # CREATE_NO_WINDOW
         out = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
-                             capture_output=True, text=True, timeout=10).stdout.strip().splitlines()
+                             capture_output=True, text=True, timeout=10, creationflags=flags).stdout.strip().splitlines()
         return int(out[0]) if out else None
     except Exception:
         return None
@@ -120,6 +122,9 @@ def render_one(name, view, args, cache_root):
     t0 = time.time()
     exposure = RR.EXPOSURE if args.clay else args.exposure
     sc = RR.new_scene(tuple(rec_ref['resolution']), args.samples, exposure)
+    # EEVEE's anisotropic filtering is a preference, 2x after the rig's read_factory_settings: ground seen at a
+    # grazing angle smears along the view at 2x
+    bpy.context.preferences.system.anisotropic_filter = f'FILTER_{args.aniso}'
     st = PL.stack(name, view)
     rm = PL.ring_mesh(st, mesh_res=args.mesh_res)
     obj = PL.make_mesh(st, rm, 'terrain')
@@ -131,7 +136,10 @@ def render_one(name, view, args, cache_root):
     else:
         if args.debug:
             pal['options']['debug'] = args.debug
-        S.apply_surface(obj, pal)
+        # the fixture's mesh is not make_terrain's (no eido_terrain record): its base elevation (heights are metres
+        # above it; altitude = height + base) comes from the stack's mask parameters, the snow and tree lines from
+        # the place (palettes.for_place put them in the palette's constants)
+        S.apply_surface(obj, pal, constants=dict(base_elevation_m=float(st['params'].base_elevation_m)))
         tag_pal = pal['name'] + (f'_debug_{args.debug}' if args.debug else '')
     add_water(st, curvature=(view == 'eye'))
     rocks = None
@@ -183,7 +191,8 @@ def render_one(name, view, args, cache_root):
                 second_render_s=round(t_second, 2), clay_render_s=(round(t_clay, 2) if t_clay else None),
                 gpu_busy_percent=gpu_busy, triangles=int(rm.triangle_count),
                 rocks=(rocks['count'] if rocks else 0), camera=[round(v, 2) for v in pos],
-                levels=[(l['role'], l['cell']) for l in st['levels']], samples=args.samples, exposure=exposure)
+                levels=[(l['role'], l['cell']) for l in st['levels']], samples=args.samples, exposure=exposure,
+                anisotropic_filter=args.aniso)
 
 
 def main(argv=None):
@@ -205,6 +214,8 @@ def main(argv=None):
     ap.add_argument('--mesh-res', type=int, default=1000,
                     help="vertices per side a level is drawn at (1000: stride 1, like the 8 m clay; package 5's "
                          "default 512: stride 2 on 1000-cell levels, about 3 M triangles)")
+    ap.add_argument('--aniso', type=int, default=16, choices=(0, 2, 4, 8, 16),
+                    help="EEVEE's anisotropic filtering (a preference: 2 after read_factory_settings)")
     ap.add_argument('--tag', default='')
     ap.add_argument('--sky-cache', default=None)
     a = ap.parse_args(argv)

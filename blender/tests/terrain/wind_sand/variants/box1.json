@@ -1,0 +1,15 @@
+[
+ ["a_base", {"iters": 24000}],
+ ["b_g100_s25", {"iters": 24000, "set": {"gust": 100, "spread_deg": 25}}],
+ ["c_g100_s40", {"iters": 24000, "set": {"gust": 100, "spread_deg": 40}}],
+ ["d_sand55_g100_s25", {"iters": 24000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 25}}],
+ ["e_prock025_g100_s25", {"iters": 24000, "set": {"p_rock": 0.25, "gust": 100, "spread_deg": 25}}],
+ ["f_pre_g100_s25", {"iters": 12000, "set": {"gust": 100, "spread_deg": 25, "grow_prepass": [[128, 30000], [256, 20000]]}}],
+ ["g_pre_sand55_g100_s25", {"iters": 12000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 25, "grow_prepass": [[128, 30000], [256, 20000]]}}],
+ ["h_pre_long_g100_s25", {"iters": 12000, "set": {"gust": 100, "spread_deg": 25, "grow_prepass": [[128, 80000], [256, 30000]]}}],
+ ["i_pre_avg_g100_s25", {"iters": 12000, "set": {"gust": 100, "spread_deg": 25, "grow_prepass": [[128, 30000], [256, 20000]], "average_iters": 400, "smooth_cells": 0.5}}],
+ ["j_pre_lowboost", {"iters": 12000, "set": {"gust": 100, "spread_deg": 25, "grow_prepass": [[128, 30000], [256, 20000]], "lift_boost": 4.0, "p_lift": 0.06}}],
+ ["k_pre_upwind", {"iters": 12000, "set": {"gust": 100, "spread_deg": 25, "grow_prepass": [[128, 30000], [256, 20000]], "rise": "upwind", "speed_ref_deg": 10.0}}],
+ ["l_pre_5winds", {"iters": 12000, "set": {"gust": 100, "spread_deg": 20, "grow_prepass": [[128, 30000], [256, 20000]], "winds": [[28, 1.0], [95, 0.45], [148, 0.75], [205, 0.4], [268, 0.55]]}}],
+ ["m_pre_sand55_lowboost_5w", {"iters": 12000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 20, "grow_prepass": [[128, 30000], [256, 20000]], "lift_boost": 4.0, "p_lift": 0.06, "winds": [[28, 1.0], [95, 0.45], [148, 0.75], [205, 0.4], [268, 0.55]]}}]
+]

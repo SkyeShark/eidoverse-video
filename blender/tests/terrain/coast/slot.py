@@ -4,6 +4,8 @@ busy (60 s apart, up to 60 minutes). From anywhere, in system Python:
     python blender/tests/terrain/coast/slot.py <script.py> [args...]      # log: out/coast/logs/<script>.log
 
 The slots are the main checkout's heavy.sh, heavy2.sh, heavy3.sh (exit 75: not started). Prints the log's tail.
+Every child runs without a console window (CREATE_NO_WINDOW on Windows: a bash started from a windowless Python
+otherwise opens a blank console over the desktop).
 """
 import os
 import subprocess
@@ -14,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAIN = os.environ.get('EIDO_MAIN', 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01')
 SLOTS = ('heavy.sh', 'heavy2.sh', 'heavy3.sh')
 LOGS = os.path.normpath(os.path.join(HERE, '..', 'out', 'coast', 'logs'))
+NO_WINDOW = {'creationflags': 0x08000000} if os.name == 'nt' else {}
 
 
 def main():
@@ -31,7 +34,8 @@ def main():
         for s in SLOTS:
             cmd = ['bash', f'work/claude_body/work/tmp/{s}', '12', 'bash', 'run_blender.sh', script] + args
             with open(log_path, 'w', encoding='utf-8') as log:
-                rc = subprocess.call(cmd, cwd=MAIN, env=env, stdout=log, stderr=subprocess.STDOUT)
+                rc = subprocess.call(cmd, cwd=MAIN, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                     stdin=subprocess.DEVNULL, **NO_WINDOW)
             if rc != 75:
                 break
         else:

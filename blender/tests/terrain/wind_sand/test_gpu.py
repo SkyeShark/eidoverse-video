@@ -61,40 +61,54 @@ def fields(seed=0):
     return np.stack([bed, sand], -1).astype(np.float32)
 
 
+def steering(seed=10, steer_deg=25.0, turn_deg=10.0):
+    """A Steering on the test grid: three smooth random fields of about unit variance, clipped at +-2."""
+    n = np.stack([np.clip(3.0 * T.random_field(SHAPE, -1.0, 1.0, seed=seed + k, smooth=6), -2.0, 2.0)
+                  for k in range(3)])
+    return A.Steering(n, steer_deg, turn_deg)
+
+
 def test_parity():
+    """Each kernel in one dispatch against its twin, with the wind unturned and steered (the `wind` input: each
+    cell's own turn, and the transport's box of hops around every turn)."""
     st = fields(3)
     pw, ph = T.pin_pattern(SHAPE, seed=4, band=4, value=(0.0, 6.0))
     pins = np.stack([pw, ph], -1).astype(np.float32)
     aval = G.kernel(source=A.AVALANCHE_SRC, name='dune_avalanche')
+    stg = steering()
     worst = {}
     exact_plan, exact_sand, n_cases = 0, 0, 0
     for mode_name, mode in T.BOUNDARY_CASES:
         for d, rise in ((0.0, 'upwind'), (37.0, 'sand'), (225.0, 'sand'), (301.0, 'upwind')):
-            p = A.params_for({'p_lift': 0.3, 'long_factor': 2.0, 'speedup': 0.6, 'lift_boost': 4.0, 'rise': rise,
-                              'speed_from_m': 0.5, 'speed_ref_m': 4.0})
-            u = A.uniforms_for(p, 4.0, d, 7, 11, mode)
-            r = T.parity('dune_shadow', {'st': st}, u['dune_shadow'])
-            worst[f'dune_shadow {mode_name} {d:g}'] = r['worst']
-            sh = A.twin_shadow({'st': st}, u['dune_shadow'])['outShadow']
-            r = T.parity('dune_activate', {'st': st, 'shadow': sh}, u['dune_activate'])
-            worst[f'dune_activate {mode_name} {d:g}'] = r['worst']
-            # the integer hash: the GPU's plan records equal the twin's exactly
-            k = G.kernel('dune_activate')
-            outp = G.empty(SHAPE, channels=4)
-            G.run(k, None, samplers={'st': G.texture(st), 'shadow': G.texture(sh)}, images={'outPlan': outp},
-                  uniforms=u['dune_activate'])
-            gp = G.read(outp)
-            tp = A.twin_activate({'st': st, 'shadow': sh}, u['dune_activate'])['outPlan']
-            exact_plan += int(np.array_equal(gp, tp))
-            r = T.parity('dune_transport', {'st': st, 'plan': tp}, u['dune_transport'])
-            worst[f'dune_transport {mode_name} {d:g}'] = r['worst']
-            kt = G.kernel('dune_transport')
-            outs = G.empty(SHAPE, fmt='RG32F')
-            G.run(kt, None, samplers={'st': G.texture(st), 'plan': G.texture(tp)}, images={'outSt': outs},
-                  uniforms=u['dune_transport'])
-            exact_sand += int(np.array_equal(G.read(outs), A.twin_transport({'st': st, 'plan': tp},
-                                                                             u['dune_transport'])['outSt']))
-            n_cases += 1
+            for steered in (False, True):
+                wind, turn = stg.for_wind(d) if steered else (A.unturned(SHAPE), (0.0, 0.0))
+                tag = f'{mode_name} {d:g}' + (' steered' if steered else '')
+                p = A.params_for({'p_lift': 0.3, 'long_factor': 2.0, 'speedup': 0.6, 'lift_boost': 4.0,
+                                  'rise': rise, 'speed_from_m': 0.5, 'speed_ref_m': 4.0,
+                                  'speed_pow': 3 if d == 225.0 else (2 if d == 37.0 else 1)})
+                u = A.uniforms_for(p, 4.0, d, 7, 11, mode, turn)
+                r = T.parity('dune_shadow', {'st': st, 'wind': wind}, u['dune_shadow'])
+                worst[f'dune_shadow {tag}'] = r['worst']
+                sh = A.twin_shadow({'st': st, 'wind': wind}, u['dune_shadow'])['outShadow']
+                r = T.parity('dune_activate', {'st': st, 'shadow': sh, 'wind': wind}, u['dune_activate'])
+                worst[f'dune_activate {tag}'] = r['worst']
+                # the integer hash: the GPU's plan records equal the twin's exactly
+                k = G.kernel('dune_activate')
+                outp = G.empty(SHAPE, channels=4)
+                G.run(k, None, samplers={'st': G.texture(st), 'shadow': G.texture(sh), 'wind': G.texture(wind)},
+                      images={'outPlan': outp}, uniforms=u['dune_activate'])
+                gp = G.read(outp)
+                tp = A.twin_activate({'st': st, 'shadow': sh, 'wind': wind}, u['dune_activate'])['outPlan']
+                exact_plan += int(np.array_equal(gp, tp))
+                r = T.parity('dune_transport', {'st': st, 'plan': tp}, u['dune_transport'])
+                worst[f'dune_transport {tag}'] = r['worst']
+                kt = G.kernel('dune_transport')
+                outs = G.empty(SHAPE, fmt='RG32F')
+                G.run(kt, None, samplers={'st': G.texture(st), 'plan': G.texture(tp)}, images={'outSt': outs},
+                      uniforms=u['dune_transport'])
+                exact_sand += int(np.array_equal(G.read(outs), A.twin_transport({'st': st, 'plan': tp},
+                                                                                 u['dune_transport'])['outSt']))
+                n_cases += 1
         ua = A.uniforms_for(A.params_for({'creep': 0.01}), 4.0, 0.0, 0, 0, mode)['dune_avalanche']
         r = T.parity(aval, {'st': st, 'pins': pins if mode == T.BOUND_PINNED else np.zeros_like(pins)}, ua)
         worst[f'dune_avalanche {mode_name}'] = r['worst']
@@ -110,25 +124,28 @@ def test_parity():
 def test_many_iterations():
     st = fields(5)
     p = {'hop_cells': 3.0}
-    g = A.SandSim(st[..., 0], st[..., 1], 4.0, T.BOUND_PERIODIC, p, seed=9)
-    t = A.TwinSim(st[..., 0], st[..., 1], 4.0, T.BOUND_PERIODIC, p, seed=9)
-    first, worst = None, 0.0
-    sched = A.schedule(A.KINDS['star']['winds'], 40, 10, 8.0, 9)
-    it = 0
-    for d, b in sched:
-        for _ in range(b):
-            if it >= 40:
-                break
-            g.step(d)
-            t.step(d)
-            gs = g.read()[1]
-            diff = float(np.abs(gs - t.st[..., 1]).max())
-            worst = max(worst, diff)
-            if diff > 0 and first is None:
-                first = it
-            it += 1
-    check('gpu_and_twin_loops_agree_40_iterations', worst <= 1e-4,
-          {'max |gpu - twin| sand, m': worst, 'first iteration that differs': first, 'iterations': it})
+    res = {}
+    for name, stg in (('unturned', None), ('steered', steering(seed=30))):
+        g = A.SandSim(st[..., 0], st[..., 1], 4.0, T.BOUND_PERIODIC, p, seed=9, steer=stg)
+        t = A.TwinSim(st[..., 0], st[..., 1], 4.0, T.BOUND_PERIODIC, p, seed=9, steer=stg)
+        first, worst = None, 0.0
+        sched = A.schedule(A.KINDS['star']['winds'], 40, 10, 8.0, 9, gust=4, spread_deg=20.0, with_wind=True)
+        it = 0
+        for d, b, w in sched:
+            for _ in range(b):
+                if it >= 40:
+                    break
+                g.step(d, w)
+                t.step(d, w)
+                gs = g.read()[1]
+                diff = float(np.abs(gs - t.st[..., 1]).max())
+                worst = max(worst, diff)
+                if diff > 0 and first is None:
+                    first = it
+                it += 1
+        res[name] = {'max |gpu - twin| sand, m': worst, 'first iteration that differs': first, 'iterations': it}
+    check('gpu_and_twin_loops_agree_40_iterations', max(r['max |gpu - twin| sand, m'] for r in res.values()) <= 1e-4,
+          res)
 
 
 def test_mass_gpu():
@@ -217,8 +234,11 @@ def test_families():
         'wind, lee faces only)': tr['sand_cover'] >= 0.6 and tr_axis <= 30.0 and tr['lee_lee_share'] >= 0.8,
         'linear: ridges along the resultant (coherence >= 0.5, crests within 20 deg of north-south, 2 lee '
         'directions)': li['coherence'] >= 0.5 and lin_axis <= 20.0 and li['lee_peaks'] == 2,
+        # (over the cycle or at its end: since the gusts, the steering and the speed-up's power spread a star
+        # field's faces over every direction, the weakest wind's family can stand out only in the field it leaves)
         'star: no ridge direction (coherence < 0.3, against linear\'s >= 0.5) and slip faces in 3 or more '
-        'directions over a wind cycle': st['coherence'] < 0.3 and st['cycle_lee_peaks'] >= 3,
+        'directions over a wind cycle or at its end':
+            st['coherence'] < 0.3 and max(st['cycle_lee_peaks'], st['lee_peaks']) >= 3,
     }
     check('four_regimes_four_families', all(fam.values()),
           {'families': fam,

@@ -6,7 +6,8 @@
 
 job.json: {"out_dir": ..., "items": [{"tag", "recipe", "seed", "params": {...}, "size": m (default the recipe's
 reference extent), "resolution": 1024, "focus": [x, y] or null, "hero_cell": 0.5, "stage_params": {op: {...}}
-(merged into that op's stages after the knobs resolve: for calibration runs), "cache": false}]}
+(merged into that op's stages after the knobs resolve: for calibration runs), "defaults": {...} (over the recipe's
+defaults: grow_levels, lakes, context), "cache": false}]}
 
 Per item, in out_dir: <tag>.npz (the main level: h, cell, frame, water, context_h / context_cell: the judge's
 field format), <tag>_levels.npz (every level: L<i>_<field>, and L<i>_window = x0, y0, side, cell, n) and
@@ -49,6 +50,11 @@ def ref_extent(recipe):
 
 def one(item, out_dir):
     R = RG.get(item['recipe'])
+    if item.get('defaults'):
+        # a calibration run's recipe defaults (grow_levels, lakes, context ...) over the registered recipe's
+        import copy
+        R = copy.copy(R)
+        R.defaults = dict(R.defaults, **item['defaults'])
     values, stages = R.resolve(item.get('params') or {})
     for op, extra in (item.get('stage_params') or {}).items():
         for s in stages:

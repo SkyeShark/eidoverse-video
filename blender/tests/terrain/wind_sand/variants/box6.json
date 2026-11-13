@@ -1,0 +1,9 @@
+[
+ ["a_kind", {"iters": 24000, "set": {}}],
+ ["b_spread40_jit30", {"iters": 24000, "set": {"spread_deg": 40.0, "jitter_deg": 30.0}}],
+ ["c_5winds_sp30", {"iters": 24000, "set": {"winds": [[28, 1.0], [95, 0.5], [148, 0.75], [205, 0.45], [268, 0.55]], "spread_deg": 30.0}}],
+ ["d_6winds_sp25", {"iters": 24000, "set": {"winds": [[28, 1.0], [88, 0.4], [148, 0.75], [208, 0.4], [268, 0.55], [328, 0.4]], "spread_deg": 25.0}}],
+ ["e_jit45", {"iters": 24000, "set": {"jitter_deg": 45.0}}],
+ ["f_blk500_sp40", {"iters": 24000, "set": {"block": 500, "spread_deg": 40.0, "jitter_deg": 20.0}}],
+ ["g_5winds_sp40_jit30", {"iters": 24000, "set": {"winds": [[28, 1.0], [95, 0.5], [148, 0.75], [205, 0.45], [268, 0.55]], "spread_deg": 40.0, "jitter_deg": 30.0}}]
+]

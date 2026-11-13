@@ -87,8 +87,11 @@ def _image_mean_linear(img):
     return rgb.mean(0)
 
 
-def _recolour(mat, target_linear):
-    """Rescale a model material's base colour from its own mean to target_linear (channel by channel), on a copy."""
+def _recolour(mat, target_linear, contrast=0.55):
+    """Rescale a model material's base colour from its own mean to target_linear (channel by channel), on a copy:
+    target * (1 + contrast (scan / mean - 1)), as the ground layers' colour rescale does. With contrast under 1 a dark
+    scan with a few bright specks (rock_09: mean 0.09, most of it under half that) becomes the target's stone with its
+    detail, not a near-black rock with clipped highlights (what a plain rescale made of it on the red desert soil)."""
     if mat is None or not mat.use_nodes:
         return mat
     nt = mat.node_tree
@@ -106,13 +109,46 @@ def _recolour(mat, target_linear):
         mean = _image_mean_linear(node.image)
     if mean is None:
         return mat
-    scale = np.clip(np.asarray(target_linear) / np.maximum(mean, 1e-4), 0.0, 8.0)
-    vm = nt.nodes.new('ShaderNodeVectorMath')
-    vm.operation = 'MULTIPLY'
-    vm.inputs[1].default_value = tuple(float(v) for v in scale)
-    vm.location = (bsdf.location.x - 220, bsdf.location.y)
-    nt.links.new(src, vm.inputs[0])
-    nt.links.new(vm.outputs[0], sock)
+    c = float(contrast)
+    rel = nt.nodes.new('ShaderNodeVectorMath')           # scan / mean
+    rel.operation = 'MULTIPLY'
+    rel.inputs[1].default_value = tuple(float(v) for v in 1.0 / np.maximum(mean, 1e-4))
+    mad = nt.nodes.new('ShaderNodeVectorMath')           # contrast (scan / mean) + (1 - contrast)
+    mad.operation = 'MULTIPLY_ADD'
+    mad.inputs[1].default_value = (c, c, c)
+    mad.inputs[2].default_value = (1.0 - c, 1.0 - c, 1.0 - c)
+    out = nt.nodes.new('ShaderNodeVectorMath')           # x target
+    out.operation = 'MULTIPLY'
+    out.inputs[1].default_value = tuple(float(v) for v in np.clip(target_linear, 0.0, 0.95))
+    for k, n in enumerate((rel, mad, out)):
+        n.location = (bsdf.location.x - 660 + 220 * k, bsdf.location.y)
+    nt.links.new(src, rel.inputs[0])
+    nt.links.new(rel.outputs[0], mad.inputs[0])
+    nt.links.new(mad.outputs[0], out.inputs[0])
+    nt.links.new(out.outputs[0], sock)
+    return mat
+
+
+def _matte(mat, rough_min=0.6):
+    """Hold a model material's roughness at rough_min or more: the small rock scans pack a low roughness (rock_07's
+    averages 0.30), so under make_sky they mirrored the blue sky and read as black glossy pebbles on dry ground."""
+    if mat is None or not mat.use_nodes:
+        return mat
+    nt = mat.node_tree
+    bsdf = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
+    if bsdf is None:
+        return mat
+    sock = bsdf.inputs['Roughness']
+    if not sock.links:
+        sock.default_value = max(float(sock.default_value), float(rough_min))
+        return mat
+    src = sock.links[0].from_socket
+    mx = nt.nodes.new('ShaderNodeMath')
+    mx.operation = 'MAXIMUM'
+    mx.inputs[1].default_value = float(rough_min)
+    mx.location = (bsdf.location.x - 220, bsdf.location.y - 260)
+    nt.links.new(src, mx.inputs[0])
+    nt.links.new(mx.outputs[0], sock)
     return mat
 
 
@@ -174,7 +210,7 @@ def load_models(model_ids, colour=None, res='1k', log=print):
                     if slot.material is not None:
                         m = slot.material.copy()
                         m.name = f'{slot.material.name}_{key}'
-                        slot.material = _recolour(m, target)
+                        slot.material = _matte(_recolour(m, target))
             for uc in list(o.users_collection):
                 uc.objects.unlink(o)
             coll.objects.link(o)

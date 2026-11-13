@@ -5,11 +5,14 @@
        uMetric 0: the trough's target height at this cell, zf + max(H prof(r / W), fillz(r / W)): a lower
                   envelope, so a trunk's trough wins over a nearer tributary's, and a step in a floor becomes a riegel
        uMetric 1: the distance r (the test against a brute-force twin)
-   prof(rho) = 0 on the floor (rho <= uFloorFrac), ((rho - uFloorFrac) / (1 - uFloorFrac))^b up the wall to the lip
-   (rho = 1), then the shoulder 1 + uShH ((rho - 1) / uShW)^uShB (a bench uShW W wide rising uShH H to its outer
-   edge; uShW 0: the wall's law continues), then the upper wall up to the trimline, rising uOut H per W (so the
-   carve ends at the trimline instead of planing the ridges beyond). fillz(rho) = fill + uFloorRise H
-   min(rho / uFloorFrac, 1)^2: the valley fill's top, rising gently from the river to the foot of the walls.
+   prof(rho) = 0 on the floor (rho <= ff), cliff((rho - ff) / (1 - ff)) up the wall to the lip (rho = 1: a cliff
+   whose slope ramps up over its toe, uToe of its run, stands at its steepest across the core and eases off over its
+   lip, uLip), then the shoulder 1 + uShH ((rho - 1) / uShW)^uShB (a bench uShW W wide rising uShH H to its outer
+   edge; uShW 0: none), then the upper wall up to the trimline, rising uOut H per W (so the carve ends at the
+   trimline instead of planing the ridges beyond). ff = uFloorFrac seedC.x, the seed's own floor share (a
+   tributary's floor is narrower than the trunk's: solvers/glacial.py centrelines). fillz(rho) = fill + rise H
+   min(rho / ff, 1)^2, rise = uFloorRise seedC.y: the valley fill's top, rising from the river to the foot of the
+   walls by the seed's own fans and aprons (they differ along the valley).
    One entry per stream, so the U-carve's smooth minimum joins different troughs and never a stream's neighbouring
    seeds (which would sink every floor by a quarter of the join width). Steps uStep = 2^k ... 2, 1, then 1 again
    (solvers/glacial.py jfa_steps). Twin: solvers/glacial.py jump_flood. */
@@ -17,10 +20,13 @@
 //! sampler seedA       per seed cell: x, y (m from the grid's corner), zf (the floor under the fill), H (wall, m)
 //                      (cell (i, j)'s centre is ((i + .5) dx, (j + .5) dx); H runs from the floor to the lip)
 //! sampler seedB       per seed cell: W (half-width, m), stream id, fill (m above zf), moraine (m)
+//! sampler seedC       per seed cell: the floor share's factor (x uFloorFrac), the fans' factor (x uFloorRise),
+//                      the shoulder cut (a share of H: u_carve.glsl), unused
 //! image   outC rgba32f
 //! uniform int uStep   the jump, cells
 //! uniform float uDx   the cell, metres
-//! uniform float uB    the wall's exponent b
+//! uniform float uToe  the share of the wall's run over which its slope ramps up from the floor
+//! uniform float uLip  the share over which it eases off into the shoulder
 //! uniform float uFloorFrac  the floor's share of the half-width (the wall starts there)
 //! uniform float uFloorRise  the fill's rise from the river to the foot of the walls, a share of H
 //! uniform float uShW  the shoulder's width, a share of the half-width W (0: no shoulder)
@@ -29,28 +35,42 @@
 //! uniform float uOut  the upper wall beyond the shoulder: its rise in H per W
 //! uniform int uMetric 0: the target height; 1: the distance
 
-float prof(float rho) {
-  if (rho <= 1.0 || uShW <= 0.0) return pow(max(rho - uFloorFrac, 0.0) / (1.0 - uFloorFrac), uB);
+float cliff(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float c = 1.0 / (1.0 - 0.5 * (uToe + uLip));
+  if (t < uToe) return c * t * t / (2.0 * max(uToe, 1e-6));
+  if (t > 1.0 - uLip) {
+    float u = 1.0 - t;
+    return 1.0 - c * u * u / (2.0 * max(uLip, 1e-6));
+  }
+  return c * (t - 0.5 * uToe);
+}
+
+float prof(float rho, float ff) {
+  if (rho <= 1.0) return cliff((rho - ff) / (1.0 - ff));
+  if (uShW <= 0.0) return 1.0 + uOut * (rho - 1.0);
   float s = (rho - 1.0) / uShW;
   if (s <= 1.0) return 1.0 + uShH * pow(s, uShB);
   return 1.0 + uShH + uOut * (rho - 1.0 - uShW);
 }
 
-float fillz(float rho, float fill, float H) {
-  float t = min(rho / max(uFloorFrac, 1e-3), 1.0);
-  return fill + uFloorRise * H * t * t;
+float fillz(float rho, float fill, float H, float ff, float rise) {
+  float t = min(rho / max(ff, 1e-3), 1.0);
+  return fill + rise * H * t * t;
 }
 
 float metric(int ci, ivec2 n, vec2 xp, out float sid) {
   ivec2 c = ivec2(ci % n.x, ci / n.x);
   vec4 a = texelFetch(seedA, c, 0);
   vec4 b = texelFetch(seedB, c, 0);
+  vec4 e = texelFetch(seedC, c, 0);
   sid = b.y;
   vec2 d = xp - a.xy;
   float r = sqrt(d.x * d.x + d.y * d.y);
   if (uMetric == 1) return r;
   float rho = r / b.x;
-  return a.z + max(a.w * prof(rho), fillz(rho, b.z, a.w));
+  float ff = clamp(uFloorFrac * e.x, 0.0, 0.95);
+  return a.z + max(a.w * prof(rho, ff), fillz(rho, b.z, a.w, ff, uFloorRise * e.y));
 }
 
 /* (ci, m, sid) into the sorted list: one entry per stream (the better kept), the four best streams */

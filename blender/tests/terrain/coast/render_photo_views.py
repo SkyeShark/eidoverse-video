@@ -56,16 +56,23 @@ VIEWS = {
     # on top of a straight cliff, or at its foot, the faces ahead are seen edge-on and hidden), so the camera's
     # anchor is searched along the coast: on the turf `back` metres behind the top edge ('top') or `out` metres out
     # on the beach ('beach'), looking `sign` x t along the coast at the face `dist` metres ahead, with a clear sight
-    # line, the face seen as frontally as the coast allows, near `prefer`.
-    # on a sister's top just back from the edge, along the cliffs east-south-east toward Belle Tout (no EXIF: ~36 mm)
-    'ss_clifftop_east': dict(rock='chalk', mode='along', sign=-1, where='top', back=10.0, dist=600.0,
+    # line, the face seen as frontally as the coast allows, near `prefer` (with `cos`: seen at that obliquity, the
+    # cosine of the sight line from the face's normal: a photograph along a straight run of cliffs).
+    # on a sister's top just back from the edge, along the cliffs east-south-east toward Belle Tout (no EXIF: ~36 mm);
+    # 4 m back: the photograph has the near edge and its face in the left of the frame (10 m back hid them); the face
+    # 600 m ahead seen 70 degrees off its normal (the most frontal view stood across a bay from a headland)
+    'ss_clifftop_east': dict(rock='chalk', mode='along', sign=-1, where='top', back=4.0, dist=600.0, cos=0.3,
                              prefer=-200.0, min_top=40.0, aim=0.3, lens=36.0, sun=200.0),
-    # the beach at Birling Gap, looking west-north-west along the foot of the cliffs (S200EXR 9.8 mm = 42 mm)
-    'ss_beach_birling_gap': dict(rock='chalk', mode='along', sign=1, where='beach', out=25.0, dist=500.0,
+    # the beach at Birling Gap, looking west-north-west along the foot of the cliffs (S200EXR 9.8 mm = 42 mm): on the
+    # shingle 14 m in from the water's edge, the camera 4 m above it (the photograph looks down the beach from the
+    # steps); out=+25 m stood it in the sea before the coast had a beach
+    'ss_beach_birling_gap': dict(rock='chalk', mode='along', sign=1, where='beach', out=-14.0, eye=4.0, dist=500.0,
                                  prefer=300.0, min_top=20.0, aim=0.35, lens=42.0, sun=200.0),
     # at a sister's edge looking west-north-west along the coast and down (5D Mk III at 53 mm)
-    'ss_clifftop_west_high': dict(rock='chalk', mode='along', sign=1, where='top', back=2.0, dist=500.0,
-                                  prefer=200.0, min_top=40.0, aim=0.4, lens=53.0, sun=190.0),
+    # (on a sister's summit, `high`: the next sister along the cliff top hid a face 500 m ahead from a lower top; the
+    # face 350 m ahead, a sight line clear by 0.3 m: looking down along the coast from the edge found no anchor at 1 m)
+    'ss_clifftop_west_high': dict(rock='chalk', mode='along', sign=1, where='top', back=2.0, dist=350.0, cos=0.35,
+                                  margin=0.3, high=True, prefer=200.0, min_top=35.0, aim=0.25, lens=53.0, sun=190.0),
     # Moher's cliff top looking south-south-west along the coves and headlands (RX10 IV, 34 mm equivalent)
     'moher_clifftop_south': dict(rock='layered', mode='along', sign=-1, where='top', back=12.0, dist=900.0,
                                  prefer=300.0, min_top=80.0, aim=0.6, lens=34.0, sun=240.0),
@@ -226,14 +233,22 @@ def _ground(t, xy):
     return float(t.height_at(np.array([xy[0]]), np.array([xy[1]]))[0])
 
 
-def _clear(t, eye, tgt, margin=0.3, k=160):
-    """The sight line from eye to tgt clears the ground by `margin` (sampled from 8 m out to 95 % of the way: from
-    a few metres behind an edge the line to a face along the coast passes the brow within a metre or so)."""
+def _clearance(t, eye, tgt, k=240, start_m=1.5):
+    """The least height of the sight line from eye to tgt over the ground, sampled from start_m out to 95 % of the
+    way (denser near the eye, where a rise of the turf ahead hides everything)."""
     e, g = np.asarray(eye, np.float64), np.asarray(tgt, np.float64)
     d = float(np.hypot(*(g[:2] - e[:2])))
-    s = np.linspace(min(8.0 / max(d, 8.0), 0.5), 0.95, k)
+    s0 = min(start_m / max(d, start_m), 0.5)
+    s = s0 + (0.95 - s0) * np.linspace(0.0, 1.0, k) ** 1.6
     P = e[None, :] + (g - e)[None, :] * s[:, None]
-    return float((P[:, 2] - np.asarray(t.height_at(P[:, 0], P[:, 1]), np.float64)).min()) >= margin
+    return float((P[:, 2] - np.asarray(t.height_at(P[:, 0], P[:, 1]), np.float64)).min())
+
+
+def _clear(t, eye, tgt, margin=1.0):
+    """The sight line clears the ground by `margin` from 1.5 m out (a hero level resolves the turf a metre or so
+    higher or lower than the main level the views are planned on: checked from 8 m out with 0.3 m, a 4 m rise
+    10 m ahead of a clifftop camera filled the whole shot with grass)."""
+    return _clearance(t, eye, tgt) >= margin
 
 
 def along_view(fr, spec, t):
@@ -266,7 +281,7 @@ def along_view(fr, spec, t):
             cz = g + 1.7
         else:
             cxy = q + spec['out'] * nq
-            cz = max(_ground(t, cxy), 0.0) + 1.7
+            cz = max(_ground(t, cxy), 0.0) + float(spec.get('eye', 1.7))
         if spec['mode'] == 'stack':
             sxy, sz = S, spec['aim'] * s_top
             ns = (cxy - S) / max(float(np.hypot(*(cxy - S))), 1e-6)
@@ -280,13 +295,16 @@ def along_view(fr, spec, t):
             sz = spec['aim'] * s_top
         if max(abs(cxy[0]), abs(cxy[1]), abs(sxy[0]), abs(sxy[1])) > lim:
             continue
-        if not _clear(t, (cxy[0], cxy[1], cz), (sxy[0], sxy[1], sz)):
+        if not _clear(t, (cxy[0], cxy[1], cz), (sxy[0], sxy[1], sz), margin=float(spec.get('margin', 1.0))):
             continue
         d = cxy - sxy
         cosv = float(d @ ns / max(float(np.hypot(*d)), 1e-6))
         if spec['mode'] != 'stack' and cosv < 0.1:
             continue
-        score = cosv - (abs(a - spec['prefer']) / 3000.0 if 'prefer' in spec else 0.0)
+        front = -abs(cosv - spec['cos']) if 'cos' in spec else cosv
+        score = front - (abs(a - spec['prefer']) / 3000.0 if 'prefer' in spec else 0.0)
+        if spec.get('high'):
+            score += cz / 100.0                          # the highest top along the coast
         if best is None or score > best[0]:
             best = (score, a, cxy, cz, sxy, sz, cosv, q)
     if best is None:
@@ -375,9 +393,11 @@ def main():
         # the camera's height again on the built terrain (the hero levels refine the ground under it)
         g = float(tt.height_at(np.array([cam_p[0]]), np.array([cam_p[1]]))[0])
         if spec.get('mode') in ('along', 'stack'):
-            cam_p = (cam_p[0], cam_p[1], (max(g, 0.0) if spec['where'] == 'beach' else g) + 1.7)
+            cam_p = (cam_p[0], cam_p[1], (max(g, 0.0) if spec['where'] == 'beach' else g) + float(spec.get('eye', 1.7)))
         elif spec['cam'][2][0] == 'ground':
             cam_p = (cam_p[0], cam_p[1], max(g, 0.0) + spec['cam'][2][1])
+        # the sight line on the built terrain (its hero levels): recorded, so a shot the turf hides is caught
+        built_clear = _clearance(tt, cam_p, tgt_p)
         RR.place_camera(cam, cam_p, tgt_p)
         cam.data.lens = spec['lens']
         stem = os.path.join(OUT, f"{a['tag']}_{name}")
@@ -403,6 +423,7 @@ def main():
                                   anchor_top_m=round(an['top_z'], 1),
                                   t=[round(float(v), 3) for v in an['t']], n=[round(float(v), 3) for v in an['n']],
                                   focus=[[round(c, 1) for c in f] for f in focus],
+                                  sight_clearance_m=round(built_clear, 2),
                                   levels=[str(lv) for lv in tt.levels], seconds=round(time.time() - tv, 1))
         print(f"[coast.views] {name}: camera {rec['views'][name]['camera']} -> {rec['views'][name]['target']}, "
               f"{spec['lens']} mm, top {an['top_z']:.0f} m, {rec['views'][name]['seconds']} s", flush=True)

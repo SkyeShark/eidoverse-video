@@ -1,0 +1,14 @@
+[
+ ["f1_c30_fix", {"set": {"sand_m": 30, "bed_m": 20, "p_lift": 0.03, "lift_boost": 15.0, "speed_from_frac": 0.1,
+                         "supply_var": 0.35, "supply_stretch_m": 0.0, "supply_cap": 99.0, "spread_deg": 30.0,
+                         "steer_deg": 35.0, "sheet_smooth_cells": 1.5}}],
+ ["f2_c30_fix_sheet1", {"set": {"sand_m": 30, "bed_m": 20, "p_lift": 0.03, "lift_boost": 15.0, "speed_from_frac": 0.1,
+                                "supply_var": 0.35, "supply_stretch_m": 0.0, "supply_cap": 99.0, "spread_deg": 30.0,
+                                "steer_deg": 35.0, "sheet_smooth_cells": 1.0}}],
+ ["f3_c35_fix_corr", {"set": {"sand_m": 35, "bed_m": 20, "p_lift": 0.03, "lift_boost": 15.0, "speed_from_frac": 0.1,
+                              "supply_var": 0.5, "supply_stretch_m": 1500.0, "supply_cap": 1.5, "spread_deg": 30.0,
+                              "steer_deg": 35.0, "sheet_smooth_cells": 1.5}}],
+ ["f4_c30_fix_mild", {"set": {"sand_m": 30, "bed_m": 20, "p_lift": 0.03, "lift_boost": 15.0, "speed_from_frac": 0.1,
+                              "supply_var": 0.35, "supply_stretch_m": 0.0, "supply_cap": 99.0, "spread_deg": 25.0,
+                              "steer_deg": 25.0, "sheet_smooth_cells": 1.5}}]
+]

@@ -17,13 +17,21 @@ Parameters of 'river_path' (metres, degrees, m/m):
     kind 'walk'                  'walk' (a smoothed random walk), 'kinoshita' (meanders), 'polyline' (points)
     points None                  [[x, y], ...] for 'polyline' (extended straight past its ends to cross every level)
     through [0, 0]               a point on the course (its arc-length origin)
+    centre 'course'              'kinoshita': 'course' puts the course itself through `through`; 'axis' puts the
+                                 meander belt's centre line there (the train shifted across the valley, so the belt
+                                 sits on the point whatever the bends' phase: through a loop's apex the whole belt
+                                 lay one loop amplitude off it)
     flow_azimuth_deg 90          the down-valley direction, compass degrees (clockwise from north: 90 flows east)
     length_m None                the course's length (default: three times the coarsest level's side)
     wiggle_deg 12, wiggle_wavelength_m 3000     'walk': the direction's spread and the scale of its bends
     wavelength_m 1200            'kinoshita': the arc length of one meander (two bends)
     sinuosity 2.5 (or theta0_deg)  'kinoshita': arc length / down-valley length (theta0 is solved for it)
     skew 0.03, flat 0.0          'kinoshita': Js (bends lean downstream) and Jf (flattened, boxy bends)
-    vary 0.15                    'kinoshita': the slow variation of the amplitude and wavelength along the course
+    vary 0.15                    'kinoshita': the variation of the amplitude and wavelength along the course
+    vary_scale 3.0, vary_skew 0  'kinoshita': the variation's scale in meander wavelengths (3: slow, neighbouring
+                                 loops alike; about 1: every loop its own size), and the skew's variation (+-)
+    min_neck_m 0                 'kinoshita': a loop whose limbs would pass closer than this (or cross) is shrunk
+                                 until they do not: thin necks, never a closed or crossing loop (0: no check)
     growth 1.0, growth_stages 6  'kinoshita': the bends' amplitude when the base-level fall starts, as a fraction
                                  of the final; it grows to 1 over the fall, every bend keeping its down-valley place,
                                  so the channel sweeps outward while it cuts down (undercut outer walls, long slip-off
@@ -33,6 +41,14 @@ Parameters of 'river_path' (metres, degrees, m/m):
     gradient 0.0015              the bed's fall per metre downstream
     schedule [[0, 0], [1, 1]]    the base-level fall over the run (strata_fluvial): time fraction -> fraction of the
                                  way from the starting surface down to the final bed (piecewise linear)
+    pool_spacing_m 0, pool_depth_m 0, pool_riffle 0.12, pool_jitter 0.35    pool and riffle (0: a smooth bed): the
+                                 final bed steps down the valley as pools pool_spacing_m apart (each its own length,
+                                 x exp(jitter N(0, 1))), each scoured pool_depth_m below the bed line and ending at
+                                 its downstream lip, where a dry riffle (pool_riffle of the reach) runs down at the
+                                 gradient to the next pool. Every pool is a closed basin spilling at its lip, so a
+                                 recipe with defaults['lakes'] = 'lake' holds flat water in each, at its own level:
+                                 the river reads as water, pool and drop, as a canyon river does (one connected strip
+                                 of water would be one lake at one level)
 
 The Kinoshita curve (Kinoshita 1961; Parker et al. 1983): the channel direction along arc length s is
     theta(s) = theta0 sin(k s) + theta0^3 (Js cos(3 k s) - Jf sin(3 k s)),   k = 2 pi / wavelength
@@ -45,10 +61,11 @@ import math
 import numpy as np
 
 F32 = np.float32
-DEFAULTS = dict(kind='walk', points=None, through=(0.0, 0.0), flow_azimuth_deg=90.0, length_m=None, wiggle_deg=12.0,
-                wiggle_wavelength_m=3000.0, wavelength_m=1200.0, sinuosity=2.5, theta0_deg=None, skew=0.03, flat=0.0,
-                vary=0.15, width_m=60.0, bed_m=0.0, gradient=0.0015, schedule=((0.0, 0.0), (1.0, 1.0)),
-                step_m=None, seed=0, growth=1.0, growth_stages=6)
+DEFAULTS = dict(kind='walk', points=None, through=(0.0, 0.0), centre='course', flow_azimuth_deg=90.0, length_m=None,
+                wiggle_deg=12.0, wiggle_wavelength_m=3000.0, wavelength_m=1200.0, sinuosity=2.5, theta0_deg=None,
+                skew=0.03, flat=0.0, vary=0.15, vary_scale=3.0, vary_skew=0.0, min_neck_m=0.0, width_m=60.0,
+                bed_m=0.0, gradient=0.0015, schedule=((0.0, 0.0), (1.0, 1.0)), step_m=None, seed=0, growth=1.0,
+                growth_stages=6, pool_spacing_m=0.0, pool_depth_m=0.0, pool_riffle=0.12, pool_jitter=0.35)
 MIN_CELLS = 1.5                         # the channel is at least this many cells wide (8-connected on every level)
 
 
@@ -82,14 +99,14 @@ def _integrate(theta, ds):
     return np.stack([x, y], 1)
 
 
-def _place(local, through, flow_azimuth_deg, s, s0=0.0):
-    """Rotate a course built along +x (down-valley) to the compass azimuth and move its arc-length origin s0 onto
-    `through`."""
+def _place(local, through, flow_azimuth_deg, s, s0=0.0, anchor=None):
+    """Rotate a course built along +x (down-valley) to the compass azimuth and move its arc-length origin s0 (or
+    the local point `anchor`) onto `through`."""
     az = math.radians(float(flow_azimuth_deg))
     ux, uy = math.sin(az), math.cos(az)                  # compass: clockwise from north
     vx, vy = -uy, ux                                     # left of the flow
     k = int(np.argmin(np.abs(s - s0)))
-    p = local - local[k]
+    p = local - (local[k] if anchor is None else np.asarray(anchor, np.float64))
     xy = np.stack([p[:, 0] * ux + p[:, 1] * vx, p[:, 0] * uy + p[:, 1] * vy], 1)
     return xy + np.asarray(through, np.float64)[None, :]
 
@@ -134,11 +151,52 @@ def theta0_for(sinuosity, skew=0.0, flat=0.0):
     return 0.5 * (lo + hi)
 
 
+def _close_pairs(local, s, min_d, min_sep):
+    """Index pairs (a, b), a < b, of course points closer than min_d whose arc lengths differ by more than min_sep
+    (the two limbs of a loop or two loops), one pair (the closest) per 0.5 min_sep stretch of the arc. Points are
+    binned on a min_d grid, so only neighbouring bins are compared."""
+    stride = max(1, int(min_d / max(float(s[1] - s[0]), 1e-9) / 3.0))
+    idx = np.arange(0, len(local), stride)
+    p = local[idx]
+    key = np.floor(p / min_d).astype(np.int64)
+    bins = {}
+    for k, (kx, ky) in enumerate(key):
+        bins.setdefault((int(kx), int(ky)), []).append(k)
+    best = {}
+    for (kx, ky), members in bins.items():
+        near = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                near += bins.get((kx + dx, ky + dy), [])
+        near = np.array(near)
+        for k in members:
+            other = near[near > k]
+            if not len(other):
+                continue
+            ia, ib = idx[k], idx[other]
+            far = (s[ib] - s[ia]) > min_sep
+            if not far.any():
+                continue
+            d = np.hypot(*(local[ib[far]] - local[ia]).T)
+            m = int(np.argmin(d))
+            if d[m] < min_d:
+                slot = int(s[ia] // (0.5 * min_sep))
+                if slot not in best or d[m] < best[slot][0]:
+                    best[slot] = (float(d[m]), int(ia), int(ib[far][m]))
+    return [(a, b) for _d, a, b in best.values()]
+
+
 def kinoshita(through, flow_azimuth_deg, length_m, wavelength_m=1200.0, sinuosity=2.5, theta0_deg=None, skew=0.03,
-              flat=0.0, vary=0.15, seed=0, step_m=None):
+              flat=0.0, vary=0.15, seed=0, step_m=None, vary_scale=3.0, vary_skew=0.0, min_neck_m=0.0,
+              centre='course'):
     """A meander train: the Kinoshita direction along the arc, its amplitude theta0 (from the sinuosity unless
-    given) and its wavelength varying slowly along the course by `vary` (relative), so no two bends are alike. The
-    course's down-valley length is about length_m. (N, 2) world metres, upstream first."""
+    given) and its wavelength varying along the course by `vary` (relative) over vary_scale meander wavelengths
+    (3: slowly, neighbouring loops alike; about 1: loop by loop, every loop its own size and shape), and its skew
+    by +-vary_skew (some loops lean downstream, some up), so no two bends are alike. min_neck_m > 0: a loop whose
+    limbs would come closer than that (or cross) has its amplitude shrunk until they do not, so the necks are thin
+    but never closed. The course's down-valley length is about length_m. centre 'course': the course passes
+    through `through`; 'axis': the belt's centre line does (the middle of the course's lateral spread within two
+    down-valley wavelengths of the arc origin). (N, 2) world metres, upstream first."""
     th0 = math.radians(float(theta0_deg)) if theta0_deg is not None else theta0_for(sinuosity, skew, flat)
     sig = kinoshita_sinuosity(th0, skew, flat)
     arc = float(length_m) * sig
@@ -146,21 +204,49 @@ def kinoshita(through, flow_azimuth_deg, length_m, wavelength_m=1200.0, sinuosit
     n = max(int(math.ceil(arc / step)) + 1, 3)
     s = np.linspace(-0.5 * arc, 0.5 * arc, n)
     v = float(vary)
-    nl = _smooth_noise_1d(s, 3.3 * float(wavelength_m), int(seed) + 17, octaves=2)
-    na = _smooth_noise_1d(s, 2.7 * float(wavelength_m), int(seed) + 29, octaves=2)
+    sc = float(vary_scale)
+    nl = _smooth_noise_1d(s, 1.1 * sc * float(wavelength_m), int(seed) + 17, octaves=2)
+    na = _smooth_noise_1d(s, 0.9 * sc * float(wavelength_m), int(seed) + 29, octaves=2)
     lam = float(wavelength_m) * np.clip(1.0 + v * nl, 0.5, 1.6)
     phase = np.concatenate([[0.0], np.cumsum(2.0 * math.pi / (0.5 * (lam[1:] + lam[:-1])) * np.diff(s))])
     phase += np.random.default_rng(int(seed) * 31 + 7).uniform(0.0, 2.0 * math.pi)
     # amplitude variation, kept under the closing angle: past about 125 degrees the bends touch
     amp = np.clip(th0 * (1.0 + 0.6 * v * na), 0.0, math.radians(125.0))
-    theta = kinoshita_theta(phase, amp, skew, flat)
-    local = _integrate(theta, s[1] - s[0])
+    if float(vary_skew):
+        skew = skew + float(vary_skew) * _smooth_noise_1d(s, 1.3 * sc * float(wavelength_m), int(seed) + 41,
+                                                          octaves=1)
+    ds = s[1] - s[0]
+    mult = np.ones_like(s)
+    neck = float(min_neck_m or 0.0)
+    for _ in range(60):
+        theta = kinoshita_theta(phase, amp * mult, skew, flat)
+        local = _integrate(theta, ds)
+        if neck <= 0.0:
+            break
+        pairs = _close_pairs(local, s, neck, 3.0 * neck)
+        if not pairs:
+            break
+        # a loop whose limbs come closer than the neck: its amplitude shrinks a little (a smooth dip over the arc
+        # between the two points), until every neck is at least min_neck_m wide
+        for a, b in pairs:
+            lo, hi = s[a], s[b]
+            pad = 0.25 * (hi - lo) + 2.0 * ds
+            t = np.clip(np.minimum(s - (lo - pad), (hi + pad) - s) / max(pad, 1e-9), 0.0, 1.0)
+            mult = mult * (1.0 - 0.05 * t * t * (3.0 - 2.0 * t))
     # the mean direction of a varying train drifts a little: turn it back onto +x
     d = local[-1] - local[0]
     a = -math.atan2(d[1], d[0])
     R = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
     local = local @ R.T
-    return _place(local, through, flow_azimuth_deg, s, 0.0)
+    anchor = None
+    if centre == 'axis':
+        k0 = int(np.argmin(np.abs(s)))
+        near = np.abs(local[:, 0] - local[k0, 0]) <= 2.0 * float(wavelength_m) / sig
+        lat = local[near, 1]
+        anchor = (float(local[k0, 0]), 0.5 * float(np.percentile(lat, 5) + np.percentile(lat, 95)))
+    elif centre != 'course':
+        raise ValueError(f"river_path centre {centre!r} is 'course' or 'axis'")
+    return _place(local, through, flow_azimuth_deg, s, 0.0, anchor)
 
 
 def extend(points, length_m):
@@ -276,22 +362,69 @@ def schedule_at(schedule, t):
 class River:
     """A course with its channel width, final bed profile and schedule (what 'river_path' keeps in ctx.shared).
     The bed at arc length s, at the fraction f of the fall done:
-        bed(s, f) = top(s) - f (top(s) - final(s)),   final(s) = bed_m - gradient (s - s_through)
-    top(s) is the starting surface along the course (sampled once, on the level where the run starts).
+        bed(s, f) = top(s) - f (top(s) - final(s)),   final(s) = bed_m - gradient (s - s_through) - pool(s)
+    top(s) is the starting surface along the course (sampled once, on the level where the run starts). pool(s) is
+    the pool-and-riffle scour (pool_spacing_m, pool_depth_m; 0 without pools): on the hero levels it is the full
+    pool depth everywhere (a smooth trench under the pools' water, never a closed basin: a pool crossing a hero
+    window's border band would be filled with sediment there, so the hero levels take each pool's water from their
+    parent instead, cell by cell; the parent's dry riffles part the pools).
     stages: [(f, points, s_through), ...] a growing course (growth < 1): the course used at a fall fraction f is the
     last stage whose f is at most it; the final course is `points`."""
 
-    def __init__(self, points, width_m, bed_m, gradient, schedule, s_through, top=None, spec=None, stages=None):
+    def __init__(self, points, width_m, bed_m, gradient, schedule, s_through, top=None, spec=None, stages=None,
+                 seed=0):
         self.width_m = float(width_m)
         self.bed_m = float(bed_m)
         self.gradient = float(gradient)
         self.schedule = [list(map(float, r)) for r in schedule]
         self.spec = dict(spec or {})
+        self.pool = (float(_p(self.spec, 'pool_spacing_m') or 0.0), float(_p(self.spec, 'pool_depth_m') or 0.0),
+                     float(_p(self.spec, 'pool_riffle')), float(_p(self.spec, 'pool_jitter')))
+        self.pool_seed = int(seed)
+        self._crest_cache = None
         self.final_course = (np.asarray(points, np.float64), float(s_through))
         self.stages = [(float(f), np.asarray(p, np.float64), float(s0)) for f, p, s0 in (stages or [])]
         self.top_field = None
         self._use(self.final_course[0], self.final_course[1])
         self.top = None if top is None else np.asarray(top, np.float64)
+
+    def crests(self):
+        """The riffles' crests (the pools' downstream lips), arc lengths along the final course, ascending: one every
+        pool_spacing_m x exp(pool_jitter N(0, 1)) (clipped to 0.5-2 spacings), from the course's start to its end,
+        the same on every level (world arc length, a seeded draw)."""
+        sp = self.pool[0]
+        if sp <= 0.0:
+            return None
+        if self._crest_cache is None:
+            s_end = float(arc_length(self.final_course[0])[-1])
+            rng = np.random.default_rng(self.pool_seed * 4421 + 613)
+            n = int(s_end / (0.5 * sp)) + 4
+            steps = sp * np.clip(np.exp(self.pool[3] * rng.standard_normal(n)), 0.5, 2.0)
+            c = -sp * rng.uniform(0.0, 1.0) + np.concatenate([[0.0], np.cumsum(steps)])
+            self._crest_cache = c[c <= s_end + 2.0 * sp]
+        return self._crest_cache
+
+    def pool_scour(self, s):
+        """0..1 along the final course: 0 on the riffles and at every pool's lip, rising quickly below a riffle to the
+        pool's deepest point (a third of the way down it) and back to 0 at its lip."""
+        c = self.crests()
+        s = np.asarray(s, np.float64)
+        if c is None or len(c) < 2:
+            return np.zeros_like(s)
+        k = np.clip(np.searchsorted(c, s, side='right') - 1, 0, len(c) - 2)
+        u = np.clip((s - c[k]) / (c[k + 1] - c[k]), 0.0, 1.0)
+        r = min(max(self.pool[2], 0.0), 0.9)
+        v = np.clip((u - r) / (1.0 - r), 0.0, 1.0)
+        return np.where(u > r, np.sin(math.pi * v ** 0.75) ** 0.6, 0.0)
+
+    def final(self, s, smooth=False):
+        """The final bed at arc length s: the bed line minus the pool scour (smooth: minus the full pool depth, the
+        hero levels' trench)."""
+        line = self.bed_m - self.gradient * (np.asarray(s, np.float64) - self.s_through)
+        depth = self.pool[1] if self.pool[0] > 0.0 else 0.0
+        if depth <= 0.0:
+            return line
+        return line - depth * (1.0 if smooth else self.pool_scour(s))
 
     def _use(self, points, s_through):
         self.points = points
@@ -315,9 +448,6 @@ class River:
         self._use(*pick)
         return True
 
-    def final(self, s):
-        return self.bed_m - self.gradient * (np.asarray(s, np.float64) - self.s_through)
-
     def _sample(self):
         from ..core import grid as Gd
         h, x0, y0, cell = self.top_field
@@ -330,8 +460,8 @@ class River:
         self._sample()
         return self.top
 
-    def bed(self, s, f):
-        fin = self.final(s)
+    def bed(self, s, f, smooth=False):
+        fin = self.final(s, smooth)
         if self.top is None or f >= 1.0:
             return fin
         top = np.interp(np.asarray(s, np.float64), self.s, self.top)
@@ -356,7 +486,7 @@ class River:
         w = np.array(base_pins['pin_w'], F32, copy=True)
         ph = np.array(base_pins['pin_h'], F32, copy=True)
         if m.any():
-            bed = self.bed(s[m], f)
+            bed = self.bed(s[m], f, smooth=getattr(level, 'role', None) == 'hero')
             if hold is not None:
                 wb = np.clip(np.asarray(hold, np.float64)[m], 0.0, 1.0)
                 bed = wb * np.asarray(base_pins['pin_h'], np.float64)[m] + (1.0 - wb) * bed
@@ -391,7 +521,9 @@ def course(params, seed=0, extent_m=10000.0):
     elif kind == 'kinoshita':
         pts = kinoshita(through, az, length, float(_p(params, 'wavelength_m')), float(_p(params, 'sinuosity')),
                         _p(params, 'theta0_deg'), float(_p(params, 'skew')), float(_p(params, 'flat')),
-                        float(_p(params, 'vary')), s_seed, _p(params, 'step_m'))
+                        float(_p(params, 'vary')), s_seed, _p(params, 'step_m'), float(_p(params, 'vary_scale')),
+                        float(_p(params, 'vary_skew')), float(_p(params, 'min_neck_m') or 0.0),
+                        str(_p(params, 'centre')))
     else:
         raise ValueError(f"river_path kind {kind!r} is 'walk', 'kinoshita' or 'polyline'")
     s = arc_length(pts)
@@ -427,7 +559,8 @@ def make_river(params, seed=0, extent_m=10000.0):
     pts, s0 = course(params, seed, extent_m)
     sch = _p(params, 'schedule')
     return River(pts, float(_p(params, 'width_m')), float(_p(params, 'bed_m')), float(_p(params, 'gradient')),
-                 sch, s0, spec=dict(params or {}), stages=growth_courses(params, seed, extent_m))
+                 sch, s0, spec=dict(params or {}), stages=growth_courses(params, seed, extent_m),
+                 seed=int(seed) + int(_p(params, 'seed')))
 
 
 # ------------------------------------------------------------------------------------------------- the op ---

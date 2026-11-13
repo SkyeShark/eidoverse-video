@@ -6,6 +6,8 @@
 
   kernels      out/fluvial/kernel_tests.json (test_kernels.py): every kernel against its twin, creep and threshold
                conserving the sum of h within 1e-5, the fluvial stage deterministic, the step cost
+  floors/hills out/fluvial/floors_hills_tests.json (test_floors_hills.py): the valley floors' widths, drainage and
+               tributary backfill, the soil hillslopes' steady state and lee asymmetry, on synthetic ground
   bands        the judge's verdict of each generated main level against its reference (judge_fields.py wrote
                <tag>_verdict.json); the meadow's own checks (slope p99 < 15 degrees, no closed depressions)
   seams        every child level against its parent (<tag>_seams.json): |dh| <= 0.05 m on the edge ring, slope jump
@@ -59,6 +61,12 @@ def main():
         check('the fluvial stage is deterministic', det and all(k[n]['ok'] for n in det), det[0] if det else None)
         rec['cost'] = k.get('cost')
         rec['kernel_failures'] = fails
+    fh = os.path.join(OUT, 'floors_hills_tests.json')
+    if os.path.exists(fh):
+        t = load(fh)
+        for name, v in t.items():
+            if isinstance(v, dict) and 'ok' in v:
+                check(name, v['ok'], v['detail'])
     for group, tags in (('fluvial_range', a.range), ('rolling_hills', a.hills), ('meadow', a.meadow)):
         for tag in [t for t in tags.split(',') if t]:
             v = load(os.path.join(a.gen, tag + '_verdict.json'))

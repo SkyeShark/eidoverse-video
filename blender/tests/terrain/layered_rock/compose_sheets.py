@@ -100,12 +100,25 @@ def fan(reference):
 
 
 def views(reference, tag, title=None):
+    """The generated renders are read under <reference>_<tag> (render_views.py keys them so): with the tag alone the
+    Monument Valley sheet was built from the Badlands' cameras, photographs and renders. A camera whose photograph
+    is not this reference's (its prefix) stops the sheet."""
     src = json.load(open(os.path.join(PHOTOS, 'sources.json'), encoding='utf-8'))
     sys.path.insert(0, HERE)
-    vr = json.load(open(os.path.join(VIEWS, f'{tag}_views.json'), encoding='utf-8'))
+    stem = f'{reference}_{tag}'
+    vr = json.load(open(os.path.join(VIEWS, f'{stem}_views.json'), encoding='utf-8'))
+    if vr.get('reference') not in (None, reference):
+        raise ValueError(f"{stem}_views.json holds views of {vr.get('reference')}, not {reference}")
     rr = json.load(open(os.path.join(VIEWS, f'{reference}_views.json'), encoding='utf-8')) \
         if os.path.exists(os.path.join(VIEWS, f'{reference}_views.json')) else {}
     names = list((vr.get('cameras') or {}).keys()) or list((rr.get('cameras') or {}).keys())
+    for nm in names:
+        photo = ((vr.get('cameras') or {}).get(nm, {}).get('photo')
+                 or (rr.get('cameras') or {}).get(nm, {}).get('photo'))
+        if photo and not str(photo).startswith(PREFIX[reference] + '_'):
+            raise ValueError(f'view {nm!r} of {stem} uses photograph {photo}, not one of {reference} '
+                             f'({PREFIX[reference]}_*)')
+    tag = stem
     rows = []
     for nm in names:
         cg = (vr.get('cameras') or {}).get(nm, {})
@@ -129,7 +142,7 @@ def views(reference, tag, title=None):
     return grid(rows, ['photograph', 'real DEM, the photo\'s camera', 'real DEM, clay',
                        f'generated ({tag}), matched camera', 'generated, clay'], 420, 236,
                 title or f'{reference} vs {tag}: photograph, real DEM and generated terrain under make_sky daylight',
-                os.path.join(SHEETS, f'{reference}_{tag}_views.png'))
+                os.path.join(SHEETS, f'{tag}_views.png'))
 
 
 if __name__ == '__main__':

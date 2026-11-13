@@ -1,8 +1,9 @@
 """The photo-matched compare sheet: per photograph a row of the photo (cropped to 16:9 about its middle, the lens's
 horizontal field kept), the real place's elevation data rendered from the photo's camera, and each generated
-terrain from the same camera in the valley's frame (photo_views.py, render_views.py).
+terrain from the same camera in the valley's frame (photo_views.py; render_views.py in clay, render_textured.py
+with the palettes).
 
-    python blender/tests/terrain/glacial/photo_sheet.py <job.json> <sheet.png> [--title text]
+    python blender/tests/terrain/glacial/photo_sheet.py <job.json>[,<job2.json> ...] <sheet.png> [--title text]
 """
 import json
 import os
@@ -38,11 +39,12 @@ def photo_16x9(path):
 def main():
     job_path, out = sys.argv[1], sys.argv[2]
     title = sys.argv[sys.argv.index('--title') + 1] if '--title' in sys.argv else os.path.basename(job_path)
-    job = json.load(open(job_path, encoding='utf-8'))
     meta = json.load(open(os.path.join(PHOTOS, 'sources.json'), encoding='utf-8'))['photos']
     rows = {}
-    for v in job['views']:
-        rows.setdefault(v['photo'], []).append(v)
+    for jp in job_path.split(','):                       # several jobs (clay, textured): one row per photograph
+        job = json.load(open(jp, encoding='utf-8'))
+        for v in job['views']:
+            rows.setdefault(v['photo'], []).append(dict(v, out_dir=job['out_dir']))
     ncols = 1 + max(len(r) for r in rows.values())
     head = 40
     sheet = Image.new('RGB', (ncols * (W + 8) + 8, head + len(rows) * (H + 46)), (22, 22, 22))
@@ -51,16 +53,28 @@ def main():
     f = font(14)
     for r, (photo, views) in enumerate(rows.items()):
         y = head + r * (H + 46)
-        ph = next(m for m in meta.values() if m['file'] == photo)
+        ph = next((m for m in meta.values() if m['file'] == photo), None)
+        if ph is None:                                   # a view placed in the valley frame (photo_views --axis): the
+            cand = json.load(open(os.path.join(PHOTOS, 'candidates.json'), encoding='utf-8'))   # photograph's credit
+            c = cand.get(os.path.basename(photo), {})
+            ph = dict(title=c.get('title', os.path.basename(photo)).replace('File:', ''), author=c.get('author', '?'),
+                      licence=c.get('licence', '?'), lens_mm_36=float('nan'))
         sheet.paste(photo_16x9(os.path.join(PHOTOS, photo)), (8, y + 40))
         d.text((8, y + 2), f"photo: {ph['title'][:70]}", fill=(230, 230, 230), font=f)
-        d.text((8, y + 20), f"{ph['author']}, {ph['licence']} (Wikimedia Commons); lens {ph['lens_mm_36']:.0f} mm "
-                            f"(36 mm frame)", fill=(170, 170, 170), font=f)
+        lens = ph['lens_mm_36']
+        d.text((8, y + 20), f"{ph['author']}, {ph['licence']} (Wikimedia Commons)" +
+               (f"; lens {lens:.0f} mm (36 mm frame)" if lens == lens else '; the same kind of view, not its camera'),
+               fill=(170, 170, 170), font=f)
         for k, v in enumerate(views):
             x = 8 + (k + 1) * (W + 8)
-            p = os.path.join(job['out_dir'], v['name'] + '.png')
-            src = v['source'].get('reference') or os.path.splitext(os.path.basename(v['source']['npz']))[0]
-            label = ('the real place: ' if v['source'].get('reference') else 'generated: ') + src
+            p = os.path.join(v['out_dir'], v['name'] + '.png')
+            if 'source' in v:                                # render_views.py: grey clay meshes of the fields
+                src = v['source'].get('reference') or os.path.splitext(os.path.basename(v['source']['npz']))[0]
+                label = ('the real place: ' if v['source'].get('reference') else 'generated: ') + src
+            else:                                            # render_textured.py: make_terrain with its palette
+                label = (f"the real place, textured: {(v.get('params') or {}).get('dem')}"
+                         if v.get('recipe') == 'real_place' else
+                         f"generated, textured: {v.get('recipe')} seed {v.get('seed')}")
             c = v['camera']
             d.text((x, y + 2), label, fill=(230, 230, 230), font=f)
             d.text((x, y + 20), f"camera ({c['x']:.0f}, {c['y']:.0f}) m, heading {c['heading_deg']:.0f}, pitch "

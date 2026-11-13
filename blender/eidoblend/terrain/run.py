@@ -14,7 +14,12 @@ Per level:
   3. the stages that select the level, in recipe order. The coarsest level first grows coarse-to-fine through its
      pre-passes (256, 512 ... cells, each upsampled into the next) when an evolving stage (fluvial, creep, talus,
      threshold, uplift - any op whose function has evolves = True) selects it; a constructional op (a cone, a DEM,
-     a crater) runs once, on the first pass. Ops that take ctx= get a StageContext (solvers/fluvial.py); the
+     a crater) runs once, on the first pass; a post op (post = True: valley floors, soil hillslopes - shaping
+     what the erosion made) runs once, on the last pass. The first defaults['grow_levels'] levels (default 1, the
+     coarsest only) GROW (role 'grow': uplift and the full physics); the rest refine. A recipe with a wide context
+     grows its outer levels coarse (the far ranges or hills to the horizon) and its inner context levels at their
+     own cells, each starting from its parent and pinned to it at the border, so the landform near the tile is
+     still grown at the cell it was tuned at. Ops that take ctx= get a StageContext (solvers/fluvial.py); the
      wave-1 convention op(fields, level, params, seed) is called as is, and on a child level its height is then
      pulled to the parent's in the border band. A stage's `where` limits it: the fields it changed are blended
      with what they were by the mask (masks.py names, or field names);
@@ -65,6 +70,14 @@ def _evolves(op_name):
         return True
     try:
         return bool(getattr(get_op(op_name), 'evolves', False))
+    except KeyError:
+        return False
+
+
+def _post(op_name):
+    """A post op shapes what the level's erosion made (valley floors, soil hillslopes): once, on the last pass."""
+    try:
+        return bool(getattr(get_op(op_name), 'post', False))
     except KeyError:
         return False
 
@@ -147,11 +160,12 @@ def _blend(before, fields, m):
 
 # ------------------------------------------------------------------------------------------------- cache ---
 
-def _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev):
+def _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev, grow_n=1):
     from .core import cache as CA
     payload = dict(v=RUN_VERSION, plan=[lv.to_dict() for lv in plan[:i + 1]],
                    stages=[s.to_dict() for s in stages], values=values, seed=int(seed), flatten=flatten,
-                   sea=sea_level, base=base_elevation_m, lakes=lakes_mode, device=dev.name, code=CA.code_hash())
+                   sea=sea_level, base=base_elevation_m, lakes=lakes_mode, device=dev.name, code=CA.code_hash(),
+                   grow=int(grow_n))
     blob = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str)
     return 'lv_' + hashlib.sha1(blob.encode('utf-8')).hexdigest()
 
@@ -178,6 +192,7 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
     flatten = list(flatten or [])
     defaults = dict(getattr(recipe, 'defaults', {}) or {})
     lakes_mode = defaults.get('lakes', 'lake')
+    grow_n = max(1, int(defaults.get('grow_levels', 1) or 1))
     mask_params = None
     shared = {}
     out = []
@@ -192,7 +207,8 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
         key = None
         if cache:
             from .core import cache as CA
-            key = _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev)
+            key = _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev,
+                             grow_n)
             C = CA.Cache(key)
             if C.complete():
                 f = C.load_level(0, lv)
@@ -220,12 +236,15 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
             if k > 0:
                 fields = fields.inherit(sub, rules=SKIP)
             ctx = FL.StageContext(plan=plan, index=i, level=sub, prepass=k if len(subs) > 1 and k < len(subs) - 1
-                                  else None, fresh=(parent is None and k == 0), role='grow' if parent is None
-                                  else 'refine', pins=pins, shared=shared, seed=seed, sea_level=sea_level,
-                                  base_elevation_m=base_elevation_m, flatten=flatten, device=dev, log=log,
-                                  values=values)
+                                  else None, fresh=(parent is None and k == 0), role='grow'
+                                  if (parent is None or i < grow_n) else 'refine', pins=pins, shared=shared,
+                                  seed=seed, sea_level=sea_level, base_elevation_m=base_elevation_m, flatten=flatten,
+                                  device=dev, log=log, values=values, grow_levels=grow_n)
             for st in mine:
-                if k > 0 and not _evolves(st.op):
+                post = _post(st.op)
+                if post and k < len(subs) - 1:
+                    continue
+                if k > 0 and not _evolves(st.op) and not post:
                     continue
                 if st.params.get('enabled', True) is False:
                     continue

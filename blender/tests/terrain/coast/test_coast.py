@@ -336,9 +336,89 @@ def test_plan_fixes():
           f'(coast_frac, value at the coast, slope per km seaward, slope per km inland): {rows}')
 
 
+def test_beach_scars_chalk():
+    """The review of 2026-11-12 (the Birling Gap photograph: a wide grey shingle beach and the chalk platform at the
+    cliff foot; the face's flint bands, fresh collapse scars and rubble). op 'coast' on a synthetic downland at 2 m
+    cells with the chalk preset's foot (twin device): (a) a shingle beach at the cliff foot: its crest within 0.3 m
+    of shingle_m, the ground above sea level out to 85-115 % of its width; (b) collapse scars recess the foot line
+    (the cut with scars reaches up to scar_depth_m further inland than without, never less far) and heap debris at
+    their foot (talus over 1 m); (c) the chalk column: every bed and flint band of the face at its own angle, the
+    face about 79 degrees overall."""
+    from eidoblend.terrain.recipes.sea_cliffs import ROCKS
+    pre = ROCKS['chalk']['coast']                                      # the recipe's chalk foot, as it builds it
+    n, cell = 200, 2.0
+    lv = _level(n, cell)
+    X, Y = lv.xy()
+    land = 70.0 + 0.04 * Y + 3.0 * np.sin(X / 31.0)
+    land = np.where(Y < -110, -4.0, land)                              # the original shore 110 m south
+    base = {'retreat_m': 40.0, 'weakness': 0.0, 'crenel_m': 0.0, 'fetch_max_m': 800.0, 'face_spread_deg': 0.0,
+            'platform_rough_m': 0.0, 'exposure_power': 0.0, 'talus_frac': 0.0, 'beach_exposure': [0.05, 0.1]}
+    base.update({k: pre[k] for k in ('shingle_m', 'shingle_w_m', 'shingle_berm', 'platform_top_m',
+                                     'platform_slope_deg')})
+    crest_m, width_m = float(pre['shingle_m']), float(pre['shingle_w_m'])
+    # the dry beach ends where the beach face, falling from the berm to -0.6 m at the beach's width, crosses the sea
+    dry_m = width_m * (pre['shingle_berm'] + (1.0 - pre['shingle_berm']) * crest_m / (crest_m + 0.6))
+    runs = {}
+    for name, extra in (('plain', {}), ('scars', {'scars': 1.0, 'scar_spacing_m': 90.0})):
+        f = Fields(lv, {'h': land.astype(np.float32), 'bed': land.astype(np.float32)})
+        CO.op_coast(f, lv, dict(base, **extra), 5, ctx=_ctx(lv))
+        runs[name] = f
+    h = np.asarray(runs['plain']['h'], np.float64)
+    # (a) per column: the face's foot (the first cell over 8 m going inland), the beach's crest and dry width
+    crest, width = [], []
+    for i in range(n):
+        col = h[:, i]
+        face = np.nonzero(col > 8.0)[0]
+        if face.size == 0:
+            continue
+        jf = int(face.min())
+        beach = col[:jf]
+        crest.append(float(beach[max(jf - 6, 0):jf].max()))
+        dry = np.nonzero(beach > 0.0)[0]
+        width.append((jf - int(dry.min())) * cell if dry.size else 0.0)
+    crest, width = np.array(crest), np.array(width)
+    ok_a = (crest.size > 0.9 * n and abs(float(np.median(crest)) - crest_m) < 0.3
+            and 0.85 * dry_m <= float(np.median(width)) <= 1.15 * dry_m)
+    check('chalk foot: a shingle beach at the cliff foot (crest, width)', ok_a,
+          f'crest median {np.median(crest):.2f} m (asked {crest_m:g}), dry beach width median '
+          f'{np.median(width):.1f} m (its {width_m:g} m width less the beach face under the sea: {dry_m:.1f}) over '
+          f'{crest.size} columns')
+    # (b) scars: how much further inland the cut reaches, and the debris at their feet
+    cut0 = np.asarray(runs['plain']['h'], np.float64) < land - 1.0
+    cut1 = np.asarray(runs['scars']['h'], np.float64) < land - 1.0
+    reach0 = np.array([Y[np.nonzero(cut0[:, i])[0].max(), i] if cut0[:, i].any() else -1e9 for i in range(n)])
+    reach1 = np.array([Y[np.nonzero(cut1[:, i])[0].max(), i] if cut1[:, i].any() else -1e9 for i in range(n)])
+    deeper = reach1 - reach0
+    tal = np.asarray(runs['scars']['talus'], np.float64)
+    ok_b = 3.0 <= deeper.max() <= 12.0 + 2 * cell and np.all(deeper >= -1e-6) and tal.max() > 1.0
+    check('chalk foot: collapse scars recess the cliff line and heap debris at their foot', ok_b,
+          f'recess max {deeper.max():.1f} m (scar_depth_m 3-12), columns recessed {int((deeper > cell).sum())} '
+          f'of {n}; debris (talus) max {tal.max():.2f} m')
+    # (c) the chalk column
+    col = CO.column_table('chalk', 0.0)
+    s = np.linspace(0, 40, 8001)
+    z = CO.face_profile(s, 0.3, None, col, 0.0)
+    ang = np.degrees(np.arctan(np.diff(z) / np.diff(s)))
+    zm = 0.5 * (z[1:] + z[:-1])
+    beds = CO.COLUMNS['chalk']
+    cyc = sum(b[0] for b in beds)
+    edges = np.cumsum([0.0] + [b[0] for b in beds])
+    rows, ok_c = [], True
+    for k, (th, a) in enumerate(beds):
+        inside = (np.mod(zm, cyc) > edges[k] + 0.1) & (np.mod(zm, cyc) < edges[k + 1] - 0.1) & (zm < 100)
+        if inside.sum() < 3:
+            continue
+        got = float(np.median(ang[inside]))
+        rows.append((th, a, round(got, 2)))
+        ok_c &= abs(got - a) < 0.6
+    overall = math.degrees(math.atan((z[-1] - z[0]) / (s[-1] - s[0])))
+    check('chalk column: each bed and flint band of the face at its own angle', ok_c and 77.0 <= overall <= 81.0,
+          f'(thickness, angle, measured): {rows}; overall {overall:.1f} deg')
+
+
 def main():
     t0 = time.time()
-    for fn in (test_exposure, test_jfa, test_dean, test_cliff, test_column, test_plan_fixes):
+    for fn in (test_exposure, test_jfa, test_dean, test_cliff, test_column, test_plan_fixes, test_beach_scars_chalk):
         try:
             fn()
         except Exception as e:                                          # noqa: BLE001

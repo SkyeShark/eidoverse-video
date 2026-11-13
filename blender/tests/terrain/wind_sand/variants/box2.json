@@ -1,0 +1,13 @@
+[
+ ["a_s55_avg", {"iters": 24000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["b_s55_sv07", {"iters": 24000, "set": {"sand_m": 55, "supply_var": 0.7, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["c_s45_sv07", {"iters": 24000, "set": {"sand_m": 45, "supply_var": 0.7, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["d_s35_sf0", {"iters": 24000, "set": {"sand_m": 35, "speed_from_frac": 0.0, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["e_s55_sp1800", {"iters": 24000, "set": {"sand_m": 55, "spacing_m": 1800, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["f_s55_g50_s15", {"iters": 24000, "set": {"sand_m": 55, "gust": 50, "spread_deg": 15, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["g_s55_nogust", {"iters": 24000, "set": {"sand_m": 55, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["h_s55_5w", {"iters": 24000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 20, "winds": [[28, 1.0], [95, 0.45], [148, 0.75], [205, 0.4], [268, 0.55]], "average_iters": 400, "smooth_cells": 0.5}}],
+ ["i_s55_blk600", {"iters": 24000, "set": {"sand_m": 55, "block": 600, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["j_s70_sv07", {"iters": 24000, "set": {"sand_m": 70, "supply_var": 0.7, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}],
+ ["k_s55_long", {"iters": 48000, "set": {"sand_m": 55, "gust": 100, "spread_deg": 25, "average_iters": 400, "smooth_cells": 0.5}}]
+]

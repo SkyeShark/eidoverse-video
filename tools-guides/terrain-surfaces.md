@@ -215,7 +215,12 @@ stratigraphic height, so the bands sit on the benches the erosion cut.
   full-resolution image but has no mipmaps, so past a few metres the ground
   crawls when the camera moves. `interpolation='Auto'` (the default) reads
   Cubic within `detail_distance` (4, 9) metres of the camera and Linear past
-  it.
+  it. The shimmer probe (`blender/tests/terrain/surfacing/test_shimmer.py`
+  and `shimmer_metric.py`: the meadow's ground with the camera turned by
+  half a pixel, 960 × 540, 16 samples) measures the crawl as a share of the
+  real motion: 0.14 from 28 m out, 0.12 at 9-28 m and 0.24 at 3.5-6 m, where
+  Cubic everywhere crawls about 1.0 in the distance. A wider frame or a
+  longer lens can push `detail_distance` out; check it with the probe.
 - `dress=True` scatters CC0 rock models within 150 m of the focus on the
   talus, rock-toe and channel masks: sizes from a power law, half-buried and
   turned to the ground, as collection instances.

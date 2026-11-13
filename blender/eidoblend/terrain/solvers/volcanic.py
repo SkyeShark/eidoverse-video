@@ -28,9 +28,14 @@ Stage ops: OPS maps an op name to op(fields, level, params, seed, ctx=None), fou
                   plain, the plain pinned as the ranges' base level while they grow), 'volcano_plain' (the apron and
                   lava plain filling the low ground the vent's flows reach)
   processes       'volcano_age' (the fluvial backbone for the landform's age with no uplift: gullies, fans and
-                  aprons; radial and sector erodibility, kept craters), 'lava_flows' (DOWNFLOW walkers: tongues with
-                  levees, fronts and rough tops), 'caldera_lake' (a lake at its own level), 'volcano_lakes' (lakes
-                  with dry craters and playa floors; the solvers' pits filled with sediment)
+                  aprons; radial and sector erodibility, kept craters, seeded ravines, sparse wandering furrows with
+                  the erodibility gathered into them: furrow_k_factor), 'lava_flows' (DOWNFLOW walkers: tongues with
+                  levees, fronts and rough tops; with front_deg aa flows in lobed units: rubble fronts and margins at
+                  their angle, broad levees, ridged tops, none on the cone they left; channelled near the vent,
+                  spreading where the ground levels out, filling the gullies they cross, parting round higher
+                  ground), 'lava_rubble' (the flows' clinker on the fine levels), 'caldera_lake' (a lake at its own
+                  level, under the caldera's lowest notch), 'volcano_lakes' (lakes with dry craters and playa floors,
+                  limited in reach, size and count; the solvers' pits filled with sediment)
 Cones are piles at repose on the ground (piles_on): on a slope their downhill flanks are longer, never steeper.
 
 numpy on the CPU for the shapes, walkers and lakes; the aging runs the fluvial package's GPU kernels.
@@ -804,14 +809,17 @@ def rift_cones(centre, rift_azimuth_deg, count=24, distance_m=(1500.0, 12000.0),
 def cinder_field(window, count=12, width_m=(330.0, 1400.0), hw_ratio=0.18, crater_ratio=(0.30, 0.45),
                  flank_deg=(31.0, 33.0), vent_lines=2, line_trend_deg=None, line_spread_m=350.0,
                  age_yr=(0.0, 500e3), breach_fraction=0.3, outline_noise=0.05, avoid=(), elongation=1.0,
-                 overlap=0.2, seed=0):
+                 overlap=0.2, breach_toward_deg=None, breach_spread_deg=50.0, seed=0):
     """A cinder cone field (the cinder_cones recipe): `count` cones along `vent_lines` straight vent alignments
     crossing the window (x0, y0, size) in metres, trends within 25 degrees of line_trend_deg (random if None),
     scattered line_spread_m (1 sigma) off their line, blue-noise spaced (no overlap beyond `overlap` of the smaller
     cone's width: 0.2 apart, 0.4 coalescing pairs; nor with the cones in `avoid`: a hero cone placed by hand), basal
     widths log-uniform in width_m (H 60-250 m at H/W 0.18), elongated along their vent line by a factor uniform in
-    `elongation` (a fissure-fed cone), ages uniform in age_yr for the aging stage, some breached away from the field
-    centre. Returns a list of cinder_cone argument dicts."""
+    `elongation` (a fissure-fed cone), ages uniform in age_yr for the aging stage, some breached: toward
+    breach_toward_deg +- breach_spread_deg when given (the ground's downhill azimuth: a cone's lava ponds against its
+    downhill wall and breaks it out; breached away from the field's centre, a cone on the field's uphill side opened
+    uphill and its flow wrapped round it in a spiral), else away from the field centre. Returns a list of cinder_cone
+    argument dicts."""
     x0, y0, size = (float(v) for v in window)
     rng = _rng(seed, 41)
     trend = rng.uniform(0.0, 180.0) if line_trend_deg is None else float(line_trend_deg)
@@ -845,8 +853,11 @@ def cinder_field(window, count=12, width_m=(330.0, 1400.0), hw_ratio=0.18, crate
                     tilt_azimuth_deg=rng.uniform(0.0, 360.0), outline_noise=float(outline_noise),
                     age_yr=float(rng.uniform(*age_yr)), seed=int(rng.integers(1 << 30)))
         if rng.random() < breach_fraction:
-            cone.update(breach_azimuth_deg=math.degrees(math.atan2(px - (x0 + size / 2), py - (y0 + size / 2))),
-                        breach_width_deg=rng.uniform(40.0, 70.0))
+            if breach_toward_deg is None:
+                baz = math.degrees(math.atan2(px - (x0 + size / 2), py - (y0 + size / 2)))
+            else:                       # from the cone's own seed: the field's draws (and so its cones) stay as they were
+                baz = float(breach_toward_deg) + float(breach_spread_deg) * _rng(cone['seed'], 43).uniform(-1.0, 1.0)
+            cone.update(breach_azimuth_deg=baz, breach_width_deg=rng.uniform(40.0, 70.0))
         e = rng.uniform(*elongation) if not np.isscalar(elongation) else float(elongation)
         if e != 1.0:
             # about its vent line, each dyke at its own angle (parallel cones' straight flanks all faced two ways)
@@ -861,7 +872,8 @@ _NB = ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1))    
 _NB_LEN = np.array([math.hypot(a, b) for a, b in _NB])
 
 
-def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0, salt=0, dh_rel=None, pond_m=None):
+def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0, salt=0, dh_rel=None, pond_m=None,
+                 stop_spread=0.0, front_spread=0.0):
     """DOWNFLOW (Favalli et al. 2005), vectorised over walkers: from the start cell (column i, row j) every walker
     steps to the neighbour with the steepest descent of the surface perturbed by U(-dh, dh) (drawn per neighbour and
     step), until its path is length_m long, it leaves the grid or no perturbed neighbour lies lower (a pit stops it).
@@ -869,8 +881,12 @@ def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0,
     gentle plateau a fixed few metres is many times the drop per cell and every walker random-walks into a round
     puddle about its vent. pond_m: a walker with no lower neighbour ponds instead of stopping: it steps to its lowest
     neighbour (never straight back) and spends the climb from a budget of pond_m, stopping only when the budget is
-    gone (a flow that thick fills a hollow and spills over its lowest side). Returns the fraction of walkers that
-    passed through each cell (0..1), float64. Deterministic per (seed, salt): numpy's generator seeded with both."""
+    gone (a flow that thick fills a hollow and spills over its lowest side). stop_spread: each walker's length is
+    uniform in (1 - stop_spread .. 1) x length_m, so the flow thins out over its last stretch instead of ending on
+    one arc; front_spread: the perturbation grows by (1 + front_spread (travelled / its length)^2) as a walker nears
+    its end (a flow slowing at its front spreads into lobes; with both 0 every walker runs to the same length and the
+    front was a straight ribbon's rounded end). Returns the fraction of walkers that passed through each cell (0..1),
+    float64. Deterministic per (seed, salt): numpy's generator seeded with both."""
     h = np.asarray(h, np.float64)
     ny, nx = h.shape
     rng = np.random.default_rng([abs(int(seed)) & 0xFFFFFFFF, 7177, int(salt)])
@@ -884,6 +900,11 @@ def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0,
     dj = np.array([d[1] for d in _NB])
     hp = np.pad(h, 1, mode='constant', constant_values=np.inf)          # off the grid is never lower
     lim = float(length_m)
+    if stop_spread:
+        lim = lim * (1.0 - float(stop_spread) * np.random.default_rng([abs(int(seed)) & 0xFFFFFFFF, 7179,
+                                                                         int(salt)]).random(N))
+    lim = np.broadcast_to(np.asarray(lim, np.float64), (N,))
+    fs = float(front_spread)
     S = None
     if dh_rel:
         # no floor worth the name: across a filled hollow the routing surface falls a few millimetres a cell toward
@@ -896,6 +917,8 @@ def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0,
     while alive.any():
         a = np.nonzero(alive)[0]
         d_a = np.minimum(S[j[a], i[a]], dh_m) if S is not None else np.full(a.size, float(dh_m))
+        if fs:
+            d_a = d_a * (1.0 + fs * (dist[a] / lim[a]) ** 2)
         here = h[j[a], i[a]] + rng.uniform(-1.0, 1.0, a.size) * d_a
         nb = (hp[j[a, None] + 1 + dj[None, :], i[a, None] + 1 + di[None, :]]
               + rng.uniform(-1.0, 1.0, (a.size, 8)) * d_a[:, None])
@@ -923,23 +946,32 @@ def lava_walkers(h, cell, start, walkers=400, length_m=6000.0, dh_m=3.0, seed=0,
         i[a] += di[k]
         j[a] += dj[k]
         dist[a] += _NB_LEN[k] * cell
-        off = (i[a] <= 0) | (j[a] <= 0) | (i[a] >= nx - 1) | (j[a] >= ny - 1) | (dist[a] >= lim)
+        off = (i[a] <= 0) | (j[a] <= 0) | (i[a] >= nx - 1) | (j[a] >= ny - 1) | (dist[a] >= lim[a])
         np.add.at(visits, j[a] * nx + i[a], 1.0)          # a walker re-crossing a cell counts again: clipped at 1
         alive[a[off]] = False
     return np.minimum(visits.reshape(ny, nx) / N, 1.0)
 
 
 def lava_surface(P, cell, thickness_m, x=None, y=None, p_edge=0.04, margin_m=None, levee=0.3, rough=0.12, age=0.0,
-                 seed=0, width_m=None):
+                 seed=0, width_m=None, front_deg=None, levee_frac=0.1, width_scale=None):
     """A lava flow's added height and footprint from the walkers' passage fraction P (lava_walkers): the footprint
     is where P exceeds p_edge (smoothed), widened to width_m about the walkers' paths when given (lava spreads to a
     width its yield strength sets; walkers on an even slope trace a ribbon a few cells wide), its edge lobate (world
-    noise, needs x, y); the flow a flat-topped sheet thickness_m thick standing on its margins at a front margin_m
-    wide (default 1.5 x the thickness: lava fronts stand at 30-40 degrees), levees thickness x levee higher along
-    both edges, a rough top (pressure ridges: world noise at 6 and 2 x the thickness, rough x the thickness). age
-    0..1 dulls the front and the roughness (an older flow, weathered and mantled). Returns (added metres, footprint
-    0..1)."""
+    noise, needs x, y); the flow a flat-topped sheet thickness_m thick standing on its margins, levees thickness x
+    levee higher along both edges, a rough top (rough x the thickness). age 0..1 dulls the front and the roughness
+    (an older flow, weathered and mantled).
+
+    The margins: front_deg None keeps the old soft margin (margin_m wide, default 1.5 x the thickness, which the
+    blur and the footprint's own soft edge spread to a 15-degree ramp). front_deg (an aa flow's rubble front stands
+    at 30-40 degrees) makes the margin thickness / tan(front_deg) wide on a sharper footprint, the levees broad
+    ridges levee_frac of the flow's width inside each margin (not a thin line traced round the outline), and the top
+    pressure ridges and rubble: ridged noise at 3 and 1.2 x the thickness; width_scale (front_deg only: an array like
+    P, 0.5-2) scales width_m cell by cell (a flow narrow on a steep flank spreads wide where the ground levels out).
+    Returns (added metres, footprint 0..1)."""
     from .hillslope import gaussian_blur
+    if front_deg is not None:
+        return _lava_surface_aa(P, cell, thickness_m, x, y, p_edge, margin_m, levee, rough, age, seed, width_m,
+                                float(front_deg), float(levee_frac), width_scale)
     mm = 1.5 * float(thickness_m) if margin_m is None else float(margin_m)
     mm *= 1.0 + 2.0 * float(age)
     mc = max(mm / float(cell), 1.2)          # under a cell the footprint's edge stair-steps along the grid axes
@@ -982,15 +1014,65 @@ def lava_surface(P, cell, thickness_m, x=None, y=None, p_edge=0.04, margin_m=Non
     return np.maximum(T, 0.0), plate
 
 
+def _lava_surface_aa(P, cell, thickness_m, x, y, p_edge, margin_m, levee, rough, age, seed, width_m, front_deg,
+                     levee_frac, width_scale=None):
+    """lava_surface with front_deg: an aa flow's steep rubble front and margins, broad levees, ridged top."""
+    from .hillslope import gaussian_blur
+    th, cell = float(thickness_m), float(cell)
+    path = smoothstep(0.5 * p_edge, 2.0 * p_edge, gaussian_blur(np.asarray(P, np.float64), 0.8))
+    rng = np.random.default_rng([abs(int(seed)) & 0xFFFFFFFF, 9097])
+    W = None
+    if width_m and float(width_m) > 2.0 * cell:
+        W = float(width_m)
+        sig = 0.25 * W / cell
+        b = gaussian_blur(path, sig) * (math.sqrt(TAU) * sig)
+        if width_scale is not None:
+            # the band's width cell by cell: the band at half, the full and twice the width, read in log2 of the
+            # scale between them (the band's edge moves with sigma)
+            lf = np.log2(np.clip(np.asarray(width_scale, np.float64), 0.5, 2.0))
+            b_lo = gaussian_blur(path, 0.5 * sig) * (math.sqrt(TAU) * 0.5 * sig)
+            b_hi = gaussian_blur(path, 2.0 * sig) * (math.sqrt(TAU) * 2.0 * sig)
+            b = np.where(lf < 0.0, b + (b - b_lo) * lf, b + (b_hi - b) * lf)
+        lobes = 0.0
+        for frac, a in ((0.12, 0.5), (0.04, 0.3)):
+            g = gaussian_blur(rng.standard_normal(np.shape(P)), max(frac * W / cell, 0.7))
+            lobes = lobes + a * g / max(float(np.std(g)), 1e-9)
+        b = b * np.clip(1.0 + lobes, 0.2, None)
+        e2 = math.exp(-2.0)
+        # a narrow soft edge (the margin's blur below sets the front's width; the old 0.8-1.25 band spread the edge
+        # over five cells, a 15-degree ramp at any thickness)
+        core = smoothstep(0.92 * e2, 1.08 * e2, b)
+    else:
+        core = path
+    margin = th / math.tan(math.radians(front_deg)) if margin_m is None else float(margin_m)
+    margin *= 1.0 + 2.0 * float(age)
+    plate = smoothstep(0.3, 0.7, gaussian_blur(core, max(margin / (1.05 * cell), 0.7)))
+    T = th * plate
+    if levee:
+        lw = float(levee_frac) * (W if W else 8.0 * th)          # each levee's width
+        f2 = gaussian_blur(core, max(0.6 * lw / cell, 0.7))
+        T = T + float(levee) * th * plate * (1.0 - smoothstep(0.55, 0.9, f2))
+    if rough:
+        # pressure ridges and rubble: ridged noise (sharp crests, broad troughs) at 3 and 1.2 x the thickness
+        r = 0.0
+        for wl, a in ((3.0, 1.0), (1.2, 0.55)):
+            g = gaussian_blur(rng.standard_normal(np.shape(P)), max(wl * th / (4.0 * cell), 0.7))
+            g = g / max(float(np.std(g)), 1e-9)
+            r = r + a * (1.0 - 2.0 * np.abs(np.tanh(0.8 * g)))
+        T = T + float(rough) * (1.0 - 0.7 * float(age)) * th * r * plate
+    return np.maximum(T, 0.0), plate
+
+
 # ====================================================================== calderas (design 4.7)
 
-def scallop_outline(az, count, amp, seed, salt=51, sharpness=0.6, round_deg=1.5):
+def scallop_outline(az, count, amp, seed, salt=51, sharpness=0.6, round_deg=1.5, sizes=(0.3, 1.7)):
     """A scalloped ring as a radius factor of azimuth (radians or an AzimuthSampler; zero mean): `count` arcs bulging
     outward and meeting in inward cusps (the promontories between collapse embayments), each arc's span jittered and
-    its bulge sized 0.3-1.7 x amp. sharpness 0.5 makes semicircular arcs; larger values blunt them. The cusps are
-    rounded by a Gaussian of round_deg along the ring (1.5 degrees is about 120 m at a 4.5 km radius), so a promontory
-    is a rounded nose, not a radial crease down the wall."""
-    table = _scallop_table(count, amp, seed, salt, sharpness)
+    its bulge sized uniformly in `sizes` x amp (a wide range, 0.05-2.5: a few large embayments and nearly straight
+    stretches between them; 0.3-1.7 round a ring of 9 read as a pie-crust edge). sharpness 0.5 makes semicircular
+    arcs; larger values blunt them. The cusps are rounded by a Gaussian of round_deg along the ring (1.5 degrees is
+    about 120 m at a 4.5 km radius), so a promontory is a rounded nose, not a radial crease down the wall."""
+    table = _scallop_table(count, amp, seed, salt, sharpness, sizes)
     if round_deg > 0:
         sig = float(round_deg) / 360.0 * _AZ_SAMPLES
         k = np.fft.rfftfreq(_AZ_SAMPLES) * _AZ_SAMPLES            # cycles per turn
@@ -1000,11 +1082,11 @@ def scallop_outline(az, count, amp, seed, salt=51, sharpness=0.6, round_deg=1.5)
     return azimuth_sampler(az)(table)
 
 
-def _scallop_table(count, amp, seed, salt, sharpness):
+def _scallop_table(count, amp, seed, salt, sharpness, sizes=(0.3, 1.7)):
     rng = _rng(seed, salt)
     n = int(count)
     cusps = np.sort(np.mod((np.arange(n) + rng.uniform(-0.4, 0.4, n)) * TAU / n + rng.uniform(0.0, TAU), TAU))
-    size = rng.uniform(0.3, 1.7, n)                      # embayments of very different depths, never a flower
+    size = rng.uniform(float(sizes[0]), float(sizes[1]), n)    # embayments of very different depths, never a flower
     a = np.mod(AZ_TABLE_ANGLES, TAU)
     i = np.searchsorted(cusps, a, side='right') - 1                  # the arc that starts at cusps[i] (i = -1 wraps)
     c0 = np.where(i >= 0, cusps[i % n], cusps[-1] - TAU)
@@ -1067,10 +1149,29 @@ def caldera_wall_run_m(wall_height_m, wall_deg=42.0, talus_deg=35.0, talus_frac=
     return th / math.tan(math.radians(talus_deg)) + (float(wall_height_m) - th) / math.tan(math.radians(wall_deg))
 
 
+def embayment_outline(az, count, amp, width_deg, seed, salt=55):
+    """A ring's outline with a few embayments (radius factor of azimuth, radians or an AzimuthSampler; zero mean):
+    `count` smooth outward bights at random azimuths, each a raised cosine of half-width uniform in width_deg
+    (degrees) and depth uniform in amp (fractions of the radius), added (overlapping ones merge into a broader bight).
+    Unlike scallop_outline's arcs, which meet their neighbours in inward cusps all round the ring, the outline between
+    them stays as it was: a few large embayments and the straight stretches between."""
+    rng = _rng(seed, salt)
+    a = np.mod(AZ_TABLE_ANGLES, TAU)
+    table = np.zeros_like(a)
+    for _ in range(int(count)):
+        c = rng.uniform(0.0, TAU)
+        w = math.radians(rng.uniform(*width_deg))
+        d = np.abs(np.mod(a - c + math.pi, TAU) - math.pi)
+        table += rng.uniform(*amp) * np.where(d < w, 0.5 * (1.0 + np.cos(math.pi * d / w)), 0.0)
+    table -= table[:-1].mean()
+    return azimuth_sampler(az)(table)
+
+
 def caldera_collapse(x, y, h_before, centre, rim_radius_m, rim_height_m, floor_m, wall_deg=42.0, talus_deg=35.0,
                      talus_frac=0.35, scallops=8, scallop_amp=0.05, radius_noise=0.02, edge_noise=0.01,
                      elongation=1.0, elongation_azimuth_deg=0.0, crest_round_m=40.0, round_crest=True, cliffs=None,
-                     edge_decay=1.0, seed=0):
+                     edge_decay=1.0, scallop_sizes=(0.3, 1.7), talus_vary=0.0, polygon=None, embayments=None,
+                     seed=0):
     """A ring-fault collapse of an edifice (design 4.7 steps 2-4, analytically).
     cliffs             None: a plain rock face at wall_deg. A dict (strong_deg 72, strong_frac 0.35, layer_m
                        (25, 110), sectors 7): the face is the layered column of wall_column, its strong ledges
@@ -1087,9 +1188,18 @@ def caldera_collapse(x, y, h_before, centre, rim_radius_m, rim_height_m, floor_m
     wall_deg           the rock face (design: thresholded at 40-45 degrees)
     talus_deg          the talus apron at the wall's foot (repose 33-37), over talus_frac of the wall height
     scallops           collapse embayments around the ring (design: 4-8), scallop_amp their outward bulge (fraction of
-                       the radius); radius_noise low-frequency outline noise (harmonics 1-5); edge_noise the points
-                       and coves along the ring (harmonics 10-48); elongation the outline's long / short axis ratio
-                       (about), the long axis along elongation_azimuth_deg, the mean radius kept
+                       the radius), scallop_sizes the range of each one's bulge (x amp, scallop_outline);
+                       radius_noise low-frequency outline noise (harmonics 1-5); edge_noise the points and coves
+                       along the ring (harmonics 10-48); elongation the outline's long / short axis ratio (about), the
+                       long axis along elongation_azimuth_deg, the mean radius kept
+    talus_vary         the talus apron's top rising and falling round the ring by this fraction of its height
+                       (azimuth harmonics 3-24: debris cones under the chutes, the rock running further down between
+                       them); 0 keeps it at one height, a continuous bench all round the wall
+    polygon            None, or dict(sides, strength, azimuth_deg, roundness): the outline a rounded polygon (the ring
+                       fault following the region's fractures: straight stretches between broad corners), blended in
+                       by strength (impact.polygon_factor)
+    embayments         None, or dict(count, amp (lo, hi), width_deg (lo, hi), salt): a few smooth bights
+                       (embayment_outline), where scallops make cusps all round the ring
 
     The floor's edge is the mean rim radius minus the wall's run, shaped by the scallops, noise and elongation; the
     collapse surface rises from it as talus then rock; the edifice is cut down to that surface wherever it stands
@@ -1115,17 +1225,30 @@ def caldera_collapse(x, y, h_before, centre, rim_radius_m, rim_height_m, floor_m
         # edge_decay: the fall-off over harmonics 10-48 (1: sharp short spurs; 1.6: broader points and coves)
         shape = shape * (1.0 + float(edge_noise) * azimuth_noise(sampler, seed, 53, 10, 48, decay=float(edge_decay)))
     if scallops:
-        shape = shape * (1.0 + scallop_outline(sampler, scallops, scallop_amp, seed))
+        shape = shape * (1.0 + scallop_outline(sampler, scallops, scallop_amp, seed, sizes=scallop_sizes))
+    if polygon:
+        from .impact import polygon_factor
+        pg = dict(polygon)
+        shape = shape * polygon_factor(sampler, int(pg['sides']), float(pg['strength']),
+                                       float(pg.get('azimuth_deg', 0.0)), float(pg.get('roundness', 0.08)))
+    if embayments:
+        eb = dict(embayments)
+        shape = shape * (1.0 + embayment_outline(sampler, int(eb['count']), eb['amp'], eb['width_deg'], seed,
+                                                 int(eb.get('salt', 55))))
     u = r - r_floor * shape                                 # outward distance from the floor's edge
     tt, tw = math.tan(math.radians(talus_deg)), math.tan(math.radians(wall_deg))
     th = float(talus_frac) * Hw
     talus_line = floor_m + tt * u
+    # the rock face's foot: at the mean talus height, or rising and falling round the ring (the face is shifted along
+    # its own slope, so the rock reaches further down between the debris cones)
+    shift = (float(talus_vary) * th * azimuth_noise(sampler, seed, 54, 3, 24, decay=0.6) if talus_vary
+             else 0.0)
     strength = None
     if cliffs:
-        rock_line, strength = _layered_face(u - th / tt, az, Hw - th, wall_deg, dict(cliffs), seed)
-        rock_line = rock_line + floor_m + th
+        rock_line, strength = _layered_face(u - (th + shift) / tt, az, Hw - th, wall_deg, dict(cliffs), seed)
+        rock_line = rock_line + floor_m + th + shift
     else:
-        rock_line = floor_m + th + tw * (u - th / tt)
+        rock_line = floor_m + th + shift + tw * (u - (th + shift) / tt)
     k = 0.02 * Hw
     surface = smooth_max(smooth_max(talus_line, rock_line, k), floor_m, k)
     rock = smooth_max(rock_line, floor_m, k)
@@ -1136,7 +1259,50 @@ def caldera_collapse(x, y, h_before, centre, rim_radius_m, rim_height_m, floor_m
     floor = (u < 0.0).astype(np.float64)
     out = dict(height=h, talus=talus, floor=floor)
     if strength is not None:
-        out['strength'] = np.where((u > th / tt) & (surface < hb + 1.0), strength, np.nan)
+        out['strength'] = np.where((u > (th + shift) / tt) & (surface < hb + 1.0), strength, np.nan)
+    return out
+
+
+_FACE_TABLES = {}
+_FACE_AZ = 720                                 # azimuth samples of a face table (the sector blend varies over ~20 deg)
+_FACE_RUN = 4096                               # run samples over the longest column (a crater wall: 0.05-0.1 m apart)
+
+
+def _face_table(height_m, wall_deg, spec, seed):
+    """The layered face's sector blend tabulated once per wall (kept per process): (U, Z, S, S0), Z and S of shape
+    (_FACE_AZ + 1, _FACE_RUN + 1) over azimuth 0..TAU (closed) and run 0..U (the longest column's run), each
+    sector's own profile continued at wall_deg above its top, so beyond U the blend rises at wall_deg; S0 the blend
+    of the first layers' slopes, which continue the face below its foot."""
+    import json
+    key = json.dumps([float(height_m), float(wall_deg), spec, int(seed)], sort_keys=True, default=str)
+    if key in _FACE_TABLES:
+        return _FACE_TABLES[key]
+    sp = dict(spec)
+    n = int(sp.pop('sectors', 7))
+    rng = _rng(seed, 57)
+    phase = rng.uniform(0.0, TAU)
+    tw = math.tan(math.radians(wall_deg))
+    cols = [column_profile(wall_column(height_m, wall_deg, seed=int(seed) * 31 + k, **sp)) for k in range(n)]
+    U = max(float(uk[-1]) for uk, _zk in cols)
+    ut = np.linspace(0.0, U, _FACE_RUN + 1)
+    at = np.linspace(0.0, TAU, _FACE_AZ + 1)
+    Z = np.zeros((at.size, ut.size))
+    S = np.zeros_like(Z)
+    S0 = np.zeros(at.size)
+    W = np.zeros(at.size)
+    for k, (uk, zk) in enumerate(cols):
+        z = np.where(ut > uk[-1], zk[-1] + tw * (ut - uk[-1]), np.interp(ut, uk, zk))
+        seg = np.clip(np.searchsorted(uk, ut) - 1, 0, len(uk) - 2)
+        s = np.where(ut > uk[-1], tw, (zk[seg + 1] - zk[seg]) / np.maximum(uk[seg + 1] - uk[seg], 1e-9))
+        w = np.exp(8.0 * (np.cos(at - (phase + TAU * k / n)) - 1.0))
+        Z += w[:, None] * z[None, :]
+        S += w[:, None] * s[None, :]
+        S0 += w * (zk[1] / max(uk[1], 1e-9))
+        W += w
+    out = (U, Z / W[:, None], S / W[:, None], S0 / W)
+    if len(_FACE_TABLES) > 32:
+        _FACE_TABLES.pop(next(iter(_FACE_TABLES)))
+    _FACE_TABLES[key] = out
     return out
 
 
@@ -1144,28 +1310,30 @@ def _layered_face(u, az, height_m, wall_deg, spec, seed):
     """The rock face of a layered wall: (height above the face's foot at run u (metres outward), its threshold
     tangent). `sectors` columns (wall_column, seeds of their own) at evenly spread azimuths, blended by von Mises
     weights (kappa 8: each sector's own column about 90 % at its centre); beyond a column's top the face continues
-    at wall_deg, below its foot at its first layer's angle."""
-    n = int(spec.pop('sectors', 7))
-    rng = _rng(seed, 57)
-    phase = rng.uniform(0.0, TAU)
+    at wall_deg, below its foot at its first layer's angle. The blend is read from a table of azimuth and run
+    (_face_table: one bilinear read per point, not one interpolation per sector)."""
+    U, Z, S, S0 = _face_table(height_m, wall_deg, spec, seed)
+    spec.pop('sectors', None)
     tw = math.tan(math.radians(wall_deg))
-    zs = np.zeros_like(u)
-    ws = np.zeros_like(u)
-    sl = np.zeros_like(u)
-    for k in range(n):
-        col = wall_column(height_m, wall_deg, seed=int(seed) * 31 + k, **spec)
-        uk, zk = column_profile(col)
-        w = np.exp(8.0 * (np.cos(az - (phase + TAU * k / n)) - 1.0))
-        z = np.interp(u, uk, zk)
-        z = np.where(u > uk[-1], zk[-1] + tw * (u - uk[-1]), z)
-        z = np.where(u < 0.0, u * (zk[1] / max(uk[1], 1e-9)), z)
-        seg = np.clip(np.searchsorted(uk, u) - 1, 0, len(uk) - 2)
-        s = (zk[seg + 1] - zk[seg]) / np.maximum(uk[seg + 1] - uk[seg], 1e-9)
-        s = np.where((u > uk[-1]) | (u < 0.0), np.where(u < 0.0, zk[1] / max(uk[1], 1e-9), tw), s)
-        zs += w * z
-        sl += w * s
-        ws += w
-    return zs / ws, 1.1 * sl / ws
+    u = np.asarray(u, np.float64)
+    fa = np.mod(np.asarray(az, np.float64), TAU) * (_FACE_AZ / TAU)
+    j = np.minimum(fa.astype(np.int64), _FACE_AZ - 1)
+    g = fa - j
+    fu = np.clip(u, 0.0, U) * (_FACE_RUN / max(U, 1e-9))
+    i = np.minimum(fu.astype(np.int64), _FACE_RUN - 1)
+    f = fu - i
+
+    def read(T):
+        a = T[j, i] + (T[j, i + 1] - T[j, i]) * f
+        b = T[j + 1, i] + (T[j + 1, i + 1] - T[j + 1, i]) * f
+        return a + (b - a) * g
+    z = read(Z)
+    s = read(S)
+    s0 = S0[j] + (S0[j + 1] - S0[j]) * g
+    top = Z[j, -1] + (Z[j + 1, -1] - Z[j, -1]) * g
+    z = np.where(u > U, top + tw * (u - U), np.where(u < 0.0, u * s0, z))
+    s = np.where(u > U, tw, np.where(u < 0.0, s0, s))
+    return z, 1.1 * s
 
 
 # ====================================================================== reference presets (measured)
@@ -1287,33 +1455,89 @@ def _stamp_key(op, params):
     return f'stamp_{op}_' + hashlib.sha1(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
 
-def stamp_add(fields, level, key, evaluate, supersample=1):
+_STAMP_BLOCK = 65536        # points per evaluation block: a shape's dozens of temporaries then stay in the CPU's
+                            # cache (an impact crater over a whole 1024^2 level in one pass took 2x as long)
+
+
+def _blocks_down(a, s, how=None):
+    """A row block (rows a multiple of s) of a supersampled field back to cells: the s x s mean, or with how
+    'nanmax' the largest finite value of each block (a threshold field that is NaN off a wall)."""
+    a = np.asarray(a, np.float64)
+    if s == 1:
+        return a
+    b = a.reshape(a.shape[0] // s, s, a.shape[1] // s, s)
+    if how == 'nanmax':
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)                  # the all-NaN blocks off the wall
+            return np.nanmax(b, axis=(1, 3))
+    return b.mean(axis=(1, 3))
+
+
+def _evaluate_grid(evaluate, ox, oy, c, m, s, reduce=None, block=True):
+    """evaluate(x, y) at the (m s)^2 sub-cell centres of the m x m cells from (ox, oy) at c metres, in row blocks of
+    whole cells (_STAMP_BLOCK points; block False: one pass), joined and brought back to cells per key (_blocks_down;
+    reduce maps a key to its rule). The shapes are functions of world position, so the blocks change nothing."""
+    g = (np.arange(m * s) + 0.5) * (c / s)
+    X, Y = np.meshgrid(ox + g, oy + g)
+    rows = X.shape[0]
+    step = max(s, (max(_STAMP_BLOCK // max(X.shape[1], 1), 1) // s) * s) if block else rows
+    parts = {}
+    for j in range(0, rows, step):
+        for k, v in evaluate(X[j:j + step], Y[j:j + step]).items():
+            parts.setdefault(k, []).append(_blocks_down(v, s, (reduce or {}).get(k)))
+    return {k: v[0] if len(v) == 1 else np.vstack(v) for k, v in parts.items()}
+
+
+def _parent_stamp(ctx, key, x0, y0, cp, m, keys):
+    """The parent level's own evaluation of a stamp over this child's window and the 2 cells round it that
+    crop_upsample2 reads ((m + 4)^2 at the parent's cells), from what stamp_add kept in ctx.shared on the parent; None
+    when it is not there (a cache hit upstream, no ctx, or a window that does not sit on the parent's grid)."""
+    store = getattr(ctx, 'shared', None) if ctx is not None else None
+    rec = (store or {}).get('_stamps', {}).get(key)
+    if rec is None or abs(rec['cell'] - cp) > 1e-6 * cp or not all(k in rec['arrays'] for k in keys):
+        return None
+    fi, fj = (x0 - rec['x0']) / cp, (y0 - rec['y0']) / cp
+    i0, j0 = int(round(fi)), int(round(fj))
+    if abs(fi - i0) > 1e-4 or abs(fj - j0) > 1e-4 or i0 < 2 or j0 < 2 or i0 + m + 2 > rec['n'] or j0 + m + 2 > rec['n']:
+        return None
+    return {k: np.asarray(rec['arrays'][k][j0 - 2:j0 + m + 2, i0 - 2:i0 + m + 2], np.float64) for k in keys}
+
+
+def stamp_add(fields, level, key, evaluate, supersample=1, ctx=None, reduce=None, block=True):
     """Add a world-space shape's contributions to a level's fields once per terrain (see the section note).
-    evaluate(x, y) returns {field name: metres to add}, 'h' among them; fields that are absent are skipped."""
+    evaluate(x, y) returns {field name: metres to add}, 'h' among them; fields that are absent are skipped, and a key
+    that names no field (a wall's threshold, say) is only evaluated and returned. Evaluated in row blocks (block
+    False: one pass, for a shape that loops over its own parts), each key brought back from the supersampled points
+    by its reduce rule (default the mean). With ctx, the level's evaluation is kept in ctx.shared for its child, which
+    then reads the parent-grid shape from it instead of evaluating it again (and subtracts exactly what the parent
+    added). Returns the evaluation at this level's cells (dict of float64 arrays)."""
     from ..core import grid as _grid
     x0, y0, cell, n = level_window(level)
     s = int(supersample)
-
-    def on(ox, oy, c, m):
-        g = (np.arange(m * s) + 0.5) * (c / s)
-        X, Y = np.meshgrid(ox + g, oy + g)
-        return {k: box_down(np.asarray(v, np.float64), s) for k, v in evaluate(X, Y).items()}
-
-    here = on(x0, y0, cell, n)
-    add = dict(here)
+    here = _evaluate_grid(evaluate, x0, y0, cell, n, s, reduce, block)
+    keys = [k for k in here if k in fields or k == 'h']
+    add = {k: here[k] for k in keys}
     if key in fields:                              # inherited: the parent's h holds the shape at the parent's grid
         if n % 2:
             raise ValueError(f'{key}: a level of {n} cells cannot be a x2 child')
         m, cp = n // 2, 2.0 * cell
-        parent = on(x0 - 2.0 * cp, y0 - 2.0 * cp, cp, m + 4)       # the window and the 2 cells crop_upsample2 reads
+        parent = _parent_stamp(ctx, key, x0, y0, cp, m, keys)
+        if parent is None:                         # the window and the 2 cells crop_upsample2 reads
+            parent = _evaluate_grid(lambda xq, yq: {k: v for k, v in evaluate(xq, yq).items() if k in keys},
+                                    x0 - 2.0 * cp, y0 - 2.0 * cp, cp, m + 4, s, reduce, block)
         # as Fields.inherit upsampled them: Catmull-Rom for h and bed, bilinear for every other field
         add = {k: here[k] - _grid.crop_upsample2(parent[k], 2, 2, m, 'catmull' if k in ('h', 'bed') else 'bilinear')
-               for k in here}
+               for k in keys}
     for k, v in add.items():
         if k in fields:
             fields[k] = np.asarray(fields[k], np.float32) + v.astype(np.float32)
     fields[key] = here['h'].astype(np.float32)
-    return fields
+    store = getattr(ctx, 'shared', None) if ctx is not None else None
+    if store is not None:
+        store.setdefault('_stamps', {})[key] = dict(x0=x0, y0=y0, cell=cell, n=n,
+                                                    arrays={k: np.asarray(here[k], np.float32) for k in keys})
+    return here
 
 
 def level_window(level):
@@ -1424,7 +1648,7 @@ def op_stratovolcano(fields, level, params, seed, ctx=None):
     def evaluate(x, y):
         out = stratovolcano(x, y, **p)
         return {'h': out['height'], 'bed': out['height'] - out['cinder']}
-    stamp_add(fields, level, _stamp_key('stratovolcano', dict(params, seed=p['seed'])), evaluate, s)
+    stamp_add(fields, level, _stamp_key('stratovolcano', dict(params, seed=p['seed'])), evaluate, s, ctx=ctx)
     _pull_band(fields, ctx)
     return fields
 
@@ -1452,17 +1676,19 @@ def op_cinder_cones(fields, level, params, seed, ctx=None):
     default): each cone a pile at repose on the level's ground (piles_on), set at the ground's height at its vent,
     sampled on the first level the stage runs on (before the cones) and kept for the finer levels, which join the
     same piles by a plain maximum (sharper, never stacked); 'add': the cones added to h (stamp_add; on sloping
-    ground their downhill flanks stand steeper than repose). bed is unchanged, so the cones are loose scoria
-    (h - bed) for the talus stage."""
+    ground their downhill flanks stand steeper than repose). toe_frac: the piles' concave toe, as a fraction of each
+    cone's height (piles_on; 0.2 by default). bed is unchanged, so the cones are loose scoria (h - bed) for the
+    talus stage."""
     if _prepass(ctx):
         return fields
     p = dict(params)
     s = int(p.pop('supersample', 1))
     compose = p.pop('compose', 'pile')
+    toe = float(p.pop('toe_frac', 0.2))
     cones = cones_of(p, seed)
     key = _stamp_key('cinder_cones', dict(params, seed=seed))
     if compose == 'add':
-        stamp_add(fields, level, key, lambda x, y: {'h': cinder_cones(x, y, cones)}, s)
+        stamp_add(fields, level, key, lambda x, y: {'h': cinder_cones(x, y, cones)}, s, ctx=ctx)
         _pull_band(fields, ctx)
         return fields
     h = np.asarray(fields['h'], np.float64)
@@ -1478,7 +1704,7 @@ def op_cinder_cones(fields, level, params, seed, ctx=None):
         bases, slopes = _ground_at(ground, level, cones, first)
         store[key] = dict(bases=bases, slopes=slopes)
     rec = store[key]
-    out = piles_on(h, x, y, cones, rec['bases'], rec['slopes'], smooth=first)
+    out = piles_on(h, x, y, cones, rec['bases'], rec['slopes'], toe_frac=toe, smooth=first)
     fields['h'] = _f32(out)
     if first:
         fields[key] = _f32(out - h)
@@ -1579,7 +1805,8 @@ SETTING_DEFAULTS = dict(centre=(0.0, 0.0), basin_m=12000.0, ramp_m=6000.0, cover
                         plain_m=0.0, plain_slope=0.0, plain_slope_up=None, plain_down_azimuth_deg=180.0,
                         plain_extent_m=30000.0, open_azimuth_deg=None, open_half_deg=60.0, plain_k=1.0,
                         plain_rough_m=0.0, plain_rough_scale_m=2500.0, plain_blend_m=25.0, plain_radius_m=None,
-                        plain_taper_m=8000.0, shield_m=0.0, shield_radius_m=1500.0, plain_fill_max_m=None)
+                        plain_taper_m=8000.0, shield_m=0.0, shield_radius_m=1500.0, plain_fill_max_m=None,
+                        plain_rough_inner=None)
 
 
 def setting_shape(level, params, seed, dev=None):
@@ -1818,6 +2045,14 @@ def plain_surface(level, params, seed, dev=None):
             d = (x - p['centre'][0]) * ex + (y - p['centre'][1]) * ey
             local = 1.0 - np.tanh(d / float(p['plain_extent_m'])) ** 2
             amp = rough * np.clip(local, 0.15, 1.0)
+        if p.get('plain_rough_inner'):
+            # under the cone the apron's lobes are buried by the cone's own flows and tephra: the noise fades to
+            # `factor` inside r0_m (the cone's flanks get their texture from the aging stage's radial streaks; the
+            # apron's round swells showed through the lower flanks as blobs)
+            pi_ = dict(p['plain_rough_inner'])
+            rr, _ = polar(x, y, p['centre'])
+            f0 = float(pi_.get('factor', 0.3))
+            amp = amp * (f0 + (1.0 - f0) * smoothstep(float(pi_['r0_m']), float(pi_['r1_m']), rr))
         plain = plain + amp * (_unit_fbm(level, sc, int(seed) + 37, dev, 4)
                                + 0.33 * _unit_fbm(level, 0.25 * sc, int(seed) + 39, dev, 3))
     return plain
@@ -1831,7 +2066,152 @@ AGE_DEFAULTS = dict(age_yr=1.0e5, K=2.0e-6, m=0.5, n=1.0, threshold_deg=38.0, th
                     dt_target_yr=None, lock=True, fill_pits=True, young_radius_m=0.0, young_factor=1.0,
                     centre=(0.0, 0.0), strength_from_field=False, threshold_gain=0.0, breakup=0.0, k_breakup=0.0,
                     breakup_scales_m=(60.0, 20.0, 7.0), seed_texture_m=0.0, seed_texture_scale_m=150.0,
-                    sector_contrast=0.0, sector_harmonics=(2, 6), keep_craters=(), k_profile=None)
+                    sector_contrast=0.0, sector_harmonics=(2, 6), keep_craters=(), k_profile=None, ravines=(),
+                    ravine_field=None, seed_streaks=None)
+
+
+def ravine_cut(x, y, centre, ravines, seed=0):
+    """The depth (metres, >= 0) of radial ravines cut into a cone at world points: each dict(azimuth_deg, r_m (from,
+    to: metres from centre), depth_m, width_m (about one sigma of a Gaussian cross-section), wander_m (its line
+    wandering sideways)); its depth rising from 0 at the upper end over the first fifth of its length and easing
+    out over the last third (where it opens into its fan). Combined by maximum."""
+    r, az = polar(x, y, centre)
+    out = np.zeros(np.broadcast(np.asarray(x), np.asarray(y)).shape)
+    for k, rv in enumerate(ravines):
+        a = math.radians(float(rv['azimuth_deg']))
+        along = r * np.cos(az - a)
+        lat = r * np.sin(az - a)
+        r0, r1 = (float(v) for v in rv['r_m'])
+        sel = (along > r0 - 3.0 * float(rv['width_m'])) & (along < r1 + 3.0 * float(rv['width_m']))
+        if not sel.any():
+            continue
+        if float(rv.get('wander_m', 0.0)):
+            lat = lat - float(rv['wander_m']) * fbm(along, np.full_like(along, 1000.0 * k), 0.4 * (r1 - r0),
+                                                    int(seed) + 97 + k, octaves=3)
+        t = np.clip((along - r0) / max(r1 - r0, 1e-6), 0.0, 1.0)
+        prof = smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.67, 1.0, t))
+        w = float(rv['width_m']) * (0.6 + 0.6 * t)              # the ravine widens downslope
+        cut = float(rv['depth_m']) * prof * np.exp(-(lat / w) ** 2)
+        out = np.maximum(out, np.where(sel, cut, 0.0))
+    return out
+
+
+def radial_streaks(x, y, centre, k_range=(40, 160), decay=0.6, r_range_m=(1000.0, 10000.0), bands=3, seed=0,
+                   wander_m=0.0, wander_scale_m=2000.0, sparse=None):
+    """Unit-RMS streaks running down a cone from `centre` at world points: periodic noise of azimuth (harmonics
+    k_range, falling off at `decay`: a few broad furrows and many fine ones; at radius r the spacing of harmonic k is
+    2 pi r / k), in `bands` overlapping bands of log radius over r_range_m, each band its own pattern, so a streak
+    runs a band's length (a factor of about 2 in radius) and fades as another begins. Periodic in azimuth: no seam.
+    The streaks fade in over half a band below r_range_m and out over half a band above it. What seeds radial
+    gullies of many sizes on a cone (isotropic noise seeds round hollows).
+
+    wander_m: each streak's line wanders sideways by about this many metres (one sigma of world noise at
+    wander_scale_m, the azimuth shifted by it over the radius), so the streaks bend and wind down the cone (without it
+    they ran as straight spokes from the summit: a sunburst from the air, a pleated skirt from the foot). sparse: None
+    keeps the whole signal (troughs and crests); a threshold t (sigmas) keeps only the troughs below -t, each as deep
+    as it reaches beyond the threshold in half-sigmas, and leaves the ground between them at 0: furrows of many depths
+    with smooth planes between (the returned values are <= 0)."""
+    r, az = polar(x, y, centre)
+    if wander_m:
+        # the azimuth's shift is world noise over the radius: a line keeps its sideways wander in metres (shifts
+        # under a quarter of the wander's scale from the centre are held there: no swirl at the summit)
+        wn = fbm(x, y, float(wander_scale_m), int(seed) + 613, octaves=2)
+        az = az + float(wander_m) * wn / np.maximum(r, 0.25 * float(wander_scale_m))
+    s = azimuth_sampler(az)
+    lr = np.log(np.maximum(r, 1.0))
+    l0, l1 = math.log(float(r_range_m[0])), math.log(float(r_range_m[1]))
+    wid = (l1 - l0) / max(int(bands), 1)
+    out = np.zeros(np.shape(r))
+    wsum = np.zeros(np.shape(r))
+    for b in range(int(bands)):
+        c = l0 + wid * (b + 0.5)
+        w = np.exp(-((lr - c) / wid) ** 2)
+        out += w * azimuth_noise(s, seed, 600 + b, int(k_range[0]), int(k_range[1]), decay=float(decay))
+        wsum += w * w
+    env = smoothstep(l0 - 0.5 * wid, l0, lr) * (1.0 - smoothstep(l1, l1 + 0.5 * wid, lr))
+    out = env * out / np.sqrt(np.maximum(wsum, 1e-12))
+    if sparse is not None:
+        out = -2.0 * np.maximum(-out - float(sparse), 0.0)
+    return out
+
+
+def _streak_set(level, centre, st, seed, i):
+    """One seed_streaks entry (dict amp_m, k, decay, r_m, bands, wander_m, wander_scale_m, sparse, k_floor) at a
+    level's cells: radial_streaks' signal (unit, before amp_m)."""
+    xq, yq = level.xy()
+    return radial_streaks(xq, yq, centre, st.get('k', (40, 160)), st.get('decay', 0.6),
+                          st.get('r_m', (1000.0, 10000.0)), int(st.get('bands', 3)), int(seed) + 709 + 31 * i,
+                          wander_m=float(st.get('wander_m', 0.0)), wander_scale_m=float(st.get('wander_scale_m', 2000.0)),
+                          sparse=st.get('sparse'))
+
+
+def _streak_sets(p):
+    sets = p.get('seed_streaks')
+    if not sets:
+        return []
+    return [dict(s) for s in (sets if isinstance(sets, (list, tuple)) else [sets])]
+
+
+def furrow_k_factor(level, p, seed):
+    """The erodibility gathered into a 'volcano_age' stage's furrows and ravines (a factor of K at the level's cells,
+    k_floor..1), or None when no seed_streaks set is sparse with a k_floor. On a young cone of permeable scoria and
+    lava the rain soaks in, and gullies are cut where debris flows and slush avalanches run, down the furrows between
+    lava lobes; the planes between barely erode (K x k_floor). Beyond the furrows' outer radius (1.3 x, eased) the
+    ground keeps its erodibility. (With K alike everywhere the stream power cut an even comb of gullies of one size:
+    a washboard from the foot.)"""
+    from .hillslope import gaussian_blur
+    gul = [(i_, st) for i_, st in enumerate(_streak_sets(p)) if st.get('sparse') is not None
+           and st.get('k_floor') is not None]
+    if not gul:
+        return None
+    xq, yq = level.xy()
+    m = np.zeros(np.shape(xq))
+    for i_, st in gul:
+        m = np.maximum(m, smoothstep(0.0, 0.6, -_streak_set(level, p['centre'], st, seed, i_)))
+    rvs = ravines_of(p, seed)
+    if rvs:
+        cut = ravine_cut(xq, yq, p['centre'], rvs, seed)
+        m = np.maximum(m, smoothstep(0.05, 0.4, cut / max(max(float(rv['depth_m']) for rv in rvs), 1e-6)))
+    m = np.clip(gaussian_blur(m, max(25.0 / float(level.cell), 0.5)), 0.0, 1.0)
+    rq, _ = polar(xq, yq, p['centre'])
+    r_hi = max(float(st.get('r_m', (1000.0, 10000.0))[1]) for _i, st in gul)
+    m = 1.0 - (1.0 - smoothstep(r_hi, 1.3 * r_hi, rq)) * (1.0 - m)
+    k_floor = min(float(st['k_floor']) for _i, st in gul)
+    return k_floor + (1.0 - k_floor) * m
+
+
+def ravines_of(params, seed):
+    """The ravines a 'volcano_age' stage cuts: params ravines (explicit dicts, see ravine_cut) plus ravine_field
+    (dict count, r_m (lo, hi) of the upper end, length_m (lo, hi), depth_m (lo, hi), width_m (lo, hi), wander_m:
+    that many at azimuths of their own, seeded)."""
+    out = [dict(rv) for rv in (params.get('ravines') or ())]
+    f = params.get('ravine_field')
+    if f:
+        rng = _rng(seed, 93)
+        for _ in range(int(f.get('count', 4))):
+            r0 = rng.uniform(*f['r_m'])
+            out.append(dict(azimuth_deg=rng.uniform(0.0, 360.0), r_m=[r0, r0 + rng.uniform(*f['length_m'])],
+                            depth_m=rng.uniform(*f['depth_m']), width_m=rng.uniform(*f['width_m']),
+                            wander_m=float(f.get('wander_m', 0.0))))
+    return out
+
+
+def basins_kept(h, filled, min_depth_m):
+    """The filled surface (hydro.fill_depressions) with every closed depression deeper than min_depth_m left as it
+    is: a sink the drainage gathers in, not a lake brimming to its spill. The shallow pits stay filled (their flats
+    drain on). What a closed basin's drainage (a crater's, a caldera's) is routed on."""
+    from ..core.metrics import label
+    h = np.asarray(h, np.float64)
+    filled = np.asarray(filled, np.float64)
+    depth = filled - h
+    lab, n = label(depth > 1e-4)
+    if not n:
+        return filled
+    maxd = np.zeros(n + 1)
+    np.maximum.at(maxd, lab.ravel(), depth.ravel())
+    deep = maxd > float(min_depth_m)
+    deep[0] = False
+    return np.where(deep[lab], h, filled)
 
 
 def _keep_mask(level, craters):
@@ -1870,7 +2250,8 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
     recent eruption keeps open - the fluvial passes fill every pit each step, so without this a summit crater fills
     in; inside, the surface may be lowered by the run but never raised), k_profile ([[r_m, factor], ...]: K x a
     piecewise-linear factor of the distance from `centre`, constant beyond its ends: Fuji's steep upper cone is
-    cut by radial gullies while its lower flanks, resurfaced by lava flows and tephra, stay smooth)."""
+    cut by radial gullies while its lower flanks, resurfaced by lava flows and tephra, stay smooth), ravines /
+    ravine_field (radial ravines cut before the run on its first level: ravine_cut, ravines_of)."""
     if _prepass(ctx):
         return fields
     from . import fluvial as FL
@@ -1899,8 +2280,17 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
         dt = float(fields[key].flat[0]) if key in fields else dt
         steps = max(int(round(age / dt)), 1)
     dt_ref = dt * FL.CELL_REF_M / (cell if grow else max(cell, main_cell))
-    if first and float(p['seed_texture_m']) > 0:
-        tx = float(p['seed_texture_m']) * _unit_fbm(level, float(p['seed_texture_scale_m']), int(seed) + 707, dev, 3)
+    if first and (float(p['seed_texture_m']) > 0 or p['seed_streaks']):
+        tx = np.zeros(fields['h'].shape)
+        if float(p['seed_texture_m']) > 0:
+            tx = float(p['seed_texture_m']) * _unit_fbm(level, float(p['seed_texture_scale_m']), int(seed) + 707, dev,
+                                                        3)
+        if p['seed_streaks']:
+            # radial furrows of many sizes (radial_streaks: dict amp_m, k, decay, r_m, bands, wander_m, sparse, or a
+            # list of such sets): the flow gathers in them and cuts gullies down the cone, deep and shallow, where
+            # isotropic noise seeds round hollows
+            for i_, st in enumerate(_streak_sets(p)):
+                tx = tx + float(st['amp_m']) * _streak_set(level, p['centre'], st, seed, i_)
         if p['k_profile']:                       # the seed texture only where the run is meant to cut
             xq, yq = level.xy()
             rq, _ = polar(xq, yq, p['centre'])
@@ -1909,11 +2299,39 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
         fields['h'] = _f32(np.asarray(fields['h'], np.float64) + tx)
         if 'bed' in fields:
             fields['bed'] = _f32(np.asarray(fields['bed'], np.float64) + tx)
-    if first:
-        surf = HY.routing_surface(HY.fill_depressions(np.asarray(fields['h'], np.float64),
-                                                      sea_level=ctx.sea_level)[0], sea_level=ctx.sea_level)
-        A_in = ctx.pins['A_in'] if ctx.pins is not None else None
-        fields['A'] = HY.route_to_convergence(dev, surf, cell, A0=fields.get('A'), A_in=A_in)[0]
+    if first and (p['ravines'] or p['ravine_field']):
+        # a few deep ravines seeded before the run (the stream power gathers the drainage into them and deepens
+        # them; the flanks between keep long smooth ridges): Fuji's Osawa-kuzure, where an even comb of equal
+        # gullies otherwise covered the cone from foot to summit
+        xq, yq = level.xy()
+        cut = ravine_cut(xq, yq, p['centre'], ravines_of(p, seed), seed)
+        fields['h'] = _f32(np.asarray(fields['h'], np.float64) - cut)
+        if 'bed' in fields:
+            fields['bed'] = _f32(np.minimum(np.asarray(fields['bed'], np.float64) - cut, fields['h']))
+    closed = not p['fill_pits']
+    pins_saved = None
+    if closed and not first and ctx.pins is not None:
+        # a closed basin's refine level: the parent's inflow was routed over the basin filled to its spill (run.py's
+        # end routing), so it carried the whole basin's catchment across the floor toward the rim's lowest point;
+        # injected at this window's edge every step, it cut a channel across the floor. The window drains on its own.
+        pins_saved = ctx.pins
+        ctx.pins = dict(ctx.pins, A_in=np.zeros_like(ctx.pins['A_in']), qs_in=np.zeros_like(ctx.pins['qs_in']))
+    if first or closed:
+        h0 = np.asarray(fields['h'], np.float64)
+        if first:
+            filled = HY.fill_depressions(h0, sea_level=ctx.sea_level)[0]
+            if closed:
+                # the basin stays a sink: routed over its filled surface, its whole catchment poured over the rim's
+                # lowest point for the run's first few hundred steps (until the one-iteration-per-step routing caught
+                # up), cut a breach through the rim and creased the floor toward it (Meteor Crater's seed 1)
+                filled = basins_kept(h0, filled, HY.depression_threshold(float(np.ptp(h0))))
+            surf = HY.routing_surface(filled, sea_level=ctx.sea_level)
+        else:
+            # a closed basin's refine level: routed on its own surface (its pits hold their drainage), not on the
+            # inherited area, whose stale river crossed the floor to the spill point; no CPU fill on a hero level
+            surf = h0.astype(np.float32)
+        A_in = ctx.pins['A_in'] if (ctx.pins is not None and first) else None
+        fields['A'] = HY.route_to_convergence(dev, surf, cell, A0=fields.get('A') if first else None, A_in=A_in)[0]
     saved = {k: fields[k] for k in ('U', 'K_factor', 'Sc_factor') if k in fields}
     fields['U'] = np.zeros(fields['h'].shape, np.float32)
     kf = np.ones(fields['h'].shape)
@@ -1933,6 +2351,9 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
         _r, az = polar(x, y, p['centre'])
         k0, k1 = p['sector_harmonics']
         kf = kf * np.exp(sc_ * azimuth_noise(az, seed, 91, int(k0), int(k1), decay=0.8) - 0.5 * sc_ * sc_)
+    fk = furrow_k_factor(level, p, seed)
+    if fk is not None:
+        kf = kf * fk
     fields['K_factor'] = _f32(kf)
     keep = list(p['keep_craters'] or ())
     h_keep = np.asarray(fields['h'], np.float64).copy() if keep else None
@@ -1963,6 +2384,8 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
             fields[k] = saved[k]
         elif k in fields:
             del fields[k]
+    if pins_saved is not None:
+        ctx.pins = pins_saved                       # the runner's pins for the level's later stages
     fields[key] = np.full(fields['h'].shape, dt, np.float32)        # the step the first level used (and a marker)
     return fields
 
@@ -1970,16 +2393,21 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
 # ---------------------------------------------------------------------- lava flows (DOWNFLOW, design 4.7)
 
 LAVA_DEFAULTS = dict(walkers=400, length_m=6000.0, thickness_m=12.0, dh_m=None, dh_factor=0.25, dh_rel=1.5, age=0.0,
-                     levee=0.3, rough=0.12, p_edge=0.01, width_m=None)
+                     levee=0.3, rough=0.12, p_edge=0.01, width_m=None, front_deg=None, levee_frac=0.1,
+                     stop_spread=0.0, front_spread=0.0, vent_taper=0.6, no_climb=False, units=1, bury=False,
+                     spread_slope_deg=None, channel=None)
 
 
 def lava_vents(params, seed):
     """The vents of a 'lava_flows' stage, each dict(at, and LAVA_DEFAULTS overrides): params vents=[...] (explicit),
     rift=dict(centre, azimuth_deg, count, distance_m (lo, hi), spread_m, length_m (lo, hi), thickness_m (lo, hi),
     age (lo, hi)) (flank vents along a volcano's rift, both ways), breaches=dict(the cinder_cones stage's cones /
-    field / kappa; length_m, thickness_m, age) (a flow from the foot of every breached cone, out of its breach), and
-    scatter=dict(window (x0, y0, size), count, length_m, thickness_m, age) (old flows from vents spread over a
-    plateau)."""
+    field / kappa; length_m, thickness_m, age) (a flow from the foot of every breached cone, out of its breach),
+    feet=dict(the cones as for breaches; fraction, downhill_azimuth_deg, spread_deg, length_m (lo, hi), thickness_m
+    (lo, hi), age (lo, hi), width_m (lo, hi)) (older flows from the feet of that share of the cones, breached or not,
+    each leaving its cone toward the plateau's downhill azimuth +- spread_deg: a field's plateau is built of its own
+    cones' flows), and scatter=dict(window (x0, y0, size), count, length_m, thickness_m, age) (old flows from vents
+    spread over a plateau)."""
     out = [dict(v) for v in params.get('vents', ())]
     rng = _rng(seed, 81)
     if params.get('rift'):
@@ -2008,6 +2436,20 @@ def lava_vents(params, seed):
                             thickness_m=float(bp.get('thickness_m', 12.0)) * rng.uniform(0.7, 1.2),
                             age=1.0 - youth,
                             width_m=float(bp['width_m']) * rng.uniform(0.6, 1.4) if bp.get('width_m') else None))
+    if params.get('feet'):
+        fp = dict(params['feet'])
+        frng = _rng(seed, 83)
+        for c in cones_of(fp, seed):
+            if frng.random() >= float(fp.get('fraction', 1.0)):
+                continue
+            az = float(fp.get('downhill_azimuth_deg', 0.0)) + frng.uniform(-1.0, 1.0) * float(fp.get('spread_deg', 60.0))
+            ex, ey = compass(az)
+            rb = 0.5 * float(c['width_m']) * max(1.0, float(c.get('elongation', 1.0)))
+            out.append(dict(at=(c['at'][0] + rb * ex, c['at'][1] + rb * ey),
+                            length_m=frng.uniform(*fp.get('length_m', (2000.0, 6000.0))),
+                            thickness_m=frng.uniform(*fp.get('thickness_m', (6.0, 15.0))),
+                            age=frng.uniform(*fp.get('age', (0.5, 1.0))),
+                            width_m=frng.uniform(*fp['width_m']) if fp.get('width_m') else None))
     if params.get('scatter'):
         sp = dict(params['scatter'])
         x0, y0, size = (float(v) for v in sp['window'])
@@ -2057,32 +2499,220 @@ def op_lava_flows(fields, level, params, seed, ctx=None):
             j0, j1, i0, i1 = max(cj - r0, 0), min(cj + r0 + 1, n), max(ci - r0, 0), min(ci + r0 + 1, n)
             g = g.copy()
             g[j0:j1, i0:i1] = gaussian_blur(g[j0:j1, i0:i1], sig)
-        P = lava_walkers(g, level.cell, (fi, fj), int(v['walkers']), float(v['length_m']), dh, seed, k,
-                         dh_rel=v['dh_rel'], pond_m=float(v['thickness_m']))
-        # the flow's own window: where walkers went, plus room for its width, margins and levees
-        jj, ii = np.nonzero(P > 0.0)
-        th = float(v['thickness_m'])
-        mc = max(1.5 * th * (1.0 + 2.0 * float(v['age'])) / level.cell, 1.2)
-        pad = int(math.ceil(12.0 * mc + 2.0 * float(v['width_m'] or 0.0) / level.cell + 8))
-        j0, j1 = max(int(jj.min()) - pad, 0), min(int(jj.max()) + pad + 1, n)
-        i0, i1 = max(int(ii.min()) - pad, 0), min(int(ii.max()) + pad + 1, n)
-        win = (slice(j0, j1), slice(i0, i1))
-        T, F = lava_surface(P[win], level.cell, th, x[win], y[win], float(v['p_edge']), None,
-                            float(v['levee']), float(v['rough']), float(v['age']), int(seed) + 13 * k,
-                            width_m=v['width_m'])
-        if v['width_m']:
-            # a flow leaves its vent narrow and spreads downstream: the band about the paths thins to nothing at the
-            # vent, so it does not climb back up the cone it came from
-            rv = np.hypot(x[win] - float(v['at'][0]), y[win] - float(v['at'][1]))
-            taper = smoothstep(0.0, 0.6 * float(v['width_m']), rv)
-            T, F = T * taper, F * taper
-        total[win] += T
-        foot[win] = np.maximum(foot[win], F * (1.0 - 0.6 * float(v['age'])))
+        units = max(int(v.get('units', 1) or 1), 1)
+        urng = np.random.default_rng([abs(int(seed)) & 0xFFFFFFFF, 9113, k])
+        tv, fv = np.zeros_like(h), np.zeros_like(h)
+        start, axis = (fi, fj), None
+        for u in range(units):
+            vu = dict(v)
+            if u:
+                # a later flow unit breaking out of the earlier ones' side or front, shorter and narrower, walking on
+                # the ground plus what they laid down, so it is turned aside by them (a compound aa flow's lobes: one
+                # tongue of even width read as a ribbon with a rounded end)
+                (ai, aj), (di_, dj_), L_ax = axis
+                vu['length_m'] = float(v['length_m']) * urng.uniform(0.25, 0.6)
+                vu['thickness_m'] = float(v['thickness_m']) * urng.uniform(0.7, 1.0)
+                W0 = float(v['width_m'] or 0.0)
+                if W0:
+                    vu['width_m'] = W0 * urng.uniform(0.35, 0.7)
+                if urng.random() < 0.5:                             # from a side, alongside the first unit
+                    s_ = urng.uniform(0.2, 0.8) * L_ax
+                    lat = urng.choice([-1.0, 1.0]) * (0.5 * W0 + 0.15 * float(vu['width_m'] or 0.0)) / level.cell
+                else:                                               # from the front, pushing it on
+                    s_ = urng.uniform(0.8, 1.0) * L_ax
+                    lat = urng.uniform(-0.3, 0.3) * W0 / level.cell
+                if v.get('channel'):
+                    # a channelled flow breaks out only past its channel (a side unit placed near the vent laid a
+                    # wide lobe round the cone's foot, a skirt)
+                    s_ = max(s_, min(float(dict(v['channel']).get('until', 0.45)) * float(v['length_m'])
+                                     / level.cell, L_ax))
+                start = (float(np.clip(ai + s_ * di_ - lat * dj_, 2, n - 3)),
+                         float(np.clip(aj + s_ * dj_ + lat * di_, 2, n - 3)))
+            # (a later unit sees the earlier ones smoothed at the walkers' scale: as broad obstacles, not as their
+            # rubble, whose small pits stopped every walker within a few cells)
+            gu = g + gaussian_blur(tv, max(sig, 1.0)) if u else g
+            P = lava_walkers(gu, level.cell, start, int(vu['walkers']), float(vu['length_m']), dh,
+                             seed, k if u == 0 else k * 16 + u, dh_rel=v['dh_rel'], pond_m=float(vu['thickness_m']),
+                             stop_spread=float(v['stop_spread']), front_spread=float(v['front_spread']) if u == 0
+                             else 0.0)
+            if u == 0 and units > 1:
+                # the first unit's axis: from its vent toward the passage's centroid, twice that far
+                pj, pi = np.nonzero(P > 0.05)
+                if pj.size:
+                    w_ = P[pj, pi]
+                    cj_, ci_ = float(np.sum(pj * w_) / np.sum(w_)), float(np.sum(pi * w_) / np.sum(w_))
+                    dist_ = max(math.hypot(ci_ - fi, cj_ - fj), 1.0)
+                    axis = ((fi, fj), ((ci_ - fi) / dist_, (cj_ - fj) / dist_), 2.0 * dist_)
+                else:
+                    units = 1
+            # the unit's own window: where walkers went, plus room for its width, margins and levees
+            jj, ii = np.nonzero(P > 0.0)
+            th = float(vu['thickness_m'])
+            mc = max(1.5 * th * (1.0 + 2.0 * float(v['age'])) / level.cell, 1.2)
+            pad = int(math.ceil(12.0 * mc + 2.0 * float(vu['width_m'] or 0.0) / level.cell + 8))
+            j0, j1 = max(int(jj.min()) - pad, 0), min(int(jj.max()) + pad + 1, n)
+            i0, i1 = max(int(ii.min()) - pad, 0), min(int(ii.max()) + pad + 1, n)
+            win = (slice(j0, j1), slice(i0, i1))
+            wsc = None
+            if v.get('spread_slope_deg') and vu['width_m']:
+                # lava spreads where the ground levels out: the width x sqrt(tan(spread_slope) / tan(slope)), 0.5-1.6
+                # (on the smoothed ground the walkers ran on: narrow down the steep cone, wide lobes on the plain; at
+                # one width all the way the flows ran as straight ribbons down the flanks)
+                gy, gx = np.gradient(gu[win], level.cell)
+                ts = np.maximum(np.hypot(gx, gy), 1e-3)
+                wsc = np.clip(np.sqrt(math.tan(math.radians(float(v['spread_slope_deg']))) / ts), 0.5, 1.6)
+            if u == 0 and v.get('channel') and vu['width_m']:
+                # a channelled reach: the first unit leaves its vent at frac of its width and opens to the full width
+                # over the first `until` of its length (SP Crater's flow runs 2.5 km in a channel 300-500 m wide, then
+                # spreads into lobes 1-2 km across; at one width from the vent it lay at the cone's foot as a skirt)
+                ch = dict(v['channel'])
+                fr, until = float(ch.get('frac', 0.4)), float(ch.get('until', 0.45))
+                dv = np.hypot(x[win] - float(v['at'][0]), y[win] - float(v['at'][1])) / float(vu['length_m'])
+                ramp = fr + (1.0 - fr) * smoothstep(0.1 * until, until, dv)
+                wsc = ramp if wsc is None else wsc * ramp
+            T, F = lava_surface(P[win], level.cell, th, x[win], y[win], float(v['p_edge']), None,
+                                float(v['levee']), float(v['rough']), float(v['age']), int(seed) + 13 * k + 7 * u,
+                                width_m=vu['width_m'], front_deg=v['front_deg'], levee_frac=float(v['levee_frac']),
+                                width_scale=wsc)
+            if v['no_climb'] == 'local':
+                # the flow's top stands at most 1.3 x its thickness over the ground its own paths run on nearby (the
+                # paths' mean ground within the band's width): rising ground beside or in its way laps out of it - the
+                # cone it left, and a cone it meets, left standing as an island - where the band laid over the paths
+                # at one thickness buried two cones 1 km out in SP Crater's field. The flow stays thick to its edge
+                # against the rising ground (an onlap, not a taper)
+                pw = smoothstep(0.02, 0.1, P[win])
+                gw = (h + total)[win]
+                sg = max(0.25 * float(vu['width_m'] or 4.0 * th) / level.cell, 1.0)
+                bw = gaussian_blur(pw, sg)
+                lvl_path = np.where(bw > 1e-4, gaussian_blur(gw * pw, sg) / np.maximum(bw, 1e-6), gw)
+                # thinned in proportion where the ground rises 0.3-1.3 x the thickness over the paths' level, so its
+                # top stays about level and keeps its ridges (capped at one level, the top lay dead flat there)
+                up = np.clip((lvl_path + 1.3 * th - gw) / th, 0.0, 1.0)
+                T, F = T * up, F * smoothstep(0.0, 0.25, up)
+            elif v['no_climb']:
+                # the flow stands on the ground at and below its vent: none of it on the cone it left (where the
+                # ground rises past the vent's by its thickness), so it leaves the cone's foot at full thickness
+                sj, si = int(round(start[1])), int(round(start[0]))
+                zv = float(h[sj, si] + total[sj, si])
+                up = 1.0 - smoothstep(zv + 0.25 * th, zv + 1.0 * th, h[win] + total[win])
+                T, F = T * up, F * up
+            if u == 0 and v['width_m'] and float(v['vent_taper']) > 0.0:
+                # a flow leaves its vent narrow and spreads downstream: the band about the paths thins at the vent,
+                # so it does not climb back up the cone it came from
+                rv = np.hypot(x[win] - float(v['at'][0]), y[win] - float(v['at'][1]))
+                taper = smoothstep(0.0, float(v['vent_taper']) * float(v['width_m']), rv)
+                T, F = T * taper, F * taper
+            tv[win] = np.maximum(tv[win], T)
+            fv[win] = np.maximum(fv[win], F)
+        if v.get('bury'):
+            # the flow fills the gullies and hollows it runs over: its base is the ground smoothed at the flow's own
+            # scale (the walkers' ground g), so the cone's gullies do not print through its top as stripes
+            tv = tv + np.maximum(g - (h + total), 0.0) * smoothstep(0.35, 0.8, fv)
+        total += tv
+        foot = np.maximum(foot, fv * (1.0 - 0.6 * float(v['age'])))
     fields['h'] = _f32(h + total)
     if 'bed' in fields:
         fields['bed'] = _f32(np.asarray(fields['bed'], np.float64) + total)
     fields['lava'] = _f32(foot)
     fields[key] = _f32(total)
+    _pull_band(fields, ctx)
+    return fields
+
+
+def cone_rills(x, y, cones, depth_m=1.5, spacing_m=25.0, seed=0):
+    """Rills down cinder cones' flanks at world points (metres to cut, >= 0): for each cone, sparse furrows running
+    down from its crater rim (radial_streaks about its vent, harmonics that lay them about spacing_m apart at
+    mid-flank, only the deeper troughs, a few metres of wander), between just below the rim and the toe (the rim and
+    the toe's break stay sharp), deepest at mid-flank, fainter on older cones (smoothed by creep: x exp(-kappa_t /
+    400 m2)). Combined by maximum. A function of world position and the cones."""
+    x = np.asarray(x, np.float64)
+    y = np.asarray(y, np.float64)
+    out = np.zeros(np.broadcast(x, y).shape)
+    for k, c in enumerate(cones):
+        W = float(c.get('width_m', 800.0))
+        R = 0.5 * W * max(1.0, float(c.get('elongation', 1.0)))
+        rcr = 0.5 * W * float(c.get('crater_ratio', 0.4))
+        fade = math.exp(-float(c.get('kappa_t_m2', 0.0) or 0.0) / 400.0)
+        if fade < 0.05 or R <= rcr * 1.5:
+            continue
+        r_mid = 0.5 * (rcr + R)
+        k_mid = TAU * r_mid / float(spacing_m)
+        at = tuple(float(v) for v in c['at'])
+        sd = int(c.get('seed', 0)) * 13 + int(seed) * 7 + k
+
+        def fn(xq, yq, at=at, rcr=rcr, R=R, k_mid=k_mid, sd=sd, fade=fade):
+            r = np.hypot(xq - at[0], yq - at[1])
+            env = smoothstep(1.15 * rcr, 1.6 * rcr, r) * (1.0 - smoothstep(0.8 * R, 1.0 * R, r))
+            # the troughs below the noise's mean, so each rill is about half the spacing wide: its walls under 15
+            # degrees across a flank at 28, so the scoria's talus pass at 33 degrees leaves them standing (narrow V
+            # rills, walls past 30 degrees across, were relaxed away on the hero levels)
+            s = radial_streaks(xq, yq, at, (max(int(0.5 * k_mid), 4), max(int(2.0 * k_mid), 8)), 0.5, (rcr, R), 2, sd,
+                               wander_m=4.0, wander_scale_m=80.0, sparse=0.0)
+            # each rill as deep as its trough goes, linearly (a trough at -2 sigma half of depth_m), the deepest held
+            # at depth_m: a saturating profile made flat-bottomed rills with walls at the talus angle
+            return float(depth_m) * fade * env * np.clip(-0.25 * s, 0.0, 1.0)
+        add_on_support(out, x, y, at, 1.05 * R, fn, combine=np.maximum)
+    return out
+
+
+def op_cone_rills(fields, level, params, seed, ctx=None):
+    """Stage op 'cone_rills': cone_rills cut into h on the levels fine enough to hold them (put it on 'cell<=4', after
+    the cones): params the cinder_cones stage's cones / field / kappa_m2_per_yr (cones_of), depth_m (1.5), spacing_m
+    (25). SP Crater's flanks are rilled from rim to toe; at 1.7 m smooth flanks read as a clay cone. Each finer level
+    adds only its own finer detail (stamp_add), so the rills are the same world function on every level; cut into the
+    loose scoria only (bed is unchanged)."""
+    if _prepass(ctx):
+        return fields
+    cones = cones_of(params, seed)
+    d, sp = float(params.get('depth_m', 1.5)), float(params.get('spacing_m', 25.0))
+    key = _stamp_key('cone_rills', dict(params, seed=seed))
+    tmp = {'h': np.zeros(fields['h'].shape, np.float32)}
+    if key in fields:
+        tmp[key] = fields[key]
+    stamp_add(tmp, level, key, lambda xq, yq: {'h': -cone_rills(xq, yq, cones, d, sp, seed)}, 1, ctx=ctx,
+              block=False)
+    h = np.asarray(fields['h'], np.float64) + np.asarray(tmp['h'], np.float64)
+    if 'bed' in fields:
+        h = np.maximum(h, np.asarray(fields['bed'], np.float64))           # the rills are in the loose scoria
+    fields['h'] = _f32(h)
+    fields[key] = tmp[key]
+    _pull_band(fields, ctx)
+    return fields
+
+
+def lava_rubble(x, y, scales_m=(8.0, 3.0, 1.2), amps_m=(1.2, 0.6, 0.3), seed=0):
+    """An aa flow's rubbly top at world points (metres to add, >= 0): ridged gradient noise (sharp crests, broad
+    hollows) at each scale, the clinker blocks and the pressure ridges between them. A function of world position and
+    seed alone."""
+    out = np.zeros(np.broadcast(np.asarray(x), np.asarray(y)).shape)
+    for i, (s, a) in enumerate(zip(scales_m, amps_m)):
+        n = gradient_noise(x, y, float(s), int(seed) * 7907 + 131 * i + 29) / 0.24
+        out = out + float(a) * (1.0 - np.abs(np.tanh(0.9 * n))) ** 2
+    return out
+
+
+def op_lava_rubble(fields, level, params, seed, ctx=None):
+    """Stage op 'lava_rubble': the flows' rough aa top on the levels fine enough to show it (put it on 'cell<=4', after
+    the flows): lava_rubble (params scales_m, amps_m) where the 'lava' field says a flow lies, as strong as its
+    footprint there (dulled with the flow's age), into h and bed (lava is rock). The flows are made on the main level,
+    where a 10-40 m cell holds none of their clinker, so at 1.7 m a flow was a smooth tongue; each finer level adds
+    only its own finer detail (stamp_add), so the rubble is the same world function on every level."""
+    if _prepass(ctx) or 'lava' not in fields:
+        return fields
+    sc = tuple(float(v) for v in params.get('scales_m', (8.0, 3.0, 1.2)))
+    am = tuple(float(v) for v in params.get('amps_m', (1.2, 0.6, 0.3)))
+    sd = int(params.get('seed', seed))
+    key = _stamp_key('lava_rubble', dict(scales_m=sc, amps_m=am, seed=sd))
+    tmp = {'h': np.zeros(fields['h'].shape, np.float32)}
+    if key in fields:
+        tmp[key] = fields[key]
+    stamp_add(tmp, level, key, lambda xq, yq: {'h': lava_rubble(xq, yq, sc, am, sd)}, 1, ctx=ctx)
+    wgt = np.clip(1.6 * np.asarray(fields['lava'], np.float64), 0.0, 1.0)
+    add = wgt * np.asarray(tmp['h'], np.float64)
+    fields['h'] = _f32(np.asarray(fields['h'], np.float64) + add)
+    if 'bed' in fields:
+        fields['bed'] = _f32(np.asarray(fields['bed'], np.float64) + add)
+    fields[key] = tmp[key]
     _pull_band(fields, ctx)
     return fields
 
@@ -2114,16 +2744,24 @@ def op_volcano_lakes(fields, level, params, seed, ctx=None):
     water, a summit crater too). Put it last, on every level.
 
     dry            craters that hold no water (dicts at, radius_m: Fuji's summit crater, SP Crater's, Meteor
-                   Crater's floor is a dry playa): a depression whose deepest cell lies within one is left as it is
-                   (no water, no fill), or with playa_frac in its dict, filled flat from its lowest point until the
-                   flat covers that fraction of the depression (the lake beds of a closed crater: Meteor Crater's
-                   floor, about 28 % of the crater)
+                   Crater's floor is a dry playa): a depression whose deepest cell lies within one and whose area is
+                   at least min_area_m2 (default 2 % of the circle) is left as it is (no water, no fill), or with
+                   playa_frac in its dict, filled flat from its lowest point until the flat covers that fraction of
+                   the depression (the lake beds of a closed crater), on a level that holds the whole depression
     dry_cones      a cinder_cones stage's params (cones, field, kappa_m2_per_yr): every cone's crater is dry too
                    (scoria is permeable)
     mode           'lake' (default): a depression at least min_depth_m deep (default the design's max(1 m, 0.2 % of
                    the relief)) and min_area_m2 in area (default 0) holds water at its spill level; every other one
                    is filled with sediment (the solvers' pits: ponds strung along channel beds are not lakes).
                    'sediment': every depression but the dry ones is filled
+    lake_radius_m  lakes only within this distance of `centre` (where the cone and its apron dam the valleys round
+                   it, as the Fuji Five Lakes are); beyond, every basin fills with sediment, as an intermontane basin
+                   does (on a 160 km context, ranges grown round closed hollows held 83 lakes up to 230 km2)
+    max_area_m2    a basin larger than this fills with sediment (a flat basin floor), not a lake
+    max_lakes      at most this many lakes, the largest that qualify (Fuji: five), chosen on the coarsest level; a
+                   finer level keeps the depressions holding its parent's lakes and fills the rest
+    hero_pits      'keep': on a hero level the depressions that are not lakes stay as they are (only those reaching
+                   its border band are filled): the ground's own hollows, not sediment flats
     A child level's depressions reaching into its border band are filled (the seam's, not lakes; its outer 2
     cells are never touched, so it meets its parent exactly), and the parent's lakes are carried down
     (lake_level_m). Writes water (depth, m) and lake_level_m; the fill goes into h and deposit. Skips the coarsest
@@ -2168,6 +2806,11 @@ def op_volcano_lakes(fields, level, params, seed, ctx=None):
             xs, ys = x.ravel()[deepest], y.ravel()[deepest]
             for c in p['dry']:
                 hit = dl[(np.hypot(xs - c['at'][0], ys - c['at'][1]) < float(c['radius_m'])) & (dl > 0)]
+                # only a depression of a crater's size is the crater (min_area_m2, default 2 % of its circle): the
+                # small pits inside its radius on a hero window (behind blocks, in rills) are the solvers' pits and
+                # fill with sediment (treated as dry craters with playas, 4328 of them took 526 s of one build)
+                amin = float(c.get('min_area_m2', 0.02 * math.pi * float(c['radius_m']) ** 2))
+                hit = hit[area[hit] >= amin]
                 dry[hit] = True
                 if c.get('playa_frac'):
                     for L in hit:
@@ -2181,13 +2824,43 @@ def op_volcano_lakes(fields, level, params, seed, ctx=None):
         lake = np.zeros(n + 1, bool)
         if p.get('mode', 'lake') == 'lake':
             lake = (maxd > thr) & (area >= float(p.get('min_area_m2', 0.0))) & ~dry & ~band
+            if p.get('max_area_m2') is not None:
+                lake &= area <= float(p['max_area_m2'])
+            if p.get('lake_radius_m') is not None:
+                x, y = level.xy()
+                c0 = p.get('centre', (0.0, 0.0))
+                near = np.zeros(n + 1)
+                np.maximum.at(near, lab.ravel(), (np.hypot(x - c0[0], y - c0[1]) < float(p['lake_radius_m'])
+                                                  ).ravel().astype(np.float64))
+                lake &= near > 0.5
+            if p.get('max_lakes') is not None and int(lake[1:].sum()) > int(p['max_lakes']):
+                keep = np.argsort(np.where(lake, area, -1.0))[::-1][:int(p['max_lakes'])]
+                lake = np.zeros(n + 1, bool)
+                lake[keep] = True
+            if p.get('max_lakes') is not None and child:
+                # the lakes were chosen on the coarsest level: a finer level keeps the depressions that hold its
+                # parent's lakes and fills every other (choosing its own five, the main level showed seven)
+                held = _carried_lakes(fields, level)
+                lake = np.zeros(n + 1, bool)
+                if held is not None:
+                    lake[np.unique(lab[(held > 1e-3) & (lab > 0)])] = True
         lake[0] = False
         fill = (lab > 0) & ~lake[lab] & ~dry[lab]
         if child:
             fill &= _g.edge_distance(h.shape) > 2
+        if getattr(level, 'role', None) == 'hero' and p.get('hero_pits') == 'keep':
+            # on a hero level only the depressions of its border band (the seam's) and none of the others: a hero
+            # window's pits are the hydraulic pass's puddles and the ground's own hollows, a few decimetres deep, and
+            # filled they lay as dead-flat patches over a tenth of the window at the walker's feet
+            fill &= band[lab]
         water = np.where(lake[lab], depth, 0.0)
         add = np.where(fill, depth, 0.0)
         for L, frac in playa.items():           # a dry crater's floor of lake beds: flat over frac of it
+            if band[L]:
+                # a hero window inside the crater holds only part of it: its lowest cells are not the crater's
+                # floor, and flattening them laid a flat patch of its own in every window (the parent's playa is
+                # inherited)
+                continue
             cells = lab == L
             top = float(np.quantile(h[cells], min(max(frac + 0.06, 0.0), 0.95)))     # + the fillet's share
             # the fans grade into the lake beds: a smooth fill (a fillet a few metres high), not a crease
@@ -2217,7 +2890,9 @@ def op_caldera_lake(fields, level, params, seed, ctx=None):
     """Stage op 'caldera_lake': a lake at its own level in a caldera (or a crater), not at its spill: a closed basin's
     lake stands where inflow and evaporation and seepage balance (Crater Lake 185 m under its lowest rim notch).
     params: level_m (the field frame), or below_rim_m under the mean rim the collapse recorded ('caldera_rim_m');
-    centre. The water is the connected region under the lake level that holds the centre: water = level - h there.
+    centre. On the first level it runs on (one holding the whole caldera) the level is held 2 m under the caldera's
+    spill, its lowest notch, and recorded as 'caldera_lake_m' for the finer levels. The water is the connected
+    region under the lake level that holds the centre: water = level - h there.
     Every other closed depression on the level is filled with sediment to its spill (they are the solvers' pits): a
     caldera recipe sets defaults['lakes'] = False, so the runner's end stage does not fill the caldera to its rim."""
     if _prepass(ctx):
@@ -2225,7 +2900,9 @@ def op_caldera_lake(fields, level, params, seed, ctx=None):
     from . import hydro as HY
     from ..core.metrics import label
     h = np.asarray(fields['h'], np.float64)
-    if params.get('level_m') is not None:
+    if 'caldera_lake_m' in fields:
+        L = float(np.median(fields['caldera_lake_m']))       # the level the whole caldera's level decided
+    elif params.get('level_m') is not None:
         L = float(params['level_m'])
     else:
         if 'caldera_rim_m' not in fields:
@@ -2233,6 +2910,20 @@ def op_caldera_lake(fields, level, params, seed, ctx=None):
         L = float(np.mean(fields['caldera_rim_m'])) - float(params.get('below_rim_m', 300.0))
     c = params.get('centre', (0.0, 0.0))
     fi, fj = level.index_of(c[0], c[1])
+    if 'caldera_lake_m' not in fields and 'caldera_floor' in fields:
+        # a lake cannot stand above its basin's lowest notch: on the level that holds the whole caldera, the level
+        # is held under the caldera's spill (a valley cut back through the rim below the asked level let the lake
+        # run out over the flank); finer levels inherit it (their windows hold only part of the caldera)
+        fl = np.asarray(fields['caldera_floor']) > 0.5
+        if fl.any():
+            spill = float(np.median(HY.fill_depressions(h, sea_level=getattr(ctx, 'sea_level', None)
+                                                        if ctx is not None else None)[0][fl]))
+            if L > spill - 2.0:
+                if ctx is not None:
+                    ctx.log(f'[terrain.volcanic] caldera lake: the rim\'s lowest notch is at {spill:.1f} m: the lake '
+                            f'at {spill - 2.0:.1f} m, not {L:.1f} m')
+                L = spill - 2.0
+        fields['caldera_lake_m'] = np.full(h.shape, L, np.float32)
     lab, n = label(h < L)
     water = np.zeros_like(h)
     if n:
@@ -2277,6 +2968,8 @@ OPS = {
     'volcano_plain': op_volcano_plain,
     'volcano_age': op_volcano_age,
     'lava_flows': op_lava_flows,
+    'lava_rubble': op_lava_rubble,
+    'cone_rills': op_cone_rills,
     'caldera_lake': op_caldera_lake,
     'volcano_lakes': op_volcano_lakes,
 }

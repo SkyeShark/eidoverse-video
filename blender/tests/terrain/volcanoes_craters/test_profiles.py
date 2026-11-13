@@ -19,6 +19,10 @@ pass. What it checks:
   world space     every shape equal at shared points of two levels of different cell size and window; seeds
   stage ops       the op contract on a fake level (row 0 south, window offsets, fields written)
   timing          each preset at 1024 x 1024 against the design's 1 s for world-space inputs per level
+  the review's fixes (2026-11-12): the layered face's table against the per-sector blend; the impact crater's
+                  concave debris apron on Meteor Crater's ring medians, a near-level floor centre and no flat disc,
+                  its talus recorded; fallen blocks on the apron (not the floor's centre), in h and bed; ravines along
+                  their azimuth; the caldera's talus top rising and falling round the ring
 """
 import math
 import sys
@@ -512,6 +516,21 @@ def test_levels():
         top = float(dc['h'].max())
         check(f'two levels: {name} on parent and child = inherited base + the shape at the child\'s cells',
               err < 2e-3 * max(top, 1.0), f'max error {err:.2e} m over h, bed and deposit (shape top {top:.0f} m)')
+        # with the runner's context: the child reads the parent-grid shape the parent kept in ctx.shared (stamp_add)
+        # instead of evaluating it again, and comes out the same
+        ctx = types.SimpleNamespace(shared={}, prepass=None, pins=None)
+        fq = Fields(parent, {'h': base, 'bed': base - 10.0, 'deposit': 0.0})
+        op(fq, parent, params, 4, ctx=ctx)
+        kept = [k for k in ctx.shared.get('_stamps', {})]
+        fr = fq.inherit(child)
+        read = (V._parent_stamp(ctx, kept[0], child.x0, child.y0, parent.cell, child.n // 2, ['h'])
+                if len(kept) == 1 else None)
+        op(fr, child, params, 4, ctx=ctx)
+        err_c = max(float(np.abs(fr[k] - fc[k]).max()) for k in ('h', 'bed', 'deposit'))
+        check(f'two levels: {name} with the runner\'s context reads the parent\'s kept shape and matches',
+              read is not None and err_c < 1e-3 * max(top, 1.0),
+              f'parent stamp kept: {kept}; read for the child: {read is not None}; max |with - without| '
+              f'{err_c:.2e} m')
     # the caldera after the stratovolcano, on both levels
     sv, cl = cases['stratovolcano'][1], dict(centre=(0.0, 0.0), rim_radius_m=1200.0, floor_m=400.0, scallops=6,
                                              scallop_amp=0.08, inner_cones=[dict(at=(-200.0, 150.0), width_m=400.0)])
@@ -539,35 +558,158 @@ def test_levels():
 
 # ====================================================================== timing
 def test_timing():
-    X40, Y40 = C.grid(1024, 40.0)
-    X14, Y14 = C.grid(1024, 14.0)
-    X3, Y3 = C.grid(1024, 3.0)
-    X8, Y8 = C.grid(1024, 7.8)
+    field = V.cinder_field((-4000.0, -4000.0, 8000.0), count=12, seed=1)
+    # (cell metres, the shape at world points, how its stage evaluates it): the stamped shapes (op_stratovolcano,
+    # op_impact_crater) through stamp_add's row blocks (volcanic._evaluate_grid: a shape's temporaries stay in the
+    # CPU's cache), the caldera and the cinder piles by their ops in one pass over the level
     cases = {
-        'FUJI preset (cone, crater, Hoei, 18 rift cones), 41 km at 40 m': lambda: V.fuji_surface(X40, Y40),
-        'CRATER_LAKE preset (edifice, cones, collapse, island), 14 km at 14 m': lambda: V.crater_lake_surface(X14, Y14),
-        'METEOR_CRATER preset filling the level, 3 km at 3 m': lambda: I.impact_crater(X3, Y3, **I.METEOR_CRATER),
-        'cinder field, 12 cones, 8 km at 7.8 m': lambda: V.cinder_cones(X8, Y8, V.cinder_field(
-            (-4000.0, -4000.0, 8000.0), count=12, seed=1)),
+        'FUJI preset (cone, crater, Hoei, 18 rift cones), 41 km at 40 m':
+            (40.0, lambda x, y: V.fuji_surface(x, y), True),
+        'CRATER_LAKE preset (edifice, cones, collapse, island), 14 km at 14 m':
+            (14.0, lambda x, y: V.crater_lake_surface(x, y), False),
+        'METEOR_CRATER preset filling the level, 3 km at 3 m':
+            (3.0, lambda x, y: I.impact_crater(x, y, **I.METEOR_CRATER)['delta'], True),
+        'cinder field, 12 cones, 8 km at 7.8 m': (7.8, lambda x, y: V.cinder_cones(x, y, field), False),
     }
-    for name, fn in cases.items():
+    n = 1024
+    for name, (cell, fn, blocks) in cases.items():
+        o = -0.5 * n * cell
+        X, Y = C.grid(n, cell)
+        if blocks:
+            t0 = time.time()
+            whole = np.asarray(fn(X, Y), np.float64)
+            t_whole = time.time() - t0
         times = []
         for _ in range(3):
             t0 = time.time()
-            fn()
+            if blocks:
+                got = V._evaluate_grid(lambda x, y: {'h': fn(x, y)}, o, o, cell, n, 1)['h']
+            else:
+                fn(X, Y)
             times.append(time.time() - t0)
         dt = min(times)
         # design 9 asks <= 1 s per level for world-space inputs; numpy here is memory-bound, so other jobs on this
         # shared machine slow it (two-fold under full load), and only a regression past 4 s fails
-        print(f'INFO  timing 1024^2: {name}: best of 3 {dt:.2f} s (runs {", ".join(f"{t:.2f}" for t in times)}; '
+        how = f'in row blocks (one pass {t_whole:.2f} s)' if blocks else 'in one pass'
+        print(f'INFO  timing 1024^2: {name}: {how} best of 3 {dt:.2f} s (runs {", ".join(f"{t:.2f}" for t in times)}; '
               f'design 9 target 1 s)', flush=True)
         check(f'timing 1024^2 under 4 s (a regression catch): {name}', dt < 4.0, f'{dt:.2f} s')
+        if blocks:
+            check(f'row blocks give the one pass exactly: {name}', np.array_equal(got, whole),
+                  f'max |diff| {float(np.max(np.abs(got - whole))):.2e} m')
+
+
+# ====================================================================== the review's fixes (2026-11-12)
+def _face_blend(u, az, height_m, wall_deg, spec, seed):
+    """The layered face's sector blend evaluated per sector (the oracle the table must match)."""
+    n = int(spec.pop('sectors', 7))
+    phase = V._rng(seed, 57).uniform(0.0, V.TAU)
+    tw = math.tan(math.radians(wall_deg))
+    zs, ws = np.zeros_like(u), np.zeros_like(u)
+    for k in range(n):
+        uk, zk = V.column_profile(V.wall_column(height_m, wall_deg, seed=int(seed) * 31 + k, **spec))
+        w = np.exp(8.0 * (np.cos(az - (phase + V.TAU * k / n)) - 1.0))
+        z = np.where(u > uk[-1], zk[-1] + tw * (u - uk[-1]), np.interp(u, uk, zk))
+        zs += w * np.where(u < 0.0, u * (zk[1] / max(uk[1], 1e-9)), z)
+        ws += w
+    return zs / ws
+
+
+def test_fixes():
+    rng = np.random.default_rng(3)
+    spec = dict(strong_deg=75.0, strong_frac=0.45, layer_m=[10.0, 30.0], sectors=9)
+    u = rng.uniform(-40.0, 120.0, 200000)
+    az = rng.uniform(-4.0, 9.0, u.size)
+    z_tab, _s = V._layered_face(u, az, 55.0, 50.0, dict(spec), 11)
+    err = float(np.abs(z_tab - _face_blend(u, az, 55.0, 50.0, dict(spec), 11)).max())
+    check('layered face: the azimuth x run table matches the per-sector blend (one read per point, not nine)',
+          err < 0.05, f'max |dz| {err:.3f} m over 200,000 points of a 55 m face')
+
+    # the impact crater's concave debris apron on Meteor Crater's tile, against the reference's ring medians
+    from eidoblend.terrain.recipes import impact_crater as RC
+    p = dict(RC.CRATER)
+    p.pop('supersample')
+    p.update(seed=1, centre=(30.0, 0.0))
+    hr, meta, X, Y = C.load_reference('meteor_crater')
+    Xs, Ys = C.grid(2000, 1.5)
+    out = I.impact_crater(Xs, Ys, **p)
+    h = C.box_down(1683.0 + out['delta'], 2)
+    r = np.hypot(X - 30.0, Y)
+    zr0, zg0 = np.median(hr[r < 30]), np.median(h[r < 30])
+    rows = []
+    for rr in (120, 200, 280, 360, 440):
+        m = np.abs(r - rr) < 6
+        rows.append((rr, float(np.median(hr[m]) - zr0), float(np.median(h[m]) - zg0)))
+    ok = all(abs(g - f) < max(6.0, 0.25 * f) for _rr, f, g in rows)
+    check('impact crater: a concave debris apron from the floor\'s centre to the face, on the reference\'s ring '
+          'medians (no flat disc meeting the walls in a sharp line)', ok,
+          ', '.join(f'{rr} m: ref {f:.1f} gen {g:.1f}' for rr, f, g in rows))
+    sg = C.slope_deg(h, 3.0)
+    floor = float(np.median(sg[r < 160]))
+    flat = float((sg[r < 0.9 * 597] < 1.0).mean())
+    check('impact crater: the floor near-level at the centre (the reference: 0.5-3 degrees) and no dead-flat disc',
+          floor < 4.0 and flat < 0.15, f'slope median within 160 m {floor:.1f} deg; under 1 degree: {flat:.2f} of '
+                                       f'the crater')
+    tal = C.box_down(out['talus'], 2)
+    frac = float((tal[r < 640] > 1.0).mean())
+    check('impact crater: the apron under the face recorded as talus (the material\'s scree, the dressing\'s '
+          'boulders)', 0.12 < frac < 0.4 and float(tal.max()) > 10.0,
+          f'talus over 1 m on {frac:.2f} of the crater, up to {tal.max():.0f} m')
+
+    # fallen blocks: a world function (two levels agree), on the apron's upper part only, sizes as asked
+    lvl = lambda x0, y0, cell, n: types.SimpleNamespace(x0=x0, y0=y0, cell=cell, n=n)   # noqa: E731
+    params = dict(RC.BLOCKS, crater={k: RC.CRATER[k] for k in ('centre', 'diameter_m', 'sides', 'polygon',
+                                                                 'polygon_azimuth_deg', 'radius_noise')})
+    fb = {'h': np.zeros((256, 256), np.float32), 'bed': np.zeros((256, 256), np.float32)}
+    I.op_crater_blocks(fb, lvl(-28.0, -528.0, 0.25, 256), params, 1)
+    tall = float(fb['h'].max())
+    check('crater blocks: blocks on the south wall\'s apron, at most 0.6 of their 9 m largest size high, in h and in '
+          'bed (rock)', 0.5 < tall <= 9.0 * 0.6 + 1e-6 and np.array_equal(fb['h'], fb['bed']),
+          f'tallest {tall:.2f} m; cells over 0.3 m: {int((fb["h"] > 0.3).sum())} of 65536')
+    fc = {'h': np.zeros((100, 100), np.float32), 'bed': np.zeros((100, 100), np.float32),
+          'deposit': np.zeros((100, 100), np.float32)}
+    I.op_crater_blocks(fc, lvl(-25.0, -25.0, 0.5, 100), params, 1)
+    check('crater blocks: no blocks on the floor\'s centre (they rest on the apron and at its foot), only the low '
+          'sediment hummocks of its shrubs (in h and deposit, under 0.8 m)',
+          float(fc['bed'].max()) == 0.0 and 0.1 < float(fc['deposit'].max()) < 0.8
+          and np.allclose(fc['h'], fc['deposit']),
+          f'rock within 25 m of the centre {float(fc["bed"].max()):.2f} m; hummocks up to '
+          f'{float(fc["deposit"].max()):.2f} m over {float(np.mean(fc["deposit"] > 0.05)):.2f} of the ground')
+
+    # ravines: deepest on their axis part-way down, nothing off to the side or past their end
+    rv = [dict(azimuth_deg=270.0, r_m=[500.0, 5500.0], depth_m=100.0, width_m=150.0, wander_m=0.0)]
+    r_ = np.array([500.0, 1500.0, 3000.0, 5500.0, 6500.0])
+    on = V.ravine_cut(-r_, np.zeros_like(r_), (0.0, 0.0), rv)
+    side = V.ravine_cut(np.array([-3000.0]), np.array([900.0]), (0.0, 0.0), rv)
+    check('ravines: cut along their azimuth, deepest past their head, easing out at their end, none to the side',
+          on[0] < 1.0 and on[1] > 90.0 and on[2] > 90.0 and on[3] < 1.0 and on[4] == 0.0 and side[0] < 1.0,
+          f'depth along the axis at {", ".join(f"{a:.0f}" for a in r_)} m: {", ".join(f"{d:.1f}" for d in on)}; '
+          f'900 m to the side {side[0]:.2f} m')
+
+    # the caldera's talus apron: its top rises and falls round the ring (not one bench at one height)
+    n = 400
+    Xc, Yc = np.meshgrid(np.linspace(-5200.0, 5200.0, n), np.linspace(-5200.0, 5200.0, n))
+    hb = 2400.0 - 0.05 * np.hypot(Xc, Yc)
+    spreads = []
+    for vary in (0.0, 0.4):
+        o = V.caldera_collapse(Xc, Yc, hb, (0.0, 0.0), 4000.0, 2200.0, 1300.0, wall_deg=50.0, talus_deg=33.0,
+                               talus_frac=0.32, talus_vary=vary, scallops=0, radius_noise=0.0, edge_noise=0.0,
+                               seed=4)
+        az_ = np.degrees(np.arctan2(Xc, Yc)) % 360.0
+        tops = []
+        for a0 in range(0, 360, 15):
+            m = (np.abs(((az_ - a0 + 180.0) % 360.0) - 180.0) < 3.0) & (o['talus'] > 0.5)
+            tops.append(float(np.percentile(o['height'][m], 95)) if m.any() else np.nan)
+        spreads.append(float(np.nanstd(tops)))
+    check('caldera: the talus apron\'s top rises and falls round the ring with talus_vary (one height all round: a '
+          'bench ring)', spreads[0] < 5.0 and spreads[1] > 25.0,
+          f'the apron top\'s spread round the ring: {spreads[0]:.1f} m at 0, {spreads[1]:.1f} m at 0.4 (wall 900 m)')
 
 
 def main():
     t0 = time.time()
     for t in (test_stratovolcano, test_cinder_cone, test_impact, test_caldera, test_world_space, test_ops, test_levels,
-              test_timing):
+              test_timing, test_fixes):
         t()
     bad = [r for r in RESULTS if not r[0]]
     print(f'{len(RESULTS) - len(bad)} of {len(RESULTS)} checks pass; {time.time() - t0:.1f} s')
