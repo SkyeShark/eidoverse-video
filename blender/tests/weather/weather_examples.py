@@ -95,7 +95,7 @@ def shot(name, weather, t, cam_fn, hours=16.0, sky_calls=(), **wopts):
     sc.frame_start, sc.frame_end = 1, f
     cam_fn()
     sky = make_sky(sc, camera=cam, hours=hours, weather=weather, sun=shot.sun,
-                   cache_dir=os.path.join(OUT, 'cache', name), quality='film')
+                   cache_dir=os.path.join(OUT, 'cache', name), quality='film', weather_fx=False)
     shot.sun = sky.sun
     for fn in sky_calls:
         fn(sky)
@@ -138,7 +138,7 @@ def cell_edge_time(weather='storm', t_max=300.0, hours=16.0):
     sc.frame_start, sc.frame_end = 1, int(round(t_max * FPS)) + 1
     look(*RAIN_VIEW)
     sky = make_sky(sc, camera=cam, hours=hours, weather=weather, sun=shot.sun,
-                   cache_dir=os.path.join(OUT, 'cache', 'cell_edge'), quality='film')
+                   cache_dir=os.path.join(OUT, 'cache', 'cell_edge'), quality='film', weather_fx=False)
     shot.sun = sky.sun
     wx = make_weather_system(sc, sky, moisture=False, log=lambda *a: None)
     x, y = np.array([cam.location.x]), np.array([cam.location.y])
@@ -245,7 +245,7 @@ def impact_closeups():
     sc.frame_start, sc.frame_end = 1, f_end
     set_cam(*STREET_CAM)
     sky = make_sky(sc, camera=cam, hours=16.0, weather='storm', sun=shot.sun,
-                   cache_dir=os.path.join(OUT, 'cache', 'impact'), quality='film')
+                   cache_dir=os.path.join(OUT, 'cache', 'impact'), quality='film', weather_fx=False)
     shot.sun = sky.sun
     wx = make_weather_system(sc, sky, strike_targets=[S['collection']], occluders=S['collection'], log=lambda *a: None)
     wx.wrap_scene()
@@ -287,7 +287,7 @@ def bolt_styles():
     sc.frame_start, sc.frame_end = 1, 2
     look((0.0, -8.0, 1.6), (0.0, 100.0, 42.0), 24.0)
     sky = make_sky(sc, camera=cam, hours=17.0, weather='darkstorm', sun=shot.sun,
-                   cache_dir=os.path.join(OUT, 'cache', 'bolt_styles'), quality='film')
+                   cache_dir=os.path.join(OUT, 'cache', 'bolt_styles'), quality='film', weather_fx=False)
     shot.sun = sky.sun
     wx = make_weather_system(sc, sky, log=lambda *a: None)
     wx.bake(frame_start=2, frame_end=2, bake_sky=not DRY)

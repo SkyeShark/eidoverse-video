@@ -110,7 +110,8 @@ for name in names:
     sc.collection.objects.link(cam)
     sc.camera = cam
 
-    sky = make_sky(sc, camera=cam, cache_dir=os.path.join(out, '_cache'), quality=args.quality, **spec['kw'])
+    sky = make_sky(sc, camera=cam, cache_dir=os.path.join(out, '_cache'), quality=args.quality, weather_fx=False,
+                   **spec['kw'])
     spec['calls'](sky)
     sky.use_fog(density=0.0003)
     sd = sky.sun_dir

@@ -192,7 +192,7 @@ for name, T in moments:
     f = int(round(T * FPS)) + 1
     sc.frame_start, sc.frame_end = 1, f
     sky = make_sky(sc, camera=cam, hours=hours, weather=name, sun=sun, cache_dir=os.path.join(OUT, 'cache', name),
-                   quality='film')
+                   quality='film', weather_fx=False)
     sun = sky.sun
     wx = make_weather_system(sc, sky, wet_model='eidoverse', rain_cells='column', moisture=False,
                              log=lambda *a: None)

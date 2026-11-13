@@ -76,7 +76,7 @@ rows = []
 for tag, weather, ambient in RUNS:
     sc, cam, sphere = scene()
     sky = make_sky(sc, camera=cam, hours=15.0, clouds='cumulus', weather=weather, ambient=ambient,
-                   cache_dir=os.path.join(OUT, '_cache', tag), shadows=False)
+                   cache_dir=os.path.join(OUT, '_cache', tag), shadows=False, weather_fx=False)
     sd = sky.sun_dir
     yaw = math.radians(math.degrees(math.atan2(-sd[0], sd[1])) - 100.0)         # sun on the left, a little behind
     cam.location = (0.0, 0.0, 1.6)

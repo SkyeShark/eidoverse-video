@@ -10,6 +10,11 @@ The lanes (Blender x; every lane runs along +Y from y = -5, the course's start):
     x = 12   a 1.5 m platform from y = -6 to y = -1 and its edge
     x = 15.. the maneuver planner's lanes: a 0.55 m wall (vault), a 1.2 m block (climbLedge), a 2.0 m block
              (climbWallUp), a 3.0 m block (wall scramble), a 1.1 m gap between raised slabs (gap jump)
+    x = 40   a wall across the lane at y = 0 (2.6 m high) with a 1.4 m doorway, its lintel over it at 2.1-2.6 m
+    x = 44   a ceiling slab over the lane (2.3-2.4 m), on nothing
+    x = 48   a beam across the lane at 1.2-1.5 m: too low to walk under
+    x = 52   a 2.2 m block sunk 2 mm into the ground (the course builder's skirt), from y = -0.1
+    x = 56   a 2.5 m block from y = -0.1 built against a 2.5 m platform from y = 0.5
 Each check names the option(s) it exercises and prints the numbers it judged.
 """
 
@@ -83,6 +88,17 @@ def build():
     # a 45 deg slab at the upper-body cylinder's height (max_slope)
     box('one_foot_block', -9.0 + 0.04, -9.0 + 0.30, -2.0, -1.4, 0.0, 0.06)
     box('void_platform', 69.0, 71.0, -6.0, -1.0, 0.0, 0.5)
+    # the overheads (ground_under_overhead): a doorway's lintel, a ceiling slab, and a beam too low to walk under
+    box('door_wall_w', 37.0, 39.3, -0.05, 0.05, 0.0, 2.6)
+    box('door_wall_e', 40.7, 43.0, -0.05, 0.05, 0.0, 2.6)
+    box('door_lintel', 39.3, 40.7, -0.05, 0.05, 2.1, 2.6)
+    box('ceiling_slab', 43.4, 44.6, -1.0, 3.0, 2.3, 2.4)
+    box('low_beam', 47.0, 49.0, -0.05, 0.05, 1.2, 1.5)
+    # tall solids that are no overheads: a 2.2 m block sunk 2 mm into the ground (the course builder's skirt: the
+    # ground's face inside it), a 2.5 m block built against a 2.5 m platform (their faces on one another)
+    box('sunk_block', 51.0, 53.0, -0.1, 2.4, -0.002, 2.2)
+    box('built_against_a', 55.0, 57.0, -0.1, 0.5, -0.002, 2.5)
+    box('built_against_b', 55.0, 57.0, 0.5, 3.0, -0.002, 2.5)
     me = bpy.data.meshes.new('slab45')
     me.from_pydata([(-15.5, 0.0, 0.9), (-12.5, 0.0, 0.9), (-12.5, 1.5, 2.4), (-15.5, 1.5, 2.4)], [], [(0, 1, 2, 3)])
     bpy.context.scene.collection.objects.link(bpy.data.objects.new('slab45', me))
@@ -373,11 +389,13 @@ def main():
         R.check(f'{name}(): {" then ".join(want)}, ending where the move leads', ok and seen == want and check(p, pk),
                 f'started {ok}, played {seen}, feet at ({p.x:.2f}, {p.y:.2f}, {p.z:.2f}), peak {pk:.2f} m')
     # ---- the maneuver planner (the engine: scan, classify, choose; moves registered as stubs)
-    picks = {}
+    picks, faces = {}, {}
 
     def stub(name):
         def f(ctl, scan, ob, fx, fy, *rest):
             picks.setdefault(name, []).append((round(ob.get('rise', ob.get('width', 0.0)), 2), rest))
+            if 'back_d' in ob and not ob.get('plateau'):      # (a cover the scan sees the far side of)
+                faces.setdefault(name, []).append((round(ob['face_d'], 3), round(ob['back_d'], 3), round(ob['end_d'], 3)))
             return False
         return f
     for lane, x, z in (('vault 0.55', 15.0, 0.0), ('ledge 1.2', 17.0, 0.0), ('climb 2.0', 19.0, 0.0),
@@ -389,6 +407,11 @@ def main():
     R['planner_picks'] = {k: [list(map(str, v_)) for v_ in vs[:2]] for k, vs in picks.items()}
     R.check('the planner picks vault for 0.55 m cover (vault_min_rise 0.42 .. vault_max_rise 1.15, depth <= 1.0)',
             any(abs(p[0] - 0.55) < 0.05 for p in picks.get('vault', [])), f'{picks.get("vault", [])[:2]}')
+    # the scan's samples step 0.15 m, so its last sample over a cover (end_d) lies up to a step short of the far face:
+    # the level rays measure both faces (face_d, back_d: the vault's hand keeps out of the cover between them)
+    R.check('the scan measures the 0.55 m wall\'s near and far faces (face_d, back_d: 0.30 m apart within 1 cm)',
+            bool(faces.get('vault')) and all(abs(b - a - 0.30) < 0.01 for a, b, _e in faces['vault']),
+            f'(face_d, back_d, end_d) {faces.get("vault", [])[:3]}')
     R.check('the planner picks mount (climbLedge) for a 1.2 m block, mount (climbWallUp) for 2.0 m',
             any(p[1] == ('climbLedge',) for p in picks.get('mount', [])) and
             any(p[1] == ('climbWallUp',) for p in picks.get('mount', [])), f'{picks.get("mount", [])[:4]}')
@@ -396,6 +419,47 @@ def main():
             f'{picks.get("wall_scramble", [])[:2]}')
     R.check('the planner picks the gap jump for a 1.1 m gap (jump_max_gap 2.2)', bool(picks.get('gap_jump')),
             f'{picks.get("gap_jump", [])[:2]}')
+    # ---- ground_under_overhead (this edition's, on): a lintel, a ceiling slab, a beam too low to walk under. The moves
+    # are stubs that record what the planner picks; the body walks on along +Y
+    def overhead_lane(x, stop_y=3.0, **opts):
+        got = []
+
+        def rec(name):
+            def f(ctl, scan, ob, fx, fy, *rest):
+                got.append((name, round(ob.get('rise', ob.get('width', 0.0)), 2)))
+                return False
+            return f
+        c = ctrl(x=x, y=-4.0, enable_turning=True, **opts)
+        c.maneuvers = {k: rec(k) for k in ('vault', 'mount', 'wall_scramble', 'gap_jump')}
+        rr = drive(c, 240, (0.0, 1.0), stop_y=stop_y)
+        # the scan from 1.5 m before the overhead's line, standing: its sample 1.5 m ahead lies under it
+        s = ctrl(x=x, y=-1.5, enable_turning=True, **opts)
+        scan = [(round(q['d'], 2), None if q['y'] is None else round(q['y'], 3))
+                for q in s._scan_path_ahead(0.0, 1.0)['samples'] if 1.45 <= q['d'] <= 1.8]
+        return got, rr, scan, c
+    for x, label in ((40.0, 'through a doorway under its lintel (2.1-2.6 m)'),
+                     (44.0, 'under a ceiling slab (2.3-2.4 m)')):
+        got, rr, scan, c = overhead_lane(x)
+        top = max(r['p'].z for r in rr)
+        R.check(f'ground_under_overhead (on): {label} the probes and the scan read the floor: no move picked, the feet '
+                f'on the floor, the walk goes through', not got and top < 0.01 and rr[-1]['p'].y > 2.5 and
+                scan and all(y is not None and abs(y) < 0.01 for _d, y in scan),
+                f'picked {got[:3]}, feet up to {top * 1000:.1f} mm, reached y = {rr[-1]["p"].y:.2f}; the scan under it '
+                f'(d, z) {scan}; the body is {c.vrm_height:.3f} m tall')
+    got, rr, scan, c = overhead_lane(40.0, stop_y=-0.3, ground_under_overhead=False)
+    R.check('ground_under_overhead=False (the original): the scan reads the lintel\'s top as the ground ahead and the '
+            'planner picks a move into the doorway', bool(got) and any(y is not None and y > 2.5 for _d, y in scan),
+            f'picked {sorted(set(got))[:3]}; the scan under it (d, z) {scan}')
+    got, rr, scan, c = overhead_lane(48.0, stop_y=-0.3)
+    R.check('a beam the body cannot walk under (1.2 m clear) stays an obstacle: the planner picks a move for its top',
+            any(n == 'mount' and abs(rise - 1.5) < 0.05 for n, rise in got),
+            f'picked {sorted(set(got))[:3]}; the scan under it (d, z) {scan}')
+    for x, top, label in ((52.0, 2.2, 'a 2.2 m block sunk 2 mm into the ground (the ground\'s face inside it)'),
+                          (56.0, 2.5, 'a 2.5 m block built against a 2.5 m platform')):
+        got, rr, scan, c = overhead_lane(x, stop_y=-0.3)
+        R.check(f'ground_under_overhead (on): {label} is a solid, no overhead: the scan reads its top and the planner '
+                f'picks a move for it', bool(got) and scan and all(y is not None and abs(y - top) < 0.01 for _d, y in scan),
+                f'picked {sorted(set(got))[:3]}; the scan over it (d, z) {scan}')
 
 
 try:

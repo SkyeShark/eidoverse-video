@@ -485,11 +485,15 @@ class Follow(Steer):
 class Emote(_Cmd):
     """playEmote for `seconds` (default: the clip once), then stopEmote. facing: where the body turns while it plays
     (the WebGPU controller's _emoteFacingY): 'keep' (default) the current heading, a heading in degrees, or None for
-    the WebGPU default (three's rotation.y = pi: Blender +Y)"""
+    the WebGPU default (three's rotation.y = pi: Blender +Y). stop=False: no stopEmote, as a scene that plays an emote
+    and never stops it (the course example's finale salute): after its seconds the clip holds its last pose (a clip
+    played once stays clamped there) and the body keeps the emote's facing; the commands after it run with the emote
+    still on (a wait holds the pose; locomotion stays suspended while it plays, the engine's)"""
 
-    def __init__(self, slot, seconds=None, fade_in=0.2, fade_out=0.3, loop=False, facing='keep'):
+    def __init__(self, slot, seconds=None, fade_in=0.2, fade_out=0.3, loop=False, facing='keep', stop=True):
         self.slot, self.seconds, self.fade_in, self.fade_out, self.loop, self.facing = \
             slot, seconds, fade_in, fade_out, loop, facing
+        self.stop = stop
 
     def start(self, loco):
         c = loco.ctrl
@@ -511,6 +515,8 @@ class Emote(_Cmd):
         if self.phase == 'play':
             self.left -= dt
             if self.left <= 0:
+                if not self.stop:
+                    return None                     # the pose held on: the next command takes the frame
                 c.stop_emote(fade_out=self.fade_out)
                 self.phase = 'out'
                 self.left = self.fade_out + 0.1
@@ -676,6 +682,35 @@ def seat_gap(h, body, cclip, M, seat, world=None, t=None):
     return lowest - pan['z'], pan['z']
 
 
+def stand_clip_travel(cc):
+    """a stand-up clip (sit_to_stand: its root under the seated hips, its hips stepping forward over the feet) played
+    with its hips' xy held over its first frame's: its hips' travel taken out of it, once per clip (cc._travel, (n + 1,
+    2) in the clip's axes; cc.root_curve keeps the hips' curve as the clip has it) -> the travel, which the caller
+    takes as root motion (stand_shift). The seated root holds still, so the travel played in the clip carried the hips
+    forward off the root and, once the controller had the root back, slid them back onto it"""
+    if not hasattr(cc, '_travel'):
+        cc._travel = cc.P[:, :2] - cc.P[0, :2]
+        cc.P[:, :2] = cc.P[0, :2]
+        cc.root_curve = cc.root_curve.copy()
+    return cc._travel
+
+
+def stand_shift(cc, R, t, fade, span, cross, resid, extra0=None):
+    """the seated root's shift (x, y) at time t of a stand-up clip played through stand_clip_travel: the crossfade's
+    carry (cross: the seated pose's hips less the clip's first pose's, by the crossfade's weight, so the hips stay where
+    the seated pose has them), the clip's hips' travel to t (R: the seated root's rotation), and what is left over
+    against the standing spot (resid) eased out over the span's second half; extra0: the seat's own shift before the
+    stand-up (emotes.StandUp's seated loop). film.Sit's forward stand-up and emotes.StandUp's stand-up clip ->
+    Vector (x, y)"""
+    w = min(1.0, t / max(fade, 1e-6))
+    tc = min(t, cc.duration)
+    kt = np.linspace(0.0, cc.duration, len(cc._travel))
+    trw = R @ Vector((float(np.interp(tc, kt, cc._travel[:, 0])), float(np.interp(tc, kt, cc._travel[:, 1])), 0.0))
+    e = min(1.0, max(0.0, (min(1.0, t / max(span, 1e-6)) - 0.5) / 0.5))
+    out = cross * w + Vector((trw.x, trw.y)) - resid * (e * e * (3.0 - 2.0 * e))
+    return out if extra0 is None else extra0 + out
+
+
 SIT_CLAMP_FROM = 0.4        # from this share of the seated clip on, no seated skin goes into the pan (seatOn's clamp)
 
 
@@ -689,7 +724,10 @@ class Sit(_Cmd):
     pan, eased in over the descent's second half and out over the first 60 % of the stand-up; and from SIT_CLAMP_FROM
     of the clip on, sitting down and (reversed) standing up, the root is never lower than keeps the underside on the pan
     at the clip's time (the clamp: the clip's hips reach the seat's height before its end). The feet stand on the floor
-    under the seated body (the plant)"""
+    under the seated body (the plant). A stand-up clip (reverse=False) takes its hips' travel as root motion
+    (stand_clip_travel, stand_shift: the hips stay on the seat through the crossfade, then step forward with the clip
+    and end over the spot the sit began from) and the root is handed back at its end, so `up` is at least its length.
+    The body keeps the seat's heading when the controller has the root back (an earlier emote's facing is not taken)"""
 
     def __init__(self, hold=2.2, clip='stand_to_sit', stand_clip='sit_to_stand', reverse=True, reverse_speed=1.25,
                  down=None, up=None, fade_in=0.25, fade_out=0.3, seat=None):
@@ -698,9 +736,11 @@ class Sit(_Cmd):
         self.down, self.up, self.fade_in, self.fade_out, self.seat = down, up, fade_in, fade_out, seat
         self.settle = 0.0
         self.clamp_t = self.clamp_v = None
+        self.up_cc = None
 
     def start(self, loco):
         c = loco.ctrl
+        c._emote_facing_y = c.scene_heading
         dur = c.begin_seated(self.clip, fade_in=self.fade_in)
         self.phase, self.left = 'down', (self.down if self.down is not None else (dur or 0.0))
         self.span = self.left
@@ -770,18 +810,59 @@ class Sit(_Cmd):
         lift = self._clamp(c, dt) if c is not None else None
         return dz if lift is None else max(dz, lift)
 
+    def _begin_stand_clip(self, c):
+        """endSeated with the stand-up clip, its hips' travel as root motion: the clip crossfaded in over the held
+        sit-down's last pose, the root carried by the two poses' hips (cross) and then by the clip's travel, what is
+        left against the spot the sit began from eased out (resid); the root stays the seat's until the clip ends
+        -> the clip's length (s)"""
+        if self.stand_clip not in getattr(c, '_emote_actions', {}):
+            c.load_emote(self.stand_clip, loop=False)
+        cc = c._emote_actions[self.stand_clip].clip
+        travel = stand_clip_travel(cc)
+        M = c.pose.M.copy()
+        R = M.to_3x3()
+        d = R @ (Vector(c._emote_clip(self.clip).root_curve[-1]) - Vector(cc.root_curve[0]))
+        trend = R @ Vector((travel[-1][0], travel[-1][1], 0.0))
+        self.up_cc, self.up_R, self.up_t = cc, R, 0.0
+        self.root0 = M.translation.copy()
+        self.cross = Vector((d.x, d.y))
+        self.resid = self.cross + Vector((trend.x, trend.y))
+        c.play_emote(self.stand_clip, fade_in=self.fade_in, fade_out=self.fade_in)    # symmetric: the carry's weight
+        c._seated_release_in = None
+        return cc.duration
+
+    def _carry(self, c, dt):
+        """this frame's root on the stand-up clip's travel (the clip's time after this frame's mixer update); at the
+        clip's end the root goes back to the controller, over the spot the sit began from"""
+        cc = self.up_cc
+        self.up_t += dt
+        s = stand_shift(cc, self.up_R, self.up_t, self.fade_in, cc.duration, self.cross, self.resid)
+        t = c.pose.M.translation.copy()
+        t.x, t.y = self.root0.x + s.x, self.root0.y + s.y
+        c.pose.M.translation = t
+        c.pose.invalidate()
+        if self.up_t >= cc.duration - 1e-6:
+            c._seated = False
+            self.up_cc = None
+
     def step(self, loco, dt):
         c = loco.ctrl
         self.left -= dt
         if self.left > 0:
+            if self.up_cc is not None:
+                self._carry(c, dt)
             c.seat_dz = self._seat_dz(c, dt)
             return (0.0, 0.0)
         if self.phase == 'down':
             self.phase, self.left = 'hold', self.hold
         elif self.phase == 'hold':
-            rem = c.end_seated(None if self.reverse else self.stand_clip, reverse=self.reverse,
-                               reverse_speed=self.reverse_speed)
-            self.phase, self.left = 'up', (self.up if self.up is not None else (rem or 0.0) + 0.1)
+            if self.reverse:
+                rem = c.end_seated(None, reverse=True, reverse_speed=self.reverse_speed)
+                self.phase, self.left = 'up', (self.up if self.up is not None else (rem or 0.0) + 0.1)
+            else:
+                rem = self._begin_stand_clip(c)
+                self.phase, self.left = 'up', max(self.up if self.up is not None else 0.0, rem) + 0.1
+                self._carry(c, dt)
         elif self.phase == 'up':
             c.stop_emote(fade_out=self.fade_out)
             self.phase, self.left = 'out', self.fade_out + 0.1
@@ -1119,6 +1200,7 @@ def record(c, f, t):
             'tread_run': c.ahead_tread_run, 'spread': c.ahead_probe_spread, 'stair_shape': c.ahead_stair_shape,
             'backward': bool(c.backward), 'feet_world': tuple(c.feet_world_position),
             'hand_contact': dict(getattr(c, 'hand_contact', None) or {}),
+            'hand_cover': dict(getattr(c, 'hand_cover', None) or {}),
             'M_ik': c.pose.M.copy(), 'N_ik': {k: q.copy() for k, q in c.pose.N.items()}}
 
 

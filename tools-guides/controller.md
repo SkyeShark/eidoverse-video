@@ -74,9 +74,9 @@ the queue.
 | `follow_path(points, ...)` | the same along a polyline; corners rounded into arcs of radius speed / max_turn_rate, followed by pure pursuit 0.6 s ahead |
 | `run_to(p)` | `move_to(p, gait='run')` |
 | `turn_to(deg)`, `turn_by(deg)`, `face(p)` | turn on the spot (turnLeft / turnRight, the root taking the clip's own hip yaw scaled to the angle; over 1.1 × the clip's turn it is split, the parts crossfaded; under 20° a settling turn). The feet step round: one is always down |
-| `emote(slot, seconds=None, facing='keep')` | `playEmote` (locomotion suspended), then `stopEmote`; `facing` a heading in degrees, `'keep'`, or `None` for the WebGPU default (three's π) |
+| `emote(slot, seconds=None, facing='keep', stop=True)` | `playEmote` (locomotion suspended), then `stopEmote`; `facing` a heading in degrees, `'keep'`, or `None` for the WebGPU default (three's π). `stop=False` never calls `stopEmote`, as a scene that plays an emote and leaves it on: after `seconds` the clip holds its last pose, facing where it played, through the commands after it (the course example's finale salute) |
 | `gesture(slot, weight=2.5)` / `stop_gesture()` | `playGesture`: the upper body plays the clip over whatever the legs do |
-| `sit(hold=2.2, seat=None, clip='stand_to_sit', reverse=True, reverse_speed=1.25)` | `beginSeated` where the body stands, hold, `endSeated` (reversed, as the course example does), `stopEmote`; `seat_spot(seat_xy, heading_deg)` says where to stand so the clip's own hip travel ends over the seat. `seat=` the seat object: `seatOn`'s settle, the held seat measured on the posed skin with the feet set down where the bake plants them, and the body raised or lowered so its underside rests on the pan, whatever the seat's height; and `seatOn`'s clamp: from 40 % of the clip on, sitting down and (reversed) standing up, the body is never lower than keeps its underside on the pan. The feet stand on the floor under it |
+| `sit(hold=2.2, seat=None, clip='stand_to_sit', reverse=True, reverse_speed=1.25)` | `beginSeated` where the body stands, hold, `endSeated` (reversed, as the course example does), `stopEmote`; `seat_spot(seat_xy, heading_deg)` says where to stand so the clip's own hip travel ends over the seat. `seat=` the seat object: `seatOn`'s settle, the held seat measured on the posed skin with the feet set down where the bake plants them, and the body raised or lowered so its underside rests on the pan, whatever the seat's height; and `seatOn`'s clamp: from 40 % of the clip on, sitting down and (reversed) standing up, the body is never lower than keeps its underside on the pan. The feet stand on the floor under it. `reverse=False` stands up on `stand_clip` (sit_to_stand) played forward, its hips' travel taken as root motion (`stand_clip_travel`, `stand_shift`, which `emotes.StandUp` shares): the hips stay on the seat through its crossfade, step forward with the clip and end over the spot the sit began from. The walk after a sit goes on at the seat's heading, whatever facing an earlier emote asked |
 | `vault()`, `climb_ledge()`, `jump(distance, height)`, `climb_ladder(height)`, `climb_wall()` | the explicit moves from where the body stands, facing its heading (the auto-trigger does the vault, the mounts, the scramble and the gap jump on its own along any path); each lasts while the move and anything it chains are in flight |
 | `steer(fn, seconds=None, speed=None, gait=None, stop=True)` | the body steered frame by frame from scene logic, as a WebGPU scene's `renderFrame` called `locomote(dt, input)`: `fn(t, ctrl)` returns a direction of travel (world x, y; its length, at most 1, scales the pace), `(0, 0)` to stand, `None` to end; `t` is the command's seconds, `walk.frame` the frame being simulated |
 | `follow(target, distance=1.0, speed=None, gait=None, seconds=None, bone=None)` | keep `distance` from a keyed object (another character's armature or one of its bones, a vehicle, an empty), reading where its keys put it at each frame: walk after it, run while it goes faster than the run threshold, and stop `distance` short of it wherever it stops |
@@ -230,7 +230,14 @@ What the film bake decides, frame by frame over the recorded take:
   where the seat left the foot, its place and heading. A foot's
   heading is read from its forward and up vectors together, in the frame of
   the ground it stands on, steady from heel strike to toe-off on a cross
-  slope too.
+  slope too. My robot body's ankle rolls 14.9° at most, short of a steep
+  cross slope: a planted foot on ground tilted across it more than 8°
+  (`ROLL_SLOPE`) whose ankle meets that stop gets one roll off the ground
+  for its whole stance, the most its solved legs need in its flat part
+  (`_stance_rolls`, a quarter to 45 % of the stance; a turn's or a stop's
+  short step from a quarter to its end), so its sole stands on its edge and
+  does not roll on the ground as the shin moves over it. On level ground
+  nothing is rolled.
 - **Load by reach.** Each planted leg carries the body's load by how far its
   foot stands from its hip along the ground: all of it within `TRAIL_FULL`
   (0.55) of the leg's reach, none past `TRAIL_NONE` (0.85) (`plant.py`). A
@@ -259,7 +266,8 @@ What the film bake decides, frame by frame over the recorded take:
   stair, the hips already risen) is let go early, but not while the other
   foot is in the air: until the other lands, the pelvis comes down to it.
   Down stairs the trailing foot, above the hips' reach, leaves before the
-  other lands.
+  other lands. A seat's stance (`sit`'s seated frames) is never let go
+  early: its feet stay on the floor through the hold and the rise.
 - **Swinging feet** follow the clip's own arc over the line between the two
   plants, never closer than `clearance` mid-swing to the highest ground they
   sweep, and never in contact while they travel faster than 0.8 m/s (a
@@ -356,8 +364,8 @@ weight.) `gait_sync='stride'` is the original: `timeScale = speed /
 nativeSpeed` (capped at 1.4).
 
 **This edition's additions**, each an option that is off unless asked
-(`Locomotion` turns the first three on), except the maneuvers' last pass,
-which is on:
+(`Locomotion` turns the first three on), except the maneuvers' last pass and
+the probes under what is overhead, which are on:
 
 - `gait_sync='distance'` (above) and `native_*_speed=None` (measured).
 - `land_on_contact=True`: a falling body lands when its feet reach the
@@ -372,6 +380,17 @@ which is on:
   original finds no ground there and the body takes off: over the stress
   course's 35 cm dome, a hop into fallIdle. The probes ahead keep the
   original's answer (read past, a ramp box's steep front edge is a step).
+- `ground_under_overhead=True` (on unless turned off): every downward probe
+  (the feet's, the ones ahead, the maneuvers' scan of the path ahead) looks
+  under a surface it meets higher over the feet than the body is tall, where
+  the room under it fits the body standing (its height and 5 cm,
+  `OVERHEAD_ROOM`): a doorway's lintel, a ceiling, a beam or a deck the body
+  walks beneath. The original drops its probes from 3-5 m over the body and
+  reads the top of whatever is over the head as the ground ahead: a lintel in
+  the colliders started a wall scramble in its doorway. A beam too low to walk
+  under, a block sunk into the floor and two blocks built against each other
+  are still climbed (`CollisionWorld.underside`, `inside_solid`); where nothing
+  hangs over the head it changes nothing.
 - `turn_on_spot(angle)`: turnLeft / turnRight played with the root taking the
   clip's hip yaw (the original never plays them); a turn straight after the
   same turn crossfades from a twin action of the clip. The library's turns
@@ -445,10 +464,29 @@ on the body and the clip instead:
   nothing and the body crossed flat, stepping onto the cover). Its hips curve
   rides over the line from take-off to landing, scaled so the tucked feet
   clear the top by 6 cm wherever they are over it, the crouch at either end
-  kept so the legs reach the ground. The prop hand plants on the top at full
-  weight, its contact latched where it first reaches; where the arm alone
+  kept so the legs reach the ground. The prop hand plants its palm flat on
+  the top at full weight: turned palm-down, the skin under its knuckles on
+  the top, the wrist where that hand puts it (the original aims the wrist
+  2 cm over the top, and the clip's hand, pitched fingers-down there, ran
+  Aporia's fingertips up to 13 cm into the course's covers). My robot body's
+  hand keeps the clip's turn there, the wrist 2 cm over the top (its wrist
+  bends back 70° at most: asked for a flat palm, its hardware turned the hand
+  about the wrist and left its fingertips 12.7 cm in the top). Its contact is
+  latched where it first reaches; where the arm alone
   cannot reach (low cover, the body high enough for its legs to clear it)
-  the spine leans the shoulder down to it (`lean_to_reach`).
+  the spine leans the shoulder down to it (`lean_to_reach`). It takes hold
+  over 15 % of the move (`VAULT_HAND_IN`: at once, the hand jumped 32 cm onto
+  the top in a frame) and lets go over the next 17 % (`VAULT_HAND_OUT`),
+  rising 15 cm off the top as it does (the original's hold ends in one
+  frame, and the clip has flung that hand up by then: a 58 cm pop), and
+  whatever holds it, no point of the hand
+  goes under the top while it is over the cover: the arm lifts it out (the
+  clip's hand sweeps down through the cover as the body passes it). The
+  cover runs from its near face to its far one, both measured by level rays
+  (the scan's `face_d` and `back_d`; its samples step 15 cm, so its last one
+  over the cover read a 25 cm wall 17.7 cm deep), and the record carries it
+  (`hand_cover`) to my robot body's hardware pass, which keeps the held hand
+  out of it too ([robot body](robot-body.md)).
 - **The mount** (climbLedge, the scramble's and the ladder's mantle): the
   hands grab the lip at full weight as they near it and stay where they land
   on the top through the pull-over. The end crouch is a visual sink that
@@ -490,8 +528,10 @@ on the body and the clip instead:
   joints it has; a hand the move holds (a vault's prop hand, a ladder grip:
   the record's `hand_contact` weight) is solved again from the rehomed
   shoulder and run through the arm pass (`dof_pass(reach=)`), so the hand
-  still plants on the top or the rung through the passage
-  ([robot body](robot-body.md)).
+  still plants on the top or the rung through the passage; a held hand the
+  arm pass leaves in the vault cover it is over (the record's `hand_cover`:
+  the shoulder at its pitch stop as the body passes the hand) is lifted out
+  by the elbow ([robot body](robot-body.md)).
 
 A drop deeper than `fall_land_min_drop` (0.85 m) plays fallLand; the film
 plant stands the landing on the ground it reached. Register your own moves in
@@ -509,6 +549,8 @@ world = CollisionWorld()                    # every visible mesh that is not ski
 world.ray_cast(origin, direction, max_dist) # Hit: .hit .point .normal .distance .object
 world.sphere_cast_down(origin, r, dist, min_normal=0.7)    # a ball dropped: Rapier's castShape witness and normal
 world.move_and_slide(centre, (dx, dy), radius, half_height, skin=0.05)
+world.underside(x, y, z)                    # a surface at z seen from under it: (its underside's z, what lies below)
+world.inside_solid(point)                   # inside a closed solid, by its faces' winding along level rays
 world.refresh()                             # after the scene changes
 ```
 
@@ -578,7 +620,10 @@ It builds in about five minutes, the spring chains baked with the take. Its
 stills from the follow camera at 14.4 s, 40 s and 51.6 s match the WebGPU
 film's frames of the same moments in composition, scale and stride, and
 Aporia casts her sun shadow in them (`load_vrm` sets the MToon materials up
-for EEVEE's shadow pass: [characters](characters.md#loading-a-vrm)). The
+for EEVEE's shadow pass: [characters](characters.md#loading-a-vrm)). Its
+finale salutes toward the follow camera and holds the salute's last pose,
+facing it, to the film's end, as the WebGPU example does (it never calls
+`stopEmote`). The
 whole film at the scene's 960 x 540 and 16 samples takes 13-16 s a frame on
 a shared GPU, over six hours for its 1727 frames; with scene.json's width,
 height and samples lowered to 640 x 360 and 4, a look at the whole take
@@ -589,10 +634,11 @@ renders at 1.3 s a frame.
 | `test_controller_course.py` | the course: a bump, 8° ramps, small stairs up and down, a run up and down normal stairs, the run slowing to a stop on its mark, turns on the spot (a boot on the floor in every frame), a walk to the side |
 | `test_controller_presets.py --preset NAME [--leg-ik none]` | every TERRAIN_CONFIG of the WebGPU bench (`eidoblend.course.PRESETS`), the stress course among them (its dome stepped over, not hopped); `--leg-ik none` is attachLocomotion without leg IK (the bench's noik scenes) |
 | `test_controller_terrain.py` | rolling ground and rocks, a curved path, a jog, a stop and a turn on the slope |
-| `test_controller_acting.py` | a gesture over the walk, an emote, a sit on a bench 5 cm higher than the clip's seat (settled onto it, never more than 1 cm into it sitting down or standing up, the boots on the floor), a 1.44 m drop into fallIdle and fallLand, the backward walk, a jog and a sprint |
+| `test_controller_cross_slope.py [--vrm aletheia]` | a 20° hillside walked along its contour both ways, a turn on the spot on it and a jog across: every planted sole holds one roll off the slope through its flat stance, within 1° a frame and 1.5° in all (my robot body's ankle rolls 14.9° at most; Aletheia's feet lie flat on it), the boots out of the slope |
+| `test_controller_acting.py` | a gesture over the walk, an emote, a sit on a bench 5 cm higher than the clip's seat (settled onto it, never more than 1 cm into it sitting down or standing up, the boots on the floor, the walk on at the seat's heading), a 1.44 m drop into fallIdle and fallLand, the backward walk, a jog and a sprint, and a plain seat stood up from on the stand-up clip (the hips held through its crossfade, carried forward and never back, ending over the spot she sat down from; the boots on the floor through the hold and one on it from the hips leaving the seat) |
 | `test_controller_foot_ik.py` | every `VRMFootControllerIK` option on a still body, then the WebGPU per-frame IK against the plant |
-| `test_controller_options.py` | every controller and `attach_locomotion` option, one behaviour each, on the controller's own telemetry; the maneuver planner's choices |
-| `test_controller_maneuvers.py` | `examples/obstacle_course.js` as the WebGPU example directs it, on its own character (Aporia) and with its follow camera keyed into the film: vaults (each rising over its cover, its prop hand on the top), mounts (hands on the lip, the crouch resting on the top), the gap jump, falls and landings, the sit stop at the bench (settled on it), the cheer while walking, the ladder (hands and feet on the rungs), the salute toward the camera; no foot inside anything through any maneuver |
+| `test_controller_options.py` | every controller and `attach_locomotion` option, one behaviour each, on the controller's own telemetry; the maneuver planner's choices and the scan's measure of a cover's near and far faces; the probes under a doorway's lintel and a ceiling slab (walked under), a beam too low to walk under, a block sunk into the floor and two built against each other (climbed) |
+| `test_controller_maneuvers.py` | `examples/obstacle_course.js` as the WebGPU example directs it, on its own character (Aporia) and with its follow camera keyed into the film: vaults (each rising over its cover, its prop hand's palm on the top and no point of a hand in it), mounts (hands on the lip, the crouch resting on the top), the gap jump, falls and landings, the sit stop at the bench (settled on it), the cheer while walking, the ladder (hands and feet on the rungs), the salute toward the camera, held facing it to the end; no foot inside anything through any maneuver |
 | `test_controller_follow.py` | `follow` after a keyed cart that rolls off, curves, stops and races off (the body keeps its distance, stops behind it each time, runs while it races), then `steer` through a slow S from a function of time; checks.feet on every gait, the keyed armature against the bake |
 
 The spring chains' test, `test_take_springs.py`, is the characters family's
@@ -624,14 +670,17 @@ in `out/` list the frames under `stance_issues`, `swing_issues` and
 - The ramp pyramid (`ramp_pyramid`, 12 of 13 checks): where a stair clip
   plays on the ramps, one stance's last frame, the foot rolling onto its
   toes, slips 7 mm and its toes read 3 mm into the slope.
-- My robot body on a 20 degree cross slope: its ankle's roll range is short
-  of the slope, and the joint clamp turns a planted foot 1.6 to 3 degrees a
-  frame through the heel-off. Aletheia passes the same walk clean.
-- On rolling ground (the terrain test, my robot body: 22 of 27 checks), a
+- My robot body on a 20 degree cross slope (`test_controller_cross_slope.py`,
+  17 of 19 checks): its walks hold each planted sole's roll as steadily as
+  Aletheia's feet lie flat on it (within 0.74° a frame and 1.3° through the
+  flat stance, hers 0.82° and 0.98°), but jogging across it the downhill
+  foot's short stances still roll 2.1-3.1° a frame between their landing and
+  heel-off, and the turn on the spot there misses an ankle target by 5 mm.
+- On rolling ground (the terrain test, my robot body: 23 of 27 checks), a
   stance planted at the foot of a 16 cm rock, before the step onto it, has
   its toe against the rock's flank (the plant's rigid sole points read up to
   57 mm under it), a stance where the walk back sets off turns 4.5 degrees
-  in a frame, and the turns on the slope miss an ankle target by up to 6 mm.
+  in a frame, and a turn on the slope misses an ankle target by 2.2 mm.
 - Stepping onto a boulder over about 20 cm in mid-stride: my robot body's
   swing target outruns its legs for a few frames. The terrain test keeps that
   boulder beside the path.

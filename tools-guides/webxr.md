@@ -49,10 +49,15 @@ bash run_blender.sh blender/eidoblend/xr/export_cli.py work/<id>/scene.blend wor
 `export_cli.py` also takes `--facing X,Y`, `--name`, `--shadows`,
 `--texel-density N`, `--max-texture N`, `--max-image N`, `--no-bake`,
 `--no-motion` (instances and deformation go out still, at the first frame),
-`--no-world`, `--world-frame F` and `--world-width W` (its docstring has them
-all). A `.blend` opened headless starts without add-ons: the export turns the
-VRM add-on on itself when the file holds a cast, so its MToon materials are
-read as MToon. Then serve the bundle and open it in the headset:
+`--no-world`, `--world-frame F`, `--world-width W`, `--world-step S` (a sky
+that changes, baked every S seconds), `--no-vrm` (no `.vrm` of the VRM casts:
+their PBR stand-ins only) and `--no-audio` (its docstring has them all;
+`export_xr` takes the last three as `world_step`, `vrm` and `audio`, and the
+sequence's cap and width as `world_sequence_max` and
+`world_sequence_width`). A `.blend` opened headless starts without add-ons:
+the export turns the VRM add-on on itself when the file holds a cast, so its
+MToon materials are read as MToon. Then serve the bundle and open it in the
+headset:
 
 ```sh
 python blender/eidoblend/xr/server.py --home /work/<id>/vr/index.html --log work/<id>/vr/results.jsonl
@@ -74,7 +79,9 @@ the glTF exporter, the depsgraph and the bakes all read the context's.
 `survey_xr(scene)` (and `--survey`) is cheap — no bake, no GLB — and says
 what an export would do: objects by type, what glTF cannot hold, which
 materials would be baked and which channels, the motion it would convert, the
-animated values it carries or cannot, the lights, the world, the view, the
+animated values it carries or cannot, the lights, the world (and whether it
+changes over the film: a sequence), the VRM casts whose `.vrm` it would write,
+the sound strips it would mix down, the view, the
 triangles rendering now, and the film's own image textures as the headset
 would hold them, graded (`over` asks for `max_image`). Run it on a film before
 exporting it.
@@ -85,6 +92,9 @@ exporting it.
 | --- | --- |
 | `scene.glb` | Blender's glTF exporter: the whole timeline as ONE glTF animation sampled every frame (`export_animation_mode='SCENE'`), punctual lights, cameras, materials as below; only the page's own `xr_*` custom properties ride along as extras |
 | `world.hdr` | the world baked alone into an equirectangular Radiance image (Blender bakes with Cycles; this export is that bake's one use), in three's equirect convention: the page's sky dome and its image-based light |
+| `world_NNN.hdr` | instead of `world.hdr` when the world changes over the film (keyed or driven world values, as `eidoblend.sky` keys its bake, or an image sequence or movie in it): the world every `world_step` seconds (1 by default, 32 images at most, `world_sequence_width` 1024 wide), a timed sequence |
+| `vrm/<cast>.vrm` | each VRM cast (an armature whose meshes wear MToon) alone, as the VRM add-on writes it: the page draws its MToon |
+| `audio.mp3` | the film's sound strips mixed down (`eidoblend.media.audio.mixdown`), played on the page's clock |
 | `textures/` | the bakes (base colour + alpha, metallic-roughness, normal, emission) |
 | `choreo.json` | timeline markers, the property tracks glTF cannot carry, and any `--choreo` object tracks |
 | `scene.xr.json` | the manifest the page reads: the XR settings in three's axes, the view transform, area lights, page-side materials, counts and Quest grades, warnings |
@@ -105,11 +115,13 @@ exporting it.
 | image textures through UV Map / Mapping / Normal Map / Separate Color | written as they are (no bake) |
 | an unlit material (a colour into the output) | `KHR_materials_unlit`, baked when procedural |
 | emission | the colour (normalised) and its strength: `KHR_materials_emissive_strength` |
-| a VRM's MToon | its glTF-shaped settings on a Principled stand-in (base colour, normal, emission, alpha); outlines off |
+| a VRM's MToon | the cast's `.vrm` beside the GLB, and its glTF-shaped settings on a Principled stand-in in the GLB that names the MToon material it stands for: the page swaps three-vrm's MToon (its node material, outlines included) onto the GLB's character, which keeps the film's motion |
 | sun, point, spot lights | `KHR_lights_punctual` in Blender's own watts (lighting mode COMPAT, below) |
 | area lights | three `RectAreaLight`s from the manifest (glTF has no area light) |
-| light energy / colour, emission strength, visibility, keyed | `choreo.json` tracks the page applies every frame |
-| the world | `world.hdr` (or, with `--no-world`, one flat colour, its radiance averaged over the sphere — baked at 64 × 32 when it is procedural — as the background and a uniform environment, which lights metals too) |
+| keyed material factors (base colour, metallic, roughness, emission, alpha cutoff, occlusion and normal strength, the `KHR_materials_*` factors), a Mapping node's keyed offset, rotation and scale before an image, a camera's lens and clip, a punctual light's colour, power, range and cone | `KHR_animation_pointer` channels (the exporter's `export_pointer_animation`), on a skinned or modified mesh's materials too; three's GLTFLoader skips them, the page reads them and plays them on the film's clock |
+| light energy / colour, emission strength, visibility, keyed | `choreo.json` tracks the page applies every frame (area lights, visibility and baked emission have no pointer) |
+| the world | `world.hdr`, or a timed `world_NNN.hdr` sequence when it changes over the film (or, with `--no-world`, one flat colour, its radiance averaged over the sphere — baked at 64 × 32 when it is procedural — as the background and a uniform environment, which lights metals too) |
+| sound strips | `audio.mp3`, the scene's mixdown |
 | an object tagged `xr_material` | drawn by the page with its own TSL material (below) |
 | a haze or fog box (a mesh whose materials are volumes only) | left out and named in the warnings: the exporter would write it as an opaque grey box round the set |
 | volume objects, Grease Pencil, hair curves, strand particles, speakers, light probes | not glTF: named in the warnings |
@@ -145,8 +157,15 @@ to 512). Textures are the one budget the export can meet for you without
 touching the set: `max_image=2048` (`--max-image 2048`) scales the film's own
 image textures down to 2048 px on the long side for the bundle (in memory; the
 `.blend` is not saved), since the headset uploads every texture uncompressed —
-a 4096 px map with its mips is about 90 MB of its memory. My robot body's 4K
-maps grade its walk `over` (783 MB) as they are, and `ok` (246 MB) at 2048.
+a 4096 px map with its mips is about 90 MB of its memory. My robot body's
+eight 4096 px maps take 715.8 MB as they are, which grades its walk `over`,
+and 179.0 MB at 2048 (`ok`).
+The world's images count too (`counts.world_mb_gpu`, in the `quest` texture
+grade): each equirect and its prefiltered light, 41.9 MB for a 2048-wide
+`world.hdr`, 10.5 MB for each 1024-wide image of a sky that changes, so a
+sequence at its 32-image cap takes 335.5 MB (`world_gpu_mb(width, count)`; a
+warning names it when it moves the grade). `world_step`, `world_sequence_max`
+and `world_sequence_width` trade the sky's steps against that memory.
 
 The pieces work on their own too:
 
@@ -162,6 +181,14 @@ M.bake_for_gltf(meshes, 'work/<id>/vr/textures', texel_density=24)   # Cycles on
 M.cap_images(meshes, max_size=2048)  # their image textures scaled down for the headset (in memory)
 W.bake_world_equirect(scene, 'work/<id>/vr/world.hdr', width=2048)  # also a GPU job
 MO.light_intensity(bpy.data.objects['key'])   # what a three light takes: lux, candela, or an area light's radiance
+from eidoblend.xr import export as X, glb
+X.vrm_casts(objects)                 # [(armature, meshes)] whose meshes wear MToon
+X.export_vrm_casts(objects, 'work/<id>/vr')    # their .vrm files (the VRM add-on's exporter), before convert_mtoon
+X.world_changes(scene)               # keyed or driven world values, or an image sequence / movie in the world
+X.world_sequence_frames(scene, step=1.0, most=32)   # the frames a changing world is baked at
+X.world_gpu_mb(1024, 32)             # 335.5: the MB those images and their prefiltered light take on the headset
+X.sound_strips(scene)                # what audio.mp3 mixes down
+X.pointer_targets(glb.read('work/<id>/vr/scene.glb'))   # what its KHR_animation_pointer channels animate, by name
 ```
 
 ### Light, colour and the sky
@@ -213,7 +240,24 @@ MO.light_intensity(bpy.data.objects['key'])   # what a three light takes: lux, c
 - **The sky.** `world.hdr` is the world at the export's first frame (or
   `world_frame`), linear and unclipped. The page draws it on a dome round your
   head that turns with the stage, and lights with it (`scene.environment`,
-  turned with the stage too).
+  turned with the stage too). A world that changes over the film
+  (`export.world_changes`: keyed or driven world values, an image sequence or a
+  movie) is baked every `world_step` seconds into a timed sequence instead; the
+  dome cross-fades between the two images either side of the film's time and
+  the image-based light steps to the nearer one (each image's prefiltered
+  environment is made once, as the page loads, and the light changes image
+  through one environment node, so no material is rebuilt as it steps).
+- **MToon.** A VRM cast's `.vrm` (the VRM add-on's own export of its MToon,
+  outlines and all) rides beside the GLB. The page loads it with three-vrm and
+  `MToonNodeMaterial` (from `node_modules/@pixiv`, the renderer's own build, as
+  the WebGPU pages load it) and puts each MToon material on the GLB's meshes
+  whose stand-in names it, the outline as a second pass of the same geometry as
+  three-vrm draws it. The GLB's skin keeps playing the film's motion, springs
+  included; nothing of the `.vrm` runs but its materials.
+- **The film's sound.** `audio.mp3` plays on the page's clock: browsers only
+  start sound after a touch, a click or a key (or the headset session), and the
+  page pulls it back onto the film's time whenever it drifts a tenth of a
+  second, the loop included.
 
 ### Page-side materials
 
@@ -447,13 +491,27 @@ origin (the baked normals read back the glTF way, the page's shadows and
 ridges against EEVEE's), and an export of a scene that is not the context
 scene; four test films (a product shot lit by two area lights, two
 crows, my robot walking with its maps capped at 2048 px, the look family's
-theatre with its spot lights, haze and a camera cut), each photographed in
+theatre with its spot lights, haze and a camera cut: the walk the test builds
+itself, the other three are their families' test outputs, skipped with the
+test that builds them when they are missing), each photographed in
 the page through the camera it shows at each time beside EEVEE's frame (EEVEE
 with no compositor and no volumes, as the page has neither); the compressed
-bundles; every `export_cli.py` option; `survey_xr` on five films; every
+bundles; every `export_cli.py` option; `survey_xr` on five films (a meadow
+from the [vegetation](vegetation.md) guide's recipe and my robot's walk built
+by the test; the product shot, the crows and the fire teapot read when their
+families' tests have built them); every
 function and option of `xr_kit.js` on an exported stage (`kit_check.html`,
 with a stand-in session for the loop, the pads and the rig in a session); the
-servers; and every `quest.py` command against a stand-in adb.
+servers; every `quest.py` command against a stand-in adb; and a film with
+the film's look (`test_xr_film_look.py`: Aletheia in MToon with outlines, a
+swatch whose base colour and roughness are keyed, a sliding texture, a lens
+keyed 35 to 70 mm, a sky keyed from dusk blue to amber, a tone on a sound
+strip), its pointer channels, `.vrm`, sky sequence and sound checked in the
+bundle and on the page beside EEVEE at two times, the sky's colour within 0.03
+of EEVEE's; keyed material colours on a plain, a subdivided and a skinned mesh
+reach the GLB as pointer channels on their own materials
+(`test_xr_pointer_tracks.py`, no render); and `world_changes` and the sky
+sequence's frames (`test_xr_survey.py`).
 
 ## Performance notes (Quest 3)
 
@@ -477,15 +535,16 @@ a crowd moves first.
   either (no headset or OpenXR runtime on the machine that built this); its
   landmarks and session settings are written and read back, and their first
   views rendered.
-- **Animated material values other than emission strength, camera lens and
-  world animation**: the export warns, the page does not play them
-  (`KHR_animation_pointer` would carry them; three's GLTFLoader does not read
-  it). An emission strength track on a BAKED material sets the strength as
-  keyed, not relative to the bake.
-- **A sky that changes over the film** (`eidoblend.sky`'s baked layers): one
-  frame of it becomes `world.hdr`.
-- **MToon's toon look**: shade colour, rim, matcap and outlines (the page draws
-  the Principled stand-in; three-vrm's MToon material would draw the real one).
+- **Animated values inside a procedural graph**: a keyed value that no glTF
+  material factor holds (a noise's scale, a ramp's stop) or that a bake froze
+  into a texture: the export names it, the page does not play it. An emission
+  strength track on a BAKED material sets the strength as keyed, not relative
+  to the bake.
+- **A sky that changes between its images**: the sequence is the world every
+  `world_step` seconds, cross-faded; a change faster than that (a lightning
+  flash) shows only where an image catches it.
+- **The film's sound in space**: `audio.mp3` is the film's stereo mixdown; the
+  page plays no positional (HRTF) sound from speakers or sound strips.
 - **Volumes, Grease Pencil, hair curves, strand particles**: not glTF; the
   export names them and the page shows nothing there (a haze box's light
   shafts and a theatre's beams included).
@@ -500,7 +559,6 @@ a crowd moves first.
   frame, with a warning. Wind on a big meadow wants a page-side material.
 - **Post effects** (bloom, depth of field, motion blur, the compositor): the
   page has none, by the kit's rules.
-- **Audio**: the film's sound is not exported with the page.
 - **Area light shadows**: three's `RectAreaLight` casts none, so what an area
   light shades in EEVEE (a stool's soft shadow on the floor, a crow's on the
   boards) is lit on the page; and area light spread under 180°, light shapes

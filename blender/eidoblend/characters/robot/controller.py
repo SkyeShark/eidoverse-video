@@ -192,7 +192,7 @@ class RobotLegs:
         self._cmd = None                     # the command in hand: {'kind', 'cmd', ...}
         self._next_route = None              # a route handed over while a turn clip plays: taken when it ends
         self._emote_facing = None            # the engine controller's _emoteFacingY: a standing emote's world heading
-        self._seat = None                    # the seat in hand: 'seat' (emotes.SeatOn) | 'plain' (beginSeated alone)
+        self._seat = None                    # 'seat' while seated (emotes.SeatOn: a chair's seat or a plain one)
         self.maneuver_log = []               # the moves the controller did not start: (time, name, what it said)
         self._auto_held = None               # the legs' auto_maneuvers setting while a route holds it (_moves_en_route)
         self.record = self.loco.live
@@ -537,11 +537,12 @@ class RobotLegs:
 
     # ------------------------------------------------------------------------------------------------- seats
     def begin_seated(self, slot='stand_to_sit', opts=None):
-        """beginSeated: the seated state. With a seat (opts['seat']: emotes.seat_plan's measures, which seat_on keeps on
-        the body, or opts['chair']: a chair to walk to) the controller family's sit-down (emotes.SeatOn: from where the
-        body stands, or walked up to the chair, turned out of it and backed onto its spot; the hips settled on the pan,
-        the feet on the floor) and seated until stand_up. Without one the JS's: the seated clip plays where the body
-        stands and the root holds (the caller owns the seat) -> the clip's duration"""
+        """beginSeated: the seated state, through the controller family's seat (emotes.SeatOn) until stand_up. With a
+        seat (opts['seat']: emotes.seat_plan's measures, which seat_on keeps on the body, or opts['chair']: a chair to
+        walk to): from where the body stands, or walked up to the chair, turned out of it and backed onto its spot; the
+        hips settled on the pan, the feet on the floor. Without one the JS's plain beginSeated: the seated clip from
+        where the body stands, the root held (the caller owns the seat), the feet on the floor as a seat's are
+        -> the clip's duration"""
         from ..emotes.verbs import SeatOn
         o = dict(opts or {})
         self._sync_place()                                 # seatOn's snap onto its spot, made just before
@@ -556,34 +557,29 @@ class RobotLegs:
             self._hand('seat', SeatOn(ch, transition=slot, face=face, hold=None, fade=fade, sink=o.get('sink', 0.0),
                                       back_up=0.0 if plan is not None else o.get('back_up', 0.35),
                                       hip_back=o.get('hip_back'), camera=o.get('camera'), speed=self.walk_speed))
-            self._seat = 'seat'
-            return a.clip.duration
-        self._seat = 'plain'
-        return self.ctrl.begin_seated(slot, fade_in=fade)
+        else:
+            self._hand('seat', SeatOn(None, transition=slot, hold=None, fade=fade))
+        self._seat = 'seat'
+        return a.clip.duration
 
     def end_seated(self, slot='sit_to_stand', opts=None):
-        """endSeated: a seat taken through emotes.SeatOn stands up through its StandUp (slot: the stand-up clip; None
-        reverses the sit-down); a plain seat plays the stand-up clip where it sits (the controller hands the root back
-        once the clip has carried the hips over the feet), then stopEmote -> the stand-up's length (s), or None"""
+        """endSeated: the seat stands up through emotes.StandUp (slot: the stand-up clip, its hip travel taken as root
+        motion; None reverses the sit-down), then the standing pose and stopEmote -> None (the stand-up's length is
+        the clip's; the controller's state is 'performing' until it is done)"""
         from ..emotes.verbs import StandUp
         o = dict(opts or {})
         fade = o.get('fadeIn', o.get('fade', 0.25))
         if self._seat is None:
             return None
-        if self._seat == 'seat':
-            self._seat = None
-            up = StandUp(reverse=None if slot is None else False, clip=slot or 'sit_to_stand', fade=fade)
-            k = self._cmd
-            if k is not None and k['kind'] == 'seat':
-                k['parts'].append(up)                      # still sitting down: up once it is seated
-                k['kind'] = 'stand'
-            else:
-                self._hand('stand', up)
-            return None
         self._seat = None
-        rem = self.ctrl.end_seated(slot, fade_in=fade, reverse=slot is None) or 1.8
-        self._hand('stand', Wait(rem), Call(lambda c: c.stop_emote(fade_out=0.3)), Wait(0.4))
-        return rem
+        up = StandUp(reverse=None if slot is None else False, clip=slot or 'sit_to_stand', fade=fade)
+        k = self._cmd
+        if k is not None and k['kind'] == 'seat':
+            k['parts'].append(up)                          # still sitting down: up once it is seated
+            k['kind'] = 'stand'
+        else:
+            self._hand('stand', up)
+        return None
 
     # ------------------------------------------------------------------------------------------------- gestures
     def load_gesture(self, slot, loop=True):

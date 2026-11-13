@@ -97,8 +97,10 @@ for ob in S['collection'].objects:              # the roofs opt out of local str
     if ob.name.startswith('building_'):         # noLightningStrike), so a local strike lands in the street
         ob['eido_noLightningStrike'] = 1
 t_build = time.time()
+# weather_fx=False: this film builds its own weather system (strike targets, occluders, the storm's range) and bakes
+# the sky per still after the weather's one plan, so the sky must not hand its bakes to a weather of its own
 sky = make_sky(sc, camera=cam, hours=17.0, weather='rain', cache_dir=os.path.join(OUT, 'cache_' + args.mode),
-               quality=args.quality)
+               quality=args.quality, weather_fx=False)
 sky.use_fog(density=0.0012)
 sky.transition_to('darkstorm', 1.0, 9.0, at=39.0)
 wx = make_weather_system(sc, sky, strike_targets=[S['collection']], occluders=S['collection'],

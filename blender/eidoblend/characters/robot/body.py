@@ -548,7 +548,8 @@ class VRMRobotBody:
     def _see_the_frame(self, t):
         """the scene at the frame for t, and the sensors' view of it rebuilt where anything they see has moved since the
         last sense (the JS's raycaster casts against the live scene each sense): a mover's place compared, and a mesh an
-        armature or its shape keys deform taken as moved every sense"""
+        armature or its shape keys deform taken as moved every sense. The view is split (RobotSensors.refresh(dynamic=)):
+        what stands still is read once, at the first sense, and each rebuild after it reads the movers alone"""
         if not self.movers():
             return
         f = self.frame_start + int(round(t * self.scene.render.fps / self.scene.render.fps_base))
@@ -560,7 +561,7 @@ class VRMRobotBody:
                 self._deforming[o.name] = _deforms(o)
             state.append(None if self._deforming[o.name] else tuple(round(v, 6) for row in o.matrix_world for v in row))
         if None in state or state != self._seen_state:
-            self.sensors.refresh()
+            self.sensors.refresh(dynamic=self._movers, dynamic_only=self._seen_state is not None)
             self.refreshes += 1
         self._seen_state = state
 

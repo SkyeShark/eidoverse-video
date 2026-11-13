@@ -130,9 +130,10 @@ then right, the head and the crown following the face, set down every frame, and
 body to the head and shoulders, in the example's own studio (its equirect softboxes made from the same formula, the key
 and rim lights, the dark floor disc, the bloom on the face only).
 
-As a film through the runner, `blender/examples/claude_robot/` is the same example in the scene format
-([scene-format](scene-format.md)): its `scene.py` calls `claude_robot_example()` at the example's own 30 fps and 8 s,
-and its `scene.json` asks 960 × 540 at 16 samples (raise both for a final film):
+As a film through the runner, like every other example, `blender/examples/claude_robot/` is the same example in the
+scene format ([scene-format](scene-format.md)): its `scene.py` calls `claude_robot_example()` at the example's own
+30 fps and 8 s and only reads my body's files, and its `scene.json` asks 960 × 540 at 16 samples (raise both for a
+final film), the film H.264 into `blender/examples/out/claude_robot.mp4`:
 
 ```bash
 python eido_blender.py build  blender/examples/claude_robot/scene.json                   # every frame keyed into its .blend
@@ -164,8 +165,11 @@ How it is careful, piece by piece (each usable on its own):
 - **The arm only goes where my hardware takes it.** `hands.reach_through_hardware` solves a fan of elbow swivels and
   passes each through THIS frame's arm pass (`arm_preview(..., dt)`: the shoulder's stops, its pitch stage turning at
   most its actuator's 360°/s from where it is, the wrist's stops and turn limit), keeping the one my arm actually
-  makes closest to the plan. At the can (the grasp, the set-down) the hand follows its planned path to 0.0 mm and
-  within 1.3°, and carrying it in the air within 4.3 mm and 2.9° (`test_pick_up.py` measures it on the keyed result).
+  makes closest to the plan. At the prop (the pre-grasp to the grasp, the set-down to the hand opening) a degree of
+  the hand's turn weighs 8 mm in that choice (`AT_PROP_TURN_W`; 2 mm in the air), so my elbow swings round to keep the
+  prop's turn rather than hold its place while my wrist meets a stop. At the can the hand follows its planned path to
+  0.0 mm and within 0.0° (my right hand) and 1.2° (my left), and carrying it in the air within 4.3 mm and 2.9°
+  (`test_pick_up.py` measures it on the keyed result).
 - **The fingers close until they touch.** `hands.close_on(hm, rec, Surface(prop), gap)` closes each finger's three
   pins in turn, proximal first, each until a link at or past it comes within `gap` of the prop's surface (a signed
   distance from a BVH of the prop's mesh), inside each pin's range; the thumb turns into the most opposition that clears
@@ -286,15 +290,17 @@ heading is radians about +Z, 0 facing −Y (the same number as three's `rotation
 - **I see what moves.** Where the sensed world has moving objects (anything keyed, driven or constrained, deformed by
   an armature that is, or under a parent that is: a door, a cart, another character), each sense first sets the scene
   to the frame of its `t` (`frame_start` + t × fps; `create(opts={'frame_start': ...})`) and the sensors rebuild their
-  view of it (`RobotSensors.refresh()`) where something moved, as the JS's raycaster casts against the live scene.
-  `body.movers()` lists
+  view of it where something moved, as the JS's raycaster casts against the live scene. The view is split
+  (`RobotSensors.refresh(dynamic=movers)`, [navigation](navigation.md)): what stands still is read once, at the first
+  sense, and each rebuild after it reads the movers alone (`dynamic_only=True`), so a large still set beside them costs
+  nothing per sense. `body.movers()` lists
   them. In `test_body_moving.py` every hit on a sliding door and a rolling cart lies on its surface as the scene has it
   at that sense's frame (0.0 mm), where the scene's first frame would put the cart's hits 2.6 m off; I see the door
   shut (no path), then open (the walk goes through it), and the cart crossing (a replan round it). The view is rebuilt
   only at a sense where a mover has moved since the last (a mesh an armature, its shape keys or a modifier can
-  reshape counts as moved every sense): 33 of that run's 177 senses, 0.6 ms each in that room; `body.refreshes`
-  counts them. The legs walk against the colliders made at `create` (the JS's Rapier world is fixed the same way): a
-  door or a cart that moves is seen and planned round, never walked against.
+  reshape counts as moved every sense): 33 of that run's 177 senses, a median 1.0 ms each in that room;
+  `body.refreshes` counts them. The legs walk against the colliders made at `create` (the JS's Rapier world is fixed
+  the same way): a door or a cart that moves is seen and planned round, never walked against.
 - `body.log` (plans, replans, arrivals, rejections), `body.readings` and `body.paths` record the run for checks.
 - **A look-at is re-aimed from the keyed body.** The JS aims the head from the head and the heading it renders; here the
   run is live and the film is its bake, and the keyed head stands a little off the live one (the plant's pelvis). So
@@ -351,10 +357,11 @@ axis-aligned box (a flat floor gets a 5 cm thickness under its top), or its own 
 `ob['trimesh_collider'] = True` (or `trimesh_colliders=True` for all) — flag shaped ground (terrain, ramps, stairs),
 because a box turns a slope or a flight into a block at its highest point. An object flagged `ob['no_walkable'] = True`
 (vegetation, effects, a ladder's rungs) never collides. Keep seats out of it (the controller reads a pan as a step to
-climb), things that move (they are seen, not collided with), and what is over my head: a doorway's lintel, a ceiling,
-a beam. The controller's scan of the path ahead drops its probes from 3 m over the body, as the engine's does, so it
-reads the top of anything up there as the ground ahead and climbs it: in `test_body_moving.py` a lintel in the colliders
-started a wall scramble in the doorway. The sensors still see all of it.
+climb) and things that move (they are seen, not collided with). What is over my head belongs in it like any wall: a
+doorway's lintel, a ceiling, a beam. My legs' probes look under it (the controller family's `ground_under_overhead`;
+the engine's probes drop from 3 m over the body and read its top as the ground ahead, so a lintel in the colliders
+started a wall scramble in its doorway), and in `test_body_moving.py` I walk through a doorway under its lintel with my
+feet on the floor.
 
 ### My legs: the engine's controller, frame by frame
 
@@ -375,7 +382,9 @@ frame the adapter hands the legs a direction and they run the command in hand, t
 - **a seat** (`emotes.SeatOn` and `StandUp`: "Seats" below).
 
 Whatever the engine's controller does on its own while it walks or runs happens here on its own: stairs and ramps on
-its stair clips at the tread-synced pace; low cover vaulted, a ledge climbed, a gap jumped and a big drop landed
+its stair clips at the tread-synced pace; a cross slope steeper than my ankle's 14.9° of roll, each planted boot
+standing on its edge at one roll through its stance ([controller](controller.md)); low cover vaulted, a ledge climbed,
+a gap jumped and a big drop landed
 (`fallLand`), its auto-maneuvers, wherever the route meets them; a move called mid-stride starts out of the walk or the
 run, and the route goes on from where it lands me; a run turns at the controller's rate. Those moves are for what lies
 on the route. The JS's adapter stops pushing the controller within `arrive_radius` of the last waypoint, so a wall just
@@ -440,7 +449,12 @@ first: `face_direction` out of the chair, and the snap is what is left), keeps t
 the hips settled onto the pan and clamped out of it from 40 % of the descent, the backrest kept clear, the feet on the
 floor), seated until `stand_up` (`emotes.StandUp`). `begin_seated(slot, chair=...)` walks me to the seat first
 (`SeatOn`'s approach: up to it, round it when it is in the way, the turn out of it, a step back onto its spot);
-`begin_seated(slot)` alone is the JS's: the seated clip where I stand, the root held (the caller owns the seat).
+`begin_seated(slot)` alone is the JS's: the seated clip where I stand, the root held (the caller owns the seat), through
+`SeatOn`'s plain seat, so my feet go onto the floor and rest there as a chair's do, and `stand_up('sit_to_stand')` takes
+the stand-up clip's hip travel as root motion (`StandUp`). In `test_body_api.py` my feet rest within 3.8 mm of the floor
+through the hold and one is on it at every frame from my hips leaving the seat to the walk on (the clip shuffles both
+while the seat still carries me), my hips move forward with the clip at most 2.1 cm a frame and never more than 0.2 cm
+back, and I stand over the spot I sat down from (0.0 cm).
 
 Measured on the keyed, evaluated mesh in `test_body_seat.py`: `seat_on` puts me on its spot to 0.0 cm and 0.0° (the
 walk up had left me 26 cm short of it; that is its snap); through each hold my seat skin rests 0.9-1.0 mm over the
@@ -448,7 +462,7 @@ pan, my hips over the chair's pan 6.3 cm from its centre (its backrest's bias) a
 foot's lowest sole point 0.0-3.4 mm over the floor; half a second after each stand-up my hips are within 2 cm of my
 standing height, and the walks after both resolve. All 38 gait segments of that film pass the controller family's
 `checks.feet`. For a film, seat me through `seat_on` or `begin_seated(chair=...)`: the plain `begin_seated(slot)` is
-the JS's primitive under them, and on its own it sits on air (below: Not yet ported).
+the JS's primitive under them, and on its own it sits on air (put a seat under me).
 
 ### Aimed emotes
 
@@ -496,13 +510,17 @@ where the clamped leg cannot reach that far it moves my whole body out (5.4 cm a
 
 **My hands hold what the move holds.** My hardware pass rehomes my torso (my single waist joint cannot take the clip's
 chest bend), which would swing a planted hand away from what it holds. So the controller family's plant, running my
-hardware pass, solves each hand the move holds (the record's `hand_contact` weight: the vault's prop hand, the
-ladder's grips) again from the rehomed shoulder through my arm pass (`dof_pass(reach=)`), over a few rounds that
-pre-compensate what my joint clamps and pitch rate take off, and my own passes after it keep those hands exactly. In
-the test the vault's knuckles come to 4.9 cm of the wall's top, and on the ladder a knuckle is a median 4.3 cm from its
-rung (67 % of the 33 grip frames within the controller family's 6 cm); `climb_ladder({'rungRadius': ...})` gives the
-rungs' real thickness, so my palms close over them. The free arm the vault raises is the clip's own (Aletheia's vault
-on the same clip raises it too).
+hardware pass, solves each hand the move holds (the record's `hand_contact` weight: the vault's prop hand, the mount's
+hands on the top, the ladder's grips) again from the rehomed shoulder through my arm pass (`dof_pass(reach=)`), over a
+few rounds that pre-compensate what my joint clamps and pitch rate take off, and my own passes after it keep those
+hands exactly. My shoulder's pitch stage turns 360°/s at most and stops at 60°, so through the vault's plant my arm
+lags the hand the controller family puts on the top and then, straight and at that stop, cannot shorten as my body
+passes over it: the hand the move holds over the cover (the record's `hand_cover`) is lifted out by my elbow, bent a
+little more each try until no point of the hand is under the top, the hand going forward along the top as a planted
+hand does when the body passes it. In `test_body_maneuvers.py` my vault's palm comes to 0.1 cm of the wall's top and no
+point of my hands goes into the wall; through the ladder's climb the nearer palm is a median 0.6 cm from a rung's
+surface; `climb_ladder({'rungRadius': ...})` gives the rungs' real thickness, so my palms close over them. The free
+arm the vault raises is the clip's own (Aletheia's vault on the same clip raises it too).
 
 ### Seeing what it knows: `RobotDebug`
 
@@ -575,8 +593,8 @@ bash run_blender.sh blender/tests/robot_body/render_stills.py route_claude_robot
 - `test_body_aimed_emote.py` — `set_emote_facing`: two emotes aimed within 15° pivot in their fade-in (no turn on
   the spot, the facing on the aim, the planted feet still), one aimed 50° off turns to it first and back after.
 - `test_body_maneuvers.py` — down a hall: a vault over a low wall, a jump over a ditch out of a walk, a climb onto a
-  step and up a ladder onto a tower, and the refusals; its stills show the ladder from the step's side, where the tower
-  does not hide it.
+  step and up a ladder onto a tower, and the refusals; my hands on what the moves hold; its stills show the ladder from
+  the step's side, where the tower does not hide it, and the hands up close on the wall's top and on the rungs.
 - `test_crown_head_states.py` — the presets: each of the ten `CROWN_STATES` (with its `HEAD_STATES` pose where there
   is one) held in turn through the frame order, every petal at its state's fold inside its stops, the head at its
   state's pitch, roll and pan, the actuators at their rates; my head rendered in each.
@@ -587,7 +605,9 @@ bash run_blender.sh blender/tests/robot_body/render_stills.py route_claude_robot
 - `test_body_api.py` — every other action and query: the look-ats, a 90° turn on the spot, a two-pass scan, a run
   to a corner short of a pane (no move for what lies past the goal), a salute aimed at the camera, walking to a
   landmark, the JS's rejections (an unknown landmark, an unknown clip, a stop, a collision stall on a pane the sensors
-  cannot see and the controller cannot climb), the JS's plain beginSeated and standing up.
+  cannot see and the controller cannot climb), the JS's plain beginSeated and standing up (my feet on the floor
+  through the hold and one on it from my hips leaving the seat to the walk on, the stand-up clip carrying my hips
+  forward to stand over the spot I sat down from).
 
 Their stills are strips: a low camera beside each walk's start and stop, each turn on the spot, each move, each
 sit-down and stand-up, held over it and every two or three frames (`_stage.side_view`: square to the travel, 45 cm
@@ -627,34 +647,19 @@ Each writes `out/<test>.json` (the report and its PASS / FAIL checks), its `.ble
   that place again (the JS's memory): at the end of `test_body_moving.py`, 18 of the 156 cells the cart stood and
   rolled over still hold its top's height (0.9 m, seen while it stood: a ledge to the planner), none of them blocked;
   the walk went round them.
-- **The sensors' rebuild for a moving thing is the whole sensed set's.** `RobotSensors.refresh()` rebuilds one BVH
-  over every mesh the sensors see, at each sense where a mover has moved: 3.6 ms for 200 props, 55 ms for 2,000,
-  1.2 s with a 250k-vertex ground beside them. A static view built once and a second one over the movers alone,
-  rebuilt per sense, belongs in `eidoblend.harness.navigation` ([navigation](navigation.md)).
-- **The controller's scan ahead reads what is over my head as ground** (the controller family's maneuver scan drops
-  its probes from 3 m over the body, as the engine's `_scanPathAhead` does): a lintel, a ceiling or a beam in
-  `collision_meshes` reads as a wall to climb in front of me, and the controller starts a wall scramble there. Keep
-  them out of the colliders (above); the sensors see them anyway.
-- **My hands on a move are a few centimetres off**: the vault's knuckles 4.9 cm from the wall's top at their nearest,
-  the ladder's a median 4.3 cm from the rung, a third of the grip frames further than 6 cm (above: "The moves"); the
-  same as the controller family's contact IK leaves them before my passes.
-- **My seats' residuals.** The plain `begin_seated(slot)` (no seat: the seated clip where I stand, the root held)
-  keeps the engine's seams. The JS's `stand_up('sit_to_stand')` starts a clip whose hips sit where its own seat is,
-  45 cm from where the sit-down left them, so my seated body shifts 45 cm in six frames as it crossfades in; and the
-  controller takes the root back 85 % into the clip (the engine's), so the standing body slides 40 cm back to its
-  root in six frames. The film's plant also holds my feet through the sit, the hold and the rise as one stance and
-  lets them go there: one foot 3.8 cm off the floor in the hold, neither down for 69 frames from the rise
-  (`test_body_api.py`). `seat_on` and `begin_seated(chair=...)` sit and stand through `emotes.SeatOn` and
-  `StandUp` (the stand-up clip's hip travel taken as root motion, the seat's own feet) and show none of it (above).
-  Sitting on the ground I do a long sit, my legs out along the floor (my hips flex 98° at most and my knees 112°, so I
-  cannot fold into the library's cross-legged clip), my heels resting on it; my boots and arms stay out of the floor
-  through the sit-down, the hold and the rise, lying down too ([maneuvers](maneuvers.md#not-yet-ported)). My ankle has
-  no twist, so in a chair a resting foot turns with my shin.
-- **My left hand's set-down is less exact than my right's.** From the mirrored stance the left grasp sits near my
-  wrist's extension stop, and setting the can down my hardware leaves the hand up to 4.4° off its planned turn (6.6°
-  on the frame it opens) against the right's 1.3°: the can lands that far off upright and tips onto its base over
-  three frames; my eyes come within 5.2-5.5° of the can and the set-down place where the right's are within 4.2°
-  (`test_pick_up.py --side left` reports both as its two FAILs). `pick_and_hold` plans upright props (round or
+- **My hands arrive late on the vault's top and the ladder's first rungs.** On the vault my shoulder's pitch rate
+  (360°/s) holds my arm behind the hand the controller family reaches out (up to 48 cm off it on the way down), so my
+  hand lands on the top a few frames after a human's; in the first five frames of the ladder's climb my hands are still
+  reaching for the rungs, the nearer palm up to 9 cm off one (6.1, 3.3, 9.1, 1.0 and 3.5 cm; within 1.5 cm from then
+  on), so nine in ten of the climb's frames are within 3.4 cm, not 3 (`test_body_maneuvers.py` reports it as its FAIL).
+- **My seats' residuals.** Sitting on the ground I do a long sit, my legs out along the floor (my hips flex 98° at
+  most and my knees 112°, so I cannot fold into the library's cross-legged clip), my heels resting on it; my boots and
+  arms stay out of the floor through the sit-down, the hold and the rise, lying down too
+  ([maneuvers](maneuvers.md#not-yet-ported)). My ankle has no twist, so in a chair a resting foot turns with my shin.
+- **My eyes on my left hand's work.** Picking up with my left hand my eyes come within 5.2° of the can as the reach
+  starts and of the set-down place (`test_pick_up.py --side left`'s FAIL: its bar is 5°), where my right hand's are
+  within 4.2°: as the reach starts my head alone would be 30° off the can (26° for my right hand's), its nod at its
+  30° stop, and my eyes' look range does not take all of the rest. `pick_and_hold` plans upright props (round or
   flat-sided); props lying down, handles and two-handed carries are not planned.
 - **Moving colliders.** My legs walk against the colliders made at `create`, as the JS's Rapier world is built once: a
   door or a cart that moves is seen and planned round, never walked against.

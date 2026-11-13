@@ -85,7 +85,8 @@ cam.rotation_euler = (math.radians(88), 0.0, 0.0)          # looking along +Y
 
 T_END = 40.0
 sc.frame_start, sc.frame_end = 1, int(T_END * FPS) + 1
-sky = make_sky(sc, camera=cam, hours=15.0, weather='storm', cache_dir=os.path.join(OUT, 'cache'), quality='film')
+sky = make_sky(sc, camera=cam, hours=15.0, weather='storm', cache_dir=os.path.join(OUT, 'cache'), quality='film',
+               weather_fx=False)
 wx = make_weather_system(sc, sky, strike_targets=[flat], moisture=False, log=lambda *a: None)
 wx.wrap_scene()
 wx.debug_force_local_strike(at=2.0)

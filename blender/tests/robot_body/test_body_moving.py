@@ -2,9 +2,9 @@
 that opens, a cart that crosses the room. VRMRobotBody.update(t, dt) sets the scene to the frame for t where the sensed
 world has moving objects, and the sensors rebuild their view of it each sense.
 
-A room (8 x 7 m) split by a wall with a 1.4 m doorway (its lintel is seen but is no collider: it is over my head, and
-the controller's scan ahead would read its top as a wall to climb); its sliding door is shut, and slides open behind the
-wall at 3.0-4.0 s. A cart rolls 2.6 m across my way in the far half at 8.2-9.8 s, past the doorway as I walk up to it, and
+A room (8 x 7 m) split by a wall with a 1.4 m doorway, its lintel over it at 2.1-2.6 m (a collider with the walls: my
+legs' probes read the floor under it, as I walk beneath it); its sliding door is shut, and slides open behind the wall at
+3.0-4.0 s. A cart rolls 2.6 m across my way in the far half at 8.2-9.8 s, past the doorway as I walk up to it, and
 stands beside my goal. The scene's direction, awaited action by action:
 
     scan_area -> walk_to(behind the wall) [no path: the door is shut] -> until 4.3 s -> scan_area (the door open)
@@ -14,12 +14,14 @@ The door and the cart are not walls the legs walk against (the JS builds its Rap
 keeps me off them is what my sensors see. Checks (PASS / FAIL):
   - the shut door is seen as shut: the first walk_to is rejected ('no path'), the doorway's cells blocked then
   - the open door is seen as open: the doorway's cells free after the second scan, the walk resolves through it
+  - the lintel over the doorway is over my head: no move plays, my feet stay on the floor through the doorway
   - every sensor hit on the door and on the cart lies on its surface as the scene has it at that sense's frame (within
     1 cm), where the one snapshot at the first frame would put the cart's hits metres off
   - the cart is seen and avoided: a replan while it is in view, and my keyed root at least 0.35 m from it on every
     frame
   - what it costs: the sensors' rebuild (s), made only at the senses where the door or the cart had moved since the
-    last; what the cart left in the memory at the end (reported)
+    last, of the movers' view alone after the first (RobotSensors.refresh(dynamic=, dynamic_only=)); what the cart
+    left in the memory at the end (reported)
 Stills: out/moving_<moment>_<k>_f<frame>.png (the door and the cart with what I see of them; the walk through the
 doorway from a low side camera); out/moving.json, out/moving.blend.
 
@@ -70,10 +72,9 @@ def scene():
              S.box('wall_w', -4.1, -4.0, -3.0, NORTH, 0.0, H, wall_m),
              S.box('wall_e', 4.0, 4.1, -3.0, NORTH, 0.0, H, wall_m),
              S.box('divider_w', -4.0, DOOR_X[0], WALL_Y - 0.05, WALL_Y + 0.05, 0.0, H, wall_m),
-             S.box('divider_e', DOOR_X[1], 4.0, WALL_Y - 0.05, WALL_Y + 0.05, 0.0, H, wall_m)]
-    # the lintel over the doorway: seen, not a collider (it is over my head, neither walked on nor walked round; the
-    # controller's scan ahead drops its probes from 3 m over the body and would read its top as a wall to climb)
-    S.box('lintel', DOOR_X[0], DOOR_X[1], WALL_Y - 0.05, WALL_Y + 0.05, 2.1, H, wall_m)
+             S.box('divider_e', DOOR_X[1], 4.0, WALL_Y - 0.05, WALL_Y + 0.05, 0.0, H, wall_m),
+             # the lintel over the doorway, a collider like the rest of the wall: over my head, it is walked under
+             S.box('lintel', DOOR_X[0], DOOR_X[1], WALL_Y - 0.05, WALL_Y + 0.05, 2.1, H, wall_m)]
     # the door: a sliding leaf in the doorway, just on the far side of the wall, sliding east behind it to open
     bpy.context.preferences.edit.keyframe_new_interpolation_type = 'LINEAR'
     w = DOOR_X[1] - DOOR_X[0]
@@ -144,9 +145,9 @@ def main():
     sens = body.sensors
     base_refresh = sens.refresh
 
-    def timed_refresh():
+    def timed_refresh(*a, **kw):
         t0 = time.time()
-        n = base_refresh()
+        n = base_refresh(*a, **kw)
         refresh.append(time.time() - t0)
         return n
     sens.refresh = timed_refresh
@@ -179,6 +180,12 @@ def main():
             sum(s == STATE_FREE for s in opened) >= 4 and thru and all(DOOR_X[0] < p.x < DOOR_X[1] for p in thru),
             f'walk_to after it opened: {out.get("walk_open")}; the doorway\'s cells {opened} (1 free); I cross the wall\'s '
             f'line at x {[round(p.x, 2) for p in thru[:3]]}')
+    # the lintel in my legs' colliders: their probes and their scan ahead read the floor under it
+    near = [r['feet_world'][2] for r in rep['_records'] if abs(r['feet_world'][1] - WALL_Y) < 1.0]
+    R['doorway'] = {'moves': rep['moves'], 'frames_within_1m': len(near),
+                    'feet_z_mm': [round(1000 * min(near), 1), round(1000 * max(near), 1)] if near else None}
+    R.check('the lintel over the doorway is over my head: no move plays, my feet on the floor through the doorway',
+            not rep['moves'] and near and max(abs(z) for z in near) < 0.01, f'{R["doorway"]}')
     # every hit on a mover against its surface at that sense's frame (and the cart's against its first frame's)
     worst, worst_static, n = {'door': 0.0, 'cart': 0.0}, 0.0, {'door': 0, 'cart': 0}
     first_cart = None

@@ -590,12 +590,12 @@ def arm_preview(rig, N, side, dt=None):
     return out
 
 
-def reach_through_hardware(rig, rec, side, wrist, turn, swivel, dt, last=None, span_deg=45.0, step_deg=5.0):
+def reach_through_hardware(rig, rec, side, wrist, turn, swivel, dt, last=None, span_deg=45.0, step_deg=5.0, turn_w=2.0):
     """reach() whose elbow swivel is chosen by what the arm's hardware pass will make of it THIS frame (arm_preview with
     dt: the shoulder's stops, its pitch stage's actuator rate from where it stands, the wrist's stops and turn limit):
     swivels round the planned one, each solved, passed through the hardware and measured against the target (the wrist's
-    place, mm, and the hand's turn), the least miss kept, then the nearest to the last frame's (no flip). rec['N'] in
-    place -> reach()'s report with 'miss_mm' and 'miss_deg' (what the pass will leave)"""
+    place, mm, and the hand's turn, a degree weighing turn_w mm), the least miss kept, then the nearest to the last
+    frame's (no flip). rec['N'] in place -> reach()'s report with 'miss_mm' and 'miss_deg' (what the pass will leave)"""
     best = None
     n = int(span_deg / step_deg)
     for k in range(-n, n + 1):
@@ -606,12 +606,15 @@ def reach_through_hardware(rig, rec, side, wrist, turn, swivel, dt, last=None, s
         p, W = rig.bone_world({'N': Np, 'off': rec['off'], 'M': rec['M']}, side + 'Hand')
         miss_mm = 1000 * (p - wrist).length
         miss_deg = math.degrees(W.rotation_difference(turn).angle)
-        cost = miss_mm + 2.0 * miss_deg + 0.2 * abs(k) * step_deg + (0.6 * abs(math.degrees(psi - last))
-                                                                     if last is not None else 0.0)
+        cost = miss_mm + turn_w * miss_deg + 0.2 * abs(k) * step_deg + (0.6 * abs(math.degrees(psi - last))
+                                                                        if last is not None else 0.0)
         if best is None or cost < best[0]:
             best = (cost, psi, probe['N'], dict(r, miss_mm=miss_mm, miss_deg=miss_deg))
     rec['N'].update(best[2])
     return best[3]
+
+
+AT_PROP_TURN_W = 8.0      # mm a degree of the hand's turn weighs in the elbow's swivel while the hand is at the prop
 
 
 def _rot_z(q, ang):
@@ -996,7 +999,13 @@ def pick_and_hold(h, rig, obj, f0=1, side='right', clip=None, ground=None, at=(0
                 if last_sw is None:
                     last_sw = swivel_of(rig, rec_prev, side) if rec_prev is not None else sw
                 base_N = dict(rec['N'])
-                r = reach_through_hardware(rig, rec, side, wt, tq, sw, dt, last=last_sw, span_deg=90.0)
+                # at the prop (the pre-grasp to the grasp, the set-down to the hand opening) the hand's turn is the
+                # prop's: a degree off there weighs AT_PROP_TURN_W mm, so the elbow swings round to keep it rather than
+                # hold its place while the wrist meets a stop (the left hand setting the can down: 4.4 deg off at 2 mm a
+                # degree)
+                at_prop = T['pre'] <= t <= T['closed'] or T['over'] <= t <= T['open']
+                r = reach_through_hardware(rig, rec, side, wt, tq, sw, dt, last=last_sw, span_deg=90.0,
+                                           turn_w=AT_PROP_TURN_W if at_prop else 2.0)
                 if grasp_hand is not None and T['over'] <= t < T['open']:
                     # SETTING DOWN to contact: the prop rides the hand as my hardware will put it this frame; where
                     # its lowest point would pass into the surface, the hand stops that much higher

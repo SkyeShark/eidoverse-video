@@ -114,7 +114,8 @@ sun = None
 t_all = time.time()
 for name, kw in CELLS:
     t0 = time.time()
-    probe = make_sky(sc, camera=cam, cache_dir=os.path.join(OUT, '_cache', name), sun=sun, shadows=False, **kw)
+    probe = make_sky(sc, camera=cam, cache_dir=os.path.join(OUT, '_cache', name), sun=sun, shadows=False,
+                     weather_fx=False, **kw)
     sun = probe.sun
     probe.update(0.0)
     key = probe.lights['key_dir']                       # three.js: sun by day, moon at night
@@ -129,7 +130,7 @@ for name, kw in CELLS:
     if args.cirrus_atlas:
         kw = dict(kw, cirrus_atlas=args.cirrus_atlas)
     sky = make_sky(sc, camera=cam, cache_dir=os.path.join(OUT, '_cache', name), sun=sun, quality=args.quality,
-                   **kw)
+                   weather_fx=False, **kw)
     sky.use_fog(density=0.0003)
     sky.bake(log=lambda *a: None)
     sc.render.filepath = os.path.join(OUT, name + args.suffix + '.png')

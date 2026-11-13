@@ -27,7 +27,11 @@ blend of clips at any speed):
                 frames is moved along the travel as little as keeps it out (_tuck_shift). The first stance after a
                 seat stands where the seat left the foot
   THE TARGET    tilted onto the ground's plane under the sole, set flat when within 1.5 deg of flat (not into the
-                heel-off), inside the ankle's range for my robot body, toes flat on the ground through the toe roll
+                heel-off), inside the ankle's pitch range for my robot body, toes flat on the ground through the toe
+                roll. My robot body's ankle rolls at most 14.9 deg, short of a steep cross slope: a planted foot on
+                one (ground tilted across it over 8 deg) keeps one roll off the ground for its whole stance, the most
+                its solved legs need in its flat part (_stance_rolls), so its sole does not roll on the ground as the
+                shin moves over it until the heel-off
   THE HEIGHT    in stance the lowest sole point on the ground. In swing the straight line between the two plants plus
                 the clip's own arc over it (in the body's frame), never closer than `clearance` mid-swing to the highest
                 ground the sole sweeps (a slope-limited envelope: the foot rises before a riser, not at it)
@@ -49,7 +53,8 @@ import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 
 from .. import robot_dof as dof
-from .._math import D2R, R2D, clamp, ease, hann_smooth, q_from_three, q_to_three, smooth, wrap_pi
+from .._math import (D2R, R2D, clamp, ease, euler_from_quat, hann_smooth, lerp_table, q_from_three, q_to_three, smooth,
+                     twist_about, wrap_pi)
 from ..ground import SIDES, foot_points
 from ..locomotion import CONTACT, FLAT, FWD, LOCK_BAND, NEED, REACH_MARGIN, WIDTH, YAW_CAP, _bump, _intervals
 
@@ -86,6 +91,13 @@ TRAIL_DIP_LATE = 0.12                # where the pelvis reaches it only this far
 TRAIL_DOUBLE = 3                     # and the other foot has stood this many frames (the weight crosses first)
 TRAIL_STAIR_SHARE = 0.15             # the stair clips' share of the blend's weight that holds such a stance on
 STAIR_CLIPS = ('stairsUp', 'stairsDown', 'stairsRunUp', 'stairsRunDown')
+ROLL_TOL = 0.4 * D2R                 # my robot body: a planted foot its ankle's roll stop holds further than this off its
+ROLL_ROUNDS = 2                      # target gets one roll for the stance (_stance_rolls), in these rounds, measured
+ROLL_FROM = 0.25                     # over its flat part: from this share of the stance (its landing settled)
+ROLL_TO = 0.45                       # to this one (the heel-off: the clip's own foot comes back from there, THE TARGET),
+ROLL_SLOPE = 8.0 * D2R               # on ground tilted across the foot more than this (a cross slope); a stance of
+ROLL_SHORT = 8                       # fewer frames (a turn's step, a stop's) from ROLL_FROM to its end
+ROLL_EASE = 5                        # frames: the swing turns the foot onto its stance's roll over its last ones
 
 
 KNEE_MAX_HUMAN = 150.0 * D2R          # a human knee folds past round one's 112 deg (my robot's hardware stop): a run's
@@ -147,7 +159,9 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
           feet=None, log=print, released=None):
     """recs: film.py's per-frame records -> (frames for key_frames, report). A planted foot that its straight leg still
     cannot reach at the end of its stance (the trailing foot on a stair, the hips already risen) is released there:
-    the bake runs again with those frames lifted ('released' in the report)"""
+    the bake runs again with those frames lifted ('released' in the report); a seat's stance (mostly 'seated' frames:
+    film.Sit) is not, its feet stay on the floor through the hold and the rise. On my robot body a stance its ankle's
+    roll stop held off the ground is baked again with one roll for the whole stance ('rolls_deg')"""
     late = {s: set(v) for s, v in (released or {}).items()}
     for s in SIDES:
         late.setdefault(s, set())
@@ -164,6 +178,8 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
             other = 'right' if s == 'left' else 'left'
             for row in rep['stances'][s]:
                 a, b = row['frames']
+                if 2 * sum(frames[f - f00]['mode'] == 'seated' for f in range(a, b + 1)) > b - a + 1:
+                    continue        # a seat's stance (film.Sit): its feet rest on the floor through the hold and the rise
                 # left behind (the pelvis no longer comes down to it): let go from there whatever the other foot does,
                 # an early toe-off. A walk has a foot down at every frame: where the other foot is still in its swing
                 # there, that swing is brought forward to land by then (_land_by: the faster step a body moving on
@@ -248,10 +264,109 @@ def plant(body, world, recs, fps, clearance=CLEARANCE, pelvis='stance', face=Non
         frames, rep = frames2, rep2
         if undo and len(undo) == len(more_t):
             break
+    # my robot body: a planted foot that its ankle's roll stop held off its target in some frame of its stance (a
+    # cross slope steeper than the roll reaches) gets one roll off the ground for the whole stance, the most its solved
+    # legs needed (_stance_rolls); a stance that came out turning or slipping more is left as it was
+    rolls = {}
+    if body.robot:
+        for _round in range(ROLL_ROUNDS):
+            more_r = _stance_rolls(frames, rep, rolls)
+            if not more_r:
+                break
+            kept_r = dict(rolls)
+            rolls.update(more_r)
+            log(f'[plant] stances held off their roll by the ankle\'s stop, one roll each (deg): '
+                f'{ {k[0] + " f" + str(recs[k[1]]["f"]): round(v * R2D, 1) for k, v in more_r.items()} }')
+            before = rows_by_start(rep)
+            frames2, rep2 = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log,
+                                   late, retime, tucks, rolls)
+            after = rows_by_start(rep2)
+            undo = [k for k in more_r if after.get(k) is None or
+                    after[k]['yaw_deg_per_frame_max'] > before[k]['yaw_deg_per_frame_max'] + 0.1 or
+                    after[k]['slip_mm_per_frame_max'] > max(1.0, before[k]['slip_mm_per_frame_max']) + 0.5]
+            if undo:
+                for k in undo:
+                    if k in kept_r:
+                        rolls[k] = kept_r[k]
+                    else:
+                        rolls.pop(k, None)
+                log(f'[plant] rolls not kept (the stance held worse): '
+                    f'{[k[0] + " f" + str(recs[k[1]]["f"]) for k in undo]}')
+                frames2, rep2 = _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet,
+                                       log, late, retime, tucks, rolls)
+            frames, rep = frames2, rep2
+            if undo and len(undo) == len(more_r):
+                break
     rep['released'] = {s: sorted(v) for s, v in late.items()}
     rep['landed_early'] = {k[0] + f' f{recs[k[1]]["f"]}': [recs[i]['f'] for i in v] for k, v in retime.items()}
     rep['tucks_mm'] = {k[0] + f' f{recs[k[1]]["f"]}': round(1000 * v.length, 1) for k, v in tucks.items()}
+    rep['rolls_deg'] = {k[0] + f' f{recs[k[1]]["f"]}': round(v * R2D, 2) for k, v in rolls.items()}
     return frames, rep
+
+
+def _stance_rolls(frames, rep, rolls):
+    """my robot body's planted feet that its ankle's roll stop held off their targets on a cross slope: each stance on
+    ground tilted across the foot more than ROLL_SLOPE ('cross_tilt') with a frame of its flat part (ROLL_FROM to
+    ROLL_TO of it) whose ankle sits at its roll stop ('roll_stop') and whose solved foot is rolled more than ROLL_TOL
+    off its target ('roll_off', after the clamps) gets the roll that frame needed added to the stance's roll, for
+    every frame of it. The landing's first frames are not counted: the shin still leans as the swing left it and the
+    heel comes down on its edge, settling onto the stance's roll as the foot comes flat (the downhill foot on a 20 deg
+    slope: held 13 deg off as it lands, 6 through the stance); nor is the heel-off, where the clip's own foot rolls
+    onto its toes, but in a stance of fewer than ROLL_SHORT frames (a turn's step) everything from ROLL_FROM on is.
+    On level ground (a turn on the spot, a seat) a foot off its target is the hip's or the ankle's other
+    stops, not the roll's: no stance there is rolled -> {(side, the stance's first index): roll}"""
+    out = {}
+    f00 = frames[0]['f']
+    for s in SIDES:
+        for row in rep['stances'][s]:
+            ia, ib = row['frames'][0] - f00, row['frames'][1] - f00
+            if max(abs(frames[i]['meas'][s].get('cross_tilt', 0.0)) for i in range(ia, ib + 1)) < ROLL_SLOPE:
+                continue
+            k0 = ia + int(ROLL_FROM * (ib - ia + 1))
+            k1 = ib if ib - ia + 1 < ROLL_SHORT else max(k0, ia + int(ROLL_TO * (ib - ia + 1)))
+            offs = [frames[i]['meas'][s].get('roll_off', 0.0) if frames[i]['meas'][s].get('roll_stop') else 0.0
+                    for i in range(k0, k1 + 1)]
+            k = max(range(len(offs)), key=lambda j: abs(offs[j]), default=None)
+            if k is not None and abs(offs[k]) > ROLL_TOL:
+                out[(s, ia)] = rolls.get((s, ia), 0.0) + offs[k]
+    return out
+
+
+def _at_roll_stop(q_foot, side, tol=0.05):
+    """whether my robot body's clamped ankle (the foot's turn on its shin, Blender's normalized frame) sits at its roll
+    stop: the cardan's roll at the end of its range, coupled to the pitch as robot_dof clamps it"""
+    J = dof.LEG_JOINTS[2]
+    m = 1 if side == 'left' else -1
+    q = q_to_three(q_foot)
+    x, _y, z = euler_from_quat(q @ twist_about(q, J['noTwist']).inverted(), 'XZY')
+    xd, zd = x * R2D, m * z * R2D
+    c = J['coupled']
+    lo = max(J['range']['z'][0], lerp_table(c['x'], c['zmin'], xd))
+    hi = min(J['range']['z'][1], lerp_table(c['x'], c['zmax'], xd))
+    return zd >= hi - tol or zd <= lo + tol
+
+
+def _cross_tilt(fd, W_t):
+    """how far the ground a planted foot landed on (its landing surface) tilts across the foot: the surface normal's
+    lean toward the foot's side, about its forward (rad); 0 where no surface is known"""
+    if 'surface' not in fd:
+        return 0.0
+    n = fd['surface'][0]
+    f = W_t @ FWD
+    lat = Vector((-f.y, f.x, 0.0))
+    if lat.length < 1e-6:
+        return 0.0
+    return math.asin(max(-1.0, min(1.0, n.dot(lat.normalized()))))
+
+
+def _roll_off(W_target, W_foot):
+    """how far a solved foot is rolled off its target turn about the target's forward axis (rad, right-handed)"""
+    f = (W_target @ FWD).normalized()
+    ut, ua = W_target @ Vector((0.0, 0.0, 1.0)), W_foot @ Vector((0.0, 0.0, 1.0))
+    ut, ua = ut - f * ut.dot(f), ua - f * ua.dot(f)
+    if ut.length < 1e-6 or ua.length < 1e-6:
+        return 0.0
+    return math.atan2(f.dot(ut.cross(ua)), ut.dot(ua))
 
 
 TUCK_TOL = 0.0015                     # m: a planted sole point this far under the ground it stands on is in it
@@ -372,7 +487,7 @@ def _retime(pb, world, A, recs, s, a, L, g, E, released):
 
 
 def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_state, feet, log, released,
-           retime=None, tucks=None):
+           retime=None, tucks=None, rolls=None):
     import types
     dt = 1.0 / fps
     pb = copy.copy(body)
@@ -387,9 +502,10 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
         helpers = {}
         if body.robot:
             # a maneuver's held hands (the record's hand_contact: the contact IK's weight on each) go back where its
-            # IK put them, through the hardware
+            # IK put them, through the hardware, and out of the vault cover one is held over (the record's hand_cover)
             hc = {s: w for s, w in (r.get('hand_contact') or {}).items() if w > 0.01}
-            N, helpers = dof_pass(body, N, dt, reach={'M': r['M'], 'off': r['off'], 'hands': hc} if hc else None)
+            N, helpers = dof_pass(body, N, dt, reach={'M': r['M'], 'off': r['off'], 'hands': hc,
+                                                     'covers': r.get('hand_cover') or {}} if hc else None)
         if r.get('after_hardware') is not None:
             # what the frame's maker asks of the pose as the hardware leaves it (a ground sit: the limbs resting on
             # the floor rather than in it)
@@ -579,6 +695,16 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             best = max(best, 1.0 - dd / 5.0)
         return max(0.0, best)
 
+    # my robot body: each stance's roll (_stance_rolls) on its frames, and eased in and out over ROLL_EASE frames of the
+    # swings either side (the foot turns onto it in the air, not on the ground)
+    roll_of, roll_w = {}, {}
+    for (s, a), v in (rolls or {}).items():
+        b = next((b_ for a_, b_ in intervals[s] if a_ == a), a)
+        for i in range(max(0, a - ROLL_EASE), min(n - 1, b + ROLL_EASE) + 1):
+            w = 1.0 if a <= i <= b else ease(1.0 - (a - i if i < a else i - b) / float(ROLL_EASE + 1))
+            if w > roll_w.get((s, i), 0.0) and not A[i]['feet'][s]['free'] and \
+                    (a <= i <= b or A[i]['feet'][s]['lock'] is None):
+                roll_of[(s, i)], roll_w[(s, i)] = v * w, w
     for s in SIDES:
         for i, r in enumerate(A):
             fd = r['feet'][s]
@@ -598,9 +724,17 @@ def _plant(body, world, recs, fps, clearance, pelvis, face, crown_state, head_st
             tq = Quaternion().slerp(tilt, fd['wt'])
             fd['W_t'] = tq @ W
             if body.robot and fd['lock'] is not None:
+                # inside my ankle's pitch range as the clip's shin would leave it (a heel strike, a heel-off, a steep
+                # ramp). Its roll is not that clamp's: measured against the clip's shin it followed the shin's lean
+                # frame by frame and rolled a planted sole on a cross slope; it is the stance's own (_stance_rolls)
                 Wsh = Quaternion((0.0, 0.0, 1.0), fd['theta']) @ fd['W_sh']
                 q3 = dof.project_joint(q_to_three(Wsh.inverted() @ fd['W_t']), dof.LEG_JOINTS[2], 1 if s == 'left' else -1)
-                fd['W_t'] = Wsh @ q_from_three(q3)
+                D = (Wsh @ q_from_three(q3)) @ fd['W_t'].inverted()
+                f_ax = (fd['W_t'] @ FWD).normalized()
+                D = D @ twist_about(D, f_ax).inverted()
+                fd['W_t'] = D @ Quaternion(f_ax, roll_of.get((s, i), 0.0)) @ fd['W_t']
+            elif (s, i) in roll_of:
+                fd['W_t'] = Quaternion((fd['W_t'] @ FWD).normalized(), roll_of[(s, i)]) @ fd['W_t']
             fwd = W @ FWD
             Nt = fd['Ntoes']
             if fd['lock'] is not None and fwd.z < 0.0:
@@ -1152,7 +1286,10 @@ def _solve_frame(pb, world, A, intervals, i, r, dz, run, run_yaw, prev, lift, he
                    'ankle_err_xy': (fk['p_an'] - T[s]).xy.length, 'stance': st_now[s], 'free': free[s],
                    'behind': bool(r['feet'][s].get('behind')),
                    'yaw': ground_yaw(fk['W_ft'], fk['W_to'], _surface_normal(r['feet'][s], st_now[s])),
-                   'lift_min': r['feet'][s]['lift_min'], 'mode': r['mode']}
+                   'lift_min': r['feet'][s]['lift_min'], 'mode': r['mode'],
+                   'roll_off': _roll_off(Wt[s], fk['W_ft']) if body.robot and st_now[s] else 0.0,
+                   'roll_stop': _at_roll_stop(N[s + 'Foot'], s) if body.robot and st_now[s] else False,
+                   'cross_tilt': _cross_tilt(r['feet'][s], Wt[s]) if st_now[s] else 0.0}
         prev[s] = meas[s]
     return {'f': r['f'], 'M': M, 'N': N, 'off': r['off'], 'stages': stages, 'helpers': r['helpers'], 'petals': petals,
             'meas': meas, 'psi': r['psi'], 'mode': r['mode']}

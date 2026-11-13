@@ -13,12 +13,16 @@ cheer while walking, the sit stop on a bench, the salute) plus the falls and the
       fallLandMinDrop (0.85 m) plays fallLand (its feet planted where it lands), then the walk resumes and stops
     5 a backward walk (gait 'walkBackward': the walk clip under the travel, reversed), stop
     6 a jog (gait 'slowRun') on a curve, then a sprint (gait 'fastRun'), slowing to a walk and a stop
+    7 a plain seat where she stopped (no seat object), stood up from with the stand-up clip played forward
+      (reverse=False: its hips' travel taken as root motion)
 
 Prints PASS / FAIL: checks.feet on every gait's frames, the gesture's weight while the legs walk, the emote's facing,
 the hips over the bench at the bench's height, the seated skin resting on the pan and never more than 1 cm into the
-bench sitting down, held or standing up (the clamp), the seated boots on the floor (the visible mesh), the fall and the
-landing clip, the backward walk's facing against its travel, the jog's and the
-sprint's paces, the stops on their marks, the keyed armature against the bake.
+bench sitting down, held or standing up (the clamp), the seated boots on the floor (the visible mesh), the stand-up
+keeping the seat's heading (not the salute's facing), the plain seat's hips held through the stand-up clip's crossfade,
+carried forward by it and never back, ending over the spot she sat down from, its boots on the floor through the hold
+and one on it at every frame from the hips leaving the seat, the fall and the landing clip, the backward walk's facing against its
+travel, the jog's and the sprint's paces, the stops on their marks, the keyed armature against the bake.
 """
 
 import math
@@ -131,6 +135,10 @@ def main():
     marks['end'] = (0.0, y_far['y1'] - 1.5)
     loco.follow_path([marks['end']], gait='fastRun')
     loco.wait(0.8)
+    # last, a plain seat where she stopped (beginSeated where she stands, no seat object), stood up from with the
+    # stand-up clip played forward
+    loco.sit(hold=1.0, reverse=False)
+    loco.wait(0.5)
     t0 = time.time()
     rep = loco.bake(f0=1)
     R['timing_s']['bake'] = round(time.time() - t0, 1)
@@ -153,8 +161,16 @@ def main():
                 f'{len(em)} frames, heading moved {dh:.2f} deg')
     else:
         R.check('the salute plays (locomotion suspended)', False, 'no emote frames')
-    # 3 the sit: the hips over the bench at its height
-    seated = [r for r in recs if r['mode'] == 'seated']
+    # 3 the sit: the hips over the bench at its height (the take's first seat; the plain seat after it is 3b)
+    sits = []
+    for i, r in enumerate(recs):
+        if r['cmd'] == 'Sit':
+            if sits and sits[-1][-1] == i - 1:
+                sits[-1].append(i)
+            else:
+                sits.append([i])
+    R.check('both sits play (the bench, then the plain seat)', len(sits) == 2, f'{len(sits)} sit commands')
+    seated = [recs[i] for i in (sits[0] if sits else []) if recs[i]['mode'] == 'seated']
     R.check('the sit plays (seated frames)', len(seated) > 30, f'{len(seated)} seated frames')
     if seated:
         hb = me.humanoid['hips']
@@ -203,6 +219,60 @@ def main():
                                                                                    fb - (fb - fa) // 3 + 1, 6)]
         R.check('the seated feet stand on the floor (the visible boots within -6 / +10 mm of it through the hold)',
                 all(-0.006 <= z <= 0.010 for z in lows), f'{[round(z * 1000, 1) for z in lows]} mm')
+        # the salute before the sit set the controller's emote facing: once the root is handed back the body keeps
+        # the seat's heading, not that one
+        dh = max(abs(math.degrees(math.remainder(recs[i]['heading'] - seated[0]['heading'], 2 * math.pi)))
+                 for i in sits[0])
+        R.check("the bench stand-up keeps the seat's heading to the walk on (not the earlier salute's facing)",
+                dh < 1.0, f"the heading at most {dh:.2f} deg off the seat's over the sit's {len(sits[0])} frames")
+    # 3b the plain seat with the stand-up clip forward: its hips' travel taken as root motion (stand_shift)
+    if len(sits) > 1:
+        hb = me.humanoid['hips']
+        pl = sits[1]
+        fa, fb = recs[pl[0]]['f'], recs[pl[-1]]['f'] + 1           # to the first frame after it: standing, walking on
+        hips, hips_z = {}, {}
+        for f in range(fa, fb + 1):
+            sc.frame_set(f)
+            hp = me.arm.matrix_world @ me.arm.pose.bones[hb].head
+            hips[f], hips_z[f] = hp.xy.copy(), hp.z
+        up0 = next((recs[i]['f'] for i in pl if recs[i]['weights'].get('sit_to_stand', 0.0) > 0.01), None)
+        if up0 is None:
+            R.check('the plain seat stands up with the stand-up clip', False, 'no sit_to_stand weight')
+        else:
+            h = recs[pl[0]]['heading']
+            fwd = Vector((math.sin(h), -math.cos(h)))
+            fade = int(round(0.25 * 30))
+            held = max((hips[f] - hips[up0 - 1]).length for f in range(up0, up0 + fade + 1))
+            steps = [(hips[f] - hips[f - 1]) for f in range(up0, fb + 1)]
+            big = max(d.length for d in steps)
+            back = max(-d.dot(fwd) for d in steps)
+            end = (hips[fb] - hips[fa]).length
+            R['plain_seat'] = {'frames': [fa, fb], 'stand_clip_from': up0, 'crossfade_hips_cm': round(held * 100, 2),
+                               'step_max_cm': round(big * 100, 2), 'back_max_cm': round(back * 100, 2),
+                               'seated_hips_back_cm': round((hips[fa] - hips[up0 - 1]).dot(fwd) * 100, 1),
+                               'end_from_start_cm': round(end * 100, 2)}
+            R.check("the plain seat: through the stand-up clip's crossfade the hips stay on the seat (within 1 cm)",
+                    held < 0.01, f"{held * 100:.2f} cm over the {fade} frames from f{up0}")
+            R.check('the plain seat: the stand-up clip carries the hips forward, never back (at most 2.5 cm a frame, '
+                    'none over 0.5 cm back)', big < 0.025 and back < 0.005,
+                    f'largest step {big * 100:.2f} cm, largest back {back * 100:.2f} cm, f{up0}-f{fb}')
+            R.check('the plain seat: she stands up over the spot she sat down from (the hips within 3 cm)', end < 0.03,
+                    f"{end * 100:.2f} cm, the seated hips {R['plain_seat']['seated_hips_back_cm']:.1f} cm behind it")
+            # the seat's feet (the plant keeps a seat's stance: no early toe-off at its end): both boots on the floor
+            # through the hold, and one on it at every frame from the hips leaving the seat (2 cm over their seated
+            # height as the stand-up starts) to standing
+            fm = T.FootMesh(me)
+            floor = recs[pl[0]]['feet_world'][2]
+            hold = range(fa + int(0.6 * (up0 - fa)), up0, 2)
+            low = {f: {s: v['zmin'] - floor for s, v in fm.at(f).items()} for f in list(hold) + list(range(up0, fb + 1))}
+            worst = max((abs(z) for f in hold for z in low[f].values()), default=9.9)
+            off = next((f for f in range(up0, fb + 1) if hips_z[f] > hips_z[up0 - 1] + 0.02), fb)
+            up = [f for f in range(off, fb + 1) if min(low[f].values()) > 0.010]
+            R['plain_seat'].update(feet_hold_mm=round(1000 * worst, 1), hips_leave_seat=off, rise_frames_no_foot_down=up[:8])
+            R.check('the plain seat: both boots on the floor through the hold (within 10 mm)', worst < 0.010,
+                    f'{worst * 1000:.1f} mm at most over f{hold[0]}-f{hold[-1]}')
+            R.check('the plain seat: a boot on the floor at every frame from the hips leaving the seat to standing '
+                    '(within 10 mm)', not up, f'{len(up)} frames of f{off}-f{fb} with neither boot down: {up[:8]}')
     # 4 the fall and the landing
     air = [r for r in recs if not r['grounded']]
     fall_w = max((r['weights'].get('fallIdle', 0.0) for r in recs), default=0.0)
@@ -269,11 +339,22 @@ def shots(sc, me, recs, segs, bn):
             S.append(dict(cam, name=nm, frame=f))
             names.append(nm)
         sheets[f'strip_{label}'] = names
-    seated = [r['f'] for r in recs if r['mode'] == 'seated']
-    if seated:
-        a = seated[0] - 10
-        b = seated[-1] + 40
+    runs = []
+    for r in recs:
+        if r['mode'] == 'seated':
+            if runs and runs[-1][1] == r['f'] - 1:
+                runs[-1][1] = r['f']
+            else:
+                runs.append([r['f'], r['f']])
+    if runs:
+        a = runs[0][0] - 10
+        b = runs[0][1] + 40
         strip('sit', [int(a + (b - a) * k / 7) for k in range(8)])
+    up = [r['f'] for r in recs if r['weights'].get('sit_to_stand', 0.0) > 0.01]
+    if len(runs) > 1 and up:
+        # the plain seat's stand-up clip: from the end of the hold to standing, every 6 frames
+        a = up[0] - 6
+        strip('plain_stand', [a + 6 * k for k in range(min(14, (up[-1] + 12 - a) // 6 + 1))])
     air = [r['f'] for r in recs if not r['grounded']]
     if air:
         strip('fall', [air[0] - 12 + 5 * k for k in range(8)])

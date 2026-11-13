@@ -220,7 +220,7 @@ buf = io.StringIO()
 with redirect_stdout(buf):
     sky.set_colors({'shield': (1.0, 0.2, 0.1), 'star': (1.0, 0.9, 0.9)})
 check('shieldworld: set_colors reaches the shield and the star', buf.getvalue() == ''
-      and sky.red_giant.shield_color == (1.0, 0.2, 0.1) and sky.red_giant.star_tint == (1.0, 0.9, 0.9))
+      and sky.celestial.shield_color == (1.0, 0.2, 0.1) and sky.celestial.star_tint == (1.0, 0.9, 0.9))
 sky.update(0.0)
 check('shieldworld: the giant rides the sun (disc and glow lobes off)', sky.sky.U['sunDiscI'] == 0
       and sky.sky.U['sunGlowI'] == 0 and sky.sky.U['starDir'] == tuple(sky.sky.sun_dir))

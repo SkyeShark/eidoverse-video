@@ -71,6 +71,14 @@ E.stand_up(walk, reverse=None,         # None: the sit-down reversed when it is 
            clip='sit_to_stand', reverse_speed=1.25, fade=0.25, fade_out=0.5)
 ```
 
+`chair=None` is the engine's plain `beginSeated`: the transition plays where
+the body stands, facing its heading, the root held (no walk, no pan to settle
+on: the caller owns the seat). Its feet are a seat's (set on the floor, held
+where they rest, stepped where the clip moves them), and `stand_up`'s
+stand-up clip takes its hips' travel as root motion, so she stands up over
+the spot she sat down from. My robot body's `begin_seated(slot)` without a
+chair sits this way.
+
 **A shot that opens seated** (`instant=True`, the engine's instant path:
 `seatOn` without a transition snaps a VRM into the chair pose). No walk and
 no descent: the body is put (`controller.place`) on the spot the transition's
@@ -255,7 +263,8 @@ the settle and the descent's lift frame by frame, on its legs' hardware),
 the body is put at the spot facing out of the chair (the engine moves the
 VRM there and syncs its capsule), `body.begin_seated(transition)` starts the
 clip, `arm['eido_seated']` is set, and the plan stays on the body
-(`body.seat_plan`) for its bake. `emote`, `face_camera` and `sit_on_ground`
+(`body.seat_plan`): `begin_seated` hands it to the legs, which sit down onto
+the seat through `SeatOn` from that spot. `emote`, `face_camera` and `sit_on_ground`
 on such a VRM warn and point at the body's own calls (`perform_action`,
 `face_direction`, `set_emote_facing`): the engine's are for a VRM nothing
 moves.
@@ -271,8 +280,8 @@ def script(b):
 ```
 
 The robot body's bake seats it by that plan: in `test_robot_seat.py`, sat
-down, its hips rest on the plan's target (0.0 cm) and its seated skin on the
-pan (0.1 cm).
+down, its hips rest on the plan's target (0.0 cm, judged within 3 cm) and its
+seated skin on the pan (0.1 cm, judged within 1 cm).
 
 ## On the ground — `sit_on_ground`
 
@@ -436,9 +445,9 @@ the body out of the floor through a ground sit's crossfades).
   the sit-down reversed at 1.25x to stand, the walk on with the cheer over
   it.
 - `test_robot_seat.py`: `seat_on` on a VRM my robot body drives: the body
-  placed and seated through its own state, the plan kept for its bake, and
-  the body's own bake seating it by the plan (the hips on its target, the
-  seated skin on the pan).
+  placed and seated through its own state, the plan kept for its legs, and
+  the body's own bake seating it by the plan (the hips within 3 cm of its
+  target, the seated skin within 1 cm of the pan).
 - `test_start_seated.py`: `seat_on(instant=True)`: a take that opens seated
   on a chair, stands up and walks off, then a cut into a 0.56 m chair in the
   fidget loop, a stand-up and a walk (the springs reset and settled at the

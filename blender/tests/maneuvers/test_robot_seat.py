@@ -11,8 +11,9 @@ Prints PASS / FAIL: seat_on returns the pan's height; the body is placed at the 
 the chair (the engine moves the VRM there and syncs its capsule); its controller enters the seated state; the plan
 (body.seat_plan) is kept for the bake: its lift curve starts at 0 and ends on the settle, never under the clamp; the
 audits' exemption is set; the stationary path is not taken (no clip strips added on the armature). Then the run is baked
-by the body's own bake (eidoblend.characters.robot, which seats the body by its plan) and, sat down, the seated hips
-rest on the plan's target and the seated skin on the pan. Stills: a strip of the sit.
+by the body's own bake (eidoblend.characters.robot: its legs sat down through emotes.SeatOn with the plan) and the
+seated hips are judged over the seat: within 3 cm of the plan's target, the seat skin within 1 cm of the pan. Stills:
+a strip of the sit.
 """
 
 import math
@@ -106,10 +107,10 @@ def main():
     gap = None if und is None else (und - plan['seat']['z']) * 100
     R['seated_after_bake'] = {'frame': fs, 'hips_to_target_cm': round(dxy * 100, 1),
                               'seat_skin_to_pan_cm': None if gap is None else round(gap, 1)}
-    R.check("the body's own bake seats it by the plan: the hips on its target (within 4 cm)", dxy < 0.04,
+    R.check("the body's own bake seats it by the plan: the hips on its target (within 3 cm)", dxy < 0.03,
             f'{dxy * 100:.1f} cm at f{fs}')
-    R.check("the body's own bake seats it by the plan: the seated skin on the pan (within 1.5 cm)",
-            gap is not None and abs(gap) < 1.5, f'{gap if gap is None else round(gap, 2)} cm at f{fs}')
+    R.check("the body's own bake seats it by the plan: the seated skin on the pan (within 1 cm)",
+            gap is not None and abs(gap) < 1.0, f'{gap if gap is None else round(gap, 2)} cm at f{fs}')
     T.light(sc)
     S, sheets = [], {}
     names = []
