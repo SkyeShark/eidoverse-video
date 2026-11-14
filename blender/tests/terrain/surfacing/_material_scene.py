@@ -61,11 +61,27 @@ def scene(samples=16, res=(W, H), aniso=16, exposure=EXPOSURE):
     return sc
 
 
-def terrain(case, name=None):
+def terrain(case, name=None, mesh_res=None, mask_attributes=True):
     """(Terrain, object): the case's snapshot (no GPU) and its ring mesh object with the terrain's custom properties,
-    in grey clay (api._build_blender's own steps, without rocks)."""
+    in grey clay (api._build_blender's own steps, without rocks). mesh_res: the rings drawn again at that many
+    vertices per level side (mesh.MESH_RES is 512: stride 2 on levels of 1024 cells; 1024 is stride 1), as
+    api._assemble_terrain builds them; mask_attributes False leaves the masks off the redrawn rings (thirty
+    attributes on four times the vertices), which only the material without baked data reads."""
     t = C.terrain(case)
     pal = t.info.get('palette')
+    if mesh_res:
+        from eidoblend.terrain.build import mesh as _mesh
+        n = len(t.levels)
+        attrs = None
+        if mask_attributes:
+            stack = [t.masks.level(i) if hasattr(t.masks, 'level') else t.masks[i] for i in range(n)]
+            attrs = {k: [m.get(k) for m in stack] for k in sorted(set().union(*[set(m) for m in stack]))}
+        t0 = time.time()
+        t.ring = _mesh.build_rings(t.levels, [t.fields(i)['h'] for i in range(n)], attrs,
+                                   cores=any(lv.role == 'hero' for lv in t.levels), mesh_res=int(mesh_res))
+        t.info['mesh_res'] = int(mesh_res)
+        log(f'[material scene] {case}: rings at {int(mesh_res)} vertices a side, {len(t.ring.verts):,} vertices, '
+            f'{t.ring.triangle_count:,} triangles in {time.time() - t0:.1f} s')
     A._build_blender(t, name or f'{case}_terrain', None, None, False, log)
     t.info['palette'] = pal                               # (building in clay records palette None)
     return t, t.obj

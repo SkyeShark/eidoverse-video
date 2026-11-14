@@ -70,8 +70,11 @@ builds the per-texel material instead:
   - planar reads are hex-tiled ('hex', one node group, eido_hex_grid: three reads on a triangle grid, each turned and
     offset, sharpened by w^7 and their heights; a read's coordinate changes only where its weight is 0);
   - box layers read eight fixed sector frames on faces steeper than 47 degrees (u along the strike, v up a fixed
-    65-degree dip, two slots by the face's own bearing, hex-tiled inside each), planar below 37 degrees, their scans'
-    normal maps in each frame's tangent plane; the Box projection is not used;
+    65-degree dip, two slots by the face's own bearing, hex-tiled inside each without turning: rock on a wall is
+    directional), planar below 37 degrees, their scans' normal maps in each frame's tangent plane; the Box
+    projection is not used. With the palette's far_scale they keep the far read on steep faces (the scan at
+    far_scale x the tile in the same frames, over far_distance: the joints and blocks a wall shows from 100 m on);
+    planar reads have none;
   - every noise term fades with the pixel's footprint (and a smoothstep around a faded term widens by the spread it
     lost, so a layer's cover holds as the noise fades), and fbm drops the octaves finer than two footprints;
   - a layer's ramp and the satmap are read from the palette's ramp image (one row each, Closest); the patches get()
@@ -123,6 +126,9 @@ SECTOR_DIP_DEG = 65.0                 # the sector frames' fixed up-dip axis (SU
 STEEP_DEG = (37.0, 47.0)              # box layers: planar below, sector frames above
 HEX_POWER = 7.0                       # hex tiling's sharpening of the barycentric weights
 HEX_CONTRAST = 0.6                    # ... and how much each read's own height weighs (mix(1, 2 h, 0.6))
+STEEP_HEX = 2.0                       # the sector reads' hex lattice, in planar hex_m (a layer's steep_hex_m)
+HEX_PATCH = 0.29                      # a hexagon's width in hex_m (the lattice unit, 1 / (2 sqrt 3))
+BLEND_PATCH_M = 1.0                   # hexagons wider than this lend a layer edge less of their height's swing
 DEAD_FOOTPRINTS = 3.0                 # the reader's dead band inside a window edge, in footprints
 FADE_CELLS = 8.0                      # a level fades in over this many of its own cells
 FAR_TEXEL_PX = 2.5                    # D0: where a main-level texel spans this many pixels
@@ -137,7 +143,7 @@ NOISE_HALF = {'noise': 0.358, 'fbm': 0.344}
 RAW_HALF = (0.2, 0.163, 0.143, 0.134, 0.130, 0.128)
 CANOPY_COVER, CANOPY_SHADE = 0.72, 0.92   # a canopy's mean far away: lit crowns' share, and their shade (the far
 #                                           colour C's, surface/far_colour.py)
-HEX_VERSION = 1
+HEX_VERSION = 3
 # EEVEE compiles a material with a limited number of mesh attributes: at 15 masks the alpine palette failed with
 # 'Material ... uses too many attributes' (measured 11-13; the shader reads them all as undefined variables). A
 # material reading more masks than ATTRS_DIRECT reads them packed three to a FLOAT_VECTOR point attribute
@@ -1283,23 +1289,45 @@ def hex_grid_group():
 
 def _layer_group(L, S, i, opt, box, hexed):
     """One layer's scan reads as a node group (eido_layer_<hash>, shared by materials that read the same scan the same
-    way). Out: Color (the scan's albedo), Height (its normalised height), NX, NY (its normal in the world-XY tangent
-    frame: the planar reads), Pert (box layers: the world-space tilt of the sector reads' normals), Rough, AO.
+    way). Out: Color (the scan's albedo), Height (its normalised height), Soft Height (the same reads' heights by
+    their plain weights: continuous where the sharpened blend steps from one hexagon's read to the next, so a layer
+    edge blended on it does not run along the hexagons), NX, NY (its normal in the world-XY tangent frame: the
+    planar reads), Pert (box layers: the world-space tilt of the sector reads' normals), Rough, AO.
 
     Planar reads: world (x, y) / tile, hex-tiled (hexed) or one read; the albedo 'Auto' filtered (Cubic near, Linear
     far). Box layers (in: U0, V0, U1, V1 the two sector slots' frame coordinates, W0 the even slot's weight, T0, B0,
     T1, B1 their tangent frames on the surface, Steep): planar on gentle ground and the two sector slots on steep
     faces, each slot hex-tiled in its own frame and mipmapped Linear; the slots and then planar against steep are
     height blended (a_i = w_i + h_i / 2, kept within 0.2 of the tallest), so a read with weight 0 counts for nothing
-    and the switch follows the scan's own features rather than ghosting two layouts."""
+    and the switch follows the scan's own features rather than ghosting two layouts.
+
+    The hex lattice: hex_m (default the tile) is Mikkelsen's scaling, a hexagon about 0.29 hex_m across, each
+    showing a third of the tile's width, turned at random (hex_rotate False: offsets only). On steep faces rock is
+    directional (beds lie flat, stains and cracks run down the dip) and structured at the tile's scale: thirds of a
+    12 m cliff scan turned at random read as confetti on the canyon's walls (11-14). So the sector reads take
+    steep_hex_m (default STEEP_HEX x the planar hex_m: hexagons about 0.58 of the tile) and are not turned unless
+    steep_rotate is set."""
     tile = float(L['tile_m'])
     hex_m = float(L.get('hex_m') or tile)
     rot = 1.0 if L.get('hex_rotate', True) else 0.0
+    s_hex_m = float(L.get('steep_hex_m') or STEEP_HEX * hex_m)
+    s_rot = 1.0 if L.get('steep_rotate', False) else 0.0
     ns = float(L['normal'])
     interp = opt['interpolation']
     dd = [float(v) for v in opt['detail_distance']]
-    sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, rot, ns, interp, dd, bool(box), bool(hexed), i,
-                      HEX_VERSION])
+    # a box layer's far read on steep faces (the palette's far_scale, far_distance, far_contrast, far_bump and
+    # macro_mod, as the material without baked data reads them): the scan once more at far_scale x the tile in each
+    # sector frame, its brightness modulating the near read and its colour, height and normal taking over across
+    # far_distance. A cliff's scan at its true 12 m tile is a fine grain from 100 m on; the larger joints and blocks
+    # a wall shows at that distance are this read's (the canyon's walls, 11-14: without it they read as sandpaper).
+    # Planar reads take none: flat ground's variation at those scales comes from the terrain's data
+    far_k = float(opt.get('far_scale', 1.0) or 1.0) if box else 1.0
+    wall = dict(k=far_k, d=[float(v) for v in opt.get('far_distance', (40.0, 200.0))],
+                mm=float(L.get('macro_mod', opt.get('macro_mod', 0.0)) or 0.0),
+                fc=float(L.get('far_contrast', opt.get('far_contrast', 0.65))),
+                fb=float(opt.get('far_bump', 0.5)), fh=bool(L.get('far_height', True))) if far_k > 1.0 else None
+    sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, rot, s_hex_m, s_rot, ns, interp, dd, bool(box),
+                      bool(hexed), i, wall, HEX_VERSION])
     ng, fresh = _new_group('eido_layer_' + hashlib.sha1(sig.encode()).hexdigest()[:12], sig)
     if not fresh:
         return ng
@@ -1309,7 +1337,7 @@ def _layer_group(L, S, i, opt, box, hexed):
         for nm in ('T0', 'B0', 'T1', 'B1'):
             _sock(ng, nm, 'INPUT', 'v')
     _sock(ng, 'Color', 'OUTPUT', 'c')
-    for nm in ('Height', 'NX', 'NY', 'Rough', 'AO'):
+    for nm in ('Height', 'Soft Height', 'NX', 'NY', 'Rough', 'AO'):
         _sock(ng, nm, 'OUTPUT', 'f')
     _sock(ng, 'Pert', 'OUTPUT', 'v')
     g = Graph(ng)
@@ -1336,7 +1364,7 @@ def _layer_group(L, S, i, opt, box, hexed):
         if turn is not None:                              # the read's turn undone: its normal in the frame
             cs, sn, nsn = turn
             nx, ny = (g.math('MULTIPLY_ADD', nx, cs, g.mul(ny, sn)), g.math('MULTIPLY_ADD', nx, nsn, g.mul(ny, cs)))
-        return dict(col=col, h=h, nx=nx, ny=ny, rough=rough, ao=nr.outputs['Alpha'])
+        return dict(col=col, h=h, hs=h, nx=nx, ny=ny, rough=rough, ao=nr.outputs['Alpha'])
 
     def blend(reads, ws):
         """sum w_k read_k over reads (dicts), the weights sockets summing to 1."""
@@ -1352,12 +1380,12 @@ def _layer_group(L, S, i, opt, box, hexed):
         out['col'] = acc
         return out
 
-    def frame(U, V, seed, auto):
+    def frame(U, V, seed, auto, size=hex_m, turn=rot):
         if not hexed:
             return one(g.combine_xyz(g.mul(U, inv), g.mul(V, inv), 0.0), auto)
         hx = g.node('ShaderNodeGroup')
         hx.node_tree = hex_grid_group()
-        for nm, v in (('U', U), ('V', V), ('Inverse Size', 1.0 / hex_m), ('Seed', seed), ('Rotate', rot)):
+        for nm, v in (('U', U), ('V', V), ('Inverse Size', 1.0 / size), ('Seed', seed), ('Rotate', turn)):
             g.set(hx.inputs[nm], v)
         o = hx.outputs
         reads, ws = [], []
@@ -1371,7 +1399,17 @@ def _layer_group(L, S, i, opt, box, hexed):
             ws.append(g.mul(g.math('POWER', o[f'W{c}'], HEX_POWER),
                             g.math('MULTIPLY_ADD', r['h'], 2.0 * HEX_CONTRAST, 1.0 - HEX_CONTRAST)))
         tot = g.math('DIVIDE', 1.0, g.math('MAXIMUM', g.add(g.add(ws[0], ws[1]), ws[2]), 1e-6))
-        return blend(reads, [g.mul(w, tot) for w in ws])
+        out = blend(reads, [g.mul(w, tot) for w in ws])
+        # the soft height: the three reads' heights by their plain barycentric weights (they sum to 1), a continuous
+        # field with no step at a hexagon's border. Each hexagon still shows another part of the scan, whose height
+        # stands a little higher or lower on average, and a layer edge blended on that follows the lattice (teeth
+        # of 1.5 to 3.5 m along the cliff's edge on the canyon's brink wall): so the soft height's swing about 0.5
+        # is scaled down where a hexagon is wider than BLEND_PATCH_M, to the swing a hexagon of that width gives
+        hs = g.math('MULTIPLY_ADD', reads[2]['h'], o['W2'],
+                    g.math('MULTIPLY_ADD', reads[1]['h'], o['W1'], g.mul(reads[0]['h'], o['W0'])))
+        f = min(1.0, BLEND_PATCH_M / (HEX_PATCH * size))
+        out['hs'] = hs if f >= 1.0 else g.math('MULTIPLY_ADD', g.sub(hs, 0.5), f, 0.5)
+        return out
 
     def height_pair(wa, ha, hb):
         """(a's share, b's share) of two reads by weight wa (b's 1 - wa) and height: a_i = w_i + h_i / 2, kept within
@@ -1386,19 +1424,58 @@ def _layer_group(L, S, i, opt, box, hexed):
     seed = 7.1 + 13.7 * i
     p = frame(x, y, seed, True)
     if not box:
-        for nm, key in (('Color', 'col'), ('Height', 'h'), ('NX', 'nx'), ('NY', 'ny'), ('Rough', 'rough'), ('AO', 'ao')):
+        for nm, key in (('Color', 'col'), ('Height', 'h'), ('Soft Height', 'hs'), ('NX', 'nx'), ('NY', 'ny'),
+                        ('Rough', 'rough'), ('AO', 'ao')):
             g.set(go.inputs[nm], p[key])
         g.set(go.inputs['Pert'], (0.0, 0.0, 0.0))
         return ng
-    sec = [frame(gi.outputs[f'U{s}'], gi.outputs[f'V{s}'], seed + 101.0, False) for s in (0, 1)]
+    sec = [frame(gi.outputs[f'U{s}'], gi.outputs[f'V{s}'], seed + 101.0, False, s_hex_m, s_rot) for s in (0, 1)]
     we, wo = height_pair(gi.outputs['W0'], sec[0]['h'], sec[1]['h'])
     sb = blend(sec, [we, wo])
+    hs_steep = g.mix('FLOAT', gi.outputs['W0'], sec[1]['hs'], sec[0]['hs'])
     pert = None
     for s, w in ((0, we), (1, wo)):
         t = g.vmath('ADD', g.vmath('SCALE', gi.outputs[f'T{s}'], scale=sec[s]['nx']),
                     g.vmath('SCALE', gi.outputs[f'B{s}'], scale=sec[s]['ny']))
         t = g.vmath('SCALE', t, scale=w)
         pert = t if pert is None else g.vmath('ADD', pert, t)
+    if wall is not None:
+        # the far read, one per sector slot (a slot's frame changes only where its plain weight is 0), albedo and
+        # height from one image, the normal from the other at far_bump of its slopes
+        fd = g.smoothstep(wall['d'][0], wall['d'][1], g.view_distance())
+        inv_f = inv / wall['k']
+        nsf = ns * wall['fb']
+        fcol = fh = fpert = None
+        for s, w in ((0, gi.outputs['W0']), (1, g.sub(1.0, gi.outputs['W0']))):
+            vec = g.combine_xyz(g.math('MULTIPLY_ADD', gi.outputs[f'U{s}'], inv_f, 0.37 + 0.21 * i + 0.5 * s),
+                                g.math('MULTIPLY_ADD', gi.outputs[f'V{s}'], inv_f, 0.71 - 0.17 * i + 0.3 * s), 0.0)
+            a = _tex(g, S['albedo'], vec, 'Linear')
+            nr = _tex(g, S['nrao'], vec, 'Linear')
+            r, gg, _b = g.separate_rgb(nr.outputs['Color'])
+            t = g.vmath('ADD', g.vmath('SCALE', gi.outputs[f'T{s}'], scale=g.math('MULTIPLY_ADD', r, 2.0 * nsf, -nsf)),
+                        g.vmath('SCALE', gi.outputs[f'B{s}'], scale=g.math('MULTIPLY_ADD', gg, 2.0 * nsf, -nsf)))
+            c, h, t = g.vmath('SCALE', a.outputs['Color'], scale=w), g.mul(a.outputs['Alpha'], w), \
+                g.vmath('SCALE', t, scale=w)
+            fcol = c if fcol is None else g.vmath('ADD', fcol, c)
+            fh = h if fh is None else g.add(fh, h)
+            fpert = t if fpert is None else g.vmath('ADD', fpert, t)
+        mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
+        near = sb['col']
+        if wall['mm'] > 0.0:                              # the scan as its own macro variation map
+            ml = max(sum(a_ * b_ for a_, b_ in zip(mean_lin, _LUMA)), 1e-4)
+            lum = g.vmath('DOT_PRODUCT', fcol, _LUMA)
+            mod = g.math('MINIMUM', g.math('MAXIMUM', g.math('MULTIPLY_ADD', lum, wall['mm'] / ml, 1.0 - wall['mm']),
+                                           0.55), 1.6)
+            near = g.vmath('SCALE', near, scale=mod)
+        if wall['fc'] != 1.0:                             # the larger pattern, toned down around the scan's mean
+            fcol = g.vmath('ADD', g.vmath('SCALE', fcol, scale=wall['fc']),
+                           tuple((1.0 - wall['fc']) * v for v in mean_lin))
+        sb['col'] = g.mix('RGBA', fd, near, fcol)
+        if wall['fh']:
+            sb['h'] = g.mix('FLOAT', fd, sb['h'], fh)
+            hs_steep = g.mix('FLOAT', fd, hs_steep, fh)
+        pert = g.mix('VECTOR', fd, pert, fpert)
+    g.set(go.inputs['Soft Height'], g.mix('FLOAT', gi.outputs['Steep'], p['hs'], hs_steep))
     wp, ws_ = height_pair(g.sub(1.0, gi.outputs['Steep']), p['h'], sb['h'])
     out = blend([p, sb], [wp, ws_])
     g.set(go.inputs['Color'], out['col'])
@@ -1873,7 +1950,7 @@ def _surface_group_data(pal, sd, name, prefer, log):
                 g.set(lg.inputs[f'B{s}'], sec[s]['B'])
             g.set(lg.inputs['W0'], sec[0]['w'])
             g.set(lg.inputs['Steep'], steep)
-        col, h = lg.outputs['Color'], lg.outputs['Height']
+        col, h, hs = lg.outputs['Color'], lg.outputs['Height'], lg.outputs['Soft Height']
         mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
         mean = np.maximum(np.array(mean_lin, np.float64), 1e-4)
         contrast = float(L.get('contrast', 1.0))
@@ -1963,6 +2040,7 @@ def _surface_group_data(pal, sd, name, prefer, log):
                                                     g.math('MAXIMUM', dat.value('canopy_expected'), 0.02))))
             col = g.mix('RGBA', kf, col, ccol)
             h = g.mix('FLOAT', kf, h, cn['h'])
+            hs = g.mix('FLOAT', kf, hs, cn['h'])
             rough = g.mix('FLOAT', kf, rough, 0.9)
             nx, ny = g.mul(nx, g.sub(1.0, kf)), g.mul(ny, g.sub(1.0, kf))
             if float(L['canopy'].get('height_m', 3.0)) > 0:
@@ -2022,21 +2100,23 @@ def _surface_group_data(pal, sd, name, prefer, log):
         bump_own = None
         if float(L['bump_m']) > 0 and (not box or not S['stats'].get('has_normal', True)):
             bump_own = float(L['bump_m'])                 # a set without a normal map keeps its height's bump
-        per.append(dict(L=L, cov=cov, col=col, h=h, nx=nx, ny=ny, pert=lg.outputs['Pert'] if box else None,
+        per.append(dict(L=L, cov=cov, col=col, h=h, hs=hs, nx=nx, ny=ny, pert=lg.outputs['Pert'] if box else None,
                         rough=rough, ao=lg.outputs['AO'], box=box, ripple=ripple, canopy_bump=canopy_bump,
                         relief=relief_h, bump_own=bump_own))
 
     # the overlay of the macro data and the scans' heights (SURFACING_DESIGN.md 3.2 rule 2), then the composite: a
     # layer's coverage pushed up where d > 0.5 and down where d < 0.5, unchanged at 0 and 1 and in the mean when d's
     # mean is 0.5; d = 0.5 + height (h - 0.5) + crest crest + crest_fine crest_fine + crease crease (a layer's
-    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain)
+    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain). The height here and
+    # in the height blend is the layer's soft height: on the sharpened hex blend's height a layer edge ran along
+    # the hexagons' borders (a sawtooth of triangles on the canyon's brink wall)
     if opt.get('overlay', True):
         for p in per:
             if isinstance(p['cov'], float):
                 continue
             ov = dict(height=1.0)
             ov.update(p['L'].get('overlay') or {})
-            d = g.math('MULTIPLY_ADD', g.sub(p['h'], 0.5), float(ov.get('height', 0.0)), 0.5) \
+            d = g.math('MULTIPLY_ADD', g.sub(p['hs'], 0.5), float(ov.get('height', 0.0)), 0.5) \
                 if float(ov.get('height', 0.0)) else 0.5
             for key in ('crest', 'crest_fine', 'crease'):
                 amt = float(ov.get(key, 0.0) or 0.0)
@@ -2062,7 +2142,7 @@ def _surface_group_data(pal, sd, name, prefer, log):
     for i, p in enumerate(per):
         ai = excl[i]
         if kb > 0:
-            ai = g.add(ai, g.mul(p['h'], kb))
+            ai = g.add(ai, g.mul(p['hs'], kb))
         e = p['L']['edge_noise'] if p['L']['edge_noise'] is not None else float(opt['edge_noise'])
         if e > 0 and i > 0:
             n = noise(coords, 1.0 / 0.85, 3.0, 0.62, 11.1 + 7.3 * i)
@@ -2845,8 +2925,9 @@ def surface_material(palette='auto', recipe=None, strata=None, options=None, nam
               (the relief below the cell, default 0.5), far_m (D0, metres; default where a main-level texel spans
               2.5 pixels), overlay (False: no overlay before the height blend), dusting dict(colour, amount,
               slope_deg, where), debug 'level' (the level each pixel reads); a layer's hex_m (default its tile),
-              hex_rotate (False for directional scans), overlay dict(height, crest, crest_fine, crease), provenance
-              dict(src, down, pale), patina and fresh_gain (multipliers on rock by `fresh`)
+              hex_rotate (False for directional scans), steep_hex_m and steep_rotate (the sector reads of a box
+              layer: by default twice hex_m and not turned), overlay dict(height, crest, crest_fine, crease),
+              provenance dict(src, down, pale), patina and fresh_gain (multipliers on rock by `fresh`)
     constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m,
               pixel_angle, ...)
     data      a SurfaceData (terrain/surface.bake_surface) of the terrain the material is for: the per-texel
