@@ -319,15 +319,21 @@
 
         const m0 = vec3(0.0, 0.8, 0.6), m1 = vec3(-0.8, 0.36, -0.48), m2 = vec3(-0.6, -0.48, 0.64);
         const applyM = (p) => vec3(dot(p, m0), dot(p, m1), dot(p, m2));
-        const fbm3 = (p) => {
+        // The trailing pp.assign is for Direct3D's shader compiler (FXC, Chrome's
+        // WebGL2 path on Windows): in the nested march loops it treats a variable's
+        // last assignment as an integer and drops floor() and the Hermite from
+        // whatever reads it. After the trailing assign, no octave reads the last one.
+        const fbmOf = (noise) => (p) => {
             const pp = p.toVar();
-            const f = noise3(pp).mul(0.5).toVar();
+            const f = noise(pp).mul(0.5).toVar();
             pp.assign(applyM(pp).mul(2.02));
-            f.addAssign(noise3(pp).mul(0.25));
+            f.addAssign(noise(pp).mul(0.25));
             pp.assign(applyM(pp).mul(2.03));
-            f.addAssign(noise3(pp).mul(0.125));
+            f.addAssign(noise(pp).mul(0.125));
+            pp.assign(vec3(0));
             return f;
         };
+        const fbm3 = fbmOf(noise3);
         const hash11 = (n) => fract(sin(n).mul(43758.5453));
         // Pixel jitter needs a genuine 2D decorrelating hash. Feeding screen
         // XY plus a constant Z through hash3 leaves one factor constant and
@@ -361,15 +367,7 @@
             const nx3 = mix(hash3(i.add(vec3(0, 1, 1))), hash3(i.add(vec3(1, 1, 1))), sm.x);
             return mix(mix(nx0, nx1, sm.y), mix(nx2, nx3, sm.y), sm.z);
         };
-        const fbm3A = (p) => {
-            const pp = p.toVar();
-            const f = noise3A(pp).mul(0.5).toVar();
-            pp.assign(applyM(pp).mul(2.02));
-            f.addAssign(noise3A(pp).mul(0.25));
-            pp.assign(applyM(pp).mul(2.03));
-            f.addAssign(noise3A(pp).mul(0.125));
-            return f;
-        };
+        const fbm3A = fbmOf(noise3A);
         // Optional optimized-tier 3D density BASIS. This caches the random
         // lattice used by the erosion FBM, not the animated cloudsAt result:
         // weather, height, wind, both erosion stages, and all FBM octaves stay
@@ -413,15 +411,7 @@
                 const uvw = fract(i.div(P)).add(sm.add(0.5).div(P));
                 return basisNode.sample(uvw).level(0).r;
             };
-            fbm3Cached = (p) => {
-                const pp = p.toVar();
-                const f = noise3Cached(pp).mul(0.5).toVar();
-                pp.assign(applyM(pp).mul(2.02));
-                f.addAssign(noise3Cached(pp).mul(0.25));
-                pp.assign(applyM(pp).mul(2.03));
-                f.addAssign(noise3Cached(pp).mul(0.125));
-                return f;
-            };
+            fbm3Cached = fbmOf(noise3Cached);
         }
         // EROSION NOISE: true-3D ALU noise, NOT the texture-slice fbm3. The
         // slice noise's diagonal correlation lattice prints PARALLELOGRAM
