@@ -11,12 +11,15 @@
 // (the rings of the hero levels and the cores, or the main ring when there is no focus), so a body standing on it
 // stands on the rendered triangles. It follows the terrain mesh's world matrix.
 //
-// The ray caster visits only the lattice cells the ray's ground track crosses, in order (a 2D walk over each ring's
-// lattice lines, down into a ring's hole through the child ring and out again), and tests each cell's triangles
-// (its two halves, or its seam fan) with three's own Ray.intersectTriangle on the same vertices, as Mesh.raycast
-// does. So every hit, its distance, point, face and face index are those of three's loop over all the triangles
-// (tests/mesh_api/raycast_test.mjs compares them), at the cost of the cells crossed. A vertical ray is one cell.
-// The skirt's triangles are tested only for a ray that crosses the outermost window's border.
+// The ray caster visits only the lattice cells the ray's ground track touches (a 2D walk over each ring's lattice
+// lines, down into a ring's hole through the child ring and out again), and tests each cell's triangles (its two
+// halves, or its seam fan) with three's own Ray.intersectTriangle on the same vertices, as Mesh.raycast does. So
+// every hit, its distance, point, face and face index are those of three's loop over all the triangles
+// (tests/mesh_api/collider_test.mjs compares them), at the cost of the cells crossed. A vertical ray is one cell.
+// A track that lies on a lattice line (a camera at x = 0 looking along z: the origin is on every ring's lattice)
+// touches the cells on both sides of it, and a track through a lattice point all four around it: three counts a
+// hit on a triangle's edge, so those cells are visited too. The skirt's triangles are tested only for a ray that
+// crosses the outermost window's border.
 
 import { searchsorted } from './mesh.js';
 
@@ -69,11 +72,18 @@ export function colliderProxy(THREE, rm, mesh, opts = {}) {
 
 // ---------------------------------------------------------------------------------------- the ray caster ---
 
+const TOL = 1e-7;       // metres: a track this close to a lattice line or point touches the cells on its other side
+const TIE = 1e-9;       // relative: two line crossings this close in ray parameter are one lattice point
+
+// the cell holding v along one axis (on a lattice line: the cell above it), clamped to the ring
+function cellOf(lines, v) {
+    return Math.min(Math.max(searchsorted(lines, v, 'right') - 1, 0), lines.length - 2);
+}
+
 // the cell of a point along one axis, by the way the ray travels: on a lattice line it is the cell ahead
 function cellAt(lines, v, d) {
-    const n = lines.length;
     const i = (d < 0 ? searchsorted(lines, v, 'left') : searchsorted(lines, v, 'right')) - 1;
-    return Math.min(Math.max(i, 0), n - 2);
+    return Math.min(Math.max(i, 0), lines.length - 2);
 }
 
 // clip the parameter interval tr of a ray o + t d against lo <= coordinate <= hi; false when nothing is left
@@ -86,103 +96,155 @@ function slab(o, d, lo, hi, tr) {
     return tr[0] <= tr[1];
 }
 
-/** Call visit(ring, i, j) for every lattice cell of the ring mesh that the ground track of the ray o + t d crosses
- * for t in [t0, t1], in the order the ray meets them (Blender axes: ox, oy the origin, dx, dy the direction's ground
- * components). visit returning true stops the walk. Cells inside a ring's hole are the child ring's. */
+function inHole(r, i, j) {
+    const h = r.holeLines;
+    return h !== null && i >= h[2] && i < h[3] && j >= h[0] && j < h[1];
+}
+
+/** Call visit(ring, i, j) once for every lattice cell of the ring mesh that the ground track of the ray o + t d
+ * touches for t in [t0, t1] (Blender axes: ox, oy the origin, dx, dy the direction's ground components), the cells
+ * a track lying on a lattice line or passing through a lattice point touches on every side included (within 1e-7 m).
+ * Cells inside a ring's hole are the child ring's. A ring's cells come in the order the ray meets them; visit may
+ * return a ray parameter, and the walk then ends once it has passed it (the nearest hit: nothing beyond it is
+ * needed). */
 export function walkCells(rm, ox, oy, dx, dy, t0, t1, visit) {
     const rings = rm.rings;
-    const EPS = 1e-9;
-    if (dx === 0 && dy === 0) {
-        // a vertical ray: the cells holding the point (two or four of them when it lies on a lattice line or point,
-        // and the neighbour ring's when it lies on a ring's border)
-        for (let k = 0; k < rings.length; k++) {
-            const r = rings[k];
-            if (ox < r.xm[0] || ox > r.xm[r.nx - 1] || oy < r.ym[0] || oy > r.ym[r.ny - 1]) break;
-            const is = [cellAt(r.xm, ox, 1)], js = [cellAt(r.ym, oy, 1)];
-            const il = cellAt(r.xm, ox, -1), jl = cellAt(r.ym, oy, -1);
-            if (il !== is[0]) is.push(il);
-            if (jl !== js[0]) js.push(jl);
-            for (const j of js) for (const i of is) if (!inHole(r, i, j) && visit(k, i, j)) return true;
-        }
-        return false;
-    }
-    const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+    const seen = new Set();
     const tr = [0, 0];
+    let limit = Infinity;
 
+    const call = (k, i, j) => {
+        const key = (k * 65536 + j) * 65536 + i;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const s = visit(k, i, j);
+        if (typeof s === 'number' && s < limit) limit = s;
+    };
+
+    // every cell within TOL of the box [xa, xb] x [ya, yb] (a point, or a track that stays within TOL of one), in
+    // ring k and, where the box reaches its hole, in the rings inside it
+    const touchBox = (k, xa, xb, ya, yb) => {
+        const r = rings[k], xm = r.xm, ym = r.ym;
+        if (xb < xm[0] - TOL || xa > xm[r.nx - 1] + TOL || yb < ym[0] - TOL || ya > ym[r.ny - 1] + TOL) return;
+        const i0 = cellOf(xm, xa - TOL), i1 = cellOf(xm, xb + TOL), j0 = cellOf(ym, ya - TOL), j1 = cellOf(ym, yb + TOL);
+        let child = false;
+        for (let j = j0; j <= j1; j++) {
+            for (let i = i0; i <= i1; i++) {
+                if (inHole(r, i, j)) child = true;
+                else call(k, i, j);
+            }
+        }
+        if (child) touchBox(k + 1, xa, xb, ya, yb);
+    };
+    const touchAt = (k, t) => touchBox(k, ox + t * dx, ox + t * dx, oy + t * dy, oy + t * dy);
+
+    if (dx === 0 && dy === 0) {                          // a vertical ray: the cells holding the point
+        touchBox(0, ox, ox, oy, oy);
+        return;
+    }
+    const r0 = rings[0];
+    tr[0] = t0;
+    tr[1] = t1;
+    if (!slab(ox, dx, r0.xm[0] - TOL, r0.xm[r0.nx - 1] + TOL, tr) || !slab(oy, dy, r0.ym[0] - TOL, r0.ym[r0.ny - 1] + TOL, tr)) return;
+    const tA0 = tr[0], tB0 = tr[1];
+    const xa = ox + tA0 * dx, xb = ox + tB0 * dx, ya = oy + tA0 * dy, yb = oy + tB0 * dy;
+    const flatX = Math.abs(xb - xa) <= TOL, flatY = Math.abs(yb - ya) <= TOL;     // the track keeps to one x, one y
+    if (flatX && flatY) {
+        touchBox(0, Math.min(xa, xb), Math.max(xa, xb), Math.min(ya, yb), Math.max(ya, yb));
+        return;
+    }
+
+    if (flatX || flatY) {
+        // The track runs along one axis: in every ring it touches the rows (columns) within TOL of it, two of them
+        // when it lies on a lattice line. Each ring is swept in the ray's direction; where a touched cell is in the
+        // ring's hole the child ring is swept over the hole's stretch (once: it finds its own rows).
+        const alongX = flatY;
+        const o = alongX ? ox : oy, d = alongX ? dx : dy;
+        const cLo = alongX ? Math.min(ya, yb) : Math.min(xa, xb), cHi = alongX ? Math.max(ya, yb) : Math.max(xa, xb);
+        const up = d > 0;
+        const sweep = (k, tA, tB) => {
+            const r = rings[k];
+            const along = alongX ? r.xm : r.ym, across = alongX ? r.ym : r.xm;
+            if (cHi < across[0] - TOL || cLo > across[across.length - 1] + TOL) return;
+            const a0 = cellOf(across, cLo - TOL), a1 = cellOf(across, cHi + TOL);
+            const pA = o + tA * d, pB = o + tB * d;
+            const b0 = cellOf(along, Math.min(pA, pB) - TOL), b1 = cellOf(along, Math.max(pA, pB) + TOL);
+            let descended = false;
+            for (let b = up ? b0 : b1; up ? b <= b1 : b >= b0; b += up ? 1 : -1) {
+                if (((up ? along[b] : along[b + 1]) - o) / d > limit) return;
+                for (let a = a0; a <= a1; a++) {
+                    const i = alongX ? b : a, j = alongX ? a : b;
+                    if (!inHole(r, i, j)) {
+                        call(k, i, j);
+                    } else if (!descended) {
+                        descended = true;
+                        const h = r.holeLines;
+                        tr[0] = tA;
+                        tr[1] = tB;
+                        if (slab(o, d, (alongX ? r.xm[h[2]] : r.ym[h[0]]) - TOL, (alongX ? r.xm[h[3]] : r.ym[h[1]]) + TOL, tr)) {
+                            sweep(k + 1, tr[0], tr[1]);
+                        }
+                    }
+                }
+            }
+        };
+        sweep(0, tA0, tB0);
+        return;
+    }
+
+    // The general ray: a walk over each ring's lattice lines, cell by cell in the order the ray crosses them.
+    const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
     const walk = (k, tA, tB) => {
         const r = rings[k], xm = r.xm, ym = r.ym, nx = r.nx, ny = r.ny;
         const hole = r.holeLines;
+        if (tA > limit) return;
+        touchAt(k, tA);                                  // a start on a lattice line: the cells behind it too
         let i = cellAt(xm, ox + tA * dx, dx), j = cellAt(ym, oy + tA * dy, dy);
-        // a ray along a lattice line touches the cells on both of its sides
-        const twinJ = dy === 0 && j > 0 && oy === ym[j] ? j - 1 : -1;
-        const twinI = dx === 0 && i > 0 && ox === xm[i] ? i - 1 : -1;
         let tCur = tA;
         for (;;) {
+            if (tCur > limit) return;
             if (hole && i >= hole[2] && i < hole[3] && j >= hole[0] && j < hole[1]) {
                 tr[0] = tCur;
                 tr[1] = tB;
                 if (slab(ox, dx, xm[hole[2]], xm[hole[3]], tr) && slab(oy, dy, ym[hole[0]], ym[hole[1]], tr) && tr[1] > tr[0]) {
-                    const h0 = tr[0], h1 = tr[1];
-                    // along a hole's edge line: this ring's cells on the line's other side, beside the hole
-                    if (twinJ >= 0 && !inHole(r, i, twinJ)) {
-                        const ia = cellAt(xm, ox + h0 * dx, dx), ib = cellAt(xm, ox + h1 * dx, -dx);
-                        for (let q = Math.min(ia, ib); q <= Math.max(ia, ib); q++) if (visit(k, q, twinJ)) return true;
-                    }
-                    if (twinI >= 0 && !inHole(r, twinI, j)) {
-                        const ja = cellAt(ym, oy + h0 * dy, dy), jb = cellAt(ym, oy + h1 * dy, -dy);
-                        for (let q = Math.min(ja, jb); q <= Math.max(ja, jb); q++) if (visit(k, twinI, q)) return true;
-                    }
-                    if (walk(k + 1, h0, h1)) return true;
-                    if (h1 >= tB) return false;
+                    const h1 = tr[1];
+                    walk(k + 1, tr[0], h1);              // the child ring's stretch
+                    if (h1 >= tB) break;
                     tCur = h1;
                     i = cellAt(xm, ox + h1 * dx, dx);
                     j = cellAt(ym, oy + h1 * dy, dy);
                     if (i >= hole[2] && i < hole[3] && j >= hole[0] && j < hole[1]) {
                         // rounding left the point inside the hole: leave through the side the ray crosses first
-                        const tx = dx > 0 ? (xm[hole[3]] - ox) / dx : dx < 0 ? (xm[hole[2]] - ox) / dx : Infinity;
-                        const ty = dy > 0 ? (ym[hole[1]] - oy) / dy : dy < 0 ? (ym[hole[0]] - oy) / dy : Infinity;
-                        if (tx <= ty) i = dx > 0 ? hole[3] : hole[2] - 1;
-                        if (ty <= tx) j = dy > 0 ? hole[1] : hole[0] - 1;
+                        const ex = dx > 0 ? (xm[hole[3]] - ox) / dx : (xm[hole[2]] - ox) / dx;
+                        const ey = dy > 0 ? (ym[hole[1]] - oy) / dy : (ym[hole[0]] - oy) / dy;
+                        if (ex <= ey) i = dx > 0 ? hole[3] : hole[2] - 1;
+                        if (ey <= ex) j = dy > 0 ? hole[1] : hole[0] - 1;
                     }
-                    if (i < 0 || i > nx - 2 || j < 0 || j > ny - 2) return false;
+                    if (i < 0 || i > nx - 2 || j < 0 || j > ny - 2) break;
                     continue;
                 }
             } else {
-                if (visit(k, i, j)) return true;
-                if (twinJ >= 0 && !inHole(r, i, twinJ) && visit(k, i, twinJ)) return true;
-                if (twinI >= 0 && !inHole(r, twinI, j) && visit(k, twinI, j)) return true;
+                call(k, i, j);
             }
-            const tx = dx > 0 ? (xm[i + 1] - ox) / dx : dx < 0 ? (xm[i] - ox) / dx : Infinity;
-            const ty = dy > 0 ? (ym[j + 1] - oy) / dy : dy < 0 ? (ym[j] - oy) / dy : Infinity;
+            const tx = dx > 0 ? (xm[i + 1] - ox) / dx : (xm[i] - ox) / dx;
+            const ty = dy > 0 ? (ym[j + 1] - oy) / dy : (ym[j] - oy) / dy;
             const tn = Math.min(tx, ty);
-            if (tn > tB) return false;
-            if (Math.abs(tx - ty) <= EPS * (1 + Math.abs(tn))) {
-                // through a lattice point (or within rounding of one): the two cells beside it are touched too
-                const i2 = i + sx, j2 = j + sy;
-                if (i2 >= 0 && i2 <= nx - 2 && !inHole(r, i2, j) && visit(k, i2, j)) return true;
-                if (j2 >= 0 && j2 <= ny - 2 && !inHole(r, i, j2) && visit(k, i, j2)) return true;
-                i = i2;
-                j = j2;
+            if (tn > tB) break;
+            if (Math.abs(tx - ty) <= TIE * (1 + Math.abs(tn))) {
+                touchAt(k, tn);                          // through a lattice point: every cell around it
+                i += sx;
+                j += sy;
             } else if (tx < ty) {
                 i += sx;
             } else {
                 j += sy;
             }
-            if (i < 0 || i > nx - 2 || j < 0 || j > ny - 2) return false;
+            if (i < 0 || i > nx - 2 || j < 0 || j > ny - 2) break;
             tCur = tn;
         }
+        if (tB <= limit) touchAt(k, tB);                 // an end on a lattice line: the cells beyond it too
     };
-
-    const r0 = rings[0];
-    tr[0] = t0;
-    tr[1] = t1;
-    if (!slab(ox, dx, r0.xm[0], r0.xm[r0.nx - 1], tr) || !slab(oy, dy, r0.ym[0], r0.ym[r0.ny - 1], tr)) return false;
-    return walk(0, tr[0], tr[1]);
-}
-
-function inHole(r, i, j) {
-    const h = r.holeLines;
-    return h !== null && i >= h[2] && i < h[3] && j >= h[0] && j < h[1];
+    walk(0, tA0, tB0);
 }
 
 /** Replace mesh.raycast by the height-grid ray caster (see the module doc). The geometry is also kept from a
@@ -208,21 +270,22 @@ export function installRaycast(THREE, mesh, rm) {
         return groups.length ? groups[g].materialIndex : 0;
     };
 
-    // three's checkGeometryIntersection for triangle t (Mesh.js, r184), on the same vertices
+    // three's checkGeometryIntersection for triangle t (Mesh.js, r184), on the same vertices: the hit is pushed on
+    // `out`; returns its parameter along the local ray, or Infinity when the ray misses the triangle
     const test = (t, raycaster, out) => {
         const a = index[3 * t], b = index[3 * t + 1], c = index[3 * t + 2];
         const mi = slotOf(t);
         const material = Array.isArray(mesh.material) ? mesh.material[mi] : mesh.material;
-        if (!material) return false;
+        if (!material) return Infinity;
         vA.fromBufferAttribute(position, a);
         vB.fromBufferAttribute(position, b);
         vC.fromBufferAttribute(position, c);
         const hit = material.side === THREE.BackSide ? ray.intersectTriangle(vC, vB, vA, true, point)
             : ray.intersectTriangle(vA, vB, vC, material.side === THREE.FrontSide, point);
-        if (hit === null) return false;
+        if (hit === null) return Infinity;
         world.copy(point).applyMatrix4(mesh.matrixWorld);
         const distance = raycaster.ray.origin.distanceTo(world);
-        if (distance < raycaster.near || distance > raycaster.far) return false;
+        if (distance < raycaster.near || distance > raycaster.far) return Infinity;
         const barycoord = new THREE.Vector3();
         THREE.Triangle.getBarycoord(point, vA, vB, vC, barycoord);
         const it = { distance, point: world.clone(), object: mesh };
@@ -238,7 +301,7 @@ export function installRaycast(THREE, mesh, rm) {
         it.barycoord = barycoord;
         it.faceIndex = t;
         out.push(it);
-        return true;
+        return tmp.copy(point).sub(ray.origin).dot(ray.direction);
     };
 
     mesh.raycast = function (raycaster, intersects) {
@@ -259,22 +322,31 @@ export function installRaycast(THREE, mesh, rm) {
         const found = [];
         walkCells(rm, ox, oy, dx, dy, t0, t1, (k, i, j) => {
             const n = rm.cellTriangles(k, i, j, tris);
-            let any = false;
-            for (let q = 0; q < n; q++) any = test(tris[q], raycaster, found) || any;
-            return first && any;
+            let nearest = Infinity;
+            for (let q = 0; q < n; q++) nearest = Math.min(nearest, test(tris[q], raycaster, found));
+            // the nearest hit only: the cells the ray enters after it hold nothing nearer
+            return first && nearest < Infinity ? nearest * (1 + 1e-9) + 1e-9 : undefined;
         });
-        // the skirt hangs on the outermost border: only a ray whose ground track reaches the border can meet it
+        // The skirt hangs from the outermost border, a vertical wall on each side of the window: a ray can meet it
+        // only where its ground track comes to that side's line, so only the wall's quads there are tested (quad k
+        // runs from perimeter point k to k + 1, counter-clockwise from the south-west corner: kernels/mesh/skirt.wgsl)
         if (nAll > nTerrain) {
-            const inside = (x, y) => x > xmin && x < xmax && y > ymin && y < ymax;
-            let reaches;
-            if (dx === 0 && dy === 0) {
-                reaches = !inside(ox, oy) && ox >= xmin && ox <= xmax && oy >= ymin && oy <= ymax;
-            } else {
+            const nx = r0.nx, ny = r0.ny, m = (nAll - nTerrain) / 2;
+            for (let side = 0; side < 4; side++) {       // south, east, north, west
+                const alongX = side === 0 || side === 2;
+                const line = side === 0 ? ymin : side === 1 ? xmax : side === 2 ? ymax : xmin;
+                const lines = alongX ? r0.xm : r0.ym;
+                const oc = alongX ? oy : ox, dc = alongX ? dy : dx, oa = alongX ? ox : oy, da = alongX ? dx : dy;
                 const tr = [t0, t1];
-                reaches = slab(ox, dx, xmin, xmax, tr) && slab(oy, dy, ymin, ymax, tr) &&
-                    (tr[0] > t0 || tr[1] < t1 || !inside(ox + t0 * dx, oy + t0 * dy) || !inside(ox + t1 * dx, oy + t1 * dy));
+                if (!slab(oc, dc, line - TOL, line + TOL, tr) || !slab(oa, da, lines[0] - TOL, lines[lines.length - 1] + TOL, tr)) continue;
+                const pa = da === 0 ? oa : oa + tr[0] * da, pb = da === 0 ? oa : oa + tr[1] * da;
+                const s0 = cellOf(lines, Math.min(pa, pb) - TOL), s1 = cellOf(lines, Math.max(pa, pb) + TOL);
+                for (let s = s0; s <= s1; s++) {
+                    const k = side === 0 ? s : side === 1 ? nx - 1 + s : side === 2 ? 2 * nx + ny - 4 - s : m - 1 - s;
+                    test(nTerrain + k, raycaster, found);
+                    test(nTerrain + m + k, raycaster, found);
+                }
             }
-            if (reaches) for (let t = nTerrain; t < nAll; t++) test(t, raycaster, found);
         }
         if (first && found.length > 1) {
             found.sort((p, q) => p.distance - q.distance);
