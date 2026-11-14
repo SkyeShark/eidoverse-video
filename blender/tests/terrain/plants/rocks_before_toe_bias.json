@@ -1,0 +1,6 @@
+{
+ "what": "place_rocks on the synthetic valley (test_plants.test_rocks), recorded from dressing.py before the toe bias was added",
+ "sha1": "ec99950bf4e9ddcea2446c8f9e3f34847c00be72",
+ "count": 1633,
+ "numpy": "2.5.2"
+}

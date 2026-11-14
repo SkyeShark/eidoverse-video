@@ -15,6 +15,10 @@ How a rock is placed, so the result can be trusted:
 - size: a power law between size_m[0] and size_m[1], N(>s) ~ s^-alpha (talus and boulder fields measure alpha 2-3).
   The smallest size kept grows with distance from the focus (lod_m_per_m metres per metre), so far ground keeps
   only the rocks a camera could resolve, at the same density of big rocks as near ground.
+- toe bias (optional, toe_bias > 0; off by default, and off the rocks are placed exactly as without it): the
+  smallest rock grows toward the toe of a debris slope, size_m[0] x (1 + toe_bias x grain), where `grain` is the
+  surface bake's map of the distance down the fall path (0 at the apex, 1 at the toe): the sorting real rockfall
+  shows, fines under the wall and blocks at the foot. A terrain without that map keeps one smallest size.
 - each rock stands on height_at, a `bury` fraction of its height under the ground, its up axis turned `align` of the
   way from world up to the surface normal, a random turn about it and a few degrees of random tilt; its proportions
   are jittered a little (no two stones alike).
@@ -37,7 +41,7 @@ from . import palettes as P
 
 DEFAULT_SPEC = dict(models=['boulder_01', 'rock_07', 'rock_09'], colour=None, density='0.0',
                     size_m=(0.12, 2.5), alpha=2.4, bury=0.35, align=0.6, tilt_deg=8.0, squash=(0.7, 1.05),
-                    radius_m=150.0, lod_m_per_m=0.01, max_rocks=400000, model_res='1k')
+                    radius_m=150.0, lod_m_per_m=0.01, max_rocks=400000, model_res='1k', toe_bias=0.0)
 # lod_m_per_m 0.01: a rock d metres off is kept only if it is at least 0.01 d across, about 7 pixels at 960 px over a
 # 74-degree view (24 mm) and more at longer lenses: the scanned models are 12-110 k triangles each, so rocks a camera
 # cannot resolve are not drawn. A model entry may be (id, min_size_m, max_size_m): the heavy boulder scans then stand
@@ -321,6 +325,12 @@ def place_rocks(spec, mask_at, height_at, normal_at=None, focus=(0.0, 0.0), radi
     al = float(sp['alpha'])
     u = rng.random(len(x))
     size = s0 * (1.0 - u * (1.0 - (s0 / s1) ** al)) ** (-1.0 / al)
+    toe = float(sp.get('toe_bias') or 0.0)
+    if toe > 0.0:                                        # the same draws, from a smallest size that grows to the toe
+        grain = mask_at('grain', x, y)
+        if grain is not None:
+            lo = np.minimum(s0 * (1.0 + toe * np.clip(np.asarray(grain, np.float64), 0.0, 1.0)), 0.95 * s1)
+            size = lo * (1.0 - u * (1.0 - (lo / s1) ** al)) ** (-1.0 / al)
     dist = np.hypot(x - fx, y - fy)
     keep = size >= np.maximum(s0, float(sp['lod_m_per_m']) * dist)
     x, y, size = x[keep], y[keep], size[keep]
