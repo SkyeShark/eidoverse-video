@@ -430,13 +430,9 @@
         // coverage control with distinct masses.
         const wSampleL = (uvNode) => weatherNode.sample(uvNode).level(0).r;   // EANPA: explicit LOD
         const wSampleS = (uvNode) => weatherNode.sample(uvNode).level(0).g;   // EANPA: explicit LOD
-        // Height profile of the cloud layer: rises over the bottom half, falls
-        // over the top half. The rising edge is written as a mirrored falling
-        // edge, 1 - smoothstep(0.5, 1, 1 - ch), which is the same curve as
-        // smoothstep(0, 0.5, ch). The plain form is miscompiled by Direct3D's
-        // shader compiler (FXC, Chrome's default WebGL2 path on Windows) once
-        // the march sits inside the pass Loop: it drops the t*t and the clouds
-        // render bigger and brighter. The mirrored form compiles correctly.
+        // Height profile of the cloud layer: rises over the bottom half, falls over the top.
+        // The rising edge is mirrored (equal to smoothstep(0, 0.5, ch) within 1.2e-7) because
+        // the plain form reads a value FXC folds inside the march loops; see fbmOf.
         const layerProfile = (ch) => float(1).sub(smoothstep(0.5, 1.0, float(1).sub(ch)))
             .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
         const earthC = vec3(0, -R_EARTH, 0);
