@@ -114,6 +114,22 @@ image, motion and sound inspection.
 - Creatures: the WebGPU edition's creature builder is not ported; a new
   creature creator is being made. [Creatures](tools-guides/creatures.md).
 
+### Creature Creator v2 (work in progress)
+**WIP and incomplete.** A second creature creator for **high-fidelity PBR
+creatures and humans**, alongside the WebGPU edition's stylized low-poly
+`makeCreature`: realistic, rigged glb files with baked texture sets and runtime
+materials. In this first drop: an octopus, a stag beetle with four variants and
+an axolotl; a base woman and man with four outfits, robot hands and 15 hair
+styles; hats, glasses and other accessories; and work-in-progress pieces of
+Aletheia and Aporia. In this Blender edition the glb files import into Blender
+as assets (File > Import > glTF 2.0: meshes, skins, morph targets, clips and
+their base colour, normal and occlusion-roughness-metal maps). The kit's own
+runtime (`Bestiary.create()`, its materials and procedural motion) is the
+WebGPU edition's three.js code and runs there (`python eido.py render`).
+Remixing new characters with it as a procedural tool is not working yet. What
+loads, what does not, and every shipped file:
+[Creature Creator v2](eidoverse/bestiary/README.md).
+
 ### Other articulated scene tools
 - [Clippy](tools-guides/clippy.md) — a paperclip character with morph controls and
   his 43 named performances.

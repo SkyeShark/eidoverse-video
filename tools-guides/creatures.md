@@ -22,6 +22,12 @@ Until it lands:
   that needs the builder's own morphologies (a talking octopus, a dragon
   with folding wings, a platypus from mixed parts) waits for the new creator,
   or is made in the WebGPU edition, where `makeCreature` runs as it is.
+- [Creature Creator v2](../eidoverse/bestiary/README.md) (WIP, incomplete)
+  ships realistic, rigged glb files: an octopus, a stag beetle and its
+  variants, an axolotl, a base woman and man with outfits and hair, and
+  accessories. They import into Blender as assets (meshes, skins, morph
+  targets, clips and their PBR maps). Its own runtime, which gives them their
+  materials and procedural motion, is the WebGPU edition's three.js code.
 
 ## Not yet ported
 
