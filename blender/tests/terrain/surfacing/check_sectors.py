@@ -2,14 +2,18 @@
 walls at their world positions, beside today's Box projection.
 
     bash run_blender.sh blender/tests/terrain/surfacing/check_sectors.py [--case canyon] [--views brink_down,wall_L4]
+        [--grid brink_down,wall_L4] [--slope]
     (a GPU job: queue it with EIDO_GPU_WRAP on a shared machine, blender/tests/_where.py)
 
 Views: the judge's brink_down (the canyon's right-hand wall, diagonal to the axes) and wall_L4, a camera framing
 about 250 m of the steepest wall on the 0.98 m hero level (the 250 m window there with the most ground over 50
-degrees, seen from 300 m along its mean facing). Each view four times under make_sky: today's material and the
-per-texel one, first with a colour grid in place of every box layer's scan (8 x 8 cells of distinct colours, dark
-lines every cell: grid cells must read square, with no streaks and no seam where the sector slots meet), then with
-the scans. Writes out/surfacing/material/sectors/<case>_<view>_<today|per_texel>_<grid|scan>.png and
+degrees, seen from 300 m along its mean facing); any other name is a judge view of the case (approach_walk and
+low_oblique: far slopes of one material, before and after). Each view under make_sky in today's material and the
+per-texel one with the scans, and the --grid views (default: all) also with a colour grid in place of every box
+layer's scan (8 x 8 cells of distinct colours, dark lines every cell: grid cells must read square, with no streaks
+and no seam where the sector slots meet). --slope: each view once more as an emission of the baked field normal's
+slope (white at 90 degrees), what the layer weights read per texel. Writes
+out/surfacing/material/sectors/<case>_<view>_<today|per_texel>_<grid|scan>.png, <case>_<view>_slope.png and
 sectors_<case>.json (the cameras and frame seconds).
 """
 import json
@@ -32,7 +36,29 @@ def args():
 
     def opt(k, d=None):
         return a[a.index(k) + 1] if k in a else d
-    return dict(case=opt('--case', 'canyon'), views=opt('--views', 'brink_down,wall_L4').split(','))
+    views = opt('--views', 'brink_down,wall_L4').split(',')
+    return dict(case=opt('--case', 'canyon'), views=views, grid=(opt('--grid') or ','.join(views)).split(','),
+                slope='--slope' in a)
+
+
+def slope_material(sd):
+    """An emission of the baked field normal's slope / 90 degrees, read through eido_terrain_map."""
+    from eidoblend.terrain.build import surfacing as S
+    mat = bpy.data.materials.new('sector_slope')
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    tm = nt.nodes.new('ShaderNodeGroup')
+    tm.node_tree = S.terrain_map_group(sd)
+    m = nt.nodes.new('ShaderNodeMath')
+    m.operation = 'DIVIDE'
+    nt.links.new(tm.outputs['slope'], m.inputs[0])
+    m.inputs[1].default_value = 90.0
+    em = nt.nodes.new('ShaderNodeEmission')
+    nt.links.new(m.outputs[0], em.inputs['Color'])
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
+    return mat
 
 
 def grid_images():
@@ -150,6 +176,8 @@ def main():
             MS.light(sc, cam, sky)
             for kind in ('scan', 'grid'):
                 if kind == 'grid':
+                    if v not in a['grid']:
+                        continue
                     swap(mat, pairs)
                 MS.frame(sc)
                 secs = MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_{label}_{kind}.png"))
@@ -157,6 +185,12 @@ def main():
                 MS.log(f"[sectors] {v} {label} {kind}: {secs:.2f} s")
             swap_back(mat)                                # the scans again for the next view
             MS.clean(sky)
+    if a['slope']:
+        obj.data.materials.clear()
+        obj.data.materials.append(slope_material(sd))
+        for v, cam in cams.items():
+            sc.camera = cam
+            MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_slope.png"))
     path = os.path.join(MS.OUT, f"sectors_{a['case']}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1)

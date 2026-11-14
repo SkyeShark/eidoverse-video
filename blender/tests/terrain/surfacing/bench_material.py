@@ -1,5 +1,8 @@
 """What the terrain material costs per frame, against grey clay on the same frame (one Blender process, through a GPU
-slot; other jobs share the GPU, so each palette's textured and clay frames alternate and the best of each counts):
+slot; other jobs share the GPU, so each palette's textured and clay frames alternate and the best of each counts;
+every timed frame follows a discarded frame of the same material, because a material switch can recompile). This
+scene has no levels, so it times the material that reads mesh attributes; the material that reads baked surface data
+is timed on a real terrain by check_full_config.py, the same way:
 
     bash run_blender.sh blender/tests/terrain/surfacing/bench_material.py [--palettes alpine,desert_sandstone]
         [--variants full,no_far,...] [--reps 3] [--tag b1]
@@ -179,11 +182,15 @@ def main():
             ob.data.materials.append(mat)
             S.pack_masks(ob, mat)                        # a palette past ATTRS_DIRECT masks reads them packed
             t_first = frame()
+            # a material switch can recompile (a run that cycled materials frame by frame stalled for minutes), so
+            # every timed frame follows a discarded frame of the same material, never a switch
             tex, cl = [], []
             for _ in range(a['reps']):
                 ob.data.materials[0] = mat
+                frame()
                 tex.append(frame())
                 ob.data.materials[0] = clay
+                frame()
                 cl.append(frame())
             rec = dict(first_s=round(t_first, 2), textured_s=round(min(tex), 2), clay_s=round(min(cl), 2),
                        material_s=round(min(tex) - min(cl), 2), nodes=len(grp.nodes), images=grp['eido_images'])

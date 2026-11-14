@@ -64,8 +64,9 @@ builds the per-texel material instead:
     reads the atlas' coarsest mips; slope, aspect, northness, eastness and insolation come from the baked field
     normal (D), height from the object z;
   - the shading normal is the field normal plus the relief below the cell (D's gradient, detail_strength), the scans'
-    normal maps in its tangent frame, and the bump of ripples, canopy and strata relief on top (each bump's weight in
-    its Distance, read once outside the bump's height);
+    normal maps in its tangent frame, the strata's bed relief as an analytic tilt (the relief image differentiated
+    along the stratigraphic height: no Bump node, which would evaluate the level reader three times), and the bump
+    of ripples and canopy on top (each bump's weight in its Distance, read once outside the bump's height);
   - planar reads are hex-tiled ('hex', one node group, eido_hex_grid: three reads on a triangle grid, each turned and
     offset, sharpened by w^7 and their heights; a read's coordinate changes only where its weight is 0);
   - box layers read eight fixed sector frames on faces steeper than 47 degrees (u along the strike, v up a fixed
@@ -127,6 +128,7 @@ FADE_CELLS = 8.0                      # a level fades in over this many of its o
 FAR_TEXEL_PX = 2.5                    # D0: where a main-level texel spans this many pixels
 FAR_FADE_MAIN_CELLS = 64.0            # the far colour fades in over this many main cells beyond the hero windows
 FAR_GRAIN = 0.25                      # how much of the base layer's scan luminance the far colour keeps
+FAR_FADE_NODE = 'eido_far_fade'       # the near material's hand-off smoothstep over D0..1.5 D0 (set_far_distance)
 DETAIL_STRENGTH = 0.5                 # the relief below the cell, by default (options detail_strength)
 # the 5-95 % half-range of (n - 0.5) of the mask language's noise() and fbm() (Blender's Noise Texture, stretched
 # x2.5 and x3; measured with surface/noise.py over 2e5 points): what a faded term's smoothstep widens by
@@ -822,6 +824,7 @@ class _Strata:
         self.reads = {}
         self._uv = {}
         self._relief = None
+        self._slope = None
         self._g_st = (g, comp, st, coords)
         self._at = {}
 
@@ -869,6 +872,32 @@ class _Strata:
             r, ledge, _b = self.g.separate_rgb(col)
             self._relief = (r, ledge)
         return self._relief
+
+    def relief_slope(self):
+        """(d relief / d zs per metre, the direction zs rises in): the beds' relief differentiated along the
+        stratigraphic height, a central difference half a pixel of the relief image either side (two more reads of
+        that image, mipmapped, so beds finer than a pixel fade to no slope), and the unit-rise direction of zs: +z,
+        tilted by the dip of a 'position' source (the warps' and runnels' own gradients are a few per cent and
+        left out). What an analytic tilt of the normal needs: a Bump node would evaluate the whole stratigraphic
+        height, the level reader under it included, three times."""
+        if self.relief_img is None:
+            return None
+        if self._slope is None:
+            g, _comp, st, _coords = self._g_st
+            span = self.z_hi - self.z_lo
+            d = 0.5 * span / float(self.relief_img.size[0])
+            r = []
+            for off in (d, -d):
+                u = g.math('MULTIPLY_ADD', self.zs, 1.0 / span, (off - self.z_lo) / span)
+                col, _a = self._read(self.relief_img, g.combine_xyz(u, self.v, 0.0))
+                r.append(g.separate_rgb(col)[0])
+            up = (0.0, 0.0, 1.0)
+            if st.get('source', 'attribute') != 'attribute':
+                dip = math.tan(math.radians(float(st.get('dip_deg', 0.0))))
+                az = math.radians(float(st.get('dip_azimuth_deg', st.get('azimuth_deg', 0.0))))
+                up = (-dip * math.cos(az), -dip * math.sin(az), 1.0)
+            self._slope = (g.mul(g.sub(r[0], r[1]), 1.0 / (2.0 * d)), up)
+        return self._slope
 
 
 def _macro(g, coords, albedo, octaves, noise3=False):
@@ -1761,6 +1790,24 @@ def far_distance(pal, sd):
     return _main_cell(sd) / (FAR_TEXEL_PX * float(consts.get('pixel_angle') or P.CONSTANTS['pixel_angle']))
 
 
+def set_far_distance(material, far_m):
+    """Move a per-texel terrain material's hand-off to the far colour to far_m metres (D0: it fades over
+    D0..1.5 D0), in place: a node value, so nothing is rebuilt or recompiled. material: a surface_material(data=...)
+    or its node group. The far material's rings are chosen at apply_surface: call it again when D0 moves a camera's
+    1.5 D0 across a ring. Returns the group."""
+    ng = material if isinstance(material, bpy.types.NodeTree) else next(
+        n.node_tree for n in material.node_tree.nodes if n.bl_idname == 'ShaderNodeGroup')
+    nd = ng.nodes.get(FAR_FADE_NODE)
+    if nd is None:
+        raise ValueError(f'{ng.name}: no far hand-off (a material without baked data, or a bake without a palette)')
+    nd.inputs['From Min'].default_value = float(far_m)
+    nd.inputs['From Max'].default_value = 1.5 * float(far_m)
+    ng['eido_far_m'] = float(far_m)
+    if not isinstance(material, bpy.types.NodeTree):
+        material['eido_far_m'] = float(far_m)
+    return ng
+
+
 def _surface_group_data(pal, sd, name, prefer, log):
     """surface_group with baked surface data (the module doc's second part)."""
     opt = pal['options']
@@ -2088,8 +2135,9 @@ def _surface_group_data(pal, sd, name, prefer, log):
     w_far = None
     if dat.has_family('C'):
         cm = _main_cell(sd)
-        w_far = g.mul(g.smoothstep(D0, 1.5 * D0, vd),
-                      g.smoothstep(0.0, FAR_FADE_MAIN_CELLS * cm, dat.rd.outputs['Hero Outside']))
+        fade = g.smoothstep(D0, 1.5 * D0, vd)
+        fade.node.name = FAR_FADE_NODE                    # set_far_distance moves it without a rebuild
+        w_far = g.mul(fade, g.smoothstep(0.0, FAR_FADE_MAIN_CELLS * cm, dat.rd.outputs['Hero Outside']))
         fc_col = g.vmath('SCALE', dat.colour('C'), scale=_far_grain(g, layers[0], sets[0], coords))
         albedo = g.mix('RGBA', w_far, albedo, fc_col)
         rough = g.mix('FLOAT', w_far, rough, dat.value('far_roughness'))
@@ -2110,12 +2158,22 @@ def _surface_group_data(pal, sd, name, prefer, log):
     if pert is not None:
         nvec = g.vmath('ADD', nvec, pert)
     normal = g.vmath('NORMALIZE', nvec)
-    # the bumps: ripples, canopy, strata relief (and a scan without a normal map), each its own Bump node with its
-    # weight (cheap coverages: every weight with its noise at its mean, composited) and the far fade in its Distance,
-    # computed once outside the bump's height, so EEVEE's three evaluations of the height read only the height
+    keep = 1.0 if w_far is None else g.sub(1.0, w_far)
+    # the beds in relief (hard beds out as ledges, soft ones back): an analytic tilt of the normal by the relief's
+    # slope along the stratigraphic height, n' = normalize(n - k (up - (up . n) n)), k = weight x relief_m x
+    # d(relief)/d(zs), weighted by the strata layers' own blended weights. No Bump node: a Bump evaluates its whole
+    # height input three times, and the stratigraphic height reads the F atlas through the level reader
+    if strata is not None and any(p['relief'] is not None for p in per):
+        slope, up = strata.relief_slope()
+        k = g.mul(_mul(g, _mul(g, wsum([1.0 if p['relief'] is not None else None for p in per]), keep),
+                       strata.relief_m), slope)
+        sg = g.vmath('SUBTRACT', up, g.vmath('SCALE', normal, scale=g.vmath('DOT_PRODUCT', normal, up)))
+        normal = g.vmath('NORMALIZE', g.vmath('SUBTRACT', normal, g.vmath('SCALE', sg, scale=k)))
+    # the bumps: ripples, canopy (and a scan without a normal map), each its own Bump node with its weight (cheap
+    # coverages: every weight with its noise at its mean, composited) and the far fade in its Distance, computed
+    # once outside the bump's height, so EEVEE's three evaluations of the height read only the height
     cheap = _Compiler(g, coords, pal.get('constants'), noise3=True, flat=True, attrs=comp.attrs, data=dat)
-    bumped = [p['bump_own'] is not None or p['ripple'] is not None or p['canopy_bump'] is not None
-              or p['relief'] is not None for p in per]
+    bumped = [p['bump_own'] is not None or p['ripple'] is not None or p['canopy_bump'] is not None for p in per]
     if any(bumped):
         ccov = [_clamp01(g, cheap(P.parse(weights[i]))) if bumped[i] or any(bumped[:i]) else 0.0
                 for i in range(len(per))]
@@ -2124,7 +2182,6 @@ def _surface_group_data(pal, sd, name, prefer, log):
         for i in range(len(per) - 1, -1, -1):
             bw[i] = _mul(g, ccov[i], crem) if bumped[i] else 0.0
             crem = _mul(g, crem, _one_minus(g, ccov[i]))
-        keep = 1.0 if w_far is None else g.sub(1.0, w_far)
         for p, w in zip(per, bw):
             terms = []
             if p['bump_own'] is not None:
@@ -2133,8 +2190,6 @@ def _surface_group_data(pal, sd, name, prefer, log):
                 terms.append((p['ripple'], 1.0))
             if p['canopy_bump'] is not None:
                 terms.append((p['canopy_bump'], 1.0))
-            if p['relief'] is not None:
-                terms.append((p['relief'], strata.relief_m))
             for hgt, scale in terms:
                 dist = _mul(g, _mul(g, w, keep), scale)
                 if isinstance(dist, float) and dist == 0.0:
@@ -2991,6 +3046,7 @@ def missing_masks(obj, palette_or_names):
 
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
            'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
-           'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'reader_group', 'hex_grid_group',
+           'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'set_far_distance', 'reader_group',
+           'hex_grid_group',
            'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
            'DEBUG_COLOURS']
