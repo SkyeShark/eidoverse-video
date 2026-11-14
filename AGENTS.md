@@ -188,6 +188,15 @@ piece and a render test.
      tripod insect / spider / flight with banking), animal faces (muzzles,
      ears, tusks, horn styles), typed feet, accessories (hats/ties/shades),
      robots, seeded randoms.
+   - **Creature Creator v2 (WIP / incomplete)** — high-fidelity PBR creatures
+     and humans, alongside the stylized low-poly `makeCreature`
+     (`creature_builder.js`). What loads today: a realistic octopus, stag
+     beetle (four variants) and axolotl, a base woman and man with outfits,
+     robot hands and 15 hair styles, and accessories, through
+     `Bestiary.create()` / `Bestiary.accessory()` after importing
+     `eidoverse/bestiary/runtime/bestiary.js`; WIP pieces of Aletheia and
+     Aporia as plain glb files. Not working yet: remixing new characters as a
+     procedural tool. Read `eidoverse/bestiary/README.md` before casting one.
    - SPOM relief — real CARVED depth + a silhouette that follows the relief. `createReliefColumn` for CURVED surfaces (columns/pipes whose flanges overhang the outline); `createParallaxMaterial` for FLAT surfaces (brick / stone / tile / tread / panel). The height field is `fetch_texture`'s **`displacement`** map. The single most under-used surface showpiece; deep docs below.
    - The world-space sky system (day cycles, storms, cloud shadows) or the `nuclear_explosion` blast.
    - A `VRMCharacterController` walk with terrain (stairs, ramps) — real

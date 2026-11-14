@@ -1,0 +1,90 @@
+{
+ "_about": "THE MATERIAL SETS OF THE SISTERS' TENTACLES: one mesh, UV and bake for both sisters; a variant swaps maps on the rig glb's three materials (out/aletheia_sister_tentacles_rig_idle.glb embeds ALETHEIA's red 1). Paths from work/bestiary/human/aletheia/tentacles/. glTF packing: albedo sRGB; ORM = occlusion R, roughness G, metallic B; normal = tangent space, the same file for both sisters. Written by scripts/s26_aporia_hard_maps.py.",
+ "materials": {
+  "aletheia_tentacle_red_paint_over_metal": {
+   "aletheia": {
+    "albedo": "priv/out/sister_maps/T_sister_tentacle_albedo_studio_crimson.png",
+    "orm": "priv/out/sister_maps/T_sister_tentacle_orm.png",
+    "normal": "priv/out/sister_maps/T_sister_tentacle_normal.png"
+   },
+   "aporia": {
+    "albedo": "priv/out/sister_maps/T_sister_tentacle_albedo_aporia.png",
+    "orm": "priv/out/sister_maps/T_sister_tentacle_orm_aporia.png",
+    "normal": "priv/out/sister_maps/T_sister_tentacle_normal.png"
+   },
+   "masks": "priv/out/sister_maps/T_sister_tentacle_masks.png"
+  },
+  "aletheia_tentacle_plug": {
+   "aletheia": {
+    "albedo": "priv/out/sister_plug/T_plug_albedo.png",
+    "orm": "priv/out/sister_plug/T_plug_orm.png",
+    "normal": "priv/out/sister_plug/T_plug_normal.png"
+   },
+   "aporia": {
+    "albedo": "priv/out/sister_plug/T_plug_albedo_aporia.png",
+    "orm": "priv/out/sister_plug/T_plug_orm_aporia.png",
+    "normal": "priv/out/sister_plug/T_plug_normal.png"
+   }
+  },
+  "aletheia_tentacle_gripper_steel_and_rubber": {
+   "aletheia": {
+    "albedo": "priv/out/sister_gripper/T_gripper_albedo.png",
+    "orm": "priv/out/sister_gripper/T_gripper_orm.png",
+    "normal": "priv/out/sister_gripper/T_gripper_normal.png"
+   },
+   "aporia": {
+    "albedo": "priv/out/sister_gripper/T_gripper_albedo_aporia.png",
+    "orm": "priv/out/sister_gripper/T_gripper_orm_aporia.png",
+    "normal": "priv/out/sister_gripper/T_gripper_normal.png"
+   }
+  }
+ },
+ "aporia_hard_maps": {
+  "plug": {
+   "albedo": "priv/out/sister_plug/T_plug_albedo_aporia.png",
+   "orm": "priv/out/sister_plug/T_plug_orm_aporia.png",
+   "sha1": {
+    "albedo": "93f9b5949682",
+    "orm": "12877dd53e26"
+   },
+   "read_back_max_linear_albedo_difference": 0.00158,
+   "read_back_max_orm_difference": 0.00157,
+   "metal_texels": 254660,
+   "metal_linear_p10_p50_p90": [
+    0.0508,
+    0.0553,
+    0.1332
+   ],
+   "metal_warmth_median_signed": -0.081,
+   "metal_rough_p10_p50_p90": [
+    0.28,
+    0.38,
+    0.421
+   ],
+   "rubber_texels_unchanged": 7484
+  },
+  "gripper": {
+   "albedo": "priv/out/sister_gripper/T_gripper_albedo_aporia.png",
+   "orm": "priv/out/sister_gripper/T_gripper_orm_aporia.png",
+   "sha1": {
+    "albedo": "2f450d0f5b26",
+    "orm": "37d3ca04caaa"
+   },
+   "read_back_max_linear_albedo_difference": 0.00136,
+   "read_back_max_orm_difference": 0.00157,
+   "metal_texels": 171372,
+   "metal_linear_p10_p50_p90": [
+    0.0882,
+    0.1332,
+    0.1343
+   ],
+   "metal_warmth_median_signed": -0.081,
+   "metal_rough_p10_p50_p90": [
+    0.376,
+    0.38,
+    0.535
+   ],
+   "rubber_texels_unchanged": 90772
+  }
+ }
+}
