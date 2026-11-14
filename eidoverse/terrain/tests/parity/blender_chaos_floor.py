@@ -73,20 +73,6 @@ def channels(f, cell):
     return np.asarray(f['A'], np.float64) > max(1e6, 400 * cell * cell)
 
 
-def reference_for(recipe):
-    """(reference name or None, size or None, params or None, source_chain) as the judge's run.py and
-    blender_job.recipe_item set them for the recipe."""
-    from judge import refs
-    if recipe == 'real_place':
-        from eidoblend.terrain import recipes as RG
-        name = RG.get('real_place').resolve(None)[0]['dem']
-        return name, refs.load(name).extent, {'dem': name}, False
-    names = refs.RECIPE_REFERENCES.get(recipe) or []
-    if not names:
-        return None, None, None, True
-    return names[0], refs.load(names[0]).extent, None, True
-
-
 # -------------------------------------------------------------------------------------------- one run (Blender) ---
 
 def _log_lines(path):
@@ -136,7 +122,7 @@ def run_one(a):
     fh, th = B.blender_code_hashes()
     if manifest is None or (fh, th) != (manifest['key']['field_hash'], manifest['key']['terrain_hash']):
         sys.exit(f'[floor] the Blender code at {root} is not the code {a.root} is keyed by: start the driver again')
-    ref_name, size, params, source_chain = reference_for(a.recipe)
+    ref_name, size, params, source_chain = B.reference_for(a.recipe)
     tag = 'base' if a.pattern == 0 else f'p{a.pattern}'
     pdir = os.path.join(a.dir, tag)
     os.makedirs(pdir, exist_ok=True)

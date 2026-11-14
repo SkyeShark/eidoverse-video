@@ -233,6 +233,20 @@ LAKES_AS_SURFACE = ('judged with the lakes as their flat surfaces and no lake ma
                     "basin read's \"holds water\" rule is off for this verdict; the surface measured is the same")
 
 
+def reference_for(recipe):
+    """(reference name or None, size or None, params or None, source_chain) as the judge's run.py and
+    blender_job.recipe_item set them for the recipe."""
+    from judge import refs
+    if recipe == 'real_place':
+        from eidoblend.terrain import recipes as RG
+        name = RG.get('real_place').resolve(None)[0]['dem']
+        return name, refs.load(name).extent, {'dem': name}, False
+    names = refs.RECIPE_REFERENCES.get(recipe) or []
+    if not names:
+        return None, None, None, True
+    return names[0], refs.load(names[0]).extent, None, True
+
+
 def judge_dict(result, reference, label=None, source_chain=True):
     """The Blender judge's verdict (judge.judging.judge, as it is) of `result` (a Terrain, a Terrain.save path, a
     dict or an (h, cell) pair) as a dict, with every number. One judge for both editions (plan 6.3).
