@@ -134,12 +134,14 @@ if (import.meta.main ?? process.argv[1]?.endsWith('fxc_fold_check.mjs')) {
     const args = process.argv.slice(2), ti = args.indexOf('--target'), target = ti >= 0 ? args[ti + 1] : 'ps_5_0';
     if (args.includes('--selftest')) {
         const r = check(REPRO, { target: 'ps_5_0' }); report('selftest (fold repro)', r);
-        if (!r.diff.length) { console.log('SELFTEST FAILED: this FXC does not fold the repro, so a PASS on the sky would prove nothing'); process.exit(1); }
+        if ((r.dump.round_ni ?? 0) !== 0 || r.reference.round_ni !== 1) { console.log('SELFTEST FAILED: expected round_ni 0 (folded) vs 1 (reference); a PASS on the sky would prove nothing'); process.exit(1); }
         console.log('selftest ok: this FXC folds the repro and the checker sees it'); process.exit(0);
     }
     const file = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--target');
     if (!file) { console.log('usage: fxc_fold_check.mjs <dump.txt> [--target ps_5_0] | --selftest   (see the header)'); process.exit(2); }
-    const r = check(compilerInput(fs.readFileSync(file, 'utf8')), { target }); report(file, r);
+    const hlsl = compilerInput(fs.readFileSync(file, 'utf8'));
+    if (!hlsl.includes('kPass')) { console.log(`${file}: no kPass loop, so this is not the sky march; nothing checked`); process.exit(2); }
+    const r = check(hlsl, { target }); report(file, r);
     console.log(r.diff.length ? `FAIL: FXC folded something the [fastopt] reference keeps (${r.diff.join(', ')})` : 'PASS: same arithmetic as the [fastopt] reference');
     process.exit(r.diff.length ? 1 : 0);
 }
