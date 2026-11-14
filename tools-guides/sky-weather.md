@@ -141,6 +141,12 @@ reprojection; it belongs around the low-level sky domes. The world facade
 keeps its internals private. Use its supported performance settings rather
 than extracting and reparenting internal domes from a production scene.
 
+On Windows, Chrome's WebGL2 path compiles the sky with FXC, which miscompiles
+some loop-carried variables in the nested cloud march; `fbmOf` carries a
+workaround. After changing the march, run
+`node eidoverse/fxc_fold_check.mjs --selftest` and then the check on a dump of
+the sky's translated shader (how to get one is in the file's header).
+
 The asteroid module also contains `bakeAsteroidMoon` for regenerating its
 specific prepared assets. Normal videos load the bundled result; keep asset
 regeneration work separate from playback. Check [development.md](development.md)

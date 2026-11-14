@@ -318,9 +318,10 @@
         const m0 = vec3(0.0, 0.8, 0.6), m1 = vec3(-0.8, 0.36, -0.48), m2 = vec3(-0.6, -0.48, 0.64);
         const applyM = (p) => vec3(dot(p, m0), dot(p, m1), dot(p, m2));
         // The trailing pp.assign is for Direct3D's shader compiler (FXC, Chrome's
-        // WebGL2 path on Windows): in the nested march loops it treats a variable's
-        // last assignment as an integer and drops floor() and the Hermite from
-        // whatever reads it. After the trailing assign, no octave reads the last one.
+        // WebGL2 path on Windows). A variable declared outside two nested real loops,
+        // starting at an integer and assigned in the inner one, has its last assignment
+        // treated as an integer: floor() and the Hermite vanish from whatever reads it.
+        // After the dead store, no octave reads the last one. Check: fxc_fold_check.mjs.
         const fbmOf = (noise) => (p) => {
             const pp = p.toVar();
             const f = noise(pp).mul(0.5).toVar();
