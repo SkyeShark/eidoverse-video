@@ -33,7 +33,7 @@ on shipped commercial games for calibration: numbers only, no game data is in th
 | Coat | a shaggy fur coat for the octopus | `Bestiary.create({ species: 'octopus', coat: { path } })` |
 | Remixes | 48 pre-resolved random remixes of the octopus | `Bestiary.random(seed)` |
 | Old calls | `makeCreature` options mapped onto the realistic bases where a base exists | `Bestiary.fromMakeCreature(opts)`, `Bestiary.keyReport(opts)` |
-| Aletheia and Aporia | WIP pieces (head, jumpsuits, hardware, boots, tentacles, eye displays, hair) as plain glb files | the engine's `GLTFLoader` (not wired into `create()` yet) |
+| Aletheia and Aporia | WIP pieces (head with a working mouth, jumpsuits, hardware and belt, boots, hard-surface arms, tentacles, eye displays, hair) as plain glb files | the engine's `GLTFLoader` (not wired into `create()` yet) |
 
 **What does not work yet:**
 
@@ -193,7 +193,21 @@ sockets they plug into).
 | `human/aletheia/tentacles/out/aletheia_sister_tentacles_material_sets.json` + `tentacles/priv/out/sister_{maps,plug,gripper}/*.png` (which maps make Aporia's variant) | - | 16 PNG (512-2048) | 7.8 | delivered |
 | `human/aletheia/eye_displays_v3/glb/on_head_low/eye_display_style_<1-8>_*.glb` (eight spiral display styles, seated on the head) | 1,816-12,884 | - | 0.3-2.9 | delivered |
 | `human/aletheia/eye_displays_v3/runtime/sister_eyes_v3.js` (the displays' states, blink, gaze and glow) | - | - | 0.1 | delivered |
-| `human/hair_craft/rebuild/style/out/coat_her_straight_shoulder_bangs_f2j.glb` (straight, shoulder length, a fringe; its crown is being rebuilt) | 12,718 | 3 (max 2048) | 3.8 | WIP |
+| `human/hair_craft/rebuild/style/out/coat_her_straight_shoulder_bangs_f2j.glb` (straight, shoulder length, a fringe; superseded by f2o below) | 12,718 | 3 (max 2048) | 3.8 | WIP |
+
+Newer pieces (second drop). Where two versions of a piece are listed, the later one is current; the earlier one stays
+for scenes that already load it.
+
+| File | Triangles | Textures | MB | Status |
+|---|---:|---|---:|---|
+| `human/aletheia/head_low/out/aletheia_head_low_v16.glb` (head v15 with a working mouth: a jaw joint, inner lips, teeth, gums, tongue, speech visemes as morph targets; 13 joints) | 11,852 | 4 (max 2048) | 8.2 | delivered |
+| `human/hair_craft/rebuild/style/out/coat_her_straight_shoulder_bangs_f2o.glb` (the fringe above the brows, a wider face window, one smooth crown, blunt ends turned under; 529 cards, a level-of-detail ladder in its `extras`; its motion is being built) | 11,916 | 3 (max 2048) | 3.6 | WIP |
+| `human/aletheia/arm_low/fix_r3/out/glb/aletheia_arm_L_hard_surface_lod0_11889_tris.glb` / `aporia_arm_L_...` (hard-surface forearm and hand, the left arm: 67 rigid parts on 19 joints, each joint's axis and stops in its `extras`; mirror it for the right) | 11,889 each | 3 each (2048) | 5.1 / 5.3 | delivered |
+| `human/aletheia/suit_hardware/out/aletheia_jumpsuit_hardware_v2.glb` (hardware v1's parts with the belt as geometry: a webbing strap, one buckle at the front centre over the zip, keepers) | 4,375 | 6 (max 1024) | 1.7 | delivered |
+| `human/aletheia/suit_hardware/out/aporia_jumpsuit_hardware_v2.glb` (Aporia's belt) | 1,204 | 3 (max 1024) | 0.5 | delivered |
+| `human/aletheia/suit_hardware/out/maps_v6g_belt_patched/suit_{basecolor,normal,orm}[_aporia].png` (the jumpsuit's maps with the painted belt also painted out: wear the jumpsuit with this set when hardware v2 is worn) | - | 6 PNG (2048) | 20.6 | delivered |
+| `human/aletheia/suit_low/out/aletheia_jumpsuit_low_v5_tucked.glb` / `aporia_jumpsuit_low_v5_tucked.glb` (v4 with the zip's open V cut out between its two rows; outside the cut it is v4) | 9,314 each | 3 each (max 2048) | 10.9 / 10.9 | delivered |
+| `human/aletheia/suit_low/out/aletheia_neck_v2_under_the_open_zip.glb` (the neck piece between head and jumpsuit, seen through the open zip; vertex colours; identity matrix in the figure's frame) | 828 | - | 0.03 | delivered |
 
 Every glb carries notes in its `extras` (frames, sockets, units). Where a file's `extras` describe its texture set
 (a `uv_set` size of 4096), they describe the master; the shipped file's maps are 2048.
