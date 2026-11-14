@@ -44,6 +44,8 @@ DEFAULT_SAVES = [
     ('lauterbrunnen_film', 'blender/tests/terrain/out/surface_data/snap/lauterbrunnen'),
     ('fluvial_range_film', 'blender/tests/terrain/out/surface_data/snap/fluvial_range'),
     ('real_place_film_nofocus', 'blender/tests/terrain/out/surfacing_judge/terrains/real_place'),
+    ('sea_cliffs_film', 'blender/tests/terrain/out/surfacing_judge/terrains/sea_cliffs'),      # a sea
+    ('caldera_film', 'blender/tests/terrain/out/surfacing_judge/terrains/caldera'),            # a crater lake
 ]
 
 

@@ -5,16 +5,21 @@ are cleared besides), every run with its dispatch log, readbacks and step snapsh
 its stage dumps (blender_stage_dump.py) and its Terrain.save. The hooks are design_probes/blender_floor_patterns.py's
 (tests/parity/_hooks.py); nothing in the Blender branch changes.
 
-    <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py [--recipes a,b] [--seeds 1,2]
-        [--patterns 0-5] [--dump-seeds 1,2] [--quality draft] [--timeout-min 60]
-                     the driver: each missing run as a Blender job through the Blender edition's run_blender.sh,
-                     after $EIDO_GPU_WRAP when it is set (blender/tests/_where.blender_cmd), one at a time; a run
-                     already done is skipped, so it resumes where it stopped
+    bash eidoverse/terrain/tests/parity/floor_runs.sh [--recipes a,b] [--seeds 1,2] [--patterns 0-5]
+        [--dump-seeds 1,2] [--quality draft] [--retry-failed]
+                     the runs, one Blender job after another through the Blender edition's run_blender.sh, after
+                     $EIDO_GPU_WRAP when it is set; a run already done is skipped, so it resumes where it stopped.
+                     The jobs are started by that shell, not by Python: a GPU queue may refuse a job whose
+                     launching shell it cannot see
+    <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py --next [the same options]
+                     the next run that is not done (floor_runs.sh asks; exit code 3 when none is left)
+    <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py --status [the same options]
+                     which runs are done, failed and missing
     <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py --summarise
                      floor.json from every run in: the tolerances (5.3), the classes (5.4 item 6)
     bash run_blender.sh eidoverse/terrain/tests/parity/blender_chaos_floor.py -- --run --recipe R --seed S
         --pattern P --dir <dir> --root <root> [--dump] [--quality draft]
-                     one run (the driver starts these)
+                     one run (floor_runs.sh starts these)
 
 The Blender edition is found as _blender.py finds it ($EIDO_BLENDER_EDITION, or blender/ in this checkout).
 Outputs, under $EIDO_PARITY_OUT or eidoverse/terrain/tests/out/parity/, keyed by the Blender commit and code hash
@@ -25,7 +30,8 @@ Outputs, under $EIDO_PARITY_OUT or eidoverse/terrain/tests/out/parity/, keyed by
     <recipe>_s<seed>_<quality>/base/    run.json, done.json, dispatch_log.jsonl.gz, readbacks.jsonl.gz,
                                         kernels.json, snap/ (d<dispatch>.npz, index.json), terrain.npz + .json (the
                                         Terrain.save of every level), verdict.json (the judge's numbers and verdict
-                                        on the main level, when the recipe has a reference), stages/ (with --dump)
+                                        on the main level, when the recipe has a reference), stages/ (with --dump),
+                                        plans/ (every plan call: plans.json, calls.pkl, r<k>.npz; _hooks.py)
     <recipe>_s<seed>_<quality>/p<k>/    run.json, done.json, sample.json (against the base: every level's RMS and
                                         p99 |dh| over relief and channel overlap, the judge's numbers, the kernel
                                         sequence and uniforms, the step snapshots' differences), the run's own logs
@@ -42,7 +48,6 @@ from __future__ import annotations
 import gzip
 import json
 import os
-import subprocess
 import sys
 import time
 
@@ -143,7 +148,8 @@ def run_one(a):
             else H.SnapStore(None, base_dir=os.path.join(base_dir, 'snap')))
     dumper = StageDumper(os.path.join(pdir, 'stages')) if (a.dump and a.pattern == 0) else None
     print(f'[floor] {a.recipe} seed {a.seed} {tag}: reference {ref_name}, size {size}', flush=True)
-    h.start(pattern=None if a.pattern == 0 else a.pattern, log_dir=pdir, snap=snap, dumper=dumper)
+    plans = H.PlanRecorder(os.path.join(pdir, 'plans')) if a.pattern == 0 else None
+    h.start(pattern=None if a.pattern == 0 else a.pattern, log_dir=pdir, snap=snap, dumper=dumper, plans=plans)
     t0 = time.perf_counter()
     try:
         t = A.generate(a.recipe, size=size, seed=a.seed, params=params, quality=a.quality, cache=False,
@@ -161,8 +167,7 @@ def run_one(a):
     verdict = None
     tj = time.perf_counter()
     if ref_name:
-        from judge import judge
-        verdict = judge(t, ref_name, label=f'{a.recipe}_seed{a.seed}', source_chain=source_chain).to_dict()
+        verdict = B.judge_dict(t, ref_name, label=f'{a.recipe}_seed{a.seed}', source_chain=source_chain)
     judge_s = time.perf_counter() - tj
     run = dict(recipe=a.recipe, seed=a.seed, pattern=a.pattern, quality=a.quality, size=size, params=params,
                reference=ref_name, source_chain=source_chain, seconds=round(secs, 2), judge_seconds=round(judge_s, 2),
@@ -217,81 +222,124 @@ def run_one(a):
 
 # ------------------------------------------------------------------------------------------------ the driver ---
 
-def _kill_tree(p):
-    if os.name == 'nt':
-        subprocess.call(['taskkill', '/T', '/F', '/PID', str(p.pid)], stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL, creationflags=B.NO_WINDOW)
-    else:
-        p.kill()
+# The order the recipes are run in: what the port's packages need first comes first (plan 8.3, 8.4: the hydrology
+# and fluvial packages' recipes, then detail's, wind and sand, volcanoes and craters, layered rock, karst and coast,
+# glacial). Every recipe of the registry is in it; a recipe added to the registry later runs last.
+RECIPE_ORDER = ('rolling_hills', 'tower_karst', 'fluvial_range', 'meadow', 'real_place', 'dunes', 'caldera',
+                'cinder_cones', 'impact_crater', 'stratovolcano', 'canyon', 'incised_meanders', 'mesas_buttes',
+                'badlands', 'sea_cliffs', 'alpine_valley')
 
 
-def driver(a):
+def _root_and_manifest():
+    """The output root for the Blender code as it is now (keyed by its commit and code hash), its manifest made."""
     edition = B.bare_terrain_package()
-    import _where                                       # the Blender edition's blender/tests/_where.py
     key = B.source_key(edition)
     root = os.path.join(B.parity_root(), key['folder'])
     os.makedirs(root, exist_ok=True)
     man_path = os.path.join(root, 'manifest.json')
-    man = B.read_json(man_path)
-    if man is None:
-        man = dict(key=key, versions=B.versions(), protocol=PROTOCOL, created=time.strftime('%Y-%m-%d %H:%M:%S'))
-        B.write_json(man_path, man)
-    if key['dirty']:
-        print(f"[floor] note: the Blender terrain code differs from {key['commit'][:7]} in {key['dirty']}: the "
-              f"outputs are keyed by its hashes ({key['folder']})", flush=True)
+    if B.read_json(man_path) is None:
+        B.write_json(man_path, dict(key=key, versions=B.versions(), protocol=PROTOCOL,
+                                    created=time.strftime('%Y-%m-%d %H:%M:%S')))
+    return edition, key, root
+
+
+def _wanted(a):
     from eidoblend.terrain import recipes as RG
-    recipes = [r for r in (a.recipes.split(',') if a.recipes else RG.names()) if r]
+    names = RG.names()
+    recipes = [r for r in a.recipes.split(',') if r] if a.recipes else \
+        [r for r in RECIPE_ORDER if r in names] + [r for r in names if r not in RECIPE_ORDER]
     seeds = [int(s) for s in a.seeds.split(',') if s]
     lo, _, hi = a.patterns.partition('-')
     patterns = list(range(int(lo), int(hi or lo) + 1))
     dump_seeds = {int(s) for s in a.dump_seeds.split(',') if s}
-    me = os.path.abspath(__file__)
-    env = dict(os.environ, EIDO_BLENDER_EDITION=edition, HEAVY_VRAM_GB=os.environ.get('HEAVY_VRAM_GB', '4'),
-               GPU_MEMCAP_GB=os.environ.get('GPU_MEMCAP_GB', '8'), PYTHONDONTWRITEBYTECODE='1')
-    t_all = time.time()
-    for recipe in recipes:
-        for seed in seeds:
+    return recipes, seeds, patterns, dump_seeds
+
+
+def next_run(a):
+    """--next: the next run that is not done, for floor_runs.sh: its folder on the first line, then the words that
+    follow `run_blender.sh` (this script, then its arguments), one per line; exit code 3 when nothing is left. Seeds
+    outermost (every recipe's seed 1 before any seed 2), then the recipes in RECIPE_ORDER, then the base run and its
+    patterns. A run with failed.json is passed over (--clear-failed removes those marks, so the runs are taken
+    again), and so are the perturbed runs of a base that is not done."""
+    _edition, key, root = _root_and_manifest()
+    recipes, seeds, patterns, dump_seeds = _wanted(a)
+    for seed in seeds:
+        for recipe in recipes:
             rdir = os.path.join(root, f'{recipe}_s{seed}_{a.quality}')
+            base_done = os.path.exists(os.path.join(rdir, 'base', 'done.json'))
             for p in patterns:
-                tag = 'base' if p == 0 else f'p{p}'
-                pdir = os.path.join(rdir, tag)
+                pdir = os.path.join(rdir, 'base' if p == 0 else f'p{p}')
                 if os.path.exists(os.path.join(pdir, 'done.json')):
                     continue
-                if p > 0 and not os.path.exists(os.path.join(rdir, 'base', 'done.json')):
-                    print(f'[floor] {recipe} seed {seed} {tag}: no base run: skipped', flush=True)
+                if os.path.exists(os.path.join(pdir, 'failed.json')):
+                    continue
+                if p > 0 and not base_done:
                     continue
                 os.makedirs(pdir, exist_ok=True)
-                args = ['--run', '--recipe', recipe, '--seed', seed, '--pattern', p, '--dir', rdir, '--root', root,
-                        '--quality', a.quality] + (['--dump'] if (p == 0 and seed in dump_seeds) else [])
-                cmd = _where.blender_cmd(me, *args)
-                t0 = time.time()
-                while True:
-                    with open(os.path.join(pdir, 'blender.log'), 'w', encoding='utf-8') as log:
-                        proc = subprocess.Popen(cmd, cwd=edition, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                                stdin=subprocess.DEVNULL, creationflags=B.NO_WINDOW)
-                        try:
-                            rc = proc.wait(timeout=a.timeout_min * 60)
-                        except subprocess.TimeoutExpired:
-                            _kill_tree(proc)
-                            proc.wait()
-                            rc = 124
-                    if rc != 75:
-                        break
-                    print(f'[floor] {recipe} seed {seed} {tag}: every GPU slot busy: waiting 60 s', flush=True)
-                    time.sleep(60)
-                ok = rc == 0 and os.path.exists(os.path.join(pdir, 'done.json'))
-                print(f"[floor] {recipe} seed {seed} {tag}: {'ok' if ok else f'FAILED rc={rc}'} in "
-                      f"{time.time() - t0:.0f} s (total {(time.time() - t_all) / 60:.1f} min)", flush=True)
-                if not ok:
-                    tail = ''
-                    try:
-                        with open(os.path.join(pdir, 'blender.log'), encoding='utf-8', errors='replace') as f:
-                            tail = f.read()[-3000:]
-                    except OSError:
-                        pass
-                    B.write_json(os.path.join(pdir, 'failed.json'), dict(rc=rc, log_tail=tail))
-                    if p == 0:
-                        break                           # no base: its perturbed runs cannot be compared
+                words = [os.path.abspath(__file__), '--run', '--recipe', recipe, '--seed', seed, '--pattern', p,
+                         '--dir', rdir, '--root', root, '--quality', a.quality]
+                if p == 0 and seed in dump_seeds:
+                    words.append('--dump')
+                print('\n'.join(str(w).replace('\\', '/') for w in [pdir] + words), flush=True)
+                return
+    sys.exit(3)
+
+
+def clear_failed(a):
+    """--clear-failed: remove the failed.json of every wanted run, so --next takes them again (floor_runs.sh
+    --retry-failed)."""
+    _edition, key, root = _root_and_manifest()
+    recipes, seeds, patterns, _dump = _wanted(a)
+    n = 0
+    for seed in seeds:
+        for recipe in recipes:
+            for p in patterns:
+                f = os.path.join(root, f'{recipe}_s{seed}_{a.quality}', 'base' if p == 0 else f'p{p}', 'failed.json')
+                if os.path.exists(f):
+                    os.remove(f)
+                    n += 1
+    print(f'[floor] {n} failed run(s) will be taken again', flush=True)
+
+
+def mark_failed(a):
+    """--mark-failed <run folder> --rc N: failed.json with the exit code and the log's tail (floor_runs.sh, after a
+    run that left no done.json), so --next passes it over."""
+    tail = ''
+    try:
+        with open(os.path.join(a.mark_failed, 'blender.log'), encoding='utf-8', errors='replace') as f:
+            tail = f.read()[-3000:]
+    except OSError:
+        pass
+    B.write_json(os.path.join(a.mark_failed, 'failed.json'),
+                 dict(rc=a.rc, log_tail=tail, date=time.strftime('%Y-%m-%d %H:%M:%S')))
+
+
+def status(a):
+    """--status: one line per recipe and seed (which runs are done, failed or missing) and the totals."""
+    _edition, key, root = _root_and_manifest()
+    recipes, seeds, patterns, _dump = _wanted(a)
+    done = failed = missing = 0
+    secs = 0.0
+    for seed in seeds:
+        for recipe in recipes:
+            rdir = os.path.join(root, f'{recipe}_s{seed}_{a.quality}')
+            marks = []
+            for p in patterns:
+                pdir = os.path.join(rdir, 'base' if p == 0 else f'p{p}')
+                d = B.read_json(os.path.join(pdir, 'done.json'))
+                if d is not None:
+                    marks.append('ok')
+                    done += 1
+                    secs += float(d.get('seconds', 0.0))
+                elif os.path.exists(os.path.join(pdir, 'failed.json')):
+                    marks.append('FAILED')
+                    failed += 1
+                else:
+                    marks.append('-')
+                    missing += 1
+            print(f'{recipe:18s} seed {seed}: ' + ' '.join(marks), flush=True)
+    print(f"[floor] {root}: {done} done ({secs / 60:.1f} min of generation), {failed} failed, {missing} to run",
+          flush=True)
 
 
 # ----------------------------------------------------------------------------------------------- the summary ---
@@ -414,14 +462,27 @@ def main():
     ap.add_argument('--root')
     ap.add_argument('--key', default='')
     ap.add_argument('--quality', default='draft')
-    ap.add_argument('--timeout-min', type=float, default=60.0)
+    ap.add_argument('--next', action='store_true')
+    ap.add_argument('--clear-failed', action='store_true')
+    ap.add_argument('--mark-failed', default='')
+    ap.add_argument('--rc', type=int, default=1)
+    ap.add_argument('--status', action='store_true')
     a = ap.parse_args(B.script_args())
     if a.run:
         run_one(a)
     elif a.summarise:
         summarise(a)
+    elif a.mark_failed:
+        mark_failed(a)
+    elif a.clear_failed:
+        clear_failed(a)
+    elif a.next:
+        next_run(a)
+    elif a.status:
+        status(a)
     else:
-        driver(a)
+        ap.error('give --next, --status, --summarise, --clear-failed, --mark-failed or --run (floor_runs.sh starts the '
+                 'runs)')
 
 
 if __name__ == '__main__':

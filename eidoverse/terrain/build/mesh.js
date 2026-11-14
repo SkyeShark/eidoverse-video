@@ -541,7 +541,6 @@ export async function buildRings(R, levels, heights, opts = {}) {
             r.I = r.Z = null;
             r.Z = r.Zf;
             delete r.Zf;
-            delete r.tab;
         }
         const groups = rings.map((r) => ({ start: 3 * r.triBase, count: 3 * r.triangles,
             materialIndex: ringMaterial(roles[r.spec.level]) }));
@@ -737,6 +736,80 @@ export class RingMesh {
         }
         const l = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         return [n[0] / l, n[1] / l, n[2] / l];
+    }
+
+    /** The triangles of lattice cell (i, j) of ring k (the quad between lines i, i + 1 and j, j + 1), as numbers of
+     * the index buffer written into `out`; returns how many. A plain cell has its two halves, (a, b, c) and
+     * (a, c, d); a cell along the ring's hole has one half and the seam fan that replaces the other; a cell inside
+     * the hole has none (the child ring draws it). The same arithmetic as kernels/mesh/ring_quads.wgsl and
+     * ring_fans.wgsl place them with: what a ray caster needs to test a cell (build/collider.js). */
+    cellTriangles(k, i, j, out) {
+        const r = this.rings[k];
+        const tab = r.tab, nx = r.nx, ny = r.ny;
+        let alo = 0, ahi = 0, clo = 0, chi = 0, fan = -1;
+        if (r.holeLines) {
+            const [jb, jt, il, ir] = r.holeLines;
+            if (j >= jb && j < jt) {
+                alo = il - 1; ahi = ir; clo = il; chi = ir + 1;
+                if (i === il - 1) fan = 2 * (ir - il) + 2 * (j - jb);             // the fan to the left of the hole
+                else if (i === ir) fan = 2 * (ir - il) + 2 * (j - jb) + 1;        // to its right
+            } else if (j === jt) {
+                alo = il; ahi = ir;
+                if (i >= il && i < ir) fan = 2 * (i - il) + 1;                    // above it
+            } else if (j === jb - 1) {
+                clo = il; chi = ir;
+                if (i >= il && i < ir) fan = 2 * (i - il);                        // below it
+            }
+        }
+        let n = 0;
+        if (i < alo || i >= ahi) out[n++] = r.triBase + tab[6 * ny + 5 * nx + j] + (i >= ahi ? i - (ahi - alo) : i);
+        if (i < clo || i >= chi) out[n++] = r.triBase + r.nAbc + tab[7 * ny + 5 * nx - 1 + j] + (i >= chi ? i - (chi - clo) : i);
+        if (fan >= 0) {
+            const base = r.triBase + r.nAbc + r.nAcd;
+            for (let t = r.fans[fan]; t < r.fans[fan + 1]; t++) out[n++] = base + t;
+        }
+        return n;
+    }
+
+    /** heightAt for many points, on the GPU (kernels/mesh/height_at.wgsl: the same rule, float32): `pts` is a list
+     * field of 2 numbers a point, Blender (x, y); returns a float list field of `count` heights, which the caller
+     * releases. What samples the rendered ground under tens of thousands of points (the water's depth). The rings'
+     * heights, lines and layout are uploaded on the first call and kept until dispose(). */
+    heightField(R, pts, count) {
+        if (!this._gpu || this._gpu.R !== R) {
+            this.dispose();
+            const P = prims(R);
+            let nz = 0, nl = 0;
+            const table = new Int32Array(8 * this.rings.length);
+            this.rings.forEach((r, k) => {
+                table.set([r.nx, r.ny, nz, nl, ...(r.holeLines ?? [-1, -1, -1, -1])], 8 * k);
+                nz += r.nx * r.ny;
+                nl += r.nx + r.ny;
+            });
+            const zs = new Float32Array(nz), lines = new Float32Array(nl);
+            let oz = 0, ol = 0;
+            for (const r of this.rings) {                 // whole grids and lines copied, one after another
+                zs.set(r.Z, oz);
+                lines.set(r.xm, ol);
+                lines.set(r.ym, ol + r.nx);
+                oz += r.nx * r.ny;
+                ol += r.nx + r.ny;
+            }
+            this._gpu = { R, zs: P.list(nz, 'f32', zs), lines: P.list(nl, 'f32', lines), ring: P.list(table.length, 'i32', table) };
+        }
+        const g = this._gpu;
+        const out = prims(R).list(count, 'f32');
+        R.run('mesh/height_at', { pts, zs: g.zs, lines: g.lines, ring: g.ring }, { outH: out },
+            { uCount: count, uRings: this.rings.length }, lineGroups(count));
+        return out;
+    }
+
+    /** Release what heightField() keeps on the GPU. */
+    dispose() {
+        if (this._gpu) {
+            for (const f of [this._gpu.zs, this._gpu.lines, this._gpu.ring]) if (!f.destroyed) f.destroy();
+            this._gpu = null;
+        }
     }
 
     /** The lattice point (i, j) of ring k as [x, y, z] (Blender axes, the float32 values). */

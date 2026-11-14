@@ -6,6 +6,8 @@
 //     W.out('masks')                                      // tests/out/masks/ (git-ignored; made on first use)
 //     W.parityOut()                                       // the parity fixtures and dumps (5.1): $EIDO_PARITY_OUT,
 //                                                         // else tests/out/parity/
+//     W.fixtures('kernels')                               // a fixture folder of tests/parity/fixtures.py, or null
+//     W.floorRun('dunes', 1, 'base')                      // a finished run of the floor (5.4), or null
 //     W.blenderEdition()                                  // the Blender edition's root, or null (see below)
 //     W.blenderPython()                                   // Blender's bundled Python (C6), or null
 //     W.blenderCmd(script, ...args)                       // argv: headless Blender through run_blender.sh, after
@@ -108,6 +110,49 @@ export function parityOut() {
         return p;
     }
     return out('parity');
+}
+
+/** The folders of parityOut() that hold the Blender edition's fixtures and runs, one per Blender commit and code hash
+ * (blender_<commit>_<hash>, plan 5.1), newest first by their manifest's time. */
+export function parityKeys() {
+    const root = parityOut(), found = [];
+    for (const e of Deno.readDirSync(root)) {
+        if (!e.isDirectory || !e.name.startsWith('blender_')) continue;
+        let t = 0;
+        try {
+            t = Deno.statSync(`${root}/${e.name}/manifest.json`).mtime?.getTime() ?? 0;
+        } catch (_e) { /* a folder without a manifest sorts last */ }
+        found.push({ name: e.name, dir: `${root}/${e.name}`, t });
+    }
+    return found.sort((a, b) => b.t - a.t);
+}
+
+/** The folder of the parity outputs for one Blender code state: $EIDO_PARITY_KEY (a folder name of parityOut()),
+ * else the newest. null when there is none. */
+export function parityKeyDir() {
+    const keys = parityKeys(), want = env('EIDO_PARITY_KEY');
+    const k = want ? keys.find((x) => x.name === want) : keys[0];
+    return k ? k.dir : null;
+}
+
+/** A fixture folder made by tests/parity/fixtures.py ('kernels', 'functions/hydro', 'plans', 'twin_probe',
+ * 'np_random', 'core_inputs'), or null after saying how to make it. */
+export function fixtures(kind) {
+    const key = parityKeyDir();
+    const dir = key ? `${key}/fixtures/${kind}` : null;
+    if (dir && exists(`${dir}/manifest.json`)) return dir;
+    const flag = { kernels: '--kernels', twin_probe: '--kernels', plans: '--plans', np_random: '--plans',
+        core_inputs: '--recipes' }[kind] ?? `--functions --only ${kind.split('/').pop()}`;
+    console.log(`[skip] no ${kind} fixtures${key ? ` in ${key}` : ''}: make them with <Blender's python> -I ` +
+        `eidoverse/terrain/tests/parity/fixtures.py ${flag}`);
+    return null;
+}
+
+/** A run of the floor (plan 5.4): <key>/<recipe>_s<seed>_<quality>/<base | p1..p5>, or null when it is not done. */
+export function floorRun(recipe, seed = 1, which = 'base', quality = 'draft') {
+    const key = parityKeyDir();
+    const dir = key ? `${key}/${recipe}_s${seed}_${quality}/${which}` : null;
+    return dir && exists(`${dir}/done.json`) ? dir : null;
 }
 
 // -------------------------------------------------------------------------------------- the main checkout ---

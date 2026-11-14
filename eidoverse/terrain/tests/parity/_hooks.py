@@ -5,7 +5,8 @@ the dispatch log, the readbacks, the step snapshots and the stage dumps of the p
     import _hooks as H
     hooks = H.install()                 # after the Blender package and the GPU are up (G.init(): the self test's
                                         # dispatch is never logged)
-    hooks.start(pattern=None, log_dir=..., snap=H.SnapStore(...), dumper=...)    # then api.generate(...)
+    hooks.start(pattern=None, log_dir=..., snap=H.SnapStore(...), dumper=..., plans=H.PlanRecorder(...))
+                                        # then api.generate(...)
     hooks.stop()
 
 What is wrapped (module attributes, so every caller's lookup finds the wrapper):
@@ -23,6 +24,8 @@ What is wrapped (module attributes, so every caller's lookup finds the wrapper):
   core/gpu.read              every readback: its line in readbacks.jsonl.gz
   solvers/hydro.lakes, solvers/hydro.route_to_convergence, run.where_mask
                              the runner's end stages and a stage's `where` mask: their dumps (run.py's own calls only)
+  every function that draws from numpy's Generator (discover_plan_functions)
+                             the plans: each outermost call's arguments and result (PlanRecorder), in a base run
 
 The dispatch log (5.2): <dir>/dispatch_log.jsonl.gz, one JSON array per dispatch,
     [op, kernel, [[uniform, value or [values]], ...] by name, [[image, height, width, format], ...] by name,
@@ -37,6 +40,10 @@ Step snapshots (5.7): each kernel's bound images after its 1st, 10th, 100th, 1,0
 run (key '<kernel>#<count>'), and on the main level's own cells after its 1st, 10th and 100th dispatch within each
 op call (key 'L<level>_c<call>_<op>_<kernel>#<count>'). The base run keeps the arrays (snap/d<dispatch>.npz and
 snap/index.json); a perturbed run compares its own with the base's at the same key and keeps only the differences.
+A snapshot also holds the dispatch's inputs, each sampler's texture as 'in__<sampler>': the forcing a solver hands
+its kernels in textures (the fluvial run's `par` = U, K, Sc, G and `pin`: the relief controller's factors live there,
+not in uniforms, so the dispatch log alone would not see a wrong K; measured on rolling_hills: five perturbed runs
+moved the main level by 9-16 % of relief and not one uniform by more than 4 float32 steps).
 """
 from __future__ import annotations
 
@@ -149,6 +156,208 @@ class SnapStore:
         return self.diffs
 
 
+# ------------------------------------------------------------------------------------------------ the plans ---
+# Every function of the Blender terrain package that draws from numpy's Generator is a plan (PORT_PLAN.md 2.4,
+# 5.1): found by reading the modules' syntax trees (a function whose body calls default_rng, or calls a function that
+# only returns one, such as solvers/volcanic._rng), never by a list that could miss one. A base run records each
+# outermost call: the function, the op and level it ran in, its arguments (pickled, when they are small: plans over
+# objects, not field evaluations) and its result as JSON and arrays. fixtures.py --plans then makes the same calls
+# again for seeds 1-8 in plain Python.
+
+PLAN_PACKAGES = ('solvers', 'recipes', 'core')
+PLAN_SKIP_MODULES = ('core.twins',)                 # the twins' test inputs draw too; they are not plans
+PLAN_ARGS_MAX_BYTES = 4 << 20                       # larger arguments are whole-level fields: recorded by shape only
+PLAN_CALLS_PER_FUNCTION = 48
+
+
+def _calls_in(node, names):
+    import ast
+    found = set()
+    for c in ast.walk(node):
+        if isinstance(c, ast.Call):
+            nm = c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, 'id', None)
+            if nm in names:
+                found.add(nm)
+    return found
+
+
+def discover_plan_functions(terrain_dir):
+    """[(module 'solvers.karst', qualname 'plan_karst' | 'Column.__init__')] of every module-level function and
+    method that draws from numpy's Generator (see above); ops (op_*) are left out: their calls are the stage dumps."""
+    import ast
+    trees = {}
+    for pkg in PLAN_PACKAGES:
+        d = os.path.join(terrain_dir, pkg)
+        for f in sorted(os.listdir(d)):
+            if f.endswith('.py') and f != '__init__.py' and f'{pkg}.{f[:-3]}' not in PLAN_SKIP_MODULES:
+                with open(os.path.join(d, f), encoding='utf-8') as fh:
+                    trees[f'{pkg}.{f[:-3]}'] = ast.parse(fh.read())
+    funcs = {}
+    for mod, tree in trees.items():
+        out = funcs[mod] = []
+        for n in tree.body:
+            if isinstance(n, ast.FunctionDef):
+                out.append((n.name, n))
+            elif isinstance(n, ast.ClassDef):
+                out += [(f'{n.name}.{m.name}', m) for m in n.body if isinstance(m, ast.FunctionDef)]
+    factories = set()
+    for mod, fl in funcs.items():
+        for q, n in fl:
+            if any(isinstance(s, ast.Return) and isinstance(s.value, ast.Call)
+                   and getattr(s.value.func, 'attr', None) == 'default_rng' for s in n.body):
+                factories.add(q.split('.')[-1])
+    found = []
+    for mod, fl in funcs.items():
+        for q, n in fl:
+            name = q.split('.')[-1]
+            if name in factories or name.startswith('op_'):
+                continue
+            if _calls_in(n, {'default_rng'} | factories):
+                found.append((mod, q))
+    return found
+
+
+def resolve_plan_function(module, qualname):
+    """(function, owner): the function `qualname` of eidoblend.terrain.<module> as the module has it now, and the
+    object it is an attribute of (the module, or its class); (None, None) when it is gone."""
+    import importlib
+    try:
+        owner = importlib.import_module(f'eidoblend.terrain.{module}')
+        parts = qualname.split('.')
+        for p in parts[:-1]:
+            owner = getattr(owner, p)
+        return getattr(owner, parts[-1]), owner
+    except (ImportError, AttributeError):
+        return None, None
+
+
+def _bind(fn, args, kwargs):
+    import inspect
+    try:
+        return inspect.signature(fn).bind_partial(*args, **kwargs)
+    except (TypeError, ValueError):
+        return None
+
+
+def plan_call_args(call, seed=None):
+    """(args, kwargs) of a recorded plan call (its pickled arguments), with `seed` in place of its seed argument."""
+    import pickle
+    args, kwargs = pickle.loads(call['pickle'])
+    if seed is not None and call.get('seed_arg'):
+        fn, _owner = resolve_plan_function(call['module'], call['qualname'])
+        b = _bind(fn, args, kwargs)
+        if b is not None:
+            b.arguments['seed'] = seed
+            return list(b.args), dict(b.kwargs)
+    return list(args), dict(kwargs)
+
+
+def _arg_bytes(v, depth=0):
+    if isinstance(v, np.ndarray):
+        return v.nbytes
+    if depth > 3:
+        return 0
+    if isinstance(v, dict):
+        return sum(_arg_bytes(x, depth + 1) for x in v.values())
+    if isinstance(v, (list, tuple)):
+        return sum(_arg_bytes(x, depth + 1) for x in v)
+    d = getattr(v, '__dict__', None)
+    return sum(_arg_bytes(x, depth + 1) for x in d.values()) if isinstance(d, dict) else 0
+
+
+class PlanRecorder:
+    """The plan calls of one base run: <dir>/calls.pkl (the replayable calls, for fixtures.py --plans),
+    <dir>/plans.json (every call: where it ran, its arguments' JSON form, its result) and r<k>.npz (result arrays)."""
+
+    def __init__(self, dir):
+        self.dir = dir
+        os.makedirs(dir, exist_ok=True)
+        self.depth = 0
+        self.calls, self.records, self.counts = [], [], {}
+
+    def before(self, fn, args, kwargs):
+        """The call's arguments pickled before it runs (it may change them), or None when they are too large or do
+        not pickle."""
+        import pickle
+        if _arg_bytes(args) + _arg_bytes(kwargs) > PLAN_ARGS_MAX_BYTES:
+            return None
+        try:
+            return pickle.dumps((args, kwargs), protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception:                                            # noqa: BLE001 - a context, a device, a closure
+            return None
+
+    def add(self, h, module, qualname, fn, blob, args, kwargs, out):
+        key = f'{module}.{qualname}'
+        n = self.counts[key] = self.counts.get(key, 0) + 1
+        if n > PLAN_CALLS_PER_FUNCTION:
+            return
+        b = _bind(fn, args, kwargs)
+        is_init = qualname.endswith('.__init__')
+        arrays = {}
+        k = len(self.records)
+        try:
+            result = B.jsonable(args[0] if is_init else out, arrays, 'result', 256)
+        except Exception as e:                                       # noqa: BLE001 - recorded
+            result = {'__error__': f'{type(e).__name__}: {e}'}
+        shapes = {}
+        try:
+            arg_json = B.jsonable(dict(b.arguments) if b is not None else dict(args=list(args), kwargs=kwargs),
+                                  shapes, 'args', 256)
+        except Exception as e:                                       # noqa: BLE001 - recorded
+            arg_json = {'__error__': f'{type(e).__name__}: {e}'}
+        rec = dict(index=k, module=module, qualname=qualname, op=h.op, call=h.call if h.op not in OUTSIDE else None,
+                   level=h.level, pass_index=h.pass_, seed_arg=bool(b is not None and 'seed' in b.arguments),
+                   replayable=blob is not None, init=is_init, args=arg_json,
+                   arg_arrays={p: [list(a.shape), str(a.dtype)] for p, a in shapes.items()}, result=result,
+                   result_arrays=None)
+        if arrays:
+            rec['result_arrays'] = f'r{k:04d}.npz'
+            B.save_npz(os.path.join(self.dir, rec['result_arrays']), arrays)
+        self.records.append(rec)
+        if blob is not None:
+            self.calls.append(dict(index=k, module=module, qualname=qualname, op=rec['op'], level=rec['level'],
+                                   seed_arg=rec['seed_arg'], init=is_init, pickle=blob))
+
+    def finish(self):
+        import pickle
+        with open(os.path.join(self.dir, 'calls.pkl'), 'wb') as f:
+            pickle.dump(self.calls, f, protocol=pickle.HIGHEST_PROTOCOL)
+        B.write_json(os.path.join(self.dir, 'plans.json'),
+                     dict(calls=self.records, counts=self.counts, per_function_limit=PLAN_CALLS_PER_FUNCTION,
+                          args_max_bytes=PLAN_ARGS_MAX_BYTES))
+        return dict(recorded=len(self.records), replayable=len(self.calls), functions=len(self.counts))
+
+
+def install_plan_hooks(h):
+    """Wrap every plan function (discover_plan_functions) so a run with a PlanRecorder records its outermost calls."""
+    import eidoblend.terrain as pkg
+    wrapped = []
+    for module, qualname in discover_plan_functions(pkg.__path__[0]):
+        fn, owner = resolve_plan_function(module, qualname)
+        if fn is None or getattr(fn, '_parity_plan', False):
+            continue
+
+        def make(fn=fn, module=module, qualname=qualname):
+            @functools.wraps(fn)
+            def w(*a, **k):
+                rec = h.plans
+                if not h.active or rec is None or rec.depth > 0:
+                    return fn(*a, **k)
+                blob = rec.before(fn, a, k)
+                rec.depth += 1
+                try:
+                    out = fn(*a, **k)
+                finally:
+                    rec.depth -= 1
+                rec.add(h, module, qualname, fn, blob, a, k, out)
+                return out
+            w._parity_plan = True
+            return w
+        setattr(owner, qualname.split('.')[-1], make())
+        wrapped.append(f'{module}.{qualname}')
+    return wrapped
+
+
 def _copy_kernel(G, fmt, cache={}):
     if fmt not in cache:
         cache[fmt] = G.kernel(source='//! sampler src\n//! image dst ' + fmt.lower() + '\nvoid main() {\n'
@@ -191,16 +400,17 @@ class Hooks:
         self.dispatches = self.readbacks = 0
         self.op_nudges = self.in_nudges = 0
         self.log = self.rlog = None
-        self.snap = self.dumper = None
+        self.snap = self.dumper = self.plans = None
         self.run_args, self.main_index = None, None
         self.in_hook = False
         self.names_by_id = {}
         self.op_calls = []                       # [op, level, pass] per op call
 
     # ---------------------------------------------------------------------------------------------- control ---
-    def start(self, pattern=None, log_dir=None, snap=None, dumper=None):
+    def start(self, pattern=None, log_dir=None, snap=None, dumper=None, plans=None):
         self._reset()
         self.pattern = pattern
+        self.plans = plans
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
             self.log = gzip.open(os.path.join(log_dir, 'dispatch_log.jsonl.gz'), 'wb')
@@ -219,13 +429,14 @@ class Hooks:
             B.write_json(os.path.join(log_dir, 'kernels.json'), self.kernels)
         if self.dumper is not None:
             self.dumper.flush()
+        self.plan_summary = self.plans.finish() if self.plans is not None else None
         return self.snap.finish() if self.snap is not None else None
 
     def summary(self):
         return dict(dispatches=self.dispatches, readbacks=self.readbacks, op_calls=self.call + 1,
                     kernels={k: self.counts[k] for k in sorted(self.counts, key=lambda k: -self.counts[k])},
                     op_entry_nudges=self.op_nudges, in_op_nudges=self.in_nudges, memos_cleared=self.memos_cleared,
-                    calls=self.op_calls)
+                    calls=self.op_calls, plans=getattr(self, 'plan_summary', None))
 
     def stage_for(self, params):
         """The recipe Stage whose params dict this is (run.py passes st.params itself), or None."""
@@ -309,6 +520,7 @@ class Hooks:
                 keys.append(f'L{self.level}_c{self.call}_{self.op}_{name}#{cc}')
             if keys:
                 arrays = {n: self._orig_read(t) for n, t in images.items()}
+                arrays.update({'in__' + n: self._orig_read(t) for n, t in samplers.items()})
                 self.snap.take(keys, d, name, arrays, dict(meta, op=self.op))
 
     def on_read(self, tex, a):
@@ -441,5 +653,6 @@ def install():
     RUN.run_levels, MS.compute_stack, RUN.where_mask = _run_levels, _compute_stack, _where
     HY.lakes = _end(HY.lakes, 'lakes')
     HY.route_to_convergence = _end(HY.route_to_convergence, 'route')
+    h.plan_functions = install_plan_hooks(h)
     RUN._parity_hooks = h
     return h

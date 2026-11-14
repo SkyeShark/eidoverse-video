@@ -31,11 +31,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TERRAIN = os.path.normpath(os.path.join(HERE, '..', '..'))              # eidoverse/terrain/
 REPO = os.path.normpath(os.path.join(TERRAIN, '..', '..'))              # this checkout
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0                        # CREATE_NO_WINDOW: no console on the desktop
-# the paths whose code makes the fields and masks (core/cache.CODE_GLOBS and api._code_hash): the outputs' key
+# the paths whose code makes the fields and masks (core/cache.CODE_GLOBS and api._code_hash, and api.py, whose
+# generate() the runs call): the outputs' key. build/ and surface/ make no field, so their commits leave it alone
 TERRAIN_CODE = ('blender/eidoblend/terrain/core', 'blender/eidoblend/terrain/kernels',
                 'blender/eidoblend/terrain/solvers', 'blender/eidoblend/terrain/run.py',
                 'blender/eidoblend/terrain/recipes', 'blender/eidoblend/terrain/masks.py',
-                'blender/eidoblend/terrain/api.py', 'blender/eidoblend/terrain/build/mesh.py')
+                'blender/eidoblend/terrain/api.py')
 
 
 def blender_edition(required=True):
@@ -222,6 +223,40 @@ def read_json(path, default=None):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+# ------------------------------------------------------------------------------------------------ the judge ---
+
+LAKES_AS_SURFACE = ('judged with the lakes as their flat surfaces and no lake mask: judge/match.py cannot bring a lake '
+                    'mask to a reference pixel finer than the generated cell when the reference is a softened radar '
+                    'DSM (its _mask_to upsamples through core/grid.resample_box, which only averages down), so the '
+                    "basin read's \"holds water\" rule is off for this verdict; the surface measured is the same")
+
+
+def judge_dict(result, reference, label=None, source_chain=True):
+    """The Blender judge's verdict (judge.judging.judge, as it is) of `result` (a Terrain, a Terrain.save path, a
+    dict or an (h, cell) pair) as a dict, with every number. One judge for both editions (plan 6.3).
+
+    One case the judge itself cannot take (reported to the lead as a defect of the Blender judge, not fixed there): a
+    terrain with lakes whose cell is coarser than the reference's pixel and finer than its native resolution (a draft
+    tower_karst, 15.6 m cells, against guilin_karst, 30 m radar stored at 8 m) raises in match._mask_to. Then the same
+    surface is judged again with the lake depth added to the height and no lake mask, and the verdict carries
+    'judge_note' saying so: the base run, the perturbed runs and the port are all judged this way, like for like."""
+    import numpy as np
+    from judge import judge
+    from judge.judging import unpack
+    try:
+        return judge(result, reference, label=label, source_chain=source_chain).to_dict()
+    except ValueError as e:
+        h, cell, water, sea = unpack(result)
+        if 'resample_box averages down' not in str(e) or water is None:
+            raise
+    w = np.asarray(water, np.float64)
+    surf = np.asarray(h, np.float64) + np.where(w > 0.01, w, 0.0)          # match.surface's lake rule
+    v = judge(dict(h=surf, cell=cell, sea_level=sea), reference, label=label, source_chain=source_chain).to_dict()
+    v['judge_note'] = LAKES_AS_SURFACE
+    v['notes'] = list(v.get('notes') or []) + [LAKES_AS_SURFACE]
+    return v
 
 
 def script_args():
