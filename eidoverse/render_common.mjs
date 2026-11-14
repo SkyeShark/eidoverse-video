@@ -167,9 +167,13 @@ export async function setupRenderer(width, height) {
     // (multi-million-particle fluids, big grids) can allocate storage buffers
     // bigger than the 128MB spec-default binding cap. Requesting exactly the
     // adapter's reported max is always valid; it just unlocks the headroom the
-    // 4090 already has.
+    // 4090 already has. The terrain generator's kernels (eidoverse/terrain/core/
+    // gpu.js, which runs on this device as GPU_DEVICE) bind up to nine storage
+    // buffers in one stage (the spec default is 8) and keep tiles in workgroup
+    // memory, so those two limits are raised too.
     const requiredLimits = {};
-    for (const k of ['maxStorageBufferBindingSize', 'maxBufferSize', 'maxUniformBufferBindingSize']) {
+    for (const k of ['maxStorageBufferBindingSize', 'maxBufferSize', 'maxUniformBufferBindingSize',
+        'maxStorageBuffersPerShaderStage', 'maxComputeWorkgroupStorageSize']) {
         const v = adapter.limits?.[k];
         if (v != null) requiredLimits[k] = v;
     }

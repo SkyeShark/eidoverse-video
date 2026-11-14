@@ -28,3 +28,6 @@ eidoverse/examples/*.png
 
 # The shared texture/model library: third-party CC0 sets are fetched on first use (fetch_texture.py / fetch_model.py --cache), never committed
 eidoverse/assets/cache/
+
+# The terrain package's test outputs: fixtures from the Blender edition, parity dumps, result JSONs (regenerate with the tests in eidoverse/terrain/tests/)
+eidoverse/terrain/tests/out/
