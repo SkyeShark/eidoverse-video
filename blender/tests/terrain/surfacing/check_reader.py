@@ -151,9 +151,11 @@ def float_render(sc, path, res):
 
 
 def flat_scene(sc):
-    """Emission renders: no world light, the Standard view, no film filter, one sample."""
+    """Emission renders: no world light, a transparent film (alpha marks the ground), the Standard view, no film
+    filter, one sample."""
     sc.world = bpy.data.worlds.new('black')
     sc.world.color = (0.0, 0.0, 0.0)
+    sc.render.film_transparent = True
     vs = sc.view_settings
     vs.view_transform = 'Standard'
     vs.look = 'None'
@@ -211,9 +213,15 @@ def patch_origin(t, sd, i, n_px, grid):
     return i0, j0, tex
 
 
+def map_group(sd):
+    """eido_terrain_map of the data, with `flow` among its packed maps (the M map these checks read)."""
+    packed = {n for grp in sd.packing() for n in grp}
+    return S.terrain_map_group(sd, names=None if 'flow' in packed else sorted(packed | {'flow'}))
+
+
 def parity(sc, t, obj, sd, rec):
     """The parity part (module doc)."""
-    tm = S.terrain_map_group(sd)
+    tm = map_group(sd)
     flat_scene(sc)
     me = obj.data
     out = {}
@@ -289,7 +297,7 @@ def edge_views(t, sd):
 
 
 def edges(sc, t, obj, sd, rec):
-    tm = S.terrain_map_group(sd)
+    tm = map_group(sd)
     flat_scene(sc)
     me = obj.data
     maps = [('flow', 'M', 0.0, 1.0), ('cavity', 'E', 0.0, 1.0), ('normal_x', 'D', -1.0, 1.0)]

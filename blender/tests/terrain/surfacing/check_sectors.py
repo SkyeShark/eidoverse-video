@@ -2,16 +2,24 @@
 walls at their world positions, beside today's Box projection.
 
     bash run_blender.sh blender/tests/terrain/surfacing/check_sectors.py [--case canyon] [--views brink_down,wall_L4]
-        [--grid brink_down,wall_L4] [--slope]
+        [--grid brink_down,wall_L4 | none] [--cells 2] [--plain] [--slope] [--only per_texel | today]
+        [--mesh-res 1024] [--reps 3] [--tag s1]
     (a GPU job: queue it with EIDO_GPU_WRAP on a shared machine, blender/tests/_where.py)
+
+The same runner serves check 8, the stride-1 comparison: --mesh-res 1024 draws the rings at stride 1 (four times the
+vertices; with --only per_texel the masks stay off them), --reps 3 takes each view's best of three frames, and the
+record holds the vertices and the seconds the terrain and its object took.
 
 Views: the judge's brink_down (the canyon's right-hand wall, diagonal to the axes) and wall_L4, a camera framing
 about 250 m of the steepest wall on the 0.98 m hero level (the 250 m window there with the most ground over 50
 degrees, seen from 300 m along its mean facing); any other name is a judge view of the case (approach_walk and
 low_oblique: far slopes of one material, before and after). Each view under make_sky in today's material and the
 per-texel one with the scans, and the --grid views (default: all) also with a colour grid in place of every box
-layer's scan (8 x 8 cells of distinct colours, dark lines every cell: grid cells must read square, with no streaks
-and no seam where the sector slots meet). --slope: each view once more as an emission of the baked field normal's
+layer's scan (--cells squares a tile side, default 8, each a distinct colour with dark lines and a pale bar along
+its top: grid cells must read square, with no streaks and no seam where the sector slots meet). --plain: both
+materials with one read per frame (no second lattice, no far read, no hex tiling), so the grid shows the Box
+projection beside the sector frames alone; without it the grid shows the de-tiling too (hex tiling cuts it into
+hexagons of a third of a tile). --slope: each view once more as an emission of the baked field normal's
 slope (white at 90 degrees), what the layer weights read per texel. Writes
 out/surfacing/material/sectors/<case>_<view>_<today|per_texel>_<grid|scan>.png, <case>_<view>_slope.png and
 sectors_<case>.json (the cameras and frame seconds).
@@ -20,6 +28,7 @@ import json
 import math
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,8 +46,12 @@ def args():
     def opt(k, d=None):
         return a[a.index(k) + 1] if k in a else d
     views = opt('--views', 'brink_down,wall_L4').split(',')
-    return dict(case=opt('--case', 'canyon'), views=views, grid=(opt('--grid') or ','.join(views)).split(','),
-                slope='--slope' in a)
+    grid = opt('--grid')
+    return dict(case=opt('--case', 'canyon'), views=views,
+                grid=views if grid is None else [v for v in grid.split(',') if v and v != 'none'],
+                slope='--slope' in a, mesh_res=int(opt('--mesh-res', '0')), only=opt('--only'),
+                tag=opt('--tag', ''), reps=int(opt('--reps', '1')), plain='--plain' in a,
+                cells=int(opt('--cells', '8')))
 
 
 def slope_material(sd):
@@ -61,16 +74,21 @@ def slope_material(sd):
     return mat
 
 
-def grid_images():
-    """(albedo, flat normal) test images: 8 x 8 cells of distinct colours with dark lines, height 0.5 (alpha), sRGB;
-    a flat normal map (0.5, 0.5), roughness 0.8, AO 1."""
+def grid_images(cells=8):
+    """(albedo, flat normal) test images: cells x cells squares of distinct colours with dark lines, each with a
+    pale bar along its top edge (so a turned or mirrored read shows), height 0.5 (alpha), sRGB; a flat normal map
+    (0.5, 0.5), roughness 0.8, AO 1."""
     n = 1024
+    c = max(1, int(cells))
     a = np.zeros((n, n, 4), np.float32)
     rng = np.random.default_rng(5)
-    cols = rng.uniform(0.25, 0.9, (8, 8, 3))
+    cols = rng.uniform(0.25, 0.9, (c, c, 3))
     jj, ii = np.mgrid[0:n, 0:n]
-    a[..., :3] = cols[jj * 8 // n, ii * 8 // n]
-    line = ((ii % (n // 8)) < 6) | ((jj % (n // 8)) < 6)
+    a[..., :3] = cols[jj * c // n, ii * c // n]
+    w = max(3, n // (c * 40))
+    line = ((ii % (n // c)) < w) | ((jj % (n // c)) < w)
+    top = (jj % (n // c)) > (n // c) - 4 * w                # row 0 is the image's bottom: the high rows are the top
+    a[top, :3] = 0.95
     a[line, :3] = 0.08
     a[..., 3] = 0.5
     img = bpy.data.images.new('sector_grid', n, n, alpha=True, float_buffer=False)
@@ -151,9 +169,11 @@ def main():
     a = args()
     os.makedirs(OUT, exist_ok=True)
     sc = MS.scene(samples=16)
-    t, obj = MS.terrain(a['case'])
+    t0 = time.time()
+    t, obj = MS.terrain(a['case'], mesh_res=a['mesh_res'] or None, mask_attributes=a['only'] != 'per_texel')
+    t_obj = time.time() - t0
     sd = MS.surface(t)
-    grid, flat = grid_images()
+    grid, flat = grid_images(a['cells'])
     pairs = {}
     for alb, nrao in box_images(t):
         pairs[alb] = grid
@@ -168,8 +188,16 @@ def main():
         else:
             cams[v] = MS.camera(sc, t, a['case'], v)
             rec[v] = dict(eye=[round(c, 1) for c in cams[v].matrix_world.translation])
+    tag = f"_{a['tag']}" if a['tag'] else ''
+    rec['mesh'] = dict(mesh_res=a['mesh_res'] or 512, vertices=len(obj.data.vertices),
+                       triangles=len(obj.data.polygons), terrain_and_object_s=round(t_obj, 1))
+    # --plain: one read per frame in both materials (no second lattice, no far read, no hex tiling), so the grid
+    # shows the projections alone: the Box projection beside the sector frames
+    plain = {None: dict(anti_tile=False, far_scale=1.0, far_detile=False, macro_mod=0.0), 'data': dict(detile='offset')}
     for label, data in (('today', None), ('per_texel', sd)):
-        mat = MS.apply(t, obj, data)
+        if a['only'] and label != a['only']:
+            continue
+        mat = MS.apply(t, obj, data, options=(plain[None if data is None else 'data'] if a['plain'] else None))
         for v, cam in cams.items():
             sc.camera = cam
             sky = os.path.join(OUT, '_sky')
@@ -180,7 +208,8 @@ def main():
                         continue
                     swap(mat, pairs)
                 MS.frame(sc)
-                secs = MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_{label}_{kind}.png"))
+                path = os.path.join(OUT, f"{a['case']}_{v}_{label}_{kind}{tag}.png")
+                secs = min(MS.frame(sc, path if k == a['reps'] - 1 else None) for k in range(a['reps']))
                 rec[v][f'{label}_{kind}_s'] = round(secs, 2)
                 MS.log(f"[sectors] {v} {label} {kind}: {secs:.2f} s")
             swap_back(mat)                                # the scans again for the next view
@@ -190,8 +219,8 @@ def main():
         obj.data.materials.append(slope_material(sd))
         for v, cam in cams.items():
             sc.camera = cam
-            MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_slope.png"))
-    path = os.path.join(MS.OUT, f"sectors_{a['case']}.json")
+            MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_slope{tag}.png"))
+    path = os.path.join(MS.OUT, f"sectors_{a['case']}{tag}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1)
     MS.log(f'[sectors] done -> {path}')
