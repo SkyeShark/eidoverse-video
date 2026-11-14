@@ -258,10 +258,8 @@
         noiseTex.needsUpdate = true;
         const noiseNode = T3.texture(noiseTex);
 
-        // The noise cells take f = p - floor(p) rather than fract(p). It is the
-        // same value, but inside the pass Loop Direct3D's shader compiler (FXC)
-        // treats a fract() result as if it were 0 or 1 and folds f*f into f,
-        // which flattens the erosion noise; see layerProfile below.
+        // f = p - floor(p) is fract(p); this is the form measured identical on
+        // D3D11/Vulkan/WebGPU. The FXC miscompile it was chasing is fixed in fbmOf.
         const noise2 = (p) => {
             const i = floor(p), f = p.sub(i);
             const sm = f.mul(f).mul(float(3).sub(f.mul(2)));
