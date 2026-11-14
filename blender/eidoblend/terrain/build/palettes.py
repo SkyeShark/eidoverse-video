@@ -10,7 +10,8 @@ palette into the eido_terrain_surface node group, build/dressing.py scatters its
     P.masks_used(pal)                  # {'slope', 'talus', 'convex_20m', ...}: the eido_<mask> attributes it reads
     P.describe('alpine')               # one page: layers, scans, weights, rocks
 
-How the layers are placed (the way a terrain artist places them, from the terrain's own data):
+How the layers are placed (the way a terrain artist places them, from the terrain's own data; the table entries
+below are the 11-13 state, and the looks after them move each threshold by terrain terms instead of world noise):
   - cliffs against flats by slope, the threshold broken by world noise at several scales (fbm) and moved by curvature:
     convex ground (ridges, rims, spurs) bares its rock at a lower slope, hollows hold their cover to a steeper one;
   - talus and scree on the slopes under cliffs (the talus field, rock_toe, and the repose band of slopes, more in
@@ -47,6 +48,9 @@ A palette is a dict:
                      box layers)
         weight       the layer's coverage, 0..1, as a mask expression (below). Coverage composites in order: a layer
                      covers what lies below it, so the base layer is '1' and snow sits on top
+        fallback     a mask expression the material takes in place of `weight` when it has no baked surface data
+                     (SURFACING_DESIGN.md 5.3): a canopy layer whose weight reads the plant layer's canopy_expected
+                     keeps its weight of today here
         strata       True: the albedo is recoloured by the palette's strata column at each point's stratigraphic
                      height (the bands sit on the benches the solver made); a float 0..1 mixes the column's colour
                      with the layer's own (talus: mostly the colour of the beds above it). A palette without a column
@@ -68,6 +72,14 @@ A palette is a dict:
                      relative to the layer's colour) or tint ((r, g, b) multiplier), amount, detail (noise octaves,
                      default 3), lo/hi (the noise's smoothstep edges, default 0.42/0.62), where (a mask expression
                      that limits it)
+        ramp         dict(t, stops[, smooth]): the layer's colour read from a ramp at a terrain term, where one
+                     constant paints the whole layer one tone. t is a mask expression, clamped to 0..1; stops are
+                     [(t, colour), ...] with t rising: a colour is sRGB '#rrggbb' (the layer averages that colour
+                     there; `colour` is the ramp's centre, by default its middle) or (r, g, b), a linear multiplier
+                     (a rock layer coloured by the strata column: weathered against fresh rock). Between stops the
+                     colour runs straight in linear RGB (smooth=True: eased with smoothstep). get() writes the ramp
+                     out as patches placed by t (ramp_patches, marked from_ramp), which is how a material without
+                     baked surface data draws it; ramp_rows gives the same ramps as the rows of a ramp image
         far_contrast the far read's contrast around the scan's mean (default the palette's 0.65)
         macro_mod    how much the far read's brightness modulates the near read (default the palette's)
         far_height   False: the height blend keeps the near read's height at a distance too (speckle layers: shrubs,
@@ -83,7 +95,13 @@ A palette is a dict:
                      shadowed gaps between them, each clump its own tone and a relief clump_height_m tall (the grain
                      a canopy keeps from the air), whole clumps in or out at the edge
     options      material options (DEFAULT_OPTIONS; the old film material's, plus landscape macro octaves, the far
-                 scale and the de-tiling)
+                 scale and the de-tiling), and:
+        satmap       dict(t, stops[, amount, smooth]): the place's own macro colour, a ramp of (r, g, b) multipliers
+                     (or sRGB colours, taken over the ramp's middle) read at a terrain term and multiplied into the
+                     whole ground as a ratio around 1, drawn in by amount (default 1). It stands where the landscape
+                     macro octaves of world noise stood: a look that sets it keeps one residual octave of at most
+                     +-3 % (macro=_MACRO_RESIDUAL). Its t reads today's masks (wetness, northness, occlusion, peaks)
+                     until the surface data bake's valley, crest, insolation and fresh land
     strata       None, or the column spec the strata layers read (see STRATA_COLUMNS and surfacing.strata_image):
                  column, source ('attribute': the eido_strata mask; 'position': object z with a dip), z_offset_m,
                  dip_deg, dip_azimuth_deg, faults, warp [(scale_m, amp_m), ...], facies_m (the lateral scale over
@@ -98,9 +116,29 @@ A palette is a dict:
     dressing     the rock scatter (build/dressing.py): models (ids, or (id, min_size_m, max_size_m) so heavy boulder
                  scans stand only for big rocks), colour, density expression, sizes, burial
 
+A look is what a palette takes on top of its table entry (get() merges it): PALETTE_LOOKS by palette name, then
+RECIPE_LOOKS by recipe for 'auto'. Its keys: layers ({layer name: {key: value}} over the layers of that name; a name
+the palette lacks, given with a `set`, is a new layer), drop ([layer names] to remove), order ([layer names], bottom
+first), strata (replaces the palette's), and any other palette key (dicts merge). desert_sandstone, badlands, karst
+and chalk_coast are written that way on purpose: recipes copy those four table entries into their defaults, and a
+recipe's defaults are part of its terrain cache key, so the entries themselves stay as the cached terrains saw them
+(tests/terrain/surface_look/test_look.py builds every recipe's cache-key payload under the last commit's palettes.py
+and this one, and they must match).
+
+The looks are written to SURFACING_DESIGN.md 3.1 and 3.2: colour from the terrain (a layer's ramp at a terrain term,
+the satmap, the tone), the strata column on the cliffs only (soils, sediment and plants their own colours; talus a
+quarter of the column, until the bake's src_strata gives it its source bed), and every edge from terrain terms, a
+weight's world noise moving its threshold by at most a quarter of the window (raggedness at the metre scale). The
+shared vocabulary: _face (bare rock, the ribs and chutes of a wall from the plan curvature and the drainage),
+_debris (talus and scree), _SNOW_SHAPED (snow moved by the ground's shape), _CATENA_HILLS (the catena of gentle
+hills), _TILLAGE (bands along the contours). get() writes each ramp, and the satmap on every layer, as patches marked
+from_ramp ('ramp', 'satmap'): that is how the material draws them from the mesh's attributes; a material that reads
+the ramp image (ramp_rows) skips the patches so marked.
+
 The mask expression language (layer weights, rock densities; the same grammar as a stage's `where`):
-    numbers, mask names (masks.MASKS: slope, talus, snow, northness, convex_20m, ...), the terrain constants
-    (CONSTANTS: base_elevation_m, snowline_m, treeline_m), + - * /, unary -,
+    numbers, mask names (masks.MASKS: slope, talus, snow, northness, convex_20m, ...; and the surface data bake's maps,
+    SURFACE_MAPS, which read 0 on a mesh without them), the terrain constants (CONSTANTS: base_elevation_m,
+    snowline_m, treeline_m, latitude_deg, wind_azimuth_deg, pixel_angle), + - * /, unary -,
     smoothstep(e0, e1, x)  (e0 > e1 allowed: a falling edge), min(a, b, ...), max(a, b, ...), clamp(x, lo, hi),
     abs(x), pow(x, e), mix(a, b, t), noise(scale_m[, seed]): a world-space noise of about 0..1 (mean 0.5) with
     features `scale_m` metres across, fbm(scale_m[, seed]): the same with five octaves (features from scale_m down to
@@ -192,7 +230,37 @@ CONSTANTS = {
     'base_elevation_m': 0.0,        # altitude = height + base_elevation_m
     'snowline_m': 1.0e5,            # altitude of today's snowline
     'treeline_m': 1.0e5,            # altitude of the treeline
+    # the place's latitude (negative south of the equator): its climatological sun, the one the ground's cover answers
+    # to (where snow melts, slopes dry, plants grow), climate_sun(). A palette or a terrain may set sun_azimuth_deg and
+    # sun_elevation_deg outright in its constants instead; the render's sun is never passed (SURFACING_DESIGN.md 2.2)
+    'latitude_deg': 40.0,
+    'wind_azimuth_deg': 90.0,       # the compass bearing the prevailing wind blows toward (streaks, slip faces)
+    'pixel_angle': 0.001,           # radians one pixel spans (a 1080-line frame with a 53 degree vertical field of
+                                    # view has 0.00086): what fades a noise term finer than a pixel
 }
+# the constants get() writes into every palette. The others are read from CONSTANTS where an expression uses them,
+# unless a palette or a terrain sets them: writing them into every palette would change the dicts the recipes keep in
+# their defaults (tower_karst and sea_cliffs build theirs from get()), and with them those terrains' cache keys
+_FILLED_CONSTANTS = ('base_elevation_m', 'snowline_m', 'treeline_m')
+
+
+def climate_sun(constants=None):
+    """(azimuth_deg, elevation_deg): the place's climatological sun, which the surface data bake (snowpack melt), the
+    plant layer and the material's insolation all read, so they agree; never the render's sun of a shot (the review
+    lights each view from its own side). constants: the terrain's and the palette's (any mapping; CONSTANTS fills
+    what it lacks). A mapping that sets sun_azimuth_deg and sun_elevation_deg gets those (one alone is taken with the
+    other from the latitude); else the equinox noon sun of latitude_deg: due south (180) north of the equator, due
+    north (0) south of it, at 90 - |latitude| degrees."""
+    c = constants or {}
+    lat = float(c.get('latitude_deg') if c.get('latitude_deg') is not None else CONSTANTS['latitude_deg'])
+    lat = max(-90.0, min(90.0, lat))
+    az = 180.0 if lat >= 0.0 else 0.0
+    el = 90.0 - abs(lat)
+    if c.get('sun_azimuth_deg') is not None:
+        az = float(c['sun_azimuth_deg']) % 360.0
+    if c.get('sun_elevation_deg') is not None:
+        el = max(-90.0, min(90.0, float(c['sun_elevation_deg'])))
+    return az, el
 
 # ------------------------------------------------------------------------------------- the strata columns ---
 # A column is bottom to top: base_m (the stratigraphic height of its bottom, metres) and formations
@@ -304,8 +372,11 @@ FORMATION_LOOKS = [
     ('channel sandstone', ('#bfae94', 0.95, 1.5, 0.05)),
     # (the rim formations a shade warmer than the 11-12 values: under the sky's blue fill and the haze they rendered
     # cool blue-grey from the air, where tw_07's rim cliffs are buff and cream)
-    ('kaibab', ('#baa78c', 0.95, 2.5, 0.1)), ('toroweap', ('#ad977b', 1.0, 1.5, 0.11)),
-    ('coconino', ('#cdbb9c', 0.9, 5.0, 0.06)), ('hermit', ('#8b5a48', 1.0, 1.2, 0.11)),
+    # (11-14: warmer and darker again, a third of a stop: the far buttes' caps still drew a pale grey-white band from
+    # the approach walk, hue 234 at chroma 4, read as snow; tw_02's far rim is grey-buff, its Coconino a thin cream
+    # line)
+    ('kaibab', ('#ae9878', 0.95, 2.5, 0.1)), ('toroweap', ('#a38a6c', 1.0, 1.5, 0.11)),
+    ('coconino', ('#c2aa88', 0.9, 5.0, 0.06)), ('hermit', ('#8b5a48', 1.0, 1.2, 0.11)),
     ('esplanade', ('#ad826a', 0.95, 3.0, 0.09)),
     ('supai', ([('#7f4f3f', 0.55), ('#97796a', 0.3), ('#6c4a3e', 0.15)], 1.0, 1.4, 0.12)),
     ('redwall', ('#8d6455', 0.95, 4.0, 0.09)), ('temple butte', ('#83756a', 1.0, 1.8, 0.1)),
@@ -388,6 +459,59 @@ _SNOW = ('smoothstep(0.33, 0.63, smoothstep(snowline_m - 250, snowline_m + 250, 
          '+ 200*(fbm(500, 6) - 0.5) + 110*(fbm(60, 7) - 0.5) + 80*(fbm(14, 9) - 0.5)) '
          '+ 0.2*smoothstep(30, 12, slope)*smoothstep(snowline_m - 100, snowline_m + 300, altitude) - 0.06) '
          '* smoothstep(52, 40, slope + 10*(fbm(30, 8) - 0.5) + 6*(fbm(6, 10) - 0.5))')
+
+# ------------------------------------------------------------------- weights from the terrain's own structure ---
+# (SURFACING_DESIGN.md 3.2.) The three templates above move their thresholds with world noise, which knows nothing
+# of the ground: a wall's cliff, talus and bench then stack up it in bands (slope and the 20 m convexity both draw
+# height lines on a layered wall), and a noise wider than its threshold's window draws its own isolines as the edge.
+# The weights below take a quarter of their window from noise at most (raggedness at the metre scale) and the rest
+# from terrain terms, first of all the two that run DOWN a wall instead of along it:
+#   _PLAN    the plan curvature at 20 m as -1..1: + on spurs, ribs and buttress noses, - in gullies, chutes and
+#            hollows (a bend of a third over the 20 m saturates it)
+#   _GULLY   where a slope's drainage gathers, 0..1: flow is the log drainage area, about 0.2 for a hillslope's own
+#            and 0.45 for a gully's
+# so rock ribs alternate with debris chutes around a wall, as the impact crater's walls already did where its chutes
+# cut them. (The old templates stay as they are: the table entries built from them are part of recipes' cache keys.)
+_PLAN = 'clamp(60*curv_plan_20m, -1, 1)'
+_GULLY = 'smoothstep(0.24, 0.44, flow)'
+
+# (The terms that run down a wall carry the most weight, those along it the least: with 9 and 7 degrees from the plan
+# curvature and the drainage against 6 and 5 from the 20 m convexity, the canyon's cliff and talus still stacked up
+# its walls in bands, a height-line index of 0.77 on its slopes over 25 degrees (0.80 with _CLIFF and _TALUS); at 15
+# and 10 against 4 and 3 the talus lies in chutes between rock ribs, as on Toroweap's walls, 0.75)
+_FACE = ('max(smoothstep({lo}, {hi}, slope + 2.4*(fbm(12, 0) - 0.5) + 15*' + _PLAN + ' + 4*convex_20m '
+         '- 3*concave_20m - 10*' + _GULLY + '{extra}), 0.9*smoothstep(0.2, 0.6, ' + _PLAN + ' + 0.4*convex_20m) '
+         '* smoothstep({rlo}, {rhi}, slope){ribs}) * (1 - smoothstep(0.4, 2.0, deposit + talus))')
+
+
+def _face(lo, hi, extra='', ribs=''):
+    """Bare rock from `lo` to `hi` degrees: 15 degrees sooner on a spur or a buttress nose and as much later in a
+    chute, 10 later where the drainage gathers, a little sooner on a convex rim and later in a concave foot; and the
+    ribs between a wall's gullies bare from lo - 13 degrees (ribs: a factor on that term)."""
+    return _FACE.format(lo=lo, hi=hi, extra=extra, rlo=lo - 13, rhi=lo - 4, ribs=ribs)
+
+
+_DEBRIS = ('max(smoothstep(0.2, 1.5, talus), 0.8*smoothstep(0.4, 0.85, rock_toe + 0.1*(fbm(30, 3) - 0.5)){toe}, '
+           'smoothstep({lo}, {hi}, slope + 2*(fbm(9, 3) - 0.5) - 13*' + _PLAN + ' + 4*concave_20m - 4*convex_20m '
+           '+ 9*' + _GULLY + '){band})')
+
+
+def _debris(lo, hi, toe='', band=''):
+    """Talus and scree: what the solvers left, the rockfall shadow under rock faces, and the repose band of slopes
+    from `lo` to `hi` degrees, reached sooner in a chute, a concave foot or a gully and later on a spur."""
+    return _DEBRIS.format(lo=lo, hi=hi, toe=toe, band=band)
+
+
+# snow, as _SNOW (altitude against the snowline over a broad band, moved by the ground's shape, lower on north faces
+# and down the drainage), with its world noise cut to a quarter of each window: at 390 m of noise over a 500 m band,
+# and 16 degrees over the 12 degree slope gate, the noise drew the edge, the hard white splats on Fuji's lower cone and
+# the blots over the alpine valley's high ground (11-13). The ground's shape moves it by up to 1000 m, the noise by 125
+_SNOW_SHAPED = ('smoothstep(0.33, 0.63, smoothstep(snowline_m - 250, snowline_m + 250, altitude + 220*northness '
+                '+ clamp(-50000*curv_plan_20m - 20000*curv_profile_20m, -450, 550) + 250*smoothstep(0.5, 0.8, flow) '
+                '+ 70*(fbm(500, 6) - 0.5) + 35*(fbm(60, 7) - 0.5) + 20*(fbm(14, 9) - 0.5)) '
+                '+ 0.2*smoothstep(30, 12, slope)*smoothstep(snowline_m - 100, snowline_m + 300, altitude) - 0.06) '
+                '* smoothstep(52, 40, slope + 4*' + _PLAN + ' + 2*(fbm(30, 8) - 0.5) + 1*(fbm(6, 10) - 0.5))')
+
 
 # ------------------------------------------------------------------------------------------- the palettes ---
 
@@ -782,6 +906,278 @@ PALETTES = {
     ),
 }
 
+# What a palette takes on top of its table entry, by palette name (the part before any '+column'): get() merges it
+# once (the module doc says how a look is written). The four entries recipes copy into their defaults
+# (desert_sandstone and badlands through solvers/strata.palette_for; karst and chalk_coast through get(), so those two
+# take no look here: tower_karst and sea_cliffs take theirs in RECIPE_LOOKS) are changed only through looks.
+
+# one residual octave of world noise in the ground's brightness, +-3 %: what is left of the landscape macro octaves
+# where the ground's variation comes from its own structure (a layer's ramp, the satmap, the tone)
+_MACRO_RESIDUAL = [dict(scale_m=320.0, value=0.03, detail=3.0, roughness=0.55, w=3.3)]
+
+# light and dark from the ground's shape at the mesh's scales: the 20 m crests and hollows, and each level's own
+# finest bends (convex and concave at twice its cell: metres near the camera, tens of metres on the main level), so
+# crests read crisp and pale and creases dark at whatever distance the ground is drawn; gorges and slots darker
+_TONE = ('0.07*convex_20m + 0.06*convex - 0.05*concave_20m - 0.08*concave '
+         '- {gorge}*smoothstep(0.8, 0.45, occlusion)')
+
+# the catena of gentle hills, 0 on the exposed convex hilltops and the south slopes, 1 in the swales, the hollows and
+# on the north slopes: the plan curvature at the scale of broad hills (a bend of 1/500 m saturates it: the 20 m
+# convexity masks barely fire on 8-degree loess hills), the sky view (the swales lie low), aspect and wetness
+_CATENA_HILLS = ('0.5 + 0.35*clamp(-500*curv_plan_20m, -1, 1) + 0.15*northness + 2.0*(0.94 - occlusion) '
+                 '+ 0.3*(clamp(wetness, 0, 0.6) - 0.25)')
+
+# tillage and swaths in bands along the contours: cells of a partition of (x, y, k z) with a large k are long along a
+# contour and thin across it (2.5 m of height for the swaths, 0.5 m for the tillage), so on a hillside they lie as
+# stripes that follow the hill, as a ploughed or cut Palouse field shows them from above (palouse_hills_01)
+_TILLAGE = dict(scale_m=None, tint=(0.88, 0.87, 0.86), amount=0.5, where='smoothstep(0.45, 0.5, cells(60, 9, 24))')
+_TILLAGE_FINE = dict(scale_m=None, tint=(0.92, 0.91, 0.9), amount=0.5, where='smoothstep(0.45, 0.5, cells(12, 10, 24))')
+
+PALETTE_LOOKS = {
+    # Desert sandstone, as the photographs from Toroweap show it (tw_03, tw_07): the bedding bands on the CLIFFS; the
+    # slopes between the cliff bands smooth debris with no bands, redder under the red cliffs and greyer under the
+    # grey ones; the benches and plateaus their own soils and scrub, placed by the drainage; walls cut into ribs and
+    # chutes by their gullies.
+    'desert_sandstone': dict(
+        layers={
+            # soil lies in its own colour, not the bed's under it: paler and stonier on the dry convex ground, a
+            # darker, redder silt down the swales (a ramp of multipliers, so a recipe's own soil colour keeps its hue)
+            # (salmon-tan, the Esplanade's soil in tw_04, hue 62 at chroma 22: the review's sky fill and view
+            # transform turn an albedo about 9 degrees redder and a third greyer, so the soil that read mauve at
+            # hue 47, chroma 9 from the approach walk, 11-13, takes the albedo sample_photo.retint gives for it)
+            # (a fifth its bed's colour, as a residual soil is. The soil on the gorge's grey benches still reads as
+            # salmon-tan patches inside the grey formations from the brink at a fifth, 11-14; more of the bed would
+            # redden the plateau's soil away from tw_04's. The bake's provenance gives a bench soil its own bed's
+            # colour: SURFACING_DESIGN.md 3.1, part two of this look)
+            'soil': dict(strata=0.2, colour='#b2845e',
+                         ramp=dict(t='0.5 + 0.8*(clamp(wetness, 0, 0.7) - 0.3) - 25*curv_plan_20m '
+                                     '+ 0.25*concave_20m - 0.3*convex_20m',
+                                   stops=[(0.0, (1.17, 1.15, 1.12)), (0.45, (1.0, 1.0, 1.0)), (1.0, (0.76, 0.72, 0.7))]),
+                         patches=[dict(scale_m=5.0, tint=(0.8, 0.82, 0.86), amount=0.35)]),
+            # sand and gravel down every wash the drainage draws (flow, channels), not only the trunk, and over the
+            # sediment fills, graded in over two metres of fill so a filled basin's shore (the fill's own contour)
+            # is no edge: at 0.25-1.3 m the fills drew pale discs with crisp rims on the canyon's benches. Silty
+            # patches on the fills; the deep fill a shade paler
+            'wash': dict(strata=False,
+                         weight='max(smoothstep(0.52, 0.72, flow) * smoothstep(14, 4, slope), '
+                                '0.9*smoothstep(0.15, 0.6, channels) * smoothstep(18, 6, slope), '
+                                '0.7*smoothstep(0.3, 2.5, deposit + sand) * smoothstep(20, 8, slope))',
+                         ramp=dict(t='smoothstep(0.5, 4.0, deposit + sand)',
+                                   stops=[(0.0, (0.95, 0.92, 0.89)), (1.0, (1.06, 1.06, 1.07))]),
+                         patches=[dict(scale_m=14.0, tint=(0.84, 0.82, 0.8), amount=0.4, lo=0.48, hi=0.66,
+                                       where='smoothstep(0.5, 2.5, deposit + sand)'),
+                                  dict(scale_m=4.0, tint=(0.88, 0.88, 0.86), amount=0.3)]),
+            # the grey-olive cast shrubs give the ground, as a cover that thickens down the swales and hollows and
+            # thins on convex, dry ground: the scans' own heights break it into soil and litter at the scale of a
+            # twig, and the shrubs themselves are plants (the plant layer), not blots of this layer. Thick round a
+            # filled basin's damp margin and thinner over the deep fill, so the fill's edge is a margin of scrub
+            # (the wetness index saturates on any flat fill, so it is capped and the fill's depth takes the scrub off
+            # again inside the window: with the wetness alone a filled basin drew a solid grey-olive blob)
+            # (a third of the plateau and more: from the rim the Esplanade and the benches are grey-tan and olive
+            # with dark shrubs, tw_02 and tw_07, the salmon soil showing only near the camera; with a tenth, mostly
+            # down the gullies, the plateau read as bare salmon soil from above)
+            # (olive, about as light as the soil, as the sage and grass of tw_04 are: hue 86-110 at chroma 15; at
+            # #726e58 the cover rendered dark and blue-grey from the approach walk, L* 35, hue 165, chroma 3, so it
+            # takes sample_photo.retint's albedo, a quarter lighter)
+            'scrub': dict(colour='#887a4c', weight='0.8*smoothstep(0.3, 0.75, 0.25 + 0.9*clamp(wetness, 0, 0.45) + 0.3*concave_20m '
+                                 '- 0.4*convex_20m - 14*curv_plan_20m + 0.1*northness '
+                                 '- 0.35*smoothstep(0.3, 2.0, deposit + sand) + 0.11*(fbm(2.2, 0) - 0.5)) '
+                                 '* smoothstep(25, 14, slope) * smoothstep(0.6, 0.48, flow)'),
+            # talus: debris, so no bedding on it: a quarter the colour of the beds 25 m above (redder under the red
+            # formations, greyer under the grey), its own colour the olive grey-brown of the vegetated talus slopes
+            # between the cliff bands (tw_07, tw_03: hue 65, chroma 11); fresher and paler down the chutes where it
+            # still moves, darker and scrub-speckled on the stable slopes between them
+            'talus': dict(strata=0.25, colour='#8c6a52', weight=_debris(21, 29),
+                          ramp=dict(t='0.5 - 0.5*' + _PLAN + ' + 0.4*' + _GULLY,
+                                    stops=[(0.0, (0.82, 0.86, 0.8)), (0.5, (1.0, 1.0, 1.0)), (1.0, (1.14, 1.08, 1.02))])),
+            # slickrock: the rims, the spurs' noses, and the broad divides between the washes, where little ground
+            # drains across and the soil is thin (the swales and the foot slopes hold theirs: a soil catena, drawn
+            # by the drainage and not by a band of slope); half its bed's colour, so a bench keeps the hue of its
+            # formation, and half the salmon of the Esplanade's rim rock (tw_07's foreground: hue 63, chroma 22).
+            # (Only the broadest divides, and at half strength: every divide down to the hillslope's own, flow under
+            # 0.19, veined the whole plateau with pale dendrites, 11-13)
+            'slickrock': dict(strata=0.5, colour='#b68d6e',
+                              weight='max(smoothstep(0.2, 0.6, convex_20m + 0.6*peaks + 0.5*' + _PLAN + ' - 0.5*wetness '
+                                     '+ 0.1*(fbm(15, 17) - 0.5)) * smoothstep(4, 12, slope), '
+                                     '0.55*smoothstep(0.14, 0.07, flow + 0.017*(fbm(15, 17) - 0.5)) '
+                                     '* smoothstep(2.5, 7, slope)) * smoothstep(0.5, 0.1, deposit + sand)'),
+            # the banded cliffs, cut into ribs and chutes; varnish in curtains metres wide under the pour-overs and
+            # down the chutes; the recesses darker, the buttress noses paler
+            'cliff': dict(weight=_face(37, 47), streaks=(9.0, 0.34, 0.5, 0.72),
+                          streaks_where='0.3 + 0.7*smoothstep(0.1, 0.6, ' + _GULLY + ' - 0.5*' + _PLAN + ')',
+                          patches=[dict(scale_m=None, tint=(0.8, 0.77, 0.76), amount=0.7,
+                                        where='smoothstep(0.15, 0.8, 0.6*' + _GULLY + ' - ' + _PLAN + ')'),
+                                   dict(scale_m=None, tint=(1.1, 1.07, 1.03), amount=0.7,
+                                        where='smoothstep(0.2, 0.9, ' + _PLAN + ')')]),
+        },
+        constants=dict(latitude_deg=36.2),              # Toroweap
+        options=dict(macro=_MACRO_RESIDUAL, tone=_TONE.format(gorge=0.16),
+                     # the place's own macro colour: north-facing and damp ground a shade darker and cooler, the
+                     # open, dry, sunward ground paler and warmer; the depths of a gorge darker. (Damp ground only a
+                     # little: the swales are already the scrub's and the soil ramp's darker end, and the three
+                     # together drew the plateau as a leopard of salmon and dark blue-grey from the air, 11-14)
+                     satmap=dict(t='0.5 - 0.14*northness - 0.15*(wetness - 0.3) + 0.9*(occlusion - 0.85) + 0.12*peaks',
+                                 stops=[(0.0, (0.86, 0.87, 0.9)), (0.5, (1.0, 1.0, 1.0)), (1.0, (1.1, 1.08, 1.04))])),
+    ),
+    # Alpine, as Lauterbrunnen's photographs show it (lauterbrunnen_01, 14, 15): forest on the steep valley sides and
+    # their talus cones, meadows on the shoulders, the terraces and the floor, alpine grass to near the ridges above the
+    # treeline, rock where the walls stand, scree in the cirques and under the walls, snow by the ground's shape. Every
+    # edge from terrain terms: at 0.55 of world noise over a 0.18 window the forest's edge was the noise's own
+    # isoline, a camouflage of blobs from Schynige Platte (11-13); the repose band of slopes laid scree over most of
+    # the high ground (the alpine valley's uplands stand at a median 37 degrees), and rock_toe, keyed to a rock mask
+    # that reads 1 on any deeply eroded ground, speckled them with straight-edged polygons.
+    'alpine': dict(
+        layers={
+            # meadow by the catena: lush deep green along the drainage and in the hollows, a drier yellow-green on the
+            # convex knolls and shoulders; on the floor parcels mown at different times (a mosaic of whole fields,
+            # straight-edged, as Lauterbrunnen's floor from the walls); tawny alpine grass high above the treeline,
+            # reached sooner on the ridges and later in the hollows and on the south faces. (The 90 m world-noise
+            # swales are gone: the drainage draws them.) (Green to 300-600 m over the treeline, as the shoulders
+            # above Wengen and Muerren in lauterbrunnen_15: hue 128 at chroma 30 near the camera in lauterbrunnen_01,
+            # where the high pasture rendered olive, hue 101 at chroma 16, from Schynige Platte, 11-13)
+            'pasture': dict(
+                ramp=dict(t='0.5 + 0.9*(clamp(wetness, 0, 0.8) - 0.4) + 0.25*concave_20m - 0.3*convex_20m '
+                            '- 20*curv_plan_20m',
+                          stops=[(0.0, (1.16, 1.1, 0.84)), (0.5, (1.0, 1.0, 1.0)), (1.0, (0.84, 0.92, 0.8))]),
+                patches=[dict(scale_m=7.0, colour='#8a8a45', amount=0.45),
+                         dict(scale_m=None, tint=(1.12, 1.07, 0.88), amount=0.55,
+                              where='smoothstep(0.66, 0.665, cells(45, 7)) * smoothstep(9, 4, slope)'),
+                         dict(scale_m=None, tint=(0.88, 0.95, 0.85), amount=0.55,
+                              where='smoothstep(0.3, 0.295, cells(45, 7)) * smoothstep(9, 4, slope)'),
+                         dict(scale_m=None, colour='#86804f', amount=0.6,
+                              where='smoothstep(treeline_m + 300, treeline_m + 750, altitude + 120*northness '
+                                    '+ 80*convex_20m - 80*concave_20m + 60*(fbm(150, 9) - 0.5))')]),
+            # scree: the talus the solvers left (the cones and aprons under the trough walls), the foot of real rock
+            # faces (rock_toe where the masks' rock is the faces' own: on ground worn less than 10-25 m, a real
+            # DEM's; where the masks count every metre worn past 20 m as rock, an eroded recipe's uplands, rock_toe
+            # draws straight-edged polygons and is left out), and above the alpine pastures the repose band of
+            # slopes, sooner in the chutes and the concave feet. (Thick talus only, faded in over 1.5-8 m: at
+            # 0.5-3 m every thin sheet of the solver's debris on the grassed slopes drew an angular grey patch with
+            # a crisp edge from Schynige Platte, 11-14; thin debris under grass is pasture. And only where it still
+            # moves, on slopes over 24-32 degrees, or above the treeline: stable debris on the gentle shoulders below
+            # it is meadow, as Wengen's and Muerren's terraces are, where it drew rounded grey blobs from the air)
+            # (and never on faces over 44-52 degrees, which no debris holds: the solver's talus runs up the trough's
+            # near-vertical walls, and drew them as scree, 11-14)
+            'scree': dict(weight='max(smoothstep(1.5, 8.0, talus) * max(smoothstep(24, 32, slope), '
+                                 'smoothstep(treeline_m - 100, treeline_m + 300, altitude)) * smoothstep(52, 44, slope), '
+                                 '0.8*smoothstep(0.4, 0.85, '
+                                 'rock_toe*smoothstep(25, 10, wear) + 0.1*(fbm(30, 3) - 0.5)), '
+                                 'smoothstep(30, 40, slope + 2*(fbm(9, 3) - 0.5) '
+                                 '- 13*' + _PLAN + ' + 4*concave_20m - 4*convex_20m + 9*' + _GULLY + ') '
+                                 '* smoothstep(treeline_m + 500, treeline_m + 900, altitude + 100*northness '
+                                 '+ 80*(fbm(300, 14) - 0.5)))'),
+            # the forest on the steep valley sides, their ledges and their talus cones, more on north faces and in the
+            # hollows; meadow on the open, convex, gentler shoulders and terraces; avalanche tracks cleared down the
+            # drainage lines of the steep slopes, and the active scree (steep and thick) left bare; the treeline lower
+            # on north faces and the exposed ridges, higher in the sheltered hollows. (Not `plants`: it takes plants
+            # off any talus, and the solver's talus lies over the trough's sides, where Lauterbrunnen's spruce stands
+            # on its talus cones.) Its tone: spruce dark on the north faces and in the hollows, larch paler near the
+            # treeline, beech and mixed stands lighter on the low sunny slopes
+            'forest': dict(
+                weight='smoothstep(0.45, 0.65, 0.3 + 0.3*smoothstep(15, 30, slope) + 0.15*clamp(wetness, 0, 0.8) '
+                       '+ 0.12*northness + 0.1*concave_20m '
+                       '- 0.35*smoothstep(0.1, 0.5, convex_20m)*smoothstep(30, 15, slope) '
+                       '- 0.4*smoothstep(0.62, 0.86, flow)*smoothstep(18, 28, slope) '
+                       '- 0.35*smoothstep(36, 44, slope)*smoothstep(1.0, 5.0, talus) + 0.05*(fbm(30, 4) - 0.5)) '
+                       '* smoothstep(6, 12, slope) * smoothstep(70, 60, slope + 2*(fbm(30, 5) - 0.5)) '
+                       '* smoothstep(0.35, 0.5, occlusion) * (1 - snow) '
+                       '* smoothstep(treeline_m + 80, treeline_m - 150, altitude + 100*northness + 80*convex_20m '
+                       '- 60*concave_20m + 50*(fbm(300, 12) - 0.5))',
+                patches=[dict(scale_m=None, tint=(1.26, 1.22, 0.98), amount=0.55,
+                              where='smoothstep(treeline_m - 450, treeline_m - 100, altitude + 60*(fbm(70, 31) - 0.5))'),
+                         dict(scale_m=None, tint=(1.3, 1.27, 1.02), amount=0.5,
+                              where='smoothstep(0.1, -0.6, northness) * smoothstep(treeline_m - 500, treeline_m - 900, '
+                                    'altitude)'),
+                         dict(scale_m=None, tint=(0.8, 0.85, 0.8), amount=0.45,
+                              where='smoothstep(0.2, 0.8, northness + 0.5*concave_20m)'),
+                         dict(scale_m=25.0, tint=(0.84, 0.88, 0.84), amount=0.25)]),
+            # the walls bared by slope, sooner on spurs and later in the chutes (ribs above the treeline only: a
+            # wooded spur is not a bare rib); its ochre zones, lichen and streaks as the table has them. Every face
+            # over 55-68 degrees bare whatever talus the solver's bookkeeping leaves on it (the trough's walls)
+            'rock': dict(weight='max(' + _face(50, 62, extra=' + 10*smoothstep(treeline_m + 100, treeline_m + 700, '
+                                                           'altitude + 150*(fbm(400, 2) - 0.5))',
+                                               ribs=' * smoothstep(treeline_m + 300, treeline_m + 800, altitude)')
+                                + ', smoothstep(55, 68, slope))'),
+            'snow': dict(weight=_SNOW_SHAPED),
+        },
+        constants=dict(latitude_deg=46.6),              # Lauterbrunnen
+        options=dict(macro=_MACRO_RESIDUAL, tone=_TONE.format(gorge=0.18),
+                     # the place's own macro colour: damp, low, shaded ground deeper and cooler; the dry, open, sunward
+                     # shoulders and ridges paler and warmer
+                     satmap=dict(t='0.5 + 0.3*(clamp(wetness, 0, 0.9) - 0.4) - 0.1*northness - 0.15*peaks '
+                                   '- 0.5*(occlusion - 0.72)',
+                                 stops=[(0.0, (1.07, 1.05, 0.97)), (1.0, (0.92, 0.95, 0.95))])),
+    ),
+    # Farmland, as the Palouse's photographs show it (palouse_hills_01, 03, 04): whole fields along the hills, and
+    # inside every field the hill itself: the eroded hilltops pale (the loess's pale subsoil shows where the topsoil
+    # washed off), the swales and the north slopes darker and, in a green field, lusher; tillage and swaths in bands
+    # along the contours. The fields' colours from the photographs (sample_photo.retint): golden and pale pink-tan
+    # stubble, a yellow-green crop, a lighter fallow brown (the 11-13 fields rendered dark olive, chocolate and
+    # blue-green, each one flat colour, as polygons laid over the hills)
+    'farmland': dict(
+        layers={
+            'grass': dict(colour='#767b36',
+                          ramp=dict(t=_CATENA_HILLS, stops=[(0.0, (1.14, 1.1, 0.86)), (0.5, (1.0, 1.0, 1.0)),
+                                                            (1.0, (0.86, 0.95, 0.88))]),
+                          patches=[dict(scale_m=7.0, colour='#6c7434', amount=0.3), _TILLAGE_FINE]),
+            'soil': dict(colour='#936e4d', weight='smoothstep(0.255, 0.245, cells(500, 1, 20))',
+                         ramp=dict(t=_CATENA_HILLS, stops=[(0.0, (1.3, 1.26, 1.18)), (0.5, (1.0, 1.0, 1.0)),
+                                                           (1.0, (0.86, 0.84, 0.82))]),
+                         patches=[_TILLAGE, _TILLAGE_FINE]),
+            'crop': dict(colour='#cfa770', weight='smoothstep(0.645, 0.655, cells(500, 1, 20))',
+                         ramp=dict(t=_CATENA_HILLS, stops=[(0.0, (1.16, 1.15, 1.12)), (0.5, (1.0, 1.0, 1.0)),
+                                                           (1.0, (0.86, 0.85, 0.84))]),
+                         patches=[dict(scale_m=None, colour='#dac2ac', amount=0.7,
+                                       where='smoothstep(0.82, 0.83, cells(500, 1, 20))'), _TILLAGE, _TILLAGE_FINE]),
+        },
+        constants=dict(latitude_deg=46.9),              # the Palouse
+        options=dict(macro=_MACRO_RESIDUAL, tone='0.05*convex_20m - 0.06*concave_20m'),
+    ),
+    # Badlands, as the photographs from the Wall show them (bl_01, bl_04, bl_06, bl_07): cream and buff walls in soft
+    # pastel bands, fluted top to bottom by their rills (darker in the rills, paler on the noses between them), pale
+    # cream aprons and mounds at their feet, and the mixed-grass prairie golden on the dry ground and greener in the
+    # swales. Under the review's sky the walls had rendered grey (chroma 3, darker than the grass) and the foot
+    # blue-grey, where every photograph's walls are cream-buff (hue 85, chroma 20-23) and brighter than the prairie:
+    # the walls take a warm tint over their column and the foot its own cream (sample_photo.retint)
+    'badlands': dict(
+        layers={
+            'prairie': dict(colour='#ad9971',
+                            ramp=dict(t='0.4 + 0.9*(clamp(wetness, 0, 0.8) - 0.3) + 0.3*concave_20m '
+                                        '- 0.3*convex_20m - 15*curv_plan_20m',
+                                      stops=[(0.0, (1.08, 1.04, 0.94)), (0.45, (1.0, 1.0, 1.0)),
+                                             (1.0, (0.8, 0.9, 0.45))]),
+                            patches=[dict(scale_m=6.0, colour='#8e8458', amount=0.4)]),
+            # the crusted clay of the aprons, the mounds and the slopes too steep for the sod: bare where the slope
+            # passes what grass holds (sooner on the convex mounds, later in the moist swales) and on the young
+            # sediment at the walls' feet and along the washes; a third its beds' colour (half drew the Chadron's
+            # grey-green at the foot as a blue-grey band under the sky)
+            'clay': dict(colour='#ceaf79', strata=0.3,
+                         weight='max(smoothstep(8, 16, slope + 2*(fbm(12, 0) - 0.5) + 5*convex_20m - 4*concave_20m '
+                                '- 6*(clamp(wetness, 0, 0.8) - 0.3)), smoothstep(0.15, 0.45, convex_20m), '
+                                '0.8*smoothstep(0.3, 1.0, deposit) * smoothstep(14, 5, slope) '
+                                '* smoothstep(0.3, 0.7, rock_toe + 0.5*smoothstep(0.6, 0.85, flow) '
+                                '+ 0.1*(fbm(60, 6) - 0.5)))'),
+            # the walls: steep ground bared sooner on the noses between the rills and later in the rills, which
+            # hold the clay their slopes shed; darker down the rills, paler on the noses; streaks a rill apart
+            'mudstone': dict(tint=(1.15, 1.1, 0.8),
+                             weight='smoothstep(21, 31, slope + 2.5*(fbm(20, 3) - 0.5) + 7*' + _PLAN + ' '
+                                    '+ 4*convex_20m - 3*concave_20m)',
+                             streaks=(1.2, 0.26), streaks_where='0.4 + 0.6*smoothstep(0.0, -0.6, ' + _PLAN + ')',
+                             patches=[dict(scale_m=None, tint=(0.82, 0.8, 0.8), amount=0.6,
+                                           where='smoothstep(-0.1, -0.7, ' + _PLAN + ')'),
+                                      dict(scale_m=None, tint=(1.08, 1.06, 1.03), amount=0.6,
+                                           where='smoothstep(0.1, 0.7, ' + _PLAN + ')')]),
+        },
+        constants=dict(latitude_deg=43.8),              # the Badlands Wall
+        options=dict(macro=_MACRO_RESIDUAL, tone=_TONE.format(gorge=0.14)),
+    ),
+    # the places the other palettes are judged against, for their climatological sun (climate_sun): the palette's
+    # look is otherwise its table entry (these two are not in any recipe's cache key; karst and chalk_coast are, and
+    # take their latitudes through RECIPE_LOOKS and PLACES)
+    'volcanic': dict(constants=dict(latitude_deg=35.4)),          # Fuji
+    'dunes': dict(constants=dict(latitude_deg=37.7)),             # Great Sand Dunes
+}
+
 # the palette a recipe takes with palette='auto'
 RECIPE_PALETTES = {
     'fluvial_range': 'alpine', 'alpine_valley': 'alpine', 'stratovolcano': 'volcanic', 'caldera': 'volcanic',
@@ -804,49 +1200,85 @@ _SLICKROCK_SPARSE = ('max(smoothstep(0.14, 0.4, convex_20m + 0.45*(fbm(22, 4) - 
 # Moenkopi's top (zs 362) sits at the rim crest, about 50 m over the plain at 1683 m: the Kaibab's buff ledges make the
 # upper wall, the Coconino the lower wall under its talus, as in the photographs from the rim
 RECIPE_LOOKS = {
-    'impact_crater': dict(strata=dict(column='meteor_crater', source='position', z_offset_m=362.0 - 1741.0,
+    'impact_crater': dict(constants=dict(latitude_deg=35.0), strata=dict(column='meteor_crater', source='position', z_offset_m=362.0 - 1741.0,
                                       warp=[(400.0, 3.0), (60.0, 0.8)], facies_m=500.0, smear=(2.0, 1.5),
                                       parting=0.15, looks=False, relief_m=0.5, relief_shade=0.1),
-                          # the plain's red Moenkopi soil and its dry grass and shrubs (meteor_crater_02_plain_north)
+                          # the plain's red Moenkopi soil and its dry grass and shrubs (meteor_crater_02_plain_north);
+                          # the ejecta blanket round the rim paler, the buff Kaibab and pale Coconino rubble thrown out
+                          # over it (meteor_crater_03 from the air: a pale halo), thinning outward with the blanket's
+                          # height over the plain (1683 m), paler on its radial ridges than in the swales between
+                          # them; a 70 m world-noise patch drew blotches over the plain (11-13)
                           layers={'soil': dict(colour='#9a6248', strata=0.15,
                                                patches=[dict(scale_m=5.0, tint=(0.8, 0.8, 0.84), amount=0.45),
-                                                        dict(scale_m=70.0, tint=(1.14, 1.2, 1.26), amount=0.4,
-                                                             detail=4.0)]),
+                                                        dict(scale_m=None, tint=(1.24, 1.2, 1.12), amount=0.6,
+                                                             where='smoothstep(1694, 1724, height + 3000*curv_plan_20m) '
+                                                                   '* smoothstep(22, 10, slope)')]),
                                   # the plain's bedrock showing through: weathered red-brown Moenkopi ledges, a few
                                   # (plain_north's foreground ledge), where the canyon's pale pavement term painted
                                   # the whole plain with white splats in the 11-13 aerial (the Kaibab's buff at the
                                   # plain's level, twice the red soil's brightness)
                                   'slickrock': dict(colour='#9c7d66', strata=0.3, weight=_SLICKROCK_SPARSE),
-                                  'scrub': dict(colour='#8a7c58')}),
+                                  'scrub': dict(colour='#8a7c58'),
+                                  # the walls exactly as they were (their bands broken by the ribs and chutes read
+                                  # right beside the photographs: SURFACING_DESIGN.md 3.8): the cliff and the talus
+                                  # under it as the table draws them, not desert_sandstone's look
+                                  'cliff': dict(weight=_cliff(37, 47), streaks=(2.5, 0.35), patches=None,
+                                                streaks_where='0.4 + 0.6*smoothstep(0.2, 0.4, flow + 0.15*(fbm(50, 21) '
+                                                              '- 0.5))'),
+                                  'talus': dict(strata=0.75, colour='#8a5e48', weight=_talus(21, 29), ramp=None),
+                                  # the floor: lake-bed sediment over the whole floor of the bowl (the sky view is
+                                  # low inside it), so no ring of the plain's red soil shows between the talus
+                                  # aprons and the fill; darker where it lies damp, paler crusted patches where it
+                                  # lies wettest (the fill's depth is no cue: tens of metres everywhere but its rim).
+                                  # Its colour the floor's pale yellow-tan in meteor_crater_01 (hue 72), the
+                                  # brightest ground of the bowl: at the palette's #a88466 it rendered salmon, hue 61
+                                  # at chroma 13, and at sample_photo.retint's #b28358 (the render's lightness kept)
+                                  # an orange disc as dark as the aprons, 11-14
+                                  'wash': dict(colour='#c2a27c', ramp=dict(t='smoothstep(0.45, 0.85, wetness) - 0.3*convex_20m',
+                                                         stops=[(0.0, (1.06, 1.05, 1.03)), (1.0, (0.86, 0.86, 0.84))]),
+                                               weight='max(smoothstep(0.52, 0.72, flow) * smoothstep(14, 4, slope), '
+                                                      '0.9*smoothstep(0.15, 0.6, channels) * smoothstep(18, 6, slope), '
+                                                      '0.7*smoothstep(0.3, 2.5, deposit + sand) * smoothstep(20, 8, slope), '
+                                                      '0.8*smoothstep(0.88, 0.8, occlusion) * smoothstep(24, 14, slope))',
+                                               patches=[dict(scale_m=14.0, tint=(0.84, 0.82, 0.8), amount=0.4, lo=0.48,
+                                                             hi=0.66, where='smoothstep(0.5, 2.5, deposit + sand)'),
+                                                        dict(scale_m=4.0, tint=(0.88, 0.88, 0.86), amount=0.3),
+                                                        dict(scale_m=None, tint=(1.12, 1.11, 1.08), amount=0.6,
+                                                             where='smoothstep(0.86, 0.98, wetness)')])}),
     # Monument Valley's floor is orange-red sand blown off the De Chelly (mv_02, mv_04, mv_05), not the pale Cedar Mesa
     # the floor is stripped to
     # (its shrubs are dark dots on the orange sand, a tenth of the floor at most: the palette's grey-olive scrub, a
     # sixth of the ground in 3.5 m speckle, averaged to a grey haze over the whole floor from the air)
     # (the floor's tones: paler wind-sorted sand in sheets and darker gravelly lag, not caliche: mv_04, mv_05)
-    'mesas_buttes': dict(layers={'slickrock': dict(colour='#b0704c', strata=0.3, weight=_SLICKROCK_SPARSE),
+    'mesas_buttes': dict(constants=dict(latitude_deg=37.0), layers={'slickrock': dict(colour='#b0704c', strata=0.3, weight=_SLICKROCK_SPARSE),
                                  'soil': dict(colour='#a6623f', strata=0.2,
                                               patches=[dict(scale_m=6.0, tint=(0.84, 0.82, 0.82), amount=0.45),
                                                        dict(scale_m=90.0, tint=(1.12, 1.14, 1.16), amount=0.5,
                                                             detail=4.0),
                                                        dict(scale_m=25.0, tint=(0.9, 0.86, 0.84), amount=0.35)]),
                                  'wash': dict(colour='#b07a52', strata=0.1),
+                                 # red talus under the red walls (mv_02, mv_04), not Toroweap's vegetated olive
+                                 'talus': dict(colour='#9a5c40'),
                                  'scrub': dict(colour='#5c5741',
                                                weight='smoothstep(25, 14, slope) * smoothstep(0.74, 0.88, fbm(1.6, 0) '
                                                       '+ 0.08*wetness + 0.2*concave_20m - 0.25*convex_20m '
                                                       '+ 0.25*(fbm(180, 1) - 0.5) - 0.06) '
                                                       '* smoothstep(0.93, 0.85, flow) '
                                                       '* (1 - 0.75*smoothstep(1.0, 6.0, deposit))')}),
+    # the Goosenecks: the red Halgaito slopes between the grey limestone ledges (gn_01, gn_06), their talus red, not
+    # Toroweap's vegetated olive
+    'incised_meanders': dict(constants=dict(latitude_deg=37.2), layers={'talus': dict(colour='#8c5444')}),
     # the star dunes recipe is judged against the Namib: its iron-red sand over the interdune's gravel and dry grass
     # (the review's Dune 45 and crest photographs: namib_star_dunes_02, a brown gravel floor under straw grass where
     # the red sand runs out; the pale grey-beige crust of 11-12 drew every dune's toe as a hard orange-on-grey line)
-    'dunes': dict(layers={'sand': dict(colour='#c47c4f'), 'damp sand': dict(colour='#9a6447'),
+    'dunes': dict(constants=dict(latitude_deg=-24.7), layers={'sand': dict(colour='#c47c4f'), 'damp sand': dict(colour='#9a6447'),
                           'crust': dict(colour='#a07a5e', patches=dict(scale_m=30.0, colour='#8e6e58', amount=0.5)),
                           'grass': dict(colour='#b0a070')}),
     # the river-carved range is judged against the San Gabriel Mountains: chaparral, a dense dark olive brush on every
     # slope it can hold, grey-brown decomposed granite and pale outcrops on the ridges and the steepest faces, golden
     # dry grass on the gentle ground, pale washes; no snow (san_gabriel_mountains_01-03). The alpine palette's bedded
     # limestone and snow painted the whole range white (the 11-12 aerial). palette='alpine' keeps the alpine look
-    'fluvial_range': dict(constants=dict(snowline_m=4500.0, treeline_m=2900.0), layers={
+    'fluvial_range': dict(constants=dict(snowline_m=4500.0, treeline_m=2900.0, latitude_deg=34.3), layers={
         'pasture': dict(colour='#a08d62', patches=[dict(scale_m=7.0, colour='#8f7f58', amount=0.5),
                                                    dict(scale_m=90.0, colour='#b09c70', amount=0.45, detail=4.0)]),
         'scree': dict(colour='#958a7a'),
@@ -868,7 +1300,12 @@ RECIPE_LOOKS = {
     # cones, black basalt flows, a pale grey-brown cinder plain under straw grass with juniper and pinyon scattered on
     # it (sp_crater_01 from the air: a black cone and its flow on a pale plain). The volcanic palette's wet look
     # (green grass, closed forest) dressed the whole field in forest
-    'cinder_cones': dict(layers={
+    # the places of the recipes whose palettes are another place's, for their climatological sun (climate_sun); the
+    # karst and chalk coast palettes are in two recipes' cache keys, so their places come only through here
+    'caldera': dict(constants=dict(latitude_deg=42.9)),           # Crater Lake
+    'tower_karst': dict(constants=dict(latitude_deg=25.3)),       # Guilin
+    'sea_cliffs': dict(constants=dict(latitude_deg=50.8)),        # the Seven Sisters
+    'cinder_cones': dict(constants=dict(latitude_deg=35.6), layers={
         'ash soil': dict(colour='#8a8070', patches=[dict(scale_m=6.0, colour='#7a7062', amount=0.45),
                                                     dict(scale_m=120.0, colour='#9a8f7a', amount=0.4, detail=4.0)]),
         'grass': dict(colour='#a49a76', weight='smoothstep(0.1, 0.36, plants + 0.25*(fbm(150, 0) - 0.5) '
@@ -890,29 +1327,31 @@ RECIPE_LOOKS = {
 # a real DEM's palette (the real_place recipe), its strata (absolute metres: the reference DEMs carry their own
 # heights) and the mask parameters that make its snow and tree line (masks.MaskParams fields, altitude in metres)
 PLACES = {
-    'lauterbrunnen': dict(palette='alpine', mask_params=dict(snowline_m=2750.0, treeline_m=1950.0)),
+    # (latitude_deg: the place's, for its climatological sun, climate_sun; for_place puts it in the palette's
+    # constants. The real_place recipe reads only a place's palette, mask_params and strata)
+    'lauterbrunnen': dict(palette='alpine', mask_params=dict(snowline_m=2750.0, treeline_m=1950.0), latitude_deg=46.6),
     'grand_canyon_toroweap': dict(
-        palette='desert_sandstone', mask_params=dict(treeline_m=2200.0),
+        palette='desert_sandstone', mask_params=dict(treeline_m=2200.0), latitude_deg=36.2,
         # the Toroweap fault: the west side is down about 170 m (the Esplanade bench at 1200 m there, 1370 m east)
         strata=dict(column='toroweap', source='attribute', looks=False,
                     faults=[dict(x=-1450.0, y=0.0, strike_deg=8.0, throw_m=170.0, down='west', width_m=60.0)],
                     warp=[(300.0, 4.0), (6.0, 0.6)])),
-    'mount_fuji': dict(palette='volcanic', mask_params=dict(snowline_m=2700.0, treeline_m=2450.0)),
-    'crater_lake': dict(palette='volcanic', mask_params=dict(treeline_m=2400.0)),
-    'great_sand_dunes': dict(palette='dunes', mask_params=dict()),
-    'namib_star_dunes': dict(palette='dunes', mask_params=dict()),
-    'badlands_sd': dict(palette='badlands', mask_params=dict(),
+    'mount_fuji': dict(palette='volcanic', mask_params=dict(snowline_m=2700.0, treeline_m=2450.0), latitude_deg=35.4),
+    'crater_lake': dict(palette='volcanic', mask_params=dict(treeline_m=2400.0), latitude_deg=42.9),
+    'great_sand_dunes': dict(palette='dunes', mask_params=dict(), latitude_deg=37.7),
+    'namib_star_dunes': dict(palette='dunes', mask_params=dict(), latitude_deg=-24.7),
+    'badlands_sd': dict(palette='badlands', mask_params=dict(), latitude_deg=43.8,
                         strata=dict(column='badlands_cedar_pass', source='attribute', looks=False,
                                     warp=[(250.0, 1.5), (4.0, 0.25)])),
-    'badlands_sd_detail': dict(palette='badlands', mask_params=dict(),
+    'badlands_sd_detail': dict(palette='badlands', mask_params=dict(), latitude_deg=43.8,
                                strata=dict(column='badlands_cedar_pass', source='attribute', looks=False,
                                            warp=[(250.0, 1.5), (4.0, 0.25)])),
-    'guilin_karst': dict(palette='karst', mask_params=dict()),
-    'seven_sisters': dict(palette='chalk_coast', mask_params=dict(sea_level=0.0)),
-    'palouse_hills': dict(palette='farmland', mask_params=dict()),
-    'monument_valley': dict(palette='desert_sandstone', mask_params=dict(),
+    'guilin_karst': dict(palette='karst', mask_params=dict(), latitude_deg=25.3),
+    'seven_sisters': dict(palette='chalk_coast', mask_params=dict(sea_level=0.0), latitude_deg=50.8),
+    'palouse_hills': dict(palette='farmland', mask_params=dict(), latitude_deg=46.9),
+    'monument_valley': dict(palette='desert_sandstone', mask_params=dict(), latitude_deg=37.0,
                             strata=dict(column='monument_valley', source='attribute', z_offset_m=1500.0)),
-    'meteor_crater': dict(palette='desert_sandstone', mask_params=dict(),
+    'meteor_crater': dict(palette='desert_sandstone', mask_params=dict(), latitude_deg=35.0,
                           strata=dict(column='meteor_crater', source='attribute', z_offset_m=352.0 - 1700.0,
                                       looks=False)),
 }
@@ -1022,9 +1461,37 @@ def names_in(expr):
     return out
 
 
+# The maps the surface data bake adds to the masks (terrain/surface/maps.MAPS; SURFACING_DESIGN.md 2.2) and the one
+# name the material derives from its normal beyond the masks' own (insolation). Listed here as well, so a palette
+# that reads them can be written and checked where the bake is not installed. A material built without baked surface
+# data reads each of them as 0, as it reads any attribute the mesh lacks.
+SURFACE_MAPS = ('crest', 'crest_fine', 'crease', 'cavity', 'settle', 'snowpack', 'fresh', 'spi', 'valley',
+                'src_strata', 'grain', 'streak', 'canopy', 'canopy_expected', 'shrubs', 'insolation')
+_SURFACE_NAMES = None
+
+
+def surface_maps():
+    """The names a mask expression may read beyond the masks package's: SURFACE_MAPS and whatever the surface data
+    bake's registry (terrain/surface/maps.MAPS) lists, when that package is there."""
+    global _SURFACE_NAMES
+    if _SURFACE_NAMES is None:
+        names = set(SURFACE_MAPS)
+        try:
+            from ..surface import maps as _maps
+            reg = getattr(_maps, 'MAPS', None) or ()
+            for m in (reg.keys() if isinstance(reg, dict) else reg):
+                nm = m if isinstance(m, str) else (m.get('name') if isinstance(m, dict) else getattr(m, 'name', None))
+                if isinstance(nm, str):
+                    names.add(nm)
+        except Exception:                                # the bake is not installed, or needs Blender to import
+            pass
+        _SURFACE_NAMES = frozenset(names)
+    return _SURFACE_NAMES
+
+
 def known_mask(name):
-    """None if `name` is a mask the masks package makes (masks.parse_name), else an error message naming the
-    nearest valid ones."""
+    """None if `name` is a mask the masks package makes (masks.parse_name) or a map of the surface data bake
+    (surface_maps), else an error message naming the nearest valid ones."""
     try:
         from .. import masks as _M
     except Exception:                                    # pragma: no cover - the masks package is part of the family
@@ -1033,6 +1500,8 @@ def known_mask(name):
         _M.parse_name(name)
         return None
     except KeyError as e:
+        if name in surface_maps():
+            return None
         return str(e).strip('"\'')
 
 
@@ -1111,10 +1580,12 @@ def voronoi_cells(x, y, scale_m, seed=0, z=None, z_stretch=0.0):
     return val
 
 
-def evaluate(expr, masks, x=None, y=None, constants=None):
+def evaluate(expr, masks, x=None, y=None, constants=None, flat=False):
     """Evaluate an expression with numpy. masks: {name: array} or a callable name -> array (all the same shape);
     x, y: world metres of the points (needed only by noise(), fbm() and cells()); constants: the terrain constants
-    (CONSTANTS defaults). A mask the dict lacks reads 0 (an absent process), as the material's Attribute node does."""
+    (CONSTANTS defaults). A mask the dict lacks reads 0 (an absent process), as the material's Attribute node does.
+    flat=True: noise(), fbm() and cells() read their mean 0.5, which leaves what the terrain alone decides (the
+    material weights its bump by these; the look tests measure a weight's noise share against them)."""
     t = parse(expr) if not isinstance(expr, tuple) else expr
     get = masks if callable(masks) else (lambda n: masks.get(n))
     consts = dict(CONSTANTS)
@@ -1144,6 +1615,8 @@ def evaluate(expr, masks, x=None, y=None, constants=None):
             return a / np.where(np.abs(b) < 1e-12, 1e-12, b) if isinstance(b, np.ndarray) else a / (b if abs(b) > 1e-12 else 1e-12)
         f, args = n[1], n[2]
         if f in ('noise', 'fbm', 'cells'):
+            if flat:
+                return 0.5
             if x is None:
                 raise ExprError(f'{f}() needs the points (x, y) to evaluate with numpy')
             seed = int(args[1][1]) if len(args) > 1 else 0
@@ -1210,6 +1683,138 @@ def hex_linear(h):
     return tuple(float(x) for x in srgb_to_linear(np.array([(v >> 16) & 255, (v >> 8) & 255, v & 255]) / 255.0))
 
 
+# -------------------------------------------------------------------------------------------------- ramps ---
+# A ramp is a colour read at a terrain term: dict(t='<mask expression, 0..1>', stops=[(t, colour), ...]). A layer's
+# `ramp` colours the layer; options['satmap'] (dict(t, stops, amount)) multiplies the whole ground as a ratio around
+# 1, the place's own macro colour (drainage, hollows and crests) where world-noise octaves knew nothing of the
+# ground. One definition serves both ways a material can draw a ramp: ramp_patches (terrain-placed patches, what the
+# node group already reads) and ramp_rows (the rows of a ramp image, for a material that reads baked surface data).
+
+def ramp_stops(ramp):
+    """A ramp's stops as (t (N,), linear rgb (N, 3), kind). kind is 'colour' when the stops are sRGB '#rrggbb'
+    colours and 'tint' when they are (r, g, b) multipliers. Raises ValueError naming what is wrong."""
+    stops = list((ramp or {}).get('stops') or ())
+    if len(stops) < 2:
+        raise ValueError('a ramp needs at least two stops [(t, colour), ...]')
+    ts, cs, kinds = [], [], set()
+    for s in stops:
+        if not (isinstance(s, (list, tuple)) and len(s) == 2):
+            raise ValueError(f'ramp stop {s!r}: write it as (t, colour)')
+        t, c = s
+        ts.append(float(t))
+        if isinstance(c, str):
+            cs.append(hex_linear(c))
+            kinds.add('colour')
+        else:
+            c = tuple(float(v) for v in c)
+            if len(c) != 3:
+                raise ValueError(f'ramp stop colour {c!r}: sRGB "#rrggbb" or an (r, g, b) multiplier')
+            cs.append(c)
+            kinds.add('tint')
+    if len(kinds) != 1:
+        raise ValueError('a ramp mixes sRGB colours and (r, g, b) multipliers: use one kind')
+    ts = np.array(ts, np.float64)
+    if ts[0] < 0.0 or ts[-1] > 1.0 or np.any(np.diff(ts) <= 0.0):
+        raise ValueError(f'ramp stops at t = {[float(v) for v in ts]}: t must rise within 0..1')
+    return ts, np.array(cs, np.float64), kinds.pop()
+
+
+def ramp_value(ramp, t):
+    """The ramp's linear (r, g, b) at t (a number or an array, clamped to 0..1): straight between the stops, or
+    eased with smoothstep when the ramp says smooth; the first stop below it and the last above."""
+    ts, cs, _kind = ramp_stops(ramp)
+    t = np.clip(np.asarray(t, np.float64), 0.0, 1.0)
+    out = np.empty(t.shape + (3,))
+    out[...] = cs[0]
+    for k in range(1, len(ts)):
+        s = np.clip((t - ts[k - 1]) / (ts[k] - ts[k - 1]), 0.0, 1.0)
+        if ramp.get('smooth'):
+            s = s * s * (3.0 - 2.0 * s)
+        out += s[..., None] * (cs[k] - cs[k - 1])
+    return out
+
+
+def _ramp_segments(ramp, centre, tag):
+    """A ramp as patches: a constant one taking `centre` to the first stop, then one per segment that takes each
+    stop to the next where t crosses it. The patches multiply (each mixes the colour toward itself times a ratio),
+    and a segment's weight is 1 before the next begins, so their product is the ramp's colour over `centre`."""
+    ts, cs, _kind = ramp_stops(ramp)
+    t = str(ramp['t'])
+    out = []
+    first = cs[0] / np.maximum(np.asarray(centre, np.float64), 1e-4)
+    if np.max(np.abs(first - 1.0)) > 1e-6:
+        out.append(dict(scale_m=None, tint=tuple(float(v) for v in first), amount=1.0, from_ramp=tag))
+    for k in range(1, len(ts)):
+        ratio = cs[k] / np.maximum(cs[k - 1], 1e-4)
+        if np.max(np.abs(ratio - 1.0)) <= 1e-6:
+            continue
+        a, b = float(ts[k - 1]), float(ts[k])
+        where = f'smoothstep({a!r}, {b!r}, {t})' if ramp.get('smooth') else f'clamp((({t}) - {a!r}) / {b - a!r}, 0, 1)'
+        out.append(dict(scale_m=None, tint=tuple(float(v) for v in ratio), amount=1.0, where=where, from_ramp=tag))
+    return out
+
+
+def ramp_patches(layer):
+    """A layer's `ramp` as the patches that draw it (see _ramp_segments), relative to the layer's `colour` for a ramp
+    of colours and to 1 for a ramp of multipliers. [] without a ramp. get() puts them first in the layer's patches."""
+    r = layer.get('ramp')
+    if not r:
+        return []
+    kind = ramp_stops(r)[2]
+    if kind == 'colour' and not layer.get('colour'):
+        raise ValueError(f"layer {layer.get('name', '?')!r}: a ramp of colours needs the layer's colour (its centre)")
+    return _ramp_segments(r, hex_linear(layer['colour']) if kind == 'colour' else (1.0, 1.0, 1.0), 'ramp')
+
+
+def satmap_patches(pal):
+    """options['satmap'] as the patches every layer takes (multiplying every layer by the same ratio multiplies the
+    blended ground by it): the ramp's colour over its own middle for a ramp of colours, the multiplier itself
+    otherwise, drawn in by `amount` (default 1). [] without a satmap."""
+    sm = (pal.get('options') or {}).get('satmap')
+    if not sm:
+        return []
+    ts, cs, kind = ramp_stops(sm)
+    amount = float(sm.get('amount', 1.0))
+    if kind == 'colour':
+        cs = cs / np.maximum(ramp_value(sm, 0.5), 1e-4)
+    cs = 1.0 + amount * (cs - 1.0)
+    return _ramp_segments(dict(sm, stops=[(float(t), tuple(float(v) for v in c)) for t, c in zip(ts, cs)]),
+                          (1.0, 1.0, 1.0), 'satmap')
+
+
+def ramp_rows(pal, width=256):
+    """The palette's ramps as the rows of a ramp image: (rows, index).
+
+    rows   float32 (R, width, 4), sRGB-encoded 0..1 (what an 8-bit sRGB image stores, so the GPU hands the shader
+           the linear value), alpha 1. Texel j holds t = j / (width - 1): read a row at u = (0.5 + t (width - 1))
+           / width. With no ramp in the palette, rows has no row.
+    index  {key: dict(row, kind, gain, t, smooth)}, key the layer's name for its `ramp` and 'satmap' for the
+           options' satmap. kind 'colour': the row is the layer's albedo there (it stands where `colour` stands);
+           kind 'tint': the row times gain is a multiplier (gain at least 1, so the row fits 0..1). The satmap's
+           row is always a tint, with its amount applied.
+    """
+    pal = get(pal) if not isinstance(pal, dict) or 'options' not in pal else pal
+    tt = np.linspace(0.0, 1.0, int(width))
+    rows, index = [], {}
+
+    def add(key, ramp, lin, kind):
+        gain = max(1.0, float(lin.max())) if kind == 'tint' else 1.0
+        row = np.ones((int(width), 4), np.float32)
+        row[:, :3] = linear_to_srgb(np.clip(lin / gain, 0.0, 1.0))
+        index[key] = dict(row=len(rows), kind=kind, gain=gain, t=str(ramp['t']), smooth=bool(ramp.get('smooth')))
+        rows.append(row)
+    for L in pal['layers']:
+        if L.get('ramp'):
+            add(L['name'], L['ramp'], ramp_value(L['ramp'], tt), ramp_stops(L['ramp'])[2])
+    sm = pal['options'].get('satmap')
+    if sm:
+        lin = ramp_value(sm, tt)
+        if ramp_stops(sm)[2] == 'colour':
+            lin = lin / np.maximum(ramp_value(sm, 0.5), 1e-4)
+        add('satmap', sm, 1.0 + float(sm.get('amount', 1.0)) * (lin - 1.0), 'tint')
+    return (np.stack(rows) if rows else np.zeros((0, int(width), 4), np.float32)), index
+
+
 # ----------------------------------------------------------------------------------------- resolution, checks ---
 
 def names():
@@ -1273,14 +1878,16 @@ def get(palette, recipe=None, validate=True):
                     pal['strata'].setdefault(k, copy.deepcopy(v))
     else:
         raise TypeError('palette: a name, "auto", a dict or None')
+    # the palette's own look (PALETTE_LOOKS, by the name before any '+column'), once: `looks` records it, so a
+    # palette that comes through here again (surfacing.resolve, a recipe that edits a get() result) is not changed
+    # twice; then the recipe's look over that ('auto' only)
+    base_name = str(pal['name']).split('+')[0]
+    if base_name in PALETTE_LOOKS and base_name not in (pal.get('looks') or ()):
+        _apply_look(pal, PALETTE_LOOKS[base_name])
+        pal['looks'] = list(pal.get('looks') or ()) + [base_name]
     look = RECIPE_LOOKS.get(_recipe_name(recipe)) if auto else None
-    if look:                                             # the recipe's own look over its palette ('auto' only)
-        for k, v in copy.deepcopy(look).items():
-            if k == 'layers':                            # {layer name: {key: value}} over the palette's layers
-                for L in pal['layers']:
-                    L.update(v.get(L['name'], {}))
-            else:
-                pal[k] = dict(pal.get(k) or {}, **v) if isinstance(v, dict) and k != 'strata' else v
+    if look:
+        _apply_look(pal, look)
     opts = copy.deepcopy(DEFAULT_OPTIONS)
     opts.update(pal.get('options') or {})
     pal['options'] = opts
@@ -1301,14 +1908,61 @@ def get(palette, recipe=None, validate=True):
         for k, v in STRATA_DEFAULTS.items():
             pal['strata'].setdefault(k, copy.deepcopy(v))
     pal.setdefault('dressing', None)
-    consts = dict(CONSTANTS)
+    consts = {k: CONSTANTS[k] for k in _FILLED_CONSTANTS}
     consts.update(pal.get('constants') or {})
     pal['constants'] = consts
+    # ramps as patches (a layer's own first, then the satmap's on every layer), replacing those of an earlier pass.
+    # A ramp that cannot be read is left for check() to name
+    try:
+        sat = satmap_patches(pal)
+    except (ValueError, KeyError, TypeError):
+        sat = []
+    for L in pal['layers']:
+        rp = []
+        if L.get('ramp'):
+            try:
+                if not L.get('colour') and ramp_stops(L['ramp'])[2] == 'colour':
+                    L['colour'] = '#%02x%02x%02x' % tuple(
+                        int(round(255.0 * float(v))) for v in linear_to_srgb(ramp_value(L['ramp'], 0.5)))
+                rp = ramp_patches(L)
+            except (ValueError, KeyError, TypeError):
+                rp = []
+        own = [pt for pt in _patches(L) if not pt.get('from_ramp')]
+        if rp or sat or len(own) != len(_patches(L)):
+            L['patches'] = rp + own + copy.deepcopy(sat)
     if validate:
         problems = check(pal)
         if problems:
             raise ValueError(f'palette {pal["name"]!r}: ' + '; '.join(problems))
     return pal
+
+
+def _apply_look(pal, look):
+    """Merge a look (PALETTE_LOOKS, RECIPE_LOOKS: see the module doc) into a palette, in place."""
+    look = copy.deepcopy(look)
+    layers = look.pop('layers', None) or {}
+    drop = set(look.pop('drop', None) or ())
+    order = look.pop('order', None)
+    pal['layers'] = [L for L in pal['layers'] if L['name'] not in drop]
+    have = {L['name'] for L in pal['layers']}
+    for L in pal['layers']:
+        L.update(layers.get(L['name'], {}))
+    for nm, d in layers.items():                         # a layer the palette lacks, given whole
+        if nm not in have and nm not in drop and d.get('set'):
+            pal['layers'].append(dict(d, name=nm))
+    if order:
+        by = {L['name']: L for L in pal['layers']}
+        if set(order) != set(by) or len(order) != len(by):
+            raise ValueError(f"palette {pal.get('name')!r}: a look's order {list(order)} must name each of its layers "
+                             f'once: {sorted(by)}')
+        pal['layers'] = [by[n] for n in order]
+    for k, v in look.items():
+        if k == 'strata' and isinstance(v, dict) and 'column' not in v and isinstance(pal.get('strata'), dict):
+            pal['strata'] = dict(pal['strata'], **v)     # settings over the palette's column (a look with a column
+        elif isinstance(v, dict) and k != 'strata':      # replaces the spec)
+            pal[k] = dict(pal.get(k) or {}, **v)
+        else:
+            pal[k] = v
 
 
 def _patches(L):
@@ -1343,6 +1997,16 @@ def check(pal):
                     out.append(f'{tag}: {msg}')
         except ExprError as err:
             out.append(f'{tag}: {err}')
+
+    def ramp_ok(tag, r):
+        if not isinstance(r, dict) or r.get('t') is None:
+            out.append(f'{tag}: a dict(t=<mask expression>, stops=[(t, colour), ...])')
+            return
+        try:
+            ramp_stops(r)
+        except (ValueError, TypeError) as err:
+            out.append(f'{tag}: {err}')
+        expr_ok(f'{tag} t', r['t'])
     for i, L in enumerate(layers):
         tag = f'layer {i} ({L.get("name", "?")})'
         if not L.get('set'):
@@ -1359,6 +2023,8 @@ def check(pal):
         if L.get('strata') and not pal.get('strata') and L.get('colour') is None:
             out.append(f'{tag}: strata=True, but the palette has no strata column and the layer no colour')
         expr_ok(f'{tag} weight', L.get('weight', '1'))
+        if L.get('fallback') is not None:
+            expr_ok(f'{tag} fallback', L['fallback'])
         for k, pt in enumerate(_patches(L)):
             if not (pt.get('colour') or pt.get('tint')):
                 out.append(f'{tag} patch {k}: needs a colour or a tint')
@@ -1369,6 +2035,8 @@ def check(pal):
                     out.append(f'{tag} patch {k}: {e}')
             if pt.get('where'):
                 expr_ok(f'{tag} patch {k} where', pt['where'])
+        if L.get('ramp'):
+            ramp_ok(f'{tag} ramp', L['ramp'])
         for e in _layer_exprs(L):
             expr_ok(f'{tag} streaks_where/ledges where', e)
         ld = L.get('ledges')
@@ -1384,11 +2052,13 @@ def check(pal):
     o = pal.get('options') or {}
     if o.get('interpolation') not in ('Auto', 'Cubic', 'Linear', 'Closest'):
         out.append("options.interpolation must be 'Auto', 'Cubic', 'Linear' or 'Closest'")
-    if o.get('detile') not in ('offset', 'rotate'):
-        out.append("options.detile must be 'offset' or 'rotate'")
+    if o.get('detile') not in ('offset', 'rotate', 'hex'):
+        out.append("options.detile must be 'offset', 'rotate' or 'hex'")
     for key in ('damp_where', 'tone'):
         if o.get(key):
             expr_ok(key, o[key])
+    if o.get('satmap'):
+        ramp_ok('options.satmap', o['satmap'])
     st = pal.get('strata')
     if st:
         col = st.get('column')
@@ -1409,14 +2079,20 @@ def material_masks(pal):
     out = set()
     for L in pal['layers']:
         out |= names_in(L['weight'])
+        if L.get('fallback') is not None:
+            out |= names_in(L['fallback'])
         for pt in _patches(L):
             if pt.get('where'):
                 out |= names_in(pt['where'])
+        if L.get('ramp'):
+            out |= names_in(L['ramp']['t'])
         for e in _layer_exprs(L):
             out |= names_in(e)
     for key in ('damp_where', 'tone'):
         if pal['options'].get(key):
             out |= names_in(pal['options'][key])
+    if pal['options'].get('satmap'):
+        out |= names_in(pal['options']['satmap']['t'])
     if pal.get('strata') and pal['strata'].get('source', 'attribute') == 'attribute' and \
             any(L.get('strata') for L in pal['layers']):
         out.add('strata')
@@ -1434,8 +2110,9 @@ def masks_used(pal):
 
 
 def for_place(dem):
-    """(palette, place) for a real DEM (a reference name): the palette dict with the place's strata merged in, and
-    the place record (its mask_params for masks.MaskParams: snowline_m, treeline_m, sea_level)."""
+    """(palette, place) for a real DEM (a reference name): the palette dict with the place's strata merged in and its
+    latitude in the constants (climate_sun), and the place record (its mask_params for masks.MaskParams: snowline_m,
+    treeline_m, sea_level)."""
     if dem not in PLACES:
         raise KeyError(f'no palette for the place {dem!r}; nearest: {", ".join(_nearest(dem, PLACES))}')
     place = copy.deepcopy(PLACES[dem])
@@ -1446,7 +2123,10 @@ def for_place(dem):
     mp = place.get('mask_params') or {}
     pal['constants'] = dict(pal.get('constants') or {},
                             **{k: float(v) for k, v in mp.items() if k in ('snowline_m', 'treeline_m')})
-    return get(pal), place
+    pal = get(pal)
+    if place.get('latitude_deg') is not None:          # the place's own, over the palette's look's
+        pal['constants']['latitude_deg'] = float(place['latitude_deg'])
+    return pal, place
 
 
 def _look(name):
@@ -1514,6 +2194,9 @@ def describe(palette):
                      f"colour {L['colour'] or 'scan'}{'  strata' if L['strata'] else ''}"
                      f"{'  canopy' if L.get('canopy') else ''}")
         lines.append(f"      weight: {L['weight']}")
+        if L.get('ramp'):
+            lines.append(f"      ramp at {L['ramp']['t']}: "
+                         + ', '.join(f'{t:g} {c}' for t, c in L['ramp']['stops']))
     if pal.get('strata'):
         lines.append(f"  strata: {pal['strata']}")
     lines.append(f"  constants: {pal['constants']}")
@@ -1527,8 +2210,9 @@ def describe(palette):
 
 
 __all__ = ['PALETTES', 'STRATA_COLUMNS', 'STRATA_DEFAULTS', 'FORMATION_LOOKS', 'LAYER_COLOURS', 'RECIPE_PALETTES', 'RECIPE_LOOKS',
-           'PLACES', 'DEFAULT_OPTIONS', 'LANDSCAPE', 'LANDSCAPE_MACRO', 'CONSTANTS', 'DERIVED', 'MAX_LAYERS',
+           'PALETTE_LOOKS', 'PLACES', 'DEFAULT_OPTIONS', 'LANDSCAPE', 'LANDSCAPE_MACRO', 'CONSTANTS', 'DERIVED',
+           'MAX_LAYERS', 'SURFACE_MAPS', 'surface_maps', 'known_mask', 'climate_sun',
            'ExprError', 'parse', 'tree_key', 'names_in', 'evaluate', 'value_noise', 'voronoi_cells', 'names', 'get',
            'check', 'masks_used', 'material_masks', 'for_place', 'column_layers', 'column_repeats', 'describe',
-           'hex_linear',
+           'ramp_stops', 'ramp_value', 'ramp_patches', 'satmap_patches', 'ramp_rows', 'hex_linear',
            'srgb_to_linear', 'linear_to_srgb', 'resolve_name']

@@ -1,13 +1,15 @@
-"""The independent review's matched views, rendered with the surfacing package's current palettes (one recipe per
-Blender process, through a GPU slot), so each textured view lies beside the reviewer's photograph and the reviewer's
-own render of the same camera (out/review/renders/<recipe>/, which this never touches):
+"""The judge's views, rendered with the current palettes (one recipe per Blender process, through a GPU slot), so
+each textured view lies beside its photograph (the surfacing judge's boards, blender/tests/terrain/surfacing_judge/):
 
     EIDO_TERRAIN_CACHE_GB=20 bash run_blender.sh blender/tests/terrain/surfacing/review_views.py --recipe canyon \\
-        [--views a,b] [--tag v2] [--debug layers] [--samples 16] [--no-rocks] [--aniso 16] [--time]
+        [--views a,b] [--tag v2] [--layers] [--debug layers] [--samples 16] [--no-rocks] [--aniso 16] [--time] \\
+        [--plan <views.json>] [--palettes <palettes.py>]
     (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The cameras are the review's (out/review/views_plan.json: the matched spot, aim point and lens of each photograph),
-built and lit exactly as out/review/scripts/review_render.py does: make_terrain at the judge's settings (the
+The cameras are the judge's (surfacing_judge/views.json: the review's matched spot, aim point and lens of each
+photograph, the cameras that faced walls on today's terrain moved, an establishing aerial and a low oblique added;
+--plan takes another file of that shape, such as the review's own out/review/views_plan.json), built and lit as
+out/review/scripts/review_render.py does: make_terrain at the judge's settings (the
 reference's extent, seed 1, film quality, hero levels on the camera when it stands in the main tile), the recipe's
 palette ('auto'; --debug layers: each layer one flat colour, unlit), its rocks, make_sky daylight with the sun 70
 degrees left of the view, 960 x 540, 16 samples, exposure -0.5. Writes out/surfacing/review/<recipe>/<view>[_<tag>].png
@@ -20,6 +22,15 @@ cached terrains.
                    object with the current palette and render: a minute a view instead of a rebuild whenever another
                    package's solver edit changes the terrain cache's code hash. The geometry is that snapshot's.
     --once         render each view once (no second, timing frame)
+    --layers       after the textured frame, the same frame as a layer map: <view>[_<tag>]_layers.png, the palette's
+                   debug='layers' material (each layer one flat colour mixed by its weight, unlit) with lakes and the
+                   sea black, rocks and plants hidden, no world, the Standard view transform, a transparent film,
+                   8-bit RGBA. The judge decodes it into the material's own weights per pixel
+                   (surfacing_judge/layers.decode_layer_map): the one-material share and within-layer variation of the
+                   frame, and the board's layer-map column
+    --palettes <f> the palettes module read from this file instead of the checkout's (a state before a round:
+                   `git show <commit>:blender/eidoblend/terrain/build/palettes.py > <file>`, outside the repo); the
+                   record names the file
 """
 import gc
 import json
@@ -34,9 +45,31 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TN = os.path.normpath(os.path.join(HERE, '..'))
 REVIEW = os.path.join(TN, 'out', 'review')
 OUT = os.path.join(TN, 'out', 'surfacing', 'review')
+JUDGE_VIEWS = os.path.join(TN, 'surfacing_judge', 'views.json')
 sys.path.insert(0, TN)
 sys.path.insert(0, os.path.join(TN, 'reference'))
 sys.path.insert(0, os.path.normpath(os.path.join(TN, '..', '..')))
+
+
+def _install_palettes():
+    """--palettes <file>: that file becomes eidoblend.terrain.build.palettes before anything imports the checkout's
+    (build/ is a namespace package, so importing it runs no module)."""
+    a = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+    if '--palettes' not in a:
+        return None
+    import importlib.util
+    import eidoblend.terrain.build as build
+    path = os.path.abspath(a[a.index('--palettes') + 1])
+    spec = importlib.util.spec_from_file_location('eidoblend.terrain.build.palettes', path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    build.palettes = mod
+    print(f'[review_views] palettes from {path}', flush=True)
+    return path
+
+
+PALETTES_FILE = _install_palettes()
 
 import bpy  # noqa: E402
 
@@ -63,8 +96,9 @@ def args():
         return a[a.index(k) + 1] if k in a else d
     return dict(recipe=opt('--recipe'), views=(opt('--views') or ''), tag=opt('--tag', ''), debug=opt('--debug'),
                 samples=int(opt('--samples', '16')), rocks='--no-rocks' not in a, aniso=int(opt('--aniso', '16')),
-                time='--time' in a, snap=opt('--snap'), once='--once' in a,
-                plan=opt('--plan', os.path.join(REVIEW, 'views_plan.json')))
+                time='--time' in a, snap=opt('--snap'), once='--once' in a, layers='--layers' in a,
+                plan=opt('--plan', JUDGE_VIEWS if os.path.exists(JUDGE_VIEWS)
+                         else os.path.join(REVIEW, 'views_plan.json')))
 
 
 def recipe_centre(recipe, params):
@@ -117,6 +151,51 @@ def render(sc, cam, path, sky_root, once=False):
     return t_first, time.time() - t0
 
 
+def layer_pass(sc, t, path):
+    """The layer map of the frame just rendered (--layers in the module doc). Returns the render seconds."""
+    from eidoblend.terrain.build import palettes as Pal
+    from eidoblend.terrain.build import surfacing as S
+    info = t.info
+    strata = (Pal.PLACES.get(info['place']) or {}).get('strata') if info.get('place') else None
+    S.apply_surface(t.obj, palette=info.get('palette') or 'auto', recipe=t.recipe, strata=strata,
+                    options={'debug': 'layers'}, log=None)
+    black = bpy.data.materials.new('judge_water_black')
+    black.use_nodes = True
+    nt = black.node_tree
+    nt.nodes.clear()
+    em = nt.nodes.new('ShaderNodeEmission')
+    em.inputs['Color'].default_value = (0.0, 0.0, 0.0, 1.0)
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
+    water = [o for o in list(t.water.get('lakes') or []) + [t.water.get('sea')] if o is not None]
+    for o in water:
+        o.data.materials.clear()
+        o.data.materials.append(black)
+    keep = {t.obj.name} | {o.name for o in water}
+    for o in sc.objects:
+        if o.type != 'CAMERA' and o.name not in keep:
+            o.hide_render = True                           # rocks, plants, clouds, the sun
+    world = bpy.data.worlds.new('judge_black')
+    world.color = (0.0, 0.0, 0.0)
+    sc.world = world
+    vs = sc.view_settings
+    vs.view_transform = 'Standard'
+    vs.look = 'None'
+    vs.exposure = 0.0
+    vs.gamma = 1.0
+    sc.render.film_transparent = True
+    sc.render.use_compositing = False
+    sc.render.use_sequencer = False
+    im = sc.render.image_settings
+    im.file_format = 'PNG'
+    im.color_mode = 'RGBA'
+    im.color_depth = '8'                               # the decode is exact to 0.03 at 8 bits (test_measures)
+    sc.render.filepath = path
+    t0 = time.time()
+    bpy.ops.render.render(write_still=True)
+    return time.time() - t0
+
+
 def build_terrain(a, recipe, size, params, palette, focus, view_name):
     """make_terrain at the judge's settings, or with --snap the saved terrain of this view (made and saved on its
     first run), rebuilt with the current palette."""
@@ -143,8 +222,9 @@ def main():
     out = os.path.join(OUT, recipe)
     os.makedirs(out, exist_ok=True)
     sky_root = os.path.join(OUT, '_sky', recipe)
-    size = refs.load(REF[recipe]).extent if REF[recipe] else None
-    params = PARAMS.get(recipe)
+    ref = plan['reference'] if 'reference' in plan else REF[recipe]       # the judge's views.json names both
+    size = refs.load(ref).extent if ref else None
+    params = plan['params'] if 'params' in plan else PARAMS.get(recipe)
     c0 = recipe_centre(recipe, params)
     tag = f"_{a['tag']}" if a['tag'] else ''
     rec_path = os.path.join(out, f'{recipe}{tag}_record.json')
@@ -212,7 +292,12 @@ def main():
                              build_s=round(tb, 1),
                              first_render_s=round(t_first, 1),
                              second_render_s=None if t_second is None else round(t_second, 2),
-                             total_s=round(time.time() - t0, 1), caption=v['caption'], photo=v.get('photo'))
+                             total_s=round(time.time() - t0, 1), caption=v['caption'], photo=v.get('photo'),
+                             frame=v.get('frame'), plan=os.path.basename(a['plan']), palettes_file=PALETTES_FILE)
+            if a['layers'] and not a['debug']:
+                lp = os.path.join(out, name + '_layers.png')
+                rec[name]['layers'] = os.path.basename(lp)
+                rec[name]['layers_render_s'] = round(layer_pass(sc, t, lp), 1)
             hit = t.info.get('cache_hit')
             print(f"[review_views] {recipe}/{name}: heading {heading:.0f} pitch {pitch:.1f} lens {v['lens']:.0f}; "
                   f"build {tb:.0f} s (cache {hit if isinstance(hit, str) else ('hit' if hit else 'miss')}), first "
