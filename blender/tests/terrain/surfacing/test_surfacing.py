@@ -322,8 +322,11 @@ def test_strata_image():
 
 
 def _composite(pal, masks, x, y, consts=None):
-    """The material's coverage composite with numpy (a layer covers what lies below it): exclusive weights."""
-    cov = [np.clip(P.evaluate(L['weight'], masks, x, y, consts or pal['constants']), 0, 1) for L in pal['layers']]
+    """The material's coverage composite with numpy (a layer covers what lies below it): exclusive weights. As the
+    material without baked surface data does, a layer's `fallback` stands for its weight (a canopy layer's weight
+    reads the plant layer's canopy_expected, which only a bake holds)."""
+    cov = [np.clip(P.evaluate(L['fallback'] if L.get('fallback') is not None else L['weight'], masks, x, y,
+                              consts or pal['constants']), 0, 1) for L in pal['layers']]
     excl = [None] * len(cov)
     rem = np.ones_like(cov[0])
     for i in range(len(cov) - 1, -1, -1):
@@ -421,17 +424,23 @@ def test_shape_driven_cover():
     check('snow near the snowline lies in the gullies, not on the ribs between them, and its edge is no contour',
           g_s > 0.6 and r_s < 0.25 and along > 0.25, f'250 m under the line: gullies {g_s:.2f}, ribs {r_s:.2f}; '
           f'spread along a contour {along:.2f}')
-    # the alpine palette on a 30-40 degree slope with no talus: below the treeline forest (scree under it in the
-    # order), above it scree and rock, never scree laid over the forest
+    # the alpine palette on a 30-40 degree slope: below the treeline forest (scree under it in the order), never
+    # scree laid over the forest; above it no forest, and scree where talus lies, not over all the high ground (grey
+    # scree over most of the high ground was the look's defect: the rest is alpine pasture, SURFACING_DESIGN.md 3.9)
     pal = P.get('alpine')
     slope = 30.0 + 10.0 * X / X.max()
     ma = dict(m, slope=slope, flow=np.full(X.shape, 0.2), wetness=np.full(X.shape, 0.2), curv_plan_20m=zeros)
-    lo = _composite(pal, dict(ma, height=np.full(X.shape, 600.0)), X, Y, dict(pal['constants'], base_elevation_m=800.0))
-    hi = _composite(pal, dict(ma, height=np.full(X.shape, 1800.0)), X, Y, dict(pal['constants'], base_elevation_m=800.0))
+    ca = dict(pal['constants'], base_elevation_m=800.0)
+    lo = _composite(pal, dict(ma, height=np.full(X.shape, 600.0)), X, Y, ca)
+    hi = _composite(pal, dict(ma, height=np.full(X.shape, 1800.0)), X, Y, ca)
+    hi_t = _composite(pal, dict(ma, height=np.full(X.shape, 1800.0), talus=np.full(X.shape, 10.0)), X, Y, ca)
     res = dict(low_forest=float(lo['forest'].mean()), low_scree=float(lo['scree'].mean()),
-               high_bare=float((hi['scree'] + hi['rock']).mean()), high_forest=float(hi['forest'].mean()))
-    check('alpine scree and rock: none spotting the forest below the treeline, bare ground above it',
-          res['low_forest'] > 0.75 and res['low_scree'] < 0.12 and res['high_bare'] > 0.5 and res['high_forest'] < 0.1,
+               high_forest=float(hi['forest'].mean()), high_bare_no_talus=float((hi['scree'] + hi['rock']).mean()),
+               high_scree_on_talus=float(hi_t['scree'].mean()))
+    check('alpine scree and rock: none spotting the forest below the treeline; above it no forest, and scree where '
+          'talus lies, not over all the high ground',
+          res['low_forest'] > 0.75 and res['low_scree'] < 0.12 and res['high_forest'] < 0.1
+          and res['high_bare_no_talus'] < 0.4 and res['high_scree_on_talus'] > 0.75,
           ', '.join(f'{k} {v:.2f}' for k, v in res.items()))
     # contour-stretched cells on a hillside rising along x: a cell spans far more along the contour (y) than across it
     hill = 0.25 * X
