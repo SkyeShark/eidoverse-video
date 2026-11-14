@@ -56,9 +56,34 @@ What the node group does, per pixel:
      thousands of metres), the tone expression (hollows and gorges darker, convex edges paler), damp patches (plus
      damp_where, e.g. along wet ground) and partial map AO.
 
+With baked surface data (data=SurfaceData, terrain/surface; SURFACING_DESIGN.md 2.4-2.6, 3.3-3.7) the same palette
+builds the per-texel material instead:
+  - every map is read from its atlas through the two-slot level reader (reader_group): per pixel the finest window
+    holding it, the even levels in one slot and the odd levels in the other, each slot changing level only where its
+    weight is exactly 0 (a dead band of three footprints inside every window edge), so no 2 x 2 quad on a window edge
+    reads the atlas' coarsest mips; slope, aspect, northness, eastness and insolation come from the baked field
+    normal (D), height from the object z;
+  - the shading normal is the field normal plus the relief below the cell (D's gradient, detail_strength), the scans'
+    normal maps in its tangent frame, and the bump of ripples, canopy and strata relief on top (each bump's weight in
+    its Distance, read once outside the bump's height);
+  - planar reads are hex-tiled ('hex', one node group, eido_hex_grid: three reads on a triangle grid, each turned and
+    offset, sharpened by w^7 and their heights; a read's coordinate changes only where its weight is 0);
+  - box layers read eight fixed sector frames on faces steeper than 47 degrees (u along the strike, v up a fixed
+    65-degree dip, two slots by the face's own bearing, hex-tiled inside each), planar below 37 degrees, their scans'
+    normal maps in each frame's tangent plane; the Box projection is not used;
+  - every noise term fades with the pixel's footprint (and a smoothstep around a faded term widens by the spread it
+    lost, so a layer's cover holds as the noise fades), and fbm drops the octaves finer than two footprints;
+  - a layer's ramp and the satmap are read from the palette's ramp image (one row each, Closest); the patches get()
+    wrote for them are skipped;
+  - past D0 (a main-level texel spanning 2.5 pixels, or the option far_m) the ground fades over D0..1.5 D0 to the
+    baked far colour C (its own data per texel to the horizon), never inside the hero windows; rings beyond 1.5 D0
+    from every camera passed to apply_surface take the far material (slot 1), a cost saving only.
+The layer key `fallback` (a weight for a material without baked data) is taken in place of `weight` without data, or
+where the weight reads a map the data lacks.
+
 Mesh attributes per material: EEVEE fails a material that reads 15 of them ('uses too many attributes'), so a palette
 reading more than ATTRS_DIRECT masks reads them packed three to a FLOAT_VECTOR point attribute (mask_packs), which
-apply_surface writes onto the mesh (pack_masks).
+apply_surface writes onto the mesh (pack_masks). A material with baked data reads no mesh attribute.
 
 Images per material: two per layer and one for the strata (two with relief). EEVEE here allows 30 images in one
 material (32 samplers, 2 kept by the engine: 'uses too many samplers (34/32)' at 32 images, measured 11-08). A Cubic
@@ -89,6 +114,28 @@ from . import palettes as P
 
 PACK_VERSION = 1
 MAX_IMAGES = 28                       # EEVEE's 30 per material (measured), less two spare
+# a material with baked data counts samplers, not images: an image read with one state (Linear and Cubic share; the
+# atlases are read Linear EXTEND in both reader slots, the scans Linear or Cubic REPEAT) is one sampler, and each
+# other state (Closest, EXTEND against REPEAT) one more (SURFACING_DESIGN.md 1.3, probe A)
+MAX_SAMPLERS = 28
+SECTOR_DIP_DEG = 65.0                 # the sector frames' fixed up-dip axis (SURFACING_DESIGN.md 3.4, probe C)
+STEEP_DEG = (37.0, 47.0)              # box layers: planar below, sector frames above
+HEX_POWER = 7.0                       # hex tiling's sharpening of the barycentric weights
+HEX_CONTRAST = 0.6                    # ... and how much each read's own height weighs (mix(1, 2 h, 0.6))
+DEAD_FOOTPRINTS = 3.0                 # the reader's dead band inside a window edge, in footprints
+FADE_CELLS = 8.0                      # a level fades in over this many of its own cells
+FAR_TEXEL_PX = 2.5                    # D0: where a main-level texel spans this many pixels
+FAR_FADE_MAIN_CELLS = 64.0            # the far colour fades in over this many main cells beyond the hero windows
+FAR_GRAIN = 0.25                      # how much of the base layer's scan luminance the far colour keeps
+DETAIL_STRENGTH = 0.5                 # the relief below the cell, by default (options detail_strength)
+# the 5-95 % half-range of (n - 0.5) of the mask language's noise() and fbm() (Blender's Noise Texture, stretched
+# x2.5 and x3; measured with surface/noise.py over 2e5 points): what a faded term's smoothstep widens by
+NOISE_HALF = {'noise': 0.358, 'fbm': 0.344}
+# ... and of the raw Noise Texture's Fac (patches, streaks, damp, ledges), by detail 0..5
+RAW_HALF = (0.2, 0.163, 0.143, 0.134, 0.130, 0.128)
+CANOPY_COVER, CANOPY_SHADE = 0.72, 0.92   # a canopy's mean far away: lit crowns' share, and their shade (the far
+#                                           colour C's, surface/far_colour.py)
+HEX_VERSION = 1
 # EEVEE compiles a material with a limited number of mesh attributes: at 15 masks the alpine palette failed with
 # 'Material ... uses too many attributes' (measured 11-13; the shader reads them all as undefined variables). A
 # material reading more masks than ATTRS_DIRECT reads them packed three to a FLOAT_VECTOR point attribute
@@ -268,7 +315,27 @@ def strata_image(column, name='eido_strata', px_per_m=STRATA_PX_PER_M, seed=0, r
     back into recesses; a formation's beds lean hard when its roughness multiplier is under 1, the massive limestones
     and sandstones), G 1 on the top metre of a bed that stands out over the bed above it (a ledge, where debris, soil
     and plants lodge). Its beds are the colour image's, pixel for pixel (their own random draws, so the colours
-    are the same with or without it)."""
+    are the same with or without it). The pixels are strata_array's."""
+    out = strata_array(column, px_per_m=px_per_m, seed=seed, rows=rows, parting=parting, pad_m=pad_m, looks=looks,
+                       repeat=repeat, relief=relief)
+    rgba, z_lo, z_hi = out[:3]
+    rep = P.column_repeats(column) if repeat is None else bool(repeat)
+    img = _float_image(name, rgba)
+    img['eido_rows'] = int(rgba.shape[0])
+    img['eido_repeat'] = rep
+    if relief:
+        ri = _float_image(name + '_relief', out[3])
+        ri['eido_rows'] = int(rgba.shape[0])
+        img['eido_relief'] = ri.name
+    return img, float(z_lo), float(z_hi)
+
+
+def strata_array(column, px_per_m=STRATA_PX_PER_M, seed=0, rows=1, parting=0.0, pad_m=0.0, looks=False, repeat=None,
+                 relief=False):
+    """The numpy half of strata_image (no bpy): (rgba, z_lo, z_hi), rgba (rows, W, 4) float64, linear RGB the bed
+    colour and A its roughness multiplier, z_lo..z_hi metres across W (a repeating column, palettes.column_repeats,
+    spans one period: read it with wrap). relief=True adds a fourth item, the relief image's pixels (R how far each
+    bed stands out, G the ledges, A 1). Deterministic per column: the beds strata_image draws, pixel for pixel."""
     layers = P.column_layers(column, looks=looks)
     rep = P.column_repeats(column) if repeat is None else bool(repeat)
     z_lo, z_hi = layers[0][1], layers[-1][2]
@@ -326,14 +393,9 @@ def strata_image(column, name='eido_strata', px_per_m=STRATA_PX_PER_M, seed=0, r
                 if rr[e] - rr[e + 1] > 0.3:
                     rel[r, max(e - k + 1, 0):e + 1, 1] = 1.0
             rel[r, :, 3] = 1.0
-    img = _float_image(name, rgba)
-    img['eido_rows'] = R
-    img['eido_repeat'] = rep
     if relief:
-        ri = _float_image(name + '_relief', rel)
-        ri['eido_rows'] = R
-        img['eido_relief'] = ri.name
-    return img, float(z_lo), float(z_hi)
+        return rgba, float(z_lo), float(z_hi), rel
+    return rgba, float(z_lo), float(z_hi)
 
 
 def _float_image(name, rgba):
@@ -363,7 +425,7 @@ def _noise3(g, pos, scale_m, detail=2.0, roughness=0.5, seed=0.0):
     n = g.node('ShaderNodeTexNoise', noise_dimensions='3D')
     g.set(n.inputs['Vector'], g.vmath('ADD', pos, tuple(o * float(scale_m) for o in off)))
     g.set(n.inputs['Scale'], 1.0 / max(float(scale_m), 1e-6))
-    g.set(n.inputs['Detail'], float(detail))
+    g.set(n.inputs['Detail'], detail if isinstance(detail, bpy.types.NodeSocket) else float(detail))
     g.set(n.inputs['Roughness'], float(roughness))
     return n.outputs['Fac']
 
@@ -381,9 +443,14 @@ class _Compiler:
     equal sub-expressions (a derived name every layer reads is built once). Terrain constants fold in as numbers.
     noise3: the landscape palettes' noise() as 3D noise (cheaper; the old meadow material keeps its 4D noise).
     flat: noise(), fbm() and cells() read their mean 0.5 (the cheap coverage the bump is weighted by); attrs shares
-    another compiler's attribute nodes; packs (mask_packs): the masks read from packed attributes."""
+    another compiler's attribute nodes; packs (mask_packs): the masks read from packed attributes.
+    data (_Data): baked surface maps, read before any attribute. fp (a footprint socket, metres): every noise() and
+    fbm() term's deviation from its mean is scaled by smoothstep(1, 4, scale / footprint), their detail drops to
+    log2(scale / (2 footprint)), and a smoothstep whose argument holds a faded term widens its edges by the spread
+    the term lost (NOISE_HALF), so its expected cover stays put as the noise fades (SURFACING_DESIGN.md 3.2, rule 4).
+    cells() has no mean to fade to and is kept as it is."""
 
-    def __init__(self, g, pos, consts=None, noise3=False, flat=False, attrs=None, packs=None):
+    def __init__(self, g, pos, consts=None, noise3=False, flat=False, attrs=None, packs=None, data=None, fp=None):
         self.g = g
         self.pos = pos
         self.attrs = attrs if attrs is not None else {}
@@ -394,10 +461,85 @@ class _Compiler:
         self.consts = dict(P.CONSTANTS)
         self.consts.update(consts or {})
         self.pack_of = {m: (an, c) for an, ms in (packs or []) for c, m in enumerate(ms)}
+        self.data = data
+        self.fp = None if flat else fp
+        self._fades = {}
+        self._details = {}
+
+    def fade(self, scale_m):
+        """smoothstep(1, 4, scale / footprint): 1 where a term of that scale spans 4 pixels or more, 0 under one
+        (1.0 without a footprint)."""
+        if self.fp is None:
+            return 1.0
+        key = float(scale_m)
+        if key not in self._fades:
+            self._fades[key] = self.g.smoothstep(1.0, 4.0, self.g.math('DIVIDE', key, self.fp))
+        return self._fades[key]
+
+    def detail(self, scale_m, detail):
+        """The Noise Texture's detail for a term of scale_m: min(detail, log2(scale / (2 footprint))), at least 0."""
+        if self.fp is None:
+            return float(detail)
+        key = (float(scale_m), float(detail))
+        if key not in self._details:
+            g = self.g
+            r = g.math('DIVIDE', float(scale_m), g.mul(self.fp, 2.0))
+            self._details[key] = g.math('MINIMUM', g.math('MAXIMUM', g.math('LOGARITHM', g.math('MAXIMUM', r, 1e-6),
+                                                                              2.0), 0.0), float(detail))
+        return self._details[key]
+
+    def lost_spread(self, t):
+        """The half-spread the faded noise terms of an expression tree lost (a float 0.0 or a socket): sum over its
+        additive noise and fbm terms of |coefficient| x NOISE_HALF x (1 - fade). Products of two non-constant terms
+        and the nonlinear functions count 0 (their inner smoothsteps widen themselves)."""
+        if self.fp is None:
+            return 0.0
+        k = t[0]
+        if k in ('num', 'const', 'mask'):
+            return 0.0
+        if k == 'neg':
+            return self.lost_spread(t[1])
+        g = self.g
+
+        def add(a, b):
+            if isinstance(a, float) and a == 0.0:
+                return b
+            if isinstance(b, float) and b == 0.0:
+                return a
+            return g.add(a, b)
+
+        def scale(c, s):
+            if isinstance(s, float):
+                return abs(c) * s
+            return s if abs(c) == 1.0 else g.mul(s, abs(c))
+        if k == 'op':
+            o = t[1]
+            if o in '+-':
+                return add(self.lost_spread(t[2]), self.lost_spread(t[3]))
+            if o == '*':
+                a, b = self(t[2]), self(t[3])
+                if isinstance(a, float):
+                    return scale(a, self.lost_spread(t[3]))
+                if isinstance(b, float):
+                    return scale(b, self.lost_spread(t[2]))
+                return 0.0
+            if o == '/':
+                b = self(t[3])
+                if isinstance(b, float) and abs(b) > 1e-12:
+                    return scale(1.0 / b, self.lost_spread(t[2]))
+                return 0.0
+            return 0.0
+        if k == 'call' and t[1] in ('noise', 'fbm'):
+            f = self.fade(float(t[2][0][1]))
+            hs = NOISE_HALF[t[1]]
+            return 0.0 if isinstance(f, float) else g.math('MULTIPLY_ADD', f, -hs, hs)
+        return 0.0
 
     def attr(self, name):
         if name not in self.attrs:
-            if name in self.pack_of:
+            if self.data is not None and self.data.has(name):
+                self.attrs[name] = self.data.value(name)
+            elif name in self.pack_of:
                 an, c = self.pack_of[name]
                 if ('pack', an) not in self.attrs:
                     self.attrs[('pack', an)] = self.g.separate_xyz(self.g.attribute(an).outputs['Vector'])
@@ -406,18 +548,25 @@ class _Compiler:
                 self.attrs[name] = self.g.attribute('eido_' + name).outputs['Fac']
         return self.attrs[name]
 
+    def _stretch(self, n, k, scale_m):
+        """clamp((n - 0.5) k f + 0.5, 0, 1): the stretched noise, faded by the footprint (the far colour's form)."""
+        f = self.fade(scale_m)
+        kk = k if isinstance(f, float) else self.g.mul(f, k)
+        return self.g.math('MULTIPLY_ADD', self.g.sub(n, 0.5), kk, 0.5, clamp=True)
+
     def noise(self, scale_m, seed=0):
         if self.flat:
             return 0.5
         key = (float(scale_m), int(seed))
         if key not in self.noises:
             if self.noise3:
-                n = _noise3(self.g, self.pos, scale_m, detail=2.0, roughness=0.5, seed=0.37 + 7.31 * int(seed))
+                n = _noise3(self.g, self.pos, scale_m, detail=self.detail(scale_m, 2.0), roughness=0.5,
+                            seed=0.37 + 7.31 * int(seed))
             else:
-                n = self.g.noise(self.pos, 1.0 / max(float(scale_m), 1e-6), detail=2.0, roughness=0.5,
-                                 w=0.37 + 7.31 * int(seed) + 0.013 * float(scale_m))
+                n = self.g.noise(self.pos, 1.0 / max(float(scale_m), 1e-6), detail=self.detail(scale_m, 2.0),
+                                 roughness=0.5, w=0.37 + 7.31 * int(seed) + 0.013 * float(scale_m))
             # the shader noise's spread is narrow (mostly 0.3-0.7): stretch it to about 0..1
-            self.noises[key] = self.g.math('MULTIPLY_ADD', self.g.sub(n, 0.5), 2.5, 0.5, clamp=True)
+            self.noises[key] = self._stretch(n, 2.5, scale_m)
         return self.noises[key]
 
     def fbm(self, scale_m, seed=0):
@@ -427,8 +576,9 @@ class _Compiler:
             return 0.5
         key = ('fbm', float(scale_m), int(seed))
         if key not in self.noises:
-            n = _noise3(self.g, self.pos, scale_m, detail=5.0, roughness=0.6, seed=5.3 + 1.9 * int(seed))
-            self.noises[key] = self.g.math('MULTIPLY_ADD', self.g.sub(n, 0.5), 3.0, 0.5, clamp=True)
+            n = _noise3(self.g, self.pos, scale_m, detail=self.detail(scale_m, 5.0), roughness=0.6,
+                        seed=5.3 + 1.9 * int(seed))
+            self.noises[key] = self._stretch(n, 3.0, scale_m)
         return self.noises[key]
 
     def cells(self, scale_m, seed=0, z_stretch=0.0):
@@ -490,7 +640,13 @@ class _Compiler:
         if f == 'smoothstep':
             if all(isinstance(e, float) for e in v):
                 return float(P._smooth(v[0], v[1], v[2]))
-            return g.smoothstep(v[0], v[1], v[2])
+            e0, e1 = v[0], v[1]
+            if isinstance(e0, float) and isinstance(e1, float):
+                sp = self.lost_spread(args[2])
+                if not isinstance(sp, float):
+                    sgn = 1.0 if e1 >= e0 else -1.0
+                    e0, e1 = g.math('MULTIPLY_ADD', sp, -sgn, e0), g.math('MULTIPLY_ADD', sp, sgn, e1)
+            return g.smoothstep(e0, e1, v[2])
         if f in ('min', 'max'):
             if all(isinstance(e, float) for e in v):
                 return float(min(v) if f == 'min' else max(v))
@@ -602,13 +758,17 @@ class _Reader:
         return g.smoothstep(0.47, 0.53, n)
 
 
-def _strata_zs(g, comp, st, coords):
+def _strata_zs(g, comp, st, coords, base=None):
     """The stratigraphic height socket: eido_strata (source 'attribute') or object z with a dip (source 'position'),
-    plus z_offset_m, fault throws, world-noise warps and the runnels' smear."""
+    plus z_offset_m, fault throws, world-noise warps and the runnels' smear. base: a height socket that stands for
+    the strata attribute or the object z (a debris' source height, src_strata), through the same offsets."""
     x, y, z = g.separate_xyz(coords)
-    if st.get('source', 'attribute') == 'attribute':
+    if base is not None and st.get('source', 'attribute') == 'attribute':
+        zs = base
+    elif st.get('source', 'attribute') == 'attribute':
         zs = comp.attr('strata')
     else:
+        z = base if base is not None else z
         dip = math.tan(math.radians(float(st.get('dip_deg', 0.0))))
         az = math.radians(float(st.get('dip_azimuth_deg', st.get('azimuth_deg', 0.0))))
         zs = z
@@ -662,6 +822,21 @@ class _Strata:
         self.reads = {}
         self._uv = {}
         self._relief = None
+        self._g_st = (g, comp, st, coords)
+        self._at = {}
+
+    def band_at(self, base):
+        """(colour, roughness) of the column at another height socket that stands for the strata attribute or the
+        object z (src_strata: a debris' source bed), through the same offsets, faults and warps: one more read of
+        the same image."""
+        key = base.node.name + ':' + base.identifier
+        if key not in self._at:
+            g, comp, st, coords = self._g_st
+            zs = _strata_zs(g, comp, st, coords, base=base)
+            span = self.z_hi - self.z_lo
+            u = g.math('MULTIPLY_ADD', zs, 1.0 / span, -self.z_lo / span)
+            self._at[key] = self._read(self.img, g.combine_xyz(u, self.v, 0.0))
+        return self._at[key]
 
     def uv(self, offset_m=0.0):
         key = round(float(offset_m), 3)
@@ -886,10 +1061,1272 @@ def _canopy(g, cn, coords, i):
     return dict(col=col, h=h, crown=crown, r_edge=r_edge, far=far, bump=bump)
 
 
-def surface_group(palette, name=GROUP_NAME, prefer='2k', log=print):
-    """The eido_terrain_surface shader node group of a palette (palettes.get resolves it). Outputs: BSDF, Base Color,
-    Roughness, Normal. The group carries the palette name and its layers' sets as custom properties."""
+# ------------------------------------------------------------------------------------ baked surface data ---
+
+def _sock(ng, name, io, kind):
+    t = {'f': 'NodeSocketFloat', 'v': 'NodeSocketVector', 'c': 'NodeSocketColor', 's': 'NodeSocketShader'}[kind]
+    return ng.interface.new_socket(name, in_out=io, socket_type=t)
+
+
+def _new_group(name, sig):
+    """(group, fresh): the shader node group `name` when one with this signature exists (fresh False), else a new
+    one (an older group of that name is replaced)."""
+    old = bpy.data.node_groups.get(name)
+    if old is not None:
+        if old.get('eido_sig') == sig:
+            return old, False
+        bpy.data.node_groups.remove(old)
+    ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    ng['eido_sig'] = sig
+    return ng, True
+
+
+def _tex(g, img, vec, interp='Linear', ext='REPEAT'):
+    n = g.node('ShaderNodeTexImage', interpolation=interp, extension=ext)
+    n.image = img
+    g.set(n.inputs['Vector'], vec)
+    return n
+
+
+def reader_group(sd):
+    """The two-slot level reader of a terrain's surface data (SURFACING_DESIGN.md 2.4): one shader node group per
+    terrain, eido_terrain_reader_<hash of its windows and atlas layouts>, shared by its near and far materials and by
+    eido_terrain_map.
+
+    In:  Position (object metres: the terrain keeps an identity transform), Footprint (metres a pixel spans there).
+    Out: Detail Even, Detail Odd, Cell Even, Cell Odd: the atlas coordinates of the even and odd slots on the detail
+         layout (D, E) and the cell layout (M, F, C, P); Odd Weight (the even slot takes the rest); Level (the finest
+         window holding the pixel: the level of the ring that draws it); Even Level, Odd Level (what each slot
+         reads); Hero Outside (metres outside the outermost hero window, Chebyshev; 1e6 without hero levels);
+         Sel <k> (1 inside window k, for k >= 1).
+
+    Per pixel: L counts the windows k >= 1 holding it; the even slot reads the finest even level holding it (else
+    level 0), the odd slot the finest odd one (else level 1), so the slot of L's parity reads L and the other L - 1.
+    L fades in over FADE_CELLS of its own cells behind a dead band of DEAD_FOOTPRINTS footprints inside its edge,
+    capped by the room before the next finer window: w_L = smoothstep(z, z + 8 c_L, d_L), z = min(3 footprints,
+    margin_{L+1} - 8 c_L), d_L the distance inside L's edge. A slot changes level only at a window edge, where its
+    weight is exactly 0 on both sides, so the coarse mips a 2 x 2 quad straddling the jump reads count for nothing.
+    Every per-level constant is a telescoping sum over the windows: q = q_first + sum_k sel_k (q_k - q_{k-step})."""
+    rc = sd.reader_constants()
+    lv = list(sd.levels)
+    K = len(lv)
+    geo = [[float(v.x0), float(v.y0), float(v.side), float(v.cell), str(getattr(v, 'role', ''))] for v in lv]
+    sig = hashlib.sha1(json.dumps([rc, geo, DEAD_FOOTPRINTS, FADE_CELLS, 1], sort_keys=True,
+                                  default=float).encode()).hexdigest()[:12]
+    ng, fresh = _new_group(f'eido_terrain_reader_{sig}', sig)
+    if not fresh:
+        return ng
+    for nm, kd in (('Position', 'v'), ('Footprint', 'f')):
+        _sock(ng, nm, 'INPUT', kd)
+    for nm in ('Detail Even', 'Detail Odd', 'Cell Even', 'Cell Odd'):
+        _sock(ng, nm, 'OUTPUT', 'v')
+    for nm in ('Odd Weight', 'Level', 'Even Level', 'Odd Level', 'Hero Outside'):
+        _sock(ng, nm, 'OUTPUT', 'f')
+    for k in range(1, K):
+        _sock(ng, f'Sel {k}', 'OUTPUT', 'f')
+    g = Graph(ng)
+    gi, go = g.node('NodeGroupInput'), g.node('NodeGroupOutput')
+    x, y, _z = g.separate_xyz(gi.outputs['Position'])
+    fp = gi.outputs['Footprint']
+    cx = [float(v.x0) + 0.5 * float(v.side) for v in lv]
+    cy = [float(v.y0) + 0.5 * float(v.side) for v in lv]
+
+    def cheb(ax, ay):
+        return g.math('MAXIMUM', g.math('ABSOLUTE', g.sub(x, ax)), g.math('ABSOLUTE', g.sub(y, ay)))
+    sel = [None] + [g.math('LESS_THAN', cheb(cx[k], cy[k]), 0.5 * float(lv[k].side)) for k in range(1, K)]
+
+    def tele(vals, step=1, first=0):
+        vals = [float(v) for v in vals]
+        acc = vals[first]
+        for k in range(first + step, K, step):
+            d = vals[k] - vals[k - step]
+            if d != 0.0:
+                acc = g.math('MULTIPLY_ADD', sel[k], d, acc)
+        return acc
+    for k in range(1, K):
+        g.set(go.inputs[f'Sel {k}'], sel[k])
+    g.set(go.inputs['Level'], tele(range(K)))
+    if K > 1:
+        # L's centre, half side (level 0's: its whole side, more than any of its pixels lies inside it), cell,
+        # parity, and the cap on its dead band (the room before the next finer window, less the fade)
+        R = [float(lv[0].side)] + [0.5 * float(v.side) for v in lv[1:]]
+        cap = []
+        for k in range(K):
+            if k + 1 < K:
+                a, b = lv[k], lv[k + 1]
+                m = min(b.x0 - a.x0, b.y0 - a.y0, a.x0 + a.side - b.x0 - b.side, a.y0 + a.side - b.y0 - b.side)
+                cap.append(max(float(m) - FADE_CELLS * float(a.cell), 0.0))
+            else:
+                cap.append(1.0e6)
+        d_in = g.sub(tele(R), cheb(tele(cx), tele(cy)))
+        z = g.math('MINIMUM', g.mul(fp, DEAD_FOOTPRINTS), tele(cap))
+        om = g.smoothstep(z, g.math('MULTIPLY_ADD', tele([v.cell for v in lv]), FADE_CELLS, z), d_in)
+        par = tele([k % 2 for k in range(K)])
+        g.set(go.inputs['Odd Weight'],
+              g.math('MULTIPLY_ADD', par, g.math('MULTIPLY_ADD', om, 2.0, -1.0), g.sub(1.0, om)))
+    else:
+        g.set(go.inputs['Odd Weight'], 0.0)
+    g.set(go.inputs['Even Level'], tele(range(K), 2, 0))
+    g.set(go.inputs['Odd Level'], tele(range(K), 2, 1) if K > 1 else 0.0)
+    for lay, tag in (('detail', 'Detail'), ('cell', 'Cell')):
+        T = rc[lay]
+        au = [t['du'] / t['side'] for t in T]
+        bu = [t['u0'] - t['du'] * t['x0'] / t['side'] for t in T]
+        av = [t['dv'] / t['side'] for t in T]
+        bv = [t['v0'] - t['dv'] * t['y0'] / t['side'] for t in T]
+        for first, slot in ((0, 'Even'), (1, 'Odd')):
+            f0 = first if K > first else 0
+            u = g.math('MULTIPLY_ADD', x, tele(au, 2, f0), tele(bu, 2, f0))
+            v = g.math('MULTIPLY_ADD', y, tele(av, 2, f0), tele(bv, 2, f0))
+            g.set(go.inputs[f'{tag} {slot}'], g.combine_xyz(u, v, 0.0))
+    roles = [str(getattr(v, 'role', '')) for v in lv]
+    if 'hero' in roles:
+        h = roles.index('hero')
+        g.set(go.inputs['Hero Outside'], g.sub(cheb(cx[h], cy[h]), 0.5 * float(lv[h].side)))
+    else:
+        g.set(go.inputs['Hero Outside'], 1.0e6)
+    return ng
+
+
+def hex_grid_group():
+    """eido_hex_grid: hex tiling's triangle grid (SURFACING_DESIGN.md 3.3; Mikkelsen 2022, written from the published
+    description), one node group shared by every hex-tiled read.
+
+    In:  U, V (metres along the frame's axes: world x, y for a planar read, a sector frame's strike and dip), Inverse
+         Size (1 / hex_m), Seed, Rotate (1: each read turned at random; 0: offsets only, for directional scans).
+    Out: per slot c = 0, 1, 2: DU<c>, DV<c> (metres from the slot's grid vertex), OU<c>, OV<c> (its random offset, in
+         tiles), Cos<c>, Sin<c>, NSin<c> (its random turn), W<c> (its barycentric weight).
+
+    The grid is a triangle lattice of edge hex_m / (2 sqrt 3) (Mikkelsen's scaling): a point lies in one triangle,
+    whose three vertices are its three reads. Reads go to slots by the vertex's class (i - j) mod 3 on the skewed
+    lattice, which differs at the three corners of every triangle, so a slot's vertex changes only across the far
+    edges of its hexagon of six triangles, where its weight is 0: the implicit derivatives' mip jump falls where the
+    read counts for nothing. A read's coordinates are R (P - vertex) / tile + offset, small numbers near every
+    vertex, so float32 keeps them exact far from the origin."""
+    sig = f'hex{HEX_VERSION}'
+    ng, fresh = _new_group('eido_hex_grid', sig)
+    if not fresh:
+        return ng
+    for nm in ('U', 'V', 'Inverse Size', 'Seed', 'Rotate'):
+        _sock(ng, nm, 'INPUT', 'f')
+    for c in range(3):
+        for nm in ('DU', 'DV', 'OU', 'OV', 'Cos', 'Sin', 'NSin', 'W'):
+            _sock(ng, f'{nm}{c}', 'OUTPUT', 'f')
+    g = Graph(ng)
+    gi, go = g.node('NodeGroupInput'), g.node('NodeGroupOutput')
+    U, V = gi.outputs['U'], gi.outputs['V']
+    k = g.mul(gi.outputs['Inverse Size'], 2.0 * math.sqrt(3.0))
+    su, sv = g.mul(U, k), g.mul(V, k)
+    a = g.math('MULTIPLY_ADD', sv, -0.57735027, su)        # skewed onto the triangle grid
+    b = g.mul(sv, 1.15470054)
+    bx, by = g.math('FLOOR', a), g.math('FLOOR', b)
+    fx, fy = g.sub(a, bx), g.sub(b, by)
+    t = g.add(fx, fy)
+    s = g.math('GREATER_THAN', t, 1.0)                     # the upper triangle of the cell
+    u1 = g.sub(1.0, t)
+    W = (g.math('ABSOLUTE', u1), g.math('MULTIPLY_ADD', s, u1, fx), g.math('MULTIPLY_ADD', s, u1, fy))
+    # the vertices: P0 = base + s (1, 1) of class k0, P1 = base + (1, 0) of class k0 + 1, P2 = base + (0, 1) of class
+    # k0 + 2 (k0 = (i - j) mod 3 of the base); slot c takes P_j with j = (c - k0) mod 3
+    k0 = g.math('FLOORED_MODULO', g.sub(bx, by), 3.0)
+    e0 = g.math('LESS_THAN', k0, 0.5)
+    e2 = g.math('GREATER_THAN', k0, 1.5)
+    E = (e0, g.sub(g.sub(1.0, e0), e2), e2)
+    hm = g.math('DIVIDE', 1.0, k)                          # a lattice unit in metres
+    hv = g.mul(hm, 0.8660254)
+    rot = g.mul(gi.outputs['Rotate'], 2.0 * math.pi)
+    for c in range(3):
+        ea, eb, ec = E[c], E[(c - 1) % 3], E[(c - 2) % 3]
+        vx = g.add(bx, g.math('MULTIPLY_ADD', ea, s, eb))
+        vy = g.add(by, g.math('MULTIPLY_ADD', ea, s, ec))
+        w = g.math('MULTIPLY_ADD', ec, W[2], g.math('MULTIPLY_ADD', eb, W[1], g.mul(ea, W[0])))
+        cu = g.mul(g.math('MULTIPLY_ADD', vy, 0.5, vx), hm)
+        cv = g.mul(vy, hv)
+        wn = g.node('ShaderNodeTexWhiteNoise', noise_dimensions='3D')
+        g.set(wn.inputs['Vector'], g.combine_xyz(vx, vy, gi.outputs['Seed']))
+        r, gg, bb = g.separate_rgb(wn.outputs['Color'])
+        th = g.mul(g.sub(bb, 0.5), rot)
+        sn = g.math('SINE', th)
+        for nm, v in (('DU', g.sub(U, cu)), ('DV', g.sub(V, cv)), ('OU', r), ('OV', gg), ('Cos', g.math('COSINE', th)),
+                      ('Sin', sn), ('NSin', g.mul(sn, -1.0)), ('W', w)):
+            g.set(go.inputs[f'{nm}{c}'], v)
+    return ng
+
+
+def _layer_group(L, S, i, opt, box, hexed):
+    """One layer's scan reads as a node group (eido_layer_<hash>, shared by materials that read the same scan the same
+    way). Out: Color (the scan's albedo), Height (its normalised height), NX, NY (its normal in the world-XY tangent
+    frame: the planar reads), Pert (box layers: the world-space tilt of the sector reads' normals), Rough, AO.
+
+    Planar reads: world (x, y) / tile, hex-tiled (hexed) or one read; the albedo 'Auto' filtered (Cubic near, Linear
+    far). Box layers (in: U0, V0, U1, V1 the two sector slots' frame coordinates, W0 the even slot's weight, T0, B0,
+    T1, B1 their tangent frames on the surface, Steep): planar on gentle ground and the two sector slots on steep
+    faces, each slot hex-tiled in its own frame and mipmapped Linear; the slots and then planar against steep are
+    height blended (a_i = w_i + h_i / 2, kept within 0.2 of the tallest), so a read with weight 0 counts for nothing
+    and the switch follows the scan's own features rather than ghosting two layouts."""
+    tile = float(L['tile_m'])
+    hex_m = float(L.get('hex_m') or tile)
+    rot = 1.0 if L.get('hex_rotate', True) else 0.0
+    ns = float(L['normal'])
+    interp = opt['interpolation']
+    dd = [float(v) for v in opt['detail_distance']]
+    sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, rot, ns, interp, dd, bool(box), bool(hexed), i,
+                      HEX_VERSION])
+    ng, fresh = _new_group('eido_layer_' + hashlib.sha1(sig.encode()).hexdigest()[:12], sig)
+    if not fresh:
+        return ng
+    if box:
+        for nm in ('U0', 'V0', 'U1', 'V1', 'W0', 'Steep'):
+            _sock(ng, nm, 'INPUT', 'f')
+        for nm in ('T0', 'B0', 'T1', 'B1'):
+            _sock(ng, nm, 'INPUT', 'v')
+    _sock(ng, 'Color', 'OUTPUT', 'c')
+    for nm in ('Height', 'NX', 'NY', 'Rough', 'AO'):
+        _sock(ng, nm, 'OUTPUT', 'f')
+    _sock(ng, 'Pert', 'OUTPUT', 'v')
+    g = Graph(ng)
+    gi, go = g.node('NodeGroupInput'), g.node('NodeGroupOutput')
+    x, y, _z = g.separate_xyz(g.node('ShaderNodeTexCoord').outputs['Object'])
+    far = g.handover(*dd) if interp == 'Auto' else None
+    inv = 1.0 / tile
+
+    def albedo(vec, auto):
+        if auto and interp == 'Auto':
+            c1 = _tex(g, S['albedo'], vec, 'Cubic')
+            c2 = _tex(g, S['albedo'], vec, 'Linear')
+            return (g.mix('RGBA', far, c1.outputs['Color'], c2.outputs['Color']),
+                    g.mix('FLOAT', far, c1.outputs['Alpha'], c2.outputs['Alpha']))
+        n = _tex(g, S['albedo'], vec, 'Linear' if interp == 'Auto' else interp)
+        return n.outputs['Color'], n.outputs['Alpha']
+
+    def one(vec, auto, turn=None):
+        col, h = albedo(vec, auto)
+        nr = _tex(g, S['nrao'], vec, 'Linear')
+        r, gg, rough = g.separate_rgb(nr.outputs['Color'])
+        nx = g.math('MULTIPLY_ADD', r, 2.0 * ns, -ns)
+        ny = g.math('MULTIPLY_ADD', gg, 2.0 * ns, -ns)
+        if turn is not None:                              # the read's turn undone: its normal in the frame
+            cs, sn, nsn = turn
+            nx, ny = (g.math('MULTIPLY_ADD', nx, cs, g.mul(ny, sn)), g.math('MULTIPLY_ADD', nx, nsn, g.mul(ny, cs)))
+        return dict(col=col, h=h, nx=nx, ny=ny, rough=rough, ao=nr.outputs['Alpha'])
+
+    def blend(reads, ws):
+        """sum w_k read_k over reads (dicts), the weights sockets summing to 1."""
+        out = {}
+        for key in ('h', 'nx', 'ny', 'rough', 'ao'):
+            acc = g.mul(reads[0][key], ws[0])
+            for r, w in zip(reads[1:], ws[1:]):
+                acc = g.math('MULTIPLY_ADD', r[key], w, acc)
+            out[key] = acc
+        acc = g.vmath('SCALE', reads[0]['col'], scale=ws[0])
+        for r, w in zip(reads[1:], ws[1:]):
+            acc = g.vmath('ADD', acc, g.vmath('SCALE', r['col'], scale=w))
+        out['col'] = acc
+        return out
+
+    def frame(U, V, seed, auto):
+        if not hexed:
+            return one(g.combine_xyz(g.mul(U, inv), g.mul(V, inv), 0.0), auto)
+        hx = g.node('ShaderNodeGroup')
+        hx.node_tree = hex_grid_group()
+        for nm, v in (('U', U), ('V', V), ('Inverse Size', 1.0 / hex_m), ('Seed', seed), ('Rotate', rot)):
+            g.set(hx.inputs[nm], v)
+        o = hx.outputs
+        reads, ws = [], []
+        for c in range(3):
+            du, dv = g.mul(o[f'DU{c}'], inv), g.mul(o[f'DV{c}'], inv)
+            cs, sn, nsn = o[f'Cos{c}'], o[f'Sin{c}'], o[f'NSin{c}']
+            u = g.math('MULTIPLY_ADD', du, cs, g.math('MULTIPLY_ADD', dv, nsn, o[f'OU{c}']))
+            v = g.math('MULTIPLY_ADD', du, sn, g.math('MULTIPLY_ADD', dv, cs, o[f'OV{c}']))
+            r = one(g.combine_xyz(u, v, 0.0), auto, (cs, sn, nsn))
+            reads.append(r)
+            ws.append(g.mul(g.math('POWER', o[f'W{c}'], HEX_POWER),
+                            g.math('MULTIPLY_ADD', r['h'], 2.0 * HEX_CONTRAST, 1.0 - HEX_CONTRAST)))
+        tot = g.math('DIVIDE', 1.0, g.math('MAXIMUM', g.add(g.add(ws[0], ws[1]), ws[2]), 1e-6))
+        return blend(reads, [g.mul(w, tot) for w in ws])
+
+    def height_pair(wa, ha, hb):
+        """(a's share, b's share) of two reads by weight wa (b's 1 - wa) and height: a_i = w_i + h_i / 2, kept within
+        0.2 of the taller, normalised."""
+        aa = g.math('MULTIPLY_ADD', ha, 0.5, wa)
+        ab = g.math('MULTIPLY_ADD', hb, 0.5, g.sub(1.0, wa))
+        ma = g.sub(g.math('MAXIMUM', aa, ab), 0.2)
+        ba = g.math('MAXIMUM', g.sub(aa, ma), 0.0)
+        bb = g.math('MAXIMUM', g.sub(ab, ma), 0.0)
+        tot = g.math('DIVIDE', 1.0, g.math('MAXIMUM', g.add(ba, bb), 1e-5))
+        return g.mul(ba, tot), g.mul(bb, tot)
+    seed = 7.1 + 13.7 * i
+    p = frame(x, y, seed, True)
+    if not box:
+        for nm, key in (('Color', 'col'), ('Height', 'h'), ('NX', 'nx'), ('NY', 'ny'), ('Rough', 'rough'), ('AO', 'ao')):
+            g.set(go.inputs[nm], p[key])
+        g.set(go.inputs['Pert'], (0.0, 0.0, 0.0))
+        return ng
+    sec = [frame(gi.outputs[f'U{s}'], gi.outputs[f'V{s}'], seed + 101.0, False) for s in (0, 1)]
+    we, wo = height_pair(gi.outputs['W0'], sec[0]['h'], sec[1]['h'])
+    sb = blend(sec, [we, wo])
+    pert = None
+    for s, w in ((0, we), (1, wo)):
+        t = g.vmath('ADD', g.vmath('SCALE', gi.outputs[f'T{s}'], scale=sec[s]['nx']),
+                    g.vmath('SCALE', gi.outputs[f'B{s}'], scale=sec[s]['ny']))
+        t = g.vmath('SCALE', t, scale=w)
+        pert = t if pert is None else g.vmath('ADD', pert, t)
+    wp, ws_ = height_pair(g.sub(1.0, gi.outputs['Steep']), p['h'], sb['h'])
+    out = blend([p, sb], [wp, ws_])
+    g.set(go.inputs['Color'], out['col'])
+    for nm, key in (('Height', 'h'), ('Rough', 'rough'), ('AO', 'ao')):
+        g.set(go.inputs[nm], out[key])
+    g.set(go.inputs['NX'], g.mul(p['nx'], wp))
+    g.set(go.inputs['NY'], g.mul(p['ny'], wp))
+    g.set(go.inputs['Pert'], g.vmath('SCALE', pert, scale=ws_))
+    return ng
+
+
+_SHADER_NAMES = ('slope', 'aspect', 'northness', 'eastness', 'insolation', 'height', 'slope_20m')
+
+
+class _Data:
+    """A material's reads of baked surface data (terrain/surface SurfaceData) through the two-slot reader: has(name),
+    value(name) (a decoded map: the even and odd slots' reads mixed by the reader's weight), colour(family) (C or P,
+    linear), the field normal and the macro normal (the field normal plus the relief below the cell)."""
+
+    def __init__(self, g, sd, names, coords, fp, consts, tile_m=4.0, detail_strength=DETAIL_STRENGTH):
+        from ..surface import maps as MP
+        self.g, self.sd, self.MP = g, sd, MP
+        self.coords = coords
+        self.consts = consts
+        want = set()
+        for n in names:
+            for m in (MP.PAIRS.get(n) or (n,)):
+                try:
+                    if MP.spec(m).family == 'M' and sd.has(m):
+                        want.add(m)
+                except KeyError:
+                    pass
+        have = {n for grp in sd.packing() for n in grp}
+        if not want <= have:
+            sd.pack(sorted(have | want))
+        self.images = sd.images()
+        self.rd = g.node('ShaderNodeGroup')
+        self.rd.node_tree = reader_group(sd)
+        g.set(self.rd.inputs['Position'], coords)
+        g.set(self.rd.inputs['Footprint'], fp)
+        self.w_odd = self.rd.outputs['Odd Weight']
+        self.K = len(sd.levels)
+        self._fam, self._sep, self._chan, self._val = {}, {}, {}, {}
+        self.tile_m = float(tile_m)
+        self.detail_strength = float(detail_strength)
+        self._nf = None
+        self._nm = None
+
+    # ---- what there is
+    def has(self, name):
+        if name in _SHADER_NAMES:
+            if name == 'slope_20m':
+                return 'n20_x' in self._packed() and 'n20_y' in self._packed()
+            return 'D' in self.images
+        try:
+            fam, _ch, _rule = self.sd.channel(name)
+        except KeyError:
+            return False
+        return fam in self.images
+
+    def has_family(self, fam):
+        return fam in self.images
+
+    def _packed(self):
+        return {n for grp in self.sd.packing() for n in grp}
+
+    # ---- reads
+    def fam(self, f):
+        if f not in self._fam:
+            lay = 'Detail' if f in ('D', 'E') else 'Cell'
+            self._fam[f] = [_tex(self.g, self.images[f], self.rd.outputs[f'{lay} {s}'], 'Linear', 'EXTEND')
+                            for s in ('Even', 'Odd')]
+        return self._fam[f]
+
+    def chan(self, f, c):
+        key = (f, c)
+        if key not in self._chan:
+            pair = []
+            for n in self.fam(f):
+                if c == 3:
+                    pair.append(n.outputs['Alpha'])
+                else:
+                    if n.name not in self._sep:
+                        self._sep[n.name] = self.g.separate_rgb(n.outputs['Color'])
+                    pair.append(self._sep[n.name][c])
+            self._chan[key] = tuple(pair)
+        return self._chan[key]
+
+    def mix(self, e, o):
+        return self.g.mix('FLOAT', self.w_odd, e, o)
+
+    def slot_const(self, vals, slot):
+        """A per-level constant as the slot (0 even, 1 odd) reads it: telescoped over that parity's windows."""
+        g = self.g
+        vals = [float(v) for v in vals]
+        first = slot if self.K > slot else 0
+        acc = vals[first]
+        for k in range(first + 2, self.K, 2):
+            d = vals[k] - vals[k - 2]
+            if d != 0.0:
+                acc = g.math('MULTIPLY_ADD', self.rd.outputs[f'Sel {k}'], d, acc)
+        return acc
+
+    def value(self, name):
+        if name in self._val:
+            return self._val[name]
+        if name in _SHADER_NAMES:
+            v = self._derived(name)
+        else:
+            fam, ch, (kind, a, b) = self.sd.channel(name)
+            if isinstance(ch, tuple):
+                raise KeyError(f'{name!r} is a pair: read its channels by their own names')
+            v = self._decode(fam, ch, kind, a, b)
+        self._val[name] = v
+        return v
+
+    def _decode(self, fam, ch, kind, a, b):
+        g = self.g
+        e, o = self.chan(fam, ch)
+        if kind == 'affine':
+            if not isinstance(a, (tuple, list)) and not isinstance(b, (tuple, list)):
+                m = self.mix(e, o)
+                return m if (float(a) == 1.0 and float(b) == 0.0) else g.math('MULTIPLY_ADD', m, float(a), float(b))
+            av = a if isinstance(a, (tuple, list)) else [a] * self.K
+            bv = b if isinstance(b, (tuple, list)) else [b] * self.K
+            return self.mix(g.math('MULTIPLY_ADD', e, self.slot_const(av, 0), self.slot_const(bv, 0)),
+                            g.math('MULTIPLY_ADD', o, self.slot_const(av, 1), self.slot_const(bv, 1)))
+        if kind == 'square':
+            return self.mix(g.mul(g.mul(e, e), float(a)), g.mul(g.mul(o, o), float(a)))
+        if kind == 'z_plus':
+            bv = b if isinstance(b, (tuple, list)) else [b] * self.K
+            z = g.separate_xyz(self.coords)[2]
+            return g.add(z, self.mix(g.add(e, self.slot_const(bv, 0)), g.add(o, self.slot_const(bv, 1))))
+        raise ValueError(f'decode rule {kind!r}')
+
+    def colour(self, fam):
+        """The linear colour of C or P (the images are sRGB: the GPU hands the shader linear values)."""
+        key = ('colour', fam)
+        if key not in self._val:
+            e, o = self.fam(fam)
+            self._val[key] = self.g.mix('RGBA', self.w_odd, e.outputs['Color'], o.outputs['Color'])
+        return self._val[key]
+
+    # ---- normals and the derived names
+    def n_field(self):
+        """(nx, ny, nz, N): the field normal from D (the two slots' x, y mixed, z rebuilt)."""
+        if self._nf is None:
+            g = self.g
+            nx, ny = self.value_raw('normal_x'), self.value_raw('normal_y')
+            nz = g.math('SQRT', g.math('MAXIMUM', g.sub(g.sub(1.0, g.mul(nx, nx)), g.mul(ny, ny)), 1e-4))
+            N = g.vmath('NORMALIZE', g.combine_xyz(nx, ny, nz))
+            self._nf = (nx, ny, nz, N)
+        return self._nf
+
+    def value_raw(self, name):
+        if name not in self._val:
+            fam, ch, (kind, a, b) = self.sd.channel(name)
+            self._val[name] = self._decode(fam, ch, kind, a, b)
+        return self._val[name]
+
+    def n_macro(self):
+        """The macro normal: the field normal tilted by the relief below the cell, normalize(nx / nz - s k gx,
+        ny / nz - s k gy, 1) with s the detail strength and k the level's fade (the relief's finest octave, two of
+        D's texels, against the scans' tile: under one tile the scans' own normals carry that band)."""
+        if self._nm is None:
+            g = self.g
+            nx, ny, nz, _N = self.n_field()
+            if self.detail_strength > 0.0 and self.has('detail_gx'):
+                lam = [2.0 * float(t['texel']) for t in self.sd.reader_constants()['detail']]
+                kl = [float(P._smooth(self.tile_m, 2.0 * self.tile_m, v)) * self.detail_strength for v in lam]
+                ks = self.mix(self.slot_const(kl, 0), self.slot_const(kl, 1)) if len(set(kl)) > 1 else kl[0]
+                gx, gy = self.value_raw('detail_gx'), self.value_raw('detail_gy')
+                if isinstance(ks, float) and ks == 0.0:
+                    hx, hy = g.math('DIVIDE', nx, nz), g.math('DIVIDE', ny, nz)
+                else:
+                    hx = g.sub(g.math('DIVIDE', nx, nz), _mul(g, gx, ks))
+                    hy = g.sub(g.math('DIVIDE', ny, nz), _mul(g, gy, ks))
+                self._nm = g.vmath('NORMALIZE', g.combine_xyz(hx, hy, 1.0))
+            else:
+                self._nm = self.n_field()[3]
+        return self._nm
+
+    def _derived(self, name):
+        g = self.g
+        if name == 'height':
+            return g.separate_xyz(self.coords)[2]
+        if name == 'slope_20m':
+            ax, ay = self.value('n20_x'), self.value('n20_y')
+            nz = g.math('SQRT', g.math('MAXIMUM', g.sub(g.sub(1.0, g.mul(ax, ax)), g.mul(ay, ay)), 1e-6))
+            return g.math('DEGREES', g.math('ARCCOSINE', g.math('MINIMUM', nz, 1.0)))
+        nx, ny, nz, N = self.n_field()
+        if name == 'slope':
+            return g.math('DEGREES', g.math('ARCCOSINE', g.math('MINIMUM', g.separate_xyz(N)[2], 1.0)))
+        if name == 'aspect':
+            return g.math('FLOORED_MODULO', g.math('DEGREES', g.math('ARCTAN2', nx, ny)), 360.0)
+        if name in ('northness', 'eastness'):
+            r = g.math('SQRT', g.math('MAXIMUM', g.add(g.mul(nx, nx), g.mul(ny, ny)), 1e-12))
+            fade = g.math('DIVIDE', g.smoothstep(1.0, 3.0, self.value('slope')), r)
+            return g.mul(ny if name == 'northness' else nx, fade)
+        if name == 'insolation':
+            az, el = (math.radians(v) for v in P.climate_sun(self.consts))
+            s = (math.sin(az) * math.cos(el), math.cos(az) * math.cos(el), math.sin(el))
+            return g.math('MAXIMUM', g.vmath('DOT_PRODUCT', N, s), 0.0)
+        raise KeyError(name)
+
+
+def _data_names(pal, weights):
+    """The map names a palette's material reads with baked data (its weights as chosen, the patches it still draws,
+    ramps, streaks, ledges, damp, tone, satmap, dusting, strata and provenance, patina, canopy)."""
+    out = set()
+    for L, w in zip(pal['layers'], weights):
+        out |= P.names_in(w)
+        for pt in _patch_list(L):
+            if pt.get('where') and not pt.get('from_ramp'):
+                out |= P.names_in(pt['where'])
+        if L.get('ramp'):
+            out |= P.names_in(L['ramp']['t'])
+        for key in ('streaks_where',):
+            if L.get(key):
+                out |= P.names_in(L[key])
+        if isinstance(L.get('ledges'), dict) and L['ledges'].get('where'):
+            out |= P.names_in(L['ledges']['where'])
+        prov = L.get('provenance') or {}
+        if prov.get('src'):
+            out.add('src_strata')
+        if prov.get('down'):
+            out.add('deposit')
+        if L.get('patina') is not None:
+            out.add('fresh')
+        if L.get('canopy'):
+            out |= {'canopy_far', 'canopy_expected'}
+    o = pal['options']
+    for key in ('damp_where', 'tone'):
+        if o.get(key):
+            out |= P.names_in(o[key])
+    for key in ('satmap', 'dusting'):
+        d = o.get(key)
+        if isinstance(d, dict):
+            for k in ('t', 'where'):
+                if d.get(k):
+                    out |= P.names_in(d[k])
+    st = pal.get('strata')
+    if st and st.get('source', 'attribute') == 'attribute' and any(L.get('strata') for L in pal['layers']):
+        out.add('strata')
+    if 'slope_20m' in out:
+        out |= {'n20_x', 'n20_y'}
+    return out
+
+
+def _rgb3(v, default=1.0):
+    """A multiplier as linear (r, g, b): a number, an (r, g, b), or an sRGB '#rrggbb' colour."""
+    if v is None:
+        v = default
+    if isinstance(v, str):
+        return tuple(P.hex_linear(v))
+    if isinstance(v, (int, float)):
+        return (float(v),) * 3
+    return tuple(float(c) for c in v)[:3]
+
+
+def _amount(v):
+    return 1.0 if v is True else (0.0 if not v else float(v))
+
+
+def _v3(c):
+    """A colour for a vector socket: a constant as (r, g, b), a socket as it is."""
+    return tuple(float(v) for v in c)[:3] if isinstance(c, (tuple, list)) else c
+
+
+def _v4(c):
+    """A colour for an RGBA socket: a constant as (r, g, b, 1), a socket as it is."""
+    return tuple(float(v) for v in c)[:3] + (1.0,) if isinstance(c, (tuple, list)) else c
+
+
+def _lut_image(pal):
+    """(Image or None, {key: row info}): the palette's ramps (palettes.ramp_rows) as a 256 x R sRGB image, one row each,
+    made once per content (eido_ramps_<hash>), read Closest (SURFACING_DESIGN.md 2.6: a filtered read bleeds rows)."""
+    rows, index = P.ramp_rows(pal)
+    if not len(rows):
+        return None, {}
+    rows = np.ascontiguousarray(rows, np.float32)
+    nm = 'eido_ramps_' + hashlib.sha1(rows.tobytes()).hexdigest()[:10]
+    img = bpy.data.images.get(nm)
+    if img is None:
+        R, W = rows.shape[:2]
+        img = bpy.data.images.new(nm, W, R, alpha=True, float_buffer=False)
+        img.colorspace_settings.name = 'sRGB'             # before the pixels (SURFACING_DESIGN.md 1.3, probe A3)
+        img.alpha_mode = 'CHANNEL_PACKED'
+        img.pixels.foreach_set(rows.ravel())
+        img.update()
+        try:
+            img.pack()                                    # a saved .blend keeps it
+        except RuntimeError:
+            pass
+    return img, index
+
+
+def _sector_frames(g, dat, coords, Nm):
+    """The two sector slots (SURFACING_DESIGN.md 3.4): per slot dict(U, V, w, T, B). The bearing phi is the azimuth of
+    the field normal (the face's own, from D); the even slot reads the even sector nearest it (phi_k = k 45 degrees,
+    k even), the odd slot the odd one; the even slot's weight is smoothstep(0.1, 0.9, s), s = |2 frac(phi / 90) - 1|
+    (1 at an even sector's centre), so a slot changes sector only where its weight is exactly 0. Frame k: u = P . t_k
+    along the strike, t_k = (-sin phi_k, cos phi_k, 0); v = P . b_k up the fixed dip, b_k = (-cos d cos phi_k,
+    -cos d sin phi_k, sin d), d = SECTOR_DIP_DEG: constant linear maps of the world position, so a scan keeps its
+    scale (at most 1/cos(25 deg) = 1.10 along the dip from 47 to 90 degrees). T, B: t_k and b_k on the shading
+    normal's tangent plane, the frame of the slot's normal maps."""
+    nx, ny, _nz, _N = dat.n_field()
+    x, y, z = g.separate_xyz(coords)
+    q = g.math('DIVIDE', g.math('ARCTAN2', ny, nx), 0.5 * math.pi)
+    fl = g.math('FLOOR', q)
+    s = g.math('ABSOLUTE', g.math('MULTIPLY_ADD', g.sub(q, fl), 2.0, -1.0))
+    w_even = g.smoothstep(0.1, 0.9, s)
+    cd, sd_ = math.cos(math.radians(SECTOR_DIP_DEG)), math.sin(math.radians(SECTOR_DIP_DEG))
+    out = []
+    for phi in (g.mul(g.math('ROUND', q), 0.5 * math.pi), g.mul(g.add(fl, 0.5), 0.5 * math.pi)):
+        c, sn = g.math('COSINE', phi), g.math('SINE', phi)
+        U = g.math('MULTIPLY_ADD', y, c, g.mul(x, g.mul(sn, -1.0)))
+        V = g.math('MULTIPLY_ADD', z, sd_, g.mul(g.math('MULTIPLY_ADD', x, c, g.mul(y, sn)), -cd))
+        T = g.combine_xyz(g.mul(sn, -1.0), c, 0.0)
+        Tp = g.vmath('NORMALIZE', g.vmath('SUBTRACT', T, g.vmath('SCALE', Nm, scale=g.vmath('DOT_PRODUCT', T, Nm))))
+        out.append(dict(U=U, V=V, T=Tp, B=g.vmath('CROSS_PRODUCT', Nm, Tp)))
+    out[0]['w'] = w_even
+    out[1]['w'] = g.sub(1.0, w_even)
+    return out
+
+
+def _count_samplers(ng):
+    """(distinct images, samplers) a node group's image reads take, its subgroups included: one sampler per image
+    and state, Linear and Cubic sharing (SURFACING_DESIGN.md 1.3, probe A)."""
+    states = set()
+    seen = set()
+
+    def walk(tree):
+        if tree.name in seen:
+            return
+        seen.add(tree.name)
+        for n in tree.nodes:
+            if n.bl_idname == 'ShaderNodeTexImage' and n.image is not None:
+                states.add((n.image.name, 'closest' if n.interpolation == 'Closest' else 'filtered', n.extension))
+            elif n.bl_idname == 'ShaderNodeGroup' and n.node_tree is not None:
+                walk(n.node_tree)
+    walk(ng)
+    return len({s[0] for s in states}), len(states)
+
+
+def _faded_smooth(g, comp, lo, hi, n, scale_m, detail):
+    """smoothstep(lo, hi, n) of a raw Noise Texture Fac n (a patch, streak, damp or ledge noise of scale_m), the noise
+    faded to its mean with the footprint and the edges widened by the spread it lost (RAW_HALF), so its mean cover
+    stays put; as it was without a footprint."""
+    f = comp.fade(scale_m)
+    if isinstance(f, float):
+        return g.smoothstep(lo, hi, n)
+    nf = g.math('MULTIPLY_ADD', g.sub(n, 0.5), f, 0.5)
+    hs = RAW_HALF[int(max(0, min(5, round(float(detail)))))]
+    sp = g.math('MULTIPLY_ADD', f, -hs, hs)
+    sgn = 1.0 if hi >= lo else -1.0
+    return g.smoothstep(g.math('MULTIPLY_ADD', sp, -sgn, float(lo)), g.math('MULTIPLY_ADD', sp, sgn, float(hi)), nf)
+
+
+def _layer_weights(pal, sd, log=None):
+    """Each layer's weight expression with baked data: its weight, or its fallback where the weight reads a map the
+    data lacks (SURFACING_DESIGN.md 5.3)."""
+    out = []
+    for L in pal['layers']:
+        w = L['weight']
+        miss = sorted(n for n in P.names_in(w) if not sd.has(n))
+        if miss and L.get('fallback') is not None:
+            if log:
+                log(f"[surfacing] {pal['name']}/{L['name']}: the data lacks {', '.join(miss)}: its fallback weight")
+            w = L['fallback']
+        out.append(w)
+    return out
+
+
+def _main_cell(sd):
+    lv = list(sd.levels)
+    mains = [v for v in lv if getattr(v, 'role', '') == 'main']
+    return float((mains[-1] if mains else lv[min(len(lv) - 1, 0)]).cell)
+
+
+def far_distance(pal, sd):
+    """D0, metres (SURFACING_DESIGN.md 3.7): where the near material hands off to the far colour C, the distance at
+    which a main-level texel spans FAR_TEXEL_PX pixels (c_main / (2.5 pixel_angle)), or the option far_m."""
+    opt = pal['options']
+    if opt.get('far_m'):
+        return float(opt['far_m'])
+    consts = dict(P.CONSTANTS)
+    consts.update(pal.get('constants') or {})
+    return _main_cell(sd) / (FAR_TEXEL_PX * float(consts.get('pixel_angle') or P.CONSTANTS['pixel_angle']))
+
+
+def _surface_group_data(pal, sd, name, prefer, log):
+    """surface_group with baked surface data (the module doc's second part)."""
+    opt = pal['options']
+    layers = pal['layers']
+    sets = [packed_set(L['set'], prefer, log=log) for L in layers]
+    ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    for nm, kd in (('BSDF', 's'), ('Base Color', 'c'), ('Roughness', 'f'), ('Normal', 'v')):
+        _sock(ng, nm, 'OUTPUT', kd)
+    g = Graph(ng)
+    gout = g.node('NodeGroupOutput')
+    coords = g.node('ShaderNodeTexCoord').outputs['Object']
+    geo = g.geometry()
+    Ng, Vin = geo.outputs['Normal'], geo.outputs['Incoming']
+    consts = dict(P.CONSTANTS)
+    consts.update(pal.get('constants') or {})
+    pix = float(consts.get('pixel_angle') or P.CONSTANTS['pixel_angle'])
+    vd = g.view_distance()
+    ndv = g.math('ABSOLUTE', g.vmath('DOT_PRODUCT', Ng, Vin))
+    vpix = g.mul(vd, pix)
+    fp_read = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.05))     # the reader's dead band (2.4)
+    fp = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.25))          # the noise terms' fade (3.2)
+    detile = opt.get('detile') or 'offset'
+    n3 = detile != 'offset'
+    hexed = bool(opt['anti_tile']) and detile in ('rotate', 'hex')
+    weights = _layer_weights(pal, sd, log)
+    tiles = sorted(float(L['tile_m']) for L in layers)
+    dat = _Data(g, sd, _data_names(pal, weights), coords, fp_read, consts, tile_m=tiles[len(tiles) // 2],
+                detail_strength=float(opt.get('detail_strength', DETAIL_STRENGTH)))
+    comp = _Compiler(g, coords, pal.get('constants'), noise3=n3, data=dat, fp=fp)
+    nfx, nfy, nfz, Nf = dat.n_field()
+    Nm = dat.n_macro()
+    lut_img, lut_idx = _lut_image(pal)
+
+    def lut(info, t):
+        R = lut_img.size[1]
+        W = lut_img.size[0]
+        u = g.math('MULTIPLY_ADD', _clamp01(g, t), (W - 1.0) / W, 0.5 / W)
+        n = _tex(g, lut_img, g.combine_xyz(u, (info['row'] + 0.5) / R, 0.0), 'Closest', 'EXTEND')
+        return n.outputs['Color']
+
+    def noise(pos, scale_m, detail, roughness, seed):
+        return _noise3(g, pos, scale_m, detail=detail, roughness=roughness, seed=seed) if n3 else \
+            g.noise(pos, 1.0 / float(scale_m), detail=detail, roughness=roughness, w=seed)
+    box_any = any(L['projection'] == 'box' for L in layers)
+    sec = _sector_frames(g, dat, coords, Nm) if box_any else None
+    steep = g.smoothstep(math.cos(math.radians(STEEP_DEG[0])), math.cos(math.radians(STEEP_DEG[1])), nfz) \
+        if box_any else None
+    steep_face = None
+    strata = None
+    if pal.get('strata') and any(L['strata'] for L in layers):
+        strata = _Strata(g, comp, pal['strata'], coords, pal['name'])
+    per = []
+    for i, (L, S) in enumerate(zip(layers, sets)):
+        cov = _clamp01(g, comp(P.parse(weights[i])))
+        box = L['projection'] == 'box'
+        lg = g.node('ShaderNodeGroup')
+        lg.node_tree = _layer_group(L, S, i, opt, box, hexed)
+        if box:
+            for s in (0, 1):
+                g.set(lg.inputs[f'U{s}'], sec[s]['U'])
+                g.set(lg.inputs[f'V{s}'], sec[s]['V'])
+                g.set(lg.inputs[f'T{s}'], sec[s]['T'])
+                g.set(lg.inputs[f'B{s}'], sec[s]['B'])
+            g.set(lg.inputs['W0'], sec[0]['w'])
+            g.set(lg.inputs['Steep'], steep)
+        col, h = lg.outputs['Color'], lg.outputs['Height']
+        mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
+        mean = np.maximum(np.array(mean_lin, np.float64), 1e-4)
+        contrast = float(L.get('contrast', 1.0))
+        own = tuple(P.hex_linear(L['colour'])) if L['colour'] else None
+        rp = lut_idx.get(L['name']) if (L.get('ramp') and lut_img is not None) else None
+        base = own
+        if rp is not None and rp['kind'] == 'colour':
+            base = lut(rp, comp(P.parse(rp['t'])))         # the ramp's colour stands where `colour` stands
+        smix = float(L['strata']) if L['strata'] is not True else 1.0
+        prov = L.get('provenance') or {}
+        band_rough = None
+        if smix > 0 and strata is not None:
+            band, band_rough = strata.band(float(L.get('strata_offset_m', 0.0)))
+            src = _amount(prov.get('src'))
+            if src > 0.0 and dat.has('src_strata'):
+                # debris takes the column at its source's stratigraphic height: a red cone below red beds runs
+                # down over grey ones, and the bands no longer climb the debris
+                sb, sr = strata.band_at(dat.value('src_strata'))
+                band = sb if src >= 1.0 else g.mix('RGBA', src, band, sb)
+                band_rough = sr if src >= 1.0 else g.mix('FLOAT', src, band_rough, sr)
+            target = band if (smix >= 1.0 or base is None) else g.mix('RGBA', smix, _v4(base), band)
+        else:
+            target = base
+        tint_mult = None
+        if rp is not None and rp['kind'] == 'tint':
+            tint_mult = g.vmath('SCALE', lut(rp, comp(P.parse(rp['t']))), scale=float(rp['gain']))
+            if target is not None:
+                target = g.vmath('MULTIPLY', _v3(target), tint_mult)
+                tint_mult = None
+        down = _amount(prov.get('down'))
+        if down > 0.0 and target is not None:
+            cd = None
+            share = 1.0
+            if dat.has_family('P'):
+                cd = dat.colour('P')
+                share = dat.value('down_share')
+            elif strata is not None and dat.has('src_strata'):
+                cd = strata.band_at(dat.value('src_strata'))[0]      # P deferred: the debris' own provenance
+            if cd is not None:
+                k = _mul(g, _mul(g, g.smoothstep(0.1, 1.5, comp.attr('deposit')), share), down)
+                pale = _rgb3(prov.get('pale'), 1.0)
+                if pale != (1.0, 1.0, 1.0):
+                    cd = g.vmath('MULTIPLY', cd, pale)
+                target = g.mix('RGBA', k, _v4(target), cd)
+        if target is not None:
+            rel = g.vmath('MULTIPLY', col, tuple(1.0 / mean))
+            if contrast != 1.0:
+                rel = g.vmath('ADD', g.vmath('SCALE', rel, scale=contrast), (1.0 - contrast,) * 3)
+            col = g.vmath('MULTIPLY', rel, _v3(target))
+        if tint_mult is not None:
+            col = g.vmath('MULTIPLY', col, tint_mult)
+        if L['tint'] is not None:
+            col = g.vmath('MULTIPLY', col, tuple(L['tint'])[:3])
+        if L.get('patina') is not None and dat.has('fresh'):
+            # weathered rock against fresh: the patina (varnish, lichen, iron stain) where the face stands, the
+            # fresh gain where it fails
+            pa, fg = _rgb3(L['patina']), _rgb3(L.get('fresh_gain'), 1.0)
+            col = g.vmath('MULTIPLY', col, g.mix('VECTOR', dat.value('fresh'), pa, fg))
+        rough = g.mul(lg.outputs['Rough'], float(L['roughness']))
+        if band_rough is not None:
+            rough = g.mul(rough, band_rough if smix >= 1.0 else g.mix('FLOAT', smix, 1.0, band_rough))
+        relief_rv = relief_lv = None
+        if smix >= 1.0 and strata is not None and L.get('relief', True) and strata.relief() is not None:
+            relief_rv, relief_lv = strata.relief()
+            shade = float(pal['strata'].get('relief_shade', 0.15))
+            if shade > 0.0:
+                col = g.vmath('SCALE', col, scale=g.math('MULTIPLY_ADD', relief_rv, shade, 1.0 - shade))
+        nx, ny = lg.outputs['NX'], lg.outputs['NY']
+        canopy_bump = None
+        if L.get('canopy'):
+            cn = _canopy(g, L['canopy'], coords, i)
+            crown_m = float(L['canopy'].get('crown_m', 4.5))
+            fc = comp.fade(crown_m)
+            ccol = cn['col']
+            if not isinstance(fc, float):
+                # finer than a few pixels the crowns read their mean tone (the far colour's), not an aliasing
+                # Voronoi
+                cl = [0.5 * (a + b) * CANOPY_SHADE for a, b in zip(P.hex_linear(L['canopy'].get('colour', '#26371f')),
+                                                                      P.hex_linear(L['canopy'].get('light', '#3d522c')))]
+                gp = P.hex_linear(L['canopy'].get('gap', '#11160d'))
+                mc = tuple(float(gq + (c - gq) * CANOPY_COVER) for gq, c in zip(gp, cl)) + (1.0,)
+                ccol = g.mix('RGBA', fc, mc, ccol)
+            kf = cn['far']
+            if dat.has('canopy_far') and dat.has('canopy_expected'):
+                # the stand-in crowns cover what the instances leave to the material: off where trees stand
+                kf = _mul(g, kf, _clamp01(g, g.math('DIVIDE', dat.value('canopy_far'),
+                                                    g.math('MAXIMUM', dat.value('canopy_expected'), 0.02))))
+            col = g.mix('RGBA', kf, col, ccol)
+            h = g.mix('FLOAT', kf, h, cn['h'])
+            rough = g.mix('FLOAT', kf, rough, 0.9)
+            nx, ny = g.mul(nx, g.sub(1.0, kf)), g.mul(ny, g.sub(1.0, kf))
+            if float(L['canopy'].get('height_m', 3.0)) > 0:
+                canopy_bump = _mul(g, _mul(g, cn['bump'], kf), fc)
+            if L['canopy'].get('edge') and not isinstance(cov, float):
+                t = cn['r_edge']
+                cov = g.mix('FLOAT', kf, cov, g.smoothstep(g.sub(t, 0.05), g.add(t, 0.05), cov))
+        for k, pt in enumerate(_patch_list(L)):
+            if pt.get('from_ramp'):
+                continue                                  # the ramp image draws it
+            amount = float(pt.get('amount', 0.6))
+            if pt.get('scale_m') is None:
+                pm = amount
+            else:
+                det = float(pt.get('detail', 3.0))
+                pn = noise(coords, float(pt['scale_m']), det, 0.55, 33.7 + 2.3 * i + 5.1 * k)
+                pm = g.mul(_faded_smooth(g, comp, float(pt.get('lo', 0.42)), float(pt.get('hi', 0.62)), pn,
+                                         float(pt['scale_m']), det), amount)
+            if pt.get('where'):
+                pm = _mul(g, pm, _clamp01(g, comp(P.parse(pt['where']))))
+            if pt.get('tint'):
+                ratio = np.array(pt['tint'][:3], np.float64)
+            else:
+                ref = np.array(P.hex_linear(L['colour'])) if L['colour'] else mean
+                ratio = np.array(P.hex_linear(pt['colour'])) / np.maximum(ref, 1e-4)
+            col = g.mix('RGBA', pm, col, g.vmath('MULTIPLY', col, tuple(float(v) for v in ratio)))
+        if L.get('streaks'):
+            if steep_face is None:
+                steep_face = g.smoothstep(0.78, 0.5, nfz)
+            st = [float(v) for v in L['streaks']]
+            width, amount = st[0], st[1]
+            lo, hi = (st[2], st[3]) if len(st) >= 4 else (0.45, 0.68)
+            sv = g.vmath('MULTIPLY', coords, (1.0 / width, 1.0 / width, 1.0 / (8.0 * width)))
+            sn = noise(sv, 1.0, 3.0, 0.55, 19.7 + 3.3 * i)
+            dark = g.mul(g.mul(_faded_smooth(g, comp, lo, hi, sn, width, 3.0), amount), steep_face)
+            if L.get('streaks_where'):
+                dark = _mul(g, dark, _clamp01(g, comp(P.parse(L['streaks_where']))))
+            col = g.vmath('SCALE', col, scale=g.sub(1.0, dark))
+        relief_h = None
+        if relief_rv is not None:
+            relief_h = relief_rv
+            ld = L.get('ledges')
+            if ld:
+                sc = float(ld.get('scale_m', 5.0))
+                pn = noise(coords, sc, 3.0, 0.55, 51.3 + 3.1 * i)
+                pm = g.mul(g.mul(relief_lv, _faded_smooth(g, comp, float(ld.get('lo', 0.38)), float(ld.get('hi', 0.6)),
+                                                          pn, sc, 3.0)), float(ld.get('amount', 0.75)))
+                if ld.get('where'):
+                    pm = _mul(g, pm, _clamp01(g, comp(P.parse(ld['where']))))
+                col = g.mix('RGBA', pm, col, g.vmath('MULTIPLY', col, tuple(float(v) for v in ld['tint'][:3])))
+        if float(L.get('value', 1.0)) != 1.0:
+            col = g.vmath('SCALE', col, scale=float(L['value']))
+        col = g.vmath('MINIMUM', g.vmath('MAXIMUM', col, (0.0, 0.0, 0.0)), (0.95, 0.95, 0.95))
+        ripple = None
+        if L.get('ripples'):
+            ripple = _ripples(g, coords, L['ripples'], i)
+        bump_own = None
+        if float(L['bump_m']) > 0 and (not box or not S['stats'].get('has_normal', True)):
+            bump_own = float(L['bump_m'])                 # a set without a normal map keeps its height's bump
+        per.append(dict(L=L, cov=cov, col=col, h=h, nx=nx, ny=ny, pert=lg.outputs['Pert'] if box else None,
+                        rough=rough, ao=lg.outputs['AO'], box=box, ripple=ripple, canopy_bump=canopy_bump,
+                        relief=relief_h, bump_own=bump_own))
+
+    # the overlay of the macro data and the scans' heights (SURFACING_DESIGN.md 3.2 rule 2), then the composite: a
+    # layer's coverage pushed up where d > 0.5 and down where d < 0.5, unchanged at 0 and 1 and in the mean when d's
+    # mean is 0.5; d = 0.5 + height (h - 0.5) + crest crest + crest_fine crest_fine + crease crease (a layer's
+    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain)
+    if opt.get('overlay', True):
+        for p in per:
+            if isinstance(p['cov'], float):
+                continue
+            ov = dict(height=1.0)
+            ov.update(p['L'].get('overlay') or {})
+            d = g.math('MULTIPLY_ADD', g.sub(p['h'], 0.5), float(ov.get('height', 0.0)), 0.5) \
+                if float(ov.get('height', 0.0)) else 0.5
+            for key in ('crest', 'crest_fine', 'crease'):
+                amt = float(ov.get(key, 0.0) or 0.0)
+                if amt and dat.has(key):
+                    term = dat.value(key)
+                    if key != 'crest':                    # the texel-scale terms fade with the footprint
+                        term = _mul(g, term, comp.fade(2.0 * _main_cell(sd) / 8.0))
+                    d = g.math('MULTIPLY_ADD', term, amt, d)
+            if isinstance(d, float):
+                continue
+            d = _clamp01(g, d)
+            cv = p['cov']
+            a_lo = g.mul(g.mul(cv, d), 2.0)
+            a_hi = g.sub(1.0, g.mul(g.mul(g.sub(1.0, cv), g.sub(1.0, d)), 2.0))
+            p['cov'] = g.mix('FLOAT', g.math('LESS_THAN', cv, 0.5), a_hi, a_lo)
+    excl = [None] * len(per)
+    rem = 1.0
+    for i in range(len(per) - 1, -1, -1):
+        excl[i] = _mul(g, per[i]['cov'], rem)
+        rem = _mul(g, rem, _one_minus(g, per[i]['cov']))
+    kb = float(opt['height_blend'])
+    a = []
+    for i, p in enumerate(per):
+        ai = excl[i]
+        if kb > 0:
+            ai = g.add(ai, g.mul(p['h'], kb))
+        e = p['L']['edge_noise'] if p['L']['edge_noise'] is not None else float(opt['edge_noise'])
+        if e > 0 and i > 0:
+            n = noise(coords, 1.0 / 0.85, 3.0, 0.62, 11.1 + 7.3 * i)
+            f = comp.fade(1.0 / 0.85)
+            ai = g.add(ai, g.mul(g.sub(n, 0.5), _mul(g, f, 2.0 * e)))
+        a.append(ai)
+    if len(a) == 1:
+        wn = [1.0]
+    else:
+        ma = a[0]
+        for v in a[1:]:
+            ma = g.math('MAXIMUM', ma, v)
+        ma = g.sub(ma, float(opt['blend_depth']))
+        b = [g.math('MAXIMUM', g.sub(v, ma), 0.0) for v in a]
+        s = b[0]
+        for v in b[1:]:
+            s = g.add(s, v)
+        s = g.math('MAXIMUM', s, 1e-5)
+        wn = [g.math('DIVIDE', v, s) for v in b]
+
+    def wsum(vals):
+        acc = None
+        for v, w in zip(vals, wn):
+            if v is None:
+                continue
+            term = _mul(g, v, w)
+            acc = term if acc is None else g.add(acc, term)
+        return 0.0 if acc is None else acc
+
+    def wsum_vec(vals):
+        acc = None
+        for v, w in zip(vals, wn):
+            if v is None:
+                continue
+            term = g.vmath('SCALE', v, scale=w)
+            acc = term if acc is None else g.vmath('ADD', acc, term)
+        return acc
+    albedo = wsum_vec([p['col'] for p in per])
+    rough = wsum([p['rough'] for p in per])
+    if opt['ao'] > 0:
+        albedo = g.vmath('SCALE', albedo, scale=g.add(1.0 - opt['ao'], g.mul(wsum([p['ao'] for p in per]), opt['ao'])))
+    if opt.get('tone'):
+        tv = comp(P.parse(opt['tone']))
+        if not isinstance(tv, float):
+            albedo = g.vmath('SCALE', albedo, scale=g.math('MINIMUM', g.math('MAXIMUM', g.add(tv, 1.0), 0.4), 1.6))
+        elif tv != 0.0:
+            albedo = g.vmath('SCALE', albedo, scale=min(max(1.0 + tv, 0.4), 1.6))
+    albedo = _macro(g, coords, albedo, opt.get('macro') or [], n3)
+    if lut_img is not None and 'satmap' in lut_idx:
+        si = lut_idx['satmap']
+        albedo = g.vmath('MULTIPLY', albedo, g.vmath('SCALE', lut(si, comp(P.parse(si['t']))), scale=float(si['gain'])))
+    if opt['damp'] > 0 or opt.get('damp_where'):
+        dm = 0.0
+        if opt['damp'] > 0:
+            sc = float(opt.get('damp_scale_m', 6.25))
+            dn = noise(coords, sc, 3.0, 0.6, 13.3)
+            dm = g.mul(_faded_smooth(g, comp, 0.5, 0.68, dn, sc, 3.0), float(opt['damp']))
+        if opt.get('damp_where'):
+            dw = _clamp01(g, comp(P.parse(opt['damp_where'])))
+            dm = dw if isinstance(dm, float) and dm == 0.0 else g.math('MAXIMUM', dm, dw)
+        if not (isinstance(dm, float) and dm == 0.0):
+            albedo = g.vmath('SCALE', albedo, scale=g.sub(1.0, g.mul(dm, 0.38)))
+            rough = g.mul(rough, g.sub(1.0, g.mul(dm, 0.32)))
+
+    # the far hand-off (SURFACING_DESIGN.md 3.7): past D0 the ground fades to its baked far colour C (x a faint grain
+    # of the base layer's scan) over D0..1.5 D0 of view distance, never inside the hero windows (the second factor
+    # fades it in over 64 main cells beyond the outermost one); both factors are continuous, so nothing steps at a
+    # window edge, and a pixel's distance decides it whichever ring draws it
+    D0 = far_distance(pal, sd)
+    w_far = None
+    if dat.has_family('C'):
+        cm = _main_cell(sd)
+        w_far = g.mul(g.smoothstep(D0, 1.5 * D0, vd),
+                      g.smoothstep(0.0, FAR_FADE_MAIN_CELLS * cm, dat.rd.outputs['Hero Outside']))
+        fc_col = g.vmath('SCALE', dat.colour('C'), scale=_far_grain(g, layers[0], sets[0], coords))
+        albedo = g.mix('RGBA', w_far, albedo, fc_col)
+        rough = g.mix('FLOAT', w_far, rough, dat.value('far_roughness'))
+    elif log:
+        log(f"[surfacing] {pal['name']}: no far colour in the data (no palette bake): no far hand-off")
+
+    # normals: the macro normal (field normal + relief below the cell), the planar reads' normal maps in its world-XY
+    # tangent frame, the sector reads' tilts in their own frames, then the bumps
+    nxs = wsum([p['nx'] for p in per])
+    nys = wsum([p['ny'] for p in per])
+    dot = g.vmath('DOT_PRODUCT', Nm, (1.0, 0.0, 0.0))
+    Txy = g.vmath('NORMALIZE', g.vmath('SUBTRACT', (1.0, 0.0, 0.0), g.vmath('SCALE', Nm, scale=dot)))
+    Bxy = g.vmath('CROSS_PRODUCT', Nm, Txy)
+    nzs = g.math('SQRT', g.math('MAXIMUM', g.sub(g.sub(1.0, g.mul(nxs, nxs)), g.mul(nys, nys)), 0.0))
+    nvec = g.vmath('ADD', g.vmath('ADD', g.vmath('SCALE', Txy, scale=nxs), g.vmath('SCALE', Bxy, scale=nys)),
+                   g.vmath('SCALE', Nm, scale=nzs))
+    pert = wsum_vec([p['pert'] for p in per])
+    if pert is not None:
+        nvec = g.vmath('ADD', nvec, pert)
+    normal = g.vmath('NORMALIZE', nvec)
+    # the bumps: ripples, canopy, strata relief (and a scan without a normal map), each its own Bump node with its
+    # weight (cheap coverages: every weight with its noise at its mean, composited) and the far fade in its Distance,
+    # computed once outside the bump's height, so EEVEE's three evaluations of the height read only the height
+    cheap = _Compiler(g, coords, pal.get('constants'), noise3=True, flat=True, attrs=comp.attrs, data=dat)
+    bumped = [p['bump_own'] is not None or p['ripple'] is not None or p['canopy_bump'] is not None
+              or p['relief'] is not None for p in per]
+    if any(bumped):
+        ccov = [_clamp01(g, cheap(P.parse(weights[i]))) if bumped[i] or any(bumped[:i]) else 0.0
+                for i in range(len(per))]
+        bw = [None] * len(per)
+        crem = 1.0
+        for i in range(len(per) - 1, -1, -1):
+            bw[i] = _mul(g, ccov[i], crem) if bumped[i] else 0.0
+            crem = _mul(g, crem, _one_minus(g, ccov[i]))
+        keep = 1.0 if w_far is None else g.sub(1.0, w_far)
+        for p, w in zip(per, bw):
+            terms = []
+            if p['bump_own'] is not None:
+                terms.append((g.sub(p['h'], 0.5), p['bump_own']))
+            if p['ripple'] is not None:
+                terms.append((p['ripple'], 1.0))
+            if p['canopy_bump'] is not None:
+                terms.append((p['canopy_bump'], 1.0))
+            if p['relief'] is not None:
+                terms.append((p['relief'], strata.relief_m))
+            for hgt, scale in terms:
+                dist = _mul(g, _mul(g, w, keep), scale)
+                if isinstance(dist, float) and dist == 0.0:
+                    continue
+                bp = g.node('ShaderNodeBump')
+                bp.inputs['Strength'].default_value = 1.0
+                g.set(bp.inputs['Distance'], dist)
+                g.set(bp.inputs['Height'], hgt)
+                g.set(bp.inputs['Normal'], normal)
+                normal = bp.outputs['Normal']
+    # a grazing pixel whose shading normal turns away from the camera is pulled toward the mesh's own normal, so it
+    # never shades black (shadows stay geometric)
+    facing = g.smoothstep(0.0, 0.1, g.vmath('DOT_PRODUCT', normal, Vin))
+    normal = g.vmath('NORMALIZE', g.mix('VECTOR', facing, Ng, normal))
+    if opt.get('dusting'):
+        # powder and ash on every ledge and grain the scans and the macro normal draw, by the final normal
+        du = opt['dusting']
+        t0, t1 = du.get('slope_deg', (25.0, 45.0))
+        nzf = g.separate_xyz(normal)[2]
+        dm = g.mul(g.smoothstep(math.cos(math.radians(float(t1))), math.cos(math.radians(float(t0))), nzf),
+                   float(du.get('amount', 0.6)))
+        if du.get('where'):
+            dm = _mul(g, dm, _clamp01(g, comp(P.parse(du['where']))))
+        if w_far is not None:
+            dm = _mul(g, dm, g.sub(1.0, w_far))
+        albedo = g.mix('RGBA', dm, albedo, tuple(P.hex_linear(du.get('colour', '#f2f4f6'))) + (1.0,))
+
+    bsdf = g.node('ShaderNodeBsdfPrincipled')
+    bsdf.inputs['Metallic'].default_value = 0.0
+    specs = [float(p['L'].get('specular', opt['specular'])) for p in per]
+    spec = specs[0] if len(set(specs)) == 1 else wsum(specs)
+    if w_far is not None and not (isinstance(spec, float) and spec == float(opt['specular'])):
+        spec = g.mix('FLOAT', w_far, spec, float(opt['specular']))
+    g.set(bsdf.inputs['Specular IOR Level'], spec)
+    albedo = g.vmath('MINIMUM', albedo, (0.95, 0.95, 0.95))
+    g.set(bsdf.inputs['Base Color'], albedo)
+    rough_c = g.math('MINIMUM', g.math('MAXIMUM', rough, 0.02), 1.0) if not isinstance(rough, float) else rough
+    g.set(bsdf.inputs['Roughness'], rough_c)
+    g.set(bsdf.inputs['Normal'], normal)
+    g.set(gout.inputs['BSDF'], bsdf.outputs['BSDF'])
+    dbg = opt.get('debug')
+    if dbg:
+        em = g.node('ShaderNodeEmission')
+        if dbg == 'weights':
+            cols = [wn[-1], wn[-2] if len(wn) > 1 else 0.0, wn[-3] if len(wn) > 2 else 0.0]
+            g.set(em.inputs['Color'], g.combine_xyz(*cols))
+        elif dbg == 'layers':
+            g.set(em.inputs['Color'], wsum_vec([DEBUG_COLOURS[i % len(DEBUG_COLOURS)] for i in range(len(per))])
+                  if len(per) > 1 else DEBUG_COLOURS[0] + (1.0,))
+        elif dbg == 'level':
+            lvl = dat.rd.outputs['Level']
+            g.set(em.inputs['Color'], g.combine_xyz(g.math('FRACT', g.mul(lvl, 0.37)), g.math('FRACT', g.mul(lvl, 0.61)),
+                                                    g.math('FRACT', g.mul(lvl, 0.83))))
+        else:
+            g.set(em.inputs['Color'], albedo)
+        g.set(gout.inputs['BSDF'], em.outputs['Emission'])
+    g.set(gout.inputs['Base Color'], albedo)
+    g.set(gout.inputs['Roughness'], rough_c)
+    g.set(gout.inputs['Normal'], normal)
+    nimg, nsamp = _count_samplers(ng)
+    if nsamp > MAX_SAMPLERS:
+        fams = sorted(f for f in dat.images if f.startswith('M'))
+        raise ValueError(f"palette {pal['name']!r} with baked data takes {nsamp} samplers ({nimg} images); EEVEE "
+                         f"allows about 30 ({MAX_SAMPLERS} with a margin): drop a layer, or read fewer masks (its "
+                         f"{len(fams)} mask atlases, {', '.join(fams)}, take one each)")
+    ng['eido_palette'] = pal['name']
+    ng['eido_sets'] = [S['name'] for S in sets]
+    ng['eido_images'] = nimg
+    ng['eido_samplers'] = nsamp
+    ng['eido_mask_packs'] = '[]'
+    ng['eido_attributes'] = 0
+    ng['eido_surface_key'] = str(sd.key)
+    ng['eido_far_m'] = float(D0)
+    ng['eido_hex'] = bool(hexed)
+    return ng
+
+
+def _far_grain(g, L, S, coords):
+    """1 + FAR_GRAIN (luminance / mean - 1) of the base layer's scan read once (mipmapped, planar): the faint grain the
+    far colour keeps of the ground it stands for."""
+    mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
+    ml = max(sum(a * b for a, b in zip(mean_lin, _LUMA)), 1e-4)
+    n = _tex(g, S['albedo'], g.vmath('SCALE', coords, scale=1.0 / float(L['tile_m'])), 'Linear')
+    lum = g.vmath('DOT_PRODUCT', n.outputs['Color'], _LUMA)
+    return g.math('MULTIPLY_ADD', lum, FAR_GRAIN / ml, 1.0 - FAR_GRAIN)
+
+
+def far_group(palette, data, name='eido_terrain_far', prefer='2k', log=print):
+    """The far material's node group (SURFACING_DESIGN.md 3.7): the baked far colour C and its roughness, the macro
+    normal from D, the base layer's faint grain, no layers. What the near material shows past 1.5 D0, for rings
+    lying beyond that from every camera: a cost saving only."""
     pal = P.get(palette) if not (isinstance(palette, dict) and 'options' in palette) else palette
+    opt = pal['options']
+    L0 = pal['layers'][0]
+    S0 = packed_set(L0['set'], prefer, log=log)
+    ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    for nm, kd in (('BSDF', 's'), ('Base Color', 'c'), ('Roughness', 'f'), ('Normal', 'v')):
+        _sock(ng, nm, 'OUTPUT', kd)
+    g = Graph(ng)
+    gout = g.node('NodeGroupOutput')
+    coords = g.node('ShaderNodeTexCoord').outputs['Object']
+    geo = g.geometry()
+    consts = dict(P.CONSTANTS)
+    consts.update(pal.get('constants') or {})
+    pix = float(consts.get('pixel_angle') or P.CONSTANTS['pixel_angle'])
+    ndv = g.math('ABSOLUTE', g.vmath('DOT_PRODUCT', geo.outputs['Normal'], geo.outputs['Incoming']))
+    fp = g.math('DIVIDE', g.mul(g.view_distance(), pix), g.math('MAXIMUM', ndv, 0.05))
+    tiles = sorted(float(L['tile_m']) for L in pal['layers'])
+    dat = _Data(g, data, set(), coords, fp, consts, tile_m=tiles[len(tiles) // 2],
+                detail_strength=float(opt.get('detail_strength', DETAIL_STRENGTH)))
+    if not dat.has_family('C'):
+        raise ValueError('far_group: the surface data has no far colour (bake it with a palette)')
+    normal = dat.n_macro()
+    albedo = g.vmath('MINIMUM', g.vmath('SCALE', dat.colour('C'), scale=_far_grain(g, L0, S0, coords)),
+                     (0.95, 0.95, 0.95))
+    rough = g.math('MINIMUM', g.math('MAXIMUM', dat.value('far_roughness'), 0.02), 1.0)
+    bsdf = g.node('ShaderNodeBsdfPrincipled')
+    bsdf.inputs['Metallic'].default_value = 0.0
+    bsdf.inputs['Specular IOR Level'].default_value = float(opt['specular'])
+    g.set(bsdf.inputs['Base Color'], albedo)
+    g.set(bsdf.inputs['Roughness'], rough)
+    g.set(bsdf.inputs['Normal'], normal)
+    g.set(gout.inputs['BSDF'], bsdf.outputs['BSDF'])
+    g.set(gout.inputs['Base Color'], albedo)
+    g.set(gout.inputs['Roughness'], rough)
+    g.set(gout.inputs['Normal'], normal)
+    nimg, nsamp = _count_samplers(ng)
+    ng['eido_palette'] = pal['name']
+    ng['eido_images'] = nimg
+    ng['eido_samplers'] = nsamp
+    ng['eido_surface_key'] = str(data.key)
+    ng['eido_far'] = True
+    return ng
+
+
+def terrain_map_group(data, names=None, name='eido_terrain_map'):
+    """eido_terrain_map (SURFACING_DESIGN.md 2.7): a terrain's baked maps per pixel through the same two-slot reader,
+    for agents' own shaders. One output per map, named by it (decoded to its unit: maps.MAPS): the masks and new maps
+    in the M atlases (by default the current packing: the palette's reads), D's normal_x, normal_y, detail_gx,
+    detail_gy, E's crease, cavity, crest_fine, grain, F's strata and src_strata, C's far_colour and far_roughness and
+    P's down_colour and down_share where baked, and the derived slope, aspect, northness, eastness, insolation,
+    height, plus Level (the finest window holding the pixel). Link the output you want; the rest compile to nothing.
+    names: pack these maps into the M atlases first (call it before building materials on the same data: a repack
+    remakes the M images). A second terrain's group is named eido_terrain_map_<key>."""
+    from ..surface import maps as MP
+    if names:
+        data.pack(list(names))
+    other = bpy.data.node_groups.get(name)
+    if other is not None and other.get('eido_surface_key') not in (None, str(data.key)):
+        name = f'{name}_{str(data.key)[:8]}'
+    old = bpy.data.node_groups.get(name)
+    if old is not None:
+        bpy.data.node_groups.remove(old)
+    ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    g = Graph(ng)
+    coords = g.node('ShaderNodeTexCoord').outputs['Object']
+    geo = g.geometry()
+    ndv = g.math('ABSOLUTE', g.vmath('DOT_PRODUCT', geo.outputs['Normal'], geo.outputs['Incoming']))
+    fp = g.math('DIVIDE', g.mul(g.view_distance(), float(P.CONSTANTS['pixel_angle'])), g.math('MAXIMUM', ndv, 0.05))
+    dat = _Data(g, data, set(), coords, fp, dict(P.CONSTANTS))
+    outs = []
+    packed = sorted({n for grp in data.packing() for n in grp})
+    fixed = [n for f in ('D', 'E', 'F') if f in dat.images for n in MP.FAMILIES[f]['channels'] if n is not None]
+    for n in packed + fixed:
+        if dat.has(n):
+            outs.append((n, dat.value(n) if n not in ('normal_x', 'normal_y', 'detail_gx', 'detail_gy')
+                         else dat.value_raw(n), 'f'))
+    for f, (cn, an) in (('C', ('far_colour', 'far_roughness')), ('P', ('down_colour', 'down_share'))):
+        if dat.has_family(f):
+            outs.append((cn, dat.colour(f), 'c'))
+            outs.append((an, dat.value(an), 'f'))
+    for n in ('slope', 'aspect', 'northness', 'eastness', 'insolation', 'height'):
+        outs.append((n, dat.value(n), 'f'))
+    if dat.has('slope_20m'):
+        outs.append(('slope_20m', dat.value('slope_20m'), 'f'))
+    outs.append(('Level', dat.rd.outputs['Level'], 'f'))
+    for n, _v, kd in outs:
+        _sock(ng, n, 'OUTPUT', kd)
+    go = g.node('NodeGroupOutput')
+    for n, v, _kd in outs:
+        g.set(go.inputs[n], v)
+    ng['eido_surface_key'] = str(data.key)
+    return ng
+
+
+def surface_group(palette, name=GROUP_NAME, prefer='2k', log=print, data=None):
+    """The eido_terrain_surface shader node group of a palette (palettes.get resolves it). Outputs: BSDF, Base Color,
+    Roughness, Normal. The group carries the palette name and its layers' sets as custom properties. data: a
+    SurfaceData (terrain/surface): the per-texel material of the module doc's second part."""
+    pal = P.get(palette) if not (isinstance(palette, dict) and 'options' in palette) else palette
+    if data is not None:
+        return _surface_group_data(pal, data, name, prefer, log)
     opt = pal['options']
     layers = pal['layers']
     sets = [packed_set(L['set'], prefer, log=log) for L in layers]
@@ -941,10 +2378,12 @@ def surface_group(palette, name=GROUP_NAME, prefer='2k', log=print):
         strata = _Strata(g, comp, pal['strata'], coords, pal['name'])
         images.add(strata.img.name)
 
-    # per layer: coverage, then the reads
+    # per layer: coverage, then the reads. Without baked data a layer's fallback stands for its weight (a canopy
+    # layer's weight reads the plant layer's canopy_expected, which only baked data holds)
+    wexpr = [L['fallback'] if L.get('fallback') is not None else L['weight'] for L in layers]
     per = []
     for i, (L, S) in enumerate(zip(layers, sets)):
-        cov = _clamp01(g, comp(P.parse(L['weight'])))
+        cov = _clamp01(g, comp(P.parse(wexpr[i])))
         r = _layer_reads(g, rd, S, L, i, coords_rot, steep)
         images.update((S['albedo'].name, S['nrao'].name))
         col, h = r['col'], r['h']
@@ -1175,7 +2614,7 @@ def surface_group(palette, name=GROUP_NAME, prefer='2k', log=print):
         bumped = [float(p['L']['bump_m']) > 0 or p['ripple'] is not None or p['canopy_bump'] is not None
                   or p['relief'] is not None for p in per]
         # (a bumped layer's share needs the coverage of every layer above it)
-        ccov = [_clamp01(g, cheap(P.parse(p['L']['weight']))) if bumped[i] or any(bumped[:i]) else 0.0
+        ccov = [_clamp01(g, cheap(P.parse(wexpr[i]))) if bumped[i] or any(bumped[:i]) else 0.0
                 for i, p in enumerate(per)]
         bw = [None] * len(per)
         crem = 1.0
@@ -1312,23 +2751,7 @@ def resolve(palette='auto', recipe=None, strata=None, options=None, constants=No
     return pal
 
 
-def surface_material(palette='auto', recipe=None, strata=None, options=None, name='terrain_ground', prefer='2k',
-                     log=print, constants=None):
-    """A material whose surface is the eido_terrain_surface group of a palette; palette=None gives clay_material().
-
-    palette   a name (palettes.names()), 'auto' (the recipe's: palettes.RECIPE_PALETTES), or a palette dict
-    recipe    the recipe (name, Recipe or dict), for 'auto'
-    strata    the rock column for the palette's strata layers: a STRATA_COLUMNS name, the solver's column list, or a
-              dict (column, source 'attribute' | 'position', z_offset_m, dip_deg, dip_azimuth_deg, faults, warp,
-              facies_m, smear, parting, looks)
-    options   material options over the palette's (palettes.DEFAULT_OPTIONS)
-    constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m)
-    """
-    if palette is None:
-        return clay_material(name)
-    t0 = time.time()
-    pal = resolve(palette, recipe, strata, options, constants)
-    ng = surface_group(pal, prefer=prefer, log=log)
+def _group_material(ng, name):
     mat = new_material(name)
     nt = mat.node_tree
     for n in list(nt.nodes):
@@ -1338,31 +2761,188 @@ def surface_material(palette='auto', recipe=None, strata=None, options=None, nam
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     out.location = (300, 0)
     nt.links.new(grp.outputs['BSDF'], out.inputs['Surface'])
-    mat['eido_palette'] = pal['name']
-    mat['eido_masks'] = sorted(P.masks_used(pal))
-    mat['eido_constants'] = json.dumps(pal['constants'])
-    mat['eido_mask_packs'] = ng['eido_mask_packs']
-    if log:
-        packed = json.loads(ng['eido_mask_packs'])
-        log(f"[surfacing] {pal['name']}: {len(pal['layers'])} layers, {ng['eido_images']} images, "
-            f"{ng['eido_attributes']} mesh attributes" + (f" ({sum(len(m) for _a, m in packed)} masks packed three to "
-                                                         f"one: pack_masks writes them)" if packed else '')
-            + f", {len(ng.nodes)} nodes in {time.time() - t0:.1f} s")
     return mat
 
 
-def apply_surface(obj, palette='auto', recipe=None, strata=None, options=None, name=None, log=print, constants=None):
+def _nodes_in(ng, seen=None):
+    """Nodes of a group with its subgroups expanded (each distinct subgroup counted once)."""
+    seen = set() if seen is None else seen
+    n = 0
+    for nd in ng.nodes:
+        n += 1
+        if nd.bl_idname == 'ShaderNodeGroup' and nd.node_tree is not None and nd.node_tree.name not in seen:
+            seen.add(nd.node_tree.name)
+            n += _nodes_in(nd.node_tree, seen)
+    return n
+
+
+def surface_material(palette='auto', recipe=None, strata=None, options=None, name='terrain_ground', prefer='2k',
+                     log=print, constants=None, data=None):
+    """A material whose surface is the eido_terrain_surface group of a palette; palette=None gives clay_material().
+
+    palette   a name (palettes.names()), 'auto' (the recipe's: palettes.RECIPE_PALETTES), or a palette dict
+    recipe    the recipe (name, Recipe or dict), for 'auto'
+    strata    the rock column for the palette's strata layers: a STRATA_COLUMNS name, the solver's column list, or a
+              dict (column, source 'attribute' | 'position', z_offset_m, dip_deg, dip_azimuth_deg, faults, warp,
+              facies_m, smear, parting, looks)
+    options   material options over the palette's (palettes.DEFAULT_OPTIONS), and with baked data: detile 'hex'
+              (the landscape palettes' 'rotate' reads as hex; 'offset' keeps one read per frame), detail_strength
+              (the relief below the cell, default 0.5), far_m (D0, metres; default where a main-level texel spans
+              2.5 pixels), overlay (False: no overlay before the height blend), dusting dict(colour, amount,
+              slope_deg, where), debug 'level' (the level each pixel reads); a layer's hex_m (default its tile),
+              hex_rotate (False for directional scans), overlay dict(height, crest, crest_fine, crease), provenance
+              dict(src, down, pale), patina and fresh_gain (multipliers on rock by `fresh`)
+    constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m,
+              pixel_angle, ...)
+    data      a SurfaceData (terrain/surface.bake_surface) of the terrain the material is for: the per-texel
+              material (module doc); its far colour C needs the bake to have had a palette
+    """
+    if palette is None:
+        return clay_material(name)
+    t0 = time.time()
+    pal = resolve(palette, recipe, strata, options, constants)
+    ng = surface_group(pal, prefer=prefer, log=log, data=data)
+    mat = _group_material(ng, name)
+    mat['eido_palette'] = pal['name']
+    mat['eido_masks'] = sorted(P.masks_used(pal)) if data is None else []
+    mat['eido_constants'] = json.dumps(pal['constants'])
+    mat['eido_mask_packs'] = ng['eido_mask_packs']
+    mat['eido_build_s'] = round(time.time() - t0, 2)
+    if data is not None:
+        mat['eido_surface_key'] = str(data.key)
+        mat['eido_far_m'] = float(ng['eido_far_m'])
+        mat['eido_samplers'] = int(ng['eido_samplers'])
+    if log:
+        if data is not None:
+            log(f"[surfacing] {pal['name']} (baked data {str(data.key)[:10]}): {len(pal['layers'])} layers, "
+                f"{ng['eido_images']} images, {ng['eido_samplers']} samplers, {_nodes_in(ng)} nodes "
+                f"(groups expanded) in {time.time() - t0:.1f} s; far hand-off at {ng['eido_far_m']:.0f} m")
+        else:
+            packed = json.loads(ng['eido_mask_packs'])
+            log(f"[surfacing] {pal['name']}: {len(pal['layers'])} layers, {ng['eido_images']} images, "
+                f"{ng['eido_attributes']} mesh attributes" + (f" ({sum(len(m) for _a, m in packed)} masks packed "
+                                                             f"three to one: pack_masks writes them)" if packed else '')
+                + f", {len(ng.nodes)} nodes in {time.time() - t0:.1f} s")
+    return mat
+
+
+def far_material(palette='auto', recipe=None, strata=None, options=None, name='terrain_far', prefer='2k', log=print,
+                 constants=None, data=None):
+    """The far material of a terrain with baked data (material slot 1: its far colour C, the macro normal, a faint
+    grain; SURFACING_DESIGN.md 3.7). apply_surface(cameras=...) gives it to the rings beyond 1.5 D0 of every camera."""
+    if data is None:
+        raise ValueError('far_material needs the terrain\'s surface data (data=)')
+    t0 = time.time()
+    pal = resolve(palette, recipe, strata, options, constants)
+    ng = far_group(pal, data, prefer=prefer, log=log)
+    mat = _group_material(ng, name)
+    mat['eido_palette'] = pal['name']
+    mat['eido_far'] = True
+    mat['eido_surface_key'] = str(data.key)
+    if log:
+        log(f"[surfacing] {pal['name']} far material: {ng['eido_samplers']} samplers, {_nodes_in(ng)} nodes in "
+            f"{time.time() - t0:.1f} s")
+    return mat
+
+
+def _camera_points(cameras):
+    """(N, 2) world x, y of camera positions: camera objects (their world location), (x, y[, z]) points, or arrays of
+    them (points along a camera path)."""
+    pts = []
+    for c in cameras or []:
+        if hasattr(c, 'matrix_world'):
+            t = c.matrix_world.translation
+            pts.append((float(t[0]), float(t[1])))
+            continue
+        a = np.asarray(c, np.float64)
+        if a.ndim == 2:
+            pts.extend((float(r[0]), float(r[1])) for r in a)
+        else:
+            pts.append((float(a[0]), float(a[1])))
+    return np.asarray(pts, np.float64).reshape(-1, 2)
+
+
+def _ring_table(obj):
+    """[dict(ring, level, start, count, window (x0, y0, x1, y1), hole or None)] of a ring mesh object: what
+    mesh.make_object stores (eido_terrain_rings), else rebuilt from its layout."""
+    raw = obj.get('eido_terrain_rings')
+    if raw:
+        return json.loads(raw)
+    lay = obj.get('eido_terrain_mesh')
+    if not lay:
+        return []
+    from . import mesh as _mesh
+    return _mesh.ring_table(json.loads(lay) if isinstance(lay, str) else dict(lay))
+
+
+def far_rings(obj, data, cameras, far_m=None, palette=None):
+    """The rings of a terrain object that lie beyond 1.5 D0 (horizontal metres) from every camera point: those the far
+    material may draw (SURFACING_DESIGN.md 3.7). D0: far_m, else the palette's far_distance. No cameras, no rings."""
+    pts = _camera_points(cameras)
+    if not len(pts):
+        return []
+    if far_m is None:
+        far_m = far_distance(P.get(palette or 'auto') if not isinstance(palette, dict) else palette, data)
+    lim = 1.5 * float(far_m)
+    out = []
+    for r in _ring_table(obj):
+        x0, y0, x1, y1 = r['window']
+        dx = np.maximum(np.maximum(x0 - pts[:, 0], pts[:, 0] - x1), 0.0)
+        dy = np.maximum(np.maximum(y0 - pts[:, 1], pts[:, 1] - y1), 0.0)
+        d = np.hypot(dx, dy)
+        if r.get('hole'):
+            hx0, hy0, hx1, hy1 = r['hole']
+            inside = (pts[:, 0] > hx0) & (pts[:, 0] < hx1) & (pts[:, 1] > hy0) & (pts[:, 1] < hy1)
+            dh = np.minimum(np.minimum(pts[:, 0] - hx0, hx1 - pts[:, 0]), np.minimum(pts[:, 1] - hy0, hy1 - pts[:, 1]))
+            d = np.where(inside, dh, d)
+        if float(d.min()) > lim:
+            out.append(int(r['ring']))
+    return out
+
+
+def _set_far_rings(obj, rings):
+    """material_index 1 on the triangles of these rings (the far material), 0 elsewhere."""
+    me = obj.data
+    idx = np.zeros(len(me.polygons), np.int32)
+    if rings:
+        tab = {int(r['ring']): r for r in _ring_table(obj)}
+        for k in rings:
+            r = tab[int(k)]
+            idx[int(r['start']):int(r['start']) + int(r['count'])] = 1
+    me.polygons.foreach_set('material_index', idx)
+    me.update()
+    return int(idx.sum())
+
+
+def apply_surface(obj, palette='auto', recipe=None, strata=None, options=None, name=None, log=print, constants=None,
+                  data=None, cameras=None):
     """surface_material(...) assigned to obj (its material slots replaced), with the terrain's own constants
-    (terrain_constants(obj): base elevation, snowline, treeline) under any given here. Warns about masks the palette
-    reads that obj's mesh lacks (they read as 0). Returns the material."""
+    (terrain_constants(obj): base elevation, snowline, treeline) under any given here. Without data, warns about
+    masks the palette reads that obj's mesh lacks (they read as 0). Returns the (near) material.
+
+    data      the terrain's SurfaceData: the per-texel material
+    cameras   with data: camera objects, (x, y[, z]) points or arrays of points along a camera path; rings lying
+              beyond 1.5 D0 of all of them take the far material (slot 1). None: every ring the near material, which
+              hands off to the same far colour by itself past D0 (the far material is a cost saving only)"""
     consts = terrain_constants(obj)
     consts.update(constants or {})
     mat = surface_material(palette, recipe, strata, options, name=name or (obj.name + '_ground'), log=log,
-                           constants=consts)
+                           constants=consts, data=data)
     me = obj.data
     me.materials.clear()
     me.materials.append(mat)
-    if palette is not None:
+    if palette is not None and data is not None:
+        far = far_rings(obj, data, cameras, far_m=mat.get('eido_far_m')) if cameras else []
+        if far and data.families() and 'C' in data.families():
+            me.materials.append(far_material(palette, recipe, strata, options, name=(name or obj.name) + '_far',
+                                             log=log, constants=consts, data=data))
+            n = _set_far_rings(obj, far)
+            if log:
+                log(f"[surfacing] {obj.name}: rings {far} ({n:,} triangles) beyond {1.5 * mat['eido_far_m']:.0f} m of "
+                    f"every camera take the far material")
+        elif len(me.polygons):
+            _set_far_rings(obj, [])
+    elif palette is not None:
         pack_masks(obj, mat)
         if log:
             miss = missing_masks(obj, mat.get('eido_masks', []))
@@ -1410,5 +2990,7 @@ def missing_masks(obj, palette_or_names):
 
 
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
-           'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'resolve', 'terrain_constants', 'cache_root',
-           'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'ATTRS_DIRECT', 'DEBUG_COLOURS']
+           'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
+           'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'reader_group', 'hex_grid_group',
+           'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
+           'DEBUG_COLOURS']

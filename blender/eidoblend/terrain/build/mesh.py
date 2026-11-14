@@ -176,6 +176,8 @@ class _Ring:
     Z: np.ndarray = None     # (len(ys), len(xs)) heights as written (float32 values held in float64)
     xm: np.ndarray = None    # lattice lines in metres, as written (float32 values held in float64)
     ym: np.ndarray = None
+    tri_start: int = 0       # this ring's triangles: a run of the mesh's polygons (its seam fans included)
+    tri_count: int = 0
 
 
 def _find(sorted_arr, values):
@@ -243,6 +245,10 @@ def _topology(specs, skirt):
         rings.append(_Ring(s, hole, xs, ys, idx, own, nv, lines))
         nv += cnt
     tris = [_ring_triangles(r, rings[k + 1] if k + 1 < len(rings) else None) for k, r in enumerate(rings)]
+    start = 0
+    for r, t in zip(rings, tris):
+        r.tri_start, r.tri_count = start, int(len(t))
+        start += int(len(t))
     tris = np.concatenate(tris).astype(np.int64)
     perim = None
     if skirt:
@@ -393,6 +399,13 @@ class RingMesh:
                     windows=[[w.x0, w.y0, w.cell, w.n] for w in self.windows],
                     rings=[s.as_list() for s in self.specs], skirt=self.skirt is not None,
                     skirt_drop_m=(self.skirt or {}).get('drop_m', SKIRT_DROP_M))
+
+    def ring_table(self):
+        """[dict(ring, level, start, count, window, hole)]: each ring's triangles (polygons start .. start + count of
+        the object, its seam fans included) and its region in metres (window (x0, y0, x1, y1), hole the next ring's
+        window or None): what material_index per ring reads (surfacing.far_rings). The skirt's triangles follow the
+        last ring's and keep material 0."""
+        return _table(self.rings, self.origin, self.unit)
 
     # locating points ----------------------------------------------------------------------------------------
     def ring_of(self, x, y):
@@ -661,6 +674,27 @@ def _assemble(origin, unit, windows, iwins, specs, heights, attributes, skirt, s
     return RingMesh(origin, unit, windows, specs, rings, verts, tris.astype(np.int32), n_terrain, vals, skirt_info)
 
 
+def _table(rings, origin, unit):
+    def m(v, axis):
+        return float(np.float32(origin[axis] + float(v) * unit))
+    out = []
+    for k, r in enumerate(rings):
+        s = r.spec
+        hole = None if r.hole is None else [m(r.hole[0], 0), m(r.hole[1], 1), m(r.hole[2], 0), m(r.hole[3], 1)]
+        out.append(dict(ring=k, level=int(s.level), start=int(r.tri_start), count=int(r.tri_count),
+                        window=[m(s.x0, 0), m(s.y0, 1), m(s.x1, 0), m(s.y1, 1)], hole=hole))
+    return out
+
+
+def ring_table(layout):
+    """RingMesh.ring_table() from a layout() alone (an object made before the table was stored on it)."""
+    windows = [Window(float(a), float(b), float(c), int(d)) for a, b, c, d in layout['windows']]
+    origin, unit, _iwins = _integer_windows(windows)
+    specs = [RingSpec(*map(int, s)) for s in layout['rings']]
+    rings, _nv, _tris, _perim = _topology(specs, layout.get('skirt', True))
+    return _table(rings, origin, unit)
+
+
 def rebuild(layout, verts):
     """A RingMesh (geometry only: height_at, normal_at) from a layout() and the vertex positions read back from the
     mesh, e.g. after a .blend is reopened. The vertex order is a pure function of the layout."""
@@ -685,11 +719,13 @@ def rebuild(layout, verts):
 
 # ------------------------------------------------------------------------------------------------- blender ---
 
-def make_object(rm, name='terrain', collection=None, uv=True, smooth=True):
+def make_object(rm, name='terrain', collection=None, uv=True, smooth=True, mask_attributes=True):
     """The Blender object of a RingMesh: triangles written explicitly, a 'UVMap' in world metres (u = x, v = y, the
     planar projection's frame for tangent-space normal maps), every attribute as a FLOAT point attribute
-    'eido_<name>', smooth shading on the terrain and flat on the skirt. Linked into `collection` (default the
-    scene's). Returns the object."""
+    'eido_<name>' (mask_attributes=False keeps only eido_level: thirty masks on 3M vertices are 360 MB of RAM and
+    seconds of build, and a material reading baked surface data never reads them), smooth shading on the terrain and
+    flat on the skirt, and the rings' triangle runs as the custom property eido_terrain_rings (RingMesh.ring_table:
+    material_index per ring). Linked into `collection` (default the scene's). Returns the object."""
     import bpy
     V = len(rm.verts)
     T = len(rm.tris)
@@ -705,6 +741,8 @@ def make_object(rm, name='terrain', collection=None, uv=True, smooth=True):
         layer = me.uv_layers.new(name='UVMap')
         layer.uv.foreach_set('vector', rm.verts[rm.tris.ravel(), :2].ravel())
     for n, arr in rm.attrs.items():
+        if not mask_attributes and n != 'level':
+            continue
         att = me.attributes.new('eido_' + n, 'FLOAT', 'POINT')
         att.data.foreach_set('value', np.asarray(arr, np.float32))
     if smooth:
@@ -713,6 +751,8 @@ def make_object(rm, name='terrain', collection=None, uv=True, smooth=True):
         att = me.attributes.get('sharp_face') or me.attributes.new('sharp_face', 'BOOLEAN', 'FACE')
         att.data.foreach_set('value', sharp)
     obj = bpy.data.objects.new(name, me)
+    import json
+    obj['eido_terrain_rings'] = json.dumps(rm.ring_table())
     (collection or bpy.context.scene.collection).objects.link(obj)
     return obj
 
