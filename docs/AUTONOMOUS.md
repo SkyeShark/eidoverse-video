@@ -27,6 +27,9 @@ CC0 foley instead. Never fake a tool call; degrade honestly and say so in your r
   `synthkit/`, `voicebox/`, the runners and `AGENTS.md`). Use it; never try to change it.
 - The texture and model library (`eidoverse/assets/cache/`) is writable: `fetch_texture.py`,
   `fetch_model.py` and the loaders fetch what a scene asks for on first use.
+- `work/bestiary/` is not yours: it holds Creature Creator v2's shipped assets (WIP: realistic
+  creatures, humans and accessories as glb files that import into Blender as assets; what each is:
+  `eidoverse/bestiary/README.md`). Import them into your scene; never change or move them.
 
 ## How you render
 
