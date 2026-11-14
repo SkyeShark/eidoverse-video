@@ -5,8 +5,8 @@ of the view, AgX Medium High Contrast, exposure -0.5, EEVEE, 16 samples), and th
 measured from the render. The palettes' colours are set from the photographs through this table: a photographed
 colour on a sunlit slope is matched by the albedo that renders to it here, not by the photograph's own pixel values.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \\
-        bash run_blender.sh <worktree>/blender/tests/terrain/surfacing/calibrate_light.py
+    bash run_blender.sh blender/tests/terrain/surfacing/calibrate_light.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/surfacing/calibration/chart.png and chart.json ({orientation: [[albedo or colour, displayed sRGB], ...]}).
 """

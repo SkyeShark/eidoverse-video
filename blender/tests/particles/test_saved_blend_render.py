@@ -7,10 +7,8 @@ checks the reopened file's point positions in its own process; this renders it, 
 
 Checks: each still matches the building run's still of that frame (mean |diff| under 1 in 8-bit).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_saved_blend_render.py \
-        [-- out=verify] [frames=58,72,150,214]
+    bash run_blender.sh blender/tests/particles/test_saved_blend_render.py [-- out=verify] [frames=58,72,150,214]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

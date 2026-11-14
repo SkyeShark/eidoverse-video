@@ -19,8 +19,8 @@ Per recipe, two steps:
 
 Writes blender/tests/terrain/out/integration/sheets/<recipe>.jpg, sheets/overview.jpg (every recipe in one row: a
 photograph, the place at 1.7 m, the recipe at 1.7 m and from the air), the judge's files in sheets/judge/<recipe>/
-and sheets/index.json (per recipe: bands passed, the failures, the seconds). GPU: the main checkout's slots
-(heavy.sh, then heavy2.sh, then heavy3.sh; --slots heavy.sh keeps to one), retried every 60 s while all are busy.
+and sheets/index.json (per recipe: bands passed, the failures, the seconds). GPU: each Blender run is a GPU job,
+queued through EIDO_GPU_WRAP when it is set (blender/tests/_where.py), retried every 60 s while every slot is busy.
 """
 import argparse
 import glob
@@ -358,10 +358,8 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--samples', type=int, default=16)
     ap.add_argument('--compose-only', action='store_true')
-    ap.add_argument('--slots', default='heavy.sh,heavy2.sh,heavy3.sh')
     ap.add_argument('--slot-wait', type=float, default=600.0, help='minutes to wait for a free GPU slot per job')
     a = ap.parse_args()
-    JR.SLOTS = tuple(s for s in a.slots.split(',') if s) or ('heavy.sh',)
     run_blender = JR.run_blender
     JR.run_blender = lambda script, args, log_path: run_blender(script, args, log_path, timeout_min=a.slot_wait)
     names = [r for r in a.recipes.split(',') if r] or list(RECIPES)

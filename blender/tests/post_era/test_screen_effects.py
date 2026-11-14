@@ -7,9 +7,10 @@ bw_halftone, bleach_bypass); the time-driven ones change from frame to frame.
   --stage live    on a live render of the era probe scene: underwater with its bubbles (frames 1 and 24), the
                   registry's own two-effect example (effects ['underwater', 'vhs_tape']: world under, signal over),
                   retro_wireframe in green, amber and multicolor, and its cleanup
-Run from the main checkout (the GPU slot), each stage in its own Blender:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage saved
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage live
+Run from the main checkout (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py), each
+stage in its own Blender:
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage saved
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_screen_effects.py --stage live
 """
 import json
 import os

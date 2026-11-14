@@ -10,9 +10,8 @@ installFilament; the import below only reports early when the port is missing.
     out/motion/<robot>_<clip>_t<seconds>.png      480 x 270
     out/motion_render.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_motion_render.py [-- ids...]
+    bash run_blender.sh blender/tests/robotics/test_motion_render.py [-- ids...]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import os

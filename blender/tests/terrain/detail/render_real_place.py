@@ -1,9 +1,9 @@
 """Eye-level renders of real_place Lauterbrunnen's hero levels, with and without the detail stages (the package's
 done-when: hero-level eye views show rills, ribs and talus, not clay):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/detail/render_real_place.py [--variants upsampled,detail,full] [--tag r1]
+    bash run_blender.sh blender/tests/terrain/detail/render_real_place.py [--variants upsampled,detail,full] [--tag r1]
         [--views eye,wall,slope,ground]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The terrain is the mesh-and-API package's (focus: the reference's eye spot and the robot's spot 14 m along the view),
 made by make_terrain with

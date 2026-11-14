@@ -1,7 +1,8 @@
 """Does WaterMesh mirror the scene's objects (three's reflector(): a planar render of the scene)?
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/water3d/probe_water_mesh_mirror.py [-- samples=32]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 A calm WaterMesh (a flat normal map, distortion 0) with a bright red post standing in it and an orange one off to the
 side, a camera 1.5 m up. Variants (columns): the planar probe on (create_water_mesh's default) / off (ray tracing

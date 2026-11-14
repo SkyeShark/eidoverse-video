@@ -1,5 +1,5 @@
 """Probe renders of what the other fabrication probes do not show: the keyed growth over time, the live filament feed,
-the dispenser, a free service loop and a mesh carved as a relief. One Blender run, one GPU slot.
+the dispenser, a free service loop and a mesh carved as a relief. One Blender run, one GPU job.
 
   growth   out/manufacturing_example.blend (written by test_fabrication_render.py) reopened as a plain file before
            eidoblend is imported: the lathe sleeve printing layer by layer and the aluminium pocket being milled, each
@@ -21,9 +21,9 @@ the inlet at both times and the reel turned; the dispenser fed; the service loop
 the finished stock lies within its scallop of the target, and lift_over_steps keeps the cutter out of the walls that the
 plain planner's straight moves cut into.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/fabrication/test_growth_feed_mesh_relief_render.py [-- --no-render] [-- --only growth,feed]
+    bash run_blender.sh blender/tests/fabrication/test_growth_feed_mesh_relief_render.py
+        [-- --no-render] [-- --only growth,feed]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import math
 import os

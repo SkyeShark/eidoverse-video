@@ -21,8 +21,8 @@ blender/tests/pipeline/run_tests.py (T0-T16); run both.
     U6  the runner: the overlay layer and hooks as a film uses them, a lower third sliding in over a graded shot
         with a vignette (two stills: mid-slide and in place; LOOK at them)
 
-    python blender/tests/pipeline2/run_tests.py [U0 U3 ...]     # through the GPU slot when anything renders:
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 python <worktree>/blender/tests/pipeline2/run_tests.py
+    python blender/tests/pipeline2/run_tests.py [U0 U3 ...]
+    (a GPU job when anything renders; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Library assets come from the shared cache (EIDO_ASSET_CACHE, EIDO_NO_FETCH=1). Exit 0 when every check passed. A
 passing check is not a visual review: LOOK at the PNGs.

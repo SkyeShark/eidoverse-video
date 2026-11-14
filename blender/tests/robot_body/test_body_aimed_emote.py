@@ -20,8 +20,7 @@ Checks (PASS / FAIL), on the keyed result:
 Stills: out/aimed_emote_<emote>_<k>_f<frame>.png (a low side camera held over each emote); out/aimed_emote.json,
 out/aimed_emote.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_aimed_emote.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_aimed_emote.py --no-render
 """
 
 import math

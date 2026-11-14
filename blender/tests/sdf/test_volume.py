@@ -1,7 +1,7 @@
 """create_sdf_volume: the engine's sample() contract and the Blender-native medium() as Volume objects.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_volume.py [-- render=1]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_volume.py [-- render=1]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 1. The conversion, numerically: rays marched through the written grids (numpy, trilinear) against createSdfVolume's
    own march of the same sample() on the GPU: the same transmittance and the same emitted light.

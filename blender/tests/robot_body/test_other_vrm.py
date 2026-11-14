@@ -24,8 +24,7 @@ Checks (PASS / FAIL):
 Stills: out/other_vrm_<moment>_<k>_f<frame>.png (low side cameras over her walk's start and stop and her turn; her
 face on the lamp); out/other_vrm.json, out/other_vrm.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_other_vrm.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_other_vrm.py --no-render
 """
 
 import math

@@ -17,8 +17,11 @@ import _common as C  # noqa: E402
 from eidoblend.common import EIDOVERSE_DIR  # noqa: E402
 from eidoblend.sdf import rhombic_dodecahedron as RD  # noqa: E402
 
-MAIN = 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01'
-THREE = os.path.join(MAIN, 'node_modules', 'three', 'build', 'three.module.js')
+sys.path.insert(0, os.path.dirname(C.HERE))
+import _where  # noqa: E402
+
+# three from the checkout that holds node_modules/ (blender/tests/_where.py main_checkout())
+THREE = os.path.join(str(_where.main_checkout()), 'node_modules', 'three', 'build', 'three.module.js')
 deno = os.environ.get('DENO', 'deno')
 res = subprocess.run([deno, 'run', '--no-config', '--no-lock', '-A', os.path.join(C.HERE, 'rd_dump.mjs'),
                       EIDOVERSE_DIR, THREE], capture_output=True, text=True, timeout=120)

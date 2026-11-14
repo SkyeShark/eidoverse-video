@@ -3,7 +3,8 @@ the stock idle on a grey floor under a near-black world: the key to the camera's
 side at a quarter of the key, the rim behind. Rendered with the key alone, the key + fill, and all three, so each
 light's job shows. Judge: the key models the shells (a lit side and a shadow side), the fill opens the shadow side
 without flattening it, the rim separates the silhouette from the background.
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh blender/tests/look/test_key_fill_rim.py
+    bash run_blender.sh blender/tests/look/test_key_fill_rim.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 import os
 import sys

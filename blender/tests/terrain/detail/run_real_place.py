@@ -1,9 +1,9 @@
 """real_place Lauterbrunnen with its hero levels around the reference's eye spot (the mesh-and-API package's focus),
 generated in variants, every level's fields saved for the sheets and numbers (sheets.py):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/detail/run_real_place.py [--variants upsampled,detail,full] [--tag t]
+    bash run_blender.sh blender/tests/terrain/detail/run_real_place.py [--variants upsampled,detail,full] [--tag t]
         [--breakup '{"relief": 0.05}'] [--hydraulic '{"steps": 3000}'] [--recipe real_place|fluvial_range]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 variants (real_place):
     upsampled   the DEM stage only: the hero levels are the DEM upsampled (Catmull-Rom), clay at eye level

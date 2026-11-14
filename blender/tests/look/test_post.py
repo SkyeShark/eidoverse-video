@@ -8,7 +8,8 @@
     sun_beams; old_bw_film over 12 frames (its 12 fps cadence, gate weave, flicker and dust live in time)
   - options: an unknown one raises, a WebGPU-only one warns and is ignored (no render)
 Run test_meadow_camera.py and test_stage.py (--stage build) first.
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh blender/tests/look/test_post.py
+    bash run_blender.sh blender/tests/look/test_post.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 import json
 import os

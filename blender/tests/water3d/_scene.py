@@ -146,8 +146,13 @@ def principled(name, col, rough=0.5, metal=0.0, alpha=None, blended=False, trans
     return m
 
 
-MAIN = 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01'
-TEXCACHE = MAIN + '/eidoverse/assets/cache/textures'
+def texset(name):
+    """A CC0 texture set's folder in the shared texture cache, the first root that has it
+    (eidoblend.terrain.texture_roots: this checkout's, $EIDO_TEXTURE_CACHE, $EIDO_ASSET_CACHE, the main checkout's
+    when this one is a git worktree). Without it the bare name comes back, a folder that is not there: pbr() then
+    leaves the maps off."""
+    from eidoblend.terrain import texture_roots
+    return next((str(r / name) for r in texture_roots() if (r / name).is_dir()), name)
 
 
 def pbr(name, tex_dir, stem, scale=1.0, tint=None, rough_mul=1.0, normal_strength=1.0, metal=None):

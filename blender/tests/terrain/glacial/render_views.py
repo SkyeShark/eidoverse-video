@@ -2,8 +2,8 @@
 reference rig's scene: its clay, exposure and AgX look, the main tile and its wider context as meshes, the Earth's
 curvature (with refraction) dropped away from the camera, the sun 70 degrees left of the view at 15:30.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/glacial/render_views.py --job <job.json> [--samples 16]
+    bash run_blender.sh blender/tests/terrain/glacial/render_views.py --job <job.json> [--samples 16]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Each view: {name, source: {reference: name} or {npz: path (gen.py's: h row 0 = south, cell, context_h,
 context_cell)}, camera: {x, y, z (metres, the source's own heights), heading_deg (compass), pitch_deg, lens_mm (a

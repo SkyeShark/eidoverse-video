@@ -21,10 +21,9 @@
               metaball, a Geometry Nodes instancer, a collection instance, an array-modified mesh, and the repo's
               animated crow (model:crow) live in its own clip
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_morph_examples.py \
+    bash run_blender.sh blender/tests/particles/test_morph_examples.py \
         [-- examples=header,guide,text,chain,lowpoly,modes,sources,objects] [res=960x540] [samples=16] [no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 Stills: out/morph_<example>_<what>_f<NNN>.png."""
 
 import glob

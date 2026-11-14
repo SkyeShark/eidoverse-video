@@ -2,14 +2,15 @@
 transcription of era_looks.js, and looked at.
 
   --stage sources   renders the source frames once (EEVEE; Combined, Depth and Normal saved as EXR sequences):
-                    era_probe   the WebGPU era probe rebuilt (work/fx_probe/era_new.js: the claudesona idle on a dark
+                    era_probe   the WebGPU era probe rebuilt (era_new.js: the claudesona idle on a dark
                                 metal floor): frames 1-8
                     meadow      round one's meadow (tests/look/out/meadow/meadow_camera.blend, my robot walking in
                                 daylight): frames 53-60
                     night       the neon street: frames 1-8
   --stage looks     composites the era pass over the saved frames (the compositor only):
                     - all 23 presets on the meadow (frame 60) and on the era probe (frame 8), sheets; the five the
-                      WebGPU probe rendered beside its renders (work/fx_probe/new_1..5.png); the night presets
+                      WebGPU probe rendered beside its renders (new_1..5.png, from EIDO_ERA_PROBE_DIR when it is
+                      set: they are made outside the repo); the night presets
                     - parity: single looks against ref_era.py (the shader in numpy) on the meadow frame
                     - numeric: clean = the plain frame; c64 = the palette; mac = two levels on its 3 px grid;
                       websafe = 6 levels a channel; every look alone stays finite; an unknown option raises
@@ -18,9 +19,9 @@ transcription of era_looks.js, and looked at.
                     - the NaN clamp: a frame with NaN and Inf pixels through every look stays finite
                     - the registry: era_looks under a HUD overlay, glitch_bars and rgb_shift over it
                     - cost: build time, and per-frame time on the GPU and the CPU compositor
-Run from the main checkout (the GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_era_looks.py --stage sources
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_era_looks.py --stage looks
+Run from the main checkout (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_era_looks.py --stage sources
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_era_looks.py --stage looks
 """
 import json
 import os
@@ -36,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenes as SC                                            # noqa: E402
 import ref_era as REF                                          # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _where                                                  # noqa: E402  (blender/tests/_where.py)
 from eidoblend.look import frame_stats as FS                    # noqa: E402
 
 A = SC.args()
@@ -451,11 +454,13 @@ def probe_part():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     sc, fx, _m = presets_on('era_probe', 8, 'probe')
     pairs, labs = [], []
+    # the WebGPU probe's own renders come from outside the repo: EIDO_ERA_PROBE_DIR (without it, no side-by-side sheet)
+    ref_dir = _where.external('EIDO_ERA_PROBE_DIR', "the WebGPU era-looks probe's renders (new_1..5.png)")
     for i, preset in enumerate(['c64_1982', 'poster_night', 'watercolor', 'crt', 'printer1961'], 1):
-        ref = os.path.join(SC.REF, f'new_{i}.png')
-        if os.path.exists(ref):
+        ref = os.path.join(ref_dir, f'new_{i}.png') if ref_dir is not None else None
+        if ref is not None and os.path.exists(ref):
             pairs += [ref, os.path.join(OUT, f'probe_{preset}.png')]
-            labs += [f'WebGPU {preset} (work/fx_probe/new_{i}.png)', f'Blender {preset}']
+            labs += [f'WebGPU {preset} (new_{i}.png)', f'Blender {preset}']
     if pairs:
         FS.sheet(pairs, os.path.join(OUT, 'probe_vs_webgpu.jpg'), cols=2, tile=800, labels=labs)
     # a crossfade keyed over frames 1-8 (bell1961 -> mac1984): its ends, either side of its middle

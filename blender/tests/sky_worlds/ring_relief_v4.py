@@ -2,8 +2,9 @@
 
 The v4 set (ring_relief_v4.bin.gz: eroded heights with their own normals and AO, ring_albedo_v4.png, and
 ring_relief_v3.bin.gz for the water normals) lives in Eanpa Engine's assets/ringworld/ and is not in this repo: the test
-reads it there (read only) through make_sky(world='ringworld', ring={'reliefDir': ...}), and renders the same views
-with the repo's v1 band beside it.
+reads it from the folder $EIDO_EANPA_RINGWORLD_DIR names (read only) through make_sky(world='ringworld',
+ring={'reliefDir': ...}), and renders the same views with the repo's v1 band beside it; without it only the decoder's
+checks run.
 
 Checks (no GPU for the first group): the ERLF decoder round-trips a synthetic buffer and refuses truncated and foreign
 ones as the JS does; the real v4 decodes at 4344 x 1448 with its heights in the repo height map's orientation once
@@ -29,6 +30,9 @@ from eidoblend.sky import make_sky  # noqa: E402
 from eidoblend.sky.ringworld import decode_ring_relief, load_ring_relief, RELIEF_MAGIC  # noqa: E402
 from eidoblend.sky.bake.baker import load_image_rgba  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(HERE))
+import _where  # noqa: E402
+
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ap = argparse.ArgumentParser()
 ap.add_argument('--hours', default='11,23')
@@ -38,7 +42,9 @@ ap.add_argument('--samples', type=int, default=16)
 ap.add_argument('--quality', default='film')
 ap.add_argument('--no-render', action='store_true')
 args = ap.parse_args(argv)
-EANPA = 'C:/Users/sdn52/OneDrive/Desktop/Eanpa Engine/assets/ringworld'
+EANPA = _where.external('EIDO_EANPA_RINGWORLD_DIR', "Eanpa Engine's ringworld assets (its assets/ringworld: "
+                        "ring_relief_v4.bin.gz, ring_albedo_v4.png, ring_relief_v3.bin.gz)")
+EANPA = str(EANPA) if EANPA else None
 OUT = os.path.join(HERE, 'out', 'ring_v4')
 os.makedirs(OUT, exist_ok=True)
 CEL = os.path.join(REPO, 'eidoverse', 'assets', 'sky', 'celestial')
@@ -80,8 +86,8 @@ check('a foreign magic or version raises', raises(struct.pack('<4I', 0x12345678,
       == 'Unsupported ring relief format')
 check('a short payload raises', raises(buf[:-1]) == 'Invalid ring relief dimensions or payload length')
 
-if not os.path.exists(os.path.join(EANPA, 'ring_relief_v4.bin.gz')):
-    print('SKIP the v4 set is not at %s' % EANPA)
+if EANPA is None or not os.path.exists(os.path.join(EANPA, 'ring_relief_v4.bin.gz')):
+    print('SKIP the v4 set is not at %s' % EANPA if EANPA else 'SKIP the v4 set: no EIDO_EANPA_RINGWORLD_DIR')
     print('PASS ring_relief_v4 decoder' if ok_all else 'FAIL ring_relief_v4 decoder')
     raise SystemExit(0)
 

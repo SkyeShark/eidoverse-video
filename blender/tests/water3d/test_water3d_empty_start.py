@@ -1,8 +1,9 @@
 """A pour that opens on an empty tank: frames with no water at all are meshed (the chorus scene's empty start, baked
 from its first frame, and any pour that begins a beat into the shot).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_empty_start.py [-- samples=32]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water3d_empty_start.py [-- samples=32]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 A small glass tank (0.6 x 0.6 x 0.5 m, the analytic walls, 1.25 cm cells) starts as all air; a spout switches on at
 0.5 s and off at 3 s, enough for a pool several cells deep; every frame from 1 is meshed. Checks (PASS/FAIL): the bake

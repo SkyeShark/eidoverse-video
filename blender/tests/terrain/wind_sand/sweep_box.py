@@ -2,8 +2,8 @@
 so a box at the growth level's cell and cells-per-spacing grows what the recipe's growth level grows, a quarter of the
 area). In Blender (GPU):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/sweep_box.py --variants <file.json> --tag name
+    bash run_blender.sh blender/tests/terrain/wind_sand/sweep_box.py --variants <file.json> --tag name
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 <file.json>: [[label, {"n": 512, "cell": 15.625, "iters": 27000, "snaps": [9000, 18000], "seed": 1,
                        "set": {...dune_field / slab model params...}}], ...]

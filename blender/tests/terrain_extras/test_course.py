@@ -6,7 +6,8 @@ engine's telemetry, the course example's whole run (examples/obstacle_course.js)
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain_extras/test_course.py [--no-render]
         [--parts presets,example,walk,walk_render,example_run,example_run_render,variants] [--walk-to 14.0]
         [--driver controller|walk_path] [--engine-literal] [--save]
-    (renders through heavy.sh). The walk's bake is CPU work: run it outside the GPU slot with
+    (renders are GPU jobs: on a shared machine queue them with EIDO_GPU_WRAP, blender/tests/_where.py).
+    The walk's bake is CPU work: run it outside the GPU slot with
     --parts walk --no-render --save (it saves out/course_walk.blend), then render its stills through the slot with
     --parts walk_render; the course example the same way (example_run, then example_run_render). --engine-literal
     walks without the stair-clip flags the engine's constructor never read. variants bakes 4 s of each variant scene

@@ -8,8 +8,8 @@ Checks (always, no render): each hook is linked into its Principled input (Base 
 Color) from the shading point's Geometry Position, a material passed in is left as it is, the bake writes one PLY
 per frame and the player sets the hooked material on the played mesh.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_iso_field.py [-- frames=1,24] [--no-render]
+    bash run_blender.sh blender/tests/fx/test_iso_field.py [-- frames=1,24] [--no-render]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import math

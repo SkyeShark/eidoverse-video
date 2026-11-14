@@ -1,8 +1,8 @@
 """Render a generated tower-karst terrain exactly as the references are rendered (reference/render_references.py's
 render_probe: grey clay, make_sky daylight at 15:30, the same three views and lens), from make_views.py's fields.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/karst/render_karst.py --name fenglin_s7 [--views top,aerial,eye] [--hero]
+    bash run_blender.sh blender/tests/terrain/karst/render_karst.py --name fenglin_s7 [--views top,aerial,eye] [--hero]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/karst/<name>_top_hillshade.png, _aerial_45deg.png, _eye_1p7m.png and _views.json; with --hero also
 <name>_hero_eye_1p7m.png: the same eye, standing in a 2 km window at 2 m inside a 24 km surround.

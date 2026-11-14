@@ -10,9 +10,9 @@
                     detail differs between any two GPUs and float64, on the frame's mean colour and 64 px blocks.
                     Opacity 0 gives the plain frame for the newly ported groups. --only a,b runs some; --dump writes
                     blender | numpy | difference x 10 strips to out/parity/.
-Run from the main checkout (the GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_effects/test_parity.py --stage sources
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_effects/test_parity.py --stage parity
+Run from the main checkout (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/post_effects/test_parity.py --stage sources
+    bash run_blender.sh <worktree>/blender/tests/post_effects/test_parity.py --stage parity
 """
 import os
 import sys

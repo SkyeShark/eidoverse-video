@@ -2,10 +2,10 @@
 test_rotary_target_vs_carved.py, test_rotary_materials_lineup.py) with EEVEE: each frame as it plays, jumped to, from
 the build's own camera or from extra close-up cameras. Several builds render in one Blender run.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/fabrication_rotary/render_rotary_probes.py -- blend=out/rotary_example.blend \
+    bash run_blender.sh blender/tests/fabrication_rotary/render_rotary_probes.py -- blend=out/rotary_example.blend \
         [frames=1,37,73] [scale=50] [samples=16] [tag=rotary] [views=scene,close,side] [size=WxH] [blur=0.5]
     ... render_rotary_probes.py -- jobs="out/rotary_example.blend@73,241@close@rotary;out/rotary_mesh_example.blend@1,97@scene"
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 blur=<shutter>: render with the harness film's motion blur (that shutter in frames, centred, one step); the builds
 alone have it off.

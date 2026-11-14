@@ -6,10 +6,11 @@ board's recount from the poll camera. News: the claudesona on the mark in the fe
 the fence's shadows, her own shadow from the crew LED), the crowd, wide and pov cameras (the signs lit by news.js's
 normals: the crowd side bright, her side glowing through), the van's livery, a fence sign, the transformer yard.
 Both: one camera under plain AgX and under cn_lib.ACES_LIKE_LOOK, measured against the WebGPU frame of that camera
-(co_final_8 / nw_final_2, read from the main checkout's probes).
+(co_final_8 / nw_final_2: the WebGPU probe stage's stills, from outside the repo, read from EIDO_UF_PROBES_DIR; without
+it the pair is rendered and not measured).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <this folder>/verify_probes.py [corridor|news|both]
+    cd <main checkout> && bash run_blender.sh <this folder>/verify_probes.py [corridor|news|both]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Writes out/verify/<set>/<shot>.png and a sheet per set (out/verify/<set>_sheet.png).
 """
@@ -19,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fixture as F  # noqa: E402
+import _where  # noqa: E402  (blender/tests/_where.py, on the path through _fixture)
 import render_shots as RS  # noqa: E402
 
 import bpy  # noqa: E402
@@ -29,7 +31,8 @@ from eidoblend.sets.unknown_force import cn_lib as CL, corridor as COR, news as 
 A = F.args()
 WHICH = next((a for a in A if a in ('corridor', 'news', 'both')), 'both')
 OUT = F.OUT / 'verify'
-WEBGPU = Path('C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/work/unknown_force/sets/probes')
+WEBGPU = _where.external('EIDO_UF_PROBES_DIR', "the WebGPU probe stage's stills of UNKNOWN FORCE's sets "
+                         '(co_final_8.png, nw_final_2.png)')
 
 
 def grey(path):
@@ -39,7 +42,8 @@ def grey(path):
 
 
 def tone_pair(S, sc, out, names, cam, st, webgpu_png, regions, t=0.0):
-    """The camera under plain AgX and under cn_lib.ACES_LIKE_LOOK; each region's mean against the WebGPU frame's."""
+    """The camera under plain AgX and under cn_lib.ACES_LIKE_LOOK; each region's mean against the WebGPU frame's
+    (webgpu_png in WEBGPU, when that folder is given)."""
     S.update(t, st)
     rows = []
     for tag, lk in (('agx', 'None'), ('aces_like', CL.ACES_LIKE_LOOK)):
@@ -49,7 +53,7 @@ def tone_pair(S, sc, out, names, cam, st, webgpu_png, regions, t=0.0):
         g = grey(out / f'{cam}_{tag}.png')
         rows.append([g[r].mean() for r in regions.values()])
     sc.view_settings.look = 'None'
-    w = grey(webgpu_png) if Path(webgpu_png).is_file() else None
+    w = grey(WEBGPU / webgpu_png) if WEBGPU is not None and (WEBGPU / webgpu_png).is_file() else None
     if w is None:
         return
     ref = [w[r].mean() for r in regions.values()]
@@ -97,7 +101,7 @@ def corridor():
     g = grey(out / 'pedestal_close.png')[150:460, 350:550]          # the pedestal's front face
     F.check('pedestal: its marble shows its veins (it once read one texel of the walls\' uv: a flat block)',
             g.std() > 6.0, f'luminance std {g.std():.1f} over the face')
-    tone_pair(C, sc, out, names, 'cap', st, WEBGPU / 'co_final_8.png',
+    tone_pair(C, sc, out, names, 'cap', st, 'co_final_8.png',
               {'wall': (slice(60, 120), slice(250, 400)), 'floor': (slice(420, 500), slice(650, 750)),
                'cap': (slice(270, 285), slice(400, 460)), 'cushion': (slice(330, 350), slice(350, 450))})
     RS.contact_sheet(out, names, OUT / 'corridor_sheet.png')
@@ -126,7 +130,7 @@ def news():
     F.check("crowd: the signs' crowd side takes the floods head-on, as news.js's normals lit it (the WebGPU frame: "
             "246)", big.mean() > 195, f'paper {big.mean():.0f}')
     st = {'spray': 1.0}
-    tone_pair(N, sc, out, names, 'crowd', st, WEBGPU / 'nw_final_2.png',
+    tone_pair(N, sc, out, names, 'crowd', st, 'nw_final_2.png',
               {'sign': (slice(140, 160), slice(100, 200)), 'figure': (slice(380, 420), slice(440, 470)),
                'ground': (slice(470, 520), slice(700, 800)), 'wall': (slice(140, 180), slice(600, 700))}, t=0.3)
     close(N, sc, out, names, 'van_livery', (-10.4, 1.7, 17.4), (-12.2, 1.5, 12.2), 40, st, t=0.3)

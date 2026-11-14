@@ -1,7 +1,8 @@
 """tests/xr/test_xr_features.py: a small lit, animated film set through the whole XR export, checked number by number.
 
-    cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_features.py
+    bash run_blender.sh blender/tests/xr/test_xr_features.py
+    # a GPU job of an estimated 6 GB of VRAM and up to 16 GB of RAM; on a shared machine queue it with
+    # EIDO_GPU_WRAP (blender/tests/_where.py)
 
 The set (5 s at 24 fps, AgX) holds one of each thing an eidoblend film animates or shades in a way glTF must be taught:
   robot      claude_robot_2k.vrm (characters.load_vrm) dancing a VRMA clip (an NLA strip)  -> skin + sampled joints

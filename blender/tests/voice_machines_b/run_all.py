@@ -1,8 +1,9 @@
 """Every voice-machines-b test in one Blender process (one GPU slot for all the stills):
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/voice_machines_b/run_all.py                 # checks
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --render             # + stills
+    bash run_blender.sh <this> --render                                                                        # + stills
     ... run_all.py --render --only voder,tandem                                                                 # a subset
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The parity dumps the checks compare against (the WebGPU modules' logic, and three r184's own geometries):
     deno run --no-config --no-lock -A parity_dump.mjs out/parity_js.json

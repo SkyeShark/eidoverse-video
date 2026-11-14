@@ -1,7 +1,7 @@
 """The coast package's GPU tests (Blender, through a GPU slot):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/coast/test_coast_gpu.py
+    bash run_blender.sh blender/tests/terrain/coast/test_coast_gpu.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
   1. parity: ONE dispatch of each coast kernel against its numpy twin on a non-square 96 x 80 field (design section
      2.5: within 1e-4 x the output's range): coast_fetch_16 (a coast with a bay, a narrow headland and an island),

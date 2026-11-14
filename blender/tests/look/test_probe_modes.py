@@ -4,7 +4,8 @@ history between final renders (so a jumped-to still is the film's frame).
 On the meadow test's blend (run test_meadow_camera.py --stage build first): one time rendered by jump, by preroll (1 s
 of frames evaluated first) and by replay (every frame from the start); then the same frame rendered alone and right
 after the frame before it. The differences are measured (max / mean per channel, and a windowed SSIM on luma).
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh blender/tests/look/test_probe_modes.py
+    bash run_blender.sh blender/tests/look/test_probe_modes.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 import os
 import sys

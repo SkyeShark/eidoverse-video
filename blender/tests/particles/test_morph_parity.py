@@ -9,8 +9,7 @@
    the Geometry Nodes graph's output (the cloud's 'Points Only' switch) at several segments, factors, turbulences,
    spins, vortices and times: the axes, the curl and the vortex.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01 && bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_morph_parity.py
+    bash run_blender.sh blender/tests/particles/test_morph_parity.py
 The dump is rebuilt with Deno when it is missing (deno on PATH, the main checkout's node_modules/three/build)."""
 
 import json

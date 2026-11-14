@@ -23,6 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO, 'blender'))
 from eidoblend.sky import make_sky  # noqa: E402
+from eidoblend.terrain import texture_roots  # noqa: E402
+from eidoblend.terrain.build.dressing import model_roots  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ap = argparse.ArgumentParser()
@@ -50,9 +52,14 @@ ap.add_argument('--shadow-height', type=float, default=None, help='caster metres
 args = ap.parse_args(argv)
 
 OUT = os.path.join(HERE, 'out')
-CACHE_TEX = os.path.normpath(os.path.join(REPO, '..', 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets',
-                                          'cache'))
 GRASS = os.path.join(REPO, 'eidoverse', 'assets', 'grass')
+
+
+def cached(roots, name):
+    """A fetched CC0 set from the shared asset cache, the first of roots() that has it (texture_roots / model_roots:
+    this checkout's, $EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree), or ''."""
+    return next((str(r / name) for r in roots() if (r / name).is_dir()), '')
+
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 sc = bpy.context.scene
@@ -84,7 +91,7 @@ def ground_material():
     mat.use_nodes = True
     nt = mat.node_tree
     bsdf = nt.nodes['Principled BSDF']
-    d = os.path.join(CACHE_TEX, 'textures', 'Ground037_2k')
+    d = cached(texture_roots, 'Ground037_2k')
     tc = nt.nodes.new('ShaderNodeTexCoord')
     mp = nt.nodes.new('ShaderNodeMapping')
     mp.inputs['Scale'].default_value = (0.45, 0.45, 0.45)       # a 2.2 m tile
@@ -290,7 +297,7 @@ def place_references(yaw_deg):
         st = bpy.data.objects.new(name + '_stand', st_me)
         st.location = (x, y, 0.4)
         sc.collection.objects.link(st)
-    crate_dir = os.path.join(CACHE_TEX, 'models', 'wooden_military_crate_1k')
+    crate_dir = cached(model_roots, 'wooden_military_crate_1k')
     if os.path.isdir(crate_dir):
         gltf = [f for f in os.listdir(crate_dir) if f.endswith(('.gltf', '.glb'))]
         if gltf:

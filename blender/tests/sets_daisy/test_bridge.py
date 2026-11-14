@@ -5,8 +5,9 @@ first shot, bridge-local) and the claudesona on the walkway; renders the film's 
 fog brightens and warms toward it; the pale disc), and the debug_ids build (each part a flat colour, its name printed).
 Checks the sun direction, the drift, the set contract's update(t, st) and dispose() numerically.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/test_bridge.py [-- --no-render --no-her]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 or in two steps: test_bridge.py --no-render (CPU), then render_saved.py bridge (the probe cameras are saved with it).
 """

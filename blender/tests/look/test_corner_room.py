@@ -15,7 +15,8 @@ the sunlit floor; the light inventory in the log. Checks (PASS / FAIL): fast GI 
 under the white sphere (the warm room's floor strips and the sphere's underside no bluer than their neighbours); the
 plaster walls without the grain of shading half-lit by the World; the volume probe's bake bringing the room's bounce.
     bash run_blender.sh blender/tests/look/test_corner_room.py --stage build
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --stage render
+    bash run_blender.sh <this> --stage render           # a GPU job (on a shared machine queue it with EIDO_GPU_WRAP,
+                                                        # blender/tests/_where.py)
     bash run_blender.sh <this> --stage measure          # the checks again on the stills on disk (no GPU)
 """
 import json

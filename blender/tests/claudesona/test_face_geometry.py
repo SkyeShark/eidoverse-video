@@ -11,8 +11,7 @@ Checks, per install:
     the rig's own mouth shapes (show MMD mouth, A, vis_aa ...) keep their deltas on the new rest
     the viseme face's idx names the same shapes as the JS's
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_face_geometry.py
+    bash run_blender.sh blender/tests/claudesona/test_face_geometry.py
 """
 
 import json

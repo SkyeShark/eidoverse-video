@@ -96,7 +96,7 @@ def make_seed_tree(species='whiteOak', seed=1, dials=None, location=(0.0, 0.0, 0
     lod       LOD options (describe(species, 'lod')), plus the bake settings cardRes (512),
               cardVariants (3), billboardRes (1024)
     cards     bake (or reuse) the branch-card set when a wanted level places cards (renders:
-              run through heavy.sh); False keeps the cluster-spray fallback
+              a GPU job); False keeps the cluster-spray fallback
     billboard also bake the far billboard impostor (level 'BB': two crossed cards)
     sun_light the sun lamp the leaf/frond/spine backlight follows (the JS sunLight). None
               keeps the current binding, or binds the scene's strongest sun lamp.

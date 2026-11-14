@@ -3,8 +3,9 @@
 //
 //   deno run --no-config --no-lock -A --import-map=importmap_engine.json engine_trace_spheretest.mjs \
 //       json=engine_trace_spheretest_novc.json [opts={"volumeControl":false}] [T=10]
+//   (the import map takes three from this checkout's node_modules/)
 //
-// E:/eidoverse-video-desktop-work-folder/spheretest/scene.js, option for option: gridSize [64, 48, 64], worldSize
+// The engine's spheretest scene (work/spheretest/scene.js), option for option: gridSize [64, 48, 64], worldSize
 // [2, 1.5, 2], domainCenter [0, 0.75, 0], maxSpheres 4, columnDepth 0.62, measureVolume; a 0.26 m ball held at
 // y = 1.30 for 3 s, then descending 0.42 m/s to y = 0.30 and, from 5 s, sweeping x = 0.55 sin((t - 5) 1.5), fed with
 // setSpheres once per frame before step(1/30). The volume (solid cells excluded, as the sensor does) every 15 frames.
@@ -19,7 +20,7 @@ const context = { configure() {}, unconfigure() {}, getCurrentTexture: fakeTex }
 const canvas = { width: 64, height: 64, style: {}, addEventListener() {}, removeEventListener() {}, getContext: () => context };
 const renderer = new THREE.WebGPURenderer({ canvas, context, adapter, device, antialias: false });
 await renderer.init();
-const { createWaterSim } = await import('file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/eidoverse/fluid_water.js');
+const { createWaterSim } = await import(new URL('../../../eidoverse/fluid_water.js', import.meta.url).href);
 const opts = JSON.parse(args.opts || '{"volumeControl":false}');
 const water = await createWaterSim(renderer, Object.assign({ gridSize: [64, 48, 64], worldSize: [2, 1.5, 2],
     domainCenter: [0, 0.75, 0], maxSpheres: 4, measureVolume: true, columnDepth: 0.62 }, opts));

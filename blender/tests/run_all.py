@@ -9,9 +9,11 @@
     python blender/tests/run_all.py --failed              # again, the tests the last run did not pass
 
 Each test runs in the mode that checks it without rendering where it has one (--no-render, --build-only, --stage
-build, --mode check, render=0 ...). A test that must render to check anything runs through the shared GPU slot
-(heavy.sh, then heavy2.sh, then heavy3.sh in the main checkout, retried every 60 s while all are busy); without those
-scripts it runs directly. The kinds:
+build, --mode check, render=0 ...). A test that must render to check anything is a GPU job: with EIDO_GPU_WRAP set
+(blender/tests/_where.py) it queues through it, its VRAM estimate and RAM cap in HEAVY_VRAM_GB and GPU_MEMCAP_GB,
+retried every 60 s while the queue says every slot is busy (exit 75); without it, it runs directly. With EIDO_MEMCAP
+set, the Blender runs that render nothing run under that RAM-cap launcher (python -I $EIDO_MEMCAP <GB> -- <command>).
+The kinds:
 
     imports  one Blender process imports every eidoblend module (the package's scripts aside), reaches each family's
              subpackages through its parent's exports (WIRING), and runs every eidoblend import statement of every
@@ -49,12 +51,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BLENDER_DIR = os.path.dirname(HERE)
 ROOT = os.path.dirname(BLENDER_DIR)                         # the worktree / checkout this file is in
 OUT = os.path.join(HERE, 'out', 'run_all')
-MAIN = os.environ.get('EIDO_MAIN_CHECKOUT') or r'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01'
+sys.path.insert(0, HERE)
+import _where  # noqa: E402
+MAIN = str(_where.main_checkout())
 if not os.path.isfile(os.path.join(MAIN, 'run_blender.sh')):
     MAIN = ROOT                                             # no main checkout here: this checkout's launcher
-SLOT_DIR = os.path.join(MAIN, 'work', 'claude_body', 'work', 'tmp')
-SLOTS = [s for s in ('heavy.sh', 'heavy2.sh', 'heavy3.sh') if os.path.isfile(os.path.join(SLOT_DIR, s))]
-MEMCAP = os.path.join(SLOT_DIR, 'memcap.py')
+GPU_WRAP = shlex.split(os.environ.get('EIDO_GPU_WRAP', ''))  # the GPU queue's command prefix (blender/tests/_where.py)
+SLOTS = ['EIDO_GPU_WRAP'] if GPU_WRAP else []               # renders go through it; without it they run directly
+MEMCAP = os.environ.get('EIDO_MEMCAP', '')                  # a RAM-cap launcher: python -I $EIDO_MEMCAP GB -- command
 LEAVE_OUT = {'terrain'}     # the terrain family's suites run on their own: terrain/integration/run_tests.py
 
 
@@ -348,7 +352,8 @@ def q(p):
 
 
 def command(t: T, slot=None):
-    """(argv, cwd) for a test. Blender runs go through the main checkout's run_blender.sh; a slot wraps a render."""
+    """(argv, cwd) for a test. Blender runs go through the main checkout's run_blender.sh, renders through
+    _where.blender_cmd; slot 'EIDO_GPU_WRAP' queues a render, with its VRAM estimate and RAM cap."""
     args = ' '.join(q(a) for a in t.args)
     cwd = {'root': ROOT, 'here': os.path.dirname(t.path)}.get(t.cwd, t.cwd)
     if t.kind == 'py':
@@ -360,10 +365,11 @@ def command(t: T, slot=None):
         if os.path.isfile(MEMCAP):
             line = f'{q(PY)} -I {q(MEMCAP)} {t.cap} -- {line}'
         return [BASH, '-c', line], MAIN
-    inner = {'gpu': f'bash run_blender.sh {q(t.path)} {args}', 'gsh': f'bash {q(t.path)} {args}',
-             'gpy': f'{q(PY)} {q(t.path)} {args}'}[t.kind]
+    inner = ' '.join(q(a) for a in {'gpu': _where.blender_cmd(t.path, *t.args),     # after $EIDO_GPU_WRAP's words
+                                    'gsh': GPU_WRAP + ['bash', t.path] + t.args,
+                                    'gpy': GPU_WRAP + [PY, t.path] + t.args}[t.kind])
     if slot:
-        return [BASH, '-c', f'HEAVY_VRAM_GB={t.vram} bash work/claude_body/work/tmp/{slot} {t.cap} {inner}'], MAIN
+        return [BASH, '-c', f'HEAVY_VRAM_GB={t.vram} GPU_MEMCAP_GB={t.cap} {inner}'], MAIN
     return [BASH, '-c', inner], (ROOT if t.kind == 'gpy' else MAIN)
 
 
@@ -608,7 +614,7 @@ def main():
         for a in AREA_ORDER:
             for t in [t for t in todo if t.area == a]:
                 print(f'{t.kind:4s} {t.name}' + (f'   ({t.why})' if t.why else ''))
-        print(f'{len(todo)} tests; GPU slots: {", ".join(SLOTS) or "none (renders run directly)"}; launcher {MAIN}')
+        print(f'{len(todo)} tests; GPU queue: {" ".join(GPU_WRAP) or "none (renders run directly)"}; launcher {MAIN}')
         return 0
     if not BASH:
         sys.exit('run_all: Git Bash not found (set EIDO_BASH)')

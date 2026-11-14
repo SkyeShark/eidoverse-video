@@ -1,6 +1,6 @@
 """tests/look/test_meadow_camera.py: the camera toolkit and the exposure check on the meadow film's two set-ups.
 
-The WebGPU meadow (work/claude_body/film/tools/dlss5nr/meadow/meadow.js) had two cameras: a low tracking camera ahead
+The WebGPU meadow (a film's meadow.js, outside this repo) had two cameras: a low tracking camera ahead
 of me and to my left, easing round as I come on, the sky behind me; and a tripod at the path's side turning to follow
 me past. Here both are built with look.camera on claude_robot.vrm walking through scanned grass in late-afternoon sun
 (a neutral world and a sun light: the sky is the sky family's, not this fixture's), then checked: the motion (bounce),
@@ -11,12 +11,15 @@ focus in the second from a mark on the meadow beyond the path (picked in the pic
 A third camera, not a shot: a long lens down in the grass at the path's side, panning with my legs as I pass. Its
 sightline (my ankle back to the lens) runs through five metres of grass blades, so it checks that excluding the
 Geometry Nodes scatters excludes their instances (without the exclusion the same path must be blocked by the grass
-sources, or the check proves nothing).
+sources, or the check proves nothing). The scanned plants are Poly Haven's CC0 sets in the shared asset cache, found
+where the flora family finds them (fixtures.meadow_assets()): without them the meadow is bare soil and that check is
+skipped, saying so.
 
     # build (no render): the scene, both shots, every audit; saves out/meadow_camera.blend
     bash run_blender.sh blender/tests/look/test_meadow_camera.py --stage build
-    # render (through the GPU slot): exposure sweep + probe stills + contact sheet
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --stage render
+    # render: exposure sweep + probe stills + contact sheet; a GPU job, on a shared machine queue it with
+    # EIDO_GPU_WRAP (blender/tests/_where.py)
+    bash run_blender.sh <this> --stage render
 """
 import json
 import math
@@ -129,7 +132,11 @@ def build():
     print(f"[meadow] low camera without the grass excluded: {len(hit)} run(s), "
           f"{REPORT['low_control']['frames_blocked_by_grass']} frame(s) blocked by grass sources "
           f"({sorted({i['object'] for i in hit})}); with it excluded: {len(safety['low'])} issue(s)", flush=True)
-    if not hit:
+    if not grass:
+        REPORT['skipped'] = ['the grass exclusion check: no scanned grass (the meadow\'s Poly Haven plant sets are not '
+                             'in the shared asset cache)']
+        print(f"[skip] {REPORT['skipped'][0]}", flush=True)
+    elif not hit:
         FAIL.append('the low camera\'s sightline never met the grass without exclusion: the exclusion is untested')
     REPORT['audits'] = rec
     REPORT['safety'] = safety

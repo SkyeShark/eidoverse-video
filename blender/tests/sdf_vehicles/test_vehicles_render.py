@@ -2,10 +2,11 @@
 3/4 front view, rendered in EEVEE beside the engine's own raymarch (its shade(), sampleEnvMap bound to the same HDRI)
 from the same camera.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_vehicles/test_vehicles_render.py -- [vehicles=modern,cyber,sleek,jet] \
         [shading=parts|baked] [quality=high] [views=az,el,dist;az,el,dist...] [lens=50] [tag=] [w=960 h=540
         samples=16] [ref=1]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/veh_<kind><tag>_eevee.png, _ref.png and _sheet.png (EEVEE left, the engine's march right); further views
 (views=: azimuth from the front, elevation, distance in bounding diagonals) add _v1, _v2 ... PASS lines:

@@ -28,10 +28,8 @@ again; the process state line follows the time slider (equal to the job's own pa
 too); the workpiece-source line (the default invitation, the FDM slicing note, the rotary report's triangles and
 views); "Inspect workpiece" frames the rotary stock.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_inspector_render.py \
-        [-- --no-process]
+    bash run_blender.sh blender/tests/robotics/test_inspector_render.py [-- --no-process]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import math

@@ -1,7 +1,7 @@
 """A water_compute pool baked and saved, for test_reopen_saved_blend.py (the EXR heights played by Geometry Nodes).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/water3d/probe_water_compute_saved.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/probe_water_compute_saved.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
     ... then test_reopen_saved_blend.py -- blend=<worktree>/blender/tests/water3d/out/verify/wc_saved.blend
         frames=12,20 tag=wc "ref=<worktree>/blender/tests/water3d/out/verify/wc_saved_f{f}.png"
 

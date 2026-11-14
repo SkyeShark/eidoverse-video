@@ -15,8 +15,7 @@ in a session that has not imported the fabrication port, that a dispenser's load
 (index.js always runs installFilament); and, last, with the port's hooks: create_ptfe_tube / service_loop forwarded,
 the dispenser's live filament installed at load, and its 'filament-feed' keyed with the strand's Geometry Nodes inputs.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_runtime.py
+    bash run_blender.sh blender/tests/robotics/test_runtime.py
 """
 
 import math

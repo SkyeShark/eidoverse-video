@@ -6,9 +6,8 @@ rebuilt every recolourable material, its stats match the catalog's triangle coun
     out/catalog/<id>.png          one still per entry (320 x 240 by default)
     out/catalog_render.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_catalog_render.py [-- ids... | --res 480x360]
+    bash run_blender.sh blender/tests/robotics/test_catalog_render.py [-- ids... | --res 480x360]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 Then the contact sheet (system Python): python blender/tests/robotics/contact_sheet.py out/catalog out/catalog_sheet.png
 """
 

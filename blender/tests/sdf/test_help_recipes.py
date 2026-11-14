@@ -1,7 +1,7 @@
 """The engine help()'s own samples and recipe patterns, built with the Blender edition and rendered.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 10 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_help_recipes.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_help_recipes.py
+    (a GPU job: 4 GB VRAM, 10 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 SdfRaymarchLoader.help() taught the API with a minimal recipe (two spheres joined into a peanut, in the engine's
 contract: map + shade, no surface), a custom-uniforms sample (sdSphere(p, uRadius), shade returns uColor, the radius

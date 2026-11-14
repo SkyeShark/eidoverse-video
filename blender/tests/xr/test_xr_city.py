@@ -1,7 +1,7 @@
 """tests/xr/test_xr_city.py: the kit's example city built in Blender, rendered with EEVEE, exported for the XR page.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_city.py
+    bash run_blender.sh blender/tests/xr/test_xr_city.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 
 Checks (PASS / FAIL lines):
   - EXAMPLES['city'] builds the page's 36 towers from its Park-Miller generator (180 faces, g0 / tower attributes) and

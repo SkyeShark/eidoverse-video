@@ -5,8 +5,8 @@ the grey clay is swapped for a flat false-colour material that reads them throug
 scree on rock_toe, rock, wet channels, snow; wet ground darker). It proves the attribute route in EEVEE and shows the
 masks in 3D, beside the same view of the clay reference.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/masks/render_masks.py [--only lauterbrunnen,mount_fuji]
+    bash run_blender.sh blender/tests/terrain/masks/render_masks.py [--only lauterbrunnen,mount_fuji]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/masks/renders/<name>_masks_aerial_45deg.png (960 x 540, 16 samples) and <name>_masks_views.json.
 """

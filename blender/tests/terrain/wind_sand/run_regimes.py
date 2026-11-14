@@ -1,9 +1,9 @@
 """The four wind regimes on one periodic box (design 4.6's table; package 8's test "the four wind regimes give four
 different dune families", and "one wind gives slip faces on the lee side"). In Blender (GPU):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/run_regimes.py [--n 256] [--cell 4] [--iters 6000] \\
+    bash run_blender.sh blender/tests/terrain/wind_sand/run_regimes.py [--n 256] [--cell 4] [--iters 6000] \\
         [--kinds star,barchan,transverse,linear] [--tag name] [--set key=value ...]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Each kind starts from the same kind of start (dune_field's start_fields: a flat bed, a sand sheet of the kind's
 thickness with a supply variation, a seed at the target spacing) on an n x n periodic box of `cell` metres, and runs

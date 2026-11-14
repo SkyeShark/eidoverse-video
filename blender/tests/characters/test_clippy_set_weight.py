@@ -7,9 +7,9 @@ the keyed value on each override frame, the sequencer's own value on the frames 
 (CONSTANT: no ramp at frame 29.5 or 30.5), the other keys still LINEAR, the scene's shape key at frames 30 and 31, the
 clamp, the take-back, bake()'s report, and an unknown morph name raising. Prints PASS/FAIL lines.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_clippy_set_weight.py
-    # -- --render: frames 39, 40 and 41 on the studio floor, through the GPU slot (heavy.sh)
+    bash run_blender.sh blender/tests/characters/test_clippy_set_weight.py
+    # -- --render: frames 39, 40 and 41 on the studio floor, a GPU job (on a shared machine queue it with
+    #    EIDO_GPU_WRAP, blender/tests/_where.py)
     #    -> out/clippy_set_weight_f039.png, _f040.png (the atom, for that frame only), _f041.png
 """
 

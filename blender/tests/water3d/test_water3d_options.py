@@ -1,7 +1,7 @@
 """Breadth for eidoblend.fx.water3d: every option and API call the dam break and the pour do not exercise.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_options.py [-- samples=48]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_options.py [-- samples=48]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Numeric (PASS/FAIL), each a small sim:
   - volume_control=False against the engine's own uncontrolled trace (engine_trace_dambreak_novc.json, 3 s)
@@ -268,7 +268,7 @@ w.dispose()
 for ob in list(bpy.data.objects):
     bpy.data.objects.remove(ob, do_unlink=True)
 sc.frame_start, sc.frame_end = 1, 60
-tiles = S.pbr('pool_tiles', S.TEXCACHE + '/Terrazzo005_1k', 'Terrazzo005', scale=1.2)
+tiles = S.pbr('pool_tiles', S.texset('Terrazzo005_1k'), 'Terrazzo005', scale=1.2)
 # the pool basin the analytic walls stand for, as the visible stage: 4 x 4 m, floor at 0
 S.box(sc, 'pool_floor', (4.4, 4.4, 0.2), (0, 0, -0.1), tiles)
 for (sx, sy, x, y) in ((0.2, 4.4, 2.1, 0), (0.2, 4.4, -2.1, 0), (4.4, 0.2, 0, 2.1), (4.4, 0.2, 0, -2.1)):

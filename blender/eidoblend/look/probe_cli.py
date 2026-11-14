@@ -3,7 +3,7 @@
     bash run_blender.sh blender/eidoblend/look/probe_cli.py --blend film.blend --at 1.5 --at 4 [--out DIR] [--name N]
         [--preroll 1 | --replay] [--preset probe|film|preview|keep] [--samples 16] [--res 960x540] [--exposure +0.5]
         [--compare 4.0] [--false-color] [--sheet]
-  (every render goes through the GPU slot: HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh ...)
+  (a GPU job: every probe is a render)
 
   --at T        a time in seconds from frame_start (repeatable; also --at 1.5,4); --frame F for frame numbers
   --preroll S   evaluate S seconds of frames before each probe (unbaked sims, spring bones, stateful handlers)

@@ -1010,15 +1010,15 @@ The lead's standing block applies on top of these.
   - Tests go in `blender/tests/terrain/<package>/`. Renders and other outputs go in
     `blender/tests/terrain/out/<package>/`: the ignore rule `blender/tests/*/out/` covers only the family's own
     `out/`, not an `out/` one folder deeper.
-- **GPU.** Every Blender run that dispatches kernels or renders goes through a slot. From
-  `C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01`:
+- **GPU.** Every Blender run that dispatches kernels or renders is a GPU job (4 GB VRAM, 12 GB RAM cap): on a
+  shared machine, queue it with `EIDO_GPU_WRAP` (`blender/tests/_where.py`). From the repo root:
 
   ```
-  HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <script> [args]
+  bash run_blender.sh <script> [args]
   ```
 
-  If that slot says "not started", try `heavy2.sh`, then `heavy3.sh`; if all are busy, wait 60 s and retry. Renders
-  stay at most 960×540 and 16 samples, under `make_sky` daylight.
+  If the queue says "not started" (exit 75), every slot is busy: wait 60 s and retry. Renders stay at most 960×540
+  and 16 samples, under `make_sky` daylight.
 - **Units.** Metres, years and degrees in every interface. A tile fraction anywhere is a defect.
 - **Looking.** Look at every image you produce, the reference beside it, as an environment artist. Name defects
   concretely.

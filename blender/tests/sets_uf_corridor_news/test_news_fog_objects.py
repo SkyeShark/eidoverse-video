@@ -13,8 +13,9 @@ take FogExp2's share at their depth (linear EXR, wrapped against not); then stil
 wrapped and not (wide and crowd cameras, and 3x crops of the wide).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_news_fog_objects.py
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_corridor_news/test_news_fog_objects.py --render
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import math
 import sys

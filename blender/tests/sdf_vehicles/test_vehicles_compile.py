@@ -5,8 +5,8 @@ bounds, and bounds.min.y is its lowest point), the material ids on the surface a
 create_sdf_object(EXAMPLES[...]) builds (the engine's createSdfObject(EXAMPLES.x) path) and help() lists them.
 No render.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf_vehicles/test_vehicles_compile.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf_vehicles/test_vehicles_compile.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

@@ -1,8 +1,7 @@
 """Probe: the era-2 machines the way a new film uses them, beyond one machine on its own (renders through the GPU slot).
 
-From the main checkout:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/voice_machines_a/test_instances_clock_ortho.py \\
+From the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/voice_machines_a/test_instances_clock_ortho.py \\
         [-- --only two,turned,clock,ortho,footprint]
 
 two     two C64s built without names into one screen folder, each with its own text, power and voice: separate roots,

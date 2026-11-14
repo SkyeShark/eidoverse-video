@@ -4,8 +4,9 @@ gradient), underwater's rising bubbles, godrays (the fog volume and the light's 
 opacity), depth_fog's two modes side by side, focus_blur's WebGPU knobs (focal_length, bokeh_scale -> an f-stop), and a
 saved .blend of the wireframe reopened in a fresh Blender. Sheets to look at, PASS/FAIL lines for what is measured.
 
-Run from the main checkout (the GPU slot), after test_parity.py --stage sources:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_effects/test_live.py
+Run from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py), after
+test_parity.py --stage sources:
+    bash run_blender.sh <worktree>/blender/tests/post_effects/test_live.py
     (--stage reopen runs inside the fresh Blender the main stage starts for the saved .blend)
 """
 import math

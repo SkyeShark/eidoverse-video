@@ -7,8 +7,7 @@ loads the same models with make_robot(textures=False) and compares, converting t
 (C^-1 W C for nodes, C^-1 M for port frames). It also checks the runtime test's determinism rule (sample(clip, 2),
 sample(clip, 8), sample(clip, 2) give identical matrices) and that every part has mapped triangles.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_js_parity.py [-- ids...]
+    bash run_blender.sh blender/tests/robotics/test_js_parity.py [-- ids...]
 """
 
 import json

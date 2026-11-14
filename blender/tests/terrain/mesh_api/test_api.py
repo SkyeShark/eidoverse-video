@@ -11,8 +11,8 @@ Checks
               from 1.7 m to the target clears the ground (re-checked here along 400 samples)
   masks       MaskSet.at agrees with the main level's array at cell centres
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/mesh_api/test_api.py
+    bash run_blender.sh blender/tests/terrain/mesh_api/test_api.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import json
 import math

@@ -4,8 +4,8 @@ material. Checks that they draw (lit pixels), as the WebGPU's did: the steam onc
 was a 3-vector, so (uv - 0.5) * 2 put z at -1 into the puff's radius and every puff was transparent). Writes
 out/steam/<name>.png.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sets_uf_corridor_news/render_steam_alone.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/render_steam_alone.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import sys
 from pathlib import Path

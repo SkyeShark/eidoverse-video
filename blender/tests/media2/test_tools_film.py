@@ -1,7 +1,7 @@
 """Probe: what the engine-agnostic audio tools wrote (tools_host.py), put into a Blender film. From the main checkout:
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media2/test_tools_film.py [-- --only vrm,sound,captions]
+    bash run_blender.sh <worktree>/blender/tests/media2/test_tools_film.py [-- --only vrm,sound,captions]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 vrm       claude.vrm sings DAISY's chorus 1 (69-84 s of the song, frame 1 = 69 s): lipsync.py's audio-derived
           visemes (0..0.35, so divide=0.35), gated to align_lyrics.py's lines (audio.viseme_windows), keyed onto its

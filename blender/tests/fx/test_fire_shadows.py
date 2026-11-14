@@ -27,8 +27,8 @@
 Renders 480 x 270 (the teapot cases 960 x 540), 16 samples, to out/fire_shadows/*.exr (and PNG stills); prints PASS /
 FAIL with the numbers.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_fire_shadows.py [-- cases=options,shadows,spokes]
+    bash run_blender.sh blender/tests/fx/test_fire_shadows.py [-- cases=options,shadows,spokes]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import math

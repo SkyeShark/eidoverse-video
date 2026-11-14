@@ -1,8 +1,8 @@
 """tests/xr/test_xr_pages.py: the exported bundles in the kit's page, photographed by eidoverse/xr/shot.mjs (headless
 Chrome, the WebGL2 backend the headset uses), compared with EEVEE and with the original example page.
 
-    python blender/tests/xr/test_xr_pages.py          (after test_xr_city.py and test_xr_features.py; a GPU job:
-                                                       run it through heavy.sh like a render)
+    python blender/tests/xr/test_xr_pages.py          (after test_xr_city.py and test_xr_features.py)
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 Checks:
   - every still renders ('ready'), with no exception or console error
   - the city page: one 30 s clip, the grid drawn by the page's own material, the world dome; the kit's street view
@@ -33,9 +33,12 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
+sys.path.insert(0, os.path.join(WORKTREE, 'blender', 'tests'))
+import _where  # noqa: E402
+
 OUT = os.path.join(HERE, 'out', 'pages')
 os.makedirs(OUT, exist_ok=True)
-MAIN_NODE_MODULES = os.path.abspath(os.path.join(WORKTREE, '..', 'eidoverse-video-prealpha-0.01', 'node_modules'))
+MAIN_NODE_MODULES = os.path.abspath(_where.main_checkout() / 'node_modules')     # the checkout holding node_modules/
 SIZE = (960, 540)
 # one bundle is shot with the browser named explicitly (shots.shoot's chrome=, shot.mjs's CHROME); the rest find it
 CHROME = next((p for p in (r'C:\Program Files\Google\Chrome\Application\chrome.exe', '/usr/bin/google-chrome',

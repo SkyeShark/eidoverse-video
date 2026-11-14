@@ -3497,7 +3497,7 @@ class SetBase:
         raise NotImplementedError
 
     def bake_probes(self, scene=None):
-        """Bake the set's volume probe (parts['probe'], when it has one: a GPU job, run it through heavy.sh) at the
+        """Bake the set's volume probe (parts['probe'], when it has one: a GPU job) at the
         set's current state. Returns {probe: seconds}."""
         import bpy
         from ...look import lighting as LL

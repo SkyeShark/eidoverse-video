@@ -10,8 +10,9 @@ builds the funeral (with its bridge vignette) and the corner twice, at the origi
     corner, the spark in flight) render the same at both places.
 The stills double as views of the sets as assets. Writes out/parked/<set>_<view>_{origin,parked}.png.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 24 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/test_parked.py [-- --no-render --only funeral|corner]
+    (a GPU job under a 24 GB memory cap; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 
 import os

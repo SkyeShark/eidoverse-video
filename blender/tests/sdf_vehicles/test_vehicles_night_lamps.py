@@ -2,9 +2,10 @@
 keyed drive with a keyed repaint, and the jet from behind. The daylight tests cannot show the lamps (at a 3 W/m2 sun a
 headlight pool is faint by design), so their seats, aim and colour are judged here.
 
-    cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_vehicles/test_vehicles_night_lamps.py [-- quality=balanced lamp_power=8
         w=960 h=540]
+    (a GPU job: 6 GB VRAM, 16 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 PASS lines: every lamp sits just outside its vehicle's solid, facing the part it belongs to (the SDF is positive at
 the light, and the nearest surface is that lamp's part), so its own body does not shadow it; seen from above with the

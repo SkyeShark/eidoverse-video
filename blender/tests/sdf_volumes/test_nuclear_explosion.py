@@ -1,7 +1,8 @@
 """NuclearExplosionFX.applyTo as volumes in the scene: the effect's life, its motion, its options, the registry hooks.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_volumes/test_nuclear_explosion.py [-- quality=balanced w=480 h=270]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 1. Options: the engine's call shape ({scene, camera, opts} with camelCase keys) and snake_case; an unknown option
    raises; the screen-only options are accepted and said so; disable_for_perf_test builds hidden and bakes nothing.

@@ -1,7 +1,7 @@
 """Probe: extruded type and title cards in Blender 5.2 EEVEE (eidoblend.media.text3d).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_text3d.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_text3d.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 - the size conversion: an 'H' at three's size 1 must stand the font's cap height (OS/2) tall, for three fonts;
 - centring: the ink box symmetric about the origin;

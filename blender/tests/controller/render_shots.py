@@ -1,5 +1,5 @@
-"""Render controller tests' stills from their saved, keyed .blend files (the bakes ran on the CPU; only this takes the GPU
-slot, once for any number of tests).
+"""Render controller tests' stills from their saved, keyed .blend files (the bakes ran on the CPU; only this is a
+GPU job, once for any number of tests).
 
     render_shots.py <out/TAG_shots.json> [<out/TAG2_shots.json> ...] [--only PREFIX[,PREFIX...]] [--sheet-cols 4]
 
@@ -7,9 +7,9 @@ Each shot: a camera at `pos` looking at `target` with `lens`, at `frame` (with `
 names another bake of the same armature) -> out/<tag>_<name>.png (960x540, 16 samples, EEVEE, the light saved in the
 .blend). Each sheet: its shots, half size, labelled, in rows -> out/<tag>_<sheet>.png.
 
-    bash C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/gpu_slot.sh \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/render_shots.py \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/out/course_claude_robot_shots.json
+    bash blender/tests/controller/gpu_slot.sh blender/tests/controller/render_shots.py \\
+        blender/tests/controller/out/course_claude_robot_shots.json
+    (gpu_slot.sh: the job behind EIDO_GPU_WRAP when that is set, blender/tests/_where.py)
 """
 
 import json

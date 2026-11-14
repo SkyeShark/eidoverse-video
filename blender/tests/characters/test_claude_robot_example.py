@@ -10,9 +10,8 @@ whole frame: it also runs applyLegClearance and initHandDOF / applyHandDOF each 
                                               6.8 (relaxed, looking left), 7.6 (looking right)
     out/claude_robot_example.json             the report and the checks
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_claude_robot_example.py [--no-render]
+    bash run_blender.sh blender/tests/characters/test_claude_robot_example.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

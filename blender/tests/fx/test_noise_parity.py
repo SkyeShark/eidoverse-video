@@ -1,6 +1,6 @@
 """Parity of the fx family's noise ports, and the GPU path's plumbing. Headless, no render (a few ms of GPU).
 
-    bash run_blender.sh <worktree>/blender/tests/fx/test_noise_parity.py
+    bash run_blender.sh blender/tests/fx/test_noise_parity.py
 
 Checks
   1. GLSL eido_snoise / eido_snoise_vec3 (compute) == numpy _noise.snoise / snoise_vec3      (|d| < 2e-5)
@@ -20,6 +20,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..', '..')))
+sys.path.insert(0, os.path.dirname(HERE))
+import _where                                                      # noqa: E402
 from eidoblend.fx import _noise                                    # noqa: E402
 from eidoblend.fx._gpu import ComputeContext, GLSL_SNOISE, GLSL_MX_NOISE   # noqa: E402
 
@@ -181,8 +183,7 @@ try:
     import subprocess, json, shutil
     node = shutil.which('node')
     three = None
-    for root in (os.path.normpath(os.path.join(HERE, '..', '..', '..')),
-                 r'C:\Users\sdn52\OneDrive\Desktop\eidoverse-video-prealpha-0.01'):
+    for root in (os.path.normpath(os.path.join(HERE, '..', '..', '..')), str(_where.main_checkout())):
         p = os.path.join(root, 'node_modules', 'three', 'examples', 'jsm', 'math', 'ImprovedNoise.js')
         if os.path.exists(p):
             three = p

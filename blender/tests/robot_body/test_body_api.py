@@ -32,8 +32,7 @@ set_running; the controller's set_walk_speed, set_run_speed, is_busy, get_state,
 Stills: out/body_api_<moment>_<k>_f<frame>.png (low side cameras over the turns, the run, the sit and the stand; the
 salute from its camera); out/body_api.json, out/body_api.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_api.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_api.py --no-render
 """
 
 import math

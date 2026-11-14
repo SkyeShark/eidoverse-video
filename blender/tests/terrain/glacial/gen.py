@@ -1,8 +1,8 @@
 """Generate alpine_valley (or any recipe) in Blender (GPU kernels) and save every level's fields, for the numbers
 (judged in plain Python by judge_fields.py) and the sheets. No renders (render_photo_views.py renders).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/glacial/gen.py --job <job.json>
+    bash run_blender.sh blender/tests/terrain/glacial/gen.py --job <job.json>
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 job.json: {"out_dir": ..., "items": [{"tag", "recipe" (default alpine_valley), "seed", "params": {...}, "size": m
 (default the reference's extent, else the recipe's), "reference": name (default the recipe's first), "resolution":

@@ -4,7 +4,8 @@ the default name, as a museum or a newsroom would build them, each prints its ow
 buffer_dir ('//screens/tty') in an unsaved and a saved blend. A probe render shows both papers side by side.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/voice_machines_b/test_two_teletypes.py       # checks
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --render             # + still
+    bash run_blender.sh <this> --render                                                                        # + still
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import shutil
 import sys

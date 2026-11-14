@@ -12,8 +12,8 @@ does not fall from 64 to 256 samples) and lose the refraction (the floor's check
 pick converges (its grain falls with the samples) and shows the floor through its clear picks, over twice as plainly
 as the fractional pool. This is why the water materials pick (fx/water3d/material.py, fx/swe.py).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/probe_partial_transmission.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/probe_partial_transmission.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/partial_transmission_<n>spp.png.
 """

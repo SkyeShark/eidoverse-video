@@ -6,9 +6,9 @@
 //   the pure solvers: scara.forward / inverse / demo, SerialArm forward / inverse, articulatedDemo, gantryDemo,
 //   constrainGantryPose, graspValues, rotaryFixtureSetup; loadPart triangle counts; frameCamera.
 // Nothing renders (textures: false, no GPU).
-//   cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01   (its deno.json + node_modules resolve three)
+// From the repository root (its deno.json and node_modules, which `python eido.py bootstrap` makes, resolve three):
 //   deno run --no-check --allow-read --allow-write --allow-env --node-modules-dir=manual --no-lock --config deno.json \
-//       C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/js_parity_dump.mjs [model ids]
+//       blender/tests/robotics/js_parity_dump.mjs [model ids]
 const here = new URL('.', import.meta.url);
 const repo = new URL('../../../', here);
 const outDir = new URL('out/js_parity/', here);

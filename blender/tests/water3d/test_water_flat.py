@@ -1,7 +1,8 @@
 """eidoblend.fx.water_flat: three's WaterMesh (flat reflective water) and water_compute.js (a rippling height field).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water_flat.py [-- samples=32 parts=1,2,3,4,5]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water_flat.py [-- samples=32 parts=1,2,3,4,5]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 1. A lake (out/wflat_lake_f####.png): a 300 m WaterMesh under the sky panorama, its sun bound to the scene's sun
    lamp, an island and a pier to reflect, frames 1 and 49 (the normal map scrolls with time).
@@ -55,8 +56,8 @@ def clear():
 if '1' in PARTS:
     S.world_panorama(sc, SKY, strength=1.0, rotate_deg=180)
     sun = S.sun(sc, 'sun', azimuth_deg=95, elevation_deg=12, strength=3.0, col=(1.0, 0.88, 0.72))
-    rock = S.pbr('island_rock', S.TEXCACHE + '/Concrete034_2k', 'Concrete034', scale=0.2, tint=(0.55, 0.52, 0.46))
-    wood = S.pbr('pier_wood', S.TEXCACHE + '/Planks039_2k', 'Planks039', scale=0.8)
+    rock = S.pbr('island_rock', S.texset('Concrete034_2k'), 'Concrete034', scale=0.2, tint=(0.55, 0.52, 0.46))
+    wood = S.pbr('pier_wood', S.texset('Planks039_2k'), 'Planks039', scale=0.8)
     S.lathe(sc, 'island', [(0, -2), (28, -2), (24, 1.5), (14, 6), (6, 9), (0, 9.5)], segments=48,
             loc=(60, 120, 0), mat=rock)
     for i in range(7):
@@ -85,9 +86,9 @@ if '1' in PARTS:
 # ---- 2. the basin pool --------------------------------------------------------------------------------------
 if '2' in PARTS:
     sc.frame_start, sc.frame_end = 1, 96
-    stone = S.pbr('basin_stone2', S.TEXCACHE + '/Concrete034_2k', 'Concrete034', scale=1.6,
+    stone = S.pbr('basin_stone2', S.texset('Concrete034_2k'), 'Concrete034', scale=1.6,
                   tint=(0.92, 0.88, 0.80))
-    paving = S.pbr('paving2', S.TEXCACHE + '/PavingStones128_1k', 'PavingStones128', scale=0.55)
+    paving = S.pbr('paving2', S.texset('PavingStones128_1k'), 'PavingStones128', scale=0.55)
     S.lathe(sc, 'basin', [(0.0, 0.0), (0.26, 0.0), (0.26, 0.05), (0.17, 0.09), (0.13, 0.18), (0.12, 0.30),
                           (0.15, 0.36), (0.26, 0.39), (0.34, 0.44), (0.38, 0.52), (0.395, 0.60), (0.40, 0.665),
                           (0.39, 0.683), (0.37, 0.688), (0.35, 0.684), (0.34, 0.665), (0.33, 0.60), (0.31, 0.52),

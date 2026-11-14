@@ -3,9 +3,10 @@ alone (--vrm stands the claudesona on the turntable, at the scale the cams are f
 
     cd blender && python -c "import sys; sys.path.insert(0, '.'); from eidoblend.sets.unknown_force import \
         showroom as SR; SR.draw_canvases('tests/sets_uf_interiors/out/art_cache')"
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_showroom.py -- [--cams reveal,toaster,...] [--no_render]
         [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.6]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Checks: the build's contents (280 folded seats + 28 row ends, the toaster's CSG slots really open into the body,
 the LED wall's pixel-footprint driver, the void seen by the camera only), three's light units and the one shadow

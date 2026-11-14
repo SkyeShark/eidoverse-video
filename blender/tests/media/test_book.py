@@ -1,7 +1,7 @@
 """Probe: a hardcover book in Blender 5.2 EEVEE (eidoblend.media.book: book_core.js posed in Deno, PC2 caches).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_book.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_book.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The template's covers (front, back, spine composed into the wrap by the rig's own composer) and lining, with the
 16 Simulacra spreads, on a wooden desk: closed (f1), half open (f13), open on the title spread (f28), a leaf mid-turn

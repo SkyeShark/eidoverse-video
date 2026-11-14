@@ -1,8 +1,9 @@
 """The lit water's palette on a baked scene: re-shade a saved water .blend with other look values and render.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/water3d/probe_lit_palette.py -- blend=out/w3d_pour.blend frames=60,144 \
         variants=as_baked,defaults [samples=64]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Each variant rebuilds the water material with create_water_sim's look options over the same baked PLY sequence
 (the player's Set Material node takes the new material) and renders the frames to

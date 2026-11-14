@@ -1,10 +1,12 @@
 """The engine's own vehicle check scenes, rebuilt in EEVEE and set beside the frames the engine rendered of them.
 
-    cd <main checkout> && HEAVY_VRAM_GB=8 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_vehicles/test_vehicles_check_scenes.py -- [scenes=a,b,...] [t=0] [w=960 h=540]
+    (a GPU job: 8 GB VRAM, 16 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The WebGL engine kept these regression scenes in the production workspace's _reality_check folder (scene script,
-config and the frame it rendered: three.js, ACES):
+The WebGL engine kept these regression scenes (scene script, config and the frame it rendered: three.js, ACES); the
+frames, its city HDRI and the smoke test's chair are reference files outside this repo, read from the folder
+$EIDO_ENGINE_CHECK_DIR names (without it the test prints SKIP):
   sdf_all_examples        Mr. Hege, the red shoggoth, the modern sedan (0xc8c8d2, 0.18) and the cyberpunk sedan
                           (0x00e7ff, 0.12) under the city HDRI on a glossy grey ground
   sdf_cyberpunk_palette   four cyberpunk sedans: cyan, magenta, acid, amber
@@ -373,8 +375,9 @@ SCENES = {f.__name__: f for f in (sdf_all_examples, sdf_cyberpunk_palette, sdf_s
                                    sdf_sleek_3q, sdf_modern_wheel, sdf_wheel_closeup, sdf_sleek_wheel,
                                    sdf_badge_closeup, sdf_jet_rain, sdf_underwater_smoke)}
 
-if not os.path.isdir(V.CHECK):
-    print(f'SKIP vehicle check scenes: {V.CHECK} is not on this machine', flush=True)
+if V.CHECK is None or not os.path.isdir(V.CHECK):
+    print(f'SKIP vehicle check scenes: {V.CHECK} is not a folder' if V.CHECK else
+          'SKIP vehicle check scenes: no check-scene folder (EIDO_ENGINE_CHECK_DIR)', flush=True)
     V.summary()
     sys.exit(0)
 

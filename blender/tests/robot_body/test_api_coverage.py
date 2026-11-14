@@ -7,8 +7,7 @@ eidoblend.characters.robot.VRMRobotBody / EidoverseRobotController / RobotDebug,
 a name that maps differently, or does not apply in Blender, is in RENAMED / NOT_APPLICABLE below with its reason.
 PASS / FAIL per source; writes out/api_coverage.json (the whole table). No render:
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_api_coverage.py
+    bash run_blender.sh blender/tests/robot_body/test_api_coverage.py
 """
 
 import os

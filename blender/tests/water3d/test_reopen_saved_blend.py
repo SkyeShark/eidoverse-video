@@ -1,8 +1,9 @@
 """A saved water .blend, opened in a fresh Blender with no eidoblend on the path, plays and renders on its own.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/water3d/test_reopen_saved_blend.py -- blend=<file.blend> frames=60,144 tag=pour \
         [ref=<png path with {f} for the frame>]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The contract is that every bake is keyed or cached data (PLY sequences played by Geometry Nodes, EXR sequences,
 drivers), so a saved file renders any frame with no Python of ours. This opens the file (run_blender.sh starts Blender

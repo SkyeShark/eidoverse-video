@@ -23,8 +23,7 @@ Checks (PASS / FAIL):
 Stills: out/nav_room_<moment>_<k>_f<frame>.png (the map, the route and the rays over the room from above; the body
 walking; the start and the stop, low); out/nav_room.json, out/nav_room.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_navigate_room.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_navigate_room.py --no-render
 """
 
 import math

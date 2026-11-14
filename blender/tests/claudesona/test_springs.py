@@ -15,9 +15,8 @@ Then the probe renders: the petals and the tie through the turn, and aletheia's 
 
     out/springs_<who>.json, out/springs_<who>_sheet.png
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_springs.py [--no-render] [--who claude_suit|aletheia]
+    bash run_blender.sh blender/tests/claudesona/test_springs.py [--no-render] [--who claude_suit|aletheia]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

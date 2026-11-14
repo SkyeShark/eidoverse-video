@@ -1,8 +1,9 @@
 """eidoblend.fx.stable_fluids in Blender: fluid_sim.js's uses in the engine's scenes, rendered.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/test_stable_fluids.py phase=bake
-    cd <main checkout> && HEAVY_VRAM_GB=3 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_stable_fluids.py [-- parts=1,2,3]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/test_stable_fluids.py [-- parts=1,2,3]
+    (the render: a GPU job, 3 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP,
+    blender/tests/_where.py)
 
 The bake (the numpy solver, several minutes of CPU) runs without the GPU; the render phase (the default once a bake is
 on disk: out/fluid2d_cache/sf_bakes.json) reattaches it with load_bake.
@@ -47,7 +48,7 @@ A = S.args()
 PARTS = set(A.get('parts', '1,2,3').split(','))
 FPS = 30
 CACHE = os.path.join(S.OUT, 'fluid2d_cache')
-# phase=bake runs the numpy solvers only (CPU: run it outside the GPU slot), phase=render reattaches those bakes
+# phase=bake runs the numpy solvers only (CPU: not a GPU job), phase=render reattaches those bakes
 # (load_bake) and renders; the default renders when a bake is on disk, else does both
 MANIFEST = os.path.join(CACHE, 'sf_bakes.json')
 PHASE = A.get('phase', 'render' if os.path.exists(MANIFEST) else 'all')
@@ -236,7 +237,8 @@ if '2' in PARTS and RENDER:
                                                   'kloppenheim_puresky_ldr.png'), check_existing=True)
     # the distortions move a scene texture's lookup by a few pixels (simple: density.rg * 3e-4 of the frame), which a
     # smooth sky hides: they warp the paving stones' edges instead
-    edge_img = bpy.data.images.load(S.TEXCACHE + '/PavingStones128_1k/PavingStones128_Color.jpg', check_existing=True)
+    edge_img = bpy.data.images.load(os.path.join(S.texset('PavingStones128_1k'), 'PavingStones128_Color.jpg'),
+                                    check_existing=True)
     effects = [('overlay', s) for s in OVERLAY_STYLES] + [('overlay', 'densityTint')] + \
         [('distortion', d) for d in DISTORTIONS]
     cols, pw, ph, gap = 5, 3.2, 1.8, 0.12

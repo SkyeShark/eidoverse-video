@@ -1,8 +1,8 @@
 """Generate package 9's recipes in Blender (GPU kernels) and save their fields, for the judge's numbers and the sheets
 (judged in plain Python by judge_recipes.py). No renders here: render_recipes.py renders.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/volcanoes_craters/gen.py --job <job.json>
+    bash run_blender.sh blender/tests/terrain/volcanoes_craters/gen.py --job <job.json>
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
     (or: python blender/tests/terrain/volcanoes_craters/vc.py gen ... , which writes the job and finds a slot)
 
 job.json: {"out_dir": ..., "items": [{"tag", "recipe", "seed", "params": {...}, "size": m (default the recipe's

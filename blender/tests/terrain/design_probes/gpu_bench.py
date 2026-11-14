@@ -6,12 +6,13 @@ slopes, MFD area gather, incision, uplift), so its time stands for one solver pa
     bash run_blender.sh gpu_bench.py
 """
 import json
+import os
 import sys
 import time
 
 import numpy as np
 
-sys.path.insert(0, r'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender')
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')))
 from eidoblend.fx._gpu import ComputeContext  # noqa: E402
 
 SRC = r'''

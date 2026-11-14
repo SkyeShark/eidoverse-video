@@ -9,9 +9,8 @@ Checks: the camera on the example's orbit at every still (radius 2.5 m, 1.4 m up
 (cos 0.4t r, 1.4, sin 0.4t r) looking at (0, 1.1, 0)); the idle clip moves the body between stills; the springs and the
 fog are in the scene; each still written.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_basic_vrm.py
+    bash run_blender.sh blender/tests/claudesona/test_basic_vrm.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

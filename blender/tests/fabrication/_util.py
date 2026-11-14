@@ -1,9 +1,9 @@
 """Shared bits of the fabrication tests: paths, PASS / FAIL lines, the Deno dump, a studio for probe renders.
 
-Run a test headless from the main checkout (renders through the GPU slot):
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/<test>.py [-- args]
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <test>.py      # for renders
+Run a test headless from the repo root:
+    bash run_blender.sh blender/tests/fabrication/<test>.py [-- args]
+The renders are GPU jobs (4 GB VRAM, 12 GB RAM cap): on a shared machine queue them with EIDO_GPU_WRAP
+(blender/tests/_where.py).
 """
 
 from __future__ import annotations
@@ -18,9 +18,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
+sys.path.insert(0, os.path.dirname(HERE))
+import _where  # noqa: E402
+
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
-MAIN = os.environ.get('EIDO_MAIN_CHECKOUT', 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01')
+MAIN = str(_where.main_checkout())          # the checkout holding node_modules/ (three for the Deno dumps)
 
 RESULTS = {'pass': 0, 'fail': 0, 'lines': []}
 

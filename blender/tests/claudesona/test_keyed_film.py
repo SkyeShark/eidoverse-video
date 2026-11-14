@@ -19,9 +19,8 @@ Checks:
 Stills: out/keyed_film_sheet.png (the four frames; then the face at two head turns on the TuTa: the catchlights and
 the paint stay on the face).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_keyed_film.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_keyed_film.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

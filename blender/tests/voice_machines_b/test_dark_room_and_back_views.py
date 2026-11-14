@@ -4,7 +4,8 @@ and then power off (the lights dying); the tandem from its left (non-drive) side
 normal must lean to the axle on the wire's own side (tandem.js's NaN-sparkle guard).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/voice_machines_b/test_dark_room_and_back_views.py
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --render             # stills
+    bash run_blender.sh <this> --render                                                                        # stills
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The checks (PASS / FAIL) run without --render too; the luminance checks read the stills, so they need --render.
 """

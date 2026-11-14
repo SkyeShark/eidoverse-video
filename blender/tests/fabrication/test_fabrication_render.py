@@ -9,9 +9,8 @@ wood, 18 s time-lapse) at 960 x 540, then checks what the saved file will play, 
 and times the stock evaluation. Then renders probe stills into out/: the example's wide view and close views of each
 machine at three times (shadows on in the close views so contact reads).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/fabrication/test_fabrication_render.py
-        [-- --no-render] [-- --samples 16]
+    bash run_blender.sh blender/tests/fabrication/test_fabrication_render.py [-- --no-render] [-- --samples 16]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import math
 import os

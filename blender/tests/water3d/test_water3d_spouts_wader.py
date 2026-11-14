@@ -1,10 +1,11 @@
 """The chorus scene's water in Blender: an empty stone basin filled on camera by spouts, a wader walking through it
 as sphere colliders, the luminous jade palette.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_spouts_wader.py [-- samples=48]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water3d_spouts_wader.py [-- samples=48]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The chorus scene (E:/eidoverse-video-desktop-work-folder/chorus/scene.js) at a fifth of its scale: the basin is a
+The chorus scene (work/chorus/scene.js) at a fifth of its scale: the basin is a
 revolved bowl voxelised as the only collider (walls off), the sim starts EMPTY (initialLevel below the floor) and the
 spouts fill it (one emitter per mouth, falling at 5 m/s with a slight inward lean, as its setEmitters); his body is a
 set of spheres set every frame (bake(track_spheres=...)); and its water options carry over: velSmooth 0 ("water, not
@@ -41,8 +42,8 @@ configure_eevee(sc, samples=SAMPLES)
 sc.view_settings.exposure = float(A.get('exposure', 0.4))
 
 # ---- the stage: a dusk basin -------------------------------------------------------------------------------
-stone = S.pbr('basin_stone', S.TEXCACHE + '/Concrete034_2k', 'Concrete034', scale=0.9, tint=(0.55, 0.50, 0.46))
-ground_m = S.pbr('ground', S.TEXCACHE + '/PavingStones128_1k', 'PavingStones128', scale=0.4,
+stone = S.pbr('basin_stone', S.texset('Concrete034_2k'), 'Concrete034', scale=0.9, tint=(0.55, 0.50, 0.46))
+ground_m = S.pbr('ground', S.texset('PavingStones128_1k'), 'PavingStones128', scale=0.4,
                  tint=(0.45, 0.42, 0.40))
 # the bowl: inner radius 0.95 m at the rim, floor 0.12 m above the ground, rim at 0.62 m (a closed lathe: the
 # collider and the visible prop are one mesh)
@@ -52,7 +53,7 @@ basin = S.lathe(sc, 'basin', prof, segments=128, mat=stone)
 RIM_Z, FLOOR_Z, INNER_R = 0.62, 0.12, 0.92
 S.box(sc, 'ground', (30, 30, 0.2), (0, 0, -0.1), ground_m)
 # three spout heads on posts round the rim (props; the water leaves their mouths)
-bronze = S.pbr('spout_bronze', S.TEXCACHE + '/Metal042A_1k', 'Metal042A', scale=6.0, tint=(0.75, 0.52, 0.34))
+bronze = S.pbr('spout_bronze', S.texset('Metal042A_1k'), 'Metal042A', scale=6.0, tint=(0.75, 0.52, 0.34))
 spouts = []
 for k in range(3):
     a = math.radians(90 + 120 * k)

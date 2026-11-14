@@ -3,8 +3,7 @@
 Sources are real Blender objects (empties, meshes, a Geometry Nodes instancer), so the object path of
 source_geometry (evaluated meshes, parents, reflections, instances, local space) is what is tested.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_mesh_input.py
+    bash run_blender.sh blender/tests/fabrication/test_mesh_input.py
 """
 import math
 import os

@@ -7,9 +7,8 @@ scheduled one after another, baked, and a still at each clip's peak:
     out/clippy.json          the build (vertices, shape keys, timings) and the checks: every shape key moves some vertex,
                              the topology is one for all keys
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_clippy.py [--no-render]
+    bash run_blender.sh blender/tests/characters/test_clippy.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

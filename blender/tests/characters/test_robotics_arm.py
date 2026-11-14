@@ -7,9 +7,8 @@ the recolour (materials rebuilt); renders two stills:
     out/robotics_arm_posed.png     joints [0, 0.5, 0.4, 0, -0.9, 0], jaw gap 0.03 m, primary #d9e0df, accent #398b91
     out/robotics_arm.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_robotics_arm.py [--no-render]
+    bash run_blender.sh blender/tests/characters/test_robotics_arm.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

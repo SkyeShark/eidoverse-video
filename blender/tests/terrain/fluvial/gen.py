@@ -1,8 +1,8 @@
 """Generate the fluvial package's recipes in Blender (GPU kernels) and save every level's fields, for the numbers
 (judged in plain Python by judge_fields.py) and the sheets. No renders: the judge's run.py renders.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/fluvial/gen.py --job <job.json>
+    bash run_blender.sh blender/tests/terrain/fluvial/gen.py --job <job.json>
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 job.json: {"out_dir": ..., "items": [{"tag", "recipe", "seed", "params": {...}, "size": m (default the recipe's
 reference extent), "resolution": 1024, "focus": [x, y] or null, "hero_cell": 0.5, "stage_params": {op: {...}}

@@ -2,9 +2,9 @@
 the highest dune of the main tile's inner 5 km (where the review's crest and interdune views stand). In Blender (the
 slab model needs the GPU):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/dune_lab.py --tag name [--variants <file.json>] [--judge 1] \\
+    bash run_blender.sh blender/tests/terrain/wind_sand/dune_lab.py --tag name [--variants <file.json>] [--judge 1] \\
         [--focus x,y] [--seed 1]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 <file.json>: [[label, {"params": {...knobs...}, "set": {...dune_field params...}}], ...] (as judge_dunes.py); without
 it one variant, the recipe as it stands, labelled 'base'. Writes out/wind_sand/lab_<tag>/<label>.npz: per level i the

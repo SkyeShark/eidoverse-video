@@ -73,6 +73,22 @@ Tests render: keep them small (960x540 or less, 16 samples or fewer, a few
 seconds of film), run one at a time on a shared GPU, and LOOK at what they
 write. A passing test is not a visual review.
 
+Tests find everything relative to the checkout (`tests/_where.py`), so they run
+from a fresh clone. A few environment variables adapt them to a machine:
+
+| variable | what it does |
+|---|---|
+| `EIDO_GPU_WRAP` | a command prefix for every headless Blender job (a GPU queue on a shared machine, `nice`, a job runner); unset, Blender runs directly |
+| `EIDO_MEMCAP` | a RAM-cap launcher `run_all.py` runs its no-render jobs through (`python -I $EIDO_MEMCAP <GB> -- <command>`) |
+| `EIDO_MAIN_CHECKOUT` | the checkout holding the untracked `node_modules/` and `eidoverse/assets/cache/` (default: the main worktree when this checkout is a git worktree, else this checkout) |
+| `EIDO_ASSET_CACHE` | another folder's fetched texture and model library, read before fetching again |
+| `EIDOBLEND_PH_ASSETS` | the folder of the scanned Poly Haven plant sets (default: `scanned_plants/` in the asset cache) |
+| `TRIAGE_CACHE` | the terrain triage cache of real DEMs and Ekigar fields (default: under `tests/terrain/out/`) |
+
+Inputs that live outside this repo (another engine's reference renders, another
+project's assets) have their own variables, named where each test reads them;
+without one, the checks that need it are skipped, saying which variable to set.
+
 Blender's own Python runs the package: 3.13 with numpy, OpenImageIO and
 requests; no scipy, no cv2 (Pillow is present on this machine's Blender but
 may have been installed after it: don't rely on it). Outside Blender use the

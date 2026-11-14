@@ -22,6 +22,8 @@ from PIL import Image, ImageDraw
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT / 'blender'))
+sys.path.insert(0, str(HERE.parent))
+import _where  # noqa: E402  (blender/tests/_where.py: the main checkout, for its node_modules/)
 from eidoblend.media.canvas_scenes import deno_exe  # noqa: E402
 from eidoblend.props import voice_machines as VM  # noqa: E402
 from eidoblend.props.voice_machines import c64, desktop2001, mac1984, noise_data, rng  # noqa: E402
@@ -177,14 +179,8 @@ def main():
 
 def three_build_dir():
     """A node_modules/three/build folder: this worktree's, else the main checkout's (read only)."""
-    for root in (ROOT, ROOT.parent / 'eidoverse-video-prealpha-0.01'):
+    for root in (ROOT, _where.main_checkout()):
         d = root / 'node_modules' / 'three' / 'build'
-        if (d / 'three.module.js').is_file():
-            return d
-    git = ROOT / '.git'
-    if git.is_file() and git.read_text().startswith('gitdir:'):
-        main = Path(git.read_text().split(':', 1)[1].strip()).parents[2]
-        d = main / 'node_modules' / 'three' / 'build'
         if (d / 'three.module.js').is_file():
             return d
     return None

@@ -8,9 +8,10 @@ Writes out/shots/<set>/<shot>.png and a contact sheet per set.
 The cap shots need a head: --her stands the claudesona (claude_suit.vrm at 0.87, the scale capFit was measured for)
 on the mark for them alone and hides her elsewhere; without it, a bare head bone stands in (the cap's flight, no fit).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_corridor_news/render_shots.py [corridor|news] [--samples 16]
         [--size 960x540] [--her] [--only base,states,look] [--dry]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import math
 import sys

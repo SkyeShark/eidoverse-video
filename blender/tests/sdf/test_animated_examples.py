@@ -2,8 +2,9 @@
 pulse, blinking darting eyes), the explosion (the radius pulse, the rising noise), the stylized blob (its domain warp)
 on the per-frame atlas sequence, and the gyroid recipe (its palette drifts with uTime).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf/test_animated_examples.py [-- frames=3 time_scale=20]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 out/anim_examples_f0001.png, _f0003.png and anim_examples_sheet.png. PASS lines: each bake wrote its frames, the
 player shows different geometry (or colour) at the first and last frame, the atlas sequence's mesh carries its UV

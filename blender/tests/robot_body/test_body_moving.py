@@ -25,8 +25,7 @@ keeps me off them is what my sensors see. Checks (PASS / FAIL):
 Stills: out/moving_<moment>_<k>_f<frame>.png (the door and the cart with what I see of them; the walk through the
 doorway from a low side camera); out/moving.json, out/moving.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_moving.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_moving.py --no-render
 """
 
 import math

@@ -2,8 +2,8 @@
 PLY sequence played by Geometry Nodes ('vertex' carrier), the blob as a per-frame atlas sequence ('atlas'), the
 .blend saved, reopened and rendered again: the saved file plays on its own.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_animated_bake.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_animated_bake.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 out/anim_hege_f0001.png, anim_hege_f0005.png (this session), anim_hege_f0005_reopened.png (from the saved file),
 anim_sheet.png.

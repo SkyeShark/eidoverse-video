@@ -10,9 +10,8 @@ ways in one Blender process, its outputs measured and looked at:
 Checks: every tile and sheet written at its size; the sheet's grid; the reel's frame count; the saved .blend's tile
 within 1 % of the sheet's (mean absolute difference: the keys alone rebuild the frame).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_turntable.py
+    bash run_blender.sh blender/tests/claudesona/test_turntable.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

@@ -4,8 +4,9 @@ alone (--vrm stands the claudesona at the mark, at the scale the cams are framed
     # pre-draw the canvases once (system Python, outside the GPU slot):
     cd blender && python -c "import sys; sys.path.insert(0, '.'); from eidoblend.sets.unknown_force import \
         quiet_room as QR; QR.draw_canvases('tests/sets_uf_interiors/out/art_cache')"
-    # build, check, bake the room probe, render (from the main checkout, through the GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    # build, check, bake the room probe, render (from the main checkout; a GPU job: on a shared machine queue it
+    # with EIDO_GPU_WRAP, blender/tests/_where.py):
+    bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/test_quiet_room.py -- [--cams altar,pews,...] [--no_render]
         [--samples 16] [--res 960x540] [--vrm] [--probe_samples 512] [--probe_spacing 0.45] [--save]
 

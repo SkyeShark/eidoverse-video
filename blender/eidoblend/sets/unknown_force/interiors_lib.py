@@ -3098,7 +3098,7 @@ class InteriorSet(dict):
         return ee
 
     def bake_probes(self, scene=None):
-        """Bake the set's volume probe (a GPU job: run it through heavy.sh). Returns {probe: seconds}. In a scene
+        """Bake the set's volume probe (a GPU job). Returns {probe: seconds}. In a scene
         several sets share (env_switch), the bake sees this set alone, lit by its own env (the others hidden, their
         env weights 0, any keys on those switches muted for the bake), and the scene is left as it was."""
         from ...look import lighting as LL

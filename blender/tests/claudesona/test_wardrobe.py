@@ -16,9 +16,8 @@ Stills: out/wardrobe_patterns_sheet.png (stripes, blocks + perPetal, rainbow pet
 canvas, pinstripes, the hoodie), out/wardrobe_cyclist_sheet.png (front, side, back; then the same without the folds),
 out/wardrobe_look_sheet.png (the lab coat in MToon and in PBR).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_wardrobe.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_wardrobe.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

@@ -1,11 +1,13 @@
 """WaterMesh's ripple normal map, and the one engine scene that used WaterMesh, in Blender.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/water3d/probe_water_mesh_normals.py [-- samples=32 three_normals=<waternormals.jpg>]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Every WaterMesh scene in the engine sampled three's examples/textures/waternormals.jpg. The Blender edition has no
 copy of it and synthesises one (make_water_normals). This renders the same sea three ways, rows of the sheet:
-  three      three's own waternormals.jpg, read where it lies (three_normals=, a three.js checkout; not copied)
+  three      three's own waternormals.jpg, read where it lies (three_normals=<file>, or textures/waternormals.jpg in
+             $EIDO_THREE_EXAMPLES_DIR, a three.js checkout's examples/; not copied)
   generated  make_water_normals' defaults (the map create_water_mesh makes when it is given none)
   steep      the earlier defaults (strength 6, all along the wind): a mean slope of 44 degrees
 Columns: liquids.md's example (a 10 km sea under a cloudy SkyMesh, camera 6 m up) and the antad_response coast's
@@ -27,10 +29,16 @@ sys.path.insert(0, HERE)
 import _scene as S  # noqa: E402
 from eidoblend.fx.water_flat import create_water_mesh, create_sky_mesh, make_water_normals  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(HERE))
+import _where  # noqa: E402
+
 A = S.args()
 SAMPLES = int(A.get('samples', 32))
-THREE = A.get('three_normals', 'C:/Users/sdn52/OneDrive/Desktop/SPOM_threejs_example_contribution/three.js/examples/'
-                               'textures/waternormals.jpg')
+THREE = A.get('three_normals')
+if not THREE:
+    _ex = _where.external('EIDO_THREE_EXAMPLES_DIR', "three.js's examples folder (a three.js checkout's examples/, "
+                          "for textures/waternormals.jpg; the sheet goes without its 'three' row)")
+    THREE = os.path.join(_ex, 'textures', 'waternormals.jpg') if _ex else ''
 OUT = os.path.join(S.OUT, 'verify')
 os.makedirs(OUT, exist_ok=True)
 sc = S.fresh_scene(res=(960, 540), fps=24, end=48, samples=SAMPLES)

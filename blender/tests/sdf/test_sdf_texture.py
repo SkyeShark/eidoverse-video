@@ -1,8 +1,8 @@
 """make_sdf_texture: the four SDF_TEX_RECIPES rendered into images, a bank of four screens showing them in an EEVEE
 scene (the engine's documented use: the texture as map + emissiveMap), and a baked sequence that plays.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_sdf_texture.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_sdf_texture.py
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 out/tex_<recipe>.png (each texture as the engine's render target held it), out/tex_screens.png (the screens), and
 PASS lines: every recipe renders a subject (hit pixels) over its sky, the custom_de / custom_shade overrides take,

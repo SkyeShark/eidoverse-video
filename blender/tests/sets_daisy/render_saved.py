@@ -5,9 +5,10 @@ This opens each .blend and renders those frames through the cameras its timeline
 camera), so the GPU slot holds only the renders, and every still proves the contract: the saved file plays and renders
 any frame on its own.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/render_saved.py funeral bridge [--only shot03_bar04,erupt]
-    ... heavy.sh 24 ... render_saved.py corner        (its own process: the camp's render peaks at 12.1-12.7 GB)
+    ... render_saved.py corner        (its own process: the camp's render peaks at 12.1-12.7 GB)
+    (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Writes out/<set>/<set>_<name>.png; prints a PASS/FAIL line per still (the file exists, no magenta, not black).
 """

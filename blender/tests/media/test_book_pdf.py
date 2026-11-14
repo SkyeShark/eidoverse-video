@@ -1,7 +1,7 @@
 """Probe: a book from a PDF (eidoblend.media.book, pdf=): the janus "Simulacra and Simulators" PDF, 351 pages.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_book_pdf.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_book_pdf.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 pymupdf (system Python) rasterises the pages, Pillow composes the spreads, the rig sizes the leaf count and the
 thickness from the page count; the book opens in the middle of the document (page 60) and turns a leaf.

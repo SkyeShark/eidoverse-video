@@ -2,7 +2,8 @@
 compositor File Output node into one multilayer EXR, and the picture itself still renders. On the corner room (run
 test_corner_room.py --stage build first); the passes are read back with OpenImageIO and a few are saved as PNGs to
 look at (diffuse light, specular light, shadow, AO, normal).
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh blender/tests/look/test_debug_passes.py
+    bash run_blender.sh blender/tests/look/test_debug_passes.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 import glob
 import os

@@ -1,7 +1,7 @@
 """Probe: the placement helpers on a terrain, and the audits catching deliberate mistakes.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/terrain/test_placement.py [--no-render]
+    bash run_blender.sh blender/tests/terrain/test_placement.py [--no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Builds a small terrain with a clearing (make_terrain's meadow, _fixture.ground), then:
   place_on      a crate on the clearing, a second crate stacked on it, a third on the slope

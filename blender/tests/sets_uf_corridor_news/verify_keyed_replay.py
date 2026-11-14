@@ -3,9 +3,10 @@ same frames rendered twice, once in the session that keyed them and once from th
 imports nothing of eidoblend. The renders must match: whatever the set left live in Python (a driver, a Geometry
 Nodes input, an image variant, a camera cut by markers) would show up as a difference.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <this folder>/verify_keyed_replay.py bake corridor      (then: ... verify_keyed_replay.py replay corridor)
     the same with news
+    (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The corridor (4 s at 24 fps): a repost typed from 0.5 s, the cap carried to a stand-in head from 1 s, the door camera
 cutting to corridorWide at frame 49 (a marker), the doors opening from 2.2 s, a recount at 2.5 s, the lights dimming

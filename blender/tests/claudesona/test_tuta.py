@@ -22,9 +22,8 @@ badges pinned, face paint, the disc), out/tuta_details_sheet.png (the chest: zip
 yoke, grommet, a ghost; the legs: knee panels, cargo pocket, lightning inlay, boots; the face: paint + catchlights),
 out/tuta_eject_sheet.png (mod_gold popped off and tumbling, its sparks), out/tuta_neon_sheet.png (neon 0, 0.4, 1).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_tuta.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_tuta.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

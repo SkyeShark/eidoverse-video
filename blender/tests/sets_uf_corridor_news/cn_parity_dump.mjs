@@ -8,7 +8,7 @@
 //
 //   cd <worktree> && deno run --no-config --no-lock --cached-only -A blender/tests/sets_uf_corridor_news/cn_parity_dump.mjs
 //
-// The texture library: fetchPBR answers with the main checkout's cache (EIDO_ASSET_CACHE, or the default path below)
+// The texture library: fetchPBR answers with the main checkout's cache (EIDO_ASSET_CACHE, or mainCheckout()'s below)
 // and loadImageTexture with a 1x1 placeholder: no PBR pixels are compared, only what the sets draw themselves.
 // Writes blender/tests/sets_uf_corridor_news/out/parity/{cn.json, tex_<set>_<i>_<w>x<h>.bin} (test_parity.py compares).
 const W = await import('npm:three@0.184.0/webgpu');
@@ -18,8 +18,23 @@ const root = Deno.cwd().replace(/\\/g, '/');
 const EIDO = new URL('file:///' + root.replace(/^\/+/, '') + '/eidoverse/');
 const outDir = root + '/blender/tests/sets_uf_corridor_news/out/parity';
 await Deno.mkdir(outDir, { recursive: true });
-const CACHE = (Deno.env.get('EIDO_ASSET_CACHE') || 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/eidoverse/assets/cache')
-    .replace(/\\/g, '/');
+// the checkout that holds the untracked shared folders, found as blender/tests/_where.py's main_checkout() finds it:
+// EIDO_MAIN_CHECKOUT, else the main worktree when this checkout is a linked git worktree (its .git is a file
+// "gitdir: <main>/.git/worktrees/<name>"), else this checkout
+const mainCheckout = () => {
+    const env = Deno.env.get('EIDO_MAIN_CHECKOUT');
+    if (env) return env.replace(/\\/g, '/');
+    try {
+        const line = Deno.readTextFileSync(`${root}/.git`).trim();
+        if (line.startsWith('gitdir:')) {
+            let g = line.slice(7).trim().replace(/\\/g, '/');
+            if (!/^([A-Za-z]:)?\//.test(g)) g = `${root}/${g}`;            // a relative gitdir: from this checkout
+            return g.split('/').slice(0, -3).join('/');
+        }
+    } catch { /* .git is the repository's own folder: this is the main checkout */ }
+    return root;
+};
+const CACHE = (Deno.env.get('EIDO_ASSET_CACHE') || `${mainCheckout()}/eidoverse/assets/cache`).replace(/\\/g, '/');
 
 // every DataTexture the sets make, in creation order (cn_lib's dataTex / envTex go through THREE.DataTexture)
 let made = [];

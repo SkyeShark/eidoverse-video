@@ -18,8 +18,9 @@ render with the sphere probes at 2048 is measured beside it.
 out/reflections/reflections_sheet.png: the ball without, with, and the reference (x4 crops);
 out/reflections/reflections_look.png: the chrome ball and a brushed one (roughness 0.3) on dark ground at dusk, 960 x 540.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/sdf_volumes/test_volume_reflections.py [--no-render]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/sdf_volumes/test_volume_reflections.py [--no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

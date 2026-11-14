@@ -1,8 +1,9 @@
 """A pour into a stone basin, then a splash: eidoblend.fx.water3d with mesh colliders, emitters and the volume target
 driven while water is added (the engine's documented filling workflow).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 16 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_pour_basin.py [-- res=128 samples=64]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water3d_pour_basin.py [-- res=128 samples=64]
+    (a GPU job: 4 GB VRAM, 16 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 A bronze spout on a stone wall pours into an empty fountain basin (a lathe on a pedestal, voxelised as the
 collider) standing on paving stones (a ground slab, also a collider). At 5.5 s a bucket-sized slug falls from above
@@ -48,11 +49,11 @@ configure_eevee(sc, samples=SAMPLES)
 sc.view_settings.exposure = float(A.get('exposure', 0.0))
 
 # ---- the stage ---------------------------------------------------------------------------------------------
-stone = S.pbr('basin_stone', S.TEXCACHE + '/Concrete034_2k', 'Concrete034', scale=1.6, tint=(0.92, 0.88, 0.80))
-paving = S.pbr('paving', S.TEXCACHE + '/PavingStones128_1k', 'PavingStones128', scale=0.55)
-bronze = S.pbr('spout_bronze', S.TEXCACHE + '/Metal042A_1k', 'Metal042A', scale=6.0, tint=(0.95, 0.62, 0.38),
+stone = S.pbr('basin_stone', S.texset('Concrete034_2k'), 'Concrete034', scale=1.6, tint=(0.92, 0.88, 0.80))
+paving = S.pbr('paving', S.texset('PavingStones128_1k'), 'PavingStones128', scale=0.55)
+bronze = S.pbr('spout_bronze', S.texset('Metal042A_1k'), 'Metal042A', scale=6.0, tint=(0.95, 0.62, 0.38),
                rough_mul=0.8)
-wall_mat = S.pbr('wall_stone', S.TEXCACHE + '/Concrete034_2k', 'Concrete034', scale=1.1, tint=(0.80, 0.76, 0.70))
+wall_mat = S.pbr('wall_stone', S.texset('Concrete034_2k'), 'Concrete034', scale=1.1, tint=(0.80, 0.76, 0.70))
 # the basin: pedestal and bowl as ONE closed lathe (the collider and the visible prop are the same mesh)
 # a deep font (the level set keeps bulk water well and thin sheets badly: a deep vessel fills, a dish would not)
 profile = [(0.0, 0.0), (0.26, 0.0), (0.26, 0.05), (0.17, 0.09), (0.13, 0.18), (0.12, 0.30), (0.15, 0.36),

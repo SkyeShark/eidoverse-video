@@ -18,8 +18,7 @@ doorway (keyed), a cart rolling along the wall (keyed) with a crate parented on 
     the cost              2,000 crates beside a 250k-vertex ground: a full rebuild, and the movers' alone (under a tenth
                           of it)
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/harness/test_robot_sensors.py
+    bash run_blender.sh blender/tests/harness/test_robot_sensors.py
 """
 import math
 import os

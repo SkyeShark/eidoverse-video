@@ -1,9 +1,10 @@
 """Probe: the UNKNOWN FORCE city (with the hole inside it) built in Blender 5.2 and rendered from the set's cameras.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
+    cd <main checkout> && \
         bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_city_render.py [--no-render] [--shots a,b]
         [--samples 16] [--res 960x540] [--bloom] [--save] [--power 1.0] [--her] [--vrm path] [--sweep]
         [--compare] [--refs dir] [--tag _suffix] [--clamp-indirect 10] [--set rain=0,wet=0.5] [--hash hoskins]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Builds the city (seed 1909) and checks it numerically: the buildings, signs, lamps and cars against the engine's
 counts (1908, 4446 + the hole's 24, 1967, 2161), the merged buffers, the Geometry Nodes systems after evaluation (rain
@@ -14,8 +15,8 @@ from the dive at four of its times, the city's two static views, the hole's eigh
 turn-down into out/, lit as the WebGPU probe stage lit its stills of the set, and the dive's end again with the deck
 off (probe_dive_t40.8_cloud_0.png): the pillar of light reads as bright and even through the deck. --her puts a performer
 on the mark (a VRM: claude_suit.vrm, or --vrm) in the haze, for scale and for the performer-only lights. --compare
-writes out/compare_<shot>.png: the WebGPU probe stage's still of that view (from --refs, default
-<cwd>/work/unknown_force/sets/probes) beside this render. Prints PASS / FAIL.
+writes out/compare_<shot>.png: the WebGPU probe stage's still of that view (made outside the repo: from --refs dir,
+else EIDO_UF_PROBES_DIR; with neither the compare is skipped) beside this render. Prints PASS / FAIL.
 """
 import math
 import sys
@@ -24,6 +25,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
+sys.path.insert(0, str(HERE.parent))
+import _where  # noqa: E402  (blender/tests/_where.py: the WebGPU stills, from outside the repo)
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
@@ -303,9 +306,9 @@ if '--bloom' in args:
           f"strength {gl.inputs['Strength'].default_value:.2f}, size {gl.inputs['Size'].default_value:.2f}, "
           f"threshold {gl.inputs['Threshold'].default_value:.2f}")
 
-# The stills are lit as the WebGPU probe stage lit its stills of the set (work/unknown_force/sets/probes/
-# sets_probe.js), so they compare like for like: the dive's focal light at gain 0.6 over 230 m; the hole's and the
-# static views' at (0, 0, 3) (three's (0, 3, 0)), gain 0.35 over 70 m, the clock at 80 s + the move's time.
+# The stills are lit as the WebGPU probe stage lit its stills of the set (its sets_probe.js), so they compare like
+# for like: the dive's focal light at gain 0.6 over 230 m; the hole's and the static views' at (0, 0, 3) (three's
+# (0, 3, 0)), gain 0.35 over 70 m, the clock at 80 s + the move's time.
 FOCAL_DIVE = {'gain': 0.6, 'radius': 230.0}
 FOCAL_HOLE = {'pos': (0.0, 0.0, 3.0), 'gain': 0.35, 'radius': 70.0}
 shots = []
@@ -465,9 +468,14 @@ if RENDER and (not want_shots or 'turned_down' in want_shots):
 # near the shot's mid time, the times used here.
 REFS = {'dive_t16.0': 'fin_dive16_off.png', 'dive_t40.8': 'fin_dive40_off.png',
         'hole_closeSing': 'fin_hole_close_off.png', 'hole_low': 'fin_hole_low_off.png'}
+refs = None
 if RENDER and '--compare' in args:
+    # the WebGPU stills live outside the repo: --refs dir, else EIDO_UF_PROBES_DIR; with neither the compare is skipped
+    refs = opt('--refs') or _where.external('EIDO_UF_PROBES_DIR', "the WebGPU probe stage's stills of UNKNOWN FORCE's "
+                                            'sets (fin_dive16_off.png ...)')
+if refs is not None:
     from PIL import Image, ImageDraw
-    ref_dir = Path(opt('--refs', str(Path.cwd() / 'work' / 'unknown_force' / 'sets' / 'probes')))
+    ref_dir = Path(refs)
     made = 0
     for shot, ref in REFS.items():
         # this run's still (with --tag, the variant's: never an older untagged render beside the WebGPU's)

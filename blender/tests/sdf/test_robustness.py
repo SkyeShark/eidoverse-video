@@ -1,8 +1,9 @@
 """The engine under the uses a film puts it to: several objects of one example, frames with nothing to show, the
 TSL edition's shade(p, n, mat, ctx), and screens and volumes side by side.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_robustness.py          (-- render=0 runs without the GPU slot)
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_robustness.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py;
+    -- render=0 renders nothing and needs no queue)
 
 PASS lines:
   * two explosions of one example with different speeds keep their own atlases: each object's cache files are named

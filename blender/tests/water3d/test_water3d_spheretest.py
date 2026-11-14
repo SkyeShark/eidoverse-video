@@ -2,10 +2,11 @@
 A ball hangs over the dam-break tank while the pool settles, then descends into it and sweeps through it; the water
 must part around it, not pass through it.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_spheretest.py [-- samples=32 shading=engine]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water3d_spheretest.py [-- samples=32 shading=engine]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The engine's scene (E:/eidoverse-video-desktop-work-folder/spheretest/scene.js), option for option: gridSize
+The engine's scene (work/spheretest/scene.js), option for option: gridSize
 [64, 48, 64] over [2, 1.5, 2] m, domainCenter [0, 0.75, 0], maxSpheres 4, the 0.62-deep dam-break column, the ball
 r 0.26 at y 1.30 for 3 s, then down at 0.42 m/s to 0.30, sweeping x = 0.55 sin(1.5 (t - 5)) from 5 s; 9 s at 30 fps.
 The ball is an animated object fed to the solver by bake(track_spheres=...).

@@ -1,9 +1,8 @@
-"""The stills a robot_body test listed (out/<tag>_shots.json) rendered from its saved out/<tag>.blend, so the test's CPU
-run (--no-render) never holds the shared GPU slot:
+"""The stills a robot_body test listed (out/<tag>_shots.json) rendered from its saved out/<tag>.blend, so the test's own
+run (--no-render) stays on the CPU and only this is a GPU job (on a shared machine queue it with
+EIDO_GPU_WRAP, blender/tests/_where.py):
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/render_stills.py <tag> [prefix ...]
+    bash run_blender.sh blender/tests/robot_body/render_stills.py <tag> [prefix ...]
 
 Each shot: {'name', 'frame', 'cam', 'target', 'lens'}; -> out/<tag>_<name>_f<frame>.png (_stage.render_shots: 960 x
 540, 16 samples, EEVEE with ray tracing and Fast GI on). Prefixes after the tag render only the shots named so.

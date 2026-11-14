@@ -1,14 +1,14 @@
 """The shallow-water port's first probe: the engine's swe_demo (an empty bowl filling from three rim spouts,
 then a chrome wader breaching the pool), baked with eidoblend.fx.swe and rendered in EEVEE.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_swe_basin.py [-- end=288 frames=72,168,240,288]
+    bash run_blender.sh blender/tests/fx/test_swe_basin.py [-- end=288 frames=72,168,240,288]
     (more: style=demo|natural, bake=0 render=0, samples=64 tag=_s64 for the water's convergence)
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The bake is CPU only (numpy, ~0.2 s a frame at 256^2 with 6144 spray slots); the render needs the GPU slot.
+The bake is CPU only (numpy, ~0.2 s a frame at 256^2 with 6144 spray slots); the render runs on the GPU.
 The wader follows the demo's SWE_TEST timeline (it drops at t = 4 s instead of 22 s), so a short bake shows
 the breach. Writes blender/tests/fx/out/swe_basin_f####.png and the EXR caches under out/swe_cache/.
-Reference: E:/eidoverse-video-desktop-work-folder/swe_demo/swe_fill_demo.mp4 (WebGPU).
+Reference: the engine's own render of work/swe_demo, its swe_fill_demo.mp4 (WebGPU).
 """
 
 import math

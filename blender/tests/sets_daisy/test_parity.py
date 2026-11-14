@@ -19,13 +19,14 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _common as C                                        # noqa: E402
+import _where                                               # noqa: E402  (blender/tests/_where.py, on _common's path)
 
 from mathutils import Vector                                # noqa: E402
 
 from eidoblend.sets.daisy import corner as CO               # noqa: E402
 from eidoblend.sets.daisy import funeral as FU              # noqa: E402
 
-THREE = os.environ.get('THREE_MODULE', 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three/build/three.module.js')
+THREE = os.environ.get('THREE_MODULE', (_where.main_checkout() / 'node_modules/three/build/three.module.js').as_posix())
 DENO = os.environ.get('DENO', 'deno')
 BULB_B = Vector((-1.930, 1.760, 1.149))           # the lamp bulb's centre, room-local Blender (from the GLB, as built)
 BULB3 = (BULB_B.x, BULB_B.z, -BULB_B.y)

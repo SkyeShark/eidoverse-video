@@ -22,10 +22,8 @@ Checks (PASS / FAIL), on the EVALUATED (skinned) mesh where it matters:
     actuator (90 deg/s) onto it or back to the idle
 Stills: out/pick_up_<moment>_f<k>.png (wide and close), out/pick_up.json, out/pick_up.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_pick_up.py [--no-render] \
-        [--side left] [--prop carton]
+    bash run_blender.sh blender/tests/robot_body/test_pick_up.py [--no-render] [--side left] [--prop carton]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 
 --side left: my left hand, the prop in front of my left shoulder (the mirrored pins, wrist and grasp); --prop carton: a
 juice carton (65 x 65 x 130 mm, square-sided) instead of the can. Any of them writes out/pick_up_<side>_<prop>_* instead.

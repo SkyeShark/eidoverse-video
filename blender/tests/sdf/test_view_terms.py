@@ -13,8 +13,8 @@ Render (unless --no-render), the stage black and unlit so the frame is the emiss
     stills: out/view_terms_sheet.png (EEVEE | march | the stylized blob lit, with its sheen | with the engine's unlit
     rim per pixel instead)
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/sdf/test_view_terms.py [--no-render]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_view_terms.py [--no-render]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

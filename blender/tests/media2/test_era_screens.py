@@ -2,9 +2,8 @@
 
 First build DAISY's timeline (the captions, kicks and voice envelopes the scenes read), from the worktree:
     python -B blender/tests/media2/run_daisy.py song --upto chorus2 --no-tts
-Then, from the main checkout:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media2/test_era_screens.py [-- --only wall,curved,devices,film]
+Then, from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/media2/test_era_screens.py [-- --only wall,curved,devices,film]
 
 wall     the nine 1939-1984 scenes (the title card included), each baked at three moments of its own line at
          DAISY's cue with DAISY's captions (bake_canvas_scene -> canvas_bake.mjs -> the module's own draw), laid end

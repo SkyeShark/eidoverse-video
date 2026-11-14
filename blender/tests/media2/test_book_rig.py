@@ -1,7 +1,7 @@
 """Probe: make_book(rig={...}), a raw makeBookRig spec (no GLB, no makeBookFromSpec arithmetic), in EEVEE.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media2/test_book_rig.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media2/test_book_rig.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The spec is the janus book's measure written out by hand (boardLen, jointX, foreX, halfH, halfT, lip, round, uJoint)
 with 16 leaves, a plain blue cloth and six of the janus spreads: closed at frame 1, open by 12, a leaf turned over

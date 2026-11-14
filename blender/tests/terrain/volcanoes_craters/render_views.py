@@ -1,8 +1,8 @@
 """Render package 9's analytic shapes through the reference rig, like for like with the references (Blender 5.2).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/volcanoes_craters/render_views.py \\
+    bash run_blender.sh blender/tests/terrain/volcanoes_craters/render_views.py \\
         [--only fuji,lake,meteor,sp,sp_real,field] [--views top,aerial,eye] [--dry]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Each shape is evaluated on its reference's tile (volcanic / impact presets, the placeholder base of _common) and
 rendered by reference/render_references.render_probe: the same grey clay, make_sky daylight, AgX look and three views

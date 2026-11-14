@@ -69,10 +69,11 @@ PROPS = {'neon': 1.0, 'paint': 0.0, 'eyes': 0.0, 'eye_neon': 0.0, 'grime': 1.0}
 
 # ------------------------------------------------------------------------------------------------ textures
 def _texture_set(name, res):
-    """a CC0 set from the shared library: this worktree's cache, the main checkout's, or fetched once"""
-    roots = [os.path.join(_REPO, 'eidoverse', 'assets', 'cache', 'textures'),
-             os.path.join(os.path.dirname(_REPO), 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets', 'cache', 'textures')]
-    for r in roots:
+    """a CC0 set from the shared library: the first texture root that has it (eidoblend.terrain.texture_roots: this
+    checkout's cache, EIDO_TEXTURE_CACHE, EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree), or
+    fetched once"""
+    from ...terrain import texture_roots
+    for r in texture_roots():
         d = os.path.join(r, f'{name}_{res}')
         if os.path.isdir(d):
             fs = os.listdir(d)

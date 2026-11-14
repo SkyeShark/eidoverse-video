@@ -1,7 +1,7 @@
 """Probe: graphics on the frame (eidoblend.media.overlay): the overlay layer, subtitles, the edit scene, sound.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_overlay.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_overlay.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 1. a sound-only sequencer on the film scene must leave the 3D render in place (Blender renders the sequencer
    instead of the scene as soon as it holds a picture strip);

@@ -1,8 +1,8 @@
 """Probe: a voicebox line sung by claude.vrm in Blender (eidoblend.media.audio).
 
     python -B blender/tests/media/audio_host.py            # host side first (voicebox: system Python)
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_audio.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_audio.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 - the line's phoneme-exact visemes (24 fps, 0..1, gated to the sung window) keyed onto the VRM's expression shape
   keys and previews; read back at sampled frames;

@@ -2,8 +2,8 @@
 tiling (fill=2), Suzanne voxelized, and the engine's reveal recipe (cells appearing inside a growing sphere) at two
 frames of the scene time.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_rhombic_render.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_rhombic_render.py
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 out/rd_f0012.png, out/rd_f0036.png. PASS lines: instance counts, the reveal hides and shows the right cells.
 """

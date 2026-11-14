@@ -19,9 +19,9 @@ sheet"). From the worktree root, in system Python (it starts Blender itself, thr
 Writes <out>/verdicts.json (every number, band and verdict), <out>/compare_<reference>.png (the sheet), the renders,
 and prints each verdict's table. Exit code 0 when every row passes, 1 otherwise, 2 on an error.
 
-The GPU slot: the shared-machine rule (DESIGN.md section 11) runs Blender through the main checkout's slot scripts
-(EIDO_MAIN, default C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01; heavy.sh, then heavy2.sh, then
-heavy3.sh, every 60 s for up to 60 minutes while all are busy). Without that checkout it runs run_blender.sh here.
+The GPU: Blender here is a GPU job (DESIGN.md section 11). With EIDO_GPU_WRAP set (blender/tests/_where.py) it
+queues through it, retried every 60 s for up to 60 minutes while the queue says every slot is busy (exit 75); without
+it, Blender runs directly through this checkout's run_blender.sh.
 """
 import argparse
 import json
@@ -34,36 +34,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TN = os.path.normpath(os.path.join(HERE, '..'))
 WORKTREE = os.path.normpath(os.path.join(TN, '..', '..', '..'))
 sys.path.insert(0, TN)
+sys.path.insert(0, os.path.dirname(TN))                       # blender/tests: _where
 
 import numpy as np  # noqa: E402
 
+import _where  # noqa: E402
 from judge import judge, refs  # noqa: E402
 from judge import sheet as S  # noqa: E402
 
-MAIN = os.environ.get('EIDO_MAIN', 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01')
-SLOTS = ('heavy.sh', 'heavy2.sh', 'heavy3.sh')
-
-
 def run_blender(script, args, log_path, timeout_min=60):
-    """Run a Blender script through the first free GPU slot (retrying while all are busy), else directly."""
-    slot_dir = os.path.join(MAIN, 'work', 'claude_body', 'work', 'tmp')
-    env = dict(os.environ, HEAVY_VRAM_GB='4')
-    if os.path.exists(os.path.join(slot_dir, SLOTS[0])):
+    """Run a Blender script through _where.blender_cmd: queued by $EIDO_GPU_WRAP when it is set (retrying while the
+    queue says every slot is busy, exit 75), else directly. -> (rc, 'EIDO_GPU_WRAP' | 'direct' | None)"""
+    env = dict(os.environ, HEAVY_VRAM_GB='4', GPU_MEMCAP_GB='12')       # the job's VRAM estimate and RAM cap
+    cmd = _where.blender_cmd(script, *args)
+    if os.environ.get('EIDO_GPU_WRAP'):
         t_end = time.time() + 60 * timeout_min
         while True:
-            for s in SLOTS:
-                cmd = ['bash', f'work/claude_body/work/tmp/{s}', '12', 'bash', 'run_blender.sh', script] + args
-                with open(log_path, 'w', encoding='utf-8') as log:
-                    rc = subprocess.call(cmd, cwd=MAIN, env=env, stdout=log, stderr=subprocess.STDOUT)
-                if rc != 75:
-                    return rc, s
+            with open(log_path, 'w', encoding='utf-8') as log:
+                rc = subprocess.call(cmd, cwd=WORKTREE, env=env, stdout=log, stderr=subprocess.STDOUT)
+            if rc != 75:
+                return rc, 'EIDO_GPU_WRAP'
             if time.time() > t_end:
                 return 75, None
             print('[judge] every GPU slot is busy: waiting 60 s', flush=True)
             time.sleep(60)
     with open(log_path, 'w', encoding='utf-8') as log:
-        rc = subprocess.call(['bash', 'run_blender.sh', script] + args, cwd=WORKTREE, stdout=log,
-                             stderr=subprocess.STDOUT)
+        rc = subprocess.call(cmd, cwd=WORKTREE, stdout=log, stderr=subprocess.STDOUT)
     return rc, 'direct'
 
 

@@ -7,12 +7,13 @@ film's 'seep' surge pour at the head of the valley. The storm is compressed: ful
 the 0.05 m3/s seep from t = 2 s. Frame 1 is the dry patch (the case that used to z-fight black), later frames
 the carved, braided wash with its rim.
 
-    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/fx/test_swe_erosion.py -- render=0 end=720
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_swe_erosion.py -- bake=0 end=720 frames=1,240,720
+    bash run_blender.sh blender/tests/fx/test_swe_erosion.py -- render=0 end=720
+    bash run_blender.sh blender/tests/fx/test_swe_erosion.py -- bake=0 end=720 frames=1,240,720
+    (the render: a GPU job, 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP,
+    blender/tests/_where.py)
 
-Soil maps: the film's soil_diff/rough/normal.jpg from maps=<dir> (default: the film's work folder, used when it
-exists); without them the patch and the ground use the module's cut-colour soil.
+Soil maps: the film's soil_diff/rough/normal.jpg from maps=<dir>, else from $EIDO_EROSION_SOIL_DIR (the film's own
+folder, outside this repo); without them the patch and the ground use the module's cut-colour soil.
 Writes blender/tests/fx/out/swe_erosion_<cam>_f####.png (cams low, top, rim: a 2 m top crop of the domain rim).
 """
 
@@ -26,6 +27,8 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..', '..')))
+sys.path.insert(0, os.path.dirname(HERE))
+import _where                                    # noqa: E402
 from eidoblend.fx import swe as fxswe            # noqa: E402
 from eidoblend.fx._util import color             # noqa: E402
 
@@ -37,8 +40,9 @@ FPS = 24
 END = int(args.get('end', 720))
 FRAMES = [int(x) for x in args.get('frames', '1,240,720').split(',')]
 CAMS = args.get('cams', 'low,top,rim').split(',')
-MAPS = args.get('maps', 'E:/eidoverse-video-desktop-work-folder/erosion/assets/')
-HAVE_MAPS = all(os.path.exists(os.path.join(MAPS, f'soil_{k}.jpg')) for k in ('diff', 'rough', 'normal'))
+MAPS = args.get('maps') or _where.external('EIDO_EROSION_SOIL_DIR', "the erosion film's soil maps (soil_diff, "
+                                           "soil_rough and soil_normal .jpg; the cut-colour soil stands in)")
+HAVE_MAPS = bool(MAPS) and all(os.path.exists(os.path.join(MAPS, f'soil_{k}.jpg')) for k in ('diff', 'rough', 'normal'))
 
 
 # ---- the film's ground (shape_water.js groundY), three (x, z) -> y; Blender bed_fn(x, y) = groundY(x, -y) -----

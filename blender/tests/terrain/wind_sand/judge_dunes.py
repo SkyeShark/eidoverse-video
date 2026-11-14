@@ -1,9 +1,9 @@
 """Quick in-process judging of dunes variants (numbers only; the compare sheets come from the judge's own one
 command, judge/run.py). In Blender (the slab model needs the GPU):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/judge_dunes.py --variants <file.json> [--quality film] \\
+    bash run_blender.sh blender/tests/terrain/wind_sand/judge_dunes.py --variants <file.json> [--quality film] \\
         [--tag name]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 <file.json>: [[label, {"ref": "namib_star_dunes", "params": {...knobs...}, "set": {...dune_field params...}}], ...]
 "set" overrides the dune_field stage's own parameters (solvers/aeolian.FIELD_DEFAULTS / DEFAULTS), through a recipe

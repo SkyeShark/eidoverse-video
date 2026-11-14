@@ -6,7 +6,7 @@ A650's SerialArm forward, Jacobian and inverse, articulatedDemo, gantryDemo, con
 rotaryFixtureSetup. Every value is used in the kit's native axes in both editions, so they must agree to float
 precision.
 
-    python C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_solvers_parity.py
+    python blender/tests/robotics/test_solvers_parity.py
 """
 
 import json

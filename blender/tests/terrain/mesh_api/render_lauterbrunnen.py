@@ -2,8 +2,8 @@
 hero window around the reference's eye spot renders with no seams, and a character placed by height_at stands on
 the ground.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/mesh_api/render_lauterbrunnen.py [--views eye,feet,aerial]
+    bash run_blender.sh blender/tests/terrain/mesh_api/render_lauterbrunnen.py [--views eye,feet,aerial]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 One make_terrain call (seven levels: 32 km at 32 m down to 500 m at 0.5 m around the eye spot), the alpine palette
 and its rocks from the surfacing package; my robot body (claude_robot.vrm) stood 7.5 m in front of the eye camera,

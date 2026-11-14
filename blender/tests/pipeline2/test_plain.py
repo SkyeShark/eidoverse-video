@@ -25,8 +25,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 OUT = os.path.join(HERE, 'out', 'plain')
 sys.path.insert(0, os.path.join(ROOT, 'blender'))
-MAIN = os.environ.get('EIDO_MAIN', 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01')
-THREE = os.path.join(MAIN, 'node_modules', 'three', 'build', 'three.module.js')
+sys.path.insert(0, os.path.join(ROOT, 'blender', 'tests'))
+import _where  # noqa: E402  (the checkout that holds node_modules/: this one, or a worktree's main checkout)
+
+THREE = os.path.join(str(_where.main_checkout()), 'node_modules', 'three', 'build', 'three.module.js')
 DENO = shutil.which('deno')
 results = []
 

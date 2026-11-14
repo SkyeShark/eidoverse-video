@@ -6,8 +6,7 @@ inside the assembled printer and loadPart extraction, 4 one physical clock for e
 ball-tool / fixture atlas, 9 air cuts and rapid collisions; then the facade and the keyed playback, which the
 Blender edition adds. Tests 2, 3, 7 and 8 check the robotics kit's assets through eidoblend.characters.robotics.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_fabrication_feed.py
+    bash run_blender.sh blender/tests/fabrication/test_fabrication_feed.py
 """
 import json
 import math

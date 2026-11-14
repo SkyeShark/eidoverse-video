@@ -6,7 +6,6 @@
     python blender/tests/terrain/integration/run_tests.py --kinds py   # plain Python only (numpy twins, no Blender)
     python blender/tests/terrain/integration/run_tests.py --only karst # the tests whose name contains a text
     python blender/tests/terrain/integration/run_tests.py --failed     # again, the ones the last run did not pass
-    ... --slots heavy.sh              # the GPU slots it may use, in order (default heavy.sh, heavy2.sh, heavy3.sh)
     ... --out <folder>                # logs and summary.json elsewhere (default out/integration/tests/)
     ... --rejudge                     # the last run's logs read again (no test runs): summary.json rewritten
     ... --rerun test_mesh,test_karst  # these tests again, the last run's other results carried into summary.json
@@ -16,8 +15,8 @@ the terrain family's manifest below, which run_all.py itself leaves out. The kin
 
     py   plain Python with numpy (the kernels' twins, the judge, masks, the analytic profiles): no Blender, no GPU
     bl   Blender with no kernel and no render (the import smoke, the surfacing unit tests, the loft parity)
-    gpu  Blender through a GPU slot (the main checkout's heavy.sh, heavy2.sh, heavy3.sh, or the --slots given,
-         retried every 60 s while all are busy): every test that dispatches a kernel (the GPU-twin parities,
+    gpu  Blender as a GPU job (queued through EIDO_GPU_WRAP when it is set, blender/tests/_where.py, retried every
+         60 s while the queue says every slot is busy): every test that dispatches a kernel (the GPU-twin parities,
          make_terrain) or renders
 
 Each package's CPU tests run first, then its GPU tests, one at a time. Logs (one per test) and summary.json go to
@@ -162,14 +161,6 @@ def main():
         if os.path.exists(partial):
             os.remove(partial)
         argv.append('--resume')
-    # the GPU slots to use, in order (default all three; --slots heavy.sh keeps to one when the shared ledger in
-    # work/.gpu_jobs/ reserves one slot for this work)
-    slots = [s for s in _take(argv, '--slots', 'heavy.sh,heavy2.sh,heavy3.sh').split(',') if s]
-    if R.SLOTS:                                          # the main checkout's slot scripts are here
-        unknown = [s for s in slots if s not in R.SLOTS]
-        if unknown or not slots:
-            sys.exit(f'run_tests: --slots {",".join(slots)}: the slots here are {", ".join(R.SLOTS)}')
-        R.SLOTS = slots
     if not any(a == '--kinds' or a.startswith('--kinds=') for a in argv):
         argv += ['--kinds', 'py,bl,gpu,gpy']             # run_all's import smoke covers the other families
     sys.argv = [sys.argv[0]] + argv

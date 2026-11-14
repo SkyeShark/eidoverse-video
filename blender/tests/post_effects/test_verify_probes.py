@@ -12,8 +12,9 @@
                      strengths; focus_blur's screen mode beside the lens, focus_objects keyed per frame and its saved
                      .blend in a fresh Blender; nuclear_explosion through the registry (built without a bake, removed)
   --stage godrays    the godrays room alone
-Run from the main checkout (the GPU slot), after test_parity.py --stage sources:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_effects/test_verify_probes.py --stage simplex
+Run from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py), after
+test_parity.py --stage sources:
+    bash run_blender.sh <worktree>/blender/tests/post_effects/test_verify_probes.py --stage simplex
 """
 import json
 import math

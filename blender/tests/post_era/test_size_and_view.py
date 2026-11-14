@@ -12,8 +12,9 @@ follow a view set after it:
     through AgX; set the look to 'AgX - Punchy' after applying: display.stale() names the display nodes, and with
     nothing synced the paper comes out wrong; display.keep_synced (on once a pass is applied) copies the view before
     the render, and e.update() (display.sync) does it by hand: both land the paper as authored again
-Run from the main checkout (the GPU slot), after test_aeropittura.py --stage sources:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_size_and_view.py
+Run from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py), after
+test_aeropittura.py --stage sources:
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_size_and_view.py
 """
 import json
 import os

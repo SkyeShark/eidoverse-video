@@ -7,9 +7,10 @@ the engine sky (the sky family's moon at the set's hour, the world wrapped by th
 by animate() as a short H.264 clip, the .blend saved, reopened in place and a frame re-rendered from its keys alone.
 Each still is read back and checked for what it must show.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy_ocean/test_ocean_stills.py [--res 960x540] [--samples 16] [--only a,b]
         [--no-sky] [--no-motion]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import json
 import math

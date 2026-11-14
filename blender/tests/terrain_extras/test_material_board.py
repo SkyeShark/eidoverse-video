@@ -1,7 +1,7 @@
 """Material boards for eidoblend.materials (procedural_materials.js): every generator, every factory, the recipe.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain_extras/test_material_board.py [--no-render]
-    (renders go through heavy.sh)
+    (renders are GPU jobs: on a shared machine queue them with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Builds three boards and renders each to blender/tests/terrain_extras/out/:
   pm_generators.png   every generator and composite mode as an unlit swatch (Standard view: the swatch shows the

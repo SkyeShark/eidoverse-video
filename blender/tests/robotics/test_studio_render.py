@@ -18,10 +18,9 @@ on the grid's colour ramp, with lines in it), the Blender grid lines land on the
 cross-correlation of the two blocks' luminance) and darken the floor about as much (the median darkening within 0.6 to
 1.6 times WebGPU's: round one's world-space strips darkened it a twelfth as much).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_studio_render.py [-- --no-render]
-    (-- --compare-existing: no slot needed, compares the renders already in out/studio with the WebGPU frames)
+    bash run_blender.sh blender/tests/robotics/test_studio_render.py [-- --no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
+    (-- --compare-existing: no GPU needed, compares the renders already in out/studio with the WebGPU frames)
 """
 
 import math

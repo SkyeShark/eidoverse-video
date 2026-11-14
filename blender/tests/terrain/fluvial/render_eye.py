@@ -2,9 +2,9 @@
 eye-level look: design section 12, risk 1), under the reference rig's sky (make_sky, Earth 15:30, cumulus, AgX
 Medium High Contrast +0.5, the sun 70 degrees left of the view), 960 x 540, 16 samples.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/fluvial/render_eye.py --recipe fluvial_range --seed 1 \
+    bash run_blender.sh blender/tests/terrain/fluvial/render_eye.py --recipe fluvial_range --seed 1 \
         [--params '{"detail": false}'] [--tag r6] [--textured] [--clay] [--view ridge|floor]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 fluvial_range  generate() without a focus; on its main level a 30-45 degree hillslope near the centre at mid height
                and a standing point about 500 m across it on a ridge (--view ridge, the default: the San Gabriel

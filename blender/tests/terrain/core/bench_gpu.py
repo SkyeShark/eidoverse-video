@@ -2,8 +2,8 @@
 plus what the core adds: the sample creep pass, texture upload and readback, per-kernel compile time in a fresh
 process, and world-noise fields. Writes out/core/gpu_bench.json with the design's numbers beside ours.
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/core/bench_gpu.py
+    bash run_blender.sh blender/tests/terrain/core/bench_gpu.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import json
 import os
