@@ -65,8 +65,9 @@ XVFB = "xvfb-run -a -s '-screen 0 1280x720x24'"
 # the Deno entry points the Blender edition runs (canvas scenes, the book and parole exporters)
 DENO_ENTRIES = ['blender/eidoblend/media/js/canvas_bake.mjs', 'blender/eidoblend/media/js/canvas_scenes.mjs',
                 'blender/eidoblend/media/js/book_export.mjs', 'blender/eidoblend/media/js/parole_export.mjs']
-# toolkit folders and files mounted read-only over the read-write repo (folders protect everything beneath them)
-PROTECTED_DIRS = ['blender', 'eidoverse', 'tools-guides', 'docs', 'docker', 'synthkit', 'voicebox']
+# toolkit folders and files mounted read-only over the read-write repo (folders protect everything beneath them);
+# work/bestiary/ holds Creature Creator v2's shipped assets inside the otherwise writable work/ folder
+PROTECTED_DIRS = ['blender', 'eidoverse', 'tools-guides', 'docs', 'docker', 'synthkit', 'voicebox', 'work/bestiary']
 PROTECTED_FILE_PATTERNS = ['*.py', '*.sh', 'AGENTS.md', 'CLAUDE.md', 'deno.json', 'deno.lock']
 # On Windows every program this runner starts in the background gets a windowless console (CREATE_NO_WINDOW): docker,
 # the comfy bridge and the agent's container never open a console window on the desktop. Elsewhere the flag is 0.
