@@ -10,10 +10,9 @@ keyed visibility switch, and the saved .blend renders any frame on its own (chec
 Checks (PASS/FAIL): the cloud on the live body at the dissolve frame; each formed shape exactly its target; the clock's
 colours its texture's; the word's width; the reopened .blend evaluating the same cloud.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_robot_morph.py \
+    bash run_blender.sh blender/tests/particles/test_robot_morph.py \
         [-- frames=30,52,...] [blend=normal|additive] [res=960x540] [samples=16] [no-render] [model=alarm_clock_01:2k]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import math

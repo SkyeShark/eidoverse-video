@@ -1,7 +1,7 @@
 """Probe: in-world screens in Blender 5.2 EEVEE (eidoblend.media.screens).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_screens.py [--only mac,wall,av]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_screens.py [--only mac,wall,av]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 mac   the Macintosh 1984 GLB on a wooden desk; a Python-drawn 1-bit screen (Pillow, typed text, blinking cursor)
       taken over onto its own screen_crt mesh, inside the tube's raster window (mac1984.js's), under its glass

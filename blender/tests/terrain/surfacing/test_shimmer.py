@@ -1,9 +1,9 @@
 """The shimmer probe (design section 3): how much the meadow's ground crawls when the camera moves, under the
 surfacing material's 'Auto' filtering.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/surfacing/test_shimmer.py [--views eye,over,edge,top] [--tag new]
+    bash run_blender.sh blender/tests/terrain/surfacing/test_shimmer.py [--views eye,over,edge,top] [--tag new]
         [--samples 16] [--res 960x540]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
     python <worktree>/blender/tests/terrain/surfacing/shimmer_metric.py new
 
 The scene: make_terrain('meadow', seed=7) (160 m, a level clearing of 8 m at the origin) in the 'meadow' palette, the

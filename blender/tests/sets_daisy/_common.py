@@ -1,8 +1,9 @@
 """What the sets_daisy tests share: sys.path, the shared texture library, a clean scene, the probe look, PASS/FAIL lines,
 the claudesona at a set's mark, and stills at chosen frames (each through the frame's own camera marker).
 
-Run from the main checkout (renders through the GPU slot):
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+Run from the main checkout (renders are GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP:
+blender/tests/_where.py):
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/test_funeral.py [-- --only 3,5 --no-render]
 """
 
@@ -16,11 +17,13 @@ import bpy
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
+sys.path.insert(0, os.path.join(WORKTREE, 'blender', 'tests'))
+import _where                                               # noqa: E402  (blender/tests/_where.py)
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
 # the shared CC0 library: the main checkout's holds every set these sets read (no downloads from a test); a worktree's
 # own cache may hold only what other work fetched into it, so the main one is preferred whenever it is on the machine
-MAIN_CACHE = 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/eidoverse/assets/cache'
+MAIN_CACHE = (_where.main_checkout() / 'eidoverse' / 'assets' / 'cache').as_posix()
 if not os.environ.get('EIDO_ASSET_CACHE') and os.path.isdir(os.path.join(MAIN_CACHE, 'textures')):
     os.environ['EIDO_ASSET_CACHE'] = MAIN_CACHE
 os.environ.setdefault('EIDO_NO_FETCH', '1')
@@ -40,6 +43,13 @@ def args():
             out['flags'].add(a[i].lstrip('-'))
             i += 1
     return out
+
+
+def film_timeline():
+    """The DAISY film's own timeline (its daisy_timeline.json, as eidoverse/examples/daisy/song.py writes it), which
+    lives outside the repo: DAISY_TIMELINE names it. None without it (printing so): the checks that need it skip."""
+    return _where.external('DAISY_TIMELINE', "the DAISY film's timeline (daisy_timeline.json, written by "
+                                             'eidoverse/examples/daisy/song.py)')
 
 
 def check(name, ok, detail=''):

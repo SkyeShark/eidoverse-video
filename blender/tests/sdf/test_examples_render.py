@@ -1,8 +1,9 @@
 """The solid EXAMPLES built as meshes, standing on a floor, rendered in EEVEE beside the engine's own raymarch of
 the same SDF and shade() from the same camera.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf/test_examples_render.py -- examples=basic_sphere,mr_hege [quality=high] [t=0]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 For each example: out/ex_<name>_eevee.png (EEVEE, lit by suns that point where the shade()'s hand lights pointed,
 plus a grey world for its ambient term), out/ex_<name>_ref.png (the engine's raymarch through AgX), and
@@ -83,7 +84,7 @@ def frame_camera(obj, view):
 
 
 # BVHTree.FromObject builds a tree that hits nothing past about 10 M quads (the 15.1 M-quad Menger sponge at 'high'),
-# and a second render of such a mesh for its silhouette passes the 12 GB of a GPU slot: those meshes skip the
+# and a second render of such a mesh for its silhouette passes the job's 12 GB RAM cap: those meshes skip the
 # silhouette check, saying so (test_mesh_depth_parity.py checks the mesher against the field)
 BVH_MAX_QUADS = 10_000_000
 
@@ -157,7 +158,7 @@ for name in NAMES:
     w4, h4 = W // div, H // div
     if len(c.quads) > BVH_MAX_QUADS:
         print(f'SKIP {name}: silhouette check: {len(c.quads)} quads pass what BVHTree holds and a second render '
-              f'of them passes the slot; the mesher is checked against the field in test_mesh_depth_parity.py',
+              f'of them passes a 12 GB RAM cap; the mesher is checked against the field in test_mesh_depth_parity.py',
               flush=True)
     else:
         ref4 = EM.march(obj, cam, w4, h4, samples=1, t=T)

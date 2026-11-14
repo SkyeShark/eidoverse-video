@@ -2,7 +2,7 @@
   "imports": {
     "three": "npm:three@0.184.0",
     "three/tsl": "npm:three@0.184.0/tsl",
-    "three-bvh-csg": "../../../../eidoverse-video-prealpha-0.01/node_modules/three-bvh-csg/src/index.js",
-    "three-mesh-bvh": "../../../../eidoverse-video-prealpha-0.01/node_modules/three-mesh-bvh/src/index.js"
+    "three-bvh-csg": "../../../node_modules/three-bvh-csg/src/index.js",
+    "three-mesh-bvh": "../../../node_modules/three-mesh-bvh/src/index.js"
   }
 }

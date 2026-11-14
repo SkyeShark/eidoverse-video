@@ -1,7 +1,7 @@
 """create_sdf_volume's grids measured in a render: EEVEE against the closed-form answer.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_volume_density.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_volume_density.py
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Three 0.9 m cubes of constant medium in a row in front of a white emissive backdrop. The camera ray through a
 cube's centre crosses s = 0.9 m / cos(its angle off the axis): 0.928 m for A (2.25 m off-axis), 0.903 m for B and C.

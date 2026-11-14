@@ -27,10 +27,9 @@ controller). Checks (PASS / FAIL):
     makes the same world: a memory within 5 % of its known cells of the live one, the route through it within 0.3 m
 Stills: out/route_<vrm>_<moment>_f<k>.png (low side cameras); out/route_<vrm>.json, out/route_<vrm>.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_route.py --no-render
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_route.py
+    bash run_blender.sh blender/tests/robot_body/test_body_route.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_route.py
+    # the second renders: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import math

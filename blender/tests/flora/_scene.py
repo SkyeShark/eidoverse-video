@@ -1,6 +1,7 @@
 """Shared test scaffolding for the flora probes (headless Blender 5.2): a clean EEVEE scene, TEST lights (a sun and a
 plain sky colour: the flora family cannot import the sky family's subpackage, so these stand in for lookdev only),
-a ground plane with the CC0 Poly Haven leafy_grass texture the lead fetched, a camera, and a still render.
+a ground plane with the CC0 Poly Haven leafy_grass texture from the shared texture cache (fetch_texture.py
+leafy_grass 2k --cache), a camera, and a still render.
 """
 import math
 import os
@@ -14,8 +15,6 @@ WORKTREE = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
-MAIN = os.path.normpath(os.path.join(WORKTREE, '..', 'eidoverse-video-prealpha-0.01'))
-PH = os.path.join(MAIN, 'work', 'claude_body', 'film', 'tools', 'dlss5nr', 'bmeadow', 'assets')
 PHYS_SKY_K = 0.12 / 11.37       # lights(physical=True): background strength per unit of sun strength (see lights)
 
 
@@ -123,7 +122,11 @@ def lights(sun_elev_deg=38.0, sun_az_deg=-60.0, strength=4.0, sky=(0.42, 0.58, 0
 
 
 def ground(size=60.0, tex='leafy_grass', tile=2.0):
-    """A ground plane under the flora: the CC0 leafy_grass texture (diffuse, roughness, normal), tiled every `tile` m."""
+    """A ground plane under the flora: the CC0 leafy_grass texture (diffuse, roughness, normal) at 2k, tiled every
+    `tile` m. The set comes from the shared texture cache (eidoblend.terrain.find_set: this checkout's,
+    $EIDO_TEXTURE_CACHE, $EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree); without it the
+    ground is plain soil colour."""
+    from eidoblend.terrain import find_set
     bpy.ops.mesh.primitive_plane_add(size=size)
     g = bpy.context.active_object
     g.name = 'test_ground'
@@ -134,19 +137,22 @@ def ground(size=60.0, tex='leafy_grass', tile=2.0):
     mp = nt.nodes.new('ShaderNodeMapping')
     mp.inputs['Scale'].default_value = (1 / tile, 1 / tile, 1)
     nt.links.new(tc.outputs['Object'], mp.inputs['Vector'])
-    d = os.path.join(PH, tex)
+    try:
+        s = find_set(tex, prefer='2k')
+    except FileNotFoundError:
+        s = {}
 
-    def im(fn, color):
+    def im(path, color):
         n = nt.nodes.new('ShaderNodeTexImage')
-        n.image = bpy.data.images.load(os.path.join(d, fn), check_existing=True)
+        n.image = bpy.data.images.load(str(path), check_existing=True)
         n.image.colorspace_settings.name = 'sRGB' if color else 'Non-Color'
         nt.links.new(mp.outputs[0], n.inputs['Vector'])
         return n
-    if os.path.isdir(d):
-        nt.links.new(im(f'{tex}_diff_2k.jpg', True).outputs['Color'], pr.inputs['Base Color'])
-        nt.links.new(im(f'{tex}_rough_2k.jpg', False).outputs['Color'], pr.inputs['Roughness'])
+    if all(k in s for k in ('color', 'roughness', 'normal')):
+        nt.links.new(im(s['color'], True).outputs['Color'], pr.inputs['Base Color'])
+        nt.links.new(im(s['roughness'], False).outputs['Color'], pr.inputs['Roughness'])
         nm = nt.nodes.new('ShaderNodeNormalMap')
-        nt.links.new(im(f'{tex}_nor_gl_2k.jpg', False).outputs['Color'], nm.inputs['Color'])
+        nt.links.new(im(s['normal'], False).outputs['Color'], nm.inputs['Color'])
         nt.links.new(nm.outputs[0], pr.inputs['Normal'])
     else:
         pr.inputs['Base Color'].default_value = (0.08, 0.06, 0.035, 1)
@@ -170,7 +176,7 @@ def render(path, frame=None):
     sc = bpy.context.scene
     if frame is not None:
         sc.frame_set(frame)
-    if '--no-render' in args():                 # build check only (no GPU slot needed)
+    if '--no-render' in args():                 # build check only (no render: not a GPU job)
         bpy.context.evaluated_depsgraph_get()
         print(f'[flora-test] (no render) {path}', flush=True)
         return

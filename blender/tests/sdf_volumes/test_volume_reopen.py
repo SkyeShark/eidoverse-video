@@ -2,9 +2,10 @@
 explosion's keyed opacity, rendered in the session that built them and again by a fresh Blender that only opens the
 file.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash -c \
+    cd <main checkout> && bash -c \
         "bash run_blender.sh <worktree>/blender/tests/sdf_volumes/test_volume_reopen.py -- mode=build && \
          bash run_blender.sh <worktree>/blender/tests/sdf_volumes/test_volume_reopen.py -- mode=open"
+    (one GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 mode=build: a bonfire (look='lit', its smoke scattering) and a small nuclear explosion baked over frames 1-4, the
     lamps keyed, the explosion's opacity keyed 0.3 -> 1; saved to out/verify/reopen/reopen.blend; frames 2 and 4

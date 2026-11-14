@@ -3,9 +3,9 @@ pour) and renders the same frames with the material output's Thickness unlinked 
 baked 'thick' attribute as a slab, and as a sphere (or the variants= listed: zero, slab<NN>, bed<NN> = the material's
 own exit/bed rule with NN % of the path kept over a bed).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/probe_refraction_thickness.py -- \
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/probe_refraction_thickness.py -- \
         blend=out/w3d_dambreak.blend frames=132,180 tag=dam
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/probe_thick_<tag>_<variant>_f####.png and a sheet (rows = variants, columns = frames).
 """

@@ -10,8 +10,7 @@
   object, .ply, .xyz, .npy), volumes (a Geometry Nodes volume, a .vdb of the fire's cache), every shape, text / ASCII /
   banner specs, the resolver's dict and tuple specs, resampling, centroid matching, pairing, stagger.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01 && bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_targets.py
+    bash run_blender.sh blender/tests/particles/test_targets.py
 Exit 0 when every check passes."""
 
 import glob

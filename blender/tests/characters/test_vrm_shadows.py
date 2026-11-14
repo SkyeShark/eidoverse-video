@@ -2,9 +2,9 @@
 (characters/vrm.py mtoon_shadows): Aletheia (MToon) and the robot (glTF PBR) both cast sun shadows, and both stand in a
 planar mirror.
 
-    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/characters/test_vrm_shadows.py
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/characters/test_vrm_shadows.py -- --render
+    bash run_blender.sh blender/tests/characters/test_vrm_shadows.py
+    bash run_blender.sh blender/tests/characters/test_vrm_shadows.py -- --render
+    # --render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 
 Checks (no render): every MToon material takes the shadow flag its alpha mode needs (OPAQUE: Transparent Shadows off;
 MASK and BLEND: on); the add-on's MToon output group lets shadow rays see the material's opacity (its Is Camera Ray

@@ -5,9 +5,10 @@ instances with their own liveries, the baked shading path, the resolution option
 saved .blend reopened; plus the pure pieces (colour parsing, the camo names, the badge canvas, the GLSL evaluator
 against the numpy library, the stripe masks at known points).
 
-    cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_vehicles/test_vehicles_options.py [-- parts=a,b]   (parts: pure, live, sheets,
         reopen; default all)
+    (a GPU job: 6 GB VRAM, 16 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Sheets in out/: opt_paint_roughness.png (the modern sedan in deep blue at paintRoughness 0, 0.18, 0.45, 0.8),
 opt_metal_presets.png (one sleek car switched live through the six METAL_PRESETS), opt_camo.png (one jet

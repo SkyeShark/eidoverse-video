@@ -5,8 +5,9 @@ on with the echoes off), at 960 x 540 and at 1920 x 1080 (that frame doubled, bi
 it (kuwahara='blender'), measured against the same reference; the cost of each, GPU and CPU compositor; a sheet of
 crops at 1080p.
 
-Run from the main checkout (the GPU slot), after test_aeropittura.py --stage sources:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_aero_kuwahara.py
+Run from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py), after
+test_aeropittura.py --stage sources:
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_aero_kuwahara.py
 """
 import json
 import os

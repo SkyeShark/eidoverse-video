@@ -1,10 +1,11 @@
 """The engine's watertest, in Blender: a dam break in a glass tank (column against the -x wall collapses, surges
 across the floor, runs up the far wall, settles), with eidoblend.fx.water3d.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_dam_break.py [-- frames=12,24,...]
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/test_water3d_dam_break.py [-- frames=12,24,...]
     (more: smooth=0 for the trilinear contour, samples=64, tag=_x, fps=60, end=420 for scene_long's 14 s,
      shading=engine, solver=edition)
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 variant= runs the watertest folder's other scene files, option for option:
     cubic   scene_cubic.js, the cubic-cell control: a 2 x 2 x 2 m domain on 64^3, column height 0.54
@@ -18,7 +19,7 @@ Checks (PASS/FAIL): the sensor's initial volume and the whole 6 s volume trace a
 fluid_water.js (engine_trace_dambreak.json, made by engine_trace_water.mjs; the novc variant against its own
 trace), the settled pool's height and the baked thickness on its top surface. Renders
 out/w3d_dambreak<tag>_f####.png at the engine scene's camera.
-Reference look: E:/eidoverse-video-desktop-work-folder/watertest/water.mp4 (_sheet_final2.png).
+Reference look: the engine's own render of work/watertest, its water.mp4 (_sheet_final2.png).
 """
 
 import json

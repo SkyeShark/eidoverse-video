@@ -4,8 +4,9 @@ phases, the faces' surfacing and their light untouched, only the displacement go
 plane exactly; the camera, the uniforms and the layout's matrix are dumped beside each still; then sea_reference.py
 (system Python) evaluates sea.js's colorNode in numpy for the same pixels and compares.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy_ocean/test_sea_reference.py [--render-only]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
     python <worktree>/blender/tests/sets_daisy_ocean/sea_reference.py    (the compare alone, after --render-only)
 """
 import json

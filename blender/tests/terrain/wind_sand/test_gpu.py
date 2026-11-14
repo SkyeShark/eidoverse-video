@@ -1,7 +1,7 @@
 """Wind and sand on the GPU (Blender 5.2, gpu.compute), package 8's tests (DESIGN.md section 11):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/test_gpu.py
+    bash run_blender.sh blender/tests/terrain/wind_sand/test_gpu.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
   - parity: each kernel (dune_shadow, dune_activate, dune_transport, and the avalanche source) in one dispatch
     against its numpy twin, on a non-square 96 x 80 field with pins, in every boundary mode (core/twins.parity:

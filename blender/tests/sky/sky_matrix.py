@@ -20,6 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO, 'blender'))
 from eidoblend.sky import make_sky  # noqa: E402
+from eidoblend.terrain import texture_roots  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ap = argparse.ArgumentParser()
@@ -44,8 +45,9 @@ if args.only:
     CELLS = [c for c in CELLS if c[0] in keep]
 
 OUT = os.path.join(HERE, 'out', 'matrix')
-CACHE_TEX = os.path.normpath(os.path.join(REPO, '..', 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets',
-                                          'cache', 'textures', 'Ground037_2k'))
+# the ground's CC0 Ground037 set from the shared texture cache, the first root that has it (texture_roots: this
+# checkout's, $EIDO_TEXTURE_CACHE, $EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree)
+CACHE_TEX = next((str(r / 'Ground037_2k') for r in texture_roots() if (r / 'Ground037_2k').is_dir()), '')
 os.makedirs(OUT, exist_ok=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)

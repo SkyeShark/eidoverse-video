@@ -16,9 +16,8 @@ the tangent space's sign. This measures it, with EEVEE's world-space Normal pass
 PASS: error(B) is a small fraction of the signal, and error(G) is larger than error(B). Also renders the beauty of A
 and B side by side in the studio light (out/normal_parity_beauty.png) and writes out/normal_parity.json.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_normal_parity.py
+    bash run_blender.sh blender/tests/robotics/test_normal_parity.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import glob

@@ -2,8 +2,8 @@
 layers verbatim (two 'fire' layers on flame_05 / flame_06, 'embers' on spark_01, 'smoke' on smoke_04), over
 a small pit of logs and stones built here (the set's camp_fire.glb is not in the repo), lit by a fire light.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_particles_campfire.py [-- frames=12,30,60]
+    bash run_blender.sh blender/tests/fx/test_particles_campfire.py [-- frames=12,30,60]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 No bake: the particles are a Geometry Nodes function of scene time. Writes out/particles_campfire_f####.png.
 """

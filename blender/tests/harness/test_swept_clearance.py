@@ -8,8 +8,7 @@
     control   the same radar turning a whole revolution, ending where it began (a turntable keyed 0 -> 360 degrees):
               WARN, it sweeps through 'pole_D' (the spin axis found from the sample turned furthest, not the last)
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/harness/test_swept_clearance.py
+    bash run_blender.sh blender/tests/harness/test_swept_clearance.py
 """
 import importlib.util
 import os

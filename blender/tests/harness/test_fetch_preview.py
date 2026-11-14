@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """tests/harness/test_fetch_preview.py: fetch_model.py's previews rendered in Blender (model_preview.py through
-run_blender.sh), as a fetch and --build-previews make them. Renders (four 512 x 512 previews, 16 samples): run it
-through the GPU slot. From the main checkout:
+run_blender.sh), as a fetch and --build-previews make them. Renders (four 512 x 512 previews, 16 samples): a GPU
+job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py):
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 python <worktree>/blender/tests/harness/test_fetch_preview.py
+    python blender/tests/harness/test_fetch_preview.py
 
 Copies of four models go to out/fetch_preview/ (the catalogue's own previews are never touched):
     the crow (feet at its origin, its nose curated as glTF +z), the funeral props (eleven named parts: a kit), the

@@ -4,15 +4,15 @@ Teapot TeapotGeometry(0.8, 28) burning from its raw vertex buffer, 12 x 24 x 12 
 the example's spot key light, 80 x 80 floor (#111115, roughness .8) at 0.8 m, black world, camera (14, 5.5, 4.4)
 looking at (0, 3.6, 0) in three's axes. Bakes on the GPU, renders a few stills at 960x540.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_fire_teapot.py [-- frames=1,24,48 fps=24 end=48]
+    bash run_blender.sh blender/tests/fx/test_fire_teapot.py [-- frames=1,24,48 fps=24 end=48]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 More args: preset=raw (the engine's own numbers, look=None), match=0|aces|aces_compose (display_match),
 path=, emis=, spread=, endcolor=rrggbb, smoke=, clarity=, lights=, exposure=, look=AgX_-_Punchy, tag=_name,
 glow=0 (the teapot without make_fire_glow, the fire's glow on the burning mesh), glow_strength=.
 The teapot spins through a driver on `frame`, so the warmup's pre-roll spins it too, as the engine's did.
 Writes blender/tests/fx/out/fire_teapot<tag>_f####.png and the .vdb cache under out/fire_cache/.
-Reference: E:/eidoverse-video-desktop-work-folder/firetest/fire.mp4 (WebGPU, 1600x900).
+Reference: the engine's own render of work/firetest, its fire.mp4 (WebGPU, 1600x900).
 """
 
 import math

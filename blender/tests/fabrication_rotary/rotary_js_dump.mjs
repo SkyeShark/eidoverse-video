@@ -1,9 +1,9 @@
 // rotary_js_dump.mjs: runs the WebGPU edition's rotary carving planner (eidoverse/robotics/rotary_*.js, untouched)
 // headless in Deno and dumps what the Blender port must reproduce, for test_rotary_parity.py to compare. Nothing
 // renders. Every position is dumped in three's axes; the Python side converts (x, y, z) -> (x, -z, y).
-//   cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01    (its deno.json + node_modules resolve three)
+//   cd <main checkout>    (its deno.json + node_modules resolve three; blender/tests/_where.py main_checkout())
 //   deno run --no-check -A --node-modules-dir=manual --no-lock --config deno.json \
-//       C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/fabrication_rotary/rotary_js_dump.mjs [full]
+//       <this checkout>/blender/tests/fabrication_rotary/rotary_js_dump.mjs [full]
 const here = new URL('.', import.meta.url);
 const repo = new URL('../../../', here);
 const outDir = new URL('out/js_parity/', here);

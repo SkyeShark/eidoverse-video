@@ -1,8 +1,7 @@
 """Probe: the era-2 voice machines of step A (c64, dectalk, desktop2001, mac1984), built by name in EEVEE.
 
-From the main checkout (renders go through the shared GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/voice_machines_a/test_machines.py \\
+From the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/voice_machines_a/test_machines.py \\
         [-- --only api,desk,close,crt,voice,mac,scene,lineup,plastic,kit,saved]
 
 api     the registry (props.NAMES, voice_machines.MACHINES / build_machine / load_machine, the lazy loader), each

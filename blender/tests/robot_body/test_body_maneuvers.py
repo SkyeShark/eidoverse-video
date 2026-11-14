@@ -26,8 +26,7 @@ Checks (PASS / FAIL):
 Stills: out/maneuvers_<move>_<k>_f<frame>.png (low side cameras), out/maneuvers_vault_hand_* and
 out/maneuvers_ladder_hand_* (the hands up close on the wall's top and the rungs); out/maneuvers.json, out/maneuvers.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_maneuvers.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_maneuvers.py --no-render
 """
 
 import math

@@ -16,12 +16,16 @@ Everything is in metres; the road runs along +Y.
 import math
 import os
 import random
+import sys
 
 import bmesh
 import bpy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MAIN_CACHE = 'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/eidoverse/assets/cache'
+sys.path.insert(0, os.path.dirname(HERE))
+import _where  # noqa: E402
+
+MAIN_CACHE = str(_where.main_checkout() / 'eidoverse' / 'assets' / 'cache')
 # the sets this street uses live in the main checkout's shared cache (read only: no fetch writes there)
 if not os.path.isdir(os.path.join(HERE, '..', '..', '..', 'eidoverse', 'assets', 'cache', 'textures', 'Asphalt025C_2k')):
     os.environ.setdefault('EIDO_ASSET_CACHE', MAIN_CACHE)

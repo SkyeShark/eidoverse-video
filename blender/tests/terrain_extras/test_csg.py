@@ -1,7 +1,7 @@
 """three-bvh-csg's seven operations in Blender (eidoblend.course.csg), the HOLLOW ones on open and closed shells.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain_extras/test_csg.py [--no-render]
-    (renders through heavy.sh)
+    (renders are GPU jobs: on a shared machine queue them with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Checks (PASS/FAIL, numeric):
   volumes  a 1 m box and a 0.75 m sphere overlapping: ADDITION = A + B - (A n B), SUBTRACTION = A - (A n B),

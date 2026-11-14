@@ -12,9 +12,10 @@ rendered by jumping into the keyed timeline. The sets alone, no performer.
                the cuts (animate(camera=a function of the frame)). With ffmpeg on the PATH the same cards are encoded
                to an H.264 clip and read back as a movie (media_image: source MOVIE, its length and size).
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/example_asset_use.py [--set quiet_room|showroom|both] [--fps 30]
         [--save] [--keep_blend] [--no_render] [--samples 16] [--res 960x540]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Stills: out/asset/<set>_<cam>_f<frame>.png and out/asset/asset_sheet.jpg. --save writes each set's .blend, opens it
 again, re-renders one still from the file alone and compares it with the render made before saving (the keys, the

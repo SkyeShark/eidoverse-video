@@ -1,7 +1,8 @@
 """verify_probes.py: the independent verifier's probes of the two interiors, the ones the step's own tests do not take.
 
   ibl       the env's light as the World (EEVEE's route: no material samples an environment of its own), the
-            showroom and the quiet room against the engine's look-off probes (region means printed).
+            showroom and the quiet room against the engine's look-off probes (region means printed; the probes are
+            WebGPU renders from outside the repo, read from EIDO_UF_PROBES_DIR, and skipped without it).
   shared    both sets in ONE scene, parked apart, cut from the quiet room to the showroom by keyed show() (the
             engine's way: every set in the conductor's scene, each hidden off screen). env_switch gives each its own
             env while it is shown, and each probe bakes with its set alone; the two shots must render as the same
@@ -16,8 +17,9 @@
   look      INTERIORS.md's note for the look, run as the guide writes it: the reveal under argue (the white deck
             paints warm) and with the palette at 0.22 (it stays cold).
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_interiors/verify_probes.py [--only ibl,shared,parked,scale,showroom,look]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Stills: out/verify/*.png and out/verify/verify_sheet.jpg.
 """
@@ -28,6 +30,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _common as T  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _where  # noqa: E402  (blender/tests/_where.py: the engine's probes, from outside the repo)
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
@@ -224,8 +229,6 @@ def showroom_probes():
     return pe
 
 
-ENGINE = os.path.normpath(os.path.join(T.BLENDER_DIR, '..', '..', 'eidoverse-video-prealpha-0.01', 'work',
-                                        'unknown_force', 'sets', 'probes'))
 # regions (x0, y0, x1, y1 at 960 x 540) of the engine's look-off probes and the same cams here
 REGIONS = {
     'toaster': {'engine': 'sr_final_toaster_off_probe2.png',
@@ -281,8 +284,10 @@ def ibl():
         n.bl_idname == 'ShaderNodeTexEnvironment' for n in m.node_tree.nodes))
     T.check('the env lights both sets through the World: no material samples an environment of its own',
             n_sr == 0 and n_qr == 0, f'showroom {n_sr}, quiet room {n_qr} materials with an environment')
-    for cam in ('toaster', 'emptySeats', 'altar'):
-        eng = os.path.join(ENGINE, REGIONS[cam]['engine'])
+    engine = _where.external('EIDO_UF_PROBES_DIR', "the WebGPU probe stage's stills of UNKNOWN FORCE's sets (the "
+                             "engine's look-off probes, sr_final_toaster_off_probe2.png ...)")
+    for cam in ('toaster', 'emptySeats', 'altar') if engine else ():
+        eng = os.path.join(engine, REGIONS[cam]['engine'])
         if not os.path.isfile(eng):
             continue
         e = regions(eng, cam)

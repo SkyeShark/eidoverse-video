@@ -3,8 +3,8 @@ recipe at the reference's extent, or real_place on the real elevation data), her
 on the main tile, under make_sky daylight with the review's rig (the sun 70 degrees left of the view at 15:30,
 exposure -0.5, AgX), 960 x 540.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/glacial/render_textured.py --job <job.json> [--samples 16]
+    bash run_blender.sh blender/tests/terrain/glacial/render_textured.py --job <job.json> [--samples 16]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 job.json: {"out_dir": ..., "views": [{"name", "recipe" ('alpine_valley' | 'real_place'), "seed" (1), "params" ({}),
 "size" (m; default the recipe's at the judge's extent), "camera": {"x", "y" (metres from the main tile's centre),

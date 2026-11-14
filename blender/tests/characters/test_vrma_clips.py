@@ -6,9 +6,8 @@ the hold hands over without a jump (the hand's travel across the handover frame)
     out/vrma_clips_f<NNN>.png   (still_breathe, turn_it_down mid-press, the hold)
     out/vrma_clips.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_vrma_clips.py [--no-render]
+    bash run_blender.sh blender/tests/characters/test_vrma_clips.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

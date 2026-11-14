@@ -7,10 +7,8 @@ upright, as the preset's own comment says tongue textures must stay). Same emitt
 Checks: with rotate=0 every quad's up axis is the camera's up (upright tongues); with the engine's rotate the quads
 point every way.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 6 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_fire_tongue_rotation.py \
-        [-- out=verify] [no-render]
+    bash run_blender.sh blender/tests/particles/test_fire_tongue_rotation.py [-- out=verify] [no-render]
+    (a GPU job: 4 GB VRAM, 6 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

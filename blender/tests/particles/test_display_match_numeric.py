@@ -10,10 +10,8 @@ engine_exposure=1.0 (three's own default toneMappingExposure, which the engine's
 Checks: every grey quad within 2.5 / 255 of three's display value at each exposure (printed for the coloured ones,
 which AgX may not reach); without the match the greys differ (AgX is not ACES).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 6 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_display_match_numeric.py \
-        [-- out=verify]
+    bash run_blender.sh blender/tests/particles/test_display_match_numeric.py [-- out=verify]
+    (a GPU job: 4 GB VRAM, 6 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

@@ -1,24 +1,17 @@
 #!/usr/bin/env bash
-# gpu_slot.sh <script.py> [args...]: run a Blender script through the shared GPU slots (heavy.sh, heavy2.sh, heavy3.sh
-# from the main checkout: the same rules, their own locks), trying each in turn and, while all three print "not started"
-# (busy or short of VRAM), again every 60 s for up to 60 minutes.
-#     bash blender/tests/controller/gpu_slot.sh blender/tests/controller/render_shots.py out/TAG_shots.json
-MAIN=/c/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-cd "$MAIN" || exit 2
-for i in $(seq 1 60); do
-    for slot in heavy.sh heavy2.sh heavy3.sh; do
-        [ -f "work/claude_body/work/tmp/$slot" ] || continue
-        out=$(HEAVY_VRAM_GB=4 bash "work/claude_body/work/tmp/$slot" 12 bash run_blender.sh "$@" 2>&1)
-        code=$?
-        if echo "$out" | grep -q "not started"; then
-            continue
-        fi
-        echo "[gpu_slot] ran in $slot"
-        echo "$out"
-        exit $code
-    done
-    echo "[gpu_slot] all slots busy; retry $i in 60 s"
-    sleep 60
+# gpu_slot.sh <script.py> [args...]: run a Blender script as a GPU job, through this checkout's run_blender.sh with
+# $EIDO_GPU_WRAP's words in front when that is set (a machine's GPU queue: the command blender/tests/_where.py's
+# blender_cmd builds). The arguments that name existing files are made absolute first: a queue may start the job in
+# another folder.
+#     bash blender/tests/controller/gpu_slot.sh blender/tests/controller/render_shots.py \
+#         blender/tests/controller/out/TAG_shots.json
+REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
+args=()
+for a in "$@"; do
+    if [ -e "$a" ]; then
+        a="$(cd "$(dirname "$a")" && pwd)/$(basename "$a")"
+    fi
+    args+=("$a")
 done
-echo "[gpu_slot] gave up after 60 minutes"
-exit 75
+eval "wrap=(${EIDO_GPU_WRAP:-})"          # its words as a shell splits them (blender_cmd: shlex.split)
+exec "${wrap[@]}" bash "$REPO/run_blender.sh" "${args[@]}"

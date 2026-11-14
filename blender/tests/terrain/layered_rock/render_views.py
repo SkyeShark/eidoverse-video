@@ -4,10 +4,10 @@ photograph's own camera, and a generated terrain from the camera that stands in 
 the sun 70 degrees left of the view), 960 x 540, 16 samples, textured (the palette and rocks near the camera) and in
 the references' grey clay. compose_sheets.py sets them beside the photographs.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/layered_rock/render_views.py --real grand_canyon_toroweap [--fan]
+    bash run_blender.sh blender/tests/terrain/layered_rock/render_views.py --real grand_canyon_toroweap [--fan]
     ... render_views.py --recipe canyon --seed 1 --tag v1 [--params '{...}'] [--stage-params '{op: {...}}']
                         [--views overlook,west_side] [--no-clay] [--no-textured]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 --real <reference>   the real DEM (the real_place recipe) from the photos' cameras: <reference>_<view>.png (textured)
                      and _clay.png; with --fan, clay renders from every photo position at the FAN headings, to fit

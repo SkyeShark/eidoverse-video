@@ -9,9 +9,9 @@ Three views per subject, written to renders/<name>__<view>.png:
           puts it
 Subjects with an overlay paint that mask on the clay (a 0..1 ramp, dark blue -> yellow), lit as clay.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/triage/render.py [--only a,b] [--group g] [--views top,aerial,eye]
+    bash run_blender.sh blender/tests/terrain/triage/render.py [--only a,b] [--group g] [--views top,aerial,eye]
         [--skip-existing] [--samples 16] [--exposure 0]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 The make_sky bake takes a proxy camera with the render camera's rotation and lens, at most 2 km up, so a 200 km
 aerial still gets an ordinary sky; the top view needs no bake of its own (every camera ray hits terrain).
 """

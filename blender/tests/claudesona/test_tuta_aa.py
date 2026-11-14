@@ -17,9 +17,8 @@ leaves much more.
     out/closeup_fixed.png, closeup_footprint.png: the chest at 0.9 m, where the stitches span pixels (as crisp in both)
     out/tuta_aa.json: the numbers
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_tuta_aa.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_tuta_aa.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

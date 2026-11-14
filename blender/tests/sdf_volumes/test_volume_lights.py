@@ -1,7 +1,8 @@
 """Do the SDF fires light the scene? EEVEE's volume emission alone, and light_from_emission's keyed lamps.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_volumes/test_volume_lights.py [-- cases=bonfire,candle_flame]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Per case (a bonfire on a grey floor at night with a chrome ball and a grey wall beside it; a candle on a table
 top; the pyroclastic fireball, a surface SDF), four renders of one frame, to float EXR (measured) and AgX PNG

@@ -1,7 +1,7 @@
 """Every create_sdf_object option the examples do not exercise, in one lit scene.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_options.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_options.py
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Left to right in out/opt_scene.png: a peanut written in PYTHON (SDF_NP map and surface), a GLSL shape on the 'vertex'
 carrier with 'vertex' normals, a two-material SDF whose box takes a Blender material by id (materials={2: mat}), a

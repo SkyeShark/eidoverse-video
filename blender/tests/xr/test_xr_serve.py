@@ -24,9 +24,12 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
+sys.path.insert(0, os.path.join(WORKTREE, 'blender', 'tests'))
+import _where  # noqa: E402
+
 OUT = os.path.join(HERE, 'out', 'serve')
 os.makedirs(OUT, exist_ok=True)
-MAIN_NODE_MODULES = os.path.abspath(os.path.join(WORKTREE, '..', 'eidoverse-video-prealpha-0.01', 'node_modules'))
+MAIN_NODE_MODULES = os.path.abspath(_where.main_checkout() / 'node_modules')     # the checkout holding node_modules/
 
 from eidoblend.xr import server  # noqa: E402
 

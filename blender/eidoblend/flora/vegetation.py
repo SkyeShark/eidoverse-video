@@ -138,6 +138,7 @@ FLORA_SPECIES = {
 # them with the same brush (placement, wind, pushers), one variant mesh picked per plant. They keep their own
 # scanned materials. Habit values are this edition's (real-size scans: no scale-up), by plant kind.
 SCANNED_DIR_ENV = 'EIDOBLEND_PH_ASSETS'
+SCANNED_CACHE = 'scanned_plants'        # their folder in the shared asset cache (eidoverse/assets/cache, git-ignored)
 SCANNED_SPECIES = {
     'grass_medium_01': {'kind': 'grass'}, 'grass_medium_02': {'kind': 'grass'},
     'celandine_01': {'kind': 'herb'}, 'dandelion_01': {'kind': 'herb'},
@@ -156,14 +157,53 @@ SCANNED_KINDS = {
 }
 
 
+def _main_checkout(root):
+    """The repository's main checkout when `root` is a linked git worktree (its .git is a file
+    "gitdir: <main>/.git/worktrees/<name>"), else None."""
+    try:
+        with open(os.path.join(root, '.git'), encoding='utf-8') as fh:
+            line = fh.read().strip()
+    except OSError:                     # no .git, or the repository's own .git folder: not a linked worktree
+        return None
+    if not line.startswith('gitdir:'):
+        return None
+    gitdir = os.path.normpath(os.path.join(root, line.split(':', 1)[1].strip()))
+    return os.path.dirname(os.path.dirname(os.path.dirname(gitdir)))
+
+
+def scanned_roots():
+    """Where the Poly Haven plant sets are looked for, in order: $EIDOBLEND_PH_ASSETS alone when it is set; else
+    scanned_plants/ in the shared asset cache, found as the terrain family finds its texture sets and models: this
+    checkout's eidoverse/assets/cache, $EIDO_ASSET_CACHE, then the main checkout's cache when this checkout is a git
+    worktree (read only)."""
+    env = os.environ.get(SCANNED_DIR_ENV)
+    if env:
+        return [env]
+    root = repo_root()
+    roots = [os.path.join(root, 'eidoverse', 'assets', 'cache', SCANNED_CACHE)]
+    if os.environ.get('EIDO_ASSET_CACHE'):
+        roots.append(os.path.join(os.environ['EIDO_ASSET_CACHE'], SCANNED_CACHE))
+    main = _main_checkout(root)
+    if main:
+        roots.append(os.path.join(main, 'eidoverse', 'assets', 'cache', SCANNED_CACHE))
+    seen, out = set(), []
+    for r in roots:
+        k = os.path.normcase(os.path.normpath(r))
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
 def scanned_dir():
-    """Where the Poly Haven plant sets live: $EIDOBLEND_PH_ASSETS, else the fetch folder in the main checkout
-    (work/claude_body/film/tools/dlss5nr/bmeadow/assets, fetched with its fetch_ph.py)."""
-    d = os.environ.get(SCANNED_DIR_ENV)
-    if d:
-        return d
-    main = os.path.join(os.path.dirname(repo_root()), 'eidoverse-video-prealpha-0.01')
-    return os.path.join(main, 'work', 'claude_body', 'film', 'tools', 'dlss5nr', 'bmeadow', 'assets')
+    """The folder of the Poly Haven plant sets, each as Poly Haven's .blend download of the model at 2k (CC0):
+    <asset>/<asset>_2k.blend with the textures/ it includes beside it. The first of scanned_roots() that holds any of
+    them, else the first (this checkout's cache, or $EIDOBLEND_PH_ASSETS), where a missing set is reported."""
+    roots = scanned_roots()
+    for r in roots:
+        if any(os.path.isfile(os.path.join(r, a, f'{a}_2k.blend')) for a in SCANNED_SPECIES):
+            return r
+    return roots[0]
 
 
 BLADE_HABITS = {

@@ -2,7 +2,7 @@
 displacement (eidoblend.terrain.relief), under raking daylight.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain_extras/test_relief_bounds.py [--no-render]
-    (renders through heavy.sh)
+    (renders are GPU jobs: on a shared machine queue them with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Walls (3 x 2.4 m, Bricks097, 3 x 2.4 tiles, 3 cm deep), left to right:
   plain                no bounds: the displaced border is the outline (round one's wall)

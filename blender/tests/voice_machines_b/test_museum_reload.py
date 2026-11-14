@@ -4,7 +4,8 @@ teletype's buffer and the Speak & Spell's VFD sequences, the tandem's Geometry N
 film at frame 30: the machines at true scale side by side.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/voice_machines_b/test_museum_reload.py      # checks
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --render             # + still
+    bash run_blender.sh <this> --render                                                                        # + still
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import math
 import shutil

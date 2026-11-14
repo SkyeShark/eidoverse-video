@@ -1,7 +1,7 @@
 """The detail package's GPU tests (Blender, through a GPU slot):
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/detail/test_detail_gpu.py
+    bash run_blender.sh blender/tests/terrain/detail/test_detail_gpu.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
   1. parity: one dispatch of every kernel (pipes_flux, pipes_water, pipes_transport, pipes_thermal, breakup) against
      its numpy twin on a 96 x 80 field with pins, in the open, periodic and pinned modes, within 1e-4 x the range of

@@ -1,9 +1,10 @@
 """Shared fixtures for the UNKNOWN FORCE corridor / news probes: the worktree on sys.path, the shared texture library,
 a clean scene, probe render settings, PASS / FAIL lines and still renders from the sets' own cameras.
 
-Every render goes through the shared GPU slot: from the main checkout,
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this folder>/render_shots.py both
-(the shot renders peak near 1 GB of RAM before rendering: a cap of 4 is enough and leaves the shared ledger room).
+Every render is a GPU job (on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py): from the main
+checkout,
+    bash run_blender.sh <this folder>/render_shots.py both
+(the shot renders peak near 1 GB of RAM before rendering: a memory cap of 4 GB is enough).
 """
 import os
 import sys
@@ -16,10 +17,13 @@ OUT = HERE / 'out'
 OUT.mkdir(exist_ok=True)
 if str(WORKTREE / 'blender') not in sys.path:
     sys.path.insert(0, str(WORKTREE / 'blender'))
+if str(HERE.parent) not in sys.path:
+    sys.path.insert(0, str(HERE.parent))
+import _where  # noqa: E402  (blender/tests/_where.py: the main checkout, whose library the sets read)
 
 # the shared CC0 library: the sets' texture sets (Marble016, Asphalt025C ... all fetched once) sit in the main
 # checkout's library, which is read, never written; this worktree's own library (when it has one) holds other sets'
-_MAIN_CACHE = Path('C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/eidoverse/assets/cache')
+_MAIN_CACHE = _where.main_checkout() / 'eidoverse' / 'assets' / 'cache'
 _NEEDED = ('Marble016_2k', 'Asphalt025C_2k', 'Cardboard002_1k', 'Fabric077_1k')
 if not os.environ.get('EIDO_ASSET_CACHE'):
     _own = WORKTREE / 'eidoverse/assets/cache'

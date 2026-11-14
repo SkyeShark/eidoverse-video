@@ -4,8 +4,9 @@ registry's own multi-effect example; opacity 0 is the plain frame; time moves th
 
   --stage sheets   the catalogue: defaults and options of each effect (sheets_*.jpg)
   --stage time     the animated effects at frames 6, 18, 30, 42 (time_*.jpg), and their 'moves' checks
-Run from the main checkout (the GPU slot), after test_parity.py --stage sources:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_effects/test_looks.py --stage sheets
+Run from the main checkout (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py), after
+test_parity.py --stage sources:
+    bash run_blender.sh <worktree>/blender/tests/post_effects/test_looks.py --stage sheets
 """
 import os
 import sys

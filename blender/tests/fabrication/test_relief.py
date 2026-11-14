@@ -1,7 +1,6 @@
 """relief_test.mjs ported: relief compensation, swept stock and assembled machining, with the same assertions.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_relief.py
+    bash run_blender.sh blender/tests/fabrication/test_relief.py
 """
 import math
 import os

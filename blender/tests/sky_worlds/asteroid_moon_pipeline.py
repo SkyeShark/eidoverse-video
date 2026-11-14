@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(REPO, 'blender'))
 from eidoblend.sky.asteroid_moon import bake_asteroid_moon, make_asteroid_moon  # noqa: E402
 from eidoblend.sky.nodes import key_values  # noqa: E402
 from eidoblend.sky import moon_materials as MM  # noqa: E402
+from eidoblend.terrain import texture_roots  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ap = argparse.ArgumentParser()
@@ -30,8 +31,12 @@ ap.add_argument('--res', default='640x640')
 args = ap.parse_args(argv)
 OUT = os.path.join(HERE, 'out', 'asteroid')
 os.makedirs(OUT, exist_ok=True)
-TEX = os.path.normpath(os.path.join(REPO, '..', 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets', 'cache',
-                                    'textures', 'Ground106_2k'))
+# the CC0 set from the shared texture cache, the first root that has it (texture_roots: this checkout's,
+# $EIDO_TEXTURE_CACHE, $EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree)
+TEX = next((str(r / 'Ground106_2k') for r in texture_roots() if (r / 'Ground106_2k').is_dir()), None)
+if TEX is None:
+    raise SystemExit('[asteroid] Ground106_2k is not in the shared texture cache: '
+                     'python fetch_texture.py Ground106 2k --cache')
 
 
 def check(name, ok, detail=''):

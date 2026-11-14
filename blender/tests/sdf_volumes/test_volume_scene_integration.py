@@ -1,8 +1,9 @@
 """The SDF volumes inside a real scene: what the per-example probes do not cover.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sdf_volumes/test_volume_scene_integration.py \
         [-- cases=fog,cuts,inside,rotated,nuke_placed,fire_lamps,registry,probe_reflect]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Cases (renders in out/verify/, 480 x 270, 16 samples):
   fog          a fog box filling the stage and a bonfire: fit_volume_range must not drop the fog the fire's froxel

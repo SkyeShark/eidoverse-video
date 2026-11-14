@@ -1,7 +1,7 @@
 """tests/xr/test_xr_tangents_shadows.py: three things a film set does that the other xr tests do not, through the export.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_tangents_shadows.py
+    bash run_blender.sh blender/tests/xr/test_xr_tangents_shadows.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 
   1. A mesh with its OWN UV map and a procedural bump (ridges along x, a Wave texture into a Bump node), on a plane whose
      UVs are turned 90 degrees and on a UV sphere: bake_for_gltf bakes the normal onto the 'gltf_bake' UV map. Blender's

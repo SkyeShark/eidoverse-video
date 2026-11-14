@@ -12,10 +12,9 @@ marker-bound camera cut, and motion blur.
           out/<out>/blur_{off,on_steps1,on_steps8}_f026.png.
   blurcontrol  the control: a cube moved by object keys blurs (the render setup works).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_camera_cut_and_motion_blur.py \
+    bash run_blender.sh blender/tests/particles/test_camera_cut_and_motion_blur.py \
         [-- out=verify] [parts=cut,blur,blurcontrol] [no-render]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import math

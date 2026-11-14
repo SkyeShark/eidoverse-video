@@ -12,10 +12,9 @@ the program's events (eidoblend.fabrication.physical) instead of every frame:
     manual mode   a joint slider after physical keying leaves no physical rig behind; Reset keys the events again
     the file      saved and reopened, the job plays from its keys and simple-expression drivers alone
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/robotics/test_inspector_physical.py            # no render
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/robotics/test_inspector_physical.py -- --render                 # + stills
+    bash run_blender.sh blender/tests/robotics/test_inspector_physical.py                # no render
+    bash run_blender.sh blender/tests/robotics/test_inspector_physical.py -- --render    # + stills
+    # the stills: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import math

@@ -1,8 +1,8 @@
 """Probe: load_kit on a parts-library GLB (the funeral's props: a bier, candles, a mannequin ...),
 parts pulled by name, by family and as islands, placed on a terrain.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/terrain/test_kit.py [--no-render]
+    bash run_blender.sh blender/tests/terrain/test_kit.py [--no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 (The funeral GLB carries no textures: its role materials were applied at runtime in WebGPU, so the
 parts render in the importer's plain materials.)

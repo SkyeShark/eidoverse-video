@@ -14,6 +14,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO, 'blender'))
+sys.path.insert(0, os.path.join(REPO, 'blender', 'tests'))
+import _where  # noqa: E402
+
 _spec = importlib.util.spec_from_file_location('characters_stage', os.path.join(REPO, 'blender', 'tests', 'characters', '_stage.py'))
 C = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(C)
@@ -21,7 +24,7 @@ OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
 C.OUT = OUT
 
-MAIN = os.path.join(os.path.dirname(REPO), 'eidoverse-video-prealpha-0.01')
+MAIN = str(_where.main_checkout())          # the checkout holding the untracked node_modules/
 THREE_JS = next((p for p in (os.path.join(REPO, 'node_modules', 'three', 'build', 'three.module.js'),
                              os.path.join(MAIN, 'node_modules', 'three', 'build', 'three.module.js')) if os.path.exists(p)), None)
 
@@ -298,7 +301,7 @@ def stairs(name, x0, run, rise, n, y0, y1, mat, down=False, base=0.0):
 
 
 def render_shots(sc, tag, shots):
-    """a test's stills rendered now (render_stills.py renders the same list from the saved .blend through the GPU slot):
+    """a test's stills rendered now (render_stills.py renders the same list from the saved .blend, a GPU job):
     out/<tag>_<name>_f<frame>.png at the probe settings (960 x 540, 16 samples, EEVEE ray tracing and Fast GI on). A
     shot's 'hide': the names of objects left out of that still (the debug overlays, for a still of the body's feet)"""
     import bpy

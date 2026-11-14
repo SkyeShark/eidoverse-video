@@ -12,8 +12,7 @@ size is chosen here.
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.environ.get('TRIAGE_CACHE', 'C:/Users/sdn52/AppData/Local/Temp/claude/58f6fc01d66e098b/'
-                                       '7ba5a5b7-5eb0-446a-8f4f-977d471453ff/scratchpad/triage_cache')
+CACHE = os.environ.get('TRIAGE_CACHE', os.path.normpath(os.path.join(HERE, '..', 'out', 'triage', 'cache')))
 RENDERS = os.path.join(HERE, 'renders')
 SHEETS = os.path.join(HERE, 'sheets')
 RES = 1024

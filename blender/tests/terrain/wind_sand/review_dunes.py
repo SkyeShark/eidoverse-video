@@ -1,9 +1,9 @@
 """The independent review's three dune views, re-planned on the dunes recipe as it stands and rendered beside the
 same photographs (in Blender, through a GPU slot):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/wind_sand/review_dunes.py [--tag name] [--views a,b] [--clay 1] \\
+    bash run_blender.sh blender/tests/terrain/wind_sand/review_dunes.py [--tag name] [--views a,b] [--clay 1] \\
         [--seed 1] [--params '{"kind": "star"}'] [--set '{"hero_winds": "last2"}']
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The plan is the review's (out/review/scripts/plan_views.py, plan_dunes) on this run's own main level: the highest
 dune within 2.5 km of the tile centre; 'interdune_floor' from the floor 900 m from it, the lowest spot with an open

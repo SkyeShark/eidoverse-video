@@ -1,8 +1,8 @@
 """Probe: relief as real displacement. A brick wall carved by its height map beside the same
 material as bump only, and a relief column whose bricks overhang its outline, under raking light.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/terrain/test_relief.py
+    bash run_blender.sh blender/tests/terrain/test_relief.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Then depth_metres under an UNAPPLIED scale: the same wall with scale 2 along its normal, carved in
 world space (the default) and, for contrast, in object space. Close-ups from the same place relative

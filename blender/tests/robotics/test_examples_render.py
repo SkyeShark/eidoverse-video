@@ -9,9 +9,8 @@ before saving (the keyed-data contract: a saved file plays and renders any frame
     out/examples/mantis.blend               (deleted after the check unless --keep)
     out/examples_render.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_examples_render.py
+    bash run_blender.sh blender/tests/robotics/test_examples_render.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import os

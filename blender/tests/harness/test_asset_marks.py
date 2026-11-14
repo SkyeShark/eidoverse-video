@@ -9,8 +9,7 @@
       (texel density, an 'up' wear layer) whole: the imported meshes keep their UVs and materials exactly, the plinth
       is layered and rescaled
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/harness/test_asset_marks.py
+    bash run_blender.sh blender/tests/harness/test_asset_marks.py
 """
 import os
 import sys

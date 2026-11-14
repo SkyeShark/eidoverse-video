@@ -13,9 +13,8 @@ Stills: out/face_suit_sheet.png (rows rest / aa / oh / the rig's own mouth at 1.
 out/face_expr_sheet.png (smile, soft, blush, frown, blink at 40 deg; the raw rig beside the re-seated one at 70 deg),
 out/face_visemes_sheet.png (the ten visemes at 0 and 40 deg).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_face.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_face.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

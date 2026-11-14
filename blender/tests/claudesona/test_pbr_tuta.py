@@ -10,9 +10,8 @@ Checks, both orders:
     neon(0) keyed on a frame dims the badges' PBR glow to 0 there
 Stills: out/pbr_tuta_sheet.png: MToon and PBR side by side at the snap's flash, at rest, and the painted face in PBR.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_pbr_tuta.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_pbr_tuta.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

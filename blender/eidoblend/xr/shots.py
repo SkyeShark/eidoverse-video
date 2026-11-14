@@ -14,7 +14,7 @@ page's 'ready' / 'error: ...' flag and window.__shotInfo its numbers). This runs
 
 Each row: query, status ('ready', 'error: ...' or 'TIMEOUT'), seconds, path (the PNG), info (window.__shotInfo as a
 dict, or None), errors (the page's exceptions and console errors / warnings printed under that still).
-A GPU job on a shared machine: run it through the GPU slot (heavy.sh) like any render.
+A GPU job, like any render.
 """
 from __future__ import annotations
 

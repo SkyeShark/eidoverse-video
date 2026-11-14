@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, r'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender')
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')))
 from eidoblend.fx._gpu import ComputeContext  # noqa: E402
 
 COMMON = r'''

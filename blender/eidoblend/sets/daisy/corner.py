@@ -1905,7 +1905,7 @@ class Corner:
         return made
 
     def bake_probes(self, scene=None, frame=None):
-        """Bake the room's volume probe (a GPU job: run it through heavy.sh) with the room on screen: at `frame`, or
+        """Bake the room's volume probe (a GPU job) with the room on screen: at `frame`, or
         at the first frame of the scene's range that shows the room (keyed by animate()), or as it stands. Returns
         {probe: seconds}."""
         from ...look import lighting as LL

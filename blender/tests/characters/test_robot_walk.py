@@ -20,10 +20,8 @@ result, the feet's points where Blender's skinned mesh puts them), saves out/rob
     --tag NAME     the outputs' prefix;  --flat  a level floor;  --no-render  build, walk, check (and save) only;
     --no-save      no .blend;  --vrm claude_robot_2k   the 2K-texture body (faster to load)
 
-Run (from the main checkout, through the shared GPU slot):
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/characters/test_robot_walk.py [-- args]
+Run (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py):
+    bash run_blender.sh blender/tests/characters/test_robot_walk.py [-- args]
 """
 
 import json

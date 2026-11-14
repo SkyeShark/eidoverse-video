@@ -7,9 +7,10 @@ Then the set's invariants: moved (its root translated) it renders the same pictu
 coordinates; a saved .blend renders a keyed frame on its own; and an options build (no mirror, no sky, no towers, no
 rain, dim lamps) builds and renders after the full set's dispose().
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_race_bin/test_race.py -- [--build-only] [--shots tag,tag] [--res 960x540]
         [--samples 16] [--no-rain] [--no-invariants]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Prints PASS / FAIL lines; exits 1 on a FAIL.
 """

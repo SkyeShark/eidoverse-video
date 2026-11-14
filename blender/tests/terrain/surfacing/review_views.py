@@ -2,9 +2,9 @@
 Blender process, through a GPU slot), so each textured view lies beside the reviewer's photograph and the reviewer's
 own render of the same camera (out/review/renders/<recipe>/, which this never touches):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 EIDO_TERRAIN_CACHE_GB=20 bash work/claude_body/work/tmp/heavy.sh 12 \\
-        bash run_blender.sh <worktree>/blender/tests/terrain/surfacing/review_views.py --recipe canyon \\
+    EIDO_TERRAIN_CACHE_GB=20 bash run_blender.sh blender/tests/terrain/surfacing/review_views.py --recipe canyon \\
         [--views a,b] [--tag v2] [--debug layers] [--samples 16] [--no-rocks] [--aniso 16] [--time]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The cameras are the review's (out/review/views_plan.json: the matched spot, aim point and lens of each photograph),
 built and lit exactly as out/review/scripts/review_render.py does: make_terrain at the judge's settings (the

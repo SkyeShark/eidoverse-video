@@ -1,7 +1,7 @@
 """The terrain core's GPU runner tests (Blender, through a GPU slot):
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/terrain/core/test_gpu.py
+    bash run_blender.sh blender/tests/terrain/core/test_gpu.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
   1. round trip: numpy -> texture -> numpy is bit-exact (R32F, RG32F, RGBA32F; 3 channels padded; non-square;
      negative, huge, tiny, inf and nan values), and so is a copy kernel (texelFetch -> imageStore)

@@ -12,9 +12,8 @@
      claude_suit.vrm: the band's body without the wardrobe's outfit) with the trumpet (ska_trumpet.glb) played from it: the fingertips on the valve caps (mm),
      stills out/pose_bake_ska_trumpet_f<k>.png
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_pose_bake.py [--no-render]
+    bash run_blender.sh blender/tests/robot_body/test_pose_bake.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

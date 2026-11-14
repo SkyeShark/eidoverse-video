@@ -12,9 +12,8 @@ Checks (PASS / FAIL lines):
 Stills: out/robot_example_t<S.SS>.png at the example's face moments (the example's own camera), plus close-ups of the
 hands (robot_example_hands_t<S.SS>.png) and the feet (robot_example_feet_t<S.SS>.png); out/robot_example.json.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_claude_robot_example.py [--no-render]
+    bash run_blender.sh blender/tests/robot_body/test_claude_robot_example.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import math

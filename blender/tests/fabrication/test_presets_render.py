@@ -9,9 +9,8 @@
 Checks (numeric): each material's removed volume, chip count alive at the probe time, and the slicer's contours for
 each sample. Renders land in out/presets_*.png (960 x 540, shadows on).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/fabrication/test_presets_render.py
-        [-- --no-render]
+    bash run_blender.sh blender/tests/fabrication/test_presets_render.py [-- --no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import os
 import sys

@@ -3,7 +3,7 @@ medium; the make() knobs reach the volume's own uniforms; the explosion ring's p
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf_volumes/test_volume_examples.py [-- fit=1]
 
-(GPU evaluation only, no render: light enough to run outside the slot.)
+(GPU evaluation only, no render: light enough to run without queueing for the GPU.)
 
 1. Registry: the eight volume examples with the engine's bounds and step counts (nuclear_blast's from its size).
 2. Per example: the grids at three times through the loop are finite, occupied, and change with time; the
@@ -15,7 +15,7 @@ medium; the make() knobs reach the volume's own uniforms; the explosion ring's p
    and emission scales), fitted to the engine's march with post over the loop (tests/sdf/engine_march.py; prints
    RING_POST_FOLD).
 5. timing=1: three baked frames of every example at the probe resolutions: seconds and MB of .vdb per frame (a
-   bake: run it through the GPU slot, heavy.sh).
+   bake: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py).
 """
 
 import os

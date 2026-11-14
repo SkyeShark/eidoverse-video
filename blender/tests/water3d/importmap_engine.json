@@ -1,5 +1,5 @@
 {"imports": {
-  "three": "file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three/build/three.webgpu.js",
-  "three/webgpu": "file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three/build/three.webgpu.js",
-  "three/tsl": "file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three/build/three.tsl.js"
+  "three": "../../../node_modules/three/build/three.webgpu.js",
+  "three/webgpu": "../../../node_modules/three/build/three.webgpu.js",
+  "three/tsl": "../../../node_modules/three/build/three.tsl.js"
 }}

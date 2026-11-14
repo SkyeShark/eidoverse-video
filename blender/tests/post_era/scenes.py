@@ -1,7 +1,7 @@
 """tests/post_era/scenes.py: the scenes the era looks, aeropittura and after_image tests photograph, and the plumbing
 that renders them once and composites the post over the saved frames. Test dressing, not ports.
 
-  - era_probe: the WebGPU era-looks probe (work/fx_probe/era_new.js, whose renders new_1..5.png are the reference):
+  - era_probe: the WebGPU era-looks probe (era_new.js, whose renders new_1..5.png are the reference):
     the claudesona (claude_suit_wardrobe.vrm) playing idle on a dark metallic floor, a hemisphere fill and a sun, the
     camera at three (1.2, 1.4, 2.2) looking at (0, 1.1, 0), vertical fov 50, a near-black background.
   - uf_hole: THE HOLE of UNKNOWN FORCE, built by its own port (eidoblend.sets.unknown_force), the claudesona
@@ -21,9 +21,7 @@ from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
-MAIN = os.path.abspath(os.path.join(WORKTREE, '..', 'eidoverse-video-prealpha-0.01'))
 OUT = os.path.join(HERE, 'out')
-REF = os.path.join(MAIN, 'work', 'fx_probe')                 # the WebGPU era-looks probe renders
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
 
 
@@ -177,7 +175,7 @@ def look_settings(scene, exposure=0.0, samples=16, motion_blur=False):
 
 # ------------------------------------------------------------------------------------------------- the scenes
 def era_probe(fps=24, frames=(1, 48)):
-    """work/fx_probe/era_new.js, rebuilt."""
+    """The WebGPU era-looks probe (era_new.js), rebuilt."""
     sc = new_scene(fps, frames)
     hemisphere_world(sc)                                   # HemisphereLight(0xffffff, 0x202040, 0.8); bg 0x0a0a14
     sun(sc, (3, 6, 4), 2.5)                                # DirectionalLight(0xffffff, 2.5) at (3, 6, 4)

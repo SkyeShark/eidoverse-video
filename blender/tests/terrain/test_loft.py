@@ -1,8 +1,9 @@
 """Loft: the Blender port against the engine's own loft.js (vertex for vertex), and a probe still.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/terrain/test_loft.py --no-render
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh .../test_loft.py
-    (the probe still's ground is make_terrain's: its kernels need the GPU slot)
+    bash run_blender.sh .../test_loft.py
+    (the probe still's ground is make_terrain's: its kernels make it a GPU job, 4 GB VRAM, 12 GB RAM cap; on a
+    shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Parity: Node runs eidoverse/loft.js (three from node_modules: this checkout's, else the main
 checkout's) for the same sweeps; the walls' vertices must agree to float32 precision after the axis

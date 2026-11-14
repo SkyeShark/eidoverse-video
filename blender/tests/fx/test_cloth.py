@@ -2,8 +2,8 @@
 streaming flag on a pole (pin 'left', wind 0.0008, windBias 0.9, windDir away from the pole), over a floor,
 with a sphere collider the banner drapes over.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 \
-        bash run_blender.sh <worktree>/blender/tests/fx/test_cloth.py [-- end=90 frames=1,45,90]
+    bash run_blender.sh blender/tests/fx/test_cloth.py [-- end=90 frames=1,45,90]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The bake is CPU (numpy, 1120 vertices); writes out/cloth_cache/*.pc2 and out/cloth_f####.png.
 """

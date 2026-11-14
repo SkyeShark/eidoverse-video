@@ -20,11 +20,9 @@ pose. Writes out/<tag>.json, out/<tag>.blend and out/<tag>_shots.json; render_sh
     <tag>_feet_k            a fixed low camera on the small stairs up: a planted foot through its stance
     <tag>_wide              the whole course from above and to the side
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/test_controller_course.py --vrm aletheia
-    bash C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/gpu_slot.sh \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/render_shots.py \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/out/course_aletheia_shots.json
+    bash run_blender.sh blender/tests/controller/test_controller_course.py --vrm aletheia
+    bash blender/tests/controller/gpu_slot.sh blender/tests/controller/render_shots.py \\
+        blender/tests/controller/out/course_aletheia_shots.json
 """
 
 import math

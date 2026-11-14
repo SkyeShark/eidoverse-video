@@ -20,8 +20,7 @@ Checks (PASS / FAIL), each seat measured on the keyed, evaluated mesh:
   - the controller family's checks.feet per gait listed
 Stills: out/seat_<vrm>_<moment>_<k>_f<frame>.png (low side cameras); out/seat_<vrm>.json, out/seat_<vrm>.blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_body_seat.py --no-render
+    bash run_blender.sh blender/tests/robot_body/test_body_seat.py --no-render
 """
 
 import math

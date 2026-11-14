@@ -6,14 +6,15 @@ image sequences, makes the film's own cameras (one per bar; the spark's two bars
 marks; checks the clock, placements, keys and the evaluated march numerically; saves the .blend; renders one still per
 bar from the film's own camera (mid-bar) plus the spark in flight.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 24 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/test_corner.py [-- --only 0,4 --no-render --no-her --lite --exposure 0]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 (a memory cap of 16 GB or more: the camp's render peaks at 12.1-12.7 GB). --lite builds the camp without grass, trees and
 particles (a quick look at the rest). In two steps, the GPU slot for the renders alone: test_corner.py --no-render (CPU;
 the screens take about two minutes), then render_saved.py corner.
-Checks the spark's re-timing to a caption's sung "spark" (and the film's own caption, when the DAISY timeline is on the
-machine). Writes out/corner/corner_<name>.png, out/corner/corner.blend, out/corner/stills.json and the screens' frames
+Checks the spark's re-timing to a caption's sung "spark" (and the film's own caption, when DAISY_TIMELINE gives the DAISY
+timeline). Writes out/corner/corner_<name>.png, out/corner/corner.blend, out/corner/stills.json and the screens' frames
 in out/corner/screens/.
 """
 
@@ -152,8 +153,8 @@ def spark_caption_checks():
             and abs(sp['t1'] - t1_old) < 1e-9 and b_new[0] > b_old[0] and b_new[-1] <= t1_old + 1e-4,
             f"t0 {t0_old:.3f} -> {sp['t0']:.3f}; first birth {b_old[0]:.3f} -> {b_new[0]:.3f}")
     CR.set_spark_timing(t0_old, t1_old)
-    TLP = os.environ.get('DAISY_TIMELINE', 'E:/eidoverse-video-desktop-work-folder/daisy/out/daisy_timeline.json')
-    if os.path.isfile(TLP):
+    TLP = C.film_timeline()                                # outside the repo: DAISY_TIMELINE, else None (skipped)
+    if TLP is not None and os.path.isfile(TLP):
         import json
         with open(TLP, encoding='utf-8') as f:
             film_cap = next((c for c in json.load(f)['captions'] if 'spark' in c['text']), None)

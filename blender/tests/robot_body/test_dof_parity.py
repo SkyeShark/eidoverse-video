@@ -10,8 +10,7 @@ The JS runs under deno on a mock VRM built from the same rig data (three's own m
 WeakMap memos across the frames). Compared per frame: every humanoid bone's normalized rotation, the hip stages, the
 shoulder pitch helpers, the wrist roll and flex stages, the thumb rotors and the 12 petals. Writes out/dof_parity.json.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_dof_parity.py
+    bash run_blender.sh blender/tests/robot_body/test_dof_parity.py
 """
 
 import json

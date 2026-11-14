@@ -1,7 +1,7 @@
 """Probe: makeBook(gltf), the measured-GLB book path, in Blender 5.2 EEVEE (eidoblend.media.book).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media2/test_book_glb.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media2/test_book_glb.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The janus book GLB (Simulacra and Simulators, crimson bookcloth, its own wrap, normal and ORM maps):
 1. parity: the engine's own makeBook (eidoverse/book.js in Deno, book_glb_parity.mjs) measures the GLB; the

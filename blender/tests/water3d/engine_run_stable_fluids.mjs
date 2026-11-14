@@ -1,9 +1,11 @@
-// Runs three-fluid-fx's own WGSLFluidSimulation (the package fluid_sim.js wraps; read-only, from the main checkout's
-// node_modules) headless on WebGPU with a scripted splat sequence and writes its textures as raw float32: the
-// parity reference for eidoblend.fx.stable_fluids (test_stable_fluids_parity.py runs the port on the same script).
+// Runs three-fluid-fx's own WGSLFluidSimulation (the package fluid_sim.js wraps; read-only, from this checkout's
+// node_modules, else the main checkout's) headless on WebGPU with a scripted splat sequence and writes its textures as
+// raw float32: the parity reference for eidoblend.fx.stable_fluids (test_stable_fluids_parity.py runs the port on the
+// same script).
 //
 //   deno run --no-config --no-lock -A --import-map=<this folder>/importmap_engine.json \
 //       engine_run_stable_fluids.mjs out=<dir> case=<name> [frames=60]
+//   (the import map takes three from this checkout's node_modules/)
 //
 // case: 'motion' (splat colour = the package default (dx, dy, 1), dye on), 'colour' (fluid_sim.js's splat(): the
 // colour tints density AND drives velocity), 'novort' (vorticity off, BFECC off, no wall reflection), 'showcase'
@@ -19,7 +21,27 @@ const context = { configure() {}, unconfigure() {}, getCurrentTexture: fakeTex }
 const canvas = { width: 64, height: 64, style: {}, addEventListener() {}, removeEventListener() {}, getContext: () => context };
 const renderer = new THREE.WebGPURenderer({ canvas, context, adapter, device, antialias: false });
 await renderer.init();
-const fx = await import('file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01/node_modules/three-fluid-fx/dist-lib/tsl/three-fluid-fx.es.js');
+// the checkout that holds the untracked node_modules/, found as blender/tests/_where.py's main_checkout() finds it:
+// EIDO_MAIN_CHECKOUT, else the main worktree when this checkout is a linked git worktree (its .git is a file
+// "gitdir: <main>/.git/worktrees/<name>"), else this checkout
+const repo = new URL('../../../', import.meta.url);
+const folderUrl = (p, base) => {            // a folder path, absolute or relative to base, as a file: URL
+    p = p.replace(/\\/g, '/').replace(/\/?$/, '/');
+    return /^([A-Za-z]:)?\//.test(p) ? new URL('file:///' + p.replace(/^\/+/, '')) : new URL(p, base);
+};
+const mainCheckout = () => {
+    const env = Deno.env.get('EIDO_MAIN_CHECKOUT');
+    if (env) return folderUrl(env);
+    try {
+        const line = Deno.readTextFileSync(new URL('.git', repo)).trim();
+        if (line.startsWith('gitdir:')) return new URL('../../../', folderUrl(line.slice(7).trim(), repo));
+    } catch { /* .git is the repository's own folder: this is the main checkout */ }
+    return repo;
+};
+const FX = 'node_modules/three-fluid-fx/dist-lib/tsl/three-fluid-fx.es.js';
+const isFile = (u) => { try { return Deno.statSync(u).isFile; } catch { return false; } };
+const fxUrl = [new URL(FX, repo), new URL(FX, mainCheckout())].find(isFile) ?? new URL(FX, mainCheckout());
+const fx = await import(fxUrl.href);
 const CASE = args.case || 'motion';
 const N = Number(args.frames || (CASE === 'showcase' ? 75 : 60));
 // 'showcase': work/_showcase/fluid as the engine ran it (fluid_sim.js's options; its enableDye never reached the

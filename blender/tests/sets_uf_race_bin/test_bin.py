@@ -8,9 +8,10 @@ translated) the set renders the same pictures; a saved .blend renders a keyed fr
 nothing of the set (the import's meshes, materials and maps, and the keys' actions included); and an options build (no
 sky, no lights, a quarter-size atlas, fewer sheets) renders.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_race_bin/test_bin.py -- [--build-only] [--res 960x540] [--samples 16]
         [--atlas 1] [--shots tag,tag] [--no-invariants]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Prints PASS / FAIL lines; exits 1 on a FAIL.
 """

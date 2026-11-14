@@ -13,9 +13,9 @@ The sun's elevation is the same in every view (make_sky's 15:30: 37.7 degrees); 
 make_sky's `azimuth` option, so the light falls the same way relative to every camera and the tile stays
 geographically oriented (x east, y north, z up, heights in metres above the tile's lowest point).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/reference/render_references.py [--only a,b] [--views top,aerial,eye] \\
+    bash run_blender.sh blender/tests/terrain/reference/render_references.py [--only a,b] [--views top,aerial,eye] \\
         [--sky-cache <temp folder>]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 render_probe() takes any heightfield, so a generated terrain renders exactly as the references do, from a
 Blender script of its own:

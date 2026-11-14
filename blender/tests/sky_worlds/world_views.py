@@ -24,6 +24,7 @@ REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO, 'blender'))
 from eidoblend.sky import make_sky  # noqa: E402
 from eidoblend.sky import palette as P  # noqa: E402
+from eidoblend.terrain import texture_roots  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ap = argparse.ArgumentParser()
@@ -48,8 +49,9 @@ args = ap.parse_args(argv)
 
 OUT = args.out or os.path.join(HERE, 'out', args.world)
 os.makedirs(OUT, exist_ok=True)
-CACHE_TEX = os.path.normpath(os.path.join(REPO, '..', 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets', 'cache',
-                                          'textures'))
+# the ground's CC0 Ground037 set from the shared texture cache, the first root that has it (texture_roots: this
+# checkout's, $EIDO_TEXTURE_CACHE, $EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree)
+GROUND_TEX = next((str(r / 'Ground037_2k') for r in texture_roots() if (r / 'Ground037_2k').is_dir()), '')
 
 
 def check(name, ok, detail=''):
@@ -90,7 +92,7 @@ def ground_material():
     m.use_nodes = True
     nt = m.node_tree
     b = nt.nodes['Principled BSDF']
-    d = os.path.join(CACHE_TEX, 'Ground037_2k')
+    d = GROUND_TEX
     if os.path.isdir(d):
         tc = nt.nodes.new('ShaderNodeTexCoord')
         mp = nt.nodes.new('ShaderNodeMapping')

@@ -1,7 +1,7 @@
 """The mesh and API package's acceptance in Blender (design section 11, package 5).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/mesh_api/test_api_blender.py [--parts synthetic,place,api,cracks]
+    bash run_blender.sh blender/tests/terrain/mesh_api/test_api_blender.py [--parts synthetic,place,api,cracks]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Parts
   synthetic  the ring mesh of nested levels at odd offsets (strides 1, 2, 4, cores) as a Blender object: its

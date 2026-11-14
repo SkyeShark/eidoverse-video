@@ -13,7 +13,7 @@ the Blender edition needs:
   - start(): the same server in a thread, for tests and scripts (an ephemeral port, HTTPS optional, stop()).
 
     python blender/eidoblend/xr/server.py --home /work/<id>/vr/index.html --log work/<id>/vr/results.jsonl
-    python blender/eidoblend/xr/server.py --node-modules ../eidoverse-video-prealpha-0.01/node_modules
+    python blender/eidoblend/xr/server.py --node-modules <a checkout>/node_modules
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend.xr import server

@@ -2,8 +2,7 @@
 test_fabrication_render.py) in a fresh Blender without importing eidoblend, jump to frames out of order, and check
 that the bead grows, the stocks deepen and the machines move from the file's own keys, nodes and drivers.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_saved_blend.py
+    bash run_blender.sh blender/tests/fabrication/test_saved_blend.py
 """
 import os
 import sys

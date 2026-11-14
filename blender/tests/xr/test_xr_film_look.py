@@ -1,8 +1,9 @@
 """tests/xr/test_xr_film_look.py: a piece in the headset with the film's look: MToon, animated material values, a camera
 lens, a sky that changes and the film's sound, through export_xr and the page, against EEVEE.
 
-    cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_film_look.py
+    bash run_blender.sh blender/tests/xr/test_xr_film_look.py
+    # a GPU job of an estimated 6 GB of VRAM and up to 16 GB of RAM; on a shared machine queue it with
+    # EIDO_GPU_WRAP (blender/tests/_where.py)
 
 The film (2 s at 24 fps, Standard view): Aletheia (aletheia.vrm, MToon with outlines) turning on the spot; a swatch whose
 Principled base colour is keyed red -> blue and its roughness 0.2 -> 0.8; a checker whose Mapping node's offset is keyed

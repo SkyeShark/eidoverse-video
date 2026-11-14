@@ -18,11 +18,9 @@ out/<tag>.json, out/<tag>.blend and out/<tag>_shots.json;
 render_shots.py renders a side camera at each gait's middle (from the downhill side) and a low camera in front of the
 walk across, at the level of the feet, every four frames of a stride (sheet 'across').
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/test_controller_cross_slope.py
-    bash C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/gpu_slot.sh \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/render_shots.py \\
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/controller/out/cross_slope_claude_robot_shots.json
+    bash run_blender.sh blender/tests/controller/test_controller_cross_slope.py
+    bash blender/tests/controller/gpu_slot.sh blender/tests/controller/render_shots.py \\
+        blender/tests/controller/out/cross_slope_claude_robot_shots.json
 """
 
 import math

@@ -13,9 +13,8 @@ the crown's lead screws 240 deg/s, the neck 120 deg/s), keyed on one timeline. C
   - nothing moves faster than its actuator: no petal turns more than 240 deg/s, the head's state no more than 120 deg/s
 Stills: out/crown_head_<state>_f<k>.png (my head, front three-quarter); out/crown_head_states.json, .blend.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robot_body/test_crown_head_states.py [--no-render]
+    bash run_blender.sh blender/tests/robot_body/test_crown_head_states.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import math

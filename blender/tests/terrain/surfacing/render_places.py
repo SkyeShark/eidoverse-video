@@ -3,9 +3,9 @@ reference DEM (the _place fixture: levels, package 4's masks, package 5's ring m
 cameras (reference/renders/<name>_views.json), make_sky daylight, look and exposure, so every textured view lies
 beside its grey-clay reference. The eye view adds the palette's rocks around the camera.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/surfacing/render_places.py [--only toroweap,lauterbrunnen,...]
+    bash run_blender.sh blender/tests/terrain/surfacing/render_places.py [--only toroweap,lauterbrunnen,...]
         [--views aerial,eye] [--no-rocks] [--clay] [--samples 16] [--tag v1] [--sky-cache <dir>]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/surfacing/<place>_<palette>_<view>[_<tag>].png and <place>[_<tag>]_record.json (render seconds per frame:
 the first render, which compiles the material, and a second one of the same frame; triangles; rocks).

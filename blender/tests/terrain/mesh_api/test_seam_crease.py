@@ -8,8 +8,8 @@ parent ring, which every ring has everywhere. A seam within 25 % + 0.1 degree of
 reads like any other row of the mesh. The main tile's own border is also where the DEM meets its surround (real_place
 blends them continuously in height, not in slope), so an excess there is the data's, not the stitching's.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/mesh_api/test_seam_crease.py
+    bash run_blender.sh blender/tests/terrain/mesh_api/test_seam_crease.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import json
 import os

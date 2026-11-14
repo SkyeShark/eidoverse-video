@@ -1,7 +1,7 @@
 """Probe: parole in liberta in Blender (eidoblend.media.parole) over a film, through the overlay layer and edit scene.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_parole.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_parole.py
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 A title thrown in ("UNKNOWN FORCE", rows), then the first chorus line "I'm the unknown force" with its default
 pre-heard guesses (the camps' answers, struck through as she sings), over 4 s of the Voder wall film. Stills of the

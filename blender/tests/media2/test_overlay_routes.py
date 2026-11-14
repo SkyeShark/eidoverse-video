@@ -1,8 +1,8 @@
 """Probe: the overlay's two routes around the post chain, LyricRenderer on the frame, and an engine sprite atlas on a
 screen. From the main checkout (DAISY's timeline first: run_daisy.py song, see test_era_screens.py):
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media2/test_overlay_routes.py [-- --only routes,atlas]
+    bash run_blender.sh <worktree>/blender/tests/media2/test_overlay_routes.py [-- --only routes,atlas]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 routes   the voder_1939 wall at DAISY's 24.5 s ("I was a hiss and a buzz..."), six frames at 24 fps, with an overlay
          layer holding a lower third (solid teal, white, #ffd400 and #101418 ink) and DAISY's lyrics through

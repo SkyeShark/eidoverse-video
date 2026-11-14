@@ -1,9 +1,9 @@
 """What the terrain material costs per frame, against grey clay on the same frame (one Blender process, through a GPU
 slot; other jobs share the GPU, so each palette's textured and clay frames alternate and the best of each counts):
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/surfacing/bench_material.py [--palettes alpine,desert_sandstone]
+    bash run_blender.sh blender/tests/terrain/surfacing/bench_material.py [--palettes alpine,desert_sandstone]
         [--variants full,no_far,...] [--reps 3] [--tag b1]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 The scene: a 1.6 km square of ground (512 x 512 vertices) with gentle hills and two steep walls, every eido_<mask>
 attribute the palettes read filled with plausible values (slopes from the surface, the rest from smooth noise), a

@@ -145,10 +145,11 @@ TEX = None
 
 
 def texture_set(name):
-    """a CC0 set from the shared texture cache (this checkout's, else the main checkout's): {role: path}"""
-    roots = [os.path.join(REPO, 'eidoverse', 'assets', 'cache', 'textures'),
-             os.path.join(os.path.dirname(REPO), 'eidoverse-video-prealpha-0.01', 'eidoverse', 'assets', 'cache', 'textures')]
-    for r in roots:
+    """a CC0 set from the shared texture cache, the first root that has it (eidoblend.terrain.texture_roots: this
+    checkout's, EIDO_TEXTURE_CACHE, EIDO_ASSET_CACHE, the main checkout's when this one is a git worktree):
+    {role: path}"""
+    from eidoblend.terrain import texture_roots
+    for r in texture_roots():
         d = os.path.join(r, name)
         if os.path.isdir(d):
             fs = os.listdir(d)

@@ -19,7 +19,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WORKTREE = HERE.parents[2]
-MAIN = Path('C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01')
+sys.path.insert(0, str(HERE.parent))
+import _where  # noqa: E402
+
+MAIN = _where.main_checkout()             # deno's working folder, as lightning_parity.mjs asks: the main checkout
 sys.path.insert(0, str(WORKTREE / 'blender'))
 from eidoblend.weather import lightning as L  # noqa: E402
 from eidoblend.weather.bolt import bolt_ribbon  # noqa: E402

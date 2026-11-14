@@ -2,8 +2,8 @@
 lines, renders, sheets, linear PNGs).
 
     stage(...)            EEVEE + AgX, the engine's check-scene city HDRI as world (reflections are the point here),
-                          a sun, a ground plane; the HDRI is read from the production workspace's _reality_check
-                          (read only), and a plain sky colour stands in when that folder is not on the machine
+                          a sun, a ground plane; the HDRI is read from $EIDO_ENGINE_CHECK_DIR (the engine's check
+                          scenes, outside this repo, read only), and a plain sky colour stands in without it
     three(x, y, z)        a three.js point or direction in Blender axes
     camera_three(...)     a camera placed in three coordinates with three's vertical field of view
     three_quarter(obj)    a camera at a 3/4 view of an object (azimuth from its front, elevation, distance)
@@ -27,8 +27,12 @@ import _common as C  # noqa: E402  (also puts <repo>/blender on sys.path)
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
 CACHE = os.path.join(OUT, 'cache')
-CHECK = r'C:/Users/sdn52/OneDrive/Desktop/new_twitter_harness/generated_videos/ffmpeg/workspace/_reality_check'
-HDRI = os.path.join(CHECK, 'hdri.hdr')
+sys.path.insert(0, os.path.dirname(HERE))
+import _where  # noqa: E402
+
+CHECK = _where.external('EIDO_ENGINE_CHECK_DIR', "the WebGL engine's check scenes (hdri.hdr and the frames it "
+                        "rendered; without them a plain sky lights the stages)")
+HDRI = os.path.join(CHECK, 'hdri.hdr') if CHECK else None
 
 check = C.check
 summary = C.summary
@@ -63,7 +67,7 @@ def stage(width=960, height=540, samples=16, hdri=True, hdri_strength=1.0, sun_e
     sc.eevee.use_fast_gi = True
     nt = sc.world.node_tree
     bg = nt.nodes['Background']
-    if hdri and os.path.exists(HDRI):
+    if hdri and HDRI and os.path.exists(HDRI):
         env = nt.nodes.new('ShaderNodeTexEnvironment')
         env.image = bpy.data.images.load(HDRI, check_existing=True)
         nt.links.new(env.outputs['Color'], bg.inputs['Color'])
@@ -200,6 +204,8 @@ def save_rgb(path, a):
 def engine_frame(fname, w, h):
     """One of the engine's check-scene frames, resized to w x h (RGB floats), or None when it is not here."""
     import OpenImageIO as oiio
+    if CHECK is None:
+        return None
     p = os.path.join(CHECK, fname)
     if not os.path.exists(p):
         return None

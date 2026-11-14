@@ -16,8 +16,7 @@ drawn side (no render).
   tubes     PTFE tubes draw their front faces only (filament.js: side FrontSide); the last one disposed takes the
             shared tube node group with it
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_job_keys_seek_dispose_framing_tubes.py
+    bash run_blender.sh blender/tests/fabrication/test_job_keys_seek_dispose_framing_tubes.py
 """
 import math
 import os

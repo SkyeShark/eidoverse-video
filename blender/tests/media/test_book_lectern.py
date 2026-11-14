@@ -2,8 +2,8 @@
 angle, page_angle, board_th, lip, round, u_joint, cover['trim']; makeBookFromSpec's input and options).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_book_lectern.py -- --no-render
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/media/test_book_lectern.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/media/test_book_lectern.py
+    (the render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Three books from the template covers and six spreads, open throughout, a leaf turned over frames 14..30:
   flat      the defaults (angle 180, page_angle 179)

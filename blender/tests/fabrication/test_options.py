@@ -1,8 +1,7 @@
 """The options the WebGPU tests do not reach, exercised one by one (no render): each changes what it should, or is
 refused with the original's message.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_options.py
+    bash run_blender.sh blender/tests/fabrication/test_options.py
 """
 import math
 import os

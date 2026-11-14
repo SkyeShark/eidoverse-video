@@ -1,8 +1,7 @@
 """rig.drive_module: one module of a robot driven by a simple expression of a property and the frame (the robotics
 guide's recipe, on the G430 CNC), no render:
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/robotics/test_rig_drive_module.py
+    bash run_blender.sh blender/tests/robotics/test_rig_drive_module.py
 
 Checked: the gantry's X carriage follows its property along its axis; its lead screw turns 785.398 rad per metre of it
 (an 8 mm lead); the spindle turns at 16,000 rpm with the frame at 24 fps; every driver is a simple expression (no

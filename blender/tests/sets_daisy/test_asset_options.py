@@ -10,8 +10,9 @@ With --render it then builds both whole sets and renders one still per look (the
 the room, without the words; the corner's through its own camera at that look) into out/looks/.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_asset_options.py
-    ... HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 24 bash run_blender.sh \
-        <worktree>/blender/tests/sets_daisy/test_asset_options.py --render
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy/test_asset_options.py --render
+    (--render: a GPU job, about 6 GB of VRAM under a 24 GB memory cap; on a shared machine queue it with EIDO_GPU_WRAP:
+    blender/tests/_where.py)
 """
 
 import math

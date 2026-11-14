@@ -14,13 +14,16 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(REPO, 'blender'))
+sys.path.insert(0, os.path.join(REPO, 'blender', 'tests'))
+import _where  # noqa: E402
+
 _spec = importlib.util.spec_from_file_location('characters_stage', os.path.join(REPO, 'blender', 'tests', 'characters', '_stage.py'))
 CS = importlib.util.module_from_spec(_spec)       # the characters family's stage: clean_scene, probe_render, studio ...
 _spec.loader.exec_module(CS)
 
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
-MAIN = os.path.join(os.path.dirname(REPO), 'eidoverse-video-prealpha-0.01')
+MAIN = str(_where.main_checkout())          # the checkout holding the untracked node_modules/ and texture cache
 VRMS = os.path.join(REPO, 'eidoverse', 'assets', 'vrms')
 
 clean_scene, probe_render, studio_world, floor_disc, sun, camera, aim, still = (

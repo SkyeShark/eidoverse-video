@@ -25,7 +25,7 @@ import time
 import numpy as np
 from PIL import Image
 
-RES = r'C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/terrain/research'
+RES = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'research'))
 sys.path.insert(0, os.path.join(RES, 'tools'))
 sys.path.insert(0, os.path.join(RES, 'proto'))
 import terrain_metrics as TM  # noqa: E402

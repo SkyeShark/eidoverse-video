@@ -2,7 +2,8 @@
 box, the line feed), the keyboard and lamps, and probe renders at true scale.
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/voice_machines_b/test_teletype.py           # checks
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --render             # + stills
+    bash run_blender.sh <this> --render                                                                        # + stills
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import json
 import math

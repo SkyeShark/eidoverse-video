@@ -6,7 +6,8 @@ their light's level (the amber par keyed 600 W -> 60 W between frames 12 and 36:
 driver), the dark fixture's dark lens, and clears(): a narrow FOH profile passes under the arch, a wide one paints it
 (rendered alone in its own still so the painted arch shows).
     bash run_blender.sh blender/tests/look/test_stage.py --stage build
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <this> --stage render
+    bash run_blender.sh <this> --stage render
+    # --stage render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 import json
 import math

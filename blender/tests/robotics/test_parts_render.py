@@ -6,9 +6,8 @@ the same triangles in a full load of the donor), every other donor mesh hidden, 
     out/parts/<model>__<part>.png        320 x 240
     out/parts_render.json
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_parts_render.py
+    bash run_blender.sh blender/tests/robotics/test_parts_render.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import os

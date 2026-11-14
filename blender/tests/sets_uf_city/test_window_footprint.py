@@ -2,8 +2,8 @@
 against the truth, at two of the film's dive cameras:
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_window_footprint.py
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_window_footprint.py --render
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_window_footprint.py --render
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 The truth is what the GPU's fwidth measured on a plane: rays through a pixel and its right and lower neighbours hit the
 same facade quad (its UVs, in metres, are affine there), so |du_x| + |du_y| over the cell size is the window grid's

@@ -3,9 +3,10 @@ paints no reflection of its own) and the keyed update numerically, dispose it an
 (--render) render the set's five cameras plus the states (doors open, the post typing, the cap on a head, a recount).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_corridor.py
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_corridor_news/test_corridor.py --render [door,corridorWide,...] [--states]
         [--samples 16] [--size 960x540] [--save]
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import math
 import sys

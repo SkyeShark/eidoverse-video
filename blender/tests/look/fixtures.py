@@ -4,14 +4,15 @@ flora of a film come from their own families' ports (make_sky, make_terrain, cre
   - outdoor_world: a neutral uniform world (a flat pale-blue fill, no sky model: the sky is the sky family's) and a
     SUN light (look.lighting.sun) for the sun and its shadows. Exposure numbers measured under it are this fixture's,
     not a film's: a film meters under its own make_sky.
-  - ground: Poly Haven's leafy_grass set when the main checkout has it, else the ambientCG Ground103 soil set, else a
-    plain soil colour.
-  - meadow_dressing: Poly Haven scanned grasses and flowers (CC0, fetched for the Blender meadow into the main
-    checkout's work/claude_body/film/tools/dlss5nr/bmeadow/assets) scattered by a Geometry Nodes tree either side of
-    the walk; skipped when the folder is not there.
+  - ground: Poly Haven's leafy_grass set from the shared asset cache (textures/leafy_grass_2k) when it is there, else
+    the ambientCG Ground103 soil set, else a plain soil colour.
+  - meadow_dressing: Poly Haven scanned grasses and flowers (CC0), found where the flora family finds them
+    (vegetation.scanned_dir()), scattered by a Geometry Nodes tree either side of the walk; skipped when they are not
+    there.
   - robot: claude_robot.vrm (the VRM add-on), walking the stock walk.vrma in place, carried forward at 1.44 m/s
     (meadow.js's measured MW_SPEED), facing +Y.
 """
+import functools
 import math
 import os
 import sys
@@ -22,11 +23,41 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKTREE = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 ASSETS = os.path.join(WORKTREE, 'eidoverse', 'assets')
-MAIN = os.path.abspath(os.path.join(WORKTREE, '..', 'eidoverse-video-prealpha-0.01'))
-BMEADOW = os.path.join(MAIN, 'work', 'claude_body', 'film', 'tools', 'dlss5nr', 'bmeadow', 'assets')
 OUT = os.path.join(HERE, 'out')
 
 sys.path.insert(0, os.path.join(WORKTREE, 'blender'))
+sys.path.insert(0, os.path.join(WORKTREE, 'blender', 'tests'))
+import _where  # noqa: E402
+
+MAIN = str(_where.main_checkout())          # the checkout whose root holds the untracked Ground103 soil set
+
+
+MEADOW_PLANTS = ('grass_medium_01', 'grass_medium_02', 'dandelion_01', 'celandine_01', 'weed_plant_02')
+
+
+@functools.lru_cache(maxsize=None)
+def meadow_assets():
+    """The folder of the scanned meadow's Poly Haven plant sets (MEADOW_PLANTS, each a .blend in a subfolder of its own
+    name), found where the flora family finds them: vegetation.scanned_dir() ($EIDOBLEND_PH_ASSETS, else scanned_plants/
+    in the shared asset cache). None, after saying so, when none of them is there."""
+    from eidoblend.flora import vegetation
+    d = vegetation.scanned_dir()
+    if any(os.path.isdir(os.path.join(d, a)) for a in MEADOW_PLANTS):
+        return d
+    print(f"[skip] the scanned meadow's Poly Haven plant sets: none of {', '.join(MEADOW_PLANTS)} is in {d}", flush=True)
+    return None
+
+
+def leafy_grass():
+    """Poly Haven's leafy_grass texture set in the shared asset cache (textures/leafy_grass_2k, as fetch_texture.py
+    stores it): this checkout's cache, $EIDO_ASSET_CACHE, then the main checkout's. {} when it is in none of them."""
+    for base in (os.path.join(ASSETS, 'cache'), os.environ.get('EIDO_ASSET_CACHE'),
+                 os.path.join(MAIN, 'eidoverse', 'assets', 'cache')):
+        if base:
+            maps = _texture_set(os.path.join(base, 'textures', 'leafy_grass_2k'))
+            if maps.get('diff'):
+                return maps
+    return {}
 
 
 def args():
@@ -71,21 +102,26 @@ def outdoor_world(scene, elevation_deg=18.0, azimuth_deg=-70.0, sun_w_m2=4.5, su
 
 
 def _texture_set(folder):
-    """A Poly Haven texture set's maps in a folder: {diff, rough, nor_gl, ...} -> paths."""
+    """A Poly Haven texture set's maps in a folder: {diff, rough, nor_gl, ao, disp} -> paths. It reads both Poly Haven's
+    download names (<id>_diff_2k.jpg, <id>_nor_gl_2k.jpg) and fetch_texture.py's cache names (<id>_diff.jpg,
+    <id>_normal.jpg, OpenGL; <id>_displacement.jpg)."""
     out = {}
     if not os.path.isdir(folder):
         return out
+    names = {'diff': ('diff',), 'rough': ('rough',), 'nor_gl': ('nor_gl', 'normal'), 'ao': ('ao',),
+             'disp': ('disp', 'displacement')}
     for f in os.listdir(folder):
-        for k in ('diff', 'rough', 'nor_gl', 'ao', 'disp'):
-            if f'_{k}_' in f:
+        stem = os.path.splitext(f)[0]
+        for k, ns in names.items():
+            if any(f'_{n}_' in f or stem.endswith(f'_{n}') for n in ns):
                 out[k] = os.path.join(folder, f)
     return out
 
 
 def ground(scene, size=400.0, repeat_m=2.0):
-    """A ground plane: Poly Haven's leafy_grass set (fetched for the Blender meadow) when the main checkout has it,
-    else the Ground103 soil set from the main checkout's root, else a plain soil colour."""
-    leafy = _texture_set(os.path.join(BMEADOW, 'leafy_grass'))
+    """A ground plane: Poly Haven's leafy_grass set from the shared asset cache when it is there, else the Ground103
+    soil set from the main checkout's root, else a plain soil colour."""
+    leafy = leafy_grass()
     if leafy.get('diff'):
         return _ground_textured(scene, size, repeat_m, leafy['diff'], leafy.get('rough'), leafy.get('nor_gl'))
     return _ground_soil(scene, size, repeat_m)
@@ -177,8 +213,9 @@ def _append_collection(blend, name):
 def meadow_dressing(scene, path_x=0.0, half_gap=0.55, area=(30.0, 60.0), centre_y=0.0, density=9.0, seed=3):
     """Scanned grass and flowers either side of a walk along +Y at x = path_x (a 2 x half_gap strip kept short).
     Returns the scatter objects (exclude them from camera sightlines), or [] without the assets."""
-    if not os.path.isdir(BMEADOW):
-        print('[fixtures] no bmeadow assets: the meadow is bare soil', flush=True)
+    meadow = meadow_assets()
+    if meadow is None:
+        print('[fixtures] no meadow assets: the meadow is bare soil', flush=True)
         return []
     src = bpy.data.collections.new('meadow_sources')
     scene.collection.children.link(src)
@@ -187,11 +224,11 @@ def meadow_dressing(scene, path_x=0.0, half_gap=0.55, area=(30.0, 60.0), centre_
              ('weed_plant_02', 'weed_plant_02_LOD0', 1)]
     weights = []
     for folder, coll, wgt in picks:
-        blends = [f for f in os.listdir(os.path.join(BMEADOW, folder)) if f.endswith('.blend')] \
-            if os.path.isdir(os.path.join(BMEADOW, folder)) else []
+        blends = [f for f in os.listdir(os.path.join(meadow, folder)) if f.endswith('.blend')] \
+            if os.path.isdir(os.path.join(meadow, folder)) else []
         if not blends:
             continue
-        c = _append_collection(os.path.join(BMEADOW, folder, blends[0]), coll)
+        c = _append_collection(os.path.join(meadow, folder, blends[0]), coll)
         if c is None:
             continue
         for o in list(c.all_objects):

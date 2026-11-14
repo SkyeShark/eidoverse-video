@@ -1,7 +1,7 @@
 """The dynamic sphere colliders against the engine itself: the spheretest scene's water, numbers only.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_spheretest_parity.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/water3d/test_water3d_spheretest_parity.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 engine_trace_spheretest.mjs ran fluid_water.js on the spheretest scene (a 0.26 m ball held over the dam break while it
 settles, then lowered into the pool and swept through it, setSpheres once per frame) and wrote its volume sensor's

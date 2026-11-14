@@ -1,8 +1,8 @@
 """make_explosion_texture: the engine's mushroom-cloud detonation shader (makeExplosionTexture, from its GLSL edition;
 the TSL migration dropped it) rendered into images at the four beats of its 15-second loop, shown on a screen in an
 EEVEE scene, and baked into a sequence the screen plays.
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_explosion_texture.py [-- render=0]
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_explosion_texture.py [-- render=0]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 out/tex_explosion_beats.png: t = 0.5 s (the flash), 3.5 s (the cap rising), 9 s (the cloud billowing) and 14 s (the
 fade), each as a screen shows it (the default encoding: the engine's look, its sRGB render target reading the
 shader's gamma-encoded values as linear light). out/tex_explosion_screen.png: a monitor in a dark room

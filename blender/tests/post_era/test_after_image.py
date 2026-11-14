@@ -7,9 +7,9 @@ previous frame is its own trail, written to disk every frame and read back on th
                     feedback computed in numpy from the plain frames (trail = max(new, old x damp, old masked below
                     0.1)); opacity 0.5; damp keyed down mid-shot; a cut restarts the trail; the trail's disk and time
                     cost per frame; a sheet of the trail beside the plain frames.
-Run from the main checkout (the GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_after_image.py --stage sources
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_after_image.py --stage post
+Run from the main checkout (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_after_image.py --stage sources
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_after_image.py --stage post
 """
 import json
 import os

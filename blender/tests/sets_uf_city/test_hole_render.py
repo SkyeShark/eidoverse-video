@@ -2,9 +2,10 @@
 screens and tickers redrawn through their API, one of its camera moves keyed, and stills rendered from its eight
 camera moves.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
+    cd <main checkout> && \
         bash run_blender.sh <worktree>/blender/tests/sets_uf_city/test_hole_render.py [--no-render] [--shots a,b]
         [--samples 16] [--res 960x540] [--her] [--vrm path] [--power 1.0] [--compare] [--refs dir]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 Checks: the standalone extras; the light map painted with the hole's share only; billboards[0].set_canvas (a still),
 billboards[1].set_canvas(frames=...) (a keyed PNG sequence with its hold file), billboards[0].reset(), tickers[1]
@@ -14,7 +15,8 @@ the screens and tickers go back to their camps, and the renders use the camera m
 orbit, low, nadir, screens, enter) at mid-move, lit as the WebGPU probe stage lit its standalone hole (focal light at
 (0, 0, 3), gain 0.35 over 70 m; the clock at 80 s + the move's time). --her puts a performer on the mark (a VRM) for
 scale and for the performer-only lights. --compare writes out/compare_hole_alone_low.png beside the WebGPU probe
-stage's fin_standalone_hole.png (from --refs, default <cwd>/work/unknown_force/sets/probes).
+stage's fin_standalone_hole.png (made outside the repo: from --refs dir, else EIDO_UF_PROBES_DIR; with neither the
+compare is skipped).
 """
 import sys
 import time
@@ -22,6 +24,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
+sys.path.insert(0, str(HERE.parent))
+import _where  # noqa: E402  (blender/tests/_where.py: the WebGPU still, from outside the repo)
 
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
@@ -243,9 +247,14 @@ if RENDER:
             check(f'render hole alone {n}', np.isfinite(a).all() and lum > 0.01, f'{times[-1]:.1f} s, luma {lum:.3f}')
         else:
             check(f'render hole alone {n}', False, 'no file')
+refs = None
 if RENDER and '--compare' in args:
+    # the WebGPU still lives outside the repo: --refs dir, else EIDO_UF_PROBES_DIR; with neither the compare is skipped
+    refs = opt('--refs') or _where.external('EIDO_UF_PROBES_DIR', "the WebGPU probe stage's stills of UNKNOWN FORCE's "
+                                            'sets (fin_standalone_hole.png)')
+if refs is not None:
     from PIL import Image, ImageDraw
-    ref = Path(opt('--refs', str(Path.cwd() / 'work' / 'unknown_force' / 'sets' / 'probes'))) / 'fin_standalone_hole.png'
+    ref = Path(refs) / 'fin_standalone_hole.png'
     mine = OUT / 'probe_hole_alone_low.png'
     if ref.exists() and mine.exists():
         a = Image.open(ref).convert('RGB')

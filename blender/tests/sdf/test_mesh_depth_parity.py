@@ -1,7 +1,7 @@
 """The mesh is the field's surface, hole for hole: the hit distance of every pixel through the dual-contoured mesh
 (BVH ray casts) against the engine's march of the same field from the same camera.
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_mesh_depth_parity.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_mesh_depth_parity.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 The subject is the Menger sponge at four levels (uFoldCount = 4): a field full of tunnels, whose finest holes
 (25 mm) a 10 mm mesh resolves. Its distance estimator changes up to three times faster than distance, so the
 march is run twice: with conservative steps (0.3 of the DE, which cannot step over a wall: the field's true

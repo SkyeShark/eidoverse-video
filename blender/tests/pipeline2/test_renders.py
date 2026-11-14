@@ -1,7 +1,8 @@
 """test_renders.py: the harness-rest ports that make pictures, rendered so they can be looked at (960 x 540, 16 samples).
 
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh blender/tests/pipeline2/test_renders.py
+    bash run_blender.sh blender/tests/pipeline2/test_renders.py
         [--only hover,kit,windows,recipes,shelf,stairs,clips,rig] [--no-render]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
   hover    the stool and clock seated (place_on), then the stool moved 0.3 m: the clock hangs in the air and the
            hovering audit names it (round one's false negative): hover_seated.png, hover_moved.png

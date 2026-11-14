@@ -5,9 +5,9 @@
   mesh_fabrication  EXAMPLES['mesh_fabrication']: the rotary CNC carving the handle sample (needs the rotary package),
                     keyed and rendered at three frames only (its stock writes one VDB file per keyed frame)
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/fabrication/test_examples_render.py
+    bash run_blender.sh blender/tests/fabrication/test_examples_render.py
         [-- --no-render] [-- --only relief|mesh_fabrication]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 import os
 import shutil

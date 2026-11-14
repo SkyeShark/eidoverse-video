@@ -16,8 +16,9 @@ the stills give, reading the earlier frames back from disk (look/post/history.py
     the same frame after a cut (the echoes fall back to the current frame)
   - era_looks crt (the meadow, frames 53-60: the CRT persistence reads K = 7 frames back): the same
 
-Run after the sources of test_after_image.py, test_aeropittura.py and test_era_looks.py, from the main checkout:
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_film_render.py
+Run after the sources of test_after_image.py, test_aeropittura.py and test_era_looks.py, from the main checkout (a GPU
+job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_film_render.py
 """
 import glob
 import json

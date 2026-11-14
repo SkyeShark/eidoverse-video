@@ -1,7 +1,8 @@
 """tests/xr/test_xr_films.py: real films, exported for the headset page.
 
-    cd <main checkout> && HEAVY_VRAM_GB=6 bash work/claude_body/work/tmp/heavy.sh 16 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_films.py [example] [crows] [robot_walk] [stage]
+    bash run_blender.sh blender/tests/xr/test_xr_films.py [example] [crows] [robot_walk] [stage]
+    # a GPU job of an estimated 6 GB of VRAM and up to 16 GB of RAM; on a shared machine queue it with
+    # EIDO_GPU_WRAP (blender/tests/_where.py)
 
 Three films are other families' test outputs (eido_blender through the pipeline suite, the look family's stage),
 opened here READ ONLY when they are built and skipped, with the test that builds them, when they are not; my robot's

@@ -8,10 +8,8 @@ every sampled point (particle_targets.graph_colors), so the cloud looks like the
 Checks: each cloud's colours vary the way its material does (not one flat colour), and a cloud point takes the
 colour the material shows at the nearest point of the model's surface (a KD-tree over a dense colour sampling).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_procedural_material_cloud.py \
-        [-- out=verify] [no-render]
+    bash run_blender.sh blender/tests/particles/test_procedural_material_cloud.py [-- out=verify] [no-render]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import math

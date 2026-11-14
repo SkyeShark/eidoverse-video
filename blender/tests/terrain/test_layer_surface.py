@@ -1,8 +1,8 @@
 """Probe: layer_surface on geometry built in code (a lathed fountain basin, a bevelled stepped
 plinth, a column), before and after, in EEVEE.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/terrain/test_layer_surface.py
+    bash run_blender.sh blender/tests/terrain/test_layer_surface.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/layers_before.png and out/layers_after.png from the same camera, and prints the texel
 densities before/after normalising and the curvature ranges the masks read.

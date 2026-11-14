@@ -3,8 +3,9 @@ same frames with the per-sample white-noise pick as built, with no churn foam at
 per surface point (a 3D noise of the position, remapped to an even spread, so foam forms coherent lace and only its
 edges dither), at two sample counts.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 \
-        bash run_blender.sh <worktree>/blender/tests/water3d/probe_foam_pick.py -- blend=out/w3d_pour.blend frames=60,144
+    cd <main checkout> && bash run_blender.sh \
+        <worktree>/blender/tests/water3d/probe_foam_pick.py -- blend=out/w3d_pour.blend frames=60,144
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Writes out/probe_foam_<variant>_s<samples>_f####.png, crops of the stream and the splash, and a sheet.
 """

@@ -10,10 +10,11 @@ the reading-shot ease, focal / spare / vortex / spin / chevrons, the HAZARD guar
                     (keyed); focal and spare keyed on her every frame; Crali's vortex (dive); spin by a time driver;
                     chevrons turned; a cut at 8 (the cut frame equals the same frame with no echo); the echo split where
                     she moves; a non-finite focal refused, and a NaN keyed into the socket survived; NaN / Inf input
-                    pixels; the WebGPU lab's storm frame beside mine; the per-frame cost.
-Run from the main checkout (the GPU slot):
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_aeropittura.py --stage sources
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh <worktree>/blender/tests/post_era/test_aeropittura.py --stage looks
+                    pixels; the WebGPU lab's storm frame beside mine (lab1080_probe2.png, from EIDO_UF_LAB_DIR when
+                    it is set: it is made outside the repo); the per-frame cost.
+Run from the main checkout (GPU jobs; on a shared machine queue them with EIDO_GPU_WRAP: blender/tests/_where.py):
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_aeropittura.py --stage sources
+    bash run_blender.sh <worktree>/blender/tests/post_era/test_aeropittura.py --stage looks
 """
 import json
 import math
@@ -29,6 +30,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scenes as SC                                            # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _where                                                  # noqa: E402  (blender/tests/_where.py)
 from eidoblend.look import frame_stats as FS                    # noqa: E402
 
 A = SC.args()
@@ -37,7 +40,6 @@ OUT = os.path.join(SC.OUT, 'aero')
 SRC = os.path.join(OUT, 'src')
 F0, F1 = 1, 12
 CUT = 8
-LAB = os.path.join(SC.MAIN, 'work', 'unknown_force', 'lab', 'lab1080_probe2.png')
 FAIL, REPORT = [], {}
 os.makedirs(OUT, exist_ok=True)
 
@@ -175,9 +177,11 @@ def looks():
         labels.append(f'LOOKS.{name}')
         d = np.abs(FS.read_rgb(paths[-1]).astype(int) - FS.read_rgb(plain).astype(int))
         REPORT.setdefault('looks', {})[name] = round(float(d.mean()), 2)
-    if os.path.exists(LAB):
-        paths.append(LAB)
-        labels.append('WebGPU storm on its lab set (work/unknown_force/lab/lab1080_probe2.png)')
+    # the WebGPU lab's storm frame comes from outside the repo: EIDO_UF_LAB_DIR (without it, the sheet goes without)
+    lab = _where.external('EIDO_UF_LAB_DIR', "the WebGPU lab's renders of UNKNOWN FORCE (lab1080_probe2.png)")
+    if lab is not None and os.path.exists(os.path.join(lab, 'lab1080_probe2.png')):
+        paths.append(os.path.join(lab, 'lab1080_probe2.png'))
+        labels.append('WebGPU storm on its lab set (lab1080_probe2.png)')
     FS.sheet(paths, os.path.join(OUT, 'aero_looks_sheet.jpg'), cols=3, tile=640, labels=labels)
     check(REPORT['looks']['hush'] < REPORT['looks']['argue'] < REPORT['looks']['storm'],
           f"the looks rise hush < argue < storm (mean change from the plain frame {REPORT['looks']})")

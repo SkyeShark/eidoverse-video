@@ -1,10 +1,11 @@
 """The engine's own SDF check scenes and smoke tests, rebuilt in EEVEE and set beside the frames the engine rendered.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        <worktree>/blender/tests/sdf/test_engine_check_scenes.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sdf/test_engine_check_scenes.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-The WebGL engine kept regression scenes for its SDF examples in the production workspace's _reality_check folder,
-with the frames it rendered (three.js, ACES tone mapping). Two use this step's examples:
+The WebGL engine kept regression scenes for its SDF examples with the frames it rendered (three.js, ACES tone
+mapping): reference renders that live outside this repo, read from the folder $EIDO_ENGINE_CHECK_DIR names (hdri.hdr,
+<scene>_frame.jpg). Two use this step's examples:
   sdf_hege_closeup    Mr. Hege's jacket close up, under the city HDRI, a 1.4 key light from (5, 9, 4), a grey
                       ground (roughness 0.3, metalness 0.2) at y = -1.35, a 28 degree camera 2.4 m from (0, 0.3, 0)
   sdf_all_examples    Mr. Hege and the red shoggoth (and two sedans, the vehicles step's) on that ground, the camera
@@ -17,12 +18,13 @@ the engine's frame right. The engine's SDF shade() lit itself with hand lights a
 and HDRI light the baked materials, and the tone curve is AgX, not ACES. PASS lines: the scenes build and render;
 in sdf_all_examples the red skin (Mr. Hege's head and tentacles, the shoggoth, and their reflections) stands where
 the engine drew it, at the same size (centre within 25 px, pixel count within a factor of two).
-The workspace's two screen smoke tests come too: sdf_tex_smoketest (the four recipes on a wall of monitors) and
-sdf_explosion_smoketest (the detonation on an unlit plane); their PASS lines hold each screen's brightness, and the
+The engine's two screen smoke tests come too, their frames read from the folder above that one:
+sdf_tex_smoketest/preview.jpg (the four recipes on a wall of monitors) and sdf_explosion_smoketest/v_t2.5s.jpg (the
+detonation on an unlit plane); their PASS lines hold each screen's brightness, and the
 detonation's sky, to the engine's frame, which the default encoding (the engine's sRGB render target) reproduces.
 out/engine_tex_smoketest.png: EEVEE, the engine's frame, and EEVEE with encoding='srgb' (darker: the shader's values
 read as display colours). out/engine_explosion_smoketest.png: EEVEE beside the engine.
-Needs the production workspace (read only); without it the test prints SKIP.
+Needs those reference renders (read only); without $EIDO_ENGINE_CHECK_DIR the test prints SKIP.
 """
 
 import math
@@ -39,8 +41,12 @@ from mathutils import Vector  # noqa: E402
 
 from eidoblend import sdf  # noqa: E402
 
-CHECK = r'C:/Users/sdn52/OneDrive/Desktop/new_twitter_harness/generated_videos/ffmpeg/workspace/_reality_check'
-HDRI = os.path.join(CHECK, 'hdri.hdr')
+sys.path.insert(0, os.path.dirname(C.HERE))
+import _where  # noqa: E402
+
+CHECK = _where.external('EIDO_ENGINE_CHECK_DIR', "the WebGL engine's SDF check scenes (hdri.hdr and the frames it "
+                        "rendered, <scene>_frame.jpg)")
+HDRI = os.path.join(CHECK, 'hdri.hdr') if CHECK else None
 W, H = 960, 540
 CACHE = os.path.join(C.OUT, 'cache_engine_scenes')
 
@@ -117,8 +123,9 @@ def read_rgb(path):
     return np.asarray(oiio.ImageBuf(path).get_pixels(oiio.FLOAT))[..., :3]
 
 
-if not os.path.exists(HDRI):
-    print(f'SKIP engine check scenes: {CHECK} is not on this machine', flush=True)
+if HDRI is None or not os.path.exists(HDRI):
+    print(f'SKIP engine check scenes: {HDRI} is not there' if HDRI else
+          'SKIP engine check scenes: no check-scene folder (EIDO_ENGINE_CHECK_DIR)', flush=True)
     C.summary()
     sys.exit(0)
 
@@ -167,7 +174,7 @@ C.sheet([p, os.path.join(C.OUT, '_engine_all_examples_engine.png')],
         os.path.join(C.OUT, 'engine_all_examples.png'), cols=2)
 
 # ============================================================================== the screens' smoke tests ==========
-# workspace/sdf_tex_smoketest: the four recipes on a 2 x 2 wall of monitors (512 x 384 textures, MeshStandardMaterial
+# smoke test sdf_tex_smoketest: the four recipes on a 2 x 2 wall of monitors (512 x 384 textures, MeshStandardMaterial
 # with the texture as map and emissiveMap, emissive white at 0.85), a 1.5 key light, background #0a0d18, the camera
 # at (0, 0, 5.6) with a 45 degree view; ACES at exposure 1.1 (here AgX, exposure +0.14 stops)
 SMOKE = os.path.dirname(CHECK)
@@ -266,7 +273,7 @@ if os.path.exists(tex_frame):
 else:
     print(f'SKIP sdf_tex_smoketest: {tex_frame} is not on this machine', flush=True)
 
-# workspace/sdf_explosion_smoketest: the detonation (1024 x 1024, its clock at 3 x the film's) on a 4.4 m plane in
+# smoke test sdf_explosion_smoketest: the detonation (1024 x 1024, its clock at 3 x the film's) on a 4.4 m plane in
 # MeshBasicMaterial (the texture, unlit), background #08080c, the camera at (0, 0, 4) with a 45 degree view; the kept
 # frame v_t2.5s.jpg is film time 2.5 s, shader time 7.5 s
 ex_frame = os.path.join(SMOKE, 'sdf_explosion_smoketest', 'v_t2.5s.jpg')

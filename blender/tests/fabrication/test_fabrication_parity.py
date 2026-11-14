@@ -5,8 +5,7 @@ port and compares: FeedPath timing and samples, FilamentPath dwells, swept cutte
 removal (volume, events, final heights), the relief program, the original relief sample, slicing (layers, perimeter
 and infill lengths per layer, print time) and mesh sections. three's (x, y, z) is Blender's (x, -z, y).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/fabrication/test_fabrication_parity.py
+    bash run_blender.sh blender/tests/fabrication/test_fabrication_parity.py
 """
 import math
 import os

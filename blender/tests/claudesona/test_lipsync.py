@@ -14,9 +14,8 @@ Checks:
 Outputs: out/lipsync_sheet.png (the three faces at four sung moments, front), out/lipsync_side.png (the same at 40 deg),
 out/lipsync_sung_line.mp4 (H.264 + AAC, the first 4.5 s, 960x400; --no-video skips it).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_lipsync.py [--no-render] [--no-video]
+    bash run_blender.sh blender/tests/claudesona/test_lipsync.py [--no-render] [--no-video]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

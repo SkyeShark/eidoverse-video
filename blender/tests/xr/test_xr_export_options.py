@@ -1,7 +1,7 @@
 """tests/xr/test_xr_export_options.py: the export's options the other xr tests leave at their defaults, on a small set.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/xr/test_xr_export_options.py
+    bash run_blender.sh blender/tests/xr/test_xr_export_options.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 
   export_xr  motion_step=2 (keys every second frame), max_shape_keys=6 (a Geometry Nodes wave over 49 frames: 6
              morph targets at most), cameras=False (no camera in the GLB), page=False (no index.html),

@@ -16,10 +16,9 @@ display match for additive sprites.
   display     create_particles_compose: the additive sprites' light shown as three's ACESFilmic showed it, under AgX
               (stills with the match off and on)
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 8 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_particles_presets.py \
-        [-- parts=presets,header,motes,uniforms,options,parity,display] [no-render]"""
+    bash run_blender.sh blender/tests/particles/test_particles_presets.py \
+        [-- parts=presets,header,motes,uniforms,options,parity,display] [no-render]
+    (a GPU job: 4 GB VRAM, 8 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)"""
 
 import math
 import os

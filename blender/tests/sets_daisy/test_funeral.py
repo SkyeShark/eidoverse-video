@@ -5,11 +5,12 @@ frames), makes the film's own cameras (one per shot, cut on bar lines), the fog 
 claudesona at her mark; checks the clock, the curves, the placements and the keys numerically; saves the .blend; and
 renders one still per shot from the film's own camera (the middle of each shot) plus the story's beats.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_daisy/test_funeral.py [-- --only 0,5,9 --no-render --no-her --no-tl --exposure 0.0]
+    (a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 
 or in two steps, the GPU slot for the renders alone: test_funeral.py --no-render (CPU), then render_saved.py funeral.
-With the DAISY film's timeline on the machine the eulogy types on Opus 3's captions, as in the film (--no-tl: the
+With the film's timeline (DAISY_TIMELINE) the eulogy types on Opus 3's captions, as in the DAISY film (--no-tl: the
 default BEATS). Writes out/funeral/funeral_<name>.png, out/funeral/funeral.blend and out/funeral/stills.json. Judge:
 the fog bridge (orange span in luminous fog, the sun a pale disc, sodium lamps); the vigil (candles, the bier, the
 mannequins and Opus 3's lace, the screen's note, the cream insides of the pendant shades); the power failure into
@@ -41,11 +42,11 @@ sc = C.clean_scene(FPS, (F0, F1))
 C.probe_look(sc, exposure=float(A.get('exposure', 0.0)))
 sc.eevee.shadow_pool_size = '2048'                         # the vigil's shadowed lights fill 1024 MB of tiles
 
-# the film's own timeline (outside the repo, read if present): the eulogy re-times to Opus 3's spoken captions, so the
-# stills compare frame for frame with the DAISY film (--no-tl keeps the default BEATS)
-TLP = os.environ.get('DAISY_TIMELINE', 'E:/eidoverse-video-desktop-work-folder/daisy/out/daisy_timeline.json')
+# the film's own timeline (outside the repo: DAISY_TIMELINE, read if given): the eulogy re-times to Opus 3's spoken
+# captions, so the stills compare frame for frame with the DAISY film (--no-tl keeps the default BEATS)
+TLP = None if 'no-tl' in A['flags'] else C.film_timeline()
 TL = None
-if os.path.isfile(TLP) and 'no-tl' not in A['flags']:
+if TLP is not None and os.path.isfile(TLP):
     import json
     with open(TLP, encoding='utf-8') as f:
         TL = json.load(f)
@@ -153,7 +154,8 @@ if TL is not None:
             and all(a[0] < a[1] < a[2] for a in L) and L[0][1] < L[1][1] < L[2][1] < FU.BEATS['erupt'],
             ' '.join(f'[{a[0]:.2f} {a[1]:.2f} {a[2]:.2f}]' for a in L))
 else:
-    print(f'[funeral] no film timeline at {TLP} (or --no-tl): the eulogy keeps the default BEATS')
+    print(f'[funeral] no film timeline ({TLP or "DAISY_TIMELINE not given"}, or --no-tl): the eulogy keeps the default '
+          'BEATS')
 
 # the cameras frame her: her mark inside the frame of the shots that aim at her
 mk = F.mark_at(5.0)['pos']

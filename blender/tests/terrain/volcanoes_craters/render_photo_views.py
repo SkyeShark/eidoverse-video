@@ -3,9 +3,9 @@ real DEM (the real_place recipe) and on the generated recipe, from the same came
 distance, direction and height - with the photo's focal length and aspect, grey clay under make_sky daylight (the
 reference rig's look: Earth 15:30, cumulus, the sun 70 degrees left of the view), at most 960 x 540, 16 samples.
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/terrain/volcanoes_craters/render_photo_views.py --place mount_fuji --seed 1 \\
+    bash run_blender.sh blender/tests/terrain/volcanoes_craters/render_photo_views.py --place mount_fuji --seed 1 \\
         [--only real|gen] [--textured]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 Cameras (VIEWS, set by looking at each photo): `cam` is the camera relative to the landform's centre (metres east,
 north), from the photo's recorded location (or the estimated one in sources.json); `cam_z` its height: ['ground', m]

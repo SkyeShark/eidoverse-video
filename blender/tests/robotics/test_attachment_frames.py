@@ -7,8 +7,7 @@ compared with the declared port frames. Also: an intentional twist turns about t
 moving it; a missing, zero, NaN or parallel authored axis is refused at load (and the refused load leaves nothing in
 the file); an invalid attachment (NaN twist, a singular mount matrix) cannot reparent the child.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_attachment_frames.py
+    bash run_blender.sh blender/tests/robotics/test_attachment_frames.py
 """
 
 import math

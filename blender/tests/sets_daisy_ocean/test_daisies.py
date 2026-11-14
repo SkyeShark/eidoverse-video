@@ -4,8 +4,8 @@ and rendered: open by day, with a beat's pulse, shut at dusk. The swaying superb
 9.7 million vertices: its render wants a 32 GB memory cap (at 12 GB Blender's draw cache runs out of memory).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy_ocean/test_daisies.py --no-render
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 32 bash run_blender.sh \
-        <worktree>/blender/tests/sets_daisy_ocean/test_daisies.py
+    cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_daisy_ocean/test_daisies.py
+    (the render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import importlib.util
 import json

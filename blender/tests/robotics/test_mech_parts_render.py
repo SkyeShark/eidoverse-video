@@ -8,9 +8,8 @@ reference values); the beacon / stack light keys follow update(t); RoboticArm.fo
 
     out/mech_parts_lineup.png, out/mech_parts_lineup_f30.png, out/legacy_arm_tools.png, out/legacy_arm_f60.png
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/robotics/test_mech_parts_render.py
+    bash run_blender.sh blender/tests/robotics/test_mech_parts_render.py
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import os

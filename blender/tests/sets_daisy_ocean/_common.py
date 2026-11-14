@@ -12,9 +12,12 @@ REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 BLENDER_DIR = os.path.join(REPO, 'blender')
 if BLENDER_DIR not in sys.path:
     sys.path.insert(0, BLENDER_DIR)
+sys.path.insert(0, os.path.join(BLENDER_DIR, 'tests'))
+import _where  # noqa: E402  (blender/tests/_where.py)
+
 OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
-MAIN = os.path.join(os.path.dirname(REPO), 'eidoverse-video-prealpha-0.01')
+MAIN = str(_where.main_checkout())          # the checkout holding the untracked node_modules/
 THREE_BUILD = os.path.join(MAIN, 'node_modules', 'three', 'build')
 JS_DUMP = os.path.join(OUT, 'ocean_js.json')
 

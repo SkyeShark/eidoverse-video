@@ -11,9 +11,8 @@ Checks:
     the claudesona's eye bones carry no vertices (its eyes are painted on the face plate): reported
 Stills: out/lookat_aletheia_sheet.png (the eyes on a lit target: centre, her left, her right, up, down; close up).
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/claudesona/test_lookat.py [--no-render]
+    bash run_blender.sh blender/tests/claudesona/test_lookat.py [--no-render]
+    # a GPU job; on a shared machine queue it with EIDO_GPU_WRAP (blender/tests/_where.py)
 """
 
 import json

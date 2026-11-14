@@ -3,8 +3,9 @@ with the same roles), the keyed update and the Geometry Nodes poses numerically,
 cameras plus the states (the tag half sprayed, floods off, the chyron in its overlay).
 
     cd <main checkout> && bash run_blender.sh <worktree>/blender/tests/sets_uf_corridor_news/test_news.py
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
+    cd <main checkout> && bash run_blender.sh \
         <worktree>/blender/tests/sets_uf_corridor_news/test_news.py --render [fence,crowd,...] [--states] [--samples 16]
+    (--render: a GPU job; on a shared machine queue it with EIDO_GPU_WRAP: blender/tests/_where.py)
 """
 import math
 import sys

@@ -10,7 +10,7 @@ const context = { configure() {}, unconfigure() {}, getCurrentTexture: fakeTex }
 const canvas = { width: W, height: H, style: {}, addEventListener() {}, removeEventListener() {}, getContext: () => context };
 const renderer = new THREE.WebGPURenderer({ canvas, context, adapter, device, antialias: false });
 await renderer.init();
-const { createWaterSim } = await import('file:///C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/eidoverse/fluid_water.js');
+const { createWaterSim } = await import(new URL('../../../eidoverse/fluid_water.js', import.meta.url).href);
 const opts = JSON.parse(args.opts || '{}');
 const water = await createWaterSim(renderer, Object.assign({ gridSize: [64, 48, 64], worldSize: [2, 1.5, 2], columnDepth: 0.62, measureVolume: true }, opts));
 const T = Number(args.T || 6), fps = Number(args.fps || 30), every = Number(args.every || 15);

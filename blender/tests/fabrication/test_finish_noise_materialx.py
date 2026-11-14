@@ -10,8 +10,8 @@ arithmetic) at the pixel's centre. EEVEE's render buffers hold half floats (a st
 emits Fac in red and fract(64 Fac) in green, and Fac is rebuilt from the two as (round(64 R - G) + G) / 64, good to
 about 1e-5. Writes out/noise_materialx/ (the EXR and the difference over that precision as a PNG).
 
-    cd <main checkout> && HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \\
-        <worktree>/blender/tests/fabrication/test_finish_noise_materialx.py
+    bash run_blender.sh blender/tests/fabrication/test_finish_noise_materialx.py
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os

@@ -11,8 +11,7 @@ no render):
     hidden              her meshes kept out of the render                no record
     no chains           my robot body                                    no record
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    bash run_blender.sh <worktree>/blender/tests/harness/test_spring_audit.py
+    bash run_blender.sh blender/tests/harness/test_spring_audit.py
 """
 import os
 import sys

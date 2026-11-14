@@ -4,8 +4,8 @@
            [--params '{"age_kyr": 200}'] [--stage-params '{"volcano_age": {"K": 3e-6}}'] [--focus x,y]
     python blender/tests/terrain/volcanoes_craters/vc.py judge <tag> [<tag> ...]
 
-gen writes out/volcanoes_craters/gen/job_<tag>.json, runs gen.py in Blender (judge/run.py's slot runner: heavy.sh,
-then heavy2.sh, heavy3.sh, retrying every 60 s while all are busy), then judges every item. judge measures a saved
+gen writes out/volcanoes_craters/gen/job_<tag>.json, runs gen.py in Blender (judge/run.py's runner: a GPU job, queued
+by EIDO_GPU_WRAP when set, retried every 60 s while every slot is busy), then judges every item. judge measures a saved
 field against its reference with the judge package (judge.judge: the generic numbers and bands, the family's),
 writes <tag>_verdict.json, the level seams (<tag>_seams.json: |dh| at each child's edge, the slope jump) and
 <tag>_sheet.png: the reference's hillshade beside the generated main level's at the reference pixel (north up), a

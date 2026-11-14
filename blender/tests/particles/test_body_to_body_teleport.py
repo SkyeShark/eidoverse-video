@@ -7,10 +7,8 @@ reform lands on the pose she has on each frame and the cloud keeps dancing with 
 Checks (PASS/FAIL): the cloud is the robot's live surface at the dissolve; once formed it is HER live surface at two
 different frames (it moves with her dance); its colours are hers there.
 
-    cd C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-prealpha-0.01
-    HEAVY_VRAM_GB=4 bash work/claude_body/work/tmp/heavy.sh 12 bash run_blender.sh \
-        C:/Users/sdn52/OneDrive/Desktop/eidoverse-video-blender/blender/tests/particles/test_body_to_body_teleport.py \
-        [-- out=verify] [no-render]
+    bash run_blender.sh blender/tests/particles/test_body_to_body_teleport.py [-- out=verify] [no-render]
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 """
 
 import os
