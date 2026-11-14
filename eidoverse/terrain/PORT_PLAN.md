@@ -424,6 +424,9 @@ its judge's measures (numpy and Pillow, run on the port's renders: one judge aga
 
 ### 4.1 The choice
 
+Decided 2026-11-14: raw WGSL compute, the faster of the two measured ways (the edition's owner chose it on these
+numbers; the materials stay TSL NodeMaterials).
+
 Three ways to run the kernels were on the table. I measured the first two.
 
 - **Raw WGSL compute pipelines on the scene's `GPUDevice`** (chosen). The kernels are transcriptions of GLSL that
