@@ -1,0 +1,826 @@
+{
+ "machine": "NVIDIA GeForce RTX 5090 Laptop GPU, Windows 11, Deno 2.8.1 WebGPU (wgpu), 2026-11-13; a shared machine: every probe ran through the GPU queue, other sessions' jobs in the other slots",
+ "gpu_device.mjs": {
+  "deno": "2.8.1",
+  "adapter": {
+   "vendor": "4318",
+   "architecture": "",
+   "device": "11352",
+   "description": "NVIDIA GeForce RTX 5090 Laptop GPU",
+   "isFallbackAdapter": false
+  },
+  "adapter_features": [
+   "bgra8unorm-storage",
+   "depth-clip-control",
+   "depth32float-stencil8",
+   "dual-source-blending",
+   "float32-filterable",
+   "immediate-data",
+   "indirect-first-instance",
+   "rg11b10ufloat-renderable",
+   "shader-f16",
+   "texture-compression-bc",
+   "texture-compression-bc-sliced-3d",
+   "timestamp-query"
+  ],
+  "device_features": [
+   "float32-filterable",
+   "shader-f16",
+   "timestamp-query"
+  ],
+  "limits": {
+   "maxBufferSize": 4503599627370496,
+   "maxStorageBufferBindingSize": 2147483644,
+   "maxUniformBufferBindingSize": 65536,
+   "minUniformBufferOffsetAlignment": 256,
+   "minStorageBufferOffsetAlignment": 256,
+   "maxTextureDimension2D": 8192,
+   "maxComputeWorkgroupSizeX": 256,
+   "maxComputeWorkgroupSizeY": 256,
+   "maxComputeInvocationsPerWorkgroup": 1024,
+   "maxComputeWorkgroupStorageSize": 49152,
+   "maxComputeWorkgroupsPerDimension": 65535,
+   "maxStorageBuffersPerShaderStage": 1048576,
+   "maxStorageTexturesPerShaderStage": 1048576,
+   "maxSampledTexturesPerShaderStage": 1048576,
+   "maxBindGroups": 8,
+   "maxBindingsPerBindGroup": 1000,
+   "maxDynamicUniformBuffersPerPipelineLayout": 8
+  },
+  "read_write_storage_texture": {
+   "r32float": true,
+   "rgba32float": true,
+   "rg32float": true
+  },
+  "wgsl_language_features": null
+ },
+ "gpu_runner_bench.mjs": {
+  "adapter": "NVIDIA GeForce RTX 5090 Laptop GPU",
+  "deno": "2.8.1",
+  "timestamp_query": true,
+  "buffers": {
+   "512": {
+    "ms_per_step": 0.0129,
+    "js_issue_ms_per_dispatch": 0.0089,
+    "gpu_timestamp_ms_per_step": 0.0059,
+    "readback_rgba32f_ms": 35.8,
+    "readback_r32f_ms": 21.2,
+    "upload_rgba32f_ms": 18,
+    "deterministic_200_steps": true,
+    "finite": true
+   },
+   "1024": {
+    "ms_per_step": 0.0098,
+    "js_issue_ms_per_dispatch": 0.0058,
+    "gpu_timestamp_ms_per_step": 0.0263,
+    "readback_rgba32f_ms": 86.2,
+    "readback_r32f_ms": 28.6,
+    "upload_rgba32f_ms": 24.7,
+    "deterministic_200_steps": true,
+    "finite": true
+   },
+   "2048": {
+    "ms_per_step": 0.7602,
+    "js_issue_ms_per_dispatch": 0.0137,
+    "gpu_timestamp_ms_per_step": 0.2775,
+    "readback_rgba32f_ms": 354.9,
+    "readback_r32f_ms": 87.9,
+    "upload_rgba32f_ms": 79.4,
+    "deterministic_200_steps": true,
+    "finite": true
+   },
+   "4096": {
+    "ms_per_step": -0.2207,
+    "js_issue_ms_per_dispatch": 0.0284,
+    "gpu_timestamp_ms_per_step": 0.7661,
+    "readback_rgba32f_ms": 1632.5,
+    "readback_r32f_ms": 888,
+    "upload_rgba32f_ms": 271.6,
+    "deterministic_200_steps": true,
+    "finite": true
+   }
+  },
+  "textures": {
+   "512": {
+    "ms_per_step": 0.0198,
+    "gpu_timestamp_ms_per_step": 0.0094,
+    "bit_identical_to_buffers_200_steps": true
+   },
+   "1024": {
+    "ms_per_step": 0.0452,
+    "gpu_timestamp_ms_per_step": 0.0353,
+    "bit_identical_to_buffers_200_steps": true
+   },
+   "2048": {
+    "ms_per_step": 0.3613,
+    "gpu_timestamp_ms_per_step": 0.2606,
+    "bit_identical_to_buffers_200_steps": true
+   }
+  },
+  "wall": {
+   "512": {
+    "wall_ms_per_step": 0.0317,
+    "js_issue_ms_per_dispatch": 0.0206
+   },
+   "1024": {
+    "wall_ms_per_step": 0.0469,
+    "js_issue_ms_per_dispatch": 0.0124
+   },
+   "2048": {
+    "wall_ms_per_step": 0.3237,
+    "js_issue_ms_per_dispatch": 0.0084
+   }
+  },
+  "readback": {
+   "small_16B_ms_median": 16.72,
+   "small_16B_ms_min": 14.55,
+   "1024_r32f_ms_median": 27.8,
+   "1024_rgba32f_ms_median": 73.6,
+   "2048_r32f_ms_median": 63.9,
+   "2048_rgba32f_ms_median": 215.7,
+   "empty_submit_roundtrip_ms_median": 16.58
+  },
+  "one_submit_per_dispatch_1024": {
+   "ms_per_dispatch_wall": 0.7217
+  },
+  "memory_7_levels_2048": {
+   "buffers": 177,
+   "gib": 3.19,
+   "allocate_and_clear_ms": 4162,
+   "validation_error": null,
+   "oom_error": null
+  },
+  "note": "buffers[N].ms_per_step is the wall-clock (T(2S) - T(S)) / S method of the Blender probe; on this machine the readback after the loop varies by tens of ms, so it is noise at 2048^2 and 4096^2 (negative at 4096^2). The GPU time is gpu_timestamp_ms_per_step (timestamp-query over a pass of S steps); the loop cost without readback is wall[N].",
+  "first_run_gpu_timestamp_ms_per_step": {
+   "512": 0.0066,
+   "1024": 0.0267,
+   "2048": 0.1991,
+   "4096": 0.8485
+  }
+ },
+ "tsl_compute_bench.mjs": {
+  "adapter": "NVIDIA GeForce RTX 5090 Laptop GPU",
+  "three": "184",
+  "tsl": {
+   "512": {
+    "first_two_calls_ms": 198.1,
+    "js_ms_per_compute_call": 0.0574,
+    "wall_ms_per_step_compute": 0.092,
+    "wall_ms_per_step_computeAsync": 0.2762,
+    "readback_rgba32f_ms": 34.2,
+    "finite": true
+   },
+   "1024": {
+    "first_two_calls_ms": 70.9,
+    "js_ms_per_compute_call": 0.0324,
+    "wall_ms_per_step_compute": 0.0614,
+    "wall_ms_per_step_computeAsync": 0.2519,
+    "readback_rgba32f_ms": 42.9,
+    "finite": true
+   },
+   "2048": {
+    "first_two_calls_ms": 568.1,
+    "js_ms_per_compute_call": 0.5623,
+    "wall_ms_per_step_compute": 0.6064,
+    "wall_ms_per_step_computeAsync": 0.5446,
+    "readback_rgba32f_ms": 509,
+    "finite": true
+   }
+  },
+  "tsl_vs_wgsl_512": {
+   "one_step": {
+    "identical_fraction_h": 0,
+    "worst_abs_h": 0.10000038146972656,
+    "worst_over_range_h": 0.001001
+   },
+   "steps_200": {
+    "identical_fraction_h": 0,
+    "worst_abs_h": 65.01360702514648,
+    "worst_over_range_h": 0.3959
+   }
+  },
+  "first_run_js_ms_per_compute_call": {
+   "512": 0.0883,
+   "1024": 0.5422,
+   "2048": 0.2187
+  },
+  "first_run_wall_ms_per_step_compute": {
+   "512": 0.2832,
+   "1024": 0.6035,
+   "2048": 0.2894
+  },
+  "note": "tsl_vs_wgsl_512 compares the TSL kernel with the raw WGSL one inside this long session (three sizes compiled first): after one step the TSL read differs by exactly one step's uplift (0.1 m), as if the readback missed the dispatch. In a fresh process (tsl_vs_wgsl_fresh.mjs, below) the same TSL kernel is bit-identical to the WGSL kernel at 64^2 and 512^2 and within 1.1e-7 of a float64 reference, and a first renderer.compute() / computeAsync() call runs. The stale read is not explained; it is recorded as an observation, not as a property of TSL."
+ },
+ "kernel_parity.mjs": {
+  "adapter": "NVIDIA GeForce RTX 5090 Laptop GPU",
+  "deno": "2.8.1",
+  "cases": {
+   "flow_weights open": {
+    "ok": true,
+    "worst": 1.227e-07
+   },
+   "flow_weights p=1.3 open": {
+    "ok": true,
+    "worst": 1.942e-07
+   },
+   "route_incise n=1 D-infinity open": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise n=1 D8 open": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise pits filled=1 open": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise pits filled=0 open": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise n=1.5 explicit open": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise column open": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "creep cap=5 open": {
+    "ok": true,
+    "worst": 1.413e-07
+   },
+   "creep cap=1 open": {
+    "ok": true,
+    "worst": 8.737e-08
+   },
+   "threshold_excess open": {
+    "ok": true,
+    "worst": 1.881e-07
+   },
+   "threshold isotropic loose=0 open": {
+    "ok": true,
+    "worst": 7.08e-08
+   },
+   "threshold pair loose=0 open": {
+    "ok": true,
+    "worst": 4.768e-07
+   },
+   "threshold isotropic loose=1 open": {
+    "ok": true,
+    "worst": 9.537e-08
+   },
+   "threshold pair loose=1 open": {
+    "ok": true,
+    "worst": 1.192e-07
+   },
+   "flow_weights periodic": {
+    "ok": true,
+    "worst": 9.564e-08
+   },
+   "flow_weights p=1.3 periodic": {
+    "ok": true,
+    "worst": 1.357e-07
+   },
+   "route_incise n=1 D-infinity periodic": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise n=1 D8 periodic": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise pits filled=1 periodic": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise pits filled=0 periodic": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise n=1.5 explicit periodic": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise column periodic": {
+    "ok": true,
+    "worst": 2.292e-05
+   },
+   "creep cap=5 periodic": {
+    "ok": true,
+    "worst": 1.237e-07
+   },
+   "creep cap=1 periodic": {
+    "ok": true,
+    "worst": 9.55e-08
+   },
+   "threshold_excess periodic": {
+    "ok": true,
+    "worst": 1.839e-07
+   },
+   "threshold isotropic loose=0 periodic": {
+    "ok": true,
+    "worst": 5.513e-08
+   },
+   "threshold pair loose=0 periodic": {
+    "ok": true,
+    "worst": 4.768e-07
+   },
+   "threshold isotropic loose=1 periodic": {
+    "ok": true,
+    "worst": 9.537e-08
+   },
+   "threshold pair loose=1 periodic": {
+    "ok": true,
+    "worst": 1.192e-07
+   },
+   "flow_weights pinned": {
+    "ok": true,
+    "worst": 1.227e-07
+   },
+   "flow_weights p=1.3 pinned": {
+    "ok": true,
+    "worst": 1.942e-07
+   },
+   "route_incise n=1 D-infinity pinned": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise n=1 D8 pinned": {
+    "ok": true,
+    "worst": 3.056e-05
+   },
+   "route_incise pits filled=1 pinned": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise pits filled=0 pinned": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise n=1.5 explicit pinned": {
+    "ok": true,
+    "worst": 1.528e-05
+   },
+   "route_incise column pinned": {
+    "ok": true,
+    "worst": 2.292e-05
+   },
+   "creep cap=5 pinned": {
+    "ok": true,
+    "worst": 1.418e-07
+   },
+   "creep cap=1 pinned": {
+    "ok": true,
+    "worst": 7.653e-08
+   },
+   "threshold_excess pinned": {
+    "ok": true,
+    "worst": 1.881e-07
+   },
+   "threshold isotropic loose=0 pinned": {
+    "ok": true,
+    "worst": 6.268e-07
+   },
+   "threshold pair loose=0 pinned": {
+    "ok": true,
+    "worst": 5.723e-07
+   },
+   "threshold isotropic loose=1 pinned": {
+    "ok": true,
+    "worst": 1.357e-06
+   },
+   "threshold pair loose=1 pinned": {
+    "ok": true,
+    "worst": 2.617e-06
+   },
+   "creep_layers": {
+    "ok": true,
+    "worst": 7.133e-08
+   }
+  },
+  "failed": [],
+  "kernel_cases_worst": 3.056e-05,
+  "hashes_bit_exact": {
+   "pcg": true,
+   "pcg2": true,
+   "pcg3": true,
+   "cell_hash": true,
+   "u01": true,
+   "ekigar_hash2_integer": true,
+   "ekigar_hash2_gradient_vs_float32_arithmetic": false,
+   "ekigar_hash2_gradient_vs_numpy_float64_worst_ulp": 64
+  },
+  "world_noise": {
+   "level": "96 cells of 7.5 m at x0 = 40 km",
+   "terms": 9,
+   "max_abs": 7.748603820800781e-07,
+   "range": 0.8413879498839378,
+   "ratio": 9.209e-07
+  },
+  "builtin_ulp": {
+   "pow": {
+    "max": 69,
+    "p99": 28,
+    "exact_frac": 0.164
+   },
+   "exp": {
+    "max": 15,
+    "p99": 11,
+    "exact_frac": 0.18
+   },
+   "log": {
+    "max": 40480,
+    "p99": 5,
+    "exact_frac": 0.493
+   },
+   "sqrt": {
+    "max": 1,
+    "p99": 1,
+    "exact_frac": 0.831
+   },
+   "tan": {
+    "max": 50170,
+    "p99": 77,
+    "exact_frac": 0.105
+   },
+   "atan": {
+    "max": 2,
+    "p99": 1,
+    "exact_frac": 0.653
+   },
+   "atan2": {
+    "max": 2,
+    "p99": 1,
+    "exact_frac": 0.635
+   },
+   "divide": {
+    "max": 2,
+    "p99": 1,
+    "exact_frac": 0.717
+   }
+  },
+  "fluvial_step": {
+   "512": {
+    "wall_ms_per_step": 1.1877,
+    "js_issue_ms_per_step": 0.7387,
+    "dispatches_per_step": 11.25,
+    "gpu_timestamp_ms_per_step": 0.1029,
+    "deterministic_205_steps": true,
+    "blender_glsl_step_ms": null
+   },
+   "1024": {
+    "wall_ms_per_step": 2.7611,
+    "js_issue_ms_per_step": 2.0623,
+    "dispatches_per_step": 11.25,
+    "gpu_timestamp_ms_per_step": 0.5138,
+    "deterministic_205_steps": true,
+    "blender_glsl_step_ms": 1.0161
+   },
+   "2048": {
+    "wall_ms_per_step": 6.3644,
+    "js_issue_ms_per_step": 4.0752,
+    "dispatches_per_step": 11.25,
+    "gpu_timestamp_ms_per_step": 4.4022,
+    "deterministic_205_steps": true,
+    "blender_glsl_step_ms": 4.4557
+   }
+  },
+  "fluvial_step_quiet_run": {
+   "512": {
+    "wall_ms_per_step": 0.2584,
+    "js_issue_ms_per_step": 0.098,
+    "gpu_timestamp_ms_per_step": 0.0786
+   },
+   "1024": {
+    "wall_ms_per_step": 1.0758,
+    "js_issue_ms_per_step": 0.1146,
+    "gpu_timestamp_ms_per_step": 0.6058,
+    "blender_glsl_step_ms": 1.0161
+   },
+   "2048": {
+    "wall_ms_per_step": 3.9133,
+    "js_issue_ms_per_step": 0.0799,
+    "gpu_timestamp_ms_per_step": 3.006,
+    "blender_glsl_step_ms": 4.4557
+   },
+   "passes": "flow_weights + route_incise + h_keep + creep + creep_layers + (threshold_excess + threshold) x 2 = 9 dispatches a step (dispatches_per_step in the fluvial_step record also counts the 50 timestamped steps: (200 x 9 + 50 x 9) / 200 = 11.25)"
+  },
+  "fluvial_step_note": "fluvial_step (above) is the second run, made while a Blender job (the chaos-floor probe) ran in another slot: CPU contention slowed the JS issue 10-40 x"
+ },
+ "tsl_vs_wgsl_fresh.mjs": {
+  "adapter": "NVIDIA GeForce RTX 5090 Laptop GPU",
+  "one_step": {
+   "64": {
+    "tsl_vs_float64_worst_rel_h": 1.03e-07,
+    "wgsl_vs_float64_worst_rel_h": 1.03e-07,
+    "tsl_vs_wgsl_worst_abs_h": 0
+   },
+   "512": {
+    "tsl_vs_float64_worst_rel_h": 1.06e-07,
+    "wgsl_vs_float64_worst_rel_h": 1.06e-07,
+    "tsl_vs_wgsl_worst_abs_h": 0
+   }
+  },
+  "first_call": {
+   "compute": "ran",
+   "computeAsync": "ran"
+  }
+ },
+ "np_random_probe.mjs": {
+  "cases": 10,
+  "bit_exact": 10,
+  "mismatched": 0,
+  "numpy": "2.5.2"
+ },
+ "blender_chaos_floor.py": {
+  "quality": "draft",
+  "seed": 1,
+  "perturbation": "every FluvialRun start: +1 ulp on 25 % of cells, -1 ulp on 25 %",
+  "recipes": {
+   "fluvial_range": {
+    "seconds": [
+     73.9,
+     50.5,
+     17.8
+    ],
+    "perturbed_runs": 6,
+    "levels": [
+     {
+      "level": "Level(0 context 192000 m @ 375 m x512, x0 -96000 y0 -96000, prepass [256])",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.010483682947313798,
+      "p99_abs_over_relief": 0.04155369855310134,
+      "max_abs_m": 422.9107666015625,
+      "relief_m": 2802.791530609131,
+      "channel_jaccard": 0.42767965895249693
+     },
+     {
+      "level": "Level(1 context 96000 m @ 187.5 m x512, x0 -48000 y0 -48000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.01933055612838154,
+      "p99_abs_over_relief": 0.07181348848676328,
+      "max_abs_m": 549.10693359375,
+      "relief_m": 2688.9991302490234,
+      "channel_jaccard": 0.23872566799661468
+     },
+     {
+      "level": "Level(2 context 48000 m @ 93.75 m x512, x0 -24000 y0 -24000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.04768905584747728,
+      "p99_abs_over_relief": 0.18851243628227374,
+      "max_abs_m": 737.013427734375,
+      "relief_m": 2458.783447265625,
+      "channel_jaccard": 0.2102305896088733
+     },
+     {
+      "level": "Level(3 context 24000 m @ 46.88 m x512, x0 -12000 y0 -12000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.06928158531107989,
+      "p99_abs_over_relief": 0.20333906886370295,
+      "max_abs_m": 619.5494384765625,
+      "relief_m": 2291.7725830078125,
+      "channel_jaccard": 0.1990058134636448
+     },
+     {
+      "level": "Level(4 main 12000 m @ 23.44 m x512, x0 -6000 y0 -6000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.1256728976092981,
+      "p99_abs_over_relief": 0.28550297713870787,
+      "max_abs_m": 680.2655029296875,
+      "relief_m": 1845.197265625,
+      "channel_jaccard": 0.09526916802610114
+     }
+    ],
+    "main_metrics_delta": {
+     "relief_m": [
+      1845.197265625,
+      1742.75390625
+     ],
+     "hypsometric_integral": [
+      0.32466805389417774,
+      0.2496581310147959
+     ],
+     "slope_p10": [
+      18.51709572769249,
+      5.110106044469141
+     ],
+     "slope_p50": [
+      34.38311684170234,
+      32.59245277222108
+     ],
+     "slope_p90": [
+      43.37627421982555,
+      43.10397742110657
+     ],
+     "slope_p99": [
+      50.175798558724566,
+      50.079216002514755
+     ],
+     "frac_slope_lt5": [
+      0.034694671630859375,
+      0.09909439086914062
+     ],
+     "depression_area_frac": [
+      1.52587890625e-05,
+      3.4332275390625e-05
+     ],
+     "spectrum_slope": [
+      -4.360305326815157,
+      -4.5803526873644245
+     ],
+     "spectrum_knee_m": [
+      794.5973207694713,
+      250.28247265688125
+     ],
+     "anisotropy_4": [
+      0.05410628318827418,
+      0.0490655590928404
+     ],
+     "anisotropy_8": [
+      0.011082107230990975,
+      0.004228857104562879
+     ],
+     "cliff_pair_frac": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "stratovolcano": {
+    "seconds": [
+     69.4,
+     29.9,
+     46.0
+    ],
+    "perturbed_runs": 5,
+    "levels": [
+     {
+      "level": "Level(0 context 160000 m @ 312.5 m x512, x0 -80000 y0 -80000, prepass [256])",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.013424372972936426,
+      "p99_abs_over_relief": 0.06649409331198128,
+      "max_abs_m": 826.716552734375,
+      "relief_m": 4154.765090942383,
+      "channel_jaccard": 0.8709712075633863
+     },
+     {
+      "level": "Level(1 context 80000 m @ 156.2 m x512, x0 -40000 y0 -40000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.009182257676372239,
+      "p99_abs_over_relief": 0.04130414555907025,
+      "max_abs_m": 456.739990234375,
+      "relief_m": 3903.7959594726562,
+      "channel_jaccard": 0.8181818181818182
+     },
+     {
+      "level": "Level(2 main 40000 m @ 78.12 m x512, x0 -20000 y0 -20000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.0033567574403328454,
+      "p99_abs_over_relief": 0.016043127135118778,
+      "max_abs_m": 229.152099609375,
+      "relief_m": 3660.74210357666,
+      "channel_jaccard": 0.8249850924269528
+     }
+    ],
+    "main_metrics_delta": {
+     "relief_m": [
+      3660.74210357666,
+      3660.74845123291
+     ],
+     "hypsometric_integral": [
+      0.24750766417462014,
+      0.24756371406206953
+     ],
+     "slope_p10": [
+      1.3559551622093706,
+      1.3380510636547347
+     ],
+     "slope_p50": [
+      6.4535947049971725,
+      6.435252901056272
+     ],
+     "slope_p90": [
+      32.70566765355424,
+      32.67511337486709
+     ],
+     "slope_p99": [
+      40.083621975475204,
+      40.06857172001479
+     ],
+     "frac_slope_lt5": [
+      0.42163848876953125,
+      0.42295074462890625
+     ],
+     "depression_area_frac": [
+      0.012500762939453125,
+      0.012500762939453125
+     ],
+     "spectrum_slope": [
+      -3.985552062250201,
+      -3.9855271032078385
+     ],
+     "spectrum_knee_m": [
+      2359.6857817042337,
+      2359.6857817042337
+     ],
+     "anisotropy_4": [
+      0.02511186293328039,
+      0.024460669196433003
+     ],
+     "anisotropy_8": [
+      0.006758843796363666,
+      0.005104856713563848
+     ],
+     "cliff_pair_frac": [
+      0.0,
+      0.0
+     ]
+    }
+   },
+   "canyon": {
+    "seconds": [
+     13.9,
+     20.2,
+     23.3
+    ],
+    "perturbed_runs": 3,
+    "levels": [
+     {
+      "level": "Level(0 context 16000 m @ 31.25 m x512, x0 -8000 y0 -8000, prepass [256])",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.0045680266170105115,
+      "p99_abs_over_relief": 0.02111129942586171,
+      "max_abs_m": 211.976806640625,
+      "relief_m": 1792.7245140075684,
+      "channel_jaccard": 0.6954498448810755
+     },
+     {
+      "level": "Level(1 main 8000 m @ 15.62 m x512, x0 -4000 y0 -4000)",
+      "bit_identical_rerun": true,
+      "rms_over_relief": 0.007532129714097674,
+      "p99_abs_over_relief": 0.03693470405789171,
+      "max_abs_m": 226.94027709960938,
+      "relief_m": 1568.5083236694336,
+      "channel_jaccard": 0.4948130749657467
+     }
+    ],
+    "main_metrics_delta": {
+     "relief_m": [
+      1568.5083236694336,
+      1576.837040901184
+     ],
+     "hypsometric_integral": [
+      0.5002513001505478,
+      0.4975738128220274
+     ],
+     "slope_p10": [
+      1.133707648838612,
+      0.9888284582030685
+     ],
+     "slope_p50": [
+      17.45927153072655,
+      17.4359511912498
+     ],
+     "slope_p90": [
+      55.46893036823762,
+      55.479062768300274
+     ],
+     "slope_p99": [
+      70.17474979990581,
+      70.27771586709099
+     ],
+     "frac_slope_lt5": [
+      0.2778167724609375,
+      0.27707672119140625
+     ],
+     "depression_area_frac": [
+      0.01076507568359375,
+      0.010776519775390625
+     ],
+     "spectrum_slope": [
+      -4.1416616741968495,
+      -4.134549838315769
+     ],
+     "spectrum_knee_m": [
+      1334.8398541700349,
+      1334.8398541700349
+     ],
+     "anisotropy_4": [
+      0.005374829767450514,
+      0.004194715576911849
+     ],
+     "anisotropy_8": [
+      0.026711620824699196,
+      0.027361532777756267
+     ],
+     "cliff_pair_frac": [
+      2.2955391934623045e-05,
+      1.3390645295196776e-05
+     ]
+    }
+   }
+  }
+ }
+}
