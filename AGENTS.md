@@ -102,6 +102,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [VRM autonomous navigation](tools-guides/navigation.md) | Sensor cones, occupancy memory, landmarks, route planning and diagnostics. |
 | [Procedural and realistic creatures](tools-guides/creatures.md) | Creature morphology, gait, speech and optional cached realist pipelines. |
 | [Clippy character](tools-guides/clippy.md) | Paperclip morphs, named performances and deterministic animation. |
+| [Creature Creator v2 (WIP)](eidoverse/bestiary/README.md) | High-fidelity PBR creatures and humans, WIP / incomplete, alongside the stylized low-poly creature creator (`creature_builder.js`). What loads today: a realistic octopus, stag beetle (four variants) and axolotl, a base woman and man with outfits, robot hands and 15 hair styles, and accessories, through `Bestiary.create()` / `Bestiary.accessory()` after importing `eidoverse/bestiary/runtime/bestiary.js`; WIP pieces of Aletheia and Aporia as plain glb files. Not working yet: remixing new characters as a procedural tool. |
 | [Books and PDFs](tools-guides/books.md) | Hardcover rigs, cover art, scanned spreads, PDF pages and page turns. |
 | [Character damage and dismemberment](tools-guides/destruction.md) | Per-limb damage, authored cut sites, detached pieces and blood effects. |
 | [Modular robotics and manufacturing](tools-guides/robotics.md) | Individual parts, attachment ports, robot assemblies, motion, IK, G430 FDM/CNC and inspector. |

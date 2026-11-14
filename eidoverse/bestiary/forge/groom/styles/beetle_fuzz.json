@@ -1,0 +1,34 @@
+{
+  "name": "beetle_fuzz",
+  "about": "A second-base smoke test: a short bumblebee-like pile on the stag beetle's cuticle, combed from the front to the back. The beetle is not rigged yet, so this style uses only fields any glb carries (the normal, height, maps) and a fixed-axis flow; its skin tag is 'cuticle'. Strands and gates only (no card glb: a coat's ABI needs the base's skin weights).",
+  "base": "stag_beetle",
+  "skin_tag": "cuticle",
+  "seed": 5,
+  "fields": {
+    "underside": {"smooth": [0.25, 0.55], "of": {"normal": [0, -1, 0]}},
+    "len_mm": {"lerp": [1.6, 0.9], "by": {"ref": "underside"}}
+  },
+  "domain": 1.0,
+  "bare": {"smooth": [0.55, 0.85], "of": {"normal": [0, -1, 0]}},
+  "mask_cut": 0.12,
+  "flow": {
+    "sources": [{"dir": "axis", "axis": [0, 0, -1]}],
+    "smooth_iters": 40,
+    "hold": 2.0,
+    "designed": []
+  },
+  "length_mm": {"ref": "len_mm"},
+  "length_jitter": {"sigma": 0.15, "clip": [0.7, 1.4]},
+  "strands": {"density_cm2": 160, "d_max_cm2": 160, "points": 5},
+  "classes": [{"name": "pile", "share": 1.0, "length": 1.0, "clump": 1.0, "flex": 0.4}],
+  "lift": {"root_deg": 30, "tip_deg": 55, "pow": 1.0, "jitter_deg": 8},
+  "gravity": 0.0,
+  "margin_mm": 0.05,
+  "clumps": {"density_cm2": 40, "d_max_cm2": 40, "alpha": 0.72, "oversample": 3.0, "guide_class": 0},
+  "operators": [
+    {"op": "clump", "strength": [0.10, 0.30], "profile": 2.0},
+    {"op": "frizz", "amp_mm": 0.04},
+    {"op": "settle", "margin_mm": 0.05}
+  ],
+  "targets": {"by_class": {"pile": {"length_mm_p50": [0.8, 2.0], "curl_p50_max": 1.06}}}
+}

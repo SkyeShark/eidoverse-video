@@ -1,0 +1,121 @@
+{
+  "name": "octopus_shaggy",
+  "about": "A long shaggy coat over the octopus's aboral skin: guard hairs over a wavier undercoat, clumped into locks, parted at a crown whorl behind the eyes and combed from there forward over the brow and down every arm toward its tip, and back over the mantle, round its tip and down to a soft fur line above the bare underside, drooping a little under gravity. Length follows the arm's radius (1.5 x r, 4-40 mm), so the arms taper into short fur; on the head and mantle no hair is longer than its distance to the bare edge allows, so the coat thins and shortens into its fur lines. Bare as the velvet: the oral face and sucker side, the siphon, the eye rings, the mouth, the thin tips.",
+  "base": "octopus",
+  "seed": 23,
+  "fields": {
+    "ventral": {"tex": "masks.g"},
+    "arm_r_mm": {"chain_r_mm": "^arm", "off": 26},
+    "eyes": {"near": "^socket_eye_[LR]$", "r0_mm": 17, "r1_mm": 27},
+    "face": {"near": "^socket_eye_[LR]$", "r0_mm": 22, "r1_mm": 70},
+    "siphon": {"joints": "^funnel_"},
+    "mouth": {"near": "^socket_mouth$", "r0_mm": 45, "r1_mm": 70},
+    "underside": {"smooth": [0.22, 0.45], "of": {"normal": [0, -1, 0]}},
+    "bare": {"max": [
+      {"smooth": [0.30, 0.62], "of": {"ref": "ventral"}},
+      {"ref": "underside"},
+      {"smooth": [0.20, 0.55], "of": {"ref": "siphon"}},
+      {"ref": "eyes"},
+      {"ref": "mouth"},
+      {"smooth": [2.6, 1.6], "of": {"ref": "arm_r_mm"}}
+    ]},
+    "edge_mm": {"edge_mm": {"not": {"ref": "bare"}}, "cut": 0.12},
+    "on_arm": {"clamp": [0, 1], "of": {"joints": "^arm"}},
+    "len_body": {"mul": [
+      {"min": [40.0, {"max": [4.0, {"scale": 1.5, "of": {"ref": "arm_r_mm"}}]}]},
+      {"lerp": [1.0, 0.45], "by": {"ref": "face"}},
+      {"lerp": [0.25, 1.0], "by": {"smooth": [0.0, 12.0], "of": {"ref": "edge_mm"}}}
+    ]},
+    "len_mm": {"lerp": [{"min": [{"ref": "len_body"}, {"max": [2.5, {"scale": 0.6, "of": {"ref": "edge_mm"}}]}]},
+                        {"ref": "len_body"}], "by": {"ref": "on_arm"}},
+    "strands_cm2": {"scale": 36.0, "of": {"lerp": [
+      {"lerp": [0.3, 1.0], "by": {"smooth": [0.0, 16.0], "of": {"ref": "edge_mm"}}},
+      {"lerp": [0.5, 1.0], "by": {"smooth": [0.0, 8.0], "of": {"ref": "edge_mm"}}}], "by": {"ref": "on_arm"}}},
+    "lie_edge": {"max": [{"smooth": [10.0, 0.0], "of": {"ref": "edge_mm"}}, {"ref": "lie_line"}, {"ref": "lie_crown"}]},
+    "lie_crown": {"near": {"between": ["^socket_eyes$", "^socket_head_top$"], "t": 0.4}, "r0_mm": 8.0, "r1_mm": 22.0},
+    "lie_line": {"mul": [{"smooth": [20.0, 0.0], "of": {"ref": "edge_mm"}}, {"not": {"ref": "on_arm"}}]},
+    "drape_line": {"mul": [{"smooth": [45.0, 0.0], "of": {"ref": "edge_mm"}}, {"not": {"ref": "on_arm"}}]},
+    "cards_cm2": {"scale": 5.2, "of": {"pow": -1.3, "of": {"scale": 0.1, "of": {"ref": "len_mm"}}}}
+  },
+  "domain": 1.0,
+  "bare": {"ref": "bare"},
+  "mask_cut": 0.12,
+  "edge_guard": {"band_mm": 8.0, "strength": 1.0, "cut": 0.12, "flow_parallel": 1.0,
+                 "why_g6": "coat G6 (11-01): the guard turns hairs along an edge only where the coat runs along it (the arms' flanks); where the coat is combed INTO its edge (the mantle's back, down to its fur line) the guard had laid every arriving hair sideways into a horizontal band, G5's hard line and straw fringe, so there it fades with the flow's share into the edge (groom._edge_guard flow_parallel) and the coat ends before the edge instead: on the head and mantle no hair is longer than 0.6 of its distance to the bare edge and the strands thin from x 0.3 at the edge over 16 mm (fields len_mm, strands_cm2), so the tips end staggered over a band, not piled up at the edge (0.85 drew a crisp hem: g6/look/de1_hem.png)",
+                 "why": "coat round 3 (10-30): THE COAT'S EDGE. Round 2 shortened the coat only inside the bare mask's soft band (x 0.35 .. 1 by not-bare), so strands rooted a few mm inside it grew full length and gravity laid 6 % of them out over the sucker side and the oral web while the flow ran along the edge: 1,805 cards with a part over bare skin, the oral web's pale paper cards (work/bestiary/coat/g5/g5_groom/scratch/s01_octopus_shaggy_g4.json). Now (1) within 8 mm of the edge the part of a growth step heading into the bare zone turns along the edge (strands.k_grow's guard), (2) the trim operator ends whatever still reaches bare skin, (3) the pelt thins and shortens with its distance from the edge, as a real pelt does at a bare patch: length x 0.25 at the edge to x 1 at 12 mm, strand density x 0.5 to x 1 at 8 mm (fields edge_mm), (4) cards.py trims and narrows the cards that still reach it, and gates them"},
+  "flow": {
+    "sources": [
+      {"dir": "chain", "chains": "^arm", "sign": 1},
+      {"dir": "away", "from": {"between": ["^socket_eyes$", "^socket_head_top$"], "t": 0.4},
+       "mask": {"mul": [{"not": {"ref": "on_arm"}}, {"not": {"ref": "underside"}}]}},
+      {"dir": "toward", "to": "^mantle_1$", "mask": {"mul": [{"not": {"ref": "on_arm"}}, {"ref": "underside"}]},
+       "why": "coat G6: the bare underside's own flow runs in toward the middle of the mantle's underside, so the sink every flow combed down to a fur line must have (Poincare-Hopf: the underside's boundary all flows in) sits there, under the mantle, not just under its back tip where it pulled the coat's last hairs together into a V"}
+    ],
+    "singularities": [
+      {"type": "whorl", "at": {"between": ["^socket_eyes$", "^socket_head_top$"], "t": 0.4}, "radius_mm": 18, "spin": 1,
+       "strength": 2.2,
+       "why_g6e": "coat G6 (restart 2): a real crown whorl's hairs SPIRAL round its centre and lie down over it, so no skin shows there; at strength 0.5 the hairs left the centre at ~27 deg off the radius, a small starburst with a bald patch of skin ~15 mm wide (g6/look/fl1_crown.png). At 2.2 they leave it at ~65 deg, ~42 deg 20 mm out, nearly radial by 30 mm; lie_crown lays the hairs within 8-22 mm of the centre down as at a fur line (g6/look/cr1_crown.png). Seen from the face's front, the crown's backward hairs still stand as a fan on the head's convex top outline (G5 had a darker crest there)"}
+    ],
+    "smooth_iters": 60,
+    "hold": 2.0,
+    "why": "coat G6 (11-01): THE MANTLE BACK. Through G5 the head's coat radiated from the mantle's back tip ('away from socket_mantle_apex'), and that tip sits on the 'underside' bare mask's edge (density 0.02 at the tip, 0 a few mm below): seen from low behind the fur fanned out round a bald spot of bumpy skin and stopped on a hard line with a straw fringe (work/bestiary/coat/g5/g5_check/look/v_check.png). Now the coat parts where a furred animal's does, at a CROWN WHORL on the head's midline behind the eyes (40 % of the way from socket_eyes to socket_head_top: 50 mm from each eye, ~48 mm inside the coat), a spiral source (the whorl's own why: its hairs leave the centre ~65 deg off the radius and lie down there), and from there it lies forward over the brow to the arms and back over the mantle, round its tip and down to the fur line",
+    "designed": [
+      {"name": "crown whorl", "at": {"between": ["^socket_eyes$", "^socket_head_top$"], "t": 0.4}, "radius_mm": 30},
+      {"at": "^socket_arm\\d_tip$", "radius_mm": 40},
+      {"at": "^socket_eye_[LR]$", "radius_mm": 30},
+      {"at": "^socket_mouth$", "radius_mm": 70},
+      {"name": "nape fold: the mantle's forward stream meets the back arms' backward stream under the mantle's overhang",
+       "mask": {"mul": [{"near": "^mantle_0$", "r0_mm": 70, "r1_mm": 95}, {"smooth": [110, 90], "of": {"height_mm": [0, 1, 0]}}]}},
+      {"name": "web saddles: the head's stream splits into two arms, low on the web between them",
+       "mask": {"mul": [{"smooth": [65, 50], "of": {"height_mm": [0, 1, 0]}}, {"smooth": [0.10, 0.25], "of": {"joints": "^arm"}},
+                        {"smooth": [0.95, 0.80], "of": {"joints": "^arm"}}]}}
+    ]
+  },
+  "length_mm": {"ref": "len_mm"},
+  "length_jitter": {"sigma": 0.18, "clip": [0.65, 1.5]},
+  "strands": {"density_cm2": {"ref": "strands_cm2"}, "d_max_cm2": 36, "points": 10},
+  "classes": [
+    {"name": "guard", "share": 0.22, "length": 1.2, "clump": 0.6, "wave": 0.5, "lift_tip_deg": -4, "flex": 0.8},
+    {"name": "under", "share": 0.78, "length": 0.8, "clump": 1.0, "wave": 1.0, "flex": 1.0}
+  ],
+  "lift": {"root_deg": 64, "tip_deg": 85, "pow": 0.6, "jitter_deg": 5,
+           "edge": {"by": {"ref": "lie_edge"}, "root_deg": 80, "tip_deg": 88,
+                    "why": "coat G6 (11-01): the last 10 mm before a bare edge, 20 mm on the head and mantle (lie_line) and 8-22 mm round the crown whorl (lie_crown), the hairs lie down (10 deg off the skin at the root, 2 at the tip, from 26 / 5), as a pelt's last hairs do at a belly line: G5's fur line stood out over the mantle's bare underside as a straw fringe"},
+           "why": "coat round 2 (10-30): a combed coat. The first pass's 44 / 80 deg from the normal (46 deg off the skin at the root) stood every card 33-47 deg off the skin at its root, its chord 27 deg, guides 12-19 mm proud: at the mantle's outline that read as a standing crest (work/bestiary/coat/g4/g4_groom/s02_crest_g1.json, renders/s03_profile_g1.png). Now 26 deg off the skin at the root, 5 deg at the tip; cards.py's lie-down gate holds every card segment at or under this"},
+  "gravity": 0.30,
+  "gravity_edge": {"by": {"ref": "drape_line"}, "scale": 0.15,
+                   "why": "coat G6 (11-01): below the mantle's back tip the body curves under toward the bare underside, where gravity's pull points out of the skin and stood the fur line off it as a brim; toward a head or mantle fur line (from 45 mm) the coat's droop fades to 0.15 so the coat lies against the body"},
+  "margin_mm": 0.3,
+  "clumps": {"density_cm2": {"ref": "cards_cm2"}, "d_max_cm2": 30.0, "alpha": 0.72, "oversample": 3.0, "guide_class": 0},
+  "operators": [
+    {"op": "clump", "strength": [0.35, 0.75], "profile": 1.3},
+    {"op": "wave", "amp_mm": [0.6, 1.6], "freq": [0.6, 1.4]},
+    {"op": "frizz", "amp_mm": 0.25},
+    {"op": "settle", "margin_mm": 0.3, "iters": 3},
+    {"op": "trim", "cut": 0.12, "margin_mm": 0.5, "min_mm": 0.8}
+  ],
+  "cards": {
+    "length_q": 0.85,
+    "rows": [[20, 2], [45, 3], [1000, 4]],
+    "width": {"min_mm": 2.5, "max_mm": 20, "tip_scale": 0.45, "scale": 1.15},
+    "width_q": 0.85,
+    "layer_q": [0.40, 0.80],
+    "wisp_share": 0.08,
+    "edge_margin_mm": 1.0, "edge_min_mm": 2.0, "overhang_tol_mm": 1.0,
+    "overshoot_mm": 4.0, "density_cut": 0.12
+  },
+  "atlas": {"version": 3, "strand_um": [60, 90, 10], "attr_res": 1024, "depth_mm": 2.0,
+            "lock_um": [1000, 650, 120], "width_um": [220, 260, 70],
+            "why": "coat round 3 (10-30): v3 draws each tile as LOCKS of fine strands with partings between them (forge/groom/tiles.py render_v3, its defaults V3: lock_mm 1.6 / 2.1 / 2.9 / 4.0, lock_frac 0.76 / 0.66 / 0.54 / 0.45, gathered from a fifth of the length, tips staggered, strays across the partings), because at the close cameras (0.34-0.56 m, a pixel 0.23-0.38 mm) a strand is a third of a pixel and only locks resolve: v2's even brush read as felt under TAA (the g4 check). The attribute page is RGB, no alpha (the engine divided v2's RGBA page by its alpha in every shot: R depth = the clump's shape at depth_mm 2.0, the real spread; G per-lock id + per-strand offset; B sideways). Agreed with the runtime builder (g5_runtime/FOR_GROOM.md 17:0x). Round 2's v2 overrides (fill, root_span, tip_min, lock_pull) are gone: V3's defaults carry them; the first pass's lock_um / width_um stay for version 1"},
+  "lod": {"ranks": 8, "length_bias": 0.5, "widen_pow": 0.35, "switch_px": [6.0, 3.0, 1.5, 0.75],
+          "budget_tris": [30000, 15000, 7500, 3600]},
+  "maps": {"res": {"head": 2048, "arms": 1280}, "fibre_um": 70, "blur_px": 1.0, "groove": 0.35, "height_mm": 13.0},
+  "look": {"tip_lift": 0.30, "root_dark": 0.25, "value_jitter": 0.25, "hue_jitter": 0.05, "rank_fade": 0.5,
+           "layer_tone": [0.88, 1.00, 1.02],
+           "why": "layer_tone (coat round 2, 10-30): the skin's coat layer (the maps alone at the far LOD, and between the cards) multiplied to the cards' average as the camera sees them, so the hand-over from cards to maps holds the octopus's tone. Solved by work/bestiary/coat/g4/g4_groom/s09_tone.py from engine tone shots (tone_confirm.sh: the runtime's tone shot, harness AO 0.3 m, AgX) on the live runtime/coat.js cb60e808 at layer tones 1 and [0.80, 0.86, 0.99], fitted to TAA (the real-time default): at 1 the maps alone read within 1.4 levels of the coat but pinker (coat / maps R 0.957-0.989, B 0.99-1.07 over 1.75-12 m); with this value TAA reads -1.2..+1.4 levels and every channel within 3.5 %, the no-TAA clip fallback -3.1..-4.2 (it shows less of the layer). Re-solve it whenever coat.js's lighting, sheen or AO handling changes"},
+  "targets": {
+    "by_class": {"guard": {"length_mm_p50": [18, 50], "curl_p50_max": 1.15},
+                 "under": {"length_mm_p50": [10, 36], "curl_p50_max": 1.15}},
+    "strands_per_cm2": [28, 44]
+  }
+}

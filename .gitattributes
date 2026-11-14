@@ -11,3 +11,6 @@
 *.mp3 binary
 *.mp4 binary
 *.wav binary
+# Creature Creator v2's raw data files (half-float lookup tables, vertex offsets)
+work/bestiary/**/*.f16 binary
+work/bestiary/**/*.bin binary

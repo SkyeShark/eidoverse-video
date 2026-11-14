@@ -99,6 +99,19 @@ them with image, motion and sound inspection.
   (the realtime path for anything MarchingCubes-shaped). `MeshBVH` ships
   for fast spatial queries.
 
+### Creature Creator v2 (work in progress)
+**WIP and incomplete.** A second creature creator for **high-fidelity PBR
+creatures and humans**, alongside the stylized low-poly `makeCreature`:
+realistic, rigged glb files with baked texture sets and runtime materials. In
+this first drop: an octopus, a stag beetle with four variants and an axolotl;
+a base woman and man with four outfits, robot hands and 15 hair styles;
+hats, glasses and other accessories; and work-in-progress pieces of Aletheia
+and Aporia. The finished assets load and render today through the kit's
+runtime (`Bestiary.create()`, `Bestiary.accessory()`) or as plain glb files;
+remixing new characters with it as a procedural tool is not working yet. What
+loads, what does not, and every shipped file:
+[Creature Creator v2](eidoverse/bestiary/README.md).
+
 ### Other articulated scene tools
 - [Clippy](tools-guides/clippy.md) — a paperclip character with morph controls and
   named performances.

@@ -1,0 +1,95 @@
+{
+  "name": "octopus_velvet",
+  "about": "A short dense velvet pile over the octopus's aboral skin (mantle, head, crown top, the arms' upper sides), combed from the mantle's apex over the head and down every arm toward its tip. Bare where fur would read wrong: the oral face and the arms' sucker side (the ventral mask), the siphon (the funnel joints' skin), a ring round each eye, the mouth, and the last thin centimetres of each arm tip.",
+  "base": "octopus",
+  "seed": 11,
+  "fields": {
+    "ventral": {"tex": "masks.g"},
+    "arm_r_mm": {"chain_r_mm": "^arm", "off": 26},
+    "eyes": {"near": "^socket_eye_[LR]$", "r0_mm": 17, "r1_mm": 27},
+    "face": {"near": "^socket_eye_[LR]$", "r0_mm": 20, "r1_mm": 60},
+    "siphon": {"joints": "^funnel_"},
+    "mouth": {"near": "^socket_mouth$", "r0_mm": 45, "r1_mm": 70},
+    "underside": {"smooth": [0.22, 0.45], "of": {"normal": [0, -1, 0]}},
+    "bare": {"max": [
+      {"smooth": [0.30, 0.62], "of": {"ref": "ventral"}},
+      {"ref": "underside"},
+      {"smooth": [0.20, 0.55], "of": {"ref": "siphon"}},
+      {"ref": "eyes"},
+      {"ref": "mouth"},
+      {"smooth": [2.2, 1.3], "of": {"ref": "arm_r_mm"}}
+    ]},
+    "edge_mm": {"edge_mm": {"not": {"ref": "bare"}}, "cut": 0.12},
+    "len_mm": {"mul": [
+      {"min": [3.6, {"max": [0.8, {"scale": 0.2, "of": {"ref": "arm_r_mm"}}]}]},
+      {"lerp": [1.0, 0.55], "by": {"ref": "face"}},
+      {"lerp": [0.4, 1.0], "by": {"smooth": [0.0, 4.0], "of": {"ref": "edge_mm"}}}
+    ]},
+    "strands_cm2": {"scale": 90.0, "of": {"lerp": [0.55, 1.0], "by": {"smooth": [0.0, 3.0], "of": {"ref": "edge_mm"}}}}
+  },
+  "domain": 1.0,
+  "bare": {"ref": "bare"},
+  "mask_cut": 0.12,
+  "edge_guard": {"band_mm": 3.0, "strength": 1.0, "cut": 0.12,
+                 "why": "coat round 3 (10-30): the coat's edge as the shaggy's (its why), scaled to the pile: round 2's velvet crossed with 0.17 % of its strands but 1,254 of its cards had an edge over bare skin (wide shingles on the arms' curve). The pile thins and shortens over its last 3-4 mm (length x 0.4 at the edge, density x 0.55), growth turns along the edge within 3 mm, the trim ends the rest"},
+  "flow": {
+    "sources": [
+      {"dir": "chain", "chains": "^arm", "sign": 1},
+      {"dir": "away", "from": "^socket_mantle_apex$", "mask": {"not": {"clamp": [0, 1], "of": {"joints": "^arm"}}}}
+    ],
+    "smooth_iters": 60,
+    "hold": 2.0,
+    "designed": [
+      {"at": "^socket_mantle_apex$", "radius_mm": 30},
+      {"at": "^socket_arm\\d_tip$", "radius_mm": 40},
+      {"at": "^socket_eye_[LR]$", "radius_mm": 30},
+      {"at": "^socket_mouth$", "radius_mm": 70},
+      {"name": "nape fold: the mantle's forward stream meets the back arms' backward stream under the mantle's overhang",
+       "mask": {"mul": [{"near": "^mantle_0$", "r0_mm": 70, "r1_mm": 95}, {"smooth": [110, 90], "of": {"height_mm": [0, 1, 0]}}]}},
+      {"name": "web saddles: the head's stream splits into two arms, low on the web between them",
+       "mask": {"mul": [{"smooth": [65, 50], "of": {"height_mm": [0, 1, 0]}}, {"smooth": [0.10, 0.25], "of": {"joints": "^arm"}},
+                        {"smooth": [0.95, 0.80], "of": {"joints": "^arm"}}]}}
+    ]
+  },
+  "length_mm": {"ref": "len_mm"},
+  "length_jitter": {"sigma": 0.14, "clip": [0.7, 1.35]},
+  "strands": {"density_cm2": {"ref": "strands_cm2"}, "d_max_cm2": 90, "points": 5},
+  "classes": [
+    {"name": "pile", "share": 1.0, "length": 1.0, "clump": 1.0, "flex": 0.35}
+  ],
+  "lift": {"root_deg": 32, "tip_deg": 52, "pow": 1.0, "jitter_deg": 7},
+  "gravity": 0.0,
+  "margin_mm": 0.12,
+  "clumps": {"density_cm2": 3.5, "d_max_cm2": 3.5, "alpha": 0.72, "oversample": 3.0, "guide_class": 0},
+  "cards": {
+    "kind": "fins",
+    "fins": {"radius_mm": 3.0, "height_q": 80.0, "height_scale": 1.0, "min_mask": 0.12, "min_height_mm": 0.25, "taper_mm": 5.0,
+             "why": "coat round 3 (10-31): height_scale 1.0, the pile's measured top: at 1.2 the band stood ~3 mm tall, a 13 px ribbon at the eye-ring close; taper_mm: height and lean run out over the coat's last 5 mm, as a pelt thins at a bare patch (the last fins stood whole and the band ended in a square cut, g5_groom/renders/s12_h.png)"},
+    "rows": [[1000, 2]],
+    "overhang_tol_mm": 1.5,
+    "why": "coat round 3 (10-30): VELVET'S OUTLINE as TRUE FINS (Lengyel, Praun, Finkelstein & Hoppe 2001), one per coated edge of the low, not the groom's shingles at 3.5 per cm2. The evidence (g5_groom/refs, s03_outline.py: antler velvet, a short dense pile on ~3 cm tines, and the mole): a real pile's outline is a continuous even band with a fine fringe, no teeth; a shingle set puts ~1 card per cm of outline on a 1 cm arm (round 2's thorns). A polygon mesh's silhouette runs along its edges, so the silhouette edges' fins always stand along the outline, facing the camera, whatever the view"
+  },
+  "atlas": {"version": 3, "fin_page": [2048, 512], "depth_mm": 1.5,
+            "why": "coat round 3 (10-30): the fin tiles, side views of the pile (forge/groom/tiles.py render_fins, its defaults FIN): fibres stratified along the edge, an under-pile, tips staggered over the top third, very few strays, wrapping in u. The attribute page is RGB, no alpha, as shaggy's v3"},
+  "lod": {"ranks": 8, "length_bias": 0.3, "widen_pow": 0.35, "switch_px": [6.0, 3.0, 1.5, 0.75],
+          "budget_tris": [62000, 15000, 7500, 3600]},
+  "shells": {"tile_mm": 10.0, "tile_px": 256, "layers": 8, "children": 20, "dot_mm": 0.10},
+  "short_end": {"cards": false, "shells_from_screen": 4.0,
+                "fins": {"from_screen": 1.3, "full_screen": 1.7,
+                         "why": "the integration (10-29, engine renders): the coat maps alone lose the pile's silhouette close up (a crisp skin outline); fins drawn only where the body turns edge-on (look.fin_only) give the outline its fuzz while the face-on read stays the maps'. Coat round 3 (10-30): the onset back under the hero view (1.3 to 1.7, it was 2.6 to 3.4): the pile is ~3 px at 1.75 m, round 2 had moved the onset off the hero only because a sparse shingle set read as specks there, and continuous edge fins read as the soft outline the photographs show (g5_groom/renders/s08_velvet_onset.png; s03_outline.py on the hero's arm: fringe cv 0.21 -> 0.15, lumps 0.45 -> 0.34 % of the diameter). A 3.5 mm pile seen side-on has no deep root to shade and no free tips standing off the body, so the look below drops the deep coat's self-shadow, root occlusion and free-tip fibre diffuse (selfShadow 1, aoRoot 0.1, tipFree 0; with the long coat's defaults 0.55 / 0.35 / 0.6 the fins read as a dark fringe: g_integrate/look/v2_velvet_tf0.png)"},
+                "decision":"the coat maps carry velvet's face at every screen size (they match the strand renders) and the edge fins its outline from screen ~1.7; shells are an optional close-up layer from screen ~4 (pile >= 6 px), to be timed and tuned in the engine (coat round 3: the tile's base coverage is 38 %, from the fullest 10 mm window of the head; the 15-17 % it had was its window running off the uv island)",
+                "evidence": "work/bestiary/coat/g_groom/renders/g04_octopus_velvet_short_end.png, g04_octopus_velvet_short_end.json"},
+  "operators": [
+    {"op": "clump", "strength": [0.10, 0.32], "profile": 2.0},
+    {"op": "frizz", "amp_mm": 0.06},
+    {"op": "settle", "margin_mm": 0.12, "iters": 3},
+    {"op": "trim", "cut": 0.12, "margin_mm": 0.2, "min_mm": 0.3}
+  ],
+  "maps": {"res": {"head": 2048, "arms": 1280}, "fibre_um": 45, "blur_px": 0.75, "groove": 0.25, "height_mm": 3.6},
+  "look": {"tip_lift": 0.20, "root_dark": 0.15, "value_jitter": 0.05, "hue_jitter": 0.02, "rank_fade": 0.5,
+           "selfShadow": 1.0, "aoRoot": 0.10, "tipFree": 0.0, "finRim": 0.5, "finSheen": 0.5},
+  "targets": {
+    "by_class": {"pile": {"length_mm_p50": [1.5, 4.0], "curl_p50_max": 1.06}},
+    "strands_per_cm2": [70, 110]
+  }
+}
