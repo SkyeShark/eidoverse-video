@@ -271,16 +271,39 @@ def next_run(a):
     sys.exit(3)
 
 
+def next_stage_floor(a):
+    """--next-stage-floor: the next base run whose stage floors (5.3, 5.4 item 7: blender_stage_dump.py --floor) are
+    not in, for floor_runs.sh --stage-floors: the base run's folder on the first line, then the words that follow
+    `run_blender.sh`; exit code 3 when nothing is left. Seeds outermost, the recipes in RECIPE_ORDER. A base run
+    without stage dumps, or with stage_floors_failed.json, is passed over."""
+    _edition, key, root = _root_and_manifest()
+    recipes, seeds, _patterns, _dump = _wanted(a)
+    for seed in seeds:
+        for recipe in recipes:
+            base = os.path.join(root, f'{recipe}_s{seed}_{a.quality}', 'base')
+            if not (os.path.exists(os.path.join(base, 'done.json'))
+                    and os.path.exists(os.path.join(base, 'stages', 'stages.json'))):
+                continue
+            if os.path.exists(os.path.join(base, 'stage_floors.done')) or \
+                    os.path.exists(os.path.join(base, 'stage_floors_failed.json')):
+                continue
+            words = [os.path.join(HERE, 'blender_stage_dump.py'), '--floor', os.path.join(base, 'stages'),
+                     '--patterns', a.stage_patterns, '--levels', a.levels]
+            print('\n'.join(str(w).replace('\\', '/') for w in [base] + words), flush=True)
+            return
+    sys.exit(3)
+
+
 def clear_failed(a):
-    """--clear-failed: remove the failed.json of every wanted run, so --next takes them again (floor_runs.sh
-    --retry-failed)."""
+    """--clear-failed: remove the failed.json of every wanted run (with --failed-name stage_floors_failed.json: of
+    every base run's stage floors), so --next takes them again (floor_runs.sh --retry-failed)."""
     _edition, key, root = _root_and_manifest()
     recipes, seeds, patterns, _dump = _wanted(a)
     n = 0
     for seed in seeds:
         for recipe in recipes:
             for p in patterns:
-                f = os.path.join(root, f'{recipe}_s{seed}_{a.quality}', 'base' if p == 0 else f'p{p}', 'failed.json')
+                f = os.path.join(root, f'{recipe}_s{seed}_{a.quality}', 'base' if p == 0 else f'p{p}', a.failed_name)
                 if os.path.exists(f):
                     os.remove(f)
                     n += 1
@@ -288,15 +311,15 @@ def clear_failed(a):
 
 
 def mark_failed(a):
-    """--mark-failed <run folder> --rc N: failed.json with the exit code and the log's tail (floor_runs.sh, after a
-    run that left no done.json), so --next passes it over."""
+    """--mark-failed <run folder> --rc N [--failed-name F --log L]: failed.json (or F) with the exit code and the
+    log's tail (floor_runs.sh, after a run that left no done.json), so --next passes it over."""
     tail = ''
     try:
-        with open(os.path.join(a.mark_failed, 'blender.log'), encoding='utf-8', errors='replace') as f:
+        with open(os.path.join(a.mark_failed, a.log), encoding='utf-8', errors='replace') as f:
             tail = f.read()[-3000:]
     except OSError:
         pass
-    B.write_json(os.path.join(a.mark_failed, 'failed.json'),
+    B.write_json(os.path.join(a.mark_failed, a.failed_name),
                  dict(rc=a.rc, log_tail=tail, date=time.strftime('%Y-%m-%d %H:%M:%S')))
 
 
@@ -449,8 +472,13 @@ def main():
     ap.add_argument('--key', default='')
     ap.add_argument('--quality', default='draft')
     ap.add_argument('--next', action='store_true')
+    ap.add_argument('--next-stage-floor', action='store_true')
+    ap.add_argument('--stage-patterns', type=int, default=5)
+    ap.add_argument('--levels', default='main')
     ap.add_argument('--clear-failed', action='store_true')
     ap.add_argument('--mark-failed', default='')
+    ap.add_argument('--failed-name', default='failed.json')
+    ap.add_argument('--log', default='blender.log')
     ap.add_argument('--rc', type=int, default=1)
     ap.add_argument('--status', action='store_true')
     a = ap.parse_args(B.script_args())
@@ -464,11 +492,13 @@ def main():
         clear_failed(a)
     elif a.next:
         next_run(a)
+    elif a.next_stage_floor:
+        next_stage_floor(a)
     elif a.status:
         status(a)
     else:
-        ap.error('give --next, --status, --summarise, --clear-failed, --mark-failed or --run (floor_runs.sh starts the '
-                 'runs)')
+        ap.error('give --next, --next-stage-floor, --status, --summarise, --clear-failed, --mark-failed or --run '
+                 '(floor_runs.sh starts the runs)')
 
 
 if __name__ == '__main__':

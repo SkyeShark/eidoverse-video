@@ -7,9 +7,10 @@
 //                                                                // scene graph; mesh.userData.colliderProxy
 //     installRaycast(THREE, mesh, rm);                           // mesh.raycast walks the rings' lattices
 //
-// The proxy is the visual surface itself: the same position attribute and a contiguous run of the same index buffer
-// (the rings of the hero levels and the cores, or the main ring when there is no focus), so a body standing on it
-// stands on the rendered triangles. It follows the terrain mesh's world matrix.
+// The proxy is the visual surface itself: the visual mesh's own vertices (a view of its vertex buffer) and a
+// contiguous run of its triangles in their order (the rings of the hero levels and the cores, or the main ring when
+// there is no focus), so a body standing on it stands on the rendered triangles. It follows the terrain mesh's
+// world matrix.
 //
 // The ray caster visits only the lattice cells the ray's ground track touches (a 2D walk over each ring's lattice
 // lines, down into a ring's hole through the child ring and out again), and tests each cell's triangles (its two
@@ -40,16 +41,27 @@ export function colliderRings(rm, roles, maxTriangles = COLLIDER_MAX_TRIANGLES) 
     return [first, last];
 }
 
-/** The collider proxy of a terrain mesh (see the module doc): a THREE.Mesh that is not in the scene graph, shares
- * the visual geometry's vertices and holds the triangles of the rings colliderRings() names. opts: roles (each
- * level's role), maxTriangles, rings ([first, last], instead of the rule). */
+/** The collider proxy of a terrain mesh (see the module doc): a THREE.Mesh that is not in the scene graph and holds
+ * the triangles of the rings colliderRings() names, on the visual mesh's own vertices. When the ring mesh was built
+ * with that run (buildRings' opts.collider, as makeTerrain builds it) the proxy carries only the run's stretch of
+ * the vertex buffer (a view of the same memory, from the run's first vertex: userData.firstVertex) and the run's
+ * triangles counted from there, so whoever builds a trimesh from it copies no vertex of the far rings; else it
+ * shares the whole position attribute and a run of the index buffer. opts: roles (each level's role), maxTriangles,
+ * rings ([first, last], instead of the rule). */
 export function colliderProxy(THREE, rm, mesh, opts = {}) {
-    const [first, last] = opts.rings ?? colliderRings(rm, opts.roles ?? null, opts.maxTriangles ?? COLLIDER_MAX_TRIANGLES);
+    const c = rm.collider ?? null;
+    const [first, last] = opts.rings ?? c?.rings ?? colliderRings(rm, opts.roles ?? null, opts.maxTriangles ?? COLLIDER_MAX_TRIANGLES);
     const a = rm.rings[first], b = rm.rings[last];
     const start = 3 * a.triBase, end = 3 * (b.triBase + b.triangles);
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', mesh.geometry.getAttribute('position'));
-    g.setIndex(new THREE.BufferAttribute(rm.index.subarray(start, end), 1));
+    const own = c !== null && c.rings[0] === first && c.rings[1] === last;
+    if (own) {
+        g.setAttribute('position', new THREE.BufferAttribute(rm.positions.subarray(3 * c.vBase, 3 * rm.nv), 3));
+        g.setIndex(new THREE.BufferAttribute(c.index, 1));
+    } else {
+        g.setAttribute('position', mesh.geometry.getAttribute('position'));
+        g.setIndex(new THREE.BufferAttribute(rm.index.subarray(start, end), 1));
+    }
     g.boundingBox = mesh.geometry.boundingBox.clone();
     g.boundingSphere = mesh.geometry.boundingSphere.clone();
     const proxy = new THREE.Mesh(g, Array.isArray(mesh.material) ? mesh.material[0] : mesh.material);
@@ -59,6 +71,7 @@ export function colliderProxy(THREE, rm, mesh, opts = {}) {
     proxy.userData.trimeshCollider = true;
     proxy.userData.colliderOf = mesh;
     proxy.userData.rings = [first, last];
+    proxy.userData.firstVertex = own ? c.vBase : 0;
     proxy.userData.triangles = (end - start) / 3;
     proxy.updateMatrixWorld = function () {             // it is not in the scene graph: it takes the terrain's matrix
         mesh.updateWorldMatrix(true, false);

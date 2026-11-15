@@ -1,5 +1,5 @@
 // ring_heights: one ring's heights on its lattice, build/mesh.py _sample and _seam_override (blender/eidoblend/
-// terrain at f90c6fc). A lattice point is a cell corner of the ring's level: its height is the level's field there by
+// terrain at 3dda52e). A lattice point is a cell corner of the ring's level: its height is the level's field there by
 // Catmull-Rom, weights (-1, 9, 9, -1) / 16 over the four cells either side on each axis (edge cells repeated), rows
 // first and then columns, in that order of terms. The outermost row and column of a ring with a parent then take the
 // parent's straight edge: np.interp along the parent's lattice line through the parent's heights as written
@@ -9,13 +9,19 @@
 // 13.5 ulp of the corner's largest tap for any evaluation order, fused or not (12.5 from the two four-term sums,
 // whose weights sum to 20 / 16 in magnitude, 1 from Blender's rounding). A seam point adds the interpolation's
 // rounding to its parent vertices' own.
-//! sampler hl r32f       the level's heights, n x n, row 0 south
+//
+// The same lattice for a mask (uKind 1; the debug attributes of build/mesh.js, _assemble's `attributes`): bilinear at
+// the corner, _lattice_bilinear's float32 sums in its order (the two rows of each column, the two columns, x 0.25:
+// exact in float32, so equal to numpy's to the bit), the border from the parent's lattice in the same way. uKind 2:
+// the level has no such mask, so 0 inside (the border still follows the parent).
+//! sampler hl r32f       the level's heights (uKind 1: its mask), n x n, row 0 south; any field when uKind is 2
 //! sampler tab r32i      the rings' integer tables (build/mesh.js TABLE layout); this ring's start at uTab.x
-//! sampler pz r32f       the parent ring's heights grid (any 1 x 1 field for the outermost ring)
-//! image   outZ r32f     this ring's heights, ny x nx
+//! sampler pz r32f       the parent ring's lattice of the same quantity (any 1 x 1 field for the outermost ring)
+//! image   outZ r32f     this ring's lattice, ny x nx
 //! uniform ivec4 uDims   nx, ny, 1 when the ring has a parent, n (the level's cells a side)
 //! uniform ivec4 uPar    the parent's lattice row of this ring's bottom and top border, column of its left and right
 //! uniform ivec4 uTab    this ring's first table entry, 0, 0, 0
+//! uniform int uKind     0: heights (Catmull-Rom); 1: a mask (bilinear); 2: nothing on this level (0)
 
 const W = array<f32, 4>(-0.0625, 0.5625, 0.5625, -0.0625);
 
@@ -62,9 +68,23 @@ fn kmain(p: vec2<i32>) {
     outZ_store(p, vec4<f32>(z, 0.0, 0.0, 0.0));
     return;
   }
+  if (u.uKind == 2) {
+    outZ_store(p, vec4<f32>(0.0));
+    return;
+  }
   // the cell-corner indices: corner m sits between cells m - 1 and m; taps m - 2 .. m + 1, clamped
   let mx = tab_b[t0 + 2 * ny + nx + i];
   let my = tab_b[t0 + 2 * ny + 2 * nx + j];
+  if (u.uKind == 1) {
+    let i0 = clamp(mx - 1, 0, n - 1);
+    let i1 = clamp(mx, 0, n - 1);
+    let j0 = clamp(my - 1, 0, n - 1);
+    let j1 = clamp(my, 0, n - 1);
+    let c0 = h_at(i0, j0, n) + h_at(i0, j1, n);
+    let c1 = h_at(i1, j0, n) + h_at(i1, j1, n);
+    outZ_store(p, vec4<f32>((c0 + c1) * 0.25, 0.0, 0.0, 0.0));
+    return;
+  }
   var ix: array<i32, 4>;
   var iy: array<i32, 4>;
   for (var q = 0; q < 4; q++) {

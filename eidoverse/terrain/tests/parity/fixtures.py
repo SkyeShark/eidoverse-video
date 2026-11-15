@@ -27,8 +27,14 @@ eidoverse/terrain/tests/out/parity/, keyed by the Blender commit and code hash (
 --plans      Every function of the Blender terrain package that draws from numpy's Generator, called again for
              seeds 1-8 with the arguments a real run gave it: the plan calls are recorded by the floor's base runs
              (blender_chaos_floor.py, <run>/base/plans/), so this needs those runs; it says which recipes have none.
-             Numpy's own draws for every call form are the runner package's (tests/core_runner/
-             np_random_expected.py), run as it is into fixtures/np_random/.
+             A case: {label, recipe, function, op, level, seed (null: as the run made it), call (its arguments as
+             JSON; arrays under inputs), result (JSON; arrays under outputs), result_bytes, from_recording, error}.
+             Functions that also return whole fields (the lava walkers' visits, a flow surface) are bounded in size:
+             their first two calls per recipe always, later ones while a budget lasts (PLAN_FIRST_CALLS below). A
+             function that cannot run without the GPU (compose.uplift) gives the run's own recorded result. Ops that
+             draw in their own body are listed in the manifest: their stage replay checks them. Numpy's own draws for
+             every call form are the runner package's (tests/core_runner/np_random_expected.py), run as it is into
+             fixtures/np_random/.
 --recipes    to_dict(), resolve() for the defaults and two other knob sets, describe(), and plan_levels for 20
              focus cases at each quality: the core-inputs package's generator (tests/core_inputs/
              core_inputs_expected.py), run as it is into fixtures/core_inputs/, so there is one generator.
@@ -39,7 +45,8 @@ uniform_types {name: 'float' | 'int' | 'vec2' | 'ivec2' ...}, inputs {sampler: {
 outputs {image: {file, shape, dtype}}, channels (when the Blender test compares only some)}]}: a superset of the
 design probe's manifest, so tests/core_runner/_twins.mjs reads it. Arrays are (H, W, C), row 0 south, C order.
 A function fixture's case: {label, function, args, inputs {name: array}, outputs {name: array}, values}, arrays in
-their natural shape, dtype one of f32 f64 i32 i64 u32 u8 (bools are u8).
+their natural shape, dtype one of f32 f64 i32 i64 u32 u8 (bools are u8), c128 and c64 (complex: the file holds
+(re, im) pairs, the shape is the complex array's). An array of objects or strings is {value: its JSON, shape, dtype}.
 """
 from __future__ import annotations
 
@@ -98,14 +105,21 @@ class Store:
         if hwc and a.ndim == 2:
             a = a[:, :, None]
         a = np.ascontiguousarray(a)
-        dt = DT[str(a.dtype)]
-        h = hashlib.sha1(a.tobytes() + repr((a.shape, dt)).encode()).hexdigest()
+        shape = list(a.shape)
+        if a.dtype.kind == 'c':                                    # complex: the file holds (re, im) pairs of floats
+            dt = 'c128' if a.dtype == np.complex128 else 'c64'
+            a = a.view(np.float64 if dt == 'c128' else np.float32)
+        elif str(a.dtype) not in DT:                               # an object or string array: as its JSON
+            return {'value': B.jsonable(a.tolist()), 'shape': shape, 'dtype': str(a.dtype)}
+        else:
+            dt = DT[str(a.dtype)]
+        h = hashlib.sha1(a.tobytes() + repr((shape, dt)).encode()).hexdigest()
         name = self.files.get(h)
         if name is None:
             name = self.files[h] = f'a{len(self.files) + 1:05d}.bin'
             a.astype(a.dtype.newbyteorder('<'), copy=False).tofile(os.path.join(self.dir, name))
             self.bytes += a.nbytes
-        return {'file': name, 'shape': list(a.shape), 'dtype': dt}
+        return {'file': name, 'shape': shape, 'dtype': dt}
 
     def finish(self, **extra):
         self.manifest.update(extra, arrays=len(self.files), bytes=self.bytes)
@@ -631,14 +645,38 @@ def function_fixtures(root_out, key, only=None):
 # ------------------------------------------------------------------------------------------------------ plans ---
 
 PLAN_SEEDS = (1, 2, 3, 4, 5, 6, 7, 8)
+# What bounds the plan fixtures' size (a plan over objects is small; some functions that draw also return whole fields:
+# the lava walkers' visits, a flow surface, an uplift field): per recipe and function, the first PLAN_FIRST_CALLS calls
+# are always kept, each over all seeds while that stays under PLAN_CALL_BYTES (the karst plan: 13 MB a seed); later
+# calls are kept over all seeds, then as the run made them, while the function's total stays under
+# PLAN_FUNCTION_BYTES; the rest are counted in the manifest and left out.
+PLAN_FIRST_CALLS = 2
+PLAN_CALL_BYTES = 128 << 20
+PLAN_FUNCTION_BYTES = 48 << 20
+
+
+def _result_bytes(v):
+    """The array bytes a recorded result's JSON names (its {'__array__', 'shape', 'dtype'} entries)."""
+    if isinstance(v, dict):
+        if '__array__' in v and 'shape' in v:
+            try:
+                return int(np.prod(v['shape'], dtype=np.int64)) * np.dtype(v.get('dtype', 'float64')).itemsize
+            except TypeError:
+                return 0
+        return sum(_result_bytes(x) for x in v.values())
+    if isinstance(v, list):
+        return sum(_result_bytes(x) for x in v)
+    return 0
 
 
 def plan_fixtures(root_out, key, only=None):
     """Every recorded plan call (the floor's base runs: <recipe>_s<seed>_draft/base/plans/calls.pkl) made again for
-    seeds 1-8 (module doc). The seed is the call's `seed` argument; a call without one is recorded as it was."""
+    seeds 1-8 (module doc). The seed is the call's `seed` argument; a call without one is recorded as it was. The
+    size rule is above (PLAN_FIRST_CALLS): the manifest counts the calls left out. A function that cannot run without
+    the GPU gives one case per call, the run's own recorded result."""
     import pickle
     import _hooks as H
-    B.bare_terrain_package()
+    edition = B.bare_terrain_package()
     store = Store(os.path.join(root_out, 'plans'), 'plans', key)
     root = os.path.dirname(root_out)
     have, missing = [], []
@@ -654,37 +692,94 @@ def plan_fixtures(root_out, key, only=None):
             continue
         with open(pk, 'rb') as f:
             calls = pickle.load(f)
+        recorded = {r['index']: r for r in (B.read_json(os.path.join(os.path.dirname(pk), 'plans.json')) or {})
+                    .get('calls', [])}
         n0 = len(store.manifest['cases'])
+        seen, used, left_out, from_run = {}, {}, {}, {}
+        t0 = time.perf_counter()
         for i, c in enumerate(calls):
             fn, owner = H.resolve_plan_function(c['module'], c['qualname'])
+            fkey = f"{c['module']}.{c['qualname']}"
             if fn is None:
-                store.manifest['cases'].append(dict(recipe=recipe, function=f"{c['module']}.{c['qualname']}",
+                store.manifest['cases'].append(dict(recipe=recipe, function=fkey,
                                                     error='the function is gone from the module'))
                 continue
-            seeds = PLAN_SEEDS if c.get('seed_arg') else (None,)
+            rec = recorded.get(c['index'], {})
+            size = _result_bytes(rec.get('result'))
+            sweep = PLAN_SEEDS if c.get('seed_arg') else (None,)
+            k = seen[fkey] = seen.get(fkey, 0) + 1
+            if k <= PLAN_FIRST_CALLS:
+                seeds = sweep if size * len(sweep) <= PLAN_CALL_BYTES else (None,)
+            elif used.get(fkey, 0) + size * len(sweep) <= PLAN_FUNCTION_BYTES:
+                seeds = sweep
+            elif used.get(fkey, 0) + size <= PLAN_FUNCTION_BYTES:
+                seeds = (None,)
+            else:
+                left_out[fkey] = left_out.get(fkey, 0) + 1
+                continue
+            used[fkey] = used.get(fkey, 0) + size * len(seeds)
             for s in seeds:
                 args, kwargs = H.plan_call_args(c, s)
                 in_arrays, arrays = {}, {}
                 call_json = B.jsonable(dict(args=list(args[1:] if c.get('init') else args), kwargs=kwargs),
                                        in_arrays, 'call', 256)
+                recording = False
                 try:
                     H.clear_memos()
                     out = owner(*args[1:], **kwargs) if c.get('init') else fn(*args, **kwargs)
                     result = B.jsonable(out, arrays, 'result', 256)
                     err = None
+                except RuntimeError as e:
+                    # a function that also evaluates fields on the GPU (compose.uplift: its spur plan, then the
+                    # world noise) cannot run here: its case is the run's own result, as recorded, for the run's seed
+                    if 'needs Blender' not in str(e):
+                        result, err = None, f'{type(e).__name__}: {e}'
+                    else:
+                        result, err, recording = rec.get('result'), None, True
+                        if rec.get('result_arrays'):
+                            with np.load(os.path.join(os.path.dirname(pk), rec['result_arrays'])) as z:
+                                arrays = {n: z[n] for n in z.files}
+                        from_run[fkey] = from_run.get(fkey, 0) + 1
                 except Exception as e:                               # noqa: BLE001 - recorded
                     result, err = None, f'{type(e).__name__}: {e}'
+                if recording and s is not None:
+                    args, kwargs = H.plan_call_args(c, None)         # the recording is of the run's own seed
+                    in_arrays = {}
+                    call_json = B.jsonable(dict(args=list(args[1:] if c.get('init') else args), kwargs=kwargs),
+                                           in_arrays, 'call', 256)
                 store.manifest['cases'].append(dict(
-                    label=f"{recipe} {c['qualname']} #{i} seed {s if s is not None else 'as run'}", recipe=recipe,
-                    function=f"{c['module']}.{c['qualname']}", op=c.get('op'), level=c.get('level'), seed=s,
+                    label=f"{recipe} {c['qualname']} #{i} seed "
+                          f"{s if s is not None and not recording else 'as run'}", recipe=recipe,
+                    function=fkey, op=c.get('op'), level=c.get('level'), seed=None if recording else s,
+                    result_bytes=size, from_recording=recording,
                     call=call_json, inputs={n: store.save(a) for n, a in in_arrays.items()}, result=result,
                     outputs={n: store.save(a) for n, a in arrays.items()}, error=err))
-        have.append(dict(recipe=recipe, calls=len(calls), cases=len(store.manifest['cases']) - n0))
-        print(f'[fixtures] plans: {recipe}: {len(calls)} recorded calls -> {have[-1]["cases"]} cases', flush=True)
-    man = store.finish(recipes=have, recipes_without_recorded_plans=missing, seeds=list(PLAN_SEEDS))
-    print(f"[fixtures] plans: {len(man['cases'])} cases from {len(have)} recipes"
+                if recording:
+                    break                                            # one case: there is no sweep without the GPU
+        have.append(dict(recipe=recipe, calls=len(calls), cases=len(store.manifest['cases']) - n0,
+                         calls_left_out=left_out, cases_from_the_run_recording=from_run,
+                         seconds=round(time.perf_counter() - t0, 1)))
+        print(f'[fixtures] plans: {recipe}: {len(calls)} recorded calls -> {have[-1]["cases"]} cases'
+              + (f' ({sum(left_out.values())} calls left out, over the size budget: '
+                 f'{", ".join(f"{k.split(chr(46), 1)[1]} x{v}" for k, v in left_out.items())})' if left_out else '')
+              + (f' ({sum(from_run.values())} taken from the run\'s recording, the function needs the GPU: '
+                 f'{", ".join(k.split(chr(46), 1)[1] for k in from_run)})' if from_run else '')
+              + f' in {have[-1]["seconds"]} s', flush=True)
+    # the ops that draw from the Generator in their own body: no plan fixture can hold their draws (an op takes a
+    # level's fields), so the stage replay of that op is the check of its plan
+    ops = [f'{m}.{q}' for m, q in H.discover_plan_functions(os.path.join(edition, 'blender', 'eidoblend', 'terrain'),
+                                                           ops=True)]
+    errors = sum(1 for c in store.manifest['cases'] if c.get('error'))
+    man = store.finish(recipes=have, recipes_without_recorded_plans=missing, seeds=list(PLAN_SEEDS),
+                       ops_that_draw_in_their_own_body=ops, first_calls_always_kept=PLAN_FIRST_CALLS,
+                       call_bytes=PLAN_CALL_BYTES, function_bytes=PLAN_FUNCTION_BYTES, cases_with_an_error=errors)
+    print(f"[fixtures] plans: {len(man['cases'])} cases from {len(have)} recipes, {man['arrays']} arrays "
+          f"({man['bytes'] / 1e6:.1f} MB), {errors} with an error"
           + (f"; no recorded plan calls yet for {', '.join(missing)} (their base runs came before the plan hook, or "
              f"have not run)" if missing else '') + f' -> {store.dir}', flush=True)
+    if ops:
+        print(f"[fixtures] plans: ops that draw in their own body (checked by their stage replay): {', '.join(ops)}",
+              flush=True)
     return man
 
 

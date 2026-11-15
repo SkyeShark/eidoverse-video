@@ -8,11 +8,13 @@ bundled Python 3.13, numpy 2.3.4: the plan's C6), on
   saves       the levels of Blender Terrain.save files (<name>.npz + .json): their h fields, plan and mesh_res,
               cores when the plan has a hero level, as api._assemble_terrain builds them
 
-and dumped per case into <out>/<case>/: the ring specs and layout(), every ring's lattice (xs, ys, the vertex
-index grid, the heights as written, the lattice lines in metres), the vertices, triangles and vertex_normals(),
-height_at / normal_at at 2,000 points across rings and seams, the open edges and T-junctions, the triangles per
-ring, the seam creases of test_seam_crease.py, and each level's lake geometry (build/water.py). The port's mesh
-is compared with these (mesh_test.mjs, height_test.mjs, ...).
+and dumped per case into <out>/<case>/: the ring specs, layout() and ring_table(), every ring's lattice (xs, ys, the
+vertex index grid, the heights as written, the lattice lines in metres), the vertices, triangles and
+vertex_normals(), height_at / normal_at at 2,000 points across rings and seams, the open edges and T-junctions, the
+triangles per ring, point attributes (two test fields on the synthetic stacks, one absent on every other level; the
+saves' slope and flow masks; and mesh.py's own `level`), the seam creases of test_seam_crease.py (the points too),
+and each level's lake geometry (build/water.py). The port's mesh is compared with these (mesh_test.mjs,
+seam_test.mjs, water_test.mjs, collider_test.mjs).
 
     <Blender's python> -I -B eidoverse/terrain/tests/mesh_api/mesh_expected.py [--out DIR] [--cases a,b]
         [--save NAME=PATH]...
@@ -36,9 +38,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, '..', '..', '..', '..'))
 OUT = os.path.normpath(os.path.join(HERE, '..', 'out', 'mesh_api', 'fixtures'))
-RECORDED_COMMIT = 'f90c6fc'
+RECORDED_COMMIT = '3dda52e'             # build/mesh.js's; water.py and test_mesh.py have not changed since f90c6fc
 SOURCES = ['blender/eidoblend/terrain/build/mesh.py', 'blender/eidoblend/terrain/build/water.py',
            'blender/eidoblend/terrain/core/metrics.py', 'blender/tests/terrain/mesh_api/test_mesh.py']
+ATTRIBUTE_MASKS = ('slope', 'flow')     # the masks a save's mesh is built with as point attributes, where it has them
 # default saves: (name, path below the Blender checkout, without .npz)
 DEFAULT_SAVES = [
     ('lauterbrunnen_film', 'blender/tests/terrain/out/surface_data/snap/lauterbrunnen'),
@@ -130,15 +133,20 @@ def points(rm, plan, n, rng):
 
 def creases(rm):
     """test_seam_crease.py's measure on this mesh: per seam, the crease across the ring border and across ordinary
-    lattice lines three spacings inside the child and outside in the parent (degrees, 2,000 points each)."""
+    lattice lines three spacings inside the child and outside in the parent (degrees, 2,000 points each), and the
+    points and step each was measured at (x, y, the unit normal across the line, the half step)."""
     out = {}
     for k in range(1, len(rm.rings)):
         child, parent = rm.rings[k], rm.rings[k - 1]
         sc, sp = child.spec.sp * rm.unit, parent.spec.sp * rm.unit
-        seam = TM.crease_deg(rm, *TM.border_points(child, 0.0), 0.25 * min(sc, sp))
-        inner = TM.crease_deg(rm, *TM.border_points(child, 3 * sc), 0.25 * sc)
-        outer = TM.crease_deg(rm, *TM.border_points(child, -3 * sp), 0.25 * sp)
-        out[k] = dict(spacing_m=[sp, sc], seam=seam, inner=inner, outer=outer)
+        rec = dict(spacing_m=[sp, sc])
+        for part, inset, d in (('seam', 0.0, 0.25 * min(sc, sp)), ('inner', 3 * sc, 0.25 * sc),
+                               ('outer', -3 * sp, 0.25 * sp)):
+            pts = TM.border_points(child, inset)
+            rec[part] = TM.crease_deg(rm, *pts, d)
+            rec[part + '_points'] = np.stack(pts, 1)
+            rec[part + '_step'] = float(d)
+        out[k] = rec
     return out
 
 
@@ -159,6 +167,11 @@ def dump_mesh(case, rm, plan, man, d, rng):
     man['skirt'] = rm.skirt
     man['bounds'] = list(rm.bounds())
     man['ring_triangles'] = ring_triangle_counts(rm)
+    man['ring_table'] = json.loads(json.dumps(rm.ring_table()))
+    man['ring_table_from_layout'] = json.loads(json.dumps(M.ring_table(rm.layout())))
+    man['attributes'] = sorted(rm.attrs)
+    for n, a in rm.attrs.items():
+        d.put('attr_' + n, a, np.float32)
     rings = []
     for k, r in enumerate(rm.rings):
         d.put(f'xs_{k}', r.xs, np.int32)
@@ -200,11 +213,13 @@ def dump_mesh(case, rm, plan, man, d, rng):
     for k, c in cr.items():
         for part in ('seam', 'inner', 'outer'):
             d.put(f'crease_{part}_{k}', c[part], np.float64)
+            d.put(f'crease_{part}_points_{k}', c[part + '_points'], np.float64)
         p = lambda a, q: float(np.percentile(a, q))  # noqa: E731
         ref = np.concatenate([c['inner'], c['outer']])
         good = (p(c['seam'], 50) <= p(ref, 50) * 1.25 + 0.1 and p(c['seam'], 99) <= p(ref, 99) * 1.25 + 0.1)
         man['creases'][str(k)] = dict(spacing_m=c['spacing_m'], seam_p50_p90_p99=[p(c['seam'], q) for q in (50, 90, 99)],
-                                      ordinary_p50_p90_p99=[p(ref, q) for q in (50, 90, 99)], pass_=bool(good))
+                                      ordinary_p50_p90_p99=[p(ref, q) for q in (50, 90, 99)], pass_=bool(good),
+                                      steps_m=dict(seam=c['seam_step'], inner=c['inner_step'], outer=c['outer_step']))
     man['seconds_dump_mesh'] = round(time.perf_counter() - t0, 2)
 
 
@@ -260,12 +275,21 @@ def run_synthetic(label, wins, res, cores, out, base_man):
     surf = TM.rough if label.startswith('rough') else TM.surface
     hs = TM.level_arrays(wins, surf)
     hs32 = [np.asarray(h, np.float32) for h in hs]
-    rm = M.build_rings(wins, hs32, {}, cores=cores, mesh_res=res)
+    # two point attributes: a field every level has, and one that every other level lacks (None: 0 there)
+    wave = [np.asarray(a, np.float32) for a in TM.level_arrays(wins, lambda X, Y: 0.5 + 0.5 * np.sin(X / 9.0) * np.cos(Y / 7.0))]
+    ramp = [np.asarray(a, np.float32) if k % 2 == 0 else None
+            for k, a in enumerate(TM.level_arrays(wins, lambda X, Y: 0.01 * X - 0.02 * Y + 3.0))]
+    attrs = dict(wave=wave, ramp=ramp)
+    rm = M.build_rings(wins, hs32, attrs, cores=cores, mesh_res=res)
     d = Dump(os.path.join(out, label))
     man = dict(base_man, case=label, kind='synthetic', surface=surf.__name__, mesh_res=res, cores=cores,
                windows=[[w.x0, w.y0, w.cell, w.n] for w in wins])
     for k, h in enumerate(hs32):
         d.put(f'h_{k}', h, np.float32)
+        d.put(f'in_wave_{k}', wave[k], np.float32)
+        if ramp[k] is not None:
+            d.put(f'in_ramp_{k}', ramp[k], np.float32)
+    man['attribute_inputs'] = dict(wave=[True] * len(wins), ramp=[a is not None for a in ramp])
     man['seconds_build'] = round(time.perf_counter() - t0, 2)
     dump_mesh(label, rm, None, man, d, np.random.default_rng(11))
     man['arrays'] = d.arrays
@@ -281,16 +305,22 @@ def run_save(label, base, out, base_man):
         meta = json.load(f)
     plan = [LV.Level.from_dict(dd) for dd in meta['plan']]
     fields = [dict() for _ in plan]
+    masks = [dict() for _ in plan]
     with np.load(base + '.npz', allow_pickle=False) as z:
         for k in z.files:
             lvl, kind, nm = k.split('__', 2)
             if kind == 'f' and nm in ('h', 'water', 'bed'):
                 fields[int(lvl[1:])][nm] = z[k]
+            elif kind == 'm' and nm in ATTRIBUTE_MASKS:
+                masks[int(lvl[1:])][nm] = z[k].astype(np.float32)      # float32, as Terrain.load hands them on
     t_load = time.perf_counter() - t0
     cores = any(lv.role == 'hero' for lv in plan)
     mesh_res = int(meta.get('mesh_res') or M.MESH_RES)
+    # the masks as point attributes, as api._assemble_terrain passes them ({name: [per level, or None]})
+    names = sorted(set().union(*[set(m) for m in masks]))
+    attrs = {n: [m.get(n) for m in masks] for n in names}
     t1 = time.perf_counter()
-    rm = M.build_rings(plan, [f['h'] for f in fields], {}, cores=cores, mesh_res=mesh_res)
+    rm = M.build_rings(plan, [f['h'] for f in fields], attrs, cores=cores, mesh_res=mesh_res)
     t_build = time.perf_counter() - t1
     d = Dump(os.path.join(out, label))
     rel = os.path.relpath(base, BLE).replace('\\', '/')

@@ -270,20 +270,27 @@ async function checkCase(name) {
     const { mesh, heightAt, masks } = ts;
     const [m2, h2] = ts;
     const mats = mesh.material;
-    const roles = ts.levels.map((lv) => lv.role);
+    const table = ts.ring.ringTable();
     const groupsOk = mesh.geometry.groups.length === ts.ring.rings.length + 1 &&
-        ts.ring.rings.every((r, k) => mesh.geometry.groups[k].materialIndex === (roles[r.spec.level] === 'context' ? 1 : 0));
-    T.ok(tag('scene: the mesh has the near and far clay NodeMaterials, one group a ring (context rings the far one), no mask attributes'),
+        mesh.geometry.groups.every((g, k) => g.materialIndex === 0 && (k === table.length || (g.start === 3 * table[k].start && g.count === 3 * table[k].count)));
+    T.ok(tag('scene: the mesh has the near and far clay NodeMaterials, one group a ring (the ring table\'s runs, every one on the near slot), no mask attributes'),
         mesh.isMesh && Array.isArray(mats) && mats.length === 2 && mats.every((m) => m.isNodeMaterial === true) && groupsOk &&
         C.sameJson(Object.keys(mesh.geometry.attributes).sort(), ['normal', 'position', 'uv']) && mesh.name === 'ground' && mesh.userData.trimeshCollider === true,
         `${mesh.geometry.groups.length} groups, attributes ${Object.keys(mesh.geometry.attributes).join(', ')}`);
     T.ok(tag('scene: `const { mesh, heightAt, masks } = t` and `const [mesh, heightAt] = t` work'),
         heightAt(mx[0], mz[0]) === ts.ring.heightAt(mx[0], my[0]) && masks === ts.masks && m2 === mesh && h2(mx[1], mz[1]) === ts.ring.heightAt(mx[1], my[1]), '');
+    // the collider proxy: a view of the mesh's own vertex buffer from its first vertex, its rings' triangles counted
+    // from there
     const proxy = ts.collider;
-    T.ok(tag('scene: the collider proxy shares the vertices, holds a run of the index buffer, and is on the mesh'),
-        proxy && mesh.userData.colliderProxy === proxy && proxy.geometry.getAttribute('position') === mesh.geometry.getAttribute('position') &&
-        proxy.geometry.index.array.buffer === mesh.geometry.index.array.buffer && proxy.parent === null && proxy.userData.triangles > 0,
-        `rings ${JSON.stringify(proxy?.userData.rings)}, ${proxy?.userData.triangles} of ${ts.ring.triangleCount} triangles`);
+    const pp = proxy?.geometry.getAttribute('position').array, mp = mesh.geometry.getAttribute('position').array;
+    const fv = proxy?.userData.firstVertex ?? 0, firstRing = ts.ring.rings[proxy?.userData.rings[0] ?? 0];
+    let proxyOk = Boolean(proxy) && mesh.userData.colliderProxy === proxy && pp.buffer === mp.buffer && pp.byteOffset === mp.byteOffset + 12 * fv &&
+        proxy.parent === null && proxy.userData.triangles > 0 && proxy.geometry.index.count === 3 * proxy.userData.triangles;
+    const pi = proxy?.geometry.index.array;
+    for (const q of [0, 1, 2, 3 * 777, pi.length - 1]) if (pi[q] + fv !== mesh.geometry.index.array[3 * firstRing.triBase + q]) proxyOk = false;
+    T.ok(tag('scene: the collider proxy is on the mesh, its vertices a view of the mesh\'s vertex buffer from its first vertex, its triangles the rings\' run counted from there'),
+        proxyOk, `rings ${JSON.stringify(proxy?.userData.rings)}, ${proxy?.userData.triangles} of ${ts.ring.triangleCount} triangles, ` +
+        `${pp.length / 3} of ${mp.length / 3} vertices`);
     T.ok(tag('scene: the exact ray caster is installed and the geometry refuses a bounds tree'),
         mesh.userData.exactRaycast === true && Object.prototype.hasOwnProperty.call(mesh, 'raycast') && mesh.geometry.computeBoundsTree() === null, '');
     const ud = mesh.userData.eidoTerrain;
@@ -292,6 +299,49 @@ async function checkCase(name) {
         C.sameJson(JSON.parse(JSON.stringify(mesh.userData.eidoTerrainMesh)), JSON.parse(JSON.stringify(ts.ring.layout()))), '');
     rec.water = { lakes: ts.water.lakes.map((m) => m.userData.eidoWater), sea: ts.water.sea?.userData.eidoWater ?? null };
     rec.triangles = ts.ring.triangleCount;
+
+    // preview: the hillshade and mask PNGs (looked at beside the DEM: out/mesh_api/preview/)
+    const pbase = C.urlPath(C.outUrl(`preview/${name}`));
+    t0 = performance.now();
+    const files = await ts.preview(pbase);
+    rec.preview_s = +((performance.now() - t0) / 1000).toFixed(2);
+    const ihdr = (f) => {
+        const b = Deno.readFileSync(f).subarray(0, 26), v = new DataView(b.buffer, b.byteOffset, 26);
+        return { png: b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47, w: v.getUint32(16), h: v.getUint32(20), depth: b[24], colour: b[25] };
+    };
+    const main = ts.main, heads = files.map(ihdr);
+    const wantMasks = ['slope', 'flow', 'rock', 'snow', 'vegetation', 'wetness', 'talus'].filter((m) => ts.masks._stack[main.index].has(m));
+    const heroLast = ts.levels[ts.levels.length - 1].role === 'hero';
+    T.ok(tag('preview: <path>_main_hillshade.png (RGB, the hero windows outlined), the hero hillshade when there is one, a PNG per mask present; n x n, 8-bit'),
+        files.length === 1 + (heroLast ? 1 : 0) + wantMasks.length && heads.every((h) => h.png && h.depth === 8) &&
+        heads[0].w === main.n && heads[0].h === main.n && heads[0].colour === 2 && files[0].endsWith('_main_hillshade.png') &&
+        wantMasks.every((m) => files.includes(`${pbase}_mask_${m}.png`)),
+        `${files.length} files in ${rec.preview_s} s: ${files.map((f) => f.split('/').pop()).join(', ')}`);
+
+    // meshMasks: masks as point attributes (a debug option)
+    const tm = await Terrain.load(base, { build: false, plants: false, meshMasks: ['slope', 'flow'] });
+    const at = tm.ring.attributes;
+    const lvOf = tm.ring.rings.map((r) => r.spec.level);
+    let mmOk = at !== null && C.sameJson(Object.keys(at).sort(), ['flow', 'level', 'slope']) && at.slope.length === tm.ring.vertexCount;
+    // a vertex of each ring's interior: its level, and its slope the mean of the four cells around its corner
+    if (mmOk) {
+        tm.ring.rings.forEach((r, k) => {
+            const i = Math.min(3, r.nx - 2), j = Math.min(2, r.ny - 2), v = r.idx[j * r.nx + i];
+            if (at.level[v] !== lvOf[k]) mmOk = false;
+            const lv = tm.levels[lvOf[k]], a = tm.mask('slope').array(lvOf[k]);
+            const cx = Math.round((r.xm[i] - lv.x0) / lv.cell), cy = Math.round((r.ym[j] - lv.y0) / lv.cell);
+            const c = (q, n) => Math.min(Math.max(q, 0), n - 1);
+            const wantV = Math.fround(Math.fround(Math.fround(a[c(cy - 1, lv.n) * lv.n + c(cx - 1, lv.n)] + a[c(cy, lv.n) * lv.n + c(cx - 1, lv.n)]) +
+                Math.fround(a[c(cy - 1, lv.n) * lv.n + c(cx, lv.n)] + a[c(cy, lv.n) * lv.n + c(cx, lv.n)])) * 0.25);
+            if (at.slope[v] !== wantV) mmOk = false;
+        });
+    }
+    let r1 = await C.throwsWith(() => Terrain.load(base, { build: false, plants: false, meshMasks: ['slpoe'] }), ["no mask 'slpoe'", 'slope'], 'KeyError');
+    const nine = tm.masks.names().slice(0, 9);
+    let r2 = await C.throwsWith(() => Terrain.load(base, { build: false, plants: false, meshMasks: nine }), ['at most 8'], 'ValueError');
+    T.ok(tag('meshMasks: the named masks and the level as point attributes (bilinear at the vertex, to the bit); an unknown mask names the nearest; more than eight are refused'),
+        mmOk && r1.ok && r2.ok, mmOk ? `${Object.keys(at).join(', ')}; ${r1.message.slice(0, 80)}; ${r2.message.slice(0, 80)}` : 'attribute values');
+    tm.dispose();
     ts.dispose();
     t.dispose();
 }

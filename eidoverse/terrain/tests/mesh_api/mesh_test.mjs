@@ -11,8 +11,13 @@
 //   heights             every lattice point within 14 ulp of its corner's largest tap (a seam point: of its parent
 //                       points' bound plus 4 ulp of their height); the worst in ulp reported
 //   normals             every terrain vertex within 1e-5 rad of vertex_normals()
-//   groups              one per ring and the skirt's, Blender's triangles per ring, material 1 on context rings;
-//                       the geometry carries position, normal and uv only (no mask attributes)
+//   groups              one per ring and the skirt's, the triangle runs of Blender's ring_table(), every one on
+//                       material slot 0 as Blender leaves every polygon; ringTable() and ringTable(layout) JSON-equal
+//                       to ring_table()
+//   attributes          built with point attributes as Blender's build_rings(attributes=...): every value the
+//                       lattice's interior gives equal to the bit, the seams' within 1e-5 of the range; `level`
+//                       exact; the geometry carries them as eido_<name>, and without them position, normal and uv only
+//   collider run        buildRings' opts.collider: the run's triangles counted from its first vertex, index for index
 //   heightAt            at Blender's 2,000 points: equal to height_at to 1e-12 relative where the triangle's three
 //                       vertices are bit-equal, within their bound elsewhere; the same rings; the transcription on
 //                       Blender's own heights equal at every point; points outside read the edge as Blender's
@@ -22,7 +27,8 @@
 
 import * as THREE from 'npm:three@0.184.0';
 import * as G from '../../core/gpu.js';
-import { RingMesh, buildRings, gpuNormals, integerWindows, makeGeometry, NONE, asWindow, searchsorted } from '../../build/mesh.js';
+import { RingMesh, buildRings, gpuNormals, integerWindows, makeGeometry, ringTable, NONE, asWindow, searchsorted } from '../../build/mesh.js';
+import { colliderRings } from '../../build/collider.js';
 import { readNpz } from '../../core/io.js';
 import { prims } from '../../core/prims.js';
 import { Level } from '../../core/levels.js';
@@ -35,16 +41,24 @@ const R = await G.init();
 const T = new C.Checks('mesh and API: the ring mesh against build/mesh.py');
 T.extra.cases = {};
 
+// the levels, their heights and the point attributes Blender built the fixture's mesh with ({ name: [per level] })
 async function levelsOf(name, man) {
+    const names = man.attributes.filter((a) => a !== 'level');
     if (man.kind === 'synthetic') {
         const levels = man.windows.map(([x0, y0, cell, n]) => ({ x0, y0, cell, n }));
-        return { levels, heights: levels.map((_, k) => C.arr(name, man, `h_${k}`)) };
+        const attributes = Object.fromEntries(names.map((a) => [a, levels.map((_, k) =>
+            (man.attribute_inputs[a][k] ? C.arr(name, man, `in_${a}_${k}`) : null))]));
+        return { levels, heights: levels.map((_, k) => C.arr(name, man, `h_${k}`)), attributes };
     }
     const base = C.blenderPath(man.save);
     const levels = man.plan.map((d) => Level.fromDict(d));
     const want = levels.map((_, i) => `L${i}__f__h`);
-    const z = await readNpz(base + '.npz', { names: want });
-    return { levels, heights: want.map((k) => z[k].data) };
+    const masks = levels.flatMap((_, i) => names.map((a) => `L${i}__m__${a}`));
+    const z = await readNpz(base + '.npz', { names: [...want, ...masks] });
+    // a mask as Terrain.load hands it on: float32 (the save holds float16 for the bounded ones)
+    const f32 = (a) => (a === undefined ? null : a.data instanceof Float32Array ? a.data : new Float32Array(a.data));
+    const attributes = Object.fromEntries(names.map((a) => [a, levels.map((_, i) => f32(z[`L${i}__m__${a}`]))]));
+    return { levels, heights: want.map((k) => z[k].data), attributes };
 }
 
 // the height bound of every lattice point (see the header): per ring a Float64Array, ny x nx
@@ -100,9 +114,11 @@ async function checkCase(name) {
     const man = C.manifest(name);
     const rec = {};
     T.extra.cases[name] = rec;
-    const { levels, heights } = await levelsOf(name, man);
+    const { levels, heights, attributes } = await levelsOf(name, man);
+    const roles = levels.map((l) => l.role ?? null);
     const t0 = performance.now();
-    const rm = await buildRings(R, levels, heights, { cores: man.cores, meshRes: man.mesh_res });
+    const rm = await buildRings(R, levels, heights, { cores: man.cores, meshRes: man.mesh_res, attributes,
+        collider: (rings) => colliderRings({ rings }, roles) });
     rec.build_s = +((performance.now() - t0) / 1000).toFixed(3);
     rec.triangles = rm.triangleCount;
     rec.vertices = rm.vertexCount;
@@ -206,30 +222,89 @@ async function checkCase(name) {
     T.ok(tag('vertex normals against Blender\'s within the turn their heights\' bound allows (+1e-5 rad)'), worstRatio2 <= 1,
         `worst ${worstAng.toExponential(3)} rad at vertex ${at}; worst / bound ${worstRatio2.toFixed(3)}`);
 
-    // groups and attributes
+    // groups: Blender's ring table (each ring's run of triangles), every one on material slot 0, then the skirt's
     const g = makeGeometry(THREE, rm);
     const attrs = Object.keys(g.attributes).sort();
-    const roles = levels.map((l) => l.role ?? null);
-    let groupOk = g.groups.length === rm.rings.length + (man.skirt ? 1 : 0), groupWhy = `${g.groups.length} groups`;
-    rm.rings.forEach((r, k) => {
+    const table = JSON.parse(JSON.stringify(rm.ringTable()));
+    T.ok(tag('ringTable() JSON-equal to Blender\'s ring_table() (each ring\'s triangle run, window and hole in metres); ' +
+        'ringTable(layout) the same'), C.sameJson(table, man.ring_table) &&
+        C.sameJson(JSON.parse(JSON.stringify(ringTable(rm.layout()))), man.ring_table_from_layout),
+        C.jsonDiff(table, man.ring_table) ?? `${table.length} rings`);
+    let groupOk = g.groups.length === rm.rings.length + (man.skirt ? 1 : 0), groupWhy = `${g.groups.length} groups, all on slot 0`;
+    man.ring_table.forEach((row, k) => {
         const gr = g.groups[k];
-        const mi = roles[r.spec.level] === 'context' ? 1 : 0;
-        if (!gr || gr.count !== 3 * man.ring_triangles[k] || gr.materialIndex !== mi) {
+        if (!gr || gr.start !== 3 * row.start || gr.count !== 3 * row.count || gr.count !== 3 * man.ring_triangles[k] || gr.materialIndex !== 0) {
             groupOk = false;
-            groupWhy = `ring ${k}: ${gr?.count / 3} triangles (Blender ${man.ring_triangles[k]}), material ${gr?.materialIndex} (want ${mi})`;
+            groupWhy = `ring ${k}: triangles ${gr?.start / 3}+${gr?.count / 3} (Blender ${row.start}+${row.count}), material ${gr?.materialIndex}`;
         }
     });
     if (man.skirt) {
         const sg = g.groups[g.groups.length - 1];
-        if (sg.start !== 3 * man.terrain_triangles || sg.count !== 3 * (man.triangles - man.terrain_triangles)) {
+        if (sg.start !== 3 * man.terrain_triangles || sg.count !== 3 * (man.triangles - man.terrain_triangles) || sg.materialIndex !== 0) {
             groupOk = false;
-            groupWhy = `the skirt's group ${sg.start}+${sg.count}`;
+            groupWhy = `the skirt's group ${sg.start}+${sg.count}, material ${sg.materialIndex}`;
         }
     }
-    T.ok(tag('one geometry group per ring (Blender\'s triangles per ring, context rings material 1) and the skirt\'s'),
+    T.ok(tag('one geometry group per ring (Blender\'s run of triangles) and the skirt\'s after them, every one on material slot 0'),
         groupOk, groupWhy);
-    T.ok(tag('no mask attributes: position, normal and uv only'), C.sameJson(attrs, ['normal', 'position', 'uv']), attrs.join(', '));
+
+    // point attributes: Blender's build_rings(attributes=...) values; the lattice's own points are float32 sums in
+    // numpy's order (equal to the bit), a seam point is interpolated in float32 where np.interp is float64
+    const want = man.attributes.map((a) => 'eido_' + a).concat(['normal', 'position', 'uv']).sort();
+    let attOk = C.sameJson(attrs, want), attWhy = '';
+    rec.attributes = {};
+    for (const a of man.attributes) {
+        const mine = rm.attributes?.[a], theirs = C.arr(name, man, 'attr_' + a);
+        if (!mine || mine.length !== theirs.length) {
+            attOk = false;
+            attWhy ||= `${a}: ${mine?.length} values, Blender ${theirs.length}`;
+            continue;
+        }
+        let lo = Infinity, hi = -Infinity, worst = 0, differ = 0, at = -1;
+        for (let v = 0; v < theirs.length; v++) {
+            lo = Math.min(lo, theirs[v]);
+            hi = Math.max(hi, theirs[v]);
+            const d = Math.abs(mine[v] - theirs[v]);
+            if (d) differ++;
+            if (!(d <= worst)) { worst = d; at = v; }
+        }
+        const rel = worst / Math.max(hi - lo, 1e-30);
+        rec.attributes[a] = { vertices: theirs.length, differ, worst, worst_of_range: rel };
+        const ok = a === 'level' ? differ === 0 : rel <= 1e-5;
+        if (!ok) {
+            attOk = false;
+            attWhy ||= `${a}: worst ${worst.toExponential(2)} (${rel.toExponential(2)} of the range) at vertex ${at}`;
+        }
+    }
+    T.ok(tag('point attributes as Blender\'s build_rings(attributes=...): the geometry carries eido_<name>; values within 1e-5 of ' +
+        'the range (the seams\' float32 interpolation), `level` exact'), attOk,
+        attWhy || Object.entries(rec.attributes).map(([a, r]) => `${a}: ${r.differ} of ${r.vertices} differ, worst ${r.worst_of_range.toExponential(2)} of the range`).join('; '));
+    const bare = makeGeometry(THREE, new RingMesh({ ...rm, attributes: null }));
+    T.ok(tag('no mask attributes unless asked for: position, normal and uv only'),
+        C.sameJson(Object.keys(bare.attributes).sort(), ['normal', 'position', 'uv']), Object.keys(bare.attributes).sort().join(', '));
+    bare.dispose();
     g.dispose();
+
+    // the collider's run of rings: the same triangles, their vertex numbers counted from the run's first vertex
+    const cl = rm.collider;
+    const [cf, clast] = colliderRings(rm, roles);
+    let collOk = cl !== null && cl.rings[0] === cf && cl.rings[1] === clast, collWhy = '';
+    if (collOk) {
+        const start = 3 * rm.rings[cf].triBase, count = 3 * (rm.rings[clast].triBase + rm.rings[clast].triangles) - start;
+        const nOwn = rm.nv - cl.vBase;
+        collOk = cl.index.length === count && cl.vBase === (cf ? rm.rings[cf - 1].v0 : 0);
+        let used = 0;
+        const seenV = new Uint8Array(nOwn);
+        for (let q = 0; collOk && q < count; q++) {
+            if (cl.index[q] + cl.vBase !== rm.index[start + q] || cl.index[q] >= nOwn) { collOk = false; collWhy = `index ${q}`; }
+            else if (!seenV[cl.index[q]]) { seenV[cl.index[q]] = 1; used++; }
+        }
+        rec.collider = { rings: cl.rings, triangles: count / 3, first_vertex: cl.vBase, vertices_in_view: nOwn, vertices_used: used,
+            mesh_vertices: rm.vertexCount };
+        collWhy ||= `rings ${cf}..${clast}: ${(count / 3).toLocaleString('en-US')} triangles on ${used.toLocaleString('en-US')} vertices, ` +
+            `in a view of ${nOwn.toLocaleString('en-US')} of the mesh's ${rm.vertexCount.toLocaleString('en-US')}`;
+    }
+    T.ok(tag('collider run: its triangles index for index, counted from its first vertex (the parent ring\'s first)'), collOk, collWhy);
 
     // heightAt
     const px = C.arr(name, man, 'px'), py = C.arr(name, man, 'py'), hz = C.arr(name, man, 'hz');

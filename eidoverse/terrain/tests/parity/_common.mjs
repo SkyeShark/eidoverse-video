@@ -123,10 +123,13 @@ export function gradeArray(got, want, opts = {}) {
 }
 
 const TYPES = { f32: Float32Array, f64: Float64Array, i32: Int32Array, u32: Uint32Array, u8: Uint8Array,
-    i8: Int8Array, u16: Uint16Array, i64: BigInt64Array, f16: globalThis.Float16Array };
+    i8: Int8Array, u16: Uint16Array, i64: BigInt64Array, f16: globalThis.Float16Array,
+    c128: Float64Array, c64: Float32Array };               // complex: (re, im) pairs, twice the shape's count
 
-/** A fixture's array (little-endian, C order): { file, shape, dtype } read from `dir` as a typed array. */
+/** A fixture's array (little-endian, C order): { file, shape, dtype } read from `dir` as a typed array (complex
+ * dtypes as (re, im) pairs). An array of objects or strings is stored as { value }: that JSON is returned. */
 export function array(dir, a) {
+    if (a.file === undefined && 'value' in a) return a.value;
     const bytes = Deno.readFileSync(`${dir}/${a.file}`);
     const T = TYPES[a.dtype];
     if (!T) throw new Error(`fixture array ${a.file}: dtype ${a.dtype} is not read here`);

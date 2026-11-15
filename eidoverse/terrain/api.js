@@ -41,8 +41,10 @@
 //     inside each area and the cells its falloff reaches (per-row tables made in doubles), so the ground inside is
 //     the area's height to the bit and the ground beyond the falloff is untouched to the bit; the blend between is
 //     float32 where numpy's is float64 rounded once.
-//   - The mesh carries no mask attributes and one geometry group per ring (build/mesh.js; PORT_PLAN.md C4);
-//     `meshMasks` is reserved for the debug attributes of 7.3.
+//   - The mesh carries no mask attributes and one geometry group per ring (build/mesh.js; PORT_PLAN.md C4): its
+//     material is the array [near, far], every ring on the near slot until the surfacing module names the far
+//     rings from the cameras (as Blender's apply_surface does). `meshMasks: [names]` (a debug option, 7.3) adds up
+//     to eight masks as the point attributes api.py always writes, eido_<mask>, and eido_level.
 //   - `surface` and `plants` (SURFACING_DESIGN.md 5.3) are accepted and reserved: until the surfacing wave is
 //     ported 'auto' resolves to none, like `palette: 'auto'` gives the grey clay, with one notice. t.plants holds
 //     the spots a save carries (Terrain.load reads <base>.plants.json and its .f32 files, save writes them back).
@@ -1302,11 +1304,21 @@ async function assembleTerrain(R, recipe, values, plan, fields, stack, info, opt
         if (a === undefined) throw new ValueError(`level ${i}: no field 'h'`);
         return a;
     });
+    // meshMasks (a debug option): those masks as point attributes of the mesh, eido_<mask>, with eido_level
+    let attributes = null;
     if (opts.meshMasks) {
-        throw new NotPortedError('meshMasks (masks as vertex attributes, a debug option) is not written yet: the mesh ' +
-            'carries no mask attributes; mask(name).at(x, z) samples a mask');
+        const names = typeof opts.meshMasks === 'string' ? [opts.meshMasks] : [...opts.meshMasks];
+        const have = [...new Set(stack.flatMap((m) => m.names()))];
+        for (const n of names) if (!have.includes(n)) throw new KeyError(`meshMasks: no mask ${pyReprValue(n)}` + nearest(n, have));
+        if (names.length > Mesh.MAX_ATTRIBUTES) {
+            throw new ValueError(`meshMasks: ${names.length} masks; at most ${Mesh.MAX_ATTRIBUTES} (a vertex has 16 attributes ` +
+                'by default, and the material reads its masks from data textures, not from the mesh)');
+        }
+        attributes = Object.fromEntries(names.map((n) => [n, stack.map((m) => (m.has(n) ? m.f32(n) : null))]));
     }
-    const ring = await Mesh.buildRings(R, plan, heights, { cores, meshRes: Math.trunc(info.mesh_res || Mesh.MESH_RES) });
+    const roles = plan.map((lv) => lv.role);
+    const ring = await Mesh.buildRings(R, plan, heights, { cores, meshRes: Math.trunc(info.mesh_res || Mesh.MESH_RES), attributes,
+        collider: (rings) => Collider.colliderRings({ rings }, roles) });
     return new Terrain(recipe, values, plan, fields, new MaskSet(stack, plan), ring, info, R);
 }
 
@@ -1332,8 +1344,9 @@ async function buildScene(t, name, palette, dress, log, THREEgiven) {
     info.name = name;
     const rm = t.ring;
     const geometry = Mesh.makeGeometry(THREE, rm);
-    // one material slot per kind of ring (PORT_PLAN.md 7.3): 0 near, 1 far (the context rings); the clay in both
-    // until the surfacing wave
+    // two material slots (PORT_PLAN.md 7.3): 0 near, 1 far. Every ring's group is on slot 0, as Blender leaves
+    // every polygon; the surfacing wave's material names the far rings from the cameras (surfacing.py far_rings)
+    // and moves their groups to slot 1. The clay in both until then.
     const near = clayMaterial(THREE, name + '_clay'), far = clayMaterial(THREE, name + '_clay_far');
     const mesh = new THREE.Mesh(geometry, [near, far]);
     mesh.name = name;

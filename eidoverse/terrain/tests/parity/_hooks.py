@@ -181,9 +181,11 @@ def _calls_in(node, names):
     return found
 
 
-def discover_plan_functions(terrain_dir):
+def discover_plan_functions(terrain_dir, ops=False):
     """[(module 'solvers.karst', qualname 'plan_karst' | 'Column.__init__')] of every module-level function and
-    method that draws from numpy's Generator (see above); ops (op_*) are left out: their calls are the stage dumps."""
+    method that draws from numpy's Generator (see above); ops (op_*) are left out: their calls are the stage dumps.
+    With ops=True, the ops that draw in their own body instead (their draws have no plan fixture: the stage replay of
+    that op is what checks them)."""
     import ast
     trees = {}
     for pkg in PLAN_PACKAGES:
@@ -210,7 +212,7 @@ def discover_plan_functions(terrain_dir):
     for mod, fl in funcs.items():
         for q, n in fl:
             name = q.split('.')[-1]
-            if name in factories or name.startswith('op_'):
+            if name in factories or name.startswith('op_') != bool(ops):
                 continue
             if _calls_in(n, {'default_rng'} | factories):
                 found.append((mod, q))

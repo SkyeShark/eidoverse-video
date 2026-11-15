@@ -251,7 +251,10 @@ def replay_one(h, header, rec, dir, pattern):
 
 def stage_floors(stages_dir, patterns=5, levels='main', ops=None, log=print):
     """The stage floors of one dump folder (module doc): {'stages': [...], 'patterns': n}, also written to
-    <stages_dir>/../stage_floors.json."""
+    <stages_dir>/../stage_floors.json after every stage, so a run that is cut off is taken up where it stopped
+    (a stage already in the file with the same number of patterns is kept). When every stage of the chosen levels
+    is in (no --ops filter), <stages_dir>/../stage_floors.done is written."""
+    import traceback
     import _hooks as H
     B.import_blender_terrain()
     h = H.install()
@@ -263,49 +266,75 @@ def stage_floors(stages_dir, patterns=5, levels='main', ops=None, log=print):
         want = None
     else:
         want = {int(x) for x in str(levels).split(',') if x != ''}
+    base_dir = os.path.dirname(os.path.abspath(stages_dir))
+    path = os.path.join(base_dir, 'stage_floors.json')
+    prev = B.read_json(path) or {}
+    entries = {}
+    if prev.get('patterns') == patterns:
+        entries = {s['call']: s for s in prev.get('stages', []) if 'floor' in s or 'skipped' in s}
     out = dict(source=os.path.abspath(stages_dir), patterns=patterns, levels=levels,
                protocol='5.4: every float32 field of the level +-1 ulp on half the cells at the op entry, and each '
                         'kernel\'s images after its first dispatch in the call; default_rng([pattern, op call]) and '
                         '([pattern, op call, kernel, 1])', stages=[], versions=B.versions(h.G.init()))
-    path = os.path.join(os.path.dirname(os.path.abspath(stages_dir)), 'stage_floors.json')
+
+    def write():
+        out['stages'] = [entries[c] for c in sorted(entries)]
+        B.write_json(path, out)
+
+    complete = True
     for rec in header['stages']:
         if want is not None and rec['level'] not in want:
             continue
         if ops and rec['op'] not in ops:
+            complete = complete and rec['call'] in entries
+            continue
+        if rec['call'] in entries:
             continue
         ent = dict(call=rec['call'], level=rec['level'], pass_index=rec['pass_index'], n=rec['n'], op=rec['op'],
                    label=rec.get('label'), seconds_in_run=rec.get('seconds'))
         if not rec.get('pickle'):
             ent['skipped'] = f"no pickle of its params and shared ({rec.get('pickle_error')})"
-            out['stages'].append(ent)
+            entries[rec['call']] = ent
+            write()
             continue
-        with np.load(os.path.join(stages_dir, rec['after'])) as z:
-            want_after = {k: z[k] for k in z.files if not k.startswith('shared__')}
-        t0 = time.perf_counter()
-        base = replay_one(h, header, rec, stages_dir, None)
-        ent['replay_seconds'] = round(time.perf_counter() - t0, 2)
-        rd = _diffs(base, want_after)
-        ent['replay_bit_identical'] = all(isinstance(v, list) and v[3] for v in rd.values())
-        if not ent['replay_bit_identical']:
-            ent['replay_vs_dump'] = rd
-        samples = []
-        for p in range(1, patterns + 1):
-            got = replay_one(h, header, rec, stages_dir, p)
-            samples.append(_diffs(got, base))
-        fl = {}
-        for name in base:
-            vals = [s.get(name) for s in samples if isinstance(s.get(name), list)]
-            if vals:
-                fl[name] = dict(max_over_range=max(v[0] for v in vals), rms_over_range=max(v[1] for v in vals),
-                                p99_over_range=max(v[2] for v in vals),
-                                samples=[[v[0], v[1], v[2]] for v in vals])
-        ent['floor'] = fl
-        out['stages'].append(ent)
-        log(f"[stage-floor] L{rec['level']} {rec['op']} (call {rec['call']}): replay "
-            f"{'bit-identical' if ent['replay_bit_identical'] else 'DIFFERS'}, h floor "
-            f"{fl.get('h', {}).get('rms_over_range', float('nan')):.3g} RMS / range ({ent['replay_seconds']} s a replay)")
-        B.write_json(path, out)
-    B.write_json(path, out)
+        try:
+            with np.load(os.path.join(stages_dir, rec['after'])) as z:
+                want_after = {k: z[k] for k in z.files if not k.startswith('shared__')}
+            t0 = time.perf_counter()
+            base = replay_one(h, header, rec, stages_dir, None)
+            ent['replay_seconds'] = round(time.perf_counter() - t0, 2)
+            rd = _diffs(base, want_after)
+            ent['replay_bit_identical'] = all(isinstance(v, list) and v[3] for v in rd.values())
+            if not ent['replay_bit_identical']:
+                ent['replay_vs_dump'] = rd
+            samples = []
+            for p in range(1, patterns + 1):
+                got = replay_one(h, header, rec, stages_dir, p)
+                samples.append(_diffs(got, base))
+            fl = {}
+            for name in base:
+                vals = [s.get(name) for s in samples if isinstance(s.get(name), list)]
+                if vals:
+                    fl[name] = dict(max_over_range=max(v[0] for v in vals), rms_over_range=max(v[1] for v in vals),
+                                    p99_over_range=max(v[2] for v in vals),
+                                    samples=[[v[0], v[1], v[2]] for v in vals])
+            ent['floor'] = fl
+            log(f"[stage-floor] L{rec['level']} {rec['op']} (call {rec['call']}): replay "
+                f"{'bit-identical' if ent['replay_bit_identical'] else 'DIFFERS'}, h floor "
+                f"{fl.get('h', {}).get('rms_over_range', float('nan')):.3g} RMS / range "
+                f"({ent['replay_seconds']} s a replay)", flush=True)
+        except Exception as e:                                       # noqa: BLE001 - recorded; the next stage still runs
+            ent['skipped'] = f'the replay raised {type(e).__name__}: {e}'
+            ent['traceback'] = traceback.format_exc()[-2000:]
+            h.active = False
+            log(f"[stage-floor] L{rec['level']} {rec['op']} (call {rec['call']}): the replay raised "
+                f"{type(e).__name__}: {e}", flush=True)
+        entries[rec['call']] = ent
+        write()
+    write()
+    if complete:
+        B.write_json(os.path.join(base_dir, 'stage_floors.done'),
+                     dict(stages=len(entries), patterns=patterns, levels=levels, date=time.strftime('%Y-%m-%d %H:%M:%S')))
     return out
 
 

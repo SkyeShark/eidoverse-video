@@ -1,4 +1,4 @@
-// Port of blender/eidoblend/terrain/build/mesh.py at f90c6fc.
+// Port of blender/eidoblend/terrain/build/mesh.py at 3dda52e.
 //
 // The terrain's ring mesh (design section 8, PORT_PLAN.md 7.3): one mesh that draws every level as a ring (the
 // level's window minus its child's window), so vertex density falls off with distance from the focus. Seams are
@@ -8,6 +8,7 @@
 //     const rm = await buildRings(R, levels, heights, { cores: true });   // R: the GPU runner (core/gpu.js)
 //     rm.heightAt(x, y)              // metres at Blender (x, y), on rm's triangles; numbers or arrays
 //     rm.normalAt(x, y)              // the shading normal there, Blender axes
+//     rm.ringTable()                 // each ring's triangle run and region in metres (what a far material reads)
 //     const geometry = makeGeometry(THREE, rm);   // a BufferGeometry in three.js axes, one group per ring
 //
 // Frames (design 2.1, PORT_PLAN.md 2.2). Blender axes, metres, everywhere but the geometry's buffers: a level is a
@@ -39,14 +40,22 @@
 //     lines, float32(origin + lattice * unit) made in JavaScript doubles: bit-equal.
 //   - vertex_normals is a gather over the corners sorted by vertex (core/prims.js sortPairs), not np.bincount's
 //     scatter: the same sum in a fixed order, float32 against float64 (within 1e-5 rad).
-//   - No mask attributes (make_object writes every mask as a point attribute, about 30 on 3M vertices): the
-//     material reads per-level data textures (PORT_PLAN.md 3.5); WebGPU's default maxVertexAttributes is 16.
-//   - One geometry group per ring (C4): material 0, the near material, for the main and hero rings and the cores;
-//     material 1, the far material, for the context rings; the skirt takes its ring's. mesh.py at f90c6fc writes
-//     one material; the index per ring is the surfacing round's (SURFACING_DESIGN.md 3.7), reserved here. Until the
-//     last wave both slots hold the clay.
+//   - No point attributes unless asked for (make_object writes every mask, about 30 on 3M vertices, or with
+//     mask_attributes=False only eido_level): the material reads per-level data textures (PORT_PLAN.md 3.5), and
+//     WebGPU's default maxVertexAttributes is 16. opts.attributes (build_rings' `attributes`; makeTerrain's
+//     meshMasks, a debug option) adds them as mesh.py makes them, eido_<name> and eido_level, at most
+//     MAX_ATTRIBUTES.
+//   - The rings' triangle runs are geometry groups (three.js draws a group with one material slot), one per ring
+//     in ring order and then the skirt's, where make_object stores ring_table() as the object's
+//     eido_terrain_rings; ringTable() is that table. Every group is slot 0, the near material, as mesh.py leaves
+//     every polygon's material_index (the skirt "keeps material 0"): the rings a far material may draw are
+//     chosen from the cameras by the surfacing module (surfacing.py far_rings, _set_far_rings: the rings beyond
+//     1.5 x the far distance of every camera point), which sets those groups' materialIndex to 1.
 //   - The skirt is flat-shaded in Blender; its vertices here carry their side's outward normal (the face normal of
 //     every skirt face but the four at the corners).
+//   - opts.collider names a run of rings whose triangles are also written with vertex numbers counted from the
+//     run's first vertex (kernels/mesh/collider_index.wgsl): the collider proxy's index buffer (build/collider.js;
+//     PORT_PLAN.md 7.5). No Blender counterpart.
 //   - make_object's 'UVMap' (u = x, v = y, world metres) is the geometry's uv attribute (it is the same at every
 //     corner of a vertex).
 //   - rebuild(layout, verts) (a mesh rebuilt from a reopened .blend) is not ported: a three.js scene keeps its
@@ -410,20 +419,22 @@ export function topology(specs, iwins, skirt = true) {
 
 // ------------------------------------------------------------------------------------------------ building ---
 
-function asLevelField(R, h, w, k) {
+function asLevelField(R, h, w, k, what = 'heights') {
     if (h && typeof h === 'object' && h.runner !== undefined && h.buffer !== undefined) {
         if (h.h !== w.n || h.w !== w.n || h.channels !== 1 || h.kind !== 'f32') {
-            throw new RangeError(`level ${k}: heights must be (${w.n}, ${w.n}) float32, got (${h.h}, ${h.w}) ${h.format}`);
+            throw new RangeError(`level ${k}: ${what} must be (${w.n}, ${w.n}) float32, got (${h.h}, ${h.w}) ${h.format}`);
         }
         return { f: h, own: false };
     }
     const data = h?.data instanceof Float32Array ? h.data : h;
     if (!(data instanceof Float32Array) || data.length !== w.n * w.n) {
         const got = data?.length ?? (h == null ? 'nothing' : typeof h);
-        throw new RangeError(`level ${k}: heights must be (${w.n}, ${w.n}) float32 (${w.n * w.n} values), got ${got}`);
+        throw new RangeError(`level ${k}: ${what} must be (${w.n}, ${w.n}) float32 (${w.n * w.n} values), got ${got}`);
     }
     return { f: R.field(w.n, w.n, 1, data), own: true };
 }
+
+export const MAX_ATTRIBUTES = 8;        // point attributes a mesh may carry beside its level (PORT_PLAN.md 7.3)
 
 const groups2d = (nx, ny) => [Math.ceil(nx / 16), Math.ceil(ny / 16), 1];
 const listField = (R, n, kind) => {
@@ -433,17 +444,25 @@ const listField = (R, n, kind) => {
 
 /** The ring mesh of nested levels, coarsest first (mesh.py build_rings, on the GPU and read back once).
  *   R          the GPU runner (core/gpu.js)
- *   levels     windows (asWindow), each inside the one before, on its cell grid, cell halved; Level objects carry
- *              their role, which picks each ring's material (opts.roles otherwise)
+ *   levels     windows (asWindow), each inside the one before, on its cell grid, cell halved
  *   heights    per level, its n x n heights (metres, row 0 south): a GPU field, a Float32Array, or { data }
  *   opts       cores (draw the finest level again down to stride 1: when there is a focus), meshRes, skirt,
- *              skirtDropM, roles
+ *              skirtDropM;
+ *              attributes: { name: [per level, an n x n array like a level's heights, or null] }: point attributes,
+ *              bilinear at the vertices (0 where null), at most MAX_ATTRIBUTES; with it (even empty) the mesh also
+ *              carries `level`, each vertex's ring's level (mesh.py's eido_level);
+ *              collider: (rings) => [first, last], the run of rings whose triangles are also written counted from
+ *              the run's first vertex (the collider proxy's index buffer, build/collider.js)
  * Returns a RingMesh. */
 export async function buildRings(R, levels, heights, opts = {}) {
-    const { cores = false, meshRes = MESH_RES, skirt = true, skirtDropM = SKIRT_DROP_M } = opts;
+    const { cores = false, meshRes = MESH_RES, skirt = true, skirtDropM = SKIRT_DROP_M, attributes = null, collider = null } = opts;
     const t0 = performance.now();
     const windows = levels.map(asWindow);
-    const roles = opts.roles ?? levels.map((l) => l?.role ?? null);
+    const attNames = attributes ? Object.keys(attributes) : [];
+    if (attNames.length > MAX_ATTRIBUTES) {
+        throw new RangeError(`${attNames.length} point attributes; a mesh carries at most ${MAX_ATTRIBUTES} beside its level ` +
+            '(a debug option: the material reads data textures)');
+    }
     const { origin, unit, iwins } = integerWindows(windows);
     const specs = planRings(iwins, meshRes, cores);
     const topo = topology(specs, iwins, skirt);
@@ -486,11 +505,53 @@ export async function buildRings(R, levels, heights, opts = {}) {
                 { uDims: [r.nx, r.ny, r.v0, par ? 1 : 0], uHole: r.holeInner, uPar: pl, uTab: [r.tabAt, 0, 0, 0] },
                 groups2d(r.nx, r.ny));
             R.run('mesh/ring_heights', { hl: levelF[r.spec.level].f, tab: tabF, pz: par ? par.Z : dummyF }, { outZ: r.Z },
-                { uDims: [r.nx, r.ny, par ? 1 : 0, iwins[r.spec.level].n], uPar: pl, uTab: [r.tabAt, 0, 0, 0] },
+                { uDims: [r.nx, r.ny, par ? 1 : 0, iwins[r.spec.level].n], uPar: pl, uTab: [r.tabAt, 0, 0, 0], uKind: 0 },
                 groups2d(r.nx, r.ny));
         });
         for (const lf of levelF) if (lf.own) lf.f.destroy();
         levelF.length = 0;
+        // point attributes (mesh.py _assemble's masks): each one's lattice ring by ring, bilinear on the ring's level,
+        // its border the parent's straight edge; then the values of the vertices each ring adds, and the skirt's copies
+        const attF = {};
+        if (attributes) {
+            for (const name of [...attNames, 'level']) {
+                attF[name] = listField(R, V, 'f32');
+                owned.push(attF[name]);
+            }
+            const write = (name, r, k, lattice, level) => {
+                R.run('mesh/ring_attribute', { zg: lattice, ig: r.I }, { outA: attF[name] },
+                    { uDims: [r.nx, r.ny, r.v0, 0], uMode: 0, uLevel: level }, groups2d(r.nx, r.ny));
+                if (k === 0 && m) {
+                    R.run('mesh/ring_attribute', { zg: lattice, ig: r.I }, { outA: attF[name] },
+                        { uDims: [r.nx, r.ny, nv, m], uMode: 1, uLevel: level }, lineGroups(m));
+                }
+            };
+            for (const name of attNames) {
+                const arrs = attributes[name] ?? [];
+                const src = new Map();                   // level -> its array on the GPU (the cores draw a level again)
+                let prev = null;
+                rings.forEach((r, k) => {
+                    const lv = r.spec.level;
+                    if (!src.has(lv)) {
+                        const a = arrs[lv] == null ? null : asLevelField(R, arrs[lv], iwins[lv], lv, `attribute '${name}'`);
+                        if (a?.own) owned.push(a.f);
+                        src.set(lv, a);
+                    }
+                    const a = src.get(lv);
+                    const lattice = R.field(r.ny, r.nx, 1);
+                    owned.push(lattice);
+                    R.run('mesh/ring_heights', { hl: a ? a.f : dummyF, tab: tabF, pz: prev ?? dummyF }, { outZ: lattice },
+                        { uDims: [r.nx, r.ny, k ? 1 : 0, iwins[lv].n], uPar: r.parLines ?? [0, 0, 0, 0], uTab: [r.tabAt, 0, 0, 0],
+                            uKind: a ? 1 : 2 }, groups2d(r.nx, r.ny));
+                    write(name, r, k, lattice, -1);
+                    prev?.destroy();
+                    prev = lattice;
+                });
+                prev?.destroy();
+                for (const a of src.values()) if (a?.own) a.f.destroy();
+            }
+            rings.forEach((r, k) => write('level', r, k, dummyF, r.spec.level));
+        }
         // positions, uv and the index buffer
         const pos = listField(R, 3 * V, 'f32'), uv = listField(R, 2 * V, 'f32'), nrm = listField(R, 3 * V, 'f32');
         const tri = listField(R, 3 * T, 'u32');
@@ -520,34 +581,57 @@ export async function buildRings(R, levels, heights, opts = {}) {
                 { uDims: [r0.nx, r0.ny, nv, m], uBase: [terrainTriangles, 0, 0, 0], uDrop: skirtDropM }, lineGroups(m));
         }
         owned.push(...gpuNormals(R, pos, tri, nv, terrainTriangles, nrm));
-        // one wait for everything the host keeps
-        const parts = [{ field: pos, count: 3 * V }, { field: nrm, count: 3 * V }, { field: uv, count: 2 * V },
-            { field: tri, count: 3 * T }, { field: bounds, count: 2 }];
-        if (zmin) parts.push({ field: zmin, count: 1 });
-        for (const r of rings) parts.push({ field: r.Z }, { field: r.I });
-        const got = await R.readParts(parts);
-        const [positions, normals, uvs, index, b] = got;
-        let q = zmin ? 6 : 5;
-        for (const r of rings) {
-            r.Zf = got[q++];
-            r.idx = got[q++];
+        // the collider proxy's triangles: a run of rings, their vertex numbers counted from the run's first vertex.
+        // A ring's border reads its parent's vertices where the lattices meet, so the run's vertices start with the
+        // parent ring's.
+        let coll = null;
+        if (collider) {
+            const [first, last] = collider(rings);
+            const vBase = first > 0 ? rings[first - 1].v0 : 0;
+            const start = 3 * rings[first].triBase, count = 3 * (rings[last].triBase + rings[last].triangles) - start;
+            const field = listField(R, count, 'u32');
+            owned.push(field);
+            R.run('mesh/collider_index', { tri }, { outT: field }, { uFirst: start, uCount: count, uBase: vBase }, lineGroups(count));
+            coll = { rings: [first, last], vBase, start, count, field };
         }
-        const hmin = keyToFloat(~b[0] >>> 0), hmax = keyToFloat(b[1]);
-        const bottom = zmin ? Math.fround(got[5][0] - skirtDropM) : null;
-        const skirtInfo = m ? { drop_m: skirtDropM, bottom_z: got[5][0] - skirtDropM, first_vertex: nv } : null;
-        for (const r of rings) {
+        // one wait for everything the host keeps
+        const parts = [], keys = [];
+        const want = (key, part) => {
+            keys.push(key);
+            parts.push(part);
+        };
+        want('positions', { field: pos, count: 3 * V });
+        want('normals', { field: nrm, count: 3 * V });
+        want('uvs', { field: uv, count: 2 * V });
+        want('index', { field: tri, count: 3 * T });
+        want('bounds', { field: bounds, count: 2 });
+        if (zmin) want('zmin', { field: zmin, count: 1 });
+        if (coll) want('collider', { field: coll.field, count: coll.count });
+        for (const name of Object.keys(attF)) want('att:' + name, { field: attF[name], count: V });
+        rings.forEach((r, k) => {
+            want('Z' + k, { field: r.Z });
+            want('I' + k, { field: r.I });
+        });
+        const read = await R.readParts(parts);
+        const got = Object.fromEntries(keys.map((key, q) => [key, read[q]]));
+        const hmin = keyToFloat(~got.bounds[0] >>> 0), hmax = keyToFloat(got.bounds[1]);
+        const bottom = zmin ? Math.fround(got.zmin[0] - skirtDropM) : null;
+        const skirtInfo = m ? { drop_m: skirtDropM, bottom_z: got.zmin[0] - skirtDropM, first_vertex: nv } : null;
+        rings.forEach((r, k) => {
             r.I.destroy();
             r.Z.destroy();
-            r.I = r.Z = null;
-            r.Z = r.Zf;
-            delete r.Zf;
-        }
-        const groups = rings.map((r) => ({ start: 3 * r.triBase, count: 3 * r.triangles,
-            materialIndex: ringMaterial(roles[r.spec.level]) }));
-        if (m) groups.push({ start: 3 * terrainTriangles, count: 6 * m, materialIndex: groups[0].materialIndex, skirt: true });
-        return new RingMesh({ origin, unit, windows, specs, rings, positions, normals, uvs, index, groups,
-            nv, terrainTriangles, skirt: skirtInfo, heightRange: [Math.min(hmin, bottom ?? hmin), hmax],
-            seconds: (performance.now() - t0) / 1000 });
+            r.I = null;
+            r.Z = got['Z' + k];
+            r.idx = got['I' + k];
+        });
+        // one group a ring, then the skirt's: every one the near material's slot (see the module doc)
+        const groups = rings.map((r) => ({ start: 3 * r.triBase, count: 3 * r.triangles, materialIndex: 0 }));
+        if (m) groups.push({ start: 3 * terrainTriangles, count: 6 * m, materialIndex: 0, skirt: true });
+        const atts = attributes ? Object.fromEntries(Object.keys(attF).map((name) => [name, got['att:' + name]])) : null;
+        return new RingMesh({ origin, unit, windows, specs, rings, positions: got.positions, normals: got.normals, uvs: got.uvs,
+            index: got.index, groups, attributes: atts, nv, terrainTriangles, skirt: skirtInfo,
+            collider: coll ? { rings: coll.rings, vBase: coll.vBase, index: got.collider } : null,
+            heightRange: [Math.min(hmin, bottom ?? hmin), hmax], seconds: (performance.now() - t0) / 1000 });
     } finally {
         for (const lf of levelF) if (lf.own) lf.f.destroy();
         for (const f of owned) if (!f.destroyed) f.destroy();
@@ -574,9 +658,23 @@ export function gpuNormals(R, pos, tri, nv, terrainTriangles, nrm) {
     return [sorted.keys, sorted.vals, counts, starts];
 }
 
-/** The material slot of a ring (C4): 1, the far material, for a context ring; 0 for the rest. */
-export function ringMaterial(role) {
-    return role === 'context' ? 1 : 0;
+// mesh.py _table: each ring's triangle run and its region in metres (the float32 lattice values)
+function tableOf(rings, origin, unit) {
+    const m = (v, axis) => Math.fround(origin[axis] + v * unit);
+    return rings.map((r, k) => {
+        const s = r.spec, h = r.hole;
+        return { ring: k, level: s.level, start: r.triBase, count: r.triangles,
+            window: [m(s.x0, 0), m(s.y0, 1), m(s.x1, 0), m(s.y1, 1)],
+            hole: h ? [m(h[0], 0), m(h[1], 1), m(h[2], 0), m(h[3], 1)] : null };
+    });
+}
+
+/** RingMesh.ringTable() from a layout() alone (mesh.py ring_table: a mesh whose table was not kept with it). */
+export function ringTable(layout) {
+    const windows = layout.windows.map(([x0, y0, cell, n]) => new Window(Number(x0), Number(y0), Number(cell), Math.trunc(n)));
+    const { origin, unit, iwins } = integerWindows(windows);
+    const specs = layout.rings.map((s) => new RingSpec(...s.map((v) => Math.trunc(v))));
+    return tableOf(topology(specs, iwins, layout.skirt ?? true).rings, origin, unit);
 }
 
 
@@ -585,7 +683,9 @@ export function ringMaterial(role) {
 /** The rings of one terrain: positions, normals and uv (three.js axes, Float32Array, 3 / 3 / 2 a vertex), the index
  * buffer (Uint32Array, the skirt's triangles last), one group per ring, and heightAt / normalAt on the triangles
  * (Blender axes). rings[k]: { spec, hole, holeLines, xs, ys (lattice), xm, ym (metres, the float32 values),
- * Z (heights as written, ny x nx Float32Array), idx (vertex numbers, NONE in the hole), v0, triBase, ... }. */
+ * Z (heights as written, ny x nx Float32Array), idx (vertex numbers, NONE in the hole), v0, triBase, ... }.
+ * attributes: null, or { name: Float32Array, one number a vertex } with `level` among them (buildRings'
+ * opts.attributes). collider: null, or { rings: [first, last], vBase, index } (buildRings' opts.collider). */
 export class RingMesh {
     constructor(o) {
         Object.assign(this, o);
@@ -593,6 +693,14 @@ export class RingMesh {
 
     get triangleCount() { return this.index.length / 3; }
     get vertexCount() { return this.positions.length / 3; }
+
+    /** [{ ring, level, start, count, window, hole }]: each ring's triangles (start .. start + count of the index
+     * buffer's triangles, its seam fans included: its geometry group) and its region in metres, Blender axes
+     * (window [x0, y0, x1, y1]; hole the next ring's window, or null): what picks the rings a far material draws
+     * (mesh.py ring_table, the same JSON). The skirt's triangles follow the last ring's. */
+    ringTable() {
+        return tableOf(this.rings, this.origin, this.unit);
+    }
 
     /** [xmin, ymin, xmax, ymax] of the outermost window, metres (Blender axes). */
     bounds() {
@@ -843,12 +951,15 @@ function childLine(C, which) {
 
 /** The BufferGeometry of a RingMesh: position, normal and uv (three.js axes, world metres), the Uint32 index, one
  * group per ring (and the skirt's), its bounding box and sphere from the heights' range (nothing walks the
- * vertices). userData.ringMesh is the RingMesh. */
+ * vertices). A mesh built with point attributes carries each as eido_<name> (one float a vertex: eido_slope,
+ * eido_level, as Blender names them; a NodeMaterial reads one with attribute('eido_slope', 'float')).
+ * userData.ringMesh is the RingMesh. */
 export function makeGeometry(THREE, rm) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(rm.positions, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(rm.normals, 3));
     g.setAttribute('uv', new THREE.BufferAttribute(rm.uvs, 2));
+    for (const [name, a] of Object.entries(rm.attributes ?? {})) g.setAttribute('eido_' + name, new THREE.BufferAttribute(a, 1));
     g.setIndex(new THREE.BufferAttribute(rm.index, 1));
     for (const gr of rm.groups) g.addGroup(gr.start, gr.count, gr.materialIndex);
     const [xmin, ymin, xmax, ymax] = rm.bounds();
