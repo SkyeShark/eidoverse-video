@@ -19,7 +19,10 @@ scene.add(terrain.mesh);
 ```
 
 `terrain.heightAt(x, z)` gives exact ground height anywhere; `flatRadius`
-keeps a level clearing for staging the action.
+keeps a level clearing for staging the action. In rain, hand the same function
+to the sky (`makeSky({ ..., groundHeightAt: terrain.heightAt })`) so splashes
+land on the terrain instead of the flat `y = 0` plane — see
+[sky-weather.md](sky-weather.md).
 
 
 Foliage, plant species, wind and SeedThree are documented in

@@ -40,6 +40,15 @@ ring, load another moon texture or create a separate light for its band.
   (`intensity` defaults to 1, `seconds` to 45).
 - `setColors({cloud, star, sky, rain, shield})` retints authored channels.
   Omitted channels retain their values; `shield` only applies to `shieldworld`.
+- Rain splashes ring out on the flat `y = 0` plane unless the scene names its
+  ground. Over terrain pass `groundHeightAt: terrain.heightAt` to `makeSky`
+  (or call `setGroundHeightAt(fn)`); every ring then stands on the surface under
+  it and tilts with the slope. The function may return `null`/`NaN` where there
+  is no ground (past a terrain's edge) and no splash shows there. After the
+  ground changes shape under the same function — a reshaped terrain, a new water
+  level — call `invalidateGround()`; `setGroundHeightAt(null)` returns to the
+  flat plane. The low-level `makeWeatherSystem` takes the same function as
+  `opts.groundHeightAt` (and the flat height as `opts.groundY`).
 - `wrapScene()` includes geometry added after initial construction in wetness
   and cloud-shadow effects. Materials can use `userData.noWet` when appropriate.
 - `enableReflections(options)` enables moving sky reflections on metals,
@@ -121,7 +130,7 @@ custom scene or toolkit work after reviewing their contracts:
 | System | Entry and lifecycle |
 | --- | --- |
 | `sky_system.js` | `await makeSkySystem({scene,textures,opts})`; `update(t,camera)`, `setTime`, `setClouds`, `setColors`, `applyToLights`, `bakeEnv`, `enableReflections`, `wrapCloudShadows` |
-| `weather_system.js` | `await makeWeatherSystem({scene,sky,opts})`; `wrapScene`, `setWeather`, `transitionTo`, `update(t,camera)`, `sunDim`, `hemiDim` (hemisphere-light multiplier; `0.5 + sunDim×0.5` unless the preset authors its own), `setColors` (forwards to the sky only the channels named, so `setColors({ rain })` leaves cloud/sun/shield tints alone) |
+| `weather_system.js` | `await makeWeatherSystem({scene,sky,opts})`; `wrapScene`, `setWeather`, `transitionTo`, `update(t,camera)`, `sunDim`, `hemiDim` (hemisphere-light multiplier; `0.5 + sunDim×0.5` unless the preset authors its own), `setColors` (forwards to the sky only the channels named, so `setColors({ rain })` leaves cloud/sun/shield tints alone), `setGroundHeightAt`/`invalidateGround` (splash ground; `opts.groundHeightAt`, `opts.groundY`, `opts.groundResolution`) |
 | `redgiant.js` | `makeRedGiant({opts})`; attached by the shieldworld package; its star/shield tint and motion are driven by the shared sky |
 | `ringworld.js` | `makeRingworld({glbBytes,textures,opts})`; group, band lighting and `update(t)` are owned by the ringworld package |
 | `asteroid_moon.js` | `makeAsteroidMoon` loads the prepared mesh and maps; the package positions it on its authored orbit |

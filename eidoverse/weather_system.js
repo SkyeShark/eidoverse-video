@@ -20,6 +20,15 @@
 //   weather.setWeather('storm', 1.0);     // see WEATHER table below
 //   // per frame: weather.update(t, camera)
 //
+// GROUND: splashes ring out on the flat plane opts.groundY (default 0) unless
+// the scene names its real surface. Over terrain, pass the height function —
+// makeWeatherSystem({ scene, sky, opts: { groundHeightAt: terrain.heightAt } })
+// — and every ring stands on the ground under it (hills, valleys, slopes).
+// The function may return null/NaN for "no ground here" (past a terrain's
+// edge): no splash shows there. When the ground changes shape under a live
+// system, call weather.invalidateGround(); swap or clear the function with
+// weather.setGroundHeightAt(fn | null).
+//
 // States (these are whole dialed-in looks — pick one, don't rebuild it):
 //   clear · fair · sunshower · overcast · rain · storm (great-plains
 //   towering deck + lightning) · cyclone (sealed canopy sheet) ·
@@ -311,6 +320,22 @@
         const N_SPLASH = opts.splashCount ?? 1200;
         const GROUND_Y = opts.groundY ?? 0;
         const P = RAD * 2;
+        // The ground under the splashes, when the scene names one
+        // (opts.groundHeightAt): a camera-centred heightfield baked on the CPU
+        // from that function and sampled by the splash shader at every ring
+        // corner. GROUND_N² samples over the splash tile plus a roaming margin;
+        // the camera may wander half the margin before a re-centre starts, and
+        // a re-centre lands over GROUND_BAKE_FRAMES frames. At the defaults a
+        // whole bake is 128² calls (~2-3 ms of procedural terrain), spaced
+        // ~0.96 m — under 3 cm from the rendered triangles at p95, which is
+        // what the field lift covers.
+        const GROUND_N = Math.max(16, Math.min(512, Math.round(opts.groundResolution ?? 128)));
+        const GROUND_MARGIN = Math.max(4, RAD * 0.35);
+        const GROUND_HALF = RAD + GROUND_MARGIN;
+        const GROUND_STEP = (GROUND_HALF * 2) / (GROUND_N - 1);
+        const GROUND_BAKE_FRAMES = 4;
+        const SPLASH_LIFT_FLAT = 0.015;
+        const SPLASH_LIFT_FIELD = 0.03;
 
         const u = {
             time: uniform(0),
@@ -337,6 +362,13 @@
             puddleK: uniform(opts.puddles ?? 1),
             cellLo: uniform(0.9),
             cellHi: uniform(1.45),
+            // the splash ground (see GROUND_N): the baked window's min corner,
+            // whether the splashes stand on it (1) or on GROUND_Y (0), and
+            // whether they may show at all (0 while a named ground has no
+            // window under the camera yet)
+            groundOrigin: uniform(new T3.Vector2(0, 0)),
+            groundOn: uniform(0),
+            groundVis: uniform(typeof opts.groundHeightAt === 'function' ? 0 : 1),
             denseA: uniform(1),
         };
 
@@ -448,8 +480,32 @@
 
         // ---------------- ground splashes (the world-anchor cue) ----------------
         // expanding rings at ground level, tiled in world space like the streaks;
-        // each instance cycles ring-out on its own hash phase. Flat-ground v1
-        // (opts.groundY) — terrain scenes can disable via splashCount: 0.
+        // each instance cycles ring-out on its own hash phase. The ground is the
+        // flat plane opts.groundY, or — when the scene names its surface with
+        // opts.groundHeightAt — the baked heightfield below, sampled per ring
+        // CORNER so a ring lies along the slope it lands on.
+        //
+        // Heightfield texels: R + G = height (a half-float pair: hi, then the
+        // residual — ~mm at any altitude, and a sum of two linearly filtered
+        // channels is still the bilinear height), B = ground present (1) or not.
+        // Half floats so the hardware filters it on every backend.
+        const groundTex = new T3.DataTexture(
+            new Uint16Array(GROUND_N * GROUND_N * 4), GROUND_N, GROUND_N,
+            T3.RGBAFormat, T3.HalfFloatType,
+        );
+        groundTex.minFilter = T3.LinearFilter;
+        groundTex.magFilter = T3.LinearFilter;
+        groundTex.wrapS = T3.ClampToEdgeWrapping;
+        groundTex.wrapT = T3.ClampToEdgeWrapping;
+        groundTex.generateMipmaps = false;
+        groundTex.needsUpdate = true;
+        const groundTexN = T3.texture(groundTex);
+        // world (x, z) → the texel centred on the sample taken there
+        const GROUND_UV_SCALE = 1 / (GROUND_STEP * GROUND_N);
+        const GROUND_UV_BIAS = 0.5 / GROUND_N;
+        const groundSample = (x, z) => groundTexN.sample(
+            vec2(x, z).sub(u.groundOrigin).mul(GROUND_UV_SCALE).add(GROUND_UV_BIAS),
+        ).level(0);
         const SP = RAD;   // splash tile half-extent (tighter than rain)
         const splashGeo = new T3.PlaneGeometry(1, 1);
         splashGeo.rotateX(-Math.PI / 2);
@@ -460,8 +516,18 @@
             const pz = u.camPos.z.add(fract(s2.sub(u.camPos.z.div(SP * 2))).sub(0.5).mul(SP * 2));
             const phase = fract(s3.mul(9.7).add(u.time.mul(2.4)));
             const ringR = phase.mul(0.13).add(0.015);
-            splashMat.positionNode = vec3(px, GROUND_Y + 0.015, pz)
-                .add(positionLocal.mul(vec3(ringR.mul(2), 1, ringR.mul(2))));
+            const corner = positionLocal.mul(vec3(ringR.mul(2), 1, ringR.mul(2)));
+            const under = groundSample(px.add(corner.x), pz.add(corner.z));
+            const groundY = mix(
+                float(GROUND_Y + SPLASH_LIFT_FLAT),
+                under.r.add(under.g).add(SPLASH_LIFT_FIELD),
+                u.groundOn,
+            );
+            splashMat.positionNode = vec3(px, groundY, pz).add(corner);
+            // a ring within a texel of "no ground" stays dark: it would stand on
+            // a height half made of the absent side
+            const groundHere = mix(float(1), smoothstep(0.995, 1.0, under.b), u.groundOn)
+                .mul(u.groundVis);
             const rr = uv().sub(0.5).length().mul(2);
             const ring = smoothstep(0.55, 0.8, rr)
                 .mul(float(1).sub(smoothstep(0.85, 1.0, rr)));
@@ -479,7 +545,8 @@
             const fieldDistance = vec2(px.sub(u.camPos.x), pz.sub(u.camPos.z)).length();
             const fieldFade = float(1).sub(smoothstep(SP * 0.70, SP, fieldDistance));
             splashMat.colorNode = u.rainColor.mul(1.15);
-            splashMat.opacityNode = ring.mul(float(1).sub(phase)).mul(0.30).mul(fieldFade).mul(cellGateS).mul(countGate).mul(clamp(u.rainK.mul(2), 0, 1));
+            splashMat.opacityNode = ring.mul(float(1).sub(phase)).mul(0.30).mul(fieldFade).mul(cellGateS).mul(countGate).mul(clamp(u.rainK.mul(2), 0, 1))
+                .mul(groundHere);
         }
         const splashInst = new T3.InstancedMesh(splashGeo, splashMat, N_SPLASH);
         splashInst.frustumCulled = false;
@@ -1442,6 +1509,21 @@
                 sceneLight: 1,
                 sceneColor: [0.72, 0.78, 0.86],
             },
+            ground: {
+                // 'flat' = splashes on opts.groundY; 'heightfield' = on the
+                // scene's groundHeightAt, through the baked window
+                mode: typeof opts.groundHeightAt === 'function' ? 'heightfield' : 'flat',
+                flatY: GROUND_Y,
+                resolution: GROUND_N,
+                spacingMeters: GROUND_STEP,
+                windowHalfExtent: GROUND_HALF,
+                bakes: 0,
+                lastBakeMs: 0,
+                lastBakeUrgent: false,
+                windowCenter: null,
+                absentSamples: 0,
+                heightFaults: 0,
+            },
             lightning: {
                 schedule: 'deterministic-separated-events-bounded-return-strokes',
                 palette: 'standard',
@@ -1540,6 +1622,120 @@
             }
             return out;
         };
+
+        // ---- the splash ground's CPU half: bake the window, keep it centred ----
+        // Samples sit on a FIXED world lattice (centres snap to GROUND_STEP), so
+        // a re-centre re-reads the same points and no ring hops. A finished bake
+        // swaps in whole — the GPU never sees half of one window and half of the
+        // next. While splashes are not showing, nothing is baked.
+        const ground = {
+            fn: typeof opts.groundHeightAt === 'function' ? opts.groundHeightAt : null,
+            epoch: 0,      // bumped by invalidateGround()/setGroundHeightAt()
+            live: null,    // { cx, cz, epoch, fn } — the window the shader samples
+            job: null,     // a bake in progress (same shape + rows, heights)
+            spare: new Uint16Array(GROUND_N * GROUND_N * 4),
+        };
+        const toHalf = T3.DataUtils.toHalfFloat, fromHalf = T3.DataUtils.fromHalfFloat;
+        const HALF_ONE = toHalf(1);
+        const groundJob = (x, z) => ({
+            cx: Math.round(x / GROUND_STEP) * GROUND_STEP,
+            cz: Math.round(z / GROUND_STEP) * GROUND_STEP,
+            epoch: ground.epoch, fn: ground.fn, row: 0, ms: 0,
+            h: new Float64Array(GROUND_N * GROUND_N),
+        });
+        const groundRows = (job, rows) => {
+            const ox = job.cx - GROUND_HALF, oz = job.cz - GROUND_HALF;
+            const end = Math.min(GROUND_N, job.row + rows);
+            for (let j = job.row; j < end; j++) {
+                const z = oz + j * GROUND_STEP;
+                for (let i = 0; i < GROUND_N; i++) {
+                    let h;
+                    try {
+                        h = job.fn(ox + i * GROUND_STEP, z);
+                    } catch (e) {
+                        h = null;
+                        if (diagnostics.ground.heightFaults++ === 0) {
+                            console.warn('[weather_system] groundHeightAt threw — no splash there:', e);
+                        }
+                    }
+                    // null/undefined/NaN = no ground at this point (Number(null) would be 0)
+                    job.h[j * GROUND_N + i] = (h === null || h === undefined) ? NaN : Number(h);
+                }
+            }
+            job.row = end;
+            return end >= GROUND_N;
+        };
+        const groundCommit = (job, urgent) => {
+            const H = job.h, d = ground.spare;
+            // An absent texel still feeds the bilinear filter of its present
+            // neighbours (whose rings are dimmed by B, but not to exactly
+            // zero), so give it the window's mean present height rather than
+            // a 0 that can sit hundreds of metres away.
+            let sum = 0, n = 0;
+            for (let k = 0; k < H.length; k++) if (Number.isFinite(H[k])) { sum += H[k]; n++; }
+            const fill = n ? sum / n : GROUND_Y;
+            for (let k = 0; k < H.length; k++) {
+                const present = Number.isFinite(H[k]);
+                const h = present ? H[k] : fill;
+                const hi = toHalf(h);
+                d[k * 4] = hi;
+                d[k * 4 + 1] = toHalf(h - fromHalf(hi));
+                d[k * 4 + 2] = present ? HALF_ONE : 0;
+                d[k * 4 + 3] = HALF_ONE;
+            }
+            ground.spare = groundTex.image.data;
+            groundTex.image.data = d;
+            groundTex.needsUpdate = true;
+            u.groundOrigin.value.set(job.cx - GROUND_HALF, job.cz - GROUND_HALF);
+            ground.live = { cx: job.cx, cz: job.cz, epoch: job.epoch, fn: job.fn };
+            Object.assign(diagnostics.ground, {
+                bakes: diagnostics.ground.bakes + 1,
+                lastBakeUrgent: urgent,
+                windowCenter: [job.cx, job.cz],
+                absentSamples: H.length - n,
+            });
+        };
+        const tickGround = (camera) => {
+            if (!ground.fn) {
+                u.groundOn.value = 0;
+                u.groundVis.value = 1;
+                return;
+            }
+            // nothing ringing out, nothing to stand on: bake when it matters
+            if (!camera || !splashInst.visible || N_SPLASH <= 0) return;
+            const x = camera.position.x, z = camera.position.z;
+            const off = (w) => (w ? Math.max(Math.abs(x - w.cx), Math.abs(z - w.cz)) : Infinity);
+            const live = ground.live;
+            const liveOff = off(live);
+            const stale = !live || live.epoch !== ground.epoch || live.fn !== ground.fn
+                || liveOff > GROUND_MARGIN * 0.5;
+            if (stale) {
+                const job = ground.job;
+                if (!job || job.epoch !== ground.epoch || job.fn !== ground.fn
+                    || off(job) > GROUND_MARGIN * 0.5) {
+                    ground.job = groundJob(x, z);
+                }
+            }
+            if (ground.job) {
+                // Nothing right on screen (first bake, a teleport past the
+                // margin, a different ground function): finish now rather than
+                // ring out at the wrong height. Otherwise — the camera drifting
+                // toward the edge, the ground reshaped — spread it over frames.
+                const urgent = !live || live.fn !== ground.fn || liveOff > GROUND_MARGIN;
+                const job = ground.job, clock = globalThis.performance ?? Date, t0 = clock.now();
+                const rows = urgent ? GROUND_N : Math.ceil(GROUND_N / GROUND_BAKE_FRAMES);
+                const done = groundRows(job, rows);
+                if (done) groundCommit(job, urgent);
+                job.ms += clock.now() - t0;   // a bake's whole cost: every slice, and the upload prep
+                if (done) {
+                    diagnostics.ground.lastBakeMs = job.ms;
+                    ground.job = null;
+                }
+            }
+            u.groundOn.value = ground.live ? 1 : 0;
+            u.groundVis.value = ground.live && off(ground.live) <= GROUND_MARGIN ? 1 : 0;
+        };
+
         const sys = {
             uniforms: u, state, rain: rainInst, bolt, WEATHER, diagnostics,
             lightningProfile: globalThis.EANPA_LIGHTNING_PROFILE,
@@ -1708,6 +1904,31 @@
                 return Math.max(0.08, 1 - (1 - target) * amount);
             },
             wrapMaterial, wrapScene,
+            // The surface the splashes land on (see GROUND at the top of the
+            // file). setGroundHeightAt(fn) swaps it — null returns to the flat
+            // opts.groundY plane; invalidateGround() re-reads the same function
+            // after the ground changed shape (a reshaped terrain, a new water
+            // level). The splashes keep the old ground until the new one is
+            // baked, which is a few frames — unless the function itself
+            // changed, which bakes at once.
+            setGroundHeightAt(fn) {
+                ground.fn = typeof fn === 'function' ? fn : null;
+                ground.epoch++;
+                ground.job = null;
+                diagnostics.ground.mode = ground.fn ? 'heightfield' : 'flat';
+                if (!ground.fn) {
+                    ground.live = null;
+                    u.groundOn.value = 0;
+                    u.groundVis.value = 1;
+                } else if (!ground.live) {
+                    u.groundVis.value = 0;   // flat rings must not show until the first bake
+                }
+                return sys;
+            },
+            invalidateGround() {
+                ground.epoch++;
+                return sys;
+            },
             // Every pooled weather mesh, for boot-time pipeline warmup. These
             // spawn invisible, and compileAsync skips invisible objects — so
             // their pipelines compiled mid-switch (a multi-second stall) or
@@ -1794,6 +2015,7 @@
                     u.camRight.value.set(e[0], e[1], e[2]).normalize();
                     u.camUp.value.set(e[4], e[5], e[6]).normalize();
                 }
+                tickGround(camera);
                 updateImpactPool(t, camera);
                 // grey/darken the LIVE sky palette (tracks TOD changes) + flash
                 if (sky) {
@@ -2231,6 +2453,9 @@
                 scorchGeometry.dispose();
                 rainMat.dispose();
                 splashMat.dispose();
+                groundTex.dispose();
+                ground.fn = null;
+                ground.job = null;
                 boltMat.dispose();
             },
         };
