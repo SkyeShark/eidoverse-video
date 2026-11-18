@@ -1,0 +1,12 @@
+{
+    "width": 960,
+    "height": 540,
+    "fps": 1,
+    "duration": 13,
+    "script": "eidoverse/terrain/tests/mesh_api/render_lauterbrunnen.js",
+    "outputVideo": "eidoverse/terrain/tests/out/mesh_api/renders/lauterbrunnen.mp4",
+    "capture": { "at": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "jump": true },
+    "assets": {
+        "robot": "eidoverse/assets/vrms/claude_robot.vrm"
+    }
+}

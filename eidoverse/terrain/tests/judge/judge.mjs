@@ -16,6 +16,17 @@
 //                    the adapter on Blender's own save against the verdict that run's own judge() call wrote: the
 //                    numbers must be equal. --runpy also runs the Blender edition's judge/run.py --field
 //                    --no-render with the Python on the path (run.py needs Pillow) and compares its verdicts.json
+//     deno run ... judge.mjs --selfcheck-all [--runpy] [--seeds 1,2]
+//                    the same for every base run of the floor that has a verdict (tests/out/parity/
+//                    judge_selfcheck_all.json sums them up)
+//     deno run --unstable-webgpu ... judge.mjs --resave <dir> [--recipes a,b] [--seeds 1,2]
+//                    a GPU job: every floor base run's Blender save loaded by the port (api.js Terrain.load) and
+//                    written again by it (t.save) as <dir>/<recipe>_s<seed>: the Terrain.save format as the port
+//                    writes it, until the port generates the recipes itself
+//     deno run ... judge.mjs --judge-saves <dir> [--recipes a,b]
+//                    every port save in <dir> judged by the Blender judge, its numbers against the Blender save's
+//                    (compareVerdicts, the floor's class and changes) and its arrays against the Blender save's
+//                    (tests/parity/field_parity.mjs); tests/out/parity/judge_port_saves.json sums them up
 //
 // The comparison of numbers, per the plan's judge grade:
 //   field class         each number within max(1.25 x the largest change the floor's samples show in it, its
@@ -129,6 +140,88 @@ export function compareDistribution(port, blender) {
     return { ok: means.every((m) => m.ok) && bands.every((b) => b.ok), means, bands };
 }
 
+// the floor's base runs: [{ recipe, seed, dir }] (the newest Blender key, tests/_where.mjs parityKeyDir)
+function floorBases(recipes, seeds) {
+    const key = W.parityKeyDir();
+    if (!key) return [];
+    const out = [];
+    for (const e of [...Deno.readDirSync(key)].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        const m = /^(.+)_s(\d+)_draft$/.exec(e.name);
+        if (!e.isDirectory || !m || !seeds.includes(m[2]) || (recipes && !recipes.includes(m[1]))) continue;
+        const dir = `${key}/${e.name}/base`;
+        if (W.exists(`${dir}/done.json`) && W.exists(`${dir}/terrain.npz`)) out.push({ recipe: m[1], seed: m[2], dir });
+    }
+    return out;
+}
+
+/** --resave: each floor base run's Blender save loaded by the port and written again by it (a GPU job: Terrain.load
+ * builds the ring mesh). [{ recipe, seed, blender, port, seconds }]; <dir>/resaved.json lists them. */
+export async function resave(outDir, { recipes = null, seeds = ['1', '2'] } = {}) {
+    const { Terrain } = await import('../../api.js');
+    const G = await import('../../core/gpu.js');
+    Deno.mkdirSync(outDir, { recursive: true });
+    const done = [];
+    for (const b of floorBases(recipes, seeds)) {
+        const t0 = performance.now();
+        const t = await Terrain.load(`${b.dir}/terrain`, { build: false, log: () => {} });
+        const port = `${outDir}/${b.recipe}_s${b.seed}`;
+        await t.save(port);
+        t.dispose();
+        done.push({ recipe: b.recipe, seed: Number(b.seed), blender: `${b.dir}/terrain`, port,
+            seconds: +((performance.now() - t0) / 1000).toFixed(2) });
+        console.log(`[resave] ${b.recipe} seed ${b.seed}: loaded and saved by the port in ${done[done.length - 1].seconds} s`);
+    }
+    Deno.writeTextFileSync(`${outDir}/resaved.json`, JSON.stringify({ date: new Date().toISOString(), saves: done }, null, 1));
+    G.shutdown();
+    return done;
+}
+
+/** --judge-saves: the port's saves in outDir (resaved.json) judged and compared with their Blender saves: the
+ * numbers (compareVerdicts with the floor's entry) and every array (field_parity.compareSaves). */
+export async function judgeSaves(outDir, { recipes = null } = {}) {
+    const FP = await import('../parity/field_parity.mjs');
+    const list = C.readJson(`${outDir}/resaved.json`, { saves: [] }).saves.filter((s) => !recipes || recipes.includes(s.recipe));
+    const key = W.parityKeyDir();
+    const floor = C.readJson(key ? `${key}/floor.json` : '', null);
+    const rows = [];
+    for (const s of list) {
+        const rec = floor?.recipes?.[s.recipe] ?? null, ent = rec?.seeds?.[String(s.seed)] ?? null;
+        const fp = await FP.compareSaves(s.blender, s.port, { floorEntry: ent, class_: rec?.class_ ?? null });
+        const arraysEqual = fp.plan_equal && !fp.only_a.length && !fp.only_b.length && fp.levels.every((l) => l.bit_identical) &&
+            fp.fields.every((f) => f.max_abs === 0);
+        const row = { recipe: s.recipe, seed: s.seed, class_: rec?.class_ ?? null, plan_equal: fp.plan_equal,
+            arrays_identical: arraysEqual, arrays_compared: fp.fields.length + fp.levels.length, field_parity_ok: fp.ok };
+        const bv = C.readJson(`${s.blender.replace(/\/terrain$/, '')}/verdict.json`);
+        if (bv) {
+            const v = await judgeSave(s.port, { recipe: s.recipe, label: `${s.recipe}_seed${s.seed}`, outDir: `${outDir}/judge_${s.recipe}_s${s.seed}`,
+                sourceChain: s.recipe === 'real_place' ? false : undefined });
+            if (!v) {
+                row.judge = 'the judge failed: see its judge.log';
+            } else {
+                const c = compareVerdicts(v, bv, ent);
+                let same = 0, n = 0;
+                for (const kind of ['generated', 'generated_family']) {
+                    for (const [k, b] of Object.entries(bv.numbers?.[kind] ?? {})) {
+                        n++;
+                        if (JSON.stringify(v.numbers?.[kind]?.[k]) === JSON.stringify(b)) same++;
+                    }
+                }
+                Object.assign(row, { numbers: n, numbers_bit_equal: same, numbers_within_tolerance: c.ok, failures: c.failures,
+                    verdicts: c.verdicts, judge_note: v.judge_note ?? null });
+            }
+        } else {
+            row.judge = 'no reference: the recipe has no Blender verdict (meadow)';
+        }
+        rows.push(row);
+        console.log(`[judge-saves] ${s.recipe} seed ${s.seed}: arrays ${arraysEqual ? 'byte for byte the Blender save\'s' : 'DIFFER'}` +
+            (row.numbers ? `, judge numbers ${row.numbers_bit_equal}/${row.numbers} bit-equal, ${row.numbers_within_tolerance ? 'all within tolerance' : 'OVER: ' + row.failures.join(', ')}` : `, ${row.judge}`));
+    }
+    const ok = rows.every((r) => r.arrays_identical && (r.numbers == null || (r.numbers_within_tolerance && r.numbers_bit_equal === r.numbers)));
+    Deno.writeTextFileSync(`${W.out('parity')}/judge_port_saves.json`, JSON.stringify({ date: new Date().toISOString(), dir: outDir,
+        saves: rows.length, ok, rows }, null, 1));
+    return { ok, rows };
+}
+
 function printComparison(c, limit = 60) {
     for (const r of c.rows.slice(0, limit)) {
         if (typeof r.port !== 'number') continue;
@@ -188,8 +281,41 @@ if (import.meta.main) {
     const args = [...Deno.args];
     const flag = (n) => { const i = args.indexOf(n); if (i < 0) return false; args.splice(i, 1); return true; };
     const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args.splice(i, 2)[1] : null; };
-    const self = opt('--selfcheck'), runpy = flag('--runpy');
+    const self = opt('--selfcheck'), runpy = flag('--runpy'), all = flag('--selfcheck-all'), seedsOpt = opt('--seeds');
+    const resaveDir = opt('--resave'), judgeDir = opt('--judge-saves'), recipesOpt = opt('--recipes')?.split(',') ?? null;
     if (self) Deno.exit(await selfcheck(W.absPath(self), runpy));
+    if (resaveDir) {
+        const done = await resave(W.absPath(resaveDir), { recipes: recipesOpt, seeds: (seedsOpt ?? '1,2').split(',') });
+        console.log(`${done.length} Blender saves loaded and written again by the port -> ${W.absPath(resaveDir)}`);
+        Deno.exit(done.length ? 0 : 2);
+    }
+    if (judgeDir) {
+        const r = await judgeSaves(W.absPath(judgeDir), { recipes: recipesOpt });
+        console.log(`${r.rows.length} port saves: ${r.ok ? 'every array byte for byte the Blender save\'s and every judge number equal' : 'NOT all equal: see judge_port_saves.json'}`);
+        Deno.exit(r.ok ? 0 : 1);
+    }
+    if (all) {
+        const key = W.parityKeyDir();
+        if (!key) { console.log('no floor runs: tests/parity/floor_runs.sh makes them'); Deno.exit(2); }
+        const seeds = (seedsOpt ?? '1,2').split(',').filter(Boolean);
+        const runs = [];
+        for (const e of [...Deno.readDirSync(key)].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+            const m = /^(.+)_s(\d+)_draft$/.exec(e.name);
+            if (!e.isDirectory || !m || !seeds.includes(m[2])) continue;
+            const dir = `${key}/${e.name}/base`;
+            if (!W.exists(`${dir}/verdict.json`)) continue;              // meadow has no reference
+            const code = await selfcheck(dir, runpy);
+            const res = C.readJson(`${W.out('parity')}/judge_selfcheck_${m[1]}_s${m[2]}.json`, {});
+            runs.push({ recipe: m[1], seed: Number(m[2]), ok: code === 0, failed: res.failed ?? ['no result'],
+                rows: (res.rows ?? []).map((r) => ({ check: r.check.split(': ').slice(1).join(': ') || r.check, passed: r.passed, detail: r.detail })) });
+        }
+        const bad = runs.filter((r) => !r.ok);
+        Deno.writeTextFileSync(`${W.out('parity')}/judge_selfcheck_all.json`, JSON.stringify({ date: new Date().toISOString(),
+            key, runpy, runs: runs.length, passed: runs.length - bad.length, failed: bad.map((r) => `${r.recipe} s${r.seed}`), results: runs }, null, 1));
+        console.log(`judge adapter: ${runs.length - bad.length} of ${runs.length} Blender saves judged equal to their runs' own verdicts` +
+            (runpy ? ' and to judge/run.py --field' : '') + (bad.length ? `; FAILED: ${bad.map((r) => `${r.recipe} s${r.seed}`).join(', ')}` : ''));
+        Deno.exit(bad.length ? 1 : 0);
+    }
     const recipe = opt('--recipe'), reference = opt('--reference'), against = opt('--against'), seed = opt('--seed') ?? '1',
         floorFile = opt('--floor'), outDir = opt('--out');
     if (!args.length || !(recipe || reference)) {

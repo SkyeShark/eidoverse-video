@@ -1168,11 +1168,18 @@ export function generate(opts = {}) {
     return generateChecked(checkOptions(opts, 'generate()'));
 }
 
-async function generateChecked(o) {
-    const log = o.log;
-    const secs = {};
-    const t0 = now();
+/** What a call resolves to before anything runs (the first half of api.py generate): the recipe, its knobs and
+ * stages, the defaults, the level plan, the mask parameters and the cache key ({ recipe, values, stages, plan, key,
+ * ... }). Nothing is generated, and the cache is not read. What finds (or, in a test, seeds) a terrain's cache entry.
+ * Options as makeTerrain's. */
+export async function resolveCall(opts = {}) {
+    const o = checkOptions(opts, 'resolveCall()');
     const R = await G.init({ renderer: o.renderer });
+    return resolveChecked(o, R);
+}
+
+async function resolveChecked(o, R) {
+    const log = o.log;
     const recipe = registry.resolve(o.recipe);
     const [values, stages] = recipe.resolve(o.params);
     const dfl = { ...recipe.defaults };
@@ -1202,13 +1209,23 @@ async function generateChecked(o) {
     const maskParams = { ...(dfl.mask_params ?? {}) };
     maskParams.sea_level = seaLevel;                     // y's frame, as MaskParams wants it
     maskParams.base_elevation_m = baseElevationM;
-    secs.plan = round2(now() - t0);
-
     // the cache: everything that decides the fields and masks
     const seed = Math.trunc(o.seed);
     const key = Ch.makeKey(recipe.toDict(), values, size, res, seed, plan, focusList,
         { flatten, sea_level: seaLevel, base_elevation_m: baseElevationM, mask_params: maskParams, quality, api: API_VERSION,
             code: Ch.terrainCodeHash() });
+    return { recipe, values, stages, dfl, quality, size, res, ctxm, hero, seaLevel, baseElevationM, flatten, warnings,
+        warn, focusList, plan, maskParams, seed, key };
+}
+
+async function generateChecked(o) {
+    const log = o.log;
+    const secs = {};
+    const t0 = now();
+    const R = await G.init({ renderer: o.renderer });
+    const { recipe, values, stages, dfl, quality, size, res, ctxm, hero, seaLevel, baseElevationM, flatten, warnings, warn,
+        focusList, plan, maskParams, seed, key } = await resolveChecked(o, R);
+    secs.plan = round2(now() - t0);
     const C = new Ch.Cache(key);
     const hit = Boolean(o.cache) && C.complete();
     let skipped = [], flats = [];

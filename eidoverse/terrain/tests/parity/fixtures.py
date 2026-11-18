@@ -3,7 +3,7 @@ replacements of numpy code, their plans and their recipes against (PORT_PLAN.md 
 no GPU.
 
     <Blender's python> -I eidoverse/terrain/tests/parity/fixtures.py [--kernels] [--functions] [--plans]
-        [--recipes] [--only fluvial,hydro,...] [--out <dir>]            (no flag: all four)
+        [--recipes] [--plans-check] [--only fluvial,hydro,...] [--out <dir>]            (no flag: all five)
 
 Run it with Blender's own Python (tests/_where.mjs blenderPython(): Python 3.13, numpy 2.3.4, zlib 1.3.1), never the
 system's (plan C6): every manifest records the versions. The Blender edition is found as _blender.py finds it
@@ -35,6 +35,11 @@ eidoverse/terrain/tests/out/parity/, keyed by the Blender commit and code hash (
              draw in their own body are listed in the manifest: their stage replay checks them. Numpy's own draws for
              every call form are the runner package's (tests/core_runner/np_random_expected.py), run as it is into
              fixtures/np_random/.
+--plans-check  What the plan fixtures are worth: every recorded call made again exactly as the run made it (its own
+             arguments and seed, the memos cleared, as --plans makes it) against the result the run recorded
+             (plans.json, r<k>.npz): equal JSON and bit-equal arrays. A function whose result depends on more than its
+             arguments (a memo an earlier call set) shows here. Writes fixtures/plans/run_check.json; exit code 1
+             when a call differs.
 --recipes    to_dict(), resolve() for the defaults and two other knob sets, describe(), and plan_levels for 20
              focus cases at each quality: the core-inputs package's generator (tests/core_inputs/
              core_inputs_expected.py), run as it is into fixtures/core_inputs/, so there is one generator.
@@ -783,15 +788,102 @@ def plan_fixtures(root_out, key, only=None):
     return man
 
 
+def _same_arrays(a, b):
+    """Bit-equal arrays (NaNs included), with the same dtype and shape."""
+    a, b = np.asarray(a), np.asarray(b)
+    return a.dtype == b.dtype and a.shape == b.shape and np.array_equal(a.view(np.uint8), b.view(np.uint8))
+
+
+def plan_check(root_out, key, only=None):
+    """--plans-check (module doc): every replayable recorded plan call of the seed-1 base runs made again as the run
+    made it, against the run's recording. {recipes: {recipe: {function: {calls, equal, gpu, differ: [...]}}}}, also
+    written to fixtures/plans/run_check.json."""
+    import pickle
+    import _hooks as H
+    B.bare_terrain_package()
+    root = os.path.dirname(root_out)
+    out = dict(key=key, versions=B.versions(), date=time.strftime('%Y-%m-%d %H:%M:%S'), recipes={})
+    calls_n = equal_n = differ_n = gpu_n = 0
+    for name in sorted(os.listdir(root)):
+        pdir = os.path.join(root, name, 'base', 'plans')
+        if '_s1_' not in name or not os.path.exists(os.path.join(pdir, 'calls.pkl')):
+            continue
+        recipe = name.rsplit('_s', 1)[0]
+        if only and recipe not in only:
+            continue
+        with open(os.path.join(pdir, 'calls.pkl'), 'rb') as f:
+            calls = pickle.load(f)
+        recorded = {r['index']: r for r in (B.read_json(os.path.join(pdir, 'plans.json')) or {}).get('calls', [])}
+        rows = out['recipes'][recipe] = {}
+        t0 = time.perf_counter()
+        for c in calls:
+            fkey = f"{c['module']}.{c['qualname']}"
+            row = rows.setdefault(fkey, dict(calls=0, equal=0, gpu=0, differ=[]))
+            row['calls'] += 1
+            calls_n += 1
+            fn, owner = H.resolve_plan_function(c['module'], c['qualname'])
+            rec = recorded.get(c['index'])
+            if fn is None or rec is None:
+                row['differ'].append(dict(index=c['index'], why='the function or its record is gone'))
+                differ_n += 1
+                continue
+            args, kwargs = H.plan_call_args(c, None)
+            try:
+                H.clear_memos()
+                got = owner(*args[1:], **kwargs) if c.get('init') else fn(*args, **kwargs)
+            except RuntimeError as e:
+                if 'needs Blender' in str(e):                # compose.uplift: its fixture is the run's recording
+                    row['gpu'] += 1
+                    gpu_n += 1
+                    continue
+                row['differ'].append(dict(index=c['index'], why=f'{type(e).__name__}: {e}'))
+                differ_n += 1
+                continue
+            except Exception as e:                           # noqa: BLE001 - recorded
+                row['differ'].append(dict(index=c['index'], why=f'{type(e).__name__}: {e}'))
+                differ_n += 1
+                continue
+            arrays = {}
+            result = B.jsonable(got, arrays, 'result', 256)
+            want_arrays = {}
+            if rec.get('result_arrays'):
+                with np.load(os.path.join(pdir, rec['result_arrays'])) as z:
+                    want_arrays = {n: z[n] for n in z.files}
+            bad = []
+            if json.dumps(result, sort_keys=True) != json.dumps(rec.get('result'), sort_keys=True):
+                bad.append('the result JSON differs')
+            if sorted(arrays) != sorted(want_arrays):
+                bad.append(f'other arrays: {sorted(set(arrays) ^ set(want_arrays))[:6]}')
+            else:
+                bad += [f'array {n} differs' for n in sorted(arrays) if not _same_arrays(arrays[n], want_arrays[n])]
+            if bad:
+                row['differ'].append(dict(index=c['index'], op=c.get('op'), level=c.get('level'), why='; '.join(bad[:6])))
+                differ_n += 1
+            else:
+                row['equal'] += 1
+                equal_n += 1
+        n_d = sum(len(r['differ']) for r in rows.values())
+        print(f"[fixtures] plans-check: {recipe}: {sum(r['calls'] for r in rows.values())} calls, "
+              f"{sum(r['equal'] for r in rows.values())} equal to the run's recording, "
+              f"{sum(r['gpu'] for r in rows.values())} need the GPU (the fixture is the recording), {n_d} differ"
+              + (': ' + ', '.join(f"{k.split('.', 1)[1]} x{len(r['differ'])}" for k, r in rows.items() if r['differ'])
+                 if n_d else '') + f' in {time.perf_counter() - t0:.1f} s', flush=True)
+    out['totals'] = dict(calls=calls_n, equal=equal_n, need_the_gpu=gpu_n, differ=differ_n)
+    B.write_json(os.path.join(root_out, 'plans', 'run_check.json'), out)
+    print(f'[fixtures] plans-check: {calls_n} calls: {equal_n} equal, {gpu_n} need the GPU, {differ_n} differ -> '
+          f"{os.path.join(root_out, 'plans', 'run_check.json')}", flush=True)
+    return out
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    for flag in ('--kernels', '--functions', '--plans', '--recipes'):
+    for flag in ('--kernels', '--functions', '--plans', '--recipes', '--plans-check'):
         ap.add_argument(flag, action='store_true')
     ap.add_argument('--only', default='')
     ap.add_argument('--out', default='')
     a = ap.parse_args(B.script_args())
-    every = not (a.kernels or a.functions or a.plans or a.recipes)
+    every = not (a.kernels or a.functions or a.plans or a.recipes or a.plans_check)
     only = {x for x in a.only.split(',') if x} or None
     edition = B.bare_terrain_package()
     key = B.source_key(edition)
@@ -817,6 +909,8 @@ def main():
         plan_fixtures(out, key, only)
         ok &= _run_script(os.path.join(HERE, '..', 'core_runner', 'np_random_expected.py'),
                           os.path.join(out, 'np_random'), extra)
+    if a.plans_check or every:
+        ok &= plan_check(out, key, only)['totals']['differ'] == 0
     if a.recipes or every:
         ok &= _run_script(os.path.join(HERE, '..', 'core_inputs', 'core_inputs_expected.py'),
                           os.path.join(out, 'core_inputs'), extra)

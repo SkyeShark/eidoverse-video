@@ -3,11 +3,19 @@
 #
 #     bash eidoverse/terrain/tests/parity/floor_runs.sh [--recipes a,b] [--seeds 1,2] [--patterns 0-5]
 #          [--dump-seeds 1,2] [--quality draft] [--retry-failed]
+#     bash eidoverse/terrain/tests/parity/floor_runs.sh --stage-floors [--recipes a,b] [--seeds 1,2]
+#          [--stage-patterns 5] [--levels main] [--retry-failed]
 #
 # blender_chaos_floor.py --next names the next run that is not done (so this resumes where it stopped), and each run
 # is `$EIDO_GPU_WRAP bash <Blender edition>/run_blender.sh blender_chaos_floor.py --run ...`, its output in the run's
 # own blender.log. The jobs are started here and not from Python because a GPU queue may check that the shell which
 # started it is still alive, which it cannot see through a Python parent.
+#
+# --stage-floors runs the stage floors instead (plan 5.3, 5.4 item 7): for each base run with stage dumps, one job
+# `run_blender.sh blender_stage_dump.py --floor <base>/stages ...` (blender_chaos_floor.py --next-stage-floor names
+# the next), its output in <base>/stage_floors.log; it is done when <base>/stage_floors.done is written, and a job
+# that stops before that is marked <base>/stage_floors_failed.json (--retry-failed takes those again). A job cut off
+# keeps the stages it finished in <base>/stage_floors.json and goes on from there.
 #
 # Environment (nothing here is a path of one machine):
 #   EIDO_BLENDER_EDITION   the root of a checkout of the blender branch (not needed when this checkout holds blender/)
@@ -64,8 +72,22 @@ trap 'rm -rf "$LOCK"' EXIT
 
 ARGS=()
 RETRY=0
-for a in "$@"; do if [ "$a" = "--retry-failed" ]; then RETRY=1; else ARGS+=("$a"); fi; done
-[ "$RETRY" = 1 ] && "$PY" -I "$HERE/blender_chaos_floor.py" --clear-failed "${ARGS[@]}"
+STAGE=0
+for a in "$@"; do
+    case "$a" in
+        --retry-failed) RETRY=1 ;;
+        --stage-floors) STAGE=1 ;;
+        *) ARGS+=("$a") ;;
+    esac
+done
+if [ "$STAGE" = 1 ]; then
+    NEXT_FLAG=--next-stage-floor LOG_NAME=stage_floors.log DONE_NAME=stage_floors.done FAILED_NAME=stage_floors_failed.json
+    WHAT=' stage floors'
+else
+    NEXT_FLAG=--next LOG_NAME=blender.log DONE_NAME=done.json FAILED_NAME=failed.json
+    WHAT=''
+fi
+[ "$RETRY" = 1 ] && "$PY" -I "$HERE/blender_chaos_floor.py" --clear-failed --failed-name "$FAILED_NAME" "${ARGS[@]}"
 MAX="${FLOOR_MAX_RUNS:-0}"
 n=0
 busy=0
@@ -75,13 +97,13 @@ while :; do
         echo "[floor_runs] $FLOOR_STOP_FILE exists: stopping before the next run"
         break
     fi
-    mapfile -t NEXT < <("$PY" -I "$HERE/blender_chaos_floor.py" --next "${ARGS[@]}" | tr -d '\r')
+    mapfile -t NEXT < <("$PY" -I "$HERE/blender_chaos_floor.py" "$NEXT_FLAG" "${ARGS[@]}" | tr -d '\r')
     [ "${#NEXT[@]}" -ge 2 ] || break
     pdir="${NEXT[0]}"
     words=("${NEXT[@]:1}")
     t0=$SECONDS
     # shellcheck disable=SC2086  (the wrap is a command prefix: split into words on purpose)
-    ( cd "$EDITION" && ${EIDO_GPU_WRAP:-} bash "$EDITION/run_blender.sh" "${words[@]}" ) > "$pdir/blender.log" 2>&1 < /dev/null
+    ( cd "$EDITION" && ${EIDO_GPU_WRAP:-} bash "$EDITION/run_blender.sh" "${words[@]}" ) > "$pdir/$LOG_NAME" 2>&1 < /dev/null
     rc=$?
     if [ "$rc" -eq 75 ]; then
         busy=$((busy + 1))
@@ -91,11 +113,11 @@ while :; do
         continue
     fi
     busy=0
-    if [ -f "$pdir/done.json" ]; then
-        echo "[floor_runs] $(basename "$(dirname "$pdir")")/$(basename "$pdir"): ok in $((SECONDS - t0)) s (total $(((SECONDS - t_all) / 60)) min)"
+    if [ -f "$pdir/$DONE_NAME" ]; then
+        echo "[floor_runs] $(basename "$(dirname "$pdir")")/$(basename "$pdir")$WHAT: ok in $((SECONDS - t0)) s (total $(((SECONDS - t_all) / 60)) min)"
     else
-        "$PY" -I "$HERE/blender_chaos_floor.py" --mark-failed "$pdir" --rc "$rc"
-        echo "[floor_runs] $(basename "$(dirname "$pdir")")/$(basename "$pdir"): FAILED rc=$rc in $((SECONDS - t0)) s (see its blender.log)"
+        "$PY" -I "$HERE/blender_chaos_floor.py" --mark-failed "$pdir" --rc "$rc" --failed-name "$FAILED_NAME" --log "$LOG_NAME"
+        echo "[floor_runs] $(basename "$(dirname "$pdir")")/$(basename "$pdir")$WHAT: FAILED rc=$rc in $((SECONDS - t0)) s (see its $LOG_NAME)"
     fi
     n=$((n + 1))
     [ "$MAX" -gt 0 ] && [ "$n" -ge "$MAX" ] && break

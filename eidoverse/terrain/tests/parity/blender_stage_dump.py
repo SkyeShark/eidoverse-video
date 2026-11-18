@@ -12,7 +12,9 @@ step snapshots of the same run); this file owns their format and the replay:
                          the 'after' dump bit for bit, or the dump does not hold all of the op's input), then once per
                          pattern with both perturbation points of 5.4 (every float field of the level at the op's
                          entry, and each kernel's images after its first dispatch in the call); writes
-                         <run>/base/stage_floors.json
+                         <run>/base/stage_floors.json. An op that keeps state between its calls outside its arguments
+                         (WARM: karst's plan domain, set by the coarsest level's call) has the run's earlier calls of
+                         it run first, as they were; a port's replay of it does the same (replay.mjs)
 
 The format (5.2), in <recipe>_s<seed>_<quality>/base/stages/:
     stages.json                       the run (plan, recipe to_dict, knob values, resolved stages, seed, flatten,
@@ -49,6 +51,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _blender as B  # noqa: E402
 
 SHARED_ARRAY_MIN = 64          # arrays in `shared` above this many values go to the npz, smaller ones into the JSON
+FLOOR_FORMAT = 2               # stage_floors.json's format: entries of another format are made again
+# Ops whose result on a finer level depends on module state an earlier call of the same op set, outside the op's
+# arguments (every other memo of the package is a pure cache: its key holds every input, so clearing it costs only
+# time; _hooks.MEMOS). A replay of such an op first runs the run's earlier calls of it, as they were (never
+# perturbed), so the state is the run's.
+WARM = {'karst': "op_karst takes its plan's domain from karst._DOMAINS, which only the coarsest level's call sets "
+                 "(every level of one terrain shares one plan): a finer level replayed alone plans over its own "
+                 "window, another terrain"}
 
 
 class StageDumper:
@@ -206,9 +216,9 @@ def _diffs(got, want):
     return out
 
 
-def replay_one(h, header, rec, dir, pattern):
-    """Run rec's op once from its 'before' dump (pattern None: as it is; else the 5.4 perturbation). The fields after
-    it, {name: float32 array}."""
+def load_call(h, header, rec, dir):
+    """A dumped op call as run.py made it: (op function, Fields, level, params, ctx or None), from its 'before'
+    dump and pickle."""
     from eidoblend.terrain.core.fields import Fields
     from eidoblend.terrain.core.levels import Level
     FL = h.FL
@@ -233,8 +243,29 @@ def replay_one(h, header, rec, dir, pattern):
                               log=lambda m: None, values=copy.deepcopy(pk.get('values')),
                               grow_levels=c['grow_levels'])
         h.active = was
-    fn = h._orig_get_op(rec['op'])
+    return h._orig_get_op(rec['op']), fields, level, params, ctx
+
+
+def warm_calls(header, rec):
+    """The run's earlier calls a replay of rec runs first (WARM): every earlier call of the same op, in call
+    order; [] for any other op."""
+    if rec['op'] not in WARM:
+        return []
+    return [r for r in header['stages'] if r['op'] == rec['op'] and r['call'] < rec['call']]
+
+
+def replay_one(h, header, rec, dir, pattern):
+    """Run rec's op once from its 'before' dump (pattern None: as it is; else the 5.4 perturbation), after the
+    run's earlier calls of it when it is a WARM op (as they were: outside the replayed call, so never perturbed).
+    The fields after it, {name: float32 array}."""
+    warm = [(w, load_call(h, header, w, dir)) for w in warm_calls(header, rec)]
+    fn, fields, level, params, ctx = load_call(h, header, rec, dir)
     h.start(pattern=pattern)                               # memos cleared; the dispatch and nudge hooks on
+    for w, (wfn, wf, wl, wp, wc) in warm:                  # op '<prepare>': no nudge reaches these
+        if wc is not None:
+            wfn(wf, wl, wp, w['seed'], ctx=wc)
+        else:
+            wfn(wf, wl, wp, w['seed'])
     h.main_index = header.get('main_index')
     h.call, h.level, h.pass_, h.ctx = rec['call'] - 1, rec['level'], rec['pass_index'], ctx
     r = h.enter_op(rec['op'], fields, level, params, rec['seed'], ctx)
@@ -270,9 +301,10 @@ def stage_floors(stages_dir, patterns=5, levels='main', ops=None, log=print):
     path = os.path.join(base_dir, 'stage_floors.json')
     prev = B.read_json(path) or {}
     entries = {}
-    if prev.get('patterns') == patterns:
+    if prev.get('patterns') == patterns and prev.get('format') == FLOOR_FORMAT:
         entries = {s['call']: s for s in prev.get('stages', []) if 'floor' in s or 'skipped' in s}
-    out = dict(source=os.path.abspath(stages_dir), patterns=patterns, levels=levels,
+    out = dict(format=FLOOR_FORMAT, source=os.path.abspath(stages_dir), patterns=patterns, levels=levels,
+               warm={op: why for op, why in WARM.items()},
                protocol='5.4: every float32 field of the level +-1 ulp on half the cells at the op entry, and each '
                         'kernel\'s images after its first dispatch in the call; default_rng([pattern, op call]) and '
                         '([pattern, op call, kernel, 1])', stages=[], versions=B.versions(h.G.init()))
@@ -292,6 +324,8 @@ def stage_floors(stages_dir, patterns=5, levels='main', ops=None, log=print):
             continue
         ent = dict(call=rec['call'], level=rec['level'], pass_index=rec['pass_index'], n=rec['n'], op=rec['op'],
                    label=rec.get('label'), seconds_in_run=rec.get('seconds'))
+        if warm_calls(header, rec):
+            ent['warm_calls'] = [w['call'] for w in warm_calls(header, rec)]
         if not rec.get('pickle'):
             ent['skipped'] = f"no pickle of its params and shared ({rec.get('pickle_error')})"
             entries[rec['call']] = ent

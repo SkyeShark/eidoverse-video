@@ -3,14 +3,16 @@
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/mesh_api/collider_test.mjs [case ...] [--rays N]
 //
 // (from the repository root; on a shared machine put $EIDO_GPU_WRAP in front). Per save:
-//   proxy       the rings near the focus (the hero rings and cores, or the main ring), at most about 2 M triangles,
-//               every one a triangle of the visual mesh
-//   rapier      a Rapier trimesh built from the proxy the way eidoverse/robot_controller.js builds one, in under
-//               2 s; rays cast down onto it land within 1e-3 m of heightAt
+//   proxy       the rings near the focus (the hero rings and cores, or the main ring), under the triangle limit,
+//               every one a triangle of the visual mesh on the visual mesh's own vertices; it is written to
+//               out/mesh_api/collider/<case>/ (what a controller reads from it, and 400 points with heightAt) for
+//               rapier_test.mjs, which builds and times the Rapier trimesh in a process of its own (no GPU: a GPU
+//               queue may run this one at low priority, which is no place to time a CPU build)
 //   ray caster  N rays (1,000 on the first case, 150 on the others: three's loop over every triangle is the slow
 //               side) of every kind (down from above, on lattice points and lines, oblique, grazing, from outside
-//               and from below, short, along a ring's border, through the skirt): mesh.raycast gives exactly the
-//               hits of THREE.Mesh.prototype.raycast, the brute-force loop over all the triangles: the same count,
+//               and from below, short, along a ring's border, along the x = 0 and z = 0 lattice lines, through
+//               lattice points, through the skirt): mesh.raycast gives exactly the hits of
+//               THREE.Mesh.prototype.raycast, the brute-force loop over all the triangles: the same count,
 //               distances, points, faces and face indices; with a DoubleSide material too; firstHitOnly gives
 //               the nearest; a vertical ray's hit is heightAt
 
@@ -33,13 +35,6 @@ await G.init();
 const THREE = await A.three();
 const T = new C.Checks('mesh and API: the collider proxy and the exact ray caster');
 T.extra.cases = {};
-let RAPIER = null;
-try {
-    RAPIER = await import('npm:@dimforge/rapier3d-compat@0.14.0').then((m) => m.default || m);
-    await RAPIER.init();
-} catch (e) {
-    console.log(`[skip] the Rapier checks: ${e.message}`);
-}
 
 function rays(t, n, rnd) {
     // [origin, direction, near, far, what] in three.js axes
@@ -55,10 +50,40 @@ function rays(t, n, rnd) {
         return d.map((v) => v / l);
     };
     const ground = (x, y) => [x, rm.heightAt(x, y), -y];
-    const kinds = ['down', 'down_fine', 'vertex', 'line', 'oblique', 'oblique_fine', 'graze', 'outside', 'below', 'short', 'seam_along', 'seam_cross', 'skirt', 'up'];
+    const kinds = ['down', 'down_fine', 'vertex', 'line', 'oblique', 'oblique_fine', 'graze', 'outside', 'below', 'short', 'seam_along', 'seam_cross', 'skirt', 'up',
+        'axis', 'lattice_point', 'border_along'];
     for (let q = 0; q < n; q++) {
         const kind = kinds[q % kinds.length];
         const all = [xmin, ymin, xmax, ymax];
+        if (kind === 'axis') {
+            // a camera on a lattice line looking along it (x = 0 and z = 0 are lattice lines of every ring; so is
+            // every line of a coarser ring inside a finer one): the ground track lies on the line
+            const r = rm.rings[Math.floor(rnd() * rm.rings.length)];
+            const alongX = rnd() < 0.5;
+            const line = rnd() < 0.3 ? 0 : (alongX ? r.ym : r.xm)[Math.floor(rnd() * (alongX ? r.ny : r.nx))];
+            const lo = alongX ? xmin : ymin, hi = alongX ? xmax : ymax;
+            const a = lo + rnd() * (hi - lo), b = lo + rnd() * (hi - lo);
+            const pa = alongX ? [a, line] : [line, a], pb = alongX ? [b, line] : [line, b];
+            const o = [pa[0], rm.heightAt(pa[0], pa[1]) + 5 + rnd() * 300, -pa[1]];
+            out.push([o, dirTo(o, ground(pb[0], pb[1])), 0, Infinity, kind]);
+            continue;
+        }
+        if (kind === 'lattice_point') {
+            // through lattice points: from above one lattice point to the ground at another on its diagonal
+            const r = rm.rings[Math.floor(rnd() * rm.rings.length)];
+            const i = Math.floor(rnd() * (r.nx - 8)), j = Math.floor(rnd() * (r.ny - 8)), s = 1 + Math.floor(rnd() * 6);
+            const o = [r.xm[i], rm.heightAt(r.xm[i], r.ym[j]) + 20 + rnd() * 80, -r.ym[j]];
+            out.push([o, dirTo(o, ground(r.xm[i + s], r.ym[j + s])), 0, Infinity, kind]);
+            continue;
+        }
+        if (kind === 'border_along') {
+            // along the outermost border, on it: the skirt's wall and the border cells
+            const y = rnd() < 0.5 ? ymin : ymax;
+            const xa = xmin + rnd() * (xmax - xmin), xb = xmin + rnd() * (xmax - xmin);
+            const o = [xa, rm.heightAt(xa, y) + 10 + rnd() * 50, -y];
+            out.push([o, dirTo(o, ground(xb, y)), 0, Infinity, kind]);
+            continue;
+        }
         if (kind === 'down' || kind === 'down_fine') {
             const [x, y] = inWin(kind === 'down' ? all : win(fin));
             out.push([[x, top, -y], [0, -1, 0], 0, Infinity, kind]);
@@ -149,13 +174,21 @@ async function checkCase(name, nRays) {
     const tris = proxy.geometry.index.count / 3;
     const hero = rm.rings.findIndex((r) => roles[r.spec.level] === 'hero');
     const expectFirst = hero >= 0 ? hero : rm.rings.findIndex((r) => roles[r.spec.level] === 'main');
-    let sub = true;
+    const fv = proxy.userData.firstVertex;
     const pi = proxy.geometry.index.array, off = 3 * rm.rings[first].triBase;
-    for (const q of [0, 1, 2, pi.length - 3, pi.length - 2, pi.length - 1, Math.floor(pi.length / 2)]) if (pi[q] !== rm.index[off + q]) sub = false;
-    T.ok(tag('proxy: the rings near the focus (hero rings and cores, else the main ring), at most about 2 M triangles, a run of the visual index buffer'),
-        first >= expectFirst && last === rm.rings.length - 1 && tris <= COLLIDER_MAX_TRIANGLES && sub &&
+    const pp = proxy.geometry.attributes.position.array;
+    let sub = pp.buffer === rm.positions.buffer && pp.byteOffset === rm.positions.byteOffset + 12 * fv && pp.length === 3 * (rm.nv - fv);
+    let top = 0;
+    for (let q = 0; q < pi.length; q++) {                 // every triangle the visual mesh's, on its own vertices
+        if (pi[q] + fv !== rm.index[off + q]) sub = false;
+        if (pi[q] > top) top = pi[q];
+    }
+    T.ok(tag(`proxy: the rings near the focus (hero rings and cores, else the main ring), at most ${(COLLIDER_MAX_TRIANGLES / 1e6).toFixed(2)} M triangles, ` +
+        'every one the visual mesh\'s triangle, on a view of its vertex buffer from the proxy\'s first vertex'),
+        first >= expectFirst && last === rm.rings.length - 1 && tris <= COLLIDER_MAX_TRIANGLES && sub && top < pp.length / 3 &&
         tris === rm.rings[last].triBase + rm.rings[last].triangles - rm.rings[first].triBase,
-        `rings ${first}..${last} of ${rm.rings.length} (${roles.join(', ')}): ${tris.toLocaleString('en-US')} of ${rm.triangleCount.toLocaleString('en-US')} triangles`);
+        `rings ${first}..${last} of ${rm.rings.length} (${roles.join(', ')}): ${tris.toLocaleString('en-US')} of ${rm.triangleCount.toLocaleString('en-US')} triangles, ` +
+        `${(pp.length / 3).toLocaleString('en-US')} of ${rm.vertexCount.toLocaleString('en-US')} vertices`);
     mesh.position.set(12.5, -3, 40);
     mesh.updateMatrixWorld(true);
     proxy.updateWorldMatrix(true, true);
@@ -163,44 +196,28 @@ async function checkCase(name, nRays) {
     mesh.position.set(0, 0, 0);
     mesh.updateMatrixWorld(true);
     proxy.updateWorldMatrix(true, true);
-    rec.proxy = { rings: [first, last], triangles: tris };
+    rec.proxy = { rings: [first, last], triangles: tris, vertices: pp.length / 3, first_vertex: fv };
 
-    // Rapier, as eidoverse/robot_controller.js builds a trimesh from a collision mesh
-    if (RAPIER) {
-        const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-        const t0 = performance.now();
-        const posA = proxy.geometry.attributes.position;
-        const v = new Float32Array(posA.count * 3);
-        const tv = new THREE.Vector3();
-        for (let i = 0; i < posA.count; i++) {
-            tv.fromBufferAttribute(posA, i).applyMatrix4(proxy.matrixWorld);
-            v[i * 3] = tv.x; v[i * 3 + 1] = tv.y; v[i * 3 + 2] = tv.z;
-        }
-        const idx = new Uint32Array(proxy.geometry.index.array);
-        const t1 = performance.now();
-        const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-        world.createCollider(RAPIER.ColliderDesc.trimesh(v, idx), body);
-        const t2 = performance.now();
-        world.step();
-        rec.rapier = { copy_s: +((t1 - t0) / 1000).toFixed(3), trimesh_s: +((t2 - t1) / 1000).toFixed(3), triangles: tris, vertices: posA.count };
-        T.ok(tag('rapier: the trimesh of the proxy is built in under 2 s'), (t2 - t0) / 1000 < 2.0,
-            `${((t2 - t1) / 1000).toFixed(2)} s for ${tris.toLocaleString('en-US')} triangles (+ ${((t1 - t0) / 1000).toFixed(2)} s copying ${posA.count.toLocaleString('en-US')} vertices)`);
-        const rnd = C.lcg(17);
-        const a = rm.rings[first];
-        let worst = 0, missed = 0, n = 0;
-        const top = rm.heightRange[1] + 100;
+    // what a controller reads from the proxy, for rapier_test.mjs: its vertices, its triangles, and 400 points over
+    // its rings with heightAt there
+    {
+        const dir = `collider/${name}/`;
+        Deno.writeFileSync(C.outUrl(dir + 'positions.f32'), new Uint8Array(pp.buffer, pp.byteOffset, pp.byteLength));
+        Deno.writeFileSync(C.outUrl(dir + 'index.u32'), new Uint8Array(pi.buffer, pi.byteOffset, pi.byteLength));
+        const rnd = C.lcg(17), a = rm.rings[first];
+        const samples = new Float64Array(3 * 400);
         for (let q = 0; q < 400; q++) {
             const x = a.xm[0] + rnd() * (a.xm[a.nx - 1] - a.xm[0]), y = a.ym[0] + rnd() * (a.ym[a.ny - 1] - a.ym[0]);
-            const hit = world.castRay(new RAPIER.Ray({ x, y: top, z: -y }, { x: 0, y: -1, z: 0 }), top - rm.heightRange[0] + 200, true);
-            n++;
-            if (!hit) { missed++; continue; }
-            const toi = hit.timeOfImpact ?? hit.toi;
-            worst = Math.max(worst, Math.abs((top - toi) - t.heightAt(x, -y)));
+            samples.set([x, -y, t.heightAt(x, -y)], 3 * q);
         }
-        rec.rapier.surface_worst_m = worst;
-        T.ok(tag('rapier: rays cast down onto the trimesh land within 1e-3 m of heightAt'), worst <= 1e-3 && missed === 0,
-            `${n} rays over the proxy's rings: worst ${worst.toExponential(2)} m, ${missed} missed`);
-        world.free();
+        Deno.writeFileSync(C.outUrl(dir + 'samples.f64'), new Uint8Array(samples.buffer));
+        // each ring of the run: its triangles, and the first vertex a run starting at it would need (its parent's)
+        const run = [];
+        for (let k = first; k <= last; k++) run.push({ ring: k, level: rm.rings[k].spec.level, triangles: rm.rings[k].triangles,
+            first_vertex: (k ? rm.rings[k - 1].v0 : 0) - fv });
+        Deno.writeTextFileSync(C.outUrl(dir + 'meta.json'), JSON.stringify({ case: name, rings: [first, last], triangles: tris,
+            vertices: pp.length / 3, mesh_vertices: rm.vertexCount, mesh_triangles: rm.triangleCount, height_range: rm.heightRange,
+            matrix_world: proxy.matrixWorld.toArray(), run, samples: 400 }, null, 1));
     }
 
     // the ray caster against three's loop over every triangle
