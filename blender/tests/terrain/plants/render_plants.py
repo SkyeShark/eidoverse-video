@@ -6,7 +6,7 @@ the view, 960 x 540, 16 samples, exposure -0.5) through the per-texel material w
   1. the terrain built in clay (make_terrain), its rocks scattered as make_terrain scatters them;
   2. its surface data baked (surface.bake_surface, cached);
   3. the plants planned on it at the camera (plants.plan_plants(data=); an eye view's camera stands where a person
-     can stand, no plant's foot within STAND_M of it and no crown over it), their cover rasters added to the data
+     can stand, no plant's crown within STAND_M of it), their cover rasters added to the data
      (SurfaceData.add_maps(spots.cover_extra()): canopy, canopy_expected, canopy_far, shrubs, shrubs_far), so the
      material's forest, scrub and crowns read the one rule the plants were placed by (design 4.7);
   4. the per-texel material (surfacing.apply_surface(data=, cameras=[camera])), which reads those rasters;
@@ -82,22 +82,26 @@ SETS = {
 }
 # views whose judge camera frames no plants, or only plants: where their aim lands instead (frame: (x, y) from the
 # left, from the top), how far the camera walks toward the aim along the ground (forward_m; the terrain's hero
-# levels follow it), and why
+# levels follow it), how far its line of sight is kept clear of crowns where its photograph stands at a built
+# overlook (vista_m), and why
 REFRAME = {
     ('dunes', 'interdune_floor'): dict(frame=(0.5, 0.15),
                                        why='the judge\'s camera aims 13.7 degrees up at the dune face, the floor and '
                                            'its grass below the frame; namib_star_dunes_02 looks along the floor with '
                                            'the dune behind: pitched to 4.7 degrees'),
-    ('caldera', 'rim_east'): dict(forward_m=335.0,
+    ('caldera', 'rim_east'): dict(forward_m=335.0, vista_m=30.0,
                                   why='the judge\'s camera stands on the bench inside the rim, 335 m back from where '
                                       'the caldera wall steepens past 25 degrees and its rock begins; the forest on '
                                       'the bench and the rounded shoulder hides the lake from there. crater_lake_01 '
-                                      'stands at the overlook wall on the edge: walked forward to it'),
+                                      'stands at the overlook wall on the edge, its vista kept open: walked forward '
+                                      'to it, and the first 30 m of its line of sight kept clear of crowns (a pine '
+                                      '10 m in front filled the frame)'),
 }
 EXPOSURE = -0.5
 W, H = 960, 540
-STAND_M = 1.5        # an eye view's camera: no plant's foot within this of it, nor any crown over it (where its
-#                      photographer stands)
+STAND_M = 1.5        # an eye view's camera: no plant's crown within this of it (where its photographer stands)
+VISTA_STEP_M, VISTA_HALF_M = 5.0, 2.0   # an overlook's vista (REFRAME vista_m): no crown within 2 m of its line of
+#                                         sight, in discs every 5 m along it
 
 
 def args():
@@ -378,10 +382,10 @@ def main():
             made = {}
             tp = time.time()
             # an eye view plants around its camera; an aerial around the ground it looks at. An eye view's camera
-            # is where its photographer stands, on ground a person can stand on: no plant's foot within STAND_M of
-            # it and no crown over it (the camera stood inside a chaparral bush at the San Gabriel road, its
-            # flowers filling the frame, and under a pine on the cinder plain, 11-18), with the terrain's flats kept
-            # clear as plan_plants keeps them
+            # is where its photographer stands, on ground a person can stand on: no plant's crown within STAND_M of
+            # it (the camera stood inside a chaparral bush at the San Gabriel road, its flowers filling the frame,
+            # under a pine on the cinder plain, and half a metre from a pine's crown at the caldera's rim, 11-18),
+            # with the terrain's flats kept clear as plan_plants keeps them
             eye = ez - ground < 50.0
             pf = (ex, ey) if eye else (tx, ty)
             r['plant_focus'] = [round(pf[0], 1), round(pf[1], 1)]
@@ -390,6 +394,11 @@ def main():
                 clear = [(fl['at'][0], fl['at'][1], float(fl.get('radius', 0.0)))
                          for fl in (getattr(t, 'flats', None) or []) if fl.get('radius')] + [(ex, ey, STAND_M, 'crown')]
                 r['stand_m'] = STAND_M
+                if rf.get('vista_m'):                    # an overlook: its line of sight kept open (REFRAME)
+                    n = math.hypot(tx - ex, ty - ey)
+                    clear += [(ex + s * (tx - ex) / n, ey + s * (ty - ey) / n, VISTA_HALF_M, 'crown')
+                              for s in np.arange(VISTA_STEP_M, float(rf['vista_m']) + 1e-6, VISTA_STEP_M)]
+                    r['vista_m'] = float(rf['vista_m'])
             if a['plants']:
                 # the plan and its cover rasters are kept in the terrain's cache entry (plants.cache_base: keyed by
                 # the ecotope, the seed, the focus, the clear discs, the bake and the plant code), so a view
