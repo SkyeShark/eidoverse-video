@@ -7,7 +7,8 @@ a case whose snapshot is missing is skipped with the command that makes it. With
 the GPU; without it the bake runs first (a GPU job: queue the run with EIDO_GPU_WRAP, blender/tests/_where.py).
 
 Checks per case: the material builds; its samplers stay within the budget and are counted by image and state; every
-atlas is read Linear and EXTEND in both reader slots (one sampler each) and the ramp image only Closest; one level
+atlas is read Linear and EXTEND in both reader slots (one sampler each; the families in surfacing.CUBIC_FAMILIES also
+Cubic where a texel is magnified, which shares that sampler) and the ramp image only Closest; one level
 reader group serves the near material, the far material and eido_terrain_map; no Bump node has the level reader
 under its height; the far material builds with three images or fewer; eido_terrain_map offers every packed map and
 the derived names. Then, with no terrain: which rings take the far material for a set of cameras.
@@ -85,9 +86,11 @@ def test_case(case):
     nimg, nsamp = S._count_samplers(ng)
     check(f'{case}: the per-texel material builds within the sampler budget',
           nsamp <= S.MAX_SAMPLERS and nsamp == int(ng['eido_samplers']),
-          f'{nimg} images, {nsamp} samplers of {S.MAX_SAMPLERS}, {S._nodes_in(ng)} nodes (groups once), '
+          f'{nimg} images, {nsamp} samplers of {S.MAX_SAMPLERS}, {S._nodes_in(ng)} nodes (groups expanded), '
           f'built in {build:.1f} s; D0 {float(ng["eido_far_m"]):.0f} m')
-    atlas = {img.name for img in sd.images().values()}
+    fams = sd.images()
+    atlas = {img.name for img in fams.values()}
+    cubic_ok = {fams[f].name for f in S.CUBIC_FAMILIES if f in fams}
     states, lut = {}, set()
     for tr in trees(ng).values():
         for n in tr.nodes:
@@ -97,8 +100,13 @@ def test_case(case):
                 states.setdefault(n.image.name, set()).add((n.interpolation, n.extension))
             elif n.image.name.startswith('eido_ramps_'):
                 lut.add((n.interpolation, n.extension))
-    bad = {k: sorted(v) for k, v in states.items() if v != {('Linear', 'EXTEND')}}
-    check(f'{case}: every atlas is read Linear and EXTEND only (one sampler for both reader slots)', not bad,
+    # Linear and Cubic share a sampler (SURFACING_DESIGN.md 1.3, probe A): the families in CUBIC_FAMILIES may add a
+    # Cubic read where a texel is magnified; anything else (Closest, REPEAT, CLIP) would cost a sampler more
+    bad = {k: sorted(v) for k, v in states.items()
+           if not ({('Linear', 'EXTEND')} <= v <= {('Linear', 'EXTEND'), ('Cubic', 'EXTEND')})
+           or (('Cubic', 'EXTEND') in v and k not in cubic_ok)}
+    check(f'{case}: every atlas is read Linear (Cubic on {", ".join(S.CUBIC_FAMILIES)}, the same sampler) and EXTEND '
+          f'only: one sampler for both reader slots', not bad,
           f'{len(states)} atlases read' + (f'; {bad}' if bad else ''))
     check(f'{case}: the ramp image is read Closest only', lut <= {('Closest', 'EXTEND')},
           f'{sorted(lut) or "no ramp in this palette"}')

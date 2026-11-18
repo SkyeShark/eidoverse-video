@@ -3,12 +3,13 @@ walls at their world positions, beside today's Box projection.
 
     bash run_blender.sh blender/tests/terrain/surfacing/check_sectors.py [--case canyon] [--views brink_down,wall_L4]
         [--grid brink_down,wall_L4 | none] [--cells 2] [--plain] [--slope] [--only per_texel | today]
-        [--mesh-res 1024] [--reps 3] [--tag s1]
+        [--options steep_hex_m=0,far_scale=1] [--mesh-res 1024] [--reps 3] [--tag s1]
     (a GPU job: queue it with EIDO_GPU_WRAP on a shared machine, blender/tests/_where.py)
 
 The same runner serves check 8, the stride-1 comparison: --mesh-res 1024 draws the rings at stride 1 (four times the
 vertices; with --only per_texel the masks stay off them), --reps 3 takes each view's best of three frames, and the
-record holds the vertices and the seconds the terrain and its object took.
+record holds the vertices, the seconds the terrain and its object took and the process's GPU memory after the
+renders (Windows). --options: material options over the palette's, for the per-texel material.
 
 Views: the judge's brink_down (the canyon's right-hand wall, diagonal to the axes) and wall_L4, a camera framing
 about 250 m of the steepest wall on the 0.98 m hero level (the 250 m window there with the most ground over 50
@@ -47,7 +48,12 @@ def args():
         return a[a.index(k) + 1] if k in a else d
     views = opt('--views', 'brink_down,wall_L4').split(',')
     grid = opt('--grid')
-    return dict(case=opt('--case', 'canyon'), views=views,
+    options = {}
+    for kv in (opt('--options') or '').split(','):
+        if '=' in kv:
+            k, v = kv.split('=', 1)
+            options[k] = json.loads(v) if v[:1] in '-0123456789tfn"[' else v
+    return dict(case=opt('--case', 'canyon'), views=views, options=options,
                 grid=views if grid is None else [v for v in grid.split(',') if v and v != 'none'],
                 slope='--slope' in a, mesh_res=int(opt('--mesh-res', '0')), only=opt('--only'),
                 tag=opt('--tag', ''), reps=int(opt('--reps', '1')), plain='--plain' in a,
@@ -193,11 +199,15 @@ def main():
                        triangles=len(obj.data.polygons), terrain_and_object_s=round(t_obj, 1))
     # --plain: one read per frame in both materials (no second lattice, no far read, no hex tiling), so the grid
     # shows the projections alone: the Box projection beside the sector frames
-    plain = {None: dict(anti_tile=False, far_scale=1.0, far_detile=False, macro_mod=0.0), 'data': dict(detile='offset')}
+    plain = {None: dict(anti_tile=False, far_scale=1.0, far_detile=False, macro_mod=0.0),
+             'data': dict(detile='offset', far_scale=1.0)}
     for label, data in (('today', None), ('per_texel', sd)):
         if a['only'] and label != a['only']:
             continue
-        mat = MS.apply(t, obj, data, options=(plain[None if data is None else 'data'] if a['plain'] else None))
+        opts = dict(plain[None if data is None else 'data']) if a['plain'] else {}
+        if data is not None:
+            opts.update(a['options'])
+        mat = MS.apply(t, obj, data, options=opts or None)
         for v, cam in cams.items():
             sc.camera = cam
             sky = os.path.join(OUT, '_sky')
@@ -220,6 +230,7 @@ def main():
         for v, cam in cams.items():
             sc.camera = cam
             MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_slope{tag}.png"))
+    rec['mesh']['vram_mib'] = MS.vram_mib()               # this process's GPU memory after the renders
     path = os.path.join(MS.OUT, f"sectors_{a['case']}{tag}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1)

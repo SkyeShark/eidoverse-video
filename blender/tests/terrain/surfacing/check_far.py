@@ -14,9 +14,13 @@ so their difference is what a ring would show:
     difference of the two renders' mean colours, and per pixel its median and 90th percentile;
   - the same over the pixels whose view distance lies in the band D0..1.5 D0, where the hand-off happens as built;
   - the share of the frame the far colour takes as built.
+Then the view once more with its camera passed to apply_surface, so the rings beyond 1.5 D0 of it take the far
+material (slot 1: C, the macro normal, no layers; a cost saving only): against the near material as built, the
+CIELAB difference of the mean colours over those rings' pixels, what the far material's ring boundary would show.
 The region comes from an emission render of the level reader's Hero Outside and the view distance. --old adds
 today's material (mesh attributes) on the same views, for the eye. Writes
-out/surfacing/material/far/<case>_<view>_<as_built|near|far|old>.png, a 4x difference image, and far_<case>.json.
+out/surfacing/material/far/<case>_<view>_<as_built|near|far|rings|old>.png, a 4x difference image, and
+far_<case>.json.
 """
 import json
 import os
@@ -31,8 +35,6 @@ import numpy as np  # noqa: E402
 from eidoblend.terrain.build import surfacing as S  # noqa: E402
 
 OUT = os.path.join(MS.OUT, 'far')
-DIST_UNIT = 20000.0                       # the emission's view distance scale, metres
-OUTSIDE_UNIT = 4000.0                     # ... and the Hero Outside scale
 
 
 def args():
@@ -53,79 +55,6 @@ def srgb_to_lab(rgb):
     xyz = lin @ m.T / np.array([0.95047, 1.0, 1.08883])
     f = np.where(xyz > 216.0 / 24389.0, np.cbrt(xyz), (24389.0 / 27.0 * xyz + 16.0) / 116.0)
     return np.stack([116.0 * f[..., 1] - 16.0, 500.0 * (f[..., 0] - f[..., 1]), 200.0 * (f[..., 1] - f[..., 2])], -1)
-
-
-def read_png(path):
-    img = bpy.data.images.load(path, check_existing=False)
-    w, h = img.size
-    px = np.empty(w * h * 4, np.float32)
-    img.pixels.foreach_get(px)
-    bpy.data.images.remove(img)
-    return px.reshape(h, w, 4)[::-1, :, :3]
-
-
-def region_material(sd):
-    """An emission of (Hero Outside / OUTSIDE_UNIT, view distance / DIST_UNIT, 1) through the terrain's reader."""
-    mat = bpy.data.materials.new('far_region')
-    mat.use_nodes = True
-    nt = mat.node_tree
-    nt.nodes.clear()
-    rd = nt.nodes.new('ShaderNodeGroup')
-    rd.node_tree = S.reader_group(sd)
-    tc = nt.nodes.new('ShaderNodeTexCoord')
-    nt.links.new(tc.outputs['Object'], rd.inputs['Position'])
-    rd.inputs['Footprint'].default_value = 1.0
-    cam = nt.nodes.new('ShaderNodeCameraData')
-    comb = nt.nodes.new('ShaderNodeCombineColor')
-    for k, (sock, unit) in enumerate(((rd.outputs['Hero Outside'], OUTSIDE_UNIT), (cam.outputs['View Distance'],
-                                                                                 DIST_UNIT))):
-        m = nt.nodes.new('ShaderNodeMath')
-        m.operation = 'DIVIDE'
-        nt.links.new(sock, m.inputs[0])
-        m.inputs[1].default_value = unit
-        nt.links.new(m.outputs[0], comb.inputs[k])
-    comb.inputs[2].default_value = 1.0
-    em = nt.nodes.new('ShaderNodeEmission')
-    nt.links.new(comb.outputs[0], em.inputs['Color'])
-    out = nt.nodes.new('ShaderNodeOutputMaterial')
-    nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
-    return mat
-
-
-def region_render(sc, me, mat, path):
-    """(hero_outside metres, view distance metres, ground mask) per pixel, top row first: a one-sample float render
-    with a black world and the Standard view, then the scene's own settings back."""
-    slots = list(me.materials)
-    me.materials.clear()
-    me.materials.append(mat)
-    idx = np.empty(len(me.polygons), np.int32)
-    me.polygons.foreach_get('material_index', idx)
-    me.polygons.foreach_set('material_index', np.zeros(len(me.polygons), np.int32))
-    vs, im = sc.view_settings, sc.render.image_settings
-    keep = (sc.world, vs.view_transform, vs.look, vs.exposure, sc.eevee.taa_render_samples, im.file_format,
-            im.color_depth, im.color_mode, sc.render.film_transparent)
-    sc.world = bpy.data.worlds.get('far_black') or bpy.data.worlds.new('far_black')
-    sc.world.color = (0.0, 0.0, 0.0)
-    vs.view_transform, vs.look, vs.exposure = 'Standard', 'None', 0.0
-    sc.eevee.taa_render_samples = 1
-    sc.render.film_transparent = True
-    im.file_format, im.color_depth, im.color_mode = 'OPEN_EXR', '32', 'RGBA'
-    sc.render.filepath = path
-    bpy.ops.render.render(write_still=True)
-    img = bpy.data.images.load(path, check_existing=False)
-    w, h = img.size
-    px = np.empty(w * h * 4, np.float32)
-    img.pixels.foreach_get(px)
-    bpy.data.images.remove(img)
-    px = px.reshape(h, w, 4)[::-1]
-    (sc.world, vs.view_transform, vs.look, vs.exposure, sc.eevee.taa_render_samples, im.file_format, im.color_depth,
-     im.color_mode, sc.render.film_transparent) = keep
-    me.materials.clear()
-    for m in slots:
-        me.materials.append(m)
-    me.polygons.foreach_set('material_index', idx)
-    me.update()
-    return px[..., 0] * OUTSIDE_UNIT, px[..., 1] * DIST_UNIT, px[..., 3] > 0.5
 
 
 def compare(near, far, sel):
@@ -151,11 +80,13 @@ def main():
     mat = MS.apply(t, obj, sd)
     d0 = float(mat['eido_far_m'])
     cm = S._main_cell(sd)
-    region = region_material(sd)
+    region = MS.region_material(sd)
     rec = dict(case=case, far_m=d0, main_cell=cm, views={})
     sky = os.path.join(OUT, '_sky')
     for v, cam in cams.items():
         sc.camera = cam
+        if len(me.materials) > 1 or me.materials[0] is not mat:
+            mat = MS.apply(t, obj, sd)                     # the near material alone again (the last view's rings)
         MS.light(sc, cam, sky)
         MS.frame(sc)
         imgs = {}
@@ -163,10 +94,10 @@ def main():
             S.set_far_distance(mat, dist)
             path = os.path.join(OUT, f'{case}_{v}_{label}.png')
             secs = MS.frame(sc, path)
-            imgs[label] = read_png(path)
+            imgs[label] = MS.read_png(path)
             MS.log(f'[far] {case} {v} {label}: {secs:.2f} s')
         S.set_far_distance(mat, d0)
-        outside, dist, ground = region_render(sc, me, region, os.path.join(OUT, f'{case}_{v}_region.exr'))
+        outside, dist, ground = MS.region_render(sc, me, region, os.path.join(OUT, f'{case}_{v}_region.exr'))
         allowed = ground & (outside > S.FAR_FADE_MAIN_CELLS * cm)
         band = allowed & (dist > d0) & (dist < 1.5 * d0)
         beyond = allowed & (dist >= 1.5 * d0)
@@ -184,6 +115,23 @@ def main():
         dimg.file_format = 'PNG'
         dimg.save()
         bpy.data.images.remove(dimg)
+        # the far material on the rings beyond 1.5 D0 of this camera, against the near material as built there
+        MS.apply(t, obj, sd, cameras=[cam])
+        far_px = np.zeros(ground.shape, bool)
+        if len(me.materials) > 1:
+            MS.frame(sc)
+            path = os.path.join(OUT, f'{case}_{v}_rings.png')
+            MS.frame(sc, path)
+            rings = MS.read_png(path)
+            far_px = ground & (np.abs(rings - imgs['as_built']).max(-1) > 0.0)
+            # the far material's own pixels: those its ring draws (where the two renders differ at all, or the
+            # rings' region by distance: beyond 1.5 D0 every pixel the far material can draw)
+            sel = ground & (dist >= 1.5 * d0) & allowed
+            r['far_material'] = dict(rings=S.far_rings(obj, sd, [cam], far_m=d0),
+                                     differing_px=int(far_px.sum()),
+                                     **compare(imgs['as_built'], rings, sel))
+        else:
+            r['far_material'] = 'no ring lies beyond 1.5 D0 of this camera'
         rec['views'][v] = r
         MS.log(f'[far] {case} {v}: {json.dumps(r)}')
         MS.clean(sky)

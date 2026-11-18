@@ -1,7 +1,8 @@
 """The material's check 1 (SURFACING_DESIGN.md 5.4, package 2): the two-slot level reader, before anything is built on
 it.
 
-    bash run_blender.sh blender/tests/terrain/surfacing/check_reader.py [--case canyon] [--parts parity,edges,look]
+    bash run_blender.sh blender/tests/terrain/surfacing/check_reader.py [--case canyon]
+        [--parts parity,edges,look,dolly] [--edges finest,clamped] [--frames 36]
     (a GPU job: queue it with EIDO_GPU_WRAP on a shared machine, blender/tests/_where.py)
 
 parity  On every level, a 64 x 64 texel patch deep inside its own ring (no window edge within 40 of its cells)
@@ -16,6 +17,19 @@ edges   Views across window edges (2 m and 6 m above the ground looking across t
         changes) the error's share over 0.05, mean and max, against the error elsewhere: probe D's measure, within
         twice. The emission renders and the level map are written for the eye.
 look    the same three views in the per-texel material under make_sky, for the eye (no seam ring at 1x).
+dolly   the per-texel material from a camera 2 m up walking across the finest window's edge, --frames frames and
+        an H.264 video of them (ffmpeg on the PATH), to watch for a seam ring in motion.
+lut     check 9: at grazing angles the material's ramp image reads no other row's colour. Each row of the palette's
+        ramp image read exactly as the material reads it (Closest, EXTEND, the row's centre, u = t (W - 1) / W +
+        0.5 / W) at t = fract(x / 3.7 + y / 2.3), a pattern that sweeps the whole ramp every few metres, as an
+        emission seen from the 2 m and 6 m edge views (grazing), one sample and no film filter, so each pixel shows
+        one texel. Every ground pixel must be one of its own row's 256 colours within one 8-bit step (a Closest
+        read returns a whole texel: the sRGB decode's rounding is all it may differ by; a bleed returns another
+        row's texel, so the record also says how many pixels lie nearer another row). The first row is also read
+        Linear (mipmapped, as a plain image read would be), to show the check catches a bleed.
+--edges clamped adds (to edges and look) two views from inside the window that sits closest to its parent's edge
+(a hero window clamped 16 cells inside its parent, where the reader's dead band is capped by the room left),
+looking out across its own edge and its parent's just beyond; alpine_valley's first hero window is one.
 Writes out/surfacing/material/reader_<case>.json and the renders (out/surfacing/material/reader/).
 """
 import json
@@ -40,7 +54,8 @@ def args():
 
     def opt(k, d=None):
         return a[a.index(k) + 1] if k in a else d
-    return dict(case=opt('--case', 'canyon'), parts=opt('--parts', 'parity,edges,look').split(','))
+    return dict(case=opt('--case', 'canyon'), parts=opt('--parts', 'parity,edges,look').split(','),
+                edges=tuple(opt('--edges', 'finest').split(',')), frames=int(opt('--frames', '36')))
 
 
 def node(nt, kind, **props):
@@ -214,9 +229,10 @@ def patch_origin(t, sd, i, n_px, grid):
 
 
 def map_group(sd):
-    """eido_terrain_map of the data, with `flow` among its packed maps (the M map these checks read)."""
+    """eido_terrain_map of the data, with `flow` and `wetness` among its packed maps (the M maps these checks read)."""
     packed = {n for grp in sd.packing() for n in grp}
-    return S.terrain_map_group(sd, names=None if 'flow' in packed else sorted(packed | {'flow'}))
+    need = {'flow', 'wetness'}
+    return S.terrain_map_group(sd, names=None if need <= packed else sorted(packed | need))
 
 
 def parity(sc, t, obj, sd, rec):
@@ -226,11 +242,14 @@ def parity(sc, t, obj, sd, rec):
     me = obj.data
     out = {}
     N = 64
+    # an 8-bit M map and the half-float F map (strata, where the palette has a rock column; else a second M map), an
+    # 8-bit E map and the half-float D map
+    cell_names = ('flow', 'strata') if sd.has('strata') else ('flow', 'wetness')
     for i, lv in enumerate(sd.levels):
         m = sd.maps(i)
         h = np.asarray(t.fields(i)['h'], np.float64)
         res = {}
-        for grid, names in (('cell', ('flow', 'strata')), ('detail', ('cavity', 'normal_x'))):
+        for grid, names in (('cell', cell_names), ('detail', ('cavity', 'normal_x'))):
             po = patch_origin(t, sd, i, N, grid)
             if po is None:
                 res[grid] = 'no patch'
@@ -279,20 +298,52 @@ def parity(sc, t, obj, sd, rec):
     rec['parity'] = out
 
 
-def edge_views(t, sd):
-    """[(name, eye, target)]: across the finest window's edge at 2 m and 6 m, and across the next one from 120 m."""
+def clamped_level(sd, cells=20.0):
+    """(k, side, margin metres) of the window that sits closest to its parent's edge, when that is within `cells`
+    parent cells (a hero window clamped inside its parent: the reader's dead band is capped there); else None.
+    side: 'west', 'east', 'south' or 'north'."""
+    best = None
     lv = sd.levels
-    f = lv[-1]
-    p = lv[-2]
-    cx = f.x0 + 0.5 * f.side
+    for k in range(1, len(lv)):
+        a, b = lv[k - 1], lv[k]
+        m = {'west': b.x0 - a.x0, 'south': b.y0 - a.y0, 'east': a.x0 + a.side - b.x0 - b.side,
+             'north': a.y0 + a.side - b.y0 - b.side}
+        side = min(m, key=m.get)
+        if m[side] <= cells * a.cell and (best is None or m[side] / a.cell < best[2] / lv[best[0] - 1].cell):
+            best = (k, side, float(m[side]))
+    return best
+
+
+def edge_views(t, sd, which=('finest',)):
+    """[(name, eye, target)]. 'finest': across the finest window's edge at 2 m and 6 m, and across the next one from
+    120 m. 'clamped': from inside the window that sits closest to its parent's edge, looking out across its own edge
+    and its parent's just beyond, 6 m and 60 m above the ground (none when no window is clamped)."""
+    lv = sd.levels
     out = []
-    for name, dz, lvl, back in (('grazing_2m', 2.0, f, 0.15), ('low_6m', 6.0, f, 0.3), ('oblique_120m', 120.0, p, 0.35)):
-        ey = lvl.y0 - back * lvl.side * 0.5
-        ex = cx
-        ez = float(t.height_at(ex, ey)) + dz
-        ty = lvl.y0 + 0.25 * lvl.side
-        tz = float(t.height_at(ex, ty))
-        out.append((name, (ex, ey, ez), (ex, ty, tz)))
+    if 'finest' in which:
+        f = lv[-1]
+        p = lv[-2]
+        cx = f.x0 + 0.5 * f.side
+        for name, dz, lvl, back in (('grazing_2m', 2.0, f, 0.15), ('low_6m', 6.0, f, 0.3),
+                                    ('oblique_120m', 120.0, p, 0.35)):
+            ey = lvl.y0 - back * lvl.side * 0.5
+            ex = cx
+            ez = float(t.height_at(ex, ey)) + dz
+            ty = lvl.y0 + 0.25 * lvl.side
+            tz = float(t.height_at(ex, ty))
+            out.append((name, (ex, ey, ez), (ex, ty, tz)))
+    cl = clamped_level(sd) if 'clamped' in which else None
+    if cl is not None:
+        k, side, margin = cl
+        b = lv[k]
+        dx, dy = {'west': (-1, 0), 'east': (1, 0), 'south': (0, -1), 'north': (0, 1)}[side]
+        cx, cy = b.x0 + 0.5 * b.side, b.y0 + 0.5 * b.side
+        ex0, ey0 = cx + dx * 0.5 * b.side, cy + dy * 0.5 * b.side          # the middle of the clamped edge
+        for name, dz, back in (('clamped_6m', 6.0, 0.06), ('clamped_60m', 60.0, 0.2)):
+            ex, ey = ex0 - dx * back * b.side, ey0 - dy * back * b.side
+            ez = float(t.height_at(ex, ey)) + dz
+            tx, ty = ex0 + dx * (margin + 0.1 * b.side), ey0 + dy * (margin + 0.1 * b.side)
+            out.append((name, (ex, ey, ez), (tx, ty, float(t.height_at(tx, ty)))))
     return out
 
 
@@ -315,7 +366,7 @@ def edges(sc, t, obj, sd, rec):
         return remap(nt, g.outputs['Level'], 0.0, 16.0)
     lvl = emission('edges_level', [level_fn, None, None])
     out = {}
-    for name, eye, target in edge_views(t, sd):
+    for name, eye, target in edge_views(t, sd, args()['edges']):
         cam = MS.camera(sc, t, args()['case'], name, eye=eye, target=target, lens=35.0)
         imgs = {}
         for key, mat in (('reader', read), ('ref', ref), ('level', lvl)):
@@ -347,12 +398,110 @@ def edges(sc, t, obj, sd, rec):
     rec['edges'] = out
 
 
+def lut_material(img, row, interp):
+    """An emission of one row of a ramp image read as surfacing's lut() reads it, at t = fract(x / 3.7 + y / 2.3)."""
+    W, R = img.size
+    mat = bpy.data.materials.new(f'lut_{row}_{interp}')
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    tc = node(nt, 'ShaderNodeTexCoord')
+    sep = node(nt, 'ShaderNodeSeparateXYZ')
+    nt.links.new(tc.outputs['Object'], sep.inputs[0])
+    a = node(nt, 'ShaderNodeMath', operation='MULTIPLY')
+    nt.links.new(sep.outputs[0], a.inputs[0])
+    a.inputs[1].default_value = 1.0 / 3.7
+    b = node(nt, 'ShaderNodeMath', operation='MULTIPLY_ADD')
+    nt.links.new(sep.outputs[1], b.inputs[0])
+    b.inputs[1].default_value = 1.0 / 2.3
+    nt.links.new(a.outputs[0], b.inputs[2])
+    fr = node(nt, 'ShaderNodeMath', operation='FRACT')
+    nt.links.new(b.outputs[0], fr.inputs[0])
+    u = node(nt, 'ShaderNodeMath', operation='MULTIPLY_ADD')
+    nt.links.new(fr.outputs[0], u.inputs[0])
+    u.inputs[1].default_value = (W - 1.0) / W
+    u.inputs[2].default_value = 0.5 / W
+    cv = node(nt, 'ShaderNodeCombineXYZ')
+    nt.links.new(u.outputs[0], cv.inputs[0])
+    cv.inputs[1].default_value = (row + 0.5) / R
+    tx = node(nt, 'ShaderNodeTexImage', interpolation=interp, extension='EXTEND')
+    tx.image = img
+    nt.links.new(cv.outputs[0], tx.inputs['Vector'])
+    em = node(nt, 'ShaderNodeEmission')
+    nt.links.new(tx.outputs['Color'], em.inputs['Color'])
+    out = node(nt, 'ShaderNodeOutputMaterial')
+    nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
+    return mat
+
+
+def lut(sc, t, obj, sd, rec):
+    """The lut part (module doc)."""
+    from eidoblend.terrain.build import palettes as P
+    a = args()
+    pal_name, strata = MS.palette_args(t)
+    pal = S.resolve(pal_name, t.recipe, strata)
+    img, index = S._lut_image(pal)
+    if img is None:
+        rec['lut'] = 'the palette has no ramps'
+        MS.log('[reader] lut: the palette has no ramps')
+        return
+    W, R = img.size
+    px = np.empty(W * R * 4, np.float32)
+    img.pixels.foreach_get(px)
+    enc = np.clip(px.reshape(R, W, 4)[..., :3].astype(np.float64), 0.0, 1.0)
+    rows = P.srgb_to_linear(enc)
+    # one 8-bit step of each texel, in linear: a Closest read returns a whole texel, so it can differ from the texel
+    # only by the sRGB decode's rounding (under a step); a bleed returns another texel
+    step = np.maximum(np.abs(P.srgb_to_linear(np.clip(enc + 1.0 / 255.0, 0.0, 1.0)) - rows), 1e-4)
+    flat_scene(sc)
+    me = obj.data
+    views = [v for v in edge_views(t, sd, ('finest',)) if v[0] in ('grazing_2m', 'low_6m')]
+    out = dict(rows=R, width=W, ramps={k: v.get('row') for k, v in index.items()}, views={})
+    for name, eye, target in views:
+        MS.camera(sc, t, a['case'], name, eye=eye, target=target, lens=35.0)
+        res = {}
+        for row, interp in [(r, 'Closest') for r in range(R)] + [(0, 'Linear')]:
+            me.materials.clear()
+            me.materials.append(lut_material(img, row, interp))
+            im = float_render(sc, os.path.join(OUT, f'lut_{name}_r{row}_{interp}.exr'), (MS.W, MS.H))
+            ground = im[..., 3] > 0.5
+            got = im[..., :3][ground].astype(np.float64)
+
+            def nearest(rr):
+                """Each pixel's distance to the nearest texel of row rr, in that texel's 8-bit steps (the largest
+                over the channels)."""
+                best = np.full(len(got), np.inf)
+                for k0 in range(0, W, 32):
+                    d = (np.abs(got[:, None, :] - rows[rr, None, k0:k0 + 32, :])
+                         / step[rr, None, k0:k0 + 32, :]).max(-1).min(-1)
+                    best = np.minimum(best, d)
+                return best
+            own = nearest(row)
+            other = np.full(len(got), np.inf)
+            for rr in range(R):
+                if rr != row:
+                    other = np.minimum(other, nearest(rr))
+            off = own > 1.0
+            res[f'{row}_{interp}'] = dict(ground_px=int(ground.sum()), off_row_share=round(float(off.mean()), 5),
+                                         worst_steps=round(float(own.max()), 2),
+                                         nearer_another_row=round(float((off & (other < own)).mean()), 5))
+        out['views'][name] = res
+        closest = [v for k, v in res.items() if k.endswith('_Closest')]
+        MS.log(f"[reader] lut {name}: Closest, pixels more than one 8-bit step off their row: "
+               f"{max(v['off_row_share'] for v in closest):.5f} (worst {max(v['worst_steps'] for v in closest)} "
+               f"steps); Linear row 0: {res['0_Linear']}")
+    out['pass'] = all(v['off_row_share'] == 0.0 for vw in out['views'].values() for k, v in vw.items()
+                      if k.endswith('_Closest'))
+    rec['lut'] = out
+
+
 def look(sc, t, obj, sd, rec):
     """The per-texel material at the edge views, for the eye."""
-    case = args()['case']
+    a = args()
+    case = a['case']
     mat = MS.apply(t, obj, sd)
     out = {}
-    for name, eye, target in edge_views(t, sd):
+    for name, eye, target in edge_views(t, sd, a['edges']):
         cam = MS.camera(sc, t, case, name, eye=eye, target=target, lens=35.0)
         sky = os.path.join(OUT, '_sky')
         MS.light(sc, cam, sky)
@@ -360,7 +509,44 @@ def look(sc, t, obj, sd, rec):
         out[name] = round(MS.frame(sc, os.path.join(OUT, f'look_{case}_{name}.png')), 2)
         MS.clean(sky)
     rec['look_frames_s'] = out
+    if 'dolly' in a['parts']:
+        dolly(sc, t, sd, case, a['frames'], rec)
     _ = mat
+
+
+def dolly(sc, t, sd, case, frames, rec):
+    """The moving camera: 2 m above the ground, walking north across the finest window's south edge and on across
+    the edge of the next finer ring's core, looking ahead and a little down, `frames` frames at 960 x 540 (the
+    material already on the object). Frames to out/.../reader/dolly_<case>/, and an H.264 video beside them when
+    ffmpeg is on the PATH."""
+    import shutil
+    import subprocess
+    f = sd.levels[-1]
+    cx = f.x0 + 0.5 * f.side
+    y0, y1 = f.y0 - 0.08 * f.side, f.y0 + 0.10 * f.side
+    folder = os.path.join(OUT, f'dolly_{case}')
+    os.makedirs(folder, exist_ok=True)
+    sky = os.path.join(OUT, '_sky')
+    secs = []
+    for k in range(frames):
+        y = y0 + (y1 - y0) * k / max(frames - 1, 1)
+        eye = (cx, y, float(t.height_at(cx, y)) + 2.0)
+        ty = y + 60.0
+        cam = MS.camera(sc, t, case, 'dolly', eye=eye, target=(cx, ty, float(t.height_at(cx, ty)) + 0.5), lens=28.0)
+        if k == 0:
+            MS.light(sc, cam, sky)
+        secs.append(MS.frame(sc, os.path.join(folder, f'f_{k:03d}.png')))
+    MS.clean(sky)
+    rec['dolly'] = dict(frames=frames, from_y=round(y0, 1), to_y=round(y1, 1), edge_y=round(f.y0, 1),
+                        frame_s=round(sorted(secs)[len(secs) // 2], 2), folder=os.path.relpath(folder, MS.OUT))
+    exe = shutil.which('ffmpeg')
+    if exe:
+        mp4 = os.path.join(OUT, f'dolly_{case}.mp4')
+        cmd = [exe, '-y', '-loglevel', 'error', '-framerate', '12', '-i', os.path.join(folder, 'f_%03d.png'),
+               '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '16', mp4]
+        r = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000 if os.name == 'nt' else 0)
+        rec['dolly']['video'] = os.path.relpath(mp4, MS.OUT) if r.returncode == 0 else f'ffmpeg failed: {r.stderr[:200]}'
+    MS.log(f"[reader] dolly: {json.dumps(rec['dolly'])}")
 
 
 def main():
@@ -371,13 +557,15 @@ def main():
     t, obj = MS.terrain(a['case'])
     sd = MS.surface(t)
     rec['levels'] = [str(v) for v in sd.levels]
-    if 'look' in a['parts']:
+    if 'look' in a['parts'] or 'dolly' in a['parts']:
         look(sc, t, obj, sd, rec)
         sc = bpy.context.scene
     if 'parity' in a['parts']:
         parity(sc, t, obj, sd, rec)
     if 'edges' in a['parts']:
         edges(sc, t, obj, sd, rec)
+    if 'lut' in a['parts']:
+        lut(sc, t, obj, sd, rec)
     path = os.path.join(MS.OUT, f"reader_{a['case']}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1, default=str)
