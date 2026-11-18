@@ -20,8 +20,8 @@
 // tests/out/fluvial/kernels_test.json.
 
 import * as G from '../../core/gpu.js';
-import { defaultRng } from '../../core/np_random.js';
 import * as C from '../parity/_common.mjs';
+import { randomField, rgba } from './_common.mjs';
 
 const W = C.W;
 const args = [...Deno.args];
@@ -57,47 +57,6 @@ if (want('fixtures')) {
 }
 
 // ----------------------------------------------------------------------------------------- conservation ---
-
-/** core/twins.py _box(a, r): the separable box blur of radius r with edge clamping, float64 (a test field). */
-function box(a, h, w, r) {
-    let cur = a;
-    for (const axis of [0, 1]) {
-        const n = axis === 0 ? h : w, out = new Float64Array(h * w);
-        const at = (j, i) => cur[j * w + i];
-        for (let line = 0; line < (axis === 0 ? w : h); line++) {
-            const c = new Float64Array(n + 2 * r + 1);
-            let s = 0;
-            for (let k = 0; k < n + 2 * r; k++) {
-                const src = Math.min(Math.max(k - r, 0), n - 1);
-                s += axis === 0 ? at(src, line) : at(line, src);
-                c[k + 1] = s;
-            }
-            for (let k = 0; k < n; k++) {
-                const v = (c[k + 2 * r + 1] - c[k]) / (2 * r + 1);
-                if (axis === 0) out[k * w + line] = v; else out[line * w + k] = v;
-            }
-        }
-        cur = out;
-    }
-    return cur;
-}
-
-/** core/twins.py random_field(shape, lo, hi, seed, smooth): numpy's default_rng(seed).random, box-smoothed,
- * rescaled to [lo, hi], float32. */
-export function randomField(h, w, lo, hi, seed, smooth = 0) {
-    let a = Float64Array.from(defaultRng(seed).random(h * w));
-    for (let k = 0; k < smooth; k++) a = box(a, h, w, 2);
-    let mn = Infinity, mx = -Infinity;
-    for (const v of a) { if (v < mn) mn = v; if (v > mx) mx = v; }
-    const span = Math.max(mx - mn, 1e-12);
-    return Float32Array.from(a, (v) => lo + (hi - lo) * ((v - mn) / span));
-}
-
-function rgba(n, ...chans) {
-    const out = new Float32Array(n * 4);
-    chans.forEach((c, k) => { if (c) for (let i = 0; i < n; i++) out[4 * i + k] = c[i]; });
-    return out;
-}
 
 if (want('conservation')) {
     const HS = await import('../../solvers/hillslope.js');

@@ -10,19 +10,24 @@ the design-shaped Lauterbrunnen stack with hero levels at 2 m and 0.5 m (fixture
 the chaos floor's runs (tests/parity/blender_chaos_floor.py: Blender's Terrain.save, masks included).
 
 Inputs are rounded to float32 first (the level runner's fields are float32 in both editions; the DEM fixtures hold
-float64), so masks.py and the port see the same numbers. Every case is made twice: masks.py as it is, and the same
+float64), so masks.py and the port see the same numbers. Every case is made five times: masks.py as it is; the same
 code with its gaussian_blur's FFT in float64 (numpy 2.3.4 transforms float32 data in single precision, and that
 round-off alone moves the smoothstepped curvature masks by up to 3e-3 of their range; the port's blur is a direct
-convolution, PORT_PLAN.md 3.4). The second set is stored only where it differs.
+convolution, PORT_PLAN.md 3.4), stored only where it differs; and that float64 version three times more with each
+blurred field moved by one float32 step on a random half of its cells (ULP_PATTERNS), whose largest change per level
+and mask is the one-step floor (ulp_floor): masks.py keeps each blurred field in float32 and differentiates the
+curvature's twice, so one step of the blur moves the curvature masks by about 1e-3 of their range. That floor is
+masks.py's own precision; the port's grades stand on it, as the recipes' stand on the chaos floor (plan 5.4).
 
 Outputs (git-ignored), tests/out/masks/fixtures/ by default:
-  manifest.json   the cases (levels, params, names, norms, skipped, the march shifts masks.py took), the versions and
-                  the Blender key (tests/parity/_blender.py source_key)
+  manifest.json   the cases (levels, params, names, norms, skipped, the march shifts masks.py took, fft_spread and
+                  ulp_floor per level and mask), masks.py's tables (api), the versions and the Blender key
+                  (tests/parity/_blender.py source_key)
   <case>.npz      L<i>__in__<field> (float32), L<i>__out__<mask> (masks.py, float32), L<i>__f64__<mask> (the float64
                   FFT, where it differs); a function case's arrays are in__<name> / out__<name> / f64__<name>
   floor.json      per floor base save: the mask parameters its run used, whether masks.py recomputed from the save's
                   fields gives the save's masks bit for bit, and per level and mask the float32 FFT's spread
-                  (max |as is - float64 FFT|)
+                  (max |as is - float64 FFT|) and the one-step floor
 Runs numpy only; nothing is written into the Blender edition (no bytecode either).
 """
 import argparse
@@ -69,20 +74,68 @@ def blur64(a, sigma_cells):
     return np.asarray(out[:ny, :nx], F32)
 
 
-class Variant:
-    """with Variant(True): masks.py's gaussian_blur is blur64 inside the block."""
+ULP_PATTERNS = (1, 2, 3)
 
-    def __init__(self, f64):
-        self.f64 = f64
+
+def blur64_moved(pattern):
+    """blur64 with its float32 result moved by one float32 step (np.nextafter) on a random half of the cells, up on
+    half of those and down on the other half (default_rng([pattern, call])): masks.py's own last-bit sensitivity. It
+    stores each blurred field as float32 and differentiates the curvature's twice, so one step of the blur moves the
+    curvature masks by about 1e-3 of their range (measured): the floor any float32 evaluation of masks.py stands on."""
+    calls = [0]
+
+    def blur(a, sigma_cells):
+        out = blur64(a, sigma_cells)
+        rng = np.random.default_rng([pattern, calls[0]])
+        calls[0] += 1
+        sel = rng.random(out.shape) < 0.5
+        to = np.where(rng.random(int(sel.sum())) < 0.5, F32(-np.inf), F32(np.inf)).astype(F32)
+        out[sel] = np.nextafter(out[sel], to)
+        return out
+    return blur
+
+
+class Variant:
+    """with Variant(True): masks.py's gaussian_blur is blur64 inside the block; Variant(True, pattern): blur64 moved by
+    one float32 step (blur64_moved)."""
+
+    def __init__(self, f64, pattern=None):
+        self.f64, self.pattern = f64, pattern
 
     def __enter__(self):
         self.orig = M.gaussian_blur
-        if self.f64:
+        if self.pattern is not None:
+            M.gaussian_blur = blur64_moved(self.pattern)
+        elif self.f64:
             M.gaussian_blur = blur64
         return self
 
     def __exit__(self, *exc):
         M.gaussian_blur = self.orig
+
+
+def variants(fn):
+    """fn() as it is, with the float64 FFT, and with the float64 FFT moved by one step (ULP_PATTERNS): (as is, f64,
+    [moved ...], the marches the as-is run made). fn returns a Masks or a list of Masks."""
+    with Variant(False):
+        MARCHES.clear()
+        a = fn()
+        marches = list(MARCHES)
+    with Variant(True):
+        b = fn()
+    moved = []
+    for p in ULP_PATTERNS:
+        with Variant(True, p):
+            moved.append(fn())
+    return a, b, moved, marches
+
+
+def floors(f64, moved):
+    """Per mask: the largest |moved - f64| over the patterns (the one-step floor)."""
+    out = {}
+    for nm, v in f64.items():
+        out[nm] = max(float(np.abs(np.asarray(m[nm], np.float64) - np.asarray(v, np.float64)).max()) for m in moved)
+    return out
 
 
 # --------------------------------------------------------------------------------------- the march shifts ---
@@ -153,9 +206,11 @@ def f32_inputs(fields):
     return f32, {k: v.astype(np.float64) for k, v in f32.items()}
 
 
-def store_stack(case, fl32, lv, outs, outs64, first=0):
-    """Inputs, masks.py's masks and the float64 FFT's where they differ, per level (from level `first`)."""
+def store_stack(case, fl32, lv, outs, outs64, moved, first=0):
+    """Inputs, masks.py's masks and the float64 FFT's where they differ, per level (from level `first`); the spread
+    of the float32 FFT and the one-step floor per level and mask."""
     spread = {}
+    case.meta['ulp_floor'] = {f'L{i}': floors(outs64[i], [m[i] for m in moved]) for i in range(first, len(outs))}
     for i in range(first, len(outs)):
         for k, v in fl32[i].items():
             case.put(f'L{i}__in__{k}', v)
@@ -227,23 +282,26 @@ def synthetic(out_dir):
     computes.append(('api_defaults', {'h': happ}, 4.0, dict()))
     computes.append(('api_strata', {'h': happ}, 4.0, dict(x0=100.0, y0=-50.0, names=['slope', 'strata'],
                                                           params=M.MaskParams(strata=dict(dip_deg=1.0, azimuth_deg=90.0)))))
+    # a strata warp (a callable of the cells' world x and y): 0.001 x + 3 m - the port's test gives masks.js the same
+    # warp over GPU fields (its manifest params say '<callable>', as to_dict writes it)
+    computes.append(('api_strata_warp', {'h': happ}, 4.0, dict(
+        x0=100.0, y0=-50.0, names=['strata'],
+        params=M.MaskParams(base_elevation_m=750.0, strata=dict(dip_deg=2.0, azimuth_deg=30.0,
+                                                                warp=lambda X, Y: 0.001 * X + 3.0)))))
     for name, fields, cellc, kw in computes:
         c = Case(name, 'compute')
         f32, f64 = f32_inputs(fields)
         outs = {}
-        for variant in (False, True):
-            with Variant(variant):
-                MARCHES.clear()
-                outs[variant] = M.compute(f64, cellc, **kw)
-                marches = list(MARCHES)
+        outs[False], outs[True], moved, marches = variants(lambda: M.compute(f64, cellc, **kw))
+        c.meta['ulp_floor'] = {'L0': floors(outs[True], moved)}
         if name == 'periodic':                     # the roll by whole boxes of the widest decimation
             roll = (32, 64)
             fr = {'h': np.roll(f64['h'], roll, axis=(0, 1))}
             c.meta['roll'] = list(roll)
             rolled = {}
-            for variant in (False, True):
-                with Variant(variant):
-                    rolled[variant] = M.compute(fr, cellc, names=pnames, params=Pp, norms=outs[False].norms)
+            rolled[False], rolled[True], rmoved, _m = variants(
+                lambda: M.compute(fr, cellc, names=pnames, params=Pp, norms=outs[False].norms))
+            c.meta['ulp_floor']['R0'] = floors(rolled[True], rmoved)
         for k, v in f32.items():
             c.put(f'L0__in__{k}', v)
         sp = {}
@@ -301,7 +359,7 @@ def api_record():
         good_size={str(n): M._good_size(n) for n in (1, 7, 11, 13, 97, 127, 512, 541, 1000, 1037, 2049, 2071)},
         decimation=[[s, n, w, M._decimation(s, n, w)] for s in (1.0, 6.0, 6.0001, 8.9999, 9.0, 12.5, 40.0, 300.0, 1000.0)
                     for n in (128, 1000, 1024) for w in (False, True)],
-        smoothstep=[[e0, e1, x, float(M.smoothstep(e0, e1, x))] for e0, e1 in ((0.0, 0.3), (34.0, 46.0), (1.0, 3.0),
+        smoothstep=[[e0, e1, x, float(M.smoothstep(e0, e1, np.array([x]))[0])] for e0, e1 in ((0.0, 0.3), (34.0, 46.0), (1.0, 3.0),
                                                                                  (0.03, 0.3), (46.0, 34.0))
                     for x in (-1.0, 0.0, 0.1, 0.15, 0.3, 2.0, 35.0, 40.0, 45.9, 46.0, 50.0)],
         attribute_name=M.attribute_name('slope'))
@@ -343,10 +401,11 @@ def scale_cases(out_dir):
             for k, v in f.items():
                 cs.put(f'{lvl}__in__{k}', v)
         outs = {}
-        for variant in (False, True):
-            with Variant(variant):
-                outs[variant] = (M.compute(base, c, names=names, norms=norms, params=P, strict=False),
-                                 M.compute(fine, c / 2, names=names, norms=norms, params=P, strict=False))
+        outs[False], outs[True], moved, _m = variants(
+            lambda: [M.compute(base, c, names=names, norms=norms, params=P, strict=False),
+                     M.compute(fine, c / 2, names=names, norms=norms, params=P, strict=False)])
+        cs.meta['ulp_floor'] = {'C': floors(outs[True][0], [m[0] for m in moved]),
+                                'F': floors(outs[True][1], [m[1] for m in moved])}
         spread = {}
         for lvl, i in (('C', 0), ('F', 1)):
             sp = {}
@@ -376,18 +435,13 @@ def reference_cases(out_dir, names_only=None):
         fl32, fl64 = zip(*[f32_inputs(f) for f in fl])
         P = F.params_for(name)
         names = list(M.DEFAULT_NAMES) + SCALES_200
-        outs = {}
-        for variant in (False, True):
-            with Variant(variant):
-                MARCHES.clear()
-                outs[variant] = M.compute_stack(list(fl64), lv, names=names, params=P, strict=False)
-                marches = list(MARCHES)
+        a_, b_, moved, marches = variants(lambda: M.compute_stack(list(fl64), lv, names=names, params=P, strict=False))
         c = Case(f'ref_{name}', 'stack')
-        store_stack(c, fl32, lv, outs[False], outs[True])
+        store_stack(c, fl32, lv, a_, b_, moved)
         c.meta.update(params=P.to_dict(), names=names, strict=False, marches=marches, reference=name,
                       shape_stats=meta.get('shape_stats'))
         metas.append(c.save(out_dir))
-        print(f'[masks fixtures] {name}: {len(outs[False])} levels in {time.time() - t0:.1f} s, '
+        print(f'[masks fixtures] {name}: {len(a_)} levels in {time.time() - t0:.1f} s, '
               f'{metas[-1]["bytes"] / 1e6:.0f} MB', flush=True)
     return metas
 
@@ -397,18 +451,12 @@ def hero_case(out_dir):
     fields, levels, meta = F.hero_stack('lauterbrunnen', log=lambda m: None)
     fl32, fl64 = zip(*[f32_inputs(f) for f in fields])
     P = F.params_for('lauterbrunnen')
-    outs = {}
-    for variant in (False, True):
-        with Variant(variant):
-            MARCHES.clear()
-            outs[variant] = M.compute_stack(list(fl64), levels, params=P)
-            marches = list(MARCHES)
+    a_, b_, moved, marches = variants(lambda: M.compute_stack(list(fl64), levels, params=P))
     c = Case('hero_lauterbrunnen', 'stack')
-    # levels 0 and 1 are the reference case's (the same fields and parameters): stored once there, inputs here too
-    store_stack(c, fl32, levels, outs[False], outs[True], first=0)
+    store_stack(c, fl32, levels, a_, b_, moved, first=0)
     c.meta.update(params=P.to_dict(), names=None, marches=marches, reference='lauterbrunnen')
     m = c.save(out_dir)
-    print(f'[masks fixtures] hero stack: {len(outs[False])} levels in {time.time() - t0:.1f} s, {m["bytes"] / 1e6:.0f} MB',
+    print(f'[masks fixtures] hero stack: {len(a_)} levels in {time.time() - t0:.1f} s, {m["bytes"] / 1e6:.0f} MB',
           flush=True)
     return [m]
 
@@ -465,9 +513,8 @@ def floor_cases(out_dir, folder=''):
             levels = [dict(x0=p['x0'], y0=p['y0'], cell=p['cell'], role=p['role']) for p in plan]
             f64 = [{k: np.asarray(v, np.float64) for k, v in f.items()} for f in fields]
             outs = {}
-            for variant in (False, True):
-                with Variant(variant):
-                    outs[variant] = M.compute_stack(f64, levels, params=P)
+            outs[False], outs[True], moved, _m = variants(lambda: M.compute_stack(f64, levels, params=P))
+            entry['ulp_floor'] = {f'L{i}': floors(outs[True][i], [m[i] for m in moved]) for i in range(len(plan))}
             equal, spread = {}, {}
             for i, m in enumerate(outs[False]):
                 eq, sp = {}, {}
@@ -537,6 +584,9 @@ def main():
             cases[c['name']] = c
     if not only or 'floor' in only:
         floor_cases(out_dir, a.floor_folder)
+    if only == {'floor'}:                                            # floor.json only: the manifest is left as it is
+        print(f'[masks fixtures] floor in {time.time() - t0:.1f} s -> {out_dir}', flush=True)
+        return
     B.write_json(man_path, dict(source='tests/masks/masks_expected.py: the Blender edition\'s masks.py', key=B.source_key(),
                                 versions=B.versions(), api=api, cases=sorted(cases.values(), key=lambda c: c['name'])))
     print(f'[masks fixtures] {len(cases)} cases in {time.time() - t0:.1f} s -> {out_dir}', flush=True)

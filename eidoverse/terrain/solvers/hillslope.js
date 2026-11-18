@@ -505,7 +505,9 @@ export async function opSoilHills(fields, level, params, seed = 0, ctx = null) {
             uDepMin: hasDep ? Number(p.hold_deposit_m) : 0.0, uKeep: keep ? 1 : 0 });
     if (keep && kk.length === 2) keep.destroy();
     filled.destroy();
-    const chanCells = (await P.statsU32(bitsAnd(R, bits, 1))).nonzero;
+    const chanFlags = bitsToFloat(R, bits, 1);
+    const chanCells = (await P.stats(chanFlags)).nonzero;
+    chanFlags.destroy();
     const az = (Number(p.wind_from_deg) + 180.0) * DEG;
     const wind = [Math.sin(az), Math.cos(az)];
     const solved = await soilSolve(R, hHeld, hold, hHeld, pins.pin_w, pins.pin_h, cell, Cv, { asym: Number(p.asymmetry), wind,
@@ -560,10 +562,7 @@ export async function opSoilHills(fields, level, params, seed = 0, ctx = null) {
     return fields;
 }
 
-// the cells of a u32 bit field with bit `bit` set, as a u32 0 / 1 field (for a count)
-function bitsAnd(R, bits, bit) {
-    return prims(R).where(bitsToFloat(R, bits, bit), '>', 0.5);
-}
+// 1 where a u32 bit field has bit `bit` set, else 0 (a float field, for a count): a new field
 function bitsToFloat(R, bits, bit) {
     const out = R.field(bits.h, bits.w, 1);
     const k = R.kernel('fluvial_bit', { source: `//! sampler b r32ui\n//! image outF r32f\n//! uniform int uBit\n` +

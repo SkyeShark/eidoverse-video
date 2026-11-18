@@ -62,8 +62,11 @@
 //     `backend` argument.
 //   - rockness, erodibility, the micro-relief's slope share, to_c, initial_state and the packs, back to metres, the
 //     anchor and finish are kernels (kernels/detail/ramp, hydraulic_seed, to_cells, pipe_start, pipe_out, finish_h,
-//     finish_add; core/prims.js boxBlur, which is _box; core/grid.js slopeDeg), in float32 where numpy is float64.
-//     The smoothed slope is computed once (numpy computes the same array twice, for rockness and on_slope).
+//     finish_add; core/prims.js boxBlur, which is _box), in float32 where numpy is float64. The smoothed slope is
+//     computed once (numpy computes the same array twice, for rockness and on_slope), and as the box mean of height
+//     differences (kernels/detail/box_gradient.wgsl), not as the gradient of a box-smoothed float32 surface: the
+//     same quantity, in the better-conditioned form plan 2.3 asks for where float32 loses to float64 by much (the
+//     smoothed heights' rounding, divided by the cell, was 1e-5 of the slope; measured on the function fixtures).
 //   - The surfaces are carried as h_in plus changes, never as float32 sums until the last one (numpy holds h_new in
 //     float64): finish() takes the change h_new - h_base and adds it to h_in once, after the anchor.
 //   - The wet field's samples are summed on the GPU (kernels/detail/wet_acc.wgsl) instead of read back every 100
@@ -267,11 +270,20 @@ export function ramp(src, lo, den, a = 0.0, b = 1.0) {
     return out;
 }
 
-/** The slope in degrees of the surface smoothed over `r` cells (core/grid.js slopeDeg of box(h, r)). A new field. */
+/** np.gradient(_box(h, r), cell) and its slope in degrees: { gx, gy, s }, new fields (kernels/detail/
+ * box_gradient.wgsl: the box mean of height differences, the same quantity in a form float32 keeps). */
+export function boxGradient(h, cell, r) {
+    const R = h.runner;
+    const gx = R.field(h.h, h.w, 1), gy = R.field(h.h, h.w, 1), s = R.field(h.h, h.w, 1);
+    R.run('detail/box_gradient', { h }, { outGx: gx, outGy: gy, outS: s }, { uR: Math.trunc(r), uCell: Number(cell) });
+    return { gx, gy, s };
+}
+
+/** The slope in degrees of the surface smoothed over `r` cells (grid.slope_deg(_box(h, r), cell)). A new field. */
 export function smoothedSlope(h, cell, r) {
-    const hs = box(h, r);
-    const s = Gd.slopeDeg(hs, cell);
-    hs.destroy();
+    const { gx, gy, s } = boxGradient(h, cell, r);
+    gx.destroy();
+    gy.destroy();
     return s;
 }
 

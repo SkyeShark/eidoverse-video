@@ -1,19 +1,28 @@
 """The detail package's function fixtures (PORT_PLAN.md 5.1, 8.2 row P12): the Blender edition's numpy code of
 solvers/hydraulic.py and solvers/detail.py that becomes GPU code in the port, run on recorded inputs with every output
-kept, and the inputs and twin results of the Blender detail tests the port's tests repeat. numpy only: no Blender, no
-GPU (the twins run where the Blender ops would use the GPU: backend='numpy').
+kept, each case with its own floor; and the inputs and twin results of the Blender detail tests the port's tests
+repeat. numpy only: no Blender, no GPU (the twins run where the Blender ops would use the GPU: backend='numpy').
 
     <Blender's python> -I eidoverse/terrain/tests/detail/blender_detail_fixtures.py [--out <dir>] [--only a,b]
+        [--patterns 5]
 
 Run it with Blender's own Python (tests/_where.mjs blenderPython(): Python 3.13, numpy 2.3.4), never the system's
 (plan C6); the manifest records the versions. The Blender edition is found as tests/parity/_blender.py finds it
 ($EIDO_BLENDER_EDITION, or blender/ in this checkout) and is only read. Writes, in tests/parity/fixtures.py's format
 (its Store and FunctionRecorder, imported), <parity outputs>/<Blender key>/fixtures/functions/detail/.
 
+The floor of a case (values.floor: {output: the largest max |d| / range}). The chaos floor's protocol (plan C1, 5.4)
+applied to one call: the function run again five times with every float32 input moved by one ulp on half the cells
+(+1 on a quarter, -1 on a quarter: tests/parity/_hooks.py nudge, default_rng([pattern, case, 17])) and, where it
+evaluates world noise, that noise rounded to float32 and nudged the same way (the port evaluates it in float32 on the
+GPU, as Blender's field_gpu does; this oracle's is numpy's float64 field()). The largest change of each output over
+the five is what Blender's own code does under differences of a correct port's size; tests/detail/functions_test.mjs
+grades each output at max(the plan's grade, 1.25 x its floor), as the plan grades a stage replay (5.3).
+
 The groups (--only):
   hydraulic   rockness, anchor and anchor_scale_m, micro_relief (numpy's field()), finish, and op_hydraulic on two
               hillsides (a level with a parent and the border ramp, one without; with and without bed, kfac and
-              rock_fail; 1, 20 and 150 steps; full and random rain)
+              rock_fail; 1, 20 and 150 steps; full and random rain; the runner's pins in a context)
   model       the inputs of the Blender GPU test's conservation runs (128^2, closed and periodic edges) and its
               300-step run against the twins (64^2): the twins' own result and the numbers the Blender test compares
   breakup     breakup_terms and breakup_uniforms (four parameter sets, five cells, 40 km from the origin, bedding on and
@@ -37,16 +46,99 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'parity'))
 import _blender as B  # noqa: E402
 import fixtures as FX  # noqa: E402
+from _hooks import nudge  # noqa: E402
 
 import numpy as np  # noqa: E402
 
 F = np.float32
 GROUPS = ('hydraulic', 'model', 'breakup', 'gully', 'planation')
+STATE = dict(case=0, patterns=5, noise_rng=None)
 
 
 def level(index, role, x0, y0, cell, n, parent=None, depth=0):
     from eidoblend.terrain.core.levels import Level
     return Level(index, role, float(x0), float(y0), n * float(cell), float(cell), int(n), parent=parent, depth=depth)
+
+
+def install_noise_nudge():
+    """While STATE['noise_rng'] is set, numpy's world noise comes back rounded to float32 and nudged by one ulp on
+    half the cells (the floor's second perturbation point: what float32 noise is to the float64 oracle)."""
+    from eidoblend.terrain.core import world_noise as N
+    if getattr(N.field, '_detail_nudge', False):
+        return
+    orig = N.field
+
+    def field(spec, x, y, seed=0):
+        v = orig(spec, x, y, seed)
+        if STATE['noise_rng'] is not None:
+            v = nudge(np.asarray(v, F), STATE['noise_rng']).astype(np.float64)
+        return v
+    field._detail_nudge = True
+    N.field = field
+
+
+def span(a):
+    a = np.asarray(a, np.float64)
+    fin = a[np.isfinite(a)]
+    if not fin.size:
+        return 1.0
+    return float(np.ptp(fin)) or float(np.max(np.abs(fin))) or 1.0
+
+
+def floored(rec, label, fn_name, args, inputs, compute, values=None):
+    """Record a case: compute(inputs) -> {output: array}, then its floor over STATE['patterns'] perturbed runs."""
+    STATE['case'] += 1
+    t0 = time.perf_counter()
+    out0 = {k: np.array(v) for k, v in compute({k: np.array(v) for k, v in inputs.items() if v is not None}).items()}
+    sec = time.perf_counter() - t0
+    floor = {k: 0.0 for k in out0}
+    for p in range(1, STATE['patterns'] + 1):
+        rng = np.random.default_rng([p, STATE['case'], 17])
+        inp = {}
+        for k in sorted(inputs):
+            v = inputs[k]
+            if v is None:
+                continue
+            v = np.asarray(v)
+            inp[k] = nudge(v, rng) if v.dtype == F and v.ndim >= 2 else np.array(v)
+        STATE['noise_rng'] = np.random.default_rng([p, STATE['case'], 29])
+        try:
+            outp = compute(inp)
+        finally:
+            STATE['noise_rng'] = None
+        for k, a in out0.items():
+            b = np.asarray(outp[k], np.float64)
+            a64 = np.asarray(a, np.float64)
+            fin = np.isfinite(a64) & np.isfinite(b)
+            d = float(np.max(np.abs(b[fin] - a64[fin]))) if fin.any() else 0.0
+            floor[k] = max(floor[k], d / span(a))
+    rec.case(label, fn_name, args, inputs, out0, values=dict(values or {}, floor=floor, seconds=round(sec, 3),
+                                                              patterns=STATE['patterns']))
+    print(f'[detail fixtures] {label}: {sec:.2f} s; floor ' +
+          ', '.join(f'{k} {v:.1e}' for k, v in floor.items()), flush=True)
+
+
+def fields_of(lv, arrays):
+    from eidoblend.terrain.core.fields import Fields
+    return Fields(lv, {k: np.asarray(v) for k, v in arrays.items()})
+
+
+def op_case(rec, label, fn_name, fn, lv, arrays, params, seed, pins=None, **kw):
+    """A Blender op on Fields made of `arrays` (and a context holding `pins`): before and after, with its floor."""
+    inputs = {f'f__{k}': np.asarray(v, F) for k, v in arrays.items()}
+    if pins is not None:
+        inputs.update({f'pin__{k}': np.asarray(v, F) for k, v in pins.items()})
+
+    def compute(inp):
+        f = fields_of(lv, {k[3:]: v for k, v in inp.items() if k.startswith('f__')})
+        ctx = None
+        if pins is not None:
+            ctx = types.SimpleNamespace(pins={k[5:]: v for k, v in inp.items() if k.startswith('pin__')}, log=None,
+                                        device=None)
+        fn(f, lv, dict(params), seed, log=lambda m: None, ctx=ctx, **kw)
+        return {f'f__{k}': np.array(v) for k, v in f.items()}
+    floored(rec, label, fn_name, dict(level=lv.to_dict(), params=params, seed=seed, ctx_pins=pins is not None, **kw),
+            inputs, compute)
 
 
 def hillside(n, seed=3, base=500.0):
@@ -67,27 +159,6 @@ def slope_terrain(n, seed=3, base=500.0):
     return b.astype(F)
 
 
-def fields_of(lv, arrays):
-    from eidoblend.terrain.core.fields import Fields
-    return Fields(lv, {k: np.asarray(v) for k, v in arrays.items()})
-
-
-def op_case(rec, label, fn_name, fn, lv, arrays, params, seed, pins=None, **kw):
-    """Run a Blender op on Fields made of `arrays` (and a context holding `pins`); record before and after."""
-    f = fields_of(lv, arrays)
-    before = {f'f__{k}': np.array(v) for k, v in f.items()}
-    if pins is not None:
-        before.update({f'pin__{k}': np.asarray(v, F) for k, v in pins.items()})
-    ctx = types.SimpleNamespace(pins=dict(pins), log=None, device=None) if pins is not None else None
-    t0 = time.perf_counter()
-    fn(f, lv, dict(params), seed, log=lambda m: None, ctx=ctx, **kw)
-    sec = time.perf_counter() - t0
-    after = {f'f__{k}': np.array(v) for k, v in f.items()}
-    rec.case(label, fn_name, dict(level=lv.to_dict(), params=params, seed=seed, ctx_pins=pins is not None, **kw),
-             before, after, values=dict(seconds=round(sec, 3)))
-    print(f'[detail fixtures] {label}: {sec:.2f} s', flush=True)
-
-
 # ------------------------------------------------------------------------------------------------- hydraulic ---
 
 def hydraulic_cases(rec):
@@ -96,23 +167,23 @@ def hydraulic_cases(rec):
     from eidoblend.terrain.solvers import hydraulic as HY
     for cell, sl in ((1.0, (35.0, 50.0)), (4.0, (20.0, 30.0))):
         h = T.random_field((80, 96), 0.0, 300.0, 21, smooth=2)
-        rec.case(f'rockness cell {cell} slope {sl}', 'hydraulic.rockness', dict(cell=cell, slope_deg=list(sl)),
-                 dict(h=h), dict(rk=HY.rockness(h, cell, sl)))
+        floored(rec, f'rockness cell {cell} slope {sl}', 'hydraulic.rockness', dict(cell=cell, slope_deg=list(sl)),
+                dict(h=h), lambda i, cell=cell, sl=sl: dict(rk=HY.rockness(i['h'], cell, sl)))
     jj, ii = np.mgrid[0:96, 0:112].astype(np.float64)
     change = (T.random_field((96, 112), -0.5, 0.5, 23, smooth=1).astype(np.float64)
               - 0.6 * np.exp(-((ii - 40.3) / 0.8) ** 2) + 2.0 * np.exp(-(((ii - 80) / 14.0) ** 2 + ((jj - 50) / 14.0) ** 2)))
     for scale in (3.0, 6.0, 12.0, 24.0, 2.4):
-        rec.case(f'anchor scale {scale} cells', 'hydraulic.anchor', dict(scale_cells=scale),
-                 dict(change=change.astype(F)), dict(a=HY.anchor(change.astype(F).astype(np.float64), scale)))
+        floored(rec, f'anchor scale {scale} cells', 'hydraulic.anchor', dict(scale_cells=scale), dict(change=change.astype(F)),
+                lambda i, scale=scale: dict(a=HY.anchor(i['change'].astype(np.float64), scale)))
     lvs = [level(5, 'hero', 0.0, 0.0, 1.0, 64, parent=4, depth=-3), level(3, 'hero', 0.0, 0.0, 4.0, 64, parent=2, depth=-1),
            level(2, 'main', 0.0, 0.0, 8.0, 64, parent=1, depth=0), level(0, 'context', 0.0, 0.0, 30.0, 64, depth=2)]
     rec.case('anchor_scale_m', 'hydraulic.anchor_scale_m', dict(levels=[lv.to_dict() for lv in lvs]), {}, {},
              values=dict(scales=[HY.anchor_scale_m(lv) for lv in lvs], given=HY.anchor_scale_m(lvs[0], 20.0)))
     for cell in (0.5, 4.0):
         lv = level(4, 'hero', 40123.0, -25311.0, cell, 96, parent=3, depth=-2)
-        r = HY.micro_relief(lv, 1 + 7001, 0.12 * cell, 3.0 * cell, backend='numpy')
-        rec.case(f'micro_relief cell {cell} 40 km out', 'hydraulic.micro_relief',
-                 dict(level=lv.to_dict(), seed=7002, amp_m=0.12 * cell, wavelength_m=3.0 * cell), {}, dict(r=r))
+        floored(rec, f'micro_relief cell {cell} 40 km out', 'hydraulic.micro_relief',
+                dict(level=lv.to_dict(), seed=7002, amp_m=0.12 * cell, wavelength_m=3.0 * cell), {},
+                lambda i, lv=lv, cell=cell: dict(r=HY.micro_relief(lv, 1 + 7001, 0.12 * cell, 3.0 * cell, backend='numpy')))
     # finish: the blend to the pins, the anchor, the record fields (on a hero level, and on a coarsest level)
     n = 96
     rng = np.random.default_rng(31)
@@ -130,18 +201,20 @@ def hydraulic_cases(rec):
             ('hero, anchor 12 m, seed kept 0.6, pins', level(5, 'hero', 0.0, 0.0, 1.0, n, parent=4, depth=-3), 12.0, 0.6, True, True),
             ('main, no anchor, no seed, pins', level(2, 'main', 0.0, 0.0, 8.0, n, parent=1), None, 0.0, True, False),
             ('coarsest, anchor given but no parent, no pins', level(0, 'context', 0.0, 0.0, 30.0, n), 90.0, 1.0, False, True)):
-        h_base = h_in.astype(np.float64) + seed_k * bump.astype(np.float64)
-        h_new = h_base + dH.astype(np.float64)
-        bed_new = h_base + dB.astype(np.float64)
-        arrays = dict(h=h_in, **({k: v for k, v in olds.items()} if with_old else {}))
-        f = fields_of(lv, arrays)
-        w, hh = (pw, ph) if pins else (np.zeros((n, n)), h_in)
-        HY.finish(f, h_new, bed_new, h_base, np.asarray(w, np.float64), np.asarray(hh, np.float64),
-                  talus=tal.astype(np.float64), wet=wet.astype(np.float64), level=lv, anchor_m=anchor_m)
-        rec.case(f'finish {tag}', 'hydraulic.finish', dict(level=lv.to_dict(), anchor_m=anchor_m, seed_k=seed_k, pins=pins),
-                 dict(h_in=h_in, bump=bump, dH=dH, dB=dB, pw=pw if pins else None, ph=ph if pins else None, talus=tal,
-                      wet=wet, **({f'old_{k}': v for k, v in olds.items()} if with_old else {})),
-                 {k: np.array(v) for k, v in f.items()})
+        inputs = dict(h_in=h_in, bump=bump, dH=dH, dB=dB, pw=pw if pins else None, ph=ph if pins else None, talus=tal,
+                      wet=wet, **({f'old_{k}': v for k, v in olds.items()} if with_old else {}))
+
+        def compute(i, lv=lv, anchor_m=anchor_m, seed_k=seed_k, pins=pins):
+            h_base = i['h_in'].astype(np.float64) + seed_k * i['bump'].astype(np.float64)
+            h_new = h_base + i['dH'].astype(np.float64)
+            bed_new = h_base + i['dB'].astype(np.float64)
+            f = fields_of(lv, dict(h=i['h_in'], **{k[4:]: v for k, v in i.items() if k.startswith('old_')}))
+            w, hh = (i['pw'], i['ph']) if pins else (np.zeros((n, n)), i['h_in'])
+            HY.finish(f, h_new, bed_new, h_base, np.asarray(w, np.float64), np.asarray(hh, np.float64),
+                      talus=i['talus'].astype(np.float64), wet=i['wet'].astype(np.float64), level=lv, anchor_m=anchor_m)
+            return {k: np.array(v) for k, v in f.items()}
+        floored(rec, f'finish {tag}', 'hydraulic.finish', dict(level=lv.to_dict(), anchor_m=anchor_m, seed_k=seed_k, pins=pins),
+                inputs, compute)
     # the op itself, through the twins: hillsides in metres on a hero level (border ramp, no ctx) and a coarsest one
     for tag, n, cell, extra, params, seed, parent in (
             ('hero 96 1 m, 1 step', 96, 1.0, (), {'steps': 1}, 3, 4),
@@ -237,9 +310,12 @@ def breakup_cases(rec):
                                   ('fluvial_range', PARAM_SETS[1][1], 2.0, 1)):
         p = DT._params(DT.BREAKUP, pp, 'breakup')
         lv = level(3, 'hero', 40123.0, -25311.0, cell, 96, parent=2, depth=-1)
-        R, kf, sc, D = DT.strength(p, lv, h, seed, backend='numpy')
-        rec.case(f'strength {pname} cell {cell}', 'detail.strength', dict(params=pp, level=lv.to_dict(), seed=seed),
-                 dict(h=h), dict(R=R, kfac=kf, sc_abs=sc, D=D))
+
+        def compute(i, p=p, lv=lv, seed=seed):
+            R, kf, sc, D = DT.strength(p, lv, i['h'], seed, backend='numpy')
+            return dict(R=R, kfac=kf, sc_abs=sc, D=D)
+        floored(rec, f'strength {pname} cell {cell}', 'detail.strength', dict(params=pp, level=lv.to_dict(), seed=seed),
+                dict(h=h), compute)
     # relax: a debris cone and a rock step on a cohesive base, in cell units
     n = 48
     jj, ii = np.mgrid[0:n, 0:n].astype(np.float64)
@@ -249,9 +325,12 @@ def breakup_cases(rec):
     bed = (300.0 + step).astype(F)
     sc = np.where(ii > 28, math.tan(math.radians(60.0)), 1e3).astype(F)
     for iters in (1, 10, 100):
-        dl, bed_rel, net = DT.relax(b0, bed, sc, math.tan(math.radians(35.0)), iters, 0.06, backend='numpy', floor=-2.0)
-        rec.case(f'relax {iters} passes', 'detail.relax', dict(iterations=iters, rate=0.06, repose_deg=35.0, floor=-2.0),
-                 dict(b0=b0, bed=bed, sc=sc), dict(dl=dl, bed_rel=bed_rel, net=net))
+        def compute(i, iters=iters):
+            dl, bed_rel, net = DT.relax(i['b0'], i['bed'], i['sc'], math.tan(math.radians(35.0)), iters, 0.06,
+                                        backend='numpy', floor=-2.0)
+            return dict(dl=dl, bed_rel=bed_rel, net=net)
+        floored(rec, f'relax {iters} passes', 'detail.relax', dict(iterations=iters, rate=0.06, repose_deg=35.0, floor=-2.0),
+                dict(b0=b0, bed=bed, sc=sc), compute)
     # the op, through the twins: its three threshold modes, with and without bed, K and Sc
     n = 96
     hb = (T.random_field((n, n), 0.0, 220.0, 44, smooth=2).astype(np.float64) + 800.0)
@@ -286,29 +365,41 @@ def gully_cases(rec):
     dx, dy = DT.flow_direction(h, 1.0, 12.0)
     for o, lam in enumerate((12.0, 6.0)):
         ox, oy = N.lattice_offset(1 + 4242, o)
-        c, sn, sdx, sdy = DT.phacelle_noise(X / lam, Y / lam, dx, dy, 1.0, 0.25, 0.5, (ox, oy))
-        rec.case(f'phacelle_noise 40 km out, wavelength {lam} m', 'detail.phacelle_noise',
-                 dict(level=lv.to_dict(), wavelength_m=lam, freq=1.0, offset=0.25, normalization=0.5,
-                      lattice_offset=[int(ox), int(oy)]),
-                 dict(dx=dx, dy=dy), dict(c=c, s=sn, sdx=sdx, sdy=sdy))
+
+        def compute(i, lam=lam, ox=ox, oy=oy):
+            c, sn, sdx, sdy = DT.phacelle_noise(X / lam, Y / lam, i['dx'].astype(np.float64), i['dy'].astype(np.float64),
+                                                1.0, 0.25, 0.5, (ox, oy))
+            return dict(c=c, s=sn, sdx=sdx, sdy=sdy)
+        floored(rec, f'phacelle_noise 40 km out, wavelength {lam} m', 'detail.phacelle_noise',
+                dict(level=lv.to_dict(), wavelength_m=lam, freq=1.0, offset=0.25, normalization=0.5,
+                     lattice_offset=[int(ox), int(oy)]),
+                dict(dx=dx.astype(F), dy=dy.astype(F)), compute)
     for smooth_m in (12.0, 5.0, 1.0):
-        fx, fy = DT.flow_direction(h, 1.0, smooth_m)
-        rec.case(f'flow_direction smoothed {smooth_m} m', 'detail.flow_direction', dict(cell=1.0, smooth_m=smooth_m),
-                 dict(h=h.astype(F)), dict(dx=fx, dy=fy))
+        def compute(i, smooth_m=smooth_m):
+            fx, fy = DT.flow_direction(i['h'].astype(np.float64), 1.0, smooth_m)
+            return dict(dx=fx, dy=fy)
+        floored(rec, f'flow_direction smoothed {smooth_m} m', 'detail.flow_direction', dict(cell=1.0, smooth_m=smooth_m),
+                dict(h=h.astype(F)), compute)
     flow = (T.random_field((n, n), -1.0, 1.0, 52, smooth=2), T.random_field((n, n), -1.0, 1.0, 53, smooth=2))
-    fx, fy = DT.flow_direction(h, 1.0, 12.0, flow=flow)
-    rec.case('flow_direction of a given flow', 'detail.flow_direction', dict(cell=1.0, smooth_m=12.0, flow=True),
-             dict(h=h.astype(F), flow_x=flow[0], flow_y=flow[1]), dict(dx=fx, dy=fy))
+
+    def compute_flow(i):
+        fx, fy = DT.flow_direction(i['h'].astype(np.float64), 1.0, 12.0, flow=(i['flow_x'], i['flow_y']))
+        return dict(dx=fx, dy=fy)
+    floored(rec, 'flow_direction of a given flow', 'detail.flow_direction', dict(cell=1.0, smooth_m=12.0, flow=True),
+            dict(h=h.astype(F), flow_x=flow[0], flow_y=flow[1]), compute_flow)
     for tag, pp, cell, use_flow in (('3 octaves, 1 m', {}, 1.0, False), ('3 octaves, 0.5 m, given flow', {}, 0.5, True),
                                     ('2 octaves, wavelength 20 m, amp 1 m, 2 m', {'octaves': 2, 'wavelength_m': 20.0, 'amp_m': 1.0}, 2.0, False)):
         lvg = level(4, 'hero', 40123.0, -25311.0, cell, n, parent=3, depth=-2)
         hg = (T.random_field((n, n), 0.0, 40.0 * cell, 54, smooth=3).astype(np.float64)
               + 0.45 * cell * np.mgrid[0:n, 0:n][0])
         p = DT._params(DT.GULLY, pp, 'gully')
-        g, mask = DT.gully_relief(lvg, hg, p, 7, flow=flow if use_flow else None)
-        rec.case(f'gully_relief {tag}', 'detail.gully_relief', dict(level=lvg.to_dict(), params=pp, seed=7, flow=use_flow),
-                 dict(h=hg.astype(F), **(dict(flow_x=flow[0], flow_y=flow[1]) if use_flow else {})),
-                 dict(g=g, mask=mask))
+
+        def compute(i, lvg=lvg, p=p, use_flow=use_flow):
+            g, mask = DT.gully_relief(lvg, i['h'].astype(np.float64), p, 7,
+                                      flow=(i['flow_x'], i['flow_y']) if use_flow else None)
+            return dict(g=g, mask=mask)
+        floored(rec, f'gully_relief {tag}', 'detail.gully_relief', dict(level=lvg.to_dict(), params=pp, seed=7, flow=use_flow),
+                dict(h=hg.astype(F), **(dict(flow_x=flow[0], flow_y=flow[1]) if use_flow else {})), compute)
         arrays = dict(h=(hg + 300.0).astype(F))
         if use_flow:
             arrays.update(flow_x=flow[0], flow_y=flow[1], bed=(hg + 299.0).astype(F))
@@ -335,9 +426,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--out', default='')
     ap.add_argument('--only', default='')
+    ap.add_argument('--patterns', type=int, default=5)
     a = ap.parse_args(B.script_args())
     only = {x for x in a.only.split(',') if x} or set(GROUPS)
+    STATE['patterns'] = a.patterns
     edition = B.bare_terrain_package()
+    install_noise_nudge()
     key = B.source_key(edition)
     out = os.path.abspath(a.out) if a.out else os.path.join(B.parity_root(), key['folder'], 'fixtures', 'functions', 'detail')
     store = FX.Store(out, 'functions/detail', key)
@@ -354,7 +448,10 @@ def main():
         t1 = time.perf_counter()
         fn(rec)
         groups.append(dict(group=g, seconds=round(time.perf_counter() - t1, 2)))
-    man = store.finish(groups=groups, made_by='tests/detail/blender_detail_fixtures.py')
+    man = store.finish(groups=groups, made_by='tests/detail/blender_detail_fixtures.py', patterns=STATE['patterns'],
+                       floor='every float32 input and the world noise moved by one float32 ulp on half the cells '
+                             '(tests/parity/_hooks.py nudge), five patterns: values.floor per output, the largest '
+                             'max |d| / range')
     print(f"[detail fixtures] {len(man['cases'])} cases, {man['arrays']} arrays, {man['bytes'] / 1e6:.1f} MB in "
           f"{time.perf_counter() - t0:.1f} s", flush=True)
 

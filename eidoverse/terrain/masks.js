@@ -54,10 +54,13 @@
 //     round() and floor division included): a few thousand numbers per level, never a loop over its cells.
 //   - gaussianBlur is core/prims.js's (P1): the circular convolution with the FFT's own kernel, summed over
 //     differences from the cell's own value, where masks.py multiplies a float32 FFT (numpy 2.3.4 transforms float32
-//     data in single precision). Measured on the reference stacks, that FFT's round-off alone moves convex / concave
-//     by up to 3e-3 of their range and peaks and snow by up to 1.4e-3, while the curvature itself stays within 1e-4:
-//     so tests/masks/ grades every mask against masks.py with its FFT in float64 (within 1e-4 of the range), and
-//     against masks.py as it is within that FFT's own spread.
+//     data in single precision). The port's blurred grid is within one float32 step of masks.py's run with its FFT in
+//     float64 (measured). masks.py keeps every blurred grid in float32 and differentiates the curvature's twice, so
+//     one float32 step of the blur moves convex / concave by about 1e-3 of their range (measured: its own floor), and
+//     its float32 FFT moves them by up to 3e-3: tests/masks/ grades every mask against masks.py with its FFT in
+//     float64 within max(1e-4 of the range, 1.25 x that one-step floor), measured per case, level and mask (0 for
+//     every mask that reads no blur, so those are held to 1e-4), and against masks.py as it is within its FFT's
+//     spread besides.
 //   - NaN, masks.py's "no terrain" (beyond every level in the occlusion march; not a rock foot in rockShadow), is the
 //     sentinel NOH of kernels/masks/lib.wgsl: WGSL lets an implementation assume no NaN reaches a shader, and fmax's
 //     NaN skipping is then a comparison with the sentinel. The masks never hold it.
@@ -883,7 +886,6 @@ export async function compute(fields, opts = {}) {
         if (names.includes(nm)) out.skipped[nm] = why;
     };
     const one = () => R.field(ny, nx, 1);
-    const wrapI = [P.wrap[0] ? 1 : 0, P.wrap[1] ? 1 : 0];
     try {
         // ---- slope, aspect, height
         const hp = padLevel(h, 1, cell, { x0, y0, wrap: P.wrap, outside, fill: 'odd', pair: true });

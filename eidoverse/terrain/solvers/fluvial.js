@@ -118,6 +118,9 @@ export function _p(params, key) {
 /** f'{x:g}' and f'{x:.<d>g}' (the log lines). */
 export const pyG = (x) => pyFormat(Number(x), 'g');
 export const fmtG = (x, d) => pyFormat(Number(x), `.${d}g`);
+/** Python's round(x, n): the exact decimal value rounded half to even (pyFormat's .nf is exact), as the records
+ * fluvial.py writes carry it. */
+export const pyRoundN = (x, n) => Number(pyFormat(Number(x), `.${n}f`));
 
 function runnerOf(fields, ctx) {
     const R = (ctx && ctx.device) || fields.h?.runner || fields.R;
@@ -705,7 +708,7 @@ export async function opFluvial(fields, level, params, seed = 0, ctx = null) {
             uf *= f;
             if (ufMax !== null && ufMax !== undefined) uf = Math.min(uf, Number(ufMax));
             run.setPar(parOf(uf));
-            history.push([i + 1, Math.round(rel * 10) / 10, Math.round(uf * 1e4) / 1e4]);
+            history.push([i + 1, pyRoundN(rel, 1), pyRoundN(uf, 4)]);
         }
     }
     const out = run.readback();
@@ -725,9 +728,9 @@ export async function opFluvial(fields, level, params, seed = 0, ctx = null) {
     ctx.evolved = true;
     const rel = !refine ? await RUN.windowRelief(fields.h, lv, rwin) : null;
     const info = { level: String(lv), prepass: ctx.prepass, role: refine ? 'refine' : 'grow', steps,
-        dt_yr: Math.round(dt * 100) / 100, years: Math.round(steps * dt), D: Dused, spacing_m: Math.round(spacing * 10) / 10,
-        creep_sub: nSub, U_factor: Math.round(uf * 1e4) / 1e4, relief_main_window_m: rel === null ? null : Math.round(rel * 10) / 10,
-        lock_block_cells: lockH0 !== null ? lockB : null, lock_m: lockM, seconds: Math.round((now() - t0) * 1000) / 1000,
+        dt_yr: pyRoundN(dt, 2), years: pyRound(steps * dt), D: Dused, spacing_m: pyRoundN(spacing, 1),
+        creep_sub: nSub, U_factor: pyRoundN(uf, 4), relief_main_window_m: rel === null ? null : pyRoundN(rel, 1),
+        lock_block_cells: lockH0 !== null ? lockB : null, lock_m: lockM, seconds: pyRoundN(now() - t0, 3),
         controller: history.slice(-6) };
     (ctx.shared.fluvial_log ??= []).push(info);
     ctx.log(`[terrain.fluvial] ${info.role} ${lv.n}^2 @ ${fmtG(cell, 3)} m` +
@@ -738,12 +741,406 @@ export async function opFluvial(fields, level, params, seed = 0, ctx = null) {
     return fields;
 }
 
+// ================================================================================== alluvial valley floors ===
+
+export const FLOOR = Object.freeze({ width_m: 120.0, area_ref_m2: 5.0e7, width_exp: 0.5, area_min_m2: 1.0e6,
+    width_max_m: 600.0, depth_max_m: 80.0, cross_slope: 0.01, grade: 0.002, min_width_cells: 2.0, toe_cells: 1.0,
+    along_smooth: 8 });
+
+/** The smallest float32 at or above x. */
+function f32AtOrAbove(x) {
+    const f = Math.fround(x);
+    if (f >= x) return f;
+    const b = new Float32Array([f]), u = new Uint32Array(b.buffer);
+    if (f > 0) u[0] += 1;
+    else if (f < 0) u[0] -= 1;
+    else u[0] = 1;
+    return b[0];
+}
+
+/** Stage 'valley_floor' (fluvial.py op_valley_floor): alluvial floors in the valleys of the channels the level
+ * resolves. A river carrying more sediment than it can move aggrades its valley: the floor fills flat between the
+ * walls until it is as wide as the river's floodplain. Per channel cell (drainage area A >= area_min_m2), the floor's
+ * width is W = width_m (A / area_ref_m2)^width_exp, at most width_max_m (a channel whose floor would be under
+ * min_width_cells cells is left a V on this level). The cells that drain to it laterally (the first channel cell down
+ * their D8 path, on the eroded surface or, where the river crosses a rounding pit, the lake-filled routing surface)
+ * are its valley's cross-section; the floor's level is their mean height above the channel at half the floor's
+ * width along their paths, at most depth_max_m above it; that depth is smoothed along the network (along_smooth
+ * passes). Floors never drop going upstream (each channel cell's floor at least its receiver's plus `grade` per
+ * metre). Cells under their floor fill to it, rising cross_slope per metre of path away from the channel, the fill's
+ * edge softened over toe_cells. The fill is sediment: it adds to `deposit` (bed stays). Pins hold a child's border
+ * band to its parent's surface. Every step is a GPU kernel (kernels/fluvial/vf_*.wgsl; the pointer jumping of numpy's
+ * loop, its np.bincount sums as a stable sort and ordered runs, its sequential upstream pass as a path maximum). */
+export async function opValleyFloor(fields, level, params, seed = 0, ctx = null) {
+    ctx = await asContext(ctx, fields, level);
+    const t0 = now();
+    if (params.enabled === false) return fields;
+    const p = { ...FLOOR };
+    for (const [k, v] of Object.entries(params ?? {})) if (k in FLOOR && v !== null && v !== undefined) p[k] = v;
+    if (Number(p.width_m) <= 0) return fields;
+    const R = runnerOf(fields, ctx), P = prims(R), D = Gd.dummies(R);
+    const h = fields.h, n = level.n, cell = Number(level.cell), N = n * n;
+    const sea = ctx.sea_level ?? null;
+    const own = [];
+    let surf = null, A;
+    if ('A' in fields) {
+        A = fields.A;
+    } else {
+        const { filled } = await HY.fillDepressions(h, { seaLevel: sea });
+        surf = await HY.routingSurface(filled, { seaLevel: sea });
+        filled.destroy();
+        A = (await HY.routeToConvergence(R, surf, cell)).A;
+        own.push(A);
+    }
+    const W = R.field(n, n, 1), chan = R.field(n, n, 1), cnt = R.field(1, 1, 1, null, 'u32');
+    cnt.name = 'valley_floor_count';
+    own.push(W, chan, cnt);
+    R.run('fluvial/vf_chan', { A, h }, { outW: W, outC: chan, count: cnt },
+        { uWidth: Number(p.width_m), uAref: Number(p.area_ref_m2), uExp: Number(p.width_exp), uWmax: Number(p.width_max_m),
+            uAmin: f32AtOrAbove(Number(p.area_min_m2)), uMinCells: Number(p.min_width_cells), uCell: cell,
+            uSea: sea !== null ? 1 : 0, uSea32: sea !== null ? Math.fround(sea) : 0.0 });
+    const [nch] = await R.readRange(cnt, 0, 1);
+    const release = () => { for (const f of own) if (!f.destroyed) f.destroy(); if (surf && !surf.destroyed) surf.destroy(); };
+    if (nch === 0) {
+        ctx.log(`[terrain.fluvial] valley floors on ${level}: no channel wide enough at ${fmtG(cell, 3)} m cells`);
+        release();
+        return fields;
+    }
+    // D8 receivers on the eroded surface; when a channel cell inside the window has none (a rounding pit or flat on
+    // the river), on the lake-filled surface tilted across its flats instead, with the channel cells breached
+    const scratchU = R.field(1, 1, 1, null, 'u32'), scratchF = R.field(1, 1, 1);
+    own.push(scratchU, scratchF);
+    let rec = HY.d8Receivers(h);
+    if (surf === null) {
+        R.clear(cnt);
+        R.run('fluvial/vf_init', { rec, chan }, { outT: scratchU, outD: scratchF, count: cnt }, { uMode: 0, uCell: cell },
+            [Math.ceil(n / 16), Math.ceil(n / 16), 1]);
+        const [pits] = await R.readRange(cnt, 0, 1);
+        if (pits > 0) {
+            const { filled } = await HY.fillDepressions(h, { seaLevel: sea });
+            surf = await HY.routingSurface(filled, { seaLevel: sea });
+            filled.destroy();
+        }
+    }
+    if (surf !== null) {
+        rec.destroy();
+        rec = HY.d8Receivers(surf, { breach: chan });
+    }
+    own.push(rec);
+    const order = surf ?? h;
+    const rounds = Math.ceil(Math.log2(Math.max(2, N))) + 1;
+    const cover = [Math.ceil(n / 16), Math.ceil(n / 16), 1];
+    // every cell's first channel cell down its path (pointer jumping) and the path's length to it
+    const Tp = R.pair(n, n, 1, null, 'u32'), Dp = R.pair(n, n, 1);
+    own.push(Tp, Dp);
+    R.run('fluvial/vf_init', { rec, chan }, { outT: Tp.src, outD: Dp.src, count: cnt }, { uMode: 1, uCell: cell }, cover);
+    for (let r = 0; r < rounds; r++) {
+        R.run('fluvial/vf_jump', { ptr: Tp.src, val: Dp.src }, { outP: Tp.dst, outV: Dp.dst }, {});
+        Tp.swap();
+        Dp.swap();
+    }
+    // the floor level of each channel cell: the mean height above it of the cells that drain to it from half the
+    // floor's width away (np.bincount over the band cells: a stable sort by channel cell, then each run in order)
+    const keys = R.field(n, n, 1, null, 'u32'), hand = R.field(n, n, 1);
+    own.push(keys, hand);
+    R.run('fluvial/vf_band', { t: Tp.src, dist: Dp.src, chan, h, W }, { outK: keys, outH: hand }, { uCell: cell });
+    const sorted = P.sortPairs(keys, null, {});
+    own.push(sorted.keys, sorted.vals);
+    const L = R.pair(n, n, 1);
+    own.push(L);
+    R.run('fluvial/vf_sum', { sk: sorted.keys, sv: sorted.vals, hand }, { outL: L.src }, { uCount: N, uDepthMax: Number(p.depth_max_m) });
+    // the fill depth smoothed along the network (each channel cell with its receiver and donors, along_smooth times)
+    for (let k = 0; k < Math.trunc(Number(p.along_smooth)); k++) {
+        R.run('fluvial/vf_smooth', { lvl: L.src, chan, rec }, { outL: L.dst }, {});
+        L.swap();
+    }
+    // floors never drop going upstream: numpy's downstream-first pass, as a path maximum (vf_floor_init.wgsl)
+    const Pf = R.pair(n, n, 1, null, 'u32'), Lf = R.pair(n, n, 1), F0 = R.field(n, n, 1);
+    own.push(Pf, Lf, F0);
+    R.run('fluvial/vf_floor_init', { rec, chan, surf: order, h, lvl: L.src }, { outP: Pf.src, outL: Lf.src, outF: F0 },
+        { uGrade: Number(p.grade), uCell: cell });
+    const Pa = R.pair(n, n, 1, null, 'u32'), K = R.pair(n, n, 1), Aa = R.pair(n, n, 1, null, 'u32');
+    own.push(Pa, K, Aa);
+    R.copy(Pf.src, Pa.src);
+    for (let r = 0; r < rounds; r++) {
+        R.run('fluvial/vf_jump', { ptr: Pf.src, val: Lf.src }, { outP: Pf.dst, outV: Lf.dst }, {});
+        Pf.swap();
+        Lf.swap();
+    }
+    const key = HS.ew(R, HS.EW.SUB, F0, Lf.src);
+    R.copy(key, K.src);
+    key.destroy();
+    R.run('fluvial/vf_init', { rec, chan }, { outT: Aa.src, outD: scratchF, count: cnt }, { uMode: 2, uCell: cell }, cover);
+    for (let r = 0; r < rounds; r++) {
+        R.run('hydro/jump_argmax', { ptr: Pa.src, key: K.src, arg: Aa.src }, { outP: Pa.dst, outK: K.dst, outA: Aa.dst }, {});
+        Pa.swap();
+        K.swap();
+        Aa.swap();
+    }
+    const Fr = R.field(n, n, 1);
+    own.push(Fr);
+    R.clear(cnt);
+    R.run('fluvial/vf_floor_final', { chan, h, lvl: L.src, F0, L: Lf.src, arg: Aa.src }, { outF: Fr, count: cnt }, {});
+    // cells under their floor fill to it, rising cross_slope away from the channel; the toe; the pins
+    const fill = R.field(n, n, 1);
+    own.push(fill);
+    R.run('fluvial/vf_fill', { t: Tp.src, dist: Dp.src, chan, h, W, F: Fr, fb: D.f1, pins: D.f1 }, { outF: fill, outA: scratchF },
+        { uMode: 0, uCross: Number(p.cross_slope), uToe: 0, uPins: 0 });
+    const toe = Number(p.toe_cells) > 0;
+    const fb = toe ? HS.gaussianBlur(fill, Number(p.toe_cells)) : null;
+    if (fb) own.push(fb);
+    const pins = ctx.pins ? R.pack(ctx.pins, ['pin_w', 'pin_h', null, null]) : null;
+    if (pins) own.push(pins);
+    const hn = R.field(n, n, 1), add = R.field(n, n, 1);
+    R.run('fluvial/vf_fill', { t: Tp.src, dist: Dp.src, chan, h, W, F: fill, fb: fb ?? D.f1, pins: pins ?? D.f1 },
+        { outF: hn, outA: add }, { uMode: 1, uCross: 0.0, uToe: toe ? 1 : 0, uPins: pins ? 1 : 0 });
+    const [raised] = await R.readRange(cnt, 0, 1);
+    const dep0 = 'deposit' in fields ? fields.deposit : null;
+    fields.deposit = dep0 ? Gd.arith(R, 'add', dep0, add) : (() => { const c = R.like(add); R.copy(add, c); return c; })();
+    if ('bed' in fields) fields.bed = HS.ew(R, HS.EW.MIN, fields.bed, hn);
+    fields.h = hn;
+    ctx.evolved = true;
+    // the record: the cells filled over 5 cm, their median fill and the largest
+    const on = HS.ew(R, HS.EW.LAKE, add, null, null, 0.05);
+    const onCount = (await P.stats(on, { mask: on })).count;
+    const p50 = onCount ? await P.median(add, { mask: on, dtype: 'float64' }) : 0.0;
+    const mx = (await P.stats(add)).max;
+    on.destroy();
+    add.destroy();
+    release();
+    const info = { level: String(level), channel_cells: nch, raised_upstream: raised, floor_cells: onCount,
+        fill_p50_m: Math.round(p50 * 100) / 100, fill_max_m: Math.round(mx * 100) / 100,
+        seconds: Math.round((now() - t0) * 1000) / 1000 };
+    (ctx.shared.floor_log ??= []).push(info);
+    ctx.log(`[terrain.fluvial] valley floors ${level.n}^2 @ ${fmtG(cell, 3)} m: ${nch} channel cells (A >= ` +
+        `${pyG(Number(p.area_min_m2) / 1e6)} km2), ${info.floor_cells} cells filled (p50 ${info.fill_p50_m} m, ` +
+        `max ${info.fill_max_m} m), ${raised} backfilled upstream, ${info.seconds} s`);
+    return fields;
+}
+
+
+// ================================================================================ a base-level fall along a river ===
+
+export const INCISE = Object.freeze({ drop_m: 80.0, years: 3.0e4, stages: 6, uplift_scale: 1.0, fluvial: null, head_m: null,
+    taper_m: 0.0 });
+
+/** The non-increasing sequence closest to z in least squares (pool adjacent violators), doubles (fluvial.py
+ * monotone_fit). z: an array of numbers along a course (a few thousand, not a level's cells). */
+export function monotoneFit(z) {
+    const vals = [], wts = [], cnts = [];
+    for (const v of z) {
+        vals.push(Number(v));
+        wts.push(1.0);
+        cnts.push(1);
+        while (vals.length > 1 && vals[vals.length - 2] < vals[vals.length - 1]) {
+            const k = vals.length - 2;
+            const w = wts[k] + wts[k + 1];
+            vals[k] = (vals[k] * wts[k] + vals[k + 1] * wts[k + 1]) / w;
+            wts[k] = w;
+            cnts[k] += cnts[k + 1];
+            vals.pop();
+            wts.pop();
+            cnts.pop();
+        }
+    }
+    const out = [];
+    vals.forEach((v, i) => { for (let c = 0; c < cnts[i]; c++) out.push(v); });
+    return Float64Array.from(out);
+}
+
+// np.interp(x, xp, fp) for one x: xp ascending (a course's arc lengths)
+function interp(x, xp, fp) {
+    const n = xp.length;
+    if (x <= xp[0]) return fp[0];
+    if (x >= xp[n - 1]) return fp[n - 1];
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (xp[m] <= x) lo = m; else hi = m;
+    }
+    if (xp[hi] === xp[lo]) return fp[hi];
+    return fp[lo] + ((x - xp[lo]) * (fp[hi] - fp[lo])) / (xp[hi] - xp[lo]);
+}
+
+// np.searchsorted(a, v) (side 'left') on an ascending array
+function searchsorted(a, v) {
+    let lo = 0, hi = a.length;
+    while (lo < hi) {
+        const m = (lo + hi) >> 1;
+        if (a[m] < v) lo = m + 1; else hi = m;
+    }
+    return lo;
+}
+
+// the median of a few numbers (np.median, float64)
+function median(xs) {
+    const s = Float64Array.from(xs).sort();
+    const n = s.length;
+    return n % 2 ? s[(n - 1) / 2] : 0.5 * (s[n / 2 - 1] + s[n / 2]);
+}
+
+/** Stage 'incise' (fluvial.py op_incise): a base-level fall along a river course, run once, on the finest growing
+ * level (the levels below inherit what it cut). A river along the course (the river module's course parameters, as
+ * 'river_path' takes them) drops drop_m below the grown surface, lowered in `stages` steps over `years` while the
+ * fluvial physics run with the recipe's own parameters (`fluvial`, the uplift x uplift_scale; no relief controller),
+ * so its valley is cut and knickpoints climb its tributaries only as far as the time allows. params (metres, years):
+ * the course keys (kind, through, flow_azimuth_deg, wiggle_deg, wiggle_wavelength_m, width_m, length_m, seed),
+ * drop_m 80, years 3e4, stages 6, uplift_scale 1, fluvial (null: the level's own 'fluvial' stage's), head_m (the river
+ * rises head_m of arc length upstream of `through`), taper_m 0 (the fall eases in over this arc length), grade_m 3000,
+ * min_grade 5e-4. Writes the course's channel cells into fields.river and fields.incised and ctx.shared.incise.
+ *
+ * The course, its channel on a level and its pins are the river module's (blender/eidoblend/terrain/solvers/rivers.py,
+ * ported as solvers/rivers.js by the layered-rock package): it is imported when this op runs, so the fluvial module
+ * loads without it; until it is in the checkout the op raises, naming it. What this op asks of it is rivers.py's own
+ * interface: DEFAULTS, makeRiver (make_river)(course, seed, extent) giving a River with s, s_through, points,
+ * final_course, _use(points, s_through), sampleTop (sample_top)(level, h field) -> the surface along the course,
+ * a replaceable final(s, smooth), bed_m, gradient, schedule, and pins(level, basePins, f, { cache, hold }) -> [pins,
+ * the channel's mask], GPU fields. The arithmetic along the course (the smoothing, the monotone fit, the grades) is
+ * over its points, in doubles, as numpy computes it. */
+export async function opIncise(fields, level, params, seed = 0, ctx = null) {
+    ctx = await asContext(ctx, fields, level);
+    if (params.enabled === false || !ctx.last_grow) return fields;
+    const t0 = now();
+    const p = { ...INCISE };
+    for (const [k, v] of Object.entries(params ?? {})) if (v !== null && v !== undefined) p[k] = v;
+    const drop = Number(p.drop_m);
+    if (drop <= 0) return fields;
+    let RV;
+    try {
+        RV = await import(new URL('./rivers.js', import.meta.url).href);
+    } catch (e) {
+        throw new Error(`stage 'incise': the river module (eidoverse/terrain/solvers/rivers.js, the port of ` +
+            `blender/eidoblend/terrain/solvers/rivers.py) is not in this checkout yet (${e.message})`);
+    }
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const makeRiver = RV.makeRiver ?? RV.make_river;
+    const course = Object.fromEntries(Object.entries(p).filter(([k]) => k in RV.DEFAULTS && !['bed_m', 'gradient', 'schedule'].includes(k)));
+    const extent = ctx.plan && ctx.plan.length ? Number(ctx.plan[0].side) : Number(level.side);
+    const rv = await makeRiver(course, seed, extent);
+    if (p.head_m !== null && p.head_m !== undefined) {
+        // the course starts head_m upstream of its through point (a source inside the window)
+        let k0 = searchsorted(rv.s, Math.max(Number(rv.s_through) - Number(p.head_m), 0.0));
+        k0 = Math.min(k0, Math.max(rv.s.length - 4, 0));
+        const pts = rv.points.slice(k0);
+        rv.final_course = [pts, Number(rv.s_through) - Number(rv.s[k0])];
+        rv._use(...rv.final_course);
+    }
+    const h0 = R.like(fields.h);
+    R.copy(fields.h, h0);
+    const top = await (rv.sampleTop ?? rv.sample_top).call(rv, level, h0);
+    const pts = rv.points;
+    const inside = [];
+    for (let i = 0; i < pts.length; i++) {
+        const [x, y] = pts[i];
+        inside.push(x > level.x0 && x < level.x0 + level.side && y > level.y0 && y < level.y0 + level.side);
+    }
+    if (inside.filter(Boolean).length < 4) {
+        ctx.log(`[terrain.fluvial] incise on ${level}: the course does not cross the window; nothing to cut`);
+        h0.destroy();
+        return fields;
+    }
+    // the final bed: the surface along the course inside the window, smoothed over grade_m of arc length, made to fall
+    // downstream at least min_grade (the least-squares non-increasing fit, then the grade), minus the drop; past the
+    // window, straight on at the end grades
+    const sIn = [], zIn = [];
+    inside.forEach((v, i) => { if (v) { sIn.push(Number(rv.s[i])); zIn.push(Number(top[i])); } });
+    const ds = sIn.length > 1 ? median(sIn.slice(1).map((v, i) => v - sIn[i])) : 1.0;
+    const k = Math.max(pyRound(Number(p.grade_m ?? 3000.0) / Math.max(ds, 1e-6) / 2.0), 1);
+    const zp = [...Array(k).fill(zIn[0]), ...zIn, ...Array(k).fill(zIn[zIn.length - 1])];
+    const zs = [];
+    for (let i = 0; i + 2 * k < zp.length; i++) {
+        let s = 0;
+        for (let j = 0; j <= 2 * k; j++) s += zp[i + j] * (1 / (2 * k + 1));
+        zs.push(s);
+    }
+    const gMin = Number(p.min_grade ?? 5e-4);
+    const zg = monotoneFit(zs);
+    for (let i = 1; i < zg.length; i++) zg[i] = Math.min(zg[i], zg[i - 1] - gMin * (sIn[i] - sIn[i - 1]));
+    const taper = Number(p.taper_m || 0.0);
+    if (taper > 0) {
+        // the fall eases in below the head (still never rising: an increasing drop under a falling grade)
+        for (let i = 0; i < zg.length; i++) {
+            const t = Math.min(Math.max((sIn[i] - Number(rv.s[0])) / taper, 0.0), 1.0);
+            zg[i] = zg[i] - drop * t * t * (3.0 - 2.0 * t);
+        }
+    } else {
+        for (let i = 0; i < zg.length; i++) zg[i] -= drop;
+    }
+    const L = zg.length, kk = Math.min(k, L - 1), kb = Math.max(L - k - 1, 0);
+    const g0 = Math.max((zg[0] - zg[kk]) / Math.max(sIn[kk] - sIn[0], 1e-6), gMin);
+    const g1 = Math.max((zg[kb] - zg[L - 1]) / Math.max(sIn[L - 1] - sIn[kb], 1e-6), gMin);
+    const graded = (s) => {
+        const one = (x) => {
+            if (x < sIn[0]) return zg[0] + g0 * (sIn[0] - x);
+            if (x > sIn[L - 1]) return zg[L - 1] - g1 * (x - sIn[L - 1]);
+            return interp(x, sIn, zg);
+        };
+        return typeof s === 'number' ? one(s) : Float64Array.from(s, one);
+    };
+    rv.final = graded;                                   // the River's bed(s, f) falls from top(s) to final(s)
+    let i0 = 0;
+    for (let i = 1; i < sIn.length; i++) if (Math.abs(sIn[i] - rv.s_through) < Math.abs(sIn[i0] - rv.s_through)) i0 = i;
+    rv.bed_m = zg[i0];
+    const g = (zg[0] - zg[L - 1]) / Math.max(sIn[L - 1] - sIn[0], 1e-6);
+    rv.gradient = g;
+    rv.schedule = [[0.0, 0.0], [1.0, 1.0]];
+    const base = ctx.pins ?? edgePins(R, level.n, fields.h, ctx.sea_level ?? null);
+    const fl = { ...(p.fluvial ?? ctx.shared.fluvial_params ?? {}) };
+    Object.assign(fl, { relief_m: null, uplift_scale: Number(p.uplift_scale), lock: false, _incise: true });
+    delete fl.steps;
+    const Ukeep = 'U' in fields ? (() => { const c = R.like(fields.U); R.copy(fields.U, c); return c; })() : null;
+    const dt = (Number(_p(fl, 'dt_ref_yr')) * Number(level.cell)) / CELL_REF_M;
+    const kSt = Math.max(Math.trunc(Number(p.stages)), 1);
+    const stepsTotal = Math.max(pyRound(Number(p.years) / dt), kSt);
+    const cache = {};
+    let m = null;
+    for (let s = 0; s <= kSt; s++) {                     // kSt steps of the fall, then the cutting at the final bed
+        const f = Math.min((s + 1) / kSt, 1.0);
+        const [pinsK, mk] = await rv.pins(level, base, f, { cache, hold: ctx.index > 0 ? base.pin_w : null });
+        if (m && m !== mk && !m.destroyed) m.destroy();
+        m = mk;
+        const sub = new RUN.StageContext({ plan: ctx.plan, index: ctx.index, level, prepass: null, fresh: false, role: 'grow',
+            pins: pinsK, shared: ctx.shared, seed: ctx.seed, sea_level: ctx.sea_level, base_elevation_m: ctx.base_elevation_m,
+            flatten: ctx.flatten, device: R, log: () => {}, values: ctx.values, grow_levels: ctx.grow_levels });
+        const nK = s < kSt ? Math.floor(stepsTotal / (2 * kSt)) : stepsTotal - Math.floor(stepsTotal / (2 * kSt)) * kSt;
+        await opFluvial(fields, level, { ...fl, steps: Math.max(nK, 1), min_steps: 1 }, seed, sub);
+        for (const [name, fld] of Object.entries(pinsK)) if (fld !== base[name] && !fld.destroyed) fld.destroy();
+        if (Ukeep) {
+            const c = R.like(Ukeep);
+            R.copy(Ukeep, c);
+            fields.U = c;                                 // op_fluvial writes U x the factor back: keep the growth's
+        }
+    }
+    // the course's channel, inherited by the finer levels: their fluvial stage holds it at the height it arrives at
+    // and the soil hillslopes never raise it, so it stays the base level the fall made
+    fields.river = 'river' in fields ? HS.ew(R, HS.EW.MAX, fields.river, m) : (() => { const c = R.like(m); R.copy(m, c); return c; })();
+    fields.incised = m;
+    const cutF = HS.ew(R, HS.EW.SUB, h0, fields.h);
+    const st = await P.stats(cutF);
+    const pos = HS.ew(R, HS.EW.MAX_K, cutF, null, null, 0.0);
+    const cutMean = (await P.stats(pos)).mean;
+    for (const fld of [cutF, pos, h0]) fld.destroy();
+    if (Ukeep) Ukeep.destroy();
+    if (!ctx.pins) for (const fld of Object.values(base)) fld.destroy();
+    ctx.evolved = true;
+    ctx.shared.incise = { bed_m: rv.bed_m, gradient: g, drop_m: drop, years: Number(p.years), cut_mean_m: Math.round(cutMean * 100) / 100 };
+    ctx.log(`[terrain.fluvial] incise ${level.n}^2 @ ${fmtG(level.cell, 3)} m: the course dropped ${pyG(drop)} m below the ` +
+        `surface's grade (bed ${rv.bed_m.toFixed(1)} m at its origin, falling ${(1000 * g).toFixed(2)} m/km) over ` +
+        `${pyG(Number(p.years) / 1000)} kyr in ${kSt} steps (${stepsTotal} steps of ${dt.toFixed(0)} yr): mean cut ` +
+        `${ctx.shared.incise.cut_mean_m} m, max ${st.max.toFixed(1)} m, ${(now() - t0).toFixed(2)} s`);
+    return fields;
+}
+
+
 for (const op of [opUplift, opFluvial]) {
     op.evolves = true;              // run.js runs evolving ops on every coarse-to-fine pass, the rest once
     op.takesCtx = true;
 }
+opValleyFloor.post = true;          // run.js runs post ops once per level, after its last coarse-to-fine pass
+opIncise.post = true;               // (and only on the finest growing level: ctx.last_grow)
+for (const op of [opValleyFloor, opIncise]) op.takesCtx = true;
 
-export const OPS = { uplift: opUplift, fluvial: opFluvial };
+export const OPS = { uplift: opUplift, fluvial: opFluvial, valley_floor: opValleyFloor, incise: opIncise };
 
 export {
     standaloneContext as standalone_context, edgePins as edge_pins, unitNoise as _unit_noise, faultZones as fault_zones,

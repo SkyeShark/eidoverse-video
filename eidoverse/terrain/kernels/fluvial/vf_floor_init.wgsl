@@ -37,7 +37,7 @@ fn kmain(p: vec2<i32>) {
   }
   let F = h_at(p).x + lvl_at(p).x;
   var F0 = F;
-  var ptr = u32(i);
+  var nxt = u32(i);
   var gl = 0.0;
   let r = rec_at(p);
   if (r >= 0 && chan_b[r] > 0.5) {
@@ -45,13 +45,13 @@ fn kmain(p: vec2<i32>) {
     let dj = r / n.x - p.y;
     let gr = u.uGrade * (u.uCell * sqrt(f32(di * di + dj * dj)));
     if (forward(i, r)) {
-      ptr = u32(r);
+      nxt = u32(r);
       gl = gr;
     } else {
       F0 = max(F, (h_b[r] + lvl_b[r]) + gr);
     }
   }
-  outP_store(p, ptr);
+  outP_store(p, nxt);
   outL_store(p, vec4<f32>(gl, 0.0, 0.0, 0.0));
   outF_store(p, vec4<f32>(F0, 0.0, 0.0, 0.0));
 }

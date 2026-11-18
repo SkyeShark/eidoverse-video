@@ -5,6 +5,7 @@
 //   uMode 1   every cell's pointer to its first channel cell down its path and the path's length to it, before the
 //             pointer jumping: stop = chan | no receiver; t = stop ? the cell : its receiver; dist = stop ? 0 :
 //             cell sqrt(di^2 + dj^2)
+//   uMode 2   outT = the cell's own index (the path maximum's starting cell)
 //! sampler rec r32i    d8_receivers: row-major index, -1 none
 //! sampler chan        1 on channel cells
 //! image   outT r32ui
@@ -22,6 +23,10 @@ fn kmain(p: vec2<i32>) {
   if (u.uMode == 0) {
     let inner = p.x > 0 && p.y > 0 && p.x < n.x - 1 && p.y < n.y - 1;
     if (r < 0 && c && inner) { atomicAdd(&count_b[0], 1u); }
+    return;
+  }
+  if (u.uMode == 2) {
+    outT_store(p, u32(i));
     return;
   }
   if (c || r < 0) {

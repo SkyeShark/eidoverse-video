@@ -61,6 +61,10 @@
 //   - op_breakup's slope, rock mask, weathering and thresholds are one kernel (kernels/detail/breakup_surface.wgsl);
 //     to_c, the start state, relax's packs and the way back to metres are kernels/detail/to_cells, pipe_start and
 //     pipe_out, finish is solvers/hydraulic.js finish (changes added to h_in once), in float32 where numpy is float64.
+//   - The gradient of the smoothed surface (op_breakup's, flow_direction's, the gully mask's slope) is the box mean of
+//     height differences (kernels/detail/box_gradient.wgsl), the same quantity as np.gradient(_box(h, r)) in the
+//     better-conditioned form plan 2.3 asks for (smoothing first rounds every smoothed float32 height, and the
+//     difference divides that by the cell: 1e-5 of the slope, measured).
 //   - gully_relief, which Blender runs in numpy, is one kernel (kernels/detail/gully.wgsl: every octave per cell,
 //     the Phacelle noise of kernels/detail/phacelle.wgsl on lattice coordinates kept as an integer cell and a float32
 //     fraction, built in doubles here: gullyTable), and flow_direction another (kernels/detail/flow_dir.wgsl).
@@ -312,10 +316,10 @@ export async function opBreakup(fields, level, params = null, seed = 0, ctx = nu
     const keep = (f) => { temp.push(f); return f; };
     try {
         const bk = keep(strength(p, level, hIn, seed));            // (R, kfac, sc_abs, D)
-        const hs = keep(HY.box(hIn, 2));
-        const { gx, gy } = Gd.gradient(hs, cell);
+        const { gx, gy, s: slopeField } = HY.boxGradient(hIn, cell, 2);      // grid.gradient(HY._box(h_in, 2), cell)
         keep(gx);
         keep(gy);
+        keep(slopeField);
         const { pin_w: pw, pin_h: ph, made } = HY.pinsFor(fields, level, hIn, ctx);
         temp.push(...made);
         let mode = p.threshold;
@@ -396,9 +400,8 @@ export function flowDirection(h, cell, smoothM, flow = null) {
         [fx, fy] = [flow.x ?? flow[0], flow.y ?? flow[1]];
     } else {
         const r = Math.max(1, Math.trunc(pyRound(Number(smoothM) / Number(cell) / 2.0)));
-        const hs = HY.box(h, r);
-        const g = Gd.gradient(hs, cell);
-        hs.destroy();
+        const g = HY.boxGradient(h, cell, r);                       // grid.gradient(HY._box(h, r), cell)
+        g.s.destroy();
         [fx, fy, neg] = [g.gx, g.gy, 1];
         own = [g.gx, g.gy];
     }

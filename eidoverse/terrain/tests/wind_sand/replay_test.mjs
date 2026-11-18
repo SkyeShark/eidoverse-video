@@ -2,9 +2,11 @@
 // (PORT_PLAN.md 5.3, 5.7, 8.1: "every op a package ports is accepted by four checks"; 8.2 P8).
 //
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/wind_sand/replay_test.mjs [seeds]
+//          [--run <base dir>] ...
 //
 // (from the repository root; behind $EIDO_GPU_WRAP on a shared machine; seeds default 1,2: the floor's dunes runs,
-// tests/parity/floor_runs.sh). A dunes run calls dune_field once per level (three at draft quality): the coarsest
+// tests/parity/floor_runs.sh; --run adds a run in the floor's format, such as tests/wind_sand/blender_refine.py's
+// linear run, whose finer levels refine). A dunes run calls dune_field once per level (three at draft quality): the coarsest
 // level's call grows the tile on the growth level (the main level here: 512 cells of 15.6 m resolve the 1.4 km spacing
 // with 90 cells) and the other two find it in the solver's memo (aeolian._TILES; the port's growTile memo), so the
 // replay runs the run's three calls in order in one process, as the run did: the recipe's prepare hook first (the
@@ -32,7 +34,10 @@ import * as DP from '../parity/dispatch_parity.mjs';
 import * as RP from '../parity/replay.mjs';
 import * as S from './_common.mjs';
 
-const seeds = (Deno.args[0] ?? '1,2').split(',').map(Number);
+const argv = [...Deno.args];
+const extraRuns = [];
+for (let i = argv.indexOf('--run'); i >= 0; i = argv.indexOf('--run')) extraRuns.push(S.W.absPath(argv.splice(i, 2)[1]));
+const seeds = argv.length ? argv[0].split(',').filter(Boolean).map(Number) : (extraRuns.length ? [] : [1, 2]);
 
 // each snapshot key's largest |port - Blender| over its images and channels, as a share of the channel's range, and
 // whether every integer channel of a plan record is equal (the record for the summary: what the first dispatches show)
@@ -59,9 +64,17 @@ async function snapshotTable(run, portDir) {
                 const over = err / ((hi - lo) || Math.abs(hi) || 1);
                 if (over > worst) { worst = over; where = `${im}[${c}]`; }
             }
-            if (im === 'outPlan') for (let i = 0; i < n; i++) if (want.data[4 * i + 1] !== got.data[4 * i + 1] || want.data[4 * i + 3] !== got.data[4 * i + 3] || want.data[4 * i] !== got.data[4 * i]) cellsDiffer++;
+            // a decision: whether the cell lifts, its integer hop and its landing hop (the lifted amount itself is
+            // min(sand, slab), a float the port's sand carries to its last bits)
+            if (im === 'outPlan') {
+                for (let i = 0; i < n; i++) {
+                    const o = 4 * i;
+                    if ((want.data[o] > 0) !== (got.data[o] > 0) || want.data[o + 1] !== got.data[o + 1] ||
+                        want.data[o + 2] !== got.data[o + 2] || want.data[o + 3] !== got.data[o + 3]) cellsDiffer++;
+                }
+            }
         }
-        out[key] = { worst_over_range: +worst.toPrecision(3), where, ...(key.startsWith('dune_activate') ? { plan_cells_that_differ: cellsDiffer } : {}) };
+        out[key] = { worst_over_range: +worst.toPrecision(3), where, ...(key.includes('dune_activate') ? { decisions_that_differ: cellsDiffer } : {}) };
     }
     return out;
 }
@@ -71,13 +84,16 @@ const quiet = [];
 const log = (m) => quiet.push(m);
 const results = [];
 
-for (const seed of seeds) {
-    const dir = S.W.floorRun('dunes', seed, 'base');
-    if (!dir) {
-        S.W.skip(`dunes seed ${seed}`, 'tests/parity/floor_runs.sh --recipes dunes makes the floor run');
+const runDirs = seeds.map((s) => [S.W.floorRun('dunes', s, 'base'), s]);
+for (const d of extraRuns) runDirs.push([d, C.readJson(`${d}/run.json`)?.seed ?? null]);
+for (const [dir, seedOf] of runDirs) {
+    if (!dir || !S.W.exists(`${dir}/stages/stages.json`)) {
+        S.W.skip(`dunes seed ${seedOf}`, 'tests/parity/floor_runs.sh --recipes dunes (or tests/wind_sand/blender_refine.py) makes the run');
         continue;
     }
     const run = await RP.loadRun(dir);
+    const kind = run.header.values?.kind ?? 'star';
+    const seed = kind === 'star' ? run.header.seed : `${run.header.seed} (${kind})`;
     const main = run.header.main_index;
     const mainCall = run.stages.find((s) => s.level === main)?.call;
     const mainFloor = run.floors[mainCall];
@@ -88,9 +104,10 @@ for (const seed of seeds) {
     A.clearTiles();
     A.prepare(run.header.values, run.levels);              // what the recipe's prepare hook does before the levels run
     T.ok(`dunes seed ${seed}: the recipe's prepare hook is the solver's (it records the level stack)`, typeof DUNES.prepare === 'function');
+    const runTag = kind === 'star' ? `dunes_s${run.header.seed}` : `dunes_${kind}_s${run.header.seed}`;
     for (const st of run.stages) {
         const before = await RP.stageBefore(R, run, st);
-        const logDir = `${S.OUT}/replay/dunes_s${seed}/c${st.call}_${st.op}`;
+        const logDir = `${S.OUT}/replay/${runTag}/c${st.call}_${st.op}`;
         const pl = new RP.PortLog(G, logDir, { mainLevel: main }).start();
         Object.assign(G.context, { op: st.op, call: st.call, level: st.level, pass: st.pass_index, prepass: null, end: null });
         const t0 = performance.now();
@@ -111,8 +128,9 @@ for (const seed of seeds) {
         }
         const f = await RP.compareAfter(run, st, before.fields);
         const worst = Object.entries(f.fields).sort((a, b) => b[1].over - a[1].over);
+        const borrowed = run.floors[st.call]?.borrowed_from_call !== undefined;
         T.ok(`${tag}: every field of the op's result against Blender's from the same input, within the stage floor` +
-            (st.level === main ? '' : ' (the main level\'s, borrowed: an average of the same tile)'), f.ok,
+            (borrowed ? ' (the main level\'s, borrowed: an average of the same tile)' : ''), f.ok,
             worst.map(([k, g]) => `${k} ${S.sci(g.over)} of range (tol ${S.sci(g.tol / (g.range || 1))}, floor ${S.sci(g.floor)})`).join('; ') +
             (f.missing.length ? `; missing ${f.missing}` : '') + (f.extra.length ? `; extra ${f.extra}` : ''));
         const mine = await DP.loadRun(logDir);
@@ -132,14 +150,16 @@ for (const seed of seeds) {
                 counts_that_differ: d.counts_that_differ.slice(0, 10), uniforms_over_4_steps: d.uniforms_over_4_steps,
                 worst_uniforms: d.worst_uniforms, readbacks: d.readbacks }, snapshots: { ok: sn.ok, keys: sn.keys, compared: sn.compared,
                 worst: sn.worst, failures: sn.failures.slice(0, 20), only_port: sn.only_port } });
-        if (st.level === 0) {
-            T.ok(`dunes seed ${seed}: the growth call's time beside Blender's (recorded, not graded)`, true, `${seconds} s against Blender's ${st.seconds} s`);
+        if (summary.dispatches > 10) {
+            T.ok(`${tag}: the call's time beside Blender's (recorded, not graded)`, true, `${seconds} s against Blender's ${st.seconds} s`);
             const table = await snapshotTable(run, logDir);
             results[results.length - 1].snapshot_table = table;
             const first = Object.entries(table).filter(([k]) => k.endsWith('#1'));
-            T.ok(`dunes seed ${seed}: at each kernel's first dispatch the snapshots are within the kernel grade, and dune_activate's plan records are Blender's (recorded)`,
-                first.every(([k, v]) => v.worst_over_range <= 1e-4 || k.startsWith('route')),
-                first.map(([k, v]) => `${k} ${S.sci(v.worst_over_range, 2)}${v.plan_cells_that_differ !== undefined ? ` (${v.plan_cells_that_differ} plan cells differ)` : ''}`).join('; '));
+            if (first.length) {
+                T.ok(`${tag}: at each kernel's first dispatch the snapshots are within the kernel grade, and dune_activate's decisions are Blender's (recorded)`,
+                    first.every(([k, v]) => v.worst_over_range <= 1e-4 || k.startsWith('route')),
+                    first.map(([k, v]) => `${k} ${S.sci(v.worst_over_range, 2)}${v.decisions_that_differ !== undefined ? ` (${v.decisions_that_differ} decisions differ)` : ''}`).join('; '));
+            }
         }
         for (const name of Object.keys(before.fields)) before.fields[name]?.destroy?.();
         for (const p of Object.values(before.pins)) p.destroy?.();
