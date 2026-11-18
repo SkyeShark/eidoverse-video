@@ -64,8 +64,8 @@ def individuals(only=None):
             if kind != 'seedthree' or (only and ident not in only):
                 continue
             level = 'card' if float(s['lod']['billboard_m']) > float(s['lod']['hero_m']) else 'full'
-            for sd in seeds:
-                key = (ident, int(sd), json.dumps(opts, sort_keys=True))
+            for sd in seeds:                             # an individual as SeedThree grows it (its tone left out)
+                key = (ident, int(sd), json.dumps(PI.grown_dials(opts), sort_keys=True))
                 k, size, users, lv = out.get(key, (s['kind'], float(s['size_m'][1]), [], level))
                 users.append(f"{eco['name']}/{s['name']}")
                 out[key] = (k, max(size, float(s['size_m'][1])), users, lv)
@@ -194,13 +194,16 @@ def alpha_texels(species, seed, dials):
     return np.concatenate(out) if out else None
 
 
+CUT_RANGE = (0.2, 0.9)              # a cut-out lower than 0.2 keeps the bake's faint fringe, higher than 0.9 frays it
+
+
 def matching_cut(alpha, area_ratio, cut=PI.ALPHA_CUT):
     """The cut-out threshold that keeps 1 / area_ratio of the texels the default one keeps (the billboard's
-    silhouette scaled to its card level's): the default when the areas already agree within 10 %."""
+    silhouette scaled to its card level's), within CUT_RANGE: the default when the areas already agree within 10 %."""
     if alpha is None or abs(area_ratio - 1.0) <= 0.10:
         return cut
     want = float((alpha > cut).mean()) / area_ratio
-    lo, hi = (cut, 0.97) if area_ratio > 1.0 else (0.02, cut)
+    lo, hi = (cut, CUT_RANGE[1]) if area_ratio > 1.0 else (CUT_RANGE[0], cut)
     for _ in range(40):
         mid = 0.5 * (lo + hi)
         if float((alpha > mid).mean()) > want:

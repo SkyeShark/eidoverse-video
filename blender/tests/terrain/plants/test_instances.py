@@ -13,6 +13,9 @@ a sparse stand planned on the synthetic valley (_ground.py) and instanced for a 
               the camera
   billboards  the realised billboard mesh carries each plant's card centre and yaw (eido_bb_origin, eido_bb_yaw),
               and its material reads them instead of Object Info
+  tint        each plant's own tone: the billboards read it from the mesh, the card and full levels from the instance
+  match       a tree's billboard takes its measured gain on its foliage only, and its cut-out threshold
+              (BILLBOARD_GAIN); a shrub without a match keeps SeedThree's billboard
   ground      no plant floats or is buried: each plant's lowest point lies where its base (the ground less its sink)
               puts it (a SeedThree plant reaches below its base by its own grown amount, scaled)
   height      each plant stands scale x size_m[1] tall above its base (a flora plant within its stroke's own height
@@ -51,10 +54,17 @@ def check(name, ok, detail=''):
     return ok
 
 
+FIR = ('douglasFir', 11, {'height': 30, 'paramOverrides': {'length': {1: 0.14}, 'downAngle': {1: 98}}})
+
+
 def ecotope():
     """A sparse stand: SeedThree shrubs at least 6 m apart, flora grass tufts at least 1.1 m apart (so each
-    plant's geometry is its own), everywhere on the valley."""
+    plant's geometry is its own), a few firs (the alpine spruce's individual) far apart, everywhere on the valley."""
     return dict(title='instancer test', species=[
+        dict(name='fir', kind='tree', source=('seedthree', FIR[0], FIR[2], [FIR[1]]), size_m=(20.0, 30.0),
+             core_m=25.0, max_cell_m=None, max_radius_m=200.0, lod_m_per_m=0.0, fade=(1.0, 1.0),
+             cluster=dict(parents_per_ha=4.0, mu=2.0, sigma_m=20.0), density='0.0008', on=EVERYWHERE,
+             lod=dict(hero_m=30.0, billboard_m=60.0, near_m=0.0)),
         dict(name='shrub', kind='shrub', source=('seedthree', 'blackbrush', {}, [7]), size_m=(0.9, 1.5),
              core_m=7.0, foot_m=1.0, max_cell_m=None, max_radius_m=110.0, lod_m_per_m=0.0, fade=(1.0, 1.0),
              cluster=dict(parents_per_ha=40.0, mu=3.0, sigma_m=10.0), density='0.012', on=EVERYWHERE,
@@ -156,6 +166,9 @@ def main():
     for o in plant['objects']:
         bpy.data.objects.remove(o, do_unlink=True)
 
+    # a measured billboard match for the fir, and none for the shrub: the fir's gain on its foliage only
+    PI.BILLBOARD_GAIN[(FIR[0], FIR[1], json.dumps(PI.grown_dials(json.loads(json.dumps(FIR[2]))),
+                                                  sort_keys=True))] = dict(gain=(0.8, 0.9, 1.1), alpha=0.6)
     ti = time.time()
     made = PI.instance_plants(spots, None, log=None)
     secs = time.time() - ti
@@ -267,6 +280,29 @@ def main():
           and all(reads_tint(m, 'INSTANCER') for m in near_mats),
           f"{len(mats)} billboard and {len(near_mats)} near materials: "
           + ', '.join(sorted(m.name for m in near_mats))[:300])
+
+    # the match: a tree's billboard takes its measured gain on its foliage only and its cut-out threshold; a shrub
+    # without a measured match keeps SeedThree's billboard (no gain, the 0.35 cut-out)
+    def bb_mats(species):
+        col = next(c for c in bpy.data.collections if c.name.endswith(f'_{species}_billboard_source'))
+        return [m for ch in col.children for o in ch.objects for m in o.data.materials if m]
+
+    def cut_of(m):
+        return [round(n.inputs[1].default_value, 3) for n in m.node_tree.nodes
+                if n.bl_idname == 'ShaderNodeMath' and n.operation == 'GREATER_THAN' and n.inputs[0].links
+                and n.inputs[0].links[0].from_socket.name == 'Alpha']
+    fir_m, shrub_m = bb_mats('fir'), bb_mats('shrub')
+
+    def foliage_mask(m):
+        return any(n.bl_idname == 'ShaderNodeMapRange' and abs(n.inputs['From Max'].default_value
+                                                                - PI.FOLIAGE_EDGE) < 1e-6 for n in m.node_tree.nodes)
+    masked = all(foliage_mask(m) for m in fir_m)
+    plain = not any(foliage_mask(m) for m in shrub_m)
+    check('match: the tree\'s billboard takes its gain on its foliage only and its cut-out, the unmatched shrub\'s '
+          'stays as SeedThree baked it', bool(fir_m) and masked and plain
+          and all(cut_of(m) == [0.6] for m in fir_m) and all(cut_of(m) == [PI.ALPHA_CUT] for m in shrub_m),
+          f"fir {[m.name for m in fir_m]} cut-outs {[cut_of(m) for m in fir_m]}; shrub cut-outs "
+          f"{[cut_of(m) for m in shrub_m]}")
 
     # ground and height, plant by plant and level by level: each level's geometry stands where that level's own
     # extent, scaled to the spot, puts it over the spot's base (the ground less its sink). SeedThree's levels reach

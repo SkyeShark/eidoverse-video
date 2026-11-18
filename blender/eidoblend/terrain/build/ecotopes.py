@@ -22,7 +22,10 @@ An ecotope is a dict:
         kind         'tree', 'shrub', 'grass', 'forb' or 'groundcover': it sets the defaults below (KINDS)
         source       what an instancer grows for it:
                        ('seedthree', species, dials, seeds)   a SeedThree species (make_seed_tree) with its dials,
-                                                              one individual per seed
+                                                              one individual per seed; dials['eidoGain'] = (r, g, b)
+                                                              is the eidoverse side's tone on its albedo, set
+                                                              against the photographs (plant_instances: copies of
+                                                              its materials; SeedThree never sees it)
                        ('flora', species, opts)               a flora-family species (create_flora) with its options;
                                                               opts['seeds'] lists the individuals (default [7]);
                                                               opts['gain'] = (r, g, b) multiplies the plant's colour
@@ -59,8 +62,10 @@ An ecotope is a dict:
         ground       the material layer the species implies under it (litter under conifers), a layer name of the
                      palette, or None
         max_radius_m how far from the focus it is placed
-        max_cell_m   the coarsest level cell it is placed on (None: any level): shrubs want 4 m cells or finer,
-                     grass the finest levels, so a plant is never placed on ground that does not resolve its site
+        max_cell_m   the coarsest level cell it is placed on (None, every kind's default: any level). Densities
+                     read the coarse levels whatever level holds a plant, and height_at lies on the rendered
+                     triangles of every ring, so an eye view standing on a context ring (the crater's plain,
+                     Schynige) gets its undergrowth too; a species may still keep to finer levels
         lod_m_per_m  the smallest size kept grows by this much per metre from the focus (as the rocks' does)
         fade         (from, to) fractions of max_radius_m over which the species thins out to nothing (the band the
                      material's far canopy takes over in)
@@ -92,8 +97,9 @@ without a bake. Plus the plant layer's derived names (plants.DERIVED_NAMES):
     soil          loose cover the roots hold in, metres: deposit + talus + sand (scaled by `settle` when a surface
                   bake gives it)
     insolation    0..1: the cosine between the 20 m normal and the place's climatological sun
-    dist_channel  metres to the nearest stream (cells whose `channels` mask is on, or whose `flow` is at least
-                  channel_flow, on the main and context levels): pow(0.5, dist_channel / 30) halves every 30 m
+    dist_channel  metres to the nearest stream (cells whose `flow` is at least channel_flow, or, with channel_mask 1,
+                  whose `channels` mask is on, on the main and context levels): pow(0.5, dist_channel / 30) halves
+                  every 30 m
     shade         0..1: the shade of the shade-casting plants already placed
     ledge         0..1: the strata relief's ledges (0 until the material's strata_array is there to read)
 One level for every density (design 4.2, change 9): every name a density, a stature or an `around.where` reads is
@@ -132,26 +138,29 @@ KINDS = {
                  shade=dict(tolerance=0.5, radius=1.0), lod=dict(hero_m=40.0, billboard_m=120.0, near_m=0.0),
                  sink=0.3, align=0.0, max_count=50000, fade=(0.8, 1.0),
                  age=dict(shape=2.2, scale=0.6, stand=0.6), cluster=dict(parents_per_ha=60.0, mu=5.0, sigma_m=7.0)),
-    'shrub': dict(priority=1, max_radius_m=400.0, max_cell_m=4.0, lod_m_per_m=0.003, roots_m=0.8, casts_shade=False,
+    'shrub': dict(priority=1, max_radius_m=400.0, max_cell_m=None, lod_m_per_m=0.003, roots_m=0.8, casts_shade=False,
                   shade=dict(tolerance=0.5, radius=1.0), lod=dict(hero_m=25.0, billboard_m=250.0, near_m=30.0),
                   sink=0.05, align=0.0, max_count=40000, fade=(0.8, 1.0),
                   age=dict(shape=2.0, scale=0.65, stand=0.4), cluster=dict(parents_per_ha=150.0, mu=5.0, sigma_m=3.0)),
     # (crown_m of the undergrowth: a tuft's radius at full size, what its sward covers: flora's blade bunches are
     # 0.26-0.5 m across at their base scale, a daisy's head and leaves a quarter metre)
-    'grass': dict(priority=2, max_radius_m=100.0, max_cell_m=1.0, lod_m_per_m=0.006, roots_m=0.4, casts_shade=False,
+    # (fade: the undergrowth thins out over the far half of its radius, a sward that ends as a meadow does, not a
+    # line: the material carries no grass cover beyond the tufts until the surface bake registers grass_far, and the
+    # dunes' sward ended in a line at 160 m, 11-14)
+    'grass': dict(priority=2, max_radius_m=100.0, max_cell_m=None, lod_m_per_m=0.006, roots_m=0.4, casts_shade=False,
                   crown_m=0.25,
                   shade=dict(tolerance=0.3, radius=1.0), lod=dict(hero_m=0.0, billboard_m=0.0, near_m=25.0),
-                  sink=0.0, align=0.0, max_count=60000, fade=(0.75, 1.0),
+                  sink=0.0, align=0.0, max_count=60000, fade=(0.5, 1.0),
                   age=dict(shape=2.5, scale=0.7, stand=0.3), cluster=dict(parents_per_ha=1000.0, mu=8.0, sigma_m=1.2)),
-    'forb': dict(priority=2, max_radius_m=80.0, max_cell_m=1.0, lod_m_per_m=0.006, roots_m=0.3, casts_shade=False,
+    'forb': dict(priority=2, max_radius_m=80.0, max_cell_m=None, lod_m_per_m=0.006, roots_m=0.3, casts_shade=False,
                  crown_m=0.12,
                  shade=dict(tolerance=0.3, radius=1.0), lod=dict(hero_m=0.0, billboard_m=0.0, near_m=25.0),
-                 sink=0.0, align=0.0, max_count=20000, fade=(0.75, 1.0),
+                 sink=0.0, align=0.0, max_count=20000, fade=(0.5, 1.0),
                  age=dict(shape=2.5, scale=0.7, stand=0.3), cluster=dict(parents_per_ha=400.0, mu=8.0, sigma_m=1.0)),
-    'groundcover': dict(priority=3, max_radius_m=40.0, max_cell_m=0.6, lod_m_per_m=0.004, roots_m=0.2, crown_m=0.15,
+    'groundcover': dict(priority=3, max_radius_m=40.0, max_cell_m=None, lod_m_per_m=0.004, roots_m=0.2, crown_m=0.15,
                         casts_shade=False, shade=dict(tolerance=0.7, radius=1.0),
                         lod=dict(hero_m=0.0, billboard_m=0.0, near_m=15.0), sink=0.0, align=0.0, max_count=20000,
-                        fade=(0.75, 1.0), age=dict(shape=2.5, scale=0.7, stand=0.3),
+                        fade=(0.5, 1.0), age=dict(shape=2.5, scale=0.7, stand=0.3),
                         cluster=dict(parents_per_ha=2000.0, mu=10.0, sigma_m=0.6)),
 }
 
@@ -160,6 +169,7 @@ KINDS = {
 # sun_elevation_deg), the one the bake and the material read
 CONSTANTS = {
     'channel_flow': 0.8,            # the `flow` a cell needs to count as a stream for dist_channel
+    'channel_mask': 1.0,            # 1: the main and context levels' `channels` mask counts too (rills); 0: flow alone
 }
 
 # `site`: the palettes' `plants` term (palettes.DERIVED) on the 20 m slope and aspect, the suitability a density
@@ -178,14 +188,21 @@ _SPRUCE = ('seedthree', 'douglasFir', _NARROW_CONIFER, [11, 23])
 # a broadleaf of the valley floors and stream sides (sycamore maple, ash and alder at Lauterbrunnen): the red maple
 _MAPLE = ('seedthree', 'redMaple', dict(), [5, 17])
 # a broadleaf's card level (SeedThree's LOD2) is bare branches with a few leaf cards beside its full crown, a winter
-# tree in summer (the red maple's covers about two thirds of its full level's area, 11-18, match_billboards.py), and
-# a stand of them read as an orchard on bare grey trunks: such a tree goes from its full level (the nearest within
-# 40 m) straight to its billboard, which is matched to the full level
+# tree in summer, and a stand of them read as an orchard on bare grey trunks; the pine's is as thin. Measured with
+# match_billboards.py (11-18), the card level covers 0.62-0.63 of the full level's area for the red maple and the
+# pine, 0.75-0.77 for the narrow Douglas fir (kept) and 0.97-0.99 for the shrubs: such a tree goes from its full
+# level (the nearest within 40 m) straight to its billboard, which is matched to the full level
 _BROADLEAF_LOD = dict(hero_m=40.0, billboard_m=40.0)
 # blackbrush's stems: SeedThree's dormant slate grey (its own measurement, linear 0.40, 0.42, 0.47) from the species'
 # bark texture; the species' bark tint, made for the app's light, leaves the brown texture magenta-grey (red and blue
 # over green), which reads lavender under a daylit sky
 _BLACKBRUSH_BARK = 0xb4c8e4
+# the desert shrubs' tones against tw_04 (11-18, the canyon's approach_walk beside it, its ground half as bright as
+# the photograph's, so set against the ground): blackbrush still read lavender (sRGB 92, 87, 97, where the shrub is
+# a dark grey-olive in the field), and sagebrush snow-white and cool (L* 67, b* -0.4 against the photograph's silver
+# grey-green, L* 68, b* +8.9, beside soil of L* 60 where the render's is 44.5)
+_BLACKBRUSH_TONE = (0.85, 0.95, 0.6)
+_SAGE = ('seedthree', 'sagebrush', dict(eidoGain=(0.62, 0.6, 0.48)), [3])
 # flora's dry grass (galleta_dry, its straw recolour) keeps the blade atlas's luminance, about 0.2 linear, and renders
 # dark olive: the Namib's sward in namib_star_dunes_02 is 2.6, 2.8 and 1.7 times as bright (linear R, G, B) as the
 # grass band of the 11-14 interdune render, which mixes in some ground; the gain takes most of that
@@ -199,6 +216,9 @@ ECOTOPES = {
     'alpine': dict(
         title='Alpine: spruce forest on the valley sides, maples along the streams of the floor, meadow grass and '
               'flowers near the camera',
+        # the floor's broadleaves follow its river, not the rills the channels mask marks on every slope foot (at
+        # Lauterbrunnen's floor camera 248 rill cells within 400 m, where the river runs 150-400 m off)
+        constants=dict(channel_mask=0.0),
         species=[
             # spruce holds the 12-55 degree sides below the treeline, north faces and hollows first (the palette's
             # forest layer, on terrain terms alone); the floor is cleared pasture; the avalanche tracks down the
@@ -206,7 +226,11 @@ ECOTOPES = {
             # stay low (krummholz, a third of their height at the line)
             # (crown_m: the narrow Douglas fir grown for it is 11.2-11.4 m across at 29-33 m, a crown radius of 5.9 m
             # at 32 m against the 2.3 m its trunks keep apart)
-            dict(name='spruce', kind='tree', source=_SPRUCE, size_m=(7.0, 32.0), core_m=2.3, crown_m=5.9,
+            # (on rock: the spruce holds the valley sides to about 60 degrees by its density's own slope terms, the
+            # ledges and talus of the lower walls; the bare-rock rule, which bares slopes from 40 degrees at the main
+            # level's cells, stripped the forest from Lauterbrunnen's sides, which lauterbrunnen_15 shows wooded
+            # (11-18, ridge_schynige))
+            dict(name='spruce', kind='tree', source=_SPRUCE, size_m=(7.0, 32.0), core_m=2.3, crown_m=5.9, on=('rock',),
                  stature='0.25 + 0.75*smoothstep(treeline_m + 80, treeline_m - 300, altitude + 100*northness_20m)',
                  cluster=dict(parents_per_ha=110.0, mu=6.0, sigma_m=7.0), range_per_ha=(200.0, 660.0),
                  ground='forest', shade=dict(tolerance=0.6, radius=1.0),
@@ -246,14 +270,14 @@ ECOTOPES = {
             # hollows and fewer on the convex rims, none in the washes or on thick fill
             # (crown_m: the blackbrush grown is 2.1-2.2 m across at 1.5 m, a fifth of that below its base)
             dict(name='blackbrush', kind='shrub',
-                 source=('seedthree', 'blackbrush', dict(barkTint=_BLACKBRUSH_BARK), [7, 19]),
+                 source=('seedthree', 'blackbrush', dict(barkTint=_BLACKBRUSH_BARK, eidoGain=_BLACKBRUSH_TONE), [7, 19]),
                  size_m=(0.35, 1.0), core_m=0.55, crown_m=0.85, range_per_ha=(250.0, 1200.0),
                  cluster=dict(parents_per_ha=200.0, mu=6.0, sigma_m=4.0),
                  density='0.12 * smoothstep(30, 16, slope_20m) * smoothstep(0.3, 0.6, site + 0.15*concave_20m '
                          '- 0.2*convex_20m + 0.2*(fbm(60, 1) - 0.5)) * smoothstep(0.93, 0.85, flow) '
                          '* (1 - 0.75*smoothstep(1.0, 6.0, deposit))'),
             # big sagebrush and snakeweed: grey shrubs where water gathers, along the wash margins and in the swales
-            dict(name='sagebrush', kind='shrub', source=('seedthree', 'sagebrush', dict(), [3]),
+            dict(name='sagebrush', kind='shrub', source=_SAGE,
                  size_m=(0.4, 1.3), core_m=0.6, crown_m=0.95, range_per_ha=(40.0, 320.0),
                  cluster=dict(parents_per_ha=80.0, mu=4.0, sigma_m=5.0),
                  density='0.032 * smoothstep(24, 10, slope_20m) * smoothstep(0.45, 0.75, site + 0.35*wetness '
@@ -287,7 +311,7 @@ ECOTOPES = {
                          '* smoothstep(treeline_m + 80, treeline_m - 150, altitude + 100*northness_20m)'),
             # (crown_m: the pine grown is 13.4 m across at 20 m)
             dict(name='pine', kind='tree', source=('seedthree', 'pine', dict(height=20), [9]), size_m=(5.0, 22.0),
-                 core_m=2.8, crown_m=7.4, cluster=dict(parents_per_ha=40.0, mu=4.0, sigma_m=10.0),
+                 core_m=2.8, crown_m=7.4, lod=_BROADLEAF_LOD, cluster=dict(parents_per_ha=40.0, mu=4.0, sigma_m=10.0),
                  range_per_ha=(20.0, 160.0), shade=dict(tolerance=0.2, radius=1.2),
                  density='0.016 * smoothstep(0.2, 0.45, site) * smoothstep(0.25, 0.6, insolation + 0.3*convex_20m) '
                          '* smoothstep(44, 30, slope_20m) '
@@ -302,8 +326,10 @@ ECOTOPES = {
         species=[
             # dune grass (the Namib's bushman grass, Great Sand Dunes' ricegrass): tufts on thin sand and gravel, in
             # drifts with bare ground between; none on the active dunes
+            # (to 300 m, where a tuft spans a pixel or two from the eye height, the far tufts dropped first by their
+            # size for their distance: the sward thins into the floor rather than ending)
             dict(name='dune grass', kind='grass', source=('flora', 'galleta_dry', dict(_DRY, seeds=[7, 13])),
-                 size_m=(0.25, 0.65), core_m=0.24, max_radius_m=160.0, lod_m_per_m=0.004, on=('sand',),
+                 size_m=(0.25, 0.65), core_m=0.24, max_radius_m=300.0, lod_m_per_m=0.002, on=('sand',),
                  cluster=dict(parents_per_ha=1500.0, mu=9.0, sigma_m=1.8), range_per_ha=(2500.0, 13500.0),
                  density='1.3 * smoothstep(3.0, 0.4, sand) * smoothstep(9, 3, slope_20m) '
                          '* smoothstep(0.3, 0.55, 0.5*site + 0.5*fbm(30, 2))'),
@@ -321,7 +347,7 @@ ECOTOPES = {
                  cluster=dict(parents_per_ha=2500.0, mu=9.0, sigma_m=1.4), range_per_ha=(5000.0, 22500.0),
                  density='2.2 * smoothstep(0.2, 0.5, site) * smoothstep(16, 7, slope_20m) '
                          '* (1 - smoothstep(0.15, 0.45, convex_20m))'),
-            dict(name='sagebrush', kind='shrub', source=('seedthree', 'sagebrush', dict(), [3]),
+            dict(name='sagebrush', kind='shrub', source=_SAGE,
                  size_m=(0.4, 1.2), core_m=0.6, crown_m=0.9, cluster=dict(parents_per_ha=50.0, mu=4.0, sigma_m=5.0),
                  range_per_ha=(20.0, 200.0),
                  density='0.02 * smoothstep(0.4, 0.7, site + 0.3*wetness + 0.2*concave_20m) '
