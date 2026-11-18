@@ -18,6 +18,7 @@ Both: 960 x 540, 16 samples, make_sky daylight (the sun 70 degrees left of the f
 AgX at exposure -0.5, H.264 High yuv420p with a silent AAC track and faststart (ordinary players open them), checked
 with ffprobe and a full decode. Writes out/surfacing_judge/videos/<recipe>_<kind>[_<tag>].mp4 and videos.json.
 """
+import gc
 import json
 import math
 import os
@@ -97,7 +98,7 @@ def key(cam, f):
     cam.keyframe_insert('rotation_euler', frame=f)
 
 
-def render_animation(sc, cam, t, n, fps, cache, frames, raw, log):
+def render_animation(sc, cam, plant_objects, n, fps, cache, frames, raw, log):
     """make_sky over the frames (the sun fixed where the first frame puts it), the plants bound to its sun, every frame
     rendered and encoded (judge/video.encode: H.264 High yuv420p, CRF 18, faststart)."""
     from eidoblend.sky import make_sky
@@ -112,7 +113,9 @@ def render_animation(sc, cam, t, n, fps, cache, frames, raw, log):
     sky = make_sky(sc, camera=cam, world='earth', hours=RR.SUN_ELEV_HOURS, clouds='cumulus', cache_dir=cache,
                    quality='film', shadows=False, azimuth=RR.sun_azimuth_option(SH.sun_xy(cam)))
     sky.bake(frame_start=1, frame_end=n, log=SH.quiet)
-    t.bind_sun(sky.sun)
+    if any(plant_objects.values()):
+        from eidoblend.terrain.build import plant_instances as PI
+        PI.bind_sun(sky.sun)
     t_sky = time.time() - t0
     sc.render.filepath = os.path.join(frames, 'f')
     t1 = time.time()
@@ -122,6 +125,15 @@ def render_animation(sc, cam, t, n, fps, cache, frames, raw, log):
     log(f'[video] {os.path.basename(raw)}: sky {t_sky:.0f} s, {n} frames in {t_render:.0f} s ({t_render / n:.2f} s a '
         f'frame)')
     return dict(sky_s=round(t_sky, 1), render_s=round(t_render, 1), frame_s=round(t_render / n, 2))
+
+
+def release(t):
+    """The terrain's plant objects; the numpy side (the levels' fields and masks, the surface maps, the plan's
+    working arrays: several GB on a film terrain) let go before the frames, which compile every shader under the
+    job's RAM cap."""
+    objects = dict(t.plant_objects)
+    t.surface = t.plants = None
+    return objects
 
 
 def walk(a, recipe, plan, size, params, c0, log):
@@ -153,9 +165,10 @@ def walk(a, recipe, plan, size, params, c0, log):
     for f in range(n):
         SH.aim_camera(cam, tuple(path[f]), (tx, ty, tz), v['frame'], v['lens'])
         key(cam, f + 1)
-    return sc, cam, t, n, dict(view=v['name'], terrain=source, build_s=round(build_s, 1), walk_m=round(length, 1),
-                               start=[round(ex, 1), round(ey, 1)], plants=(t.info.get('plants') or {}).get('counts'),
-                               far_material=len(t.obj.data.materials) > 1)
+    info = dict(view=v['name'], terrain=source, build_s=round(build_s, 1), walk_m=round(length, 1),
+                start=[round(ex, 1), round(ey, 1)], plants=(t.info.get('plants') or {}).get('counts'),
+                far_material=len(t.obj.data.materials) > 1)
+    return sc, cam, release(t), n, info
 
 
 def orbit(a, recipe, plan, size, params, c0, log):
@@ -191,9 +204,10 @@ def orbit(a, recipe, plan, size, params, c0, log):
     for f in range(n):
         SH.aim_camera(cam, tuple(path[f]), (tx, ty, tz), v['frame'], v['lens'])
         key(cam, f + 1)
-    return sc, cam, t, n, dict(view=v['name'], terrain=source, build_s=round(build_s, 1), degrees=a['orbit_deg'],
-                               radius_m=round(rad, 1), plants=(t.info.get('plants') or {}).get('counts'),
-                               far_material=len(t.obj.data.materials) > 1)
+    info = dict(view=v['name'], terrain=source, build_s=round(build_s, 1), degrees=a['orbit_deg'],
+                radius_m=round(rad, 1), plants=(t.info.get('plants') or {}).get('counts'),
+                far_material=len(t.obj.data.materials) > 1)
+    return sc, cam, release(t), n, info
 
 
 def main():
@@ -212,11 +226,13 @@ def main():
         rec = dict(when=time.strftime('%Y-%m-%d %H:%M'))
         t0 = time.time()
         try:
-            sc, cam, t, n, info = (walk if kind == 'walk' else orbit)(a, recipe, plan, size, params, c0, log)
+            sc, cam, plant_objects, n, info = (walk if kind == 'walk' else orbit)(a, recipe, plan, size, params, c0,
+                                                                                 log)
+            gc.collect()
             rec.update(info)
             work = os.path.join(OUT, f'_{name}')
             raw = os.path.join(work, name + '_raw.mp4')
-            rec.update(render_animation(sc, cam, t, n, a['fps'], os.path.join(work, 'sky'),
+            rec.update(render_animation(sc, cam, plant_objects, n, a['fps'], os.path.join(work, 'sky'),
                                         os.path.join(work, 'frames'), raw, log))
             final = os.path.join(OUT, name + '.mp4')
             mux_aac(raw, final)
@@ -228,7 +244,6 @@ def main():
                 if os.path.exists(src):
                     shutil.copyfile(src, os.path.join(OUT, f'{name}_f{f:04d}.png'))
             shutil.rmtree(work, ignore_errors=True)
-            del t
         except Exception as e:                                   # noqa: BLE001 - recorded, the next video runs
             traceback.print_exc()
             rec['error'] = f'{type(e).__name__}: {e}'

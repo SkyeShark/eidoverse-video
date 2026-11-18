@@ -163,7 +163,7 @@ needs `height_at`), generate first and build after:
 from eidoblend.terrain import generate
 from eidoblend.terrain.api import place_camera
 t = generate('impact_crater', seed=1, focus=(0, -900))   # levels, masks, the ring mesh: no Blender object yet
-vp = t.viewpoint(target=(0, 0), distance=900, heading=0)  # standing south of the crater, looking north into it
+vp = t.viewpoint(target=(0, -600), distance=300, heading=0)   # on the plain south of the crater, facing its rim
 t.build(plants='auto', cameras=[vp.eye])                  # make_terrain's Blender half, same keywords
 place_camera(vp, cam)
 ```
@@ -414,8 +414,10 @@ faces over 60°, bare rock, or talus and sand deeper than the roots hold.
   the card distance at their card level, billboards beyond (one mesh of
   crossed cards, matched to the card level's colour). Shrubs keep their card
   level while they span about 4 pixels. Grass and flowers are flora strokes
-  (instances) near the focus; beyond them the material carries their cover.
-  Shrubs, grass and flowers are never realised.
+  (instances) within 60-150 m of the focus; beyond them the ground is the
+  palette's own grass or soil layer, so frame a meadow so the edge of the
+  planted grass falls behind a rise or out of the picture. Shrubs, grass and
+  flowers are never realised.
 - **After `make_sky`**, bind the SeedThree plants to its sun:
   `t.bind_sun(sky.sun)`.
 - **SeedThree** grows the trees and shrubs, through its Blender add-on
