@@ -820,7 +820,9 @@ def plan_plants(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data
                read from it (SurfaceData.maps: the masks, the bake's maps with its own drainage on hero levels, the
                plant rasters), so the expressions read the material's data; without one, the masks alone (a bake
                map an expression names then reads 0)
-    exclude    [(x, y, r), ...] discs kept clear; default the terrain's flatten areas
+    exclude    [(x, y, r), ...] discs kept clear; default the terrain's flatten areas. A disc given as
+               (x, y, r, 'crown') also keeps every plant's crown off its centre (a plant's foot at least its crown
+               radius from it): a spot a person stands on, a camera at eye height
     Returns a PlantSpots."""
     t0 = time.perf_counter()
     info = getattr(terrain, 'info', None) or {}
@@ -997,8 +999,12 @@ def _thin(s, c, ground, f, gi, exclude, feet, casters, st):
     b = ground.bounds
     dist = path_distance(f, x, y)
     ok = (x >= b[0]) & (x <= b[2]) & (y >= b[1]) & (y <= b[3]) & (dist <= gi['exact'] + gi['pad'])
-    for ex, ey, er in exclude:
-        ok &= (x - ex) ** 2 + (y - ey) ** 2 > er * er
+    for disc in exclude:
+        ex, ey, er = (float(v) for v in disc[:3])
+        reach = er
+        if len(disc) > 3 and disc[3] == 'crown':        # a spot a person stands on: outside every crown as well
+            reach = np.maximum(er, float(s.get('crown_m', s['core_m'])) * c['size'] / float(s['size_m'][1]))
+        ok &= (x - ex) ** 2 + (y - ey) ** 2 > reach * reach
     c = {k: v[ok] for k, v in c.items()}
     dist = dist[ok]
     x, y = c['x'], c['y']
@@ -1496,11 +1502,11 @@ def _strip_ext(base):
     return base
 
 
-def cache_base(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data=None):
+def cache_base(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data=None, exclude=None):
     """Where a plan of this terrain is kept in the terrain cache (design 4.5): <terrain cache entry>/plants_<key>,
-    the key a hash of the ecotope, the seed, the focus, the radius, the surface bake it read (data, its key) and the
-    plant code (plants.py, ecotopes.py, and palettes.py, whose expressions decide every density). None for a terrain
-    without a cache entry."""
+    the key a hash of the ecotope, the seed, the focus, the radius, the surface bake it read (data, its key), the
+    discs it keeps clear when given (exclude, as plan_plants takes it) and the plant code (plants.py, ecotopes.py,
+    and palettes.py, whose expressions decide every density). None for a terrain without a cache entry."""
     info = getattr(terrain, 'info', None) or {}
     if not info.get('cache_key'):
         return None
@@ -1515,9 +1521,11 @@ def cache_base(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data=
     for fn in ('plants.py', 'ecotopes.py', 'palettes.py'):
         with open(os.path.join(here, fn), 'rb') as fh:
             h.update(fh.read())
-    h.update(json.dumps([E.ecotope_hash(eco), int(seed), None if f is None else np.round(f, 3).tolist(),
-                         None if radius_m is None else float(radius_m),
-                         None if data is None else str(getattr(data, 'key', ''))]).encode('utf-8'))
+    key = [E.ecotope_hash(eco), int(seed), None if f is None else np.round(f, 3).tolist(),
+           None if radius_m is None else float(radius_m), None if data is None else str(getattr(data, 'key', ''))]
+    if exclude is not None:
+        key.append([[v if isinstance(v, str) else round(float(v), 3) for v in disc] for disc in exclude])
+    h.update(json.dumps(key).encode('utf-8'))
     return os.path.join(_cache.Cache(info['cache_key']).path, 'plants_' + h.hexdigest()[:16])
 
 

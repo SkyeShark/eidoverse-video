@@ -91,6 +91,20 @@ BILLBOARD_GAIN = {
         dict(gain=(0.851, 0.881, 1.287), alpha=0.35),                               # 10.6 -> 2.1, 0.97
     ('blackbrush', 7, '{"barkTint": 11847908, "leafColorize": 5660719, "leafTintAmount": 0.45}'):
         dict(gain=(1.321, 1.278, 1.42), alpha=0.35),                                # 6.6 -> 1.2, 1.06
+    # trees, their gain on the foliage only: the Douglas fir against its card level (it covers 0.75-0.77 of its full
+    # level's area), the broadleaves and the pine against their full level (their card levels cover 0.44-0.76 and
+    # are set aside: ecotopes._BROADLEAF_LOD)
+    ('douglasFir', 11, '{"height": 30, "paramOverrides": {"downAngle": {"1": 98}, "length": {"1": 0.14}}}'):
+        dict(gain=(0.798, 0.872, 1.116), alpha=0.694),                              # 7.9 -> 2.6, 1.02
+    ('douglasFir', 23, '{"height": 30, "paramOverrides": {"downAngle": {"1": 98}, "length": {"1": 0.14}}}'):
+        dict(gain=(0.777, 0.858, 1.102), alpha=0.694),                              # 8.1 -> 3.1, 0.95
+    ('redMaple', 5, '{}'): dict(gain=(0.72, 0.705, 1.518), alpha=0.35),             # 22.5 -> 3.5, 0.98
+    ('redMaple', 17, '{}'): dict(gain=(0.738, 0.723, 1.527), alpha=0.35),           # 21.7 -> 3.5, 1.00
+    ('pine', 9, '{"height": 20}'): dict(gain=(0.971, 1.006, 1.346), alpha=0.35),   # 6.1 -> 3.5, 0.95
+    ('whiteOak', 1737, '{"height": 9}'): dict(gain=(0.788, 0.72, 1.735), alpha=0.2),  # 21.2 -> 1.8, 0.90
+    ('americanSycamore', 5, '{"height": 16}'): dict(gain=(0.722, 0.679, 1.167), alpha=0.35),   # 16.6 -> 3.2, 1.02
+    ('sweetgum', 5, '{"height": 14}'): dict(gain=(1.005, 0.865, 1.92), alpha=0.35),   # 19.0 -> 2.4, 0.97
+    ('sweetgum', 17, '{"height": 14}'): dict(gain=(1.019, 0.87, 1.945), alpha=0.35),  # 19.1 -> 2.3, 0.98
 }
 ALPHA_CUT = 0.35                    # SeedThree's billboard cut-out threshold
 _F = {n: i for i, n in enumerate(PL.FIELDS)}
