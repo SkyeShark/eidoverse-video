@@ -23,10 +23,15 @@
 //   5 seams_levels       the same, coloured by level
 //   6.. graze_<k>        for every seam k (ring k's border): a camera 2 m above the ground on the border line, looking
 //                        along it; lit clay in the frame, and the crack test beside it: the same view at 2x
-//                        (1920 x 1080, 4x MSAA) with the terrain unlit black over a magenta backdrop under the
-//                        whole outermost window and a black sky. A camera above the ground can see the backdrop
-//                        only through a hole in the surface (a ray leaving the window never comes back under it),
-//                        so every magenta pixel is a crack. Counted, and written as graze_<k>_cracks.png
+//                        (1920 x 1080, 4x MSAA), unlit: the terrain's front faces black, its back faces (the same
+//                        triangles drawn again) magenta and pushed back by a depth bias, a magenta backdrop under
+//                        the whole outermost window, a black sky. From above the ground a line of sight meets a back
+//                        face, the skirt from inside or the backdrop only through a hole in the surface (a ray
+//                        leaving the window never comes back under it), and the bias keeps a back face behind the
+//                        front face that covers it (crests, where the two tie), so every magenta pixel is a crack,
+//                        whichever way the view looks. Counted, and written as graze_<k>_cracks.png. The control
+//                        (graze_<k>_control.png) takes one triangle of the seam out, the one the ray caster finds
+//                        beside the frame's centre line three quarters of the way down: that hole must show magenta
 // The record, out/mesh_api/renders/lauterbrunnen_renders.json: cameras, the sun, the robot's shift and foot gaps, the
 // crack counts per seam.
 
@@ -54,6 +59,17 @@ const flat = (r, g, b, name) => {
     m.color.setRGB(r, g, b);
     m.toneMapped = false;
     m.name = name;
+    return m;
+};
+
+// the crack test's back faces: magenta, pushed back by a depth bias (slope-scaled and constant), so where a front
+// face covers them they lose even the exact depth ties along a crest's shared edges, and win only through a hole
+const backFaces = () => {
+    const m = flat(1, 0, 1, 'crack_back');
+    m.side = THREE.BackSide;
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = 2;
+    m.polygonOffsetUnits = 8;
     return m;
 };
 
@@ -125,8 +141,8 @@ function placeSun(S, cam, elev, centre) {
 }
 
 function setGround(S, which) {
-    const mats = which === 'levels' ? [S.levels, S.levels] : which === 'black' ? [S.black, S.black] : S.clay;
-    S.t.mesh.material = mats;
+    const one = { levels: S.levels, black: S.black }[which];
+    S.t.mesh.material = one ? [one, one] : S.clay;
 }
 
 globalThis.setup = async function () {
@@ -178,8 +194,11 @@ globalThis.setup = async function () {
     const L = Math.hypot(tx - ex, ty - ey), ux = (tx - ex) / L, uy = (ty - ey) / L;
     const rx = ex + 14.0 * ux + 1.6 * uy, ry = ey + 14.0 * uy - 1.6 * ux;
     const hAt = (x, z) => t.heightAt(x, z);                       // three.js (x, z)
+    // the body's metadata names its licence, CC BY 4.0, which three-vrm's metadata plugin refuses unless it is listed
+    const { VRMMetaLoaderPlugin } = await import('npm:@pixiv/three-vrm@3.5.2');
     const loader = new globalThis.GLTFLoader();
-    loader.register((p) => new globalThis.VRMLoaderPlugin(p));
+    loader.register((p) => new globalThis.VRMLoaderPlugin(p, { metaPlugin: new VRMMetaLoaderPlugin(p,
+        { acceptLicenseUrls: ['https://vrm.dev/licenses/1.0/', 'https://creativecommons.org/licenses/by/4.0/'] }) }));
     const gltf = await new Promise((res, rej) => loader.parse(globalThis.b64toArrayBuffer(globalThis.ASSETS.robot), '', res, rej));
     const vrm = gltf.userData.vrm;
     vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
@@ -217,6 +236,9 @@ globalThis.setup = async function () {
     backdrop.position.set(0.5 * (xmin + xmax), t.ring.heightRange[0] - 200.0, -0.5 * (ymin + ymax));
     backdrop.visible = false;
     scene.add(backdrop);
+    const back = new THREE.Mesh(t.mesh.geometry, backFaces());     // the same triangles, their undersides
+    back.visible = false;
+    scene.add(back);
     const crackRT = new THREE.RenderTarget(2 * WIDTH, 2 * HEIGHT, { samples: 4 });
     const camera = new THREE.PerspectiveCamera(50, WIDTH / HEIGHT, 0.05, 80000);
 
@@ -224,7 +246,8 @@ globalThis.setup = async function () {
     globalThis._s = scene;
     globalThis._c = camera;
     globalThis._L = { t, TM, C, G, Io, renderer, scene, camera, sun, hemi, sky, clay, levels: levelsMaterial(),
-        black: flat(0, 0, 0, 'black'), backdrop, crackRT, vrm, outDir, ex, ey, tx, ty, ux, uy, rx, ry, hAt, refEye,
+        black: flat(0, 0, 0, 'crack_front'), back, backdrop, crackRT, vrm, outDir,
+        ex, ey, tx, ty, ux, uy, rx, ry, hAt, refEye,
         rec: { save: man.save, terrain: { levels: t.levels.map(String), triangles: t.ring.triangleCount, rings: t.ring.rings.length },
             robot: { at_blender: [rx, ry], facing_deg: face * 180 / Math.PI, ground_vrm_shift_m: shift, feet: gaps },
             views: {}, cracks: {}, setup_s: +((performance.now() - t0) / 1000).toFixed(1) } };
@@ -251,31 +274,13 @@ function grazeCamera(S, k) {
     else if (side === 2) { a = [x1 - s, y1]; b = [x1 - s - ahead, y1]; }
     else { a = [x0, y1 - s]; b = [x0, y1 - s - ahead]; }
     const eye = B2T(a[0], a[1], S.hAt(a[0], -a[1]) + 2.0), target = B2T(b[0], b[1], S.hAt(b[0], -b[1]));
-    return { eye, target, side: ['south', 'east', 'north', 'west'][side], ahead_m: ahead, spacing_m: [P.spec.sp * rm.unit, r.spec.sp * rm.unit] };
+    return { eye, target, side: ['south', 'east', 'north', 'west'][side], ahead_m: ahead,
+        spacing_m: [P.spec.sp * rm.unit, r.spec.sp * rm.unit] };
 }
 
-async function crackTest(S, k, cam) {
-    const { renderer, scene, crackRT } = S;
-    const bg = scene.background;
-    setGround(S, 'black');
-    S.vrm.scene.visible = false;
-    for (const l of S.t.water.lakes) l.visible = false;
-    S.backdrop.visible = true;
-    scene.background = new THREE.Color(0, 0, 0);
-    const c2 = cam.clone();
-    c2.aspect = crackRT.width / crackRT.height;
-    c2.updateProjectionMatrix();
-    renderer.setRenderTarget(crackRT);
-    await renderer.renderAsync(scene, c2);
-    renderer.setRenderTarget(null);
-    const px = await renderer.readRenderTargetPixelsAsync(crackRT, 0, 0, crackRT.width, crackRT.height);
-    scene.background = bg;
-    S.backdrop.visible = false;
-    S.vrm.scene.visible = true;
-    for (const l of S.t.water.lakes) l.visible = true;
-    // a magenta pixel (any coverage: the 4x samples resolve a sub-pixel hole to a dim magenta)
+// the magenta pixels of a readback (any coverage: the 4x samples resolve a sub-pixel hole to a dim magenta)
+function magenta(px, W) {
     let n = 0, first = null;
-    const W = crackRT.width;
     for (let q = 0; q < px.length; q += 4) {
         const r = px[q], g = px[q + 1], b = px[q + 2];
         if (r > 6 && b > 6 && g * 2 < Math.min(r, b)) {
@@ -283,12 +288,92 @@ async function crackTest(S, k, cam) {
             if (!first) first = [(q / 4) % W, Math.floor(q / 4 / W)];
         }
     }
-    // the 2x frame as a PNG (samples on the GPU, one u32 a sample, as core/io.js encodes them)
+    return [n, first];
+}
+
+// the terrain's front faces with one triangle taken out (made degenerate), sharing the vertex buffer: the control's
+// hole. One index copy, its one changed triangle written back and the next taken out by update ranges
+function holed(S, face) {
+    const g = S.t.mesh.geometry;
+    if (!S.holed) {
+        const g2 = new THREE.BufferGeometry();
+        g2.setAttribute('position', g.getAttribute('position'));
+        g2.setIndex(new THREE.BufferAttribute(g.index.array.slice(), 1));
+        g2.boundingBox = g.boundingBox.clone();
+        g2.boundingSphere = g.boundingSphere.clone();
+        S.holed = { mesh: new THREE.Mesh(g2, S.black), face: -1 };
+        S.holed.mesh.visible = false;
+        S.scene.add(S.holed.mesh);
+    }
+    const H = S.holed, idx = H.mesh.geometry.index, a = idx.array, orig = g.index.array;
+    if (H.face >= 0) {
+        a.set(orig.subarray(3 * H.face, 3 * H.face + 3), 3 * H.face);
+        idx.addUpdateRange(3 * H.face, 3);
+    }
+    a[3 * face + 1] = a[3 * face + 2] = a[3 * face];
+    idx.addUpdateRange(3 * face, 3);
+    idx.needsUpdate = true;
+    H.face = face;
+    return H.mesh;
+}
+
+async function crackTest(S, k, cam) {
+    const { renderer, scene, crackRT } = S;
+    const bg = scene.background;
+    S.vrm.scene.visible = false;
+    for (const l of S.t.water.lakes) l.visible = false;
+    S.backdrop.visible = true;
+    scene.background = new THREE.Color(0, 0, 0);
+    const c2 = cam.clone();
+    c2.aspect = crackRT.width / crackRT.height;
+    c2.updateProjectionMatrix();
+    const W = crackRT.width;
+    const shot = async () => {
+        renderer.setRenderTarget(crackRT);
+        await renderer.renderAsync(scene, c2);
+        renderer.setRenderTarget(null);
+        return renderer.readRenderTargetPixelsAsync(crackRT, 0, 0, W, crackRT.height);
+    };
+    // the control: a triangle of the seam taken out, the one just beside the frame's centre line three quarters of
+    // the way down (the camera stands on the seam line and looks along it, so that ray meets the ground at the seam;
+    // a ray exactly along the line runs through the edges two triangles share, where three's triangle test can
+    // reject both on a last bit, the brute-force loop as much as the ray caster); the hole must show
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(0.01, -0.5), c2);
+    rc.firstHitOnly = true;
+    const hit = rc.intersectObject(S.t.mesh, false)[0] ?? null;
+    S.back.visible = true;
+    let control = null, controlPx = null, holeAt = null;
+    if (hit) {
+        const h = holed(S, hit.faceIndex);
+        S.t.mesh.visible = false;
+        h.visible = true;
+        controlPx = await shot();
+        [control] = magenta(controlPx, W);
+        h.visible = false;
+        S.t.mesh.visible = true;
+        const q = hit.point.clone().project(c2);
+        holeAt = [Math.round((q.x + 1) / 2 * W), Math.round((1 - q.y) / 2 * crackRT.height)];
+    }
+    setGround(S, 'black');
+    const px = await shot();
+    S.back.visible = false;
+    scene.background = bg;
+    S.backdrop.visible = false;
+    S.vrm.scene.visible = true;
+    for (const l of S.t.water.lakes) l.visible = true;
+    setGround(S, 'clay');
+    const [n, first] = magenta(px, W);
+    // the 2x frames as PNGs (samples on the GPU, one u32 a sample, as core/io.js encodes them)
     const R = await S.G.init();
-    const f = R.field(crackRT.height, 4 * W, 1, Uint32Array.from(px), 'u32');
-    await S.Io.writePng(`${S.outDir}/lauterbrunnen_graze_${k}_cracks.png`, { field: f, width: W, height: crackRT.height, channels: 4, bitDepth: 8 });
-    f.destroy();
-    return { magenta_pixels: n, first_at_px: first, size: [W, crackRT.height] };
+    for (const [what, data] of [['cracks', px], ['control', controlPx]]) {
+        if (!data) continue;
+        const f = R.field(crackRT.height, 4 * W, 1, Uint32Array.from(data), 'u32');
+        await S.Io.writePng(`${S.outDir}/lauterbrunnen_graze_${k}_${what}.png`, { field: f, width: W, height: crackRT.height, channels: 4, bitDepth: 8 });
+        f.destroy();
+    }
+    return { magenta_pixels: n, first_at_px: first, control_magenta_pixels: control, control_face: hit?.faceIndex ?? null,
+        control_distance_m: hit?.distance ?? null, control_hole_at_px: holeAt, size: [W, crackRT.height] };
 }
 
 globalThis.renderFrame = async function (_time, frame) {
@@ -328,7 +413,8 @@ globalThis.renderFrame = async function (_time, frame) {
             rec.sun_dir = placeSun(S, camera, SUN_ELEV_DEG, g.eye);
             rec.cracks = await crackTest(S, k, camera);
             S.rec.cracks[k] = rec.cracks;
-            console.log(`[render_lauterbrunnen] seam ${k} (${g.spacing_m.join(' -> ')} m, ${g.side} border): ${rec.cracks.magenta_pixels} backdrop pixels at 2x`);
+            console.log(`[render_lauterbrunnen] seam ${k} (${g.spacing_m.join(' -> ')} m, ${g.side} border): ${rec.cracks.magenta_pixels} magenta ` +
+                `pixels at 2x; with the seam's triangle ${rec.cracks.control_distance_m?.toFixed(1)} m ahead taken out: ${rec.cracks.control_magenta_pixels}`);
         }
     }
     camera.far = 80000;

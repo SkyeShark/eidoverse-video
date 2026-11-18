@@ -141,8 +141,32 @@ function compareDispatch(a, b, gkey, acc) {
     acc.compared++;
 }
 
+/** The convergence loops the whole floor knows: every recipe and seed's base/dispatch_floor.json under a Blender
+ * key folder (the newest, tests/_where.mjs parityKeyDir, by default), as { 'op|kernel': interval, kernel: interval }
+ * with the interval the greatest common divisor of every move seen. A loop that moved under one ulp in any recipe
+ * may move in a correct port of another recipe whose own five samples happened not to move it (measured: route_area
+ * in the runner, in soil_hills and in volcano_age, by 1 to 3 intervals of 128; tower_karst's never moved), so
+ * compareLogs lets such a count differ by whole intervals too. {} without floors. */
+export function knownIntervals(keyDir = C.W.parityKeyDir()) {
+    const out = {};
+    if (!keyDir || !C.W.isDir(keyDir)) return out;
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    for (const e of Deno.readDirSync(keyDir)) {
+        if (!e.isDirectory) continue;
+        const f = C.readJson(`${keyDir}/${e.name}/base/dispatch_floor.json`);
+        for (const [k, m] of Object.entries(f?.counts_that_move ?? {})) {
+            const kernel = k.split('|').pop();
+            out[k] = gcd(out[k] ?? 0, m.interval);
+            out[kernel] = gcd(out[kernel] ?? 0, m.interval);
+        }
+    }
+    return out;
+}
+
 /** Compare two runs' logs (see the top). opts.floor: a dispatch_floor.json's content (the tolerances of the uniforms
- * after a readback, and the counts that move). Returns the report; report.ok is the verdict. */
+ * after a readback, and the counts that move); opts.intervals: { 'op|kernel' or kernel: interval } of loops a solver
+ * names as stopping on a convergence test; opts.known: knownIntervals() (the loops the whole floor saw move). A count
+ * of a loop in any of the three may differ by whole intervals. Returns the report; report.ok is the verdict. */
 export function compareLogs(A, B, opts = {}) {
     const ga = groups(A), gb = groups(B);
     const floor = opts.floor ?? null;
@@ -200,7 +224,8 @@ export function compareLogs(A, B, opts = {}) {
     const moving = new Map(Object.entries(floor?.counts_that_move ?? {}));
     const countFails = [];
     for (const c of counts) {
-        const known = moving.get(`${c.op}|${c.kernel}`) ?? opts.intervals?.[`${c.op}|${c.kernel}`] ?? opts.intervals?.[c.kernel] ?? null;
+        const known = moving.get(`${c.op}|${c.kernel}`) ?? opts.intervals?.[`${c.op}|${c.kernel}`] ?? opts.intervals?.[c.kernel] ??
+            opts.known?.[`${c.op}|${c.kernel}`] ?? opts.known?.[c.kernel] ?? null;
         const step = known?.interval ?? known ?? null;
         c.allowed = step ? (Math.abs(c.a - c.b) % step === 0) : false;
         if (!c.allowed) countFails.push(c);
@@ -314,7 +339,7 @@ if (import.meta.main) {
     const [A, B] = [await loadRun(C.W.absPath(args[0])), await loadRun(C.W.absPath(args[1]))];
     if (!A || !B) { console.log(`no dispatch_log.jsonl.gz in ${!A ? args[0] : args[1]}`); Deno.exit(2); }
     const floor = floorFile ? C.readJson(floorFile) : C.readJson(`${A.dir}/dispatch_floor.json`);
-    const r = compareLogs(A, B, { floor });
+    const r = compareLogs(A, B, { floor, known: knownIntervals(C.W.norm(`${A.dir}/../..`)) });
     delete r._uniforms;
     delete r._counts;
     if (outFile) Deno.writeTextFileSync(outFile, JSON.stringify(r, null, 1));

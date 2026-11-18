@@ -54,6 +54,9 @@
 //     Terrain.load rebuilds one from a save.
 //   - run.js (the level runner), masks.js and core/metrics.js belong to other packages of the port. Until each is in
 //     the checkout, what needs it says so by name: a terrain can then be loaded or read from the cache, not generated.
+//   - resolveCall(opts) has no counterpart: generate's first half (the recipe, the knobs, the defaults, the level
+//     plan, the cache key) as a function of its own, which generate calls, so a tool or a test can find a call's
+//     cache entry without running the call.
 
 import { crc32, inflateRawSync } from 'node:zlib';
 import * as registry from './recipes/index.js';

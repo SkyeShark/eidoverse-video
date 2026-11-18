@@ -256,7 +256,8 @@ async function selfcheck(dir, withRunPy) {
         Deno.mkdirSync(rdir, { recursive: true });
         const argv = [py, `${edition}/blender/tests/terrain/judge/run.py`, '--field', `${dir}/terrain.npz`, '--reference', mine.reference, '--no-render', '--out', rdir];
         if (info.recipe === 'real_place') console.log('  (run.py --field applies the source chain; a real_place save is judged without it by the adapter)');
-        const code = py ? await W.run(argv, { cwd: edition, log: `${rdir}/run.log` }) : -1;
+        const code = py ? await W.run(argv, { cwd: edition, log: `${rdir}/run.log`,
+            env: { ...Deno.env.toObject(), PYTHONDONTWRITEBYTECODE: '1' } }) : -1;     // nothing written into the edition
         const rv = C.readJson(`${rdir}/verdicts.json`)?.[0];
         if (!rv) {
             T.ok('judge/run.py --field --no-render on the same save (the Python on the path)', false, `exit ${code}: see ${rdir}/run.log`);

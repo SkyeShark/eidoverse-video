@@ -36,6 +36,13 @@ import * as DP from './dispatch_parity.mjs';
 
 export const SNAP_AT = [1, 10, 100, 1000, 10000];
 export const CALL_SNAP_AT = [1, 10, 100];
+// Ops whose result on a finer level depends on state an earlier call of the same op left in its module, outside its
+// arguments (tests/parity/blender_stage_dump.py WARM, which measured it): a replay of such a stage first runs the
+// run's earlier calls of that op from their own dumps, unlogged and uncompared, as the Blender stage floor does.
+export const WARM = Object.freeze({ karst: "op_karst's plan domain is set by the coarsest level's call (karst._DOMAINS)" });
+
+/** The run's earlier calls a replay of `st` runs first (WARM): every earlier call of the same op, in call order. */
+export const warmStages = (run, st) => (WARM[st.op] ? run.stages.filter((s) => s.op === st.op && s.call < st.call) : []);
 const OUTSIDE = new Set(['<prepare>', '<runner>', '<masks>', '<after>']);
 const FMT = (f) => f.format.toUpperCase();
 
@@ -308,8 +315,16 @@ export async function blenderCall(run, call) {
 
 /** Replay one stage with the port's op (see the top). opts: logDir (where the port's log of the call goes; default
  * a folder under tests/out/parity/replay/), invoke(op, { fields, level, params, seed, ctx }) to call an op another
- * way, floor (a dispatch_floor.json's content). Returns { stage, seconds, fields, dispatch, snapshots, ok }. */
+ * way, floor (a dispatch_floor.json's content), intervals (the solver's named convergence loops), warm (the stages
+ * run first; default warmStages). Returns { stage, seconds, fields, dispatch, snapshots, ok }. */
 export async function replayStage(R, G, run, st, op, opts = {}) {
+    for (const w of opts.warm ?? warmStages(run, st)) {       // the module state the run had (WARM), unlogged
+        const wb = await stageBefore(R, run, w);
+        if (opts.invoke) await opts.invoke(op, { fields: wb.fields, level: wb.level, params: structuredClone(w.params), seed: w.seed, ctx: stageContext(run, w, wb) });
+        else await op(wb.fields, wb.level, structuredClone(w.params), w.seed, stageContext(run, w, wb));
+        for (const f of Object.values(wb.pins)) f.destroy?.();
+        for (const name of Object.keys(wb.fields)) wb.fields[name]?.destroy?.();
+    }
     const before = await stageBefore(R, run, st);
     const ctx = stageContext(run, st, before);
     const main = run.header.main_index;
@@ -334,7 +349,8 @@ export async function replayStage(R, G, run, st, op, opts = {}) {
         out.fields = await compareAfter(run, st, before.fields);
         const floor = opts.floor ?? C.readJson(`${run.dir}/dispatch_floor.json`);
         const mineRun = await DP.loadRun(logDir);
-        const d = DP.compareLogs(await blenderCall(run, st.call), mineRun, { floor });
+        run._known ??= DP.knownIntervals(C.W.norm(`${run.dir}/../..`));
+        const d = DP.compareLogs(await blenderCall(run, st.call), mineRun, { floor, known: run._known, intervals: opts.intervals });
         delete d._uniforms;
         delete d._counts;
         out.dispatch = d;

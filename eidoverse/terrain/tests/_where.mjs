@@ -13,6 +13,8 @@
 //     W.blenderCmd(script, ...args)                       // argv: headless Blender through run_blender.sh, after
 //                                                         // $EIDO_GPU_WRAP's words when that is set
 //     W.denoCmd(script, ...args)                          // argv: a Deno WebGPU job, after $EIDO_GPU_WRAP's words
+//     W.gpuArgv(argv, { cwd })                            // any argv as a GPU job (the two above use it); cwd: the
+//                                                         // folder the job runs in (a queue may run it elsewhere)
 //     W.pythonCmd(script, ...args)                        // argv: Blender's Python -I (numpy only: not a GPU job)
 //     W.dem('lauterbrunnen')                              // { json, png, water, context } of a reference DEM
 //     W.external('EIDO_X_DIR', 'what it is')              // an outside input, or null after saying what to set
@@ -343,16 +345,28 @@ export function gpuWrap() {
     return words;
 }
 
-/** The argv that runs `script` in headless Blender through run_blender.sh (its args after Blender's `--`), with
- * $EIDO_GPU_WRAP's words in front when it is set (blender/tests/_where.blender_cmd). */
-export function blenderCmd(script, ...args) {
-    return [...gpuWrap(), 'bash', runBlenderSh(), String(script), ...args.map(String)];
+/** argv as a GPU job: after $EIDO_GPU_WRAP's words when it is set, started by a bash that waits for it, so a queue
+ * that checks the shell which started it (its parent process) sees a live shell and not this Deno process, which a
+ * shell's `kill -0` cannot see; argv as it is otherwise. A queue may also run its job from a folder of its own, so
+ * with opts.cwd the job changes into that folder itself, inside the wrap (give W.run the same cwd). */
+export function gpuArgv(argv, opts = {}) {
+    const wrap = gpuWrap();
+    if (!wrap.length) return argv.map(String);
+    const job = opts.cwd ? ['bash', '-c', 'cd "$0" && exec "$@"', String(opts.cwd), ...argv.map(String)] : argv.map(String);
+    return ['bash', '-c', '"$@"; exit $?', 'gpu_job', ...wrap, ...job];
 }
 
-/** The argv of a Deno WebGPU job (this Deno, this checkout's deno.json and lock), after $EIDO_GPU_WRAP's words. */
+/** The argv that runs `script` in headless Blender through run_blender.sh (its args after Blender's `--`), with
+ * $EIDO_GPU_WRAP's words in front when it is set (blender/tests/_where.blender_cmd; gpuArgv). */
+export function blenderCmd(script, ...args) {
+    return gpuArgv(['bash', runBlenderSh(), String(script), ...args.map(String)]);
+}
+
+/** The argv of a Deno WebGPU job (this Deno, this checkout's deno.json and lock), after $EIDO_GPU_WRAP's words
+ * (gpuArgv). */
 export function denoCmd(script, ...args) {
-    return [...gpuWrap(), norm(Deno.execPath()), 'run', '--config', `${REPO}/deno.json`, '--frozen', '--unstable-webgpu',
-        '--allow-all', String(script), ...args.map(String)];
+    return gpuArgv([norm(Deno.execPath()), 'run', '--config', `${REPO}/deno.json`, '--frozen', '--unstable-webgpu',
+        '--allow-all', String(script), ...args.map(String)]);
 }
 
 /** The argv of a numpy-only job in Blender's Python (-I: isolated, no user site, no environment), or null. */
