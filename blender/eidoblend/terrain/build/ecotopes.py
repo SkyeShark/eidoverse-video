@@ -499,15 +499,19 @@ RECIPE_ECOTOPES = {
             'yucca': dict(on=('sand',), range_per_ha=(2.0, 20.0),
                           density='0.002 * smoothstep(30, 12, slope_20m) * smoothstep(0.2, 0.5, site)'),
         }),
-    # a cinder-cone field on a dry plateau (SP Crater): pines scattered on the plain, none on the cones' loose
-    # cinders, straw grass between them
+    # a cinder-cone field on a dry plateau (SP Crater): juniper and pinyon scattered on the plain (the pine, grown
+    # low), none on the cones' loose cinders, straw grass between them. At 40 full-size pines a hectare the plain
+    # read as a pine wood from the eye (11-18), where sp_crater's plain is open grassland with a tree here and there
+    # (crown_m: the pine grown is 13.4 m across at 20 m, so 3.3 m in radius at 9 m)
     'cinder_cones': dict(
-        title='Cinder-cone field: scattered pines and straw grass on the plain, bare cinders on the cones',
+        title='Cinder-cone field: scattered junipers and pinyons and straw grass on the plain, bare cinders on the '
+              'cones',
         species={
             'fir': None,
-            'pine': dict(density='0.004 * smoothstep(0.35, 0.75, site + 0.25*wetness - 0.2*convex_20m) '
+            'pine': dict(size_m=(3.0, 9.0), core_m=1.6, crown_m=3.3,
+                         density='0.0012 * smoothstep(0.35, 0.75, site + 0.25*wetness - 0.2*convex_20m) '
                                  '* smoothstep(14, 7, slope_20m)',
-                         cluster=dict(parents_per_ha=14.0, mu=3.0, sigma_m=14.0), range_per_ha=(2.0, 42.0)),
+                         cluster=dict(parents_per_ha=6.0, mu=2.0, sigma_m=18.0), range_per_ha=(1.0, 12.0)),
             'ash grass': dict(density='0.7 * smoothstep(0.1, 0.36, site) * smoothstep(22, 12, slope_20m)'),
         }),
     # Crater Lake's rim stands 100-300 m under the treeline: whitebark pine and mountain hemlock parkland, and the

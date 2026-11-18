@@ -821,8 +821,8 @@ def plan_plants(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data
                plant rasters), so the expressions read the material's data; without one, the masks alone (a bake
                map an expression names then reads 0)
     exclude    [(x, y, r), ...] discs kept clear; default the terrain's flatten areas. A disc given as
-               (x, y, r, 'crown') also keeps every plant's crown off its centre (a plant's foot at least its crown
-               radius from it): a spot a person stands on, a camera at eye height
+               (x, y, r, 'crown') keeps every plant's crown off it too (a plant's foot at least r plus its crown
+               radius from the centre): a spot a person stands on, a camera at eye height
     Returns a PlantSpots."""
     t0 = time.perf_counter()
     info = getattr(terrain, 'info', None) or {}
@@ -1002,8 +1002,8 @@ def _thin(s, c, ground, f, gi, exclude, feet, casters, st):
     for disc in exclude:
         ex, ey, er = (float(v) for v in disc[:3])
         reach = er
-        if len(disc) > 3 and disc[3] == 'crown':        # a spot a person stands on: outside every crown as well
-            reach = np.maximum(er, float(s.get('crown_m', s['core_m'])) * c['size'] / float(s['size_m'][1]))
+        if len(disc) > 3 and disc[3] == 'crown':        # a spot a person stands on: no crown over the disc either
+            reach = er + float(s.get('crown_m', s['core_m'])) * c['size'] / float(s['size_m'][1])
         ok &= (x - ex) ** 2 + (y - ey) ** 2 > reach * reach
     c = {k: v[ok] for k, v in c.items()}
     dist = dist[ok]

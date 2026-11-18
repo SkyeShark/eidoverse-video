@@ -11,7 +11,7 @@ GPU. They run on a small synthetic valley (_ground.py) with the family's own mas
   stature       krummholz: toward the treeline the trees stay low and stand closer
   density       stems per hectare where a species is at home lie in the ecotope's range_per_ha
   ground        every spot stands on height_at, with the triangle's normal; none on water or in a flatten area;
-                none whose foot or crown is over a standing spot (exclude's (x, y, r, 'crown'): an eye camera)
+                no crown within r of a standing spot (exclude's (x, y, r, 'crown'): an eye camera)
   format        save / load round-trip; a Node reader (read_plants.mjs: fs and Float32Array) reads the same numbers
   pattern       the trees' pair correlation: none below the hard core, clustered at the cluster scale
   cover         the cover rasters: canopy from the placed crowns, canopy_expected from the density, shrubs; and
@@ -270,8 +270,8 @@ def test_ground(t, spots):
     check('ground: no plant in a flatten area', not (np.hypot(a[:, 0] - 100.0, a[:, 1] + 100.0) < 40.0).any())
     check('ground: no plant on water', not (np.hypot(a[:, 0] + 250.0, a[:, 1] - 150.0) < 76.0).any(),
           f'{len(a):,} plants planned around a 160 m pond')
-    # a spot a person stands on, under a spruce (exclude's (x, y, r, 'crown')): no plant's foot within r of it and
-    # no crown over it; the rest of the plan barely changes
+    # a spot a person stands on, under a spruce (exclude's (x, y, r, 'crown')): no plant's crown reaches within r
+    # of it; the rest of the plan barely changes
     full = E.get('alpine')
     before = PL.plan_plants(t, full, seed=4, radius_m=300.0, **QUIET)
     sp = before.array('spruce').astype(np.float64)
@@ -283,12 +283,10 @@ def test_ground(t, spots):
         a = after.array(n).astype(np.float64)
         crown = float(after.entry(n)['rule'].get('crown_m') or after.entry(n)['rule']['core_m'])
         if len(a):
-            worst = min(worst, float((np.hypot(a[:, 0] - x0, a[:, 1] - y0)
-                                      - np.maximum(1.5, crown * a[:, 4])).min()))
+            worst = min(worst, float((np.hypot(a[:, 0] - x0, a[:, 1] - y0) - (1.5 + crown * a[:, 4])).min()))
         lost += before.count(n) - after.count(n)
         n_all += before.count(n)
-    check('ground: a standing spot keeps every foot 1.5 m off and every crown off it', worst > 0.0
-          and 0 < lost < 0.01 * n_all,
+    check('ground: a standing spot keeps every crown 1.5 m off it', worst > 0.0 and 0 < lost < 0.01 * n_all,
           f'under the spruce at ({x0:.1f}, {y0:.1f}): the nearest plant {worst:+.2f} m past its reach; '
           f'{lost} of {n_all:,} plants gone')
 
