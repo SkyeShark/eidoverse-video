@@ -120,6 +120,20 @@ def test_case(case):
     bumps = sum(1 for tr in trees(ng).values() for n in tr.nodes if n.bl_idname == 'ShaderNodeBump')
     check(f'{case}: no Bump node evaluates the level reader (a Bump runs its height three times)', not under,
           f'{bumps} Bump nodes' + (f'; reader under a bump in {under}' if under else ''))
+    # the sector frames: hex-tiled for the box layers of the largest tiles (the cliffs), read once for the smaller
+    # box tiles under them (surfacing.STEEP_HEX_SHARE)
+    pal_d = S.resolve(pal, t.recipe, strata)
+    box = {L['set']: float(L['tile_m']) for L in pal_d['layers'] if L['projection'] == 'box'}
+    hexed = {}
+    for n in ng.nodes:
+        if n.bl_idname == 'ShaderNodeGroup' and n.node_tree is not None and n.node_tree.name.startswith('eido_layer_'):
+            if 'S0' in n.inputs:
+                tile = json.loads(n.node_tree['eido_sig'])[2]
+                hexed[tile] = 'S0 RD0' in n.inputs
+    big = max(box.values()) if box else 0.0
+    want = {tile: tile >= S.STEEP_HEX_SHARE * big for tile in hexed}
+    check(f'{case}: sector frames hex-tiled for the cliff-sized box tiles only', hexed == want,
+          f'box tiles {sorted(box.values())}: hex-tiled in their sector frames {hexed}')
     fm = S.far_material(pal, recipe=t.recipe, strata=strata, data=sd, name=f'{case}_far', log=MS.log)
     fg = next(n.node_tree for n in fm.node_tree.nodes if n.bl_idname == 'ShaderNodeGroup')
     tm = S.terrain_map_group(sd)

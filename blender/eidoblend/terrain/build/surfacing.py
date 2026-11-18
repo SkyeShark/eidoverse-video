@@ -70,12 +70,10 @@ builds the per-texel material instead:
   - planar reads are hex-tiled ('hex': three reads on a triangle grid, each turned and offset, sharpened by w^7
     and their heights; a read's coordinate changes only where its weight is 0). The grid is one node group,
     eido_hex_grid, placed once per lattice: a layer's lattice is its hex_m, by default its tile snapped to
-    2.5 x 2^n metres (hex_class), so layers of like tiles share one grid. With 'Auto' filtering the hex reads are
-    mipmapped Linear, and within detail_distance one read at the plain world coordinate (albedo Cubic, normal map
-    Linear) takes over (design 8.1's first lever; near_hex True: Cubic in every hex read). Where a hexagon is
-    narrower than a 2 x 2 pixel quad (a 2.5 m lattice from about 100-300 m on), every quad straddles a read's jump
-    and the hex reads fall to the scan's coarsest mips: the ground there shows the scan's mean, and its variation
-    comes from the terrain's data;
+    2.5 x 2^n metres (hex_class), so layers of like tiles share one grid. Where a hexagon is narrower than a 2 x 2
+    pixel quad (a 2.5 m lattice from about 100-300 m on), every quad straddles a read's jump and the hex reads fall
+    to the scan's coarsest mips: the ground there shows the scan's mean, and its variation comes from the terrain's
+    data;
   - box layers read eight fixed sector frames on faces steeper than 47 degrees (u along the strike, v up a fixed
     65-degree dip, two slots by the face's own bearing; hex-tiled inside each on one lattice, steep_hex_m, without
     turning: rock on a wall is directional, for the box layers of the largest tiles, the cliffs; a smaller box tile
@@ -158,8 +156,6 @@ DETAIL_STRENGTH = 0.5                 # the relief below the cell, by default (o
 NOISE_HALF = {'noise': 0.358, 'fbm': 0.344}
 # ... and of the raw Noise Texture's Fac (patches, streaks, damp, ledges), by detail 0..5
 RAW_HALF = (0.2, 0.163, 0.143, 0.134, 0.130, 0.128)
-CANOPY_COVER, CANOPY_SHADE = 0.72, 0.92   # a canopy's mean far away: lit crowns' share, and their shade (the far
-#                                           colour C's, surface/far_colour.py)
 HEX_VERSION = 4
 # EEVEE compiles a material with a limited number of mesh attributes: at 15 masks the alpine palette failed with
 # 'Material ... uses too many attributes' (measured 11-13; the shader reads them all as undefined variables). A
@@ -1129,6 +1125,94 @@ def _canopy(g, cn, coords, i):
     return dict(col=col, h=h, crown=crown, r_edge=r_edge, far=far, bump=bump)
 
 
+_CANOPY_MEANS = {}
+
+
+def canopy_mean(cn, n=160, slices=3, seed=11):
+    """(r, g, b) linear: what a canopy's crowns as _canopy draws them (a palette layer's canopy dict) average to where
+    a crown is finer than a pixel: the material fades them to it, and the far colour C's canopy term should be it
+    (surface/far_colour.py). Their mean colour times the mean n_z of their bump (crowns and clumps in relief: a
+    Lambertian canopy of tilted crowns returns E[n . l] = E[n_z] l_z of the sun a flat ground returns, the shading the
+    faded bump no longer draws). Computed on `slices` grids of n x n points, a tenth of a crown apart, at random
+    heights (the terrain's height moves the 3D partitions' slice), deterministic (fixed seed), with _canopy's
+    arithmetic: the crowns' and the clumps' 3D Voronoi F1 with Blender's PCG hashes and the ragged outlines' Noise
+    Texture, both from surface/noise.py's port. Measured 11-18 on the alpine forest: a lit share of 0.37 and a
+    luminance of 0.049, where the constants used before (a lit share of 0.72 at 0.92 of the crowns' mean tone) gave
+    0.085, 1.75 x too bright, and with the faded bump the forested slopes still rendered 1.13-1.17 x brighter than the
+    crowns drawn and bumped (Lauterbrunnen from Schynige Platte read as meadow)."""
+    key = json.dumps([cn, n, slices, seed], sort_keys=True, default=str)
+    if key in _CANOPY_MEANS:
+        return _CANOPY_MEANS[key]
+    from ..surface import noise as BN
+    F = np.float32
+    rng = np.random.default_rng(seed)
+    crown_m = float(cn.get('crown_m', 4.5))
+    clump_m = float(cn.get('clump_m', 0.0) or 0.0)
+    step = crown_m / 10.0
+    gx, gy = np.meshgrid(np.arange(n) * step, np.arange(n) * step)
+    co = np.concatenate([np.stack([gx.ravel() + rng.uniform(0.0, 1000.0), gy.ravel() + rng.uniform(0.0, 1000.0),
+                                   np.full(n * n, rng.uniform(0.0, 50.0 * max(crown_m, clump_m)))], 1)
+                         for _ in range(slices)], 0)
+    to_f = F(1.0 / 2147483648.0)
+
+    def f1(scale, randomness):
+        """The Voronoi node's F1 (3D, Euclidean) at co: (distance, the cell's colour (n, 3))."""
+        p = (co * scale).astype(F)
+        c = np.floor(p)
+        loc = (p - c).astype(F)
+        ic = c.astype(np.int64).astype(np.uint32)
+        r = F(min(max(randomness, 0.0), 1.0))
+        best = np.full(len(p), np.inf, F)
+        take_off = np.zeros((len(p), 3), np.int64)
+        with np.errstate(over='ignore'):
+            for k in (-1, 0, 1):
+                for j in (-1, 0, 1):
+                    for i in (-1, 0, 1):
+                        off = (i, j, k)
+                        h = BN.pcg3d_i(*[ic[:, q] + np.uint32(off[q] & 0xFFFFFFFF) for q in range(3)])
+                        d = np.sqrt(sum((F(off[q]) + np.asarray(h[q]).astype(np.int64).astype(F) * to_f * r
+                                         - loc[:, q]) ** 2 for q in range(3))).astype(F)
+                        take = d < best
+                        best = np.where(take, d, best)
+                        take_off[take] = off
+            h = BN.pcg3d_i(*[ic[:, q] + take_off[:, q].astype(np.uint32) for q in range(3)])
+        col = np.stack([np.asarray(v).astype(np.int64).astype(F) * to_f for v in h], -1)
+        return best.astype(np.float64), col.astype(np.float64)
+
+    def smooth(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    def lin(hx):
+        return np.array(P.hex_linear(hx), np.float64)
+    d, col = f1(1.0 / crown_m, 0.85)
+    rag = BN.noise_node3(co, 2.2 / crown_m, 2.0, 0.5).astype(np.float64)
+    crown = 1.0 - smooth(0.08, 0.6, d * ((col[:, 2] * 0.45 + 0.62) + rag * 0.45))
+    bump = crown ** 0.6 * float(cn.get('height_m', 3.0))
+    r1 = col[:, :1]
+    tone = lin(cn.get('colour', '#26371f'))[None] * (1.0 - r1) + lin(cn.get('light', '#3d522c'))[None] * r1
+    shade = crown * 0.4 + 0.72
+    if clump_m > 0.0:
+        dc, cc = f1(1.0 / clump_m, 1.0)
+        rag2 = BN.noise_node3(co, 2.5 / clump_m, 2.0, 0.5).astype(np.float64)
+        gap = float(cn.get('clump_gap', 0.25))
+        clump = 1.0 - smooth(0.62 - 0.4 * gap, 0.9 - 0.4 * gap, dc * (rag2 * 0.5 + 0.75))
+        tone = tone * (cc[:, :1] * 0.5 + 0.76)
+        shade = shade * (clump * 0.42 + 0.68)
+        bump = bump + clump ** 0.8 * float(cn.get('clump_height_m', 4.0))
+        crown = crown * (clump * 0.6 + 0.4)
+    lit_share = smooth(0.0, 0.32, crown)[:, None]
+    mean = (lin(cn.get('gap', '#11160d'))[None] * (1.0 - lit_share) + tone * shade[:, None] * lit_share).mean(0)
+    nz = 1.0
+    if float(cn.get('height_m', 3.0)) > 0.0:
+        hgt = bump.reshape(slices, n, n)
+        dy, dx = np.gradient(hgt, step, axis=(1, 2))
+        nz = float((1.0 / np.sqrt(1.0 + dx * dx + dy * dy)).mean())
+    out = tuple(float(v) * nz for v in mean)
+    _CANOPY_MEANS[key] = out
+    return out
+
+
 # ------------------------------------------------------------------------------------ baked surface data ---
 
 def _sock(ng, name, io, kind):
@@ -1402,10 +1486,6 @@ def _layer_group(L, S, i, opt, box, plan):
     ns = float(L['normal'])
     interp = opt['interpolation']
     dd = [float(v) for v in opt['detail_distance']]
-    # 'Auto' with hex tiling: by default the hex reads are mipmapped Linear and one read at the plain world coordinate
-    # takes over within detail_distance, its albedo Cubic (SURFACING_DESIGN.md 8.1's first lever: three Cubic reads
-    # per planar layer took the canyon's compile to 1.6 x today's); near_hex True reads Cubic in every hex read
-    near_hex = bool(opt.get('near_hex', False))
     # a box layer's far read on steep faces (the palette's far_scale, far_distance, far_contrast, far_bump and
     # macro_mod, as the material without baked data reads them): the scan once more at far_scale x the tile in each
     # sector frame, its brightness modulating the near read and its colour, height and normal taking over across
@@ -1418,7 +1498,7 @@ def _layer_group(L, S, i, opt, box, plan):
                 fc=float(L.get('far_contrast', opt.get('far_contrast', 0.65))),
                 fb=float(opt.get('far_bump', 0.5)), fh=bool(L.get('far_height', True))) if far_k > 1.0 else None
     sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, p_rot, s_hex_m, s_rot, ns, interp, dd,
-                      bool(box), i, wall, near_hex, HEX_VERSION])
+                      bool(box), i, wall, HEX_VERSION])
     ng, fresh = _new_group('eido_layer_' + hashlib.sha1(sig.encode()).hexdigest()[:12], sig)
     if not fresh:
         return ng
@@ -1482,16 +1562,13 @@ def _layer_group(L, S, i, opt, box, plan):
 
     def frame(prefix, pos, auto, size, turned):
         """A frame's read: one read at pos x (1 / tile) (lattice 0), or the three reads of its hex grid (the group's
-        inputs `prefix` RD<c>, O<c>, W<c>, CS<c>), sharpened by w^7 and their heights; with 'Auto' filtering and
-        near_hex off, the hex reads mipmapped Linear and, within detail_distance, one read at the plain world
-        coordinate cross-faded over them (near_read)."""
+        inputs `prefix` RD<c>, O<c>, W<c>, CS<c>), sharpened by w^7 and their heights."""
         if size <= 0.0:
             return one(g.vmath('SCALE', pos, scale=inv), auto)
-        near_one = auto and interp == 'Auto' and not near_hex
         o = gi.outputs
         reads, ws = [], []
         for c in range(3):
-            r = one(_vmadd(g, o[f'{prefix} RD{c}'], (inv, inv, 0.0), o[f'{prefix} O{c}']), auto and not near_one,
+            r = one(_vmadd(g, o[f'{prefix} RD{c}'], (inv, inv, 0.0), o[f'{prefix} O{c}']), auto,
                     o[f'{prefix} CS{c}'] if turned else None)
             reads.append(r)
             ws.append(g.mul(g.math('POWER', o[f'{prefix} W{c}'], HEX_POWER),
@@ -1507,22 +1584,7 @@ def _layer_group(L, S, i, opt, box, plan):
                     g.math('MULTIPLY_ADD', reads[1]['h'], o[f'{prefix} W1'], g.mul(reads[0]['h'], o[f'{prefix} W0'])))
         f = min(1.0, BLEND_PATCH_M / (HEX_PATCH * size))
         out['hs'] = hs if f >= 1.0 else g.math('MULTIPLY_ADD', g.sub(hs, 0.5), f, 0.5)
-        if near_one:
-            out = near_read(out)
         return out
-
-    def near_read(hexed_out):
-        """Within detail_distance: one read at the plain world coordinate, its albedo Cubic (sharp at grazing angles
-        at the walker's feet) and its normal map Linear at the same coordinate (so colour and shading stay one
-        stone), cross-faded to the hex blend over detail_distance (Linear beyond: still in motion far off)."""
-        P0 = g.vmath('SCALE', g.node('ShaderNodeTexCoord').outputs['Object'], scale=inv)
-        cn = _tex(g, S['albedo'], P0, 'Cubic')
-        nr = _tex(g, S['nrao'], P0, 'Linear')
-        r, gg, rough = g.separate_rgb(nr.outputs['Color'])
-        near = dict(col=cn.outputs['Color'], h=cn.outputs['Alpha'], hs=cn.outputs['Alpha'],
-                    nx=g.math('MULTIPLY_ADD', r, 2.0 * ns, -ns), ny=g.math('MULTIPLY_ADD', gg, 2.0 * ns, -ns),
-                    rough=rough, ao=nr.outputs['Alpha'])
-        return {key: g.mix('RGBA' if key == 'col' else 'FLOAT', far, near[key], v) for key, v in hexed_out.items()}
 
     def height_pair(wa, ha, hb):
         """(a's share, b's share) of two reads by weight wa (b's 1 - wa) and height: a_i = w_i + h_i / 2, kept within
@@ -2184,6 +2246,7 @@ def _surface_group_data(pal, sd, name, prefer, log):
             if shade > 0.0:
                 col = g.vmath('SCALE', col, scale=g.math('MULTIPLY_ADD', relief_rv, shade, 1.0 - shade))
         nx, ny = lg.outputs['NX'], lg.outputs['NY']
+        hs_scan = hs                                      # the scan's own soft height (mean 0.5): the overlay's
         canopy_bump = None
         if L.get('canopy'):
             cn = _canopy(g, L['canopy'], coords, i)
@@ -2191,13 +2254,9 @@ def _surface_group_data(pal, sd, name, prefer, log):
             fc = comp.fade(crown_m)
             ccol = cn['col']
             if not isinstance(fc, float):
-                # finer than a few pixels the crowns read their mean tone (the far colour's), not an aliasing
-                # Voronoi
-                cl = [0.5 * (a + b) * CANOPY_SHADE for a, b in zip(P.hex_linear(L['canopy'].get('colour', '#26371f')),
-                                                                      P.hex_linear(L['canopy'].get('light', '#3d522c')))]
-                gp = P.hex_linear(L['canopy'].get('gap', '#11160d'))
-                mc = tuple(float(gq + (c - gq) * CANOPY_COVER) for gq, c in zip(gp, cl)) + (1.0,)
-                ccol = g.mix('RGBA', fc, mc, ccol)
+                # finer than a few pixels the crowns read their mean (canopy_mean: what the crowns drawn near
+                # average to), not an aliasing Voronoi
+                ccol = g.mix('RGBA', fc, canopy_mean(L['canopy']) + (1.0,), ccol)
             kf = cn['far']
             if dat.has('canopy_far') and dat.has('canopy_expected'):
                 # the stand-in crowns cover what the instances leave to the material: off where trees stand
@@ -2265,24 +2324,29 @@ def _surface_group_data(pal, sd, name, prefer, log):
         bump_own = None
         if float(L['bump_m']) > 0 and (not box or not S['stats'].get('has_normal', True)):
             bump_own = float(L['bump_m'])                 # a set without a normal map keeps its height's bump
-        per.append(dict(L=L, cov=cov, col=col, h=h, hs=hs, nx=nx, ny=ny, pert=lg.outputs['Pert'] if box else None,
-                        rough=rough, ao=lg.outputs['AO'], box=box, ripple=ripple, canopy_bump=canopy_bump,
-                        relief=relief_h, bump_own=bump_own))
+        per.append(dict(L=L, cov=cov, col=col, h=h, hs=hs, hs_scan=hs_scan, nx=nx, ny=ny,
+                        pert=lg.outputs['Pert'] if box else None, rough=rough, ao=lg.outputs['AO'], box=box,
+                        ripple=ripple, canopy_bump=canopy_bump, relief=relief_h, bump_own=bump_own))
 
     # the overlay of the macro data and the scans' heights (SURFACING_DESIGN.md 3.2 rule 2), then the composite: a
     # layer's coverage pushed up where d > 0.5 and down where d < 0.5, unchanged at 0 and 1 and in the mean when d's
-    # mean is 0.5; d = 0.5 + height (h - 0.5) + crest crest + crest_fine crest_fine + crease crease (a layer's
-    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain). The height here and
-    # in the height blend is the layer's soft height: on the sharpened hex blend's height a layer edge ran along
-    # the hexagons' borders (a sawtooth of triangles on the canyon's brink wall)
+    # mean is 0.5; d = 0.5 + height (h - 0.5) f + crest crest + crest_fine crest_fine + crease crease (a layer's
+    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain), f the footprint's
+    # fade at the layer's tile (a scan finer than a pixel leaves the cover alone). The height is the scan's own soft
+    # height, mean 0.5: on the sharpened hex blend's height a layer edge ran along the hexagons' borders (a sawtooth
+    # of triangles on the canyon's brink wall), and a canopy's crown pattern (mean about 0.38) took a fifth of a
+    # forest's cover away (Lauterbrunnen's forested sides read as meadow, 11-18)
     if opt.get('overlay', True):
         for p in per:
             if isinstance(p['cov'], float):
                 continue
             ov = dict(height=1.0)
             ov.update(p['L'].get('overlay') or {})
-            d = g.math('MULTIPLY_ADD', g.sub(p['hs'], 0.5), float(ov.get('height', 0.0)), 0.5) \
-                if float(ov.get('height', 0.0)) else 0.5
+            amt = float(ov.get('height', 0.0))
+            d = 0.5
+            if amt:
+                k = _mul(g, comp.fade(float(p['L']['tile_m'])), amt)
+                d = g.math('MULTIPLY_ADD', g.sub(p['hs_scan'], 0.5), k, 0.5)
             for key in ('crest', 'crest_fine', 'crease'):
                 amt = float(ov.get(key, 0.0) or 0.0)
                 if amt and dat.has(key):
@@ -3099,9 +3163,7 @@ def surface_material(palette='auto', recipe=None, strata=None, options=None, nam
               default one lattice for all of them, twice the class of the largest box tile, not turned; 0: one
               read per sector frame), each a material option or a layer's own key; steep_hex_share (box layers
               with a tile under this share of the largest read each sector frame once, default 0.5; 0: every box
-              layer hex-tiled in its sector frames); near_hex (True: every hex read
-              of a planar frame 'Auto' filtered; by default one Cubic read at the plain coordinate within
-              detail_distance, design 8.1's first lever); a layer's overlay
+              layer hex-tiled in its sector frames); a layer's overlay
               dict(height, crest, crest_fine, crease), provenance dict(src, down, pale), patina and fresh_gain
               (multipliers on rock by `fresh`)
     constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m,
@@ -3304,6 +3366,6 @@ def missing_masks(obj, palette_or_names):
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
            'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
            'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'set_far_distance', 'reader_group',
-           'hex_grid_group', 'hex_class',
+           'hex_grid_group', 'hex_class', 'canopy_mean',
            'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
            'DEBUG_COLOURS']

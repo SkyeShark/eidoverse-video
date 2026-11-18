@@ -567,6 +567,13 @@ def main():
     if 'lut' in a['parts']:
         lut(sc, t, obj, sd, rec)
     path = os.path.join(MS.OUT, f"reader_{a['case']}.json")
+    if os.path.exists(path):                              # a run of some parts keeps the others' last results
+        try:
+            old = json.load(open(path, encoding='utf-8'))
+            old.update(rec)
+            rec = old
+        except (OSError, ValueError):
+            pass
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1, default=str)
     MS.log(f'[reader] done -> {path}')
