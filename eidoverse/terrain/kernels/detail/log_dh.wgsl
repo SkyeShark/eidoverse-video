@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py and blender/eidoblend/terrain/solvers/detail.py
+// at f90c6fc, as a GPU kernel.
 // log_dh: the numbers a detail op's log line reads, cell by cell (the port's own kernel, PORT_PLAN.md 3.2: numpy code
 // of blender/eidoblend/terrain/solvers/hydraulic.py op_hydraulic and detail.py op_breakup at f90c6fc moved to the
 // GPU). With d = a - b - uSeedK c (op_hydraulic: dh = fields['h'] - h_base; op_breakup: dh = fields['h'] - h_in, and

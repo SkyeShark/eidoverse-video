@@ -55,6 +55,9 @@ import * as HY from './hydro.js';
 
 const DEG = Math.PI / 180.0;
 const tanDeg = (d) => Math.tan(Number(d) * DEG);
+/** The convergence loops of this module's ops, by op and kernel (PORT_PLAN.md 5.7): their counts may differ by whole
+ * intervals. soil_hills routes its channel test's drainage area to convergence (hydro.js routeToConvergence). */
+export const CONVERGENCE_LOOPS = Object.freeze({ 'soil_hills|route_area': 128 });
 const runnerOf = (fields, ctx) => (ctx && ctx.device) || fields.h?.runner || fields.R;
 const round3 = (s) => Math.round(s * 1000) / 1000;
 const now = () => performance.now() / 1000;
@@ -62,13 +65,26 @@ const now = () => performance.now() / 1000;
 
 // ==================================================================================================== helpers ===
 
+const KERNELS = new WeakMap();
+/** The runner's Kernel of a kernel's name, looked up once per runner: R.run given a name reads the kernel's file and
+ * parses its `//!` header on every call (core/gpu.js kernel(): about 0.15 ms a dispatch on the benchmark's machine,
+ * more than the GPU's own time of a 1024^2 step's whole nine passes), so every loop here passes the Kernel. */
+export function kernelOf(R, name) {
+    let m = KERNELS.get(R);
+    if (!m) KERNELS.set(R, (m = new Map()));
+    let k = m.get(name);
+    if (!k) m.set(name, (k = R.kernel(name)));
+    return k;
+}
+
 /** One element-wise step (kernels/fluvial/ew.wgsl): a new r32f field of `shape` (default a's). */
 export function ew(R, mode, a = null, b = null, c = null, k0 = 0.0, k1 = 0.0, shape = null) {
     const D = Gd.dummies(R);
     const ref = a ?? b ?? c;
     const [h, w] = shape ?? [ref.h, ref.w];
     const out = R.field(h, w, 1);
-    R.run('fluvial/ew', { a: a ?? D.f1, b: b ?? D.f1, c: c ?? D.f1 }, { outF: out }, { uMode: mode, uK0: Number(k0), uK1: Number(k1) });
+    R.run(kernelOf(R, 'fluvial/ew'), { a: a ?? D.f1, b: b ?? D.f1, c: c ?? D.f1 }, { outF: out },
+        { uMode: mode, uK0: Number(k0), uK1: Number(k1) });
     return out;
 }
 export const EW = Object.freeze({ ADD_FREE: 0, SHIFT_SCALE: 1, HYPOT: 2, MAX_K_HYPOT: 3, MAX_A_HYPOT: 4, PIN: 5, MIN: 6,
@@ -103,12 +119,12 @@ export function thresholdPass(R, S, M, P, Q, cell, rate, looseOnly, bound, iso =
     let phis;
     if (iso) {
         if (phi === null || phi.h !== S.src.h || phi.w !== S.src.w) phi = R.field(S.src.h, S.src.w, 1);
-        R.run('threshold_excess', { st: S.src, par: P }, { outP: phi }, { uDx: Number(cell), uBound: Math.trunc(bound) });
+        R.run(kernelOf(R, 'threshold_excess'), { st: S.src, par: P }, { outP: phi }, { uDx: Number(cell), uBound: Math.trunc(bound) });
         phis = phi;
     } else {
         phis = phi ?? Gd.dummies(R).f1;
     }
-    R.run('threshold', { st: S.src, par: P, pin: Q, mk: M.src, phiT: phis }, { outS: S.dst, outM: M.dst },
+    R.run(kernelOf(R, 'threshold'), { st: S.src, par: P, pin: Q, mk: M.src, phiT: phis }, { outS: S.dst, outM: M.dst },
         { uDx: Number(cell), uRate: Number(rate), uLoose: looseOnly ? 1 : 0, uIso: Math.trunc(iso), uBound: Math.trunc(bound) });
     S.swap();
     M.swap();
@@ -139,7 +155,7 @@ export class Pass {
     }
 
     creep(cell, dtSub, D, cap, bound) {
-        this.R.run('creep', { st: this.S.src, par: this.P, pin: this.Q }, { outS: this.S.dst },
+        this.R.run(kernelOf(this.R, 'creep'), { st: this.S.src, par: this.P, pin: this.Q }, { outS: this.S.dst },
             { uDx: Number(cell), uDtSub: Number(dtSub), uD: Number(D), uCap: Number(cap), uBound: Math.trunc(bound) });
         this.S.swap();
     }
@@ -315,7 +331,8 @@ export async function downstream(R, bits, rec, maxPasses = 1 << 16) {
     for (;;) {
         R.clear(counter);
         for (let i = 0; i < chunk; i++) {
-            R.run('fluvial/soil_down', { bits: P.src, rec }, { outB: P.dst, changed: counter }, { uCount: i === chunk - 1 ? 1 : 0 });
+            R.run(kernelOf(R, 'fluvial/soil_down'), { bits: P.src, rec }, { outB: P.dst, changed: counter },
+                { uCount: i === chunk - 1 ? 1 : 0 });
             P.swap();
         }
         done += chunk;
@@ -348,7 +365,7 @@ export async function soilSolve(R, h0, holdW, holdH, pinW, pinH, cell, Cv, opts 
         const top = pyr[pyr.length - 1];
         const m0 = Math.floor(top.h.h / 2), m1 = Math.floor(top.h.w / 2);
         const h2 = R.field(m0, m1, 1), c2 = R.field(m0, m1, 4);
-        R.run('fluvial/soil_block2', { h: top.h, con: top.con }, { outH: h2, outC: c2 });
+        R.run(kernelOf(R, 'fluvial/soil_block2'), { h: top.h, con: top.con }, { outH: h2, outC: c2 });
         pyr.push({ h: h2, con: c2, c: 2.0 * top.c });
     }
     let total = 0, cur = null, change = 0.0;
@@ -368,12 +385,12 @@ export async function soilSolve(R, h0, holdW, holdH, pinW, pinH, cell, Cv, opts 
         const un = { uDx: c, uC: Number(Cv), uAsym: Number(asym), uWind: [Number(wind[0]), Number(wind[1])],
             uOmega: Number(omega), uBound: Math.trunc(bound) };
         for (let k = 0; k < its - 1; k++) {
-            R.run('soil_jacobi', { st: S.src, con }, { outS: S.dst }, un);
+            R.run(kernelOf(R, 'soil_jacobi'), { st: S.src, con }, { outS: S.dst }, un);
             S.swap();
         }
         const prev = R.like(S.src);
         R.copy(S.src, prev);
-        R.run('soil_jacobi', { st: S.src, con }, { outS: S.dst }, un);
+        R.run(kernelOf(R, 'soil_jacobi'), { st: S.src, con }, { outS: S.dst }, un);
         S.swap();
         cur = S.src;
         S.dst.destroy();
@@ -562,13 +579,10 @@ export async function opSoilHills(fields, level, params, seed = 0, ctx = null) {
     return fields;
 }
 
-// 1 where a u32 bit field has bit `bit` set, else 0 (a float field, for a count): a new field
+// 1 where a u32 bit field has bit `bit` set, else 0 (a float field, for a count; kernels/fluvial/bit.wgsl): a new field
 function bitsToFloat(R, bits, bit) {
     const out = R.field(bits.h, bits.w, 1);
-    const k = R.kernel('fluvial_bit', { source: `//! sampler b r32ui\n//! image outF r32f\n//! uniform int uBit\n` +
-        `fn kmain(p: vec2<i32>) {\n  if (!inside(p, outF_size())) { return; }\n` +
-        `  outF_store(p, vec4<f32>(select(0.0, 1.0, (b_at(p) & u32(u.uBit)) != 0u), 0.0, 0.0, 0.0));\n}\n` });
-    R.run(k, { b: bits }, { outF: out }, { uBit: bit });
+    R.run('fluvial/bit', { b: bits }, { outF: out }, { uBit: bit });
     return out;
 }
 

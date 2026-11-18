@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py (finish, anchor) at f90c6fc, as a GPU kernel.
 // finish_h: a detail op's height and bed written into the level, cell by cell (the port's own kernel, PORT_PLAN.md
 // 3.2: numpy code of blender/eidoblend/terrain/solvers/hydraulic.py finish() at f90c6fc moved to the GPU). It
 // replaces

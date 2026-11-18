@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py (finish) at f90c6fc, as a GPU kernel.
 // finish_add: what a detail op adds to the level's record fields, cell by cell (the port's own kernel, PORT_PLAN.md
 // 3.2: numpy code of blender/eidoblend/terrain/solvers/hydraulic.py finish() at f90c6fc moved to the GPU). It
 // replaces, with keep = 1 - clip(pin_w, 0, 1) and dh = (h_new - h_base) * keep:

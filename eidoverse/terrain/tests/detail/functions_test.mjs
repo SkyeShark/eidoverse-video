@@ -88,8 +88,8 @@ function finishCase(fn, label, oks) {
     r.cases++;
     if (!oks.every(Boolean)) r.failed.push(label);
 }
-async function readField(f) { return R.read(f); }
-const pinsCtx = (c, fields) => {
+async function readField(f) { return await R.read(f); }
+const pinsCtx = (c) => {
     if (!c.args.ctx_pins) return null;
     return { pins: { pin_w: fieldOf(c, 'pin__pin_w'), pin_h: fieldOf(c, 'pin__pin_h') }, log: () => {} };
 };
@@ -99,7 +99,7 @@ async function opCase(c, op, k, uses) {
     const lv = Level.fromDict(c.args.level);
     const fields = new Fields(lv, null, R);
     for (const name of Object.keys(c.inputs)) if (name.startsWith('f__')) fields.set(name.slice(3), f32(arr(c, name)));
-    const ctx = pinsCtx(c, fields) ?? { log: () => {} };
+    const ctx = pinsCtx(c) ?? { log: () => {} };
     await op(fields, lv, structuredClone(c.args.params), c.args.seed, ctx);
     const oks = [];
     for (const name of Object.keys(c.outputs)) {

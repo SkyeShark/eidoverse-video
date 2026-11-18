@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/detail.py (gully_relief) at f90c6fc, as a GPU kernel.
 // gully: the gully octaves' relief and their slope mask, cell by cell (the port's own kernel, PORT_PLAN.md 3.2: numpy
 // code of blender/eidoblend/terrain/solvers/detail.py gully_relief at f90c6fc moved to the GPU; the plan's "Phacelle
 // gully octave, from Ekigar's src/nodes/phacelle.js", through kernels/detail/phacelle.wgsl). It replaces

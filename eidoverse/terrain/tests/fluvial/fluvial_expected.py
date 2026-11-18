@@ -77,6 +77,15 @@ for cell, n, below in ((2.0, 160, 2), (20.0, 128, 0)):
     add('threshold', lv, {'params': params, 'seed': SEED, 'below_main': below},
         {'Sc': FL.threshold(lv, params, SEED, None, below_main=below)}, f'threshold at {cell:g} m, {below} below the main')
 
+# the noise fields threshold() takes, on its own (the world noise's share of threshold's difference): the unit noise
+# at threshold_scale_m and the ridged outcrop noise, at the 20 m level above
+lv = lvl(128, 20.0, x0=300.0, y0=-700.0)
+add('unit_noise', lv, {'scales': [400.0], 'seed': SEED, 'base_seed': 211},
+    {'n': FL._unit_noise([400.0], lv, SEED, None, 211)}, 'unit noise at 400 m (threshold_noise)')
+add('field', lv, {'spec': {'kind': 'ridged', 'wavelength_m': 120.0, 'octaves': 3, 'seed': 401}, 'seed': SEED},
+    {'n': FL._field({'kind': 'ridged', 'wavelength_m': 120.0, 'octaves': 3, 'seed': 401}, lv, SEED, None)},
+    'ridged noise at 120 m (outcrops)')
+
 # composite uplift and start: a shape with a regional background, a cut, a tilt; and a background alone (ridged)
 lv = lvl(128, 150.0, x0=-9600.0, y0=-9600.0)
 comp = {'shape': {'kind': 'ridge', 'centre': [0.0, 0.0], 'azimuth_deg': 70.0, 'length_m': 12000.0, 'width_m': 3000.0,

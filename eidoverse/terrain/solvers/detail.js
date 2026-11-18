@@ -79,8 +79,7 @@ import { prims } from '../core/prims.js';
 import * as N from '../core/world_noise.js';
 import * as HY from './hydraulic.js';
 
-const TAU = 6.28318530717959;
-const DEG = Math.PI / 180.0;                            // math.radians' factor
+const DEG = Math.PI / 180.0;                           // math.radians' factor
 
 export const BREAKUP = {
     scales_m: [[50.0, 15.0, 5.0], 'm', 'wavelengths of the strength noise'],

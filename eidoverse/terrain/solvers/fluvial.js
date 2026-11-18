@@ -389,6 +389,9 @@ export class FluvialRun {
     constructor(R, cell, fields, par, pins, bound = PINNED, column = null, lockH0 = null, lockB = 2) {
         this.R = R;
         this.cell = Number(cell);
+        // the step's kernels, looked up once (hillslope.js kernelOf: a dispatch by name reads the kernel's file)
+        this.k = Object.fromEntries(['flow_weights', 'route_incise', 'h_keep', 'creep', 'creep_layers', 'lock_restrict',
+            'lock_apply'].map((name) => [name, HS.kernelOf(R, name)]));
         const h = fields.h;
         const [n0, n1] = [h.h, h.w];
         this.shape = [n0, n1];
@@ -450,23 +453,23 @@ export class FluvialRun {
 
     step(dt, D, nSub, iters, rate, cap, m = 0.5, nexp = 1.0, p = 1.0, lockGain = 1.0, slope = 1, iso = 1,
         pitFill = 1, pitEps = 1e-3) {
-        const R = this.R, S = this.S, M = this.M, cell = this.cell, b = this.bound;
-        R.run('flow_weights', { st: S.src }, { outW: this.W }, { uDx: cell, uP: p, uBound: b });
+        const R = this.R, S = this.S, M = this.M, cell = this.cell, b = this.bound, K = this.k;
+        R.run(K.flow_weights, { st: S.src }, { outW: this.W }, { uDx: cell, uP: p, uBound: b });
         const [z0, dz, nc] = this.col;
-        R.run('route_incise', { st: S.src, wsumT: this.W, par: this.P, pin: this.Q, mk: M.src, kcol: this.kcol, zoff: this.zoff },
+        R.run(K.route_incise, { st: S.src, wsumT: this.W, par: this.P, pin: this.Q, mk: M.src, kcol: this.kcol, zoff: this.zoff },
             { outS: S.dst, outM: M.dst },
             { uDx: cell, uDt: dt, uM: m, uN: nexp, uP: p, uColZ0: z0, uColDz: dz, uColN: nc, uSlope: Math.trunc(slope),
                 uPitFill: Math.trunc(pitFill), uPitEps: pitEps, uBound: b });
         S.swap();
         M.swap();
         if (D > 0 && nSub > 0) {
-            R.run('h_keep', { st: S.src }, { outH: this.W }, {});          // the flow weights are used by now
+            R.run(K.h_keep, { st: S.src }, { outH: this.W }, {});          // the flow weights are used by now
             for (let k = 0; k < nSub; k++) {
-                R.run('creep', { st: S.src, par: this.P, pin: this.Q }, { outS: S.dst },
+                R.run(K.creep, { st: S.src, par: this.P, pin: this.Q }, { outS: S.dst },
                     { uDx: cell, uDtSub: dt / nSub, uD: D, uCap: cap, uBound: b });
                 S.swap();
             }
-            R.run('creep_layers', { st: S.src, h0: this.W, mk: M.src }, { outM: M.dst }, {});
+            R.run(K.creep_layers, { st: S.src, h0: this.W, mk: M.src }, { outM: M.dst }, {});
             M.swap();
         }
         for (let k = 0; k < iters; k++) this.phi = HS.thresholdPass(R, S, M, this.P, this.Q, cell, rate, false, b, iso, this.phi);
@@ -475,13 +478,13 @@ export class FluvialRun {
             const [off, tgt] = phases[this.steps % phases.length];
             if (stage1 !== null) {
                 const [b1, zero, R1] = stage1;
-                R.run('lock_restrict', { st: S.src, tgt: zero }, { outR: R1 }, { uB: b1, uOff: [0, 0] });
-                R.run('lock_restrict', { st: R1, tgt }, { outR: Rf },
+                R.run(K.lock_restrict, { st: S.src, tgt: zero }, { outR: R1 }, { uB: b1, uOff: [0, 0] });
+                R.run(K.lock_restrict, { st: R1, tgt }, { outR: Rf },
                     { uB: Math.floor(this.lockB / b1), uOff: [Math.floor(off[0] / b1), Math.floor(off[1] / b1)] });
             } else {
-                R.run('lock_restrict', { st: S.src, tgt }, { outR: Rf }, { uB: this.lockB, uOff: off });
+                R.run(K.lock_restrict, { st: S.src, tgt }, { outR: Rf }, { uB: this.lockB, uOff: off });
             }
-            R.run('lock_apply', { st: S.src, res: Rf, pin: this.Q, mk: M.src }, { outS: S.dst, outM: M.dst },
+            R.run(K.lock_apply, { st: S.src, res: Rf, pin: this.Q, mk: M.src }, { outS: S.dst, outM: M.dst },
                 { uGain: lockGain, uB: this.lockB, uOff: off });
             S.swap();
             M.swap();
@@ -835,7 +838,7 @@ export async function opValleyFloor(fields, level, params, seed = 0, ctx = null)
     own.push(Tp, Dp);
     R.run('fluvial/vf_init', { rec, chan }, { outT: Tp.src, outD: Dp.src, count: cnt }, { uMode: 1, uCell: cell }, cover);
     for (let r = 0; r < rounds; r++) {
-        R.run('fluvial/vf_jump', { ptr: Tp.src, val: Dp.src }, { outP: Tp.dst, outV: Dp.dst }, {});
+        R.run(HS.kernelOf(R, 'fluvial/vf_jump'), { ptr: Tp.src, val: Dp.src }, { outP: Tp.dst, outV: Dp.dst }, {});
         Tp.swap();
         Dp.swap();
     }
@@ -863,7 +866,7 @@ export async function opValleyFloor(fields, level, params, seed = 0, ctx = null)
     own.push(Pa, K, Aa);
     R.copy(Pf.src, Pa.src);
     for (let r = 0; r < rounds; r++) {
-        R.run('fluvial/vf_jump', { ptr: Pf.src, val: Lf.src }, { outP: Pf.dst, outV: Lf.dst }, {});
+        R.run(HS.kernelOf(R, 'fluvial/vf_jump'), { ptr: Pf.src, val: Lf.src }, { outP: Pf.dst, outV: Lf.dst }, {});
         Pf.swap();
         Lf.swap();
     }
@@ -872,7 +875,8 @@ export async function opValleyFloor(fields, level, params, seed = 0, ctx = null)
     key.destroy();
     R.run('fluvial/vf_init', { rec, chan }, { outT: Aa.src, outD: scratchF, count: cnt }, { uMode: 2, uCell: cell }, cover);
     for (let r = 0; r < rounds; r++) {
-        R.run('hydro/jump_argmax', { ptr: Pa.src, key: K.src, arg: Aa.src }, { outP: Pa.dst, outK: K.dst, outA: Aa.dst }, {});
+        R.run(HS.kernelOf(R, 'hydro/jump_argmax'), { ptr: Pa.src, key: K.src, arg: Aa.src }, { outP: Pa.dst, outK: K.dst, outA: Aa.dst },
+            {});
         Pa.swap();
         K.swap();
         Aa.swap();

@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py and blender/eidoblend/terrain/solvers/detail.py
+// at f90c6fc, as a GPU kernel.
 // pipe_out: a pipe-model run back to metres, cell by cell (the port's own kernel, PORT_PLAN.md 3.2: numpy code of
 // blender/eidoblend/terrain/solvers/hydraulic.py op_hydraulic and detail.py op_breakup at f90c6fc moved to the GPU).
 // It replaces

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/detail.py (op_planation) at f90c6fc, as a GPU kernel.
 // planation: a pediment plain with residual knobs, cell by cell (the port's own kernel, PORT_PLAN.md 3.2: numpy code
 // of blender/eidoblend/terrain/solvers/detail.py op_planation at f90c6fc moved to the GPU). With the two world-noise
 // fields made by core/world_noise.js (the resistance fbm at resist_wavelength_m, the plain's small relief at 60 m) it

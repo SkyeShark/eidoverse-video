@@ -8,8 +8,8 @@
 //
 // Per stage (tests/parity/replay.mjs replayStage does the work):
 //   fields     every field after the op within max(1e-4 x its range, 1.25 x the stage's floor sample, 16 float32
-//              steps) of Blender's (blender_stage_dump.py --floor measured the floors of the main level's stages; a
-//              level without a floor gets the kernel grade)
+//              steps) of Blender's (the stage floors of blender_stage_dump.py --floor --levels all; a stage without
+//              a floor gets the kernel grade)
 //   dispatches the call's Blender kernels, counts, uniforms and bound images against Blender's log of the same call
 //   snapshots  the images and inputs of each Blender kernel after its 1st, 10th and 100th dispatch in the call (main
 //              level), and after its 1st, 10th ... dispatch of the run where the replayed call is the run's first
@@ -17,15 +17,20 @@
 //              replay.mjs's own snapshot comparison pairs the replay's counts (which start at 1 in the call) with
 //              Blender's counts over the whole run, which name other dispatches after a kernel's first call; this
 //              test pairs only the counts that mean the same dispatch (reported to the lead for replay.mjs).
+//   control    (fluvial) the stage's control record (ctx.shared.fluvial_log) against Blender's: role, steps, dt,
+//              years, valley spacing, creep sub-steps, the lock's block and length and the prepass equal, D within
+//              1e-12; the relief controller's U factor and schedule reported beside Blender's.
 // Beside the plan's grades, which take each field's (and snapshot channel's) single worst cell, the test reports the
 // same comparison by the field's RMS and 99th percentile of |d| (the floor samples record all three: [max, RMS, p99]
 // of the stage floor, [max, RMS] of the snapshots), each within max(1e-4, 1.25 x the largest sample): on the routed
 // quantities of a chaotic op (A and qs one step lagged, the deposit of pinned and filled cells) one cell's jump
 // decides the worst-cell number, and five samples bound it loosely. A stage passes the plan's grade (`ok`); `ok_rms`
 // says whether it passes by RMS and p99 instead.
-// JavaScript per cell here is test code. Writes tests/out/fluvial/replay_<recipe>_s<seed>.json.
+// JavaScript per cell here is test code. Writes tests/out/fluvial/replay_<recipe>_s<seed>.json (with --ops naming
+// fewer than all of the package's ops: replay_<recipe>_s<seed>_<op+op>.json, so a partial pass keeps the whole one).
 
 import * as G from '../../core/gpu.js';
+import { CONVERGENCE_LOOPS } from '../../solvers/hillslope.js';
 import * as RP from '../parity/replay.mjs';
 import * as DP from '../parity/dispatch_parity.mjs';
 import * as C from '../parity/_common.mjs';
@@ -37,6 +42,7 @@ const RECIPES = opt('--recipes', 'rolling_hills').split(',');
 const SEEDS = opt('--seeds', '1').split(',').map(Number);
 const MINE = ['uplift', 'fluvial', 'valley_floor', 'incise', 'creep', 'talus', 'threshold', 'soil_hills', 'hummocks'];
 const OPS = opt('--ops', MINE.join(',')).split(',');
+const TAG = MINE.every((o) => OPS.includes(o)) ? '' : `_${OPS.join('+')}`;
 const LEVELS = opt('--levels', 'all');
 const MAX_CALLS = Number(opt('--max-calls', '100000'));
 
@@ -182,7 +188,7 @@ for (const recipe of RECIPES) {
             if (!OPS.includes(st.op) || (want && !want.includes(st.level))) continue;
             if (calls++ >= MAX_CALLS) break;
             if (!(await registry.hasOp(st.op))) { results.push({ stage: { call: st.call, op: st.op, level: st.level }, error: 'op not registered' }); continue; }
-            const logDir = `${W.out('fluvial')}/replay/${recipe}_s${seed}/c${st.call}_${st.op}`;
+            const logDir = `${W.out('fluvial')}/replay${TAG}/${recipe}_s${seed}/c${st.call}_${st.op}`;
             // the fields' RMS and p99 of |d| against Blender's after dump, read before replayStage releases them
             const dist = {};
             let record = null;
@@ -196,7 +202,8 @@ for (const recipe of RECIPES) {
                     dist[name] = rmsP99(g, w.data);
                 }
             };
-            const r = await RP.replayStage(R, G, run, st, await registry.getOp(st.op), { logDir, invoke });
+            const r = await RP.replayStage(R, G, run, st, await registry.getOp(st.op), { logDir, invoke,
+                intervals: { ...CONVERGENCE_LOOPS } });
             if (!r.error) {
                 r.snapshots_replay_mjs = { ok: r.snapshots.ok, compared: r.snapshots.compared };
                 r.snapshots = await compareSnapshots(run, st, logDir);
@@ -237,7 +244,7 @@ for (const recipe of RECIPES) {
             T.ok(line.split(':')[0], r.ok, r.error ?? (r.ok ? '' : `by RMS and p99: ${r.ok_rms ? 'within' : 'over'}`));
         }
         all.push({ recipe, seed, results });
-        Deno.writeTextFileSync(`${W.out('fluvial')}/replay_${recipe}_s${seed}.json`, JSON.stringify({ recipe, seed, date: new Date().toISOString(),
+        Deno.writeTextFileSync(`${W.out('fluvial')}/replay_${recipe}_s${seed}${TAG}.json`, JSON.stringify({ recipe, seed, ops: OPS, date: new Date().toISOString(),
             replayed: results.length, passed: results.filter((r) => r.ok).length,
             passed_rms: results.filter((r) => r.ok_rms).length, results }, null, 1));
     }

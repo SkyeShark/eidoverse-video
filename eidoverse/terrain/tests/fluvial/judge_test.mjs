@@ -12,6 +12,10 @@
 //     deno run --no-config --no-lock --allow-all eidoverse/terrain/tests/fluvial/judge_test.mjs
 //          [--recipes fluvial_range,meadow] [--seeds 1,2,3,4] [--saves <dir>]
 //
+// A seed whose floor run is missing under the parity key ($EIDO_PARITY_KEY, else the newest) is looked for under the
+// other keys of the same Blender terrain code (their manifests' field_hash and terrain_hash equal the key's: another
+// commit of the branch that changed no file of the terrain), and the key it came from is recorded.
+//
 // Writes tests/out/fluvial/judge_test.json.
 
 import * as J from '../judge/judge.mjs';
@@ -24,13 +28,30 @@ const RECIPES = opt('--recipes', 'fluvial_range,meadow').split(',');
 const SEEDS = opt('--seeds', '1,2,3,4').split(',');
 const SAVES = opt('--saves', `${W.out('fluvial')}/saves`);
 const T = new C.Checks('fluvial: the recipes judged whole, beside the Blender floor runs');
-const out = { recipes: {} };
+const KEY = W.parityKeyDir();
+const out = { key: KEY && KEY.split('/').pop(), recipes: {} };
+
+// the floor run of (recipe, seed) under the key, else under a key of the same terrain code: [dir, key name] or null
+function floorRunOfCode(recipe, seed) {
+    const own = W.floorRun(recipe, seed);
+    if (own) return [own, KEY.split('/').pop()];
+    const code = (dir) => { const k = C.readJson(`${dir}/manifest.json`)?.key; return k ? `${k.field_hash}|${k.terrain_hash}` : null; };
+    const mine = KEY ? code(KEY) : null;
+    if (!mine) return null;
+    for (const k of W.parityKeys()) {
+        const dir = `${k.dir}/${recipe}_s${seed}_draft/base`;
+        if (k.dir !== KEY && code(k.dir) === mine && W.exists(`${dir}/done.json`)) return [dir, k.name];
+    }
+    return null;
+}
 
 for (const recipe of RECIPES) {
     const rec = (out.recipes[recipe] = { seeds: {} });
     const port = [], blender = [];
     for (const seed of SEEDS) {
-        const base = W.floorRun(recipe, Number(seed));
+        const found = floorRunOfCode(recipe, Number(seed));
+        const base = found?.[0] ?? null;
+        if (found && found[1] !== out.key) (rec.other_keys ??= {})[seed] = found[1];
         const save = `${SAVES}/${recipe}_s${seed}.npz`;
         if (!base || !W.exists(save)) {
             rec.seeds[seed] = { missing: !base ? 'the Blender floor run' : 'the port save' };

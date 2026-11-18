@@ -1,3 +1,6 @@
+// Port of the `precise` lines of blender/eidoblend/terrain/kernels/pipes_water.glsl,
+// blender/eidoblend/terrain/kernels/pipes_transport.glsl and blender/eidoblend/terrain/kernels/pipes_thermal.glsl
+// at f90c6fc.
 // exact.wgsl (`//! include detail/exact`): GLSL's `precise` for the pipe model's error-free steps, which WGSL has no
 // qualifier for. The port's own file: the Blender kernels pipes_water.glsl, pipes_transport.glsl and
 // pipes_thermal.glsl (at f90c6fc) mark a few lines `precise` so the compiler keeps each operation as written:

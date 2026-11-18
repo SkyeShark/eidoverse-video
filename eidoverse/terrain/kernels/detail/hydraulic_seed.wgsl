@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py at f90c6fc, as a GPU kernel.
 // hydraulic_seed: the hydraulic op's erodibility and its micro-relief seed, cell by cell (the port's own kernel,
 // PORT_PLAN.md 3.2: numpy code of blender/eidoblend/terrain/solvers/hydraulic.py op_hydraulic at f90c6fc moved to
 // the GPU). It replaces

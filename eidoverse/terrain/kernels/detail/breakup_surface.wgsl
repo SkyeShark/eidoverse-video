@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/detail.py (op_breakup) at f90c6fc, as a GPU kernel.
 // breakup_surface: the rock breakup's weathering and thresholds, cell by cell (the port's own kernel, PORT_PLAN.md
 // 3.2: numpy code of blender/eidoblend/terrain/solvers/detail.py op_breakup at f90c6fc moved to the GPU). From the
 // gradient of the surface smoothed over 2 cells and the breakup kernel's (R, kfac, sc_abs, D) it replaces

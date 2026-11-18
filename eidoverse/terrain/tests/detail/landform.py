@@ -75,13 +75,36 @@ def main():
         sys.exit('landform: the two saves have different plans')
     out = dict(port=dict(landform=S.landform(plan, det), landform_vs=S.landform_vs(plan, det, ups)),
                saves=dict(detail=a.detail, upsampled=a.upsampled), versions=B.versions())
+    bl = None
     if a.blender:
         plan_b, bl, _ = load_save(a.blender)
         if [lv.to_dict() for lv in plan_b] != [lv.to_dict() for lv in plan]:
             out['vs_blender'] = 'the plans differ'
+            bl = None
         else:
             out['vs_blender'] = vs(plan, det, bl)
             out['blender'] = dict(landform=S.landform(plan, bl), landform_vs=S.landform_vs(plan, bl, ups))
+    # realism: each hero level against the real ground (swissALTI3D 0.5 m resampled to the level, made by the Blender
+    # package's lauterbrunnen_truth.py for this plan), the Blender package's sheets.realism, for every run here
+    out['realism'] = {}
+    truth_dir = os.path.join(root, 'blender', 'tests', 'terrain', 'out', 'detail', 'truth')
+    try:
+        import lauterbrunnen_truth as LT
+        same_plan = [lv.to_dict() for lv in LT.plan()] == [lv.to_dict() for lv in plan]
+    except Exception as e:                                      # noqa: BLE001 - the truth is optional data
+        same_plan = False
+        out['realism_skipped'] = f'{type(e).__name__}: {e}'
+    if not same_plan:
+        out.setdefault('realism_skipped', "the save's plan is not the Blender package's lauterbrunnen_truth.plan()")
+    for lv in (plan if same_plan else []):
+        tp = os.path.join(truth_dir, f'real_L{lv.index}.npz')
+        if lv.role != 'hero' or not os.path.exists(tp):
+            continue
+        truth = np.load(tp)['h']
+        if truth.shape != (lv.n, lv.n) or np.isfinite(truth).mean() <= 0.2:
+            continue
+        runs = dict(port_detail=det, port_upsampled=ups, **(dict(blender_detail=bl) if bl is not None else {}))
+        out['realism'][lv.index] = {k: S.realism(plan, f, truth, lv, ups) for k, f in runs.items()}
     txt = json.dumps(out, indent=1, default=lambda o: o.item() if hasattr(o, 'item') else str(o))
     if a.out:
         with open(a.out, 'w', encoding='utf-8') as f:

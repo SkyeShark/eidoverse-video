@@ -10,7 +10,9 @@
 //
 // Reads the port's main-tile masks (tests/out/masks/sheets/<name>_port_masks.npz, masks_test.mjs --only refs --sheets)
 // and the stack's float32 inputs (tests/out/masks/fixtures/ref_<name>.npz). Writes tests/out/masks/renders/:
-//     <name>_masks_save.npz / .json        a one-level Terrain.save of the main tile with its masks
+//     <name>_masks_save.npz / .json        a one-level Terrain.save of the main tile with its masks (and its water
+//                                          where the reference has a water mask, the only water render_masks.py
+//                                          draws)
 //     <name>_masks_port_aerial_45deg.png   the port's render
 //     masks_aerials_compare.png            per reference: Blender's clay reference, Blender's masks render, the
 //                                          port's masks render (tests/masks/sheets_port.py --aerials composes it)
@@ -102,7 +104,9 @@ for (const name of only) {
     // reference views' datum wants), its water, and the port's masks
     const level = new Level(0, 'main', lvd.x0, lvd.y0, n * lvd.cell, lvd.cell, n, null, 2, [], 16, 0);
     const arrays = [['L0__f__h', () => inputs.L1__in__h]];
-    if (inputs.L1__in__water) arrays.push(['L0__f__water', () => inputs.L1__in__water]);
+    // water drawn as render_masks.py draws it: only where the reference has a water mask (its lakes and sea); the
+    // masks tests' closed basins (fixtures.lakes) are in the masks (wetness 1 there), not drawn as lake surfaces
+    if (inputs.L1__in__water && W.dem(name).water) arrays.push(['L0__f__water', () => inputs.L1__in__water]);
     for (const [k, v] of Object.entries(masks)) arrays.push([`L0__m__${k}`, () => v]);
     const base = `${OUT}/${name}_masks_save`;
     await Io.writeNpz(`${base}.npz`, arrays);
@@ -145,4 +149,8 @@ for (const name of only) {
         palette: PALETTE_OF[name], log: `${work}/${label}_aerial.log` };
     console.log(`[render_masks] ${name}: ${ok ? png : `FAILED (exit ${code}): see ${work}/${label}_aerial.log`} (${results[name].seconds} s)`);
 }
-Deno.writeTextFileSync(`${OUT}/render_masks.json`, JSON.stringify(results, null, 1));
+let before = {};
+try {
+    before = JSON.parse(Deno.readTextFileSync(`${OUT}/render_masks.json`));
+} catch (_e) { /* the first run */ }
+Deno.writeTextFileSync(`${OUT}/render_masks.json`, JSON.stringify({ ...before, ...results }, null, 1));

@@ -2,13 +2,15 @@
 Blender side of tests/fluvial/bench_interleaved.sh; PORT_PLAN.md 8.2 row P6: the step within 1.25 x Blender's
 measured cost):
 
-    bash run_blender.sh eidoverse/terrain/tests/fluvial/bench_blender.py --out <json> [--sizes 1024,2048] [--steps 200]
+    bash run_blender.sh eidoverse/terrain/tests/fluvial/bench_blender.py --out <json> [--sizes 512,1024,2048]
+         [--steps 200]
 
 One whole step (flow_weights, route_incise, h_keep, creep x1, creep_layers, (threshold_excess, threshold) x2: the
 production step with fluvial.py's DEFAULTS), on twins.random_field(n, 0, 2000, 1, smooth=2) at 10 m cells, U 2e-3,
 K 1.5e-5, Sc 0.7, G 0.5, the outer ring pinned; without and with the lock (64-cell blocks). 5 steps and a read first,
 then `steps` steps and a read, timed: the read waits for the GPU, as test_cost's does. Writes the milliseconds per
-step. Nothing here changes the Blender edition (the parity helpers import it read-only).
+step. test_cost's sizes are 1024 and 2048; 512, the size of every level of a draft bake, is measured beside them.
+Nothing here changes the Blender edition (the parity helpers import it read-only).
 """
 import json
 import os
@@ -31,7 +33,7 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--out', required=True)
-    ap.add_argument('--sizes', default='1024,2048')
+    ap.add_argument('--sizes', default='512,1024,2048')
     ap.add_argument('--steps', type=int, default=200)
     a = ap.parse_args(B.script_args())
     GPU = FL.device('gpu')

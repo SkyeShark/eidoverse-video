@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py and blender/eidoblend/terrain/solvers/detail.py
+// (with blender/eidoblend/terrain/core/grid.py gradient and slope_deg) at f90c6fc, as a GPU kernel.
 // box_gradient: the gradient and slope of a box-smoothed surface, cell by cell (the port's own kernel, PORT_PLAN.md
 // 3.2: numpy code of blender/eidoblend/terrain/solvers/hydraulic.py and detail.py at f90c6fc moved to the GPU). It
 // replaces

@@ -1,6 +1,6 @@
-// phacelle.wgsl (`//! include detail/phacelle`, after `//! include noise`): Phacelle noise for the gully octave.
-// Port of blender/eidoblend/terrain/solvers/detail.py phacelle_noise at f90c6fc (numpy, its oracle), which is
-// Ekigar's phacelle_noise (src/nodes/phacelle.js, MIT; the technique is Rune Skovbo Johansen's Phacelle noise,
+// Port of blender/eidoblend/terrain/solvers/detail.py phacelle_noise at f90c6fc (numpy, its oracle).
+// phacelle.wgsl (`//! include detail/phacelle`, after `//! include noise`): Phacelle noise for the gully octave, which
+// is Ekigar's phacelle_noise (src/nodes/phacelle.js, MIT; the technique is Rune Skovbo Johansen's Phacelle noise,
 // runevision.com) on Blender's lattice: Ekigar's integer hash2 of the lattice cell plus an integer offset per seed and
 // octave (kernels/noise.wgsl eido_hash2, bit for bit with numpy's hash2). Stripes run ALONG the direction d; `freq`
 // stripes per lattice cell; returns (cos, sin, side x, side y). The surface bake's gully filter (the last wave) reads

@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py and blender/eidoblend/terrain/solvers/detail.py
+// at f90c6fc, as a GPU kernel.
 // ramp: a smoothstep ramp of a field, cell by cell (the port's own kernel, PORT_PLAN.md 3.2: numpy code of
 // blender/eidoblend/terrain/solvers/hydraulic.py and detail.py at f90c6fc moved to the GPU). It replaces
 //   hydraulic.rockness     t = clip((s - lo) / max(hi - lo, 1e-6), 0, 1); t * t * (3 - 2 t)

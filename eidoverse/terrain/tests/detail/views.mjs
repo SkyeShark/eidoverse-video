@@ -30,6 +30,7 @@ const SAVES = {
     port_detail: `${W.out('detail')}/real_place/detail/terrain`,
     port_upsampled: `${W.out('detail')}/real_place/upsampled/terrain`,
     blender_detail: `${W.out('detail')}/runs/lauterbrunnen_film/base/terrain`,
+    port_full: `${W.out('detail')}/real_place/full/terrain`,          // the registered recipe (with the fluvial package's ops)
 };
 const WANT = A.list('--saves') ?? Object.keys(SAVES);
 const OUT = `${W.out('detail')}/views`;
@@ -42,7 +43,9 @@ if (!tests) {
 }
 const ref = C.readJson(`${tests}/reference/renders/lauterbrunnen_views.json`);
 const r2 = C.readJson(`${tests}/out/detail/renders/r2_renders.json`);
-const record = { views: {}, saves: {}, renders: {} };
+// (a run with --saves adds its renders to the record of the runs before it)
+const before = A.list('--saves') ? C.readJson(`${OUT}/views.json`, null) : null;
+const record = { views: { ...(before?.views ?? {}) }, saves: {}, renders: { ...(before?.renders ?? {}) } };
 for (const view of VIEWS) {
     const cam = r2?.detail?.[`${view}_clay`];
     if (!cam) { console.log(`[skip] ${view}: not in the Blender package's r2_renders.json`); continue; }
@@ -66,14 +69,17 @@ for (const view of VIEWS) {
 }
 Deno.writeTextFileSync(`${OUT}/views.json`, JSON.stringify(record, null, 1));
 // one sheet per view: Blender's EEVEE render, then this renderer's of Blender's save, the port's detail and upsampled
+// (and the port's full recipe when it was rendered)
+const full = Object.keys(record.renders).some((k) => k.startsWith('port_full_'));
+const names = ['blender_detail', 'port_detail', 'port_upsampled', ...(full ? ['port_full'] : [])];
 const rows = Object.keys(record.views).map((view) => [view, record.views[view].blender_render,
-    ...['blender_detail', 'port_detail', 'port_upsampled'].map((n) => `${OUT}/${n}_${view}_eye_1p7m.png`)]);
+    ...names.map((n) => `${OUT}/${n}_${view}_eye_1p7m.png`)]);
 const py = W.which('python') ?? W.which('python3');
 if (py) {
     for (const [view, ...pics] of rows) {
         await W.run([py, `${W.TESTS}/detail/sheet.py`, '--out', `${OUT}/${view}_sheet.png`, '--title',
-            `real_place Lauterbrunnen, ${view} view (1.7 m): Blender EEVEE (its r2 detail render) | this renderer: Blender's detail save | the port's detail | the port's DEM alone`,
-            ...pics]);
+            `real_place Lauterbrunnen, ${view} view (1.7 m): Blender EEVEE (its r2 detail render) | this renderer: Blender's detail save | the port's detail | the port's DEM alone` +
+            (full ? ' | the port\'s full recipe' : ''), ...pics]);
     }
 }
 console.log(`[views] ${Object.keys(record.renders).length} renders -> ${OUT}`);

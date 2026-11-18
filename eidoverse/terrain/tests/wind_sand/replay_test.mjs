@@ -140,7 +140,10 @@ for (const [dir, seedOf] of runDirs) {
             `${d.counts_that_differ.length} counts differ; ${d.uniforms_over_4_steps} uniforms over 4 float32 steps; ` +
             `${d.image_differences.length} image differences` + (d.structure_differences.length ? `; ${d.structure_differences.slice(0, 2).join(' | ')}` : '') +
             (d.first_uniform_over_4_steps ? `; first uniform over: ${JSON.stringify(d.first_uniform_over_4_steps).slice(0, 300)}` : ''));
-        const sn = await RP.compareSnapshots(run, logDir);
+        // Blender's snapshots of this call only: its kernel counts run over the whole run (dune_shadow#1 is the run's
+        // first, in the growth call), the port's PortLog counts each replayed call from its own start
+        const callRun = { ...run, snapIndex: Object.fromEntries(Object.entries(run.snapIndex).filter(([, e]) => e.call === st.call)) };
+        const sn = await RP.compareSnapshots(callRun, logDir);
         T.ok(`${tag}: the step snapshots within max(1e-4 x range, 1.25 x the floor at that dispatch)`, sn.ok,
             `${sn.keys} snapshots, ${sn.compared} channels compared, worst ${S.sci(sn.worst)} of range` +
             (sn.failures.length ? `; over: ${sn.failures.slice(0, 4).map((x) => `${x.key} ${x.image}[${x.channel}] ${S.sci(x.over)} > ${S.sci(x.tol)}`).join(', ')}` : '') +
@@ -152,7 +155,7 @@ for (const [dir, seedOf] of runDirs) {
                 worst: sn.worst, failures: sn.failures.slice(0, 20), only_port: sn.only_port } });
         if (summary.dispatches > 10) {
             T.ok(`${tag}: the call's time beside Blender's (recorded, not graded)`, true, `${seconds} s against Blender's ${st.seconds} s`);
-            const table = await snapshotTable(run, logDir);
+            const table = await snapshotTable(callRun, logDir);
             results[results.length - 1].snapshot_table = table;
             const first = Object.entries(table).filter(([k]) => k.endsWith('#1'));
             if (first.length) {

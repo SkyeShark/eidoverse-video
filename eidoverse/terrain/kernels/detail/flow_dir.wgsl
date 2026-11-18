@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/detail.py (flow_direction) at f90c6fc, as a GPU kernel.
 // flow_dir: a unit downhill direction per cell (the port's own kernel, PORT_PLAN.md 3.2: numpy code of
 // blender/eidoblend/terrain/solvers/detail.py flow_direction at f90c6fc moved to the GPU). It replaces
 //   fx, fy = the given flow (flow_x, flow_y), or -gx, -gy of the surface box-smoothed over smooth_m (uNeg 1)

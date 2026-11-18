@@ -74,7 +74,9 @@ for (const name of RUNS) {
         run._known ??= view._known;
         const worst = Object.entries(r.fields?.fields ?? {}).sort((a, b) => b[1].over - a[1].over)[0];
         const d = r.dispatch ?? {};
-        const line = `${name} L${st.level} ${st.op} (call ${st.call}, ${st.n} cells): ` + (r.error ? r.error :
+        const lvd = run.header.plan?.[st.level];
+        const line = `${name} L${st.level}${lvd ? ` (${lvd.role} ${lvd.cell} m x${lvd.n})` : ''} ${st.op} (call ${st.call}, ` +
+            `stage ${st.n} of its level): ` + (r.error ? r.error :
             `fields ${r.fields.ok ? 'within tolerance' : 'OVER'} (worst ${worst ? `${worst[0]} ${C.sci(worst[1].over)} of range, ` +
                 `grade ${C.sci(worst[1].tol / (worst[1].range || 1))}` : 'none'}${r.fields.missing.length ? `; missing ${r.fields.missing}` : ''}` +
             `${r.fields.extra.length ? `; extra ${r.fields.extra}` : ''}), dispatch log ${d.ok ? 'equal' : 'DIFFERS'} ` +

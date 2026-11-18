@@ -1,7 +1,8 @@
 // The fluvial package's GPU replacements of numpy code against the numpy functions themselves (PORT_PLAN.md 5.1
 // "function fixtures", 5.3 "function" grades), on the cases tests/fluvial/fluvial_expected.py made with the Blender
 // edition's own Python: erodibility (roughness, k_breakup at scales a 2 m level resolves, k_contrast, faults with
-// wander and length), fault_zones, threshold (noise, breakup, outcrops, the gain below the main level),
+// wander and length), fault_zones, threshold (noise, breakup, outcrops, the gain below the main level) and the two
+// noise fields it takes on their own (the world noise's share of its difference: core/world_noise.js, P2's),
 // composite_uplift and composite_start (a shape with a cut background and a tilt; a ridged background alone),
 // edge_pins with a sea, _sea_flat with flatten areas, the lock's offset_block_means (blocks 2-32 at their four
 // offsets), and the driver's numbers (diffusivity, lock_block, creep_substeps, soil_convexity, soft_cap).
@@ -48,6 +49,8 @@ for (const c of M.cases) {
         case 'erodibility': got.K = FL.erodibility(lv, a.params, a.seed, R); break;
         case 'fault_zones': got.F = FL.faultZones(a.faults, lv, a.seed, R); break;
         case 'threshold': got.Sc = FL.threshold(lv, a.params, a.seed, R, a.below_main); break;
+        case 'unit_noise': got.n = FL.unitNoise(a.scales, lv, a.seed, R, a.base_seed); break;
+        case 'field': got.n = FL.field(a.spec, lv, a.seed, R); break;
         case 'composite_uplift': got.u = FL.compositeUplift(a.params, lv, a.seed, R); break;
         case 'composite_start': {
             // the start of Blender's own uplift (uploaded), so the comparison is of composite_start alone

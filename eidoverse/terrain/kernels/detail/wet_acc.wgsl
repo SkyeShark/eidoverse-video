@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/solvers/hydraulic.py at f90c6fc, as a GPU kernel.
 // wet_acc: one sample of the hydraulic op's wet field, added cell by cell (the port's own kernel, PORT_PLAN.md 3.2:
 // numpy code of blender/eidoblend/terrain/solvers/hydraulic.py op_hydraulic at f90c6fc moved to the GPU). It replaces
 //   wet += run.state()[..., 1] + run.velocity()[..., 2] * dt        (every 100 steps of the last wet_tail of them)

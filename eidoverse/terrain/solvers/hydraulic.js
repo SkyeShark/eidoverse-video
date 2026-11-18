@@ -48,7 +48,9 @@
 //
 // Exports beside the op (what solvers/detail.js and later packages read, under hydraulic.py's names in camelCase):
 // PARAMS, defaults, uniforms, PipeRun (PipeRunGPU), startFields (initial_state with par), rockness, microRelief, box,
-// pinsFor, bandFade, anchor, anchorScaleM, finish, logOf, BIG_TAN, RUNNER_KEYS, OPS.
+// pinsFor, bandFade, anchor, anchorScaleM, finish, logOf, BIG_TAN, RUNNER_KEYS, OPS; and the port's own GPU helpers
+// the detail ops share: boxGradient (np.gradient of _box, and its slope), smoothedSlope, ramp (the smoothstep ramps),
+// anchorLowpass, logDh and logPercentile (the log lines' numbers).
 //
 // The dispatch log (PORT_PLAN.md 5.7): Blender's kernels are world_noise_field (the micro-relief, once) and the four
 // pipe passes `steps` times, in that order; every other dispatch is the port's own (kernels/detail/, core/prims.js
@@ -420,7 +422,8 @@ export function logOf(log, ctx, prefix) {
 
 /** np.percentile(x, q) of one channel of a log_dh field and its float64 rule (a log line's numbers). */
 export async function logPercentile(f, q, channel) {
-    return prims(f.runner).percentile(f, [q], { channel, dtype: 'float64' }).then((v) => v[0]);
+    const v = await prims(f.runner).percentile(f, [q], { channel, dtype: 'float64' });
+    return v[0];
 }
 
 /** The log_dh field of a - b - seedK c (kernels/detail/log_dh.wgsl): (max(-d, 0), max(d, 0), |d|, d). */

@@ -625,7 +625,7 @@ if (manifest && want('scale')) {
     const ts = performance.now();
     const rows = {};
     const bad = [];
-    for (const meta of manifest.cases.filter((c) => c.name.startsWith('scale_'))) {
+    for (const meta of manifest.cases.filter((c) => c.kind === 'scale')) {
         const name = meta.reference;
         const arrays = await load(meta);
         const n = 360, c = meta.cell;
