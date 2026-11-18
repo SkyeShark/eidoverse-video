@@ -1,15 +1,19 @@
 """eidoblend.terrain: the terrain-and-surfaces family of the Blender edition.
 
     from eidoblend.terrain import make_terrain, recipes, describe
-    t = make_terrain(recipe='real_place', params={'dem': 'lauterbrunnen'}, focus=(480, 1640), seed=1)
+    t = make_terrain(recipe='real_place', params={'dem': 'lauterbrunnen'}, focus=(480, 1640), seed=1,
+                     plants='auto')
     obj, height_at, masks = t                  # or t.obj, t.height_at(x, y), t.masks['slope'].at(x, y)
+    t.surface.at('crest', x, y)                # the surface bake's maps (terrain/surface); t.plants the spots
     recipes()                                  # every recipe's name and title
     describe('real_place')                     # its stages, knobs (units, defaults, ranges) and references
+    terrain_surface(obj)                       # a reopened .blend: the surface atlases relinked
 
     from eidoblend.terrain import layer_surface   # the surface tools for built geometry, unchanged
 
-Guide: tools-guides/terrain-surfaces.md; design: blender/tests/terrain/DESIGN.md. Self-contained: imports no
-other family's subpackage.
+Guide: tools-guides/terrain-surfaces.md; designs: blender/tests/terrain/DESIGN.md (the landforms) and
+SURFACING_DESIGN.md (the surface and the plants). Self-contained: imports no other family's subpackage, except the
+plant layer's instancing, which grows its plants through the flora and trees families.
 
 Names are resolved on first use, so importing a numeric module of the family (core, masks, the solvers, the recipes)
 needs no bpy and runs in plain Python. `recipes` is the recipe registry (the recipes/ subpackage), and calling it
@@ -18,14 +22,16 @@ lists the recipes.
 import importlib
 
 _EXPORTS = {
-    'make_terrain': '.api', 'Terrain': '.api', 'MaskSet': '.api', 'describe': '.api', 'terrain_height_at': '.api',
+    'make_terrain': '.api', 'generate': '.api', 'Terrain': '.api', 'MaskSet': '.api', 'describe': '.api',
+    'terrain_height_at': '.api', 'terrain_surface': '.api', 'place_camera': '.api',
     'normalize_texel_density': '.surface_layers', 'make_layered_material': '.surface_layers',
     'layer_surface': '.surface_layers', 'grunge_texture': '.surface_layers', 'add_curvature': '.surface_layers',
     'add_geometry_normal': '.surface_layers', 'fetched_reason': '.surface_layers',
     'find_set': '._pbr', 'load_set': '._pbr', 'texture_roots': '._pbr',
 }
 
-__all__ = ['make_terrain', 'Terrain', 'MaskSet', 'recipes', 'describe', 'terrain_height_at',
+__all__ = ['make_terrain', 'generate', 'Terrain', 'MaskSet', 'recipes', 'describe', 'terrain_height_at',
+           'terrain_surface', 'place_camera',
            'normalize_texel_density', 'make_layered_material', 'layer_surface', 'grunge_texture', 'add_curvature',
            'add_geometry_normal', 'fetched_reason', 'find_set', 'load_set', 'texture_roots']
 

@@ -1,21 +1,30 @@
-"""make_terrain and the Terrain it returns (design section 8).
+"""make_terrain and the Terrain it returns (design section 8; the surface and the plants: SURFACING_DESIGN.md 5.3).
 
     from eidoblend.terrain import make_terrain, recipes, describe
-    t = make_terrain(recipe='real_place', params={'dem': 'lauterbrunnen'}, focus=(480, 1640), seed=1)
+    t = make_terrain(recipe='real_place', params={'dem': 'lauterbrunnen'}, focus=(480, 1640), seed=1,
+                     plants='auto', cameras=[cam])
     obj, height_at, masks = t                     # or the members below
     t.height_at(x, y)        # metres at Blender (x, y), exactly on the rendered triangles (floats or arrays)
     t.normal_at(x, y)        # the shading normal there
     t.mask('slope').at(x, y) # any mask (masks.MASKS) at world points, from the finest level holding them
+    t.surface.at('crest', x, y)  # any baked surface map (surface.MAPS) at world points
+    t.plants.names()         # the planted species; t.plant_objects their Blender objects
     t.viewpoint(target=(0, -3000), distance=1500)   # a standing point that sees the target (not a wall)
     t.preview('<dir>/name')  # hillshade and mask PNGs, to look at before a render
+
+    t = generate('canyon', focus=(x, y))          # everything short of Blender (no object yet) ...
+    vp = t.viewpoint(target=(x, y + 900), distance=900)
+    t.build(plants='auto', cameras=[vp.eye])      # ... then the object, its surface and its plants
 
 The call, in order: the recipe (a name, a Recipe, a recipe dict or a list of stages) and its knobs are resolved and
 checked; the defaults come from the recipe, its DEM (real_place) and the quality; plan_levels lays out the levels
 around the focus; the cache is read, or the level runner (terrain/run.py: run_levels) runs the stages and writes
-it; the exact flatten pass; the masks; the ring mesh with the masks as point attributes; then, in Blender, the
-object, the palette's material (palette=None: grey clay), lake and sea surfaces, and rocks near the focus. One
-summary line is printed, naming any stage whose op is not registered (the runner skips it). The runner's
-kernels need Blender's GPU module: run it in Blender.
+it; the exact flatten pass; the masks; the ring mesh with the masks as point attributes; then, in Blender
+(Terrain.build): the object; the surface data bake (terrain/surface: the maps per texel, cached in their own root)
+with the plant layer's cover (the plan's, or the ecotope's expected cover with no plan) and the palette's far and
+provenance colours; the per-texel material (palette=None: grey clay); lake and sea surfaces; rocks near the focus;
+the plants. One summary line is printed, naming any stage whose op is not registered (the runner skips it). The
+runner's kernels and the surface bake need Blender's GPU module: run it in Blender.
 """
 from __future__ import annotations
 
@@ -37,7 +46,15 @@ from .core.fields import Fields
 
 API_VERSION = 1
 ARGS = ('recipe', 'size', 'resolution', 'seed', 'params', 'focus', 'hero_cell', 'context', 'flatten', 'sea_level',
-        'base_elevation_m', 'palette', 'dress', 'quality', 'cache', 'name', 'collection', 'mesh_res', 'log')
+        'base_elevation_m', 'palette', 'dress', 'quality', 'cache', 'name', 'collection', 'mesh_res', 'surface',
+        'plants', 'cameras', 'mask_attributes', 'log')
+# plants={...}: what a plan and its instancing take (plants.plan_plants, plant_instances.instance_plants)
+PLANT_KEYS = ('ecotope', 'focus', 'radius_m', 'seed', 'exclude', 'stand_m', 'lod', 'wind', 'instance', 'spots')
+# the plant layer's cover rasters (surface.maps.MAPS): a palette whose material reads any of them, or that has a
+# canopy layer, gets them in its bake with plants or without (SURFACING_DESIGN.md 4.7)
+PLANT_MAPS = frozenset(('canopy', 'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far', 'grass', 'grass_far'))
+STAND_M = 1.5            # plants keep their crowns this far off every camera passed that stands near the ground
+EYE_CAMERA_M = 50.0      # ... a camera at most this high over the ground at its feet
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -172,6 +189,34 @@ class Terrain:
         self.water = {'lakes': [], 'sea': None}
         self.rocks = None
         self.flats = info.get('flats', [])
+        self.surface = None          # the surface data bake (surface.SurfaceData), once built
+        self.plants = None           # the plant layer's spots (plants.PlantSpots), when planted
+        self.plant_objects = {}      # {species: [objects]} the instanced plants
+
+    def build(self, name='terrain', collection=None, palette='auto', dress=True, surface='auto', plants=None,
+              cameras=None, mask_attributes=True, cache=True, log=print):
+        """Everything make_terrain does in Blender, for a Terrain from generate() or Terrain.load(build=False): the
+        object, the surface bake, the material, water, rocks and plants (make_terrain's arguments of the same
+        names; palette 'keep': the one it was generated or saved with). Build once per Terrain. Returns the
+        object."""
+        if self.obj is not None:
+            raise RuntimeError(f"this Terrain is built already (object {self.obj.name!r}): load or generate it again")
+        if palette == 'keep':
+            palette = self.info.get('palette', 'auto')
+        tb = time.perf_counter()
+        _build_blender(self, name, collection, palette, dress, log, surface=surface, plants=plants, cameras=cameras,
+                       mask_attributes=mask_attributes, cache=cache)
+        self.info.setdefault('seconds', {})['blender'] = round(time.perf_counter() - tb, 2)
+        return self.obj
+
+    def bind_sun(self, sun=None):
+        """Bind the instanced SeedThree plants to the scene's sun (the leaves' backlight, the sun the billboards cast
+        from): call it once the sky and its sun are final (after make_sky). `sun` a sun lamp, default the scene's
+        strongest. Returns the lamp, or None when there are no SeedThree plants or no sun."""
+        if not any(self.plant_objects.values()):
+            return None
+        from .build import plant_instances as _pi
+        return _pi.bind_sun(sun)
 
     def __iter__(self):
         return iter((self.obj, self.height_at, self.masks))
@@ -308,7 +353,9 @@ class Terrain:
 
     def save(self, path):
         """Write the terrain (every level's fields and masks, the plan, the recipe and knobs, the flats) to
-        <path>.npz with its description in <path>.json. Terrain.load reads it back."""
+        <path>.npz with its description in <path>.json, and its plants' spots (when it has any) beside them in the
+        plant layer's format (<path>.plants.json and <path>.plants.<species>.f32). Terrain.load reads it back. The
+        surface bake is not written: it is a cache keyed by the terrain (surface.cache_root()), remade when missing."""
         from . import masks as _masks
         arrays = {}
         for i, f in enumerate(self._fields):
@@ -322,13 +369,22 @@ class Terrain:
         np.savez(base + '.npz', **arrays)
         meta = dict(self.info, recipe=self.recipe.to_dict(), knobs=self.knobs,
                     plan=[lv.to_dict() for lv in self.levels], api_version=API_VERSION)
+        if self.plants is not None:
+            self.plants.save(base)
+            meta['plants_file'] = os.path.basename(base) + '.plants.json'
+        else:
+            meta.pop('plants_file', None)
         with open(base + '.json', 'w', encoding='utf-8') as f:
             json.dump(_plain(meta), f, indent=1)
         return base + '.npz'
 
     @classmethod
-    def load(cls, path, build=True, name=None, collection=None, palette='keep', dress=False, log=print):
-        """A Terrain from save(); build=True also makes its object (palette 'keep': the one it was made with)."""
+    def load(cls, path, build=True, name=None, collection=None, palette='keep', dress=False, surface='auto',
+             plants='keep', cameras=None, mask_attributes=True, log=print):
+        """A Terrain from save(); build=True also makes its object (Terrain.build: palette 'keep' the one it was made
+        with; surface, cameras and mask_attributes as make_terrain takes them). plants 'keep': the spots saved beside
+        it (instanced when built), none when it was saved without; None: no plants; 'auto' or a dict: planned anew,
+        as make_terrain plans them."""
         base = os.path.splitext(path)[0]
         with open(base + '.json', encoding='utf-8') as f:
             meta = json.load(f)
@@ -346,9 +402,16 @@ class Terrain:
                     stack[i][nm] = np.asarray(z[k], np.float32)
         info = dict(meta)
         t = _assemble_terrain(R, meta['knobs'], plan, fields, stack, info)
+        if plants == 'keep':
+            plants = None
+            if os.path.exists(base + '.plants.json'):
+                from .build import plants as _pl
+                t.plants = _pl.PlantSpots.load(base, terrain=t)
+                plants = {'spots': t.plants}
         if build:
             pal = info.get('palette') if palette == 'keep' else palette
-            _build_blender(t, name or info.get('name', 'terrain'), collection, pal, dress, log)
+            t.build(name or info.get('name') or 'terrain', collection, pal, dress, surface=surface, plants=plants,
+                    cameras=cameras, mask_attributes=mask_attributes, log=log)
         return t
 
 
@@ -481,7 +544,8 @@ def _scaled_resolution(res, quality):
 
 def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None, focus=None, hero_cell=None,
                  context=None, flatten=None, sea_level=None, base_elevation_m=None, palette='auto', dress=True,
-                 quality='film', cache=True, name='terrain', collection=None, mesh_res=None, log=print, **unknown):
+                 quality='film', cache=True, name='terrain', collection=None, mesh_res=None, surface='auto',
+                 plants=None, cameras=None, mask_attributes=True, log=print, **unknown):
     """A terrain (design section 8). Returns a Terrain; `obj, height_at, masks = make_terrain(...)` also works.
 
     recipe       a name from recipes(), a Recipe, a recipe dict (recipe.to_dict(), edited) or a list of stages
@@ -499,8 +563,24 @@ def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None
     palette      'auto' (the recipe's or the place's), a palette name, a palette dict, or None (grey clay)
     dress        rocks on the talus and rock-toe masks near the focus
     quality      'draft' | 'film' | 'hero'
-    cache        read and write eidoverse/assets/cache/terrain/<key>
+    cache        read and write eidoverse/assets/cache/terrain/<key> (and the surface bake's and the plants' caches)
     mesh_res     vertices per side each level is drawn at (default 512: about 3.3M triangles for seven levels)
+    surface      'auto': the surface data bake (terrain/surface.bake_surface: every map per texel on every level,
+                 cached in its own root) and the per-texel material reading it, whenever a palette or the plants read
+                 it; True: bake even for clay without plants; a dict: the bake's options (surface/bake.py DEFAULTS);
+                 None or False: no bake (the material reads the mesh's mask attributes, the forest its fallback)
+    plants       None: no plants (a palette with a canopy layer still gets the ecotope's expected cover in its bake,
+                 so its forest stands where the plants would); 'auto': the palette's ecotope planned around the focus
+                 (plants.plan_plants, kept in the terrain's cache entry) and instanced for a still shot
+                 (plant_instances.instance_plants); a dict of any of: ecotope, focus, radius_m, seed, exclude (the
+                 plan's), stand_m (the crowns kept off each camera near the ground, default 1.5 m; 0: none), lod,
+                 wind (the instancing's), instance (False: plan and cover only, no objects), spots (a PlantSpots to
+                 instance instead of planning)
+    cameras      camera objects, (x, y[, z]) points, or arrays of points along a camera path: rings beyond 1.5 D0
+                 of all of them take the far material (a cost saving only), and plants keep their crowns stand_m off
+                 every one standing within 50 m of the ground
+    mask_attributes  True: the eido_<mask> point attributes on the mesh (for agents' own shaders and Geometry Nodes;
+                 the per-texel material reads none); False: only eido_level (thirty floats a vertex less)
     """
     t0 = time.perf_counter()
     if unknown:
@@ -510,11 +590,11 @@ def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None
         raise TypeError('make_terrain needs a recipe: one of ' + ', '.join(_registry.names()))
     if quality not in _levels.QUALITY:
         raise ValueError(f'quality {quality!r}' + _nearest(quality, _levels.QUALITY))
+    _check_surface_args(surface, plants, palette, mask_attributes)
     t = generate(recipe, size, resolution, seed or 0, params, focus, hero_cell, context, flatten, sea_level,
                  base_elevation_m, quality, cache, mesh_res, palette, log)
-    tb = time.perf_counter()
-    _build_blender(t, name, collection, palette, dress, log)
-    t.info['seconds']['blender'] = round(time.perf_counter() - tb, 2)
+    t.build(name, collection, palette, dress, surface=surface, plants=plants, cameras=cameras,
+            mask_attributes=mask_attributes, cache=cache, log=log)
     t.info['seconds']['total'] = round(time.perf_counter() - t0, 2)
     _summary(t, log)
     return t
@@ -631,11 +711,246 @@ def _assemble_terrain(R, values, plan, fields, stack, info):
 
 # --------------------------------------------------------------------------------------------- in Blender ---
 
-def _build_blender(t, name, collection, palette, dress, log):
+def _check_surface_args(surface, plants, palette, mask_attributes):
+    """Raise on a surface, plants or mask_attributes argument that cannot work, before any terrain is made."""
+    if not (surface in (None, False, True, 'auto') or isinstance(surface, dict)):
+        raise ValueError(f"surface={surface!r}: 'auto', True, a dict of bake options, or None")
+    _plant_spec(plants)
+    if mask_attributes is False and surface in (None, False) and palette is not None:
+        raise ValueError('mask_attributes=False with surface=None: the material would have no masks to read (keep '
+                         "the attributes, or let the material read the surface bake: surface='auto')")
+
+
+def _plant_spec(plants):
+    """plants= as a dict of PLANT_KEYS, or None for no plants."""
+    if plants is None or plants is False:
+        return None
+    if plants is True or plants == 'auto':
+        return {}
+    if isinstance(plants, dict):
+        bad = set(plants) - set(PLANT_KEYS)
+        if bad:
+            k = sorted(bad)[0]
+            raise KeyError(f'plants: unknown key {k!r}' + _nearest(k, PLANT_KEYS))
+        return dict(plants)
+    if hasattr(plants, 'species') and hasattr(plants, 'array'):      # a PlantSpots
+        return {'spots': plants}
+    raise TypeError(f"plants={plants!r}: None, 'auto', a dict ({', '.join(PLANT_KEYS)}) or a PlantSpots")
+
+
+def _camera_list(cameras):
+    """cameras= as a list (a single camera object or point becomes a list of one)."""
+    if cameras is None:
+        return []
+    if hasattr(cameras, 'matrix_world') or (isinstance(cameras, (tuple, list)) and len(cameras) in (2, 3)
+                                            and all(isinstance(v, (int, float, np.floating)) for v in cameras)):
+        return [cameras]
+    if isinstance(cameras, np.ndarray) and cameras.ndim == 1:
+        return [cameras]
+    return list(cameras)
+
+
+def _camera_xyz(cameras):
+    """(N, 3) world positions of the cameras with a height (camera objects, (x, y, z) points, path arrays); 2-D
+    points have none and are left out."""
+    pts = []
+    for c in _camera_list(cameras):
+        if hasattr(c, 'matrix_world'):
+            p = c.matrix_world.translation
+            pts.append((float(p[0]), float(p[1]), float(p[2])))
+            continue
+        a = np.asarray(c, np.float64)
+        if a.ndim == 2 and a.shape[1] >= 3:
+            pts.extend((float(r[0]), float(r[1]), float(r[2])) for r in a)
+        elif a.ndim == 1 and a.shape[0] >= 3:
+            pts.append((float(a[0]), float(a[1]), float(a[2])))
+    return np.asarray(pts, np.float64).reshape(-1, 3)
+
+
+def _stand_discs(t, cameras, stand_m):
+    """(x, y, stand_m, 'crown') discs at the cameras standing within EYE_CAMERA_M of the ground (a path thinned to
+    one disc per stand_m): the plan keeps every plant's foot and crown off them (plants.plan_plants' exclude)."""
+    if not stand_m or stand_m <= 0:
+        return []
+    p = _camera_xyz(cameras)
+    if not len(p):
+        return []
+    near = (p[:, 2] - np.asarray(t.height_at(p[:, 0], p[:, 1]), np.float64)) <= EYE_CAMERA_M
+    out = []
+    for x, y, _z in p[near]:
+        if out and math.hypot(x - out[-1][0], y - out[-1][1]) < float(stand_m):
+            continue
+        out.append((float(x), float(y), float(stand_m), 'crown'))
+    return out
+
+
+def _cover_tag(sd, names):
+    """A hash of the plant rasters a palette bake reads (their bytes on every level): the far colour is a function
+    of them, so its cache must change when they do."""
+    h = hashlib.sha1()
+    for nm in sorted(names):
+        for i in range(len(sd.levels)):
+            a = sd.maps(i).get(nm)
+            h.update(nm.encode('utf-8'))
+            h.update(b'-' if a is None else np.ascontiguousarray(a, np.float32).tobytes())
+    return h.hexdigest()[:12]
+
+
+def _far_reads(rpal):
+    """The names the palette's far colour reads (surface/far_colour.py's kernel: its layers' weights, patches,
+    streaks...), or the material's mask reads when that kernel cannot be compiled."""
+    from .build import palettes as _pal
+    try:
+        from .surface import far_colour as _fc
+        return set(_fc.kernel_source(rpal)[1])
+    except Exception:                                    # noqa: BLE001 - the palette bake reports its own failure
+        return set(_pal.material_masks(rpal))
+
+
+def _plan(t, sd, spec, cameras, cache, log):
+    """The plants' spots and their cover rasters (bake_surface's extra form): a given PlantSpots, else the plan kept
+    in the terrain's cache entry (plants.cache_base), else a new plan (then kept there)."""
+    from .build import plants as _pl
+    spots = spec.get('spots')
+    if spots is not None:
+        spots.attach(t, sd)
+        return spots, spots.cover_extra(), 'given'
+    ecotope = spec.get('ecotope', 'auto')
+    focus = spec.get('focus')
+    exclude = spec.get('exclude')
+    stand = _stand_discs(t, cameras, spec.get('stand_m', STAND_M))
+    if exclude is None and stand:                        # plan_plants' own default (the flats) plus the cameras
+        exclude = [(f['at'][0], f['at'][1], float(f.get('radius', 0.0))) for f in t.flats if f.get('radius')]
+    if stand:
+        exclude = list(exclude) + stand
+    kw = dict(focus=focus, radius_m=spec.get('radius_m'), seed=int(spec.get('seed', 0)), data=sd, exclude=exclude)
+    base = _pl.cache_base(t, ecotope, **kw) if cache else None
+    how = 'planned'
+    spots = None
+    if base and os.path.exists(base + '.plants.json'):
+        try:
+            spots = _pl.PlantSpots.load(base, terrain=t, data=sd)
+            how = 'cached'
+        except (OSError, ValueError, KeyError) as e:
+            log(f'[make_terrain] the cached plan does not load ({e}): planning again')
+    if spots is None:
+        spots = _pl.plan_plants(t, ecotope, log=log, **kw)
+        if base:
+            spots.save(base)
+    cover = None
+    if base and os.path.exists(base + '.cover.npz') and how == 'cached':
+        with np.load(base + '.cover.npz', allow_pickle=False) as z:
+            names = sorted({k.rsplit('_L', 1)[0] for k in z.files})
+            cover = {k: [np.asarray(z[f'{k}_L{i}']) for i in range(len(t.levels))] for k in names}
+    if cover is None:
+        cover = spots.cover_extra()
+        if base:
+            np.savez_compressed(base + '.cover.npz', **{f'{k}_L{i}': v for k, per in cover.items()
+                                                       for i, v in enumerate(per)})
+    return spots, cover, how
+
+
+def _bake_and_plant(t, pal, surface, spec, cameras, cache, log):
+    """The surface data with the plant layer's cover and the palette's colours: (SurfaceData, PlantSpots or None).
+
+    Order: the maps first (bake_surface with the palette's constants, which name the bake, and no palette bake),
+    then the plan or the ecotope's expected cover on those maps (densities read the bake's crest, settle, snowpack
+    ...), added to the data, then the palette bake (the far colour C reads the cover through the forest and scrub
+    weights), keyed by the cover it read, then the M packing of the palette's material."""
+    from . import surface as _sf
+    from .build import palettes as _pal
+    from .surface import bake as _sb
+    rpal = _sb.resolve_palette(t, pal) if pal is not None else None
+    opts = _sb.resolve_options(t, rpal, dict(surface) if isinstance(surface, dict) else None)
+    sd = _sf.bake_surface(t, palette=None, options=opts, cache=cache, log=log)   # the same key as with the palette
+    spots, cover, how = None, None, None
+    reads = set()
+    if rpal is not None:
+        reads = _pal.material_masks(rpal) & PLANT_MAPS
+        if any(L.get('canopy') for L in rpal['layers']):
+            reads |= {'canopy_expected', 'canopy_far'}
+    if spec is not None:
+        t0 = time.perf_counter()
+        spots, cover, how = _plan(t, sd, spec, cameras, cache, log)
+        t.info['seconds']['plants_plan'] = round(time.perf_counter() - t0, 2)
+    elif reads:
+        from .build import plants as _pl
+        t0 = time.perf_counter()
+        cover = _pl.expected_cover(t, data=sd)
+        how = 'expected'
+        t.info['seconds']['plants_cover'] = round(time.perf_counter() - t0, 2)
+    if cover:
+        sd.add_maps(cover)
+    rec = dict(key=str(sd.key), cache_hit=bool(sd.info.get('cache_hit')), cover=how,
+               cover_maps=sorted(cover) if cover else [])
+    if rpal is not None:
+        sd.pack(sorted(_pal.material_masks(rpal)))
+        if opts.get('maps', 'all') == 'all':
+            pk = rpal
+            far = _far_reads(rpal) & set(cover or ())
+            if far:
+                pk = dict(rpal, plant_cover=_cover_tag(sd, far))
+            try:
+                sd.bake_palette(pk, cache=sd.cache_dir, log=log)
+            except (ValueError, KeyError, TypeError, RuntimeError) as e:
+                # the material then reads no far colour (C) and no provenance colour (P): the ground keeps its
+                # near look to the horizon, and sediment its debris' own column colour
+                rec['palette_bake'] = f'failed: {type(e).__name__}: {e}'
+                log(f"[make_terrain] the palette bake failed ({type(e).__name__}: {e}): no far colour")
+        rec.setdefault('palette_bake', sd.info.get('palette_bake'))
+    t.info['surface'] = rec
+    return sd, spots
+
+
+def _anisotropy_16(log):
+    """16x anisotropic filtering, which the per-texel material's reader needs (SURFACING_DESIGN.md 2.4: a GPU
+    texture keeps the filter it was made with, so it is set before any image is drawn). A session preference: the
+    saved preferences keep the user's own."""
+    import bpy
+    prefs = bpy.context.preferences
+    if prefs.system.anisotropic_filter == 'FILTER_16':
+        return
+    dirty = prefs.is_dirty
+    old = prefs.system.anisotropic_filter
+    prefs.system.anisotropic_filter = 'FILTER_16'
+    try:
+        prefs.is_dirty = dirty
+    except (AttributeError, TypeError):
+        pass
+    log(f'[make_terrain] anisotropic filtering {old} -> FILTER_16 for this session (the terrain\'s atlases need it)')
+
+
+def _surface_record(sd):
+    """What terrain_surface(obj) relinks from: the bake's key, the terrain's, where its atlas files were, and each
+    family's file name."""
+    from .surface import bake as _sb
+    files = {}
+    for fam in sd.families():
+        try:
+            files[fam] = os.path.basename(sd.image_path(fam))
+        except (KeyError, ValueError):
+            continue
+    return dict(key=str(sd.key), terrain_key=_sb.terrain_key(sd.terrain), cache_dir=sd.cache_dir, files=files,
+                palette_bake=sd.info.get('palette_bake'))
+
+
+def _build_blender(t, name, collection, palette, dress, log, surface='auto', plants=None, cameras=None,
+                   mask_attributes=True, cache=True):
     from .build import water as _water
+    _check_surface_args(surface, plants, palette, mask_attributes)
+    spec = _plant_spec(plants)
     info = t.info
     info['name'] = name
-    obj = _mesh.make_object(t.ring, name, collection)
+    secs = info.setdefault('seconds', {})
+    pal = palette
+    if palette == 'auto' and info.get('place'):
+        pal = info.get('palette') or 'auto'
+    info['palette'] = pal                                 # the ecotope 'auto' reads it
+    strata = None
+    if info.get('place'):
+        from .build import palettes as _pal
+        strata = (_pal.PLACES.get(info['place']) or {}).get('strata')
+    obj = _mesh.make_object(t.ring, name, collection, mask_attributes=bool(mask_attributes))
     t.obj = obj
     obj['trimesh_collider'] = True
     obj['eido_terrain'] = json.dumps(_plain(dict(
@@ -644,20 +959,33 @@ def _build_blender(t, name, collection, palette, dress, log):
         plan=[lv.to_dict() for lv in t.levels], cache_key=info['cache_key'], flats=t.flats,
         sea_level=info['sea_level'], base_elevation_m=info['base_elevation_m'], api_version=API_VERSION)))
     obj['eido_terrain_mesh'] = json.dumps(t.ring.layout())
+    # the surface data and the plants' plan (the plan reads the bake's maps; the bake holds the plan's cover)
+    bake = surface is True or isinstance(surface, dict) or (surface == 'auto' and (pal is not None or spec is not None))
+    sd = spots = None
+    if bake:
+        ts = time.perf_counter()
+        sd, spots = _bake_and_plant(t, pal, surface, spec, cameras, cache, log)
+        secs['surface'] = round(time.perf_counter() - ts, 2)
+    elif spec is not None:                               # plants on the masks alone (no bake)
+        ts = time.perf_counter()
+        spots, _cover, how = _plan(t, None, spec, cameras, cache, log)
+        info['plants_cover'] = how
+        secs['plants_plan'] = round(time.perf_counter() - ts, 2)
+    t.surface = sd
+    t.plants = spots
     # the material
     from .build import surfacing as _surf
-    pal = palette
-    if palette == 'auto' and info.get('place'):
-        pal = info.get('palette') or 'auto'
+    tm = time.perf_counter()
     if pal is None:
         obj.data.materials.append(_surf.clay_material(name + '_clay'))
     else:
-        strata = None
-        if info.get('place'):
-            from .build import palettes as _pal
-            strata = (_pal.PLACES.get(info['place']) or {}).get('strata')
-        _surf.apply_surface(obj, palette=pal, recipe=t.recipe, strata=strata, log=log)
-    info['palette'] = pal
+        if sd is not None:
+            _anisotropy_16(log)
+        _surf.apply_surface(obj, palette=pal, recipe=t.recipe, strata=strata, log=log, data=sd,
+                            cameras=_camera_list(cameras) if sd is not None else None)
+    secs['material'] = round(time.perf_counter() - tm, 2)
+    if sd is not None:
+        obj['eido_surface'] = json.dumps(_plain(_surface_record(sd)))
     # water
     lakes = _water.lake_objects(t, name=name + '_lake', collection=collection)
     sea = (_water.sea_object(t, info['sea_level'], name=name + '_sea', collection=collection)
@@ -668,19 +996,33 @@ def _build_blender(t, name, collection, palette, dress, log):
         try:
             from .build import dressing as _dress
             from .build import palettes as _pal
-            spec = _pal.get(pal, t.recipe).get('dressing')
+            dspec = _pal.get(pal, t.recipe).get('dressing')
         except (ImportError, KeyError, ValueError) as e:
             log(f'[make_terrain] no rocks: {e}')
-            spec = None
-        if spec:
+            dspec = None
+        if dspec:
             fx, fy = np.mean(np.asarray(info['focus'], np.float64), axis=0)
 
             def mask_at(nm, x, y):
-                return t.masks[nm].at(x, y) if nm in t.masks else None
+                if nm in t.masks:
+                    return t.masks[nm].at(x, y)
+                if sd is not None and sd.has(nm):             # a baked map (the toe bias reads grain)
+                    return sd.at(nm, x, y)
+                return None
             exclude = [(f['at'][0], f['at'][1], float(f.get('radius', 0.0))) for f in t.flats if f.get('radius')]
-            t.rocks = _dress.scatter_rocks(spec, mask_at=mask_at, height_at=t.height_at, normal_at=t.normal_at,
+            t.rocks = _dress.scatter_rocks(dspec, mask_at=mask_at, height_at=t.height_at, normal_at=t.normal_at,
                                            focus=(float(fx), float(fy)), seed=info['seed'], name=name + '_rocks',
                                            collection=collection, exclude=exclude, log=log)
+    # the plants, instanced for the shot
+    if spots is not None and spec.get('instance', True):
+        from .build import plant_instances as _pi
+        ti = time.perf_counter()
+        t.plant_objects = _pi.instance_plants(spots, t, collection=collection, lod=spec.get('lod'),
+                                              cache=bool(cache), wind=bool(spec.get('wind', False)), log=log)
+        secs['plants_instance'] = round(time.perf_counter() - ti, 2)
+    if spots is not None:
+        info['plants'] = dict(ecotope=spots.meta.get('ecotope'), counts={n: spots.count(n) for n in spots.names()},
+                              focus=spots.meta.get('focus'))
     return obj
 
 
@@ -741,7 +1083,68 @@ def terrain_height_at(obj):
     return height_at
 
 
+def _material_images(obj):
+    """The surface atlas images a terrain object's materials read (Image Texture nodes, node groups included):
+    {image name: image} of the images the surface bake made (they carry eido_family)."""
+    seen, out = set(), {}
+
+    def walk(nt):
+        if nt is None or nt.name in seen:
+            return
+        seen.add(nt.name)
+        for nd in nt.nodes:
+            if nd.bl_idname == 'ShaderNodeTexImage' and nd.image is not None and nd.image.get('eido_family'):
+                out[nd.image.name] = nd.image
+            elif nd.bl_idname == 'ShaderNodeGroup':
+                walk(nd.node_tree)
+    for m in obj.data.materials:
+        if m is not None and m.use_nodes:
+            walk(m.node_tree)
+    return out
+
+
+def terrain_surface(obj, folder=None):
+    """The surface bake's atlas images of a terrain object after its .blend is reopened, relinked (as
+    terrain_height_at rebuilds height_at): every atlas the object's materials read is found where its file is
+    (its own path, else `folder`, the .blend's folder, the bake's cache folder, then the surface cache's root for
+    the object's terrain) and reloaded from there. The LUT and strata images are packed in the .blend and need
+    nothing. Before moving a .blend to another machine, copy the files beside it: t.surface.save_images(folder).
+    Returns the object's record (key, terrain_key, cache_dir, files, palette_bake) with images {family: path}.
+    Raises FileNotFoundError naming the files it could not find (make_terrain with the same arguments bakes them
+    again)."""
+    import bpy
+    raw = obj.get('eido_surface')
+    if raw is None:
+        raise ValueError(f"'{obj.name}' has no surface bake (no eido_surface property: made with surface=None, or "
+                         f"not by make_terrain)")
+    rec = json.loads(raw)
+    from . import surface as _sf
+    places = [folder, bpy.path.abspath('//') if bpy.data.filepath else None, rec.get('cache_dir'),
+              os.path.join(_sf.cache_root(), str(rec.get('terrain_key') or ''))]
+    places = [p for p in places if p]
+    images, missing = {}, []
+    for img in _material_images(obj).values():
+        fam = str(img.get('eido_family'))
+        path = bpy.path.abspath(img.filepath) if img.filepath else ''
+        if path and os.path.exists(path):
+            images[fam] = path
+            continue
+        base = os.path.basename(path.replace('\\', '/')) or rec.get('files', {}).get(fam, '')
+        hit = next((os.path.join(p, base) for p in places if base and os.path.exists(os.path.join(p, base))), None)
+        if hit is None:
+            missing.append(base or img.name)
+            continue
+        img.filepath = hit
+        img.reload()
+        images[fam] = hit
+    if missing:
+        raise FileNotFoundError(f"'{obj.name}': surface atlas files not found ({', '.join(missing)}) in "
+                                f"{', '.join(places)}; make_terrain with the same arguments bakes them again, and "
+                                f"t.surface.save_images(folder) keeps copies beside a .blend")
+    return dict(rec, images=images)
+
+
 place_camera = _place_camera
 
 __all__ = ['make_terrain', 'generate', 'Terrain', 'MaskSet', 'Mask', 'Viewpoint', 'recipes', 'describe',
-           'terrain_height_at', 'flatten_fields', 'place_camera']
+           'terrain_height_at', 'terrain_surface', 'flatten_fields', 'place_camera', 'PLANT_KEYS', 'PLANT_MAPS']

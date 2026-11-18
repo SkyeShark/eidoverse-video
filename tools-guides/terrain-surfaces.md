@@ -21,9 +21,12 @@ in nature, run on grids in metres and years: rivers cutting into rising rock,
 hillslopes creeping and failing at their threshold angle, sediment settling in
 valley floors, ice carving troughs, wind moving sand, waves cutting cliffs
 back. A volcano's cone, a crater's bowl or a karst tower is only the starting
-surface those processes work on. The grid passes are GLSL compute shaders run
-through Blender's GPU module, so `make_terrain` runs inside Blender
-(headless too).
+surface those processes work on. The ground is then coloured from the same
+data, texel by texel: rock where the faces stand bare, debris in the colour of
+the beds it fell from, soil gathered in the hollows, snow lying in the gullies,
+and the place's plants standing where it grows them. The grid passes are GLSL
+compute shaders run through Blender's GPU module, so `make_terrain` runs
+inside Blender (headless too).
 
 ```python
 import sys; sys.path.insert(0, '<repo>/blender')
@@ -34,7 +37,8 @@ describe('alpine_valley')    # its stages, knobs (unit, default, range, what eac
 
 t = make_terrain('alpine_valley', seed=7,
                  params={'ela_m': 2000, 'trough_width_m': 1400},   # the recipe's knobs, in their units
-                 focus=(480, 1640))      # hero levels down to 0.5 m around the camera's standing point
+                 focus=(480, 1640),      # hero levels down to 0.5 m around the camera's standing point
+                 plants='auto')          # the place's trees, shrubs and grass around the focus
 obj, height_at, masks = t    # or t.obj, t.height_at(x, y), t.mask('slope').at(x, y)
 ```
 
@@ -125,18 +129,56 @@ t = make_terrain(
     palette='auto',          # 'auto', a palette name, a palette dict, or None (grey clay)
     dress=True,              # rocks on the talus and rock-toe masks near the focus
     quality='film',          # 'draft' | 'film' | 'hero'
-    cache=True,              # read and write eidoverse/assets/cache/terrain/<key>
+    cache=True,              # read and write the terrain, surface and plant caches
+    surface='auto',          # the surface bake and the per-texel material ([The surface](#the-surface))
+    plants=None,             # None, 'auto' or a dict: the plant layer ([Plants](#plants))
+    cameras=None,            # the shot's cameras (objects, points or a path): far rings, plants' standing spots
+    mask_attributes=True,    # the eido_<mask> point attributes on the mesh ([Maps for your own shaders](#maps-for-your-own-shaders))
     name='terrain', collection=None, mesh_res=None)
+```
+
+- `surface='auto'` bakes the terrain's maps per texel and builds the
+  material on them whenever a palette or the plants read them; `True` bakes
+  for grey clay without plants too; a dict passes the bake's options
+  (`surface/bake.py`'s `DEFAULTS`); `None` keeps the old material, which reads
+  the mask attributes on the mesh and draws its forests from their `fallback`
+  weights.
+- `plants=None` places no plants, but a palette with forest or scrub layers
+  still gets the ecotope's expected cover in its bake, so its forest stands
+  where the trees would. `'auto'` plans the palette's ecotope around the
+  focus and instances it for a still shot.
+- `cameras` is a list of camera objects, `(x, y, z)` points, or arrays of
+  points along a camera path. Rings lying beyond 1.5 × the far distance of
+  every camera take the cheap far material, and every camera within 50 m of
+  the ground gets a 1.5 m standing spot with no plant's crown over it. Without
+  cameras nothing changes but the cost.
+- `mask_attributes=False` leaves only `eido_level` on the mesh: thirty floats
+  a vertex less (about 360 MB of RAM on a seven-level terrain). The
+  per-texel material reads none of them.
+
+To place a camera on the ground before the terrain is built (an eye camera
+needs `height_at`), generate first and build after:
+
+```python
+from eidoblend.terrain import generate
+from eidoblend.terrain.api import place_camera
+t = generate('impact_crater', seed=1, focus=(0, -900))   # levels, masks, the ring mesh: no Blender object yet
+vp = t.viewpoint(target=(0, 0), distance=900, heading=0)  # standing south of the crater, looking north into it
+t.build(plants='auto', cameras=[vp.eye])                  # make_terrain's Blender half, same keywords
+place_camera(vp, cam)
 ```
 
 ### The `Terrain` it returns
 
 | member | what it is |
 |---|---|
-| `t.obj` | the ring mesh: one object at the origin, the masks as point attributes, the material applied, `obj['trimesh_collider'] = True` so the placement helpers treat it as the ground, and `obj['eido_terrain']` holding the recipe, knobs, seed, level plan and cache key |
+| `t.obj` | the ring mesh: one object at the origin, the material applied, `obj['trimesh_collider'] = True` so the placement helpers treat it as the ground, `obj['eido_terrain']` holding the recipe, knobs, seed, level plan and cache key, and `obj['eido_surface']` naming its surface bake |
 | `t.height_at(x, y)` | metres at Blender (x, y), exactly on the rendered triangles of the finest ring holding the point (floats or numpy arrays) |
 | `t.normal_at(x, y)` | the shading normal there (`smooth=False`: the triangle's) |
 | `t.masks`, `t.mask(name)` | a `MaskSet`: `t.mask('slope').at(x, y)` samples the finest level holding each point, `.array('main')` is one level's array (row 0 the south edge), `t.masks.names()` lists them |
+| `t.surface` | the surface bake (`SurfaceData`, or None with `surface=None`): `t.surface.at('crest', x, y)` samples any baked map on the finest level holding each point, `.maps(i)` is level i's `{name: array}`, `.names()` lists them ([The surface](#the-surface)) |
+| `t.plants`, `t.plant_objects` | the planted spots (`PlantSpots`, or None) and `{species: [objects]}` instanced from them ([Plants](#plants)) |
+| `t.bind_sun(sun)` | binds the SeedThree plants to the sun once the sky is made (their leaves' backlight, the sun their billboards cast from) |
 | `t.levels` | each level's window (`x0`, `y0`, `side`, `cell`, `n`) and `role` (`'context'`, `'main'`, `'hero'`) |
 | `t.fields(level)` | a level's raw arrays (`h`, `bed`, `water`, `deposit` ...), by index or role |
 | `t.flats` | the flattened areas and the heights they resolved to |
@@ -145,8 +187,9 @@ t = make_terrain(
 | `t.viewpoint(target, distance, ...)` | a standing point about `distance` m from `target` from which a 1.7 m eye sees the target over the ground, on footing under 30° (`prefer='low'`: a valley floor, `'high'`: a rim; `heading=` compass degrees); `place_camera(vp, cam)` from `eidoblend.terrain.api` aims a camera from it |
 | `t.metrics(pixel_m=None)` | the main tile's relief, slope percentiles, closed depressions, power spectrum and grid-direction numbers |
 | `t.preview(path)` | a north-up hillshade with the hero windows outlined, the finest level's hillshade and mask PNGs: a look before a render |
-| `t.save(path)`, `Terrain.load(path)` | write and read every level's fields and masks |
-| `terrain_height_at(obj)` | `height_at` again after a `.blend` is reopened, from the object alone |
+| `t.build(...)` | make_terrain's Blender half (the object, surface, material, water, rocks, plants), for a terrain from `generate` or `Terrain.load(build=False)` |
+| `t.save(path)`, `Terrain.load(path)` | write and read every level's fields and masks, and the plants' spots ([Saving and reopening](#saving-and-reopening)) |
+| `terrain_height_at(obj)`, `terrain_surface(obj)` | after a `.blend` is reopened: `height_at` again from the object alone, and the surface atlases relinked |
 
 **Placing things.** `place_on`, `snap_to_ground` and `scatter_on`
 ([placement.md](placement.md)) ray-cast the terrain's mesh, and
@@ -161,14 +204,111 @@ vp = t.viewpoint(target=(0, -3000), distance=1500, prefer='low')
 place_camera(vp, cam)        # 1.7 m over the ground, level horizon, looking at the target
 ```
 
-### Masks
+### The surface
+
+With a palette, `make_terrain` bakes the terrain's maps per texel on every
+level (`t.surface`) and colours the ground from them in one material. What to
+expect of it beside a photograph:
+
+- **Where each material lies** comes from the terrain's own structure at
+  every scale: rock where the slope and the rock's strength bare it, with the
+  ribs bare and the chutes holding cover; talus and scree under the walls
+  that shed them, fine at a cone's apex and coarse at its toe; soil gathered
+  in hollows and on valley floors, settled on benches and slope feet;
+  sediment in the channels and fans; snow lying in the gullies with bare ribs
+  between; forest and scrub where the place's ecotope grows them. Noise only
+  roughens the edges at the metre scale.
+- **Colour follows the landform.** A layer's colour is a ramp read at a
+  terrain term, so no layer is one flat tone. Debris takes the colour of the
+  beds it fell from and sediment the colour its drainage carries down; rock
+  is weathered where it stands and paler where it is failing now; crests read
+  pale and creases dark at the field's own scale; the strata column colours
+  the cliffs only.
+- **Relief below the mesh.** The shading normal is the full-resolution
+  height plus gullies and rock ribs below the cell, so distant slopes shade
+  every rill and ledge, and near ground takes the scans' own normals.
+- **No tiling and no smear.** Planar scans are hex-tiled (three reads on a
+  triangle grid, each turned and offset). Steep faces read their scans in
+  eight fixed frames tilted to the dip, picked by the face's own normal, so a
+  wall in any orientation keeps its scan at its scale.
+- **To the horizon.** Past a distance D0, where a main-level texel spans 2.5
+  pixels (about 3 km on an 8 km tile), the ground fades over D0 to 1.5 D0 to
+  its baked far colour: the near material's own average there, so the
+  horizon is coloured by its own data and no ring shows. Rings beyond 1.5 D0
+  of every camera passed take a cheap far material.
+
+```python
+t = make_terrain('meadow', seed=7, focus=(0, -20))
+sd = t.surface
+sd.names()[:6]                          # the maps the bake holds on the finest level
+sd.at('crest', 0.0, -20.0)              # -1..1: + crests and rims, - hollows and chutes
+sd.at('wetness', [0.0, 5.0], [-20.0, -20.0])     # arrays too
+level = sd.maps(t.main.index)           # {name: (n, n) float32} in physical units, row 0 the south edge
+```
+
+| map | what it marks |
+|---|---|
+| `crest` | convexity at 8-128 m, the same on every level: + crests, rims, ribs, spurs; − creases, chutes, hollows (on gentle ground, where soil gathers) |
+| `crest_fine`, `crease`, `cavity` | each level's finest convexity; the sub-cell gullies' curvature; short-radius occlusion (1 open, low in creases and at wall feet) |
+| `settle` | where a thin loose layer comes to rest: 0.5 where it stayed (all gentle ground), toward 1 where it gathered (benches, ledges, slope feet), toward 0 where it shed |
+| `snowpack` | metres of snow that settled, slid off steep faces and melted in the sun: full gullies, bare ribs |
+| `fresh` | ground eroding now: faces steeper than their rock holds, scoured channel floors |
+| `spi`, `valley` | stream power; flat and low at 12 m and wider (valley floors, fans, basins) |
+| `src_strata`, `grain` | the rock column's height a debris cell's material came from (metres); 0 at a talus apex to 1 at its toe |
+| `streak` | wind exposure on convex ground, trailed downwind |
+| `n20_x`, `n20_y`, `slope_20m` | the 20 m normal and its slope: what a rule reads that must not step where a finer level begins |
+| `canopy_expected`, `canopy_far`, `canopy`, `shrubs`, `shrubs_far` | the plant layer's cover: what the ecotope's tree density implies, the part the instanced plants leave to the material, the placed crowns, the undergrowth |
+| `far_colour`, `far_roughness`, `down_colour`, `down_share` | the palette's far colour, and the colour and share of the sediment the drainage carries |
+
+Every mask of the next section is there too; `slope`, `aspect`,
+`northness`, `eastness`, `insolation` and `height` are derived in the shader.
+`surface/maps.py`'s `MAPS` gives each map's unit, family and meaning.
+
+The material's options are a palette's `options` (pass a palette dict:
+`palettes.get(name)` edited):
+
+| option | what it does | default |
+|---|---|---|
+| `detile` | `'hex'`: planar scans hex-tiled; `'offset'`: one read per frame | `'hex'` |
+| `hex_m`, `hex_rotate` (also per layer) | a planar read's hex lattice in metres (0: one read); `False` keeps a directional scan's orientation (ripples, ploughed rows) | the layer's tile, snapped to 2.5 × 2ⁿ; `True` |
+| `steep_hex_m`, `steep_hex_share` | the lattice of the steep faces' sector reads; box layers whose tile is under this share of the largest box tile read each frame once | twice the largest box tile's lattice; 0.5 |
+| `detail_strength` | how much the relief below the cell tilts the normal | 0.5 |
+| `far_m` | D0, metres: where the far colour takes over | a main-level texel spanning 2.5 pixels |
+| `overlay` | `False`: layer edges follow the height blend alone, not the scans' grain and the landform's convexity | on |
+| `dusting` | `dict(colour, amount, slope_deg, where)`: powder or ash on every facet flatter than `slope_deg` | none |
+| `debug` | `'layers'`: each layer one flat colour (the judge's layer map); `'level'`: the level each pixel reads | none |
+
+The terrain constants the palette reads (its `constants`, over which the
+terrain puts its own): `pixel_angle` (the radians a pixel spans, 1/1000 by
+default, a 960-pixel frame at 55°: every noise term fades with the pixel's
+footprint, so pass your camera's), `latitude_deg` (the place's sun at its
+equinox noon: snow melts and plants grow by it, never by the shot's sun) and
+`wind_azimuth_deg` (streaks, slip faces). A layer's own keys (`ramp`,
+`provenance`, `patina`, `fresh_gain`, `overlay`, `fallback`, `canopy` ...)
+are described in `build/palettes.py`'s module doc.
+
+- **Anisotropic filtering.** The material reads each atlas in two slots that
+  change level only where their weight is 0, which needs 16× anisotropic
+  filtering at grazing angles. `make_terrain` sets Blender's preference to
+  16× for the session when it builds the material. A GPU texture keeps the
+  filter it was drawn with, so a script that wants another value sets it
+  after `make_terrain` and before the first render.
+- **Cost** on this machine (a shared GPU): a cold bake 10-30 s per terrain,
+  a cache hit about a second; the palette's colours 10-25 s cold; the
+  material builds in 10-30 s and compiles on the first frame (15-70 s); a
+  960 × 540 frame at 16 samples 1-3 s from the air, 1-6 s at eye level with
+  plants; the data's textures about 0.7 GB at film quality.
+
+### Maps for your own shaders
 
 The masks come from the processes (drainage area, eroded depth, deposit,
 talus, sand, snow, exposed rock) and from the final surface (slope, aspect,
-curvature at a scale in metres). They are FLOAT point attributes named
-`eido_<mask>` on the mesh, which an Attribute node reads, and they are in
-metres and degrees on every level, so a mask means the same in a hero ring
-and on the horizon.
+curvature at a scale in metres). With `mask_attributes=True` (the default)
+they are FLOAT point attributes named `eido_<mask>` on the mesh, which an
+Attribute node or Geometry Nodes read, and they are in metres and degrees on
+every level, so a mask means the same in a hero ring and on the horizon. The
+attributes sit on the mesh's vertices (every second cell); the surface bake
+holds the same masks per texel.
 
 | mask | what it is |
 |---|---|
@@ -185,7 +325,33 @@ and on the horizon.
 | `occlusion` | sky-view factor |
 | `vegetation` | suitability for plants from moisture, slope, altitude band, light and bare ground: a density for the flora |
 
-Plants follow the masks through the flora's own options:
+Per texel, a shader of your own reads any baked map through the same reader
+as the terrain's material, the node group `eido_terrain_map` (on the terrain
+object only: it finds each pixel's level from the object coordinates):
+
+```python
+import bpy
+from eidoblend.terrain.build import surfacing as S
+ng = S.terrain_map_group(t.surface, names=['crest', 'wetness'])   # one output per map, in its unit
+mat = bpy.data.materials.new('my_ground')
+mat.use_nodes = True
+nt = mat.node_tree
+grp = nt.nodes.new('ShaderNodeGroup')
+grp.node_tree = ng
+ramp = nt.nodes.new('ShaderNodeValToRGB')
+nt.links.new(grp.outputs['crest'], ramp.inputs['Fac'])
+nt.links.new(ramp.outputs['Color'], nt.nodes['Principled BSDF'].inputs['Base Color'])
+```
+
+Its outputs are the maps of `names` (or, without it, the maps the palette
+reads), `normal_x`, `normal_y`, `detail_gx`, `detail_gy`, `crease`,
+`cavity`, `crest_fine`, `grain`, `strata`, `src_strata`, `far_colour`,
+`far_roughness`, `down_colour` and `down_share` where baked, the derived
+`slope`, `aspect`, `northness`, `eastness`, `insolation`, `height` and
+`slope_20m`, and `Level`. Naming maps packs them into the bake's mask
+images; the terrain's own material keeps the images it was built with.
+
+Hand-made flora strokes follow the masks through the flora's own options:
 
 ```python
 from eidoblend.flora import create_flora
@@ -194,6 +360,78 @@ create_flora('grass', size=60, center=(x, y), height_fn=t.height_at,
              clip_fn=lambda x, y: veg.at(x, y) < 0.35)    # no grass on rock, scree, sand or water
 ```
 
+### Plants
+
+`plants='auto'` plants the place's ecotope around the focus: trees, shrubs,
+grass and flowers where the terrain grows them, as Blender objects for a
+still shot, with their cover handed to the material so the forest beyond the
+planted radius is the same forest.
+
+```python
+t = make_terrain('meadow', seed=7, focus=(0, -20), plants='auto', cameras=[(0, -20, 1.7)])
+t.plants.names()                        # ['meadow grass', 'meadow flowers']
+t.plants.count('meadow grass')          # how many were planted
+t.plants.stats['meadow grass']          # candidates, kept, stems per hectare where it is at home ...
+t.plant_objects                         # {species: [objects]}
+```
+
+The ecotopes (`build/ecotopes.py`; each palette has one, and a recipe or a
+real place may override it):
+
+| ecotope | what grows |
+|---|---|
+| `alpine` | spruce on the valley sides (SeedThree's Douglas fir, dialled narrow), maples along the streams, meadow grass and flowers |
+| `volcanic` | fir and pine below the treeline, ash grass; Crater Lake opens into parkland toward the rim |
+| `karst` | broadleaf (sweetgum) on every flank the towers let hold it, trees along the river and the fields |
+| `desert_sandstone` | blackbrush and sagebrush on benches and plateaus, bunchgrass between, a few yuccas |
+| `badlands` | prairie grass on the tables and the plain, sagebrush in the draws; the clay walls and floors bare |
+| `dunes` | dry grass tufts on the interdune floor, creosote at the dunes' feet |
+| `chalk_coast`, `farmland`, `meadow` | downland turf and flowers; grass on verges and pastures; grass and flowers |
+
+How a plant is placed: clusters drawn per world cell (a hash of the cell, so
+the same inputs give the same plants, and a moved camera or a larger radius
+keeps every plant already placed); kept by the species' density, written on
+terms that mean the same on every level (the 20 m slope, wetness, crest,
+valley, the distance to a stream, the place's sun); no two closer than their
+hard core; trees shading the undergrowth; nothing on water, settled snow,
+faces over 60°, bare rock, or talus and sand deeper than the roots hold.
+
+| `plants={...}` | what it does |
+|---|---|
+| `ecotope` | `'auto'` (the palette's, with the recipe's and the place's overrides), a name, or an ecotope dict |
+| `focus` | `(x, y)` or a path `[(x, y), ...]`: where plants are wanted (default the terrain's focus, else the main tile's centre). Trees reach their species' radius (2-3 km), shrubs 300-500 m, grass 60-150 m |
+| `radius_m` | a cap on every species' radius |
+| `seed` | the plan's seed (the terrain's is hashed in) |
+| `exclude` | `[(x, y, r), ...]` discs kept clear; `(x, y, r, 'crown')` keeps the crowns off too (default: the flattened areas) |
+| `stand_m` | crowns kept this far from each camera standing near the ground (default 1.5; 0: none) |
+| `lod` | `{'hero_m', 'billboard_m', 'near_m'}` for every species, or `{species: {...}}` |
+| `wind` | `True`: trees in SeedThree's swaying grove (their cards realised near the camera so each sways); default a still shot |
+| `instance` | `False`: plan and cover only, no objects |
+| `spots` | a `PlantSpots` to instance instead of planning |
+
+- **Detail by distance, every frame, by the active camera:** the nearest
+  trees within 40 m at their full level (64 trees at most), the rest within
+  the card distance at their card level, billboards beyond (one mesh of
+  crossed cards, matched to the card level's colour). Shrubs keep their card
+  level while they span about 4 pixels. Grass and flowers are flora strokes
+  (instances) near the focus; beyond them the material carries their cover.
+  Shrubs, grass and flowers are never realised.
+- **After `make_sky`**, bind the SeedThree plants to its sun:
+  `t.bind_sun(sky.sun)`.
+- **SeedThree** grows the trees and shrubs, through its Blender add-on
+  (`SEEDTHREE_DIR`, or a SeedThree checkout beside this one). A species'
+  first use grows its individuals and bakes their billboards (minutes); they
+  are kept in `eidoverse/assets/cache/terrain_plants/`.
+- **The spots on disk:** `t.plants.save(base)` writes `<base>.plants.json`
+  and one `<base>.plants.<species>.f32` per species: headerless little-endian
+  float32, twelve fields a plant (x, y, z, yaw, scale, age, tint, nx, ny, nz,
+  variant, level). A three.js placer reads the JSON and each file as a
+  `Float32Array` (position (x, z, −y), `rotation.y` = yaw) and grows the
+  named SeedThree species with SeedThree's own generators. A plan is kept in
+  the terrain's cache entry, so a shot built again plans nothing.
+- **Cost:** planning 1-30 s (Lauterbrunnen's 50,000 spruce about 25 s), the
+  cover rasters 2-15 s, instancing 1-5 s.
+
 ### Palettes, rocks and water
 
 `palette='auto'` takes the recipe's palette (the place's, for `real_place`);
@@ -201,26 +439,21 @@ a name picks one of `alpine`, `desert_sandstone`, `volcanic`, `dunes`,
 `badlands`, `karst`, `chalk_coast`, `farmland` and `meadow`; `None` gives
 grey clay (albedo 0.18) for shape comparisons. A palette is up to six CC0
 scan layers in one node group, each weighted by a mask expression such as
-`'max(smoothstep(0.35, 0.6, rock), smoothstep(24, 31, slope))'`, projected
-from above on gentle ground and box-projected (triplanar) on steep faces, and
+`'smoothstep(0.52, 0.72, flow) * smoothstep(14, 4, slope)'` (a wash along
+the drainage on gentle ground), and
 height-blended in order so the layers interlock at their own detail. The
 layered-rock recipes add their rock column's colour bands at the
 stratigraphic height, so the bands sit on the benches the erosion cut.
+`build/palettes.py`'s module doc describes a palette and its looks.
 
-- Each map is read twice at unrelated scales and offsets, switched by world
-  noise in patches about a tile across (`detile_patch`), so a tile seldom
-  repeats.
-- Texture reads hold still in motion. EEVEE's `'Linear'` is mipmapped but
-  not anisotropic, so ground at grazing angles blurs; `'Cubic'` reads the
-  full-resolution image but has no mipmaps, so past a few metres the ground
-  crawls when the camera moves. `interpolation='Auto'` (the default) reads
-  Cubic within `detail_distance` (4, 9) metres of the camera and Linear past
-  it. The shimmer probe (`blender/tests/terrain/surfacing/test_shimmer.py`
-  and `shimmer_metric.py`: the meadow's ground with the camera turned by
-  half a pixel, 960 × 540, 16 samples) measures the crawl as a share of the
-  real motion: 0.14 from 28 m out, 0.12 at 9-28 m and 0.24 at 3.5-6 m, where
-  Cubic everywhere crawls about 1.0 in the distance. A wider frame or a
-  longer lens can push `detail_distance` out; check it with the probe.
+- Texture reads hold still in motion: the scans are read bicubic within 4-9
+  m of the camera (`detail_distance`) and mipmapped past it, and every noise
+  term fades with the pixel's footprint. The shimmer probe
+  (`blender/tests/terrain/surfacing/check_shimmer.py`, the canyon's approach
+  walk with the camera turned by half a pixel) measures the crawl as a share
+  of the real motion: 0.09 under 10 m, 0.09 at 10-40 m, 0.21 at 40-400 m and
+  0.11 past 400 m. A wider frame or a longer lens can move
+  `detail_distance`; check it with the probe.
 - `dress=True` scatters CC0 rock models within 150 m of the focus on the
   talus, rock-toe and channel masks: sizes from a power law, half-buried and
   turned to the ground, as collection instances.
@@ -300,6 +533,47 @@ with hero levels); past `EIDO_TERRAIN_CACHE_GB` (default 8) the oldest go.
 A cache hit loads the fields and builds the mesh in seconds. The first call
 in a Blender process also compiles its kernels.
 
+The surface bake has its own root, `EIDO_SURFACE_CACHE` (default
+`eidoverse/assets/cache/terrain_surface/`): one bake per terrain key (its
+arrays and its atlas images, 0.2-0.6 GB), keyed by the terrain, the bake's
+code and its options, the palette's colours beside it keyed by the palette
+and the plant cover they read; past 8 GB the least recently used terrains go,
+and the terrain cache's own prune never touches it. A plan of plants is kept
+in its terrain's cache entry (`plants_<key>.plants.json`, its spots and its
+cover rasters), keyed by the ecotope, the focus, the seed, the discs kept
+clear, the bake it read and the plant code. `cache=False` keeps all three in
+memory.
+
+### Saving and reopening
+
+```python
+import os, tempfile
+import bpy
+from eidoblend.terrain import Terrain, terrain_surface, terrain_height_at
+folder = tempfile.mkdtemp()
+t.save(os.path.join(folder, 'meadow'))           # meadow.npz, .json, and its plants' .plants.json and .f32 files
+t2 = Terrain.load(os.path.join(folder, 'meadow'), name='meadow_again')   # built again: its bake a cache hit,
+                                                                          # its saved plants instanced
+t.surface.save_images(os.path.join(folder, 'surface'))   # the atlas images, copied beside the .blend
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(folder, 'meadow.blend'))
+```
+
+The surface's atlas images are files (the surface cache's, or the copies
+`save_images` made); a `.blend` references them, as it references the scan
+cache. After reopening a `.blend`, `terrain_surface(obj)` finds every atlas
+the terrain's materials read (where its file was, else a folder you name,
+the `.blend`'s folder, the bake's cache folder) and reloads it, and
+`terrain_height_at(obj)` rebuilds `height_at` from the object alone:
+
+```python
+obj = bpy.data.objects['terrain']
+terrain_surface(obj)            # {'key', 'images': {family: path}, ...}; a missing file raises, naming it
+height_at = terrain_height_at(obj)
+```
+
+`Terrain.load(path, plants='keep')` instances the saved spots; `plants=None`
+leaves them out, `'auto'` plans again.
+
 ### Heightmaps for other tools
 
 ```python
@@ -323,6 +597,48 @@ own: benches, crater ratios, dune spacing...), the bands they must fall in,
 and a sheet with the place's views beside the recipe's: top-down hillshade,
 45° aerial and 1.7 m eye in grey clay, then the hero levels' eye view and the
 textured aerial and eye. Use it when you change a recipe's stages.
+
+The surface and the plants are judged beside photographs of the real place
+from matched cameras (`blender/tests/terrain/surfacing_judge/views.json`:
+every recipe's photographed views, an establishing aerial and a low
+oblique). The bar is World Machine and Gaea: a colour map at the
+heightfield's texel, made from erosion data. Use these when you change a
+palette, an ecotope or the material:
+
+```
+bash run_blender.sh blender/tests/terrain/surfacing/review_views.py --recipe canyon --plants --layers --tag mine
+python blender/tests/terrain/surfacing_judge/board.py canyon --before final --after mine
+python blender/tests/terrain/surfacing_judge/baseline.py --state mine --skip tile,splat,audit_frames
+bash run_blender.sh blender/tests/terrain/surfacing_judge/video.py --recipe canyon --tag mine
+```
+
+`review_views.py` renders each view as a scene author would build it
+(960 × 540, 16 samples, `make_sky` daylight, rocks and plants) and, with
+`--layers`, the same frame as a layer map (each layer one flat colour). The
+board puts the photograph, the render before, the render after and the layer
+map side by side, with two places enlarged 2× where a defect would show
+(`out/surfacing_judge/boards/`). Read each view against this list:
+
+1. colour follows the landform: boundaries at slope breaks, gullies, ridges
+   and fans, and across the contours, not along height lines;
+2. no flat single material where the place is not one (a continuous
+   chaparral, conifer forest or dune sea is one in the photograph too, with
+   variation inside it);
+3. no tiling at any distance;
+4. relief at every distance: rills at mid distance, crisp crests, dark
+   creases;
+5. debris and sediment in their source's colour;
+6. steep faces with no smear, with vertical structure;
+7. plants where the place grows them, objects near and canopy far, one
+   forest;
+8. nothing changes as the camera moves: no shimmer, no seam ring, no pop (the
+   videos: an 8 s aerial orbit and a 6 s walk at eye level per recipe).
+
+`baseline.py` measures each frame beside the photograph's own ground (the
+largest one-material region against the photograph's, the repetition peak
+with its high-pass energy, the colour after matching the exposure, the
+seams at window edges) into `out/surfacing_judge/baseline_<state>.md`. The
+numbers support the eye and never replace it: blur passes a repetition test.
 
 ## `layer_surface` — making built geometry look built
 
@@ -557,3 +873,10 @@ unapplied scale in world and object space).
   later recipes: shield volcano, lava field, playa with bajada fans,
   inselberg plain, braided outwash plain, river valley with floodplain and
   oxbows, complex crater, volcanic island, fjord.
+- The surface: colour ramps sampled from orthophotos of each place (they are
+  sampled from the matched photographs now), a freshness map from the
+  erosion's own last epochs (failing faces are read from the rock's
+  threshold now), and the impact crater's ejecta blanket as its own layer.
+- The plants: the three.js placer that reads the spots files (the format is
+  written for it), a spruce of SeedThree's own (a narrow Douglas fir stands
+  in), and rock-clinging shrubs for the karst towers' steepest flanks.
