@@ -467,21 +467,24 @@ def lut(sc, t, obj, sd, rec):
             ground = im[..., 3] > 0.5
             got = im[..., :3][ground].astype(np.float64)
 
-            def nearest(rr):
+            def nearest(rr, px):
                 """Each pixel's distance to the nearest texel of row rr, in that texel's 8-bit steps (the largest
                 over the channels)."""
-                best = np.full(len(got), np.inf)
+                best = np.full(len(px), np.inf)
                 for k0 in range(0, W, 32):
-                    d = (np.abs(got[:, None, :] - rows[rr, None, k0:k0 + 32, :])
+                    d = (np.abs(px[:, None, :] - rows[rr, None, k0:k0 + 32, :])
                          / step[rr, None, k0:k0 + 32, :]).max(-1).min(-1)
                     best = np.minimum(best, d)
                 return best
-            own = nearest(row)
-            other = np.full(len(got), np.inf)
-            for rr in range(R):
-                if rr != row:
-                    other = np.minimum(other, nearest(rr))
+            own = nearest(row, got)
             off = own > 1.0
+            other = np.full(len(got), np.inf)
+            if off.any():                                 # only the pixels off their own row can lie nearer another
+                sub = np.full(int(off.sum()), np.inf)
+                for rr in range(R):
+                    if rr != row:
+                        sub = np.minimum(sub, nearest(rr, got[off]))
+                other[off] = sub
             res[f'{row}_{interp}'] = dict(ground_px=int(ground.sum()), off_row_share=round(float(off.mean()), 5),
                                          worst_steps=round(float(own.max()), 2),
                                          nearer_another_row=round(float((off & (other < own)).mean()), 5))

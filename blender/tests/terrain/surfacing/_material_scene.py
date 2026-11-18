@@ -209,18 +209,23 @@ def frame(sc, path=None):
     return time.time() - t0
 
 
-def salt(mat, k):
-    """k extra no-op nodes on the material's roughness: a different shader source, so a compile measured after it is
-    cold (the GPU driver caches compiled sources; node values are uniforms and would not change the source)."""
+def salt(mat, k=None):
+    """32 extra no-op nodes on the material's roughness, each ADD 0 or MAXIMUM 0 by the bits of a fresh random
+    number on every call (k is accepted and ignored): a shader source no earlier run has compiled, so a compile
+    measured after it is cold. The GPU driver keeps compiled sources on disk across processes, and node values are
+    uniforms that do not change the source: a salt of k nodes (a small count) repeated across runs and hit that
+    cache (a 'cold' first frame of 1-5 s, 11-18)."""
+    import random
+    bits = random.SystemRandom().getrandbits(32)
     nt = mat.node_tree
     grp = next(n for n in nt.nodes if n.bl_idname == 'ShaderNodeGroup')
     ng = grp.node_tree
     bsdf = next(n for n in ng.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled')
     sock = bsdf.inputs['Roughness']
     src = sock.links[0].from_socket if sock.links else None
-    for _ in range(int(k)):
+    for b in range(32):
         m = ng.nodes.new('ShaderNodeMath')
-        m.operation = 'ADD'
+        m.operation = 'MAXIMUM' if (bits >> b) & 1 else 'ADD'
         m.inputs[1].default_value = 0.0
         if src is not None:
             ng.links.new(src, m.inputs[0])
