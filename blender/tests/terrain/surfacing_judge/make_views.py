@@ -117,8 +117,11 @@ FIXES = {
             'wall 200 m off; the photograph stands in the open floor meadow looking up-valley along the trough: '
             'the camera on the floor 120 m from the trunk river, looking up the line the river runs'),
     ('sea_cliffs', 'clifftop_along'): dict(
-        how='see', target='aim_ground', dz=5.0, prefer='high',
-        why='a grass slope rises in front of the camera; the photograph walks the clifftop with the sea beside it'),
+        how='edge', inland_m=40.0, along_m=900.0, by_eye=True,
+        why='a grass slope rises in front of the camera, and the spot first found beyond it framed only downland, '
+            'the cliffs out of the picture; the photograph walks the clifftop near the edge, looking along the '
+            'chalk face with the sea on its right: the camera 40 m inland of the nearest cliff edge, looking along '
+            'it'),
     ('sea_cliffs', 'headland_tele'): dict(
         how='see', target='aim_ground', dz=5.0, prefer='high',
         why='a nearer rise hides the cliff line; the photograph looks along the Seven Sisters from Seaford Head'),
@@ -306,7 +309,8 @@ def _channel_distance(stack, xs, ys):
 def fix_along(stack, v, f):
     """A floor view along a valley: the trunk river nearest the camera (the main level's channel cells of the
     largest flow within 800 m), its up-valley line fitted over 1.5 km each way; the camera off_channel_m to the side
-    of it on footing under max_slope_deg, the aim on the river line the view's distance up-valley, dz over it."""
+    of it on footing under max_slope_deg, the aim on the river itself about the view's distance up-valley, dz over
+    it."""
     cam, ground, aim = V.camera_of(stack, v)
     lv = stack.levels[stack.main]
     ms = stack.masks('main')
@@ -340,6 +344,16 @@ def fix_along(stack, v, f):
                 if sl > float(f['max_slope_deg']) or not bool(V.dry(stack, np.array([ex]), np.array([ey]))[0]):
                     continue
                 ax, ay = px + u[0] * dist, py + u[1] * dist
+                # the aim on the river itself: of the trunk's cells (anywhere up the valley) about `dist` from
+                # the spot and upstream of it, the one nearest that point ahead (a trough bends: a point straight
+                # ahead can stand on its wall, and the view then looks up the wall, not along the floor)
+                far = (ch > 0.5) & (fl >= pf - 0.5)
+                dd = np.hypot(X - px, Y - py)
+                cand = far & (np.abs(dd - dist) <= 0.25 * dist) & (((X - px) * u[0] + (Y - py) * u[1]) > 0)
+                if cand.any():
+                    jj, ii = np.unravel_index(int(np.argmin(np.where(cand, np.hypot(X - ax, Y - ay), np.inf))),
+                                              X.shape)
+                    ax, ay = float(X[jj, ii]), float(Y[jj, ii])
                 az = float(stack.height_at(ax, ay)) + float(f.get('dz', 0.0))
                 w = dict(v, cam=_rel(stack, (ex, ey)), cam_z=['ground', 1.7],
                          aim=_rel(stack, (ax, ay)) + [round(az, 3)])
@@ -354,10 +368,64 @@ def fix_along(stack, v, f):
         return None, None, 'no flat dry footing beside the river sees up the valley'
     k, w, cc, dist = best
     hd = (90.0 - math.degrees(math.atan2(u[1], u[0]))) % 360.0
+    bend = f" (the valley bends: the review's {dist0:.0f} m lies behind its side)" if dist < dist0 else ''
     return w, cc, (f"stands {f['off_channel_m'] * k:.0f} m beside the trunk river "
                    f"{math.hypot(px - cam.eye[0], py - cam.eye[1]):.0f} m from the review's spot, looking up the "
-                   f"river's line (heading {hd:.0f}) to the floor {dist:.0f} m away (the valley bends: the review's "
-                   f"{dist0:.0f} m lies behind its side)" if dist < dist0 else '')
+                   f"valley (heading {hd:.0f}) at the river {dist:.0f} m away{bend}")
+
+
+def fix_edge(stack, v, f):
+    """A clifftop view along a sea cliff: the face (main-level cells over 50 degrees) within 1.5 km of the camera;
+    each candidate edge cell, the highest clifftops first, gets its line fitted over 600 m, the camera inland_m back
+    from it on the clifftop, and an aim along the edge the way that keeps the sea on the right (along_m, else
+    nearer), a little down the face; the first the check passes is taken (the downland rises and falls along the
+    edge, the Seven Sisters' hills, so a low spot sees only the next rise)."""
+    cam, ground, aim = V.camera_of(stack, v)
+    lv = stack.levels[stack.main]
+    X, Y = stack.xy('main')
+    h = np.asarray(stack.fields[stack.main]['h'], np.float64)
+    gy, gx = np.gradient(h, lv['cell'])
+    slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+    face = slope > 50.0
+    d0 = np.hypot(X - cam.eye[0], Y - cam.eye[1])
+    near = face & (d0 <= 1500.0)
+    if not near.any():
+        return None, None, 'no cliff face within 1.5 km of the camera'
+    jj, ii = np.nonzero(near)
+    # the clifftop over each face cell: the highest ground within 3 cells inland of it
+    order = np.argsort(-h[jj, ii])
+    tried = 0
+    for k in order[::max(1, len(order) // 60)]:
+        j, i = int(jj[k]), int(ii[k])
+        px, py = float(X[j, i]), float(Y[j, i])
+        seg = face & (np.hypot(X - px, Y - py) <= 600.0)
+        xs, ys = X[seg], Y[seg]
+        if len(xs) < 6:
+            continue
+        c = np.array([xs.mean(), ys.mean()])
+        u = np.linalg.svd(np.stack([xs - c[0], ys - c[1]], 1), full_matrices=False)[2][0]
+        sea = -np.array([gx[j, i], gy[j, i]])            # downhill across the face: toward the sea
+        sea /= max(np.linalg.norm(sea), 1e-9)
+        if u[1] * sea[0] - u[0] * sea[1] < 0:            # the sea on the right of the view: right = (u_y, -u_x)
+            u = -u
+        ex, ey = px - sea[0] * float(f['inland_m']), py - sea[1] * float(f['inland_m'])
+        top = float(stack.height_at(ex, ey))
+        for along in (float(f['along_m']), 0.7 * float(f['along_m']), 0.45 * float(f['along_m'])):
+            ax, ay = px + u[0] * along, py + u[1] * along
+            az = float(stack.height_at(ax, ay))
+            for frac in (0.3, 0.6):                      # the aim partway down the face below the clifftop there
+                g = float(stack.height_at(ax + sea[0] * 60.0, ay + sea[1] * 60.0))
+                w = dict(v, cam=_rel(stack, (ex, ey)), cam_z=['ground', 1.7],
+                         aim=_rel(stack, (ax, ay)) + [round(az - frac * max(az - g, 0.0), 3)])
+                cc = V.check(stack, w)
+                tried += 1
+                if not cc['fails']:
+                    hd = (90.0 - math.degrees(math.atan2(u[1], u[0]))) % 360.0
+                    return w, cc, (f"stands {f['inland_m']:.0f} m inland of the cliff edge, on a clifftop "
+                                   f"{top:.0f} m high {math.hypot(px - cam.eye[0], py - cam.eye[1]):.0f} m from the "
+                                   f"review's spot, looking {along:.0f} m along it (heading {hd:.0f}) with the sea on "
+                                   f"its right")
+    return None, None, f'no clifftop spot sees along the edge ({tried} tried)'
 
 
 def fix_forward(stack, v, f):
@@ -458,7 +526,7 @@ def main(argv):
                 v = dict(v, origin=f'review, kept: {KEEP[key]}')
             if key in FIXES and (c['fails'] or FIXES[key].get('by_eye')):
                 f = FIXES[key]
-                w, c2, how = {'see': fix_see, 'spot': fix_spot, 'along': fix_along}[f['how']](st, v, f)
+                w, c2, how = {'see': fix_see, 'spot': fix_spot, 'along': fix_along, 'edge': fix_edge}[f['how']](st, v, f)
                 if w is None:
                     print(f'{recipe}/{v["name"]}: FAILS ({"; ".join(c["fails"])}) and the fix found nothing: {how}')
                     v = dict(v, origin=f"review, failing: {f['why']}; no move found ({how})")

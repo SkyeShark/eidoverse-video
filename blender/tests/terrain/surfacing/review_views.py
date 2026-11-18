@@ -141,14 +141,59 @@ def render(sc, path, once=False):
     return t_first, time.time() - t0
 
 
-def layer_scene(sc, t, palette):
-    """The layer pass's scene (--layers in the module doc): the palette's debug='layers' material on the terrain's
-    data, water black, every other object hidden, a black world, the Standard view transform, 8-bit RGBA."""
+def layer_material(t, palette):
+    """The palette's debug='layers' material on the terrain's own data (each layer one flat colour by its weight),
+    built while the data is held, for the layer pass after the frames."""
     from eidoblend.terrain.build import surfacing as S
     info = t.info
     strata = (P.PLACES.get(info['place']) or {}).get('strata') if info.get('place') else None
-    S.apply_surface(t.obj, palette=palette, recipe=t.recipe, strata=strata, options={'debug': 'layers'}, log=None,
-                    data=t.surface)
+    consts = S.terrain_constants(t.obj)
+    return S.surface_material(palette, recipe=t.recipe, strata=strata, options={'debug': 'layers'},
+                              name=t.obj.name + '_layers', log=None, constants=consts, data=t.surface)
+
+
+def image_users(mats):
+    """[(Image Texture node, image name)] of materials, their node groups included."""
+    out, seen = [], set()
+
+    def walk(nt):
+        if nt is None or nt.name in seen:
+            return
+        seen.add(nt.name)
+        for nd in nt.nodes:
+            if nd.bl_idname == 'ShaderNodeTexImage' and nd.image is not None:
+                out.append((nd, nd.image.name))
+            elif nd.bl_idname == 'ShaderNodeGroup':
+                walk(nd.node_tree)
+    for m in mats:
+        if m is not None and m.use_nodes:
+            walk(m.node_tree)
+    return out
+
+
+def relink(users):
+    """Point every recorded image node at the image of its recorded name again: a second material of the same
+    palette replaces the strata column's images by name (surfacing.strata_image), which empties the first
+    material's nodes; the new images hold the same column."""
+    n = 0
+    for nd, name in users:
+        if nd.image is None or nd.image.name != name:
+            img = bpy.data.images.get(name)
+            if img is not None:
+                nd.image = img
+                n += 1
+    return n
+
+
+def layer_scene(sc, obj, water, mat):
+    """The layer pass's scene (--layers in the module doc): the layer material on every ring, water black, every
+    other object hidden, a black world, the Standard view transform, 8-bit RGBA."""
+    import numpy as np
+    me = obj.data
+    me.materials.clear()
+    me.materials.append(mat)
+    me.polygons.foreach_set('material_index', np.zeros(len(me.polygons), np.int32))
+    me.update()
     black = bpy.data.materials.new('judge_water_black')
     black.use_nodes = True
     nt = black.node_tree
@@ -157,11 +202,10 @@ def layer_scene(sc, t, palette):
     em.inputs['Color'].default_value = (0.0, 0.0, 0.0, 1.0)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
     nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
-    water = [o for o in list(t.water.get('lakes') or []) + [t.water.get('sea')] if o is not None]
     for o in water:
         o.data.materials.clear()
         o.data.materials.append(black)
-    keep = {t.obj.name} | {o.name for o in water}
+    keep = {obj.name} | {o.name for o in water}
     for o in sc.objects:
         if o.type != 'CAMERA' and o.name not in keep:
             o.hide_render = True                           # rocks, plants, clouds, the sun
@@ -258,6 +302,17 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
                                                     'plants_instance')},
                   terrain_s=round(tg, 1), build_s=round(tb, 1), plan=os.path.basename(a['plan']),
                   palettes_file=PALETTES_FILE)
+    # what the frames need is in Blender now: the layer material is built while the data is held, then the numpy
+    # side (the levels' fields and masks, the surface maps, the plan's working arrays: several GB on a film terrain)
+    # is let go before the first frame, which compiles every shader under the job's RAM cap
+    users = image_users(list(t.obj.data.materials))
+    lmat = layer_material(t, palette) if a['layers'] and not a['debug'] else None
+    common['relinked_images'] = relink(users)
+    obj, plant_objects = t.obj, dict(t.plant_objects)
+    water = [o for o in list(t.water.get('lakes') or []) + [t.water.get('sea')] if o is not None]
+    t.surface = t.plants = None
+    del t
+    gc.collect()
     done = []
     sun = None
     for v, cam, eye, aim, ground in shots:
@@ -269,7 +324,10 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
             cache = os.path.join(sky_root, v['name'])
             sky = light(sc, cam, cache, sun)
             sun = sky.sun
-            bound = t.bind_sun(sun) if t.plant_objects else None
+            bound = None
+            if any(plant_objects.values()):
+                from eidoblend.terrain.build import plant_instances as PI
+                bound = PI.bind_sun(sun)
             path = os.path.join(out, name + '.png')
             t_first, t_second = render(sc, path, once=a['once'])
             shutil.rmtree(cache, ignore_errors=True)
@@ -279,7 +337,7 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
                 # the difference survives better than either number)
                 from eidoblend.terrain.build import surfacing as S
                 for label, clay in (('clay', True), ('textured', False)):
-                    t.obj.data.materials[0] = S.clay_material() if clay else mat
+                    obj.data.materials[0] = S.clay_material() if clay else mat
                     bpy.ops.render.render(write_still=False)              # compile
                     best = 1e9
                     for _ in range(2):
@@ -303,10 +361,10 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
         except Exception as e:                                   # noqa: BLE001 - recorded, the run goes on
             traceback.print_exc()
             rec[name] = dict(common, error=f'{type(e).__name__}: {e}')
-    if a['layers'] and not a['debug'] and done:
+    if lmat is not None and done:
         try:
             t1 = time.time()
-            layer_scene(sc, t, palette)
+            layer_scene(sc, obj, water, lmat)
             for v, name, cam in done:
                 sc.camera = cam
                 lp = os.path.join(out, name + '_layers.png')
@@ -320,7 +378,6 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
             traceback.print_exc()
             for _v, name, _c in done:
                 rec[name]['layers_error'] = f'{type(e).__name__}: {e}'
-    del t
     gc.collect()
 
 
