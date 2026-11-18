@@ -98,12 +98,24 @@ FIXES = {
     ('dunes', 'crest'): dict(
         how='spot', radius=900.0, prefer='high', pitch=-7.0,
         why='a dune face rises in front of the camera; the photograph looks along a crest down to the plain'),
+    ('badlands', 'overlook'): dict(
+        how='spot', radius=500.0, prefer='high', pitch=-12.0, by_eye=True,
+        why='the review\'s aim lies 95 m under today\'s ground 38 m away, so the camera looked 62 degrees down at '
+            'its feet (the renders of 11-14 and 11-18: nothing but the ground at the feet); the photograph looks '
+            'from the upper prairie edge down across the rills'),
     ('tower_karst', 'riverbank'): dict(
         how='spot', radius=1200.0, prefer='low',
         why='a tower fills the picture; the photograph looks over the river at towers in the distance'),
     ('tower_karst', 'plain_fields'): dict(
-        how='see', target='high', r=600.0, dz=-30.0, prefer='low',
-        why='a nearer tower hides the one the camera looks up at; the photograph looks up a valley between towers'),
+        how='see', target='high', r=600.0, dz=-30.0, prefer='low', max_slope_deg=4.0,
+        why='a nearer tower hides the one the camera looks up at; the photograph looks up a valley between towers '
+            'from the plain among the fields (on footing under 4 degrees: the spot first found stood on a wooded '
+            'hill slope, where the plant layer grows broadleaf over 9 degrees and a crown filled the frame)'),
+    ('alpine_valley', 'floor_axis'): dict(
+        how='along', off_channel_m=120.0, max_slope_deg=6.0, dz=30.0, by_eye=True,
+        why='the camera stood on the river line, in the riverside maple belt the plant layer grows, facing a trough '
+            'wall 200 m off; the photograph stands in the open floor meadow looking up-valley along the trough: '
+            'the camera on the floor 120 m from the trunk river, looking up the line the river runs'),
     ('sea_cliffs', 'clifftop_along'): dict(
         how='see', target='aim_ground', dz=5.0, prefer='high',
         why='a grass slope rises in front of the camera; the photograph walks the clifftop with the sea beside it'),
@@ -113,6 +125,23 @@ FIXES = {
     ('rolling_hills', 'hilltop_walk'): dict(
         how='spot', radius=1500.0, prefer='high', pitch=-3.0,
         why='a nearer rise hides the hills; the photograph looks out over the fields from a hilltop'),
+}
+# a second step on a view after FIXES (or on the review's view), by eye: the plant layer's renders of 11-18 showed
+# what the clay check cannot (crowns in front of the camera, the floor out of the frame)
+#   forward: the camera walks forward_m toward the aim along the ground; vista_m: the first metres of its sight line
+#            are kept clear of crowns (the renderer passes discs along it to the plants' plan)
+#   frame:   the aim placed at another point of the frame
+THEN = {
+    ('caldera', 'rim_east'): dict(
+        how='forward', forward_m=335.0, vista_m=30.0, seen_in='out/plants/boards/caldera_rim_east_p8.jpg',
+        why='from the bench inside the rim the forest and the rounded shoulder hide the lake; crater_lake_01 stands '
+            'at the overlook wall on the edge, where the caldera wall steepens past 25 degrees: walked 335 m toward '
+            'the aim, the first 30 m of the sight line kept clear of crowns'),
+    ('dunes', 'interdune_floor'): dict(
+        how='frame', frame=(0.5, 0.15),
+        why='the camera aimed 13.7 degrees up at the dune face, the floor and its grass below the frame; '
+            'namib_star_dunes_02 looks along the floor with the dune behind: the aim placed high in the frame '
+            '(4.7 degrees up)'),
 }
 # a view the check passes but the design needs as it is
 KEEP = {('canyon', 'brink_down'): 'the near right-hand wall is the material package\'s test case for the Box '
@@ -177,9 +206,14 @@ def fix_see(stack, v, f):
     if f.get('ring') == 'context':                     # an eye view that stands on a context ring, as its spot does
         main = stack.levels[stack.main]
         within, exclude = 0, (main['x0'], main['y0'], main['x0'] + main['side'], main['y0'] + main['side'])
+    allowed = None
+    if f.get('off_channel_m'):                         # off the streams (their riparian trees) by this much
+        def allowed(x, y):
+            return _channel_distance(stack, x, y) >= float(f['off_channel_m'])
     for scale in (1.0, 0.75, 1.35, 0.55, 1.8):
         vp = V.viewpoint(stack, tgt, dist * scale, eye_height=eye_h, heading=cam.heading_deg,
-                         prefer=f.get('prefer'), lens_mm=v['lens'], within=within, exclude=exclude)
+                         prefer=f.get('prefer'), lens_mm=v['lens'], within=within, exclude=exclude,
+                         max_slope_deg=float(f.get('max_slope_deg', 30.0)), allowed=allowed)
         if vp is None:
             continue
         w = dict(v, cam=_rel(stack, vp['eye']), cam_z=['ground', round(eye_h, 3)],
@@ -212,6 +246,9 @@ def fix_spot(stack, v, f, n=15):
     xs, ys = xs[ok], ys[ok]
     keep = V.dry(stack, xs, ys) if len(xs) else np.zeros(0, bool)
     xs, ys = xs[keep], ys[keep]
+    if f.get('off_channel_m') and len(xs):            # off the streams (their riparian trees) by this much
+        keep = _channel_distance(stack, xs, ys) >= float(f['off_channel_m'])
+        xs, ys = xs[keep], ys[keep]
     if not len(xs):
         return None, None, f'no dry ground within {r:.0f} m inside the level'
     gz = np.asarray(stack.height_at(xs, ys), np.float64)
@@ -223,7 +260,7 @@ def fix_spot(stack, v, f, n=15):
                                                                     float(v['cam_z'][1]) <= 10.0) else 1.7
     best = None
     for x, y, z, s, rk in zip(xs, ys, gz, slope, rank):
-        if s > 30.0:
+        if s > float(f.get('max_slope_deg', 30.0)):
             continue
         if f.get('prefer') == 'high' and rk < 0.6:                     # summits, crests and rims only
             continue
@@ -251,6 +288,109 @@ def fix_spot(stack, v, f, n=15):
                   f"keeps heading {cam.heading_deg:.0f}"
                   + (f", looks {pitch:+.0f} degrees as the photograph does" if pitch is not None
                      else f" and pitch {cam.pitch_deg:.1f}"))
+
+
+def _channel_distance(stack, xs, ys):
+    """Metres from each point to the nearest stream cell of the main level (its `channels` mask over 0.5)."""
+    import cv2
+    ch = np.asarray(stack.masks('main').get('channels', 0.0), np.float32)
+    lv = stack.levels[stack.main]
+    if np.ndim(ch) != 2 or not (ch > 0.5).any():
+        return np.full(len(xs), np.inf)
+    d = cv2.distanceTransform((ch <= 0.5).astype(np.uint8), cv2.DIST_L2, 5) * float(lv['cell'])
+    i = np.clip(((np.asarray(xs) - lv['x0']) / lv['cell']).astype(int), 0, d.shape[1] - 1)
+    j = np.clip(((np.asarray(ys) - lv['y0']) / lv['cell']).astype(int), 0, d.shape[0] - 1)
+    return d[j, i]
+
+
+def fix_along(stack, v, f):
+    """A floor view along a valley: the trunk river nearest the camera (the main level's channel cells of the
+    largest flow within 800 m), its up-valley line fitted over 1.5 km each way; the camera off_channel_m to the side
+    of it on footing under max_slope_deg, the aim on the river line the view's distance up-valley, dz over it."""
+    cam, ground, aim = V.camera_of(stack, v)
+    lv = stack.levels[stack.main]
+    ms = stack.masks('main')
+    ch, fl = np.asarray(ms['channels'], np.float64), np.asarray(ms['flow'], np.float64)
+    X, Y = stack.xy('main')
+    h = np.asarray(stack.fields[stack.main]['h'], np.float64)
+    d0 = np.hypot(X - cam.eye[0], Y - cam.eye[1])
+    near = (ch > 0.5) & (d0 <= 800.0)
+    if not near.any():
+        return None, None, 'no stream within 800 m of the camera'
+    j, i = np.unravel_index(int(np.argmax(np.where(near, fl, -np.inf))), fl.shape)
+    px, py, pf = float(X[j, i]), float(Y[j, i]), float(fl[j, i])
+    trunk = (ch > 0.5) & (fl >= pf - 0.5) & (np.hypot(X - px, Y - py) <= 1500.0)
+    xs, ys, zs = X[trunk], Y[trunk], h[trunk]
+    if len(xs) < 8:
+        return None, None, 'the trunk river is too short to give a line'
+    c = np.array([xs.mean(), ys.mean()])
+    u = np.linalg.svd(np.stack([xs - c[0], ys - c[1]], 1), full_matrices=False)[2][0]
+    if np.polyfit((xs - c[0]) * u[0] + (ys - c[1]) * u[1], zs, 1)[0] < 0:
+        u = -u                                          # up-valley: the way the river's bed rises
+    side = np.array([-u[1], u[0]])
+    dist0 = float(math.hypot(aim[0] - cam.eye[0], aim[1] - cam.eye[1]))
+    best = None
+    for frac in (1.0, 0.8, 0.65, 0.5, 0.4):              # the farthest floor up the line the ground lets it see
+        dist = dist0 * frac
+        for s_ in (1.0, -1.0):
+            for k in np.arange(1.0, 3.01, 0.25):        # off the river by off_channel_m .. 3x
+                ex, ey = px + s_ * side[0] * f['off_channel_m'] * k, py + s_ * side[1] * f['off_channel_m'] * k
+                sl = float(np.degrees(np.arccos(np.clip(V._normals(stack.height_at, np.array([ex]), np.array([ey]),
+                                                                     lv['cell'])[0, 2], -1, 1))))
+                if sl > float(f['max_slope_deg']) or not bool(V.dry(stack, np.array([ex]), np.array([ey]))[0]):
+                    continue
+                ax, ay = px + u[0] * dist, py + u[1] * dist
+                az = float(stack.height_at(ax, ay)) + float(f.get('dz', 0.0))
+                w = dict(v, cam=_rel(stack, (ex, ey)), cam_z=['ground', 1.7],
+                         aim=_rel(stack, (ax, ay)) + [round(az, 3)])
+                cc = V.check(stack, w)
+                if not cc['fails'] and (best is None or k < best[0]):
+                    best = (k, w, cc, dist)
+            if best is not None:
+                break
+        if best is not None:
+            break
+    if best is None:
+        return None, None, 'no flat dry footing beside the river sees up the valley'
+    k, w, cc, dist = best
+    hd = (90.0 - math.degrees(math.atan2(u[1], u[0]))) % 360.0
+    return w, cc, (f"stands {f['off_channel_m'] * k:.0f} m beside the trunk river "
+                   f"{math.hypot(px - cam.eye[0], py - cam.eye[1]):.0f} m from the review's spot, looking up the "
+                   f"river's line (heading {hd:.0f}) to the floor {dist:.0f} m away (the valley bends: the review's "
+                   f"{dist0:.0f} m lies behind its side)" if dist < dist0 else '')
+
+
+def fix_forward(stack, v, f):
+    """The camera walks forward_m toward its aim along the ground (the same height over it), keeping the aim."""
+    cam, ground, aim = V.camera_of(stack, v)
+    ux, uy = aim[0] - cam.eye[0], aim[1] - cam.eye[1]
+    n = math.hypot(ux, uy)
+    x, y = cam.eye[0] + float(f['forward_m']) * ux / n, cam.eye[1] + float(f['forward_m']) * uy / n
+    eye_h = float(v['cam_z'][1]) if v['cam_z'][0] == 'ground' else 1.7
+    w = dict(v, cam=_rel(stack, (x, y)), cam_z=['ground', round(eye_h, 3)])
+    if f.get('vista_m'):
+        w['vista_m'] = float(f['vista_m'])
+    c = V.check(stack, w)
+    how = f"walks {float(f['forward_m']):.0f} m toward the aim" + (
+        f", its first {float(f['vista_m']):.0f} m of sight kept clear of crowns" if f.get('vista_m') else '')
+    if c['fails']:
+        if not f.get('seen_in'):
+            return None, None, 'walked forward, it fails: ' + '; '.join(c['fails'])
+        # the saved terrain is the main level alone (no hero levels around the new spot): where a render of the
+        # recipe's own terrain at that spot shows the view, the render decides
+        how += (f" (the clay check on the saved terrain fails it: {'; '.join(c['fails'])}; the render at the spot "
+                f"reads as the photograph: {f['seen_in']})")
+        c = dict(c, fails=[])
+    return w, c, how
+
+
+def fix_frame(stack, v, f):
+    """The aim placed at another point of the frame (x, y from the left, from the top)."""
+    w = dict(v, frame=[float(f['frame'][0]), float(f['frame'][1])])
+    c = V.check(stack, w)
+    if c['fails']:
+        return None, None, 'reframed, it fails: ' + '; '.join(c['fails'])
+    return w, c, f"places the aim at {w['frame']} of the frame"
 
 
 def added(stack, recipe, kind, side):
@@ -318,7 +458,7 @@ def main(argv):
                 v = dict(v, origin=f'review, kept: {KEEP[key]}')
             if key in FIXES and (c['fails'] or FIXES[key].get('by_eye')):
                 f = FIXES[key]
-                w, c2, how = (fix_see if f['how'] == 'see' else fix_spot)(st, v, f)
+                w, c2, how = {'see': fix_see, 'spot': fix_spot, 'along': fix_along}[f['how']](st, v, f)
                 if w is None:
                     print(f'{recipe}/{v["name"]}: FAILS ({"; ".join(c["fails"])}) and the fix found nothing: {how}')
                     v = dict(v, origin=f"review, failing: {f['why']}; no move found ({how})")
@@ -332,6 +472,19 @@ def main(argv):
                     c = c2
             elif c['fails']:
                 print(f'{recipe}/{v["name"]}: FAILS with no fix written: {"; ".join(c["fails"])}')
+            if key in THEN:
+                f = THEN[key]
+                w, c2, how = (fix_forward if f['how'] == 'forward' else fix_frame)(st, v, f)
+                if w is None:
+                    print(f'{recipe}/{v["name"]}: the second step found nothing: {how}')
+                else:
+                    first = v.get('origin', 'review')
+                    w['origin'] = f"{first}; then, by eye: {f['why']}; the judge's camera {how}"
+                    w['focus'] = bool(V.kind_of(w) == 'eye' and c2['stands'] == 'main')
+                    print(f'{recipe}/{v["name"]}: {how}; blocked {100 * c2["blocked"]:.0f} %, ground '
+                          f'{100 * c2["ground"]:.0f} %, aim ray {100 * c2["aim_seen"]:.0f} %')
+                    sheet_rows.append((recipe, v, w, st))
+                    v, c = w, c2
             kinds.add(level_kind(c, side))
             if key in CROPS and not v.get('origin', '').startswith('review, moved'):
                 v = dict(v, crops=CROPS[key])

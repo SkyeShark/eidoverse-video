@@ -451,7 +451,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Package | Role | Instructions |
 | --- | --- | --- |
-| [blender/eidoblend/terrain/](../blender/eidoblend/terrain/__init__.py) | The terrain family: `make_terrain` (landforms made by their processes on the GPU from 16 recipes, real elevation data refined by `real_place`, levels from the horizon down to 0.25-0.5 m around the camera, the ring mesh, its masks, palettes and rocks; `bake.py` from the command line), the surface layers, parallax relief, loft | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
+| [blender/eidoblend/terrain/](../blender/eidoblend/terrain/__init__.py) | The terrain family: `make_terrain` (landforms made by their processes on the GPU from 16 recipes, real elevation data refined by `real_place`, levels from the horizon down to 0.25-0.5 m around the camera, the ring mesh, its masks, rocks; `bake.py` from the command line); the surface bake (`terrain/surface/`: every level's maps per texel in atlas images, cached in their own root) and the per-texel material read from it (layers placed and coloured by the terrain's own data, hex-tiled scans, steep faces in fixed sector frames, the far colour to the horizon; `eido_terrain_map` for agents' own shaders); the plant layer (ecotopes' rules turned into plant spots, instanced as flora and SeedThree plants with level of detail by camera, saved in a format a three.js placer reads); `terrain_surface` for a reopened `.blend`; the surface layers, parallax relief, loft | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
 
 ### WebXR (`eidoblend.xr`)
 

@@ -421,13 +421,14 @@ def dry(stack, x, y, level='main'):
 
 
 def viewpoint(stack, target, distance, eye_height=1.7, heading=None, max_slope_deg=30.0, lens_mm=35.0,
-              look_dz=0.0, prefer=None, clearance_m=1.0, within='main', exclude=None):
+              look_dz=0.0, prefer=None, clearance_m=1.0, within='main', exclude=None, allowed=None):
     """Terrain.viewpoint's rule (terrain/api.py) on a saved terrain: a standing point about `distance` metres from
     `target` ((x, y) or (x, y, z), world metres) from which an eye `eye_height` over the ground sees the target,
     the sight line clearing the ground by clearance_m from 3 m out to 97 % of the way, the footing under
     max_slope_deg and dry (views.dry: Terrain.viewpoint reads the mesh, which runs under lakes and the sea, so it can
     stand a camera on a lake bed), inside the `within` level ('main' or a level index) and outside the `exclude` box
-    (x0, y0, x1, y1: the main window, for an eye view that must stand on a context ring). Candidates every 5 degrees
+    (x0, y0, x1, y1: the main window, for an eye view that must stand on a context ring), where allowed(x, y) holds (a
+    callable on arrays of points; default everywhere). Candidates every 5 degrees
     around the target
     at 0.55-1.5 x the distance, ranked by the heading asked for (compass degrees the camera looks toward), then
     prefer 'low' or 'high', then the distance asked for, then the clearance. Returns dict(eye, target, ground_z,
@@ -455,6 +456,8 @@ def viewpoint(stack, target, distance, eye_height=1.7, heading=None, max_slope_d
     gz = np.asarray(stack.height_at(px, py), np.float64)
     nz = _normals(stack.height_at, px, py, lv['cell'])[:, 2]
     flat = (np.degrees(np.arccos(np.clip(nz, -1, 1))) <= max_slope_deg) & dry(stack, px, py)
+    if allowed is not None:
+        flat &= np.asarray(allowed(px, py), bool)
     ez = gz + eye_height
     k = 160
     t0 = np.minimum(3.0 / np.maximum(D, 3.0), 0.5)[:, None]

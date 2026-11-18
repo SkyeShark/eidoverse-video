@@ -2,11 +2,15 @@
 Python: numpy, Pillow; no render):
 
     python blender/tests/terrain/surfacing_judge/baseline.py [--state before] [--terrains <json>] [--recipes a,b]
-           [--views a,b] [--plan <views.json>] [--ref-state before] [--audit <folder>]
+           [--views a,b] [--plan <views.json>] [--ref-state before] [--audit <folder>] [--snap <dir>]
            [--skip tile,frames,splat,audit_frames]
     (a run adds to the state's json: --skip tile keeps the tiles measured before, --skip audit_frames the audit's
     frame splats; --skip splat leaves the frames that have no layer map without layers, which saves minutes a view;
-    --ref-state: today's renders the repetition energy is read against, default the frozen state 'before')
+    --ref-state: today's renders the repetition energy is read against, default the frozen state 'before';
+    --snap: where the renders' own terrains are saved (review_views.py --snap): a view whose record names its
+    terrain file there is measured on it, hero levels and all, so the window edges a seam is read along land on the
+    ground the render drew; else on the recipe's listed terrain, whose main level hero levels refine by metres to
+    tens of metres)
 
 The tile    per recipe, on the main level of the terrain listed for the state (--terrains; default
             out/surfacing_judge/terrains_<state>.json when it exists, else terrains.json), the palette's layers
@@ -601,8 +605,15 @@ def main(argv):
                     continue
                 print(f"[baseline] {recipe}/{v['name']}: the frame", flush=True)
                 try:
-                    res['frames'][f"{recipe}/{v['name']}"] = frame_measures(recipe, v, state, st, pal, ref_state,
+                    vst = st
+                    tf = (S.record(recipe, v['name'], state) or {}).get('terrain')
+                    snap = opt('--snap')
+                    if snap and isinstance(tf, str) and tf.endswith('.npz') and os.path.exists(os.path.join(snap, tf)):
+                        from surfacing_judge import terrain_data as TD
+                        vst = TD.load(os.path.join(snap, tf), recipe=recipe, heroes=True)   # the render's own
+                    res['frames'][f"{recipe}/{v['name']}"] = frame_measures(recipe, v, state, vst, pal, ref_state,
                                                                             splat='splat' not in skip)
+                    del vst
                 except Exception as e:                # noqa: BLE001
                     import traceback
                     traceback.print_exc()
