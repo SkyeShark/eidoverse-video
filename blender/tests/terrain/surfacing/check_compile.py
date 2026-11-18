@@ -9,8 +9,6 @@ on the GPU (so the first frame is the compile and one render).
 Variants (options over the palette's, on the material with baked data unless named today):
   today      the material without baked data (mesh attributes), for the ratio
   full       the per-texel material as apply_surface builds it
-  near_hex   near_hex True: every hex read of a planar frame 'Auto' (Cubic near beside mipmapped Linear), the
-             configuration before design 8.1's first lever (one Cubic near read at the plain coordinate)
   linear     interpolation 'Linear': no Cubic near read beside each mipmapped one
   no_hex     detile 'offset': one read per frame, no hex tiling (planar and sector frames)
   no_far     far_scale 1: no far read on the box layers' steep faces
@@ -38,7 +36,7 @@ import bpy  # noqa: E402
 from eidoblend.terrain.build import surfacing as S  # noqa: E402
 
 # name: None (today's material) or the material options over the palette's
-VARIANTS = {'today': None, 'full': {}, 'near_hex': dict(near_hex=True), 'linear': dict(interpolation='Linear'),
+VARIANTS = {'today': None, 'full': {}, 'linear': dict(interpolation='Linear'),
             'no_hex': dict(detile='offset'), 'no_far': dict(far_scale=1.0), 'steep_one': dict(steep_hex_m=0.0),
             'steep_all': dict(steep_hex_share=0.0), 'steep_hex': dict(steep_hex_m=20.0)}
 VIEW = {'canyon': 'brink_down', 'alpine_valley': 'floor_lischmaad', 'toroweap': 'brink_down',

@@ -21,9 +21,12 @@ its top: grid cells must read square, with no streaks and no seam where the sect
 materials with one read per frame (no second lattice, no far read, no hex tiling), so the grid shows the Box
 projection beside the sector frames alone; without it the grid shows the de-tiling too (hex tiling cuts it into
 hexagons of a third of a tile). --slope: each view once more as an emission of the baked field normal's
-slope (white at 90 degrees), what the layer weights read per texel. Writes
-out/surfacing/material/sectors/<case>_<view>_<today|per_texel>_<grid|scan>.png, <case>_<view>_slope.png and
-sectors_<case>.json (the cameras and frame seconds).
+slope (white at 90 degrees), what the layer weights read per texel. --level: each view once more as the per-texel
+material's level map (options debug='level': one flat colour per level, so the window edges show). --no-palette:
+bake the surface data without the palette (no far colour C or provenance P: the per-texel material then has no far
+hand-off), for a palette whose palette bake cannot run. Writes
+out/surfacing/material/sectors/<case>_<view>_<today|per_texel>_<grid|scan>.png, <case>_<view>_slope.png,
+<case>_<view>_level.png and sectors_<case>.json (the cameras and frame seconds).
 """
 import json
 import math
@@ -55,9 +58,9 @@ def args():
             options[k] = json.loads(v) if v[:1] in '-0123456789tfn"[' else v
     return dict(case=opt('--case', 'canyon'), views=views, options=options,
                 grid=views if grid is None else [v for v in grid.split(',') if v and v != 'none'],
-                slope='--slope' in a, mesh_res=int(opt('--mesh-res', '0')), only=opt('--only'),
+                slope='--slope' in a, level='--level' in a, mesh_res=int(opt('--mesh-res', '0')), only=opt('--only'),
                 tag=opt('--tag', ''), reps=int(opt('--reps', '1')), plain='--plain' in a,
-                cells=int(opt('--cells', '8')))
+                cells=int(opt('--cells', '8')), no_palette='--no-palette' in a)
 
 
 def slope_material(sd):
@@ -178,7 +181,7 @@ def main():
     t0 = time.time()
     t, obj = MS.terrain(a['case'], mesh_res=a['mesh_res'] or None, mask_attributes=a['only'] != 'per_texel')
     t_obj = time.time() - t0
-    sd = MS.surface(t)
+    sd = MS.surface(t, palette=None if a['no_palette'] else 'auto')
     grid, flat = grid_images(a['cells'])
     pairs = {}
     for alb, nrao in box_images(t):
@@ -230,6 +233,11 @@ def main():
         for v, cam in cams.items():
             sc.camera = cam
             MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_slope{tag}.png"))
+    if a['level']:
+        MS.apply(t, obj, sd, options=dict(a['options'], debug='level'))
+        for v, cam in cams.items():
+            sc.camera = cam
+            MS.frame(sc, os.path.join(OUT, f"{a['case']}_{v}_level{tag}.png"))
     rec['mesh']['vram_mib'] = MS.vram_mib()               # this process's GPU memory after the renders
     path = os.path.join(MS.OUT, f"sectors_{a['case']}{tag}.json")
     with open(path, 'w', encoding='utf-8') as f:
