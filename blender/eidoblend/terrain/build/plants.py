@@ -21,9 +21,13 @@ How a spot is placed, so the result can be trusted:
   cell, the species' name, the terrain's seed and the plan's: no generator state, so a cell gives the same candidates
   whatever is planned around it.
 - density. A candidate is kept with probability density / (parents_per_ha x mu), the species' density expression
-  evaluated on the masks of the finest level that holds the point (the rejection the rock scatter uses), times
-  1 - shade x (1 - tolerance) under the trees already placed. It is dropped on water, snow, bare rock and deep talus
-  or sand (ecotopes.py), on a level coarser than the species' max_cell_m, inside a flatten area, or off the terrain.
+  (the rejection the rock scatter uses), times 1 - shade x (1 - tolerance) under the trees already placed. Every
+  name a density reads is taken on the terrain's coarse levels (the main level in its tile, the context levels
+  beyond it), so stems per hectare never step where a hero window begins (design 4.2): a hero level's steeper
+  slopes, sharper curvatures and own drainage shape no density. It is dropped, on the finest level that holds the
+  point, on water, settled snow, its own cell steeper than STEEP_DEG and deep talus or sand, and on the coarse levels'
+  bare rock (ecotopes.py); and on a level coarser than the species' max_cell_m, inside a flatten area, or off the
+  terrain.
 - hard core. Species are placed in the order of their priority. A candidate is dropped within 0.75 x (its radius +
   the other's foot) of a plant placed earlier, and among the candidates of one priority the one with the smaller mark
   (a hash) wins wherever two stand closer than 0.75 x the sum of their radii: sequential inhibition in the order of
@@ -61,7 +65,13 @@ from . import palettes as P
 FORMAT = 'eidoverse-terrain-plants/1'
 FIELDS = ('x', 'y', 'z', 'yaw', 'scale', 'age', 'tint', 'nx', 'ny', 'nz', 'variant', 'level')
 # names the density expressions may read beyond the masks and the surface bake's maps (ecotopes.py describes them)
-DERIVED_NAMES = ('soil', 'insolation', 'dist_channel', 'shade', 'ledge')
+DERIVED_NAMES = ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'soil', 'insolation', 'dist_channel', 'shade',
+                 'ledge')
+STEEP_DEG = 60.0                    # no plant stands on its own cell steeper than this (unless it grows on rock)
+# the cover rasters a plan gives the surface bake (PlantSpots.cover), of which cover_extra hands over those its map
+# registry knows; and the kind of plant each cover kind counts
+COVER_MAPS = ('canopy', 'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far', 'grass', 'grass_far')
+COVER_KIND = {'tree': 'tree', 'shrub': 'shrub', 'grass': 'grass', 'forb': 'grass', 'groundcover': 'grass'}
 CORE_FACTOR = 0.75                 # two plants stand no closer than this x the sum of their radii (flora's rule)
 PAD_CORES = 12.0                    # the margin generated around a planned radius, in hard-core distances: a
                                     # decision inside the radius hangs on the margin's edge only through a chain of
@@ -272,6 +282,22 @@ def _upsample(a, m):
     return rows[i0, :] * (1.0 - w) + rows[i0 + 1, :] * w           # along y
 
 
+def _normal_20m(h, cell):
+    """(nx, ny) of the normal of a level's height raster blurred at 20 m, as the surface bake makes n20: the
+    masks' Gaussian (a periodic FFT) over the raster padded by reflection out to 4 sigma, then central differences."""
+    from .. import masks as _masks
+    h = np.asarray(h, np.float64)
+    s = 20.0 / float(cell)
+    hb = h
+    if s > 0.25:
+        m = min(int(math.ceil(4.0 * s)) + 2, h.shape[0] - 1, h.shape[1] - 1)
+        mu = float(h.mean())
+        hb = np.asarray(_masks.gaussian_blur(np.pad(h - mu, m, mode='reflect'), s), np.float64)[m:-m, m:-m] + mu
+    gy, gx = np.gradient(hb, float(cell))
+    L = np.sqrt(1.0 + gx * gx + gy * gy)
+    return -gx / L, -gy / L
+
+
 def terrain_constants(terrain):
     """The terrain constants (palettes.CONSTANTS) of a Terrain: its base elevation, its snowline and treeline from
     its recipe's mask parameters, its real place's (palettes.PLACES) or its knobs, and a real place's latitude: what
@@ -306,11 +332,14 @@ def terrain_constants(terrain):
 class _Ground:
     """What the planner reads of a terrain: its levels, each level's maps (its masks; with a surface bake, everything
     SurfaceData.maps gives a level: the masks, the bake's maps with its own drainage on hero levels, the plant
-    rasters and the derived insolation), the planner's derived names, heights and normals, and the constants."""
+    rasters and the derived insolation), the planner's derived names, heights and normals, and the constants.
+    Two reads: site() takes a name on the coarse levels, the one level every density reads (the module doc), and
+    at() on the finest level holding each point, for the exclusions."""
 
     def __init__(self, terrain, data=None, constants=None):
         self.levels = [_Level(i, lv) for i, lv in enumerate(terrain.levels)]
         self.data = data
+        self._terrain = terrain
         if data is not None:
             self.stack = [data.maps(i) for i in range(len(self.levels))]
         else:
@@ -325,6 +354,8 @@ class _Ground:
         self.constants.update(constants or {})
         self._coarse = [lv.index for lv in self.levels if lv.role != 'hero'] or [0]
         self._dist = None
+        self._n20 = None
+        self._site = P.parse(E.SITE)
         self.notes = []
         lv0 = self.levels[0]
         self.bounds = (lv0.x0, lv0.y0, lv0.x0 + lv0.side, lv0.y0 + lv0.side)
@@ -332,6 +363,97 @@ class _Ground:
     # points ------------------------------------------------------------------------------------------------
     def locate(self, x, y):
         return _Points(self.levels, x, y)
+
+    def coarse(self, pts):
+        """The points located on the coarse levels (kept on the points: one location per set of points)."""
+        cp = getattr(pts, '_coarse', None)
+        if cp is None:
+            cp = _Points(self.levels, pts.x, pts.y, only=set(self._coarse))
+            pts._coarse = cp
+        return cp
+
+    def site(self, pts, name, shade=None, memo=None):
+        """A name as every density reads it: on the coarse levels (the main level in its tile, the context levels
+        beyond), whatever level holds the point, so a density never steps at a hero window's edge; the 20 m slope
+        and aspect, `site`, `soil` and `insolation` are made from such reads too. memo: a dict that keeps what was
+        read (the expressions of one set of points share it). None when the terrain has none (it reads 0)."""
+        memo = {} if memo is None else memo
+        if name in memo:
+            return memo[name]
+
+        def get(n):
+            return self.site(pts, n, shade, memo)
+        if name == 'shade':
+            v = shade if shade is not None else np.zeros(pts.n)
+        elif name == 'site':
+            v = np.asarray(P.evaluate(self._site, get, pts.x, pts.y, self.constants), np.float64) * np.ones(pts.n)
+        elif name in ('slope_20m', 'northness_20m', 'eastness_20m'):
+            cp = self.coarse(pts)
+            n20 = self.n20()
+            nx = cp.sample(self.levels, [None if a is None else a[0] for a in n20])
+            ny = cp.sample(self.levels, [None if a is None else a[1] for a in n20])
+            g2 = np.minimum(nx * nx + ny * ny, 0.9999)
+            slope = np.degrees(np.arctan(np.sqrt(g2 / (1.0 - g2))))
+            fade = _smooth(1.0, 3.0, slope) / np.maximum(np.sqrt(g2), 1e-12)
+            memo['slope_20m'], memo['northness_20m'], memo['eastness_20m'] = slope, ny * fade, nx * fade
+            v = memo[name]
+        elif name == 'insolation':                       # the place's climatological sun on the 20 m normal
+            v = self._insolation(get('slope_20m'), get('northness_20m'), get('eastness_20m'), pts.n)
+        elif name == 'soil':
+            v = self._soil(get, pts.n, get('slope_20m'))
+        elif name == 'dist_channel':
+            v = self.coarse(pts).sample(self.levels, self.dist_channel())
+        elif name == 'ledge':
+            v = None
+        else:
+            v = self.coarse(pts).sample(self.levels, [m.get(name) for m in self.stack])
+        memo[name] = v
+        return v
+
+    def n20(self):
+        """Per level the 20 m normal's x and y (None on hero levels, which a density never reads): the surface
+        bake's n20 where the data holds it, else the normal of the level's height blurred at 20 m (the bake's own
+        rule), else the masks' slope and aspect of the level's cells."""
+        if self._n20 is None:
+            out = [None] * len(self.levels)
+            for i in self._coarse:
+                m, lv = self.stack[i], self.levels[i]
+                if m.get('n20_x') is not None and m.get('n20_y') is not None:
+                    out[i] = (np.asarray(m['n20_x'], np.float64), np.asarray(m['n20_y'], np.float64))
+                    continue
+                h = None
+                fields = getattr(self._terrain, 'fields', None)
+                if fields is not None:
+                    try:
+                        h = np.asarray(fields(i)['h'], np.float64)
+                    except (KeyError, IndexError, TypeError, AttributeError):
+                        h = None
+                if h is not None and h.shape == (lv.n, lv.n):
+                    out[i] = _normal_20m(h, lv.cell)
+                elif m.get('slope') is not None and m.get('aspect') is not None:
+                    t = np.tan(np.radians(np.asarray(m['slope'], np.float64)))
+                    a = np.radians(np.asarray(m['aspect'], np.float64))
+                    L = np.sqrt(1.0 + t * t)
+                    out[i] = (t * np.sin(a) / L, t * np.cos(a) / L)
+            if all(a is None for a in out):
+                lv = self.levels[self._coarse[-1]]
+                out[self._coarse[-1]] = (np.zeros((lv.n, lv.n)), np.zeros((lv.n, lv.n)))
+                self.notes.append('no height, n20 or slope on the coarse levels: densities read flat ground')
+            self._n20 = out
+        return self._n20
+
+    def _soil(self, get, n, slope):
+        """Loose cover the roots hold in: deposit + talus + sand, more in hollows (-crest) and, on slopes, where the
+        bake's settle gathered it (settle reads 0.5, unmoved, on gentle ground)."""
+        parts = [get(k) for k in ('deposit', 'talus', 'sand')]
+        v = sum((p for p in parts if p is not None), np.zeros(n))
+        crest, settle = get('crest'), get('settle')
+        if crest is not None:
+            v = v * (1.0 + np.clip(-crest, 0.0, 1.0))
+        if settle is not None:
+            k = _smooth(10.0, 20.0, slope) if slope is not None else np.ones(n)
+            v = v * (1.0 + k * (2.0 * settle - 1.0))
+        return v
 
     def normal_at(self, x, y):
         if self._normal_at is not None:
@@ -347,26 +469,16 @@ class _Ground:
         return n / np.linalg.norm(n, axis=1, keepdims=True)
 
     def at(self, pts, name, shade=None):
-        """One map or derived name at located points: an array, or None when the terrain has none (it then reads 0,
-        as the material's reader does)."""
+        """One map or derived name at located points, on the finest level holding each (the exclusions' read): an
+        array, or None when the terrain has none (it then reads 0, as the material's reader does). The 20 m terms,
+        `site` and `dist_channel` are the coarse levels' (site())."""
         if name == 'shade':
             return shade if shade is not None else np.zeros(pts.n)
+        if name in ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'dist_channel'):
+            return self.site(pts, name, shade)
         if name == 'soil':                               # loose cover, more in hollows and, on slopes, where the
-            parts = [self.at(pts, n) for n in ('deposit', 'talus', 'sand')]     # bake's settle gathered it
-            v = sum((p for p in parts if p is not None), np.zeros(pts.n))
-            crest, settle = self.at(pts, 'crest'), self.at(pts, 'settle')
-            if crest is not None:
-                v = v * (1.0 + np.clip(-crest, 0.0, 1.0))
-            if settle is not None:                       # settle reads 0.5 ("unmoved") on gentle ground
-                slope = self.at(pts, 'slope_20m')
-                slope = self.at(pts, 'slope') if slope is None else slope
-                k = _smooth(10.0, 20.0, slope) if slope is not None else np.ones(pts.n)
-                v = v * (1.0 + k * (2.0 * settle - 1.0))
-            return v
-        if name == 'dist_channel':
-            d = self.dist_channel()
-            cp = _Points(self.levels, pts.x, pts.y, only=set(self._coarse))
-            return cp.sample(self.levels, d)
+            return self._soil(lambda n: self.at(pts, n), pts.n,          # bake's settle gathered it
+                              self.at(pts, 'slope'))
         if name == 'ledge':
             return None
         v = pts.sample(self.levels, [m.get(name) for m in self.stack])
@@ -647,27 +759,33 @@ class _NeedMargin(Exception):
     pass
 
 
-def _exclusions(s, ground, pts, getter):
-    """True where the species may stand: off water, snow, bare rock and talus or sand deeper than its roots."""
+def _exclusions(s, ground, pts, site, fine, steep=True):
+    """True where the species may stand: off water, settled snow, a cell steeper than STEEP_DEG (with steep) and
+    talus or sand deeper than its roots, read on the finest level holding the point (fine), and off bare rock and
+    the snow mask, read where its density is (site: the coarse levels)."""
     ok = np.ones(pts.n, bool)
     on = set(s['on'])
     if 'water' not in on:
-        w = getter('water')
+        w = fine('water')
         if w is not None:
             ok &= w <= 0.05
     if 'snow' not in on:
-        sp = getter('snowpack')                          # a surface bake's settled snow, metres
+        sp = fine('snowpack')                            # a surface bake's settled snow, metres
         if sp is not None:
             ok &= sp <= 0.2
         else:
-            sn = getter('snow')
+            sn = site('snow')
             if sn is not None:
                 ok &= sn <= 0.5
     if 'rock' not in on:
-        ok &= np.asarray(P.evaluate(_BARE, getter, pts.x, pts.y, ground.constants)) <= 0.5
+        ok &= np.asarray(P.evaluate(_BARE, site, pts.x, pts.y, ground.constants)) * np.ones(pts.n) <= 0.5
+        if steep:
+            sl = fine('slope')
+            if sl is not None:
+                ok &= sl <= STEEP_DEG
     for sub in ('talus', 'sand'):
         if sub not in on:
-            v = getter(sub)
+            v = fine(sub)
             if v is not None:
                 ok &= v <= float(s['roots_m'])
     return ok
@@ -795,7 +913,7 @@ def _plan(species, ground, f, tseed, seed, exclude, scale):
         need = info[k]['R']
         for j in range(k + 1, len(groups)):
             feet = max(float(s['foot_m']) for s in groups[k])
-            crown = max(float(s['core_m']) for s in groups[k])
+            crown = max(float(s['crown_m']) for s in groups[k])      # the shade and `around` reach crowns
             reach = CORE_FACTOR * (feet + info[j]['core'])
             reach = max(reach, max(float(s['shade']['radius']) for s in groups[j]) * crown)
             reach = max(reach, max((float(s['around'].get('radius', 1.5)) * crown for s in groups[j]
@@ -812,7 +930,7 @@ def _plan(species, ground, f, tseed, seed, exclude, scale):
             c = _candidates(s, keys, f, gi['exact'] + gi['pad'], ground.bounds)
             if s.get('around'):
                 par = placed[s['around']['species']]
-                pcore = float(next(x for x in species if x['name'] == s['around']['species'])['core_m'])
+                pcore = float(next(x for x in species if x['name'] == s['around']['species'])['crown_m'])
                 extra = _around(s, keys + (np.int64(77),), par, pcore)
                 n_own = 0 if c is None else len(c['x'])
                 c = extra if c is None else {k: np.concatenate([c[k], extra[k]]) for k in c}
@@ -859,9 +977,9 @@ def _plan(species, ground, f, tseed, seed, exclude, scale):
             p = placed[s['name']]
             feet = dict(x=np.concatenate([feet['x'], p['x']]), y=np.concatenate([feet['y'], p['y']]),
                         r=np.concatenate([feet['r'], float(s['foot_m']) * p['scale']]))
-            if s['casts_shade']:
+            if s['casts_shade']:                         # a crown shades the ground under it: its crown radius
                 casters = dict(x=np.concatenate([casters['x'], p['x']]), y=np.concatenate([casters['y'], p['y']]),
-                               r=np.concatenate([casters['r'], float(s['core_m']) * p['scale']]))
+                               r=np.concatenate([casters['r'], float(s['crown_m']) * p['scale']]))
     return placed, stats
 
 
@@ -893,12 +1011,15 @@ def _thin(s, c, ground, f, gi, exclude, feet, casters, st):
         x, y = c['x'], c['y']
         pts = ground.locate(x, y)
     shade = _shade_at(x, y, casters, float(s['shade']['radius']))
-    cache = {}
+    memo, fine_memo = {}, {}
 
-    def getter(name):
-        if name not in cache:
-            cache[name] = ground.at(pts, name, shade=shade)
-        return cache[name]
+    def getter(name):                                    # what a density, stature or `where` reads: the coarse levels
+        return ground.site(pts, name, shade, memo)
+
+    def fine(name):                                      # what an exclusion reads: the finest level holding the point
+        if name not in fine_memo:
+            fine_memo[name] = ground.at(pts, name, shade=shade)
+        return fine_memo[name]
     if s['_stature'] is not None:                        # the height the site lets a plant reach (krummholz): before
         k = np.asarray(P.evaluate(s['_stature'], getter, x, y, ground.constants), np.float64) * np.ones(len(x))
         c['size'] = c['size'] * np.clip(k, 0.05, 1.0)    # the hard core, so stunted plants stand closer
@@ -907,7 +1028,7 @@ def _thin(s, c, ground, f, gi, exclude, feet, casters, st):
     dens = np.maximum(np.asarray(P.evaluate(s['_density'], getter, x, y, ground.constants), np.float64), 0.0)
     if dens.ndim == 0:
         dens = np.full(len(x), float(dens))
-    allowed = _exclusions(s, ground, pts, getter)
+    allowed = _exclusions(s, ground, pts, getter, fine)
     own = dist <= s['_radius']
     drawn = own if seeded is None else own & ~seeded     # the cluster process's own candidates, uniform over the ground
     st['candidates'] = int(own.sum())
@@ -1003,16 +1124,18 @@ def _view(s, p, ground, f, st=None):
 
 
 # the spot fields each Blender instancer turns into what it draws (design 4.6): flora's strokes take each spot's
-# place and height, flora draws yaw and tint itself; SeedThree's groves take yaw and the individual too
+# place and height, flora draws yaw and tint itself; SeedThree's still groves take yaw, the individual and the tint
+# (each plant's own tone) too (its swaying grove, plant_instances with wind, all but the tint)
 HONOURED = {'flora': ['x', 'y', 'z', 'scale'], 'ph': ['x', 'y', 'z', 'scale'],
-            'seedthree': ['x', 'y', 'z', 'yaw', 'scale', 'variant']}
+            'seedthree': ['x', 'y', 'z', 'yaw', 'scale', 'variant', 'tint']}
 
 
 def _species_record(s, count, st):
     rule = {k: v for k, v in s.items() if not k.startswith('_') and k != 'source'}
     return dict(name=s['name'], kind=s['kind'], source=E.source_dict(s['source']), honoured=HONOURED[s['source'][0]],
                 size_m=[float(s['size_m'][0]), float(s['size_m'][1])], core_m=float(s['core_m']),
-                foot_m=float(s['foot_m']), cluster=E._jsonable(s['cluster']), sink=float(s['sink']),
+                crown_m=float(s['crown_m']), foot_m=float(s['foot_m']), cluster=E._jsonable(s['cluster']),
+                sink=float(s['sink']),
                 align=float(s['align']), lod=dict(s['lod']),
                 ground=s['ground'], count=int(count), fields=list(FIELDS), rule=E._jsonable(rule), stats=dict(st))
 
@@ -1160,6 +1283,8 @@ class PlantSpots:
                             one forest (design 4.7)
           shrubs            the same as canopy_expected for the shrubs: the undergrowth's cover
           shrubs_far        and as canopy_far: the shrub cover the instanced shrubs leave to the material
+          grass             the same for the grasses, forbs and ground cover (their tufts' crown_m): the sward
+          grass_far         and the sward the instanced tufts leave to the material, past their radius
         Needs the terrain (a plan has it; loaded spots take it through load(base, terrain=) or attach)."""
         if self._ground is None:
             raise RuntimeError('cover() reads the terrain: PlantSpots.load(base, terrain=t), or spots.attach(t)')
@@ -1178,10 +1303,11 @@ class PlantSpots:
                 continue
             a = self._arrays[s['name']]
             _discs(canopy, (a[:, 0].astype(np.float64) - lv.x0) / cell, (a[:, 1].astype(np.float64) - lv.y0) / cell,
-                   s['core_m'] * a[:, 4].astype(np.float64) / cell)
+                   s.get('crown_m', s['core_m']) * a[:, 4].astype(np.float64) / cell)
         return dict(canopy=np.clip(canopy, 0.0, 1.0).astype(np.float32),
                     canopy_expected=_cover_raster(expected['tree'], k, m), canopy_far=_cover_raster(far['tree'], k, m),
-                    shrubs=_cover_raster(expected['shrub'], k, m), shrubs_far=_cover_raster(far['shrub'], k, m))
+                    shrubs=_cover_raster(expected['shrub'], k, m), shrubs_far=_cover_raster(far['shrub'], k, m),
+                    grass=_cover_raster(expected['grass'], k, m), grass_far=_cover_raster(far['grass'], k, m))
 
     def _kept_at(self, entry, d):
         """The share of a species' crown area its instances carry at distances d from the focus: the plan's own
@@ -1204,9 +1330,9 @@ class PlantSpots:
     def cover_extra(self, max_n=1024, density_n=512):
         """The cover rasters of every level in the form the surface bake takes as extra= (bake_surface, or
         SurfaceData.add_maps): {'canopy': [array per level], 'canopy_expected': [...], ...}, the rasters its map
-        registry (surface.maps.MAPS) knows."""
+        registry (surface.maps.MAPS) knows (grass and grass_far once it registers them)."""
         from ..surface.maps import MAPS as known
-        names = [k for k in ('canopy', 'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far') if k in known]
+        names = [k for k in COVER_MAPS if k in known]
         out = {k: [] for k in names}
         for i in range(len(self.meta['terrain']['levels'])):
             c = self.cover(i, max_n, density_n)
@@ -1217,12 +1343,13 @@ class PlantSpots:
 
 def _crown_and_scale(rule):
     """(mean crown area in m^2, mean scale) of a species' plants over its age distribution (24 x 24 quantiles of the
-    stand's draw and the plant's own): what a density of stems covers, with no plan."""
+    stand's draw and the plant's own): what a density of stems covers, with no plan (the crown radius crown_m)."""
     u = (np.arange(24) + 0.5) / 24.0
     us, uo = np.meshgrid(u, u)
     _age, size = _age_size(rule, us.ravel(), uo.ravel())
     sc = size / float(rule['size_m'][1])
-    return float(np.mean(math.pi * (float(rule['core_m']) * sc) ** 2)), float(sc.mean())
+    crown = float(rule.get('crown_m', rule['core_m']))
+    return float(np.mean(math.pi * (crown * sc) ** 2)), float(sc.mean())
 
 
 def _kept_by_core(rule, dens, mean_scale):
@@ -1242,13 +1369,13 @@ def _kept_by_core(rule, dens, mean_scale):
 
 
 def _level_cover(ground, rules, i, max_n=1024, density_n=512, kept=None, focus=None):
-    """The expected cover of trees and of shrubs on level i, from the rules' densities alone (the one rule the plan
-    and the material share, design 4.7): per kind the sum over its species of density x the share the hard core
-    keeps x the mean crown area, the density clipped to the cluster process's ceiling, kept off excluded ground,
-    shrubs thinned under the expected tree cover. With kept (species name, distances -> the share its instances
-    carry) and the plan's focus, also what the instances leave to the material. The densities are evaluated on a
-    k x k grid of the level (at most density_n across, a whole fraction of the raster's m x m). Returns (m, step, k,
-    {kind: exponent}, {kind: far exponent})."""
+    """The expected cover of trees, of shrubs and of grasses (forbs and ground cover with them: COVER_KIND) on level
+    i, from the rules' densities alone (the one rule the plan and the material share, design 4.7): per kind the sum
+    over its species of density x the share the hard core keeps x the mean crown area, the density clipped to the
+    cluster process's ceiling, kept off excluded ground, the undergrowth thinned under the expected tree cover. With
+    kept (species name, distances -> the share its instances carry) and the plan's focus, also what the instances
+    leave to the material. The densities are evaluated on a k x k grid of the level (at most density_n across, a
+    whole fraction of the raster's m x m). Returns (m, step, k, {kind: exponent}, {kind: far exponent})."""
     lv = ground.levels[i]
     step = 1
     while lv.n // step > max_n:
@@ -1256,27 +1383,32 @@ def _level_cover(ground, rules, i, max_n=1024, density_n=512, kept=None, focus=N
     m = lv.n // step
     k = m // math.ceil(m / max(int(density_n), 1))
     pts = _GridPoints(ground.levels, i, k)
-    cache = {}
+    memo, fine_memo = {}, {}
 
-    def getter(name):
-        if name not in cache:
-            cache[name] = ground.at(pts, name, shade=cache.get('shade'))
-        return cache[name]
-    expected = {'tree': np.zeros(pts.n), 'shrub': np.zeros(pts.n)}
-    far = {'tree': np.zeros(pts.n), 'shrub': np.zeros(pts.n)}
+    def getter(name):                                    # the densities' read: the coarse levels, on every level
+        return ground.site(pts, name, memo.get('shade'), memo)
+
+    def fine(name):
+        if name not in fine_memo:
+            fine_memo[name] = ground.at(pts, name)
+        return fine_memo[name]
+    expected = {k_: np.zeros(pts.n) for k_ in ('tree', 'shrub', 'grass')}
+    far = {k_: np.zeros(pts.n) for k_ in ('tree', 'shrub', 'grass')}
     dfocus = None if kept is None else path_distance(focus, pts.x, pts.y)
-    for kind in ('tree', 'shrub'):
+    for kind in ('tree', 'shrub', 'grass'):
         if kind == 'shrub':
-            cache['shade'] = 1.0 - np.exp(-expected['tree'])
+            memo['shade'] = 1.0 - np.exp(-expected['tree'])
         for rule in rules:
-            if rule['kind'] != kind:
+            if COVER_KIND.get(rule['kind']) != kind:
                 continue
             dmax = rule['cluster']['parents_per_ha'] * rule['cluster']['mu'] * 1.0e-4
             dens = np.asarray(P.evaluate(P.parse(rule['density']), getter, pts.x, pts.y, ground.constants),
                               np.float64) * np.ones(pts.n)
-            dens = np.clip(dens, 0.0, dmax) * _exclusions(rule, ground, pts, getter)
-            if kind == 'shrub':
-                dens = dens * (1.0 - cache['shade'] * (1.0 - float(rule['shade']['tolerance'])))
+            # the physical exclusions on this level's own cells, as the plan places; not its cells' steepness,
+            # which a hero level resolves and its parent does not (the raster must not step at a window edge)
+            dens = np.clip(dens, 0.0, dmax) * _exclusions(rule, ground, pts, getter, fine, steep=False)
+            if kind != 'tree':
+                dens = dens * (1.0 - memo['shade'] * (1.0 - float(rule['shade']['tolerance'])))
             crown, mean_scale = _crown_and_scale(rule)
             e = dens * _kept_by_core(rule, dens, mean_scale) * crown
             expected[kind] += e
@@ -1312,21 +1444,22 @@ def _resolve(terrain, ecotope):
 
 
 def expected_cover(terrain, ecotope='auto', data=None, max_n=1024, density_n=512):
-    """The ecotope's cover rasters with no plan (design 4.7): per level, from its tree and shrub densities alone,
-    in the form bake_surface(extra=) takes: {'canopy_expected': [array per level], 'canopy_far': [...], 'shrubs':
-    [...], 'shrubs_far': [...]}, the far ones equal to the expected ones (nothing is instanced). A plan's cover()
-    gives the same canopy_expected and shrubs. terrain, ecotope and data as plan_plants takes them."""
+    """The ecotope's cover rasters with no plan (design 4.7): per level, from its tree, shrub and grass densities
+    alone, in the form bake_surface(extra=) takes: {'canopy_expected': [array per level], 'canopy_far': [...],
+    'shrubs': [...], 'shrubs_far': [...], 'grass': [...], 'grass_far': [...]} (the names the surface bake's map
+    registry knows), the far ones equal to the expected ones (nothing is instanced). A plan's cover() gives the same
+    canopy_expected, shrubs and grass. terrain, ecotope and data as plan_plants takes them."""
+    from ..surface.maps import MAPS as known
     eco = _resolve(terrain, ecotope)
     ground = _Ground(terrain, data, _constants(terrain, eco))
-    out = {'canopy_expected': [], 'canopy_far': [], 'shrubs': [], 'shrubs_far': []}
+    out = {k: [] for k in ('canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far', 'grass', 'grass_far')}
     for i in range(len(ground.levels)):
         m, _step, k, exp_, _far = _level_cover(ground, eco['species'], i, max_n, density_n)
-        tree, shrub = _cover_raster(exp_['tree'], k, m), _cover_raster(exp_['shrub'], k, m)
-        out['canopy_expected'].append(tree)
-        out['canopy_far'].append(tree.copy())
-        out['shrubs'].append(shrub)
-        out['shrubs_far'].append(shrub.copy())
-    return out
+        for kind, name in (('tree', 'canopy_expected'), ('shrub', 'shrubs'), ('grass', 'grass')):
+            r = _cover_raster(exp_[kind], k, m)
+            out[name].append(r)
+            out['canopy_far' if kind == 'tree' else name + '_far'].append(r.copy())
+    return {k: v for k, v in out.items() if k in known}
 
 
 def _discs(img, cx, cy, r):

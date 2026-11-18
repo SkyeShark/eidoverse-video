@@ -21,6 +21,8 @@ GPU. They run on a small synthetic valley (_ground.py) with the family's own mas
   around        understory seeded around another species' plants stands around them
   surface       with the surface bake's SurfaceData: maps read as SurfaceData.at reads them, rules on bake maps,
                 snowpack kept clear, the cover rasters handed to the bake (add_maps) and read back
+  edges         no step at a window edge: stems per hectare either side of every hero window's edge within 10 %
+                (the judge's edge_density on the saved spots; edges_real.py does the same on real terrains)
   timing        10^4 trees and 10^5 shrubs planned within the design's 10 s
   rocks         the rock scatter with the toe bias off is what it was; on, the smallest rock grows toward the toe
 
@@ -379,9 +381,18 @@ def test_cover(t, spots):
     check('cover: in the forest the placed crowns cover what the density expects (within a quarter)',
           abs(got - want) < 0.25 * want, f'canopy {got:.3f} against canopy_expected {want:.3f} over '
                                          f'{int(forest.sum()) * lv.cell ** 2 / 1e4:.1f} ha')
-    open_ = inside & (c['canopy_expected'] < 0.02)
+    # open ground a crown's reach from any forest (the edge trees' crowns overhang the open ground beside them)
+    reach = max(float(e.get('crown_m', e['core_m'])) for e in spots.species if e['kind'] == 'tree')
+    k = int(math.ceil(reach / lv.cell))
+    wooded = c['canopy_expected'] >= 0.02
+    near = wooded.copy()
+    for dj in range(-k, k + 1):
+        for di in range(-k, k + 1):
+            near |= np.roll(np.roll(wooded, dj, 0), di, 1)
+    open_ = inside & ~near
     check('cover: where no trees are expected none stand', float(c['canopy'][open_].mean()) < 0.02,
-          f"canopy {float(c['canopy'][open_].mean()):.4f} over {int(open_.sum()) * lv.cell ** 2 / 1e4:.1f} ha")
+          f"canopy {float(c['canopy'][open_].mean()):.4f} over {int(open_.sum()) * lv.cell ** 2 / 1e4:.1f} ha, "
+          f"{reach:g} m from any forest")
     h = spots.cover('last')
     check('cover: a hero level draws single crowns', float(h['canopy'].max()) > 0.99 and float(h['canopy'].min()) == 0.0
           or float(h['canopy_expected'].max()) < 0.05,
@@ -434,7 +445,8 @@ def test_handoff(t):
         if e['kind'] != 'shrub':
             continue
         a = spots.array(n).astype(np.float64)
-        PL._discs(placed, (a[:, 0] - lv.x0) / lv.cell, (a[:, 1] - lv.y0) / lv.cell, e['core_m'] * a[:, 4] / lv.cell)
+        PL._discs(placed, (a[:, 0] - lv.x0) / lv.cell, (a[:, 1] - lv.y0) / lv.cell,
+                  e.get('crown_m', e['core_m']) * a[:, 4] / lv.cell)
     rows = []
     ok = bands(np.clip(placed, 0.0, 1.0), c['shrubs_far'], c['shrubs'], d, c['shrubs'] > 0.05, rows,
                ((20.0, 110.0, 'inside'), (180.0, 330.0, 'across'), (420.0, 700.0, 'beyond')))
@@ -603,6 +615,64 @@ def test_surface(t):
           same and inner.sum() > 20 and float(np.median(c_at)) > 0.95 and float(c_at.min()) > 0.5,
           f"canopy under {int(inner.sum())} spruce trunks of the finest level: median {np.median(c_at):.2f}, "
           f"least {c_at.min():.2f}; canopy_expected and shrubs beside it")
+
+
+UNTHINNED_M = {'tree': 700.0, 'shrub': 420.0, 'grass': 150.0, 'forb': 150.0, 'groundcover': 100.0}
+
+
+def unthinned(eco, radius_m=None, **kw):
+    """An ecotope with the view's thinning off (no distance thinning, no fade band, no cap, any level), every species
+    out to radius_m (default by kind, UNTHINNED_M: a meadow's grass out to 700 m is 26 million candidates): the plan's
+    placement itself, which the window-edge gate measures."""
+    eco = E.get(eco, **kw) if isinstance(eco, str) else copy.deepcopy(eco)
+    for s in eco['species']:
+        s.update(max_count=10 ** 8, lod_m_per_m=0.0, fade=(1.0, 1.0), max_cell_m=None,
+                 max_radius_m=radius_m or UNTHINNED_M[s['kind']])
+    return eco
+
+
+def edge_steps(t, eco, focus, tmp, seed=4, data=None, min_count=400, strip_m=50.0):
+    """Per species and hero window edge: stems per hectare in strip_m strips either side (the judge's edge_density on
+    the saved spots), the same on the terrain's coarse levels alone (_ground.CoarseView: the same candidates and
+    densities, no window), and their quotient, the step the window makes: [dict(species, level, edge, inner, outer,
+    ratio, ratio_coarse, step)], the edges with min_count plants a side."""
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..')))
+    from surfacing_judge import plants as JP
+    hero = PL.plan_plants(t, eco, focus=focus, seed=seed, data=data, **QUIET)
+    coarse = PL.plan_plants(G.CoarseView(t), eco, focus=focus, seed=seed, data=data, **QUIET)
+    out = []
+    windows = [(float(lv.x0), float(lv.y0), float(lv.side)) for lv in t.levels if getattr(lv, 'role', '') == 'hero']
+    for tag, sp in (('hero', hero), ('coarse', coarse)):
+        sp.save(os.path.join(tmp, f'edges_{tag}'))
+    jh, jc = JP.load(os.path.join(tmp, 'edges_hero')), JP.load(os.path.join(tmp, 'edges_coarse'))
+    for nm in hero.names():
+        rc = {(r['level'], r['edge']): r for r in JP.edge_density(jc, nm, windows, strip_m, min_count)}
+        for r in JP.edge_density(jh, nm, windows, strip_m, min_count):
+            c = rc.get((r['level'], r['edge']))
+            if c is None:
+                continue
+            out.append(dict(species=nm, level=r['level'], edge=r['edge'], inner=r['inner'], outer=r['outer'],
+                            inner_coarse=c['inner'], outer_coarse=c['outer'], ratio=r['ratio'],
+                            ratio_coarse=c['ratio'], step=r['ratio'] / c['ratio']))
+    return out
+
+
+def test_edges(t, tmp):
+    """No step at a window edge (design 5.4, package 4, item 5): stems per hectare of every species in 50 m strips
+    either side of every hero window's edge, the plan's placement itself (its view's thinning off), set against the
+    same strips of the same plan on the coarse levels alone: the ground's own gradient across 100 m (the valley's
+    forest edge, its floor) is in both, a step the window makes only in the first. The densities read the coarse
+    levels, so the window may change only what the finest level excludes."""
+    rows = []
+    worst = 0.0
+    for eco in ('alpine', 'desert_sandstone'):
+        for r in edge_steps(t, unthinned(eco), None, tmp):
+            worst = max(worst, abs(r['step'] - 1.0))
+            rows.append(f"{eco}/{r['species']} {r['level']}{r['edge'][0]} {r['inner']:.0f}/{r['outer']:.0f} per ha "
+                        f"({100 * (r['ratio'] - 1.0):+.0f} %; without the window {100 * (r['ratio_coarse'] - 1.0):+.0f} "
+                        f"%: step {100 * (r['step'] - 1.0):+.1f} %)")
+    check('edges: no window edge steps stems per hectare by 10 % (against the same plan without the window)',
+          rows and worst <= 0.10, f'{len(rows)} edges, worst step {100 * worst:.1f} %: ' + '; '.join(rows))
 
 
 def test_around(t):
@@ -782,6 +852,8 @@ def main():
             test_around(t)
         if want('surface'):
             test_surface(t)
+        if want('edges'):
+            test_edges(t, tmp)
         if want('timing'):
             test_timing(t)
         if want('rocks'):

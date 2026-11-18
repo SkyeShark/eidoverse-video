@@ -1,34 +1,35 @@
-"""The plants seen from the review's cameras (surfacing design 5.4, package 4, items 2 and 3): each acceptance view
-rendered as the review renders it (surfacing/review_views.py: make_terrain at the judge's settings, the recipe's
-palette, its rocks, make_sky daylight with the sun 70 degrees left of the view, 960 x 540, 16 samples, exposure
--0.5), with the terrain's plants planned at the camera (plants.plan_plants) and instanced
-(plant_instances.instance_plants). A fresh file per view; give a run one view when the terrains are big, since a
-finished view's memory stays with the process (the caldera, after the canyon in the same process, rendered over a
-12 GB cap that it fits alone).
+"""The plants seen from the judge's cameras (surfacing design 5.4, package 4, items 2 and 3): each view of
+surfacing_judge/views.json rendered as the review renders it (the recipe's terrain at its reference's extent, seed 1,
+film quality, hero levels around an eye-level camera, the rocks, make_sky daylight with the sun 70 degrees left of
+the view, 960 x 540, 16 samples, exposure -0.5) through the per-texel material with the plants:
 
-    bash run_blender.sh blender/tests/terrain/plants/render_plants.py [--views a,b] [--tag t] [--clay] [--once]
-        [--samples 16] [--no-rocks] [--no-plants] [--seed 0] [--grow]
+  1. the terrain built in clay (make_terrain), its rocks scattered as make_terrain scatters them;
+  2. its surface data baked (surface.bake_surface, cached);
+  3. the plants planned on it at the camera (plants.plan_plants(data=)), their cover rasters added to the data
+     (SurfaceData.add_maps(spots.cover_extra()): canopy, canopy_expected, canopy_far, shrubs, shrubs_far), so the
+     material's forest, scrub and crowns read the one rule the plants were placed by (design 4.7);
+  4. the per-texel material (surfacing.apply_surface(data=, cameras=[camera])), which reads those rasters;
+  5. the plants instanced for a still shot (plant_instances.instance_plants: levels picked per frame by the camera).
+A fresh file per view: a finished view's memory stays with the process.
+
+    bash run_blender.sh blender/tests/terrain/plants/render_plants.py [--views a,b] [--set acceptance|recipes|far]
+        [--tag t] [--once] [--samples 16] [--no-rocks] [--no-plants] [--seed 0] [--grow] [--cost] [--bare]
     (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
-  --views    view names of VIEWS (default all six), as out/review/views_plan.json names them
-  --clay     the ground in grey clay (no palette: no material compile), for looking at the plants alone
-  --no-plants  the same frame without plants (the board's 'before' from the same session)
+  --views    view names (as views.json names them), from every set; --set picks a set: acceptance (design 5.4's
+             six), recipes (an eye view of every other recipe with an ecotope), far (aerials over forests: the
+             far canopy and the hand-off); default acceptance
+  --no-plants  the same view without plants: the material's canopy from expected_cover alone (plants=None)
   --once     one frame per view (no second, timed frame)
   --grow     only grow the SeedThree individuals the views' ecotopes name into the plant library
-             (plant_instances.grow_seedthree; about a minute each, once), so the view runs take them from it
-  --cost     after the timed frame, the frame again with each group of plant objects hidden in turn (SeedThree's
-             card level, its billboards, its full level, flora's near and still strokes, every plant): what each
-             costs, recorded with the scene's statistics
-  --surface  bake the terrain's surface data first (surface.bake_surface), plan on it (plan_plants(data=)) and hand
-             the plan's cover rasters back to it (SurfaceData.add_maps(spots.cover_extra())): the design's 5.3
-             interface on a real terrain, timed (the material does not read the rasters yet)
-  --frame-y  where the aim point lands, from the top (default the plan's): the same camera pitched to show the
-             ground in front of it (the dunes view's plan aims 12 degrees up, its floor below the frame)
+  --cost     after the timed frame, the frame again with each group of plant objects hidden in turn
+  --bare     also the frame with the plants hidden and the material as it is (the ground under the plants: litter
+             where the instances stand, the material's crowns beyond them)
 
-Writes out/plants/views/<recipe>_<view>[_<tag>].png and out/plants/views/record[_<tag>].json: per view the camera,
-the plan (species, counts, stems per hectare at home, seconds), the instancing (objects, SeedThree's card distance,
-seconds) and the frame seconds (the second frame is the one item 3 holds to 8 s). board_plants.py lays each beside
-the photograph and the review's render of the same camera.
+Writes out/plants/views/<recipe>_<view>[_<tag>].png (and _bare.png) and out/plants/views/record[_<tag>].json: per
+view the camera, the plan (species, counts, stems per hectare at home, seconds), the instancing (objects, card
+distances, seconds), the frame seconds (the second frame is the one item 3 holds to 8 s) and the memory after each
+stage. board_plants.py lays each beside its photograph.
 """
 import gc
 import json
@@ -41,28 +42,40 @@ import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TN = os.path.normpath(os.path.join(HERE, '..'))
-REVIEW = os.path.join(TN, 'out', 'review')
 OUT = os.path.join(TN, 'out', 'plants', 'views')
 sys.path.insert(0, TN)
 sys.path.insert(0, os.path.join(TN, 'reference'))
 sys.path.insert(0, os.path.normpath(os.path.join(TN, '..', '..')))
 
 import bpy  # noqa: E402
+import numpy as np  # noqa: E402
 
 import render_references as RR  # noqa: E402
+from surfacing_judge import views as V  # noqa: E402
 from judge import refs  # noqa: E402
 from eidoblend.sky import make_sky  # noqa: E402
 from eidoblend.terrain import api as A  # noqa: E402
+from eidoblend.terrain import surface as SU  # noqa: E402
+from eidoblend.terrain.build import dressing as DR  # noqa: E402
+from eidoblend.terrain.build import palettes as P  # noqa: E402
 from eidoblend.terrain.build import plant_instances as PI  # noqa: E402
 from eidoblend.terrain.build import plants as PL  # noqa: E402
+from eidoblend.terrain.build import surfacing as S  # noqa: E402
 
-# the acceptance views (design 5.4, package 4, item 2): (recipe, view name in views_plan.json)
-VIEWS = [('real_place', 'floor_lischmaad'), ('real_place', 'ridge_schynige'), ('canyon', 'approach_walk'),
-         ('caldera', 'rim_east'), ('fluvial_range', 'canyon_road'), ('dunes', 'interdune_floor')]
-REF = {'fluvial_range': 'san_gabriel_mountains', 'alpine_valley': 'lauterbrunnen', 'caldera': 'crater_lake',
-       'canyon': 'grand_canyon_toroweap', 'dunes': 'namib_star_dunes', 'real_place': 'lauterbrunnen'}
-PARAMS = {'real_place': {'dem': 'lauterbrunnen'}}
-TEX_EXPOSURE = -0.5
+# the views (recipe, name in views.json)
+SETS = {
+    # design 5.4, package 4, item 2
+    'acceptance': [('real_place', 'floor_lischmaad'), ('real_place', 'ridge_schynige'), ('canyon', 'approach_walk'),
+                   ('caldera', 'rim_east'), ('fluvial_range', 'canyon_road'), ('dunes', 'interdune_floor')],
+    # an eye view of every other recipe with an ecotope, beside its photograph where it has one
+    'recipes': [('alpine_valley', 'floor_axis'), ('stratovolcano', 'walk_upper_flank'), ('cinder_cones', 'ground_se'),
+                ('impact_crater', 'plain_north'), ('incised_meanders', 'rim_walk'), ('mesas_buttes', 'valley_view'),
+                ('badlands', 'prairie_walk'), ('tower_karst', 'plain_fields'), ('sea_cliffs', 'clifftop_along'),
+                ('rolling_hills', 'hilltop_walk'), ('meadow', 'eye_swales')],
+    # forests from the air: the far canopy and the hand-off from the instances to it
+    'far': [('caldera', 'aerial_far'), ('alpine_valley', 'aerial_axis'), ('fluvial_range', 'aerial_range_front')],
+}
+EXPOSURE = -0.5
 W, H = 960, 540
 
 
@@ -71,26 +84,30 @@ def args():
 
     def opt(k, d=None):
         return a[a.index(k) + 1] if k in a else d
-    return dict(views=[s for s in (opt('--views') or '').split(',') if s], tag=opt('--tag', ''),
-                clay='--clay' in a, once='--once' in a, samples=int(opt('--samples', '16')),
+    return dict(views=[s for s in (opt('--views') or '').split(',') if s], set=opt('--set', 'acceptance'),
+                tag=opt('--tag', ''), once='--once' in a, samples=int(opt('--samples', '16')),
                 rocks='--no-rocks' not in a, plants='--no-plants' not in a, seed=int(opt('--seed', '0')),
-                grow='--grow' in a, cost='--cost' in a, surface='--surface' in a,
-                frame_y=None if opt('--frame-y') is None else float(opt('--frame-y')),
-                plan=opt('--plan', os.path.join(REVIEW, 'views_plan.json')))
+                grow='--grow' in a, cost='--cost' in a, bare='--bare' in a)
+
+
+def chosen(a):
+    if a['views']:
+        return [(r, v) for vs in SETS.values() for r, v in vs if v in a['views']]
+    return list(SETS[a['set']])
 
 
 def plant_groups(made):
     """The plant objects by what they draw: {group: [objects]}."""
-    out = {'seedthree cards': [], 'seedthree billboards': [], 'seedthree full level': [], 'flora near': [],
-           'flora still': []}
+    out = {'seedthree near (full and card levels)': [], 'seedthree billboards': [], 'seedthree grove (wind)': [],
+           'flora strokes': []}
     for obs in made.values():
         for o in obs:
             info = json.loads(o['eido_plants'])
             if 'seedthree' in info['source']:
                 key = ('seedthree billboards' if o.name.endswith('_billboards') else
-                       'seedthree full level' if o.name.endswith('_hero') else 'seedthree cards')
+                       'seedthree near (full and card levels)' if info.get('still') else 'seedthree grove (wind)')
             else:
-                key = 'flora near' if info.get('motion') else 'flora still'
+                key = 'flora strokes'
             out[key].append(o)
     return out
 
@@ -119,17 +136,17 @@ def memory_gb():
     size for both; None when the platform tells neither."""
     try:
         import ctypes
-        from ctypes import wintypes as W
+        from ctypes import wintypes as WT
 
         class Counters(ctypes.Structure):
-            _fields_ = [('cb', W.DWORD), ('PageFaultCount', W.DWORD), ('PeakWorkingSetSize', ctypes.c_size_t),
+            _fields_ = [('cb', WT.DWORD), ('PageFaultCount', WT.DWORD), ('PeakWorkingSetSize', ctypes.c_size_t),
                         ('WorkingSetSize', ctypes.c_size_t), ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
                         ('QuotaPagedPoolUsage', ctypes.c_size_t), ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
                         ('QuotaNonPagedPoolUsage', ctypes.c_size_t), ('PagefileUsage', ctypes.c_size_t),
                         ('PeakPagefileUsage', ctypes.c_size_t)]
         k32, psapi = ctypes.windll.kernel32, ctypes.windll.psapi
         k32.GetCurrentProcess.restype = ctypes.c_void_p           # a pseudo-handle, pointer-sized
-        psapi.GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(Counters), W.DWORD]
+        psapi.GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(Counters), WT.DWORD]
         c = Counters()
         c.cb = ctypes.sizeof(Counters)
         if not psapi.GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
@@ -169,17 +186,13 @@ def recipe_defaults(recipe, params):
     return R, dfl
 
 
-def recipe_centre(recipe, params):
-    c = recipe_defaults(recipe, params)[1].get('centre', (0.0, 0.0))
-    return float(c[0]), float(c[1])
-
-
 def grow(views):
     """Every SeedThree individual the views' ecotopes name, grown into the plant library (or found there)."""
     from eidoblend.terrain.build import ecotopes as E
+    plan = V.load()
     seen, out = set(), []
     for recipe, _v in views:
-        R, dfl = recipe_defaults(recipe, PARAMS.get(recipe))
+        R, dfl = recipe_defaults(recipe, plan[recipe].get('params'))
         eco = E.get('auto', recipe=R, place=dfl.get('place'), palette=dfl.get('palette'))
         for s in eco['species']:
             src = E.source_dict(s['source'])
@@ -219,8 +232,7 @@ def aim_camera(cam, eye, target, frame, lens):
 
 
 def sky_and_sun(sc, cam, cache):
-    """make_sky as the review sets it (the sun 70 degrees left of the view), baked; then SeedThree's plants bound
-    to its sun (their backlight, and the billboards' cast-only shadow)."""
+    """make_sky as the review sets it (the sun 70 degrees left of the view), baked."""
     bpy.context.view_layer.update()
     d = cam.matrix_world.col[2][:3]
     hd = math.atan2(-d[1], -d[0]) + math.radians(RR.SUN_LEFT_DEG)
@@ -243,10 +255,32 @@ def frame_seconds(sc, path, once):
     return first, time.time() - t0
 
 
+def palette_of(t):
+    """(palette, strata) as make_terrain passes them for this terrain (a real place: its own palette and strata)."""
+    place = t.info.get('place')
+    if place and place in P.PLACES:
+        return P.PLACES[place].get('palette') or 'auto', P.PLACES[place].get('strata')
+    return 'auto', None
+
+
+def rocks(t, pal, name):
+    """The palette's rocks around the focus, as make_terrain scatters them (api._build_blender)."""
+    spec = P.get(pal, t.recipe).get('dressing')
+    if not spec or not t.info.get('focus'):
+        return None
+    fx, fy = np.mean(np.asarray(t.info['focus'], np.float64), axis=0)
+
+    def mask_at(nm, x, y):
+        return t.masks[nm].at(x, y) if nm in t.masks else None
+    exclude = [(f['at'][0], f['at'][1], float(f.get('radius', 0.0))) for f in t.flats if f.get('radius')]
+    return DR.scatter_rocks(spec, mask_at=mask_at, height_at=t.height_at, normal_at=t.normal_at,
+                            focus=(float(fx), float(fy)), seed=t.info['seed'], name=name + '_rocks', log=print)
+
+
 def main():
     a = args()
-    plan = json.load(open(a['plan'], encoding='utf-8'))
-    views = [(r, v) for r, v in VIEWS if not a['views'] or v in a['views']]
+    plan = V.load()
+    views = chosen(a)
     os.makedirs(OUT, exist_ok=True)
     if a['grow']:
         bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -257,23 +291,28 @@ def main():
         os._exit(0)
     tag = f"_{a['tag']}" if a['tag'] else ''
     rec_path = os.path.join(OUT, f'record{tag}.json')
-    rec = json.load(open(rec_path, encoding='utf-8')) if os.path.exists(rec_path) else {}
     sky_root = os.path.join(OUT, '_sky')
     for recipe, vname in views:
         t0 = time.time()
-        key = f'{recipe}_{vname}'
+        key = f'{recipe}_{vname}' + ('' if a['plants'] else '_noplants')
+        r = {}
         try:
             v = next(x for x in plan[recipe]['views'] if x['name'] == vname)
-            sc = RR.new_scene((W, H), a['samples'], TEX_EXPOSURE)
+            sc = RR.new_scene((W, H), a['samples'], EXPOSURE)
             bpy.context.preferences.system.anisotropic_filter = 'FILTER_16'
-            size = refs.load(REF[recipe]).extent
-            params = PARAMS.get(recipe)
-            c0 = recipe_centre(recipe, params)
-            focus = [(c0[0] + v['cam'][0], c0[1] + v['cam'][1])] if v['focus'] else None
-            t = A.make_terrain(recipe, size=size, seed=1, params=params, quality='film',
-                               palette=None if a['clay'] else 'auto', dress=a['rocks'], focus=focus,
-                               name=f'{recipe}_plants')
+            ref = plan[recipe].get('reference')
+            size = refs.load(ref).extent if ref else None
+            params = plan[recipe].get('params')
+            _R, dfl = recipe_defaults(recipe, params)
+            c0 = dfl.get('centre', (0.0, 0.0))
+            focus = [(c0[0] + v['cam'][0], c0[1] + v['cam'][1])] if v.get('focus') else None
+            t = A.make_terrain(recipe, size=size, seed=1, params=params, quality='film', palette=None, dress=False,
+                               focus=focus, name=f'{recipe}_plants')
             tb = time.time() - t0
+            pal, strata = palette_of(t)
+            t.info['palette'] = pal
+            if a['rocks']:
+                rocks(t, pal, f'{recipe}_plants')
             cx, cy = t.main.x0 + t.main.side / 2.0, t.main.y0 + t.main.side / 2.0
             ex, ey = v['cam'][0] + cx, v['cam'][1] + cy
             kind, dz = v['cam_z']
@@ -284,45 +323,51 @@ def main():
             sc.collection.objects.link(cam)
             sc.camera = cam
             dist = math.dist((ex, ey, ez), (tx, ty, tz))
-            if kind == 'ground':
-                cam.data.clip_start, cam.data.clip_end = 0.1, 4.0 * t.main.side + 40000.0
+            if ez - ground < 50.0:
+                cam.data.clip_start, cam.data.clip_end = 0.1, 4.0 * t.levels[0].side + 40000.0
             else:
-                cam.data.clip_start, cam.data.clip_end = max(1.0, 0.01 * dist), 30.0 * dist
-            frame = v['frame'] if a['frame_y'] is None else (v['frame'][0], a['frame_y'])
-            heading, pitch = aim_camera(cam, (ex, ey, ez), (tx, ty, tz), frame, v['lens'])
+                cam.data.clip_start, cam.data.clip_end = max(1.0, 0.01 * dist), 4.0 * t.levels[0].side + 40000.0
+            heading, pitch = aim_camera(cam, (ex, ey, ez), (tx, ty, tz), v.get('frame', (0.5, 0.5)), v['lens'])
             r = dict(camera=[round(ex, 1), round(ey, 1), round(ez, 1)], aim=[round(tx, 1), round(ty, 1), round(tz, 1)],
-                     heading_deg=round(heading, 1), pitch_deg=round(pitch, 2), lens=v['lens'], focus=focus,
-                     levels=[str(lv) for lv in t.levels], cache_hit=t.info.get('cache_hit'), build_s=round(tb, 1),
-                     clay=a['clay'], caption=v['caption'], photo=v.get('photo'), memory_gb={})
-            rec[key + tag] = r
+                     heading_deg=round(heading, 1), pitch_deg=round(pitch, 2), lens=v['lens'], kind=v.get('kind'),
+                     focus=focus, levels=[str(lv) for lv in t.levels], cache_hit=t.info.get('cache_hit'),
+                     build_s=round(tb, 1), caption=v.get('caption'), photo=v.get('photo'), palette=pal,
+                     plants=a['plants'], memory_gb={})
 
             def stage(name):                             # the process's memory after each stage, kept on disk so a
                 r['memory_gb'][name] = memory_gb()       # run that dies still says where its memory went
                 save_record(rec_path, key + tag, r)
             stage('terrain')
+            ts = time.time()
+            sd = SU.bake_surface(t, palette=pal)
+            r['surface_s'] = round(time.time() - ts, 1)
+            made = {}
+            tp = time.time()
+            # an eye view plants around its camera; an aerial around the ground it looks at
+            pf = (ex, ey) if ez - ground < 50.0 else (tx, ty)
+            r['plant_focus'] = [round(pf[0], 1), round(pf[1], 1)]
             if a['plants']:
-                data = None
-                if a['surface']:
-                    from eidoblend.terrain.surface import bake_surface
-                    ts = time.time()
-                    data = bake_surface(t, palette='auto')
-                    r['surface_s'] = round(time.time() - ts, 1)
-                tp = time.time()
-                spots = PL.plan_plants(t, 'auto', focus=(ex, ey), seed=a['seed'], data=data)
+                spots = PL.plan_plants(t, 'auto', focus=pf, seed=a['seed'], data=sd)
                 r['plan_s'] = round(time.time() - tp, 2)
-                if data is not None:
-                    tc = time.time()
-                    extra = spots.cover_extra()
-                    data.add_maps(extra)
-                    r['cover_s'] = round(time.time() - tc, 1)
-                    r['cover_means'] = {k: [round(float(v.mean()), 4) for v in per] for k, per in extra.items()}
-                    r['surface_maps'] = data.names()
+                tc = time.time()
+                extra = spots.cover_extra()
                 r['ecotope'] = spots.meta['ecotope']
                 r['species'] = {n: dict(count=spots.count(n), per_ha_home=spots.stats[n].get('per_ha_home'),
                                         range_per_ha=spots.entry(n)['rule'].get('range_per_ha'))
                                 for n in spots.names()}
                 r['notes'] = list(spots.notes)
-                stage('plan')
+            else:
+                extra = PL.expected_cover(t, data=sd)
+                tc = time.time()
+            sd.add_maps(extra)
+            r['cover_s'] = round(time.time() - tc, 1)
+            r['cover_means'] = {k: [round(float(x.mean()), 4) for x in per] for k, per in extra.items()}
+            stage('plan')
+            tm = time.time()
+            S.apply_surface(t.obj, palette=pal, recipe=t.recipe, strata=strata, data=sd, cameras=[cam], log=print)
+            r['material_s'] = round(time.time() - tm, 1)
+            stage('material')
+            if a['plants']:
                 ti = time.time()
                 made = PI.instance_plants(spots, t)
                 r['instance_s'] = round(time.time() - ti, 1)
@@ -331,8 +376,7 @@ def main():
                 bpy.context.view_layer.update()
                 stage('instances')
             sky_and_sun(sc, cam, os.path.join(sky_root, key))
-            if a['plants']:
-                r['sun'] = getattr(PI.bind_sun(), 'name', None)
+            r['sun'] = getattr(PI.bind_sun(), 'name', None) if a['plants'] else None
             stage('sky')
             path = os.path.join(OUT, key + tag + '.png')
             first, second = frame_seconds(sc, path, a['once'])
@@ -340,19 +384,29 @@ def main():
                      total_s=round(time.time() - t0, 1), image=os.path.relpath(path, TN).replace(os.sep, '/'),
                      statistics=sc.statistics(bpy.context.view_layer))
             stage('frames')
-            if a['cost'] and a['plants']:
+            if a['bare'] and made:
+                for obs in made.values():
+                    for o in obs:
+                        o.hide_render = True
+                bare = os.path.join(OUT, key + '_bare' + tag + '.png')
+                sc.render.filepath = bare
+                bpy.ops.render.render(write_still=True)
+                r['bare_image'] = os.path.relpath(bare, TN).replace(os.sep, '/')
+                for obs in made.values():
+                    for o in obs:
+                        o.hide_render = False
+            if a['cost'] and made:
                 r['frame_costs_s'] = frame_costs(sc, made)
                 print(f"[render_plants] {key}{tag}: frame costs {r['frame_costs_s']}", flush=True)
-            rec[key + tag] = r
-            print(f"[render_plants] {key}{tag}: build {tb:.0f} s, plan {r.get('plan_s')} s, instance "
-                  f"{r.get('instance_s')} s, first frame {first:.1f} s"
+            print(f"[render_plants] {key}{tag}: build {tb:.0f} s, surface {r['surface_s']} s, plan {r.get('plan_s')} s, "
+                  f"material {r['material_s']} s, instance {r.get('instance_s')} s, first frame {first:.1f} s"
                   + ('' if second is None else f', second {second:.2f} s'), flush=True)
-            del t
+            del t, sd
         except Exception as e:                                   # noqa: BLE001 - recorded, the run goes on
             traceback.print_exc()
-            rec[key + tag] = dict(error=f'{type(e).__name__}: {e}')
+            r = dict(r, error=f'{type(e).__name__}: {e}')
         gc.collect()
-        save_record(rec_path, key + tag, rec[key + tag])
+        save_record(rec_path, key + tag, r)
     shutil.rmtree(sky_root, ignore_errors=True)
     print('[render_plants] done', flush=True)
     os._exit(0)
