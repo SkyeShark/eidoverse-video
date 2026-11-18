@@ -10,7 +10,10 @@ the view, 960 x 540, 16 samples, exposure -0.5) through the per-texel material w
      material's forest, scrub and crowns read the one rule the plants were placed by (design 4.7);
   4. the per-texel material (surfacing.apply_surface(data=, cameras=[camera])), which reads those rasters;
   5. the plants instanced for a still shot (plant_instances.instance_plants: levels picked per frame by the camera).
-A fresh file per view: a finished view's memory stays with the process.
+A fresh file per view: a finished view's memory stays with the process. An eye view plants around its camera, an
+aerial around the ground it looks at. A plan and its cover rasters are kept in the terrain's cache entry
+(plants.cache_base), so a view rendered again re-plans nothing. A view whose judge camera frames no plants is
+reframed (REFRAME: where its aim lands instead, and why; the record says so).
 
     bash run_blender.sh blender/tests/terrain/plants/render_plants.py [--views a,b] [--set acceptance|recipes|far]
         [--tag t] [--once] [--samples 16] [--no-rocks] [--no-plants] [--seed 0] [--grow] [--cost] [--bare]
@@ -74,6 +77,12 @@ SETS = {
                 ('rolling_hills', 'hilltop_walk'), ('meadow', 'eye_swales')],
     # forests from the air: the far canopy and the hand-off from the instances to it
     'far': [('caldera', 'aerial_far'), ('alpine_valley', 'aerial_axis'), ('fluvial_range', 'aerial_range_front')],
+}
+# views whose judge camera frames no plants: where their aim lands instead ((x, y) from the left, from the top), why
+REFRAME = {
+    ('dunes', 'interdune_floor'): ((0.5, 0.15), 'the judge\'s camera aims 13.7 degrees up at the dune face, the floor '
+                                                'and its grass below the frame; namib_star_dunes_02 looks along the '
+                                                'floor with the dune behind: pitched to 4.7 degrees'),
 }
 EXPOSURE = -0.5
 W, H = 960, 540
@@ -327,12 +336,13 @@ def main():
                 cam.data.clip_start, cam.data.clip_end = 0.1, 4.0 * t.levels[0].side + 40000.0
             else:
                 cam.data.clip_start, cam.data.clip_end = max(1.0, 0.01 * dist), 4.0 * t.levels[0].side + 40000.0
-            heading, pitch = aim_camera(cam, (ex, ey, ez), (tx, ty, tz), v.get('frame', (0.5, 0.5)), v['lens'])
+            frame, why_reframed = REFRAME.get((recipe, vname), (v.get('frame', (0.5, 0.5)), None))
+            heading, pitch = aim_camera(cam, (ex, ey, ez), (tx, ty, tz), frame, v['lens'])
             r = dict(camera=[round(ex, 1), round(ey, 1), round(ez, 1)], aim=[round(tx, 1), round(ty, 1), round(tz, 1)],
                      heading_deg=round(heading, 1), pitch_deg=round(pitch, 2), lens=v['lens'], kind=v.get('kind'),
                      focus=focus, levels=[str(lv) for lv in t.levels], cache_hit=t.info.get('cache_hit'),
                      build_s=round(tb, 1), caption=v.get('caption'), photo=v.get('photo'), palette=pal,
-                     plants=a['plants'], memory_gb={})
+                     plants=a['plants'], reframed=why_reframed, memory_gb={})
 
             def stage(name):                             # the process's memory after each stage, kept on disk so a
                 r['memory_gb'][name] = memory_gb()       # run that dies still says where its memory went
@@ -347,10 +357,33 @@ def main():
             pf = (ex, ey) if ez - ground < 50.0 else (tx, ty)
             r['plant_focus'] = [round(pf[0], 1), round(pf[1], 1)]
             if a['plants']:
-                spots = PL.plan_plants(t, 'auto', focus=pf, seed=a['seed'], data=sd)
+                # the plan and its cover rasters are kept in the terrain's cache entry (plants.cache_base: keyed by
+                # the ecotope, the seed, the focus, the bake and the plant code), so a view rendered again re-plans
+                # nothing
+                base = PL.cache_base(t, 'auto', focus=pf, seed=a['seed'], data=sd)
+                spots = None
+                if base and os.path.exists(base + '.plants.json'):
+                    try:
+                        spots = PL.PlantSpots.load(base, terrain=t, data=sd)
+                        r['plan_cached'] = True
+                    except (OSError, ValueError, KeyError) as e:
+                        print(f'[render_plants] the cached plan does not load ({e}): planning again', flush=True)
+                if spots is None:
+                    spots = PL.plan_plants(t, 'auto', focus=pf, seed=a['seed'], data=sd)
+                    if base:
+                        spots.save(base)
                 r['plan_s'] = round(time.time() - tp, 2)
                 tc = time.time()
-                extra = spots.cover_extra()
+                extra = None
+                if base and os.path.exists(base + '.cover.npz'):
+                    with np.load(base + '.cover.npz') as z:
+                        names = sorted({k.rsplit('_L', 1)[0] for k in z.files})
+                        extra = {k: [np.asarray(z[f'{k}_L{i}']) for i in range(len(t.levels))] for k in names}
+                if extra is None:
+                    extra = spots.cover_extra()
+                    if base:
+                        np.savez_compressed(base + '.cover.npz', **{f'{k}_L{i}': v for k, per in extra.items()
+                                                                    for i, v in enumerate(per)})
                 r['ecotope'] = spots.meta['ecotope']
                 r['species'] = {n: dict(count=spots.count(n), per_ha_home=spots.stats[n].get('per_ha_home'),
                                         range_per_ha=spots.entry(n)['rule'].get('range_per_ha'))
@@ -366,6 +399,12 @@ def main():
             tm = time.time()
             S.apply_surface(t.obj, palette=pal, recipe=t.recipe, strata=strata, data=sd, cameras=[cam], log=print)
             r['material_s'] = round(time.time() - tm, 1)
+            # the per-texel material reads no mask attribute: the rings' eido_<mask> attributes go, as
+            # mesh.make_object(mask_attributes=False) leaves them out (thirty floats a vertex on 2-3 million
+            # vertices), eido_level kept
+            me = t.obj.data
+            for nm in [at.name for at in me.attributes if at.name.startswith('eido_') and at.name != 'eido_level']:
+                me.attributes.remove(me.attributes[nm])
             stage('material')
             if a['plants']:
                 ti = time.time()
@@ -375,6 +414,15 @@ def main():
                 r['lod'] = {n: [json.loads(o['eido_plants']) for o in obs[:1]] for n, obs in made.items() if obs}
                 bpy.context.view_layer.update()
                 stage('instances')
+            # nothing after this needs the plan's working arrays, the surface data's numpy maps or the terrain's
+            # fields (the object, its images and the instances live in Blender): the caldera's first frame ran
+            # past the 12 GB cap with them held (7.5 GB before the sky, 11-18)
+            if a['plants']:
+                spots._ground = None
+                del spots
+            del extra, sd, t
+            gc.collect()
+            stage('freed')
             sky_and_sun(sc, cam, os.path.join(sky_root, key))
             r['sun'] = getattr(PI.bind_sun(), 'name', None) if a['plants'] else None
             stage('sky')
@@ -401,7 +449,6 @@ def main():
             print(f"[render_plants] {key}{tag}: build {tb:.0f} s, surface {r['surface_s']} s, plan {r.get('plan_s')} s, "
                   f"material {r['material_s']} s, instance {r.get('instance_s')} s, first frame {first:.1f} s"
                   + ('' if second is None else f', second {second:.2f} s'), flush=True)
-            del t, sd
         except Exception as e:                                   # noqa: BLE001 - recorded, the run goes on
             traceback.print_exc()
             r = dict(r, error=f'{type(e).__name__}: {e}')

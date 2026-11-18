@@ -78,8 +78,20 @@ TINT_AMOUNT = 0.25                  # a still plant's albedo x (1 + TINT_AMOUNT 
 # gains on its baked albedo, and alpha, the threshold its cut-out keeps the baked alpha above (SeedThree's 0.35: a
 # higher one thins a billboard baked from the full level down to the card level's silhouette). What
 # match_billboards.py measured with both rendered at the card distance under make_sky. Keyed (SeedThree species,
-# seed, dials as sorted JSON); an individual missing here keeps SeedThree's billboard as it is
-BILLBOARD_GAIN = {}
+# seed, dials as sorted JSON); an individual missing here keeps SeedThree's billboard as it is. Measured 11-18 (the
+# comments: the mean colour's distance from the level it takes over from before and after, in CIELAB, and the
+# billboard's silhouette area over that level's)
+BILLBOARD_GAIN = {
+    # shrubs: against their card level (it covers 0.97-0.99 of their full level's area)
+    ('sagebrush', 3, '{}'): dict(gain=(0.764, 0.796, 0.872), alpha=0.35),           # dE 6.3 -> 1.5, area 1.01
+    ('blackbrush', 7, '{"barkTint": 11847908}'): dict(gain=(1.304, 1.283, 1.293), alpha=0.35),    # 5.8 -> 0.9, 1.06
+    ('blackbrush', 19, '{"barkTint": 11847908}'): dict(gain=(1.311, 1.288, 1.298), alpha=0.35),   # 5.9 -> 0.8, 1.07
+    ('creosote', 3, '{}'): dict(gain=(0.872, 0.917, 1.28), alpha=0.35),             # 9.8 -> 1.9, 0.97
+    ('creosote', 3, '{"leafColorize": 5069356, "leafTintAmount": 0.55}'):
+        dict(gain=(0.851, 0.881, 1.287), alpha=0.35),                               # 10.6 -> 2.1, 0.97
+    ('blackbrush', 7, '{"barkTint": 11847908, "leafColorize": 5660719, "leafTintAmount": 0.45}'):
+        dict(gain=(1.321, 1.278, 1.42), alpha=0.35),                                # 6.6 -> 1.2, 1.06
+}
 ALPHA_CUT = 0.35                    # SeedThree's billboard cut-out threshold
 _F = {n: i for i, n in enumerate(PL.FIELDS)}
 _FLORA_OPTS = ('height', 'color', 'blades', 'daisy', 'corn', 'sunflower', 'head_scale', 'normals', 'rough',
@@ -112,9 +124,17 @@ def _seedthree_code():
     return h.hexdigest()
 
 
+TONE_DIAL = 'eidoGain'              # a SeedThree source's eidoverse-side tone, (r, g, b) on its albedo (ecotopes.py)
+
+
+def grown_dials(dials):
+    """A SeedThree source's dials as SeedThree grows them: the eidoverse side's tone (TONE_DIAL) left out."""
+    return {k: v for k, v in (dials or {}).items() if k != TONE_DIAL}
+
+
 def seedthree_key(species, seed, dials=None):
-    blob = json.dumps([LIBRARY_VERSION, BILLBOARD_RES, list(bpy.app.version[:2]), species, int(seed), dials or {},
-                       _seedthree_code()], sort_keys=True, default=str)
+    blob = json.dumps([LIBRARY_VERSION, BILLBOARD_RES, list(bpy.app.version[:2]), species, int(seed),
+                       grown_dials(dials), _seedthree_code()], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:16]
 
 
@@ -226,8 +246,9 @@ def grow_seedthree(species, seed, dials=None, cache=True, log=print):
     [objects]}, cards [the two billboard card objects], height_m and width_m (SeedThree's whole extent), top_m and
     bottom_m (how far its full level reaches above and below its base: the height it stands is top_m), half_h,
     half_w, centre_z (its billboard's), key, from_cache, seconds). The objects are in no collection: instance their
-    meshes."""
+    meshes. The dials' eidoverse-side tone (TONE_DIAL) is not SeedThree's: it is left out here."""
     t0 = time.time()
+    dials = grown_dials(dials)
     key = seedthree_key(species, seed, dials)
     path = library_root() / f'seedthree_{species}_{int(seed)}_{key}.blend'
     before = (set(bpy.data.node_groups), set(bpy.data.materials), set(bpy.data.images))
@@ -463,10 +484,15 @@ def billboard_group(name, bb_col, card_m):
     return ng
 
 
-def _tone_base(nt, gain, attr_type):
+FOLIAGE_EDGE = 0.04                 # albedo green over its red and blue that counts as foliage (foliage-only gains)
+
+
+def _tone_base(nt, gain, attr_type, foliage=False):
     """Multiply the Principled BSDF's Base Color of a material's tree by gain (r, g, b) and by the plant's own tone,
     1 + TINT_AMOUNT (eido_tint - 0.5), eido_tint read from the mesh ('GEOMETRY': a realised billboard's vertices) or
-    from the instance ('INSTANCER': a card or full level instanced on the spots)."""
+    from the instance ('INSTANCER': a card or full level instanced on the spots), and the leaves' backlight (a
+    Translucent BSDF's Color) by gain. foliage: the albedo's gain only where it is green (its green over its red and
+    blue by FOLIAGE_EDGE, faded in from 0), the bark kept as it is."""
     bsdf = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
     if bsdf is None:
         return
@@ -484,44 +510,90 @@ def _tone_base(nt, gain, attr_type):
     nt.links.new(t.outputs['Fac'], k.inputs[0])
     m = nt.nodes.new('ShaderNodeVectorMath')
     m.operation = 'MULTIPLY'
-    m.inputs[1].default_value = tuple(float(v) for v in gain)
     m.location = (x, y)
     s = nt.nodes.new('ShaderNodeVectorMath')
     s.operation = 'SCALE'
     s.location = (x + 180, y)
-    if sock.links:
-        nt.links.new(sock.links[0].from_socket, m.inputs[0])
+    src = sock.links[0].from_socket if sock.links else None
+    if src is not None:
+        nt.links.new(src, m.inputs[0])
     else:
         m.inputs[0].default_value = tuple(sock.default_value)[:3]
+    g = tuple(float(v) for v in gain)
+    if foliage and src is not None and g != (1.0, 1.0, 1.0):
+        sep = nt.nodes.new('ShaderNodeSeparateColor')
+        sep.location = (x - 600, y - 150)
+        nt.links.new(src, sep.inputs[0])
+        rb = nt.nodes.new('ShaderNodeMath')
+        rb.operation = 'MAXIMUM'
+        rb.location = (x - 420, y - 200)
+        nt.links.new(sep.outputs[0], rb.inputs[0])
+        nt.links.new(sep.outputs[2], rb.inputs[1])
+        d = nt.nodes.new('ShaderNodeMath')
+        d.operation = 'SUBTRACT'
+        d.location = (x - 280, y - 200)
+        nt.links.new(sep.outputs[1], d.inputs[0])
+        nt.links.new(rb.outputs[0], d.inputs[1])
+        f = nt.nodes.new('ShaderNodeMapRange')         # 0 at no green excess, 1 at FOLIAGE_EDGE (clamped)
+        f.location = (x - 140, y - 200)
+        f.inputs['From Min'].default_value = 0.0
+        f.inputs['From Max'].default_value = FOLIAGE_EDGE
+        nt.links.new(d.outputs[0], f.inputs['Value'])
+        mix = nt.nodes.new('ShaderNodeVectorMath')     # 1 + f (gain - 1)
+        mix.operation = 'MULTIPLY_ADD'
+        mix.location = (x - 10, y - 200)
+        mix.inputs[0].default_value = tuple(v - 1.0 for v in g)
+        nt.links.new(f.outputs['Result'], mix.inputs[1])
+        mix.inputs[2].default_value = (1.0, 1.0, 1.0)
+        nt.links.new(mix.outputs[0], m.inputs[1])
+    else:
+        m.inputs[1].default_value = g
     nt.links.new(m.outputs[0], s.inputs[0])
     nt.links.new(k.outputs[0], s.inputs['Scale'])
     nt.links.new(s.outputs[0], sock)
+    if g != (1.0, 1.0, 1.0):
+        # the leaves' backlight (SeedThree's Translucent lobe, coloured by the species' transmit, not the albedo)
+        # takes the same gain, or a darkened plant keeps its glow
+        for n in [n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfTranslucent']:
+            c = n.inputs['Color']
+            tm = nt.nodes.new('ShaderNodeVectorMath')
+            tm.operation = 'MULTIPLY'
+            tm.inputs[1].default_value = g
+            tm.location = (n.location[0] - 200, n.location[1] + 120)
+            if c.links:
+                nt.links.new(c.links[0].from_socket, tm.inputs[0])
+            else:
+                tm.inputs[0].default_value = tuple(c.default_value)[:3]
+            nt.links.new(tm.outputs[0], c)
 
 
-def _tinted_material(mat):
-    """A copy of a SeedThree part's material whose albedo takes each instance's own tone (eido_tint, the spots' tint
-    field, read from the instancer): the still grove's card and full levels. Shared per material."""
-    name = f'{mat.name} [tint]'
+def _tinted_material(mat, tone=None):
+    """A copy of a SeedThree part's material whose albedo takes the source's tone (its dials' TONE_DIAL, (r, g, b))
+    and each instance's own tone (eido_tint, the spots' tint field, read from the instancer): the still grove's card
+    and full levels. Shared per (material, tone)."""
+    g = tuple(round(float(v), 4) for v in (tone or (1.0, 1.0, 1.0)))
+    name = f'{mat.name} [tint {g[0]:g} {g[1]:g} {g[2]:g}]'
     out = bpy.data.materials.get(name)
     if out is not None and out.get('eido_tint_of') == mat.name:
         return out
     out = mat.copy()
     out.name = name
     out['eido_tint_of'] = mat.name
-    _tone_base(out.node_tree, (1.0, 1.0, 1.0), 'INSTANCER')
+    _tone_base(out.node_tree, g, 'INSTANCER')
     return out
 
 
-def _still_billboard_material(mat, gain=None, alpha=None):
+def _still_billboard_material(mat, gain=None, alpha=None, foliage=False):
     """An eidoverse-side copy of a SeedThree billboard material for realised billboards: where SeedThree's reads the
     instance's origin (Object Info) for the card's dome normal, this reads eido_bb_origin from the mesh, and where
     it turns the baked detail normal from the card's frame to the world (Vector Transform, object to world), this
     turns it by eido_bb_yaw about z (the realised mesh's object frame is the world's). gain: (r, g, b) on the baked
-    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN); the albedo also takes each plant's own tone (eido_tint,
-    from the mesh). Shared per (material, gain, alpha)."""
+    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN); foliage: the gain on the green of the bake only (a
+    tree's: its bark stays as baked); the albedo also takes each plant's own tone (eido_tint, from the mesh). Shared
+    per (material, gain, alpha, foliage)."""
     g = tuple(round(float(v), 4) for v in (gain or (1.0, 1.0, 1.0)))
     cut = round(float(ALPHA_CUT if alpha is None else alpha), 3)
-    name = f'{mat.name} [still {g[0]:g} {g[1]:g} {g[2]:g} a{cut:g}]'
+    name = f'{mat.name} [still {g[0]:g} {g[1]:g} {g[2]:g} a{cut:g}{" leaves" if foliage else ""}]'
     out = bpy.data.materials.get(name)
     if out is not None and out.get('eido_still_of') == mat.name:
         return out
@@ -558,7 +630,7 @@ def _still_billboard_material(mat, gain=None, alpha=None):
             for link in list(n.outputs[0].links):
                 nt.links.new(r.outputs[0], link.to_socket)
             nt.nodes.remove(n)
-    _tone_base(nt, g, 'GEOMETRY')
+    _tone_base(nt, g, 'GEOMETRY', foliage=foliage)
     return out
 
 
@@ -649,6 +721,8 @@ def _instance_seedthree_still(entry, rec, focus, coll, lod, base, cache, log, he
     from seedthree.bl.sun import bound_sun, find_sun
     src = entry['source']
     species, dials, seeds = src['seedthree'], src.get('dials') or {}, src.get('seeds') or [1]
+    tone = tuple(float(v) for v in (dials.get(TONE_DIAL) or (1.0, 1.0, 1.0)))
+    dials = grown_dials(dials)
     card_m, dens = card_distance(entry, rec, focus, lod)
     hero_m = float(lod['hero_m'])
     variants = np.clip(rec[:, _F['variant']].astype(np.int64), 0, len(seeds) - 1)
@@ -661,7 +735,7 @@ def _instance_seedthree_still(entry, rec, focus, coll, lod, base, cache, log, he
     origin = np.stack([rec[:, 0], rec[:, 1], z + s * centre[variants]], 1)
     tag = f"{base}_{PL._file_part(entry['name'])}"
     roles = ('bark', 'cards', 'foliage', 'fronds')
-    tinted = [_tinted_material] * len(plants)             # each instance's own tone (the spots' tint field)
+    tinted = [lambda m: _tinted_material(m, tone)] * len(plants)    # the source's tone and each instance's own
     near_col = _variant_collection(tag + '_near_source', [p['levels'].get('LOD2') or p['levels']['LOD0']
                                                          if p is not None else [] for p in plants], roles,
                                    materials=tinted)
@@ -672,7 +746,8 @@ def _instance_seedthree_still(entry, rec, focus, coll, lod, base, cache, log, he
     bb_col = _variant_collection(tag + '_billboard_source', [p['cards'] if p is not None else [] for p in plants],
                                  offset=[(0.0, 0.0, float(c)) for c in centre],
                                  materials=[(lambda m, e=e: _still_billboard_material(
-                                     m, (e or {}).get('gain'), (e or {}).get('alpha'))) for e in gains])
+                                     m, tuple(a * b for a, b in zip((e or {}).get('gain') or (1.0, 1.0, 1.0), tone)),
+                                     (e or {}).get('alpha'), foliage=entry['kind'] == 'tree')) for e in gains])
     me = _species_points(tag + '_spots', rec, s, z, variants, origin)
     ob = bpy.data.objects.new(tag, me)
     coll.objects.link(ob)

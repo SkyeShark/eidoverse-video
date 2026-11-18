@@ -504,9 +504,9 @@ class _Ground:
     # level rasters -----------------------------------------------------------------------------------------
     def dist_channel(self):
         """Per level, metres to the nearest stream cell (None on hero levels, which read the main level's): the
-        cells whose `flow` is at least channel_flow, or whose `channels` mask is on where the level's cell is 7.6 m
-        or more (finer levels' `channels` mark rills). A level takes its parent's distance where that is nearer, so
-        a stream outside a window still counts."""
+        cells whose `flow` is at least channel_flow, or, with the constant channel_mask 1, whose `channels` mask is
+        on where the level's cell is 7.6 m or more (finer levels' `channels` mark rills). A level takes its parent's
+        distance where that is nearer, so a stream outside a window still counts."""
         if self._dist is None:
             out = [None] * len(self.levels)
             prev = None
@@ -515,7 +515,7 @@ class _Ground:
                 seed = np.zeros((lv.n, lv.n), bool)
                 if m.get('flow') is not None:
                     seed |= np.asarray(m['flow']) >= self.constants['channel_flow']
-                if m.get('channels') is not None and lv.cell >= 7.6:
+                if m.get('channels') is not None and lv.cell >= 7.6 and self.constants.get('channel_mask', 1.0):
                     seed |= np.asarray(m['channels']) > 0.5
                 d = _distance_to(seed, lv.cell, DIST_CHANNEL_CAP_M)
                 if prev is not None:
@@ -1521,5 +1521,5 @@ def cache_base(terrain, ecotope='auto', focus=None, radius_m=None, seed=0, data=
     return os.path.join(_cache.Cache(info['cache_key']).path, 'plants_' + h.hexdigest()[:16])
 
 
-__all__ = ['plan_plants', 'expected_cover', 'PlantSpots', 'FORMAT', 'FIELDS', 'DERIVED_NAMES', 'path_distance',
-           'terrain_constants', 'cache_base']
+__all__ = ['plan_plants', 'expected_cover', 'PlantSpots', 'FORMAT', 'FIELDS', 'DERIVED_NAMES', 'COVER_MAPS',
+           'STEEP_DEG', 'path_distance', 'terrain_constants', 'cache_base']

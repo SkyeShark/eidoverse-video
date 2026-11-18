@@ -249,11 +249,15 @@ def test_ground(t, spots):
               f'cells {cells.min():g}-{cells.max():g} m' if len(a) else 'no spots')
     check('ground: every spot stands on height_at (none floats, none is buried)', worst <= 0.0,
           f'{n_all:,} spots; the worst is {worst * 1000:+.2f} mm past the float32 tolerance')
+    # a species that keeps to fine levels (max_cell_m; every kind's default is any level) stands on no coarser one,
+    # out past the finest window (128 m across)
     eco = E.get('alpine')
-    grass = spots.array('meadow grass')
+    eco['species'] = [dict(s, max_cell_m=0.5, max_radius_m=150.0, max_count=10 ** 6)
+                      for s in eco['species'] if s['name'] == 'meadow grass']
+    grass = PL.plan_plants(t, eco, seed=4, **QUIET).array('meadow grass')
     cells = np.array([l.cell for l in t.levels])[grass[:, 11].astype(int)]
-    check('ground: grass stands only on cells of 1 m or finer (its max_cell_m)', bool((cells <= 1.0).all()),
-          f'{len(grass):,} bunches on cells of {cells.min():g}-{cells.max():g} m')
+    check('ground: a species keeps to the levels its max_cell_m allows', len(grass) > 0 and bool((cells <= 0.5).all()),
+          f'{len(grass):,} bunches within 150 m, on cells of {cells.min():g}-{cells.max():g} m (max_cell_m 0.5)')
     # a flatten area and water are kept clear
     t2 = G.Ground(t.levels, [dict(m) for m in t.masks._stack], t._height, dict(t.info))
     t2.flats = [dict(at=[100.0, -100.0], radius=40.0)]
