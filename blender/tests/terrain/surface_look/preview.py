@@ -10,6 +10,14 @@ every level) or a level stack saved by a generator's test (L<i>_<field> arrays w
 n; the masks are computed here with the recipe's mask parameters). --palettes builds from another palettes.py (the
 file as it was before an edit).
 
+--surface [<folder>] reads the terrain's surface data bake as well (SURFACING_DESIGN.md 2.2: crest, valley, cavity,
+settle, grain, fresh, snowpack, src_strata, insolation, slope_20m, ...; the bake a render made, from the surface
+cache's own root, or from <folder>), each map on the level's cells (the detail maps box-averaged), and the plant
+layer's expected cover for a palette with a canopy layer, so a rule written on the new maps reads what the per-texel
+material reads. The colours then take the debris' source beds (provenance src), the sediment's carried colour
+(provenance down, from the palette bake's P where it is cached, else the column at src_strata) and the patina against
+fresh rock. A Terrain.save file only.
+
 It evaluates the palette as the material composites it (palettes.evaluate: each layer's weight clamped to 0..1, a
 layer covering what lies below it), with the scatter's value noise standing in for the shader's (the breakup's
 pattern differs, its statistics do not), colours each layer by its colour, ramp, patches and tints (the strata
@@ -196,31 +204,72 @@ def scan_mean(P, set_name):
     return np.array([0.2, 0.17, 0.13])
 
 
+def _rgb3(v, default=1.0):
+    """A multiplier as linear (r, g, b): a number, an (r, g, b) or an sRGB colour (surfacing._rgb3)."""
+    from eidoblend.terrain.build import palettes as P
+    if v is None:
+        v = default
+    if isinstance(v, str):
+        return np.array(P.hex_linear(v))
+    if isinstance(v, (int, float)):
+        return np.full(3, float(v))
+    return np.array([float(c) for c in v][:3])
+
+
 def colours(P, pal, masks, h, X, Y, consts):
-    """Each layer's linear colour (H, W, 3) as the material makes it, without the scans' detail."""
+    """Each layer's linear colour (H, W, 3) as the material makes it, without the scans' detail: with surface data in
+    the masks, the debris' source beds (provenance src at src_strata), the sediment's carried colour (provenance down:
+    P's down_colour, else the column at src_strata) and the patina against fresh rock, as build/surfacing.py
+    composes them."""
     def ev(e, flat=False):
         return np.clip(np.broadcast_to(np.asarray(evaluate(P, e, masks, X, Y, consts, flat), np.float64),
                                        h.shape), 0.0, 1.0)
     st = pal.get('strata')
     zs = None
+    pos = False
     if st and any(L['strata'] for L in pal['layers']):
         if st.get('source', 'attribute') == 'attribute':
             zs = np.asarray(masks.get('strata', np.zeros_like(h)), np.float64)
         else:
+            pos = True
             dip = math.tan(math.radians(float(st.get('dip_deg', 0.0))))
             az = math.radians(float(st.get('dip_azimuth_deg', st.get('azimuth_deg', 0.0))))
             zs = h - (X * math.cos(az) + Y * math.sin(az)) * dip
+    src_zs = None
+    if zs is not None and 'src_strata' in masks:
+        # src_strata is in the masks' strata frame; with a 'position' column the frame is the height's
+        src_zs = np.asarray(masks['src_strata'], np.float64) + ((zs - h) if pos else 0.0)
     out = []
     for i, L in enumerate(pal['layers']):
         own = np.array(P.hex_linear(L['colour'])) if L['colour'] else None
         smix = float(L['strata']) if L['strata'] is not True else 1.0
+        prov = L.get('provenance') or {}
+        src = 1.0 if prov.get('src') is True else float(prov.get('src') or 0.0)
         if smix > 0 and zs is not None:
             band = strata_colour(P, st, zs + float(L.get('strata_offset_m', 0.0)), X, Y)
+            if src > 0.0 and src_zs is not None:
+                band = band + src * (strata_colour(P, st, src_zs, X, Y) - band)
             col = band if (smix >= 1.0 or own is None) else own + smix * (band - own)
         else:
             col = np.broadcast_to(own if own is not None else scan_mean(P, L['set']), h.shape + (3,)).copy()
+        down = 1.0 if prov.get('down') is True else float(prov.get('down') or 0.0)
+        if down > 0.0:
+            cd, share = None, 1.0
+            if 'down_colour' in masks:
+                cd = np.asarray(masks['down_colour'], np.float64)
+                share = np.asarray(masks.get('down_share', np.ones_like(h)), np.float64)
+            elif src_zs is not None:
+                cd = strata_colour(P, st, src_zs, X, Y)
+            if cd is not None:
+                k = P._smooth(0.1, 1.5, np.asarray(masks.get('deposit', np.zeros_like(h)), np.float64)) * share * down
+                cd = cd * _rgb3(prov.get('pale'), 1.0)
+                col = col + k[..., None] * (cd - col)
         if L['tint'] is not None:
             col = col * np.array(L['tint'][:3])
+        if L.get('patina') is not None and 'fresh' in masks:
+            f = np.clip(np.asarray(masks['fresh'], np.float64), 0.0, 1.0)[..., None]
+            pa, fg = _rgb3(L['patina']), _rgb3(L.get('fresh_gain'), 1.0)
+            col = col * (pa + f * (fg - pa))
         cn = L.get('canopy')
         if cn:                                           # seen from afar: the crowns' two tones and their gaps
             far = 0.5 * (np.array(P.hex_linear(cn.get('colour', '#26371f')))
@@ -374,8 +423,65 @@ def memo_noise(P):
     P.value_noise = value_noise
 
 
+def _to_cells(a, n):
+    """A map on a level's cells (n x n): a detail map (k n x k n) box-averaged, a coarser one repeated."""
+    a = np.asarray(a, np.float64)
+    if a.ndim == 3:
+        return np.stack([_to_cells(a[..., c], n) for c in range(a.shape[2])], axis=-1)
+    m = a.shape[0]
+    if m == n:
+        return a
+    if m > n and m % n == 0:
+        k = m // n
+        return a.reshape(n, k, n, k).mean(axis=(1, 3))
+    if n % m == 0:
+        k = n // m
+        return np.repeat(np.repeat(a, k, axis=0), k, axis=1)
+    idx = np.clip(((np.arange(n) + 0.5) * m / n).astype(np.int64), 0, m - 1)
+    return a[np.ix_(idx, idx)]
+
+
+def surface_level(terrain_path, li, pal, folder=None, log=print):
+    """{name: array on level li's cells}: the terrain's surface data bake (the newest one cached for its terrain key,
+    in the surface cache's root or in folder), its palette bake's colours when one is cached, and the plant layer's
+    expected cover when the palette has a canopy layer. Plain Python (tests/terrain/core/plain_import)."""
+    import glob as _glob
+    core = os.path.join(TN, 'core')
+    if core not in sys.path:
+        sys.path.insert(0, core)
+    import plain_import
+    plain_import.install()
+    from eidoblend.terrain import api as A
+    from eidoblend.terrain import surface as SU
+    t = A.Terrain.load(terrain_path, build=False)
+    folder = folder or SU.cache_folder(t, True)
+    metas = [p for p in sorted(_glob.glob(os.path.join(folder, 'surface_*.json')), key=os.path.getmtime)
+             if '_pal' not in os.path.basename(p)]
+    if not metas:
+        raise FileNotFoundError(f'no surface bake of {terrain_path} in {folder}: render it with render_look.py --data')
+    key = os.path.basename(metas[-1])[len('surface_'):-len('.json')]
+    baked, info = SU.load_cached(folder, key, len(t.levels))
+    colour = None
+    pals = sorted(_glob.glob(os.path.join(folder, f'surface_{key}_pal*_L0.npz')), key=os.path.getmtime)
+    if pals:
+        tag = os.path.basename(pals[-1])[len(f'surface_{key}_'):-len('_L0.npz')]
+        colour = []
+        for i in range(len(t.levels)):
+            with np.load(os.path.join(folder, f'surface_{key}_{tag}_L{i}.npz')) as z:
+                colour.append({k: np.asarray(z[k], np.float32) for k in z.files})
+    sd = SU.SurfaceData(t, baked, info, info.get('options') or {}, key, colour=colour, cache_dir=folder)
+    if any(L.get('canopy') for L in pal['layers']):
+        try:
+            from eidoblend.terrain.build import plants as PL
+            sd.add_maps(PL.expected_cover(t))
+        except Exception as e:                           # noqa: BLE001 - the preview goes on without it
+            log(f'[preview] no expected cover: {type(e).__name__}: {e}')
+    n = int(t.levels[li].n)
+    return {k: _to_cells(v, n) for k, v in sd.maps(li).items() if np.ndim(v) >= 2}
+
+
 def run(recipe, terrain, level='main', tag='new', palettes_file=None, size=900, crop=None, params=None, log=print,
-        step=1):
+        step=1, surface=None):
     t0 = time.time()
     M, R, P = load_modules(palettes_file)
     if getattr(P.value_noise, '__name__', '') != 'value_noise' or P.value_noise.__module__ != __name__:
@@ -396,6 +502,8 @@ def run(recipe, terrain, level='main', tag='new', palettes_file=None, size=900, 
     h = np.asarray(fields['h'], np.float64)
     n, cell = h.shape[0], float(lv['cell'])
     masks = {k: np.asarray(v, np.float64) for k, v in masks.items()}
+    if surface is not None:
+        masks.update(surface_level(terrain, li, pal, folder=surface or None, log=log))
     masks.setdefault('height', h)
     if crop:
         i0, j0, i1, j1 = (int(round((v - o) / cell)) for v, o in zip(crop, (lv['x0'], lv['y0'], lv['x0'], lv['y0'])))
@@ -475,6 +583,7 @@ def main():
     ap.add_argument('--crop')
     ap.add_argument('--params')
     ap.add_argument('--step', type=int, default=1)
+    ap.add_argument('--surface', nargs='?', const='', default=None)
     a = ap.parse_args()
     params = None
     if a.params:
@@ -486,7 +595,7 @@ def main():
             except ValueError:
                 params[k] = v
     crop = [float(v) for v in a.crop.split(',')] if a.crop else None
-    run(a.recipe, a.terrain, a.level, a.tag, a.palettes, a.size, crop, params, step=a.step)
+    run(a.recipe, a.terrain, a.level, a.tag, a.palettes, a.size, crop, params, step=a.step, surface=a.surface)
 
 
 if __name__ == '__main__':

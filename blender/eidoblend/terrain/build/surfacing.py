@@ -1097,6 +1097,7 @@ def _canopy(g, cn, coords, i):
     h = g.math('MULTIPLY_ADD', crown, 0.6, 0.25)
     shade = g.math('MULTIPLY_ADD', crown, 0.4, 0.72)
     clump_m = float(cn.get('clump_m', 0.0) or 0.0)
+    cmod = None
     if clump_m > 0.0:
         # clumps: crowns grow in clusters a few trees across, with shadowed gaps between them, each cluster its own
         # tone (older dark spruce, younger paler stands) and its own relief, so the canopy seen from the air (a crown
@@ -1117,15 +1118,28 @@ def _canopy(g, cn, coords, i):
         bump = g.add(bump, g.mul(g.math('POWER', clump, 0.8), float(cn.get('clump_height_m', 4.0))))
         r_edge = g.mix('FLOAT', 0.65, r_edge, g.math('MULTIPLY_ADD', k2, 0.76, 0.12))
         h = g.mul(h, g.math('MULTIPLY_ADD', clump, 0.45, 0.55))
-        crown = g.mul(crown, g.math('MULTIPLY_ADD', clump, 0.6, 0.4))
+        cf = g.math('MULTIPLY_ADD', clump, 0.6, 0.4)
+        crown = g.mul(crown, cf)
+        # the clump's own factor on the crowns' colour (tone x shade x a lit share that grows with cf): what the
+        # crowns keep of their clump where a crown is finer than a pixel (canopy_mean's mean_clump normalises it)
+        cmod = g.mul(g.mul(g.math('MULTIPLY_ADD', k1, 0.5, 0.76), g.math('MULTIPLY_ADD', clump, 0.42, 0.68)), cf)
     lit = g.vmath('SCALE', tone, scale=shade)
     col = g.mix('RGBA', g.smoothstep(0.0, 0.32, crown), lin(cn.get('gap', '#11160d')), lit)
     near0, near1 = cn.get('near_m', (25.0, 90.0))
     far = g.smoothstep(float(near0), float(near1), g.view_distance())
-    return dict(col=col, h=h, crown=crown, r_edge=r_edge, far=far, bump=bump)
+    return dict(col=col, h=h, crown=crown, r_edge=r_edge, far=far, bump=bump, cmod=cmod)
 
 
 _CANOPY_MEANS = {}
+_CANOPY_CLUMP = {}
+
+
+def canopy_clump_mean(cn, n=160, slices=3, seed=11):
+    """The mean over the canopy of _canopy's clump factor (cmod: the clump's tone x shade x crown cover factors), so
+    the crowns faded to canopy_mean keep their clump's grain as canopy_mean x cmod / this, with the same mean; 1.0
+    for a canopy without clumps."""
+    canopy_mean(cn, n, slices, seed)
+    return _CANOPY_CLUMP.get(json.dumps([cn, n, slices, seed], sort_keys=True, default=str), 1.0)
 
 
 def canopy_mean(cn, n=160, slices=3, seed=11):
@@ -1201,6 +1215,7 @@ def canopy_mean(cn, n=160, slices=3, seed=11):
         shade = shade * (clump * 0.42 + 0.68)
         bump = bump + clump ** 0.8 * float(cn.get('clump_height_m', 4.0))
         crown = crown * (clump * 0.6 + 0.4)
+        _CANOPY_CLUMP[key] = float(((cc[:, 0] * 0.5 + 0.76) * (clump * 0.42 + 0.68) * (clump * 0.6 + 0.4)).mean())
     lit_share = smooth(0.0, 0.32, crown)[:, None]
     mean = (lin(cn.get('gap', '#11160d'))[None] * (1.0 - lit_share) + tone * shade[:, None] * lit_share).mean(0)
     nz = 1.0
@@ -2254,9 +2269,19 @@ def _surface_group_data(pal, sd, name, prefer, log):
             fc = comp.fade(crown_m)
             ccol = cn['col']
             if not isinstance(fc, float):
-                # finer than a few pixels the crowns read their mean (canopy_mean: what the crowns drawn near
-                # average to), not an aliasing Voronoi
-                ccol = g.mix('RGBA', fc, canopy_mean(L['canopy']) + (1.0,), ccol)
+                # finer than a few pixels the crowns read their mean (canopy_mean: what the crowns drawn near average
+                # to, their relief's shading included), not an aliasing Voronoi, times their clump's factor on it
+                # (cmod over its mean) until the clumps are finer than a pixel too: the grain a forest keeps from the
+                # air, which one flat mean took away (Lauterbrunnen's forest read as smooth green, 11-18)
+                mc = canopy_mean(L['canopy'])
+                faded = mc + (1.0,)
+                if cn.get('cmod') is not None:
+                    k = g.math('DIVIDE', cn['cmod'], canopy_clump_mean(L['canopy']))
+                    fcl = comp.fade(float(L['canopy']['clump_m']))
+                    if not isinstance(fcl, float):
+                        k = g.mix('FLOAT', fcl, 1.0, k)
+                    faded = g.vmath('SCALE', mc, scale=k)
+                ccol = g.mix('RGBA', fc, faded, ccol)
             kf = cn['far']
             if dat.has('canopy_far') and dat.has('canopy_expected'):
                 # the stand-in crowns cover what the instances leave to the material: off where trees stand
@@ -3366,6 +3391,6 @@ def missing_masks(obj, palette_or_names):
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
            'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
            'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'set_far_distance', 'reader_group',
-           'hex_grid_group', 'hex_class', 'canopy_mean',
+           'hex_grid_group', 'hex_class', 'canopy_mean', 'canopy_clump_mean',
            'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
            'DEBUG_COLOURS']
