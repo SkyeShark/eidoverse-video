@@ -13,8 +13,11 @@ review lights them (make_sky daylight from the view's left).
     MS.light(sc, cam, cache_dir)                    # make_sky for that view
     secs = MS.frame(sc, path)                       # one render (written when path is given): seconds
 
-Cases are the snapshot names (_cases.CASES): canyon, alpine_valley, toroweap, lauterbrunnen, meteor_crater, ...; a
-view's plan is the case's recipe in views.json (real places: their own entry when the judge has one).
+Cases are the snapshot names (_cases.CASES): canyon, alpine_valley, toroweap, lauterbrunnen, meteor_crater, ...;
+any other recipe name loads the judge's saved terrain of that recipe (out/surfacing_judge/terrains/<recipe>.npz, made
+by surfacing_judge/make_terrains.py: the terrain the review's views were framed on, context and main levels only),
+e.g. sea_cliffs, impact_crater, badlands. A view's plan is the case's recipe in views.json (real places: their own
+entry when the judge has one).
 """
 import json
 import math
@@ -44,6 +47,7 @@ from eidoblend.terrain.build import surfacing as S  # noqa: E402
 W, H = 960, 540
 EXPOSURE = -0.5                         # the review's textured exposure
 VIEWS = os.path.join(TN, 'surfacing_judge', 'views.json')
+JUDGE_TERRAINS = os.path.join(TN, 'out', 'surfacing_judge', 'terrains')
 # the judge's plan a case's views come from
 PLAN_OF = {'canyon': 'canyon', 'alpine_valley': 'alpine_valley', 'lauterbrunnen': 'real_place',
            'meteor_crater': 'impact_crater', 'toroweap': 'canyon', 'fluvial_range': 'fluvial_range'}
@@ -61,13 +65,25 @@ def scene(samples=16, res=(W, H), aniso=16, exposure=EXPOSURE):
     return sc
 
 
+def load(case):
+    """The case's Terrain (no Blender object, no GPU): its surface-data snapshot, else the judge's saved terrain of
+    that recipe."""
+    if case in C.CASES:
+        return C.terrain(case)
+    p = os.path.join(JUDGE_TERRAINS, case + '.npz')
+    if not os.path.exists(p):
+        raise FileNotFoundError(f'{case!r} is neither a surface-data case ({", ".join(C.CASES)}) nor a judge terrain '
+                                f'({p}: surfacing_judge/make_terrains.py makes them)')
+    return A.Terrain.load(p, build=False)
+
+
 def terrain(case, name=None, mesh_res=None, mask_attributes=True):
-    """(Terrain, object): the case's snapshot (no GPU) and its ring mesh object with the terrain's custom properties,
-    in grey clay (api._build_blender's own steps, without rocks). mesh_res: the rings drawn again at that many
-    vertices per level side (mesh.MESH_RES is 512: stride 2 on levels of 1024 cells; 1024 is stride 1), as
-    api._assemble_terrain builds them; mask_attributes False leaves the masks off the redrawn rings (thirty
-    attributes on four times the vertices), which only the material without baked data reads."""
-    t = C.terrain(case)
+    """(Terrain, object): the case's snapshot or judge terrain (load(): no GPU) and its ring mesh object with the
+    terrain's custom properties, in grey clay (api._build_blender's own steps, without rocks). mesh_res: the rings
+    drawn again at that many vertices per level side (mesh.MESH_RES is 512: stride 2 on levels of 1024 cells; 1024
+    is stride 1), as api._assemble_terrain builds them; mask_attributes False leaves the masks off the redrawn rings
+    (thirty attributes on four times the vertices), which only the material without baked data reads."""
+    t = load(case)
     pal = t.info.get('palette')
     if mesh_res:
         from eidoblend.terrain.build import mesh as _mesh
@@ -212,6 +228,104 @@ def salt(mat, k):
             m.inputs[0].default_value = sock.default_value
         src = m.outputs[0]
     ng.links.new(src, sock)
+
+
+DIST_UNIT = 20000.0                       # region_render's view distance scale, metres
+OUTSIDE_UNIT = 4000.0                     # ... and its Hero Outside scale
+
+
+def region_material(sd):
+    """An emission of (Hero Outside / OUTSIDE_UNIT, view distance / DIST_UNIT, 1) through the terrain's reader."""
+    mat = bpy.data.materials.new('view_region')
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    rd = nt.nodes.new('ShaderNodeGroup')
+    rd.node_tree = S.reader_group(sd)
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    nt.links.new(tc.outputs['Object'], rd.inputs['Position'])
+    rd.inputs['Footprint'].default_value = 1.0
+    cam = nt.nodes.new('ShaderNodeCameraData')
+    comb = nt.nodes.new('ShaderNodeCombineColor')
+    for k, (sock, unit) in enumerate(((rd.outputs['Hero Outside'], OUTSIDE_UNIT), (cam.outputs['View Distance'],
+                                                                                 DIST_UNIT))):
+        m = nt.nodes.new('ShaderNodeMath')
+        m.operation = 'DIVIDE'
+        nt.links.new(sock, m.inputs[0])
+        m.inputs[1].default_value = unit
+        nt.links.new(m.outputs[0], comb.inputs[k])
+    comb.inputs[2].default_value = 1.0
+    em = nt.nodes.new('ShaderNodeEmission')
+    nt.links.new(comb.outputs[0], em.inputs['Color'])
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
+    return mat
+
+
+def region_render(sc, me, mat, path):
+    """(metres outside the outermost hero window, view distance metres, ground mask) per pixel, top row first, from
+    region_material on the whole mesh: a one-sample float render with a black world and the Standard view, then the
+    scene's own settings, materials and material indices back."""
+    import numpy as np
+    slots = list(me.materials)
+    me.materials.clear()
+    me.materials.append(mat)
+    idx = np.empty(len(me.polygons), np.int32)
+    me.polygons.foreach_get('material_index', idx)
+    me.polygons.foreach_set('material_index', np.zeros(len(me.polygons), np.int32))
+    vs, im = sc.view_settings, sc.render.image_settings
+    keep = (sc.world, vs.view_transform, vs.look, vs.exposure, sc.eevee.taa_render_samples, im.file_format,
+            im.color_depth, im.color_mode, sc.render.film_transparent)
+    sc.world = bpy.data.worlds.get('region_black') or bpy.data.worlds.new('region_black')
+    sc.world.color = (0.0, 0.0, 0.0)
+    vs.view_transform, vs.look, vs.exposure = 'Standard', 'None', 0.0
+    sc.eevee.taa_render_samples = 1
+    sc.render.film_transparent = True
+    im.file_format, im.color_depth, im.color_mode = 'OPEN_EXR', '32', 'RGBA'
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    img = bpy.data.images.load(path, check_existing=False)
+    w, h = img.size
+    px = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    px = px.reshape(h, w, 4)[::-1]
+    (sc.world, vs.view_transform, vs.look, vs.exposure, sc.eevee.taa_render_samples, im.file_format, im.color_depth,
+     im.color_mode, sc.render.film_transparent) = keep
+    me.materials.clear()
+    for m in slots:
+        me.materials.append(m)
+    me.polygons.foreach_set('material_index', idx)
+    me.update()
+    return px[..., 0] * OUTSIDE_UNIT, px[..., 1] * DIST_UNIT, px[..., 3] > 0.5
+
+
+def read_png(path):
+    """(H, W, 3) display values 0..1 of a written PNG, top row first."""
+    import numpy as np
+    img = bpy.data.images.load(path, check_existing=False)
+    w, h = img.size
+    px = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    return px.reshape(h, w, 4)[::-1, :, :3]
+
+
+def vram_mib():
+    """This process's dedicated GPU memory in MiB, from Windows' "GPU Process Memory" performance counter (what Task
+    Manager shows per process); None where that counter does not exist (other systems) or cannot be read."""
+    if os.name != 'nt':
+        return None
+    import subprocess
+    cmd = ("$s = (Get-Counter '\\GPU Process Memory(pid_%d*)\\Dedicated Usage' -ErrorAction SilentlyContinue)"
+           ".CounterSamples; if ($s) { [math]::Round(($s | Measure-Object -Property CookedValue -Sum).Sum / 1MB) }"
+           % os.getpid())
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd], capture_output=True,
+                           text=True, timeout=30, creationflags=0x08000000)
+        return int(r.stdout.strip()) if r.stdout.strip() else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 def clean(path):

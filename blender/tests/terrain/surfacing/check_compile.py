@@ -3,18 +3,27 @@ material built several ways, each a fresh source for the GPU driver, its first f
 on the GPU (so the first frame is the compile and one render).
 
     bash run_blender.sh blender/tests/terrain/surfacing/check_compile.py [--case canyon]
-        [--variants today,full,linear,no_hex,no_far] [--res 240x135]
+        [--variants today,full,linear,no_hex,no_far,steep_one] [--rounds 2] [--res 240x135]
     (a GPU job: queue it with EIDO_GPU_WRAP on a shared machine, blender/tests/_where.py)
 
 Variants (options over the palette's, on the material with baked data unless named today):
-  today    the material without baked data (mesh attributes), for the ratio
-  full     the per-texel material as apply_surface builds it
-  linear   interpolation 'Linear': no Cubic near read beside each mipmapped one
-  no_hex   detile 'offset': one read per frame, no hex tiling (planar and sector frames)
-  no_far   far_scale 1: no far read on the box layers' steep faces
+  today      the material without baked data (mesh attributes), for the ratio
+  full       the per-texel material as apply_surface builds it
+  near_hex   near_hex True: every hex read of a planar frame 'Auto' (Cubic near beside mipmapped Linear), the
+             configuration before design 8.1's first lever (one Cubic near read at the plain coordinate)
+  linear     interpolation 'Linear': no Cubic near read beside each mipmapped one
+  no_hex     detile 'offset': one read per frame, no hex tiling (planar and sector frames)
+  no_far     far_scale 1: no far read on the box layers' steep faces
+  steep_all  steep_hex_share 0: every box layer hex-tiled in its sector frames (by default only the cliff-sized
+             tiles are, the rest read each sector frame once)
+  steep_one  steep_hex_m 0: the sector frames read once each, hex tiling on the planar reads only
+  steep_hex  steep_hex_m 20: the sector frames hex-tiled on a 20 m lattice (three reads each)
 A first, untimed pass renders `full` once so the atlases and scans are uploaded. Each variant is then built, salted
-and rendered once (wall seconds and this process's CPU seconds), in the order given, then once more in reverse
-order under another salt; the lower of the two counts. Writes out/surfacing/material/compile_<case>.json.
+(its own salt every time: the GPU driver caches a source it has compiled) and rendered once (wall seconds and this
+process's CPU seconds), in the order given; with --rounds 2 once more in reverse order; the lowest counts. A name
+may be given twice (today,full,...,full,today brackets a single round against the machine's drift). Records per
+variant the Python build seconds, the nodes the shader is compiled from (groups expanded, every instance), the
+samplers and the compile seconds. Writes out/surfacing/material/compile_<case>.json.
 """
 import json
 import os
@@ -28,8 +37,10 @@ import _material_scene as MS  # noqa: E402
 import bpy  # noqa: E402
 from eidoblend.terrain.build import surfacing as S  # noqa: E402
 
-VARIANTS = {'today': None, 'full': {}, 'linear': dict(interpolation='Linear'), 'no_hex': dict(detile='offset'),
-            'no_far': dict(far_scale=1.0)}
+# name: None (today's material) or the material options over the palette's
+VARIANTS = {'today': None, 'full': {}, 'near_hex': dict(near_hex=True), 'linear': dict(interpolation='Linear'),
+            'no_hex': dict(detile='offset'), 'no_far': dict(far_scale=1.0), 'steep_one': dict(steep_hex_m=0.0),
+            'steep_all': dict(steep_hex_share=0.0), 'steep_hex': dict(steep_hex_m=20.0)}
 VIEW = {'canyon': 'brink_down', 'alpine_valley': 'floor_lischmaad', 'toroweap': 'brink_down',
         'lauterbrunnen': 'floor_lischmaad'}
 
@@ -40,8 +51,8 @@ def args():
     def opt(k, d=None):
         return a[a.index(k) + 1] if k in a else d
     w, h = (int(v) for v in opt('--res', '240x135').split('x'))
-    return dict(case=opt('--case', 'canyon'), variants=opt('--variants', 'today,full,linear,no_hex,no_far').split(','),
-                res=(w, h))
+    return dict(case=opt('--case', 'canyon'), rounds=int(opt('--rounds', '2')), res=(w, h),
+                variants=opt('--variants', 'today,full,linear,no_hex,no_far,steep_one').split(','))
 
 
 def first_frame():
@@ -62,32 +73,33 @@ def main():
     pal, strata = MS.palette_args(t)
     consts = S.terrain_constants(obj)
     me = obj.data
+    salts = iter(range(int(time.time()) % 30 + 2, 10 ** 6))
 
-    def build(name, k):
+    def build(name):
+        k = next(salts)
         opts = VARIANTS[name]
         t0 = time.time()
         mat = S.surface_material(pal, recipe=t.recipe, strata=strata, options=dict(opts) if opts else None,
-                                 constants=consts, data=None if name == 'today' else sd, name=f'{case}_{name}_{k}',
+                                 constants=consts, data=None if opts is None else sd, name=f'{case}_{name}_{k}',
                                  log=None)
         secs = time.time() - t0
-        if name == 'today':
+        if opts is None:
             S.pack_masks(obj, mat)
         MS.salt(mat, k)
         ng = next(n.node_tree for n in mat.node_tree.nodes if n.bl_idname == 'ShaderNodeGroup')
         me.materials.clear()
         me.materials.append(mat)
-        return mat, round(secs, 1), S._nodes_in(ng), S._count_samplers(ng)[1]
-    k0 = int(time.time()) % 30 + 2
-    build('full', k0)                                      # the images' upload, untimed
+        return round(secs, 1), S._nodes_in(ng), S._count_samplers(ng)[1]
+    build('full')                                          # the images' upload, untimed
     first_frame()
     if 'today' in a['variants']:
-        build('today', k0)
+        build('today')
         first_frame()
     rec = {}
     order = list(a['variants'])
-    for rnd, names in enumerate((order, order[::-1])):
+    for names in [order, order[::-1]][:max(1, a['rounds'])]:
         for name in names:
-            _mat, bs, nodes, samp = build(name, k0 + 40 + 7 * rnd + order.index(name))
+            bs, nodes, samp = build(name)
             wall, cpu = first_frame()
             r = rec.setdefault(name, dict(build_s=bs, nodes=nodes, samplers=samp, compile_s=[], compile_cpu_s=[]))
             r['compile_s'].append(wall)
@@ -102,7 +114,7 @@ def main():
     path = os.path.join(MS.OUT, f'compile_{case}.json')
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1)
-    MS.log(f'[compile] {json.dumps({k: (v["best_s"], v.get("over_today")) for k, v in rec.items()})}')
+    MS.log(f'[compile] {json.dumps({k: (v["best_s"], v.get("over_today"), v["nodes"]) for k, v in rec.items()})}')
     MS.log(f'[compile] done -> {path}')
 
 

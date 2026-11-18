@@ -17,7 +17,9 @@ recompiles. --recompile: each material once more with another salt, its images a
 frame is the compile alone; the ratio of the two materials' is the one to hold against the budget (1.5 x, section 7).
 
 Records per material the Python build seconds, nodes (groups expanded), images, samplers, the first frame, the best
-timed frame and its cost over clay. Writes out/surfacing/material/full_config[_<tag>].json and the last timed frames.
+timed frame and its cost over clay, and the best frame at one sample (after a discarded one: the viewport's cost per
+redraw at this size, against the budget's 5 fps, 0.2 s). Writes out/surfacing/material/full_config[_<tag>].json and
+the last timed frames.
 """
 import json
 import os
@@ -111,11 +113,17 @@ def main():
             nimg, nsamp = S._count_samplers(ng)
             first, first_cpu = first_frame(sc)
             frame_s = best(sc, reps, os.path.join(MS.OUT, f'full_config_{case}_{label}{tag}.png'))
+            spp = sc.eevee.taa_render_samples
+            sc.eevee.taa_render_samples = 1                # the viewport's redraw: one sample (no recompile)
+            MS.frame(sc)
+            one_spp = best(sc, reps)
+            sc.eevee.taa_render_samples = spp
             slots = len(me.materials)
             clay_s = clay_frames(sc, me, clay, reps)
             r[label] = dict(build_s=round(build, 1), nodes=S._nodes_in(ng), images=nimg, samplers=nsamp,
                             first_frame_s=first, first_frame_cpu_s=first_cpu, frame_s=frame_s, clay_s=clay_s,
-                            material_s=round(frame_s - clay_s, 2), slots=slots, far_m=mat.get('eido_far_m'))
+                            material_s=round(frame_s - clay_s, 2), one_sample_s=one_spp, slots=slots,
+                            far_m=mat.get('eido_far_m'))
             MS.log(f'[check0] {case}/{label}: {r[label]}')
         # the far material alone on the whole terrain: its compile
         pal, strata = MS.palette_args(t)

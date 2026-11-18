@@ -67,21 +67,31 @@ builds the per-texel material instead:
     normal maps in its tangent frame, the strata's bed relief as an analytic tilt (the relief image differentiated
     along the stratigraphic height: no Bump node, which would evaluate the level reader three times), and the bump
     of ripples and canopy on top (each bump's weight in its Distance, read once outside the bump's height);
-  - planar reads are hex-tiled ('hex', one node group, eido_hex_grid: three reads on a triangle grid, each turned and
-    offset, sharpened by w^7 and their heights; a read's coordinate changes only where its weight is 0);
+  - planar reads are hex-tiled ('hex': three reads on a triangle grid, each turned and offset, sharpened by w^7
+    and their heights; a read's coordinate changes only where its weight is 0). The grid is one node group,
+    eido_hex_grid, placed once per lattice: a layer's lattice is its hex_m, by default its tile snapped to
+    2.5 x 2^n metres (hex_class), so layers of like tiles share one grid. With 'Auto' filtering the hex reads are
+    mipmapped Linear, and within detail_distance one read at the plain world coordinate (albedo Cubic, normal map
+    Linear) takes over (design 8.1's first lever; near_hex True: Cubic in every hex read). Where a hexagon is
+    narrower than a 2 x 2 pixel quad (a 2.5 m lattice from about 100-300 m on), every quad straddles a read's jump
+    and the hex reads fall to the scan's coarsest mips: the ground there shows the scan's mean, and its variation
+    comes from the terrain's data;
   - box layers read eight fixed sector frames on faces steeper than 47 degrees (u along the strike, v up a fixed
-    65-degree dip, two slots by the face's own bearing, hex-tiled inside each without turning: rock on a wall is
-    directional), planar below 37 degrees, their scans' normal maps in each frame's tangent plane; the Box
-    projection is not used. With the palette's far_scale they keep the far read on steep faces (the scan at
-    far_scale x the tile in the same frames, over far_distance: the joints and blocks a wall shows from 100 m on);
-    planar reads have none;
+    65-degree dip, two slots by the face's own bearing; hex-tiled inside each on one lattice, steep_hex_m, without
+    turning: rock on a wall is directional, for the box layers of the largest tiles, the cliffs; a smaller box tile
+    under a cliff layer reads each frame once, steep_hex_share), planar below 37 degrees, their scans'
+    normal maps in each frame's tangent plane; the Box projection is not used. With the palette's far_scale they
+    keep the far read on steep faces (the scan at far_scale x the tile in the same frames, the two slots height
+    blended, over far_distance: the joints and blocks a wall shows from 100 m on); planar reads have none;
   - every noise term fades with the pixel's footprint (and a smoothstep around a faded term widens by the spread it
     lost, so a layer's cover holds as the noise fades), and fbm drops the octaves finer than two footprints;
   - a layer's ramp and the satmap are read from the palette's ramp image (one row each, Closest); the patches get()
     wrote for them are skipped;
   - past D0 (a main-level texel spanning 2.5 pixels, or the option far_m) the ground fades over D0..1.5 D0 to the
-    baked far colour C (its own data per texel to the horizon), never inside the hero windows; rings beyond 1.5 D0
-    from every camera passed to apply_surface take the far material (slot 1), a cost saving only.
+    baked far colour C (its own data per texel to the horizon) and its roughness, never inside the hero windows;
+    each layer keeps its own specular there (the near weights are evaluated anyway); rings beyond 1.5 D0 from every
+    camera passed to apply_surface take the far material (slot 1), a cost saving only, with the palette's one
+    specular (C carries no specular).
 The layer key `fallback` (a weight for a material without baked data) is taken in place of `weight` without data, or
 where the weight reads a map the data lacks.
 
@@ -126,9 +136,16 @@ SECTOR_DIP_DEG = 65.0                 # the sector frames' fixed up-dip axis (SU
 STEEP_DEG = (37.0, 47.0)              # box layers: planar below, sector frames above
 HEX_POWER = 7.0                       # hex tiling's sharpening of the barycentric weights
 HEX_CONTRAST = 0.6                    # ... and how much each read's own height weighs (mix(1, 2 h, 0.6))
-STEEP_HEX = 2.0                       # the sector reads' hex lattice, in planar hex_m (a layer's steep_hex_m)
+HEX_LADDER = 2.5                      # default hex lattices are this x 2^n metres (hex_class): like tiles share one
+STEEP_HEX = 2.0                       # the sector reads' hex lattice, in hex_class(the largest box tile); 0: one
+#                                       read per sector frame (a layer's steep_hex_m sets its own)
+STEEP_HEX_SHARE = 0.5                 # ... for box layers whose tile is at least this share of the largest box tile;
+#                                       smaller ones (talus and scree under a cliff layer, which covers the faces
+#                                       over 47 degrees) read each sector frame once (option steep_hex_share; 0: all)
 HEX_PATCH = 0.29                      # a hexagon's width in hex_m (the lattice unit, 1 / (2 sqrt 3))
 BLEND_PATCH_M = 1.0                   # hexagons wider than this lend a layer edge less of their height's swing
+CUBIC_FAMILIES = ('D',)               # the atlases also read bicubic where a texel is magnified (_Data.fam)
+CUBIC_PX = (0.3, 0.6)                 # ... from a pixel spanning this share of a texel (bicubic) to this (mipmapped)
 DEAD_FOOTPRINTS = 3.0                 # the reader's dead band inside a window edge, in footprints
 FADE_CELLS = 8.0                      # a level fades in over this many of its own cells
 FAR_TEXEL_PX = 2.5                    # D0: where a main-level texel spans this many pixels
@@ -143,7 +160,7 @@ NOISE_HALF = {'noise': 0.358, 'fbm': 0.344}
 RAW_HALF = (0.2, 0.163, 0.143, 0.134, 0.130, 0.128)
 CANOPY_COVER, CANOPY_SHADE = 0.72, 0.92   # a canopy's mean far away: lit crowns' share, and their shade (the far
 #                                           colour C's, surface/far_colour.py)
-HEX_VERSION = 3
+HEX_VERSION = 4
 # EEVEE compiles a material with a limited number of mesh attributes: at 15 masks the alpine palette failed with
 # 'Material ... uses too many attributes' (measured 11-13; the shader reads them all as undefined variables). A
 # material reading more masks than ATTRS_DIRECT reads them packed three to a FLOAT_VECTOR point attribute
@@ -473,27 +490,38 @@ class _Compiler:
         self.fp = None if flat else fp
         self._fades = {}
         self._details = {}
+        self._inv_fp = None
+        self._log_fp = None
 
     def fade(self, scale_m):
         """smoothstep(1, 4, scale / footprint): 1 where a term of that scale spans 4 pixels or more, 0 under one
         (1.0 without a footprint)."""
         if self.fp is None:
             return 1.0
-        key = float(scale_m)
+        key = max(float(scale_m), 1e-6)
         if key not in self._fades:
-            self._fades[key] = self.g.smoothstep(1.0, 4.0, self.g.math('DIVIDE', key, self.fp))
+            # (the edges divided by the scale instead of the footprint multiplied by it: one node per scale)
+            self._fades[key] = self.g.smoothstep(1.0 / key, 4.0 / key, self._per_fp())
         return self._fades[key]
+
+    def _per_fp(self):
+        """1 / footprint, once."""
+        if self._inv_fp is None:
+            self._inv_fp = self.g.math('DIVIDE', 1.0, self.fp)
+        return self._inv_fp
 
     def detail(self, scale_m, detail):
         """The Noise Texture's detail for a term of scale_m: min(detail, log2(scale / (2 footprint))), at least 0."""
-        if self.fp is None:
+        if self.fp is None or float(detail) <= 0.0:
             return float(detail)
-        key = (float(scale_m), float(detail))
+        key = (max(float(scale_m), 1e-6), float(detail))
         if key not in self._details:
             g = self.g
-            r = g.math('DIVIDE', float(scale_m), g.mul(self.fp, 2.0))
-            self._details[key] = g.math('MINIMUM', g.math('MAXIMUM', g.math('LOGARITHM', g.math('MAXIMUM', r, 1e-6),
-                                                                              2.0), 0.0), float(detail))
+            if self._log_fp is None:                       # log2(1 / (2 footprint)), once
+                self._log_fp = g.math('LOGARITHM', g.math('MAXIMUM', g.mul(self._per_fp(), 0.5), 1e-9), 2.0)
+            ls = math.log2(key[0])
+            # clamp(log2(scale) + log2(1 / (2 footprint)), 0, detail), as one clamped linear map per scale
+            self._details[key] = g.map_range(self._log_fp, -ls, key[1] - ls, 0.0, key[1])
         return self._details[key]
 
     def lost_spread(self, t):
@@ -679,6 +707,11 @@ class _Compiler:
 
 def _clamp01(g, x):
     return max(0.0, min(1.0, x)) if isinstance(x, float) else g.math('MAXIMUM', g.math('MINIMUM', x, 1.0), 0.0)
+
+
+def _sat(g, x):
+    """clamp(x, 0, 1) as one node (a Math node's own clamp): the material with baked data counts its nodes."""
+    return max(0.0, min(1.0, x)) if isinstance(x, float) else g.math('ADD', x, 0.0, clamp=True)
 
 
 def _one_minus(g, x):
@@ -1223,14 +1256,24 @@ def reader_group(sd):
     return ng
 
 
-def hex_grid_group():
-    """eido_hex_grid: hex tiling's triangle grid (SURFACING_DESIGN.md 3.3; Mikkelsen 2022, written from the published
-    description), one node group shared by every hex-tiled read.
+def hex_class(tile_m):
+    """A layer's default hex lattice size, metres: its tile snapped to the ladder HEX_LADDER x 2^n (2.5, 5, 10,
+    20, ...), so layers of like tiles share one lattice, and with it one hex grid in the shader (a grid placed per
+    layer was a third of the shader's source). A hexagon then shows 0.2 to 0.4 of the tile's width."""
+    return HEX_LADDER * 2.0 ** round(math.log2(max(float(tile_m), 1e-3) / HEX_LADDER))
 
-    In:  U, V (metres along the frame's axes: world x, y for a planar read, a sector frame's strike and dip), Inverse
-         Size (1 / hex_m), Seed, Rotate (1: each read turned at random; 0: offsets only, for directional scans).
-    Out: per slot c = 0, 1, 2: DU<c>, DV<c> (metres from the slot's grid vertex), OU<c>, OV<c> (its random offset, in
-         tiles), Cos<c>, Sin<c>, NSin<c> (its random turn), W<c> (its barycentric weight).
+
+def hex_grid_group(rotate=True):
+    """eido_hex_grid (rotate False: eido_hex_grid_plain): hex tiling's triangle grid (SURFACING_DESIGN.md 3.3;
+    Mikkelsen 2022, written from the published description), placed once per lattice (a frame and a size) and shared
+    by every layer read on it.
+
+    In:  Position (its x, y: metres along the frame's axes: world x, y for a planar read, a sector frame's strike and
+         dip), Inverse Size (1 / hex_m), Seed.
+    Out: per slot c = 0, 1, 2: RD<c> (the position from the slot's grid vertex, metres, turned by the slot's random
+         angle), O<c> (its random offset, in tiles: x, y), W<c> (its barycentric weight) and, with rotate, CS<c>
+         ((cos, sin, 0) of that angle). A read's coordinate is RD x (1 / tile) + O; its normal map's (nx, ny) turned
+         back into the frame is (dot(n, CS), cross(CS, n).z).
 
     The grid is a triangle lattice of edge hex_m / (2 sqrt 3) (Mikkelsen's scaling): a point lies in one triangle,
     whose three vertices are its three reads. Reads go to slots by the vertex's class (i - j) mod 3 on the skewed
@@ -1238,18 +1281,20 @@ def hex_grid_group():
     edges of its hexagon of six triangles, where its weight is 0: the implicit derivatives' mip jump falls where the
     read counts for nothing. A read's coordinates are R (P - vertex) / tile + offset, small numbers near every
     vertex, so float32 keeps them exact far from the origin."""
-    sig = f'hex{HEX_VERSION}'
-    ng, fresh = _new_group('eido_hex_grid', sig)
+    sig = f'hex{HEX_VERSION}{"r" if rotate else "p"}'
+    ng, fresh = _new_group('eido_hex_grid' if rotate else 'eido_hex_grid_plain', sig)
     if not fresh:
         return ng
-    for nm in ('U', 'V', 'Inverse Size', 'Seed', 'Rotate'):
+    _sock(ng, 'Position', 'INPUT', 'v')
+    for nm in ('Inverse Size', 'Seed'):
         _sock(ng, nm, 'INPUT', 'f')
     for c in range(3):
-        for nm in ('DU', 'DV', 'OU', 'OV', 'Cos', 'Sin', 'NSin', 'W'):
-            _sock(ng, f'{nm}{c}', 'OUTPUT', 'f')
+        for nm, kd in (('RD', 'v'), ('O', 'v'), ('W', 'f')) + ((('CS', 'v'),) if rotate else ()):
+            _sock(ng, f'{nm}{c}', 'OUTPUT', kd)
     g = Graph(ng)
     gi, go = g.node('NodeGroupInput'), g.node('NodeGroupOutput')
-    U, V = gi.outputs['U'], gi.outputs['V']
+    P_in = gi.outputs['Position']
+    U, V, _z = g.separate_xyz(P_in)
     k = g.mul(gi.outputs['Inverse Size'], 2.0 * math.sqrt(3.0))
     su, sv = g.mul(U, k), g.mul(V, k)
     a = g.math('MULTIPLY_ADD', sv, -0.57735027, su)        # skewed onto the triangle grid
@@ -1268,7 +1313,6 @@ def hex_grid_group():
     E = (e0, g.sub(g.sub(1.0, e0), e2), e2)
     hm = g.math('DIVIDE', 1.0, k)                          # a lattice unit in metres
     hv = g.mul(hm, 0.8660254)
-    rot = g.mul(gi.outputs['Rotate'], 2.0 * math.pi)
     for c in range(3):
         ea, eb, ec = E[c], E[(c - 1) % 3], E[(c - 2) % 3]
         vx = g.add(bx, g.math('MULTIPLY_ADD', ea, s, eb))
@@ -1276,45 +1320,92 @@ def hex_grid_group():
         w = g.math('MULTIPLY_ADD', ec, W[2], g.math('MULTIPLY_ADD', eb, W[1], g.mul(ea, W[0])))
         cu = g.mul(g.math('MULTIPLY_ADD', vy, 0.5, vx), hm)
         cv = g.mul(vy, hv)
+        D = g.vmath('SUBTRACT', P_in, g.combine_xyz(cu, cv, 0.0))
         wn = g.node('ShaderNodeTexWhiteNoise', noise_dimensions='3D')
         g.set(wn.inputs['Vector'], g.combine_xyz(vx, vy, gi.outputs['Seed']))
-        r, gg, bb = g.separate_rgb(wn.outputs['Color'])
-        th = g.mul(g.sub(bb, 0.5), rot)
-        sn = g.math('SINE', th)
-        for nm, v in (('DU', g.sub(U, cu)), ('DV', g.sub(V, cv)), ('OU', r), ('OV', gg), ('Cos', g.math('COSINE', th)),
-                      ('Sin', sn), ('NSin', g.mul(sn, -1.0)), ('W', w)):
-            g.set(go.inputs[f'{nm}{c}'], v)
+        g.set(go.inputs[f'O{c}'], wn.outputs['Color'])     # (its third channel rides along: an image read takes x, y)
+        g.set(go.inputs[f'W{c}'], w)
+        if not rotate:
+            g.set(go.inputs[f'RD{c}'], D)
+            continue
+        # the turn: u = du cos - dv sin, v = du sin + dv cos, as a dot and a cross product with (cos, -sin, 0)
+        th = g.math('MULTIPLY_ADD', g.separate_rgb(wn.outputs['Color'])[2], 2.0 * math.pi, -math.pi)
+        cs, sn = g.math('COSINE', th), g.math('SINE', th)
+        csn = g.combine_xyz(cs, g.mul(sn, -1.0), 0.0)
+        g.set(go.inputs[f'RD{c}'], g.combine_xyz(g.vmath('DOT_PRODUCT', D, csn),
+                                                 g.separate_xyz(g.vmath('CROSS_PRODUCT', csn, D))[2], 0.0))
+        g.set(go.inputs[f'CS{c}'], g.combine_xyz(cs, sn, 0.0))
     return ng
 
 
-def _layer_group(L, S, i, opt, box, hexed):
+def _vmadd(g, a, b, c):
+    """a x b + c on vectors (each a socket or a constant)."""
+    n = g.node('ShaderNodeVectorMath', operation='MULTIPLY_ADD')
+    g.set(n.inputs[0], a)
+    g.set(n.inputs[1], b)
+    g.set(n.inputs[2], c)
+    return n.outputs[0]
+
+
+def _hex_plan(layers, hexed, opt=None):
+    """Per layer (planar lattice, turned, sector lattice, turned): its hex lattices in metres, 0 for one read.
+
+    The planar lattice is hex_m (a layer's key, else the material option), by default hex_class(tile): Mikkelsen's
+    scaling, a hexagon about 0.29 hex_m across showing 0.2 to 0.4 of the tile's width, turned at random (hex_rotate
+    False: offsets only). On steep faces rock is directional (beds lie flat, stains and cracks run down the dip) and
+    structured at the tile's scale: thirds of a 12 m cliff scan turned at random read as confetti on the canyon's
+    walls (11-14). So the sector reads' lattice is steep_hex_m, by default STEEP_HEX x the class of the material's
+    largest box tile (hexagons about half that tile across), not turned unless steep_rotate is set, for the box
+    layers whose tile is at least steep_hex_share (STEEP_HEX_SHARE) of the largest: the cliff layers, which cover
+    the faces over 47 degrees. A smaller box tile (talus, scree, slickrock under a cliff layer) reads each sector
+    frame once: the sector reads were most of the compile (the canyon's three box layers, 11-18). Layers with the
+    same lattice share one hex grid."""
+    opt = opt or {}
+
+    def pick(L, key, default):
+        v = L.get(key) if L.get(key) is not None else opt.get(key)
+        return default if v is None else v
+    box_tiles = [float(L['tile_m']) for L in layers if L['projection'] == 'box']
+    steep = STEEP_HEX * hex_class(max(box_tiles)) if box_tiles else 0.0
+    share = float(opt.get('steep_hex_share', STEEP_HEX_SHARE) or 0.0)
+    out = []
+    for L in layers:
+        ph = float(pick(L, 'hex_m', hex_class(L['tile_m'])))
+        big = not box_tiles or float(L['tile_m']) >= share * max(box_tiles)
+        sh = float(pick(L, 'steep_hex_m', steep if big else 0.0))
+        if not hexed:
+            ph = sh = 0.0
+        if L['projection'] != 'box':
+            sh = 0.0
+        out.append((max(ph, 0.0), bool(pick(L, 'hex_rotate', True)), max(sh, 0.0), bool(pick(L, 'steep_rotate', False))))
+    return out
+
+
+def _layer_group(L, S, i, opt, box, plan):
     """One layer's scan reads as a node group (eido_layer_<hash>, shared by materials that read the same scan the same
     way). Out: Color (the scan's albedo), Height (its normalised height), Soft Height (the same reads' heights by
     their plain weights: continuous where the sharpened blend steps from one hexagon's read to the next, so a layer
     edge blended on it does not run along the hexagons), NX, NY (its normal in the world-XY tangent frame: the
     planar reads), Pert (box layers: the world-space tilt of the sector reads' normals), Rough, AO.
 
-    Planar reads: world (x, y) / tile, hex-tiled (hexed) or one read; the albedo 'Auto' filtered (Cubic near, Linear
-    far). Box layers (in: U0, V0, U1, V1 the two sector slots' frame coordinates, W0 the even slot's weight, T0, B0,
-    T1, B1 their tangent frames on the surface, Steep): planar on gentle ground and the two sector slots on steep
-    faces, each slot hex-tiled in its own frame and mipmapped Linear; the slots and then planar against steep are
-    height blended (a_i = w_i + h_i / 2, kept within 0.2 of the tallest), so a read with weight 0 counts for nothing
-    and the switch follows the scan's own features rather than ghosting two layouts.
-
-    The hex lattice: hex_m (default the tile) is Mikkelsen's scaling, a hexagon about 0.29 hex_m across, each
-    showing a third of the tile's width, turned at random (hex_rotate False: offsets only). On steep faces rock is
-    directional (beds lie flat, stains and cracks run down the dip) and structured at the tile's scale: thirds of a
-    12 m cliff scan turned at random read as confetti on the canyon's walls (11-14). So the sector reads take
-    steep_hex_m (default STEEP_HEX x the planar hex_m: hexagons about 0.58 of the tile) and are not turned unless
-    steep_rotate is set."""
+    plan: the layer's (planar lattice, turned, sector lattice, turned) of _hex_plan. A hex-tiled frame takes a hex
+    grid's outputs as inputs (planar: P RD<c>, P O<c>, P W<c> and, turned, P CS<c>, for c = 0, 1, 2; the sector
+    slots s = 0, 1: S<s> RD<c>, ...), so one grid serves every layer on its lattice; a frame with lattice 0 is read
+    once. Planar reads: world (x, y) / tile, the albedo 'Auto' filtered (Cubic near, Linear far). Box layers (in:
+    S0, S1 the two sector slots' frame coordinates (u, v, 0), W0 the even slot's weight, T0, B0, T1, B1 their
+    tangent frames on the surface, Steep): planar on gentle ground and the two sector slots on steep faces, each
+    slot in its own frame and mipmapped Linear; the slots and then planar against steep are height blended
+    (a_i = w_i + h_i / 2, kept within 0.2 of the tallest), so a read with weight 0 counts for nothing and the switch
+    follows the scan's own features rather than ghosting two layouts."""
     tile = float(L['tile_m'])
-    hex_m = float(L.get('hex_m') or tile)
-    rot = 1.0 if L.get('hex_rotate', True) else 0.0
-    s_hex_m = float(L.get('steep_hex_m') or STEEP_HEX * hex_m)
-    s_rot = 1.0 if L.get('steep_rotate', False) else 0.0
+    hex_m, p_rot, s_hex_m, s_rot = plan
     ns = float(L['normal'])
     interp = opt['interpolation']
     dd = [float(v) for v in opt['detail_distance']]
+    # 'Auto' with hex tiling: by default the hex reads are mipmapped Linear and one read at the plain world coordinate
+    # takes over within detail_distance, its albedo Cubic (SURFACING_DESIGN.md 8.1's first lever: three Cubic reads
+    # per planar layer took the canyon's compile to 1.6 x today's); near_hex True reads Cubic in every hex read
+    near_hex = bool(opt.get('near_hex', False))
     # a box layer's far read on steep faces (the palette's far_scale, far_distance, far_contrast, far_bump and
     # macro_mod, as the material without baked data reads them): the scan once more at far_scale x the tile in each
     # sector frame, its brightness modulating the near read and its colour, height and normal taking over across
@@ -1326,23 +1417,28 @@ def _layer_group(L, S, i, opt, box, hexed):
                 mm=float(L.get('macro_mod', opt.get('macro_mod', 0.0)) or 0.0),
                 fc=float(L.get('far_contrast', opt.get('far_contrast', 0.65))),
                 fb=float(opt.get('far_bump', 0.5)), fh=bool(L.get('far_height', True))) if far_k > 1.0 else None
-    sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, rot, s_hex_m, s_rot, ns, interp, dd, bool(box),
-                      bool(hexed), i, wall, HEX_VERSION])
+    sig = json.dumps([S['albedo'].name, S['nrao'].name, tile, hex_m, p_rot, s_hex_m, s_rot, ns, interp, dd,
+                      bool(box), i, wall, near_hex, HEX_VERSION])
     ng, fresh = _new_group('eido_layer_' + hashlib.sha1(sig.encode()).hexdigest()[:12], sig)
     if not fresh:
         return ng
+    for prefix, size, turned in (('P', hex_m, p_rot),) + ((('S0', s_hex_m, s_rot), ('S1', s_hex_m, s_rot))
+                                                           if box else ()):
+        if size > 0.0:
+            for c in range(3):
+                for nm, kd in (('RD', 'v'), ('O', 'v'), ('W', 'f')) + ((('CS', 'v'),) if turned else ()):
+                    _sock(ng, f'{prefix} {nm}{c}', 'INPUT', kd)
     if box:
-        for nm in ('U0', 'V0', 'U1', 'V1', 'W0', 'Steep'):
-            _sock(ng, nm, 'INPUT', 'f')
-        for nm in ('T0', 'B0', 'T1', 'B1'):
+        for nm in ('S0', 'S1', 'T0', 'B0', 'T1', 'B1'):
             _sock(ng, nm, 'INPUT', 'v')
+        for nm in ('W0', 'Steep'):
+            _sock(ng, nm, 'INPUT', 'f')
     _sock(ng, 'Color', 'OUTPUT', 'c')
     for nm in ('Height', 'Soft Height', 'NX', 'NY', 'Rough', 'AO'):
         _sock(ng, nm, 'OUTPUT', 'f')
     _sock(ng, 'Pert', 'OUTPUT', 'v')
     g = Graph(ng)
     gi, go = g.node('NodeGroupInput'), g.node('NodeGroupOutput')
-    x, y, _z = g.separate_xyz(g.node('ShaderNodeTexCoord').outputs['Object'])
     far = g.handover(*dd) if interp == 'Auto' else None
     inv = 1.0 / tile
 
@@ -1355,15 +1451,19 @@ def _layer_group(L, S, i, opt, box, hexed):
         n = _tex(g, S['albedo'], vec, 'Linear' if interp == 'Auto' else interp)
         return n.outputs['Color'], n.outputs['Alpha']
 
-    def one(vec, auto, turn=None):
+    def one(vec, auto, cs=None):
+        """One read of the scan at vec. cs: the (cos, sin, 0) of a turned read, whose normal is turned back into
+        the frame: (nx cos + ny sin, ny cos - nx sin) = (dot(n, cs), cross(cs, n).z)."""
         col, h = albedo(vec, auto)
         nr = _tex(g, S['nrao'], vec, 'Linear')
         r, gg, rough = g.separate_rgb(nr.outputs['Color'])
-        nx = g.math('MULTIPLY_ADD', r, 2.0 * ns, -ns)
-        ny = g.math('MULTIPLY_ADD', gg, 2.0 * ns, -ns)
-        if turn is not None:                              # the read's turn undone: its normal in the frame
-            cs, sn, nsn = turn
-            nx, ny = (g.math('MULTIPLY_ADD', nx, cs, g.mul(ny, sn)), g.math('MULTIPLY_ADD', nx, nsn, g.mul(ny, cs)))
+        if cs is None:
+            nx = g.math('MULTIPLY_ADD', r, 2.0 * ns, -ns)
+            ny = g.math('MULTIPLY_ADD', gg, 2.0 * ns, -ns)
+        else:
+            nv = _vmadd(g, nr.outputs['Color'], (2.0 * ns, 2.0 * ns, 0.0), (-ns, -ns, 0.0))
+            nx = g.vmath('DOT_PRODUCT', nv, cs)
+            ny = g.separate_xyz(g.vmath('CROSS_PRODUCT', cs, nv))[2]
         return dict(col=col, h=h, hs=h, nx=nx, ny=ny, rough=rough, ao=nr.outputs['Alpha'])
 
     def blend(reads, ws):
@@ -1380,23 +1480,21 @@ def _layer_group(L, S, i, opt, box, hexed):
         out['col'] = acc
         return out
 
-    def frame(U, V, seed, auto, size=hex_m, turn=rot):
-        if not hexed:
-            return one(g.combine_xyz(g.mul(U, inv), g.mul(V, inv), 0.0), auto)
-        hx = g.node('ShaderNodeGroup')
-        hx.node_tree = hex_grid_group()
-        for nm, v in (('U', U), ('V', V), ('Inverse Size', 1.0 / size), ('Seed', seed), ('Rotate', turn)):
-            g.set(hx.inputs[nm], v)
-        o = hx.outputs
+    def frame(prefix, pos, auto, size, turned):
+        """A frame's read: one read at pos x (1 / tile) (lattice 0), or the three reads of its hex grid (the group's
+        inputs `prefix` RD<c>, O<c>, W<c>, CS<c>), sharpened by w^7 and their heights; with 'Auto' filtering and
+        near_hex off, the hex reads mipmapped Linear and, within detail_distance, one read at the plain world
+        coordinate cross-faded over them (near_read)."""
+        if size <= 0.0:
+            return one(g.vmath('SCALE', pos, scale=inv), auto)
+        near_one = auto and interp == 'Auto' and not near_hex
+        o = gi.outputs
         reads, ws = [], []
         for c in range(3):
-            du, dv = g.mul(o[f'DU{c}'], inv), g.mul(o[f'DV{c}'], inv)
-            cs, sn, nsn = o[f'Cos{c}'], o[f'Sin{c}'], o[f'NSin{c}']
-            u = g.math('MULTIPLY_ADD', du, cs, g.math('MULTIPLY_ADD', dv, nsn, o[f'OU{c}']))
-            v = g.math('MULTIPLY_ADD', du, sn, g.math('MULTIPLY_ADD', dv, cs, o[f'OV{c}']))
-            r = one(g.combine_xyz(u, v, 0.0), auto, (cs, sn, nsn))
+            r = one(_vmadd(g, o[f'{prefix} RD{c}'], (inv, inv, 0.0), o[f'{prefix} O{c}']), auto and not near_one,
+                    o[f'{prefix} CS{c}'] if turned else None)
             reads.append(r)
-            ws.append(g.mul(g.math('POWER', o[f'W{c}'], HEX_POWER),
+            ws.append(g.mul(g.math('POWER', o[f'{prefix} W{c}'], HEX_POWER),
                             g.math('MULTIPLY_ADD', r['h'], 2.0 * HEX_CONTRAST, 1.0 - HEX_CONTRAST)))
         tot = g.math('DIVIDE', 1.0, g.math('MAXIMUM', g.add(g.add(ws[0], ws[1]), ws[2]), 1e-6))
         out = blend(reads, [g.mul(w, tot) for w in ws])
@@ -1405,11 +1503,26 @@ def _layer_group(L, S, i, opt, box, hexed):
         # stands a little higher or lower on average, and a layer edge blended on that follows the lattice (teeth
         # of 1.5 to 3.5 m along the cliff's edge on the canyon's brink wall): so the soft height's swing about 0.5
         # is scaled down where a hexagon is wider than BLEND_PATCH_M, to the swing a hexagon of that width gives
-        hs = g.math('MULTIPLY_ADD', reads[2]['h'], o['W2'],
-                    g.math('MULTIPLY_ADD', reads[1]['h'], o['W1'], g.mul(reads[0]['h'], o['W0'])))
+        hs = g.math('MULTIPLY_ADD', reads[2]['h'], o[f'{prefix} W2'],
+                    g.math('MULTIPLY_ADD', reads[1]['h'], o[f'{prefix} W1'], g.mul(reads[0]['h'], o[f'{prefix} W0'])))
         f = min(1.0, BLEND_PATCH_M / (HEX_PATCH * size))
         out['hs'] = hs if f >= 1.0 else g.math('MULTIPLY_ADD', g.sub(hs, 0.5), f, 0.5)
+        if near_one:
+            out = near_read(out)
         return out
+
+    def near_read(hexed_out):
+        """Within detail_distance: one read at the plain world coordinate, its albedo Cubic (sharp at grazing angles
+        at the walker's feet) and its normal map Linear at the same coordinate (so colour and shading stay one
+        stone), cross-faded to the hex blend over detail_distance (Linear beyond: still in motion far off)."""
+        P0 = g.vmath('SCALE', g.node('ShaderNodeTexCoord').outputs['Object'], scale=inv)
+        cn = _tex(g, S['albedo'], P0, 'Cubic')
+        nr = _tex(g, S['nrao'], P0, 'Linear')
+        r, gg, rough = g.separate_rgb(nr.outputs['Color'])
+        near = dict(col=cn.outputs['Color'], h=cn.outputs['Alpha'], hs=cn.outputs['Alpha'],
+                    nx=g.math('MULTIPLY_ADD', r, 2.0 * ns, -ns), ny=g.math('MULTIPLY_ADD', gg, 2.0 * ns, -ns),
+                    rough=rough, ao=nr.outputs['Alpha'])
+        return {key: g.mix('RGBA' if key == 'col' else 'FLOAT', far, near[key], v) for key, v in hexed_out.items()}
 
     def height_pair(wa, ha, hb):
         """(a's share, b's share) of two reads by weight wa (b's 1 - wa) and height: a_i = w_i + h_i / 2, kept within
@@ -1421,15 +1534,14 @@ def _layer_group(L, S, i, opt, box, hexed):
         bb = g.math('MAXIMUM', g.sub(ab, ma), 0.0)
         tot = g.math('DIVIDE', 1.0, g.math('MAXIMUM', g.add(ba, bb), 1e-5))
         return g.mul(ba, tot), g.mul(bb, tot)
-    seed = 7.1 + 13.7 * i
-    p = frame(x, y, seed, True)
+    p = frame('P', None if hex_m > 0.0 else g.node('ShaderNodeTexCoord').outputs['Object'], True, hex_m, p_rot)
     if not box:
         for nm, key in (('Color', 'col'), ('Height', 'h'), ('Soft Height', 'hs'), ('NX', 'nx'), ('NY', 'ny'),
                         ('Rough', 'rough'), ('AO', 'ao')):
             g.set(go.inputs[nm], p[key])
         g.set(go.inputs['Pert'], (0.0, 0.0, 0.0))
         return ng
-    sec = [frame(gi.outputs[f'U{s}'], gi.outputs[f'V{s}'], seed + 101.0, False, s_hex_m, s_rot) for s in (0, 1)]
+    sec = [frame(f'S{s}', gi.outputs[f'S{s}'], False, s_hex_m, s_rot) for s in (0, 1)]
     we, wo = height_pair(gi.outputs['W0'], sec[0]['h'], sec[1]['h'])
     sb = blend(sec, [we, wo])
     hs_steep = g.mix('FLOAT', gi.outputs['W0'], sec[1]['hs'], sec[0]['hs'])
@@ -1441,24 +1553,26 @@ def _layer_group(L, S, i, opt, box, hexed):
         pert = t if pert is None else g.vmath('ADD', pert, t)
     if wall is not None:
         # the far read, one per sector slot (a slot's frame changes only where its plain weight is 0), albedo and
-        # height from one image, the normal from the other at far_bump of its slopes
+        # height from one image, the normal from the other at far_bump of its slopes; the two slots height blended
+        # as the near reads are (a plain blend ghosted the two frames' patterns where a face's bearing lies between
+        # sectors: the 0.98 m wall's grid at 300 m, 11-18)
         fd = g.smoothstep(wall['d'][0], wall['d'][1], g.view_distance())
         inv_f = inv / wall['k']
         nsf = ns * wall['fb']
-        fcol = fh = fpert = None
-        for s, w in ((0, gi.outputs['W0']), (1, g.sub(1.0, gi.outputs['W0']))):
-            vec = g.combine_xyz(g.math('MULTIPLY_ADD', gi.outputs[f'U{s}'], inv_f, 0.37 + 0.21 * i + 0.5 * s),
-                                g.math('MULTIPLY_ADD', gi.outputs[f'V{s}'], inv_f, 0.71 - 0.17 * i + 0.3 * s), 0.0)
+        slot = []
+        for s in (0, 1):
+            vec = _vmadd(g, gi.outputs[f'S{s}'], (inv_f, inv_f, 0.0),
+                         (0.37 + 0.21 * i + 0.5 * s, 0.71 - 0.17 * i + 0.3 * s, 0.0))
             a = _tex(g, S['albedo'], vec, 'Linear')
             nr = _tex(g, S['nrao'], vec, 'Linear')
             r, gg, _b = g.separate_rgb(nr.outputs['Color'])
             t = g.vmath('ADD', g.vmath('SCALE', gi.outputs[f'T{s}'], scale=g.math('MULTIPLY_ADD', r, 2.0 * nsf, -nsf)),
                         g.vmath('SCALE', gi.outputs[f'B{s}'], scale=g.math('MULTIPLY_ADD', gg, 2.0 * nsf, -nsf)))
-            c, h, t = g.vmath('SCALE', a.outputs['Color'], scale=w), g.mul(a.outputs['Alpha'], w), \
-                g.vmath('SCALE', t, scale=w)
-            fcol = c if fcol is None else g.vmath('ADD', fcol, c)
-            fh = h if fh is None else g.add(fh, h)
-            fpert = t if fpert is None else g.vmath('ADD', fpert, t)
+            slot.append((a.outputs['Color'], a.outputs['Alpha'], t))
+        fwe, fwo = height_pair(gi.outputs['W0'], slot[0][1], slot[1][1])
+        fcol = g.vmath('ADD', g.vmath('SCALE', slot[0][0], scale=fwe), g.vmath('SCALE', slot[1][0], scale=fwo))
+        fh = g.math('MULTIPLY_ADD', slot[1][1], fwo, g.mul(slot[0][1], fwe))
+        fpert = g.vmath('ADD', g.vmath('SCALE', slot[0][2], scale=fwe), g.vmath('SCALE', slot[1][2], scale=fwo))
         mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
         near = sb['col']
         if wall['mm'] > 0.0:                              # the scan as its own macro variation map
@@ -1495,11 +1609,14 @@ class _Data:
     value(name) (a decoded map: the even and odd slots' reads mixed by the reader's weight), colour(family) (C or P,
     linear), the field normal and the macro normal (the field normal plus the relief below the cell)."""
 
-    def __init__(self, g, sd, names, coords, fp, consts, tile_m=4.0, detail_strength=DETAIL_STRENGTH):
+    def __init__(self, g, sd, names, coords, fp, consts, tile_m=4.0, detail_strength=DETAIL_STRENGTH, cubic=True):
         from ..surface import maps as MP
         self.g, self.sd, self.MP = g, sd, MP
         self.coords = coords
         self.consts = consts
+        self.fp = fp
+        self.cubic = bool(cubic)
+        self._mini = {}
         want = set()
         for n in names:
             for m in (MP.PAIRS.get(n) or (n,)):
@@ -1544,23 +1661,48 @@ class _Data:
 
     # ---- reads
     def fam(self, f):
+        """A family's two slot reads, [(Color, Alpha) even, (Color, Alpha) odd]: mipmapped Linear. The families in
+        CUBIC_FAMILIES (with cubic) are also read bicubic, and that read is taken where a texel is magnified (a
+        pixel spans under CUBIC_PX[0] of it; the mipmapped read past CUBIC_PX[1]): a threshold on a bilinear read
+        of a sharp slope break follows the texel grid in a staircase, which a steep face stretches by 1 / cos(its
+        slope) into teeth down the dip (the canyon's brink wall: a 0.98 m texel, teeth of 1 by 3 m, 11-14). The
+        bicubic read is the same image in the same sampler."""
         if f not in self._fam:
+            g = self.g
             lay = 'Detail' if f in ('D', 'E') else 'Cell'
-            self._fam[f] = [_tex(self.g, self.images[f], self.rd.outputs[f'{lay} {s}'], 'Linear', 'EXTEND')
-                            for s in ('Even', 'Odd')]
+            out = []
+            for s, slot in enumerate(('Even', 'Odd')):
+                lin = _tex(g, self.images[f], self.rd.outputs[f'{lay} {slot}'], 'Linear', 'EXTEND')
+                col, alpha = lin.outputs['Color'], lin.outputs['Alpha']
+                if self.cubic and f in CUBIC_FAMILIES:
+                    cub = _tex(g, self.images[f], self.rd.outputs[f'{lay} {slot}'], 'Cubic', 'EXTEND')
+                    w = self._minified(lay, s)
+                    col = g.mix('RGBA', w, cub.outputs['Color'], col)
+                    alpha = g.mix('FLOAT', w, cub.outputs['Alpha'], alpha)
+                out.append((col, alpha))
+            self._fam[f] = out
         return self._fam[f]
+
+    def _minified(self, lay, s):
+        """0 where a pixel spans under CUBIC_PX[0] of slot s's texel on the layout, 1 past CUBIC_PX[1]."""
+        key = (lay, s)
+        if key not in self._mini:
+            tex = [float(t['texel']) for t in self.sd.reader_constants()['detail' if lay == 'Detail' else 'cell']]
+            r = self.g.math('DIVIDE', self.fp, self.slot_const(tex, s))
+            self._mini[key] = self.g.smoothstep(CUBIC_PX[0], CUBIC_PX[1], r)
+        return self._mini[key]
 
     def chan(self, f, c):
         key = (f, c)
         if key not in self._chan:
             pair = []
-            for n in self.fam(f):
+            for s, (col, alpha) in enumerate(self.fam(f)):
                 if c == 3:
-                    pair.append(n.outputs['Alpha'])
+                    pair.append(alpha)
                 else:
-                    if n.name not in self._sep:
-                        self._sep[n.name] = self.g.separate_rgb(n.outputs['Color'])
-                    pair.append(self._sep[n.name][c])
+                    if (f, s) not in self._sep:
+                        self._sep[(f, s)] = self.g.separate_rgb(col)
+                    pair.append(self._sep[(f, s)][c])
             self._chan[key] = tuple(pair)
         return self._chan[key]
 
@@ -1615,8 +1757,8 @@ class _Data:
         """The linear colour of C or P (the images are sRGB: the GPU hands the shader linear values)."""
         key = ('colour', fam)
         if key not in self._val:
-            e, o = self.fam(fam)
-            self._val[key] = self.g.mix('RGBA', self.w_odd, e.outputs['Color'], o.outputs['Color'])
+            (e, _ea), (o, _oa) = self.fam(fam)
+            self._val[key] = self.g.mix('RGBA', self.w_odd, e, o)
         return self._val[key]
 
     # ---- normals and the derived names
@@ -1796,7 +1938,7 @@ def _sector_frames(g, dat, coords, Nm):
         V = g.math('MULTIPLY_ADD', z, sd_, g.mul(g.math('MULTIPLY_ADD', x, c, g.mul(y, sn)), -cd))
         T = g.combine_xyz(g.mul(sn, -1.0), c, 0.0)
         Tp = g.vmath('NORMALIZE', g.vmath('SUBTRACT', T, g.vmath('SCALE', Nm, scale=g.vmath('DOT_PRODUCT', T, Nm))))
-        out.append(dict(U=U, V=V, T=Tp, B=g.vmath('CROSS_PRODUCT', Nm, Tp)))
+        out.append(dict(P=g.combine_xyz(U, V, 0.0), T=Tp, B=g.vmath('CROSS_PRODUCT', Nm, Tp)))
     out[0]['w'] = w_even
     out[1]['w'] = g.sub(1.0, w_even)
     return out
@@ -1936,20 +2078,43 @@ def _surface_group_data(pal, sd, name, prefer, log):
     strata = None
     if pal.get('strata') and any(L['strata'] for L in layers):
         strata = _Strata(g, comp, pal['strata'], coords, pal['name'])
+    # the hex grids: one per lattice (a frame: planar or a sector slot; a size; turned or not), shared by every
+    # layer read on it (SURFACING_DESIGN.md 8.1: a grid placed per layer was a third of the shader's source)
+    plan = _hex_plan(layers, hexed, opt)
+    grids = {}
+
+    def grid(frame, pos, size, turned):
+        key = (frame, round(float(size), 6), bool(turned))
+        if key not in grids:
+            nd = g.node('ShaderNodeGroup')
+            nd.node_tree = hex_grid_group(turned)
+            g.set(nd.inputs['Position'], pos)
+            nd.inputs['Inverse Size'].default_value = 1.0 / float(size)
+            nd.inputs['Seed'].default_value = 7.1 + 13.7 * len(grids)
+            grids[key] = nd
+        return grids[key]
     per = []
     for i, (L, S) in enumerate(zip(layers, sets)):
         cov = _clamp01(g, comp(P.parse(weights[i])))
         box = L['projection'] == 'box'
         lg = g.node('ShaderNodeGroup')
-        lg.node_tree = _layer_group(L, S, i, opt, box, hexed)
+        lg.node_tree = _layer_group(L, S, i, opt, box, plan[i])
+        p_hex, p_rot, s_hex, s_rot = plan[i]
+        frames = [('P', 'planar', coords, p_hex, p_rot)]
         if box:
+            frames += [(f'S{s}', f'sector {s}', sec[s]['P'], s_hex, s_rot) for s in (0, 1)]
             for s in (0, 1):
-                g.set(lg.inputs[f'U{s}'], sec[s]['U'])
-                g.set(lg.inputs[f'V{s}'], sec[s]['V'])
+                g.set(lg.inputs[f'S{s}'], sec[s]['P'])
                 g.set(lg.inputs[f'T{s}'], sec[s]['T'])
                 g.set(lg.inputs[f'B{s}'], sec[s]['B'])
             g.set(lg.inputs['W0'], sec[0]['w'])
             g.set(lg.inputs['Steep'], steep)
+        for prefix, frame, pos, size, turned in frames:
+            if size > 0.0:
+                gn = grid(frame, pos, size, turned)
+                for c in range(3):
+                    for nm in ('RD', 'O', 'W') + (('CS',) if turned else ()):
+                        g.set(lg.inputs[f'{prefix} {nm}{c}'], gn.outputs[f'{nm}{c}'])
         col, h, hs = lg.outputs['Color'], lg.outputs['Height'], lg.outputs['Soft Height']
         mean_lin = [float(v) for v in S['stats']['mean_albedo_linear']]
         mean = np.maximum(np.array(mean_lin, np.float64), 1e-4)
@@ -2299,10 +2464,11 @@ def _surface_group_data(pal, sd, name, prefer, log):
 
     bsdf = g.node('ShaderNodeBsdfPrincipled')
     bsdf.inputs['Metallic'].default_value = 0.0
+    # each layer's own specular, past D0 as well: the near weights are evaluated there anyway, and the palette's
+    # default in their place (0.5 against the plant layers' 0.08-0.12) lit the far ground with sky reflection, 1.5 L
+    # brighter and bluer than the near material across the hand-off (the canyon's band, 11-18)
     specs = [float(p['L'].get('specular', opt['specular'])) for p in per]
     spec = specs[0] if len(set(specs)) == 1 else wsum(specs)
-    if w_far is not None and not (isinstance(spec, float) and spec == float(opt['specular'])):
-        spec = g.mix('FLOAT', w_far, spec, float(opt['specular']))
     g.set(bsdf.inputs['Specular IOR Level'], spec)
     albedo = g.vmath('MINIMUM', albedo, (0.95, 0.95, 0.95))
     g.set(bsdf.inputs['Base Color'], albedo)
@@ -2379,7 +2545,7 @@ def far_group(palette, data, name='eido_terrain_far', prefer='2k', log=print):
     fp = g.math('DIVIDE', g.mul(g.view_distance(), pix), g.math('MAXIMUM', ndv, 0.05))
     tiles = sorted(float(L['tile_m']) for L in pal['layers'])
     dat = _Data(g, data, set(), coords, fp, consts, tile_m=tiles[len(tiles) // 2],
-                detail_strength=float(opt.get('detail_strength', DETAIL_STRENGTH)))
+                detail_strength=float(opt.get('detail_strength', DETAIL_STRENGTH)), cubic=False)
     if not dat.has_family('C'):
         raise ValueError('far_group: the surface data has no far colour (bake it with a palette)')
     normal = dat.n_macro()
@@ -2899,16 +3065,19 @@ def _group_material(ng, name):
     return mat
 
 
-def _nodes_in(ng, seen=None):
-    """Nodes of a group with its subgroups expanded (each distinct subgroup counted once)."""
-    seen = set() if seen is None else seen
-    n = 0
-    for nd in ng.nodes:
-        n += 1
-        if nd.bl_idname == 'ShaderNodeGroup' and nd.node_tree is not None and nd.node_tree.name not in seen:
-            seen.add(nd.node_tree.name)
-            n += _nodes_in(nd.node_tree, seen)
-    return n
+def _nodes_in(ng, _memo=None):
+    """Nodes of a group with its subgroups expanded, every instance counted: what the shader is compiled from (a
+    group placed twelve times is twelve copies of its nodes in the shader's source)."""
+    memo = {} if _memo is None else _memo
+    if ng.name not in memo:
+        n = 0
+        for nd in ng.nodes:
+            if nd.bl_idname == 'ShaderNodeGroup' and nd.node_tree is not None:
+                n += _nodes_in(nd.node_tree, memo)
+            else:
+                n += 1
+        memo[ng.name] = n
+    return memo[ng.name]
 
 
 def surface_material(palette='auto', recipe=None, strata=None, options=None, name='terrain_ground', prefer='2k',
@@ -2924,10 +3093,17 @@ def surface_material(palette='auto', recipe=None, strata=None, options=None, nam
               (the landscape palettes' 'rotate' reads as hex; 'offset' keeps one read per frame), detail_strength
               (the relief below the cell, default 0.5), far_m (D0, metres; default where a main-level texel spans
               2.5 pixels), overlay (False: no overlay before the height blend), dusting dict(colour, amount,
-              slope_deg, where), debug 'level' (the level each pixel reads); a layer's hex_m (default its tile),
-              hex_rotate (False for directional scans), steep_hex_m and steep_rotate (the sector reads of a box
-              layer: by default twice hex_m and not turned), overlay dict(height, crest, crest_fine, crease),
-              provenance dict(src, down, pale), patina and fresh_gain (multipliers on rock by `fresh`)
+              slope_deg, where), debug 'level' (the level each pixel reads); hex_m (a planar read's hex lattice,
+              metres: by default the layer's tile snapped to 2.5 x 2^n, hex_class; 0: one read), hex_rotate
+              (False for directional scans), steep_hex_m and steep_rotate (the sector reads of box layers: by
+              default one lattice for all of them, twice the class of the largest box tile, not turned; 0: one
+              read per sector frame), each a material option or a layer's own key; steep_hex_share (box layers
+              with a tile under this share of the largest read each sector frame once, default 0.5; 0: every box
+              layer hex-tiled in its sector frames); near_hex (True: every hex read
+              of a planar frame 'Auto' filtered; by default one Cubic read at the plain coordinate within
+              detail_distance, design 8.1's first lever); a layer's overlay
+              dict(height, crest, crest_fine, crease), provenance dict(src, down, pale), patina and fresh_gain
+              (multipliers on rock by `fresh`)
     constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m,
               pixel_angle, ...)
     data      a SurfaceData (terrain/surface.bake_surface) of the terrain the material is for: the per-texel
@@ -3128,6 +3304,6 @@ def missing_masks(obj, palette_or_names):
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
            'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
            'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'set_far_distance', 'reader_group',
-           'hex_grid_group',
+           'hex_grid_group', 'hex_class',
            'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
            'DEBUG_COLOURS']
