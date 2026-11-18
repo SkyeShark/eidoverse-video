@@ -5,15 +5,17 @@ the view, 960 x 540, 16 samples, exposure -0.5) through the per-texel material w
 
   1. the terrain built in clay (make_terrain), its rocks scattered as make_terrain scatters them;
   2. its surface data baked (surface.bake_surface, cached);
-  3. the plants planned on it at the camera (plants.plan_plants(data=)), their cover rasters added to the data
+  3. the plants planned on it at the camera (plants.plan_plants(data=); an eye view's camera stands where a person
+     can stand, no plant's foot within STAND_M of it and no crown over it), their cover rasters added to the data
      (SurfaceData.add_maps(spots.cover_extra()): canopy, canopy_expected, canopy_far, shrubs, shrubs_far), so the
      material's forest, scrub and crowns read the one rule the plants were placed by (design 4.7);
   4. the per-texel material (surfacing.apply_surface(data=, cameras=[camera])), which reads those rasters;
   5. the plants instanced for a still shot (plant_instances.instance_plants: levels picked per frame by the camera).
 A fresh file per view: a finished view's memory stays with the process. An eye view plants around its camera, an
 aerial around the ground it looks at. A plan and its cover rasters are kept in the terrain's cache entry
-(plants.cache_base), so a view rendered again re-plans nothing. A view whose judge camera frames no plants is
-reframed (REFRAME: where its aim lands instead, and why; the record says so).
+(plants.cache_base), so a view rendered again re-plans nothing. A view whose judge camera frames no plants, or sees
+nothing but them where its photograph looks over them, is reframed (REFRAME: where its aim lands instead, or how far
+its camera walks toward the aim, and why; the record says so).
 
     bash run_blender.sh blender/tests/terrain/plants/render_plants.py [--views a,b] [--set acceptance|recipes|far]
         [--tag t] [--once] [--samples 16] [--no-rocks] [--no-plants] [--seed 0] [--grow] [--cost] [--bare]
@@ -78,14 +80,24 @@ SETS = {
     # forests from the air: the far canopy and the hand-off from the instances to it
     'far': [('caldera', 'aerial_far'), ('alpine_valley', 'aerial_axis'), ('fluvial_range', 'aerial_range_front')],
 }
-# views whose judge camera frames no plants: where their aim lands instead ((x, y) from the left, from the top), why
+# views whose judge camera frames no plants, or only plants: where their aim lands instead (frame: (x, y) from the
+# left, from the top), how far the camera walks toward the aim along the ground (forward_m; the terrain's hero
+# levels follow it), and why
 REFRAME = {
-    ('dunes', 'interdune_floor'): ((0.5, 0.15), 'the judge\'s camera aims 13.7 degrees up at the dune face, the floor '
-                                                'and its grass below the frame; namib_star_dunes_02 looks along the '
-                                                'floor with the dune behind: pitched to 4.7 degrees'),
+    ('dunes', 'interdune_floor'): dict(frame=(0.5, 0.15),
+                                       why='the judge\'s camera aims 13.7 degrees up at the dune face, the floor and '
+                                           'its grass below the frame; namib_star_dunes_02 looks along the floor with '
+                                           'the dune behind: pitched to 4.7 degrees'),
+    ('caldera', 'rim_east'): dict(forward_m=335.0,
+                                  why='the judge\'s camera stands on the bench inside the rim, 335 m back from where '
+                                      'the caldera wall steepens past 25 degrees and its rock begins; the forest on '
+                                      'the bench and the rounded shoulder hides the lake from there. crater_lake_01 '
+                                      'stands at the overlook wall on the edge: walked forward to it'),
 }
 EXPOSURE = -0.5
 W, H = 960, 540
+STAND_M = 1.5        # an eye view's camera: no plant's foot within this of it, nor any crown over it (where its
+#                      photographer stands)
 
 
 def args():
@@ -314,7 +326,13 @@ def main():
             params = plan[recipe].get('params')
             _R, dfl = recipe_defaults(recipe, params)
             c0 = dfl.get('centre', (0.0, 0.0))
-            focus = [(c0[0] + v['cam'][0], c0[1] + v['cam'][1])] if v.get('focus') else None
+            rf = REFRAME.get((recipe, vname)) or {}
+            vc = v['cam']
+            if rf.get('forward_m'):                      # the camera walks toward the aim; the hero levels with it
+                ux, uy = v['aim'][0] - vc[0], v['aim'][1] - vc[1]
+                n = math.hypot(ux, uy)
+                vc = [vc[0] + float(rf['forward_m']) * ux / n, vc[1] + float(rf['forward_m']) * uy / n]
+            focus = [(c0[0] + vc[0], c0[1] + vc[1])] if v.get('focus') else None
             t = A.make_terrain(recipe, size=size, seed=1, params=params, quality='film', palette=None, dress=False,
                                focus=focus, name=f'{recipe}_plants')
             tb = time.time() - t0
@@ -323,7 +341,7 @@ def main():
             if a['rocks']:
                 rocks(t, pal, f'{recipe}_plants')
             cx, cy = t.main.x0 + t.main.side / 2.0, t.main.y0 + t.main.side / 2.0
-            ex, ey = v['cam'][0] + cx, v['cam'][1] + cy
+            ex, ey = vc[0] + cx, vc[1] + cy
             kind, dz = v['cam_z']
             ground = float(t.height_at(ex, ey))
             ez = ground + float(dz) if kind == 'ground' else float(dz)
@@ -336,7 +354,7 @@ def main():
                 cam.data.clip_start, cam.data.clip_end = 0.1, 4.0 * t.levels[0].side + 40000.0
             else:
                 cam.data.clip_start, cam.data.clip_end = max(1.0, 0.01 * dist), 4.0 * t.levels[0].side + 40000.0
-            frame, why_reframed = REFRAME.get((recipe, vname), (v.get('frame', (0.5, 0.5)), None))
+            frame, why_reframed = rf.get('frame', v.get('frame', (0.5, 0.5))), rf.get('why')
             heading, pitch = aim_camera(cam, (ex, ey, ez), (tx, ty, tz), frame, v['lens'])
             r = dict(camera=[round(ex, 1), round(ey, 1), round(ez, 1)], aim=[round(tx, 1), round(ty, 1), round(tz, 1)],
                      heading_deg=round(heading, 1), pitch_deg=round(pitch, 2), lens=v['lens'], kind=v.get('kind'),
@@ -349,18 +367,34 @@ def main():
                 save_record(rec_path, key + tag, r)
             stage('terrain')
             ts = time.time()
-            sd = SU.bake_surface(t, palette=pal)
+            try:
+                sd = SU.bake_surface(t, palette=pal)
+            except (ValueError, KeyError) as e:          # the palette's colours could not be baked: the maps alone
+                print(f'[render_plants] {key}: the palette bake failed ({type(e).__name__}: {e}); the maps without '
+                      f'the far colour', flush=True)
+                r['palette_bake_failed'] = f'{type(e).__name__}: {e}'
+                sd = SU.bake_surface(t, palette=None)
             r['surface_s'] = round(time.time() - ts, 1)
             made = {}
             tp = time.time()
-            # an eye view plants around its camera; an aerial around the ground it looks at
-            pf = (ex, ey) if ez - ground < 50.0 else (tx, ty)
+            # an eye view plants around its camera; an aerial around the ground it looks at. An eye view's camera
+            # is where its photographer stands, on ground a person can stand on: no plant's foot within STAND_M of
+            # it and no crown over it (the camera stood inside a chaparral bush at the San Gabriel road, its
+            # flowers filling the frame, and under a pine on the cinder plain, 11-18), with the terrain's flats kept
+            # clear as plan_plants keeps them
+            eye = ez - ground < 50.0
+            pf = (ex, ey) if eye else (tx, ty)
             r['plant_focus'] = [round(pf[0], 1), round(pf[1], 1)]
+            clear = None
+            if eye:
+                clear = [(fl['at'][0], fl['at'][1], float(fl.get('radius', 0.0)))
+                         for fl in (getattr(t, 'flats', None) or []) if fl.get('radius')] + [(ex, ey, STAND_M, 'crown')]
+                r['stand_m'] = STAND_M
             if a['plants']:
                 # the plan and its cover rasters are kept in the terrain's cache entry (plants.cache_base: keyed by
-                # the ecotope, the seed, the focus, the bake and the plant code), so a view rendered again re-plans
-                # nothing
-                base = PL.cache_base(t, 'auto', focus=pf, seed=a['seed'], data=sd)
+                # the ecotope, the seed, the focus, the clear discs, the bake and the plant code), so a view
+                # rendered again re-plans nothing
+                base = PL.cache_base(t, 'auto', focus=pf, seed=a['seed'], data=sd, exclude=clear)
                 spots = None
                 if base and os.path.exists(base + '.plants.json'):
                     try:
@@ -369,7 +403,7 @@ def main():
                     except (OSError, ValueError, KeyError) as e:
                         print(f'[render_plants] the cached plan does not load ({e}): planning again', flush=True)
                 if spots is None:
-                    spots = PL.plan_plants(t, 'auto', focus=pf, seed=a['seed'], data=sd)
+                    spots = PL.plan_plants(t, 'auto', focus=pf, seed=a['seed'], data=sd, exclude=clear)
                     if base:
                         spots.save(base)
                 r['plan_s'] = round(time.time() - tp, 2)

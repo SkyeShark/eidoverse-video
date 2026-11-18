@@ -182,11 +182,15 @@ SITE = ('(1 - smoothstep(32, 48, slope_20m)) * (0.35 + 0.65*wetness) * smoothste
 # SeedThree has no spruce, hemlock, chamise or manzanita. What stands in, and how it is dialled on our side:
 
 # Norway spruce and the subalpine firs and hemlocks: the Douglas fir with short first-level branches (a crown about
-# a quarter of its height across, where the species' own is three quarters) that droop a little below the horizontal
-_NARROW_CONIFER = dict(height=30, paramOverrides=dict(length={1: 0.14}, downAngle={1: 98}))
+# a quarter of its height across, where the species' own is three quarters) that droop a little below the horizontal.
+# Its tone: a conifer canopy reflects about half what a meadow does, and the dark spruce slopes of lauterbrunnen_01
+# and _15 read far darker than their meadows; the instanced firs rendered 1.25 times as bright as the render's own
+# meadow at Schynige (11-18), so their albedo is taken down to about 0.45
+_NARROW_CONIFER = dict(height=30, paramOverrides=dict(length={1: 0.14}, downAngle={1: 98}), eidoGain=(0.45, 0.48, 0.45))
 _SPRUCE = ('seedthree', 'douglasFir', _NARROW_CONIFER, [11, 23])
-# a broadleaf of the valley floors and stream sides (sycamore maple, ash and alder at Lauterbrunnen): the red maple
-_MAPLE = ('seedthree', 'redMaple', dict(), [5, 17])
+# a broadleaf of the valley floors and stream sides (sycamore maple, ash and alder at Lauterbrunnen): the red maple,
+# its light crowns toned down toward the dark broadleaf line of lauterbrunnen_01
+_MAPLE = ('seedthree', 'redMaple', dict(eidoGain=(0.6, 0.65, 0.6)), [5, 17])
 # a broadleaf's card level (SeedThree's LOD2) is bare branches with a few leaf cards beside its full crown, a winter
 # tree in summer, and a stand of them read as an orchard on bare grey trunks; the pine's is as thin. Measured with
 # match_billboards.py (11-18), the card level covers 0.62-0.63 of the full level's area for the red maple and the
@@ -387,12 +391,13 @@ ECOTOPES = {
     'farmland': dict(
         title='Farmland: grass on the verges and pastures near the camera (the crops are the material\'s fields)',
         species=[
+            # (on the steep ground the plough leaves, not on the fields: a numpy cell noise does not lay out the
+            # material's fields, whose noise is the shader's, and the sward stood on a ploughed field, 11-18)
             dict(name='field grass', kind='grass', source=('flora', 'grass', dict(height=0.3, color='green',
                                                                                 seeds=[7, 11])),
                  size_m=(0.2, 0.38), core_m=0.0, max_radius_m=40.0, lod_m_per_m=0.008,
                  cluster=dict(parents_per_ha=22000.0, mu=8.0, sigma_m=0.6), range_per_ha=(40000.0, 176000.0),
-                 density='17 * smoothstep(0.15, 0.45, site) * smoothstep(0.26, 0.3, cells(500, 1, 14)) '
-                         '* smoothstep(0.645, 0.6, cells(500, 1, 14))'),
+                 density='17 * smoothstep(0.15, 0.45, site) * smoothstep(18, 26, slope_20m)'),
         ]),
     'meadow': dict(
         title='Meadow: grass and flowers',
@@ -456,6 +461,44 @@ RECIPE_ECOTOPES = {
                           density='0.009 * smoothstep(0.3, 0.7, insolation + 0.3*convex_20m) '
                                   '* smoothstep(42, 20, slope_20m)'),
         }),
+    # the impact crater's plain is a dry grassland, not the plateau's blackbrush shrubland (meteor_crater_02: red soil
+    # with straw tufts a few metres apart and a low shrub here and there; with the desert's own species, 11-18, a
+    # thousand shrubs a hectare and green grass covered it): straw grass, sparse low shrubs, no sagebrush or yucca
+    'impact_crater': dict(
+        title='Crater plain: a dry grassland of scattered straw tufts and a few low shrubs on red soil',
+        species={
+            'sagebrush': None, 'yucca': None,
+            'blackbrush': dict(size_m=(0.2, 0.6), cluster=dict(parents_per_ha=30.0, mu=4.0, sigma_m=6.0),
+                               range_per_ha=(20.0, 120.0),
+                               density='0.012 * smoothstep(30, 16, slope_20m) * smoothstep(0.3, 0.6, site '
+                                       '+ 0.15*concave_20m - 0.2*convex_20m + 0.2*(fbm(60, 1) - 0.5)) '
+                                       '* smoothstep(0.93, 0.85, flow) * (1 - 0.75*smoothstep(1.0, 6.0, deposit))'),
+            'bunchgrass': dict(source=('flora', 'galleta_dry', dict(_DRY, seeds=[7, 13])), size_m=(0.2, 0.5),
+                               cluster=dict(parents_per_ha=300.0, mu=8.0, sigma_m=1.6), range_per_ha=(600.0, 2400.0),
+                               density='0.2 * smoothstep(28, 14, slope_20m) * smoothstep(0.2, 0.5, site) '
+                                       '* smoothstep(0.95, 0.88, flow)'),
+        }),
+    # Monument Valley's floor is a sand sheet with low shrubs scattered over it (mv_04): the plateau's species keep
+    # off sand thicker than their roots, which left the floor bare beyond the camera's feet (11-18). On the deep sand
+    # grow sand sage (the sagebrush), narrowleaf yucca here and there, and ricegrass; blackbrush keeps to the
+    # shallow soils. The yuccas at the desert's own density stood black among them, so they are a third as many
+    'mesas_buttes': dict(
+        title='Sand floor: sand sage and straw tufts scattered over the sand, a few yuccas',
+        species={
+            'blackbrush': None,
+            'sagebrush': dict(size_m=(0.3, 0.9), on=('sand',), cluster=dict(parents_per_ha=40.0, mu=4.0,
+                                                                            sigma_m=6.0),
+                              range_per_ha=(30.0, 160.0),
+                              density='0.016 * smoothstep(24, 10, slope_20m) * smoothstep(0.93, 0.85, flow) '
+                                      '* (0.4 + 0.6*smoothstep(-0.3, 0.3, concave_20m - convex_20m '
+                                      '+ 0.3*(fbm(80, 3) - 0.5)))'),
+            'bunchgrass': dict(source=('flora', 'galleta_dry', dict(_DRY, seeds=[7, 13])), on=('sand',),
+                               size_m=(0.2, 0.5), cluster=dict(parents_per_ha=200.0, mu=8.0, sigma_m=1.6),
+                               range_per_ha=(400.0, 1600.0),
+                               density='0.12 * smoothstep(20, 8, slope_20m) * smoothstep(0.93, 0.85, flow)'),
+            'yucca': dict(on=('sand',), range_per_ha=(2.0, 20.0),
+                          density='0.002 * smoothstep(30, 12, slope_20m) * smoothstep(0.2, 0.5, site)'),
+        }),
     # a cinder-cone field on a dry plateau (SP Crater): pines scattered on the plain, none on the cones' loose
     # cinders, straw grass between them
     'cinder_cones': dict(
@@ -467,12 +510,29 @@ RECIPE_ECOTOPES = {
                          cluster=dict(parents_per_ha=14.0, mu=3.0, sigma_m=14.0), range_per_ha=(2.0, 42.0)),
             'ash grass': dict(density='0.7 * smoothstep(0.1, 0.36, site) * smoothstep(22, 12, slope_20m)'),
         }),
+    # Crater Lake's rim stands 100-300 m under the treeline: whitebark pine and mountain hemlock parkland, and the
+    # collapse walls below it are talus and cliff with a tree here and there (crater_lake_01: two trees at the
+    # overlook). With the flanks' full stand the rim camera saw 28 firs and 55 pines from 25 to 100 m in front of the
+    # lake (11-18): here the stands open from 450 m under the treeline, and thin out on the walls from 24-26 degrees
+    'caldera': dict(
+        title='Caldera: conifer forest on the outer flanks, parkland toward the rim, a tree here and there on the '
+              'walls',
+        species={
+            'fir': dict(density='0.06 * smoothstep(0.3, 0.52, site + 0.1*concave_20m + 0.08*northness_20m) '
+                                '* smoothstep(0.5, 6.0, slope_20m) * smoothstep(38, 26, slope_20m) '
+                                '* (1 - 0.8*smoothstep(0.2, 0.6, lava)) '
+                                '* smoothstep(treeline_m + 80, treeline_m - 450, altitude + 100*northness_20m)'),
+            'pine': dict(density='0.016 * smoothstep(0.2, 0.45, site) '
+                                 '* smoothstep(0.25, 0.6, insolation + 0.3*convex_20m) * smoothstep(36, 24, slope_20m) '
+                                 '* smoothstep(treeline_m + 150, treeline_m - 450, altitude + 100*northness_20m)'),
+        }),
 }
 
 # a real place's ecotope (the real_place recipe's DEM): the palette's, or a recipe's, with the same kind of merge
 PLACE_ECOTOPES = {
     'san_gabriel_mountains': dict(base='fluvial_range'),
     'sp_crater': dict(base='cinder_cones'),
+    'meteor_crater': dict(base='impact_crater'),
 }
 
 

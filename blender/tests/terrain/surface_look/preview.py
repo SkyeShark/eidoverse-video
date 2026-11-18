@@ -193,11 +193,14 @@ def strata_colour(P, st, zs, X, Y, seed=0):
 
 
 def scan_mean(P, set_name):
-    """A scan's mean linear albedo from its packed stats (the surface-set cache), or a mid grey-brown."""
+    """A scan's mean linear albedo from its packed stats (the surface-set cache: <set>_<resolution>_v<n>/stats.json),
+    or a mid grey-brown."""
     d = os.path.join(BLENDER_DIR, '..', 'eidoverse', 'assets', 'cache', 'terrain_surface_sets')
+    want = str(set_name).lower()
     try:
-        for nm in os.listdir(d):
-            if nm.lower().startswith(str(set_name).lower() + '_v'):
+        for nm in sorted(os.listdir(d)):
+            head, _sep, ver = nm.lower().rpartition('_v')
+            if ver.isdigit() and (head == want or head.rsplit('_', 1)[0] == want):
                 return np.array(json.load(open(os.path.join(d, nm, 'stats.json')))['mean_albedo_linear'])
     except OSError:
         pass
