@@ -8,14 +8,22 @@
 //              grow_levels, values, shared) equal to the one Blender's op received
 //   inputs     the fields each op receives against its `before` dump: the inheritance (Catmull-Rom and bilinear x2),
 //              the pins (pin_w bit for bit, pin_h, the inflow A_in and qs_in), the band pull after a legacy op, the
-//              where blend; grade max(1e-5 of the field's range, 16 float32 steps of its largest value); the inflow
-//              at the drainage area's 1e-4 of its range: it is made from the parent's routed area and surface, which
-//              carry the route's own difference (tests/hydro/hydro_test.mjs holds inflow itself to 1e-6 on Blender's
-//              inputs)
-//   end stages the fields before and after lakes (h, water, deposit and the fill bit for bit, the lake count), the
-//              routing surface (within 3 float32 steps of Blender's float32 surface: 2 from numpy's float64, C11, and
-//              Blender's own rounding), the area's start and inflow, the drainage area after convergence (1e-4 of its
-//              range) and its iterations (equal, or one test interval apart)
+//              where blend; grade max(1e-5 of the field's range, 16 float32 steps of its largest value); the drainage
+//              area and what is made from it (the child's inherited A, A_in, qs_in) at the area's grade below. An op
+//              of Blender's that replaced ctx.pins for the rest of its pass (river_path's channel, the volcanoes'
+//              own) hands the next op Blender's pins, as the op itself would in a port run
+//   the area   the drainage area turns on an ulp of the routing surface wherever the ground is flat (Blender against
+//              itself: route_area's output moves by up to 72 % of its range after one dispatch on impact_crater's
+//              floor runs), so it is graded at max(1e-4, 1.25 x the largest change the floor's five perturbed runs
+//              show in route_area's output: the run's snapshot floors, plan 5.3), where tests/hydro/hydro_test.mjs holds
+//              route_to_convergence and inflow to 1.5e-6 and 1e-6 on Blender's own inputs
+//   end stages the fields before and after lakes (h, water, deposit and the fill bit for bit with the lake count,
+//              when the fields before were Blender's bit for bit; else at the inputs' grade), the
+//              routing surface (the same receiver tree: no cell off Blender's float32 surface by half a step of eps,
+//              where a different path moves it by whole steps; its float32 steps from Blender's reported: C11's 2 ulp of
+//              numpy's float64 is tests/hydro/hydro_test.mjs's grade on Blender's own inputs, while here the input
+//              already carries the inheritance's and the band pull's last bits), the area's start and inflow, the
+//              drainage area after convergence (1e-4 of its range) and its iterations (equal, or one test apart)
 //   dispatches the runner's own dispatch log (op '<runner>': the end stages' flow_weights and route_area) against
 //              Blender's (tests/parity/dispatch_parity.mjs), level by level
 //   seams      every child against its parent (the Blender fluvial package's judge_fields.seams): |dh| on the edge
@@ -119,14 +127,34 @@ const summary = (cmp) => Object.entries(cmp.fields).filter(([, f]) => !f.exact).
 
 // ------------------------------------------------------------------------------------------------ one run ---
 
+// the drainage area's grade for a run: max(1e-4, 1.25 x the largest change of route_area's output in its floor)
+function areaGrade(run) {
+    let fl = 0;
+    for (const [key, rec] of Object.entries(run.snapFloor ?? {})) if (key.includes('route_area') && rec.outA) fl = Math.max(fl, rec.outA[0] ?? 0);
+    return Math.max(1e-4, 1.25 * fl);
+}
+// the routing surface's grade where its input is not Blender's to the bit: 1.25 x the largest change of route_area's
+// input st (the routing surface) in the floor's perturbed runs
+function surfaceGrade(run) {
+    let fl = 0;
+    for (const [key, rec] of Object.entries(run.snapFloor ?? {})) if (key.includes('route_area') && rec.in__st) fl = Math.max(fl, rec.in__st[0] ?? 0);
+    return 1.25 * fl;
+}
+const AREA = ['A', 'A_in', 'qs_in'];
+
 async function runOnce(dir, recipeName, logDir, cache = false) {
     const run = await RP.loadRun(dir);
     const res = BOPS.recipes[recipeName];
     const stages = res.stages.map((d) => Stage.fromDict(d));
     const plan = run.levels;
     const n0 = (i) => plan[i].n;
-    const rec = { recipe: recipeName, dir, calls: [], ends: [], problems: [] };
+    const kA = areaGrade(run), kS = surfaceGrade(run);
+    const areaK = Object.fromEntries(AREA.map((k) => [k, kA]));
+    const rec = { recipe: recipeName, dir, calls: [], ends: [], problems: [], area_grade: kA, surface_grade: kS };
+    const lastCall = {};                      // level -> its last op call (did the runner change its result after it?)
     const problem = (m) => { if (rec.problems.length < 60) rec.problems.push(m); };
+    const owned = [];                         // pins of Blender's handed to the next op: the test's to release
+    let lakesExactBefore = {};
     let next = 0;
     const fns = new Map();
     const replay = async (name, fields, level, params, seed, ctx) => {
@@ -134,6 +162,7 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
         const row = { call: G.context.call, op: name };
         rec.calls.push(row);
         if (!st) { problem(`call ${G.context.call}: ${name} is one call more than Blender's ${run.stages.length}`); return; }
+        lastCall[st.level] = st;
         // the call itself
         const where = { op: st.op, level: st.level, pass: st.pass_index, call: st.call, n: st.window.n, x0: st.window.x0, y0: st.window.y0, cell: st.window.cell };
         const mine = { op: name, level: G.context.level, pass: G.context.pass, call: G.context.call, n: level.n, x0: level.x0, y0: level.y0, cell: level.cell };
@@ -158,16 +187,18 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
         }
         // the fields it receives: inherited, pinned, pulled, blended by the port
         const before = await RP.npz(`${run.dir}/stages/${st.before}`);
-        const cmp = await compareFields(fields, levelArrays(before, level.n));
+        const cmp = await compareFields(fields, levelArrays(before, level.n), { k: areaK });
         row.inputs = { ok: cmp.ok, inexact: summary(cmp) };
         if (!cmp.ok) problem(`call ${st.call} ${name} L${st.level} p${st.pass_index}: inputs ${cmp.names ? '' : `names ${cmp.mine} vs ${cmp.theirs}; `}${summary(cmp)}`);
-        if (ctx && ctx.pins) {
-            const pw = levelArrays(before, level.n, 'pin__');
+        const pw = levelArrays(before, level.n, 'pin__');
+        if (ctx && ctx.pins && !ctx.pins._fromBlender) {
             const pins = {};
             for (const k of Object.keys(pw)) pins[k] = ctx.pins[k];
-            const pc = await compareFields(pins, pw, { k: { A_in: 1e-4, qs_in: 1e-4 }, uses: { A_in: ['divide'], qs_in: ['divide'] }, exact: ['pin_w'] });
+            const pc = await compareFields(pins, pw, { k: areaK, uses: { A_in: ['divide'], qs_in: ['divide'] }, exact: ['pin_w'] });
             row.pins = { ok: pc.ok, inexact: summary(pc) };
             if (!pc.ok) problem(`call ${st.call} ${name} L${st.level}: pins ${pc.names ? '' : `names ${pc.mine} vs ${pc.theirs}; `}${summary(pc)}`);
+        } else if (ctx && ctx.pins) {
+            row.pins = { ok: true, inexact: "Blender's op's own pins (handed over)" };
         }
         // the op's result: Blender's (or the port's own op with --real)
         if (REAL.has(name)) {
@@ -187,6 +218,24 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
             ctx.evolved = Boolean(st.evolved);
             for (const k of Object.keys(ctx.shared)) delete ctx.shared[k];
             Object.assign(ctx.shared, structuredClone(st.shared_after ?? {}));
+            // an op of Blender's that replaced ctx.pins for the rest of its pass: the next op of the pass gets them
+            const nx = run.stages[next];
+            if (nx && nx.level === st.level && nx.pass_index === st.pass_index && nx.takes_ctx && !REAL.has(name)) {
+                const npw = levelArrays(await RP.npz(`${run.dir}/stages/${nx.before}`), level.n, 'pin__');
+                const names = Object.keys(npw).sort();
+                const changed = !sameJson(names, Object.keys(pw).sort()) || names.some((k) => !bitsEqual(npw[k], pw[k]));
+                if (changed) {
+                    if (!names.length) {
+                        ctx.pins = null;
+                    } else {
+                        const p = { _fromBlender: true };
+                        for (const k of names) owned.push(p[k] = R.field(level.n, level.n, 1, Float32Array.from(npw[k])));
+                        Object.defineProperty(p, '_fromBlender', { value: true, enumerable: false });
+                        ctx.pins = p;
+                    }
+                    row.pins_replaced_by_the_op = true;
+                }
+            }
         }
     };
     const getOp = async (name) => {
@@ -213,18 +262,22 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
             const arrays = await RP.npz(`${run.dir}/stages/${event === 'lakes_before' ? d.before : d.after}`);
             const want = levelArrays(arrays, n);
             delete want.filled;
-            const cmp = await compareFields(p.fields, want, event === 'lakes_after' ? { exact: ['h', 'water', 'deposit'] } : {});
+            const exact = event === 'lakes_after' && lakesExactBefore[p.index];
+            const cmp = await compareFields(p.fields, want, exact ? { exact: ['h', 'water', 'deposit'], k: areaK } : { k: areaK });
             e.ok = cmp.ok;
             e.inexact = summary(cmp);
+            if (event === 'lakes_before') lakesExactBefore[p.index] = cmp.ok && Object.values(cmp.fields).every((f) => f.exact);
             if (event === 'lakes_after') {
                 const f = await R.read(p.filled);
                 const f64 = arrays.filled.data;
                 let differ = 0;
                 for (let i = 0; i < f64.length; i++) if (f[i] !== f64[i]) differ++;
+                const g = C.gradeArray(f, Float32Array.from(f64), { k: 1e-5, m: 16 });
+                e.exact_inputs = exact;
                 e.filled_differ = differ;
                 e.nlakes = [p.nlakes, d.nlakes];
                 e.threshold = d.thr;
-                if (differ || p.nlakes !== d.nlakes) e.ok = false;
+                if (exact ? differ || p.nlakes !== d.nlakes : !g.ok) e.ok = false;
             } else {
                 e.threshold = [p.threshold, d.thr];
                 if (Math.abs(p.threshold - d.thr) > 1e-12 * Math.abs(d.thr)) { e.ok = false; problem(`L${p.index}: the lakes threshold ${p.threshold} against Blender's ${d.thr}`); }
@@ -235,24 +288,51 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
             if (!d) { e.ok = false; problem(`L${p.index}: no route dump`); return; }
             const arrays = await RP.npz(`${run.dir}/stages/${d.before}`);
             const s = await R.read(p.surface);
-            const u = ulps(s, arrays.surf.data);
+            const want = arrays.surf.data;
+            const u = ulps(s, want);
             e.surface_worst_ulp = +u.worst.toFixed(3);
             e.surface_cells_over_3_ulp = u.over;
-            e.surface_bit_equal = bitsEqual(s, arrays.surf.data);
+            e.surface_bit_equal = bitsEqual(s, want);
+            // the routing surface's input is Blender's to the bit when the lakes' fields were (a lake level), or when
+            // the level's last op was Blender's own and the runner changed nothing after it (no band pull, no where)
+            const lc = lastCall[p.index];
+            const lakeLevel = `${p.index} lakes` in ends;
+            const exactIn = lakeLevel ? Boolean(lakesExactBefore[p.index]) :
+                Boolean(lc && (lc.takes_ctx || p.index === 0) && !lc.where && !REAL.has(lc.op));
+            // with Blender's input, a different receiver tree moves a cell by whole steps of eps and rounding by far
+            // less: no cell may differ by half a step. Without it, ties on flats may break otherwise (as between two
+            // Blender runs): the floor's grade of route_area's input
+            let top = 0, lo = Infinity, hi = -Infinity;
+            for (const v of want) { top = Math.max(top, Math.abs(v)); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+            const eps = HY.routingEps(top);
+            let structural = 0, worstM = 0;
+            for (let i = 0; i < want.length; i++) {
+                const d = Math.abs(s[i] - want[i]);
+                worstM = Math.max(worstM, d);
+                if (d > 0.5 * eps) structural++;
+            }
+            e.exact_input = exactIn;
+            e.surface_worst_m = worstM;
+            e.surface_cells_off_by_half_a_step = structural;
+            const tolS = Math.max(16 * C.ulp32(top), kS * (hi - lo));
+            e.surface_ok = exactIn ? structural === 0 : worstM <= tolS;
+            e.surface_tol_m = exactIn ? 0.5 * eps : tolS;
             const pa = {};
             if (p.A0) pa.A0 = p.A0;
             if (p.A_in) pa.A_in = p.A_in;
-            const want = {};
-            for (const k of ['A0', 'A_in']) if (arrays[k]) want[k] = arrays[k].data;
-            const cmp = await compareFields(pa, want, { k: { A_in: 1e-4 }, uses: { A_in: ['divide'] } });
+            const wantA = {};
+            for (const k of ['A0', 'A_in']) if (arrays[k]) wantA[k] = arrays[k].data;
+            const cmp = await compareFields(pa, wantA, { k: { A_in: kA, A0: kA }, uses: { A_in: ['divide'] } });
             e.inputs = summary(cmp);
-            e.ok = u.over === 0 && cmp.ok;
-            if (!e.ok) problem(`L${p.index} route_before: surface worst ${u.worst.toFixed(2)} ulp, ${u.over} cells over 3; ${cmp.names ? '' : `names ${cmp.mine} vs ${cmp.theirs}; `}${e.inputs}`);
+            e.ok = e.surface_ok && cmp.ok;
+            if (!e.ok) problem(`L${p.index} route_before (${exactIn ? "Blender's input" : 'an input a few ulp from Blender\'s'}): surface ` +
+                `${structural} cells off by half a step or more (worst ${C.sci(worstM)} m against ${C.sci(e.surface_tol_m)} m, ` +
+                `${u.worst.toFixed(2)} ulp); ${cmp.names ? '' : `names ${cmp.mine} vs ${cmp.theirs}; `}${e.inputs}`);
         } else if (event === 'route_after') {
             const d = ends[`${p.index} route`];
             const arrays = await RP.npz(`${run.dir}/stages/${d.after}`);
             const a = await R.read(p.A);
-            const g = C.gradeArray(a, arrays.A.data, { k: 1e-4, uses: ['pow', 'divide'] });
+            const g = C.gradeArray(a, arrays.A.data, { k: kA, uses: ['pow', 'divide'] });
             e.A_over = +g.over.toPrecision(3);
             e.iterations = [p.iterations, d.iterations];
             e.ok = g.ok && Math.abs(p.iterations - d.iterations) <= HY.CHECK && (p.iterations - d.iterations) % HY.CHECK === 0;
@@ -286,6 +366,7 @@ async function runOnce(dir, recipeName, logDir, cache = false) {
         error = `${e.name}: ${e.message}\n${e.stack?.split('\n').slice(1, 4).join('\n')}`;
     }
     if (log) await log.stop();
+    for (const f of owned) if (!f.destroyed) f.destroy();
     rec.seconds = +((performance.now() - t0) / 1000).toFixed(2);
     rec.error = error;
     if (next !== run.stages.length && !error) problem(`the port made ${next} op calls, Blender ${run.stages.length}`);
@@ -349,9 +430,14 @@ for (const name of RECIPES) {
         }
         const endsOk = !rec.error && rec.ends.length > 0 && rec.ends.filter((e) => e.event !== 'where').every((e) => e.ok !== false) &&
             rec.ends.filter((e) => e.event === 'route_after').length === run.levels.length;
-        const worstUlp = Math.max(0, ...rec.ends.filter((e) => e.event === 'route_before').map((e) => e.surface_worst_ulp));
+        const rb = rec.ends.filter((e) => e.event === 'route_before');
+        const worstUlp = Math.max(0, ...rb.map((e) => e.surface_worst_ulp));
+        const worstM = Math.max(0, ...rb.map((e) => e.surface_worst_m ?? 0));
+        const over3 = rb.reduce((s, e) => s + (e.surface_cells_over_3_ulp ?? 0), 0);
         T.ok(`${tag}: the end stages equal Blender's (lakes exact, routing surface, drainage area, iterations)`, endsOk,
-            rec.problems.filter((p) => /lakes|route/.test(p)).slice(0, 3).join(' | ') || `routing surface worst ${worstUlp} ulp`);
+            rec.problems.filter((p) => /lakes|route/.test(p)).slice(0, 3).join(' | ') ||
+            `routing surface worst ${worstUlp} ulp (${C.sci(worstM, 2)} m), ${over3} cells over 3 ulp; ` +
+            `drainage area worst ${C.sci(Math.max(0, ...rec.ends.filter((e) => e.event === 'route_after').map((e) => e.A_over)), 2)} of range`);
         // the runner's own dispatch log against Blender's
         if (!rec.error) {
             const A = await DP.loadRun(dir), B = await DP.loadRun(logDir);

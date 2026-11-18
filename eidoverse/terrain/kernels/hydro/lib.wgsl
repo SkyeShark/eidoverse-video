@@ -1,6 +1,8 @@
 // What the kernels of kernels/hydro/ share (`//! include hydro/lib`): exact sums of float32 values, where numpy adds
 // float32 heights in float64 (exact for terrain heights) and rounds the result to float32 once: the lakes' deposit
-// (deposit + filled - h) and the parent's lake water (ph + pw - h, and the largest lake level ph + pw).
+// (deposit + filled - h) and the parent's lake water (ph + pw - h, and the largest lake level ph + pw); and numpy's
+// float64 routing surfaces held exactly as float32 pairs (h + water, which is not a float32 value on many lake
+// cells, and decides numpy's flats and receivers there: solvers/hydro.js says where).
 //
 // Integer arithmetic, not float tricks: a two-sum (Knuth's error-free addition) does not survive this machine's
 // shader compiler, which reassociates and contracts float arithmetic (PORT_PLAN.md 2.3; measured again for this
@@ -107,8 +109,11 @@ fn sum_sign4(a: f32, b: f32, c: f32, d: f32) -> i32 {
 }
 
 // a + b + c rounded once to float32 (nearest, ties to even): numpy's float64 sum of three float32 values, rounded
-fn sum3(a: f32, b: f32, c: f32) -> f32 {
-  let s = w_sum4(a, b, c, 0.0);
+fn sum3(a: f32, b: f32, c: f32) -> f32 { return sum4(a, b, c, 0.0); }
+
+// a + b + c + d rounded once to float32 (nearest, ties to even)
+fn sum4(a: f32, b: f32, c: f32, d: f32) -> f32 {
+  let s = w_sum4(a, b, c, d);
   if (s.z == -1000) { return 0.0; }
   var t = vec2<u32>(bitcast<u32>(s.x), bitcast<u32>(s.y));
   var neg = false;
@@ -137,8 +142,21 @@ fn sum3(a: f32, b: f32, c: f32) -> f32 {
     e = e - (23 - p);
   }
   let be = e + 23 + 127;                              // m in [2^23, 2^24): the float32 exponent's bits
-  if (be <= 0 || be >= 255) { return (a + b) + c; }   // a subnormal or an overflow: not a terrain's number
+  if (be <= 0 || be >= 255) { return ((a + b) + c) + d; }   // a subnormal or an overflow: not a terrain's number
   var bits = (u32(be) << 23u) | (m & 0x7FFFFFu);
   if (neg) { bits = bits | 0x80000000u; }
   return bitcast<f32>(bits);
 }
+
+// An exact float64 value of numpy's held as a pair (hi, lo): hi its float32 rounding (nearest, ties to even), lo the
+// rest, exactly (numpy's sum of two float32 values: the rounding error of a float32 sum is a float32). Normalised
+// pairs order and compare as their values do: lexicographically. A float32 field read as a pair has lo = 0.
+fn p_less(a: vec2<f32>, b: vec2<f32>) -> bool { return a.x < b.x || (a.x == b.x && a.y < b.y); }
+fn p_equal(a: vec2<f32>, b: vec2<f32>) -> bool { return a.x == b.x && a.y == b.y; }
+// a + b of two float32 values as a pair
+fn p_sum(a: f32, b: f32) -> vec2<f32> {
+  let hi = a + b;
+  return vec2<f32>(hi, sum3(a, b, -hi));
+}
+// (a - b) of two pairs, rounded once to float32
+fn p_diff(a: vec2<f32>, b: vec2<f32>) -> f32 { return sum4(a.x, -b.x, a.y, -b.y); }

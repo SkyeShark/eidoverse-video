@@ -67,8 +67,10 @@
 //     level's pins after its end stages, and a level's routing surface once its child has its inflow.
 //   - window_relief's percentiles are core/prims.js exact selections on the main window's cells (numpy 2.3.4's float64
 //     arithmetic for float64 data, as window_relief's np.asarray(h, np.float64) is).
-//   - The routing-surface inputs h + water and max(filled, h + water) are float32 (kernels/hydro/surface_in.wgsl:
-//     numpy's exact float64 sum rounded once; solvers/hydro.js names where that can differ).
+//   - The routing-surface inputs h + water and max(filled, h + water) are numpy's float64 sums held exactly, as
+//     float32 pairs (kernels/hydro/surface_in.wgsl; solvers/hydro.js fills and routes them as numpy does its float64
+//     arrays): on a lake cell the sum misses the spill level by the depth's float32 rounding, and numpy's flats and
+//     receivers there follow those fractions of a step.
 //   - The level key's JSON is JavaScript's sorted JSON over the port's own code hash (core/cache.js), as core/cache.js
 //     keys are: the two editions' keys are never compared.
 //   - A `where` that names a mask (not a field) needs masks.js (the masks package); until it is in the checkout the
@@ -390,10 +392,11 @@ function shareable(shared) {
 
 // ------------------------------------------------------------------------------------- routing surfaces ---
 
-// kernels/hydro/surface_in.wgsl: h + water (filled null), or max(filled, h + water); a new field
+// kernels/hydro/surface_in.wgsl: h + water (filled null), or max(filled, h + water), as numpy's float64 values held
+// exactly (an rg32f field of pairs, solvers/hydro.js); a new field
 function surfaceInput(h, water, filled = null) {
     const R = h.runner, D = Gd.dummies(R);
-    const out = R.like(h);
+    const out = R.field(h.h, h.w, 2);
     R.run('hydro/surface_in', { h, water: water ?? D.f1, filled: filled ?? D.f1 }, { outF: out },
         { uMode: filled ? 1 : 0, uWater: water ? 1 : 0 });
     return out;

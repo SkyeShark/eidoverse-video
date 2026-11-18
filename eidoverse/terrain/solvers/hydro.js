@@ -44,19 +44,24 @@
 //   - flow_receivers and d8_receivers are one kernel (kernels/hydro/receivers.wgsl): exact for float32 heights (the
 //     kernel's header says how numpy's float64 slope comparisons are kept). d8Receivers is exported for the fluvial
 //     package's valley floors, which call fluvial.d8_receivers with a breach mask.
-//   - _descend runs in the path-maximum form (PORT_PLAN.md C11): rs = s eps + max over the path to the outlet of
-//     (f - s eps), the path maximum by pointer jumping, instead of numpy's loop over the steps; float32 within a few
-//     ulp of numpy's float64 (kernels/hydro/descend.wgsl).
+//   - _descend runs in the path-maximum form (PORT_PLAN.md C11): the largest key f - s eps on the path to the outlet
+//     by pointer jumping, carried with the cell it comes from (kernels/hydro/jump_argmax.wgsl), and the result made
+//     from that cell's height as f(q*) + (s - s(q*)) eps, instead of numpy's loop over the steps. The plan's
+//     s eps + max cancels on long paths near 0 m (1,262 ulp of a 7e-5 m height on rolling_hills' plain); this form
+//     is within 0.9 ulp of numpy's float64 (kernels/hydro/descend.wgsl).
 //   - lakes: the per-label maxima and touches are integer atomics (kernels/hydro/lake_labels.wgsl); h and deposit
 //     are replaced only when a cell fills, as numpy's `if fill_cells.any()` (one readback of two counts). numpy's
 //     float64 sums of float32 heights (deposit + filled - h, ph + pw - h) are exact; the kernels add the values'
 //     significands exactly in 64-bit integers and round once (kernels/hydro/lib.wgsl), so the deposit and the
 //     parent's lake water are numpy's to the bit where filled - h alone is not a float32 value (a bed below half its
 //     spill level). A float two-sum would be cheaper, but this machine's shader compiler reassociates it away.
-//   - Where numpy routes a float64 surface that is not float32 everywhere (h + water across a lake whose bed lies
-//     below half its surface's height: the sum is not a float32 value), the port rounds that sum to float32 first
-//     (kernels/hydro/surface_in.wgsl); the fill commutes with the rounding, the receivers on that lake's surface can
-//     differ from numpy's by the rounding.
+//   - Where numpy routes a float64 surface that is not float32 everywhere (h + water across a lake: the depth is
+//     stored rounded to float32, so the sum misses the spill level by that rounding), the surface is held exactly as
+//     float32 pairs (hi, lo) and filled, measured and routed as pairs (kernels/hydro/surface_in.wgsl, fill_pair.wgsl,
+//     flat_pair.wgsl; the receivers and the descent read pairs); rounded to float32 first, the lakes' flats came out
+//     other than numpy's (canyon's main level: 206 cells of the routing surface whole steps of eps away). The pair
+//     fill and flat distance relax one step per dispatch (core/prims.js's sweep tiles), and run only where some lo is
+//     not 0; elsewhere core/prims.js runs on the pair's first channel.
 //   - inflow is a gather on the child window's edge cells (kernels/hydro/inflow.wgsl), float32 where numpy is
 //     float64; _parent_lake_water is one kernel (kernels/hydro/parent_lake_water.wgsl).
 //   - route_to_convergence's test reads back 4 bytes (kernels/hydro/converge.wgsl, a GPU maximum of the relative
@@ -110,18 +115,92 @@ export function depressionThreshold(reliefM) {
     return Math.max(1.0, 0.002 * Number(reliefM));
 }
 
+// ------------------------------------------------------------------------------- numpy's float64 surfaces ---
+// A surface numpy holds in float64 that is not float32 everywhere (h + water across lakes) is an rg32f field of exact
+// pairs (hi, lo) (kernels/hydro/lib.wgsl); fillDepressions, flatDistance, the receivers and the descent take such a
+// field as numpy takes its float64 array. Where every lo is 0 the pair is a float32 field and core/prims.js runs on
+// its first channel as it is; the pair kernels (kernels/hydro/fill_pair.wgsl, flat_pair.wgsl) run only where numpy's
+// surface really is not float32. The level runner's grids never wrap, and the pair forms do not.
+
+/** True for an rg32f field of exact pairs with a nonzero lo somewhere (one readback, remembered on the field). */
+export async function pairNeeded(f) {
+    if (f.channels !== 2) return false;
+    if (f._pairNeeded === undefined) f._pairNeeded = (await prims(f.runner).stats(f, { channel: 1 })).nonzero > 0;
+    return f._pairNeeded;
+}
+
+// the sea level as a pair (hi, lo) of float32: its float32 rounding and the rest of the double, rounded
+function seaPair(seaLevel) {
+    const hi = Math.fround(seaLevel);
+    return [hi, Math.fround(seaLevel - hi)];
+}
+
+// dispatch step(src, dst, counted) in chunks until a chunk's last dispatch changes nothing (core/prims.js _relax's
+// schedule); the number of dispatches
+async function relax(R, pair, counter, step, what, maxDispatches = 1 << 20) {
+    let done = 0, chunk = 8;
+    for (;;) {
+        R.clear(counter);
+        for (let i = 0; i < chunk; i++) {
+            step(pair.src, pair.dst, i === chunk - 1);
+            pair.swap();
+        }
+        done += chunk;
+        const got = await R.readRange(counter, 0, 1);
+        if (got[0] === 0) return done;
+        if (done >= maxDispatches) throw new Error(`hydro: ${what} not settled after ${done} dispatches`);
+        chunk = Math.min(chunk * 2, 64);
+    }
+}
+
+function noWrap(wrap, what) {
+    if (wrap?.[0] || wrap?.[1]) throw new Error(`hydro ${what}: a surface of float64 pairs on a wrapping grid is not ported (the level runner's grids never wrap)`);
+}
+
 /** Every cell's spill level (the priority-flood fill), exactly: core/prims.js fillDepressions, hydro.py's
  * fill_depressions (outlets: an open edge, the sea (cells at or below seaLevel), and on a tile periodic on both axes
- * with no sea, the lowest basin). Returns { filled (r32f), info: { outlet, dispatches } }. */
+ * with no sea, the lowest basin). A pair surface (above) gives a pair; else r32f. Returns { filled, info: { outlet,
+ * dispatches } } (outlet null for a pair surface: nothing reads it). */
 export async function fillDepressions(height, opts = {}) {
-    const r = await prims(runnerOf(height)).fillDepressions(height, { wrap: opts.wrap ?? NOWRAP, seaLevel: opts.seaLevel ?? null });
+    const R = runnerOf(height);
+    const wrap = opts.wrap ?? NOWRAP, seaLevel = opts.seaLevel ?? null;
+    if (await pairNeeded(height)) {
+        noWrap(wrap, 'fillDepressions');
+        const W = R.pair(height.h, height.w, 2), counter = R.field(1, 1, 1, null, 'u32');
+        const un = { uSea: seaLevel !== null ? 1 : 0, uSea2: seaLevel !== null ? seaPair(seaLevel) : [0, 0], uCount: 0 };
+        R.run('hydro/fill_pair', { h: height, win: height }, { outW: W.src, changed: counter }, { ...un, uInit: 1 });
+        const dispatches = await relax(R, W, counter, (src, dst, counted) => {
+            R.run('hydro/fill_pair', { h: height, win: src }, { outW: dst, changed: counter }, { ...un, uInit: 0, uCount: counted ? 1 : 0 });
+        }, 'the fill of a pair surface');
+        W.dst.destroy();
+        counter.destroy();
+        W.src._pairNeeded = true;
+        return { filled: W.src, info: { outlet: null, dispatches } };
+    }
+    const r = await prims(R).fillDepressions(height, { wrap, seaLevel });
     return { filled: r.filled, info: { outlet: r.outlet, dispatches: r.dispatches } };
 }
 
 /** Breadth-first steps (8-connected) across every flat of `surface` from where it drains (a cell with a lower
- * neighbour, an open edge, or the sea); 0 off the flats (hydro.py flat_distance). A u32 field. */
+ * neighbour, an open edge, or the sea); 0 off the flats (hydro.py flat_distance). A pair surface as above. A u32
+ * field. */
 export async function flatDistance(surface, opts = {}) {
-    return prims(runnerOf(surface)).flatDistance(surface, { wrap: opts.wrap ?? NOWRAP, seaLevel: opts.seaLevel ?? null });
+    const R = runnerOf(surface);
+    const wrap = opts.wrap ?? NOWRAP, seaLevel = opts.seaLevel ?? null;
+    if (await pairNeeded(surface)) {
+        noWrap(wrap, 'flatDistance');
+        const D = R.pair(surface.h, surface.w, 1, null, 'u32'), counter = R.field(1, 1, 1, null, 'u32');
+        const un = { uSea: seaLevel !== null ? 1 : 0, uSea2: seaLevel !== null ? seaPair(seaLevel) : [0, 0], uCount: 0 };
+        R.run('hydro/flat_pair', { surf: surface, din: D.dst }, { outD: D.src, changed: counter }, { ...un, uInit: 1 });
+        await relax(R, D, counter, (src, dst, counted) => {
+            R.run('hydro/flat_pair', { surf: surface, din: src }, { outD: dst, changed: counter }, { ...un, uInit: 0, uCount: counted ? 1 : 0 });
+        }, 'the flat distance of a pair surface');
+        R.run('hydro/flat_pair', { surf: surface, din: D.src }, { outD: D.dst, changed: counter }, { ...un, uInit: 3 });
+        D.src.destroy();
+        counter.destroy();
+        return D.dst;
+    }
+    return prims(R).flatDistance(surface, { wrap, seaLevel });
 }
 
 /** solvers/fluvial.py d8_receivers(h, breach): every cell's steepest strictly-lower neighbour as a row-major index
@@ -167,16 +246,27 @@ export function routingEps(top) {
  * receiver, in the path-maximum form (PORT_PLAN.md C11; kernels/hydro/descend.wgsl). opts.steps: pathSteps(rec), when
  * the caller has it. A new r32f field. */
 export async function descend(filled, rec, eps, opts = {}) {
-    const R = runnerOf(filled), P = prims(R), D = Gd.dummies(R);
+    const R = runnerOf(filled), D = Gd.dummies(R);
     const steps = opts.steps ?? await pathSteps(rec);
     const hi = Math.fround(eps), lo = Math.fround(eps - hi);
-    const key = R.field(filled.h, filled.w, 1);
-    R.run('hydro/descend', { f: filled, steps, pm: D.f1 }, { outF: key }, { uMode: 0, uEpsHi: hi, uEpsLo: lo });
-    const M = P.pathMax(rec, key);
-    key.destroy();
-    const rs = R.field(filled.h, filled.w, 1);
-    R.run('hydro/descend', { f: filled, steps, pm: M }, { outF: rs }, { uMode: 1, uEpsHi: hi, uEpsLo: lo });
-    M.destroy();
+    const [h, w] = [filled.h, filled.w];
+    const un = { uEpsHi: hi, uEpsLo: lo };
+    // the keys and their cells, then the path maximum and its cell by pointer jumping (prims/jump_init's pointers)
+    const P = R.pair(h, w, 1, null, 'u32'), K = R.pair(h, w, 1), A = R.pair(h, w, 1, null, 'u32');
+    const d0 = R.field(h, w, 1, null, 'u32');
+    R.run('prims/jump_init', { rec }, { outP: P.src, outD: d0 }, {});
+    d0.destroy();
+    R.run('hydro/descend', { f: filled, steps, arg: D.u1 }, { outF: K.src, outA: A.src }, { uMode: 0, ...un });
+    const rounds = Math.ceil(Math.log2(Math.max(2, h * w))) + 1;
+    for (let r = 0; r < rounds; r++) {
+        R.run('hydro/jump_argmax', { ptr: P.src, key: K.src, arg: A.src }, { outP: P.dst, outK: K.dst, outA: A.dst }, {});
+        P.swap();
+        K.swap();
+        A.swap();
+    }
+    const rs = R.field(h, w, 1), stand = R.field(1, 1, 1, null, 'u32');
+    R.run('hydro/descend', { f: filled, steps, arg: A.src }, { outF: rs, outA: stand }, { uMode: 1, ...un });
+    for (const x of [P, K, A, stand]) x.destroy();
     if (!opts.steps) steps.destroy();
     return rs;
 }
