@@ -17,8 +17,13 @@
 // What a replay checks, per stage (plan 5.3):
 //   fields     every field after the op against Blender's `after` dump: max |d| <= max(1e-4 x the field's range,
 //              1.25 x the largest of the stage's floor samples (<run>/base/stage_floors.json, made by
-//              blender_stage_dump.py --floor), 16 float32 steps); an op that does not evolve has no floor
-//   dispatches the call's dispatch log against the same call's lines of Blender's log (dispatch_parity.mjs)
+//              blender_stage_dump.py --floor for every op of the main level; another level's floor is 0, the kernel
+//              grade), 16 float32 steps)
+//   dispatches the call's dispatch log against the same call's lines of Blender's log (dispatch_parity.mjs): a loop
+//              that stops on a convergence test may differ by whole test intervals when the solver names it
+//              (opts.intervals) or the floor saw it move anywhere (dispatch_parity.knownIntervals)
+//   warm-up    an op that keeps state between its calls outside its arguments (WARM below: karst) has the run's
+//              earlier calls of it run first, unlogged, as the Blender stage floor does
 //   snapshots  on the main level's own cells: each kernel's images and inputs after its 1st, 10th and 100th dispatch
 //              in the call against Blender's snapshots, at max(1e-4 x range, 1.25 x the largest floor sample there)
 //

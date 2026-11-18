@@ -22,18 +22,20 @@
 //   4 seams_clay_lowsun  the same with the sun 8 degrees up, grazing (creases show most)
 //   5 seams_levels       the same, coloured by level
 //   6.. graze_<k>        for every seam k (ring k's border): a camera 2 m above the ground on the border line, looking
-//                        along it; lit clay in the frame, and the crack test beside it: the same view at 2x
+//                        along it (the frame: lit clay along one side, the side turning with k), and the crack test
+//                        along each of the border's four sides (every fan orientation): the same view at 2x
 //                        (1920 x 1080, 4x MSAA), unlit: the terrain's front faces black, its back faces (the same
 //                        triangles drawn again) magenta and pushed back by a depth bias, a magenta backdrop under
 //                        the whole outermost window, a black sky. From above the ground a line of sight meets a back
 //                        face, the skirt from inside or the backdrop only through a hole in the surface (a ray
 //                        leaving the window never comes back under it), and the bias keeps a back face behind the
 //                        front face that covers it (crests, where the two tie), so every magenta pixel is a crack,
-//                        whichever way the view looks. Counted, and written as graze_<k>_cracks.png. The control
-//                        (graze_<k>_control.png) takes one triangle of the seam out, the one the ray caster finds
-//                        beside the frame's centre line three quarters of the way down: that hole must show magenta
+//                        whichever way the view looks. Counted, and written as graze_<k>_<side>_cracks.png. The
+//                        control (graze_<k>_<side>_control.png) takes one triangle of the seam out, the one the ray
+//                        caster finds beside the frame's centre line three quarters of the way down: that hole must
+//                        show magenta
 // The record, out/mesh_api/renders/lauterbrunnen_renders.json: cameras, the sun, the robot's shift and foot gaps, the
-// crack counts per seam.
+// crack counts per seam and side.
 
 const OUT_REL = 'terrain/tests/out/mesh_api/renders/';
 const VIEWS = ['eye_clay', 'eye_levels', 'feet_clay', 'seams_clay', 'seams_clay_lowsun', 'seams_levels'];
@@ -259,11 +261,11 @@ function writeRecord() {
     Deno.writeTextFileSync(`${S.outDir}/lauterbrunnen_renders.json`, JSON.stringify(S.rec, null, 1));
 }
 
-// the camera of a seam's grazing view: on ring k's border line, 2 m above the ground, looking along the line at the
-// ground a few dozen parent spacings ahead; the side turns with k, so the seams show every fan orientation
-function grazeCamera(S, k) {
+// the camera of a seam's grazing view: on ring k's border line (side 0 south, east-going; 1 east; 2 north; 3 west),
+// 2 m above the ground, looking along the line at the ground a few dozen parent spacings ahead
+const SIDES = ['south', 'east', 'north', 'west'];
+function grazeCamera(S, k, side) {
     const rm = S.t.ring, r = rm.rings[k], P = rm.rings[k - 1];
-    const side = (k - 1) % 4;                                   // 0 south (east-going), 1 east, 2 north, 3 west
     const x0 = r.xm[0], x1 = r.xm[r.nx - 1], y0 = r.ym[0], y1 = r.ym[r.ny - 1];
     const len = side % 2 ? y1 - y0 : x1 - x0;
     const ahead = Math.min(0.6 * len, 40 * P.spec.sp * rm.unit);
@@ -274,8 +276,7 @@ function grazeCamera(S, k) {
     else if (side === 2) { a = [x1 - s, y1]; b = [x1 - s - ahead, y1]; }
     else { a = [x0, y1 - s]; b = [x0, y1 - s - ahead]; }
     const eye = B2T(a[0], a[1], S.hAt(a[0], -a[1]) + 2.0), target = B2T(b[0], b[1], S.hAt(b[0], -b[1]));
-    return { eye, target, side: ['south', 'east', 'north', 'west'][side], ahead_m: ahead,
-        spacing_m: [P.spec.sp * rm.unit, r.spec.sp * rm.unit] };
+    return { eye, target, side: SIDES[side], ahead_m: ahead, spacing_m: [P.spec.sp * rm.unit, r.spec.sp * rm.unit] };
 }
 
 // the magenta pixels of a readback (any coverage: the 4x samples resolve a sub-pixel hole to a dim magenta)
@@ -317,7 +318,7 @@ function holed(S, face) {
     return H.mesh;
 }
 
-async function crackTest(S, k, cam) {
+async function crackTest(S, tag, cam) {
     const { renderer, scene, crackRT } = S;
     const bg = scene.background;
     S.vrm.scene.visible = false;
@@ -369,7 +370,7 @@ async function crackTest(S, k, cam) {
     for (const [what, data] of [['cracks', px], ['control', controlPx]]) {
         if (!data) continue;
         const f = R.field(crackRT.height, 4 * W, 1, Uint32Array.from(data), 'u32');
-        await S.Io.writePng(`${S.outDir}/lauterbrunnen_graze_${k}_${what}.png`, { field: f, width: W, height: crackRT.height, channels: 4, bitDepth: 8 });
+        await S.Io.writePng(`${S.outDir}/lauterbrunnen_graze_${tag}_${what}.png`, { field: f, width: W, height: crackRT.height, channels: 4, bitDepth: 8 });
         f.destroy();
     }
     return { magenta_pixels: n, first_at_px: first, control_magenta_pixels: control, control_face: hit?.faceIndex ?? null,
@@ -406,15 +407,23 @@ globalThis.renderFrame = async function (_time, frame) {
         if (k >= t.ring.rings.length) {                          // past the last seam: the eye view again
             aim(camera, B2T(S.ex, S.ey, eyeZ), B2T(...S.refEye.target), S.refEye.lens_mm);
         } else {
-            const g = grazeCamera(S, k);
+            // the crack test along all four sides of the seam (every fan orientation), then the frame along one
+            S.rec.cracks[k] = {};
+            for (let s = 0; s < 4; s++) {
+                const g = grazeCamera(S, k, s);
+                aim(camera, g.eye, g.target, 35.0);
+                camera.near = 0.05;
+                camera.updateProjectionMatrix();
+                const c = await crackTest(S, `${k}_${g.side}`, camera);
+                S.rec.cracks[k][g.side] = { ...c, ahead_m: g.ahead_m, spacing_m: g.spacing_m };
+                console.log(`[render_lauterbrunnen] seam ${k} (${g.spacing_m.join(' -> ')} m, ${g.side} border): ${c.magenta_pixels} magenta pixels ` +
+                    `at 2x; with the seam's triangle ${c.control_distance_m?.toFixed(1)} m ahead taken out: ${c.control_magenta_pixels}`);
+            }
+            const g = grazeCamera(S, k, (k - 1) % 4);
             aim(camera, g.eye, g.target, 35.0);
             camera.near = 0.05;
             rec = { side: g.side, ahead_m: g.ahead_m, spacing_m: g.spacing_m };
             rec.sun_dir = placeSun(S, camera, SUN_ELEV_DEG, g.eye);
-            rec.cracks = await crackTest(S, k, camera);
-            S.rec.cracks[k] = rec.cracks;
-            console.log(`[render_lauterbrunnen] seam ${k} (${g.spacing_m.join(' -> ')} m, ${g.side} border): ${rec.cracks.magenta_pixels} magenta ` +
-                `pixels at 2x; with the seam's triangle ${rec.cracks.control_distance_m?.toFixed(1)} m ahead taken out: ${rec.cracks.control_magenta_pixels}`);
         }
     }
     camera.far = 80000;

@@ -227,7 +227,6 @@ export async function main(argv = Deno.args) {
     } catch (e) {
         if (e?.name !== 'NotPortedError') throw e;
         console.error(`${PROG}: ${e.name}: ${e.message}`);
-        G.shutdown();
         return 1;
     }
     try {
@@ -249,14 +248,18 @@ export async function main(argv = Deno.args) {
         await Deno.writeTextFile(join(a.out, name + '_bake.json'), JSON.stringify(plain(rec), null, 1));
         A.summary(t, console.log);
         console.log(`[bake] ${files.length} files in ${a.out}`);
-        t.dispose();
         return 0;
     } finally {
-        G.shutdown();
+        t.dispose();
     }
 }
 
 if (import.meta.main) {
-    const code = await main();
-    if (code) Deno.exit(code);
+    let code = 1;
+    try {
+        code = await main();
+    } finally {
+        G.shutdown();                                    // the device, so the process ends (main() leaves it to its caller)
+    }
+    Deno.exit(code);
 }

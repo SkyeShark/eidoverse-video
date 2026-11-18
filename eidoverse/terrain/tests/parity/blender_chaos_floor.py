@@ -11,6 +11,9 @@ its stage dumps (blender_stage_dump.py) and its Terrain.save. The hooks are desi
                      $EIDO_GPU_WRAP when it is set; a run already done is skipped, so it resumes where it stopped.
                      The jobs are started by that shell, not by Python: a GPU queue may refuse a job whose
                      launching shell it cannot see
+    bash eidoverse/terrain/tests/parity/floor_runs.sh --stage-floors [--recipes a,b] [--seeds 1,2]
+                     the stage floors (plan 5.3, 5.4 item 7) of every base run with stage dumps: one Blender job
+                     each, blender_stage_dump.py --floor on the main level (--next-stage-floor names the next)
     <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py --next [the same options]
                      the next run that is not done (floor_runs.sh asks; exit code 3 when none is left)
     <Blender's python> -I eidoverse/terrain/tests/parity/blender_chaos_floor.py --status [the same options]
