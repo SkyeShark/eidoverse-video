@@ -124,17 +124,31 @@ def check_names_and_budget(P, log=print):
     except Exception:                                    # noqa: BLE001 - the bake needs Blender or is not there
         pass
     attrs_direct = 10                                    # surfacing.ATTRS_DIRECT (no bpy here)
+    surface = set(P.surface_maps())
+    n_surface = 0
     for key, pal in _all_palettes(P).items():
         used = P.material_masks(pal)
+        # a material without baked data reads every name as a mesh attribute, the surface data's maps too (packed
+        # with the masks, written as 0 by pack_masks: the looks are written so that 0 is their neutral value, or a
+        # layer's fallback stands in), so all of them count toward the attribute budget
         n_attr = len(used) if len(used) <= attrs_direct else (len(used) + 2) // 3
         if n_attr > 14:
             bad.append(f'{key}: {len(used)} masks need {n_attr} attributes (14 compile)')
-        missing = sorted(m for m in used if m not in M.DEFAULT_NAMES and m not in ('strata',))
+        missing = sorted(m for m in used if m not in M.DEFAULT_NAMES and m not in ('strata',) and m not in surface)
         if missing:
-            # a surface data map, read as 0 by a material without the bake (today's attribute path)
-            bad.append(f'{key}: reads {missing}, which the ring mesh does not carry yet (read as 0)')
-    log('[names] ' + ('known_mask takes the bake\'s maps; every material fits the attribute budget and reads only '
-                      'masks the mesh carries' if not bad else f'{len(bad)} problems: {bad}'))
+            bad.append(f'{key}: reads {missing}, neither a mask the ring mesh carries nor a surface data map')
+        n_surface += bool(used & surface)
+        for L in pal['layers']:
+            # a weight whose cover comes from a map only the bake makes (the plant layer's rasters, the snowpack) needs
+            # a fallback, the weight a material without them takes (SURFACING_DESIGN.md 5.3); a term on another map is
+            # written to be neutral at 0 (palettes._has)
+            only = P.names_in(L['weight']) & {'canopy_expected', 'canopy_far', 'canopy', 'shrubs', 'shrubs_far',
+                                              'snowpack'}
+            if only and L.get('fallback') is None:
+                bad.append(f"{key}/{L['name']}: its weight reads {sorted(only)} and it has no fallback")
+    log('[names] ' + (f'known_mask takes the bake\'s maps; every material fits the attribute budget; {n_surface} '
+                      f'palettes read the surface data, and every weight on a map only the bake makes has a fallback'
+                      if not bad else f'{len(bad)} problems: {bad}'))
     return bad
 
 

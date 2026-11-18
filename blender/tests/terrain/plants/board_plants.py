@@ -1,8 +1,9 @@
-"""Boards of the plants' acceptance views (system Python: numpy and Pillow; no Blender): per view, in a row, the
-photograph, the review's newest render of the same camera without plants (out/surfacing/review/<recipe>/<view>*.png)
-and render_plants.py's render with them (out/plants/views/<recipe>_<view>[_<tag>].png); under them two crops at 2x
-of both renders where a defect would show (the near ground, and the band where SeedThree's cards hand over to their
-billboards), so the plants are judged beside the place, item by item.
+"""Boards of the plants' views (system Python: numpy and Pillow; no Blender): per view, in a row, the photograph,
+render_plants.py's render with the plants (out/plants/views/<recipe>_<view>[_<tag>].png) and the same view without
+them (its --no-plants render, <view>_noplants[_<tag>].png, the material's canopy from expected_cover alone; else
+its --bare frame, the plants hidden; else the review's newest render, out/surfacing/review/<recipe>/<view>*.png);
+under them two crops at 2x of both where a defect would show (the near ground, and the band where SeedThree's cards
+hand over to their billboards), so the plants are judged beside the place, item by item.
 
     python blender/tests/terrain/plants/board_plants.py [--tag t] [--views a,b]
 
@@ -43,16 +44,30 @@ def newest_before(recipe, view):
 
 
 def photo_path(rec):
-    """The record's photograph, found relative to this checkout's test folder (the plan stores where it was)."""
+    """The record's photograph: views.json gives it relative to blender/tests/terrain/out/ (older plans gave a path
+    under this checkout's test folder)."""
     p = rec.get('photo')
     if not p:
         return None
-    if os.path.exists(p):
-        return p
+    for cand in (os.path.join(TN, 'out', p), p):
+        if os.path.exists(cand):
+            return cand
     tail = p.replace('\\', '/').split('blender/tests/terrain/', 1)
     if len(tail) == 2 and os.path.exists(os.path.join(TN, tail[1])):
         return os.path.join(TN, tail[1])
     return None
+
+
+def without_plants(recipe, view, tag):
+    """(path, label) of the same view without plants: its --no-plants render, its bare frame, or the review's."""
+    t = f'_{tag}' if tag else ''
+    for name, label in ((f'{recipe}_{view}_noplants{t}.png', 'no plants (expected_cover)'),
+                        (f'{recipe}_{view}_bare{t}.png', 'plants hidden')):
+        p = os.path.join(VIEWS_OUT, name)
+        if os.path.exists(p):
+            return p, label
+    p = newest_before(recipe, view)
+    return p, 'review, no plants'
 
 
 def fit(im, size=TILE):
@@ -98,9 +113,13 @@ def label(im, text):
     return im
 
 
+RECIPES = ('real_place', 'fluvial_range', 'alpine_valley', 'impact_crater', 'incised_meanders', 'mesas_buttes',
+           'tower_karst', 'sea_cliffs', 'rolling_hills', 'cinder_cones')
+
+
 def board(key, rec, tag, out_dir):
     recipe, view = key.split('_', 1) if '_' in key else (key, key)
-    for r in ('real_place', 'fluvial_range', 'alpine_valley'):
+    for r in RECIPES:
         if key.startswith(r + '_'):
             recipe, view = r, key[len(r) + 1:]
     view = view[:-len('_' + tag)] if tag and view.endswith('_' + tag) else view
@@ -109,12 +128,12 @@ def board(key, rec, tag, out_dir):
         print(f'[board_plants] {key}: no render')
         return None
     after = Image.open(after_p).convert('RGB')
-    before_p = newest_before(recipe, view)
+    before_p, before_what = without_plants(recipe, view, tag)
     before = Image.open(before_p).convert('RGB').resize(after.size) if before_p else Image.new('RGB', after.size)
     ph = photo_path(rec)
     photo = Image.open(ph).convert('RGB') if ph else Image.new('RGB', TILE)
-    row1 = [label(fit(photo), 'photograph'),
-            label(fit(before), 'review, no plants: ' + (os.path.basename(before_p) if before_p else 'none')),
+    row1 = [label(fit(photo), 'photograph' if ph else 'no photograph'),
+            label(fit(before), f'{before_what}: ' + (os.path.basename(before_p) if before_p else 'none')),
             label(fit(after), 'with plants: ' + os.path.basename(after_p))]
     near = (0.5, 0.82)
     hy = handoff_row(rec)
@@ -123,7 +142,7 @@ def board(key, rec, tag, out_dir):
     for (cx, cy), what in ((near, 'near ground 2x'), (mid, 'card-billboard hand-off 2x' if hy else 'mid ground 2x')):
         a, _ = crop2x(after, cx, cy)
         b, _ = crop2x(before, cx, cy)
-        row2.append(label(fit(b), f'review {what}'))
+        row2.append(label(fit(b), f'without {what}'))
         row2.append(label(fit(a), f'plants {what}'))
     W = TILE[0] * 3
     out = Image.new('RGB', (W, TILE[1] * 3), (20, 20, 20))
@@ -160,6 +179,8 @@ def main():
         if 'error' in r:
             print(f'[board_plants] {key}: {r["error"]}')
             continue
+        if not r.get('plants', True) or '_noplants' in key:
+            continue                                     # a view without plants: the board's other half
         if only and not any(key.endswith(v) or key.endswith(v + '_' + tag) for v in only):
             continue
         board(key, r, tag, BOARDS)

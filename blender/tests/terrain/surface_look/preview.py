@@ -444,7 +444,8 @@ def _to_cells(a, n):
 def surface_level(terrain_path, li, pal, folder=None, log=print):
     """{name: array on level li's cells}: the terrain's surface data bake (the newest one cached for its terrain key,
     in the surface cache's root or in folder), its palette bake's colours when one is cached, and the plant layer's
-    expected cover when the palette has a canopy layer. Plain Python (tests/terrain/core/plain_import)."""
+    expected cover when the palette has a canopy layer or a weight reads the plant rasters. Plain Python
+    (tests/terrain/core/plain_import)."""
     import glob as _glob
     core = os.path.join(TN, 'core')
     if core not in sys.path:
@@ -453,6 +454,7 @@ def surface_level(terrain_path, li, pal, folder=None, log=print):
     plain_import.install()
     from eidoblend.terrain import api as A
     from eidoblend.terrain import surface as SU
+    from eidoblend.terrain.build import palettes as P
     t = A.Terrain.load(terrain_path, build=False)
     folder = folder or SU.cache_folder(t, True)
     metas = [p for p in sorted(_glob.glob(os.path.join(folder, 'surface_*.json')), key=os.path.getmtime)
@@ -470,7 +472,8 @@ def surface_level(terrain_path, li, pal, folder=None, log=print):
             with np.load(os.path.join(folder, f'surface_{key}_{tag}_L{i}.npz')) as z:
                 colour.append({k: np.asarray(z[k], np.float32) for k in z.files})
     sd = SU.SurfaceData(t, baked, info, info.get('options') or {}, key, colour=colour, cache_dir=folder)
-    if any(L.get('canopy') for L in pal['layers']):
+    plant_maps = {'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far'}
+    if any(L.get('canopy') or (P.names_in(L['weight']) & plant_maps) for L in pal['layers']):
         try:
             from eidoblend.terrain.build import plants as PL
             sd.add_maps(PL.expected_cover(t))

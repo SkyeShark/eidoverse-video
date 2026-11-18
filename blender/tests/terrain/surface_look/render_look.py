@@ -15,8 +15,9 @@ renders and photographs.
 
     --data             the per-texel material (SURFACING_DESIGN.md 2.4): the terrain's surface data baked with its
                        palette (terrain/surface.bake_surface: the maps, the far colour C and the provenance colour P),
-                       the plant layer's expected cover added first when the palette has a canopy layer
-                       (plants.expected_cover, so the forest reads canopy_expected and C sees it), the far material on
+                       the plant layer's expected cover added first when the palette has a canopy layer or a weight
+                       reads the plant rasters (plants.expected_cover, so the forest reads canopy_expected, the scrub
+                       shrubs_far, and C sees them), the far material on
                        the rings beyond 1.5 D0 of every camera rendered from that terrain. Without it, the material
                        reads the mesh's mask attributes (the path a terrain without baked data takes)
     --snap <dir>       the first run of a view saves its terrain there (Terrain.save), later runs load it: the same
@@ -30,6 +31,10 @@ renders and photographs.
                        view transform, a black world and black water, rocks hidden (surfacing/review_views.py's
                        layer pass, which the judge's layer decoding reads)
     --params k=v,...   recipe knobs (real_place: dem=lauterbrunnen)
+    --plants           with --data: the plant layer's plants as well (plants.plan_plants around the first view's
+                       camera, their cover rasters in the surface data, so the material's crowns and scrub leave the
+                       ground under the instanced plants to them; plant_instances.instance_plants), for the forests
+                       read with plants and without (SURFACING_DESIGN.md 5.4, package 3, item 5)
 
 Views that share a terrain are rendered in one scene: the terrain, its bake and its material are made once, then
 every view, then (with --layers) the layer material once and every view's layer map.
@@ -72,7 +77,7 @@ def args():
                 params[k] = v
     return dict(recipe=opt('--recipe'), views=(opt('--views') or ''), tag=opt('--tag', 'new'),
                 samples=int(opt('--samples', '16')), rocks='--no-rocks' not in a, layers='--layers' in a,
-                data='--data' in a, snap=opt('--snap') or os.environ.get('EIDO_LOOK_SNAP'),
+                data='--data' in a, plants='--plants' in a, snap=opt('--snap') or os.environ.get('EIDO_LOOK_SNAP'),
                 palettes=opt('--palettes'), params=params or None, plan=opt('--plan', VIEWS))
 
 
@@ -222,7 +227,8 @@ def bake_data(t, rec):
     t0 = time.time()
     rpal = SB.resolve_palette(t, pal if pal is not None else 'auto')
     extra = None
-    if any(L.get('canopy') for L in rpal['layers']):
+    plant_maps = {'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far'}
+    if any(L.get('canopy') or (P.names_in(L['weight']) & plant_maps) for L in rpal['layers']):
         from eidoblend.terrain.build import plants as PL
         extra = PL.expected_cover(t)
         rec['cover_s'] = round(time.time() - t0, 1)
@@ -361,14 +367,29 @@ def render_group(a, recipe, size, params, c0, views, src, out, sky_root, rec):
                   rocks=(t.rocks or {}).get('count') if isinstance(t.rocks, dict) else None,
                   palettes_file=a['palettes'] and os.path.basename(a['palettes']), data=bool(a['data']))
     sd = None
+    planted = None
     if a['data']:
         sd = bake_data(t, common)
+        if a['plants']:
+            from eidoblend.terrain.build import plants as PL
+            t1 = time.time()
+            ex, ey, _ez = eye_of(t, views[0])
+            spots = PL.plan_plants(t, focus=(ex, ey), data=sd, log=quiet)
+            sd.add_maps(spots.cover_extra())
+            common['plan_s'] = round(time.time() - t1, 1)
+            common['plants'] = {k: int(spots.count(k)) for k in spots.names()}
+            planted = spots
         t1 = time.time()
         mat = apply_material(t, sd, [eye_of(t, v) for v in views])
         common['material_s'] = round(time.time() - t1, 1)
         common['samplers'] = mat.get('eido_samplers')
         common['far_m'] = mat.get('eido_far_m')
         common['far_rings'] = len(t.obj.data.materials) > 1
+        if planted is not None:
+            from eidoblend.terrain.build import plant_instances as PI
+            t1 = time.time()
+            PI.instance_plants(planted, t, log=quiet)
+            common['instance_s'] = round(time.time() - t1, 1)
     pal = t.info.get('palette')
     common['palette'] = pal.get('name') if isinstance(pal, dict) else pal
     grp = next((n.node_tree for n in t.obj.data.materials[0].node_tree.nodes if n.bl_idname == 'ShaderNodeGroup'),
@@ -381,7 +402,10 @@ def render_group(a, recipe, size, params, c0, views, src, out, sky_root, rec):
             t1 = time.time()
             cam, eye, tgt, heading, pitch, ground = view_camera(sc, t, v, c0)
             cache = os.path.join(sky_root, name)
-            light(sc, cam, cache)
+            sky = light(sc, cam, cache)
+            if planted is not None:
+                from eidoblend.terrain.build import plant_instances as PI
+                PI.bind_sun(sky.sun)                         # the leaves' backlight and the billboards' sun
             path = os.path.join(out, name + '.png')
             sc.render.filepath = path
             t2 = time.time()

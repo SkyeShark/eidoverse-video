@@ -3,11 +3,15 @@ layer map after (render_look.py's frames), and 2x crops of where a defect would 
 beside the photograph and beside what it replaces. Plain Python (numpy, Pillow).
 
     python blender/tests/terrain/surface_look/board.py --recipe canyon --before base --after new
-        [--views a,b] [--crops "view:x0,y0,x1,y1;view:..."] [--tile 800]
+        [--views a,b] [--crops "view:x0,y0,x1,y1;view:..."] [--tile 800] [--plan <views.json>]
 
---crops: rectangles as fractions of the 960 x 540 frame (from the left, from the top), cut from before and after at
-the same place and shown at 2x. Writes out/surface_look/boards/<recipe>_<before>_<after>_<view>.jpg (one board per
-view, the 2x2 grid with the view's caption, its crops under it).
+--before and --after: a render_look.py tag (out/surface_look/<recipe>/<view>_<tag>.png), or state:<name> (a state of
+the surfacing judge, out/surfacing_judge/states/<name>/<recipe>/<view>.png: state:before is the 11-13 review's look
+from the judge's cameras), or mat:<tag> (the material package's per-texel renders, out/surfacing/material/sectors/
+<recipe>_<view>_per_texel_scan_<tag>.png). The views are the judge's (surfacing_judge/views.json), and so are the
+photographs. --crops: rectangles as fractions of the 960 x 540 frame (from the left, from the top), cut from before
+and after at the same place and shown at 2x. Writes out/surface_look/boards/<recipe>_<before>_<after>_<view>.jpg (one
+board per view, the 2x2 grid with the view's caption, its crops under it; ':' in a tag becomes '-').
 """
 import argparse
 import json
@@ -19,6 +23,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TN = os.path.normpath(os.path.join(HERE, '..'))
 OUT = os.path.join(TN, 'out', 'surface_look')
 REVIEW = os.path.join(TN, 'out', 'review')
+VIEWS = os.path.join(TN, 'surfacing_judge', 'views.json')
+
+
+def render_path(recipe, view, tag, layers=False):
+    """Where a tag's frame of a view is (module doc)."""
+    suffix = '_layers' if layers else ''
+    if tag.startswith('state:'):
+        return os.path.join(TN, 'out', 'surfacing_judge', 'states', tag[6:], recipe, f'{view}{suffix}.png')
+    if tag.startswith('mat:'):
+        return os.path.join(TN, 'out', 'surfacing', 'material', 'sectors',
+                            f"{recipe}_{view}_per_texel_scan_{tag[4:]}{suffix}.png")
+    return os.path.join(OUT, recipe, f'{view}_{tag}{suffix}.png')
+
+
+def plan_views(recipe, plan=None):
+    """The judge's views of a recipe (views.json; the review's plan as a fallback)."""
+    for p in ([plan] if plan else []) + [VIEWS, os.path.join(REVIEW, 'views_plan.json')]:
+        if p and os.path.exists(p):
+            got = json.load(open(p, encoding='utf-8')).get(recipe)
+            if got:
+                return got.get('views', [])
+    return []
 
 
 def font(size=15):
@@ -29,11 +55,14 @@ def font(size=15):
 
 
 def photo_path(p):
-    """The review plan's photograph path, found again under this checkout's out/ (the plan was written on another
-    checkout): the part after 'terrain/out/' (or 'terrain\\out\\') joined to this checkout's out/."""
+    """A view's photograph: the judge's views give it relative to this checkout's blender/tests/terrain/out/; the
+    review plan's absolute path is found again under out/ (the part after 'terrain/out/')."""
     if not p:
         return None
     s = str(p).replace('\\', '/')
+    cand = os.path.join(TN, 'out', s)
+    if os.path.exists(cand):
+        return cand
     key = 'terrain/out/'
     if key in s:
         cand = os.path.join(TN, 'out', s.split(key, 1)[1])
@@ -67,22 +96,20 @@ def load(path, w, h, label):
     return blank(w, h, f'{label}: none')
 
 
-def board(recipe, view, before, after, tile=800, crops=None, caption=''):
-    d = os.path.join(OUT, recipe)
-    plan = json.load(open(os.path.join(REVIEW, 'views_plan.json'), encoding='utf-8')).get(recipe, {})
-    v = next((x for x in plan.get('views', []) if x['name'] == view), {})
+def board(recipe, view, before, after, tile=800, crops=None, caption='', plan=None):
+    v = next((x for x in plan_views(recipe, plan) if x['name'] == view), {})
     th = tile * 9 // 16
     cells = [(load(photo_path(v.get('photo')), tile, th, 'photograph'), 'photograph'),
-             (load(os.path.join(d, f'{view}_{before}.png'), tile, th, before), f'before [{before}]'),
-             (load(os.path.join(d, f'{view}_{after}.png'), tile, th, after), f'after [{after}]'),
-             (load(os.path.join(d, f'{view}_{after}_layers.png'), tile, th, 'layers'), f'layer map [{after}]')]
+             (load(render_path(recipe, view, before), tile, th, before), f'before [{before}]'),
+             (load(render_path(recipe, view, after), tile, th, after), f'after [{after}]'),
+             (load(render_path(recipe, view, after, layers=True), tile, th, 'layers'), f'layer map [{after}]')]
     crops = crops or []
     ch = 0
     crop_ims = []
     for (x0, y0, x1, y1) in crops:
         pair = []
         for tag in (before, after):
-            p = os.path.join(d, f'{view}_{tag}.png')
+            p = render_path(recipe, view, tag)
             if os.path.exists(p):
                 im = Image.open(p).convert('RGB')
                 W, H = im.size
@@ -110,7 +137,7 @@ def board(recipe, view, before, after, tile=800, crops=None, caption=''):
         B.paste(pair[1], (tile, y + 24))
         y += max(p.height for p in pair) + 26
     os.makedirs(os.path.join(OUT, 'boards'), exist_ok=True)
-    path = os.path.join(OUT, 'boards', f'{recipe}_{before}_{after}_{view}.jpg')
+    path = os.path.join(OUT, 'boards', f"{recipe}_{before.replace(':', '-')}_{after.replace(':', '-')}_{view}.jpg")
     B.save(path, quality=92)
     return path
 
@@ -123,19 +150,19 @@ def main():
     ap.add_argument('--views', default='')
     ap.add_argument('--crops', default='')
     ap.add_argument('--tile', type=int, default=800)
+    ap.add_argument('--plan')
     a = ap.parse_args()
-    plan = json.load(open(os.path.join(REVIEW, 'views_plan.json'), encoding='utf-8')).get(a.recipe, {})
-    views = [s for s in a.views.split(',') if s] or [v['name'] for v in plan.get('views', [])]
+    views = [s for s in a.views.split(',') if s] or [v['name'] for v in plan_views(a.recipe, a.plan)]
     crops = {}
     for part in a.crops.split(';'):
         if ':' in part:
             vn, box = part.split(':', 1)
             crops.setdefault(vn.strip(), []).append(tuple(float(t) for t in box.split(',')))
     for vn in views:
-        if not os.path.exists(os.path.join(OUT, a.recipe, f'{vn}_{a.after}.png')) and \
-                not os.path.exists(os.path.join(OUT, a.recipe, f'{vn}_{a.before}.png')):
+        if not os.path.exists(render_path(a.recipe, vn, a.after)) and \
+                not os.path.exists(render_path(a.recipe, vn, a.before)):
             continue
-        print('[board]', board(a.recipe, vn, a.before, a.after, a.tile, crops.get(vn)))
+        print('[board]', board(a.recipe, vn, a.before, a.after, a.tile, crops.get(vn), plan=a.plan))
 
 
 if __name__ == '__main__':

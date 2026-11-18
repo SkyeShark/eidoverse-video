@@ -111,6 +111,31 @@ def valley(size=2048.0, n=256, focus=(60.0, -120.0), hero_cell=0.5, palette='alp
                   fields=[{k: np.asarray(v, np.float32) for k, v in f.items()} for f in fields])
 
 
+class CoarseView:
+    """A terrain seen through its coarse levels only (context and main: no hero windows), everything else the
+    terrain's: the same plan on it draws the same candidates and reads the same densities, so its stems either side
+    of a hero window's edge are the terrain's own gradient there, without the window (the window-edge gates)."""
+
+    def __init__(self, t, data=None):
+        keep = [i for i, lv in enumerate(t.levels) if getattr(lv, 'role', 'main') != 'hero'] or [0]
+        self._t, self._keep = t, keep
+        self.levels = [t.levels[i] for i in keep]
+        masks = t.masks
+        stack = [masks.level(i) if hasattr(masks, 'level') else masks[i] for i in keep]
+        if data is not None:
+            stack = [data.maps(i) for i in keep]
+        self.masks = _MaskSet(stack)
+        self.height_at = t.height_at
+        self.normal_at = getattr(t, 'normal_at', None)
+        self.info = dict(getattr(t, 'info', None) or {})
+        self.recipe = getattr(t, 'recipe', None)
+        self.knobs = dict(getattr(t, 'knobs', None) or {})
+        self.flats = list(getattr(t, 'flats', None) or [])
+
+    def fields(self, i):
+        return self._t.fields(self._keep[i])
+
+
 _CACHE = {}
 
 
