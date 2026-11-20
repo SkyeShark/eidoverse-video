@@ -16,6 +16,9 @@ as a GPU job (the bake's kernels, a shader compile, one small render):
 5. mask_attributes=False: of the eido_ attributes only eido_level stays.
 6. terrain_surface(obj) on the .blend saved and reopened: every atlas found where it was; after save_images and a
    move, the atlases relinked from the folder given.
+7. the standing discs cameras= gives the plan: a standing camera near the ground keeps every crown stand_m off;
+   a camera path keeps the crowns off its line only (radius 0, one disc a metre), so grass grows up to a walk; a
+   camera high over the ground gets none.
 Prints [PASS] / [FAIL] per check and a summary line; writes out/surfacing_judge/integration/ (git-ignored).
 """
 import json
@@ -252,11 +255,28 @@ def canopy_and_far():
     check('5 mask_attributes default: the masks stay', len(att) > 10, f'{len(att)} eido_ attributes')
 
 
+def stand_discs():
+    class Flat:                                                   # the ground at z = 0 everywhere
+        @staticmethod
+        def height_at(x, y):
+            return np.zeros(np.shape(x))
+    one = A._stand_discs(Flat, [(10.0, 20.0, 1.7)], A.STAND_M)
+    check('7 a standing camera: one disc of stand_m', len(one) == 1 and one[0][2] == A.STAND_M and one[0][3] == 'crown',
+          f'{one}')
+    path = np.stack([np.arange(21) * 0.5, np.zeros(21), np.full(21, 1.7)], 1)
+    discs = A._stand_discs(Flat, [path], A.STAND_M)
+    gaps = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(discs, discs[1:])]
+    check('7 a camera path: crowns off its line only (radius 0), a disc a metre',
+          len(discs) == 11 and all(d[2] == 0.0 for d in discs) and all(abs(g - A.PATH_STEP_M) < 1e-9 for g in gaps),
+          f'{len(discs)} discs, radii {sorted({d[2] for d in discs})}')
+    check('7 a camera high over the ground: no disc', A._stand_discs(Flat, [(0.0, 0.0, 400.0)], A.STAND_M) == [])
+
+
 def main():
     t0 = time.time()
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     only = argv[argv.index('--only') + 1].split(',') if '--only' in argv else None
-    for fn in (meadow, canopy_and_far):
+    for fn in (stand_discs, meadow, canopy_and_far):
         if only and fn.__name__ not in only:
             continue
         try:

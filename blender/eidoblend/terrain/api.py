@@ -54,6 +54,7 @@ PLANT_KEYS = ('ecotope', 'focus', 'radius_m', 'seed', 'exclude', 'stand_m', 'lod
 # canopy layer, gets them in its bake with plants or without (SURFACING_DESIGN.md 4.7)
 PLANT_MAPS = frozenset(('canopy', 'canopy_expected', 'canopy_far', 'shrubs', 'shrubs_far', 'grass', 'grass_far'))
 STAND_M = 1.5            # plants keep their crowns this far off every camera passed that stands near the ground
+PATH_STEP_M = 1.0        # ... and off a camera path's line itself (no margin), checked every metre along it
 EYE_CAMERA_M = 50.0      # ... a camera at most this high over the ground at its feet
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -578,7 +579,7 @@ def make_terrain(recipe=None, size=None, resolution=None, seed=None, params=None
                  instance instead of planning)
     cameras      camera objects, (x, y[, z]) points, or arrays of points along a camera path: rings beyond 1.5 D0
                  of all of them take the far material (a cost saving only), and plants keep their crowns stand_m off
-                 every one standing within 50 m of the ground
+                 every one standing within 50 m of the ground (off a path's line itself: grass grows up to a walk)
     mask_attributes  True: the eido_<mask> point attributes on the mesh (for agents' own shaders and Geometry Nodes;
                  the per-texel material reads none); False: only eido_level (thirty floats a vertex less)
     """
@@ -768,19 +769,26 @@ def _camera_xyz(cameras):
 
 
 def _stand_discs(t, cameras, stand_m):
-    """(x, y, stand_m, 'crown') discs at the cameras standing within EYE_CAMERA_M of the ground (a path thinned to
-    one disc per stand_m): the plan keeps every plant's foot and crown off them (plants.plan_plants' exclude)."""
+    """(x, y, r, 'crown') discs the plan keeps every plant's foot and crown off (plants.plan_plants' exclude), at the
+    cameras standing within EYE_CAMERA_M of the ground. A standing camera (an object or a point): r = stand_m, so no
+    plant stands where the camera does. A camera path (an array of points: a walk or a dolly): r = 0 every
+    PATH_STEP_M along it, so the crowns of trees and shrubs stay off its line while grass and flowers, which never
+    reach the lens, grow up to it (a stand_m disc at every step mows a track through a meadow)."""
     if not stand_m or stand_m <= 0:
         return []
-    p = _camera_xyz(cameras)
-    if not len(p):
-        return []
-    near = (p[:, 2] - np.asarray(t.height_at(p[:, 0], p[:, 1]), np.float64)) <= EYE_CAMERA_M
     out = []
-    for x, y, _z in p[near]:
-        if out and math.hypot(x - out[-1][0], y - out[-1][1]) < float(stand_m):
+    for c in _camera_list(cameras):
+        p = _camera_xyz([c])
+        if not len(p):
             continue
-        out.append((float(x), float(y), float(stand_m), 'crown'))
+        near = (p[:, 2] - np.asarray(t.height_at(p[:, 0], p[:, 1]), np.float64)) <= EYE_CAMERA_M
+        r, step = (0.0, PATH_STEP_M) if len(p) > 1 else (float(stand_m), float(stand_m))
+        last = None
+        for x, y, _z in p[near]:
+            if last is not None and math.hypot(x - last[0], y - last[1]) < step:
+                continue
+            out.append((float(x), float(y), r, 'crown'))
+            last = (x, y)
     return out
 
 
