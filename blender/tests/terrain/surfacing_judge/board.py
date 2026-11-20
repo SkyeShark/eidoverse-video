@@ -175,7 +175,8 @@ def view_row(recipe, v, before, after, stack=None, numbers=None):
     crops = pick_crops(v, w, ground)
     font, small = _font(16), _font(13)
     head = 46
-    gap = 40                                           # the numbers' line, then the crops' labels
+    lines = [numbers] if isinstance(numbers, str) else list(numbers or [])
+    gap = 40 + 16 * max(0, len(lines) - 1)             # the numbers' lines (one per state), then the crops' labels
     row = Image.new('RGB', (4 * TW, head + TH + gap + 2 * CH), BG)
     for k, im in enumerate((photo_tile(v), tile_b, tile_a, tile_l)):
         row.paste(im, (k * TW, head))
@@ -200,8 +201,8 @@ def view_row(recipe, v, before, after, stack=None, numbers=None):
         for t in (1, 2):
             d.rectangle([t * TW + x0 // 2, head + y0 // 2, t * TW + x1 // 2, head + y1 // 2],
                         outline=(255, 210, 60) if k == 0 else (90, 200, 255), width=2)
-    if numbers:
-        d.text((6, head + TH + 2), numbers[:230], fill=(170, 220, 170), font=small)
+    for i, s in enumerate(lines):
+        d.text((6, head + TH + 2 + 16 * i), s[:240], fill=(170, 220, 170), font=small)
     return row
 
 
@@ -227,7 +228,10 @@ def _numbers(state, recipe, view):
     if col.get('delta_e') is not None:
         parts.append(f"colour dE {col['delta_e']:.1f} exposure matched, spread {col.get('spread_ratio_L') or 0:.2f}")
     if fr.get('seam_worst_delta_e') is not None:
-        parts.append(f"seam dE {fr['seam_worst_delta_e']:.2f} over its control")
+        sw = fr.get('seam_worst') or {}
+        parts.append(f"seam dE {fr['seam_worst_delta_e']:.2f} over its control"
+                     + (f" at the {sw['side_m']:.0f} m window" if sw.get('side_m') else '')
+                     + (' FAIL' if fr.get('seam_verdict') == 'fail' else ''))
     return f"{state}: " + '; '.join(parts) if parts else None
 
 
@@ -252,8 +256,8 @@ def main(argv):
                 continue
             if not (S.render(r, v['name'], before) or S.render(r, v['name'], after)):
                 continue
-            nums = ' | '.join(x for x in (_numbers(before, r, v['name']), _numbers(after, r, v['name'])) if x)
-            rows.append(view_row(r, v, before, after, st, nums or None))
+            nums = [x for x in (_numbers(before, r, v['name']), _numbers(after, r, v['name'])) if x]
+            rows.append(view_row(r, v, before, after, st, nums))
         if not rows:
             print(f'{r}: no view rendered in {before} or {after}')
             continue
