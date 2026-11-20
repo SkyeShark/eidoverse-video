@@ -5,7 +5,10 @@
 // makes another drainage network), so the gate is over seeds, as judge.mjs compareDistribution has it: each banded
 // number's mean within half its band's tolerance of Blender's mean, and every band Blender passes on 3 or more of 4
 // seeds passed by the port on 3 or more. meadow has no reference DEM: its criteria are the Blender recipe's own
-// (slope p99 under 15 degrees, no pits), from core/metrics.js on the main level beside the Blender runs' own numbers.
+// (slope p99 under 15 degrees, no pits), from core/metrics.js on the main level beside the Blender runs' own numbers,
+// judged by the same class rule: the criteria Blender meets on 3 or more of the 4 seeds, the port meets on 3 or more,
+// and (a one-sided criterion has no band tolerance for the mean) the port's mean slope p99 meets the criterion too.
+// Each seed's numbers are printed and kept in the JSON; the class rule is the check.
 //
 //     <bake the saves> deno run ... eidoverse/terrain/bake.mjs --recipe R --seed S --quality draft --no-cache --save
 //                      --out eidoverse/terrain/tests/out/fluvial/saves          (a GPU job each)
@@ -60,11 +63,13 @@ for (const recipe of RECIPES) {
         if (recipe === 'meadow') {
             const bm = C.readJson(`${base}/run.json`)?.metrics_main ?? null;
             const pm = C.readJson(`${SAVES}/${recipe}_s${seed}_bake.json`)?.metrics ?? null;
-            rec.seeds[seed] = { blender: bm && { slope_p99: bm.slope_p99, depression_count: bm.depression_count, relief_m: bm.relief_m },
-                port: pm && { slope_p99: pm.slope_p99, depression_count: pm.depression_count, relief_m: pm.relief_m } };
+            const meets = (m) => m.slope_p99 < 15.0 && m.depression_count === 0;
+            rec.seeds[seed] = { blender: bm && { slope_p99: bm.slope_p99, depression_count: bm.depression_count, relief_m: bm.relief_m, meets: meets(bm) },
+                port: pm && { slope_p99: pm.slope_p99, depression_count: pm.depression_count, relief_m: pm.relief_m, meets: meets(pm) } };
             if (pm) {
-                T.ok(`meadow s${seed}: slope p99 under 15 degrees and no pits (the recipe's criteria)`, pm.slope_p99 < 15.0 && pm.depression_count === 0,
-                    `port p99 ${pm.slope_p99.toFixed(2)}, ${pm.depression_count} pits (Blender ${bm?.slope_p99?.toFixed(2)}, ${bm?.depression_count} pits)`);
+                console.log(`meadow s${seed}: slope p99 under 15 degrees and no pits: port ${meets(pm) ? 'meets' : 'misses'} (p99 ` +
+                    `${pm.slope_p99.toFixed(2)}, ${pm.depression_count} pits), Blender ${bm ? (meets(bm) ? 'meets' : 'misses') : '?'} ` +
+                    `(p99 ${bm?.slope_p99?.toFixed(2)}, ${bm?.depression_count} pits)`);
             }
             if (pm && bm) { port.push(pm); blender.push(bm); }
             continue;
@@ -87,6 +92,14 @@ for (const recipe of RECIPES) {
         const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / Math.max(xs.length, 1);
         rec.means = { port: { slope_p99: mean(port, 'slope_p99'), relief_m: mean(port, 'relief_m') },
             blender: { slope_p99: mean(blender, 'slope_p99'), relief_m: mean(blender, 'relief_m') }, seeds: port.length };
+        const meets = (m) => m.slope_p99 < 15.0 && m.depression_count === 0;
+        const bp = blender.filter(meets).length, pp = port.filter(meets).length, need = Math.ceil(0.75 * port.length);
+        rec.distribution = { blender_meets: bp, port_meets: pp, of: port.length, need, means: rec.means };
+        T.ok(`meadow: the distribution class over ${port.length} seeds: the criteria (slope p99 under 15 degrees, no pits) met by ` +
+            `the port on 3 of 4 seeds where Blender meets them on 3 of 4, and the port's mean slope p99 under 15 degrees`,
+        port.length >= 4 && (bp < need || pp >= need) && rec.means.port.slope_p99 < 15.0,
+        `Blender meets them on ${bp} of ${blender.length} seeds, the port on ${pp} of ${port.length}; mean slope p99 port ` +
+            `${rec.means.port.slope_p99.toFixed(2)}, Blender ${rec.means.blender.slope_p99.toFixed(2)}`);
         continue;
     }
     if (port.length >= 2) {

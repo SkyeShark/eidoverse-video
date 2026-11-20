@@ -21,9 +21,14 @@ The runs (seed 1, cache off):
                        the port's whole run of the same variant is compared with it (tests/detail/real_place_test.mjs)
   gully_planation      real_place Lauterbrunnen at draft quality with the stages dem, planation and gully on the main
                        level: the two ops no recipe calls, on real ground
+  lauterbrunnen_film_full
+                       the registered recipe (dem, fluvial, talus, breakup, hydraulic) at film quality with the same
+                       focus: the Blender run the port's full variant is judged beside (tests/detail/real_place_test.mjs
+                       --variants full, tests/detail/views.mjs). A save only: no hooks, no dumps, no snapshots
 Every level's op calls carry their in-call step snapshots (the floor's hooks take them on the main level only), and
 the run's terrain is saved (Terrain.save). Writes eidoverse/terrain/tests/out/detail/runs/<name>/base/: run.json,
-dispatch_log.jsonl.gz, readbacks.jsonl.gz, kernels.json, snap/, stages/, terrain.npz and terrain.json.
+dispatch_log.jsonl.gz, readbacks.jsonl.gz, kernels.json, snap/, stages/, terrain.npz and terrain.json (a run without
+hooks: run.json, terrain.npz and terrain.json).
 """
 from __future__ import annotations
 
@@ -46,6 +51,8 @@ RUNS = {
                                                    'levels': 'main', 'where': None},
                                                   {'op': 'gully', 'params': {}, 'levels': 'main', 'where': None}),
                             snap_roles=('main',)),
+    'lauterbrunnen_film_full': dict(recipe='real_place', params={'dem': 'lauterbrunnen'}, quality='film', focus=True,
+                                    keep=None, extra=(), snap_roles=(), hooks=False),
 }
 
 
@@ -87,6 +94,8 @@ def main():
     if a.pattern:
         return perturbed(a)
     spec = RUNS[a.run]
+    if not spec.get('hooks', True):
+        return plain(a, spec)
     root = B.import_blender_terrain()
     import _hooks as H
     from blender_stage_dump import StageDumper
@@ -135,6 +144,41 @@ def main():
           f'{dumper.bytes / 1e6:.0f} MB, snapshots {snap.bytes / 1e6:.0f} MB -> {base}', flush=True)
     sys.stdout.flush()
     os._exit(0)                      # (sys.exit with GPU textures alive crashed Blender's teardown once: the Blender tests')
+
+
+def plain(a, spec):
+    """A run without the parity hooks: generated as the hooked runs are (api.generate, seed 1, cache off), then saved."""
+    root = B.import_blender_terrain()
+    from eidoblend.terrain import api as A
+    from eidoblend.terrain import recipes as RG
+    from eidoblend.terrain.core import gpu as G
+    gpu = G.init()
+    d = RG.get(spec['recipe']).to_dict()
+    if spec['keep'] is not None:
+        d['stages'] = [s for s in d['stages'] if s['op'] in spec['keep']]
+    d['stages'] += [dict(s) for s in spec['extra']]
+    pts = lauterbrunnen_focus(root) if spec['focus'] else None
+    base = os.path.join(OUT, a.run, 'base')
+    os.makedirs(base, exist_ok=True)
+    for f in ('done.json', 'failed.json'):
+        if os.path.exists(os.path.join(base, f)):
+            os.remove(os.path.join(base, f))
+    lines = []
+    print(f"[detail runs] {a.run}: {spec['recipe']} {spec['quality']}, stages {[s['op'] for s in d['stages']]}, focus {pts}",
+          flush=True)
+    t0 = time.perf_counter()
+    t = A.generate(d, seed=1, params=dict(spec['params']), focus=pts, quality=spec['quality'], cache=False,
+                   log=lambda m: (lines.append(str(m)), print(m, flush=True)))
+    sec = time.perf_counter() - t0
+    t.save(os.path.join(base, 'terrain'))
+    rec = dict(run=a.run, recipe=d, params=spec['params'], quality=spec['quality'], focus=[list(p) for p in pts or []],
+               seed=1, seconds=round(sec, 2), plan=[lv.to_dict() for lv in t.levels], main_index=t.main.index,
+               versions=B.versions(gpu), key=B.source_key(root), log=lines, hooks=False)
+    B.write_json(os.path.join(base, 'run.json'), rec)
+    B.write_json(os.path.join(base, 'done.json'), dict(seconds=round(sec, 2)))
+    print(f'[detail runs] {a.run}: {sec:.1f} s -> {base}', flush=True)
+    sys.stdout.flush()
+    os._exit(0)                      # (as main(): Blender's teardown with GPU textures alive)
 
 
 def perturbed(a):

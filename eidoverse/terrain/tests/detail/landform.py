@@ -4,17 +4,23 @@ package's own code: blender/tests/terrain/detail/sheets.py landform() and landfo
 (no second implementation). And the port's hero levels against the Blender edition's own run of the same variant.
 
     <Blender's python> -I eidoverse/terrain/tests/detail/landform.py <port detail save> <port upsampled save>
-        [--blender <Blender's detail save>] [--out <json>]
+        [--blender <Blender's save of the same variant>] [--variant detail] [--out <json>] [--sheets <dir>]
 
-A save is a Terrain.save base path (<base>.npz and <base>.json). Numbers:
+A save is a Terrain.save base path (<base>.npz and <base>.json). The first save is the variant judged: the detail
+variant (dem, breakup, hydraulic), or another (--variant full: the registered recipe). Numbers:
   landform           each hero level box-averaged to the main level's 8 m pixel against the main level in the same
                      window (sheets.landform)
-  landform_vs        the detail's own effect: each hero level at the main pixel with the detail stages against the
+  landform_vs        the variant's own effect: each hero level at the main pixel with its hero stages against the
                      same level without them (the upsampled variant), with the Blender package's acceptance rule:
                      slope percentiles within max(1 %, 0.25 deg), relief within 1 %, the hypsometric integral within
                      0.01, and the main level identical (sheets.landform_vs)
   vs_blender         with --blender: per level, the port's h against Blender's (RMS and p99 |dh| over the level's
                      relief, the largest |dh|), and Blender's own landform_vs on its run, beside the port's
+  sheets             with --sheets: the Blender package's own hillshade sheets (sheets.sheet, its module's OUT pointed
+                     at <dir>, so nothing is written into the Blender edition): per hero level, north up, the whole
+                     level at half size and a 300-cell crop at the focus, columns port_upsampled, port_<variant>,
+                     blender_<variant> (with --blender) and the real ground (swissALTI3D 0.5 m resampled to the level,
+                     the Blender package's truth) where it covers the level: <dir>/sheets/<variant>_L<i>.png
 Run with Blender's own Python (numpy 2.3.4; plan C6). The Blender edition is found as tests/parity/_blender.py finds it
 and is only read (no bytecode is written into it).
 """
@@ -62,7 +68,9 @@ def main():
     ap.add_argument('detail')
     ap.add_argument('upsampled')
     ap.add_argument('--blender', default='')
+    ap.add_argument('--variant', default='detail')
     ap.add_argument('--out', default='')
+    ap.add_argument('--sheets', default='')
     a = ap.parse_args(B.script_args())
     root = B.bare_terrain_package()
     for p in (os.path.join(root, 'blender', 'tests', 'terrain', 'core'), os.path.join(root, 'blender', 'tests', 'terrain', 'detail')):
@@ -73,7 +81,7 @@ def main():
     plan_u, ups, _ = load_save(a.upsampled)
     if [lv.to_dict() for lv in plan] != [lv.to_dict() for lv in plan_u]:
         sys.exit('landform: the two saves have different plans')
-    out = dict(port=dict(landform=S.landform(plan, det), landform_vs=S.landform_vs(plan, det, ups)),
+    out = dict(variant=a.variant, port=dict(landform=S.landform(plan, det), landform_vs=S.landform_vs(plan, det, ups)),
                saves=dict(detail=a.detail, upsampled=a.upsampled), versions=B.versions())
     bl = None
     if a.blender:
@@ -103,14 +111,30 @@ def main():
         truth = np.load(tp)['h']
         if truth.shape != (lv.n, lv.n) or np.isfinite(truth).mean() <= 0.2:
             continue
-        runs = dict(port_detail=det, port_upsampled=ups, **(dict(blender_detail=bl) if bl is not None else {}))
+        runs = {f'port_{a.variant}': det, 'port_upsampled': ups, **({f'blender_{a.variant}': bl} if bl is not None else {})}
         out['realism'][lv.index] = {k: S.realism(plan, f, truth, lv, ups) for k, f in runs.items()}
+    if a.sheets:
+        sys.path.insert(0, HERE)
+        from blender_detail_runs import lauterbrunnen_focus      # the runs' own focus (lauterbrunnen_truth.focus())
+        S.OUT = a.sheets                                         # sheet() writes <OUT>/sheets/<tag>_L<i>.png
+        runs = {'port_upsampled': ups, f'port_{a.variant}': det, **({f'blender_{a.variant}': bl} if bl is not None else {})}
+        out['sheets'] = {}
+        for lv in plan:
+            if lv.role != 'hero':
+                continue
+            tp = os.path.join(truth_dir, f'real_L{lv.index}.npz')
+            truth = np.load(tp)['h'] if (same_plan and os.path.exists(tp)) else None
+            if truth is not None and not (truth.shape == (lv.n, lv.n) and np.isfinite(truth).mean() > 0.2):
+                truth = None
+            p, cols = S.sheet(a.variant, plan, runs, truth, lv, lauterbrunnen_focus(root)[0])
+            out['sheets'][lv.index] = dict(path=p, columns=cols, level=str(lv))
+            print(f'[sheets] {p}: {cols}', flush=True)
     txt = json.dumps(out, indent=1, default=lambda o: o.item() if hasattr(o, 'item') else str(o))
     if a.out:
         with open(a.out, 'w', encoding='utf-8') as f:
             f.write(txt)
     lv_ = out['port']['landform_vs']
-    print(f"[landform] port detail vs upsampled: {'PASS' if lv_['ok'] else 'FAIL'}; main level identical "
+    print(f"[landform] port {a.variant} vs upsampled: {'PASS' if lv_['ok'] else 'FAIL'}; main level identical "
           f"{lv_['main_level_identical']}", flush=True)
     for i, row in lv_.items():
         if isinstance(row, dict):

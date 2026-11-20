@@ -5,21 +5,25 @@
 // and the robot's spot 14 m along the view), in two variants of the registered recipe:
 //   upsampled   the stage dem alone: the hero levels are the DEM upsampled
 //   detail      dem, breakup and hydraulic: this package's ops on every hero level (4, 2, 1 and 0.5 m)
-// (the recipe's full stages add fluvial and talus, the fluvial package's). Each is made by api.js generate (the level
-// runner, the ops, the masks when masks.js is in, the ring mesh) and saved (Terrain.save) under
-// tests/out/detail/real_place/<variant>. Then, with Blender's Python, tests/detail/landform.py: the Blender package's
-// own landform numbers (sheets.py landform_vs: each hero level at the main 8 m pixel, with and without the detail,
-// slope percentiles within max(1 %, 0.25 deg), relief within 1 %, the hypsometric integral within 0.01, the main level
-// identical), and the hero levels against Blender's own run of the detail variant (tests/detail/blender_detail_runs.py
-// lauterbrunnen_film) when it is there.
+//   full        the registered recipe (dem, fluvial, talus, breakup, hydraulic: the fluvial package's refine and talus
+//               before this package's ops on every hero level)
+// Each is made by api.js generate (the level runner, the ops, the masks when masks.js is in, the ring mesh) and saved
+// (Terrain.save) under tests/out/detail/real_place/<variant>. Then, with Blender's Python, tests/detail/landform.py
+// for each variant other than upsampled: the Blender package's own landform numbers (sheets.py landform_vs: each hero
+// level at the main 8 m pixel, with and without the variant's hero stages, slope percentiles within max(1 %,
+// 0.25 deg), relief within 1 %, the hypsometric integral within 0.01, the main level identical), the hero levels
+// against Blender's own run of the same variant (tests/detail/blender_detail_runs.py: lauterbrunnen_film for detail,
+// lauterbrunnen_film_full for full) when it is there, and the Blender package's hillshade sheets beside the real ground
+// (real_place/sheets/<variant>_L<i>.png).
 //
 //     deno run --no-config --no-lock --unstable-webgpu --allow-all eidoverse/terrain/tests/detail/real_place_test.mjs
 //         [--variants upsampled,detail] [--quality film] [--skip-generate]
 //     (a GPU job: on a shared machine behind $EIDO_GPU_WRAP; needs the Lauterbrunnen DEM: $EIDO_TERRAIN_DEMS or
-//     $EIDO_BLENDER_EDITION)
+//     $EIDO_BLENDER_EDITION; with --skip-generate it judges the saves already made, no GPU)
 //
-// Writes tests/out/detail/real_place_test.json (real_place_<variant>.json for other variants, e.g. --variants full).
-// The eye views are tests/detail/views.mjs's.
+// Writes tests/out/detail/real_place_test.json (real_place_<variant>.json for other variants, e.g. --variants full),
+// and real_place/landform.json (the detail variant), real_place/landform_<variant>.json for the others. The eye views
+// are tests/detail/views.mjs's.
 
 import * as API from '../../api.js';
 import * as G from '../../core/gpu.js';
@@ -70,15 +74,23 @@ if (!A.flag('--skip-generate')) {
     }
     G.shutdown();
 }
-// the Blender package's own numbers on the port's saves (and the Blender run's, beside)
-const py = W.pythonCmd(`${W.TESTS}/detail/landform.py`, `${OUT}/detail/terrain`, `${OUT}/upsampled/terrain`,
-    ...(W.exists(`${W.out('detail')}/runs/lauterbrunnen_film/base/terrain.npz`) ? ['--blender', `${W.out('detail')}/runs/lauterbrunnen_film/base/terrain`] : []),
-    '--out', `${OUT}/landform.json`);
-if (!py) {
-    T.ok('landform numbers', false, 'needs Blender\'s Python (EIDO_BLENDER_PYTHON)');
-} else {
+// the Blender package's own numbers on the port's saves (and the Blender run's of the same variant, beside)
+const BLENDER_RUN = { detail: 'lauterbrunnen_film', full: 'lauterbrunnen_film_full' };
+for (const variant of VARIANTS.filter((v) => v !== 'upsampled')) {
+    if (!W.exists(`${OUT}/${variant}/terrain.npz`) || !W.exists(`${OUT}/upsampled/terrain.npz`)) {
+        T.ok(`${variant}: landform numbers`, false, `no save of the ${variant} or the upsampled variant under ${OUT}`);
+        continue;
+    }
+    const bsave = `${W.out('detail')}/runs/${BLENDER_RUN[variant] ?? variant}/base/terrain`;
+    const json = `${OUT}/${variant === 'detail' ? 'landform' : `landform_${variant}`}.json`;
+    const py = W.pythonCmd(`${W.TESTS}/detail/landform.py`, `${OUT}/${variant}/terrain`, `${OUT}/upsampled/terrain`,
+        ...(W.exists(`${bsave}.npz`) ? ['--blender', bsave] : []), '--variant', variant, '--out', json, '--sheets', OUT);
+    if (!py) {
+        T.ok(`${variant}: landform numbers`, false, 'needs Blender\'s Python (EIDO_BLENDER_PYTHON)');
+        continue;
+    }
     await W.run(py, { env: { ...Deno.env.toObject(), PYTHONDONTWRITEBYTECODE: '1' } });
-    const L = C.readJson(`${OUT}/landform.json`);
+    const L = C.readJson(json);
     const lv = L?.port?.landform_vs, bl = L?.blender?.landform_vs ?? null;
     // the rule on the port, number by number; where the Blender edition's own run of the variant misses the rule
     // too, the port's change within 1.25 x Blender's (the source of truth's result is what the port reproduces)
@@ -95,19 +107,20 @@ if (!py) {
         }
     }
     const over = Object.values(lv ?? {}).some((r) => typeof r === 'object' && r?._over);
-    T.ok('the hero levels add detail without moving the landform (the Blender detail package\'s landform_vs rule: slope ' +
+    T.ok(`${variant}: the hero levels' stages (${variant === 'detail' ? 'breakup, hydraulic' : 'all the recipe\'s'}) add detail ` +
+        'without moving the landform (the Blender detail package\'s landform_vs rule: slope ' +
         'percentiles within max(1 %, 0.25 deg), relief within 1 %, hypsometric integral within 0.01, main level identical; ' +
         'a number Blender\'s own run misses too within 1.25 x Blender\'s change)',
     lv && lv.main_level_identical && !over, lv ? `main level identical ${lv.main_level_identical}; ` + Object.entries(lv).filter(([, r]) => typeof r === 'object')
         .map(([i, r]) => `L${i}: p50 ${r.slope_deg_p50.diff >= 0 ? '+' : ''}${r.slope_deg_p50.diff}, p99 ${r.slope_deg_p99.diff >= 0 ? '+' : ''}${r.slope_deg_p99.diff} deg, ` +
             `relief ${(r.relief_m.rel * 100).toFixed(2)} %, HI ${r.hypsometric_integral.diff}`).join('; ') +
-        (misses.length ? `; outside the rule: ${misses.join('; ')}` : '') : 'no numbers');
+        (misses.length ? `; outside the rule: ${misses.join('; ')}` : '') + (bl ? '' : '; (no Blender run of this variant to compare a miss with)') : 'no numbers');
     if (L?.vs_blender && typeof L.vs_blender === 'object') {
         const rows = Object.entries(L.vs_blender);
-        T.ok('the port\'s detail run against Blender\'s, level by level (RMS of |dh| over relief)', true,
+        T.ok(`${variant}: the port's run against Blender's, level by level (RMS of |dh| over relief)`, true,
             rows.map(([i, r]) => `L${i} ${r.role} ${r.cell} m ${C.sci(r.rms_over_relief, 2)}${r.bit_identical ? ' (identical)' : ''}`).join('; '));
     }
-    records.landform = L;
+    records[variant === 'detail' ? 'landform' : `landform_${variant}`] = L;
 }
 T.extra.records = records;
 const other = VARIANTS.filter((v) => !['upsampled', 'detail'].includes(v));
