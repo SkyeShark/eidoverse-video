@@ -25,6 +25,10 @@ The runs (seed 1, cache off):
                        the registered recipe (dem, fluvial, talus, breakup, hydraulic) at film quality with the same
                        focus: the Blender run the port's full variant is judged beside (tests/detail/real_place_test.mjs
                        --variants full, tests/detail/views.mjs). A save only: no hooks, no dumps, no snapshots
+  lauterbrunnen_film_fluvial
+                       the same without this package's ops (dem, fluvial, talus): where the full variant's hero levels
+                       differ from Blender's, it says whether the difference is in the ground this package's ops start
+                       from (the fluvial package's refine and talus) or arises in them. A save only
 Every level's op calls carry their in-call step snapshots (the floor's hooks take them on the main level only), and
 the run's terrain is saved (Terrain.save). Writes eidoverse/terrain/tests/out/detail/runs/<name>/base/: run.json,
 dispatch_log.jsonl.gz, readbacks.jsonl.gz, kernels.json, snap/, stages/, terrain.npz and terrain.json (a run without
@@ -53,6 +57,8 @@ RUNS = {
                             snap_roles=('main',)),
     'lauterbrunnen_film_full': dict(recipe='real_place', params={'dem': 'lauterbrunnen'}, quality='film', focus=True,
                                     keep=None, extra=(), snap_roles=(), hooks=False),
+    'lauterbrunnen_film_fluvial': dict(recipe='real_place', params={'dem': 'lauterbrunnen'}, quality='film', focus=True,
+                                       keep=('dem', 'fluvial', 'talus'), extra=(), snap_roles=(), hooks=False),
 }
 
 

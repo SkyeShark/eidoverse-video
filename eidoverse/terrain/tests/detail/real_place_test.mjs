@@ -7,6 +7,8 @@
 //   detail      dem, breakup and hydraulic: this package's ops on every hero level (4, 2, 1 and 0.5 m)
 //   full        the registered recipe (dem, fluvial, talus, breakup, hydraulic: the fluvial package's refine and talus
 //               before this package's ops on every hero level)
+//   fluvial     the same without this package's ops (dem, fluvial, talus): the ground they start from in the full
+//               variant, to tell a difference that enters before them from one that arises in them
 // Each is made by api.js generate (the level runner, the ops, the masks when masks.js is in, the ring mesh) and saved
 // (Terrain.save) under tests/out/detail/real_place/<variant>. Then, with Blender's Python, tests/detail/landform.py
 // for each variant other than upsampled: the Blender package's own landform numbers (sheets.py landform_vs: each hero
@@ -34,7 +36,7 @@ const { C, W } = D;
 const A = D.argsOf();
 const VARIANTS = A.list('--variants') ?? ['upsampled', 'detail'];
 const QUALITY = A.opt('--quality', 'film');
-const KEEP = { upsampled: ['dem'], detail: ['dem', 'breakup', 'hydraulic'], full: null };
+const KEEP = { upsampled: ['dem'], detail: ['dem', 'breakup', 'hydraulic'], full: null, fluvial: ['dem', 'fluvial', 'talus'] };
 const OUT = `${W.out('detail')}/real_place`;
 const T = new C.Checks('detail: real_place Lauterbrunnen with hero levels');
 
@@ -75,7 +77,7 @@ if (!A.flag('--skip-generate')) {
     G.shutdown();
 }
 // the Blender package's own numbers on the port's saves (and the Blender run's of the same variant, beside)
-const BLENDER_RUN = { detail: 'lauterbrunnen_film', full: 'lauterbrunnen_film_full' };
+const BLENDER_RUN = { detail: 'lauterbrunnen_film', full: 'lauterbrunnen_film_full', fluvial: 'lauterbrunnen_film_fluvial' };
 for (const variant of VARIANTS.filter((v) => v !== 'upsampled')) {
     if (!W.exists(`${OUT}/${variant}/terrain.npz`) || !W.exists(`${OUT}/upsampled/terrain.npz`)) {
         T.ok(`${variant}: landform numbers`, false, `no save of the ${variant} or the upsampled variant under ${OUT}`);
@@ -107,8 +109,11 @@ for (const variant of VARIANTS.filter((v) => v !== 'upsampled')) {
         }
     }
     const over = Object.values(lv ?? {}).some((r) => typeof r === 'object' && r?._over);
-    T.ok(`${variant}: the hero levels' stages (${variant === 'detail' ? 'breakup, hydraulic' : 'all the recipe\'s'}) add detail ` +
-        'without moving the landform (the Blender detail package\'s landform_vs rule: slope ' +
+    const stages = { detail: 'breakup, hydraulic', fluvial: 'fluvial, talus' }[variant] ?? 'all the recipe\'s';
+    const diagnostic = variant === 'detail' ? '' : ' [a diagnostic, not this package\'s acceptance: the registered recipe ' +
+        'whole is P4\'s gate (PORT_PLAN.md 8.4); the fluvial variant shows what enters before this package\'s ops]';
+    T.ok(`${variant}: the hero levels' stages (${stages}) add detail without moving the landform${diagnostic} ` +
+        '(the Blender detail package\'s landform_vs rule: slope ' +
         'percentiles within max(1 %, 0.25 deg), relief within 1 %, hypsometric integral within 0.01, main level identical; ' +
         'a number Blender\'s own run misses too within 1.25 x Blender\'s change)',
     lv && lv.main_level_identical && !over, lv ? `main level identical ${lv.main_level_identical}; ` + Object.entries(lv).filter(([, r]) => typeof r === 'object')
