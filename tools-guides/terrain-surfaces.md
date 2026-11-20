@@ -150,8 +150,9 @@ t = make_terrain(
 - `cameras` is a list of camera objects, `(x, y, z)` points, or arrays of
   points along a camera path. Rings lying beyond 1.5 × the far distance of
   every camera take the cheap far material, and every camera within 50 m of
-  the ground gets a 1.5 m standing spot with no plant's crown over it. Without
-  cameras nothing changes but the cost.
+  the ground gets a 1.5 m standing spot with no plant's crown over it. A camera
+  path keeps the crowns of trees and shrubs off its line only, so grass and
+  flowers grow up to a walk. Without cameras nothing changes but the cost.
 - `mask_attributes=False` leaves only `eido_level` on the mesh: thirty floats
   a vertex less (about 360 MB of RAM on a seven-level terrain). The
   per-texel material reads none of them.
@@ -403,7 +404,7 @@ faces over 60°, bare rock, or talus and sand deeper than the roots hold.
 | `radius_m` | a cap on every species' radius |
 | `seed` | the plan's seed (the terrain's is hashed in) |
 | `exclude` | `[(x, y, r), ...]` discs kept clear; `(x, y, r, 'crown')` keeps the crowns off too (default: the flattened areas) |
-| `stand_m` | crowns kept this far from each camera standing near the ground (default 1.5; 0: none) |
+| `stand_m` | crowns kept this far from each camera standing near the ground (default 1.5; 0: none); a camera path keeps them off its line only |
 | `lod` | `{'hero_m', 'billboard_m', 'near_m'}` for every species, or `{species: {...}}` |
 | `wind` | `True`: trees in SeedThree's swaying grove (their cards realised near the camera so each sways); default a still shot |
 | `instance` | `False`: plan and cover only, no objects |

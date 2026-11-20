@@ -8,12 +8,14 @@ and the far hand-off, plants changing their level of detail. One recipe per Blen
     (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
 
 walk   the recipe's photographed eye view (WALK; views.json's camera, lens and framing): the camera walks a tenth of
-       the way to its aim (10-150 m), 1.7 m over the ground every frame, looking at the aim; the terrain's hero
-       levels around the camera's start (the still's terrain), the plants planned along the walk with a standing
-       corridor kept clear of crowns (cameras= along the path)
+       the way to its aim (10-150 m, shorter where the ground ahead would rise into its sight line: walk_path),
+       1.7 m over the ground smoothed over 3 m, looking at the aim; the terrain's hero levels around the camera's
+       start (the still's terrain), the plants planned along the walk with the crowns kept off its line (cameras=
+       along the path)
 orbit  the recipe's aerial view (ORBIT): the camera carried --orbit-deg around the ground it looks at, at its height
-       and distance; the plants planned around that ground; every orbit position passed as a camera (the far
-       material on the rings beyond 1.5 D0 of all of them)
+       and distance, lifted where the ground or its sight line to the aim needs (orbit_heights); the plants planned
+       around that ground; every orbit position passed as a camera (the far material on the rings beyond 1.5 D0 of
+       all of them)
 Both: 960 x 540, 16 samples, make_sky daylight (the sun 70 degrees left of the first frame's view, where it stays),
 AgX at exposure -0.5, H.264 High yuv420p with a silent AAC track and faststart (ordinary players open them), checked
 with ffprobe and a full decode. Writes out/surfacing_judge/videos/<recipe>_<kind>[_<tag>].mp4 and videos.json.
@@ -55,6 +57,122 @@ ORBIT = {'fluvial_range': 'aerial_range_front', 'alpine_valley': 'aerial_axis', 
          'badlands': 'aerial', 'dunes': 'aerial', 'tower_karst': 'aerial', 'sea_cliffs': 'establishing',
          'rolling_hills': 'aerial', 'real_place': 'establishing', 'meadow': 'drone'}
 WALK_S, ORBIT_S = 6.0, 8.0
+WALK_AHEAD_M = 40.0       # a walk's ground within 40 m ahead may rise into its sight line to the aim at most
+WALK_RISE_DEG = 4.0       # 4 degrees further than in the still's own frame (not a gully's far wall in the lens)
+WALK_SMOOTH_M = 3.0       # its eye height follows the ground smoothed over 3 m, never under 1.2 m
+ORBIT_CLEAR_M, ORBIT_CLEAR_R_M = 40.0, 150.0   # an orbit keeps 40 m of air over the ground within 150 m of it
+ORBIT_SIGHT_M = 15.0      # and its sight line to the aim passes 15 m over the ground over the first third of the way
+ORBIT_SIGHT_SHARE = 1.0 / 3.0   # (an aim hidden behind a far rim is a view; a slope filling the lens is not)
+ORBIT_MAX_LIFT = 0.25     # lifted at most this share of its height over the aim more than the still; past it, it turns less
+
+
+def _heights(t, x, y):
+    return np.asarray(t.height_at(np.asarray(x, np.float64), np.asarray(y, np.float64)), np.float64)
+
+
+def _sight_need(t, p, aim, s, margin):
+    """Per camera position of p (N, 3): the height it needs for its straight line to aim to pass margin over the
+    ground at the fractions s of the way (the line's height there is z (1 - s) + s aim_z)."""
+    qx = p[:, 0:1] + s[None, :] * (aim[0] - p[:, 0:1])
+    qy = p[:, 1:2] + s[None, :] * (aim[1] - p[:, 1:2])
+    h = _heights(t, qx.ravel(), qy.ravel()).reshape(qx.shape)
+    return np.max((h + margin - s[None, :] * aim[2]) / (1.0 - s[None, :]), axis=1)
+
+
+def _smooth(z, sigma):
+    """A Gaussian of sigma samples along a path, its ends held."""
+    if sigma < 0.5:
+        return np.asarray(z, np.float64)
+    k = np.arange(-int(3 * sigma), int(3 * sigma) + 1)
+    w = np.exp(-0.5 * (k / sigma) ** 2)
+    return np.convolve(np.pad(z, len(k) // 2, mode='edge'), w / w.sum(), mode='valid')
+
+
+def _ground_rise(t, p, aim, d):
+    """Per camera position of p (N, 3): how far the ground at the distances d ahead (toward the aim, at most 0.8 of
+    the way) rises above the sight line to the aim, in degrees of elevation (negative: below it)."""
+    dx, dy = aim[0] - p[:, 0:1], aim[1] - p[:, 1:2]
+    D = np.hypot(dx, dy)
+    dd = np.minimum(d[None, :], 0.8 * D)
+    h = _heights(t, (p[:, 0:1] + dx / D * dd).ravel(), (p[:, 1:2] + dy / D * dd).ravel()).reshape(dd.shape)
+    return (np.degrees(np.arctan2(h - p[:, 2:3], dd)) - np.degrees(np.arctan2(aim[2] - p[:, 2:3], D))).max(axis=1)
+
+
+def walk_path(t, start, aim, dz, n, length):
+    """The walk's n camera positions from start toward aim: dz over the ground smoothed over WALK_SMOOTH_M (never
+    under 1.2 m), over `length` metres, shortened (0.6x at a time, down to 10 m) while the ground within
+    WALK_AHEAD_M ahead of a frame rises more than WALK_RISE_DEG further into its sight line to the aim than it does
+    at the still's own camera (a gully's far wall in the lens); where no length toward the aim passes, the same
+    lengths backing away from it (a dolly out of the still), else the shortest toward it. Returns the positions
+    (n, 3), the length walked (negative: backing away) and the lengths tried with their frames over."""
+    ex, ey = start
+    dist = math.hypot(aim[0] - ex, aim[1] - ey)
+    ux, uy = (aim[0] - ex) / dist, (aim[1] - ey) / dist
+    d = np.geomspace(1.0, WALK_AHEAD_M, 40)
+    tried, first = [], None
+    for sign in (1.0, -1.0):
+        L = float(length)
+        while True:
+            s = sign * L * np.arange(n) / max(n - 1, 1)
+            px, py = ex + ux * s, ey + uy * s
+            g = _heights(t, px, py)
+            pz = np.maximum(_smooth(g, WALK_SMOOTH_M * max(n - 1, 1) / L) + dz, g + min(dz, 1.2))
+            p = np.stack([px, py, pz], 1)
+            rise = _ground_rise(t, p, aim, d)
+            over = int(np.count_nonzero(rise[1:] > max(float(rise[0]), 0.0) + WALK_RISE_DEG))
+            tried.append([round(sign * L, 1), over])
+            if not over:
+                return p, sign * L, tried
+            if L <= 10.0:
+                break
+            L = max(10.0, 0.6 * L)
+        if first is None:
+            first = (p, sign * L)
+    return first[0], first[1], tried
+
+
+def _orbit_need(t, px, py, pz, aim):
+    """The lift each orbit position needs: to ORBIT_CLEAR_M of air over the ground within ORBIT_CLEAR_R_M, and for
+    its sight line to the aim to pass ORBIT_SIGHT_M over the ground over the first ORBIT_SIGHT_SHARE of the way."""
+    ang = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    rx = px[:, None] + ORBIT_CLEAR_R_M * np.cos(ang)[None, :]
+    ry = py[:, None] + ORBIT_CLEAR_R_M * np.sin(ang)[None, :]
+    ground = np.maximum(_heights(t, px, py), _heights(t, rx.ravel(), ry.ravel()).reshape(rx.shape).max(axis=1))
+    need = np.maximum(ground + ORBIT_CLEAR_M, _sight_need(t, np.stack([px, py, pz], 1), aim,
+                                                          np.linspace(0.005, ORBIT_SIGHT_SHARE, 64), ORBIT_SIGHT_M))
+    return need - pz
+
+
+def orbit_path(t, aim, rad, b0, z_at, follows_ground, degrees, n):
+    """The orbit's n camera positions around the aim at radius rad: `degrees` of turn from the still's bearing b0,
+    lifted where the ground or the sight line to the aim needs more than the still's own camera does; where that
+    lift would pass ORBIT_MAX_LIFT of the camera's height over the aim, only the part of a turn either way around
+    b0 that stays within it (a valley's floor seen from its side lies behind its walls). z_at(x, y) gives the
+    unlifted heights. One height for an orbit at a height, a smoothed lift for one that follows the ground. Returns
+    (positions (n, 3), degrees turned, the largest lift)."""
+    deg = int(round(degrees))
+    th = b0 + np.radians(np.arange(-deg, deg + 1))
+    px, py = aim[0] + rad * np.cos(th), aim[1] + rad * np.sin(th)
+    z0 = z_at(px, py)
+    still = max(float(_orbit_need(t, px[deg:deg + 1], py[deg:deg + 1], z0[deg:deg + 1], aim)[0]), 0.0)
+    ok = _orbit_need(t, px, py, z0, aim) - still <= max(ORBIT_CLEAR_M, ORBIT_MAX_LIFT * (float(z0[deg]) - aim[2]))
+    lo = hi = deg
+    while lo > 0 and ok[lo - 1]:
+        lo -= 1
+    while hi < 2 * deg and ok[hi + 1]:
+        hi += 1
+    a0 = max(lo, min(deg, hi - deg)) if hi - lo >= deg else lo
+    a1 = min(hi, a0 + deg)
+    th = b0 + np.radians(np.linspace(a0 - deg, a1 - deg, n))
+    px, py = aim[0] + rad * np.cos(th), aim[1] + rad * np.sin(th)
+    z0 = z_at(px, py)
+    z = z0 + np.maximum(_orbit_need(t, px, py, z0, aim) - still, 0.0)
+    if follows_ground:
+        env = np.array([z[max(0, i - 6):i + 7].max() for i in range(n)])
+        z = np.maximum(_smooth(env, 4.0), z)
+    else:
+        z = np.full(n, float(z.max()))
+    return np.stack([px, py, z], 1), float(a1 - a0), float((z - z0).max())
 
 
 def args():
@@ -145,14 +263,12 @@ def walk(a, recipe, plan, size, params, c0, log):
     ex, ey = v['cam'][0] + cx, v['cam'][1] + cy
     tx, ty, tz = v['aim'][0] + cx, v['aim'][1] + cy, v['aim'][2]
     dz = float(v['cam_z'][1]) if v['cam_z'][0] == 'ground' else 1.7
-    dist = math.hypot(tx - ex, ty - ey)
-    length = min(max(0.1 * dist, 10.0), 150.0)
-    ux, uy = (tx - ex) / dist, (ty - ey) / dist
     n = int(round(WALK_S * a['fps']))
-    s = length * np.arange(n) / max(n - 1, 1)
-    px, py = ex + ux * s, ey + uy * s
-    pz = np.asarray(t.height_at(px, py), np.float64) + dz
-    path = np.stack([px, py, pz], 1)
+    path, length, tried = walk_path(t, (ex, ey), (tx, ty, tz), dz, n,
+                                    min(max(0.1 * math.hypot(tx - ex, ty - ey), 10.0), 150.0))
+    if len(tried) > 1:
+        log(f'[video] {recipe} walk: [length m (negative: backing away), frames with the ground rising into the '
+            f'sight line] {tried}')
     spec = SH.plant_spec(v, (ex, ey), (tx, ty), path=path[::12]) if a['plants'] else None
     t0 = time.time()
     t.build(f'{recipe}_walk', palette=SH.palette_now(recipe), dress=True, plants=spec, cameras=[path],
@@ -166,8 +282,8 @@ def walk(a, recipe, plan, size, params, c0, log):
         SH.aim_camera(cam, tuple(path[f]), (tx, ty, tz), v['frame'], v['lens'])
         key(cam, f + 1)
     info = dict(view=v['name'], terrain=source, build_s=round(build_s, 1), walk_m=round(length, 1),
-                start=[round(ex, 1), round(ey, 1)], plants=(t.info.get('plants') or {}).get('counts'),
-                far_material=len(t.obj.data.materials) > 1)
+                walk_tried=tried, start=[round(ex, 1), round(ey, 1)],
+                plants=(t.info.get('plants') or {}).get('counts'), far_material=len(t.obj.data.materials) > 1)
     return sc, cam, release(t), n, info
 
 
@@ -184,13 +300,16 @@ def orbit(a, recipe, plan, size, params, c0, log):
     rad = math.hypot(ex - tx, ey - ty)
     b0 = math.atan2(ey - ty, ex - tx)
     n = int(round(ORBIT_S * a['fps']))
-    ang = b0 + np.radians(a['orbit_deg']) * np.arange(n) / n
-    px, py = tx + rad * np.cos(ang), ty + rad * np.sin(ang)
     if kind == 'ground':                                  # a low view keeps its height over the ground it flies over
-        pz = np.asarray(t.height_at(px, py), np.float64) + float(dz)
+        def z_at(x, y):
+            return _heights(t, x, y) + float(dz)
     else:
-        pz = np.full(n, ez)
-    path = np.stack([px, py, pz], 1)
+        def z_at(x, y):
+            return np.full(np.shape(x), ez)
+    path, turned, lift = orbit_path(t, (tx, ty, tz), rad, b0, z_at, kind == 'ground', a['orbit_deg'], n)
+    if lift > 0.5 or turned < a['orbit_deg'] - 0.5:
+        log(f'[video] {recipe} orbit: {turned:.0f} degrees, lifted up to {lift:.0f} m (the ground, or the sight '
+            f'line to the aim)')
     spec = SH.plant_spec(v, (ex, ey), (tx, ty)) if a['plants'] else None
     t0 = time.time()
     t.build(f'{recipe}_orbit', palette=SH.palette_now(recipe), dress=True, plants=spec, cameras=[path],
@@ -204,8 +323,8 @@ def orbit(a, recipe, plan, size, params, c0, log):
     for f in range(n):
         SH.aim_camera(cam, tuple(path[f]), (tx, ty, tz), v['frame'], v['lens'])
         key(cam, f + 1)
-    info = dict(view=v['name'], terrain=source, build_s=round(build_s, 1), degrees=a['orbit_deg'],
-                radius_m=round(rad, 1), plants=(t.info.get('plants') or {}).get('counts'),
+    info = dict(view=v['name'], terrain=source, build_s=round(build_s, 1), degrees=round(turned, 1),
+                radius_m=round(rad, 1), lift_m=round(lift, 1), plants=(t.info.get('plants') or {}).get('counts'),
                 far_material=len(t.obj.data.materials) > 1)
     return sc, cam, release(t), n, info
 
