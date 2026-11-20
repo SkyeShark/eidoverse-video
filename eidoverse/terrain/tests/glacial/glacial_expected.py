@@ -29,12 +29,14 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'parity'))
 import _blender as B  # noqa: E402
+import _hooks as HK  # noqa: E402
 
 B.bare_terrain_package()
 import numpy as np  # noqa: E402
 
 from eidoblend.terrain.core import levels as L  # noqa: E402
 from eidoblend.terrain.core import twins as T  # noqa: E402
+from eidoblend.terrain.core import world_noise as WN  # noqa: E402
 from eidoblend.terrain.core.fields import Fields  # noqa: E402
 from eidoblend.terrain.solvers import fluvial as FL  # noqa: E402
 from eidoblend.terrain.solvers import glacial as G  # noqa: E402
@@ -213,18 +215,46 @@ if want('synthetic'):
     A, _ = G.ice_flux_converge(TWIN, surf, np.ones_like(surf), cell, recv, 0.0, params={'ice_width_m': 0.0}, check=32)
     add('best_donor on the 64^2 dome', 'best_donor', {'cell': cell}, dict(recv=recv, A=A, up=G.best_donor(recv, A)))
 
-    # the flutes (test_flutes): a slope falling west, its contours wavy; numpy's world noise (no device)
+    # the flutes (test_flutes): a slope falling west, its contours wavy; numpy's world noise (no device). With each
+    # its rounding floor (PORT_PLAN.md 5.4 on the function: its input h moved by one float32 ulp on half the cells,
+    # default_rng([pattern, 1]), and the first noise field it makes moved likewise as it is made, the image the GPU
+    # path's first world_noise_field dispatch writes, default_rng([pattern, 1, 0, 1]); five patterns): the largest
+    # max |d| / range over them
+    def flutes_floor(h_in, lv_, params_, seed_):
+        base_ = G.wall_flutes(h_in.astype(F32), lv_, params_, seed_)
+        rg = float(np.ptp(base_)) or 1.0
+        worst = 0.0
+        field0 = WN.field
+        for pat in range(1, 6):
+            first = [True]
+
+            def nudged_field(*a, **k):
+                out = field0(*a, **k)
+                if first[0]:
+                    first[0] = False
+                    out = HK.nudge(np.asarray(out, F32), np.random.default_rng([pat, 1, 0, 1]))
+                return out
+            WN.field = nudged_field
+            try:
+                got = G.wall_flutes(HK.nudge(h_in.astype(F32), np.random.default_rng([pat, 1])), lv_, params_, seed_)
+            finally:
+                WN.field = field0
+            worst = max(worst, float(np.max(np.abs(np.asarray(got, np.float64) - base_))) / rg)
+        return worst
+
     lv = L.plan_levels(1000.0, 128, (0.0, 0.0), None, None, None)[0]
     X, Y = lv.xy()
     h = 0.8 * X + 0.1 * Y + 50.0 * np.sin(Y / 200.0)
     add('wall_flutes on a slope (128^2, 7.8 m)', 'wall_flutes', {'params': {}, 'seed': 1},
-        dict(h=h.astype(F32), flutes=G.wall_flutes(h, lv, {}, 1)), level=lv)
+        dict(h=h.astype(F32), flutes=G.wall_flutes(h.astype(F32), lv, {}, 1)), level=lv,
+        values=dict(floor=flutes_floor(h, lv, {}, 1)))
     lv2 = L.plan_levels(4000.0, 256, (300.0, -200.0), None, None, None)[0]
     X2, Y2 = lv2.xy()
     h2 = 600.0 + 0.3 * X2 - 0.5 * Y2 + 120.0 * np.sin(X2 / 700.0) * np.cos(Y2 / 900.0)
     pf = {'flute_weak': 0.6, 'flute_strong': 0.2}
     add('wall_flutes on a folded slope (256^2, 15.6 m)', 'wall_flutes', {'params': pf, 'seed': 8},
-        dict(h=h2.astype(F32), flutes=G.wall_flutes(h2, lv2, pf, 8)), level=lv2)
+        dict(h=h2.astype(F32), flutes=G.wall_flutes(h2.astype(F32), lv2, pf, 8)), level=lv2,
+        values=dict(floor=flutes_floor(h2, lv2, pf, 8)))
 
     # drainage_receivers (test_drainage_receivers): rough ground with basins; a cell 1 mm above a broad flat
     rng = np.random.default_rng(6)
@@ -308,23 +338,48 @@ if want('synthetic'):
     lv, h = v_valley()
     params = dict(gp, ela_m=500.0, trough_depth_m=600.0, cirques=False, channel_area_m2=1.0e6)
 
-    def carve_of(h_in):
+    def carve_of(h_in, pattern=None):
         fl_ = Fields(lv, {'h': h_in.copy(), 'bed': h_in.copy()})
         ctx_ = FL.StageContext(plan=[lv], index=0, level=lv, prepass=None, fresh=False, role='grow',
                                pins=FL.edge_pins(lv.n, h_in), shared={}, seed=1, base_elevation_m=0.0, device=TWIN,
                                log=lambda m: None)
-        return fl_, G.carve_level(fl_, lv, params, 1, ctx_, TWIN)
+        if pattern is None:
+            return fl_, G.carve_level(fl_, lv, params, 1, ctx_, TWIN)
+        # a perturbed run, as the stage floors' (tests/parity/_hooks.py, PORT_PLAN.md 5.4): every float32 field of
+        # the level one ulp up on a quarter of the cells and down on a quarter at the op's entry (default_rng([pattern,
+        # 1]), the fields in sorted order), and each kernel's images likewise right after its first dispatch in the
+        # call (default_rng([pattern, 1, the kernel's index in first-dispatch order, 1]), the images in sorted order),
+        # but the jump flood's: they hold packed cell indices, which a nudge turns into other seeds' (carve_floor.py)
+        rng = np.random.default_rng([pattern, 1])
+        for key in sorted(fl_.keys()):
+            v = fl_[key]
+            if isinstance(v, np.ndarray) and v.dtype == F32 and v.ndim == 2:
+                fl_[key] = HK.nudge(v, rng)
+        names = []
+        run0 = TWIN.run
+
+        def run(kernel, samplers, images, uniforms):
+            out = run0(kernel, samplers, images, uniforms)
+            name = kernel.name if hasattr(kernel, 'name') else kernel
+            if name not in names:
+                names.append(name)
+                krng = np.random.default_rng([pattern, 1, len(names) - 1, 1])
+                for k_ in sorted(images):
+                    if name != 'jump_flood':
+                        images[k_].a = HK.nudge(images[k_].a, krng)
+            return out
+        TWIN.run = run
+        try:
+            return fl_, G.carve_level(fl_, lv, params, 1, ctx_, TWIN)
+        finally:
+            del TWIN.run
 
     fields, rec = carve_of(h)
-    # the carve's own floor (PORT_PLAN.md 5.4 item 1(a), the op-entry point): h moved by one float32 ulp on half the
-    # cells (+1 on a quarter, -1 on a quarter, default_rng([pattern, 0])), five patterns; per field the largest
-    # max |d| / range over them
+    # the carve's own floor (PORT_PLAN.md 5.4, as the stage floors measure it): the op-entry and in-op perturbations
+    # above, five patterns; per field the largest max |d| / range over them
     floor = {}
     for pat in range(1, 6):
-        rng = np.random.default_rng([pat, 0])
-        r = rng.random(h.shape)
-        hp = np.where(r < 0.25, np.nextafter(h, F32(np.inf)), np.where(r < 0.5, np.nextafter(h, F32(-np.inf)), h)).astype(F32)
-        fp, _ = carve_of(hp)
+        fp, _ = carve_of(h, pat)
         for k, v in fields.items():
             if np.ndim(v) != 2 or k not in fp:
                 continue

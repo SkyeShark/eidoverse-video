@@ -47,7 +47,7 @@ import { createHash } from 'node:crypto';
 import * as Gd from '../core/grid.js';
 import { ValueError, pyFormat, pyRepr, pyRound } from '../core/levels.js';
 import { defaultRng } from '../core/np_random.js';
-import { keyToFloat, prims } from '../core/prims.js';
+import { f32AtOrBelow, keyToFloat, prims } from '../core/prims.js';
 import * as N from '../core/world_noise.js';
 import * as FL from './fluvial.js';
 import * as HS from './hillslope.js';
@@ -591,7 +591,7 @@ const AGED_PATCHES = new Map();
 export function clearMemos() {
     for (const p of AGED_PATCHES.values()) if (!p.field.destroyed) p.field.destroy();
     AGED_PATCHES.clear();
-    for (const t of FACE_TABLES.values()) for (const f of [t.Z, t.S, t.S0]) if (f && !f.destroyed) f.destroy();
+    for (const t of FACE_TABLES.values()) for (const f of [t.zst, t.s0t]) if (f && !f.destroyed) f.destroy();
     FACE_TABLES.clear();
     NOISE_TABLES.clear();
 }
@@ -1706,8 +1706,1739 @@ export async function opCalderaCollapse(fields, level, params, seed = 0, ctx = n
 }
 
 
+// ====================================================================== the surroundings (design 4.7, 5) ===
+
+export const SETTING_DEFAULTS = Object.freeze({ centre: [0.0, 0.0], basin_m: 12000.0, ramp_m: 6000.0, cover: 0.6,
+    patch_m: 9000.0, texture: 0.35, U_m_per_yr: 3e-3, start_m: 600.0, start_roughness: 0.4, keep_m: null, far_m: null,
+    tilt_azimuth_deg: 0.0, tilt: 0.0, plain: 0.0, plain_m: 0.0, plain_slope: 0.0, plain_slope_up: null,
+    plain_down_azimuth_deg: 180.0, plain_extent_m: 30000.0, open_azimuth_deg: null, open_half_deg: 60.0, plain_k: 1.0,
+    plain_rough_m: 0.0, plain_rough_scale_m: 2500.0, plain_blend_m: 25.0, plain_radius_m: null, plain_taper_m: 8000.0,
+    shield_m: 0.0, shield_radius_m: 1500.0, plain_fill_max_m: null, plain_rough_inner: null });
+
+/** Python's statistics.NormalDist().inv_cdf(p) (Wichura's AS241, as statistics._normal_dist_inv_cdf computes it). */
+export function normalInvCdf(p) {
+    const q = p - 0.5;
+    let num, den, r;
+    if (Math.abs(q) <= 0.425) {
+        r = 0.180625 - q * q;
+        num = (((((((2.5090809287301226727e+3 * r + 3.3430575583588128105e+4) * r + 6.7265770927008700853e+4) * r +
+            4.5921953931549871457e+4) * r + 1.3731693765509461125e+4) * r + 1.9715909503065514427e+3) * r +
+            1.3314166789178437745e+2) * r + 3.3871328727963666080e+0) * q;
+        den = (((((((5.2264952788528545610e+3 * r + 2.8729085735721942674e+4) * r + 3.9307895800092710610e+4) * r +
+            2.1213794301586595867e+4) * r + 5.3941960214247511077e+3) * r + 6.8718700749205790830e+2) * r +
+            4.2313330701600911252e+1) * r + 1.0);
+        return num / den;
+    }
+    r = q <= 0.0 ? p : 1.0 - p;
+    r = Math.sqrt(-Math.log(r));
+    if (r <= 5.0) {
+        r = r - 1.6;
+        num = (((((((7.7454501427834140764e-4 * r + 2.2723844989269184583e-2) * r + 2.4178072517745061177e-1) * r +
+            1.2704582524523683826e+0) * r + 3.6478483247632045505e+0) * r + 5.7694972214606914055e+0) * r +
+            4.6303378461565452959e+0) * r + 1.4234371107496835773e+0);
+        den = (((((((1.0507500716444168432e-9 * r + 5.4759380849953449460e-4) * r + 1.5198666563616457197e-2) * r +
+            1.4810397642748007459e-1) * r + 6.8976733498510000455e-1) * r + 1.6763848301838038494e+0) * r +
+            2.0531916266377588219e+0) * r + 1.0);
+    } else {
+        r = r - 5.0;
+        num = (((((((2.0103343992922881326e-7 * r + 2.7115555687434875782e-5) * r + 1.2426609473880784386e-3) * r +
+            2.6532189526576123093e-2) * r + 2.9656057182850489123e-1) * r + 1.7848265399172913358e+0) * r +
+            5.4637849111641143699e+0) * r + 6.6579046435011037772e+0);
+        den = (((((((2.0442631033899397856e-15 * r + 1.4215117583164458887e-7) * r + 1.8463183175100546818e-5) * r +
+            7.8686913114561329059e-4) * r + 1.4875361290850614852e-2) * r + 1.3692988092273580531e-1) * r +
+            5.9983220655588793769e-1) * r + 1.0);
+    }
+    let x = num / den;
+    if (q < 0.0) x = -x;
+    return x;
+}
+
+/** gradient-noise terms as the kernels' `ntab` reads them, for a grid: two texels each, [scale, seed] per term (the
+ * lattice's integer base and the float32 offset of the grid's origin in doubles; the seed's low 32 bits). */
+export function noiseTexels(grid, terms) {
+    const out = new Float32Array(8 * Math.max(terms.length, 1));
+    const bits = new Uint32Array(out.buffer);
+    terms.forEach(([scale, seed], k) => {
+        const bx = Math.floor(grid.ox / scale), by = Math.floor(grid.oy / scale);
+        out.set([bx, by, grid.ox / scale - bx, grid.oy / scale - by], 8 * k);
+        out[8 * k + 4] = grid.step / scale;
+        bits[8 * k + 5] = u32of(seed);
+    });
+    return out;
+}
+
+/** fbm's octave terms: scale / 2^o at int(seed) * 7919 + 101 o + 17. */
+export const fbmTerms = (scale, seed, octaves = 2) =>
+    Array.from({ length: octaves }, (_, o) => [scale / 2.0 ** o, Math.trunc(seed) * 7919 + 101 * o + 17]);
+
+/** _unit_fbm: core/world_noise.js fbm of unit standard deviation (3 x the field's 1/3) at a level's cells, on the GPU
+ * (Blender's _world_field on its GPU device: field_gpu). A new field. */
+export function unitFbm(R, level, wavelengthM, seed, octaves = 3) {
+    const f = N.fieldGpu(R, { kind: 'fbm', wavelength_m: Number(wavelengthM), octaves: Math.trunc(octaves) }, level, Math.trunc(seed));
+    const g = ew(R, EW.LERP, null, f, null, null, 0.0, 3.0, [f.h, f.w]);
+    f.destroy();
+    return g;
+}
+
+// the setting's numbers as kernels/volcanic/setting.wgsl reads them
+function settingTexels(p, extra = {}) {
+    const t = new Float32Array(40);
+    const cover = Number(p.cover);
+    const tcov = cover < 0.999 ? normalInvCdf(Math.min(Math.max(1.0 - cover, 1e-3), 1.0 - 1e-3)) : 0.0;
+    const [tex, tey] = compass(Number(p.tilt_azimuth_deg));
+    const [dex, dey] = compass(Number(p.plain_down_azimuth_deg));
+    const s = Number(p.plain_slope), su = p.plain_slope_up === null || p.plain_slope_up === undefined ? s : Number(p.plain_slope_up);
+    const s0 = Math.max(s, Number(p.plain_slope_up ?? 0.0) || 0.0);
+    const inner = truthy(p.plain_rough_inner) ? p.plain_rough_inner : null;
+    t.set([Number(p.basin_m), Number(p.ramp_m), cover < 0.999 ? 1 : 0, tcov], 0);
+    t.set([Number(p.texture), p.open_azimuth_deg === null || p.open_azimuth_deg === undefined ? 0 : 1,
+        radians(Number(p.open_azimuth_deg ?? 0.0)), Number(p.open_half_deg)], 4);
+    t.set([Number(p.plain), Number(p.tilt), tex, tey], 8);
+    t.set([Number(p.plain_m), Number(p.shield_m), Number(p.shield_radius_m), s], 12);
+    t.set([su, dex, dey, Number(p.plain_extent_m)], 16);
+    t.set([Number(p.plain_rough_m), s0, inner ? 1 : 0, inner ? num(inner.factor, 0.3) : 0.0], 20);
+    t.set([inner ? Number(inner.r0_m) : 0.0, inner ? Number(inner.r1_m) : 0.0,
+        p.plain_radius_m === null || p.plain_radius_m === undefined ? -1.0 : Number(p.plain_radius_m), Number(p.plain_taper_m)], 24);
+    t.set([extra.keep ?? 0.0, extra.far ?? 0.0, extra.plain ? 1 : 0, Number(p.plain_k)], 28);
+    t.set([Number(p.start_m), Number(p.start_roughness), extra.pk ?? 1.0, Number(p.plain_blend_m)], 32);
+    t.set([Number(p.plain_fill_max_m ?? 0.0) || 0.0, 0.3 * Number(p.basin_m), extra.limit ? 1 : 0, extra.apron ? 1 : 0], 36);
+    return t;
+}
+
+const OUT_DUMMIES = new WeakMap();
+
+/** A runner's 1 x 1 stand-ins for the images a kernel's mode does not write: never bound as samplers (core/gpu.js
+ * refuses one field as a sampler and an image, or as two images, of one dispatch). */
+export function outDummies(R) {
+    let d = OUT_DUMMIES.get(R);
+    if (!d) {
+        d = { f: [R.field(1, 1, 1), R.field(1, 1, 1), R.field(1, 1, 1)], u: R.field(1, 1, 1, null, 'u32') };
+        OUT_DUMMIES.set(R, d);
+    }
+    return d;
+}
+
+// one mode of kernels/volcanic/setting.wgsl at a level's cells: [outF, outG (modes 7 and 9)]
+function settingRun(R, level, p, mode, inputs = {}, extra = {}) {
+    const [x0, y0, cell, n] = levelWindow(level);
+    const D = Gd.dummies(R);
+    const prm = R.field(1, 10, 4, settingTexels(p, extra));
+    const two = mode === 7 || mode === 9;
+    const f = R.field(n, n, 1), g = two ? R.field(n, n, 1) : outDummies(R).f[0];
+    const c = [Number(p.centre[0]), Number(p.centre[1])];
+    R.run('volcanic/setting', { a: inputs.a ?? D.f1, b: inputs.b ?? D.f1, c: inputs.c ?? D.f1, d: inputs.d ?? D.f1, prm },
+        { outF: f, outG: g }, { uMode: mode, uOrg: [x0 - c[0], y0 - c[1]], uStep: cell }, groupsOf(n, n));
+    prm.destroy();
+    return two ? [f, g] : [f];
+}
+
+/** setting_shape: the uplift shape of a volcano's surroundings, about 0..1 at the level's cells (a new field). */
+export function settingShape(R, level, params, seed) {
+    const p = { ...SETTING_DEFAULTS, ...(params ?? {}) };
+    const a = Number(p.cover) < 0.999 ? unitFbm(R, level, Number(p.patch_m), Math.trunc(seed) + 501) : null;
+    const b = Number(p.texture) > 0.0 ? unitFbm(R, level, Number(p.patch_m) / 3.0, Math.trunc(seed) + 503) : null;
+    const [out] = settingRun(R, level, p, 0, { a, b });
+    for (const f of [a, b]) if (f) f.destroy();
+    return out;
+}
+
+/** plain_surface: setting_plain plus the apron's lobes and swells (world noise) at a level's cells (a new field). */
+export function plainSurface(R, level, params, seed) {
+    const p = { ...SETTING_DEFAULTS, ...(params ?? {}) };
+    let a = null, b = null;
+    if (Number(p.plain_rough_m) > 0.0) {
+        const sc = Number(p.plain_rough_scale_m);
+        a = unitFbm(R, level, sc, Math.trunc(seed) + 37, 4);
+        b = unitFbm(R, level, 0.25 * sc, Math.trunc(seed) + 39, 3);
+    }
+    const [out] = settingRun(R, level, p, 1, { a, b });
+    for (const f of [a, b]) if (f) f.destroy();
+    return out;
+}
+
+/** _apron_limit: 1 where the apron may reach (a new field). */
+export function apronLimit(R, level, params) {
+    const p = { ...SETTING_DEFAULTS, ...(params ?? {}) };
+    return settingRun(R, level, p, 2)[0];
+}
+
+/** _reach: 1 on the 8-connected parts of `mask` (a u32 field, nonzero on) holding a seed, 0 elsewhere: the vent's cell
+ * when the level holds it, plus `seeds` (a float field, > 0.5 on); every part when no part holds a seed. A new field. */
+export async function reach(R, mask, level, params, seeds = null) {
+    const P = prims(R), D = Gd.dummies(R);
+    const { labels, count } = await P.label(mask);
+    const [x0, y0, cell, n] = levelWindow(level);
+    if (!count) {
+        labels.destroy();
+        return Gd.fill(R, [n, n], 0.0);
+    }
+    const c = (params ?? {}).centre ?? [0.0, 0.0];
+    const i = Math.floor((Number(c[0]) - x0) / cell), j = Math.floor((Number(c[1]) - y0) / cell);
+    const vent = i >= 0 && i < n && j >= 0 && j < n ? [i, j] : [-1, -1];
+    const keep = R.field(1, count + 1, 1, null, 'u32');
+    R.run('volcanic/reach', { lab: labels, seeds: seeds ?? D.f1 }, { keep, outF: outDummies(R).f[0] },
+        { uMode: 0, uSeeds: seeds ? 1 : 0, uVent: vent, uAll: 0 }, groupsOf(n, n));
+    const k = await R.read(keep);
+    let any = false;
+    for (let L = 1; L <= count; L++) if (k[L]) { any = true; break; }
+    const out = R.field(n, n, 1);
+    R.run('volcanic/reach', { lab: labels, seeds: D.f1 }, { keep, outF: out }, { uMode: 1, uSeeds: 0, uVent: [-1, -1], uAll: any ? 0 : 1 },
+        groupsOf(n, n));
+    keep.destroy();
+    labels.destroy();
+    return out;
+}
+
+/** Stage op 'volcano_setting': the ground a volcano grows on, for a fluvial stage to carve before the cone is stamped
+ * (volcanic.py op_volcano_setting; its docstring holds). On the coarsest level U = U_m_per_yr x the shape and, with a
+ * plain, the plain pinned as the ranges' base level for the fluvial stage of the same pass (ctx.pins, _setting); on
+ * the fresh pass h = bed = the plain plus the shape scaled to start_m, roughened. Every level gets K_factor (plain_k)
+ * and 'volcano_far'. */
+export async function opVolcanoSetting(fields, level, params, seed = 0, ctx = null) {
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const p = { ...SETTING_DEFAULTS, ...(params ?? {}) };
+    const grow = ctx === null || ctx === undefined || (ctx.role ?? 'grow') === 'grow';
+    const fresh = ctx === null || ctx === undefined || !!ctx.fresh;
+    const [, , , n] = levelWindow(level);
+    const shape = settingShape(R, level, p, seed);
+    const own = [shape];
+    if (grow) fields.U = ew(R, EW.LERP, null, shape, null, null, 0.0, Number(p.U_m_per_yr));
+    if (Number(p.plain_k) !== 1.0) fields.K_factor = settingRun(R, level, p, 4, { a: shape })[0];
+    let plainW = null;
+    if (Number(p.plain_m) !== 0.0 || Number(p.plain_slope) !== 0.0) {
+        const low = P.where(shape, '<', 0.12);
+        const rc = await reach(R, low, level, p);
+        low.destroy();
+        const lim = apronLimit(R, level, p);
+        plainW = settingRun(R, level, p, 5, { a: shape, b: rc, c: lim })[0];
+        rc.destroy();
+        lim.destroy();
+        own.push(plainW);
+    }
+    const plain = plainW !== null || fresh ? plainSurface(R, level, p, seed) : null;
+    if (plain) own.push(plain);
+    let smax = null;
+    if (fresh) {
+        const nf = N.fieldGpu(R, { kind: 'fbm', wavelength_m: 0.3 * Number(p.patch_m), octaves: 5 }, level, Math.trunc(seed) + 31);
+        smax = (await P.stats(shape)).max;
+        const pk = Math.max(smax, 1e-9);
+        const h0 = settingRun(R, level, p, 6, { a: plain, b: shape, c: nf }, { pk })[0];
+        nf.destroy();
+        fields.h = h0;
+        fields.bed = copyOf(h0);
+    }
+    if (grow && plainW !== null && ctx && Number(p.U_m_per_yr) > 0.0) {
+        smax = smax ?? (await P.stats(shape)).max;
+        if (smax > 0.0) {                         // only when there are ranges to grow on it
+            const edge = FL.edgePins(R, n, fields.h);
+            const [w, ph] = settingRun(R, level, p, 7, { a: edge.pin_w, b: edge.pin_h, c: plainW, d: plain });
+            edge.pin_w.destroy();
+            edge.pin_h.destroy();
+            releaseSettingPins(ctx);
+            ctx.pins = { pin_w: w, pin_h: ph, A_in: edge.A_in, qs_in: edge.qs_in, _setting: true };
+        }
+    }
+    if (grow) {
+        fields.volcano_far = Gd.fill(R, [n, n], 1.0);
+    } else {
+        const keep = Number(p.keep_m ?? p.basin_m);
+        const far = Number(p.far_m ?? Number(p.basin_m) + Number(p.ramp_m));
+        fields.volcano_far = settingRun(R, level, p, 3, { a: shape }, { keep, far, plain: plainW !== null })[0];
+    }
+    for (const f of own) if (!f.destroyed) f.destroy();
+    return fields;
+}
+
+// volcano_setting's pins (its own fields) released when they are dropped
+function releaseSettingPins(ctx) {
+    const pins = ctx?.pins;
+    if (pins && pins._setting) for (const k of ['pin_w', 'pin_h', 'A_in', 'qs_in']) if (pins[k] && !pins[k].destroyed) pins[k].destroy();
+}
+
+/** Stage op 'volcano_plain': the apron and lava plain a volcano spreads over its surroundings, filling the low ground
+ * its flows reach (volcanic.py op_volcano_plain): h = smooth_max(h, plain) over the parts of (plain above the ground)
+ * connected to the vent or to what the parent filled, dilated by 2 cells, fading out in deep valleys and beyond the
+ * apron's reach; the fill is deposit; 'apron' marks the reach. Skips the coarsest level's pre-passes. */
+export async function opVolcanoPlain(fields, level, params, seed = 0, ctx = null) {
+    if (ctx?.pins?._setting) {
+        releaseSettingPins(ctx);
+        ctx.pins = null;                          // volcano_setting's plain pins served the fluvial stage of this pass
+    }
+    if (isPrepass(ctx)) return fields;
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const p = { ...SETTING_DEFAULTS, ...(params ?? {}) };
+    const plain = plainSurface(R, level, p, seed);
+    const keep = p.plain_radius_m !== null && p.plain_radius_m !== undefined ? apronLimit(R, level, p) : null;
+    const h = fields.h;
+    const [mask, seeds] = settingRun(R, level, p, 9, { a: h, b: plain, c: 'apron' in fields ? fields.apron : null },
+        { apron: 'apron' in fields });
+    const mu = P.where(mask, '>', 0.5);
+    mask.destroy();
+    const rc = await reach(R, mu, level, p, seeds);
+    mu.destroy();
+    seeds.destroy();
+    const dil = P.dilate(rc, 2);
+    const fill = settingRun(R, level, p, 8, { a: h, b: plain, c: dil, d: keep }, { limit: keep !== null })[0];
+    for (const f of [dil, plain, keep]) if (f) f.destroy();
+    fields.apron = rc;
+    fields.h = ew(R, EW.ADD, h, fill);
+    fields.deposit = 'deposit' in fields ? ew(R, EW.ADD, fields.deposit, fill) : fill;
+    if (fields.deposit !== fill) fill.destroy();
+    pullBand(fields, ctx);
+    return fields;
+}
+
+
+// =================================================================================== radial streaks, ravines ===
+
+/** radial_streaks (or with rills, cone_rills' cone) on a grid about centre: unit-RMS streaks running down a cone in
+ * bands of log radius, wandering sideways, sparse troughs only. A new field (mode 0), or the rills combined into
+ * `into` over rect (mode 1). */
+function streaksRun(R, grid, centre, st, seed, opts = {}) {
+    const k = st.k ?? [40, 160], decay = num(st.decay, 0.6), rr = (st.r_m ?? [1000.0, 10000.0]).map(Number);
+    const bands = Math.trunc(num(st.bands, 3));
+    const wander = num(st.wander_m, 0.0), wsc = num(st.wander_scale_m, 2000.0);
+    const sparse = st.sparse === undefined || st.sparse === null ? null : Number(st.sparse);
+    const tabs = new AzTables();
+    for (let b = 0; b < bands; b++) tabs.add(azimuthNoiseTable(Math.trunc(seed), 600 + b, Math.trunc(k[0]), Math.trunc(k[1]), decay));
+    const l0 = Math.log(rr[0]), l1 = Math.log(rr[1]);
+    const wid = (l1 - l0) / Math.max(bands, 1);
+    const prm = R.field(1, 3, 4, Float32Array.from([l0, l1, wid, bands, sparse === null ? 0 : 1, sparse ?? 0.0, wander,
+        0.25 * wsc, 0, opts.fade ?? 0.0, opts.rcr ?? 0.0, opts.R ?? 0.0]));
+    const ntab = R.field(1, 4, 4, noiseTexels(grid, fbmTerms(wsc, Math.trunc(seed) + 613, 2)));
+    const out = opts.into ?? R.field(grid.h, grid.w, 1);
+    const rect = opts.rect ?? [0, 0, grid.w, grid.h];
+    R.run('volcanic/streaks', { azt: tabs.field(R), prm, ntab }, { outF: out },
+        { uMode: opts.into ? 1 : 0, uOrg: [grid.ox - Number(centre[0]), grid.oy - Number(centre[1])], uStep: grid.step, uRect: rect },
+        opts.into ? groupsOf(rect[2] - rect[0], rect[3] - rect[1]) : groupsOf(grid.w, grid.h));
+    prm.destroy();
+    ntab.destroy();
+    tabs.destroy();
+    return out;
+}
+
+/** radial_streaks at a level's cells about centre (volcanic.py; st: { k, decay, r_m, bands, wander_m, wander_scale_m,
+ * sparse }). A new field. */
+export function radialStreaks(R, level, centre, st, seed) {
+    return streaksRun(R, levelGrid(level), centre, st, seed);
+}
+
+/** cone_rills: rills down cinder cones' flanks, metres to cut (>= 0), on a grid (volcanic.py cone_rills). A new field. */
+export function coneRills(R, grid, blocks, cones, depthM = 1.5, spacingM = 25.0, seed = 0) {
+    const out = Gd.fill(R, [grid.h, grid.w], 0.0);
+    cones.forEach((c, k) => {
+        const W = num(c.width_m, 800.0);
+        const Rr = 0.5 * W * Math.max(1.0, num(c.elongation, 1.0));
+        const rcr = 0.5 * W * num(c.crater_ratio, 0.4);
+        const fade = Math.exp(-(Number(c.kappa_t_m2 ?? 0.0) || 0.0) / 400.0);
+        if (fade < 0.05 || Rr <= rcr * 1.5) return;
+        const rMid = 0.5 * (rcr + Rr);
+        const kMid = TAU * rMid / Number(spacingM);
+        const at = [Number(c.at[0]), Number(c.at[1])];
+        const sd = Math.trunc(num(c.seed, 0)) * 13 + Math.trunc(seed) * 7 + k;
+        const st = { k: [Math.max(Math.trunc(0.5 * kMid), 4), Math.max(Math.trunc(2.0 * kMid), 8)], decay: 0.5, r_m: [rcr, Rr],
+            bands: 2, wander_m: 4.0, wander_scale_m: 80.0, sparse: 0.0 };
+        for (const [lo, hi] of blocks) {
+            const sl = grid.support(at, 1.05 * Rr, lo, hi);
+            if (!sl || !(sl[1] > sl[0] && sl[3] > sl[2])) continue;
+            streaksRun(R, grid, at, st, sd, { into: out, rect: [sl[2], sl[0], sl[3], sl[1]], fade: Number(depthM) * fade, rcr, R: Rr });
+        }
+    });
+    return out;
+}
+
+/** ravine_cut: the depth (>= 0) of radial ravines cut into a cone at a level's cells (volcanic.py). A new field. */
+export function ravineCut(R, level, centre, ravines, seed = 0) {
+    const [x0, y0, cell, n] = levelWindow(level);
+    const t = new Float32Array(8 * Math.max(ravines.length, 1));
+    const bits = new Uint32Array(t.buffer);
+    ravines.forEach((rv, k) => {
+        t.set([radians(Number(rv.azimuth_deg)), Number(rv.r_m[0]), Number(rv.r_m[1]), Number(rv.depth_m)], 8 * k);
+        t.set([Number(rv.width_m), num(rv.wander_m, 0.0), k, 0.0], 8 * k + 4);
+        bits[8 * k + 7] = u32of(Math.trunc(seed) + 97 + k);
+    });
+    const rtab = R.field(1, 2 * Math.max(ravines.length, 1), 4, t);
+    const out = R.field(n, n, 1);
+    R.run('volcanic/ravines', { rtab }, { outF: out }, { uOrg: [x0 - Number(centre[0]), y0 - Number(centre[1])], uStep: cell,
+        uCount: ravines.length });
+    rtab.destroy();
+    return out;
+}
+
+/** The ravines a 'volcano_age' stage cuts: params ravines plus ravine_field's, drawn (volcanic.py ravines_of). */
+export function ravinesOf(params, seed) {
+    const out = (params.ravines ?? []).map((rv) => ({ ...rv }));
+    const f = params.ravine_field;
+    if (truthy(f)) {
+        const rng = rngOf(seed, 93);
+        for (let i = 0; i < Math.trunc(num(f.count, 4)); i++) {
+            const r0 = rng.uniform(Number(f.r_m[0]), Number(f.r_m[1]));
+            out.push({ azimuth_deg: rng.uniform(0.0, 360.0), r_m: [r0, r0 + rng.uniform(Number(f.length_m[0]), Number(f.length_m[1]))],
+                depth_m: rng.uniform(Number(f.depth_m[0]), Number(f.depth_m[1])),
+                width_m: rng.uniform(Number(f.width_m[0]), Number(f.width_m[1])), wander_m: num(f.wander_m, 0.0) });
+        }
+    }
+    return out;
+}
+
+
+// ===================================================================================== rubble and rills ===
+
+/** lava_rubble: an aa flow's rubbly top on a grid (metres to add, >= 0): ridged gradient noise at each scale. */
+export function lavaRubble(R, grid, scales = [8.0, 3.0, 1.2], amps = [1.2, 0.6, 0.3], seed = 0) {
+    const D = Gd.dummies(R);
+    const terms = scales.map((s, i) => [Number(s), Math.trunc(seed) * 7907 + 131 * i + 29]);
+    const ntab = R.field(1, 2 * Math.max(terms.length, 1), 4, noiseTexels(grid, terms));
+    const af = R.field(1, Math.max(amps.length, 1), 1, Float32Array.from(amps.length ? amps.map(Number) : [0]));
+    const out = R.field(grid.h, grid.w, 1);
+    R.run('volcanic/rubble', { ntab, amps: af, lava: D.f1, rub: D.f1 }, { outF: out }, { uMode: 0, uCount: terms.length });
+    ntab.destroy();
+    af.destroy();
+    return out;
+}
+
+// stampAdd on a temporary Fields holding h = 0 (and the stamp's own field when inherited): the shape's share here
+async function tempStamp(fields, level, key, evaluate, ctx, block = true) {
+    const R = fields.R;
+    const { Fields } = await import('../core/fields.js');
+    const [, , , n] = levelWindow(level);
+    const tmp = new Fields(level, { h: Gd.fill(R, [n, n], 0.0) }, R);
+    if (key in fields) tmp[key] = copyOf(fields[key]);
+    const here = await stampAdd(tmp, level, key, evaluate, 1, ctx, null, block);
+    release(here);
+    return tmp;
+}
+
+/** Stage op 'lava_rubble': the flows' rough aa top on the levels fine enough to show it, where the 'lava' field says
+ * a flow lies, as strong as its footprint there, into h and bed (stampAdd: the same world function on every level). */
+export async function opLavaRubble(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx) || !('lava' in fields)) return fields;
+    const R = runnerOf(fields, ctx);
+    const sc = (params.scales_m ?? [8.0, 3.0, 1.2]).map(Number), am = (params.amps_m ?? [1.2, 0.6, 0.3]).map(Number);
+    const sd = Math.trunc(Number(params.seed ?? seed));
+    const key = stampKey('lava_rubble', { scales_m: sc, amps_m: am, seed: sd });
+    const tmp = await tempStamp(fields, level, key, async (grid) => ({ h: lavaRubble(R, grid, sc, am, sd) }), ctx);
+    const D = Gd.dummies(R);
+    const add = R.like(fields.h);
+    R.run('volcanic/rubble', { ntab: D.f1, amps: D.f1, lava: fields.lava, rub: tmp.h }, { outF: add }, { uMode: 1, uCount: 0 });
+    fields.h = ew(R, EW.ADD, fields.h, add);
+    if ('bed' in fields) fields.bed = ew(R, EW.ADD, fields.bed, add);
+    add.destroy();
+    fields[key] = copyOf(tmp[key]);
+    tmp.dispose();
+    pullBand(fields, ctx);
+    return fields;
+}
+
+/** Stage op 'cone_rills': cone_rills cut into h on the levels fine enough to hold them (stampAdd), in the loose scoria
+ * only (h never below bed). params: the cinder_cones stage's cones / field / kappa_m2_per_yr, depth_m, spacing_m. */
+export async function opConeRills(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx)) return fields;
+    const R = runnerOf(fields, ctx);
+    const cones = conesOf(params, seed);
+    const d = num(params.depth_m, 1.5), sp = num(params.spacing_m, 25.0);
+    const key = stampKey('cone_rills', { ...params, seed });
+    const tmp = await tempStamp(fields, level, key, async (grid, blocks) => {
+        const c = coneRills(R, grid, blocks, cones, d, sp, seed);
+        const neg = ew(R, EW.LERP, null, c, null, null, 0.0, -1.0);
+        c.destroy();
+        return { h: neg };
+    }, ctx, false);
+    let h = ew(R, EW.ADD, fields.h, tmp.h);
+    if ('bed' in fields) {
+        const hb = ew(R, EW.MAX, h, fields.bed);
+        h.destroy();
+        h = hb;
+    }
+    fields.h = h;
+    fields[key] = copyOf(tmp[key]);
+    tmp.dispose();
+    pullBand(fields, ctx);
+    return fields;
+}
+
+
+// ============================================================================== lakes, with dry craters ===
+
+export const LAKE_NONE = -1.0e6;                // 'lake_level_m' off the lakes
+
+// kernels/volcanic/lakes.wgsl, one mode at the cells of `lab` (or of ins.a): out fields as given ({ outF, outG, outH }),
+// stand-ins of their own elsewhere; stats the atomic per-label words
+function lakesRun(R, mode, lab, ins = {}, outs = {}, u = {}, stats = null, flags = null) {
+    const D = Gd.dummies(R), O = outDummies(R);
+    const ref = lab ?? ins.a;
+    R.run('volcanic/lakes', { a: ins.a ?? D.f1, b: ins.b ?? D.f1, c: ins.c ?? D.f1, d: ins.d ?? D.f1, lab: lab ?? D.u1,
+        flags: flags ?? D.u1 }, { stats: stats ?? O.u, outF: outs.outF ?? O.f[0], outG: outs.outG ?? O.f[1], outH: outs.outH ?? O.f[2] },
+    { uMode: mode, uOrg: u.uOrg ?? [0, 0], uStep: u.uStep ?? 1.0, uR: u.uR ?? -1.0, uK: u.uK ?? 0.0, uBand: u.uBand ?? 0,
+        uLabel: u.uLabel ?? 0 }, groupsOf(ref.w, ref.h));
+}
+
+/** A float 0 / 1 mask (kernels/volcanic/mask.wgsl): mode 0 lab == L, 1 lab != 0, 2 f > t. A new field. */
+function maskOf(R, mode, { lab = null, f = null, L = 0, t = 0.0 } = {}) {
+    const D = Gd.dummies(R);
+    const ref = lab ?? f;
+    const out = R.field(ref.h, ref.w, 1);
+    R.run('volcanic/mask', { lab: lab ?? D.u1, f: f ?? D.f1 }, { outF: out }, { uMode: mode, uLabel: L, uT: t }, groupsOf(ref.w, ref.h));
+    return out;
+}
+
+/** _carried_lakes: water on this level under the parent's lakes (the inherited lake levels grown by one cell), or null
+ * when there are none. A new field. */
+async function carriedLakes(R, fields) {
+    if (!('lake_level_m' in fields)) return null;
+    const P = prims(R);
+    const s = await P.stats(fields.lake_level_m);
+    if (!(s.max > 0.5 * LAKE_NONE)) return null;
+    const g = P.dilate(fields.lake_level_m, 1);
+    const out = R.like(fields.h);
+    lakesRun(R, 4, null, { a: g, b: fields.h }, { outF: out });
+    g.destroy();
+    return out;
+}
+
+// the largest labels by area, at most `count` (np.argsort(np.where(lake, area, -1))[::-1][:count]); ties of equal
+// area go to the larger label, as a stable ascending sort reversed gives them
+function largest(lake, area, count) {
+    const idx = Array.from({ length: lake.length }, (_, i) => i).filter((i) => lake[i]);
+    idx.sort((a, b) => (area[b] - area[a]) || (b - a));
+    return new Set(idx.slice(0, count));
+}
+
+/** Stage op 'volcano_lakes': the lakes of a volcanic or cratered landscape (volcanic.py op_volcano_lakes; its
+ * docstring holds): dry craters (and every cinder cone's crater with dry_cones), a depression of the design's depth
+ * and the given area holds water at its spill level (mode 'lake') within lake_radius_m, at most max_lakes (chosen on
+ * the coarsest level, kept below), every other one filled with sediment; playas in dry craters; the parent's lakes
+ * carried down. Writes water and lake_level_m; the fill goes into h and deposit. Skips the coarsest level's pre-passes. */
+export async function opVolcanoLakes(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx)) return fields;
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const HY = await import('./hydro.js');
+    const p = { ...(params ?? {}) };
+    if (truthy(p.dry_cones)) {
+        p.dry = [...(p.dry ?? []), ...conesOf(p.dry_cones, seed).map((c) => ({ at: c.at,
+            radius_m: 0.5 * num(c.width_m, 800.0) * num(c.crater_ratio, 0.4) + 20.0 }))];
+    }
+    const [x0, y0, cell, n] = levelWindow(level);
+    const h = fields.h;
+    const sea = ctx?.sea_level ?? null;
+    const { filled } = await HY.fillDepressions(h, { seaLevel: sea });
+    const depth = ew(R, EW.SUB, filled, h);
+    filled.destroy();
+    const dm = P.where(depth, '>', 1e-4);
+    const { labels: lab, count: nlab } = await P.label(dm);
+    dm.destroy();
+    let water = Gd.fill(R, [n, n], 0.0), add = Gd.fill(R, [n, n], 0.0);
+    let nl = 0, filledAny = false;
+    const child = bandPins(ctx) !== null;
+    const band = Math.trunc(level.band ?? 16);
+    if (nlab) {
+        // per depression: its deepest depth, area, whether it reaches the lake radius and the border band
+        const init = new Uint32Array(5 * (nlab + 1));
+        for (let L = 0; L <= nlab; L++) init[5 * L + 4] = 0xFFFFFFFF;
+        const stats = R.field(1, 5 * (nlab + 1), 1, init, 'u32');
+        const c0 = p.centre ?? [0.0, 0.0];
+        const lr = p.lake_radius_m === undefined || p.lake_radius_m === null ? -1.0 : Number(p.lake_radius_m);
+        lakesRun(R, 0, lab, { a: depth }, {}, { uOrg: [x0 - Number(c0[0]), y0 - Number(c0[1])], uStep: cell, uR: lr,
+            uBand: child ? band : -1 }, stats);
+        lakesRun(R, 1, lab, { a: depth }, {}, {}, stats);
+        const st = await R.read(stats);
+        stats.destroy();
+        const F = new Float32Array(st.buffer);
+        const maxd = new Float64Array(nlab + 1), area = new Float64Array(nlab + 1), near = new Uint8Array(nlab + 1);
+        const inBand = new Uint8Array(nlab + 1), deepest = new Int32Array(nlab + 1);
+        for (let L = 1; L <= nlab; L++) {
+            maxd[L] = F[5 * L];
+            area[L] = st[5 * L + 1] * cell ** 2;
+            near[L] = st[5 * L + 2];
+            inBand[L] = st[5 * L + 3];
+            deepest[L] = st[5 * L + 4];
+        }
+        const rel = ctx?.shared?.relief ?? null;
+        let thr;
+        if (p.min_depth_m !== undefined && p.min_depth_m !== null) thr = Number(p.min_depth_m);
+        else {
+            let r0 = rel;
+            if (!r0) {
+                const s = await P.stats(h);
+                r0 = s.max - s.min;
+            }
+            thr = HY.depressionThreshold(r0);
+        }
+        const dry = new Uint8Array(nlab + 1);
+        const playa = new Map();
+        if (truthy(p.dry)) {
+            for (const c of p.dry) {
+                const amin = Number(c.min_area_m2 ?? 0.02 * Math.PI * Number(c.radius_m) ** 2);
+                for (let L = 1; L <= nlab; L++) {
+                    const k = deepest[L];
+                    const xs = x0 + ((k % n) + 0.5) * cell, ys = y0 + (Math.floor(k / n) + 0.5) * cell;
+                    if (!(Math.hypot(xs - Number(c.at[0]), ys - Number(c.at[1])) < Number(c.radius_m))) continue;
+                    if (!(area[L] >= amin)) continue;
+                    dry[L] = 1;
+                    if (truthy(c.playa_frac)) playa.set(L, Number(c.playa_frac));
+                }
+            }
+        }
+        let lake = new Uint8Array(nlab + 1);
+        if ((p.mode ?? 'lake') === 'lake') {
+            for (let L = 1; L <= nlab; L++) {
+                let ok = maxd[L] > thr && area[L] >= num(p.min_area_m2, 0.0) && !dry[L] && !(child && inBand[L]);
+                if (ok && p.max_area_m2 !== undefined && p.max_area_m2 !== null) ok = area[L] <= Number(p.max_area_m2);
+                if (ok && lr >= 0.0) ok = near[L] > 0;
+                lake[L] = ok ? 1 : 0;
+            }
+            if (p.max_lakes !== undefined && p.max_lakes !== null) {
+                let cnt = 0;
+                for (let L = 1; L <= nlab; L++) cnt += lake[L];
+                if (cnt > Math.trunc(p.max_lakes)) {
+                    const keepSet = largest(lake, area, Math.trunc(p.max_lakes));
+                    lake = new Uint8Array(nlab + 1);
+                    for (const L of keepSet) lake[L] = 1;
+                }
+                if (child) {
+                    // the lakes were chosen on the coarsest level: keep the depressions holding the parent's lakes
+                    const held = await carriedLakes(R, fields);
+                    lake = new Uint8Array(nlab + 1);
+                    if (held) {
+                        const hm = R.field(1, nlab + 1, 1, null, 'u32');
+                        lakesRun(R, 8, lab, { a: held }, {}, { uK: 1e-3 }, hm);
+                        held.destroy();
+                        const hc = await R.read(hm);
+                        hm.destroy();
+                        for (let L = 1; L <= nlab; L++) if (hc[L]) lake[L] = 1;
+                    }
+                }
+            }
+        }
+        lake[0] = 0;
+        const flags = new Uint32Array(nlab + 1);
+        for (let L = 1; L <= nlab; L++) flags[L] = (lake[L] ? 1 : 0) | (dry[L] ? 2 : 0) | (inBand[L] ? 4 : 0);
+        const ff = R.field(1, nlab + 1, 1, flags, 'u32');
+        const ed = child ? Gd.edgeDistance(R, n) : null;
+        const hero = level.role === 'hero' && p.hero_pits === 'keep';
+        lakesRun(R, 2, lab, { a: depth, b: ed }, { outF: water, outG: add }, { uBand: (child ? 1 : 0) | (hero ? 2 : 0) }, null, ff);
+        ff.destroy();
+        if (ed) ed.destroy();
+        for (const [L, frac] of playa) {
+            if (inBand[L]) continue;               // a hero window inside the crater holds only part of it
+            const cells = maskOf(R, 0, { lab, L });
+            const top = await P.quantile(h, Math.min(Math.max(frac + 0.06, 0.0), 0.95), { mask: cells, dtype: 'float64' });
+            const s = await P.stats(h, { mask: cells });
+            const k = Math.max(0.08 * (s.max - s.min), 1e-3);
+            cells.destroy();
+            lakesRun(R, 3, lab, { a: h }, { outF: add }, { uR: top, uK: k, uLabel: L });
+        }
+        for (let L = 1; L <= nlab; L++) nl += lake[L];
+        filledAny = true;
+    }
+    lab.destroy();
+    depth.destroy();
+    const carried = await carriedLakes(R, fields) ?? Gd.fill(R, [n, n], 0.0);
+    const h2 = R.like(h), w2 = R.like(h), ll = R.like(h);
+    lakesRun(R, 5, null, { a: h, b: add, c: water, d: carried }, { outF: h2, outG: w2, outH: ll });
+    carried.destroy();
+    water.destroy();
+    const addStats = filledAny ? await P.stats(add, { mask: add }) : { count: 0 };
+    fields.h = h2;
+    if (addStats.count) fields.deposit = 'deposit' in fields ? ew(R, EW.ADD, fields.deposit, add) : copyOf(add);
+    add.destroy();
+    fields.water = w2;
+    fields.lake_level_m = ll;
+    if (ctx && typeof ctx.log === 'function') {
+        ctx.log(`[terrain.volcanic] lakes on ${n}^2 @ ${pyFormat(cell, '.3g')} m: ${nl} lakes, ` +
+            `${pyFormat(addStats.count / (n * n), '.4f')} of the level filled with sediment, ${(p.dry ?? []).length} dry craters`);
+    }
+    return fields;
+}
+
+/** Stage op 'caldera_lake': a lake at its own level in a caldera, not at its spill (volcanic.py op_caldera_lake; its
+ * docstring holds): the level below the caldera's lowest notch on the first level, kept in 'caldera_lake_m'; the water
+ * the connected region under the level that holds the centre; every other closed depression filled with sediment.
+ * Skips the coarsest level's pre-passes. */
+export async function opCalderaLake(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx)) return fields;
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const HY = await import('./hydro.js');
+    const [x0, y0, cell, n] = levelWindow(level);
+    const h = fields.h;
+    const sea = ctx?.sea_level ?? null;
+    let L;
+    if ('caldera_lake_m' in fields) L = await P.median(fields.caldera_lake_m);
+    else if (params.level_m !== undefined && params.level_m !== null) L = Number(params.level_m);
+    else {
+        if (!('caldera_rim_m' in fields)) throw new ValueError("caldera_lake: no 'caldera_rim_m' (run caldera_collapse first) and no level_m");
+        L = (await P.stats(fields.caldera_rim_m)).mean - num(params.below_rim_m, 300.0);
+    }
+    const c = params.centre ?? [0.0, 0.0];
+    const fi = (Number(c[0]) - x0) / cell - 0.5, fj = (Number(c[1]) - y0) / cell - 0.5;
+    if (!('caldera_lake_m' in fields) && 'caldera_floor' in fields) {
+        const mf = maskOf(R, 2, { f: fields.caldera_floor, t: 0.5 });
+        const any = (await P.stats(mf, { mask: mf })).count > 0;
+        if (any) {
+            const { filled } = await HY.fillDepressions(h, { seaLevel: sea });
+            const spill = await P.median(filled, { mask: mf, dtype: 'float64' });
+            filled.destroy();
+            if (L > spill - 2.0) {
+                ctx?.log?.(`[terrain.volcanic] caldera lake: the rim's lowest notch is at ${pyFormat(spill, '.1f')} m: the lake at ` +
+                    `${pyFormat(spill - 2.0, '.1f')} m, not ${pyFormat(L, '.1f')} m`);
+                L = spill - 2.0;
+            }
+        }
+        mf.destroy();
+        fields.caldera_lake_m = Gd.fill(R, [n, n], Math.fround(L));
+    }
+    const below = whereLess(P, h, L);
+    const { labels: lab, count } = await P.label(below);
+    below.destroy();
+    let water = Gd.fill(R, [n, n], 0.0);
+    const Lhi = Math.fround(L), Llo = L - Lhi;
+    if (count) {
+        const ci = Math.min(Math.max(pyRound(fi), 0), n - 1), cj = Math.min(Math.max(pyRound(fj), 0), n - 1);
+        const [kk] = await R.readRange(lab, cj * n + ci, 1);
+        let k = kk;
+        if (k === 0 && 'caldera_floor' in fields) {           // an island at the centre: the largest region on the floor
+            const cnt = R.field(1, count + 1, 1, null, 'u32');
+            lakesRun(R, 8, lab, { a: fields.caldera_floor }, {}, { uK: 0.5 }, cnt);
+            const bc = await R.read(cnt);
+            cnt.destroy();
+            let best = -1, bi = 0;
+            for (let i = 0; i <= count; i++) if (bc[i] > best) { best = bc[i]; bi = i; }
+            if (best > 0) k = bi;
+        }
+        if (k > 0) lakesRun(R, 6, lab, { a: h }, { outF: water }, { uR: Lhi, uK: Llo, uLabel: k });
+    }
+    lab.destroy();
+    // the surface over the lake (numpy's h + water is L there, exactly), its depressions, the caldera's own basin kept
+    const surf = R.like(h);
+    lakesRun(R, 7, null, { a: h, b: water }, { outF: surf }, { uR: Lhi });
+    const { filled } = await HY.fillDepressions(surf, { seaLevel: sea });
+    const depth = R.like(h);
+    lakesRun(R, 9, null, { a: filled, b: surf }, { outF: depth });
+    filled.destroy();
+    surf.destroy();
+    const dm = P.where(depth, '>', 1e-4);
+    const { labels: dl, count: dn } = await P.label(dm);
+    dm.destroy();
+    let pit = depth;
+    const wpos = await P.stats(water, { mask: water });
+    if (dn && wpos.count) {
+        const wd = P.dilate(water, 1);
+        const own = R.field(1, dn + 1, 1, null, 'u32');
+        lakesRun(R, 10, dl, { a: water, b: wd }, {}, {}, own);
+        wd.destroy();
+        pit = R.like(h);
+        lakesRun(R, 11, dl, { a: depth, b: water }, { outF: pit }, {}, own);
+        own.destroy();
+        depth.destroy();
+    } else {
+        pit = R.like(h);
+        const none = R.field(1, Math.max(dn + 1, 1), 1, null, 'u32');
+        lakesRun(R, 11, dl, { a: depth, b: water }, { outF: pit }, {}, none);
+        none.destroy();
+        depth.destroy();
+    }
+    dl.destroy();
+    const ps = await P.stats(pit, { mask: pit });
+    if (ps.count) {
+        fields.h = ew(R, EW.ADD, h, pit);
+        fields.deposit = 'deposit' in fields ? ew(R, EW.ADD, fields.deposit, pit) : copyOf(pit);
+    }
+    pit.destroy();
+    fields.water = water;
+    pullBand(fields, ctx);
+    return fields;
+}
+
+// `h < L` for a double L, exactly as numpy's float64 comparison of float32 values: a u32 field
+function whereLess(P, f, L) {
+    if (Math.fround(L) === L) return P.where(f, '<', L);
+    return P.where(f, '<=', f32AtOrBelow(L));      // the float32 values below a double that is not one
+}
+
+
+// ======================================================================= aging: the fluvial backbone for an age ===
+
+export const AGE_DEFAULTS = Object.freeze({ age_yr: 1.0e5, K: 2.0e-6, m: 0.5, n: 1.0, threshold_deg: 38.0,
+    threshold_noise: 0.15, threshold_scale_m: 400.0, deposition: 1.0, roughness: 0.6, roughness_scales_m: [2000.0, 300.0, 50.0],
+    valley_spacing_m: 300.0, gullies: false, steps: null, max_steps: 3000, min_steps: 200, dt_target_yr: null, lock: true,
+    fill_pits: true, young_radius_m: 0.0, young_factor: 1.0, centre: [0.0, 0.0], strength_from_field: false,
+    threshold_gain: 0.0, breakup: 0.0, k_breakup: 0.0, breakup_scales_m: [60.0, 20.0, 7.0], seed_texture_m: 0.0,
+    seed_texture_scale_m: 150.0, sector_contrast: 0.0, sector_harmonics: [2, 6], keep_craters: [], k_profile: null,
+    ravines: [], ravine_field: null, seed_streaks: null });
+
+// kernels/volcanic/age.wgsl, one mode at a level's cells: [outF, outG (mode 3)]
+function ageRun(R, level, centre, mode, ins = {}, u = {}, tabs = null, ktab = null) {
+    const [x0, y0, cell, n] = levelWindow(level);
+    const D = Gd.dummies(R), O = outDummies(R);
+    const f = R.field(n, n, 1), g = mode === 3 ? R.field(n, n, 1) : O.f[0];
+    R.run('volcanic/age', { azt: tabs ? tabs.field(R) : D.f1, a: ins.a ?? D.f1, b: ins.b ?? D.f1, c: ins.c ?? D.f1, ktab: ktab ?? D.f1 },
+        { outF: f, outG: g }, { uMode: mode, uOrg: [x0 - Number(centre[0]), y0 - Number(centre[1])], uStep: cell,
+            uK0: u.k0 ?? 0.0, uK1: u.k1 ?? 0.0, uRow: u.row ?? 0, uCount: u.count ?? 0 }, groupsOf(n, n));
+    return mode === 3 ? [f, g] : f;
+}
+
+// the streak sets of a 'volcano_age' stage (volcanic.py _streak_sets)
+function streakSets(p) {
+    const sets = p.seed_streaks;
+    if (!truthy(sets)) return [];
+    return (Array.isArray(sets) ? sets : [sets]).map((s) => ({ ...s }));
+}
+
+// _streak_set: one seed_streaks entry at a level's cells (radial_streaks' signal, before amp_m)
+const streakSet = (R, level, centre, st, seed, i) => radialStreaks(R, level, centre, st, Math.trunc(seed) + 709 + 31 * i);
+
+// np.interp(r, k_profile) about the centre at a level's cells (core/compose.js's 'profile' shape: numpy's interp)
+async function kProfile(R, level, centre, prof) {
+    const C = await import('../core/compose.js');
+    return C.shape(R, { kind: 'profile', centre, r_m: prof.map((q) => Number(q[0])), z_m: prof.map((q) => Number(q[1])) }, level);
+}
+
+/** furrow_k_factor: the erodibility gathered into a 'volcano_age' stage's furrows and ravines (k_floor..1), or null
+ * when no streak set is sparse with a k_floor (volcanic.py). A new field. */
+export function furrowKFactor(R, level, p, seed) {
+    const gul = streakSets(p).map((st, i) => [i, st]).filter(([, st]) => st.sparse !== undefined && st.sparse !== null &&
+        st.k_floor !== undefined && st.k_floor !== null);
+    if (!gul.length) return null;
+    const [, , cell, n] = levelWindow(level);
+    const centre = p.centre;
+    let m = Gd.fill(R, [n, n], 0.0);
+    for (const [i, st] of gul) {
+        const s = streakSet(R, level, centre, st, seed, i);
+        const m2 = ageRun(R, level, centre, 4, { a: m, b: s });
+        s.destroy();
+        m.destroy();
+        m = m2;
+    }
+    const rvs = ravinesOf(p, seed);
+    if (rvs.length) {
+        const cut = ravineCut(R, level, centre, rvs, seed);
+        const m2 = ageRun(R, level, centre, 5, { a: m, b: cut }, { k0: Math.max(Math.max(...rvs.map((rv) => Number(rv.depth_m))), 1e-6) });
+        cut.destroy();
+        m.destroy();
+        m = m2;
+    }
+    const mb = HS.gaussianBlur(m, Math.max(25.0 / cell, 0.5));
+    m.destroy();
+    const rHi = Math.max(...gul.map(([, st]) => Number((st.r_m ?? [1000.0, 10000.0])[1])));
+    const kFloor = Math.min(...gul.map(([, st]) => Number(st.k_floor)));
+    const out = ageRun(R, level, centre, 6, { a: mb }, { k0: rHi, k1: kFloor });
+    mb.destroy();
+    return out;
+}
+
+/** basins_kept: the filled surface with every closed depression deeper than minDepthM left as it is (a sink the
+ * drainage gathers in). A new field. */
+export async function basinsKept(R, h, filled, minDepthM) {
+    const P = prims(R);
+    const depth = ew(R, EW.SUB, filled, h);
+    const dm = P.where(depth, '>', 1e-4);
+    const { labels: lab, count } = await P.label(dm);
+    dm.destroy();
+    if (!count) {
+        depth.destroy();
+        lab.destroy();
+        return copyOf(filled);
+    }
+    const init = new Uint32Array(5 * (count + 1));
+    for (let L = 0; L <= count; L++) init[5 * L + 4] = 0xFFFFFFFF;
+    const stats = R.field(1, 5 * (count + 1), 1, init, 'u32');
+    lakesRun(R, 0, lab, { a: depth }, {}, { uR: -1.0, uBand: -1 }, stats);
+    const out = R.like(h);
+    lakesRun(R, 12, lab, { a: h, b: filled }, { outF: out }, { uR: Number(minDepthM) }, stats);
+    for (const f of [depth, lab, stats]) f.destroy();
+    return out;
+}
+
+/** Stage op 'volcano_age': the fluvial backbone (solvers/fluvial.js) run on a constructional shape for its age with no
+ * uplift (volcanic.py op_volcano_age; its docstring holds): time-faithful on the first level it runs on (from the
+ * drainage routed to convergence on the start surface, no lock), refined under the lock below; seed texture, sparse
+ * furrows and ravines first; K x the young summit, the k_profile, the sector contrast and the furrows' gathering;
+ * Sc from the field for walls built with their strength; kept craters lowered but never raised. Skips the coarsest
+ * level's pre-passes. */
+export async function opVolcanoAge(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx)) return fields;
+    const R = runnerOf(fields, ctx), P = prims(R);
+    const HY = await import('./hydro.js');
+    const p = { ...AGE_DEFAULTS, ...(params ?? {}) };
+    ctx = await FL.asContext(ctx, fields, level);
+    if (ctx.pins?._setting) {
+        releaseSettingPins(ctx);
+        ctx.pins = null;          // volcano_setting's plain pins were for its ranges' growth, not for the aging
+    }
+    const key = 'aged_' + stampKey('volcano_age', { ...params, seed }).slice('stamp_'.length);
+    const first = !(key in fields);
+    const [, , cell, n] = levelWindow(level);
+    const main = ctx.main;
+    const mainCell = main ? Number(main.cell) : cell;
+    const grow = ctx.role === 'grow';
+    const age = Number(p.age_yr);
+    let steps;
+    if (truthy(p.steps)) {
+        steps = Math.trunc(Number(p.steps));
+    } else {
+        const dtT = p.dt_target_yr;
+        steps = truthy(dtT) ? Math.trunc(pyRound(age / Number(dtT))) : Math.trunc(Number(p.max_steps));
+        steps = Math.min(Math.max(steps, Math.trunc(Number(p.min_steps))), Math.trunc(Number(p.max_steps)));
+    }
+    let dt = age / Math.max(steps, 1);
+    if (!first) {
+        // refine at the first level's step (a finer level adds detail as deep in cells, not more years per cell)
+        dt = (await R.readRange(fields[key], 0, 1))[0];
+        steps = Math.max(Math.trunc(pyRound(age / dt)), 1);
+    }
+    const dtRef = dt * FL.CELL_REF_M / (grow ? cell : Math.max(cell, mainCell));
+    const centre = [Number(p.centre[0]), Number(p.centre[1])];
+    if (first && (Number(p.seed_texture_m) > 0 || truthy(p.seed_streaks))) {
+        let tx = Gd.fill(R, [n, n], 0.0);
+        if (Number(p.seed_texture_m) > 0) {
+            const u = unitFbm(R, level, Number(p.seed_texture_scale_m), Math.trunc(seed) + 707, 3);
+            tx.destroy();
+            tx = ew(R, EW.LERP, null, u, null, null, 0.0, Number(p.seed_texture_m));
+            u.destroy();
+        }
+        if (truthy(p.seed_streaks)) {
+            // radial furrows of many sizes: the flow gathers in them and cuts gullies down the cone
+            for (const [i, st] of streakSets(p).entries()) {
+                const s = streakSet(R, level, centre, st, seed, i);
+                const t2 = ew(R, EW.ADD_SCALED, tx, s, null, null, Number(st.amp_m));
+                s.destroy();
+                tx.destroy();
+                tx = t2;
+            }
+        }
+        if (truthy(p.k_profile)) {                // the seed texture only where the run is meant to cut
+            const kp = await kProfile(R, level, centre, p.k_profile);
+            const t2 = ageRun(R, level, centre, 7, { a: tx, b: kp });
+            kp.destroy();
+            tx.destroy();
+            tx = t2;
+        }
+        fields.h = ew(R, EW.ADD, fields.h, tx);
+        if ('bed' in fields) fields.bed = ew(R, EW.ADD, fields.bed, tx);
+        tx.destroy();
+    }
+    if (first && (truthy(p.ravines) || truthy(p.ravine_field))) {
+        // a few deep ravines seeded before the run: the stream power gathers the drainage into them
+        const cut = ravineCut(R, level, centre, ravinesOf(p, seed), seed);
+        fields.h = ew(R, EW.SUB, fields.h, cut);
+        if ('bed' in fields) {
+            const b = ew(R, EW.SUB, fields.bed, cut);
+            fields.bed = ew(R, EW.MIN, b, fields.h);
+            b.destroy();
+        }
+        cut.destroy();
+    }
+    const closed = !truthy(p.fill_pits);
+    let pinsSaved = null;
+    if (closed && !first && ctx.pins) {
+        // a closed basin's refine level: the window drains on its own (no inflow across the floor)
+        pinsSaved = ctx.pins;
+        ctx.pins = { ...ctx.pins, A_in: Gd.fill(R, [n, n], 0.0), qs_in: Gd.fill(R, [n, n], 0.0) };
+    }
+    if (first || closed) {
+        const h0 = fields.h;
+        let surf;
+        if (first) {
+            let { filled } = await HY.fillDepressions(h0, { seaLevel: ctx.sea_level ?? null });
+            if (closed) {
+                const s = await P.stats(h0);
+                const kept = await basinsKept(R, h0, filled, HY.depressionThreshold(s.max - s.min));
+                filled.destroy();
+                filled = kept;
+            }
+            surf = await HY.routingSurface(filled, { seaLevel: ctx.sea_level ?? null });
+            filled.destroy();
+        } else {
+            surf = copyOf(h0);                    // routed on its own surface (its pits hold their drainage)
+        }
+        const A_in = ctx.pins && first ? ctx.pins.A_in : null;
+        const routed = await HY.routeToConvergence(R, surf, cell, { A0: first && 'A' in fields ? fields.A : null, A_in });
+        surf.destroy();
+        fields.A = routed.A;
+    }
+    const saved = {};
+    for (const k of ['U', 'K_factor', 'Sc_factor']) if (k in fields) saved[k] = copyOf(fields[k]);
+    fields.U = Gd.fill(R, [n, n], 0.0);
+    let kf = Gd.fill(R, [n, n], 1.0);
+    if (Number(p.young_radius_m) > 0 && Number(p.young_factor) !== 1.0) {
+        kf.destroy();
+        kf = ageRun(R, level, centre, 0, {}, { k0: Number(p.young_factor), k1: Number(p.young_radius_m) });
+    }
+    if (truthy(p.k_profile)) {
+        const kp = await kProfile(R, level, centre, p.k_profile);
+        const k2 = ew(R, EW.MUL, kf, kp);
+        kp.destroy();
+        kf.destroy();
+        kf = k2;
+    }
+    const sc = Number(p.sector_contrast);
+    if (sc > 0.0) {
+        const tabs = new AzTables();
+        const row = tabs.add(azimuthNoiseTable(Math.trunc(seed), 91, Math.trunc(p.sector_harmonics[0]), Math.trunc(p.sector_harmonics[1]), 0.8));
+        const k2 = ageRun(R, level, centre, 1, { a: kf }, { k0: sc, row }, tabs);
+        tabs.destroy();
+        kf.destroy();
+        kf = k2;
+    }
+    const fk = furrowKFactor(R, level, p, seed);
+    if (fk) {
+        const k2 = ew(R, EW.MUL, kf, fk);
+        fk.destroy();
+        kf.destroy();
+        kf = k2;
+    }
+    fields.K_factor = kf;
+    const keep = p.keep_craters ?? [];
+    const hKeep = keep.length ? copyOf(fields.h) : null;
+    const t0 = Math.tan(radians(Number(p.threshold_deg)));
+    if (truthy(p.strength_from_field) && 'Sc' in fields) fields.Sc_factor = ew(R, EW.LERP, null, fields.Sc, null, null, 0.0, 1.0 / t0);
+    else if ('Sc_factor' in fields) delete fields.Sc_factor;
+    const fp = {};
+    for (const k of ['K', 'm', 'n', 'threshold_deg', 'threshold_noise', 'threshold_scale_m', 'deposition', 'roughness',
+        'roughness_scales_m', 'valley_spacing_m', 'gullies', 'threshold_gain', 'breakup', 'k_breakup', 'breakup_scales_m']) fp[k] = p[k];
+    Object.assign(fp, { steps, min_steps: 1, max_steps: Math.max(steps, 1), dt_ref_yr: dtRef, relief_m: null,
+        lock: truthy(p.lock) && !first, fill_pits: truthy(p.fill_pits), mode: 'evolve', Sc_from_fields: false });
+    await FL.opFluvial(fields, level, fp, seed, ctx);
+    if (keep.length) {
+        const kt = new Float32Array(4 * keep.length);
+        const [x0, y0] = levelWindow(level);
+        keep.forEach((c, k) => kt.set([x0 - Number(c.at[0]), y0 - Number(c.at[1]), Number(c.radius_m), 0.0], 4 * k));
+        const ktab = R.field(1, keep.length, 4, kt);
+        const w = ageRun(R, level, [0, 0], 2, {}, { count: keep.length }, null, ktab);
+        ktab.destroy();
+        const [lowered, cut] = ageRun(R, level, centre, 3, { a: fields.h, b: hKeep, c: w });
+        w.destroy();
+        hKeep.destroy();
+        fields.h = lowered;
+        if ('deposit' in fields) fields.deposit = ew(R, EW.MAX_DIFF, fields.deposit, cut, null, null, 0.0);
+        cut.destroy();
+        if ('bed' in fields) fields.bed = ew(R, EW.MIN, fields.bed, fields.h);
+    }
+    for (const k of ['U', 'K_factor', 'Sc_factor']) {
+        if (k in saved) fields[k] = saved[k];
+        else if (k in fields) delete fields[k];
+    }
+    if (pinsSaved) {
+        for (const k of ['A_in', 'qs_in']) if (ctx.pins[k] && !ctx.pins[k].destroyed) ctx.pins[k].destroy();
+        ctx.pins = pinsSaved;                     // the runner's pins for the level's later stages
+    }
+    fields[key] = Gd.fill(R, [n, n], Math.fround(dt));      // the step the first level used (and a marker)
+    return fields;
+}
+
+
+// ===================================================================== numpy's standard normals on the GPU ===
+// lava_surface draws numpy's standard normals per cell of a flow's window (rng.standard_normal(np.shape(P))); the edition
+// puts per-cell work on the GPU and field-class parity needs numpy's very draws, so they come from
+// kernels/volcanic/normal.wgsl: PCG64's words per segment of 256 (the segments' start states advanced here in BigInt),
+// every word classified as the start of a ziggurat attempt, the attempts chained segment by segment (a walk per
+// segment and entry offset on the GPU, the chain of segments here), the values written where numpy puts them. The
+// attempts the float32 classification cannot decide (the tail, and wedge tests within 1e-5 of a tie) are settled in
+// doubles by core/np_random.js's own generator placed at that word. The ziggurat's tables are core/np_random.js's,
+// read from its source (module constants it does not export).
+
+const U128 = (1n << 128n) - 1n;
+const PCG_MULT = 0x2360ED051FC65DA44385DF649FCCF645n;
+const LIMBS = ['s0', 's1', 's2', 's3', 's4', 's5', 's6', 's7'], INCS = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'];
+const bigOf = (g, names) => names.reduceRight((v, k) => (v << 16n) | BigInt(g[k]), 0n);
+function setBig(g, names, v) {
+    names.forEach((k, i) => { g[k] = Number((v >> BigInt(16 * i)) & 0xFFFFn); });
+}
+
+/** The LCG's jump of `delta` steps: [A, C] with state' = A state + C (mod 2^128) (pcg_advance_lcg_128). */
+export function pcgJump(inc, delta) {
+    let accMult = 1n, accPlus = 0n, curMult = PCG_MULT, curPlus = inc, d = BigInt(delta);
+    while (d > 0n) {
+        if (d & 1n) {
+            accMult = (accMult * curMult) & U128;
+            accPlus = (accPlus * curMult + curPlus) & U128;
+        }
+        curPlus = ((curMult + 1n) * curPlus) & U128;
+        curMult = (curMult * curMult) & U128;
+        d >>= 1n;
+    }
+    return [accMult, accPlus];
+}
+
+const advanceState = (state, inc, delta) => {
+    const [A, C] = pcgJump(inc, delta);
+    return (A * state + C) & U128;
+};
+
+let ZIGGURAT = null;
+
+// core/np_random.js's KI_DOUBLE, WI_DOUBLE and FI_DOUBLE, read from its source
+function zigguratTables() {
+    if (ZIGGURAT) return ZIGGURAT;
+    const src = Deno.readTextFileSync(new URL('../core/np_random.js', import.meta.url));
+    const grab = (name) => {
+        const m = new RegExp(`const ${name} = new Float64Array\\(\\[([\\s\\S]*?)\\]\\);`).exec(src);
+        if (!m) throw new Error(`volcanic: core/np_random.js holds no ${name} (the ziggurat's tables)`);
+        return m[1].split(',').map((s) => s.trim()).filter(Boolean).map(Number);
+    };
+    const ki = grab('KI_DOUBLE'), wi = grab('WI_DOUBLE'), fi = grab('FI_DOUBLE');
+    if (ki.length !== 256 || wi.length !== 256 || fi.length !== 256) throw new Error('volcanic: the ziggurat tables are not 256 long');
+    ZIGGURAT = { ki, wi, fi };
+    return ZIGGURAT;
+}
+
+const ZIG_FIELDS = new WeakMap();
+
+function zigguratFields(R) {
+    let z = ZIG_FIELDS.get(R);
+    if (!z) {
+        const { ki, wi, fi } = zigguratTables();
+        const kt = new Uint32Array(512), wf = new Float32Array(512);
+        for (let i = 0; i < 256; i++) {
+            kt[2 * i] = Math.floor(ki[i] / 8388608);          // rabs's high 29 bits and low 23 bits
+            kt[2 * i + 1] = ki[i] % 8388608;
+            wf[2 * i] = wi[i];
+            wf[2 * i + 1] = fi[i];
+        }
+        z = { kt: R.field(1, 512, 1, kt, 'u32'), wf: R.field(1, 256, 2, wf) };
+        ZIG_FIELDS.set(R, z);
+    }
+    return z;
+}
+
+let SETTLER = null;
+
+// one ziggurat attempt that starts at word k of the stream (S0, inc), in doubles: core/np_random.js's own _normal()
+// from that word. The tail always returns; a wedge returned at k when its attempt read exactly its two words.
+function settleAttempt(S0, inc, k, idx) {
+    if (!SETTLER) SETTLER = defaultRng(0);
+    const g = SETTLER;
+    setBig(g, LIMBS, advanceState(S0, inc, k));
+    setBig(g, INCS, inc);
+    g.hasU32 = false;
+    let steps = 0;
+    const step0 = Object.getPrototypeOf(g)._step;
+    g._step = function () { steps++; step0.call(this); };
+    try {
+        const v = g._normal();
+        if (idx === 0) return { cons: steps, out: 1, value: v };
+        return steps === 2 ? { cons: 2, out: 1, value: v } : { cons: 2, out: 0, value: 0.0 };
+    } finally {
+        delete g._step;
+    }
+}
+
+const NSEG = 256, NENTRY = 32;
+
+/** numpy's gen.standard_normal((rows, cols)) on the GPU: a new (rows, cols) field, draw for draw (float32 values of
+ * numpy's), and `gen` (a core/np_random.js NpGenerator) advanced past them, as numpy leaves it. count draws of
+ * (rows, cols) each come out as `count` fields, consecutive in the stream (one call: one chain). */
+export async function standardNormalGpu(R, gen, rows, cols, count = 1) {
+    const P = prims(R), Z = zigguratFields(R);
+    const N = rows * cols * count;
+    const S0 = bigOf(gen, LIMBS), inc = bigOf(gen, INCS);
+    let M = Math.ceil((Math.ceil(N * 1.02) + 2 * NSEG) / NSEG) * NSEG;
+    const groups = (k) => [Math.ceil(Math.min(Math.max(k, 1), 4096) / 16), Math.ceil(Math.ceil(Math.max(k, 1) / 4096) / 16), 1];
+    const D = Gd.dummies(R), O = outDummies(R);
+    for (;;) {
+        const nseg = M / NSEG;
+        // the segments' start states (one more segment: the words an attempt near the end reads)
+        const [A, C] = pcgJump(inc, NSEG);
+        const st = new Uint32Array(4 * (nseg + 1));
+        let s = S0;
+        for (let k = 0; k <= nseg; k++) {
+            for (let w = 0; w < 4; w++) st[4 * k + w] = Number((s >> BigInt(32 * w)) & 0xFFFFFFFFn);
+            s = (A * s + C) & U128;
+        }
+        const incw = new Uint32Array(4);
+        for (let w = 0; w < 4; w++) incw[w] = Number((inc >> BigInt(32 * w)) & 0xFFFFFFFFn);
+        const starts = P.list(4 * (nseg + 1), 'u32', st), incF = R.field(1, 4, 1, incw, 'u32');
+        const words = P.list(2 * (M + NSEG), 'u32');
+        const run = (mode, sm, im, count, u = {}) => R.run('volcanic/normal', { a: sm.a ?? D.u1, b: sm.b ?? D.u1, c: sm.c ?? D.u1,
+            wf: sm.wf ?? D.f1, c2: sm.c2 ?? D.u1 }, { o1: im.o1 ?? O.u, o2: im.o2 ?? P.dummyU, o3: im.o3 ?? O.f[0] },
+        { uMode: mode, uSeg: NSEG, uCount: count, uE: u.e ?? NENTRY }, groups(count));
+        run(0, { a: starts, b: incF }, { o1: words }, nseg + 1);
+        starts.destroy();
+        incF.destroy();
+        const cons = P.list(M, 'u32'), flags = P.list(M, 'u32'), vals = P.list(M, 'f32');
+        run(1, { a: words, b: Z.kt, wf: Z.wf }, { o1: cons, o2: flags, o3: vals }, M);
+        // the attempts float32 could not decide, settled in doubles
+        const dm = P.list(M, 'u32');
+        run(5, { a: flags }, { o1: dm }, M);
+        const { index, n: nd } = await P.nonzero(dm, { count: M });
+        dm.destroy();
+        if (nd) {
+            const idx = await R.readRange(index, 0, nd);
+            const w0 = await R.readParts(Array.from(idx, (k) => ({ field: words, first: 2 * k, count: 1 })));
+            const patch = new Uint32Array(4 * nd), pf = new Float32Array(patch.buffer);
+            idx.forEach((k, i) => {
+                const r = settleAttempt(S0, inc, k, w0[i][0] & 0xFF);
+                patch[4 * i] = k;
+                patch[4 * i + 1] = r.cons;
+                patch[4 * i + 2] = r.out;
+                pf[4 * i + 3] = r.value;
+            });
+            const pl = P.list(4 * nd, 'u32', patch);
+            run(4, { a: pl }, { o1: cons, o2: flags, o3: vals }, nd);
+            pl.destroy();
+        }
+        index.destroy();
+        // the walk of every segment from every entry offset, then the chain of segments
+        const exits = P.list(nseg * NENTRY, 'u32'), counts = P.list(nseg * NENTRY, 'u32');
+        run(2, { b: cons, c: flags }, { o1: exits, o2: counts }, nseg * NENTRY);
+        const [ex, ct] = await R.readAll([exits, counts]);
+        exits.destroy();
+        counts.destroy();
+        const segs = [];
+        let ent = 0, total = 0;
+        for (let k = 0; k < nseg && total < N; k++) {
+            segs.push(ent, total);
+            total += ct[k * NENTRY + ent];
+            ent = ex[k * NENTRY + ent];
+            if (ent >= NENTRY) throw new Error(`volcanic standardNormalGpu: an attempt reads past ${NENTRY} words (a tail of ${ent} words)`);
+        }
+        if (total < N) {                            // not enough words for the draws: more words (rare)
+            for (const f of [words, cons, flags, vals]) f.destroy();
+            M = Math.ceil((M * 1.5) / NSEG) * NSEG;
+            continue;
+        }
+        const sf = P.list(segs.length, 'u32', Uint32Array.from(segs));
+        const out = R.field(rows * count, cols, 1);
+        const end = R.field(1, 1, 1, null, 'u32');
+        run(3, { b: cons, c: flags, wf: vals, c2: sf }, { o1: end, o3: out }, segs.length / 2, { e: N });
+        const [T] = await R.read(end);
+        for (const f of [words, cons, flags, vals, sf, end]) f.destroy();
+        setBig(gen, LIMBS, advanceState(S0, inc, T));
+        if (count === 1) return out;
+        const parts = [];
+        for (let i = 0; i < count; i++) {
+            const f = R.field(rows, cols, 1);
+            R.run('hydro/crop', { src: out }, { outF: f }, { uOrigin: [0, i * rows] });
+            parts.push(f);
+        }
+        out.destroy();
+        return parts;
+    }
+}
+
+
+// ============================================================================== lava flows (DOWNFLOW, design 4.7) ===
+
+export const LAVA_DEFAULTS = Object.freeze({ walkers: 400, length_m: 6000.0, thickness_m: 12.0, dh_m: null, dh_factor: 0.25,
+    dh_rel: 1.5, age: 0.0, levee: 0.3, rough: 0.12, p_edge: 0.01, width_m: null, front_deg: null, levee_frac: 0.1,
+    stop_spread: 0.0, front_spread: 0.0, vent_taper: 0.6, no_climb: false, units: 1, bury: false, spread_slope_deg: null,
+    channel: null });
+
+/** The vents of a 'lava_flows' stage (volcanic.py lava_vents): params vents, rift, breaches, feet, scatter. */
+export function lavaVents(params, seed) {
+    const out = (params.vents ?? []).map((v) => ({ ...v }));
+    const rng = rngOf(seed, 81);
+    const rangeOf = (o, k, d) => (o[k] ?? d).map(Number);
+    if (truthy(params.rift)) {
+        const rp = { ...params.rift };
+        const c0 = rp.centre ?? [0.0, 0.0];
+        const [ex, ey] = compass(num(rp.azimuth_deg, 0.0));
+        for (let i = 0; i < Math.trunc(num(rp.count, 3)); i++) {
+            const side = rng.random() < 0.5 ? 1.0 : -1.0;
+            const dr = rangeOf(rp, 'distance_m', [3000.0, 8000.0]);
+            const d = rng.uniform(dr[0], dr[1]);
+            const lat = rng.normal(0.0, num(rp.spread_m, 1500.0));
+            const lr = rangeOf(rp, 'length_m', [5000.0, 10000.0]), tr = rangeOf(rp, 'thickness_m', [10.0, 25.0]);
+            const ar = rangeOf(rp, 'age', [0.0, 0.6]);
+            const v = { at: [Number(c0[0]) + side * d * ex - lat * ey, Number(c0[1]) + side * d * ey + lat * ex] };
+            v.length_m = rng.uniform(lr[0], lr[1]);
+            v.thickness_m = rng.uniform(tr[0], tr[1]);
+            v.age = rng.uniform(ar[0], ar[1]);
+            v.width_m = truthy(rp.width_m) ? rng.uniform(Number(rp.width_m[0]), Number(rp.width_m[1])) : null;
+            out.push(v);
+        }
+    }
+    if (truthy(params.breaches)) {
+        const bp = { ...params.breaches };
+        for (const c of conesOf(bp, seed)) {
+            if (c.breach_azimuth_deg === undefined || c.breach_azimuth_deg === null) continue;
+            const [ex, ey] = compass(Number(c.breach_azimuth_deg));
+            const rb = 0.5 * Number(c.width_m);
+            const youth = 1.0 - Math.min(num(c.age_yr, 0.0) / num(bp.age_span_yr, 5e5), 1.0);
+            const v = { at: [Number(c.at[0]) + 0.92 * rb * ex, Number(c.at[1]) + 0.92 * rb * ey] };
+            v.length_m = num(bp.length_m, 4000.0) * (0.5 + 0.5 * youth) * rng.uniform(0.7, 1.3);
+            v.thickness_m = num(bp.thickness_m, 12.0) * rng.uniform(0.7, 1.2);
+            v.age = 1.0 - youth;
+            v.width_m = truthy(bp.width_m) ? Number(bp.width_m) * rng.uniform(0.6, 1.4) : null;
+            out.push(v);
+        }
+    }
+    if (truthy(params.feet)) {
+        const fp = { ...params.feet };
+        const frng = rngOf(seed, 83);
+        for (const c of conesOf(fp, seed)) {
+            if (frng.random() >= num(fp.fraction, 1.0)) continue;
+            const az = num(fp.downhill_azimuth_deg, 0.0) + frng.uniform(-1.0, 1.0) * num(fp.spread_deg, 60.0);
+            const [ex, ey] = compass(az);
+            const rb = 0.5 * Number(c.width_m) * Math.max(1.0, num(c.elongation, 1.0));
+            const lr = rangeOf(fp, 'length_m', [2000.0, 6000.0]), tr = rangeOf(fp, 'thickness_m', [6.0, 15.0]);
+            const ar = rangeOf(fp, 'age', [0.5, 1.0]);
+            const v = { at: [Number(c.at[0]) + rb * ex, Number(c.at[1]) + rb * ey] };
+            v.length_m = frng.uniform(lr[0], lr[1]);
+            v.thickness_m = frng.uniform(tr[0], tr[1]);
+            v.age = frng.uniform(ar[0], ar[1]);
+            v.width_m = truthy(fp.width_m) ? frng.uniform(Number(fp.width_m[0]), Number(fp.width_m[1])) : null;
+            out.push(v);
+        }
+    }
+    if (truthy(params.scatter)) {
+        const sp = { ...params.scatter };
+        const [x0, y0, size] = sp.window.map(Number);
+        for (let i = 0; i < Math.trunc(num(sp.count, 6)); i++) {
+            const ax = x0 + size * rng.uniform(0.1, 0.9);
+            const ay = y0 + size * rng.uniform(0.1, 0.9);
+            const lr = rangeOf(sp, 'length_m', [2000.0, 6000.0]), tr = rangeOf(sp, 'thickness_m', [5.0, 15.0]);
+            const ar = rangeOf(sp, 'age', [0.4, 1.0]);
+            const v = { at: [ax, ay] };
+            v.length_m = rng.uniform(lr[0], lr[1]);
+            v.thickness_m = rng.uniform(tr[0], tr[1]);
+            v.age = rng.uniform(ar[0], ar[1]);
+            v.width_m = truthy(sp.width_m) ? rng.uniform(Number(sp.width_m[0]), Number(sp.width_m[1])) : null;
+            out.push(v);
+        }
+    }
+    return out;
+}
+
+const NB_DI = [-1, 0, 1, -1, 1, -1, 0, 1], NB_DJ = [-1, -1, -1, 0, 0, 1, 1, 1];
+const NB_LEN = NB_DI.map((a, k) => Math.hypot(a, NB_DJ[k]));
+
+/** DOWNFLOW (Favalli et al. 2005), volcanic.py lava_walkers: walkers stepping from the start cell to the neighbour
+ * of steepest perturbed descent on h (a Float32Array or Float64Array of ny x nx, row 0 south: the level's surface
+ * read back once), numpy's draws in numpy's order. JavaScript over the walkers (PORT_PLAN.md 2.4: their draws depend
+ * on how many are alive each step); the local slope (dh_rel) is taken in doubles at the cells they visit, from the
+ * same heights numpy's np.gradient reads there. Returns { visits (Float32Array of counts, ny x nx), N, cells (the
+ * visited cells' row-major indices, ascending) }: the passage fraction is min(visits / N, 1). */
+export function lavaWalkers(h, ny, nx, cell, start, walkers = 400, lengthM = 6000.0, dhM = 3.0, seed = 0, salt = 0,
+    dhRel = null, pondM = null, stopSpread = 0.0, frontSpread = 0.0) {
+    const N = Math.trunc(walkers);
+    const sd = Math.abs(Math.trunc(seed)) % 4294967296;
+    const rng = defaultRng([sd, 7177, Math.trunc(salt)]);
+    const i = new Int32Array(N).fill(Math.min(Math.max(pyRound(start[0]), 1), nx - 2));
+    const j = new Int32Array(N).fill(Math.min(Math.max(pyRound(start[1]), 1), ny - 2));
+    const dist = new Float64Array(N);
+    const alive = new Uint8Array(N).fill(1);
+    const visits = new Float32Array(ny * nx);
+    const seen = new Set();
+    const visit = (k, c) => { visits[k] += c; seen.add(k); };
+    let lim = new Float64Array(N).fill(Number(lengthM));
+    if (stopSpread) {
+        const r = defaultRng([sd, 7179, Math.trunc(salt)]).random(N);
+        for (let w = 0; w < N; w++) lim[w] = Number(lengthM) * (1.0 - Number(stopSpread) * r[w]);
+    }
+    const fs = Number(frontSpread);
+    const at = (jj, ii) => (ii < 0 || jj < 0 || ii >= nx || jj >= ny ? Infinity : h[jj * nx + ii]);
+    // np.gradient's slope at a cell (central inside, one-sided on the edges), times cell x dh_rel
+    const S = dhRel ? (jj, ii) => {
+        const gx = ii === 0 ? (h[jj * nx + 1] - h[jj * nx]) / cell : ii === nx - 1 ? (h[jj * nx + ii] - h[jj * nx + ii - 1]) / cell
+            : (h[jj * nx + ii + 1] - h[jj * nx + ii - 1]) / (2.0 * cell);
+        const gy = jj === 0 ? (h[nx + ii] - h[ii]) / cell : jj === ny - 1 ? (h[jj * nx + ii] - h[(jj - 1) * nx + ii]) / cell
+            : (h[(jj + 1) * nx + ii] - h[(jj - 1) * nx + ii]) / (2.0 * cell);
+        return Math.max(Math.hypot(gx, gy), 1e-5) * cell * Number(dhRel);
+    } : null;
+    const budget = new Float64Array(N).fill(pondM ? Number(pondM) : 0.0);
+    const back = new Int32Array(N).fill(-1);
+    visit(j[0] * nx + i[0], N);
+    const drop = new Float64Array(8);
+    for (;;) {
+        const a = [];
+        for (let w = 0; w < N; w++) if (alive[w]) a.push(w);
+        if (!a.length) break;
+        const da = new Float64Array(a.length);
+        a.forEach((w, q) => {
+            let d = S ? Math.min(S(j[w], i[w]), Number(dhM)) : Number(dhM);
+            if (fs) d = d * (1.0 + fs * (dist[w] / lim[w]) ** 2);
+            da[q] = d;
+        });
+        const uh = rng.uniform(-1.0, 1.0, a.length);
+        const un = rng.uniform(-1.0, 1.0, a.length * 8);
+        const ks = new Int32Array(a.length), ok = new Uint8Array(a.length);
+        a.forEach((w, q) => {
+            const here = h[j[w] * nx + i[w]] + uh[q] * da[q];
+            let best = -Infinity, bk = 0;
+            for (let k = 0; k < 8; k++) {
+                const nb = at(j[w] + NB_DJ[k], i[w] + NB_DI[k]) + un[8 * q + k] * da[q];
+                drop[k] = (here - nb) / (NB_LEN[k] * cell);
+                if (drop[k] > best) { best = drop[k]; bk = k; }
+            }
+            ks[q] = bk;
+            ok[q] = drop[bk] > 0.0 ? 1 : 0;
+        });
+        if (pondM) {
+            // pond: the lowest neighbour that is not the way back, paid for from the budget
+            a.forEach((w, q) => {
+                if (ok[q]) return;
+                let lo = Infinity, kk = 0;
+                for (let k = 0; k < 8; k++) {
+                    const raw = k === back[w] ? Infinity : at(j[w] + NB_DJ[k], i[w] + NB_DI[k]);
+                    if (raw < lo) { lo = raw; kk = k; }
+                }
+                const rise = lo - h[j[w] * nx + i[w]];
+                if (Number.isFinite(rise) && rise <= budget[w]) {
+                    budget[w] -= Math.max(rise, 0.0);
+                    ks[q] = kk;
+                    ok[q] = 1;
+                }
+            });
+        }
+        a.forEach((w, q) => {
+            if (!ok[q]) { alive[w] = 0; return; }
+            const k = ks[q];
+            back[w] = 7 - k;
+            i[w] += NB_DI[k];
+            j[w] += NB_DJ[k];
+            dist[w] += NB_LEN[k] * cell;
+        });
+        // np.add.at counts every moved walker (one that left the grid or its length too), then the stopped ones die
+        a.forEach((w, q) => {
+            if (!ok[q]) return;
+            visit(j[w] * nx + i[w], 1);
+        });
+        a.forEach((w, q) => {
+            if (!ok[q]) return;
+            if (i[w] <= 0 || j[w] <= 0 || i[w] >= nx - 1 || j[w] >= ny - 1 || dist[w] >= lim[w]) alive[w] = 0;
+        });
+    }
+    return { visits, N, cells: Int32Array.from(seen).sort() };
+}
+
+// kernels/volcanic/lava.wgsl, one mode over the size of `a` (outF new or given; outG for the modes that write it)
+function lavaRun(R, mode, ins, u = {}, outs = {}) {
+    const D = Gd.dummies(R), O = outDummies(R);
+    const two = [11, 12, 13, 20].includes(mode);
+    const ref = ins.a;
+    const outF = outs.outF ?? R.field(ref.h, ref.w, 1);
+    const outG = two ? (outs.outG ?? R.field(ref.h, ref.w, 1)) : O.f[1];
+    R.run('volcanic/lava', { a: ins.a, b: ins.b ?? D.f1, c: ins.c ?? D.f1, d: ins.d ?? D.f1, e: ins.e ?? D.f1 }, { outF, outG },
+        { uMode: mode, uOrg: u.org ?? [0, 0], uStep: u.step ?? 1.0, uK0: u.k0 ?? 0.0, uK1: u.k1 ?? 0.0, uLen: u.len ?? 1.0,
+            uFlag: u.flag ?? 0, uAt: u.at ?? [0, 0] }, groupsOf(ref.w, ref.h));
+    return two ? [outF, outG] : outF;
+}
+
+/** np.std of a field (population: sqrt of the mean square deviation), from a fixed-tree float32 sum (numpy's pairwise
+ * float64: relative 1e-7). */
+async function stdOf(R, f) {
+    const P = prims(R);
+    const s = await P.stats(f);
+    const mean = s.sum / s.count;
+    const dev = lavaRun(R, 10, { a: f }, { k0: mean });
+    const q = await P.stats(dev);
+    dev.destroy();
+    return Math.sqrt(q.sum / q.count);
+}
+
+const blur = (f, s) => HS.gaussianBlur(f, s);       // solvers/hillslope.py gaussian_blur: numpy's FFT blur, reflect
+
+/** lava_surface: a flow's added height and footprint from the walkers' passage fraction P (a GPU field of the flow's
+ * window), as volcanic.py makes them (its docstring holds; front_deg: the aa flow of _lava_surface_aa). The noise is
+ * numpy's standard normals (standardNormalGpu, the same draws). Returns [T (metres), F (the footprint 0..1)]. */
+export async function lavaSurface(R, P, cell, thicknessM, opts = {}) {
+    const o = { p_edge: 0.04, margin_m: null, levee: 0.3, rough: 0.12, age: 0.0, seed: 0, width_m: null, front_deg: null,
+        levee_frac: 0.1, width_scale: null, ...opts };
+    const th = Number(thicknessM), sd = Math.abs(Math.trunc(o.seed)) % 4294967296;
+    const [rows, cols] = [P.h, P.w];
+    const own = [];
+    const keep = (f) => { own.push(f); return f; };
+    const sqrtTau = Math.sqrt(TAU);
+    const pb = keep(blur(P, 0.8));
+    const path = keep(lavaRun(R, 1, { a: pb }, { k0: Number(o.p_edge) }));
+    const W = truthy(o.width_m) && Number(o.width_m) > 2.0 * cell ? Number(o.width_m) : null;
+    let T, plate;
+    if (o.front_deg !== null && o.front_deg !== undefined) {
+        // _lava_surface_aa: one generator for the lobes and the rough top
+        const rng = defaultRng([sd, 9097]);
+        const draws = (W ? 2 : 0) + (truthy(o.rough) ? 2 : 0);
+        const noise = draws ? await standardNormalGpu(R, rng, rows, cols, draws) : [];
+        const nz = Array.isArray(noise) ? noise : [noise];
+        nz.forEach(keep);
+        let core = path;
+        if (W) {
+            const sig = 0.25 * W / cell;
+            const bs = keep(blur(path, sig));
+            let b = keep(ew(R, EW.LERP, null, bs, null, null, 0.0, sqrtTau * sig));
+            if (o.width_scale) {
+                // the band's width cell by cell: the band at half, the full and twice the width, read in log2 of the scale
+                const blo = keep(ew(R, EW.LERP, null, keep(blur(path, 0.5 * sig)), null, null, 0.0, sqrtTau * 0.5 * sig));
+                const bhi = keep(ew(R, EW.LERP, null, keep(blur(path, 2.0 * sig)), null, null, 0.0, sqrtTau * 2.0 * sig));
+                b = keep(lavaRun(R, 2, { a: b, b: blo, c: bhi, d: o.width_scale }));
+            }
+            let lobes = keep(Gd.fill(R, [rows, cols], 0.0));
+            for (const [q, [frac, a]] of [[0, [0.12, 0.5]], [1, [0.04, 0.3]]]) {
+                const g = keep(blur(nz[q], Math.max(frac * W / cell, 0.7)));
+                const s = Math.max(await stdOf(R, g), 1e-9);
+                lobes = keep(lavaRun(R, 9, { a: lobes, b: g }, { k0: a, k1: s }));
+            }
+            core = keep(lavaRun(R, 3, { a: b, b: lobes }, { k0: 0.92, k1: 1.08 }));
+        }
+        let margin = o.margin_m === null || o.margin_m === undefined ? th / Math.tan(radians(Number(o.front_deg))) : Number(o.margin_m);
+        margin *= 1.0 + 2.0 * Number(o.age);
+        plate = lavaRun(R, 4, { a: keep(blur(core, Math.max(margin / (1.05 * cell), 0.7))) }, { k0: 0.3 });
+        T = ew(R, EW.LERP, null, plate, null, null, 0.0, th);
+        if (truthy(o.levee)) {
+            const lw = Number(o.levee_frac) * (W ? W : 8.0 * th);           // each levee's width
+            const f2 = keep(blur(core, Math.max(0.6 * lw / cell, 0.7)));
+            const T2 = lavaRun(R, 5, { a: plate, b: f2 }, { k0: th, k1: Number(o.levee) });
+            T.destroy();
+            T = T2;
+        }
+        let r = keep(Gd.fill(R, [rows, cols], 0.0)), coef = 0.0;
+        if (truthy(o.rough)) {
+            // pressure ridges and rubble: ridged noise (sharp crests, broad troughs) at 3 and 1.2 x the thickness
+            const base = W ? 2 : 0;
+            for (const [q, [wl, a]] of [[0, [3.0, 1.0]], [1, [1.2, 0.55]]]) {
+                const g = keep(blur(nz[base + q], Math.max(wl * th / (4.0 * cell), 0.7)));
+                const s = Math.max(await stdOf(R, g), 1e-9);
+                r = keep(lavaRun(R, 6, { a: r, b: g }, { k0: a, k1: s }));
+            }
+            coef = Number(o.rough) * (1.0 - 0.7 * Number(o.age)) * th;
+        }
+        const T3 = lavaRun(R, 7, { a: T, b: r, c: plate }, { k0: coef });
+        T.destroy();
+        T = T3;
+    } else {
+        // the soft margin: two generators, the lobes' (9097) and the rough top's (9091)
+        let mm = o.margin_m === null || o.margin_m === undefined ? 1.5 * th : Number(o.margin_m);
+        mm *= 1.0 + 2.0 * Number(o.age);
+        const mc = Math.max(mm / cell, 1.2);
+        let core = path;
+        if (W) {
+            const sig = 0.25 * W / cell;
+            const b0 = keep(ew(R, EW.LERP, null, keep(blur(path, sig)), null, null, 0.0, sqrtTau * sig));
+            const nz = await standardNormalGpu(R, defaultRng([sd, 9097]), rows, cols, 2);
+            nz.forEach(keep);
+            let lobes = keep(Gd.fill(R, [rows, cols], 0.0));
+            for (const [q, [frac, a]] of [[0, [0.12, 0.5]], [1, [0.04, 0.3]]]) {
+                const g = keep(blur(nz[q], Math.max(frac * W / cell, 0.7)));
+                const s = Math.max(await stdOf(R, g), 1e-9);
+                lobes = keep(lavaRun(R, 9, { a: lobes, b: g }, { k0: a, k1: s }));
+            }
+            core = keep(lavaRun(R, 3, { a: b0, b: lobes }, { k0: 0.8, k1: 1.25 }));
+        }
+        const f1 = keep(blur(core, mc));
+        plate = lavaRun(R, 4, { a: f1 }, { k0: 0.2 });
+        const f2 = keep(blur(core, 3.0 * mc));
+        T = lavaRun(R, 8, { a: plate, b: f2 }, { k0: th, k1: Number(o.levee) });
+        let r = keep(Gd.fill(R, [rows, cols], 0.0)), coef = 0.0;
+        if (truthy(o.rough)) {
+            // pressure ridges and blocks: isotropic noise blurred at 6 and 2 x the thickness
+            const nz = await standardNormalGpu(R, defaultRng([sd, 9091]), rows, cols, 2);
+            nz.forEach(keep);
+            for (const [q, [wl, a]] of [[0, [6.0, 1.0]], [1, [2.0, 0.5]]]) {
+                const g = keep(blur(nz[q], Math.max(wl * th / (4.0 * cell), 0.7)));
+                const s = Math.max(await stdOf(R, g), 1e-9);
+                r = keep(lavaRun(R, 9, { a: r, b: g }, { k0: a, k1: s }));
+            }
+            coef = Number(o.rough) * (1.0 - 0.7 * Number(o.age)) * th;
+        }
+        const T3 = lavaRun(R, 7, { a: T, b: r, c: plate }, { k0: coef });
+        T.destroy();
+        T = T3;
+    }
+    for (const f of own) if (f && !f.destroyed && f !== T && f !== plate) f.destroy();
+    return [T, plate];
+}
+
+// a window [j0, j1) x [i0, i1) of a level field, cropped (hydro/crop)
+function cropOf(R, f, j0, j1, i0, i1) {
+    const w = R.field(j1 - j0, i1 - i0, 1);
+    R.run('hydro/crop', { src: f }, { outF: w }, { uOrigin: [i0, j0] });
+    return w;
+}
+
+/** Stage op 'lava_flows' (design 4.7): flows from the vents (lavaVents) by DOWNFLOW walkers on this level's surface,
+ * each the lava_surface of its walkers' passage, in lobed units, the later flows over the earlier ones (volcanic.py
+ * op_lava_flows; its docstring holds). The walkers walk in JavaScript on the surface read back once per unit (their
+ * draws depend on how many are alive each step, PORT_PLAN.md 2.4); everything per cell is on the GPU. The flows go into
+ * h and bed (lava is rock) and their footprint, dulled with age, into 'lava'. Runs on the first level it selects. */
+export async function opLavaFlows(fields, level, params, seed = 0, ctx = null) {
+    if (isPrepass(ctx)) return fields;
+    const key = stampKey('lava_flows', { ...params, seed });
+    if (key in fields) return fields;
+    const R = runnerOf(fields, ctx);
+    const p = { ...LAVA_DEFAULTS };
+    for (const [k, v] of Object.entries(params ?? {})) if (k in LAVA_DEFAULTS) p[k] = v;
+    const vents = lavaVents(params ?? {}, seed);
+    const [x0, y0, cell, n] = levelWindow(level);
+    const h = fields.h;
+    let total = Gd.fill(R, [n, n], 0.0);
+    let foot = 'lava' in fields ? copyOf(fields.lava) : Gd.fill(R, [n, n], 0.0);
+    const sd = Math.abs(Math.trunc(seed)) % 4294967296;
+    for (let k = 0; k < vents.length; k++) {
+        const v = { ...p };
+        for (const [kk, vv] of Object.entries(vents[k])) if (vv !== null && vv !== undefined) v[kk] = vv;
+        const at = [Number(v.at[0]), Number(v.at[1])];
+        const fi = (at[0] - x0) / cell - 0.5, fj = (at[1] - y0) / cell - 0.5;
+        if (!(fi >= 2 && fi < n - 2 && fj >= 2 && fj < n - 2)) continue;
+        const th0 = Number(v.thickness_m), W0 = Number(v.width_m ?? 0.0) || 0.0;
+        const dh = v.dh_m !== null && v.dh_m !== undefined ? Number(v.dh_m) : Number(v.dh_factor) * th0;
+        // the walkers' ground: the surface smoothed at the flow's own scale
+        const ht = ew(R, EW.ADD, h, total);
+        let g = copyOf(ht);
+        const sig = Math.max(2.0 * th0, 0.5 * W0) / cell;
+        if (sig > 0.5) {
+            const r0 = Math.ceil(Number(v.length_m) / cell + 8.0 * sig);
+            const ci = pyRound(fi), cj = pyRound(fj);
+            const j0 = Math.max(cj - r0, 0), j1 = Math.min(cj + r0 + 1, n), i0 = Math.max(ci - r0, 0), i1 = Math.min(ci + r0 + 1, n);
+            const win = cropOf(R, g, j0, j1, i0, i1);
+            const bw = blur(win, sig);
+            win.destroy();
+            lavaRun(R, 16, { a: bw }, { at: [i0, j0] }, { outF: g });
+            bw.destroy();
+        }
+        let units = Math.max(Math.trunc(Number(v.units || 1)), 1);
+        const unitCount = units;                  // volcanic.py's range(units), fixed before units = 1 below
+        const urng = defaultRng([sd, 9113, k]);
+        let tv = Gd.fill(R, [n, n], 0.0), fv = Gd.fill(R, [n, n], 0.0);
+        let start = [fi, fj], axis = null;
+        for (let u = 0; u < unitCount; u++) {
+            const vu = { ...v };
+            if (u) {
+                // a first unit with no passage over 0.05 leaves no axis: volcanic.py sets units = 1 but its range runs
+                // on, and unpacking None raises (a Blender defect, kept: the port runs as the edition does)
+                if (axis === null) throw new TypeError('cannot unpack non-iterable NoneType object');
+                const [[ai, aj], [di, dj], Lax] = axis;
+                vu.length_m = Number(v.length_m) * urng.uniform(0.25, 0.6);
+                vu.thickness_m = Number(v.thickness_m) * urng.uniform(0.7, 1.0);
+                if (W0) vu.width_m = W0 * urng.uniform(0.35, 0.7);
+                let s, lat;
+                if (urng.random() < 0.5) {                     // from a side, alongside the first unit
+                    s = urng.uniform(0.2, 0.8) * Lax;
+                    lat = urng.choice([-1.0, 1.0]) * (0.5 * W0 + 0.15 * (Number(vu.width_m ?? 0.0) || 0.0)) / cell;
+                } else {                                       // from the front, pushing it on
+                    s = urng.uniform(0.8, 1.0) * Lax;
+                    lat = urng.uniform(-0.3, 0.3) * W0 / cell;
+                }
+                if (truthy(v.channel)) {
+                    s = Math.max(s, Math.min(num(v.channel.until, 0.45) * Number(v.length_m) / cell, Lax));
+                }
+                start = [Math.min(Math.max(ai + s * di - lat * dj, 2), n - 3), Math.min(Math.max(aj + s * dj + lat * di, 2), n - 3)];
+            }
+            // a later unit sees the earlier ones smoothed at the walkers' scale
+            let gu = g;
+            if (u) {
+                const bt = blur(tv, Math.max(sig, 1.0));
+                gu = ew(R, EW.ADD, g, bt);
+                bt.destroy();
+            }
+            const host = await R.read(gu);
+            const th = Number(vu.thickness_m);
+            const walk = lavaWalkers(host, n, n, cell, start, Math.trunc(vu.walkers), Number(vu.length_m), dh, seed,
+                u === 0 ? k : k * 16 + u, v.dh_rel, th, Number(v.stop_spread), u === 0 ? Number(v.front_spread) : 0.0);
+            if (u === 0 && units > 1) {
+                // the first unit's axis: from its vent toward the passage's centroid, twice that far (np.nonzero's
+                // order, numpy's pairwise sums)
+                const pj = [], pi = [], w = [];
+                for (const c of walk.cells) {
+                    const pv = Math.min(walk.visits[c] / walk.N, 1.0);
+                    if (pv > 0.05) { pj.push(Math.floor(c / n)); pi.push(c % n); w.push(pv); }
+                }
+                if (pj.length) {
+                    const sw = npSum(Float64Array.from(w));
+                    const cj = npSum(Float64Array.from(pj, (x, q) => x * w[q])) / sw;
+                    const ci = npSum(Float64Array.from(pi, (x, q) => x * w[q])) / sw;
+                    const dist = Math.max(Math.hypot(ci - fi, cj - fj), 1.0);
+                    axis = [[fi, fj], [(ci - fi) / dist, (cj - fj) / dist], 2.0 * dist];
+                } else {
+                    units = 1;
+                }
+            }
+            // the unit's own window: where walkers went, plus room for its width, margins and levees
+            let jmin = n, jmax = -1, imin = n, imax = -1;
+            for (const c of walk.cells) {
+                const jj = Math.floor(c / n), ii = c % n;
+                jmin = Math.min(jmin, jj); jmax = Math.max(jmax, jj); imin = Math.min(imin, ii); imax = Math.max(imax, ii);
+            }
+            const mc = Math.max(1.5 * th * (1.0 + 2.0 * Number(v.age)) / cell, 1.2);
+            const pad = Math.ceil(12.0 * mc + 2.0 * (Number(vu.width_m ?? 0.0) || 0.0) / cell + 8);
+            const j0 = Math.max(jmin - pad, 0), j1 = Math.min(jmax + pad + 1, n), i0 = Math.max(imin - pad, 0), i1 = Math.min(imax + pad + 1, n);
+            const vf = R.field(n, n, 1, walk.visits);
+            const Pfull = lavaRun(R, 0, { a: vf }, { k0: walk.N });
+            vf.destroy();
+            const Pw = cropOf(R, Pfull, j0, j1, i0, i1);
+            Pfull.destroy();
+            const worg = [x0 + i0 * cell - at[0], y0 + j0 * cell - at[1]];
+            let wsc = null;
+            if (truthy(v.spread_slope_deg) && truthy(vu.width_m)) {
+                // lava spreads where the ground levels out: the width x sqrt(tan(spread_slope) / tan(slope)), 0.5-1.6
+                const gw = cropOf(R, gu, j0, j1, i0, i1);
+                const { gx, gy } = Gd.gradient(gw, cell);
+                wsc = lavaRun(R, 15, { a: gx, b: gy }, { k0: Math.tan(radians(Number(v.spread_slope_deg))) });
+                for (const f of [gw, gx, gy]) f.destroy();
+            }
+            if (u === 0 && truthy(v.channel) && truthy(vu.width_m)) {
+                // a channelled reach: the first unit leaves its vent at frac of its width, opening to the full width
+                const ch = v.channel;
+                const ramp = lavaRun(R, 14, { a: wsc ?? Pw }, { org: worg, step: cell, k0: num(ch.frac, 0.4), k1: num(ch.until, 0.45),
+                    len: Number(vu.length_m), flag: wsc ? 1 : 0 });
+                if (wsc) wsc.destroy();
+                wsc = ramp;
+            }
+            let [T, F] = await lavaSurface(R, Pw, cell, th, { p_edge: Number(v.p_edge), margin_m: null, levee: Number(v.levee),
+                rough: Number(v.rough), age: Number(v.age), seed: Math.trunc(seed) + 13 * k + 7 * u, width_m: vu.width_m,
+                front_deg: v.front_deg, levee_frac: Number(v.levee_frac), width_scale: wsc });
+            if (wsc) wsc.destroy();
+            if (v.no_climb === 'local') {
+                // the flow's top at most 1.3 x its thickness over the ground its own paths run on nearby
+                const gw = cropOf(R, ht, j0, j1, i0, i1);
+                const [pw, gwpw] = lavaRun(R, 20, { a: Pw, b: gw });
+                const sg = Math.max(0.25 * (Number(vu.width_m ?? 0.0) || 4.0 * th) / cell, 1.0);
+                const bw = blur(pw, sg), bgw = blur(gwpw, sg);
+                const [T2, F2] = lavaRun(R, 11, { a: T, b: F, c: gw, d: bw, e: bgw }, { k0: th });
+                for (const f of [gw, pw, gwpw, bw, bgw, T, F]) f.destroy();
+                T = T2;
+                F = F2;
+            } else if (truthy(v.no_climb)) {
+                // none of it on the cone it left: the ground at and below its vent
+                const sj = pyRound(start[1]), si = pyRound(start[0]);
+                const [zv] = await R.readRange(ht, sj * n + si, 1);
+                const gw = cropOf(R, ht, j0, j1, i0, i1);
+                const [T2, F2] = lavaRun(R, 12, { a: T, b: F, c: gw }, { k0: zv, k1: th });
+                for (const f of [gw, T, F]) f.destroy();
+                T = T2;
+                F = F2;
+            }
+            if (u === 0 && truthy(v.width_m) && Number(v.vent_taper) > 0.0) {
+                // a flow leaves its vent narrow and spreads downstream
+                const [T2, F2] = lavaRun(R, 13, { a: T, b: F }, { org: worg, step: cell, k0: Number(v.vent_taper) * Number(v.width_m) });
+                T.destroy();
+                F.destroy();
+                T = T2;
+                F = F2;
+            }
+            lavaRun(R, 17, { a: T }, { at: [i0, j0] }, { outF: tv });
+            lavaRun(R, 17, { a: F }, { at: [i0, j0] }, { outF: fv });
+            for (const f of [T, F, Pw]) f.destroy();
+            if (gu !== g) gu.destroy();
+        }
+        if (truthy(v.bury)) {
+            // the flow fills the gullies and hollows it runs over: its base is the walkers' ground g
+            const t2 = lavaRun(R, 18, { a: tv, b: g, c: ht, d: fv });
+            tv.destroy();
+            tv = t2;
+        }
+        const t3 = ew(R, EW.ADD, total, tv);
+        total.destroy();
+        total = t3;
+        const f3 = lavaRun(R, 19, { a: foot, b: fv }, { k0: Number(v.age) });
+        foot.destroy();
+        foot = f3;
+        for (const f of [tv, fv, g, ht]) f.destroy();
+    }
+    fields.h = ew(R, EW.ADD, h, total);
+    if ('bed' in fields) fields.bed = ew(R, EW.ADD, fields.bed, total);
+    fields.lava = foot;
+    fields[key] = total;
+    pullBand(fields, ctx);
+    return fields;
+}
+
+
 // ================================================================================================= the ops ===
 
-for (const op of [opStratovolcano, opCinderCones, opCalderaCollapse]) op.evolves = true;   // run.js calls them on every
-                                                                          // pass of the coarsest level; the stamps skip the pre-passes
-export const OPS = { stratovolcano: opStratovolcano, cinder_cones: opCinderCones, caldera_collapse: opCalderaCollapse };
+for (const op of [opStratovolcano, opCinderCones, opCalderaCollapse, opVolcanoSetting, opVolcanoPlain, opVolcanoAge,
+    opLavaFlows, opCalderaLake, opVolcanoLakes]) op.evolves = true;   // run.js calls them on every pass of the coarsest
+                                                                      // level; the stamps skip the pre-passes
+export const OPS = { stratovolcano: opStratovolcano, cinder_cones: opCinderCones, caldera_collapse: opCalderaCollapse,
+    volcano_setting: opVolcanoSetting, volcano_plain: opVolcanoPlain, volcano_age: opVolcanoAge, lava_flows: opLavaFlows,
+    lava_rubble: opLavaRubble, cone_rills: opConeRills, caldera_lake: opCalderaLake, volcano_lakes: opVolcanoLakes };
+

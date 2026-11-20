@@ -20,6 +20,7 @@ import * as RUN from '../../run.js';
 import * as FL from '../../solvers/fluvial.js';
 import * as GL from '../../solvers/glacial.js';
 import * as C from '../parity/_common.mjs';
+import * as GLT from './_glacial.mjs';
 import { finish } from './_glacial.mjs';
 
 const W = C.W;
@@ -36,6 +37,7 @@ try {
     console.log('[skip] no glacial fixtures: make them with <Blender\'s python> -I eidoverse/terrain/tests/glacial/glacial_expected.py');
     Deno.exit(0);
 }
+const ON_GPU = C.readJson(`${DIR}/gpu_fixtures.json`)?.cases ?? null;   // Blender's GPU results (gpu_fixtures.py)
 const R = await G.init();
 const P = prims(R);
 const results = {};
@@ -159,13 +161,49 @@ if (want('carve')) {
             T.ok(`${tag}: the cirque plan on numpy's own seeds (cirque_ela_m 1800): the rows within 1e-12 relative`, rc.ok, rc.detail);
             upb.destroy();
         }
-        // 7. the jump flood on numpy's own seed textures: the candidates identical to the twin's, every pass
+        // 7. the jump flood on numpy's own seed textures, every pass: the candidates identical to the Blender kernel's
+        // own on its GPU (tests/glacial/gpu_fixtures.py), and how many differ from the twin's (numpy's float32
+        // emulation of the kernel, whose pow and exp round as numpy's do: a near tie of two seeds' metrics can fall
+        // the other way)
         {
             const sA = up32(c, 'seedA'), sB = up32(c, 'seedB'), sC = up32(c, 'seedC'), c0 = up32(c, 'cand0');
             const cand = GL.jumpFloodRun(R, c0, sA, sB, lv.cell, v.profile_uniforms, v.steps, 0, sC);
-            const ec = exact(await R.read(cand), arr(c, 'cand_twin'));
-            T.ok(`${tag}: the jump flood (${v.steps.length} passes at ${n}^2) on numpy's seed textures: the candidates identical to the twin's`,
-                ec.ok, `${ec.diff} of ${4 * n * n} slots differ`);
+            const got = await R.read(cand);
+            const et = exact(got, arr(c, 'cand_twin'));
+            const gpu = ON_GPU?.[c.label];
+            if (gpu) {
+                const want = C.array(DIR, gpu.cand_gpu);
+                const eg = exact(got, want);
+                // where a slot differs: is it a near tie? Each slot's target in float64 (glacial.py decode_best) on
+                // both lists: the same four targets within 16 float32 steps means the two kernels ranked candidates
+                // whose float32 targets round to within an ulp or two of each other (pow and exp round differently in
+                // the two shader compilers); a larger difference is a real one
+                let real = 0, cells = 0;
+                if (!eg.ok) {
+                    const sA = arr(c, 'seedA'), sB = arr(c, 'seedB'), sC = arr(c, 'seedC');
+                    const mp = GLT.decodeBest(got, sA, sB, sC, n, n, lv.cell, v.profile_uniforms, 0);
+                    const mb = GLT.decodeBest(want, sA, sB, sC, n, n, lv.cell, v.profile_uniforms, 0);
+                    const ulp = (x) => 2 ** (Math.floor(Math.log2(Math.max(Math.abs(x), 1e-30))) - 23);
+                    for (let p = 0; p < n * n; p++) {
+                        let differs = false, near = true;
+                        for (let s = 0; s < 4; s++) {
+                            if (got[4 * p + s] === want[4 * p + s]) continue;
+                            differs = true;
+                            const a = mp[4 * p + s], b = mb[4 * p + s];
+                            if (!(a === b || Math.abs(a - b) <= 16 * ulp(Math.max(Math.abs(a), Math.abs(b))))) near = false;
+                        }
+                        if (differs) { cells++; if (!near) real++; }
+                    }
+                }
+                T.ok(`${tag}: the jump flood (${v.steps.length} passes at ${n}^2) on numpy's seed textures: the candidates identical ` +
+                    'to the Blender kernel\'s on its GPU, but for near ties (each differing slot\'s target in float64 within 16 float32 steps of ' +
+                    'Blender\'s)', eg.ok || real === 0, `${eg.diff} of ${4 * n * n} slots differ, on ${cells} cells, ${real} of them more than ` +
+                    `a near tie (from the twin's: the port ${et.diff}, Blender's GPU ${gpu.slots_differing_from_twin})`);
+                results[`${tag} jump flood`] = { vs_gpu: eg.diff, cells, real, vs_twin: et.diff, gpu_vs_twin: gpu.slots_differing_from_twin };
+            } else {
+                T.ok(`${tag}: the jump flood (${v.steps.length} passes at ${n}^2) on numpy's seed textures: the candidates identical to the twin's ` +
+                    '(no GPU candidates: tests/glacial/gpu_fixtures.py)', et.ok, `${et.diff} of ${4 * n * n} slots differ`);
+            }
             for (const f of [sA, sB, sC, c0, cand]) f.destroy();
         }
         for (const f of [h, recv, filled, b, ones, Qr.Q, Ar.Q, upF, Qb, Ab]) f.destroy();
@@ -243,20 +281,26 @@ if (want('synthetic')) {
         T.ok(`${c.label}: drainage_receivers bit for bit`, er.ok && ef.ok, `${er.diff} receivers, ${ef.diff} filled heights differ`);
         for (const f of [h, recv, filled]) f.destroy();
     }
-    // wall_flutes: a smoothstep of gain 1 / 0.12 over the noise total, whose weights turn with the fall direction
-    // (detail.flow_direction: the box-smoothed gradient, float32 here, float64 in numpy): a few cells where the step
-    // is steepest carry the direction's and the noise's float32 differences amplified. The grade: the masks' (1e-4 of
-    // range) on all but 0.01 % of the cells, and every cell within 1e-3 of range (test-grade, reported)
+    // wall_flutes: a smoothstep of gain 1 / 0.12 over the noise total, whose weights turn with the fall direction.
+    // Blender's own flutes (refine_level and carve_level pass the GPU device) take their noise from the
+    // world_noise_field kernel in float32; the fixture's numpy twin evaluates it in float64, whose difference from
+    // float32 world coordinates alone moves the folded slope's flutes by 4.8e-5 of range. So the reference is
+    // Blender's GPU result (tests/glacial/gpu_fixtures.py), at the float-function grade: max(1e-5 of range, 1.25 x
+    // the function's rounding floor (glacial_expected.py: h and the first noise field moved by one ulp, five
+    // patterns)); the distance from numpy's twin is reported beside it, for the port and for Blender's GPU alike
     for (const c of cs('wall_flutes')) {
         const lv = Level.fromDict(c.level), h = up32(c, 'h');
         const f = await GL.wallFlutes(h, lv, c.args.params, c.args.seed, R);
-        const got = await R.read(f), wantF = arr(c, 'flutes');
-        const g = floats(got, wantF, { k: 1e-4, uses: ['atan2', 'divide'] });
-        let over = 0;
-        for (let i = 0; i < wantF.length; i++) if (Math.abs(got[i] - wantF[i]) > g.tol) over++;
-        T.ok(`${c.label}: wall_flutes within 1e-4 of its range of numpy's on all but 0.01 % of the cells, every cell within 1e-3`,
-            over <= 1e-4 * wantF.length && g.over <= 1e-3, `worst ${sci(g.over)} of range; ${over} of ${wantF.length} cells over 1e-4`);
-        results[c.label] = { over_range: g.over, cells_over: over, cells: wantF.length };
+        const got = await R.read(f), twin = arr(c, 'flutes');
+        const floor = Number(c.values?.floor ?? 0), k = Math.max(1e-5, 1.25 * floor);
+        const gpu = ON_GPU?.[c.label];
+        const ref = gpu ? C.array(DIR, gpu.flutes_gpu) : twin;
+        const g = floats(got, ref, { k, uses: ['atan2', 'divide'] });
+        const gt = floats(got, twin, { k });
+        T.ok(`${c.label}: wall_flutes within max(1e-5 of range, 1.25 x its floor ${sci(floor)}) of ` +
+            (gpu ? 'Blender\'s on its GPU' : 'numpy\'s twin (no GPU result: tests/glacial/gpu_fixtures.py)'), g.ok,
+        `worst ${sci(g.over)} of range; from numpy's twin: the port ${sci(gt.over)}` + (gpu ? `, Blender's GPU ${sci(gpu.gpu_vs_twin_over_range)}` : ''));
+        results[c.label] = { over_range: g.over, vs: gpu ? 'gpu' : 'twin', vs_twin: gt.over, gpu_vs_twin: gpu?.gpu_vs_twin_over_range ?? null, floor };
         for (const x of [h, f]) x.destroy();
     }
     for (const c of cs('lip_open')) {
@@ -298,23 +342,32 @@ if (want('synthetic')) {
             pins: FL.edgePins(R, lv.n, fields.h), shared: {}, seed: 1, base_elevation_m: 0.0, device: R, log: () => {} });
         const rec = await GL.carveLevel(fields, lv, c.args.params, c.args.seed, ctx, R);
         const want = c.values.record, fl = c.values.floor ?? {};
-        const worst = {};
+        const gpu = ON_GPU?.[c.label];
+        const worst = {}, vsTwin = {};
         let ok = true;
         // an evolving op (the walls' 64 threshold passes): plan 5.3's stage grade, max(1e-4 of range, 1.25 x the carve's
-        // own floor, measured by glacial_expected.py with the op-entry perturbation, five patterns)
+        // own floor, measured by glacial_expected.py as the stage floors are, five patterns), against the Blender
+        // carve on its GPU (tests/glacial/gpu_fixtures.py: the kernels' float32 rounding as a Blender run has it), or
+        // the twin device's when that is not there; the distance from the twin's is reported beside
         for (const [k, a] of Object.entries(c.arrays)) {
             if (!k.startsWith('out_')) continue;
             const name = k.slice(4);
             if (!(name in fields)) { worst[name] = 'missing'; ok = false; continue; }
-            const g = floats(await R.read(fields[name]), arr(c, k), { k: Math.max(1e-4, 1.25 * (fl[name] ?? 0)), uses: ['pow', 'exp', 'sqrt', 'divide'] });
+            const got = await R.read(fields[name]);
+            const ref = gpu?.fields?.[name] ? C.array(DIR, gpu.fields[name]) : arr(c, k);
+            const g = floats(got, ref, { k: Math.max(1e-4, 1.25 * (fl[name] ?? 0)), uses: ['pow', 'exp', 'sqrt', 'divide'] });
             worst[name] = sci(g.over, 1);
+            vsTwin[name] = sci(floats(got, arr(c, k)).over, 1);
             if (!g.ok) ok = false;
         }
-        results[c.label] = { worst, floor: fl };
-        T.ok(`${c.label}: every field within max(1e-4 of range, 1.25 x its floor) of the twin carve's; seeds ${rec.seeds} (numpy ${want.seeds}), ` +
-            `streams ${rec.streams} (${want.streams}), steps ${JSON.stringify(rec.jfa_steps)} (${JSON.stringify(want.jfa_steps)})`,
-        ok && rec.seeds === want.seeds && rec.streams === want.streams && JSON.stringify(rec.jfa_steps) === JSON.stringify(want.jfa_steps),
-        JSON.stringify(worst));
+        results[c.label] = { worst, vs: gpu ? 'gpu' : 'twin', vs_twin: vsTwin, gpu_vs_twin: gpu?.gpu_vs_twin_over_range ?? null, floor: fl };
+        const ref = gpu ? gpu.record : want;
+        T.ok(`${c.label}: every field within max(1e-4 of range, 1.25 x its floor) of the ${gpu ? 'Blender carve\'s on its GPU' : 'twin carve\'s'}; ` +
+            `seeds ${rec.seeds} (Blender ${ref.seeds}), streams ${rec.streams} (${ref.streams}), steps ${JSON.stringify(rec.jfa_steps)} ` +
+            `(${JSON.stringify(ref.jfa_steps)})`,
+        ok && rec.seeds === ref.seeds && rec.streams === ref.streams && JSON.stringify(rec.jfa_steps) === JSON.stringify(ref.jfa_steps),
+        JSON.stringify(worst) + (gpu ? `; from the twin's: the port ${JSON.stringify(vsTwin)}, Blender's GPU ` +
+            JSON.stringify(Object.fromEntries(Object.entries(gpu.gpu_vs_twin_over_range).map(([k, v]) => [k, sci(v, 1)]))) : ''));
         fields.dispose();
     }
     for (const c of cs('valley_uplift')) {

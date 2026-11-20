@@ -4,10 +4,13 @@
 //   mode 0   depth = filled - h;   the depression mask depth > 1e-4 (u32)
 //            (the float32 difference of two float32 heights is exact here, as numpy's float64 one; the comparison
 //            with numpy's double 1e-4 is depth > uThr, the largest float32 below 1e-4, which decides it alike)
-//   mode 1   keep = chan | roll(chan, +-1, axis 0) | roll(chan, +-1, axis 1)  (np.roll: wrapping);  a depression
-//            touching it is kept: kept[label] = 1 (an atomic store of 1, order-free)
-//   mode 2   fill = label > 0 & !kept[label] & edge distance >= hold;  h = h + depth (the fill's own height),
-//            deposit = deposit + depth;  count the filled cells
+//   mode 1   keep = chan, then for axis 0 and then axis 1: keep = keep | roll(keep, 1) | roll(keep, -1) (np.roll
+//            wraps), so the 3 x 3 box around every channel cell, across the grid's edges;  a depression touching it is
+//            kept: kept[label] = 1 (an atomic store of 1, order-free)
+//   mode 2   fill = label > 0 & !kept[label] & edge distance >= hold;  h = h + depth, which numpy's float64 sum
+//            makes the spill level itself (the float32 cast of h + (filled - h) is filled), so the kernel writes
+//            filled;  deposit = deposit + depth (one float32 rounding, as numpy's cast of its float64 sum);  count
+//            the filled cells
 //! sampler h          the level's height
 //! sampler filled     its spill levels (mode 0)
 //! sampler lab r32ui  the depressions' labels (modes 1-2)
@@ -35,12 +38,12 @@ fn kmain(p: vec2<i32>) {
   let l = lab_at(p);
   if (u.uMode == 1) {
     if (l == 0u) { return; }
-    let xm = select(p.x - 1, n.x - 1, p.x == 0);
-    let xp = select(p.x + 1, 0, p.x == n.x - 1);
-    let ym = select(p.y - 1, n.y - 1, p.y == 0);
-    let yp = select(p.y + 1, 0, p.y == n.y - 1);
-    let k = chan_at(p).x > 0.5 || chan_at(vec2<i32>(xm, p.y)).x > 0.5 || chan_at(vec2<i32>(xp, p.y)).x > 0.5 ||
-      chan_at(vec2<i32>(p.x, ym)).x > 0.5 || chan_at(vec2<i32>(p.x, yp)).x > 0.5;
+    var k = false;
+    for (var dy = -1; dy <= 1; dy++) {
+      for (var dx = -1; dx <= 1; dx++) {
+        k = k || chan_at(wrap(p + vec2<i32>(dx, dy), n)).x > 0.5;
+      }
+    }
     if (k) { atomicStore(&kept_b[l], 1u); }
     return;
   }
@@ -53,8 +56,9 @@ fn kmain(p: vec2<i32>) {
     filling = filling && e >= u.uHold;
   }
   if (filling) {
-    let depth = filled_at(p).x - hh;
-    outH_store(p, vec4<f32>(hh + depth, 0.0, 0.0, 0.0));
+    let top = filled_at(p).x;
+    let depth = top - hh;
+    outH_store(p, vec4<f32>(top, 0.0, 0.0, 0.0));
     outD_store(p, vec4<f32>(dd + depth, 0.0, 0.0, 0.0));
     atomicAdd(&cnt_b[0], 1u);
   } else {

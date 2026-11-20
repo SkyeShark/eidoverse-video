@@ -52,6 +52,22 @@ export function floorRunOfCode(recipe, seed, which = 'base') {
     return null;
 }
 
+/** A fixture set of tests/parity/fixtures.py (C.loadFixture's { dir, manifest }) under the parity key, else under
+ * another key of the same Blender terrain code (as floorRunOfCode), or null. */
+export function loadFixtureOfCode(kind) {
+    const key = W.parityKeyDir();
+    if (!key) return null;
+    const code = (dir) => { const k = C.readJson(`${dir}/manifest.json`)?.key; return k ? `${k.field_hash}|${k.terrain_hash}` : null; };
+    const mine = code(key);
+    for (const k of W.parityKeys()) {
+        const dir = `${k.dir}/fixtures/${kind}`;
+        if ((k.dir === key || (mine && code(k.dir) === mine)) && W.exists(`${dir}/manifest.json`)) {
+            return { dir, manifest: JSON.parse(Deno.readTextFileSync(`${dir}/manifest.json`)) };
+        }
+    }
+    return C.loadFixture(kind);                       // says how to make them
+}
+
 /** A dumped context's shared record with its arrays ({ __array__: path } placeholders, the arrays in
  * ctx.sharedArrays: tests/parity/replay.mjs stageContext) as GPU fields, as the port's ops keep them (stampAdd's
  * ctx.shared._stamps). Returns the fields made (the caller releases them). */

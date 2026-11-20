@@ -52,7 +52,8 @@
 //     hydro.py flow_receivers' rule, which is drainage_receivers' own: the same D8 rule and flat step; glacial's
 //     d8_receivers divides the slopes by LEN x cell where fluvial's divides by LEN, a common positive factor, so the
 //     order differs only on float64 near-ties, and the kernel compares exactly up to one float32 rounding), the mass
-//     balance, the discharge's convergence test (a reduction: 8 bytes a test instead of the field), the channel
+//     balance and its stacking with the inflow into ice_flux's two-channel input (mb: np.stack([b, Q_in], -1)), the
+//     discharge's convergence test (a reduction: 8 bytes a test instead of the field), the channel
 //     and seed masks, the streams (seed_pos, seed_links: numpy's lexsort of each receiver's donors and its first of
 //     each segment is a gather over the eight neighbours here, which keeps the same donor: the largest discharge,
 //     then the lowest position; the pointer jumping and np.unique are core/prims.js pathSteps and cumsum),
@@ -85,6 +86,8 @@
 //     trunk_pins' np.interp(s, course s, course bed) is exactly that, so the trunk's pins are that kernel.
 //   - The pins the trunk adds (valley_uplift's ctx.pins) are released by the next pass's valley_uplift (fields of
 //     the GPU are not collected).
+//   - valley_uplift's fresh start sets bed to a copy of h where numpy binds both names to one array: a level's
+//     fields are released one by one, so no two names share a field (the values are the same).
 //   - Python's round() is core/levels.js pyRound (half to even); f'{x:.3g}' is pyFormat.
 //
 // The convergence loop this module names for the dispatch-log comparison (PORT_PLAN.md 5.7): ice_flux, tested every

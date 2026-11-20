@@ -44,8 +44,9 @@
 //     kernels in kernels/strata/ (each names the numpy lines it replaces): offset() (offset.wgsl: the dip plane,
 //     warps, faults and fold), the plateau start (plateau.wgsl, acc.wgsl), joint_field (joints.wgsl), rock_mass
 //     (acc.wgsl), rock_cores and _box_noise (cores.wgsl), the forcing pack (par.wgsl), the edge follow (ring.wgsl),
-//     caprock_fraction (caprock.wgsl), fill_dry_basins (dry.wgsl, with solvers/hydro.js fillDepressions and
-//     core/prims.js label: numpy's fill and labels to the bit), and the end fields zs, K and Sc with facies_factor
+//     caprock_fraction (caprock.wgsl), fill_dry_basins with op_strata_fluvial's widening of the channel it keeps
+//     (dry.wgsl, with solvers/hydro.js fillDepressions and core/prims.js label: numpy's fill, labels and filled cells
+//     to the bit), and the end fields zs, K and Sc with facies_factor
 //     (final.wgsl). numpy evaluates them in float64 from the GPU's float32 noise; here they are float32 in numpy's
 //     order, and a world-space plane or line is evaluated as its value at the level's first cell plus its steps per
 //     column and per row, made in doubles, so the float32 arithmetic works on the level's extent. They are not Blender
@@ -705,9 +706,11 @@ export async function caprockFraction(h, zoff, level, main, capZs, R) {
     return c / ((j1 - j0) * (i1 - i0));
 }
 
-/** Fill every closed depression of a level's surface that does not touch `keep` (the river's channel, a field) with
- * sediment, in place (h and deposit; the bed stays), never within `hold` cells of the edge (strata.py
- * fill_dry_basins). Returns the cells filled. */
+/** Fill every closed depression of a level's surface that does not touch `keep` with sediment, in place (h and
+ * deposit; the bed stays), never within `hold` cells of the edge (strata.py fill_dry_basins). `keep` is the river's
+ * channel as op_strata_fluvial holds it: the kernel widens it to the 3 x 3 box around each channel cell (the caller's
+ * two np.roll passes, wrapping) before it keeps a depression. When cells fill, fields.h and fields.deposit become new
+ * fields and the old ones are destroyed (numpy's assignment drops them). Returns the cells filled. */
 export async function fillDryBasins(fields, keep = null, hold = 0, R = null) {
     R = R ?? fields.h.runner;
     const D = Gd.dummies(R), im = imageDummies(R), P = prims(R);
@@ -716,8 +719,10 @@ export async function fillDryBasins(fields, keep = null, hold = 0, R = null) {
     const mask = R.field(n, n, 1, null, 'u32');
     const k = kernelOf(R, 'strata/dry');
     const un = { uThr: f32AtOrBelow(1e-4), uHold: Math.trunc(hold), uHasDep: 'deposit' in fields ? 1 : 0 };
+    // every mode covers the level's cells (the runner sizes a dispatch by its first image, a stand-in in modes 1-2)
+    const groups = [Math.ceil(n / 16), Math.ceil(n / 16), 1];
     R.run(k, { h, filled, lab: D.u1, chan: D.f1, dep: D.f1 }, { outM: mask, kept: im.ua, outH: im.fa, outD: im.fb, cnt: im.ub },
-        { ...un, uMode: 0 });
+        { ...un, uMode: 0 }, groups);
     const { labels, count } = await P.label(mask);
     mask.destroy();
     if (!count) {
@@ -728,11 +733,11 @@ export async function fillDryBasins(fields, keep = null, hold = 0, R = null) {
     const kept = R.field(1, count + 1, 1, null, 'u32');
     if (keep) {
         R.run(k, { h, filled, lab: labels, chan: keep, dep: D.f1 }, { outM: im.ua, kept, outH: im.fa, outD: im.fb, cnt: im.ub },
-            { ...un, uMode: 1 });
+            { ...un, uMode: 1 }, groups);
     }
     const oh = R.field(n, n, 1), od = R.field(n, n, 1), cnt = R.field(1, 2, 1, null, 'u32');
     R.run(k, { h, filled, lab: labels, chan: D.f1, dep: 'deposit' in fields ? fields.deposit : D.f1 },
-        { outM: im.ua, kept, outH: oh, outD: od, cnt }, { ...un, uMode: 2 });
+        { outM: im.ua, kept, outH: oh, outD: od, cnt }, { ...un, uMode: 2 }, groups);
     const [c] = await R.readAll([cnt]);
     for (const f of [labels, filled, kept, cnt]) f.destroy();
     if (!c[0]) {
@@ -740,6 +745,7 @@ export async function fillDryBasins(fields, keep = null, hold = 0, R = null) {
         od.destroy();
         return 0;
     }
+    for (const f of [fields.h, fields.deposit]) if (f && f !== D.f1 && !f.destroyed) f.destroy();
     fields.h = oh;
     fields.deposit = od;
     return c[0];
