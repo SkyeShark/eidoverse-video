@@ -10,9 +10,10 @@ path for small grids in plain Python; production runs the kernels on the GPU.
     TW.KERNELS                               # every kernel name
 
 The kernels load through core/gpu.kernel with common.glsl prefixed, as every terrain kernel does; their twins
-register with core/twins by the name 'surface_<kernel>'. The gully filter's twin calls solvers/detail.py's
-phacelle_noise itself, the settle's and the snowpack's twin is detail.relax(backend='numpy'), upsample2's is
-core/grid.py's crop_upsample2. No bpy.
+register with core/twins by the name 'surface_<kernel>'. The gully filter's twin is gully_octave: solvers/detail.py's
+phacelle_noise arithmetic with each lattice point's spacing and depth varied (with neither varied it equals
+phacelle_noise to rounding, surface_data/test_relief.py); the settle's and the snowpack's twin is
+detail.relax(backend='numpy'), upsample2's is core/grid.py's crop_upsample2. No bpy.
 """
 from __future__ import annotations
 
@@ -202,9 +203,76 @@ def crest(s, u):
             'outX': T.rgba(ex, tan_s)}
 
 
+def _smooth64(e0, e1, x):
+    """GLSL smoothstep in float64 (edges that are arrays too)."""
+    t = np.clip((np.asarray(x, np.float64) - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def gully_octave(px, py, ix, iy, dx, dy, freq, norm, jitter, spread, along):
+    """One octave of the relief's gullies (phacelle.glsl's inner loop): solvers/detail.py's phacelle_noise on lattice
+    coordinates (px, py) with the integer lattice offset (ix, iy) and the direction field (dx, dy), each lattice
+    point's stripes at their own spacing (2^(jitter u)) and carrying a log-normal depth (spread) blended with a kernel
+    `along` times longer down (dx, dy) than across, inside the 1.5-cell disk the filter's own weights live in.
+    freq is the octave's 1 / wavelength (world gradients). Returns (c, s, gx, gy, Am, gAx, gAy): the stripes' cosine
+    and sine, d(c)/d(world), the local depth factor and its world gradient. float64. With jitter 0, spread 0 it is
+    phacelle_noise(px, py, dx, dy, 1, 0.25, norm) exactly (c, s; g as gully_relief takes it), Am 1."""
+    pix, piy = np.floor(px), np.floor(py)
+    pfx, pfy = px - pix, py - piy
+    bx, by = pix.astype(np.int64) + int(ix), piy.astype(np.int64) + int(iy)
+    pdx, pdy = -dy, dx
+    sdx, sdy = pdx * TAU, pdy * TAU
+    isc2 = 1.0 / (1.5 / float(along)) ** 2
+    phx = np.zeros_like(px)
+    phy = np.zeros_like(px)
+    ws = np.zeros_like(px)
+    fs = np.zeros_like(px)
+    ks = np.zeros_like(px)
+    as_ = np.zeros_like(px)
+    dkx = np.zeros_like(px)
+    dky = np.zeros_like(px)
+    dax = np.zeros_like(px)
+    day = np.zeros_like(px)
+    for i in range(-1, 3):
+        for j in range(-1, 3):
+            rx, ry = N.hash2(bx + i, by + j)
+            ex, ey = N.hash2(bx + i + 1013, by + j - 7919)
+            e2x, _e2y = N.hash2(bx + i - 3571, by + j + 2797)
+            vx = pfx - i - rx * 0.5
+            vy = pfy - j - ry * 0.5
+            w = np.maximum(0.0, np.exp((vx * vx + vy * vy) * -2.0) - 0.01111)
+            fr = np.exp2(float(jitter) * ex)
+            wave = (vx * sdx + vy * sdy) * fr + 0.25 * TAU
+            phx += np.cos(wave) * w
+            phy += np.sin(wave) * w
+            ws += w
+            fs += w * fr
+            n = (ey + e2x) * 1.22474487
+            a = np.exp(float(spread) * n - 0.5 * float(spread) * float(spread))
+            vc = vx * pdx + vy * pdy
+            bump = np.maximum(0.0, 1.0 - (vx * vx + vy * vy) * (1.0 / 2.25))
+            ex2 = np.exp(-0.5 * vc * vc * isc2)
+            K = bump * bump * ex2
+            kx = float(freq) * ex2 * (bump * (-4.0 / 2.25) * vx - bump * bump * vc * isc2 * pdx)
+            ky = float(freq) * ex2 * (bump * (-4.0 / 2.25) * vy - bump * bump * vc * isc2 * pdy)
+            ks += K
+            as_ += K * a
+            dkx += kx
+            dky += ky
+            dax += kx * a
+            day += ky * a
+    qx, qy = phx / ws, phy / ws
+    mag = np.maximum(1.0 - float(norm), np.sqrt(qx * qx + qy * qy))
+    c, sn = qx / mag, qy / mag
+    fbar = fs / ws
+    gx = -sn * sdx * fbar * float(freq)
+    gy = -sn * sdy * fbar * float(freq)
+    Am = (as_ + 1.0e-6) / (ks + 1.0e-6)
+    return c, sn, gx, gy, Am, (dax - Am * dkx) / (ks + 1.0e-6), (day - Am * dky) / (ks + 1.0e-6)
+
+
 @T.twin(PREFIX + 'phacelle')
 def phacelle(s, u):
-    from ..solvers import detail as DT
     hg = s['hgT']
     hd, wd = hg.shape[:2]
     f = int(u['uF'])
@@ -214,9 +282,16 @@ def phacelle(s, u):
     ok = L > 1e-12
     Ls = np.where(ok, L, 1.0)
     dx, dy = np.where(ok, d[..., 0] / Ls, 0.0), np.where(ok, d[..., 1] / Ls, 0.0)
+    cov = cell_at(s['coverT'], (hd, wd), f).astype(np.float64)
+    gate = cell_at(s['gateT'], (hd, wd), f).astype(np.float64)
     jj, ii = np.mgrid[0:hd, 0:wd]
     lx = ((ii.astype(F) + F(0.5)) * texel).astype(F)
     ly = ((jj.astype(F) + F(0.5)) * texel).astype(F)
+    spec, init = [float(v) for v in u['uSpec']], [float(v) for v in u['uInit']]
+    loose = _smooth64(float(u['uLoose'][0]), float(u['uLoose'][1]), cov[..., 0] - cov[..., 1])
+    a_init = init[0] * (1.0 + (init[1] - 1.0) * loose)
+    sand = 1.0 - _smooth64(init[2], init[3], cov[..., 1])
+    bury = [float(v) for v in u['uBury']]
     octs = s['octT']
     relief = np.zeros((hd, wd))
     gx = np.zeros((hd, wd))
@@ -225,23 +300,30 @@ def phacelle(s, u):
     cd = 0.0
     for o in range(int(u['uOct'])):
         A, B = octs[0, 2 * o], octs[0, 2 * o + 1]
+        fq = float(B[0])
         px = (A[2] + lx * B[0]).astype(F).astype(np.float64)        # the lattice coordinate as the kernel holds it
         py = (A[3] + ly * B[0]).astype(F).astype(np.float64)
-        c, sn, sdx, sdy = DT.phacelle_noise(px, py, dx, dy, 1.0, 0.25, float(u['uNorm']), (int(A[0]), int(A[1])))
-        ogx, ogy = -sn * sdx * float(B[0]), -sn * sdy * float(B[0])
-        if B[2] > 0.5:
-            relief += float(B[1]) * c
-            gx += float(B[1]) * ogx
-            gy += float(B[1]) * ogy
-            k2 = float(B[1]) * float(B[0]) * float(B[0])
-            cn += k2 * c
-            cd += k2
-        dx = dx + float(u['uSteer']) * ogx / (float(B[0]) * TAU)
-        dy = dy + float(u['uSteer']) * ogy / (float(B[0]) * TAU)
+        c, _sn, ogx, ogy, Am, gAx, gAy = gully_octave(px, py, int(A[0]), int(A[1]), dx, dy, fq, float(u['uNorm']),
+                                                      spec[0], spec[1], spec[2])
+        amp = float(B[1])
+        ab = max(amp, 1.0e-6)
+        W = (_smooth64(0.5, 2.0, cov[..., 3] * fq / a_init) * sand
+             * (1.0 - _smooth64(bury[0] * ab, bury[1] * ab, cov[..., 2])))
+        if float(B[3]) > -0.5:
+            W = W * gate[..., int(float(B[3]) + 0.5)]
+        relief += amp * W * Am * c
+        gx += amp * W * (Am * ogx + c * gAx)
+        gy += amp * W * (Am * ogy + c * gAy)
+        k2 = amp * fq * fq
+        cn += k2 * W * Am * c
+        cd += k2
+        st = float(u['uSteer']) * np.minimum(W * Am, 1.0)
+        dx = dx + st * ogx / (fq * TAU)
+        dy = dy + st * ogy / (fq * TAU)
         L = np.maximum(np.hypot(dx, dy), 1e-12)
         dx, dy = dx / L, dy / L
     slope = np.degrees(np.arctan(hg[..., 3].astype(np.float64)))
-    cover = cell_at(s['coverT'], (hd, wd), f)[..., 0]
+    cover = cov[..., 0].astype(F)
     cover_w = smoothstep(u['uCover'][0], u['uCover'][1], cover).astype(np.float64)
     rock = smoothstep(u['uRockDeg'][0], u['uRockDeg'][1], slope).astype(np.float64) * (1.0 - cover_w)
     sl = [float(v) for v in u['uSlope']]
@@ -414,4 +496,5 @@ def route_colour(s, u):
     return {'outQ': Q.astype(F)}
 
 
-__all__ = ['KERNELS', 'PREFIX', 'UPSAMPLE_KINDS', 'source', 'inline', 'smoothstep', 'cdiff', 'cell_at', 'bilinear_at']
+__all__ = ['KERNELS', 'PREFIX', 'UPSAMPLE_KINDS', 'source', 'inline', 'smoothstep', 'cdiff', 'cell_at', 'bilinear_at',
+           'gully_octave']
