@@ -8,9 +8,10 @@ section 5; the solver is solvers/karst.py.
 
 Stages, in order:
   karst      every level: the alluvial plain and its river (a flat water surface with cut banks and point bars,
-             written to `water` so the lake builder draws it), the towers (each a ledged wall from its footprint's
-             edge meeting its summit: a spire's needle, a peak's knobbed cone, a block's cliffed cap with knobs; deep
-             inside a cluster the broad concave fengcong cone, its flanks meeting its neighbours' at cols), inside the
+             written to `water` so the lake builder draws it), the towers (on the plain and at a cluster's edge,
+             where the plain undercuts their feet, each a ledged wall from its footprint's edge meeting its summit: a
+             spire's needle, a peak's knobbed cone, a block's cliffed cap with knobs; deep inside a cluster the broad
+             concave fengcong cone, wooded to its top, its flanks meeting its neighbours' at cols), inside the
              clusters each tower's massif body (a walled skirt reaching toward its neighbours, so a cluster stands as
              one massif with its peaks on it, cols between them and cockpits in the gaps), the
              raised ground between a cluster's inner towers, the talus cones at their feet, the cockpits filled flat
@@ -87,15 +88,16 @@ TOWER_KARST = Recipe(
         Stage('karst', {}, levels='all'),
         Stage('threshold', {'iterations': 24}, levels='all'),
     ],
-    doc='Towers from blue-noise centres in clusters along the joint strike and scattered on the plain: spires, peaks '
-        'and cliffed blocks, each a ledged wall of 76-88 degrees from its foot meeting a pointed or knobby summit; '
-        'a river at plain level with cut banks and point bars; judged against guilin_karst (Copernicus 30 m, through '
-        'the radar chain: its spacing, heights and plain, not its walls) and the Li River photographs.')
+    doc='Towers from blue-noise centres in clusters along the joint strike and scattered on the plain: on the plain '
+        'and at the clusters\' edges spires, peaks and cliffed blocks, each a ledged wall of 76-88 degrees from its foot '
+        'meeting a pointed or knobby summit; inside the clusters broad concave cones joined at cols; a river at plain '
+        'level with cut banks and point bars; judged against guilin_karst (Copernicus 30 m, through the radar chain) '
+        'and the Li River photographs.')
 
 def karst_palette():
     """The towers' material: the surfacing package's karst palette (its scans, colours, forest canopy and fields),
     with two layers placed from this terrain's own fields:
-      - bare limestone on the towers' sheer walls and on the benches' risers, from 76 to 86 degrees, the threshold
+      - bare limestone on the towers' sheer walls and collapse scarps, from 76 to 86 degrees, the threshold
         broken by noise at 40 m and 12 m, bared a little lower on convex ribs and held under forest in gullies,
         without the convex bonus that bared the pointed summits (Guilin's towers are forest on every flank and ledge
         the rock lets it hold, the grey showing on the vertical faces; at the palette's 68-80 degrees these towers'

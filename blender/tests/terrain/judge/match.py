@@ -19,7 +19,8 @@ The steps:
   4. A reference whose source is coarser than its stored pixel (the 30 m radar DSMs; refs.NATIVE) gets its generated
      field through the same chain: box-averaged to the native resolution, upsampled (Catmull-Rom) to the stored
      pixel, then the fetch's Gaussian. So a crest a generator makes sharp is softened exactly as the radar softened
-     the real one, and the two are compared alike.
+     the real one, and the two are compared alike. Its lake mask takes the same chain (then over a half), so a
+     generated cell coarser than the stored pixel (a draft terrain against a radar DSM) is matched too.
 """
 from __future__ import annotations
 
@@ -113,6 +114,16 @@ def _mask_to(mask, src_cell, dst_cell, n_out):
     return grid.resample_box(mask.astype(np.float64), src_cell, dst_cell, n_out) > 0.5
 
 
+def _mask_chain(mask, cell, nat_cell, n_nat, ref_pixel, n_ref, blur_px):
+    """A lake mask through the source chain its heights take (step 4): box to the native pixel, Catmull-Rom up to
+    the stored pixel, the fetch's Gaussian, then over a half. (Straight from the generated cell to the stored pixel
+    it failed whenever the generated cell is coarser than the stored pixel: a draft terrain against a radar DSM.)"""
+    if mask is None:
+        return None
+    coarse = grid.resample_box(mask.astype(np.float64), cell, nat_cell, n_nat)
+    return gaussian(cubic_resample(coarse, nat_cell, ref_pixel, n_ref), blur_px) > 0.5
+
+
 def match(h, cell, ref, water=None, sea_level=None, source_chain=True):
     """A generated field (row 0 = south, metres, `cell` metres per cell) and a refs.Reference on one grid.
     source_chain=False skips step 4 for a field that already carries the source's softness: the reference's own
@@ -147,7 +158,7 @@ def match(h, cell, ref, water=None, sea_level=None, source_chain=True):
         g = gaussian(g, ref.native_blur_px * nat / ref.pixel)
         notes.append(f'reference is {nat:g} m data stored at {ref.pixel:g} m: the generated field went through the '
                      f'same chain (box to {nat:g} m, Catmull-Rom up, Gaussian {ref.native_blur_px:g} native px)')
-        gw = _mask_to(glake, cell, ref.pixel, n_ref)
+        gw = _mask_chain(glake, cell, extent / n_nat, n_nat, ref.pixel, n_ref, ref.native_blur_px * nat / ref.pixel)
         r = rh if rh.shape[0] == n_ref else grid.resample_box(rh, ref.pixel, ref.pixel, n_ref)
         return Matched(g, np.asarray(r, dtype=np.float64), ref.pixel, extent, notes, gw, rlake)
     if cell < pixel - 1e-9 or gs.shape[0] != n_out:
