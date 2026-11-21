@@ -143,14 +143,14 @@ FLUVIAL = dict(K=1.5e-5, valley_spacing_m='$valley_spacing_m', threshold_deg='$t
 # the trunk's size is a U about half as deep as wide, not a slot as deep as wide: on seeds 5 and 6 those slots ran
 # along the side valleys' bottoms like canals). smooth_cells 12: a glacier cuts through its river's bends, so the
 # trough runs straighter than the valley it took over.
-# The rock (rock_weak_deg, rock_scale_m, the knob rock_strong_share): massive limestone under nearly half the
-# ground, in reaches a few km long, where the walls stand at wall_deg over a broad flat floor (Lauterbrunnen's box
-# between the village and Stechelberg), and weaker rock elsewhere, whose walls failed back after the ice to as
-# little as 52 degrees over their talus (its narrower U and V reaches, toward Zweiluetschinen and the valley head);
-# wall_iters 200 lets the coarsest level's walls fail that far. Massive everywhere, every section of the trunk was a
-# box: the judge's U-fit read 2.8-3.3 on every seed against Lauterbrunnen's 1.8, whose sections run from 0.7 to 5.4;
-# with a third of it massive and the weak walls at 45 degrees the tile kept too few cliffs (slope p99 63-66 degrees
-# against the real tile's 76).
+# The rock (rock_weak_deg, rock_scale_m, the knobs rock_strong_share and massive_reach_m): massive limestone across
+# the valley from 0.2 to 2.2 km down-valley of the tile's centre and in patches elsewhere, where the walls stand at
+# wall_deg over a broad flat floor (Lauterbrunnen's box between the village and Stechelberg, the wall the floor
+# views look at), and weaker rock beyond, whose walls failed back after the ice to as little as 52 degrees over their
+# talus (its narrower U and V reaches, toward Zweiluetschinen and the valley head); wall_iters 200 lets the coarsest
+# level's walls fail that far. Massive everywhere, every section of the trunk was a box: the judge's U-fit read
+# 2.8-3.3 on every seed against Lauterbrunnen's 1.8, whose sections run from 0.7 to 5.4. Left to the noise alone, the
+# reach the floor views look at came out weak on seed 1 and its Staubbach-like wall a grassed ramp over talus.
 # apron 0.33: the fill rises on from the floor's edge up the walls' toe at about 30 degrees, a talus apron (level
 # there, the fill made a shelf at every wall's foot whose edges stepped along the coarsest level's cells, and the
 # finer levels raised them into levees with square corners)
@@ -161,6 +161,7 @@ GLACIAL = dict(ela_m='$ela_m', trough_width_m='$trough_width_m', trough_depth_m=
                shoulder_width='$shoulder_width', shoulder_rise=0.3, shoulder_exp=1.0, cut=0.3, cut_width=4.0,
                shoulder_cut=0.18, shoulder_cut_width=2.0, floor_grade=0.012,
                rock_weak_deg=52.0, rock_scale_m=3000.0, rock_strong_share='$rock_strong_share', wall_iters=200,
+               rock_band_m='$massive_reach_m', rock_band_down_m=1000.0, rock_band_azimuth_deg='$drain_azimuth_deg',
                wall_noise=0.25, wall_scales_m=[400.0, 120.0, 40.0], channel_area_m2=4.0e6, smooth_cells=12.0,
                rock_flutes=0.6, flute_weak=0.6, flute_strong=0.2)
 # (the flutes: couloirs failing to about 72 degrees on 80-degree walls (flute_weak 0.6). At the defaults' 67 degrees
@@ -230,10 +231,15 @@ ALPINE_VALLEY = Recipe(
                                    apply=_tributaries),
         'shoulder_width': Knob(1.5, '', (0.0, 5.0), "the benches above the trough's lip (Muerren, Wengen), as a "
                                                     "share of the trough's half-width; 0: none"),
-        'rock_strong_share': Knob(0.45, '', (0.0, 1.0), "the share of the ground in massive rock, in reaches a few km "
-                                                        "long, where the trough's walls stand at wall_deg (a box "
-                                                        "trough); elsewhere the rock is weaker and its walls failed "
-                                                        "back to as little as 52 degrees over talus (a U)"),
+        'rock_strong_share': Knob(0.3, '', (0.0, 1.0), "the share of the ground in massive rock (beyond the massive "
+                                                       "reach), in patches a few km across, where the trough's walls "
+                                                       "stand at wall_deg (a box trough); elsewhere the rock is weaker "
+                                                       "and its walls failed back to as little as 52 degrees over "
+                                                       "talus (a U)"),
+        'massive_reach_m': Knob(1200.0, 'm', (0.0, 10000.0), "the massive limestone crossing the valley 1 km down-valley "
+                                                             "of the tile's centre: its walls stand sheer within this "
+                                                             "distance of that line (Lauterbrunnen's box between the "
+                                                             "village and Stechelberg; 0: none)"),
         'wall_deg': Knob(80.0, 'deg', (35.0, 85.0), "the trough walls' angle: the carved cliff's core stands at it "
                                                     "and the fresh walls' threshold is it (lognormal, with fall-line "
                                                     "couloirs and ribs on the levels that resolve them; "

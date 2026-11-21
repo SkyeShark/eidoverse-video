@@ -317,11 +317,13 @@ def test_u_fit():
           f"to the walls' shoulders)", 0.5 * tw <= after.get('trough_width_m', 0) <= 2.0 * tw,
           f"{after.get('trough_width_m', 0):.0f} m")
     # the same valley in weak rock (the recipe's rock_weak_deg, none of the ground massive): the fresh walls fail
-    # back after the carve to about 45 degrees over their talus, a U in place of the box
+    # back after the carve to their angle over their talus, a U in place of the box. (On these 15.6 m cells a 600 m
+    # wall needs about four times the 200 passes the recipe gives the coarsest level's 31 m cells; with 200 here
+    # half its height still stood at 60 degrees or more)
     weak = Fields(lv, {'h': h.copy(), 'bed': h.copy()})
     ctx.pins = FL.edge_pins(lv.n, h)
-    G.carve_level(weak, lv, dict(params, rock_weak_deg=float(AV.GLACIAL['rock_weak_deg']), rock_strong_share=0.0),
-                  1, ctx, GPU)
+    G.carve_level(weak, lv, dict(params, rock_weak_deg=float(AV.GLACIAL['rock_weak_deg']), rock_strong_share=0.0,
+                                 rock_band_m=0.0, wall_iters=800), 1, ctx, GPU)
     after_w = FA.alpine_valley(np.asarray(weak['h'], np.float64), lv.cell)
     steep_w = float(np.median([s['steep'] for s in box_sections(weak['h'], lv)]))
     bw = after_w.get('u_exponent', float('nan'))
