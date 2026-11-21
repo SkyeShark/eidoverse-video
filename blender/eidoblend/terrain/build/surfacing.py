@@ -159,7 +159,7 @@ FAR_FADE_MAIN_CELLS = 64.0            # the far colour fades in over this many m
 FAR_GRAIN = 0.25                      # how much of the base layer's scan luminance the far colour keeps
 FAR_FADE_NODE = 'eido_far_fade'       # the near material's hand-off smoothstep over D0..1.5 D0 (set_far_distance)
 DETAIL_STRENGTH = 0.5                 # the relief below the cell, by default (options detail_strength)
-NORMAL_VAR_VERSION = 1                # the scans' normal variance record in their stats.json (scan_normal_variance)
+NORMAL_VAR_VERSION = 2                # the scans' normal variance record in their stats.json (scan_normal_variance)
 AA_GRAZING = 1.0 / 16.0               # specular anti-aliasing's footprint: vd x pixel angle / sqrt(max(|N.V|, this)),
 #                                       the side of a square of the anisotropic footprint's area (16x filtering)
 # the 5-95 % half-range of (n - 0.5) of the mask language's noise() and fbm() (Blender's Noise Texture, stretched
@@ -351,31 +351,39 @@ def _normal_variance(xy):
 
 
 def _loss_curve(lost, total):
-    """(k, p, largest error) of 1 - 2^-((m / k)^p) fitted to lost[m] / total over the mip levels 0-10, by a grid
-    search: the shape the material evaluates (_rough_aa). The scans in use fit within 0.01-0.08 (11-20), well inside
-    the one mip level a footprint's estimate is good to."""
+    """(a, b, largest error) of smoothstep(a, b, m) fitted to lost[m] / total over the mip levels 0-10, by a grid
+    search: the shape the material evaluates (_rough_aa: one Map Range node a layer, where the 1 - 2^-((m / k)^p) of
+    the first version took two Power nodes and added a tenth to the compile, 11-20). The scans in use fit within
+    0.013-0.094, inside the one mip level a footprint's estimate is good to."""
     fr = np.asarray(lost, np.float64)[:11] / max(float(total), 1e-12)
     m = np.arange(len(fr), dtype=np.float64)
-    K = np.linspace(0.3, 8.0, 78)[:, None, None]
-    Pw = np.linspace(0.4, 3.0, 53)[None, :, None]
-    err = np.abs(1.0 - 2.0 ** (-(m[None, None, :] / K) ** Pw) - fr[None, None, :]).max(-1)
+    A = np.arange(-4.0, 3.0001, 0.1)[:, None, None]
+    B = np.arange(0.5, 12.0001, 0.1)[None, :, None]
+    t = np.clip((m[None, None, :] - A) / np.maximum(B - A, 1e-6), 0.0, 1.0)
+    err = np.abs(t * t * (3.0 - 2.0 * t) - fr[None, None, :]).max(-1)
+    err = np.where((B - A)[..., 0] > 0.2, err, np.inf)
     i, j = np.unravel_index(int(np.argmin(err)), err.shape)
-    return float(K[i, 0, 0]), float(Pw[0, j, 0]), float(err[i, j])
+    return float(A[i, 0, 0]), float(B[0, j, 0]), float(err[i, j])
 
 
 def scan_normal_variance(folder, stats=None, log=print):
     """A packed scan's stats with its normal map's slope variance (stats['normal_var']: version, total, lost by mip
-    level, the loss curve's k and p and its fit error; _normal_variance, _loss_curve), made once from its
-    normal_rough_ao.png and kept in its stats.json. What the material's specular anti-aliasing adds back to the
-    scan's roughness as its mips average its normals away."""
+    level, the loss curve's smoothstep edges a and b in mip levels and its fit error; _normal_variance, _loss_curve),
+    made once from its normal_rough_ao.png (a record of an older version refits its stored table) and kept in its
+    stats.json. What the material's specular anti-aliasing adds back to the scan's roughness as its mips average its
+    normals away."""
     folder = Path(folder)
     if stats is None:
         stats = json.loads((folder / 'stats.json').read_text())
     t0 = time.time()
-    total, lost = _normal_variance(_read_pixels(folder / 'normal_rough_ao.png', 'Non-Color')[0][..., :2])
-    k, p, err = _loss_curve(lost, total)
+    old = stats.get('normal_var') or {}
+    if old.get('lost') and old.get('total') is not None:
+        total, lost = float(old['total']), [float(v) for v in old['lost']]
+    else:
+        total, lost = _normal_variance(_read_pixels(folder / 'normal_rough_ao.png', 'Non-Color')[0][..., :2])
+    a, b, err = _loss_curve(lost, total)
     stats = dict(stats, normal_var=dict(version=NORMAL_VAR_VERSION, total=round(total, 6),
-                                        lost=[round(v, 6) for v in lost], k=round(k, 4), p=round(p, 4),
+                                        lost=[round(v, 6) for v in lost], a=round(a, 3), b=round(b, 3),
                                         fit_err=round(err, 4)))
     s_path = folder / 'stats.json'
     tmp = s_path.with_name(f'stats.{os.getpid()}.tmp')
@@ -2142,16 +2150,16 @@ def _layer_weights(pal, sd, log=None):
 
 
 def _aa_constants(S, L):
-    """(V, k, p, log2 texel) of a layer's scan for the specular anti-aliasing: V its normal map's slope variance at
-    the layer's normal strength (x normal^2), k and p its loss curve by mip level, the texel in metres (tile / the
-    scan's width). None for a scan with no normal variance."""
+    """(V, e0, e1) of a layer's scan for the specular anti-aliasing: V its normal map's slope variance at the layer's
+    normal strength (x normal^2), e0 and e1 its loss curve's smoothstep edges as log2 of the footprint in metres (the
+    edges in mip levels plus log2 of the texel, tile / the scan's width). None for a scan with no normal variance."""
     nv = S['stats'].get('normal_var') or {}
     total = float(nv.get('total') or 0.0)
     if total <= 0.0 or not S['stats'].get('has_normal', True):
         return None
     ns = float(L['normal'])
-    width = float((S['stats'].get('size') or [2048])[0])
-    return total * ns * ns, float(nv['k']), float(nv['p']), math.log2(float(L['tile_m']) / width)
+    l2t = math.log2(float(L['tile_m']) / float((S['stats'].get('size') or [2048])[0]))
+    return total * ns * ns, float(nv['a']) + l2t, float(nv['b']) + l2t
 
 
 def _aa_footprint(g, vpix, ndv):
@@ -2163,23 +2171,20 @@ def _aa_footprint(g, vpix, ndv):
 def _rough_aa(g, rough, lfp, aa):
     """A scan's roughness with the slope variance its normal map's mips have averaged away at this pixel (specular
     anti-aliasing): alpha' ^2 = alpha^2 + V_lost with alpha = roughness^2, so roughness' = (r^4 + V_lost)^(1/4);
-    V_lost = V (1 - 2^-((m / k)^p)) at the mip level m = log2(footprint / texel) (scan_normal_variance's fit).
+    V_lost = V smoothstep(e0, e1, log2 footprint) (scan_normal_variance's fit; the edges carry the texel).
     lfp: log2 of the footprint (_aa_footprint); aa: _aa_constants."""
-    V, k, p, l2t = aa
-    x = g.math('MAXIMUM', g.math('MULTIPLY_ADD', lfp, 1.0 / k, -l2t / k), 0.0)
-    kept = g.math('POWER', 0.5, g.math('POWER', x, p))
-    lost = g.math('MULTIPLY_ADD', kept, -V, V)
-    r2 = g.mul(rough, rough)
-    return g.math('POWER', g.math('MULTIPLY_ADD', r2, r2, lost), 0.25)
+    V, e0, e1 = aa
+    return _rough_lost(g, rough, g.mul(g.smoothstep(e0, e1, lfp), V))
 
 
 def _rough_lost(g, rough, var):
-    """(r^4 + var)^(1/4): a roughness with a slope variance var (a float or a socket) added to its alpha^2: the far
-    colour's roughness once every scan's normals have averaged flat (var: the layers' V by their weights)."""
+    """(r^4 + var)^(1/4), as two square roots: a roughness with a slope variance var (a float or a socket) added to
+    its alpha^2. Per layer the variance its mips have lost (_rough_aa); on the far colour's roughness the layers' V
+    by their weights, once every scan's normals have averaged flat."""
     if isinstance(var, float) and var <= 0.0:
         return rough
     r2 = g.mul(rough, rough)
-    return g.math('POWER', g.math('MULTIPLY_ADD', r2, r2, var), 0.25)
+    return g.math('SQRT', g.math('SQRT', g.math('MULTIPLY_ADD', r2, r2, var)))
 
 
 def _blend_weights(g, comp, dat, sd, per, opt, edge_noise=None):

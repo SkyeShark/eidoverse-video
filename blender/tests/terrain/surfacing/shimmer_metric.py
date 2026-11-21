@@ -1,7 +1,7 @@
 """How much the ground crawls when the camera moves (system Python: numpy + OpenCV): the shimmer probe's metric
 (design section 3).
 
-    python blender/tests/terrain/surfacing/shimmer_metric.py <tag> [<tag> ...] [--dir <folder>]
+    python blender/tests/terrain/surfacing/shimmer_metric.py <tag> [<tag> ...] [--dir <folder>] [--parts]
 
 Reads meadow_<tag>_shimmer_0/1/2.png (test_shimmer.py: the meadow's 'edge' view with the camera turned by 0, 0.5 and
 1 pixel), default folder out/surfacing/. Each frame is blurred (Gaussian sigma 1.5 px); the half-pixel frame is
@@ -14,6 +14,10 @@ material in this probe, measured 11-07 at 960x540, 16 samples (OLD_AUTO is the b
     Cubic everywhere   distant 1.00  middle 0.85  near 0.26
     Linear everywhere  distant 0.14  middle 0.11  near 0.08
     Auto (4, 9)        distant 0.14  middle 0.11  near 0.22
+--parts also prints the two sides of each ratio, x 1e4 (luminance 0..1): the crawl, mean |f1 - (f0 + f2) / 2|, and
+the motion, mean |f2 - f0|. A ratio can rise because the ground crawls more, or because its texture moves less (a
+smoother scan at that distance): the crawl at the render's noise floor is about 1.5-2.0 here (16 samples), so a band
+whose motion falls toward it scores higher with no more crawl (the meadow's soil gave way to a sward, 11-20).
 """
 import sys
 from pathlib import Path
@@ -33,14 +37,15 @@ def _load(p):
     return cv2.GaussianBlur(a[..., 2] * 0.2126 + a[..., 1] * 0.7152 + a[..., 0] * 0.0722, (0, 0), 1.5)
 
 
-def metric(folder, tag):
+def metric(folder, tag, parts=False):
+    """{band: ratio}, or with parts {band: (ratio, crawl, motion)}."""
     f = [_load(Path(folder) / ('meadow_%s_shimmer_%d.png' % (tag, k))) for k in range(3)]
     out = {}
     for name, (r0, r1) in BANDS.items():
         s = slice(r0, r1)
         e = np.abs(f[1][s] - 0.5 * (f[0][s] + f[2][s])).mean()
         m = np.abs(f[2][s] - f[0][s]).mean()
-        out[name] = e / max(m, 1e-9)
+        out[name] = (e / max(m, 1e-9), e, m) if parts else e / max(m, 1e-9)
     return out
 
 
@@ -51,6 +56,12 @@ if __name__ == '__main__':
         i = args.index('--dir')
         folder = Path(args[i + 1])
         del args[i:i + 2]
+    parts = '--parts' in args
+    args = [a for a in args if a != '--parts']
     for tag in args:
-        r = metric(folder, tag)
-        print('%-24s %s' % (tag, '  '.join('%s %.2f' % kv for kv in r.items())))
+        r = metric(folder, tag, parts)
+        if parts:
+            print('%-24s %s' % (tag, '  '.join('%s %.2f (crawl %.1f, motion %.1f)' % (k, v[0], 1e4 * v[1], 1e4 * v[2])
+                                               for k, v in r.items())))
+        else:
+            print('%-24s %s' % (tag, '  '.join('%s %.2f' % kv for kv in r.items())))
