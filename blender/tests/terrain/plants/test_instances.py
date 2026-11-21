@@ -17,9 +17,12 @@ a sparse stand planned on the synthetic valley (_ground.py) and instanced for a 
   match       a tree's billboard takes its measured gain on its foliage only, and its cut-out threshold
               (BILLBOARD_GAIN); a shrub without a match keeps SeedThree's billboard
   tone        a toned tree's billboard takes its source's tone (TONE_DIAL) on bark and foliage alike
-  soft cut    every billboard's cut-out is hard near the camera and keeps a far plant's coverage (ALPHA_SOFT_M)
+  soft cut    every billboard's cut-out is hard while its plant stands large on screen and keeps a small one's
+              coverage (ALPHA_SOFT_PX, eido_bb_h)
   shade       under a low sun bound with bind_sun, every still billboard's points carry the terrain's shadow
               (eido_shade), as a 1 m march over the terrain's height finds it, and the billboard material reads it
+  canopy      and the shadow line of their neighbours' crowns (eido_canopy_z), read by the material against each
+              fragment's height; canopy_line on a row of trees under a known sun
   ground      no plant floats or is buried: each plant's lowest point lies where its base (the ground less its sink)
               puts it (a SeedThree plant reaches below its base by its own grown amount, scaled)
   height      each plant stands scale x size_m[1] tall above its base (a flora plant within its stroke's own height
@@ -61,7 +64,8 @@ def check(name, ok, detail=''):
 
 FIR = ('douglasFir', 11, {'height': 30, 'paramOverrides': {'length': {1: 0.14}, 'downAngle': {1: 98}}})
 FIR_TONE = (0.5, 0.6, 0.5)              # the fir source's eidoverse-side tone (TONE_DIAL), bark and foliage alike
-SUN_ELEVATION = 12.0                    # degrees: a low sun from the east, which the valley's east side shades in part
+SUN_ELEVATIONS = (12.0, 55.0)           # degrees: a low sun from the east, which the valley's east side shades, and a
+                                        # high one, under which the floor is lit
 
 
 def ecotope():
@@ -326,51 +330,95 @@ def main():
     check('tone: the tree\'s billboard takes its source\'s tone on bark and foliage, its gain on the foliage only',
           bool(fir_m) and all(has_tone(m) and foliage_mask(m) for m in fir_m), f'tone {FIR_TONE}')
 
-    # the soft cut-out: hard near the camera, the alpha's own share of a far pixel (the camera's distance through
-    # ALPHA_SOFT_M); no hard threshold left
+    # the soft cut-out: hard while the plant stands large on screen, the alpha's own share of a pixel when it is
+    # small (the camera's distance over the plant's height, eido_bb_h, through ALPHA_SOFT_PX); no hard threshold
+    # left; and every billboard point carries its plant's height
     def soft(m):
         mr = [n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeMapRange' and n.inputs['Value'].links
-              and n.inputs['Value'].links[0].from_node.bl_idname == 'ShaderNodeCameraData']
-        return len(mr) == 1 and abs(mr[0].inputs['From Min'].default_value - PI.ALPHA_SOFT_M[0]) < 1e-6 \
-            and abs(mr[0].inputs['From Max'].default_value - PI.ALPHA_SOFT_M[1]) < 1e-6 and cut_of(m) != ['hard']
-    check('soft cut: every billboard\'s cut-out widens with the camera\'s distance (a far plant keeps its coverage)',
-          bool(fir_m + shrub_m) and all(soft(m) for m in fir_m + shrub_m), f'{len(fir_m + shrub_m)} materials')
+              and n.inputs['Value'].links[0].from_node.bl_idname == 'ShaderNodeMath'
+              and n.inputs['Value'].links[0].from_node.operation == 'DIVIDE'
+              and n.inputs['Value'].links[0].from_node.inputs[0].links
+              and n.inputs['Value'].links[0].from_node.inputs[0].links[0].from_node.bl_idname == 'ShaderNodeCameraData']
+        lo, hi = (1.0 / (p * PI.PIXEL_ANGLE) for p in PI.ALPHA_SOFT_PX)
+        return len(mr) == 1 and abs(mr[0].inputs['From Min'].default_value - lo) < 1e-3 \
+            and abs(mr[0].inputs['From Max'].default_value - hi) < 1e-3 and cut_of(m) != ['hard']
+    bh = far_ob.data.attributes.get('eido_bb_h')
+    hv = np.empty(len(far_ob.data.vertices), np.float32)
+    if bh is not None:
+        bh.data.foreach_get('value', hv)
+    check('soft cut: every billboard\'s cut-out widens as its plant gets small on screen (a small plant keeps its '
+          'coverage, a large one its silhouette)', bool(fir_m + shrub_m) and all(soft(m) for m in fir_m + shrub_m)
+          and bh is not None and bool(len(hv)) and float(hv.min()) > 0.0,
+          f'{len(fir_m + shrub_m)} materials; plant heights on the points {float(hv.min()) if len(hv) else 0:.2f}-'
+          f'{float(hv.max()) if len(hv) else 0:.2f} m')
 
-    # the shade: under a low sun, every billboard's points carry the terrain's shadow (bind_sun), as a brute-force
-    # march over the terrain's own height finds it, and the billboard material reads it
+    # the shade: under a low sun and a high one, every billboard's points carry the terrain's shadow (bind_sun), as a
+    # brute-force march over the terrain's own height finds it, and the billboard material reads it
     from mathutils import Vector
-    az, el = math.radians(0.0), math.radians(SUN_ELEVATION)          # from the east (+x)
-    to_sun = (math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))
     sun = bpy.data.objects.new('sun', bpy.data.lights.new('sun', 'SUN'))
     sc.collection.objects.link(sun)
-    sun.rotation_euler = Vector(to_sun).to_track_quat('Z', 'Y').to_euler()
-    bpy.context.view_layer.update()
-    PI.bind_sun(sun)
     me = far_ob.data
-    sh = me.attributes.get('eido_shade')
-    detail, ok_sh = 'no eido_shade on the points', False
-    if sh is not None and len(me.vertices):
+    reads = all(any(nd.bl_idname == 'ShaderNodeAttribute' and nd.attribute_name == 'eido_shade'
+                    for nd in m.node_tree.nodes) for m in mats)
+    rows, n_in, n_out, agree_all, in_range = [], 0, 0, [], True
+    for el_deg in SUN_ELEVATIONS:
+        az, el = math.radians(0.0), math.radians(el_deg)              # from the east (+x)
+        to_sun = (math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))
+        sun.rotation_euler = Vector(to_sun).to_track_quat('Z', 'Y').to_euler()
+        bpy.context.view_layer.update()
+        PI.bind_sun(sun)
+        sh = me.attributes.get('eido_shade')
+        if sh is None or not len(me.vertices):
+            rows.append(f'{el_deg:g} degrees: no eido_shade on the points')
+            agree_all.append(0.0)
+            continue
         n = len(me.vertices)
         s = np.empty(n, np.float32)
         sh.data.foreach_get('value', s)
         org = np.empty(n * 3, np.float32)
         me.attributes['eido_bb_origin'].data.foreach_get('vector', org)
         org = org.reshape(-1, 3).astype(np.float64)
-        steps = np.arange(1.0, 3000.0, 1.0)
         ex = np.full(n, -1e9)
-        for t_ in steps:
-            g = np.asarray(t.height_at(org[:, 0] + to_sun[0] / math.cos(el) * t_, org[:, 1] + to_sun[1] / math.cos(el) * t_))
+        for t_ in np.arange(1.0, 3000.0, 1.0):
+            g = np.asarray(t.height_at(org[:, 0] + to_sun[0] / math.cos(el) * t_,
+                                       org[:, 1] + to_sun[1] / math.cos(el) * t_))
             ex = np.maximum(ex, g - (org[:, 2] + math.tan(el) * t_))
-        sure_in, sure_out = ex > 6.0, ex < -3.0
-        agree = (np.sum(s[sure_in] > 0.9) + np.sum(s[sure_out] < 0.1)) / max(int(sure_in.sum() + sure_out.sum()), 1)
-        reads = all(any(nd.bl_idname == 'ShaderNodeAttribute' and nd.attribute_name == 'eido_shade'
-                        for nd in m.node_tree.nodes) for m in mats)
-        ok_sh = bool(sure_in.any()) and bool(sure_out.any()) and agree >= 0.97 and float(s.min()) >= 0.0 \
-            and float(s.max()) <= 1.0 and reads
-        detail = (f'{n} points under a {SUN_ELEVATION:g} degree sun from the east: {int(sure_in.sum())} surely '
-                  f'shaded, {int(sure_out.sum())} surely lit by a 1 m march over the terrain, {agree * 100:.1f} % '
-                  f'agree; the material reads it: {reads}')
-    check('shade: every still billboard carries the terrain\'s shadow under the bound sun (eido_shade)', ok_sh, detail)
+        # decisive points a metre past the soft band (sun_shade: lit below -0.5 m, shaded above +3 m); the march
+        # starts a metre out, so a lit card centre on open ground reads its own height plus tan(el) under the ray
+        sure_in, sure_out = ex > 4.0, ex < -1.0
+        decisive = int(sure_in.sum() + sure_out.sum())
+        agree = (np.sum(s[sure_in] > 0.9) + np.sum(s[sure_out] < 0.1)) / max(decisive, 1)
+        n_in, n_out = n_in + int(sure_in.sum()), n_out + int(sure_out.sum())
+        if decisive:
+            agree_all.append(float(agree))
+        in_range &= float(s.min()) >= 0.0 and float(s.max()) <= 1.0
+        rows.append(f'{el_deg:g} degrees from the east: {int(sure_in.sum())} of {n} surely shaded, '
+                    f'{int(sure_out.sum())} surely lit by a 1 m march, {agree * 100:.1f} % agree')
+    ok_sh = n_in > 0 and n_out > 0 and bool(agree_all) and min(agree_all) >= 0.97 and in_range and reads
+    check('shade: every still billboard carries the terrain\'s shadow under the bound sun (eido_shade)', ok_sh,
+          '; '.join(rows) + f'; the material reads it: {reads}')
+
+    # the crowns' shade: the shadow line the crowns toward the sun cast on each card, over its centre
+    # (eido_canopy_z), on the points after bind_sun, the material reading it against each fragment's own height; and
+    # on a row of 20 m trees under a 45 degree sun from the east, 15 m for the card with a crown 5 m east of it and
+    # for one 2 m off that line, none (-1e9) for one 10 m off it or with nothing east of it
+    cn = me.attributes.get('eido_canopy_z')
+    cv = np.empty(len(me.vertices), np.float32)
+    if cn is not None:
+        cn.data.foreach_get('value', cv)
+    reads_c = all(any(nd.bl_idname == 'ShaderNodeAttribute' and nd.attribute_name == 'eido_canopy_z'
+                      for nd in m.node_tree.nodes) for m in mats)
+    el = math.radians(45.0)
+    row = np.array([[5.0, 0.0, 20.0, 3.0], [0.0, 0.0, 20.0, 3.0], [0.0, 10.0, 20.0, 3.0], [10.0, 0.0, 20.0, 3.0]])
+    cl = PI.canopy_line(np.array([0.0, 0.0, 10.0, 0.0]), np.array([0.0, 10.0, 0.0, 2.0]), row,
+                        (math.cos(el), 0.0, math.sin(el)))
+    shaded = int((cv > PI.CANOPY_NONE).sum()) if len(cv) else 0
+    check('canopy: every still billboard carries the shadow line of its neighbours\' crowns (eido_canopy_z), read by '
+          'its material against the fragment\'s height', cn is not None and bool(len(cv))
+          and bool(np.isfinite(cv).all()) and float(cv.min()) >= PI.CANOPY_NONE and reads_c
+          and bool(np.allclose(cl, [15.0, -1.0e9, -1.0e9, 15.0])),
+          f'{len(cv)} points, {shaded} under a neighbour\'s shadow line; the material reads it: {reads_c}; '
+          f'a row of trees: {np.round(cl, 1).tolist()}')
 
     # ground and height, plant by plant and level by level: each level's geometry stands where that level's own
     # extent, scaled to the spot, puts it over the spot's base (the ground less its sink). SeedThree's levels reach

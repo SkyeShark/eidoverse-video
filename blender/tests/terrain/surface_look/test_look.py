@@ -226,10 +226,11 @@ def check_noise_share(P, log=print, limit=0.25):
 
 
 # the recipe looks written under the 3.2 rule (the others are from before it, and keep their own noise until they are
-# rewritten); and the layers whose pattern is a random partition by design: farmland's fields are whole cells of a
-# Voronoi partition (cells()), each field one crop, so their edge is the partition's and not a threshold broken by noise
-LOOKS_UNDER_RULE = set()
-NOISE_PATTERN_LAYERS = {('palette farmland', 'soil'), ('palette farmland', 'crop')}
+# rewritten: the impact crater's walls are kept exactly as they read right, SURFACING_DESIGN.md 3.8); and the layers
+# whose pattern is a random partition by design: farmland's fields are whole cells of a Voronoi partition (cells()),
+# each field one crop, so their edge is the partition's and not a threshold broken by noise
+LOOKS_UNDER_RULE = {'incised_meanders', 'dunes', 'fluvial_range', 'caldera', 'tower_karst', 'sea_cliffs'}
+NOISE_PATTERN_LAYERS = {('palette farmland', 'soil'), ('palette farmland', 'crop'), ('recipe dunes', 'grass')}
 
 
 def check_sampler(log=print):

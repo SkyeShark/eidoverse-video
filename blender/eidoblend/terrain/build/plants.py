@@ -66,7 +66,7 @@ FORMAT = 'eidoverse-terrain-plants/1'
 FIELDS = ('x', 'y', 'z', 'yaw', 'scale', 'age', 'tint', 'nx', 'ny', 'nz', 'variant', 'level')
 # names the density expressions may read beyond the masks and the surface bake's maps (ecotopes.py describes them)
 DERIVED_NAMES = ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'soil', 'insolation', 'dist_channel',
-                 'dist_water', 'shade', 'ledge')
+                 'dist_water', 'fall_streak', 'shade', 'ledge')
 STEEP_DEG = 60.0                    # no plant stands on its own cell steeper than this (unless it grows on rock)
 # the cover rasters a plan gives the surface bake (PlantSpots.cover), of which cover_extra hands over those its map
 # registry knows; and the kind of plant each cover kind counts
@@ -78,6 +78,9 @@ PAD_CORES = 12.0                    # the margin generated around a planned radi
                                     # that many neighbours of falling mark, which a plan practically never holds
 DIST_CHANNEL_CAP_M = 400.0          # dist_channel reads at most this
 DIST_WATER_CAP_M = 800.0            # dist_water reads at most this
+SHADE_CHUNK = 1_000_000             # candidates per pass of the shade from the trees placed before (_shade_at)
+STREAK_NOISE_M = 120.0              # fall_streak: the noise's feature size across the fall line, metres
+STREAK_HALF_M = 240.0               # and how far it is smeared down and up the fall line from each point, metres
 _FRAME = {
     'axes': 'x east, y north, z up, metres (Blender)',
     'three': 'position (x, z, -y)',
@@ -356,6 +359,7 @@ class _Ground:
         self._coarse = [lv.index for lv in self.levels if lv.role != 'hero'] or [0]
         self._dist = None
         self._distw = None
+        self._streak = None
         self._n20 = None
         self._site = P.parse(E.SITE)
         self.notes = []
@@ -407,6 +411,8 @@ class _Ground:
             v = self.coarse(pts).sample(self.levels, self.dist_channel())
         elif name == 'dist_water':
             v = self.coarse(pts).sample(self.levels, self.dist_water())
+        elif name == 'fall_streak':
+            v = self.coarse(pts).sample(self.levels, self.fall_streak())
         elif name == 'ledge':
             v = None
         else:
@@ -478,7 +484,8 @@ class _Ground:
         `site` and `dist_channel` are the coarse levels' (site())."""
         if name == 'shade':
             return shade if shade is not None else np.zeros(pts.n)
-        if name in ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'dist_channel', 'dist_water'):
+        if name in ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'dist_channel', 'dist_water',
+                    'fall_streak'):
             return self.site(pts, name, shade)
         if name == 'soil':                               # loose cover, more in hollows and, on slopes, where the
             return self._soil(lambda n: self.at(pts, n), pts.n,          # bake's settle gathered it
@@ -551,6 +558,67 @@ class _Ground:
                 prev = i
             self._distw = out
         return self._distw
+
+    def fall_streak(self):
+        """Per level (the coarse levels; None on hero levels, which read the main level's) a 0..1 noise smeared along
+        the fall line: a world-space value noise of STREAK_NOISE_M features averaged along each cell's streamline down
+        and up the 20 m normal's slope for STREAK_HALF_M either way (a line integral convolution), so its values run
+        in streaks down every slope, radial on a cone, and stay the noise itself on ground under 3 degrees. What the
+        disturbances that shape a forest's upper edge follow (avalanche tracks, debris flows, lava tongues, fire
+        runs): a treeline that reads it ends in tongues up and down the slope, not lobes (11-20: an isotropic wander
+        left the stratovolcano's forest edge a level line over each face). The levels share one stretch (the main
+        level's 5-95 % spread to 0.1-0.9), so a value means the same on each."""
+        if self._streak is None:
+            out = [None] * len(self.levels)
+            n20 = self.n20()
+            raw = {}
+            for i in self._coarse:
+                if n20[i] is None:
+                    continue
+                lv = self.levels[i]
+                nx, ny = (np.asarray(a, np.float64) for a in n20[i])
+                g = np.hypot(nx, ny)
+                flat = g < math.sin(math.radians(3.0))
+                ux = np.where(flat, 0.0, nx / np.maximum(g, 1e-12))
+                uy = np.where(flat, 0.0, ny / np.maximum(g, 1e-12))
+                n = nx.shape[0]                          # the normal's own grid over the level's window
+                cell = lv.side / n
+                c = (np.arange(n) + 0.5) * cell
+                X, Y = np.meshgrid(lv.x0 + c, lv.y0 + c)
+                noise = P.value_noise(X, Y, STREAK_NOISE_M, seed=71, octaves=3)
+                step = max(cell, 12.0)
+                k = max(int(round(STREAK_HALF_M / step)), 1)
+                acc, cnt = noise.copy(), 1
+                flat_n = noise.ravel()
+                for sign in (1.0, -1.0):
+                    px, py = X.copy(), Y.copy()
+                    for _ in range(k):
+                        # the fall line's direction at the nearest cell, one step along it
+                        ii = np.clip(np.floor((px - lv.x0) / cell).astype(np.int64), 0, n - 1)
+                        jj = np.clip(np.floor((py - lv.y0) / cell).astype(np.int64), 0, n - 1)
+                        px = px + sign * step * ux[jj, ii]
+                        py = py + sign * step * uy[jj, ii]
+                        # the noise there, bilinear on the grid
+                        fi = np.clip((px - lv.x0) / cell - 0.5, 0.0, n - 1.001)
+                        fj = np.clip((py - lv.y0) / cell - 0.5, 0.0, n - 1.001)
+                        i0, j0 = fi.astype(np.int64), fj.astype(np.int64)
+                        ti, tj = fi - i0, fj - j0
+                        k00 = j0 * n + i0
+                        acc += ((flat_n[k00] * (1.0 - ti) + flat_n[k00 + 1] * ti) * (1.0 - tj)
+                                + (flat_n[k00 + n] * (1.0 - ti) + flat_n[k00 + n + 1] * ti) * tj)
+                        cnt += 1
+                raw[i] = np.where(flat, noise, acc / cnt)
+            if raw:
+                main = next((i for i in self._coarse[::-1] if i in raw), None)
+                lo, hi = np.percentile(raw[main], [5.0, 95.0])
+                for i, a in raw.items():
+                    out[i] = np.clip(0.1 + 0.8 * (a - lo) / max(hi - lo, 1e-6), 0.0, 1.0).astype(np.float32)
+            else:
+                self.notes.append('no 20 m normal on the coarse levels: fall_streak reads 0.5')
+                lv = self.levels[self._coarse[-1]]
+                out[self._coarse[-1]] = np.full((lv.n, lv.n), 0.5, np.float32)
+            self._streak = out
+        return self._streak
 
     @staticmethod
     def _xy(lv, step=1):
@@ -700,8 +768,14 @@ def _focus_points(focus):
     return a[:, :2].copy()
 
 
+PATH_GAP_M = 600.0                  # a focus's consecutive points farther apart than this are separate views, not a path
+
+
 def path_distance(focus, x, y):
-    """Metres from points to the focus: a point, or the path through its points in order."""
+    """Metres from points to the focus: a point, or the path through its points in order. Two consecutive points
+    farther apart than PATH_GAP_M are not joined (no camera path jumps so far: such a list is a set of views, each
+    planned around its own point; joined, two views 9 km apart planted a 9 km corridor of grass between them, 17
+    million candidates, 11-20)."""
     f = np.asarray(focus, np.float64).reshape(-1, 2)
     x = np.asarray(x, np.float64)
     y = np.asarray(y, np.float64)
@@ -709,6 +783,9 @@ def path_distance(focus, x, y):
     for a, b in zip(f[:-1], f[1:]):
         ab = b - a
         L2 = float(ab @ ab)
+        if L2 > PATH_GAP_M * PATH_GAP_M:
+            d = np.minimum(d, np.hypot(x - b[0], y - b[1]))
+            continue
         if L2 <= 0.0:
             continue
         t = np.clip(((x - a[0]) * ab[0] + (y - a[1]) * ab[1]) / L2, 0.0, 1.0)
@@ -825,10 +902,13 @@ def _shade_at(x, y, casters, radius):
     if casters is None or len(casters['x']) == 0 or len(x) == 0:
         return np.zeros(len(x))
     reach = radius * casters['r']
-    i, j, d = _pairs(x, y, casters['x'], casters['y'], float(reach.max()))
-    s = 1.0 - _smooth(0.5 * reach[j], reach[j], d)
-    keep = s > 0.0
-    logs = np.bincount(i[keep], weights=np.log1p(-np.minimum(s[keep], 1.0 - 1e-9)), minlength=len(x))
+    logs = np.zeros(len(x))
+    for s0 in range(0, len(x), SHADE_CHUNK):          # in chunks: a dense undergrowth under a dense forest is tens
+        s1 = min(len(x), s0 + SHADE_CHUNK)            # of millions of pairs, gigabytes at once (11-20)
+        i, j, d = _pairs(x[s0:s1], y[s0:s1], casters['x'], casters['y'], float(reach.max()))
+        s = 1.0 - _smooth(0.5 * reach[j], reach[j], d)
+        keep = s > 0.0
+        logs[s0:s1] = np.bincount(i[keep], weights=np.log1p(-np.minimum(s[keep], 1.0 - 1e-9)), minlength=s1 - s0)
     return 1.0 - np.exp(logs)
 
 

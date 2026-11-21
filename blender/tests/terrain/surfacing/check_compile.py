@@ -16,6 +16,7 @@ Variants (options over the palette's, on the material with baked data unless nam
              tiles are, the rest read each sector frame once)
   steep_one  steep_hex_m 0: the sector frames read once each, hex tiling on the planar reads only
   steep_hex  steep_hex_m 20: the sector frames hex-tiled on a 20 m lattice (three reads each)
+  no_aa      specular_aa False: no specular anti-aliasing (each scan's own roughness at every distance)
 A first, untimed pass renders `full` once so the atlases and scans are uploaded. Each variant is then built, salted
 (its own salt every time: the GPU driver caches a source it has compiled) and rendered once (wall seconds and this
 process's CPU seconds), in the order given; with --rounds 2 once more in reverse order; the lowest counts. A name
@@ -38,7 +39,8 @@ from eidoblend.terrain.build import surfacing as S  # noqa: E402
 # name: None (today's material) or the material options over the palette's
 VARIANTS = {'today': None, 'full': {}, 'linear': dict(interpolation='Linear'),
             'no_hex': dict(detile='offset'), 'no_far': dict(far_scale=1.0), 'steep_one': dict(steep_hex_m=0.0),
-            'steep_all': dict(steep_hex_share=0.0), 'steep_hex': dict(steep_hex_m=20.0)}
+            'steep_all': dict(steep_hex_share=0.0), 'steep_hex': dict(steep_hex_m=20.0),
+            'no_aa': dict(specular_aa=False)}
 VIEW = {'canyon': 'brink_down', 'alpine_valley': 'floor_lischmaad', 'toroweap': 'brink_down',
         'lauterbrunnen': 'floor_lischmaad'}
 

@@ -24,12 +24,15 @@ SeedThree species (source ('seedthree', species, dials, seeds)):
                               that reads each plant's card centre and yaw from the mesh (eido_bb_origin, eido_bb_yaw)
                               where SeedThree's reads the instance's Object Info, and takes the billboard's measured
                               colour gain against the card level (BILLBOARD_GAIN, match_billboards.py; a tree's on its
-                              foliage) and the source's tone (bark and foliage alike). Its cut-out keeps a far plant's
-                              coverage (_soft_cut: a hard edge near, the alpha's share of the pixel far). Two hundred
+                              foliage) and the source's tone (bark and foliage alike). Its cut-out keeps a small
+                              plant's coverage (_soft_cut: a hard edge while the plant stands large on screen, the
+                              alpha's share of the pixel when it is a few pixels tall). Two hundred
                               thousand instanced billboards cost 25 s a frame and 3 GB; as one mesh they cost little.
                               It casts the sun's shadow and receives none (seedthree.bl.cast_only), so bind_sun gives
                               each plant the terrain's shadow under the sun (eido_shade, sun_shade over the terrain's
-                              coarse heightfields), which its material takes as SHADE_ALBEDO of the light.
+                              coarse heightfields), which its material takes as SHADE_ALBEDO of the light, and the
+                              shadow line the crowns toward the sun cast on it (eido_canopy_z, canopy_line), under
+                              which each fragment takes CANOPY_SHADE of that.
     The card distance is min(the species' billboard_m, sqrt(NEAR_TREES / (pi x density))) for trees; shrubs keep
     their card level while a plant spans 4 pixels (height / (4 PIXEL_ANGLE)), at most NEAR_SHRUBS plants.
   - A shot with wind (wind=True): trees take SeedThree's own grove (seedthree.bl.forest.forest_group), as its
@@ -125,10 +128,15 @@ BILLBOARD_GAIN = {
     ('sweetgum', 17, '{"crownShape": 1, "height": 14}'): dict(gain=(1.026, 0.886, 2.0), alpha=0.35),   # 19.3 -> 2.6, 0.99
 }
 ALPHA_CUT = 0.35                    # SeedThree's billboard cut-out threshold
-ALPHA_SOFT_M = (150.0, 1500.0)      # a billboard's cut-out widens from its hard edge to its whole alpha over these
-                                    # distances (_soft_cut): a far plant keeps the share of a pixel its crown covers
+ALPHA_SOFT_PX = (24.0, 4.0)         # a billboard's cut-out is hard while its plant stands this many pixels tall
+                                    # (PIXEL_ANGLE) and widens to its whole alpha by the second (_soft_cut): a small
+                                    # plant keeps the share of a pixel its crown covers, a large one its silhouette
 SHADE_ALBEDO = 0.3                  # a billboard in the terrain's shadow (eido_shade 1) takes this share of its
                                     # light: the sky's alone, the sun's twin lights every billboard (cast-only)
+CANOPY_SHADE = 0.85                 # a billboard below its neighbours' shadow line (eido_canopy_z) takes this share
+                                    # of the terrain's shade: the lit crowns around it light it a little
+CANOPY_REACH_M = 40.0               # how far toward the sun a neighbour's crown is looked for
+CANOPY_NONE = -1.0e4                # eido_canopy_z where no crown shades the card (and before bind_sun)
 _F = {n: i for i, n in enumerate(PL.FIELDS)}
 _FLORA_OPTS = ('height', 'color', 'blades', 'daisy', 'corn', 'sunflower', 'head_scale', 'normals', 'rough',
                'specular', 'lod', 'variants', 'wind', 'sss', 'translucency')
@@ -532,7 +540,8 @@ def _tone_base(nt, gain, attr_type, foliage=False, tone=None, shade=False):
     backlight, bark and foliage alike (the source's tone, TONE_DIAL: a toned tree's billboard keeps its toned bark,
     where a foliage-only tone left the broadleaves' trunks white on their billboards, an orchard of white-trunk
     clones, 11-20). shade: also the terrain's shadow from the mesh's eido_shade (bind_sun: 0 in the sun, 1 in a
-    ridge's or a slope's shadow), which a billboard lit by the shadowless twin sun cannot receive (SHADE_ALBEDO)."""
+    ridge's or a slope's shadow), which a billboard lit by the shadowless twin sun cannot receive (SHADE_ALBEDO),
+    and its neighbours' below the shadow line their crowns cast on it (eido_canopy_z, CANOPY_SHADE)."""
     bsdf = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
     if bsdf is None:
         return
@@ -601,17 +610,62 @@ def _tone_base(nt, gain, attr_type, foliage=False, tone=None, shade=False):
     sk = k.outputs[0]
     lit = None
     if shade:
-        # in the terrain's shadow: SHADE_ALBEDO of the light (the sky's share of it), on the albedo and the backlight
+        # in the terrain's shadow: SHADE_ALBEDO of the light (the sky's share of it), on the albedo and the backlight;
+        # below the shadow line of the crowns toward the sun (eido_canopy_z, over the card's centre: the fragment's
+        # own height decides, so a crown's top is lit over the shade of its foot) CANOPY_SHADE of that shade; the
+        # deeper of the two, not both (in a ridge's shadow the crowns take no sun to shade it from)
         a = nt.nodes.new('ShaderNodeAttribute')
         a.attribute_type = attr_type
         a.attribute_name = 'eido_shade'
         a.location = (x - 400, y + 320)
+        c = nt.nodes.new('ShaderNodeAttribute')
+        c.attribute_type = attr_type
+        c.attribute_name = 'eido_canopy_z'
+        c.location = (x - 900, y + 470)
+        o = nt.nodes.new('ShaderNodeAttribute')
+        o.attribute_type = attr_type
+        o.attribute_name = 'eido_bb_origin'
+        o.location = (x - 900, y + 620)
+        geo = nt.nodes.new('ShaderNodeNewGeometry')
+        geo.location = (x - 900, y + 780)
+        pz = nt.nodes.new('ShaderNodeSeparateXYZ')
+        pz.location = (x - 720, y + 780)
+        nt.links.new(geo.outputs['Position'], pz.inputs[0])
+        oz = nt.nodes.new('ShaderNodeSeparateXYZ')
+        oz.location = (x - 720, y + 620)
+        nt.links.new(o.outputs['Vector'], oz.inputs[0])
+        up = nt.nodes.new('ShaderNodeMath')              # the fragment's height over the card's centre
+        up.operation = 'SUBTRACT'
+        up.location = (x - 560, y + 700)
+        nt.links.new(pz.outputs['Z'], up.inputs[0])
+        nt.links.new(oz.outputs['Z'], up.inputs[1])
+        ex = nt.nodes.new('ShaderNodeMath')              # how far under the crowns' shadow line it lies
+        ex.operation = 'SUBTRACT'
+        ex.location = (x - 420, y + 560)
+        nt.links.new(c.outputs['Fac'], ex.inputs[0])
+        nt.links.new(up.outputs[0], ex.inputs[1])
+        f = nt.nodes.new('ShaderNodeMapRange')
+        f.interpolation_type = 'SMOOTHSTEP'
+        f.inputs['From Min'].default_value = -1.0
+        f.inputs['From Max'].default_value = 1.5
+        f.location = (x - 300, y + 520)
+        nt.links.new(ex.outputs[0], f.inputs['Value'])
+        sc = nt.nodes.new('ShaderNodeMath')
+        sc.operation = 'MULTIPLY'
+        sc.inputs[1].default_value = CANOPY_SHADE
+        sc.location = (x - 200, y + 470)
+        nt.links.new(f.outputs['Result'], sc.inputs[0])
+        deep = nt.nodes.new('ShaderNodeMath')
+        deep.operation = 'MAXIMUM'
+        deep.location = (x - 200, y + 340)
+        nt.links.new(a.outputs['Fac'], deep.inputs[0])
+        nt.links.new(sc.outputs[0], deep.inputs[1])
         lit = nt.nodes.new('ShaderNodeMath')
         lit.operation = 'MULTIPLY_ADD'
         lit.inputs[1].default_value = SHADE_ALBEDO - 1.0
         lit.inputs[2].default_value = 1.0
-        lit.location = (x - 200, y + 320)
-        nt.links.new(a.outputs['Fac'], lit.inputs[0])
+        lit.location = (x - 120, y + 400)
+        nt.links.new(deep.outputs[0], lit.inputs[0])
         both = nt.nodes.new('ShaderNodeMath')
         both.operation = 'MULTIPLY'
         both.location = (x - 40, y + 260)
@@ -662,23 +716,37 @@ def _tinted_material(mat, tone=None):
 
 
 def _soft_cut(nt, node, cut):
-    """Replace a billboard's cut-out (alpha > cut, a Math node) by one that keeps a far plant's coverage: near the
-    camera the same hard edge, from ALPHA_SOFT_M[0] to [1] a ramp that widens to the whole alpha range, so the
-    texture's mip, where a texel averages crown and gaps, leaves the plant the share of the pixel its crown covers
-    (the material is dithered: a fraction is drawn as that share of the samples). A hard cut-out on mipped alpha
-    erased the stand-in spruce past a few hundred metres, a cut of 0.69 the sooner, and the slopes its instances
-    stood on read as bare, smooth felt (11-20, Schynige). (alpha - cut) / w + 0.5, clamped, w from 0.02 to 1."""
+    """Replace a billboard's cut-out (alpha > cut, a Math node) by one that keeps a small plant's coverage: while
+    the plant stands ALPHA_SOFT_PX[0] pixels tall or more the same hard edge, down to [1] pixels a ramp that widens
+    to the whole alpha range, so the texture's mip, where a texel averages crown and gaps, leaves the plant the share
+    of the pixel its crown covers (the material is dithered: a fraction is drawn as that share of the samples). The
+    plant's size on screen is its height (eido_bb_h, from the mesh) over the camera's distance. A hard cut-out on
+    mipped alpha erased the stand-in spruce past a few hundred metres, a cut of 0.69 the sooner, and the slopes its
+    instances stood on read as bare, smooth felt (11-20, Schynige); a ramp by distance alone (150-1500 m) softened
+    20 m spruces that still stood 20 pixels tall at a kilometre into a felt of overlapping fringes (11-20,
+    Lauterbrunnen). (alpha - cut) / w + cut, clamped, w from 0.02 to 1: the hard edge at the cut, the alpha itself
+    at the softest (with + 0.5 a card's empty corners kept 0.5 - cut of cover there, a faint box of foliage colour
+    round every small plant, 11-20)."""
     x, y = node.location
     cam = nt.nodes.new('ShaderNodeCameraData')
-    cam.location = (x - 600, y - 200)
+    cam.location = (x - 800, y - 200)
+    hh = nt.nodes.new('ShaderNodeAttribute')
+    hh.attribute_type = 'GEOMETRY'
+    hh.attribute_name = 'eido_bb_h'
+    hh.location = (x - 800, y - 360)
+    per = nt.nodes.new('ShaderNodeMath')                 # metres of distance per metre of plant (0 without a height:
+    per.operation = 'DIVIDE'                             # the hard edge)
+    per.location = (x - 600, y - 260)
+    nt.links.new(cam.outputs['View Distance'], per.inputs[0])
+    nt.links.new(hh.outputs['Fac'], per.inputs[1])
     w = nt.nodes.new('ShaderNodeMapRange')
     w.location = (x - 400, y - 200)
     w.interpolation_type = 'SMOOTHSTEP'
-    w.inputs['From Min'].default_value = ALPHA_SOFT_M[0]
-    w.inputs['From Max'].default_value = ALPHA_SOFT_M[1]
+    w.inputs['From Min'].default_value = 1.0 / (ALPHA_SOFT_PX[0] * PIXEL_ANGLE)
+    w.inputs['From Max'].default_value = 1.0 / (ALPHA_SOFT_PX[1] * PIXEL_ANGLE)
     w.inputs['To Min'].default_value = 0.02
     w.inputs['To Max'].default_value = 1.0
-    nt.links.new(cam.outputs['View Distance'], w.inputs['Value'])
+    nt.links.new(per.outputs[0], w.inputs['Value'])
     a = node.inputs[0].links[0].from_socket
     sub = nt.nodes.new('ShaderNodeMath')
     sub.operation = 'SUBTRACT'
@@ -695,7 +763,7 @@ def _soft_cut(nt, node, cut):
     add.use_clamp = True
     add.location = (x + 100, y)
     nt.links.new(div.outputs[0], add.inputs[0])
-    add.inputs[1].default_value = 0.5
+    add.inputs[1].default_value = float(cut)
     for link in list(node.outputs[0].links):
         nt.links.new(add.outputs[0], link.to_socket)
     nt.nodes.remove(node)
@@ -706,10 +774,11 @@ def _still_billboard_material(mat, gain=None, alpha=None, foliage=False, tone=No
     instance's origin (Object Info) for the card's dome normal, this reads eido_bb_origin from the mesh, and where
     it turns the baked detail normal from the card's frame to the world (Vector Transform, object to world), this
     turns it by eido_bb_yaw about z (the realised mesh's object frame is the world's). gain: (r, g, b) on the baked
-    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN), kept by a far plant's coverage (_soft_cut); foliage: the
+    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN), kept by a small plant's coverage (_soft_cut); foliage: the
     gain on the green of the bake only (a tree's: its bark stays as baked); tone: the source's tone (TONE_DIAL) on
-    bark and foliage alike; the albedo also takes each plant's own tone (eido_tint, from the mesh) and the terrain's
-    shadow (eido_shade, bind_sun). Shared per (material, gain, alpha, foliage, tone)."""
+    bark and foliage alike; the albedo also takes each plant's own tone (eido_tint, from the mesh), the terrain's
+    shadow and its neighbours' (eido_shade, eido_canopy_z: bind_sun). Shared per (material, gain, alpha, foliage,
+    tone)."""
     g = tuple(round(float(v), 4) for v in (gain or (1.0, 1.0, 1.0)))
     tn = tuple(round(float(v), 4) for v in (tone or (1.0, 1.0, 1.0)))
     cut = round(float(ALPHA_CUT if alpha is None else alpha), 3)
@@ -794,7 +863,7 @@ def _variant_collection(name, per_variant, roles=None, offset=None, materials=No
     return col
 
 
-def _species_points(name, rec, scale, z_base, variant, origin=None):
+def _species_points(name, rec, scale, z_base, variant, origin=None, height=None):
     me = bpy.data.meshes.new(name)
     n = len(rec)
     me.vertices.add(n)
@@ -811,6 +880,13 @@ def _species_points(name, rec, scale, z_base, variant, origin=None):
         at = me.attributes.new('eido_bb_origin', 'FLOAT_VECTOR', 'POINT')
         if n:
             at.data.foreach_set('vector', np.ascontiguousarray(origin, np.float32).ravel())
+        at = me.attributes.new('eido_canopy_z', 'FLOAT', 'POINT')       # no crown's shadow until bind_sun
+        if n:
+            at.data.foreach_set('value', np.full(n, CANOPY_NONE, np.float32))
+    if height is not None:                               # each plant's height, metres (the billboard's soft cut)
+        at = me.attributes.new('eido_bb_h', 'FLOAT', 'POINT')
+        if n:
+            at.data.foreach_set('value', np.ascontiguousarray(height, np.float32))
     me.update()
     return me
 
@@ -869,7 +945,8 @@ def _instance_seedthree_still(entry, rec, focus, coll, lod, base, cache, log, he
                                  materials=[(lambda m, e=e: _still_billboard_material(
                                      m, (e or {}).get('gain') or (1.0, 1.0, 1.0), (e or {}).get('alpha'),
                                      foliage=entry['kind'] == 'tree', tone=tone)) for e in gains])
-    me = _species_points(tag + '_spots', rec, s, z, variants, origin)
+    me = _species_points(tag + '_spots', rec, s, z, variants, origin,
+                         height=rec[:, _F['scale']].astype(np.float64) * float(entry['size_m'][1]))
     ob = bpy.data.objects.new(tag, me)
     coll.objects.link(ob)
     ob.modifiers.new('Eido Plants', 'NODES').node_group = near_group(tag + ' near', near_col, full_col, card_m,
@@ -1084,8 +1161,60 @@ def _instance_flora(entry, rec, focus, coll, lod, base, log):
 # glowed as if in full sun: a stand on a shaded tower flank read as a block of pale cut-outs (11-20, Guilin). Every
 # instanced plants collection keeps the terrain's coarse heightfields (the context and main levels' h), and
 # bind_sun marches each billboard's card centre toward the sun over them: eido_shade on its points (0 in the sun,
-# 1 in the terrain's shadow), which the billboard material reads (_tone_base, SHADE_ALBEDO).
+# 1 in the terrain's shadow), which the billboard material reads (_tone_base, SHADE_ALBEDO). For the same reason a
+# stand of billboards was lit crown by crown as if each stood alone: a felt of even green on Lauterbrunnen's wooded
+# sides at 0.5-1.6 km, where the photographs show lit crowns over the shade between them (11-20). The collection
+# also keeps its plants' crowns (_crowns), and bind_sun gives each billboard the shadow line the crowns toward the
+# sun cast on it (canopy_line), over its card's centre: eido_canopy_z on its points, which the material compares
+# with each fragment's own height, so a crown's top stands lit over the shade of its foot and of the stand.
 _SHADE_GROUND = {}
+
+
+def _crowns(spots):
+    """[x, y, top, radius] of a plan's SeedThree plants (trees and shrubs, every level of detail): the crowns that
+    shade each other; a plant's height is its scale x size_m[1] over its spot, its crown radius crown_m x scale."""
+    parts = []
+    for e in spots.species:
+        if 'seedthree' not in e['source']:
+            continue
+        rec = spots.array(e['name'])
+        if not len(rec):
+            continue
+        sc = rec[:, _F['scale']].astype(np.float64)
+        top = rec[:, _F['z']].astype(np.float64) + sc * float(e['size_m'][1])
+        r = sc * float(e.get('crown_m', e['core_m']))
+        parts.append(np.stack([rec[:, _F['x']].astype(np.float64), rec[:, _F['y']].astype(np.float64), top, r], 1))
+    return np.concatenate(parts) if parts else np.zeros((0, 4))
+
+
+def canopy_line(x, y, crowns, to_sun, chunk=20000):
+    """Per card (at x, y) the height of the shadow line the crowns toward the sun cast on it: a crown [x, y, top, r]
+    nearer the sun on the card's line of light, within its radius r of it across the light and at most
+    CANOPY_REACH_M along it, shades it below top - d tan(el), d its distance along the light; the highest such line,
+    or -1e9 where none. Its own crown (d 0) does not count."""
+    x, y = (np.asarray(v, np.float64).ravel() for v in (x, y))
+    n = len(x)
+    line = np.full(n, -1.0e9)
+    d = np.asarray(to_sun, np.float64)
+    d = d / max(float(np.linalg.norm(d)), 1e-9)
+    hz = math.hypot(d[0], d[1])
+    if not n or not len(crowns) or hz < 1e-6 or d[2] <= 0.0:
+        return line
+    ux, uy, tan_el = d[0] / hz, d[1] / hz, d[2] / hz
+    cx, cy, ct, cr = (np.asarray(crowns[:, k], np.float64) for k in range(4))
+    for s0 in range(0, n, chunk):
+        s1 = min(n, s0 + chunk)
+        i, j, _d = PL._pairs(x[s0:s1], y[s0:s1], cx, cy, CANOPY_REACH_M)
+        if not len(i):
+            continue
+        dx, dy = cx[j] - x[s0:s1][i], cy[j] - y[s0:s1][i]
+        along = dx * ux + dy * uy
+        k = (along > 0.5) & (np.abs(dy * ux - dx * uy) < cr[j])
+        if k.any():
+            part = np.full(s1 - s0, -1.0e9)
+            np.maximum.at(part, i[k], ct[j[k]] - along[k] * tan_el)
+            line[s0:s1] = part
+    return line
 
 
 def _shade_ground(terrain):
@@ -1162,16 +1291,17 @@ def sun_shade(ground, x, y, z, to_sun):
 
 
 def _shade_billboards(sun, log=None):
-    """eido_shade on every still billboard's points under this sun (the module note above)."""
+    """eido_shade and eido_canopy_z on every still billboard's points under this sun (the module note above)."""
     if sun is None or not _SHADE_GROUND:
         return 0
     to_sun = np.asarray(sun.matrix_world.to_3x3().col[2], np.float64)
     done = 0
-    for name, ground in list(_SHADE_GROUND.items()):
+    for name, kept in list(_SHADE_GROUND.items()):
         coll = bpy.data.collections.get(name)
         if coll is None:
             _SHADE_GROUND.pop(name, None)
             continue
+        ground, crowns = kept['ground'], kept['crowns']
         meshes = {}
         for ob in coll.objects:
             if ob.type == 'MESH' and ob.name.endswith('_billboards') and ob.get('eido_plants') \
@@ -1188,10 +1318,16 @@ def _shade_billboards(sun, log=None):
             s = sun_shade(ground, p[:, 0], p[:, 1], p[:, 2], to_sun)
             at = me.attributes.get('eido_shade') or me.attributes.new('eido_shade', 'FLOAT', 'POINT')
             at.data.foreach_set('value', np.ascontiguousarray(s, np.float32))
+            # the crowns' shadow line on each card (its points share its centre), over the card's centre
+            cards, inv = np.unique(p, axis=0, return_inverse=True)
+            line = canopy_line(cards[:, 0], cards[:, 1], crowns, to_sun)[inv.ravel()]
+            c = np.clip(line - p[:, 2], CANOPY_NONE, -CANOPY_NONE)
+            at = me.attributes.get('eido_canopy_z') or me.attributes.new('eido_canopy_z', 'FLOAT', 'POINT')
+            at.data.foreach_set('value', np.ascontiguousarray(c, np.float32))
             me.update()
             done += n
     if log:
-        log(f'[plants] the terrain\'s shade on {done:,} billboards')
+        log(f'[plants] the terrain\'s and the crowns\' shade on {done:,} billboard points')
     return done
 
 
@@ -1199,7 +1335,8 @@ def _shade_billboards(sun, log=None):
 
 def bind_sun(sun=None):
     """Bind SeedThree's plants to the scene's sun (the leaves' backlight, and the lamp the billboards cast from
-    without receiving), and give every still billboard the terrain's shadow under it (eido_shade): `sun` a sun lamp
+    without receiving), and give every still billboard the terrain's shadow under it (eido_shade) and the shadow
+    line its neighbours' crowns cast on it (eido_canopy_z): `sun` a sun lamp
     object, default the scene's strongest. Call it once the sky and its sun are final (again when the sun moves); it
     is eidoblend.trees.make_seed_tree.set_sun. Returns the lamp, or None when the scene has none."""
     _seedthree()
@@ -1230,7 +1367,8 @@ def instance_plants(spots, terrain=None, collection=None, lod=None, cache=True, 
     base = (obj.name if obj is not None else 'terrain') + '_plants'
     coll = bpy.data.collections.new(base)
     (collection or bpy.context.scene.collection).children.link(coll)
-    _SHADE_GROUND[coll.name] = _shade_ground(terrain)    # the billboards' shade, once the sun is known (bind_sun)
+    _SHADE_GROUND[coll.name] = dict(ground=_shade_ground(terrain),      # the billboards' shade, once the sun is
+                                    crowns=_crowns(spots))              # known (bind_sun)
     focus = np.asarray(spots.meta['focus'], np.float64).reshape(-1, 2)
     trees = [e['name'] for e in spots.species
              if e['kind'] == 'tree' and 'seedthree' in e['source'] and len(spots.array(e['name']))]

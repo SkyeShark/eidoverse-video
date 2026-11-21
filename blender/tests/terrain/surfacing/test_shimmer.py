@@ -2,7 +2,7 @@
 surfacing material's 'Auto' filtering.
 
     bash run_blender.sh blender/tests/terrain/surfacing/test_shimmer.py [--views eye,over,edge,top] [--tag new]
-        [--samples 16] [--res 960x540]
+        [--samples 16] [--res 960x540] [--options '{"specular_aa": false}'] [--old]
     (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
     python <worktree>/blender/tests/terrain/surfacing/shimmer_metric.py new
 
@@ -35,6 +35,8 @@ def opt(name, default):
 
 TAG = opt('--tag', 'new')
 VIEWS = opt('--views', 'eye,over,edge').split(',')
+OPTIONS = __import__('json').loads(opt('--options', '{}'))     # material options over the meadow palette's
+OLD = '--old' in argv                                           # the material without baked data (meadow())
 SAMPLES = int(opt('--samples', '16'))
 W, H = (int(v) for v in opt('--res', '960x540').split('x'))
 
@@ -125,10 +127,18 @@ def render(cam, path):
 
 # ------------------------------------------------------------------------------------------- the probe ---
 def meadow():
-    """The meadow terrain object and its height_at: make_terrain('meadow') with the probe's clearing."""
+    """The meadow terrain object and its height_at: make_terrain('meadow') with the probe's clearing (--options: the
+    meadow palette with those material options, e.g. one variable of the material against another; --old: the
+    material without baked data, the film material's way of reading the masks, on the palette as it is now: the bar's
+    like for like when the palette has changed since OLD_AUTO was measured)."""
     from eidoblend.terrain import make_terrain
+    pal = 'meadow'
+    if OPTIONS:
+        from eidoblend.terrain.build import palettes as P
+        pal = P.get('meadow')
+        pal['options'].update(OPTIONS)
     t = make_terrain('meadow', seed=7, flatten=[{'at': (0.0, 0.0), 'radius': 8.0, 'falloff': 8.0}],
-                     palette='meadow', dress=False, name='meadow')
+                     palette=pal, dress=False, name='meadow', surface=None if OLD else 'auto')
     return t.obj, t.height_at
 
 
