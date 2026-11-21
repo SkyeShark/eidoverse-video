@@ -155,8 +155,14 @@ def main():
             bpy.data.objects.remove(ob, do_unlink=True)
         bpy.data.orphans_purge(do_recursive=True)
     shutil.rmtree(sky_root, ignore_errors=True)
-    with open(os.path.join(OUT, f"{A['tag']}_renders.json"), 'w') as f:
-        json.dump(rec, f, indent=1, default=str)
+    path = os.path.join(OUT, f"{A['tag']}_renders.json")
+    done = {}
+    if os.path.exists(path):                   # a tag rendered a variant at a time keeps every variant's record
+        with open(path) as f:
+            done = json.load(f)
+    done.update(rec)
+    with open(path, 'w') as f:
+        json.dump(done, f, indent=1, default=str)
 
 
 main()

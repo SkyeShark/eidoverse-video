@@ -8,6 +8,8 @@ generated in variants, every level's fields saved for the sheets and numbers (sh
 variants (real_place):
     upsampled   the DEM stage only: the hero levels are the DEM upsampled (Catmull-Rom), clay at eye level
     detail      the DEM, then this package's rock breakup and hydraulic pass on the hero levels
+    breakup     the DEM and the rock breakup only, and
+    hydraulic   the DEM and the hydraulic pass only: which of the two moves a number
     full        the registered recipe: fluvial refinement, talus, rock breakup, hydraulic (packages 3 and 12)
 fluvial_range: --recipe fluvial_range runs the registered recipe ('full') and the same without the detail stages
 ('nodetail'), focus on a hillside (--focus x,y).
@@ -43,8 +45,8 @@ def args():
 def recipe_for(name, variant, bp, hp):
     from eidoblend.terrain import recipes as RG
     d = RG.get(name).to_dict()
-    keep = {'upsampled': ('dem',), 'detail': ('dem', 'breakup', 'hydraulic'), 'nodetail': None,
-            'full': None}[variant]
+    keep = {'upsampled': ('dem',), 'detail': ('dem', 'breakup', 'hydraulic'), 'breakup': ('dem', 'breakup'),
+            'hydraulic': ('dem', 'hydraulic'), 'nodetail': None, 'full': None}[variant]
     stages = []
     for s in d['stages']:
         if keep is not None and s['op'] not in keep:

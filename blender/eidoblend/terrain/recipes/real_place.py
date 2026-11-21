@@ -19,7 +19,8 @@ two datasets disagree (resolution, vertical datum). The bed is the surface: a DE
 the inherited ground counts as rock and only what the detail stages add is loose. The hero levels start from their
 parent upsampled (Catmull-Rom) and then get the detail stages: fluvial refinement (mode 'refine': the landform is
 held, detail grows below the parent's pixel), talus, rock breakup and hydraulic rills (packages 3 and 12); the level
-runner skips a stage whose op is not registered yet.
+runner skips a stage whose op is not registered yet. The DEM's pixels are measured, so rock breakup and the hydraulic
+pass keep the mean of every one (hold_main_pixels): their rills, ribs and hummocks are what the pixel cannot hold.
 
 Drainage. The masks read the drainage area A (flow, channels, wetness, vegetation); the level runner routes it to
 convergence on every level after its stages, the parent's catchment entering each child at its edge.
@@ -358,8 +359,8 @@ REAL_PLACE = Recipe(
                       'pixel_m': '$pixel_m'}, levels=['context', 'main']),
         Stage('fluvial', {'mode': 'refine'}, levels='hero', name='fluvial_refine'),
         Stage('talus', {'repose_deg': 35.0}, levels='hero'),
-        Stage('breakup', {}, levels='hero'),
-        Stage('hydraulic', {}, levels='hero'),
+        Stage('breakup', {'hold_main_pixels': True}, levels='hero'),
+        Stage('hydraulic', {'hold_main_pixels': True}, levels='hero'),
     ],
     doc='The main tile is the DEM; context levels are its surround harmonised to it; hero levels refine it. The '
         'hero stages (fluvial refinement, talus, rock breakup, hydraulic) belong to the fluvial and detail packages: '

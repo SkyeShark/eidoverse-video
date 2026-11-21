@@ -25,6 +25,12 @@
   streaks        (second pass) radial_streaks: unit RMS in range, gone beyond it, no seam, running downslope
   breaches       (second pass) cinder cones breached toward the ground's downhill azimuth, the field unchanged
   outline        (second pass) the caldera's polygon and embayments: a few bights, a less round rim, the same floor
+  eruptions      (geometry round) the flows a cone's aging lays: the same for a seed, within their groups'
+                 distances, a rift's along its axis, over every epoch; one laid on its own window is the flow
+                 op_lava_flows lays on the whole level; each span of the aging opened by its flows, the furrows'
+                 erodibility following the surface (a flow's top at k_floor, its margins at full K, buried margins)
+  units          (geometry round) a compound flow whose first unit leaves no passage over 0.05 is that one unit
+  lake ties      (geometry round) max_lakes keeps the larger labels of equal depressions: the data's choice
 Exit status 0 when every check passes.
 """
 import math
@@ -439,6 +445,179 @@ def test_flow_bury_spread():
           f'{across(h0, core):.1f} m without; width {w_steep:.0f} m on the 12-degree flank, {w_flat:.0f} m on the plain')
 
 
+def test_eruptions():
+    """The geometry round: the eruptions a cone's aging lays (eruption_flows) are the same for a seed, each group's
+    vents within its distances (a rift's along its axis both ways), spread over the epochs; a flow laid on its own
+    window (lay_flow) is the flow op_lava_flows lays on the whole level (one unit, the same shape): the same
+    footprint and thickness, the gullies under it filled."""
+    er = dict(epochs=4, groups=[
+        dict(count=30, r_m=[450.0, 900.0], width_m=[200.0, 80.0, 600.0], length_m=[3000.0, 1200.0, 7000.0],
+             thickness_frac=[0.02, 0.05], thickness_m=[2.0, 12.0]),
+        dict(count=40, r_m=[1500.0, 12000.0], azimuth_deg=315.0, half_deg=20.0, width_m=[450.0, 150.0, 1500.0],
+             length_m=[4000.0, 1500.0, 9000.0], thickness_frac=[0.02, 0.04], thickness_m=[4.0, 25.0])])
+    a = V.eruption_flows(dict(centre=(100.0, -50.0), eruptions=er), 3)
+    b = V.eruption_flows(dict(centre=(100.0, -50.0), eruptions=er), 3)
+    c = V.eruption_flows(dict(centre=(100.0, -50.0), eruptions=er), 4)
+    r = np.array([math.hypot(f['at'][0] - 100.0, f['at'][1] + 50.0) for _e, f in a])
+    summit = r[r <= 900.0]
+    off = [abs(((math.degrees(math.atan2(f['at'][0] - 100.0, f['at'][1] + 50.0)) - 315.0 + 90.0) % 180.0) - 90.0)
+           for (_e, f), x in zip(a, r) if x >= 1500.0]
+    epochs = sorted({e for e, _f in a})
+    ordered = all(a[k][0] <= a[k + 1][0] for k in range(len(a) - 1))
+    check('eruptions: the same flows for a seed (another seed others), every vent within its group\'s distances, '
+          'the rift\'s along its axis, every epoch used, in epoch order',
+          a == b and a != c and len(a) == 70 and summit.size == 30 and float(summit.min()) >= 450.0
+          and len(off) == 40 and float(r.max()) <= 12000.0 and max(off) < 4.0 * 20.0 and epochs == [0, 1, 2, 3]
+          and ordered,
+          f'{len(a)} flows; summit vents {summit.size} at {summit.min():.0f}-{summit.max():.0f} m; rift vents '
+          f'{len(off)} within {max(off):.0f} deg of the axis (sigma 20); epochs {epochs}')
+    # one flow down a 12-degree flank with gullies every 150 m (test_flow_bury_spread's ground)
+    n, cell = 320, 12.5
+    X, Y, lv = grid(n, cell, -2000.0, -500.0)
+    yy = Y + 500.0
+    t12, t2 = math.tan(math.radians(12.0)), math.tan(math.radians(2.0))
+    base = 1500.0 - np.where(yy < 1500.0, t12 * yy, t12 * 1500.0 + t2 * (yy - 1500.0))
+    ground = base - 6.0 * (0.5 + 0.5 * np.cos(2.0 * math.pi * X / 150.0)) ** 4
+    flow = dict(at=[0.0, -400.0], length_m=3200.0, thickness_m=12.0, width_m=500.0)
+    shape = dict(walkers=300, dh_factor=0.25, front_deg=35.0, levee=0.35, levee_frac=0.12, rough=0.0,
+                 stop_spread=0.3, front_spread=1.0, spread_slope_deg=6.0, vent_taper=0.2, p_edge=0.01)
+    h1 = ground.copy()
+    V.lay_flow(h1, X, Y, cell, flow, 5, 0, shape)
+    f = {'h': ground.astype(np.float32), 'bed': ground.astype(np.float32)}
+    V.op_lava_flows(f, lv, dict(vents=[dict(flow, age=0.0, dh_m=0.25 * 12.0)], units=1, bury=True, no_climb='local',
+                                **{k: v for k, v in shape.items() if k != 'walkers'}, walkers=300), 5)
+    d_win = h1 - ground
+    d_op = f['h'].astype(np.float64) - ground
+    a_win, a_op = float((d_win > 2.0).sum()), float((d_op > 2.0).sum())
+    inside = (d_win > 2.0) & (d_op > 2.0)
+    core = inside & (yy > 300.0) & (yy < 2400.0)
+    gully = core & (np.cos(2.0 * math.pi * X / 150.0) > 0.9)
+    rib = core & (np.cos(2.0 * math.pi * X / 150.0) < -0.5)
+    check('eruptions: a flow on its own window is op_lava_flows\' flow on the whole level (footprint and thickness '
+          'within 10 %), running downhill, its top level across the gullies it buried',
+          abs(a_win - a_op) < 0.1 * a_op and abs(float(np.median(d_win[inside])) - float(np.median(d_op[inside])))
+          < 0.1 * float(np.median(d_op[inside])) and float(yy[d_win > 2.0].max()) > 2000.0
+          and float(np.median(d_win[gully]) - np.median(d_win[rib])) > 3.0,
+          f'footprint {a_win * cell * cell / 1e6:.2f} km2 windowed, {a_op * cell * cell / 1e6:.2f} km2 on the level; '
+          f'thickness p50 {np.median(d_win[inside]):.1f} / {np.median(d_op[inside]):.1f} m; reaches '
+          f'{yy[d_win > 2.0].max():.0f} m down the slope; over the gullies {np.median(d_win[gully]):.1f} m, '
+          f'over the ribs {np.median(d_win[rib]):.1f} m (the gullies 6 m deep)')
+
+
+def test_erupt_and_erode():
+    """The geometry round: the aging's eruptions (_erupt_and_erode) open each span with its flows and run the fluvial
+    span after them; the furrows' erodibility follows the surface: a flow's top at k_floor, the ring just outside it
+    at full K, and a later flow covering an earlier one's margin buries that margin. (The fluvial run and the GPU
+    routing are stood in for: this checks the order and the erodibility, test_kernels the physics.)"""
+    from eidoblend.terrain.solvers import fluvial as FL
+    from eidoblend.terrain.solvers import hydro as HY
+    n, cell = 200, 20.0
+    X, Y, lv = grid(n, cell)
+    h = 1000.0 - 0.25 * Y                                      # a flank falling north
+    furrows = np.where(np.cos(2.0 * math.pi * X / 400.0) > 0.8, 1.0, 0.15)
+    flows = [(0, dict(at=(0.0, -1500.0), length_m=2200.0, width_m=300.0, thickness_m=8.0)),
+             (1, dict(at=(160.0, -1300.0), length_m=1200.0, width_m=260.0, thickness_m=8.0))]
+    seen = []
+    real = (FL.op_fluvial, HY.route_to_convergence)
+
+    def fluvial(fields, level, params, seed=0, ctx=None):
+        seen.append((int(params['steps']), np.asarray(fields['K_factor'], np.float64).copy(),
+                     np.asarray(fields['h'], np.float64).copy()))
+        return fields
+    FL.op_fluvial = fluvial
+    HY.route_to_convergence = lambda dev, surf, c, A0=None, A_in=None: (np.ones(np.shape(surf), np.float32), 0)
+    try:
+        f = {'h': h.astype(np.float32), 'bed': h.astype(np.float32), 'A': np.ones(h.shape, np.float32),
+             'K_factor': (furrows).astype(np.float32)}
+        ctx = types.SimpleNamespace(pins=None, sea_level=None, log=lambda m: None)
+        p = dict(centre=(0.0, 0.0), eruptions=dict(epochs=2, shape=dict(rough=0.0, walkers=150, levee=0.15,
+                                                                       levee_frac=0.2)))
+        V._erupt_and_erode(f, lv, p, dict(steps=0), flows, 7, 3, ctx, None, np.ones(h.shape), furrows, 0.15)
+    finally:
+        FL.op_fluvial, HY.route_to_convergence = real
+    (s0, k0, h0), (s1, k1, h1) = seen
+    raised0 = (h0 - h) > 2.0                                 # flow A, laid before the first span
+    raised1 = (h1 - h0) > 2.0                                # flow B, before the second
+    top_a = raised0 & ~raised1
+    grown = np.zeros_like(raised0)
+    for dj in range(-2, 3):
+        for di in range(-2, 3):
+            grown |= np.roll(np.roll(raised0, dj, 0), di, 1)
+    near = grown & ~raised0 & (np.abs(X) < 400.0) & (Y > -1400.0) & (Y < 400.0)     # A's margins, 1-2 cells out
+    buried = near & raised1                                  # the part of them B covers
+    check('eruptions: each span opened by its flows; a flow\'s top at k_floor, the ring outside it at full K, '
+          'the margins a later flow covers buried',
+          (s0, s1) == (4, 3) and raised0.sum() > 100 and raised1.sum() > 50
+          and abs(float(np.median(k0[top_a])) - 0.15) < 1e-3 and float(np.median(k0[near])) > 0.3
+          and buried.sum() > 5 and float(np.median(k1[buried])) < 0.2,
+          f'spans of {s0} and {s1} steps; flow A {int(raised0.sum())} cells, flow B {int(raised1.sum())}; K on A\'s '
+          f'top {np.median(k0[top_a]):.2f}, just outside it {np.median(k0[near]):.2f}, on its margins B covered '
+          f'{np.median(k1[buried]) if buried.any() else float("nan"):.2f} ({int(buried.sum())} cells)')
+
+
+def test_units_without_passage():
+    """The geometry round: a compound flow whose first unit leaves no passage over 0.05 (no axis for a later unit to
+    break out along) is that one unit: the same flow as units=1, no error (the loop ran on into the missing axis)."""
+    n, cell = 160, 12.5
+    X, Y, lv = grid(n, cell, -1000.0, -500.0)
+    ground = 1500.0 - 0.15 * (Y + 500.0)
+    vent = dict(at=[0.0, -300.0], length_m=1500.0, thickness_m=12.0, age=0.0, dh_m=1.5, width_m=300.0, walkers=200)
+    shape = dict(dh_factor=0.25, front_deg=35.0, levee=0.3, levee_frac=0.1, rough=0.0, stop_spread=0.0,
+                 front_spread=0.0, vent_taper=0.0, no_climb=False)
+
+    def weak(h, cell_, start, *a, **k):
+        # a passage spread so thin that no cell holds more than 4 % of the walkers: a line down the slope (north)
+        P = np.zeros(np.shape(h))
+        i, j = int(round(start[0])), int(round(start[1]))
+        P[j:j + 80, i] = 0.04
+        return P
+    real = V.lava_walkers
+    V.lava_walkers = weak
+    out, err = {}, None
+    try:
+        for units in (1, 4):
+            f = {'h': ground.astype(np.float32), 'bed': ground.astype(np.float32)}
+            V.op_lava_flows(f, lv, dict(shape, vents=[dict(vent)], units=units), 1)
+            out[units] = f['h'].astype(np.float64)
+    except Exception as e:                                   # noqa: BLE001 - reported as the check's failure
+        err = f'{type(e).__name__}: {e}'
+    finally:
+        V.lava_walkers = real
+    same = err is None and np.array_equal(out[1], out[4])
+    check('aa flow: a first unit with no passage over 0.05 ends a compound flow (the same flow as one unit, no error)',
+          same and float((out[1] - ground).max()) > 5.0,
+          err or f'units 4 vs 1: max |dh| {np.abs(out[4] - out[1]).max():.2e} m; flow up to '
+                 f'{(out[1] - ground).max():.1f} m thick')
+
+
+def test_lake_ties():
+    """The geometry round: max_lakes chooses by the data alone. Of depressions of one area the larger labels are kept
+    (a stable sort, reversed). numpy's default sort leaves equal keys in whatever order its algorithm reaches: on
+    this layout of 17 basins it kept label 9 of the nine equal largest, where the rule keeps 13, 15 and 16."""
+    from eidoblend.terrain.core.metrics import label
+    from eidoblend.terrain.solvers import hydro as HY
+    n, cell = 360, 50.0
+    X, Y, lv = grid(n, cell)
+    h = np.full(X.shape, 500.0)
+    # 17 round basins, two sizes (B 400 m, s 300 m), centred on cells along a staircase so their labels (the order
+    # of their first cells, row by row from the south) follow the list
+    for k, s in enumerate('BsssBBssBBsBBsBBs'):
+        r = np.hypot(X - (-8975.0 + 1000.0 * (1 + k)), Y - (-8975.0 + 900.0 * (1 + k)))
+        rb = 400.0 if s == 'B' else 300.0
+        h = h + np.where(r < rb, -20.0 * (1.0 - (r / rb) ** 2), 0.0)
+    lab, nl = label(HY.fill_depressions(h)[0] - h > 1e-4)
+    areas = np.bincount(lab.ravel(), minlength=nl + 1)[1:]
+    f = {'h': h.astype(np.float32), 'deposit': np.zeros(X.shape, np.float32)}
+    V.op_volcano_lakes(f, lv, dict(min_depth_m=5.0, min_area_m2=1.0e5, max_lakes=3, lake_radius_m=20000.0,
+                                   centre=(0.0, 0.0)), 1)
+    wet = sorted(int(L) for L in np.unique(lab[(np.asarray(f['water']) > 0.5) & (lab > 0)]))
+    big = [k + 1 for k, s in enumerate('BsssBBssBBsBBsBBs') if s == 'B']
+    check('lakes: of equal depressions, max_lakes keeps the larger labels (chosen by the data, not the sort)',
+          nl == 17 and len(set(areas[[b - 1 for b in big]].tolist())) == 1 and wet == [13, 15, 16],
+          f'{nl} depressions of {sorted(set(areas.tolist()))} cells, the largest in labels {big}; lakes in labels '
+          f'{wet} ([13, 15, 16] asked)')
+
+
 def test_lava_rubble():
     """The review's fixes, third pass: the flows' clinker on the fine levels (lava_rubble): only where the lava field
     lies, into h and bed, and on a parent and its x2 child the inherited rubble plus the child's own finer detail
@@ -531,8 +710,8 @@ def main():
     t0 = time.time()
     for t in (test_walkers, test_lakes, test_caldera_lake, test_islands, test_apron, test_aa_flows,
               test_caldera_lake_notch, test_lake_limits, test_closed_basin, test_radial_streaks, test_breach_toward,
-              test_caldera_outline, test_furrows, test_flow_bury_spread, test_lava_rubble, test_cone_rills,
-              test_hero_pits):
+              test_caldera_outline, test_furrows, test_flow_bury_spread, test_eruptions, test_erupt_and_erode,
+              test_units_without_passage, test_lake_ties, test_lava_rubble, test_cone_rills, test_hero_pits):
         t()
     bad = [r for r in RESULTS if not r[0]]
     print(f'{len(RESULTS) - len(bad)} of {len(RESULTS)} checks pass; {time.time() - t0:.1f} s')

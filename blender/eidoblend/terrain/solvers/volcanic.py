@@ -29,13 +29,14 @@ Stage ops: OPS maps an op name to op(fields, level, params, seed, ctx=None), fou
                   lava plain filling the low ground the vent's flows reach)
   processes       'volcano_age' (the fluvial backbone for the landform's age with no uplift: gullies, fans and
                   aprons; radial and sector erodibility, kept craters, seeded ravines, sparse wandering furrows with
-                  the erodibility gathered into them: furrow_k_factor), 'lava_flows' (DOWNFLOW walkers: tongues with
-                  levees, fronts and rough tops; with front_deg aa flows in lobed units: rubble fronts and margins at
-                  their angle, broad levees, ridged tops, none on the cone they left; channelled near the vent,
-                  spreading where the ground levels out, filling the gullies they cross, parting round higher
-                  ground), 'lava_rubble' (the flows' clinker on the fine levels), 'caldera_lake' (a lake at its own
-                  level, under the caldera's lowest notch), 'volcano_lakes' (lakes with dry craters and playa floors,
-                  limited in reach, size and count; the solvers' pits filled with sediment)
+                  the erodibility gathered into them: furrow_k_factor; the cone growing as it erodes: eruptions of
+                  lava flows between spans of the run, eruption_flows, lay_flow), 'lava_flows' (DOWNFLOW walkers:
+                  tongues with levees, fronts and rough tops; with front_deg aa flows in lobed units: rubble fronts
+                  and margins at their angle, broad levees, ridged tops, none on the cone they left; channelled near
+                  the vent, spreading where the ground levels out, filling the gullies they cross, parting round
+                  higher ground), 'lava_rubble' (the flows' clinker on the fine levels), 'caldera_lake' (a lake at its
+                  own level, under the caldera's lowest notch), 'volcano_lakes' (lakes with dry craters and playa
+                  floors, limited in reach, size and count; the solvers' pits filled with sediment)
 Cones are piles at repose on the ground (piles_on): on a slope their downhill flanks are longer, never steeper.
 
 numpy on the CPU for the shapes, walkers and lakes; the aging runs the fluvial package's GPU kernels.
@@ -422,8 +423,10 @@ def stratovolcano(x, y, centre=(0.0, 0.0), height_m=3700.0, radius_m=18000.0, up
     if f > 0.0:
         inner = smooth_max(inner, H - dc, 0.08 * dc)
     inner = np.where(rho < 1.6, inner, _BIG)
-    w = 0.05 * rc if crest_round_m is None else float(crest_round_m)
-    z = crest_union(z_out, inner, w * (2.0 * bowl_depth / rc + s_rim))
+    # (its own name: outer() reads w, the summit platform's width, again below for the flank craters and the
+    # parasitic cones' bases)
+    w_crest = 0.05 * rc if crest_round_m is None else float(crest_round_m)
+    z = crest_union(z_out, inner, w_crest * (2.0 * bowl_depth / rc + s_rim))
 
     for fc in flank_craters:
         z = _flank_crater(x, y, z, fc, centre, lambda xq, yq: outer(xq, yq)[0])
@@ -2067,7 +2070,7 @@ AGE_DEFAULTS = dict(age_yr=1.0e5, K=2.0e-6, m=0.5, n=1.0, threshold_deg=38.0, th
                     centre=(0.0, 0.0), strength_from_field=False, threshold_gain=0.0, breakup=0.0, k_breakup=0.0,
                     breakup_scales_m=(60.0, 20.0, 7.0), seed_texture_m=0.0, seed_texture_scale_m=150.0,
                     sector_contrast=0.0, sector_harmonics=(2, 6), keep_craters=(), k_profile=None, ravines=(),
-                    ravine_field=None, seed_streaks=None)
+                    ravine_field=None, seed_streaks=None, eruptions=None)
 
 
 def ravine_cut(x, y, centre, ravines, seed=0):
@@ -2214,6 +2217,166 @@ def basins_kept(h, filled, min_depth_m):
     return np.where(deep[lab], h, filled)
 
 
+# ---------------------------------------------------------------------- eruptions during the aging (growth)
+# A stratovolcano grows while it erodes (design 4.7 'growth and erosion'): lava flows from the summit and the flank
+# vents bury the gullies in their paths, and the water that runs on the cone gathers along their margins and between
+# their lobes. So the drainage a young cone carries is set by its flows - their widths, lengths and overlaps - not by
+# one wavelength of its own (seeded by azimuthal noise, the gullies came out as an even sunburst of ravines one size
+# apart: Fuji's main level beside its DEM).
+
+ERUPTION_SHAPE = dict(walkers=120, dh_factor=0.25, front_deg=35.0, levee=0.35, levee_frac=0.12, rough=0.15,
+                      stop_spread=0.3, front_spread=1.0, spread_slope_deg=6.0, vent_taper=0.2, p_edge=0.01)
+
+
+def _lognormal_in(rng, spec, sigma=0.5):
+    """A draw from (median, lo, hi): lognormal about the median (sigma in ln), clipped to [lo, hi]."""
+    med, lo, hi = (float(v) for v in spec)
+    return float(np.clip(med * math.exp(rng.normal(0.0, sigma)), lo, hi))
+
+
+def eruption_flows(params, seed):
+    """The flows a 'volcano_age' stage's eruptions lay: params eruptions = dict(epochs (the age in that many spans,
+    each opened by its eruptions), groups: a list of dict(count, r_m (lo, hi): the vents' distance from `centre`,
+    area-uniform; azimuth_deg + half_deg: vents along an axis both ways, scattered half_deg (one sigma) about it (a
+    rift), or none: all round; width_m, length_m: (median, lo, hi), lognormal; thickness_frac (lo, hi) of the width,
+    thickness_m (lo, hi) its bounds)). Returns [(epoch, dict(at, length_m, width_m, thickness_m))], by epoch, each
+    epoch's flows in their drawing order. Deterministic per seed."""
+    e = dict(params.get('eruptions') or {})
+    E = max(int(e.get('epochs', 4)), 1)
+    c = params.get('centre', (0.0, 0.0))
+    rng = _rng(seed, 97)
+    out = []
+    for g in e.get('groups') or ():
+        for _ in range(int(g.get('count', 0))):
+            r0, r1 = (float(v) for v in g['r_m'])
+            r = math.sqrt(rng.uniform(r0 * r0, r1 * r1))
+            if g.get('azimuth_deg') is not None:
+                a = (float(g['azimuth_deg']) + (180.0 if rng.random() < 0.5 else 0.0)
+                     + rng.normal(0.0, float(g.get('half_deg', 20.0))))
+            else:
+                a = rng.uniform(0.0, 360.0)
+            ex, ey = compass(a)
+            W = _lognormal_in(rng, g['width_m'])
+            L = _lognormal_in(rng, g['length_m'])
+            tf = rng.uniform(*g.get('thickness_frac', (0.02, 0.05)))
+            T = float(np.clip(tf * W, *g.get('thickness_m', (3.0, 25.0))))
+            out.append((int(rng.integers(E)), dict(at=(float(c[0]) + r * ex, float(c[1]) + r * ey), length_m=L,
+                                                   width_m=W, thickness_m=T)))
+    out.sort(key=lambda t: t[0])                      # stable: each epoch keeps the drawing order
+    return out
+
+
+def lay_flow(h, X, Y, cell, flow, seed, salt, shape=None):
+    """One lava flow laid on h (float64 (n, n) at the level's cells X, Y; changed in place) over a window about its
+    reach: DOWNFLOW walkers (lava_walkers) on the ground smoothed at the flow's own scale, lava_surface's aa margins,
+    levees and rough top, wider where the ground levels out, thinned where the ground rises over its paths' level
+    (an onlap: the cone it left and a rise in its way stand out of it), narrow at its vent, and the gullies under it
+    filled (its base is the smoothed ground). op_lava_flows' single unit on a window: over the level's whole grid a
+    flow cost a second, and an eruption history lays a hundred or more. flow: dict at, length_m, width_m, thickness_m
+    (age 0..1 dulls it); shape: ERUPTION_SHAPE's keys. Returns ((row slice, column slice), added metres, footprint
+    0..1) in level cells, or None for a vent within 2 cells of the level's edge."""
+    from .hillslope import gaussian_blur
+    s = dict(ERUPTION_SHAPE, **(shape or {}))
+    n = h.shape[0]
+    x0, y0 = float(X[0, 0]) - 0.5 * cell, float(Y[0, 0]) - 0.5 * cell
+    fi, fj = (float(flow['at'][0]) - x0) / cell - 0.5, (float(flow['at'][1]) - y0) / cell - 0.5
+    if not (2 <= fi < n - 2 and 2 <= fj < n - 2):
+        return None
+    L, W, th = float(flow['length_m']), float(flow['width_m']), float(flow['thickness_m'])
+    age = float(flow.get('age', 0.0))
+    sig = max(2.0 * th, 0.5 * W) / cell
+    R = int(math.ceil(L / cell + 4.0 * W / cell + 6.0 * sig + 8))
+    ci, cj = int(round(fi)), int(round(fj))
+    j0, j1, i0, i1 = max(cj - R, 0), min(cj + R + 1, n), max(ci - R, 0), min(ci + R + 1, n)
+    hw = h[j0:j1, i0:i1]
+    g = gaussian_blur(hw, sig) if sig > 0.5 else hw.copy()
+    P = lava_walkers(g, cell, (fi - i0, fj - j0), int(s['walkers']), L, float(s['dh_factor']) * th, seed, salt,
+                     dh_rel=1.5, pond_m=th, stop_spread=float(s['stop_spread']), front_spread=float(s['front_spread']))
+    jj, ii = np.nonzero(P > 0.0)
+    pad = int(math.ceil(2.0 * W / cell + 12.0 * max(1.5 * th * (1.0 + 2.0 * age) / cell, 1.2) + 8))
+    a0, a1 = max(int(jj.min()) - pad, 0), min(int(jj.max()) + pad + 1, hw.shape[0])
+    b0, b1 = max(int(ii.min()) - pad, 0), min(int(ii.max()) + pad + 1, hw.shape[1])
+    win = (slice(a0, a1), slice(b0, b1))
+    xw, yw = X[j0:j1, i0:i1][win], Y[j0:j1, i0:i1][win]
+    wsc = None
+    if s.get('spread_slope_deg'):
+        gy, gx = np.gradient(g[win], cell)
+        wsc = np.clip(np.sqrt(math.tan(math.radians(float(s['spread_slope_deg'])))
+                              / np.maximum(np.hypot(gx, gy), 1e-3)), 0.5, 1.6)
+    T, F = lava_surface(P[win], cell, th, xw, yw, float(s['p_edge']), None, float(s['levee']), float(s['rough']), age,
+                        int(seed) + 13 * int(salt), width_m=W, front_deg=float(s['front_deg']),
+                        levee_frac=float(s['levee_frac']), width_scale=wsc)
+    gw = hw[win]
+    pw = smoothstep(0.02, 0.1, P[win])
+    sg = max(0.25 * W / cell, 1.0)
+    bw = gaussian_blur(pw, sg)
+    lvl = np.where(bw > 1e-4, gaussian_blur(gw * pw, sg) / np.maximum(bw, 1e-6), gw)
+    up = np.clip((lvl + 1.3 * th - gw) / th, 0.0, 1.0)
+    T, F = T * up, F * smoothstep(0.0, 0.25, up)
+    if float(s['vent_taper']) > 0.0:
+        taper = smoothstep(0.0, float(s['vent_taper']) * W, np.hypot(xw - float(flow['at'][0]),
+                                                                     yw - float(flow['at'][1])))
+        T, F = T * taper, F * taper
+    T = T + np.maximum(g[win] - gw, 0.0) * smoothstep(0.35, 0.8, F)
+    hw[win] += T
+    return (slice(j0 + a0, j0 + a1), slice(i0 + b0, i0 + b1)), T, F
+
+
+def _erupt_and_erode(fields, level, p, fp, flows, steps, seed, ctx, dev, k_base=None, furrows=None, k_floor=None):
+    """volcano_age's run with eruptions (its first level): the age in `epochs` spans, each opened by its flows
+    (lay_flow, into h and bed: lava is rock), the drainage routed to convergence again on the new surface, then the
+    fluvial backbone for the span's steps. A flow laid in an earlier span is older at the end: it is laid dulled by
+    the share of the age still to come (lava_surface's age, up to `dull`, default 0.8: its margins wider, an old
+    flow mantled), and eroded for that long. With the furrows' erodibility (furrow_k_factor: furrows, k_floor and
+    the K factor without them, k_base) the erodibility follows the surface: a flow's top is fresh permeable lava
+    (k_floor) and the water it sheds gathers along its margins (a ring a cell or two wide outside it, at full K),
+    where a later flow buries the margins of the ones it covers."""
+    from . import fluvial as FL
+    from . import hydro as HY
+    from .hillslope import gaussian_blur
+    er = dict(p['eruptions'])
+    E = max(int(er.get('epochs', 4)), 1)
+    dull = float(er.get('dull', 0.8))
+    X, Y = level.xy()
+    cell = float(level.cell)
+    A_in = ctx.pins['A_in'] if ctx.pins is not None else None
+    spans = [steps // E + (1 if e < steps % E else 0) for e in range(E)]
+    laid = 0
+    cover = np.zeros(X.shape)
+    margins = np.zeros(X.shape)
+    ring = max(1.0, 40.0 / cell)                      # the margins' ring: about 40 m, at least a cell
+    for e in range(E):
+        h = np.asarray(fields['h'], np.float64).copy()
+        add = np.zeros_like(h)
+        age = dull * (E - 1 - e) / max(E - 1, 1)
+        for k, (ep, fl) in enumerate(flows):
+            if ep != e:
+                continue
+            out = lay_flow(h, X, Y, cell, dict(fl, age=age), seed, 7000 + k, er.get('shape'))
+            if out is None:
+                continue
+            sl, T, F = out
+            add[sl] += T
+            laid += 1
+            if furrows is not None:
+                m = np.clip(2.0 * (gaussian_blur(F, ring) - F), 0.0, 1.0)
+                margins[sl] = np.maximum(margins[sl] * (1.0 - F), m)
+            cover[sl] = np.maximum(cover[sl], F)
+        if add.any():
+            fields['h'] = _f32(h)
+            if 'bed' in fields:
+                fields['bed'] = _f32(np.asarray(fields['bed'], np.float64) + add)
+            surf = HY.routing_surface(HY.fill_depressions(h, sea_level=ctx.sea_level)[0], sea_level=ctx.sea_level)
+            fields['A'] = HY.route_to_convergence(dev, surf, cell, A0=fields.get('A'), A_in=A_in)[0]
+            if furrows is not None:
+                fk = np.maximum(furrows * (1.0 - cover) + float(k_floor) * cover, margins)
+                fields['K_factor'] = _f32(k_base * fk)
+        if spans[e] > 0:
+            FL.op_fluvial(fields, level, dict(fp, steps=spans[e], min_steps=1, max_steps=spans[e]), seed, ctx=ctx)
+    ctx.log(f'[terrain.volcanic] eruptions on {level.n}^2 @ {cell:.3g} m: {laid} of {len(flows)} flows in {E} spans, '
+            f'{float((cover > 0.5).mean()):.2f} of the level under them')
+
+
 def _keep_mask(level, craters):
     """1 inside each kept crater (dict at, radius_m), easing to 0 over its outer fifth."""
     x, y = level.xy()
@@ -2251,7 +2414,10 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
     in; inside, the surface may be lowered by the run but never raised), k_profile ([[r_m, factor], ...]: K x a
     piecewise-linear factor of the distance from `centre`, constant beyond its ends: Fuji's steep upper cone is
     cut by radial gullies while its lower flanks, resurfaced by lava flows and tephra, stay smooth), ravines /
-    ravine_field (radial ravines cut before the run on its first level: ravine_cut, ravines_of)."""
+    ravine_field (radial ravines cut before the run on its first level: ravine_cut, ravines_of), eruptions (the cone
+    growing while it erodes, on the first level: the age in spans, each opened by lava flows from the summit and the
+    flank vents that bury the gullies in their paths, so the water gathers along the flows' margins and between
+    their lobes: eruption_flows, lay_flow, _erupt_and_erode)."""
     if _prepass(ctx):
         return fields
     from . import fluvial as FL
@@ -2352,6 +2518,7 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
         k0, k1 = p['sector_harmonics']
         kf = kf * np.exp(sc_ * azimuth_noise(az, seed, 91, int(k0), int(k1), decay=0.8) - 0.5 * sc_ * sc_)
     fk = furrow_k_factor(level, p, seed)
+    k_base = kf
     if fk is not None:
         kf = kf * fk
     fields['K_factor'] = _f32(kf)
@@ -2368,7 +2535,14 @@ def op_volcano_age(fields, level, params, seed, ctx=None):
     fp.update(steps=steps, min_steps=1, max_steps=max(steps, 1), dt_ref_yr=dt_ref, relief_m=None,
               lock=bool(p['lock']) and not first, fill_pits=bool(p['fill_pits']), mode='evolve',
               Sc_from_fields=False)
-    FL.op_fluvial(fields, level, fp, seed, ctx=ctx)
+    flows = eruption_flows(p, seed) if (first and p.get('eruptions')) else []
+    if flows:
+        floors = [float(st['k_floor']) for st in _streak_sets(p) if st.get('sparse') is not None
+                  and st.get('k_floor') is not None]
+        _erupt_and_erode(fields, level, p, fp, flows, steps, seed, ctx, dev, k_base, fk,
+                         min(floors) if floors else None)
+    else:
+        FL.op_fluvial(fields, level, fp, seed, ctx=ctx)
     if keep:
         w = _keep_mask(level, keep)
         h = np.asarray(fields['h'], np.float64)
@@ -2544,7 +2718,8 @@ def op_lava_flows(fields, level, params, seed, ctx=None):
                     dist_ = max(math.hypot(ci_ - fi, cj_ - fj), 1.0)
                     axis = ((fi, fj), ((ci_ - fi) / dist_, (cj_ - fj) / dist_), 2.0 * dist_)
                 else:
-                    units = 1
+                    units = 1                       # no passage to break out of: this unit is the flow's only one
+                                                    # (the loop ends after it, below)
             # the unit's own window: where walkers went, plus room for its width, margins and levees
             jj, ii = np.nonzero(P > 0.0)
             th = float(vu['thickness_m'])
@@ -2604,6 +2779,8 @@ def op_lava_flows(fields, level, params, seed, ctx=None):
                 T, F = T * taper, F * taper
             tv[win] = np.maximum(tv[win], T)
             fv[win] = np.maximum(fv[win], F)
+            if u + 1 >= units:
+                break                               # range(units) was fixed when the loop began
         if v.get('bury'):
             # the flow fills the gullies and hollows it runs over: its base is the ground smoothed at the flow's own
             # scale (the walkers' ground g), so the cone's gullies do not print through its top as stripes
@@ -2834,7 +3011,9 @@ def op_volcano_lakes(fields, level, params, seed, ctx=None):
                                                   ).ravel().astype(np.float64))
                 lake &= near > 0.5
             if p.get('max_lakes') is not None and int(lake[1:].sum()) > int(p['max_lakes']):
-                keep = np.argsort(np.where(lake, area, -1.0))[::-1][:int(p['max_lakes'])]
+                # the largest first; of two of one area the larger label (a stable sort keeps equal areas in label
+                # order, reversed here: the choice is the data's, not the sort's)
+                keep = np.argsort(np.where(lake, area, -1.0), kind='stable')[::-1][:int(p['max_lakes'])]
                 lake = np.zeros(n + 1, bool)
                 lake[keep] = True
             if p.get('max_lakes') is not None and child:

@@ -45,6 +45,12 @@ ground shed, net, m; only with rock_fail), wet (water standing plus water passin
 depth + discharge x dt, m; the wet / dry pattern). The loop runs with open, draining edges; the pins are blended in
 once at the end (finish), so the border band fades from the detail to the parent's surface.
 
+The main level's pixels. A level's change is anchored (only what is narrower than 1.5 main pixels stays), but rills
+and fans 2-4 cells wide on a 4 m or 2 m level are as wide as an 8 m pixel, and a Gaussian low cut keeps half of a
+32 m wave: kept, they move the main level's pixels (at Lauterbrunnen 0.1 m RMS on the valley floor). With
+hold_main_pixels (real_place sets it: a DEM's pixels are measured) the op's change then keeps the mean of every main
+pixel exactly (hold_pixels): the detail is what the pixel cannot hold, and the landform stays the DEM's.
+
 The numpy twins below are the kernels' test oracles (core/twins.py), registered by kernel name; `run_numpy` steps
 them for the conservation tests at 64-128 cells. Production is the GPU (PipeRunGPU); there is no CPU path in it.
 """
@@ -103,6 +109,9 @@ PARAMS = {
     'anchor': (True, 'bool', "keep only the change narrower than anchor_m (anchor): detail without moving the "
                              "landform the levels above hold"),
     'anchor_m': (None, 'm', "the anchor's scale (None: 1.5 x the main level's cell, 12 m at Lauterbrunnen)"),
+    'hold_main_pixels': (False, 'bool', "the op's change keeps the mean of every main-level pixel (hold_pixels, after "
+                                        "the anchor): it adds only what that pixel cannot hold. For a real place, "
+                                        "whose pixels are measured (real_place sets it)"),
     'wet_tail': (0.2, '', 'the last fraction of the steps averaged into the wet field'),
 }
 
@@ -297,7 +306,8 @@ def pipes_thermal(s, u):
     ta = s['tacc']
     dbc = (db + ta[..., 1]).astype(F)
     b2 = (b + dbc).astype(F)
-    carry = (dbc - (b2 - b)).astype(F)                     # what float32 rounding dropped (Kahan)
+    bv = (b2 - b).astype(F)
+    carry = ((b - (b2 - bv)) + (dbc - bv)).astype(F)       # what float32 rounding dropped, exactly (TwoSum; Kahan)
     bed2 = np.minimum(bed, b2)
     if mode == T.BOUND_PINNED:
         b2 = T.pin_apply(b2, pin[..., 0], pin[..., 1])
@@ -603,7 +613,9 @@ def op_hydraulic(fields, level, params=None, seed=0, log=None, backend='gpu', ct
     finish(fields, h_new, bed_new, h_base, pw, ph,
            talus=np.maximum(tal.astype(np.float64), 0.0) * cell if p['rock_fail'] else None,
            wet=(wet / max(nwet, 1)) * cell, level=level,
-           anchor_m=anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None)
+           anchor_m=anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None,
+           pixels=main_pixels(level, ctx) if p['hold_main_pixels'] else None, h_in=h_in,
+           log=lambda m: log(f'level {level.index}: {m}'))
     dh = fields['h'] - h_base
     sec = time.perf_counter() - t0
     log(f'level {level.index} ({level.cell:.3g} m x{level.n}): {steps} steps in {sec:.1f} s; eroded '
@@ -636,11 +648,100 @@ def anchor_scale_m(level, p_anchor_m=None):
     return 3.0 * float(level.cell)
 
 
-def finish(fields, h_new, bed_new, h_base, pin_w, pin_h, talus=None, wet=None, level=None, anchor_m=None):
+def main_pixels(level, ctx=None):
+    """(f, oi, oj): the main level's pixels on a finer level, f cells a side, the level's first cell oi, oj cells into
+    its pixel (a hero level lies on its parent's grid lines, not always on the main level's: Lauterbrunnen's 1 m level
+    is half a pixel off in y, its 0.5 m level in both). None on the main level and coarser, or without the plan
+    (the level runner's StageContext carries it)."""
+    main = next((lv for lv in (getattr(ctx, 'plan', None) or ()) if lv.role == 'main'), None)
+    if main is None or float(main.cell) <= float(level.cell) * (1.0 + 1e-9):
+        return None
+    f = int(round(float(main.cell) / float(level.cell)))
+    return (f, int(round((float(level.x0) - float(main.x0)) / float(level.cell))) % f,
+            int(round((float(level.y0) - float(main.y0)) / float(level.cell))) % f)
+
+
+def _pixel_sums(a, f, oi, oj):
+    """Sums over the main pixels of a level's array (main_pixels' f, oi, oj): the pixels cut by the level's edge sum
+    the cells inside."""
+    nj, ni = np.shape(a)
+    pad = ((oj, (-(nj + oj)) % f), (oi, (-(ni + oi)) % f))
+    s = np.pad(np.asarray(a, np.float64), pad)
+    return s.reshape(s.shape[0] // f, f, s.shape[1] // f, f).sum(axis=(1, 3))
+
+
+def _catmull_rom(n, f, o):
+    """One axis's Catmull-Rom from the pixel centres to the n cell centres, by each cell's place in its pixel: per
+    phase (the cells r - o, r - o + f, ... share one set of weights) (first cell, cells, first tap in the pixels padded
+    by 2, the 4 weights)."""
+    out = []
+    for r in range(f):
+        i0 = (r - o) % f
+        if i0 >= n:
+            continue
+        t = (r + 0.5) / f - 0.5
+        b = math.floor(t)
+        u = t - b
+        out.append((i0, len(range(i0, n, f)), (i0 + o) // f + b + 1,
+                    (((-0.5 * u + 1.0) * u - 0.5) * u, (1.5 * u - 2.5) * u * u + 1.0,
+                     ((-1.5 * u + 2.0) * u + 0.5) * u, (0.5 * u - 0.5) * u * u)))
+    return out
+
+
+def _upsample(z, n, f, phases, axis):
+    """Pixel values z onto n cells along one axis, Catmull-Rom (_catmull_rom's phases; the pixels padded 2 at each end,
+    so the edges clamp): strided slices, no matrix product (Blender's numpy multiplies matrices slowly)."""
+    zp = np.pad(z, ((2, 2), (0, 0)) if axis == 0 else ((0, 0), (2, 2)), mode='edge')
+    out = np.empty((n, z.shape[1]) if axis == 0 else (z.shape[0], n))
+    for i0, k, s0, w in phases:
+        if axis == 0:
+            acc = w[0] * zp[s0:s0 + k]
+            for q in (1, 2, 3):
+                acc += w[q] * zp[s0 + q:s0 + q + k]
+            out[i0::f] = acc
+        else:
+            acc = w[0] * zp[:, s0:s0 + k]
+            for q in (1, 2, 3):
+                acc += w[q] * zp[:, s0 + q:s0 + q + k]
+            out[:, i0::f] = acc
+    return out
+
+
+def hold_pixels(change, keep, pixels, tol_m=1.0e-4, iterations=200, relax=1.5):
+    """A level's change less the smooth surface that carries its mean over each main pixel, so that every pixel keeps
+    its height: the pixels' means, interpolated to the cells Catmull-Rom (C1, so no crease runs along the pixel
+    edges) and weighted by `keep` (0 where the level is held on its parent: the edge stays on the parent's surface),
+    subtracted until every mean is under tol_m metres. Over-relaxed, and each pixel's step scaled by 1 / its free
+    share (at most 4), so the border band's pixels converge with the rest (8-20 passes at Lauterbrunnen); pixels less
+    than a quarter free are left to converge as far as they do. Returns (change, the largest mean left on the pixels
+    judged)."""
+    f, oi, oj = pixels
+    c = np.array(change, np.float64)
+    kw = np.clip(np.asarray(keep, np.float64), 0.0, 1.0)
+    nj, ni = c.shape
+    cnt = _pixel_sums(np.ones_like(c), f, oi, oj)
+    free = _pixel_sums(kw, f, oi, oj) / cnt
+    rows, cols = _catmull_rom(nj, f, oj), _catmull_rom(ni, f, oi)
+    judged = free >= 0.25
+    gain = np.where(free > 0.0, float(relax) / np.maximum(free, 0.25), 0.0)
+    worst = 0.0
+    for _ in range(int(iterations)):
+        m = _pixel_sums(c, f, oi, oj) / cnt
+        worst = float(np.abs(m[judged]).max()) if judged.any() else 0.0
+        if worst < tol_m:
+            break
+        c -= kw * _upsample(_upsample(m * gain, nj, f, rows, 0), ni, f, cols, 1)
+    return c, worst
+
+
+def finish(fields, h_new, bed_new, h_base, pin_w, pin_h, talus=None, wet=None, level=None, anchor_m=None, pixels=None,
+           h_in=None, log=None):
     """Write a detail op's result into the fields: with anchor_m (metres; on a level with a parent), only the change
     narrower than that (anchor); h blended to the pins once (h = mix(h_new, pin_h, pin_w): the border band fades from
     the detail to its parent's surface), bed under it, and wear / deposit / talus added from the process change
-    h_new - h_base (faded the same way: where the processes acted, whatever the anchor kept)."""
+    h_new - h_base (faded the same way: where the processes acted, whatever the anchor kept). With pixels
+    (main_pixels), the op's whole change to h (from h_in, default h_base) then keeps every main pixel's mean
+    (hold_pixels), the bed moved with the surface."""
     w = np.clip(np.asarray(pin_w, np.float64), 0.0, 1.0)
     keep = 1.0 - w
     dh = (h_new - h_base) * keep
@@ -649,8 +750,18 @@ def finish(fields, h_new, bed_new, h_base, pin_w, pin_h, talus=None, wet=None, l
         h_new = h_new + moved
         bed_new = bed_new + moved
     h = h_new * keep + np.asarray(pin_h, np.float64) * w
+    bed = np.minimum(np.minimum(bed_new, h_new) * keep + np.asarray(pin_h, np.float64) * w, h)
+    if pixels is not None:
+        ref = np.asarray(h_base if h_in is None else h_in, np.float64)
+        c = h - ref
+        held, worst = hold_pixels(c, keep, pixels)
+        h = ref + held
+        bed = np.minimum(bed + (held - c), h)
+        if log is not None:
+            log(f'main pixels held: their mean change under {worst * 1000.0:.2f} mm, by a correction of '
+                f'{float(np.sqrt(np.mean((c - held) ** 2))):.3f} m RMS')
     fields['h'] = h
-    fields['bed'] = np.minimum(np.minimum(bed_new, h_new) * keep + np.asarray(pin_h, np.float64) * w, h)
+    fields['bed'] = bed
     fields['wear'] = np.asarray(fields.get('wear', 0.0)) + np.maximum(-dh, 0.0)
     fields['deposit'] = np.asarray(fields.get('deposit', 0.0)) + np.maximum(dh, 0.0)
     if talus is not None:
