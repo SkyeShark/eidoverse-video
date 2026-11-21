@@ -23,7 +23,12 @@
 //
 //     deno run --no-config --no-lock --unstable-webgpu --allow-all eidoverse/terrain/tests/glacial/replay_test.mjs
 //         [--runs alpine_valley_s1,alpine_valley_s2] [--ops glacial,valley_uplift] [--levels 0,1,2] [--calls 5,8]
+//         [--run-dir <name>=<a run's base folder>]
 //     (on a shared machine, behind $EIDO_GPU_WRAP)
+//
+// --run-dir replays a run that is not a floor run, from its folder (tests/glacial/blender_runs.py --dump: the
+// yosemite preset's dumps): no floor samples it, so every call takes the kernel grade (and 16 float32 steps); a
+// diagnosis of the op on that run's inputs, written to replay_test_<name>.json so the floor runs' record stays.
 //
 // Writes tests/out/glacial/replay_test.json and the port's logs under tests/out/glacial/replay/. JavaScript per cell
 // here is test code.
@@ -42,7 +47,8 @@ const OPS = { glacial: GL.opGlacial, valley_uplift: GL.opValleyUplift };
 const WANT_OPS = list('--ops') ?? Object.keys(OPS);
 const LEVELS = list('--levels')?.map(Number) ?? null;
 const CALLS = list('--calls')?.map(Number) ?? null;
-const RUNS = list('--runs') ?? ['alpine_valley_s1', 'alpine_valley_s2'];
+const RUN_DIRS = Object.fromEntries((list('--run-dir') ?? []).map((s) => [s.slice(0, s.indexOf('=')), s.slice(s.indexOf('=') + 1)]));
+const RUNS = list('--runs') ?? (Object.keys(RUN_DIRS).length ? Object.keys(RUN_DIRS) : ['alpine_valley_s1', 'alpine_valley_s2']);
 
 /** The floor run of (recipe, seed) under the parity key, else under another key of the same Blender terrain code. */
 function floorRunOfCode(recipe, seed) {
@@ -128,8 +134,8 @@ const R = await G.init();
 const results = [];
 for (const name of RUNS) {
     const m = /^(.*)_s(\d+)$/.exec(name);
-    const found = m ? floorRunOfCode(m[1], Number(m[2])) : null;
-    if (!found) {
+    const found = RUN_DIRS[name] ? [W.absPath(RUN_DIRS[name]), null] : m ? floorRunOfCode(m[1], Number(m[2])) : null;
+    if (!found || (RUN_DIRS[name] && !W.exists(`${found[0]}/done.json`))) {
         console.log(`[skip] ${name}: no floor run with stage dumps (tests/parity/floor_runs.sh)`);
         continue;
     }
@@ -152,13 +158,15 @@ for (const name of RUNS) {
         // the carve's per-seed profile fields (each cell's winning seed's values, trough_zf .. trough_sharp) step where
         // the jump flood's winner changes: kept to count the cells whose winner differs from Blender's
         // (and graded by the run's own stage_floors.json as well, the plan's protocol as tests/parity measured it)
+        // (a --run-dir run has no carve floor: its carve call, the coarsest level's grown pass, is graded so too)
         let kept = null, byStageFloors = null;
+        const carveCall = st.op === 'glacial' && st.context?.role === 'grow' && (st.context?.prepass ?? null) === null;
         const invoke = async (op, a) => {
             await op(a.fields, a.level, a.params, a.seed, a.ctx);
-            if (st.op === 'glacial' && 'trough_zf' in a.fields && own) {
+            if (st.op === 'glacial' && 'trough_zf' in a.fields && (own || (RUN_DIRS[name] && carveCall))) {
                 kept = {};
                 for (const k of PROFILE) if (k in a.fields) kept[k] = await R.read(a.fields[k]);
-                byStageFloors = (await RP.compareAfter(run, st, a.fields)).ok;
+                if (own) byStageFloors = (await RP.compareAfter(run, st, a.fields)).ok;
             }
         };
         const r = await RP.replayStage(R, G, view, st, OPS[st.op], { logDir, intervals: GL.CONVERGENCE_LOOPS, invoke });
@@ -207,6 +215,6 @@ for (const name of RUNS) {
     }
 }
 T.ok(`${results.length} replays ran`, results.length > 0, '');
-const code = finish(T, 'replay_test', { results });
+const code = finish(T, Object.keys(RUN_DIRS).length ? `replay_test_${RUNS.join('_')}` : 'replay_test', { results });
 G.shutdown();
 Deno.exit(code);
