@@ -78,12 +78,17 @@ Parameters of the 'fluvial' stage (metres, years, degrees; K in the stream-power
                                        profiles: they are the base level of the gullies and hillslopes the level
                                        refines. Free, a hero level's river rose with the lock's uplift above its own
                                        entry in the pinned border band, the parent's inflow drained back out of the
-                                       window there, and the trunk lost its catchment level by level
+                                       window there, and the trunk lost its catchment level by level. A course is
+                                       held on the level's surface with its hollows filled, from where its area
+                                       reaches the hold's all the way down (op_fluvial says why)
     hold_levels 'hero'                 where hold_rivers holds: the hero levels ('hero') or every refining level
                                        ('refine'). The lock raises each block by what its rivers cut, so where a block
                                        downstream on a trunk cut more than the one above it, it rose faster than the
                                        trunk's fall and dammed it: closed hollows 35-43 m deep along fluvial_range's
-                                       trunk canyons on its 24 km and main levels, filled flat at each level's end
+                                       trunk canyons on its 24 km and main levels, filled flat at each level's end.
+                                       Held there, those hollows do not form, but a held river cuts no channel of
+                                       its own on the level: the valley floors stage fills its floor flat to the
+                                       held course and the water spreads across it
     band_blend False                   True: the border band is the design's ramp. The run holds only the cells
                                        pinned in full (the seam's own two cells, the sea, held rivers and incised
                                        channels) and its outcome is blended to the parent by the band's weights once
