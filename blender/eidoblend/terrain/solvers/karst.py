@@ -93,7 +93,7 @@ import numpy as np
 
 __all__ = ['DEFAULTS', 'KIND_PRESETS', 'KarstPlan', 'params_for', 'cone_profile', 'wall_table', 'pinnacles',
            'rib_harmonics', 'poisson_disc', 'plan_karst', 'cached_plan', 'evaluate', 'op_karst', 'noise2', 'fbm2',
-           'supersampling_for', 'OPS']
+           'supersampling_for', 'cone_weight', 'OPS']
 
 # ---------------------------------------------------------------- parameters (metres, degrees)
 DEFAULTS = dict(
@@ -613,6 +613,14 @@ def _interior_of(plan, raw):
     return _smoothstep(t0, t0 + 0.9 * plan.cluster_std, raw)
 
 
+def cone_weight(cluster, interior):
+    """0..1: how far a tower is a cluster's broad cone rather than a tower the plain undercuts, from its cluster
+    membership and its depth inside the cluster: 0 on the plain and in a cluster's first two rows of towers (within
+    about 150-250 m of the plain, whose water table undercuts their feet), 1 further in. (Over the first row only,
+    the cones behind it filled every view from the river)"""
+    return _smoothstep(0.3, 0.7, cluster) * _smoothstep(0.15, 0.75, interior)
+
+
 def _compass_to_rad(deg):
     """Compass degrees (0 north, clockwise) to radians from +x, counter-clockwise."""
     return math.radians(90.0 - deg)
@@ -824,7 +832,7 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     ang_cl = np.clip(ang_cl, *pr['cluster_peak_deg'])
     # (by how deep inside: a cluster's edge towers keep the steep peaks of the plain, so the massif meets the plain
     # with sheer faces and its broad cones stand behind them)
-    deep = in_cl * _smoothstep(0.0, 0.6, interior)
+    deep = cone_weight(m, interior)
     ang = np.where(kind == 1, ang + (ang_cl - ang) * deep, ang)
     r0_main = H / np.tan(np.radians(ang))                 # the main cone's foot radius
     R_block = np.where(in_cl > 0.5, _uni(rng, pr['massif_reach'], N) * nn3, _uni(rng, pr['block_girth'], N) * H)
@@ -1224,7 +1232,8 @@ def supersampling_for(cell):
 
 class _Grid:
     """A level's subsample grid and a way to put smooth world fields on it: a field is evaluated on a lattice of
-    `stride` cells (aligned with the level's cell centres, one sample of rim) and bilinearly interpolated."""
+    `stride` cells (aligned with the level's cell centres, two samples of rim) and interpolated by Catmull-Rom
+    splines."""
 
     def __init__(self, x0, y0, cell, n, ss):
         self.x0, self.y0, self.cell, self.n, self.ss = x0, y0, cell, n, ss
@@ -1234,38 +1243,55 @@ class _Grid:
         self.ys = y0 + (np.arange(self.N) + 0.5) * self.sub
 
     def smooth(self, fn, shortest_m):
-        """fn(X, Y) of world metres, on the subsample grid; sampled every max(1, shortest_m / 8 / cell) cells. A
-        lattice coarser than one cell is anchored to world coordinates (its nodes at 0.5 cell + j step), so two
-        windows of one cell size sample a field at the same nodes and agree where they overlap."""
+        """fn(X, Y) of world metres, on the subsample grid; sampled every max(1, shortest_m / 8 / cell) cells and
+        interpolated by Catmull-Rom splines, so the field's slope runs on smoothly across the lattice's lines.
+        (Interpolated bilinearly, its slope jumped at every line: a crease every lattice step, which the cones' jitter,
+        scaled by the distance from an apex, raised to slope jumps of 2-6 degrees every 5 m on the hero levels' towers,
+        a grid over every flank that the main level, sampling each cell, does not have.) A lattice coarser than one
+        cell is anchored to world coordinates (its nodes at 0.5 cell + j step), so two windows of one cell size sample a
+        field at the same nodes and agree where they overlap."""
         k = max(1, int(shortest_m / (8.0 * self.cell)))
         step = k * self.cell
-        m = int(math.ceil(self.n / k)) + 3
         if k == 1:
-            lx = self.x0 + 0.5 * self.cell + (np.arange(m) - 1) * step
-            ly = self.y0 + 0.5 * self.cell + (np.arange(m) - 1) * step
+            m = self.n + 5
+            lx = self.x0 + 0.5 * self.cell + (np.arange(m) - 2) * step
+            ly = self.y0 + 0.5 * self.cell + (np.arange(m) - 2) * step
         else:
-            jx = math.floor((self.x0 - 0.5 * self.cell) / step) - 1
-            jy = math.floor((self.y0 - 0.5 * self.cell) / step) - 1
-            lx = 0.5 * self.cell + (jx + np.arange(m + 1)) * step
-            ly = 0.5 * self.cell + (jy + np.arange(m + 1)) * step
-            m = m + 1
+            m = int(math.ceil(self.n / k)) + 6
+            jx = math.floor((self.x0 - 0.5 * self.cell) / step) - 2
+            jy = math.floor((self.y0 - 0.5 * self.cell) / step) - 2
+            lx = 0.5 * self.cell + (jx + np.arange(m)) * step
+            ly = 0.5 * self.cell + (jy + np.arange(m)) * step
         v = np.broadcast_to(np.asarray(fn(lx[None, :], ly[:, None]), np.float64), (m, m))   # separable lattice
         if k == 1 and self.ss == 1:
-            return v[1:self.n + 1, 1:self.n + 1]
-        tx = (self.xs - lx[0]) / step
-        ty = (self.ys - ly[0]) / step
-        i0 = np.clip(np.floor(tx).astype(np.intp), 0, m - 2)
-        j0 = np.clip(np.floor(ty).astype(np.intp), 0, m - 2)
-        fx = tx - i0
-        fy = ty - j0
-        rows = v[j0] * (1 - fy)[:, None] + v[j0 + 1] * fy[:, None]
-        return rows[:, i0] * (1 - fx)[None, :] + rows[:, i0 + 1] * fx[None, :]
+            return v[2:self.n + 2, 2:self.n + 2]
+        return _catmull_rom_sep(v, (self.xs - lx[0]) / step, (self.ys - ly[0]) / step)
 
     def down(self, a):
         """Subsamples to cells: the mean of each cell's ss x ss subsamples."""
         if self.ss == 1:
             return a
         return a.reshape(self.n, self.ss, self.n, self.ss).mean(axis=(1, 3))
+
+
+def _catmull_rom_weights(t):
+    """The four Catmull-Rom weights of samples -1, 0, 1 and 2 at t in [0, 1) between samples 0 and 1."""
+    t2, t3 = t * t, t * t * t
+    return (0.5 * (-t3 + 2.0 * t2 - t), 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0), 0.5 * (-3.0 * t3 + 4.0 * t2 + t),
+            0.5 * (t3 - t2))
+
+
+def _catmull_rom_sep(v, tx, ty):
+    """Values v on a lattice (rows, columns) at fractional lattice coordinates tx (columns) and ty (rows), by
+    Catmull-Rom splines along each axis: exact at the nodes, the slope continuous across the lattice's lines. The
+    lattice holds at least one node beyond the queries on each side."""
+    m_y, m_x = v.shape
+    i0 = np.clip(np.floor(tx).astype(np.intp), 1, m_x - 3)
+    j0 = np.clip(np.floor(ty).astype(np.intp), 1, m_y - 3)
+    wy = _catmull_rom_weights(ty - j0)
+    rows = sum(w[:, None] * v[j0 + a - 1] for a, w in enumerate(wy))
+    wx = _catmull_rom_weights(tx - i0)
+    return sum(rows[:, i0 + a - 1] * w[None, :] for a, w in enumerate(wx))
 
 
 def _bilinear_sep(v, lx, ly, qx, qy):
@@ -1349,11 +1375,13 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
     JAG = G.smooth(lambda X, Y: pr['jag'] * fbm2(X, Y, 90.0, 2, plan.salt + 131, 0.45, lim) / 0.3,
                    max(40.0, lim)).astype(f32)
     # where the walls' ledges hold (1) and where they have broken off (0); a ledge is under 1.5 m wide, so a level
-    # coarser than 2.5 m takes the mean (the share of the wall they hold along)
+    # coarser than 2.5 m takes the mean (the share of the wall they hold along). A share: held to 0..1, where the
+    # spline through its lattice swings past the ends of its steep transitions (6 % beyond on 0.49 m cells)
     if cell <= 2.5:
-        LEDGE = G.smooth(lambda X, Y: _smoothstep(0.5 - pr['ledge_cover'] - 0.12, 0.5 - pr['ledge_cover'] + 0.12,
-                                                  0.5 + fbm2(X, Y, 30.0, 2, plan.salt + 141, 0.5, lim) / 0.6),
-                         max(8.0, lim)).astype(f32)
+        LEDGE = np.clip(G.smooth(lambda X, Y: _smoothstep(0.5 - pr['ledge_cover'] - 0.12,
+                                                          0.5 - pr['ledge_cover'] + 0.12,
+                                                          0.5 + fbm2(X, Y, 30.0, 2, plan.salt + 141, 0.5, lim) / 0.6),
+                                 max(8.0, lim)), 0.0, 1.0).astype(f32)
     else:
         LEDGE = None
 
