@@ -197,9 +197,10 @@ octopus arm's own resting coil, lower = the tail lies longer, 0 = no coil).
 
 Aletheia and Aporia are characters of aihegemonymemes (x.com/aihegemonymemes), the same characters as
 `eidoverse/assets/vrms/aletheia.vrm` and `aporia.vrm` (see CREDITS.md). These are WIP pieces of these characters,
-shipped with the repository; credit as in CREDITS.md. They are not assembled into one figure yet: each piece is in
-metres, +Y up, and its `extras` say its own frame (the eye displays share the head's; the tentacles name the jumpsuit
-sockets they plug into).
+shipped with the repository; credit as in CREDITS.md. Since the fourth drop Aletheia's body pieces also ship bound to
+one skeleton (the rigged figure below); the head, hair, coat and tentacles are still worn on it from their own files.
+Each piece is in metres, +Y up, and its `extras` say its own frame (the eye displays share the head's; the tentacles
+name the jumpsuit sockets they plug into).
 
 | File | Triangles | Textures | MB | Status |
 |---|---:|---|---:|---|
@@ -237,6 +238,18 @@ Newer pieces (third drop).
 | `human/aletheia/head_low/jaw_fix/out/aletheia_head_low_v19.glb` (head v16 with the jaw skinned as a mandible: the chin and the lower border ride the jaw whole, so the jaw line keeps its curve when the mouth opens with the head turned; the cheek tabs' painted contact line taken out of the skin maps where the skin slides under them; the same topology, UVs, joints and face table as v16) | 11,852 | 4 (max 2048) | 7.6 | delivered |
 | `human/aletheia/coat_rig/armpit_fix/out/aletheia_coat_rigged_lod0.glb` / `..._lod1.glb` / `..._lod2.glb` (Aletheia's transparent coat on spring bones: 139 joints, 33 that follow the body and 106 on springs; the drape's folds baked; its top is bound to the jumpsuit's skin and its `extras` record which) | 16,674 / 7,028 / 2,000 | 2 each (2048 / 1024 / 512) | 7.0 / 5.6 / 4.9 | delivered |
 | `human/aletheia/coat_rig/armpit_fix/runtime/coat_rig.js`, `coat_springs.js`, `coat_film_maps.js` (the coat's runtime: loading a rigged coat on a figure, the spring solver with its fold rows and body colliders, the transparent film material) | - | - | 0.1 | delivered |
+
+Newer pieces (fourth drop): the latest of both characters, shipped while they are still being reworked. What is being
+reworked now: both coats are being re-cut to lie closer to the body (a finer drape, with a fabric high baked onto the low
+where the coat rides the body), the hair's strands inside each card, and the walk.
+
+| File | Triangles | Textures | MB | Status |
+|---|---:|---|---:|---|
+| `human/aletheia/head_low/jaw_fix/out/rigged/aletheia_A2_rigged_head_v19.glb` (Aletheia's rigged figure: the jumpsuit, zipper, hardware with the belt, cuff linings, boots, neck and hard-surface arms bound to one 82-joint skeleton, rigged for head v19; wear the head, hair, coat and tentacles from their own files) | 44,263 | 15 (max 2048) | 33.3 | WIP |
+| `human/hair_craft/rebuild/strand/out/coat_her_straight_shoulder_bangs_f2s_m5.glb` (the sisters' hair f2s on its spring cages: f2o's cut with locks and blunt lock ends, the hair's flow written as its tangents; 530 cards, its level-of-detail ladder in the file. Its newer runtime is not public yet: the kit's `coat.js` draws it still, with the older look) | 10,070 at full detail (31,744 with the ladder) | 2 (max 2048) | 3.9 | WIP |
+| `human/aletheia/head_low/jaw_fix/aporia_copy/out/aporia_head_low_v4_fuller.glb` / `..._middle.glb` / `..._subtle.glb` (Aporia's head: Aletheia's head v19 re-shaped by at most 2.4 mm to Aporia's own measured face, her dark steel hardware, her black brows, the same working mouth; three strengths of her face, "fuller" the one her figure wears, the choice still open) | 11,852 each | 4 each (max 2048) | 7.2 each | WIP |
+| `human/aletheia/coat_rig_aporia/out/aporia_coat_rigged_lod0.glb` / `..._lod1.glb` / `..._lod2.glb` (Aporia's woven trench worn open, on spring bones: 133 joints, 31 that follow the body and 102 on springs; its `extras` record the jumpsuit skin it was bound to. Being re-cut closer to the body) | 13,192 / 5,284 / 1,682 | 1 each (2048 / 1024 / 512) | 7.6 / 6.0 / 5.4 | WIP |
+| `human/aletheia/coat_rig_aporia/out/aporia_coat_springs.json`, `coat_rig_aporia/runtime/coat_rig.js`, `coat_springs.js`, `coat_film_maps.js` and `runtime/aporia_coat/*` (the coats' runtime, newer than Aletheia's coat folder's and serving both sisters, with Aporia's spring groups, her woven ripstop and her name plate) | - | 4 PNG (small) | 0.9 | WIP |
 
 Every glb carries notes in its `extras` (frames, sockets, units). Where a file's `extras` describe its texture set
 (a `uv_set` size of 4096), they describe the master; the shipped file's maps are 2048.

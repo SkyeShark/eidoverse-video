@@ -1,0 +1,45 @@
+{
+ "what": "one repeat of the NYCO ripstop plain weave of Aporia's coat (NOTES.md STUDY 3)",
+ "tile_mm": [
+  11.7073,
+  10.4
+ ],
+ "px": [
+  1024,
+  1024
+ ],
+ "ends": 48,
+ "picks": 26,
+ "pitch_mm": {
+  "warp_ends_across": 0.2439,
+  "weft_picks_up": 0.4
+ },
+ "ripstop_grid_mm": [
+  5.854,
+  5.2
+ ],
+ "height_mm": {
+  "range": 0.1424,
+  "crimp_warp": 0.055,
+  "crimp_weft": 0.035,
+  "ridge": 0.06,
+  "rib_proud": 0.03
+ },
+ "slope_deg": {
+  "p50": 23.9,
+  "p95": 38.8
+ },
+ "shade": {
+  "mean_value": 0.8,
+  "stored": "the shade x 0.80 (so a tone over the mean fits 8 bits); the scene divides by 0.80",
+  "p05": 0.85,
+  "p95": 1.114
+ },
+ "warp_face_share": 0.518,
+ "cloth": {
+  "name": "NYCO ripstop poplin, 50 / 50 nylon-cotton, durable water-repellent finish",
+  "g_m2": 220,
+  "thickness_mm": 0.4
+ },
+ "uv": "the shell's uv is the pattern's flat place in METRES (u across = the weft's run, v up = the warp's run): the tile repeats every tile_mm; normal map OpenGL (green = +v), image row 0 = v 0 (flipY false)"
+}
