@@ -498,7 +498,8 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
                                          spills so every swale drains - the microrelief a near-level surface starts
                                          from (till hummocks, old dune swells), so a meadow the countryside left
                                          level still gathers its water into swales at the spacing
-    The border band stays pinned to the parent; sea cells are held."""
+    The border band holds the ground the stages before left it (unseeded), the seam's own cells the parent's
+    surface; sea cells are held."""
     ctx = ctx or FL.standalone_context(fields, level)
     t0 = time.perf_counter()
     if params.get('enabled', True) is False:
@@ -521,6 +522,7 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
         # the parent's rills come out before this level cuts its own (rill_cut, inherited): held channel cells kept
         # the parent's rill depth and the new rill went in on top, three levels deep, as steps along the swales
         h = h + np.asarray(fields['rill_cut'], np.float64) * (1.0 - np.clip(pins['pin_w'], 0.0, 1.0))
+    h_band = h                    # the ground the border band holds (below, before the solve)
     from . import hydro as HY
     seed_m = float(p['seed_m'])
     seeded = seed_m > 0 and cell <= float(p['seed_max_cell_m'])
@@ -587,10 +589,12 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
             hold = np.where(np.asarray(fields[k], np.float64) > 0.5, 1.0, hold)
     az = math.radians(float(p['wind_from_deg']) + 180.0)
     wind = (math.sin(az), math.cos(az))
-    # the border band is held at the ground the level has now: the parent's surface at the seam, and inward whatever
-    # the stages before made of it (a fluvial stage with band_blend fades its own change across the band; pinned
-    # back to the parent's surface here, that change met the solved slopes in a step at the band's inner edge)
-    band_h = np.where(np.asarray(pins['pin_w'], np.float64) > 0.0, h, np.asarray(pins['pin_h'], np.float64))
+    # the border band is held at the ground the stages before left it (unseeded), the seam's own cells at the
+    # parent's surface: a fluvial stage with band_blend fades its own change across the band, and pinned back to the
+    # parent's surface here that change met the held channels and the solved slopes in a step at the band's inner
+    # edge (slope p99 28-33 degrees there against 15-16 inside on the meadow's film level)
+    pw = np.asarray(pins['pin_w'], np.float64)
+    band_h = np.where((pw > 0.0) & (pw < 1.0), h_band, np.asarray(pins['pin_h'], np.float64))
     hs, change, its = soil_solve(dev, h, hold, h, pins['pin_w'], band_h, cell, C,
                                  float(p['asymmetry']), wind, half_cells=0.5 * sp / cell, omega=float(p['omega']),
                                  coarse_levels=int(p['coarse_levels']), iter_scale=float(p['iter_scale']))

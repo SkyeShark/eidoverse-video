@@ -30,7 +30,10 @@ STRIKE_DEG = 70.0
 SHAPES = {
     # longer than the 48 km context: the range runs on past the horizon along its strike
     # 14 km across its spine: at 22 km (closer to the San Gabriels with their front ranges) the interior drained
-    # badly within its growth, basins between the spurs filled flat and 8 % of the main tile lay under 5 degrees
+    # badly within its growth, basins between the spurs filled flat and 8 % of the main tile lay under 5 degrees.
+    # (At 24 km, 11-21: the draft's hypsometric integral rose into the reference's band on four seeds, 0.38-0.44
+    # against 0.33; at film the basins filled again, 4.7 and 5.1 % under 5 degrees against 1.9 and 2.7, and the
+    # integral stayed at the band's floor, 0.35 and 0.33)
     'ridge': {'kind': 'ridge', 'centre': [0.0, 0.0], 'azimuth_deg': STRIKE_DEG, 'length_m': 60000.0,
               'width_m': 14000.0, 'spurs': 12, 'spur_length_m': 6000.0, 'texture': 0.3},
     'dome': {'kind': 'dome', 'centre': [0.0, 0.0], 'radius_m': 16000.0, 'texture': 0.3},
