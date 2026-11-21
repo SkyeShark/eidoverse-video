@@ -3,11 +3,11 @@
     python blender/tests/terrain/karst/test_karst.py [name ...]     # all, or the named tests
 
 Writes out/karst/test_results.json (every test's verdict, numbers and seconds). The design's checks for this half
-(section 11, row 11): blue-noise spacing and tower profile wall angles; plus the review's measures (the towers'
-walls 70-90 degrees and pointed, not domed, beside the Li River photographs; not one profile; a river with water at
-plain level and gravel bars), the fenglin / fengcong composition, world-space consistency across levels, the op on
-core's level plan, the recipe, and the official judge against guilin_karst (judge/, through the radar chain), whose
-slope tail and spectrum are reported, not asserted: the 30 m radar rounds the towers' walls the photographs show.
+(section 11, row 11): blue-noise spacing and tower profile wall angles; plus the measures beside the Li River
+photographs (the plain's towers steep and cliffed, the clusters' cones wooded, pointed, not domed; not one profile
+on the plain; a river with water at plain level and gravel bars), the fenglin / fengcong composition, world-space
+consistency across levels and windows, a continuous base edge, no terraces on the hero levels, the op on core's
+level plan, the recipe, and the official judge against guilin_karst (judge/, through the radar chain): every band.
 """
 import json
 import math
@@ -212,49 +212,69 @@ def test_tower_walls_and_summits():
 
 
 def test_plan_kinds():
-    """In the default plan: spires, peaks and blocks all present, none over 70 % of the towers (not one profile);
-    the walls 70-89 degrees with p10 >= 76; the peaks' cones 58-70 and the spires' 70-80 degrees; heights spread
-    (p90 / p10 >= 2.5); the tallest towers massifs (of the towers over twice the median height at most 10 % single
-    cones: a 400 m single cone read as a pyramid); scarps on most towers, the ribs never folding a cone (each cone's
-    sum of m |a_m| under 1)."""
+    """In the default plan. Cliffed forms stand where the plain undercuts a tower's foot: on the plain spires, peaks
+    and blocks all present (each over 5 %), none over 70 % (not one profile), and most of the plain's and the
+    cluster edges' towers (over 60 %) carry a collapse scarp; deep inside a cluster only cones (no spire, no block),
+    26-40 degrees, no random scarp (0.35-0.6 deep): at most the edge scarp's taper, a third of that. The walls
+    70-89 degrees with p10 >= 76; the plain's peaks' cones
+    58-70 and the spires' 70-80 degrees; a tower's further peaks within 3 degrees of its own cone; heights spread
+    (p90 / p10 >= 2.5); the plain's tallest towers massifs (of its towers over twice the median height at most 10 %
+    single cones: a 400 m single cone on the plain read as a pyramid); the ribs never folding a cone (each cone's sum
+    of m |a_m| under 1)."""
     plan = K.plan_karst(7, DOMAIN, {}, via=(0, 0), main=MAIN)
-    n = plan.count
-    shares = np.bincount(plan.kind.astype(int), minlength=3) / n
-    assert np.all(shares > 0.03) and shares.max() < 0.7, shares
+    in_cl = K._smoothstep(0.3, 0.7, plan.cluster)
+    deep = in_cl * K._smoothstep(0.0, 0.6, plan.interior)
+    on_plain = plan.cluster < 0.3
+    shares = np.bincount(plan.kind[on_plain].astype(int), minlength=3) / max(int(on_plain.sum()), 1)
+    assert np.all(shares > 0.05) and shares.max() < 0.7, shares
+    inner = deep >= 0.9
+    assert inner.sum() > 100 and np.all(plan.kind[inner] == 1), np.bincount(plan.kind[inner], minlength=3)
     assert plan.wall.min() >= 70.0 - 1e-9 and plan.wall.max() <= 89.0 + 1e-9 and np.percentile(plan.wall, 10) >= 76.0
     ang = np.degrees(np.arctan(plan.pk_h[:, 0] / plan.pk_r0[:, 0]))
     sp, pk = ang[plan.kind == 0], ang[plan.kind == 1]
     assert sp.min() >= 70.0 - 1e-6 and sp.max() <= 80.0 + 1e-6, (sp.min(), sp.max())
-    # (the plain's peaks 58-70 degrees; deep inside a cluster the broad fengcong cones from 48)
-    pk_plain = ang[(plan.kind == 1) & (plan.cluster < 0.3)]
+    # (the plain's peaks 58-70 degrees; deep inside a cluster the broad fengcong cones, 26-36 and up toward the
+    # plain's angle at the cluster's edge)
+    pk_plain = ang[(plan.kind == 1) & on_plain]
     assert pk_plain.min() >= 58.0 - 1e-6 and pk_plain.max() <= 70.0 + 1e-6, (pk_plain.min(), pk_plain.max())
-    assert pk.min() >= 48.0 - 1e-6 and pk.max() <= 70.0 + 1e-6, (pk.min(), pk.max())
+    assert pk.min() >= 26.0 - 1e-6 and pk.max() <= 70.0 + 1e-6, (pk.min(), pk.max())
+    pk_in = ang[inner]
+    assert pk_in.max() <= 40.0, f'a cone deep inside a cluster at {pk_in.max():.1f} degrees'
+    more = np.isfinite(plan.pk_h[:, 1])
+    a2 = np.degrees(np.arctan(plan.pk_h[more, 1] / plan.pk_r0[more, 1]))
+    assert np.abs(a2 - ang[more]).max() <= 3.0 + 1e-6, np.abs(a2 - ang[more]).max()
     Ht = plan.H + plan.F
     spread = float(np.percentile(Ht, 90) / np.percentile(Ht, 10))
     assert spread >= 2.5, f'heights p90 / p10 {spread:.2f}'
-    tall = Ht > 2.0 * K.DEFAULTS['median_height_m']
+    tall = (Ht > 2.0 * K.DEFAULTS['median_height_m']) & on_plain
     single = tall & (plan.npk == 1) & (plan.kind != 2)
     single_share = float(single.sum() / max(tall.sum(), 1))
-    assert single_share <= 0.10, f'{single_share:.0%} of the tall towers are single cones'
-    with_scarp = float((plan.scarp[:, :, 2] > 0).any(1).mean())
-    assert 0.6 <= with_scarp <= 0.9, f'{with_scarp:.0%} of the towers have a scarp'
+    assert single_share <= 0.10, f'{single_share:.0%} of the plain\'s tall towers are single cones'
+    scarped = (plan.scarp[:, :, 2] > 0).any(1)
+    with_scarp = float(scarped[deep < 0.5].mean())
+    assert with_scarp >= 0.6, f'{with_scarp:.0%} of the plain\'s and the edges\' towers have a scarp'
+    inner_depth = float(plan.scarp[inner, :, 2].max())
+    assert inner_depth <= K.DEFAULTS['scarp_depth'][1] / 3.0, f'a scarp {inner_depth:.2f} deep inside a cluster'
     fold = (np.abs(plan.pk_rib) * K.RIB_ORDERS[None, None, :]).sum(-1).max()
     assert fold < 1.0, f'a cone whose ribs fold it: sum m |a_m| = {fold:.2f}'
-    record('test_plan_kinds', shares_spire_peak_block=shares.round(3).tolist(),
+    record('test_plan_kinds', plain_shares_spire_peak_block=shares.round(3).tolist(), inner_cones=int(inner.sum()),
+           inner_cone_deg_p50_max=[round(float(np.median(pk_in)), 1), round(float(pk_in.max()), 1)],
            wall_p10_p50_p90=np.percentile(plan.wall, [10, 50, 90]).round(1).tolist(),
            height_p10_p50_p90=np.percentile(Ht, [10, 50, 90]).round(1).tolist(), height_spread=round(spread, 2),
-           tall_single_cone_share=round(single_share, 3), towers_with_scarps=round(with_scarp, 3),
-           rib_budget_max=round(float(fold), 3))
+           plain_tall_single_cone_share=round(single_share, 3), plain_edge_towers_with_scarps=round(with_scarp, 3),
+           inner_scarp_depth_max=round(inner_depth, 3), rib_budget_max=round(float(fold), 3))
 
 
 def test_tower_slopes():
-    """The review's measure, on the towers it is about (the photographs' "towers rise from the plain with 70-90
-    degree walls"): fourteen towers of the default fenglin (seed 7) standing on the plain or at a cluster's edge,
-    each evaluated at 1 m cells: their cells (a tower's wall or summit, or its massif body's wall, 15 m and more
-    above the plain; not a body's skirt nor a cockpit's soil floor) have a median slope of 60 degrees or more and
-    over 30 % of them stand steeper than 70 (the review measured 55 and 8 % on the towers it rejected). And deep
-    inside a cluster (a 2 km window at the tile's centre, 2 m cells), the fengcong cones are pointed, not domed:
-    the upper 40 % of every tower's height has a median slope of 45 degrees or more."""
+    """The towers the Li River photographs show, steep and wooded to their tops with bare rock on the sheerest
+    faces: fourteen towers of the default fenglin (seed 7) standing on the plain or at a cluster's edge, each
+    evaluated at 1 m cells: their cells (a tower's wall or summit, or its massif body's wall, 15 m and more above the
+    plain; not a body's skirt nor a cockpit's soil floor) have a median slope of 55 degrees or more and 10-30 % of
+    them stand steeper than 70 (the cliffed feet and scarps; an earlier review measured 55 and 8 % on rounded towers
+    it rejected, and 35 % over 70 stood bare grey from foot to top). And deep inside a cluster (a 2 km window at the
+    tile's centre, 2 m cells), the fengcong cones are wooded cones, not domes and not walls: their cells' median
+    slope 25-45 degrees, the upper 40 % of every tower's height no gentler than its lower 60 % at the median (a
+    dome's top is), and under 5 % of their cells over 60 degrees."""
     plan = K.plan_karst(7, DOMAIN, {}, via=(0, 0), main=MAIN)
     inm = (np.abs(plan.x) < 3500) & (np.abs(plan.y) < 3500)
     sel = np.nonzero(inm & ((plan.cluster < 0.3) | (plan.interior < 0.2)) & (plan.H + plan.F > 40))[0]
@@ -272,7 +292,7 @@ def test_tower_slopes():
     a = np.concatenate(walls)
     med = float(np.median(a))
     over70 = float((a > 70.0).mean())
-    assert med >= 60.0 and over70 >= 0.30, f'tower cells: median {med:.1f} deg, {over70:.0%} over 70'
+    assert med >= 55.0 and 0.10 <= over70 <= 0.30, f'tower cells: median {med:.1f} deg, {over70:.0%} over 70'
     out = K.evaluate(plan, -1000.0, -1000.0, 2.0, 1000)
     h = out['h'].astype(np.float64)
     s = slope_deg(h, 2.0)
@@ -281,11 +301,16 @@ def test_tower_slopes():
     top = np.zeros(plan.count)
     np.maximum.at(top, tid[tw], (h - out['plain'])[tw])
     rel = np.where(tw, (h - out['plain']) / np.maximum(top[np.maximum(tid, 0)], 1.0), 0.0)
-    upper = tw & (rel >= 0.6)
-    up_med = float(np.median(s[upper]))
-    assert up_med >= 45.0, f'the cluster towers\' upper 40 %: median {up_med:.1f} deg (domed)'
+    upper, lower = tw & (rel >= 0.6), tw & (rel < 0.6)
+    up_med, low_med, all_med = float(np.median(s[upper])), float(np.median(s[lower])), float(np.median(s[tw]))
+    over60 = float((s[tw] > 60.0).mean())
+    assert 25.0 <= all_med <= 45.0, f'the cluster cones: median {all_med:.1f} deg'
+    assert up_med >= low_med, f'the cluster towers\' upper 40 %: median {up_med:.1f} deg under the lower {low_med:.1f} (domed)'
+    assert over60 < 0.05, f'{over60:.1%} of the cluster cones\' cells over 60 degrees (walls inside a cluster)'
     record('test_tower_slopes', towers=len(walls), median_slope_deg=round(med, 1), share_over_70=round(over70, 3),
-           share_over_80=round(float((a > 80.0).mean()), 3), cluster_upper_median_deg=round(up_med, 1))
+           share_over_80=round(float((a > 80.0).mean()), 3), cluster_median_deg=round(all_med, 1),
+           cluster_upper_median_deg=round(up_med, 1), cluster_lower_median_deg=round(low_med, 1),
+           cluster_share_over_60=round(over60, 3))
 
 
 # ------------------------------------------------------------------------------ world space and the levels
@@ -311,6 +336,118 @@ def test_parent_child_levels():
     d = np.abs(down - parent[128:384, 128:384])
     assert d.mean() <= 0.8 and np.percentile(d, 99) <= 12.0, f'mean {d.mean():.2f} p99 {np.percentile(d, 99):.2f}'
     record('test_parent_child_levels', dh_mean_m=float(d.mean()), dh_p99_m=float(np.percentile(d, 99)))
+
+
+def test_window_shift():
+    """The same world cells in two windows that differ by whole cells come out alike (h, bed, deposit, talus within
+    1e-6 of their ranges), at the main level's 7.8125 m cells (2 x 2 subsamples), a hero level's 1 m and an off-grid
+    0.49 m window. (The tower loop's window-local float32 metres rounded differently wherever the window started: a
+    shift moved bed and deposit by up to 6e-5 of their ranges, talus by 2.3e-4.) The cockpit floors are left out:
+    outside the main tile a window finds its own."""
+    plan = K.plan_karst(1, DOMAIN, {}, via=(0, 0), main=MAIN)
+    worst = {}
+    for x0, y0, cell, n, (i, j) in ((-2000.0, -2000.0, 7.8125, 256, (5, 2)), (-1200.0, 300.0, 1.0, 384, (7, 3)),
+                                    (-700.3, -200.1, 0.48828125, 384, (11, 5))):
+        a = K.evaluate(plan, x0, y0, cell, n, fill=False)
+        b = K.evaluate(plan, x0 + i * cell, y0 + j * cell, cell, n, fill=False)
+        for k in ('h', 'bed', 'deposit', 'talus'):
+            A = a[k][j:, i:].astype(np.float64)
+            d = float(np.abs(A - b[k][:n - j, :n - i]).max()) / max(float(np.ptp(A)), 1e-6)
+            worst[f'{cell:g}m_{k}'] = d
+            assert d <= 1e-6, f'{k} at {cell:g} m moved by {d:.2e} of its range with the window'
+    record('test_window_shift', max_change_of_range=worst)
+
+
+def test_base_edge_continuous():
+    """The common base's soil thins continuously as the base rises out of the plain, so a rounding difference in the
+    base moves the rock and the soil by a rounding difference: the base's height times 1 + 2e-6 moves h, bed and
+    deposit by under 1 mm on 31.25 m and 15.625 m levels (switched on where the base stood 0.5 m up, the rock and
+    the soil stepped by alluvium_m + 0.5 m along that contour: one flipped subsample moved a cell's bed 3.1 m). And
+    across the base's edge the soil changes smoothly: neighbouring cells where the base is 0-12 m up differ in
+    deposit by at most 12 m x (their base heights' difference / 12 m) x 1.5 + 0.5 m."""
+    plan = K.plan_karst(1, DOMAIN, {}, via=(0, 0), main=MAIN)
+    orig = K._plinth_of
+    moved = {}
+    for x0, cell, n in ((-2000.0, 31.25, 128), (-1000.0, 15.625, 128)):
+        a = K.evaluate(plan, x0, x0, cell, n, fill=False)
+        K._plinth_of = lambda p, X, Y: orig(p, X, Y) * (1.0 + 2e-6)
+        try:
+            b = K.evaluate(plan, x0, x0, cell, n, fill=False)
+        finally:
+            K._plinth_of = orig
+        for k in ('h', 'bed', 'deposit'):
+            d = float(np.abs(a[k].astype(np.float64) - b[k]).max())
+            moved[f'{cell:g}m_{k}'] = d
+            assert d < 1e-3, f'{k} at {cell:g} m moved {d:.3f} m'
+    # the soil across the base's edge, on a level at 1 cell = 1 subsample, the plain and the base alone (the towers
+    # moved out of the window: their rock, buried under the alluvium past their feet, rightly thins the soil over it),
+    # off the river: the soil's thickness changes by at most 1.5 x the base's rise between two cells, the
+    # smoothstep's steepest, plus 5 cm
+    import copy
+    bare = copy.copy(plan)
+    bare.x = plan.x + 1.0e7
+    bare.floors = None
+    G = K._Grid(-1000.0, -1000.0, 4.0, 500, 1)
+    pm = G.smooth(lambda X, Y: K._plinth_of(plan, X, Y) * K._base_membership(plan, X, Y), 240.0)
+    out = K.evaluate(bare, -1000.0, -1000.0, 4.0, 500, ss=1, fill=False)
+    dep = out['deposit'].astype(np.float64)
+    open_ = (out['water'] <= 0.0) & (out['h'] >= out['plain'] - 0.01)
+    al = plan.params['alluvium_m']
+    edge = (np.minimum(pm[:, 1:], pm[:, :-1]) < al) & (np.maximum(pm[:, 1:], pm[:, :-1]) > 0.0) & \
+        open_[:, 1:] & open_[:, :-1]
+    step = np.abs(np.diff(dep, axis=1))[edge]
+    bound = 1.5 * np.abs(np.diff(pm, axis=1))[edge] + 0.05
+    worst = float((step - bound).max()) if step.size else -1.0
+    assert step.size > 50, f'only {step.size} cell pairs along the base\'s edge'
+    assert worst <= 0.0, f'the soil steps {worst:.2f} m past its bound across the base\'s edge'
+    record('test_base_edge_continuous', moved_m=moved, edge_pairs=int(step.size),
+           edge_soil_step_max_m=round(float(step.max()), 3))
+
+
+def test_cockpit_floors_meet_their_ground():
+    """A cockpit's soil floor never stands above the ground beside it: on a hero level (1 m cells, a 600 m window under
+    the plain_fields camera of seed 1), no pair of neighbouring cells jumps by over 2 m where the unfilled ground does
+    not. (The floor map is found at 10 m: a basin it saw closed opened at 1 m through a narrower gap, and its floor ran
+    on over the lower ground to end in steps of 2-28 m along the map's grid: 106 such pairs here.)"""
+    plan = K.plan_karst(1, DOMAIN, {}, via=(0, 0), main=MAIN)
+    a = K.evaluate(plan, 3243.0, -1632.0, 1.0, 600, fill=False)['h'].astype(np.float64)
+    b = K.evaluate(plan, 3243.0, -1632.0, 1.0, 600)['h'].astype(np.float64)
+    made = sum(int(((np.abs(np.diff(b, axis=ax)) - np.abs(np.diff(a, axis=ax))) > 2.0).sum()) for ax in (0, 1))
+    filled = float((b - a > 0.05).mean())
+    assert made == 0, f'{made} neighbour pairs where a soil floor steps over 2 m above its ground'
+    record('test_cockpit_floors_meet_their_ground', fill_steps=made, filled_share=round(filled, 4))
+
+
+def test_no_terraces_on_hero_levels():
+    """The forested summit cones carry no terraces (the Li River photographs; benches every 13 m on the hero levels
+    banded the towers green and grey, which the main level's height did not have): a lone peak at 0.5 m cells (no
+    ledges, knobs, ribs or fluting), along 16 rays down its cone from 2 m off the apex to 15 m above its wall's brow,
+    departs from its own 20 m running mean by at most 0.15 m rms (the cone's own curvature leaves 0.07; the benches
+    made about 0.9 m)."""
+    plan = one_tower_plan(H=150.0, wall=82.0, cone_deg=60.0, girth=0.7, b=0.1, ledges=False, peak_rough=0.0)
+    out = K.evaluate(plan, -160.0, -160.0, 0.5, 640)
+    h = out['h'].astype(np.float64) - out['plain'].astype(np.float64)
+    R, r0 = float(plan.R[0]), float(plan.pk_r0[0, 0])
+    z_edge = 150.0 * float(K.cone_profile(R / r0, 0.1))
+    rr = np.arange(2.0, 160.0, 0.5)
+    res = []
+    for a in np.radians(np.arange(16) * 22.5):
+        # bilinear along the ray (nearest cells drew a staircase of +-0.6 m on a 60 degree cone)
+        fi = np.clip((rr * math.cos(a) + 160) / 0.5 - 0.5, 0.0, 638.999)
+        fj = np.clip((rr * math.sin(a) + 160) / 0.5 - 0.5, 0.0, 638.999)
+        i, j = fi.astype(int), fj.astype(int)
+        ti, tj = fi - i, fj - j
+        z = ((h[j, i] * (1 - ti) + h[j, i + 1] * ti) * (1 - tj) + (h[j + 1, i] * (1 - ti) + h[j + 1, i + 1] * ti) * tj)
+        cone = z > z_edge + 15.0                   # (the 20 m window kept clear of the brow's rounded corner)
+        z = z[:np.argmin(cone) if not cone.all() else cone.size]
+        if z.size < 80:
+            continue
+        run = np.convolve(z, np.ones(41) / 41.0, mode='valid')
+        res.append(float(np.sqrt(np.mean((z[20:-20] - run) ** 2))))
+    assert len(res) >= 12, f'only {len(res)} rays down the cone'
+    worst = max(res)
+    assert worst <= 0.15, f'the cone departs from its running mean by {worst:.2f} m rms: terraces'
+    record('test_no_terraces_on_hero_levels', rays=len(res), rms_m_max=round(worst, 4))
 
 
 def test_determinism():
@@ -576,33 +713,31 @@ def test_performance():
 
 
 def test_guilin_judge():
-    """The official judge (judge/) on the default fenglin at the reference's extent (h and the river's water), seeds
-    1 (the judge's and the review's) and 7: the layout numbers pass (relief, hypsometry, slope p50, the flat
-    fraction, closed depressions with flat floors, anisotropy, texel cliffs, summit spacing, plain fraction); the
-    slope tail (p90, p99) and the spectrum slope are recorded: the photographs' steep walls exceed what the 30 m radar
-    reference can hold, even through the judge's radar chain. Seed 11 is recorded too: its bowl fraction sits at the
-    band's edge (0.019 against 0.018) from one 68 ha patch of plain inside a cluster that drains through a gap
-    narrower than the radar's 30 m pixels, which the radar chain closes into a basin."""
+    """The official judge (judge/) on the default fenglin at the reference's extent (h and the river's water): every
+    band passes (relief, hypsometry, slope p50, p90 and p99, the flat fraction, the spectrum slope, closed depressions
+    with flat floors, anisotropy, texel cliffs, summit spacing, plain fraction), through the judge's radar chain, on
+    seeds 1, 2 and 7 at 8 m cells, and on seed 1 at the draft's 15.625 m cells (a terrain with water coarser than the
+    reference's stored 8 m pixel: its lake mask takes the radar chain too)."""
     from judge import judging
     rows = {}
-    for seed in (1, 7, 11):
+    for seed, cell in ((1, 8.0), (2, 8.0), (7, 8.0), (1, 15.625)):
+        n = int(round(8000.0 / cell))
         plan = K.plan_karst(seed, DOMAIN, {}, via=(0, 0), main=MAIN)
-        out = K.evaluate(plan, -4000.0, -4000.0, 8.0, 1000)
-        v = judging.judge(dict(h=out['h'].astype(np.float64), cell=8.0, frame='south_up', water=out['water']),
+        out = K.evaluate(plan, -4000.0, -4000.0, cell, n)
+        v = judging.judge(dict(h=out['h'].astype(np.float64), cell=cell, frame='south_up', water=out['water']),
                           'guilin_karst')
-        rows[seed] = {r['metric']: (round(float(r['gen']), 3), r['passed']) for r in v.rows
-                      if r.get('passed') is not None}
-    asserted = ('relief_m', 'hypsometric_integral', 'slope_p50', 'frac_slope_lt5', 'bowl_area_frac', 'anisotropy_4',
-                'anisotropy_8', 'cliff_pair_frac', 'summit_spacing_m', 'plain_frac')
-    for seed in (1, 7):
-        for k in asserted:
-            assert rows[seed][k][1], f'seed {seed}: {k} = {rows[seed][k][0]} out of its band'
-    record('test_guilin_judge', rows={str(k): v for k, v in rows.items()}, asserted=list(asserted),
-           asserted_seeds=[1, 7], reported=['slope_p90', 'slope_p99', 'spectrum_slope', 'seed 11'])
+        key = f'seed{seed}_{cell:g}m'
+        rows[key] = {r['metric']: (round(float(r['gen']), 3), r['passed']) for r in v.rows
+                     if r.get('passed') is not None}
+        record('test_guilin_judge', rows=rows)
+        assert v.passed, f'{key}: {v.failures}'
+    record('test_guilin_judge', rows=rows, asserted='every band')
 
 
 TESTS = [test_blue_noise_spacing, test_plan_spacing_and_clusters, test_profile_functions, test_tower_walls_and_summits,
-         test_plan_kinds, test_tower_slopes, test_world_space_windows, test_parent_child_levels, test_determinism,
+         test_plan_kinds, test_tower_slopes, test_world_space_windows, test_window_shift, test_base_edge_continuous,
+         test_no_terraces_on_hero_levels, test_cockpit_floors_meet_their_ground, test_parent_child_levels,
+         test_determinism,
          test_fenglin_composition, test_cluster_massifs, test_river, test_fengcong_composition,
          test_fluting_on_hero_levels,
          test_op_on_core_levels, test_recipe, test_performance, test_guilin_judge]

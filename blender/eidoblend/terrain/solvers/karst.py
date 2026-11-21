@@ -16,18 +16,23 @@ is at x = x0 + (i + 0.5) cell, y = y0 + (j + 0.5) cell.
     out = evaluate(plan, x0=-4000.0, y0=-4000.0, cell=7.8125, n=1024)
     out['h'], out['bed'], out['deposit'], out['talus'], out['water'], out['Sc']      # float32 (n, n)
 
-What Guilin's towers are, from the Li River photographs (the 30 m radar reference rounds them): steep peaks and
-towers rise abruptly from a flat alluvial plain, their bases cliffed (76-88 degrees, the limestone's bedding
-breaking them with ledges), their summits pointed, ridged or knobby, never smooth domes; sizes vary from slim
-spires to massifs 400 m across; inside a cluster they stand close, joined at saddles, in rows along the joints.
+What Guilin's towers are, from the Li River photographs and the 30 m radar tile: where a tower's foot meets the
+alluvial plain, the plain's water table undercuts it, so the towers on the plain and a cluster's towers facing it
+rise abruptly with cliffed bases (76-88 degrees, the limestone's bedding breaking them with ledges, collapse scarps
+standing sheer) under pointed, ridged or knobby summits, never smooth domes; sizes vary from slim spires to massifs
+400 m across. Inside a cluster, above the plain, the rock drains down into the cockpits and nothing undercuts it:
+its peaks are broad cones wooded to their tops (26-36 degrees on average, steeper near the summit, a concave apron
+at the foot), joined at cols, drawn out in rows along the joints. Through the radar, a summit's height halves 160 m
+out (200 m for the tallest) and the tile's slopes stand at p50 15, p90 36, p99 50 degrees.
 Each tower here is the intersection of two surfaces:
   - its WALL, rising from the footprint's edge: a table of bands up the height (wall_table: a foot notch at 89
     degrees, then wall bands at the tower's wall angle, 76-88, between ledges of 0.6-1.8 m at 40-60 degrees every
     10-30 m, the ledges holding along 55 % of the wall and breaking off elsewhere), read at the distance inside the
-    footprint (the footprint: elongated along the joint strike, leaning, spurred and lobed by world noise; on levels
-    with cells of 2 m or less, fluted: grooves straight down the wall, and on up the peaks' flanks);
-  - its SUMMIT: the highest of its peak cones, each z = h (1 - x + b x (1 - x)), x the (elongated) distance from the
-    peak over h / tan(angle), b the convexity: a spire's cone straight to steepening (b 0-0.3), a peak's from
+    footprint (the footprint: drawn out along the joint strike, leaning, spurred and lobed by world noise; on levels
+    with cells of 2 m or less, fluted: grooves straight down the wall, and on up a steep peak's bare flanks);
+  - its SUMMIT: the highest of its peak cones, each z = h (1 - x + b x (1 - x)), x the distance from the peak over
+    h / tan(angle) (the distance along the peak's axis shrunk by its elongation, so an elongated peak is longer, its
+    flanks still at its angle), b the convexity: a spire's cone straight to steepening (b 0-0.3), a peak's from
     easing toward its foot (b to -0.2: a steep pointed top whose flanks run on to the saddles) to steepening (a
     sugarloaf, to 0.3); the distance scaled by the cone's ribs (rib_harmonics: azimuthal harmonics 2-7, so ribs and
     gullies radiate from the apex without ever folding the cone) and bent by a gentle 90 m world-noise jitter, the
@@ -35,12 +40,16 @@ Each tower here is the intersection of two surfaces:
     cliff top (the rim, 30-52 % of its height) to 92 % at the centre, lumpy, with knobs over half of it.
   z = smooth-min(wall, summit) over brow_m: the wall stands until it meets the summit, then the summit rises.
 The kinds of tower: a spire (one cone at 70-80 degrees, its footprint 70-92 % of the cone's foot: a short cliff
-under a needle); a peak (one cone at 58-70 degrees, or two or three strung along a ridge; on the plain its footprint
-35-65 % of the cone's foot, a cliff 35-65 % of its height; inside a cluster 60-85 %, its flanks running on to meet
-its neighbours'); a block (a cliffed cap carrying two to four peaks: 8-10 % of the towers, and most of the towers
-taller than 1.4-2.4 times the median: the massive towers of the river's bends). One or two collapse scarps pull a
-sector of a tower's footprint in (scarp_sectors), so the wall stands high there under a concave sheer face; the
-summit cones carry bedding benches (ledges and risers) on the levels that resolve them.
+under a needle; on the plain only); a peak (one cone, or two or three strung along a ridge at the tower's own angle;
+on the plain at 58-70 degrees, its footprint 55-85 % of the cone's foot, a cliff 15-45 % of its height; at a
+cluster's edge the same, its first collapse scarp turned to the plain; deep inside a cluster the fengcong cone, its
+footprint the whole cone, so no wall); a block (a cliffed cap carrying two to four peaks: 8 % of the plain's towers,
+and most of the plain's towers taller than 1.4-2.4 times the median: the massive towers of the river's bends; a
+cluster's tallest are ridges of cones). One or two collapse scarps pull a sector of a tower's footprint in
+(scarp_sectors), so the wall stands high there under a concave sheer face: where the plain meets the tower, none
+deep inside a cluster. The bedding shows only where the rock is bare, as the walls' ledges: the forested cones carry
+no terraces (the Li River photographs; regular benches every 13 m on the summit cones banded the towers green and
+grey on the hero levels).
 The plan: a cluster field (broad noise mixed with ridged noise, stretched along the joint strike): the peak clusters,
 the rest plain; its threshold makes cluster_cover the main tile's share in clusters. Centres by variable-radius
 Poisson-disc (poisson_disc): spacing_m apart inside the clusters, plain_spacing times that on the plain, the plain's
@@ -49,8 +58,8 @@ so neighbours are alike. The towers inside a cluster are drawn out along the str
 The ground between a cluster's inner towers is raised: a base (base_m, undulating by base_rough_m at 300 m and
 120 m) that is nothing at a cluster's edge and toward the river, so the outer towers rise straight from the plain;
 every tower rises from the base under each of its cells. Deep inside a cluster a peak is the fengcong cone: broad
-(its foot cluster_reach of the median distance to its three nearest neighbours, 48-62 degrees on average) and
-concave (cluster_convexity: 60-70 degrees at the top easing to 30-40 at the foot), so neighbours' flanks meet at cols
+(its foot cluster_reach of the median distance to its three nearest neighbours, 26-36 degrees on average) and
+concave (cluster_convexity: 35-55 degrees at the top easing to 15-25 at the foot), so neighbours' flanks meet at cols
 about half their height up; a cluster's edge towers keep the steep cliffed peaks of the plain, so the massif meets
 the plain with sheer faces. Each cluster tower also stands on a massif BODY: the same wall table at a wider
 footprint (body_reach), its brow body x the tower's height up, a rough skirt rising inward from it at body_deg (to
@@ -65,8 +74,9 @@ the plain, a channel river_width_m wide (+- river_width_var along its course) an
 line swung toward the outer bank of each bend, a cut bank there and a gravel point bar on the inner bank standing
 bar_m above the water at the sharpest bends. Where towers ring a gap, the gap is a closed depression (a cockpit, or
 a polje where a cluster encloses a patch of plain) and soil fills its bottom flat (cockpit_fill of its depth, a
-small pit nearly to its spill), found once per plan on the main tile so every level fills it alike: the one family
-where closed depressions are correct. fengcong raises the clusters on a common plinth (plinth_m).
+small pit nearly to its spill), found once per plan on the main tile so every level fills it alike, and on each
+level's own cells never above the lowest ground beside it, where a gap finer than the plan's map lets it spill: the
+one family where closed depressions are correct. fengcong raises the clusters on a common plinth (plinth_m).
 
 The stage op `karst` (op_karst) writes h, bed (the rock: towers, and the buried rock under the alluvium and the
 cockpit soil), deposit (h - bed), talus (the talus cones), water (the river's depth: flat at one level, so the lake
@@ -89,7 +99,8 @@ __all__ = ['DEFAULTS', 'KIND_PRESETS', 'KarstPlan', 'params_for', 'cone_profile'
 DEFAULTS = dict(
     kind='fenglin',              # 'fenglin' (towers on a river plain) | 'fengcong' (peaks over dolines)
     spacing_m=210.0,             # Poisson-disc spacing of the towers inside the clusters (about their neighbour gap)
-    median_height_m=150.0,       # median summit height above the plain
+    median_height_m=130.0,       # median summit height above the plain (Guilin's radar tile: its summits stand a
+                                 # median 130 m over their surroundings, its relief 374 m)
     height_sigma=0.38,           # lognormal spread of the heights (natural log)
     height_trend=0.30,           # world-space height trend (2 km scale, natural-log amplitude): neighbours alike
     wall_deg=82.0,               # the walls' angle (median; per tower +- wall_spread_deg, held to 70-89)
@@ -99,8 +110,11 @@ DEFAULTS = dict(
     ledge_m=(0.6, 1.8),          # ... this tall (so 0.4-1.5 m wide) ...
     ledge_cover=0.55,            # ... along this share of the wall (world noise at 30 m: ledges break off and resume)
     notch_m=(2.0, 6.0),          # the foot notch's height (89 degrees: the undercut's stand-in)
-    slim_share=(0.35, 0.20),     # the share of slim spires among the towers (on the plain, inside the clusters)
-    block_share=(0.08, 0.10),    # the share of blocks and massifs (a cliffed cap with knobs) among them
+    slim_share=(0.35, 0.0),      # the share of slim spires among the towers (on the plain, inside the clusters) ...
+    block_share=(0.08, 0.0),     # ... and of blocks and massifs (a cliffed cap with knobs): cliffed forms stand where
+                                 # the plain's water table undercuts a tower's foot, not inside a cluster, which
+                                 # drains down into its cockpits (needles and tables there put 10 % of Guilin's 30 m
+                                 # radar tile over 50 degrees, against its 1 %)
     spire_deg=(70.0, 80.0),      # a spire's cone angle (its mean slope, apex to foot)
     spire_girth=(0.70, 0.92),    # a spire's footprint, a share of its cone's foot radius (a short steep wall below)
     peak_deg=(58.0, 70.0),       # a peak's cone angle (on the plain)
@@ -112,10 +126,13 @@ DEFAULTS = dict(
                                  # neighbours: the cones meet at saddles, so a cluster is one massif with its peaks
                                  # on it (Guilin's peak clusters at 30 m: 23 % of the ground 100-200 m up; separate
                                  # towers on a low base held 8 %, the clusters a plain strewn with pebbles)
-    cluster_peak_deg=(48.0, 62.0),  # ... its cone angle follows from its height over that reach, held to this, ...
-    cluster_convexity=(-0.55, -0.15),  # ... and its profile concave: the fengcong cone, steep at the top (60-70
-                                       # degrees) easing to 30-40 at its foot where it meets its neighbours at cols.
-                                       # (Narrow 58-70 degree cones over the massif bodies stood as candles on cakes)
+    cluster_peak_deg=(26.0, 36.0),  # ... its cone angle follows from its height over that reach, held to this, ...
+    cluster_convexity=(-0.55, -0.25),  # ... and its profile concave: the fengcong cone, steeper at the top (35-55
+                                       # degrees) easing to 15-25 at its foot where it meets its neighbours at cols,
+                                       # as Guilin's radar profiles fall (a summit's height halves 160-200 m out and
+                                       # its apron flattens past 130 m; at 48-62 degrees the clusters' peaks halved
+                                       # at 75 m whatever their height, and the tile's slopes ran 14 degrees steep at
+                                       # p90). (Narrow 58-70 degree cones over massif bodies stood as candles on cakes)
     inner_girth=(1.0, 1.08),     # deep inside a cluster the footprint takes the whole cone (no wall: its flanks run
                                  # down into the saddles and cockpits), but for its collapse scarps
     edge_scarp=(0.45, 0.65),     # a cluster's edge tower turns a collapse scarp of this depth toward the plain: the
@@ -134,9 +151,9 @@ DEFAULTS = dict(
                                  # (in the clusters: neighbours overlap into massifs, the gaps left are cockpits)
     peak_convexity=(-0.2, 0.3),  # b of z = h (1 - x + b x (1 - x)): below 0 a peak's flanks ease toward its foot
                                  # (steep pointed tops, flanks running into the saddles), above 0 they steepen (a
-                                 # sugarloaf); their straight sides broken by the knobs (peak_rough) and the
-                                 # bedding benches. (Mostly convex, -0.1..0.4, rounded the tops: the upper sixth of
-                                 # the towers stood at 45 degrees, the review's domes)
+                                 # sugarloaf); their straight sides broken by the knobs (peak_rough). (Mostly convex,
+                                 # -0.1..0.4, rounded the tops: the upper sixth of the towers stood at 45 degrees,
+                                 # the review's domes)
     spire_convexity=(0.0, 0.3),    # a spire's: straight to steepening (a needle, never a flared foot)
     peak_spacing_m=70.0,         # the least spacing of a tower's own peaks
     peaks_max=4,
@@ -149,9 +166,10 @@ DEFAULTS = dict(
     scarps=(0.25, 0.5, 0.25),    # the chances of 0, 1 and 2 collapse scarps on a tower: on each, a sector of the
     scarp_deg=(25.0, 60.0),      # footprint (this half-width) is pulled in by ...
     scarp_depth=(0.35, 0.6),     # ... this share of its radius, so the wall rises high there: a concave sheer face
-    ribs=0.45,                   # the summit cones' ribs and gullies: azimuthal harmonics 2-7 of each cone's distance
+    ribs=0.3,                    # the summit cones' ribs and gullies: azimuthal harmonics 2-7 of each cone's distance
                                  # from its apex, sum of m |a_m| (under 1 the distance never folds: ribs radiate from
-                                 # the apex and the flanks stand between 0.7 and 1.4 of the cone's slope)
+                                 # the apex and the flanks stand between 0.85 and 1.2 of the cone's slope; at 0.45,
+                                 # 0.75-1.35, the ribs alone stood the clusters' cones past the radar's 50 degrees)
     jag=0.05,                    # a gentle world-noise jitter of that distance (relative std, 90 m and 40 m): the
                                  # ribs bend and the feet bulge; 0.2 at 45-6 m folded the cones into blade fences
     brow_m=2.0,                  # the rounding where a wall meets the summit, metres (at most 2 % of the height)
@@ -163,9 +181,6 @@ DEFAULTS = dict(
     elongation=0.35,             # max footprint elongation along the strike, on the plain
     cluster_elong=(0.10, 0.55),  # the elongation inside the clusters (their peaks string into rows along the strike)
     ridge_share=0.12,            # the share of towers drawn out into ridges (elongation 0.6-1.1, 2-3 peaks)
-    benches=0.6,                 # the summit cones' bedding benches: z - k B / 2 pi sin(2 pi z / B) (k this; under 1
-    bench_m=13.0,                # it never folds): ledges at (1 - k) and risers at (1 + k) of the cone's slope, every B
-                                 # metres of height (undulating +-3 m over 160 m), fading out over the top quarter
     tall_massif=0.85,            # towers from 1.4 to 2.4 x the median height become massifs: up to this share of
                                  # the peaks turn blocks, and of the rest ridges (no single 400 m cone)
     lean=0.20,                   # max footprint offset (one wall higher than the other)
@@ -205,7 +220,7 @@ DEFAULTS = dict(
 KIND_PRESETS = {
     'fenglin': dict(),
     'fengcong': dict(spacing_m=210.0, median_height_m=190.0, height_sigma=0.28, height_trend=0.2,
-                     slim_share=(0.3, 0.3), block_share=(0.1, 0.1), peak_girth=(0.75, 0.95), plinth_m=60.0,
+                     slim_share=(0.3, 0.0), block_share=(0.1, 0.0), peak_girth=(0.75, 0.95), plinth_m=60.0,
                      base_m=0.0, base_rough_m=10.0,
                      cluster_cover=0.97, cluster_ridges=0.3, cluster_elong=(0.0, 0.5), plain_density=0.0,
                      elongation=0.25, ridge_share=0.1, lean=0.10, river=False),
@@ -612,8 +627,8 @@ def _place_peaks(rng, pr, R, H, elong, axis, kind, npk, floor, main_ang):
     count placed. The first peak is the tower's summit (height H) near the centre, at the tower's own cone angle
     (main_ang). The others: on a ridge tower (elongation over 0.6) strung along its long axis, 0.35-0.6 of its
     half-length out on alternate sides; on a block, darted inside 0.6 of the footprint at least peak_spacing_m apart.
-    They stand lower (0.6-0.92 H, less 25 % toward the edge, never under the floor), at the peak angle, drawn out
-    along the tower's axis (ridged crests)."""
+    They stand lower (0.6-0.92 H, less 25 % toward the edge, never under the floor), at the tower's own cone angle
+    (+-3 degrees), drawn out along the tower's axis (ridged crests)."""
     N = R.size
     K = int(pr['peaks_max'])
     nan = np.full((N, K), np.nan)
@@ -659,7 +674,9 @@ def _place_peaks(rng, pr, R, H, elong, axis, kind, npk, floor, main_ang):
         dy[sel, k] = cy[sel, first[sel]]
         u = np.hypot(along[sel, first[sel]] / el[sel], across[sel, first[sel]] * el[sel]) / np.maximum(R[sel], 1e-6)
         h[sel, k] = H[sel] * rng.uniform(0.6, 0.92, sel.size) * (1.0 - 0.25 * np.clip(u, 0.0, 1.0) ** 2)
-        ang[sel, k] = rng.uniform(*pr['peak_deg'], sel.size)
+        # at the tower's own cone angle, +-3 degrees (a cluster ridge's peaks are cones of the cluster, not the
+        # plain's 58-70 degree peaks: those stood as steep teeth on the broad cones)
+        ang[sel, k] = main_ang[sel] + rng.uniform(-3.0, 3.0, sel.size)
     # the placed peaks first in every row (a dart that failed leaves a gap)
     order = np.argsort(np.isnan(h), axis=1, kind='stable')
     dx, dy, h, ang = (np.take_along_axis(a, order, 1) for a in (dx, dy, h, ang))
@@ -790,10 +807,12 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     slim_p = pr['slim_share'][0] * (1.0 - in_cl) + pr['slim_share'][1] * in_cl
     block_p = pr['block_share'][0] * (1.0 - in_cl) + pr['block_share'][1] * in_cl
     # the tallest towers are massifs, not single cones (a 400 m cone read as a pyramid): from 1.4 x the median height
-    # up, the chance of a slim spire falls and half the rest become blocks (thresholds on the same draw)
+    # up, the chance of a slim spire falls and, on the plain, most of the rest become blocks (thresholds on the same
+    # draw); inside a cluster they become ridges of cones (below). Cliffs stand where a tower's foot meets the plain,
+    # whose water table undercuts it; a cluster's interior drains down into its cockpits, so its peaks are cones
     tall = _smoothstep(1.4, 2.4, (H + F) / max(pr['median_height_m'], 1e-6))
     slim_p = slim_p * (1.0 - tall)
-    block_p = block_p + (1.0 - slim_p - block_p) * pr['tall_massif'] * tall
+    block_p = block_p + (1.0 - slim_p - block_p) * pr['tall_massif'] * tall * (1.0 - in_cl)
     kind = np.where(u_k < slim_p, 0, np.where(u_k < slim_p + block_p, 2, 1)).astype(np.int8)
     ang = np.where(kind == 0, _uni(rng, pr['spire_deg'], N), _uni(rng, pr['peak_deg'], N))
     nn3 = _knn_median(tx, ty, 3, 3.0 * pr['spacing_m'])
@@ -844,6 +863,9 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     rib = rib_harmonics(np.random.default_rng([int(seed) & 0xFFFFFFFF, 0x52494253]), N, int(pr['peaks_max']),
                         pr['ribs'])                                                               # 'RIBS'
     scarp = scarp_sectors(np.random.default_rng([int(seed) & 0xFFFFFFFF, 0x53434152]), N, pr)   # 'SCAR'
+    # a wall collapses where the plain undercuts its foot: no scarps deep inside a cluster (on its broad cones a scarp
+    # pulled half the footprint in and stood a 150-200 m sheer face in the middle of the massif)
+    scarp[:, :, 2] *= (1.0 - deep)[:, None]
     # a cluster's edge towers turn their first scarp toward the plain (down the cluster field's gradient), broad and
     # deep: the massif meets the plain with sheer faces (Guilin's towers are undercut where the floodplain meets them)
     edge = (in_cl > 0.3) & (interior < 0.6) & (kind != 0)
@@ -1321,13 +1343,6 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
     LOB = G.smooth(lambda X, Y: pr['lobes_m'] * (noise2(X, Y, 130.0, plan.salt + 101)
                                                  + 0.45 * noise2(X, Y, 60.0, plan.salt + 102)) / 0.33,
                    max(60.0, lim)).astype(f32)
-    # the beds' undulation for the summits' benches (+-3 m over 160 m); a level whose cells are coarser than a bench
-    # takes none (the benches would alias)
-    if pr['benches'] > 0 and pr['bench_m'] >= 4.0 * cell:
-        BENCH = G.smooth(lambda X, Y: 3.0 * fbm2(X, Y, 160.0, 2, plan.salt + 161, 0.5) / 0.33,
-                         max(60.0, lim)).astype(f32)
-    else:
-        BENCH = None
     # the summit cones' gentle distance jitter (the ribs bend, the feet bulge): long wavelengths only, so the
     # jittered distance's gradient stays near 1 even 150 m from an apex (at 45 m down to 6 m it folded the cones into
     # fences of blades)
@@ -1406,8 +1421,6 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
             4.0 * pr['lobes_m'] + pr['fluting_m'] + 2.0 * cell
         xe, ye = G.x0 + N * sub, G.y0 + N * sub
         hit = (plan.x + ext > G.x0) & (plan.x - ext < xe) & (plan.y + ext > G.y0) & (plan.y - ext < ye)
-        xs_l = (G.xs - G.x0).astype(f32)                # window-local metres: float32 keeps millimetres here
-        ys_l = (G.ys - G.y0).astype(f32)
         for t in np.nonzero(hit)[0]:
             cx, cy, e_ = plan.x[t], plan.y[t], ext[t]
             i0 = max(int((cx - e_ - G.x0) / sub), 0)
@@ -1416,12 +1429,18 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
             j1 = min(int(math.ceil((cy + e_ - G.y0) / sub)) + 1, N)
             if i1 <= i0 or j1 <= j0:
                 continue
-            dx = xs_l[i0:i1][None, :] - f32(cx - G.x0)
-            dy = ys_l[j0:j1][:, None] - f32(cy - G.y0)
+            # metres from the tower's centre: the world offset in float64, then float32 (a tower spans a few hundred
+            # metres, so float32 keeps tenths of a millimetre). (Window-local float32 coordinates rounded differently
+            # wherever the window started: a whole-cell shift moved a wall that rises 57 m per metre by millimetres)
+            dx = (G.xs[i0:i1] - cx).astype(f32)[None, :]
+            dy = (G.ys[j0:j1] - cy).astype(f32)[:, None]
             r = np.sqrt(dx * dx + dy * dy)
             ca, sa = f32(math.cos(plan.axis[t])), f32(math.sin(plan.axis[t]))
             el = f32(1.0 + plan.elong[t])
-            re = np.sqrt(((dx * ca + dy * sa) / el) ** 2 + ((dy * ca - dx * sa) * el) ** 2)
+            # the footprint drawn out along the strike (el times longer), its width across kept: a tower elongates
+            # along its joints, its flanks keep their angle. (Squeezed across by el as well, it cut walls along the
+            # long sides of the clusters' cones and stood their flanks el times steeper across the strike)
+            re = np.sqrt(((dx * ca + dy * sa) / el) ** 2 + (dy * ca - dx * sa) ** 2)
             rinv = f32(1.0) / np.maximum(r, f32(1e-3))
             c1, s1 = dx * rinv, dy * rinv                    # cos and sin of the direction from the axis
             stretch = f32(1.0) + f32(plan.lean[t]) * (c1 * f32(math.cos(plan.lean_dir[t]))
@@ -1490,8 +1509,8 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
                 pa = float(plan.pk_axis[t, k])
                 pc, ps = f32(math.cos(pa)), f32(math.sin(pa))
                 pe = f32(1.0 + plan.pk_e[t, k])
-                pu = (pdx * pc + pdy * ps) / pe
-                pv = (pdy * pc - pdx * ps) * pe
+                pu = (pdx * pc + pdy * ps) / pe          # drawn out along its axis, its flanks at the cone's angle
+                pv = pdy * pc - pdx * ps
                 rho = np.sqrt(pu * pu + pv * pv)
                 if plan.pk_rib is not None and np.any(plan.pk_rib[t, k] != 0):
                     # the cone's ribs: its distance x g(theta), harmonics 2-7 by the angle-addition recurrences
@@ -1506,7 +1525,11 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
                     rho = rho * g_rib
                 rho = rho * jag
                 if flo is not None:
-                    rho = rho + flo                      # the flutes run on up the peak's flanks
+                    # the flutes run on up a steep peak's bare flanks: dissolution grooves of bare rock, fading in from
+                    # 50 to 65 degree cones (none under a wooded cluster cone: there they drew radial streaks)
+                    fl_w = _smoothstep(50.0, 65.0, math.degrees(math.atan2(plan.pk_h[t, k], plan.pk_r0[t, k])))
+                    if fl_w > 0:
+                        rho = rho + f32(fl_w) * flo
                 x = rho / f32(plan.pk_r0[t, k])
                 b = f32(plan.pk_b[t, k])
                 z = f32(plan.pk_h[t, k]) * np.where(x <= f32(1.0), f32(1.0) - x + b * x * (f32(1.0) - x),
@@ -1517,13 +1540,6 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
                 # the height up, so the wall below stays clean
                 up = _smoothstep(0.35, 0.75, summit / f32(H)).astype(f32)
                 summit = summit + f32(pr['peak_rough']) * up * rough_box(j0, j1, i0, i1, H)
-            if BENCH is not None:
-                # the beds' benches across the summit's flanks: ledges and risers, horizontal but for the beds'
-                # undulation, fading out over the top quarter so the summit stays pointed
-                bm = f32(pr['bench_m'])
-                kb = f32(pr['benches']) * _smoothstep(0.93, 0.72, summit / f32(H)).astype(f32)
-                ph = (summit + BENCH[j0:j1, i0:i1] + (PM[j0:j1, i0:i1] if PM is not None else f32(0.0))) / bm
-                summit = summit - kb * bm / f32(2 * math.pi) * np.sin(f32(2 * math.pi) * ph)
             brow = f32(min(pr['brow_m'], 0.02 * H))
             z = _smin(wallz, summit, brow) if brow > 0 else np.minimum(wallz, summit)
             d_out_edge = d_in
@@ -1568,16 +1584,24 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
                 sb = scree[j0:j1, i0:i1]
                 scree[j0:j1, i0:i1] = np.where(cone > sb, cone, sb)
 
-    # the clusters' common base (fengcong): flat at plinth_m inside a cluster, under the peaks; it shows only between
-    # them, as the cockpits' floors
-    if PM is not None:
-        rock = np.maximum(rock, np.where(PM > 0.5, PM, NEG).astype(f32))
-
+    # the clusters' common base (fengcong's plinth, fenglin's ground between a cluster's inner towers), PM above the
+    # plain: it shows only between the towers, as the cockpits' floors and the cols. The plain's alluvium laps onto
+    # its foot: the base's soil is the alluvium's whole thickness where the base leaves the plain and thins to none
+    # as the base rises alluvium_m above it, so the rock under its foot dips beneath the alluvium to the plain's
+    # buried rock, and the ground, the rock and the soil all change smoothly across the base's edge. (Switched on
+    # where the base stood 0.5 m up, it stepped the rock and the soil by alluvium_m + 0.5 m along that contour)
     level = plain['level']
     rock_h = level + rock
-    talus_ss = np.maximum(level + scree - np.maximum(rock_h, plain['surface']), 0.0) * (scree > 0)
-    h_ss = np.maximum(plain['surface'], rock_h) + talus_ss
-    bed_ss = np.minimum(h_ss, np.maximum(rock_h, level - pr['alluvium_m']))
+    top = np.maximum(plain['surface'], rock_h)
+    rock_b = level - pr['alluvium_m']
+    if PM is not None:
+        on = PM > 0
+        soil_b = pr['alluvium_m'] * (1.0 - _smoothstep(0.0, max(pr['alluvium_m'], 1e-3), PM))
+        top = np.maximum(top, np.where(on, level + PM, -1e9))
+        rock_b = np.maximum(rock_b, np.where(on, level + PM - soil_b, -1e9))
+    talus_ss = np.maximum(level + scree - top, 0.0) * (scree > 0)
+    h_ss = top + talus_ss
+    bed_ss = np.minimum(h_ss, np.maximum(rock_h, rock_b))
 
     h = G.down(h_ss).astype(np.float64)
     bed = G.down(bed_ss).astype(np.float32)
@@ -1604,6 +1628,7 @@ def evaluate(plan, x0, y0, cell, n, ss=None, fill=True):
             dry = G.down((plain['surface'] >= level - 0.25).astype(np.float64)) > 0.999
             own = _cockpit_floors(h, cell, pr['cockpit_fill'], dry)
             floor = np.where(inside, floor, own)
+        floor = _cap_leaks(h, floor)
         soil = floor > h + 0.05                  # the soil floor is the surface there, not a tower's rock
         h = np.maximum(h, floor)
     else:
@@ -1705,6 +1730,36 @@ def _cockpit_floors(h, cell, share, allowed, max_cells=320, max_area_m2=None):
     if out.shape[0] < n:
         out = np.pad(out, ((0, n - out.shape[0]), (0, n - out.shape[1])), mode='edge')
     return out
+
+
+def _cap_leaks(h, floor, iters=6):
+    """The cockpit floors on a level's own cells: a soil floor stands no higher than the lowest ground beside it,
+    where the basin spills. (The floor map is made at FLOOR_MAP_CELL_M: a basin it sees closed can open at this
+    level's cells through a gap narrower than that, and its floor ran on past the basin over lower ground to end in a
+    step along the map's 10 m grid.) Each region the floor would fill (8-connected) is lowered to the lowest surface
+    beside it, its floor or its ground, where that is lower; repeated until none is, since a lowered region can part
+    from ground it stood above."""
+    from ..core import metrics as M
+    floor = np.asarray(floor, np.float64)
+    for _ in range(iters):
+        fill = floor > h + 0.05
+        if not fill.any():
+            break
+        lab, k = M.label(fill)
+        surf = np.maximum(h, floor)
+        cap = np.full(k + 1, np.inf)
+        for dj, di in M.PAIR_DIRS:
+            sa, sb = M.pair_slices(dj, di, h.shape)
+            for p, q in ((sa, sb), (sb, sa)):
+                lp, lq = lab[p], lab[q]
+                low = (lp > 0) & (lq != lp) & (surf[q] < floor[p] - 0.05)
+                if low.any():
+                    np.minimum.at(cap, lp[low], surf[q][low])
+        lowered = fill & np.isfinite(cap[lab]) & (cap[lab] < floor)
+        if not lowered.any():
+            break
+        floor = np.where(lowered, cap[lab], floor)
+    return floor
 
 
 def _rolling_min_1(a):
