@@ -560,6 +560,66 @@ def flow_receivers(filled, wrap=NOWRAP, sea_level=None):
     return rec
 
 
+def lake_receivers(filled, ground, wrap=NOWRAP, sea_level=None):
+    """flow_receivers on a filled surface, except across its flats (its filled depressions, at their spill level):
+    there each cell drains the way the water runs over the ground the fill covers. From each flat's drain (where it
+    spills) a priority flood enters the flat, always onto its lowest ground first, and each cell's receiver is the
+    cell the flood reached it from. So a path into a filled hollow runs down its floor to the lowest ground and out
+    along its deepest route to the spill, as the floor's own valleys run, where the breadth-first steps across the
+    level fill (flow_receivers) draw straight lines along the grid's axes and diagonals, whatever the ground under
+    them. Where the ground under a flat is level too the flood is breadth-first, as before. Returns flat indices
+    (-1: an outlet), as flow_receivers."""
+    from . import fluvial as _FL
+    W = np.asarray(filled, np.float64)
+    G = np.asarray(ground, np.float64)
+    ny, nx = W.shape
+    rec = _FL.d8_receivers(W)                    # off the flats: flow_receivers' steepest lower neighbour
+    dist = flat_distance(W, wrap, sea_level)
+    flat = dist > 0
+    if not flat.any():
+        return rec
+    # the drains: cells off the flats beside a flat cell at the same level (flat_distance's seeds)
+    drain = np.zeros((ny, nx), bool)
+    for wn, fn in zip(_neighbour_views(W, wrap, np.nan), _neighbour_views(flat, wrap, False)):
+        drain |= fn & (wn == W)
+    drain &= ~flat
+    w = W.ravel().tolist()
+    g = G.ravel().tolist()
+    done = (~flat).ravel().tolist()
+    out = rec.copy()
+    heap = []
+    k = 0
+
+    def push_neighbours(c):
+        nonlocal k
+        j, i = divmod(c, nx)
+        for di, dj in NBR:
+            jq, iq = j + dj, i + di
+            if wrap[0]:
+                iq %= nx
+            if wrap[1]:
+                jq %= ny
+            if 0 <= jq < ny and 0 <= iq < nx:
+                q = jq * nx + iq
+                if not done[q] and w[q] == w[c]:
+                    k += 1
+                    heapq.heappush(heap, (g[q], k, q, c))
+
+    for c in np.nonzero(drain.ravel())[0].tolist():
+        push_neighbours(c)
+    while heap:
+        _, _, q, c = heapq.heappop(heap)
+        if done[q]:
+            continue
+        done[q] = True
+        out[q] = c
+        push_neighbours(q)
+    left = ~np.asarray(done, bool)
+    if left.any():                               # a flat the flood did not reach keeps the breadth-first steps
+        out[left] = flow_receivers(W, wrap, sea_level)[left]
+    return out
+
+
 def lakes(fields, level, threshold_m, mode='lake', parent=None, sea_level=None, wrap=NOWRAP, band=0, seam_hold=2,
           no_lake=None):
     """Fill a level's closed depressions (module doc), in place. Returns (filled float64, number of lakes).

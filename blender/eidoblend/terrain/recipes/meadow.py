@@ -58,11 +58,15 @@ def op_hummocks(fields, level, params, seed=0):
 # lock_max_frac 2: the lock's block cap (an eighth of the level) was 20 m on the 160 m main level and 40 m on the
 # 320 m one, under the swales' 30 and 48 m, so the refining levels could not form them: the main tile came out level
 # (0.15 m of relief under the hummocks, mean slope 0.2 degrees)
+# band_blend: each refining level meets its parent across the border band's ramp. Pulled to its pins in every pass,
+# the band kept the parent's rills and swale banks whole while the level's creep and lock reshaped the ground inside
+# it, and the two met in a step at the band's inner edge: on the main tile strips 5 m in from its edges stood at
+# 15-22 degrees (slope p99) against 13.5-14 inside, and decided the tile's slope p99
 FLUVIAL = dict(K=1e-3, valley_spacing_m='$valley_spacing_m', context_spacing_factor=SPACING_GROWTH,
                threshold_deg=33.0, threshold_noise=0.1, threshold_scale_m=40.0, roughness='$roughness',
                roughness_scales_m=[60.0, 15.0, 4.0], deposition=0.3, age_myr='$age_myr', relief_m='$hills_relief_m',
                relief_over='level', control_levels='first', gullies=False, breakup=0.0, outcrops=0.0,
-               lock_max_frac=2)
+               lock_max_frac=2, band_blend=True)
 
 MEADOW = Recipe(
     'meadow', 'Small-scale gentle ground: swales, low rises, rills and hummocks (a meadow, 80-400 m)',

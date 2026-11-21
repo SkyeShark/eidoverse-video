@@ -373,7 +373,7 @@ def smooth_min(a, b, k):
 
 
 def _downstream(mask, rec, max_iter=4096):
-    """mask grown down the receiver paths `rec` (hydro.flow_receivers: every path ends at an outlet) until every
+    """mask grown down the receiver paths `rec` (hydro.lake_receivers: every path ends at an outlet) until every
     cell downstream of a masked cell is masked. Each pass extends every path by one cell; it stops when nothing
     changes (the gaps between channel segments are short)."""
     flat = np.asarray(mask, bool).ravel().copy()
@@ -525,11 +525,13 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
     seed_m = float(p['seed_m'])
     seeded = seed_m > 0 and cell <= float(p['seed_max_cell_m'])
     h_route = h
+    ground = h                    # the ground under any fill: the floors the swales' water follows across hollows
     hollow = None
     if seeded:
         nz = FL._field({'kind': 'fbm', 'wavelength_m': sp, 'octaves': 3, 'amp': 3.0}, level, int(seed) + 907, dev)
         free = 1.0 - np.clip(np.asarray(pins['pin_w'], np.float64), 0.0, 1.0)
         h_seed = h + seed_m * nz * free
+        ground = h_seed
         h = np.asarray(HY.fill_depressions(h_seed, sea_level=ctx.sea_level)[0], np.float64)
         hollow = (h - h_seed) > 1e-4
         h_route = np.asarray(HY.routing_surface(h, sea_level=ctx.sea_level), np.float64)
@@ -548,7 +550,10 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
         chan |= h <= ctx.sea_level
     # every cell downstream of a channel cell is channel too (D8 on the filled surface, down to an outlet), held at
     # the filled height: the multiple-flow area thins along a swale and broke it into segments, and the solve raised
-    # the gaps into dams (closed depressions as deep as the rise cap)
+    # the gaps into dams (closed depressions as deep as the rise cap). Across a filled hollow the path follows the
+    # hollow's own floor to its spill (hydro.lake_receivers): the breadth-first steps across the level fill drew
+    # straight lines along the grid's diagonals and axes, held as channels, and the solve raised parallel ridges
+    # between them (the meadow's straight 45-degree bands, flats with diagonal edges on its context levels)
     filled = np.asarray(HY.fill_depressions(h, sea_level=ctx.sea_level)[0], np.float64)
     # a filled hollow is no channel by its area: the routing spreads its water over the whole flat, every flat cell
     # passed the channel area and was held, and the flat survived the solve (the meadow's swales came out as flats
@@ -559,7 +564,7 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
         lake |= hollow
     chan &= ~lake
     core = chan
-    chan = _downstream(chan, HY.flow_receivers(filled, sea_level=ctx.sea_level))
+    chan = _downstream(chan, HY.lake_receivers(filled, ground, sea_level=ctx.sea_level))
     h = np.where(chan, filled, h)
     hold = chan.astype(np.float64)
     soft = float(p['head_soft'])

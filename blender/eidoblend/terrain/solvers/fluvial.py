@@ -73,6 +73,19 @@ Parameters of the 'fluvial' stage (metres, years, degrees; K in the stream-power
     refine_steps 1500                  steps on each refining level
     lock True                          the low-pass lock on refining levels (hero levels: blocks 2 parent valley
                                        spacings wide; levels down to the main one, which run their uplift: the mean)
+    hold_rivers 0                      > 0: on hero levels the rivers the parent resolved (inherited drainage area
+                                       over hold_rivers x the lock block's area) keep their courses and long
+                                       profiles: they are the base level of the gullies and hillslopes the level
+                                       refines. Free, a hero level's river rose with the lock's uplift above its own
+                                       entry in the pinned border band, the parent's inflow drained back out of the
+                                       window there, and the trunk lost its catchment level by level
+    band_blend False                   True: the border band is the design's ramp. The run holds only the cells
+                                       pinned in full (the seam's own two cells, the sea, held rivers and incised
+                                       channels) and its outcome is blended to the parent by the band's weights once
+                                       (as the detail package's hydraulic pass blends its own). False: every
+                                       pass pulls each band cell to its pin at its weight, which over a run holds the
+                                       whole band at the parent's surface, and the level's own ground meets it in a
+                                       step one or two cells wide at the band's inner edge
     threshold_mode 'iso'               'iso': slopes over Sc by their upwind gradient magnitude relax along the
                                        gradient (isotropic); 'pair': the design's pair excess (octagonal, 4-fold bias)
     threshold_rate None                0.12 iso, 0.06 pair; threshold_iters 2 a step (2 x 0.12 moves what the
@@ -128,7 +141,7 @@ DEFAULTS = dict(
     lock=True, creep_cap=5.0, threshold_iters=2, threshold_mode='iso', threshold_rate=None, max_creep_sub=32,
     fill_pits=True, pit_eps_m=1e-3, mode='evolve', min_steps=100, max_steps=6000,
     faults=None, context_spacing_factor=1.0, relief_over='main', U_factor_max=None,
-    uplift_scale=1.0, control_levels='grow', lock_max_frac=8,
+    uplift_scale=1.0, control_levels='grow', lock_max_frac=8, hold_rivers=0.0, band_blend=False,
 )
 THRESHOLD_RATE = {'iso': 0.12, 'pair': 0.06}
 
@@ -1222,6 +1235,27 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             lock_m = LOCK_SCALE * diffusivity(params, pcell, getattr(pl, 'depth', depth + 1), main_cell)[1]
         lock_b = lock_block(lock_m, cell, n, int(_p(params, 'lock_max_frac')))
         lock = h                                       # the start: every phase's block means are held to it
+    held_rivers = 0
+    hold = float(_p(params, 'hold_rivers'))
+    if refine and hold > 0 and depth < 0 and lock_m is not None and 'A' in fields:
+        # the rivers the parent resolved keep their courses and long profiles (module doc, hold_rivers): free, a
+        # hero level's rivers rose with the lock's uplift above their own entries in the pinned border band, the
+        # parent's inflow drained back out of the window there, and the trunk lost its catchment level by level
+        riv = np.asarray(fields['A'], np.float64) >= hold * lock_m * lock_m
+        if riv.any():
+            pins = dict(pins)
+            pins['pin_h'] = np.where(riv, h, pins['pin_h']).astype(F32)
+            pins['pin_w'] = np.where(riv, F32(1), pins['pin_w']).astype(F32)
+            held_rivers = int(riv.sum())
+    blend = None
+    if refine and _p(params, 'band_blend') and ctx.pins is not None:
+        # the border band as the design's ramp (module doc, band_blend): the run holds only the cells pinned in
+        # full (the seam's own cells, held rivers), and its outcome is blended to the parent by the band's weights.
+        # Every pass pulling the band to its pins at its weight held the whole band at the parent's surface (a
+        # weight of 0.05 applied 6000 times is a hard pin), and the level's own ground met it in one or two cells
+        blend = (np.clip(np.asarray(pins['pin_w'], np.float64), 0.0, 1.0), np.asarray(pins['pin_h'], np.float64))
+        pins = dict(pins)
+        pins['pin_w'] = np.where(blend[0] >= 1.0, F32(1), F32(0)).astype(F32)
     run = FluvialRun(dev, cell, fields, par_of(uf), pins, PINNED, params.get('column'), lock, lock_b)
     target = params.get('relief_m')
     control = (not refine) and target is not None
@@ -1252,6 +1286,12 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             run.set_par(par_of(uf))
             history.append((i + 1, round(rel, 1), round(uf, 4)))
     out = run.readback()
+    if blend is not None:
+        w, ph = blend
+        d = (w * (ph - np.asarray(out['h'], np.float64))).astype(F32)
+        mo = pin_layers(T.rgba(out['wear'], out['deposit'], out['talus'], out['loose']), d)
+        out = dict(out, h=(out['h'] + d).astype(F32), wear=mo[..., 0], deposit=mo[..., 1], talus=mo[..., 2],
+                   loose=mo[..., 3])
     if control:
         ctx.shared['U_factor'] = uf
     if not params.get('_incise'):
@@ -1268,7 +1308,7 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
     info = dict(level=str(lv), prepass=ctx.prepass, role='refine' if refine else 'grow', steps=steps,
                 dt_yr=round(dt, 2), years=round(steps * dt), D=D_used, spacing_m=round(spacing, 1), creep_sub=n_sub,
                 U_factor=round(uf, 4), relief_main_window_m=None if rel is None else round(rel, 1),
-                lock_block_cells=lock_b if lock is not None else None, lock_m=lock_m,
+                lock_block_cells=lock_b if lock is not None else None, lock_m=lock_m, held_river_cells=held_rivers,
                 seconds=round(time.perf_counter() - t0, 3), controller=history[-6:])
     ctx.shared.setdefault('fluvial_log', []).append(info)
     ctx.log(f"[terrain.fluvial] {info['role']} {lv.n}^2 @ {cell:.3g} m"
