@@ -16,8 +16,12 @@ Each section names the source, its licence, and exactly which shipped files deri
   `work/bestiary/human/hair_b3/out_b6/*/coat_human_*.glb` (bound to the same skeleton) and the peaked cap's conform data
   `work/bestiary/human/h4/rig/seats/cap_conform_<F|M>.bin` (computed on those heads). Also, for its mouth only,
   `work/bestiary/human/aletheia/head_low/out/aletheia_head_low_v16.glb` and its successor
-  `work/bestiary/human/aletheia/head_low/jaw_fix/out/aletheia_head_low_v19.glb`: their teeth, gums and tongue are the
-  human generator's (GNM's meshes, fitted to that head and reduced); the rest of that head is not GNM's.
+  `work/bestiary/human/aletheia/head_low/jaw_fix/out/aletheia_head_low_v19.glb`, and Aporia's heads built on it,
+  `work/bestiary/human/aletheia/head_low/jaw_fix/aporia_copy/out/aporia_head_low_v4_{fuller,middle,subtle}.glb`: their
+  teeth, gums and tongue are the human generator's (GNM's meshes, fitted to that head and reduced); the rest of those
+  heads is not GNM's. And the sisters' rigged figure
+  `work/bestiary/human/aletheia/head_low/jaw_fix/out/rigged/aletheia_A2_rigged_head_v19.glb`, for its skeleton's head
+  joints only, which are placed as in the base woman above.
 - Statement of changes (Apache-2.0, section 4): the heads keep GNM's head skin topology above the neck, vertex for vertex,
   except for added rings at the neck, regular blocks of quads re-placed as attachment ports, and the ears' root rings.
   Their shape is GNM's identity basis evaluated at coefficients this kit chose per sex (from the mean output of GNM's
@@ -64,15 +68,20 @@ Each section names the source, its licence, and exactly which shipped files deri
 
 Aletheia and Aporia are characters of aihegemonymemes (x.com/aihegemonymemes), the same characters as
 `eidoverse/assets/vrms/aletheia.vrm` and `aporia.vrm` (see CREDITS.md). The files under `work/bestiary/human/aletheia/`
-and the hair files `work/bestiary/human/hair_craft/rebuild/style/out/coat_her_straight_shoulder_bangs_f2j.glb` and
-`..._f2o.glb` are WIP pieces of these characters, shipped with the repository; credit as in CREDITS.md.
+and the hair files `work/bestiary/human/hair_craft/rebuild/style/out/coat_her_straight_shoulder_bangs_f2j.glb`,
+`..._f2o.glb` and `work/bestiary/human/hair_craft/rebuild/strand/out/coat_her_straight_shoulder_bangs_f2s_m5.glb` are
+WIP pieces of these characters, shipped with the repository; credit as in CREDITS.md.
 
 - The heads (v15, v16, v19), the jumpsuits (v4, v5) and the boots are low-poly models with hand-authored loops over the
   character owner's own high-poly models of the character (AI-generated meshes, Tripo, from the owner's character
   art); their shape and textures were baked down and cleaned by this kit's tools. The high-poly sources and the art are
-  not shipped. The mouth of heads v16 and v19 is described under GNM above.
-- The transparent coat on spring bones (`work/bestiary/human/aletheia/coat_rig/armpit_fix/`) was pattern-cut, draped,
-  rigged and baked by this kit's tools after the character's own coat design; no third-party or generated mesh is in it.
+  not shipped. The mouth of heads v16 and v19 is described under GNM above. Aporia's heads v4 are head v19 re-shaped by
+  at most 2.4 mm to Aporia's measured face, with her own hardware metal and brows.
+- Aletheia's rigged figure (`work/bestiary/human/aletheia/head_low/jaw_fix/out/rigged/aletheia_A2_rigged_head_v19.glb`)
+  is an assembly of the pieces named on this page, bound to one skeleton by this kit's tools.
+- The transparent coat on spring bones (`work/bestiary/human/aletheia/coat_rig/armpit_fix/`) and Aporia's woven trench
+  on spring bones (`work/bestiary/human/aletheia/coat_rig_aporia/`) were pattern-cut, draped, rigged and baked by this
+  kit's tools after the characters' own coat designs; no third-party or generated mesh is in them.
 - The jumpsuit hardware (v1, and v2 with the belt) and zippers, the tentacles, the eye displays and their runtime, and
   the hair were designed and built from scratch by this kit's tools for the characters; no third-party or generated
   mesh is in them.

@@ -1,0 +1,74 @@
+{
+ "what": "APORIA'S COAT, THE MATERIALS OF HER DESIGN MODEL (11-18, Fable 5.2): an OPAQUE WOVEN FABRIC and its hardware, for our engine (three r184 WebGPU, NodeMaterials; aporia/engine/aporia_coat.js reads this file). Every number with its reason. Colours are LINEAR sRGB. Nothing here is baked.",
+ "status": "the design round's numbers; tried in the engine by scripts/a22_render.py (its run table says what each try changed)",
+ "woven": {
+  "about": "the shell, the felled seams' laps, the placket band, the welts and every free edge's rim: ONE cloth, a 50 / 50 nylon-cotton RIPSTOP poplin with a water-repellent finish, 220 g/m2, 0.40 mm (NOTES.md STUDY 3; forge/fabric.py SHELL). the owner, 11-14: 'an actual fabric techwear trenchcoat, not raincoat like aletheia's'.",
+  "dye": {"value": [0.70, 0.108, 0.0008], "why": "HER ORANGE, MEASURED (scripts/a24_tone.py: the lit flats of her coat sheet AporiaCoat.png: sRGB 248 107 3, hue 25.5 deg, saturation 0.99, value 0.97) and matched IN THE ENGINE under the look's tone curve (ACES at exposure 0.9), not in the json: the curve bends a bright orange toward yellow and white. The tries (a22 'tone', the same frame): dye 0.80 0.117 with a full white reflection: 240 132 54 (hue 25.2, saturation 0.78); the white reflection at 0.15: dye 0.70 0.115: 234 120 27 (hue 27.0, saturation 0.89, value 0.92): 1.5 deg too yellow, so the green a little down. A deeper dye (0.50) only darkened it (217 103 39): the saturation was lost to white light, not to the albedo. Her sheet's 0.99 is paint; a lit cloth in this studio reaches about 0.9."},
+  "specular": {"value": 0.15, "why": "the share of a smooth dielectric's white reflection (F0 0.04) that a woven's face sends back: most of it enters the weave and leaves dyed. MEASURED (a24): at 1.0 the lit flats' blue stood at 54 for her sheet's 3 (saturation 0.78); at 0.15: 27 (0.89); at 0: 23 (0.90). 0.15 keeps a little of the cloth's own light at grazing angles. (three r184 reads material.specularIntensity, the plain property: a specularIntensityNode is never looked at.)"},
+  "roughness": {"value": 0.92, "why": "a matt woven: yarns are bundles of fibres, there is no smooth face to mirror the room (a film's 0.05-0.3 is the raincoat she does not want). A DWR finish closes the yarns a little: 0.92, not 1."},
+  "sheen": {"value": 0.25, "why": "the fibres that stand off a woven's face catch light at grazing angles (three's sheen lobe, Charlie): a soft lighter rim on every fold's edge, the look that says cloth. A nylon-cotton poplin is a smooth-faced cloth: a small lobe (a velvet is 1). MEASURED: it does not change the lit flats (0.25 against 0: the same to the digit); it shows on the folds' turning edges."},
+  "sheen_white": {"value": 0.05, "why": "the sheen's colour between the dye (lightened) and white: the stray fibres are dyed as the cloth is"},
+  "sheen_roughness": {"value": 0.60, "why": "a broad lobe: the fibres point every way"},
+  "weave_strength": {"value": 0.55, "why": "the weave's normal as a share of its geometric slope (a23: p50 24 deg, p95 39 deg at a 0.14 mm relief): finishing and wear press a poplin's crowns flatter than the ideal yarn"},
+  "shade_strength": {"value": 0.85, "why": "the share of the weave's own shade (the gaps between yarns in shadow, each yarn its small tone; a23) that reaches the colour, where the weave is resolved"},
+  "fade": {"value": [0.06, 0.22], "why": "the weave's normal and shade fade out between 0.06 and 0.22 tiles a pixel (a tile is 11.7 x 10.4 mm = 48 ends x 26 picks; the ripstop grid 5.85 x 5.2 mm is half a tile): a minified periodic tile beats against the pixel grid; the texture's mip chain has already averaged the single yarns away by then"},
+  "mottle": {"value": 0.05, "why": "a garment's cloth is not one flat tone: dye uptake, handling and pressing vary it by a few per cent over centimetres (a slow noise of the cloth's flat place, +- this share)"},
+  "pucker_mm": {"value": 0.32, "why": "SEAM PUCKER: a lockstitch draws the cloth together at each stitch and the layers ease between: ripples of 8-12 mm along every seam, a few tenths of a millimetre high, fading within about 9 mm of the seam line (the lap's own geometry carries 0.10 mm of it; this is the height of the normal's ripple on the cloth beside the seam and on the lap)"},
+  "pucker_wave_mm": {"value": 9.5, "why": "the ripple's length along the seam (a13's lap: 7.5-10.5 with a second wave of 13-19)"},
+  "pucker_reach_mm": {"value": 9.0, "why": "how far from the seam line the ripple reaches (a Gaussian's width)"},
+  "edge_wear": {"value": 0.10, "why": "where the cloth is folded or stands proud (the laps' and rims' crowns) it is rubbed a little lighter: the share toward a lighter orange on the fell, placket, welt and rim parts"}
+ },
+ "thread": {
+  "about": "the topstitching: a bonded polyester thread, Tex 40-60, 0.5 mm, twin rows on every felled seam",
+  "colour": {"value": [0.62, 0.075, 0.001], "why": "her sheet draws the stitching as fine DARKER dashes on the orange (a thread dyed to match reads darker than the cloth: it lies in the shadow of its own stitch holes): the dye a quarter darker"},
+  "roughness": {"value": 0.70, "why": "a bonded thread has a slight lustre the cloth has not"}
+ },
+ "rib": {
+  "about": "her black ribbed cuffs and collar band: a 2 x 2 rib knit, cotton with elastane, doubled (forge/fabric.py RIB)",
+  "colour": {"value": [0.018, 0.018, 0.020], "why": "her sheet's cuffs and band: black (sRGB about 30-38 on their lit parts); a knit's black is deeper than a woven's (its loops trap light)"},
+  "roughness": {"value": 0.95, "why": "a knit: matt"},
+  "sheen": {"value": 0.20, "why": "a knit's fuzz at grazing angles, grey on black"},
+  "pitch_mm": {"value": 4.2, "why": "a 2 x 2 rib's repeat (two wales up, two down) on a heavy cuff rib: about 4 mm; her sheet's cuff shows 14-15 ribs over its drawn width"},
+  "depth": {"value": 0.75, "why": "the ribs' normal slope (a rib's valley is deep: the two purl wales lie behind the two knit ones)"},
+  "cuff_ribs_along": {"value": "v", "why": "the cuff's ribs run ALONG her arm (her sheet: the cuff's outer edge is a row of teeth, the ribs' ends), as every knit cuff's do: the rib stretches round the wrist"},
+  "stand_ribs_along": {"value": "u", "why": "her collar band's ribs run ROUND her neck (her sheet draws the band with lines along its length; her model's band reads as three stacked rings)"}
+ },
+ "tape": {
+  "about": "the zips' tapes: a black woven polyester tape",
+  "colour": {"value": [0.020, 0.020, 0.022], "why": "black tape (her sheet: the zips are black beside the teeth)"},
+  "roughness": {"value": 0.85, "why": "a woven tape: matt, a little smoother than the shell"}
+ },
+ "zip_metal": {
+  "about": "THE FRONT ZIP's teeth, stops, retainer box, pin and slider: her sheet and her model draw them LIGHT (silver teeth with dark gaps, silver ends at the hem): a bright steel, metal",
+  "colour": {"value": [0.56, 0.57, 0.58], "why": "steel's base colour (as her plate's bare letters); her sheet's teeth read sRGB 200-235"},
+  "roughness": {"value": 0.32, "why": "tumbled metal teeth: satin, not chrome"}
+ },
+ "black_metal": {
+  "about": "HER BLACK HARDWARE: the chest zips' teeth, sliders and long pulls, her round button's cap: black-oxide carbon steel (METAL: a black finish is base colour and roughness, never metalness below 1; HIGH_TO_LOW 'metal is metal')",
+  "colour": {"value": [0.035, 0.035, 0.040], "why": "a black-oxide steel (the coat round's snaps)"},
+  "roughness": {"value": 0.38, "why": "a satin black finish: her sheet's pulls and buttons carry a soft grey highlight, not a mirror's"}
+ },
+ "white_snap": {
+  "about": "the white snap on each collar wing (her sheet: a white disc with a grey rim)",
+  "colour": {"value": [0.82, 0.82, 0.80], "why": "a white enamelled cap"},
+  "roughness": {"value": 0.30, "why": "enamel: glossy but not a mirror"}
+ },
+ "carbon_steel": {
+  "about": "HER DARK CARBON STEEL: the four port collars with their bolts and backing rings (her sheet's black discs on the back)",
+  "colour": {"value": [0.14, 0.145, 0.155], "why": "the study's dark carbon steel (her plate's body)"},
+  "roughness": {"value": 0.45, "why": "the study's: a blasted, oiled finish"}
+ },
+ "lights": {
+  "about": "the two orange lights on each port collar (her sheet's two orange dots)",
+  "colour": {"value": [1.0, 0.11, 0.002], "why": "HER SHEET'S DOTS, MATCHED THROUGH THE LOOK'S TONE CURVE (11-18 07:35, Opus 5.5): her sheet paints them sRGB about 250 110 25 (hue 23-24 deg, saturation 0.9, a little brighter than her cloth). The first numbers (1.0 0.30 0.03 x 3.0) rendered CREAM, sRGB 253 221 146 measured on s12__close__ports (hue 43, saturation 0.43): an emission over 1 runs up ACES's shoulder, where red stops and green keeps climbing. three's ACESFilmic at exposure 0.9 computed for this colour x 1.2: 248 119 31 (hue 24.3, saturation 0.88)"},
+  "intensity": {"value": 1.2, "why": "a small indicator light that stays ORANGE: just past the cloth's own lit value (0.93 -> 0.97); brighter only whitens it (x 2: 254 193 84; x 3: 255 214 116); the look has no bloom (a22 LOOK)"}
+ },
+ "plate": {
+  "about": "HER APORIA PLATE on her left lapel: METAL, her dark carbon steel, the raised letters and the worn edges bright bare steel (the study's plate material; maps scripts/a12_plate_maps.py: R the letters' tops, G the border's crown, B the worn edges)",
+  "steel": {"value": [0.040, 0.042, 0.047], "why": "her plate's body is a DARK gunmetal on her picture (aporianametag.png: sRGB 60-95 across its brushed face). The study's dark carbon steel (0.14) seen square-on under the look's key box read LIGHT grey (the first close, 04:47: sRGB about 150), and 0.065 still did (05:08): a blackened steel sends back about 4 %"},
+  "letters": {"value": [0.60, 0.61, 0.62], "why": "bare steel: her letters and her plate's rim read light on the dark face (aporianametag.png)"},
+  "roughness": {"value": 0.50, "why": "a brushed, blackened face (the study's 0.45, a little duller)"},
+  "letters_roughness": {"value": 0.25, "why": "the study's: the letters' tops are worn brighter"},
+  "edge_wear": {"value": 0.6, "why": "the study's"}
+ }
+}
