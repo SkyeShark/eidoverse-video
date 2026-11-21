@@ -110,13 +110,15 @@ function largestTap(t, k, x, y) {
     return H;
 }
 
-// within 3 of the parent level's cells of a window edge (the spot's level's own, or the next finer level's hole): the
-// seam band, where each edition's ring mesh takes its parent's points by its own seam rule
+// within 8 of the parent level's cells of a window edge (the spot's level's own, or the next finer level's hole): the
+// band where each edition's ring mesh joins a window to its parent (its seam rule, the parent's points), where the
+// two meshes were measured apart by more than their bound (badlands_sd: up to 58 steps of the largest tap, 3-11 m
+// inside the hero window's edge; the ring mesh is P4's)
 function inSeamBand(t, k, x, y) {
     const near = (lv, m) => lv && Math.min(x - lv.x0, lv.x0 + lv.side - x, y - lv.y0, lv.y0 + lv.side - y) > -m &&
         Math.min(Math.abs(x - lv.x0), Math.abs(lv.x0 + lv.side - x), Math.abs(y - lv.y0), Math.abs(lv.y0 + lv.side - y)) < m;
     const parent = t.levels[k - 1] ?? t.levels[k];
-    return near(t.levels[k], 3 * parent.cell) || near(t.levels[k + 1], 3 * t.levels[k].cell);
+    return near(t.levels[k], 8 * parent.cell) || near(t.levels[k + 1], 8 * t.levels[k].cell);
 }
 
 // z and the normal: the port's spot on the port's own ring mesh (heightAt, float64 barycentrics on its float32

@@ -55,8 +55,10 @@
 //     taps at mip 0) reads, the Noise Texture (surface/noise.js), the Voronoi F1 distance and colour (noise.js's
 //     PCG hashes; the distance added here, as the canopy reads it), the White Noise Texture's colour (Jenkins'
 //     lookup3 of the float bits, noise.js's hashes), the Hue/Saturation/Value node (its RGB-HSV round trip) and
-//     the Bump node (its surface gradient from the height's screen-space derivatives: EEVEE evaluates the height a
-//     pixel over in x and y; dFdx and dFdy of the height are the same difference to first order).
+//     the Bump node (its surface gradient from the height's screen-space derivatives: EEVEE evaluates the height graph
+//     again at positions offset within the pixel, by the node's Filter Width, per pixel; here dFdx and dFdy of the
+//     height, the difference across the 2 x 2 pixel quad: the same derivative to first order, but one value a quad
+//     where the height has detail at the pixel's own scale, so the bump crawls more as the camera moves).
 //   - Selects (Blender's comparisons, safe divisions and Map Range's guards) are a node of this file (selectNode):
 //     WGSL select() of two evaluated values, as Blender's GLSL computes them, where three's select writes an if/else
 //     block around each (356 of them in the canyon's material made D3D12's shader compiler spend 237 s on one

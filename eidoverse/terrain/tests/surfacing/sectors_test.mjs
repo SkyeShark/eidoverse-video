@@ -1,8 +1,9 @@
 // The material's check 2 (SURFACING_DESIGN.md 5.4 package 2; PORT_PLAN.md 8.2 row P17: "sectors on the canyon's
 // brink wall and a 45-degree wall without smear"): blender/tests/terrain/surfacing/check_sectors.py's views on the
 // port. Steep faces read in the fixed sector frames, on real walls at their world positions: the judge's brink_down
-// (the canyon's right-hand wall, diagonal to the axes) and wall_L4 (about 250 m of the steepest wall on the finest
-// hero level, seen from 300 m along its mean facing), each with the scans and with a colour grid in place of every
+// (the canyon's right-hand wall, diagonal to the axes) and wall_L4 (check_sectors.wall_camera: about 250 m of the
+// steepest wall on the 0.98 m hero level, seen from 300 m along its mean facing), each with the scans and with a
+// colour grid in place of every
 // box layer's scan (check_sectors.grid_images: cells x cells squares a tile side, distinct colours, dark lines, a pale
 // bar along each cell's top; a flat normal): grid cells must read square, with no streaks and no seam where the sector
 // slots meet; and the field normal's slope as an emission (what the layer weights read). For the eye: the renders are
@@ -11,7 +12,8 @@
 //
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/surfacing/sectors_test.mjs
 //         [--case canyon] [--views brink_down,wall_L4] [--cells 8]
-//     (a GPU job, behind $EIDO_GPU_WRAP)
+//     (a GPU job, behind $EIDO_GPU_WRAP; --views also takes check_reader's edge views grazing_2m, low_6m and
+//     oblique_120m: the material with its scans, lit, across a window edge)
 //
 // Writes tests/out/surfacing/sectors/<case>_<view>_<scan|grid|slope>.png and sectors_test.json.
 
@@ -96,42 +98,58 @@ const plan = judge[{ lauterbrunnen: 'real_place', meteor_crater: 'impact_crater'
 const main = t.levels.find((l) => l.role === 'main') ?? t.levels[0];
 const cx = main.x0 + main.side / 2, cy = main.y0 + main.side / 2;
 const rec = { case: name, views: {} };
-// the cameras: a judge view, or wall_L4 (the finest level's 250 m window with the most ground over 50 degrees, seen
-// from 300 m along its mean facing)
-async function camOf(v) {
+// the cameras: a judge view (its eye, aim, lens and the frame point the aim lands on), or wall_L4 (check_sectors.py
+// wall_camera, transcribed: level 4's 250 m window with the most ground over 50 degrees, seen from 300 m along the
+// steep ground's mean facing, 40 m over its mean height, at 43 mm)
+// check_reader.edge_views ('finest', as edges_test.mjs): 2 m and 6 m over the ground looking across the finest window's
+// south edge, and 120 m up across the next one's: the material lit there, for its look across a window edge (check 1's
+// look part; scans only)
+const EDGE_VIEWS = { grazing_2m: [2.0, 1, 0.15], low_6m: [6.0, 1, 0.3], oblique_120m: [120.0, 2, 0.35] };
+function camOf(v) {
+    if (v in EDGE_VIEWS) {
+        const [dz, back, share] = EDGE_VIEWS[v];
+        const f = sd.levels[sd.levels.length - 1], l = sd.levels[sd.levels.length - back];
+        const ex = f.x0 + 0.5 * f.side, ey = l.y0 - share * l.side * 0.5, ty = l.y0 + 0.25 * l.side;
+        return { eye: [ex, ey, t.ring.heightAt(ex, ey) + dz], target: [ex, ty, t.ring.heightAt(ex, ty)], lens: 35.0, frame: [0.5, 0.5] };
+    }
     if (v !== 'wall_L4') {
         const jv = plan.views.find((x) => x.name === v);
         const ex = jv.cam[0] + cx, ey = jv.cam[1] + cy;
         const ez = jv.cam_z[0] === 'ground' ? t.ring.heightAt(ex, ey) + Number(jv.cam_z[1]) : Number(jv.cam_z[1]);
-        return { eye: [ex, ey, ez], target: [jv.aim[0] + cx, jv.aim[1] + cy, jv.aim[2]], lens: Number(jv.lens) };
+        return { eye: [ex, ey, ez], target: [jv.aim[0] + cx, jv.aim[1] + cy, jv.aim[2]], lens: Number(jv.lens), frame: jv.frame };
     }
-    const k = t.levels.length - 1, lv = t.levels[k];
-    const tm = await Sf.terrainMap(sd, null, { THREE, TSL, R: G.R });
-    void tm;
-    const maps = await sd.maps(k);
-    const n = Math.round(Math.sqrt(maps.slope.length)), cell = lv.side / n;
-    const win = Math.max(8, Math.round(250 / cell));
-    let best = null;
-    for (let j = 0; j + win <= n; j += Math.max(1, win >> 2)) {
-        for (let i = 0; i + win <= n; i += Math.max(1, win >> 2)) {
-            let steep = 0, ax = 0, ay = 0;
-            for (let q = j; q < j + win; q += 4) for (let p = i; p < i + win; p += 4) {
-                const s = maps.slope[q * n + p];
-                if (s > 50) {
-                    steep++;
-                    const a = (maps.aspect[q * n + p] * Math.PI) / 180;
-                    ax += Math.sin(a); ay += Math.cos(a);
-                }
-            }
-            if (!best || steep > best.steep) best = { steep, i, j, ax, ay };
+    const lv = t.levels[4];
+    const mk = t.masks.level(4), h = t.fields(4).h;
+    const n = lv.n, k = Math.max(1, Math.round(250.0 / lv.cell));
+    // the box sums of steep cells over every k x k window (numpy's cumsum of a padded array); the first largest in
+    // row-major order, as np.argmax
+    const c = new Float64Array((n + 1) * (n + 1));
+    for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+            c[(j + 1) * (n + 1) + i + 1] = (mk.slope[j * n + i] > 50.0 ? 1 : 0) + c[j * (n + 1) + i + 1] + c[(j + 1) * (n + 1) + i] - c[j * (n + 1) + i];
         }
     }
-    const mx = lv.x0 + (best.i + win / 2) * cell, my = lv.y0 + (best.j + win / 2) * cell;
-    const l = Math.hypot(best.ax, best.ay) || 1;
-    const fx = best.ax / l, fy = best.ay / l;               // the mean facing (downslope, horizontal)
-    const mz = t.ring.heightAt(mx, my);
-    const ex = mx + 300 * fx, ey = my + 300 * fy;
-    return { eye: [ex, ey, Math.max(t.ring.heightAt(ex, ey) + 2, mz)], target: [mx, my, mz], lens: 35.0 };
+    let best = -1, bj = 0, bi = 0;
+    for (let j = 0; j + k <= n; j++) {
+        for (let i = 0; i + k <= n; i++) {
+            const s = c[(j + k) * (n + 1) + i + k] - c[j * (n + 1) + i + k] - c[(j + k) * (n + 1) + i] + c[j * (n + 1) + i];
+            if (s > best) { best = s; bj = j; bi = i; }
+        }
+    }
+    let fx = 0, fy = 0, cz = 0, m = 0;
+    for (let j = bj; j < bj + k; j++) {
+        for (let i = bi; i < bi + k; i++) {
+            if (!(mk.slope[j * n + i] > 50.0)) continue;
+            const a = (mk.aspect[j * n + i] * Math.PI) / 180;     // compass aspect: x east = sin, y north = cos
+            fx += Math.sin(a); fy += Math.cos(a); cz += h[j * n + i]; m++;
+        }
+    }
+    fx /= m; fy /= m; cz /= m;
+    const nrm = Math.hypot(fx, fy) || 1.0;
+    fx /= nrm; fy /= nrm;
+    const tx = lv.x0 + (bi + 0.5 * k) * lv.cell, ty = lv.y0 + (bj + 0.5 * k) * lv.cell;
+    const ex = tx + 300.0 * fx, ey = ty + 300.0 * fy;
+    return { eye: [ex, ey, Math.max(cz + 40.0, t.ring.heightAt(ex, ey) + 2.0)], target: [tx, ty, cz], lens: 43.0, frame: [0.5, 0.5] };
 }
 const scans = await Sf.scanArrays(sd.palette, { THREE, R: G.R, log: null });
 const grid = gridScans(scans, sd.palette);
@@ -144,13 +162,21 @@ for (const [k, sc] of variants) {
 const tm = await Sf.terrainMap(sd, null, { THREE, TSL, R: G.R });
 const slopeMat = new THREE.MeshBasicNodeMaterial();
 slopeMat.colorNode = TSL.vec4(TSL.vec3(tm.slope.div(90.0)), 1.0);
+// _material_scene.aim_camera: the camera turned so the aim lands on the frame point (a 36 mm sensor fitted horizontally)
+function aimed(c) {
+    const dx = c.target[0] - c.eye[0], dy = c.target[1] - c.eye[1], dz = c.target[2] - c.eye[2];
+    const u = (c.frame[0] - 0.5) * 36.0 / c.lens, w = (0.5 - c.frame[1]) * 36.0 * (H / W) / c.lens;
+    const yaw = Math.atan2(dy, dx) + Math.atan(u), pitch = Math.atan2(dz, Math.hypot(dx, dy)) - Math.atan(w);
+    const d = [Math.cos(pitch) * Math.cos(yaw), Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch)];
+    return { ...c, aim: c.target, target: c.eye.map((e, q) => e + 1000.0 * d[q]) };
+}
 for (const v of views) {
-    const c = await camOf(v);
+    const c = aimed(camOf(v));
     const d = [c.target[0] - c.eye[0], c.target[1] - c.eye[1]];
     const hd = Math.atan2(d[1], d[0]) + (70 * Math.PI) / 180, el = (37.7 * Math.PI) / 180;
     const sunDir = [Math.cos(hd) * Math.cos(el), Math.sin(el), -Math.sin(hd) * Math.cos(el)];
     const r = { camera: c, seconds: {} };
-    for (const [k] of [...variants, ['slope']]) {
+    for (const [k] of (v in EDGE_VIEWS ? [['scan']] : [...variants, ['slope']])) {
         const mat = k === 'slope' ? slopeMat : mats[k];
         t.mesh.material = [mat, mat];
         const scene = new THREE.Scene();

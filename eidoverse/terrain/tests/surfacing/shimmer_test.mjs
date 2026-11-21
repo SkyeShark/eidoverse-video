@@ -12,9 +12,9 @@
 // (out/surfacing/material/shimmer_<case>.json, its record of the same view). Reads the PNGs only.
 //
 //     deno run --config deno.json --frozen --allow-all eidoverse/terrain/tests/surfacing/shimmer_test.mjs
-//         [--case canyon] [--view approach_walk] [--label shimmer] [--dir <views out>]
+//         [--case canyon] [--view approach_walk] [--label shimmer] [--dir <views out>] [--ss 2] [--clay]
 //
-// Writes tests/out/surfacing/shimmer_test_<case>.json.
+// Writes tests/out/surfacing/shimmer_test_<case>_<label>[_clay].json.
 
 import * as M from './_material.mjs';
 import { readImage } from '../../build/surfacing.js';
@@ -24,12 +24,18 @@ const name = A.opt('--case', 'canyon');
 const view = A.opt('--view', 'approach_walk');
 const label = A.opt('--label', 'shimmer');
 const dir = A.opt('--dir', M.out('views'));
+// --ss k: renders made at k x the frame's width and height (views.mjs --W, --H, --turn-width 960), box-averaged k x k
+// to the frame first: k^2 samples a pixel, toward EEVEE's 16; --clay: the grey clay's frames (clay, clay_turn1,
+// clay_turn2), the crawl the frames carry without the material
+const ss = Number(A.opt('--ss', '1'));
+const clay = Deno.args.includes('--clay');
 const BANDS = [['near', 0, 10], ['middle', 10, 40], ['distant', 40, 400], ['far', 400, null]];
 const TOLERANCE = 0.02;
-const T = new M.C.Checks(`surfacing: the shimmer probe on ${name} ${view} (check 4)`);
+const T = new M.C.Checks(`surfacing: the shimmer probe on ${name} ${view} (check 4)${clay ? ', grey clay' : ''}${ss > 1 ? `, ${ss * ss} samples a pixel` : ''}`);
 
 const file = (v) => `${dir}/${name}_${view}_${label}_${v}.png`;
-const need = ['built', 'turn1', 'turn2', 'dist0', 'dist10', 'dist40', 'dist400'];
+const turns = clay ? ['clay', 'clay_turn1', 'clay_turn2'] : ['built', 'turn1', 'turn2'];
+const need = [...turns, 'dist0', 'dist10', 'dist40', 'dist400'];
 const missing = need.filter((v) => !M.W.exists(file(v)));
 if (missing.length) {
     T.ok('the seven renders are there', false, `missing ${missing.join(', ')}: run views.mjs --case ${name} --views ${view} ` +
@@ -61,18 +67,35 @@ function blur(a, w, h, sigma = 1.5) {
     return out;
 }
 
+// an image's RGB box-averaged ss x ss: { w, h, rgb (Float64Array, 0..255) }
+function down(img) {
+    const w0 = img.width, c = img.channels, s = img.data, w = Math.floor(w0 / ss), h = Math.floor(img.height / ss);
+    const rgb = new Float64Array(w * h * 3);
+    for (let j = 0; j < h; j++) {
+        for (let i = 0; i < w; i++) {
+            for (let dj = 0; dj < ss; dj++) {
+                for (let di = 0; di < ss; di++) {
+                    const o = ((j * ss + dj) * w0 + i * ss + di) * c;
+                    for (let ch = 0; ch < 3; ch++) rgb[(j * w + i) * 3 + ch] += s[o + ch];
+                }
+            }
+            for (let ch = 0; ch < 3; ch++) rgb[(j * w + i) * 3 + ch] /= ss * ss;
+        }
+    }
+    return { w, h, rgb };
+}
 const im = {};
-for (const v of need) im[v] = await readImage(file(v));
-const w = im.built.width, h = im.built.height, n = w * h;
+for (const v of need) im[v] = down(await readImage(file(v)));
+const w = im[turns[0]].w, h = im[turns[0]].h, n = w * h;
 const lum = (img) => {
-    const a = new Float64Array(n), c = img.channels, s = img.data;
-    for (let q = 0; q < n; q++) a[q] = (0.2126 * s[q * c] + 0.7152 * s[q * c + 1] + 0.0722 * s[q * c + 2]) / 255.0;
+    const a = new Float64Array(n), s = img.rgb;
+    for (let q = 0; q < n; q++) a[q] = (0.2126 * s[q * 3] + 0.7152 * s[q * 3 + 1] + 0.0722 * s[q * 3 + 2]) / 255.0;
     return blur(a, w, h);
 };
-const frames = ['built', 'turn1', 'turn2'].map((v) => lum(im[v]));
-const on = (v, q) => im[v].data[q * im[v].channels] > 127;
+const frames = turns.map((v) => lum(im[v]));
+const on = (v, q) => im[v].rgb[q * 3] > 127;
 const atLeast = { 0: 'dist0', 10: 'dist10', 40: 'dist40', 400: 'dist400' };
-const rec = { case: name, view, bands: BANDS, tolerance: TOLERANCE, port: {}, parts: {} };
+const rec = { case: name, view, label, samples_a_pixel: ss * ss, clay, bands: BANDS, tolerance: TOLERANCE, port: {}, parts: {} };
 for (const [band, d0, d1] of BANDS) {
     let e = 0, m = 0, k = 0;
     for (let q = 0; q < n; q++) {
@@ -94,6 +117,7 @@ const good = rec.blender
     ? BANDS.every(([band]) => rec.port[band] === null || rec.blender.per_texel?.[band] === null || rec.blender.per_texel?.[band] === undefined
         || rec.port[band] <= rec.blender.per_texel[band] + TOLERANCE)
     : false;
-T.ok(`${view}: no band of view distance crawls more than Blender's per-texel material + ${TOLERANCE}`, good,
+T.ok(`${view}: no band of view distance crawls more than Blender's per-texel material + ${TOLERANCE}` +
+    `${clay ? ' (here the grey clay: the floor the frames carry)' : ''}`, good,
     (rec.blender ? '' : 'no Blender record of the view to hold it to; ') + lines.join('; '));
-Deno.exit(M.finish(T, `shimmer_test_${name}`, rec));
+Deno.exit(M.finish(T, `shimmer_test_${name}_${label}${clay ? '_clay' : ''}`, rec));

@@ -1912,6 +1912,80 @@ export async function cacheBase(terrain, opts = {}) {
     return `${new Ch.Cache(info.cache_key).path}/plants_${h.digest('hex').slice(0, 16)}`;
 }
 
+// -------------------------------------------------------------------------------- shared with dressing.js ---
+
+/** The rendered ground under points (the ring mesh's height_at and normal_at, as the spots read them: build/mesh.js
+ * heightField, plants/ground_normal): { z (an f32 list of n), normal (an f32 list of 3 n, Blender axes) }. pts: the
+ * kernels' candidate records (16 numbers each, the position at 0-3). The lists are the caller's to destroy. */
+export function groundAt(terrain, pts, n, R) {
+    const gpu = new Gpu(R);
+    const xy = gpu.list(2 * n, 'f32');
+    gpu.run('spot_xy', { kp: pts }, { outP: xy }, { uCount: n }, n);
+    const rm = terrain.ring;
+    const z = rm.heightField(R, xy, n);
+    const normal = gpu.list(3 * n, 'f32');
+    const tg = rm._gpu;
+    gpu.run('ground_normal', { kp: pts, zs: tg.zs, lines: tg.lines, ring: tg.ring }, { outN: normal },
+        { uCount: n, uRings: rm.rings.length }, n);
+    xy.destroy();
+    gpu.destroy();
+    return { z, normal };
+}
+
+/** A palette expression over a terrain's maps at points (dressing.py place_rocks' density: its mask_at reads a name
+ * at the finest level holding the point, a name no level has reads 0; the scatter noise at the point; the surface
+ * bake's maps too with `data`), and the water mask there: { values, water } (f32 lists of n; water null where no
+ * level has one), the caller's to destroy. pts: the kernels' candidate records (16 numbers each, position at 0-3). */
+export async function maskExpression(terrain, expr, pts, n, opts = {}) {
+    const R = opts.R ?? await G.init();
+    const gpu = new Gpu(R);
+    const ground = new Ground(gpu, terrain, opts.data ?? null, await terrainConstants(terrain));
+    const tree = P.parse(String(expr));
+    const W = ops.WGSL();
+    const reads = [], index = new Map(), terms = [], fns = [];
+    const has = new Map();
+    for (const nm of [...P.namesIn(tree), 'water', 'height']) has.set(nm, await ground.has(nm));
+    const sampled = (name) => {
+        if (!index.has(name)) {
+            const k = reads.length;
+            index.set(name, k);
+            reads.push(name);
+            fns.push(`fn rd${k}() -> f32 { return v${k}_b[Q]; }`);
+        }
+        return W.ext('f32', `rd${index.get(name)}`);
+    };
+    const C = new ScatterCompiler(W, (name) => (has.get(name) ? sampled(name) : W.f(0.0)), ground.constants, terms);
+    const value = C.expr(tree);
+    const water = has.get('water') ? sampled('water') : null;
+    for (let k = 0; k < terms.length; k++) fns.push(noiseFn(terms[k], k));
+    const src = [`// a palette expression at points (build/plants.js maskExpression): ${JSON.stringify(String(expr)).slice(0, 200)}`,
+        '//! include plants/lib', '//! sampler pts r32ui     the points\' records (16 numbers each, the position at 0-3)',
+        ...reads.map((nm, k) => `//! sampler v${k} r32f      ${nm}`), '//! image   outV r32f', '//! image   outW r32f',
+        '//! uniform int uCount', 'var<private> Q: i32;', 'var<private> POS: vec4<f32>;', W.module(), ...fns,
+        'fn kmain(p: vec2<i32>) {', '  Q = lin(p);', '  if (Q >= u.uCount) { return; }', '  let o = u32(Q * 16);',
+        '  POS = vec4<f32>(bitcast<f32>(pts_b[o]), bitcast<f32>(pts_b[o + 1u]), bitcast<f32>(pts_b[o + 2u]), bitcast<f32>(pts_b[o + 3u]));',
+        W.body('  '), `  outV_b[Q] = ${W.code(value)};`, `  outW_b[Q] = ${water ? W.code(water) : '0.0'};`, '}', ''].join('\n');
+    const kernel = R.kernel(`plants_expr_${createHash('sha1').update(src).digest('hex').slice(0, 12)}`, { source: src });
+    const loc = ground.locate(pts, n, CAND, 0);
+    const samplers = { pts };
+    const made = [];
+    for (let k = 0; k < reads.length; k++) {
+        const v = await ground.sample(reads[k], pts, n, loc.fine, ground.all, CAND, 0);
+        samplers[`v${k}`] = v ?? gpu.dummyF;
+        if (v) made.push(v);
+    }
+    const values = gpu.list(n, 'f32'), w = gpu.list(n, 'f32');
+    gpu.run(kernel, samplers, { outV: values, outW: w }, { uCount: n }, n);
+    for (const f of [...made, loc.fine, loc.coarse]) f.destroy();
+    gpu.destroy();
+    const present = [...has].filter(([, v]) => v).map(([k]) => k);
+    if (!water) {
+        w.destroy();
+        return { values, water: null, present };
+    }
+    return { values, water: w, present };
+}
+
 export {
     planPlants as plan_plants, expectedCover as expected_cover, cacheBase as cache_base, pathDistance as path_distance,
     terrainConstants as terrain_constants,

@@ -14,7 +14,8 @@
 //! sampler starts r32ui  per bucket its first crown in `order`
 //! sampler counts r32ui  per bucket its crowns
 //! sampler order r32ui   the crowns sorted by bucket
-//! image   outS r32f     per spot: the shade, the canopy line over the card's centre
+//! image   outS r32f     per spot: the shade, the canopy line over the card's centre less CANOPY_NONE (-1e4): 0 is
+//                        no line, as the spots' numbers start
 //! uniform vec4  uGO
 //! uniform ivec2 uGW
 //! uniform float uGInv
@@ -73,5 +74,5 @@ fn kmain(p: vec2<i32>) {
     shade = select(1.0, 0.0, u.uDir.w > 1.5);
   }
   outS_b[2 * q] = shade;
-  outS_b[2 * q + 1] = clamp(line - pz, -1.0e4, 1.0e4);
+  outS_b[2 * q + 1] = clamp(line - pz, -1.0e4, 1.0e4) + 1.0e4;
 }

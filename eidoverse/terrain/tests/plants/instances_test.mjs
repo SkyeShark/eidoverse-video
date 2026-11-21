@@ -46,6 +46,20 @@ globalThis.setup = async function () {
     await renderer.init();
     globalThis._r = renderer;
     globalThis._noAutoEnhance = true;
+    // a shader that does not compile says why (the backend reports only that a module is invalid)
+    const dev = renderer.backend.device, mk = dev.createShaderModule.bind(dev);
+    dev.createShaderModule = (d) => {
+        const m = mk(d);
+        m.getCompilationInfo?.().then((ci) => {
+            for (const msg of ci.messages.filter((x) => x.type === 'error')) {
+                const lines = String(d.code).split('\\n');
+                const at = Math.max(0, (msg.lineNum ?? 1) - 1);
+                console.log('[shader error] ' + (d.label ?? '') + ': ' + msg.message + ' at line ' + msg.lineNum + ': ' +
+                    lines.slice(Math.max(0, at - 2), at + 2).join(' | '));
+            }
+        }).catch(() => {});
+        return m;
+    };
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0.55, 0.68, 0.85);
     const camera = new THREE.PerspectiveCamera(40, WIDTH / HEIGHT, 0.1, 40000);
@@ -163,15 +177,24 @@ globalThis.renderFrame = async function (tt) {
         ctx.plants.update(camera);
         await r.backend.device.queue.onSubmittedWorkDone();
         const passMs = performance.now() - t0;
+        if (!ctx.dumped) {            // the LOD pass' compute shaders, for reading (test output)
+            ctx.dumped = true;
+            const s0 = ctx.plants._still[0];
+            const sh = s0.pass.nodes.map((nd) => r._nodes.getForCompute(nd).computeShader);
+            Deno.writeTextFileSync(ctx.V.result.replace('_result.json', '_compute.wgsl'), sh.join('\\n// ----\\n'));
+        }
         const ref = reference(ctx, c.eye);
         const got = {};
         for (const s of ctx.plants._still) {
             const cnt = new Uint32Array(await r.getArrayBufferAsync(s.pass.debug.cntA));
             const rk = new Float32Array(await r.getArrayBufferAsync(s.pass.debug.rkA))[0];
+            const sel = Array.from(new Uint32Array(await r.getArrayBufferAsync(s.pass.debug.selA)));
+            const lcnt = new Uint32Array(await r.getArrayBufferAsync(s.pass.debug.lcntA))[0];
+            const hist = new Uint32Array(await r.getArrayBufferAsync(s.pass.debug.histA));
             const V = s.k.length;
             const counts = Array.from({ length: V }, () => [0, 0, 0]);
             s.buckets.forEach((b, i) => { counts[b.v][b.lod] = cnt[i]; });
-            got[s.entry.name] = { counts, rk };
+            got[s.entry.name] = { counts, rk, sel, lcnt, histTotal: hist.reduce((a, x) => a + x, 0) };
         }
         const share = await plantShare(r, globalThis._s, camera, ctx.plants);
         const t1 = performance.now();
@@ -211,7 +234,8 @@ if (res) {
             g.counts.forEach((row, v) => row.forEach((x, l) => { worst = Math.max(worst, Math.abs(x - ref.counts[v][l])); }));
             T.ok(`${r.camera} / ${sp}: the LOD pass' buckets equal the rule's (hero, cards, billboards per individual)`, worst <= 1,
                 `GPU ${JSON.stringify(g.counts)} vs ${JSON.stringify(ref.counts)}; hero radius ${g.rk.toFixed(3)} vs ${ref.rk.toFixed(3)} m, ` +
-                `cards to ${ref.cardM.toFixed(1)} m`);
+                `cards to ${ref.cardM.toFixed(1)} m` + (worst > 1 ? `; the threshold's bin ${g.sel[0]}, need ${g.sel[1]}, within hero_m ` +
+                `${g.sel[2]} (histogram ${g.histTotal}), collected ${g.lcnt}` : ''));
             if (res.species[sp] && ref.heroK < 96) heroTrees += g.counts.reduce((a, row) => a + row[0], 0);
         }
         T.ok(`${r.camera}: at most 64 trees at their full level`, heroTrees <= 64, `${heroTrees}`);

@@ -13,6 +13,10 @@
 //! sampler iwv r32f      per instance its aWindVec, 3 each
 //! sampler iap r32f      per instance its aAnchorPos, 3 each
 //! image   outV r32f     per merged vertex its 15 numbers
+//! uniform vec4 uL0      the part's own matrix in the level's frame (columns; an identity for SeedThree's parts)
+//! uniform vec4 uL1
+//! uniform vec4 uL2
+//! uniform vec4 uL3
 //! uniform int uNv       the part's vertices
 //! uniform int uCount    instances x uNv
 
@@ -22,10 +26,16 @@ fn kmain(p: vec2<i32>) {
   let j = q / u.uNv;
   let v = q - j * u.uNv;
   let m = 16 * j;
-  let c0 = vec3<f32>(mats_b[m], mats_b[m + 1], mats_b[m + 2]);
-  let c1 = vec3<f32>(mats_b[m + 4], mats_b[m + 5], mats_b[m + 6]);
-  let c2 = vec3<f32>(mats_b[m + 8], mats_b[m + 9], mats_b[m + 10]);
-  let t = vec3<f32>(mats_b[m + 12], mats_b[m + 13], mats_b[m + 14]);
+  let L = mat4x4<f32>(u.uL0, u.uL1, u.uL2, u.uL3);
+  let Mi = mat4x4<f32>(vec4<f32>(mats_b[m], mats_b[m + 1], mats_b[m + 2], mats_b[m + 3]),
+                       vec4<f32>(mats_b[m + 4], mats_b[m + 5], mats_b[m + 6], mats_b[m + 7]),
+                       vec4<f32>(mats_b[m + 8], mats_b[m + 9], mats_b[m + 10], mats_b[m + 11]),
+                       vec4<f32>(mats_b[m + 12], mats_b[m + 13], mats_b[m + 14], mats_b[m + 15]));
+  let Mm = L * Mi;
+  let c0 = Mm[0].xyz;
+  let c1 = Mm[1].xyz;
+  let c2 = Mm[2].xyz;
+  let t = Mm[3].xyz;
   let P = vec3<f32>(pos_b[3 * v], pos_b[3 * v + 1], pos_b[3 * v + 2]);
   let N = vec3<f32>(nrm_b[3 * v], nrm_b[3 * v + 1], nrm_b[3 * v + 2]);
   let wp = c0 * P.x + c1 * P.y + c2 * P.z + t;

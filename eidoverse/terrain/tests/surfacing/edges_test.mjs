@@ -136,7 +136,9 @@ for (const name of cases) {
                 other_over_005: share(eF), other_mean: mean(eF), other_p99: M.percentile(eF, 99) };
         });
         for (const k of ['reader', 'ref']) await png(`${outDir}/${name}_${vname}_${k}.png`, imgs[k], W, H);
-        await png(`${outDir}/${name}_${vname}_level.png`, imgs.level.map((v, q) => (q % 4 === 0 ? v * 8 : q % 4 === 3 ? 1 : 0)), W, H);
+        // the level map as grey steps: level k at k / (levels - 1)
+        const top = Math.max(1, sd.levels.length - 1);
+        await png(`${outDir}/${name}_${vname}_level.png`, imgs.level.map((v, q) => (q % 4 === 3 ? 1 : (16.0 * imgs.level[q - (q % 4)]) / top)), W, H);
         out[vname] = r;
         console.log(`[edges] ${name} ${vname}: ${JSON.stringify(r)}`);
     }

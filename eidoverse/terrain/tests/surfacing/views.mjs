@@ -18,9 +18,11 @@
 // the horizon), far (D0 at 1 cm: the far colour C wherever the hand-off allows it), allow (a mask: where the far colour
 // may draw, more than 64 main cells outside the outermost hero window), band (a mask: view distance D0..1.5 D0); and
 // check_shimmer.py's: turn1, turn2 (the material as built, the camera turned about the vertical by 0.5 and 1 pixel),
-// dist<m> (a mask: view distance at least m metres; dist0 the ground). Masks draw the terrain alone, white where their
-// test holds, black elsewhere. Each view once per variant, written <case>_<view>_<label>_<variant>.png; D0 moves by
-// setFarDistance, so one compile.
+// dist<m> (a mask: view distance at least m metres; dist0 the ground); clay, clay_turn1, clay_turn2 (grey clay in place
+// of the material: the frames' crawl without it). Masks draw the terrain alone, white where their test holds, black
+// elsewhere. Each view once per variant, written <case>_<view>_<label>_<variant>.png; D0 moves by setFarDistance, so
+// one compile. --turn-width: the frame width whose pixel the turns are (default --W; a supersampled render at 2 x the
+// width turns by the 1 x frame's pixel with --turn-width 960).
 //
 // Where this differs from the Blender rig, and why: as tests/judge/views.mjs's rig, the sky facade takes no azimuth, so
 // the ground and the camera are turned together about the vertical until the facade's 15:30 sun stands 70 degrees
@@ -60,7 +62,7 @@ const sets = M.useSets();
 
 const spec = { snap, bakeDir, bakeOptions: { ...(bb?.info?.options ?? {}) }, views: pick, W, H, exposureEv: -0.5, hours: 15.5,
     sunLeftDeg: 70.0, sunElevationDeg: 37.7, options: options ? JSON.parse(options) : null, sets, label, name, variants,
-    usedJson: `${out}/${name}_${label}_views.json` };
+    usedJson: `${out}/${name}_${label}_views.json`, turnWidth: Number(A.opt('--turn-width', String(W))) };
 
 const script = `// The surfacing package's views (eidoverse/terrain/tests/surfacing/views.mjs writes this file).
 globalThis.setup = async function () {
@@ -165,18 +167,24 @@ globalThis.setup = async function () {
     sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.bias = -0.0002;
     await sky.bakeEnv();
-    globalThis._views = { cams, world, sun, sky, s, elSky, t, built, near, D0, masks, Sf, variants: V.variants };
+    const clay = V.variants.some((v) => v.startsWith('clay')) ? Sf.clayMaterial(THREE, 'clay') : null;
+    globalThis._views = { cams, world, sun, sky, s, elSky, t, built, near, D0, masks, Sf, variants: V.variants, clay,
+        turnWidth: V.turnWidth };
     Deno.writeTextFileSync(V.usedJson, JSON.stringify({ case: V.name, label: V.label, sky_sun_elevation_deg: elSky,
         views: cams, options: V.options, material: { textures: t.mesh.material[0].userData.eidoTextures,
             far_m: t.mesh.material[0].userData.eidoFarM, build_s: t.mesh.material[0].userData.eidoBuildS } }, null, 1));
 };
 globalThis.renderFrame = async function (tt) {
-    const { cams, world, sun, sky, s, t, built, near, D0, masks, Sf, variants } = globalThis._views;
+    const { cams, world, sun, sky, s, t, built, near, D0, masks, Sf, variants, clay, turnWidth } = globalThis._views;
     const k = Math.max(0, Math.round(tt));
     const c = cams[Math.min(cams.length - 1, Math.floor(k / variants.length))];
     const variant = variants[k % variants.length];
     const mask = masks[variant] ?? null;
-    if (variant === 'built' || variant === 'turn1' || variant === 'turn2') {
+    // clay, clay_turn1, clay_turn2: the grey clay in place of the material (the frames' floor without it)
+    const base = variant.startsWith('clay') ? (variant.slice(5) || 'built') : variant;
+    if (variant.startsWith('clay')) {
+        t.mesh.material = [clay, clay];
+    } else if (variant === 'built' || variant === 'turn1' || variant === 'turn2') {
         t.mesh.material = built;
         Sf.setFarDistance(near, D0);
     } else if (variant === 'near' || variant === 'far') {
@@ -193,11 +201,11 @@ globalThis.renderFrame = async function (tt) {
     const R = new THREE.Matrix4().makeRotationY(theta);
     // check_shimmer.py's turns: the camera turned about the world's vertical through itself by 0.5 and 1 pixel
     // ((36 / lens) / width radians, the frame's centre), Blender's +z the vertical here too
-    const turn = variant === 'turn1' ? 0.5 : variant === 'turn2' ? 1.0 : 0.0;
+    const turn = base === 'turn1' ? 0.5 : base === 'turn2' ? 1.0 : 0.0;
     const lookAt = new THREE.Vector3(...c.look);
     if (turn) {
         const e = new THREE.Vector3(...c.eye);
-        lookAt.sub(e).applyAxisAngle(new THREE.Vector3(0, 1, 0), turn * (36.0 / c.lens) / WIDTH).add(e);
+        lookAt.sub(e).applyAxisAngle(new THREE.Vector3(0, 1, 0), turn * (36.0 / c.lens) / (turnWidth ?? WIDTH)).add(e);
     }
     const pos = new THREE.Vector3(...c.eye).applyMatrix4(R), look = lookAt.applyMatrix4(R);
     const tgt = new THREE.Vector3(...c.target).applyMatrix4(R);

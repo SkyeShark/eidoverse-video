@@ -61,6 +61,9 @@
 //     app's grove lives in its main.js); a still shot is what the design's renders use.
 //   - The billboard cut-out: Blender's dithered blend takes a fraction of the 16 samples; here alpha to coverage over
 //     the renderer's MSAA samples (alpha hashed without MSAA), the shadow pass cut at ALPHA_CUT.
+//   - SeedThree's card materials' ambient-occlusion mask (an MRT channel its app's N8AO pass reads) is left out of the
+//     copies: three r184 gives a material MRT outside an MRT pass an empty fragment output (a shader that does not
+//     compile), and this edition's renders run no such pass.
 //   - Flora: createFlora takes its placements as JavaScript arrays and loops over them itself (vegetation.js); the
 //     spots' numbers it needs (base height, stroke scale) come from a GPU pass and are handed over as they are.
 
@@ -273,11 +276,14 @@ export async function growSeedThree(species, seed, dials, { renderer, log = null
 
 // ------------------------------------------------------------------------------------ a level's parts ---
 
-// a geometry's attribute as a plain float array (the merge kernel's input)
+// a geometry's attribute as a plain float array of its first n items (the merge kernel's input; SeedThree allocates
+// some instanced buffers to a capacity above the live count)
 const arrOf = (a, n, size) => {
     if (!a) return new Float32Array(Math.max(n * size, 1));
     if (a.isInterleavedBufferAttribute) throw new Error('[plants] an interleaved SeedThree attribute: not expected');
-    return a.array instanceof Float32Array ? a.array : Float32Array.from(a.array);
+    if (a.itemSize !== size) throw new Error(`[plants] a SeedThree attribute of ${a.itemSize} numbers where ${size} are read`);
+    const v = a.array.subarray(0, n * size);
+    return v instanceof Float32Array ? v : Float32Array.from(v);
 };
 
 const PARTS = new WeakMap();
@@ -304,22 +310,19 @@ async function levelParts(level, R) {
         }
         const k = m.count, nv = geo.attributes.position.count;
         if (!k || !nv) continue;
-        const mats = new Float32Array(k * 16);
-        const tmp = new THREE.Matrix4(), M = new THREE.Matrix4();
-        // the part's own transform in each instance's matrix (an identity for SeedThree's levels: one copy then)
-        if (local.equals(new THREE.Matrix4())) mats.set(m.instanceMatrix.array.subarray(0, k * 16));
-        else for (let j = 0; j < k; j++) { m.getMatrixAt(j, tmp); M.multiplyMatrices(local, tmp); mats.set(M.elements, 16 * j); }
         const ga = geo.attributes;
         const lists = {
             pos: P.list(nv * 3, 'f32', arrOf(ga.position, nv, 3)), nrm: P.list(nv * 3, 'f32', arrOf(ga.normal, nv, 3)),
-            uvs: P.list(nv * 2, 'f32', arrOf(ga.uv, nv, 2)), mats: P.list(k * 16, 'f32', mats),
+            uvs: P.list(nv * 2, 'f32', arrOf(ga.uv, nv, 2)), mats: P.list(k * 16, 'f32', arrOf(m.instanceMatrix, k, 16)),
             ith: P.list(k, 'f32', arrOf(ga.aThickness, k, 1)), iwv: P.list(k * 3, 'f32', arrOf(ga.aWindVec, k, 3)),
             iap: P.list(k * 3, 'f32', arrOf(ga.aAnchorPos, k, 3)),
         };
         const outV = P.list(k * nv * 15, 'f32');
-        R.run(R.kernel('plants/merge_instances'), lists, { outV }, { uNv: nv, uCount: k * nv }, lineGroups(k * nv));
+        const le = local.elements;                       // the part's own transform (an identity for SeedThree's levels)
+        R.run(R.kernel('plants/merge_instances'), lists, { outV }, { uL0: le.slice(0, 4), uL1: le.slice(4, 8), uL2: le.slice(8, 12),
+            uL3: le.slice(12, 16), uNv: nv, uCount: k * nv }, lineGroups(k * nv));
         const ni = geo.index ? geo.index.count : nv;
-        const idx = P.list(Math.max(ni, 1), 'u32', geo.index ? Uint32Array.from(geo.index.array) : null);
+        const idx = P.list(Math.max(ni, 1), 'u32', geo.index ? Uint32Array.from(geo.index.array.subarray(0, ni)) : null);
         const outI = P.list(k * ni, 'u32');
         R.run(R.kernel('plants/merge_index'), { idx }, { outI }, { uNi: ni, uNv: nv, uIdentity: geo.index ? 0 : 1, uCount: k * ni },
             lineGroups(k * ni));
@@ -360,6 +363,9 @@ const isOne = (g) => g.every((v) => Math.abs(v - 1.0) < 1e-12);
 function tintedMaterial(src, { foliage, centre, mats, cap, tone, card }) {
     const m = src.clone();
     m.userData = { ...src.userData, eidoTintOf: src.name || src.uuid };
+    // SeedThree's card materials write an ambient-occlusion mask to its app's MRT pass; outside an MRT pass three r184
+    // builds them an empty fragment output, so the copies draw to the plain output
+    m.mrtNode = null;
     const g = tone3(tone);
     if (foliage) {
         const M = T.storage(mats, 'mat4', Math.max(cap, 1)).element(T.instanceIndex);
@@ -445,7 +451,6 @@ function billboardMaterial(tex, { mats, extras, cap, cardH, centreY, gain, alpha
     if (samples > 1) mat.alphaToCoverage = true;
     else mat.alphaHash = true;
     mat.maskShadowNode = alb.a.greaterThan(cut);
-    mat.mrtNode = T.mrt({ output: T.output, normal: T.normalView, aomask: T.float(0) });
     mat.userData.eidoBillboard = { gain: g, alpha: cut, foliage: !!foliage, tone: tn };
     return mat;
 }
@@ -555,26 +560,24 @@ function lodPasses({ recAttr, n, V, k, centre, sink, foot, sizeH, heroM, heroK, 
             });
         });
     })().compute(Math.max(n, 1), [64]);
-    const select = S.Fn(() => {
-        const r = S.float(-1.0).toVar();
-        S.If(uHeroK.greaterThan(0.5), () => {
-            r.assign(uHeroM);
-            S.If(sel.element(0).lessThan(S.uint(NB)), () => {
-                const m = S.min(S.atomicLoad(lcnt.element(0)), S.uint(LCAP));
-                const want = sel.element(1).sub(1);
-                S.Loop({ start: S.uint(0), end: m, type: 'uint', condition: '<', name: 'ja' }, ({ ja }) => {
-                    const v = lst.element(ja);
-                    const below = S.uint(0).toVar();
-                    S.Loop({ start: S.uint(0), end: m, type: 'uint', condition: '<', name: 'jb' }, ({ jb }) => {
-                        const w = lst.element(jb);
-                        S.If(w.lessThan(v).or(w.equal(v).and(jb.lessThan(ja))), () => { below.addAssign(1); });
-                    });
-                    S.If(below.equal(want), () => { r.assign(v); });
-                });
-            });
-        });
-        rk.element(0).assign(r);
+    // the threshold: hero_m (fewer than hero_k within it), -1 (no hero), else the need-th smallest distance of the
+    // collected bin: each collected distance ranks itself (ties by slot) and the one of rank need - 1 writes itself
+    const select0 = S.Fn(() => {
+        rk.element(0).assign(S.select(uHeroK.greaterThan(0.5), uHeroM, S.float(-1.0)));
     })().compute(1, [1]);
+    const select1 = S.Fn(() => {
+        const ja = S.instanceIndex;
+        const m = S.min(S.atomicLoad(lcnt.element(0)), S.uint(LCAP)).toVar();
+        S.If(uHeroK.greaterThan(0.5).and(sel.element(0).lessThan(S.uint(NB))).and(ja.lessThan(m)), () => {
+            const v = lst.element(ja).toVar();
+            const below = S.uint(0).toVar();
+            S.Loop({ start: S.uint(0), end: m, type: 'uint', condition: '<', name: 'jb' }, ({ jb }) => {
+                const w = lst.element(jb);
+                S.If(w.lessThan(v).or(w.equal(v).and(jb.lessThan(ja))), () => { below.addAssign(S.uint(1)); });
+            });
+            S.If(below.add(S.uint(1)).equal(sel.element(1)), () => { rk.element(0).assign(v); });
+        });
+    })().compute(LCAP, [64]);
     const scatters = buckets.map((bk, bi) => S.Fn(() => {
         const i = S.instanceIndex;
         S.If(i.lessThan(S.uint(n)), () => {
@@ -598,7 +601,8 @@ function lodPasses({ recAttr, n, V, k, centre, sink, foot, sizeH, heroM, heroK, 
                         S.storage(bk.cols, 'vec3', bk.cap).element(s).assign(S.vec3(tf, tf, tf));
                         if (bk.extras) {
                             const sv = sun.element(i);
-                            S.storage(bk.extras, 'vec4', bk.cap).element(s).assign(S.vec4(b.sc.mul(Number(sizeH)), yaw, sv.x, sv.y));
+                            S.storage(bk.extras, 'vec4', bk.cap).element(s).assign(S.vec4(b.sc.mul(Number(sizeH)), yaw, sv.x,
+                                sv.y.add(CANOPY_NONE)));
                         }
                     });
                 });
@@ -612,8 +616,8 @@ function lodPasses({ recAttr, n, V, k, centre, sink, foot, sizeH, heroM, heroK, 
             ind.element(p.mul(5).add(1)).assign(S.atomicLoad(cnt.element(b)));
         });
     })().compute(Math.max(partBucket.length, 1), [64]);
-    return { nodes: [reset, prep, find, collect, select, ...scatters, args], uCam, uHeroM, uHeroK, uCardM,
-        debug: { distA, histA, selA, rkA, cntA }, dispose() { /* the attributes are freed with the renderer's */ } };
+    return { nodes: [reset, prep, find, collect, select0, select1, ...scatters, args], uCam, uHeroM, uHeroK, uCardM,
+        debug: { distA, histA, selA, rkA, cntA, lcntA, lstA }, dispose() { /* the attributes are freed with the renderer's */ } };
 }
 
 // --------------------------------------------------------------------------------------- the instancing ---
@@ -637,9 +641,8 @@ async function instanceSeedThreeStill(entry, rec, focus, group, lod, base, ctx, 
     const k = plants.map((p) => (p ? Number(entry.size_m[1]) / p.top_m : 1.0));
     const centre = plants.map((p) => (p?.billboard ? p.billboard.centreY : 0.0));
     const recAttr = new THREE.StorageBufferAttribute(rec, 1);
-    const sunData = new Float32Array(Math.max(n, 1) * 2);
-    for (let i = 1; i < sunData.length; i += 2) sunData[i] = CANOPY_NONE;      // (fill: no crown's shadow until bindSun)
-    const sunAttr = new THREE.StorageBufferAttribute(sunData, 2);
+    // per spot (the terrain's shade, its canopy line - CANOPY_NONE): zeros until bindSun, no shade and no crown's line
+    const sunAttr = new THREE.StorageBufferAttribute(new Float32Array(Math.max(n, 1) * 2), 2);
     const buckets = [], partBucket = [], meshes = [];
     const indParts = [];
     const tag = `${base}_${PL.filePart(entry.name)}`;
@@ -818,7 +821,7 @@ async function instanceFlora(entry, rec, group, base, ctx) {
             return h;
         };
         const field = await globalThis.createFlora({ species: ident, placements, heightFn, seed: Math.trunc(Number(seeds[v])),
-            ...floraKw(opts), wind: 0, sunDir: ctx.sunDir ?? undefined });
+            ...floraKw(opts), wind: 0, ...(ctx.sunDir ? { sunDir: ctx.sunDir } : {}) });
         if (opts.gain) {
             gainFlora(field.material, opts.gain);
             if (field.stemMesh) gainFlora(field.stemMesh.material, opts.gain);
