@@ -402,6 +402,22 @@ def soil_convexity(relief_m, spacing_m):
     return 8.0 * float(relief_m) / float(spacing_m) ** 2
 
 
+def seam_zone(pin_w, level, width_m):
+    """A child level's seam zone, for a stage whose change departs from its parent's surface at the scale of the
+    features it forms (soil_hills: its hills): 1 on the seam's own cells (the pins of weight 1: the window's outer
+    rings, the sea), easing (smoothstep) to 0 at width_m from the window's edge, or at the border band's inner edge
+    if that is farther. A change of d metres let go over w metres adds about d / w to the slope: over the band's 16
+    cells (2.5 m on the meadow's 0.16 m main tile) the soil's 0.4 m was 10-15 degrees, over half a valley spacing
+    (15 m there) it is under 2."""
+    pw = np.asarray(pin_w, np.float64)
+    e = Gd.edge_distance(level.n).astype(np.float64)
+    free = pw < 1.0
+    s0 = float(e[free].min()) if free.any() else 0.0
+    w = max(float(level.band), float(width_m) / float(level.cell))
+    t = np.clip((e - s0) / max(w - s0, 1.0), 0.0, 1.0)
+    return np.maximum(1.0 - t * t * (3.0 - 2.0 * t), np.where(pw >= 1.0, 1.0, 0.0))
+
+
 def _block2(a, how):
     m0, m1 = a.shape[0] // 2, a.shape[1] // 2
     b = np.asarray(a, np.float64)[:2 * m0, :2 * m1].reshape(m0, 2, m1, 2)
@@ -498,8 +514,9 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
                                          spills so every swale drains - the microrelief a near-level surface starts
                                          from (till hummocks, old dune swells), so a meadow the countryside left
                                          level still gathers its water into swales at the spacing
-    The border band holds the ground the stages before left it (unseeded), the seam's own cells the parent's
-    surface; sea cells are held."""
+    On a child level the solve holds the seam's own cells (its pins of weight 1) at the parent's surface, and its
+    outcome fades to the parent's surface across the seam zone (seam_zone: half the level's valley spacing from the
+    window's edge, at least the border band); sea cells are held."""
     ctx = ctx or FL.standalone_context(fields, level)
     t0 = time.perf_counter()
     if params.get('enabled', True) is False:
@@ -522,7 +539,6 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
         # the parent's rills come out before this level cuts its own (rill_cut, inherited): held channel cells kept
         # the parent's rill depth and the new rill went in on top, three levels deep, as steps along the swales
         h = h + np.asarray(fields['rill_cut'], np.float64) * (1.0 - np.clip(pins['pin_w'], 0.0, 1.0))
-    h_band = h                    # the ground the border band holds (below, before the solve)
     from . import hydro as HY
     seed_m = float(p['seed_m'])
     seeded = seed_m > 0 and cell <= float(p['seed_max_cell_m'])
@@ -589,20 +605,28 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
             hold = np.where(np.asarray(fields[k], np.float64) > 0.5, 1.0, hold)
     az = math.radians(float(p['wind_from_deg']) + 180.0)
     wind = (math.sin(az), math.cos(az))
-    # the border band is held at the ground the stages before left it (unseeded), the seam's own cells at the
-    # parent's surface: a fluvial stage with band_blend fades its own change across the band, and pinned back to the
-    # parent's surface here that change met the held channels and the solved slopes in a step at the band's inner
-    # edge (slope p99 28-33 degrees there against 15-16 inside on the meadow's film level)
     pw = np.asarray(pins['pin_w'], np.float64)
-    band_h = np.where((pw > 0.0) & (pw < 1.0), h_band, np.asarray(pins['pin_h'], np.float64))
-    hs, change, its = soil_solve(dev, h, hold, h, pins['pin_w'], band_h, cell, C,
-                                 float(p['asymmetry']), wind, half_cells=0.5 * sp / cell, omega=float(p['omega']),
-                                 coarse_levels=int(p['coarse_levels']), iter_scale=float(p['iter_scale']))
+    ph = np.asarray(pins['pin_h'], np.float64)
+    fade = seam_zone(pw, level, 0.5 * sp) if (ctx.pins is not None and ctx.index > 0) else None
+    # a child level: the solve holds only the seam's own cells (and the sea), and its outcome fades to the parent's
+    # surface across the seam zone once (seam_zone). The level's hills stand between its own channels, which are
+    # not its parent's (the meadow's main tile re-forms its parent's 48 m swales as 30 m ones), so its ground departs
+    # from its parent's surface by up to the hills' relief everywhere. Held to the parent in the border band, every
+    # way tried (the band's weights in every iteration, the band at the level's own ground, the outcome blended by
+    # the band's weights once), that departure was let go over the band's 16 cells, 2.5 m on the meadow's film tile:
+    # slope p99 25-28 degrees 8-12 cells in from the edge against 13 inside after this stage, and 28-32 at the end,
+    # once the stages after it had pulled the band to the parent's surface again
+    hs, change, its = soil_solve(dev, h, hold, h, pw if fade is None else np.where(pw >= 1.0, 1.0, 0.0), ph, cell,
+                                 C, float(p['asymmetry']), wind, half_cells=0.5 * sp / cell,
+                                 omega=float(p['omega']), coarse_levels=int(p['coarse_levels']),
+                                 iter_scale=float(p['iter_scale']))
     cap = float(p['rise_cap']) * relief
     if cap > 0:
         hs = h + soft_cap(hs - h, cap)
     b = float(p['blend'])
     hn = h + b * (hs - h)
+    if fade is not None:
+        hn = hn + fade * (ph - hn)
     if cuts:
         gmax = max(float(p['rill_growth_max']), 1.0)
         d = np.where(chan, rill * np.clip((A / a_ch) ** 0.25, 1.0, gmax), 0.0)
@@ -611,7 +635,7 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
         cut = gaussian_blur(d, sig) / peak if sig > 0.4 else d
         # the blurred line, not the line itself: max(cut, d) put the full depth back on the centre cells, a
         # one-cell slot down the middle of every rill
-        cut = np.minimum(cut, gmax * rill) * (1.0 - np.clip(pins['pin_w'], 0.0, 1.0))
+        cut = np.minimum(cut, gmax * rill) * (1.0 - (np.clip(pw, 0.0, 1.0) if fade is None else fade))
         hn = hn - cut
         fields['rill_cut'] = cut.astype(F32)
     fields['h'] = hn.astype(F32)

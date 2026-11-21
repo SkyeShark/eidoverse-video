@@ -34,15 +34,19 @@ numpy twins; no Blender):
        lake_receivers (solvers/hydro.py, the channels' continuation across filled hollows): a path into a filled
        hollow runs down its floor to its lowest cell (within a cell) and out to its spill, where the breadth-first
        steps across the level fill pass 4 cells and more from it; every path ends at an outlet
-       the border band of a child level (its ground faded from the parent's surface, 0.3 m over the level's, by a
-       blended fluvial stage): the slope p99 at the band's inner edge within 1.4 x the inside's, where the band held
-       at the parent's surface stands 1.75 x and more; the seam's cells on the parent's surface (within 1e-4 m)
+       a child level whose swales are not its parent's (the parent's surface 0.3 m higher, with swales 24 m apart
+       where the level's are 16): the slope p99 across the seam zone (half the spacing from the edge) within 1.2 x
+       the inside's, where pinned by the band's weights in every iteration it stands 1.4 x and more; the seam's
+       cells on the parent's surface (within 1e-4 m)
   fluvial band_blend, hold_rivers (solvers/fluvial.py)
        pulled to its pins at its weight every pass, a band cell of weight 0.25 or more moves under 5 % of what the
        level moves it free (the band is a pin); blended, the outcome is the run with only the seam's two cells held,
        mixed with the parent by the band's weights (within 1e-4 m)
        hold_rivers on a hero level: the river the parent resolved keeps its heights (within 1e-4 m; free it moves
        over 5 cm), and the ground around it refines at least half as much as free
+       channel_head_frac on a refining level: rippled hillsides beside a river start no channels (their p90 change
+       under a quarter of free), and the river still cuts (at least a quarter of free, and 1 m deeper than with a
+       head above every cell's area, where creep fills its bed)
   hydro inlets (solvers/hydro.py, run.py's end stage)
        the water a child is given across 21 edge cells behind a 0.2 m lip reaches its valley's outlet whole with the
        inlets closed, under half of it with the whole edge open
@@ -66,6 +70,7 @@ numpy twins; no Blender):
 Writes blender/tests/terrain/out/fluvial/floors_hills_tests.json; exit code 1 on a failure.
 """
 import json
+import math
 import os
 import sys
 
@@ -581,40 +586,42 @@ def test_band_blend():
 
 
 def test_soil_band():
-    """soil_hills on a child level holds its border band at the ground the stages before left it, the seam's cells at
-    the parent's surface. A fluvial stage with band_blend fades the level's own change across the band; held at the
-    parent's surface instead, the band stood above the held channels and the solved hillslopes just inside it, a
-    step at the band's inner edge (the meadow's steep edge strips)."""
-    n, cell = 96, 0.5
-    lv = L.Level(0, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    """soil_hills on a child level: its hills stand between its own channels, not its parent's, so its ground departs
+    from its parent's surface everywhere. The solve holds only the seam's own cells, and its outcome fades to the
+    parent's surface across the seam zone (half a valley spacing, at least the border band). Pinned by the band's
+    weights in every iteration instead, the departure was let go over the band's 16 cells, a strip steeper than the
+    inside along every edge (the meadow's main tile: 25-32 degrees against 13-15)."""
+    n, cell = 128, 0.25
+    parent = L.Level(0, 'context', -n * cell, -n * cell, 2 * n * cell, 2 * cell, n, None, 2, (), 16, 1)
+    lv = L.Level(1, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n, 0, 1, (), 16, 0)
     x, y = lv.xy()
-    # swales 12 m apart on a plane falling south, rippled; the parent's surface stands 0.3 m over the level's own
-    # ground (its erosion took that off), and the band's ground fades from the one to the other (a blended fluvial
-    # stage)
-    g = 0.03 * (y - lv.y0) - 0.5 * np.clip(1.0 - np.abs(((x + 3.0) % 12.0) - 6.0) / 2.5, 0.0, 1.0) \
+    # the level's swales 16 m apart on a plane falling south, rippled; the parent's surface carries its own swales,
+    # 24 m apart and 0.3 m higher, and the band's ground fades from the one to the other (a blended fluvial stage)
+    fall = 0.03 * (y - lv.y0)
+    g = fall - 0.5 * np.clip(1.0 - np.abs(((x + 3.0) % 16.0) - 8.0) / 3.0, 0.0, 1.0) \
         + 0.15 * np.sin(x / 2.3 + 1.0) * np.cos(y / 3.1)
-    pins = band_pins(n, g + 0.3)
+    up = fall + 0.3 - 0.6 * np.clip(1.0 - np.abs(((x + 7.0) % 24.0) - 12.0) / 4.0, 0.0, 1.0)
+    pins = band_pins(n, up)
     w = pins['pin_w'].astype(np.float64)
-    h0 = g + 0.3 * w
-    prm = {'valley_spacing_m': 12.0, 'relief_m': 0.5, 'channel_frac': 0.25, 'flow_exponent': 1.0}
+    h0 = g + (up - g) * w
+    prm = {'valley_spacing_m': 16.0, 'relief_m': 0.5, 'channel_frac': 0.25, 'flow_exponent': 1.0}
     e = Gd.edge_distance(n)
+    zone = (e >= 2) & (e < 32)                    # the seam zone: half the 16 m spacing, 32 cells
     out = {}
-    # held at the parent's surface: every band cell pinned to it (the weights compounded over the solve's
-    # iterations held the whole band so)
-    for name, pn in (('parent', dict(pins, pin_w=np.where(w > 0.0, 1.0, 0.0).astype(np.float32))), ('own', pins)):
+    for name, plan, index in (('zone', [parent, lv], 1), ('pinned', [lv], 0)):
         f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32)})
-        ctx = FL.StageContext(plan=[lv], index=0, level=lv, fresh=False, role='refine', pins=pn, device=DEV,
+        ctx = FL.StageContext(plan=plan, index=index, level=lv, fresh=False, role='refine', pins=pins, device=DEV,
                               log=lambda m: None)
         HS.op_soil_hills(f, lv, prm, ctx=ctx)
         hn = np.asarray(f['h'], np.float64)
         s = Gd.slope_deg(hn, cell)
-        out[name] = (float(np.percentile(s[(e >= 14) & (e < 18)], 99)), float(np.percentile(s[e >= 24], 99)),
-                     float(np.max(np.abs(hn - (g + 0.3))[w >= 1.0])))
-    (pe, pi, _), (oe, oi, seam) = out['parent'], out['own']
-    ok = oe <= 1.4 * oi and pe >= 1.75 * pi and seam < 1e-4
-    check('soil_hills: the border band holds the ground the stages before left it', ok,
-          f'slope p99 at the band\'s inner edge {oe:.1f} deg against {oi:.1f} inside (held at the parent\'s surface: '
-          f'{pe:.1f} against {pi:.1f}); the seam cells {seam:.1e} m from the parent\'s surface')
+        out[name] = (float(np.percentile(s[zone], 99)), float(np.percentile(s[e >= 40], 99)),
+                     float(np.max(np.abs(hn - up)[w >= 1.0])))
+    (ze, zi, seam), (pe, pi, _) = out['zone'], out['pinned']
+    ok = ze <= 1.2 * zi and pe >= 1.4 * pi and seam < 1e-4
+    check('soil_hills: a child level fades to its parent across the seam zone', ok,
+          f'slope p99 in the seam zone {ze:.1f} deg against {zi:.1f} inside (pinned by the band\'s weights in every '
+          f'iteration: {pe:.1f} against {pi:.1f}); the seam cells {seam:.1e} m from the parent\'s surface')
 
 
 def test_hold_rivers():
@@ -645,6 +652,40 @@ def test_hold_rivers():
     check('fluvial hold_rivers: a hero level keeps the river its parent resolved', ok,
           f'the river\'s cells moved at most {r1:.1e} m held ({r0:.2f} m free); the ground around moved '
           f'{g1:.2f} m (p90) held, {g0:.2f} m free')
+
+
+def test_channel_head():
+    """channel_head_frac on a refining level: a river the parent resolved runs down a valley between planar,
+    slightly rippled hillsides. Free, the level cuts channels down the hillsides wherever its own cells gather water
+    (the sea cliffs' gullied downland). With the channel head the hillsides start none (they only creep) and the
+    river still cuts, where with a head above every cell's area creep fills its bed. It cuts less than free, as it
+    should: its banks no longer fall with it as gullied ground, they creep in."""
+    n, cell = 64, 4.0
+    lv = L.Level(0, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    h0 = 0.05 * (x.max() - x) + math.tan(math.radians(10.0)) * np.abs(y) \
+        + 0.3 * np.sin(x / 9.0 + 0.5) * np.cos(y / 7.0)
+    pins = band_pins(n, h0)
+    river = np.abs(y) < 0.6 * cell
+    pins['A_in'] = np.where(river & (np.arange(n)[None, :] == 0), 1.0e5, 0.0).astype(np.float32)
+    A0 = np.where(river, 1.0e5, cell * cell)
+    hill = (np.abs(y) > 40.0) & (Gd.edge_distance(n) >= 16)
+    inner = river & (Gd.edge_distance(n) >= 16)
+    out = {}
+    for frac in (0.0, 0.25, 100.0):
+        f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32), 'A': A0.astype(np.float32)})
+        ctx = FL.StageContext(plan=[lv], index=0, level=lv, fresh=False, role='refine', pins=pins, device=DEV,
+                              log=lambda m: None)
+        FL.op_fluvial(f, lv, {'K': 2e-3, 'valley_spacing_m': 120.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                              'lock': False, 'steps': 200, 'channel_head_frac': frac}, seed=1, ctx=ctx)
+        dh = np.asarray(f['h'], np.float64) - h0
+        out[frac] = (float(-np.mean(dh[inner])), float(np.percentile(np.abs(dh[hill]), 90)))
+    (r0, g0), (r1, g1), (rn, gn) = out[0.0], out[0.25], out[100.0]
+    ok = g1 < 0.25 * g0 and r1 > 0.25 * r0 and r1 > rn + 1.0
+    check('fluvial channel_head_frac: the river cuts, the hillsides start no channels', ok,
+          f'the hillsides moved {g1:.3f} m (p90) with the channel head ({0.25 * 120.0 ** 2:.0f} m2), {g0:.3f} m '
+          f'free; the river\'s bed lowered {r1:.2f} m with it, {r0:.2f} m free, {rn:.2f} m with no channel '
+          f'anywhere (creep filling it)')
 
 
 def test_inlets():
@@ -693,8 +734,9 @@ def test_grow_levels():
 def main():
     for fn in (test_floor_widths, test_floor_drains, test_tributary_backfill, test_soil_steady, test_soil_asymmetry,
                test_soil_seed, test_soil_heads, test_soil_floor_hold, test_rill_width, test_rills_once,
-               test_soil_hollows, test_lake_receivers, test_soil_band, test_band_blend, test_hold_rivers, test_inlets,
-               test_incise, test_incise_head, test_incised_held, test_regional_cut, test_grow_levels):
+               test_soil_hollows, test_lake_receivers, test_soil_band, test_band_blend, test_hold_rivers,
+               test_channel_head, test_inlets, test_incise, test_incise_head, test_incised_held, test_regional_cut,
+               test_grow_levels):
         try:
             fn()
         except Exception as e:                                         # noqa: BLE001

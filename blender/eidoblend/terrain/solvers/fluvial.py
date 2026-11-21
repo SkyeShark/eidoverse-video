@@ -86,6 +86,17 @@ Parameters of the 'fluvial' stage (metres, years, degrees; K in the stream-power
                                        pass pulls each band cell to its pin at its weight, which over a run holds the
                                        whole band at the parent's surface, and the level's own ground meets it in a
                                        step one or two cells wide at the band's inner edge
+    channel_head_frac 0                > 0, on refining levels: the channel head (Montgomery & Dietrich 1988:
+                                       channels begin where the drainage area reaches a threshold; above it the
+                                       ground creeps and fails but carries no channel): the rivers cut only where the
+                                       routed area reaches channel_head_frac x the level's valley spacing^2
+                                       (soil_hills' channel_frac), K ramped in (smoothstep in log A from half that
+                                       area to it; the area re-read every HEAD_EVERY steps), and all along the
+                                       channels the level inherited (channel_network). Without it a refining level
+                                       starts channels wherever its own cells gather water, down to MIN_SPACING_CELLS
+                                       of them, and every finer level dissects again: the sea cliffs' chalk downland
+                                       (dry valleys 450-600 m apart, smooth slopes between) came out gullied over
+                                       half its land
     threshold_mode 'iso'               'iso': slopes over Sc by their upwind gradient magnitude relax along the
                                        gradient (isotropic); 'pair': the design's pair excess (octagonal, 4-fold bias)
     threshold_rate None                0.12 iso, 0.06 pair; threshold_iters 2 a step (2 x 0.12 moves what the
@@ -130,6 +141,7 @@ LOCK_PHASES = ((0, 0), (1, 0), (1, 1), (0, 1))   # the block grid's offsets by s
 CONTROL_EVERY = 100                     # the relief controller: every 100 steps U x (target / relief)^0.7, clamped
 CONTROL_POWER = 0.7                     # (the design's 200 steps, ^0.5 and 0.8-1.25 left the first range 30 % high:
 CONTROL_CLAMP = (0.75, 1.33)            # each finer pass resolves higher peaks faster than that caught up)
+HEAD_EVERY = 50                         # channel_head_frac: steps between the channel heads' re-reads of the area
 
 DEFAULTS = dict(
     K=1.5e-5, m=0.5, n=1.0, p=1.0, slope='dinf', valley_spacing_m=400.0, D=None, gullies=False,
@@ -142,6 +154,7 @@ DEFAULTS = dict(
     fill_pits=True, pit_eps_m=1e-3, mode='evolve', min_steps=100, max_steps=6000,
     faults=None, context_spacing_factor=1.0, relief_over='main', U_factor_max=None,
     uplift_scale=1.0, control_levels='grow', lock_max_frac=8, hold_rivers=0.0, band_blend=False,
+    channel_head_frac=0.0,
 )
 THRESHOLD_RATE = {'iso': 0.12, 'pair': 0.06}
 
@@ -941,6 +954,33 @@ def level_spacing(params, depth):
     return sp
 
 
+def channel_head(A, head_m2):
+    """The channel head's ramp on K (channel_head_frac): 0 where the drainage area A is under half of head_m2, 1 from
+    head_m2 up, smoothstep in log A between."""
+    t = np.clip(np.log(np.maximum(np.asarray(A, np.float64), 1e-12) / (0.5 * float(head_m2))) / math.log(2.0),
+                0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def channel_network(h, A, head_m2, sea_level=None):
+    """The cells the inherited channels run through (channel_head_frac): drainage area over head_m2, every cell
+    downstream of one along the surface's paths (hydro.lake_receivers: across a filled hollow along its floor to
+    its spill), widened by a cell each side so a channel the level moves by a cell stays inside. The routed area
+    spreads over a valley floor's cells, and where it fell under the head's the floor cut nothing while the lock
+    raised it with its block: dams, and closed hollows 1-5 m deep along the valleys."""
+    from . import hydro as HY
+    from .hillslope import _downstream
+    h = np.asarray(h, np.float64)
+    full = np.asarray(A, np.float64) >= float(head_m2)
+    if not full.any():
+        return full
+    filled = np.asarray(HY.fill_depressions(h, sea_level=sea_level)[0], np.float64)
+    net = _downstream(full, HY.lake_receivers(filled, h, sea_level=sea_level))
+    p = np.pad(net, 1, mode='edge')
+    ny, nx = net.shape
+    return np.max([p[j:j + ny, i:i + nx] for j in range(3) for i in range(3)], axis=0)
+
+
 # =============================================================================================== the driver ===
 
 class FluvialRun:
@@ -1041,6 +1081,9 @@ class FluvialRun:
 
     def height(self):
         return self.dev.read(self.S.src)[..., 0]
+
+    def area(self):
+        return self.dev.read(self.S.src)[..., 1]
 
     def readback(self):
         s = self.dev.read(self.S.src)
@@ -1195,8 +1238,10 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
         U_run = np.where(rigid, 0.0, U_run)
         K = np.where(rigid, 0.0, K)
 
+    kk = {'K': K}                                  # K as the run uses it: ramped in at the channel heads
+
     def par_of(factor):
-        return T.rgba(U_run * factor, K, Sc, G)
+        return T.rgba(U_run * factor, kk['K'], Sc, G)
 
     pins = ctx.pins or edge_pins(n, h, ctx.sea_level)
     if refine and 'incised' in fields:
@@ -1207,6 +1252,14 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             pins['pin_h'] = np.where(held, h, pins['pin_h']).astype(F32)
             pins['pin_w'] = np.where(held, F32(1), pins['pin_w']).astype(F32)
     D, spacing = diffusivity(params, cell, depth, main_cell)
+    head_m2 = float(_p(params, 'channel_head_frac')) * spacing * spacing if refine and 'A' in fields else 0.0
+    net = None
+    if head_m2 > 0:
+        # the channel heads (module doc, channel_head_frac): the rivers cut only where the area reaches the head's,
+        # and along the channels the level inherited
+        A0 = np.asarray(fields['A'], np.float64)
+        net = channel_network(h, A0, head_m2, ctx.sea_level)
+        kk['K'] = K * np.maximum(channel_head(A0, head_m2), net)
     if refine:
         dt = float(_p(params, 'dt_ref_yr')) * max(cell, main_cell) / CELL_REF_M
         steps = int(params.get('steps', _p(params, 'refine_steps')))
@@ -1285,6 +1338,9 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
                 uf = min(uf, float(_p(params, 'U_factor_max')))
             run.set_par(par_of(uf))
             history.append((i + 1, round(rel, 1), round(uf, 4)))
+        if head_m2 > 0 and (i + 1) % HEAD_EVERY == 0 and i + 1 < steps:
+            kk['K'] = K * np.maximum(channel_head(run.area(), head_m2), net)
+            run.set_par(par_of(uf))
     out = run.readback()
     if blend is not None:
         w, ph = blend
@@ -1309,6 +1365,7 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
                 dt_yr=round(dt, 2), years=round(steps * dt), D=D_used, spacing_m=round(spacing, 1), creep_sub=n_sub,
                 U_factor=round(uf, 4), relief_main_window_m=None if rel is None else round(rel, 1),
                 lock_block_cells=lock_b if lock is not None else None, lock_m=lock_m, held_river_cells=held_rivers,
+                channel_head_m2=round(head_m2, 1) if head_m2 > 0 else None,
                 seconds=round(time.perf_counter() - t0, 3), controller=history[-6:])
     ctx.shared.setdefault('fluvial_log', []).append(info)
     ctx.log(f"[terrain.fluvial] {info['role']} {lv.n}^2 @ {cell:.3g} m"
@@ -1316,6 +1373,7 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             + f": {steps} steps x {dt:.0f} yr, D {D_used:.3g} m2/yr (valleys {spacing:.0f} m), creep x{n_sub}"
             + (f", U x{uf:.3f}, relief {rel:.0f} m" if rel is not None else '')
             + (f', locked above {lock_b} cells ({lock_b * cell:.0f} m)' if lock is not None else '')
+            + (f', channel heads at {head_m2:.0f} m2' if head_m2 > 0 else '')
             + f", {info['seconds']} s")
     return fields
 
