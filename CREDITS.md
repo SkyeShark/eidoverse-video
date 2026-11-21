@@ -23,6 +23,17 @@ did the extraction, the release engineering, and the launch film.
 - **Satori** (MPL-2.0) + **resvg** — HTML/CSS → texture rasterization.
 - **@napi-rs/canvas** — canvas-2D in Deno.
 
+## Code carried from other projects
+
+- **Ekigar** (MIT, © 2026 SkyeShark) — the terrain generator's world-space
+  noise (`blender/eidoblend/terrain/core/world_noise.py`), heightmap
+  import/export (`core/io.py`) and lake-mesh rule (`build/water.py`) come from
+  Ekigar, the maintainer's own terrain project.
+- **three-fluid-fx** (MIT, © 2026 Artem Korenevych) and
+  **WebGL-Fluid-Simulation** (MIT, © 2017 Pavel Dobryakov) —
+  `blender/eidoblend/fx/stable_fluids.py` ports their stable-fluids kernels;
+  both notices are at the top of the file.
+
 ## Design inspirations (behavior studied; implementations original)
 
 - **Character locomotion + foot IK** (`character_controller.js`,
