@@ -73,6 +73,56 @@ export function argsOf(argv = Deno.args) {
     };
 }
 
+/** The bake cases (Blender's surface_data package's, _cases.py): their snapshots are Terrain.save files. */
+export const CASES = ['toroweap', 'lauterbrunnen', 'meteor_crater', 'great_sand_dunes', 'badlands_sd', 'canyon', 'alpine_valley',
+    'fluvial_range'];
+
+/** The Blender bake of a case the tests compare with: the fixtures' copy (blender_bakes.py), else the Blender package's
+ * own cache. { dir, key, info } or null. */
+export function blenderBake(name) {
+    const root = fixtureRoot();
+    const dirs = [root ? `${root}/bakes/${name}` : null, W.blenderEdition() ? `${W.blenderTests()}/out/surface_data/cache/${name}` : null];
+    for (const dir of dirs) {
+        if (!dir || !W.exists(dir)) continue;
+        for (const e of Deno.readDirSync(dir)) {
+            if (e.isFile && e.name.startsWith('surface_') && e.name.endsWith('.json') && !e.name.includes('_pal')) {
+                return { dir, key: e.name.slice('surface_'.length, -'.json'.length), info: JSON.parse(Deno.readTextFileSync(`${dir}/${e.name}`)) };
+            }
+        }
+    }
+    return null;
+}
+
+/** A case's terrain (its snapshot) and the port's SurfaceData of it: baked with the options Blender's bake recorded
+ * (a cache hit on bake_test.mjs's bakes in tests/out/surface_data/bakes/<case>), with palette: its palette bake
+ * ('auto', as bakeSurface resolves it; provenance always) beside it. { t, sd } or null (a line says why). */
+export async function portSurface(name, { palette = false, log = null } = {}) {
+    const snap = W.blenderEdition() ? `${W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
+    const bb = blenderBake(name);
+    if (!snap || !W.exists(snap) || !bb) {
+        console.log(`[skip] ${name}: no snapshot or Blender bake (EIDO_BLENDER_EDITION, tests/surface_data/blender_bakes.py)`);
+        return null;
+    }
+    const SI = await import('../../surface/index.js');
+    const B = await import('../../surface/bake.js');
+    const { Terrain } = await import('../../api.js');
+    const t = await Terrain.load(snap, { build: false, log: null });
+    const dir = `${W.out('surface_data')}/bakes/${name}`;
+    const sd = await SI.bakeSurface(t, { palette: null, options: { ...bb.info.options }, cache: dir, log });
+    if (palette) {
+        if (!Deno.env.get('EIDO_SURFACE_SETS') && W.blenderEdition()) {
+            Deno.env.set('EIDO_SURFACE_SETS', `${W.blenderEdition()}/eidoverse/assets/cache/terrain_surface_sets`);
+        }
+        let p = 'auto';
+        if (t.info?.palette && t.info.palette !== 'auto') p = t.info.palette;
+        const pal = await B.resolvePalette(t, p);
+        sd.palette = pal;
+        sd._palettes = await B.palettesModule();
+        await sd.bakePalette(pal, { cache: dir, log, provenance: true });
+    }
+    return { t, sd };
+}
+
 /** The largest |a - b| of two arrays (as numbers), its index, and the range of b. */
 export function maxDiff(a, b, stride = 1, offset = 0) {
     let err = 0, at = -1, lo = Infinity, hi = -Infinity;
