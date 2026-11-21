@@ -23,17 +23,6 @@ did the extraction, the release engineering, and the launch film.
 - **Satori** (MPL-2.0) + **resvg** — HTML/CSS → texture rasterization.
 - **@napi-rs/canvas** — canvas-2D in Deno.
 
-## Code carried from other projects
-
-- **Ekigar** (MIT, © 2026 SkyeShark) — the terrain generator's world-space
-  noise, heightmap import/export and lake-mesh rule come from Ekigar, the
-  maintainer's own terrain project; `eidoverse/terrain/build/ops.js` is copied
-  from its `src/export/ops.js` and extended, with Ekigar's notice at its top.
-- **NumPy** (BSD-3-Clause, © 2005-2025 NumPy Developers) —
-  `eidoverse/terrain/core/np_random.js` carries NumPy's ziggurat tables and
-  transcribes its random Generator, so the three.js terrain draws the same
-  numbers as the Blender edition's; NumPy's licence is at the top of the file.
-
 ## Design inspirations (behavior studied; implementations original)
 
 - **Character locomotion + foot IK** (`character_controller.js`,

@@ -1,18 +1,8 @@
-// Copied from Ekigar's src/export/ops.js (MIT License, Copyright (c) 2026 SkyeShark: "Permission is hereby granted,
-// free of charge, to any person obtaining a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
-// modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom
-// the Software is furnished to do so, subject to the following conditions: The above copyright notice and this
-// permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED
-// "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-// HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."), for the
-// terrain port's surfacing wave (PORT_PLAN.md 3.5: the mask language and Blender's shader noise written once against
-// this backend, so the material's TSL, the surface bake's compute kernels and the tests' plain-number oracle share one
-// source). Ekigar's code is below as it is, but for one name: its TSL(tsl) is tslBase(tsl) here, and the exported
-// TSL(tsl) is it with the extension. The extension, after it, is this port's (the terrain package, AGPL-3.0 with the
-// rest of this repository).
+// The arithmetic backend the terrain port's surfacing is written against (PORT_PLAN.md 3.5): the mask language and
+// Blender's shader noise are written once against it, so the material's TSL, the surface bake's compute kernels and the
+// tests' plain-number oracle share one source. It began as the ops module of an earlier terrain prototype (Ekigar),
+// whose comments below still name that prototype's files; its TSL(tsl) is tslBase(tsl) here, and the exported
+// TSL(tsl) is it with the extension that follows.
 
 // An arithmetic BACKEND, so one expression can be a shader and a CPU oracle at once.
 //
