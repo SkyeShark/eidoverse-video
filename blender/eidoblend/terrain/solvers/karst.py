@@ -1938,20 +1938,25 @@ def cached_plan(seed, domain, params=None, via=None, main=None):
 _DOMAINS = {}
 
 
-def op_karst(fields, level, params, seed=0):
-    """Stage op 'karst' (the wave-1 convention op(fields, level, params, seed)): writes h, bed, deposit, talus,
-    water (the river) and Sc of one level from the world-space plan, in place.
+def op_karst(fields, level, params, seed=0, ctx=None):
+    """Stage op 'karst' (op(fields, level, params, seed, ctx)): writes h, bed, deposit, talus, water (the river) and
+    Sc of one level from the world-space plan, in place.
 
     level: a core.levels.Level (or anything with x0, y0, cell, n, parent (None on the coarsest level) and depth (the
     context levels' count of doublings above the main tile)). params: the karst parameters (DEFAULTS; an unknown one
     raises naming the known ones), plus optionally domain=(x0, y0, side), the plan's extent, via=(x, y), a point the
-    river passes near, and main=(x0, y0, side), the main tile (the window cluster_cover is the share of).
+    river passes near, and main=(x0, y0, side), the main tile (the window cluster_cover is the share of). ctx: the
+    runner's StageContext (solvers/fluvial.py), or None.
 
-    The plan covers the outermost window, so every level sees the same towers: by default the domain is the window
-    of the coarsest level the op runs on (parent None: levels run coarsest first), via its centre and main its
-    central window of side / 2^depth: the main tile (the context levels are centred on it). So run it on 'all'
-    levels: the fields are rebuilt from world functions at each level's cells (the walls are never upsampled), and
-    the runner's border band pins a child to its parent."""
+    The plan covers the outermost window, so every level sees the same towers: by default the domain is the coarsest
+    level's window, via its centre and main the main tile, read from the level stack (ctx.plan) whichever levels
+    this run computes. (Taken from the first level the op ran on, a run whose coarser levels came from the terrain
+    cache built its plan on a hero level's window: other towers and another river under the camera than on the main
+    level, a tower 190 m high where the main level has the plain.) Called without a context (tests, a single level),
+    the domain is the window of the coarsest level the op runs on (parent None: levels run coarsest first), via its
+    centre and main its central window of side / 2^depth (the context levels are centred on the main tile). So run
+    it on 'all' levels: the fields are rebuilt from world functions at each level's cells (the walls are never
+    upsampled), and the border band is pulled to the parent's surface as the runner pulls a legacy op's."""
     def get(k, default=None):
         if isinstance(level, dict):
             return level.get(k, default)
@@ -1960,7 +1965,12 @@ def op_karst(fields, level, params, seed=0):
     p = dict(params)
     domain, via, main = p.pop('domain', None), p.pop('via', None), p.pop('main', None)
     key = (int(seed), _plan_key(seed, (0.0, 0.0, 1.0), p, None)[2])
-    if domain is None:
+    if domain is None and ctx is not None and getattr(ctx, 'plan', None):
+        top, mn = ctx.plan[0], ctx.main
+        domain = (float(top.x0), float(top.y0), float(top.side))
+        via = (domain[0] + 0.5 * domain[2], domain[1] + 0.5 * domain[2]) if via is None else via
+        main = (float(mn.x0), float(mn.y0), float(mn.side)) if main is None else main
+    elif domain is None:
         if get('parent') is None or key not in _DOMAINS:
             side = n * cell
             ms = side / 2.0 ** max(int(get('depth', 0) or 0), 0)
@@ -1975,6 +1985,13 @@ def op_karst(fields, level, params, seed=0):
     # coarse alluvium would otherwise bleed onto rock this level resolves)
     for k in ('h', 'bed', 'deposit', 'talus', 'water', 'Sc'):
         fields[k] = out[k]
+    pins = getattr(ctx, 'pins', None) if ctx is not None else None
+    if pins is not None:
+        # a child level's border band held to its parent's surface (the runner leaves an op that takes the context
+        # its own band): the pull the runner gives a legacy op
+        w = np.clip(pins['pin_w'], 0.0, 1.0)
+        fields['h'] = (np.asarray(fields['h'], np.float64) * (1.0 - w) + pins['pin_h'] * w).astype(np.float32)
+        fields['bed'] = np.minimum(fields['bed'], fields['h'])
     return fields
 
 

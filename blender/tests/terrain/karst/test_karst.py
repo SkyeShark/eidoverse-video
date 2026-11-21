@@ -759,6 +759,39 @@ def test_op_on_core_levels():
            water_level_spread_m=spreads)
 
 
+def test_op_on_cached_levels():
+    """A run whose coarser levels come from the terrain cache runs the op on the hero levels only: with the runner's
+    context it builds the same plan from the level stack, so each hero level is bit-identical to the one a run from
+    the coarsest level makes (one plan in all). (Taken from the first level the op ran on, the plan was built on the
+    hero window: in the review's plain_fields terrain a 190 m tower stood under the camera on every hero level where
+    the main level has the plain at 0.3 m.)"""
+    from eidoblend.terrain.core.levels import plan_levels
+    from eidoblend.terrain.core.fields import Fields
+    from eidoblend.terrain.solvers.fluvial import StageContext
+    lv = plan_levels(2000.0, 128, (0.0, 0.0), context=2, focus=(100.0, -200.0), hero=4.0)
+    params = {'river_azimuth_deg': 30.0}
+    K._PLANS.clear()
+    K._DOMAINS.clear()
+    full = {}
+    for i, L in enumerate(lv):
+        f = Fields(L, {'h': 0.0})
+        K.op_karst(f, L, params, 9, ctx=StageContext(plan=lv, index=i, level=L))
+        full[i] = f['h'].copy()
+    K._PLANS.clear()
+    K._DOMAINS.clear()
+    hero = [i for i, L in enumerate(lv) if L.role == 'hero']
+    assert hero, 'no hero level in the plan'
+    worst = 0.0
+    for i in hero:
+        L = lv[i]
+        f = Fields(L, {'h': 0.0})
+        K.op_karst(f, L, params, 9, ctx=StageContext(plan=lv, index=i, level=L))
+        worst = max(worst, float(np.abs(f['h'].astype(np.float64) - full[i]).max()))
+    assert len(K._PLANS) == 1, f'{len(K._PLANS)} plans'
+    assert worst == 0.0, f'a hero level run alone differs from the full run by up to {worst:.2f} m'
+    record('test_op_on_cached_levels', hero_levels=len(hero), max_abs_dh_m=worst)
+
+
 def test_recipe():
     """tower_karst is registered, resolves (fengcong takes its preset for knobs left at their defaults), runs the
     karst op then a light threshold (no creep: it rounded the summits into domes), is JSON, names the nearest knob
@@ -833,7 +866,7 @@ TESTS = [test_blue_noise_spacing, test_plan_spacing_and_clusters, test_profile_f
          test_fenglin_composition, test_cluster_massifs, test_river, test_river_lined_with_cliffs,
          test_fengcong_composition,
          test_fluting_on_hero_levels,
-         test_op_on_core_levels, test_recipe, test_performance, test_guilin_judge]
+         test_op_on_core_levels, test_op_on_cached_levels, test_recipe, test_performance, test_guilin_judge]
 
 
 def main(argv):
