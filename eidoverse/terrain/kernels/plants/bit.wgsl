@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/bit: 1 where an item lies in [uLo, uHi) and its flags hold every bit of uMask and none of uNot, else 0: a
 // numpy boolean mask of the planner's flags, for core/prims.js nonzero (the compaction of {k: v[keep]}; a range: one
 // species' part of its priority group). With uMaxCell > 0, also off a level coarser than it (plants.py _thin's

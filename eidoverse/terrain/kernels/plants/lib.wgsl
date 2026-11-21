@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as GPU kernels' shared functions.
 // plants/lib.wgsl: what the plant planner's kernels share (`//! include plants/lib`). The port's own kernels of the
 // numpy code in blender/eidoblend/terrain/build/plants.py at f9fba8c (PORT_PLAN.md 3.5); build/plants.js drives them.
 //

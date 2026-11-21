@@ -1,3 +1,5 @@
+// Port of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel (the port's own step: the
+// header of build/plant_instances.js says why).
 // plants/merge_index: the triangles of a merged foliage part (plants/merge_instances): per instance the part's
 // indices offset by the instance's first vertex; a part without an index reads 0 .. uNi - 1 (uIdentity 1).
 //! include plants/lib

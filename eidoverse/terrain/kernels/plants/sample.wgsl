@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/sample: plants.py _Points.sample (blender/eidoblend/terrain/build/plants.py at f9fba8c) for one map: the
 // bilinear value at each point of the raster of the level it is located on (a level without the map hands its points
 // to the next coarser level that has it, else the next finer: the table's fallback), the taps on texel centres

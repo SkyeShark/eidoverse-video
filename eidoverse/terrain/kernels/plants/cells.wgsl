@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/cells: the first step of plants.py _candidates (blender/eidoblend/terrain/build/plants.py at f9fba8c) over
 // the world cells of one species in a box: a cell counts when its centre lies within reach + 0.7072 c of the focus
 // (path_distance), and then draws its cluster centres: hc = _h(tseed, seed, name, ix, iy) (the chain's first three

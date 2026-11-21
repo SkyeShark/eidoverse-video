@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/parents: plants.py _candidates' cluster centres (blender/eidoblend/terrain/build/plants.py at f9fba8c): per
 // world cell, its npar centres in order, hp = _h(hc, pj), px = (ix + _u(hp, 2)) c, py = (iy + _u(hp, 3)) c, and each
 // centre's offspring count _poisson(mu, _u(hp, 5)) by its integer thresholds. Centre k of a cell goes to slot

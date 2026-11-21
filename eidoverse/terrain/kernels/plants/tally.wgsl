@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/tally: the counts plants.py's stats sum ((flags & mask) == mask, for up to eight masks) and the largest of
 // a non-negative value over the items whose flags hold uMaxMask (st['density_max']: dens[drawn].max(), a float's bits
 // in the order of non-negative floats). Exact integers, any order: workgroup atomics, then one global atomic each.

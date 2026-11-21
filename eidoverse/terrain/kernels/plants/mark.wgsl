@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/mark: out[index[q]] = 1 for q < uCount (the items a selection keeps, as a 0/1 list over all of them): what
 // plants.py _kept_profile's np.bincount(b[idx]) counts after max_count's cap.
 //! include plants/lib

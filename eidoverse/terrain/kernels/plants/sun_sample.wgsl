@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/sun_sample: plant_instances.py sun_shade at the spots' card centres, one level: the level's sweep
 // (plants/sun_sweep) read bilinear (clamped) at the point's (s, w), less the point's own z + s tan(el); the largest
 // over the levels so far. The card centre: the spot's base (_base_z: sink x scale under the ground, deeper by the

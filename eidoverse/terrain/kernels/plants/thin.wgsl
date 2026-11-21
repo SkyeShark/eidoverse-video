@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/thin: plants.py _thin's decisions (blender/eidoblend/terrain/build/plants.py at f9fba8c), per candidate,
 // after its density, stature and exclusions are evaluated (the species' generated kernel) and its shade is known
 // (plants/shade): the size the site lets it reach, prob = min(dens / dmax, 1) (an `around` candidate: its `where`),

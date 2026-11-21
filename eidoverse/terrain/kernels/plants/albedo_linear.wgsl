@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/dressing.py at f9fba8c, as a GPU kernel.
 // plants/albedo_linear: an 8-bit sRGB image's pixels as linear colour (dressing.py _image_mean_linear, which the rock
 // recolour divides by): per pixel, one channel (uChannel) decoded from sRGB, for a mean over the image.
 //! include plants/lib

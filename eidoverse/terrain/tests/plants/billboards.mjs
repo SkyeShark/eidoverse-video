@@ -8,7 +8,7 @@
 // measured on Blender's renders; here they are checked, not tuned (the design's ΔE 3 and 10 % are reported).
 //
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
-//         eidoverse/terrain/tests/plants/billboards.mjs [--ecotopes alpine,desert,...]
+//         eidoverse/terrain/tests/plants/billboards.mjs [--recipes real_place:lauterbrunnen,canyon,...]
 //
 // Writes tests/out/plants/billboards/<species>_<seed>.png (the pair) and billboards.json.
 
@@ -36,7 +36,7 @@ for (const rp of want) {
             sink: s.sink, foot_m: s.foot_m, crown_m: s.crown_m, core_m: s.core_m });
     }
 }
-const spec = { cases, W, H, result: `${work}/result.json`, exposureEv: -0.5, hours: 15.5 };
+const spec = { cases, W, H, result: `${work}/result.json`, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0 };
 try { Deno.removeSync(spec.result); } catch (_e) { /* none yet */ }
 
 const script = `// The plants package's billboard check (eidoverse/terrain/tests/plants/billboards.mjs writes this file).
@@ -58,7 +58,7 @@ globalThis.setup = async function () {
     scene.add(sun, sun.target);
     globalThis.EANPA_NO_MRT = true;
     eval(Deno.readTextFileSync('eidoverse/sky_worlds.js'));
-    const sky = await makeSky({ scene, camera, renderer, world: 'earth', hours: V.hours, clouds: 'clear', weather: null, sun, audio: false });
+    const sky = await makeSky({ scene, camera, renderer, world: 'earth', hours: V.hours, clouds: 'cumulus', weather: null, sun, audio: false });
     sky.update(0);
     await sky.bakeEnv();
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardNodeMaterial({ color: 0x5a5a5a, roughness: 1 }));
@@ -69,10 +69,12 @@ globalThis.setup = async function () {
         PI: await import(EIDOVERSE_DIR + 'terrain/build/plant_instances.js'), results: [], cur: null };
 };
 
-// two spots of one individual, d1 and d2 metres off the camera, 2 x the plant's width apart across the view
-function pairSpots(PL, c, d1, d2, gap) {
+// two spots of one individual, d1 and d2 metres off the camera along the azimuth a (radians from east, counter-
+// clockwise: Blender's frame, as the spots are), gap apart across the view, the nearer on the left
+function pairSpots(PL, c, d1, d2, gap, a = Math.PI / 2) {
     const rec = new Float32Array(24);
-    const put = (k, x, y) => rec.set([x, y, 0, 0.3, 1.0, 1.0, 0.5, 0, 0, 1, 0, 0], 12 * k);
+    const ux = Math.cos(a), uy = Math.sin(a), rx = Math.sin(a), ry = -Math.cos(a);
+    const put = (k, off, d) => rec.set([d * ux + off * rx, d * uy + off * ry, 0, 0.3, 1.0, 1.0, 0.5, 0, 0, 1, 0, 0], 12 * k);
     put(0, -gap / 2, d1);
     put(1, gap / 2, d2);
     const entry = { name: c.species, kind: c.kind, source: { seedthree: c.id, dials: c.dials, seeds: [c.seed] }, size_m: c.size_m,
@@ -93,23 +95,30 @@ globalThis.renderFrame = async function (tt) {
         const p0 = await B.PI.instancePlants(probe, null, { renderer: r, R: B.R, log: null });
         const cardM = p0.species[c.species].card_m;
         p0.dispose();
-        const spots = pairSpots(B.PL, c, cardM * 0.985, cardM * 1.015, 1.2 * c.size_m[1]);
+        // the view's azimuth: the sky's sun 70 degrees left of it (match_billboards.py: the review's light)
+        const s0 = B.sky.sunDir;
+        const az = Math.atan2(-s0.z, s0.x) - B.V.sunLeftDeg * Math.PI / 180;
+        const spots = pairSpots(B.PL, c, cardM * 0.985, cardM * 1.015, 1.2 * c.size_m[1], az);
         const plants = await B.PI.instancePlants(spots, null, { renderer: r, R: B.R, log: (m) => console.log(m) });
         scene.add(plants.group);
-        B.cur = { k, c, plants, cardM, done: false };
+        B.cur = { k, c, plants, cardM, az, done: false };
     }
-    const { c, plants, cardM } = B.cur;
+    const { c, plants, cardM, az } = B.cur;
+    // three.js (x, z) of Blender's (x, -y): the pair's middle cardM along the azimuth
+    const mx = Math.cos(az) * cardM, mz = -Math.sin(az) * cardM;
     camera.position.set(0, 1.7, 0);
-    camera.lookAt(0, 0.5 * c.size_m[1], -cardM);
+    camera.lookAt(mx, 0.5 * c.size_m[1], mz);
     camera.fov = 2.6 * Math.atan(c.size_m[1] / cardM) * 180 / Math.PI;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld(true);
+    // the sky first (its update sets the light's colour and strength and moves the light to 120 x the sun's
+    // direction from the origin), then the light along the sun's direction from the pair
+    B.sky.update(0);
     const s = B.sky.sunDir;
-    B.sun.position.set(s.x * 1000, s.y * 1000, s.z * 1000);
-    B.sun.target.position.set(0, 0, -cardM);
+    B.sun.target.position.set(mx, 0, mz);
+    B.sun.position.set(mx + s.x * 1000, s.y * 1000, mz + s.z * 1000);
     B.sun.updateMatrixWorld(true);
     B.sun.target.updateMatrixWorld(true);
-    B.sky.update(0);
     await plants.bindSun(s);
     plants.update(camera);
     if (!B.cur.done) {

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/dist_rows: the first pass of plants.py _distance_to (blender/eidoblend/terrain/build/plants.py at f9fba8c),
 // one invocation per row: each cell's distance along its row to the row's nearest seed (np.maximum.accumulate of
 // the seeds' indices from the left, np.minimum.accumulate from the right), capped at R + 1 cells, squared: exact

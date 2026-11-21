@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/prefilter: the first lines of plants.py _thin (blender/eidoblend/terrain/build/plants.py at f9fba8c): a
 // candidate stays when it lies on the terrain (the outermost level's window, inclusive), within exact + pad of the
 // focus (path_distance), and off every excluded disc ((x - ex)^2 + (y - ey)^2 > reach^2; a 'crown' disc reaches

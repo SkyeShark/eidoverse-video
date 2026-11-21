@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/build/mesh.py (RingMesh.normal_at, as plants.py calls it) at
+// f90c6fc, as a GPU kernel.
 // plants/ground_normal: RingMesh.normal_at(x, y, smooth=False) for many points (build/mesh.py at f90c6fc, as
 // build/mesh.js normalAt transcribes it), the face normal the spots carry (plants.py _Ground.normal_at): the point
 // clamped to the outermost window, the finest ring whose window holds it, its lattice cell, the triangle by the

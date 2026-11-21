@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/dressing.py at f9fba8c, as a GPU kernel.
 // plants/rock_column: one number of each candidate's 20 (plants/rock_place) as a list: the kept flag as a u32 (uMode
 // 0), or the number at uCol as a float (uMode 1).
 //! include plants/lib

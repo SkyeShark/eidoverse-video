@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/grid_points: plants.py _GridPoints (blender/eidoblend/terrain/build/plants.py at f9fba8c): the texel centres
 // of an m x m raster over a level's window, x0 + (i + 0.5) side / m, as position records (4 numbers: xi, xf, yi,
 // yf), row by row from the south-west: the points the cover rasters' densities are evaluated on, and the cells the

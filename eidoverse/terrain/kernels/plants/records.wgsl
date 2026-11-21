@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/records: plants.py _view's records (blender/eidoblend/terrain/build/plants.py at f9fba8c): per spot the 12
 // FIELDS, x, y, z, yaw, scale, age, tint, nx, ny, nz, variant, level, float32: x and y the position rounded once,
 // z the rendered ground's height (build/mesh.js heightField), yaw 2 pi _u(id, 15), scale size / size_m[1], the

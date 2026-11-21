@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/crown_rec: plant_instances.py _crowns: a SeedThree species' plants as the crowns that shade each other, 6
 // numbers each (the position as integer part and fraction for plants/grid, its top z + scale x size_m[1], its radius
 // crown_m x scale), as u32 bits, written from slot uFirst of the list.

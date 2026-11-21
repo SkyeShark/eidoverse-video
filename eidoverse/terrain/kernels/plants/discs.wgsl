@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/discs: plants.py _discs (blender/eidoblend/terrain/build/plants.py at f9fba8c): the placed tree crowns on a
 // level's cover raster (texel k spanning [k, k + 1)). uMode 0, per crown: one smaller than 0.75 texel adds its area to
 // the texel holding its centre (an integer sum in 2^-20 texel^2: exact in any order, where np.bincount sums floats in

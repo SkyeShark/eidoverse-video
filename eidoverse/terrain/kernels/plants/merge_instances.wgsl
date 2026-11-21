@@ -1,3 +1,5 @@
+// Port of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel (the port's own step: the
+// header of build/plant_instances.js says why).
 // plants/merge_instances: one foliage part of a SeedThree level (an InstancedMesh: a leaf or card geometry and a
 // matrix per leaf) as the vertices of one plain mesh (build/plant_instances.js partGeometry; what the Blender
 // edition's grown plant holds as mesh data): every instance's matrix applied to the part's vertices, its normals by

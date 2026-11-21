@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/near_count: plant_instances.py card_distance's counts over a species' spots: 1 where the spot lies within
 // uR of the focus (plants.py path_distance), and its scale (the mean a shrub's card distance reads), per spot. The
 // spots' float32 x and y split exactly into the kernels' (integer, fraction) positions.

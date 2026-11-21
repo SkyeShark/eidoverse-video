@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/variant_key: each spot's individual, np.clip(variant, 0, uVariants - 1) (plant_instances.py's variants), as
 // a u32 key (the spots of each individual counted by a bincount over it).
 //! include plants/lib

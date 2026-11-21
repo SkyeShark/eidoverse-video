@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/cover_raster: plants.py _cover_raster (blender/eidoblend/terrain/build/plants.py at f9fba8c): an exponent
 // on a k x k grid as cover, 1 - exp(-v), bilinearly resampled to the level's m x m raster over the same window
 // (_upsample: texel centres, t = clip((i + 0.5) k / m - 0.5, 0, k - 1), along x then along y).

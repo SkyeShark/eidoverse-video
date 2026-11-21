@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/focus.wgsl (`//! include plants/focus`, after plants/lib): plants.py path_distance on positions. A kernel
 // that includes it declares `//! sampler foc r32f` (the focus' points, 4 numbers each: xi, xf, yi, yf) and
 // `//! uniform int uFocusN` (how many). Two consecutive points farther apart than PATH_GAP_M (600 m) are separate

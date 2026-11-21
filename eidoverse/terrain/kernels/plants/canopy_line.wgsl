@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/canopy_line: plant_instances.py canopy_line and the end of sun_shade, per spot: the shadow line the crowns
 // toward the sun cast on its card (a crown [x, y, top, r] within CANOPY_REACH_M of the card, nearer the sun along its
 // line of light by more than 0.5 m and within r of it across, shades it below top - along tan(el); the highest such

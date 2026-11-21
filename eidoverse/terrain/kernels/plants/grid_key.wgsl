@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/grid_key: each point's bucket in the hashed grid (plants/grid.wgsl), for a stable sort by bucket
 // (core/prims.js sortPairs) and the buckets' starts (bincount, an exclusive scan): what the neighbour searches walk.
 //! include plants/lib

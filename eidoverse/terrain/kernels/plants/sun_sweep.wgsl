@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/sun_sweep: plant_instances.py sun_shade's sweep over one level's heights (a grid laid along the light: s
 // away from the sun, w across it, cells of the level's cell): per line w the running maximum of h + s tan(el) over
 // the cells before each cell (-1e9 before the first; h bilinear in the level, -1e9 more than half a cell off it), so a

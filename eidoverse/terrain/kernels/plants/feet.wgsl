@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/feet: the end of plants.py _thin (blender/eidoblend/terrain/build/plants.py at f9fba8c): a candidate still
 // kept is dropped within 0.75 x (a placed plant's foot + its own hard-core radius) of any plant placed before it
 // (the earlier priorities' plants), found on the hashed grid (plants/grid.wgsl) of their positions. Clears bit 32 of

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/n20: plants.py _normal_20m and its fallbacks (blender/eidoblend/terrain/build/plants.py at f9fba8c), for a
 // level without the surface bake's n20: uMode 0 pads h - mu by reflection by m cells on every side (np.pad
 // mode='reflect', the edge not repeated); uMode 1 takes the blurred padded field's middle n x n, adds mu back, and

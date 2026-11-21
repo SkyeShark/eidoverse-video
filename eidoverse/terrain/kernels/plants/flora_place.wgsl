@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plant_instances.py at f9fba8c, as a GPU kernel.
 // plants/flora_place: a flora species' spots as createFlora placements (plant_instances.py _instance_flora): per
 // spot in three.js' frame its x and z (-y), its stroke scale scale x size_m[1] / h0 of its individual, and its base
 // height (_base_z with half the foot: `sink` x scale under the ground, deeper by the drop across the foot), and its

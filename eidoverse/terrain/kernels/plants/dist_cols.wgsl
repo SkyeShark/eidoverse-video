@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/dist_cols: the second pass of plants.py _distance_to (blender/eidoblend/terrain/build/plants.py at f9fba8c):
 // the squared distance to the nearest seed is the least over rows j' within R of (the row distance at j')^2 +
 // (j - j')^2 (exact integers in float32), then sqrt x cell, capped. With uParent the parent level's distance at the

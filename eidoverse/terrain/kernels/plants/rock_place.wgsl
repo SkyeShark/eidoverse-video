@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/dressing.py at f9fba8c, as a GPU kernel.
 // plants/rock_place: dressing.py place_rocks per candidate (build/dressing.js): kept by rejection (u dmax < the
 // density, 0 over water above 0.05) and off the excluded discs; its size from the power law N(>s) ~ s^-alpha between
 // s0 and s1 (the toe bias' smallest size s0 (1 + toe_bias grain) where the terrain has the grain map), kept while it

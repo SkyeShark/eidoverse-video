@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/path_dist: plants.py path_distance at points (the cover rasters' grid points: dfocus, the distance the far
 // cover reads the instances' kept share at).
 //! include plants/lib

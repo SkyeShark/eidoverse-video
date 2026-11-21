@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/seed: the seed cells of plants.py's distance rasters (blender/eidoblend/terrain/build/plants.py at f9fba8c):
 // dist_channel's (flow >= channel_flow, or with the channel mask channels > 0.5) and dist_water's (water > 0.05):
 // 1 where a >= uA (uModeA 0) or a > uA (uModeA 1), or b > uB when uUseB, else 0.

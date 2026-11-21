@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/shade: plants.py _shade_at (blender/eidoblend/terrain/build/plants.py at f9fba8c): 0..1 shade at points
 // from the shade-casting plants placed so far: full within half of radius x a crown's radius of its trunk, none beyond
 // radius x it; crowns add up as 1 - product(1 - s), summed as logs. The casters are found on the hashed grid

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/gather_rec: records by index (numpy's {k: v[keep]} over a dict of per-candidate arrays, as one array of
 // records): out[q] = src[index[q]], uStride numbers a record, for q < uCount. Exact (a copy).
 //! include plants/lib

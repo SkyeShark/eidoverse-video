@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/placed_list: plants.py _plan's lists of the plants placed so far (blender/eidoblend/terrain/build/plants.py
 // at f9fba8c): per placed plant its position and a radius, factor x size / size_m[1] (feet: foot_m x scale; the
 // shade's casters: crown_m x scale), written from slot uFirst (the list grows group by group). Also its flags for the

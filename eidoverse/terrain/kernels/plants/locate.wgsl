@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/locate: plants.py _Points (blender/eidoblend/terrain/build/plants.py at f9fba8c) for a list of points: the
 // finest level whose window holds each point (inclusive), and the finest coarse level (the main level in its tile,
 // the context levels beyond: what every density reads, _Ground.coarse); the coarsest level considered takes the

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/spot_xy: the spots' ground points as two float32 numbers each (Blender x, y): what build/mesh.js heightField
 // and plants/ground_normal read (plants.py _view: z = height_at(x, y), the normal its triangle's).
 //! include plants/lib

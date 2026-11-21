@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/grid.wgsl (`//! include plants/grid`, after plants/lib): the hashed grid the neighbour searches share
 // (plants.py _pairs: every pair of points at most `reach` apart, on a grid of reach-sized cells; here the cells are
 // hashed into a table of a power of two buckets, and every candidate pair is still tested by its distance). A kernel

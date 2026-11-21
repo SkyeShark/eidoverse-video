@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/view: plants.py _view's choice (blender/eidoblend/terrain/build/plants.py at f9fba8c) over one species'
 // placed plants: within its radius R of the focus, at least lod_m_per_m x their distance tall, and kept by
 // _u(id, 14) < 1 - _smooth(f0 R, f1 R, d) over the fade band; with the key max_count's cap sorts by,

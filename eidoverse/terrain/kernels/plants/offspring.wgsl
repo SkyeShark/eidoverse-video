@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/offspring: plants.py _candidates' plants (blender/eidoblend/terrain/build/plants.py at f9fba8c): per cluster
 // centre, its offspring in order, ho = _h(hp, ok); a radius min(sigma sqrt(-2 log1p(-_u(ho, 6))), 3 sigma) and an
 // angle 2 pi _u(ho, 7) about the centre; the age and height of _age_size from the centre's draw _u(hp, 4) (a stand

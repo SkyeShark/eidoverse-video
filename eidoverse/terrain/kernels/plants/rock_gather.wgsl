@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/dressing.py at f9fba8c, as a GPU kernel.
 // plants/rock_gather: the kept rocks' numbers in order (build/dressing.js): out[q] = the 20 numbers of rocks[index[q]]
 // (plants/rock_place), and the 16 of its matrix apart (what an InstancedMesh reads), and its model as a u32 key.
 //! include plants/lib

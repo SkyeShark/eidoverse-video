@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/streak: plants.py _Ground.fall_streak's line integral convolution (blender/eidoblend/terrain/build/plants.py
 // at f9fba8c), per texel of a level's 20 m normal grid: the world noise averaged along the texel's streamline down
 // and up the 20 m normal's slope, k steps of max(cell, 12 m) either way (the fall line's direction read at the

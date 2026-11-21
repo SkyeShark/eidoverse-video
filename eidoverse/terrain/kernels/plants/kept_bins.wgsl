@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/kept_bins: plants.py _kept_profile's sums (blender/eidoblend/terrain/build/plants.py at f9fba8c): per
 // distance band of R / 48 from the focus, the crown area (size^2) of the placed plants and of those the view keeps,
 // as 64-bit fixed-point sums (size^2 x 2^16, rounded; a carry into the high word): exact integers in any order,

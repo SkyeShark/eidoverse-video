@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/dressing.py at f9fba8c, as a GPU kernel.
 // plants/rock_cand: dressing.py place_rocks' candidates (build/dressing.js), as the planner's candidate records (16
 // numbers, the position at 0-3 as integer part and fraction): uMode 0, candidate i uniform in the disc of radius R
 // round the focus (r = R sqrt(u), theta = 2 pi u'), its id at 4-5; uMode 1, the density's 96 x 96 probe grid over the

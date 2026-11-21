@@ -1,3 +1,5 @@
+// Port of numpy code of blender/eidoblend/terrain/build/palettes.py (value_noise) and
+// blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/noise_raster: palettes.value_noise(X, Y, scale, seed, octaves, gain, stretch) at points (the grid points of
 // plants/grid_points): fall_streak's world noise (blender/eidoblend/terrain/build/plants.py at f9fba8c), on the
 // position's integer part and fraction (plants/lib.wgsl value_noise).

@@ -11,7 +11,8 @@
 // sun 70 degrees left of the view; AgX at -0.5 EV) and the view's camera.
 //
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
-//         eidoverse/terrain/tests/plants/views.mjs --snap <the review's snapshots> [--views real_place/floor_lischmaad,...]
+//         eidoverse/terrain/tests/plants/views.mjs --snap <the review's snapshots>[,<more folders>]
+//         [--views real_place/floor_lischmaad,...]
 //         [--label port]
 //
 // One render job (eidoverse/render_scene.mjs), one frame a view (each view's terrain built in its frame and freed
@@ -26,7 +27,8 @@ const ALL = ['real_place/floor_lischmaad', 'real_place/ridge_schynige', 'canyon/
     'fluvial_range/canyon_road', 'dunes/interdune_floor'];
 const want = A.list('--views', ALL);
 const label = A.opt('--label', 'port');
-const snapDir = A.opt('--snap', Deno.env.get('EIDO_VIEW_SNAPS') ?? null);
+// the saved terrains' folders (comma-separated: a view's terrain is looked for in each, in order)
+const snapDirs = (A.opt('--snap', Deno.env.get('EIDO_VIEW_SNAPS') ?? '') ?? '').split(',').filter(Boolean);
 const W = Number(A.opt('--W', '960')), H = Number(A.opt('--H', '540'));
 const edition = M.W.needBlenderEdition('the review views and the judge\'s terrains');
 if (!edition) Deno.exit(0);
@@ -48,10 +50,12 @@ for (const rv of want) {
     const group = v.focus ? [v] : plan.views.filter((x) => !x.focus);
     let snap = null;
     if (!v.focus) snap = `${tests}/out/surfacing_judge/terrains/${recipe}.npz`;
-    else if (snapDir) {
-        for (const suf of ['', '_j']) {
-            const p = `${snapDir}/${recipe}_${name}${suf}.npz`;
-            if (M.W.exists(p)) { snap = p; break; }
+    else {
+        for (const dir of snapDirs) {
+            for (const suf of ['', '_j']) {
+                const p = `${dir}/${recipe}_${name}${suf}.npz`;
+                if (!snap && M.W.exists(p)) snap = p;
+            }
         }
     }
     if (!snap || !M.W.exists(snap)) {
@@ -256,11 +260,15 @@ globalThis.renderFrame = async function (tt) {
     sc.near = -20000; sc.far = 20000;
     sc.updateProjectionMatrix();
     sun.shadow.normalBias = 2.0 * (2 * half / 4096);
+    // the sky first: its update sets the light's colour and strength and puts the light at 120 x the sun's
+    // direction from the origin, which, with the target on the view's ground kilometres away, turns the light's
+    // direction (its position less its target's) away from the sun, below the horizon; then the light along the
+    // sky's sun direction from the view's ground
+    sky.update(0);
     sun.target.position.copy(tgt);
     sun.position.copy(tgt).add(new THREE.Vector3(s.x, s.y, s.z).multiplyScalar(1000));
     sun.target.updateMatrixWorld(true);
     sun.updateMatrixWorld(true);
-    sky.update(0);
     if (!G.cur.done) {
         G.cur.done = true;
         // the billboards' shade under this view's sun (in the terrain's frame), then a first frame and a timed second

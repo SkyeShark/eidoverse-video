@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/copy_rec: records [0, uCount) of src into dst from slot uFirst (np.concatenate of a priority group's
 // species' candidates, in species order). Exact (a copy).
 //! include plants/lib

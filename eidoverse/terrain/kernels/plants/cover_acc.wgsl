@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/cover_acc: one species' term of plants.py _level_cover (blender/eidoblend/terrain/build/plants.py at
 // f9fba8c) at the grid points of a level: the density clipped to the cluster process's ceiling and kept off the
 // excluded ground, the undergrowth thinned under the expected tree cover (uS.w 1), times the share a hard core keeps

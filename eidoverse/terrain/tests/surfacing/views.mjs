@@ -228,11 +228,15 @@ globalThis.renderFrame = async function (tt) {
     sc.near = -20000; sc.far = 20000;
     sc.updateProjectionMatrix();
     sun.shadow.normalBias = 2.0 * (2 * half / 4096);
+    // the sky first: its update sets the light's colour and strength and puts the light at 120 x the sun's direction
+    // from the origin, which, with the target on the view's ground kilometres away, turns the light's direction (its
+    // position less its target's) away from the sun, below the horizon; then the light along the sky's sun direction
+    // from the view's ground (tests/plants/views.mjs found and fixed the same order)
+    sky.update(0);
     sun.target.position.copy(tgt);
     sun.position.copy(tgt).add(new THREE.Vector3(s.x, s.y, s.z).multiplyScalar(1000));
     sun.target.updateMatrixWorld(true);
     sun.updateMatrixWorld(true);
-    sky.update(0);
     // a mask frame draws the terrain alone: the sky's domes and the water hidden, so the black reads as "not here"
     for (const o of [...globalThis._s.children, ...world.children]) {
         if (o === world || o === t.mesh || o.isLight) continue;

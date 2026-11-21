@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/edges: the conflict graph of plants.py _hard_core (blender/eidoblend/terrain/build/plants.py at f9fba8c):
 // two candidates of one priority conflict when both have a hard core (r > 0) and stand closer than 0.75 x the sum of
 // their radii. Found on the hashed grid (plants/grid.wgsl, cells of 2 x 0.75 x the largest r). uMode 0 counts each

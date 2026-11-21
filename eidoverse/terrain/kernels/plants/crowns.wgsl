@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/crowns: the placed trees' crowns in a level raster's texels (plants.py PlantSpots.cover): from the spots'
 // records (12 numbers: x, y at 0-1, scale at 4), the centre ((x - x0) / cell, (y - y0) / cell) and the radius
 // crown_m x scale / cell, 4 numbers a crown for plants/discs.

@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/one_minus_exp: 1 - exp(-v) item by item (plants.py _level_cover's shade of the undergrowth, 1 - exp(-the
 // trees' exponent)), or uValue everywhere with uFill 1 (a list of one value: a level index, a cap).
 //! include plants/lib

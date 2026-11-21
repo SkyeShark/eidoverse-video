@@ -1,3 +1,4 @@
+// Port of numpy code of blender/eidoblend/terrain/build/plants.py at f9fba8c, as a GPU kernel.
 // plants/mis: plants.py _hard_core (blender/eidoblend/terrain/build/plants.py at f9fba8c) as its own rounds, run on
 // the GPU over the conflict graph (plants/edges): a candidate is accepted when no undecided neighbour has a lower
 // rank, then its undecided neighbours are rejected; sequential inhibition in rank order is the fixed point, and the
