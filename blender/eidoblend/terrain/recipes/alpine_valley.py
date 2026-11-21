@@ -9,8 +9,8 @@ The defaults are Lauterbrunnen's: one trunk trough down the middle of the tile, 
 stand at 75-80 degrees within 200 m of the floor, and where the rock is weaker a U whose walls failed back over
 their talus, under the hanging valleys that open onto them, in a horseshoe of high ridges whose head stands 9.5 km
 up-valley. PRESETS hold other settings as make_terrain keyword arguments (knobs, base elevation,
-size): 'yosemite', a 1.8 km flat-floored trough with 950 m granite walls and no benches, cut into a gently domed
-upland draining west.
+size): 'yosemite', a 1.8 km flat-floored trough with 1000 m granite walls and no benches, the Merced's canyon
+widened by its glacier in a rounded upland draining west.
 
 The stages:
   1. valley_uplift (every level): a range around one main valley, a crest across its head and two side ridges along
@@ -57,12 +57,17 @@ SHAPES = {
                   'side_shift_m': 3000.0, 'side_length_m': 20000.0, 'side_width_m': 3600.0, 'side_height': 0.65,
                   'join': 0.12, 'texture': 0.3,
                   'trunk': {'head': 0.85, 'width_m': 60.0, 'wiggle_m': 300.0, 'wiggle_wavelength_m': 8000.0}},
-    # the Sierra Nevada's west slope at Yosemite: the high country up at the valley's head beyond the tile, the
-    # uplands either side at half its height. Their ice stays thin (below the ELA) and one valley glacier comes down
-    # from the head (side uplands as high as the crest grew glaciers radiating every way, an ice cap with no trunk)
-    'upland': {'kind': 'horseshoe', 'centre': [0.0, 0.0], 'azimuth_deg': 270.0, 'crest_offset_m': 9000.0,
-               'crest_length_m': 24000.0, 'crest_width_m': 7000.0, 'side_offset_m': 4500.0, 'side_shift_m': 0.0,
-               'side_length_m': 26000.0, 'side_width_m': 5000.0, 'side_height': 0.5, 'join': 0.12, 'texture': 0.25,
+    # the Sierra Nevada's west slope at Yosemite: the high country far up the valley's head (18 km), and one broad
+    # upland block either side of the river (side_offset 2.5 km, 9 km wide, at 0.85 of the crest), started high
+    # (start_m 1600: the old surface), so the held river cuts its canyon down into it from the first pass and one
+    # valley glacier comes down it. (With the crest 9 km out and the side uplands at half its height, narrower and
+    # farther apart, the river was held at 1280 m near its head, over the ground beside it: the range drained north
+    # and south away from it, the ice flowed out across the side ridges, and the tile got three troughs and no
+    # Yosemite Valley.)
+    'upland': {'kind': 'horseshoe', 'centre': [0.0, 0.0], 'azimuth_deg': 270.0, 'crest_offset_m': 18000.0,
+               'crest_length_m': 24000.0, 'crest_width_m': 7000.0, 'side_offset_m': 2500.0, 'side_shift_m': 0.0,
+               'side_length_m': 26000.0, 'side_width_m': 9000.0, 'side_height': 0.85, 'join': 0.12, 'texture': 0.25,
+               'start_m': 1600.0,
                'trunk': {'head': 0.85, 'width_m': 60.0, 'wiggle_m': 400.0, 'wiggle_wavelength_m': 8000.0}},
     'ridge': {'kind': 'ridge', 'centre': [0.0, 0.0], 'azimuth_deg': 70.0, 'length_m': 24000.0, 'width_m': 12000.0,
               'spurs': 8, 'spur_length_m': 5500.0, 'texture': 0.3},
@@ -183,15 +188,20 @@ GLACIAL = dict(ela_m='$ela_m', trough_width_m='$trough_width_m', trough_depth_m=
 PRESETS = {
     # Yosemite: one wide trough in a granite upland that ice smoothed rather than cut into cirques (80 cirques at
     # every channel head made a field of flat-floored ovals), with few hanging tributaries (Yosemite and Bridalveil
-    # Creeks); its walls 950 m at 78 degrees leave a floor about 1 km wide in its 1.8 km (2.2 km left 1.7 km of
-    # floor), the old valley floor 970 m above it (the walls 800 m under the shoulder cut's 170 m), the ELA of the
-    # last glaciation's Tioga ice low enough that the trunk runs off the tile; the range's relief that of the real
-    # tile (1582 m: at 1100 the trunk river held 970 m up read as the range's relief and stopped its uplift); its
-    # granite massive nearly everywhere (rock_strong_share 0.95: the walls stand sheer along the whole valley)
+    # Creeks); its walls 1000 m at 78 degrees leave a floor about 1 km wide in its 1.8 km; the glacier widened the
+    # Merced's canyon rather than sinking a trough below an old valley floor: the river's old bed 400 m over the
+    # fill's graded line (bench_m), half the cut below it (overdeepen 0.5) and the walls rising as far again above it
+    # to the rims, with no shoulder cut (at bench_m 970 the held river stood 1000 m over its side valleys); the ELA
+    # of the last glaciation's Tioga ice low enough that the trunk runs off the tile; the range's relief that of the
+    # real tile (1582 m); the uplands rounded, not combed into ridges: creep over valleys 1.6 km apart and slopes
+    # failing only past 38 degrees (at 800 m and 20 degrees the uplands were planar 20-degree ridges and valleys,
+    # not domes); its granite massive nearly everywhere (rock_strong_share 0.95: the walls stand sheer along the
+    # whole valley)
     'yosemite': dict(size=12000.0, base_elevation_m=1100.0, params={
         'uplift': 'upland', 'drain_azimuth_deg': 270.0, 'relief_m': 1500.0, 'ela_m': 1500.0,
-        'trough_width_m': 1800.0, 'trough_depth_m': 950.0, 'bench_m': 970.0, 'shoulder_width': 0.0,
-        'wall_deg': 78.0, 'threshold_deg': 20.0, 'valley_spacing_m': 800.0, 'cirques': False,
+        'trough_width_m': 1800.0, 'trough_depth_m': 1000.0, 'bench_m': 400.0, 'shoulder_width': 0.0,
+        'overdeepen': 0.5, 'shoulder_cut': 0.0,
+        'wall_deg': 78.0, 'threshold_deg': 38.0, 'valley_spacing_m': 1600.0, 'cirques': False,
         'tributary_area_km2': 5.0, 'snowline_m': 3300.0, 'treeline_m': 3000.0, 'rock_strong_share': 0.95}),
 }
 

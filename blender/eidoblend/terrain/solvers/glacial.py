@@ -1470,6 +1470,7 @@ def trough_target(rho, zf, H, ff, fill, rise, prof_u, rock=False):
 
 
 SHARPEN_RHO_MAX = 2.0                     # sharpen_walls: the farthest from its seed a cell's cross-section is read
+SWITCH_GRAD = 1.0                         # ... and the steepest its floor and lip may change (m per m) to be one seed's
 
 
 def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
@@ -1496,19 +1497,33 @@ def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
         return a.reshape(n0 // 2, 2, n1 // 2, 2).mean(axis=(1, 3))
 
     fp = {k: coarse(f[k]) for k in arg}
-    # a parent cell stands for the target only where all four of its cells lie within SHARPEN_RHO_MAX of their seed:
-    # beyond it the cross-section's upper wall rises without bound (its seed's trough cut nothing there), and a
-    # block that mixed a wall cell with one whose best seed lay hundreds of half-widths away averaged them into a
-    # target kilometres high, which the Catmull-Rom carried onto the wall beside it (spikes of 1-5 km on the
-    # yosemite preset's walls). There the parent is its surface: the block mean of the inherited h (bed)
-    whole = coarse((f['trough_rho'] <= SHARPEN_RHO_MAX).astype(np.float64)) > 1.0 - 1e-9
+    # a cell's cross-section is one seed's only where its inherited parameters are: the coarsest level keeps each
+    # cell's best seed, and where that switches between seeds whose floors and lips differ (beyond a lip a seed
+    # down-valley, its floor 150-250 m lower below a confluence, has the lower shoulder there), the floor and the lip
+    # jump by that between two of its cells. Inherited bilinearly, they blend two cross-sections over a parent cell,
+    # and the target read from the blend is neither seed's: the sharpening moved the walls by 100-140 m in a staircase
+    # of the coarsest level's cells along every such lip, which each finer level sharpened again into the beaded rim
+    # of the main tile and the evenly spaced capsules on the hero walls (seed 1). Within one seed's reach the floor and
+    # the lip change by under SWITCH_GRAD metres per metre (the floor's grade, a confluence's deepening smoothed along
+    # the stream); there the walls are sharpened, elsewhere the level keeps its upsampled walls. And a parent cell
+    # stands for the target only where all four of its cells also lie within SHARPEN_RHO_MAX of their seed: beyond
+    # it the cross-section's upper wall rises without bound (its seed's trough cut nothing there), and a block that
+    # mixed a wall cell with one whose best seed lay hundreds of half-widths away averaged them into a target
+    # kilometres high, which the Catmull-Rom carried onto the wall beside it (spikes of 1-5 km on the yosemite
+    # preset's walls). Such a parent is its surface: the block mean of the inherited h (bed)
+    one = f['trough_rho'] <= SHARPEN_RHO_MAX
+    if level is not None:
+        for a in (f['trough_zf'], f['trough_zf'] + f['trough_H']):
+            gy, gx = np.gradient(a, float(level.cell))
+            one &= np.hypot(gx, gy) < SWITCH_GRAD
+    whole = coarse(one.astype(np.float64)) > 1.0 - 1e-9
     out = {}
     for rock in (False, True):
         t_own = trough_target(*(f[k] for k in arg), pu, rock=rock)
         surf = np.asarray(fields['bed'] if rock and 'bed' in fields else fields['h'], np.float64)
         t_p = np.where(whole, trough_target(*(fp[k] for k in arg), pu, rock=rock), coarse(surf))
         t_par = Gd.crop_upsample2(t_p, 0, 0, n1 // 2, 'catmull', mj=n0 // 2).astype(np.float64)
-        out[rock] = np.where(f['trough_rho'] <= SHARPEN_RHO_MAX, t_own - t_par, 0.0)
+        out[rock] = np.where(one, t_own - t_par, 0.0)
     rho = f['trough_rho']
     t = np.clip((rho - 1.0) / 0.15, 0.0, 1.0)
     w = np.clip(f['trough_sharp'], 0.0, 1.0) * (1.0 - t * t * (3.0 - 2.0 * t))

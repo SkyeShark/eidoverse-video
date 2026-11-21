@@ -28,7 +28,9 @@
  10. sharpen_walls: a trough carved on 31.25 m cells and inherited at 15.6 m gets its walls back at 15.6 m (within
      a quarter of the upsampled error and 15 m), the floor, the ground beyond the lip and the pinned band untouched;
      and where the cells past one lip carry a far seed's cross-section (rho 300), no change larger than the clean
-     trough's (the parent's target read from such blocks had stood kilometres high: spikes on yosemite's walls)
+     trough's (the parent's target read from such blocks had stood kilometres high: spikes on yosemite's walls);
+     and where the best seed switches at a lip to one down-valley with a floor 160 m lower, the walls there move no
+     more than the clean trough's (read across the switch: 80 m and more, the beads and capsules)
  11. wall_flutes' families: no couloir on a level narrower than 2 of its cells across the fall line, and the coarse
      level's couloirs kept on the finer level over the same ground
  12. valley_centre: seeds following a path 250 m off a valley's axis move onto it; seeds on the axis stay
@@ -988,6 +990,35 @@ def test_sharpen_walls():
           moved < 1.5 * float(np.abs(child['h'] - before)[inner].max()) + 5.0 and err2 < 30.0,
           f'largest change {moved:.1f} m (the clean trough\'s {float(np.abs(child["h"] - before)[inner].max()):.1f} m), '
           f'the walls off the cross-section by {err2:.1f} m', round(time.perf_counter() - t0, 2))
+    # the same trough where, from the top of one wall (rho 0.95) out, the best seed is one down-valley whose floor
+    # stands 160 m lower and whose lip 200 m lower (seed 1's west wall below a confluence): on a level (the guard reads
+    # the parameters' change in metres per metre) the walls along that lip move no more than the clean trough's (read
+    # without the guard, 80 m and more: the staircase of beads and capsules), and eight in ten of the wall's cells are
+    # still sharpened
+    from eidoblend.terrain.core.levels import Level
+    lv = Level(1, 'context', -0.5 * n * cell, -0.5 * n * cell, n * cell, 0.5 * cell, 2 * n)
+    east = (np.arange(n)[None, :] + 0.5) * cell - 0.5 * n * cell > 0
+    down = (rc > 0.95) & east
+    p3 = dict(parent, trough_rho=np.where(down, rc + 0.25, rc), trough_zf=np.where(down, -60.0, 100.0),
+              trough_H=np.where(down, H - 40.0, H), trough_fill=np.where(down, 200.0, 40.0))
+    child3 = {k: Gd.crop_upsample2(v, 0, 0, n, 'catmull' if k in ('h', 'bed') else 'bilinear').astype(np.float64)
+              for k, v in p3.items()}
+    probe = {k: v.copy() for k, v in child3.items()}
+    G.sharpen_walls(probe, None, params, pin_w)                  # no level: the parameters read as they are
+    before3 = child3['h'].copy()
+    G.sharpen_walls(child3, lv, dict(params, rock_weak_deg=None), pin_w)
+    side = inner & (np.arange(2 * n)[None, :] >= n) & (rf > 0.85) & (rf < 1.15)
+    clean = float(np.abs(child['h'] - before)[side].max())
+    guarded = float(np.abs(child3['h'] - before3)[side].max())
+    unguarded = float(np.abs(probe['h'] - before3)[side].max())
+    walls3 = inner & (rf > ff) & (rf < 1.0)
+    kept = float((np.abs(child3['h'] - before3)[walls3] > 0.0).mean() /
+                 max((np.abs(child['h'] - before)[walls3] > 0.0).mean(), 1e-9))
+    check('sharpen_walls where the best seed switches at a lip to one down-valley (floor 160 m, lip 200 m lower): '
+          'the walls there move no more than the clean trough\'s, eight in ten wall cells still sharpened',
+          guarded <= clean + 1.0 and kept >= 0.8 and unguarded > guarded + 20.0,
+          f'largest change along that lip {guarded:.1f} m (the clean trough\'s {clean:.1f} m; read without the guard '
+          f'{unguarded:.1f} m); {kept * 100:.0f} % of the wall\'s sharpened cells kept', round(time.perf_counter() - t0, 2))
 
 
 def main():
