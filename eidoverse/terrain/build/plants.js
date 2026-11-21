@@ -1580,6 +1580,12 @@ export class PlantSpots {
 
     names() { return this.species.map((s) => s.name); }
     has(name) { return this._arrays.has(name); }
+
+    /** Release what the plan keeps on the GPU for its cover rasters (the ground's uploaded maps); the records stay. */
+    dispose() {
+        this._ground?.g?.destroy();
+        this._ground = null;
+    }
     get length() { let n = 0; for (const a of this._arrays.values()) n += a.length / FIELDS.length; return n; }
 
     toString() {

@@ -919,7 +919,12 @@ export async function instancePlants(spots, terrain = null, opts = {}) {
         bindSun: async (dir) => bindSun(out, terrain, dir, ctx),
         dispose() {
             for (const f of flora) f.dispose?.();
-            group.traverse((o) => { if (o.isInstancedMesh) { o.material?.dispose?.(); } });
+            const meshes = [];
+            group.traverse((o) => { if (o.isInstancedMesh) meshes.push(o); });
+            for (const o of meshes) {
+                o.material?.dispose?.();
+                o.dispose();                             // its instance buffers (the levels' geometries stay for reuse)
+            }
             group.removeFromParent();
         },
     };

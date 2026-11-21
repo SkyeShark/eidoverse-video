@@ -42,8 +42,8 @@ fn kmain(p: vec2<i32>) {
   // the inverse transpose times det: columns c1 x c2, c2 x c0, c0 x c1
   var wn = cross(c1, c2) * N.x + cross(c2, c0) * N.y + cross(c0, c1) * N.z;
   if (dot(c0, cross(c1, c2)) < 0.0) { wn = -wn; }
-  let L = length(wn);
-  if (L > 0.0) { wn = wn / L; }
+  let ln = length(wn);
+  if (ln > 0.0) { wn = wn / ln; }
   let o = 15 * q;
   outV_b[o] = wp.x;
   outV_b[o + 1] = wp.y;

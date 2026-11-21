@@ -164,7 +164,9 @@ export async function loadModels(models, colour = null, res = '1k', { R, log = c
     const target = colour ? P.hexLinear(colour) : null;
     const out = [];
     const t0 = performance.now();
-    const Loader = globalThis.GLTFLoader ?? (await import('three/addons/loaders/GLTFLoader.js')).GLTFLoader;
+    // the scene's loader (render_scene.mjs: it hands Deno's decoded textures to WebGPU), else three's own (the
+    // version deno.json pins; the import map's three/addons/ prefix does not resolve a subpath under Deno)
+    const Loader = globalThis.GLTFLoader ?? (await import('npm:three@0.184.0/addons/loaders/GLTFLoader.js')).GLTFLoader;
     for (const [id, lo, hi] of entries) {
         const key = `${id}|${res}|${colour ?? 'scan'}`;
         if (!MODELS.has(key)) {

@@ -202,9 +202,18 @@ async function buildView(G, sp) {
     const plants = await PI.instancePlants(spots, t, { renderer, R, log: (m) => console.log(m) });
     rec.seconds.plants_instance = +((performance.now() - t0) / 1000).toFixed(1);
     rec.instanced = plants.species;
+    spots.dispose();                                     // the plan's GPU maps: the cover is made, the spots instanced
     world.add(plants.group);
     globalThis._s.add(world);
     return { t, sd, world, plants, c, rec };
+}
+
+// a finished view's GPU memory: its plants, its terrain's mesh and runner tables, its surface data's textures
+function freeView(view) {
+    view.plants.dispose();
+    globalThis._s.remove(view.world);
+    for (const tex of Object.values(view.sd?._textures ?? {})) tex?.dispose?.();
+    view.t.dispose();
 }
 
 globalThis.renderFrame = async function (tt) {
@@ -213,8 +222,7 @@ globalThis.renderFrame = async function (tt) {
     const r = globalThis._r;
     if (!G.cur || G.cur.k !== k) {
         if (G.cur) {
-            G.cur.view.plants.dispose();
-            globalThis._s.remove(G.cur.view.world);
+            freeView(G.cur.view);
             G.cur = null;
         }
         const view = await buildView(G, G.V.specs[k]);

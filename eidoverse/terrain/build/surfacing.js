@@ -77,6 +77,9 @@
 //   - The specular: Blender's Specular IOR Level s scales the Principled BSDF's F0 (0.04 at 0.5) through its IOR;
 //     here the physical NodeMaterial's IOR is set to give that F0 (1 + sqrt(F0)) / (1 - sqrt(F0)), F0 = 0.08 s.
 //   - Debug views (options.debug) are unlit MeshBasicNodeMaterials (Blender's Emission shader).
+//   - The material without baked data (surfacing.py's attribute path: the masks read as the mesh's eido_<mask>
+//     attributes) is not here: this edition's ring mesh carries no mask attributes, so surfaceMaterial and
+//     farMaterial take the terrain's SurfaceData (data:) and refuse without it; palette null still gives the clay.
 //   - Per-element work runs on the GPU (the edition's rule): the strata image's texels from the beds' table (made
 //     in JavaScript doubles with numpy's draws, core/np_random.js), the packed scans' channels, their height
 //     statistics and their normal variance pyramid (core/gpu.js kernels written in this file), canopyMean's 76,800
