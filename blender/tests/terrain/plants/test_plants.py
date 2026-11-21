@@ -270,6 +270,13 @@ def test_ground(t, spots):
     check('ground: no plant in a flatten area', not (np.hypot(a[:, 0] - 100.0, a[:, 1] + 100.0) < 40.0).any())
     check('ground: no plant on water', not (np.hypot(a[:, 0] + 250.0, a[:, 1] - 150.0) < 76.0).any(),
           f'{len(a):,} plants planned around a 160 m pond')
+    # dist_water: metres to that pond's shore, on the coarse levels (the caldera's open woodland near its lake)
+    g2 = PL._Ground(t2, None, dict(P.CONSTANTS))
+    r = np.array([0.0, 100.0, 200.0, 400.0])
+    pts = g2.locate(-250.0 + 80.0 + r, np.full(len(r), 150.0))
+    dw = g2.at(pts, 'dist_water')
+    check('ground: dist_water is the distance to the water\'s edge, capped', bool(np.all(np.abs(dw - np.minimum(
+        r, PL.DIST_WATER_CAP_M)) < 2.0 * t.levels[0].cell)), f'{np.round(dw, 1).tolist()} m at {r.tolist()} m from the shore')
     # a spot a person stands on, under a spruce (exclude's (x, y, r, 'crown')): no plant's crown reaches within r
     # of it; the rest of the plan barely changes
     full = E.get('alpine')
@@ -460,8 +467,9 @@ def test_handoff(t):
                ((120.0, 360.0, 'inside'), (410.0, 490.0, 'across'), (560.0, 800.0, 'beyond')))
     check('cover: the drawn crowns (canopy_far) take over where the plan thins the trees out: one forest', ok,
           '; '.join(rows))
-    # shrubs: the desert's thin out by size from 120 m (the smallest kept grows 3 mm per metre) to their radius
-    spots = PL.plan_plants(t, 'desert_sandstone', seed=4, **QUIET)
+    # shrubs: the desert's thin out by size (the smallest kept grows 0.9 mm per metre) and over the outer two thirds
+    # of their radius (fade 0.35-1), here capped at 600 m so the synthetic valley holds the band beyond it
+    spots = PL.plan_plants(t, 'desert_sandstone', radius_m=600.0, seed=4, **QUIET)
     c = spots.cover('main')
     placed = np.zeros((lv.n, lv.n))
     for n in spots.names():
@@ -473,7 +481,7 @@ def test_handoff(t):
                   e.get('crown_m', e['core_m']) * a[:, 4] / lv.cell)
     rows = []
     ok = bands(np.clip(placed, 0.0, 1.0), c['shrubs_far'], c['shrubs'], d, c['shrubs'] > 0.05, rows,
-               ((20.0, 110.0, 'inside'), (180.0, 330.0, 'across'), (420.0, 700.0, 'beyond')))
+               ((20.0, 110.0, 'inside'), (330.0, 480.0, 'across'), (650.0, 900.0, 'beyond')))
     check('cover: the drawn shrub cover (shrubs_far) takes over where the plan thins the shrubs out', ok,
           '; '.join(rows))
 

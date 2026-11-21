@@ -65,8 +65,8 @@ from . import palettes as P
 FORMAT = 'eidoverse-terrain-plants/1'
 FIELDS = ('x', 'y', 'z', 'yaw', 'scale', 'age', 'tint', 'nx', 'ny', 'nz', 'variant', 'level')
 # names the density expressions may read beyond the masks and the surface bake's maps (ecotopes.py describes them)
-DERIVED_NAMES = ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'soil', 'insolation', 'dist_channel', 'shade',
-                 'ledge')
+DERIVED_NAMES = ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'soil', 'insolation', 'dist_channel',
+                 'dist_water', 'shade', 'ledge')
 STEEP_DEG = 60.0                    # no plant stands on its own cell steeper than this (unless it grows on rock)
 # the cover rasters a plan gives the surface bake (PlantSpots.cover), of which cover_extra hands over those its map
 # registry knows; and the kind of plant each cover kind counts
@@ -77,6 +77,7 @@ PAD_CORES = 12.0                    # the margin generated around a planned radi
                                     # decision inside the radius hangs on the margin's edge only through a chain of
                                     # that many neighbours of falling mark, which a plan practically never holds
 DIST_CHANNEL_CAP_M = 400.0          # dist_channel reads at most this
+DIST_WATER_CAP_M = 800.0            # dist_water reads at most this
 _FRAME = {
     'axes': 'x east, y north, z up, metres (Blender)',
     'three': 'position (x, z, -y)',
@@ -354,6 +355,7 @@ class _Ground:
         self.constants.update(constants or {})
         self._coarse = [lv.index for lv in self.levels if lv.role != 'hero'] or [0]
         self._dist = None
+        self._distw = None
         self._n20 = None
         self._site = P.parse(E.SITE)
         self.notes = []
@@ -403,6 +405,8 @@ class _Ground:
             v = self._soil(get, pts.n, get('slope_20m'))
         elif name == 'dist_channel':
             v = self.coarse(pts).sample(self.levels, self.dist_channel())
+        elif name == 'dist_water':
+            v = self.coarse(pts).sample(self.levels, self.dist_water())
         elif name == 'ledge':
             v = None
         else:
@@ -474,7 +478,7 @@ class _Ground:
         `site` and `dist_channel` are the coarse levels' (site())."""
         if name == 'shade':
             return shade if shade is not None else np.zeros(pts.n)
-        if name in ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'dist_channel'):
+        if name in ('site', 'slope_20m', 'northness_20m', 'eastness_20m', 'dist_channel', 'dist_water'):
             return self.site(pts, name, shade)
         if name == 'soil':                               # loose cover, more in hollows and, on slopes, where the
             return self._soil(lambda n: self.at(pts, n), pts.n,          # bake's settle gathered it
@@ -526,6 +530,27 @@ class _Ground:
                 prev = i
             self._dist = out
         return self._dist
+
+    def dist_water(self):
+        """Per level, metres to the nearest standing or running water (`water` over 0.05 m), at most
+        DIST_WATER_CAP_M, on the coarse levels as dist_channel is (a level takes its parent's distance where that is
+        nearer)."""
+        if self._distw is None:
+            out = [None] * len(self.levels)
+            prev = None
+            for i in self._coarse:
+                lv, m = self.levels[i], self.stack[i]
+                w = m.get('water')
+                seed = (np.asarray(w) > 0.05) if w is not None else np.zeros((lv.n, lv.n), bool)
+                d = _distance_to(seed, lv.cell, DIST_WATER_CAP_M)
+                if prev is not None:
+                    X, Y = self._xy(lv)
+                    pp = _Points(self.levels, X.ravel(), Y.ravel(), only={prev})
+                    d = np.minimum(d, pp.sample(self.levels, out).reshape(lv.n, lv.n))
+                out[i] = d.astype(np.float32)
+                prev = i
+            self._distw = out
+        return self._distw
 
     @staticmethod
     def _xy(lv, step=1):
