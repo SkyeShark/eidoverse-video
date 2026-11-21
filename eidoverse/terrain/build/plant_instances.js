@@ -58,18 +58,21 @@
 //     it there exactly (the same threshold), then writes each bucket's matrices and the indirect draws' instance
 //     counts. A bucket's instances are written in an order the atomics pick (the image does not depend on it).
 //   - The card level's and billboard's bakes are SeedThree's three.js bakes (its branch cards and bakeGroupToTextures),
-//     not its Blender add-on's: the same generators' textures by another renderer. So the billboards' colour gains
-//     and cut-outs (BILLBOARD_GAIN, which match_billboards.py measured on Blender's bakes: design 4.4, "billboards are
-//     matched to LOD2 before they are used", the bake's correction on the eidoverse side) are measured again on these
-//     bakes by the same match (tests/plants/billboards.mjs, its port) into BILLBOARD_GAIN_WEBGPU, which the
-//     billboards take before Blender's table.
+//     not its Blender add-on's: the same generators' textures by another renderer. The billboards' colour gains and
+//     cut-outs (BILLBOARD_GAIN, which match_billboards.py measured on Blender's bakes: design 4.4, "billboards are
+//     matched to LOD2 before they are used") are measured again on these bakes by the same match
+//     (tests/plants/billboards.mjs, its port) for BILLBOARD_GAIN_WEBGPU, which the billboards take before Blender's
+//     table; it stays empty while this edition's tree levels read paler than Blender's (its comment), so the
+//     billboards keep Blender's gains, which hold them nearest Blender's look.
 //   - The leaves' and billboards' backlight: SeedThree's three.js materials add their scatter (three's thickness term:
 //     0.16 + a backlit lobe, x the translucency and the species' transmit, x the sun's light) on every side of a
 //     leaf, the route its Blender add-on calls 'glow'; Blender's plants take the add-on's default, 'translucent' (the
 //     same term x max(0, -N.L) of the bound sun, a Translucent BSDF on the shading normal), so a front-lit leaf takes
 //     none. The copies here (the card and full levels' foliage, the billboard) multiply their scatter colour by that
 //     factor against the sun bindSun binds: the plants light as Blender's do (measured under match_billboards' light,
-//     SeedThree's three.js levels with the glow read 14-22 ΔE paler than Blender's).
+//     SeedThree's three.js levels read 14-22 ΔE paler than Blender's on the glow, on this route trees 13-17 and shrubs
+//     6-13; what remains is
+//     a pale sky sheen over their crowns, not their geometry: their silhouettes are within 1-3 % of Blender's).
 //   - wind=True (SeedThree's forest_group grove) is not ported: SeedThree's three.js API has no grove function (its
 //     app's grove lives in its main.js); a still shot is what the design's renders use.
 //   - The billboard cut-out: Blender's dithered blend takes a fraction of the 16 samples; here alpha to coverage over
@@ -118,7 +121,11 @@ export const BILLBOARD_GAIN = Object.freeze({
 });
 // the same match on this edition's bakes (SeedThree's three.js bakes, not its Blender add-on's: the header's
 // deviations), measured as match_billboards.py measures Blender's by tests/plants/billboards.mjs (its port), keyed
-// as BILLBOARD_GAIN; the billboards take it before BILLBOARD_GAIN (billboardGainFor)
+// as BILLBOARD_GAIN; the billboards take it before BILLBOARD_GAIN (billboardGainFor). Empty: measured on 11-21 the
+// trees' card and full levels here carry a pale sky sheen Blender's do not (L* 12-17 above Blender's under the same
+// light), so their billboards' gains clip at match_billboards' 2 and match nothing (ΔE 13-29 after), while with
+// BILLBOARD_GAIN this edition's billboards stand 5-13 ΔE from Blender's own levels; the match is for the levels this
+// edition draws once they read as Blender's
 export const BILLBOARD_GAIN_WEBGPU = Object.freeze({});
 export const ALPHA_CUT = 0.35;           // SeedThree's billboard cut-out threshold
 export const ALPHA_SOFT_PX = Object.freeze([24.0, 4.0]);   // the cut-out hard at 24 pixels tall, the whole alpha at 4

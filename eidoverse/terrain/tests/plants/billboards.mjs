@@ -22,7 +22,10 @@
 // BILLBOARD_GAIN_WEBGPU entries, the table plant_instances.js takes before Blender's.
 //
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
-//         eidoverse/terrain/tests/plants/billboards.mjs [--only douglasFir,redMaple]
+//         eidoverse/terrain/tests/plants/billboards.mjs [--only douglasFir,redMaple] [--sheen] [--from <match.json>]
+//
+//     --sheen  a diagnosis (into tests/out/plants/billboards_sheen): each level also drawn without its specular lobe
+//     --from   the checks of a match this test wrote, again, without rendering
 //
 // Writes tests/out/plants/billboards/<species>_<seed>_<key8>.png (per turn: the full level | the card level | the
 // billboard | the billboard matched, display images on grey), match.json (per individual: colours, areas, gain and
@@ -37,7 +40,10 @@ import { grownDials, gainKey } from '../../build/plant_instances.js';
 const A = S.argsOf();
 const T = new S.C.Checks('plants: billboards matched to the level they take over from (match_billboards.py)');
 const only = A.list('--only', null);
-const out = `${S.W.out('plants')}/billboards`;
+// --sheen (a diagnosis, its own folder): each level also without its specular lobe, to see what of its colour the sky's
+// reflection makes
+const sheen = A.flag('--sheen');
+const out = `${S.W.out('plants')}/billboards${sheen ? '_sheen' : ''}`;
 const work = `${out}/_scenes`;
 Deno.mkdirSync(work, { recursive: true });
 const W = 960, H = 540;
@@ -67,7 +73,7 @@ for (const c of cases) {
     c.tag = `${c.id}_${c.seed}_${[...h.slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 const spec = { cases, W, H, out, result: `${work}/match.json`, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0,
-    switchM: { tree: 60.0, shrub: 120.0 }, yaws: [0.0, 25.0, 50.0, 75.0], fill: 0.6, eye: 1.7, cutRange: [0.2, 0.9] };
+    switchM: { tree: 60.0, shrub: 120.0 }, yaws: [0.0, 25.0, 50.0, 75.0], fill: 0.6, eye: 1.7, cutRange: [0.2, 0.9], sheen };
 try { Deno.removeSync(spec.result); } catch (_e) { /* none yet */ }
 
 const script = `// The plants package's billboard match (eidoverse/terrain/tests/plants/billboards.mjs writes this file).
@@ -264,9 +270,14 @@ async function matchOne(B, c) {
     scene.background = null;
     for (const o of B.skyObjs) o.visible = false;
     r.setClearColor(0x000000, 0);
-    const variant = async (gainEntry, levels, keep = false) => {
+    const variant = async (gainEntry, levels, keep = false, noSpec = false) => {
         const plants = await PI.instancePlants(oneSpot(B.PL, c), null, { renderer: r, R: B.R, log: null,
             billboardGains: { [c.key]: gainEntry } });
+        if (noSpec) {                                    // --sheen: the levels' copies without their specular lobe
+            plants.group.traverse((o) => {
+                for (const m of [o.material].flat()) if (m?.isMeshPhysicalNodeMaterial && !m.userData?.eidoBillboard) m.specularIntensity = 0.0;
+            });
+        }
         scene.add(plants.group);
         await plants.bindSun([s.x, s.y, s.z]);
         const st = plants._still[0];
@@ -287,6 +298,10 @@ async function matchOne(B, c) {
     };
     const base = await variant(null, ['full', 'card', 'billboard']);
     const per = base.got.map((g, k) => ({ yaw: V.yaws[k], full: stats(g.full), card: stats(g.card), billboard: stats(g.billboard) }));
+    if (V.sheen) {
+        const flat = await variant(null, ['full', 'card'], false, true);
+        per.forEach((p, k) => { p.full_nospec = stats(flat.got[k].full); p.card_nospec = stats(flat.got[k].card); });
+    }
     const lv = c.level;
     const mean = (f) => [0, 1, 2].map((ch) => per.reduce((a, p) => a + f(p)[ch], 0) / per.length);
     const refLin = mean((p) => p[lv].linear), bbLin = mean((p) => p.billboard.linear);
@@ -351,13 +366,19 @@ const rel = (p) => {
 };
 Deno.writeTextFileSync(config, JSON.stringify({ width: W, height: H, fps: 1, duration: cases.length, script: rel(scriptPath),
     outputVideo: rel(video), capture: { at: cases.map((_, k) => k), jump: true } }, null, 1));
-const argv = S.W.gpuArgv([S.W.norm(Deno.execPath()), 'run', '--allow-all', '--unstable-webgpu', '--node-modules-dir=auto',
-    'eidoverse/render_scene.mjs', rel(config)], { cwd: S.W.REPO });
-const log = `${work}/billboards.log`;
-const code = await S.W.run(argv, { cwd: S.W.REPO, log, env: { ...Deno.env.toObject(), RENDER_CODEC: 'libx264', RENDER_CQ: '0' } });
-T.ok('the render job ran', code === 0, `exit ${code}; ${log}`);
-const res = S.W.exists(spec.result) ? JSON.parse(Deno.readTextFileSync(spec.result)) : [];
-Deno.writeTextFileSync(`${out}/match.json`, JSON.stringify(res, null, 1));
+// --from <a match.json this test wrote>: its checks again, no render
+const from = A.opt('--from', null);
+let res;
+if (from) res = JSON.parse(Deno.readTextFileSync(from));
+else {
+    const argv = S.W.gpuArgv([S.W.norm(Deno.execPath()), 'run', '--allow-all', '--unstable-webgpu', '--node-modules-dir=auto',
+        'eidoverse/render_scene.mjs', rel(config)], { cwd: S.W.REPO });
+    const log = `${work}/billboards.log`;
+    const code = await S.W.run(argv, { cwd: S.W.REPO, log, env: { ...Deno.env.toObject(), RENDER_CODEC: 'libx264', RENDER_CQ: '0' } });
+    T.ok('the render job ran', code === 0, `exit ${code}; ${log}`);
+    res = S.W.exists(spec.result) ? JSON.parse(Deno.readTextFileSync(spec.result)) : [];
+    Deno.writeTextFileSync(`${out}/match.json`, JSON.stringify(res, null, 1));
+}
 T.ok('every individual measured', res.length === cases.length, `${res.length} of ${cases.length}`);
 for (const r of res) {
     const tag = `${r.species} ${r.seed} ${JSON.stringify(r.dials)} (${[...new Set(r.users)].join(', ')})`;
@@ -369,4 +390,4 @@ for (const r of res) {
 }
 console.log('\n// BILLBOARD_GAIN_WEBGPU entries (plant_instances.js):');
 for (const r of res) console.log(`    '${r.key}': { gain: [${r.gain.join(', ')}], alpha: ${r.alpha} },   // ΔE ${r.de_before} -> ${r.de_after}, area ${r.area_ratio_after}`);
-Deno.exit(S.finish(T, 'billboards', { results: res.map((r) => ({ ...r, turns: undefined })) }));
+Deno.exit(S.finish(T, sheen ? 'billboards_sheen' : 'billboards', { results: res.map((r) => ({ ...r, turns: undefined })) }));
