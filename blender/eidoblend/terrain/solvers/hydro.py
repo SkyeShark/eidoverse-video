@@ -20,7 +20,8 @@ always filled with sediment: they are the solver's rounding, not landforms. A ch
 Drainage area. route_area.glsl iterated on the routing surface (the filled surface with a small tilt across each
 lake and flat toward its outlet, so the water crosses lakes) from the fluvial run's last area, until the largest
 relative change over 128 iterations is under 1e-4. A child's border cells receive the parent's flow that crosses its
-window edge (A_in, m^2; qs_in, m^3/yr): rivers entering the window carry their upstream catchment with them.
+window edge (A_in, m^2; qs_in, m^3/yr): rivers entering the window carry their upstream catchment with them. Those
+edge cells are no outlets of the child's routing (inlets()): water that comes in leaves where the ground lets it.
 
 From Ekigar's hydrology (its fill and routing are accurate): fill_depressions (exact, on the graph of D8 basins;
 default wrap (False, False): the levels are open windows), route (D8 / D-infinity / MFD receivers on a filled
@@ -110,12 +111,13 @@ def _terminal_of(rec):
         t = t2
 
 
-def fill_depressions(height, wrap=NOWRAP, sea_level=None):
+def fill_depressions(height, wrap=NOWRAP, sea_level=None, inlets=None):
     """Every cell's spill level (the priority-flood fill), exactly, via the graph of D8 basins: each cell descends
     to a pit; adjacent basins meet at a pass of height max(h_a, h_b); a priority flood over the basins from the
     outlet gives each basin its minimax level; filled = max(h, level). Outlets: an open (non-periodic) edge, the sea
-    (cells at or below sea_level), and on a tile periodic on both axes with no sea, the lowest basin. Returns
-    (filled (ny, nx) float64, info = {'basins', 'outlet'})."""
+    (cells at or below sea_level), and on a tile periodic on both axes with no sea, the lowest basin. `inlets`: a
+    bool mask of edge cells that are no outlets (a child level's edge where its parent's water comes in, inlets()).
+    Returns (filled (ny, nx) float64, info = {'basins', 'outlet'})."""
     h = np.asarray(height, dtype=np.float64)
     ny, nx = h.shape
     hf = h.ravel()
@@ -166,6 +168,8 @@ def fill_depressions(height, wrap=NOWRAP, sea_level=None):
             edge |= (i == 0) | (i == nx - 1)
         if not wrap[1]:
             edge |= (j == 0) | (j == ny - 1)
+        if inlets is not None:
+            edge &= ~np.asarray(inlets, bool).ravel()
         c = np.nonzero(edge & (lab != OUT))[0]
         ea.append(lab[c])
         eb.append(np.full(c.size, OUT, dtype=np.int64))
@@ -443,10 +447,10 @@ def depression_threshold(relief_m):
     return max(1.0, 0.002 * float(relief_m))
 
 
-def flat_distance(surface, wrap=NOWRAP, sea_level=None):
+def flat_distance(surface, wrap=NOWRAP, sea_level=None, inlets=None):
     """Breadth-first steps (8-connected) across every flat of `surface` (cells with no strictly lower neighbour,
-    joined to equal neighbours) from where it drains: a cell with a lower neighbour, an open edge, or the sea.
-    0 off the flats."""
+    joined to equal neighbours) from where it drains: a cell with a lower neighbour, an open edge (but `inlets`,
+    fill_depressions'), or the sea. 0 off the flats."""
     W = np.asarray(surface, np.float64)
     ny, nx = W.shape
     n = W.size
@@ -456,11 +460,14 @@ def flat_distance(surface, wrap=NOWRAP, sea_level=None):
     for wn in _neighbour_views(W, wrap, np.inf):
         lower |= (W > wn).ravel()
     j, i = np.divmod(np.arange(n), nx)
-    seed = lower.copy()
+    edge = np.zeros(n, bool)
     if not wrap[0]:
-        seed |= (i == 0) | (i == nx - 1)
+        edge |= (i == 0) | (i == nx - 1)
     if not wrap[1]:
-        seed |= (j == 0) | (j == ny - 1)
+        edge |= (j == 0) | (j == ny - 1)
+    if inlets is not None:
+        edge &= ~np.asarray(inlets, bool).ravel()
+    seed = lower | edge
     if sea_level is not None:
         seed |= w <= sea_level
     dist = np.zeros(n)
@@ -483,10 +490,11 @@ def flat_distance(surface, wrap=NOWRAP, sea_level=None):
     return dist.reshape(ny, nx)
 
 
-def routing_surface(filled, wrap=NOWRAP, sea_level=None):
+def routing_surface(filled, wrap=NOWRAP, sea_level=None, inlets=None):
     """The surface the drainage area is routed on: the filled surface, tilted across every flat (lakes, filled
     pits, dead-flat ground) by eps per step of its breadth-first distance from the outlet, eps a few float32 steps
-    at the surface's height, so a GPU pass in float32 still sees the way down. float32.
+    at the surface's height, so a GPU pass in float32 still sees the way down. float32. `inlets`: edge cells that
+    are no outlets (fill_depressions'; `filled` must have been filled with the same inlets).
 
     The surface is built along the receiver tree (flow_receivers: the steepest lower neighbour, or across a flat
     toward its drain), outlets first: every cell at least eps above its receiver. On a flat that is the breadth-first
@@ -496,7 +504,7 @@ def routing_surface(filled, wrap=NOWRAP, sea_level=None):
     filled = np.asarray(filled, np.float64)
     top = float(np.max(np.abs(filled))) if filled.size else 0.0
     eps = max(2e-3, 4.0 * float(np.spacing(np.float32(max(top, 1.0)))))
-    rec = flow_receivers(filled, wrap, sea_level)
+    rec = flow_receivers(filled, wrap, sea_level, inlets)
     return _descend(filled, rec, eps).astype(F32)
 
 
@@ -531,16 +539,16 @@ def _descend(filled, rec, eps):
     return rs.reshape(np.shape(filled))
 
 
-def flow_receivers(filled, wrap=NOWRAP, sea_level=None):
+def flow_receivers(filled, wrap=NOWRAP, sea_level=None, inlets=None):
     """Every cell's receiver on a filled (depression-free) surface, as a flat index (-1: an outlet - an open edge
     cell or the sea - with no lower neighbour): the steepest strictly lower neighbour (D8), or on a flat the equal
-    neighbour one breadth-first step nearer the flat's drain (flat_distance). Every path ends at an outlet, however
-    gentle the ground (the tilted routing surface's eps can exceed a meadow's slopes)."""
+    neighbour one breadth-first step nearer the flat's drain (flat_distance, with the `inlets` no drain). Every path
+    ends at an outlet, however gentle the ground (the tilted routing surface's eps can exceed a meadow's slopes)."""
     from . import fluvial as _FL
     W = np.asarray(filled, np.float64)
     ny, nx = W.shape
     rec = _FL.d8_receivers(W)
-    dist = flat_distance(W, wrap, sea_level).ravel()
+    dist = flat_distance(W, wrap, sea_level, inlets).ravel()
     need = np.nonzero(rec < 0)[0]
     if need.size:
         w = W.ravel()
@@ -691,6 +699,19 @@ def _parent_lake_water(level, h, plevel, pfields):
     ii = np.clip(i0 + np.arange(level.n) // f, 0, pw.shape[1] - 1)
     L = grown[np.ix_(jj, ii)]
     return np.where(np.isfinite(L) & (L > h), L - h, 0.0)
+
+
+def inlets(A_in):
+    """The edge cells where a child level's parent sends its water in (A_in > 0, inflow()), as fill_depressions'
+    `inlets`: no outlets. Routed with its whole edge open, a child let a river that entered into a hollow or a flat
+    at the edge (a seam's rounding, a pond the level's own processes made) leave again through the next edge cell,
+    and the trunk downstream lost the catchment the parent had carried to it: on the fluvial range's canyon road
+    focus, with its rivers held (fluvial.py hold_rivers), the finest two hero levels still kept 0.50 and 0.07 of
+    it."""
+    a = np.asarray(A_in, np.float64)
+    out = a > 0.0
+    out[1:-1, 1:-1] = False
+    return out
 
 
 def inflow(plevel, pfields, level, p=1.0, surface=None):

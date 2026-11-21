@@ -587,7 +587,11 @@ def op_soil_hills(fields, level, params, seed=0, ctx=None):
             hold = np.where(np.asarray(fields[k], np.float64) > 0.5, 1.0, hold)
     az = math.radians(float(p['wind_from_deg']) + 180.0)
     wind = (math.sin(az), math.cos(az))
-    hs, change, its = soil_solve(dev, h, hold, h, pins['pin_w'], pins['pin_h'], cell, C,
+    # the border band is held at the ground the level has now: the parent's surface at the seam, and inward whatever
+    # the stages before made of it (a fluvial stage with band_blend fades its own change across the band; pinned
+    # back to the parent's surface here, that change met the solved slopes in a step at the band's inner edge)
+    band_h = np.where(np.asarray(pins['pin_w'], np.float64) > 0.0, h, np.asarray(pins['pin_h'], np.float64))
+    hs, change, its = soil_solve(dev, h, hold, h, pins['pin_w'], band_h, cell, C,
                                  float(p['asymmetry']), wind, half_cells=0.5 * sp / cell, omega=float(p['omega']),
                                  coarse_levels=int(p['coarse_levels']), iter_scale=float(p['iter_scale']))
     cap = float(p['rise_cap']) * relief
