@@ -316,6 +316,17 @@ const kernel = (R, name) => kernelOf(R, name, () => R.kernel(name));
 const groups = (h, w) => [Math.ceil(w / 16), Math.ceil(h / 16), 1];
 const RGBA = new WeakMap();
 const rgba1 = (R) => { let f = RGBA.get(R); if (!f) RGBA.set(R, (f = R.field(1, 1, 4))); return f; };
+// 1 x 1 targets for a kernel's outputs a call does not use: never a field another binding of the dispatch reads or
+// writes (the runner refuses one field bound twice), so each unused output takes its own
+const SINKS = new WeakMap();
+function sinks(R) {
+    let s = SINKS.get(R);
+    if (!s) {
+        s = { f1: R.field(1, 1, 1), f1b: R.field(1, 1, 1), u1: R.field(1, 1, 1, null, 'u32'), u1b: R.field(1, 1, 1, null, 'u32') };
+        SINKS.set(R, s);
+    }
+    return s;
+}
 
 /** One cell-by-cell step of kernels/karst/coast_ew.wgsl (its modes are numpy lines of coast.py): { F, G, U } new
  * fields (G and U only when asked: outs 'G', 'U'). */
@@ -327,7 +338,7 @@ function ew(R, mode, ins = {}, k = [0, 0, 0], outs = '', flags = [0, 0], shape =
     const G = outs.includes('G') ? R.field(h, w, 1) : null;
     const U = outs.includes('U') ? R.field(h, w, 1, null, 'u32') : null;
     R.run(kernel(R, 'karst/coast_ew'), { a: ins.a ?? D.f1, b: ins.b ?? D.f1, c: ins.c ?? D.f1, d: ins.d ?? rgba1(R) },
-        { outF: F, outG: G ?? D.f1, outU: U ?? D.u1 }, { uMode: mode, uHas: flags[0], uHas2: flags[1], uK0: k[0], uK1: k[1], uK2: k[2] },
+        { outF: F, outG: G ?? sinks(R).f1, outU: U ?? sinks(R).u1 }, { uMode: mode, uHas: flags[0], uHas2: flags[1], uK0: k[0], uK1: k[1], uK2: k[2] },
         groups(h, w));
     return { F, G, U };
 }
@@ -572,7 +583,7 @@ async function labelKeep(R, labels, count, h, w, opts = {}) {
     const L = count + 1;
     const flag = R.field(1, L, 1, null, 'u32'), cnt = R.field(1, L, 1, null, 'u32');
     const D = Gd.dummies(R);
-    R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: opts.markA ?? D.f1, keep: D.u1 }, { outK: D.f1, flag, cnt },
+    R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: opts.markA ?? D.f1, keep: D.u1 }, { outK: sinks(R).f1, flag, cnt },
         { uPass: 0, uEdge: opts.edge ? 1 : 0, uMarkA: opts.markA ? 1 : 0, uLargest: 0, uW: w, uH: h }, groups(h, w));
     const [fl, cn] = await R.readAll([flag, cnt]);
     flag.destroy();
@@ -593,7 +604,7 @@ function gatherKeep(R, labels, keep, h, w) {
     const k = R.field(1, keep.length, 1, keep, 'u32');
     const out = R.field(h, w, 1);
     const D = Gd.dummies(R);
-    R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: D.f1, keep: k }, { outK: out, flag: D.u1, cnt: D.u1 },
+    R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: D.f1, keep: k }, { outK: out, flag: sinks(R).u1, cnt: sinks(R).u1b },
         { uPass: 1, uEdge: 0, uMarkA: 0, uLargest: 0, uW: w, uH: h }, groups(h, w));
     k.destroy();
     return out;
@@ -745,7 +756,7 @@ export async function opCoast(fields, level, params, seed = 0, ctx = null) {
             for (let l = 1; l <= count; l++) if (keep.counts[l] > best) { best = keep.counts[l]; bi = l; }
             const det = R.field(n, n, 1);
             const D = Gd.dummies(R);
-            R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: D.f1, keep: D.u1 }, { outK: det, flag: D.u1, cnt: D.u1 },
+            R.run(kernel(R, 'karst/coast_labels'), { lab: labels, a: D.f1, keep: D.u1 }, { outK: det, flag: sinks(R).u1, cnt: sinks(R).u1b },
                 { uPass: 2, uEdge: 0, uMarkA: 0, uLargest: bi, uW: n, uH: n }, groups(n, n));
             if ((await Pm.stats(det)).nonzero > 0) sw = T(Pm.dilate(det, 3));
             det.destroy();
@@ -837,7 +848,7 @@ function nearMask(R, phi, k) {
 function u32ToF32(R, u) {
     const out = R.field(u.h, u.w, 1);
     const D = Gd.dummies(R);
-    R.run(kernel(R, 'karst/coast_labels'), { lab: u, a: D.f1, keep: D.u1 }, { outK: out, flag: D.u1, cnt: D.u1 },
+    R.run(kernel(R, 'karst/coast_labels'), { lab: u, a: D.f1, keep: D.u1 }, { outK: out, flag: sinks(R).u1, cnt: sinks(R).u1b },
         { uPass: 2, uEdge: 0, uMarkA: 0, uLargest: -1, uW: u.w, uH: u.h }, groups(u.h, u.w));
     return out;
 }

@@ -17,7 +17,8 @@
 //               plan's domain is set by the coarsest level's call)
 //
 //     deno run --no-config --no-lock --unstable-webgpu --allow-all eidoverse/terrain/tests/karst_coast/replay_test.mjs
-//         [--runs tower_karst_s1,sea_cliffs_s2] [--ops karst,coast] [--levels 0,2]   (behind $EIDO_GPU_WRAP)
+//         [--runs tower_karst_s1,sea_cliffs_s2] [--ops karst,coast] [--levels 0,2] [--dump]   (behind $EIDO_GPU_WRAP;
+//         --dump writes each replayed call's fields after the op to its log folder's after.npz)
 //
 // A floor run missing under the parity key is taken from another key of the same Blender terrain code. Writes
 // tests/out/karst_coast/replay_test.json and the port's logs under tests/out/karst_coast/replay/. JavaScript per cell

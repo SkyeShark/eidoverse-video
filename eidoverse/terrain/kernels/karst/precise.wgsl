@@ -1,7 +1,8 @@
 // Port of the rounding of blender/eidoblend/terrain/solvers/karst.py evaluate()'s tower loop at f90c6fc: numpy's
 // float32 lines rounded as numpy rounds them, and its float64 lines (np.interp of the wall tables, the fluting's and
-// the talus gate's periodic noise, the smoothsteps) carried in double-float and rounded to float32 once, as numpy's
-// .astype(np.float32) does (`//! include karst/precise`, after `//! include detail/exact`).
+// the talus gate's periodic noise, the smoothsteps, the lobes' noise2 and bilinear) carried in double-float and
+// rounded to float32 once, as numpy's .astype(np.float32) does (`//! include karst/precise`, after
+// `//! include karst/lib` and `//! include detail/exact`).
 //
 // Why: the loop works in window-local float32 metres, and where the rock is steep in plan its last bit is amplified
 // (a wall table rises up to 57 m per metre at a foot's notch, the buried rock dips at tan 85 degrees, the talus gate
@@ -173,10 +174,51 @@ fn kdd_noise1p(s: vec2<f32>, period: i32, salt: u32) -> vec2<f32> {
   let g1 = kfast2sum(kx(f32(h1 & 0xFFFFFF00u) * 4.656612873077393e-10 - 1.0), f32(h1 & 0xFFu) * 4.656612873077393e-10);
   let d0 = kdd_mul(g0, f);
   let d1 = kdd_mul(g1, kdd_add(f, kdd(-1.0)));
-  // _fade(f) = f f f (f (f 6 - 15) + 10)
-  let fd = kdd_mul(kdd_mul(kdd_mul(f, f), f), kdd_add(kdd_mul(f, kdd_add(kdd_mul(f, kdd(6.0)), kdd(-15.0))), kdd(10.0)));
-  let v = kdd_add(d0, kdd_mul(kdd_add(d1, -d0), fd));
+  let v = kdd_add(d0, kdd_mul(kdd_add(d1, -d0), kdd_fade(f)));
   return kdd_mul(kdd(2.0), v);
+}
+
+/** karst.py _fade(t) = t t t (t (t 6 - 15) + 10) in float64 */
+fn kdd_fade(t: vec2<f32>) -> vec2<f32> {
+  return kdd_mul(kdd_mul(kdd_mul(t, t), t), kdd_add(kdd_mul(t, kdd_add(kdd_mul(t, kdd(6.0)), kdd(-15.0))), kdd(10.0)));
+}
+
+// karst.py _GX16, _GY16 (numpy's float64 cos and sin of k 2 pi / 16) as double-floats
+const KDD_GX16 = array<vec2<f32>, 16>(vec2<f32>(1.0, 0.0), vec2<f32>(0.9238795042037964, 2.830748968563057e-8),
+    vec2<f32>(0.7071067690849304, 1.2101617485882343e-8), vec2<f32>(0.3826834261417389, 6.2233507236442165e-9),
+    vec2<f32>(6.123234262925839e-17, -2.6718908186452923e-24), vec2<f32>(-0.3826834261417389, -6.2233507236442165e-9),
+    vec2<f32>(-0.7071067690849304, -1.2101617485882343e-8), vec2<f32>(-0.9238795042037964, -2.830748968563057e-8),
+    vec2<f32>(-1.0, 0.0), vec2<f32>(-0.9238795042037964, -2.830748968563057e-8),
+    vec2<f32>(-0.7071067690849304, -1.2101617485882343e-8), vec2<f32>(-0.3826834261417389, -6.223351611822636e-9),
+    vec2<f32>(-1.8369701465288538e-16, -5.2192177393430185e-24), vec2<f32>(0.3826834261417389, 6.223351167733426e-9),
+    vec2<f32>(0.7071067690849304, 1.2101616597703924e-8), vec2<f32>(0.9238795042037964, 2.830748968563057e-8));
+const KDD_GY16 = array<vec2<f32>, 16>(vec2<f32>(0.0, 0.0), vec2<f32>(0.3826834261417389, 6.2233507236442165e-9),
+    vec2<f32>(0.7071067690849304, 1.2101617485882343e-8), vec2<f32>(0.9238795042037964, 2.830748968563057e-8),
+    vec2<f32>(1.0, 0.0), vec2<f32>(0.9238795042037964, 2.830748968563057e-8),
+    vec2<f32>(0.7071067690849304, 1.2101617485882343e-8), vec2<f32>(0.3826834261417389, 6.223351167733426e-9),
+    vec2<f32>(1.2246468525851679e-16, -5.3437816372905846e-24), vec2<f32>(-0.3826834261417389, -6.2233507236442165e-9),
+    vec2<f32>(-0.7071067690849304, -1.2101617485882343e-8), vec2<f32>(-0.9238795042037964, -2.830748968563057e-8),
+    vec2<f32>(-1.0, 0.0), vec2<f32>(-0.9238795042037964, -2.830748968563057e-8),
+    vec2<f32>(-0.7071067690849304, -1.2101617485882343e-8), vec2<f32>(-0.3826834261417389, -6.223351611822636e-9));
+const KDD_141 = vec2<f32>(1.409999966621399, 3.33786012163273e-8);
+
+/** karst.py noise2 in float64 at a lattice point: integer cell (ix, iy), fractions fx, fy in [0, 1) as double-floats */
+fn kdd_noise2(ix: i32, iy: i32, fx: vec2<f32>, fy: vec2<f32>, salt: u32) -> vec2<f32> {
+  let k00 = khash2(ix, iy, salt) & 15u;
+  let k10 = khash2(ix + 1, iy, salt) & 15u;
+  let k01 = khash2(ix, iy + 1, salt) & 15u;
+  let k11 = khash2(ix + 1, iy + 1, salt) & 15u;
+  let fx1 = kdd_add(fx, kdd(-1.0));
+  let fy1 = kdd_add(fy, kdd(-1.0));
+  let n00 = kdd_add(kdd_mul(KDD_GX16[k00], fx), kdd_mul(KDD_GY16[k00], fy));
+  let n10 = kdd_add(kdd_mul(KDD_GX16[k10], fx1), kdd_mul(KDD_GY16[k10], fy));
+  let n01 = kdd_add(kdd_mul(KDD_GX16[k01], fx), kdd_mul(KDD_GY16[k01], fy1));
+  let n11 = kdd_add(kdd_mul(KDD_GX16[k11], fx1), kdd_mul(KDD_GY16[k11], fy1));
+  let ux = kdd_fade(fx);
+  let uy = kdd_fade(fy);
+  let a = kdd_add(n00, kdd_mul(kdd_add(n10, -n00), ux));
+  let b = kdd_add(n01, kdd_mul(kdd_add(n11, -n01), ux));
+  return kdd_mul(kdd_add(a, kdd_mul(kdd_add(b, -a), uy)), KDD_141);
 }
 
 /** karst.py _smoothstep(a, b, x) in float64, x a double-float, a and (b - a) as numpy has them; rounded to float32 */

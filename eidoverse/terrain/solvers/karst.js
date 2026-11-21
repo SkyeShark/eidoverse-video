@@ -101,9 +101,11 @@
 //     last bit (a wall table rises up to 57 m per metre at a foot's notch, the buried rock dips at tan 85 degrees,
 //     the talus gate turns 140 m of cone per radian), so numpy's own float32 lands up to 7e-5 of the bed's range from
 //     the same lines in float64; a port that rounded its own way landed as far (tests/karst_coast/evaluate_test.mjs,
-//     karst_window_floor.py). Where the source decides on a threshold its float64 noise sits on (the common base's
-//     rock where PM > 0.5 m, a step of the bed by the alluvium's 12 m), the float32 noise can fall the other side on a
-//     subsample in a million.
+//     karst_window_floor.py). The footprint's lobes (LOB) are numpy's float64 world noise in double-float for the
+//     same reason (karst/lobes.wgsl, karst/bilinear_dd.wgsl; lobesField): in the world-noise kernel's float32 they
+//     moved a foot's rock by up to 0.9 mm. The other smooth fields stay float32: none feeds a steep line. Where the
+//     source decides on a threshold its float64 noise sits on (the common base's rock where PM > 0.5 m, a step of the
+//     bed by the alluvium's 12 m), the float32 noise can fall the other side on a subsample in a million.
 //   - Blender's memos (_PLANS, _DOMAINS) are module Maps here, cleared by clearMemos() (the floor protocol's
 //     memos-cleared rule, plan 5.4).
 // The convergence loops this module names for the dispatch-log comparison (PORT_PLAN.md 5.7): none; it dispatches no
@@ -1625,6 +1627,48 @@ function smoothField(R, G, shortestM, terms, mode, un = {}, opts = {}) {
     return out;
 }
 
+/** karst.py evaluate's LOB, G.smooth(lobes_m (noise2(X, Y, 130, salt + 101) + 0.45 noise2(X, Y, 60, salt + 102)) / 0.33,
+ * max(60, lim)), in double-float: kernels/karst/lobes.wgsl on the lattice (each node's lattice coordinate split on
+ * the CPU in doubles: its cell, and its fraction as hi and lo), kernels/karst/bilinear_dd.wgsl onto the subsamples
+ * (the fractions likewise), rounded to float32 once. The towers read their footprint off it on wall tables up to 57 m
+ * per metre steep, where the world-noise kernel's float32 (karst/world.wgsl) moved the rock by millimetres. A new
+ * N x N r32f field. */
+function lobesField(R, G, pr, salt, lim) {
+    const lat = G.lattice(Math.max(60.0, lim));
+    const dd = (v, out, o) => { out[o] = v; out[o + 1] = v - out[o]; };          // out: a Float32Array
+    const nodes = (ls) => {
+        const a = new Float32Array(2 * ls.length * 4);
+        [130.0, 60.0].forEach((lam, k) => {
+            for (let i = 0; i < ls.length; i++) {
+                const g = ls[i] / lam, c = Math.floor(g), o = 4 * (k * ls.length + i);
+                a[o] = c;
+                dd(g - c, a, o + 1);
+            }
+        });
+        return a;
+    };
+    const axis = (qs, ls) => {
+        const out = new Float32Array(4 * qs.length);
+        for (let i = 0; i < qs.length; i++) {
+            if (lat.crop) { out[4 * i] = i + 1; continue; }
+            const t = (qs[i] - ls[0]) / lat.step;
+            const i0 = clip(Math.floor(t), 0, lat.m - 2);
+            out[4 * i] = i0;
+            dd(t - i0, out, 4 * i + 1);
+        }
+        return out;
+    };
+    const gx = R.field(2, lat.lx.length, 4, nodes(lat.lx)), gy = R.field(2, lat.ly.length, 4, nodes(lat.ly));
+    const salts = R.field(1, 2, 1, Uint32Array.from([(salt + 101) >>> 0, (salt + 102) >>> 0]), 'u32');
+    const v = R.field(lat.ly.length, lat.lx.length, 2);
+    R.run(kernelOf(R, 'karst/lobes'), { gx, gy, salts }, { outV: v }, { uAmp: pr.lobes_m, uAmpl: pr.lobes_m - Math.fround(pr.lobes_m) });
+    const ax = R.field(1, G.xs.length, 4, axis(G.xs, lat.lx)), ay = R.field(1, G.ys.length, 4, axis(G.ys, lat.ly));
+    const out = R.field(G.ys.length, G.xs.length, 1);
+    R.run(kernelOf(R, 'karst/bilinear_dd'), { v, ax, ay }, { outF: out });
+    for (const f of [gx, gy, salts, v, ax, ay]) f.destroy();
+    return out;
+}
+
 /** The course's segments within maxD of every 16 x 16 tile of a uniform grid of points (first point (x0, y0), spacing
  * step, w x h points), in ascending order, their ends in metres from the tile's first point (doubles, rounded once):
  * kernels/karst/river.wgsl's tables { segs, sarc, bins, tilesX } (karst.py _river_bins' job). */
@@ -1850,9 +1894,8 @@ export async function evaluate(R, plan, x0, y0, cell, n, opts = {}) {
     const D = Gd.dummies(R);
     const own = [];                                       // fields to release before returning
     const keep = (f) => { own.push(f); return f; };
-    // lobes: a radial displacement in metres (spurs and re-entrants of every footprint)
-    const LOB = keep(smoothField(R, G, Math.max(60.0, lim), [term(130.0, salt + 101, 1.0), term(60.0, salt + 102, 0.45)],
-        0, { A: pr.lobes_m, B: 0.33 }));
+    // lobes: a radial displacement in metres (spurs and re-entrants of every footprint), in double-float
+    const LOB = keep(lobesField(R, G, pr, salt, lim));
     // the beds' undulation for the summits' benches; a level coarser than a bench takes none
     const BENCH = pr.benches > 0 && pr.bench_m >= 4.0 * cell ?
         keep(smoothField(R, G, Math.max(60.0, lim), fbmTerms(160.0, 2, salt + 161, 0.5), 0, { A: 3.0, B: 0.33 })) : null;

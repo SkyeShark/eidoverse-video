@@ -5,13 +5,18 @@
 // level's own cockpits outside), a fengcong plan (the plinth, no river); and the plans' cockpit floor maps.
 //
 //     deno run --no-config --no-lock --unstable-webgpu --allow-all eidoverse/terrain/tests/karst_coast/evaluate_test.mjs
-//         [--only H05,F8]                                  (on a shared machine, behind $EIDO_GPU_WRAP)
+//         [--only "hero 2 m,film"] [--dump]               (on a shared machine, behind $EIDO_GPU_WRAP; --dump writes
+//                                                            the port's fields to tests/out/karst_coast/evaluate/)
 //
 // Per field (h, bed, deposit, talus, water, plain, Sc): max |gpu - numpy| against 1e-5 of the field's range (the plan's
 // float-function grade), with the share of cells over it and over 1e-4 named: numpy's float64 against float32 meets
 // a few discrete decisions of the source (a subsample on the channel's edge, a basin's floor kept or not at a
 // threshold) where a last-bit difference flips a cell; each such cell is counted and located. tower_id: the share of
 // cells that agree. The floor maps: the basins kept (finite cells) equal, the levels within 1e-5 of the range.
+// Beside each window, numpy's own window floor (tests/karst_coast/karst_window_floor.py: karst.py's evaluate again
+// from windows shifted by whole cells, the same world cells compared) says how far the source itself moves there: its
+// tower loop works in window-local float32 metres on wall tables up to 57 m per metre steep, so its bed, deposit and
+// talus move by up to 6e-5 of their ranges (2e-4 for talus) with the window alone.
 // JavaScript per cell here is test code. Writes tests/out/karst_coast/evaluate_test.json.
 
 import * as G from '../../core/gpu.js';
@@ -54,6 +59,9 @@ export function gradeField(got, want, n, k = 1e-5) {
         at: idx >= 0 ? [idx % n, Math.floor(idx / n)] : null, got: idx >= 0 ? got[idx] : null, want: idx >= 0 ? want[idx] : null };
 }
 
+// numpy's own window floor (tests/karst_coast/karst_window_floor.py: karst.py's evaluate again from windows shifted by
+// whole cells, the same world cells compared), reported beside each window: how far the source itself moves
+const FLOOR = fx ? C.readJson(`${fx.dir}/window_floor.json`, {}) : {};
 const cases = fx ? KC.findCases(fx, 'karst.evaluate').filter((c) => !ONLY || ONLY.some((t) => c.label.includes(t))) : [];
 if (!cases.length) T.ok('karst.evaluate fixtures', false, KC.NO_FIXTURES);
 for (const c of cases) {
@@ -88,10 +96,13 @@ for (const c of cases) {
     let same = 0;
     for (let i = 0; i < tw.length; i++) if (tid[i] === tw[i]) same++;
     row.tower_id_equal = same / tw.length;
+    const fl = FLOOR[c.label]?.fields ?? null;
+    row.window_floor = fl ? Object.fromEntries(Object.entries(fl).map(([k, v]) => [k, v.over])) : null;
     results.windows[c.label] = row;
+    const floorText = fl ? `; numpy's own window floor ${['bed', 'deposit', 'talus'].map((k) => `${k} ${C.sci(fl[k]?.over ?? 0)}`).join(', ')}` : '';
     T.ok(`${c.label}: every field within 1e-5 of its range (tower_id equal on ${(100 * row.tower_id_equal).toFixed(3)} %); ` +
-        `${seconds.toFixed(2)} s (numpy ${a.seconds} s)`, fails.length === 0, fails.join('; ') ||
-        `worst ${names.map((k) => `${k} ${C.sci(row.fields[k].over)}`).join(', ')}`);
+        `${seconds.toFixed(2)} s (numpy ${a.seconds} s)`, fails.length === 0, (fails.join('; ') ||
+        `worst ${names.map((k) => `${k} ${C.sci(row.fields[k].over)}`).join(', ')}`) + floorText);
     for (const k of [...names, 'tower_id']) if (out[k] && !out[k].destroyed && k !== 'river') out[k].destroy();
 }
 

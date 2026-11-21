@@ -10,6 +10,10 @@
 //                number's mean within half its band's tolerance of Blender's mean, every band Blender passes on 3 or
 //                more of the 4 seeds passed by the port on 3 or more (judge.mjs compareDistribution); per level numbers
 //                reported for the eye
+//   Moher        sea_cliffs rock 'layered' (the floor runs hold the chalk default only): the port's save and the
+//                Blender edition's own save of the same call (its bake.py, tests/out/karst_coast/blender_saves/),
+//                both judged against cliffs_of_moher, one seed: numbers side by side, verdicts reported
+//                (--recipes sea_cliffs_layered)
 //
 //     <the saves> deno run ... eidoverse/terrain/bake.mjs --recipe R --seed S --quality draft --no-cache --save
 //                 --name R_sS --out eidoverse/terrain/tests/out/karst_coast/saves              (a GPU job each)

@@ -6,7 +6,8 @@ metre at a foot's notch, the buried rock at tan 85 degrees, the talus gate's slo
 millimetres. For each karst.evaluate fixture window of tests/out/karst_coast/fixtures, numpy's evaluate is run again
 from windows shifted by whole cells and compared with the fixture's own on the overlap: per field, the largest
 |difference| over the samples, its share of the field's range, and the cells over 1e-5 and 1e-4 of the range.
-tests/karst_coast/evaluate_test.mjs grades the port against max(1e-5 x range, 1.25 x this floor).
+tests/karst_coast/evaluate_test.mjs reports it beside each window's grade (the plan's 1e-5 of the range): how far
+the source itself moves where the port is graded.
 
     <blender python> -I eidoverse/terrain/tests/karst_coast/karst_window_floor.py [--only "hero 2 m,film"]
 
