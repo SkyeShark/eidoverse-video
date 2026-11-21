@@ -1334,13 +1334,20 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             # cell never fills, and the run's routing stalled at each (on its first hero level the area along the
             # trunk fell to a few cells', and the valley floors stage after the run found 1 channel cell draining
             # 5 km2 where unheld it found 213). So a course is held on the level's surface with its hollows filled
-            # and its flats tilted toward their outlets (hydro.routing_surface), every edge cell an outlet: with the
+            # and its flats tilted toward their outlets (hydro.routing_surface), every edge cell an outlet (with the
             # edge cells where the parent's water comes in closed, the fill of a trunk valley on the 24 km level
-            # found its outlet 287 m up
+            # found its outlet 287 m up); the seam's own cells stay on the parent's surface (raised with the rest,
+            # the hero levels' seams stood up to 0.14 m off it)
+            # Held all the way down: the inherited area thins where a floor spreads it, and the cells of such a gap,
+            # free, rose with the lock (they cut little) and dammed the course above them, so the run's routing still
+            # stalled there; every cell downstream of a held one along the filled surface's steepest descent is held
             from . import hydro as HY
+            from .hillslope import _downstream
             surf = HY.routing_surface(HY.fill_depressions(h, sea_level=ctx.sea_level)[0], sea_level=ctx.sea_level)
+            riv = _downstream(riv, d8_receivers(surf))
+            seam = np.asarray(pins['pin_w'], np.float64) >= 1.0
             pins = dict(pins)
-            pins['pin_h'] = np.where(riv, np.maximum(h, surf), pins['pin_h']).astype(F32)
+            pins['pin_h'] = np.where(riv & ~seam, np.maximum(h, surf), pins['pin_h']).astype(F32)
             pins['pin_w'] = np.where(riv, F32(1), pins['pin_w']).astype(F32)
             held_rivers = int(riv.sum())
     blend = None

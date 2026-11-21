@@ -622,8 +622,9 @@ def _river_inside(plan, x, y):
     undercuts a cluster's edge (the Li River runs between sheer-footed towers), so its first row or two of towers
     keep the plain's cliffed peaks and the broad cones stand behind them. (With the cluster field's interior alone,
     the corridor the plan keeps clear of towers was lined with a cluster's inner cones: from the river and its plain,
-    broad 26-36 degree cones filled every view, and beside them a band of plain 300-700 m wide stood empty, where a
-    broad cone's foot would have reached the river.)"""
+    broad 26-36 degree cones filled every view, and where the river crosses a cluster its nearest towers stood a
+    median 400-560 m from its centreline, against 290-320 m now: a broad cone's foot would have reached the water, so
+    the plan dropped it and left the plain empty there.)"""
     pr = plan.params
     X, Y = np.broadcast_arrays(np.asarray(x, np.float64), np.asarray(y, np.float64))
     d0 = pr['river_width_m'] * (1.0 + pr['river_width_var']) + 80.0
