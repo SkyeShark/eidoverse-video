@@ -13,7 +13,8 @@
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
 //         eidoverse/terrain/tests/plants/views.mjs --snap <the review's snapshots>[,<more folders>]
 //         [--views real_place/floor_lischmaad,...]
-//         [--label port]
+//         [--label port] [--W 1920 --H 1080: k x the review's size, averaged k x k by board_views.py]
+//         [--gains tests/out/plants/billboards/match.json: the billboards' gains from that match]
 //
 // One render job (eidoverse/render_scene.mjs), one frame a view (each view's terrain built in its frame and freed
 // after it). Writes tests/out/plants/views/<recipe>_<view>_<label>.png and views_<label>.json (per view: the plan's
@@ -66,7 +67,12 @@ for (const rv of want) {
 }
 if (!specs.length) Deno.exit(0);
 
-const spec = { specs, W, H, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0, sunElevationDeg: 37.7, sets, label,
+// --gains <billboards.mjs' match.json>: the billboards take that match's gains and cut-outs (instancePlants'
+// billboardGains), before plant_instances.js' tables hold them
+const gainsFile = A.opt('--gains', null);
+const gains = gainsFile ? Object.fromEntries(JSON.parse(Deno.readTextFileSync(gainsFile)).map((r) => [r.key, { gain: r.gain, alpha: r.alpha }]))
+    : null;
+const spec = { specs, W, H, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0, sunElevationDeg: 37.7, sets, label, gains,
     record: `${out}/views_${label}.json`, standM: 1.5, eyeCameraM: 50.0, vistaStepM: 2.0, vistaGapM: 4.0, vistaWiden: 1.1 };
 
 const script = `// The plants package's views (eidoverse/terrain/tests/plants/views.mjs writes this file).
@@ -217,7 +223,7 @@ async function buildView(G, sp) {
         rec.seconds.rocks = +((performance.now() - t0) / 1000).toFixed(1);
     }
     t0 = performance.now();
-    const plants = await PI.instancePlants(spots, t, { renderer, R, log: (m) => console.log(m) });
+    const plants = await PI.instancePlants(spots, t, { renderer, R, log: (m) => console.log(m), ...(V.gains ? { billboardGains: V.gains } : {}) });
     rec.seconds.plants_instance = +((performance.now() - t0) / 1000).toFixed(1);
     rec.instanced = plants.species;
     spots.dispose();                                     // the plan's GPU maps: the cover is made, the spots instanced
@@ -316,6 +322,18 @@ const argv = M.W.gpuArgv([M.W.norm(Deno.execPath()), 'run', '--allow-all', '--un
 const t0 = performance.now();
 const log = `${work}/views_${label}.log`;
 const code = await M.W.run(argv, { cwd: M.W.REPO, log, env: { ...Deno.env.toObject(), RENDER_CODEC: 'libx264', RENDER_CQ: '0' } });
+if (!specs.every((_sp, k) => M.W.exists(`${work}/views_${label}_at${k.toFixed(2)}s.png`)) && M.W.exists(video)) {
+    // render_scene's own frame extraction can fail on a loaded machine (ffmpeg not starting): the frames from the video
+    const base = video.replace(/\.mp4$/, '');
+    const p = new Deno.Command(Deno.env.get('FFMPEG_PATH') || 'ffmpeg', { args: ['-y', '-loglevel', 'error', '-i', video,
+        '-fps_mode', 'passthrough', `${base}_cap%d.png`], stdout: 'null', stderr: 'piped' }).outputSync();
+    if (p.code === 0) {
+        specs.forEach((_sp, k) => {
+            const c = `${base}_cap${k + 1}.png`;
+            if (M.W.exists(c)) Deno.renameSync(c, `${work}/views_${label}_at${k.toFixed(2)}s.png`);
+        });
+    }
+}
 const pngs = [];
 specs.forEach((sp, k) => {
     const shot = `${work}/views_${label}_at${k.toFixed(2)}s.png`;

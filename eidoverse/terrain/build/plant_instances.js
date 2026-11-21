@@ -32,7 +32,8 @@
 //     choice, as Blender's two Geometry Nodes groups choose). The billboard's material is an eidoverse-side copy of
 //     SeedThree's card material (makeCardMaterial), changed as plant_instances.py's _still_billboard_material changes
 //     Blender's: its canopy dome about each plant's own card centre, the baked detail normal turned by the plant's
-//     yaw, the measured colour gain (BILLBOARD_GAIN, a tree's on its foliage only), the source's tone (TONE_DIAL) on
+//     yaw, no specular (as the SeedThree add-on's billboard Blender copies: its dome-normal glint whitened the cards),
+//     the measured colour gain (BILLBOARD_GAIN, a tree's on its foliage only), the source's tone (TONE_DIAL) on
 //     bark and foliage alike, each plant's tint, the soft cut-out (alpha to coverage) that keeps a small plant's
 //     share of its pixel, and the terrain's and the crowns' shade under the sun (bindSun); it casts the sun's shadow
 //     and receives none. The card and full levels keep SeedThree's materials, copied per instance part (their maps and
@@ -62,6 +63,13 @@
 //     matched to LOD2 before they are used", the bake's correction on the eidoverse side) are measured again on these
 //     bakes by the same match (tests/plants/billboards.mjs, its port) into BILLBOARD_GAIN_WEBGPU, which the
 //     billboards take before Blender's table.
+//   - The leaves' and billboards' backlight: SeedThree's three.js materials add their scatter (three's thickness term:
+//     0.16 + a backlit lobe, x the translucency and the species' transmit, x the sun's light) on every side of a
+//     leaf, the route its Blender add-on calls 'glow'; Blender's plants take the add-on's default, 'translucent' (the
+//     same term x max(0, -N.L) of the bound sun, a Translucent BSDF on the shading normal), so a front-lit leaf takes
+//     none. The copies here (the card and full levels' foliage, the billboard) multiply their scatter colour by that
+//     factor against the sun bindSun binds: the plants light as Blender's do (measured under match_billboards' light,
+//     SeedThree's three.js levels with the glow read 14-22 ΔE paler than Blender's).
 //   - wind=True (SeedThree's forest_group grove) is not ported: SeedThree's three.js API has no grove function (its
 //     app's grove lives in its main.js); a still shot is what the design's renders use.
 //   - The billboard cut-out: Blender's dithered blend takes a fraction of the 16 samples; here alpha to coverage over
@@ -398,10 +406,17 @@ function keepClassic(m, src) {
     return m;
 }
 
+// the leaves' backlight on the SeedThree add-on's default route, as Blender's plants have it (bl/materials.py
+// backlight, 'translucent': three's scatter term x max(0, -N.L) of the bound sun, a Translucent BSDF on the shading
+// normal), where SeedThree's three.js materials let it glow from every side (the add-on's 'glow' route): the factor on a
+// scatter colour, n the shading normal in the world, uSun toward the sun
+const backlit = (n, uSun) => T.max(T.dot(n, uSun).negate(), 0.0);
+
 /** A SeedThree part's material for the card and full levels of a still shot (plant_instances.py _tinted_material):
  * SeedThree's own, with the canopy dome about each instance's own centre (a foliage part), the source's tone on its
- * albedo and backlight, and each instance's tint through the instance colour. */
-function tintedMaterial(src, { foliage, centre, mats, cap, tone, card }) {
+ * albedo and backlight, the backlight on the translucent route of the bound sun (uSun), and each instance's tint
+ * through the instance colour. */
+function tintedMaterial(src, { foliage, centre, mats, cap, tone, card, uSun }) {
     const m = keepClassic(src.clone(), src);
     m.userData = { ...src.userData, eidoTintOf: src.name || src.uuid };
     // SeedThree's card materials write an ambient-occlusion mask to its app's MRT pass; outside an MRT pass three r184
@@ -425,14 +440,17 @@ function tintedMaterial(src, { foliage, centre, mats, cap, tone, card }) {
             m.normalNode = T.normalize(domeView.add(relief.mul(0.9)));
         }
     }
+    let th = src.thicknessColorNode ? T.vec3(src.thicknessColorNode) : null;
     if (!isOne(g)) {
         const tv = T.vec3(g[0], g[1], g[2]);
         if (src.colorNode) {
             const c = T.vec4(src.colorNode);
             m.colorNode = T.vec4(c.rgb.mul(tv), c.a);
         } else m.color = src.color.clone().multiply(new THREE.Color().setRGB(g[0], g[1], g[2]));
-        if (src.thicknessColorNode) m.thicknessColorNode = T.vec3(src.thicknessColorNode).mul(tv);
+        if (th) th = th.mul(tv);
     }
+    if (th && foliage && uSun) th = th.mul(backlit(T.cameraWorldMatrix.mul(T.vec4(m.normalNode, 0)).xyz.normalize(), uSun));
+    if (th) m.thicknessColorNode = th;
     return m;
 }
 
@@ -441,9 +459,13 @@ function tintedMaterial(src, { foliage, centre, mats, cap, tone, card }) {
  * plant's card centre with the baked detail normal turned by its yaw, the gain (a tree's on its foliage only), the
  * tone, the tint, the terrain's and the crowns' shade, the soft cut-out. extras: per instance (height, yaw, shade,
  * canopy line over the card's centre). */
-function billboardMaterial(tex, { mats, extras, cap, cardH, centreY, gain, alpha, foliage, tone, transmit, samples }) {
+function billboardMaterial(tex, { mats, extras, cap, cardH, centreY, gain, alpha, foliage, tone, transmit, samples, uSun }) {
     const mat = new THREE.MeshSSSNodeMaterial({ map: tex.albedo, roughnessMap: tex.rough, side: THREE.DoubleSide, roughness: 1.0,
         metalness: 0.0 });
+    // no specular, as the billboard Blender's plants copy (SeedThree's add-on, bl/materials.py billboard_material:
+    // Specular IOR Level 0): the card's smooth dome normal catches the sun and the sky as one glint over the whole
+    // card, and a card receives no shadow to dim it, so a stand of them reads as pale cut-outs
+    mat.specularIntensity = 0.0;
     const M = T.storage(mats, 'mat4', Math.max(cap, 1)).element(T.instanceIndex);
     const X = T.varying(T.storage(extras, 'vec4', Math.max(cap, 1)).element(T.instanceIndex));
     const origin = T.varying(T.modelWorldMatrix.mul(M.mul(T.vec4(0, centreY, 0, 1.0))).xyz);
@@ -476,7 +498,9 @@ function billboardMaterial(tex, { mats, extras, cap, cardH, centreY, gain, alpha
     mat.colorNode = T.vec4(rgb.mul(lit), 1.0);
     const tr = transmit ?? [0.42, 0.62, 0.24];
     const gt = [g[0] * tn[0], g[1] * tn[1], g[2] * tn[2]];
-    mat.thicknessColorNode = T.texture(tex.trans).r.mul(0.7).mul(T.vec3(tr[0] * gt[0], tr[1] * gt[1], tr[2] * gt[2])).mul(lit);
+    let th = T.texture(tex.trans).r.mul(0.7).mul(T.vec3(tr[0] * gt[0], tr[1] * gt[1], tr[2] * gt[2])).mul(lit);
+    if (uSun) th = th.mul(backlit(nWorld, uSun));           // the add-on's translucent route, as the leaves have it
+    mat.thicknessColorNode = th;
     mat.thicknessDistortionNode = T.float(0.0);
     mat.thicknessAmbientNode = T.float(0.16);
     mat.thicknessAttenuationNode = T.float(1.0);
@@ -714,7 +738,8 @@ async function instanceSeedThreeStill(entry, rec, focus, group, lod, base, ctx, 
                     const tex = side ? bb.textures.side : bb.textures.front;
                     return { geometry: g, material: billboardMaterial(tex, { mats, extras, cap, cardH: 2 * bb.halfH, centreY: bb.centreY,
                         gain: e?.gain ?? [1, 1, 1], alpha: e?.alpha ?? ALPHA_CUT, foliage: entry.kind === 'tree', tone,
-                        transmit: undefined, samples: ctx.samples }), castShadow: true, receiveShadow: false, billboard: true };
+                        transmit: undefined, samples: ctx.samples, uSun: ctx.uSun }), castShadow: true, receiveShadow: false,
+                        billboard: true };
                 });
             } else {
                 const level = lodI === 0 ? p.levels.LOD0 : p.levels.LOD2;
@@ -723,7 +748,7 @@ async function instanceSeedThreeStill(entry, rec, focus, group, lod, base, ctx, 
                     const card = p.cardMats.has(q.material);
                     const which = card ? p.centres.card : q.material === p.assets.clusterMat ? p.centres.cluster : p.centres.leaf;
                     return { geometry: sharedGeometry(q.geometry), material: tintedMaterial(q.material, { foliage: q.foliage, centre: which,
-                        mats, cap, tone, card }), castShadow: q.castShadow !== false, receiveShadow: q.receiveShadow !== false };
+                        mats, cap, tone, card, uSun: ctx.uSun }), castShadow: q.castShadow !== false, receiveShadow: q.receiveShadow !== false };
                 });
             }
             for (const q of parts) {
@@ -907,7 +932,9 @@ export async function instancePlants(spots, terrain = null, opts = {}) {
     const group = new THREE.Group();
     group.name = base;
     const samples = Number(renderer.currentSamples ?? renderer.samples ?? renderer._samples ?? 0) || 1;
-    const ctx = { renderer, R, log, samples, sunDir: opts.sunDir ?? null, gains: opts.billboardGains ?? null };
+    const ctx = { renderer, R, log, samples, sunDir: opts.sunDir ?? null, gains: opts.billboardGains ?? null,
+        uSun: T.uniform(new THREE.Vector3(0, 1, 0)) };            // toward the bound sun, three.js' frame (bindSun)
+    if (opts.sunDir) ctx.uSun.value.set(...[...opts.sunDir].map(Number)).normalize();
     const focus = spots.meta.focus.map((p) => [Number(p[0]), Number(p[1])]);
     const trees = spots.species.filter((e) => e.kind === 'tree' && e.source.seedthree !== undefined && spots.array(e.name).length);
     const treeK = Math.max(1, Math.floor(HERO_MAX / Math.max(trees.length, 1)));
@@ -990,6 +1017,11 @@ export async function bindSun(plants, terrain, dir, ctx) {
     if (!still.length) return 0;
     const R = ctx.R, P = prims(R);
     const d = Array.isArray(dir) ? dir : [dir.x, dir.y, dir.z];
+    if (ctx.uSun) {                                      // the leaves' and cards' backlight: the sun in the world's frame
+        plants.group.updateWorldMatrix(true, false);
+        ctx.uSun.value.set(Number(d[0]), Number(d[1]), Number(d[2]))
+            .applyQuaternion(plants.group.getWorldQuaternion(new THREE.Quaternion())).normalize();
+    }
     let bx = Number(d[0]), by = -Number(d[2]), bz = Number(d[1]);          // Blender's frame
     const L = Math.max(Math.hypot(bx, by, bz), 1e-9);
     bx /= L; by /= L; bz /= L;
