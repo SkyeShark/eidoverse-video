@@ -484,12 +484,16 @@ function billboardMaterial(tex, { mats, extras, cap, cardH, centreY, gain, alpha
     const detail = T.modelWorldMatrix.mul(T.vec4(dYaw, 0)).xyz;
     const nWorld = dome.add(detail.mul(0.55)).normalize();
     mat.normalNode = T.cameraViewMatrix.mul(T.vec4(nWorld, 0)).xyz.normalize();
-    // albedo x gain (a tree's where its bake is green: its green over its red and blue, 0 to FOLIAGE_EDGE) x tone
+    // albedo x gain (a tree's where its bake is green: its green over its red and blue, 0 to FOLIAGE_EDGE) x tone.
+    // The bake's colour beyond its 12-texel dilation is black and its mips average that black in with the alpha's
+    // zeros, so a far billboard reading a small mip went dark (the stands of Lauterbrunnen's far sides, the far edge
+    // of a shrubland): the colour over the alpha the same texels average, as a premultiplied mip would give it back
+    // (at the full level a texel's alpha is 0 or 1, unchanged there)
     const alb = T.texture(tex.albedo);
     const g = gain.map(Number), tn = tone3(tone);
-    let rgb = alb.rgb;
+    let rgb = T.min(alb.rgb.div(T.max(alb.a, 1.0 / 255.0)), 1.0);
     if (foliage && !isOne(g)) {
-        const f = T.clamp(alb.g.sub(T.max(alb.r, alb.b)).div(FOLIAGE_EDGE), 0.0, 1.0);
+        const f = T.clamp(rgb.g.sub(T.max(rgb.r, rgb.b)).div(FOLIAGE_EDGE), 0.0, 1.0);
         rgb = rgb.mul(T.vec3(g[0] - 1, g[1] - 1, g[2] - 1).mul(f).add(1.0));
         if (!isOne(tn)) rgb = rgb.mul(T.vec3(tn[0], tn[1], tn[2]));
     } else {

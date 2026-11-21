@@ -92,22 +92,23 @@ globalThis.setup = async function () {
         for (const f of [a, b]) { f.material.needsUpdate = true; scene.add(f.mesh); }
         sets[mode] = [a, b];
     }
-    globalThis._p = { V, sets, done: {} };
+    // one output target for both frames (a second one made after the first was freed was never allocated)
+    globalThis._p = { V, sets, done: {}, rt: new THREE.RenderTarget(WIDTH, HEIGHT) };
 };
 
 // the Blender flora's blade shading (nodes.leaf_material with normal_mode 'mesh', grazing_damp, SPEC_FACING, curl) on
 // a createFlora blade stroke: the cards' own normals back (bunchGeometry blends them up), two-sided; the roughness x
 // BLADE_ROUGH; the specular x (1 - facing^3) x smoothstep(0, 0.1, N.V); the normal bent across the blade (u runs edge
-// to edge, the vertices alternate -1 / +1 across it) along the instance's turned UV tangent
+// to edge, the vertices alternate -1 / +1 across it) along its UV tangent, made from the screen derivatives (a tangent
+// attribute would be the stroke's ninth vertex buffer, over WebGPU's eight)
 function bladeShading(f, T, V) {
     const g = f.mesh.geometry;
     g.computeVertexNormals();
-    g.computeTangents();
     const m = f.material;
-    const yaw = T.attribute('aPosRot').w;
-    const cR = T.cos(yaw), sR = T.sin(yaw);
-    const tl = T.attribute('tangent').xyz;
-    const tV = T.modelViewMatrix.mul(T.vec4(tl.x.mul(cR).sub(tl.z.mul(sR)), tl.y, tl.x.mul(sR).add(tl.z.mul(cR)), 0.0)).xyz.normalize();
+    const q0 = T.dFdx(T.positionWorld), q1 = T.dFdy(T.positionWorld);
+    const st0 = T.dFdx(T.uv()), st1 = T.dFdy(T.uv());
+    const tW = q0.mul(st1.y).sub(q1.mul(st0.y)).normalize();
+    const tV = T.cameraViewMatrix.mul(T.vec4(tW, 0.0)).xyz.normalize();
     const across = T.varying(T.float(T.vertexIndex.mod(2)).mul(2.0).sub(1.0));
     const n = T.normalize(T.vec3(m.normalNode).mul(T.faceDirection).add(tV.mul(across.mul(V.bladeCurl))));
     m.normalNode = n;
@@ -133,12 +134,10 @@ globalThis.renderFrame = async function (tt) {
     for (const [k, fs] of Object.entries(P.sets)) for (const f of fs) f.mesh.visible = k === mode;
     if (!P.done[mode]) {
         P.done[mode] = true;
-        const rt = new THREE.RenderTarget(WIDTH, HEIGHT);
-        r.setOutputRenderTarget(rt);
+        r.setOutputRenderTarget(P.rt);
         await r.renderAsync(scene, camera);
-        const d = await r.readRenderTargetPixelsAsync(rt, 0, 0, WIDTH, HEIGHT);
+        const d = await r.readRenderTargetPixelsAsync(P.rt, 0, 0, WIDTH, HEIGHT);
         r.setOutputRenderTarget(null);
-        rt.dispose();
         // the lower third of each half: the near stands
         const half = [];
         for (const side of [0, 1]) {
