@@ -343,6 +343,117 @@ def socket_chain(chain, pair, lam):
                      life_len=float(seg0.sum()), life_len_new=float(lam * seg0.sum()))
 
 
+def femur_chain(chain, pair, lam):
+    """(CROSS r1c) THE FEMUR CUT'S CHAIN re-proportioned from the FEMUR's joint on (forge_leg_donor cut='femur', lam != 1:
+    the sections by the ring, the length by the host, M2c's rule): every point of the leg from the femur joint to the claws'
+    tip moved toward the ground point under the femur joint, P' = G + lam (P - G), G = (F.x, the claws' tip height, F.z):
+    every segment x lam, every joint angle the beetle's own, the claws' tip at its own height (leg_parts lays the claws' end
+    on the ground). socket_chain's pitch about the knee keeps the knee where the femur put it, so it cannot bring a short
+    sub-leg down to the floor (lam 0.26 refused on the axolotl: REROOT); shortened this way the leg stands lower, as the same
+    leg built smaller would. The trochanter keeps its coxa end (the femur cut ships no trochanter: it is the femur's seat and
+    its root's measure only). THE CLAWS ARE A FEATURE (M2c: "the beetle's own features kept at their own size (the tibia's
+    teeth, the tarsomeres' beads and lobes, the claws' hooks)"): the hook's chord, from the claw joint to the claws' tip, keeps
+    its own length (shortened with the leg, the beetle's hook cannot turn inside its own section: arthropod_parts' claw sweep
+    asserts at lam 0.22). Both sides (the right the left mirrored). Returns (chain', info) as socket_chain's"""
+    c = pair[0]
+    P0 = chain['pos']
+    names = ([f'femur_{c}_L', f'tibia_{c}_L'] + [f'tarsus_{n}_{c}_L' for n in range(1, 6)] +
+             [f'claw_{c}_L', f'claw_tip_{c}_L'])
+    pts0 = np.array([P0[n] for n in names], np.float64)
+    F = pts0[0]
+    G = np.array([F[0], float(pts0[-1][1]), F[2]])
+    new = G[None] + float(lam) * (pts0 - G[None])
+    new[-1] = new[-2] + (pts0[-1] - pts0[-2])                # (the hook's chord its own)
+    out = dict(chain, pos=dict(P0), legs=dict(chain['legs']))
+    M = np.array([-1.0, 1.0, 1.0])
+    for nm, p in zip(names, new):
+        out['pos'][nm] = p
+        out['pos'][nm[:-2] + '_R'] = p * M
+    lg = dict(chain['legs'][pair])
+    lg.update(femur=new[0], knee=new[1], ankle=new[2], tip=new[7], claw=new[8])
+    if 'tarsus' in lg:
+        lg['tarsus'] = [new[2 + n] for n in range(len(new) - 2)]
+    out['legs'][pair] = lg
+    seg0 = np.linalg.norm(np.diff(pts0, axis=0), axis=1)
+    return out, dict(lam=float(lam), turn_deg=0.0, hinge=None, life_len=float(seg0.sum()),
+                     life_len_new=float(lam * seg0.sum()), start='femur', drop=float((1.0 - lam) * (F[1] - G[1])))
+
+
+def frames_chain(chain, donor):
+    """(CROSS r1c, 11-10 16:4x) THE CHAIN THE JOINT FRAMES ARE READ FROM (graft_joints -> arthropod.skeleton). The skeleton
+    gives the tibia's joint its fold side "toward the trochanter" (arthropod.skeleton: toward(pts[1], pts[3], x)): on the
+    beetle that lies in the plane of femur and tibia, so the knee's hinge z stands square to both. femur_chain shortens the
+    leg from the FEMUR's joint on and leaves the trochanter at its coxa end (the shells' generator seats the femur on it
+    there), so on a femur cut at lam != 1 the knee -> trochanter line no longer runs along the femur: MEASURED on the first
+    girth-fixed legs (lam 0.1817), the knee's hinge stood 58.6 deg off the normal of the femur-tibia plane and 31.5 deg off
+    the femur's own axis: a turn there TWISTED the tibia round the femur (0.52 deg of fold per degree turned; the stance ran
+    the knee 60 deg and swung the tibia's apex 6.6 mm up and down). The frames want the trochanter (and the coxa's pivot)
+    where the shortened leg has them, G + lam (P - G) like every other point (G from the femur's joint and the chain's
+    recorded drop). The shells are generated from the chain as femur_chain returns it, untouched by this; every other
+    donor (the knee cut, a femur cut at lam 1) reads its own chain as before. Returns the chain for the FRAMES only"""
+    info = donor.get('socket') or {}
+    lam = float(info.get('lam', 1.0))
+    if donor.get('cut') != 'femur' or info.get('start') != 'femur' or lam == 1.0:
+        return chain
+    c = donor['pair'][0]
+    P = dict(chain['pos'])
+    for sd in ('L', 'R'):
+        F_ = np.asarray(P[f'femur_{c}_{sd}'], np.float64)
+        G = np.array([F_[0], F_[1] - lam * float(info['drop']) / (1.0 - lam), F_[2]])
+        for nm in (f'trochanter_{c}_{sd}', f'coxa_{c}_{sd}'):
+            P[nm] = G + lam * (np.asarray(P[nm], np.float64) - G)
+    return dict(chain, pos=P)
+
+
+def femur_girth_prof(prof, g0, u_end=0.86):
+    """(CROSS r1c loop 2) THE FEMUR AS A SWOLLEN THIGH: the beetle's own femur profile (arthropod_parts.FEMUR_PROF[pair]:
+    rows (u from the trochanter, width, depth) life mm) with its sections swollen by femur_girth_gain: g0 x at the root,
+    the swell HELD and then rounded off to the beetle's own section by u_end (0.86: FEMUR_PROF's widest station, where the
+    club begins; the club itself, read from the last row, is the beetle's). For a femur cut on a host whose ring is far
+    wider than the beetle's leg at the host's length (the axolotl: the leg 4.7 ring diameters long, the beetle's 21 root
+    diameters): the girth step shared between the host's sleeve and the femur's chitin, the thigh a belly with a shoulder
+    into the knee as a grasshopper's is, the knee-down kept at its own proportions. Measured why on 11-11 (cross_NOTES RUN
+    14): the ring's girth on the whole leg read as a hoof (L/W 0.83), the skin's taper alone ate the leg (the collar's
+    morph 61 mm of 92). PCHIP on the beetle's stations plus a twentieth-grid, so the belly is smooth. Returns the rows (a
+    tuple)"""
+    from scipy.interpolate import PchipInterpolator
+    p = np.asarray(prof, np.float64)
+    us = np.unique(np.round(np.concatenate([p[:, 0], np.linspace(0.0, 1.0, 21)]), 6))
+    W = PchipInterpolator(p[:, 0], p[:, 1])(us)
+    D = PchipInterpolator(p[:, 0], p[:, 2])(us)
+    g = femur_girth_gain(us, g0, u_end)
+    return tuple((float(u), float(w * k), float(d * k)) for u, w, d, k in zip(us, W, D, g))
+
+
+def femur_girth_gain(u, g0, u_end=0.86, fall=2.2):
+    """femur_girth_prof's swell at the femur's station u (0 the trochanter end, 1 the knee): 1 + (g0 - 1)(1 - (u / u_end) ^
+    fall): g0 at the root, 1 from u_end on, the same on width and depth. fall 1 is a straight cone; 2.2 holds the swell
+    (0.78 of it left at mid-thigh) and rounds it off. Chosen in clay on 11-14 (cross_NOTES RUN 18-19): a smooth step in
+    its place fell early and left the thigh a concave funnel, the one primitive in the leg. The maps' carry (ax5c_mat)
+    divides a femur texel's offset from its spine by this gain to land on the beetle's own femur"""
+    x = np.clip(np.asarray(u, np.float64) / float(u_end), 0.0, 1.0)
+    return 1.0 + (float(g0) - 1.0) * (1.0 - x ** fall)
+
+
+class _femur_girth:
+    """(CROSS r1c loop 2) arthropod_parts.FEMUR_PROF[pair] graded by femur_girth_prof while the donor's clay and cages are
+    built (in memory only, restored on exit, as the socket's tooth table is: the beetle's files untouched). g0 None or 1:
+    nothing changes"""
+
+    def __init__(self, AP, pair, g0):
+        self.AP, self.pair, self.g0 = AP, pair, g0
+
+    def __enter__(self):
+        self.saved = self.AP.FEMUR_PROF
+        if self.g0 is not None and float(self.g0) != 1.0:
+            self.AP.FEMUR_PROF = dict(self.saved, **{self.pair: femur_girth_prof(self.saved[self.pair], self.g0)})
+        return self
+
+    def __exit__(self, *exc):
+        self.AP.FEMUR_PROF = self.saved
+        return False
+
+
 def socket_teeth(L_t, teeth, min_gap, shrink):
     """the fore tibia's tooth table (arthropod_parts.FORE_TEETH: (fraction from the knee, protrusion, base length) mm) for
     a tibia L_t mm long from its neck to the ankle: each tooth keeps its own size (a feature, not a length); biggest
@@ -394,8 +505,22 @@ def split_to_closed(Qs_L, Qc_L, n_split):
     return vm
 
 
-def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_levels=None, log=print):
-    """THE DONOR FORGED FOR ITS SOCKET (the block comment above): the beetle's own generator on socket_chain(chain, pair,
+def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_levels=None, log=print, cut='knee',
+                    shorten=None, femur_girth=None):
+    """(CROSS r1c loop 2, 11-11) femur_girth g0 (the femur cut only; None: as before): the femur's sections swollen g0 x at
+    its root, held and rounded off to the beetle's own by its club (femur_girth_prof), so the thigh carries the host's
+    sleeve on and the leg tapers from the host's ring out.
+    shorten: which part of the leg lam re-proportions. None (every earlier call): the femur cut
+    at lam != 1 by femur_chain (the whole leg from the femur's joint, r1c's ring-girth leg), every other cut by socket_chain;
+    'knee': socket_chain on any cut (the leg from the KNEE x lam, pitched about the knee: M2's rule), so a femur cut keeps
+    the beetle's own femur and takes M2's proportions from the knee on (the bug-legged axolotl's default since r1c loop 2:
+    the femur sunk in the host's sleeve, the knee-down as M2's on the octopus).
+    (CROSS 11-10) cut: 'knee' (M2's part, the default: every line below as it was) or 'coxa' (arthropod_cage.GRAFT_CUTS'
+    coxa cut, AXOLOTL_PLAN's AX-X5 row "SOCKET: the axolotl's skin collar round the coxa": the WHOLE leg, the coxa,
+    trochanter and femur shipped with the beetle's own sleeves between them, so every joint of the leg is the beetle's own and
+    free, none inside the collar; its ROOT the coxa's section where it leaves the body, measured on the coxal cavity's sleeve
+    (build_legs' own: the body's clay field, the coxa's exposed side), donor['root_seg'] 'coxa', root_X, root_axis, root).
+    THE DONOR FORGED FOR ITS SOCKET (the block comment above): the beetle's own generator on socket_chain(chain, pair,
     lam) for the segments from the tibia on, each segment's controls fitted and its L4 limit (the HIGH) as build_legs makes
     them, its SHIPPED LOW the closed cage subdivided low_levels[kind] levels with its vertices on the limit
     (subdiv_sharp.subdivide: the same child order subdivide_topology gives the split copy), the claws' b a rigid copy of
@@ -412,7 +537,13 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
     from .mesh import QuadMesh
     lv = dict(SOCKET_FORGE['low_levels'], **(low_levels or {}))
     c = pair[0]
-    chain_m, info = socket_chain(chain, pair, lam)
+    # (r1c) the femur cut shortened from its femur (femur_chain); lam 1.0 and the other cuts: socket_chain as before
+    # (r1c loop 2) shorten='knee': socket_chain on the femur cut too (the femur the beetle's own)
+    if shorten is None:
+        shorten = 'femur' if (cut == 'femur' and lam != 1.0) else 'knee'
+    assert shorten == 'knee' or (shorten == 'femur' and cut == 'femur'), (cut, shorten)
+    chain_m, info = femur_chain(chain, pair, lam) if shorten == 'femur' else socket_chain(chain, pair, lam)
+    info = dict(info, shorten=shorten) if shorten == 'knee' and cut == 'femur' else info
     kn = AP.KNEE
     Pm = chain_m['pos']
     K_, J0 = np.asarray(Pm[f'tibia_{c}_L']), np.asarray(Pm[f'tarsus_1_{c}_L'])
@@ -424,17 +555,29 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
         f'the sub-leg turned {info["turn_deg"]:+.2f} deg about the knee; the tibia {L_t:.3f} mm from its neck: teeth kept '
         f'{len(teeth)} of {len(table)} (dropped {[d[0] for d in dropped]})')
     saved = AP.FORE_TEETH
+    g0_ = femur_girth if cut == 'femur' else None
+    if g0_ is not None:
+        log(f'[socket forge] (r1c loop 2) the femur a swollen thigh: its sections x {float(g0_):.3f} at the root, held and '
+            f'rounded off to the beetle\'s own by u 0.86 (femur_girth_prof)')
+        info = dict(info, femur_girth=float(g0_))
     try:
         AP.FORE_TEETH = teeth                       # (the socket's tooth table, in memory only, restored below)
-        clay = AC.clay_programs(spec, chain_m)
-        cages = AC.leg_cages(spec, chain_m, clay, pair)
+        with _femur_girth(AP, pair, g0_):
+            clay = AC.clay_programs(spec, chain_m)
+            cages = AC.leg_cages(spec, chain_m, clay, pair)
     finally:
         AP.FORE_TEETH = saved
     M = np.array([-1.0, 1.0, 1.0]) if side == 'R' else np.array([1.0, 1.0, 1.0])
     mir = side == 'R'
     out = dict(pair=pair, side=side, segs={}, sleeves=[], chain=chain_m, socket=info, teeth=(teeth, dropped))
     left = {}
-    for nm in LEG_SEGS:
+    assert cut in ('knee', 'femur', 'coxa'), cut
+    segs_cut = {'knee': LEG_SEGS, 'femur': ('femur',) + LEG_SEGS, 'coxa': ('coxa', 'trochanter', 'femur') + LEG_SEGS}[cut]
+    # (the trochanter's limit for the femur cut's root measure: the trochanter-femur sleeve's parent)
+    if cut == 'femur':
+        lim_t = AC.limit(cages['trochanter'])[0]
+        left_troch = dict(lim_V=lim_t.V, lim_F=lim_t.tris())
+    for nm in segs_cut:
         if nm == 'claw_b':
             continue
         cg = cages[nm]
@@ -465,6 +608,8 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
         lF = np.asarray(s_['lim_F'])[:, ::-1].copy() if mir else np.asarray(s_['lim_F'])
         P_, N_ = s_['spine']
         L = lv['tibia'] if nm == 'tibia' else (lv['claw'] if nm.startswith('claw') else lv['tarsus'])
+        if nm in ('coxa', 'trochanter', 'femur'):            # (the coxa cut: the tibia's level unless the table names one)
+            L = lv.get(nm, lv['tibia'])
         ctrl = s_['ctrl'] * M
         dense, _, parent, _ = SS.subdivide(QuadMesh(ctrl, Q), s_['sharp'], L)
         assert np.array_equal(np.asarray(dense.Q, np.int64), subdivide_topology(Q, L)), f'{nm}: subdivision order'
@@ -481,6 +626,10 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
              for nm, s_ in out['segs'].items()}
     Q_ = {nm: AC.MeshQ(V, tris_of(Q)) for nm, (V, Q) in low_L.items()}
     chained = ['tibia', 'tarsus_1', 'tarsus_2', 'tarsus_3', 'tarsus_4', 'tarsus_5']
+    if cut == 'coxa':
+        chained = ['coxa', 'trochanter', 'femur'] + chained
+    elif cut == 'femur':
+        chained = ['femur'] + chained
     for par, chd in list(zip(chained[:-1], chained[1:])) + [('tarsus_5', 'claw')]:
         if chd == 'claw':
             o = np.asarray(Pm[f'claw_{c}_L'])
@@ -490,7 +639,7 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
         else:
             sp_P = left[chd]['spine'][0]
             s_ = AC.sleeve(f'{pair} {par}-{chd}', sp_P[0], _unit(sp_P[1] - sp_P[0]), Q_[par].sdf, Q_[chd],
-                           graft=(chd == 'tarsus_1'))
+                           graft=(chd == 'tarsus_1') or (cut != 'knee' and chd == 'tibia'))   # (build_legs' graft sleeves)
         V, Qs = (s_['V'] * Mi, s_['Q'][:, ::-1].copy()) if mir else (s_['V'], s_['Q'])
         pj = left[par]['joint'] + '_' + side
         cj = f'claw_{c}_{side}' if chd == 'claw' else left[chd]['joint'] + '_' + side
@@ -499,6 +648,8 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
     # the KNEE sleeve (not shipped: the collar is the knee): its exit X and the tibia's root, on the cached femur's limit
     # and the new tibia's limit (the root measure M2b's author scale used)
     fe = legs['pairs'][pair]['femur']
+    if cut == 'femur' and lam != 1.0:
+        fe = left['femur']                  # (r1c: femur_chain moved the knee; the femur is this build's own, shipped)
     fq = AC.MeshQ(fe['lim_V'], fe['lim_F'])
     tq = AC.MeshQ(left['tibia']['lim_V'], left['tibia']['lim_F'])
     sp_P = left['tibia']['spine'][0]
@@ -517,7 +668,8 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
         teeth0, _ = socket_teeth(L_t, AP.FORE_TEETH, AC.LAYOUT['tibia']['min_gap'], SOCKET_FORGE['tooth_shrink'])
         try:
             AP.FORE_TEETH = teeth0
-            cg0 = AC.leg_cages(spec, chain_m, AC.clay_programs(spec, chain_m), pair)['tibia']
+            with _femur_girth(AP, pair, g0_):
+                cg0 = AC.leg_cages(spec, chain_m, AC.clay_programs(spec, chain_m), pair)['tibia']
         finally:
             AP.FORE_TEETH = saved
         lim0 = AC.limit(cg0)[0]
@@ -529,6 +681,39 @@ def forge_leg_donor(spec, chain, legs, pair='fore', side='R', lam=1.0, low_level
         out['tibia_root'] = AC.tibia_root([dict(kn0, child='tibia')])
         log(f'[socket forge] the root measured on the beetle\'s own teeth ({len(teeth0)} kept): d_max '
             f'{out["tibia_root"]["d_max"]:.4f} mm (the shipped tibia\'s {d_ship:.4f})')
+    if cut == 'coxa':
+        # (CROSS) THE COXA'S ROOT: build_legs' coxal cavity sleeve (the body's clay field round the coxa, its axis toward the
+        # coxa's exposed side), so the part leaves the collar where the coxa leaves the beetle's body; its section there
+        # (the sleeve's middle ring / in_child, as tibia_root) sets the author scale's measure
+        body = clay['body']['pronotum' if pair == 'fore' else 'venter']
+        cV = left['coxa']['lim_V']
+        expo = cV[body(cV) > 0.0]
+        cen = left['coxa']['spine'][0].mean(0)
+        axis = _unit(expo.mean(0) - cen)
+        cav = AC.sleeve(f'{pair} coxal cavity', cen, axis, body, AC.MeshQ(left['coxa']['lim_V'], left['coxa']['lim_F']),
+                        graft=True)
+        r_ = np.asarray(cav['radii'][1], np.float64) / AC.SLEEVE['in_child']
+        d_ = r_[:len(r_) // 2] + r_[len(r_) // 2:]
+        out.update(root_seg='coxa', root_X=np.asarray(cav['X'], np.float64) * Mi, root_axis=axis * Mi,
+                   root=dict(d_max=float(d_.max()), d_mean=float(d_.mean()), K=len(r_)), cut='coxa')
+        log(f'[socket forge] (coxa cut) the coxa leaves the body at X {np.round(out["root_X"], 3).tolist()} life mm, its '
+            f'axis {np.round(out["root_axis"], 3).tolist()}; its root {out["root"]["d_max"]:.4f} mm (d_max)')
+    elif cut == 'femur':
+        # (CROSS) THE FEMUR CUT: the femur's root where it leaves the trochanter, measured on the trochanter-femur sleeve
+        # (build_legs' own: the trochanter's limit round the femur's), its axis the femur's spine from there: the segment
+        # whose own axis is a limb's (out from the body, level), so the leg keeps the beetle's stance on a lateral ring
+        sp_P = left['femur']['spine'][0]
+        ax_f = _unit(sp_P[1] - sp_P[0])
+        tf = AC.sleeve(f'{pair} trochanter-femur (the root)', sp_P[0], ax_f,
+                       AC.MeshQ(left_troch['lim_V'], left_troch['lim_F']).sdf,
+                       AC.MeshQ(left['femur']['lim_V'], left['femur']['lim_F']), graft=False)
+        r_ = np.asarray(tf['radii'][1], np.float64) / AC.SLEEVE['in_child']
+        d_ = r_[:len(r_) // 2] + r_[len(r_) // 2:]
+        out.update(root_seg='femur', root_X=np.asarray(tf['X'], np.float64) * Mi, root_axis=ax_f * Mi,
+                   root=dict(d_max=float(d_.max()), d_mean=float(d_.mean()), K=len(r_)), cut='femur')
+        log(f'[socket forge] (femur cut) the femur leaves the trochanter at X {np.round(out["root_X"], 3).tolist()} life mm, '
+            f'its axis {np.round(out["root_axis"], 3).tolist()}; its root {out["root"]["d_max"]:.4f} mm (d_max)')
+    # (the knee cut's dict keeps M2's keys only: the identity runs pickle what the stages take from it)
     log(f'[socket forge] sleeves on the shipped lows: {[s_["child"] for s_ in out["sleeves"]]}; the tibia\'s root '
         f'{out["tibia_root"]["d_max"]:.4f} mm (d_max)')
     return out
@@ -544,7 +729,7 @@ def spine_station(P, u):
     return (1 - w) * P[i] + w * P[i + 1], _unit(P[i + 1] - P[i]), cum
 
 
-def placement(rec, donor, z_lip, author_scale, ankle_R, u_lip=None):
+def placement(rec, donor, z_lip, author_scale, ankle_R, u_lip=None, fold_dir=None, lip_in=0.0):
     """THE RIGID MAP of the donor (life mm, the beetle's frame) into the socket: x_oct = O + R (s (x - P_lip)) + z_lip Z,
     s = author_scale 1e-3 (m per life mm). The tibia's ROOT AXIS (its spine from the knee to the lip's station) goes
     onto the ring's distal axis Z. Its ROLL about that axis keeps the tibia-tarsus-claw assembly the beetle's own and
@@ -557,21 +742,41 @@ def placement(rec, donor, z_lip, author_scale, ankle_R, u_lip=None):
     the graft knee a horizontal hinge in the leg's plane.) The lip's station P_lip (the knee sleeve's exit X by
     default: the tibia's section where it leaves the femur) at z_lip past the ring's centre. Returns dict(R, s, P_lip,
     T (life mm -> m, a callable), u_lip)"""
-    P, N = donor['segs']['tibia']['spine']
+    # (CROSS 11-10) the femur and coxa cuts (forge_leg_donor cut='femur' / 'coxa'): the root segment's ROOT AXIS goes onto Z
+    # (donor['root_axis']: the femur's spine out of the trochanter, the coxal cavity's axis), the lip at its exit X on that
+    # axis; its roll UPRIGHT, the beetle's own up (+Y of its plan frame) onto the host's, so the leg stands on the host as on
+    # the beetle and its own free joints (the knee, the tarsus) stand it. The knee cut: every line as it was
+    coxa_cut = donor.get('cut') in ('coxa', 'femur')
+    P, N = donor['segs'][donor.get('root_seg', 'tibia')]['spine']
     seg = np.linalg.norm(np.diff(P, axis=0), axis=1)
     cum = np.concatenate([[0.0], np.cumsum(seg)])
     if u_lip is None:
-        u_lip = float(cum[int(np.linalg.norm(P - donor['knee_X'][None], axis=1).argmin())] / cum[-1])
+        X_ = donor['root_X'] if coxa_cut else donor['knee_X']
+        u_lip = float(cum[int(np.linalg.norm(P - X_[None], axis=1).argmin())] / cum[-1])
     P_lip, _, _ = spine_station(P, u_lip)
-    t0 = _unit(P_lip - P[0])                            # the root axis: the knee to the lip's station
-    fold = np.asarray(ankle_R, np.float64)[:, 1]         # the tarsomeres' fold side (ventral)
-    fold = _unit(fold - t0 * float(fold @ t0))
-    n0 = -fold                                          # its opposite -> the arm's aboral side (+Y)
+    if coxa_cut:
+        # (on the root axis: the collar's rays start on it; lip_in life mm further out along it, so the crest's wave and the
+        # tuck stay on the shell and its root sinks that much deeper)
+        t0 = _unit(np.asarray(donor['root_axis'], np.float64))
+        P_lip = np.asarray(donor['root_X'], np.float64) + float(lip_in) * t0
+        up = np.array([0.0, 1.0, 0.0])
+        n0 = _unit(up - t0 * float(up @ t0))
+    else:
+        t0 = _unit(P_lip - P[0])                        # the root axis: the knee to the lip's station
+        fold = np.asarray(ankle_R, np.float64)[:, 1]     # the tarsomeres' fold side (ventral)
+        fold = _unit(fold - t0 * float(fold @ t0))
+        n0 = -fold                                      # its opposite -> the arm's aboral side (+Y)
     b0 = np.cross(n0, t0)                               # (b, n, t) right-handed as the ring's (X, Y, Z): X = Y x Z
     A = np.column_stack([b0, n0, t0])                   # donor (b, n, t) in the beetle frame
     O = np.asarray(rec['frame']['creature']['origin'], np.float64)
     Rr = np.asarray(rec['frame']['creature']['R'], np.float64)       # columns X, Y, Z
     B = np.column_stack([Rr[:, 0], Rr[:, 1], Rr[:, 2]])
+    if fold_dir is not None:
+        # (REROOT) the fold side to a HOST's own side (the axolotl's limb: its ventral, the world's down, where the
+        # ring frame's -Y points up): the leg's aboral axis opposite fold_dir, made normal to the ring's Z
+        Zr = Rr[:, 2]
+        nt = -_unit(np.asarray(fold_dir, np.float64) - Zr * float(np.asarray(fold_dir, np.float64) @ Zr))
+        B = np.column_stack([np.cross(nt, Zr), nt, Zr])
     R = B @ A.T
     assert abs(np.linalg.det(R) - 1.0) < 1e-9
     s = float(author_scale) * 1e-3
@@ -580,7 +785,10 @@ def placement(rec, donor, z_lip, author_scale, ankle_R, u_lip=None):
     def T(X):
         X = np.asarray(X, np.float64)
         return (X - P_lip) * s @ R.T + shift
-    return dict(R=R, s=s, P_lip=P_lip, u_lip=u_lip, T=T, shift=shift, author_scale=float(author_scale), z_lip=z_lip)
+    out = dict(R=R, s=s, P_lip=P_lip, u_lip=u_lip, T=T, shift=shift, author_scale=float(author_scale), z_lip=z_lip)
+    if fold_dir is not None:
+        out['B'] = B                                    # (REROOT: the leg's frame at the socket, for graft_joints)
+    return out
 
 
 def place_donor(donor, pl):
@@ -626,23 +834,37 @@ def tris_of(Q):
 
 
 # ============================================================================================ the collar
-def collar(base, cage, rec, arms, tib, pl, opts=None, log=print):
+def collar(base, cage, rec, arms, tib, pl, opts=None, log=print, side=None):
     """THE COLLAR'S CAGE (module docstring) in the native cage's topology up to the native loop: rings ic - apron ..
     ic + 1 the base's own vertices (the apron baked, never shipped; the ring frozen; ic + 1 the native's first loop,
     w = 0), then the designed rings to the CREST, then the TUCK. tib: the placed tibia (V, Q: its low). Returns dict(V,
     Q, ring_no (cage ring number, designed rings ic + 2 ..), z (per ring, along the ring's Z from its centre), w (per
     ring), fixed (the base's vertices: apron, ring, native loop), cage_ids (-1 for designed vertices), copies, i0, ic,
-    i_last, n_designed, crest, tuck, r_tib, theta)"""
+    i_last, n_designed, crest, tuck, r_tib, theta).
+    (REROOT) side: ANY host's side of its ring (graft.host_ring_record's: its loops by ring number, its copies; the
+    octopus's is graft.octopus_side of its cage, the default), so the collar seats a shell on any ring record; `cage`
+    and `arms` are read only through it"""
+    from . import graft as GF
     o = dict(SOCKET, **(opts or {}))
-    rings = cage['rings']
+    if side is None:
+        side = GF.octopus_side(base, cage, rec)
+    rings = side['rings']
     ic, apron = int(rec['ring_index']), int(rec['apron_rings'])
-    L = base['low']
-    copies = {}
-    for i in range(base['n_low']):
-        copies.setdefault(int(L['orig'][i]), []).append(i)
+    copies = side['copies']
     O = np.asarray(rec['frame']['creature']['origin'], np.float64)
     Rr = np.asarray(rec['frame']['creature']['R'], np.float64)
     X, Y, Z = Rr[:, 0], Rr[:, 1], Rr[:, 2]
+    if o.get('mirror_frame'):
+        # (CROSS r1c loop 2) THE MIRRORED SIDE OF A MIRROR PAIR (opts mirror_frame; every earlier collar: off). The axolotl's
+        # R axilla ring is its L ring's mirror index for index, its vertex k at -theta_k in its own frame
+        # (remix_r1/cross/tests/p21_lr_mirror.py), so with this frame's Y the collar's column k is the mirror of the
+        # partner's column at -theta_k, and the seeded lip and cuff waves and the native radii (read in vertex order) land
+        # on other columns: the R collar was not the L's mirror (r1c: its lip 1.07 mm further out; loop 2's swollen femur:
+        # 5.97 mm). Turned over, column k is the partner's column k mirrored: the same waves, the same radii, the same lip
+        # station, the collar the partner's exact mirror. The frame returned (col['R']) is this one, so every later angle
+        # read off the collar keeps the same sense
+        Y = -Y
+        Rr = np.column_stack([X, Y, Z])
     K = int(rec['K'])
     th = TAU * np.arange(K) / K
     pos = lambda i: np.array([base['V32'][copies[int(c)][0]] for c in rings[i]]).astype(np.float64)
@@ -704,12 +926,15 @@ def collar(base, cage, rec, arms, tib, pl, opts=None, log=print):
     cage_ids = np.concatenate([np.asarray(rings[i]) for i in range(ic - apron, ic + 2)] + [-np.ones(K * n_d, int)])
     # quads ring to ring in the native's winding (vertex k of every ring at the same standard angle: the base's rings
     # are the cage's, k by the cage's alpha; the designed rings at theta_k)
-    kmap = np.asarray(cage['ring_k'])
     # the native rings' vertex order is the cage's; their k from the cage's alpha (ring_k is the cut ring's): every
     # native ring lists its vertices in the same k order (the cage builds rings that way), checked here
     def k_of(Pr, c):
         a = np.arctan2((Pr - c) @ Y, (Pr - c) @ X)
         return np.round(((a % TAU) / TAU) * K).astype(int) % K
+    # (REROOT) a host's side carries no cage ring_k: the ring's own k order by its vertices' angles (a stored record
+    # lists them in k order; an R site's turn the other way about the distal Z, so its k order is the reverse)
+    kmap = np.asarray(side['ring_k']) if 'ring_k' in side else k_of(nat[apron], nat[apron].mean(0))
+    assert sorted(kmap.tolist()) == list(range(K)), f'the ring\'s k order {kmap} is not a permutation'
     for j in range(nat_n):
         kk = k_of(nat[j], nat[j].mean(0))
         assert np.array_equal(kk, kmap), f'native ring {ic - apron + j}: its k order {kk} is not the cut ring\'s {kmap}'
@@ -895,24 +1120,33 @@ def graft_joints(spec, chain, donor, pl, base, root, rec, stem='arm0', side='R')
     arm, in the leg's plane: placement's roll), y = z x x (+ about z folds the tibia toward the oral side, -Y).
     Returns [dict(name, role, beetle, parent, world)] parent-first, and {beetle joint: graft name}"""
     from .families import arthropod as AR
-    sk = AR.skeleton(spec, chain, scale=pl['s'])
+    # (r1c) the frames from frames_chain: a re-proportioned femur cut's knee hinge square to its femur and tibia again
+    sk = AR.skeleton(spec, frames_chain(chain, donor), scale=pl['s'])
     c = donor['pair'][0]
     roles = ['tibia'] + [f'tarsus_{n}' for n in range(1, 6)] + ['claw']
+    # (CROSS) the coxa cut: the coxa, trochanter and femur first, EVERY frame the beetle's own carried by the placement (its
+    # knee is the beetle's own hinge between two shells, no designed one); numbered so the tibia stays g09
+    coxa_cut = donor.get('cut') in ('coxa', 'femur')
+    pre = {'coxa': ['coxa', 'trochanter', 'femur'], 'femur': ['femur']}.get(donor.get('cut'), [])
+    roles = pre + roles
+    k0 = 9 - len(pre)
     bnames = [f'{r}_{c}_{side}' for r in roles]
     out, gmap = [], {}
-    Xr = np.asarray(rec['frame']['creature']['R'], np.float64)[:, 0]
+    # (REROOT) the knee's hinge across the leg's plane: the ring frame's X, or the placement's own where it turned the
+    # leg to a host's fold side (placement fold_dir)
+    Xr = np.asarray(pl['B'], np.float64)[:, 0] if 'B' in pl else np.asarray(rec['frame']['creature']['R'], np.float64)[:, 0]
     for k, (r, bn) in enumerate(zip(roles, bnames)):
         Wb = sk.world[sk.index(bn)]
         Rb, pb = Wb[:3, :3], Wb[:3, 3] / pl['s']           # (life mm)
         W = np.eye(4)
         W[:3, :3] = pl['R'] @ Rb
         W[:3, 3] = pl['T'](pb[None])[0]
-        if k == 0:
+        if k == 0 and not coxa_cut:
             pa = pl['T']((sk.world[sk.index(bnames[1])][:3, 3] / pl['s'])[None])[0]
             x = _unit(pa - W[:3, 3])
             z = _unit(Xr - x * float(Xr @ x))
             W[:3, :3] = np.column_stack([x, np.cross(z, x), z])
-        nm = f'{stem}_g{9 + k:02d}'
+        nm = f'{stem}_g{k0 + k:02d}'
         out.append(dict(name=nm, role=r, beetle=bn, parent=root if k == 0 else out[-1]['name'], world=W,
                         fold_axis=W[:3, 2].tolist()))
         gmap[bn] = nm
@@ -1098,10 +1332,27 @@ def tarsal_setae(pieces, coverage_at, opts=None, log=print):
 def lscm_pinned(P, F, pin, pin_uv):
     """the least-squares conformal map (uv.lscm's construction) with MANY pinned vertices (Dirichlet data): pin (m,)
     vertex ids, pin_uv (m, 2) their fixed coordinates; the free vertices solve the conformal energy over every
-    triangle. Returns UV (n, 2)"""
+    triangle. Returns UV (n, 2).
+    (REROOT) A MIRRORED CHART: where the pins lie on a host's stacked mirror copy (the axolotl's right limbs wear the
+    left's texels, their UVs running the other way round) the triangles between pins have NEGATIVE area in UV. A
+    conformal map cannot continue a reflection: past the pins it unfolds back over them (AX-X5 at axilla_R: the ring's
+    row folded under the collar's own, 32 flipped triangles, 7,262 texels shared with the apron). There the pins are
+    mirrored in u, the map solved, and mirrored back, so the continuation runs on in the pins' own sense. A chart the
+    right way round (every cross before this one) takes the path below unchanged"""
     import scipy.sparse as sp
     import scipy.sparse.linalg as spla
     n = len(P)
+    pm_ = np.zeros(n, bool)
+    pm_[np.asarray(pin, np.int64)] = True
+    tp_ = pm_[F].all(1)
+    if tp_.any():
+        uq_ = np.zeros((n, 2))
+        uq_[np.asarray(pin, np.int64)] = pin_uv
+        a_, b_ = uq_[F[tp_, 1]] - uq_[F[tp_, 0]], uq_[F[tp_, 2]] - uq_[F[tp_, 0]]
+        if float((a_[:, 0] * b_[:, 1] - a_[:, 1] * b_[:, 0]).sum()) < 0.0:
+            out_ = lscm_pinned(P, F, pin, np.asarray(pin_uv, np.float64) * np.array([-1.0, 1.0]))
+            out_[:, 0] = -out_[:, 0]
+            return out_
     p0, p1, p2 = P[F[:, 0]], P[F[:, 1]], P[F[:, 2]]
     e1, e2 = p1 - p0, p2 - p0
     x = e1 / np.maximum(np.linalg.norm(e1, axis=1, keepdims=True), 1e-20)
@@ -1148,7 +1399,7 @@ def lscm_pinned(P, F, pin, pin_uv):
     return UV
 
 
-def collar_uv(base, col, rec):
+def collar_uv(base, col, rec, distal=False):
     """THE COLLAR'S ISLAND on the BASE'S LATTICE: the collar's quads split along the arm's oral seam (vertex seam_k of
     every ring, octopus_uv's hidden line: graft.part_islands' rule), the native quads' corners the base low's own
     vertices (graft.strip_base_corners: the split copy on the quad's side of the seam) at the base set's UVs (texels of
@@ -1165,6 +1416,12 @@ def collar_uv(base, col, rec):
     Vn, Qn, orig = U.split(col['V'], col['Q'], lab, seams)
     rq = col['ring_no'][col['Q']]
     native_q = np.nonzero(rq.max(1) <= col['ic'] + 1)[0]
+    if distal:
+        # (REROOT) a host whose ring is an island boundary of its own (the axolotl's limb rings): only the native loop
+        # past the ring pins (the base's distal chart, which the native group drops); the apron, on the other chart,
+        # is continued like the designed rings (baked for the context only, never shipped or packed)
+        native_q = np.nonzero(rq.min(1) >= col['ic'])[0]
+        native_q = native_q[rq[native_q].max(1) <= col['ic'] + 1]
     part = dict(cage_ids=col['cage_ids'])
     bc = GF.strip_base_corners(base, part, Qn, orig, native_q)
     S = int(rec['set_size'])
@@ -1175,8 +1432,10 @@ def collar_uv(base, col, rec):
     T = lscm_pinned(Vn, F, pin, T_pin)
     d1, d2 = T[F[:, 1]] - T[F[:, 0]], T[F[:, 2]] - T[F[:, 0]]
     cr = d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]
+    # (REROOT) flipped: against the island's own sense (a host's mirrored chart runs the other way round as a whole)
+    sense = 1.0 if float(cr.sum()) >= 0.0 else -1.0
     return dict(Vn=Vn, Qn=Qn, orig=orig, T=T, base_v=dict(zip(pin.tolist(), bv.tolist())), native_q=native_q,
-                seam=seams, flipped=int((cr <= 0).sum()), F=F)
+                seam=seams, flipped=int((cr * sense <= 0).sum()), F=F)
 
 
 def unwrap_island(P, F, arap_iters=8):

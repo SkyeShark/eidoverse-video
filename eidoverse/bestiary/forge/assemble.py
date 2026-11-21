@@ -51,10 +51,26 @@ def read_glb(path):
 
 def accessor_array(j, b, i):
     a = j['accessors'][i]
-    v = j['bufferViews'][a['bufferView']]
     n = _NC[a['type']]
-    arr = np.frombuffer(b, dtype=_NP[a['componentType']], count=a['count'] * n,
-                        offset=v.get('byteOffset', 0) + a.get('byteOffset', 0))
+    if 'bufferView' not in a:
+        # (REROOT) a SPARSE accessor with no base view (the axolotl's morph targets: zeros but where a corrective moves
+        # a vertex): zeros, then its sparse values at its indices
+        arr = np.zeros(a['count'] * n, _NP[a['componentType']])
+    else:
+        v = j['bufferViews'][a['bufferView']]
+        arr = np.frombuffer(b, dtype=_NP[a['componentType']], count=a['count'] * n,
+                            offset=v.get('byteOffset', 0) + a.get('byteOffset', 0))
+    if 'sparse' in a:
+        sp = a['sparse']
+        iv = j['bufferViews'][sp['indices']['bufferView']]
+        idx = np.frombuffer(b, dtype=_NP[sp['indices']['componentType']], count=sp['count'],
+                            offset=iv.get('byteOffset', 0) + sp['indices'].get('byteOffset', 0)).astype(np.int64)
+        vv = j['bufferViews'][sp['values']['bufferView']]
+        val = np.frombuffer(b, dtype=_NP[a['componentType']], count=sp['count'] * n,
+                            offset=vv.get('byteOffset', 0) + sp['values'].get('byteOffset', 0))
+        arr = np.array(arr).reshape(a['count'], n)
+        arr[idx] = val.reshape(sp['count'], n)
+        arr = arr.reshape(-1)
     return arr.reshape(a['count'], n) if n > 1 else arr
 
 
@@ -83,6 +99,22 @@ class _Bin:
         self.accessors.append(a)
         return len(self.accessors) - 1
 
+    def sparse_accessor(self, arr, kind, minmax=False):
+        """(REROOT) a morph target's deltas as a SPARSE accessor (no base view: zeros but its nonzero rows), as the
+        axolotl's own targets are written"""
+        arr = np.ascontiguousarray(arr)
+        rows = np.nonzero(np.abs(arr.reshape(len(arr), -1)).max(1) > 0)[0].astype(np.uint32)
+        a = {'componentType': _COMP[arr.dtype], 'count': int(arr.shape[0]), 'type': kind}
+        if minmax:
+            a['min'] = arr.reshape(len(arr), -1).min(0).astype(float).tolist()
+            a['max'] = arr.reshape(len(arr), -1).max(0).astype(float).tolist()
+        if len(rows):
+            a['sparse'] = {'count': int(len(rows)),
+                           'indices': {'bufferView': self.view(rows.tobytes()), 'componentType': 5125},
+                           'values': {'bufferView': self.view(np.ascontiguousarray(arr[rows]).tobytes())}}
+        self.accessors.append(a)
+        return len(self.accessors) - 1
+
 
 def quat_from_matrix(R):
     from .gltf import quat_from_matrix as q
@@ -101,8 +133,12 @@ def _encode(img, kind):
     return buf.getvalue(), 'image/jpeg'
 
 
-def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print):
-    """base_path: the base glb; parts: [dict(
+def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print, share_images=False):
+    """share_images (CROSS r1c loop 2; off: every glb's bytes as before): a part map whose ENCODED bytes equal one already
+    written by a part is stored once and its texture index reused. For parts that wear one atlas under several materials (a
+    mirrored pair's two collars and their shared shells: the R collar's maps ARE the L's), so the glb holds one texture set
+    and the runtime loads one. The one-mesh path only.
+    base_path: the base glb; parts: [dict(
          name, root (the kept joint the part hangs from),
          native=dict(prims={material name: triangle positions in that primitive}, joints=[names], sockets=[names]),
          joints=[dict(name, parent, world (4x4 bind, the creature's frame))] parent-first,
@@ -226,8 +262,26 @@ def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print):
                 assert not ((Jm < 0) & (W > 0)).any(), 'a kept vertex weighted on a dropped joint'
                 arr = np.where(Jm < 0, 0, Jm).astype(np.uint16)
             new_attrs[an] = B.accessor(arr, j['accessors'][ai]['type'], 34962, minmax=(an == 'POSITION'))
+        # (REROOT) a host with MORPH TARGETS (the axolotl's eight correctives): each target's rows for the kept vertices,
+        # written once per vertex set like the attributes (the octopus carries none: this writes nothing there)
+        new_targets = None
+        if prims[pks[0]].get('targets'):
+            new_targets = []
+            for tg in prims[pks[0]]['targets']:
+                t_new = {}
+                for an, ai in tg.items():
+                    arr = accessor_array(j, b, ai)[keepV]
+                    if 'bufferView' not in j['accessors'][ai]:                # (sparse in, sparse out)
+                        t_new[an] = B.sparse_accessor(arr, j['accessors'][ai]['type'], minmax=(an == 'POSITION'))
+                    else:
+                        t_new[an] = B.accessor(arr, j['accessors'][ai]['type'], 34962, minmax=(an == 'POSITION'))
+                new_targets.append(t_new)
+            report.setdefault('targets', {})[pos_acc] = [sorted(t) for t in prims[pks[0]]['targets']]
         for k in pks:
             pr = dict(prims[k], attributes=dict(new_attrs))
+            if new_targets is not None:
+                assert len(prims[k].get('targets', [])) == len(new_targets), 'primitives of one set with other targets'
+                pr['targets'] = [dict(t) for t in new_targets]
             pr['indices'] = B.accessor(vmap[Fs[k][keepF[k]]].astype(np.uint32).reshape(-1), 'SCALAR', 34963)
             new_prims[k] = pr
             report['dropped_tris'][mats[prims[k]['material']]] = int((~keepF[k]).sum())
@@ -242,24 +296,38 @@ def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print):
     textures = [dict(t) for t in j.get('textures', [])]
     ext_used = set(j.get('extensionsUsed', []))
 
+    tex_seen = {}
+
     def tex(img, kind):
         data, mime = _encode(img, kind)
+        if share_images:
+            import hashlib
+            key = (mime, hashlib.sha1(data).digest())
+            if key in tex_seen:
+                return tex_seen[key]
         images.append({'bufferView': B.view(data), 'mimeType': mime})
         textures.append({'sampler': 0, 'source': len(images) - 1})
+        if share_images:
+            tex_seen[key] = len(textures) - 1
         return len(textures) - 1
 
     materials = [dict(m) for m in j['materials']]
     f32 = lambda a: np.ascontiguousarray(a, np.float32)
-    for p in parts:
-        mt = p['material']
+
+    def make_material(mt):
+        """a part's material (its maps encoded and appended as textures, in the order below), appended; its index"""
         mp = mt['maps']
         # metallicFactor: the part's own (default 0). A part's ORM blue is DATA, not metalness (the graft's chitin
         # carries its clear coat's roughness there, as the beetle's glb does): at 1.0 a plain glTF viewer drew the
         # shells ~23 % metallic (up to ~49 %, the M2 seam check); the bestiary runtime reads the channels itself
+        # (REROOT) lossless: a part whose texels are the HOST'S OWN, carried (a band's, a collar's on a host's lattice),
+        # writes its colour maps as PNG too: a second JPEG generation in another atlas moved the ring's row against the
+        # host's own by dE00 p99 1.4-1.6 (the ring gates' `carried`). Off by default: every other cross's bytes as before
+        ck = 'data' if mt.get('lossless') else 'colour'
         m = {'name': mt['name'], 'doubleSided': False,
              'pbrMetallicRoughness': {'metallicFactor': float(mt.get('metallic', 0.0)), 'roughnessFactor': 1.0,
-                                      'baseColorTexture': {'index': tex(mp['albedo'], 'colour')},
-                                      'metallicRoughnessTexture': {'index': tex(mp['orm'], 'colour')}}}
+                                      'baseColorTexture': {'index': tex(mp['albedo'], ck)},
+                                      'metallicRoughnessTexture': {'index': tex(mp['orm'], ck)}}}
         m['occlusionTexture'] = {'index': m['pbrMetallicRoughness']['metallicRoughnessTexture']['index']}
         m['normalTexture'] = {'index': tex(mp['normal'], 'data')}
         ex = {}
@@ -279,7 +347,37 @@ def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print):
         if mt.get('extras'):
             m['extras'] = mt['extras']
         materials.append(m)
-        mi = len(materials) - 1
+        return len(materials) - 1
+
+    # (REROOT) every primitive of the mesh carries the base's morph targets (glTF: the same count in each): a part's
+    # primitive takes ZERO deltas in the base's targets' attributes (it has no correctives of its own)
+    base_tg = next((pr.get('targets') for pr in prims if pr.get('targets')), None)
+
+    def zero_targets(prim, n):
+        if not base_tg:
+            return
+        prim['targets'] = [{an: B.sparse_accessor(np.zeros((n, 3), np.float32), 'VEC3', minmax=(an == 'POSITION'))
+                            for an in sorted(tg)} for tg in base_tg]
+
+    made = {}
+
+    def sucker_material(p, materials_, tex_):
+        nm = p['material']['sucker_material']['name']
+        if nm not in made:
+            made[nm] = make_material(p['material']['sucker_material'])
+        return made[nm]
+
+    def extra_material(mt, materials_, tex_):
+        if mt.get('base'):
+            # (REROOT) a primitive on the BASE'S OWN material (its texels: the axolotl's fin end on its native fin's
+            # UVs), no new texture
+            return mats.index(mt['base'])
+        if mt['name'] not in made:
+            made[mt['name']] = make_material(mt)
+        return made[mt['name']]
+
+    for p in parts:
+        mi = make_material(p['material'])
         ms = p['mesh']
 
         def skin_attrs(d):
@@ -297,11 +395,24 @@ def assemble(base_path, parts, out_path, chains=None, grafts=None, log=print):
             return a
         new_prims.append({'attributes': skin_attrs(ms), 'indices': B.accessor(
             np.asarray(ms['F'], np.uint32).reshape(-1), 'SCALAR', 34963), 'material': mi, 'mode': 4})
+        zero_targets(new_prims[-1], len(ms['V']))
         if p.get('suckers') is not None:
             su = p['suckers']
-            smat = mats.index('octopus_suckers')
+            # (REROOT) the sucker material: the base's own where it has one (the octopus), else the part's set carries
+            # its own (a re-rooted octopus arm on another host: material['sucker_material'], appended once)
+            if 'octopus_suckers' in mats:
+                smat = mats.index('octopus_suckers')
+            else:
+                smat = sucker_material(p, materials, tex)
             new_prims.append({'attributes': skin_attrs(su), 'indices': B.accessor(
                 np.asarray(su['F'], np.uint32).reshape(-1), 'SCALAR', 34963), 'material': smat, 'mode': 4})
+            zero_targets(new_prims[-1], len(su['V']))
+        for extra in p.get('extra_prims', []):
+            # (REROOT) a part's further primitives on materials of their own (the axolotl's fin end, an eye's parts)
+            emi = extra_material(extra['material'], materials, tex)
+            new_prims.append({'attributes': skin_attrs(extra['mesh']), 'indices': B.accessor(
+                np.asarray(extra['mesh']['F'], np.uint32).reshape(-1), 'SCALAR', 34963), 'material': emi, 'mode': 4})
+            zero_targets(new_prims[-1], len(extra['mesh']['V']))
     J['images'], J['textures'], J['materials'] = images, textures, materials
     J['meshes'] = [dict(j['meshes'][0], primitives=new_prims)]
     J['accessors'], J['bufferViews'] = B.accessors, B.views

@@ -109,10 +109,7 @@ SPEC = dict(
               center=dict(I=0.2, II=0.15, III=0.5, IV=0.5),
               # D4.1b: the WALK's stance place of a pair's foot from its rest place (dx outward, dz forward, mm; the
               # glb's motion.walk.place by label), and a pair's own swing lift (mm; motion.walk.liftBy by label)
-              place=dict(II=(18.0, 3.0)), lift_by=dict(I=15.9),
-              # D4.1b fix: a pair's lift on its re-placing step between its rest place and its walk place (mm; the glb's
-              # motion.walk.liftPlace by label): the engine plants a walk place only while the animal walks
-              lift_place=dict(II=15.9)),
+              place=dict(II=(18.0, 3.0)), lift_by=dict(I=15.9)),
     # ---- D4.1's design rows (families/arachnid.py): the bind is the WALKING STANCE
     rig=dict(
         ride=10.0, coxa_h=2.35, body_frac=0.5, pedicel=(-23.5, 4.0), opisthosoma_z=-25.0, abd_sag=1.0,
@@ -369,20 +366,18 @@ TAGS = {
                                                 'crossed; the second hinge without it: 57 %; check_d41b K10). The rest pose '
                                                 'is untouched (the lead\'s call 11-11 (a)), and the engine plants this '
                                                 'place ONLY WHILE THE ANIMAL WALKS: standing leg II stands on the bind\'s '
-                                                'place; after a stop it settles in two cycles, the second stepping leg II '
-                                                'back in over leg I\'s base only once leg I stands (d41b fix, the check\'s F1)'),
+                                                'place; after a stop it settles in one and a half cycles at the walk\'s own '
+                                                'rate, leg II stepping back in over leg I\'s base only once leg I stands; '
+                                                'both of leg II\'s steps between the two places, out at a start and back '
+                                                'after a stop, lift as its walking swing does (d41b fix 2; the lead\'s call '
+                                                '11-18: at a start the hair coats of thighs I and II then pass 0.92 mm '
+                                                'through each other for 0.28 s, the cuticles 0.48 mm apart)'),
     'gait.lift_by.I': ('[D-d41 from P v01]', 'leg I\'s own swing lift (mm): v01 carries the swinging front leg nearly '
                                              'straight at the height of the body\'s top (the checker\'s C6d): 15.9 mm '
                                              'puts the swinging joint there. The test passes gate 10b with it (thighs '
                                              'I / II +0.56 mm at 5.9 mm bars in the skitter; check_d41b K9). (D4.1b '
                                              'shipped 14 on a study harness\'s "+0.49, 0.01 short", which read those '
                                              'thighs 0.075 mm low: the fix round\'s F3.) The other pairs keep gait.lift'),
-    'gait.lift_place.II': ('[D-d41 from P v01]', 'leg II\'s lift (mm) on its RE-PLACING step between the bind\'s place and '
-                                                 'its walk place (the glb\'s motion.walk.liftPlace by label): unfolding out '
-                                                 'from over leg I\'s base at a start, folding back after a stop. v01\'s '
-                                                 'swinging front leg\'s height, the only swing height measured; at the '
-                                                 'gait\'s 2.9 the coats of thighs I and II overlap 0.92 mm at a start, at '
-                                                 '15.9 0.26 (d41b fix E5; the cuticles 1.15 mm apart)'),
     # ---- rig
     'rig.ride': ('[E from P i01]', 'the coxa joints above the ground: photos.i01.height\'s femur bases 11.0 and 7.8; '
                                    'L4\'s leggier male, scaled, would stand higher'),
@@ -545,7 +540,7 @@ UNIT_KEY = {
     'rig.body_frac': 'frac', **{f'rig.femur_rise.{R}': 'deg' for R in ('I', 'II', 'III', 'IV')}, 'rig.az_pad': 'deg',
     'photos.i01.femur_rise': 'deg',
     **{f'gait.center.{R}': 'frac' for R in ('I', 'II', 'III', 'IV')},
-    'gait.place.II': 'mm', 'gait.lift_by.I': 'mm', 'gait.lift_place.II': 'mm', 'rig.ik.hinge2': 'text',
+    'gait.place.II': 'mm', 'gait.lift_by.I': 'mm', 'rig.ik.hinge2': 'text',
     **{f'rig.hinge2.{k}.{R}': 'deg' for k in ('band', 'range', 'knee') for R in ('I', 'II', 'III', 'IV')},
     'rig.tm_bend': 'deg', 'rig.fang.rest': 'deg', 'rig.palp.az': 'deg',
     'rig.palp.femur_e': 'deg', 'rig.palp.tarsus_bend': 'deg', 'rig.spinneret.pitch': 'deg',
