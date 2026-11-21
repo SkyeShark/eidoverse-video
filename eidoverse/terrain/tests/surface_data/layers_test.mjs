@@ -186,6 +186,15 @@ const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
 cam.position.set(0, 0, 1);
 const renders = [];
 let worstR = 0, whereR = '';
+// the texel's own value: nearest sampling for the exact check (the material's linear filter blends neighbours by the
+// varying's last bits; what is asked here is the layer and the decode)
+for (const fam of fams) {
+    tex[fam].magFilter = THREE.NearestFilter;
+    tex[fam].minFilter = THREE.NearestFilter;
+    tex[fam].generateMipmaps = false;
+}
+// rows of the render target as the quad's v runs (found from level 0 of the first family: up or down)
+let flip = null;
 for (const fam of fams) {
     const L = tex[fam];
     const Sz = L.image.width, half = L.type === THREE.HalfFloatType, srgbFam = L.colorSpace === THREE.SRGBColorSpace;
@@ -196,40 +205,56 @@ for (const fam of fams) {
         const geo = new THREE.PlaneGeometry(2, 2);
         const uvs = geo.attributes.uv;
         for (let k = 0; k < uvs.count; k++) uvs.setXY(k, uvs.getX(k) * size / Sz, uvs.getY(k) * size / Sz);
-        const mat = new THREE.MeshBasicNodeMaterial();
-        mat.colorNode = TSL.texture(L, TSL.uv()).depth(TSL.int(i));
-        mat.toneMapped = false;
-        const scene = new THREE.Scene();
-        scene.add(new THREE.Mesh(geo, mat));
-        const rt = new THREE.RenderTarget(size, size, { type: THREE.FloatType, depthBuffer: false });
-        renderer.setRenderTarget(rt);
-        renderer.render(scene, cam);
-        const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, size, size);
-        renderer.setRenderTarget(null);
-        let mx = 0;
+        const px = [];
+        for (const part of ['rgb', 'alpha']) {                 // the alpha channel read through rgb (an opaque pass)
+            const s = TSL.texture(L, TSL.uv()).depth(TSL.int(i));
+            const mat = new THREE.MeshBasicNodeMaterial();
+            mat.colorNode = part === 'rgb' ? TSL.vec4(s.rgb, 1.0) : TSL.vec4(s.a, s.a, s.a, 1.0);
+            mat.toneMapped = false;
+            const scene = new THREE.Scene();
+            scene.add(new THREE.Mesh(geo, mat));
+            const rt = new THREE.RenderTarget(size, size, { type: THREE.FloatType, depthBuffer: false });
+            renderer.setRenderTarget(rt);
+            renderer.render(scene, cam);
+            px.push(await renderer.readRenderTargetPixelsAsync(rt, 0, 0, size, size));
+            renderer.setRenderTarget(null);
+            rt.dispose();
+            mat.dispose();
+        }
         const base = i * Sz * Sz * 4;
-        for (let y = 0; y < size; y++) {
-            const row = size - 1 - y;                    // the render target's row 0 is the quad's top (v = 1)
-            for (let x = 0; x < size; x++) {
-                for (let c = 0; c < 4; c++) {
-                    const raw = L.image.data[base + (y * Sz + x) * 4 + c];
-                    let want = half ? half2num(raw) : raw / 255;
-                    if (srgbFam && c < 3) want = want <= 0.04045 ? want / 12.92 : ((want + 0.055) / 1.055) ** 2.4;
-                    const d = Math.abs(px[(row * size + x) * 4 + c] - want) / Math.max(1, Math.abs(want));
-                    if (d > mx) mx = d;
+        const want = (x, y, c) => {
+            const raw = L.image.data[base + (y * Sz + x) * 4 + c];
+            let v = half ? half2num(raw) : raw / 255;
+            if (srgbFam && c < 3) v = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            return v;
+        };
+        // the readback's rows are padded to WebGPU's 256-byte copy alignment: its row length from the length it has
+        const rowF = px[0].length / size;
+        const worst = (fl) => {
+            let mx = 0;
+            for (let y = 0; y < size; y++) {
+                const row = fl ? size - 1 - y : y;
+                for (let x = 0; x < size; x++) {
+                    for (let c = 0; c < 4; c++) {
+                        const got = c < 3 ? px[0][row * rowF + x * 4 + c] : px[1][row * rowF + x * 4];
+                        const w = want(x, y, c);
+                        const d = Math.abs(got - w) / Math.max(1, Math.abs(w));
+                        if (!(d <= mx)) mx = d;
+                    }
                 }
             }
-        }
+            return mx;
+        };
+        if (flip === null) flip = worst(true) <= worst(false);
+        const mx = worst(flip);
         renders.push({ family: fam, level: i, size, worst: mx });
         if (mx > worstR) { worstR = mx; whereR = `${fam} L${i}`; }
-        rt.dispose();
         geo.dispose();
-        mat.dispose();
     }
 }
 T.ok('TSL texture(tex, uv).depth(layer) in a headless WebGPURenderer reads every family\'s layers as their data (RGBA8 bytes, ' +
     'sRGB decoded, halves) at the texel centres, within 1e-3', worstR <= 1e-3, `worst ${S.sci(worstR, 2)}${whereR ? ' (' + whereR + ')' : ''}; ` +
-    `${renders.length} renders`);
+    `${renders.length} layers read; the render target's row 0 is the quad's ${flip ? 'top (v = 1)' : 'bottom (v = 0)'}`);
 renderer.dispose();
 for (const x of Object.values(tex)) x.dispose();
 G.shutdown();

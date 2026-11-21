@@ -7,8 +7,10 @@
 //   2. every texture tile's gutter holds the parent's maps at the gutter's own positions, encoded as the tile is: the
 //      D, E and M tiles' outer gutter ring (surface/layers.js) against the parent's encoded values there, within one
 //      8-bit step (RGBA8) or 1e-3 (16F).
-// The Blender edition's own result at d67f19e is recorded beside (its fix-round report): seven of the eight cases
-// pass, badlands_sd's src_strata at level 2 is 1.03 % of its range.
+// The Blender edition's own result at d67f19e (its fix-round report): seven of the eight cases pass, badlands_sd's
+// src_strata at level 2 is 1.03 % of its range. When the Blender edition's own seams run is there
+// (blender/tests/terrain/out/surface_data/seams_<case>.json), a third check per case holds every edge's pass or fail and
+// the case's worst seam to it.
 //
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/surface_data/seams_test.mjs
 //         [--case toroweap,canyon,...]
@@ -146,6 +148,24 @@ for (const name of cases) {
             : `worst ${worstRow?.map} L${worstRow?.level} ${(100 * (worstRow?.err ?? 0)).toFixed(3)} % of its range`);
     T.ok(`${name}: every D, E and M tile's gutter ring holds the parent's encoded maps (${grows.length})`, gbad.length === 0,
         gbad.slice(0, 4).map((r) => `${r.family} L${r.level} ${S.sci(r.worst, 2)}`).join('; '));
+    // beside the Blender edition's own seams of the same case (test_seams.py's out/surface_data/seams_<case>.json, made
+    // on its own bake run, whose maps the port's equal within the bake's grade: an edge's error can move by that grade,
+    // so what is held equal is each edge's pass or fail and the case's worst seam)
+    const bj = S.W.blenderEdition() ? `${S.W.blenderTests()}/out/surface_data/seams_${name}.json` : null;
+    if (bj && S.W.exists(bj)) {
+        const want = JSON.parse(Deno.readTextFileSync(bj)).seams;
+        const key = (r) => `${r.map} L${r.level}`;
+        const mine = new Map(rows.map((r) => [key(r), r]));
+        const both = want.filter((w) => mine.has(key(w)));
+        const okSame = both.filter((w) => mine.get(key(w)).ok !== w.ok).map(key);
+        const wb = both.reduce((w, r) => (r.err > (w?.err ?? -1) ? r : w), null);
+        const wp = both.map((w) => mine.get(key(w))).reduce((w, r) => (r.err > (w?.err ?? -1) ? r : w), null);
+        const sameWorst = wb && wp && key(wb) === key(wp) && Math.abs(wb.err - wp.err) <= 5e-4;
+        T.ok(`${name}: every map edge passes or fails as in Blender's own seams run (test_seams.py), and the worst seam is ` +
+            `Blender's within 0.05 % of its range (${both.length} edges both have)`, okSame.length === 0 && sameWorst,
+            `${okSame.slice(0, 3).map((k) => `${k} passes in one edition only`).join('; ')}${okSame.length ? '; ' : ''}worst ` +
+            `${wp ? `${key(wp)} ${(100 * wp.err).toFixed(3)} %` : '-'}, Blender's ${wb ? `${key(wb)} ${(100 * wb.err).toFixed(3)} %` : '-'}`);
+    }
     results[name] = { seams: rows, gutters: grows };
     t.dispose?.();
 }

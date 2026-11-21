@@ -115,7 +115,7 @@ for (const name of cases) {
     const sd = await SI.bakeSurface(t, { palette: null, options, cache: portDir, log: null });
     const seconds = (performance.now() - t0) / 1000;
     const rec = { case: name, blender_key: bi.key, port_key: sd.key, seconds: +seconds.toFixed(2), levels: [],
-        blender_seconds: bi.info.seconds, port_levels: sd.info.levels };
+        blender_seconds: bi.info.seconds, port_levels: (sd.info.levels ?? []).map((x, k) => ({ ...x, n: t.levels[k].n })) };
     // the octaves and the norms first: they set every level's relief and spi
     T.ok(`${name}: the gully octaves per level equal Blender's`, JSON.stringify(sd.info.relief_octaves) === JSON.stringify(bi.info.relief_octaves),
         `${JSON.stringify(sd.info.relief_octaves).slice(0, 120)}`);
