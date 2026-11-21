@@ -35,7 +35,8 @@
 //     yaw, the measured colour gain (BILLBOARD_GAIN, a tree's on its foliage only), the source's tone (TONE_DIAL) on
 //     bark and foliage alike, each plant's tint, the soft cut-out (alpha to coverage) that keeps a small plant's
 //     share of its pixel, and the terrain's and the crowns' shade under the sun (bindSun); it casts the sun's shadow
-//     and receives none. The card and full levels keep SeedThree's materials, copied per instance part: their dome
+//     and receives none. The card and full levels keep SeedThree's materials, copied per instance part (their maps and
+//     colours copied too, which three's node-material clone leaves behind): their dome
 //     about each plant's own canopy centre (SeedThree's hero material reads one centre for the one tree), the
 //     source's tone, and each plant's tint (1 + TINT_AMOUNT (tint - 0.5), the instance colour).
 //   - the card distance (card_distance): min(billboard_m, sqrt(NEAR_TREES / (pi x the stand's density round the
@@ -56,7 +57,11 @@
 //     it there exactly (the same threshold), then writes each bucket's matrices and the indirect draws' instance
 //     counts. A bucket's instances are written in an order the atomics pick (the image does not depend on it).
 //   - The card level's and billboard's bakes are SeedThree's three.js bakes (its branch cards and bakeGroupToTextures),
-//     not its Blender add-on's: the same generators' textures by another renderer.
+//     not its Blender add-on's: the same generators' textures by another renderer. So the billboards' colour gains
+//     and cut-outs (BILLBOARD_GAIN, which match_billboards.py measured on Blender's bakes: design 4.4, "billboards are
+//     matched to LOD2 before they are used", the bake's correction on the eidoverse side) are measured again on these
+//     bakes by the same match (tests/plants/billboards.mjs, its port) into BILLBOARD_GAIN_WEBGPU, which the
+//     billboards take before Blender's table.
 //   - wind=True (SeedThree's forest_group grove) is not ported: SeedThree's three.js API has no grove function (its
 //     app's grove lives in its main.js); a still shot is what the design's renders use.
 //   - The billboard cut-out: Blender's dithered blend takes a fraction of the 16 samples; here alpha to coverage over
@@ -103,6 +108,10 @@ export const BILLBOARD_GAIN = Object.freeze({
     'sweetgum|5|{"crownShape": 1, "height": 14}': { gain: [1.004, 0.873, 1.961], alpha: 0.35 },
     'sweetgum|17|{"crownShape": 1, "height": 14}': { gain: [1.026, 0.886, 2.0], alpha: 0.35 },
 });
+// the same match on this edition's bakes (SeedThree's three.js bakes, not its Blender add-on's: the header's
+// deviations), measured as match_billboards.py measures Blender's by tests/plants/billboards.mjs (its port), keyed
+// as BILLBOARD_GAIN; the billboards take it before BILLBOARD_GAIN (billboardGainFor)
+export const BILLBOARD_GAIN_WEBGPU = Object.freeze({});
 export const ALPHA_CUT = 0.35;           // SeedThree's billboard cut-out threshold
 export const ALPHA_SOFT_PX = Object.freeze([24.0, 4.0]);   // the cut-out hard at 24 pixels tall, the whole alpha at 4
 export const SHADE_ALBEDO = 0.3;         // a billboard in the terrain's shadow takes this share of its light
@@ -136,11 +145,26 @@ export function grownDials(dials) {
     return out;
 }
 
+/** An individual's key in the gain tables: `species|seed|dials as Python's sorted JSON` (the dials SeedThree grows). */
+export function gainKey(species, seed, dials) {
+    return `${species}|${Math.trunc(Number(seed))}|${E.pyJsonSorted(dials ?? {})}`;
+}
+
 /** BILLBOARD_GAIN's entry of an individual as { gain: [r, g, b], alpha }, or null. */
 export function billboardGain(species, seed, dials) {
-    const e = BILLBOARD_GAIN[`${species}|${Math.trunc(Number(seed))}|${E.pyJsonSorted(dials ?? {})}`];
+    const e = BILLBOARD_GAIN[gainKey(species, seed, dials)];
     if (!e) return null;
     return { gain: [...(e.gain ?? [1, 1, 1])], alpha: Number(e.alpha ?? ALPHA_CUT) };
+}
+
+/** The gain and cut-out an individual's billboard takes here: over's entry when it has one (null: none, the bake as
+ * it is; a measurement's override, as match_billboards.py edits BILLBOARD_GAIN), else this edition's measured one
+ * (BILLBOARD_GAIN_WEBGPU), else Blender's (BILLBOARD_GAIN). */
+export function billboardGainFor(species, seed, dials, over = null) {
+    const key = gainKey(species, seed, dials);
+    const e = over && Object.prototype.hasOwnProperty.call(over, key) ? over[key] : BILLBOARD_GAIN_WEBGPU[key] ?? BILLBOARD_GAIN[key];
+    if (!e) return null;
+    return { gain: [...(e.gain ?? [1, 1, 1])].map(Number), alpha: Number(e.alpha ?? ALPHA_CUT) };
 }
 
 /** The SeedThree checkout seedthree_api.js grows from: SEEDTHREE_DIR (a global or the environment), else a SeedThree
@@ -357,11 +381,28 @@ function sharedGeometry(src) {
 const tone3 = (tone) => (tone ?? [1, 1, 1]).map(Number);
 const isOne = (g) => g.every((v) => Math.abs(v - 1.0) < 1e-12);
 
+// what a node material's clone() leaves behind: three r184's NodeMaterial.copy copies the node slots and Material's own
+// settings, not the classic ones (maps, colour, roughness, metalness), so a clone of SeedThree's bark, leaf and card
+// materials (built with map, normalMap, roughnessMap: tree.js, leaf-cards.js, branch-cards.js) would draw untextured
+// white, as SeedThree's own forest twins note; they are copied over as SeedThree copies them
+const CLASSIC = ['map', 'normalMap', 'normalMapType', 'normalScale', 'roughnessMap', 'metalnessMap', 'alphaMap', 'aoMap',
+    'aoMapIntensity', 'emissiveMap', 'emissiveIntensity', 'bumpMap', 'bumpScale', 'color', 'emissive', 'roughness', 'metalness',
+    'flatShading', 'transmission', 'thickness', 'ior', 'specularIntensity', 'specularColor', 'sheen', 'sheenColor',
+    'sheenRoughness'];
+function keepClassic(m, src) {
+    for (const k of CLASSIC) {
+        const v = src[k];
+        if (v === undefined || !(k in m)) continue;
+        m[k] = v !== null && (v.isColor || v.isVector2) ? v.clone() : v;
+    }
+    return m;
+}
+
 /** A SeedThree part's material for the card and full levels of a still shot (plant_instances.py _tinted_material):
  * SeedThree's own, with the canopy dome about each instance's own centre (a foliage part), the source's tone on its
  * albedo and backlight, and each instance's tint through the instance colour. */
 function tintedMaterial(src, { foliage, centre, mats, cap, tone, card }) {
-    const m = src.clone();
+    const m = keepClassic(src.clone(), src);
     m.userData = { ...src.userData, eidoTintOf: src.name || src.uuid };
     // SeedThree's card materials write an ambient-occlusion mask to its app's MRT pass; outside an MRT pass three r184
     // builds them an empty fragment output, so the copies draw to the plain output
@@ -646,7 +687,7 @@ async function instanceSeedThreeStill(entry, rec, focus, group, lod, base, ctx, 
     const buckets = [], partBucket = [], meshes = [];
     const indParts = [];
     const tag = `${base}_${PL.filePart(entry.name)}`;
-    const gains = seeds.map((sd) => billboardGain(species, sd, grown));
+    const gains = seeds.map((sd) => billboardGainFor(species, sd, grown, ctx.gains));
     const useHero = heroM > 0 && heroK > 0;
     for (let v = 0; v < V; v++) {
         const p = plants[v];
@@ -845,7 +886,8 @@ async function instanceFlora(entry, rec, group, base, ctx) {
  *   terrain   the Terrain they were planned on (its name names the group), or null
  *   opts      renderer (required: the bakes and the LOD pass run on it), R (the terrain runner on its device; made if
  *             not given), camera and scene (the LOD pass then runs on every render of that camera), lod (overrides:
- *             { hero_m, billboard_m, near_m } for every species, or { species name: {...} }), log, sunDir
+ *             { hero_m, billboard_m, near_m } for every species, or { species name: {...} }), log, sunDir,
+ *             billboardGains ({ gainKey: { gain, alpha } or null }: a measurement's own, before the tables)
  *   returns   { group (a THREE.Group in the terrain's frame), made ({ species name: [objects] }), species (per SeedThree
  *             species its card distance, hero distance and count), update(camera), follow(scene, camera),
  *             bindSun(direction), dispose() } */
@@ -865,7 +907,7 @@ export async function instancePlants(spots, terrain = null, opts = {}) {
     const group = new THREE.Group();
     group.name = base;
     const samples = Number(renderer.currentSamples ?? renderer.samples ?? renderer._samples ?? 0) || 1;
-    const ctx = { renderer, R, log, samples, sunDir: opts.sunDir ?? null };
+    const ctx = { renderer, R, log, samples, sunDir: opts.sunDir ?? null, gains: opts.billboardGains ?? null };
     const focus = spots.meta.focus.map((p) => [Number(p[0]), Number(p[1])]);
     const trees = spots.species.filter((e) => e.kind === 'tree' && e.source.seedthree !== undefined && spots.array(e.name).length);
     const treeK = Math.max(1, Math.floor(HERO_MAX / Math.max(trees.length, 1)));

@@ -67,7 +67,7 @@ for (const rv of want) {
 if (!specs.length) Deno.exit(0);
 
 const spec = { specs, W, H, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0, sunElevationDeg: 37.7, sets, label,
-    record: `${out}/views_${label}.json`, standM: 1.5, eyeCameraM: 50.0, vistaStepM: 5.0, vistaHalfM: 2.0 };
+    record: `${out}/views_${label}.json`, standM: 1.5, eyeCameraM: 50.0, vistaStepM: 2.0, vistaGapM: 4.0, vistaWiden: 1.1 };
 
 const script = `// The plants package's views (eidoverse/terrain/tests/plants/views.mjs writes this file).
 globalThis.setup = async function () {
@@ -132,19 +132,33 @@ function cameraOf(t, v, V) {
         near, far, fovV, sun: sunDir, target: [tgt[0], tgt[2], -tgt[1]], dist, eyeView: kind === 'ground' && Number(dz) <= 10.0 };
 }
 
-// make_terrain's plants= for the views built together (review_views.py group_plants, shots.plant_spec) and its
-// exclusions (api.py _plan: the vista discs, the standing cameras' discs, the flats where nothing else is given)
+// shots.vista_discs (surfacing_judge/shots.py at 2cf8c84, the code of the final2 renders): the ground a view's vista_m
+// keeps open, points every VISTA_STEP_M out to vista_m across the frame's width (the lens's horizontal field, a tenth
+// wider, about the camera's own heading), at most VISTA_GAP_M apart, each a disc of radius 0 no plant's crown covers
+function vistaDiscs(v, eyeB, aimB, V) {
+    const lens = Number(v.lens);
+    const yaw = Math.atan2(aimB[1] - eyeB[1], aimB[0] - eyeB[0]) + Math.atan((Number(v.frame[0]) - 0.5) * 36.0 / lens);
+    const half = Math.atan(18.0 / lens) * V.vistaWiden;
+    const out = [];
+    for (let k = 1; k <= Math.floor(Number(v.vista_m) / V.vistaStepM + 1e-9); k++) {
+        const s = V.vistaStepM * k;
+        const n = Math.max(1, Math.ceil(2.0 * s * Math.tan(half) / V.vistaGapM));
+        for (let j = 0; j <= n; j++) {
+            const a = yaw - half + 2.0 * half * j / n;
+            out.push([eyeB[0] + s * Math.cos(a), eyeB[1] + s * Math.sin(a), 0.0, 'crown']);
+        }
+    }
+    return out;
+}
+
+// make_terrain's plants= for the views built together (review_views.py group_plants, shots.plant_spec at 2cf8c84)
+// and its exclusions (api.py _plan: the vista discs, the standing cameras' discs, the flats where nothing else is given)
 function plantSpec(t, cams, group, V) {
     const foci = [], excl = [];
     group.forEach((v, k) => {
         const c = cams[k];
         foci.push(c.eyeView ? [c.eyeB[0], c.eyeB[1]] : [c.aimB[0], c.aimB[1]]);
-        if (v.vista_m) {
-            const n = Math.hypot(c.aimB[0] - c.eyeB[0], c.aimB[1] - c.eyeB[1]);
-            for (let s = V.vistaStepM; s <= Number(v.vista_m) + 1e-9; s += V.vistaStepM) {
-                excl.push([c.eyeB[0] + s * (c.aimB[0] - c.eyeB[0]) / n, c.eyeB[1] + s * (c.aimB[1] - c.eyeB[1]) / n, V.vistaHalfM, 'crown']);
-            }
-        }
+        if (v.vista_m) excl.push(...vistaDiscs(v, c.eyeB, c.aimB, V));
     });
     const stand = [];
     for (const c of cams) if (c.eyeB[2] - c.ground <= V.eyeCameraM) stand.push([c.eyeB[0], c.eyeB[1], V.standM, 'crown']);

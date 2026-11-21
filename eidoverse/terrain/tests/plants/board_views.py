@@ -1,6 +1,7 @@
 """Boards of the plants' views (tests/plants/views.mjs): per view, in a row, the photograph, the Blender edition's
 render of the view with its plants (blender/tests/terrain/out/surfacing/review/<recipe>/<view>_<tag>.png, the review's
-final renders) and the port's (tests/out/plants/views/<recipe>_<view>_<label>.png); under them two places at 2x of
+final renders) and the port's (tests/out/plants/views/<recipe>_<view>_<label>.png; one rendered at k times the review's
+size, views.mjs --W --H, is averaged k x k first and kept as <...>_<label>_960.png); under them two places at 2x of
 both renders (the view's crops in surfacing_judge/views.json, else the near ground and the middle distance, where
 the cards hand over to the billboards and the billboards to the material's canopy), so the plants are judged beside
 the place and beside Blender's, item by item. System Python with Pillow (no Blender, no numpy needed).
@@ -67,12 +68,19 @@ def main():
         pi = Image.open(port)
         bi = Image.open(blender) if os.path.exists(blender) else None
         ph = Image.open(photo) if photo and os.path.exists(photo) else None
+        ss = ''
+        if bi is not None and pi.size != bi.size and pi.size[0] % bi.size[0] == 0 and pi.size[0] // bi.size[0] == pi.size[1] // bi.size[1]:
+            # a frame rendered at k x k the review's size (views.mjs --W, --H): its pixels averaged k x k, so the port's
+            # frame takes k^2 samples a pixel (Blender's review renders take 16)
+            k = pi.size[0] // bi.size[0]
+            pi = pi.convert('RGB').reduce(k)
+            ss = f' ({k}x{k} samples a pixel)'
         W, H = pi.size
         crops = (v or {}).get('crops') or [[W // 2 - 120, H - 135, W // 2 + 120, H], [W // 2 - 120, H // 2 - 68, W // 2 + 120, H // 2 + 67]]
         cs = (480, 270)
         board = Image.new('RGB', (3 * TILE[0], TILE[1] + 2 * cs[1] + 60), (24, 24, 24))
         d = ImageDraw.Draw(board)
-        for k, (im, cap) in enumerate([(ph, 'photograph'), (bi, f'Blender {tag}'), (pi, f'port {label}')]):
+        for k, (im, cap) in enumerate([(ph, 'photograph'), (bi, f'Blender {tag}'), (pi, f'port {label}{ss}')]):
             if im is not None:
                 board.paste(fit(im, TILE), (k * TILE[0], 20))
             d.text((k * TILE[0] + 6, 4), cap + ('' if im is not None else ' (missing)'), fill=(230, 230, 230))
@@ -92,6 +100,8 @@ def main():
         dst = os.path.join(OUT, 'boards', f'{recipe}_{name}_{label}.jpg')
         board.save(dst, quality=90)
         made.append(dst)
+        if ss:                                           # the averaged frame beside the others, for the eye and the measures
+            pi.save(os.path.join(OUT, f'{recipe}_{name}_{label}_960.png'))
     print('\n'.join(made))
     return 0
 

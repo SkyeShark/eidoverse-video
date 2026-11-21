@@ -1,45 +1,76 @@
-// Each SeedThree individual's billboard beside the level it takes over from, at the switch distance, under the sky
-// (SURFACING_DESIGN.md 4.4: "billboards are matched to LOD2 before they are used"; 5.4 package 4 item 2's boards;
-// the Blender edition measures the same with blender/tests/terrain/plants/match_billboards.py and keeps the gains in
-// plant_instances.py BILLBOARD_GAIN): per individual of the given ecotopes, two plants of it on flat grey ground, one
-// just inside its card distance (its card level, or its full level where hero_m reaches as far: the broadleaves) and
-// one just beyond (its billboard, build/plant_instances.js' material with the measured gain), side by side; their
-// mean colour (CIELAB, over the pixels each plant covers) and their silhouette areas compared. The gains were
-// measured on Blender's renders; here they are checked, not tuned (the design's ΔE 3 and 10 % are reported).
+// Port of blender/tests/terrain/plants/match_billboards.py at f9fba8c (SURFACING_DESIGN.md 4.4: "billboards are matched
+// to LOD2 before they are used"; 5.4 package 4 item 2; PORT_PLAN.md 8.2 row P15): each billboard beside the level it
+// takes over from. Every SeedThree individual an ecotope grows (every recipe's ecotope, as match_billboards'
+// individuals() collects them), alone on one spot, rendered as its full level (LOD0), its card level (LOD2) and its
+// billboard through build/plant_instances.js' still grove (the LOD pass' hero count and card distance set to show one
+// level) at the distance where a stand hands one over to the other (SWITCH_M), under make_sky with the sun 70 degrees
+// left of the view (the review's light, no shadows), from the eye height, with a lens that frames the plant, the film
+// transparent (the sky's own objects hidden, its light kept), at four turns of the plant. Measured within each
+// silhouette (the display image's alpha over 0.5): the area, the mean colour (CIELAB of the display image's mean linear
+// colour, surfacing_judge/measures.mean_lab) and the mean scene-linear colour (a float render: no tone mapping, no
+// exposure; straight, as Blender's EXR is read). The billboard is matched to the level that stands before it in a stand
+// (the card level, or the full level for a species whose lod billboard_m is no farther than its hero_m): its gain is
+// that level's mean scene-linear colour over the billboard's (rendered without one), per channel, and its cut-out the
+// threshold that keeps the share of its baked alpha that scales its silhouette to that level's; the billboard is
+// rendered again with them. The bar: the mean colour within 3 ΔE and the silhouette's area within 10 %.
+//
+// Where this differs from match_billboards.py, and why: the sky's sun stands where make_sky puts it and the view turns
+// about the plant to have it 70 degrees left (Blender turns the sun with make_sky's azimuth); the plant's turns are
+// taken from the view's heading, so each turn shows the plant as Blender's does. Also rendered: the billboard with
+// Blender's own gain (plant_instances.js BILLBOARD_GAIN, measured on Blender's bakes), to show what that table does to
+// this edition's bakes (SeedThree's three.js bakes, not its Blender add-on's). The measured gains are printed as
+// BILLBOARD_GAIN_WEBGPU entries, the table plant_instances.js takes before Blender's.
 //
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
-//         eidoverse/terrain/tests/plants/billboards.mjs [--recipes real_place:lauterbrunnen,canyon,...]
+//         eidoverse/terrain/tests/plants/billboards.mjs [--only douglasFir,redMaple]
 //
-// Writes tests/out/plants/billboards/<species>_<seed>.png (the pair) and billboards.json.
+// Writes tests/out/plants/billboards/<species>_<seed>_<key8>.png (per turn: the full level | the card level | the
+// billboard | the billboard matched, display images on grey), match.json (per individual: colours, areas, gain and
+// cut-out, ΔE and area before, with Blender's gain and after, and how much of its full level's area its card level
+// covers) and billboards.json (the checks).
 
 import * as S from './_plants.mjs';
 import * as E from '../../build/ecotopes.js';
+import * as P from '../../build/palettes.js';
+import { grownDials, gainKey } from '../../build/plant_instances.js';
 
 const A = S.argsOf();
-const T = new S.C.Checks('plants: billboards beside their levels at the switch distance');
-// the ecotopes the design's six views take (recipe[:place], as ecotopes.get('auto', recipe, place) resolves them)
-const want = A.list('--recipes', ['real_place:lauterbrunnen', 'canyon', 'caldera', 'fluvial_range', 'dunes']);
+const T = new S.C.Checks('plants: billboards matched to the level they take over from (match_billboards.py)');
+const only = A.list('--only', null);
 const out = `${S.W.out('plants')}/billboards`;
 const work = `${out}/_scenes`;
 Deno.mkdirSync(work, { recursive: true });
 const W = 960, H = 540;
-const cases = [];
-for (const rp of want) {
-    const [recipe, place] = rp.split(':');
-    const eco = E.get('auto', recipe, place ?? null, null);
-    const name = eco.name ?? recipe;
+
+// match_billboards.individuals: per individual (species, seed, the dials SeedThree grows) its kind, the largest
+// size_m[1] of its users, its users and the level that stands before its billboard
+const inds = new Map();
+for (const r of Object.keys(P.RECIPE_PALETTES).sort()) {
+    const eco = E.get('auto', r);
     for (const s of eco.species) {
         const [kind, id, opts, seeds] = s.source;
-        if (kind !== 'seedthree') continue;
-        if (cases.some((c) => c.id === id && JSON.stringify(c.dials) === JSON.stringify(opts) && c.seed === seeds[0])) continue;
-        cases.push({ ecotope: name, species: s.name, kind: s.kind, id, dials: opts, seed: seeds[0], size_m: s.size_m, lod: s.lod,
-            sink: s.sink, foot_m: s.foot_m, crown_m: s.crown_m, core_m: s.core_m });
+        if (kind !== 'seedthree' || (only && !only.includes(id))) continue;
+        const level = Number(s.lod.billboard_m) > Number(s.lod.hero_m) ? 'card' : 'full';
+        for (const sd of seeds) {
+            const dials = grownDials(opts);
+            const key = gainKey(id, sd, dials);
+            const o = inds.get(key) ?? { key, id, seed: Math.trunc(Number(sd)), dials, kind: s.kind, size: 0, users: [], level };
+            o.size = Math.max(o.size, Number(s.size_m[1]));
+            o.users.push(`${eco.name}/${s.name}`);
+            inds.set(key, o);
+        }
     }
 }
-const spec = { cases, W, H, result: `${work}/result.json`, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0 };
+const cases = [...inds.values()];
+for (const c of cases) {
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(c.key)));
+    c.tag = `${c.id}_${c.seed}_${[...h.slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+const spec = { cases, W, H, out, result: `${work}/match.json`, exposureEv: -0.5, hours: 15.5, sunLeftDeg: 70.0,
+    switchM: { tree: 60.0, shrub: 120.0 }, yaws: [0.0, 25.0, 50.0, 75.0], fill: 0.6, eye: 1.7, cutRange: [0.2, 0.9] };
 try { Deno.removeSync(spec.result); } catch (_e) { /* none yet */ }
 
-const script = `// The plants package's billboard check (eidoverse/terrain/tests/plants/billboards.mjs writes this file).
+const script = `// The plants package's billboard match (eidoverse/terrain/tests/plants/billboards.mjs writes this file).
 globalThis.setup = async function () {
     const V = ${JSON.stringify(spec)};
     const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, adapter: GPU_ADAPTER, device: GPU_DEVICE, reversedDepthBuffer: true });
@@ -51,7 +82,7 @@ globalThis.setup = async function () {
     globalThis._r = renderer;
     globalThis._noAutoEnhance = true;
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(20, WIDTH / HEIGHT, 1, 20000);
+    const camera = new THREE.PerspectiveCamera(20, WIDTH / HEIGHT, 0.5, 20000);
     globalThis._s = scene;
     globalThis._c = camera;
     const sun = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -61,109 +92,255 @@ globalThis.setup = async function () {
     const sky = await makeSky({ scene, camera, renderer, world: 'earth', hours: V.hours, clouds: 'cumulus', weather: null, sun, audio: false });
     sky.update(0);
     await sky.bakeEnv();
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardNodeMaterial({ color: 0x5a5a5a, roughness: 1 }));
-    ground.rotation.x = -Math.PI / 2;
-    scene.add(ground);
     const G = await import(EIDOVERSE_DIR + 'terrain/core/gpu.js');
     globalThis._b = { V, sky, sun, R: await G.init({ renderer }), PL: await import(EIDOVERSE_DIR + 'terrain/build/plants.js'),
-        PI: await import(EIDOVERSE_DIR + 'terrain/build/plant_instances.js'), results: [], cur: null };
+        PI: await import(EIDOVERSE_DIR + 'terrain/build/plant_instances.js'), Io: await import(EIDOVERSE_DIR + 'terrain/core/io.js'),
+        skyObjs: scene.children.filter((o) => o !== sun && o !== sun.target), results: [], shown: null, k: -1,
+        rtD: new THREE.RenderTarget(WIDTH, HEIGHT),
+        rtL: new THREE.RenderTarget(WIDTH, HEIGHT, { type: THREE.HalfFloatType, samples: 4 }) };
 };
 
-// two spots of one individual, d1 and d2 metres off the camera along the azimuth a (radians from east, counter-
-// clockwise: Blender's frame, as the spots are), gap apart across the view, the nearer on the left
-function pairSpots(PL, c, d1, d2, gap, a = Math.PI / 2) {
-    const rec = new Float32Array(24);
-    const ux = Math.cos(a), uy = Math.sin(a), rx = Math.sin(a), ry = -Math.cos(a);
-    const put = (k, off, d) => rec.set([d * ux + off * rx, d * uy + off * ry, 0, 0.3, 1.0, 1.0, 0.5, 0, 0, 1, 0, 0], 12 * k);
-    put(0, -gap / 2, d1);
-    put(1, gap / 2, d2);
-    const entry = { name: c.species, kind: c.kind, source: { seedthree: c.id, dials: c.dials, seeds: [c.seed] }, size_m: c.size_m,
-        core_m: c.core_m, crown_m: c.crown_m, foot_m: c.foot_m, sink: c.sink, lod: c.lod, count: 2, fields: [...PL.FIELDS] };
-    return new PL.PlantSpots({ format: PL.FORMAT, focus: [[0, 0]], seed: 0, ecotope: 'test', terrain: null, species: [entry] },
-        [entry], { [c.species]: rec });
+// one spot of an individual at the origin (match_billboards.plant: its yaw, scale 1, a neutral tone, upright)
+function oneSpot(PL, c) {
+    const rec = new Float32Array(12);
+    rec[4] = 1.0;
+    rec[6] = 0.5;
+    rec[9] = 1.0;
+    const entry = { name: c.id + ' ' + c.seed, kind: c.kind, source: { seedthree: c.id, dials: c.dials, seeds: [c.seed] },
+        size_m: [0.5 * c.size, c.size], sink: 0.0, foot_m: 0.0, core_m: 0.0, crown_m: 0.0,
+        lod: { hero_m: 1.0e9, billboard_m: 1.0e9, near_m: 0.0 }, count: 1, fields: [...PL.FIELDS] };
+    return new PL.PlantSpots({ format: PL.FORMAT, focus: [[0, 0]], seed: 0, ecotope: 'match', terrain: null, species: [entry] },
+        [entry], { [entry.name]: rec });
+}
+
+// match_billboards.show: one level through the LOD pass' hero count and card distance
+function show(st, lv) {
+    const p = st.pass;
+    if (lv === 'full') { p.uHeroM.value = 1.0e9; p.uHeroK.value = Math.max(1, st.hero_k); p.uCardM.value = 1.0e9; }
+    else if (lv === 'card') { p.uHeroK.value = 0; p.uCardM.value = 1.0e9; }
+    else { p.uHeroK.value = 0; p.uCardM.value = 0.0; }
+}
+
+// one frame, twice: the display image (the output pass into an 8-bit target: AgX at the exposure, sRGB) and the
+// scene-linear one (a half-float target: no tone mapping)
+async function shoot(B, plants) {
+    const r = globalThis._r, scene = globalThis._s, camera = globalThis._c;
+    plants.update(camera);
+    r.setOutputRenderTarget(B.rtD);
+    r.setRenderTarget(null);
+    await r.renderAsync(scene, camera);
+    const d = await r.readRenderTargetPixelsAsync(B.rtD, 0, 0, WIDTH, HEIGHT);
+    r.setOutputRenderTarget(null);
+    r.setRenderTarget(B.rtL);
+    await r.renderAsync(scene, camera);
+    const l = await r.readRenderTargetPixelsAsync(B.rtL, 0, 0, WIDTH, HEIGHT);
+    r.setRenderTarget(null);
+    return { d: new Uint8Array(d.buffer, d.byteOffset, WIDTH * HEIGHT * 4).slice(), l };
+}
+
+const toLin = (x) => (x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4));
+// measures.srgb_to_lab of linear_to_srgb(m): CIELAB of a linear colour (D65)
+function labOf(m) {
+    const [R1, G1, B1] = m;
+    const X = (0.4124 * R1 + 0.3576 * G1 + 0.1805 * B1) / 0.95047, Y = 0.2126 * R1 + 0.7152 * G1 + 0.0722 * B1;
+    const Z = (0.0193 * R1 + 0.1192 * G1 + 0.9505 * B1) / 1.08883;
+    const f = (t) => (t > (6 / 29) ** 3 ? Math.cbrt(Math.max(t, 0)) : t / (3 * (6 / 29) ** 2) + 4 / 29);
+    return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+}
+const dE = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+// match_billboards.stats: the silhouette (display alpha over 0.5), its area, mean Lab and mean scene-linear colour
+function stats(shot) {
+    const { d, l } = shot;
+    const half = THREE.DataUtils.fromHalfFloat;
+    let n = 0;
+    const dl = [0, 0, 0], ln = [0, 0, 0];
+    for (let i = 0, N = WIDTH * HEIGHT; i < N; i++) {
+        const a = d[4 * i + 3] / 255;
+        if (a <= 0.5) continue;
+        n++;
+        for (let c = 0; c < 3; c++) dl[c] += toLin(Math.min(1, d[4 * i + c] / 255 / a));
+        const la = half(l[4 * i + 3]);
+        for (let c = 0; c < 3; c++) ln[c] += la > 1e-6 ? half(l[4 * i + c]) / la : 0.0;
+    }
+    if (!n) return { area: 0, lab: [0, 0, 0], linear: [0, 0, 0] };
+    return { area: n, lab: labOf(dl.map((v) => v / n)).map((v) => +v.toFixed(2)), linear: ln.map((v) => v / n) };
+}
+
+// the baked alpha of an individual's two billboard cards as a histogram of its 8-bit values
+function alphaHist(p) {
+    const h = new Float64Array(256);
+    let any = false;
+    for (const side of ['front', 'side']) {
+        const tex = p?.billboard?.textures?.[side]?.albedo;
+        let data = tex?.image?.data ?? null;
+        if (!data && tex?.image?.getContext) {
+            const im = tex.image;
+            data = im.getContext('2d').getImageData(0, 0, im.width, im.height).data;
+        }
+        if (!data) continue;
+        any = true;
+        for (let i = 3; i < data.length; i += 4) h[data[i]]++;
+    }
+    return any ? h : null;
+}
+
+// match_billboards.matching_cut: the cut-out keeping 1 / ratio of the texels the default keeps, within CUT_RANGE
+function matchingCut(hist, ratio, cut, range) {
+    if (!hist || Math.abs(ratio - 1.0) <= 0.10) return cut;
+    let tot = 0;
+    for (const c of hist) tot += c;
+    const frac = (t) => { let k = 0; for (let v = 0; v < 256; v++) if (v / 255 > t) k += hist[v]; return k / tot; };
+    const want = frac(cut) / ratio;
+    let lo = ratio > 1.0 ? cut : range[0], hi = ratio > 1.0 ? range[1] : cut;
+    for (let it = 0; it < 40; it++) {
+        const mid = 0.5 * (lo + hi);
+        if (frac(mid) > want) lo = mid;
+        else hi = mid;
+    }
+    return Math.round(500 * (lo + hi)) / 1000;
+}
+
+// a display image straight over grey, half size (match_billboards.board's tiles)
+function tile(d) {
+    const w = WIDTH / 2, h = HEIGHT / 2, t = new Uint8Array(w * h * 3);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const acc = [0, 0, 0];
+            for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+                const i = 4 * ((2 * y + dy) * WIDTH + 2 * x + dx);
+                const a = d[i + 3] / 255;
+                for (let c = 0; c < 3; c++) acc[c] += (a > 0 ? Math.min(255, d[i + c] / a) : 0) * a + 128 * (1 - a);
+            }
+            for (let c = 0; c < 3; c++) t[3 * (y * w + x) + c] = Math.round(acc[c] / 4);
+        }
+    }
+    return t;
+}
+
+async function board(B, path, rows) {
+    const w = WIDTH / 2, h = HEIGHT / 2, cols = Math.max(...rows.map((r) => r.length));
+    const BW = w * cols, BH = h * rows.length;
+    const px = new Uint32Array(BW * BH * 4).fill(40);
+    rows.forEach((row, j) => row.forEach((d, i) => {
+        const t = tile(d);
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const o = 4 * ((j * h + y) * BW + i * w + x);
+                for (let c = 0; c < 3; c++) px[o + c] = t[3 * (y * w + x) + c];
+                px[o + 3] = 255;
+            }
+        }
+    }));
+    const f = B.R.field(BH, BW * 4, 1, px, 'u32');
+    await B.Io.writePng(path, { field: f, width: BW, height: BH, channels: 4, bitDepth: 8 });
+    f.destroy();
+}
+
+async function matchOne(B, c) {
+    const V = B.V, PI = B.PI, r = globalThis._r, camera = globalThis._c, scene = globalThis._s;
+    const t0 = performance.now();
+    const dist = V.switchM[c.kind] ?? V.switchM.tree;
+    // the view: the sky's sun 70 degrees left of it, the plant at the origin, the camera at the eye height
+    const s0 = B.sky.sunDir;
+    const az = Math.atan2(-s0.z, s0.x) - V.sunLeftDeg * Math.PI / 180;
+    camera.position.set(-dist * Math.cos(az), V.eye, dist * Math.sin(az));
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0.5 * c.size, 0);
+    camera.fov = 2 * Math.atan(0.5 * c.size / V.fill / dist) * 180 / Math.PI;
+    camera.near = 0.5;
+    camera.far = 4.0 * dist + 100.0;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    B.sky.update(0);
+    const s = B.sky.sunDir;
+    B.sun.target.position.set(0, 0.5 * c.size, 0);
+    B.sun.position.set(s.x * 1000, 0.5 * c.size + s.y * 1000, s.z * 1000);
+    B.sun.target.updateMatrixWorld(true);
+    B.sun.updateMatrixWorld(true);
+    B.sun.castShadow = false;
+    // the film transparent: the sky's objects and background hidden, its light (the sun, the baked environment) kept
+    const bg = scene.background;
+    scene.background = null;
+    for (const o of B.skyObjs) o.visible = false;
+    r.setClearColor(0x000000, 0);
+    const variant = async (gainEntry, levels, keep = false) => {
+        const plants = await PI.instancePlants(oneSpot(B.PL, c), null, { renderer: r, R: B.R, log: null,
+            billboardGains: { [c.key]: gainEntry } });
+        scene.add(plants.group);
+        await plants.bindSun([s.x, s.y, s.z]);
+        const st = plants._still[0];
+        const got = [];
+        for (const yaw of V.yaws) {
+            st.rec[3] = yaw * Math.PI / 180 + az;            // the plant turned as Blender's, against the view
+            st.recAttr.needsUpdate = true;
+            const g = {};
+            for (const lv of levels) {
+                show(st, lv);
+                g[lv] = await shoot(B, plants);
+            }
+            got.push(g);
+        }
+        if (keep) return { got, plants, st };
+        plants.dispose();
+        return { got };
+    };
+    const base = await variant(null, ['full', 'card', 'billboard']);
+    const per = base.got.map((g, k) => ({ yaw: V.yaws[k], full: stats(g.full), card: stats(g.card), billboard: stats(g.billboard) }));
+    const lv = c.level;
+    const mean = (f) => [0, 1, 2].map((ch) => per.reduce((a, p) => a + f(p)[ch], 0) / per.length);
+    const refLin = mean((p) => p[lv].linear), bbLin = mean((p) => p.billboard.linear);
+    const gain = refLin.map((v, ch) => +Math.min(2.0, Math.max(0.2, v / Math.max(bbLin[ch], 1e-6))).toFixed(3));
+    const ratio0 = per.reduce((a, p) => a + p.billboard.area / Math.max(p[lv].area, 1), 0) / per.length;
+    const grown = await PI.growSeedThree(c.id, c.seed, c.dials, { renderer: r });
+    const cut = matchingCut(alphaHist(grown), ratio0, PI.ALPHA_CUT, V.cutRange);
+    const bl = PI.billboardGain(c.id, c.seed, c.dials);
+    const withBl = await variant(bl ?? null, ['billboard']);
+    const after = await variant({ gain, alpha: cut }, ['billboard'], true);
+    per.forEach((p, k) => {
+        p.blender = stats(withBl.got[k].billboard);
+        p.gained = stats(after.got[k].billboard);
+        p.de_before = +dE(p[lv].lab, p.billboard.lab).toFixed(2);
+        p.de_blender = +dE(p[lv].lab, p.blender.lab).toFixed(2);
+        p.de_after = +dE(p[lv].lab, p.gained.lab).toFixed(2);
+        p.area_ratio = +(p.billboard.area / Math.max(p[lv].area, 1)).toFixed(3);
+        p.area_ratio_blender = +(p.blender.area / Math.max(p[lv].area, 1)).toFixed(3);
+        p.area_ratio_after = +(p.gained.area / Math.max(p[lv].area, 1)).toFixed(3);
+        p.card_over_full = +(p.card.area / Math.max(p.full.area, 1)).toFixed(3);
+        for (const q of [p.full, p.card, p.billboard, p.blender, p.gained]) q.linear = q.linear.map((v) => +v.toFixed(5));
+    });
+    await board(B, V.out + '/' + c.tag + '.png', base.got.map((g, k) => [g.full.d, g.card.d, g.billboard.d, after.got[k].billboard.d]));
+    const avg = (f) => +(per.reduce((a, p) => a + f(p), 0) / per.length).toFixed(3);
+    const rec = { tag: c.tag, key: c.key, species: c.id, seed: c.seed, dials: c.dials, kind: c.kind, size_m: c.size, users: c.users,
+        switch_m: dist, matched_to: lv, gain, alpha: cut, blender: bl, turns: per, card_over_full: avg((p) => p.card_over_full),
+        de_before: avg((p) => p.de_before), de_blender: avg((p) => p.de_blender), de_after: avg((p) => p.de_after),
+        area_ratio: avg((p) => p.area_ratio), area_ratio_blender: avg((p) => p.area_ratio_blender),
+        area_ratio_after: avg((p) => p.area_ratio_after), seconds: +((performance.now() - t0) / 1000).toFixed(1) };
+    rec.passed = rec.de_after <= 3.0 && Math.abs(rec.area_ratio_after - 1.0) <= 0.10;
+    console.log('[match] ' + c.tag + ' (' + [...new Set(c.users)].sort().join(', ') + '): against its ' + lv + ' level: gain ' +
+        JSON.stringify(gain) + ', alpha ' + cut + ', ΔE ' + rec.de_before + ' -> ' + rec.de_after + ' (Blender\\'s gain: ' + rec.de_blender +
+        '), area ratio ' + rec.area_ratio + ' -> ' + rec.area_ratio_after + '; its card level covers ' + rec.card_over_full +
+        ' of its full level (' + rec.seconds + ' s)');
+    // the canvas frame: the matched billboard under the sky
+    scene.background = bg;
+    for (const o of B.skyObjs) o.visible = true;
+    show(after.st, 'billboard');
+    B.shown = after.plants;
+    return rec;
 }
 
 globalThis.renderFrame = async function (tt) {
     const B = globalThis._b;
     const k = Math.max(0, Math.min(B.V.cases.length - 1, Math.round(tt)));
-    const r = globalThis._r, camera = globalThis._c, scene = globalThis._s;
-    if (!B.cur || B.cur.k !== k) {
-        if (B.cur) { B.cur.plants.dispose(); }
-        const c = B.V.cases[k];
-        // the card distance this species takes (no stand round the camera: its billboard_m, or a shrub's 4 pixels)
-        const probe = pairSpots(B.PL, c, 50, 60, 10);
-        const p0 = await B.PI.instancePlants(probe, null, { renderer: r, R: B.R, log: null });
-        const cardM = p0.species[c.species].card_m;
-        p0.dispose();
-        // the view's azimuth: the sky's sun 70 degrees left of it (match_billboards.py: the review's light)
-        const s0 = B.sky.sunDir;
-        const az = Math.atan2(-s0.z, s0.x) - B.V.sunLeftDeg * Math.PI / 180;
-        const spots = pairSpots(B.PL, c, cardM * 0.985, cardM * 1.015, 1.2 * c.size_m[1], az);
-        const plants = await B.PI.instancePlants(spots, null, { renderer: r, R: B.R, log: (m) => console.log(m) });
-        scene.add(plants.group);
-        B.cur = { k, c, plants, cardM, az, done: false };
-    }
-    const { c, plants, cardM, az } = B.cur;
-    // three.js (x, z) of Blender's (x, -y): the pair's middle cardM along the azimuth
-    const mx = Math.cos(az) * cardM, mz = -Math.sin(az) * cardM;
-    camera.position.set(0, 1.7, 0);
-    camera.lookAt(mx, 0.5 * c.size_m[1], mz);
-    camera.fov = 2.6 * Math.atan(c.size_m[1] / cardM) * 180 / Math.PI;
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld(true);
-    // the sky first (its update sets the light's colour and strength and moves the light to 120 x the sun's
-    // direction from the origin), then the light along the sun's direction from the pair
-    B.sky.update(0);
-    const s = B.sky.sunDir;
-    B.sun.target.position.set(mx, 0, mz);
-    B.sun.position.set(mx + s.x * 1000, s.y * 1000, mz + s.z * 1000);
-    B.sun.updateMatrixWorld(true);
-    B.sun.target.updateMatrixWorld(true);
-    await plants.bindSun(s);
-    plants.update(camera);
-    if (!B.cur.done) {
-        B.cur.done = true;
-        const rt = new THREE.RenderTarget(WIDTH, HEIGHT, { samples: 4 });
-        const px = [];
-        for (const on of [true, false]) {
-            plants.group.visible = on;
-            r.setRenderTarget(rt);
-            await r.renderAsync(scene, camera);
-            px.push(await r.readRenderTargetPixelsAsync(rt, 0, 0, WIDTH, HEIGHT));
-        }
-        r.setRenderTarget(null);
-        plants.group.visible = true;
-        rt.dispose();
-        // per half of the frame: the pixels the plant changes, their mean colour (sRGB -> linear -> CIELAB), and count
-        const lin = (v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
-        const lab = (rgb) => {
-            const [R1, G1, B1] = rgb;
-            let X = 0.4124 * R1 + 0.3576 * G1 + 0.1805 * B1, Y = 0.2126 * R1 + 0.7152 * G1 + 0.0722 * B1, Z = 0.0193 * R1 + 0.1192 * G1 + 0.9505 * B1;
-            X /= 0.95047; Z /= 1.08883;
-            const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
-            return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
-        };
-        const half = [];
-        for (const side of [0, 1]) {
-            let n = 0; const acc = [0, 0, 0];
-            for (let y = 0; y < HEIGHT; y++) {
-                for (let x = side ? WIDTH / 2 : 0; x < (side ? WIDTH : WIDTH / 2); x++) {
-                    const i = 4 * (y * WIDTH + x);
-                    const d = Math.abs(px[0][i] - px[1][i]) + Math.abs(px[0][i + 1] - px[1][i + 1]) + Math.abs(px[0][i + 2] - px[1][i + 2]);
-                    if (d <= 12) continue;
-                    n++;
-                    for (let ch = 0; ch < 3; ch++) acc[ch] += lin(px[0][i + ch]);
-                }
-            }
-            half.push({ n, lab: n ? lab(acc.map((v) => v / n)) : null });
-        }
-        const [a, b] = half;
-        const dE = a.lab && b.lab ? Math.hypot(a.lab[0] - b.lab[0], a.lab[1] - b.lab[1], a.lab[2] - b.lab[2]) : null;
-        B.results.push({ ...c, card_m: cardM, level: { area: a.n, lab: a.lab }, billboard: { area: b.n, lab: b.lab }, dE,
-            area_ratio: a.n ? b.n / a.n : null });
+    if (B.k !== k) {
+        B.k = k;
+        if (B.shown) { B.shown.dispose(); B.shown = null; }
+        B.results.push(await matchOne(B, B.V.cases[k]));
         Deno.writeTextFileSync(B.V.result, JSON.stringify(B.results, null, 1));
     }
-    await r.renderAsync(scene, camera);
+    const r = globalThis._r;
+    B.shown?.update(globalThis._c);
+    await r.renderAsync(globalThis._s, globalThis._c);
 };
 `;
 const scriptPath = `${work}/billboards.js`, config = `${work}/billboards.json`, video = `${work}/billboards.mp4`;
@@ -180,14 +357,16 @@ const log = `${work}/billboards.log`;
 const code = await S.W.run(argv, { cwd: S.W.REPO, log, env: { ...Deno.env.toObject(), RENDER_CODEC: 'libx264', RENDER_CQ: '0' } });
 T.ok('the render job ran', code === 0, `exit ${code}; ${log}`);
 const res = S.W.exists(spec.result) ? JSON.parse(Deno.readTextFileSync(spec.result)) : [];
-for (const [k, r] of res.entries()) {
-    const tag = `${r.id} ${r.seed} ${JSON.stringify(r.dials)}`;
-    T.ok(`${r.ecotope} / ${r.species} (${tag}): its billboard's mean colour beside its level at ${r.card_m.toFixed(0)} m (the design's ΔE 3)`,
-        r.dE !== null && r.dE <= 3.0, `ΔE ${r.dE === null ? 'n/a' : r.dE.toFixed(2)}; level L*a*b* ${JSON.stringify(r.level.lab?.map((v) => +v.toFixed(1)))}, ` +
-        `billboard ${JSON.stringify(r.billboard.lab?.map((v) => +v.toFixed(1)))}`);
-    T.ok(`${r.ecotope} / ${r.species} (${tag}): its silhouette's area within 10 % of its level's`, r.area_ratio !== null &&
-        Math.abs(r.area_ratio - 1) <= 0.1, `${r.billboard.area} / ${r.level.area} pixels (${r.area_ratio === null ? 'n/a' : r.area_ratio.toFixed(3)})`);
-    const shot = `${work}/billboards_at${k.toFixed(2)}s.png`;
-    if (S.W.exists(shot)) Deno.copyFileSync(shot, `${out}/${r.id}_${r.seed}.png`);
+Deno.writeTextFileSync(`${out}/match.json`, JSON.stringify(res, null, 1));
+T.ok('every individual measured', res.length === cases.length, `${res.length} of ${cases.length}`);
+for (const r of res) {
+    const tag = `${r.species} ${r.seed} ${JSON.stringify(r.dials)} (${[...new Set(r.users)].join(', ')})`;
+    T.ok(`${tag}: its billboard matched to its ${r.matched_to} level within 3 ΔE`, r.de_after <= 3.0,
+        `ΔE ${r.de_before} without a gain, ${r.de_blender} with Blender's ${JSON.stringify(r.blender?.gain ?? null)}, ` +
+        `${r.de_after} with the measured ${JSON.stringify(r.gain)}`);
+    T.ok(`${tag}: its silhouette's area within 10 % of its ${r.matched_to} level's`, Math.abs(r.area_ratio_after - 1.0) <= 0.10,
+        `area ratio ${r.area_ratio} at cut ${0.35}, ${r.area_ratio_after} at the measured cut ${r.alpha}`);
 }
-Deno.exit(S.finish(T, 'billboards', { results: res }));
+console.log('\n// BILLBOARD_GAIN_WEBGPU entries (plant_instances.js):');
+for (const r of res) console.log(`    '${r.key}': { gain: [${r.gain.join(', ')}], alpha: ${r.alpha} },   // ΔE ${r.de_before} -> ${r.de_after}, area ${r.area_ratio_after}`);
+Deno.exit(S.finish(T, 'billboards', { results: res.map((r) => ({ ...r, turns: undefined })) }));
