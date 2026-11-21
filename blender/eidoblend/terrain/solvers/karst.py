@@ -42,7 +42,8 @@ Each tower here is the intersection of two surfaces:
 The kinds of tower: a spire (one cone at 70-80 degrees, its footprint 70-92 % of the cone's foot: a short cliff
 under a needle; on the plain only); a peak (one cone, or two or three strung along a ridge at the tower's own angle;
 on the plain at 58-70 degrees, its footprint 55-85 % of the cone's foot, a cliff 15-45 % of its height; at a
-cluster's edge the same, its first collapse scarp turned to the plain; deep inside a cluster the fengcong cone, its
+cluster's edge or lining the river the same, its first collapse scarp turned to the plain or the river (the river's
+floodplain undercuts the towers along it as the open plain does); deep inside a cluster the fengcong cone, its
 footprint the whole cone, so no wall); a block (a cliffed cap carrying two to four peaks: 8 % of the plain's towers,
 and most of the plain's towers taller than 1.4-2.4 times the median: the massive towers of the river's bends; a
 cluster's tallest are ridges of cones). One or two collapse scarps pull a sector of a tower's footprint in
@@ -61,12 +62,13 @@ every tower rises from the base under each of its cells. Deep inside a cluster a
 (its foot cluster_reach of the median distance to its three nearest neighbours, 26-36 degrees on average) and
 concave (cluster_convexity: 35-55 degrees at the top easing to 15-25 at the foot), so neighbours' flanks meet at cols
 about half their height up; a cluster's edge towers keep the steep cliffed peaks of the plain, so the massif meets
-the plain with sheer faces. Each cluster tower also stands on a massif BODY: the same wall table at a wider
-footprint (body_reach), its brow body x the tower's height up, a rough skirt rising inward from it at body_deg (to
-at most body_top of the height); neighbours' bodies join into ridges with cols, leave cockpits where three or more
-meet, and two that would stand a slot apart (body_gap_m) are drawn on until they meet. So a cluster is a massif with
-its peaks on it, walled where it meets the plain (Guilin's clusters at 30 m: 44 % of the tile 50 m and more over
-the plain).
+the plain with sheer faces, and so do the first row or two of towers lining the river's corridor (how far inside a
+tower stands is the nearer of the cluster's edge and the corridor's: _river_inside). Each cluster tower also stands
+on a massif BODY: the same wall table at a wider footprint (body_reach), its brow body x the tower's height up, a
+rough skirt rising inward from it at body_deg (to at most body_top of the height); neighbours' bodies join into
+ridges with cols, leave cockpits where three or more meet, and two that would stand a slot apart (body_gap_m) are
+drawn on until they meet. So a cluster is a massif with its peaks on it, walled where it meets the plain (Guilin's
+clusters at 30 m: 44 % of the tile 50 m and more over the plain).
 Composition: every tower by max over the plain, a talus cone at the foot under some of its azimuths (apron); the
 plain is flat alluvium that rises gently away from a river winding through it (a least-cost course around the
 clusters, with meanders). The river is a broad water surface at plain level: a flat water level river_bank_m under
@@ -517,7 +519,7 @@ class KarstPlan:
     lean: np.ndarray = None
     lean_dir: np.ndarray = None
     cluster: np.ndarray = None        # cluster membership at the centre, 0..1
-    interior: np.ndarray = None       # how deep inside its cluster, 0..1
+    interior: np.ndarray = None       # how deep inside its cluster, away from the plain and the river's corridor, 0..1
     spur: np.ndarray = None           # (N, 4) complex: amplitude and phase of footprint harmonics 2, 3, 4, 5
     npk: np.ndarray = None            # the number of summit peaks
     pk_dx: np.ndarray = None          # (N, K) the peaks' offsets from the centre, metres
@@ -613,11 +615,40 @@ def _interior_of(plan, raw):
     return _smoothstep(t0, t0 + 0.9 * plan.cluster_std, raw)
 
 
+def _river_inside(plan, x, y):
+    """How far inside the towers a point stands from the river's floodplain, on the interior's scale: 0 up to half
+    a tower spacing past the corridor's edge (the base's: the channel's widest plus 80 m from its centreline), 1 from
+    three spacings past it. The floodplain's water table undercuts the towers that line the river as the open plain
+    undercuts a cluster's edge (the Li River runs between sheer-footed towers), so its first row or two of towers
+    keep the plain's cliffed peaks and the broad cones stand behind them. (With the cluster field's interior alone,
+    the corridor the plan keeps clear of towers was lined with a cluster's inner cones: from the river and its plain,
+    broad 26-36 degree cones filled every view, and beside them a band of plain 300-700 m wide stood empty, where a
+    broad cone's foot would have reached the river.)"""
+    pr = plan.params
+    X, Y = np.broadcast_arrays(np.asarray(x, np.float64), np.asarray(y, np.float64))
+    d0 = pr['river_width_m'] * (1.0 + pr['river_width_var']) + 80.0
+    s = pr['spacing_m']
+    d = _river_distance(plan.river_coarse, X, Y, d0 + 3.0 * s + 1.0).reshape(X.shape)
+    return _smoothstep(d0 + 0.5 * s, d0 + 3.0 * s, d)
+
+
+def _toward_river(plan, x, y, e=25.0):
+    """The direction (radians from +x) from points near the river toward its nearest stretch: down the distance's
+    gradient, by central differences over e metres (points within the corridor's edge plus 3.5 tower spacings)."""
+    pr = plan.params
+    cap = pr['river_width_m'] * (1.0 + pr['river_width_var']) + 80.0 + 3.5 * pr['spacing_m']
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    gx = _river_distance(plan.river_coarse, x + e, y, cap) - _river_distance(plan.river_coarse, x - e, y, cap)
+    gy = _river_distance(plan.river_coarse, x, y + e, cap) - _river_distance(plan.river_coarse, x, y - e, cap)
+    return np.arctan2(-gy, -gx)
+
+
 def cone_weight(cluster, interior):
     """0..1: how far a tower is a cluster's broad cone rather than a tower the plain undercuts, from its cluster
-    membership and its depth inside the cluster: 0 on the plain and in a cluster's first two rows of towers (within
-    about 150-250 m of the plain, whose water table undercuts their feet), 1 further in. (Over the first row only,
-    the cones behind it filled every view from the river)"""
+    membership and how deep inside it stands (KarstPlan.interior: away from the open plain and from the river's
+    corridor): 0 on the plain and in the first two rows of towers facing it (within about 150-250 m of the plain,
+    whose water table undercuts their feet), 1 further in. (Over the first row only, the cones behind it filled
+    every view from the river)"""
     return _smoothstep(0.3, 0.7, cluster) * _smoothstep(0.15, 0.75, interior)
 
 
@@ -831,15 +862,20 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     ang_cl = np.degrees(np.arctan(H / np.maximum(_uni(rng, pr['cluster_reach'], N) * nn3, 1.0)))
     ang_cl = np.clip(ang_cl, *pr['cluster_peak_deg'])
     # (by how deep inside: a cluster's edge towers keep the steep peaks of the plain, so the massif meets the plain
-    # with sheer faces and its broad cones stand behind them)
-    deep = cone_weight(m, interior)
+    # with sheer faces and its broad cones stand behind them; so do the towers lining the river's corridor, whose
+    # floodplain undercuts them: inside is the nearer of the two, the cluster's edge and the river's)
+    inside, ri = interior, None
+    if plan.river is not None:
+        ri = _river_inside(plan, tx, ty)
+        inside = np.minimum(interior, ri)
+    deep = cone_weight(m, inside)
     ang = np.where(kind == 1, ang + (ang_cl - ang) * deep, ang)
     r0_main = H / np.tan(np.radians(ang))                 # the main cone's foot radius
     R_block = np.where(in_cl > 0.5, _uni(rng, pr['massif_reach'], N) * nn3, _uni(rng, pr['block_girth'], N) * H)
     # a peak's footprint: on the plain its wall cuts the cone inside its foot (a cliff 15-45 % of H); at a cluster's
-    # edge cluster_girth of it (the wall facing the plain); deep inside a cluster the whole cone (inner_girth: no wall,
-    # the flanks run down into the saddles and cockpits; its collapse scarps still stand sheer)
-    g_cl = _uni(rng, pr['cluster_girth'], N) * (1.0 - interior) + _uni(rng, pr['inner_girth'], N) * interior
+    # edge or the river's cluster_girth of it (the wall facing the plain); deep inside a cluster the whole cone
+    # (inner_girth: no wall, the flanks run down into the saddles and cockpits; its collapse scarps still stand sheer)
+    g_cl = _uni(rng, pr['cluster_girth'], N) * (1.0 - inside) + _uni(rng, pr['inner_girth'], N) * inside
     g_peak = _uni(rng, pr['peak_girth'], N) * (1.0 - in_cl) + g_cl * in_cl
     R = np.select([kind == 0, kind == 1], [_uni(rng, pr['spire_girth'], N) * r0_main, g_peak * r0_main], R_block)
     R = np.maximum(R, 12.0)
@@ -874,17 +910,23 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     # a wall collapses where the plain undercuts its foot: no scarps deep inside a cluster (on its broad cones a scarp
     # pulled half the footprint in and stood a 150-200 m sheer face in the middle of the massif)
     scarp[:, :, 2] *= (1.0 - deep)[:, None]
-    # a cluster's edge towers turn their first scarp toward the plain (down the cluster field's gradient), broad and
-    # deep: the massif meets the plain with sheer faces (Guilin's towers are undercut where the floodplain meets them)
-    edge = (in_cl > 0.3) & (interior < 0.6) & (kind != 0)
+    # a cluster's edge towers turn their first scarp toward the plain (down the cluster field's gradient; toward the
+    # river where its corridor is the nearer plain), broad and deep: the massif meets the plain with sheer faces
+    # (Guilin's towers are undercut where the floodplain meets them)
+    edge = (in_cl > 0.3) & (inside < 0.6) & (kind != 0)
     if edge.any():
         e_ = 25.0
         rx = _cluster_raw(salt, pr, strike, tx + e_, ty) - _cluster_raw(salt, pr, strike, tx - e_, ty)
         ry = _cluster_raw(salt, pr, strike, tx, ty + e_) - _cluster_raw(salt, pr, strike, tx, ty - e_)
         erng = np.random.default_rng([int(seed) & 0xFFFFFFFF, 0x45444745])                     # 'EDGE'
-        out_dir = np.arctan2(-ry, -rx) + np.radians(erng.normal(0.0, 18.0, N))
+        out_dir = np.arctan2(-ry, -rx)
+        if ri is not None:
+            by_river = np.nonzero(edge & (ri < interior))[0]
+            if by_river.size:
+                out_dir[by_river] = _toward_river(plan, tx[by_river], ty[by_river], e_)
+        out_dir = out_dir + np.radians(erng.normal(0.0, 18.0, N))
         half = np.cos(np.radians(erng.uniform(50.0, 80.0, N)))
-        depth = erng.uniform(*pr['edge_scarp'], N) * _smoothstep(0.6, 0.2, interior)
+        depth = erng.uniform(*pr['edge_scarp'], N) * _smoothstep(0.6, 0.2, inside)
         scarp[edge, 0, 0] = out_dir[edge]
         scarp[edge, 0, 1] = half[edge]
         scarp[edge, 0, 2] = np.maximum(scarp[edge, 0, 2], depth[edge])
@@ -922,9 +964,9 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
         ok = d > clear
         body_R = np.minimum(body_R, np.maximum(d - bank - 2.5 * pr['lobes_m'], 0.0) / grow)
         body_h = np.where(body_R > 1.1 * R, body_h, 0.0)
-        arrays = [tx, ty, H, F, R, wall, kind, floor, B, reach, elong, axis, lean, lean_dir, m, interior, spur, npk,
+        arrays = [tx, ty, H, F, R, wall, kind, floor, B, reach, elong, axis, lean, lean_dir, m, inside, spur, npk,
                   rib, scarp, body_h, body_R, body_tan]
-        (tx, ty, H, F, R, wall, kind, floor, B, reach, elong, axis, lean, lean_dir, m, interior, spur, npk, rib,
+        (tx, ty, H, F, R, wall, kind, floor, B, reach, elong, axis, lean, lean_dir, m, inside, spur, npk, rib,
          scarp, body_h, body_R, body_tan) = (a[ok] for a in arrays)
         pk = tuple(a[ok] for a in pk)
     # the skirt never climbs past body_top of the tower's height at its centre (a wide body round a narrow peak
@@ -935,7 +977,7 @@ def plan_karst(seed, domain, params=None, via=None, main=None):
     plan.x, plan.y, plan.H, plan.F, plan.R, plan.wall, plan.kind = tx, ty, H, F, R, wall, kind
     plan.floor, plan.B, plan.reach, plan.spur = floor, B, reach, spur
     plan.elong, plan.axis, plan.lean, plan.lean_dir = elong, axis, lean, lean_dir
-    plan.cluster, plan.interior, plan.npk = m, interior, npk
+    plan.cluster, plan.interior, plan.npk = m, inside, npk
     plan.pk_dx, plan.pk_dy, plan.pk_h, plan.pk_r0, plan.pk_b, plan.pk_e, plan.pk_axis = pk
     # every tower's wall table (its ledges), from its own stream: a tower keeps its wall whatever else changes
     plan.wall_D, plan.wall_Z, plan.wall_D0 = [], [], []
