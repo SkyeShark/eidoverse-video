@@ -1,3 +1,9 @@
+// HB1 S1 (the body fix, 11-09; Skye: "insanely mottled skin that's covered in hundreds of thousands of freckles...
+// freckles are actually rare"): two constants, each marked (HB1 S1): K.MOTTLE's amplitudes lowered to the skin study's
+// candidate B (body_fix/skin/STUDY.md §4), and K.RING_BLOOD halved (the face study's red inner eye corners, §4). The
+// identities' freckles 0 / moles 15 are the scenes' (REF_ID) and the runtime's create('human'); staged in
+// work/bestiary/human/hb1/STAGED.md.
+//
 // H4b MERGED (the H4b integrator, 11-02): the H4b face builder's Edits from its copy h4b/face/engine/human_skin.js (sha1
 // cbdf7036, a copy of this file at 19dcec77; only the copy's header not landed), each marked (H4b face): THE MOUTH'S CAVITY (K.MOUTH:
 // the lips' opening as an aperture the face driver sets each frame through setAperture(), humanUniforms' mouthC / mouthN /
@@ -139,8 +145,11 @@ export const K = {
     //                          macro's 0.02 mm / px (a few sparkles along the lid), so the strip's lobe is wider and
     //                          filtered by its own normal's screen derivative (specular AA) beyond that
     RING_MEL: [0.30, 0.10],  // the ring's tissue: melanin x, the lid's posterior edge .. the corners' conjunctiva [E]
-    RING_BLOOD: [9.0, 40.0], //   blood x: at the zone table's x12-15 it rendered dull mauve (albedo a* 17); the eye
+    RING_BLOOD: [4.5, 20.0], //   blood x: at the zone table's x12-15 it rendered dull mauve (albedo a* 17); the eye
     //                          photos' caruncle is salmon red, and it is a mucosa over a dense capillary bed [E]
+    //                          (HB1 S1: [9, 40] -> [4.5, 20], halved: at [9, 40] the caruncle read as a bright pink-red
+    //                          lump and the inner corners as irritated, body_fix/face/STUDY.md §4; the packs' caruncle
+    //                          zone comes down with it)
     RING_AO_FLOOR: 0.75,     // (H3c: 0.60 -> 0.75, the wedge) the ring sits in a wedge whose measured AO reaches 0; the tissue is lit by scatter
     //                          through the lid and off the white ball, not only by the sky it sees [E]
     WET_AO_FLOOR: 0.40,      // the skin's wet tissue likewise (the lid's wet wall baked AO ~0: a black pit at each
@@ -155,11 +164,18 @@ export const K = {
     // (H3b) SKIN VARIATION at runtime, on the bind pose: nothing here needs a UV, a map or a texel, so it survives any
     // layout, the mirrored limbs are not mirrored in it, and a crowd sharing one set of maps differs by its seed.
     // THE MOTTLING: a periodic 3D noise volume (noiseVolume below) read at three scales, in log2 of each pigment.
-    // Its target is what the photos' skin holds per octave (h3b/material/s01_skin_stats.py: a* RMS 0.14-0.45, b* 0.2-0.35
-    // per octave from 0.25 to 16 mm, against H3's 0.05-0.15: 2-6x too clean). VOL_MM: mm per volume texel per layer
-    // (64 texels a period); BLOOD / MEL: log2 amplitude per layer (unit-variance noise); the fine layer fades out by the
-    // footprint so it never crawls.
-    MOTTLE: { VOL_MM: [0.30, 1.21, 4.83], BLOOD: [0.20, 0.20, 0.24], MEL: [0.10, 0.10, 0.09] },
+    // VOL_MM: mm per volume texel per layer (64 texels a period; features ~1-2 mm, ~5-10 mm, ~3-6 cm); BLOOD / MEL: log2
+    // amplitude per layer (unit-variance noise); the fine layer fades out by the footprint so it never crawls.
+    // (HB1 S1) THE AMPLITUDES: the skin study's candidate B, BLOOD [0.20, 0.20, 0.24] -> [0.06, 0.04, 0.03] and MEL
+    // [0.10, 0.10, 0.09] -> [0.02, 0.01, 0]: a trace of the blood's flush kept, the melanin clouds gone. The old values
+    // were aimed at what FRECKLED, sun-worn photos hold per octave (h3b/material/s01_skin_stats.py: a* RMS 0.14-0.45, b*
+    // 0.2-0.35 per octave from 0.25 to 16 mm), and a photo's variation per octave also holds the pores, the fine lines,
+    // the shading, the freckles and the camera's noise, which the relief tier and the freckle layer carry here already;
+    // the coarse layer (3-6 cm) sat past that round's largest octave and was never measured against anything. At those
+    // values both people carried brown and pale clouds that read as dirt, bruises and dents (the pigment alone, the back
+    // at 1 m: 4.9 % of the area more than 2 L* off its 25 mm surround; study T's painted back 0.2 %), and a 1-2 mm grain.
+    // Now `mottle` 1 is ordinary adult skin; an identity raises it (1.5-3) for a weathered or ruddy person.
+    MOTTLE: { VOL_MM: [0.30, 1.21, 4.83], BLOOD: [0.06, 0.04, 0.03], MEL: [0.02, 0.01, 0.0] },
     // THE SPOTS: per layer a grid, each cell holding one candidate spot wholly inside it (so ONE cell lookup, no search:
     // H3's Worley read 27), its centre, radius and strength hashed from the cell. A spot is a ball in the bind pose's
     // volume, and the skin's surface cuts it: g / cell^3 balls per mm3 for a cell's existence probability g, so a surface
@@ -300,10 +316,11 @@ export function humanUniforms(opts = {}) {
         blood: U(opts.blood ?? 0.00184),        // f_blood0 (NIST median; Jacques's typical 0.2 %)
         tint: U(new THREE.Color(opts.tint ?? 0xffffff)),
         flush: U(opts.flush ?? 0.0),            // blood flow display (H7): x (1 + flush) on the blood
-        // (H3b) the identity's generator options: mottle x the measured amplitudes (0 clean .. 1 the photos' adult skin);
-        // freckles (0 none .. 1 the heavy cheek of the reference: 9-11 / cm2 at zone weight 1; 0.5 a typical freckled
-        // face); moles, the whole-body count (12-58 means in the literature, 0 none); seed, the identity: every pattern
-        // is offset by it, so two people share maps and no pattern
+        // (H3b) the identity's generator options: mottle x K.MOTTLE's amplitudes (0 clean .. 1 ordinary adult skin, HB1
+        // S1; 1.5-3 a weathered or ruddy person); freckles (0 none, the default: a rare trait; .. 1 the heavy cheek of the
+        // reference: 9-11 / cm2 at zone weight 1; 0.5 a typical freckled face); moles, the whole-body count (12-58 means in
+        // the literature, 0 none); seed, the identity: every pattern is offset by it, so two people share maps and no
+        // pattern
         mottle: U(opts.mottle ?? 1.0),
         freckles: U(opts.freckles ?? 0.0),
         moles: U(opts.moles ?? 0.0),

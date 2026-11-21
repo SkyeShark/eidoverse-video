@@ -131,7 +131,7 @@ def support(theta, n=4096):
     return (P @ np.atleast_2d(d).T).max(0)
 
 
-def arm_chain(cut=CUT, arm=0, glb=None, low=None):
+def arm_chain(cut=CUT, arm=0, glb=None, low=None, host=None):
     """the canonical octopus's arm as the machine needs it, read from work/bestiary/octopus/octopus.glb (the joints, the
     bind segment lengths, every bone's chord frame) and the species' arm table (forge/species/octopus.py arm_radius,
     octopus_rig.arm_joint_s), with the low's ring at the cut (low.npz: the ring the flange's bore holds, and the ring
@@ -140,10 +140,19 @@ def arm_chain(cut=CUT, arm=0, glb=None, low=None):
     joint along the asset's straight chain, joint J0 at 0), P / W (the bind's joint positions and world frames), chordB
     (per bone 0..22 the chord frame in the bone's local axes: the runtime's chordQ is its inverse), tip_rel (bone 23 in
     bone 22's chord frame), ring (s, x, the ring before's s and x, the section's extents there in the chord-J0 frame),
-    L_arm (the arm's length)"""
+    L_arm (the arm's length).
+    (REROOT, REMIX_LIBRARY §7 rank 1) host: a GENERATED chain at another host's ring instead of the octopus's glb and
+    low (dict(W (24, 4, 4) the joints' bind worlds in the host's creature frame, js (24,) their shares, spec the radius
+    law at the host's scale, ring_pts (K, 3) the ring the flange's bore holds, ring_s / ring_before_s its share and the
+    loop before's)), so the machine is designed and built at the host's size, its hardware (DESIGN's bolts, cans and
+    fasteners) at its own absolute size"""
     from . import gltf
     from .species import octopus as O
     from .species import octopus_rig as OR
+    if host is not None:
+        return _arm_chain_from(np.asarray(host['W'], np.float64), host['spec'], np.asarray(host['js'], np.float64),
+                               cut, arm, ring_pts=np.asarray(host['ring_pts'], np.float64),
+                               ring_s=float(host['ring_s']), ring_before_s=float(host['ring_before_s']))
     glb = glb or os.path.join(OCTOPUS_DIR, 'octopus.glb')
     low = low or os.path.join(OCTOPUS_DIR, 'low.npz')
     R = gltf.read(glb)
@@ -152,10 +161,43 @@ def arm_chain(cut=CUT, arm=0, glb=None, low=None):
     js = OR.arm_joint_s(spec)
     assert len(js) == N_JOINTS
     W = np.stack([Wn[f'arm{arm}_{k:02d}'] for k in range(N_JOINTS)])
+    return _arm_chain_from(W, spec, js, cut, arm, low=low)
+
+
+def host_chain(part, donor, cut=CUT):
+    """(REROOT) arm_chain(host=...)'s input at ANY host's ring: the octopus arm RE-ROOTED there (graft.OctopusArm
+    .rerooted with z0 at the band's end: its cut-8 share s0, where the flange grips, on the band's last ring), its 24
+    joints at the octopus's own joint shares (octopus_rig.arm_joint_s) on its centreline, each frame as octopus_rig.build
+    lays an arm joint (x along the arm, y its aboral normal), the radius law its spec (the octopus's at the ring's scale
+    s_c); the ring the flange's bore holds = the band's LAST ring (graft.graft_tube(band_only=True): the octopus's own
+    section there, at the host's scale), the ring before = the band's ring before it. part: graft_tube's dict"""
+    from . import rig as RG
+    from .species import octopus as O
+    from .species import octopus_rig as OR
+    js = OR.arm_joint_s(O.low_spec(O.SPEC))
+    Pa, na, ba, ta = donor.arm
+    sa = np.linspace(0.0, 1.0, len(Pa))
+    ip = lambda X, s: np.array([np.interp(s, sa, X[:, k]) for k in range(3)])            # noqa: E731
+    W = np.zeros((N_JOINTS, 4, 4))
+    for k in range(N_JOINTS):
+        W[k] = np.eye(4)
+        W[k][:3, :3] = RG.frame_from(ip(ta, js[k]), ip(na, js[k]))
+        W[k][:3, 3] = ip(Pa, js[k])
+    K = part['K']
+    last, before = part['rings'][-1], part['rings'][-2]
+    return dict(W=W, js=js, spec=donor.spec, ring_pts=part['V'][last], ring_s=float(donor.s_at(part['z'][-1])),
+                ring_before_s=float(donor.s_at(part['z'][-2])), K=K)
+
+
+def _arm_chain_from(W, spec, js, cut, arm, low=None, ring_pts=None, ring_s=None, ring_before_s=None):
+    """arm_chain's body on its inputs (REROOT): the 24 bind worlds W, the radius law's spec, the shares js; the ring from
+    the octopus's low (low: arm `arm`'s low rings by their share along the joint polyline, the one nearest the cut) or
+    given (ring_pts in the creature's space, ring_s and the loop before's ring_before_s)"""
+    from .species import octopus as O
     P = W[:, :3, 3].copy()
     seg = np.linalg.norm(np.diff(P, axis=0), axis=1)
     r = O.arm_radius(js, spec)
-    chordB = []
+    chordB = []                                         # (REROOT: _arm_chain_from's, for the octopus and any host)
     for k in range(N_JOINTS - 1):
         loc = np.linalg.inv(W[k][:3, :3]) @ (P[k + 1] - P[k])
         loc /= np.linalg.norm(loc)
@@ -169,28 +211,35 @@ def arm_chain(cut=CUT, arm=0, glb=None, low=None):
     xs[J0:] = x
     xs[:J0] = -np.cumsum(seg[:J0][::-1])[::-1]
     L_arm = float(seg.sum() / js[-1])
-    # the low's rings on this arm: their share along the joint polyline (forge_cyborg_numbers.py's rule)
-    Lw = np.load(low, allow_pickle=True)
-    V, F, reg = Lw['V'], Lw['F'], Lw['region']
-    arm_v = np.unique(F[reg == 3 + arm])
-    Va = V[arm_v]
-    q = Va[:, None, :] - P[None, :-1]
-    ab = P[1:] - P[:-1]
-    tt = np.clip((q * ab[None]).sum(2) / (ab * ab).sum(1)[None], 0, 1)
-    dist = np.linalg.norm(q - tt[..., None] * ab[None], axis=2)
-    ib = dist.argmin(1)
-    s_arm = js[ib] + tt[np.arange(len(Va)), ib] * (js[ib + 1] - js[ib])
-    ss = np.sort(s_arm)
-    gaps = np.diff(ss)
-    a0 = np.concatenate([[0], np.nonzero(gaps > 0.002)[0] + 1])
-    a1 = np.concatenate([np.nonzero(gaps > 0.002)[0] + 1, [len(ss)]])
-    ring_s = np.array([np.median(ss[a:b]) for a, b in zip(a0, a1)])
     s_cut = 0.5 * (js[cut - 1] + js[cut])
-    ir = int(np.argmin(np.abs(ring_s - s_cut)))
     x_of = lambda s: float((s - js[J0]) / (js[J0 + 1] - js[J0]) * seg[J0])   # along chord J0 (the ring lies in it)
     Fj = chord_frame(W[J0], P[J0], P[J0 + 1])
-    on = np.abs(s_arm - ring_s[ir]) < 0.0015
-    Qr = (Va[on] - P[J0]) @ Fj
+    if ring_pts is None:
+        # the low's rings on this arm: their share along the joint polyline (forge_cyborg_numbers.py's rule)
+        Lw = np.load(low, allow_pickle=True)
+        V, F, reg = Lw['V'], Lw['F'], Lw['region']
+        arm_v = np.unique(F[reg == 3 + arm])
+        Va = V[arm_v]
+        q = Va[:, None, :] - P[None, :-1]
+        ab = P[1:] - P[:-1]
+        tt = np.clip((q * ab[None]).sum(2) / (ab * ab).sum(1)[None], 0, 1)
+        dist = np.linalg.norm(q - tt[..., None] * ab[None], axis=2)
+        ib = dist.argmin(1)
+        s_arm = js[ib] + tt[np.arange(len(Va)), ib] * (js[ib + 1] - js[ib])
+        ss = np.sort(s_arm)
+        gaps = np.diff(ss)
+        a0 = np.concatenate([[0], np.nonzero(gaps > 0.002)[0] + 1])
+        a1 = np.concatenate([np.nonzero(gaps > 0.002)[0] + 1, [len(ss)]])
+        ring_s = np.array([np.median(ss[a:b]) for a, b in zip(a0, a1)])
+        ir = int(np.argmin(np.abs(ring_s - s_cut)))
+        on = np.abs(s_arm - ring_s[ir]) < 0.0015
+        Qr = (Va[on] - P[J0]) @ Fj
+    else:
+        # (REROOT) the host's ring, given: its share and the loop before's
+        ring_s = np.array([float(ring_before_s), float(ring_s)])
+        ir = 1
+        Qr = (ring_pts - P[J0]) @ Fj
+        on = np.ones(len(ring_pts), bool)
     ring = dict(s=float(ring_s[ir]), x=x_of(ring_s[ir]), s_before=float(ring_s[ir - 1]), x_before=x_of(ring_s[ir - 1]),
                 s_cut=float(s_cut), x_cut=x_of(s_cut), n=int(on.sum()), r_nominal=float(O.arm_radius(ring_s[ir], spec)),
                 y=(float(Qr[:, 1].min()), float(Qr[:, 1].max())), z=(float(Qr[:, 2].min()), float(Qr[:, 2].max())),

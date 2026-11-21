@@ -8,10 +8,16 @@ recipe. The sections, and which tier of the pipeline consumes each (DESIGN.md "t
     spec           overrides of the base species' generator proportions (octopus: forge/species/octopus.py SPEC)
     sculpt         ordered LAYER recipes in anatomical coordinates: kind, sites, mask, density, size, seed, material id
     skin           the skin recipe: material class, patch network, paint passes, offline palette, baked overlay
-    parts          {socket: part}: study G slot rows with level bands, each naming the material slot it renders with
+    parts          {socket: part}: study G slot rows with level bands, each naming the material slot it renders with: the
+                   base's OWN parts (the octopus's eyes and beak); another creature's organ is a graft (R14)
     cyborg         the CYBORG mutation (research/CYBORG_PLAN.md §6.1): kind-keyed part tables and limb replacements,
                    seated by remix/slots.py's closed table on the manifest's TYPED sockets and chains (resolve_cyborg);
                    its glow and affixes are runtime
+    graft          the ORGAN mutation (research/CROSSBREED_DESIGN.md §6.1; the FAMILY round, 11-09): another creature's
+                   limbs and organs, kind-keyed port and region tables and limb rows from a NAMED listed cut, seated by
+                   the same closed table's organ half on the manifest's ring records, chains and regions
+                   (resolve_graft); an eye count beyond the base's pair (eyes.count: the extra-eye op). Optional: absent,
+                   a recipe hashes as before
   RUNTIME (the engine, instant, per instance: runtime/remix.js)
     palette        zone recolour from the mask packs (primary / soft / accent / pattern), fixed pigment kept
     display        the colour-change recipe: mood, mood cycle, passing clouds, iridophores, photophores, leucophores
@@ -23,7 +29,8 @@ recipe. The sections, and which tier of the pipeline consumes each (DESIGN.md "t
 
 OPERATORS make remixes: make(), merge(), normalise(), crossbreed(), swap_layer(), add_layer(), remove_layer(),
 growth(), roll_element(), roll_affixes(), resolve_auto(), resolve_parts() (study G slot tables by level band and weight),
-mutate(). resolve_runtime() turns a recipe into the block runtime/remix.js applies; apply_jitter() is the per-instance
+vary() (NATURAL VARIATION inside the base's own ranges: a base feature, not a mutation; mutate() its old name, kept
+for one landing). resolve_runtime() turns a recipe into the block runtime/remix.js applies; apply_jitter() is the per-instance
 variation, twinned in remix.js. Every random choice goes through roll(seed, key), the same bits as runtime/remix.js
 (FNV-1a on the key, then bestiary.js's lowbias32 mix), so a recipe resolves identically in Python and in the engine.
 recipe_hash(r, 'offline' | 'runtime') says which edits need a forge rebuild.
@@ -64,6 +71,13 @@ something the forge or the library does not have yet), 'warning' (builds, but su
                covering layer left on flesh a part replaces or covers (cyborg.covered, C0b)
   manifest.slot* / seat_kind / chain*   the manifest's typing: kinds on their base's joints, seats under their kinds,
                every socket's frame and its interface's dims (manifest.slot_frame, manifest.slot_dims: C0b)
+  graft.*      the graft section (CROSSBREED §6.6; remix/slots.py check_graft, plan_graft): unknown names, a cyborg
+               family (graft.cyborg), a part that does not fit its kind (graft.kind) or fits it only by Skye's word
+               (graft.skye), Skye's rule (graft.never), interfaces, sides, bands, a cut not listed or not distal for a
+               foot or a claw (graft.cut), a site with no ring record (graft.ring), the seam's classes (graft.seam), one
+               replacement per site across the graft and cyborg sections (graft.shared), a covering layer or an
+               accessory left on what a graft drops (graft.covered), the eye count (graft.eyes), a part above the size
+               class (graft.size, a warning)
   needs.*      forge capabilities the recipe needs that are not built (FORGE_CAPS)
 
     r = make('octopus', name='crystal_octopus', seed=7, element='crystal', tier='large')
@@ -632,9 +646,17 @@ PARTS = {
 # recipe['cyborg'] on remix/slots.py's closed table (kinds, interfaces, fits, seats), never on a socket named in parts.
 # needs = the FORGE_CAPS each waits on; tris = the NET triangles one placement adds, (low, high), where the plan
 # estimates them (the first target, §8's costs: the implant 1,600 against the eye's 1,200 [E-fo]; the mech arm at cut 8
-# 7-9k [E-fo] less 1,560 skin [D-fo] and 3,494 sucker [D-check] triangles; the dome 2-2.5k [E-fo]); None = no estimate
+# 7-9k [E-fo] less 1,560 skin [D-fo] and 3,494 sucker [D-check] triangles; the dome 2-2.5k [E-fo]); None = no estimate.
+# STATUS (the FAMILY round, 11-09; REMIX_LIBRARY §1's words): 'live' landed in eidoverse/bestiary/ and on a live creature,
+# 'built' the asset exists and is checked but has not landed, 'planned' nothing built (the catalogs said 'planned' for
+# live parts: the trap REMIX_LIBRARY §1 item 4 names)
+# HOSTS (the FAMILY round): per variant, the bases a live or built part has been FORGED on; on any other host it waits
+# for REROOT (FORGE_CAPS reroot: C5 is generated from the octopus's arm, C4's lens at the octopus eye's 15 mm radius, the
+# robot hand at the human's wrist ring), so a cyborg-tailed axolotl validates as resolvable but not yet buildable
 CYBORG_PARTS = {
-    'eye_implant': dict(status='planned', needs=['slot_kinds', 'eye_implant'], tris=(400, 400)),
+    # (live: C4's 'lens' on the octopus's eye_L; the cyborg beetle's 'compound' dome on its eye_L, cyborg variants)
+    'eye_implant': dict(status='live', needs=['slot_kinds', 'eye_implant'], tris=(400, 400),
+                        hosts=dict(lens=('octopus',), compound=('beetle',))),
     'sensor_module': dict(status='planned', needs=['slot_kinds', 'module_seats'], tris=(2000, 2500)),
     'antenna_probe': dict(status='planned', needs=['slot_kinds', 'module_seats'], tris=None),
     'visor': dict(status='planned', needs=['slot_kinds', 'module_seats'], tris=None),
@@ -642,26 +664,143 @@ CYBORG_PARTS = {
                        tris=None),
     'thruster_nozzle': dict(status='planned', needs=['slot_kinds', 'module_seats'], tris=None),
     'gripper': dict(status='planned', needs=['slot_kinds', 'module_seats', 'chain_cut'], tris=None),
-    'mech_tentacle': dict(status='planned', needs=['slot_kinds', 'chain_cut', 'mech_tentacle'], tris=(1946, 3946)),
+    # (live: C5's knuckled tentacle on octopus arm L1 since stage 2, its hose and pads since stage 4)
+    # (remix_r1 CROSS: REROOT forged it on the axolotl's tail too, at tail_mid on its own 17 joints: 13,797 triangles and a
+    # 160-triangle band of the host's skin for the 1,352 the tail's end gave up; the range below is the octopus's)
+    # (r1c loop 3, 11-20: that tail was 396.0 mm, 1.98 x the host's own tail past tail_mid, its root 1.07 of the ring: the
+    # size gate's length and root bars both failed (graft.size_match, G-R13; Skye, 11-11: "when limbs and heads and stuff are
+    # remixed, they should match the size of the animal"). The DEFAULT size on the axolotl is now 'host': the same machine
+    # with EVERY SECOND KNUCKLE, the octopus's joints 10 .. 22 and the tip 23 (3 clevis, 4 cardan with their roll rings, 2
+    # of them with pistons), each kept knuckle with its own section, kind and rest-motion limits, every kept segment 0.585
+    # of its own length, the sections 0.975 of the ring's scale: 201.1 mm = 1.01 x the host's tail, the root 1.045 of the
+    # ring; 21 joints (the long machine 37), 7,932 triangles and a 128-triangle band for the 1,376 the tail's end gave up.
+    # One factor on all 15 knuckles does not work: their own spans sum to 109 mm of the 145 the host's tail leaves past
+    # the flange (work/bestiary/remix_r1/cross/pipe/c5_short.py). 'long' (REROOT's, at lam 0.75) stays creatable; each
+    # size's `tris` is its net on the axolotl)
+    'mech_tentacle': dict(status='live', needs=['slot_kinds', 'chain_cut', 'mech_tentacle'], tris=(1946, 3946),
+                          hosts=dict(knuckled=('octopus', 'axolotl')),
+                          sizes=dict(axolotl=dict(
+                              default='host',
+                              host=dict(keep=(10, 12, 14, 16, 18, 20, 22, 23), lam=0.585, k_sec=0.975, length_mm=201.1,
+                                        tris=(6684, 6684), size_match=dict(length=1.01, root=1.045),
+                                        glb='work/bestiary/remix_r1/cross/out/c5host/glb/c5host_baked.glb'),
+                              long=dict(lam=0.75, length_mm=396.0, tris=(12605, 12605),
+                                        glb='work/bestiary/remix_r1/cross/out/c5/glb/c5_baked.glb')))),
+    # (the cyborg beetle's mech fore leg is live in its cyborg variants, built by a work-folder builder
+    # (beetle/variants/cyborg/mechleg.py), not by the forge: the family's forge path, C11, is still planned)
     'mech_leg': dict(status='planned', needs=['slot_kinds', 'chain_cut', 'mech_leg'], tris=None),
-    # (C3) the robot hand at the human's wrist: built in work/bestiary/cyborg_robot/c3 through forge/assemble.py's part
-    # path, not yet by the cyborg forge's own stages (so it waits on the same caps as the other rigid chains)
-    'mech_arm': dict(status='planned', needs=['slot_kinds', 'chain_cut', 'mech_leg'], tris=None),
+    # (C3, live since L3) the robot hand at the human's wrist: built in work/bestiary/cyborg_robot/c3 through
+    # forge/assemble.py's part path at the wrist's ring record, so it needs what that path needs (the FAMILY round: it
+    # waited on 'mech_leg', the cyborg forge's own rigid-chain stage, which it was never built by)
+    'mech_arm': dict(status='live', needs=['slot_kinds', 'chain_cut', 'ring_records', 'assemble'], tris=None,
+                     hosts=dict(robot_hand=('human',))),
     'mech_tail': dict(status='planned', needs=['slot_kinds', 'chain_cut', 'mech_leg'], tris=None),
     'mech_antenna': dict(status='planned', needs=['slot_kinds', 'chain_cut', 'mech_leg'], tris=None),
     'machine_head': dict(status='planned', needs=['slot_kinds', 'machine_head'], tris=None),
 }
 assert set(CYBORG_PARTS) == set(SL.CYBORG_FAMILIES), 'CYBORG_PARTS and remix/slots.py\'s cyborg families must agree'
 # GRAFT_PARTS: the ORGAN families' catalog (research/CROSSBREED_DESIGN.md §6.1; the lead's decision 6: a graft seats by
-# KIND on slots.py's one closed table through the recipe's graft section, never as a cyborg row). tris = the NET
-# triangles a placement adds, (low, high): M2's part (the collar from the ring, the shells, the sleeves: 2,416) and its
-# re-made suckers (188) less the native group it drops (arm 0 past cut 8: 1,568 skin and 3,588 sucker triangles)
-GRAFT_PARTS = {
-    'leg_graft': dict(status='M2 (staged)', needs=['ring_records', 'assemble'], tris=(-2552, -2552)),
-}
+# KIND on slots.py's one closed table through the recipe's graft section, never as a cyborg row). Per VARIANT (the
+# FAMILY round, 11-09): its status ('live', 'built', or 'designed': in a plan, its part never generated), the HOSTS its
+# part has been forged on at their own ring (on another host it waits for REROOT: FORGE_CAPS reroot), and its NET
+# triangles there where measured, (low, high): M2's part (the collar from the ring, the shells, the sleeves: 2,416) and
+# its re-made suckers (188) less the native group it drops (arm 0 past cut 8: 1,568 skin and 3,588 sucker triangles).
+# needs: the FORGE_CAPS every graft of the family waits on (its seam's cap joins per placement: graft_needs). The
+# family's status is its best variant's
+_DESIGNED = dict(status='designed', hosts=(), tris=None)
+GRAFT_PARTS = {f: dict(needs=['ring_records', 'assemble'], variants={v: dict(_DESIGNED) for v in SL.FAMILIES[f]['variants']})
+               for f in SL.ORGAN_FAMILIES}
+# (remix_r1 CROSS, with REROOT's forge outputs, work/bestiary/remix_r1/reroot/STAGED.md: the hosts each part has now been
+# forged on, and its net triangles PER HOST where measured (tris: (low, high), or { base: (low, high) }: graft_tris): on the
+# axolotl a stag beetle fore leg at an axilla nets 23,462 .. 23,627 (its shells and 727 / 716 setae for the 1,982 the limb
+# gave up), the octopus arm at tail_mid 6,894 (its skin and 41 suckers for 1,340), the octopus eyes 768 an eye)
+# (r1c, 11-10, the lead's call (b): on the axolotl the leg is forged from the FEMUR with its ROOT FILLING THE HOST'S RING and
+# its length the host limb's: the beetle's own generator on a chain shortened by one factor lam, its sections at the ring's
+# scale (graft_socket.femur_chain; forge_leg_donor cut='femur', lam 0.1817): 13,698 an axilla, its 256-triangle collar and
+# 15,424 of shells and sleeves for the 1,982 the limb gave up. Two more SIZES stay creatable, the catalog's `sizes` naming
+# each one's forge terms (the prep stage's --scale / --lam): 'slender' (the beetle's own girth at the host's length, every
+# segment at lam 1.0: 16,146) and 'long' (REROOT's knee-down leg, its root filling the ring at M2c's lam 0.6433: 222 mm,
+# 23,462 .. 23,627). tris spans the three, so a budget counts the largest)
+# (r1c loop 2, 11-12: the quality check read the 'ring' size as "a clawed hoof on a pipe of axolotl skin", its femur and
+# tibia wider than long (0.83, 0.82; the beetle's own 4.6), and Skye, 11-11: "when limbs and heads and stuff are remixed,
+# they should match the size of the animal". The DEFAULT is now 'knee_down', the one size that passes the forge's size
+# gate (graft.size_match, G-R13: length 0.85 .. 1.2 of the host's own limb past the ring, root 0.5 .. 1.05 of the ring,
+# no segment squashed past 2 x): the leg as long as the host's limb (91.8 mm), the beetle's own leg from the KNEE down at
+# M2's lam 0.64 (tibia length / width 2.84), its femur a swollen thigh whose root is 0.683 of the ring (femur_girth 3.2;
+# 11-14, graft_socket.femur_girth_gain: the swell held, then rounded off into the knee, where the first loop-2 build's
+# smooth step left a concave funnel), the host's skin a gentle sleeve to a crisp lip: 15,714 an axilla (288 of collar,
+# 17,408 of shells and sleeves for the 1,982 the limb gave up). 'ring' (the stout one), 'slender' and 'long' stay
+# creatable; each fails that gate on its own bar (squash, root, length))
+GRAFT_PARTS['leg_graft']['variants']['stag_beetle_fore'] = dict(
+    status='live', hosts=('octopus', 'axolotl'), tris=dict(octopus=(-2552, -2552), axolotl=(13698, 23627)),
+    cuts=dict(octopus='knee', axolotl='femur'),
+    sizes=dict(axolotl=dict(
+        default='knee_down',
+        knee_down=dict(cut='femur', shorten='knee', scale='host', lam=0.64, femur_girth=3.2, taper=0.25, length_mm=91.7,
+                       tris=(15714, 15714), size_match=dict(length=0.97, root=0.67, squash=(0.61, 0.67)),
+                       glb='work/bestiary/remix_r1/cross/out/ax5hb/glb/ax5hb_baked.glb'),
+        ring=dict(cut='femur', scale='ring', lam='host', length_mm=91.9, tris=(13698, 13698),
+                  glb='work/bestiary/remix_r1/cross/out/ax5rb/glb/ax5rb_baked.glb'),
+        slender=dict(cut='femur', scale='host', lam=1.0, length_mm=91.9, tris=(16146, 16146),
+                     glb='work/bestiary/remix_r1/cross/out/ax5cb/glb/ax5cb_baked.glb'),
+        long=dict(cut='knee', scale='ring', lam=0.6433, length_mm=222.5, tris=(23462, 23627),
+                  glb='work/bestiary/remix_r1/reroot/out/ax5b/glb/ax5b_baked.glb'))),
+    src='M2: the right fore leg from the knee on octopus arm R1 past cut 8, landed in stage 4 with M2d\'s fixes '
+        '(work/bestiary/patches/scratch_crossbreed_m2/out_m2c/glb/m2.glb); CROSS r1c: both fore legs from the femur '
+        'at the axolotl\'s axilla rings, the host limb\'s length, the beetle\'s own leg from the knee down at M2\'s '
+        'proportions, the beetle\'s own maps carried, the two legs one stacked texture set '
+        '(work/bestiary/remix_r1/cross/out/ax5hb/glb/ax5hb_baked.glb; the other sizes: sizes)')
+# (r1c loop 3, 11-20: that arm, at the octopus's own proportion, is 486.6 mm on the axolotl: 2.44 x the host's own tail past
+# tail_mid, the size gate's length bar failed (G-R13; Skye, 11-11: "they should match the size of the animal"). The DEFAULT
+# size on the axolotl is now 'host': the arm AS LONG AS THE HOST'S TAIL (199.9 mm = 1.00 x, its root 0.90 of the ring), the
+# octopus's own arm generator run on that shorter arm (its spec's arm length x 0.41, nothing else): a steeper taper, 14
+# geometric suckers where the long arm carries 41, each its own size by its share of the arm (never the long row squeezed),
+# its patches and papillae laid in the arm's own straightened coordinate on this arm (round, not the long arm's plan
+# pressed 2.4 x along it); bound in its REST LIE (`lie`: it comes down from the tail onto the floor by 0.70 of its length,
+# its joints' yaw axes vertical): 1,408 skin and 2,156 sucker triangles and a 396-triangle fin end for the 1,424 the tail's
+# end gave up, net 2,536. 'long' (the fold + margin arm above, 7,206 net; REROOT's own first, ax2long, was 6,894) stays
+# creatable. tris spans the two, so a budget counts the larger)
+GRAFT_PARTS['tentacle_graft']['variants']['octopus_arm'] = dict(
+    status='built', hosts=('octopus', 'axolotl'), tris=dict(axolotl=(2536, 7206)),
+    sizes=dict(axolotl=dict(
+        default='host',
+        host=dict(share=1.0, lam=0.41, lie=0.70, length_mm=199.9, tris=(2536, 2536),
+                  size_match=dict(length=1.00, root=0.90),
+                  glb='work/bestiary/remix_r1/cross/out/ax2host/glb/ax2host_baked.glb'),
+        long=dict(lam=1.0, tip_drop=0.045, length_mm=486.6, tris=(7206, 7206),
+                  glb='work/bestiary/remix_r1/cross/out/ax2fold/glb/ax2fold_baked.glb'))),
+    src='M1a: arm R1 regenerated from cut 8 by the octopus\'s own arm generator, an identity WELD through gates '
+        'G-R1..R9 (work/bestiary/patches/scratch_crossbreed_m1/out/glb/m1a.glb); REROOT AX-X2: the arm for a tail at '
+        'the axolotl\'s tail_mid (work/bestiary/remix_r1/reroot/out/ax2long/glb/ax2long_baked.glb); CROSS: the same arm '
+        'with the band\'s fold + margin dressing (work/bestiary/remix_r1/cross/out/ax2fold/glb/ax2fold_baked.glb); CROSS '
+        'r1c loop 3: the arm at the host\'s length, the default on the axolotl '
+        '(work/bestiary/remix_r1/cross/out/ax2host/glb/ax2host_baked.glb; the other size: sizes)')
+# (r1c, the lead's call (g): the eye to cite is the one whose iris is painted at the DONOR's relative cell scale, the octopus's
+# own 15 mm eye radius; REROOT's first, painted at the axolotl's 2.32 mm life radius, read as a calico marble and is kept
+# only as the before: work/bestiary/remix_r1/reroot/out/ax4/glb/ax4_baked.glb)
+GRAFT_PARTS['eye_graft']['variants']['octopus'] = dict(
+    status='built', hosts=('axolotl',), tris=dict(axolotl=(768, 768)),
+    src='REROOT AX-X4: the octopus eye forged at the axolotl\'s eye sockets; CROSS r1c: its iris painted at the '
+        'octopus\'s own cell scale (work/bestiary/remix_r1/cross/out/ax4d/glb/ax4_baked.glb)')
+
+
+def graft_tris(v, base):
+    """a graft variant's net triangles on a base: its (low, high) where it is one range, its row for this base where the
+    catalog holds them per host (remix_r1 CROSS), None where unmeasured"""
+    t = (v or {}).get('tris')
+    return t.get(base) if isinstance(t, dict) else t
+
+
+
+for _g in GRAFT_PARTS.values():
+    _st = [v['status'] for v in _g['variants'].values()]
+    _g['status'] = 'live' if 'live' in _st else ('built' if 'built' in _st else 'designed')
 assert set(GRAFT_PARTS) == set(SL.ORGAN_FAMILIES), 'GRAFT_PARTS and remix/slots.py\'s organ families must agree'
+# the catalogs' word for a part that EXISTS (the FAMILY round: 'live' beside 'built'; the readers test this tuple)
+EXISTS = ('live', 'built')
 CYBORG_RUNTIME = ('glow', 'affixes')     # the cyborg section's runtime keys (CYBORG_PLAN §6.1); the rest is offline
 ELEMENT_POLICIES = ('inherit', 'own', 'element_only')
+assert ELEMENT_POLICIES == SL.GRAFT_ELEMENT_POLICIES, 'a graft row\'s element policies are the parts rows\''
 
 # ACCESSORY ARCHETYPES: the fit fields each needs from its seat (DESIGN.md Accessories: socket_crown with a crown
 # radius and a fit cage; the eyes' bridge point, spacing and ear-hook points; the chest for a tie) and the field the
@@ -674,12 +813,14 @@ ARCHETYPES = {
     'tie': dict(required=('offset', 'rotation', 'width'), scale_by='width'),
     'mask': dict(required=('offset', 'rotation', 'radius'), scale_by='radius'),
 }
-# ACCESSORIES: none is built yet (the AAA props come from the robot body's craft). authored = the size the item is
-# modelled at (a human head: crown radius 0.091 m from a 57 cm circumference; IPD 64 mm); max_lens_yaw = how far a
-# glasses item's lenses can turn (a flat frame ~8 degrees of wrap; a hinged bridge more); tris from DESIGN.md's
-# attachment budget (0.5-6k each)
+# ACCESSORIES. authored = the size the item is modelled at (a human head: crown radius 0.091 m from a 57 cm
+# circumference; IPD 64 mm); max_lens_yaw = how far a glasses item's lenses can turn (a flat frame ~8 degrees of wrap; a
+# hinged bridge more); tris from DESIGN.md's attachment budget (0.5-6k each). STATUS (the FAMILY round, 11-09: "none is
+# built yet" was stale): the four props are LIVE (forge/props/*.py -> work/bestiary/props/*.glb, worn through
+# runtime/accessories.js PROPS; REMIX_LIBRARY §3.11), the necktie BUILT (B2's garments, work/bestiary/human/clothing_b2,
+# not landed); the rest planned
 ACCESSORIES = {
-    'top_hat': dict(archetype='hat', status='planned', authored=dict(radius=0.091), tris=3000,
+    'top_hat': dict(archetype='hat', status='live', authored=dict(radius=0.091), tris=3000,
                     materials=['felt', 'silk_band'], src='creature_builder.js hat "top" (primitive proxy only)'),
     'cap': dict(archetype='hat', status='planned', authored=dict(radius=0.091), tris=2500, materials=['cotton']),
     'beanie': dict(archetype='hat', status='planned', authored=dict(radius=0.091), tris=2000, materials=['knit']),
@@ -687,7 +828,7 @@ ACCESSORIES = {
                        materials=['felt', 'leather_band']),
     'officer_cap': dict(archetype='hat', status='planned', authored=dict(radius=0.091), tris=3500,
                         materials=['wool', 'patent_visor', 'brass']),
-    'peaked_cap': dict(archetype='hat', status='planned', authored=dict(radius=0.0907), tris=5956,
+    'peaked_cap': dict(archetype='hat', status='live', authored=dict(radius=0.0907), tris=5956,
                        materials=['worsted', 'felt', 'velvet', 'anodised_cord', 'gilt', 'enamel', 'lacquer', 'leather',
                                   'linen'],
                        src='forge/props/peaked_cap.py -> work/bestiary/props/peaked_cap.glb: the GDR general\'s '
@@ -700,17 +841,17 @@ ACCESSORIES = {
                          materials=['glass', 'metal']),
     'hardhat': dict(archetype='helmet', status='planned', authored=dict(radius=0.095), tris=3000,
                     materials=['abs_plastic']),
-    'round_glasses': dict(archetype='glasses', status='planned', authored=dict(spacing=0.064), max_lens_yaw=8.0,
+    'round_glasses': dict(archetype='glasses', status='live', authored=dict(spacing=0.064), max_lens_yaw=8.0,
                           tris=1500, materials=['acetate', 'glass']),
     'sunglasses': dict(archetype='glasses', status='planned', authored=dict(spacing=0.064), max_lens_yaw=12.0,
                        tris=1500, materials=['acetate', 'tinted_glass']),
     'wrap_goggles': dict(archetype='glasses', status='planned', authored=dict(spacing=0.064), max_lens_yaw=60.0,
                          tris=2200, materials=['brass', 'glass', 'leather'],
                          src='[D] a hinged bridge for side-facing eyes (the octopus: +-54 degrees)'),
-    'monocle': dict(archetype='monocle', status='planned', authored=dict(radius=0.016), tris=600,
+    'monocle': dict(archetype='monocle', status='live', authored=dict(radius=0.016), tris=600,
                     materials=['gold', 'glass']),
     'bow_tie': dict(archetype='tie', status='planned', authored=dict(width=0.060), tris=1000, materials=['silk']),
-    'necktie': dict(archetype='tie', status='planned', authored=dict(width=0.060), tris=1200, materials=['silk']),
+    'necktie': dict(archetype='tie', status='built', authored=dict(width=0.060), tris=1200, materials=['silk']),
     'mask_smile': dict(archetype='mask', status='planned', authored=dict(radius=0.105), tris=1000,
                        materials=['painted_card']),
 }
@@ -757,15 +898,30 @@ FORGE_CAPS = dict(
     papillae_normal_pair=False,  # a smooth + raised normal pair for the runtime's papillae display
     display_coords=True,         # rest-pose coordinates for the procedural displays (bestiary.js reads positionGeometry)
     flow_map=False,              # a flow map for liquid metal and cellular pulses
-    second_family=False,         # only the radial octopus is built
-    accessory_assets=False,      # the AAA hats, glasses and ties
+    # (the FAMILY round, 11-09: "only the radial octopus is built" was stale) the stag beetle (arthropod), the axolotl
+    # (limbed) and the human (hominid) are built; the wolf's paw pads still wait for the wolf's own generator
+    second_family=True,
+    accessory_assets=False,      # the AAA hats, glasses and ties (four props are live: ACCESSORIES' statuses say which)
     plate_generator=False, ridge_curves=False, scale_generator=False, crack_generator=False, groom_cards=False,
     arm_count_param=False,       # octopus.N_ARMS and arm_azimuths() fix eight arms
-    # the CYBORG family (research/CYBORG_PLAN.md §6.6). C0 built the slot table (remix/slots.py); the forge writes no
-    # slot extras until t13's staged patch lands (work/bestiary/patches/cyborg_c0_t13.md, C7). cyborg_ids LANDED 10-22
-    # (work/bestiary/patches/cyborg_c1_ranges.md: growth.py 41c98a5c, bake.py bceb7270, cyborg OFF byte-identical)
-    slot_kinds=False, cyborg_ids=True, plate_op=False, eye_implant=False, module_seats=False, chain_cut=False,
-    mech_tentacle=False, mech_leg=False, back_mounts=False, machine_head=False,
+    # the CYBORG family (research/CYBORG_PLAN.md §6.6). C0 built the slot table (remix/slots.py). cyborg_ids LANDED 10-22
+    # (work/bestiary/patches/cyborg_c1_ranges.md: growth.py 41c98a5c, bake.py bceb7270, cyborg OFF byte-identical).
+    # (the FAMILY round, 11-09: the caps said False for what is live) slot_kinds: t13 types every socket and writes the
+    # chains (every built glb: the octopus, the beetle, the axolotl, the human); eye_implant: C4's lens (cyborg_eye.py);
+    # chain_cut and mech_tentacle: C5 on arm L1 (cyborg_limb.py); plate_op: C3's plates on the mantle (cyborg.py)
+    slot_kinds=True, cyborg_ids=True, plate_op=True, eye_implant=True, module_seats=False, chain_cut=True,
+    mech_tentacle=True, mech_leg=False, back_mounts=False, machine_head=False,
+    # THE GRAFT path (the FAMILY round; CROSSBREED §3, §6.6): ring records (frozen in the human's and the axolotl's glbs;
+    # made at the cut on the octopus by forge/graft.py ring_record); ASSEMBLE (forge/assemble.py, one glb per cross);
+    # the seams the forge builds (graft.py's WELD: M1a; graft_socket.py's SOCKET: M2; SOCKET reversed and ARTICULATION
+    # not built); REROOT, a part's generator run at ANY host's ring and size, the organ half's and the cyborg's alike
+    # (graft.py, graft_socket.py and cyborg_limb.arm_chain() are written for an octopus arm ring, cyborg_eye.py for the
+    # octopus eye's radius: REMIX_LIBRARY §7 rank 1); the EXTRA EYE PORTS a cage cuts (the E1 re-file's item 2)
+    # (remix_r1 CROSS, the merge: reroot True with REROOT's general path, work/bestiary/remix_r1/reroot/STAGED.md, as FAMILY's
+    # landing note asks: any host's ring records, the octopus arm, the stag beetle's leg, the C5 machine and the octopus eye
+    # as donors; the hosts each part was really forged on are in the catalogs' hosts)
+    ring_records=True, assemble=True, graft_weld=True, graft_socket=True, graft_socket_reversed=False,
+    graft_articulation=False, reroot=True, eye_ports=False,
 )
 CAP_TEXT = dict(
     layer_list_plan='plan_octopus driven by the recipe\'s layer list (it is code today)',
@@ -796,7 +952,19 @@ CAP_TEXT = dict(
     mech_tentacle='the mech tentacle: rigid knuckled segments, the flange, the hoses (C5)',
     mech_leg='mech legs, tails and antennae: rigid pieces on a limbed or arthropod chain (C11, C12)',
     back_mounts='back mounts (turret, folded arm, mast) on mount plates, G5 cleared (C10)',
-    machine_head='a machine head: a head-region swap that keeps the jaw (C13)')
+    machine_head='a machine head: a head-region swap that keeps the jaw (C13)',
+    ring_records='graft RING RECORDS at the site: frozen in the glb (the human, the axolotl) or made at the cut '
+                 '(the octopus: forge/graft.py ring_record)',
+    assemble='ASSEMBLE: forge/assemble.py writes one glb per cross (the base minus each native group, plus the parts)',
+    graft_weld='a WELD seam: forge/graft.py (M1a)',
+    graft_socket='a SOCKET seam: forge/graft_socket.py (M2)',
+    graft_socket_reversed='a SOCKET REVERSED seam (a soft part leaving a hard base\'s sleeve ring): not built',
+    graft_articulation='an ARTICULATION seam (hard on hard, a condyle sunk in the opening, a sleeve inside): not built',
+    reroot='REROOT: a part\'s generator run at ANY host\'s ring, scale and texel density (REMIX_LIBRARY §7 rank 1; '
+           'graft.py, graft_socket.py and cyborg_limb.arm_chain() take the octopus arm ring today, cyborg_eye.py the '
+           'octopus eye\'s 15 mm radius)',
+    eye_ports='extra EYE PORTS: the cage cuts each port eye_ports() places (forge/ports.py cut + extend: the socket, '
+              'lids where the base has them) and seats the base\'s own eye part (E1)')
 
 # Moods are presets of bestiary.js's display weights (setDisplay: dark, eyering, spots, mottle, clouds, rings, glow) plus
 # the remix's leucophore scatter. A key a mood leaves out keeps the creature's RESTING value (the recipe's weights, and
@@ -824,8 +992,10 @@ GROWTH_MESH_TRIS = 10000
 
 RECIPE_KEYS = ('version', 'name', 'base', 'family', 'seed', 'level', 'tier', 'role', 'spec', 'sculpt', 'skin',
                'palette', 'display', 'parts', 'accessories', 'element', 'element_policy', 'affixes', 'bones',
-               'lineage', 'notes', 'cyborg')
-OFFLINE_KEYS = ('base', 'family', 'spec', 'sculpt', 'skin', 'parts', 'cyborg')
+               'lineage', 'notes', 'cyborg', 'graft')
+# (the FAMILY round) the GRAFT section is OFFLINE (a cross is forged and assembled: CROSSBREED §6.1) and OPTIONAL: make()
+# writes none, and canonical() skips an absent key, so every recipe without one hashes as before
+OFFLINE_KEYS = ('base', 'family', 'spec', 'sculpt', 'skin', 'parts', 'cyborg', 'graft')
 RUNTIME_KEYS = ('seed', 'tier', 'palette', 'display', 'element', 'element_policy', 'affixes', 'accessories', 'bones')
 
 
@@ -931,6 +1101,8 @@ def recipe_hash(r, which='all'):
                                                            if k not in CYBORG_RUNTIME})
         if not rr['cyborg']:
             rr.pop('cyborg')
+        if not rr.get('graft'):                      # (the FAMILY round) an empty graft section is no graft
+            rr.pop('graft', None)
         s = canonical(rr, keys)
     elif which == 'runtime':
         rr = dict(r, cyborg={k: v for k, v in (cyb or {}).items() if k in CYBORG_RUNTIME})
@@ -1059,10 +1231,13 @@ def resolve_auto(r):
     return r
 
 
-def mutate(r, seed, amount=0.15, sections=('spec', 'palette', 'display')):
-    """a deterministic variation: spec numbers x (1 +- amount) inside the species' ranges (coupled keys follow their
-    driver: the neck scales with the mutated ML; the end taper stays under t18's slope limit), palette colours jittered
-    (hue +-30 x amount degrees, value +-amount), the passing clouds' wavenumber and speed x (1 +- amount)"""
+def vary(r, seed, amount=0.15, sections=('spec', 'palette', 'display'), _op='vary'):
+    """a deterministic NATURAL VARIATION (base features, not a mutation: Skye 11-09, "basic base model hair/eye/skin
+    color changes are not mutations"; the E1 re-file's item 3): spec numbers x (1 +- amount) inside the species' ranges
+    (coupled keys follow their driver: the neck scales with the varied ML; the end taper stays under t18's slope
+    limit), palette colours jittered (hue +-30 x amount degrees, value +-amount), the passing clouds' wavenumber and
+    speed x (1 +- amount). Its roll keys keep their old 'mut.*' names: they are RNG SALTS, and a new name would change
+    every seeded draw (the E1 sheets, A2's random pool)"""
     r = normalise(r)
     out = copy.deepcopy(r)
     sp = SPECIES[r['base']]
@@ -1082,7 +1257,7 @@ def mutate(r, seed, amount=0.15, sections=('spec', 'palette', 'display')):
             else:
                 f = 1.0 + amount * (2.0 * roll(seed, f'mut.spec.{k}') - 1.0)
                 out['spec'][k] = float(np.clip(v * f, rng[0], rng[1]))
-        # coupled keys: jittered at the forge's scale of their driver, then carried to the mutated driver's
+        # coupled keys: jittered at the forge's scale of their driver, then carried to the varied driver's
         for k, (drv, comps) in coupled.items():
             if k not in sp['spec'] or sp['spec_ranges'].get(k) is None:
                 continue
@@ -1109,8 +1284,17 @@ def mutate(r, seed, amount=0.15, sections=('spec', 'palette', 'display')):
         cl = out['display']['clouds']
         cl['k'] = cl['k'] * (1.0 + amount * (2.0 * roll(seed, 'mut.clouds.k') - 1.0))
         cl['w'] = cl['w'] * (1.0 + amount * (2.0 * roll(seed, 'mut.clouds.w') - 1.0))
-    out['notes'] = out.get('notes', []) + [f'mutate(seed {seed}, amount {amount}, {list(sections)})']
+    # (CROSS r1c, the check's finding: the alias wrote "vary(" where live's mutate() wrote "mutate(", so every mutated recipe's
+    # canonical form and recipe_hash('all') moved) the note names the op the caller called
+    out['notes'] = out.get('notes', []) + [f'{_op}(seed {seed}, amount {amount}, {list(sections)})']
     return out
+
+
+# (the E1 re-file's item 3) the old name, DEPRECATED: kept for one landing so its callers (A2's random pool,
+# runtime_a2/tests/r01_pool.py; remix_scratch/verify/probe_gaps.py) draw exactly as before, then removed. (CROSS r1c) Its
+# notes say "mutate(...)" as live's did, so a recipe it varies hashes as before
+def mutate(r, seed, amount=0.15, sections=('spec', 'palette', 'display')):
+    return vary(r, seed, amount, sections, _op='mutate')
 
 
 def _driver_ratio(spec_over, sp, drv):
@@ -1606,11 +1790,18 @@ def manifest_from_glb(path, uv_res=256):
     # positions (G5's head region)
     recs = lambda key: {c['name']: {k: v for k, v in c.items() if k != 'name'} for c in (ex.get(key) or [])
                         if isinstance(c, dict) and 'name' in c}
+    # (the FAMILY round) the GRAFT data: the scene's RING RECORDS by name (the human writes a list, the axolotl a dict
+    # keyed by name), each as slots.ring_summary keeps it (its identity, port frame, class, density, native group's
+    # joints and sockets; the forge reads the full record), and the build's own GRAFT records (an assembled cross's)
+    rr = ex.get('rings') or []
+    rr = rr.items() if isinstance(rr, dict) else [(r.get('name'), r) for r in rr if isinstance(r, dict)]
+    rings = {(r.get('name') or k): SL.ring_summary(k, r) for k, r in rr if isinstance(r, dict) and (r.get('name') or k)}
+    grafts = [{k: v for k, v in g.items() if k != 'record'} for g in (ex.get('grafts') or []) if isinstance(g, dict)]
     man = dict(manifest=1, source=src, species=ex.get('species'), family=ex.get('family'), units=ex.get('units'), up=ex.get('up'),
                forward=ex.get('forward'), bones=bones, bone_parent=bone_parent, sockets=sockets,
                materials={k: {kk: vv for kk, vv in v.items() if kk != 'extras'} for k, v in materials.items()},
                parts=parts, uv=uv, uv_res=uv_res, budget=dict(tris=tris_total, joints=len(bones)),
-               chains=recs('chains'), regions=recs('regions'),
+               chains=recs('chains'), regions=recs('regions'), rings=rings, grafts=grafts,
                bone_world={nodes[k]['name']: wm(k)[:3, 3].round(6).tolist() for k in skin['joints']},
                inferred=inferred)
     if isinstance(ex.get('manifest'), dict):
@@ -1984,11 +2175,18 @@ def _check_parts(r, man, out, library):
                                                           'through recipe["cyborg"] (remix/slots.py), never on a socket '
                                                           f'named in parts ({s})'))
                 continue
+            if name in GRAFT_PARTS:
+                # (the FAMILY round; R14, decision 6) the parts section seats the base's OWN parts; another creature's
+                # organ is a graft, forged for its socket through the graft section
+                out.append(P('error', 'part.seat', where, f'{name} is an organ family: it grafts by KIND through '
+                                                          'recipe["graft"] (remix/slots.py\'s organ half), never on a '
+                                                          f'socket named in parts ({s})'))
+                continue
             part = PARTS.get(name) or (library or {}).get(name)
             if part is None:
                 out.append(P('error', 'part.unknown', where, f'unknown part {name!r}'))
                 continue
-            if part.get('status', 'built') != 'built':
+            if part.get('status', 'built') not in EXISTS:
                 out.append(P('missing', 'part.not_built', where, f'part {name!r} is planned, not built: '
                                                                  f'{part.get("src", "")}'))
             if part.get('seats') and s not in part['seats']:
@@ -2053,7 +2251,7 @@ def _check_accessories(r, man, out, caps):
         if item is None:
             out.append(P('error', 'accessory.unknown', where, f'unknown accessory {a.get("item")!r}'))
             continue
-        if item['status'] != 'built' and not caps.get('accessory_assets'):
+        if item['status'] not in EXISTS and not caps.get('accessory_assets'):
             out.append(P('missing', 'needs.accessory_assets', where, f'{a["item"]}: ' + CAP_TEXT['accessory_assets']))
         arch = item['archetype']
         seat = _seat_of(a, r)
@@ -2325,7 +2523,190 @@ def _check_cyborg(r, man, out, caps):
         for need in CYBORG_PARTS[F]['needs']:
             if not caps.get(need):
                 out.append(P('missing', f'needs.{need}', f'cyborg.{F}', f'{F}: ' + CAP_TEXT[need]))
+    # (the FAMILY round) a live family's part on a host it has not been forged on waits for REROOT, and a variant no forge
+    # has built is missing itself (CYBORG_PARTS hosts): the placements on a manifest, the rows without one
+    if isinstance(cyb, dict):
+        if man is not None:
+            pv = {(pl['part'], pl['variant']) for pl in placements if pl.get('part') in CYBORG_PARTS}
+        else:
+            rows = [x for rs in ((cyb.get('parts') or {}).values() if isinstance(cyb.get('parts'), dict) else [])
+                    if isinstance(rs, list) for x in rs] + list(cyb.get('limbs') if isinstance(cyb.get('limbs'), list)
+                                                               else [])
+            pv = {(x['part'], x.get('variant') or SL.FAMILIES[x['part']]['variants'][0]) for x in rows
+                  if isinstance(x, dict) and isinstance(x.get('part'), str) and x['part'] in CYBORG_PARTS}
+        for F, v in sorted(pv):
+            hosts = CYBORG_PARTS[F].get('hosts') or {}
+            if not hosts:
+                continue                                  # a planned family: its caps say what it waits on
+            if v not in hosts:
+                out.append(P('missing', 'needs.cyborg_part', f'cyborg.{F}', f'{F}.{v}: no forge has built this variant '
+                                                                            f'(built: {", ".join(hosts)})'))
+            elif r['base'] not in hosts[v] and not caps.get('reroot'):
+                out.append(P('missing', 'needs.reroot', f'cyborg.{F}', f'{F}.{v}: ' + CAP_TEXT['reroot'] +
+                             f' ({F}.{v} has been forged on {", ".join(hosts[v])} only)'))
     return placements
+
+
+# ============================================================================================ the graft section
+# (the FAMILY round, 11-09; CROSSBREED §6.1, §6.6) the ORGAN mutation as a recipe section beside the cyborg one: its
+# rows and their resolution are remix/slots.py's (check_graft, plan_graft); here its level and seed, the seeded pick,
+# the cyborg section's placements for graft.shared, the recipe's covering layers for graft.covered, what the forge still
+# lacks (needs.*), and the extra-eye op's port placement (eye_ports, moved from E1 by its re-file's item 2)
+assert TIERS == SL.FILL_ORDER, 'the graft section\'s size classes are the recipe\'s tiers'
+
+
+def _graft_plan(r, man, check_man, cyborg=()):
+    """slots.plan_graft() on the recipe: the section's own level and seed (else the recipe's), the recipe's seeded pick,
+    the cyborg section's placements (graft.shared across the two); then graft.covered over the placements
+    (slots.check_covered on the recipe's covering layers, its accessories among them)"""
+    gr = r['graft']
+    ok = lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0
+    level = gr.get('level') if isinstance(gr, dict) and ok(gr.get('level')) else r['level']
+    seed = gr.get('seed') if isinstance(gr, dict) and ok(gr.get('seed')) else r['seed']
+    placements, probs = SL.plan_graft(gr, man, r['base'], level=level, seed=seed, pick=pick_weighted, cyborg=cyborg,
+                                      check_man=check_man)
+    if man is not None and placements:
+        probs = probs + SL.check_covered(placements, man, r['base'], _covering_layers(r), code='graft.covered')
+    return placements, probs
+
+
+def graft_needs(family, variant, base, caps, seam=None, eyes=False):
+    """what a graft waits on in the forge, [(cap, text)]: its family's FORGE_CAPS (GRAFT_PARTS needs); for the extra-eye
+    op the eye ports; its seam's cap (graft_weld, graft_socket, graft_socket_reversed, graft_articulation); the PART
+    itself where its variant is only designed (its donor's generator has never run as a part); REROOT where the part
+    has been forged on other hosts only (base None: no host to judge)"""
+    g = GRAFT_PARTS[family]
+    out = [(n, CAP_TEXT[n]) for n in g['needs'] if not caps.get(n)]
+    if eyes:
+        return out + ([('eye_ports', CAP_TEXT['eye_ports'])] if not caps.get('eye_ports') else [])
+    if seam and not caps.get(f'graft_{seam.lower()}'):
+        out.append((f'graft_{seam.lower()}', CAP_TEXT[f'graft_{seam.lower()}']))
+    v = g['variants'].get(variant) or _DESIGNED
+    if v['status'] not in EXISTS:
+        out.append(('graft_part', f'{family}.{variant} is designed, not built: its donor\'s generator has not run as a '
+                                  'part yet'))
+    elif base is not None and base not in v['hosts'] and not caps.get('reroot'):
+        out.append(('reroot', CAP_TEXT['reroot'] + f' ({family}.{variant} has been forged on {", ".join(v["hosts"])} '
+                                                   'only)'))
+    return out
+
+
+def _check_graft(r, man, out, caps, cyborg=()):
+    """the graft section (CROSSBREED §6.6): every row against the closed table's organ half at validate time
+    (slots.check_graft), and on a manifest the whole resolution on its ring records, chains and regions
+    (slots.plan_graft), graft.shared with the cyborg section's placements, graft.covered over the recipe's layers and
+    accessories; then what the forge still lacks (needs.*: per placement on a manifest, per row without one). Returns
+    the placements (the budget counts them)"""
+    gr = r.get('graft')
+    if not gr:
+        return []
+    placements = []
+    if man is None:
+        out += SL.check_graft(gr, base=r.get('base'))
+    else:
+        placements, probs = _graft_plan(r, man, check_man=False, cyborg=cyborg)        # _check_manifest checks the typing
+        out += probs
+    if not isinstance(gr, dict):
+        return placements
+    if man is not None:
+        for pl in placements:
+            eyes = pl.get('key') == 'graft.eyes'
+            for cap, text in graft_needs(pl['part'], pl.get('variant'), r['base'], caps, seam=pl.get('seam'), eyes=eyes):
+                out.append(P('missing', f'needs.{cap}', pl['key'], f'{pl["part"]}' +
+                             ('' if eyes else f'.{pl["variant"]}') + f' on {pl["site"]}: {text}'))
+        return placements
+    rows = [(f'graft.parts.{K}[{i}]', row) for K, rs in (gr.get('parts') or {}).items() if isinstance(rs, list)
+            for i, row in enumerate(rs)] if isinstance(gr.get('parts'), dict) else []
+    rows += [(f'graft.limbs[{i}]', row) for i, row in enumerate(gr.get('limbs') if isinstance(gr.get('limbs'), list)
+                                                               else [])]
+    for where, row in rows:
+        F = row.get('part') if isinstance(row, dict) else None
+        if not isinstance(F, str) or F not in GRAFT_PARTS:
+            continue
+        v = row.get('variant') or SL.FAMILIES[F]['variants'][0]
+        if v not in SL.FAMILIES[F]['variants']:
+            continue
+        for cap, text in graft_needs(F, v, None, caps):
+            out.append(P('missing', f'needs.{cap}', where, f'{F}.{v}: {text}'))
+    eyes = gr.get('eyes')
+    if isinstance(eyes, dict) and isinstance(eyes.get('count'), int) and eyes['count'] != 2 and \
+            not caps.get('eye_ports'):
+        out.append(P('missing', 'needs.eye_ports', 'graft.eyes.count', f'{eyes["count"]} eyes: ' + CAP_TEXT['eye_ports']))
+    return placements
+
+
+def resolve_graft(r, manifest):
+    """the graft section's PLACEMENTS on a built creature (what the forge's general path builds from: forge/graft.py,
+    graft_socket.py, assemble.py): each built only from (kind, site, row) by remix/slots.py plan_graft on the manifest's
+    ring records, chains and regions, the manifest's typing checked too, graft.shared against the cyborg section's
+    placements, graft.covered over the recipe's layers and accessories. Raises slots.SlotError on any error (a row
+    whose part does not fit its kind is never placed). [] for a recipe without a graft section"""
+    r = normalise(r)
+    if not r.get('graft'):
+        return []
+    cyb = _cyborg_plan(r, manifest, check_man=False)[0] if r.get('cyborg') and manifest is not None else []
+    placements, probs = _graft_plan(r, manifest, check_man=True, cyborg=cyb)
+    errs = [p for p in probs if p['severity'] == 'error']
+    if errs:
+        raise SL.SlotError(errs, section='graft')
+    return placements
+
+
+def eye_ports(base, count, manifest):
+    """(E1; moved to the graft section by the E1 re-file's item 2: the eye count is a mutation) EYE COUNT as extra EYE
+    PORTS for the forge recipe: the frames of the eyes beyond the base's pair, each a port the cage cuts (forge/ports.py:
+    an opening that grows the eye socket) and the base's own eye part seats in. Placed from the base's measured eye
+    sockets (socket_eye_L / R in the glb manifest) about the head joint: each extra PAIR is the base's pair swung up
+    about the head's lateral axis by step_deg x row (the next row of a spider's or a jumping spider's eyes), radius x
+    0.8 per row [D]; an odd count puts the last eye on the midline at the bridge (socket_eyes) lifted by one step.
+    Returns [dict(name, side, world, axis, radius, row, part)]; [] for count <= 2"""
+    if count <= 2:
+        return []
+    cfg = SL.EYE_PORTS[base]
+    extra = count - 2
+    if extra > cfg['max_extra']:
+        raise ValueError(f'{base}: {count} eyes asks {extra} extra ports, the base takes at most {cfg["max_extra"]}')
+    S = manifest['sockets']
+    if 'socket_eye_L' not in S or 'socket_eye_R' not in S:
+        raise KeyError(f'{base}: the manifest has no socket_eye_L / R to place eye ports from')
+    pL, pR = np.array(S['socket_eye_L']['world']), np.array(S['socket_eye_R']['world'])
+    mid = 0.5 * (pL + pR)
+    lat = pL - pR
+    half = 0.5 * np.linalg.norm(lat)
+    lat /= np.linalg.norm(lat)
+    up = np.array([0.0, 1.0, 0.0]) - lat * lat[1]
+    up /= np.linalg.norm(up)
+    fwd = np.cross(lat, up)
+
+    # the pair's mean outward axis (the eyes' own +Z where the frame has one, else forward)
+    def axis_of(s):
+        fr = np.array(S[s].get('frame') or np.eye(3))
+        return fr[:, 2] / max(np.linalg.norm(fr[:, 2]), 1e-12)
+    aL, aR = axis_of('socket_eye_L'), axis_of('socket_eye_R')
+    # the head centre: the eye line's midpoint pulled back by the eyes' half spacing (a sphere through both eyes)
+    c = mid - fwd * half
+    step = math.radians(cfg['arc']['step_deg'] or 20.0)
+    r0 = float(manifest.get('eye_radius') or half * 0.35)
+    ports = []
+
+    def rot(v, ang):
+        # about the lateral axis (pitch up)
+        return v * math.cos(ang) + np.cross(lat, v) * math.sin(ang) + lat * np.dot(lat, v) * (1 - math.cos(ang))
+    row = 1
+    while extra >= 2:
+        for side, p, a in (('L', pL, aL), ('R', pR, aR)):
+            q = c + rot(p - c, -step * row)
+            ports.append(dict(name=f'socket_eye_{side}{row}', side=side, world=q.round(6).tolist(),
+                              axis=rot(a, -step * row).round(6).tolist(), radius=round(r0 * 0.8 ** row, 6), row=row,
+                              part=cfg['part']))
+        extra -= 2
+        row += 1
+    if extra == 1:
+        q = c + rot(mid + fwd * half * 0.25 - c, -step * row)
+        ports.append(dict(name='socket_eye_M', side='M', world=q.round(6).tolist(),
+                          axis=rot(fwd, -step * row).round(6).tolist(), radius=round(r0 * 0.8 ** row, 6), row=row,
+                          part=cfg['part']))
+    return ports
 
 
 def resolve_cyborg(r, manifest):
@@ -2501,7 +2882,7 @@ def _refused(r, pl, bad):
     return bool(wh & bad)
 
 
-def _check_budget(r, man, out, cyborg=()):
+def _check_budget(r, man, out, cyborg=(), grafts=()):
     tris = man.get('budget', {}).get('tris', 0)
     extra = sum(ACCESSORIES.get(a.get('item'), {}).get('tris', 0) for a in r['accessories'])
     for L in r['sculpt']:
@@ -2521,6 +2902,27 @@ def _check_budget(r, man, out, cyborg=()):
     if unknown:
         out.append(P('warning', 'budget.cyborg_unknown', 'budget', f'the triangle budget leaves out {unknown}: no '
                                                                    'estimate yet (CYBORG_PARTS)'))
+    # (the FAMILY round) the graft placements' NET triangles at their high estimate (GRAFT_PARTS, per variant, where its
+    # part was measured on this host: M2's -2,552 on the octopus); a refused placement costs nothing, as a cyborg's
+    gl = [pl for pl in grafts if not any(w in bad for w in (pl.get('key'), f'graft.limbs.{pl.get("site")}',
+                                                             f'graft.parts.{pl.get("kind")}@{pl.get("site")}'))]
+    est, label = {}, {}
+    for pl in gl:
+        if pl.get('key') == 'graft.eyes':
+            # the extra-eye op: the base's own eye part once per extra port, where the catalog knows its triangles
+            t = (PARTS.get(pl.get('eye_part')) or {}).get('tris')
+            n = max(int(pl.get('extra') or 0), 0)
+            est[pl['key']] = (t * n, t * n) if isinstance(t, int) else None
+            label[pl['key']] = f'{pl.get("eye_part")} x {n}'
+            continue
+        v = (GRAFT_PARTS.get(pl['part']) or {}).get('variants', {}).get(pl.get('variant')) or {}
+        est[pl['key']] = graft_tris(v, r['base']) if r['base'] in (v.get('hosts') or ()) else None
+        label[pl['key']] = f'{pl["part"]}.{pl.get("variant")}'
+    extra += sum(t[1] for t in est.values() if t is not None)
+    g_unknown = sorted({label[pl['key']] for pl in gl if est.get(pl['key']) is None})
+    if g_unknown:
+        out.append(P('warning', 'budget.graft_unknown', 'budget', f'the triangle budget leaves out {g_unknown}: no '
+                                                                  'measured estimate on this host yet (GRAFT_PARTS)'))
     # the cap: the recipe's tier, or the base species' own BUDGET tier where it is higher (the lead's C0b call: the
     # octopus is hero-class, 150,000, at any recipe tier; the recipe's tier keeps choosing its element stack and affixes)
     # a species' own budget record (budget_kinds, the lead's L1 call: the octopus's suckers at t26's 192,000): a material
@@ -2563,12 +2965,13 @@ def validate(recipe, manifest=None, library=None, caps=None):
         _check_parts(r, manifest, out, library)
         _check_accessories(r, manifest, out, caps)
         placed = _check_cyborg(r, manifest, out, caps)
+        grafted = _check_graft(r, manifest, out, caps, cyborg=placed)        # (the FAMILY round) the organ half
         if manifest is not None:
             _check_manifest(r, manifest, out)
             _check_bones(r, manifest, out)
             _check_packs(r, manifest, out)
             _check_fx(r, manifest, out)
-            _check_budget(r, manifest, out, placed)
+            _check_budget(r, manifest, out, placed, grafted)
     # one line per distinct problem
     seen, uniq = set(), []
     for p in out:
@@ -3031,9 +3434,18 @@ def _self_test(verbose=True):
           taper_slope(0.90, 0.25) < 1.0,
           f't18\'s 0.93 / 0.55 taper warns (slope 1.6); the forge\'s 0.90 / 0.25 is {taper_slope(0.90, 0.25):.2f}')
     bad_m = [s for s in range(300) if {'spec.coupled', 'spec.taper_slope', 'spec.range'} &
-             _codes(validate(mutate(r, s, amount=0.15), man))]
-    check(not bad_m, f'300 mutations keep the head mass on ML, the taper under its slope and every key in range '
-                     f'(bad seeds {bad_m[:5]})')
+             _codes(validate(vary(r, s, amount=0.15), man))]
+    check(not bad_m, f'300 seeded variations (vary) keep the head mass on ML, the taper under its slope and every key in '
+                     f'range (bad seeds {bad_m[:5]})')
+    # (CROSS r1c) the alias draws what vary() draws, and its note names it as live's mutate() did (so a mutated recipe hashes
+    # as before): the two recipes equal but for that one note
+    _nv, _nm = vary(r, 7), mutate(r, 7)
+    _strip = lambda x: {k: v for k, v in x.items() if k != 'notes'}           # noqa: E731
+    check(canonical(_strip(_nv)) == canonical(_strip(_nm)) and _nv['palette'] == _nm['palette'] and
+          _nm['notes'][-1].startswith('mutate(seed 7') and _nv['notes'][-1].startswith('vary(seed 7') and
+          _nm['notes'][:-1] == _nv['notes'][:-1],
+          'mutate() is vary()\'s deprecated alias: the same draws (the mut.* salts unchanged, E1 re-file item 3), its note '
+          'naming the op called (mutate( as live wrote it)')
     # ---- accessories: a shared seat; seat nodes (the accessories fit system)
     two = merge(r, dict(accessories=[dict(item='top_hat', fit='proposal'), dict(item='cowboy_hat', fit='proposal')]))
     check('accessory.seat_shared' in _codes(validate(two, man), 'warning'), 'two hats on one seat warn')
@@ -3084,11 +3496,14 @@ def _self_test(verbose=True):
     check(np.allclose(EL.zone_remap(c, EL.IDENTITY, 0.1), c), 'the identity zone is the identity')
     check(EL.check_table() == [], 'the element table is self-consistent')
     # ---- the CYBORG slot rule (C0: remix/slots.py; work/bestiary/tests/c00_slots.py prints every gate)
-    check(SL.check_table() == [] and len(SL.allowed_pairs()) == 18 and len(SL.CYBORG_FAMILIES) == 13   # (C3) mech_arm
-          and SL.ORGAN_FAMILIES == ('leg_graft',),
+    # (the FAMILY round) the organ half: 20 families, 49 allowed pairs beside the cyborg half's 22 (17 before the C5 mech
+    # tentacle fit limb for limb: every limb chain and a tail)
+    cyb_pairs = [p for p in SL.allowed_pairs() if p[0] in SL.CYBORG_FAMILIES]
+    check(SL.check_table() == [] and len(SL.allowed_pairs()) == 71 and len(cyb_pairs) == 22 and
+          len(SL.CYBORG_FAMILIES) == 13 and len(SL.ORGAN_FAMILIES) == 20 and 'leg_graft' in SL.ORGAN_FAMILIES,
           f'the closed table checks itself: {len(SL.CYBORG_FAMILIES)} cyborg + {len(SL.ORGAN_FAMILIES)} organ families x '
           f'{len(SL.KINDS)} kinds, '
-          f'{len(SL.allowed_pairs())} allowed pairs, none against Skye\'s never-list')
+          f'{len(SL.allowed_pairs())} allowed pairs ({len(cyb_pairs)} cyborg), none against Skye\'s never-list')
     tm = typed_fixture()
     check(SL.check_manifest(tm, 'octopus') == [], 'the octopus typed as t13\'s patch types it passes the manifest '
                                                   'checks (kinds on their joints, seats under their kinds, chains)')
@@ -3144,6 +3559,10 @@ def _self_test(verbose=True):
     check('part.seat' in _codes(validate(merge(r, dict(parts={'socket_head_top': dict(part='sensor_module',
                                                                                         material='octopus_head')})), tm),
                                 'error'), 'a cyborg family named in the organic parts section is a part.seat error')
+    check('part.seat' in _codes(validate(merge(r, dict(parts={'socket_eye_L': dict(part='eye_graft',
+                                                                                     material='octopus_eye')})), tm),
+                                'error'), 'an organ family named in the parts section is a part.seat error (R14: it '
+                                          'grafts through the graft section)')
     # ---- C0b (the lead's calls, 10-21; work/bestiary/tests/c00_slots.py G10 prints every case)
     port = copy.deepcopy(tm)
     port['sockets']['socket_head_top']['slot']['frame']['tangent'] = list(
@@ -3177,6 +3596,68 @@ def _self_test(verbose=True):
                                                               radius=0.04))]))
     check('cyborg.seat_shared' in _codes(validate(ap, tm), 'error'), 'the octopus\'s head top and mantle apex are one '
                                                                      'seat group: a hat on the apex beside a module')
+    # ---- THE GRAFT SECTION (the FAMILY round, 11-09; CROSSBREED §6.1, §6.6; work/bestiary/tests/c20_grafts.py prints
+    # every gate on the built glbs)
+    gm = lambda gr, **kw: merge(r, dict(graft=gr, **kw))
+    m1a = gm(dict(limbs=[dict(kind='tentacle', chain='R1', cut=8, part='tentacle_graft', variant='octopus_arm')]))
+    m2 = gm(dict(limbs=[dict(kind='tentacle', chain='R1', cut=8, part='leg_graft', variant='stag_beetle_fore')]))
+    p1, p2 = resolve_graft(m1a, tm), resolve_graft(m2, tm)
+    check(len(p1) == 1 and (p1[0]['chain'], p1[0]['cut'], p1[0]['root'], p1[0]['seam'], p1[0]['dressing'],
+                            p1[0]['harmonize'], p1[0]['ring_source']) ==
+          ('arm0', 8, 'arm0_08', 'WELD', 'morph', 'graft', 'at_cut') and p1[0]['native']['joints'][0] == 'arm0_09' and
+          'recipe.unknown_key' not in _codes(validate(m1a, tm)) and not _codes(validate(m1a, tm), 'error'),
+          'M1a as a graft row: R1 = arm0 from cut 8, its root arm0_08 kept, a WELD with a morph band in graft mode, the '
+          'ring made at the cut; validates clean (the graft key is a recipe key)')
+    check(len(p2) == 1 and (p2[0]['seam'], p2[0]['dressing'], p2[0]['harmonize'], p2[0]['donor']['cut'],
+                            p2[0]['donor']['side'], p2[0]['donor']['pair']) ==
+          ('SOCKET', 'membrane', 'graft', 'knee', 'R', 'fore') and not _codes(validate(m2, tm), 'error') and
+          'needs.reroot' not in _codes(validate(m2, tm)),
+          'M2 as a graft row: a SOCKET with a membrane collar, the beetle\'s right fore leg from its knee (the mid cut '
+          'matching cut 8, R13); built on this host, nothing missing')
+    foot8 = gm(dict(limbs=[dict(kind='tentacle', chain='R2', cut=8, part='foot_graft', variant='axolotl_hand')]))
+    foot12 = gm(dict(limbs=[dict(kind='tentacle', chain='R2', cut=12, part='foot_graft', variant='axolotl_hand')]))
+    check('graft.cut' in _codes(validate(foot8, tm), 'error') and not _codes(validate(foot12, tm), 'error') and
+          {'needs.graft_part'} <= _codes(validate(foot12, tm), 'missing'),
+          'limb for limb: an axolotl hand on an octopus arm takes a DISTAL cut (12 resolves, 8 is refused: graft.cut); '
+          'its part is designed, not built (needs.graft_part)')
+    eye_on_arm = gm(dict(limbs=[dict(kind='tentacle', chain='R2', cut=8, part='eye_graft')]))
+    tail_on_arm = gm(dict(limbs=[dict(kind='tentacle', chain='R2', cut=8, part='tail_graft', variant='canid_tail')]))
+    check({'graft.interface', 'graft.kind', 'graft.never'} <= _codes(validate(eye_on_arm), 'error') and
+          'graft.kind' in _codes(validate(tail_on_arm), 'error'),
+          'an eye on an arm: graft.interface, graft.kind and Skye\'s graft.never; a tail is no limb for an arm')
+    shell = gm(dict(parts={'back': [dict(part='shell_graft', variant='lobster_carapace')]}))
+    check({'graft.skye', 'graft.never'} <= _codes(validate(shell), 'error'),
+          'a shell on a back waits for Skye\'s word (graft.skye: decision 12), and her rule refuses it until then')
+    cyb_in_graft = gm(dict(limbs=[dict(kind='tentacle', chain='R1', cut=8, part='mech_tentacle')]))
+    organ_in_cyb = merge(r, dict(cyborg=dict(parts={'eye': [dict(part='eye_graft', variant='octopus')]})))
+    junk = gm(dict(parts={'eye': [dict(part='eye_graft', colour='red')]}, bogus=1))
+    check('graft.cyborg' in _codes(validate(cyb_in_graft), 'error') and
+          'cyborg.organ' in _codes(validate(organ_in_cyb), 'error') and
+          len([p for p in validate(junk) if p['code'] == 'graft.unknown' and p['severity'] == 'error']) == 2,
+          'a cyborg family in the graft section (graft.cyborg), an organ family in the cyborg\'s parts table '
+          '(cyborg.organ), unknown graft keys: errors, never warnings (G2)')
+    both = merge(m2, dict(cyborg=dict(limbs=[dict(kind='tentacle', chain='R1', cut_joint=8, part='mech_tentacle')])))
+    check('graft.shared' in _codes(validate(both, tm), 'error'),
+          'a graft and the cyborg\'s mech tentacle on one arm: graft.shared (one replacement per site)')
+    check('graft.covered' in _codes(validate(swap_layer(m2, 'arm_papillae', growth('ice')), tm), 'error'),
+          'graft.covered: an ice growth on the arms beside the grafted R1 floats past the cut')
+    e4, e7 = gm(dict(eyes=dict(count=4))), gm(dict(eyes=dict(count=7)))
+    ports = eye_ports('octopus', 4, tm)
+    check('needs.eye_ports' in _codes(validate(e4, tm), 'missing') and 'graft.eyes' in _codes(validate(e7), 'error')
+          and len(ports) == 2 and {p['side'] for p in ports} == {'L', 'R'} and ports[0]['part'] == 'octopus_eye',
+          'the extra-eye op (E1 re-file item 2): 4 octopus eyes are two ports above its pair (needs.eye_ports until a '
+          'cage cuts them); 7 is past its 6')
+    nn_g = gm(dict(limbs=[dict(kind='tentacle', chain='R1', cut=8, part='none', weight=1.0),
+                          dict(kind='tentacle', chain='R1', cut=8, part='leg_graft', variant='stag_beetle_fore')]))
+    got_g = {len(resolve_graft(merge(nn_g, dict(seed=s)), tm)) for s in range(40)}
+    check(got_g == {0, 1}, 'a none limb row: the seeded pick keeps the native arm on some seeds, grafts it on others')
+    check(recipe_hash(m2, 'offline') != recipe_hash(r, 'offline') and recipe_hash(m2, 'runtime') ==
+          recipe_hash(r, 'runtime') and recipe_hash(gm({}), 'offline') == recipe_hash(r, 'offline') and 'graft' not in r,
+          'the graft section is offline; an empty one, or none, hashes as before')
+    check(CYBORG_PARTS['mech_tentacle']['status'] == 'live' and FORGE_CAPS['mech_tentacle'] and
+          'needs.accessory_assets' not in _codes(validate(merge(r, dict(accessories=[dict(item='top_hat',
+                                                                                          fit='proposal')]))), 'missing'),
+          'the catalogs say what is live (the mech tentacle, the top hat): no stale \'missing\' for them')
     # ---- the HERO tier (the lead, 10-21: 150,000 triangles beside large's 100,000), the octopus's budget tier (C0b)
     big = typed_fixture(fake_manifest(budget=dict(tris=122560, joints=203)))
     at = lambda t: _codes(validate(merge(cy, dict(tier=t)), big), 'warning')

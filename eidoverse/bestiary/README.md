@@ -32,14 +32,16 @@ on shipped commercial games for calibration: numbers only, no game data is in th
 | Accessories | top hat, round glasses, peaked cap, monocle (in the runtime's table); more hats and soft props as files | `creature.wear(await Bestiary.accessory(name[, { path }]))` |
 | Coat | a shaggy fur coat for the octopus | `Bestiary.create({ species: 'octopus', coat: { path } })` |
 | Remixes | 48 pre-resolved random remixes of the octopus | `Bestiary.random(seed)` |
+| Grafted creatures | six pre-built crosses: an axolotl with a stag beetle's fore legs, with an octopus arm for a tail, with a mechanical tentacle for a tail, with octopus eyes; an octopus with a regenerated arm, with a beetle leg | `Bestiary.create({ species: 'axolotl', path: '<the cross>.glb' })` (the files are listed under "Grafted creatures" below) |
 | Old calls | `makeCreature` options mapped onto the realistic bases where a base exists | `Bestiary.fromMakeCreature(opts)`, `Bestiary.keyReport(opts)` |
 | Aletheia and Aporia | WIP pieces (head with a working mouth, jumpsuits, hardware and belt, boots, hard-surface arms, tentacles, eye displays, hair) as plain glb files | the engine's `GLTFLoader` (not wired into `create()` yet) |
 
 **What does not work yet:**
 
-- **Remixing new characters is not ready.** The remix system (below) has its tables and its runtime layer, but it cannot
-  yet generate a new creature (another creature's limbs, heads or skins on a base, crossbreeds, mutants) as a tool.
-  `Bestiary.random(seed)` picks from a fixed pool of 48 recipes resolved offline for the octopus.
+- **Remixing new characters is only partly there.** The remix machinery (below) is in the kit and six pre-built crosses
+  load, but a NEW cross still needs its part forged offline by the forge, whose inputs are not in the repository; no
+  tool yet turns a recipe into a new creature (another creature's limbs, heads or skins on a base, crossbreeds,
+  mutants) on its own. `Bestiary.random(seed)` picks from a fixed pool of 48 recipes resolved offline for the octopus.
 - **Only these bases are shipped.** Other creatures named in the code (wolf, deer, hawk, lobster, tarantula and more) are
   in progress and their files are not in this drop; `makeCreature` stances without a realistic base fall back to the
   old creator (`Bestiary.fromMakeCreature` says so in its key report).
@@ -133,6 +135,25 @@ below are under `work/bestiary/`; sizes in MB as shipped.
 | `cyborg_c5b/hose/cyborg_hose_arm7_s3.glb` | 27,482 | 8 (max 256) | 4.3 | live |
 | `runtime_a2/random_pool.json` (the 48 octopus remixes `random()` picks from) | - | - | 0.2 | live |
 
+### Grafted creatures (third drop)
+
+Each is one creature's part on another, made by the kit's forge and remix machinery, and loads with
+`Bestiary.create({ species: '<the host>', path: '<the file>' })`. The recipe catalogue (`remix/recipe.py`) names them as
+the DEFAULT size of each graft; the other sizes it lists ('long', 'ring', 'slender', the first eye) name files that are
+not shipped.
+
+| File | Triangles | Textures | MB | Status |
+|---|---:|---|---:|---|
+| `remix_r1/cross/out/ax5hb/glb/ax5hb_baked.glb` (axolotl with a stag beetle's fore legs, both, from the femur, at the host limb's own length; 124 joints) | 109,064 | 15 (max 2048) | 15.7 | live |
+| `remix_r1/cross/out/ax2host/glb/ax2host_baked.glb` (axolotl with an octopus arm for a tail, at the host tail's own length; 143 joints) | 80,172 | 19 (max 2048) | 17.5 | live |
+| `remix_r1/cross/out/c5host/glb/c5host_baked.glb` (axolotl with a mechanical tentacle for a tail, at the host tail's own length: eight knuckles; pass `cyborg: { glow, tint }` for its lights; 149 joints) | 84,320 | 18 (max 2048) | 16.0 | live |
+| `remix_r1/cross/out/ax4d/glb/ax4_baked.glb` (axolotl with octopus eyes) | 79,172 | 13 (max 2048) | 13.5 | live |
+| `patches/scratch_crossbreed_m1/out/glb/m1a.glb` (octopus with one arm regenerated from a cut by its own arm generator: the first graft through the weld gates; 203 joints) | 122,560 | 27 (max 2048) | 23.1 | live |
+| `patches/scratch_crossbreed_m2/out_m2c/glb/m2.glb` (octopus with a stag beetle's fore leg, from the knee, on one arm; 195 joints) | 277,127 | 27 (max 2048) | 31.7 | live |
+
+A resting grafted tail coils flat on the floor by default; `create({ ..., gait: { tailCoil: k } })` sets it (1 = the
+octopus arm's own resting coil, lower = the tail lies longer, 0 = no coil).
+
 ### Humans
 
 | File | Triangles | Textures | MB | Status |
@@ -209,6 +230,14 @@ for scenes that already load it.
 | `human/aletheia/suit_low/out/aletheia_jumpsuit_low_v5_tucked.glb` / `aporia_jumpsuit_low_v5_tucked.glb` (v4 with the zip's open V cut out between its two rows; outside the cut it is v4) | 9,314 each | 3 each (max 2048) | 10.9 / 10.9 | delivered |
 | `human/aletheia/suit_low/out/aletheia_neck_v2_under_the_open_zip.glb` (the neck piece between head and jumpsuit, seen through the open zip; vertex colours; identity matrix in the figure's frame) | 828 | - | 0.03 | delivered |
 
+Newer pieces (third drop).
+
+| File | Triangles | Textures | MB | Status |
+|---|---:|---|---:|---|
+| `human/aletheia/head_low/jaw_fix/out/aletheia_head_low_v19.glb` (head v16 with the jaw skinned as a mandible: the chin and the lower border ride the jaw whole, so the jaw line keeps its curve when the mouth opens with the head turned; the cheek tabs' painted contact line taken out of the skin maps where the skin slides under them; the same topology, UVs, joints and face table as v16) | 11,852 | 4 (max 2048) | 7.6 | delivered |
+| `human/aletheia/coat_rig/armpit_fix/out/aletheia_coat_rigged_lod0.glb` / `..._lod1.glb` / `..._lod2.glb` (Aletheia's transparent coat on spring bones: 139 joints, 33 that follow the body and 106 on springs; the drape's folds baked; its top is bound to the jumpsuit's skin and its `extras` record which) | 16,674 / 7,028 / 2,000 | 2 each (2048 / 1024 / 512) | 7.0 / 5.6 / 4.9 | delivered |
+| `human/aletheia/coat_rig/armpit_fix/runtime/coat_rig.js`, `coat_springs.js`, `coat_film_maps.js` (the coat's runtime: loading a rigged coat on a figure, the spring solver with its fold rows and body colliders, the transparent film material) | - | - | 0.1 | delivered |
+
 Every glb carries notes in its `extras` (frames, sockets, units). Where a file's `extras` describe its texture set
 (a `uv_set` size of 4096), they describe the master; the shipped file's maps are 2048.
 
@@ -221,9 +250,16 @@ element, growths, accessories; validated, then resolved into a runtime block). `
 block's runtime layers to a creature (palette, display moods, element glow, accessories, bone tweaks). Each Python
 module runs a self-test (`python -m eidoverse.bestiary.remix.recipe` from the repository root).
 
-What is missing is the generator: grafting another creature's parts onto a base at the host's size, swapping skins
-across species, and growing new creatures from those pieces. Today the pool behind `Bestiary.random()` was resolved
-offline for the octopus only.
+Since the third drop the kit also carries the grafting machinery: `slots.py` and `recipe.py` hold organ families and a
+`graft` section beside `cyborg` (which donor variants are built, which need a part forged, a default size per host);
+the forge regenerates or re-roots a donor's part at a host's ring record (`forge/graft.py`, `graft_socket.py`,
+`cyborg_limb.py`); at run time a grafted limb steps with its own solver on the host's gait, a grafted tail carries the
+host's wave on down the graft, and mechanical parts mount per chain (`runtime/bestiary.js`, `locomotion.js`,
+`axolotl.js`). The six crosses listed under "Grafted creatures" were made this way and load with one `create()` call.
+
+What is still missing is the generator as a tool: a new cross needs its part forged offline, skins are not yet swapped
+across species, and nothing grows a new creature from a recipe on its own. The pool behind `Bestiary.random()` was
+resolved offline for the octopus only.
 
 ## Licences and credits
 

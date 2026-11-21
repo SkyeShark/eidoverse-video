@@ -58,7 +58,9 @@ import { beetleMaterial, beetleUniforms, useFamilies as useBeetleFamilies, setFa
 import { SPECIES, registerSpecies, manifestOf } from './species.js';
 // (A1) THE GAIT SCHEDULER and the step solvers per anatomy (runtime/locomotion.js): the B11 hexapod moved there as its first case
 // (the same arithmetic in the same order), the limbed case (quad / biped on any base's leg chains)
-import { hexapodMotion, limbedMotion } from './locomotion.js';
+// (CROSS: the octopus arm's path law lives in locomotion.js now, one piece of code for radialMotion's arms and an arm grafted
+// for a tail: armSeeds, armCoilMul, armCurvature)
+import { hexapodMotion, limbedMotion, armSeeds, armCoilMul, armCurvature, eyeSaccade } from './locomotion.js';
 // (A1) THE ONE CONTRACT on every creature (runtime/spine.js): speed / turn / walkTo / setHeading / fly / land / anchor / parts /
 // say / talking / setTalkEnvelope / idles, the node-constraint pass; nothing runs until its call is made
 import { attachSpine } from './spine.js';
@@ -910,23 +912,38 @@ function fleshY(reach, k, rad) {
 // ASSEMBLE, forge/assemble.py, rewrites for a GRAFTED chain, whose joints past its root are the part's own: arm0_00 ..
 // arm0_08, arm0_g09 .. arm0_g23), in the records' order, each the bones its record names and its per-joint radius; a
 // glb without records (every glb before C0b lands) keeps the name scan arm<j>_<kk> from 0 until a name is missing, so
-// its motion is the one it had. A record of another anatomy is no arm here (its base's own motion reads it)
+// its motion is the one it had.
+// MOUNT (work/bestiary/remix_r1/mount/STAGED.md; REMIX_LIBRARY §7 rank 3): EVERY CHAIN FAMILY, not only the tentacles:
+// one entry per record (a leg, a tail, an antenna, a gill as well as an arm), each with the record's own fields (kind,
+// anatomy, side, label, tip, cuts, graft) and the SOLVER its slot dispatches to on a radial base: 'arm' (a tentacle:
+// radialMotion's resting path), 'leg' (a grafted arthropod leg: solveLeg), null (radialMotion poses nothing there: the
+// limbed, hexapod and salamander cases pose those slots from the same records, locomotion.js slotAnatomy). The parts'
+// mount (mountCyborgParts) finds its host chain here by the record's name or label on any base. A record of the radial
+// anatomy names bones of this glb or throws, as before; another family's missing joints are listed (entry.missing), and
+// a part mounted on that chain refuses it
 export function armChains(gltf, bones) {
     const recs = gltf?.userData?.bestiary?.chains;
     const out = [];
     if (Array.isArray(recs) && recs.length) {
         for (const r of recs) {
-            if ((r.anatomy || r.kind) !== 'tentacle') continue;
+            if (!Array.isArray(r.joints)) continue;
+            const anatomy = r.anatomy || r.kind;
             const chain = r.joints.map((n) => bones.get(n));
             const miss = r.joints.filter((n, k) => !chain[k]);
-            if (miss.length) throw new Error(`[Bestiary] chain ${r.name}: joints ${miss.join(', ')} are no bones of this glb`);
+            if (miss.length && anatomy === 'tentacle') {
+                throw new Error(`[Bestiary] chain ${r.name}: joints ${miss.join(', ')} are no bones of this glb`);
+            }
             // CROSSBREED M2: a graft of another ANATOMY on this chain (the record's graft.anatomy: 'arthropod_leg', the
             // beetle's tibia, tarsomeres and claws from joint graft.first on): its own step solver poses it (solveLeg)
             // (M2b: the native arm's bind length, the plain resting path's, where the record carries it)
             const g = r.graft;
             const leg = g?.anatomy === 'arthropod_leg'
                 ? { first: g.first, roles: g.roles, knee: g.knee, nativeLength: g.native_length ?? null } : null;
-            out.push({ name: r.name, bones: chain, radius: Array.isArray(r.radius) ? r.radius : null, leg });
+            out.push({ name: r.name, bones: miss.length ? chain.filter(Boolean) : chain,
+                radius: Array.isArray(r.radius) ? r.radius : null, leg,
+                kind: r.kind ?? null, anatomy, side: r.side ?? null, label: r.label ?? null, tip: r.tip ?? null,
+                cuts: Array.isArray(r.cuts) ? r.cuts : [], graft: g || null, missing: miss,
+                solver: anatomy === 'tentacle' ? (leg ? 'leg' : 'arm') : null });
         }
         return out;
     }
@@ -935,9 +952,15 @@ export function armChains(gltf, bones) {
         for (let k = 0; bones.get(`arm${j}_${String(k).padStart(2, '0')}`); k++) {
             chain.push(bones.get(`arm${j}_${String(k).padStart(2, '0')}`));
         }
-        out.push({ name: `arm${j}`, bones: chain, radius: null });
+        out.push({ name: `arm${j}`, bones: chain, radius: null, kind: 'tentacle', anatomy: 'tentacle', cuts: [], graft: null,
+            missing: [], solver: 'arm' });
     }
     return out;
+}
+
+// MOUNT: a chain entry by its record's name or anatomical label (the recipe's limbs rows name either: 'arm7' or 'L1')
+export function chainOf(chains, name) {
+    return (chains || []).find((c) => c.name === name) || (chains || []).find((c) => c.label === name) || null;
 }
 
 export function fleshReach(group, bones, chains = null) {
@@ -1219,11 +1242,87 @@ export function cableMeshes(cable, meshes, x) {
     return out;
 }
 
+// MOUNT (work/bestiary/remix_r1/mount/STAGED.md; REMIX_LIBRARY §7 rank 3): THE PARTS BY THEIR RECORDS, on any base.
+//   * the HOST CHAIN is the record armChains found by the part's chain name or label (api.chains: every chain family), its
+//     bones the record's joints (never arm<j>_<kk> by name), its mount keyed by the record's index in that list;
+//   * a CHORD-FRAME chain part (C5's mech tentacle, CHORD_PARTS) maps its own joints onto the host chain's by its record:
+//     its joints run from its cut's ring joint (cut - 1) to the tip, part joint i on host joint cut - 1 + i, its helper
+//     joints (record.helpers, their knuckles in host joint numbers) named by the host chain (arm7_16_cross) and parented
+//     by their record's parent (a part joint, or another helper);
+//   * a HOST-BIND chain part (the cyborg beetle's mech fore leg, HOST_BIND_PARTS) names the host chain's own bones in its
+//     skin and carries the host's inverse binds (as the hose does); its helper joints are its own nodes re-made under
+//     their host parents, each with its rule (bone.userData.helper: the hexapod's pistons and constraints.js read it);
+//   * the HIDDEN HOST: the glb's cut record (t13's cyborg_cut: arms by chain name, eyes by side, and the PRIMITIVES it
+//     names) where it has one; else the host's own records: the ring record at the part's flange joint (its native
+//     group's joints), an eye socket's slot joint, a host-bind part's slot joints from its cut; every triangle of the
+//     host's primitives whose three vertices ride those joints hidden (dropOnJoints), in the same one pass (dropRanges);
+//   * ANY NUMBER of chain parts (the lead's ONE gap): one AO floor per chord-frame part (U.aoFloors, the parts' order),
+//     one ground line per mounted arm (radialMotion's groundProfile per mount), each hose and feed sharing ITS chain's mech
+//     material (the last one mounted where it names none);
+//   * a mounted part on a chain radialMotion does not pose (a non-radial base, or a slot with no radial solver) has its
+//     helpers posed AFTER the host's own motion (out.post: create() runs it once the creature's motion has run).
+// The octopus's own records (its chains in their order, its cut record and its primitives' names) give back every value
+// the octopus-named code gave: a creature without parts runs none of this.
+const CHORD_PARTS = new Set(['mech_tentacle', 'mech_tail', 'mech_antenna']);
+const HOST_BIND_PARTS = new Set(['mech_leg']);
+
+function heaviestJoint(sk, si, sw, i) {
+    // a skinned vertex's heaviest joint (the first of equals, as fleshReach reads it): its bone
+    let c = 0, w = sw.getX(i);
+    for (let q = 1; q < 4; q++) if (sw.getComponent(i, q) > w) { w = sw.getComponent(i, q); c = q; }
+    return sk.bones[si.getComponent(i, c)];
+}
+
+export function rangesOnJoints(mesh, names) {
+    // the triangles of a skinned primitive whose three vertices all ride joints named in `names` (their heaviest joint), as
+    // [start, count] index ranges (index units, runs merged): what a replaced chain's part hides on a base with no cut record
+    const g = mesh.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, idx = g.index?.array;
+    if (!mesh.isSkinnedMesh || !si || !sw || !idx) return [];
+    const on = new Uint8Array(g.attributes.position.count);
+    for (let i = 0; i < on.length; i++) on[i] = names.has(heaviestJoint(mesh.skeleton, si, sw, i)?.name) ? 1 : 0;
+    const out = [];
+    let a = -1;
+    for (let t = 0; t < idx.length; t += 3) {
+        const hit = on[idx[t]] && on[idx[t + 1]] && on[idx[t + 2]];
+        if (hit && a < 0) a = t;
+        if (!hit && a >= 0) { out.push([a, t - a]); a = -1; }
+    }
+    if (a >= 0) out.push([a, idx.length - a]);
+    return out;
+}
+
+function helperRule(x, name, slotJ) {
+    // a host-bind part's HELPER JOINT's rule (bone.userData.helper, as an assembled glb carries it on the node:
+    // variants/cyborg_stag_beetle_rig.glb's knee pistons; the hexapod's pistons and constraints.js read it) from the part's
+    // record: its row (x.helpers: name, parent, kind, L0) with the constraint's data where the row gives it (aim, pin,
+    // pivot, cylinder), else the part's piston block (x.pistons: { <key>: { pivot_<role>, pin_<role> } }, the key the one
+    // the helper's name carries: knee_ext_cyl -> 'ext') and the slot's joints (a cylinder aims at the joint after its
+    // parent, where its pin rides: the femur's cylinder at the tibia). null: no rule (the bone keeps its bind)
+    const h = (x.helpers || []).find((r) => r.name === name);
+    if (!h) return null;
+    if (h.kind === 'piston_cylinder') {
+        const key = Object.keys(x.pistons || {}).find((k) => name.includes(`_${k}_`));
+        const pk = key ? x.pistons[key] : {};
+        const pin = h.pin ?? Object.entries(pk).find(([k]) => k.startsWith('pin'))?.[1];
+        const pivot = h.pivot ?? Object.entries(pk).find(([k]) => k.startsWith('pivot'))?.[1];
+        const pi = slotJ.indexOf(h.parent);
+        const aim = h.aim ?? (pi >= 0 && pi + 1 < slotJ.length ? slotJ[pi + 1] : null);
+        return pin && aim ? { rule: 'piston_cylinder', aim, pin, L0: h.L0, pivot, src: 'the part record (mountCyborgParts)' } : null;
+    }
+    if (h.kind === 'piston_rod') return { rule: 'piston_rod', cylinder: h.cylinder ?? h.parent, L0: h.L0 };
+    return null;
+}
+
 async function mountCyborgParts(api, parts, opts, U) {
     const { group, bones, sockets, gltf } = api;
+    // MOUNT: the host's chain records (every family) and whether radialMotion poses its arms
+    const chains = api.chains || armChains(gltf, bones);
     const cut = gltf.parser.json.meshes?.[0]?.extras?.cyborg_cut || null;
     const prims = primitiveMeshes(gltf, group);
-    const out = { parts: [], mounts: {}, cables: [] };
+    // (the cut record's primitives by role: t13 names them, arms / suckers / eye; the octopus's names where it names none)
+    const primOf = (role, name) => prims[cut?.primitives?.[role]] || prims[name] || null;
+    const rings = gltf.userData?.bestiary?.rings || {};
+    const out = { parts: [], mounts: {}, cables: [], post: null };
     const asPart = (m, kind) => {
         m.castShadow = true;
         m.receiveShadow = true;
@@ -1231,13 +1330,32 @@ async function mountCyborgParts(api, parts, opts, U) {
         m.userData.cyborgPart = kind;
     };
     let mechMaterial = null;
+    const mechByChain = new Map();             // (MOUNT: each chain part's material, for the hose and feed on its chain)
     let nMech = 0;
     const later = [];
+    const posts = [];                          // (MOUNT: chord-frame parts whose helpers radialMotion does not pose)
     // every primitive's hidden ranges, gathered from every part and dropped together at the end (dropRanges)
     const drops = new Map();
     const drop = (mesh, range) => {
         if (!drops.has(mesh)) drops.set(mesh, []);
         drops.get(mesh).push(range);
+    };
+    // MOUNT: the host's triangles on a set of joints hidden, over its own primitives (a mounted part's are not among them),
+    // those whose material kind passes `keep`; returns the triangles hidden
+    const kindOfPrim = (mesh) => {
+        const as = gltf.parser.associations?.get(mesh);
+        const mi = as && as.meshes !== undefined ? gltf.parser.json.meshes[as.meshes].primitives[as.primitives ?? 0]?.material : null;
+        return mi == null ? null : gltf.parser.json.materials?.[mi]?.extras?.bestiary ?? null;
+    };
+    const hostPrims = [];
+    group.traverse((o) => { if (o.isSkinnedMesh && gltf.parser.associations?.get(o)) hostPrims.push(o); });
+    const dropOnJoints = (names, keep = () => true) => {
+        let n = 0;
+        for (const mesh of hostPrims) {
+            if (!keep(kindOfPrim(mesh))) continue;
+            for (const r of rangesOnJoints(mesh, names)) { drop(mesh, r); n += r[1] / 3; }
+        }
+        return n;
     };
     for (const part of parts) {
         const pg = await loadPart(part);
@@ -1253,42 +1371,67 @@ async function mountCyborgParts(api, parts, opts, U) {
                 sock.add(m);
             }
             const side = /_R$/.test(part.socket) ? 'eye_R' : 'eye_L';
-            if (cut?.eyes?.[side] && prims.octopus_eye) drop(prims.octopus_eye, cut.eyes[side]);
-            else console.warn(`[bestiary] eye_implant on ${part.socket}: the glb carries no eye ranges (t13 BESTIARY_CUT)`);
-            out.parts.push({ kind: part.kind, socket: part.socket, meshes });
-        } else if (part.kind === 'mech_tentacle') {
-            const x = pg.userData?.bestiary || {};
-            const j = part.chain;
-            const chain = [];
-            for (let k = 0; ; k++) {
-                const b = bones.get(`${j}_${String(k).padStart(2, '0')}`);
-                if (!b) break;
-                chain.push(b);
+            const eyeP = primOf('eye', 'octopus_eye');
+            if (cut?.eyes?.[side] && eyeP) drop(eyeP, cut.eyes[side]);
+            else {
+                // MOUNT: no cut record: the organic eye hidden by the SOCKET'S OWN RECORD (its slot joint): the triangles of
+                // the eye primitives (material kind 'eye') riding that joint
+                const ej = sock.userData?.slot?.joint;
+                const n = ej ? dropOnJoints(new Set([ej]), (k) => k === 'eye') : 0;
+                if (!n) console.warn(`[bestiary] eye_implant on ${part.socket}: the glb carries no eye ranges (t13 BESTIARY_CUT) `
+                    + `and no eye triangles ride the socket's joint ${ej ?? '(none)'}: the organic eye stays`);
             }
-            const k0 = parseInt(x.joints[0].slice(4, 6), 10);
+            out.parts.push({ kind: part.kind, socket: part.socket, meshes });
+        } else if (CHORD_PARTS.has(part.kind)) {
+            // MOUNT: a chord-frame chain part on ANY host chain by the records (the header above): C5's mech tentacle on
+            // an octopus arm, on another arm, or REROOT's on another base's chain
+            const x = pg.userData?.bestiary || {};
+            const rec = chainOf(chains, part.chain);
+            if (!rec) {
+                throw new Error(`[Bestiary] cyborg ${part.kind}: no chain ${part.chain} on this creature (have: `
+                    + `${chains.map((c) => c.name).join(', ')})`);
+            }
+            if (rec.missing?.length) throw new Error(`[Bestiary] cyborg ${part.kind} on ${rec.name}: its record names no bones ${rec.missing.join(', ')}`);
+            const j = rec.name, chain = rec.bones;
+            // its joints from its cut's ring joint to the tip (part joint i on host joint k0 + i: C5's arm_07 .. arm_23 on
+            // the arm's joints 7 .. 23), its cut the record's (the one it was built at), else the recipe row's
+            const pcut = x.cut ?? part.cut;
+            const k0 = pcut - 1;
+            if (!Array.isArray(x.joints) || !(k0 >= 0) || k0 + x.joints.length !== chain.length) {
+                throw new Error(`[Bestiary] cyborg ${part.kind} on ${j}: its ${x.joints?.length} joints from cut ${pcut} do not run `
+                    + `to the tip of the chain's ${chain.length} (a part is generated for its chain: REROOT)`);
+            }
+            const pj = new Map(x.joints.map((n, i) => [n, k0 + i]));
+            const hrec = new Map((x.helpers || []).map((h) => [h.name, h]));
+            // a helper's host name: the host chain's name for the part's joint stem (C5's arm_16_cross on arm7: arm7_16_cross)
+            const stem = String(x.joints[0]).replace(/\d+$/, '');
+            const hostName = (nm) => `${j}_${nm.startsWith(stem) ? nm.slice(stem.length) : nm}`;
             const X = (k) => x.bind_x[k - k0];
             const m = meshes[0];
             const helper = {}, nb = [], inv = [];
             for (const b of m.skeleton.bones) {
-                const nm = b.name, k = parseInt(nm.slice(4, 6), 10);
-                if (nm.length === 6) {
+                const nm = b.name;
+                if (pj.has(nm)) {
+                    const k = pj.get(nm);
                     const M = k + 1 < chain.length ? chordBasis(chain[k + 1].position) : new THREE.Matrix4();
                     const B = M.clone().setPosition(new THREE.Vector3().setFromMatrixColumn(M, 0).multiplyScalar(-X(k)));
                     nb.push(chain[k]);
                     inv.push(B);
                 } else {
+                    const h = hrec.get(nm);
+                    if (!h) throw new Error(`[Bestiary] cyborg ${part.kind}: its joint ${nm} is neither a chain joint nor a helper of its record`);
                     const hb = new THREE.Bone();
-                    hb.name = `${j}_${nm.slice(4)}`;
+                    hb.name = hostName(nm);
                     helper[nm] = hb;
                     nb.push(hb);
-                    inv.push(new THREE.Matrix4().makeTranslation(-X(k), 0, 0));
+                    inv.push(new THREE.Matrix4().makeTranslation(-X(h.knuckle), 0, 0));
                 }
             }
             const helpers = [];
-            for (const h of x.helpers) {
+            for (const h of x.helpers || []) {
                 const hb = helper[h.name];
-                const onShell = h.parent.length > 6;
-                (onShell ? helper[h.parent] : chain[parseInt(h.parent.slice(4, 6), 10)]).add(hb);
+                const onShell = !pj.has(h.parent);
+                (onShell ? helper[h.parent] : chain[pj.get(h.parent)]).add(hb);
                 bones.set(hb.name, hb);
                 helpers.push({ bone: hb, kind: h.kind, k: h.knuckle, onShell, lc: x.cardan?.crank_lc?.[String(h.knuckle)] ?? 0 });
             }
@@ -1296,6 +1439,7 @@ async function mountCyborgParts(api, parts, opts, U) {
             m.bind(new THREE.Skeleton(nb, inv), new THREE.Matrix4());
             m.material = cyborgMaterial(m.material, cyborgUniforms(U, opts, m.material));
             mechMaterial = m.material;
+            mechByChain.set(j, m.material);
             asPart(m, part.kind);
             group.add(m);
             // the replaced arm: its distal triangles and suckers hidden, its cut ring and the ring before pinned
@@ -1303,18 +1447,21 @@ async function mountCyborgParts(api, parts, opts, U) {
             // this part's own AO floor (C5d: one uniform triple per mech part, in the parts' order)
             const fl = U.aoFloors?.[nMech++];
             if (ca) {
-                if (fl && prims.octopus_suckers && chain.length > 8) {
+                // (MOUNT: the cut record's primitives and its pinned ring's joint, the chain's cut - 1: chord 7 on an arm)
+                const armsP = primOf('arms', 'octopus_arms'), suckP = primOf('suckers', 'octopus_suckers');
+                const kp = chain.indexOf(bones.get(ca.pin.joint));
+                if (fl && suckP && kp >= 0 && chain.length > kp + 1) {
                     // the AO FLOOR's strip (skinMaterial): in chord 7's frame at the bind, x from the hidden suckers
                     // short of the cut ring (the suckers primitive's cut range, read before any range is dropped) to
                     // the ring (its pinned vertices' mean), within the angle round the oral side they span (+0.1 rad)
                     group.updateMatrixWorld(true);
-                    const G7i = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(chain[7].matrixWorld)
-                        .multiply(chordBasis(chain[8].position)).invert();
-                    const v = new THREE.Vector3(), pa = prims.octopus_arms.geometry.attributes.position;
+                    const G7i = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(chain[kp].matrixWorld)
+                        .multiply(chordBasis(chain[kp + 1].position)).invert();
+                    const v = new THREE.Vector3(), pa = armsP.geometry.attributes.position;
                     let xr = 0;
                     for (const i of ca.pin.vertices) xr += v.fromBufferAttribute(pa, i).applyMatrix4(G7i).x;
                     xr /= ca.pin.vertices.length;
-                    const sk = prims.octopus_suckers, ps = sk.geometry.attributes.position, ix = sk.geometry.index.array;
+                    const sk = suckP, ps = sk.geometry.attributes.position, ix = sk.geometry.index.array;
                     let x0 = Infinity, cmin = 1.0;
                     for (let i = ca.suckers[0]; i < ca.suckers[0] + ca.suckers[1]; i++) {
                         v.fromBufferAttribute(ps, ix[i]).applyMatrix4(G7i);
@@ -1328,9 +1475,9 @@ async function mountCyborgParts(api, parts, opts, U) {
                         fl.floor.value = AO_FLOOR;
                     }
                 }
-                drop(prims.octopus_arms, ca.distal);
-                if (prims.octopus_suckers) drop(prims.octopus_suckers, ca.suckers);
-                const sk = prims.octopus_arms;
+                drop(armsP, ca.distal);
+                if (suckP) drop(suckP, ca.suckers);
+                const sk = armsP;
                 const bi = sk.skeleton.bones.indexOf(bones.get(ca.pin.joint));
                 const si = sk.geometry.attributes.skinIndex, sw = sk.geometry.attributes.skinWeight;
                 for (const v of ca.pin.vertices) {
@@ -1340,16 +1487,75 @@ async function mountCyborgParts(api, parts, opts, U) {
                 si.needsUpdate = true;
                 sw.needsUpdate = true;
             } else {
-                console.warn(`[bestiary] mech_tentacle on ${j}: the glb carries no cut (t13 BESTIARY_CUT): its arm stays`);
+                // MOUNT: no cut record for this chain: the host's own RING RECORD at the part's flange joint (its native
+                // group's joints, the ones a graft at that ring replaces: forge/graft.py ring_record) hides the triangles
+                // riding them; the ring itself stays the host's skin (the part's flange seats on it)
+                const ce = rec.cuts.find((c) => c && typeof c === 'object' && c.joint === k0 && c.ring);
+                const nat = ce ? rings[ce.ring]?.native?.joints : null;
+                const n = Array.isArray(nat) && nat.length ? dropOnJoints(new Set(nat)) : 0;
+                if (!n) {
+                    console.warn(`[bestiary] ${part.kind} on ${j}: the glb carries no cut (t13 BESTIARY_CUT) and no ring record `
+                        + `at joint ${k0}: its ${rec.kind} stays`);
+                }
             }
-            out.mounts[parseInt(j.slice(3), 10)] = { chain: j, table: x.radius_table, cut: x.cut,
-                firstCardan: x.cardan?.knuckles?.[0] ?? 16, helpers };
+            const mount = { chain: j, table: x.radius_table, cut: x.cut, firstCardan: x.cardan?.knuckles?.[0] ?? 16, helpers };
+            out.mounts[chains.indexOf(rec)] = mount;
+            // (MOUNT: on a chain radialMotion does not pose, the helpers are posed after the host's own motion: out.post)
+            if (!(api.radial && rec.solver)) posts.push({ rec, mount });
             out.parts.push({ kind: part.kind, chain: j, meshes, helpers: helpers.map((h) => h.bone.name) });
+        } else if (HOST_BIND_PARTS.has(part.kind)) {
+            // MOUNT: a host-bind chain part (the header above): the cyborg beetle's mech fore leg on its own leg chain,
+            // mounted at runtime as ASSEMBLE joined it offline (variants/cyborg_stag_beetle_rig.glb)
+            const x = pg.userData?.bestiary || {};
+            const rec = chainOf(chains, part.chain || x.slot?.chain);
+            if (!rec) {
+                throw new Error(`[Bestiary] cyborg ${part.kind}: no chain ${part.chain || x.slot?.chain} on this creature (have: `
+                    + `${chains.map((c) => c.name).join(', ')})`);
+            }
+            const m = meshes[0];
+            const made = new Map(), nb = [];
+            for (const b of m.skeleton.bones) {
+                const o = bones.get(b.name);
+                if (o) { nb.push(o); continue; }
+                // a helper joint: the part's own node (built on the host's bind) re-made as a bone of the creature
+                const hb = new THREE.Bone();
+                hb.name = b.name;
+                hb.position.copy(b.position);
+                hb.quaternion.copy(b.quaternion);
+                hb.scale.copy(b.scale);
+                made.set(b.name, { hb, src: b });
+                nb.push(hb);
+            }
+            for (const [nm, { hb, src }] of made) {
+                const pn = src.parent?.name;
+                const par = made.get(pn)?.hb || bones.get(pn);
+                if (!par) throw new Error(`[Bestiary] cyborg ${part.kind}: its helper ${nm}'s parent ${pn} is no bone of this creature`);
+                par.add(hb);
+            }
+            const slotJ = Array.isArray(x.slot?.joints) && x.slot.joints.length ? x.slot.joints : rec.bones.map((b) => b.name);
+            for (const [nm, { hb }] of made) {
+                bones.set(nm, hb);
+                const rule = helperRule(x, nm, slotJ);
+                if (rule) hb.userData.helper = rule;
+            }
+            m.removeFromParent();
+            m.bind(new THREE.Skeleton(nb, m.skeleton.boneInverses.map((b) => b.clone())), new THREE.Matrix4());
+            m.material = cyborgMaterial(m.material, cyborgUniforms(U, opts, m.material));
+            mechMaterial = m.material;
+            mechByChain.set(rec.name, m.material);
+            asPart(m, part.kind);
+            group.add(m);
+            // the replaced pieces: every host triangle on the slot's joints from its cut (the leg's own pieces and the
+            // sleeves on their distal joints: the cyborg beetle's `replaced` list)
+            const c0 = Math.max(0, slotJ.indexOf(x.slot?.cut ?? slotJ[0]));
+            const hidden = dropOnJoints(new Set(slotJ.slice(c0)));
+            out.parts.push({ kind: part.kind, chain: rec.name, meshes, helpers: [...made.keys()], hidden });
         } else if (part.kind === 'hose' || part.kind === 'feed') {
             // (C3d: the feed's cables and hardware mount as the hose's: ONE cable system, runtime/cyborg_cable.js)
             later.push({ part, meshes, pg });
         } else {
-            throw new Error(`[Bestiary] cyborg part kind '${part.kind}': not a part this runtime mounts`);
+            throw new Error(`[Bestiary] cyborg part kind '${part.kind}': not a part this runtime mounts (eye_implant, `
+                + `${[...CHORD_PARTS, ...HOST_BIND_PARTS].join(', ')}, hose, feed)`);
         }
     }
     for (const [mesh, ranges] of drops) dropRanges(mesh, ranges);
@@ -1364,8 +1570,10 @@ async function mountCyborgParts(api, parts, opts, U) {
             m.removeFromParent();
             m.bind(new THREE.Skeleton(nb, inv), new THREE.Matrix4());
             const shares = m.material?.userData?.shares;
-            // (C3d: a shared material with no tentacle mounted takes its own maps under cyborgMaterial, as the parts do)
-            m.material = shares ? (mechMaterial || cyborgMaterial(m.material, cyborgUniforms(U, opts, m.material)))
+            // (C3d: a shared material with no tentacle mounted takes its own maps under cyborgMaterial, as the parts do;
+            // MOUNT: the mech part on ITS chain where one is mounted there, the last one mounted where it names none)
+            const mm = mechByChain.get(part.chain) || mechMaterial;
+            m.material = shares ? (mm || cyborgMaterial(m.material, cyborgUniforms(U, opts, m.material)))
                 : cyborgMaterial(m.material, cyborgUniforms(U, opts, m.material));
             asPart(m, part.kind);
         }
@@ -1397,7 +1605,60 @@ async function mountCyborgParts(api, parts, opts, U) {
         for (const m of shown) group.add(m);
         out.parts.push({ kind: part.kind, chain: part.chain, meshes: shown, cable: !!cd });
     }
+    // MOUNT: the helpers of the chord-frame parts radialMotion does not pose, after the host's motion (helperPass)
+    if (posts.length) out.post = helperPass(posts);
+    // (MOUNT: the joint budget, CROSSBREED §4.6's 256 per creature, said where the parts pass it: each C5 adds 20 helpers, so
+    // two on the octopus's 203 make 243 and a third 263; merging helpers is the JOINTS gap's, REMIX_LIBRARY §7 rank 5)
+    if (bones.size > 256) {
+        console.warn(`[bestiary] cyborg parts: ${bones.size} joints on this creature, over the 256 budget (CROSSBREED §4.6)`);
+    }
     return out;
+}
+
+export function helperPass(pairs) {
+    // MOUNT: the HELPER JOINTS of chord-frame parts on chains radialMotion does not pose ([{ rec: a chain entry, mount: its
+    // mount record }]), as one function posing them from their chain as it stands (call it AFTER the host's motion has posed
+    // the chain): the chain's chord frames read at the bind exactly as radialMotion reads them (bone k's chordQ from bone
+    // k + 1's rest offset, M_k its inverse's matrix, the last joint's the identity), then poseHelpers' rules from each
+    // knuckle's cardan angles
+    const arms = pairs.map(({ rec, mount }) => {
+        const ch = rec.bones.map((b) => ({ b }));
+        const chordQ = [];
+        for (let k = 0; k < ch.length - 1; k++) {
+            const loc = ch[k + 1].b.position.clone().normalize();
+            const yref = new THREE.Vector3(0, 1, 0).addScaledVector(loc, -loc.y).normalize();
+            const mm = new THREE.Matrix4().makeBasis(loc, yref, new THREE.Vector3().crossVectors(loc, yref));
+            chordQ.push(new THREE.Quaternion().setFromRotationMatrix(mm).invert());
+        }
+        const M = chordQ.map((q) => new THREE.Matrix4().makeRotationFromQuaternion(q.clone().invert()))
+            .concat([new THREE.Matrix4()]);
+        return { chain: ch, mount, M, Minv: M.map((mm) => mm.clone().transpose()),
+            qM: M.map((mm) => new THREE.Quaternion().setFromRotationMatrix(mm)) };
+    });
+    return () => { for (const a of arms) poseHelpers(a); };
+}
+
+// CROSS (work/bestiary/remix_r1/cross/STAGED.md): AN ASSEMBLED CHORD-FRAME PART. REROOT forges a machine INTO a creature's glb on
+// a chain of its own joints (the octopus's C5 mech tentacle for the axolotl's tail: the host's tail to its ring, then tail_m07 ..
+// tail_m23, the machine's helper joints bones of the glb too), where mountCyborgParts joins a part glb at runtime. Its helpers
+// have no rule in the glb's nodes, and a helper left at rest leaves its cardan crosses, roll shells, piston rods and hose crests
+// on the bind while the knuckles turn (the C5 asset's helpers_note). The grafted chain's RECORD carries the part's own rows
+// (graft.family a chord-frame part, graft.helpers: [{ name, joint (the knuckle's joint, by name), parent, kind, lc }]:
+// cross/pipe/c5_parts.py writes them from the asset's record): the same helperPass poses them from the chain as it stands,
+// after the creature's own motion. A glb without such a record: nothing (null)
+export function assembledHelpers(chains, bones) {
+    const pairs = [];
+    for (const rec of chains || []) {
+        const g = rec.graft;
+        if (!g || !CHORD_PARTS.has(g.family) || !Array.isArray(g.helpers) || !g.helpers.length) continue;
+        const helpers = g.helpers.map((h) => {
+            const bone = bones.get(h.name), k = rec.bones.findIndex((b) => b.name === h.joint);
+            if (!bone || k < 1) throw new Error(`[Bestiary] ${rec.name}: its ${g.family}'s helper ${h.name} (knuckle ${h.joint}) names no bone / chain joint of this glb`);
+            return { bone, kind: h.kind, k, onShell: !rec.bones.some((b) => b.name === h.parent), lc: h.lc ?? 0 };
+        });
+        pairs.push({ rec, mount: { chain: rec.name, helpers } });
+    }
+    return pairs.length ? helperPass(pairs) : null;
 }
 
 export function radialMotion(bones, seed, group, sp, opts = {}, mounts = {}, reach = null, chains = null) {
@@ -1497,6 +1758,9 @@ export function radialMotion(bones, seed, group, sp, opts = {}, mounts = {}, rea
     // given, the name scan)
     const chainList = chains || armChains(null, bones);
     for (let j = 0; j < chainList.length; j++) {
+        // MOUNT: armChains lists every chain family; a slot with no radial solver (solver null: a leg, a tail ...) is
+        // posed by its own case, never here (skipped, so every arm keeps its list index: its seeds and its mount's key)
+        if (chainList[j].solver === null) continue;
         const chain = chainList[j].bones.map((b) => ({ b, rest: b.quaternion.clone() }));
         if (!chain.length) break;
         // bind data in the creature's space: joint positions, segment lengths, the chord to the next joint in each
@@ -1518,11 +1782,8 @@ export function radialMotion(bones, seed, group, sp, opts = {}, mounts = {}, rea
             chain, len, chordQ, total, d0: d0.setY(0).normalize(),
             // seeded per arm (no twinning, AG 00.17): the spacing jitter, a slow wander along the length, the distal
             // spiral (its side, where it starts, how tight it ends), the tips that rise off the ground
-            dAz: (h(1) - 0.5) * 0.45,
-            wanderK: (h(2) - 0.5) * 2.0 * 2.2, wanderL: 0.30 + 0.30 * h(3), wanderPh: h(4) * 6.2832,
-            coilSide: h(5) < 0.5 ? -1 : 1, coilS0: 0.50 + 0.22 * h(6), coilG: 0.28 + 0.30 * h(7),
-            tipLift: h(8) < 0.35 ? 0.015 + 0.03 * h(9) : 0.0, drape: 0.10 + 0.08 * h(10),
-            ph0: h(11) * 6.2832, ph1: h(12) * 6.2832,
+            // (CROSS: the draws themselves in locomotion.js armSeeds, the same expressions)
+            ...armSeeds(h),
             reach: reach?.[j] || null,
             radius: chainList[j].radius,          // CROSSBREED M1: the record's per-joint radius (decision 4)
         });
@@ -1595,16 +1856,14 @@ export function radialMotion(bones, seed, group, sp, opts = {}, mounts = {}, rea
         const anchor = sup ? lvl1 : 0.92 * P.r0;
         const crownK = sup ? 1.0 - smooth(0.0, a.drape, a.len[0]) : 1.0;
         // the coils curl and uncurl slowly; the tips explore
-        const coilMul = 1.0 + 0.10 * Math.sin(6.2832 * 0.06 * t + a.ph0);
+        const coilMul = armCoilMul(a, t);
         dir.copy(a.d0).applyQuaternion(group.getWorldQuaternion(qg));
         let theta = Math.atan2(dir.x, dir.z) + a.dAz, s = 0.0;
         for (let k = 0; k < n - 1; k++) {
             const sm = s + 0.5 * a.len[k], u = sm / L;
             // curvature (1/m) in the ground plane: the wander, then the spiral rising toward the tip
-            let kap = a.wanderK * Math.sin(6.2832 * sm / a.wanderL + a.wanderPh) * (0.3 + 0.7 * smooth(0.05, 0.3, u));
-            const rem = Math.max(L - sm, 0.0);
-            kap += a.coilSide * coilMul * smooth(a.coilS0, a.coilS0 + 0.12, u) / (0.010 + a.coilG * rem);
-            kap += 0.9 * Math.sin(6.2832 * 0.21 * t - 9.0 * u + a.ph1) * smooth(0.75, 1.0, u);
+            // (CROSS: the law itself in locomotion.js armCurvature, the same three terms)
+            const kap = armCurvature(a, sm, u, L, coilMul, t);
             theta += kap * a.len[k];
             // the height: the drape from the crown to contact, the arm's centreline on its flesh line (its true reach,
             // fleshY) over the ground (a mounted part's arm: its ground profile where it has one)
@@ -1855,11 +2114,9 @@ export function radialMotion(bones, seed, group, sp, opts = {}, mounts = {}, rea
             if (a.mount) poseHelpers(a);
         }
         // saccades: hold a fixation, jump fast to the next (both eyes together, seeded schedule)
-        const seg = Math.floor(t / 1.7), f = t / 1.7 - seg;
-        const pick = (s, o) => (hash01(s * 13 + o, seed) - 0.5);
-        const w = Math.min(1, f / 0.04);                         // ~70 ms saccade
-        const yaw = (pick(seg - 1, 1) + (pick(seg, 1) - pick(seg - 1, 1)) * w) * 0.35;
-        const pitch = (pick(seg - 1, 2) + (pick(seg, 2) - pick(seg - 1, 2)) * w) * 0.18;
+        // (CROSS: the law itself in locomotion.js eyeSaccade, the same expressions: an octopus eye grafted in another creature's
+        // eye ports moves by it too)
+        const { yaw, pitch } = eyeSaccade(t, (i) => hash01(i, seed));
         for (const e of eyes) {
             e.b.quaternion.copy(e.rest).multiply(qa.setFromAxisAngle(Y, yaw)).multiply(qb.setFromAxisAngle(Z, pitch));
         }
@@ -1911,7 +2168,8 @@ export async function create(opts = {}) {
             filmHi: c.filmHi ?? f.thickness?.[1], darken: c.darken ?? f.darken, coat: c.coat ?? f.coat };
     };
     const ch0 = chitinOf(opts.chitin);
-    const nMechParts = opts.cyborg?.parts?.filter?.((p) => p.kind === 'mech_tentacle').length || 0;
+    // (MOUNT: every chord-frame chain part, any number of them: one AO floor each, in the parts' order)
+    const nMechParts = opts.cyborg?.parts?.filter?.((p) => CHORD_PARTS.has(p.kind)).length || 0;
     const U = {
         tint: THREE.uniform(new THREE.Color(opts.tint ?? 0xffffff)),
         dark: THREE.uniform(opts.display?.dark ?? 0.0),
@@ -2053,15 +2311,16 @@ export async function create(opts = {}) {
         group.updateMatrixWorld(true);
         U.cloudApex.value.copy(group.worldToLocal(sockets.socket_mantle_apex.getWorldPosition(new THREE.Vector3())));
     }
-    // CROSSBREED M1: the arm chains from the glb's chain records (armChains; a grafted arm's part joints are its own)
-    const chains = sp.motion === 'radial' ? armChains(gltf, bones) : null;
+    // CROSSBREED M1: the arm chains from the glb's chain records (armChains; a grafted arm's part joints are its own).
+    // MOUNT: on EVERY base, every chain family (the parts mount on any chain by its record; radialMotion poses the arms)
+    const chains = armChains(gltf, bones);
     // C5c: every arm's true reach, read at the bind before any part is mounted (the flesh arms' ground line); C5d: with
     // each joint's section outline (the root's support function)
     const reach = sp.motion === 'radial' ? fleshReach(group, bones, chains) : null;
     if (reach) fleshSupport(group, bones, chains).forEach((h, j) => { if (reach[j]) reach[j].hulls = h; });
     // CYBORG PARTS (mountCyborgParts): joined before the motion reads the bind (only when create() is given parts)
-    const cyb = opts.cyborg?.parts?.length ? await mountCyborgParts({ group, bones, sockets, gltf }, opts.cyborg.parts,
-        opts, U) : null;
+    const cyb = opts.cyborg?.parts?.length ? await mountCyborgParts({ group, bones, sockets, gltf, chains,
+        radial: sp.motion === 'radial' }, opts.cyborg.parts, opts, U) : null;
     // C5d: opts.motion 'none' leaves every bone where the caller sets it (a recorded pose, the swim record), the cable
     // still re-made on the skin each update
     // (B11) THE SIZE: a species authored at another scale (the stag beetle at x10) shows at its real size (sp.lifeScale) unless
@@ -2267,12 +2526,39 @@ export async function create(opts = {}) {
     if (!coatGltf) group.traverse((o) => { if (o.isMesh && o.material?.userData?.bestiary === 'coat') coatGltf = gltf; });
     if (coatGltf) {
         // (coat g5) the host's ground term for the cards and shells (coat.js opts.groundOcclusion; opts.coat may override)
-        api.coatCtl = await attachCoat(api, coatGltf, { groundOcclusion, ...(opts.coat || {}), auto: false,
-            display: { masks: displayMasks, clouds: displayClouds } });
+        // CROSS r1c (create path, the lead's approval): a host with its OWN skin model gives its coat its own colour terms
+        // (api.axolotl.coat: the axolotl's skin composition at the roots, no octopus chromatophores, no ground term its skin
+        // never takes: axolotl.js axolotlCoatColour); every other host exactly as before
+        const hostCoat = api.axolotl?.coat || null;
+        const { interior: _hostInterior, ...hostTerms } = hostCoat || {};
+        api.coatCtl = await attachCoat(api, coatGltf, hostCoat ? { ...hostTerms, ...(opts.coat || {}), auto: false }
+            : { groundOcclusion, ...(opts.coat || {}), auto: false, display: { masks: displayMasks, clouds: displayClouds } });
         api.coat = (c = {}) => {
             if (c.force !== undefined) api.coatCtl.force(c.force);
             api.coatCtl.look(c);
         };
+        // (CROSS r1c, the same hunk) the share of the style's interior shade this host's fur keeps (hostCoat.interior(): a pale
+        // skin's pelt is not dark inside), on the style's own resolved value; a caller's own look.layerDeep is left as given.
+        // api.coatInterior() sets it again (the axolotl calls it when its morph changes)
+        if (hostCoat?.interior && opts.coat?.look?.layerDeep == null) {
+            const deep0 = api.coatCtl.uniforms.look.layerDeep;
+            api.coatInterior = () => api.coatCtl.look({ layerDeep: deep0 * hostCoat.interior() });
+            api.coatInterior();
+        }
+    }
+    // MOUNT: a mounted part's helper joints on a chain radialMotion does not pose (mountCyborgParts' out.post), posed after the
+    // creature's own motion as its case left the update (the axolotl's motion runs after the base update); none: unchanged
+    if (cyb?.post) {
+        const inner = api.update;
+        api.update = (t) => { inner(t); cyb.post(t); };
+    }
+    // CROSS: a machine ASSEMBLED into this glb on a grafted chain (assembledHelpers: its helpers by the chain's own record), posed
+    // the same way after the creature's motion; a glb with no such record: unchanged
+    // (opts.assembledHelpers false: the helpers left on their bind, the gate's planted defect)
+    const asm = opts.assembledHelpers === false ? null : assembledHelpers(chains, bones);
+    if (asm) {
+        const inner = api.update;
+        api.update = (t) => { inner(t); asm(t); };
     }
     // (A1) THE SPINE (runtime/spine.js): the one contract over the creature's own motion (its update wrapped; nothing runs until a
     // call is made, so a scene that never calls it renders what it did)

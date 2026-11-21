@@ -939,16 +939,19 @@ REPLAN = 10                 # passes at most: a member the containment test turn
                             # forge's cascade took 9 and its last could only un-stack the pitch lug 22 twins)
 
 
-def stacked_asset(size=None, log=print):
+def stacked_asset(size=None, log=print, chain=None, lim=None):
     """cyborg_limb.make_asset with the repeats STACKED (the module notes): the CPU half. Returns make_asset's dict over
     the WHOLE low (every member's islands carried from its primary; 'isl', 'L' as exported, posed and gated) with
     A['stack'] (the groups, the members' records, the cover test, the pack) and A['bake'] (bake_view: the primaries and
     the unique pieces alone, what the bake, its gates and the material pass read). A pass whose containment test turns
     members down plans the groups again with those (member, primary) pairs refused, so they group among themselves
-    (under the largest of them) instead of each packing alone; the last pass un-stacks whatever is still turned down"""
+    (under the largest of them) instead of each packing alone; the last pass un-stacks whatever is still turned down.
+    (REROOT) chain / lim: the machine at another host's ring (cyborg_limb.arm_chain(host=host_chain(...))) and the rest
+    motion's limits it is designed for (None: the octopus's own: arm_chain(), motion_limits of it)"""
     refused, prefer, memo, swapped = {}, set(), {}, set()
     for n in range(REPLAN):
-        A, fail = _stacked_asset(size, log, refused, last=n == REPLAN - 1, prefer=prefer, memo=memo)
+        A, fail = _stacked_asset(size, log, refused, last=n == REPLAN - 1, prefer=prefer, memo=memo, chain=chain,
+                                 lim=lim)
         if not fail:
             A['stack']['passes'] = n + 1
             A['stack']['refused_pairs'] = refused
@@ -974,9 +977,9 @@ def stacked_asset(size=None, log=print):
     return A
 
 
-def _stacked_asset(size, log, refused, last, prefer=(), memo=None):
-    chain = CL.arm_chain()
-    lim = CL.motion_limits(chain)
+def _stacked_asset(size, log, refused, last, prefer=(), memo=None, chain=None, lim=None):
+    chain = CL.arm_chain() if chain is None else chain
+    lim = CL.motion_limits(chain) if lim is None else lim
     des = CL.design(chain, lim)
     isl0, shells = CL.build_low(chain, des, log=log)
     X0 = lambda b_: (chain['x'][CL.body_k(b_)], 0.0, 0.0)

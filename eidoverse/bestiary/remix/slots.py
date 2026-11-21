@@ -54,10 +54,34 @@ THE LEAD'S C0b CALLS (10-21; CYBORG_PLAN A.6, A.8, A.9) built in:
     head), and an ENCLOSING accessory claims every socket it encloses (the space helmet: the face as well as its head
     seat; recipe.py's accessory seats); an eye implant (a ball, no seat) stays allowed under either.
 
+THE ORGAN HALF (remix-machinery-r1's FAMILY round, 11-09; REMIX_LIBRARY §7 rank 2). Skye, 11-09: "these creatures are
+going to be remixed with each other, share each others limbs, have strange skins and growths". The organic half of the
+one closed table (CROSSBREED_DESIGN.md §1.2 and the lead's decision 6) is written here beside the cyborg half:
+  - the ORGAN FAMILIES: CROSSBREED §1.2's thirteen, AXOLOTL_PLAN §7.1's gill, fin and stump, LOBSTER_PLAN §7's chela,
+    every variant the base plans design (HAWK_PLAN §8.3, LOBSTER_PLAN §7, AXOLOTL_PLAN §7.2) named by its DONOR, each
+    with the donor's base and material class (the class sets the seam: WELD, SOCKET, SOCKET reversed, ARTICULATION,
+    CROSSBREED §1.1). A family with both a chain and a port interface is SPLIT (R9, decision 6): antenna_graft (a port)
+    and antenna_chain_graft (a chain), gill_graft and gill_chain_graft, wing_graft and wing_chain_graft;
+  - FITS LIMB FOR LIMB on Skye's words: every limb family fits every limb chain (an octopus arm, a beetle leg, an
+    axolotl or a human limb, a hawk's wing chain), a foot or a chela at a DISTAL cut of any of them. The head families
+    stay one to one by anatomy (decision 6: until Skye says which head crosses make sense);
+  - designed fits that wait for her word are data too (a family's ask_skye: the coverings on a back, decision 12; the
+    gills on a wolf's ears), and a row asking for one is refused naming the question (graft.skye);
+  - the recipe's GRAFT section (CROSSBREED §6.1): {level, seed, size, harmonize, parts: {kind: [rows]}, limbs: [rows],
+    eyes: {count}}, resolved by plan_graft() on a built creature's manifest (its ring records, chain cuts and regions),
+    with the cyborg's rules (kinds, Skye's rule, sides, bands, the seeded pick) and its own (a ring record at every
+    site, cut names and cut classes, one replacement per site across the graft and the cyborg sections: graft.shared);
+  - graft JOINTS (CROSSBREED §4.2: <chain stem>_g<kk>[_L|_R], M2c's arm0_g09..g15) are the base's own on a grafted
+    chain (BASES[...]['graft_joints']), and a part's distal sockets may hang on them;
+  - BASES rows for the hawk and the lobster, each marked WAITING for its glb.
+
 Pure Python (no numpy, no warp): the forge's exports (t13) and the recipe (recipe.validate, recipe.resolve_cyborg) both
 read it. The recipe's cyborg section (CYBORG_PLAN §6.1): {level, seed, size, surface, parts: {kind: [rows]}, limbs:
 [rows], glow, affixes}; a parts row {part, variant, level: [lo, hi], weight, side, site}; a limbs row {kind, chain (a
-chain record's name or anatomical label), cut_joint, part, variant, level}.
+chain record's name or anatomical label), cut_joint, part, variant, level}. The graft section's rows (CROSSBREED §6.1):
+a parts row {part, variant, level, weight, side, site, cut (a region's ring), harmonize, dressing, element_policy}; a
+limbs row {kind, chain, cut (a cut's NAME, or its joint index where the base names none), part, variant, level,
+weight, harmonize, dressing, element_policy}.
 
     python eidoverse/bestiary/remix/slots.py      prints the closed table, Skye's rule and the per-base tables
 """
@@ -69,25 +93,31 @@ import re
 # how a part attaches (CYBORG_PLAN §4.1): ball = rides its own joint inside an envelope (eyes); dome = replaces a fixed
 # shell on its joint (the beetle's compound eye); mount = seats under a typed seat_<archetype> node; chain = replaces a
 # chain record from a cut joint to the tip; region = a region swap at a generator (the machine head). 'none': a socket
-# that takes no part (the crown centre inside the body, growth sites, the FX contract)
-INTERFACES = ('ball', 'dome', 'mount', 'chain', 'region', 'none')
-_M, _N = ('mount',), ('none',)
+# that takes no part (the crown centre inside the body, growth sites, the FX contract). 'ring' (the FAMILY round; R9,
+# CROSSBREED §1.4 item 1): an ORGAN PORT, a graft seated in the port's frozen ring record with the native group behind
+# it dropped (a horn, an ear, gills, an antenna at a port). A socket keeps declaring 'mount' for its cyborg parts; it
+# offers 'ring' as well when a port ring record is linked to it (port_ring(): its kind, side, joint and frame)
+INTERFACES = ('ball', 'dome', 'mount', 'chain', 'region', 'none', 'ring')
+_M, _N, _MR = ('mount',), ('none',), ('mount', 'ring')
 # SOCKET KINDS: {kind: (the interfaces a socket of this kind may declare, what it is)}. 31 from the plan plus 'mantle'
 SOCKET_KINDS = {
     'head': (_M, "the head's dorsal seat: the hat's and the head module's (octopus socket_head_top on the collar joint "
                  "mantle_0; wolf and beetle socket_crown)"),
     'face': (_M, 'the bridge between the eyes (socket_eyes): glasses, mask, visor'),
-    'eye': (('ball', 'dome'), "an eye: 'ball' rides its own joint (octopus, wolf), 'dome' is a fixed shell on the head "
-                              "joint (the beetle's compound eye)"),
-    'antenna': (_M, "an antenna's insertion (beetle socket_antenna_L/R): antenna swaps"),
-    'horn': (_M, "a horn seat on the head (wolf and beetle socket_horn_*; the beetle's thoracic socket_pronotum_horn "
-                 "is kind pronotum, CYBORG_PLAN §4.1)"),
-    'ear': (_M, 'an ear root (wolf socket_ear_L/R): ear swaps'),
-    'mouth': (_M, 'between the jaws: the beak (octopus socket_mouth, on the crown centre), FX'),
+    'eye': (('ball', 'dome', 'ring'), "an eye: 'ball' rides its own joint (octopus, wolf), 'dome' is a fixed shell on "
+                                      "the head joint (the beetle's compound eye); 'ring' an eye PORT's ring (the "
+                                      "lobster's eyestalk, eye_graft lobster_eyestalk)"),
+    'antenna': (_MR, "an antenna's insertion (beetle socket_antenna_L/R): antenna swaps; at a port ring, antenna_graft"),
+    'horn': (_MR, "a horn seat on the head (wolf and beetle socket_horn_*; the beetle's thoracic socket_pronotum_horn "
+                  "is kind pronotum, CYBORG_PLAN §4.1); at a port ring (the human's horn_*), horn_graft and "
+                  "antenna_graft"),
+    'ear': (_MR, 'an ear root (wolf socket_ear_L/R; the human\'s ear ports): ear swaps, ear_graft'),
+    'mouth': (_MR, 'between the jaws: the beak (octopus socket_mouth, on the crown centre), FX; at the lips\' ring, '
+                   'mouthpart_graft'),
     'jaw': (_M, 'between the lower canines (wolf socket_jaw)'),
     'snout': (_M, 'mid-muzzle (wolf socket_snout): the mask seat, the beak swap'),
     'nose': (_M, 'the planum (wolf socket_nose)'),
-    'mandible': (_M, "a mandible's condyle axis (beetle socket_mandible_L/R)"),
+    'mandible': (_MR, "a mandible's condyle axis (beetle socket_mandible_L/R); at its ring, mouthpart_graft"),
     'head_centre': (_M, 'the head centre (wolf socket_head)'),
     'neck': (_M, 'mid-neck (wolf socket_neck_collar): collars. A head-region kind: a mount on the neck stands over the '
                  'head (the sombrero: the old back slot resolved into the neck)'),
@@ -104,7 +134,8 @@ SOCKET_KINDS = {
                      "socket_pronotum_horn, a thoracic horn): no family in v1 (the lead, 10-21)"),
     'siphon': (_M, "the funnel's exit (octopus socket_funnel): the thruster nozzle"),
     'abdomen_tip': (_M, 'the pygidium (beetle socket_abdomen_tip): tails, stingers'),
-    'wing': (_M, 'a wing base (wolf socket_wing_* on the scapulae; beetle socket_wing_* on wing_0_*): remix wings'),
+    'wing': (_MR, 'a wing base (wolf socket_wing_* on the scapulae; beetle socket_wing_* on wing_0_*; hawk '
+                  'socket_wing_* on scapula_*): remix wings; at a port ring, wing_graft'),
     'limb_tip': (_M, "a limb chain's tip (octopus socket_arm<j>_tip): a gripper, only on a replaced chain"),
     'paw': (_M, 'under the MCP or MTP (wolf socket_forepaw_*, socket_hindpaw_*): foot replacement'),
     'foot': (_M, "a tibia's distal end (beetle socket_foot_*): tarsus swaps"),
@@ -120,12 +151,14 @@ SOCKET_KINDS = {
                       "medial border, socket_back_lower_L/R on each posterior flank over the iliac crest): a ring where "
                       "the sisters' tentacles, wings or extra arms seat. Not a 'back' (a back takes only mounts, "
                       "Skye's rule): its own kind, region 'limb'"),
-    'scalp': (_M, "a scalp plug (the human's socket_scalp_*): antennae (SOCKET on soft skin); hair cards ride it"),
+    'scalp': (_MR, "a scalp plug (the human's socket_scalp_*): antennae (SOCKET on soft skin: antenna_graft at its "
+                   "ring); hair cards ride it"),
     # (AXOLOTL AX11 + AX12, AXOLOTL_PLAN §6.2, §7.1, §10: the same kind for the axolotl's own gill ports, one meaning;
     # patches/axolotl_ax12_recipe.md's block for a tree where this human patch landed first)
-    'gill': (_M, "a gill port: the axolotl's socket_gill_{1,2,3}_L/R on each ramus's root ring (its gill_r_0 joint), "
-                 "a gill plug on the side of the human's neck behind the jaw angle (its socket_gill_*_L/R): "
-                 "gill_graft's rami seat here"),
+    'gill': (_MR, "a gill port: the axolotl's socket_gill_{1,2,3}_L/R on each ramus's root ring (its gill_r_0 joint), "
+                  "a gill plug on the side of the human's neck behind the jaw angle (its socket_gill_*_L/R): "
+                  "gill_graft's rami seat at a port ring (the human's plugs); the axolotl's own rami are chains "
+                  "(gill_chain_graft)"),
 }
 # CHAIN KINDS: the joint chains a chain part replaces from a listed cut to the tip (scene extras bestiary.chains)
 CHAIN_KINDS = {
@@ -138,12 +171,21 @@ CHAIN_KINDS = {
     # AXOLOTL AX11 (the staged patch): a gill ramus's chain (gill_r_0..3), cut at its root ring (§6.2 gill root). The
     # plan named it 'gill', the socket kind's name: KINDS is one namespace (check_table), so it is 'gill_chain', as the
     # beetle's 'antenna' socket and 'antenna_chain' chain
-    'gill_chain': "an axolotl gill ramus (gill_{r}_0..3_L/R, a child of neck_0): gill_graft swaps it from its root ring",
+    'gill_chain': "an axolotl gill ramus (gill_{r}_0..3_L/R, a child of neck_0): gill_chain_graft swaps it from its "
+                  "root ring",
+    # THE HAWK (work/bestiary/patches/hawk_slots.md item 1, D1, 11-07; folded in by the FAMILY round): its wing is part of
+    # the base, not a mount, so a wing graft replaces it from a listed cut (`shoulder`) as antenna_chain sits beside
+    # antenna; the `wing` socket kind stays the remix wing's port
+    'wing_chain': 'a feathered wing (hawk: the humerus to digit II, with its flight feathers on their own joints)',
 }
 # REGION KINDS: regions swapped at a generator (scene extras bestiary.regions, written at C13)
 REGION_KINDS = {'head_region': 'the head region, swapped for a machine head that keeps the jaw (C13)',
                 'body_region': "the lower body under a waist ring (the human's): Mr. Hege's machine lower body, a "
-                               "naga's tail, Scylla's crown (HUMAN_PLAN §6.2, §10; families later)"}
+                               "naga's tail, Scylla's crown (HUMAN_PLAN §6.2, §10; families later)",
+                # (the FAMILY round: CROSSBREED §1.4 item 2, HAWK_PLAN §8.1) the muzzle or bill forward of a stop ring:
+                # the beak swap (snout_graft: the octopus's beak at the wolf's stop ring, the hawk's bill)
+                'snout_region': "the snout forward of its stop ring (the wolf's muzzle, the hawk's bill and cere): "
+                                "snout_graft's beak swap"}
 KINDS = {}
 for _k, (_ifs, _doc) in SOCKET_KINDS.items():
     KINDS[_k] = dict(cls='socket', interfaces=_ifs, doc=_doc)
@@ -151,6 +193,25 @@ for _k, _doc in CHAIN_KINDS.items():
     KINDS[_k] = dict(cls='chain', interfaces=('chain',), doc=_doc)
 for _k, _doc in REGION_KINDS.items():
     KINDS[_k] = dict(cls='region', interfaces=('region',), doc=_doc)
+
+# ============================================================================================ the organ half's vocabulary
+# (the FAMILY round, 11-09) MATERIAL CLASSES set a graft's SEAM (CROSSBREED §1.1): soft against soft is a WELD (the band
+# morphs the host's skin into the donor's), a hard part in soft skin a SOCKET (a soft collar wraps a shell sunk into
+# it), a soft part leaving a hard base a SOCKET REVERSED (its band starts at the base's sleeve ring, inside its
+# opening), hard against hard an ARTICULATION where the part brings its own joints (a WELD in hard material where it
+# rides the port's joint: a horn grown from a chitin head). 'membrane' is an arthropod's soft articular membrane (the
+# lobster's sleeves, work/bestiary/lobster/seams.json)
+MATERIAL_CLASSES = dict(soft=('wet_skin', 'dry_skin', 'fur', 'membrane'), hard=('keratin', 'chitin', 'bone'))
+SOFT = MATERIAL_CLASSES['soft']
+SEAMS = ('WELD', 'SOCKET', 'SOCKET_REVERSED', 'ARTICULATION')
+# CUT CLASSES (R13; LOBSTER_PLAN §6.1, AXOLOTL_PLAN §6.3's table): a donor's part starts at its own cut of the class the
+# host's cut has (M2: the octopus's mid cut 8 took the stag beetle's right fore leg from its knee, the beetle's mid cut)
+CUT_CLASSES = ('proximal', 'mid', 'distal')
+# THE LIMB CHAINS: Skye's 11-09 "share each others limbs" as data. Every chain kind that is a creature's LIMB (an
+# octopus's arm, a forelimb, a hindlimb, an arthropod leg, a bird's wing: a bird's wing is its forelimb), not its tail
+# and not the head's chains (antennae, gill rami); every limb family fits them all (FITS limb for limb)
+LIMB_CHAINS = ('tentacle', 'leg_fore', 'leg_hind', 'leg', 'wing_chain')
+assert all(KINDS[k]['cls'] == 'chain' for k in LIMB_CHAINS), 'the limb chains are chain kinds'
 
 # ============================================================================================ the closed table
 # FAMILIES (CYBORG_PLAN §7.2): each family's interfaces, the kinds it FITS (nothing else), its seat archetype (mounts),
@@ -185,11 +246,19 @@ FAMILIES = {
     'gripper': dict(
         interfaces=('mount',), fits=('limb_tip',), seat='tip', variants=('claw',), requires=('chain_replaced',),
         stage='C5', doc="a gripper on a MECH chain's tip (§4.4.3; K10): never on an organic tip"),
+    # (the FAMILY round, 11-09: FITS LIMB FOR LIMB on Skye's 11-09 "share each others limbs" for the C5 mech tentacle,
+    # the cyborg limb she named: REMIX_LIBRARY §4.1 marks FAMILY on its row for the beetle, the axolotl and the wolf)
+    # on any limb chain and on a tail, as the organic arm's tentacle_graft (the cyborg-tailed axolotl). The mech leg keeps
+    # its legs (§4.1: "no" on the octopus; c00 G4 refuses a mech leg on an arm), the robot hand an ARM's (ROADMAP
+    # decision 2), the mech tail a tail's
     'mech_tentacle': dict(
-        interfaces=('chain',), fits=('tentacle',), seat=None, variants=('knuckled',), requires=('listed_cut',),
-        stage='C5', doc='rigid knuckled segments on the same joints from a listed cut to the tip (§4.4; K9); v1: '
-        'ONE per creature (the lead\'s C5c call: the runtime carries one replaced arm\'s ground line and AO floor; '
-        'plan() refuses a second, cyborg.limit)'),
+        interfaces=('chain',), fits=LIMB_CHAINS + ('tail',), seat=None, variants=('knuckled',),
+        requires=('listed_cut',),
+        stage='C5', doc='rigid knuckled segments on the same joints from a listed cut to the tip (§4.4; K9); ANY NUMBER '
+        'per creature, one per chain (remix_r1 MOUNT: the runtime carries one ground line per mounted arm and one AO floor '
+        'per part since C5d, mounted by the chain record; the C5c call\'s ONE limit, cyborg.limit, lifted), each adding '
+        'its 20 helper joints to the creature (the joint budget, CROSSBREED §4.6, is the JOINTS gap\'s); limb for limb on '
+        'any limb chain and on a tail (the FAMILY round)'),
     'mech_leg': dict(
         interfaces=('chain',), fits=('leg_fore', 'leg_hind', 'leg'), seat=None, variants=('rigid',),
         requires=('listed_cut',), stage='C11', doc='a leg replaced from a listed cut through the paw or tarsus (G6)'),
@@ -212,14 +281,227 @@ FAMILIES = {
         doc="a head-region swap that KEEPS the jaw joint and the talk (K7, N4, G6)"),
     # ORGAN FAMILIES (research/CROSSBREED_DESIGN.md §1.2; the lead's decision 6: ONE closed table, the organic half
     # beside the cyborg one): their parts are GRAFTS, forged for their socket and assembled (forge/graft.py,
-    # graft_socket.py, assemble.py), never cyborg rows (check_recipe refuses them in cyborg.limbs: cyborg.organ). FITS
-    # stay one to one until Skye says which crosses make sense (decision 12); M2's: a limb for a limb
+    # graft_socket.py, assemble.py), never cyborg rows (check_recipe refuses them: cyborg.organ), seated through the
+    # recipe's graft section (plan_graft). THE FAMILY ROUND (11-09): every family the plans design; FITS LIMB FOR LIMB
+    # on Skye's 11-09 words ("share each others limbs": every limb family on every LIMB_CHAINS kind) and one to one by
+    # anatomy for the head (decision 6, until she says which head crosses make sense). Each family's VARIANTS are named
+    # by their DONOR, and `donors` gives each its base, its material class (the seam: MATERIAL_CLASSES; None for a ball
+    # or dome eye, which a lid or a port holds with no seam; 'host' for a stump, the base's own skin) and, for a part
+    # cut from a donor chain, that chain's kind (and a beetle leg's pair, a sided claw). `articulated`: the part brings
+    # its own joints (hard on hard is then an ARTICULATION, else a WELD in hard material). `dressing`: the family's SOCKET
+    # collar (CROSSBREED §2.10). `fill`: the size class that fills the slot (CROSSBREED §6.2). `ask_skye`: designed fits
+    # that wait for her word, each with the question (a row there is refused: graft.skye)
+    'eye_graft': dict(
+        interfaces=('ball', 'dome', 'ring'), fits=('eye',), seat=None,
+        variants=('octopus', 'canid', 'axolotl', 'compound', 'compound_ball', 'raptor', 'lobster_eyestalk'),
+        variant_interface=dict(octopus='ball', canid='ball', axolotl='ball', compound='dome', compound_ball='ball',
+                               raptor='ball', lobster_eyestalk='ring'),
+        requires=(), stage='CROSSBREED v1; AXOLOTL §7.2; HAWK §8.3; LOBSTER §7', organ=True, articulated=True,
+        fill='small',
+        donors=dict(octopus=dict(base='octopus', cls=None), canid=dict(base='wolf', cls=None),
+                    axolotl=dict(base='axolotl', cls=None), compound=dict(base='beetle', cls=None),
+                    compound_ball=dict(base='beetle', cls=None), raptor=dict(base='red_tailed_hawk', cls=None),
+                    lobster_eyestalk=dict(base='lobster', cls='chitin')),
+        doc="an eye on its own joint, forged at the host's eye dims: a ball in its lids or its lidless port (the "
+            "octopus's: AX-X4, 'the cheapest cross'; the wolf's; the axolotl's; the hawk's), the stag beetle's "
+            "compound eye as a dome or on a ball socket; the lobster's eyestalk at an eye PORT's ring (SOCKET in a lid "
+            "port, ARTICULATION in a dome port). A ball eye in a dome port is the planned 'set' seating (a SOCKET), "
+            "not built"),
+    'ear_graft': dict(
+        interfaces=('ring',), fits=('ear',), seat=None, variants=('canid',), requires=(), stage='CROSSBREED v1',
+        organ=True, articulated=True, fill='medium', donors=dict(canid=dict(base='wolf', cls='fur')),
+        doc="an ear at an ear root's port ring: the wolf's (its own ear joints; W2y's ear ports), WELD on a soft head "
+            "(the werewolf's ears at the human's ear rings)"),
+    'antenna_graft': dict(
+        interfaces=('ring',), fits=('antenna', 'horn', 'scalp'), seat=None, variants=('stag_beetle', 'lobster_whip'),
+        requires=(), stage='CROSSBREED v1; LOBSTER §7', organ=True, articulated=True, fill='medium',
+        dressing='membrane',
+        donors=dict(stag_beetle=dict(base='beetle', cls='chitin', chain='antenna_chain'),
+                    lobster_whip=dict(base='lobster', cls='chitin', chain='antenna_chain')),
+        doc="an antenna ADDED at a port ring (the human's six scalp plugs, typed for antennae; the wolf's and the "
+            "axolotl's horn ports): the stag beetle's elbowed antenna, the lobster's whip; SOCKET on a soft head, "
+            "ARTICULATION on a hard one. R9's split: an antenna chain REPLACED is antenna_chain_graft"),
+    'antenna_chain_graft': dict(
+        interfaces=('chain',), fits=('antenna_chain',), seat=None, variants=('stag_beetle', 'lobster_whip'),
+        requires=('listed_cut', 'ring_record'), stage='CROSSBREED v1; LOBSTER §7', organ=True, articulated=True,
+        fill='medium',
+        donors=dict(stag_beetle=dict(base='beetle', cls='chitin', chain='antenna_chain'),
+                    lobster_whip=dict(base='lobster', cls='chitin', chain='antenna_chain')),
+        doc="an antenna chain REPLACED from its listed cut (the beetle's past the scape; the lobster's peduncle or "
+            "flagellum): ARTICULATION on a hard head. R9's split of CROSSBREED's antenna_graft"),
+    'horn_graft': dict(
+        interfaces=('ring',), fits=('horn',), seat=None,
+        variants=('stag_mandible_major', 'stag_mandible_minor', 'lobster_rostrum'), requires=(),
+        stage='CROSSBREED v1; LOBSTER §7', organ=True, articulated=False, fill='medium', dressing='pedicle',
+        donors=dict(stag_mandible_major=dict(base='beetle', cls='chitin', morph='major'),
+                    stag_mandible_minor=dict(base='beetle', cls='chitin', morph='minor'),
+                    lobster_rostrum=dict(base='lobster', cls='chitin')),
+        doc="a horn at a horn port's ring: the stag beetle's mandible (the major or the minor male's) on a pedicle "
+            "SOCKET in a soft head (the human's and the axolotl's horn ports), a WELD in chitin; the lobster's keeled "
+            "rostrum. DESIGN.md's spike / ram / antler / moose / narwhal wait for the deer's horn generator (ROADMAP "
+            "D6)"),
+    'mouthpart_graft': dict(
+        interfaces=('ring',), fits=('mouth', 'mandible'), seat=None, variants=('octopus_beak', 'stag_mandible'),
+        requires=(), stage='CROSSBREED v1; HUMAN_PLAN HX3', organ=True, articulated=True, fill='medium',
+        dressing='lip',
+        donors=dict(octopus_beak=dict(base='octopus', cls='keratin'), stag_mandible=dict(base='beetle', cls='chitin')),
+        doc="a mouthpart at the lips' or a condyle's ring: the octopus's beak in the host's lips (a SOCKET: the "
+            "axolotl's mouth, Hege's lips, the Mugwump), the stag beetle's mandibles in the human's lips (HX3)"),
+    'snout_graft': dict(
+        interfaces=('region',), fits=('snout_region',), seat=None, variants=('octopus_beak', 'raptor_beak'),
+        requires=('region_ring',), stage='CROSSBREED v1; HAWK §8.3', organ=True, articulated=True, fill='elite',
+        dressing='lip',
+        donors=dict(octopus_beak=dict(base='octopus', cls='keratin'),
+                    raptor_beak=dict(base='red_tailed_hawk', cls='keratin')),
+        doc="the snout forward of its stop ring swapped for a beak, the lips (the hawk's: its cere) its SOCKET collar: "
+            "the octopus's beak at the wolf's stop ring, the hawk's bill"),
+    'head_graft': dict(
+        interfaces=('region',), fits=('head_region',), seat=None,
+        variants=('canid', 'stag_beetle', 'axolotl', 'raptor'), requires=('region_ring',),
+        stage='CROSSBREED v1; AXOLOTL §7.2 (AX-X7); HAWK §8.3', organ=True, articulated=True, fill='elite',
+        dressing='membrane',
+        donors=dict(canid=dict(base='wolf', cls='fur'), stag_beetle=dict(base='beetle', cls='chitin'),
+                    axolotl=dict(base='axolotl', cls='wet_skin'), raptor=dict(base='red_tailed_hawk', cls='dry_skin')),
+        doc="the head region swapped at its ring (the human's neck, K48; the axolotl's poll, K64 = the wolf's), the "
+            "donor's head WITH its own jaw and talk rig (CROSSBREED §4.5: a canid jaw, the beetle's palps and "
+            "mandibles): WELD on soft (the werewolf, with a ruff), a capsule SOCKET with a cervical membrane on hard"),
+    'tentacle_graft': dict(
+        interfaces=('chain',), fits=LIMB_CHAINS + ('tail',), seat=None, variants=('octopus_arm',),
+        requires=('listed_cut', 'ring_record'), stage='CROSSBREED M1 (M1a built)', organ=True, articulated=True,
+        fill='large',
+        donors=dict(octopus_arm=dict(base='octopus', cls='wet_skin', chain='tentacle')),
+        doc="an octopus arm from a listed cut on, the octopus's own arm generator run as a part at the host's ring (M1a: "
+            "arm R1 regenerated from cut 8, an identity WELD): limb for limb on any limb chain, and on a tail (the "
+            "design's own row: M3 the tentacle-tailed wolf, AX-X2 the octopus-tailed axolotl); WELD on soft, SOCKET "
+            "reversed on hard"),
     'leg_graft': dict(
-        interfaces=('chain',), fits=('tentacle',), seat=None, variants=('stag_beetle_fore',),
-        requires=('listed_cut', 'ring_record'), stage='M2', organ=True,
-        doc="an arthropod LEG from its knee on (the donor's tibia, tarsomeres and claws at its author scale) in a "
-            "SOCKET seam, a membrane collar on a listed cut's ring (CROSSBREED §8 M2), posed by the arthropod step "
-            "solver"),
+        interfaces=('chain',), fits=LIMB_CHAINS, seat=None,
+        variants=('stag_beetle_fore', 'stag_beetle_mid', 'stag_beetle_hind', 'axolotl_fore', 'axolotl_hind',
+                  'human_arm', 'human_leg', 'canid_fore', 'canid_hind', 'lobster_cheliped', 'lobster_walking_leg'),
+        requires=('listed_cut', 'ring_record'), stage='M2', organ=True, articulated=True, fill='large',
+        dressing='membrane',
+        donors=dict(stag_beetle_fore=dict(base='beetle', cls='chitin', chain='leg', pair='fore'),
+                    stag_beetle_mid=dict(base='beetle', cls='chitin', chain='leg', pair='mid'),
+                    stag_beetle_hind=dict(base='beetle', cls='chitin', chain='leg', pair='hind'),
+                    axolotl_fore=dict(base='axolotl', cls='wet_skin', chain='leg_fore'),
+                    axolotl_hind=dict(base='axolotl', cls='wet_skin', chain='leg_hind'),
+                    human_arm=dict(base='human', cls='dry_skin', chain='leg_fore'),
+                    human_leg=dict(base='human', cls='dry_skin', chain='leg_hind'),
+                    canid_fore=dict(base='wolf', cls='fur', chain='leg_fore'),
+                    canid_hind=dict(base='wolf', cls='fur', chain='leg_hind'),
+                    lobster_cheliped=dict(base='lobster', cls='chitin', chain='leg', sided=True),
+                    lobster_walking_leg=dict(base='lobster', cls='chitin', chain='leg')),
+        doc="a LEG from the donor's cut of the host cut's class on (M2, live: the stag beetle's right fore leg from its "
+            "knee on the octopus's mid cut 8, its toothed tibia, tarsomeres and claws in a SOCKET membrane collar the "
+            "octopus skin morphs into, posed by the arthropod step solver). Limb for limb on any limb chain (Skye "
+            "11-09): the beetle's legs (dogs with beetle legs, Gregor Samsa at the human's shoulders, AX-X5), the "
+            "axolotl's limbs (AX-X1: an octopus arm ending in an axolotl forearm and hand), the human's arms and legs "
+            "(Skye 10-28: 'octopuses with human arms'), the wolf's and the lobster's legs; SOCKET on soft, "
+            "ARTICULATION on hard"),
+    'foot_graft': dict(
+        interfaces=('chain',), fits=LIMB_CHAINS, seat=None,
+        variants=('stag_beetle_tarsus', 'axolotl_hand', 'axolotl_foot', 'canid_paw', 'raptor_talon'),
+        requires=('listed_cut', 'ring_record', 'distal_cut'), stage='CROSSBREED v1; AXOLOTL §7.2; HAWK §8.3',
+        organ=True, articulated=True, fill='large', dressing='membrane',
+        donors=dict(stag_beetle_tarsus=dict(base='beetle', cls='chitin', chain='leg'),
+                    axolotl_hand=dict(base='axolotl', cls='wet_skin', chain='leg_fore'),
+                    axolotl_foot=dict(base='axolotl', cls='wet_skin', chain='leg_hind'),
+                    canid_paw=dict(base='wolf', cls='fur', chain='leg_fore'),
+                    raptor_talon=dict(base='red_tailed_hawk', cls='dry_skin', chain='leg_hind')),
+        doc="a foot or a hand from a DISTAL cut only (R13): the stag beetle's tarsus, the axolotl's four-fingered hand "
+            "and five-toed foot, the wolf's paw, the hawk's talon foot; limb for limb on any limb chain's distal cut "
+            "(the octopus's cuts 12 / 14, which R13 kept for Skye's yes: her 'share each others limbs'); WELD on soft "
+            "(fur: a ruff; scutes: a margin), SOCKET on soft for a hard foot, SOCKET reversed on hard"),
+    'chela_graft': dict(
+        interfaces=('chain',), fits=LIMB_CHAINS, seat=None,
+        variants=('lobster_crusher', 'lobster_cutter', 'lobster_walking_chela'),
+        requires=('listed_cut', 'ring_record', 'distal_cut'), stage='LOBSTER §7', organ=True, articulated=True,
+        fill='large', dressing='wrist',
+        donors=dict(lobster_crusher=dict(base='lobster', cls='chitin', chain='leg', sided=True),
+                    lobster_cutter=dict(base='lobster', cls='chitin', chain='leg', sided=True),
+                    lobster_walking_chela=dict(base='lobster', cls='chitin', chain='leg')),
+        ask_skye=dict(tail='a pincer tail (LOBSTER_PLAN §7: a chela on a tail tip)'),
+        doc="a lobster claw from a DISTAL cut only, SIDED (the crusher and the cutter: a handedness), study G's claws slot "
+            "(hands): limb for limb on any limb chain's distal cut (the wolf's paw, the beetle's ankle, the axolotl's "
+            "hand AX-X6, the human's wrist after HX3, the octopus's cuts 12 / 14: LX1, the yes LOBSTER_PLAN §7 waited "
+            "for is Skye's 11-09 'share each others limbs'); SOCKET on soft bases (a wrist fold), ARTICULATION on hard"),
+    'tail_graft': dict(
+        interfaces=('chain',), fits=('tail',), seat=None,
+        variants=('axolotl_tail', 'canid_tail', 'raptor_fan', 'lobster_abdomen', 'lobster_fan'),
+        requires=('listed_cut', 'ring_record'), stage='CROSSBREED v1; AXOLOTL §7.2; HAWK §8.3; LOBSTER §7',
+        organ=True, articulated=True, fill='large', dressing='membrane',
+        donors=dict(axolotl_tail=dict(base='axolotl', cls='wet_skin', chain='tail'),
+                    canid_tail=dict(base='wolf', cls='fur', chain='tail'),
+                    raptor_fan=dict(base='red_tailed_hawk', cls='dry_skin', chain='tail'),
+                    lobster_abdomen=dict(base='lobster', cls='chitin', chain='tail'),
+                    lobster_fan=dict(base='lobster', cls='chitin', chain='tail')),
+        doc="a tail from a tail chain's listed cut on (a tail for a tail; a tail ADDED at a port is PORT's, "
+            "REMIX_LIBRARY §7 rank 5): the axolotl's paddle with its fins (the wolf's tail ring, the lobster's "
+            "abdomen root), the wolf's brush, the hawk's fan, the lobster's abdomen (from its root) or fan"),
+    'wing_graft': dict(
+        interfaces=('ring',), fits=('wing',), seat=None, variants=('stag_beetle_hindwing', 'raptor_wing'),
+        requires=(), stage='CROSSBREED v1; HAWK §8.3', organ=True, articulated=True, fill='large',
+        dressing='membrane',
+        donors=dict(stag_beetle_hindwing=dict(base='beetle', cls='chitin'),
+                    raptor_wing=dict(base='red_tailed_hawk', cls='dry_skin', chain='wing_chain')),
+        ask_skye=dict(back_limb='wings on the human\'s back ports (HUMAN_PLAN §6.7: a FITS widening by her word; the '
+                                'port itself is PORT\'s, REMIX_LIBRARY §7 rank 5)'),
+        doc="a wing ADDED at a wing port's ring (the wolf's scapular ports, the beetle's hindwing bases, the axolotl's "
+            "wing ports): the stag beetle's folded hindwing ('people with bug wings', Skye 10-28), the hawk's feathered "
+            "wing; WELD on soft (a ruff on fur), SOCKET reversed on chitin. R9's split: the hawk's own wing replaced "
+            "from its shoulder cut is wing_chain_graft"),
+    'wing_chain_graft': dict(
+        interfaces=('chain',), fits=LIMB_CHAINS, seat=None, variants=('raptor_wing',),
+        requires=('listed_cut', 'ring_record'), stage='HAWK §8.3', organ=True, articulated=True, fill='large',
+        donors=dict(raptor_wing=dict(base='red_tailed_hawk', cls='dry_skin', chain='wing_chain')),
+        doc="the hawk's feathered wing as a CHAIN from a listed cut (its shoulder), limb for limb (a bird's wing is its "
+            "forelimb: the hawk's own wing swapped; a harpy's arms). R9's split of wing_graft"),
+    'shell_graft': dict(
+        interfaces=('ring',), fits=(), seat=None, variants=('lobster_carapace', 'stag_beetle_elytra'), requires=(),
+        stage='CROSSBREED v1; LOBSTER §7', organ=True, articulated=False, fill='large', dressing='membrane',
+        donors=dict(lobster_carapace=dict(base='lobster', cls='chitin'),
+                    stag_beetle_elytra=dict(base='beetle', cls='chitin')),
+        ask_skye=dict(back='organic shells on backs (the lead\'s decision 12: "an organic shell on a wolf\'s or a '
+                           'beetle\'s back (the old creator allowed it)"; the beetle\'s elytra on the human\'s '
+                           'back_shell port, REMIX_LIBRARY §3.6): a back takes only mounts until she says (NEVER '
+                           'covering x back)'),
+        doc="a shell at a back port's ring, a COVERING: the lobster's carapace behind its cervical groove, the stag "
+            "beetle's elytra; designed on 'back', which waits for Skye's word"),
+    'fin_graft': dict(
+        interfaces=('ring',), fits=(), seat=None, variants=('axolotl_crest',), requires=(),
+        stage='AXOLOTL §7.1 (R18\'s fin family)', organ=True, articulated=False, fill='large',
+        donors=dict(axolotl_crest=dict(base='axolotl', cls='wet_skin')),
+        ask_skye=dict(back='a fin on a back port (AXOLOTL_PLAN §7.1\'s FITS v1): a covering on a back, decision 12\'s '
+                           'question (NEVER covering x back until she says)',
+                      tail='a finned tail on a wolf (AXOLOTL_PLAN §7.1: a covering on a limb kind, a NEVER exception)',
+                      wing='fins for wings (AXOLOTL_PLAN §7.1: a covering on a limb kind, a NEVER exception)'),
+        doc="a fin segment rising from a port's plug, a COVERING (R18's fin family): the axolotl's crest, its height "
+            "profile scaled to the port; WELD on soft backs, SOCKET reversed on chitin; every designed fit waits for "
+            "Skye's word"),
+    'gill_graft': dict(
+        interfaces=('ring',), fits=('gill',), seat=None, variants=('axolotl_ramus',), requires=(),
+        stage='AXOLOTL §7.1', organ=True, articulated=True, fill='medium', dressing='membrane',
+        donors=dict(axolotl_ramus=dict(base='axolotl', cls='wet_skin', chain='gill_chain')),
+        ask_skye=dict(ear='gills on a wolf\'s ear roots (the gill-eared wolf, AXOLOTL_PLAN §7.1)',
+                      horn='gills on horn ports (the wolf\'s, the beetle\'s; the lobster\'s spines behind the eyes)'),
+        doc="an axolotl gill ramus with its filaments (one generator, a size row per ramus) ADDED at a gill port's ring "
+            "(the human's six gill plugs, typed gill: one to one), WELD on soft heads, a membrane SOCKET in a hard "
+            "head's sleeve. R9's split: the axolotl's own rami are REPLACED by gill_chain_graft"),
+    'gill_chain_graft': dict(
+        interfaces=('chain',), fits=('gill_chain',), seat=None, variants=('axolotl_ramus',),
+        requires=('listed_cut', 'ring_record'), stage='AXOLOTL §7.1', organ=True, articulated=True, fill='medium',
+        donors=dict(axolotl_ramus=dict(base='axolotl', cls='wet_skin', chain='gill_chain')),
+        ask_skye=dict(antenna_chain='gills for the beetle\'s antennae, from the scape (AXOLOTL_PLAN §7.1)'),
+        doc="a gill ramus REPLACED from its root ring (the axolotl's six, another axolotl's rami)"),
+    'stump_graft': dict(
+        interfaces=('chain',), fits=tuple(CHAIN_KINDS), seat=None, variants=('healed', 'bud'),
+        requires=('listed_cut', 'ring_record'), stage='AXOLOTL §7.1 [D, proposed]', organ=True, articulated=False,
+        fill='small',
+        donors=dict(healed=dict(base=None, cls='host'), bud=dict(base=None, cls='host')),
+        doc="a limb, a tail, an antenna or a gill ramus ENDED at a listed cut, its ring closed by the base's own skin "
+            "(graft.py's band with w = 0 and a cap): 'healed', the band domed over the ring within 0.5-1 r (the "
+            "metamorph's resorbed gills, a dismembered limb), 'bud', the regeneration blastema, a pale translucent cone "
+            "1-2 r long (the regenerating axolotl). A PORT's stump is its own plug, which the base already renders"),
 }
 
 # ============================================================================================ Skye's rule (apart from FITS)
@@ -238,6 +520,8 @@ KIND_REGION = dict(
     # the limbs, their distal ends and the tail
     wing='limb', limb_tip='limb', paw='limb', foot='limb', claw='limb', wrist='limb', ankle='limb', tail_base='limb',
     tail_tip='limb', tentacle='limb', leg_fore='limb', leg_hind='limb', leg='limb', tail='limb',
+    # (the FAMILY round) the hawk's wing chain is a limb (its forelimb); the snout region reads as the head
+    wing_chain='limb', snout_region='head',
     # a real back takes a MOUNT and nothing else (her rule's third clause; the lead's C0b call)
     back='back',
     # HUMAN H4: an added limb's port on the back is a limb kind (a limb part there is a limb on a limb port, never
@@ -251,6 +535,14 @@ PART_CLASS = dict(
     mech_antenna='head',                                   # an antenna is the head's sensor, not a limb
     mech_tentacle='limb', mech_leg='limb', mech_arm='limb', mech_tail='limb', gripper='limb',
     leg_graft='limb',                                      # an organ family's leg: a limb for a limb (CROSSBREED M2)
+    # (the FAMILY round) the organ half: the head's organs head parts, the limbs and the tail limb parts, the shells and
+    # fins a COVERING (CROSSBREED §1.4's new class), a stump the base's own skin closing a cut ('stump')
+    eye_graft='head', ear_graft='head', antenna_graft='head', antenna_chain_graft='head', horn_graft='head',
+    mouthpart_graft='head', snout_graft='head', head_graft='head', gill_graft='head', gill_chain_graft='head',
+    tentacle_graft='limb', foot_graft='limb', chela_graft='limb', tail_graft='limb', wing_graft='limb',
+    wing_chain_graft='limb',
+    shell_graft='covering', fin_graft='covering',
+    stump_graft='stump',
     back_mount='mount',
     thruster_nozzle='siphon')                              # the funnel's own replacement
 NEVER = {('limb', 'head'): 'a limb part on the head ("a robot arm for a head?")',
@@ -268,7 +560,15 @@ NEVER = {('limb', 'head'): 'a limb part on the head ("a robot arm for a head?")'
          ('head', 'back'): 'a head part on the back (a head or sensor module, an eye, an antenna: a back takes only '
                            'mounts)',
          ('limb', 'back'): 'a limb part on the back (a limb or a gripper: a back takes only mounts)',
-         ('siphon', 'back'): 'a jet nozzle on the back (the funnel\'s own replacement: a back takes only back mounts)'}
+         ('siphon', 'back'): 'a jet nozzle on the back (the funnel\'s own replacement: a back takes only back mounts)',
+         # (the FAMILY round; CROSSBREED §1.4) a COVERING (a shell, a fin) stands on a body's surface: never on the head
+         # or a limb; and on a BACK only by Skye's word (the lead's decision 12 put organic shells on backs to her; until
+         # she answers a back takes only mounts, the C0b call). A stump closes a cut chain, never a back
+         ('covering', 'head'): 'a covering on the head (a shell or a fin: a head slot takes a head part)',
+         ('covering', 'limb'): 'a covering on a limb (a shell or a fin: a limb slot takes a limb)',
+         ('covering', 'back'): 'a covering on the back (an organic shell or fin waits for Skye\'s word, decision 12: a '
+                               'back takes only mounts)',
+         ('stump', 'back'): 'a stump on the back (a stump closes a cut limb or organ: a back takes only mounts)'}
 
 
 def never(family, kind, part_class=None, kind_region=None):
@@ -338,7 +638,9 @@ BASES = {
         # about half the skull's zygomatic breadth and the neck's radius [E: WOLF_PLAN's ZyB / CbL 0.58-0.62]
         head_margin=0.07,
         # (no growth planner yet: a growth covers a whole chain until one exists)
-        chain_regions=dict(leg_fore='limb', leg_hind='limb', tail='tail')),
+        chain_regions=dict(leg_fore='limb', leg_hind='limb', tail='tail'),
+        # (the FAMILY round) the furred head runs in the engine (W2z, W3a); the body is clay (W2v's UVs and one bake)
+        waiting='the rigged body glb: the furred head only exists (W2z / W3a), the body is clay (W2v)'),
     'beetle': dict(
         src='forge/families/arthropod.py skeleton() (104 joints at x10, work/bestiary/beetle/skeleton.json); '
             'BEETLE_PLAN §6.5',
@@ -404,7 +706,99 @@ BASES = {
         # about half the head's width at x4 (HW 151.6 mm) [E]
         head_margin=0.076,
         chain_regions=dict(leg_fore='limb', leg_hind='limb', tail='tail', gill_chain='gill')),
+    # THE HAWK (work/bestiary/patches/hawk_slots.md item 3, the hawk builder's row of 11-07, folded in by the FAMILY
+    # round: its regexes match forge/families/avian.py skeleton()'s 149 joint names, work/bestiary/hawk/skeleton.json; its
+    # `cuts=` go in the chain records the glb writes, their names and classes in ORGAN_BASES below). WAITING: no glb
+    'red_tailed_hawk': dict(
+        src='forge/families/avian.py skeleton() (149 joints, life size, work/bestiary/hawk/skeleton.json); '
+            'HAWK_PLAN §7.1, §8',
+        joints=dict(head=r'head', face=r'head', eye=r'eye_[LR]', snout=r'upper_bill', mouth=r'jaw', jaw=r'jaw',
+                    neck=r'neck_[2-5]', chest=r'thorax', back=r'thorax', wing=r'scapula_[LR]', hips=r'pelvis',
+                    tail_base=r'caudal_0', tail_tip=r'pygostyle', foot=r'tarsometatarsus_[LR]',
+                    claw=r'(hallux_2|d2_3|d3_4|d4_5)_[LR]', ankle=r'tibiotarsus_[LR]', growth=r'.+', fx=r'.+'),
+        chains=dict(
+            leg_hind=r'(femur|tibiotarsus|tarsometatarsus|hallux_[12]|d2_[1-3]|d3_[1-4]|d4_[1-5])_[LR]',
+            wing_chain=r'(humerus|forearm|forearm_twist|hand|alula|digit2|P\d+|S\d+|T\d|A\d)_[LR]',
+            tail=r'caudal_[01]|pygostyle|rectrix_\d_[LR]'),
+        interfaces=dict(eye='ball'),
+        notes=['a back slot rides the thorax only, and its seat must clear the FOLDED wings over the whole fold sweep '
+               '(HAWK_PLAN §8.2: the gate lands at D1.9)',
+               'the flight feathers are joints of the wing chain: a wing graft takes them with the wing'],
+        head_region=r'head|jaw|upper_bill|eye_[LR]|lid_(upper|lower)_[LR]|nictitans_[LR]|neck_[3-7]',
+        head_margin=0.03,          # about the skull's half width (38.5 mm) plus plumage [E]
+        chain_regions=dict(leg_hind='leg', wing_chain='wing', tail='tail'),
+        waiting='its glb: clay and cage (D1.3b), the head and the UVs failing; HAWK_PLAN §2.8\'s morphs designed'),
+    # THE LOBSTER (the FAMILY round, 11-09; LOBSTER_PLAN §6's ring sites and its socket table, on X1's skeleton:
+    # forge/species/lobster.py + forge/families/decapod*.py, 167 joints at x4, work/bestiary/lobster/skeleton.json; its 51
+    # ring records in work/bestiary/lobster/seams.json). WAITING: no glb
+    'lobster': dict(
+        src='forge/species/lobster.py + forge/families/decapod*.py (167 joints at x4, work/bestiary/lobster/'
+            'skeleton.json); LOBSTER_PLAN §6 (the ring sites), the socket table',
+        joints=dict(head=r'body', face=r'body', eye=r'eyestalk_1_[LR]', antenna=r'antenna_0_[LR]', horn=r'body',
+                    mouth=r'body', claw=r'cheliped_propodus_[LR]', foot=r'p[2-5]_propodus_[LR]', back=r'body',
+                    wing=r'body', chest=r'body', tail_base=r'abd_1', tail_tip=r'telson', growth=r'.+', fx=r'.+'),
+        chains=dict(leg=r'(cheliped|p[2-5])_(coxa|basis|merus|carpus|propodus|dactyl)_[LR]',
+                    antenna_chain=r'(antenna_[0-2]|flagellum_\d\d)_[LR]',
+                    tail=r'abd_[1-6]|telson'),
+        interfaces=dict(eye='dome'),           # the cornea: the beetle's compound-eye kind (LOBSTER_PLAN's socket table)
+        notes=['the carapace\'s head and its back ride ONE joint (body), so the G5 head region is GEOMETRIC (LOBSTER_PLAN '
+               '§6, open question 5: the carapace ahead of the cervical groove, the rostrum, the eyestalks, antennae, '
+               'antennules and mouthparts): head_probe needs that form before a back mount seats on the lobster; the '
+               'joint region below is its appendages only, so its back sockets on body type clean'],
+        head_region=r'eyestalk_[01]_[LR]|antenna_[0-2]_[LR]|flagellum_\d\d_[LR]|antennule(_lat|_med)?_[0-3]_[LR]|'
+                    r'mxp3_[0-2]_[LR]',
+        head_margin=0.05,          # about half the carapace's width ahead of the groove at x4 [E]
+        chain_regions=dict(leg='leg', antenna_chain='antenna', tail='tail'),
+        waiting='its glb: cages and UVs only (X4h / X5): no high, no bake, no rig export'),
 }
+
+# ============================================================================================ the organ half per base
+# (the FAMILY round, 11-09) what a graft reads of each base, apart from BASES (whose rows other rounds edit: the
+# human's is A2 + B1's while they run): its skin's MATERIAL CLASS at its rings (the host side of a seam); where its RING
+# RECORDS come from ('records': frozen in the glb's extras.bestiary.rings, the human's 57 and the axolotl's 21; 'at_cut':
+# made at the cut by forge/graft.py ring_record() from the canonical low, the octopus's (M1a, M2); None: none yet, so a
+# graft there waits: the beetle's sleeve rings, CROSSBREED R10); its listed cuts' NAMES where the glb names none
+# (cut_names, by joint index) and every cut's CLASS (R13: proximal, mid, distal; keyed by name, else joint index); and
+# its GRAFT JOINTS per chain kind (CROSSBREED §4.2: <the chain's stem>_g<kk>[_side], the side last for the validator's
+# side test), which check_manifest takes as the base's own on a grafted chain
+ORGAN_BASES = dict(
+    octopus=dict(material_class='wet_skin', rings='at_cut',
+                 cut_class=dict(tentacle={6: 'proximal', 8: 'mid', 10: 'mid', 12: 'distal', 14: 'distal'}),
+                 graft_joints=dict(tentacle=r'arm[0-7]_g\d\d')),
+    beetle=dict(material_class='chitin', rings=None,
+                cut_names=dict(leg={1: 'coxa', 3: 'knee'}, antenna_chain={1: 'scape'}),
+                cut_class=dict(leg=dict(coxa='proximal', knee='mid'), antenna_chain=dict(scape='proximal')),
+                graft_joints=dict(leg=r'leg_[fmh]_g\d\d_[LR]', antenna_chain=r'antenna_g\d\d_[LR]')),
+    axolotl=dict(material_class='wet_skin', rings='records',
+                 cut_class=dict(leg_fore=dict(axilla='proximal', forearm='mid', hand='distal'),
+                                leg_hind=dict(groin='proximal', shank='mid', foot='distal'),
+                                tail=dict(root='proximal', mid='mid'), gill_chain=dict(root='proximal')),
+                 graft_joints=dict(leg_fore=r'leg_fore_g\d\d_[LR]', leg_hind=r'leg_hind_g\d\d_[LR]', tail=r'tail_g\d\d',
+                                   gill_chain=r'gill_[123]_g\d\d_[LR]')),
+    human=dict(material_class='dry_skin', rings='records',
+               cut_class=dict(leg_fore=dict(shoulder='proximal', elbow='mid', wrist='distal'),
+                              leg_hind=dict(knee='mid', ankle='distal')),
+               graft_joints=dict(leg_fore=r'arm_g\d\d_[LR]', leg_hind=r'leg_g\d\d_[LR]')),
+    wolf=dict(material_class='fur', rings='records',
+              cut_class=dict(leg_fore=dict(axilla='proximal', forearm='mid', paw='distal'),
+                             leg_hind=dict(groin='proximal', shank='mid', paw='distal'),
+                             tail=dict(root='proximal', mid='mid')),
+              graft_joints=dict(leg_fore=r'leg_fore_g\d\d_[LR]', leg_hind=r'leg_hind_g\d\d_[LR]', tail=r'tail_g\d\d')),
+    red_tailed_hawk=dict(material_class='dry_skin', rings='records',
+                         cut_class=dict(leg_hind=dict(ankle='mid', foot='distal'), wing_chain=dict(shoulder='proximal'),
+                                        tail=dict(root='proximal')),
+                         graft_joints=dict(leg_hind=r'leg_hind_g\d\d_[LR]', wing_chain=r'wing_g\d\d_[LR]',
+                                           tail=r'tail_g\d\d')),
+    lobster=dict(material_class='chitin', rings='records',
+                 cut_class=dict(leg=dict(coxa='proximal', carpus='mid', knee='mid', wrist='distal', ankle='distal'),
+                                antenna_chain=dict(peduncle='proximal', flagellum='mid'),
+                                tail=dict(root='proximal', mid='mid', fan='distal')),
+                 graft_joints=dict(leg=r'(cheliped|p[2-5])_g\d\d_[LR]', antenna_chain=r'antenna_g\d\d_[LR]',
+                                   tail=r'tail_g\d\d')),
+)
+RING_SOURCES = (None, 'records', 'at_cut')
+# the distal socket kinds a grafted part carries at its own end (its claw, foot, paw, tip): they may hang on graft joints
+GRAFT_SOCKET_KINDS = ('limb_tip', 'paw', 'foot', 'claw', 'wrist', 'ankle', 'tail_tip')
 
 # the cyborg section's keys (CYBORG_PLAN §6.1) and its rows' keys; an unknown key is an error, never skipped (G2: the
 # old cyborg() skipped unknown slot keys silently)
@@ -421,6 +815,42 @@ SIDES = ('', 'L', 'R')
 # seeded weighted pick takes it like any row, and the site then stays empty, deterministically (the lead's C0b call)
 NONE = 'none'
 assert NONE not in FAMILIES, 'the none row\'s name is reserved'
+
+# THE GRAFT SECTION's keys (CROSSBREED §6.1; the FAMILY round): an unknown key is an error, never skipped (G2). A
+# parts row's `cut` names a REGION's ring (head_region rows: 'poll', 'neck'); a limbs row's `cut` names a listed cut
+# (its name, or its joint index where the base names none: the octopus's 8)
+GRAFT_KEYS = ('level', 'seed', 'size', 'harmonize', 'parts', 'limbs', 'eyes', 'note')
+GRAFT_ROW_KEYS = ('part', 'variant', 'level', 'weight', 'side', 'site', 'cut', 'harmonize', 'dressing',
+                  'element_policy', 'note')
+GRAFT_LIMB_KEYS = ('kind', 'chain', 'cut', 'part', 'variant', 'level', 'weight', 'harmonize', 'dressing',
+                   'element_policy', 'note')
+GRAFT_EYES_KEYS = ('count', 'note')
+# CROSSBREED §5.2: each skin reads as itself ('graft'), the donor recoloured toward the host's zones ('tint'), the donor
+# geometry under the host's skin stack ('reskin'). Its defaults: 'graft' for a horn, a mouthpart, an eye and every
+# SOCKET seam (a physical boundary), 'tint' for a cross-species WELD, 'graft' for the base's own part (M1a)
+HARMONIZE = ('graft', 'tint', 'reskin')
+# the band's designed boundaries (CROSSBREED §2.10, with LOBSTER_PLAN's wrist fold and bud, AXOLOTL_PLAN's fin_end,
+# HAWK_PLAN's cere): a row names one, else its seam's default (default_dressing)
+DRESSINGS = ('morph', 'fold', 'margin', 'ruff', 'pedicle', 'nailbed', 'coronet', 'membrane', 'lip', 'wrist', 'cere',
+             'fin_end', 'bud')
+GRAFT_ELEMENT_POLICIES = ('inherit', 'own', 'element_only')     # recipe.ELEMENT_POLICIES (recipe.py asserts they agree)
+GRAFT_REQUIRES = ('listed_cut', 'ring_record', 'distal_cut', 'region_ring')
+# CROSSBREED §6.2's size classes, smallest first (recipe.TIERS' names): small fills the eyes; medium the ears, horns,
+# antennae, gills and mouthparts; large a limb pair or the tail; elite the head or every limb
+FILL_ORDER = ('small', 'medium', 'large', 'elite', 'hero')
+# THE EXTRA-EYE OP (the E1 re-file's item 2, REMIX_LIBRARY §6: the eye COUNT is a body-plan change, a MUTATION, not a
+# base feature): the graft section's `eyes: {count}` adds eye PORTS beyond the base's pair (an eye_graft at new ports),
+# each seating the base's own eye part (its own UV family, never a mismatched eye). Per base the arc the extra eyes
+# ride and the most it takes: E1's staged e1_ranges.py EYE_PORTS moved here verbatim (recipe.eye_ports() places them on
+# a built manifest; a cage cuts them, forge/ports.py cut + extend, once FORGE_CAPS['eye_ports'] is built)
+EYE_PORTS = dict(
+    octopus=dict(part='octopus_eye', max_extra=4, arc=dict(axis='head_up', step_deg=24.0, rows=('above',))),
+    axolotl=dict(part='axolotl_eye', max_extra=4, arc=dict(axis='head_up', step_deg=18.0, rows=('behind',))),
+    human=dict(part='human_eye', max_extra=2, arc=dict(axis='head_up', step_deg=0.0, rows=('forehead',))),
+    beetle=dict(part='beetle_eye', max_extra=2, arc=dict(axis='head_up', step_deg=20.0, rows=('dorsal',))),
+    wolf=dict(part='canid_eye', max_extra=2, arc=dict(axis='head_up', step_deg=0.0, rows=('forehead',))),
+    lobster=dict(part='lobster_eye', max_extra=2, arc=dict(axis='head_up', step_deg=30.0, rows=('stalk',))),
+)
 
 # ============================================================================================ the surface layer (C1)
 # PLATE REGIONS per base (CYBORG_PLAN §4.2.6; the lead's C1 call: plates on UNIQUE texels; the octopus's arms set is
@@ -503,11 +933,12 @@ FEED_MAX = 6                 # lines of each kind (links, dives) per feed row
 
 
 class SlotError(ValueError):
-    """resolve_cyborg's refusal: every error problem, each naming its slot and its part"""
+    """resolve_cyborg's refusal (and resolve_graft's: section 'graft'): every error problem, each naming its slot and its
+    part"""
 
-    def __init__(self, problems):
+    def __init__(self, problems, section='cyborg'):
         self.problems = list(problems)
-        super().__init__('the cyborg slot rule refuses this recipe:\n' + '\n'.join(
+        super().__init__(f'the {section} slot rule refuses this recipe:\n' + '\n'.join(
             f'  {p["code"]} {p["where"]}: {p["message"]}' for p in self.problems))
 
 
@@ -520,6 +951,81 @@ def _match(rx, name):
 
 
 # ============================================================================================ the table's own check
+_CLASSES = MATERIAL_CLASSES['soft'] + MATERIAL_CLASSES['hard']
+
+
+def _organ_problems(f, d):
+    """(the FAMILY round) one ORGAN family's own data: its donors cover its variants exactly; each donor's base has a
+    BASES row (none only for a stump, whose class is 'host': the base's own skin); its class a material class, None only
+    for a ball or dome eye (no seam); a donor chain a chain kind; its requires known; its ask_skye kinds known, outside its
+    fits, each with its question; its fill a size class; its dressing a dressing; never a chain and a port interface on one
+    family (R9, decision 6: split it)"""
+    bad = []
+    dn = d.get('donors') or {}
+    if set(dn) != set(d.get('variants') or ()):
+        bad.append(f'{f}: donors {sorted(dn)} do not cover its variants {list(d.get("variants") or ())} exactly')
+    vi = d.get('variant_interface') or {}
+    for v, dv in sorted(dn.items()):
+        dv = dv if isinstance(dv, dict) else {}
+        b, c, ch = dv.get('base'), dv.get('cls'), dv.get('chain')
+        iface = vi.get(v) or (d['interfaces'][0] if len(d['interfaces']) == 1 else None)
+        if c == 'host':
+            if b is not None:
+                bad.append(f'{f}.{v}: a \'host\' class (the base\'s own skin) names no donor base, not {b!r}')
+        elif b not in BASES:
+            bad.append(f'{f}.{v}: donor base {b!r} has no BASES row')
+        if c is None:
+            if iface not in ('ball', 'dome'):
+                bad.append(f'{f}.{v}: no material class, and its {iface!r} interface has a seam (only a ball or a dome '
+                           'eye has none)')
+        elif c != 'host' and c not in _CLASSES:
+            bad.append(f'{f}.{v}: class {c!r} is not a material class ({", ".join(_CLASSES)})')
+        if ch is not None and ch not in CHAIN_KINDS:
+            bad.append(f'{f}.{v}: donor chain {ch!r} is not a chain kind')
+    for r_ in d.get('requires') or ():
+        if r_ not in GRAFT_REQUIRES:
+            bad.append(f'{f}: requires {r_!r}, not one of {GRAFT_REQUIRES}')
+    for k, why in (d.get('ask_skye') or {}).items():
+        if k not in KINDS or k in d['fits'] or not isinstance(why, str) or not why:
+            bad.append(f'{f}: ask_skye {k!r} must be a known kind outside its fits, with her question')
+    if d.get('fill') not in FILL_ORDER:
+        bad.append(f'{f}: fill {d.get("fill")!r} is not a size class {FILL_ORDER}')
+    if d.get('dressing') is not None and d['dressing'] not in DRESSINGS:
+        bad.append(f'{f}: dressing {d["dressing"]!r} is not one of DRESSINGS')
+    if 'chain' in d['interfaces'] and len(d['interfaces']) > 1:
+        bad.append(f'{f}: a chain and a port interface on one family ({d["interfaces"]}): split it (R9, decision 6)')
+    return bad
+
+
+def _organ_base_problems():
+    """(the FAMILY round) ORGAN_BASES against BASES: each row a base's; its material class a class; its ring source one
+    of RING_SOURCES; its cut names, cut classes and graft joints on chain kinds the base has; every class a CUT_CLASSES
+    name; every graft-joint pattern a regex"""
+    bad = []
+    for b, O in ORGAN_BASES.items():
+        if b not in BASES:
+            bad.append(f'ORGAN_BASES[{b!r}]: no BASES row')
+            continue
+        if O.get('material_class') not in _CLASSES:
+            bad.append(f'ORGAN_BASES[{b!r}].material_class {O.get("material_class")!r} is not a material class')
+        if O.get('rings') not in RING_SOURCES:
+            bad.append(f'ORGAN_BASES[{b!r}].rings {O.get("rings")!r} is not one of {RING_SOURCES}')
+        for key in ('cut_names', 'cut_class', 'graft_joints'):
+            for k in (O.get(key) or {}):
+                if k not in BASES[b]['chains']:
+                    bad.append(f'ORGAN_BASES[{b!r}].{key} names {k!r}, not a chain kind the {b} has')
+        for k, cc in (O.get('cut_class') or {}).items():
+            for key_, cls in cc.items():
+                if cls not in CUT_CLASSES:
+                    bad.append(f'ORGAN_BASES[{b!r}].cut_class[{k!r}][{key_!r}] = {cls!r}: not one of {CUT_CLASSES}')
+        for k, rx in (O.get('graft_joints') or {}).items():
+            try:
+                re.compile(rx)
+            except (re.error, TypeError):
+                bad.append(f'ORGAN_BASES[{b!r}].graft_joints[{k!r}] = {rx!r} is no regex')
+    return bad
+
+
 def check_table(families=None, kind_region=None, part_class=None):
     """the closed table's consistency (run at import; the arguments let a test check a WIDENED table): every family's
     kinds known, its interfaces in INTERFACES and matching its kinds' class, its variants and default present, its
@@ -557,6 +1063,9 @@ def check_table(families=None, kind_region=None, part_class=None):
         vi = d.get('variant_interface')
         if vi and (set(vi) != set(d['variants']) or any(v not in d['interfaces'] for v in vi.values())):
             bad.append(f'{f}: variant_interface {vi} does not cover its variants with its interfaces')
+        if d.get('organ'):
+            bad += _organ_problems(f, d)
+    bad += _organ_base_problems()
     for (c, r) in NEVER:
         if c not in set(pc.values()) or r not in set(kr.values()):
             bad.append(f'NEVER names an unused class or region: {(c, r)}')
@@ -619,7 +1128,10 @@ CYBORG_FAMILIES = tuple(f for f in FAMILIES if f not in ORGAN_FAMILIES)
 SLOT_KEYS = ('kind', 'side', 'interface', 'joint', 'frame', 'dims')
 FRAME_KEYS = ('normal', 'tangent')
 DIMS_KEYS = dict(mount=('radius', 'bolt_circle', 'bolts', 'pilot'), ball=('radius', 'axis'), dome=('radius', 'axis'),
-                 none=())
+                 none=(),
+                 # (the FAMILY round, R9) a socket that declares 'ring': its ring's mean radius (m) and K, the ring's
+                 # vertex count (K = 0 mod 4, CROSSBREED §2.2); its ring record itself rides the scene's rings
+                 ring=('radius', 'K'))
 assert set(DIMS_KEYS) == set(INTERFACES) - {'chain', 'region'}, 'every socket interface has its dims vocabulary'
 # the kit's flange PATTERN on a socket's radius, "the pattern, not the sizes" (A.7 U1): TC70, its most used interface
 # (r 35, bolt circle r 27.5, 6 bolts, pilot r 12 mm; 204 of its 239 records carry them). KS 1.5's "6 screws at 60 deg on
@@ -761,6 +1273,10 @@ def dims_problems(interface, dims, frame=None):
             bad.append(f'its bolt circle (r {bc:.4f}) does not lie inside its radius ({r:.4f})')
         if bc is not None and pl is not None and pl >= bc:
             bad.append(f'its pilot (r {pl:.4f}) does not lie inside its bolt circle ({bc:.4f})')
+    elif interface == 'ring':
+        K = dims.get('K')
+        if 'K' in dims and (isinstance(K, bool) or not isinstance(K, numbers.Integral) or K < 8 or K % 4):
+            bad.append(f'its K {K!r} must be a whole count of 8 or more, K = 0 (mod 4) (CROSSBREED §2.2)')
     elif 'axis' in dims:
         a = _vec3(dims['axis'])
         if a is None or abs(math.sqrt(_dot(a, a)) - 1.0) > UNIT_TOL:
@@ -790,7 +1306,7 @@ def slot_extras(kind, side, interface, joint, *, frame, dims=None):
     out = dict(kind=kind, side=side, interface=interface, joint=str(joint),
                frame={k: [float(x) for x in frame[k]] for k in FRAME_KEYS})
     if DIMS_KEYS[interface]:
-        out['dims'] = {k: ([float(x) for x in v] if k == 'axis' else (int(v) if k == 'bolts' else float(v)))
+        out['dims'] = {k: ([float(x) for x in v] if k == 'axis' else (int(v) if k in ('bolts', 'K') else float(v)))
                        for k, v in dims.items()}
     return out
 
@@ -1117,6 +1633,10 @@ def check_recipe(cyb, base=None):
                                                                 'fallback family (G2)'))
                 continue
             d = FAMILIES[F]
+            if d.get('organ'):
+                # (the FAMILY round) the limb rows' rule for a kind table's row too: an organ part is a graft
+                out.append(_P('error', 'cyborg.organ', where, f'{F} is an ORGAN family: a graft (the recipe\'s graft '
+                                                              'section, forged for its socket), never a cyborg part'))
             v = row.get('variant')
             if v is not None and v not in d['variants']:
                 out.append(_P('error', 'cyborg.unknown', where, f'{F} has no variant {v!r} (have: '
@@ -1233,6 +1753,13 @@ def check_manifest(man, base, base_data=None):
     chains = man.get('chains') or {}
     regions = man.get('regions') or {}
     typed = sorted(s for s, d in socks.items() if d.get('slot') is not None)
+    # (the FAMILY round) GRAFT JOINTS: on a chain record that says it is grafted (its `graft`), the base's graft-joint
+    # names for its kind (ORGAN_BASES graft_joints: M2c's arm0_g09..g15) are the base's own; a part's distal sockets (its
+    # tip, its claw, its foot) may hang on them
+    gj = (organ_base(base) if base_data is None else {}).get('graft_joints') or {}
+    grafted = {j for c in chains.values() if isinstance(c, dict) and isinstance(c.get('graft'), dict)
+               and isinstance(gj.get(c.get('kind')), str) for j in (c.get('joints') or [])
+               if isinstance(j, str) and _match(gj[c['kind']], j)}
     if not typed and not chains and not regions:
         for s, d in sorted(socks.items()):
             for arch in sorted(d.get('seats') or {}):
@@ -1298,7 +1825,7 @@ def check_manifest(man, base, base_data=None):
                 out.append(_P('error', 'manifest.slot_joint', s,
                               f'{s} is typed {kind!r}, and the {base} has no {kind!r} slot' + (f': {why}' if why else
                                                                                               '')))
-            elif not _match(rx, bone):
+            elif not _match(rx, bone) and not (kind in GRAFT_SOCKET_KINDS and bone in grafted):
                 out.append(_P('error', 'manifest.slot_joint', s,
                               f'{s} is typed {kind!r} but hangs on {bone!r}: the {base}\'s {kind!r} slot rides '
                               f'{rx} only' + (' (the old bug: a back slot on a neck bone)' if kind in ('back', 'chest')
@@ -1344,7 +1871,7 @@ def check_manifest(man, base, base_data=None):
                 out.append(_P('error', 'manifest.chain_joint', where, f'chain {name} is typed {kind!r}, and the {base} '
                                                                       f'has no {kind!r} chain'))
             else:
-                off = [j for j in js if not _match(rx, j)]
+                off = [j for j in js if not _match(rx, j) and j not in grafted]
                 if off:
                     out.append(_P('error', 'manifest.chain_joint', where,
                                   f'chain {name} ({kind}) holds {off[:4]}: the {base}\'s {kind!r} chain rides {rx}'))
@@ -1532,7 +2059,7 @@ def seat_groups(man, base, base_data=None):
 
 
 # ============================================================================================ cyborg.covered
-def check_covered(placements, man, base, layers, base_data=None):
+def check_covered(placements, man, base, layers, base_data=None, code='cyborg.covered'):
     """cyborg.covered (CYBORG_PLAN A.6; the lead's A.9 decision 4, an ERROR): a covering layer the recipe stands on
     flesh a part replaces, or on a socket a mount covers. Left there it floats, and floating is impossible by
     construction (study T hides EVERY layer over a prosthesis by the same region code). placements: plan()'s. layers:
@@ -1542,7 +2069,10 @@ def check_covered(placements, man, base, layers, base_data=None):
     accessory, whose clash with a mount is cyborg.seat_shared's). A chain part replaces its chain's joints from the cut
     to the tip: a layer on the chain's region whose share runs past the cut's share, or seated on one of those joints or
     their sockets, is covered. A mount covers its own socket. A ball or dome implant swaps the eye part on its joint and
-    covers nothing a layer stands on (the monocle beside it is C4's fit to judge)"""
+    covers nothing a layer stands on (the monocle beside it is C4's fit to judge). (The FAMILY round) a GRAFT placement
+    (plan_graft's) covers as a part does: a chain graft its chain from the cut, a port or region graft its site and the
+    sockets of its native group, which it drops: a layer or an ACCESSORY on one of those floats. `code` names the
+    section's code ('graft.covered' for the graft section)"""
     B = base_data if base_data is not None else BASES.get(base)
     if B is None or not layers or not placements:
         return []
@@ -1566,6 +2096,13 @@ def check_covered(placements, man, base, layers, base_data=None):
         on = {s for s, d in socks.items() if d.get('bone') in js}
         gone.append((pl, float(sh), js, on, regions_of.get(pl['kind'])))
     covers = {pl['site']: pl for pl in placements if pl.get('interface') == 'mount'}
+    # (the FAMILY round) a port or region graft drops its site's socket and its native group's sockets
+    drops = {}
+    for pl in placements:
+        if pl.get('section') == 'graft' and pl.get('interface') in ('ring', 'region'):
+            for s in [pl.get('site')] + list((pl.get('native') or {}).get('sockets') or []):
+                if isinstance(s, str) and s in socks:
+                    drops.setdefault(s, pl)
     on_any = set().union(*(g[3] for g in gone)) if gone else set()
     out = []
     for where, what, reach in layers:
@@ -1582,7 +2119,7 @@ def check_covered(placements, man, base, layers, base_data=None):
             if bs & js:
                 why.append(f'it rides {", ".join(sorted(bs & js))}')
             if why:
-                out.append(_P('error', 'cyborg.covered', where,
+                out.append(_P('error', code, where,
                               f'{what}: {"; ".join(why)}, which {pl["part"]}.{pl["variant"]} replaces from joint '
                               f'{pl["cut"]} ({pl["joints"][0]}) to the tip. Left on a replaced limb it floats (the '
                               'lead\'s A.9 decision 4: an error): keep it to the flesh (a share below the cut), or '
@@ -1591,9 +2128,14 @@ def check_covered(placements, man, base, layers, base_data=None):
             for s in sorted(ss - on_any):
                 pl = covers.get(s)
                 if pl is not None:
-                    out.append(_P('error', 'cyborg.covered', where,
+                    out.append(_P('error', code, where,
                                   f'{what} seats on {s}, which {pl["part"]}.{pl["variant"]} covers: it would stand '
                                   'under the part (the lead\'s A.9 decision 4: an error)'))
+        for s in sorted((ss - on_any) & set(drops)):
+            pl = drops[s]
+            out.append(_P('error', code, where,
+                          f'{what} seats on {s}, which {pl["part"]}.{pl["variant"]} drops with its native group at '
+                          f'{pl["site"]}: left there it floats (the lead\'s A.9 decision 4: an error)'))
     return out
 
 
@@ -1855,12 +2397,8 @@ def plan(cyb, man, base, level=0, seed=0, pick=None, accessories=(), base_data=N
             out.append(_P('error', 'cyborg.seat_shared', w, f'{F} on {cn}: the chain is already replaced by '
                                                             f'{replaced[cn]}'))
             continue
-        held = [k_ for k_, v_ in replaced.items() if v_.split('.')[0] == F]
-        if F == 'mech_tentacle' and held:
-            out.append(_P('error', 'cyborg.limit', w, f'{F} on {cn}: v1 mounts ONE mech arm per creature (the '
-                                                      'lead\'s C5c call: the runtime carries one replaced arm\'s '
-                                                      f'ground line and AO floor), and {held[0]} carries one'))
-            continue
+        # (remix_r1 MOUNT: no ONE-per-creature limit on the mech tentacle any more, cyborg.limit lifted: the runtime mounts every
+        # chain part by its record, one ground line per arm and one AO floor per part; one replacement per chain stays, above)
         v = row.get('variant') or d['variants'][0]
         replaced[cn] = f'{F}.{v}'
         js = list(c.get('joints') or [])
@@ -1910,6 +2448,666 @@ def plan(cyb, man, base, level=0, seed=0, pick=None, accessories=(), base_data=N
     return placements, out
 
 
+# ============================================================================================ THE GRAFT SECTION
+# (the FAMILY round, 11-09; CROSSBREED §6.1, §6.6, R9, R13) the organ half's resolver beside the cyborg's plan(): the one
+# closed table, Skye's rule, the seeded weighted pick, the chain records and the sides and bands as the cyborg reads
+# them; and its own rules: every graft seats in a RING RECORD (a chain cut's, a port's, a region's; the octopus's made at
+# the cut), a chain graft from a listed cut the row NAMES (or its joint index where the base names none), a foot or a
+# claw at a distal cut only, the cut's class matched on the donor (R13), the seam set by the two material classes, ONE
+# replacement per site across the graft and the cyborg sections (graft.shared, by native-group intersection: R9). Its
+# placements carry what the forge's general path builds from (forge/graft.py, graft_socket.py, assemble.py): the
+# chain, the cut and its ring, the root (the kept joint the part hangs from: decision 2), the native group the part
+# drops, the seam, the dressing and the harmonize mode, and the donor's base, chain, cut and side
+def organ_base(base):
+    """ORGAN_BASES' row for a base ({} for a base the organ half has no row for: a synthetic test base)"""
+    return ORGAN_BASES.get(base) or {}
+
+
+def seam(host_cls, part_cls, articulated=True):
+    """the seam between the host's material class at its ring and the part's (CROSSBREED §1.1): None for a ball or a
+    dome eye (no seam: its lids or its port hold it); 'WELD' for a stump (the base's own skin) and for soft on soft;
+    'SOCKET' for a hard part in soft skin; 'SOCKET_REVERSED' for a soft part leaving a hard base; hard on hard an
+    'ARTICULATION' when the part brings its own joints, else a 'WELD' in hard material. Raises on an unknown class"""
+    if part_cls is None:
+        return None
+    if part_cls == 'host':
+        return 'WELD'
+    for c in (host_cls, part_cls):
+        if c not in _CLASSES:
+            raise ValueError(f'{c!r} is not a material class (have: {", ".join(_CLASSES)})')
+    if host_cls in SOFT and part_cls in SOFT:
+        return 'WELD'
+    if host_cls in SOFT:
+        return 'SOCKET'
+    if part_cls in SOFT:
+        return 'SOCKET_REVERSED'
+    return 'ARTICULATION' if articulated else 'WELD'
+
+
+def default_dressing(fam, seam_, host_cls, same_base, part_cls=None):
+    """the band's dressing when a row names none (CROSSBREED §2.10): the base's own part or skin a 'morph' (M1a); a
+    WELD with fur on either side a 'ruff' (the coat thinning out over the band: the werewolf's head at the human's neck,
+    a hawk wing on the wolf), any other WELD a 'fold' (a soft weld across species); a SOCKET the family's own collar (a
+    beetle leg's membrane, M2; a horn's pedicle; a beak's lip); a SOCKET reversed a 'fold' at the sleeve; an
+    ARTICULATION or an eye none (a sleeve, the lids)"""
+    if seam_ == 'WELD':
+        return 'morph' if same_base else ('ruff' if 'fur' in (host_cls, part_cls) else 'fold')
+    if seam_ == 'SOCKET':
+        return fam.get('dressing') or 'membrane'
+    if seam_ == 'SOCKET_REVERSED':
+        return 'fold'
+    return None
+
+
+def default_harmonize(family, seam_, same_base):
+    """CROSSBREED §5.2's defaults: 'graft' for the base's own part (M1a), a horn, a mouthpart, an eye and every physical
+    boundary (a SOCKET either way, an ARTICULATION, no seam); 'tint' for a cross-species WELD (the safest one creature)"""
+    if same_base or seam_ != 'WELD' or family in ('horn_graft', 'mouthpart_graft', 'eye_graft'):
+        return 'graft'
+    return 'tint'
+
+
+# what a manifest's ring summary keeps (recipe.manifest_from_glb): the record's identity and its port frame, its class
+# and density; its native group's joints and sockets (graft.shared, graft.covered); the forge reads the full record
+RING_KEYS = ('name', 'kind', 'K', 'side', 'root', 'cut', 'port', 'cls', 'px_per_m', 'r_mean', 'planarity', 'frame', 'set',
+             'set_size', 'h', 'handedness')
+
+
+def ring_summary(name, r):
+    """a scene ring record as a manifest carries it: RING_KEYS, and its native group's joints and sockets"""
+    out = {k: r[k] for k in RING_KEYS if k in r}
+    out['name'] = r.get('name', name)
+    nat = r.get('native') if isinstance(r.get('native'), dict) else {}
+    out['native'] = dict(joints=[j for j in nat.get('joints') or [] if isinstance(j, str)],
+                         sockets=[s for s in nat.get('sockets') or [] if isinstance(s, str)])
+    return out
+
+
+def manifest_rings(man):
+    """the manifest's ring records by name (either layout the glbs write: the human's list, the axolotl's dict)"""
+    R = (man or {}).get('rings') or {}
+    if isinstance(R, list):
+        return {r['name']: r for r in R if isinstance(r, dict) and isinstance(r.get('name'), str)}
+    return {k: v for k, v in R.items() if isinstance(v, dict)} if isinstance(R, dict) else {}
+
+
+def port_ring(man, site, rings=None):
+    """the PORT ring record linked to a socket: the scene's ring with port True of the socket's kind, side and joint
+    whose frame's normal is the socket's (within 0.8 deg; the closest when several are), else None. The human's port
+    sockets declare 'mount' for their cyborg parts and carry their ring this way (h4/rig/r11_sockets.py writes both from
+    one port)"""
+    sd = ((man or {}).get('sockets') or {}).get(site) or {}
+    sl = sd.get('slot') if isinstance(sd.get('slot'), dict) else {}
+    rings = manifest_rings(man) if rings is None else rings
+    n = _vec3((sl.get('frame') or {}).get('normal') if isinstance(sl.get('frame'), dict) else None)
+    if n is None or _dot(n, n) < 1e-20:
+        return None
+    best, bc = None, 0.9999
+    for name in sorted(rings):
+        r = rings[name]
+        if not (r.get('port') is True and r.get('kind') == sl.get('kind') and (r.get('side') or '') ==
+                (sl.get('side') or '') and r.get('root') == sd.get('bone')):
+            continue
+        m = _vec3((r.get('frame') or {}).get('normal') if isinstance(r.get('frame'), dict) else None)
+        if m is None or _dot(m, m) < 1e-20:
+            continue
+        c = _dot(_unit(n), _unit(m))
+        if c > bc:
+            best, bc = r, c
+    return best
+
+
+def ring_problems(ring):
+    """what makes a ring record unusable for a graft (CROSSBREED §2.11; its build gates ran at its export: the human's
+    g01_rings, the axolotl's ax11_glb): K a whole count of 8 or more with K = 0 (mod 4); a sound frame; a material
+    class; a density (px_per_m) and a mean radius above 0. [] = usable"""
+    bad = []
+    K = ring.get('K')
+    if isinstance(K, bool) or not isinstance(K, numbers.Integral) or K < 8 or K % 4:
+        bad.append(f'its K {K!r} is not a whole count of 8 or more with K = 0 (mod 4)')
+    fr = ring.get('frame')
+    if not isinstance(fr, dict):
+        bad.append('it carries no frame')
+    else:
+        bad += frame_problems({k: fr.get(k) for k in FRAME_KEYS})
+    if ring.get('cls') not in _CLASSES:
+        bad.append(f'its material class {ring.get("cls")!r} is not one of {_CLASSES}')
+    for k in ('px_per_m', 'r_mean'):
+        if not (_real(ring.get(k)) and ring[k] > 0):
+            bad.append(f'its {k} {ring.get(k)!r} is not above 0')
+    return bad
+
+
+def _descendants(man, root):
+    kids = {}
+    for b, p in ((man or {}).get('bone_parent') or {}).items():
+        if p is not None:
+            kids.setdefault(p, []).append(b)
+    out, stack = [], list(kids.get(root, []))
+    while stack:
+        b = stack.pop()
+        out.append(b)
+        stack += kids.get(b, [])
+    return sorted(out)
+
+
+def cut_info(c, cut, rings, base, kind):
+    """a limbs row's `cut` on a chain record: (the listed cut, its joint index, its name), or (None, None, None). An int
+    is a listed cut's joint index; a string the listed cut whose name it is (the cut's own, its ring record's `cut`, or
+    ORGAN_BASES cut_names where the glb names none) or whose ring it names"""
+    names = (organ_base(base).get('cut_names') or {}).get(kind) or {}
+    for u in c.get('cuts') or []:
+        if not (isinstance(u, dict) and isinstance(u.get('joint'), int) and not isinstance(u['joint'], bool)):
+            continue
+        rr = rings.get(u['ring']) if isinstance(u.get('ring'), str) else None
+        nm = u.get('name') if isinstance(u.get('name'), str) else \
+            (rr.get('cut') if isinstance((rr or {}).get('cut'), str) else names.get(u['joint']))
+        if (isinstance(cut, int) and not isinstance(cut, bool) and cut == u['joint']) or \
+                (isinstance(cut, str) and cut in (nm, u.get('ring'))):
+            return u, u['joint'], nm
+    return None, None, None
+
+
+def cut_class(base, kind, name, joint):
+    """a cut's class (R13: proximal, mid, distal) on a base: ORGAN_BASES cut_class by its name, else its joint index"""
+    cc = (organ_base(base).get('cut_class') or {}).get(kind) or {}
+    return cc.get(name) if name in cc else cc.get(joint)
+
+
+def donor_cut(family, variant, host_base, cls, host_cut):
+    """the donor's cut its part starts at (R13: the donor's own cut of the host cut's class; on its own base, the host's
+    cut itself, M1a's identity): a cut name (or index), or None when the donor lists none of that class or is no chain"""
+    dv = FAMILIES[family]['donors'][variant]
+    b, ch = dv.get('base'), dv.get('chain')
+    if b is None or ch is None:
+        return None
+    if b == host_base:
+        return host_cut
+    cc = (organ_base(b).get('cut_class') or {}).get(ch) or {}
+    hits = [k for k, c in cc.items() if c == cls]
+    return hits[0] if hits else None
+
+
+def _gp(code, where, message, severity='error'):
+    return _P(severity, f'graft.{code}', where, message)
+
+
+def _graft_row_common(row, where, keys, out):
+    """what every graft row shares: its keys known (G2), its band, its weight, its harmonize, dressing and policy"""
+    for rk in row:
+        if rk not in keys:
+            out.append(_gp('unknown', where, f'unknown row key {rk!r} (have: {", ".join(keys)}): never skipped (G2)'))
+    if 'level' in row and not _level_ok(row['level']):
+        out.append(_gp('level', where, f'level band {row["level"]!r} must be [lo, hi] ints'))
+    w = row.get('weight', 1.0)
+    if not (isinstance(w, (int, float)) and not isinstance(w, bool) and math.isfinite(w) and w > 0):
+        out.append(_gp('schema', where, f'weight {w!r} must be a finite number > 0 (an infinite weight breaks the '
+                                        'seeded pick)'))
+    for key, opts in (('harmonize', HARMONIZE), ('dressing', DRESSINGS), ('element_policy', GRAFT_ELEMENT_POLICIES)):
+        if row.get(key) is not None and (not isinstance(row[key], str) or row[key] not in opts):
+            out.append(_gp('unknown', where, f'{key} {row[key]!r} not in {opts}'))
+    if row.get('note') is not None and not isinstance(row['note'], str):
+        out.append(_gp('schema', where, f'note {row["note"]!r}: text'))
+
+
+def _graft_family(F, K, row, where, out):
+    """a row's family against its table's kind: an ORGAN family (a cyborg family is graft.cyborg; unknown graft.unknown),
+    its variant, its interface on the kind's class (graft.interface), FITS (graft.kind) or a fit that waits for Skye
+    (graft.skye), Skye's rule (graft.never). True when the pair is placeable"""
+    if F == NONE:
+        if row.get('variant') is not None:
+            out.append(_gp('unknown', where, f'the {NONE!r} row keeps the native and takes no variant ({row["variant"]!r})'))
+        return True
+    if isinstance(F, str) and F in FAMILIES and not FAMILIES[F].get('organ'):
+        out.append(_gp('cyborg', where, f'{F} is a CYBORG family: it seats through the recipe\'s cyborg section, never '
+                                        'as a graft'))
+        return False
+    if not isinstance(F, str) or F not in FAMILIES:
+        out.append(_gp('unknown', where, f'unknown organ family {F!r} (have: {", ".join(ORGAN_FAMILIES)}, or {NONE!r} '
+                                         'to keep the native): no fallback family (G2)'))
+        return False
+    d = FAMILIES[F]
+    ok = True
+    v = row.get('variant')
+    if v is not None and v not in d['variants']:
+        out.append(_gp('unknown', where, f'{F} has no variant {v!r} (have: {", ".join(d["variants"])}): no stand-in (G2)'))
+        ok = False
+    kc = KINDS[K]['cls']
+    if (kc == 'chain') != ('chain' in d['interfaces']) or (kc == 'region') != ('region' in d['interfaces']):
+        out.append(_gp('interface', where, f'{F} ({"/".join(d["interfaces"])}) cannot take the {kc} kind {K!r}: a chain '
+                                           'part replaces a chain through graft.limbs, a port or a region part sits in '
+                                           'a kind table'))
+        ok = False
+    if K not in d['fits']:
+        q = (d.get('ask_skye') or {}).get(K)
+        if q:
+            out.append(_gp('skye', where, f'{F} on kind {K!r} waits for Skye\'s word: {q}'))
+        else:
+            out.append(_gp('kind', where, f'{F} does not fit kind {K!r}: it fits {list(d["fits"])} only (a part '
+                                          'matches its body slot)'))
+        ok = False
+    why = never(F, K)
+    if why:
+        out.append(_gp('never', where, f'{F} on kind {K!r}: Skye\'s rule, {why}'))
+        ok = False
+    return ok
+
+
+def check_graft(gr, base=None):
+    """the GRAFT section alone, no manifest (the cyborg section's check_recipe, for the organ half): unknown keys, kinds,
+    families and variants (graft.unknown); a cyborg family (graft.cyborg); a row whose part does not fit its kind
+    (graft.kind), or fits it only by Skye's word (graft.skye); Skye's rule (graft.never); a chain part in a kind table or
+    a port part as a limb (graft.interface); malformed bands, weights, sides, sites, cuts, harmonize modes, dressings and
+    policies; the size class; the eyes op's count against the base's eye ports (graft.eyes)"""
+    out = []
+    if gr is None:
+        return out
+    if not isinstance(gr, dict):
+        return [_gp('schema', 'graft', f'the graft section is a dict (CROSSBREED §6.1), not {type(gr).__name__}')]
+    for k in gr:
+        if k not in GRAFT_KEYS:
+            out.append(_gp('unknown', f'graft.{k}', f'unknown graft key {k!r} (have: {", ".join(GRAFT_KEYS)}): never '
+                                                    'skipped (G2)'))
+    for k in ('level', 'seed'):
+        v = gr.get(k)
+        if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+            out.append(_gp('schema', f'graft.{k}', f'{k} must be an int >= 0: {v!r}'))
+    if gr.get('size') is not None and gr['size'] not in FILL_ORDER:
+        out.append(_gp('unknown', 'graft.size', f'unknown size class {gr["size"]!r} (have {FILL_ORDER})'))
+    if gr.get('harmonize') is not None and gr['harmonize'] not in HARMONIZE:
+        out.append(_gp('unknown', 'graft.harmonize', f'harmonize {gr["harmonize"]!r} not in {HARMONIZE}'))
+    if gr.get('note') is not None and not isinstance(gr['note'], str):
+        out.append(_gp('schema', 'graft.note', 'note: text'))
+    parts = gr.get('parts') or {}
+    if not isinstance(parts, dict):
+        out.append(_gp('schema', 'graft.parts', 'parts is {kind: [rows]}, keyed by KIND'))
+        parts = {}
+    for K, rows in parts.items():
+        if K not in KINDS:
+            out.append(_gp('unknown', f'graft.parts.{K}', f'unknown kind {K!r}: kinds are slots.KINDS, never a socket '
+                                                          'name (no fallback)'))
+            continue
+        if KINDS[K]['cls'] == 'chain':
+            out.append(_gp('interface', f'graft.parts.{K}', f'{K!r} is a chain kind: its table takes no rows (a chain is '
+                                                            'replaced through graft.limbs)'))
+            continue
+        if not isinstance(rows, list):
+            out.append(_gp('schema', f'graft.parts.{K}', 'a kind table is a list of rows'))
+            continue
+        for i, row in enumerate(rows):
+            where = f'graft.parts.{K}[{i}]'
+            if not isinstance(row, dict):
+                out.append(_gp('schema', where, f'a row is a dict, not {row!r}'))
+                continue
+            _graft_row_common(row, where, GRAFT_ROW_KEYS, out)
+            if row.get('side') not in (None,) + SIDES:
+                out.append(_gp('side', where, f'side {row.get("side")!r} not in {SIDES}'))
+            if row.get('site') is not None and not isinstance(row['site'], str):
+                out.append(_gp('schema', where, f'site {row["site"]!r} must be a socket or region name'))
+            if row.get('cut') is not None and (KINDS[K]['cls'] != 'region' or not isinstance(row['cut'], str)):
+                out.append(_gp('cut', where, f'cut {row["cut"]!r}: only a region row names a cut (its ring, by name); '
+                                             'a port\'s ring is its own'))
+            _graft_family(row.get('part'), K, row, where, out)
+    limbs = gr.get('limbs') or []
+    if not isinstance(limbs, list):
+        out.append(_gp('schema', 'graft.limbs', 'limbs is a list of rows'))
+        limbs = []
+    for i, row in enumerate(limbs):
+        where = f'graft.limbs[{i}]'
+        if not isinstance(row, dict):
+            out.append(_gp('schema', where, f'a limb row is a dict, not {row!r}'))
+            continue
+        _graft_row_common(row, where, GRAFT_LIMB_KEYS, out)
+        K = row.get('kind')
+        if not isinstance(K, str) or K not in KINDS:
+            out.append(_gp('unknown', where, f'unknown kind {K!r}'))
+        elif KINDS[K]['cls'] != 'chain':
+            out.append(_gp('interface', where, f'a limb row replaces a CHAIN kind, and {K!r} is a {KINDS[K]["cls"]} '
+                                               'kind (its parts table seats it)'))
+        else:
+            _graft_family(row.get('part'), K, row, where, out)
+        if not isinstance(row.get('chain'), str):
+            out.append(_gp('unknown', where, f'chain {row.get("chain")!r}: a chain record\'s name or anatomical label'))
+        cut = row.get('cut')
+        if not ((isinstance(cut, int) and not isinstance(cut, bool)) or (isinstance(cut, str) and cut)):
+            out.append(_gp('cut', where, f'cut {cut!r}: a listed cut\'s NAME (\'axilla\', \'knee\'), or its joint index '
+                                         'where the base names none (the octopus\'s 8)'))
+    eyes = gr.get('eyes')
+    if eyes is not None:
+        if not isinstance(eyes, dict):
+            out.append(_gp('schema', 'graft.eyes', 'eyes is {count}: the eye count (E1 re-file item 2)'))
+        else:
+            for k in eyes:
+                if k not in GRAFT_EYES_KEYS:
+                    out.append(_gp('unknown', f'graft.eyes.{k}', f'unknown eyes key {k!r} (have: '
+                                                                 f'{", ".join(GRAFT_EYES_KEYS)})'))
+            n = eyes.get('count')
+            cfg = EYE_PORTS.get(base) if base is not None else None
+            if not (isinstance(n, int) and not isinstance(n, bool) and n >= 1):
+                out.append(_gp('eyes', 'graft.eyes.count', f'count {n!r}: a whole number of eyes, 1 or more'))
+            elif base is not None and cfg is None:
+                out.append(_gp('eyes', 'graft.eyes.count', f'the {base} has no eye-port table (slots.EYE_PORTS)'))
+            elif cfg is not None and n > 2 + cfg['max_extra']:
+                out.append(_gp('eyes', 'graft.eyes.count', f'{n} eyes: a {base} takes 1 to {2 + cfg["max_extra"]} '
+                                                           f'({cfg["max_extra"]} ports beyond its pair)'))
+    return out
+
+
+def plan_graft(gr, man, base, level=0, seed=0, pick=None, cyborg=(), base_data=None, check_man=True):
+    """the GRAFT section resolved on a BUILT creature's manifest (CROSSBREED §6.1): (placements, problems). A kind table
+    K places on the manifest's sites of kind K (its typed sockets, its region records), one row per site by the seeded
+    weighted pick 'graft.<K>.<site>' over the rows whose band holds the level, whose side matches and whose site, if
+    pinned, is this one (a 'none' row keeps the native); a port part needs a port RING linked to its socket (port_ring),
+    a region part its region's ring; a ball or dome eye the socket's own eye archetype. Every limbs row is checked at
+    any level and its chain, kind, cut (a listed cut, by name or joint index; a DISTAL one for a foot or a claw) and the
+    ring there (the cut's record, or made at the cut on a base that makes them); then each chain takes one row by the
+    pick 'graft.<kind>.<chain>'. Every placement then carries its seam (graft.seam on an unknown class), its dressing and
+    harmonize mode, its native group, and for a chain its donor's cut (R13). graft.shared: a chain already grafted in
+    this build; two grafts whose native groups meet; a graft beside a CYBORG placement (`cyborg`: plan()'s placements)
+    on the same chain, joint or socket. graft.size: a part above the section's size class (a warning). check_man adds
+    check_manifest()'s problems"""
+    if pick is None:
+        raise TypeError('plan_graft() needs pick(seed, key, weights): the recipe\'s seeded weighted pick')
+    out = list(check_graft(gr, base=base))
+    placements = []
+    if not gr or not isinstance(gr, dict):
+        return placements, out
+    if man is None:
+        out.append(_gp('untyped', 'graft', 'no manifest: grafts resolve only on a built creature\'s rings, chains and '
+                                           'regions'))
+        return placements, out
+    B = base_data if base_data is not None else BASES.get(base)
+    O = organ_base(base) if base_data is None else {}
+    if check_man:
+        out += check_manifest(man, base, base_data=B)
+    if B is None:
+        out.append(_gp('base', 'graft', f'no slot table for base {base!r} (slots.BASES): no graft seats on it'))
+        return placements, out
+    socks = man.get('sockets') or {}
+    typed = {s: d for s, d in socks.items() if isinstance(d.get('slot'), dict)}
+    chains = man.get('chains') or {}
+    regions = man.get('regions') or {}
+    rings = manifest_rings(man)
+    host_cls = O.get('material_class')
+    sec_h = gr.get('harmonize') if gr.get('harmonize') in HARMONIZE else None
+
+    def finish(pl, d, dv, ring, where):
+        """the seam, dressing, harmonize mode and element policy of a placement"""
+        hc = host_cls if host_cls is not None else (ring or {}).get('cls')
+        pc = dv.get('cls')
+        try:
+            sm = seam(hc, pc, d.get('articulated', True))
+        except ValueError as e:
+            out.append(_gp('seam', where, f'{pl["part"]}.{pl["variant"]} on {pl["site"]}: {e} (CROSSBREED §1.1 sets the '
+                                          'seam by the two classes)'))
+            sm = None
+        same = pc == 'host' or dv.get('base') == base
+        pl.update(seam=sm, host_class=hc, part_class=pc, same_base=same,
+                  harmonize=pl['row'].get('harmonize') or sec_h or default_harmonize(pl['part'], sm, same),
+                  dressing=pl['row'].get('dressing') or default_dressing(d, sm, hc, same, pc),
+                  element_policy=pl['row'].get('element_policy') or 'inherit')
+        if ring is not None:
+            for msg in ring_problems(ring):
+                out.append(_gp('ring', where, f'{pl["part"]} on {pl["site"]}: its ring {ring.get("name")!r}: {msg}'))
+
+    # ---- the kind tables: ports, eyes, regions
+    for K, rows in (gr.get('parts') if isinstance(gr.get('parts'), dict) else {}).items():
+        if K not in KINDS or not isinstance(rows, list) or KINDS[K]['cls'] == 'chain':
+            continue                                      # check_graft reported it
+        region = KINDS[K]['cls'] == 'region'
+        good = [(i, r) for i, r in enumerate(rows) if isinstance(r, dict) and isinstance(r.get('part'), str)
+                and (r['part'] == NONE or (r['part'] in FAMILIES and FAMILIES[r['part']].get('organ')))]
+        sites = sorted(n for n, g in regions.items() if isinstance(g, dict) and g.get('kind') == K) if region else \
+            sorted(s for s, d in typed.items() if d['slot'].get('kind') == K)
+        fits_k = lambda F: F == NONE or (K in FAMILIES[F]['fits'] and 'chain' not in FAMILIES[F]['interfaces'] and
+                                         region == ('region' in FAMILIES[F]['interfaces']) and not never(F, K))
+        for i, r in good:                                  # rows pinned to a site
+            st = r.get('site')
+            if not isinstance(st, str):
+                continue
+            w = f'graft.parts.{K}[{i}]'
+            if region:
+                if st not in regions:
+                    out.append(_gp('unknown', w, f'{r["part"]} names region {st!r}, which the built creature lacks'))
+            elif st not in socks:
+                out.append(_gp('unknown', w, f'{r["part"]} names socket {st!r}, which the built creature lacks'))
+            elif st not in typed:
+                out.append(_gp('untyped', w, f'{r["part"]} names {st}, which carries no slot extras'))
+            elif typed[st]['slot'].get('kind') != K:
+                out.append(_gp('kind', w, f'{r["part"]} is pinned to {st}, a {typed[st]["slot"].get("kind")!r} slot, '
+                                          f'from the {K!r} table: a row seats only on its table\'s kind'))
+        if not sites:
+            asked = sorted({r['part'] for _, r in good if r['part'] != NONE})
+            if asked:
+                why = (B.get('lacks') or {}).get(K)
+                out.append(_gp('no_site', f'graft.parts.{K}',
+                               f'no {K!r} {"region record" if region else "slot"} on this {base} for {", ".join(asked)}'
+                               + (f': {why}' if why else ' (never skipped silently: G2)')))
+            continue
+        sides_k = {s: ((regions[s].get('side') or '') if region else (typed[s]['slot'].get('side') or ''))
+                   for s in sites}
+        for i, r in good:
+            rs = r.get('side')
+            if rs in ('L', 'R') and rs not in sides_k.values():
+                out.append(_gp('side', f'graft.parts.{K}[{i}]', f'{r["part"]} says side {rs}, and no {K!r} site on this '
+                                                                f'{base} is side {rs}: the row would place nothing (G2)'))
+        if good and not any(_in_band(r, level) for _, r in good):
+            out.append(_gp('no_row', f'graft.parts.{K}', f'no row covers level {level}: the {K!r} sites keep their '
+                                                         'native parts', 'warning'))
+        for site in sites:
+            sside = sides_k[site]
+            cand = [r for _, r in good if fits_k(r['part']) and _in_band(r, level) and r.get('site') in (None, site)
+                    and (not r.get('side') or r.get('side') == sside)]
+            wts = {str(i): float(r.get('weight', 1.0)) for i, r in enumerate(cand) if _real(r.get('weight', 1.0)) and
+                   r.get('weight', 1.0) > 0}
+            if not wts:
+                continue
+            row = cand[int(pick(seed, f'graft.{K}.{site}', wts))]
+            F = row['part']
+            if F == NONE:
+                continue                                  # the band picked no part: the native stays, by the seed
+            d = FAMILIES[F]
+            v = row.get('variant') or d['variants'][0]
+            if v not in d['variants']:
+                continue                                  # check_graft reported the unknown variant
+            iface = (d.get('variant_interface') or {}).get(v) or d['interfaces'][0]
+            w = f'graft.parts.{K}@{site}'
+            pl = dict(section='graft', kind=K, site=site, part=F, variant=v, interface=iface, key=f'graft.{K}.{site}',
+                      row=dict(row), chain=None, cut=None, cut_name=None, cut_class=None, side=sside)
+            if region:
+                g = regions[site]
+                rn = g.get('ring') if isinstance(g.get('ring'), str) else None
+                ring = rings.get(rn) if rn else None
+                if row.get('cut') is not None and row['cut'] not in (rn, (ring or {}).get('cut')):
+                    out.append(_gp('cut', w, f'{F} names cut {row["cut"]!r}, and region {site} is cut at its ring {rn!r}'))
+                if ring is None:
+                    out.append(_gp('ring', w, f'{F} on region {site}: ' + (f'its ring {rn!r} is not among the scene\'s '
+                                                                         'rings' if rn else 'the region names no ring')
+                                   + ' (a region swap seats in its ring: CROSSBREED §2.11)'))
+                root = g.get('root') if isinstance(g.get('root'), str) else None
+                # the native group: the region ring's own record (the human's neck ring names the old head's sockets on
+                # its root joint too: the hat seat floats with the head), else the region's joints past its root
+                rnat = (ring or {}).get('native') or {}
+                nat_j = list(rnat.get('joints') or []) or \
+                    [j for j in g.get('joints') or [] if isinstance(j, str) and j != root]
+                nat_s = list(rnat.get('sockets') or []) or sorted(s for s, sd in socks.items()
+                                                                   if sd.get('bone') in set(nat_j))
+                pl.update(joint=root, root=root, ring=rn, ring_source='record' if ring else None,
+                          native=dict(joints=nat_j, sockets=nat_s))
+            else:
+                sd = typed[site]
+                declared = sd['slot'].get('interface')
+                ring = None
+                if iface in ('ball', 'dome'):
+                    if declared != iface:
+                        out.append(_gp('interface', w, f'{F}.{v} is a {iface!r} eye and {site} is {declared!r}' + (
+                            ': a ball eye in a dome port is the planned \'set\' seating (a SOCKET), not built'
+                            if iface == 'ball' and declared == 'dome' else ' (G8: the variant follows the eye archetype)')))
+                else:
+                    ring = port_ring(man, site, rings)
+                    if ring is None:
+                        out.append(_gp('ring', w, f'{F} on {site}: no PORT ring is linked to it (none of the scene\'s rings '
+                                                  f'is a {K!r} port on {sd.get("bone")!r} along its frame): a port graft '
+                                                  'seats in a ring (CROSSBREED §2.1)'))
+                nat = (ring or {}).get('native') or {}
+                pl.update(joint=sd.get('bone'), root=sd.get('bone'), ring=(ring or {}).get('name'),
+                          ring_source='record' if ring else None,
+                          native=dict(joints=list(nat.get('joints') or []), sockets=list(nat.get('sockets') or [])))
+            finish(pl, d, d['donors'][v], ring, w)
+            placements.append(pl)
+
+    # ---- the limbs: a chain record replaced from a listed cut
+    by_chain = {}
+    for i, row in enumerate(gr.get('limbs') if isinstance(gr.get('limbs'), list) else []):
+        if not isinstance(row, dict):
+            continue
+        w = f'graft.limbs[{i}]'
+        F, K = row.get('part'), row.get('kind')
+        if not (isinstance(F, str) and (F == NONE or (F in FAMILIES and FAMILIES[F].get('organ') and
+                                                       'chain' in FAMILIES[F]['interfaces']))):
+            continue                                      # check_graft reported it
+        if not (isinstance(K, str) and K in CHAIN_KINDS and isinstance(row.get('chain'), str)):
+            continue
+        if not chains:
+            out.append(_gp('untyped', w, f'{F} on {row["chain"]!r}: the manifest carries no chain records'))
+            continue
+        cn = _chain_of(chains, row['chain'])
+        if cn is None:
+            out.append(_gp('unknown', w, f'{F}: no chain {row["chain"]!r} (have: {", ".join(sorted(chains))})'))
+            continue
+        c = chains[cn]
+        if c.get('kind') != K:
+            out.append(_gp('kind', w, f'refused: {F} names {cn} as {K!r}, and {cn} is a {c.get("kind")!r} chain'))
+            continue
+        if F != NONE and (K not in FAMILIES[F]['fits'] or never(F, K)):
+            continue                                      # check_graft reported graft.kind / graft.skye / graft.never
+        if isinstance(c.get('graft'), dict):
+            out.append(_gp('shared', w, f'{F} on {cn}: the chain is already grafted in this build '
+                                        f'({c["graft"].get("part")}): one replacement per chain'))
+            continue
+        u, k, name = cut_info(c, row.get('cut'), rings, base, K)
+        if u is None:
+            listed = []
+            for x in c.get('cuts') or []:
+                if isinstance(x, dict) and isinstance(x.get('joint'), int):
+                    _, kk, nn = cut_info(c, x['joint'], rings, base, K)
+                    listed.append(f'{nn} ({kk})' if nn else str(kk))
+            out.append(_gp('cut', w, f'{F} on {cn} at cut {row.get("cut")!r}: not a listed cut (its cuts: '
+                                     f'{", ".join(listed) or "none"}): no ring to cut at, no weights to pin'))
+            continue
+        cls = cut_class(base, K, name, k)
+        if F != NONE and 'distal_cut' in FAMILIES[F]['requires'] and cls != 'distal':
+            distal = [str(x) for x in ((O.get('cut_class') or {}).get(K) or {}) if
+                      ((O.get('cut_class') or {}).get(K) or {})[x] == 'distal']
+            out.append(_gp('cut', w, f'refused: {F} takes a DISTAL cut only (R13: it ends a limb), and {cn}\'s cut '
+                                     f'{name if name is not None else k} is {cls or "unclassed"}'
+                                     + (f' (the {base}\'s distal cuts on a {K}: {", ".join(distal)}, where its chain '
+                                        'lists them)' if distal else f' (the {base} classes no distal cut on a {K})')))
+            continue
+        by_chain.setdefault(cn, []).append((row, u, k, name, cls))
+    for cn, items in by_chain.items():
+        c = chains[cn]
+        K = c['kind']
+        cand = [x for x in items if _in_band(x[0], level)]
+        wts = {str(n): float(x[0].get('weight', 1.0)) for n, x in enumerate(cand) if _real(x[0].get('weight', 1.0)) and
+               x[0].get('weight', 1.0) > 0}
+        if not wts:
+            continue
+        row, u, k, name, cls = cand[int(pick(seed, f'graft.{K}.{cn}', wts))]
+        F = row['part']
+        if F == NONE:
+            continue
+        d = FAMILIES[F]
+        v = row.get('variant') or d['variants'][0]
+        if v not in d['variants']:
+            continue
+        dv = d['donors'][v]
+        w = f'graft.limbs.{cn}'
+        js = [str(j) for j in c.get('joints') or []]
+        root = js[k] if 0 <= k < len(js) else None
+        rn = u.get('ring') if isinstance(u.get('ring'), str) else None
+        ring = rings.get(rn) if rn else None
+        src = 'record' if ring is not None else ('at_cut' if (O.get('rings') == 'at_cut' and not rn) else None)
+        if rn and ring is None:
+            out.append(_gp('ring', w, f'{F} on {cn}: its cut {name if name is not None else k} names ring {rn!r}, which '
+                                      'the scene\'s rings lack'))
+        elif src is None:
+            out.append(_gp('ring', w, f'{F} on {cn} at cut {name if name is not None else k}: no ring record at the cut, '
+                                      f'and the {base} makes none there (its rings: '
+                                      f'{O.get("rings") if base in ORGAN_BASES else "no ORGAN_BASES row"}): a graft seats '
+                                      'in a frozen ring (CROSSBREED §2.11)'))
+        nat = (ring or {}).get('native') or {}
+        nat_j = list(nat.get('joints') or []) or (_descendants(man, root) if root else [])
+        nat_s = list(nat.get('sockets') or []) or sorted(s for s, sd in socks.items() if sd.get('bone') in set(nat_j))
+        pl = dict(section='graft', kind=K, site=cn, part=F, variant=v, interface='chain', key=f'graft.{K}.{cn}',
+                  row=dict(row), chain=cn, cut=k, cut_name=name, cut_class=cls, joint=root, root=root, ring=rn,
+                  ring_source=src, joints=js[k:], native=dict(joints=nat_j, sockets=nat_s), side=c.get('side') or '',
+                  label=c.get('label'))
+        pl['donor'] = dict(base=dv.get('base'), chain=dv.get('chain'), cut_class=cls,
+                           cut=donor_cut(F, v, base, cls, name if name is not None else k),
+                           side=(c.get('side') or None) if dv.get('chain') else None,
+                           **{kk: dv[kk] for kk in ('pair', 'morph', 'sided') if kk in dv})
+        finish(pl, d, dv, ring, w)
+        placements.append(pl)
+
+    # ---- the extra-eye op (the E1 re-file's item 2): an eye_graft at new ports, the base's own eye part
+    eyes = gr.get('eyes')
+    n = eyes.get('count') if isinstance(eyes, dict) else None
+    cfg = EYE_PORTS.get(base)
+    if isinstance(n, int) and not isinstance(n, bool) and cfg and 1 <= n <= 2 + cfg['max_extra'] and n != 2:
+        miss = [s for s in ('socket_eye_L', 'socket_eye_R') if s not in socks]
+        if miss:
+            out.append(_gp('eyes', 'graft.eyes.count', f'{n} eyes: the manifest has no {", ".join(miss)} to place the eye '
+                                                       'ports from (recipe.eye_ports)'))
+        placements.append(dict(section='graft', kind='eye', site='eye_ports', part='eye_graft', variant=None,
+                               interface='ring', key='graft.eyes', row=dict(eyes), count=n, extra=n - 2,
+                               eye_part=cfg['part'], native=dict(joints=[], sockets=[]), seam=None, chain=None))
+
+    # ---- one replacement per site (R9: by native-group intersection), across the grafts and the cyborg section
+    def held(pl):
+        js_ = set((pl.get('native') or {}).get('joints') or [])
+        ss_ = set((pl.get('native') or {}).get('sockets') or [])
+        if pl.get('interface') in ('ring', 'region', 'ball', 'dome') and pl.get('site') in socks:
+            ss_.add(pl['site'])
+        return js_, ss_
+    for a in range(len(placements)):
+        A = placements[a]
+        ja, sa = held(A)
+        for b in range(a + 1, len(placements)):
+            Bp = placements[b]
+            jb, sb = held(Bp)
+            meet = (ja & (jb | {Bp.get('root')})) | (jb & {A.get('root')}) | (sa & sb)
+            if meet:
+                out.append(_gp('shared', Bp['key'], f'{Bp["part"]}.{Bp["variant"]} at {Bp["site"]} and '
+                                                    f'{A["part"]}.{A["variant"]} at {A["site"]} meet at '
+                                                    f'{", ".join(sorted(x for x in meet if x))[:120]}: one replacement '
+                                                    'per site (R9: their native groups intersect)'))
+    for C in cyborg or ():
+        cj = set(C.get('joints') or []) if C.get('interface') == 'chain' else set()
+        cs = {C.get('site')} if C.get('interface') != 'chain' else \
+            {s for s, sd in socks.items() if sd.get('bone') in cj}
+        for pl in placements:
+            jg, sg = held(pl)
+            meet = (jg & (cj | {C.get('joint')})) | (cj & {pl.get('root')}) | (sg & cs)
+            if (C.get('chain') is not None and C.get('chain') == pl.get('chain')) or meet:
+                out.append(_gp('shared', pl['key'], f'{pl["part"]}.{pl["variant"]} at {pl["site"]} and the cyborg '
+                                                    f'{C.get("part")}.{C.get("variant")} at {C.get("site")} take one site'
+                                                    + (f' ({", ".join(sorted(x for x in meet if x))[:120]})' if meet
+                                                       else f' (the chain {pl["chain"]})') +
+                                                    ': one replacement per site across the graft and cyborg sections'))
+
+    # ---- the size class (CROSSBREED §6.2, study G's "the size class picks which slots fill"): a warning
+    size = gr.get('size')
+    if size in FILL_ORDER:
+        for pl in placements:
+            fill = FAMILIES[pl['part']].get('fill', 'small')
+            if FILL_ORDER.index(fill) > FILL_ORDER.index(size):
+                out.append(_gp('size', pl['key'], f'{pl["part"]} fills at size {fill!r}; the section is {size!r} (CROSSBREED '
+                                                  '§6.2: small the eyes, medium + ears, horns, antennae, large + a limb '
+                                                  'pair or the tail, elite + the head)', 'warning'))
+    return placements, out
+
+
 def describe():
     """the closed table, Skye's rule and the per-base tables, as text"""
     pairs = allowed_pairs()
@@ -1933,7 +3131,21 @@ def describe():
                                                                       if B.get('lacks') else '') +
                      (f'; seat groups {B["seat_groups"]}' if B.get('seat_groups') else '') +
                      (f'; chain regions {B["chain_regions"]}' if B.get('chain_regions') else '') +
-                     (f'; growths along {B["growth_s"]}' if B.get('growth_s') else ''))
+                     (f'; growths along {B["growth_s"]}' if B.get('growth_s') else '') +
+                     (f'; WAITING for {B["waiting"]}' if B.get('waiting') else ''))
+    # (the FAMILY round) the organ half
+    lines.append(f'  the organ half: {len(ORGAN_FAMILIES)} families, '
+                 f'{sum(len(FAMILIES[f]["variants"]) for f in ORGAN_FAMILIES)} donor variants; limb chains '
+                 f'{", ".join(LIMB_CHAINS)} (FITS limb for limb)')
+    for f in ORGAN_FAMILIES:
+        d = FAMILIES[f]
+        donors = ', '.join(f'{v} ({(d["donors"][v].get("base") or "the host")}, {d["donors"][v].get("cls") or "no seam"})'
+                           for v in d['variants'])
+        lines.append(f'    {f}: {donors}' + (f'; waits for Skye on {", ".join(d["ask_skye"])}' if d.get('ask_skye')
+                                             else ''))
+    for b, O in ORGAN_BASES.items():
+        lines.append(f'    {b}: {O.get("material_class")}, rings {O.get("rings")}; cut classes '
+                     + '; '.join(f'{k} {dict(v)}' for k, v in (O.get('cut_class') or {}).items()))
     return '\n'.join(lines)
 
 
