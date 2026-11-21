@@ -18,7 +18,9 @@ GPU. They run on a small synthetic valley (_ground.py) with the family's own mas
                 canopy_far, the crowns beyond the instanced forest, taking over across its hand-off band; and
                 expected_cover with no plan, the same rule
   ecotopes      every ecotope, recipe and place resolves, checks, and plans on the synthetic ground
-  distance      the stream-distance transform against brute force
+  distance      the stream-distance transform against brute force; a focus's points far apart are separate views
+  derived       the derived names at points: a mask, dist_channel, insolation, soil, fall_streak down the fall line;
+                the shade from the trees placed before the same in chunks
   around        understory seeded around another species' plants stands around them
   surface       with the surface bake's SurfaceData: maps read as SurfaceData.at reads them, rules on bake maps,
                 snowpack kept clear, the cover rasters handed to the bake (add_maps) and read back
@@ -558,6 +560,12 @@ def test_distance():
     check('distance: capped, and all the cap where no stream is',
           float(PL._distance_to(seed, 3.0, 20.0).max()) == 20.0
           and float(PL._distance_to(np.zeros((8, 8), bool), 3.0, 50.0).min()) == 50.0)
+    # a focus's points: a path where they follow each other closely, separate views where they jump (PATH_GAP_M)
+    far = PL.path_distance([(0.0, 0.0), (2000.0, 0.0)], np.array([1000.0, 0.0, 2000.0]), np.zeros(3))
+    near = PL.path_distance([(0.0, 0.0), (100.0, 0.0)], np.array([50.0]), np.array([10.0]))
+    check('distance: a focus\'s points farther apart than PATH_GAP_M are separate views, nearer ones a path',
+          abs(far[0] - 1000.0) < 1e-6 and float(np.abs(far[1:]).max()) == 0.0 and abs(near[0] - 10.0) < 1e-6,
+          f'midway between views 2 km apart {far[0]:.0f} m, on a 100 m path {near[0]:.0f} m')
 
 
 def test_derived(t):
@@ -581,6 +589,37 @@ def test_derived(t):
     check('derived: insolation between 0 and 1 (the cosine with the place\'s climatological sun)',
           float(ins.min()) >= 0.0 and float(ins.max()) <= 1.0)
     check('derived: soil reads 0 where no deposit, talus or sand was made', float(np.abs(g.at(pts, 'soil')).max()) == 0.0)
+    # fall_streak: a noise smeared down the fall line, so on the valley's sides two points 30 m either side of a spot
+    # down the slope read nearer values than two 30 m either side along the contour
+    rng = np.random.default_rng(9)
+    x, y = rng.uniform(-900.0, 900.0, 4000), rng.uniform(-900.0, 900.0, 4000)
+    e = 10.0
+    hx = (np.asarray(t.height_at(x + e, y)) - np.asarray(t.height_at(x - e, y))) / (2.0 * e)
+    hy = (np.asarray(t.height_at(x, y + e)) - np.asarray(t.height_at(x, y - e))) / (2.0 * e)
+    gm = np.hypot(hx, hy)
+    k = gm > math.tan(math.radians(8.0))
+    x, y, ux, uy = x[k], y[k], -hx[k] / gm[k], -hy[k] / gm[k]
+    fs = lambda px, py: g.at(g.locate(px, py), 'fall_streak')
+    down = np.abs(fs(x + 30.0 * ux, y + 30.0 * uy) - fs(x - 30.0 * ux, y - 30.0 * uy))
+    across = np.abs(fs(x - 30.0 * uy, y + 30.0 * ux) - fs(x + 30.0 * uy, y - 30.0 * ux))
+    v = fs(x, y)
+    check('derived: fall_streak runs in streaks down the slope (nearer values down the fall line than along the '
+          'contour), within 0..1', len(x) > 200 and float(down.mean()) < 0.5 * float(across.mean())
+          and float(v.min()) >= 0.0 and float(v.max()) <= 1.0,
+          f'{len(x)} spots over 8 degrees: mean difference 60 m apart down the slope {down.mean():.3f}, along the '
+          f'contour {across.mean():.3f}; values {v.min():.2f}-{v.max():.2f}')
+    # the shade from the trees placed before, taken in chunks of candidates, is the same as in one pass
+    eco = E.get('alpine')
+    a = PL.plan_plants(t, eco, seed=4, radius_m=300.0, **QUIET)
+    keep = PL.SHADE_CHUNK
+    PL.SHADE_CHUNK = 997
+    try:
+        b = PL.plan_plants(t, eco, seed=4, radius_m=300.0, **QUIET)
+    finally:
+        PL.SHADE_CHUNK = keep
+    check('derived: the shade from the trees placed before reads the same in chunks of candidates (SHADE_CHUNK)',
+          a.names() == b.names() and all(np.array_equal(a.array(n), b.array(n)) for n in a.names()),
+          ', '.join(f'{n} {len(a.array(n)):,}' for n in a.names()))
 
 
 def surface_data(t):

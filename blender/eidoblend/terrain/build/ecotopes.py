@@ -102,6 +102,9 @@ without a bake. Plus the plant layer's derived names (plants.DERIVED_NAMES):
                   every 30 m
     dist_water    metres to the nearest standing or running water (`water` over 0.05 m, on the main and context
                   levels), at most 800
+    fall_streak   0..1: a world noise of 120 m smeared 240 m down and up the fall line (the 20 m normal's), so it
+                  runs in streaks down every slope, radial on a cone: what a forest's upper edge follows in tongues
+                  (avalanche tracks, debris flows, lava, fire runs); the noise itself on ground under 3 degrees
     shade         0..1: the shade of the shade-casting plants already placed
     ledge         0..1: the strata relief's ledges (0 until the material's strata_array is there to read)
 One level for every density (design 4.2, change 9): every name a density, a stature or an `around.where` reads is
@@ -116,10 +119,12 @@ How the rules are written (in the spirit of Far Cry 5's biome recipes and EcoBru
 moist ground and grass on convex, exposed ground; riparian belts falling off with dist_channel; shrubs at talus
 margins; smaller, sparser trees toward the treeline; the avalanche tracks (flow on steep slopes) kept clear. Densities
 read terrain terms, with noise only as a small residual: the numpy noise here and the shader's noise in the material
-are different noises, so a boundary drawn by noise would stand somewhere else in the ground's layers. Two exceptions,
-where the place's own pattern has no terrain term at the scale the rule draws: a treeline's slow wander (hundreds of
-metres; the forest layer reads the plant layer's own raster, canopy_expected, so the material's forest edge stands
-where the trees' does) and the drifts of a sward on flat ground (the Namib's interdune grass, patchy at 5-30 m).
+are different noises, so a boundary drawn by noise would stand somewhere else in the ground's layers. Four
+exceptions, where the place's own pattern has no terrain term at the scale the rule draws: a treeline's slow wander
+(hundreds of metres; the forest layer reads the plant layer's own raster, canopy_expected, so the material's forest
+edge stands where the trees' does), its tongues down the fall line (fall_streak, the noise smeared along the slope)
+and the drifts of a sward on flat ground (the Namib's interdune grass, patchy at 5-30 m and 100 m), and the groves
+along a stream (the floor's broadleaves, a quarter of its length).
 A stand's density varies within a band, never through a narrow window from nothing to full: a quarter-wide window
 over `site` drew hard-edged blobs on the slopes it crossed (11-20, the San Gabriels and Lauterbrunnen).
 """
@@ -210,6 +215,11 @@ _SPRUCE = ('seedthree', 'douglasFir', _NARROW_CONIFER, [11, 23, 37])
 # its light crowns toned down toward the dark broadleaf line of lauterbrunnen_01 (four individuals: with two, a belt
 # of them read as clones, 11-20)
 _MAPLE = ('seedthree', 'redMaple', dict(eidoGain=(0.6, 0.65, 0.6)), [5, 17, 29, 41])
+# Guilin's evergreen broadleaf forest and scrub: SeedThree's sweetgum with a rounded crown, toned to the towers'
+# muted dark green, its blue held down against the billboard's matched gain (blue x2) (11-20: at its grown light
+# green the scrub on the flanks read as pale cut-outs pasted on the rock, and the forest at the towers' feet as a
+# light band, beside the photographs' dark wooded towers; at (0.5, 0.55, 0.45) still a pale sage)
+_KARST_BROADLEAF = ('seedthree', 'sweetgum', dict(height=14, crownShape=1, eidoGain=(0.42, 0.52, 0.3)), [5, 17])
 # a broadleaf's card level (SeedThree's LOD2) is bare branches with a few leaf cards beside its full crown, a winter
 # tree in summer, and a stand of them read as an orchard on bare grey trunks; the pine's is as thin. Measured with
 # match_billboards.py (11-18), the card level covers 0.62-0.63 of the full level's area for the red maple and the
@@ -260,17 +270,22 @@ _TREELINE_ALT = ('(altitude + 100*northness_20m '
                  '+ 160*smoothstep(0.6, 0.86, flow)*smoothstep(14, 26, slope_20m) '
                  '- 120*smoothstep(0.05, 0.5, crest + 0.5*convex_20m) '
                  '+ 60*smoothstep(0.05, 0.5, 0.5*concave_20m - crest) '
-                 '+ 180*(fbm(700, 61) - 0.5) + 70*(fbm(160, 62) - 0.5))')
-# a volcano's cone has no avalanche regime below its treeline: the wind sets the edge. The forest reaches higher up
-# the sheltered gullies and hollows and stops lower on the exposed ribs, the big debris chutes (flow on the steep
-# cone) are open, and the edge wanders by hundreds of metres round the cone (eruptions bury the forest on one side and
-# spare it on another: on Fuji the 1707 scoria still holds the forest lower on the east)
+                 '+ 220*(fall_streak - 0.5) + 140*(fbm(700, 61) - 0.5) + 50*(fbm(160, 62) - 0.5))')
+# a snowy cone's edge: higher up the ribs and spurs, lower down the hollows and gullies, where the snow lies late and
+# slush and debris flows run, the big chutes (flow on the steep cone) open; in tongues along the fall line, and
+# wandering by hundreds of metres round the cone (eruptions bury the forest on one side and spare it on another: on
+# Fuji the 1707 scoria still holds the forest lower on the east). (11-20: with the forest higher up the sheltered
+# hollows, as a wind-set edge, trees stood in the look's snow, which reaches down the drainage into the forest)
 _TREELINE_VOLCANO = ('(altitude + 90*northness_20m '
                      '+ 200*smoothstep(0.75, 0.92, flow)*smoothstep(16, 26, slope_20m) '
-                     '- 160*smoothstep(0.32, 0.62, flow)*smoothstep(0.92, 0.75, flow) '
-                     '- 220*smoothstep(0.05, 0.5, 0.6*concave_20m - crest) '
-                     '+ 200*smoothstep(0.05, 0.5, crest + 0.6*convex_20m) '
-                     '+ 420*(fbm(1600, 63) - 0.5) + 120*(fbm(380, 64) - 0.5))')
+                     '+ 120*smoothstep(0.32, 0.62, flow) '
+                     '+ 160*smoothstep(0.05, 0.5, 0.6*concave_20m - crest) '
+                     '- 200*smoothstep(0.05, 0.5, crest + 0.6*convex_20m) '
+                     '+ 340*(fall_streak - 0.5) + 360*(fbm(1600, 63) - 0.5) + 80*(fbm(380, 64) - 0.5))')
+# the share of a caldera's stands inside it (near its lake: the young island and the walls' rockfall, the 'caldera'
+# look below): a tree here and there on the flat flows, scattered trees on the cinder cone's flanks, a few denser
+# groves (11-20: at a twentieth of the flanks' density everywhere the island's flows still read as a woodland)
+_CALDERA_INSIDE = '(0.02 + 0.06*smoothstep(8, 20, slope_20m) + 0.3*smoothstep(0.55, 0.8, fbm(150, 66)))'
 
 ECOTOPES = {
     'alpine': dict(
@@ -300,6 +315,11 @@ ECOTOPES = {
             # flow lines of the steep slopes) and the thick active scree; and a treeline that is no contour: ribs hold
             # the forest higher and the avalanche gullies take it lower, tens to a couple of hundred metres, with a
             # slow irregular residual (TREELINE))
+            # The alps: in the last 450 m under the treeline the gentler and convex ground is pasture, grazed for
+            # centuries, wooded pasture between 18 and 36 degrees, and the forest keeps to the steeper slopes and the
+            # hollows (Schynige Platte's meadows at 1970 m over the wooded drop to the valley, lauterbrunnen_15;
+            # 11-20: without it the stand covered the ridge to 2070 m, the ribs' and south faces' higher treeline,
+            # and the ridge camera stood in it)
             dict(name='spruce', kind='tree', source=_SPRUCE, size_m=(7.0, 32.0), core_m=2.3, crown_m=5.9, on=('rock',),
                  roots_m=4.0,
                  stature='0.25 + 0.75*smoothstep(treeline_m + 80, treeline_m - 300, ' + _TREELINE_ALT + ')',
@@ -309,18 +329,22 @@ ECOTOPES = {
                          '* (1 - 0.85*smoothstep(0.66, 0.88, flow)*smoothstep(20, 30, slope_20m)) '
                          '* (1 - 0.8*smoothstep(1.5, 6.0, talus)*smoothstep(26, 34, slope_20m)) '
                          '* smoothstep(9, 19, slope_20m) * smoothstep(64, 54, slope_20m) '
+                         '* (1 - 0.96*smoothstep(treeline_m - 450, treeline_m - 150, altitude) '
+                         '* smoothstep(36, 18, slope_20m + 6*concave_20m - 6*convex_20m + 8*(fall_streak - 0.5))) '
                          '* smoothstep(treeline_m + 80, treeline_m - 150, ' + _TREELINE_ALT + ')'),
-            # broadleaves along the river of the gentle floor, in irregular groups two to four crowns deep, and a
-            # single tree in the pastures now and then (lauterbrunnen_01: open meadow, a dark belt of broadleaves
-            # along the river and the road at 200-400 m. A belt halving every 30 m made a grove of the whole
-            # 300-500 m floor, 11-14; one halving every 7 m a single file of evenly spaced trees, an orchard, 11-20).
+            # broadleaves along the river of the gentle floor, in groves two to four crowns deep along a quarter of
+            # its length with open meadow between them, and a single tree in the pastures now and then
+            # (lauterbrunnen_01: open meadow, a dark belt of broadleaves along the river and the road at 200-400 m.
+            # A belt halving every 30 m made a grove of the whole 300-500 m floor, 11-14; one halving every 7 m a
+            # single file of evenly spaced trees, an orchard, 11-20; one halving every 13 m, in groves over two thirds
+            # of every stream's length, still a file of like trees across the floor camera's meadow, 11-20).
             # crown_m: the red maples grown are 12.4-14.6 m across at 15-16 m
-            dict(name='maple', kind='tree', source=_MAPLE, size_m=(5.0, 17.0), core_m=3.2, crown_m=7.3, lod=_BROADLEAF_LOD,
-                 cluster=dict(parents_per_ha=24.0, mu=5.0, sigma_m=12.0), range_per_ha=(10.0, 120.0),
-                 age=dict(shape=1.6, scale=0.6, stand=0.4), shade=dict(tolerance=0.5, radius=1.0),
+            dict(name='maple', kind='tree', source=_MAPLE, size_m=(4.0, 17.0), core_m=3.2, crown_m=7.3, lod=_BROADLEAF_LOD,
+                 cluster=dict(parents_per_ha=24.0, mu=5.0, sigma_m=14.0), range_per_ha=(10.0, 120.0),
+                 age=dict(shape=1.2, scale=0.6, stand=0.3), shade=dict(tolerance=0.5, radius=1.0),
                  density='smoothstep(0.25, 0.55, site) * smoothstep(treeline_m - 500, treeline_m - 800, altitude) '
-                         '* (0.011 * pow(0.5, dist_channel / 13) * smoothstep(16, 7, slope_20m) '
-                         '* smoothstep(0.3, 0.6, fbm(90, 41) + 0.3*pow(0.5, dist_channel / 9)) '
+                         '* (0.012 * pow(0.5, dist_channel / 22) * smoothstep(16, 7, slope_20m) '
+                         '* smoothstep(0.62, 0.76, fbm(150, 41) + 0.1*pow(0.5, dist_channel / 12)) '
                          '+ 0.0001 * smoothstep(22, 8, slope_20m))'),
             # meadow grass: bunches of blades wherever the pasture grows, thinner under the trees
             dict(name='meadow grass', kind='grass', source=('flora', 'grass', dict(height=0.34, color='green',
@@ -386,8 +410,8 @@ ECOTOPES = {
                  # steeper ground than the ribs do, and the steepness it holds wanders by some degrees round the cone)
                  density='0.06 * clamp(0.72 + 0.15*clamp(wetness, 0, 1) + 0.12*concave_20m + 0.08*northness_20m '
                          '- 0.12*convex_20m, 0.4, 1) '
-                         '* smoothstep(0.5, 6.0, slope_20m) * smoothstep(50, 38, slope_20m + 14*(fbm(900, 65) - 0.5) '
-                         '- 5*concave_20m + 4*convex_20m) '
+                         '* smoothstep(0.5, 6.0, slope_20m) * smoothstep(50, 38, slope_20m + 8*(fbm(900, 65) - 0.5) '
+                         '+ 14*(fall_streak - 0.5) - 5*concave_20m + 4*convex_20m) '
                          '* (1 - 0.8*smoothstep(0.2, 0.6, lava)) * (1 - 0.85*smoothstep(0.3, 2.0, talus + sand)) '
                          '* smoothstep(0.25, 0.55, occlusion) '
                          '* smoothstep(treeline_m + 80, treeline_m - 150, ' + _TREELINE_VOLCANO + ')'),
@@ -397,7 +421,8 @@ ECOTOPES = {
                  range_per_ha=(20.0, 160.0), shade=dict(tolerance=0.2, radius=1.2),
                  density='0.016 * (1 - 0.85*smoothstep(0.3, 2.0, talus + sand)) * smoothstep(0.25, 0.55, occlusion) '
                          '* smoothstep(0.25, 0.6, insolation + 0.3*convex_20m) '
-                         '* smoothstep(46, 32, slope_20m + 14*(fbm(900, 65) - 0.5) - 5*concave_20m + 4*convex_20m) '
+                         '* smoothstep(46, 32, slope_20m + 8*(fbm(900, 65) - 0.5) + 14*(fall_streak - 0.5) '
+                         '- 5*concave_20m + 4*convex_20m) '
                          '* smoothstep(treeline_m + 150, treeline_m - 100, ' + _TREELINE_VOLCANO + ')'),
             dict(name='ash grass', kind='grass', source=('flora', 'galleta_dry', dict(_DRY, seeds=[7, 13])),
                  size_m=(0.2, 0.5), core_m=0.2, max_radius_m=90.0,
@@ -421,7 +446,7 @@ ECOTOPES = {
                  cluster=dict(parents_per_ha=700.0, mu=8.0, sigma_m=2.4), range_per_ha=(1200.0, 5600.0),
                  age=dict(shape=1.8, scale=0.6, stand=0.5),
                  density='0.5 * smoothstep(2.5, 0.3, sand) * smoothstep(9, 3, slope_20m) '
-                         '* smoothstep(0.44, 0.64, 0.35*site + 0.65*fbm(24, 2))'),
+                         '* smoothstep(0.44, 0.64, 0.3*site + 0.35*fbm(24, 2) + 0.35*fbm(110, 5))'),
             dict(name='dune shrub', kind='shrub', source=('seedthree', 'creosote', dict(), [3]), on=('sand',),
                  size_m=(0.5, 1.6), core_m=0.9, crown_m=1.2, cluster=dict(parents_per_ha=12.0, mu=3.0, sigma_m=8.0),
                  range_per_ha=(2.0, 36.0),
@@ -459,17 +484,30 @@ ECOTOPES = {
         constants=dict(channel_mask=0.0),
         species=[
             # the towers' forest: denser where soil holds (the gentler, concave ground) on the towers' feet and lower
-            # flanks; the steep flanks' clinging scrub is the material's forest (the tower_karst look draws it by
-            # the slope), not instanced trees: a stand of sweetgums standing out from a 50-80 degree flank read as a
-            # hard-edged block of pale cut-outs (11-20, plain_fields). Rounded crowns (SeedThree's sweetgum is a
+            # flanks, giving way to the scrub below over 34-50 degrees. Rounded crowns (SeedThree's sweetgum is a
             # cone, and its stands read as conifers, odd for Guilin's evergreen broadleaf scrub)
             # (crown_m: a sweetgum is about two thirds as wide as it is tall)
-            dict(name='broadleaf', kind='tree', source=('seedthree', 'sweetgum', dict(height=14, crownShape=1), [5, 17]),
+            dict(name='broadleaf', kind='tree', source=_KARST_BROADLEAF,
                  lod=_BROADLEAF_LOD,
                  size_m=(4.0, 15.0), core_m=2.6, crown_m=5.0, cluster=dict(parents_per_ha=110.0, mu=6.0, sigma_m=6.0),
                  range_per_ha=(150.0, 660.0), ground='forest', shade=dict(tolerance=0.6, radius=1.0),
-                 density='0.066 * smoothstep(9, 17, slope_20m) * smoothstep(46, 36, slope_20m + 6*convex_20m '
-                         '- 6*concave_20m + 8*(fbm(120, 44) - 0.5))'),
+                 density='0.066 * smoothstep(9, 17, slope_20m) * smoothstep(50, 34, slope_20m + 6*convex_20m '
+                         '- 6*concave_20m + 8*(fbm(120, 44) - 0.5) + 8*(fall_streak - 0.5))'),
+            # the steep flanks' clinging scrub: the same broadleaf at scrub size, from 34-44 degrees up to the
+            # limestone's bare faces (the tower_karst look's, from 64 degrees), thinning with the slope, higher up
+            # the chutes and gullies and in tongues down the fall line (fall_streak), lower on the ribs: the towers
+            # clothed to their tops, guilin_karst_01 and the Li River plain photograph (11-20, riverbank and
+            # plain_fields: with trees only to 36-46 degrees the forest stood as a skirt with a level top round each
+            # tower's foot; and a stand of full-size sweetgums out on a 50-80 degree flank had read as a hard-edged
+            # block of pale cut-outs). Rooted in the limestone's cracks: on bare rock as on soil
+            dict(name='tower scrub', kind='tree', source=_KARST_BROADLEAF,
+                 on=('rock',), roots_m=2.0,
+                 lod=_BROADLEAF_LOD, size_m=(2.5, 7.0), core_m=1.3, crown_m=2.3, max_count=60000,
+                 cluster=dict(parents_per_ha=160.0, mu=4.0, sigma_m=5.0), range_per_ha=(60.0, 900.0),
+                 age=dict(shape=1.8, scale=0.6, stand=0.4), ground='forest', shade=dict(tolerance=0.6, radius=1.0),
+                 density='0.06 * smoothstep(34, 44, slope_20m - 6*concave_20m + 6*convex_20m) '
+                         '* smoothstep(66, 50, slope_20m + 6*convex_20m - 6*concave_20m + 12*(fall_streak - 0.5) '
+                         '+ 6*(fbm(120, 44) - 0.5))'),
             # trees along the river banks in irregular groves, not in the paddies: a single row along every channel
             # of the plain stood in the flooded fields (11-20, riverbank; guilin_karst_01: the town and groves on
             # the river bank)
@@ -648,8 +686,9 @@ RECIPE_ECOTOPES = {
     # Inside the caldera the ground is young: Wizard Island's cinder cone and its blocky lava apron, and the rockfall
     # of the walls (crater_lake_02: the dark flows bare but for a few trees and clumps, the cone's cinders showing
     # between scattered trees). The lake marks the inside of the caldera for a rule (the outer flanks lie kilometres
-    # from it): within 250-650 m of it the stands are an open woodland, a fifth of the flanks' (11-20: the island's
-    # apron, wet by the wetness index on its flat ground at the shore, stood as dense conifer forest to the water)
+    # from it): within 250-650 m of it the stands are an open woodland, a twentieth of the flanks' with a few denser
+    # groves (_CALDERA_INSIDE; 11-20: the island's apron, wet by the wetness index on its flat ground at the shore,
+    # stood as dense conifer forest to the water, and at a fifth of the flanks' still read as a closed stand)
     'caldera': dict(
         title='Caldera: conifer forest on the outer flanks, parkland toward the rim, a tree here and there on the '
               'walls, open woodland on the young island',
@@ -658,10 +697,12 @@ RECIPE_ECOTOPES = {
                                 '+ 0.08*northness_20m - 0.12*convex_20m, 0.4, 1) '
                                 '* smoothstep(0.5, 6.0, slope_20m) * smoothstep(38, 26, slope_20m) '
                                 '* (1 - 0.8*smoothstep(0.2, 0.6, lava)) * (1 - 0.85*smoothstep(0.3, 2.0, talus + sand)) '
-                                '* smoothstep(0.25, 0.55, occlusion) * (0.18 + 0.82*smoothstep(250, 650, dist_water)) '
+                                '* smoothstep(0.25, 0.55, occlusion) * mix(' + _CALDERA_INSIDE + ', 1, '
+                                'smoothstep(250, 650, dist_water)) '
                                 '* smoothstep(treeline_m + 80, treeline_m - 450, ' + _TREELINE_VOLCANO + ')'),
             'pine': dict(density='0.016 * (1 - 0.85*smoothstep(0.3, 2.0, talus + sand)) '
-                                 '* smoothstep(0.25, 0.55, occlusion) * (0.35 + 0.65*smoothstep(250, 650, dist_water)) '
+                                 '* smoothstep(0.25, 0.55, occlusion) * mix(' + _CALDERA_INSIDE + ', 1, '
+                                 'smoothstep(250, 650, dist_water)) '
                                  '* smoothstep(0.25, 0.6, insolation + 0.3*convex_20m) * smoothstep(36, 24, slope_20m) '
                                  '* smoothstep(treeline_m + 150, treeline_m - 450, ' + _TREELINE_VOLCANO + ')'),
         }),
