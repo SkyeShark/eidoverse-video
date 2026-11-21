@@ -406,14 +406,15 @@ def seam_zone(pin_w, level, width_m):
     """A child level's seam zone, for a stage whose change departs from its parent's surface at the scale of the
     features it forms (soil_hills: its hills): 1 on the seam's own cells (the pins of weight 1: the window's outer
     rings, the sea), easing (smoothstep) to 0 at width_m from the window's edge, or at the border band's inner edge
-    if that is farther. A change of d metres let go over w metres adds about d / w to the slope: over the band's 16
-    cells (2.5 m on the meadow's 0.16 m main tile) the soil's 0.4 m was 10-15 degrees, over half a valley spacing
-    (15 m there) it is under 2."""
+    if that is farther, and at most a quarter of the window in (its middle half is the level's own: rolling_hills'
+    hero levels resolve its 560 m hills hundreds of cells across). A change of d metres let go over w metres adds
+    about d / w to the slope: over the band's 16 cells (2.5 m on the meadow's 0.16 m main tile) the soil's 0.4 m was
+    10-15 degrees, over half a valley spacing (15 m there) it is under 2."""
     pw = np.asarray(pin_w, np.float64)
     e = Gd.edge_distance(level.n).astype(np.float64)
     free = pw < 1.0
     s0 = float(e[free].min()) if free.any() else 0.0
-    w = max(float(level.band), float(width_m) / float(level.cell))
+    w = max(float(level.band), min(float(width_m) / float(level.cell), 0.25 * float(level.n)))
     t = np.clip((e - s0) / max(w - s0, 1.0), 0.0, 1.0)
     return np.maximum(1.0 - t * t * (3.0 - 2.0 * t), np.where(pw >= 1.0, 1.0, 0.0))
 

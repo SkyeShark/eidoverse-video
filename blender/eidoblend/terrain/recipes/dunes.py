@@ -32,10 +32,25 @@ crest against straight-sided pyramids at repose, the shear's slope term against 
 above slip faces that started below them, the feathered smoothed sheet and the time-averaged read-out against
 pitted sand on the growth level, the expected lift on the finer levels against their own pitted flanks, the last
 season on the finer levels for a fresh slip face on the crests).
+The slope term is a trade, measured on seed 1: with it the crests turn over at the brink as the Great Sand Dunes'
+lidar does (the main level's top 15.6 m behind a slip face at 7.8 m cells, the lidar's 15.6 m; 43 m without it), and
+the dunes stand taller with longer faces (the tallest 430 m of sand against 370 m; slip faces on a fifth of the main
+level against a tenth), which three of the judge's 15 Namib bands read: relief 498 m, hypsometric integral 0.18 and
+slope p90 29 degrees at the reference's 30 m (bands 230-344 m, 0.20-0.36, 18.5-26.5; without the term 429 m, 0.21,
+25.8). Less sand lowers the dunes but bares the floor (35 m of it: slope p50 under 4 degrees against 4.6-10.6), the
+term on the finer levels only leaves the growth level's shoulders on them, and the term for the growth's last cycle
+only raises the dunes as much. Shorter seasons (blocks of 150-500 iterations) leave more of the field in slip faces
+(22-28 % of the main level against 19 %), and a speed-up that goes on growing to 1.3-1.6 x the target height lowers
+the dunes (relief 432 and 403 m, the integral 0.21 and 0.22, inside its band) but puts a quarter of the field in slip
+faces and halves the spacing the judge reads (807 m against 1707). With the term or without, the big dunes are
+pyramids whose slip faces run most of their height (the slip faces' height, area-weighted median, 218 m with the term
+and 113 m without; the lidar's 44 m on a twentieth of its ground): the faces of real big dunes are on their crests
+and on the smaller dunes over their flanks.
 The design's starting point (0/120/240 equal, 120 m of sand at 900 m) piles every dune into a pyramid at repose. For
 the Great Sand Dunes' reversing ridges in a near-unbroken sand sea: params={'winds': [[282, 1.0], [102, 0.7],
-[192, 0.5]], 'sand_m': 40, 'spacing_m': 900, 'bed_relief_m': 30, 'sand_patchiness': 0.5} (12 of the judge's 14
-bands; its dunes stand a little steeper than the Great Sand Dunes', slope p50 15 and p90 27.6 degrees).
+[192, 0.5]], 'sand_m': 40, 'spacing_m': 900, 'bed_relief_m': 30, 'sand_patchiness': 0.5} (13 of the judge's 15
+bands; its dunes stand steeper than the Great Sand Dunes', slope p50 18.4 and p90 31.2 degrees against the lidar's
+10.7 and 23.0: slip faces on 23 % of the field, the lidar's 5 %).
 """
 from __future__ import annotations
 

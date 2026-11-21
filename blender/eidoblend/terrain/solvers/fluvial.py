@@ -79,6 +79,11 @@ Parameters of the 'fluvial' stage (metres, years, degrees; K in the stream-power
                                        refines. Free, a hero level's river rose with the lock's uplift above its own
                                        entry in the pinned border band, the parent's inflow drained back out of the
                                        window there, and the trunk lost its catchment level by level
+    hold_levels 'hero'                 where hold_rivers holds: the hero levels ('hero') or every refining level
+                                       ('refine'). The lock raises each block by what its rivers cut, so where a block
+                                       downstream on a trunk cut more than the one above it, it rose faster than the
+                                       trunk's fall and dammed it: closed hollows 35-43 m deep along fluvial_range's
+                                       trunk canyons on its 24 km and main levels, filled flat at each level's end
     band_blend False                   True: the border band is the design's ramp. The run holds only the cells
                                        pinned in full (the seam's own two cells, the sea, held rivers and incised
                                        channels) and its outcome is blended to the parent by the band's weights once
@@ -91,12 +96,27 @@ Parameters of the 'fluvial' stage (metres, years, degrees; K in the stream-power
                                        ground creeps and fails but carries no channel): the rivers cut only where the
                                        routed area reaches channel_head_frac x the level's valley spacing^2
                                        (soil_hills' channel_frac), K ramped in (smoothstep in log A from half that
-                                       area to it; the area re-read every HEAD_EVERY steps), and all along the
-                                       channels the level inherited (channel_network). Without it a refining level
+                                       area to it) and full all the way down from where it reaches it (the steepest
+                                       descent; channel_head), the area and heights re-read every HEAD_EVERY steps.
+                                       Without it a refining level
                                        starts channels wherever its own cells gather water, down to MIN_SPACING_CELLS
                                        of them, and every finer level dissects again: the sea cliffs' chalk downland
                                        (dry valleys 450-600 m apart, smooth slopes between) came out gullied over
                                        half its land
+    spill_yr 0                         > 0: every spill_yr years (at least every step) the level's closed hollows fill
+                                       to their spill points with sediment (hydro.fill_depressions; the fill tilted
+                                       toward its spill, hydro.routing_surface), so the water they held runs on over
+                                       the spill and cuts it down, as a lake overflows and its outlet incises.
+                                       The routing (one Jacobi pass a step) carries no water out of a closed hollow:
+                                       on a broad uplift the rough start's hollows inside the range stayed closed
+                                       while the uplift raised their rims, their outlets never cut, and they ended as
+                                       flat filled basins (fluvial_range 22-24 km across: 5-8 % of the main tile
+                                       under 5 degrees, its hypsometric integral at its band's floor). Each spill is
+                                       a fill and a routing surface on the CPU: about a second at 512^2, 8 s and more
+                                       at 1024^2
+    spill_levels 'grow'                where spill_yr runs: the growing levels ('grow') or every level ('all': a
+                                       refining level's lock raises its blocks by what their rivers cut, and where
+                                       a block downstream rose faster than a valley's fall the valley closed behind it)
     threshold_mode 'iso'               'iso': slopes over Sc by their upwind gradient magnitude relax along the
                                        gradient (isotropic); 'pair': the design's pair excess (octagonal, 4-fold bias)
     threshold_rate None                0.12 iso, 0.06 pair; threshold_iters 2 a step (2 x 0.12 moves what the
@@ -153,8 +173,8 @@ DEFAULTS = dict(
     lock=True, creep_cap=5.0, threshold_iters=2, threshold_mode='iso', threshold_rate=None, max_creep_sub=32,
     fill_pits=True, pit_eps_m=1e-3, mode='evolve', min_steps=100, max_steps=6000,
     faults=None, context_spacing_factor=1.0, relief_over='main', U_factor_max=None,
-    uplift_scale=1.0, control_levels='grow', lock_max_frac=8, hold_rivers=0.0, band_blend=False,
-    channel_head_frac=0.0,
+    uplift_scale=1.0, control_levels='grow', lock_max_frac=8, hold_rivers=0.0, hold_levels='hero', band_blend=False,
+    channel_head_frac=0.0, spill_yr=0.0, spill_levels='grow',
 )
 THRESHOLD_RATE = {'iso': 0.12, 'pair': 0.06}
 
@@ -954,31 +974,23 @@ def level_spacing(params, depth):
     return sp
 
 
-def channel_head(A, head_m2):
+def channel_head(A, head_m2, h=None):
     """The channel head's ramp on K (channel_head_frac): 0 where the drainage area A is under half of head_m2, 1 from
-    head_m2 up, smoothstep in log A between."""
-    t = np.clip(np.log(np.maximum(np.asarray(A, np.float64), 1e-12) / (0.5 * float(head_m2))) / math.log(2.0),
-                0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
-def channel_network(h, A, head_m2, sea_level=None):
-    """The cells the inherited channels run through (channel_head_frac): drainage area over head_m2, every cell
-    downstream of one along the surface's paths (hydro.lake_receivers: across a filled hollow along its floor to
-    its spill), widened by a cell each side so a channel the level moves by a cell stays inside. The routed area
-    spreads over a valley floor's cells, and where it fell under the head's the floor cut nothing while the lock
-    raised it with its block: dams, and closed hollows 1-5 m deep along the valleys."""
-    from . import hydro as HY
-    from .hillslope import _downstream
-    h = np.asarray(h, np.float64)
-    full = np.asarray(A, np.float64) >= float(head_m2)
-    if not full.any():
-        return full
-    filled = np.asarray(HY.fill_depressions(h, sea_level=sea_level)[0], np.float64)
-    net = _downstream(full, HY.lake_receivers(filled, h, sea_level=sea_level))
-    p = np.pad(net, 1, mode='edge')
-    ny, nx = net.shape
-    return np.max([p[j:j + ny, i:i + nx] for j in range(3) for i in range(3)], axis=0)
+    head_m2 up, smoothstep in log A between. With the heights h, every cell downstream of one whose area reaches
+    head_m2 is channel too (1), along the steepest descent (a pit's or a flat's lowest neighbour off the window's
+    edge): the routed area spreads over a valley floor's cells, and where it fell under the head's the floor cut
+    nothing while the lock raised it with its block, damming the valley above (closed hollows 1-5 m deep along the
+    sea cliffs' dry valleys)."""
+    A = np.asarray(A, np.float64)
+    t = np.clip(np.log(np.maximum(A, 1e-12) / (0.5 * float(head_m2))) / math.log(2.0), 0.0, 1.0)
+    k = t * t * (3.0 - 2.0 * t)
+    full = A >= float(head_m2)
+    if h is not None and full.any():
+        from .hillslope import _downstream
+        inner = np.zeros(full.shape, bool)
+        inner[1:-1, 1:-1] = True
+        k = np.where(_downstream(full, d8_receivers(h, breach=inner)), 1.0, k)
+    return k
 
 
 # =============================================================================================== the driver ===
@@ -1082,8 +1094,29 @@ class FluvialRun:
     def height(self):
         return self.dev.read(self.S.src)[..., 0]
 
-    def area(self):
-        return self.dev.read(self.S.src)[..., 1]
+    def state(self):
+        """(n, n, 4): h, A, qs, carried."""
+        return self.dev.read(self.S.src)
+
+    def spill(self, sea_level=None):
+        """The closed hollows filled to their spill points (module doc, spill_yr): the fill, tilted toward each
+        spill so the routing crosses it, is sediment (deposit and loose cover). Returns the cells raised."""
+        from . import hydro as HY
+        s = np.array(self.dev.read(self.S.src), F32)
+        h = s[..., 0].astype(np.float64)
+        filled = np.asarray(HY.fill_depressions(h, sea_level=sea_level)[0], np.float64)
+        if not np.any(filled > h):
+            return 0
+        add = np.maximum(np.asarray(HY.routing_surface(filled, sea_level=sea_level), np.float64) - h, 0.0)
+        if not np.any(add > 0):
+            return 0
+        s[..., 0] = (h + add).astype(F32)
+        mk = np.array(self.dev.read(self.M.src), F32)
+        mk[..., 1] += add.astype(F32)
+        mk[..., 3] += add.astype(F32)
+        self.S.src = self.dev.texture(s)
+        self.M.src = self.dev.texture(mk)
+        return int(np.count_nonzero(add > 0))
 
     def readback(self):
         s = self.dev.read(self.S.src)
@@ -1253,13 +1286,10 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             pins['pin_w'] = np.where(held, F32(1), pins['pin_w']).astype(F32)
     D, spacing = diffusivity(params, cell, depth, main_cell)
     head_m2 = float(_p(params, 'channel_head_frac')) * spacing * spacing if refine and 'A' in fields else 0.0
-    net = None
     if head_m2 > 0:
         # the channel heads (module doc, channel_head_frac): the rivers cut only where the area reaches the head's,
-        # and along the channels the level inherited
-        A0 = np.asarray(fields['A'], np.float64)
-        net = channel_network(h, A0, head_m2, ctx.sea_level)
-        kk['K'] = K * np.maximum(channel_head(A0, head_m2), net)
+        # and all the way down from there
+        kk['K'] = K * channel_head(fields['A'], head_m2, h)
     if refine:
         dt = float(_p(params, 'dt_ref_yr')) * max(cell, main_cell) / CELL_REF_M
         steps = int(params.get('steps', _p(params, 'refine_steps')))
@@ -1290,14 +1320,27 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
         lock = h                                       # the start: every phase's block means are held to it
     held_rivers = 0
     hold = float(_p(params, 'hold_rivers'))
-    if refine and hold > 0 and depth < 0 and lock_m is not None and 'A' in fields:
+    hold_where = _p(params, 'hold_levels')
+    if hold_where not in ('hero', 'refine'):
+        raise ValueError(f"stage 'fluvial': hold_levels {hold_where!r} is 'hero' or 'refine'")
+    if refine and hold > 0 and (depth < 0 or hold_where == 'refine') and lock_m is not None and 'A' in fields:
         # the rivers the parent resolved keep their courses and long profiles (module doc, hold_rivers): free, a
         # hero level's rivers rose with the lock's uplift above their own entries in the pinned border band, the
         # parent's inflow drained back out of the window there, and the trunk lost its catchment level by level
         riv = np.asarray(fields['A'], np.float64) >= hold * lock_m * lock_m
         if riv.any():
+            # held where they drain: the parent's surface, upsampled, keeps rounding pits and flats along a course
+            # (on the fluvial range's hero levels a quarter to half of the held cells, up to 2 m deep), which a held
+            # cell never fills, and the run's routing stalled at each (on its first hero level the area along the
+            # trunk fell to a few cells', and the valley floors stage after the run found 1 channel cell draining
+            # 5 km2 where unheld it found 213). So a course is held on the level's surface with its hollows filled
+            # and its flats tilted toward their outlets (hydro.routing_surface), every edge cell an outlet: with the
+            # edge cells where the parent's water comes in closed, the fill of a trunk valley on the 24 km level
+            # found its outlet 287 m up
+            from . import hydro as HY
+            surf = HY.routing_surface(HY.fill_depressions(h, sea_level=ctx.sea_level)[0], sea_level=ctx.sea_level)
             pins = dict(pins)
-            pins['pin_h'] = np.where(riv, h, pins['pin_h']).astype(F32)
+            pins['pin_h'] = np.where(riv, np.maximum(h, surf), pins['pin_h']).astype(F32)
             pins['pin_w'] = np.where(riv, F32(1), pins['pin_w']).astype(F32)
             held_rivers = int(riv.sum())
     blend = None
@@ -1326,6 +1369,12 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
     slope_mode = {'dinf': 1, 'd8': 0}[_p(params, 'slope')]
     pit = 1 if _p(params, 'fill_pits') else 0
     peps = float(_p(params, 'pit_eps_m'))
+    where = _p(params, 'spill_levels')
+    if where not in ('grow', 'all'):
+        raise ValueError(f"stage 'fluvial': spill_levels {where!r} is 'grow' or 'all'")
+    spill_yr = 0.0 if (refine and where == 'grow') else float(_p(params, 'spill_yr'))
+    spill = max(1, int(round(spill_yr / dt))) if spill_yr > 0 else 0       # steps between spills
+    spilled = 0
     history = []
     for i in range(steps):
         run.step(dt, D_used, n_sub, iters, rate, cap, mexp, nexp, pexp, slope=slope_mode,
@@ -1339,8 +1388,11 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             run.set_par(par_of(uf))
             history.append((i + 1, round(rel, 1), round(uf, 4)))
         if head_m2 > 0 and (i + 1) % HEAD_EVERY == 0 and i + 1 < steps:
-            kk['K'] = K * np.maximum(channel_head(run.area(), head_m2), net)
+            st = run.state()
+            kk['K'] = K * channel_head(st[..., 1], head_m2, st[..., 0])
             run.set_par(par_of(uf))
+        if spill > 0 and (i + 1) % spill == 0 and i + 1 < steps:
+            spilled += run.spill(ctx.sea_level)
     out = run.readback()
     if blend is not None:
         w, ph = blend
@@ -1366,6 +1418,7 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
                 U_factor=round(uf, 4), relief_main_window_m=None if rel is None else round(rel, 1),
                 lock_block_cells=lock_b if lock is not None else None, lock_m=lock_m, held_river_cells=held_rivers,
                 channel_head_m2=round(head_m2, 1) if head_m2 > 0 else None,
+                spill_steps=spill or None, spilled_cells=spilled if spill else None,
                 seconds=round(time.perf_counter() - t0, 3), controller=history[-6:])
     ctx.shared.setdefault('fluvial_log', []).append(info)
     ctx.log(f"[terrain.fluvial] {info['role']} {lv.n}^2 @ {cell:.3g} m"
@@ -1374,6 +1427,7 @@ def op_fluvial(fields, level, params, seed=0, ctx=None):
             + (f", U x{uf:.3f}, relief {rel:.0f} m" if rel is not None else '')
             + (f', locked above {lock_b} cells ({lock_b * cell:.0f} m)' if lock is not None else '')
             + (f', channel heads at {head_m2:.0f} m2' if head_m2 > 0 else '')
+            + (f', hollows spilled every {spill} steps ({spilled} cells raised)' if spill else '')
             + f", {info['seconds']} s")
     return fields
 
