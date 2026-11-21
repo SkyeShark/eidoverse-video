@@ -33,6 +33,7 @@ ungrafted octopus. M0, the NULL graft (R19): the native low, weights and suckers
 pipeline's noise floor. The gates are forge/graft_gates.py; ASSEMBLE is forge/assemble.py.
 """
 import hashlib
+import json
 import math
 
 import numpy as np
@@ -257,9 +258,295 @@ def ring_problems(rec, joint_names):
     return out
 
 
-def band_length(rec):
-    """L_band = max(0.75 r, |dr|max / 0.25, two ring steps) (§2.7); the identity donor's |dr| is 0"""
-    return max(0.75 * rec['r_mean'], 0.0 / 0.25, 2.0 * rec['h'])
+def band_length(rec, dr=0.0):
+    """L_band = max(0.75 r, |dr|max / 0.25, two ring steps) (§2.7); the identity donor's |dr| is 0 (REROOT: a re-rooted
+    donor passes its own |dr|max, the radius step from the ring's section to its root section)"""
+    return max(0.75 * rec['r_mean'], float(dr) / 0.25, 2.0 * rec['h'])
+
+
+# ============================================================================================ REROOT: any host's ring
+# (REMIX_LIBRARY §7 rank 1; remix-machinery-r1) The octopus arm ring above is ONE host. Any host whose glb CARRIES its
+# ring records (extras.bestiary.rings: the axolotl's 21, the human's 57, each written by the host's own export with
+# ring_record's frozen bits: ax11_glb.py, the human's x10) goes through load_host + host_ring_record, which complete
+# the stored record into the schema the rest of this module reads (the socket frame in the creature's space, the
+# section, the seam vertex, the ring steps, the loops either side, the native group's triangles). The part itself is
+# graft_tube's (below): the host's loops round the ring, a DONOR generator run in the socket frame at the host's scale
+# and texel density, so every cross is the same code; M1a is (the octopus's loops, the octopus arm on its own ring, the
+# identity map).
+def load_host(glb_path, welded=None):
+    """ANY host's shipped glb as the graft reads it: load_base's arrays without the octopus's low.npz (the skin
+    primitives' shared vertex set: POSITION, NORMAL, TANGENT, TEXCOORD_0 in the forge's v-up convention, JOINTS_0,
+    WEIGHTS_0; each primitive's triangles by material name; the skin's joint names and bind worlds by
+    cyborg_octopus.Rig, three's composition), its records (extras.bestiary) and, when given, its WELDED topology:
+    welded = dict(Q (q, 4) the welded quads, orig (n,) each of the first n shipped vertices' welded id) so the loops
+    round a ring can be walked (tube_loops). The octopus keeps load_base (its low.npz is its welded topology)"""
+    from . import cyborg_octopus as CO
+    from . import gltf
+    G = gltf.read(glb_path)
+    j = G['json']
+    acc = G['accessor']
+    prims = j['meshes'][0]['primitives']
+    mats = [m['name'] for m in j['materials']]
+    p0 = prims[0]['attributes']
+    assert all(p['attributes']['POSITION'] == p0['POSITION'] for p in prims), 'the host\'s primitives share no vertex set'
+    uv = acc(p0['TEXCOORD_0']).astype(np.float64)
+    out = dict(path=glb_path, sha1=sha1_file(glb_path), json=j, G=G,
+               V32=acc(p0['POSITION']).copy(), N32=acc(p0['NORMAL']).copy(), T32=acc(p0['TANGENT']).copy(),
+               UV=np.column_stack([uv[:, 0], 1.0 - uv[:, 1]]), J=acc(p0['JOINTS_0']).astype(np.int64),
+               W32=acc(p0['WEIGHTS_0']).copy(), prims={}, mats=mats, records=j.get('extras', {}).get('bestiary', {}))
+    for k, p in enumerate(prims):
+        out['prims'][mats[p['material']]] = dict(index=k, F=acc(p['indices']).reshape(-1, 3).astype(np.int64),
+                                                 attrs=dict(p['attributes']), material=p['material'],
+                                                 targets=len(p.get('targets', [])))
+    rig = CO.Rig(glb_path)
+    out['rig'] = rig
+    out['jnames'] = list(rig.jnames)
+    out['world'] = rig.worlds()
+    if welded is not None:
+        orig = np.asarray(welded['orig'], np.int64)
+        n = len(orig)
+        assert n <= len(out['V32'])
+        copies = {}
+        for i, w in enumerate(orig.tolist()):
+            if w >= 0:
+                copies.setdefault(int(w), []).append(i)
+        out['welded'] = dict(Q=np.asarray(welded['Q'], np.int64), orig=orig, n=n, copies=copies,
+                             V=np.asarray(welded['V'], np.float64) if 'V' in welded else None)
+        # the low as strip_base_corners reads the octopus's low.npz: the skin primitive's triangles, every shipped
+        # vertex's welded id (-1 past the welded set: the separate pieces), the UVs (v up)
+        og = -np.ones(len(out['V32']), np.int64)
+        og[:n] = orig
+        out['low'] = dict(F=out['prims'][mats[prims[0]['material']]]['F'], orig=og, UV=out['UV'],
+                          V=out['V32'].astype(np.float64))
+    return out
+
+
+def native_tags(host):
+    """the host's NATIVE GROUP TAGS per shipped vertex (ax11_glb.py's: extras.bestiary.native_tags, run-length pairs of
+    32-bit words, bit k set when the vertex lies beyond ring sites[k]). Returns (sites, words (n,) uint32)"""
+    nt = host['records'].get('native_tags')
+    if nt is None:
+        return None, None
+    words = np.concatenate([np.full(int(c), int(v), np.uint32) for v, c in nt['rle']])
+    assert len(words) == len(host['V32']), 'the native tags do not cover the vertex set'
+    return list(nt['sites']), words
+
+
+def tube_loops(Q, ring, distal, n_out, n_in):
+    """THE TUBE'S LOOPS round a ring on a welded quad mesh (any host): ring (K welded ids, k order), distal a
+    callable(ids (K,)) -> +1 on the native's side, -1 on the base's. Each next loop's vertex k is the one across the
+    quad from the current loop's vertex k, on the side away from the loop before. Returns (loops_out (m, K) from the
+    first loop past the ring, m <= n_out; loops_in (p, K) from the first loop before it, p <= n_in): a walk stops where
+    the strip ends (an edge without exactly one quad on its far side, or a loop that is not K distinct new vertices:
+    a pole, a K change, a cap)"""
+    Q = np.asarray(Q, np.int64)
+    ring = [int(v) for v in ring]
+    K = len(ring)
+    e2q = {}
+    for qi, q in enumerate(Q.tolist()):
+        for m in range(4):
+            a, b = q[m], q[(m + 1) % 4]
+            e2q.setdefault((min(a, b), max(a, b)), []).append(qi)
+
+    def opposite(q, a, b):
+        """quad q holds the edge (a, b): the corners across from a and from b"""
+        ia, ib = q.index(a), q.index(b)
+        pa = q[(ia + 2) % 4] if q[(ia + 1) % 4] == b or q[(ia - 1) % 4] == b else None
+        # across from a: a's other neighbour in the quad (not b); across from b likewise
+        na_ = q[(ia - 1) % 4] if q[(ia + 1) % 4] == b else q[(ia + 1) % 4]
+        nb_ = q[(ib - 1) % 4] if q[(ib + 1) % 4] == a else q[(ib + 1) % 4]
+        assert pa is not None
+        return na_, nb_
+
+    def step(cur, prev):
+        """the loop past cur away from prev (a set of welded ids): per edge the one quad holding none of prev"""
+        nxt = [None] * K
+        for k in range(K):
+            a, b = cur[k], cur[(k + 1) % K]
+            cand = [Q[qi].tolist() for qi in e2q.get((min(a, b), max(a, b)), [])]
+            cand = [q for q in cand if not (set(q) & prev)]
+            if len(cand) != 1:
+                return None
+            pa, pb = opposite(cand[0], a, b)
+            for kk, v in ((k, pa), ((k + 1) % K, pb)):
+                if nxt[kk] is None:
+                    nxt[kk] = v
+                elif nxt[kk] != v:
+                    return None
+        if len(set(nxt)) != K or set(nxt) & set(cur) or set(nxt) & prev:
+            return None
+        return nxt
+
+    def first_loop(q0):
+        """the loop on the side of quad q0 (at ring edge 0), propagated round the ring quad by quad"""
+        nxt = [None] * K
+        q = q0
+        for k in range(K):
+            a, b = ring[k], ring[(k + 1) % K]
+            if k > 0:
+                cand = [Q[qi].tolist() for qi in e2q.get((min(a, b), max(a, b)), [])]
+                cand = [c for c in cand if nxt[k] in c]
+                if len(cand) != 1:
+                    return None
+                q = cand[0]
+            pa, pb = opposite(q, a, b)
+            if nxt[k] is not None and nxt[k] != pa:
+                return None
+            nxt[k] = pa
+            if k + 1 < K:
+                nxt[k + 1] = pb
+            elif nxt[0] != pb:
+                return None
+        return nxt if len(set(nxt)) == K and not set(nxt) & set(ring) else None
+
+    a0, b0 = ring[0], ring[1]
+    q_sides = [Q[qi].tolist() for qi in e2q.get((min(a0, b0), max(a0, b0)), [])]
+    assert len(q_sides) == 2, 'a ring edge without two quads: the ring is not inside a tube'
+    cand = [first_loop(q) for q in q_sides]
+    assert all(c is not None for c in cand), 'the ring\'s two sides are not both quad strips'
+    sgn = [distal(np.asarray(c)) for c in cand]
+    assert sorted(sgn) == [-1, 1], f'the side test does not tell the ring\'s two sides apart: {sgn}'
+    first_out, first_in = (cand[0], cand[1]) if sgn[0] > 0 else (cand[1], cand[0])
+
+    def walk(first, n):
+        loops, prev, cur = [], set(ring), first
+        while cur is not None and len(loops) < n:
+            loops.append(cur)
+            nxt = step(cur, prev)
+            prev, cur = set(cur), nxt
+        return np.array(loops, np.int64).reshape(-1, K)
+    return walk(first_out, n_out), walk(first_in, n_in)
+
+
+def frame_of_ring(V):
+    """the socket frame of a STORED ring (its K frozen vertices in k order, the creature's space): origin the centroid,
+    Z the axis about which the vertices turn counter-clockwise (the record's 'right-handed about +Z': the sum of the
+    consecutive radii's cross products), X vertex 0's direction made normal to Z, Y = Z x X. Returns (origin, R)"""
+    V = np.asarray(V, np.float64)
+    c = V.mean(0)
+    r = V - c
+    z = np.cross(r, np.roll(r, -1, axis=0)).sum(0)
+    z /= np.linalg.norm(z)
+    x = r[0] - z * float(r[0] @ z)
+    x /= np.linalg.norm(x)
+    return c, np.column_stack([x, np.cross(z, x), z])
+
+
+def host_ring_record(host, name, apron=3, n_native=64):
+    """THE RING RECORD of a host whose glb carries it (load_host's records['rings'][name]), completed into ring_record's
+    schema: the socket frame in the creature's space (frame_of_ring: Z checked DISTAL, toward the native group, and
+    against the record's own joint-frame normal and tangent through the root's bind world), the section (fit_section:
+    sdf.SWEEP's vocabulary, the per-vertex residual), seam_k (the ring vertices on the host's UV LENGTH seam: more split
+    copies than the ring's own), the loops either side (tube_loops on the welded quads: `apron` before the ring, up to
+    n_native past it), h and h_in (the ring steps), the slope, the base's density at the ring (the stored px_per_m:
+    the host's one density, its set and size), the ring's share along its chain (st_s), and the native group's
+    triangles per primitive (by the host's native tags: every corner tagged beyond the ring or a copy of a ring vertex,
+    at least one tagged). Returns (rec, side): rec the completed record (JSON data), side the arrays graft_tube reads
+    (loops of welded ids, apron first, the ring at index `apron`; the ring's copies split by side)"""
+    src = host['records']['rings'][name]
+    rec = json.loads(json.dumps(src))
+    W = host['welded']
+    copies = W['copies']
+    K = int(rec['K'])
+    low_k = [[int(v) for v in cp] for cp in rec['low_copies']]
+    first = np.array([cp[0] for cp in low_k])
+    V = host['V32'][first].astype(np.float64)
+    assert np.array_equal(host['V32'][first].view(np.uint32), np.asarray(rec['verts_f32'], np.uint32)), \
+        'the record\'s frozen positions are not the glb\'s'
+    assert np.array_equal(host['N32'][first].view(np.uint32), np.asarray(rec['normals_f32'], np.uint32)), \
+        'the record\'s frozen normals are not the glb\'s'
+    ring_w = [int(W['orig'][v]) for v in first]
+    for k, cp in enumerate(low_k):
+        assert all(int(W['orig'][v]) == ring_w[k] for v in cp), 'a ring copy on another welded vertex'
+    sites, words = native_tags(host)
+    bit = np.uint32(1 << sites.index(name))
+    tagged = (words & bit) != 0
+    O_, R_ = frame_of_ring(V)
+    # Z distal: the native's tagged welded vertices lie on +Z
+    tw = np.unique(W['orig'][:W['n']][tagged[:W['n']]])
+    tw = tw[tw >= 0]
+    Vw = W['V'] if W['V'] is not None else None
+    if Vw is None:
+        Vw = np.zeros((int(W['orig'].max()) + 1, 3))
+        Vw[W['orig'][:W['n']]] = host['V32'][:W['n']].astype(np.float64)
+    zt = (Vw[tw] - O_) @ R_[:, 2]
+    hand = 'right-handed about +Z'
+    if np.median(zt) < 0:
+        # the record's vertices turn the other way about the distal axis (an R site: left-handed by the plan's rule)
+        hand = 'left-handed about +Z'
+        x = R_[:, 0]
+        z = -R_[:, 2]
+        R_ = np.column_stack([x, np.cross(z, x), z])
+    # the stored frame (joint-local normal / tangent) against it
+    Wr = host['world'][host['rig'].index[rec['root']]]
+    n_st = Wr[:3, :3] @ np.asarray(rec['frame']['normal'], np.float64)
+    t_st = Wr[:3, :3] @ np.asarray(rec['frame']['tangent'], np.float64)
+    ang_n = float(np.degrees(np.arccos(min(1.0, abs(float(n_st @ R_[:, 2]) / np.linalg.norm(n_st))))))
+    ang_t = float(np.degrees(np.arccos(np.clip(float(t_st @ R_[:, 0]) / np.linalg.norm(t_st), -1.0, 1.0))))
+    o_st = (Wr @ np.append(np.asarray(rec['origin'], np.float64), 1.0))[:3]
+    # the loops: the first loop past the ring is the one on the native's (tagged) side
+    def side(ids):
+        z = (Vw[np.asarray(ids)] - O_) @ R_[:, 2]
+        return 1 if float(np.median(z)) > 0 else -1
+    lo, li = tube_loops(W['Q'], ring_w, side, n_native, apron)
+    assert len(li) == apron, f'{name}: {len(li)} loops before the ring, the apron asks {apron}'
+    loops = np.concatenate([li[::-1], np.array([ring_w]), lo])
+    pos = lambda ids: host['V32'][[copies[int(c)][0] for c in ids]].astype(np.float64)    # noqa: E731
+    loc = (V - O_) @ R_
+    theta_std = TAU * np.arange(K) / K
+    theta_got = np.arctan2(loc[:, 1], loc[:, 0])
+    if hand.startswith('left'):
+        theta_got = -theta_got
+    dth = (theta_got - theta_std + math.pi) % TAU - math.pi
+    rho = np.hypot(loc[:, 0], loc[:, 1])
+    sec, res = fit_section(rho, theta_std)
+    nxt, prv = pos(lo[0]), pos(li[0])
+    h = float(np.linalg.norm(nxt.mean(0) - V.mean(0)))
+    h_in = float(np.linalg.norm(prv.mean(0) - V.mean(0)))
+    On, _ = frame_of_ring(nxt)
+    loc_n = (nxt - On) @ R_
+    sec_n, _ = fit_section(np.hypot(loc_n[:, 0], loc_n[:, 1]), theta_std)
+    dz = float(np.dot(On - O_, R_[:, 2]))
+    # the length seam: ring vertices with more copies than the ring's own split (a ring on an island boundary has two)
+    ncp = np.array([len(cp) for cp in low_k])
+    seam = [int(k) for k in np.nonzero(ncp > np.median(ncp))[0]]
+    # each ring vertex's copies by side: the native's (used by a native triangle) and the base's
+    F0 = host['prims'][host['mats'][0]]['F']
+    nat_tri = {}
+    for mname, p in host['prims'].items():
+        F = p['F']
+        ring_copy = np.zeros(len(host['V32']), bool)
+        ring_copy[np.concatenate(low_k)] = True
+        on = (tagged[F] | ring_copy[F]).all(1) & tagged[F].any(1)
+        nat_tri[mname] = np.nonzero(on)[0]
+    distal_copies, base_copies = [], []
+    used_nat = np.zeros(len(host['V32']), bool)
+    used_nat[F0[nat_tri[host['mats'][0]]].ravel()] = True
+    used_kept = np.zeros(len(host['V32']), bool)
+    keep0 = np.ones(len(F0), bool)
+    keep0[nat_tri[host['mats'][0]]] = False
+    used_kept[F0[keep0].ravel()] = True
+    for cp in low_k:
+        distal_copies.append([v for v in cp if used_nat[v] and not used_kept[v]])
+        base_copies.append([v for v in cp if used_kept[v]])
+    # the chain and the cut this ring is listed at, and its share
+    chain = next((c for c in host['records'].get('chains', []) for ct in c.get('cuts', []) if ct.get('ring') == name),
+                 None)
+    cut = next((ct for ct in (chain or {}).get('cuts', []) if ct.get('ring') == name), None)
+    rec.update(handedness=hand, chain=chain['name'] if chain else None, cut=int(cut['joint']) if cut else None,
+               ring_index=int(apron), apron_rings=int(apron),
+               frame=dict(rec['frame'], creature=dict(origin=O_.tolist(), R=R_.tolist()),
+                          check=dict(normal_deg=ang_n, tangent_deg=ang_t,
+                                     origin_mm=float(np.linalg.norm(o_st - O_) * 1e3))),
+               section=sec, section_residual=res.tolist(), slope=dict(dr0_dz=(sec_n['r0'] - sec['r0']) / dz, dz=dz),
+               h=h, h_in=h_in, seam_k=seam, theta_dev_deg=np.degrees(dth).tolist(),
+               st_s=float(cut['s']) if cut else None, cut_s=float(cut['s']) if cut else None,
+               px_set=float(rec['px_per_m']), build=host['sha1'])
+    rec['native'] = dict(rec['native'], faces_prim={m: t.tolist() for m, t in nat_tri.items()},
+                         primitive=host['mats'][0])
+    side_ = dict(loops=loops, rings={i: loops[i] for i in range(len(loops))}, ic=int(apron), i_last=len(loops) - 1,
+                 copies=copies, distal_copies=distal_copies, base_copies=base_copies, tagged=tagged, ring_w=ring_w)
+    return rec, side_
 
 
 # ============================================================================================ the generator
@@ -296,13 +583,15 @@ def socket_map(rec, donor_arm, donor_s):
     return R, O_b - R @ O_d
 
 
-def octopus_arm_rings(donor_arm, spec, stations, R=None, t=None, n_k=16, out=1.05):
+def octopus_arm_rings(donor_arm, spec, stations, R=None, t=None, n_k=16, out=1.05, shift=0):
     """the octopus arm's ring PROXIES (octopus.build_cage's arm loop, extracted): at each station s the 16 vertices
-    c + 1.05 r(s) (cos a n + sin a b), a = -90 deg + k 22.5 deg, carried into the socket frame. Returns (m, 16, 3)"""
+    c + 1.05 r(s) (cos a n + sin a b), a = -90 deg + k 22.5 deg, carried into the socket frame. Returns (m, 16, 3).
+    (REROOT) shift: the part's vertex k takes the arm's vertex (k + shift) mod 16, so the arm's oral midline (its
+    vertex 12) lies on the host's hidden line; 0 on its own ring"""
     from .species import octopus as O
     R = np.eye(3) if R is None else R
     t = np.zeros(3) if t is None else t
-    alphas = np.radians(-90.0 + np.arange(n_k) * (360.0 / n_k))
+    alphas = np.radians(-90.0 + ((np.arange(n_k) + int(shift)) % n_k) * (360.0 / n_k))
     rings = []
     for s in stations:
         P, n, b, _ = arm_frame_at(donor_arm, s)
@@ -312,103 +601,608 @@ def octopus_arm_rings(donor_arm, spec, stations, R=None, t=None, n_k=16, out=1.0
     return np.array(rings)
 
 
+# the octopus arm's section law (octopus.build_sdf's arm SWEEP: "rounder aboral, flatter oral") and its cage's ring step
+# in share (the canonical cage: 65 rings over s 0.3347 .. 0.9973, p02_cage.npz)
+ARM_SECTION = dict(a2=0.06, phi2=0.0, a3=0.05, phi3=0.0, aspect=0.92)
+ARM_RING_DS = 0.0103547
+ARM_CUT8_S = 0.5003959804030899      # the canonical's cut-8 ring share (M1a's ring record st_s): where the part starts
+ARM_CUT8_R = 0.017288115237625894    # its mean radius there (M1a's r_mean): the scale reference for a re-rooted arm
+
+
+class OctopusArm:
+    """THE OCTOPUS ARM AS A DONOR (CROSSBREED §0 item 2, R21: octopus.build_cage's arm loop and build_sdf's arm SWEEP,
+    made standalone and re-rooted). Two ways to run it:
+      own(arm, spec, prog_low, rec)   on ITS OWN RING (M1a): the canonical's arm (its centreline and rotation-minimising
+                                      frame), the whole low program, the identity socket map; the part's rings are the
+                                      native cage's own (native=True: its stations, its quads, its cap ids)
+      rerooted(host, rec, side, ...)  at ANY HOST'S RING: one SWEEP of the arm's own section law (ARM_SECTION) and
+                                      taper (octopus.arm_radius through _ARM_TAPER) along a centreline laid in the host's
+                                      creature frame: straight behind the ring along -Z (the arm's proximal part, inside
+                                      the host, only so the sweep and the fit's support rings have it), from the ring's
+                                      origin along the native's own axis (the native loops' centroids past the ring,
+                                      then the host chain's joints past the root, then on along the last direction);
+                                      its sections by the RING (scale s_c: the ring's mean radius over the octopus's
+                                      own at cut 8, ARM_CUT8_R) and its length by the HOST (the part from the ring to the
+                                      tip `share` x the native's length past the ring: M2c's rule, R11), the arm's
+                                      share s0 = ARM_CUT8_S at the ring; its aboral side on the host's side opposite the
+                                      ring's hidden line (rec['seam_k']), so its oral midline (the suckers' rows, the
+                                      arm's UV seam, its vertex 12) lies on the host's hidden line
+    Members: arm (P, n, b, t over the donor's whole arm, sampled evenly in share), spec (its arm_radius law), prog (the
+    field the low is fitted to), R / t (the socket map: identity for both, the re-rooted arm is built in place),
+    s0, shift (octopus_arm_rings'), native, scale (s_c), length (the part's, m), L_arm (the whole donor arm's)"""
+
+    def __init__(self, arm, spec, prog, R, t, s0, shift=0, native=False, scale=1.0, length=None, L_arm=None,
+                 info=None):
+        self.arm, self.spec, self.prog, self.R, self.t = arm, spec, prog, R, t
+        self.s0, self.shift, self.native, self.scale = float(s0), int(shift), bool(native), float(scale)
+        self.length, self.L_arm, self.info = length, L_arm, info or {}
+
+    @classmethod
+    def own(cls, arm, spec, prog_low, rec):
+        R, t = socket_map(rec, arm, rec['st_s'])
+        assert np.abs(R - np.eye(3)).max() < 1e-12 and np.abs(t).max() < 1e-12, \
+            'M1a grafts the arm onto its own ring: the socket map must be the identity'
+        return cls(arm, spec, prog_low, R, t, rec['st_s'], native=True)
+
+    @classmethod
+    def rerooted(cls, host, rec, side, spec, share=1.0, count=257, back=None, tip_axis=None, log=print, z0=0.0,
+                 lam=None):
+        """the re-rooted arm at the host's ring (the class docstring). side: host_ring_record's (its native loops);
+        share: the part's length over the native's past the ring; back: the straight proximal run (m; default the arm's
+        own length up to s0 at its section scale). z0: the arc past the ring where the arm's s0 (its cut-8 share) lies
+        (0: at the ring, the WELD arm; the C5 mech tentacle's flesh: at the band's end, where its flange grips the
+        octopus's own section). lam: the arm's length over the octopus's own at its section scale instead of `share`
+        (a MACHINE on the arm keeps its proportions: C5's flange stack needs room between its ring and joint 8)"""
+        from . import loft
+        from . import sdf as SD
+        from .species import octopus as O
+        O_ = np.asarray(rec['frame']['creature']['origin'], np.float64)
+        R_ = np.asarray(rec['frame']['creature']['R'], np.float64)
+        X, Y, Z = R_[:, 0], R_[:, 1], R_[:, 2]
+        K = int(rec['K'])
+        s_c = float(rec['r_mean']) / ARM_CUT8_R
+        # the native's axis past the ring: its loops' centroids, then the host chain's joints past the root and the tip
+        W = host['welded']
+        pos = lambda ids: host['V32'][[W['copies'][int(c)][0] for c in ids]].astype(np.float64)     # noqa: E731
+        cents = [pos(l).mean(0) for l in side['loops'][side['ic'] + 1:]]
+        ch = next(c for c in host['records']['chains'] if c['name'] == rec['chain'])
+        jw = {nm: host['world'][host['rig'].index[nm]][:3, 3] for nm in ch['joints']}
+        k_root = ch['joints'].index(rec['root'])
+        tail = [jw[nm] for nm in ch['joints'][k_root + 1:]]
+        tip_nm = ch.get('tip')
+        if tip_nm and tip_nm in host['rig'].index:
+            tail.append(host['world'][host['rig'].index[tip_nm]][:3, 3])
+        z_last = float((cents[-1] - O_) @ Z)
+        tail = [p for p in tail if float((p - O_) @ Z) > z_last + 1e-4]
+        # (the chain's joints lie on the bone axis, off the skin loops' centroids: at the switch from the last loop's
+        # centroid to the next joint the arm kinked, LOOKED in rr_ax2_clay 2.5; so past the loops only the chain's last
+        # point, the tip, is kept, and the axis is smoothed, its first point and tangent held)
+        tail = tail[-1:]
+        nat = np.array([O_] + cents + tail)
+        for _ in range(8):
+            sm = nat.copy()
+            sm[2:-1] = 0.25 * nat[1:-2] + 0.5 * nat[2:-1] + 0.25 * nat[3:]
+            nat = sm
+        L_nat = float(np.linalg.norm(np.diff(nat, axis=0), axis=1).sum())
+        L_part = float(share) * L_nat
+        if lam is not None:
+            L_part = float(z0) + (1.0 - ARM_CUT8_S) * float(lam) * s_c * float(spec['arm_len'])
+            share = L_part / L_nat
+        # the donor's whole arm: L_d from s = 0 so the part s0 .. 1 is L_part (s0 at z0 past the ring); its proximal run
+        # straight behind the ring
+        L_d = (L_part - float(z0)) / (1.0 - ARM_CUT8_S)
+        back = ARM_CUT8_S * L_d - float(z0) if back is None else float(back)
+        path = nat.copy()
+        if L_part > L_nat:                               # longer than the native: on along the native's last direction
+            d_end = tip_axis if tip_axis is not None else _unit3(nat[-1] - nat[-2])
+            path = np.vstack([path, nat[-1] + d_end * (L_part - L_nat)])
+        seg = np.linalg.norm(np.diff(path, axis=0), axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        if L_part < L_nat:                               # shorter: cut the native's axis at L_part
+            k = int(np.searchsorted(cum, L_part))
+            f = (L_part - cum[k - 1]) / max(seg[k - 1], 1e-12)
+            path = np.vstack([path[:k], path[k - 1] + f * (path[k] - path[k - 1])])
+        ctrl = np.vstack([O_ - Z * back, path])
+        # (the control polyline made EVEN before the Catmull-Rom resample: through the 200 mm back run's one segment and
+        # the native's 10 mm steps the uniform spline overshot past the ring by ~17 mm, so the arm's s0 sat behind it)
+        cl = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(ctrl, axis=0), axis=1))])
+        ue = np.linspace(0.0, cl[-1], max(int(cl[-1] / 0.002) + 1, 8))
+        P = loft.resample(np.column_stack([np.interp(ue, cl, ctrl[:, k]) for k in range(3)]), count)
+        # shares evenly along the arc: the ring's point at s0 (the resampling's arc share there is back / (back + L))
+        arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))])
+        sP = arc / L_d                                   # (the share even in arc: s0 at z0 past the ring, 1 at the tip)
+        sa = np.linspace(0.0, 1.0, count)
+        P = np.column_stack([np.interp(sa, sP, P[:, k]) for k in range(3)])
+        # the aboral reference: opposite the ring's hidden line (the host's seam vertex's direction)
+        seam = int(rec['seam_k'][0])
+        th = TAU * seam / K
+        hidden = np.cos(th) * X + np.sin(th) * Y
+        n, b, t = loft.rmf(P, ref=-hidden)
+        spec_d = dict(spec, arm_r0=spec['arm_r0'] * s_c, arm_tip_r=spec['arm_tip_r'] * s_c,
+                      sucker_d=spec['sucker_d'] * s_c, arm_len=L_d, arm_pair_len=[1.0, 1.0, 1.0, 1.0])
+        prog = SD.Program()
+        prog.sweep(P, n, O.arm_radius(sa, spec_d), op=SD.UNION, name='octopus arm (re-rooted)', **ARM_SECTION)
+        # the part's vertex k on the arm's alpha: the arm's oral midline (its vertex 12, a = +90 deg... the cage's
+        # alpha -90 + 22.5 k: vertex 12 at 180 deg from n, the oral side) onto the host's seam vertex
+        shift = (12 - seam) % K
+        arm = (P, n, b, t)
+        info = dict(s_c=s_c, L_native=L_nat, L_part=L_part, L_arm=L_d, back=back, share=float(share), seam_k=seam,
+                    lam=L_d / (s_c * float(spec['arm_len'])), shift=shift, z0=float(z0))
+        log(f'[graft reroot] the octopus arm at {rec.get("name", "?")}: sections x{s_c:.4f} by the ring (r mean '
+            f'{rec["r_mean"] * 1e3:.2f} mm over the octopus\'s {ARM_CUT8_R * 1e3:.2f} at cut 8), the part '
+            f'{L_part * 1e3:.1f} mm = {share:.2f} x the native\'s {L_nat * 1e3:.1f} mm (the whole donor arm '
+            f'{L_d * 1e3:.1f} mm: lam {info["lam"]:.4f} of the octopus\'s at its section scale), its oral midline on '
+            f'the host\'s seam vertex {seam} (shift {shift})')
+        return cls(arm, spec_d, prog, np.eye(3), np.zeros(3), ARM_CUT8_S, shift=shift, native=False, scale=s_c,
+                   length=L_part, L_arm=L_d, info=info)
+
+    def s_at(self, z):
+        """the arm's share at arc length z past the ring along its centreline (the re-rooted arm: linear; s0 at z0)"""
+        z0 = float(self.info.get('z0', 0.0))
+        return self.s0 + (np.asarray(z, np.float64) - z0) / self.L_arm if self.L_arm else \
+            self.s0 + (1.0 - self.s0) * np.asarray(z, np.float64) / self.length
+
+    def rings(self, stations, out=1.05):
+        return octopus_arm_rings(self.arm, self.spec, stations, self.R, self.t, out=out, shift=self.shift)
+
+    def field(self):
+        return FramedSDF(self.prog, self.R, self.t)
+
+    def tip_axis(self):
+        _, _, _, ta = arm_frame_at(self.arm, 0.999)
+        return self.R @ ta
+
+    def section_radius(self, s, theta):
+        """the arm's SWEEP radius at share s and the part's frame angle theta (the angle of the part's vertex index
+        theta K / 2 pi: alpha = -90 deg + (theta K / 2 pi + shift) 22.5 deg from n toward b): sd_sweep's profile,
+        r0 (1 + a2 cos 2 al + a3 cos 3 al) aspect / sqrt(aspect^2 cos^2 al + sin^2 al), al from n"""
+        from .species import octopus as O
+        al = np.asarray(theta, np.float64) - math.pi / 2.0 + TAU * self.shift / 16.0
+        r = 1.0 + ARM_SECTION['a2'] * np.cos(2.0 * al) + ARM_SECTION['a3'] * np.cos(3.0 * al)
+        a = ARM_SECTION['aspect']
+        return O.arm_radius(np.asarray(s, np.float64), self.spec) * r * a / np.sqrt(a * a * np.cos(al) ** 2 +
+                                                                                    np.sin(al) ** 2)
+
+
+def _unit3(v):
+    v = np.asarray(v, np.float64)
+    return v / max(float(np.linalg.norm(v)), 1e-300)
+
+
 # ============================================================================================ the part's cage
-def part_cage(base, cage, rec, arms, spec, prog_low, mode='generate', fit_iters=6, log=print):
-    """the part's QUAD cage from the apron's first ring to the tip cap, in the native cage's topology (the octopus
-    arm's: so the part's quads correspond one for one with the native's, which the gates use):
-      rings ic - apron .. ic - 1   the APRON (the base's own, baked and painted, never shipped)
-      ring  ic                     THE RING (frozen bits)
-      rings ic + 1 .. ic + nb      the BAND (the base's own loops: L_band / h of them)
-      rings ic + nb + 1 ..         'generate' (M1a): the donor's generator in the socket frame, projected and relaxed
-                                   by retopo.fit with the apron, ring and band FIXED; 'copy' (M0): the base's own
-      the tip cap                  loft.cap over the last ring's proxies (dome 0.0008 along the tip's tangent), as the
-                                   native cage was built, then fitted with the rings
-    Positions of copied vertices come from the glb's float32 (the low's vertex for each cage id). Returns a dict"""
-    from . import loft, retopo
-    from .mesh import QuadMesh
-    rings = cage['rings']
-    ic, apron = int(rec['ring_index']), int(rec['apron_rings'])
-    nb = int(round(band_length(rec) / rec['h']))
-    i0, i_last = ic - apron, len(rings) - 1
+def octopus_side(base, cage, rec):
+    """the OCTOPUS'S side of a ring for graft_tube (its cage is its welded topology): the arm's rings by cage ring
+    number (cage['rings'], the ring at rec['ring_index']), the native's own quads (q_arm) and tip cap ids, its ring
+    stations (ring_s), the anatomical coordinate st per cage id, every cage id's low copies"""
     L = base['low']
     copies = {}
     for i in range(base['n_low']):
         copies.setdefault(int(L['orig'][i]), []).append(i)
-    cage_ids = np.concatenate([np.asarray(rings[i]) for i in range(i0, i_last + 1)] + [np.asarray(cage['cap_v'])])
-    local = {int(c): k for k, c in enumerate(cage_ids)}
-    Q = np.array([[local[int(v)] for v in q] for q in cage['q_arm'] if all(int(v) in local for v in q)])
-    ring_no = np.full(len(cage_ids), -1)
-    for i in range(i0, i_last + 1):
-        for c in rings[i]:
-            ring_no[local[int(c)]] = i
-    is_cap = ring_no < 0
-    base_pos = np.array([base['V32'][copies[int(c)][0]] for c in cage_ids]).astype(np.float64)
-    st = cage['st'][cage_ids]
-    fixed = (ring_no >= 0) & (ring_no <= ic + nb)
-    V = base_pos.copy()
+    return dict(rings={i: np.asarray(r) for i, r in enumerate(cage['rings'])}, ic=int(rec['ring_index']),
+                i_last=len(cage['rings']) - 1, copies=copies, st=cage['st'], ring_k=np.asarray(cage['ring_k']),
+                native=dict(Q=cage['q_arm'], cap_v=np.asarray(cage['cap_v']), ring_s=cage['ring_s']))
+
+
+def part_cage(base, cage, rec, arms, spec, prog_low, mode='generate', fit_iters=6, log=print):
+    """M1a / M0 on the octopus: graft_tube on the octopus's side of its own arm ring (octopus_side) with the octopus
+    arm on its own ring (OctopusArm.own: the identity socket map, the native cage's stations, quads and cap)"""
+    donor = OctopusArm.own(arms[cage['order'][int(rec['chain'][3:])]], spec, prog_low, rec)
+    return graft_tube(base, octopus_side(base, cage, rec), rec, donor, mode=mode, fit_iters=fit_iters, log=log)
+
+
+def band_ramp(z, z0, z1):
+    """the BAND's donor weight w(z): 0 over the collar (z <= z0: the native's own first loop, §2.3), a C1 smoothstep to 1
+    at z1 (zero slope at both ends: its steepest slope 1.5 x its mean, so the band's length is set by 1.5 |dr| / 0.25,
+    graft_socket.collar's rule)"""
+    u = np.clip((np.asarray(z, np.float64) - z0) / max(z1 - z0, 1e-12), 0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+# (CROSS 11-10, the lead's call (e): AX-X2's skin change read as "an even, straight gradient about 10 mm wide": the band wore
+# `morph`, the only dressing with code) CROSSBREED §2.10's DESIGNED BOUNDARY on a WELD band. `fold`: a transverse skin fold at
+# z_f in [0.35, 0.6] of the band (as at a wrist or neck crease), relief 1-3 mm, the boundary on its crest; its line wanders
+# round the limb (low harmonics, a crease is never a machined ring). `margin`: the boundary along the DONOR's own cell network
+# (the octopus skin's patch cells: its masks pack's A, 'patch random'): w steps cell by cell, so the donor's skin starts as
+# whole cells; structure places the edge, noise only shapes it. `fold+margin` (the default for a soft weld across species): the
+# fold's crest line, the donor's whole cells starting along it. Metres at the creature's authored scale
+DRESSING = dict(fold_share=0.45,        # z_f's share of the band, from the collar loop to the band's end (§2.10: 0.35-0.6)
+                fold_wander=0.16,       # the crest line's wander along the axis round the limb (share of the band)
+                fold_relief=0.0013,     # the fold's height (§2.10: 1-3 mm)
+                fold_width=0.0019,      # its crest's half-width (the bulge's Gaussian sigma)
+                crease=0.35,            # the groove on the crest's distal side, where the donor's skin tucks under (share of
+                                        # the relief), its centre and width in fold widths
+                crease_at=0.95, crease_w=0.42,
+                cell_jitter=1.6,        # a cell's own offset from the crest line, in cell sizes (the dentate edge: at 0.55
+                                        # the first look read a clean ring, the teeth a cell deep, too fine at the close-up)
+                edge_px=0.8,            # the class edge's softness between whole cells (texels: a filtered step)
+                seed=11)
+
+
+def cells_from_pack(A, cov, min_size=6):
+    """the donor's CELL NETWORK from a per-cell random pack channel (the octopus skin's masks A, 'patch random': one value per
+    patch cell): each connected region of one value inside cov, labelled; the filtered SLIVERS along the cells' borders (on
+    AX-X2's band: half the labels a single texel, 10 % of the texels, their values between two cells') joined to the nearest
+    whole cell (regions of min_size texels and more). Returns (labels (-1 outside), n)"""
+    from scipy import ndimage
+    A = np.asarray(A)
+    lab = -np.ones(A.shape, np.int64)
+    n = 0
+    for v in np.unique(A[cov]):
+        l_, k_ = ndimage.label((A == v) & cov)
+        m = l_ > 0
+        lab[m] = l_[m] - 1 + n
+        n += int(k_)
+    cnt = np.bincount(lab[cov], minlength=n)
+    big = cov & (cnt[np.maximum(lab, 0)] >= min_size)
+    if big.any() and (cov & ~big).any():
+        _, (iy, ix) = ndimage.distance_transform_edt(~big, return_indices=True)
+        sl = cov & ~big
+        lab[sl] = lab[iy[sl], ix[sl]]
+    u_, inv = np.unique(lab[cov], return_inverse=True)        # (the kept cells numbered 0 .. n - 1)
+    lab[cov] = inv
+    return lab, int(len(u_))
+
+
+def band_dressing(kind, z, theta, z0, L_band, cells=None, opts=None):
+    """CROSSBREED §2.10's dressing on a WELD band (block comment above), per sample (texels or vertices): z its station along
+    the ring's axis, theta its angle round it, z0 / L_band the collar loop's station and the band's end, cells the donor's cell
+    labels there (cells_from_pack; -1: none). kind 'morph' (band_ramp, as before), 'fold', 'margin' or 'fold+margin'. Returns
+    dict(w (the donor's class weight: the material's mix and the graft pack's R), h (the fold's relief, m: the high's / the
+    normal map's), crease (0..1: the groove's depth share, for the AO and the albedo), mask (the dressing mask: the graft pack's
+    G), z_f (the crest line's station at each sample))"""
+    from .graft_socket import cuff_wave
+    o = dict(DRESSING, **(opts or {}))
+    z = np.asarray(z, np.float64)
+    theta = np.asarray(theta, np.float64)
+    if kind == 'morph':
+        w = band_ramp(z, z0, L_band)
+        return dict(w=w, h=np.zeros_like(z), crease=np.zeros_like(z), mask=np.zeros_like(z), z_f=np.full_like(z, np.nan))
+    Lb = max(float(L_band) - float(z0), 1e-9)
+    z_f = z0 + Lb * (o['fold_share'] + o['fold_wander'] * cuff_wave(theta, o['seed'], n=3))
+    d = z - z_f
+    h, crease, mask = np.zeros_like(z), np.zeros_like(z), np.zeros_like(z)
+    if 'fold' in kind:
+        s_ = o['fold_width']
+        bulge = np.exp(-(d / s_) ** 2)
+        groove = np.exp(-((d - o['crease_at'] * s_) / (o['crease_w'] * s_)) ** 2)
+        h = o['fold_relief'] * (bulge - o['crease'] * groove)
+        crease = groove
+        mask = np.clip(bulge + groove, 0.0, 1.0)
+    if 'margin' in kind and cells is not None:
+        cells = np.asarray(cells, np.int64)
+        on = cells >= 0
+        w = (d > 0).astype(np.float64)
+        if on.any():
+            ids = cells[on]
+            n = int(ids.max()) + 1
+            cnt = np.bincount(ids, minlength=n).astype(np.float64)
+            zc = np.bincount(ids, z[on], minlength=n) / np.maximum(cnt, 1)
+            cz = np.bincount(ids, np.cos(theta[on]), minlength=n)
+            sz = np.bincount(ids, np.sin(theta[on]), minlength=n)
+            thc = np.arctan2(sz, cz)
+            # a cell's size along the axis: its z extent's spread (a disc's sd is r / 2)
+            zz = np.bincount(ids, z[on] ** 2, minlength=n) / np.maximum(cnt, 1)
+            size = 4.0 * np.sqrt(np.maximum(zz - zc ** 2, 0.0))
+            u_ = np.random.default_rng(o['seed']).uniform(-1.0, 1.0, n)
+            zf_c = z0 + Lb * (o['fold_share'] + o['fold_wander'] * cuff_wave(thc, o['seed'], n=3))
+            donor_c = (zc - zf_c) > o['cell_jitter'] * u_ * size
+            w[on] = donor_c[ids].astype(np.float64)
+        return dict(w=w, h=h, crease=crease, mask=np.maximum(mask, 0.0), z_f=z_f)
+    # a fold alone: the boundary on its crest, a narrow C1 step there (a few texels at the band's density)
+    w = band_ramp(d, -0.5 * o['fold_width'], 0.5 * o['fold_width'])
+    return dict(w=w, h=h, crease=crease, mask=mask, z_f=z_f)
+
+
+def graft_tube(host, side, rec, donor, mode='generate', fit_iters=6, log=print, band_only=False):
+    """THE PART'S QUAD CAGE at ANY host's ring (CROSSBREED §2.7; REROOT's general path), from the apron to the tip cap:
+      the APRON   the host's loops before the ring (baked and painted for context, never shipped)
+      THE RING    frozen bits
+      the BAND    the native continued past the ring MORPHED into the donor: the native loop at z (its own frozen
+                  bits) and the donor's surface at the same z and angle (the donor's field, projected along the ring
+                  plane's radii), mixed by band_ramp: w = 0 over the collar (the native's first loop, FIXED), 1 at
+                  L_band = h + 1.5 |dr|max / 0.25 (|dr| the radius step from the ring's section to the donor's at the
+                  ring); the vertex angles morph from the native's to the donor's own (each part vertex k at the
+                  standard angle 2 pi k / K: octopus_arm_rings' shift), so the donor's rings past the band continue
+                  them. The IDENTITY donor (donor.native: M1a) has w = 0 over the whole band: the band is the native's
+                  loops, L_band / h of them, all fixed
+      the DONOR   its rings past the band at its own stations (the identity donor: the native cage's ring_s, ring for
+                  ring), then its tip cap (loft.cap over the last ring's proxies, dome 0.8 mm x the donor's scale along
+                  its tip axis), fitted by retopo.fit to the donor's field in the socket frame from SUPPORT rings behind
+                  the first one (the donor's own proxies, the farthest fixed; dropped after the fit)
+    The quads: the native's own on the identity (the gates compare quad for quad), else ring to ring in the host's
+    winding, the cap's grid. host: load_base / load_host's arrays; side: octopus_side / host_ring_record's (rings by
+    ring number, copies, the native's topology on the octopus); donor: OctopusArm. Returns the part's dict (V, Q,
+    cage_ids (host ids; -1 for designed or donor vertices), ring_no, is_cap, st, fixed, i0, ic, nb, i_last, base_pos
+    (the host's position where the vertex is a host id, else nan), mode, fit, copies, rings (each ring's part
+    vertices, k order), z (each ring's station along Z), w (each ring's donor weight), L_band)"""
+    from . import loft, retopo
+    from .mesh import QuadMesh
+    rings = side['rings']
+    ic, apron = int(rec['ring_index']), int(rec['apron_rings'])
+    i0 = ic - apron
+    copies = side['copies']
+    K = int(rec['K'])
+    O_ = np.asarray(rec['frame']['creature']['origin'], np.float64)
+    R_ = np.asarray(rec['frame']['creature']['R'], np.float64)
+    pos_of = lambda ids: np.array([host['V32'][copies[int(c)][0]] for c in ids]).astype(np.float64)   # noqa: E731
     fit_stats = None
-    if mode == 'generate':
-        donor = arms[cage['order'][int(rec['chain'][3:])]]
-        R, t = socket_map(rec, donor, rec['st_s'])
-        assert np.abs(R - np.eye(3)).max() < 1e-12 and np.abs(t).max() < 1e-12, \
-            'M1a grafts the arm onto its own ring: the socket map must be the identity'
-        gen = [i for i in range(ic + nb + 1, i_last + 1)]
-        # the generator runs from SUPPORT rings behind its root (the donor's own proxies, the farthest one fixed), so
-        # retopo.fit's relaxation, which reaches one ring per round, meets the donor's first kept ring in its native
-        # context: fixed at the band's final bits instead, the ring beside it took a different relaxation target
-        # (153 um off the native on the CPU dry run); the support rings are dropped after the fit
-        n_sup = fit_iters + 1
-        sup = list(range(gen[0] - n_sup, gen[0]))
-        allr = sup + gen
-        stations = [float(cage['ring_s'][i]) for i in allr]
-        P = octopus_arm_rings(donor, spec, stations, R, t)
-        ids = np.concatenate([np.asarray(rings[i]) for i in allr] + [np.asarray(cage['cap_v'])])
-        lf = {int(c): k for k, c in enumerate(ids)}
-        Vf = np.zeros((len(ids), 3))
-        for i, ring in zip(allr, P):
-            for k, c in enumerate(rings[i]):
-                Vf[lf[int(c)]] = ring[k]
-        Qf = np.array([[lf[int(v)] for v in q] for q in cage['q_arm'] if all(int(v) in lf for v in q)])
-        # the tip cap over the last ring's PROXIES (build_cage caps before the fit), its axis the tip's tangent
-        nr = len(ids) - len(cage['cap_v'])
-        tmp = QuadMesh(Vf[:nr].copy(), Qf[:0], {})
-        last = np.array([lf[int(c)] for c in rings[i_last]])
-        _, _, _, ta = arm_frame_at(donor, 0.999)
-        capped, grid = loft.cap(tmp, last, R @ ta, dome=0.0008)
-        new = capped.V[nr:]
-        assert len(new) == len(cage['cap_v']), (len(new), len(cage['cap_v']))
-        Vf[nr:] = new                            # (creation order = the cage's cap ids' order: sorted ascending)
-        fx = np.zeros(len(ids), bool)
-        fx[[lf[int(c)] for c in rings[sup[0]]]] = True
-        mesh = QuadMesh(Vf, Qf, {})
-        sdf = FramedSDF(prog_low, R, t)
-        stat, acc = retopo.fit(mesh, sdf, iters=fit_iters, relax=0.5, fixed=fx)
-        for c in np.concatenate([np.asarray(rings[i]) for i in gen] + [np.asarray(cage['cap_v'])]):
-            V[local[int(c)]] = mesh.V[lf[int(c)]]
-        fit_stats = dict(status=stat.tolist(), accepted=[round(a, 4) for a in acc], support=[sup[0], sup[-1]])
-        d = np.linalg.norm(V - base_pos, axis=1)
-        gm = ~fixed
-        log(f'[graft] generated {len(gen)} rings + the cap by the octopus arm generator (identity socket map; support '
-            f'rings {sup[0]}..{sup[-1]}), fitted: {fit_stats}; against the native low: max {d[gm].max() * 1e6:.2f} um, '
-            f'p99 {np.percentile(d[gm], 99) * 1e6:.2f} um, median {np.median(d[gm]) * 1e6:.3f} um')
+    if donor.native:
+        # ---------------------------------------------------------- the identity: the native's rings, quads and cap
+        nat = side['native']
+        nb = int(round(band_length(rec) / rec['h']))
+        i_last = int(side['i_last'])
+        cage_ids = np.concatenate([np.asarray(rings[i]) for i in range(i0, i_last + 1)] + [np.asarray(nat['cap_v'])])
+        local = {int(c): k for k, c in enumerate(cage_ids)}
+        Q = np.array([[local[int(v)] for v in q] for q in nat['Q'] if all(int(v) in local for v in q)])
+        ring_no = np.full(len(cage_ids), -1)
+        for i in range(i0, i_last + 1):
+            for c in rings[i]:
+                ring_no[local[int(c)]] = i
+        is_cap = ring_no < 0
+        base_pos = np.array([host['V32'][copies[int(c)][0]] for c in cage_ids]).astype(np.float64)
+        st = side['st'][cage_ids]
+        fixed = (ring_no >= 0) & (ring_no <= ic + nb)
+        V = base_pos.copy()
+        if mode == 'generate':
+            gen = [i for i in range(ic + nb + 1, i_last + 1)]
+            # the generator runs from SUPPORT rings behind its root (the donor's own proxies, the farthest one fixed),
+            # so retopo.fit's relaxation, which reaches one ring per round, meets the donor's first kept ring in its
+            # native context: fixed at the band's final bits instead, the ring beside it took a different relaxation
+            # target (153 um off the native on the CPU dry run); the support rings are dropped after the fit
+            n_sup = fit_iters + 1
+            sup = list(range(gen[0] - n_sup, gen[0]))
+            allr = sup + gen
+            stations = [float(nat['ring_s'][i]) for i in allr]
+            P = donor.rings(stations)
+            ids = np.concatenate([np.asarray(rings[i]) for i in allr] + [np.asarray(nat['cap_v'])])
+            lf = {int(c): k for k, c in enumerate(ids)}
+            Vf = np.zeros((len(ids), 3))
+            for i, ring in zip(allr, P):
+                for k, c in enumerate(rings[i]):
+                    Vf[lf[int(c)]] = ring[k]
+            Qf = np.array([[lf[int(v)] for v in q] for q in nat['Q'] if all(int(v) in lf for v in q)])
+            # the tip cap over the last ring's PROXIES (build_cage caps before the fit), its axis the tip's tangent
+            nr = len(ids) - len(nat['cap_v'])
+            tmp = QuadMesh(Vf[:nr].copy(), Qf[:0], {})
+            last = np.array([lf[int(c)] for c in rings[i_last]])
+            capped, grid = loft.cap(tmp, last, donor.tip_axis(), dome=0.0008 * donor.scale)
+            new = capped.V[nr:]
+            assert len(new) == len(nat['cap_v']), (len(new), len(nat['cap_v']))
+            Vf[nr:] = new                        # (creation order = the cage's cap ids' order: sorted ascending)
+            fx = np.zeros(len(ids), bool)
+            fx[[lf[int(c)] for c in rings[sup[0]]]] = True
+            mesh = QuadMesh(Vf, Qf, {})
+            stat, acc = retopo.fit(mesh, donor.field(), iters=fit_iters, relax=0.5, fixed=fx)
+            for c in np.concatenate([np.asarray(rings[i]) for i in gen] + [np.asarray(nat['cap_v'])]):
+                V[local[int(c)]] = mesh.V[lf[int(c)]]
+            fit_stats = dict(status=stat.tolist(), accepted=[round(a, 4) for a in acc], support=[sup[0], sup[-1]])
+            d = np.linalg.norm(V - base_pos, axis=1)
+            gm = ~fixed
+            log(f'[graft] generated {len(gen)} rings + the cap by the octopus arm generator (identity socket map; '
+                f'support rings {sup[0]}..{sup[-1]}), fitted: {fit_stats}; against the native low: max '
+                f'{d[gm].max() * 1e6:.2f} um, p99 {np.percentile(d[gm], 99) * 1e6:.2f} um, median '
+                f'{np.median(d[gm]) * 1e6:.3f} um')
+        ring_list = [np.nonzero(ring_no == i)[0] for i in range(i0, i_last + 1)]     # (cage_ids holds each ring in k order)
+        z_r = np.array([float((pos_of(rings[i]).mean(0) - O_) @ R_[:, 2]) for i in range(i0, i_last + 1)])
+        return dict(V=V, Q=Q, cage_ids=cage_ids, ring_no=ring_no, is_cap=is_cap, st=st, fixed=fixed, i0=i0, ic=ic,
+                    nb=nb, i_last=i_last, base_pos=base_pos, mode=mode, fit=fit_stats, copies=copies, rings=ring_list,
+                    z=z_r, w=np.zeros(len(z_r)), L_band=float(band_length(rec)), K=K)
+    # -------------------------------------------------------------- a re-rooted donor on a host's ring
+    assert mode == 'generate', 'a re-rooted donor is generated (the copy graft is the identity\'s noise floor)'
+    X, Y, Z = R_[:, 0], R_[:, 1], R_[:, 2]
+    th_std = TAU * np.arange(K) / K
+    n_nat = max(i for i in rings) - ic                           # the native loops past the ring the side carries
+    nat_pos = {i: pos_of(rings[i]) for i in range(i0, ic + n_nat + 1)}
+    z_nat = {i: float((nat_pos[i].mean(0) - O_) @ Z) for i in nat_pos}
+    # |dr|max: the ring's own radii against the donor's section at the ring, at the ring vertices' own angles
+    loc0 = (nat_pos[ic] - O_) @ R_
+    th0 = np.arctan2(loc0[:, 1], loc0[:, 0])
+    r_nat0 = np.hypot(loc0[:, 0], loc0[:, 1])
+    r_don0 = donor.section_radius(np.full(K, float(donor.s_at(0.0))), th0)
+    dr = float(np.abs(r_nat0 - r_don0).max())
+    z_collar = z_nat[ic + 1]
+    L_band = max(band_length(rec, 0.0), z_collar + 1.5 * dr / 0.25)
+    band_i = [i for i in range(ic + 1, ic + n_nat + 1) if z_nat[i] <= L_band + 0.5 * rec['h']]
+    assert len(band_i) >= 2 and band_i == list(range(ic + 1, band_i[-1] + 1)), \
+        f'the native continues only {n_nat} loops past the ring: the band needs to z {L_band * 1e3:.1f} mm'
+    L_band = max(L_band, z_nat[band_i[-1]])                  # the band ends on a native loop's station: w = 1 there
+    # the donor's surface at a station and angles: along each angle's radius in the ring plane of its centreline point
+    P_c, n_c, b_c, t_c = donor.arm
+    sa = np.linspace(0.0, 1.0, len(P_c))
+    fld = donor.field()
+
+    def donor_at(s, theta, guess_r):
+        c = np.array([np.interp(s, sa, P_c[:, k]) for k in range(3)])
+        tz = np.array([np.interp(s, sa, t_c[:, k]) for k in range(3)])
+        tz /= np.linalg.norm(tz)
+        # the part's frame at the centreline point: the ring frame carried by the minimal rotation Z -> tz
+        ax = np.cross(Z, tz)
+        sn, cs = float(np.linalg.norm(ax)), float(Z @ tz)
+        if sn > 1e-12:
+            ax /= sn
+            Kx = np.array([[0.0, -ax[2], ax[1]], [ax[2], 0.0, -ax[0]], [-ax[1], ax[0], 0.0]])
+            Rm = np.eye(3) + sn * Kx + (1.0 - cs) * (Kx @ Kx)
+        else:
+            Rm = np.eye(3)
+        Xs, Ys = Rm @ X, Rm @ Y
+        d = np.cos(theta)[:, None] * Xs[None] + np.sin(theta)[:, None] * Ys[None]
+        p0 = c[None] + guess_r[:, None] * d
+        q, st_ = fld.project(p0, d, maxd=0.05)
+        return np.asarray(q, np.float64), st_, c
+
+    # the band's designed rings: the native loop at its station morphed into the donor there
+    s_of = lambda z: float(donor.s_at(z))                                                       # noqa: E731
+    band_V, band_w, band_z = [], [], []
+    for i in band_i:
+        z = z_nat[i]
+        w = float(band_ramp(z, z_collar, L_band))
+        Pn = nat_pos[i]
+        if w <= 0.0:
+            band_V.append(Pn)
+        else:
+            cn = Pn.mean(0)
+            loc = (Pn - cn) @ R_
+            th_n = np.arctan2(loc[:, 1], loc[:, 0])
+            dth = (th_std - th_n + math.pi) % TAU - math.pi
+            th_m = th_n + w * dth
+            Pd, st_, _ = donor_at(s_of(z), th_m, donor.section_radius(np.full(K, s_of(z)), th_m) * 1.05)
+            assert (np.asarray(st_) == 0).all(), f'the donor\'s surface missed at band station z {z * 1e3:.1f} mm'
+            band_V.append((1.0 - w) * Pn + w * Pd)
+        band_w.append(w)
+        band_z.append(z)
+    # the donor's rings past the band at its own ring step (the octopus cage's share step at the part's length)
+    ds = ARM_RING_DS
+    s_band = s_of(L_band)
+    if band_only:
+        # (the band alone: a machine part grips its end ring, the C5 flange on the octopus's own section; no donor
+        # rings, no cap, the tube open there as C5b's cut arm is under its flange)
+        st_gen = []
+    else:
+        st_gen = list(np.arange(s_band + ds, 0.9973 + 0.5 * ds, ds))
+        st_gen[-1] = min(st_gen[-1], 0.9973)
+    n_sup = fit_iters + 1
+    st_sup = [s_band + ds * (k - n_sup + 1) for k in range(n_sup)]          # behind the first generated ring, the
+    allst = st_sup + st_gen                                                 # band's last station among them
+    if band_only:
+        allst = st_sup[-2:]                                  # (a token donor tube, never kept: the cap code needs a ring)
+    Pr = donor.rings(allst)
+    Vf = Pr.reshape(-1, 3)
+    nr = len(Vf)
+    ring_ids_f = np.arange(nr).reshape(len(allst), K)
+    Qf = []
+    for a_, b_ in zip(ring_ids_f[:-1], ring_ids_f[1:]):
+        for m in range(K):
+            Qf.append((a_[m], a_[(m + 1) % K], b_[(m + 1) % K], b_[m]))
+    Qf = np.array(Qf, np.int64)
+    # outward winding (the quads' normals against the radial)
+    c_ = Vf[Qf].mean(1)
+    radv = c_ - (Pr.mean(1)[np.repeat(np.arange(len(allst) - 1), K)])
+    fn = np.cross(Vf[Qf[:, 2]] - Vf[Qf[:, 0]], Vf[Qf[:, 3]] - Vf[Qf[:, 1]])
+    if float(np.einsum('ij,ij->i', fn, radv).sum()) < 0:
+        Qf = Qf[:, ::-1].copy()
+    tmp = QuadMesh(Vf.copy(), Qf, {})
+    capped, grid = loft.cap(tmp, ring_ids_f[-1], donor.tip_axis(), dome=0.0008 * donor.scale)
+    Vf = np.asarray(capped.V, np.float64)
+    Qf = np.asarray(capped.Q, np.int64)
+    fx = np.zeros(len(Vf), bool)
+    fx[ring_ids_f[0]] = True
+    mesh = QuadMesh(Vf, Qf, {})
+    if band_only:
+        Vg = np.zeros((0, 3))
+        gen_rings = np.zeros((0, K), np.int64)
+        cap_v = np.zeros(0, np.int64)
+        fit_stats = dict(band_only=True)
+    else:
+        stat, acc = retopo.fit(mesh, fld, iters=fit_iters, relax=0.5, fixed=fx)
+        fit_stats = dict(status=np.asarray(stat).tolist(), accepted=[round(a, 4) for a in acc], support=n_sup)
+        Vg = np.asarray(mesh.V, np.float64)
+        gen_rings = ring_ids_f[n_sup:]
+        cap_v = np.arange(nr, len(Vg))
+    # ------------------------------------------------------------- the part: host rings, band, donor rings, cap
+    fixed_i = list(range(i0, ic + 2))                       # the apron, the ring, the collar loop (w = 0, the native's)
+    blocks, ring_no_l, cids, fixed_l = [], [], [], []
+    for i in fixed_i:
+        blocks.append(nat_pos[i])
+        ring_no_l.append(np.full(K, i))
+        cids.append(np.asarray(rings[i]))
+        fixed_l.append(np.ones(K, bool))
+    nids = list(cids)
+    for j, i in enumerate(band_i[1:]):
+        blocks.append(band_V[j + 1])
+        ring_no_l.append(np.full(K, i))
+        cids.append(np.full(K, -1))
+        nids.append(np.asarray(rings[i]))                    # the native vertex each band vertex was morphed from
+        fixed_l.append(np.zeros(K, bool))
+    n0 = band_i[-1]
+    for j, g in enumerate(gen_rings):
+        blocks.append(Vg[g])
+        ring_no_l.append(np.full(K, n0 + 1 + j))
+        cids.append(np.full(K, -1))
+        nids.append(np.full(K, -1))
+        fixed_l.append(np.zeros(K, bool))
+    nring = len(blocks)
+    V = np.concatenate(blocks + [Vg[cap_v]])
+    ring_no = np.concatenate(ring_no_l + [np.full(len(cap_v), -1)])
+    cage_ids = np.concatenate(cids + [np.full(len(cap_v), -1)])
+    nat_ids = np.concatenate(nids + [np.full(len(cap_v), -1)])
+    fixed = np.concatenate(fixed_l + [np.zeros(len(cap_v), bool)])
+    is_cap = ring_no < 0
+    i_last = n0 + len(gen_rings)
+    Q = []
+    for j in range(nring - 1):
+        a_, b_ = j * K, (j + 1) * K
+        for m in range(K):
+            Q.append((a_ + m, a_ + (m + 1) % K, b_ + (m + 1) % K, b_ + m))
+    Q = np.array(Q, np.int64)
+    c_ = V[Q].mean(1)
+    cent = np.repeat(V[:nring * K].reshape(nring, K, 3).mean(1)[:-1], K, axis=0)
+    fn = np.cross(V[Q[:, 2]] - V[Q[:, 0]], V[Q[:, 3]] - V[Q[:, 1]])
+    if float(np.einsum('ij,ij->i', fn, c_ - cent).sum()) < 0:
+        Q = Q[:, ::-1].copy()
+    # the cap's quads, remapped from the donor mesh's numbering (its last ring = the part's last ring)
+    if len(cap_v):
+        remap = -np.ones(len(Vg), np.int64)
+        remap[gen_rings[-1]] = np.arange((nring - 1) * K, nring * K)
+        remap[cap_v] = np.arange(nring * K, nring * K + len(cap_v))
+        cap_q = [q for q in Qf.tolist() if all(remap[v] >= 0 for v in q) and any(v in set(cap_v.tolist()) for v in q)]
+        Qc = remap[np.array(cap_q, np.int64)]
+        # the cap's winding agrees with the tube's at their shared edges (the donor mesh's own winding was outward)
+        Q = np.vstack([Q, Qc])
+    base_pos = np.full((len(V), 3), np.nan)
+    has = cage_ids >= 0
+    base_pos[has] = V[has]
+    z_r = np.array([float((V[j * K:(j + 1) * K].mean(0) - O_) @ Z) for j in range(nring)])
+    w_r = np.concatenate([np.zeros(len(fixed_i)), np.array(band_w[1:]), np.ones(len(gen_rings))])
+    # each vertex's anatomical coordinate: (s along the donor arm, cos theta, sin theta, 0): the band's s by its z
+    loc = (V - O_) @ R_
+    s_v = np.concatenate([np.repeat([s_of(max(z, 0.0)) for z in z_r], K), np.full(len(cap_v), 1.0)])
+    th_v = np.arctan2(loc[:, 1], loc[:, 0])
+    st = np.column_stack([s_v, np.cos(th_v), np.sin(th_v), np.zeros(len(V))])
+    ring_list = [np.arange(j * K, (j + 1) * K) for j in range(nring)]
+    nb = len(band_i)
+    log(f'[graft reroot] the part: {len(fixed_i)} host loops fixed (apron {apron}, the ring, the collar loop at z '
+        f'{z_collar * 1e3:.1f} mm), the band to z {L_band * 1e3:.1f} mm (|dr|max {dr * 1e3:.2f} mm: {nb - 1} designed '
+        f'rings, w {np.round(band_w[1:], 3).tolist()}), {len(gen_rings)} donor rings'
+        + (f' (share {st_gen[0]:.4f} .. {st_gen[-1]:.4f}) + the cap ({len(cap_v)} vertices)' if len(gen_rings) else
+           ' (the band alone)') + f'; fit {fit_stats}')
     return dict(V=V, Q=Q, cage_ids=cage_ids, ring_no=ring_no, is_cap=is_cap, st=st, fixed=fixed, i0=i0, ic=ic, nb=nb,
-                i_last=i_last, base_pos=base_pos, mode=mode, fit=fit_stats, copies=copies)
+                i_last=i_last, base_pos=base_pos, mode=mode, fit=fit_stats, copies=copies, rings=ring_list, z=z_r,
+                w=w_r, L_band=float(L_band), K=K, dr=dr, z_collar=z_collar, nat_ids=nat_ids)
 
 
-def part_weights(base, part, rec, arms, cage, spec, mode='generate', smooth_iters=4):
+def part_weights(base, part, rec, arms, cage, spec, mode='generate', smooth_iters=4, donor=None, cols=None):
     """weights on the chain's 24 joints (columns 0..23: arm<j>_00..arm<j>_cut are the base's, past the cut the graft's
     own joints at the donor's bind; M1a: the native positions). 'copy': the base's per vertex. 'generate': the apron,
     ring and band FROZEN (the base's bits: §2.6's Dirichlet boundary), the rest octopus_rig.weights' arm-tube rule
     (its share on the arm's centreline, rig.hat_weights over the joints' shares), smoothed over the part's cage with
-    the frozen vertices pinned (rig.smooth_field), cut to 4 influences (rig.limit_influences). Returns (n, 24)"""
+    the frozen vertices pinned (rig.smooth_field), cut to 4 influences (rig.limit_influences). Returns (n, 24).
+    (REROOT) On a host's ring: donor the re-rooted OctopusArm (its centreline: the shares the hat ramp reads; its joint
+    shares the octopus's own, octopus_rig.arm_joint_s) and cols the 24 columns' joint NAMES (graft_joint_names: 7 the
+    root's parent, 8 the root, 9.. the graft's own); the frozen vertices' host joints off those columns get columns of
+    their own after the 24. Returns (W (n, 24 + extra), the column names)"""
     from . import rig as RG
     from .species import octopus_rig as OR
     names = base['jnames']
     jn = rec['chain']
-    col = {names.index(f'{jn}_{k:02d}'): k for k in range(OR.N_ARM_JOINTS)}
     n = len(part['V'])
-    Wb = np.zeros((n, OR.N_ARM_JOINTS))
+    if cols is None:
+        col = {names.index(f'{jn}_{k:02d}'): k for k in range(OR.N_ARM_JOINTS)}
+        ncol = OR.N_ARM_JOINTS
+    else:
+        cn = list(cols)
+        for i, c in enumerate(part['cage_ids']):
+            if c >= 0 and part['fixed'][i]:
+                v = part['copies'][int(c)][0]
+                for q in range(4):
+                    nm = names[int(base['J'][v, q])]
+                    if base['W32'][v, q] > 0.0 and nm not in cn:
+                        cn.append(nm)
+        col = {names.index(nm): k for k, nm in enumerate(cn) if nm in names}
+        ncol = len(cn)
+    Wb = np.zeros((n, ncol))
     for i, c in enumerate(part['cage_ids']):
+        if c < 0:
+            continue                                             # (a designed or donor vertex: no host bits)
         v = part['copies'][int(c)][0]
         for q in range(4):
             w = float(base['W32'][v, q])
@@ -416,8 +1210,17 @@ def part_weights(base, part, rec, arms, cage, spec, mode='generate', smooth_iter
                 Wb[i, col[int(base['J'][v, q])]] += w           # (a weight off the chain would raise: none here)
     if mode == 'copy':
         return Wb
+    if cols is not None:
+        # (REROOT) the collar loop past the ring is the native's own (w = 0) but its host weights may name the native
+        # group's joints, which the graft drops: their weight moves to the ROOT (graft_socket.collar_weights' rule)
+        nat_j = [cn.index(nm) for nm in rec['native']['joints'] if nm in cn]
+        past = part['fixed'] & (part['ring_no'] > part['ic'])
+        if nat_j:
+            k_root = cn.index(rec['root'])
+            Wb[past, k_root] += Wb[np.ix_(past, nat_j)].sum(1)
+            Wb[np.ix_(past, nat_j)] = 0.0
     js = OR.arm_joint_s(spec)
-    Pa = arms[cage['order'][int(jn[3:])]][0]
+    Pa = (arms[cage['order'][int(jn[3:])]] if donor is None else donor.arm)[0]
     seg = Pa[1:] - Pa[:-1]
     V = part['V']
     q = V[:, None, :] - Pa[None, :-1, :]
@@ -426,18 +1229,54 @@ def part_weights(base, part, rec, arms, cage, spec, mode='generate', smooth_iter
     ib = dist.argmin(1)
     s_on = (ib + tseg[np.arange(n), ib]) / (len(Pa) - 1)
     a, b, t = RG.hat_weights(s_on, js)
-    W = np.zeros((n, OR.N_ARM_JOINTS))
+    W = np.zeros((n, ncol))
     np.add.at(W, (np.arange(n), a), 1.0 - t)
     np.add.at(W, (np.arange(n), b), t)
     W /= np.maximum(W.sum(1, keepdims=True), 1e-12)
     fr = part['fixed']
+    if cols is not None:
+        # (REROOT) the ring side of the donor's own joints: a share before its joint 7 never occurs past the ring (s0
+        # is the cut-8 ring's share, between joints 7 and 8): every free vertex's weight lands on columns 7 .. 23 (the
+        # apron, behind the ring, is frozen: its host weights replace its ramp below)
+        assert not W[~fr, :7].any(), 'a free part vertex before the donor\'s joint 7'
     W[fr] = Wb[fr]
     W = RG.smooth_field(W, part['Q'], iters=smooth_iters, alpha=0.5, pinned=np.nonzero(fr)[0])
     J4, W4 = RG.limit_influences(W, 4)
     Wd = np.zeros_like(W)
     np.put_along_axis(Wd, J4.astype(np.int64), W4.astype(np.float64), axis=1)
     Wd[fr] = Wb[fr]                                       # the frozen bits exactly (the cut renormalises)
-    return Wd
+    return Wd if cols is None else (Wd, cn)
+
+
+def graft_joint_names(host, rec, stem=None, n=24, cut=8):
+    """(REROOT) the 24 donor columns' joint names on a host's ring: k < 8 the root's parent (the host's joint before
+    the ring: only column 7 is ever reached), 8 the ROOT (the host's kept joint just past the ring, decision 2), k > 8
+    the graft's own joints <stem>_g<kk> (§4.2's names; stem the host chain's name)"""
+    rig = host['rig']
+    root = rec['root']
+    par = rig.names[int(rig.parent[rig.index[root]])]
+    stem = stem or rec['chain']
+    return [par if k < cut else (root if k == cut else f'{stem}_g{k:02d}') for k in range(n)]
+
+
+def graft_joints(host, rec, donor, names, cut=8):
+    """(REROOT) the graft's own joints on a host's ring: k > cut at the donor's joint shares (octopus_rig.arm_joint_s)
+    on its centreline, each frame as octopus_rig.build lays an arm joint (x along the arm, y its aboral normal, z = x
+    cross y). Returns [dict(name, parent, world)] parent-first"""
+    from . import rig as RG
+    from .species import octopus_rig as OR
+    js = OR.arm_joint_s(donor.spec)
+    Pa, na, ba, ta = donor.arm
+    sa = np.linspace(0.0, 1.0, len(Pa))
+    ip = lambda X, s: np.array([np.interp(s, sa, X[:, k]) for k in range(3)])            # noqa: E731
+    out = []
+    for k in range(cut + 1, len(names)):
+        x = ip(ta, js[k])
+        W = np.eye(4)
+        W[:3, :3] = RG.frame_from(x, ip(na, js[k]))
+        W[:3, 3] = ip(Pa, js[k])
+        out.append(dict(name=names[k], parent=names[k - 1], world=W, share=float(js[k])))
+    return out
 
 
 def part_normals(base, part, rec, mode='generate'):
@@ -445,7 +1284,8 @@ def part_normals(base, part, rec, mode='generate'):
     base's frozen bits (the ring by §2.5; the apron and band are the base's own loops, whose welded normals the base
     computed with their whole neighbourhood); 'copy': every vertex the base's"""
     from .mesh import QuadMesh
-    Nb = np.array([base['N32'][part['copies'][int(c)][0]] for c in part['cage_ids']]).astype(np.float64)
+    Nb = np.array([base['N32'][part['copies'][int(c)][0]] if c >= 0 else (np.nan, np.nan, np.nan)
+                   for c in part['cage_ids']]).astype(np.float64)
     if mode == 'copy':
         return Nb
     N = QuadMesh(part['V'], part['Q']).vertex_normals()
@@ -455,31 +1295,55 @@ def part_normals(base, part, rec, mode='generate'):
 
 
 # ============================================================================================ islands and atlas
-def part_islands(part, cage, seam_k=12):
+def part_islands(part, cage, seam_k=12, cut_rings=None):
     """the part's seams: the arm's oral midline (vertex seam_k of every ring), and loops at the native's own island
     cuts past the ring (octopus_uv: rings int(0.30 n), int(0.62 n), the tip's ring) so the donor keeps its native
-    island shapes; the apron, ring and band share the STRIP island with the donor's first length"""
-    rings = cage['rings']
-    loc = {int(c): k for k, c in enumerate(part['cage_ids'])}
+    island shapes; the apron, ring and band share the STRIP island with the donor's first length.
+    (REROOT) part['rings'] (each ring's part vertices in k order, graft_tube's) carries the rings, so a part on any host
+    reads them there; cut_rings: the island cuts by ring number on a host's ring (donor_island_cuts), None: the
+    octopus cage's (i30, i62, the tip)"""
+    rings = part['rings']
+    i0 = part['i0']
     S = []
     for i in range(part['i0'], part['i_last']):
-        S.append((loc[int(rings[i][seam_k])], loc[int(rings[i + 1][seam_k])]))
-    cuts = [int(cage['i30']), int(cage['i62']), part['i_last']]
+        S.append((int(rings[i - i0][seam_k]), int(rings[i + 1 - i0][seam_k])))
+    cuts = [int(cage['i30']), int(cage['i62']), part['i_last']] if cut_rings is None else list(cut_rings)
     for i in cuts:
         if part['i0'] < i <= part['i_last']:
-            r = [loc[int(c)] for c in rings[i]]
+            r = [int(c) for c in rings[i - i0]]
             S += [(r[m], r[(m + 1) % len(r)]) for m in range(len(r))]
     return S, [i for i in cuts if part['i0'] < i <= part['i_last']]
 
 
-def strip_base_corners(base, part, Qn, orig, strip):
+def donor_island_cuts(part, donor, shares=(0.7489, )):
+    """(REROOT) the island cuts of a re-rooted octopus arm part: the band's last ring (w = 1: the STRIP island holds the
+    ring, the collar and the morph, on the base's lattice where the native is), the octopus cage's own cut past it at
+    i62's share (0.7489: octopus_uv's int(0.62 n)), and the tip's ring. Returns ring numbers"""
+    i0 = part['i0']
+    end = int(part['i0'] + int(np.nonzero(part['w'] >= 1.0 - 1e-12)[0][0]))
+    out = [int(part['ic']), end]                     # (the ring: an island boundary on the host, as the host's own)
+    zs = part['z']
+    for s in shares:
+        z = (s - donor.s0) / (1.0 - donor.s0) * donor.length
+        j = int(np.argmin(np.abs(zs - z)))
+        if i0 + j > end:
+            out.append(i0 + j)
+    out.append(int(part['i_last']))
+    return out
+
+
+def strip_base_corners(base, part, Qn, orig, strip, partial=False):
     """THE BASE LOW'S OWN VERTEX for every split vertex of the STRIP island (its quads `strip` in Qn), corner by
     corner: each part quad is a native quad (the same cage ids), whose base-low corners (the split copy on the same side
     of the oral seam: the one sharing a base triangle with the quad's other corners) carry the base set's UVs and the
     base's shipped frames. Returns {split vertex: base low vertex}; raises where a corner has no native counterpart (a
-    donor's ring past the band: the conformal continuation is M1b's)"""
+    donor's ring past the band: the conformal continuation is M1b's).
+    (REROOT) partial: the quads with no native counterpart (a re-rooted donor's band rings, cage id -1) are skipped, so
+    only the native's own corners come back (unwrap_part's lattice strip continues the rest conformally)"""
     L = base['low']
-    cid = part['cage_ids'][orig]                     # each split vertex's native cage id
+    # each split vertex's native cage id (REROOT: nat_ids, the native vertex a band vertex was morphed from, so the band
+    # takes the native's own UVs there; the identity's are its cage ids)
+    cid = part.get('nat_ids', part['cage_ids'])[orig]
     F = L['F']
     tri_of = {}
     for t, f in enumerate(F.tolist()):
@@ -488,10 +1352,14 @@ def strip_base_corners(base, part, Qn, orig, strip):
     for q in strip:
         corners = Qn[q]
         cc = [int(cid[v]) for v in corners]
+        if partial and min(cc) < 0:
+            continue
         # the base triangles on this quad (either diagonal): their corner low ids by cage id
         cand = [t for tri in ((cc[0], cc[1], cc[2]), (cc[0], cc[2], cc[3]), (cc[0], cc[1], cc[3]), (cc[1], cc[2], cc[3]))
                 for t in tri_of.get(tuple(sorted(tri)), [])]
         if not cand:
+            if partial:
+                continue
             raise NotImplementedError(f'strip quad {q}: no native quad (a donor ring): the continuation is M1b\'s')
         ts = set(cand)
         low_of = {}
@@ -674,6 +1542,10 @@ def unwrap_part(part, seams, px_per_m, pad=8, arap_iters=8, sizes=range(256, 409
     strip_isl = None
     if lattice is not None:
         rq = (part['ring_no'][part['Q']] == lattice['ring']).any(1)
+        if lattice.get('distal'):
+            # (REROOT) a host whose ring is an island boundary of its own (the axolotl's): the strip is the island past
+            # the ring (the native's distal chart continued), the apron's an island of its own
+            rq &= (part['ring_no'][part['Q']] >= lattice['ring']).all(1)
         strip_isl = int(np.bincount(lab[rq]).argmax())
     for i in range(n_isl):
         if i == strip_isl:
@@ -734,10 +1606,34 @@ def unwrap_part(part, seams, px_per_m, pad=8, arap_iters=8, sizes=range(256, 409
     else:
         # the strip island on the base's lattice: its base UVs in the base set's texels (kernel rows, v up)
         sq = np.nonzero(lab == strip_isl)[0]
-        bcor = strip_base_corners(lattice['base'], part, Qn, orig, sq)
-        sv = np.array(sorted(bcor))
-        base_v = np.array([bcor[v] for v in sv])
-        Tb = lattice['base']['low']['UV'][base_v] * lattice['base_size']
+        if lattice.get('pin') == 'fixed':
+            # (REROOT, M1b's conformal continuation) a re-rooted donor's band: the strip's FIXED vertices (the ring and
+            # the collar loop: the native's own) pinned at the base's UVs, the morphed band rings continued by the
+            # conformal map with every pin held (graft_socket.lscm_pinned, M2's collar_uv): the native's UVs on the
+            # morphed rings stretched them past G-R5's bar (anisotropy p95 1.23 on tail_mid)
+            from .graft_socket import lscm_pinned
+            bc_all = strip_base_corners(lattice['base'], part, Qn, orig, sq, partial=True)
+            bcor = {v: b for v, b in bc_all.items() if part['fixed'][orig[v]]}
+            sv = np.unique(Qn[sq])
+            pin_l = np.array([i for i, v in enumerate(sv) if int(v) in bcor])
+            base_v = np.array([bcor.get(int(v), -1) for v in sv])
+            lk = -np.ones(len(Vn), np.int64)
+            lk[sv] = np.arange(len(sv))
+            Fl_s = lk[U._tri(Qn[sq])]
+            Tb = lscm_pinned(Vn[sv], Fl_s, pin_l,
+                             lattice['base']['low']['UV'][base_v[pin_l]] * lattice['base_size'])
+            # each strip vertex's NATIVE uv (the native vertex it was morphed from: nat_ids), for the material's
+            # native side on the band (a sample of the base's maps there)
+            uv_nat = np.full((len(sv), 2), np.nan)
+            for i, v in enumerate(sv):
+                if int(v) in bc_all:
+                    uv_nat[i] = lattice['base']['low']['UV'][bc_all[int(v)]]
+        else:
+            bcor = strip_base_corners(lattice['base'], part, Qn, orig, sq)
+            sv = np.array(sorted(bcor))
+            base_v = np.array([bcor[v] for v in sv])
+            Tb = lattice['base']['low']['UV'][base_v] * lattice['base_size']
+            uv_nat = None
         t0, t1 = Tb.min(0), Tb.max(0)
         al = int(lattice['align'])
         boxes = []
@@ -789,6 +1685,8 @@ def unwrap_part(part, seams, px_per_m, pad=8, arap_iters=8, sizes=range(256, 409
         used = float(max(sky.max(), t1[1] + off[1] + pad) / size)
         strip = dict(island=strip_isl, off=off.tolist(), base_size=int(lattice['base_size']), align=al,
                      verts=sv, quads=sq, base_uv=Tb / lattice['base_size'], base_v=base_v)
+        if uv_nat is not None:
+            strip['uv_nat'] = uv_nat                     # (REROOT: the band's native uv per strip vertex, base frame)
         log(f'[graft uv] the strip island {strip_isl} ({len(sq)} quads) on the BASE\'S LATTICE: its UVs the base set\'s '
             f'shifted by {off.astype(int).tolist()} texels (multiples of {al}: mips aligned to level {int(np.log2(al))})')
     log(f'[graft uv] {n_isl} islands packed at {px_per_m:.2f} px/m (the ring\'s) into {size}^2, height used '
@@ -1173,3 +2071,81 @@ def part_suckers(base, ns, plow, maps, joint_names, mode='generate', log=print):
     return dict(V=S['V'][v], N=S['N'][v], TAN=S['TAN'][v], UV=S['UV'][v], F=remap[S['F'][tri]],
                 J=np.array([[joint_names[int(x)] for x in row] for row in S['J'][v]]), W=S['W'][v].astype(np.float64),
                 COLOR=col.astype(np.float32))
+
+
+# ------------------------------------------------------------------ G-R13, SIZE MATCH (CROSS r1c loop 2, 11-12)
+# Skye, 11-11: "also we need to do something about stize matching" / "like when limbs and heads and stuff are remixed, they
+# should match the size of the animal". A donor part is sized to the HOST'S SLOT, never to the donor's own body: its LENGTH
+# is the host's own part past the ring (the native limb, tail or head the graft drops), its ROOT sits in the host's ring,
+# and it gets there by GENERATION on a re-proportioned chain (CROSSBREED §3: "never squashed"), so each visible segment
+# keeps the donor's own slenderness within the bar. Three numbers, each with the miss that set its bar:
+#   length  part / host's own past the ring, 0.85 .. 1.20. REROOT's first bug leg took its scale from the ring's girth alone
+#           (the tibia's root 0.88 of the ring): 222 mm on a 92 mm limb slot, 2.42 x.
+#   root    the part's girth where it leaves the host (a socket's lip, a weld's band end) / the ring's diameter, 0.50 .. 1.05.
+#           r1b's leg at the host's length kept the beetle's girth: 0.19, the check's "toothpick in a sausage".
+#   squash  per visible segment, (length / width) / the donor's own, 0.50 .. 2.00. r1c's leg filled the ring at the host's
+#           length by one factor on its length alone: femur and tibia 0.18 of the beetle's slenderness, the check's "hoof".
+SIZE_MATCH = dict(length=(0.85, 1.20), root=(0.50, 1.05), squash=(0.50, 2.00))
+
+
+def slot_measure(chain, ring_name, joint_pos, tip_pos, ring_origin, ring_r=None):
+    """THE HOST'S OWN PART PAST A RING, what a donor part at that ring is sized to. chain: the host's chain record (extras.
+    bestiary.chains: joints, s, radius, cuts); ring_name: one of its cuts' rings; joint_pos {joint name: (3,) world};
+    tip_pos (3,) the chain's tip (its socket), or None (a chain with no tip record: the last joint ends it); ring_origin (3,)
+    the ring record's origin; ring_r (m) the ring record's own mean radius when the caller has it (else the chain's radius
+    interpolated at the cut's arc share: the axolotl's axilla reads 9.19 mm that way, its ring measures 9.80). Returns
+    dict(length (m: the ring's origin, then the chain's joints from the cut's joint on, to the tip), joints [names past the
+    ring], share [each one's arc share of that length, 0 at the ring .. 1 at the tip], radius [the chain's own radius at
+    each: the host's girth along what the part replaces], ring_d (m))"""
+    cut = next(c for c in chain['cuts'] if c.get('ring') == ring_name)
+    k = int(cut['joint'])
+    names = list(chain['joints'][k:])
+    pts = [np.asarray(ring_origin, np.float64)] + [np.asarray(joint_pos[n], np.float64) for n in names]
+    if tip_pos is not None:
+        pts.append(np.asarray(tip_pos, np.float64))
+    seg = np.linalg.norm(np.diff(np.array(pts), axis=0), axis=1)
+    L = float(seg.sum())
+    arc = np.cumsum(seg)[:len(names)] / max(L, 1e-12)
+    rad = [float(r) for r in chain['radius'][k:]]
+    if ring_r is None:
+        s, r = chain['s'], chain['radius']
+        t = (float(cut['s']) - s[k - 1]) / max(s[k] - s[k - 1], 1e-12) if k > 0 else 0.0
+        ring_r = (1.0 - t) * r[max(k - 1, 0)] + t * r[k]
+    return dict(length=L, joints=names, share=[float(a) for a in arc], radius=rad, ring_d=2.0 * float(ring_r))
+
+
+def slenderness(V, a, b):
+    """a segment's length / width as the quality check measured it (remix_r1/check_quality_r1c_1/tools/p_seg_proportions.py):
+    joint to joint (a -> b) over the largest extent of its vertices V across that axis"""
+    a, b = np.asarray(a, np.float64), np.asarray(b, np.float64)
+    L = float(np.linalg.norm(b - a))
+    u = (b - a) / max(L, 1e-12)
+    p = np.asarray(V, np.float64) - a
+    perp = p - np.outer(p @ u, u)
+    e1 = np.cross(u, [0.0, 0.0, 1.0] if abs(u[2]) < 0.9 else [1.0, 0.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(u, e1)
+    W = max(float(np.ptp(perp @ (np.cos(t) * e1 + np.sin(t) * e2))) for t in np.linspace(0.0, np.pi, 36, endpoint=False))
+    return L / max(W, 1e-12)
+
+
+def size_match(L_part, L_host, d_root, d_ring, seg=None, seg_donor=None, bars=None):
+    """G-R13. L_part, L_host (m): the part from the ring to its tip, the host's own part past the ring (slot_measure);
+    d_root, d_ring (m): the part's girth where it leaves the host, the ring's diameter; seg / seg_donor {segment: length /
+    width} of the part's VISIBLE segments and of the donor's own (slenderness; both or neither). Returns dict(ok, length,
+    root, squash {segment: ratio}, fails [str])"""
+    b = dict(SIZE_MATCH, **(bars or {}))
+    out = dict(length=float(L_part / L_host), root=float(d_root / d_ring), squash={}, fails=[])
+    if not b['length'][0] <= out['length'] <= b['length'][1]:
+        out['fails'].append(f'length {out["length"]:.2f} x the host\'s own part (bar {b["length"][0]} .. {b["length"][1]})')
+    if not b['root'][0] <= out['root'] <= b['root'][1]:
+        out['fails'].append(f'root {out["root"]:.2f} of the ring\'s diameter (bar {b["root"][0]} .. {b["root"][1]})')
+    for nm in (seg or {}):
+        if seg_donor and nm in seg_donor:
+            r = float(seg[nm] / seg_donor[nm])
+            out['squash'][nm] = r
+            if not b['squash'][0] <= r <= b['squash'][1]:
+                out['fails'].append(f'{nm} {r:.2f} of the donor\'s own slenderness ({seg[nm]:.2f} against '
+                                    f'{seg_donor[nm]:.2f}; bar {b["squash"][0]} .. {b["squash"][1]})')
+    out['ok'] = not out['fails']
+    return out

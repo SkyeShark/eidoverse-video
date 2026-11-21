@@ -284,12 +284,13 @@ GROWTH_FAMILIES = {
     'verdigris': dict(
         kind='metal', albedo=(0.932, 0.623, 0.522), rough=(0.20, 0.30, 0.45), metal=1.0, trans=0.0,
         emissive=None, irid=None, micro=False, ao_p50=0.72,
-        coat=dict(albedo=(0.0561, 0.4508, 0.4233), rough=0.85, metal=0.0, cover=0.85, where='cavities'),
+        coat=dict(albedo=(0.0561, 0.4508, 0.4233), rough=0.85, metal=0.0, cover=0.85, where='whole'),
         placement=dict(size_rel=(0.02, 0.05, 0.12), proud_rel=(0.01, 0.04, 0.09), feet=(0.62, 0.33, 0.05),
                        cover=0.10),
         src='was verdigris_copper: physicallybased.info Copper srgb-linear [S] (was RTR4 (.955 .638 .538) [P]); the '
-            'verdigris coat #43B3AE gathering in cavities [D], rough .85 (was .90), layer amount .85 (was a .3-.8 '
-            'cover range) [I]'),
+            'verdigris coat #43B3AE over the whole growth, worn to the copper on its edges (growth.py layer 4, r1c; '
+            'was gathering in cavities, layer 1) [D], rough .85 (was .90), layer amount .85 (was a .3-.8 cover '
+            'range) [I]'),
     'rust': dict(
         kind='metal', albedo=(0.530, 0.513, 0.494), rough=(0.30, 0.40, 0.50), metal=1.0, trans=0.0,
         emissive=None, irid=None, micro=False, ao_p50=0.72,

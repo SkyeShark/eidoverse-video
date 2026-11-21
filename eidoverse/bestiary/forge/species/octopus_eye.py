@@ -61,9 +61,15 @@ IRIS_GAIN = wp.constant(1.06)   # the iris's albedo, whole: the fewer flecks the
 #                                 over the old 1.35 (contrasts are ratios: unchanged)
 
 
-def eye_axes(spec, side):
-    """the eye's frame: out (the optical axis), h (iris-plane world-horizontal, the pupil's long axis), u (up)"""
-    c, out, E, Re = eye_geom(spec, side)
+def eye_axes(spec, side, at=None):
+    """the eye's frame: out (the optical axis), h (iris-plane world-horizontal, the pupil's long axis), u (up).
+    (REROOT, remix-machinery-r1) at = (E, Re, out): the eye FORGED AT A HOST'S EYE DIMS (its eye socket's centre, ball
+    radius and optical axis, the host's creature frame): the same frame rule, so the pupil stays level there too"""
+    if at is None:
+        c, out, E, Re = eye_geom(spec, side)
+    else:
+        E, Re, out = np.asarray(at[0], np.float64), float(at[1]), np.asarray(at[2], np.float64)
+        out = out / np.linalg.norm(out)
     Y = np.array([0.0, 1.0, 0.0])
     h = np.cross(Y, out)
     h /= np.linalg.norm(h)
@@ -71,9 +77,10 @@ def eye_axes(spec, side):
     return E, Re, out, h, u
 
 
-def eye_mesh(spec, side, n=10):
-    """the eyeball: six n x n quad grids on a cube projected onto the sphere, the front face on the optical axis"""
-    E, Re, out, h, u = eye_axes(spec, side)
+def eye_mesh(spec, side, n=10, at=None):
+    """the eyeball: six n x n quad grids on a cube projected onto the sphere, the front face on the optical axis.
+    (REROOT) at: eye_axes' host dims (the eye forged at a host's eye socket)"""
+    E, Re, out, h, u = eye_axes(spec, side, at=at)
     R = np.column_stack([h, u, out])                 # local (x = h, y = u, z = out) -> world
     t = np.linspace(-1.0, 1.0, n + 1)
     V, Q = [], []
