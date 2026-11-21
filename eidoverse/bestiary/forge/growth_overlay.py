@@ -265,6 +265,7 @@ class Feet:
     n_ao: int             # its rays
     texel: float          # the skin's texel (m)
     seed: int
+    arcs: float           # (r1c) the breach's concentric arcs, 1 drawn (a brittle shell's star crack), 0 none (soft skin)
 
 
 @wp.func
@@ -384,7 +385,11 @@ def radial_cracks(p: wp.vec3, c0: wp.vec3, n0: wp.vec3, R0: float, pk: int, P: F
             if dth < 0.0:
                 side = -1.0
     # the CONCENTRIC arcs a brittle shell adds round an emergence (a star crack: the radials alone read as legs):
-    # one ring per piece between the radials' roots and tips, broken into arcs by a hash over its angle
+    # one ring per piece between the radials' roots and tips, broken into arcs by a hash over its angle. (r1c, the lead's
+    # call (h): drawn whatever crack_n, on soft wet skin they read as compass-drawn circles round every growth, in its AO and
+    # relief; P.arcs 0 draws none: soft skin does not crack)
+    if P.arcs < 0.5:
+        return wp.vec4(best, side, r, th)
     rr = foot + R0 * (0.45 + 0.5 * proc.u01(proc.hash3i(pk, 0, 7, P.seed + 61)))
     na = 9.0
     ai = wp.floor((th + 3.141592653589793) / 6.283185307179586 * na)
@@ -550,7 +555,7 @@ def feet_params(**kw):
     P = Feet()
     d = dict(druse_w=0.45, druse_cell=0.0009, druse_tilt=0.75, druse_dark=0.55, crack_n=9, crack_len=1.5,
              crack_w=0.00018, crack_wander=0.12, groove=0.45, lift=0.12, crack_glow=0.0, frac=(0.30, 0.19, 0.10),
-             ao_r=0.0125, n_ao=24, texel=1.0 / 9257.0, seed=5501)
+             ao_r=0.0125, n_ao=24, texel=1.0 / 9257.0, seed=5501, arcs=1.0)
     d.update(kw)
     for k, v in d.items():
         setattr(P, k, wp.vec3(*v) if k == 'frac' else (int(v) if k in ('n_ao', 'seed', 'crack_n') else float(v)))

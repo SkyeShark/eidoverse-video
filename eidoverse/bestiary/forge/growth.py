@@ -273,12 +273,14 @@ RECIPES = {
                          emis=0.0, emis_tip=0.0, layer=0, layer_amt=0.0, jit_L=0.0, jit_S=0.0, stri_amp=0.0,
                          stri_lambda=0.25, edge_L=0.0, aol_L=0.0, fuzz=0.0, smooth=1.0,
                          src='physicallybased.info Mercury srgb-linear [S]; rough .03 (a liquid surface) [I]'),
-    'verdigris': dict(      # copper going green in its cavities (DESIGN)
+    'verdigris': dict(      # copper under its patina, worn to the metal on the edges (DESIGN; r1c: was "going green in
+        # its cavities", layer 1)
         c0=(0.932, 0.623, 0.522), c1=srgb8(67, 179, 174),            # c1 = the named colour verdigris #43B3AE [I]
         rough=0.30, rough_facet=0.05, rough_cav=-0.15, rough1=0.85, metal=1.0, metal1=0.0, sss=0.0, ior=0.0,
-        trans=0.0, irid=0.0, emis=0.0, emis_tip=0.0, layer=1, layer_amt=0.85, jit_L=0.04, jit_S=0.06,
+        trans=0.0, irid=0.0, emis=0.0, emis_tip=0.0, layer=4, layer_amt=0.85, jit_L=0.04, jit_S=0.06,
         stri_amp=0.0, stri_lambda=0.25, edge_L=0.0, aol_L=0.0, fuzz=0.0, smooth=0.0,
-        src='copper physicallybased.info [S]; patina colour and roughness [I, unmeasured]'),
+        src='copper physicallybased.info [S]; patina colour and roughness [I, unmeasured]; r1c: the patina over the '
+            'whole growth (layer 4), worn to the copper on its edges, blue-green to green by the facet [I]'),
     'rust': dict(           # iron spines rusting on the exposed side
         c0=(0.530, 0.513, 0.494), c1=srgb8(124, 58, 36), rough=0.40, rough_facet=0.06, rough_cav=-0.15,
         rough1=0.90, metal=1.0, metal1=0.0, sss=0.0, ior=0.0, trans=0.0, irid=0.0, emis=0.0, emis_tip=0.0,
@@ -2128,7 +2130,8 @@ def growth_material(gs: GrowthSurf, fam: int, FT: wp.array(dtype=wp.float32), ao
     r1 = gs.rnd
     r2 = proc.u01(proc.hash3i(gs.seed, gs.facet, 2, 977))
     r3 = proc.u01(proc.hash3i(gs.seed, gs.facet, 3, 977))
-    # the layer weight (0 none, 1 cavities, 2 exposed: R11 mantis-wasp / runtime frost, 3 recesses: R11 ice-crab)
+    # the layer weight (0 none, 1 cavities, 2 exposed: R11 mantis-wasp / runtime frost, 3 recesses: R11 ice-crab, 4 a
+    # patina worn on the edges: r1c)
     mode = int(FT[o + 20] + 0.5)
     lw = float(0.0)
     if mode == 1:
@@ -2137,6 +2140,31 @@ def growth_material(gs: GrowthSurf, fam: int, FT: wp.array(dtype=wp.float32), ao
         lw = _ss(0.3, 1.0, ao) * (0.55 + 0.15 * ny) + 0.1 * conv
     elif mode == 3:
         lw = 0.75 * (1.0 - _ss(0.4, 0.95, ao)) + 0.2
+    elif mode == 4:
+        # (CROSS r1c, the lead's call (h): VERDIGRIS "is a teal-green patina over copper or bronze (greens and blue-greens,
+        # with metal showing where worn)"; mode 1 kept the patina to the cavities, so a nodule open to the sky rendered as
+        # bare copper, read silver-pink on the axolotl) 4 = THE PATINA: the coat over the whole growth, deepest in the
+        # cavities, worn through to the metal on the facet edges (the edge-wear band below, ~2 texels on the convex line)
+        # and thinned on the most exposed convexities; its colour per facet from the blue-greens to the greens (the
+        # copper acetates and the carbonates), its value uneven as a crust (a sub-facet octave and a facet draw)
+        # (Fable, 11-10 17:xx, LOOKED at the first render at 3x: the metal showed as an even pale line on EVERY facet edge, a
+        # wireframe over mint polyhedra. Real wear is uneven: rubbed through on the exposed corners and along some edges,
+        # hardly at all on others.) The worn band keeps its shape (the edge's own mask: wider toward the exposed corners,
+        # by conv) and a slow noise in the crystal's own frame says HOW FAR each stretch of edge has worn (a soft multiplier
+        # inside the mask, never a threshold on mask + noise, which speckles: reference_procedural_wear_grime_masks.md);
+        # the patina lies darker and bluer in the recesses (ao) and its crust is mottled below the facet scale
+        tl4 = gs.lp / (0.8 * wp.max(gs.R, 1.0e-6)) + wp.vec3(float(gs.seed % 977) * 1.37, 0.0, 0.0)
+        we4 = wp.max(1.75 * texel, 0.035 * gs.R) * (1.0 + 1.5 * _ss(0.45, 0.9, conv))
+        em4 = (1.0 - _ss(0.0, we4, gs.edge)) * wp.min(1.0, 0.12 * wp.max(gs.w0, 0.5 * gs.R) / we4)
+        worn = _ss(-0.10, 0.22, proc.fbm3(0.55 * tl4, 3, 2.0, 0.5, 4257))
+        em4 = em4 * (0.08 + 0.92 * worn)
+        lw = (1.0 - 0.9 * em4) * (1.0 - 0.6 * _ss(0.25, 0.75, conv) * worn) + 0.3 * (1.0 - _ss(0.35, 0.85, ao))
+        r4 = proc.u01(proc.hash3i(gs.seed, gs.facet, 4, 977))
+        r5 = proc.u01(proc.hash3i(gs.seed, gs.facet, 5, 977))
+        crust = 1.0 + 0.35 * proc.fbm3(tl4, 3, 2.0, 0.5, 4253) + 0.25 * proc.fbm3(3.1 * tl4, 2, 2.0, 0.5, 4259)
+        deep = 1.0 - _ss(0.35, 0.9, ao)                         # (the recesses between nodules: the patina thick, dark, blue)
+        c1 = wp.vec3(c1[0] * (1.0 + 0.5 * r4) * (1.0 - 0.35 * deep), c1[1] * (1.0 - 0.22 * deep),
+                     c1[2] * (1.0 - 0.55 * r4) * (1.0 - 0.10 * deep)) * ((0.8 + 0.4 * r5) * crust)
     lw = wp.clamp(lw * FT[o + 21], 0.0, 1.0)
     col = c0
     if FT[o + 31] > 0.5:

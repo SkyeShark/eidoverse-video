@@ -44,7 +44,19 @@
 //   * THE REMIX (remixAxolotl, called by remix.js apply() through api.axolotl.remix): the palette and the element's zone
 //     remaps, surface layer and glow rebuilt on the axolotl's OWN skin (remix.js's zone and surface builders, passed
 //     in: one source), over the composed pigment; the eye kept.
+//   * MOUNT (work/bestiary/remix_r1/mount/STAGED.md; CROSSBREED §4.5): THE SLOTS BY THEIR RECORDS. The tail is the tail
+//     record's joints (a grafted tail: the host's own wave, sway and idle carried on down the graft's joints), a limb slot
+//     whose record carries a GRAFT steps with its DONOR's solver (locomotion.js: slotAnatomy, the tarsus solver for a stag
+//     beetle's leg) on this gait's own plants and phases, and trails at its bind lie in the swim; the native slots, the
+//     correctives and the eyes as before (a corrective or an eye whose joint a graft dropped is skipped).
 const THREE = globalThis.THREE;
+import { frameOps, makeSolvers, slotAnatomy, slotInit, solverKey, DONOR_SOLVER, DONOR_EYE, armSeeds, armCoilMul, armCurvature,
+    drawnReach, eyeSaccade, liftClear } from './locomotion.js';
+//   * CROSS (work/bestiary/remix_r1/cross/STAGED.md; the first remixed creatures on REROOT's glbs): a donor ARTHROPOD LEG stands
+//     on the floor before its rest is read and each frame's solve starts from that stand, lies back along the body in the swim,
+//     and the rig's driven leaves follow the shoulder it poses; A TENTACLE FOR A TAIL (the octopus arm, or its C5 mech tentacle)
+//     moves by the octopus arm's own path law in TAIL MODE over the host's wave (tailTentacle below), a machine only inside its
+//     own joint limits, and lies on the floor where it reaches it.
 
 // ============================================================================================ tables
 // THE CREASE FADE: the knee_ext zone's mask is smoothstep(0, d_full, |D|) of the corrective's delta (x4 m: 140 of its
@@ -522,6 +534,8 @@ export function correctiveWeights(sk, corr) {
     const a = new THREE.Vector3(), b = new THREE.Vector3();
     for (const [nm, c] of Object.entries(corr || {})) {
         const [kind, arg] = c.measure;
+        // (MOUNT: a corrective measured on a joint a graft dropped, the hand's or the tail's, has nothing to read: skipped)
+        if ((kind === 'included' ? arg : [arg]).some((n) => !sk.idx.has(`${n}_${c.side}`))) continue;
         let ang;
         if (kind === 'included') {
             const [ja, jb, jc] = arg.map((n) => sk.i(`${n}_${c.side}`));
@@ -599,7 +613,14 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
     // the bind's and the stand's limb points: the wrist / ankle (A), the metapodial joint (M), the digits' bases (tip:
     // the IK target on their centre, ik_hand / ik_foot, which the stand keeps planted)
     const limbIdx = {}, standPts = {};
+    // MOUNT: each limb slot's chain record (kind leg_<fore|hind>, its side); a slot whose record carries a GRAFT is a DONOR slot
+    // (its donor's solver: below), every other one the salamander's own limb as before
+    const recs = sp.chains || ex.chains || [];
+    const recOf = (k) => { const [kind, sd] = k.split('_'); return recs.find((c) => c.kind === `leg_${kind}` && c.side === sd) || null; };
+    const donorSlot = new Map();
     for (const k of LIMB_ORDER) {
+        const rec = recOf(k);
+        if (rec?.graft) { donorSlot.set(k, { rec, anatomy: slotAnatomy(rec, sp) }); continue; }
         const [kind, sd] = k.split('_');
         const ids = LIMBS[kind].map((n) => sk.i(`${n}_${sd}`));
         const digits = sk.kids[ids[3]].filter((c) => /_digit\d_0_/.test(sk.names[c]));
@@ -609,18 +630,288 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
     sk.fkAll();
     for (const k of LIMB_ORDER) {
         const L = limbIdx[k];
+        if (!L) continue;
         standPts[k] = { A: sk.Pw[L.ids[2]].clone(), M: sk.Pw[L.ids[3]].clone(), tip: sk.W0p[L.tipJ].clone() };
+    }
+    // MOUNT: THE DONOR SLOTS: the donor's solver on the real bones in the root's parent's frame (locomotion.js frameOps; the
+    // salamander's root sits at that frame's origin, unturned, at the bind), its inputs and rest data from its record
+    // (slotInit: an arthropod leg's coxa / femur / tibia / tarsus by the graft's roles), read at the bind; its stand spot the
+    // foot's rest place (the solver's L.N: the stand's rotations are the native limbs')
+    const donors = [];
+    if (donorSlot.size) {
+        const rootB = bones.get('root');
+        const P0 = rootB.parent;
+        const dops = frameOps(group, P0);
+        const root0 = { p: rootB.position.clone(), q: rootB.quaternion.clone() };
+        const rootInv0 = new THREE.Matrix4().compose(root0.p, root0.q, new THREE.Vector3(1, 1, 1)).invert();
+        const solvers = makeSolvers({ ops: dops, root0, rootInv0 });
+        for (const [k, { rec, anatomy }] of donorSlot) {
+            const js = (rec.joints || []).map((n) => bones.get(n)).filter(Boolean);
+            const [kind, sd] = k.split('_');
+            // (r1c) the chain's BIND rotations, before the stand poses it: the stops are about them
+            const bind0 = new Map(js.map((b) => [b, b.quaternion.clone()]));
+            // CROSS: slotInit STANDS a grafted arthropod leg on this host's floor before it reads the slot's rest (locomotion.js
+            // tarsusStand: straight out from the shoulder, the knee folded for its reach reserve, the tarsus level, the claws' tip
+            // on the ground): D.rest is that stand, the pose each frame's solve starts from (the knee then folds on from its own
+            // side: from the straight bind the solve took the hollow side), and D.N the foot's stand spot on the floor
+            const D = slotInit(solvers, { name: rec.name, label: k, side: sd, kind, anatomy }, rec, js,
+                { bones, group, G, ops: dops, root0, rootInv0 });
+            D.rec = rec; D.slot = k; D.solve = solvers[solverKey(anatomy)];
+            D.chain = js;
+            D.rest = js.map((b) => b.quaternion.clone());
+            // CROSS: THE SWIM'S LIE of a donor limb: its stand swept back along the body as the host's own limb lies there (the
+            // swim's adpress direction of the slot's first segment, in the girdle's frame), the knee, the ankle and the foot as
+            // they stand. Its joints' local rotations, read once: the limb then rides its girdle through the wave
+            if (D.femur) {
+                const ad = SW.adpress?.[kind];
+                const d0 = ad?.[0];
+                const stops = rec.graft?.stops || null;
+                if (d0 && stops && D.tibia && D.tarsus && stops[D.tibia.name] && stops[D.tarsus.name]) {
+                    // (r1c, the lead's call (d): "in the swim, grafted legs lie back along the body like the host's own limbs
+                    // (the host's hind shank lies 25-35 deg back and 24 deg down), within the leg's own limits; no tibia
+                    // dangling under the belly") each segment of the donor leg toward the host's own adpress direction for
+                    // that segment (the swim's adpress table: the upper limb d0, the lower d1, the hand d2, in the girdle's
+                    // frame, mirrored on the right), as swimPose lays the host's limbs: the femur's own segment (to the knee)
+                    // aimed at d0, then the KNEE and the ANKLE each folded about its own hinge, inside its stops (about its
+                    // bind), to the angle that lays the next segment nearest d1 and d2 (a 1 deg scan, then 0.1 deg)
+                    const mir = sd === 'L' ? 1.0 : -1.0;
+                    const dirOf = (d) => new THREE.Vector3(d[0] * mir, d[1], d[2]).applyQuaternion(root0.q).normalize();
+                    const w0 = dirOf(d0), w1 = dirOf(ad[1] || d0), w2 = dirOf(ad[2] || ad[1] || d0);
+                    dops.aim(D.femur, dops.inP(D.femur), dops.inP(D.tibia), w0);
+                    const qAim = dops.qInP(D.femur);
+                    const tipJ = js[js.length - 1];
+                    const fold = (b, child, want, range) => {
+                        const q0 = bind0.get(b);
+                        const errAt = (a) => {
+                            b.quaternion.copy(q0).multiply(new THREE.Quaternion().setFromAxisAngle(Z_AX, a));
+                            b.updateMatrixWorld(true);
+                            return dops.inP(child).sub(dops.inP(b)).normalize().angleTo(want);
+                        };
+                        let best = range[0], be = Infinity;
+                        for (let a = range[0]; a <= range[1] + 1e-9; a += DEG) { const e = errAt(a); if (e < be) { be = e; best = a; } }
+                        for (let a = best - DEG; a <= best + DEG; a += 0.1 * DEG) {
+                            const ac = Math.max(range[0], Math.min(range[1], a));
+                            const e = errAt(ac);
+                            if (e < be) { be = e; best = ac; }
+                        }
+                        errAt(best);
+                        return { angle: best, err: be };
+                    };
+                    // THE ROLL (Fable, 11-10 16:xx). The knee is a HINGE: it lays the tibia only in the plane square to its own
+                    // axis, and the least turn that laid the upper segment on d0 left that plane wherever it fell (the first
+                    // run: the knee on its extension stop and the tibia still 50 deg off the tailward axis, 46 deg down). The
+                    // shoulder is the host's ball joint, so the limb is also ROLLED about its laid upper segment's own line
+                    // (d0, through the shoulder) to the roll at which the knee and the ankle, each inside its stops, lay the
+                    // tibia nearest d1 and the foot nearest d2 (a 5 deg scan over +-ROLL_MAX, then 1 deg; the tibia's miss
+                    // counts whole, the foot's half, and a small charge on the roll itself breaks ties toward no roll)
+                    const ROLL_MAX = (G.swimRollMax ?? 90.0) * DEG;
+                    const lay = (phi) => {
+                        dops.setWorldQ(D.femur, new THREE.Quaternion().setFromAxisAngle(w0, phi).multiply(qAim));
+                        const knee = fold(D.tibia, D.tarsus, w1, stops[D.tibia.name]);
+                        const ankle = fold(D.tarsus, tipJ, w2, stops[D.tarsus.name]);
+                        return { roll: phi, knee, ankle, cost: knee.err + 0.5 * ankle.err + 0.02 * Math.abs(phi) };
+                    };
+                    let best = lay(0.0);
+                    for (let p = -ROLL_MAX; p <= ROLL_MAX + 1e-9; p += 5.0 * DEG) { const r = lay(p); if (r.cost < best.cost - 1e-12) best = r; }
+                    for (let p = best.roll - 4.0 * DEG, p1 = best.roll + 4.0 * DEG; p <= p1 + 1e-9; p += DEG) {
+                        const pc = Math.max(-ROLL_MAX, Math.min(ROLL_MAX, p));
+                        const r = lay(pc);
+                        if (r.cost < best.cost - 1e-12) best = r;
+                    }
+                    D.swimLie = lay(best.roll);
+                } else if (d0) {
+                    const dir = new THREE.Vector3(d0[0] * (sd === 'L' ? 1.0 : -1.0), d0[1], d0[2]).applyQuaternion(root0.q).normalize();
+                    dops.aim(D.femur, dops.inP(D.femur), dops.inP(D.tarsus), dir);
+                }
+                D.swim = js.map((b) => b.quaternion.clone());
+                js.forEach((b, i) => { b.quaternion.copy(D.rest[i]); });
+                group.updateMatrixWorld(true);
+            }
+            donors.push(D);
+            standPts[k] = { M: D.N.clone() };
+        }
+        donors.ops = dops;
     }
     const FOOT_SPOTS = LIMB_ORDER.map((k) => standPts[k].M);      // (the step rate's feet: each stand spot)
     sk.reset();
     sk.fkAll();
     // the axial chain's stations (swim_pose): neck_0, spine_6 .. spine_0, tail_0 .. tail_11, s from each joint's bind z
-    const axial = ['neck_0', ...[6, 5, 4, 3, 2, 1, 0].map((k) => `spine_${k}`), ...Array.from({ length: 12 }, (_, k) => `tail_${k}`)];
+    // MOUNT: the tail's joints from its RECORD (the plain axolotl's tail_0 .. tail_11; a grafted tail's: the host's joints to the
+    // ring, then the graft's), the graft's stations by arc length along its bind (a tentacle's bind need not run along -z)
+    const tailRec = recs.find((c) => c.kind === 'tail');
+    const tailNames = tailRec?.joints?.length ? tailRec.joints : Array.from({ length: 12 }, (_, k) => `tail_${k}`);
+    const graftJ = new Set(tailRec?.graft?.joints || []);
+    const axial = ['neck_0', ...[6, 5, 4, 3, 2, 1, 0].map((k) => `spine_${k}`), ...tailNames];
     const axialI = axial.map((n) => sk.i(n));
     const ss = axialI.map((i) => sp.body.s_hip - (sk.W0p[i].z / KM) / sp.body.TL_mm);
-    ss.push(1.0);
+    for (let k = 1; k < axial.length; k++) {
+        if (graftJ.has(axial[k])) ss[k] = ss[k - 1] + sk.W0p[axialI[k]].distanceTo(sk.W0p[axialI[k - 1]]) / KM / sp.body.TL_mm;
+    }
+    // (the tip station 1.0 as it was; a grafted tail longer than that: one segment past its last joint)
+    const nA = ss.length;
+    ss.push(graftJ.size ? Math.max(1.0, 2.0 * ss[nA - 1] - ss[nA - 2]) : 1.0);
     const spineI = Array.from({ length: 7 }, (_, k) => sk.i(`spine_${k}`));
-    const tailI = Array.from({ length: 12 }, (_, k) => sk.i(`tail_${k}`));
+    const tailI = tailNames.map((n) => sk.i(n));
+    const nT = tailI.length;
+    // CROSS: A TENTACLE FOR A TAIL (the tail record's graft of the tentacle anatomy: REROOT's octopus arm at tail_mid, and the
+    // octopus's C5 mech tentacle there). CROSSBREED §4.5: "a path solve for a tentacle ... in tail mode with no ground contact".
+    //   * THE HOST'S YAW IN THE GRAFT'S OWN FRAME SENSE. The wave, the walk's sway and the idle turn each tail joint about its
+    //     own y, and the axolotl's tail joints carry y DOWN; the graft's joints are the donor's chord frames, y the ABORAL side,
+    //     up. Turned as they were, the graft bent the other way from the ring on (the wave mirrored there). Each graft joint's
+    //     host yaw is taken in its own frame's sense (the sign of its bind y against the first tail joint's).
+    //   * THE ARM'S OWN PATH LAW in TAIL MODE (locomotion.js armSeeds / armCurvature: radialMotion's solveArm, the one law): the
+    //     slow wander along the length, the distal spiral curling and uncurling, the tip exploring, as each joint's turn about its
+    //     aboral axis (the bending plane an arm lying oral side down has: the law's "ground plane"), added to the host's. The arm
+    //     reads its place along the DONOR arm at the donor's own size (the record's arm_length and u0; REROOT's grafts record
+    //     donor_info for its octopus-arm glb), so the same arm curls the same on any host.
+    //   * A MACHINE MOVES ONLY AS ITS HARDWARE DOES (Skye, 11-09, on the robot hand): where the record carries the part's
+    //     limits (the C5 mech tentacle's, per joint: cross/pipe/c5_parts.py) each joint's yaw is held inside them, and only the
+    //     joints that pitch (its cardans) pitch.
+    //   * IT LIES ON THE FLOOR where it reaches it: no joint's centreline under its own reach over the ground (the record's
+    //     reach, else its radius: the octopus arm's rule, "one local radius above the ground"). The first graft joint (the
+    //     flange on the host's flesh: the band takes it, as the octopus's flesh joints ramp before its cut) carries the run of
+    //     joints that cannot pitch; each joint that can lifts the next. Never pushed down: swimming, it trails free.
+    const tailTentacle = (() => {
+        const g = tailRec?.graft;
+        if (!g || !graftJ.size || DONOR_SOLVER[g.anatomy] !== 'tentacle') return null;
+        const gN = tailNames.filter((n) => graftJ.has(n));
+        const gI = gN.map((n) => sk.i(n));
+        const n = gI.length;
+        const yUp = (i) => new THREE.Vector3(0, 1, 0).applyQuaternion(sk.W0q[i]).y;
+        const y0 = yUp(tailI[0]);
+        // (gait.tailSense false: every joint turned as the host's are, MOUNT's as staged: the gate's control for the mirrored wave)
+        const sense = gI.map((i) => (G.tailSense === false || yUp(i) * y0 >= 0 ? 1.0 : -1.0));
+        // each segment's bind length (the last joint's: to the chain's tip socket where the glb has one)
+        const tipNode = tailRec.tip ? group.getObjectByName(tailRec.tip) : null;
+        const tipLen = tipNode?.parent === sk.bone[gI[n - 1]] ? tipNode.position.length() : 0.0;
+        const len = gI.map((i, k) => (k + 1 < n ? sk.W0p[gI[k + 1]].distanceTo(sk.W0p[i]) : tipLen));
+        const arc = [0.0];
+        for (let k = 0; k < n; k++) arc.push(arc[k] + len[k]);
+        // the donor arm: its own length (m, at its own size) and the share of it at the first graft joint
+        const gr = (ex.grafts || []).find((r) => r.part === g.part) || {};
+        const di = gr.donor_info || {};
+        let Ld = g.arm_length ?? (di.L_arm && di.s_c ? di.L_arm / di.s_c : null);
+        let u0 = g.u0 ?? null;
+        if (u0 == null && di.L_arm && di.back != null) {
+            // (REROOT's record: the arm's length before the ring, at the host's scale; the first joint a little past the ring)
+            const rv = ex.rings?.[gr.ring]?.verts;
+            const rc = Array.isArray(rv) ? rv.reduce((s, p) => s.add(new THREE.Vector3(...p)), new THREE.Vector3()).multiplyScalar(1 / rv.length) : sk.W0p[gI[0]];
+            u0 = (di.back + rc.distanceTo(sk.W0p[gI[0]])) / di.L_arm;
+        }
+        if (Ld == null || u0 == null) {
+            console.warn(`[axolotl] the tail's ${g.family || g.anatomy} graft names no donor arm length / station: the octopus arm's (0.82 m, cut 8) taken`);
+            Ld = Ld ?? 0.82; u0 = u0 ?? 0.5;
+        }
+        const total = arc[n] > 0 ? arc[n] : 1.0;
+        const uAt = (a) => u0 + (1.0 - u0) * (a / total);
+        const jIdx = Math.max(0, recs.indexOf(tailRec));
+        const seeds = armSeeds((i) => hash01(jIdx * 31 + i, seed));
+        const idx = (nm) => tailRec.joints.indexOf(nm);
+        // each joint's reach below its centreline: the part's record (a machine's radius table), else what is DRAWN under it (the
+        // octopus arm's true reach, bestiary.js fleshReach's measure: its skin and its suckers, the farthest under each joint's
+        // aboral axis at the bind; an arm's record radius is its skin's mean and its cups hang below that), else the radius
+        const drawn = g.reach ? null : drawnReach(group, gI.map((i) => sk.bone[i]));
+        const reach = gN.map((nm, k) => g.reach?.[k] ?? Math.max(drawn?.[k] ?? 0.0, tailRec.radius?.[idx(nm)] ?? 0.0));
+        const lim = g.limits || null;
+        const yawMax = gN.map((_, k) => (lim?.yaw ? lim.yaw[k] * DEG : Infinity));
+        // (a joint pitches when its record lets it by half a degree or more; with no limits every joint does; the first always)
+        const pitchMax = gN.map((_, k) => (k === 0 ? 0.35 : lim?.pitch ? (lim.pitch[k] >= 0.5 ? lim.pitch[k] * DEG : 0.0) : 0.6));
+        const groundY = G.groundY ?? 0.0;
+        const qz = new THREE.Quaternion(), qb = new THREE.Quaternion();
+        const yaw = new Float64Array(n), pitch = new Float64Array(n);
+        // A MACHINE'S KNUCKLE is its whole local turn (the bind's and the pose's together), as its cardan takes it: Ry(yaw)
+        // Rz(pitch), no roll (cyborg_limb.cardan_angles' order; bestiary.js poseHelpers reads the same). REROOT bound the machine
+        // on a tail line that bends down 2-6 deg at its first three knuckles, which are clevises: they cannot pitch. So a
+        // machine's joints past its first (the flange's, on the host's flesh) are written whole: the bind's own yaw kept, the
+        // pose's added and held inside the yaw limit, the pitch only what the lie gives a joint that pitches (a clevis: none)
+        const mach = !!lim;
+        const bindC = gI.map((i) => {
+            const e = new THREE.Matrix4().makeRotationFromQuaternion(sk.Qb[i]).elements;
+            return { yaw: Math.atan2(-e[2], e[0]), pitch: Math.asin(Math.min(1, Math.max(-1, e[1]))) };
+        });
+        const set = (k) => {
+            if (mach && k >= 1) {
+                sk.Qp[gI[k]].copy(qb.copy(sk.Qb[gI[k]]).invert())
+                    .multiply(new THREE.Quaternion().setFromAxisAngle(Y_AX, yaw[k])).multiply(qz.setFromAxisAngle(Z_AX, pitch[k]));
+            } else sk.Qp[gI[k]].setFromAxisAngle(Y_AX, yaw[k]).multiply(qz.setFromAxisAngle(Z_AX, pitch[k]));
+        };
+        const state = { yaw, pitch, lifted: 0, over: 0 };
+        // (r1c, the lead's call (f): in the swim the arm's tip passed through its own proximal arm, 20 of 121 frames, 11.6 mm deep
+        // at 1.33 s) THE SPIRAL RELAXES IN THE SWIM. The law's coil is the resting arm's (radialMotion: an arm lying on the sand,
+        // its distal part curled); an octopus arm drawn through the water trails, its spiral opened by the flow, and on a
+        // swimming host the coil's constant turn rode the host's wave round onto the arm's own root at one phase of it. So the
+        // coil term (only it: the wander and the tip's exploring wave stay) is held at (1 - tailUncurl x the swim's share): on
+        // the floor the arm curls as the octopus's do, swimming it trails (gait.tailUncurl, default 1; gait.tailCoil scales the
+        // coil itself: the gate's planted defect)
+        const uncurl = G.tailUncurl ?? 1.0, coilK = G.tailCoil ?? 1.0;
+        function pose(st) {
+            const coilMul = armCoilMul(seeds, st.t) * coilK * (1.0 - uncurl * st.sw);
+            for (let k = 0; k < n; k++) {
+                // the host's yaw as it was written (a turn about the joint's y), in this joint's own sense; the arm's own turn
+                const q = sk.Qp[gI[k]];
+                const host = 2.0 * Math.atan2(q.y, q.w) * sense[k];
+                const a0 = arc[k], a1 = arc[k + 1];
+                const um = uAt(0.5 * (a0 + a1));
+                // (gait.tailOwn false: the host's motion alone, for the gates' control runs)
+                const own = len[k] > 0 && G.tailOwn !== false ? armCurvature(seeds, um * Ld, um, Ld, coilMul, st.t) * (uAt(a1) - uAt(a0)) * Ld : 0.0;
+                const want = (mach && k >= 1 ? bindC[k].yaw : 0.0) + host + own;
+                yaw[k] = Math.max(-yawMax[k], Math.min(yawMax[k], want));
+                if (yaw[k] !== want) state.over = Math.max(state.over, Math.abs(want) - yawMax[k]);
+                pitch[k] = 0.0;
+                set(k);
+            }
+            // the lie: the creature's own frame is the root's (y up; the swim lifts the root, so the floor sinks by that much)
+            const floor = groundY - st.sw * SW.height * TL;
+            sk.fkAll();
+            const deficit = (k, m1) => {
+                // the worst shortfall under its ground line over joints k + 1 .. m1 (and the tip past the last joint)
+                let d = -Infinity;
+                for (let m = k + 1; m <= m1; m++) {
+                    if (m < n) d = Math.max(d, floor + reach[m] - sk.Pw[gI[m]].y);
+                    else if (tipLen > 0) {
+                        const tp = new THREE.Vector3(tipLen, 0, 0).applyQuaternion(sk.Qw[gI[n - 1]]).add(sk.Pw[gI[n - 1]]);
+                        d = Math.max(d, floor + reach[n - 1] - tp.y);
+                    }
+                }
+                return d;
+            };
+            state.lifted = 0;
+            // an ARM (no limits) only CLEARS the floor: where REROOT's bind lets it droop onto the floor it lies as bound, and a
+            // joint lifts only what would sink (pitch 0 up to its bound). A MACHINE RESTS on it: stiff and heavy, its straight
+            // clevis run comes down from the flange until its lowest reach touches (the octopus's own ground line for it,
+            // bestiary.js groundProfile: "one straight line ... as low as no reach sinks under it"), and each cardan lays the next
+            // joint on the floor, inside its limit either way; swimming (st.sw) it trails straight from the flange instead
+            const land = 1.0 - st.sw;
+            for (let k = 0; k < n; k++) {
+                if (pitchMax[k] <= 0) continue;
+                // the run this joint carries: the joints after it up to the next one that pitches itself (the tip after the last)
+                let m1 = k + 1;
+                while (m1 < n && pitchMax[m1] <= 0) m1++;
+                const at = (p) => { pitch[k] = p; set(k); sk.fkSub(gI[k]); return deficit(k, m1); };
+                let lo = mach ? -pitchMax[k] : 0.0, hi = pitchMax[k];
+                if (!mach && at(0.0) <= 1e-7) continue;
+                // (the shortfall falls as the joint lifts: a bisection for the pitch at which the run just rests)
+                let p;
+                if (at(hi) > 0) p = hi;                      // (its limit does not clear the run: held at the limit)
+                else if (mach && at(lo) < 0) p = lo;          // (a machine's run still over the floor at its lowest: as low as it goes)
+                else {
+                    for (let it = 0; it < 20; it++) { const mid = 0.5 * (lo + hi); if (at(mid) > 0) lo = mid; else hi = mid; }
+                    p = hi;
+                }
+                at(mach ? p * land : p);
+                state.lifted++;
+            }
+        }
+        return { pose, state, joints: gN, sense, reach, yawMax, pitchMax, Ld, u0, seeds };
+    })();
+    // CROSS: AN EYE GRAFT (extras.bestiary.grafts: REROOT's octopus eyes in the eye ports, their sites the eye sockets): the eye
+    // joints its sites' sockets name move by the donor's own eye motion (DONOR_EYE; idlePose below)
+    const eyeDonor = (() => {
+        const gr = (ex.grafts || []).find((r) => DONOR_EYE[r.donor] && Array.isArray(r.sites));
+        if (!gr) return null;
+        const idx = gr.sites.map((s) => sk.idx.get(group.getObjectByName(s)?.userData?.slot?.joint)).filter((i) => i != null);
+        return idx.length ? { kind: DONOR_EYE[gr.donor], idx, donor: gr.donor } : null;
+    })();
     const gillI = [];
     for (const r of [1, 2, 3]) for (const sd of ['L', 'R']) for (let j = 0; j < 4; j++) gillI.push([r, sd, j, sk.i(`gill_${r}_${j}_${sd}`)]);
     // the seeded phases: the walk's jitter (walk_pose's rng(11) uniform +-jitter; opts.gait.jitter: {limb: x}), the
@@ -855,27 +1146,30 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
         for (let k = 0; k < 7; k++) {
             sk.Qp[spineI[k]].setFromAxisAngle(Y_AX, (G.yaw / 7.0) * om * Math.sin(2.0 * Math.PI * st.c - 0.4 * k) * DEG);
         }
-        for (let k = 0; k < 12; k++) {
-            sk.Qp[tailI[k]].setFromAxisAngle(Y_AX, 1.5 * om * Math.sin(2.0 * Math.PI * st.c - 0.5 - 0.35 * k) * DEG);
+        // (MOUNT: over the tail record's joints, each joint's share 12 / n of the native tail's: a longer grafted tail sways no more)
+        for (let k = 0; k < nT; k++) {
+            sk.Qp[tailI[k]].setFromAxisAngle(Y_AX, 1.5 * (12 / nT) * om * Math.sin(2.0 * Math.PI * st.c - 0.5 - 0.35 * k) * DEG);
         }
         sk.fkAll();
         const now = rootAt(st.t);
         for (const k of LIMB_ORDER) {
             const L = limbIdx[k];
-            const duty = L.kind === 'fore' ? G.duty[0] : G.duty[1];
-            const lift = (L.kind === 'fore' ? G.lift[0] : G.lift[1]) * KM;
+            const kind = L ? L.kind : k.split('_')[0];
+            const duty = kind === 'fore' ? G.duty[0] : G.duty[1];
+            const lift = (kind === 'fore' ? G.lift[0] : G.lift[1]) * KM;
             const sp0 = standPts[k];
             const off = G.phase[k] + jit[k];
             const cyc = st.c + off;
             const n = Math.floor(cyc);
             const phase = cyc - n;
-            let yaw, lifted = 0.0, u;
+            let yaw, lifted = 0.0, u, head;
             const pa = plantOf(k, sp0, n, off, duty, st.t);
             if (phase < duty) {
                 // STANCE: the plant of this cycle (in the group's frame), carried into the root frame now
                 u = phase / duty;
                 relPoint(P.r.set(pa.x, sp0.M.y, pa.z), WORLD, now, P.M);
                 yaw = pa.psi - now.psi;
+                head = pa.psi;
             } else {
                 // SWING: from this cycle's plant to the next one's, on an arc lifted with the step's length (a swing the
                 // clock's first start finds under way begins there: from rest no foot hangs mid-step)
@@ -893,6 +1187,16 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
                 relPoint(P.r.set(rm.x + cm * sp0.M.x + sm * sp0.M.z, sp0.M.y + lifted, rm.z - sm * sp0.M.x + cm * sp0.M.z),
                     WORLD, now, P.M);
                 yaw = rm.psi - now.psi;
+                head = rm.psi;
+            }
+            if (!L) {
+                // MOUNT: a DONOR slot: this gait's foot target (the plant in the group's frame, before it is carried into the
+                // root's: the donor's solver works on the bones in that frame), its heading and its swing's lift share, for
+                // motion() to solve once the bones are written
+                const D = donors.find((x) => x.slot === k);
+                D.foot = P.r.clone(); D.th = head; D.up = lift > 0 ? lifted / lift : 0;
+                probe.limbs[k] = { phase, stance: phase < duty, u, lift: lifted, target: P.r.toArray(), donor: D.anatomy };
+                continue;
             }
             const Hy = new THREE.Quaternion().setFromAxisAngle(Y_AX, yaw);
             P.A.copy(sp0.A).sub(sp0.M).applyQuaternion(Hy).add(P.M);
@@ -935,7 +1239,8 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
     const swimQ = Array.from({ length: sk.n }, () => new THREE.Quaternion());
     function swimPose(st) {
         // swim_pose (the header), its phase the integrated wave
-        const y = (s) => SW.amp * (0.15 + 0.85 * s * s) * Math.sin(2.0 * Math.PI * (s / SW.wavelength - st.th));
+        // (MOUNT: the envelope held at the tip's past s = 1: a grafted tail longer than the native one swings no wider)
+        const y = (s) => SW.amp * (0.15 + 0.85 * Math.min(s, 1.0) * Math.min(s, 1.0)) * Math.sin(2.0 * Math.PI * (s / SW.wavelength - st.th));
         let prev = 0.0;
         for (let k = 0; k < axialI.length; k++) {
             const head = Math.atan2(y(ss[k + 1]) - y(ss[k]), ss[k + 1] - ss[k]);
@@ -950,6 +1255,7 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
         // the limbs ADPRESSED along the body in their girdle's posed frame (adpressed)
         for (const k of ['fore_L', 'fore_R', 'hind_L', 'hind_R']) {
             const L = limbIdx[k];
+            if (!L) continue;                       // (MOUNT: a donor slot trails at its bind lie: motion() below)
             const dirs = SW.adpress[L.kind];
             const mir = L.sd === 'L' ? 1.0 : -1.0;
             const par = sk.par[L.ids[0]];
@@ -981,13 +1287,21 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
         sk.Qp[sk.i('throat')].copy(qLocal(9.0 * pulse));
         sk.Qp[sk.i('jaw')].copy(qLocal(0.8 * pulse));
         if (w > 0) {
-            for (let k = 0; k < 12; k++) {
-                tmpQ.copy(qLocal(0, 1.2 * (k + 1) / 12.0 * Math.sin(2.0 * Math.PI * 0.18 * t - 0.25 * k)));
+            // (MOUNT: over the tail record's joints, the sway's ramp to its tip over n of them)
+            for (let k = 0; k < nT; k++) {
+                tmpQ.copy(qLocal(0, 1.2 * (k + 1) / nT * Math.sin(2.0 * Math.PI * 0.18 * t - 0.25 * k)));
                 sk.Qp[tailI[k]].slerp(tmpQ.premultiply(sk.Qp[tailI[k]].clone()), w);
             }
         }
         const drift = Math.sin(2.0 * Math.PI * 0.07 * t);
-        for (const sd of ['L', 'R']) sk.Qp[sk.i(`eye_${sd}`)].copy(qLocal(0, 3.0 * drift));
+        // (MOUNT: an eye a graft replaced has no drift of its own here)
+        for (const sd of ['L', 'R']) { const ei = sk.idx.get(`eye_${sd}`); if (ei != null) sk.Qp[ei].copy(qLocal(0, 3.0 * drift)); }
+        // CROSS: a GRAFTED EYE moves as its donor's does: the octopus eye its saccades (locomotion.js eyeSaccade, radialMotion's
+        // own law: a held fixation, a fast jump, both eyes together), over the eye joint's rest
+        if (eyeDonor) {
+            const s = eyeSaccade(t, (i) => hash01(i, seed));
+            for (const i of eyeDonor.idx) sk.Qp[i].setFromAxisAngle(Y_AX, s.yaw).multiply(tmpQ.setFromAxisAngle(Z_AX, s.pitch));
+        }
     }
     // ---------------------------------------------------------------------------------------- the frame
     const rootBone = bones.get('root');
@@ -1007,6 +1321,8 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
         // the idles over it (the tail's sway only standing still on the floor)
         const om = Math.min(1.0, st.vw / (G.speed * TL));
         idlePose(st, (1.0 - om) * (1.0 - st.sw));
+        // CROSS: a tentacle for a tail: the host's yaw in the graft's own sense, the arm's own path law, the limits, the lie
+        if (tailTentacle) { tailTentacle.pose(st); probe.tail = { lifted: tailTentacle.state.lifted, over: tailTentacle.state.over }; }
         driveLeaves(sk, leaves);
         sk.fkAll();
         // the bones: each node's rotation the bind's times the pose's
@@ -1016,8 +1332,38 @@ export function salamanderMotion(bones, seed, group, sp, opts = {}, ex = {}, mes
             rootBone.position.set(st.x, st.sw * SW.height * TL, st.z);
             rootBone.quaternion.setFromAxisAngle(Y_AX, st.psi);
         }
+        // MOUNT: the DONOR slots on the bones as written (the body posed): the donor's step solver onto this gait's target while
+        // it walks, the limb's bind lie blended in with the swim (it trails along the body, held at its bind under its parent)
+        if (donors.length) {
+            group.updateMatrixWorld(true);
+            donors.ops.refresh();
+            const body = { p: rootBone.position.clone(), q: rootBone.quaternion.clone() };
+            body.m = new THREE.Matrix4().compose(body.p, body.q, new THREE.Vector3(1, 1, 1));
+            for (const D of donors) {
+                // (CROSS: each frame's solve from the slot's STAND, a pure function of the frame; the swim's lie blended in)
+                D.chain.forEach((b, i) => { b.quaternion.copy(D.rest[i]); });
+                group.updateMatrixWorld(true);
+                if (st.sw < 1 && D.foot) D.solve(D, D.foot, D.th, D.up, body);
+                if (st.sw > 0) D.chain.forEach((b, i) => b.quaternion.slerp((D.swim || D.rest)[i], st.sw));
+                // (r1c) between its walk and its swim lie no solver plants the leg: the blended pose is lifted clear of the
+                // ground at its shoulder where it would pass under (locomotion.js liftClear; a clear pose is untouched)
+                if (st.sw > 0 && D.clearance?.leg) {
+                    group.updateMatrixWorld(true);
+                    D.lift = liftClear(D, donors.ops, D.clearance.leg, D.clearance.groundY);
+                }
+                if (probe.limbs[D.slot]) {
+                    probe.limbs[D.slot].miss = D.err ?? null;
+                    probe.limbs[D.slot].knee = D.knee ?? null;
+                    probe.limbs[D.slot].rise = D.rise ?? null;         // (r1c: the ankle's rise to keep the tibia off the ground)
+                }
+            }
+            group.updateMatrixWorld(true);
+        }
         // the correctives' morph weights (both primitives), the crease fade's drive
-        lastCorr = correctiveWeights(sk, corr);
+        // CROSS: with a donor slot the host joints it posed (the shoulder under a stag beetle's leg) are read back from the bones,
+        // so the rig's driven leaves under them (the shoulder's half-angle point, the humerus's twist: the ring's own weights) and
+        // the correctives follow the donor's pose (driveFromNodes: the path a scene's posed bones take); without one, as before
+        lastCorr = donors.length ? driveFromNodes(sk, leaves, corr) : correctiveWeights(sk, corr);
         applyCorrectives(lastCorr, meshes, A);
         probe.t = t; probe.root = [st.x, st.sw * SW.height * TL, st.z]; probe.psi = st.psi; probe.sw = st.sw;
         probe.v = st.v; probe.cycles = st.c; probe.mode = st.sw > 0.5 ? 'swim' : (st.vw > 1e-7 ? 'walk' : 'stand');
@@ -1110,7 +1456,8 @@ export async function axolotlSetup(api, gltf, sp, opts = {}) {
         walkTo(x, z, o) { return mo?.controls.walkTo(x, z, o); },
         swim(on = true) { mo?.controls.swim(on); },
         mode() { return mo ? mo.mode() : 'none'; },
-        morph(name) { setMorph(A, name); },
+        // (CROSS r1c: a coat's interior shade follows the morph too: api.coatInterior, set by create's coat attach where a coat is worn)
+        morph(name) { setMorph(A, name); api.coatInterior?.(); },
         crease(on = true) { A.creaseOn.value = on ? 1.0 : 0.0; },
         gait: mo ? { probe: mo.probe, correctives: mo.correctives, pose: mo.pose } : null,
         axolotl: {
@@ -1119,9 +1466,47 @@ export async function axolotlSetup(api, gltf, sp, opts = {}) {
             drive,
             // remix.js apply(): the palette and the element rebuilt on the axolotl's own skin (remixAxolotl)
             remix: (block, R, lib) => remixAxolotl(api, A, so, block, R, lib),
+            // CROSS r1c: a coat's colour terms on this host (bestiary.js create's coat attach reads them): axolotlCoatColour
+            // and the share of the coat's own INTERIOR SHADE this skin's fur keeps (interior: see axolotlCoatColour's note)
+            coat: { remap: axolotlCoatColour(A, skinMeshes[0]?.userData?.bestiarySource || null), display: null,
+                groundOcclusion: null, interior: () => 0.2 + 0.8 * Math.max(0.0, Math.min(1.0, A.M.value)) },
         },
     };
     return out;
+}
+
+// CROSS r1c (the lead's call (i): the furry axolotl's "dark speckled band under the chin and the grey streaky forelimb fur ending in a
+// hard line at the wrist: the coat's colours come from the host's own skin colour and its masks"). A coat's card takes its colour
+// at its root from its HOST (coat.js rootColour: the base map there, then opts.remap over the masks and the display read at the
+// root), and bestiary.js gave every host the OCTOPUS's terms: its chromatophore display (displayMasks / displayClouds), which reads
+// this skin's display pack (R iridophores, G xanthophores, B leucistic speckles) as the octopus's white spots, dark bands and eye
+// ring, and its ground term (groundOcclusion: the octopus's sand in its own shadow, cutting the down-facing ventral fur's light),
+// which this skin never takes. So a coat on the axolotl takes the axolotl's OWN colour: axolotlSkin's composition (the ground,
+// the blood read back out under the melanophores, their cover by the morph, the xanthophores' tint, the leucistic speckles, the
+// iridophores' gold body colour; not the view-dependent glint, a surface term), read at the root: the ORM's cover at the masks'
+// own root UV and level (one sample point for every pack), no display and no ground term. The morph's uniforms are the skin's
+// own, so a morph change recolours the fur with the skin.
+// THE COAT'S INTERIOR SHADE (11-10 18:3x, the look test cross/look/r1c/furry_forelimb_layerDeep_look_test_x2_RUN_camera.png): with
+// the colour right the leucistic's forelimb fur still read grey between its cards (sRGB p50 129 121 125 against the bare limb's
+// 149 140 144). That is coat.js's look.layerDeep (0.7: the furred skin between drawn cards x (1 - layerDeep x density), solved on
+// the brown octopus's shaggy coat): a dark pelt is dark inside, a white one is not (pale hairs pass the light on). So this
+// host says what share of the style's interior shade its fur keeps, by the morph's melanophore cover M (api.axolotl.coat.interior:
+// 0.2 with no melanin, the leucistic and the albinos: layerDeep 0.14, the look test's 0.15 reads 143 135 139; the whole of it at
+// the wild type's cover), and create's coat attach scales the style's own value by it (a caller's own look.layerDeep is kept)
+export function axolotlCoatColour(A, src) {
+    const ormT = src?.roughnessMap || src?.metalnessMap || null;
+    if (ormT) ormT.colorSpace = THREE.NoColorSpace;
+    return (ground, { masks, display: disp }) => {
+        const { texture, vec3, vec4, float, mix, smoothstep } = THREE;
+        const orm = ormT && masks?.uvNode ? texture(ormT, masks.uvNode).level(masks.levelNode ?? float(0.0)) : vec4(1.0, 1.0, 0.0, 0.0);
+        const cover = orm.b.mul(A.M).clamp(0.0, 1.0);
+        const blushed = masks.r.mul(A.blushThin).mul(float(1.0).sub(smoothstep(0.7, 0.85, masks.b))).clamp(0.0, 0.9);
+        const unblushed = ground.sub(A.thinBlood.mul(blushed)).div(float(1.0).sub(blushed)).max(vec3(0.0));
+        let col = mix(mix(ground, unblushed, smoothstep(0.25, 0.7, cover)), A.melanin, cover);
+        col = col.mul(mix(vec3(1.0), A.xantho, disp.g.mul(A.X).clamp(0.0, 1.5)));
+        col = col.mul(float(1.0).sub(disp.b.mul(A.S).mul(0.8)));
+        return mix(col, A.gold, disp.r.mul(A.I).clamp(0.0, 1.0).sqrt().mul(0.95));
+    };
 }
 
 export function remixAxolotl(api, A, so, block, R, lib) {
