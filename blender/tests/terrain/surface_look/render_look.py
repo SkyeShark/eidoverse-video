@@ -2,10 +2,11 @@
 the same frame (each layer one flat colour, unlit), so a palette edit is read beside the photograph of the place and
 beside the render before it (board.py puts them side by side).
 
-    bash run_blender.sh blender/tests/terrain/surface_look/render_look.py --recipe canyon \\
+    bash run_blender.sh blender/tests/terrain/surface_look/render_look.py --recipe canyon[,badlands,...] \\
         [--views a,b] [--tag new] [--data] [--layers] [--snap <dir>] [--palettes <file.py>] [--samples 16]
         [--no-rocks] [--plan <views.json>]
-    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py)
+    (a GPU job: 4 GB VRAM, 12 GB RAM cap; on a shared machine queue it with EIDO_GPU_WRAP, blender/tests/_where.py;
+    several recipes in one run wait for the queue once)
 
 The cameras are the judge's (surfacing_judge/views.json: the review's matched cameras, the ones that faced walls moved,
 an establishing aerial and a low oblique added); the terrain is make_terrain's at the judge's settings (the reference's
@@ -451,8 +452,19 @@ def render_group(a, recipe, size, params, c0, views, src, out, sky_root, rec):
 
 
 def main():
-    a = ARGS
-    recipe = a['recipe']
+    """Every recipe of --recipe (a comma list renders several in one Blender process, so a shared GPU queue is waited
+    for once)."""
+    for recipe in [r for r in (ARGS['recipe'] or '').split(',') if r]:
+        try:
+            render_recipe(ARGS, recipe)
+        except Exception:                                        # noqa: BLE001 - recorded, the next recipe goes on
+            traceback.print_exc()
+        gc.collect()
+    log('[render_look] done')
+    os._exit(0)
+
+
+def render_recipe(a, recipe):
     plan = json.load(open(a['plan'], encoding='utf-8'))[recipe]
     sel = [s for s in a['views'].split(',') if s]
     views = [v for v in plan['views'] if not sel or v['name'] in sel]
@@ -482,8 +494,7 @@ def main():
         with open(rec_path, 'w', encoding='utf-8') as fh:
             json.dump(rec, fh, indent=1, default=str)
     shutil.rmtree(sky_root, ignore_errors=True)
-    log('[render_look] done')
-    os._exit(0)
+    log(f'[render_look] {recipe} done')
 
 
 main()
