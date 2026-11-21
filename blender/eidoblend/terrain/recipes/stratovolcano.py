@@ -20,8 +20,10 @@ Stages, in order (solvers/volcanic.py unless named):
   volcano_age      the fluvial backbone run for the volcano's age with no uplift on the main level (time-faithful:
                    a few deep ravines seeded first - the Osawa-kuzure among them - and sparse wandering furrows of
                    many depths on the upper cone and the mid flanks, the erodibility gathered into them (the planes
-                   between, permeable scoria and lava, at 15 %), broad lobes running down the lower flanks onto the
-                   apron; strongest on the steep upper cone, sectors of different age, sediment dropped as fans and an
+                   between, permeable scoria and lava, at 15 %), broad lobes on the apron; the cone growing as it
+                   erodes: the age in four spans, each opened by lava flows from the summit's rim and the flank vents
+                   that fill the gullies in their paths, their tops permeable, the water gathering along their margins;
+                   strongest on the steep upper cone, sectors of different age, sediment dropped as fans and an
                    apron; the craters kept open), then refined under the lock on the hero levels
   lava_flows       DOWNFLOW flows from flank vents along the rift, on the main level: aa flows 0.4-1.5 km wide and
                    15-30 m thick, in lobed units, with steep rubble fronts, broad levees and ridged tops, narrow down
@@ -102,9 +104,9 @@ K_PROFILE = [[0.03, 0.5], [0.07, 1.0], [0.25, 1.0], [0.45, 0.6]]
 # bands of radius so they start and end; the cone's erodibility gathered into them and the ravines (k_floor: the
 # planes between, permeable scoria and lava, erode at 15 %). Two sets: the upper cone's (0.8-4.4 km out, harmonics
 # 12-60: some 25 furrows round the cone, 380 m apart at 1.5 km) and the mid flanks' (3-11 km, harmonics 30-140: 500 m
-# apart at 5 km, as Fuji's DEM's gullies are 440-670 m apart from 1.5 to 9 km out); then broad lobes 12 m high running
-# down the lower flanks onto the apron (6-26 km, harmonics 30-120), the lava and debris lobes between which the
-# streams run (round swells there held closed hollows that filled flat).
+# apart at 5 km, as Fuji's DEM's gullies are 440-670 m apart from 1.5 to 9 km out); then broad lobes 12 m high on the
+# apron beyond the flows' reach (12-26 km, harmonics 30-120), between which the streams run onto the plain (round
+# swells there held closed hollows that filled flat).
 # (Seeded by straight radial streaks, harmonics 40-160 alike all round with K alike everywhere, the gullies came out
 # as a sunburst of straight spokes from the summit, evenly spaced: a washboard from the foot; a round seed texture of
 # 3 m at 350 m printed blobs all over the lower flanks.)
@@ -118,13 +120,38 @@ STREAKS = [dict(amp_m=5.0, k=[12, 60], decay=0.5, r_m=[0.04 * _R0, 0.22 * _R0], 
                 wander_scale_m=1200.0, sparse=0.6, k_floor=0.15),
            dict(amp_m=4.0, k=[30, 140], decay=0.5, r_m=[0.15 * _R0, 0.55 * _R0], bands=3, wander_m=100.0,
                 wander_scale_m=2000.0, sparse=0.6, k_floor=0.15),
-           dict(amp_m=12.0, k=[30, 120], decay=0.8, r_m=[0.3 * _R0, 1.3 * _R0], bands=3, wander_m=300.0,
+           dict(amp_m=12.0, k=[30, 120], decay=0.8, r_m=[0.6 * _R0, 1.3 * _R0], bands=3, wander_m=300.0,
                 wander_scale_m=3000.0)]
+
+# The cone grows while it erodes (volcanic.eruption_flows, lay_flow; design 4.7 'growth and erosion'): the age in four
+# spans, each opened by lava flows that fill the gullies in their paths, each an older flow at the end by the spans
+# still to come (laid duller, its margins wider: mantled); a flow's top is fresh permeable lava (the furrows' k_floor)
+# and the water it sheds runs down its margins, where gullies cut. Flows from the summit's rim down the upper cone
+# (80-600 m wide, 1.2-7 km long, 2-12 m thick); from flank vents along the rift and scattered round the cone (120-1500 m
+# wide, 1.2-9 km long, 3-25 m thick); levees low and broad (at 0.35 of the thickness and 0.12 of the width they stood
+# as twin lines along every flow). With the furrows alone the gullies were one even sunburst of ravines a spacing
+# apart, and the broad lobes below 6 km long wavy stripes down the lower cone: the main level's hillshade correlated
+# with itself at that spacing (the judge's repetition 0.38 in the 5 km square north-east of the vent, the DEM's 0.19),
+# its gullies twice as deep as the DEM's 4-9 km out (14 against 7.6 m at their median) and more evenly spaced (spacing
+# CV 0.44 against 0.52). Fuji's DEM: lava lobes, gullies of many depths that start and end at the flows' margins and
+# fronts.
+# (Without the furrows the flows alone left the lower cone smooth between them: on a cone the water runs beside a
+# radial flow, not into it, and only the flows' fronts and the lows between near ones gather it.)
+#   (230 flows lay a quarter of the main tile under them; 150 left the comb standing between them in places)
+ERUPTIONS = dict(epochs=4, shape=dict(rough=0.0, walkers=100, levee=0.15, levee_frac=0.2), groups=[
+    dict(count=70, r_m=[450.0, 900.0], width_m=[200.0, 80.0, 600.0], length_m=[3000.0, 1200.0, 7000.0],
+         thickness_frac=[0.02, 0.05], thickness_m=[2.0, 12.0]),
+    dict(count=80, r_m=[1500.0, 12000.0], azimuth_deg=_F['rift_azimuth_deg'], half_deg=25.0,
+         width_m=[450.0, 150.0, 1500.0], length_m=[4000.0, 1500.0, 9000.0], thickness_frac=[0.02, 0.04],
+         thickness_m=[4.0, 25.0]),
+    dict(count=80, r_m=[1500.0, 13000.0], width_m=[350.0, 120.0, 1200.0], length_m=[3000.0, 1200.0, 8000.0],
+         thickness_frac=[0.02, 0.04], thickness_m=[3.0, 20.0])])
 
 AGE = dict(age_yr=1.0e5, K=2.0e-6, threshold_deg=38.0, threshold_noise=0.15, deposition=1.0, roughness=0.8,
            roughness_scales_m=[1500.0, 300.0, 80.0], valley_spacing_m=350.0,
            k_profile=[[f * _R0, k] for f, k in K_PROFILE], centre=[0.0, 0.0], seed_texture_m=0.0,
            seed_streaks=[dict(s) for s in STREAKS], sector_contrast=1.0, sector_harmonics=[3, 12],
+           eruptions=dict(ERUPTIONS, groups=[dict(g) for g in ERUPTIONS['groups']]),
            ravines=[dict(rv) for rv in RAVINES], ravine_field=dict(RAVINE_FIELD),
            keep_craters=[dict(at=[0.0, 0.0], radius_m=1.05 * _F['crater_radius_m'])]
            + [dict(at=[fc['at'][0] - _C0[0], fc['at'][1] - _C0[1]], radius_m=fc['radius_m'])
@@ -188,7 +215,14 @@ def _apply(p):
                                  wander_m=RAVINE_FIELD['wander_m'] * k),
                seed_streaks=[dict(s, r_m=[v * k for v in s['r_m']], amp_m=s['amp_m'] * min(k, 1.0),
                                   wander_m=s.get('wander_m', 0.0) * k, wander_scale_m=s.get('wander_scale_m', 2000.0) * k)
-                             for s in STREAKS])
+                             for s in STREAKS],
+               # the flows' vents, lengths and widths with the cone (the summit's rim moves with R), no thicker than
+               # Fuji's; the rift's flank vents along the rift
+               eruptions=dict(ERUPTIONS, groups=[
+                   dict(g, r_m=[v * k for v in g['r_m']], length_m=[v * k for v in g['length_m']],
+                        width_m=[v * k for v in g['width_m']], thickness_m=[v * min(k, 1.0) for v in g['thickness_m']],
+                        **({'azimuth_deg': float(p['rift_azimuth_deg'])} if 'azimuth_deg' in g else {}))
+                   for g in ERUPTIONS['groups']]))
     p.stage('volcano_lakes').update(dry=craters, lake_radius_m=1.3 * R, centre=c)
     lava = p.stage('lava_flows')
     lava['rift'] = dict(LAVA['rift'], centre=c, azimuth_deg=float(p['rift_azimuth_deg']), count=int(p['lava_flows']),
