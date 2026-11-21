@@ -28,8 +28,10 @@ face north-east), with weights for how long each blows. The kinds' regimes:
 The star defaults are calibrated on the Namib at Sossusvlei (solvers/aeolian.py KINDS['star'] says what each choice
 fixed: wandering gusts and the steered winds against three straight arms at a fixed 120 degrees, the patchy capped
 supply drawn out east-west against an even sheet left as straight-edged plates, the speed-up growing toward the
-crest against straight-sided pyramids at repose, the feathered smoothed sheet and the time-averaged read-out
-against pitted sand, the last season on the finer levels for a sharp brink above a fresh slip face).
+crest against straight-sided pyramids at repose, the shear's slope term against crests rounded into shoulders
+above slip faces that started below them, the feathered smoothed sheet and the time-averaged read-out against
+pitted sand on the growth level, the expected lift on the finer levels against their own pitted flanks, the last
+season on the finer levels for a fresh slip face on the crests).
 The design's starting point (0/120/240 equal, 120 m of sand at 900 m) piles every dune into a pyramid at repose. For
 the Great Sand Dunes' reversing ridges in a near-unbroken sand sea: params={'winds': [[282, 1.0], [102, 0.7],
 [192, 0.5]], 'sand_m': 40, 'spacing_m': 900, 'bed_relief_m': 30, 'sand_patchiness': 0.5} (12 of the judge's 14

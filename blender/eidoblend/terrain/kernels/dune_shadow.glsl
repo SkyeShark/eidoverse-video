@@ -12,26 +12,51 @@
    windward toe up to uReach cells along its stoss; uRiseMode 1, the sand's thickness (Momiji's height), which grows
    from the toe all the way to the crest of a dune on bare ground or a thinner sheet.
 
+   Along-wind slope (for the shear's slope term in dune_activate), a tangent: how the surface rises along the local
+   wind over uSlopeCells cells, bilinear so any wind direction works; uSlopeMode 0 across the cell (from uSlopeCells
+   upwind to uSlopeCells downwind of it), 1 over the ground the wind has just crossed (from uSlopeCells upwind to the
+   cell). Positive where the ground rises downwind (a windward face), negative where it falls away (a lee).
+
    The wind is steered: at each cell it blows along uDir turned by the cell's own angle (the `wind` texture holds the
    angle's cosine and sine; solvers/aeolian.py's Steering: the regional relief turns each wind by a smooth angle that
    varies across the field), and the ray looks upwind along that local direction.
 
-   Open and pinned grids stop the march where the upwind ray leaves the grid; periodic grids wrap.
+   Open and pinned grids stop the march where the upwind ray leaves the grid; periodic grids wrap (the slope's
+   samples wrap there too, and are clamped to the grid at an open or pinned edge).
    Twin: solvers/aeolian.py, twin 'dune_shadow'. */
 //! sampler st                bed (r) and sand thickness (g), metres
 //! sampler wind              the local turn of the wind: its cosine (r) and sine (g); (1, 0) where it is not turned
-//! image   outShadow rg32f   shadow 0..1 (r), rise above the lowest ground upwind, metres (g)
+//! image   outShadow rgba32f shadow 0..1 (r), rise (g, metres), along-wind slope (b, a tangent), 0 (a)
 //! uniform vec2 uDir         the unit direction the sand moves, (x east, y north), before the local turn
 //! uniform float uTanLo      the tangent where the shadow starts
 //! uniform float uTanHi      the tangent where it is complete
 //! uniform int uReach        how far upwind the ray looks, cells
 //! uniform float uCell       metres
 //! uniform int uRiseMode     0: rise above the lowest ground upwind; 1: the sand's thickness
+//! uniform int uSlopeCells   the along-wind slope's reach, cells (at least 1)
+//! uniform int uSlopeMode    0: across the cell; 1: over the ground upwind of it
 //! uniform int uBound        BOUND_OPEN / BOUND_PERIODIC / BOUND_PINNED
 
 float surface_at(ivec2 q) {
   vec4 s = texelFetch(st, q, 0);
   return s.r + s.g;
+}
+
+/* the surface at a real texel position, bilinear; wrapped on a periodic grid, clamped to it otherwise */
+float surface_bilinear(vec2 q, ivec2 n) {
+  vec2 f = floor(q);
+  vec2 t = q - f;
+  ivec2 a = ivec2(f);
+  ivec2 b = a + ivec2(1, 1);
+  if (uBound == BOUND_PERIODIC) {
+    a = wrap(a, n);
+    b = wrap(b, n);
+  } else {
+    a = clamp(a, ivec2(0), n - ivec2(1));
+    b = clamp(b, ivec2(0), n - ivec2(1));
+  }
+  return mix(mix(surface_at(ivec2(a.x, a.y)), surface_at(ivec2(b.x, a.y)), t.x),
+             mix(surface_at(ivec2(a.x, b.y)), surface_at(ivec2(b.x, b.y)), t.x), t.y);
 }
 
 void main() {
@@ -65,5 +90,9 @@ void main() {
   }
   float s = clamp((best - uTanLo) / max(uTanHi - uTanLo, 1.0e-6), 0.0, 1.0);
   float rise = uRiseMode == 1 ? texelFetch(st, p, 0).g : h0 - lowest;
-  imageStore(outShadow, p, vec4(s, rise, 0.0, 0.0));
+  float L = float(max(uSlopeCells, 1));
+  float hu = surface_bilinear(vec2(p) - L * dir, n);
+  float slope = uSlopeMode == 1 ? (h0 - hu) / (L * uCell)
+                                : (surface_bilinear(vec2(p) + L * dir, n) - hu) / (2.0 * L * uCell);
+  imageStore(outShadow, p, vec4(s, rise, slope, 0.0));
 }

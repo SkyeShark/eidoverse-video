@@ -12,12 +12,30 @@
    toward the crest than at the toe (an integer power by repeated products, so the twin's float32 matches it bit for
    bit): every height of a dune then moves at its own speed (the flux's slope in the sand's thickness grows with it),
    the upper dune outruns its base and the flanks stretch into broad aprons under the sharp crest zone, where a linear
-   speed-up only carries each face along at its angle. The same f can also lengthen the hop: the slab takes the long hop (uHop x uLong) with probability
-   uSpeedup x f, else the short hop uHop. The hop is an integer vector chosen by stochastic rounding of the real one
-   (any wind direction works on average and crests do not lock to the grid), followed up to uMaxHops times. At each landing cell the slab deposits with probability
-   shadow + (1 - shadow) x (uPSand on sand, uPRock on bare rock); at the last hop it always deposits. Every decision
-   is a hash of (source cell, iteration, seed) and a salt, so dune_transport, gathering at the landing cell, finds
-   exactly this record: the plan written here.
+   speed-up only carries each face along at its angle.
+
+   The shear also follows the ground's slope along the wind (dune_shadow's b, a tangent s): the wind presses harder
+   on a face rising into it and eases off where the ground falls away, the term in phase with the slope in the shear
+   stress over a low hill (Jackson & Hunt 1975; Kroy, Sauermann & Herrmann 2002), so the chance is also multiplied by
+   clamp(1 + uShearSlope x s, 0, uShearMax). The thickness alone cannot tell a lee shoulder from the stoss below the
+   crest: both stand on thick sand, so a rounded shoulder past the crest erodes as fast as the stoss and the slip face
+   starts well below the top. With the slope term the shoulder eases off, takes the sand that crosses the crest and
+   steepens into the slip face, which then starts at the crest, as on real dunes. uShearSlope 0: off (Werner's and
+   Momiji's rule).
+
+   How much a cell lifts (uExpected): 0, Werner's slab: one slab with the chance above, refused with the shadow's
+   probability; 1, the expected amount, uSlab x min(chance, 1) x (1 - shadow), every iteration. A cell of real sand
+   holds some 10^12 grains, so what the wind takes from it in a step is that expectation; the all-or-nothing slab is
+   one Monte Carlo draw of it, whose shot noise (single slabs arriving and leaving, wandering for a hundred
+   iterations and more) roughens every surface below the angle of repose at the cell scale. Where each parcel comes
+   down stays random either way.
+
+   The same f can also lengthen the hop: the slab takes the long hop (uHop x uLong) with probability uSpeedup x f,
+   else the short hop uHop. The hop is an integer vector chosen by stochastic rounding of the real one (any wind
+   direction works on average and crests do not lock to the grid), followed up to uMaxHops times. At each landing
+   cell the slab deposits with probability shadow + (1 - shadow) x (uPSand on sand, uPRock on bare rock); at the last
+   hop it always deposits. Every decision is a hash of (source cell, iteration, seed) and a salt, so dune_transport,
+   gathering at the landing cell, finds exactly this record: the plan written here.
 
    The hop is turned by the source cell's own angle first (the `wind` texture: its cosine and sine; the regional
    relief steers the wind, solvers/aeolian.py's Steering), so the wind's direction varies smoothly across the field.
@@ -26,7 +44,7 @@
    open grid). A cell that lifts nothing writes zeros. Inputs are read as they stood at the start of the iteration.
    Twin: solvers/aeolian.py, twin 'dune_activate'. */
 //! sampler st                bed (r) and sand thickness (g), metres
-//! sampler shadow            the wind shadow 0..1 (r) and the rise above the ground upwind, metres (g): dune_shadow
+//! sampler shadow            the wind shadow 0..1 (r), the rise, metres (g) and the along-wind slope (b): dune_shadow
 //! sampler wind              the local turn of the wind: its cosine (r) and sine (g); (1, 0) where it is not turned
 //! image   outPlan rgba32f   (lifted m, hop x, hop y, landing hop or -1)
 //! uniform vec2 uHop         the short hop vector, cells (the wind's direction x the hop length), before the turn
@@ -36,6 +54,9 @@
 //! uniform float uSpeedFrom  the rise, metres, where the speed-up starts
 //! uniform float uSpeedRef   the rise, metres, at which the speed-up is full
 //! uniform int uSpeedPow     the speed-up's power: f^uSpeedPow (1: linear in the rise)
+//! uniform float uShearSlope the shear's slope term: the chance x clamp(1 + uShearSlope x slope, 0, uShearMax)
+//! uniform float uShearMax   its most
+//! uniform int uExpected     0: Werner's slab, lifted with the chance; 1: the expected amount, every iteration
 //! uniform float uSlab       slab thickness, metres
 //! uniform float uMinSand    sand thinner than this, metres, is bare rock (not lifted; rock deposition odds)
 //! uniform float uPLift      the chance a sand cell lifts a slab this iteration
@@ -59,7 +80,11 @@ void main() {
   for (int i = 1; i < uSpeedPow; i++) {
     f = f * f1;
   }
-  if (sand > uMinSand && u01(h) < uPLift * (1.0 + uLiftBoost * f) && u01(pcg2(h, 1u)) >= sh0.r) {
+  float shear = clamp(1.0 + uShearSlope * sh0.b, 0.0, uShearMax);
+  float chance = uPLift * (1.0 + uLiftBoost * f) * shear;
+  float take = uExpected == 1 ? min(sand, uSlab * min(chance, 1.0) * (1.0 - sh0.r)) : min(sand, uSlab);
+  bool lifts = uExpected == 1 ? take > 0.0 : (u01(h) < chance && u01(pcg2(h, 1u)) >= sh0.r);
+  if (sand > uMinSand && lifts) {
     vec2 h0 = u01(pcg2(h, 64u)) < uSpeedup * f ? uHop * uLong : uHop;
     vec2 cs = texelFetch(wind, p, 0).rg;
     vec2 hop = vec2(cs.x * h0.x - cs.y * h0.y, cs.y * h0.x + cs.x * h0.y);
@@ -82,7 +107,7 @@ void main() {
         break;
       }
     }
-    rec = vec4(min(sand, uSlab), float(v.x), float(v.y), float(k));
+    rec = vec4(take, float(v.x), float(v.y), float(k));
   }
   imageStore(outPlan, p, rec);
 }
