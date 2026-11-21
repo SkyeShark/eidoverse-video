@@ -427,6 +427,57 @@ lost ordinary PBR color, maps, and metalness. `material_tools.js` explicitly
 preserves those fields; `check_materials.mjs` reproduces and checks the fix.
 Detailed implementation feedback: `work/common_tools/TOOL_FEEDBACK.md`.
 
+## Pose overlays from clip-derived keyframes (pose_layers.js rewrite, 2026-09-11)
+
+The kneel-and-place overlay is now a six-key mini-clip whose values come from
+the clip library, with contacts solved numerically (work/kneel2/: sample ->
+compose -> bake). Transferable lessons:
+
+- claude_suit rig conventions (verified by sampling clips on the rig): hip
+  flexion = -x upperLeg; knee flexion = +x lowerLeg; foot +x = plantarflex;
+  ELBOW HINGE IS LOCAL Y (x on the forearm does ~nothing); upperArm z ~ -+65
+  = arm at side; upperArm x is mostly a TWIST that aims the elbow hinge plane
+  (the reach clip points the forearm via twist + elbow, not shoulder swing).
+- Don't hand-derive contact heights from segment math: FK-pin the planted
+  ankle by solving the hips translation per key (secant, exact), and tune
+  toe/knee heights with 1-D secants against the rendered rig.
+- BUT never per-key-solve a DOF the target is insensitive to: solving knee
+  height via hip angle (thigh near vertical) zig-zagged the hip -9 -> +18
+  between keys — reads as the leg flip-flopping even though every contact
+  was correct. Author state DOFs as monotone curves; solve contacts with the
+  sensitive DOF (pelvis height via the front knee).
+- Slerp between distant keys bows FK contacts (~1cm dig / skate mid-segment);
+  keep key spacing <= ~0.2 of the path, add a solved in-between key.
+- stand_to_sit keeps both feet planted through its whole descent — good
+  ground truth for planted-foot coordination on this rig.
+- claude_suit is short-armed: wrist bottoms out ~0.31m above floor from a
+  settled genuflect at full sane fold; ground-placing needs the prop to ease
+  the last ~10cm, or design the beat as place-beside-knee.
+
+Addendum (same day, after human review of the motion): three more lessons.
+(1) The metric matching "the joints flip-flop" is JOINT FLEXION ANGLE vs
+time, not joint world-path smoothness — the knee position moved smoothly
+while its flexion pumped 21->47->31->92. (2) The pelvis path must be SOLVED
+(smooth per-key x/z targets, support thigh pitch/abduction as the DOFs);
+emergent-from-ankle-pinning pelvis traces S-curves and drifts off the
+support foot. (3) Interpolate baked keys with monotone cubic (PCHIP) over
+key eulers, live base as the s=0 knot — C1, overshoot-free, so monotone key
+values can never reverse mid-segment. Debug view of choice: continuous
+joint-trajectory plots from per-frame world positions (work/kneel2/
+plot_traj.py); frame sheets hide exactly this defect class.
+
+Addendum 2 (tail/springbones, same day): (a) pose-overlay scenes double-step
+springbones — the engine post-frame vrm.update is unconditional for
+registered VRMs while the overlay must also update; pose_layers now swallows
+the duplicate (humanoid commit only). (b) A spring chain hanging in a limb's
+collider sweep gets PUNTED into a new shape every frame (~10Hz thrash) —
+damping cannot fix a positional mechanism; steer the chain OUT of the sweep.
+(c) claude_suit's tail has no animatable root (all links are joints parented
+to hips): steer via spring settings — blend gravityDir/gravityPower (wind
+pull) + raise dragForce while the beat is active, restore exactly after.
+Debug view: 30fps consecutive-frame crops of the chain region (tail_strip_*
+in work/kneel2/).
+
 ## Deno 2.9.5 effects-path check and WSL rendering — Fable, 2026-09-12
 
 - The old 2.8.1 pin ("2.9.x corrupts the effects path") did not reproduce.
@@ -1106,3 +1157,29 @@ examples/unknown_force/.
   each set reads. Fetch with the repo's fetchers on first use and prune to the manifest (a set that finds an extra map
   may use it). Git-ignore the fetched folders. A library folder at the same depth as the film's keeps
   `../../../`-relative paths valid.
+
+## Mesh-level contact solving for pose overlays — Fable, 2026-11-12
+
+Review round 2 of pose_layers.js (PR #4) reworked the kneel's contacts from
+joint-center targets to skinned-vertex targets. What transfers:
+
+- Joint-center metrics cannot see a rigid toe box rotating through the
+  floor: CPU-skin the shoe/shin vertex groups (dominant-weight bucketing by
+  humanoid-bone subtree) and gate on the per-frame minimum.
+- Hip DOF roles MIGRATE with thigh pitch: upright, hip-y twists the foot
+  and hip-z abducts; near-horizontal thighs swap them, and at 30-50° they
+  mix — solve (hip-y, hip-z) → (foot yaw, pelvis x) jointly (2×2 Newton)
+  or coordinate descent converges to whichever target ran last.
+- Dense per-sample contact fixes need CONTINUATION (seed from the previous
+  sample, trust-region steps): independent solves flip between solution
+  branches (a 127° toe snap over Δs = 0.015) and PCHIP rings through them.
+- The base clip's idle sway makes any bake-time absolute reference wrong by
+  ±1-2 cm at runtime: re-capture the planted-ankle anchor and floor height
+  at track construction, and pin the hips to it per frame.
+- A runtime foot servo must respect rotation authority: a dug HEEL sits
+  under the ankle pivot where no rotation can lift it (tiny Jacobians turn
+  the step into a noise random-walk), and persisted corrections must decay
+  (leaky) or an onset fix freezes into the hold 20° wrong.
+- Leg-length scaling of hips deltas does NOT port floor contacts between
+  rigs (claude.vrm knee lands ~10 cm under with claude_suit's key table —
+  proportions, not just scale). Contacts are per-rig; re-solve offline.

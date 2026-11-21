@@ -98,7 +98,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Audio and speech](tools-guides/audio.md) | Music, SFX, narration, voice processing, lyric timing, lipsync and mixing. |
 | [Voice synthesis](tools-guides/voicebox.md) | Singing or speaking voices made from scratch, historical machine-voice eras (1939 Voder → neural), choirs, phoneme-exact visemes. |
 | [Music synthesis](tools-guides/synthkit.md) | Hand-built instruments and drums, sequencing, sidechain, designed FX, loudness-targeted mastering. |
-| [VRM characters](tools-guides/characters.md) | Loading, casting, animating, walking, running, gestures, sitting, foot IK, performance clips, the claudesona's face and outfits (the wardrobe, the TuTa and its badges), turntable sheets. |
+| [VRM characters](tools-guides/characters.md) | Loading, casting, animating, walking, running, gestures, sitting, foot IK, performance clips, pose overlays for beats the clip library lacks (kneel-and-place), the claudesona's face and outfits (the wardrobe, the TuTa and its badges), turntable sheets. |
 | [VRM autonomous navigation](tools-guides/navigation.md) | Sensor cones, occupancy memory, landmarks, route planning and diagnostics. |
 | [Procedural and realistic creatures](tools-guides/creatures.md) | Creature morphology, gait, speech and optional cached realist pipelines. |
 | [Clippy character](tools-guides/clippy.md) | Paperclip morphs, named performances and deterministic animation. |
