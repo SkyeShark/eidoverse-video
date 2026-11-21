@@ -17,7 +17,9 @@
      exponent under 1.5; the carved trunk a box trough (its floor level across, its walls at 60 degrees or more over
      most of their height, standing 300 m or more within 250 m of the floor), the tributaries hanging at least 100
      m, the trough near its width (the judge's U exponent is recorded: a box trough reads 3-8 there, as
-     Lauterbrunnen's middle reach does, 5.1 and 5.4)
+     Lauterbrunnen's middle reach does, 5.1 and 5.4), all in massive rock; then the same valley in weak rock (the
+     recipe's rock_weak_deg everywhere): its walls fail back into a U (under a fifth of their height at 60 degrees
+     or more, the U exponent 1.3-2.6, as Lauterbrunnen's narrower reaches read 1-2.3)
   5. cost: the whole carve (discharge, centrelines, cirques, jump flood, carve, walls) on a 1024^2 level
 Writes blender/tests/terrain/out/glacial/gpu_tests.json; exit code 1 on a failure.
 """
@@ -51,7 +53,7 @@ RESULTS, FAILED = {}, []
 F32 = np.float32
 GPU = FL.device('gpu')
 TWIN = FL.device('twin')
-PROF = G.profile_uniforms({'floor_frac': 0.25, 'wall_toe': 0.3, 'wall_lip': 0.2, 'floor_rise': 0.06,
+PROF = G.profile_uniforms({'floor_frac': 0.25, 'wall_toe': 0.3, 'wall_lip': 0.2, 'floor_rise': 0.06, 'apron': 0.33,
                            'shoulder_width': 1.5, 'shoulder_rise': 0.3, 'upper_wall': 1.5})
 
 
@@ -283,10 +285,11 @@ def test_u_fit():
                           pins=FL.edge_pins(lv.n, h), shared={}, seed=1, base_elevation_m=0.0, device=GPU,
                           log=lambda m: print(m, flush=True))
     # alpine_valley's glacial stage as the recipe resolves it (its cross-section, overdeepening, shoulder cut, head
-    # taper), the trough 600 m deep in this 2.4 km range, the whole valley glaciated
+    # taper), the trough 600 m deep in this 2.4 km range, the whole valley glaciated, in massive rock (rock_weak_deg
+    # None; the weak rock's walls are the last check)
     _, stages = AV.ALPINE_VALLEY.resolve({})
     params = dict([s for s in stages if s.op == 'glacial'][0].params, ela_m=600.0, trough_depth_m=600.0,
-                  cirques=False, channel_area_m2=1.0e6)
+                  cirques=False, channel_area_m2=1.0e6, rock_weak_deg=None)
     rec = G.carve_level(fields, lv, params, 1, ctx, GPU)
     after = FA.alpine_valley(np.asarray(fields['h'], np.float64), lv.cell)
     np.savez_compressed(os.path.join(OUT, 'synthetic_valley.npz'), before=h, after=np.asarray(fields['h'], F32),
@@ -313,6 +316,19 @@ def test_u_fit():
     check(f"trough on a synthetic valley: the trough near its {tw:.0f} m width (half to twice: the judge measures "
           f"to the walls' shoulders)", 0.5 * tw <= after.get('trough_width_m', 0) <= 2.0 * tw,
           f"{after.get('trough_width_m', 0):.0f} m")
+    # the same valley in weak rock (the recipe's rock_weak_deg, none of the ground massive): the fresh walls fail
+    # back after the carve to about 45 degrees over their talus, a U in place of the box
+    weak = Fields(lv, {'h': h.copy(), 'bed': h.copy()})
+    ctx.pins = FL.edge_pins(lv.n, h)
+    G.carve_level(weak, lv, dict(params, rock_weak_deg=float(AV.GLACIAL['rock_weak_deg']), rock_strong_share=0.0),
+                  1, ctx, GPU)
+    after_w = FA.alpine_valley(np.asarray(weak['h'], np.float64), lv.cell)
+    steep_w = float(np.median([s['steep'] for s in box_sections(weak['h'], lv)]))
+    bw = after_w.get('u_exponent', float('nan'))
+    check("trough on a synthetic valley in weak rock: the walls fail back into a U (under a fifth of their height at "
+          "60 degrees or more; the judge's U exponent 1.3-2.6)", steep_w < 0.2 and 1.3 <= bw <= 2.6,
+          f"{steep_w * 100:.0f} % of the walls' height at 60 deg or more (massive rock {steep * 100:.0f} %); U "
+          f"exponent {bw:.2f} (sections {after_w.get('u_exponents')}), width {after_w.get('trough_width_m', 0):.0f} m")
 
 
 # ------------------------------------------------------------------------------------------------- 5. cost ---

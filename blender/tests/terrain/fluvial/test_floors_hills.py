@@ -31,6 +31,15 @@ numpy twins; no Blender):
        same depth within 5 mm, not two levels' depths stacked
        a closed hollow 0.6 m deep between two swales 60 m apart is solved as hillslope (under 10 % of it flatter than
        0.05 degrees, no closed depression left over 2 cm), not held flat at its fill level
+       lake_receivers (solvers/hydro.py, the channels' continuation across filled hollows): a path into a filled
+       hollow runs down its floor to its lowest cell (within a cell) and out to its spill, where the breadth-first
+       steps across the level fill pass 4 cells and more from it; every path ends at an outlet
+  fluvial band_blend, hold_rivers (solvers/fluvial.py)
+       pulled to its pins at its weight every pass, a band cell of weight 0.25 or more moves under 5 % of what the
+       level moves it free (the band is a pin); blended, the outcome is the run with only the seam's two cells held,
+       mixed with the parent by the band's weights (within 1e-4 m)
+       hold_rivers on a hero level: the river the parent resolved keeps its heights (within 1e-4 m; free it moves
+       over 5 cm), and the ground around it refines at least half as much as free
   incise (solvers/fluvial.py)
    10. a base-level fall along a straight course over a hilly upland: the channel is cut to the upland's grade minus
        drop_m (within 15 %), the cut falls off away from the course (a valley), and 900 m and more from it the
@@ -64,6 +73,7 @@ os.makedirs(OUT, exist_ok=True)
 
 import numpy as np  # noqa: E402
 
+from eidoblend.terrain.core import grid as Gd  # noqa: E402
 from eidoblend.terrain.core import levels as L  # noqa: E402
 from eidoblend.terrain.core.fields import Fields  # noqa: E402
 from eidoblend.terrain.solvers import fluvial as FL  # noqa: E402
@@ -481,6 +491,119 @@ def test_soil_hollows():
           f'{float(np.max(filled - hn)):.3f} m')
 
 
+def test_lake_receivers():
+    """hydro.lake_receivers: a path into a filled hollow runs down the hollow's floor to its lowest ground and out
+    to its spill, where the breadth-first steps across the level fill (flow_receivers) run straight to the spill
+    whatever the floor; every path still ends at an outlet."""
+    n, cell = 96, 5.0
+    lv = L.Level(0, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    # a plane falling south, a bowl on it, and a deep pocket in the bowl's east
+    g = 0.02 * (y - lv.y0) - 3.0 * np.exp(-((x - 20.0) ** 2 + y ** 2) / (2 * 45.0 ** 2)) \
+        - 2.0 * np.exp(-((x - 105.0) ** 2 + (y - 10.0) ** 2) / (2 * 15.0 ** 2))
+    filled, _ = HY.fill_depressions(g)
+    lake = (filled - g) > 1e-4
+    low = int(np.argmin(np.where(lake, g, np.inf)))
+    jl, il = divmod(low, n)
+    top = np.nonzero(lake.ravel())[0]
+    start = int(top[np.argmax(y.ravel()[top])])                  # the hollow's northmost cell
+    rec_new = HY.lake_receivers(filled, g)
+
+    def path(rec):
+        c, cells = start, []
+        for _ in range(4 * n * n):
+            cells.append(c)
+            if rec[c] < 0:
+                return cells, True
+            c = int(rec[c])
+        return cells, False
+
+    def closest(cells):
+        jj, ii = np.divmod(np.asarray(cells), n)
+        return float(np.min(np.hypot(jj - jl, ii - il)))
+    new, ends_new = path(rec_new)
+    old, ends_old = path(HY.flow_receivers(filled))
+    ptr = np.where(rec_new >= 0, rec_new, np.arange(rec_new.size))
+    for _ in range(64):
+        ptr = ptr[ptr]
+    every = bool(np.all(rec_new[ptr] < 0))
+    ok = closest(new) <= 1.0 and closest(old) >= 4.0 and ends_new and ends_old and every
+    check('lake_receivers: a path across a filled hollow follows its floor to the lowest ground, then out', ok,
+          f'closest approach to the hollow\'s lowest cell: {closest(new):.1f} cells (breadth-first: {closest(old):.1f}); '
+          f'paths end at an outlet: {ends_new}, every cell: {every}')
+
+
+def band_pins(n, h):
+    """A child level's pins as run.py's child_pins makes them: weight 1 on the outer two cells, easing to 0 at 16."""
+    d = Gd.edge_distance(n).astype(np.float64)
+    t = np.clip((d - 2.0) / 14.0, 0.0, 1.0)
+    z = np.zeros((n, n), np.float32)
+    return dict(pin_w=(1.0 - t * t * (3.0 - 2.0 * t)).astype(np.float32), pin_h=np.asarray(h, np.float32), A_in=z,
+                qs_in=z.copy())
+
+
+def test_band_blend():
+    """band_blend, the border band as a ramp. Pulled to its pins at its weight in every pass, the whole band holds the
+    parent's surface (a weight of 0.05 compounded over hundreds of passes is a pin), so the level's own change meets
+    it in a step at the band's inner edge (the meadow's steep edge strips). Blended once, the change fades across the
+    ramp: the outcome is the run with only the seam's two cells held, mixed with the parent by the band's weights."""
+    n, cell = 48, 1.0
+    lv = L.Level(0, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    h0 = 0.08 * (y - lv.y0) + 0.5 * np.sin(2 * np.pi * x / 16.0) * np.cos(2 * np.pi * y / 24.0)
+    pins = band_pins(n, h0)
+    w = pins['pin_w'].astype(np.float64)
+    hard = dict(pins, pin_w=np.where(w >= 1.0, 1.0, 0.0).astype(np.float32))
+    p = {'K': 2e-3, 'valley_spacing_m': 12.0, 'roughness': 0.0, 'threshold_noise': 0.0, 'lock_m': 16.0, 'steps': 120}
+
+    def departure(pn, blend):
+        f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32)})
+        ctx = FL.StageContext(plan=[lv], index=0, level=lv, fresh=False, role='refine', pins=pn, device=DEV,
+                              log=lambda m: None)
+        FL.op_fluvial(f, lv, dict(p, band_blend=blend), seed=1, ctx=ctx)
+        return np.asarray(f['h'], np.float64) - h0
+    pinned, free, blended = departure(pins, False), departure(hard, False), departure(pins, True)
+    ramp = (w >= 0.25) & (w < 1.0)
+    held = float(np.max(np.abs(pinned[ramp])) / max(np.max(np.abs(free[ramp])), 1e-9))
+    err = float(np.max(np.abs(blended - (1.0 - w) * free)))
+    seam = float(np.max(np.abs(blended[w >= 1.0])))
+    ok = held < 0.05 and err < 1e-4 and seam < 1e-4
+    check('fluvial band_blend: the band is a ramp, not a pin', ok,
+          f'pinned every pass, the band cells of weight 0.25-1 moved at most {100 * held:.1f} % of what the level '
+          f'moved them free (a pin, whatever the weight); blended, the outcome is the free run mixed by the weights '
+          f'within {err:.1e} m, the seam cells moved {seam:.1e} m')
+
+
+def test_hold_rivers():
+    """hold_rivers on a hero level: the river the parent resolved (its inherited drainage area over hold_rivers lock
+    blocks) keeps its course and profile through the refine, so the parent's inflow entering at the window's edge
+    still runs down it; the ground around it refines (gullies, the lock's uplift) as before."""
+    n, cell = 64, 2.0
+    main = L.Level(0, 'main', -128.0, -128.0, 256.0, 4.0, 64, None, 2, (), 16, 0)
+    lv = L.Level(1, 'hero', -n * cell / 2, -n * cell / 2, n * cell, cell, n, 0, 1, (), 16, -1)
+    x, y = lv.xy()
+    # a valley falling west, its river along y = 0 entering at the east edge with 0.3 km2 from outside the window
+    h0 = 0.05 * (x - lv.x0) + 0.4 * np.abs(y) + 0.3 * np.sin(x / 7.0) * np.cos(y / 5.0)
+    river = np.abs(y) < 0.6 * cell
+    A0 = np.where(river, 3.0e5 + 20.0 * (lv.x0 + lv.side - x), cell * cell)
+    pins = band_pins(n, h0)
+    pins['A_in'] = np.where(river & (np.arange(n)[None, :] == n - 1), 3.0e5, 0.0).astype(np.float32)
+    out = {}
+    for hold in (0.0, 4.0):
+        f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32), 'A': A0.astype(np.float32)})
+        ctx = FL.StageContext(plan=[main, lv], index=1, level=lv, fresh=False, role='refine', pins=pins,
+                              device=DEV, log=lambda m: None)
+        FL.op_fluvial(f, lv, {'K': 2e-3, 'valley_spacing_m': 16.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                              'lock_m': 32.0, 'steps': 150, 'hold_rivers': hold}, seed=1, ctx=ctx)
+        dh = np.asarray(f['h'], np.float64) - h0
+        out[hold] = (float(np.max(np.abs(dh[river]))), float(np.percentile(np.abs(dh[~river]), 90)))
+    (r0, g0), (r1, g1) = out[0.0], out[4.0]
+    ok = r1 < 1e-4 and r0 > 0.05 and g1 > 0.5 * g0
+    check('fluvial hold_rivers: a hero level keeps the river its parent resolved', ok,
+          f'the river\'s cells moved at most {r1:.1e} m held ({r0:.2f} m free); the ground around moved '
+          f'{g1:.2f} m (p90) held, {g0:.2f} m free')
+
+
 def test_grow_levels():
     from eidoblend.terrain import run as RUN
     from eidoblend.terrain.core.recipe import Recipe, Stage
@@ -500,8 +623,8 @@ def test_grow_levels():
 def main():
     for fn in (test_floor_widths, test_floor_drains, test_tributary_backfill, test_soil_steady, test_soil_asymmetry,
                test_soil_seed, test_soil_heads, test_soil_floor_hold, test_rill_width, test_rills_once,
-               test_soil_hollows, test_incise, test_incise_head, test_incised_held, test_regional_cut,
-               test_grow_levels):
+               test_soil_hollows, test_lake_receivers, test_band_blend, test_hold_rivers, test_incise,
+               test_incise_head, test_incised_held, test_regional_cut, test_grow_levels):
         try:
             fn()
         except Exception as e:                                         # noqa: BLE001
