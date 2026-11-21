@@ -26,12 +26,27 @@
      shape and every carved cell carved by a trough within reach (a seed of no size is a level plane that the jump
      flood ranks first everywhere: on 11-13 the main tile got no trough)
  10. sharpen_walls: a trough carved on 31.25 m cells and inherited at 15.6 m gets its walls back at 15.6 m (within
-     a quarter of the upsampled error and 15 m), the floor, the ground beyond the lip and the pinned band untouched
+     a quarter of the upsampled error and 15 m), the floor, the ground beyond the lip and the pinned band untouched;
+     and where the cells past one lip carry a far seed's cross-section (rho 300), no change larger than the clean
+     trough's (the parent's target read from such blocks had stood kilometres high: spikes on yosemite's walls)
  11. wall_flutes' families: no couloir on a level narrower than 2 of its cells across the fall line, and the coarse
      level's couloirs kept on the finer level over the same ground
  12. valley_centre: seeds following a path 250 m off a valley's axis move onto it; seeds on the axis stay
  13. rock_strength: the massive share as asked; massive everywhere without rock_weak_deg; the walls' angle from
      rock_weak_deg to wall_deg
+ 14. trunk_perched: a trunk river in its valley is not perched; held over its valley's floor or along a ridge's
+     crest it is, along all of its course; only the main window counts
+ 15. the massive-rock hold: a massive wall carved on a grid at a slant stands under its walls' threshold pass (no
+     cell of the wall moves by a metre), where a hold measured by central differences fails a fifth or more of it
+ 16. the cap's onset inside the lip (u_carve twin): a straight trough at a slant to the grid cut into a valley
+     side far over its lip; with the cap jumping at the lip the slope of the lip band's cells varies along the wall
+     (the staircase of a step: beads), with the onset over the recipe's cells by under a third of that
+ 17. the wobble smoothed along the stream: a trough's W and H change from one seed to the next by under 7 %, where
+     the unsmoothed noise changes them by twice that (steps the carve's envelope over the seeds draws as arcs)
+ 18. confinement (valley_confinement, centrelines' confine): a seed in a V valley deeper than its trough is
+     confined, on a terrace or a flat not; on a trunk valley with an old valley floor (a bench) and a tributary that
+     comes down a V valley and then crosses the bench in a shallow swale, the tributary keeps its trough in the V
+     and cuts a shallow one across the bench, and the trunk's seeds are the same with and without confine
 Writes blender/tests/terrain/out/glacial/twin_tests.json; exit code 1 on a failure.
 """
 import json
@@ -406,6 +421,71 @@ def test_trunk():
           f"{lv.cell:g} m", round(time.perf_counter() - t0, 2))
 
 
+def test_massive_hold():
+    """A massive trough wall stands under its own threshold pass: the recipe's cross-section carved at 31.25 m on a
+    grid 20 degrees off the valley's axis, its walls' threshold (_wall_sc with the surface: the hold at the slope
+    the pass itself measures, upwind_slope) run for the carving level's passes, changes no cell of the wall band by
+    a metre; held at the central-difference slope instead, a fifth or more of them fail (the row of teeth)."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain import recipes as RG
+    from eidoblend.terrain.core import grid as Gd
+    from eidoblend.terrain.core.levels import Level
+    _, stages = RG.get('alpine_valley').resolve({})
+    gp = dict([s for s in stages if s.op == 'glacial'][0].params, rock_weak_deg=None, wall_iters=100)
+    n, cell = 96, 31.25
+    lv = Level(0, 'context', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    a = math.radians(20.0)
+    rho = np.abs(x * math.cos(a) + y * math.sin(a)) / 475.0
+    h = np.minimum(900.0 + 0.4 * 475.0 * rho,
+                   G.trough_target(rho, 0.0, 700.0, G.floor_frac(gp), 0.0, 0.06, G.profile_uniforms(gp)))
+    dev = FL.device('twin')
+    pins = FL.edge_pins(n, h.astype(F32))
+    band = (rho > 0.7) & (rho < 1.25) & (np.abs(x) < 0.35 * n * cell) & (np.abs(y) < 0.35 * n * cell)
+    out = {}
+    for how in ('upwind', 'central'):
+        f = {'h': h.astype(F32), 'bed': h.astype(F32)}
+        sc = G._wall_sc(lv, gp, 3, dev)
+        if how == 'upwind':
+            sc = G._wall_sc(lv, gp, 3, dev, surface=h)
+        else:
+            gx, gy = Gd.gradient(h, cell)
+            sc = np.maximum(sc, 1.05 * np.hypot(gx, gy))
+        G._walls(dev, f, lv, sc, pins, int(gp['wall_iters']), float(gp.get('wall_rate', 0.12)))
+        d = np.abs(np.asarray(f['h'], np.float64) - h)[band]
+        out[how] = (float((d > 1.0).mean()), float(d.max()))
+    check('massive rock holds its wall: the walls\' threshold changes no cell of a massive wall with the hold at the '
+          'pass\'s own slope (a fifth or more fail held at central differences)',
+          out['upwind'][0] == 0.0 and out['central'][0] >= 0.2,
+          f"upwind hold: {out['upwind'][0] * 100:.1f} % of the wall band moved over 1 m (max {out['upwind'][1]:.1f} m); "
+          f"central-difference hold: {out['central'][0] * 100:.1f} % (max {out['central'][1]:.1f} m)",
+          round(time.perf_counter() - t0, 2))
+
+
+def test_trunk_perched():
+    """trunk_perched: a trunk river at the bottom of its V valley lies in a valley (share 0); held 400 m over that
+    valley's floor, or along the crest of a ridge, it is perched along all of it (share 1); only the cells inside
+    the main window count."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain.core.levels import Level
+    n, cell = 128, 31.25
+    lv = Level(0, 'context', -2000.0, -2000.0, n * cell, cell, n)
+    main = Level(2, 'main', -1000.0, -1000.0, 2000.0, 2000.0 / n, n)
+    x, _ = lv.xy()
+    trunk = (np.abs(x) < cell).astype(F32)                        # the channel down the valley's axis (two cells)
+    valley = 0.6 * np.abs(x) + 200.0                               # a V valley, its sides at 31 degrees
+    held = np.where(trunk > 0.5, valley + 400.0, valley)           # the channel held 400 m over the floor beside it
+    ridge = 900.0 - 0.6 * np.abs(x)                                # a ridge whose crest the channel follows
+    a = G.trunk_perched(valley, trunk, lv, main)
+    b = G.trunk_perched(ridge, trunk, lv, main)
+    c = G.trunk_perched(held, trunk, lv, main)
+    out = G.trunk_perched(ridge, trunk, lv, Level(2, 'main', 1100.0, -1000.0, 800.0, 800.0 / n, n))
+    check('trunk_perched: a river in its valley 0, held over its floor or on a ridge 1, only inside the main window',
+          a == 0.0 and b == 1.0 and c == 1.0 and out == 0.0,
+          f'in its valley {a:.2f}, on a ridge {b:.2f}, held 400 m over its floor {c:.2f}, a main window the channel '
+          f'does not cross {out:.2f}', round(time.perf_counter() - t0, 2))
+
+
 def test_drainage_receivers():
     """The ice's receivers (drainage_receivers): on rough ground with closed basins, and on the case that broke the
     tilted routing surface (a cell 1 mm above a broad flat it drains into), every interior cell has a way down and
@@ -511,6 +591,89 @@ def test_shoulder_cut():
           'the cut at the lip, untouched beyond', not bad, '; '.join(notes), round(time.perf_counter() - t0, 2))
 
 
+def test_cap_onset():
+    """The cap's onset inside the lip (u_carve twin, cap_onset_cells): a straight trough of the recipe's cross-section
+    on 31.25 m cells, 20 degrees off the grid's axes, cut into a valley side that stands 640 m over the lip there
+    (a spur the trough truncates). With the cap jumping at the lip, the surface steps there by the old ground's excess
+    over the cap, and the cells along the wall straddle the step at every phase: the slope the grid gives the lip
+    band, read along lines parallel to the wall, varies with the staircase's period (a beaded row of dents); with the
+    onset over the recipe's cells the cut face is drawn over cells and that variation is under a third of it, and
+    under 8 degrees. Both carve the same trough (the floor and the wall below the onset's band within a metre)."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain import recipes as RG
+    _, stages = RG.get('alpine_valley').resolve({})
+    gp = [s for s in stages if s.op == 'glacial'][0].params
+    W, H = 0.5 * float(gp['trough_width_m']), float(gp['trough_depth_m'])
+    n, cell = 96, 31.25
+    a = math.radians(20.0)
+    ax, ay = math.sin(a), math.cos(a)                              # the trough's axis
+    jj, ii = np.mgrid[0:n, 0:n]
+    xp, yp = (ii + 0.5) * cell, (jj + 0.5) * cell
+    c0 = 0.5 * n * cell
+    s = (xp - c0) * ax + (yp - c0) * ay                            # along the axis
+    r = np.abs((xp - c0) * ay - (yp - c0) * ax)                    # from the axis
+    # the seeds: one per cell along the axis, at the axis point; each cell's candidate the nearest by its s
+    ks = np.arange(-n, n + 1) * cell
+    sx, sy = c0 + ks * ax, c0 + ks * ay
+    si = np.clip(np.floor(sx / cell).astype(int), 0, n - 1)
+    sj = np.clip(np.floor(sy / cell).astype(int), 0, n - 1)
+    ok = (sx > 0) & (sy > 0) & (sx < n * cell) & (sy < n * cell)
+    A = np.zeros((n, n, 4), F32)
+    B = np.zeros((n, n, 4), F32)
+    B[..., 0] = 1.0
+    used = {}
+    for k in np.flatnonzero(ok):
+        if (sj[k], si[k]) in used:
+            continue
+        used[(sj[k], si[k])] = k
+        A[sj[k], si[k]] = (sx[k], sy[k], 0.0, H)
+        B[sj[k], si[k]] = (W, 0.0, 0.0, 0.0)
+    cells = np.array([(j, i) for (j, i) in used], np.int64)
+    proj = np.array([ks[used[(j, i)]] for (j, i) in used])
+    order = np.argsort(proj)
+    pk = proj[order]
+    pos = np.clip(np.searchsorted(pk, s), 1, len(pk) - 1)
+    near = np.where(np.abs(pk[pos] - s) < np.abs(pk[pos - 1] - s), pos, pos - 1)
+    cand = np.full((n, n, 4), -1.0, F32)
+    cj, ci = cells[order][near][..., 0], cells[order][near][..., 1]
+    cand[..., 0] = (cj * n + ci).astype(F32)
+    h = (H + 640.0 + 0.5 * (r - W)).astype(F32)                   # a valley side 640 m over the lip at the lip
+    base = dict(G.carve_uniforms(gp), uDx=cell, uJoin=float(G._p(gp, 'join_m')), uTrim=float(G._p(gp, 'trim_m')),
+                uMorAt=0.6, uMorW=0.07, uNCirq=0, uCirqExp=2.0, uCirqFloor=0.35, uCirqOpen=2.5, uCirqTilt=0.14,
+                uBound=T.BOUND_OPEN)
+    inner = (np.abs(s) < 0.3 * n * cell) & (np.abs(r) < 0.45 * n * cell)
+    out = {}
+    for name, onset in (('step', 0.0), ('onset', float(base['uCapIn']))):
+        res = G.u_carve({'candT': cand, 'seedA': A, 'seedB': B, 'seedC': G.default_seed_c((n, n)),
+                         'st': T.rgba(h, h - 2.0), 'cirq': G.cirque_texture(np.zeros((0, 11)), None),
+                         'pin': T.rgba(np.zeros((n, n), F32), np.zeros((n, n), F32))}, dict(base, uCapIn=onset))
+        hn = res['outS'][..., 0].astype(np.float64)
+        gy, gx = np.gradient(hn, cell)
+        slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+        # the slope along lines parallel to the wall through the lip band (bilinear between the cells): a surface
+        # the grid draws well varies smoothly along them, a step drawn as a staircase varies with its period
+        sd = []
+        for off in np.arange(-4.0, 2.0, 0.25) * cell:
+            t = np.arange(-0.3, 0.3, 0.02) * n * cell
+            px = c0 + t * ax + (W + off) * ay
+            py = c0 + t * ay - (W + off) * ax
+            fi, fj = px / cell - 0.5, py / cell - 0.5
+            i0, j0 = np.floor(fi).astype(int), np.floor(fj).astype(int)
+            u, v = fi - i0, fj - j0
+            z = ((slope[j0, i0] * (1 - u) + slope[j0, i0 + 1] * u) * (1 - v) +
+                 (slope[j0 + 1, i0] * (1 - u) + slope[j0 + 1, i0 + 1] * u) * v)
+            sd.append(float(np.std(z)))
+        out[name] = (float(np.max(sd)), hn)
+    deep = inner & (r < 0.5 * W)
+    same = float(np.max(np.abs(out['step'][1][deep] - out['onset'][1][deep])))
+    ok = out['onset'][0] < out['step'][0] / 3.0 and out['onset'][0] < 8.0 and same < 1.0
+    check('the cap\'s onset inside the lip: the cut face over a truncated spur is drawn over cells, not a step the '
+          'grid staircases along a slanted wall', ok,
+          f"the slope along lines parallel to the wall through its lip band varies by {out['step'][0]:.1f} deg (the "
+          f"largest std) with the step, {out['onset'][0]:.1f} deg with the onset over {base['uCapIn']:g} cells; the "
+          f"floor and the lower wall the same within {same:.3f} m", round(time.perf_counter() - t0, 2))
+
+
 def test_lip_open():
     """lip_open on a trough section (rho from the trough's axis): a clean cliff with a shoulder rising behind its lip
     is left exactly as it is; a 40 m rim standing on the lip with a gutter behind it (what the protected lip strip
@@ -607,8 +770,9 @@ def test_head_taper_carve():
     dev = FL.device('twin')
     lv, h = v_valley()
     _, stages = AV.ALPINE_VALLEY.resolve({})
+    # (confine off: the shape the taper alone keeps; the confinement scales a tributary's depth, test_confinement)
     params = dict([s for s in stages if s.op == 'glacial'][0].params, ela_m=500.0, trough_depth_m=600.0,
-                  cirques=False, channel_area_m2=1.0e6)
+                  cirques=False, channel_area_m2=1.0e6, confine=0.0)
     recv, _ = G.drainage_receivers(h, lv.cell)
     b = G.mass_balance(h, 0.0, params)
     Q, _ = G.ice_flux_converge(dev, h, b, lv.cell, recv, 0.0, params=params, check=32)
@@ -636,6 +800,121 @@ def test_head_taper_carve():
           f"{cl['idx'].size} seeds, H/W {ratio.min():.2f}..{ratio.max():.2f} (untapered {r0:.2f}); {own * 100:.1f} % "
           f"of the {int(carved.sum())} carved cells within rho {reach:.1f} of their best seed; trough "
           f"{trough * 100:.1f} % of the grid, deepest cut {cut.max():.0f} m", round(time.perf_counter() - t0, 2))
+
+
+def test_wobble_smooth():
+    """The wobble smoothed along the stream (wobble_smooth_cells): on v_valley at 62.5 m (the recipe's glacial stage,
+    no taper, no confinement), the trough's half-width and depth change from one seed to the next by under 7 % (p95
+    under 4 %), where the unsmoothed noise changes them by twice that or more: the carve's lower envelope over the
+    seeds takes the widest one nearby, and steps of 10-30 m between neighbours drew the walls as chains of arcs."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain.recipes import alpine_valley as AV
+    lv, h = v_valley(n=128, cell=62.5)
+    _, stages = AV.ALPINE_VALLEY.resolve({})
+    dev = FL.device('twin')
+    out = {}
+    for ws in (0.0, float(G._p({}, 'wobble_smooth_cells'))):
+        params = dict([s for s in stages if s.op == 'glacial'][0].params, ela_m=500.0, trough_depth_m=600.0,
+                      cirques=False, channel_area_m2=1.0e6, confine=0.0, head_taper=0.0, wobble_smooth_cells=ws)
+        recv, _ = G.drainage_receivers(h, lv.cell)
+        b = G.mass_balance(h, 0.0, params)
+        Q, _ = G.ice_flux_converge(dev, h, b, lv.cell, recv, 0.0, params=params, check=32)
+        A, _ = G.ice_flux_converge(dev, h, np.ones_like(b), lv.cell, recv, 0.0,
+                                   params=dict(params, ice_width_m=0.0), check=32)
+        cl = G.centrelines(h, Q, A, recv, lv, lv, params, 0.0, seed=1)
+        st = cl['streams']
+        ok = (st['rcv'] >= 0) & st['cont']
+        rc = st['rcv'][ok]
+        rel = np.concatenate([np.abs(cl[k][ok] - cl[k][rc]) / np.maximum(cl[k][ok], 1e-9) for k in ('W', 'H')])
+        out[ws] = (float(np.percentile(rel, 95)), float(rel.max()))
+    (r0, m0), (r1, m1) = out[0.0], out[max(out)]
+    check('the wobble smoothed along the stream: W and H change seed to seed by under 7 % (p95 under 4 %), the '
+          'unsmoothed noise by twice that', m1 < 0.07 and r1 < 0.04 and m0 > 2.0 * m1,
+          f'smoothed p95 {r1 * 100:.1f} %, max {m1 * 100:.1f} %; unsmoothed p95 {r0 * 100:.1f} %, max {m0 * 100:.1f} %',
+          round(time.perf_counter() - t0, 2))
+
+
+def bench_valley(n=96, cell=62.5):
+    """A trunk river valley draining north (2 % gradient) in an old valley floor: an inner V 300 m to a side, then a
+    bench rising at 0.05 out to 1.5 km, then 30-degree slopes; and a tributary from the west along y = 0 that comes
+    down the slopes in a V valley (30-degree sides, its floor falling 10 % toward the bench) and crosses the bench in
+    a swale 15 m deep and 500 m wide (the coarsest level's kind of surface on seeds 5 and 6, small). Returns (level,
+    h, the tributary's x where it reaches the bench)."""
+    from eidoblend.terrain.core import levels as L
+    lv = L.plan_levels(n * cell, n, (0.0, 0.0), None, None, None)[0]
+    X, Y = lv.xy()
+    river = 300.0 + 0.02 * (lv.side / 2 - Y)
+    tan30 = math.tan(math.radians(30.0))
+    ax = np.abs(X)
+    bench_x = 1500.0
+    h = river + np.where(ax < 300.0, tan30 * ax, tan30 * 300.0 + 0.05 * (ax - 300.0))
+    slopes = h + tan30 * np.maximum(ax - bench_x, 0.0)
+    # the tributary: a V in the western slopes (its floor at the bench's edge height, rising 10 % westward)
+    edge = river + tan30 * 300.0 + 0.05 * (bench_x - 300.0)
+    v = edge + 0.10 * np.maximum(-X - bench_x, 0.0) + tan30 * np.abs(Y)
+    h = np.where(X < -bench_x, np.minimum(slopes, v), slopes)
+    # across the bench, the swale
+    swale = 15.0 * np.clip(1.0 - np.abs(Y) / 250.0, 0.0, 1.0)
+    h = np.where((X >= -bench_x) & (X < -300.0), h - swale, h)
+    return lv, (h + 0.5 * T.random_field((n, n), 0, 1, 7, smooth=2)).astype(F32), -bench_x
+
+
+def test_confinement():
+    """valley_confinement on straight seed lines: a V of 40-degree sides around a trough of the same depth as its
+    half-width x tan 40 is confined (1), a flat terrace or a plane tilted across the stream not (0), a swale 0.3 H
+    deep 0.2-0.4. Then centrelines with alpine_valley's glacial stage on bench_valley, confine 0 and 1 (twin
+    device): the trunk's seeds (the main window's largest discharge) are the same; the tributary keeps its trough's
+    depth where it comes down its V valley (H 0.6 or more of the unconfined) and cuts a shallow one across the bench
+    (H at most half), its overdeepening scaled alike; every H over 0."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain.core.levels import Level
+    from eidoblend.terrain.recipes import alpine_valley as AV
+    n, cell = 64, 31.25
+    lv0 = Level(0, 'context', -1000.0, -1000.0, n * cell, cell, n)
+    X, Y = lv0.xy()
+    S = 20
+    xy = np.stack([np.linspace(-600.0, 600.0, S), np.zeros(S)], 1)
+    st0 = {'main': np.r_[-1, np.arange(S - 1)], 'rcv': np.r_[np.arange(1, S), -1]}
+    W0, H0 = np.full(S, 150.0), np.full(S, 150.0 * math.tan(math.radians(40.0)))
+    meas = {}
+    for name, hh in (('V 40 deg', math.tan(math.radians(40.0)) * np.abs(Y)), ('terrace', 0.0 * Y),
+                     ('tilted across', 0.3 * Y), ('swale 0.3 H', 0.3 * H0[0] * np.clip(np.abs(Y) / 150.0, 0, 1))):
+        meas[name] = float(np.median(G.valley_confinement(hh, lv0, xy, st0, W0, H0)[2:-2]))
+    part1 = (meas['V 40 deg'] >= 0.9 and meas['terrace'] <= 0.02 and meas['tilted across'] <= 0.02
+             and 0.2 <= meas['swale 0.3 H'] <= 0.4)
+    dev = FL.device('twin')
+    lv, h, bench_x = bench_valley()
+    _, stages = AV.ALPINE_VALLEY.resolve({})
+    params = dict([s for s in stages if s.op == 'glacial'][0].params, ela_m=0.0, trough_depth_m=400.0,
+                  trough_width_m=1200.0, cirques=False, channel_area_m2=0.5e6, min_width_cells=1.5,
+                  smooth_cells=2.0, head_taper=0.0, wobble_w=0.0, wobble_h=0.0)
+    recv, _ = G.drainage_receivers(h, lv.cell)
+    b = G.mass_balance(h, 0.0, params)
+    Q, _ = G.ice_flux_converge(dev, h, b, lv.cell, recv, 0.0, params=params, check=32)
+    A, _ = G.ice_flux_converge(dev, h, np.ones_like(b), lv.cell, recv, 0.0, params=dict(params, ice_width_m=0.0),
+                               check=32)
+    cl = {cf: G.centrelines(h, Q, A, recv, lv, lv, dict(params, confine=cf), 0.0, seed=1) for cf in (0.0, 1.0)}
+    a, c = cl[0.0], cl[1.0]
+    sid = a['streams']['sid']
+    q = a['q']
+    trunk = sid == sid[int(np.argmax(q))]
+    trib = (~trunk) & (np.abs(a['y']) < 400.0) & (a['x'] < -350.0)
+    on_bench = trib & (a['x'] > bench_x + 250.0) & (a['x'] < -500.0)
+    in_v = trib & (a['x'] < bench_x - 300.0)
+    rH = c['H'] / np.maximum(a['H'], 1e-9)
+    rd = c['d'] / np.maximum(a['d'], 1e-9)
+    part2 = (bool(trunk.any() and on_bench.any() and in_v.any())
+             and bool(np.allclose(c['H'][trunk], a['H'][trunk]) and np.allclose(c['d'][trunk], a['d'][trunk]))
+             and float(np.median(rH[in_v])) >= 0.6 and float(np.median(rH[on_bench])) <= 0.5
+             and float(np.median(rd[on_bench])) <= 0.5 and bool(np.all(c['H'] > 0.0)))
+    check('confinement: a V valley confined, a terrace or a cross slope not; a tributary keeps its trough in its V and '
+          'cuts a shallow one across the bench, the trunk unchanged', part1 and part2,
+          f"V 40 deg {meas['V 40 deg']:.2f}, terrace {meas['terrace']:.2f}, tilted across {meas['tilted across']:.2f}, "
+          f"swale 0.3 H {meas['swale 0.3 H']:.2f}; tributary H x {np.median(rH[in_v]) if in_v.any() else float('nan'):.2f} "
+          f"in its V ({int(in_v.sum())} seeds), x {np.median(rH[on_bench]) if on_bench.any() else float('nan'):.2f} "
+          f"across the bench ({int(on_bench.sum())} seeds, overdeepening x "
+          f"{np.median(rd[on_bench]) if on_bench.any() else float('nan'):.2f}); trunk {int(trunk.sum())} seeds "
+          f"unchanged {bool(np.allclose(c['H'][trunk], a['H'][trunk]))}", round(time.perf_counter() - t0, 2))
 
 
 def test_sharpen_walls():
@@ -692,12 +971,31 @@ def test_sharpen_walls():
           f'the walls off the 15.6 m cross-section by {err0:.1f} m upsampled, {err1:.1f} m sharpened; the floor moved '
           f'{floor:.2g} m (the fans), beyond the lip {beyond:.2g} m, the pinned band {pinned:.2g} m',
           round(time.perf_counter() - t0, 2))
+    # the same trough where the cells just past one lip (rho over 1.05) carry a far seed's cross-section (rho 300,
+    # H 250: a stream's head hundreds of its half-widths away, as the yosemite preset's coarsest level left beside
+    # its walls): blocks that mix them with the wall must not carry a target kilometres high onto the wall
+    far = (rc > 1.05) & ((np.arange(n)[None, :] + 0.5) * cell - 0.5 * n * cell > 0)
+    p2 = dict(parent, trough_rho=np.where(far, 300.0, rc), trough_H=np.where(far, 250.0, H),
+              trough_zf=np.where(far, 190.0, 100.0), trough_ff=np.where(far, 0.2, ff))
+    child2 = {k: Gd.crop_upsample2(v, 0, 0, n, 'catmull' if k in ('h', 'bed') else 'bilinear').astype(np.float64)
+              for k, v in p2.items()}
+    before2 = child2['h'].copy()
+    G.sharpen_walls(child2, None, params, pin_w)
+    moved = float(np.abs(child2['h'] - before2)[inner].max())
+    err2 = float(np.abs(child2['h'] - exact)[walls].max())
+    check('sharpen_walls beside a far seed\'s cells: no block mixing them with the wall carries a target onto it (the '
+          'largest change within a sharpening\'s own size, the walls within 30 m of the cross-section)',
+          moved < 1.5 * float(np.abs(child['h'] - before)[inner].max()) + 5.0 and err2 < 30.0,
+          f'largest change {moved:.1f} m (the clean trough\'s {float(np.abs(child["h"] - before)[inner].max()):.1f} m), '
+          f'the walls off the cross-section by {err2:.1f} m', round(time.perf_counter() - t0, 2))
 
 
 def main():
     for fn in (test_jump_flood, test_mass_balance, test_profile, test_graded_fill, test_best_donor, test_flutes,
-               test_flute_families, test_valley_centre, test_rock, test_trunk, test_drainage_receivers,
-               test_shoulder_cut, test_lip_open, test_head_taper, test_head_taper_carve, test_sharpen_walls):
+               test_flute_families, test_valley_centre, test_rock, test_massive_hold, test_trunk, test_trunk_perched,
+               test_drainage_receivers,
+               test_shoulder_cut, test_cap_onset, test_lip_open, test_head_taper, test_head_taper_carve,
+               test_wobble_smooth, test_confinement, test_sharpen_walls):
         t0 = time.perf_counter()
         try:
             fn()

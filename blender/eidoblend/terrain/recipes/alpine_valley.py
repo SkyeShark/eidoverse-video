@@ -23,8 +23,8 @@ The stages:
      their half-widths): the river-carved range the ice works on, grown coarse-to-fine to near steady state on the
      coarsest level, refined below it;
   3. glacial (every level): on the coarsest level, once it is fully grown, the ice discharge, the cirques, the
-     carve with hanging tributaries (box troughs: a flat floor, cliffs standing at wall_deg within about 200 m of
-     it, shoulders above), the fresh walls' threshold at the angle their rock holds (wall_deg where massive, down to
+     carve with hanging tributaries (each as deep as its valley confines its ice) and box troughs (a flat floor,
+     cliffs standing at wall_deg within about 200 m of it, shoulders above), the fresh walls' threshold at the angle their rock holds (wall_deg where massive, down to
      52 degrees where weak: knob rock_strong_share), and lateral moraines (knob moraine_m); on the finer levels the
      walls in massive rock are sharpened to the level's own cells from the cross-section the carve left, and all
      keep their threshold and fail at it at each level's own scale, with couloirs of the sizes the level resolves;
@@ -72,13 +72,21 @@ SHAPES = {
 
 def _shape(p):
     spec = dict(SHAPES[p['uplift']])
+    start = spec.pop('start_m', None)
+    if start is not None:
+        # a shape that starts as an upland standing over its river (the Sierra's old surface, 'upland'): the range's
+        # start surface that high, so the held trunk river lies below it from the first pass
+        p.stage('valley_uplift')['start_m'] = float(start)
     if spec['kind'] == 'horseshoe':
         spec['azimuth_deg'] = float(p['drain_azimuth_deg'])
         if spec.get('trunk'):
             # the trunk river's bed stands bench_m over the line the trough's fill grades along (floor_grade). It is
             # held there while the range grows, and the relief controller reads the main tile's relief from its
             # highest half-percent of cells, which the held river's line fills when the range stays lower: at
-            # bench_m 970 under relief_m 1100 it cut the uplift to under 1 % and the tile came out a flat plain
+            # bench_m 970 under relief_m 1100 it cut the uplift to under 1 % and the tile came out a flat plain.
+            # (The line also rises floor_grade per metre from the coarsest level's edge, 290 m at a 48 km context:
+            # the yosemite preset's bench_m 970 under relief_m 1500 passed this check, and its river stood 1000 m
+            # over its side valleys. The carve logs such a perched river: glacial.trunk_perched)
             if float(p['bench_m']) > 0.75 * float(p['relief_m']):
                 raise ValueError(f"alpine_valley: bench_m {float(p['bench_m']):g} m is over 0.75 of relief_m "
                                  f"{float(p['relief_m']):g} m: the trunk river held that high reads as the range's "
@@ -154,16 +162,20 @@ FLUVIAL = dict(K=1.5e-5, valley_spacing_m='$valley_spacing_m', threshold_deg='$t
 # apron 0.33: the fill rises on from the floor's edge up the walls' toe at about 30 degrees, a talus apron (level
 # there, the fill made a shelf at every wall's foot whose edges stepped along the coarsest level's cells, and the
 # finer levels raised them into levees with square corners)
+# confine 1: a tributary's trough is as deep as its pre-glacial valley confines its ice (glacial.valley_confinement;
+# the trunk is cut as the knobs set it). Cut to full depth everywhere, the tributaries that cross the trunk's old
+# valley floor (the benches) to the trunk were straight, flat-floored trenches 110-130 m deep and 300 m wide in
+# swales 30-60 m deep on seeds 5 and 6: canals
 GLACIAL = dict(ela_m='$ela_m', trough_width_m='$trough_width_m', trough_depth_m='$trough_depth_m',
                wall_deg='$wall_deg', moraine_m='$moraine_m', cirques='$cirques', wall_toe=0.4, wall_lip=0.12,
                floor_rise=0.06, apron=0.33, rise_noise=0.6, rise_scale_m=900.0, floor_exp=1.0, head_taper=2.0,
-               overdeepen=1.0, overdeepen_exp=2.0, trough_depth_exp=1.6, cirque_ela_m=2200.0,
+               overdeepen='$overdeepen', overdeepen_exp=2.0, trough_depth_exp=1.6, cirque_ela_m=2200.0,
                shoulder_width='$shoulder_width', shoulder_rise=0.3, shoulder_exp=1.0, cut=0.3, cut_width=4.0,
-               shoulder_cut=0.18, shoulder_cut_width=2.0, floor_grade=0.012,
+               shoulder_cut='$shoulder_cut', shoulder_cut_width=2.0, floor_grade=0.012,
                rock_weak_deg=52.0, rock_scale_m=3000.0, rock_strong_share='$rock_strong_share', wall_iters=200,
                rock_band_m='$massive_reach_m', rock_band_down_m=1000.0, rock_band_azimuth_deg='$drain_azimuth_deg',
                wall_noise=0.25, wall_scales_m=[400.0, 120.0, 40.0], channel_area_m2=4.0e6, smooth_cells=12.0,
-               rock_flutes=0.6, flute_weak=0.6, flute_strong=0.2)
+               confine=1.0, rock_flutes=0.6, flute_weak=0.6, flute_strong=0.2)
 # (the flutes: couloirs failing to about 72 degrees on 80-degree walls (flute_weak 0.6). At the defaults' 67 degrees
 # (0.9) they cut the sharpened walls into deep grooves that hung like curtains)
 
@@ -231,6 +243,16 @@ ALPINE_VALLEY = Recipe(
                                    apply=_tributaries),
         'shoulder_width': Knob(1.5, '', (0.0, 5.0), "the benches above the trough's lip (Muerren, Wengen), as a "
                                                     "share of the trough's half-width; 0: none"),
+        'overdeepen': Knob(1.0, '', (0.0, 1.5), "how much of the trunk trough's cut (trough_depth_m) lies below its "
+                                                "river's old bed: 1, all of it, the lip at the old valley floor "
+                                                "(Lauterbrunnen's box cut into a valley floor that became its "
+                                                "benches); 0.5, half, the walls rising as far again above the old "
+                                                "bed (Yosemite's, the glacier widening the river's canyon up to its "
+                                                "rims)"),
+        'shoulder_cut': Knob(0.18, '', (0.0, 1.0), "how far the ice lowered the old valley floor beyond the lip, a "
+                                                   "share of trough_depth_m, the most at the lip (so the shoulders "
+                                                   "rise from it and their streams fall over the walls); 0: the "
+                                                   "ground beyond the lip as the river left it"),
         'rock_strong_share': Knob(0.3, '', (0.0, 1.0), "the share of the ground in massive rock (beyond the massive "
                                                        "reach), in patches a few km across, where the trough's walls "
                                                        "stand at wall_deg (a box trough); elsewhere the rock is weaker "

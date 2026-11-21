@@ -9,12 +9,19 @@
                  the valley fill's top, fill + rise H min(rho / ff, 1)^2 + uApron H max(rho - ff, 0), rise =
                  uFloorRise seedC.y (the fans rising from the river to the walls' foot, their height varying along
                  the valley, then the talus apron up the toe until the wall stands above it)
-       cap     = the largest of the candidates' caps: unbounded inside an inner trough (rho <= 1) or a cirque bowl,
-                 uCut H (1 - q)^2 beyond the lip, q = min((rho - 1) / uCutW, 1): the ice lowers the shoulders and
-                 spurs by at most that, the most at the lip and nothing at the trimline (rho = 1 + uCutW), so capped
-                 ground rises from the lip instead of standing as a shelf level with it (the smoothstep fade this
-                 replaced kept the cap nearly whole for a trough's width beyond the lip: a flat old valley floor
-                 there stayed a flat strip along the whole trough, and its rivers filled it with gravel)
+       cap     = the largest of the candidates' caps: unbounded inside an inner trough (rho <= 1 - dl) or a cirque
+                 bowl, uCut H (1 - q)^2 beyond the lip, q = min((rho - 1) / uCutW, 1): the ice lowers the shoulders
+                 and spurs by at most that, the most at the lip and nothing at the trimline (rho = 1 + uCutW), so
+                 capped ground rises from the lip instead of standing as a shelf level with it (the smoothstep fade
+                 this replaced kept the cap nearly whole for a trough's width beyond the lip: a flat old valley floor
+                 there stayed a flat strip along the whole trough, and its rivers filled it with gravel). Inside the
+                 lip it falls from unbounded to uCut H over uCapIn of the level's cells, uCut H / t with t = (rho - 1
+                 + dl) / dl, dl = min(uCapIn uDx / W, 0.5): where the old ground stands more than uCut H over the
+                 lip (a spur the trough truncates), the cut face above the lip is drawn over those cells. A cap that
+                 jumped at rho = 1 stood the surface there in a step as high as that excess, and the coarsest level
+                 drew the step as a staircase along every wall the grid crosses on a slant, which the finer levels
+                 upsampled into a beaded row of dents along the rim (seed 1's east wall) and sharpened into evenly
+                 spaced capsule-shaped ribs (the hero walls)
        T       = smin over the candidates and the cirque bowls (the polynomial smooth minimum, uJoin metres wide:
                  troughs and cirques meet with no crease)
        T_rock  = the same without the fill term   (the bedrock under the fill)
@@ -69,6 +76,7 @@
 //! uniform float uCut        the deepest cut beyond the lip, a share of H
 //! uniform float uCutW       where the cut ends (the trimline), a share of W beyond the lip
 //! uniform float uCapJoin    the smooth maximum's width where the cap meets the trough (m)
+//! uniform float uCapIn      the cap's onset inside the lip, in the level's cells (0: the cap jumps at the lip)
 //! uniform float uShCutW     the shoulder cut's reach beyond the lip, a share of W
 //! uniform float uJoin       the smooth minimum between troughs and cirques (m)
 //! uniform float uTrim       the smooth minimum at the trimline (m)
@@ -147,7 +155,10 @@ void main() {
     float tf = a.z + max(wall, fillz(rw, b.z, a.w, ff, uFloorRise * e.y));
     float tr = a.z + wall;
     float tq = clamp((rw - 1.0) / max(uCutW, 1e-3), 0.0, 1.0);
-    cap = max(cap, rw <= 1.0 ? 1.0e30 : uCut * a.w * (1.0 - tq) * (1.0 - tq));
+    float dl = min(uCapIn * uDx / max(b.x, 1e-3), 0.5);
+    float ti = dl > 0.0 ? clamp((rw - 1.0 + dl) / dl, 0.0, 1.0) : 0.0;
+    float cin = ti > 1e-6 ? uCut * a.w / ti : 1.0e30;
+    cap = max(cap, rw <= 1.0 ? cin : uCut * a.w * (1.0 - tq) * (1.0 - tq));
     if (e.z > 0.0) {
       float sq = clamp((rw - 1.0) / max(uShCutW, 1e-3), 0.0, 1.0);
       float ec = e.z * a.w * (1.0 - sq) * (1.0 - sq);

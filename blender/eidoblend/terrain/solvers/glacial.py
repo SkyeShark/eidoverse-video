@@ -40,7 +40,7 @@ The carve, step by step (each a GPU kernel where the work is per cell):
      overdeepen and tributaries hang above them by d_trunk (1 - f)); W and H wobble along the valley with world
      noise (wobble_*), and the sediment fill (graded_fill) grades every floor down-valley at floor_grade and meets
      the river below each glacier's end, so no reach of floor is a closed basin. A stream's trough grows in from its
-     head (head_taper).
+     head (head_taper), and a tributary's is as deep as its pre-glacial valley confines its ice (confine).
   3. Cirques (numpy): at glacier heads at or above ELA - cirque_band_m, spaced by blue-noise rejection, a bowl
      backed onto the divide above its head (its headwall reaching the crest there), elongated down-glacier and open
      on that side, its rim lobed, its floor at ELA - 50 m (never more than cirque_depth_m below the head, nor more
@@ -134,6 +134,8 @@ Parameters (metres, years, degrees; DEFAULTS below):
     cirque_ela_m None           the ELA of the later, smaller glaciations that cut today's cirques (None: ela_m);
                                 cirques form only at glacier heads at or above it less cirque_band_m
     wobble_m 700, wobble_w 0.12, wobble_h 0.1   W and H vary along the valley by world noise at this wavelength
+    wobble_smooth_cells 3       ... the factors smoothed along each stream over this many seeds (Gaussian sigma), so
+                                the walls, the lower envelope of the seeds' cross-sections, wander without scallops
     shoulder_width 0, shoulder_rise 0.25, shoulder_exp 2, upper_wall 1.5
                                 the shoulder beyond the lip: shoulder_width W wide, rising shoulder_rise H (0: none),
                                 then the upper wall rising upper_wall H per W to the trimline
@@ -151,6 +153,15 @@ Parameters (metres, years, degrees; DEFAULTS below):
     centre_valleys 1            each seed moved across to the middle of its valley (valley_centre: halfway between
                                 where the ground first stands H / 2 above the valley's floor) before that smoothing,
                                 by this share (0: on the drainage's cells)
+    confine 0                   selective linear erosion (Sugden 1978): a tributary's trough (every stream but the
+                                trunk, the one with the main tile's largest discharge) is as deep as its pre-glacial
+                                valley confines its ice: its wall height H and its overdeepening scaled by the
+                                valley's confinement (valley_confinement: how high the valley's sides stand a
+                                half-width out, over H; at least CONFINE_MIN), smoothed along the stream, by this
+                                share (0: off, 1: fully). Ice crossing a terrace (the trunk's old valley floor) or a
+                                shallow swale spreads thin and slow and cuts a shallow U there, not a slot (seeds 5
+                                and 6: flat-floored trenches 110-130 m deep and 300 m wide straight across the
+                                benches to the trunk, canals)
     rock_weak_deg None, rock_scale_m 3000, rock_strong_share 0.35, rock_band_m 0, rock_band_down_m 0,
     rock_band_azimuth_deg 0
                                 the rock (rock_strength: world noise at rock_scale_m, rock_strong_share of the ground
@@ -182,6 +193,11 @@ Parameters (metres, years, degrees; DEFAULTS below):
     rock_flutes 0, rock_flute_deg 38   the flutes, scaled by rock_flutes, on the range's own rock steeper than
                                 rock_flute_deg (finer levels): couloirs and ribs on every face, not only the walls
     cap_join_m 40               the smooth maximum where the cap beyond the lip meets the trough
+    cap_onset_cells 3           inside the lip the cap falls from unbounded to cut H over this many of the carving
+                                level's cells (u_carve.glsl), so the face the trough cuts into a spur above its lip
+                                is drawn over cells, not as a step at rho = 1 (0: the step; on a slanted wall the
+                                coarsest level drew it as a staircase, a beaded row of dents along the rim that the
+                                hero levels sharpened into evenly spaced capsules)
     moraine_m 25, moraine_at None, moraine_width 0.07
                                 the lateral moraines' height for the trunk (scaled by f; 0: none), where they stand
                                 (a share of W; None: floor_frac + 0.1, at the foot of the walls) and their width
@@ -213,8 +229,9 @@ DEFAULTS = dict(
     f_max=1.6, shoulder_width=0.0, shoulder_rise=0.25, shoulder_exp=2.0, upper_wall=1.5, cut=0.6, cut_width=2.0,
     shoulder_cut=0.0, shoulder_cut_width=2.0, lip_open_m=0.0,
     floor_grade=0.012,
-    wobble_m=700.0, wobble_w=0.12, wobble_h=0.1,
-    channel_area_m2=1.5e6, min_width_cells=2.0, smooth_cells=6.0, centre_valleys=1.0, join_m=60.0, trim_m=20.0,
+    wobble_m=700.0, wobble_w=0.12, wobble_h=0.1, wobble_smooth_cells=3.0,
+    channel_area_m2=1.5e6, min_width_cells=2.0, smooth_cells=6.0, centre_valleys=1.0, confine=0.0, join_m=60.0,
+    trim_m=20.0,
     rock_weak_deg=None, rock_scale_m=3000.0, rock_strong_share=0.35, rock_band_m=0.0, rock_band_down_m=0.0,
     rock_band_azimuth_deg=0.0,
     cirques=True, cirque_band_m=300.0, cirque_radius_m=(400.0, 800.0), cirque_elong=1.35, cirque_depth_m=350.0,
@@ -222,7 +239,7 @@ DEFAULTS = dict(
     cirque_headwall_m=500.0, cirque_open=2.5, cirque_tarn_m=40.0, cirque_lobes=0.15, cirque_tilt_deg=8.0,
     wall_deg=65.0, wall_noise=0.15, wall_scales_m=(400.0, 120.0), wall_iters=64, wall_rate=0.12,
     flute_weak=0.9, flute_strong=0.35, flute_scales_m=(320.0, 160.0, 80.0, 40.0, 20.0), flute_stretch=5.0,
-    flute_patchy=0.5, cap_join_m=40.0,
+    flute_patchy=0.5, cap_join_m=40.0, cap_onset_cells=3.0,
     rock_flutes=0.0, rock_flute_deg=38.0,
     moraine_m=25.0, moraine_at=None, moraine_width=0.07,
     refine_wall_iters=160, seed=0,
@@ -540,9 +557,14 @@ def u_carve(s, u):
             tr = (A[..., 2] + wall).astype(F32)
             Tf = np.where(valid, smin(Tf, tf, join) if c else tf, Tf)
             Tr = np.where(valid, smin(Tr, tr, join) if c else tr, Tr)
-            # the cap beyond the lip (module doc, step 5): uCut H (1 - q)^2, 0 at the trimline
+            # the cap beyond the lip (module doc, step 5): uCut H (1 - q)^2, 0 at the trimline; inside the lip it
+            # falls from unbounded to uCut H over uCapIn cells (u_carve.glsl)
             tq = np.clip((rw - F32(1)) / F32(max(float(u['uCutW']), 1e-3)), F32(0), F32(1)).astype(F32)
-            cc = np.where(rw <= 1, big, F32(u['uCut']) * A[..., 3] * (F32(1) - tq) * (F32(1) - tq))
+            dl = np.minimum(F32(u['uCapIn']) * dx / np.maximum(B[..., 0], F32(1e-3)), F32(0.5)).astype(F32)
+            ti = np.where(dl > 0, np.clip((rw - F32(1) + dl) / np.where(dl > 0, dl, F32(1)), F32(0), F32(1)),
+                          F32(0)).astype(F32)
+            cin = np.where(ti > F32(1e-6), F32(u['uCut']) * A[..., 3] / np.maximum(ti, F32(1e-6)), big).astype(F32)
+            cc = np.where(rw <= 1, cin, F32(u['uCut']) * A[..., 3] * (F32(1) - tq) * (F32(1) - tq))
             cap = np.where(valid, np.maximum(cap, cc), cap).astype(F32)
             # the shoulder cut (module doc, step 5): seedC.z H (1 - q)^2 beyond the lip, never below the lip
             ez = Cc[..., 2].astype(F32)
@@ -793,14 +815,19 @@ def centrelines(h, Q, A, recv, level, main, params, base_elevation_m, seed=0):
     # oval behind its lip (the reviewer's stamped side troughs)
     d = dt * np.power(np.maximum(fs, 0.0), float(_p(params, 'overdeepen_exp')))
     # the walls wander along the valley: W and H vary with world noise at the seeds (no two reaches alike, no
-    # extruded tube), after the smoothing so it is not smoothed away; the fans and aprons at the walls' foot vary too
+    # extruded tube), after the smoothing so it is not smoothed away; the fans and aprons at the walls' foot vary too.
+    # The factors are smoothed along the stream over wobble_smooth_cells seeds: the carve's lower envelope over a
+    # stream's seeds takes the widest seed nearby, and a width changing by 10-30 m from one seed to the next (the
+    # noise's finest octave, 175 m) drew the walls as chains of circular arcs with cusps between them, bulges 150-300
+    # m long along every wall
     wl, aw, ah = float(_p(params, 'wobble_m')), float(_p(params, 'wobble_w')), float(_p(params, 'wobble_h'))
     from ..core import world_noise as N
     if wl > 0 and (aw > 0 or ah > 0):
         n1 = 3.0 * np.asarray(N.fbm(xy[:, 0], xy[:, 1], wl, 3, seed=int(seed) * 31 + 801), np.float64)
         n2 = 3.0 * np.asarray(N.fbm(xy[:, 0], xy[:, 1], wl, 3, seed=int(seed) * 31 + 802), np.float64)
-        W = W * np.clip(1.0 + aw * n1, 0.6, 1.4)
-        H = H * np.clip(1.0 + ah * n2, 0.6, 1.4)
+        ws = float(_p(params, 'wobble_smooth_cells'))
+        W = W * smooth_along(np.clip(1.0 + aw * n1, 0.6, 1.4), st, ws)
+        H = H * smooth_along(np.clip(1.0 + ah * n2, 0.6, 1.4), st, ws)
     rv, rl = float(_p(params, 'rise_noise')), float(_p(params, 'rise_scale_m'))
     rise_f = np.ones(idx.size)
     if rv > 0 and rl > 0:
@@ -813,6 +840,21 @@ def centrelines(h, Q, A, recv, level, main, params, base_elevation_m, seed=0):
     if ht > 0:
         tp = head_taper_factor(head_distance(st, xy[:, 0], xy[:, 1]), W, ht)
         W, H, d = W * tp, H * tp, d * tp
+    # selective linear erosion (confine): a tributary deepens its valley as far as the valley confines its ice. Where
+    # it crosses the trunk's old valley floor (a bench) or a shallow swale, the ice spreads thin and slow: its walls and
+    # its overdeepening there are scaled by the valley's confinement (valley_confinement), smoothed along the stream.
+    # Cut to full depth everywhere, the tributaries crossing the benches to the trunk on seeds 5 and 6 were straight,
+    # flat-floored trenches 110-130 m deep and 300 m wide in swales 30-60 m deep: canals. The trunk (the stream with
+    # the main tile's largest discharge) is cut as the knobs set it: its ice is confined by the range around the
+    # valley, not by the old valley floor its trough is cut into
+    cf = float(_p(params, 'confine'))
+    if cf > 0:
+        qs = Q.ravel()[idx]
+        inwin = win.ravel()[idx]
+        trunk_sid = st['sid'][int(np.argmax(np.where(inwin, qs, -np.inf) if inwin.any() else qs))]
+        m = smooth_along(np.maximum(valley_confinement(h, level, xy, st, W, H), CONFINE_MIN), st, sig)
+        m = np.where(st['sid'] == trunk_sid, 1.0, 1.0 - min(cf, 1.0) * (1.0 - m))
+        H, d = H * m, d * m
     # the seeds' own floor share (a tributary's floor narrower than the trunk's: (f)^floor_exp of floor_frac, so a
     # hanging valley is a U, not a flat-floored slot), as seedC's factor on uFloorFrac
     floor_f = np.power(np.clip(fs, 1e-6, 1.0), float(_p(params, 'floor_exp')))
@@ -879,6 +921,45 @@ def valley_centre(h, level, xy, st, W, H, depth=0.5, reach=2.0, shift=0.5):
     c = np.where(found, 0.5 * (right + left), 0.0)
     c = np.clip(c, -shift * np.asarray(W, np.float64), shift * np.asarray(W, np.float64))
     return c[:, None] * nrm
+
+
+CONFINE_MIN = 0.25                        # the least share of its depth a tributary's trough keeps where unconfined
+
+
+def valley_confinement(h, level, xy, st, W, H, inner=0.75, outer=1.25):
+    """Each seed's confinement (S,), 0..1: on the cross-profile of h along its stream's normal (sampled as
+    valley_centre samples it), the mean height of each side between inner and outer x W out, above the valley's floor
+    (its lowest point within W / 2 of the seed); the lower side's rise over H. 1: a valley whose sides stand the
+    trough's depth over its floor a half-width out, which a glacier fills, thick and fast, and deepens into its
+    trough; toward 0: a terrace, a broad valley floor or a shallow swale, over which the ice spreads thin and slow and
+    erodes little (selective linear erosion). 1 for a seed without a direction (no stream through it). numpy."""
+    S = xy.shape[0]
+    if S == 0:
+        return np.zeros(0)
+    up, dn = st['main'], np.where(st['rcv'] >= 0, st['rcv'], -1)
+    a = np.where((up >= 0)[:, None], xy[np.maximum(up, 0)], xy)
+    b = np.where((dn >= 0)[:, None], xy[np.maximum(dn, 0)], xy)
+    d = b - a
+    L = np.hypot(d[:, 0], d[:, 1])
+    ok = L > 1e-9
+    d = np.where(ok[:, None], d / np.where(ok, L, 1.0)[:, None], 0.0)
+    nrm = np.stack([-d[:, 1], d[:, 0]], 1)
+    W = np.asarray(W, np.float64)
+    step = 0.5 * float(level.cell)
+    K = int(np.ceil(float(outer) * float(W.max()) / step))
+    t = np.arange(-K, K + 1) * step                                   # (T,)
+    tt = t[None, :] * np.ones((S, 1))
+    z = _sample(h, level, xy[:, 0:1] + tt * nrm[:, 0:1], xy[:, 1:2] + tt * nrm[:, 1:2])
+    near = np.abs(tt) <= np.maximum(0.5 * W, level.cell)[:, None]
+    z0 = np.where(near, z, np.inf).min(axis=1)
+    rise = []
+    for sgn in (-1.0, 1.0):
+        band = (sgn * tt >= float(inner) * W[:, None]) & (sgn * tt <= float(outer) * W[:, None])
+        cnt = band.sum(axis=1)
+        mean = np.where(band, z, 0.0).sum(axis=1) / np.maximum(cnt, 1)
+        rise.append(np.where(cnt > 0, mean - z0, 0.0))
+    c = np.minimum(rise[0], rise[1]) / np.maximum(np.asarray(H, np.float64), 1e-6)
+    return np.where(ok, np.clip(c, 0.0, 1.0), 1.0)
 
 
 ROCK_NOISE = {'kind': 'fbm', 'octaves': 2, 'seed': 9500}
@@ -1157,10 +1238,11 @@ def profile_uniforms(params):
 
 
 def carve_uniforms(params):
-    """profile_uniforms() plus u_carve.glsl's cap beyond the lip (uCut, uCutW, uCapJoin) and the shoulder cut's
-    reach (uShCutW)."""
+    """profile_uniforms() plus u_carve.glsl's cap beyond the lip (uCut, uCutW, uCapJoin, its onset inside the lip
+    uCapIn) and the shoulder cut's reach (uShCutW)."""
     return dict(profile_uniforms(params), uCut=float(_p(params, 'cut')), uCutW=float(_p(params, 'cut_width')),
-                uCapJoin=float(_p(params, 'cap_join_m')), uShCutW=float(_p(params, 'shoulder_cut_width')))
+                uCapJoin=float(_p(params, 'cap_join_m')), uCapIn=float(_p(params, 'cap_onset_cells')),
+                uShCutW=float(_p(params, 'shoulder_cut_width')))
 
 
 def jump_flood_run(dev, cand0, seedA, seedB, cell, prof_u, steps, metric=0, seedC=None):
@@ -1387,6 +1469,9 @@ def trough_target(rho, zf, H, ff, fill, rise, prof_u, rock=False):
     return np.asarray(zf, np.float64) + np.maximum(wall, fillz(rho, fill, H, prof_u, np.float64, ff=ff, rise=rise))
 
 
+SHARPEN_RHO_MAX = 2.0                     # sharpen_walls: the farthest from its seed a cell's cross-section is read
+
+
 def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
     """A finer level's walls at its own resolution: the detail its upsampling lost, put back. The level starts as its
     parent upsampled (Catmull-Rom), so its walls are the parent's cliffs smoothed over two of the parent's cells; the
@@ -1411,12 +1496,19 @@ def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
         return a.reshape(n0 // 2, 2, n1 // 2, 2).mean(axis=(1, 3))
 
     fp = {k: coarse(f[k]) for k in arg}
+    # a parent cell stands for the target only where all four of its cells lie within SHARPEN_RHO_MAX of their seed:
+    # beyond it the cross-section's upper wall rises without bound (its seed's trough cut nothing there), and a
+    # block that mixed a wall cell with one whose best seed lay hundreds of half-widths away averaged them into a
+    # target kilometres high, which the Catmull-Rom carried onto the wall beside it (spikes of 1-5 km on the
+    # yosemite preset's walls). There the parent is its surface: the block mean of the inherited h (bed)
+    whole = coarse((f['trough_rho'] <= SHARPEN_RHO_MAX).astype(np.float64)) > 1.0 - 1e-9
     out = {}
     for rock in (False, True):
         t_own = trough_target(*(f[k] for k in arg), pu, rock=rock)
-        t_par = Gd.crop_upsample2(trough_target(*(fp[k] for k in arg), pu, rock=rock), 0, 0, n1 // 2, 'catmull',
-                                  mj=n0 // 2).astype(np.float64)
-        out[rock] = t_own - t_par
+        surf = np.asarray(fields['bed'] if rock and 'bed' in fields else fields['h'], np.float64)
+        t_p = np.where(whole, trough_target(*(fp[k] for k in arg), pu, rock=rock), coarse(surf))
+        t_par = Gd.crop_upsample2(t_p, 0, 0, n1 // 2, 'catmull', mj=n0 // 2).astype(np.float64)
+        out[rock] = np.where(f['trough_rho'] <= SHARPEN_RHO_MAX, t_own - t_par, 0.0)
     rho = f['trough_rho']
     t = np.clip((rho - 1.0) / 0.15, 0.0, 1.0)
     w = np.clip(f['trough_sharp'], 0.0, 1.0) * (1.0 - t * t * (3.0 - 2.0 * t))
@@ -1494,15 +1586,35 @@ op_valley_uplift.evolves = True
 
 # =================================================================================================== the carve ===
 
+def upwind_slope(h, cell, bound=PINNED):
+    """The slope (tangent) the threshold pass itself measures at every cell (hillslope's threshold_excess: the
+    upwind, Rouy-Tourin gradient magnitude, the drop to the lower axis neighbour on each axis, a neighbour beyond the
+    grid's edge left out). A threshold under it fails the cell, so a threshold that holds a slope must be measured
+    this way: on a cliff's convex lip it exceeds the central difference (the drop below the cell is the steeper
+    one)."""
+    h = np.asarray(h, np.float64)
+
+    def ax(k):
+        v, ok = T.neighbour(h, k, bound)
+        return np.where(ok, v, h)
+
+    gx = np.maximum(h - np.minimum(ax(3), ax(4)), 0.0)
+    gy = np.maximum(h - np.minimum(ax(1), ax(6)), 0.0)
+    return np.sqrt(gx * gx + gy * gy) / float(cell)
+
+
 def _wall_sc(level, params, seed, dev, h=None, surface=None):
     """The fresh walls' threshold (tangent): tan(the walls' angle in the cell's rock: wall_angle_deg) x exp(wall_noise
     n), n unit noise at the wall scales the level resolves (strong and weak rock: ribs stand, chutes fail), and with
-    a surface, never under the slope its cells give massive rock (1.05 x its slope x the rock's strength squared),
-    then x exp(flutes) (wall_flutes) when h is given. Massive rock stands as the ice cut it: a level that draws a cliff
-    of 80 degrees over two or three of its cells cannot hold it at a threshold of that angle, and the pass that
-    should have left it standing failed it cell by cell along every wall the grid crosses on the slant, a row of
-    teeth that the finer levels sharpened (seed 1's east wall, from the coarsest level on). Weak rock still fails
-    back to its angle, and couloirs (the flutes) still fail in massive rock."""
+    a surface, never under the slope its cells give massive rock (1.05 x its slope x the rock's strength squared, the
+    slope as the threshold pass measures it: upwind_slope), then x exp(flutes) (wall_flutes) when h is given. Massive
+    rock stands as the ice cut it: a level that draws a cliff of 80 degrees over two or three of its cells cannot
+    hold it at a threshold of that angle, and the pass that should leave it standing fails it cell by cell along
+    every wall the grid crosses on the slant. Measured by central differences, the hold stood under the pass's own
+    slope on every convex lip: a fifth of a massive wall's cells still failed, by up to 35 m on the coarsest level
+    (test_twins, the massive-rock hold). (The beaded row of dents along seed 1's east rim, laid to this pass at
+    first, came from the cap's step at the lip: u_carve.glsl, uCapIn.) Weak rock still fails back to its angle, and
+    couloirs (the flutes) still fail in massive rock."""
     g = rock_strength(None, None, params, seed, level, dev)
     t = np.tan(np.radians(wall_angle_deg(g, params)))
     sc = FL._scales(_p(params, 'wall_scales_m'), level.cell, 3.0)
@@ -1512,8 +1624,7 @@ def _wall_sc(level, params, seed, dev, h=None, surface=None):
         ln = ln + a * FL._unit_noise(sc, level, seed, dev, 601)
     out = t * np.exp(ln)
     if surface is not None:
-        gx, gy = Gd.gradient(np.asarray(surface, np.float64), level.cell)
-        out = np.maximum(out, np.asarray(g, np.float64) ** 2 * 1.05 * np.hypot(gx, gy))
+        out = np.maximum(out, np.asarray(g, np.float64) ** 2 * 1.05 * upwind_slope(surface, level.cell))
     if h is not None:
         out = out * np.exp(wall_flutes(h, level, params, seed, dev))
     return out
@@ -1600,6 +1711,44 @@ def wall_flutes(h, level, params, seed, dev=None):
     return strong * (1.0 - w) - weak * w
 
 
+PERCHED_RING_M = 500.0                    # the trunk's valley sides: the ground this far out from its channel ...
+PERCHED_DROP_M = 50.0                     # ... standing this much under the channel on average: a ridge, not a valley
+PERCHED_WARN = 0.25                       # the share of the trunk's course in the main tile that warns
+
+
+def trunk_perched(h, trunk, level, main=None):
+    """The share of the held trunk river's channel cells (trunk > 0.5) inside the main window over which the ground
+    PERCHED_RING_M out (the mean of that square ring of cells) stands more than PERCHED_DROP_M lower: a river held at
+    its bed over a range that never rose around it, on a ridge its drainage runs off to either side instead of a
+    valley floor. 0.0 without trunk cells in the window."""
+    h = np.asarray(h, np.float64)
+    t = np.asarray(trunk, np.float64) > 0.5
+    if not t.any():
+        return 0.0
+    r = max(2, int(round(PERCHED_RING_M / float(level.cell))))
+
+    def box(a, k):
+        p = np.pad(a, k, mode='edge')
+        c = np.pad(np.cumsum(np.cumsum(p, 0), 1), ((1, 0), (1, 0)))
+        m = 2 * k + 1
+        return c[m:, m:] - c[:-m, m:] - c[m:, :-m] + c[:-m, :-m]
+
+    ones = np.ones_like(h)
+    ring_sum = box(h, r) - box(h, r - 1)
+    ring_n = box(ones, r) - box(ones, r - 1)
+    beside = np.where(ring_n > 0, ring_sum / np.maximum(ring_n, 1e-9), h)
+    inside = np.zeros_like(t)
+    if main is not None:
+        j0, j1, i0, i1 = FL._main_window(level, main)
+        inside[j0:j1, i0:i1] = True
+    else:
+        inside[:] = True
+    sel = t & inside
+    if not sel.any():
+        return 0.0
+    return float(np.mean(beside[sel] < h[sel] - PERCHED_DROP_M))
+
+
 def _walls(dev, fields, level, Sc, pins, iters, rate):
     """The threshold pass with Sc on the level (the layers counted: losses wear rock, gains are talus)."""
     from .hillslope import _Pass
@@ -1634,6 +1783,17 @@ def carve_level(fields, level, params, seed, ctx, dev):
                Q_max=float(Q.max()), Q_ref=cl['Q_ref'] if cl else None, seeds=int(cl['idx'].size) if cl else 0,
                streams=int(cl['streams']['sid'].max() + 1) if cl else 0, cirques=int(len(cq)),
                trunk=dict(W=cl['Wt'], H=cl['Ht'], d=cl['dt']) if cl else None)
+    if 'trunk' in fields and np.ndim(fields['trunk']) == 2:
+        # the held trunk river must lie in a valley the range grew around it (valley_uplift); held over a range
+        # that stayed lower, it stood on a ridge, the range drained off to either side and the ice flowed out across
+        # the side ridges (the yosemite preset of 11-21: held 1000 m over its side valleys, three troughs)
+        rec['trunk_perched_frac'] = round(trunk_perched(h, fields['trunk'], level, ctx.main), 3)
+        if rec['trunk_perched_frac'] > PERCHED_WARN:
+            ctx.log(f"[terrain.glacial] the trunk river stands over the ground beside it along "
+                    f"{rec['trunk_perched_frac'] * 100:.0f} % of its course in the main tile: held at its bed "
+                    f"(bench_m over the floor's graded line) above a range that did not rise around it, so the "
+                    f"range drains away from it to either side and the ice with it; raise the range (relief_m, or "
+                    f"its start surface) or lower bench_m")
     fields['ice_q'] = Q
     gs = np.full(n * n, -1.0, F32)
     if cl is not None:
@@ -1756,10 +1916,10 @@ def refine_level(fields, level, params, seed, ctx, dev):
         # a hero level refines without moving the landform: no threshold stands under the slope the level inherits
         # (its parent's walls, cliffs, truncated spurs and headwalls stand), so only the flutes' weak lines and new
         # detail fail. With the range's own threshold and the walls' noise alone they collapsed by hundreds of metres
-        # (850 m at 1 m cells)
-        gx, gy = Gd.gradient(h_in, level.cell)
+        # (850 m at 1 m cells). The inherited slope as the pass measures it (upwind_slope): by central differences
+        # every convex lip and crest stood over its threshold and failed
         base = np.maximum(sc_range * (1.0 - wall) + _wall_sc(level, params, seed, dev) * wall,
-                          1.05 * np.hypot(gx, gy))
+                          1.05 * upwind_slope(h_in, level.cell))
         Sc = base * np.exp(wall * wall_flutes(h_in, level, params, seed, dev) + (1.0 - wall) * range_flutes)
     else:
         Sc = sc_range * np.exp(range_flutes) * (1.0 - wall) + _wall_sc(level, params, seed, dev, h=h_in,
