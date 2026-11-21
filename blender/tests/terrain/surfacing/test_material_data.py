@@ -10,8 +10,11 @@ Checks per case: the material builds; its samplers stay within the budget and ar
 atlas is read Linear and EXTEND in both reader slots (one sampler each; the families in surfacing.CUBIC_FAMILIES also
 Cubic where a texel is magnified, which shares that sampler) and the ramp image only Closest; one level
 reader group serves the near material, the far material and eido_terrain_map; no Bump node has the level reader
-under its height; the far material builds with three images or fewer; eido_terrain_map offers every packed map and
-the derived names. Then, with no terrain: which rings take the far material for a set of cameras.
+under its height; the far material reads the atlases and the base layer's grain only, with the layers' own specular
+by their weights (11-20: the palette's one specular drew the caldera's far ring); eido_terrain_map offers every
+packed map and the derived names. Then, with no terrain: which rings take the far material for a set of cameras, and
+the scans' normal variance the specular anti-aliasing reads (scan_normal_variance: a flat map and a texel-scale
+checkerboard of known tilt, and every scan the palettes use, each with its loss curve's fit).
 Each test prints PASS / FAIL with its numbers; the run exits 1 on any failure.
 """
 import json
@@ -141,8 +144,25 @@ def test_case(case):
     r_map = [k for k in trees(tm) if k.startswith('eido_terrain_reader_')]
     check(f'{case}: one level reader group serves the near material, the far material and eido_terrain_map',
           len(readers) == 1 and r_far == readers and r_map == readers, f'{readers}')
-    check(f'{case}: the far material reads three images or fewer', int(fg['eido_samplers']) <= 3,
-          f"{fg['eido_samplers']} samplers, {S._nodes_in(fg)} nodes")
+    # the far material reads the atlases (its colour, normal, and the masks its layer weights read for the near
+    # material's specular and roughness there) and one scan, the base layer's grain: no layer's scans, no ramp
+    scans = set()
+    for tr in trees(fg).values():
+        for n in tr.nodes:
+            if n.bl_idname == 'ShaderNodeTexImage' and n.image is not None and n.image.name not in atlas:
+                scans.add(n.image.name)
+    s0 = S.packed_set(pal_d['layers'][0]['set'], log=None)['albedo'].name
+    check(f'{case}: the far material reads the atlases and the base layer\'s grain only, within the near\'s samplers',
+          scans <= {s0} and int(fg['eido_samplers']) <= nsamp,
+          f"{fg['eido_samplers']} samplers ({sorted(scans)} besides the atlases), {S._nodes_in(fg)} nodes against "
+          f"the near material's {S._nodes_in(ng)}")
+    fbsdf = [n for tr in trees(fg).values() for n in tr.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled']
+    specs = sorted({float(L.get('specular', pal_d['options']['specular'])) for L in pal_d['layers']})
+    sock = fbsdf[0].inputs['Specular IOR Level'] if len(fbsdf) == 1 else None
+    ok = sock is not None and (sock.is_linked if len(specs) > 1 else abs(sock.default_value - specs[0]) < 1e-6)
+    check(f'{case}: the far material takes the layers\' own specular by their weights', ok,
+          f'layer speculars {specs}; the far BSDF\'s '
+          + ('none' if sock is None else 'linked (by weight)' if sock.is_linked else f'{sock.default_value:.3f}'))
     outs = {s.name for s in tm.interface.items_tree if s.in_out == 'OUTPUT'}
     packed = {n for grp in sd.packing() for n in grp}
     need = packed | {'slope', 'aspect', 'northness', 'eastness', 'insolation', 'height', 'Level'}
@@ -173,10 +193,46 @@ def test_far_rings():
           f'no cameras: {none}')
 
 
+def test_normal_variance():
+    """The slope variance the specular anti-aliasing adds back (surfacing._normal_variance, _loss_curve): 0 for a flat
+    normal map; for a texel-scale checkerboard of normals tilted +-t about y, 2 (1 - cos t) in all, and all of it gone
+    at the first mip; every scan the palettes use has its record, its loss curve within 0.1 of its table."""
+    import math
+    import numpy as np
+    from eidoblend.terrain.build import palettes as P
+    flat = np.full((64, 64, 2), 0.5, np.float32)
+    tot0, lost0 = S._normal_variance(flat)
+    t = math.radians(20.0)
+    chk = np.full((64, 64, 2), 0.5, np.float32)
+    sx = np.where((np.add.outer(np.arange(64), np.arange(64)) % 2) == 0, math.sin(t), -math.sin(t))
+    chk[..., 0] = 0.5 + 0.5 * sx
+    tot1, lost1 = S._normal_variance(chk)
+    want = 2.0 * (1.0 - math.cos(t))
+    check('normal variance: 0 on a flat map; a texel checkerboard of +-20 degrees holds 2 (1 - cos 20) and loses '
+          'it all at the first mip', abs(tot0) < 1e-6 and max(lost0) < 1e-6 and abs(tot1 - want) < 2e-3
+          and abs(lost1[1] - want) < 2e-3, f'flat {tot0:.2e}; checkerboard {tot1:.4f} (want {want:.4f}), lost at mip 1 '
+                                           f'{lost1[1]:.4f}')
+    sets = sorted({L['set'] for nm in P.names() for L in P.get(nm)['layers']})
+    rows, bad = [], []
+    for s in sets:
+        try:
+            st = S.packed_set(s, log=None)['stats']
+        except FileNotFoundError:
+            continue
+        nv = st.get('normal_var') or {}
+        if nv.get('version') != S.NORMAL_VAR_VERSION or not 0.0 <= float(nv.get('total', -1)) < 2.0 \
+                or float(nv.get('fit_err', 1.0)) > 0.1:
+            bad.append(s)
+        rows.append(f"{s} {float(nv.get('total', -1)):.3f} (fit {float(nv.get('fit_err', 1.0)):.3f})")
+    check('normal variance: every scan the palettes use has its record, its loss curve fitted within 0.1',
+          rows and not bad, '; '.join(rows) + (f'; bad: {bad}' if bad else ''))
+
+
 def main():
     for case in args()['cases']:
         test_case(case)
     test_far_rings()
+    test_normal_variance()
     bad = [n for n, ok, _d in RESULTS if not ok]
     print(f"[test] {len(RESULTS) - len(bad)} / {len(RESULTS)} passed" + (f'; FAILED: {bad}' if bad else ''), flush=True)
     return 1 if bad else 0

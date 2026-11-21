@@ -85,11 +85,18 @@ builds the per-texel material instead:
     lost, so a layer's cover holds as the noise fades), and fbm drops the octaves finer than two footprints;
   - a layer's ramp and the satmap are read from the palette's ramp image (one row each, Closest); the patches get()
     wrote for them are skipped;
+  - specular anti-aliasing (option specular_aa, default on): what a scan's normal map shows near the camera, its
+    mips average away further off, and a surface whose normals have averaged flat while its roughness stays the
+    scan's own mirrors the sky and the sun like wet plastic (Grass004's lawn, roughness 0.26 and a strong normal
+    map, on the downs and the fields facing the sun, 11-20). So each layer's roughness takes back the slope
+    variance its normal map has lost at the pixel's footprint: alpha^2 + V_lost (alpha = roughness^2; the vMF form
+    of Toksvig's measure), V_lost from the scan's own table by mip level (scan_normal_variance);
   - past D0 (a main-level texel spanning 2.5 pixels, or the option far_m) the ground fades over D0..1.5 D0 to the
-    baked far colour C (its own data per texel to the horizon) and its roughness, never inside the hero windows;
-    each layer keeps its own specular there (the near weights are evaluated anyway); rings beyond 1.5 D0 from every
-    camera passed to apply_surface take the far material (slot 1), a cost saving only, with the palette's one
-    specular (C carries no specular).
+    baked far colour C (its own data per texel to the horizon) and its roughness (with every scan's normal variance
+    lost), never inside the hero windows; each layer keeps its own specular there (the near weights are evaluated
+    anyway); rings beyond 1.5 D0 from every camera passed to apply_surface take the far material (slot 1), a cost
+    saving only, which evaluates the same layer weights (their coverage, overlay and blend, the scans at their mean
+    height) for the specular and the roughness the near material has there (C carries neither).
 The layer key `fallback` (a weight for a material without baked data) is taken in place of `weight` without data, or
 where the weight reads a map the data lacks.
 
@@ -106,7 +113,8 @@ packing five maps into two is what makes six layers fit.
 The packed images (cache: eidoverse/assets/cache/terrain_surface_sets/<set>_v<PACK_VERSION>/, cache_root()):
   albedo_height.png    RGB the scan's albedo (sRGB), A its height normalised to mean 0.5 std 0.15
   normal_rough_ao.png  R, G the OpenGL normal's x, y (z is rebuilt), B roughness, A ambient occlusion (Non-Color)
-  stats.json           the scan's mean linear albedo (for the colour rescale), mean roughness, its height mean/std
+  stats.json           the scan's mean linear albedo (for the colour rescale), mean roughness, its height mean/std,
+                       and its normal map's slope variance by mip level (normal_var: scan_normal_variance)
 """
 from __future__ import annotations
 
@@ -151,6 +159,9 @@ FAR_FADE_MAIN_CELLS = 64.0            # the far colour fades in over this many m
 FAR_GRAIN = 0.25                      # how much of the base layer's scan luminance the far colour keeps
 FAR_FADE_NODE = 'eido_far_fade'       # the near material's hand-off smoothstep over D0..1.5 D0 (set_far_distance)
 DETAIL_STRENGTH = 0.5                 # the relief below the cell, by default (options detail_strength)
+NORMAL_VAR_VERSION = 1                # the scans' normal variance record in their stats.json (scan_normal_variance)
+AA_GRAZING = 1.0 / 16.0               # specular anti-aliasing's footprint: vd x pixel angle / sqrt(max(|N.V|, this)),
+#                                       the side of a square of the anisotropic footprint's area (16x filtering)
 # the 5-95 % half-range of (n - 0.5) of the mask language's noise() and fbm() (Blender's Noise Texture, stretched
 # x2.5 and x3; measured with surface/noise.py over 2e5 points): what a faded term's smoothstep widens by
 NOISE_HALF = {'noise': 0.358, 'fbm': 0.344}
@@ -311,11 +322,72 @@ def _load_image(path, colorspace):
 
 def packed_set(name, prefer='2k', log=print):
     """{'albedo': Image (sRGB; alpha = normalised height), 'nrao': Image (Non-Color), 'stats': dict, 'name'} for a
-    scan set, packing it first if the cache lacks it."""
+    scan set, packing it first if the cache lacks it (and its normal variance, scan_normal_variance)."""
     d = pack_set(name, prefer, log=log)
     stats = json.loads((d / 'stats.json').read_text())
+    if (stats.get('normal_var') or {}).get('version') != NORMAL_VAR_VERSION:
+        stats = scan_normal_variance(d, stats, log=log)
     return dict(albedo=_load_image(d / 'albedo_height.png', 'sRGB'),
                 nrao=_load_image(d / 'normal_rough_ao.png', 'Non-Color'), stats=stats, name=stats['set'])
+
+
+def _normal_variance(xy):
+    """(total, lost) of a normal map from its packed x, y ((H, W, 2), 0..1; z rebuilt as the material rebuilds it):
+    total = 2 (1 - |mean n|) over the whole map, the slope variance of a microfacet lobe that spreads light as much
+    (its alpha^2: the vMF form of Toksvig's measure, Han et al. 2007); lost[m] = 2 (1 - the mean over the 2^m x 2^m
+    blocks of |block mean n|), what the mip at level m has averaged away (lost[0] = 0)."""
+    nx = xy[..., 0].astype(np.float32) * 2.0 - 1.0
+    ny = xy[..., 1].astype(np.float32) * 2.0 - 1.0
+    n = np.stack([nx, ny, np.sqrt(np.maximum(1.0 - nx * nx - ny * ny, 0.0))], -1)
+    n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-6)
+    total = 2.0 * (1.0 - float(np.linalg.norm(n.reshape(-1, 3).mean(0, dtype=np.float64))))
+    lost = [0.0]
+    b = n
+    while min(b.shape[:2]) >= 2:
+        h2, w2 = b.shape[0] // 2, b.shape[1] // 2
+        b = b[:2 * h2, :2 * w2].reshape(h2, 2, w2, 2, 3).mean((1, 3))
+        lost.append(2.0 * (1.0 - float(np.linalg.norm(b, axis=-1).mean(dtype=np.float64))))
+    return max(total, 0.0), lost
+
+
+def _loss_curve(lost, total):
+    """(k, p, largest error) of 1 - 2^-((m / k)^p) fitted to lost[m] / total over the mip levels 0-10, by a grid
+    search: the shape the material evaluates (_rough_aa). The scans in use fit within 0.01-0.08 (11-20), well inside
+    the one mip level a footprint's estimate is good to."""
+    fr = np.asarray(lost, np.float64)[:11] / max(float(total), 1e-12)
+    m = np.arange(len(fr), dtype=np.float64)
+    K = np.linspace(0.3, 8.0, 78)[:, None, None]
+    Pw = np.linspace(0.4, 3.0, 53)[None, :, None]
+    err = np.abs(1.0 - 2.0 ** (-(m[None, None, :] / K) ** Pw) - fr[None, None, :]).max(-1)
+    i, j = np.unravel_index(int(np.argmin(err)), err.shape)
+    return float(K[i, 0, 0]), float(Pw[0, j, 0]), float(err[i, j])
+
+
+def scan_normal_variance(folder, stats=None, log=print):
+    """A packed scan's stats with its normal map's slope variance (stats['normal_var']: version, total, lost by mip
+    level, the loss curve's k and p and its fit error; _normal_variance, _loss_curve), made once from its
+    normal_rough_ao.png and kept in its stats.json. What the material's specular anti-aliasing adds back to the
+    scan's roughness as its mips average its normals away."""
+    folder = Path(folder)
+    if stats is None:
+        stats = json.loads((folder / 'stats.json').read_text())
+    t0 = time.time()
+    total, lost = _normal_variance(_read_pixels(folder / 'normal_rough_ao.png', 'Non-Color')[0][..., :2])
+    k, p, err = _loss_curve(lost, total)
+    stats = dict(stats, normal_var=dict(version=NORMAL_VAR_VERSION, total=round(total, 6),
+                                        lost=[round(v, 6) for v in lost], k=round(k, 4), p=round(p, 4),
+                                        fit_err=round(err, 4)))
+    s_path = folder / 'stats.json'
+    tmp = s_path.with_name(f'stats.{os.getpid()}.tmp')
+    try:
+        tmp.write_text(json.dumps(stats, indent=1))
+        os.replace(tmp, s_path)
+    except OSError:                                     # another process holds it: this one keeps its own copy
+        tmp.unlink(missing_ok=True)
+    if log:
+        log(f"[surfacing] {stats.get('set', folder.name)}: normal variance {total:.4f} (lost by mip "
+            f"{', '.join(f'{v / max(total, 1e-12):.2f}' for v in lost[1:6])}, ...) in {time.time() - t0:.1f} s")
+    return stats
 
 
 # ------------------------------------------------------------------------------------------- the strata ---
@@ -2069,6 +2141,119 @@ def _layer_weights(pal, sd, log=None):
     return out
 
 
+def _aa_constants(S, L):
+    """(V, k, p, log2 texel) of a layer's scan for the specular anti-aliasing: V its normal map's slope variance at
+    the layer's normal strength (x normal^2), k and p its loss curve by mip level, the texel in metres (tile / the
+    scan's width). None for a scan with no normal variance."""
+    nv = S['stats'].get('normal_var') or {}
+    total = float(nv.get('total') or 0.0)
+    if total <= 0.0 or not S['stats'].get('has_normal', True):
+        return None
+    ns = float(L['normal'])
+    width = float((S['stats'].get('size') or [2048])[0])
+    return total * ns * ns, float(nv['k']), float(nv['p']), math.log2(float(L['tile_m']) / width)
+
+
+def _aa_footprint(g, vpix, ndv):
+    """log2 of the pixel's footprint for the mips' normal averaging, metres: the side of a square of the anisotropic
+    footprint's area, vd x pixel angle / sqrt(max(|N . V|, AA_GRAZING))."""
+    return g.math('LOGARITHM', g.math('DIVIDE', vpix, g.math('SQRT', g.math('MAXIMUM', ndv, AA_GRAZING))), 2.0)
+
+
+def _rough_aa(g, rough, lfp, aa):
+    """A scan's roughness with the slope variance its normal map's mips have averaged away at this pixel (specular
+    anti-aliasing): alpha' ^2 = alpha^2 + V_lost with alpha = roughness^2, so roughness' = (r^4 + V_lost)^(1/4);
+    V_lost = V (1 - 2^-((m / k)^p)) at the mip level m = log2(footprint / texel) (scan_normal_variance's fit).
+    lfp: log2 of the footprint (_aa_footprint); aa: _aa_constants."""
+    V, k, p, l2t = aa
+    x = g.math('MAXIMUM', g.math('MULTIPLY_ADD', lfp, 1.0 / k, -l2t / k), 0.0)
+    kept = g.math('POWER', 0.5, g.math('POWER', x, p))
+    lost = g.math('MULTIPLY_ADD', kept, -V, V)
+    r2 = g.mul(rough, rough)
+    return g.math('POWER', g.math('MULTIPLY_ADD', r2, r2, lost), 0.25)
+
+
+def _rough_lost(g, rough, var):
+    """(r^4 + var)^(1/4): a roughness with a slope variance var (a float or a socket) added to its alpha^2: the far
+    colour's roughness once every scan's normals have averaged flat (var: the layers' V by their weights)."""
+    if isinstance(var, float) and var <= 0.0:
+        return rough
+    r2 = g.mul(rough, rough)
+    return g.math('POWER', g.math('MULTIPLY_ADD', r2, r2, var), 0.25)
+
+
+def _blend_weights(g, comp, dat, sd, per, opt, edge_noise=None):
+    """The layers' blend weights from their coverages (SURFACING_DESIGN.md 3.2, rule 2): the overlay of the macro
+    data and each scan's soft height on its coverage, the composite in order (a layer covers what lies below it),
+    then the height blend (a_i = w_i + h_i height_blend, plus the ragged edge noise on the upper layers, kept within
+    blend_depth of the tallest, normalised). per: one dict per layer (L, cov, hs_scan: the scan's own soft height,
+    the overlay's; hs: the height the blend reads). A float height is the same for every layer (the far material's
+    0.5: the scans at their coarsest mips, their mean): it adds no overlay term, and a shift common to all layers
+    leaves the blend as it is. edge_noise(i): layer i's edge noise (None: none; it fades to its mean within a few
+    metres' footprint). Returns the weights (sockets or floats).
+
+    The overlay: a layer's coverage pushed up where d > 0.5 and down where d < 0.5, unchanged at 0 and 1 and in the
+    mean when d's mean is 0.5; d = 0.5 + height (h - 0.5) f + crest crest + crest_fine crest_fine + crease crease (a
+    layer's overlay dict; by default its scan's height alone, so its edge follows the scan's grain), f the
+    footprint's fade at the layer's tile (a scan finer than a pixel leaves the cover alone). The height is the scan's
+    own soft height, mean 0.5: on the sharpened hex blend's height a layer edge ran along the hexagons' borders (a
+    sawtooth of triangles on the canyon's brink wall), and a canopy's crown pattern (mean about 0.38) took a fifth of
+    a forest's cover away (Lauterbrunnen's forested sides read as meadow, 11-18)."""
+    if opt.get('overlay', True):
+        for p in per:
+            if isinstance(p['cov'], float):
+                continue
+            ov = dict(height=1.0)
+            ov.update(p['L'].get('overlay') or {})
+            amt = float(ov.get('height', 0.0))
+            d = 0.5
+            if amt and not isinstance(p['hs_scan'], float):
+                k = _mul(g, comp.fade(float(p['L']['tile_m'])), amt)
+                d = g.math('MULTIPLY_ADD', g.sub(p['hs_scan'], 0.5), k, 0.5)
+            for key in ('crest', 'crest_fine', 'crease'):
+                amt = float(ov.get(key, 0.0) or 0.0)
+                if amt and dat.has(key):
+                    term = dat.value(key)
+                    if key != 'crest':                    # the texel-scale terms fade with the footprint
+                        term = _mul(g, term, comp.fade(2.0 * _main_cell(sd) / 8.0))
+                    d = g.math('MULTIPLY_ADD', term, amt, d)
+            if isinstance(d, float):
+                continue
+            d = _clamp01(g, d)
+            cv = p['cov']
+            a_lo = g.mul(g.mul(cv, d), 2.0)
+            a_hi = g.sub(1.0, g.mul(g.mul(g.sub(1.0, cv), g.sub(1.0, d)), 2.0))
+            p['cov'] = g.mix('FLOAT', g.math('LESS_THAN', cv, 0.5), a_hi, a_lo)
+    excl = [None] * len(per)
+    rem = 1.0
+    for i in range(len(per) - 1, -1, -1):
+        excl[i] = _mul(g, per[i]['cov'], rem)
+        rem = _mul(g, rem, _one_minus(g, per[i]['cov']))
+    kb = float(opt['height_blend'])
+    a = []
+    for i, p in enumerate(per):
+        ai = excl[i]
+        if kb > 0 and not isinstance(p['hs'], float):
+            ai = g.add(ai, g.mul(p['hs'], kb))
+        e = p['L']['edge_noise'] if p['L']['edge_noise'] is not None else float(opt['edge_noise'])
+        if e > 0 and i > 0 and edge_noise is not None:
+            f = comp.fade(1.0 / 0.85)
+            ai = g.add(ai, g.mul(g.sub(edge_noise(i), 0.5), _mul(g, f, 2.0 * e)))
+        a.append(ai)
+    if len(a) == 1:
+        return [1.0]
+    ma = a[0]
+    for v in a[1:]:
+        ma = g.math('MAXIMUM', ma, v)
+    ma = g.sub(ma, float(opt['blend_depth']))
+    b = [g.math('MAXIMUM', g.sub(v, ma), 0.0) for v in a]
+    s = b[0]
+    for v in b[1:]:
+        s = g.add(s, v)
+    s = g.math('MAXIMUM', s, 1e-5)
+    return [g.math('DIVIDE', v, s) for v in b]
+
+
 def _main_cell(sd):
     lv = list(sd.levels)
     mains = [v for v in lv if getattr(v, 'role', '') == 'main']
@@ -2125,6 +2310,8 @@ def _surface_group_data(pal, sd, name, prefer, log):
     vpix = g.mul(vd, pix)
     fp_read = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.05))     # the reader's dead band (2.4)
     fp = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.25))          # the noise terms' fade (3.2)
+    aa_on = opt.get('specular_aa', True) is not False
+    lfp = _aa_footprint(g, vpix, ndv) if aa_on else None              # the scans' mips (specular anti-aliasing)
     detile = opt.get('detile') or 'offset'
     n3 = detile != 'offset'
     hexed = bool(opt['anti_tile']) and detile in ('rotate', 'hex')
@@ -2254,6 +2441,9 @@ def _surface_group_data(pal, sd, name, prefer, log):
         rough = g.mul(lg.outputs['Rough'], float(L['roughness']))
         if band_rough is not None:
             rough = g.mul(rough, band_rough if smix >= 1.0 else g.mix('FLOAT', smix, 1.0, band_rough))
+        aa = _aa_constants(S, L) if aa_on else None
+        if aa is not None:
+            rough = _rough_aa(g, rough, lfp, aa)          # the scan's normals its mips average away, as roughness
         relief_rv = relief_lv = None
         if smix >= 1.0 and strata is not None and L.get('relief', True) and strata.relief() is not None:
             relief_rv, relief_lv = strata.relief()
@@ -2351,71 +2541,12 @@ def _surface_group_data(pal, sd, name, prefer, log):
             bump_own = float(L['bump_m'])                 # a set without a normal map keeps its height's bump
         per.append(dict(L=L, cov=cov, col=col, h=h, hs=hs, hs_scan=hs_scan, nx=nx, ny=ny,
                         pert=lg.outputs['Pert'] if box else None, rough=rough, ao=lg.outputs['AO'], box=box,
-                        ripple=ripple, canopy_bump=canopy_bump, relief=relief_h, bump_own=bump_own))
+                        ripple=ripple, canopy_bump=canopy_bump, relief=relief_h, bump_own=bump_own,
+                        var=aa[0] if aa is not None else None))
 
-    # the overlay of the macro data and the scans' heights (SURFACING_DESIGN.md 3.2 rule 2), then the composite: a
-    # layer's coverage pushed up where d > 0.5 and down where d < 0.5, unchanged at 0 and 1 and in the mean when d's
-    # mean is 0.5; d = 0.5 + height (h - 0.5) f + crest crest + crest_fine crest_fine + crease crease (a layer's
-    # overlay dict; by default its scan's height alone, so its edge follows the scan's grain), f the footprint's
-    # fade at the layer's tile (a scan finer than a pixel leaves the cover alone). The height is the scan's own soft
-    # height, mean 0.5: on the sharpened hex blend's height a layer edge ran along the hexagons' borders (a sawtooth
-    # of triangles on the canyon's brink wall), and a canopy's crown pattern (mean about 0.38) took a fifth of a
-    # forest's cover away (Lauterbrunnen's forested sides read as meadow, 11-18)
-    if opt.get('overlay', True):
-        for p in per:
-            if isinstance(p['cov'], float):
-                continue
-            ov = dict(height=1.0)
-            ov.update(p['L'].get('overlay') or {})
-            amt = float(ov.get('height', 0.0))
-            d = 0.5
-            if amt:
-                k = _mul(g, comp.fade(float(p['L']['tile_m'])), amt)
-                d = g.math('MULTIPLY_ADD', g.sub(p['hs_scan'], 0.5), k, 0.5)
-            for key in ('crest', 'crest_fine', 'crease'):
-                amt = float(ov.get(key, 0.0) or 0.0)
-                if amt and dat.has(key):
-                    term = dat.value(key)
-                    if key != 'crest':                    # the texel-scale terms fade with the footprint
-                        term = _mul(g, term, comp.fade(2.0 * _main_cell(sd) / 8.0))
-                    d = g.math('MULTIPLY_ADD', term, amt, d)
-            if isinstance(d, float):
-                continue
-            d = _clamp01(g, d)
-            cv = p['cov']
-            a_lo = g.mul(g.mul(cv, d), 2.0)
-            a_hi = g.sub(1.0, g.mul(g.mul(g.sub(1.0, cv), g.sub(1.0, d)), 2.0))
-            p['cov'] = g.mix('FLOAT', g.math('LESS_THAN', cv, 0.5), a_hi, a_lo)
-    excl = [None] * len(per)
-    rem = 1.0
-    for i in range(len(per) - 1, -1, -1):
-        excl[i] = _mul(g, per[i]['cov'], rem)
-        rem = _mul(g, rem, _one_minus(g, per[i]['cov']))
-    kb = float(opt['height_blend'])
-    a = []
-    for i, p in enumerate(per):
-        ai = excl[i]
-        if kb > 0:
-            ai = g.add(ai, g.mul(p['hs'], kb))
-        e = p['L']['edge_noise'] if p['L']['edge_noise'] is not None else float(opt['edge_noise'])
-        if e > 0 and i > 0:
-            n = noise(coords, 1.0 / 0.85, 3.0, 0.62, 11.1 + 7.3 * i)
-            f = comp.fade(1.0 / 0.85)
-            ai = g.add(ai, g.mul(g.sub(n, 0.5), _mul(g, f, 2.0 * e)))
-        a.append(ai)
-    if len(a) == 1:
-        wn = [1.0]
-    else:
-        ma = a[0]
-        for v in a[1:]:
-            ma = g.math('MAXIMUM', ma, v)
-        ma = g.sub(ma, float(opt['blend_depth']))
-        b = [g.math('MAXIMUM', g.sub(v, ma), 0.0) for v in a]
-        s = b[0]
-        for v in b[1:]:
-            s = g.add(s, v)
-        s = g.math('MAXIMUM', s, 1e-5)
-        wn = [g.math('DIVIDE', v, s) for v in b]
+    # the overlay of the macro data and the scans' heights, the composite and the height blend (_blend_weights)
+    wn = _blend_weights(g, comp, dat, sd, per, opt,
+                        edge_noise=lambda i: noise(coords, 1.0 / 0.85, 3.0, 0.62, 11.1 + 7.3 * i))
 
     def wsum(vals):
         acc = None
@@ -2474,7 +2605,12 @@ def _surface_group_data(pal, sd, name, prefer, log):
         w_far = g.mul(fade, g.smoothstep(0.0, FAR_FADE_MAIN_CELLS * cm, dat.rd.outputs['Hero Outside']))
         fc_col = g.vmath('SCALE', dat.colour('C'), scale=_far_grain(g, layers[0], sets[0], coords))
         albedo = g.mix('RGBA', w_far, albedo, fc_col)
-        rough = g.mix('FLOAT', w_far, rough, dat.value('far_roughness'))
+        # C's roughness is the scans' own (their means); past D0 every scan's normals have averaged flat, so it
+        # takes the layers' normal variance by their weights, as each layer's own roughness does by then
+        rc = dat.value('far_roughness')
+        if aa_on:
+            rc = _rough_lost(g, rc, wsum([p['var'] for p in per]))
+        rough = g.mix('FLOAT', w_far, rough, rc)
     elif log:
         log(f"[surfacing] {pal['name']}: no far colour in the data (no palette bake): no far hand-off")
 
@@ -2613,13 +2749,19 @@ def _far_grain(g, L, S, coords):
 
 
 def far_group(palette, data, name='eido_terrain_far', prefer='2k', log=print):
-    """The far material's node group (SURFACING_DESIGN.md 3.7): the baked far colour C and its roughness, the macro
-    normal from D, the base layer's faint grain, no layers. What the near material shows past 1.5 D0, for rings
-    lying beyond that from every camera: a cost saving only."""
+    """The far material's node group (SURFACING_DESIGN.md 3.7): the baked far colour C, the macro normal from D, the
+    base layer's faint grain. What the near material shows past 1.5 D0, for rings lying beyond that from every
+    camera: a cost saving only. Its specular and its roughness are the near material's there, from the same layer
+    weights (each layer's coverage, overlay, composite and blend, its scan at its mean height, as the scans' coarsest
+    mips read past D0): each layer's own specular by its weight, and C's roughness with the layers' normal variance
+    (specular_aa). C carries neither: the palette's one specular here lit the caldera's far forest with the sky,
+    a straight ring edge lighter and bluer than the near forest (11-20). The weights read the maps through the
+    packing the near material made (apply_surface builds it first; its reads include these)."""
     pal = P.get(palette) if not (isinstance(palette, dict) and 'options' in palette) else palette
     opt = pal['options']
-    L0 = pal['layers'][0]
-    S0 = packed_set(L0['set'], prefer, log=log)
+    layers = pal['layers']
+    sets = [packed_set(L['set'], prefer, log=log) for L in layers]
+    L0, S0 = layers[0], sets[0]
     ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
     for nm, kd in (('BSDF', 's'), ('Base Color', 'c'), ('Roughness', 'f'), ('Normal', 'v')):
         _sock(ng, nm, 'OUTPUT', kd)
@@ -2627,23 +2769,55 @@ def far_group(palette, data, name='eido_terrain_far', prefer='2k', log=print):
     gout = g.node('NodeGroupOutput')
     coords = g.node('ShaderNodeTexCoord').outputs['Object']
     geo = g.geometry()
+    Ng, Vin = geo.outputs['Normal'], geo.outputs['Incoming']
     consts = dict(P.CONSTANTS)
     consts.update(pal.get('constants') or {})
     pix = float(consts.get('pixel_angle') or P.CONSTANTS['pixel_angle'])
-    ndv = g.math('ABSOLUTE', g.vmath('DOT_PRODUCT', geo.outputs['Normal'], geo.outputs['Incoming']))
-    fp = g.math('DIVIDE', g.mul(g.view_distance(), pix), g.math('MAXIMUM', ndv, 0.05))
-    tiles = sorted(float(L['tile_m']) for L in pal['layers'])
-    dat = _Data(g, data, set(), coords, fp, consts, tile_m=tiles[len(tiles) // 2],
+    ndv = g.math('ABSOLUTE', g.vmath('DOT_PRODUCT', Ng, Vin))
+    vpix = g.mul(g.view_distance(), pix)
+    fp_read = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.05))
+    fp = g.math('DIVIDE', vpix, g.math('MAXIMUM', ndv, 0.25))
+    tiles = sorted(float(L['tile_m']) for L in layers)
+    weights = _layer_weights(pal, data, None)
+    names = set()
+    for w in weights:
+        names |= P.names_in(w)
+    if 'slope_20m' in names:
+        names |= {'n20_x', 'n20_y'}
+    dat = _Data(g, data, names, coords, fp_read, consts, tile_m=tiles[len(tiles) // 2],
                 detail_strength=float(opt.get('detail_strength', DETAIL_STRENGTH)), cubic=False)
     if not dat.has_family('C'):
         raise ValueError('far_group: the surface data has no far colour (bake it with a palette)')
+    comp = _Compiler(g, coords, pal.get('constants'), noise3=(opt.get('detile') or 'offset') != 'offset', data=dat,
+                     fp=fp)
+    per = [dict(L=L, cov=_clamp01(g, comp(P.parse(w))), hs_scan=0.5, hs=0.5) for L, w in zip(layers, weights)]
+    wn = _blend_weights(g, comp, dat, data, per, opt)
+
+    def wsum(vals):
+        acc = None
+        for v, w in zip(vals, wn):
+            if v is None:
+                continue
+            term = _mul(g, v, w)
+            acc = term if acc is None else (acc + term if isinstance(acc, float) and isinstance(term, float)
+                                            else g.add(acc, term))
+        return 0.0 if acc is None else acc
     normal = dat.n_macro()
+    # as the near material: a grazing pixel whose shading normal turns away from the camera is pulled toward the
+    # mesh's own normal
+    facing = g.smoothstep(0.0, 0.1, g.vmath('DOT_PRODUCT', normal, Vin))
+    normal = g.vmath('NORMALIZE', g.mix('VECTOR', facing, Ng, normal))
     albedo = g.vmath('MINIMUM', g.vmath('SCALE', dat.colour('C'), scale=_far_grain(g, L0, S0, coords)),
                      (0.95, 0.95, 0.95))
-    rough = g.math('MINIMUM', g.math('MAXIMUM', dat.value('far_roughness'), 0.02), 1.0)
+    rc = dat.value('far_roughness')
+    if opt.get('specular_aa', True) is not False:
+        aas = [_aa_constants(S, L) for S, L in zip(sets, layers)]
+        rc = _rough_lost(g, rc, wsum([a[0] if a is not None else None for a in aas]))
+    rough = g.math('MINIMUM', g.math('MAXIMUM', rc, 0.02), 1.0)
+    specs = [float(L.get('specular', opt['specular'])) for L in layers]
     bsdf = g.node('ShaderNodeBsdfPrincipled')
     bsdf.inputs['Metallic'].default_value = 0.0
-    bsdf.inputs['Specular IOR Level'].default_value = float(opt['specular'])
+    g.set(bsdf.inputs['Specular IOR Level'], specs[0] if len(set(specs)) == 1 else wsum(specs))
     g.set(bsdf.inputs['Base Color'], albedo)
     g.set(bsdf.inputs['Roughness'], rough)
     g.set(bsdf.inputs['Normal'], normal)
@@ -3188,7 +3362,9 @@ def surface_material(palette='auto', recipe=None, strata=None, options=None, nam
               default one lattice for all of them, twice the class of the largest box tile, not turned; 0: one
               read per sector frame), each a material option or a layer's own key; steep_hex_share (box layers
               with a tile under this share of the largest read each sector frame once, default 0.5; 0: every box
-              layer hex-tiled in its sector frames); a layer's overlay
+              layer hex-tiled in its sector frames); specular_aa (default True: each scan's roughness takes back
+              the normal variance its mips average away at the pixel's footprint, so distant grass and rock do
+              not mirror the sky; False: the scans' own roughness at every distance); a layer's overlay
               dict(height, crest, crest_fine, crease), provenance dict(src, down, pale), patina and fresh_gain
               (multipliers on rock by `fresh`)
     constants the terrain constants over the palette's (palettes.CONSTANTS: base_elevation_m, snowline_m, treeline_m,
@@ -3391,6 +3567,6 @@ def missing_masks(obj, palette_or_names):
 __all__ = ['surface_material', 'surface_group', 'apply_surface', 'clay_material', 'missing_masks', 'packed_set',
            'pack_set', 'pack_masks', 'mask_packs', 'strata_image', 'strata_array', 'resolve', 'terrain_constants',
            'cache_root', 'far_material', 'far_group', 'far_rings', 'far_distance', 'set_far_distance', 'reader_group',
-           'hex_grid_group', 'hex_class', 'canopy_mean', 'canopy_clump_mean',
+           'hex_grid_group', 'hex_class', 'canopy_mean', 'canopy_clump_mean', 'scan_normal_variance',
            'terrain_map_group', 'GROUP_NAME', 'PACK_VERSION', 'MAX_IMAGES', 'MAX_SAMPLERS', 'ATTRS_DIRECT',
            'DEBUG_COLOURS']
