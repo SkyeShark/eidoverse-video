@@ -632,6 +632,53 @@ def test_river():
                                                                  round(2 * float(plan.river_hw.max()))])
 
 
+def test_river_lined_with_cliffs():
+    """The river's floodplain undercuts the towers that line it as the open plain undercuts a cluster's edge (the Li
+    River runs between sheer-footed towers). In the default plan, seeds 1, 2 and 7, main tile: of the cluster towers
+    within one spacing of the corridor's edge (the base's: the channel's widest plus 80 m from its centreline) at
+    least 90 % are the plain's cliffed peaks (cone weight under 0.2), and of those with a collapse scarp at least 80 %
+    turn their first one toward the river (within 60 degrees); three and a half spacings out the broad cones stand
+    (over 70 % with cone weight over 0.9); and where the river runs through a cluster its nearest towers stand a
+    median 360 m or less from its centreline. (With the cluster field's interior alone 38-74 % of that first row were
+    cliffed, the rest broad cones, and the nearest towers stood a median 400-560 m off: a band of empty plain along
+    the river, where a broad cone's foot would have reached the water.)"""
+    rows = {}
+    for seed in (1, 2, 7):
+        plan = K.plan_karst(seed, DOMAIN, {}, via=(0, 0), main=MAIN)
+        pr = plan.params
+        d0 = pr['river_width_m'] * (1.0 + pr['river_width_var']) + 80.0
+        s = pr['spacing_m']
+        d = K._river_distance(plan.river_coarse, plan.x, plan.y, 3000.0)
+        cw = K.cone_weight(plan.cluster, plan.interior)
+        inm = (np.abs(plan.x) < 4000) & (np.abs(plan.y) < 4000)
+        cl = inm & (plan.cluster > 0.7)
+        first = np.nonzero(cl & (d < d0 + s))[0]
+        far = cl & (d > d0 + 3.5 * s)
+        cliffed = float(np.mean(cw[first] < 0.2)) if first.size else 0.0
+        cones = float(np.mean(cw[far] > 0.9))
+        sc = plan.scarp[first, 0]
+        has = sc[:, 2] > 0
+        toward = K._toward_river(plan, plan.x[first[has]], plan.y[first[has]])
+        off = np.abs((sc[has, 0] - toward + math.pi) % (2.0 * math.pi) - math.pi)
+        facing = float(np.mean(off < math.radians(60.0))) if has.any() else 0.0
+        rp = plan.river_mid
+        on = (np.abs(rp[:, 0]) < 4000) & (np.abs(rp[:, 1]) < 4000)
+        m_r, _ = K._cluster(plan, rp[:, 0], rp[:, 1])
+        through = rp[on & (m_r > 0.9)]
+        near = np.array([float(np.min(np.hypot(plan.x - x, plan.y - y))) for x, y in through])
+        rows[f'seed{seed}'] = dict(first_row=int(first.size), first_row_cliffed=round(cliffed, 3),
+                                   scarped=int(has.sum()), scarps_facing_river=round(facing, 3),
+                                   far_cones=round(cones, 3), river_points_in_clusters=int(through.shape[0]),
+                                   nearest_tower_p50_m=round(float(np.median(near)), 1) if near.size else None)
+        record('test_river_lined_with_cliffs', rows=rows)
+        assert first.size >= 10, f'seed {seed}: only {first.size} cluster towers line the river'
+        assert cliffed >= 0.9, f'seed {seed}: {cliffed:.0%} of the towers lining the river are cliffed'
+        assert facing >= 0.8, f'seed {seed}: {facing:.0%} of their scarps face the river'
+        assert cones > 0.7, f'seed {seed}: {cones:.0%} broad cones 3.5 spacings from the river'
+        assert near.size == 0 or np.median(near) <= 360.0, \
+            f'seed {seed}: the river\'s nearest towers in a cluster stand a median {np.median(near):.0f} m off'
+
+
 def test_fengcong_composition():
     """fengcong at 16 m: no river, almost no plain (< 0.1), closed depressions (cockpits) over >= 2 % of the tile,
     their floors perched on the common base (median floor >= 15 m above the plain) and mostly flat."""
@@ -783,7 +830,8 @@ TESTS = [test_blue_noise_spacing, test_plan_spacing_and_clusters, test_profile_f
          test_no_terraces_on_hero_levels, test_no_lattice_creases_on_hero_levels,
          test_cockpit_floors_meet_their_ground, test_parent_child_levels,
          test_determinism,
-         test_fenglin_composition, test_cluster_massifs, test_river, test_fengcong_composition,
+         test_fenglin_composition, test_cluster_massifs, test_river, test_river_lined_with_cliffs,
+         test_fengcong_composition,
          test_fluting_on_hero_levels,
          test_op_on_core_levels, test_recipe, test_performance, test_guilin_judge]
 
