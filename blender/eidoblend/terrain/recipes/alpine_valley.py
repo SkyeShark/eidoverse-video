@@ -4,10 +4,11 @@
     from eidoblend.terrain.recipes import alpine_valley as AV
     t = make_terrain('alpine_valley', **AV.preset('yosemite'))     # a granite trough in a domed upland
 
-The defaults are Lauterbrunnen's: one trunk trough down the middle of the tile, draining north, its flat floor about
-600 m wide between limestone walls 400-700 m high that stand at 75-80 degrees within 200 m of the floor, under
-benches (Muerren, Wengen) and the hanging valleys that open onto them, in a horseshoe of high ridges whose head
-stands 9.5 km up-valley. PRESETS hold other settings as make_terrain keyword arguments (knobs, base elevation,
+The defaults are Lauterbrunnen's: one trunk trough down the middle of the tile, draining north, its floor at about
+800 m: where the limestone is massive a box, its flat floor about 600 m wide between walls about 575 m high that
+stand at 75-80 degrees within 200 m of the floor, and where the rock is weaker a U whose walls failed back over
+their talus, under the hanging valleys that open onto them, in a horseshoe of high ridges whose head stands 9.5 km
+up-valley. PRESETS hold other settings as make_terrain keyword arguments (knobs, base elevation,
 size): 'yosemite', a 1.8 km flat-floored trough with 950 m granite walls and no benches, cut into a gently domed
 upland draining west.
 
@@ -23,9 +24,10 @@ The stages:
      coarsest level, refined below it;
   3. glacial (every level): on the coarsest level, once it is fully grown, the ice discharge, the cirques, the
      carve with hanging tributaries (box troughs: a flat floor, cliffs standing at wall_deg within about 200 m of
-     it, benches above), the fresh walls' threshold (and lateral moraines, knob moraine_m); on the finer levels the
-     walls are sharpened to the level's own cells from the cross-section the carve left, keep their steep
-     threshold and fail at it at each level's own scale where the rock is weak;
+     it, shoulders above), the fresh walls' threshold at the angle their rock holds (wall_deg where massive, down to
+     52 degrees where weak: knob rock_strong_share), and lateral moraines (knob moraine_m); on the finer levels the
+     walls in massive rock are sharpened to the level's own cells from the cross-section the carve left, and all
+     keep their threshold and fail at it at each level's own scale, with couloirs of the sizes the level resolves;
   4. the trough's floor is levelled by its fill, graded down-valley; the end stage fills what closed basins remain
      with sediment (flat floors; defaults['lakes'] = 'lake' keeps them as ribbon lakes and tarns);
   5. talus (levels with cells of 16 m and finer): the walls' debris at 35 degrees;
@@ -137,14 +139,28 @@ FLUVIAL = dict(K=1.5e-5, valley_spacing_m='$valley_spacing_m', threshold_deg='$t
 # head_taper 2: a stream's trough grows in over two half-widths from its head instead of ending in a semicircular
 # wall (the reviewer's side troughs with stamped, smoothly rounded outlines).
 # overdeepen_exp 2: tributary glaciers cut far less deep than in proportion to their size, so they hang without
-# basins of their own. smooth_cells 12: a glacier cuts through its river's bends, so the trough runs straighter than
-# the valley it took over)
+# basins of their own; trough_depth_exp 1.6: their troughs are shallower for their width too (a side valley a third
+# the trunk's size is a U about half as deep as wide, not a slot as deep as wide: on seeds 5 and 6 those slots ran
+# along the side valleys' bottoms like canals). smooth_cells 12: a glacier cuts through its river's bends, so the
+# trough runs straighter than the valley it took over.
+# The rock (rock_weak_deg, rock_scale_m, the knob rock_strong_share): massive limestone under nearly half the
+# ground, in reaches a few km long, where the walls stand at wall_deg over a broad flat floor (Lauterbrunnen's box
+# between the village and Stechelberg), and weaker rock elsewhere, whose walls failed back after the ice to as
+# little as 52 degrees over their talus (its narrower U and V reaches, toward Zweiluetschinen and the valley head);
+# wall_iters 200 lets the coarsest level's walls fail that far. Massive everywhere, every section of the trunk was a
+# box: the judge's U-fit read 2.8-3.3 on every seed against Lauterbrunnen's 1.8, whose sections run from 0.7 to 5.4;
+# with a third of it massive and the weak walls at 45 degrees the tile kept too few cliffs (slope p99 63-66 degrees
+# against the real tile's 76).
+# apron 0.33: the fill rises on from the floor's edge up the walls' toe at about 30 degrees, a talus apron (level
+# there, the fill made a shelf at every wall's foot whose edges stepped along the coarsest level's cells, and the
+# finer levels raised them into levees with square corners)
 GLACIAL = dict(ela_m='$ela_m', trough_width_m='$trough_width_m', trough_depth_m='$trough_depth_m',
                wall_deg='$wall_deg', moraine_m='$moraine_m', cirques='$cirques', wall_toe=0.4, wall_lip=0.12,
-               floor_rise=0.06, rise_noise=0.6, rise_scale_m=900.0, floor_exp=1.0, head_taper=2.0,
-               overdeepen=1.0, overdeepen_exp=2.0, cirque_ela_m=2400.0,
+               floor_rise=0.06, apron=0.33, rise_noise=0.6, rise_scale_m=900.0, floor_exp=1.0, head_taper=2.0,
+               overdeepen=1.0, overdeepen_exp=2.0, trough_depth_exp=1.6, cirque_ela_m=2200.0,
                shoulder_width='$shoulder_width', shoulder_rise=0.3, shoulder_exp=1.0, cut=0.3, cut_width=4.0,
                shoulder_cut=0.18, shoulder_cut_width=2.0, floor_grade=0.012,
+               rock_weak_deg=52.0, rock_scale_m=3000.0, rock_strong_share='$rock_strong_share', wall_iters=200,
                wall_noise=0.25, wall_scales_m=[400.0, 120.0, 40.0], channel_area_m2=4.0e6, smooth_cells=12.0,
                rock_flutes=0.6, flute_weak=0.6, flute_strong=0.2)
 # (the flutes: couloirs failing to about 72 degrees on 80-degree walls (flute_weak 0.6). At the defaults' 67 degrees
@@ -157,12 +173,13 @@ PRESETS = {
     # Creeks); its walls 950 m at 78 degrees leave a floor about 1 km wide in its 1.8 km (2.2 km left 1.7 km of
     # floor), the old valley floor 970 m above it (the walls 800 m under the shoulder cut's 170 m), the ELA of the
     # last glaciation's Tioga ice low enough that the trunk runs off the tile; the range's relief that of the real
-    # tile (1582 m: at 1100 the trunk river held 970 m up read as the range's relief and stopped its uplift)
+    # tile (1582 m: at 1100 the trunk river held 970 m up read as the range's relief and stopped its uplift); its
+    # granite massive nearly everywhere (rock_strong_share 0.95: the walls stand sheer along the whole valley)
     'yosemite': dict(size=12000.0, base_elevation_m=1100.0, params={
         'uplift': 'upland', 'drain_azimuth_deg': 270.0, 'relief_m': 1500.0, 'ela_m': 1500.0,
         'trough_width_m': 1800.0, 'trough_depth_m': 950.0, 'bench_m': 970.0, 'shoulder_width': 0.0,
         'wall_deg': 78.0, 'threshold_deg': 20.0, 'valley_spacing_m': 800.0, 'cirques': False,
-        'tributary_area_km2': 5.0, 'snowline_m': 3300.0, 'treeline_m': 3000.0}),
+        'tributary_area_km2': 5.0, 'snowline_m': 3300.0, 'treeline_m': 3000.0, 'rock_strong_share': 0.95}),
 }
 
 
@@ -178,13 +195,17 @@ ALPINE_VALLEY = Recipe(
     'alpine_valley', 'A glacial U-valley: a flat floor between sheer walls, hanging side valleys, cirques, aretes '
                      'and horns, talus',
     references=['lauterbrunnen', 'yosemite_valley'],
-    defaults={'size': 8000.0, 'context': 4, 'hero_cell': 0.5, 'palette': 'alpine', 'base_elevation_m': 800.0,
+    # (base_elevation_m 600: the floor's fill grades up from the coarsest level's edge at floor_grade, so in the main
+    # tile it stands about 190 m over base level: 790 m, Lauterbrunnen's 795 at the village. At 800 the floor lay at
+    # 1000 m and the benches and upland 200 m too high, most of them over the 1950 m treeline. The glaciers' ELAs,
+    # ela_m 1000 and cirque_ela_m 2200, moved down with it, so the ice stands where it stood on the ground)
+    defaults={'size': 8000.0, 'context': 4, 'hero_cell': 0.5, 'palette': 'alpine', 'base_elevation_m': 600.0,
               'lakes': 'sediment'},
     knobs={
         'relief_m': Knob(2600.0, 'm', (500.0, 6000.0),
                          "the river-carved range's relief on the main tile before the ice (the controller steers the "
                          "uplift to it); the trough is cut into it"),
-        'ela_m': Knob(1200.0, 'm', (0.0, 6000.0),
+        'ela_m': Knob(1000.0, 'm', (0.0, 6000.0),
                       'the equilibrium-line altitude of the carving glaciation (the last glacial maximum, not '
                       "today's): glaciers grow above it and reach down-valley until ablation eats them. The trunk "
                       'glacier has to run off the tile and past its context (as the Aare glacier ran out onto the '
@@ -194,20 +215,25 @@ ALPINE_VALLEY = Recipe(
                                "the trunk trough's width at its lip (tributaries are narrower by their ice "
                                "discharge, (Q / Q_trunk)^0.4); the flat floor is what the walls leave of it (about "
                                "600 m here, Lauterbrunnen's 400-650; its lips 1-1.15 km apart)"),
-        'trough_depth_m': Knob(830.0, 'm', (50.0, 2000.0), "the trunk trough's cut: from its rock floor to the lip, "
+        'trough_depth_m': Knob(700.0, 'm', (50.0, 2000.0), "the trunk trough's cut: from its rock floor to the lip, "
                                                           "the glacier's depth below its river's old bed (the fill "
-                                                          "then levels the floor bench_m below the lip)"),
-        'bench_m': Knob(870.0, 'm', (0.0, 2000.0), "the height of the old valley floor - the benches (Muerren, "
+                                                          "then levels the floor bench_m below the old bed)"),
+        'bench_m': Knob(700.0, 'm', (0.0, 2000.0), "the height of the old valley floor - the benches (Muerren, "
                                                    "Wengen) and the hanging valleys' mouths - above the trough's "
                                                    "floor; the walls stand the shoulder cut (0.18 of trough_depth_m, "
-                                                   "150 m) lower, 720 m here (at 650 with no cut the cliffs stood "
-                                                   "200-480 m, Lauterbrunnen's 300-950)"),
+                                                   "126 m) lower, about 575 m here (Lauterbrunnen's 300-800; Wengen "
+                                                   "stands 470 m and Muerren 850 m over the floor; at 870 the benches "
+                                                   "and the upland above them stood mostly over the 1950 m treeline)"),
         'tributary_area_km2': Knob(4.0, '', (0.05, 100.0), "the smallest catchment (km2) whose glacier carves its own "
                                                           "trough; smaller ones only feed their trunk (at 1.5 the "
                                                           "range's every side valley became a hanging trough)",
                                    apply=_tributaries),
         'shoulder_width': Knob(1.5, '', (0.0, 5.0), "the benches above the trough's lip (Muerren, Wengen), as a "
                                                     "share of the trough's half-width; 0: none"),
+        'rock_strong_share': Knob(0.45, '', (0.0, 1.0), "the share of the ground in massive rock, in reaches a few km "
+                                                        "long, where the trough's walls stand at wall_deg (a box "
+                                                        "trough); elsewhere the rock is weaker and its walls failed "
+                                                        "back to as little as 52 degrees over talus (a U)"),
         'wall_deg': Knob(80.0, 'deg', (35.0, 85.0), "the trough walls' angle: the carved cliff's core stands at it "
                                                     "and the fresh walls' threshold is it (lognormal, with fall-line "
                                                     "couloirs and ribs on the levels that resolve them; "

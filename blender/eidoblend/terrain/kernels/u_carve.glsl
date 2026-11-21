@@ -6,8 +6,9 @@
                  lip (rho = 1): its slope ramps up over the toe (uToe of its run), stands at its steepest across the
                  core and eases off over the lip (uLip); then the shoulder 1 + uShH ((rho - 1) / uShW)^uShB, then
                  the upper wall rising uOut H per W to the trimline (uShW 0: the upper wall from the lip). fillz is
-                 the valley fill's top, fill + rise H min(rho / ff, 1)^2, rise = uFloorRise seedC.y (the fans and
-                 aprons rising from the river to the walls' foot, their height varying along the valley)
+                 the valley fill's top, fill + rise H min(rho / ff, 1)^2 + uApron H max(rho - ff, 0), rise =
+                 uFloorRise seedC.y (the fans rising from the river to the walls' foot, their height varying along
+                 the valley, then the talus apron up the toe until the wall stands above it)
        cap     = the largest of the candidates' caps: unbounded inside an inner trough (rho <= 1) or a cirque bowl,
                  uCut H (1 - q)^2 beyond the lip, q = min((rho - 1) / uCutW, 1): the ice lowers the shoulders and
                  spurs by at most that, the most at the lip and nothing at the trimline (rho = 1 + uCutW), so capped
@@ -60,6 +61,7 @@
 //! uniform float uLip        the share over which it eases off into the shoulder (the rounded lip)
 //! uniform float uFloorFrac  the floor's share of the half-width (the wall starts there)
 //! uniform float uFloorRise  the fill's rise from the river to the foot of the walls, a share of H
+//! uniform float uApron      the talus apron's rise beyond the floor's edge, H per W
 //! uniform float uShW        the shoulder's width, a share of W (0: no shoulder)
 //! uniform float uShH        the shoulder's rise to its outer edge, a share of H
 //! uniform float uShB        the shoulder's exponent
@@ -110,7 +112,7 @@ float prof(float rho, float ff) {
 
 float fillz(float rho, float fill, float H, float ff, float rise) {
   float t = min(rho / max(ff, 1e-3), 1.0);
-  return fill + rise * H * t * t;
+  return fill + rise * H * t * t + uApron * H * max(rho - ff, 0.0);
 }
 
 void main() {

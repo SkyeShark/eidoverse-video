@@ -11,8 +11,9 @@
    edge; uShW 0: none), then the upper wall up to the trimline, rising uOut H per W (so the carve ends at the
    trimline instead of planing the ridges beyond). ff = uFloorFrac seedC.x, the seed's own floor share (a
    tributary's floor is narrower than the trunk's: solvers/glacial.py centrelines). fillz(rho) = fill + rise H
-   min(rho / ff, 1)^2, rise = uFloorRise seedC.y: the valley fill's top, rising from the river to the foot of the
-   walls by the seed's own fans and aprons (they differ along the valley).
+   min(rho / ff, 1)^2 + uApron H max(rho - ff, 0), rise = uFloorRise seedC.y: the valley fill's top, rising from the
+   river to the foot of the walls by the seed's own fans (they differ along the valley), then the talus apron up the
+   wall's toe until the wall stands above it.
    One entry per stream, so the U-carve's smooth minimum joins different troughs and never a stream's neighbouring
    seeds (which would sink every floor by a quarter of the join width). Steps uStep = 2^k ... 2, 1, then 1 again
    (solvers/glacial.py jfa_steps). Twin: solvers/glacial.py jump_flood. */
@@ -29,6 +30,7 @@
 //! uniform float uLip  the share over which it eases off into the shoulder
 //! uniform float uFloorFrac  the floor's share of the half-width (the wall starts there)
 //! uniform float uFloorRise  the fill's rise from the river to the foot of the walls, a share of H
+//! uniform float uApron  the talus apron's rise beyond the floor's edge, H per W
 //! uniform float uShW  the shoulder's width, a share of the half-width W (0: no shoulder)
 //! uniform float uShH  the shoulder's rise to its outer edge, a share of H
 //! uniform float uShB  the shoulder's exponent
@@ -56,7 +58,7 @@ float prof(float rho, float ff) {
 
 float fillz(float rho, float fill, float H, float ff, float rise) {
   float t = min(rho / max(ff, 1e-3), 1.0);
-  return fill + rise * H * t * t;
+  return fill + rise * H * t * t + uApron * H * max(rho - ff, 0.0);
 }
 
 float metric(int ci, ivec2 n, vec2 xp, out float sid) {

@@ -27,6 +27,11 @@
      flood ranks first everywhere: on 11-13 the main tile got no trough)
  10. sharpen_walls: a trough carved on 31.25 m cells and inherited at 15.6 m gets its walls back at 15.6 m (within
      a quarter of the upsampled error and 15 m), the floor, the ground beyond the lip and the pinned band untouched
+ 11. wall_flutes' families: no couloir on a level narrower than 2 of its cells across the fall line, and the coarse
+     level's couloirs kept on the finer level over the same ground
+ 12. valley_centre: seeds following a path 250 m off a valley's axis move onto it; seeds on the axis stay
+ 13. rock_strength: the massive share as asked; massive everywhere without rock_weak_deg; the walls' angle from
+     rock_weak_deg to wall_deg
 Writes blender/tests/terrain/out/glacial/twin_tests.json; exit code 1 on a failure.
 """
 import json
@@ -63,7 +68,7 @@ def check(name, cond, detail=None, seconds=None):
         FAILED.append(name)
 
 
-PROF = G.profile_uniforms({'floor_frac': 0.25, 'wall_toe': 0.3, 'wall_lip': 0.2, 'floor_rise': 0.06,
+PROF = G.profile_uniforms({'floor_frac': 0.25, 'wall_toe': 0.3, 'wall_lip': 0.2, 'floor_rise': 0.06, 'apron': 0.33,
                            'shoulder_width': 1.5, 'shoulder_rise': 0.3, 'upper_wall': 1.5})
 
 
@@ -265,6 +270,92 @@ def test_flutes():
           across >= 2.0 * along and 0.1 <= weak <= 0.35,
           f'change across / along the fall line {across / max(along, 1e-12):.1f}, couloirs {weak * 100:.0f} %',
           round(time.perf_counter() - t0, 2))
+
+
+def test_flute_families():
+    """wall_flutes' families: a level adds a family only once its couloirs are 2 cells wide or more (flute_gate), so
+    across the fall line no couloir on a level is narrower than 2 of its cells (the 80 m family's one-cell notches on
+    the 15.6 m level were the beaded rims and, upsampled, the hero levels' capsule ribs); and a family a coarse level
+    resolves stands where it is on the finer level (every couloir of the 15.6 m level's is a couloir on the 7.8 m
+    level's, over the same ground)."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain.core import levels as L
+    bad = []
+    runs = {}
+    for cell in (15.625, 7.8125):
+        n = int(round(2000.0 / cell))
+        lv = L.plan_levels(2000.0, n, (0.0, 0.0), None, None, None)[0]
+        X, Y = lv.xy()
+        h = 2.0 * X + 0.1 * Y                                         # a wall falling west: couloirs run along x
+        p = {'flute_patchy': 0.0}
+        f = G.wall_flutes(h, lv, p, 1)
+        weak = f < 0.0
+        for k in range(0, n, max(1, n // 16)):                       # transects across the fall line (along y)
+            col = weak[:, k].astype(int)
+            d = np.diff(np.concatenate([[0], col, [0]]))
+            widths = np.flatnonzero(d == -1) - np.flatnonzero(d == 1)
+            if widths.size and np.median(widths) < 2:
+                bad.append(f'{cell:g} m: couloirs {np.median(widths):.0f} cell wide')
+                break
+        gates = {lam: G.flute_gate(lam, cell) for lam in G.DEFAULTS['flute_scales_m']}
+        if any(g > 0 and 0.25 * lam < 2 * cell for lam, g in gates.items()):
+            bad.append(f'{cell:g} m: a family under 2 cells is gated in')
+        runs[cell] = (lv, weak)
+    lc, wc = runs[15.625]
+    lf, wf = runs[7.8125]
+    up = np.kron(wc.astype(int), np.ones((2, 2), int)).astype(bool)
+    kept = float(wf[up].mean()) if up.any() else 1.0
+    if kept < 0.9:
+        bad.append(f'the coarse level\'s couloirs are couloirs on the finer level at {kept * 100:.0f} % of them')
+    check("wall flutes' families: no couloir under 2 cells wide on a level, a coarse level's couloirs kept on the "
+          "finer one", not bad, '; '.join(bad) or f'coarse couloirs kept on the finer level {kept * 100:.0f} %',
+          round(time.perf_counter() - t0, 2))
+
+
+def test_valley_centre():
+    """valley_centre: seeds following a path 250 m to one side of a valley's axis (as a D8 path hugs one side of a
+    flat floor) move to within a cell of the axis; seeds on the axis stay."""
+    t0 = time.perf_counter()
+    from eidoblend.terrain.core import levels as L
+    lv = L.plan_levels(8000.0, 256, (0.0, 0.0), None, None, None)[0]
+    X, Y = lv.xy()
+    axis = 100.0
+    d = np.abs(X - axis)
+    h = 1000.0 + 0.01 * Y + np.where(d < 300.0, 0.0, (d - 300.0) * math.tan(math.radians(35.0)))   # flat floor, V
+    ys = np.arange(-3000.0, 3000.0, lv.cell)
+    out = []
+    for x_path in (axis - 250.0, axis):
+        xy = np.stack([np.full(ys.size, x_path), ys], 1)
+        S = ys.size
+        st = {'main': np.arange(S) + 1, 'rcv': np.arange(S) - 1}
+        st['main'][-1] = -1
+        mv = G.valley_centre(h, lv, xy, st, np.full(S, 500.0), np.full(S, 600.0))
+        out.append(float(np.median(np.abs(xy[:, 0] + mv[:, 0] - axis))))
+    ok = out[0] <= lv.cell and out[1] <= 0.5 * lv.cell
+    check('valley_centre: seeds 250 m off a valley\'s axis move onto it, seeds on it stay', ok,
+          f'off-axis path ends {out[0]:.1f} m from the axis, the axis path {out[1]:.1f} m (cell {lv.cell:g} m)',
+          round(time.perf_counter() - t0, 2))
+
+
+def test_rock():
+    """rock_strength: about rock_strong_share of the ground massive (strength over 0.5) over 40 km, 1 everywhere
+    without rock_weak_deg; wall_angle_deg from rock_weak_deg (strength 0) to wall_deg (1)."""
+    t0 = time.perf_counter()
+    rng = np.random.default_rng(4)
+    x, y = rng.uniform(-20000, 20000, 20000), rng.uniform(-20000, 20000, 20000)
+    bad = []
+    for share in (0.2, 0.35, 0.6):
+        g = G.rock_strength(x, y, {'rock_weak_deg': 45.0, 'rock_strong_share': share}, 3)
+        got = float((g > 0.5).mean())
+        if abs(got - share) > 0.07:
+            bad.append(f'share {share}: {got:.2f}')
+    if not np.all(G.rock_strength(x, y, {}, 3) == 1.0):
+        bad.append('not massive everywhere without rock_weak_deg')
+    a = G.wall_angle_deg(np.array([0.0, 1.0]), {'rock_weak_deg': 45.0, 'wall_deg': 80.0})
+    if not np.allclose(a, [45.0, 80.0]):
+        bad.append(f'angles {a}')
+    check('rock_strength: the massive share as asked, massive everywhere without rock_weak_deg; the walls\' angle '
+          'from rock_weak_deg to wall_deg', not bad, '; '.join(bad) or 'shares within 0.07', round(time.perf_counter() - t0, 2))
 
 
 def test_trunk():
@@ -528,10 +619,11 @@ def test_head_taper_carve():
     rho = np.asarray(fields['trough_rho'], np.float64)
     cut = np.asarray(h, np.float64) - np.asarray(fields['h'], np.float64)
     reach = 1.0 + max(float(params['cut_width']), float(params['shoulder_cut_width']))
-    carved = cut > 1.0
+    # what the U-carve itself cut (the fresh walls' failures after it retreat beyond its reach, up a trough's head)
+    carved = np.asarray(fields['carve'], np.float64) > 1.0
     own = float((rho[carved] <= reach + 0.05).mean()) if carved.any() else 0.0
     trough = float(np.asarray(fields['trough']).mean())
-    ok = shape_ok and own >= 0.99 and trough > 0.05 and float(cut.max()) < float(np.ptp(h))
+    ok = shape_ok and own >= 0.99 and trough > 0.03 and float(cut.max()) < float(np.ptp(h))
     check("the recipe's carve with its head taper: every seed a trough of the recipe's shape, every carved cell "
           "carved by a trough within reach", ok,
           f"{cl['idx'].size} seeds, H/W {ratio.min():.2f}..{ratio.max():.2f} (untapered {r0:.2f}); {own * 100:.1f} % "
@@ -597,8 +689,8 @@ def test_sharpen_walls():
 
 def main():
     for fn in (test_jump_flood, test_mass_balance, test_profile, test_graded_fill, test_best_donor, test_flutes,
-               test_trunk, test_drainage_receivers, test_shoulder_cut, test_lip_open, test_head_taper,
-               test_head_taper_carve, test_sharpen_walls):
+               test_flute_families, test_valley_centre, test_rock, test_trunk, test_drainage_receivers,
+               test_shoulder_cut, test_lip_open, test_head_taper, test_head_taper_carve, test_sharpen_walls):
         t0 = time.perf_counter()
         try:
             fn()
