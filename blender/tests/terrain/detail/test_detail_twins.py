@@ -13,6 +13,7 @@
   6. the hydraulic op on a synthetic hillside above a plain: the wear gathers into rills, a fan settles at the foot,
      the border band ends exactly on the start surface, the water's wet field follows the channels
   7. unknown parameters name the nearest
+  8. the anchor keeps rills and drops broad change; hold_main_pixels keeps every main pixel's mean exactly
 Writes blender/tests/terrain/out/detail/twin_tests.json; exit code 1 on a failure.
 """
 import json
@@ -21,6 +22,7 @@ import os
 import sys
 import time
 import traceback
+import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'core'))
@@ -139,6 +141,22 @@ def test_thermal():
           sl[rk].max() <= 61.0 and net3.max() > 1.0,
           f'steepest rock pair {sl[rk].max():.1f} deg (threshold 60), talus up to {net3.max():.2f} cells',
           time.perf_counter() - t0)
+    # the carry is the exact rounding error of delta + the pass's change (TwoSum), also where the pass moves more
+    # than the delta holds (a level's first passes start from delta 0; Fast2Sum is exact only the other way round)
+    shape = (80, 96)
+    dl = T.random_field(shape, -1.0e-3, 1.0e-3, 52)
+    inp = {'st': T.rgba(dl, np.zeros(shape, F), np.zeros(shape, F), dl - T.random_field(shape, 0.0, 2.0, 53)),
+           'base': T.rgba(500.0 + T.random_field(shape, 0.0, 40.0, 51, smooth=1)),
+           'par': T.rgba(np.full(shape, 1.0e3, F), T.random_field(shape, 0.55, 0.75, 54), np.full(shape, -1.0e6, F)),
+           'pin': np.zeros(shape + (4,), F),
+           'tacc': T.rgba(np.zeros(shape, F), T.random_field(shape, -1.0e-7, 1.0e-7, 55))}
+    out = T.run_twin('pipes_thermal', inp, {'uRate': 0.06, 'uBound': T.BOUND_OPEN})
+    dbc = (out['outT'][..., 0] + inp['tacc'][..., 1]).astype(F).astype(np.float64)     # tacc.x = 0: outT.x is db
+    lhs = out['outS'][..., 0].astype(np.float64) + out['outT'][..., 1].astype(np.float64)
+    exact = float((lhs == dl.astype(np.float64) + dbc).mean())
+    bigger = float((np.abs(dbc) > np.abs(dl)).mean())
+    check('thermal: delta + carry is exactly delta + the pass\'s change (TwoSum) on every cell', exact == 1.0,
+          f'{exact * 100:.3f} % of the cells exact; on {bigger * 100:.0f} % the pass moves more than the delta holds')
 
 
 # ------------------------------------------------------------------------------------------------ 3. breakup ---
@@ -280,6 +298,49 @@ def test_anchor():
           f'largest 8 m pixel mean {px_after:.3f} m, from {px_before:.3f} m', time.perf_counter() - t0)
 
 
+def test_hold_pixels():
+    """hold_main_pixels (real_place's detail stages): on a 0.5 m hero level that lies half a main pixel off the main
+    level's 8 m grid (as Lauterbrunnen's finest level does), a change of rills, a broad bump and stipple; after finish
+    every main pixel at least a quarter free of the border band keeps its mean (the change's mean there under 0.1 mm),
+    the level's edge stays on its parent's surface exactly, and a rill keeps most of its depth."""
+    t0 = time.perf_counter()
+    n = 256
+    main = Level(2, 'main', -4000.0, -4000.0, 8000.0, 8.0, 1000)
+    lv = Level(6, 'hero', 228.0, 1382.0, n * 0.5, 0.5, n, parent=5, depth=-4)
+    ctx = types.SimpleNamespace(plan=[main, lv], pins=None)
+    grid = HY.main_pixels(lv, ctx)
+    jj, ii = np.mgrid[0:n, 0:n].astype(np.float64)
+    h0 = 900.0 + 0.2 * jj + T.random_field((n, n), 0.0, 3.0, 61, smooth=3).astype(np.float64)
+    rill = -0.4 * np.exp(-((ii - 101.3 - 0.15 * jj) / 1.2) ** 2)
+    bump = 0.8 * np.exp(-(((ii - 170.0) / 30.0) ** 2 + ((jj - 120.0) / 30.0) ** 2))
+    change = rill + bump + T.random_field((n, n), -0.05, 0.05, 62).astype(np.float64)
+    pw, ph = HY.pins_for({}, lv, h0, ctx)
+    out = {}
+    for name, px in (('anchor', None), ('held', grid)):
+        f = {'h': h0.copy()}
+        HY.finish(f, h0 + change, h0 + change, h0, pw, ph, level=lv, anchor_m=HY.anchor_scale_m(lv), pixels=px)
+        out[name] = f['h'] - h0
+    fq, oi, oj = grid
+    free = HY._pixel_sums(1.0 - pw, fq, oi, oj) / HY._pixel_sums(np.ones((n, n)), fq, oi, oj)
+    means = {k: np.abs(HY._pixel_sums(v, fq, oi, oj) / HY._pixel_sums(np.ones((n, n)), fq, oi, oj))[free >= 0.25].max()
+             for k, v in out.items()}
+    edge = np.concatenate([out['held'][0], out['held'][-1], out['held'][:, 0], out['held'][:, -1]])
+    across = ii - 101.3 - 0.15 * jj
+    rows = (jj > 40) & (jj < n - 40)
+    on_rill, beside = (np.abs(across) < 0.6) & rows, (np.abs(across) > 3.0) & (np.abs(across) < 6.0) & rows
+
+    def depth(v):
+        return float(v[on_rill].mean() - v[beside].mean())
+    kept = {k: depth(v) / depth(rill) for k, v in out.items()}
+    check('hold_main_pixels: the main pixels keep their means, the edge its parent\'s surface, a rill its depth',
+          grid == (16, 8, 12) and means['held'] < 1.0e-4 and float(np.abs(edge).max()) == 0.0
+          and kept['held'] > 0.7,
+          f'main pixels {grid[0]} cells, the level {grid[1]}, {grid[2]} cells into its pixel; largest pixel mean '
+          f'{means["held"]:.1e} m (the anchor alone {means["anchor"]:.3f} m); edge max |dh| '
+          f'{float(np.abs(edge).max()):.1e} m; the rill keeps {kept["held"] * 100:.0f} % of its depth (the anchor '
+          f'alone {kept["anchor"] * 100:.0f} %)', time.perf_counter() - t0)
+
+
 # ------------------------------------------------------------------------------------------------ 7. params ---
 
 def test_params():
@@ -296,7 +357,7 @@ def test_params():
 
 def main():
     for t in (test_conservation, test_thermal, test_breakup, test_gully, test_planation, test_op_hydraulic,
-              test_anchor, test_params):
+              test_anchor, test_hold_pixels, test_params):
         try:
             t()
         except Exception as e:                                   # noqa: BLE001

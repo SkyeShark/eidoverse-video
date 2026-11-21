@@ -6,7 +6,8 @@
   1. parity: one dispatch of every kernel (pipes_flux, pipes_water, pipes_transport, pipes_thermal, breakup) against
      its numpy twin on a 96 x 80 field with pins, in the open, periodic and pinned modes, within 1e-4 x the range of
      every output channel (the design's test), with random rain (the PCG hash) and edge outflow switched on; the ground
-     as the kernels hold it, a base 500 cells up plus a change
+     as the kernels hold it, a base 500 cells up plus a change; and pipes_thermal's carry on the GPU is the exact
+     rounding error of its sum (TwoSum) on every cell, also where a pass moves more than the delta holds
   2. conservation on the GPU over 3,000 steps at 128^2, heights 500+ cells: with closed edges and with periodic ones,
      ground + suspended sediment is conserved (its net change against what was moved) and the water follows its budget
      exactly (each step: W' = (W + rain) (1 - Ke dt))
@@ -105,11 +106,21 @@ def test_parity():
         par = T.rgba(T.random_field(SHAPE, 0.5, 3.0, 33 + mode), T.random_field(SHAPE, 0.65, 0.75, 34 + mode))
         tacc = T.rgba(T.random_field(SHAPE, -1.0, 1.0, 35 + mode))
         # outT.y is the rounding carried to the next pass (Kahan): one float32 rounding, whose "range" is itself a
-        # rounding, so it is left out here; the conservation test below is what it is for
+        # rounding, so it is left out here; the TwoSum check below and the conservation test are what it is for
         report(f'parity pipes_thermal {label}',
                T.parity('pipes_thermal', {'st': T.rgba(dl, inp['st'][..., 1], inp['st'][..., 2], bed),
                                           'base': T.rgba(b0), 'par': par, 'pin': inp['pin'], 'tacc': tacc},
                         {'uRate': 0.06, 'uBound': mode}, channels={'outS': [0, 1, 2, 3], 'outT': [0]}))
+    # the thermal pass's carry: the exact rounding error of delta + the pass's change, on the GPU
+    inp = thermal_carry_inputs()
+    k = G.kernel('pipes_thermal')
+    tex = {n: G.texture(a) for n, a in inp.items()}
+    outs = {n: G.empty(SHAPE) for n in ('outS', 'outT')}
+    G.run(k, None, samplers=tex, images=outs, uniforms={'uRate': 0.06, 'uBound': T.BOUND_OPEN})
+    exact, bigger = carry_exact(inp, {n: G.read(t) for n, t in outs.items()})
+    check('pipes_thermal on the GPU: delta + carry is exactly delta + the pass\'s change (TwoSum) on every cell',
+          exact == 1.0, f'{exact * 100:.3f} % of the cells exact; on {bigger * 100:.0f} % the pass moves more than '
+                        f'the delta holds (where Fast2Sum is not exact)')
     # breakup: world noise far from the origin, joints, bedding with dip
     p = DT._params(DT.BREAKUP, {'bedding': {'spacing_m': 6.0, 'width_m': 2.0, 'strength': 0.6, 'depth_m': 0.8,
                                             'dip_deg': 3.0, 'azimuth_deg': 30.0}}, 'breakup')
@@ -120,6 +131,28 @@ def test_parity():
         u = DT.breakup_uniforms(p, lv, nt, bu)
         report(f'parity breakup (cell {cell} m, 40 km from the origin)',
                T.parity(DT.breakup_kernel(), {'st': T.rgba(h), 'terms': terms}, u, twin=DT.breakup))  # st first
+
+
+def thermal_carry_inputs(shape=SHAPE, seed=51):
+    """pipes_thermal's inputs where a pass moves more than most cells' delta holds (|dbc| > |delta|, as in a level's
+    first passes: the delta starts at 0), with tacc.x = 0, so that outT.x is the pass's own change db exactly."""
+    b0 = 500.0 + T.random_field(shape, 0.0, 40.0, seed, smooth=1)
+    dl = T.random_field(shape, -1.0e-3, 1.0e-3, seed + 1)
+    bed = dl - T.random_field(shape, 0.0, 2.0, seed + 2)              # up to 2 cells of loose debris: it slides
+    par = T.rgba(np.full(shape, 1.0e3, F), T.random_field(shape, 0.55, 0.75, seed + 3), np.full(shape, -1.0e6, F))
+    tacc = T.rgba(np.zeros(shape, F), T.random_field(shape, -1.0e-7, 1.0e-7, seed + 4))
+    return {'st': T.rgba(dl, np.zeros(shape, F), np.zeros(shape, F), bed), 'base': T.rgba(b0), 'par': par,
+            'pin': np.zeros(shape + (4,), F), 'tacc': tacc}
+
+
+def carry_exact(inp, out):
+    """(the share of cells where the delta written plus the carry equals the delta read plus the pass's change
+    dbc = fl(db + tacc.y) exactly, in float64; the share where |dbc| > |delta|). TwoSum makes the first 1."""
+    dl0 = inp['st'][..., 0].astype(np.float64)
+    db = out['outT'][..., 0]                                            # 0 + db: db itself
+    dbc = (db + inp['tacc'][..., 1]).astype(F).astype(np.float64)       # the kernel's float32 sum, rounded the same
+    lhs = out['outS'][..., 0].astype(np.float64) + out['outT'][..., 1].astype(np.float64)
+    return float((lhs == dl0 + dbc).mean()), float((np.abs(dbc) > np.abs(dl0)).mean())
 
 
 def model_inputs(b):

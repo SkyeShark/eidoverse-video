@@ -36,7 +36,9 @@ is weak and keeps its relief where it is resistant (world-space noise), with an 
 
 All three write h (blended to the pins at the end, like the hydraulic op: the border band fades from the detail to the
 parent's surface), and breakup also bed, talus, wear, deposit, kfac, K_factor, Sc and Sc_factor (and K when the level
-has one). Run by the level runner (run.py), the ops take its StageContext (pins, device, log) as ctx.
+has one). Breakup and gully anchor their change as the hydraulic op does, and with hold_main_pixels (real_place) keep
+every main pixel's mean (hydraulic.hold_pixels). Run by the level runner (run.py), the ops take its StageContext
+(pins, plan, device, log) as ctx.
 
 Order. In real_place and fluvial_range the breakup runs after the fluvial stage on each hero level, so its K_factor
 and Sc_factor reach only the stages after it on that level (the hydraulic pass); for the fluvial stage to cut along
@@ -97,6 +99,8 @@ BREAKUP = {
     'iterations': (400, '', 'threshold-relaxation passes'),
     'anchor': (True, 'bool', "keep only the change narrower than anchor_m (hydraulic.anchor)"),
     'anchor_m': (None, 'm', "the anchor's scale (None: 1.5 x the main level's cell)"),
+    'hold_main_pixels': (False, 'bool', "the change keeps the mean of every main-level pixel (hydraulic.hold_pixels): "
+                                        "for a real place, whose pixels are measured (real_place sets it)"),
     'rate': (0.06, '', 'relaxation rate (<= 1/8)'),
     'repose_deg': (35.0, 'deg', 'the repose angle of the debris'),
     'soil_deg': (38.0, 'deg', 'the threshold written into Sc on soil when the level has none'),
@@ -114,6 +118,7 @@ GULLY = {
     'normalization': (0.5, '', "Phacelle's amplitude normalisation"),
     'anchor': (True, 'bool', "keep only the change narrower than anchor_m (hydraulic.anchor)"),
     'anchor_m': (None, 'm', "the anchor's scale (None: 1.5 x the main level's cell)"),
+    'hold_main_pixels': (False, 'bool', "the change keeps the mean of every main-level pixel (hydraulic.hold_pixels)"),
 }
 
 PLANATION = {
@@ -398,7 +403,9 @@ def op_breakup(fields, level, params=None, seed=0, log=None, backend='gpu', ctx=
     bed2 = h1 + bed_rel.astype(np.float64) * cell
     pw, ph = HY.pins_for(fields, level, h_in, ctx)
     HY.finish(fields, h2, bed2, h_in, pw, ph, talus=np.maximum(net.astype(np.float64), 0.0) * cell, level=level,
-              anchor_m=HY.anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None)
+              anchor_m=HY.anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None,
+              pixels=HY.main_pixels(level, ctx) if p['hold_main_pixels'] else None,
+              log=lambda m: log(f'level {level.index}: {m}'))
     # the rock's numbers for the stages after this one: the erodibility factor (kfac, also as the fluvial stage's
     # K_factor) and the threshold (Sc; Sc_factor is its ratio to what the level had)
     fields['kfac'] = kfac
@@ -505,7 +512,9 @@ def op_gully(fields, level, params=None, seed=0, log=None, ctx=None, **_kw):
     h = h_in + g * mask
     pw, ph = HY.pins_for(fields, level, h_in, ctx)
     HY.finish(fields, h, (np.asarray(fields['bed'], np.float64) if 'bed' in fields else h), h_in, pw, ph,
-              level=level, anchor_m=HY.anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None)
+              level=level, anchor_m=HY.anchor_scale_m(level, p['anchor_m']) if p['anchor'] else None,
+              pixels=HY.main_pixels(level, ctx) if p['hold_main_pixels'] else None,
+              log=lambda m: log(f'level {level.index}: {m}'))
     log(f'level {level.index} ({level.cell:.3g} m x{level.n}): gully octave in {time.perf_counter() - t0:.1f} s, '
         f'on {mask.mean() * 100:.0f} % of the level, |relief| p99 {np.percentile(np.abs(g * mask), 99):.2f} m')
     return fields

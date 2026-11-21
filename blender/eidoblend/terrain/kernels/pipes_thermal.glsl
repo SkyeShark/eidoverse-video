@@ -20,7 +20,9 @@
    shedding more than its excess. Water and sediment pass through. PINNED mode holds the ground to its pin.
    Float32: an exchange of 1e-7 cells added to a change of several cells is partly rounded away, and over thousands
    of passes that loses mass systematically (measured: 4e-6 of the material moved; 1e-11 in float64). outT.y carries
-   what the rounding dropped into the next pass (Kahan's compensation), so it is not lost. */
+   what the rounding dropped into the next pass (Kahan's compensation), so it is not lost: the exact rounding error of
+   the sum, by Knuth's TwoSum, whichever of the two terms is larger (a level's first passes start from a delta of 0
+   and move more than it holds). */
 //! sampler st          x: delta (ground - base), y: d water, z: s sediment, w: bed - base
 //! sampler base        x: b0 (cell units)
 //! sampler par         x: threshold of the cohesive ground (tangent), y: repose of debris (tangent), z: failure floor
@@ -55,11 +57,13 @@ void main() {
     db += dh > 0.0 ? -m : m;
   }
   vec4 ta = texelFetch(tacc, p, 0);
-  /* `precise`: without it the compiler may fold dbc - ((x + dbc) - x) to 0 and drop the compensation (GLSL allows
-     such rewrites; the GPU's drift was unchanged until these were marked) */
+  /* TwoSum: carry = (c.x + dbc) - dl exactly, for any two terms (Fast2Sum, dbc - (dl - c.x), is exact only where
+     |c.x| >= |dbc|). `precise`: without it the compiler may fold the error terms to 0 and drop the compensation (GLSL
+     allows such rewrites; the GPU's drift was unchanged until these were marked) */
   precise float dbc = db + ta.y;
   precise float dl = c.x + dbc;
-  precise float carry = dbc - (dl - c.x);
+  precise float bv = dl - c.x;
+  precise float carry = (c.x - (dl - bv)) + (dbc - bv);
   float bed = min(c.w, dl);
   if (uBound == BOUND_PINNED) {
     vec4 pn = texelFetch(pin, p, 0);
