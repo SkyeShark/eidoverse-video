@@ -12,7 +12,8 @@ JUDGE_TERRAINS = os.path.join(TN, 'out', 'surfacing_judge', 'terrains')
 REFERENCE_DIR = os.path.join(TN, 'reference')
 W, H = 960, 540
 EXPOSURE = -0.5                             # the textured views' exposure (AgX)
-VISTA_STEP_M, VISTA_HALF_M = 5.0, 2.0       # a view's vista_m: no crown within 2 m of its sight line, every 5 m
+VISTA_STEP_M, VISTA_GAP_M = 2.0, 4.0       # a view's vista_m: crown-free points every 2 m out, at most 4 m apart
+VISTA_WIDEN = 1.1                           # ... across the frame's width and a tenth more (vista_discs)
 PARAMS = {'real_place': {'dem': 'lauterbrunnen'}}
 
 
@@ -118,18 +119,35 @@ def is_eye(v):
     return v['cam_z'][0] == 'ground' and float(v['cam_z'][1]) <= 10.0
 
 
+def vista_discs(v, eye, aim):
+    """The ground a view's vista keeps open (views.json vista_m: a camera standing where trees grow, at a viewpoint as
+    a photographer would): points every VISTA_STEP_M out to vista_m metres across the frame's width (the lens's
+    horizontal field, VISTA_WIDEN wider, about the camera's own heading: the aim placed at its frame point, as
+    aim_camera does), at most VISTA_GAP_M apart, each a disc of radius 0 that keeps every plant's crown off it
+    (plants.plan_plants' (x, y, 0, 'crown')). No tree or shrub crown stands over the first vista_m metres of the
+    picture, while grass and flowers, whose crowns are centimetres, grow up to the lens."""
+    lens = float(v['lens'])
+    yaw = math.atan2(aim[1] - eye[1], aim[0] - eye[0]) + math.atan((float(v['frame'][0]) - 0.5) * 36.0 / lens)
+    half = math.atan(18.0 / lens) * VISTA_WIDEN
+    out = []
+    for k in range(1, int(float(v['vista_m']) / VISTA_STEP_M + 1e-9) + 1):
+        s = VISTA_STEP_M * k
+        n = max(1, int(math.ceil(2.0 * s * math.tan(half) / VISTA_GAP_M)))
+        for j in range(n + 1):
+            a = yaw - half + 2.0 * half * j / n
+            out.append((eye[0] + s * math.cos(a), eye[1] + s * math.sin(a), 0.0, 'crown'))
+    return out
+
+
 def plant_spec(v, eye, aim, path=None):
     """make_terrain's plants= for a view: around the camera (an eye view; a walk's whole path) or the ground it looks
-    at (an aerial), with the view's vista kept clear of crowns."""
+    at (an aerial), with the view's vista kept clear of crowns (vista_discs)."""
     if path is not None:
         spec = dict(focus=[(float(p[0]), float(p[1])) for p in path])
     else:
         spec = dict(focus=(eye[0], eye[1]) if is_eye(v) else (aim[0], aim[1]))
     if v.get('vista_m'):
-        n = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
-        steps = [VISTA_STEP_M * k for k in range(1, int(float(v['vista_m']) / VISTA_STEP_M) + 1)]
-        spec['exclude'] = [(eye[0] + s * (aim[0] - eye[0]) / n, eye[1] + s * (aim[1] - eye[1]) / n, VISTA_HALF_M,
-                            'crown') for s in steps]
+        spec['exclude'] = vista_discs(v, eye, aim)
     return spec
 
 

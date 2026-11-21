@@ -227,7 +227,13 @@ expect of it beside a photograph:
   the cliffs only.
 - **Relief below the mesh.** The shading normal is the full-resolution
   height plus gullies and rock ribs below the cell, so distant slopes shade
-  every rill and ledge, and near ground takes the scans' own normals.
+  every rill and ledge, and near ground takes the scans' own normals. The
+  gullies are a spectrum of octaves keyed by world wavelength, from the
+  terrain's top octave down to 2 texels: they start where enough water
+  gathers for their size, vary in spacing and depth (most faint, a few deep),
+  never cut sand, and lie buried under the snowpack. A palette can tune them
+  with `options['relief']` (`k`, the depth over the wavelength, 0.025;
+  `spread`, `initiation`; the keys in `surface/bake.py`'s `DEFAULTS`).
 - **No tiling and no smear.** Planar scans are hex-tiled (three reads on a
   triangle grid, each turned and offset). Steep faces read their scans in
   eight fixed frames tilted to the dip, picked by the face's own normal, so a
@@ -275,6 +281,8 @@ The material's options are a palette's `options` (pass a palette dict:
 | `steep_hex_m`, `steep_hex_share` | the lattice of the steep faces' sector reads; box layers whose tile is under this share of the largest box tile read each frame once | twice the largest box tile's lattice; 0.5 |
 | `detail_strength` | how much the relief below the cell tilts the normal | 0.5 |
 | `far_m` | D0, metres: where the far colour takes over | a main-level texel spanning 2.5 pixels |
+| `specular_aa` | each scan's roughness takes back the slope its normal map's mips average away at the pixel's footprint, so distant grass and rock stay matte instead of mirroring the sky and the sun; `False`: the scans' own roughness at every distance | on |
+| `relief` | the gully spectrum below the cell: `dict(k=..., spread=..., initiation=...)` over the bake's defaults (`surface/bake.py`) | the bake's |
 | `overlay` | `False`: layer edges follow the height blend alone, not the scans' grain and the landform's convexity | on |
 | `dusting` | `dict(colour, amount, slope_deg, where)`: powder or ash on every facet flatter than `slope_deg` | none |
 | `debug` | `'layers'`: each layer one flat colour (the judge's layer map); `'level'`: the level each pixel reads | none |

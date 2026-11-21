@@ -231,7 +231,10 @@ def _numbers(state, recipe, view):
         sw = fr.get('seam_worst') or {}
         parts.append(f"seam dE {fr['seam_worst_delta_e']:.2f} over its control"
                      + (f" at the {sw['side_m']:.0f} m window" if sw.get('side_m') else '')
+                     + (' (where the far material begins)' if sw.get('far_edge') else '')
                      + (' FAIL' if fr.get('seam_verdict') == 'fail' else ''))
+        if fr.get('seam_far_delta_e') is not None and not sw.get('far_edge'):
+            parts.append(f"the far material's edge dE {fr['seam_far_delta_e']:.2f}")
     return f"{state}: " + '; '.join(parts) if parts else None
 
 

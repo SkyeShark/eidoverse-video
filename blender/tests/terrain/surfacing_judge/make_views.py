@@ -62,6 +62,15 @@ FIXES = {
         why='the camera faces a slope; the photograph looks down the trough from Wengen\'s shoulder. It stays on a '
             'context ring: one of the three eye views that show the near material there (SURFACING_DESIGN.md 5.4, '
             'package 2, item 7)'),
+    ('real_place', 'ridge_schynige'): dict(
+        how='spot', radius=3000.0, grid=41, prefer='high', pitch=-6.0, ring='context', max_slope_deg=25.0,
+        over_trees=dict(height_m=30.0, from_m=150.0), by_eye=True,
+        why='the review\'s spot stands in the spruce forest the plant layer grows since 11-20, crowns filling the '
+            'frame, and on ground so gentle that trees rise into the view for 600 m; lauterbrunnen_15 looks across '
+            'the valley from Schynige Platte with the forest below it: the photograph\'s heading and pitch from a '
+            'high spot where the trees from 150 m out stay under the frame\'s centre line. It stays on a context '
+            'ring: one of the three eye views that show the near material there (SURFACING_DESIGN.md 5.4, '
+            'package 2, item 7)'),
     ('alpine_valley', 'ridge_schynige'): dict(
         how='spot', radius=1500.0, prefer='high', keep_height=True, within='outer',
         why='the near ridge hides the valley the camera looks down into; the photograph looks across the valley '
@@ -93,8 +102,13 @@ FIXES = {
         how='see', target='high', r=1200.0, dz=-40.0, prefer='low',
         why='a near mesa hides the buttes; the photograph looks across the valley floor at three buttes'),
     ('mesas_buttes', 'under_the_wall'): dict(
-        how='see', target='high', r=1200.0, dz=-60.0, prefer='low',
-        why='the camera looks up at sky where a butte stood; the photograph stands under a butte'),
+        how='see', target='high', r=1200.0, dz=-60.0, prefer='low', max_slope_deg=5.0, open_m=300.0,
+        why='the camera looks up at sky where a butte stood; the photograph stands on the open floor and looks '
+            'across it at a butte over its talus (the spot first found stood on a talus skirt, whose dark slope '
+            'filled the lower half of the picture: the review of 11-20): the footing and the first 300 m toward '
+            'the butte under 5 degrees',
+        caption='on the open floor 1.4 km from a butte\'s wall, 1.7 m, 28 mm (photo mv_02: the West Mitten over its '
+                'talus)'),
     ('dunes', 'crest'): dict(
         how='spot', radius=900.0, prefer='high', pitch=-7.0,
         why='a dune face rises in front of the camera; the photograph looks along a crest down to the plain'),
@@ -131,8 +145,10 @@ FIXES = {
 }
 # a second step on a view after FIXES (or on the review's view), by eye: the plant layer's renders of 11-18 showed
 # what the clay check cannot (crowns in front of the camera, the floor out of the frame)
-#   forward: the camera walks forward_m toward the aim along the ground; vista_m: the first metres of its sight line
-#            are kept clear of crowns (the renderer passes discs along it to the plants' plan)
+#   forward: the camera walks forward_m toward the aim along the ground; vista_m: the first metres of the picture
+#            are kept clear of tree and shrub crowns across the frame's width (shots.vista_discs, passed to the
+#            plants' plan)
+#   vista:   the camera as it stands, with a vista_m
 #   frame:   the aim placed at another point of the frame
 THEN = {
     ('caldera', 'rim_east'): dict(
@@ -145,13 +161,22 @@ THEN = {
         why='the camera aimed 13.7 degrees up at the dune face, the floor and its grass below the frame; '
             'namib_star_dunes_02 looks along the floor with the dune behind: the aim placed high in the frame '
             '(4.7 degrees up)'),
+    ('alpine_valley', 'shoulder_wengen'): dict(
+        how='vista', vista_m=250.0,
+        why='the spot stands in the spruce forest the plant layer grows since 11-20, crowns filling the frame, and '
+            'looks 21 degrees down a slope on which trees 32 m tall rise above the frame\'s centre line out to 250 m: '
+            'a viewpoint\'s clearing, no tree or shrub crown over the first 250 m of the picture (the spots found '
+            'for the photograph\'s own heading and pitch on the context ring look at a valley side or over a ridge '
+            'at the plain beyond, not down the trough)'),
+    ('real_place', 'ridge_schynige'): dict(
+        how='vista', vista_m=150.0,
+        why='the spot stands in the spruce forest (the trees beyond 150 m stay under the centre line): a '
+            'viewpoint\'s clearing, no tree or shrub crown over the first 150 m of the picture'),
 }
 # a view the check passes but the design needs as it is
 KEEP = {('canyon', 'brink_down'): 'the near right-hand wall is the material package\'s test case for the Box '
                                   'projection\'s smear (SURFACING_DESIGN.md 5.4, package 2, item 2)',
         ('impact_crater', 'plain_north'): 'an eye view on a context ring, one of the three that show the near '
-                                          'material there (SURFACING_DESIGN.md 5.4, package 2, item 7)',
-        ('real_place', 'ridge_schynige'): 'an eye view on a context ring, one of the three that show the near '
                                           'material there (SURFACING_DESIGN.md 5.4, package 2, item 7)'}
 # the two places the board enlarges, where the review's renders showed what section 1.4 names (render pixels; the
 # board picks its own for every other view)
@@ -194,6 +219,21 @@ def _extreme_near(stack, x, y, r, which):
     return float(X[j, i]), float(Y[j, i]), float(h[j, i])
 
 
+def _open_toward(stack, xs, ys, target, open_m, max_slope_deg, step_m=10.0):
+    """Whether the ground from each point toward the target stays under max_slope_deg for the first open_m metres
+    (an open floor in front of an eye camera, not a talus slope or a rise filling the lower picture)."""
+    xs, ys = np.atleast_1d(np.asarray(xs, np.float64)), np.atleast_1d(np.asarray(ys, np.float64))
+    dx, dy = float(target[0]) - xs, float(target[1]) - ys
+    n = np.maximum(np.hypot(dx, dy), 1e-6)
+    cell = stack.levels[stack.main]['cell']
+    ok = np.ones(len(xs), bool)
+    for s in np.arange(step_m, open_m + 0.5 * step_m, step_m):
+        px, py = xs + s * dx / n, ys + s * dy / n
+        nz = V._normals(stack.height_at, px, py, cell)[:, 2]
+        ok &= np.degrees(np.arccos(np.clip(nz, -1.0, 1.0))) <= max_slope_deg
+    return ok
+
+
 def fix_see(stack, v, f):
     cam, ground, aim = V.camera_of(stack, v)
     dist = float(f.get('distance') or math.hypot(aim[0] - cam.eye[0], aim[1] - cam.eye[1]))
@@ -209,10 +249,19 @@ def fix_see(stack, v, f):
     if f.get('ring') == 'context':                     # an eye view that stands on a context ring, as its spot does
         main = stack.levels[stack.main]
         within, exclude = 0, (main['x0'], main['y0'], main['x0'] + main['side'], main['y0'] + main['side'])
-    allowed = None
+    tests = []
     if f.get('off_channel_m'):                         # off the streams (their riparian trees) by this much
+        tests.append(lambda x, y: _channel_distance(stack, x, y) >= float(f['off_channel_m']))
+    if f.get('open_m'):                                # open floor in front: the ground toward the target gentle
+        tests.append(lambda x, y: _open_toward(stack, x, y, tgt, float(f['open_m']),
+                                               float(f.get('max_slope_deg', 30.0))))
+    allowed = None
+    if tests:
         def allowed(x, y):
-            return _channel_distance(stack, x, y) >= float(f['off_channel_m'])
+            ok = np.ones(np.shape(x), bool)
+            for test in tests:
+                ok &= np.asarray(test(x, y), bool)
+            return ok
     for scale in (1.0, 0.75, 1.35, 0.55, 1.8):
         vp = V.viewpoint(stack, tgt, dist * scale, eye_height=eye_h, heading=cam.heading_deg,
                          prefer=f.get('prefer'), lens_mm=v['lens'], within=within, exclude=exclude,
@@ -229,6 +278,21 @@ def fix_see(stack, v, f):
     return None, None, 'no standing point sees the target'
 
 
+def _trees_under_centre(stack, eye, dirn, lens, height_m, from_m, to_m=500.0, step_m=10.0, rays=7):
+    """Whether trees height_m tall standing from from_m to to_m in front of an eye, across the frame's width, keep
+    their tops under the frame's centre line: the forest below a viewpoint shows in the lower picture, as it does
+    under the photographer at Schynige Platte, and leaves the view across the valley open."""
+    hd, pitch = math.atan2(float(dirn[0]), float(dirn[1])), math.asin(float(np.clip(dirn[2], -1.0, 1.0)))
+    half = math.atan(18.0 / float(lens))
+    s = np.arange(float(from_m), float(to_m) + 0.5 * step_m, step_m)
+    line = float(eye[2]) + s * math.tan(pitch)
+    for a in np.linspace(-half, half, rays):
+        g = np.asarray(stack.height_at(eye[0] + s * math.sin(hd + a), eye[1] + s * math.cos(hd + a)), np.float64)
+        if np.any(g + float(height_m) > line):
+            return False
+    return True
+
+
 def fix_spot(stack, v, f, n=15):
     cam, ground, aim = V.camera_of(stack, v)
     d = aim - cam.eye
@@ -237,15 +301,22 @@ def fix_spot(stack, v, f, n=15):
     if f.get('pitch') is not None:                     # the photograph's own pitch where today's ground changed it
         hd, pt = math.radians(cam.heading_deg), math.radians(float(f['pitch']))
         dirn = np.array([math.sin(hd) * math.cos(pt), math.cos(hd) * math.cos(pt), math.sin(pt)])
-    # an eye stands in the main tile (its hero levels); a high view may stand over the context levels
-    lv = stack.levels[stack.main if f.get('within', 'main') == 'main' else 0]
+    # an eye stands in the main tile (its hero levels); a high view may stand over the context levels, and an eye
+    # view that must stand on a context ring (ring='context') stands there, outside the main window
+    ctx = f.get('ring') == 'context'
+    lv = stack.levels[stack.main if f.get('within', 'main') == 'main' and not ctx else 0]
     r = float(f['radius'])
-    g = np.linspace(-r, r, n)
+    g = np.linspace(-r, r, int(f.get('grid', n)))
     xs, ys = np.meshgrid(cam.eye[0] + g, cam.eye[1] + g)
     xs, ys = xs.ravel(), ys.ravel()
     m = 2.0 * lv['cell']
     ok = ((xs - cam.eye[0]) ** 2 + (ys - cam.eye[1]) ** 2 <= r * r) & (xs >= lv['x0'] + m) & \
          (xs <= lv['x0'] + lv['side'] - m) & (ys >= lv['y0'] + m) & (ys <= lv['y0'] + lv['side'] - m)
+    if ctx:
+        mn = stack.levels[stack.main]
+        mm = 2.0 * lv['cell']
+        ok &= ~((xs > mn['x0'] - mm) & (xs < mn['x0'] + mn['side'] + mm) & (ys > mn['y0'] - mm) &
+                (ys < mn['y0'] + mn['side'] + mm))
     xs, ys = xs[ok], ys[ok]
     keep = V.dry(stack, xs, ys) if len(xs) else np.zeros(0, bool)
     xs, ys = xs[keep], ys[keep]
@@ -273,6 +344,9 @@ def fix_spot(stack, v, f, n=15):
         c = V.check(stack, w, grid=(64, 36))
         if c['fails']:
             continue
+        ot = f.get('over_trees')
+        if ot and not _trees_under_centre(stack, eye, dirn, v['lens'], ot['height_m'], ot['from_m']):
+            continue
         # a summit, crest or floor as the photograph's; near the review's spot; nothing rising in front; the ray
         # along the photograph's heading and pitch reaching far before it meets the ground (an open view)
         score = (rk if f.get('prefer') == 'high' else 1.0 - rk) * 6.0 - math.hypot(x - cam.eye[0],
@@ -287,10 +361,13 @@ def fix_spot(stack, v, f, n=15):
     if c['fails']:
         return None, None, 'the best spot fails the full check: ' + '; '.join(c['fails'])
     pitch = f.get('pitch')
-    return w, c, (f"stands {math.hypot(best[2] - cam.eye[0], best[3] - cam.eye[1]):.0f} m from the review's spot, "
-                  f"keeps heading {cam.heading_deg:.0f}"
+    ot = f.get('over_trees')
+    return w, c, (f"stands {math.hypot(best[2] - cam.eye[0], best[3] - cam.eye[1]):.0f} m from the review's spot"
+                  + (' on a context ring' if ctx else '') + f", keeps heading {cam.heading_deg:.0f}"
                   + (f", looks {pitch:+.0f} degrees as the photograph does" if pitch is not None
-                     else f" and pitch {cam.pitch_deg:.1f}"))
+                     else f" and pitch {cam.pitch_deg:.1f}")
+                  + (f"; trees {ot['height_m']:.0f} m tall from {ot['from_m']:.0f} m out keep under the centre line"
+                     if ot else ''))
 
 
 def _channel_distance(stack, xs, ys):
@@ -452,6 +529,16 @@ def fix_forward(stack, v, f):
     return w, c, how
 
 
+def fix_vista(stack, v, f):
+    """The camera as it stands, its first vista_m metres kept clear of tree and shrub crowns across the frame's width
+    (surfacing_judge/shots.vista_discs: a viewpoint's clearing; grass grows up to the lens)."""
+    w = dict(v, vista_m=float(f['vista_m']))
+    c = V.check(stack, w)
+    if c['fails']:
+        return None, None, 'with a vista, it fails: ' + '; '.join(c['fails'])
+    return w, c, f"keeps its first {float(f['vista_m']):.0f} m clear of tree and shrub crowns across the frame"
+
+
 def fix_frame(stack, v, f):
     """The aim placed at another point of the frame (x, y from the left, from the top)."""
     w = dict(v, frame=[float(f['frame'][0]), float(f['frame'][1])])
@@ -532,6 +619,8 @@ def main(argv):
                     v = dict(v, origin=f"review, failing: {f['why']}; no move found ({how})")
                 else:
                     w['origin'] = f"review, moved: {f['why']}; the judge's camera {how}"
+                    if f.get('caption'):                   # the review's caption no longer says where it stands
+                        w['caption'] = f['caption']
                     w['focus'] = bool(V.kind_of(w) == 'eye' and c2['stands'] == 'main')
                     print(f'{recipe}/{v["name"]}: moved, {how}; blocked {100 * c2["blocked"]:.0f} %, ground '
                           f'{100 * c2["ground"]:.0f} %, aim ray {100 * c2["aim_seen"]:.0f} %')
@@ -542,7 +631,7 @@ def main(argv):
                 print(f'{recipe}/{v["name"]}: FAILS with no fix written: {"; ".join(c["fails"])}')
             if key in THEN:
                 f = THEN[key]
-                w, c2, how = (fix_forward if f['how'] == 'forward' else fix_frame)(st, v, f)
+                w, c2, how = {'forward': fix_forward, 'frame': fix_frame, 'vista': fix_vista}[f['how']](st, v, f)
                 if w is None:
                     print(f'{recipe}/{v["name"]}: the second step found nothing: {how}')
                 else:
