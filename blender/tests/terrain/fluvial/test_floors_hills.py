@@ -44,7 +44,9 @@ numpy twins; no Blender):
        mixed with the parent by the band's weights (within 1e-4 m)
        hold_rivers on a hero level: the river the parent resolved keeps its heights (within 1e-4 m; free it moves
        over 5 cm), and the ground around it refines at least half as much as free; on a main level it holds only
-       with hold_levels 'refine'
+       with hold_levels 'refine'; the inflow passes a 0.4 m pit on the course and a 12 m stretch where the
+       inherited area falls under the hold's (held only where the area reaches it, that stretch moved 2.6 m and
+       the water past it fell from 300 to 1 thousand m2)
        channel_head_frac on a refining level: rippled hillsides beside a river start no channels (their p90 change
        under a quarter of free), and the river still cuts (at least a quarter of free, and 1 m deeper than with a
        head above every cell's area, where creep fills its bed)
@@ -54,8 +56,7 @@ numpy twins; no Blender):
        and cut it down); a refining level spills only with spill_levels 'all'
   hydro inlets (solvers/hydro.py, run.py's end stage)
        the water a child is given across 21 edge cells behind a 0.2 m lip reaches its valley's outlet whole with the
-       inlets closed, under half of it with the whole edge open; with a 1 % share only those 21 cells are inlets,
-       not the hillside trickles over the rest of the edge
+       inlets closed, under half of it with the whole edge open
   incise (solvers/fluvial.py)
    10. a base-level fall along a straight course over a hilly upland: the channel is cut to the upland's grade minus
        drop_m (within 15 %), the cut falls off away from the course (a valley), and 900 m and more from it the
@@ -674,14 +675,29 @@ def test_hold_rivers():
                           'lock_m': 32.0, 'steps': 150, 'hold_rivers': 4.0}, seed=1, ctx=ctx)
     below = river & (x < 0.0) & (x > lv.x0 + 20 * cell)
     passed = float(np.asarray(f['A'], np.float64)[below].max(axis=None)) if below.any() else 0.0
+    # a gap in the inherited area: a floor spread the parent's water over more cells, so a stretch of the course
+    # drains less than the hold's area (4 lock blocks, 4096 m2). Held only where the area reaches it, the gap's
+    # cells refined free and the run's routing stalled there; held down the course, the gap stays and the water
+    # passes it
+    gap = river & (x > -12.0) & (x < 0.0)
+    f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32),
+                    'A': np.where(gap, 1000.0, A0).astype(np.float32)})
+    ctx = FL.StageContext(plan=[main, lv], index=1, level=lv, fresh=False, role='refine', pins=pins, device=DEV,
+                          log=lambda m: None)
+    FL.op_fluvial(f, lv, {'K': 2e-3, 'valley_spacing_m': 16.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                          'lock_m': 32.0, 'steps': 150, 'hold_rivers': 4.0}, seed=1, ctx=ctx)
+    gap_moved = float(np.max(np.abs(np.asarray(f['h'], np.float64) - h0)[gap]))
+    past_gap = river & (x < -12.0) & (x > lv.x0 + 20 * cell)
+    gap_passed = float(np.asarray(f['A'], np.float64)[past_gap].max())
     (r0, g0), (r1, g1) = out[0.0], out[4.0]
     ok = (r1 < 1e-4 and r0 > 0.05 and g1 > 0.5 * g0 and moved['refine'] < 1e-4 and moved['hero'] > 0.05
-          and passed >= 3.0e5)
+          and passed >= 3.0e5 and gap_moved < 1e-4 and gap_passed >= 3.0e5)
     check('fluvial hold_rivers: a hero level keeps the river its parent resolved', ok,
           f'the river\'s cells moved at most {r1:.1e} m held ({r0:.2f} m free); the ground around moved '
           f'{g1:.2f} m (p90) held, {g0:.2f} m free; on a main level the river moved {moved["hero"]:.2f} m with '
           f'hold_levels hero, {moved["refine"]:.1e} m with refine; below a 0.4 m pit on the held course the river '
-          f'carries {passed / 1e3:.0f} thousand m2 (the inflow: 300)')
+          f'carries {passed / 1e3:.0f} thousand m2 (the inflow: 300); across a 12 m gap in the inherited area the '
+          f'course moved {gap_moved:.1e} m and past it carries {gap_passed / 1e3:.0f} thousand m2')
 
 
 def test_channel_head():
@@ -786,19 +802,10 @@ def test_inlets():
         acc = HY.accumulate(recv, wgt, term, area=(cell * cell + A_in).ravel()).reshape(h.shape)
         out[closed] = float(acc[:, -1].max())
     entering = float(A_in.sum())
-    # share: hillsides trickling 50 m2 over every other edge cell stay outlets, the river's 21 cells are inlets
-    trickle = np.zeros((n, n))
-    trickle[0, :] = trickle[-1, :] = trickle[:, -1] = 50.0
-    both = np.maximum(A_in, trickle)
-    shared = HY.inlets(both, 0.01)
-    river_in = bool(shared[n // 2 - 10:n // 2 + 11, 0].all())
-    trickles_open = int(shared.sum()) == 21
-    ok = out[True] >= entering and out[False] < 0.5 * entering and river_in and trickles_open
+    ok = out[True] >= entering and out[False] < 0.5 * entering
     check('hydro inlets: the water a child level is given at its edge runs down its valley, not back out', ok,
           f'at the valley\'s outlet {out[True] / 1e3:.0f} thousand m2 with the inlets closed, {out[False] / 1e3:.0f} '
-          f'with the whole edge open ({entering / 1e3:.0f} thousand entering); with a 1 % share the river\'s 21 cells '
-          f'are inlets {river_in}, and only they ({int(shared.sum())} inlets beside {int((trickle > 0).sum())} '
-          f'trickling cells)')
+          f'with the whole edge open ({entering / 1e3:.0f} thousand entering)')
 
 
 def test_grow_levels():

@@ -104,7 +104,6 @@ def _takes_ctx(fn):
 # --------------------------------------------------------------------------------------------------- pins ---
 
 SEAM_HOLD = 2                  # cells at a child's edge held exactly on its parent's surface
-INLET_SHARE = 0.01             # closed_inlets: the edge cells carrying 1 % or more of the water coming in (hydro.inlets)
 
 
 def child_pins(lv, h_start, parent_level, parent_fields, parent_surface, sea_level=None, p=1.0):
@@ -222,7 +221,7 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
                 inlet = None
                 if closed_inlets and lv.parent is not None:
                     a_in = HY.inflow(plan[lv.parent], out[lv.parent], lv, 1.0, surfaces.get(lv.parent))[0]
-                    inlet = HY.inlets(a_in, INLET_SHARE)
+                    inlet = HY.inlets(a_in)
                 surfaces[i] = _surface(f, sea_level, inlet if inlet is not None and inlet.any() else None)
                 rec = dict(meta.get('record') or {}, cache='hit', seconds=round(time.perf_counter() - t0, 2))
                 record['levels'].append(rec)
@@ -283,9 +282,9 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
         # the end stages: lakes on evolved levels, then the drainage area to convergence on every level
         te = time.perf_counter()
         nlakes = 0
-        # with the recipe's defaults['closed_inlets'], the edge cells where the parent's rivers come in are no outlets
-        # of the level's routing (hydro.inlets: those carrying INLET_SHARE of the water coming in or more)
-        inlet = HY.inlets(pins['A_in'], INLET_SHARE) if (closed_inlets and pins is not None) else None
+        # with the recipe's defaults['closed_inlets'], the edge cells where the parent's water comes in are no outlets
+        # of the level's routing (hydro.inlets)
+        inlet = HY.inlets(pins['A_in']) if (closed_inlets and pins is not None) else None
         inlet = inlet if inlet is not None and inlet.any() else None
         if evolved and lakes_mode:
             thr = HY.depression_threshold(shared.get('relief') or float(np.ptp(fields['h'])))

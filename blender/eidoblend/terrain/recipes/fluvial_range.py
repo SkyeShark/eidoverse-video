@@ -75,7 +75,12 @@ def _detail(p):
 # 6 km level down to 6400 m2 on the 375 m one) keep their courses and long profiles while the gullies and hillslopes
 # refine around them. Free, each hero level's lock (its uplift) raised a river's course next to the pinned border band
 # above the river's own entry there (up to 3 m), the parent's inflow drained back out of the window, and the stream
-# beside the canyon road camera kept 0.70, 0.15 and 0.03 of its catchment on the three finest hero levels
+# beside the canyon road camera kept 0.70, 0.15 and 0.03 of its catchment on the three finest hero levels.
+# hold_levels stays 'hero' (11-21). Held on the 24 km and main levels too ('refine'), the trunk canyons lost the flat
+# basins their lock dams leave at film (seeds 3 and 4: 1.9 and 2.7 % of the main tile under 5 degrees, held 1.4 and
+# 1.4 %; the San Gabriel DEM 0.9 %), but a held river cuts no channel of its own on that level: the valley floors
+# stage filled the floor flat to the held course and the canyon road stream spread across it (0.39 km2 through a
+# 10 m section of the main level, free 0.70)
 FLUVIAL = dict(K=1.5e-5, valley_spacing_m='$valley_spacing_m', threshold_deg='$threshold_deg', threshold_noise=0.2,
                threshold_scale_m=400.0, threshold_gain=0.08, roughness='$roughness',
                roughness_scales_m=[2000.0, 600.0, 150.0, 50.0], deposition='$deposition', age_myr='$age_myr',
