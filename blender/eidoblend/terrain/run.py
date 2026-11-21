@@ -27,7 +27,8 @@ Per level:
      defaults['lakes'] = 'sediment'; False skips them), keeping the parent's lakes; a depression reaching into a
      child's border band, or into a flatten area (a rigid block during erosion, which can lag its surroundings into
      a hollow; api.py levels it afterwards), fills with sediment instead; then on every level the drainage area A is
-     routed to convergence across the lakes (the masks read it).
+     routed to convergence across the lakes (the masks read it). With the recipe's defaults['closed_inlets'], a
+     child's edge cells where its parent's water comes in are no outlets of that routing (hydro.inlets).
 
 The cache: each level's fields are written under eidoverse/assets/cache/terrain/lv_<key>/, the key covering
 everything that decides levels 0..i (stages, knob values, seed, the plan up to i, flatten, sea level, the code that
@@ -160,12 +161,13 @@ def _blend(before, fields, m):
 
 # ------------------------------------------------------------------------------------------------- cache ---
 
-def _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev, grow_n=1):
+def _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev, grow_n=1,
+               inlets=False):
     from .core import cache as CA
     payload = dict(v=RUN_VERSION, plan=[lv.to_dict() for lv in plan[:i + 1]],
                    stages=[s.to_dict() for s in stages], values=values, seed=int(seed), flatten=flatten,
                    sea=sea_level, base=base_elevation_m, lakes=lakes_mode, device=dev.name, code=CA.code_hash(),
-                   grow=int(grow_n))
+                   grow=int(grow_n), inlets=bool(inlets))
     blob = json.dumps(payload, sort_keys=True, separators=(',', ':'), default=str)
     return 'lv_' + hashlib.sha1(blob.encode('utf-8')).hexdigest()
 
@@ -193,6 +195,7 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
     defaults = dict(getattr(recipe, 'defaults', {}) or {})
     lakes_mode = defaults.get('lakes', 'lake')
     grow_n = max(1, int(defaults.get('grow_levels', 1) or 1))
+    closed_inlets = bool(defaults.get('closed_inlets', False))
     mask_params = None
     shared = {}
     out = []
@@ -208,14 +211,18 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
         if cache:
             from .core import cache as CA
             key = _level_key(plan, i, stages, values, seed, flatten, sea_level, base_elevation_m, lakes_mode, dev,
-                             grow_n)
+                             grow_n, closed_inlets)
             C = CA.Cache(key)
             if C.complete():
                 f = C.load_level(0, lv)
                 meta = C.read_meta() or {}
                 shared = dict(meta.get('shared') or {})
                 out.append(f)
-                surfaces[i] = _surface(f, sea_level)
+                inlet = None
+                if closed_inlets and lv.parent is not None:
+                    a_in = HY.inflow(plan[lv.parent], out[lv.parent], lv, 1.0, surfaces.get(lv.parent))[0]
+                    inlet = HY.inlets(a_in)
+                surfaces[i] = _surface(f, sea_level, inlet if inlet is not None and inlet.any() else None)
                 rec = dict(meta.get('record') or {}, cache='hit', seconds=round(time.perf_counter() - t0, 2))
                 record['levels'].append(rec)
                 log(f'[terrain.run] level {i} {lv}: cache hit ({rec["seconds"]} s)')
@@ -275,6 +282,10 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
         # the end stages: lakes on evolved levels, then the drainage area to convergence on every level
         te = time.perf_counter()
         nlakes = 0
+        # with the recipe's defaults['closed_inlets'], the edge cells where the parent's water comes in are no outlets
+        # of the level's routing (hydro.inlets)
+        inlet = HY.inlets(pins['A_in']) if (closed_inlets and pins is not None) else None
+        inlet = inlet if inlet is not None and inlet.any() else None
         if evolved and lakes_mode:
             thr = HY.depression_threshold(shared.get('relief') or float(np.ptp(fields['h'])))
             no_lake = None
@@ -289,9 +300,12 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
                                       sea_level=sea_level, band=lv.band if parent is not None else 0,
                                       no_lake=no_lake)
             top = np.asarray(fields['h'], np.float64) + np.asarray(fields['water'], np.float64)
-            surf = HY.routing_surface(np.maximum(filled, top), sea_level=sea_level)
+            surf = np.maximum(filled, top)
+            if inlet is not None:
+                surf = HY.fill_depressions(surf, sea_level=sea_level, inlets=inlet)[0]
+            surf = HY.routing_surface(surf, sea_level=sea_level, inlets=inlet)
         else:
-            surf = _surface(fields, sea_level)
+            surf = _surface(fields, sea_level, inlet)
         A, iters = HY.route_to_convergence(dev, surf, lv.cell, A0=fields.get('A'),
                                            A_in=pins['A_in'] if pins is not None else None)
         fields['A'] = A
@@ -315,13 +329,14 @@ def run_levels(plan, recipe, values, stages, seed=0, flatten=None, sea_level=Non
     return out
 
 
-def _surface(fields, sea_level):
-    """The routing surface of a level: its lakes as their flat water, every depression filled, flats tilted."""
+def _surface(fields, sea_level, inlets=None):
+    """The routing surface of a level: its lakes as their flat water, every depression filled, flats tilted; the
+    `inlets` (hydro.inlets) no outlets."""
     h = np.asarray(fields['h'], np.float64)
     if 'water' in fields:
         h = h + np.asarray(fields['water'], np.float64)
-    filled, _ = HY.fill_depressions(h, sea_level=sea_level)
-    return HY.routing_surface(filled, sea_level=sea_level)
+    filled, _ = HY.fill_depressions(h, sea_level=sea_level, inlets=inlets)
+    return HY.routing_surface(filled, sea_level=sea_level, inlets=inlets)
 
 
 def _shareable(shared):

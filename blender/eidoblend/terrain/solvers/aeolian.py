@@ -4,26 +4,37 @@ The model (Werner 1995, with the numbers of Paris et al. 2019's Desertscapes cod
 the wind does not touch here) and `sand` (thickness, metres); the surface is h = bed + sand. One iteration:
 
   1. shadow     every cell's wind shadow: the steepest angle up to the ground upwind of it within `shadow_reach`
-                cells, ramped from 0 at shadow_lo_deg to 1 at shadow_deg (Werner's 15-degree line); and its `rise`
-                for the speed-up (the sand's thickness)                             kernels/dune_shadow.glsl
+                cells, ramped from 0 at shadow_lo_deg to 1 at shadow_deg (Werner's 15-degree line); its `rise`
+                for the speed-up (the sand's thickness); and the ground's slope along the wind over `slope_cells`
+                cells (across the cell, or over the ground upwind of it with slope_upwind)
+                                                                                    kernels/dune_shadow.glsl
   2. activate   a random share of the cells with sand (a PCG hash of cell, iteration and seed) lift one slab, none in
-                a shadow: p_lift x (1 + lift_boost x f), f growing with the sand's thickness from speed_from_m to
-                speed_ref_m (the wind speeds up over a dune toward its crest, Momiji et al. 2000; without it Werner's
-                dunes stand steep on both sides); each picks an integer hop vector by stochastic rounding of the
-                real one (any wind direction on average, no grid-locked crests) and follows it for up to `max_hops`
-                hops, depositing with probability shadow + (1 - shadow) x (p_sand on sand, p_rock on bare rock),
-                always at the last                                                  kernels/dune_activate.glsl
+                a shadow: p_lift x (1 + lift_boost x f) x clamp(1 + shear_slope x s, 0, shear_max), f growing with
+                the sand's thickness from speed_from_m to speed_ref_m (the wind speeds up over a dune toward its
+                crest, Momiji et al. 2000; without it Werner's dunes stand steep on both sides), s the along-wind
+                slope (the shear is higher on a face rising into the wind and lower where the ground falls away,
+                the in-phase term of the shear over a low hill: Jackson & Hunt 1975, Kroy et al. 2002; without it a
+                rounded shoulder past the crest, on sand as thick as the crest's, erodes as fast as the stoss and the
+                slip face starts well below the top); with lift='expected' every cell with sand lifts that chance's
+                expected amount instead, every iteration; each picks an integer hop vector by stochastic rounding
+                of the real one (any wind direction on average, no grid-locked crests) and follows it for up to
+                `max_hops` hops, depositing with probability shadow + (1 - shadow) x (p_sand on sand, p_rock on
+                bare rock), always at the last                                      kernels/dune_activate.glsl
   3. transport  the same move as a GATHER: a cell adds every slab whose recorded path ends on it (no atomics, so
                 deterministic and exactly mass-conserving)                          kernels/dune_transport.glsl
   4. avalanche  sand steeper than the angle of repose (tan 0.60, 31 degrees, the Desertscapes value) slides to the
                 lower neighbour, a symmetric pair exchange over 16 neighbours (the 8 and the knight's moves, so slip
                 faces stand at one angle whichever way they face) limited by the upper cell's own sand, so bare rock
                 never moves and mass is conserved; `aval_passes` per iteration      AVALANCHE_SRC (this module)
-The slab noise (single slabs arriving and leaving: a cell-scale speckle the shadow rule bounds at about 0.15 cells; a
-creep strong enough to clear it during the run flattens the dunes too) is cleared at the end of a run by reading the
-sand time-averaged over the run's last `average_iters` iterations (SandSim.run_averaged: the speckle decorrelates in
-tens of iterations while a dune moves a fraction of a cell in hundreds, so crests and brinks stay as sharp as the
-cells draw them), then a Gaussian of `smooth_cells` (alone, without the average, it rounds a crest by a cell).
+The slab noise (single slabs arriving and leaving) is a speckle at the cell scale that the shadow rule bounds only
+along the wind and nothing bounds across it short of the angle of repose; a creep strong enough to clear it during
+the run flattens the dunes too. Measured on the star field's main level it wanders for a hundred iterations and more
+(the high-passed sand's correlation 0.91 after 10 iterations, 0.55 after 100, 0.25 after 300), so the time-averaged
+read-out (the sand averaged over the run's last `average_iters` iterations, SandSim.run_averaged) holds only a few
+independent samples of it, and a Gaussian of `smooth_cells` after it rounds a crest by as much as it clears. The
+expected lift (lift='expected': every cell lifts its expected amount every iteration, kernels/dune_activate.glsl) is
+the slab rule's mean without its shot noise, what a cell of some 10^12 grains does; only where each parcel lands stays
+random, a speckle a small share of the slab's.
 
 The avalanche is a fourth kernel kept as source text here (core/world_noise.py keeps its field kernel the same way):
 the design names "the threshold kernel" (package 3's threshold.glsl), but that limit is the pair's mean Sc, which
@@ -99,6 +110,17 @@ DEFAULTS = dict(
     speed_ref_deg=10.0,      # 'upwind': the full rise is a stoss of this angle over the shadow's reach
     speed_pow=1,             # the speed-up grows as f^speed_pow (an integer): 2 or 3 make it grow faster toward the
                              # crest, so a dune's top outruns its base and its flanks stretch into broad aprons
+    shear_slope=0.0,         # the shear's slope term: the lift x clamp(1 + shear_slope x s, 0, shear_max), s the
+                             # ground's slope along the wind (a tangent; + rising into the wind). 0: off (Werner's and
+                             # Momiji's rule: the crest rounds into a shoulder above a slip face that starts below it)
+    shear_max=3.0,           # the slope term's most
+    slope_cells=2,           # the along-wind slope's reach, cells
+    slope_upwind=False,      # True: the slope of the ground the wind has just crossed (slope_cells upwind to the cell);
+                             # False: across the cell (slope_cells either side)
+    lift='slab',             # what a cell lifts: 'slab', Werner's slab with the lift chance; 'expected', the expected
+                             # amount (slab x chance x (1 - shadow)) every iteration, as a cell of some 10^12 grains
+                             # does. The slab's shot noise roughens every surface under the angle of repose at the
+                             # cell scale (kernels/dune_activate.glsl)
     long_factor=1.0,         # the speed-up as a longer hop as well: the long hop, a multiple of the short (1: off;
                              # long hops overshoot a small dune's shadow, so barchans and linear ridges dissolve)
     speedup=0.0,             # the long hop's chance at full speed-up
@@ -138,9 +160,10 @@ KINDS = {
                             grow_check=6000, block=1000, seed_scale=1.5, gust=100, spread_deg=30.0,
                             steer_deg=35.0, steer_wavelength_m=2000.0, supply_var=0.6, supply_wavelength_m=4000.0,
                             supply_stretch_m=1500.0, supply_axis_deg=90.0, supply_cap=1.3, average_iters=400,
-                            smooth_cells=0.5, sheet_smooth_cells=2.0, refine_winds='last', refine_iters=400,
-                            refine_block=400, refine_average_iters=200, hero_winds='last2', hero_iters=1200,
-                            hero_block=150, hero_average_iters=100),
+                            smooth_cells=0.5, sheet_smooth_cells=2.0, shear_slope=2.0, slope_upwind=True,
+                            refine_winds='last', refine_iters=400, refine_block=400, refine_lift='expected',
+                            refine_average_iters=0, refine_smooth_cells=0.0, hero_winds='last2', hero_iters=1200,
+                            hero_block=150, hero_average_iters=0),
                  doc='three winds 120 degrees apart of unequal weight: star dunes with curving arms in masses of '
                      'sand, long bare pans between the masses (calibrated on the Namib at Sossusvlei: spacing 1.4 km, '
                      '45 m of sand on a gently rolling plain; the winds off the grid axes, as real winds are). The '
@@ -160,14 +183,26 @@ KINDS = {
                      'smoothed and its margins thin out onto the floor (smooth_sheet: kept as it stood, it was a '
                      'speckled table with a step at its edge, the review\'s straight-edged plates and pitted sand). '
                      '14 avalanche passes an iteration hold the slip faces at 31-33 degrees (8 left them at 34-37). '
-                     'The sand is read time-averaged over each run\'s last iterations (the slab speckle goes, crests '
-                     'stay sharp). The main level blows the last season only, 400 iterations: every crest a sharp brink '
-                     'above a fresh slip face (longer, every face turns to that one wind). The hero levels around a '
-                     'camera blow the last two seasons in turns of 150 iterations (refine_winds \'last2\'), which '
-                     'reverses the crest zone: arms steep on both sides, knife-edges above the broad flanks, ribs and '
-                     'small dunes on the flanks (one season left a brink over a gentle stoss, a rounded shoulder at '
-                     '1.7 m; a whole cycle re-planes each big dune into a pyramid of straight-edged facets). The dunes '
-                     'grow 90 cells across'),
+                     'The crests: the shear\'s slope term (shear_slope 2 over the ground the wind has just crossed, '
+                     'two cells): without it every crest rounded into a shoulder above a slip face that started '
+                     'below the top (the 11-20 review\'s rounded hummocks: behind every slip face 40 m long or more '
+                     'the main level went on rising for 3-5 cells, 43 m to its top, where the Great Sand Dunes\' '
+                     'lidar at the same pixel turns over within 1.5 cells and falls at 8-13 degrees beyond); with it '
+                     'the slip faces start at the crests, as on real dunes, and a dune of the same sand stands '
+                     'taller, as a ridge does against a dome. The growth level keeps Werner\'s slab (its noise keeps '
+                     'the faces off the grid\'s eight directions: the expected lift there turned the slopes\' '
+                     '8-fold aspect harmonic from 0.016 to 0.034) and reads its sand time-averaged over the last '
+                     'iterations. The finer levels lift the expected amount (refine_lift): their own slab runs pitted '
+                     'every flank at their cell (the main level\'s bumps per km2 on the flanks went from 26 inherited '
+                     'to 102 read out, 4 x the lidar\'s at that pixel), which the time-average could not clear: the '
+                     'speckle wandered for a hundred iterations and more. They need no time-average or Gaussian. The '
+                     'main level blows the last season only, 400 iterations: a fresh slip face on every crest it '
+                     'crosses (longer, every face turns to that one wind). The hero levels around a camera blow the '
+                     'last two seasons in turns of 150 iterations (refine_winds \'last2\'), which reverses the crest '
+                     'zone: arms steep on both sides, knife-edges above the broad flanks, ribs and small dunes on the '
+                     'flanks (one season left a brink over a gentle stoss, a rounded shoulder at 1.7 m; a whole cycle '
+                     're-planes each big dune into a pyramid of straight-edged facets). The dunes grow 90 cells '
+                     'across'),
     'barchan': dict(winds=[(225.0, 1.0)], sand_m=2.5, spacing_m=250.0, bed_m=1.5,
                     model=dict(lift_boost=0.0, p_lift=0.075),
                     doc='one wind, thin sand on a bare plain: crescents with horns downwind. The thin sheet must '
@@ -347,11 +382,15 @@ def uniforms_for(params, cell, from_deg, it, seed, bound, turn=(0.0, 0.0)):
     return {
         'dune_shadow': {'uDir': (float(d[0]), float(d[1])), 'uTanLo': tan_lo, 'uTanHi': tan_hi,
                         'uReach': int(p['shadow_reach']), 'uCell': float(cell), 'uRiseMode': rise_mode,
-                        'uBound': int(bound)},
+                        'uSlopeCells': max(1, int(p.get('slope_cells') or 1)),
+                        'uSlopeMode': 1 if p.get('slope_upwind') else 0, 'uBound': int(bound)},
         'dune_activate': {'uHop': (float(hop[0]), float(hop[1])), 'uLong': long_f,
                           'uSpeedup': float(p['speedup']) if long_f > 1.0 else 0.0,
                           'uLiftBoost': float(p['lift_boost']), 'uSpeedFrom': speed_from, 'uSpeedRef': speed_ref,
                           'uSpeedPow': max(1, int(p.get('speed_pow') or 1)),
+                          'uShearSlope': float(p.get('shear_slope') or 0.0),
+                          'uShearMax': max(1.0, float(p.get('shear_max') or 1.0)),
+                          'uExpected': 1 if p.get('lift') == 'expected' else 0,
                           'uSlab': slab, 'uMinSand': float(p['min_sand_slabs']) * slab, 'uPLift': float(p['p_lift']),
                           'uPSand': float(p['p_sand']), 'uPRock': float(p['p_rock']),
                           'uMaxHops': int(p['max_hops']), 'uIter': int(it), 'uSeed': int(seed),
@@ -505,10 +544,36 @@ def twin_shadow(s, u):
         lowest = np.where(alive, np.minimum(lowest, hq), lowest)
     lo_t, hi_t = F32(u['uTanLo']), F32(u['uTanHi'])
     sh = np.clip((best - lo_t) / max(hi_t - lo_t, F32(1.0e-6)), 0.0, 1.0).astype(F32)
-    out = np.zeros(h.shape + (2,), F32)
+    out = np.zeros(h.shape + (4,), F32)
     out[..., 0] = sh
     out[..., 1] = st[..., 1] if int(u['uRiseMode']) == 1 else (h - lowest).astype(F32)
+    L = F32(max(int(u['uSlopeCells']), 1))
+    hu = _surface_bilinear(h, (px - L * dx).astype(F32), (py - L * dy).astype(F32), periodic)
+    if int(u['uSlopeMode']) == 1:
+        out[..., 2] = ((h - hu) / (L * cell)).astype(F32)
+    else:
+        hd = _surface_bilinear(h, (px + L * dx).astype(F32), (py + L * dy).astype(F32), periodic)
+        out[..., 2] = ((hd - hu) / (F32(2.0) * L * cell)).astype(F32)
     return {'outShadow': out}
+
+
+def _surface_bilinear(h, qx, qy, periodic):
+    """dune_shadow's surface_bilinear: the surface at real texel positions, wrapped on a periodic grid and clamped
+    to it otherwise, in float32 in the kernel's order."""
+    H, W = h.shape
+    fx, fy = np.floor(qx), np.floor(qy)
+    tx, ty = (qx - fx).astype(F32), (qy - fy).astype(F32)
+    ax, ay = fx.astype(np.int64), fy.astype(np.int64)
+    bx, by = ax + 1, ay + 1
+    if periodic:
+        ax, ay, bx, by = ax % W, ay % H, bx % W, by % H
+    else:
+        ax, bx = np.clip(ax, 0, W - 1), np.clip(bx, 0, W - 1)
+        ay, by = np.clip(ay, 0, H - 1), np.clip(by, 0, H - 1)
+    one = F32(1.0)
+    lo = (h[ay, ax] * (one - tx) + h[ay, bx] * tx).astype(F32)
+    hi = (h[by, ax] * (one - tx) + h[by, bx] * tx).astype(F32)
+    return (lo * (one - ty) + hi * ty).astype(F32)
 
 
 def _hop_choice(h, hx, hy):
@@ -540,8 +605,16 @@ def twin_activate(s, u):
     f = f1
     for _ in range(1, int(u.get('uSpeedPow', 1))):
         f = (f * f1).astype(F32)
-    plift = (F32(u['uPLift']) * (F32(1.0) + F32(u['uLiftBoost']) * f)).astype(F32)
-    lift = (sand > F32(u['uMinSand'])) & (T.u01(h) < plift) & (T.u01(T.pcg2(h, 1)) >= sh)
+    slope = s['shadow'][..., 2] if s['shadow'].shape[-1] > 2 else np.zeros_like(sh)
+    shear = np.clip(F32(1.0) + F32(u['uShearSlope']) * slope, F32(0.0), F32(u['uShearMax'])).astype(F32)
+    plift = (F32(u['uPLift']) * (F32(1.0) + F32(u['uLiftBoost']) * f) * shear).astype(F32)
+    expected = int(u['uExpected']) == 1
+    if expected:
+        take = np.minimum(sand, (F32(u['uSlab']) * np.minimum(plift, F32(1.0)) * (F32(1.0) - sh)).astype(F32))
+        lift = (sand > F32(u['uMinSand'])) & (take > F32(0.0))
+    else:
+        take = np.minimum(sand, F32(u['uSlab'])).astype(F32)
+        lift = (sand > F32(u['uMinSand'])) & (T.u01(h) < plift) & (T.u01(T.pcg2(h, 1)) >= sh)
     plong = (F32(u['uSpeedup']) * f).astype(F32)
     long_ = T.u01(T.pcg2(h, 64)) < plong
     hx, hy, lg = F32(u['uHop'][0]), F32(u['uHop'][1]), F32(u['uLong'])
@@ -568,9 +641,8 @@ def twin_activate(s, u):
         land = ~done & ok & dep
         k[land] = j
         done |= land
-    amount = np.minimum(sand, F32(u['uSlab'])).astype(F32)
     rec = np.zeros(sand.shape + (4,), F32)
-    rec[..., 0] = np.where(lift, amount, F32(0.0))
+    rec[..., 0] = np.where(lift, take, F32(0.0))
     rec[..., 1] = np.where(lift, vx, 0)
     rec[..., 2] = np.where(lift, vy, 0)
     rec[..., 3] = np.where(lift, k, 0)
@@ -758,7 +830,7 @@ class SandSim(_SimBase):
         self.k = {n: G.kernel(n) for n in ('dune_shadow', 'dune_activate', 'dune_transport')}
         self.k['dune_avalanche'] = G.kernel(source=AVALANCHE_SRC, name='dune_avalanche')
         self.st = G.PingPong(st)
-        self.shadow = G.empty(self.shape, channels=2)
+        self.shadow = G.empty(self.shape, channels=4)
         self.plan = G.empty(self.shape, channels=4)
         self.pins = G.texture(pins)
         self._wind_tex = {}
@@ -1020,11 +1092,13 @@ FIELD_DEFAULTS = dict(
     refine_block=None,          # iterations per wind block on those levels (None: block)
     refine_average_iters=None,  # their time-averaged read-out (None: average_iters; 0: the last state, denoised)
     refine_smooth_cells=None,   # their read-out Gaussian, cells (None: smooth_cells)
-    hero_winds=None,            # the hero levels' own winds, iterations, block, read-out and Gaussian (None: the
-    hero_iters=None,            # refine_* values). The hero levels hold the last few hundred metres around a
+    refine_lift=None,           # what a cell lifts on those levels, 'slab' or 'expected' (None: lift)
+    hero_winds=None,            # the hero levels' own winds, iterations, block, read-out, Gaussian and lift (None:
+    hero_iters=None,            # the refine_* values). The hero levels hold the last few hundred metres around a
     hero_block=None,            # camera: at their cells a season moves a big dune's body by metres, so the whole
     hero_average_iters=None,    # regime there re-cuts the crests (each arm's brink and slip face from the last
     hero_smooth_cells=None,     # wind that crossed it) and grows the small dunes on the flanks (refine)
+    hero_lift=None,
     pin_band=16,                # the border band pinned to the parent, cells
     steer_wavelength_m=None,    # the steering's wavelength (None: 2.5 x the spacing; steer_deg turns it on)
     sheet_smooth_cells=0.0,     # > 0: sand thinner than the speed-up's start smoothed by this many cells (smooth_sheet)
@@ -1213,9 +1287,9 @@ def refine_winds(p, mode=None):
 
 
 def refine_settings(p, lv):
-    """A refinement level's run: dict(winds, iters, block, average_iters, smooth_cells). Hero levels take the hero_*
-    values where given; every level falls back on the refine_* values, then on the growth run's own (block,
-    average_iters, smooth_cells)."""
+    """A refinement level's run: dict(winds, iters, block, average_iters, smooth_cells, lift). Hero levels take the
+    hero_* values where given; every level falls back on the refine_* values, then on the growth run's own (block,
+    average_iters, smooth_cells, lift)."""
     hero = getattr(lv, 'role', '') == 'hero'
 
     def pick(name, fallback):
@@ -1226,7 +1300,8 @@ def refine_settings(p, lv):
     return dict(winds=refine_winds(p, pick('winds', p.get('refine_winds'))), iters=int(pick('iters', 1200)),
                 block=int(pick('block', p['block'])), average_iters=int(pick('average_iters', p.get('average_iters')
                                                                                     or 0)),
-                smooth_cells=float(pick('smooth_cells', p['smooth_cells'])))
+                smooth_cells=float(pick('smooth_cells', p['smooth_cells'])),
+                lift=str(pick('lift', p.get('lift') or 'slab')))
 
 
 def refine(fields, lv, p, seed, log=None):
@@ -1239,7 +1314,7 @@ def refine(fields, lv, p, seed, log=None):
     bed = np.minimum(bed, h)
     sand = np.maximum(h - bed, 0.0).astype(np.float32)
     rs = refine_settings(p, lv)
-    q = dict(p, block=rs['block'])
+    q = dict(p, block=rs['block'], lift=rs['lift'])
     if p.get('refine_hop_cells'):
         q['hop_cells'] = float(p['refine_hop_cells'])
     w = _grid.border_ramp(lv.n, int(p['pin_band']), 'smooth')
@@ -1257,8 +1332,8 @@ def refine(fields, lv, p, seed, log=None):
     fields['sand'] = sand2
     fields['h'] = bed2 + sand2
     if log:
-        log(f'{LOG_PREFIX} refined {lv}: {iters} iterations ({len(rs["winds"])} winds, blocks of {rs["block"]}), '
-            f'{time.perf_counter() - t0:.2f} s')
+        log(f'{LOG_PREFIX} refined {lv}: {iters} iterations ({len(rs["winds"])} winds, blocks of {rs["block"]}, '
+            f'{rs["lift"]} lift), {time.perf_counter() - t0:.2f} s')
     return iters
 
 

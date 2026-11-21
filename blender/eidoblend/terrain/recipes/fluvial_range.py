@@ -68,13 +68,18 @@ def _detail(p):
             s['enabled'] = bool(p['detail'])
 
 
+# hold_rivers 4: on the hero levels the rivers the level above resolved (draining over 4 lock blocks: 1.6 km2 on the
+# 6 km level down to 6400 m2 on the 375 m one) keep their courses and long profiles while the gullies and hillslopes
+# refine around them. Free, each hero level's lock (its uplift) raised a river's course next to the pinned border band
+# above the river's own entry there (up to 3 m), the parent's inflow drained back out of the window, and the stream
+# beside the canyon road camera kept 0.70, 0.15 and 0.03 of its catchment on the three finest hero levels
 FLUVIAL = dict(K=1.5e-5, valley_spacing_m='$valley_spacing_m', threshold_deg='$threshold_deg', threshold_noise=0.2,
                threshold_scale_m=400.0, threshold_gain=0.08, roughness='$roughness',
                roughness_scales_m=[2000.0, 600.0, 150.0, 50.0], deposition='$deposition', age_myr='$age_myr',
                later_frac=0.5, relief_m='$relief_m', relief_calib=0.85, gullies='$gullies',
                k_contrast='$rock_contrast', k_contrast_scales_m=[3000.0, 1500.0],
                breakup_scales_m=[60.0, 20.0, 7.0], outcrop_scale_m=120.0,
-               faults=_faults(STRIKE_DEG, 2.5))
+               faults=_faults(STRIKE_DEG, 2.5), hold_rivers=4.0)
 
 FLUVIAL_RANGE = Recipe(
     'fluvial_range', 'A mountain range carved by rivers: threshold hillslopes, branching valleys, alluvial floors',
@@ -84,9 +89,13 @@ FLUVIAL_RANGE = Recipe(
     # context 16 (192 km): from the summit (3.3 km up) the window's edge, 96 km out, sits at the true horizon, under
     # 90 km of haze; at context 4 its 24 km edge was a ruler-straight band behind the ridges. The outer three levels
     # grow (run.py grow_levels): the 192 and 96 km levels grow the far ranges at 188 and 94 m, the 48 km level grows
-    # the range itself at 47 m as before, from its parent instead of from its own pre-passes
+    # the range itself at 47 m as before, from its parent instead of from its own pre-passes.
+    # closed_inlets: a hero level's edge cells where its parent's rivers come in are no outlets of its routing
+    # (run.py, hydro.inlets): the water that entered into a hollow or flat at the window's edge ran back out beside
+    # its own entry, and even with the rivers held the stream by the canyon road camera kept 0.50 and 0.07 of its
+    # catchment on the two finest hero levels
     defaults={'size': 12000.0, 'context': 16, 'grow_levels': 3, 'hero_cell': 0.5, 'palette': 'alpine',
-              'base_elevation_m': 400.0, 'lakes': 'sediment'},
+              'base_elevation_m': 400.0, 'lakes': 'sediment', 'closed_inlets': True},
     knobs={
         'relief_m': Knob(2000.0, 'm', (100.0, 6000.0),
                          "the main tile's relief: the controller steers the uplift on the coarsest level to it"),

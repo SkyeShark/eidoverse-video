@@ -210,6 +210,90 @@ def test_shadow():
            'crest col': crest, '15-degree line meets the ground at col': lee_end})
 
 
+def test_shear_slope():
+    """The along-wind slope (dune_shadow's b) on a ridge: + on the windward face, - on the lee, the stoss's own
+    tangent mid-face, across the cell and upwind of it; the shear's slope term lifts more on the stoss and less on a
+    lee shoulder at the same thickness, never below 0 or above its most; off (0) it leaves Werner's rule exactly."""
+    n, cell = 96, 2.0
+    jj, ii = np.mgrid[0:SHAPE[0], 0:n]
+    x = ii * cell
+    ridge = np.where(x < 80.0, x * math.tan(math.radians(12.0)), 80.0 * math.tan(math.radians(12.0))
+                     - (x - 80.0) * math.tan(math.radians(8.0)))                  # stoss 12, a lee shoulder at 8
+    ridge = (np.maximum(ridge, 0.0) + 2.0).astype(np.float32)
+    st = st_of(np.zeros_like(ridge), ridge)
+    res, ok = {}, True
+    for upwind in (False, True):
+        p = A.params_for({'shear_slope': 3.0, 'slope_cells': 2, 'slope_upwind': upwind})
+        u = A.uniforms_for(p, cell, 270.0, 0, 0, T.BOUND_OPEN)                    # a west wind: sand moves east
+        sl = A.twin_shadow({'st': st}, u['dune_shadow'])['outShadow'][SHAPE[0] // 2, :, 2]
+        mid_stoss, mid_lee = float(sl[20]), float(sl[60])
+        good = abs(mid_stoss - math.tan(math.radians(12.0))) < 1e-4 and abs(mid_lee + math.tan(math.radians(8.0))) < 1e-4
+        res['upwind' if upwind else 'across'] = dict(stoss=round(mid_stoss, 5), lee=round(mid_lee, 5))
+        ok &= good
+    # the lift chance it gives, at one thickness: 0.3 x clamp(1 + 3 s, 0, 2) over a ramp of slopes
+    tall = (800, SHAPE[1])                                       # many rows: each column's share within ~0.02
+    sand = np.full(tall, 10.0, np.float32)
+    shadow = np.zeros(tall + (4,), np.float32)
+    shadow[..., 2] = np.linspace(-0.5, 0.9, tall[1], dtype=np.float32)[None, :]
+    p = A.params_for({'shear_slope': 3.0, 'shear_max': 2.0, 'p_lift': 0.3, 'lift_boost': 0.0})
+    u = A.uniforms_for(p, cell, 270.0, 5, 9, T.BOUND_PERIODIC)['dune_activate']
+    lifted = A.twin_activate({'st': st_of(np.zeros_like(sand), sand), 'shadow': shadow}, u)['outPlan'][..., 0] > 0
+    share = lifted.mean(axis=0)
+    s = shadow[0, :, 2]
+    expect = 0.3 * np.clip(1.0 + 3.0 * s, 0.0, 2.0)
+    lo, hi = s < -0.34, s > 0.34
+    shear_ok = share[lo].max() == 0.0 and abs(float(share[hi].mean()) - 0.6) < 0.06 \
+        and float(np.abs(share - expect).mean()) < 0.03
+    # off: Werner's rule exactly (the same plan as with no slope channel at all)
+    p0 = A.params_for({'p_lift': 0.3})
+    u0 = A.uniforms_for(p0, cell, 200.0, 5, 9, T.BOUND_PERIODIC)['dune_activate']
+    bed, sd = fields(2)
+    st0 = st_of(bed, sd)
+    sh0 = A.twin_shadow({'st': st0}, A.uniforms_for(p0, cell, 200.0, 5, 9, T.BOUND_PERIODIC)['dune_shadow'])['outShadow']
+    a = A.twin_activate({'st': st0, 'shadow': sh0}, u0)['outPlan']
+    b = A.twin_activate({'st': st0, 'shadow': sh0[..., :2]}, u0)['outPlan']
+    off_ok = bool(np.array_equal(a, b))
+    check('shear_slope_follows_the_ground_along_the_wind', ok and shear_ok and off_ok,
+          {'slope mid-stoss (tan 12 = 0.21256) and mid-lee (-tan 8 = -0.14054)': res,
+           'lift share where the slope term clamps to 0': float(share[lo].max()),
+           'where it is capped at 2 (expect 0.6)': round(float(share[hi].mean()), 3),
+           'mean |share - 0.3 clamp(1 + 3 s, 0, 2)|': round(float(np.abs(share - expect).mean()), 4),
+           'off: Werner\'s rule exactly': off_ok})
+
+
+def test_expected_lift():
+    """lift='expected': every sand cell outside a full shadow lifts slab x chance x (1 - shadow) every iteration
+    (never more than it holds), the hops and landings are the slab rule's, and sand is conserved; over many
+    iterations the slab rule lifts the same on average."""
+    bed, sand = fields(5)
+    st = st_of(bed, sand)
+    p = A.params_for({'p_lift': 0.2, 'lift_boost': 2.0, 'lift': 'expected'})
+    us = A.uniforms_for(p, 4.0, 250.0, 3, 7, T.BOUND_PERIODIC)
+    sh = A.twin_shadow({'st': st}, us['dune_shadow'])['outShadow']
+    plan = A.twin_activate({'st': st, 'shadow': sh}, us['dune_activate'])['outPlan']
+    ua = us['dune_activate']
+    span = max(np.float32(ua['uSpeedRef']) - np.float32(ua['uSpeedFrom']), np.float32(1e-6))
+    f = np.clip((sh[..., 1] - np.float32(ua['uSpeedFrom'])) / span, 0, 1).astype(np.float32)
+    want = np.minimum(sand, 0.1 * 4.0 * np.minimum(0.2 * (1.0 + 2.0 * f), 1.0) * (1.0 - sh[..., 0]))
+    want = np.where(sand > np.float32(ua['uMinSand']), want, 0.0)
+    amount_ok = float(np.abs(plan[..., 0] - want).max()) < 1e-6
+    tr = A.twin_transport({'st': st, 'plan': plan}, us['dune_transport'])['outSt']
+    mass_ok = abs(float(tr[..., 1].sum(dtype=np.float64)) - float(sand.sum(dtype=np.float64))) \
+        <= 1e-6 * float(sand.sum(dtype=np.float64))
+    # the slab rule over 400 iterations lifts the same in the mean (one field, no transport between draws)
+    ps = A.params_for({'p_lift': 0.2, 'lift_boost': 2.0})
+    tot = 0.0
+    for it in range(400):
+        u = A.uniforms_for(ps, 4.0, 250.0, it, 7, T.BOUND_PERIODIC)['dune_activate']
+        tot += float(A.twin_activate({'st': st, 'shadow': sh}, u)['outPlan'][..., 0].sum(dtype=np.float64))
+    mean_ok = abs(tot / 400.0 - float(plan[..., 0].sum(dtype=np.float64))) <= 0.02 * float(plan[..., 0].sum())
+    check('expected_lift_is_the_slab_rules_mean', amount_ok and mass_ok and mean_ok,
+          {'largest |amount - slab x chance x (1 - shadow)| m': float(np.abs(plan[..., 0] - want).max()),
+           'sand conserved through the transport': mass_ok,
+           'slab rule, mean lifted per iteration over 400 m': round(tot / 400.0, 3),
+           'expected lift m': round(float(plan[..., 0].sum(dtype=np.float64)), 3)})
+
+
 def test_determinism():
     bed, sand = fields(11)
     a = A.TwinSim(bed, sand, 4.0, T.BOUND_PERIODIC, {}, seed=3)
@@ -280,8 +364,18 @@ def test_growth_pieces():
     rs_ok = (len(main['winds']) == 1 and main['iters'] == 900 and main['block'] == pick('block', False)
              and main['average_iters'] == pick('average_iters', False) and len(hero['winds']) == 3
              and hero['iters'] == pick('iters', True) and hero['block'] == 150 and hero['average_iters'] == 0
-             and hero['smooth_cells'] == main['smooth_cells'] == pr['smooth_cells'])
-    check('hero_levels_take_their_own_refinement', rs_ok, {'main': main, 'hero': hero})
+             and hero['smooth_cells'] == main['smooth_cells'] == pick('smooth_cells', False)
+             and main['lift'] == (pr.get('refine_lift') or pr['lift'])
+             and hero['lift'] == (pr.get('hero_lift') or pr.get('refine_lift') or pr['lift']))
+    # the lift: the growth run's, unless the refinement levels (or the hero levels) name their own
+    pl = A.resolve_params({'kind': 'barchan', 'refine_lift': 'expected'})
+    lift_ok = (A.refine_settings(pl, L.Level(2, 'main', 0.0, 0.0, 3000.0, 2.9296875, 1024))['lift'] == 'expected'
+               and pl['lift'] == 'slab'
+               and A.refine_settings(A.resolve_params({'kind': 'barchan', 'refine_lift': 'expected',
+                                                        'hero_lift': 'slab'}),
+                                     L.Level(4, 'hero', 0.0, 0.0, 750.0, 0.732421875, 1024))['lift'] == 'slab')
+    check('hero_levels_take_their_own_refinement', rs_ok and lift_ok, {'main': main, 'hero': hero,
+                                                                     'refine_lift / hero_lift fall back': lift_ok})
 
 
 def steering(seed=10, steer_deg=25.0, turn_deg=10.0, shape=SHAPE):
@@ -421,7 +515,8 @@ def test_supply_corridors():
 def main():
     t0 = time.perf_counter()
     for fn in (test_declarations, test_gather_equals_scatter, test_mass, test_avalanche, test_dither, test_shadow,
-               test_determinism, test_growth_pieces, test_steering, test_supply_corridors):
+               test_shear_slope, test_expected_lift, test_determinism, test_growth_pieces, test_steering,
+               test_supply_corridors):
         t = time.perf_counter()
         try:
             fn()

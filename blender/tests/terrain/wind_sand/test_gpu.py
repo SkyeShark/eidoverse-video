@@ -70,7 +70,8 @@ def steering(seed=10, steer_deg=25.0, turn_deg=10.0):
 
 def test_parity():
     """Each kernel in one dispatch against its twin, with the wind unturned and steered (the `wind` input: each
-    cell's own turn, and the transport's box of hops around every turn)."""
+    cell's own turn, and the transport's box of hops around every turn), the shear's slope term off and on (across
+    the cell and upwind of it), and the slab and the expected lift."""
     st = fields(3)
     pw, ph = T.pin_pattern(SHAPE, seed=4, band=4, value=(0.0, 6.0))
     pins = np.stack([pw, ph], -1).astype(np.float32)
@@ -85,7 +86,10 @@ def test_parity():
                 tag = f'{mode_name} {d:g}' + (' steered' if steered else '')
                 p = A.params_for({'p_lift': 0.3, 'long_factor': 2.0, 'speedup': 0.6, 'lift_boost': 4.0,
                                   'rise': rise, 'speed_from_m': 0.5, 'speed_ref_m': 4.0,
-                                  'speed_pow': 3 if d == 225.0 else (2 if d == 37.0 else 1)})
+                                  'speed_pow': 3 if d == 225.0 else (2 if d == 37.0 else 1),
+                                  'shear_slope': 0.0 if d == 0.0 else 2.5, 'slope_upwind': d in (225.0, 301.0),
+                                  'slope_cells': 3 if d == 301.0 else 2,
+                                  'lift': 'expected' if d in (37.0, 301.0) else 'slab'})
                 u = A.uniforms_for(p, 4.0, d, 7, 11, mode, turn)
                 r = T.parity('dune_shadow', {'st': st, 'wind': wind}, u['dune_shadow'])
                 worst[f'dune_shadow {tag}'] = r['worst']
@@ -99,7 +103,12 @@ def test_parity():
                       images={'outPlan': outp}, uniforms=u['dune_activate'])
                 gp = G.read(outp)
                 tp = A.twin_activate({'st': st, 'shadow': sh, 'wind': wind}, u['dune_activate'])['outPlan']
-                exact_plan += int(np.array_equal(gp, tp))
+                if p['lift'] == 'expected':          # every decision identical; the amount a float product
+                    exact_plan += int(np.array_equal(gp[..., 1:], tp[..., 1:])
+                                      and float(np.abs(gp[..., 0] - tp[..., 0]).max())
+                                      <= 1e-6 * float(u['dune_activate']['uSlab']))
+                else:
+                    exact_plan += int(np.array_equal(gp, tp))
                 r = T.parity('dune_transport', {'st': st, 'plan': tp}, u['dune_transport'])
                 worst[f'dune_transport {tag}'] = r['worst']
                 kt = G.kernel('dune_transport')
@@ -116,7 +125,8 @@ def test_parity():
     check('kernels_match_twins_every_boundary_mode', w <= 1e-4,
           {'worst |gpu - twin| / range': w, 'per case': {k: float(f'{v:.3g}') for k, v in worst.items()}})
     check('integer_hash_plans_identical', exact_plan == n_cases,
-          f'{exact_plan} of {n_cases} cases: every plan record (lift, hop x, hop y, landing hop) equal to the twin')
+          f'{exact_plan} of {n_cases} cases: every plan record (lift, hop x, hop y, landing hop) equal to the twin '
+          f'(the expected lift\'s amount within 1e-6 of a slab)')
     check('gather_identical_to_twin', exact_sand == n_cases,
           f'{exact_sand} of {n_cases} cases: transported sand bit-identical to the twin')
 

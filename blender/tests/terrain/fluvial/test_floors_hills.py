@@ -40,6 +40,9 @@ numpy twins; no Blender):
        mixed with the parent by the band's weights (within 1e-4 m)
        hold_rivers on a hero level: the river the parent resolved keeps its heights (within 1e-4 m; free it moves
        over 5 cm), and the ground around it refines at least half as much as free
+  hydro inlets (solvers/hydro.py, run.py's end stage)
+       the water a child is given across 21 edge cells behind a 0.2 m lip reaches its valley's outlet whole with the
+       inlets closed, under half of it with the whole edge open
   incise (solvers/fluvial.py)
    10. a base-level fall along a straight course over a hilly upland: the channel is cut to the upland's grade minus
        drop_m (within 15 %), the cut falls off away from the course (a valley), and 900 m and more from it the
@@ -604,6 +607,33 @@ def test_hold_rivers():
           f'{g1:.2f} m (p90) held, {g0:.2f} m free')
 
 
+def test_inlets():
+    """hydro.inlets: a child level's edge cells where its parent's water comes in are no outlets of its routing. A
+    river entering behind a low lip (a seam's rounding, a pond the level's own processes made) fills the hollow to the
+    lip and runs on down its valley; with the whole edge open it ran straight back out of the window beside its own
+    entry, and the trunk downstream lost the catchment."""
+    n, cell = 64, 2.0
+    lv = L.Level(0, 'hero', 0.0, 0.0, n * cell, cell, n)
+    x, y = lv.xy()
+    y0 = float(y[n // 2, 0])
+    h = 0.02 * (x.max() - x) + 0.1 * np.abs(y - y0) + 0.5 * np.exp(-(x - 14.0) ** 2 / (2 * 3.0 ** 2))
+    A_in = np.zeros((n, n))
+    A_in[n // 2 - 10:n // 2 + 11, 0] = 2.0e4                 # the parent's valley pours in across 21 edge cells
+    out = {}
+    for closed in (False, True):
+        inl = HY.inlets(A_in) if closed else None
+        filled = HY.fill_depressions(h, inlets=inl)[0]
+        surf = np.asarray(HY.routing_surface(filled, inlets=inl), np.float64)
+        recv, wgt, term = HY.route(surf, method='mfd', exponent=1.0)
+        acc = HY.accumulate(recv, wgt, term, area=(cell * cell + A_in).ravel()).reshape(h.shape)
+        out[closed] = float(acc[:, -1].max())
+    entering = float(A_in.sum())
+    ok = out[True] >= entering and out[False] < 0.5 * entering
+    check('hydro inlets: the water a child level is given at its edge runs down its valley, not back out', ok,
+          f'at the valley\'s outlet {out[True] / 1e3:.0f} thousand m2 with the inlets closed, {out[False] / 1e3:.0f} '
+          f'with the whole edge open ({entering / 1e3:.0f} thousand entering)')
+
+
 def test_grow_levels():
     from eidoblend.terrain import run as RUN
     from eidoblend.terrain.core.recipe import Recipe, Stage
@@ -623,7 +653,7 @@ def test_grow_levels():
 def main():
     for fn in (test_floor_widths, test_floor_drains, test_tributary_backfill, test_soil_steady, test_soil_asymmetry,
                test_soil_seed, test_soil_heads, test_soil_floor_hold, test_rill_width, test_rills_once,
-               test_soil_hollows, test_lake_receivers, test_band_blend, test_hold_rivers, test_incise,
+               test_soil_hollows, test_lake_receivers, test_band_blend, test_hold_rivers, test_inlets, test_incise,
                test_incise_head, test_incised_held, test_regional_cut, test_grow_levels):
         try:
             fn()
