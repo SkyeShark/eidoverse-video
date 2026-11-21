@@ -17,6 +17,7 @@
 //
 // Writes tests/out/surfacing/material_test.json.
 
+import process from 'node:process';
 import * as M from './_material.mjs';
 import * as Sf from '../../build/surfacing.js';
 
@@ -48,19 +49,23 @@ async function writePng(path, px, w, h) {
     f.destroy();
 }
 
+// this process's CPU seconds (user + system): on a shared machine at full load the wall clock measures the queue for a
+// core as much as the work, so the compile is recorded in both
+const cpuS = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1e6; };
+
 async function frame(scene, cam, w, h) {
     const rt = new THREE.RenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true, samples: 0 });
     renderer.setRenderTarget(rt);
-    const t0 = performance.now();
-    await renderer.renderAsync(scene, cam);
+    const t0 = performance.now(), c0 = cpuS();
+    renderer.render(scene, cam);
     const raw = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, w, h);
-    const ms = performance.now() - t0;
+    const ms = performance.now() - t0, cpu = cpuS() - c0;
     renderer.setRenderTarget(null);
     rt.dispose();
     const row = raw.length / h;
     const px = new Float32Array(w * h * 4);
     for (let j = 0; j < h; j++) for (let i = 0; i < w * 4; i++) px[j * w * 4 + i] = THREE.DataUtils.fromHalfFloat(raw[j * row + i]);
-    return { px, ms };
+    return { px, ms, cpu };
 }
 
 // the textures and samplers a material's fragment shader binds (three.js's WGSL)
@@ -119,6 +124,7 @@ for (const name of cases) {
     const f2 = await frame(scene, cam, W, H);
     const f3 = await frame(scene, cam, W, H);
     r.first_frame_s = +(f1.ms / 1000).toFixed(2);
+    r.first_frame_cpu_s = +f1.cpu.toFixed(2);
     r.frame_ms = +Math.min(f2.ms, f3.ms).toFixed(1);
     await writePng(`${outDir}/${name}_aerial.png`, f3.px, W, H);
     let lum = 0, nan = 0;
@@ -129,8 +135,15 @@ for (const name of cases) {
     }
     r.aerial_mean = +(lum / (3 * W * H)).toFixed(4);
     T.ok(`${name}: the aerial renders (no NaN, not black)`, nan === 0 && r.aerial_mean > 0.01,
-        `first frame ${r.first_frame_s} s (the compile), then ${r.frame_ms} ms; mean ${r.aerial_mean}; ${outDir}/${name}_aerial.png`);
-    const bn = await bindings(scene, cam, t.mesh);
+        `first frame ${r.first_frame_s} s wall, ${r.first_frame_cpu_s} s of this process's CPU (the compile), then ${r.frame_ms} ms; ` +
+        `mean ${r.aerial_mean}; ${outDir}/${name}_aerial.png`);
+    // the bindings of the near material's program (a mesh of one material: debug.getShaderAsync reads one program)
+    const one = new THREE.Mesh(t.mesh.geometry, near);
+    const s1 = new THREE.Scene();
+    s1.add(one);
+    s1.add(sun.clone(), new THREE.HemisphereLight(0xbfd4ff, 0x3a3020, 0.6));
+    const bn = await bindings(s1, cam, one);
+    r.describe = sd.describe().split('\n');
     r.bindings = bn;
     T.ok(`${name}: the near material samples at most ${Sf.MAX_TEXTURES} textures of its own (of a stage's 16)`,
         !bn.error && near.userData.eidoTextures <= Sf.MAX_TEXTURES && (bn.textures ?? 99) <= 16 && (bn.samplers ?? 99) <= 16,
@@ -144,6 +157,19 @@ for (const name of cases) {
     cam2.updateMatrixWorld(true);
     const f4 = await frame(scene, cam2, W, H);
     await writePng(`${outDir}/${name}_low.png`, f4.px, W, H);
+    // the far material (slot 1 on rings beyond 1.5 D0 of every camera; built here directly), on the whole mesh
+    const farM = await Sf.farMaterial(sd.palette, { data: sd, THREE, R: G.R, TSL, recipe: t.recipe, constants: Sf.terrainConstants(t), log: null });
+    const oneF = new THREE.Mesh(t.mesh.geometry, farM);
+    const sF = new THREE.Scene();
+    sF.add(oneF, sun.clone(), new THREE.HemisphereLight(0xbfd4ff, 0x3a3020, 0.6));
+    const ff = await frame(sF, cam, W, H);
+    await writePng(`${outDir}/${name}_aerial_far_material.png`, ff.px, W, H);
+    const bf = await bindings(sF, cam, oneF);
+    r.far_material = { textures: farM.userData.eidoTextures, first_frame_s: +(ff.ms / 1000).toFixed(2), first_frame_cpu_s: +ff.cpu.toFixed(2), bindings: bf };
+    T.ok(`${name}: the far material builds and reads the data and the base layer's grain only, within the near material's textures`,
+        farM.userData.eidoTextures <= near.userData.eidoTextures && !bf.error,
+        `${farM.userData.eidoTextures} textures (near ${near.userData.eidoTextures}); its first frame ${r.far_material.first_frame_s} s ` +
+        `(${r.far_material.first_frame_cpu_s} s CPU); ${bf.error ?? bf.textures + ' textures and ' + bf.samplers + ' samplers bound'}`);
     // D0 moved in place: the same program draws
     Sf.setFarDistance(near, near.userData.eidoFarM * 0.25);
     const f5 = await frame(scene, cam, W, H);

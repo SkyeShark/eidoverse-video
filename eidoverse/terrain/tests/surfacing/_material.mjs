@@ -110,6 +110,37 @@ export async function renderTop(G, object, { cx, cy, side, n, top }) {
     return { px, n };
 }
 
+/** Render `object` from Blender eye (x, y, z) at Blender target (x, y, z), a lens of `lens` mm on a 36 mm sensor
+ * fitted horizontally, w x h pixels, one sample, into a half-float target cleared to alpha 0: { px (Float32Array,
+ * row 0 the top), w, h }. */
+export async function renderPersp(G, object, { eye, target, lens = 35.0, w = 960, h = 540, near = null, far = null }) {
+    const { THREE, renderer } = G;
+    const scene = new THREE.Scene();
+    const parent = object.parent;
+    scene.add(object);
+    const fovV = 2 * Math.atan(18.0 * (h / w) / lens) * 180 / Math.PI;
+    const dist = Math.hypot(target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]);
+    const cam = new THREE.PerspectiveCamera(fovV, w / h, near ?? Math.max(0.1, 0.002 * dist), far ?? 200000.0);
+    cam.position.set(eye[0], eye[2], -eye[1]);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(target[0], target[2], -target[1]);
+    cam.updateMatrixWorld(true);
+    const rt = new THREE.RenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true });
+    renderer.setRenderTarget(rt);
+    renderer.setClearColor(0x000000, 0);
+    renderer.render(scene, cam);
+    const raw = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, w, h);
+    renderer.setRenderTarget(null);
+    rt.dispose();
+    if (parent) parent.add(object);
+    else scene.remove(object);
+    const row = raw.length / h;
+    const px = new Float32Array(w * h * 4);
+    // the readback's row 0 is the image's top (WebGPU's texture origin; renderTop's north, the reader test's check)
+    for (let j = 0; j < h; j++) for (let i = 0; i < w * 4; i++) px[j * w * 4 + i] = THREE.DataUtils.fromHalfFloat(raw[j * row + i]);
+    return { px, w, h };
+}
+
 /** The p-th percentile of numbers (numpy's linear rule). */
 export function percentile(vals, p) {
     const a = Float64Array.from(vals).sort();

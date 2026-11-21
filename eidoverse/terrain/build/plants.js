@@ -335,8 +335,22 @@ class Gpu {
         this.R = R;
         this.P = prims(R);
         this.dummyU = R.field(1, 1, 1, null, 'u32');
+        this.dummyU2 = R.field(1, 1, 1, null, 'u32');
         this.dummyF = R.field(1, 1, 1);
         this.held = [];
+        this.t0 = performance.now();
+        this.traceOn = (() => {
+            try {
+                return Boolean(Deno.env.get('EIDO_PLANTS_TRACE'));
+            } catch (_e) {
+                return false;
+            }
+        })();
+    }
+
+    /** With $EIDO_PLANTS_TRACE set, one line per step with the seconds since the plan began. */
+    trace(what) {
+        if (this.traceOn) console.log(`[plants trace] ${((performance.now() - this.t0) / 1000).toFixed(2)} s ${what}`);
     }
 
     k(name) { return this.R.kernel(`plants/${name}`); }
@@ -453,6 +467,7 @@ class Ground {
             let m;
             if (this.data) {
                 m = await this.data.maps(i);
+                this.g.trace(`level ${i}: ${Object.keys(m).length} maps`);
             } else {
                 const mk = this.terrain.masks.level(i);
                 m = {};
@@ -1086,7 +1101,9 @@ async function thin(gpu, ground, s, c, gi, focus, discs, feet, casters, st, orig
     const shade = shadeAt(gpu, cc.list, cc.n, casters, Number(s.shade.radius), origin);
     const sk = await speciesKernel(gpu, ground, s, { steep: true });
     await ground.derive(new Set(sk.reads.map(([nm]) => nm)));
+    gpu.trace(`${s.name}: its kernel (${sk.reads.length} reads) and the derived rasters`);
     const ev = await evaluateSpecies(gpu, ground, sk, cc.list, cc.n, loc, shade);
+    gpu.trace(`${s.name}: density, stature and exclusions at ${cc.n} candidates`);
     const dmax = s.cluster.parents_per_ha * s.cluster.mu * 1.0e-4;
     const flags = gpu.list(cc.n);
     gpu.run('thin', { dens: ev.dens, allowed: ev.allowed, stat: ev.stat, shade, lvl: loc.fine, pw: gpu.dummyF },
@@ -1131,12 +1148,12 @@ async function hardCore(gpu, list, n, gi, origin) {
     if (rmax > 0) {
         grid = gpu.grid(list, n, CAND, 0, 2.0 * CORE_FACTOR * rmax, origin);
         gpu.run('edges', { cand: list, gstart: grid.starts, gcount: grid.counts, gidx: grid.index, offs: gpu.dummyU },
-            { outD: deg, outA: gpu.dummyU }, { ...grid.un, uCF: CORE_FACTOR, uMode: 0, uCount: n }, n);
+            { outD: deg, outA: gpu.dummyU2 }, { ...grid.un, uCF: CORE_FACTOR, uMode: 0, uCount: n }, n);
         const sc = await gpu.scan(deg, n);
         offs = sc.offs;
         adj = gpu.list(Math.max(sc.total, 1));
         gpu.run('edges', { cand: list, gstart: grid.starts, gcount: grid.counts, gidx: grid.index, offs },
-            { outD: gpu.dummyU, outA: adj }, { ...grid.un, uCF: CORE_FACTOR, uMode: 1, uCount: n }, n);
+            { outD: gpu.dummyU2, outA: adj }, { ...grid.un, uCF: CORE_FACTOR, uMode: 1, uCount: n }, n);
         grid.destroy();
     } else {
         offs = gpu.list(n);
@@ -1266,7 +1283,7 @@ async function view(gpu, ground, s, p, st) {
     const zs = rm.heightField(R, pts, n);
     const nrm = gpu.list(3 * n, 'f32');
     const tg = rm._gpu;
-    gpu.run('ground_normal', { pts, zs: tg.zs, lines: tg.lines, ring: tg.ring }, { outN: nrm },
+    gpu.run('ground_normal', { kp, zs: tg.zs, lines: tg.lines, ring: tg.ring }, { outN: nrm },
         { uCount: n, uRings: rm.rings.length }, n);
     const rec = gpu.list(FIELDS.length * n, 'f32');
     gpu.run('records', { kp, zs, nrm }, { outR: rec }, { uR: [Number(s.size_m[1]), Math.max(s.source[3].length, 1), 0, 0], uCount: n }, n);
@@ -1314,12 +1331,14 @@ async function planGroups(gpu, ground, species, focus, tseed, seed, discs, scale
             }
             const chain = hashChain(Number(tseed), Number(seed), nameKey(s.name));
             const c = await candidates(gpu, ground, s, chain, focus, gi.exact + gi.pad);
+            gpu.trace(`${s.name}: ${c ? c.n : 0} candidates within ${(gi.exact + gi.pad).toFixed(1)} m`);
             const st = stats[s.name] = { candidates: 0, after_density: 0, kept: 0, clipped: 0.0, density_max: 0.0, home_m2: 0.0,
                 home_count: 0, per_ha_home: null };
             st.yield = 1.0;
             placed.set(s.name, { s, list: gpu.list(CAND), n: 0 });
             if (!c || !c.n) continue;
             cands.push([s, await thin(gpu, ground, s, c, gi, focus, discs, feet, casters, st, origin)]);
+            gpu.trace(`${s.name}: ${cands[cands.length - 1][1].n} thinned`);
         }
         if (!cands.length) continue;
         const total = cands.reduce((a, [, t]) => a + t.n, 0);
@@ -1334,6 +1353,7 @@ async function planGroups(gpu, ground, species, focus, tseed, seed, discs, scale
         }
         const rmax = Math.max(...cands.map(([s]) => Number(s.core_m)));    // r = core_m x size / size_m[1] <= core_m
         const hc = total ? await hardCore(gpu, list, total, { ...gi, rmax }, origin) : { keep: gpu.list(1) };
+        gpu.trace(`group ${gk}: the hard core over ${total} candidates in ${hc.rounds ?? 0} rounds`);
         for (const [s, a, n] of ranges) {
             // this species' part of the group: its range of the keep flags
             let part = { list: gpu.list(CAND), n: 0 };
@@ -1470,6 +1490,7 @@ export async function planPlants(terrain, opts = {}) {
         for (const s of species) {
             const st = res.stats[s.name];
             const rec = await view(gpu, ground, s, res.placed.get(s.name), st);
+            gpu.trace(`${s.name}: ${rec.length / FIELDS.length} spots returned`);
             arrays.set(s.name, rec);
             st.count = rec.length / FIELDS.length;
             outSpecies.push(speciesRecord(s, st.count, st));

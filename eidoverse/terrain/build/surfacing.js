@@ -57,6 +57,10 @@
 //     lookup3 of the float bits, noise.js's hashes), the Hue/Saturation/Value node (its RGB-HSV round trip) and
 //     the Bump node (its surface gradient from the height's screen-space derivatives: EEVEE evaluates the height a
 //     pixel over in x and y; dFdx and dFdy of the height are the same difference to first order).
+//   - Selects (Blender's comparisons, safe divisions and Map Range's guards) are a node of this file (selectNode):
+//     WGSL select() of two evaluated values, as Blender's GLSL computes them, where three's select writes an if/else
+//     block around each (356 of them in the canyon's material made D3D12's shader compiler spend 237 s on one
+//     pipeline) and its uniformFlow form returns an unassigned variable to a select's second reader (three r184).
 //   - Node groups become TSL subgraphs built once per terrain and lattice (the reader, the hex grids, a layer's
 //     reads), as Blender builds its groups once; their numbers are the same per pixel.
 //   - Textures: WebGPU's default device allows 16 sampled textures and 16 samplers a stage, EEVEE 30 images. So the
@@ -76,6 +80,7 @@
 //     statistics and their normal variance pyramid (core/gpu.js kernels written in this file), canopyMean's 76,800
 //     points; Blender does those in numpy.
 
+import { createHash } from 'node:crypto';
 import * as P from './palettes.js';
 import * as MP from '../surface/maps.js';
 import * as ops from './ops.js';
@@ -134,14 +139,53 @@ export function cacheRoot() {
 // footprint), which later steps test for, as surfacing.py tests isinstance(x, float).
 
 let T = null;          // three/tsl
-let OPS = null;        // build/ops.js TSL backend over it (mask_expr.js, noise.js)
+let OPS = null;        // build/ops.js TSL backend over it (mask_expr.js, noise.js), its select SEL's
 let NZ = null;         // surface/noise.js on OPS
+let SEL = null;        // select(c, a, b): a where c, else b (selectNode)
 
-/** The TSL module (and the ops backend and noise on it), loaded once: opts.TSL, else import('three/tsl'). */
+// The graph's selects as WGSL select() of two evaluated values, as Blender's GLSL computes both sides of its Mix and
+// Compare nodes, held in a variable where the graph reads one more than once (a TempNode, as three's math nodes).
+// three's own select (ConditionalNode) compiles each into an if/else block: the material's 356 made D3D12's shader
+// compiler take 237 s over one pipeline; and its uniformFlow form hands an unassigned variable (zero) to every read
+// after the first (three r184's ConditionalNode.generate keeps the property it never assigns).
+function selectNode(TempNode) {
+    class EidoSelectNode extends TempNode {
+        static get type() {
+            return 'EidoSelectNode';
+        }
+
+        constructor(condNode, ifNode, elseNode) {
+            super();
+            this.condNode = condNode;
+            this.ifNode = ifNode;
+            this.elseNode = elseNode;
+        }
+
+        generateNodeType(builder) {
+            const a = this.ifNode.getNodeType(builder), b = this.elseNode.getNodeType(builder);
+            return builder.getTypeLength(b) > builder.getTypeLength(a) ? b : a;
+        }
+
+        generate(builder, output) {
+            const type = this.getNodeType(builder);
+            const c = this.condNode.build(builder, 'bool');
+            const a = this.ifNode.build(builder, type);
+            const b = this.elseNode.build(builder, type);
+            return builder.format(builder.getTernary(c, a, b), type, output);
+        }
+    }
+    const node = (v) => (typeof v === 'number' ? T.float(v) : T.nodeObject(v));
+    return (c, a, b) => T.nodeObject(new EidoSelectNode(T.nodeObject(c), node(a), node(b)));
+}
+
+/** The TSL module (and the ops backend and noise on it), loaded once: opts.TSL, else import('three/tsl'); opts.THREE
+ * (three/webgpu, else imported) lends the select node its TempNode. */
 export async function tslModule(opts = {}) {
     if (!T || (opts.TSL && opts.TSL !== T)) {
         T = opts.TSL ?? await import('three/tsl');
-        OPS = ops.TSL(T);
+        const W = opts.THREE?.TempNode ? opts.THREE : await import('three/webgpu');
+        SEL = selectNode(W.TempNode);
+        OPS = ops.TSL({ ...T, select: SEL });
         NZ = noiseLib(OPS);
     }
     return T;
@@ -174,7 +218,7 @@ function mul(a, b) {
 function div(a, b) {
     if (isNum(a) && isNum(b)) return b !== 0 ? a / b : 0.0;
     if (isNum(b)) return b !== 0 ? F(a).div(b) : 0.0;
-    return T.select(F(b).notEqual(0.0), F(a).div(F(b)), T.float(0.0));
+    return SEL(F(b).notEqual(0.0), F(a).div(F(b)), T.float(0.0));
 }
 // Math MULTIPLY_ADD: a b + c
 function madd(a, b, c) {
@@ -202,14 +246,14 @@ function matan2(a, b) { return T.atan(F(a), F(b)); }
 function macos(a) { return T.acos(T.clamp(F(a), -1.0, 1.0)); }
 function mdeg(a) { return isNum(a) ? a * (180 / Math.PI) : F(a).mul(180 / Math.PI); }
 // Math LOGARITHM(a, base): log2(a) / log2(base) for positive arguments, else 0
-function mlog2(a) { return T.select(F(a).greaterThan(0.0), T.log2(T.max(F(a), 1e-38)), T.float(0.0)); }
+function mlog2(a) { return SEL(F(a).greaterThan(0.0), T.log2(T.max(F(a), 1e-38)), T.float(0.0)); }
 // Math POWER: compatible_pow for a >= 0 (the callers clamp a at 0 first)
 function mpow(a, b) {
     if (isNum(a) && isNum(b)) return a >= 0 ? (b === 0 ? 1.0 : a ** b) : 0.0;
-    return T.select(F(b).equal(0.0), T.float(1.0), T.pow(T.max(F(a), 0.0), F(b)));
+    return SEL(F(b).equal(0.0), T.float(1.0), T.pow(T.max(F(a), 0.0), F(b)));
 }
-function mlt(a, b) { return isNum(a) && isNum(b) ? (a < b ? 1.0 : 0.0) : T.select(F(a).lessThan(F(b)), T.float(1.0), T.float(0.0)); }
-function mgt(a, b) { return isNum(a) && isNum(b) ? (a > b ? 1.0 : 0.0) : T.select(F(a).greaterThan(F(b)), T.float(1.0), T.float(0.0)); }
+function mlt(a, b) { return isNum(a) && isNum(b) ? (a < b ? 1.0 : 0.0) : SEL(F(a).lessThan(F(b)), T.float(1.0), T.float(0.0)); }
+function mgt(a, b) { return isNum(a) && isNum(b) ? (a > b ? 1.0 : 0.0) : SEL(F(a).greaterThan(F(b)), T.float(1.0), T.float(0.0)); }
 function sat(a) { return isNum(a) ? Math.max(0.0, Math.min(1.0, a)) : T.clamp(a, 0.0, 1.0); }
 const clamp01 = sat;
 const oneMinus = (a) => sub(1.0, a);
@@ -229,7 +273,7 @@ function smooth(e0, e1, x) {
     }
     const d = sub(e1, e0);
     const t = T.clamp(F(sub(x, e0)).div(F(d)), 0.0, 1.0);
-    return T.select(F(d).notEqual(0.0), t.mul(t).mul(T.float(3.0).sub(t.mul(2.0))), T.float(0.0));
+    return SEL(F(d).notEqual(0.0), t.mul(t).mul(T.float(3.0).sub(t.mul(2.0))), T.float(0.0));
 }
 function pySmoothNode(e0, e1, x) {
     const t = Math.min(Math.max((x - e0) / (e1 - e0), 0.0), 1.0);
@@ -271,7 +315,7 @@ const vcross = (a, b) => T.cross(V3(a), V3(b));
 function vnorm(a) {
     const v = V3(a);
     const l = T.length(v);
-    return T.select(l.greaterThan(0.0), v.div(T.max(l, 1e-30)), T.vec3(0.0, 0.0, 0.0));
+    return SEL(l.greaterThan(0.0), v.div(T.max(l, 1e-30)), T.vec3(0.0, 0.0, 0.0));
 }
 const vmin = (a, b) => T.min(V3(a), V3(b));
 const vmax = (a, b) => T.max(V3(a), V3(b));
@@ -1775,22 +1819,22 @@ function hueSatValue(col, hue, satur, value) {
     const c = V3(col);
     const cmax = T.max(c.x, T.max(c.y, c.z)), cmin = T.min(c.x, T.min(c.y, c.z));
     const cdelta = cmax.sub(cmin);
-    const s = T.select(cmax.notEqual(0.0), cdelta.div(T.max(cmax, 1e-30)), T.float(0.0));
+    const s = SEL(cmax.notEqual(0.0), cdelta.div(T.max(cmax, 1e-30)), T.float(0.0));
     const cc = T.vec3(cmax).sub(c).div(T.max(cdelta, 1e-30));
-    let h = T.select(c.x.equal(cmax), cc.z.sub(cc.y), T.select(c.y.equal(cmax), cc.x.sub(cc.z).add(2.0), cc.y.sub(cc.x).add(4.0)));
+    let h = SEL(c.x.equal(cmax), cc.z.sub(cc.y), SEL(c.y.equal(cmax), cc.x.sub(cc.z).add(2.0), cc.y.sub(cc.x).add(4.0)));
     h = h.div(6.0);
-    h = T.select(h.lessThan(0.0), h.add(1.0), h);
-    h = T.select(s.equal(0.0), T.float(0.0), h);
+    h = SEL(h.lessThan(0.0), h.add(1.0), h);
+    h = SEL(s.equal(0.0), T.float(0.0), h);
     let H = T.fract(h.add(F(hue)).add(0.5));
     const Sv = T.clamp(s.mul(F(satur)), 0.0, 1.0);
     const V = cmax.mul(F(value));
-    H = T.select(H.equal(1.0), T.float(0.0), H).mul(6.0);
+    H = SEL(H.equal(1.0), T.float(0.0), H).mul(6.0);
     const ii = T.floor(H), f = H.sub(ii);
     const p = V.mul(T.float(1.0).sub(Sv)), q = V.mul(T.float(1.0).sub(Sv.mul(f))), t = V.mul(T.float(1.0).sub(Sv.mul(T.float(1.0).sub(f))));
-    const pick = (a, b, c2, d, e, g) => T.select(ii.equal(0.0), a, T.select(ii.equal(1.0), b, T.select(ii.equal(2.0), c2,
-        T.select(ii.equal(3.0), d, T.select(ii.equal(4.0), e, g)))));
+    const pick = (a, b, c2, d, e, g) => SEL(ii.equal(0.0), a, SEL(ii.equal(1.0), b, SEL(ii.equal(2.0), c2,
+        SEL(ii.equal(3.0), d, SEL(ii.equal(4.0), e, g)))));
     const rgb = T.vec3(pick(V, q, p, p, t, V), pick(t, V, V, q, p, p), pick(p, p, t, V, V, q));
-    return T.select(Sv.equal(0.0), T.vec3(V, V, V), rgb);
+    return SEL(Sv.equal(0.0), T.vec3(V, V, V), rgb);
 }
 
 // surfacing._macro: the old material's world-scale variation, as octaves of brightness, hue and saturation drift
@@ -1822,7 +1866,7 @@ function macro(coords, albedo, octaves, n3) {
 // from the position's and the height's screen-space derivatives (EEVEE evaluates the height a pixel over in x and y)
 function bumpNode(N, height, dist, Pw) {
     const n = vnorm(N);
-    const d = T.select(T.frontFacing, F(dist), F(dist).negate());
+    const d = SEL(T.frontFacing, F(dist), F(dist).negate());
     const dPdx = T.dFdx(Pw), dPdy = T.dFdy(Pw);
     const Rx = T.cross(dPdy, n), Ry = T.cross(n, dPdx);
     const det = T.dot(dPdx, Rx);
@@ -2479,28 +2523,24 @@ async function farGroupData(pal, sd, opts) {
 // a NodeMaterial of a graph: Blender's Principled BSDF (base colour, roughness, normal, its Specular IOR Level as
 // the IOR that gives its F0, module doc), or an unlit debug view
 function nodeMaterial(THREE, gr, name) {
-    // uniformFlow: every select of the graph a WGSL select() of two evaluated values, as Blender's GLSL computes its
-    // Math and Mix nodes, not an if / else three would otherwise write around each (branch-free code; a sample's
-    // implicit derivatives always in uniform control flow)
-    const U = (n) => T.uniformFlow(n);
     if (gr.emission) {
         const m = new THREE.MeshBasicNodeMaterial();
-        m.colorNode = U(T.vec4(V3(gr.emission), 1.0));
+        m.colorNode = T.vec4(V3(gr.emission), 1.0);
         m.name = name;
         return m;
     }
     const m = new THREE.MeshPhysicalNodeMaterial({ metalness: 0.0, roughness: 1.0 });
-    m.colorNode = U(T.vec4(V3(gr.albedo), 1.0));
-    m.roughnessNode = U(F(gr.roughness));
+    m.colorNode = T.vec4(V3(gr.albedo), 1.0);
+    m.roughnessNode = F(gr.roughness);
     m.metalnessNode = T.float(0.0);
-    m.normalNode = U(toViewNormal(gr.normal));
+    m.normalNode = toViewNormal(gr.normal);
     const s = gr.specular;
     if (isNum(s) && s <= 0.0) {
         m.specularIntensity = 0.0;
     } else {
         const f0 = mul(0.08, s);
         const r = msqrt(f0);
-        m.iorNode = U(F(div(add(1.0, r), mmax(sub(1.0, r), 1e-4))));
+        m.iorNode = F(div(add(1.0, r), mmax(sub(1.0, r), 1e-4)));
         m.specularIntensity = 1.0;
     }
     m.name = name;
@@ -2709,6 +2749,35 @@ export async function applySurface(t, palette = 'auto', opts = {}) {
     t.mesh.material = [near, far];
     return near;
 }
+
+// ------------------------------------------------------------------------------ the masks as attributes ---
+
+/** [[attribute name, [mask, ...]], ...]: a set of mask names, sorted, three to a vec3 attribute named
+ * eido_pk<hash>_<k> by the set (surfacing.mask_packs; the attribute path's, for a mesh that carries masks: this
+ * edition's ring mesh carries none unless makeTerrain's debug option meshMasks adds them). */
+export function maskPacks(names) {
+    const sorted = [...names].sort();
+    const h = createHashSync(sorted.join(','));
+    const out = [];
+    for (let k = 0; k < Math.ceil(sorted.length / 3); k++) out.push([`eido_pk${h.slice(0, 6)}_${k}`, sorted.slice(3 * k, 3 * k + 3)]);
+    return out;
+}
+
+/** The masks a palette (a name or object) or a list of names reads that the terrain's mesh does not carry as
+ * eido_<name> (surfacing.missing_masks). */
+export function missingMasks(t, paletteOrNames) {
+    const names = (typeof paletteOrNames === 'string' || (paletteOrNames && !Array.isArray(paletteOrNames) && paletteOrNames.layers))
+        ? [...P.masksUsed(P.get(paletteOrNames))] : [...paletteOrNames].map(String);
+    const geo = t.mesh?.geometry ?? t.geometry ?? null;
+    const have = new Set(geo ? Object.keys(geo.attributes) : []);
+    return names.filter((n) => !have.has('eido_' + n)).sort();
+}
+
+// a SHA-1 hex digest of a string, synchronous (node's crypto, as surface/far_colour.js uses it)
+function createHashSync(s) {
+    return createHash('sha1').update(s).digest('hex');
+}
+
 
 // ------------------------------------------------------------------------------------- packing the scans ---
 // surfacing.py's pack_set over the shared texture library (terrain/_pbr.py's find_set: CC0 sets fetched by

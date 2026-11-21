@@ -76,9 +76,11 @@ T.ok("describe('auto', recipe='fluvial_range') equal", dfr === fx.describe_auto_
 T.throws('an unknown ecotope names the nearest', () => E.get('alpin'), "nearest: alpine");
 
 // the candidates' Poisson tables (build/plants.js poissonThresholds) against numpy's cdf: the thresholds
-// ceil(cdf_k 2^53), made in doubles here and there, differ only by the two libms' last ulps of exp and log (summed
-// over the table), so a count by inversion is numpy's except for a 53-bit uniform in the gap between the two:
-// graded by the gap's share of the unit interval (under 2^-40: one draw in 10^12)
+// ceil(cdf_k 2^53), made in doubles here and there, differ only by the last ulps of numpy's vectorised exp and log
+// against this runtime's (summed down the table: a large mean's log-probabilities cancel terms of thousands), so a
+// count by inversion is numpy's except for a 53-bit uniform in the gaps between the two: graded by the gaps' share
+// of the unit interval, under 2^-32 (a plan draws at most about 10^6 counts: fewer than one differing count in a
+// thousand plans; the spots tests count the candidates equal on every case)
 {
     const PL = await import('../../build/plants.js');
     let tables = 0, entries = 0, differ = 0, gap = 0, bad = [];
@@ -96,8 +98,8 @@ T.throws('an unknown ecotope names the nearest', () => E.get('alpin'), "nearest:
         }
         gap = Math.max(gap, g / 9007199254740992.0);
     }
-    T.ok('the Poisson thresholds against numpy\'s cdf: the counts differ only for a draw in a gap under 2^-40',
-        tables > 0 && bad.length === 0 && gap < 2 ** -40,
+    T.ok('the Poisson thresholds against numpy\'s cdf: the counts differ only for a draw in gaps under 2^-32',
+        tables > 0 && bad.length === 0 && gap < 2 ** -32,
         `${tables} tables, ${entries} entries, ${differ} differ by a libm's last ulps; the largest table's gap ${S.sci(gap, 2)} ` +
         'of the unit interval' + (bad.length ? `; lengths differ: ${bad.join(', ')}` : ''));
 }

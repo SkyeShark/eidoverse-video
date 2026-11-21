@@ -10,14 +10,17 @@
 //
 //     deno run --config deno.json --frozen --allow-all eidoverse/terrain/tests/surfacing/views.mjs --case canyon
 //         --views brink_down,low_oblique [--options '{"specular_aa": false}'] [--label port] [--out <dir>]
-//         [--variants built,near,far,allow,band]
+//         [--variants built,near,far,allow,band] [--save <a terrain save of the case's recipe>]
 //     (the render is a GPU job of its own, behind $EIDO_GPU_WRAP; this orchestrator needs no GPU)
 //
 // Writes <out>/<case>_<view>_<label>.png (default out: tests/out/surfacing/views) and <case>_<label>_views.json.
 // --variants (check_far.py's): built (the material as applySurface makes it), near (D0 past everything: the layers to
 // the horizon), far (D0 at 1 cm: the far colour C wherever the hand-off allows it), allow (a mask: where the far colour
-// may draw, more than 64 main cells outside the outermost hero window), band (a mask: view distance D0..1.5 D0): each
-// view once per variant, written <case>_<view>_<label>_<variant>.png; D0 moves by setFarDistance, so one compile.
+// may draw, more than 64 main cells outside the outermost hero window), band (a mask: view distance D0..1.5 D0); and
+// check_shimmer.py's: turn1, turn2 (the material as built, the camera turned about the vertical by 0.5 and 1 pixel),
+// dist<m> (a mask: view distance at least m metres; dist0 the ground). Masks draw the terrain alone, white where their
+// test holds, black elsewhere. Each view once per variant, written <case>_<view>_<label>_<variant>.png; D0 moves by
+// setFarDistance, so one compile.
 //
 // Where this differs from the Blender rig, and why: as tests/judge/views.mjs's rig, the sky facade takes no azimuth, so
 // the ground and the camera are turned together about the vertical until the facade's 15:30 sun stands 70 degrees
@@ -38,7 +41,9 @@ const PLAN_OF = { canyon: 'canyon', alpine_valley: 'alpine_valley', lauterbrunne
     toroweap: 'canyon', fluvial_range: 'fluvial_range' };
 const edition = M.W.needBlenderEdition('the snapshots and the judge\'s views');
 if (!edition) Deno.exit(0);
-const snap = `${M.W.blenderTests()}/out/surface_data/snap/${name}.npz`;
+// --save: a terrain save of the case's recipe in place of its bake snapshot (the judge's own, e.g.
+// out/surfacing_judge/terrains/sea_cliffs.npz), baked with the default surface options where Blender has no bake record
+const snap = A.opt('--save', `${M.W.blenderTests()}/out/surface_data/snap/${name}.npz`);
 const judge = JSON.parse(Deno.readTextFileSync(`${M.W.blenderTests()}/surfacing_judge/views.json`));
 const plan = judge[PLAN_OF[name] ?? name];
 const pick = (views ?? plan.views.map((v) => v.name)).map((n) => {
@@ -53,7 +58,7 @@ const work = `${out}/_scenes`;
 Deno.mkdirSync(work, { recursive: true });
 const sets = M.useSets();
 
-const spec = { snap, bakeDir, bakeOptions: { ...bb.info.options }, views: pick, W, H, exposureEv: -0.5, hours: 15.5,
+const spec = { snap, bakeDir, bakeOptions: { ...(bb?.info?.options ?? {}) }, views: pick, W, H, exposureEv: -0.5, hours: 15.5,
     sunLeftDeg: 70.0, sunElevationDeg: 37.7, options: options ? JSON.parse(options) : null, sets, label, name, variants,
     usedJson: `${out}/${name}_${label}_views.json` };
 
@@ -113,28 +118,35 @@ globalThis.setup = async function () {
         // the horizontal field of view of a 36 mm sensor fitted horizontally: the vertical one three takes
         const fovV = 2 * Math.atan(18.0 * (HEIGHT / WIDTH) / lens) * 180 / Math.PI;
         return { name: v.name, eye: [ex, ez, -ey], look: [ex + 1000 * d[0], ez + 1000 * d[2], -(ey + 1000 * d[1])],
-            near, far, fovV, sun, target: [tgt[0], tgt[2], -tgt[1]], dist };
+            near, far, fovV, sun, target: [tgt[0], tgt[2], -tgt[1]], dist, lens };
     });
     await Sf.applySurface(t, pal, { data: sd, cameras: cams.map((c) => c.eye), THREE, TSL, renderer, options: V.options,
         log: (m) => console.log(m) });
     const built = [...t.mesh.material];
     const near = built[0];
     const D0 = near.userData.eidoFarM;
-    // the variants' masks (check_far.py's region): where the far colour may draw, and the hand-off's band
+    // the variants' masks, white on the terrain where their test holds, black elsewhere (the sky and water hidden):
+    // check_far.py's region (where the far colour may draw, and the hand-off's band) and check_shimmer.py's bands of
+    // view distance (dist<m>: at least m metres; dist0 the ground)
     const masks = {};
+    const vd = TSL.length(TSL.positionView);
+    const mk = (cond) => {
+        const m = new THREE.MeshBasicNodeMaterial();
+        m.colorNode = TSL.vec4(TSL.select(cond, TSL.vec3(50.0), TSL.vec3(0.0)), 1.0);
+        m.fog = false;
+        return m;
+    };
     if (V.variants.includes('allow') || V.variants.includes('band')) {
         const tm = await Sf.terrainMap(sd, null, { THREE, TSL, renderer });
         const cm = (t.levels.filter((l) => l.role === 'main').pop() ?? t.levels[0]).cell;
         const ho = tm._data.rd.heroOutside;
         const allow = typeof ho === 'number' ? TSL.float(1.0) : TSL.smoothstep(0.0, 64.0 * cm, ho);
-        const vd = TSL.length(TSL.positionView);
-        const mk = (cond) => {
-            const m = new THREE.MeshBasicNodeMaterial();
-            m.colorNode = TSL.vec4(TSL.select(cond, TSL.vec3(50.0), TSL.vec3(0.0)), 1.0);
-            return m;
-        };
         masks.allow = mk(allow.greaterThan(0.999));
         masks.band = mk(vd.greaterThanEqual(D0).and(vd.lessThanEqual(1.5 * D0)));
+    }
+    for (const v of V.variants) {
+        const m = /^dist([0-9.]+)$/.exec(v);
+        if (m) masks[v] = mk(vd.greaterThanEqual(Number(m[1])));
     }
     const world = new THREE.Group();
     world.add(t.mesh);
@@ -163,14 +175,15 @@ globalThis.renderFrame = async function (tt) {
     const k = Math.max(0, Math.round(tt));
     const c = cams[Math.min(cams.length - 1, Math.floor(k / variants.length))];
     const variant = variants[k % variants.length];
-    if (variant === 'built') {
+    const mask = masks[variant] ?? null;
+    if (variant === 'built' || variant === 'turn1' || variant === 'turn2') {
         t.mesh.material = built;
         Sf.setFarDistance(near, D0);
     } else if (variant === 'near' || variant === 'far') {
         t.mesh.material = [near, near];
         Sf.setFarDistance(near, variant === 'near' ? 1.0e9 : 0.01);
     } else {
-        t.mesh.material = [masks[variant], masks[variant]];
+        t.mesh.material = [mask, mask];
     }
     const camera = globalThis._c;
     // the ground and the camera turned together about the vertical so the facade's sun stands where the view wants it
@@ -178,7 +191,15 @@ globalThis.renderFrame = async function (tt) {
     world.rotation.y = theta;
     world.updateMatrixWorld(true);
     const R = new THREE.Matrix4().makeRotationY(theta);
-    const pos = new THREE.Vector3(...c.eye).applyMatrix4(R), look = new THREE.Vector3(...c.look).applyMatrix4(R);
+    // check_shimmer.py's turns: the camera turned about the world's vertical through itself by 0.5 and 1 pixel
+    // ((36 / lens) / width radians, the frame's centre), Blender's +z the vertical here too
+    const turn = variant === 'turn1' ? 0.5 : variant === 'turn2' ? 1.0 : 0.0;
+    const lookAt = new THREE.Vector3(...c.look);
+    if (turn) {
+        const e = new THREE.Vector3(...c.eye);
+        lookAt.sub(e).applyAxisAngle(new THREE.Vector3(0, 1, 0), turn * (36.0 / c.lens) / WIDTH).add(e);
+    }
+    const pos = new THREE.Vector3(...c.eye).applyMatrix4(R), look = lookAt.applyMatrix4(R);
     const tgt = new THREE.Vector3(...c.target).applyMatrix4(R);
     camera.position.copy(pos);
     camera.up.set(0, 1, 0);
@@ -204,6 +225,12 @@ globalThis.renderFrame = async function (tt) {
     sun.target.updateMatrixWorld(true);
     sun.updateMatrixWorld(true);
     sky.update(0);
+    // a mask frame draws the terrain alone: the sky's domes and the water hidden, so the black reads as "not here"
+    for (const o of [...globalThis._s.children, ...world.children]) {
+        if (o === world || o === t.mesh || o.isLight) continue;
+        if (o.userData.eidoShown === undefined) o.userData.eidoShown = o.visible;
+        o.visible = mask ? false : o.userData.eidoShown;
+    }
     await globalThis._r.renderAsync(globalThis._s, camera);
 };
 `;
