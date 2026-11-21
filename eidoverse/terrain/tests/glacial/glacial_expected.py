@@ -15,7 +15,9 @@ Python on the inputs that matter.
              (d8_receivers, the discharge and its budget with and without inflow), graded_fill, best_donor, the flutes
              on a slope, drainage_receivers on rough ground and on the 1 mm case, lip_open, head_distance and the
              taper, sharpen_walls on an inherited trough, the recipe's carve of the small V valley (twin device), the
-             horseshoe uplift and the trunk river (the trunk needs solvers/rivers.py)
+             horseshoe uplift and the trunk river (the trunk needs solvers/rivers.py). The flutes and the V valley's
+             carve carry their rounding floors (PORT_PLAN.md 5.4's perturbations, five patterns; the jump flood's
+             packed indices left whole, as tests/glacial/carve_floor.py has it)
 
 Writes <out>/manifest.json (cases: label, function, args, arrays) and the arrays as little-endian .bin files. Default
 out: eidoverse/terrain/tests/out/glacial/fixtures/. numpy only (no Blender, no GPU).

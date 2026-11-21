@@ -10,7 +10,12 @@
 // (tests/parity/_common.mjs); plans (the cirques, from numpy's own seeds) within 1e-12 relative, and from the port's
 // own seeds within the float grade of the seeds' values. On the carve inputs the centrelines are run twice: from
 // Blender's own discharge and area (the fixture's: the function alone, against numpy) and from the port's (the
-// whole pipeline). JavaScript per cell here is test code. Writes tests/out/glacial/functions_test.json.
+// whole pipeline). Where the Blender edition runs a function on its GPU (the jump flood's eight passes, wall_flutes'
+// noise, the whole carve), the reference is that GPU result (tests/glacial/gpu_fixtures.py, when it has been made)
+// and numpy's twin is reported beside it: the jump flood's candidates identical but for near ties (a differing slot
+// whose float64 target is within 16 float32 steps of Blender's), the flutes at the float-function grade with their
+// rounding floor, the carve at the stage grade with its floor (glacial_expected.py measures both floors).
+// JavaScript per cell here is test code. Writes tests/out/glacial/functions_test.json.
 
 import * as G from '../../core/gpu.js';
 import { Level } from '../../core/levels.js';

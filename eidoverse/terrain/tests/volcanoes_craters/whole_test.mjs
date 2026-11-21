@@ -74,10 +74,10 @@ for (const recipe of recipes) {
                 blender_passed: r.passed, port_passed: pv.rows.find((q) => q.metric === r.metric)?.passed ?? null }]));
         const cv = J.compareVerdicts(pv, bv, entry);
         s.judge = cv;
+        const show = (v) => (typeof v === 'number' ? v.toPrecision(5) : JSON.stringify(v)?.slice(0, 60));
         T.ok(`${recipe} s${seed}: every judge number within its tolerance of Blender's (${cv.rows.length} numbers)`, cv.ok,
-            cv.rows.filter((r) => !r.ok).map((r) => `${r.metric} ${typeof r.port === 'number' ? r.port.toPrecision(5) : r.port} / ` +
-                `${typeof r.blender === 'number' ? r.blender.toPrecision(5) : r.blender} (tol ${r.tol?.toPrecision?.(3)})`).join('; ') +
-            ` | bands passed: port ${s.bands.port}, Blender ${s.bands.blender} of ${banded}`);
+            cv.rows.filter((r) => !r.ok).map((r) => `${r.metric} ${show(r.port)} / ${show(r.blender)} (tol ${r.tol?.toPrecision?.(3)})`)
+                .join('; ') + ` | bands passed: port ${s.bands.port}, Blender ${s.bands.blender} of ${banded}`);
         console.log(`${recipe} s${seed}: bands passed: port ${s.bands.port}, Blender ${s.bands.blender} of ${banded}`);
     }
 }

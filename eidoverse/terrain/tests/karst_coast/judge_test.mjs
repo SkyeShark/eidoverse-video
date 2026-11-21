@@ -37,7 +37,7 @@ const out = { recipes: {} };
 // floor.json of the key a run came from
 const floorOf = (key) => C.readJson(`${W.parityOut()}/${key}/floor.json`, { recipes: {} });
 
-for (const recipe of RECIPES) {
+for (const recipe of RECIPES.filter((r) => r in SEEDS)) {
     const rec = (out.recipes[recipe] = { seeds: {} });
     const seeds = opt('--seeds', null)?.split(',') ?? SEEDS[recipe];
     const port = [], blender = [];
@@ -86,6 +86,30 @@ for (const recipe of RECIPES) {
         d.means.filter((m) => !m.ok).map((m) => `${m.metric} mean ${m.port.toFixed(3)} vs ${m.blender.toFixed(3)} (tol ${m.tol?.toFixed(3)})`)
             .concat(d.bands.filter((b) => !b.ok).map((b) => `${b.metric} passes ${b.port_passes} of ${b.of[1]} vs ${b.blender_passes} of ${b.of[0]}`)).join('; ') ||
             `${d.means.length} banded numbers`);
+    }
+}
+// Moher: rock 'layered' (not in the floor runs, whose sea_cliffs is the chalk default): the port's save and the
+// Blender edition's own of the same call (its bake.py, tests/out/karst_coast/blender_saves/), both judged against
+// cliffs_of_moher; one seed, so its numbers are reported side by side, the verdicts named
+if (!opt('--recipes', null) || RECIPES.includes('sea_cliffs_layered')) {
+    const seed = opt('--seeds', '1').split(',')[0];
+    const port = `${SAVES}/sea_cliffs_layered_s${seed}.npz`, blend = `${KC.OUT()}/blender_saves/sea_cliffs_layered_s${seed}.npz`;
+    if (W.exists(port) && W.exists(blend)) {
+        const jo = { recipe: 'sea_cliffs', reference: 'cliffs_of_moher' };
+        const pv = await J.judgeSave(port, { ...jo, label: `sea_cliffs_layered_s${seed}_port`, outDir: `${KC.OUT()}/judge/sea_cliffs_layered_s${seed}` });
+        const bv = await J.judgeSave(blend, { ...jo, label: `sea_cliffs_layered_s${seed}_blender`, outDir: `${KC.OUT()}/judge/sea_cliffs_layered_s${seed}_blender` });
+        const rows = [];
+        for (const [k, b] of Object.entries(bv?.numbers?.generated ?? {})) {
+            const p = pv?.numbers?.generated?.[k];
+            if (typeof b === 'number' && typeof p === 'number') rows.push({ metric: k, port: p, blender: b });
+        }
+        out.moher = { seed, port_passed: pv?.passed ?? null, port_failures: pv?.failures ?? null, blender_passed: bv?.passed ?? null,
+            blender_failures: bv?.failures ?? null, numbers: rows };
+        T.ok(`sea_cliffs rock 'layered' s${seed} against the Cliffs of Moher: reported (verdicts: port ${pv?.passed}, ` +
+            `Blender ${bv?.passed})`, pv !== null && bv !== null,
+        `port fails: ${(pv?.failures ?? []).join('; ') || 'none'} | Blender fails: ${(bv?.failures ?? []).join('; ') || 'none'}`);
+    } else {
+        console.log(`[skip] Moher: needs ${W.exists(port) ? '' : port} ${W.exists(blend) ? '' : blend}`);
     }
 }
 out.reference = REFERENCE;

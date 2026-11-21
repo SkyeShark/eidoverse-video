@@ -14,7 +14,8 @@ const T = new C.Checks('karst and coast: every kernel compiles');
 const R = await G.init();
 const names = [];
 for (const e of Deno.readDirSync(new URL('../../kernels/karst/', import.meta.url))) {
-    if (e.isFile && e.name.endsWith('.wgsl') && e.name !== 'lib.wgsl') names.push(`karst/${e.name.slice(0, -5)}`);
+    // (lib.wgsl and precise.wgsl are includes: kernels/karst/*'s `//! include karst/lib`, `karst/precise`)
+    if (e.isFile && e.name.endsWith('.wgsl') && !['lib.wgsl', 'precise.wgsl'].includes(e.name)) names.push(`karst/${e.name.slice(0, -5)}`);
 }
 names.sort();
 const kernels = [['coast_fetch_16', () => CO.fetchKernel(R, 16)], ['coast_seed', () => R.kernel('coast_seed')],

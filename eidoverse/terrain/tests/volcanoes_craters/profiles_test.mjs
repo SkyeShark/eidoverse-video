@@ -14,6 +14,11 @@
 //                       cliffs: its delta within 1e-5 of range
 //   quantile            prims.quantile(h, q, { mask, dtype: 'float64' }), as op_volcano_lakes takes a playa's top:
 //                       bit-equal to numpy's np.quantile of the float32 heights as float64
+//   hero levels' ops    lava_rubble, cone_rills and crater_blocks, which run on levels finer than any draft floor
+//                       run's (so no stage replay reaches them): each op on the fixture's level and synthetic fields,
+//                       every field after it within 1e-4 of range (the stage replay's grade)
+//   preset surfaces     fujiSurface and craterLakeSurface (volcanic.py fuji_surface, crater_lake_surface) on their
+//                       fixtures' grids: within 1e-5 of range
 //
 //     <Blender's python> -I eidoverse/terrain/tests/volcanoes_craters/volcanic_expected.py
 //     deno run --no-config --no-lock --unstable-webgpu --allow-all eidoverse/terrain/tests/volcanoes_craters/profiles_test.mjs
@@ -21,7 +26,9 @@
 //
 // Writes tests/out/volcanoes_craters/profiles_test.json. JavaScript per cell here is test code.
 
+import { Fields } from '../../core/fields.js';
 import * as G from '../../core/gpu.js';
+import { Level } from '../../core/levels.js';
 import { prims } from '../../core/prims.js';
 import * as IM from '../../solvers/impact.js';
 import * as VO from '../../solvers/volcanic.js';
@@ -156,6 +163,45 @@ if (!M) {
             rows.push({ label: c.label, ok: top === c.values.top, why: `${top} / ${c.values.top}` });
         }
         tally('quantile at volcanic.py:2865 (C6)', rows, 'bit-equal to numpy 2.3.4');
+    }
+    {
+        // the hero levels' ops, which no draft floor run reaches: run as ops on the fixture's level and fields, every
+        // field after the op graded as a stage replay is (<= 1e-4 x range + 16 float32 steps)
+        const OPS = { op_lava_rubble: VO.opLavaRubble, op_cone_rills: VO.opConeRills, op_crater_blocks: IM.opCraterBlocks };
+        const rows = [];
+        for (const c of M.cases.filter((x) => x.function in OPS)) {
+            const level = Level.fromDict(c.args.level);
+            const fields = new Fields(level, null, R);
+            for (const [k, a] of Object.entries(c.inputs)) fields[k] = R.field(a.shape[0], a.shape[1], 1, Float32Array.from(arr(a)));
+            await OPS[c.function](fields, level, structuredClone(c.args.params), c.args.seed, null);
+            const worst = [], missing = [];
+            for (const [k, a] of Object.entries(c.outputs)) {
+                if (!(k in fields)) { missing.push(k); continue; }
+                const want = arr(a);
+                const g = gradeOf(await R.read(fields[k]), want);
+                let amax = 0;
+                for (const v of want) amax = Math.max(amax, Math.abs(v));
+                const ok = g.err <= 1e-4 * g.range + 16 * C.ulp32(amax);
+                worst.push([k, g.over, ok]);
+            }
+            fields.dispose();
+            const bad = worst.filter(([, , ok]) => !ok);
+            rows.push({ label: c.label, ok: !bad.length && !missing.length, worst: Math.max(0, ...worst.map(([, o]) => o)),
+                why: `${worst.map(([k, o]) => `${k} ${C.sci(o)}`).join(', ')} of range${missing.length ? `; missing ${missing}` : ''}` });
+        }
+        tally('the hero levels\' ops (lava_rubble, cone_rills, crater_blocks)', rows, 'every field within 1e-4 of range');
+    }
+    {
+        // the preset surfaces on their fixtures' levels
+        const rows = [];
+        for (const c of M.cases.filter((x) => x.function === 'fuji_surface' || x.function === 'crater_lake_surface')) {
+            const level = Level.fromDict(c.args.level);
+            const f = c.function === 'fuji_surface' ? await VO.fujiSurface(R, VO.levelGrid(level)) : await VO.craterLakeSurface(R, level);
+            const g = gradeOf(await R.read(f), arr(c.outputs.z));
+            f.destroy();
+            rows.push({ label: c.label, ok: g.over <= 1e-5, worst: g.over, why: `${C.sci(g.over)} of range (${g.range.toFixed(0)} m)` });
+        }
+        tally('the preset surfaces (fuji_surface, crater_lake_surface)', rows, 'within 1e-5 of range');
     }
     G.shutdown();
 }

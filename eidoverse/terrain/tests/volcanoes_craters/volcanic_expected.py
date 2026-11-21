@@ -15,6 +15,9 @@ volcanic.py:2865 (C6)"): the Blender edition's own numpy functions on inputs the
   quantile       the playa's top of op_volcano_lakes (volcanic.py:2865): float(np.quantile(h[cells], q)) with h the
                  level's float32 heights as float64 and cells a depression's cells, for q from frac + 0.06 clipped to
                  0.95, on fields with ties and without
+  hero ops       op_lava_rubble, op_cone_rills, impact.op_crater_blocks on levels of their own (no draft floor run
+                 reaches them): the fields after each op
+  presets        fuji_surface (40 km) and crater_lake_surface (15 km) on grids of 256 x 256
 
     <Blender's python> -I eidoverse/terrain/tests/volcanoes_craters/volcanic_expected.py [out folder]
 
@@ -152,6 +155,66 @@ for k, (n, ties) in enumerate(((96, False), (128, True), (200, False), (64, True
         top = float(np.quantile(hv[cells], q))
         add('quantile', f'quantile of {int(cells.sum())} cells of {n}^2{" with ties" if ties else ""}, q {q:.2f}',
             {'q': q}, inputs={'h': h, 'cells': cells}, values={'top': top})
+
+# ------------------------------------------------------- the hero levels' ops (no draft floor run reaches them)
+# op_lava_rubble, op_cone_rills and impact.op_crater_blocks run as ops on a level of their own ('cell<=4', 'cell<=5'
+# and 'cell<=1.5' in the recipes: the draft floor runs stop at the main level), from synthetic fields: their fields
+# after the op
+from eidoblend.terrain.core.levels import Level  # noqa: E402
+
+
+def level(x0, y0, cell, n):
+    return Level(3, 'hero', float(x0), float(y0), n * float(cell), float(cell), n, 2, 1, [], 16, -1)
+
+
+yy, xx = np.mgrid[0:256, 0:256]
+lv = level(-64.0, -64.0, 0.5, 256)
+lava = np.clip(1.2 - np.hypot(xx - 120.0, yy - 140.0) / 90.0, 0.0, 1.0).astype(np.float32)
+f = {'h': np.full((256, 256), 1850.0, np.float32), 'bed': np.full((256, 256), 1849.0, np.float32), 'lava': lava}
+inp = {k: v.copy() for k, v in f.items()}
+V.op_lava_rubble(f, lv, {'scales_m': [8.0, 3.0, 1.2], 'amps_m': [1.2, 0.6, 0.3]}, 9)
+add('op_lava_rubble', 'op_lava_rubble on a 0.5 m level over a flow', {'params': {'scales_m': [8.0, 3.0, 1.2],
+    'amps_m': [1.2, 0.6, 0.3]}, 'seed': 9, 'level': lv.to_dict()}, inputs=inp,
+    outputs={k: np.asarray(v, np.float32) for k, v in f.items()})
+
+HERO = dict(at=[0.0, 0.0], width_m=1420.0, hw_ratio=0.188, crater_ratio=0.26, flank_deg=28.0, crater_wall_deg=30.0,
+            crater_depth_frac=0.41, crest_round_m=6.0, rim_tilt=0.02, tilt_azimuth_deg=200.0, outline_noise=0.02,
+            seed=9, age_yr=71000.0, kappa_t_m2=0.0)
+lv = level(-800.0, -800.0, 4.0, 400)
+x, y = lv.xy()
+cone = np.asarray(V.cinder_cones(x, y, [dict(HERO)]), np.float64)
+f = {'h': (2000.0 + cone).astype(np.float32), 'bed': np.full((400, 400), 1990.0, np.float32)}
+inp = {k: v.copy() for k, v in f.items()}
+rp = {'cones': [dict(HERO)], 'field': None, 'kappa_m2_per_yr': 0.002, 'depth_m': 1.5, 'spacing_m': 30.0}
+V.op_cone_rills(f, lv, dict(rp), 9)
+add('op_cone_rills', 'op_cone_rills on a 4 m level over SP Crater', {'params': rp, 'seed': 9, 'level': lv.to_dict()},
+    inputs=inp, outputs={k: np.asarray(v, np.float32) for k, v in f.items()})
+
+BLOCKS = dict(sets=[dict(spacing_m=24.0, size_m=[2.5, 9.0], density=0.45, rho=[0.6, 0.8, 0.95, 1.02],
+                         height_frac=[0.35, 0.6]),
+                    dict(spacing_m=8.0, size_m=[0.7, 2.5], density=0.3, rho=[0.5, 0.72, 0.97, 1.03],
+                         height_frac=[0.3, 0.55]),
+                    dict(spacing_m=7.0, size_m=[2.5, 7.0], density=0.8, rho=[0.0, 0.02, 0.55, 0.7],
+                         height_frac=[0.05, 0.1], profile='mound')],
+              crater={k: CRATER[k] for k in ('centre', 'diameter_m', 'sides', 'polygon', 'polygon_azimuth_deg',
+                                             'radius_noise')})
+lv = level(180.0, -220.0, 1.0, 512)
+f = {'h': np.full((512, 512), 1700.0, np.float32), 'bed': np.full((512, 512), 1695.0, np.float32),
+     'deposit': np.zeros((512, 512), np.float32)}
+inp = {k: v.copy() for k, v in f.items()}
+I.op_crater_blocks(f, lv, dict(BLOCKS), 11)
+add('op_crater_blocks', 'op_crater_blocks on a 1 m level over the crater wall', {'params': BLOCKS, 'seed': 11,
+    'level': lv.to_dict()}, inputs=inp, outputs={k: np.asarray(v, np.float32) for k, v in f.items()})
+
+# ------------------------------------------------------------- the preset surfaces (fuji_surface, crater_lake_surface)
+lv = level(300.0 - 20000.0, 260.0 - 20000.0, 156.25, 256)
+x, y = lv.xy()
+add('fuji_surface', 'fuji_surface, 40 km at 156 m', {'level': lv.to_dict()},
+    outputs={'z': np.asarray(V.fuji_surface(x, y), np.float64)})
+lv = level(-7500.0, -7500.0, 58.59375, 256)
+x, y = lv.xy()
+add('crater_lake_surface', 'crater_lake_surface, 15 km at 59 m', {'level': lv.to_dict()},
+    outputs={'z': np.asarray(V.crater_lake_surface(x, y), np.float64)})
 
 json.dump({'source': 'eidoverse/terrain/tests/volcanoes_craters/volcanic_expected.py', 'versions': B.versions(),
            'blender_commit': B.source_key().get('commit') if isinstance(B.source_key(), dict) else None,

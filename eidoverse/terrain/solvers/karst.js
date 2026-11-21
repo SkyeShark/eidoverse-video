@@ -84,16 +84,26 @@
 //     (npInterp), np.convolve's dot products are summed in order (OpenBLAS's ddot sums in another order: the last
 //     ulps of the river's curvature).
 //   - evaluate runs on the GPU (kernels/karst/): the level's smooth world fields on their world-anchored lattices
-//     (karst/smooth.wgsl) and bilinear onto the subsamples (karst/bilinear.wgsl); the river's frame (karst/river.wgsl:
+//     (karst/world.wgsl) and bilinear onto the subsamples (karst/bilinear.wgsl); the river's frame (karst/river.wgsl:
 //     the distance to the course and the signed distance and arc length near it, the course's segments binned per
 //     tile); the plain and its channel (karst/plain.wgsl); every tower over the subsamples its box covers
 //     (karst/towers.wgsl: the plan's towers in tables, binned per 16 x 16 tile in the order numpy visits them, so a
 //     subsample takes the same winner and owner); the composition and the cell means (karst/compose.wgsl); the
 //     cockpit floors (karst/cockpit_*.wgsl over core/prims.js fillDepressions and label: per-basin numbers by integer
 //     atomics, each basin's level in doubles on the CPU from them (one number per basin, not per cell), then gathered).
-//     numpy's float64 there is float32 here. Noise lattice coordinates are split on the CPU in doubles into an integer
-//     cell and a float32 fraction per lattice line (the world functions are evaluated on separable grids: G.smooth's
-//     lattices and the subsample rows), so a lattice 40 km from the origin is as exact as one at the origin.
+//     numpy's float64 there is float32 here, but in the tower loop. Noise lattice coordinates are split on the CPU in
+//     doubles into an integer cell and a float32 fraction per lattice line (the world functions are evaluated on
+//     separable grids: G.smooth's lattices and the subsample rows), so a lattice 40 km from the origin is as exact as
+//     one at the origin.
+//   - The tower loop (karst/towers.wgsl) rounds as numpy does (karst/precise.wgsl): its float32 lines one rounding per
+//     operation, division, sqrt and arctan2 correctly rounded, its float64 lines (np.interp of the wall tables, the
+//     fluting's and the talus gate's noise, the smoothsteps) in double-float, rounded once. The loop amplifies its
+//     last bit (a wall table rises up to 57 m per metre at a foot's notch, the buried rock dips at tan 85 degrees,
+//     the talus gate turns 140 m of cone per radian), so numpy's own float32 lands up to 7e-5 of the bed's range from
+//     the same lines in float64; a port that rounded its own way landed as far (tests/karst_coast/evaluate_test.mjs,
+//     karst_window_floor.py). Where the source decides on a threshold its float64 noise sits on (the common base's
+//     rock where PM > 0.5 m, a step of the bed by the alluvium's 12 m), the float32 noise can fall the other side on a
+//     subsample in a million.
 //   - Blender's memos (_PLANS, _DOMAINS) are module Maps here, cleared by clearMemos() (the floor protocol's
 //     memos-cleared rule, plan 5.4).
 // The convergence loops this module names for the dispatch-log comparison (PORT_PLAN.md 5.7): none; it dispatches no
@@ -1706,6 +1716,23 @@ function riverFrameLevel(R, plan, G, band) {
     return out;
 }
 
+/** kernels/karst/towers.wgsl's scalars that numpy keeps in float64 or as float32 scalars of its own rounding: the
+ * fluting's depth and 0.55 x its weight sum (Python floats: double-floats, hi and lo), and the talus gate's smoothstep
+ * edges as numpy's float32 scalar arithmetic makes them (0.55 * c and 0.55 * c + 0.35 of c = f32(1 - 2 apron_cover)
+ * are float32 under NEP 50, and so is their difference, the smoothstep's denominator). */
+function towerScalars(pr, cell) {
+    const f = Math.fround;
+    let wsum = 0.0;
+    if (cell <= 2.0 && pr.fluting_m > 0) {
+        if (7.0 >= 4.0 * cell) wsum += 0.7;
+        if (2.9 >= 4.0 * cell) wsum += 0.3;
+    }
+    const off = 0.55 * wsum;
+    const c = f(1.0 - 2.0 * pr.apron_cover), e0 = f(f(0.55) * c), e1 = f(e0 + f(0.35));
+    return { uFluteM: pr.fluting_m, uFluteMl: pr.fluting_m - f(pr.fluting_m), uFluteOff: off, uFluteOffl: off - f(off),
+        uGateA: e0, uGateDen: f(e1 - e0) };
+}
+
 /** The tables and tile lists kernels/karst/towers.wgsl reads, for the towers whose box meets the level's window
  * (karst.py evaluate's `hit` and boxes, in index order). null when none does. */
 export function towerTables(plan, G) {
@@ -1732,7 +1759,10 @@ export function towerTables(plan, G) {
     const tw = new Float32Array(M * TW * 4), ts = new Uint32Array(M * 4), pk = new Float32Array(M * K * 5 * 4);
     let rows = 0;
     for (const [t] of hits) rows += plan.wall_D[t].length;
-    const wt = new Float32Array(rows * 4);
+    // the wall tables in float64 as double-floats, 3 vec4 rows per entry: (D, D0) (Z, numpy's slope over D)
+    // (its slope over D0, 0)
+    const wt = new Float32Array(rows * 12);
+    const ddTo = (a, o, v) => { a[o] = v; a[o + 1] = v - a[o]; };
     const fluteOn = cell <= 2.0 && pr.fluting_m > 0;
     let wr = 0, anyBlock = false, anyRough = false;
     hits.forEach(([t, i0, i1, j0, j1], m) => {
@@ -1775,7 +1805,18 @@ export function towerTables(plan, G) {
             }
         }
         const D = plan.wall_D[t], Z = plan.wall_Z[t], D0 = plan.wall_D0[t];
-        for (let r = 0; r < D.length; r++) { wt[4 * wr] = D[r]; wt[4 * wr + 1] = D0[r]; wt[4 * wr + 2] = Z[r]; wr++; }
+        const sD = interpSlopes(D, Z), sD0 = interpSlopes(D0, Z);
+        for (let r = 0; r < D.length; r++) {
+            const o = 12 * wr;
+            ddTo(wt, o, D[r]);
+            ddTo(wt, o + 2, D0[r]);
+            ddTo(wt, o + 4, Z[r]);
+            if (r < D.length - 1) {                      // (a zero-width step's slope is never read: numpy's
+                ddTo(wt, o + 6, sD[r]);                  // search takes the interval with D[r + 1] > d >= D[r])
+                ddTo(wt, o + 8, sD0[r]);
+            }
+            wr++;
+        }
         if (Number.isFinite(fl)) anyBlock = true;
         else if (pr.peak_rough > 0) anyRough = true;
         if (plan.body_h[t] > 0) anyRough = true;
@@ -1862,13 +1903,14 @@ export async function evaluate(R, plan, x0, y0, cell, n, opts = {}) {
             pm: PM ?? D.f1, rlump: rough[0], rknob: rough[1], clump: cap[0], cknob: cap[1] }, { outR: RS, outO: OW },
         { uTilesX: tt.tilesX, uK: plan.K, uLedge: LEDGE ? 1 : 0, uBench: BENCH ? 1 : 0, uPM: PM ? 1 : 0, uLedgeK: pr.ledge_cover,
             uTanUnder: Math.tan(radians(85.0)), uTanApron: Math.tan(radians(pr.apron_deg)), uPeakRough: pr.peak_rough,
-            uBenchK: pr.benches, uBenchM: pr.bench_m, uFluteM: pr.fluting_m, uApronC: 1.0 - 2.0 * pr.apron_cover });
+            uBenchK: pr.benches, uBenchM: pr.bench_m, ...towerScalars(pr, cell) });
         for (const x of Object.values(f)) x.destroy();
     } else {
         R.run(kernelOf(R, 'karst/towers'), { tw: rgba1(R), ts: D.u1, pk: rgba1(R), wt: rgba1(R), bins: zeroBins(R, N), list: D.u1,
             axes: D.f2, lob: LOB, jag: JAG, ledge: D.f1, bench: D.f1, pm: PM ?? D.f1, rlump: D.f1, rknob: D.f1, clump: D.f1, cknob: D.f1 },
         { outR: RS, outO: OW }, { uTilesX: Math.ceil(N / 16), uK: plan.K, uLedge: 0, uBench: 0, uPM: PM ? 1 : 0, uLedgeK: pr.ledge_cover,
-            uTanUnder: 0, uTanApron: 0, uPeakRough: 0, uBenchK: 0, uBenchM: 1, uFluteM: 0, uApronC: 0 });
+            uTanUnder: 0, uTanApron: 0, uPeakRough: 0, uBenchK: 0, uBenchM: 1, uFluteM: 0, uFluteMl: 0, uFluteOff: 0,
+            uFluteOffl: 0, uGateA: 0, uGateDen: 1 });
     }
 
     // ---- the composition and the cell means

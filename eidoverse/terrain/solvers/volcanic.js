@@ -15,7 +15,8 @@
 //                        (kernels/volcanic/cone.wgsl, cone_eval.wgsl, pile.wgsl)
 //     rift_cones, cinder_field   the cone plans (numpy's Generator: core/np_random.js, draw for draw)
 //     caldera_collapse   a ring-fault collapse with a layered face over talus (kernels/volcanic/caldera.wgsl)
-//     FUJI, CRATER_LAKE, SP_CRATER   the reference presets, measured from the reference DEMs
+//     FUJI, CRATER_LAKE, SP_CRATER   the reference presets, measured from the reference DEMs (fujiSurface,
+//                        craterLakeSurface: the presets' analytic surfaces, fuji_surface and crater_lake_surface)
 //
 // Stage ops (OPS; run.js calls op(fields, level, params, seed, ctx)):
 //   constructional  'stratovolcano', 'cinder_cones', 'caldera_collapse' (impact.js adds 'impact_crater'): stamped
@@ -42,6 +43,31 @@
 //     floor protocol clears Blender's).
 //   - Fields are core/gpu.js fields; the ops are async. A child level's border band is pulled to its parent by
 //     kernels/volcanic/band_pull.wgsl (volcanic.py's _pull_band rounds once, run.py's twice: two kernels).
+//   - lava_flows: the DOWNFLOW walkers run in JavaScript (lavaWalkers: their draws depend on how many walkers are alive
+//     each step, PORT_PLAN.md 2.4) on the level's surface read back once per flow unit (float32, as the level holds
+//     it), each walker's local slope (dh_rel) taken in doubles at the cells it visits; from numpy's own float64
+//     heights their passage equals numpy's at every cell (tests/volcanoes_craters/plans_test.mjs). Inside the op the
+//     walkers' ground is the port's float32 field where numpy's is float64 (h + total, blurred), so a walker's choice
+//     between near-equal neighbours can differ: the flows match in class (the recipes' floor runs), not cell for cell.
+//     To keep such choices rare, every height a flow compares is held relative to the ground at its vent (they enter
+//     only as differences: the same arithmetic, in the digits float32 has).
+//   - lava_surface's noise is numpy's standard normals drawn on the GPU (standardNormalGpu, kernels/volcanic/
+//     normal.wgsl: PCG64 and the ziggurat, the draws numpy makes in its order; the attempts float32 cannot decide are
+//     settled in doubles by core/np_random.js's own generator). A value is float32: numpy's draw within 4 float32 steps
+//     (measured 2.6), the stream left where numpy leaves it. The ziggurat's tables are read from core/np_random.js's
+//     source (constants it does not export). lava_surface is float32 throughout (its blurs are core/prims.js's): its
+//     footprint, smoothstep(0.5 p_edge, 2 p_edge) of the blurred passage, carries the blur's float32 error times
+//     1 / p_edge into the margins (within 2.3e-5 of range of numpy's on the plan fixtures, 1e-4 being the grade).
+//   - caldera_collapse's and the impact crater's strength (Sc) is a step function of a cell's run u from the face's
+//     foot (the layered face's layers); u is float32 here (about 1e-3 m off numpy's at 5 km), so a cell within that of
+//     a layer boundary reads the other layer (tens of cells of 262,144). tests/volcanoes_craters/replay_test.mjs grades
+//     them by runs with every position moved by up to 1e-6 of its distance.
+//   - volcano_lakes' max_lakes keeps the largest qualifying depressions as numpy's argsort of where(lake, area, -1)
+//     reversed keeps them; between depressions of exactly equal area numpy's order is its sort's (an introsort, not
+//     stable), the port's the larger label first.
+//   - Blender defect kept (reported, not fixed): op_lava_flows sets units = 1 when a first unit leaves no passage over
+//     0.05, but its range(units) runs on and the next unit unpacks the missing axis (a TypeError); the port raises the
+//     same TypeError there.
 
 import { createHash } from 'node:crypto';
 import * as Gd from '../core/grid.js';
@@ -722,7 +748,6 @@ export const EW = Object.freeze({ ADD: 0, SUB: 1, POS_DIFF: 2, BED: 3, MIN: 4, M
  * maximum over toeFrac of its height (smooth false: a plain maximum). blocks: the row blocks numpy evaluated
  * separately ([[lo, hi], ...]; one block for a whole level). */
 export async function pilesOn(R, out, grid, blocks, cones, bases, groundSlopes = null, toeFrac = 0.2, smooth = true) {
-    const P = prims(R);
     const D = Gd.dummies(R);
     const slopes = groundSlopes ?? cones.map(() => 0.0);
     const nb = blocks.length;
@@ -1098,7 +1123,6 @@ function runnerOf(fields, ctx) {
     return R;
 }
 
-const logOf = (ctx) => (ctx && typeof ctx.log === 'function' ? ctx.log : () => {});
 
 
 // ============================================================================== the stratovolcano, evaluated ===
@@ -1282,6 +1306,57 @@ export const SP_CRATER = Object.freeze({
     at: [-12.0, -4.0], width_m: 1320.0, hw_ratio: 0.18, crater_ratio: 0.28, flank_deg: 32.0, crater_wall_deg: 30.0,
     crater_depth_frac: 0.41, rim_tilt: 0.05, tilt_azimuth_deg: 200.0, outline_noise: 0.04, seed: 9,
 });
+
+/** The FUJI preset's analytic surface (metres above sea level) at a grid's points: the cone, its crater, the Hoei
+ * crater and the rift cones as piles, on a flat foot at base_m (volcanic.py fuji_surface: one evaluation over the
+ * whole grid, so the piles' support is one block). A new field. */
+export async function fujiSurface(R, grid, preset = FUJI) {
+    const p = { ...preset };
+    const rift = pop(p, 'rift');
+    const base = Number(pop(p, 'base_m'));
+    const cones = riftCones(p.centre, p.rift_azimuth_deg, { ...rift, seed: p.seed });
+    const out = await evaluateStrato(R, stratoPlan({ ...p, cones }), grid, gridBlocks(grid, 1, false));
+    const z = ew(R, EW.LERP, null, out.h, null, null, base, base + 1.0);
+    release(out);
+    return z;
+}
+
+/** The CRATER_LAKE preset's analytic surface (metres above sea level) on a square level: the edifice with its flank
+ * cones, collapsed at the rim's mean height round rim_radius_m (720 points, in doubles), the inner cones stacked on
+ * the floor at floor_m; the lake is not filled (volcanic.py crater_lake_surface). A new field. */
+export async function craterLakeSurface(R, level, preset = CRATER_LAKE) {
+    const p = { ...preset };
+    const e = { ...p.edifice };
+    const base = Number(pop(e, 'base_m'));
+    const cones = riftCones(p.centre, p.flank_cone_azimuth_deg, { ...p.flank_cones, seed: p.seed });
+    const plan = stratoPlan({ ...e, centre: p.centre, seed: p.seed });
+    const grid = levelGrid(level);
+    const blocks = gridBlocks(grid, 1, false);
+    const ed = await evaluateStrato(R, plan, grid, blocks);
+    const at = ew(R, EW.LERP, null, ed.h, null, null, base, base + 1.0);
+    release(ed);
+    const cz = await cinderConesGrid(R, grid, blocks, cones);
+    const edifice = ew(R, EW.ADD, at, cz);
+    at.destroy();
+    cz.destroy();
+    // _ring_mean of the edifice without its cones: on the ring the summit crater's bowl is BIG, and numpy's
+    // crest_union(z, BIG, k) returns BIG + (z - BIG), rounded as here
+    const c = p.centre.map(Number), Rr = Number(p.rim_radius_m);
+    const vals = new Float64Array(720);
+    for (let k = 0; k < 720; k++) {
+        const a = k * (TAU / 720);
+        vals[k] = base + (BIG + (outerAt(plan, c[0] + Rr * Math.sin(a), c[1] + Rr * Math.cos(a)) - BIG));
+    }
+    const rimH = npSum(vals) / 720;
+    const keys = ['wall_deg', 'talus_deg', 'talus_frac', 'scallops', 'scallop_amp', 'radius_noise', 'edge_noise',
+        'elongation', 'elongation_azimuth_deg', 'seed'];
+    const out = await calderaCollapse(R, level, edifice, { centre: p.centre, rim_radius_m: Rr, rim_height_m: rimH,
+        floor_m: Number(p.floor_m), ...Object.fromEntries(keys.map((k) => [k, p[k]])) });
+    edifice.destroy();
+    for (const k of ['talus', 'floor', 'strength']) if (out[k] && !out[k].destroyed) out[k].destroy();
+    await stackPiles(R, out.height, grid, blocks, p.inner_cones, Number(p.floor_m));
+    return out.height;
+}
 
 
 // ============================================================================================== calderas (4.7) ===
@@ -2227,7 +2302,7 @@ export async function opVolcanoLakes(fields, level, params, seed = 0, ctx = null
     const dm = P.where(depth, '>', 1e-4);
     const { labels: lab, count: nlab } = await P.label(dm);
     dm.destroy();
-    let water = Gd.fill(R, [n, n], 0.0), add = Gd.fill(R, [n, n], 0.0);
+    const water = Gd.fill(R, [n, n], 0.0), add = Gd.fill(R, [n, n], 0.0);
     let nl = 0, filledAny = false;
     const child = bandPins(ctx) !== null;
     const band = Math.trunc(level.band ?? 16);
@@ -2390,7 +2465,7 @@ export async function opCalderaLake(fields, level, params, seed = 0, ctx = null)
     const below = whereLess(P, h, L);
     const { labels: lab, count } = await P.label(below);
     below.destroy();
-    let water = Gd.fill(R, [n, n], 0.0);
+    const water = Gd.fill(R, [n, n], 0.0);
     const Lhi = Math.fround(L), Llo = L - Lhi;
     if (count) {
         const ci = Math.min(Math.max(pyRound(fi), 0), n - 1), cj = Math.min(Math.max(pyRound(fj), 0), n - 1);
@@ -3021,7 +3096,7 @@ export function lavaWalkers(h, ny, nx, cell, start, walkers = 400, lengthM = 600
     const visits = new Float32Array(ny * nx);
     const seen = new Set();
     const visit = (k, c) => { visits[k] += c; seen.add(k); };
-    let lim = new Float64Array(N).fill(Number(lengthM));
+    const lim = new Float64Array(N).fill(Number(lengthM));
     if (stopSpread) {
         const r = defaultRng([sd, 7179, Math.trunc(salt)]).random(N);
         for (let w = 0; w < N; w++) lim[w] = Number(lengthM) * (1.0 - Number(stopSpread) * r[w]);
@@ -3271,9 +3346,18 @@ export async function opLavaFlows(fields, level, params, seed = 0, ctx = null) {
         if (!(fi >= 2 && fi < n - 2 && fj >= 2 && fj < n - 2)) continue;
         const th0 = Number(v.thickness_m), W0 = Number(v.width_m ?? 0.0) || 0.0;
         const dh = v.dh_m !== null && v.dh_m !== undefined ? Number(v.dh_m) : Number(v.dh_factor) * th0;
+        // every height the flow compares (its walkers' ground, the onlap and the vent's level, the buried hollows) is
+        // taken relative to the ground at the vent: they enter only as differences, which numpy forms in float64,
+        // and float32 holds h - z_vent far finer than h itself (a tenth of a millimetre at 2 km), so fewer of the
+        // walkers' near-ties are decided otherwise than numpy decides them
+        const [zr] = await R.readRange(h, pyRound(fj) * n + pyRound(fi), 1);
+        const zf = Gd.fill(R, [1, 1], zr);
+        const hr = ew(R, EW.SUB, h, zf);
+        zf.destroy();
+        const ht = ew(R, EW.ADD, hr, total);
+        hr.destroy();
         // the walkers' ground: the surface smoothed at the flow's own scale
-        const ht = ew(R, EW.ADD, h, total);
-        let g = copyOf(ht);
+        const g = copyOf(ht);
         const sig = Math.max(2.0 * th0, 0.5 * W0) / cell;
         if (sig > 0.5) {
             const r0 = Math.ceil(Number(v.length_m) / cell + 8.0 * sig);
@@ -3288,7 +3372,8 @@ export async function opLavaFlows(fields, level, params, seed = 0, ctx = null) {
         let units = Math.max(Math.trunc(Number(v.units || 1)), 1);
         const unitCount = units;                  // volcanic.py's range(units), fixed before units = 1 below
         const urng = defaultRng([sd, 9113, k]);
-        let tv = Gd.fill(R, [n, n], 0.0), fv = Gd.fill(R, [n, n], 0.0);
+        let tv = Gd.fill(R, [n, n], 0.0);
+        const fv = Gd.fill(R, [n, n], 0.0);
         let start = [fi, fj], axis = null;
         for (let u = 0; u < unitCount; u++) {
             const vu = { ...v };

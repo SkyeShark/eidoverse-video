@@ -14,6 +14,8 @@
 //   3. flood: solvers/coast.js nearestCrossing (seed + the JFA+2 schedule + the distance kernel) against coast.py's
 //      nearest_crossing on the twin device, the Blender test's wavy level set: the distance within 1e-4 cells (the
 //      Blender test's own grade for its GPU), the payload equal
+//   4. precise: kernels/karst/precise.wgsl's division, sqrt and arctan2 correctly rounded (numpy's float32), on a
+//      million arguments, beside the built-ins
 // JavaScript per cell here is test code (the edition's rule allows it in tests only). Writes
 // tests/out/karst_coast/kernels_test.json.
 
@@ -108,6 +110,60 @@ if (want('flood')) {
             `max |d - d_twin| ${C.sci(worst)} cells over ${n} cells; payload equal on ${(100 * payEq / Math.max(n, 1)).toFixed(3)} %`);
         for (const f of [phi, pay, out]) f.destroy();
     }
+}
+
+// 4. kernels/karst/precise.wgsl, the rounding the towers kernel keeps numpy's with: kdiv, ksqrt and katan2 against
+//    the correctly rounded float32 (a double's quotient, root and arctangent of float32 arguments, rounded once: what
+//    numpy's float32 division and sqrt give, and its arctan2 but for one argument in 500,000), beside the built-ins
+if (want('precise')) {
+    const src = `//! sampler q rgba32f
+//! image outP rgba32f
+//! image outB rgba32f
+//! include karst/lib
+//! include detail/exact
+//! include karst/precise
+fn kmain(p: vec2<i32>) {
+  let n = outP_size();
+  if (!inside(p, n)) { return; }
+  kprecise(n);
+  let v = q_at(p);
+  outP_store(p, vec4<f32>(kdiv(v.x, v.y), ksqrt(abs(v.z)), katan2(v.w, v.z), 0.0));
+  outB_store(p, vec4<f32>(v.x / v.y, sqrt(abs(v.z)), atan2(v.w, v.z), 0.0));
+}`;
+    const N = 1024, f = Math.fround;
+    const q = new Float32Array(N * N * 4);
+    let s = 0x9E3779B9;
+    const rnd = () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+    for (let i = 0; i < N * N; i++) {
+        const mag = () => 10 ** (rnd() * 8 - 3) * (rnd() < 0.5 ? -1 : 1);
+        q[4 * i] = mag();
+        q[4 * i + 1] = mag();
+        // a subsample's offsets from a tower: window-local metres; every eighth near an axis or the diagonal
+        const x = (rnd() - 0.5) * 900, k = i % 8;
+        q[4 * i + 2] = x;
+        q[4 * i + 3] = k === 0 ? x * (1 + (rnd() - 0.5) * 1e-3) : k === 1 ? (rnd() - 0.5) * 1e-3 : (rnd() - 0.5) * 900;
+    }
+    const k = R.kernel('karst_precise_probe', { source: src });
+    const Q = R.field(N, N, 4, q), P = R.field(N, N, 4), B = R.field(N, N, 4);
+    R.run(k, { q: Q }, { outP: P, outB: B });
+    const [gp, gb] = await R.readAll([P, B]);
+    const wrong = { div: 0, sqrt: 0, atan2: 0 }, builtin = { div: 0, sqrt: 0, atan2: 0 };
+    let worstAtan = 0;
+    for (let i = 0; i < N * N; i++) {
+        const a = q[4 * i], b = q[4 * i + 1], x = q[4 * i + 2], y = q[4 * i + 3];
+        const want3 = [f(a / b), f(Math.sqrt(Math.abs(x))), f(Math.atan2(y, x))];
+        ['div', 'sqrt', 'atan2'].forEach((nm, c) => {
+            if (gp[4 * i + c] !== want3[c]) wrong[nm]++;
+            if (gb[4 * i + c] !== want3[c]) builtin[nm]++;
+        });
+        worstAtan = Math.max(worstAtan, Math.abs(gb[4 * i + 2] - want3[2]));
+    }
+    results.precise = { arguments: N * N, wrong, builtin_wrong: builtin, builtin_atan2_worst_rad: worstAtan };
+    T.ok('karst/precise.wgsl: kdiv, ksqrt, katan2 correctly rounded (numpy\'s float32) on all but 1 in 100,000 of ' +
+        `${N * N} arguments`, wrong.div + wrong.sqrt <= (N * N) / 1e5 && wrong.atan2 <= (N * N) / 1e5,
+    `wrong: division ${wrong.div}, sqrt ${wrong.sqrt}, atan2 ${wrong.atan2}; the built-ins wrong: division ${builtin.div}, ` +
+        `sqrt ${builtin.sqrt}, atan2 ${builtin.atan2} (worst ${C.sci(worstAtan)} rad)`);
+    for (const x of [Q, P, B]) x.destroy();
 }
 
 Deno.exit(KC.finish(T, 'kernels_test', { results }));
