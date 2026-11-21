@@ -34,6 +34,9 @@ numpy twins; no Blender):
        lake_receivers (solvers/hydro.py, the channels' continuation across filled hollows): a path into a filled
        hollow runs down its floor to its lowest cell (within a cell) and out to its spill, where the breadth-first
        steps across the level fill pass 4 cells and more from it; every path ends at an outlet
+       the border band of a child level (its ground faded from the parent's surface, 0.3 m over the level's, by a
+       blended fluvial stage): the slope p99 at the band's inner edge within 1.4 x the inside's, where the band held
+       at the parent's surface stands 1.75 x and more; the seam's cells on the parent's surface (within 1e-4 m)
   fluvial band_blend, hold_rivers (solvers/fluvial.py)
        pulled to its pins at its weight every pass, a band cell of weight 0.25 or more moves under 5 % of what the
        level moves it free (the band is a pin); blended, the outcome is the run with only the seam's two cells held,
@@ -577,6 +580,43 @@ def test_band_blend():
           f'within {err:.1e} m, the seam cells moved {seam:.1e} m')
 
 
+def test_soil_band():
+    """soil_hills on a child level holds its border band at the ground the stages before left it, the seam's cells at
+    the parent's surface. A fluvial stage with band_blend fades the level's own change across the band; held at the
+    parent's surface instead, the band stood above the held channels and the solved hillslopes just inside it, a
+    step at the band's inner edge (the meadow's steep edge strips)."""
+    n, cell = 96, 0.5
+    lv = L.Level(0, 'main', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    # swales 12 m apart on a plane falling south, rippled; the parent's surface stands 0.3 m over the level's own
+    # ground (its erosion took that off), and the band's ground fades from the one to the other (a blended fluvial
+    # stage)
+    g = 0.03 * (y - lv.y0) - 0.5 * np.clip(1.0 - np.abs(((x + 3.0) % 12.0) - 6.0) / 2.5, 0.0, 1.0) \
+        + 0.15 * np.sin(x / 2.3 + 1.0) * np.cos(y / 3.1)
+    pins = band_pins(n, g + 0.3)
+    w = pins['pin_w'].astype(np.float64)
+    h0 = g + 0.3 * w
+    prm = {'valley_spacing_m': 12.0, 'relief_m': 0.5, 'channel_frac': 0.25, 'flow_exponent': 1.0}
+    e = Gd.edge_distance(n)
+    out = {}
+    # held at the parent's surface: every band cell pinned to it (the weights compounded over the solve's
+    # iterations held the whole band so)
+    for name, pn in (('parent', dict(pins, pin_w=np.where(w > 0.0, 1.0, 0.0).astype(np.float32))), ('own', pins)):
+        f = Fields(lv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32)})
+        ctx = FL.StageContext(plan=[lv], index=0, level=lv, fresh=False, role='refine', pins=pn, device=DEV,
+                              log=lambda m: None)
+        HS.op_soil_hills(f, lv, prm, ctx=ctx)
+        hn = np.asarray(f['h'], np.float64)
+        s = Gd.slope_deg(hn, cell)
+        out[name] = (float(np.percentile(s[(e >= 14) & (e < 18)], 99)), float(np.percentile(s[e >= 24], 99)),
+                     float(np.max(np.abs(hn - (g + 0.3))[w >= 1.0])))
+    (pe, pi, _), (oe, oi, seam) = out['parent'], out['own']
+    ok = oe <= 1.4 * oi and pe >= 1.75 * pi and seam < 1e-4
+    check('soil_hills: the border band holds the ground the stages before left it', ok,
+          f'slope p99 at the band\'s inner edge {oe:.1f} deg against {oi:.1f} inside (held at the parent\'s surface: '
+          f'{pe:.1f} against {pi:.1f}); the seam cells {seam:.1e} m from the parent\'s surface')
+
+
 def test_hold_rivers():
     """hold_rivers on a hero level: the river the parent resolved (its inherited drainage area over hold_rivers lock
     blocks) keeps its course and profile through the refine, so the parent's inflow entering at the window's edge
@@ -653,8 +693,8 @@ def test_grow_levels():
 def main():
     for fn in (test_floor_widths, test_floor_drains, test_tributary_backfill, test_soil_steady, test_soil_asymmetry,
                test_soil_seed, test_soil_heads, test_soil_floor_hold, test_rill_width, test_rills_once,
-               test_soil_hollows, test_lake_receivers, test_band_blend, test_hold_rivers, test_inlets, test_incise,
-               test_incise_head, test_incised_held, test_regional_cut, test_grow_levels):
+               test_soil_hollows, test_lake_receivers, test_soil_band, test_band_blend, test_hold_rivers, test_inlets,
+               test_incise, test_incise_head, test_incised_held, test_regional_cut, test_grow_levels):
         try:
             fn()
         except Exception as e:                                         # noqa: BLE001
