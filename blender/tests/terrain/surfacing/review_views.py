@@ -23,8 +23,9 @@ does not prune the cached terrains.
 
     --plants       the plant layer as make_terrain plants it (plants=): an eye view's plants around its camera, an
                    aerial's around the ground it looks at (the views sharing a terrain: along those points); a view
-                   with vista_m (views.json) keeps the first metres of its sight line clear of crowns (discs every 5
-                   m, 2 m across). The sun binds the SeedThree plants (Terrain.bind_sun) once the sky is made
+                   with vista_m (views.json) keeps its first metres clear of tree and shrub crowns across the frame's
+                   width (surfacing_judge/shots.vista_discs). The sun binds the SeedThree plants (Terrain.bind_sun)
+                   once the sky is made
     --snap <dir>   saved terrains (Terrain.save, <dir>/<recipe>_<view>[_j].npz, about 0.5 GB each) are loaded instead of
                    generated when one's focus is the view's camera, and the views without a focus take the judge's
                    saved terrain (out/surfacing_judge/terrains/<recipe>.npz); a terrain generated here is saved there.
@@ -226,6 +227,24 @@ def layer_scene(sc, obj, water, mat):
     im.color_depth = '8'                               # the decode is exact to 0.03 at 8 bits (test_measures)
 
 
+def far_rings_of(obj):
+    """Where the far material lies on a terrain object (material slot 1, SURFACING_DESIGN.md 3.7), read from the mesh:
+    (the rings that took it, the window edges between a near ring and a far one as (x0, y0, x1, y1) metres). The
+    judge's seam gate measures those edges (surfacing_judge/baseline.far_edges)."""
+    import numpy as np
+    me = obj.data
+    raw = obj.get('eido_terrain_rings')
+    if len(me.materials) < 2 or not raw:
+        return [], []
+    rings = json.loads(raw)
+    idx = np.zeros(len(me.polygons), np.int32)
+    me.polygons.foreach_get('material_index', idx)
+    far = [bool(r['count']) and bool(idx[int(r['start']):int(r['start']) + int(r['count'])].any()) for r in rings]
+    edges = [[round(float(c), 3) for c in r['hole']] for k, r in enumerate(rings[:-1])
+             if r.get('hole') and far[k] != far[k + 1]]
+    return [int(r['ring']) for r, f in zip(rings, far) if f], edges
+
+
 def view_camera(sc, t, v):
     """The view's camera on terrain t: (camera object, eye, aim, ground z)."""
     cx, cy = t.main.x0 + t.main.side / 2.0, t.main.y0 + t.main.side / 2.0
@@ -289,11 +308,13 @@ def render_group(a, recipe, size, params, c0, vs, out, sky_root, tag, rec):
     grp = next((n.node_tree for n in mat.node_tree.nodes if n.bl_idname == 'ShaderNodeGroup'), None)
     secs = t.info.get('seconds', {})
     surf = t.info.get('surface') or {}
+    far_rings, far_edges = far_rings_of(t.obj)
     common = dict(levels=[str(lv) for lv in t.levels], cache_hit=t.info.get('cache_hit'), terrain=source,
                   rocks=(t.rocks or {}).get('count') if isinstance(t.rocks, dict) else None,
                   palette=mat.get('eido_palette'), nodes=(len(grp.nodes) if grp else None),
                   samplers=mat.get('eido_samplers'), far_m=mat.get('eido_far_m'),
-                  far_material=len(t.obj.data.materials) > 1, anisotropic_filter=a['aniso'],
+                  far_material=len(t.obj.data.materials) > 1, far_rings=far_rings, far_edges=far_edges,
+                  anisotropic_filter=a['aniso'],
                   surface=dict(key=str(surf.get('key', ''))[:12], cache_hit=surf.get('cache_hit'),
                                cover=surf.get('cover'), palette_bake=surf.get('palette_bake')) if surf else None,
                   plants=(t.info.get('plants') or {}).get('counts'), plant_focus=(spec or {}).get('focus'),

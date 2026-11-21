@@ -587,6 +587,39 @@ def test_records():
     print('  levels parsed, the camera rebuilt, the cost read against the budgets')
 
 
+def test_far_edges():
+    """Where the far material begins (baseline.far_edges): rings lying beyond 1.5 far_m of every camera built with
+    the view take it (surfacing.far_rings' rule); the edge is the window of the first near ring inside a far one. A
+    record that lists its own far_edges (review_views.py since 11-20) is read as it is."""
+    from surfacing_judge import baseline as B
+    lv = ['Level(0 context 224000 m @ 218.8 m x1024, x0 -112000 y0 -112000, prepass [256, 512])',
+          'Level(1 context 112000 m @ 109.4 m x1024, x0 -56000 y0 -56000)',
+          'Level(2 context 56000 m @ 54.69 m x1024, x0 -28000 y0 -28000)',
+          'Level(3 context 28000 m @ 27.34 m x1024, x0 -14000 y0 -14000)',
+          'Level(4 main 14000 m @ 13.67 m x1024, x0 -7000 y0 -7000)']
+    # the caldera's aerial_far and low_oblique of 11-20, built together: D0 5469 m, so 8203 m
+    rec = dict(levels=lv, far_material=True, far_m=5468.75, camera=[-25700.0, -11600.0, 10391.4])
+    two = dict(rec, views_built_together=['other'])
+    other = {'camera': [1562.4, -5095.8, 1405.5]}
+    import surfacing_judge.states as S
+    keep = S.record
+    S.record = lambda recipe, view, state: other if view == 'other' else {}
+    try:
+        e = B.far_edges(two, 'caldera', 'x')
+    finally:
+        S.record = keep
+    assert e == [(-56000.0, -56000.0, 56000.0, 56000.0)], e          # ring 0 far, rings 1-4 near
+    # the aerial alone, 28 km out: rings 1 and 2 hold it, so ring 0 and rings 3-4 (11.7 km and more away) are far
+    assert B.far_edges(rec) == [(-56000.0, -56000.0, 56000.0, 56000.0), (-14000.0, -14000.0, 14000.0, 14000.0)]
+    # a camera at the centre: rings 0-2 far (14 km and more), rings 3-4 near: the edge is ring 3's window
+    assert B.far_edges(dict(rec, camera=[0.0, 0.0, 600.0])) == [(-14000.0, -14000.0, 14000.0, 14000.0)]
+    assert B.far_edges(dict(rec, far_material=False)) == []
+    assert B.far_edges(dict(rec, far_edges=[[-1, -2, 3, 4]])) == [(-1.0, -2.0, 3.0, 4.0)]
+    print('  the far material begins at the 112 km window for the caldera aerial built with its low oblique, also at '
+          'the 28 km one for the aerial alone, at the 28 km one for a camera at the centre; a record\'s own list is '
+          'read as it is')
+
+
 def test_board():
     from surfacing_judge import baseline as B
     from surfacing_judge import board as BD

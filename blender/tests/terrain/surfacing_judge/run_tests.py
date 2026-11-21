@@ -33,7 +33,8 @@ def t(kind, pkg, script, *args, **k):
 
 M = []
 # 1. the surface data: the twins and the stored bakes in plain Python, then the GPU parities
-M += [t('py', 'surface_data', s) for s in ('test_bake_small.py', 'test_seams.py', 'test_drainage.py')]
+M += [t('py', 'surface_data', s) for s in ('test_bake_small.py', 'test_relief.py', 'test_seams.py',
+                                            'test_drainage.py')]
 M += [t('gpu', 'surface_data', s) for s in ('test_expr.py', 'test_kernels.py', 'test_noise.py')]
 # 2. the material: the unit tests (no render), then the per-texel material on baked data
 M += [t('bl', 'surfacing', 'test_surfacing.py'), t('gpu', 'surfacing', 'test_material_data.py', timeout=5400)]

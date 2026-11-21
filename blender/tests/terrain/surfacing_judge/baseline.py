@@ -28,7 +28,8 @@ The frames  per view of views.json the state rendered (states.py):
               the ground's colour against the photograph's (CIELAB mean and the spread of 32 px blocks), where
               photos.json marks the photograph's ground and the layer map marks the render's
               repetition in ground windows (eye views: rows 12-25, 25-50 and 50-100 m out; aerials: three windows
-              in the lower picture); the colour step across each level window's edge (seams); the render's seconds
+              in the lower picture); the colour step across each level window's edge (seams: the hero, main and
+              context levels' windows, the edge where the far material begins marked); the render's seconds
 The audit   with --audit <folder> (the audit's coverage.json, curv_contour.json, repeat.json, repeat_walls.json,
             frame_fraction.json): the audit's own windows and terrains measured again, each number beside the
             audit's and the difference (the acceptance: within 10 %)
@@ -160,17 +161,57 @@ def frame_windows(v, cam, ground):
     return wins
 
 
-def seams(stack, rec, cam, img, ground=None, weights=None):
+def far_edges(rec, recipe=None, state=None):
+    """The window edges where a render's far material begins (SURFACING_DESIGN.md 3.7: the rings lying beyond 1.5 D0
+    of every camera passed take it, one ring per level): [(x0, y0, x1, y1)] metres, each the window of the first near
+    ring inside a far one. The record's own list (surfacing/review_views.py reads it from the mesh's material slots
+    since 11-20), else worked out as surfacing.far_rings does from the record's far_m and the cameras of the views
+    built with it (the renders made before)."""
+    if 'far_edges' in rec:
+        return [tuple(float(c) for c in e) for e in rec.get('far_edges') or []]
+    if not rec.get('far_material') or not rec.get('far_m'):
+        return []
+    lv = S.levels(rec)
+    cams = [rec['camera']] if rec.get('camera') else []
+    for name in rec.get('views_built_together') or []:
+        other = S.record(recipe, name, state) if recipe and state else {}
+        if other.get('camera'):
+            cams.append(other['camera'])
+    if not cams or not lv:
+        return []
+    pts = np.array([c[:2] for c in cams], np.float64)
+    lim = 1.5 * float(rec['far_m'])
+    far = []
+    for k, L in enumerate(lv):
+        x0, y0, x1, y1 = L['x0'], L['y0'], L['x0'] + L['side'], L['y0'] + L['side']
+        d = np.hypot(np.maximum(np.maximum(x0 - pts[:, 0], pts[:, 0] - x1), 0.0),
+                     np.maximum(np.maximum(y0 - pts[:, 1], pts[:, 1] - y1), 0.0))
+        if k + 1 < len(lv):                            # a camera inside the ring's hole: its distance to the hole
+            H = lv[k + 1]
+            hx0, hy0, hx1, hy1 = H['x0'], H['y0'], H['x0'] + H['side'], H['y0'] + H['side']
+            inside = (pts[:, 0] > hx0) & (pts[:, 0] < hx1) & (pts[:, 1] > hy0) & (pts[:, 1] < hy1)
+            dh = np.minimum(np.minimum(pts[:, 0] - hx0, hx1 - pts[:, 0]), np.minimum(pts[:, 1] - hy0, hy1 - pts[:, 1]))
+            d = np.where(inside, dh, d)
+        far.append(float(d.min()) > lim)
+    return [(lv[k + 1]['x0'], lv[k + 1]['y0'], lv[k + 1]['x0'] + lv[k + 1]['side'], lv[k + 1]['y0'] + lv[k + 1]['side'])
+            for k in range(len(lv) - 1) if far[k] != far[k + 1]]
+
+
+def seams(stack, rec, cam, img, ground=None, weights=None, far=()):
     """The colour step across each level window's edge the render shows (measures.seam_delta along the projected
-    edge, the hidden parts left out; with a layer map, only where both sides are terrain holding the same layers):
-    [dict(level, role, delta_e, control, excess, n)]."""
+    edge, the hidden parts left out; with a layer map, only where both sides are terrain holding the same layers),
+    every window inside the outermost one: the hero levels', the main level's and the context levels', so the edge
+    where the far material begins (`far`, far_edges) is measured with the rest and marked far_edge:
+    [dict(level, role, side_m, far_edge, delta_e, control, excess, n)]."""
     out = []
     if cam is None or stack is None:
         return out
     for L in S.levels(rec):
-        if L['role'] not in ('main', 'hero'):
+        if L['index'] == 0:                            # the outermost window's edge is the terrain's own end
             continue
         x0, y0, sd = L['x0'], L['y0'], L['side']
+        is_far = any(max(abs(x0 - e[0]), abs(y0 - e[1]), abs(x0 + sd - e[2]), abs(y0 + sd - e[3])) <= L['cell']
+                     for e in far)
         t = np.linspace(0.0, 1.0, 241)
         pts = np.concatenate([np.stack([x0 + sd * t, np.full_like(t, y0)], 1),
                               np.stack([np.full_like(t, x0 + sd), y0 + sd * t], 1),
@@ -189,7 +230,7 @@ def seams(stack, rec, cam, img, ground=None, weights=None):
         P, N, ok = M.line_samples(np.stack([px, py], 1), vis)
         r = M.seam_delta(img, P, N, ok, ground=ground, weights=weights) if len(P) else None
         if r:
-            out.append(dict(level=L['index'], role=L['role'], side_m=sd, **r))
+            out.append(dict(level=L['index'], role=L['role'], side_m=sd, far_edge=bool(is_far), **r))
     return out
 
 
@@ -270,13 +311,19 @@ def frame_measures(recipe, v, state, stack, pal, ref_state=None, splat=True, log
     if lm:                                             # only with the layer map: on planar ground holding the same
         planar = [i for i, L in enumerate(pal['layers']) if L.get('projection', 'planar') == 'planar']   # layers
         flat = ground & (w[planar].sum(0) > 0.5) if planar else ground       # on both sides (a wall's strata bands
-        out['seams'] = seams(stack, rec, cam, img, flat, w)                  # and a landform's edge are no seam)
+        fe = far_edges(rec, recipe, state)                                   # and a landform's edge are no seam)
+        out['far_edges'] = [list(e) for e in fe]
+        out['seams'] = seams(stack, rec, cam, img, flat, w, far=fe)
     if out['seams']:
         worst = max(out['seams'], key=lambda s: s['excess'])
         out['seam_worst_delta_e'] = worst['excess']
-        out['seam_worst'] = dict(level=worst['level'], side_m=worst['side_m'], delta_e=worst['delta_e'],
+        out['seam_worst'] = dict(level=worst['level'], role=worst['role'], side_m=worst['side_m'],
+                                 far_edge=worst.get('far_edge', False), delta_e=worst['delta_e'],
                                  control=worst['control'], n=worst['n'])
         out['seam_verdict'] = M.verdict('seam_delta_e', worst['excess'])
+        fr = [s for s in out['seams'] if s.get('far_edge')]
+        if fr:                                         # the far material's edge, measured (worst of its edges)
+            out['seam_far_delta_e'] = max(s['excess'] for s in fr)
     return out
 
 
@@ -543,7 +590,9 @@ def markdown(res):
             L.append(f"| {k} | {src} | {_f(om.get('largest'))} / {_f(om.get('photo_largest'))}{fl(om.get('flag'))} | "
                      f"{rep} | {_f(f.get('repetition_worst_steep'))} | {_f(col.get('delta_e'), 1)} "
                      f"({_f(col.get('delta_e_raw'), 1)}) | {_f(col.get('spread_ratio_L'), 2)} | "
-                     f"{_f(f.get('seam_worst_delta_e'), 2)}{' FAIL' if f.get('seam_verdict') == 'fail' else ''} | "
+                     f"{_f(f.get('seam_worst_delta_e'), 2)}{' FAIL' if f.get('seam_verdict') == 'fail' else ''}"
+                     + (f" (far edge {_f(f['seam_far_delta_e'], 2)})" if f.get('seam_far_delta_e') is not None
+                        else '') + ' | '
                      f"{_f((f.get('cost') or {}).get('frame_s'), 2)} |")
         L.append('')
     a = res.get('audit')
