@@ -23,9 +23,13 @@ SeedThree species (source ('seedthree', species, dials, seeds)):
                               per plant, its material an eidoverse-side copy of SeedThree's (_still_billboard_material)
                               that reads each plant's card centre and yaw from the mesh (eido_bb_origin, eido_bb_yaw)
                               where SeedThree's reads the instance's Object Info, and takes the billboard's measured
-                              colour gain against the card level (BILLBOARD_GAIN, match_billboards.py). Two hundred
+                              colour gain against the card level (BILLBOARD_GAIN, match_billboards.py; a tree's on its
+                              foliage) and the source's tone (bark and foliage alike). Its cut-out keeps a far plant's
+                              coverage (_soft_cut: a hard edge near, the alpha's share of the pixel far). Two hundred
                               thousand instanced billboards cost 25 s a frame and 3 GB; as one mesh they cost little.
-                              It casts the sun's shadow and receives none (seedthree.bl.cast_only).
+                              It casts the sun's shadow and receives none (seedthree.bl.cast_only), so bind_sun gives
+                              each plant the terrain's shadow under the sun (eido_shade, sun_shade over the terrain's
+                              coarse heightfields), which its material takes as SHADE_ALBEDO of the light.
     The card distance is min(the species' billboard_m, sqrt(NEAR_TREES / (pi x density))) for trees; shrubs keep
     their card level while a plant spans 4 pixels (height / (4 PIXEL_ANGLE)), at most NEAR_SHRUBS plants.
   - A shot with wind (wind=True): trees take SeedThree's own grove (seedthree.bl.forest.forest_group), as its
@@ -93,20 +97,38 @@ BILLBOARD_GAIN = {
         dict(gain=(1.321, 1.278, 1.42), alpha=0.35),                                # 6.6 -> 1.2, 1.06
     # trees, their gain on the foliage only: the Douglas fir against its card level (it covers 0.75-0.77 of its full
     # level's area), the broadleaves and the pine against their full level (their card levels cover 0.44-0.76 and
-    # are set aside: ecotopes._BROADLEAF_LOD)
-    ('douglasFir', 11, '{"height": 30, "paramOverrides": {"downAngle": {"1": 98}, "length": {"1": 0.14}}}'):
-        dict(gain=(0.798, 0.872, 1.116), alpha=0.694),                              # 7.9 -> 2.6, 1.02
-    ('douglasFir', 23, '{"height": 30, "paramOverrides": {"downAngle": {"1": 98}, "length": {"1": 0.14}}}'):
-        dict(gain=(0.777, 0.858, 1.102), alpha=0.694),                              # 8.1 -> 3.1, 0.95
+    # are set aside: ecotopes._BROADLEAF_LOD). The spruce stand-in of 11-20 (ecotopes._NARROW_CONIFER, a cone): its
+    # billboard, baked from the full level, stays 13-14 % larger than the card level even cut at 0.7, and 15 %
+    # smaller than the full level
+    ('douglasFir', 11, '{"branchDensity": 78, "height": 30, "leafSize": 0.9, "leavesPerBranch": 16, "paramOverrides": '
+                       '{"branches": {"2": 24}, "curve": {"1": -18}, "downAngle": {"1": 106}, "length": {"1": 0.22, '
+                       '"2": 0.42}}}'): dict(gain=(0.728, 0.811, 1.044), alpha=0.698),  # 9.02 -> 2.04, 1.14
+    ('douglasFir', 23, '{"branchDensity": 78, "height": 30, "leafSize": 0.9, "leavesPerBranch": 16, "paramOverrides": '
+                       '{"branches": {"2": 24}, "curve": {"1": -18}, "downAngle": {"1": 106}, "length": {"1": 0.22, '
+                       '"2": 0.42}}}'): dict(gain=(0.731, 0.813, 1.05), alpha=0.698),   # 9.01 -> 2.17, 1.13
+    ('douglasFir', 37, '{"branchDensity": 78, "height": 30, "leafSize": 0.9, "leavesPerBranch": 16, "paramOverrides": '
+                       '{"branches": {"2": 24}, "curve": {"1": -18}, "downAngle": {"1": 106}, "length": {"1": 0.22, '
+                       '"2": 0.42}}}'): dict(gain=(0.734, 0.809, 1.04), alpha=0.698),   # 8.97 -> 1.79, 1.14
     ('redMaple', 5, '{}'): dict(gain=(0.72, 0.705, 1.518), alpha=0.35),             # 22.5 -> 3.5, 0.98
     ('redMaple', 17, '{}'): dict(gain=(0.738, 0.723, 1.527), alpha=0.35),           # 21.7 -> 3.5, 1.00
+    ('redMaple', 29, '{}'): dict(gain=(0.743, 0.73, 1.511), alpha=0.35),            # 21.1 -> 3.6, 0.99
+    ('redMaple', 41, '{}'): dict(gain=(0.717, 0.704, 1.505), alpha=0.35),           # 22.4 -> 3.3, 0.97
     ('pine', 9, '{"height": 20}'): dict(gain=(0.971, 1.006, 1.346), alpha=0.35),   # 6.1 -> 3.5, 0.95
     ('whiteOak', 1737, '{"height": 9}'): dict(gain=(0.788, 0.72, 1.735), alpha=0.2),  # 21.2 -> 1.8, 0.90
+    # (11-20) the dunes' camelthorn, the white oak low and wide
+    ('whiteOak', 1737, '{"branchAngle": 82, "crownShape": 2, "height": 7, "leafSize": 0.35}'):
+        dict(gain=(0.764, 0.731, 1.648), alpha=0.35),                               # 19.75 -> 2.86, 0.92
     ('americanSycamore', 5, '{"height": 16}'): dict(gain=(0.722, 0.679, 1.167), alpha=0.35),   # 16.6 -> 3.2, 1.02
-    ('sweetgum', 5, '{"height": 14}'): dict(gain=(1.005, 0.865, 1.92), alpha=0.35),   # 19.0 -> 2.4, 0.97
-    ('sweetgum', 17, '{"height": 14}'): dict(gain=(1.019, 0.87, 1.945), alpha=0.35),  # 19.1 -> 2.3, 0.98
+    # the karst's broadleaf with a rounded crown (11-20: SeedThree's sweetgum is a cone, and a stand of it read as
+    # conifers on Guilin's towers)
+    ('sweetgum', 5, '{"crownShape": 1, "height": 14}'): dict(gain=(1.004, 0.873, 1.961), alpha=0.35),  # 19.2 -> 2.9, 0.98
+    ('sweetgum', 17, '{"crownShape": 1, "height": 14}'): dict(gain=(1.026, 0.886, 2.0), alpha=0.35),   # 19.3 -> 2.6, 0.99
 }
 ALPHA_CUT = 0.35                    # SeedThree's billboard cut-out threshold
+ALPHA_SOFT_M = (150.0, 1500.0)      # a billboard's cut-out widens from its hard edge to its whole alpha over these
+                                    # distances (_soft_cut): a far plant keeps the share of a pixel its crown covers
+SHADE_ALBEDO = 0.3                  # a billboard in the terrain's shadow (eido_shade 1) takes this share of its
+                                    # light: the sky's alone, the sun's twin lights every billboard (cast-only)
 _F = {n: i for i, n in enumerate(PL.FIELDS)}
 _FLORA_OPTS = ('height', 'color', 'blades', 'daisy', 'corn', 'sunflower', 'head_scale', 'normals', 'rough',
                'specular', 'lod', 'variants', 'wind', 'sss', 'translucency')
@@ -501,15 +523,20 @@ def billboard_group(name, bb_col, card_m):
 FOLIAGE_EDGE = 0.04                 # albedo green over its red and blue that counts as foliage (foliage-only gains)
 
 
-def _tone_base(nt, gain, attr_type, foliage=False):
+def _tone_base(nt, gain, attr_type, foliage=False, tone=None, shade=False):
     """Multiply the Principled BSDF's Base Color of a material's tree by gain (r, g, b) and by the plant's own tone,
     1 + TINT_AMOUNT (eido_tint - 0.5), eido_tint read from the mesh ('GEOMETRY': a realised billboard's vertices) or
     from the instance ('INSTANCER': a card or full level instanced on the spots), and the leaves' backlight (a
     Translucent BSDF's Color) by gain. foliage: the albedo's gain only where it is green (its green over its red and
-    blue by FOLIAGE_EDGE, faded in from 0), the bark kept as it is."""
+    blue by FOLIAGE_EDGE, faded in from 0), the bark kept as it is. tone: (r, g, b) on the whole albedo and the
+    backlight, bark and foliage alike (the source's tone, TONE_DIAL: a toned tree's billboard keeps its toned bark,
+    where a foliage-only tone left the broadleaves' trunks white on their billboards, an orchard of white-trunk
+    clones, 11-20). shade: also the terrain's shadow from the mesh's eido_shade (bind_sun: 0 in the sun, 1 in a
+    ridge's or a slope's shadow), which a billboard lit by the shadowless twin sun cannot receive (SHADE_ALBEDO)."""
     bsdf = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
     if bsdf is None:
         return
+    tone = tuple(float(v) for v in (tone or (1.0, 1.0, 1.0)))
     sock = bsdf.inputs['Base Color']
     x, y = bsdf.location[0] - 260, bsdf.location[1] + 260
     t = nt.nodes.new('ShaderNodeAttribute')
@@ -561,24 +588,61 @@ def _tone_base(nt, gain, attr_type, foliage=False):
         mix.inputs[2].default_value = (1.0, 1.0, 1.0)
         nt.links.new(mix.outputs[0], m.inputs[1])
     else:
-        m.inputs[1].default_value = g
-    nt.links.new(m.outputs[0], s.inputs[0])
-    nt.links.new(k.outputs[0], s.inputs['Scale'])
+        m.inputs[1].default_value = tuple(a * b for a, b in zip(g, tone))
+    out = m.outputs[0]
+    if foliage and src is not None and g != (1.0, 1.0, 1.0) and tone != (1.0, 1.0, 1.0):
+        tn = nt.nodes.new('ShaderNodeVectorMath')        # the tone over bark and foliage alike
+        tn.operation = 'MULTIPLY'
+        tn.location = (x + 90, y - 120)
+        tn.inputs[1].default_value = tone
+        nt.links.new(out, tn.inputs[0])
+        out = tn.outputs[0]
+    nt.links.new(out, s.inputs[0])
+    sk = k.outputs[0]
+    lit = None
+    if shade:
+        # in the terrain's shadow: SHADE_ALBEDO of the light (the sky's share of it), on the albedo and the backlight
+        a = nt.nodes.new('ShaderNodeAttribute')
+        a.attribute_type = attr_type
+        a.attribute_name = 'eido_shade'
+        a.location = (x - 400, y + 320)
+        lit = nt.nodes.new('ShaderNodeMath')
+        lit.operation = 'MULTIPLY_ADD'
+        lit.inputs[1].default_value = SHADE_ALBEDO - 1.0
+        lit.inputs[2].default_value = 1.0
+        lit.location = (x - 200, y + 320)
+        nt.links.new(a.outputs['Fac'], lit.inputs[0])
+        both = nt.nodes.new('ShaderNodeMath')
+        both.operation = 'MULTIPLY'
+        both.location = (x - 40, y + 260)
+        nt.links.new(sk, both.inputs[0])
+        nt.links.new(lit.outputs[0], both.inputs[1])
+        sk = both.outputs[0]
+    nt.links.new(sk, s.inputs['Scale'])
     nt.links.new(s.outputs[0], sock)
-    if g != (1.0, 1.0, 1.0):
+    gt = tuple(a * b for a, b in zip(g, tone))
+    if gt != (1.0, 1.0, 1.0) or lit is not None:
         # the leaves' backlight (SeedThree's Translucent lobe, coloured by the species' transmit, not the albedo)
-        # takes the same gain, or a darkened plant keeps its glow
+        # takes the same gain and tone, and the shade, or a darkened plant keeps its glow
         for n in [n for n in nt.nodes if n.bl_idname == 'ShaderNodeBsdfTranslucent']:
             c = n.inputs['Color']
             tm = nt.nodes.new('ShaderNodeVectorMath')
             tm.operation = 'MULTIPLY'
-            tm.inputs[1].default_value = g
+            tm.inputs[1].default_value = gt
             tm.location = (n.location[0] - 200, n.location[1] + 120)
             if c.links:
                 nt.links.new(c.links[0].from_socket, tm.inputs[0])
             else:
                 tm.inputs[0].default_value = tuple(c.default_value)[:3]
-            nt.links.new(tm.outputs[0], c)
+            res = tm.outputs[0]
+            if lit is not None:
+                sc = nt.nodes.new('ShaderNodeVectorMath')
+                sc.operation = 'SCALE'
+                sc.location = (n.location[0] - 60, n.location[1] + 120)
+                nt.links.new(res, sc.inputs[0])
+                nt.links.new(lit.outputs[0], sc.inputs['Scale'])
+                res = sc.outputs[0]
+            nt.links.new(res, c)
 
 
 def _tinted_material(mat, tone=None):
@@ -597,17 +661,60 @@ def _tinted_material(mat, tone=None):
     return out
 
 
-def _still_billboard_material(mat, gain=None, alpha=None, foliage=False):
+def _soft_cut(nt, node, cut):
+    """Replace a billboard's cut-out (alpha > cut, a Math node) by one that keeps a far plant's coverage: near the
+    camera the same hard edge, from ALPHA_SOFT_M[0] to [1] a ramp that widens to the whole alpha range, so the
+    texture's mip, where a texel averages crown and gaps, leaves the plant the share of the pixel its crown covers
+    (the material is dithered: a fraction is drawn as that share of the samples). A hard cut-out on mipped alpha
+    erased the stand-in spruce past a few hundred metres, a cut of 0.69 the sooner, and the slopes its instances
+    stood on read as bare, smooth felt (11-20, Schynige). (alpha - cut) / w + 0.5, clamped, w from 0.02 to 1."""
+    x, y = node.location
+    cam = nt.nodes.new('ShaderNodeCameraData')
+    cam.location = (x - 600, y - 200)
+    w = nt.nodes.new('ShaderNodeMapRange')
+    w.location = (x - 400, y - 200)
+    w.interpolation_type = 'SMOOTHSTEP'
+    w.inputs['From Min'].default_value = ALPHA_SOFT_M[0]
+    w.inputs['From Max'].default_value = ALPHA_SOFT_M[1]
+    w.inputs['To Min'].default_value = 0.02
+    w.inputs['To Max'].default_value = 1.0
+    nt.links.new(cam.outputs['View Distance'], w.inputs['Value'])
+    a = node.inputs[0].links[0].from_socket
+    sub = nt.nodes.new('ShaderNodeMath')
+    sub.operation = 'SUBTRACT'
+    sub.location = (x - 200, y)
+    nt.links.new(a, sub.inputs[0])
+    sub.inputs[1].default_value = float(cut)
+    div = nt.nodes.new('ShaderNodeMath')
+    div.operation = 'DIVIDE'
+    div.location = (x - 50, y)
+    nt.links.new(sub.outputs[0], div.inputs[0])
+    nt.links.new(w.outputs['Result'], div.inputs[1])
+    add = nt.nodes.new('ShaderNodeMath')
+    add.operation = 'ADD'
+    add.use_clamp = True
+    add.location = (x + 100, y)
+    nt.links.new(div.outputs[0], add.inputs[0])
+    add.inputs[1].default_value = 0.5
+    for link in list(node.outputs[0].links):
+        nt.links.new(add.outputs[0], link.to_socket)
+    nt.nodes.remove(node)
+
+
+def _still_billboard_material(mat, gain=None, alpha=None, foliage=False, tone=None):
     """An eidoverse-side copy of a SeedThree billboard material for realised billboards: where SeedThree's reads the
     instance's origin (Object Info) for the card's dome normal, this reads eido_bb_origin from the mesh, and where
     it turns the baked detail normal from the card's frame to the world (Vector Transform, object to world), this
     turns it by eido_bb_yaw about z (the realised mesh's object frame is the world's). gain: (r, g, b) on the baked
-    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN); foliage: the gain on the green of the bake only (a
-    tree's: its bark stays as baked); the albedo also takes each plant's own tone (eido_tint, from the mesh). Shared
-    per (material, gain, alpha, foliage)."""
+    albedo, alpha: the cut-out's threshold (BILLBOARD_GAIN), kept by a far plant's coverage (_soft_cut); foliage: the
+    gain on the green of the bake only (a tree's: its bark stays as baked); tone: the source's tone (TONE_DIAL) on
+    bark and foliage alike; the albedo also takes each plant's own tone (eido_tint, from the mesh) and the terrain's
+    shadow (eido_shade, bind_sun). Shared per (material, gain, alpha, foliage, tone)."""
     g = tuple(round(float(v), 4) for v in (gain or (1.0, 1.0, 1.0)))
+    tn = tuple(round(float(v), 4) for v in (tone or (1.0, 1.0, 1.0)))
     cut = round(float(ALPHA_CUT if alpha is None else alpha), 3)
-    name = f'{mat.name} [still {g[0]:g} {g[1]:g} {g[2]:g} a{cut:g}{" leaves" if foliage else ""}]'
+    name = (f'{mat.name} [still {g[0]:g} {g[1]:g} {g[2]:g} a{cut:g}{" leaves" if foliage else ""}'
+            + ('' if tn == (1.0, 1.0, 1.0) else f' tone {tn[0]:g} {tn[1]:g} {tn[2]:g}') + ']')
     out = bpy.data.materials.get(name)
     if out is not None and out.get('eido_still_of') == mat.name:
         return out
@@ -615,10 +722,10 @@ def _still_billboard_material(mat, gain=None, alpha=None, foliage=False):
     out.name = name
     out['eido_still_of'] = mat.name
     nt = out.node_tree
-    for n in nt.nodes:                                   # the cut-out: alpha > threshold
+    for n in list(nt.nodes):                             # the cut-out: alpha > threshold, kept by far coverage
         if n.bl_idname == 'ShaderNodeMath' and n.operation == 'GREATER_THAN' and n.inputs[0].links \
                 and n.inputs[0].links[0].from_socket.name == 'Alpha':
-            n.inputs[1].default_value = cut
+            _soft_cut(nt, n, cut)
     for n in list(nt.nodes):
         if n.bl_idname == 'ShaderNodeObjectInfo':
             a = nt.nodes.new('ShaderNodeAttribute')
@@ -644,7 +751,7 @@ def _still_billboard_material(mat, gain=None, alpha=None, foliage=False):
             for link in list(n.outputs[0].links):
                 nt.links.new(r.outputs[0], link.to_socket)
             nt.nodes.remove(n)
-    _tone_base(nt, g, 'GEOMETRY', foliage=foliage)
+    _tone_base(nt, g, 'GEOMETRY', foliage=foliage, tone=tn, shade=True)
     return out
 
 
@@ -760,8 +867,8 @@ def _instance_seedthree_still(entry, rec, focus, coll, lod, base, cache, log, he
     bb_col = _variant_collection(tag + '_billboard_source', [p['cards'] if p is not None else [] for p in plants],
                                  offset=[(0.0, 0.0, float(c)) for c in centre],
                                  materials=[(lambda m, e=e: _still_billboard_material(
-                                     m, tuple(a * b for a, b in zip((e or {}).get('gain') or (1.0, 1.0, 1.0), tone)),
-                                     (e or {}).get('alpha'), foliage=entry['kind'] == 'tree')) for e in gains])
+                                     m, (e or {}).get('gain') or (1.0, 1.0, 1.0), (e or {}).get('alpha'),
+                                     foliage=entry['kind'] == 'tree', tone=tone)) for e in gains])
     me = _species_points(tag + '_spots', rec, s, z, variants, origin)
     ob = bpy.data.objects.new(tag, me)
     coll.objects.link(ob)
@@ -971,16 +1078,138 @@ def _instance_flora(entry, rec, focus, coll, lod, base, log):
     return out
 
 
+# ------------------------------------------------------------------------------------- the terrain's shade ---
+# A still billboard is lit by SeedThree's shadowless twin of the sun (cast_only: it casts the sun's shadow and
+# receives none, so its crossed cards never band each other), so in the shadow of a ridge or of its own slope it
+# glowed as if in full sun: a stand on a shaded tower flank read as a block of pale cut-outs (11-20, Guilin). Every
+# instanced plants collection keeps the terrain's coarse heightfields (the context and main levels' h), and
+# bind_sun marches each billboard's card centre toward the sun over them: eido_shade on its points (0 in the sun,
+# 1 in the terrain's shadow), which the billboard material reads (_tone_base, SHADE_ALBEDO).
+_SHADE_GROUND = {}
+
+
+def _shade_ground(terrain):
+    """[(x0, y0, side, h float32), ...] the terrain's context and main levels, finest first; [] without fields."""
+    levels = getattr(terrain, 'levels', None)
+    fields = getattr(terrain, 'fields', None)
+    out = []
+    if not levels or fields is None:
+        return out
+    for i, lv in enumerate(levels):
+        if str(getattr(lv, 'role', 'main')) == 'hero':
+            continue
+        try:
+            h = np.asarray(fields(i)['h'], np.float32)
+        except (KeyError, IndexError, TypeError, AttributeError):
+            continue
+        out.append((float(lv.x0), float(lv.y0), float(lv.side), h))
+    return out[::-1]
+
+
+def _bilinear(a, fi, fj, outside=None):
+    """a[j, i] at fractional indices (fi along columns, fj along rows), clamped; `outside`: the value where a point
+    lies off the array by more than half a cell (None: clamp to the edge)."""
+    nj, ni = a.shape
+    ci = np.clip(fi, 0.0, ni - 1.001)
+    cj = np.clip(fj, 0.0, nj - 1.001)
+    i0, j0 = ci.astype(np.int64), cj.astype(np.int64)
+    ti, tj = ci - i0, cj - j0
+    v = ((a[j0, i0] * (1 - ti) + a[j0, i0 + 1] * ti) * (1 - tj) + (a[j0 + 1, i0] * (1 - ti) + a[j0 + 1, i0 + 1] * ti) * tj)
+    if outside is not None:
+        off = (fi < -0.5) | (fi > ni - 0.5) | (fj < -0.5) | (fj > nj - 0.5)
+        v = np.where(off, outside, v)
+    return v
+
+
+def sun_shade(ground, x, y, z, to_sun):
+    """0..1 shade of points (x, y, z) from the terrain (ground: _shade_ground's levels) under the sun at to_sun (a
+    unit vector toward it); 1 where the ground toward the sun rises 3 m over the ray from the point, 0 where it
+    stays 0.5 m under it, soft between (the sun's disc and a crown's own height). A sweep per level, not a march
+    per point: along the light's direction s (away from the sun) a point is shaded when some ground q nearer the sun
+    on its line has h(q) + s_q tan(el) over z + s tan(el), so the running maximum of h + s tan(el) along each line of
+    a grid laid along the light gives every point its shade at once (a few seconds for 10^5 billboards, where a march
+    took twenty). The levels each sweep their own window (the main level's ridges, the context's mountains), and
+    the shade is the largest."""
+    x, y, z = (np.asarray(v, np.float64).ravel() for v in (x, y, z))
+    d = np.asarray(to_sun, np.float64)
+    d = d / max(float(np.linalg.norm(d)), 1e-9)
+    hz = math.hypot(d[0], d[1])
+    if not len(x) or not ground or hz < 1e-6 or d[2] <= 0.0:
+        return np.zeros(len(x)) if d[2] > 0.0 else np.ones(len(x))
+    ux, uy, tan_el = d[0] / hz, d[1] / hz, d[2] / hz
+    excess = np.full(len(x), -1.0e9)
+    for x0, y0, side, h in ground:
+        n = h.shape[0]
+        c = side / n
+        # the window's corners in (s, w): s = -(p . u) along the light, w across it
+        cx = np.array([x0, x0 + side, x0, x0 + side])
+        cy = np.array([y0, y0, y0 + side, y0 + side])
+        s_c, w_c = -(cx * ux + cy * uy), -cx * uy + cy * ux
+        s0, w0 = float(s_c.min()), float(w_c.min())
+        ns = int(math.ceil((float(s_c.max()) - s0) / c)) + 1
+        nw = int(math.ceil((float(w_c.max()) - w0) / c)) + 1
+        S, Wg = np.meshgrid(s0 + np.arange(ns) * c, w0 + np.arange(nw) * c)        # rows along w, columns along s
+        gx, gy = -S * ux - Wg * uy, -S * uy + Wg * ux
+        H = _bilinear(h, (gx - x0) / c - 0.5, (gy - y0) / c - 0.5, outside=-1.0e9).reshape(S.shape)
+        B = H + S * tan_el
+        pm = np.maximum.accumulate(B, axis=1)
+        pm = np.concatenate([np.full((nw, 1), -1.0e9), pm[:, :-1]], axis=1)      # the ground before each cell
+        sp, wp = -(x * ux + y * uy), -x * uy + y * ux
+        v = _bilinear(pm, (sp - s0) / c, (wp - w0) / c)
+        excess = np.maximum(excess, v - (z + sp * tan_el))
+    e = np.clip((excess + 0.5) / 3.5, 0.0, 1.0)
+    return e * e * (3.0 - 2.0 * e)
+
+
+def _shade_billboards(sun, log=None):
+    """eido_shade on every still billboard's points under this sun (the module note above)."""
+    if sun is None or not _SHADE_GROUND:
+        return 0
+    to_sun = np.asarray(sun.matrix_world.to_3x3().col[2], np.float64)
+    done = 0
+    for name, ground in list(_SHADE_GROUND.items()):
+        coll = bpy.data.collections.get(name)
+        if coll is None:
+            _SHADE_GROUND.pop(name, None)
+            continue
+        meshes = {}
+        for ob in coll.objects:
+            if ob.type == 'MESH' and ob.name.endswith('_billboards') and ob.get('eido_plants') \
+                    and json.loads(ob['eido_plants']).get('still'):
+                meshes.setdefault(ob.data.name, ob.data)
+        for me in meshes.values():
+            n = len(me.vertices)
+            org = me.attributes.get('eido_bb_origin')
+            if not n or org is None:
+                continue
+            p = np.empty(n * 3, np.float32)
+            org.data.foreach_get('vector', p)
+            p = p.reshape(-1, 3)
+            s = sun_shade(ground, p[:, 0], p[:, 1], p[:, 2], to_sun)
+            at = me.attributes.get('eido_shade') or me.attributes.new('eido_shade', 'FLOAT', 'POINT')
+            at.data.foreach_set('value', np.ascontiguousarray(s, np.float32))
+            me.update()
+            done += n
+    if log:
+        log(f'[plants] the terrain\'s shade on {done:,} billboards')
+    return done
+
+
 # ------------------------------------------------------------------------------------------------ the call ---
 
 def bind_sun(sun=None):
     """Bind SeedThree's plants to the scene's sun (the leaves' backlight, and the lamp the billboards cast from
-    without receiving): `sun` a sun lamp object, default the scene's strongest. Call it once the sky and its sun are
-    final; it is eidoblend.trees.make_seed_tree.set_sun. Returns the lamp, or None when the scene has none."""
+    without receiving), and give every still billboard the terrain's shadow under it (eido_shade): `sun` a sun lamp
+    object, default the scene's strongest. Call it once the sky and its sun are final (again when the sun moves); it
+    is eidoblend.trees.make_seed_tree.set_sun. Returns the lamp, or None when the scene has none."""
     _seedthree()
     from seedthree.bl.sun import find_sun, set_sun
     sun = sun or find_sun()
-    return set_sun(sun) if sun is not None else None
+    if sun is None:
+        return None
+    lamp = set_sun(sun)
+    _shade_billboards(sun)
+    return lamp
 
 
 def instance_plants(spots, terrain=None, collection=None, lod=None, cache=True, wind=False, log=print):
@@ -1001,6 +1230,7 @@ def instance_plants(spots, terrain=None, collection=None, lod=None, cache=True, 
     base = (obj.name if obj is not None else 'terrain') + '_plants'
     coll = bpy.data.collections.new(base)
     (collection or bpy.context.scene.collection).children.link(coll)
+    _SHADE_GROUND[coll.name] = _shade_ground(terrain)    # the billboards' shade, once the sun is known (bind_sun)
     focus = np.asarray(spots.meta['focus'], np.float64).reshape(-1, 2)
     trees = [e['name'] for e in spots.species
              if e['kind'] == 'tree' and 'seedthree' in e['source'] and len(spots.array(e['name']))]

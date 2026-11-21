@@ -14,19 +14,21 @@ with the levels' own Catmull-Rom; beyond the coarsest level a linear extrapolati
 relaxation at the window's edge sees what the ring next to it shows. Heights go to the GPU less the level's mean
 (float32 keeps 7 digits).
 
-Per level (the design's steps):
-   2  field normal on the detail grid (upsample2, field_normal)
-   3  relief below the cell: flow-steered gullies (phacelle) and rock ribs (solvers/detail.py's breakup strength)
-   4  cavity and crest_fine on the detail grid (cavity, blur)
+Per level (the design's steps, in the order they run):
    5  the blur pyramid: crest, valley, n20 (blur, crest)
+  11  wind streaks, when the terrain has a wind (crest's exposure, streak)
+   7  snowpack, when the terrain has a snowline (relax, twice): before the relief, which it buries
+   2  field normal on the detail grid (upsample2, field_normal)
+   3  relief below the cell: a spectrum of flow-steered gullies from the terrain's top octave down to 2 texels,
+      varied in spacing and depth, started by the catchment, none on sand, buried by snow, stepping back where the
+      height already has relief (phacelle); rock ribs (solvers/detail.py's breakup strength)
+   4  cavity and crest_fine on the detail grid (cavity, blur)
+  10  debris provenance: src_strata and grain (carry_src)
    6  settle (solvers/detail.py's relax)
-   7  snowpack, when the terrain has a snowline (relax, twice)
    8  the filled surface (fill) on every level; on hero levels the drainage area routed again with the parent's
       catchment pinned in around the window (flow_weights, pin_inflow, solvers/hydro.py's route_to_convergence),
       and flow, wetness and channels from it with masks.py's formulas and the main tile's norms
    9  spi and fresh
-  10  debris provenance: src_strata and grain (carry_src)
-  11  wind streaks, when the terrain has a wind (crest's exposure, streak)
   12  pins (masks.pin_band)
 Gutters are filled when the atlases are assembled (surface/atlas.py), from the parent's pinned maps.
 
@@ -61,6 +63,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BAKE_VERSION = 1
 GULLY_LAMBDA0_M = 4096.0          # the world gully octaves: lambda_o = 4096 m x 2^-o on every level
 CREST_SCALES_M = (8.0, 16.0, 32.0, 64.0, 128.0)    # crest's octaves, metres, on every level
+GATE_SCALES_M = (8.0, 16.0, 32.0, 64.0)            # the geometry gates' crest scales (the gate texture's channels)
+GATE_OWN_CELLS = 32.0             # a level makes a gate whose window (2 s) spans at most this many of its cells
 
 DEFAULTS = dict(
     maps='all',                   # 'all': every map; 'masks': the field normal only (D), beside the masks the
@@ -85,7 +89,24 @@ DEFAULTS = dict(
                                   # hero levels across 10 m), where this route, on the capped fill, carried 77-113;
                                   # so the hero levels keep the masks' flow, wetness, channels
     gully=dict(),                 # the gully filter's parameters over solvers/detail.py's GULLY (and the recipe's
-                                  # gully stage, where it has one)
+                                  # gully stage, where it has one): its soil mask (slope_deg), normalization, and
+                                  # amp_m / wavelength_m for the spectrum's k where a stage sets them
+    relief=dict(                  # the gully spectrum (step 3; kernels/phacelle.glsl says how each is used)
+        top_cells=12.0,           # the top octave: the first world octave under this many main-level cells ...
+        top_max_m=256.0,          # ... and at most this (coarser valleys are the geometry's)
+        k=0.025,                  # every octave's mean depth over its wavelength (self-similar; 0.08 drew a washboard)
+        jitter=0.3,               # a lattice point's stripe spacing: 2^(+-jitter) of its octave's
+        spread=1.2,               # the gullies' depths: log-normal of this spread (most faint, a few deep)
+        along=3.0,                # a gully keeps its depth this many lattice cells down the flow (1 across)
+        steer=0.35,               # how much each octave turns the next into its gully walls (branching)
+        initiation=1.0,           # an octave's gullies start where the specific catchment is this x its wavelength
+        loose_initiation=4.0,     # ... times this on loose debris (deposit + talus), which swallows the runoff
+        loose_m=(0.3, 2.0),       # loose debris that does so: a smoothstep of its thickness, metres
+        sand_m=(0.1, 0.6),        # no gullies on sand: a smoothstep of its thickness, metres
+        bury=(0.5, 2.0),          # a snowpack of 0.5-2 x an octave's amplitude buries its gullies
+        geo=(0.12, 0.35),         # an octave the cells can hold steps back where the level's own height has relief
+                                  # at its scale: the RMS of crest's term at a quarter of the wavelength, over half it
+    ),
     rock_deg=(34.0, 46.0),        # bare rock for provenance and the ribs: a smoothstep of the slope (masks.py's)
     reach_m=None,                 # how far fallen rock reaches (None: the masks' rock_toe_reach_m, 300 m)
     carry_passes=512,             # provenance: the most Jacobi passes a level runs (a child starts from its parent)
@@ -180,18 +201,26 @@ def resolve_palette(terrain, palette):
 def resolve_options(terrain, palette=None, options=None):
     """Every bake setting: DEFAULTS, the given options over them (a dict option merges key by key), and the terrain
     constants filled in: an option given wins, then the terrain's own, then the palette's, then palettes.CONSTANTS,
-    then CONSTANT_DEFAULTS. Raises KeyError naming an unknown option."""
+    then CONSTANT_DEFAULTS. A palette's options may carry `relief` (a dict over DEFAULTS['relief']: a look's own gully
+    spectrum, a badland's dense rills or a cinder field's few gullies); an option given wins over it. Raises KeyError
+    naming an unknown option or relief key."""
     import difflib
     opts = copy.deepcopy(DEFAULTS)
-    for k, v in (options or {}).items():
-        if k not in DEFAULTS:
-            near = difflib.get_close_matches(k, list(DEFAULTS), n=3)
-            raise KeyError(f'bake_surface: no option {k!r}' + (f'; nearest: {", ".join(near)}' if near else ''))
-        if isinstance(DEFAULTS[k], dict) and isinstance(v, dict):
-            opts[k].update(v)
-        else:
-            opts[k] = v
     pal = palette if (palette is None or isinstance(palette, dict)) else resolve_palette(terrain, palette)
+    look_relief = ((pal or {}).get('options') or {}).get('relief')
+    for src in ([{'relief': look_relief}] if isinstance(look_relief, dict) else []) + [options or {}]:
+        for k, v in src.items():
+            if k not in DEFAULTS:
+                near = difflib.get_close_matches(k, list(DEFAULTS), n=3)
+                raise KeyError(f'bake_surface: no option {k!r}' + (f'; nearest: {", ".join(near)}' if near else ''))
+            if k == 'relief' and isinstance(v, dict):
+                bad = [q for q in v if q not in DEFAULTS['relief']]
+                if bad:
+                    raise KeyError(f'bake_surface: no relief key {bad[0]!r}; the keys: {", ".join(DEFAULTS["relief"])}')
+            if isinstance(DEFAULTS[k], dict) and isinstance(v, dict):
+                opts[k].update(v)
+            else:
+                opts[k] = v
     pal_consts = dict((pal or {}).get('constants') or {})
     try:
         from ..build import palettes as P
@@ -341,6 +370,7 @@ class _Baker:
         self.base = float(opts['base_elevation_m'] or 0.0)
         self.keep = {}
         self.times = []
+        self.octave_m = {}                # per level: the wavelengths of its gully octaves (info['relief_octaves'])
         self._stages = None
         fm = _fields(terrain, self.main)
         self.norms = M.norms_from(fm, self.levels[self.main].cell, self.P)
@@ -547,6 +577,18 @@ class _Baker:
             tm['streak'] = time.perf_counter() - t1
         del outX
 
+        # ---- the slope, the field normal's parts and the altitude on the padded cell grid (snow, insolation)
+        gy, gx = np.gradient(hp, F(cell))
+        g = np.sqrt(gx * gx + gy * gy)
+
+        # ---- step 7: snowpack (before the relief, which it buries)
+        pack = np.zeros((N_, N_), F)
+        if self.snow_on:
+            t1 = time.perf_counter()
+            pack = self._snowpack(i, hp, href, gx, gy, g, mk, par, keep)
+            out['snowpack'] = _crop(pack, m, n).astype(F)
+            tm['snow'] = time.perf_counter() - t1
+
         # ---- steps 2-4: the detail grid
         t1 = time.perf_counter()
         steer = outK
@@ -557,7 +599,11 @@ class _Baker:
             st[..., 2] = np.pad(fx / L, m, mode='edge')
             st[..., 3] = np.pad(fy / L, m, mode='edge')
             steer = dev.texture(st)
-        tCover = dev.texture(coverp)
+        sand = np.maximum(np.asarray(f['sand'], F), F(0)) if 'sand' in f else np.zeros((n, n), F)
+        sandp = self._pad(i, sand, 'sand')
+        keep['sand'] = sandp
+        a_spec = self._catchment(i, f, keep)
+        tCover = dev.texture(np.stack([coverp, sandp, pack, a_spec], axis=2))
         if fD == 2:
             hD = dev.empty((ND, ND), 4)
             dev.run(_K('upsample2'), {'src': tH}, {'outU': hD},
@@ -566,18 +612,26 @@ class _Baker:
             hD = tH
         hg = dev.empty((ND, ND), 4)
         dev.run(_K('field_normal'), {'hT': hD}, {'outG': hg}, {'uTexel': texel})
-        octs, gp = self._gully_octaves(i, texel)
+        octs, gp, rp = self._gully_octaves(i, texel)
+        n_oct = int((octs[0, 1::2, 2] > 0.5).sum())        # the table's octaves (a level too coarse for any: none)
+        self.octave_m[i] = [round(1.0 / float(v), 6) for v in octs[0, 1:2 * n_oct:2, 0]]
+        gates = self._geo_gates(i, keep, octs)
         rockT, rock_ref, rock_deg, normal_cap = self._rock_relief(i, hg, texel, ND)
         outD, outR = dev.empty((ND, ND), 4), dev.empty((ND, ND), 4)
         dev.run(_K('phacelle'),
                 {'hgT': hg, 'steerT': steer, 'octT': dev.texture(octs), 'rockT': rockT or self._dummy(),
-                 'coverT': tCover},
+                 'coverT': tCover, 'gateT': dev.texture(gates)},
                 {'outD': outD, 'outR': outR},
-                {'uOct': octs.shape[1] // 2, 'uTexel': texel, 'uF': fD, 'uSteer': float(gp['steer']),
+                {'uOct': n_oct, 'uTexel': texel, 'uF': fD, 'uSteer': float(rp['steer']),
                  'uNorm': float(gp['normalization']), 'uSlope': tuple(float(v) for v in gp['slope_deg']),
                  'uRockDeg': rock_deg, 'uCover': tuple(float(v) for v in self.P.cover_m),
                  'uNormalCap': normal_cap, 'uRockRef': rock_ref, 'uRockOn': int(rockT is not None),
-                 'uStrength': float(o['detail_strength'])})
+                 'uStrength': float(o['detail_strength']),
+                 'uSpec': (float(rp['jitter']), float(rp['spread']), float(rp['along']), 0.0),
+                 'uInit': (float(rp['initiation']), float(rp['loose_initiation'])) + tuple(
+                     float(v) for v in rp['sand_m']),
+                 'uLoose': tuple(float(v) for v in rp['loose_m']), 'uBury': tuple(float(v) for v in rp['bury'])})
+        del tCover, gates
         blurD = self._blur4(outR, (1.0,) * 4, fan=False)                 # the relief surface at 1 and 2 texels
         blurD2 = self._blur4(outR, (2.0,) * 4, fan=False)
         outE = dev.empty((ND, ND), 4)
@@ -645,48 +699,6 @@ class _Baker:
         keep['settle_d'] = d1
         out['settle'] = (np.clip(_crop(d1, m, n) / F(layer), 0.0, 2.0) * F(0.5)).astype(F)
         tm['settle'] = time.perf_counter() - t1
-
-        # ---- the slope, the field normal's parts and the altitude on the padded cell grid (snow, insolation)
-        gy, gx = np.gradient(hp, F(cell))
-        g = np.sqrt(gx * gx + gy * gy)
-
-        # ---- step 7: snowpack
-        if self.snow_on:
-            t1 = time.perf_counter()
-            sn = o['snow']
-            line, band_m = float(o['snowline_m']), float(sn['band_m'])
-            alt = hp + F(href + self.base)
-            slope_deg = np.degrees(np.arctan(g))
-            north = -gy / np.maximum(g, F(1e-12)) * _smooth(1.0, 3.0, slope_deg)
-            fall = F(sn['depth_m']) * _smooth(line - band_m, line + band_m, alt + F(sn['aspect_m']) * north)
-            nl = np.sqrt(F(1) + g * g)
-            insol = np.maximum((-gx * F(self.sun[0]) - gy * F(self.sun[1]) + F(self.sun[2])) / nl, F(0))
-            # melt: on slopes the sun strikes harder than flat ground (melt_sun_m where it strikes square on), and
-            # below the snowline (melt_low_m at band_m under it): flat ground at the line keeps half the fall, so the
-            # pack's edge sits at the line, where the masks' snow is 0.5 (melting by all sunlight and on both sides
-            # of the line pushed it 150 m above)
-            s_el = F(self.sun[2])
-            melt = (F(sn['melt_sun_m']) * np.maximum(insol - s_el, F(0)) / max(F(1) - s_el, F(1e-3))
-                    + F(sn['melt_low_m']) * (F(1) - _smooth(line - band_m, line, alt)))
-            # (a fresh fall on every level, plus what the parent gathered beyond its fall: as settle)
-            keep['snow_fall'] = fall
-            rest0 = fall if par is None else fall + np.maximum(
-                self._inherit(i, 'snow_rest') - self._inherit(i, 'snow_fall'), F(0))
-            rest = self._relax(hp, rest0, _tan(sn['slip_deg']), int(sn['passes']), float(sn['rate']), cell)
-            keep['snow_rest'] = rest
-            pack = np.maximum(rest - melt, F(0))
-            if 'flow' in mk:
-                flowp = self._pad(i, np.asarray(mk['flow'], F), 'flow_mask')
-                keep['flow_mask'] = flowp
-                wf = _smooth(sn['flow'][0], sn['flow'][1], flowp)
-                rep = F(_tan(sn['slip_deg'])) + (F(_tan(sn['flow_deg'])) - F(_tan(sn['slip_deg']))) * wf
-                flow0 = fall if (par is None or 'snow_flow' not in par) else fall + np.maximum(
-                    self._inherit(i, 'snow_flow') - self._inherit(i, 'snow_fall'), F(0))
-                flowed = self._relax(hp, flow0, rep, int(sn['passes']), float(sn['rate']), cell)
-                keep['snow_flow'] = flowed
-                pack = np.maximum(pack, np.maximum(flowed - melt, F(0)))
-            out['snowpack'] = _crop(pack, m, n).astype(F)
-            tm['snow'] = time.perf_counter() - t1
 
         # ---- step 8: the filled surface; on hero levels the drainage area again, the parent's catchment pinned in
         t1 = time.perf_counter()
@@ -759,11 +771,110 @@ class _Baker:
         if lv.parent is not None and lv.parent in self.keep:    # the grandparent's textures are done with
             gp_ = self.levels[lv.parent].parent
             if gp_ is not None and gp_ in self.keep:
-                self.keep[gp_].pop('tK', None)
+                for k_ in ('tK', 'geo_rms', 'a_spec', 'sand'):
+                    self.keep[gp_].pop(k_, None)
         self.times.append({k: (round(v, 4) if isinstance(v, float) else v) for k, v in tm.items()})
         return out
 
     # ---- pieces
+    def _snowpack(self, i, hp, href, gx, gy, g, mk, par, keep):
+        """Step 7: the snowpack on the padded cell grid, metres (SURFACING_DESIGN.md 2.3): the fall from the altitude
+        against the snowline and from the northness, relaxed at the slip-off, melted by the climatological sun and
+        below the line, and the larger of that and a second pass that flows along the drainage. Keeps the passes for
+        the child."""
+        o = self.o
+        sn = o['snow']
+        cell = float(self.levels[i].cell)
+        line, band_m = float(o['snowline_m']), float(sn['band_m'])
+        alt = hp + F(href + self.base)
+        slope_deg = np.degrees(np.arctan(g))
+        north = -gy / np.maximum(g, F(1e-12)) * _smooth(1.0, 3.0, slope_deg)
+        fall = F(sn['depth_m']) * _smooth(line - band_m, line + band_m, alt + F(sn['aspect_m']) * north)
+        nl = np.sqrt(F(1) + g * g)
+        insol = np.maximum((-gx * F(self.sun[0]) - gy * F(self.sun[1]) + F(self.sun[2])) / nl, F(0))
+        # melt: on slopes the sun strikes harder than flat ground (melt_sun_m where it strikes square on), and below
+        # the snowline (melt_low_m at band_m under it): flat ground at the line keeps half the fall, so the pack's
+        # edge sits at the line, where the masks' snow is 0.5 (melting by all sunlight and on both sides of the line
+        # pushed it 150 m above)
+        s_el = F(self.sun[2])
+        melt = (F(sn['melt_sun_m']) * np.maximum(insol - s_el, F(0)) / max(F(1) - s_el, F(1e-3))
+                + F(sn['melt_low_m']) * (F(1) - _smooth(line - band_m, line, alt)))
+        # (a fresh fall on every level, plus what the parent gathered beyond its fall: as settle)
+        keep['snow_fall'] = fall
+        rest0 = fall if par is None else fall + np.maximum(
+            self._inherit(i, 'snow_rest') - self._inherit(i, 'snow_fall'), F(0))
+        rest = self._relax(hp, rest0, _tan(sn['slip_deg']), int(sn['passes']), float(sn['rate']), cell)
+        keep['snow_rest'] = rest
+        pack = np.maximum(rest - melt, F(0))
+        if 'flow' in mk:
+            flowp = self._pad(i, np.asarray(mk['flow'], F), 'flow_mask')
+            keep['flow_mask'] = flowp
+            wf = _smooth(sn['flow'][0], sn['flow'][1], flowp)
+            rep = F(_tan(sn['slip_deg'])) + (F(_tan(sn['flow_deg'])) - F(_tan(sn['slip_deg']))) * wf
+            flow0 = fall if (par is None or 'snow_flow' not in par) else fall + np.maximum(
+                self._inherit(i, 'snow_flow') - self._inherit(i, 'snow_fall'), F(0))
+            flowed = self._relax(hp, flow0, rep, int(sn['passes']), float(sn['rate']), cell)
+            keep['snow_flow'] = flowed
+            pack = np.maximum(pack, np.maximum(flowed - melt, F(0)))
+        return np.ascontiguousarray(pack, F)
+
+    def _catchment(self, i, f, keep):
+        """The specific catchment (metres: the drainage area over the cell's width) on the padded cell grid, the
+        larger of the level's own and its parent's there, so a hero level whose own routing loses a trunk keeps the
+        water its parent sends down (the gullies' initiation reads it). 1e9 where the level has no drainage area."""
+        lv = self.levels[i]
+        cell = float(lv.cell)
+        n, m = lv.n, MARGIN
+        if 'A' not in f:
+            a = np.full((n + 2 * m, n + 2 * m), F(1.0e9))
+        else:
+            own = (np.maximum(np.asarray(f['A'], F), F(cell * cell)) / F(cell)).astype(F)
+            a = self._pad(i, own, 'a_spec')
+            if lv.parent is not None and 'a_spec' in self.keep.get(lv.parent, {}):
+                a = np.maximum(a, self._inherit(i, 'a_spec'))
+        keep['a_spec'] = np.ascontiguousarray(a, F)
+        return keep['a_spec']
+
+    def _geo_gates(self, i, keep, octs):
+        """The geometry gates (SURFACING_DESIGN.md 2.3, step 3) on the padded cell grid, float32 (N, N, 4): per
+        crest scale s in GATE_SCALES_M, 1 where the level's own height is smooth at that scale and 0 where it already
+        holds relief of a gully octave's size there: the RMS of crest's term at s (tanh((h - G_s h) / (tau s))) over
+        a Gaussian of 2 s, past relief['geo']. An octave of wavelength lam the level's cells can hold reads the
+        channel of s = lam / 4 (clamped to the scales; the next coarser scale where the level has no term at s). A
+        level makes the scales whose window spans at most GATE_OWN_CELLS of its cells and takes the wider ones from
+        its parent, as crest does. Only the channels the octave table reads are made; the rest are 1."""
+        lv = self.levels[i]
+        cell, n, m = float(lv.cell), lv.n, MARGIN
+        N_ = n + 2 * m
+        out = np.ones((N_, N_, 4), F)
+        lo, hi = (float(v) for v in self.o['relief']['geo'])
+        need = sorted({int(round(float(b))) for b in octs[0, 1::2, 3] if float(b) > -0.5})
+        terms = keep.get('crest_terms')
+        par = self.keep.get(lv.parent) if lv.parent is not None else None
+        made = {}
+        own = [c for c, s in enumerate(GATE_SCALES_M)
+               if 2.0 * s / cell <= GATE_OWN_CELLS and terms is not None
+               and np.isfinite(terms[CREST_SCALES_M.index(s)]).all()]
+        if own:                                           # the squared terms blurred on the device, one per channel
+            t2 = np.zeros((N_, N_, 4), F)
+            sig = [0.0] * 4
+            for c in own:
+                t = np.asarray(terms[CREST_SCALES_M.index(GATE_SCALES_M[c])], F)
+                t2[..., c] = t * t
+                sig[c] = 2.0 * GATE_SCALES_M[c] / cell
+            b = self.dev.read(self._blur4(self.dev.texture(t2), tuple(sig), fan=False))
+            for c in own:
+                made[c] = np.sqrt(np.maximum(b[..., c], F(0)))
+        for c in range(len(GATE_SCALES_M)):
+            if c not in made and par is not None and c in (par.get('geo_rms') or {}):
+                made[c] = Gd.crop_upsample2(par['geo_rms'][c], *self._win(i), 'bilinear')
+        keep['geo_rms'] = made
+        for c in need:
+            src = next((made[q] for q in range(c, len(GATE_SCALES_M)) if q in made), None)
+            if src is not None:
+                out[..., c] = F(1) - _smooth(lo, hi, src)
+        return np.ascontiguousarray(out, F)
+
     def _crest_metres(self, i, tH, hp, par, keep):
         """crest at fixed metre scales (SURFACING_DESIGN.md 2.3, step 5): t_s = tanh((h - G_s h) / (tau s)) for s in
         CREST_SCALES_M, the mean over the scales of at least one cell. A level blurs the scales of 1 to 16 of its
@@ -828,42 +939,60 @@ class _Baker:
         dl, _bed_rel, _net = DT.relax(b0, bed, sc, rep, passes, rate, backend=self.backend)
         return np.maximum(d0 + dl.astype(F) * F(cell), F(0)).astype(F)
 
+    def top_octave(self):
+        """(lam_top, o_top): the gully spectrum's top octave, the same on every level: the first world octave
+        (GULLY_LAMBDA0_M x 2^-o) under relief['top_cells'] cells of the main level and relief['top_max_m']."""
+        rp = self.o['relief']
+        top = min(float(rp['top_cells']) * float(self.levels[self.main].cell), float(rp['top_max_m']))
+        lam, o_ = GULLY_LAMBDA0_M, 0
+        while lam > top * (1.0 + 1e-9):
+            lam *= 0.5
+            o_ += 1
+        return lam, o_
+
     def _gully_octaves(self, i, texel):
-        """The gully filter's octave table for a level (two texels per octave, float32 (1, 2 n, 4)) and its
-        parameters. The octaves are keyed by world wavelength (SURFACING_DESIGN.md 2.3, step 3): octave o has
-        lambda_o = GULLY_LAMBDA0_M x 2^-o, amplitude k lambda_o (k the gully stage's amplitude over its wavelength,
-        0.08 by default: self-similar) and the lattice offset of (seed + 4242, o), so a wavelength has the same lattice
-        and pattern on a parent and a child. A level evaluates the octaves from the first one under 3 of its cells
-        down to 2 texels: coarser ones are in its height (the geometry's gullies) or belong to its parent."""
+        """The gully spectrum's octave table for a level (two texels per octave, float32 (1, 2 n, 4)), the gully
+        filter's parameters (solvers/detail.py's GULLY: its soil mask and normalisation) and the spectrum's
+        (relief). The octaves are keyed by world wavelength (SURFACING_DESIGN.md 2.3, step 3): octave o has
+        lambda_o = GULLY_LAMBDA0_M x 2^-o, amplitude k lambda_o (k: relief['k'], or the gully stage's amplitude
+        over its wavelength where a recipe sets them: self-similar) and the lattice offset of (seed + 4242, o), so a
+        wavelength has the same lattice and pattern on a parent and a child. Every level evaluates the octaves from
+        the terrain's top octave (top_octave) down to 2 texels: a level's own band alone (under 3 of its cells) was
+        one or two octaves, a washboard on any ground the geometry left smooth (11-20). An octave of at least 3 cells
+        could be in the level's height already, so it reads a geometry gate: its row's last value is the gate
+        texture's channel (GATE_SCALES_M nearest lam / 4), else -1."""
         from ..solvers import detail as DT
         lv = self.levels[i]
         cell = float(lv.cell)
         sp, _ran = self.stage('gully', i)
-        gp = DT._params(DT.GULLY, dict(sp, **(self.o.get('gully') or {})), 'gully')
+        given = dict(sp, **(self.o.get('gully') or {}))
+        gp = DT._params(DT.GULLY, given, 'gully')
+        rp = dict(self.o['relief'])
+        if 'steer' in given:
+            rp['steer'] = float(gp['steer'])
         k_amp = (float(gp['amp_m']) / float(gp['wavelength_m'])
-                 if (gp['amp_m'] is not None and gp['wavelength_m']) else 0.08)
+                 if (gp['amp_m'] is not None and gp['wavelength_m']) else float(rp['k']))
         x0p, y0p = lv.x0 - MARGIN * cell, lv.y0 - MARGIN * cell
         rows = []
-        o_ = 0
-        lam = GULLY_LAMBDA0_M
-        while lam >= 3.0 * cell * (1.0 - 1e-9):
-            lam *= 0.5
-            o_ += 1
+        lam, o_ = self.top_octave()
         while lam >= 2.0 * texel * (1.0 - 1e-9) and len(rows) < 12:
             ox, oy = N.lattice_offset(self.seed + 4242, o_)
             bx, by = math.floor(x0p / lam), math.floor(y0p / lam)
             if abs(bx + ox) >= 1 << 24 or abs(by + oy) >= 1 << 24:
                 raise ValueError('gully lattice base beyond float32 integers: world coordinates too large')
-            rows.append([(bx + ox, by + oy, x0p / lam - bx, y0p / lam - by), (1.0 / lam, k_amp * lam, 1.0, 0.0)])
+            ch = -1.0
+            if lam >= 3.0 * cell * (1.0 - 1e-9):
+                s = min(max(lam / 4.0, GATE_SCALES_M[0]), GATE_SCALES_M[-1])
+                ch = float(min(range(len(GATE_SCALES_M)), key=lambda q: abs(math.log(GATE_SCALES_M[q] / s))))
+            rows.append([(bx + ox, by + oy, x0p / lam - bx, y0p / lam - by), (1.0 / lam, k_amp * lam, 1.0, ch)])
             lam *= 0.5
             o_ += 1
-        lam0 = GULLY_LAMBDA0_M
-        if not rows:
-            rows.append([(0.0, 0.0, 0.0, 0.0), (1.0 / max(lam0, 1e-6), 0.0, 0.0, 0.0)])
+        if not rows:                                      # a placeholder row (the table is a texture): no octave
+            rows.append([(0.0, 0.0, 0.0, 0.0), (1.0 / GULLY_LAMBDA0_M, 0.0, 0.0, -1.0)])
         octs = np.zeros((1, 2 * len(rows), 4), F)
         for k, (a, b) in enumerate(rows):
             octs[0, 2 * k], octs[0, 2 * k + 1] = a, b
-        return octs, gp
+        return octs, gp, rp
 
     def _rock_relief(self, i, hg, texel, ND):
         """(texture or None, amplitude, rock slope, normal cap): solvers/detail.py's breakup strength evaluated on
@@ -1030,7 +1159,10 @@ def bake_levels(terrain, opts, log=print):
                 norms=dict(flow_lo=B.norms.flow_lo, flow_hi=B.norms.flow_hi, twi_lo=B.norms.twi_lo,
                            twi_hi=B.norms.twi_hi, spi=B.spi_norm),
                 href=[B.keep[i]['href'] for i in range(len(B.levels))],
-                snow=B.snow_on, wind=B.wind is not None)
+                snow=B.snow_on, wind=B.wind is not None,
+                # each level's gully octaves (metres): D's relief holds these, from the terrain's top octave down to
+                # two of the level's texels, so a reader can tell the part of it finer than its scans' tile
+                relief_octaves=[B.octave_m.get(i, []) for i in range(len(B.levels))])
     info['maps'] = opts.get('maps', 'all')
     fills = [B.keep[i].get('fill') for i in range(len(B.levels))]
     B.keep.clear()

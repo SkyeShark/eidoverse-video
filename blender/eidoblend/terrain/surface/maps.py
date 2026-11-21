@@ -80,8 +80,10 @@ _SPECS = [
             "Catmull-Rom surface, central differences at the texel spacing); z is rebuilt", channel=0, grid='detail'),
     MapSpec('normal_y', '-1..1', 'D', 'float', 'field_normal', "the field normal's y", channel=1, grid='detail'),
     MapSpec('detail_gx', 'm/m', 'D', 'float', 'phacelle',
-            "d/dx of the relief below the cell (metres of height per metre): flow-steered gullies on soil slopes, "
-            "rock ribs from the breakup strength on bare rock. The material adds it to the field's own gradient",
+            "d/dx of the relief below the cell (metres of height per metre): flow-steered gullies on soil slopes, a "
+            "spectrum from the terrain's top octave down to two texels, varied in spacing and depth, none on sand, "
+            "buried by the snowpack (info['relief_octaves'] lists each level's); rock ribs from the breakup strength "
+            "on bare rock. The material adds it to the field's own gradient",
             channel=2, grid='detail'),
     MapSpec('detail_gy', 'm/m', 'D', 'float', 'phacelle', "d/dy of the relief below the cell", channel=3,
             grid='detail'),

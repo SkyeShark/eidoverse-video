@@ -49,13 +49,15 @@ def cover(h):
 
 
 def octave_table(n=6, lam0=40.0, x0=-5123.7, y0=2077.1, seed=7):
+    """bake._gully_octaves' table: the first three octaves read geometry gates (channels 2, 1, 0), the rest none."""
     from eidoblend.terrain.core import world_noise as N
     rows = []
-    lam, amp = lam0, 0.08 * lam0
+    lam, amp = lam0, 0.05 * lam0
     for o in range(n):
         ox, oy = N.lattice_offset(seed + 4242, o)
         bx, by = math.floor(x0 / lam), math.floor(y0 / lam)
-        rows.append([(bx + ox, by + oy, x0 / lam - bx, y0 / lam - by), (1.0 / lam, amp, 1.0 if o >= 2 else 0.0, 0.0)])
+        rows.append([(bx + ox, by + oy, x0 / lam - bx, y0 / lam - by),
+                     (1.0 / lam, amp, 1.0, float(2 - o) if o < 3 else -1.0)])
         lam *= 0.5
         amp *= 0.5
     t = np.zeros((1, 2 * n, 4), F)
@@ -102,12 +104,23 @@ def cases():
     steer[..., 2], steer[..., 3] = np.cos(a), np.sin(a)
     rock = np.zeros((H, W, 4), F)
     rock[..., 3] = 0.6 * T.random_field((H, W), seed=22, smooth=1) - 0.3
-    covC = np.ascontiguousarray(cov[::2, ::2])
+    # the cover on the cell grid: loose debris (the valley's), sand on part of it, a snowpack on another part, and a
+    # specific catchment from 2 m to 2 km, so every gate of every octave runs from 0 to 1
+    hc, wc = H // 2, W // 2
+    covC = np.zeros((hc, wc, 4), F)
+    covC[..., 1] = np.maximum(1.2 * T.random_field((hc, wc), seed=23, smooth=2) - 0.4, 0.0)
+    covC[..., 0] = np.ascontiguousarray(cov[::2, ::2]) + covC[..., 1]
+    covC[..., 2] = np.maximum(4.0 * T.random_field((hc, wc), seed=24, smooth=2) - 1.5, 0.0)
+    covC[..., 3] = 10.0 ** (0.3 + 3.0 * T.random_field((hc, wc), seed=25, smooth=2))
+    gate = np.stack([T.random_field((hc, wc), seed=s, smooth=2) for s in (26, 27, 28, 29)], 2).astype(F)
     for tag, rock_on in (('phacelle', 1), ('phacelle_norock', 0)):
-        out[tag] = ({'hgT': hgD, 'steerT': steer, 'octT': octave_table(), 'rockT': rock, 'coverT': T.rgba(covC)},
-                    {'uOct': 6, 'uTexel': CELL / 2, 'uF': 2, 'uSteer': 0.6, 'uNorm': 0.5,
+        out[tag] = ({'hgT': hgD, 'steerT': steer, 'octT': octave_table(), 'rockT': rock, 'coverT': covC,
+                     'gateT': gate},
+                    {'uOct': 6, 'uTexel': CELL / 2, 'uF': 2, 'uSteer': 0.35, 'uNorm': 0.5,
                      'uSlope': (10.0, 18.0, 30.0, 38.0), 'uRockDeg': (38.0, 52.0), 'uCover': (0.1, 1.0),
-                     'uNormalCap': 4.0, 'uRockRef': 0.4, 'uRockOn': rock_on, 'uStrength': 0.5})
+                     'uNormalCap': 4.0, 'uRockRef': 0.4, 'uRockOn': rock_on, 'uStrength': 0.5,
+                     'uSpec': (0.3, 1.3, 3.0, 0.0), 'uInit': (1.0, 4.0, 0.1, 0.6), 'uLoose': (0.3, 2.0),
+                     'uBury': (0.5, 2.0)})
     zR = np.stack([0.5 * T.random_field((H, W), seed=31, smooth=1) - 0.25,
                    T.random_field((H, W), seed=32) * 2 - 1, h, np.zeros((H, W))], 2).astype(F)
     zB = np.stack([blur_twin(zR[..., c], (1.0, 0, 0, 0))[..., 0] for c in range(4)], 2).astype(F)
