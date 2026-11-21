@@ -126,10 +126,12 @@ STREAKS = [dict(amp_m=5.0, k=[12, 60], decay=0.5, r_m=[0.04 * _R0, 0.22 * _R0], 
 # The cone grows while it erodes (volcanic.eruption_flows, lay_flow; design 4.7 'growth and erosion'): the age in four
 # spans, each opened by lava flows that fill the gullies in their paths, each an older flow at the end by the spans
 # still to come (laid duller, its margins wider: mantled); a flow's top is fresh permeable lava (the furrows' k_floor)
-# and the water it sheds runs down its margins, where gullies cut. Flows from the summit's rim down the upper cone
-# (80-600 m wide, 1.2-7 km long, 2-12 m thick); from flank vents along the rift and scattered round the cone (120-1500 m
-# wide, 1.2-9 km long, 3-25 m thick); levees low and broad (at 0.35 of the thickness and 0.12 of the width they stood
-# as twin lines along every flow). With the furrows alone the gullies were one even sunburst of ravines a spacing
+# and the water it sheds runs down its margins, where gullies cut. A few flows from the summit's rim down the upper cone
+# (80-400 m wide, 1.2-7 km long, 2-8 m thick: 70 of them up to 600 m wide halved the upper cone's gullies, 8.5 m deep
+# at their median 1.2-4 km out against the DEM's 14.4, and the snowfield lost the dark ribs between them); from flank
+# vents along the rift and scattered round the cone (120-1500 m wide, 1.2-9 km long, 3-25 m thick); levees low and broad
+# (at 0.35 of the thickness and 0.12 of the width they stood as twin lines along every flow). With the furrows alone
+# the gullies were one even sunburst of ravines a spacing
 # apart, and the broad lobes below 6 km long wavy stripes down the lower cone: the main level's hillshade correlated
 # with itself at that spacing (the judge's repetition 0.38 in the 5 km square north-east of the vent, the DEM's 0.19),
 # its gullies twice as deep as the DEM's 4-9 km out (14 against 7.6 m at their median) and more evenly spaced (spacing
@@ -137,10 +139,10 @@ STREAKS = [dict(amp_m=5.0, k=[12, 60], decay=0.5, r_m=[0.04 * _R0, 0.22 * _R0], 
 # fronts.
 # (Without the furrows the flows alone left the lower cone smooth between them: on a cone the water runs beside a
 # radial flow, not into it, and only the flows' fronts and the lows between near ones gather it.)
-#   (230 flows lay a quarter of the main tile under them; 150 left the comb standing between them in places)
+#   (105 flank flows left the comb standing between them in places; 160 break it up)
 ERUPTIONS = dict(epochs=4, shape=dict(rough=0.0, walkers=100, levee=0.15, levee_frac=0.2), groups=[
-    dict(count=70, r_m=[450.0, 900.0], width_m=[200.0, 80.0, 600.0], length_m=[3000.0, 1200.0, 7000.0],
-         thickness_frac=[0.02, 0.05], thickness_m=[2.0, 12.0]),
+    dict(count=25, r_m=[450.0, 900.0], width_m=[150.0, 80.0, 400.0], length_m=[3000.0, 1200.0, 7000.0],
+         thickness_frac=[0.02, 0.05], thickness_m=[2.0, 8.0]),
     dict(count=80, r_m=[1500.0, 12000.0], azimuth_deg=_F['rift_azimuth_deg'], half_deg=25.0,
          width_m=[450.0, 150.0, 1500.0], length_m=[4000.0, 1500.0, 9000.0], thickness_frac=[0.02, 0.04],
          thickness_m=[4.0, 25.0]),
