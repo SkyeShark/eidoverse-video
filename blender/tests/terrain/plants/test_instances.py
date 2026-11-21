@@ -16,6 +16,10 @@ a sparse stand planned on the synthetic valley (_ground.py) and instanced for a 
   tint        each plant's own tone: the billboards read it from the mesh, the card and full levels from the instance
   match       a tree's billboard takes its measured gain on its foliage only, and its cut-out threshold
               (BILLBOARD_GAIN); a shrub without a match keeps SeedThree's billboard
+  tone        a toned tree's billboard takes its source's tone (TONE_DIAL) on bark and foliage alike
+  soft cut    every billboard's cut-out is hard near the camera and keeps a far plant's coverage (ALPHA_SOFT_M)
+  shade       under a low sun bound with bind_sun, every still billboard's points carry the terrain's shadow
+              (eido_shade), as a 1 m march over the terrain's height finds it, and the billboard material reads it
   ground      no plant floats or is buried: each plant's lowest point lies where its base (the ground less its sink)
               puts it (a SeedThree plant reaches below its base by its own grown amount, scaled)
   height      each plant stands scale x size_m[1] tall above its base (a flora plant within its stroke's own height
@@ -27,6 +31,7 @@ a sparse stand planned on the synthetic valley (_ground.py) and instanced for a 
 The SeedThree individual is the desert ecotope's blackbrush (seed 7), grown into the plant library on its first use.
 """
 import json
+import math
 import os
 import sys
 import time
@@ -55,13 +60,17 @@ def check(name, ok, detail=''):
 
 
 FIR = ('douglasFir', 11, {'height': 30, 'paramOverrides': {'length': {1: 0.14}, 'downAngle': {1: 98}}})
+FIR_TONE = (0.5, 0.6, 0.5)              # the fir source's eidoverse-side tone (TONE_DIAL), bark and foliage alike
+SUN_ELEVATION = 12.0                    # degrees: a low sun from the east, which the valley's east side shades in part
 
 
 def ecotope():
     """A sparse stand: SeedThree shrubs at least 6 m apart, flora grass tufts at least 1.1 m apart (so each
-    plant's geometry is its own), a few firs (the alpine spruce's individual) far apart, everywhere on the valley."""
+    plant's geometry is its own), a few firs (the alpine spruce's individual, with a tone) far apart, everywhere on
+    the valley."""
     return dict(title='instancer test', species=[
-        dict(name='fir', kind='tree', source=('seedthree', FIR[0], FIR[2], [FIR[1]]), size_m=(20.0, 30.0),
+        dict(name='fir', kind='tree', source=('seedthree', FIR[0], dict(FIR[2], eidoGain=FIR_TONE), [FIR[1]]),
+             size_m=(20.0, 30.0),
              core_m=25.0, max_cell_m=None, max_radius_m=200.0, lod_m_per_m=0.0, fade=(1.0, 1.0),
              cluster=dict(parents_per_ha=4.0, mu=2.0, sigma_m=20.0), density='0.0008', on=EVERYWHERE,
              lod=dict(hero_m=30.0, billboard_m=60.0, near_m=0.0)),
@@ -170,7 +179,7 @@ def main():
     PI.BILLBOARD_GAIN[(FIR[0], FIR[1], json.dumps(PI.grown_dials(json.loads(json.dumps(FIR[2]))),
                                                   sort_keys=True))] = dict(gain=(0.8, 0.9, 1.1), alpha=0.6)
     ti = time.time()
-    made = PI.instance_plants(spots, None, log=None)
+    made = PI.instance_plants(spots, t, log=None)       # the terrain: its heightfields for the billboards' shade
     secs = time.time() - ti
     dg = bpy.context.evaluated_depsgraph_get()
     entry = {s['name']: s for s in spots.species}
@@ -288,9 +297,13 @@ def main():
         return [m for ch in col.children for o in ch.objects for m in o.data.materials if m]
 
     def cut_of(m):
-        return [round(n.inputs[1].default_value, 3) for n in m.node_tree.nodes
-                if n.bl_idname == 'ShaderNodeMath' and n.operation == 'GREATER_THAN' and n.inputs[0].links
+        """The cut-out's threshold: the soft cut's (alpha - cut) node (plant_instances._soft_cut), and no hard one."""
+        hard = [n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeMath' and n.operation == 'GREATER_THAN'
+                and n.inputs[0].links and n.inputs[0].links[0].from_socket.name == 'Alpha']
+        soft = [round(n.inputs[1].default_value, 3) for n in m.node_tree.nodes
+                if n.bl_idname == 'ShaderNodeMath' and n.operation == 'SUBTRACT' and n.inputs[0].links
                 and n.inputs[0].links[0].from_socket.name == 'Alpha']
+        return soft if not hard else ['hard']
     fir_m, shrub_m = bb_mats('fir'), bb_mats('shrub')
 
     def foliage_mask(m):
@@ -303,6 +316,61 @@ def main():
           and all(cut_of(m) == [0.6] for m in fir_m) and all(cut_of(m) == [PI.ALPHA_CUT] for m in shrub_m),
           f"fir {[m.name for m in fir_m]} cut-outs {[cut_of(m) for m in fir_m]}; shrub cut-outs "
           f"{[cut_of(m) for m in shrub_m]}")
+
+    # the tone: a toned tree's billboard takes its source's tone over bark and foliage alike, after the foliage-only
+    # gain (a foliage-only tone left the broadleaves' trunks white on their billboards)
+    def has_tone(m):
+        return any(n.bl_idname == 'ShaderNodeVectorMath' and n.operation == 'MULTIPLY' and n.inputs[0].links
+                   and not n.inputs[1].links and np.allclose(tuple(n.inputs[1].default_value), FIR_TONE, atol=1e-4)
+                   for n in m.node_tree.nodes)
+    check('tone: the tree\'s billboard takes its source\'s tone on bark and foliage, its gain on the foliage only',
+          bool(fir_m) and all(has_tone(m) and foliage_mask(m) for m in fir_m), f'tone {FIR_TONE}')
+
+    # the soft cut-out: hard near the camera, the alpha's own share of a far pixel (the camera's distance through
+    # ALPHA_SOFT_M); no hard threshold left
+    def soft(m):
+        mr = [n for n in m.node_tree.nodes if n.bl_idname == 'ShaderNodeMapRange' and n.inputs['Value'].links
+              and n.inputs['Value'].links[0].from_node.bl_idname == 'ShaderNodeCameraData']
+        return len(mr) == 1 and abs(mr[0].inputs['From Min'].default_value - PI.ALPHA_SOFT_M[0]) < 1e-6 \
+            and abs(mr[0].inputs['From Max'].default_value - PI.ALPHA_SOFT_M[1]) < 1e-6 and cut_of(m) != ['hard']
+    check('soft cut: every billboard\'s cut-out widens with the camera\'s distance (a far plant keeps its coverage)',
+          bool(fir_m + shrub_m) and all(soft(m) for m in fir_m + shrub_m), f'{len(fir_m + shrub_m)} materials')
+
+    # the shade: under a low sun, every billboard's points carry the terrain's shadow (bind_sun), as a brute-force
+    # march over the terrain's own height finds it, and the billboard material reads it
+    from mathutils import Vector
+    az, el = math.radians(0.0), math.radians(SUN_ELEVATION)          # from the east (+x)
+    to_sun = (math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))
+    sun = bpy.data.objects.new('sun', bpy.data.lights.new('sun', 'SUN'))
+    sc.collection.objects.link(sun)
+    sun.rotation_euler = Vector(to_sun).to_track_quat('Z', 'Y').to_euler()
+    bpy.context.view_layer.update()
+    PI.bind_sun(sun)
+    me = far_ob.data
+    sh = me.attributes.get('eido_shade')
+    detail, ok_sh = 'no eido_shade on the points', False
+    if sh is not None and len(me.vertices):
+        n = len(me.vertices)
+        s = np.empty(n, np.float32)
+        sh.data.foreach_get('value', s)
+        org = np.empty(n * 3, np.float32)
+        me.attributes['eido_bb_origin'].data.foreach_get('vector', org)
+        org = org.reshape(-1, 3).astype(np.float64)
+        steps = np.arange(1.0, 3000.0, 1.0)
+        ex = np.full(n, -1e9)
+        for t_ in steps:
+            g = np.asarray(t.height_at(org[:, 0] + to_sun[0] / math.cos(el) * t_, org[:, 1] + to_sun[1] / math.cos(el) * t_))
+            ex = np.maximum(ex, g - (org[:, 2] + math.tan(el) * t_))
+        sure_in, sure_out = ex > 6.0, ex < -3.0
+        agree = (np.sum(s[sure_in] > 0.9) + np.sum(s[sure_out] < 0.1)) / max(int(sure_in.sum() + sure_out.sum()), 1)
+        reads = all(any(nd.bl_idname == 'ShaderNodeAttribute' and nd.attribute_name == 'eido_shade'
+                        for nd in m.node_tree.nodes) for m in mats)
+        ok_sh = bool(sure_in.any()) and bool(sure_out.any()) and agree >= 0.97 and float(s.min()) >= 0.0 \
+            and float(s.max()) <= 1.0 and reads
+        detail = (f'{n} points under a {SUN_ELEVATION:g} degree sun from the east: {int(sure_in.sum())} surely '
+                  f'shaded, {int(sure_out.sum())} surely lit by a 1 m march over the terrain, {agree * 100:.1f} % '
+                  f'agree; the material reads it: {reads}')
+    check('shade: every still billboard carries the terrain\'s shadow under the bound sun (eido_shade)', ok_sh, detail)
 
     # ground and height, plant by plant and level by level: each level's geometry stands where that level's own
     # extent, scaled to the spot, puts it over the spot's base (the ground less its sink). SeedThree's levels reach

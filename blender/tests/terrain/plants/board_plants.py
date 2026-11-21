@@ -6,6 +6,10 @@ under them two crops at 2x of both where a defect would show (the near ground, a
 hand over to their billboards), so the plants are judged beside the place, item by item.
 
     python blender/tests/terrain/plants/board_plants.py [--tag t] [--views a,b]
+    python blender/tests/terrain/plants/board_plants.py --review <recipe>:<view>[@cx,cy;cx,cy] ... --tag t
+        [--before final]
+        the judge's own renders of a view (surfacing/review_views.py --tag t) beside the photograph and the state
+        `before`, with two places at 2x (fractions of the frame; default the near ground and the middle)
 
 Writes out/plants/boards/<recipe>_<view>[_<tag>].jpg.
 """
@@ -170,10 +174,67 @@ def board(key, rec, tag, out_dir):
     return p
 
 
+def review_board(recipe, view, tag, before, crops, out_dir):
+    """The judge's camera of a view (surfacing/review_views.py renders, out/surfacing/review/<recipe>/): its
+    photograph | the review's render of state `before` | this tag's render, and under them two places at 2x, before
+    beside after (crops: [(cx, cy) fractions of the frame, ...], default the near ground and the middle)."""
+    rp = os.path.join(REVIEW, recipe)
+    after_p = os.path.join(rp, f'{view}_{tag}.png')
+    if not os.path.exists(after_p):
+        print(f'[board_plants] {recipe}/{view}: no render {os.path.basename(after_p)}')
+        return None
+    rec = {}
+    for rf in (os.path.join(rp, f'{recipe}_{tag}_record.json'),):
+        if os.path.exists(rf):
+            rec = json.load(open(rf, encoding='utf-8')).get(f'{view}_{tag}', {})
+    after = Image.open(after_p).convert('RGB')
+    before_p = os.path.join(rp, f'{view}_{before}.png')
+    before_im = Image.open(before_p).convert('RGB').resize(after.size) if os.path.exists(before_p) \
+        else Image.new('RGB', after.size)
+    ph = photo_path(rec) if rec else None
+    photo = Image.open(ph).convert('RGB') if ph else Image.new('RGB', TILE)
+    out = Image.new('RGB', (TILE[0] * 3, TILE[1] * 3), (20, 20, 20))
+    for k, (im, what) in enumerate(((photo, 'photograph' if ph else 'no photograph'),
+                                    (before_im, f'before: {before}'), (after, f'after: {tag}'))):
+        out.paste(label(fit(im), what), (k * TILE[0], 0))
+    crops = crops or [(0.5, 0.82), (0.5, 0.55)]
+    for r, (cx, cy) in enumerate(crops[:2]):
+        b, box = crop2x(before_im, cx, cy)
+        a_, _ = crop2x(after, cx, cy)
+        out.paste(label(fit(b), f'before 2x, render pixels {box[0]}-{box[0] + box[2]}, {box[1]}-{box[1] + box[3]}'),
+                  (0, (r + 1) * TILE[1]))
+        out.paste(label(fit(a_), 'after 2x'), (TILE[0], (r + 1) * TILE[1]))
+    d = ImageDraw.Draw(out)
+    lines = [f"{recipe}/{view}: {rec.get('caption', '')}"[:150],
+             f"plants {rec.get('plants')}"[:150],
+             f"frames {rec.get('first_render_s')} s / {rec.get('second_render_s')} s; build {rec.get('build_s')} s; "
+             f"seconds {rec.get('seconds')}"[:150]]
+    y = TILE[1] + 10
+    for ln in lines:
+        d.text((2 * TILE[0] + 12, y), ln, fill=(230, 230, 230))
+        y += 16
+    os.makedirs(out_dir, exist_ok=True)
+    p = os.path.join(out_dir, f'{recipe}_{view}_{tag}.jpg')
+    out.save(p, quality=90)
+    print('[board_plants] wrote', p)
+    return p
+
+
 def main():
     a = sys.argv[1:]
     tag = a[a.index('--tag') + 1] if '--tag' in a else ''
     only = set(a[a.index('--views') + 1].split(',')) if '--views' in a else None
+    if '--review' in a:
+        # python board_plants.py --review <recipe>:<view>[@cx,cy;cx,cy] ... --tag <t> [--before final]
+        before = a[a.index('--before') + 1] if '--before' in a else 'final'
+        for item in a[a.index('--review') + 1:]:
+            if item.startswith('--'):
+                break
+            spec, _, cr = item.partition('@')
+            recipe, view = spec.split(':', 1)
+            crops = [tuple(float(v) for v in c.split(',')) for c in cr.split(';')] if cr else None
+            review_board(recipe, view, tag, before, crops, BOARDS)
+        return
     rec = json.load(open(os.path.join(VIEWS_OUT, f"record{'_' + tag if tag else ''}.json"), encoding='utf-8'))
     for key, r in rec.items():
         if 'error' in r:
