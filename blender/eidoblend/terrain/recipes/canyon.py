@@ -109,6 +109,14 @@ def _rock(p):
     f['resist_run'] = float(p['rock_variety'])
     f['resist'] = 0.35 * float(p['rock_variety'])
 
+
+# The rock breakup on the hero levels gives the walls the strength field's relief (chutes, buttresses and fluting
+# along the joints) but no second failure: the column's composite threshold has already brought every face to its
+# bed's angle on that level, and the breakup's own threshold at that angle, varied by its strength noise, failed the
+# weaker half of every face top 1-2 m deep at once, its scar stopping at the rim cell by cell: a staircase of
+# flat-topped, cell-wide steps along the rims (incised_meanders' rim walk)
+BREAKUP = {'threshold': 'field', 'rock_slope_deg': [32.0, 45.0], 'spread_deg': 10.0, 'iterations': 0}
+
 CANYON = Recipe(
     'canyon', 'A canyon in layered plateau rock: stepped cliffs and benches, tributaries, an inner gorge',
     references=['grand_canyon_toroweap'],
@@ -167,7 +175,7 @@ CANYON = Recipe(
         Stage('plateau', PLATEAU, levels='all'),
         Stage('river_path', RIVER, levels='all'),
         Stage('strata_fluvial', FLUVIAL, levels='all'),
-        Stage('breakup', {'threshold': 'field', 'rock_slope_deg': [32.0, 45.0], 'spread_deg': 10.0}, levels='hero'),
+        Stage('breakup', BREAKUP, levels='hero'),
     ],
     doc='Layered plateau -> strata column -> river path with a base-level fall -> fluvial with K(zs) and the '
         'composite threshold (every level) -> rock breakup on the hero levels.')

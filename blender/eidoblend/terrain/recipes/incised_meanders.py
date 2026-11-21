@@ -75,6 +75,15 @@ def _rock(p):
     f['resist_run'] = float(p['rock_variety'])
     f['resist'] = 0.3 * float(p['rock_variety'])
 
+
+# The rock breakup on the hero levels gives the walls the strength field's relief (chutes, buttresses and fluting
+# along the joints) but no second failure: the column's composite threshold has already brought every face to its
+# bed's angle on that level (varied by the rock mass and the facies), and the breakup's own threshold at that angle,
+# varied by its strength noise, failed the weaker half of every face top up to 2 m deep at once, its scar stopping
+# at the rim cell by cell: a staircase of flat-topped steps 1.9 m tall and a cell wide along the rims (the rim walk's
+# promontory, on the 0.37 m level; without the failure the same rim is one continuous convex edge)
+BREAKUP = {'threshold': 'field', 'rock_slope_deg': [32.0, 45.0], 'spread_deg': 10.0, 'iterations': 0}
+
 INCISED_MEANDERS = Recipe(
     'incised_meanders', 'An entrenched meandering canyon: a river looping through flat-lying beds, stepped spurs, '
                         'thin necks',
@@ -121,7 +130,7 @@ INCISED_MEANDERS = Recipe(
         Stage('plateau', PLATEAU, levels='all'),
         Stage('river_path', RIVER, levels='all'),
         Stage('strata_fluvial', FLUVIAL, levels='all'),
-        Stage('breakup', {'threshold': 'field', 'rock_slope_deg': [32.0, 45.0], 'spread_deg': 10.0}, levels='hero'),
+        Stage('breakup', BREAKUP, levels='hero'),
     ],
     doc='The canyon recipe with a Kinoshita meander train: strata -> plateau -> river path (loops) with a '
         'base-level fall -> fluvial with K(zs), the composite threshold and weathering -> rock breakup (hero).')
