@@ -6,8 +6,9 @@ Writes out/karst/test_results.json (every test's verdict, numbers and seconds). 
 (section 11, row 11): blue-noise spacing and tower profile wall angles; plus the measures beside the Li River
 photographs (the plain's towers steep and cliffed, the clusters' cones wooded, pointed, not domed; not one profile
 on the plain; a river with water at plain level and gravel bars), the fenglin / fengcong composition, world-space
-consistency across levels and windows, a continuous base edge, no terraces on the hero levels, the op on core's
-level plan, the recipe, and the official judge against guilin_karst (judge/, through the radar chain): every band.
+consistency across levels and windows, a continuous base edge, no terraces nor lattice creases on the hero levels,
+the op on core's level plan, the recipe, and the official judge against guilin_karst (judge/, through the radar
+chain): every band.
 """
 import json
 import math
@@ -222,8 +223,7 @@ def test_plan_kinds():
     single cones: a 400 m single cone on the plain read as a pyramid); the ribs never folding a cone (each cone's sum
     of m |a_m| under 1)."""
     plan = K.plan_karst(7, DOMAIN, {}, via=(0, 0), main=MAIN)
-    in_cl = K._smoothstep(0.3, 0.7, plan.cluster)
-    deep = in_cl * K._smoothstep(0.0, 0.6, plan.interior)
+    deep = K.cone_weight(plan.cluster, plan.interior)
     on_plain = plan.cluster < 0.3
     shares = np.bincount(plan.kind[on_plain].astype(int), minlength=3) / max(int(on_plain.sum()), 1)
     assert np.all(shares > 0.05) and shares.max() < 0.7, shares
@@ -273,8 +273,11 @@ def test_tower_slopes():
     them stand steeper than 70 (the cliffed feet and scarps; an earlier review measured 55 and 8 % on rounded towers
     it rejected, and 35 % over 70 stood bare grey from foot to top). And deep inside a cluster (a 2 km window at the
     tile's centre, 2 m cells), the fengcong cones are wooded cones, not domes and not walls: their cells' median
-    slope 25-45 degrees, the upper 40 % of every tower's height no gentler than its lower 60 % at the median (a
-    dome's top is), and under 5 % of their cells over 60 degrees."""
+    slope 25-45 degrees, under 5 % of their cells over 60 degrees, and each cone, measured from its own foot (the
+    col or the base it rises from) to its summit, no gentler in its upper 40 % than in its lower 60 % at the median
+    over the cones (a dome's top is gentler). (Pooled over the window by the height above the plain, the two medians
+    held the visible upper halves of cones of every size and stood equal within 0.05 degrees, so the noise of the
+    ribs and knobs decided that check.)"""
     plan = K.plan_karst(7, DOMAIN, {}, via=(0, 0), main=MAIN)
     inm = (np.abs(plan.x) < 3500) & (np.abs(plan.y) < 3500)
     sel = np.nonzero(inm & ((plan.cluster < 0.3) | (plan.interior < 0.2)) & (plan.H + plan.F > 40))[0]
@@ -298,18 +301,33 @@ def test_tower_slopes():
     s = slope_deg(h, 2.0)
     tid = out['tower_id']
     tw = (tid >= 0) & (h - out['plain'] > 15.0)
+    up_h = (h - out['plain'])
     top = np.zeros(plan.count)
-    np.maximum.at(top, tid[tw], (h - out['plain'])[tw])
-    rel = np.where(tw, (h - out['plain']) / np.maximum(top[np.maximum(tid, 0)], 1.0), 0.0)
-    upper, lower = tw & (rel >= 0.6), tw & (rel < 0.6)
-    up_med, low_med, all_med = float(np.median(s[upper])), float(np.median(s[lower])), float(np.median(s[tw]))
+    np.maximum.at(top, tid[tw], up_h[tw])
+    foot = np.full(plan.count, np.inf)
+    np.minimum.at(foot, tid[tw], up_h[tw])
+    rel = np.where(tw, up_h / np.maximum(top[np.maximum(tid, 0)], 1.0), 0.0)
+    up_med, low_med = float(np.median(s[tw & (rel >= 0.6)])), float(np.median(s[tw & (rel < 0.6)]))
+    all_med = float(np.median(s[tw]))
     over60 = float((s[tw] > 60.0).mean())
+    diffs = []
+    for t in np.unique(tid[tw]):
+        m = tw & (tid == t)
+        if m.sum() < 400:                       # 1600 m2: a cone the window holds, not a sliver at its edge
+            continue
+        r = (up_h[m] - foot[t]) / max(top[t] - foot[t], 1.0)
+        if (r >= 0.6).sum() >= 30 and (r < 0.6).sum() >= 30:
+            diffs.append(float(np.median(s[m][r >= 0.6]) - np.median(s[m][r < 0.6])))
     assert 25.0 <= all_med <= 45.0, f'the cluster cones: median {all_med:.1f} deg'
-    assert up_med >= low_med, f'the cluster towers\' upper 40 %: median {up_med:.1f} deg under the lower {low_med:.1f} (domed)'
     assert over60 < 0.05, f'{over60:.1%} of the cluster cones\' cells over 60 degrees (walls inside a cluster)'
+    assert len(diffs) >= 20, f'only {len(diffs)} cones held by the window'
+    cone_diff = float(np.median(diffs))
+    assert cone_diff >= 0.0, f'the cones\' upper 40 % stands {-cone_diff:.1f} deg gentler than their lower 60 % (domed)'
     record('test_tower_slopes', towers=len(walls), median_slope_deg=round(med, 1), share_over_70=round(over70, 3),
            share_over_80=round(float((a > 80.0).mean()), 3), cluster_median_deg=round(all_med, 1),
-           cluster_upper_median_deg=round(up_med, 1), cluster_lower_median_deg=round(low_med, 1),
+           cluster_upper_median_deg=round(up_med, 2), cluster_lower_median_deg=round(low_med, 2),
+           cones=len(diffs), cone_upper_minus_lower_deg=round(cone_diff, 2),
+           cones_steeper_on_top=round(float(np.mean(np.array(diffs) >= 0.0)), 2),
            cluster_share_over_60=round(over60, 3))
 
 
@@ -448,6 +466,32 @@ def test_no_terraces_on_hero_levels():
     worst = max(res)
     assert worst <= 0.15, f'the cone departs from its running mean by {worst:.2f} m rms: terraces'
     record('test_no_terraces_on_hero_levels', rays=len(res), rms_m_max=round(worst, 4))
+
+
+def test_no_lattice_creases_on_hero_levels():
+    """The towers' flanks carry no grid of creases on the hero levels: on 1 m cells (the 600 m window under the
+    plain_fields camera of seed 1), along each axis and for every lattice step the smooth world fields are sampled at
+    here (2, 3, 5 and 7 cells), the slope changes from cell to cell as much at one phase of the step as at any other
+    (the medians of the phases within 1.4 of each other, on tower cells over 15 m above the plain). (The fields were
+    interpolated bilinearly, their slope jumping at every lattice line: the cones' jitter, scaled by the distance
+    from an apex, stood a crease every 5 m, its slope change 20 times the flank's own between them.)"""
+    plan = K.plan_karst(1, DOMAIN, {}, via=(0, 0), main=MAIN)
+    x0, y0 = 3243.0, -1632.0
+    out = K.evaluate(plan, x0, y0, 1.0, 600, fill=False)
+    h = out['h'].astype(np.float64)
+    tower = (out['tower_id'] >= 0) & (h - out['plain'] > 15.0)
+    ratios = {}
+    for k in (2, 3, 5, 7):
+        for ax, origin in ((1, x0), (0, y0)):
+            jump = np.abs(np.diff(h, n=2, axis=ax))
+            m = tower[:, 1:-1] if ax == 1 else tower[1:-1, :]
+            phase = (np.arange(jump.shape[ax]) + 1 + int(origin)) % k
+            sel = (lambda p: (slice(None), phase == p)) if ax == 1 else (lambda p: (phase == p, slice(None)))
+            meds = [float(np.median(jump[sel(p)][m[sel(p)]])) for p in range(k)]
+            ratios[f'{k}_{"x" if ax == 1 else "y"}'] = round(max(meds) / max(min(meds), 1e-9), 3)
+    worst = max(ratios, key=ratios.get)
+    assert ratios[worst] <= 1.4, f'creases every {worst} cells: a phase changes slope {ratios[worst]:.1f} x as much'
+    record('test_no_lattice_creases_on_hero_levels', tower_cells=int(tower.sum()), phase_ratio=ratios)
 
 
 def test_determinism():
@@ -736,7 +780,8 @@ def test_guilin_judge():
 
 TESTS = [test_blue_noise_spacing, test_plan_spacing_and_clusters, test_profile_functions, test_tower_walls_and_summits,
          test_plan_kinds, test_tower_slopes, test_world_space_windows, test_window_shift, test_base_edge_continuous,
-         test_no_terraces_on_hero_levels, test_cockpit_floors_meet_their_ground, test_parent_child_levels,
+         test_no_terraces_on_hero_levels, test_no_lattice_creases_on_hero_levels,
+         test_cockpit_floors_meet_their_ground, test_parent_child_levels,
          test_determinism,
          test_fenglin_composition, test_cluster_massifs, test_river, test_fengcong_composition,
          test_fluting_on_hero_levels,
