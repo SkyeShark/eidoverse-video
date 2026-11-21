@@ -77,7 +77,8 @@ The carve, step by step (each a GPU kernel where the work is per cell):
      lognormal noise in the trough, the range's own Sc outside: wall_deg where the rock is massive, down to
      rock_weak_deg where it is weak (rock_strength, world noise in reaches a few km long), so the walls in weak rock
      fail back after the ice into a U over their own talus and massive reaches keep their box (Lauterbrunnen's box
-     between the village and Stechelberg, its U and V reaches beyond); the debris lands as talus at the walls' feet
+     between the village and Stechelberg, its U and V reaches beyond); massive rock never fails under the slope the
+     level's cells give it (_wall_sc's surface), only along couloirs; the debris lands as talus at the walls' feet
      (the talus stage after this one sets it at 35 degrees).
   7. Lateral moraines: ridges of moraine_m along the trough below the ELA, at the foot of the walls.
 The level runner's end stage fills what closed basins remain (recipe defaults lakes='sediment': flat floors;
@@ -150,9 +151,13 @@ Parameters (metres, years, degrees; DEFAULTS below):
     centre_valleys 1            each seed moved across to the middle of its valley (valley_centre: halfway between
                                 where the ground first stands H / 2 above the valley's floor) before that smoothing,
                                 by this share (0: on the drainage's cells)
-    rock_weak_deg None, rock_scale_m 3000, rock_strong_share 0.35
+    rock_weak_deg None, rock_scale_m 3000, rock_strong_share 0.35, rock_band_m 0, rock_band_down_m 0,
+    rock_band_azimuth_deg 0
                                 the rock (rock_strength: world noise at rock_scale_m, rock_strong_share of the ground
-                                massive): the fresh walls' threshold stands at wall_deg where the rock is massive and
+                                massive, and with rock_band_m a massive formation crossing the valley within
+                                rock_band_m of a line rock_band_down_m down-valley of the tile's centre, the valley
+                                running toward rock_band_azimuth_deg): the
+                                fresh walls' threshold stands at wall_deg where the rock is massive and
                                 down to rock_weak_deg where it is weakest (_wall_sc), so after the ice the walls in weak
                                 rock fail back over their own talus into a U, wider at the lip and with less flat floor,
                                 and massive reaches keep their box (the finer levels sharpen only those). None: massive
@@ -210,7 +215,8 @@ DEFAULTS = dict(
     floor_grade=0.012,
     wobble_m=700.0, wobble_w=0.12, wobble_h=0.1,
     channel_area_m2=1.5e6, min_width_cells=2.0, smooth_cells=6.0, centre_valleys=1.0, join_m=60.0, trim_m=20.0,
-    rock_weak_deg=None, rock_scale_m=3000.0, rock_strong_share=0.35,
+    rock_weak_deg=None, rock_scale_m=3000.0, rock_strong_share=0.35, rock_band_m=0.0, rock_band_down_m=0.0,
+    rock_band_azimuth_deg=0.0,
     cirques=True, cirque_band_m=300.0, cirque_radius_m=(400.0, 800.0), cirque_elong=1.35, cirque_depth_m=350.0,
     cirque_floor_m=50.0, cirque_floor_frac=0.35, cirque_exp=2.0, cirque_spacing=1.5, cirque_headroom_m=0.0,
     cirque_headwall_m=500.0, cirque_open=2.5, cirque_tarn_m=40.0, cirque_lobes=0.15, cirque_tilt_deg=8.0,
@@ -876,15 +882,20 @@ def valley_centre(h, level, xy, st, W, H, depth=0.5, reach=2.0, shift=0.5):
 
 
 ROCK_NOISE = {'kind': 'fbm', 'octaves': 2, 'seed': 9500}
+ROCK_BAND_EDGE_M = 500.0                  # the massive formation's edges ease out over this
 
 
 def rock_strength(x, y, params, seed, level=None, dev=None):
     """The rock's strength, 0 (weak: shale, flysch, jointed) .. 1 (massive: Lauterbrunnen's limestone cliffs), at
     world points (x, y) or, with a level, at its cells: world fbm at rock_scale_m over its quantile for
-    rock_strong_share (that share of the ground is strong), eased over 0.2 of the noise (about 0.6 sigma). 1
-    everywhere when rock_weak_deg is None."""
+    rock_strong_share (that share of the ground is strong), eased over 0.2 of the noise (about 0.6 sigma), and with
+    rock_band_m a formation of massive rock crossing the valley: strength 1 within rock_band_m of the line square to
+    rock_band_azimuth_deg (the valley's direction down it) rock_band_down_m down-valley of the world's origin (the
+    tile's centre), easing out over the next ROCK_BAND_EDGE_M. 1 everywhere when rock_weak_deg is None."""
+    if level is not None:
+        x, y = level.xy()
     if _p(params, 'rock_weak_deg') is None:
-        return np.ones((level.n, level.n)) if level is not None else np.ones(np.shape(x))
+        return np.ones(np.shape(x))
     spec = dict(ROCK_NOISE, wavelength_m=float(_p(params, 'rock_scale_m')))
     if level is not None:
         nz = FL._field(spec, level, seed, dev)
@@ -894,7 +905,15 @@ def rock_strength(x, y, params, seed, level=None, dev=None):
     share = min(max(float(_p(params, 'rock_strong_share')), 0.02), 0.98)
     q = NormalDist(0.0, 1.0 / 3.0).inv_cdf(1.0 - share)
     t = np.clip((nz - q) / 0.2 + 0.5, 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
+    g = t * t * (3.0 - 2.0 * t)
+    band = float(_p(params, 'rock_band_m'))
+    if band > 0:
+        az = math.radians(float(_p(params, 'rock_band_azimuth_deg')))
+        u = (np.asarray(x, np.float64) * math.sin(az) + np.asarray(y, np.float64) * math.cos(az)
+             - float(_p(params, 'rock_band_down_m')))
+        tb = np.clip((band + ROCK_BAND_EDGE_M - np.abs(u)) / ROCK_BAND_EDGE_M, 0.0, 1.0)
+        g = np.maximum(g, tb * tb * (3.0 - 2.0 * tb))
+    return g
 
 
 def wall_angle_deg(g, params):
@@ -1475,19 +1494,29 @@ op_valley_uplift.evolves = True
 
 # =================================================================================================== the carve ===
 
-def _wall_sc(level, params, seed, dev, h=None):
-    """The fresh walls' threshold (tangent): tan(the walls' angle in the cell's rock: wall_angle_deg) x
-    exp(wall_noise n + flutes), n unit noise at the wall scales the level resolves (strong and weak rock: ribs stand,
-    chutes fail), the flutes (wall_flutes) when the surface h is given."""
-    t = np.tan(np.radians(wall_angle_deg(rock_strength(None, None, params, seed, level, dev), params)))
+def _wall_sc(level, params, seed, dev, h=None, surface=None):
+    """The fresh walls' threshold (tangent): tan(the walls' angle in the cell's rock: wall_angle_deg) x exp(wall_noise
+    n), n unit noise at the wall scales the level resolves (strong and weak rock: ribs stand, chutes fail), and with
+    a surface, never under the slope its cells give massive rock (1.05 x its slope x the rock's strength squared),
+    then x exp(flutes) (wall_flutes) when h is given. Massive rock stands as the ice cut it: a level that draws a cliff
+    of 80 degrees over two or three of its cells cannot hold it at a threshold of that angle, and the pass that
+    should have left it standing failed it cell by cell along every wall the grid crosses on the slant, a row of
+    teeth that the finer levels sharpened (seed 1's east wall, from the coarsest level on). Weak rock still fails
+    back to its angle, and couloirs (the flutes) still fail in massive rock."""
+    g = rock_strength(None, None, params, seed, level, dev)
+    t = np.tan(np.radians(wall_angle_deg(g, params)))
     sc = FL._scales(_p(params, 'wall_scales_m'), level.cell, 3.0)
     a = float(_p(params, 'wall_noise'))
     ln = np.zeros((level.n, level.n))
     if a > 0 and sc:
         ln = ln + a * FL._unit_noise(sc, level, seed, dev, 601)
+    out = t * np.exp(ln)
+    if surface is not None:
+        gx, gy = Gd.gradient(np.asarray(surface, np.float64), level.cell)
+        out = np.maximum(out, np.asarray(g, np.float64) ** 2 * 1.05 * np.hypot(gx, gy))
     if h is not None:
-        ln = ln + wall_flutes(h, level, params, seed, dev)
-    return t * np.exp(ln)
+        out = out * np.exp(wall_flutes(h, level, params, seed, dev))
+    return out
 
 
 FLUTE_ORIENTATIONS = 8
@@ -1677,7 +1706,7 @@ def carve_level(fields, level, params, seed, ctx, dev):
     wall = np.clip(np.asarray(M[..., 2], np.float64) * 1.5, 0.0, 1.0)
     sc_range = np.asarray(fields['Sc'], np.float64) if 'Sc' in fields else \
         np.full((n, n), math.tan(math.radians(35.0)))
-    Sc = sc_range * (1.0 - wall) + _wall_sc(level, params, seed, dev) * wall
+    Sc = sc_range * (1.0 - wall) + _wall_sc(level, params, seed, dev, surface=h_new) * wall
     _walls(dev, fields, level, Sc, pins, _p(params, 'wall_iters'), float(_p(params, 'wall_rate')))
     fields['Sc'] = Sc.astype(F32)
     ctx.evolved = True
@@ -1733,7 +1762,8 @@ def refine_level(fields, level, params, seed, ctx, dev):
                           1.05 * np.hypot(gx, gy))
         Sc = base * np.exp(wall * wall_flutes(h_in, level, params, seed, dev) + (1.0 - wall) * range_flutes)
     else:
-        Sc = sc_range * np.exp(range_flutes) * (1.0 - wall) + _wall_sc(level, params, seed, dev, h=h_in) * wall
+        Sc = sc_range * np.exp(range_flutes) * (1.0 - wall) + _wall_sc(level, params, seed, dev, h=h_in,
+                                                                      surface=h_in) * wall
     iters = int(_p(params, 'refine_wall_iters'))
     if iters > 0:
         _walls(dev, fields, level, Sc, pins, iters, float(_p(params, 'wall_rate')))

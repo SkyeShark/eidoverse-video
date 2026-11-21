@@ -351,6 +351,13 @@ def test_rock():
             bad.append(f'share {share}: {got:.2f}')
     if not np.all(G.rock_strength(x, y, {}, 3) == 1.0):
         bad.append('not massive everywhere without rock_weak_deg')
+    # a massive formation 1 km down a valley draining east, 800 m either side of its line: massive across it
+    band = dict(rock_weak_deg=45.0, rock_strong_share=0.05, rock_band_m=800.0, rock_band_down_m=1000.0,
+                rock_band_azimuth_deg=90.0)
+    gin = G.rock_strength(1000.0 + rng.uniform(-750, 750, 500), rng.uniform(-20000, 20000, 500), band, 3)
+    gout = G.rock_strength(1000.0 + rng.uniform(2000, 9000, 2000), rng.uniform(-20000, 20000, 2000), band, 3)
+    if gin.min() < 0.99 or (gout > 0.5).mean() > 0.12:
+        bad.append(f'the massive formation: {gin.min():.2f} in it, {(gout > 0.5).mean():.2f} massive beyond')
     a = G.wall_angle_deg(np.array([0.0, 1.0]), {'rock_weak_deg': 45.0, 'wall_deg': 80.0})
     if not np.allclose(a, [45.0, 80.0]):
         bad.append(f'angles {a}')
