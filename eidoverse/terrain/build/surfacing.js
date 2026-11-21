@@ -1307,10 +1307,12 @@ const DENO_BITMAP = Symbol.for('Deno_bitmapData');
 
 /** An image file's pixels as stored: { data (Uint8Array, rows top first, `channels` bytes a pixel; 16-bit samples
  * as two bytes each, little-endian), width, height, channels, bits }. Deno's own decoder (the edition's
- * loadImageTexture's), with no colour transform and no premultiplied alpha (a data channel in alpha stays itself). */
+ * loadImageTexture's), with no colour transform. Its premultiplyAlpha stays 'default', which hands over the stored
+ * bytes; 'none' divides a PNG's colour by its alpha on this Deno (measured on a packed scan: 132 read as 149 under
+ * an alpha of 226), and a packed scan's alpha is data (height, AO). */
 export async function readImage(path) {
     const bytes = await Deno.readFile(path);
-    const bmp = await createImageBitmap(new Blob([bytes]), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+    const bmp = await createImageBitmap(new Blob([bytes]), { colorSpaceConversion: 'none' });
     if (typeof bmp[DENO_BITMAP] !== 'function') throw new Error(`readImage: this Deno cannot hand over decoded pixels (${path})`);
     const raw = bmp[DENO_BITMAP]();
     const w = bmp.width, h = bmp.height, px = w * h;
@@ -2046,7 +2048,8 @@ async function surfaceGroupData(pal, sd, opts) {
     const log = opts.log === undefined ? console.log : opts.log;
     const opt = pal.options;
     const layers = pal.layers;
-    const scans = await scanArrays(pal, { THREE, R, prefer, log });
+    // opts.scans: scanArrays' result made elsewhere (a test's colour grid in place of a scan, check 2)
+    const scans = opts.scans ?? await scanArrays(pal, { THREE, R, prefer, log });
     const sets = scans.sets;
     const { coords, Ng, Vin, vd, consts, ndv, vpix, fpRead, fp } = pixelInputs(pal);
     const aaOn = opt.specular_aa !== false;
@@ -2476,24 +2479,28 @@ async function farGroupData(pal, sd, opts) {
 // a NodeMaterial of a graph: Blender's Principled BSDF (base colour, roughness, normal, its Specular IOR Level as
 // the IOR that gives its F0, module doc), or an unlit debug view
 function nodeMaterial(THREE, gr, name) {
+    // uniformFlow: every select of the graph a WGSL select() of two evaluated values, as Blender's GLSL computes its
+    // Math and Mix nodes, not an if / else three would otherwise write around each (branch-free code; a sample's
+    // implicit derivatives always in uniform control flow)
+    const U = (n) => T.uniformFlow(n);
     if (gr.emission) {
         const m = new THREE.MeshBasicNodeMaterial();
-        m.colorNode = T.vec4(V3(gr.emission), 1.0);
+        m.colorNode = U(T.vec4(V3(gr.emission), 1.0));
         m.name = name;
         return m;
     }
     const m = new THREE.MeshPhysicalNodeMaterial({ metalness: 0.0, roughness: 1.0 });
-    m.colorNode = T.vec4(V3(gr.albedo), 1.0);
-    m.roughnessNode = F(gr.roughness);
+    m.colorNode = U(T.vec4(V3(gr.albedo), 1.0));
+    m.roughnessNode = U(F(gr.roughness));
     m.metalnessNode = T.float(0.0);
-    m.normalNode = toViewNormal(gr.normal);
+    m.normalNode = U(toViewNormal(gr.normal));
     const s = gr.specular;
     if (isNum(s) && s <= 0.0) {
         m.specularIntensity = 0.0;
     } else {
         const f0 = mul(0.08, s);
         const r = msqrt(f0);
-        m.iorNode = F(div(add(1.0, r), mmax(sub(1.0, r), 1e-4)));
+        m.iorNode = U(F(div(add(1.0, r), mmax(sub(1.0, r), 1e-4))));
         m.specularIntensity = 1.0;
     }
     m.name = name;
@@ -2584,7 +2591,7 @@ export async function surfaceMaterial(palette = 'auto', opts = {}) {
     }
     const t0 = performance.now();
     const pal = resolve(palette, opts.recipe ?? null, opts.strata ?? null, opts.options ?? null, opts.constants ?? null);
-    const gr = await surfaceGroupData(pal, opts.data, { THREE, R, prefer: opts.prefer, log: opts.log });
+    const gr = await surfaceGroupData(pal, opts.data, { THREE, R, prefer: opts.prefer, log: opts.log, scans: opts.scans });
     const m = nodeMaterial(THREE, gr, name);
     Object.assign(m.userData, { eidoPalette: pal.name, eidoSets: gr.info.sets, eidoTextures: gr.info.textures,
         eidoSurfaceKey: gr.info.surfaceKey, eidoFarM: gr.D0, eidoFarUniform: gr.farUniform, eidoHex: gr.info.hex,
@@ -2942,11 +2949,15 @@ export async function packSet(name, prefer = '2k', opts = {}) {
     const { prims } = await import('../core/prims.js');
     const PR = prims(R);
     Deno.mkdirSync(d, { recursive: true });
+    const tm = {};
+    let tl = performance.now();
+    const lap = (k) => { const n = performance.now(); tm[k] = +((n - tl) / 1000).toFixed(2); tl = n; };
     const col = await imageField(R, src.color);
     const W = col.w, H = col.h;
     const stand = R.field(1, 1, 4, new Float32Array([0.5, 0.5, 0.5, 1.0]));
     const maps = {};
     for (const r of ['normal', 'roughness', 'ao', 'displacement', 'arm']) maps[r] = r in src ? (await imageField(R, src[r])).field : null;
+    lap('decode');
     // the height's mean and spread over the fitted displacement (numpy's float64 mean and two-pass std; float32 sums
     // in a fixed tree here)
     let hm = 0.5, hs = 0.0;
@@ -2959,6 +2970,7 @@ export async function packSet(name, prefer = '2k', opts = {}) {
         fitted.destroy();
         dev.destroy();
     }
+    lap('height');
     const outA = R.field(H, 4 * W, 1, null, 'u32'), outB = R.field(H, 4 * W, 1, null, 'u32'), outL = R.field(H, W, 4);
     R.run(R.kernel('surfacing_pack', PACK), { col: col.field, nrm: maps.normal ?? stand, rgh: maps.roughness ?? stand,
         aom: maps.ao ?? stand, dsp: maps.displacement ?? stand, arm: maps.arm ?? stand }, { outA, outB, outL },
@@ -2970,6 +2982,7 @@ export async function packSet(name, prefer = '2k', opts = {}) {
     await Io.writePng(tmpB, { field: outB, width: W, height: H, channels: 4, bitDepth: 8 });
     Deno.renameSync(tmpA, aPath);
     Deno.renameSync(tmpB, bPath);
+    lap('png');
     // the stats: means over the texels (numpy's float32 means; float32 sums in a fixed tree here)
     const lin = [];
     for (let c = 0; c < 3; c++) lin.push((await PR.stats(outL, { channel: c })).mean);
@@ -2984,7 +2997,8 @@ export async function packSet(name, prefer = '2k', opts = {}) {
     const tmp = `${d}/stats.${Deno.pid}.tmp`;
     Deno.writeTextFileSync(tmp, JSON.stringify(stats, null, 1));
     Deno.renameSync(tmp, sPath);
-    if (log) log(`[surfacing] packed ${src.name} (${W}x${H}) in ${((performance.now() - t0) / 1000).toFixed(1)} s -> ${d}`);
+    lap('stats');
+    if (log) log(`[surfacing] packed ${src.name} (${W}x${H}) in ${((performance.now() - t0) / 1000).toFixed(1)} s (${JSON.stringify(tm)}) -> ${d}`);
     return d;
 }
 
@@ -3235,4 +3249,4 @@ export { hexClass as hex_class, farDistance as far_distance, setFarDistance as s
     strataImage as strata_image, surfaceMaterial as surface_material, farMaterial as far_material, applySurface as apply_surface,
     clayMaterial as clay_material, terrainMap as terrain_map_group, terrainConstants as terrain_constants, farRings as far_rings,
     packSet as pack_set, packedSet as packed_set, scanNormalVariance as scan_normal_variance, canopyMean as canopy_mean,
-    canopyClumpMean as canopy_clump_mean, readerNodes as reader_group, hexGrid as hex_grid_group };
+    canopyClumpMean as canopy_clump_mean, readerNodes as reader_group, hexGrid as hex_grid_group, cubicRead as _cubicRead };
