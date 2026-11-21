@@ -43,13 +43,19 @@ numpy twins; no Blender):
        level moves it free (the band is a pin); blended, the outcome is the run with only the seam's two cells held,
        mixed with the parent by the band's weights (within 1e-4 m)
        hold_rivers on a hero level: the river the parent resolved keeps its heights (within 1e-4 m; free it moves
-       over 5 cm), and the ground around it refines at least half as much as free
+       over 5 cm), and the ground around it refines at least half as much as free; on a main level it holds only
+       with hold_levels 'refine'
        channel_head_frac on a refining level: rippled hillsides beside a river start no channels (their p90 change
        under a quarter of free), and the river still cuts (at least a quarter of free, and 1 m deeper than with a
        head above every cell's area, where creep fills its bed)
+       spill_yr on a growing level: one spill fills a closed hollow 80 m deep to its spill (under 1 mm of closed
+       depression left, every filled cell with a lower neighbour, the fill in deposit and loose within 1 mm), and
+       over 400 steps of uplift its floor ends at least 20 m lower than without spills (its water crossed the spill
+       and cut it down); a refining level spills only with spill_levels 'all'
   hydro inlets (solvers/hydro.py, run.py's end stage)
        the water a child is given across 21 edge cells behind a 0.2 m lip reaches its valley's outlet whole with the
-       inlets closed, under half of it with the whole edge open
+       inlets closed, under half of it with the whole edge open; with a 1 % share only those 21 cells are inlets,
+       not the hillside trickles over the rest of the edge
   incise (solvers/fluvial.py)
    10. a base-level fall along a straight course over a hilly upland: the channel is cut to the upland's grade minus
        drop_m (within 15 %), the cut falls off away from the course (a valley), and 900 m and more from it the
@@ -647,11 +653,35 @@ def test_hold_rivers():
                               'lock_m': 32.0, 'steps': 150, 'hold_rivers': hold}, seed=1, ctx=ctx)
         dh = np.asarray(f['h'], np.float64) - h0
         out[hold] = (float(np.max(np.abs(dh[river]))), float(np.percentile(np.abs(dh[~river]), 90)))
+    # hold_levels: the same level as a main level refining its context parent (depth 0) holds only with 'refine'
+    up = L.Level(0, 'context', -128.0, -128.0, 256.0, 4.0, 64, None, 2, (), 16, 1)
+    mv = L.Level(1, 'main', lv.x0, lv.y0, lv.side, cell, n, 0, 2, (), 16, 0)
+    moved = {}
+    for where in ('hero', 'refine'):
+        f = Fields(mv, {'h': h0.astype(np.float32), 'bed': h0.astype(np.float32), 'A': A0.astype(np.float32)})
+        ctx = FL.StageContext(plan=[up, mv], index=1, level=mv, fresh=False, role='refine', pins=pins,
+                              device=DEV, log=lambda m: None)
+        FL.op_fluvial(f, mv, {'K': 2e-3, 'valley_spacing_m': 16.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                              'lock_m': 32.0, 'steps': 150, 'hold_rivers': 4.0, 'hold_levels': where}, seed=1, ctx=ctx)
+        moved[where] = float(np.max(np.abs(np.asarray(f['h'], np.float64) - h0)[river]))
+    # a rounding pit 0.4 m deep on the course (an upsampled parent keeps them): held as it was, the run's routing
+    # stopped there and the river below it lost the inflow; held where it drains, the area passes it
+    hp = h0 - 0.4 * np.exp(-0.5 * (np.hypot(x - 20.0, y) / 3.0) ** 2)
+    f = Fields(lv, {'h': hp.astype(np.float32), 'bed': hp.astype(np.float32), 'A': A0.astype(np.float32)})
+    ctx = FL.StageContext(plan=[main, lv], index=1, level=lv, fresh=False, role='refine', pins=pins, device=DEV,
+                          log=lambda m: None)
+    FL.op_fluvial(f, lv, {'K': 2e-3, 'valley_spacing_m': 16.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                          'lock_m': 32.0, 'steps': 150, 'hold_rivers': 4.0}, seed=1, ctx=ctx)
+    below = river & (x < 0.0) & (x > lv.x0 + 20 * cell)
+    passed = float(np.asarray(f['A'], np.float64)[below].max(axis=None)) if below.any() else 0.0
     (r0, g0), (r1, g1) = out[0.0], out[4.0]
-    ok = r1 < 1e-4 and r0 > 0.05 and g1 > 0.5 * g0
+    ok = (r1 < 1e-4 and r0 > 0.05 and g1 > 0.5 * g0 and moved['refine'] < 1e-4 and moved['hero'] > 0.05
+          and passed >= 3.0e5)
     check('fluvial hold_rivers: a hero level keeps the river its parent resolved', ok,
           f'the river\'s cells moved at most {r1:.1e} m held ({r0:.2f} m free); the ground around moved '
-          f'{g1:.2f} m (p90) held, {g0:.2f} m free')
+          f'{g1:.2f} m (p90) held, {g0:.2f} m free; on a main level the river moved {moved["hero"]:.2f} m with '
+          f'hold_levels hero, {moved["refine"]:.1e} m with refine; below a 0.4 m pit on the held course the river '
+          f'carries {passed / 1e3:.0f} thousand m2 (the inflow: 300)')
 
 
 def test_channel_head():
@@ -688,6 +718,53 @@ def test_channel_head():
           f'anywhere (creep filling it)')
 
 
+def test_spill():
+    """spill_yr on a growing level: a closed hollow 80 m deep in the middle of an uplifted block. One spill fills
+    it to its spill point, tilted so that every filled cell drains (no closed depression left, every filled cell
+    has a lower neighbour), the fill counted in deposit and loose cover. Over the run, its water crossing the spill
+    cuts the outlet down, so the hollow's floor ends lower than without the spills, where the routing never carried
+    its water out and it only filled."""
+    n, cell = 64, 100.0
+    lv = L.Level(0, 'context', -n * cell / 2, -n * cell / 2, n * cell, cell, n)
+    x, y = lv.xy()
+    r = np.hypot(x, y)
+    block = np.clip(Gd.edge_distance(n) * cell / 1200.0, 0.0, 1.0)
+    rng = np.random.default_rng(3)
+    h0 = (250.0 * block - 80.0 * np.exp(-0.5 * (r / 700.0) ** 2) + 3.0 * rng.standard_normal(x.shape)).astype(np.float32)
+    z = np.zeros(h0.shape, np.float32)
+    par = np.stack([z, np.full_like(z, 2e-5), np.full_like(z, 0.6), z], -1)
+    run = FL.FluvialRun(DEV, cell, {'h': h0, 'bed': h0}, par, FL.edge_pins(n, h0))
+    raised = run.spill()
+    hs = np.asarray(run.height(), np.float64)
+    mk = np.asarray(DEV.read(run.M.src), np.float64)
+    left = float((HY.fill_depressions(hs)[0] - hs).max())
+    fill = hs - h0.astype(np.float64)
+    drains = bool(np.all(FL.d8_receivers(hs)[fill.ravel() > 0] >= 0))
+    booked = float(max(np.abs(mk[..., 1] - fill).max(), np.abs(mk[..., 3] - fill).max()))
+    floors = {}
+    for sp in (0.0, 6.4e4):                                  # 50 steps of 1282 yr
+        f = Fields(lv, {'h': h0, 'bed': h0, 'U': (1.5e-3 * block).astype(np.float32)})
+        FL.op_fluvial(f, lv, {'K': 2e-5, 'valley_spacing_m': 600.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                              'threshold_deg': 30.0, 'steps': 400, 'spill_yr': sp}, seed=1, ctx=ctx_of(lv))
+        floors[sp] = float(np.asarray(f['h'], np.float64)[r < 1500.0].min())
+    # spill_levels: a refining level spills only with 'all'
+    spilled = {}
+    for where in ('grow', 'all'):
+        f = Fields(lv, {'h': h0, 'bed': h0, 'A': np.full(h0.shape, cell * cell, np.float32)})
+        ctx = FL.StageContext(plan=[lv], index=0, level=lv, fresh=False, role='refine', pins=FL.edge_pins(n, h0),
+                              device=DEV, log=lambda m: None)
+        FL.op_fluvial(f, lv, {'K': 2e-5, 'valley_spacing_m': 600.0, 'roughness': 0.0, 'threshold_noise': 0.0,
+                              'lock': False, 'steps': 20, 'spill_yr': 1.0, 'spill_levels': where}, seed=1, ctx=ctx)
+        spilled[where] = ctx.shared['fluvial_log'][-1]['spilled_cells']
+    ok = (raised > 0 and left < 1e-3 and drains and booked < 1e-3 and floors[6.4e4] < floors[0.0] - 20.0
+          and spilled['grow'] is None and (spilled['all'] or 0) > 0)
+    check('fluvial spill_yr: a closed hollow fills to its spill and drains over it', ok,
+          f'one spill raised {raised} cells, closed depression left {left:.2e} m, every filled cell drains {drains}, '
+          f'|fill - deposit|, |fill - loose| max {booked:.1e} m; after 400 steps the hollow\'s floor at '
+          f'{floors[6.4e4]:.1f} m with spills every 64 kyr (50 steps), {floors[0.0]:.1f} m without; on a refining '
+          f'level cells spilled {spilled["grow"]} with spill_levels grow, {spilled["all"]} with all')
+
+
 def test_inlets():
     """hydro.inlets: a child level's edge cells where its parent's water comes in are no outlets of its routing. A
     river entering behind a low lip (a seam's rounding, a pond the level's own processes made) fills the hollow to the
@@ -709,10 +786,19 @@ def test_inlets():
         acc = HY.accumulate(recv, wgt, term, area=(cell * cell + A_in).ravel()).reshape(h.shape)
         out[closed] = float(acc[:, -1].max())
     entering = float(A_in.sum())
-    ok = out[True] >= entering and out[False] < 0.5 * entering
+    # share: hillsides trickling 50 m2 over every other edge cell stay outlets, the river's 21 cells are inlets
+    trickle = np.zeros((n, n))
+    trickle[0, :] = trickle[-1, :] = trickle[:, -1] = 50.0
+    both = np.maximum(A_in, trickle)
+    shared = HY.inlets(both, 0.01)
+    river_in = bool(shared[n // 2 - 10:n // 2 + 11, 0].all())
+    trickles_open = int(shared.sum()) == 21
+    ok = out[True] >= entering and out[False] < 0.5 * entering and river_in and trickles_open
     check('hydro inlets: the water a child level is given at its edge runs down its valley, not back out', ok,
           f'at the valley\'s outlet {out[True] / 1e3:.0f} thousand m2 with the inlets closed, {out[False] / 1e3:.0f} '
-          f'with the whole edge open ({entering / 1e3:.0f} thousand entering)')
+          f'with the whole edge open ({entering / 1e3:.0f} thousand entering); with a 1 % share the river\'s 21 cells '
+          f'are inlets {river_in}, and only they ({int(shared.sum())} inlets beside {int((trickle > 0).sum())} '
+          f'trickling cells)')
 
 
 def test_grow_levels():
@@ -735,8 +821,8 @@ def main():
     for fn in (test_floor_widths, test_floor_drains, test_tributary_backfill, test_soil_steady, test_soil_asymmetry,
                test_soil_seed, test_soil_heads, test_soil_floor_hold, test_rill_width, test_rills_once,
                test_soil_hollows, test_lake_receivers, test_soil_band, test_band_blend, test_hold_rivers,
-               test_channel_head, test_inlets, test_incise, test_incise_head, test_incised_held, test_regional_cut,
-               test_grow_levels):
+               test_channel_head, test_spill, test_inlets, test_incise, test_incise_head, test_incised_held,
+               test_regional_cut, test_grow_levels):
         try:
             fn()
         except Exception as e:                                         # noqa: BLE001

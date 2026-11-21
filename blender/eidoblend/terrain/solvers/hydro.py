@@ -701,16 +701,22 @@ def _parent_lake_water(level, h, plevel, pfields):
     return np.where(np.isfinite(L) & (L > h), L - h, 0.0)
 
 
-def inlets(A_in):
+def inlets(A_in, share=0.0):
     """The edge cells where a child level's parent sends its water in (A_in > 0, inflow()), as fill_depressions'
     `inlets`: no outlets. Routed with its whole edge open, a child let a river that entered into a hollow or a flat
     at the edge (a seam's rounding, a pond the level's own processes made) leave again through the next edge cell,
     and the trunk downstream lost the catchment the parent had carried to it: on the fluvial range's canyon road
     focus, with its rivers held (fluvial.py hold_rivers), the finest two hero levels still kept 0.50 and 0.07 of
-    it."""
+    it. With `share`, only the edge cells that carry at least that share of all the water coming in (its rivers):
+    the parent's hillsides trickle over most of a window's edge (3154 of the 4092 edge cells of the fluvial range's
+    24 km level), and with all of those closed the water of whole strips along the edge was routed along it to the
+    few cells left open, up to 30 x the drainage area there."""
     a = np.asarray(A_in, np.float64)
-    out = a > 0.0
-    out[1:-1, 1:-1] = False
+    edge = np.zeros(a.shape, bool)
+    edge[0, :] = edge[-1, :] = edge[:, 0] = edge[:, -1] = True
+    out = edge & (a > 0.0)
+    if float(share) > 0.0 and out.any():
+        out &= a >= float(share) * float(a[edge].sum())
     return out
 
 
