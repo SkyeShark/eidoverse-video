@@ -30,7 +30,8 @@
      and where the cells past one lip carry a far seed's cross-section (rho 300), no change larger than the clean
      trough's (the parent's target read from such blocks had stood kilometres high: spikes on yosemite's walls);
      and where the best seed switches at a lip to one down-valley with a floor 160 m lower, the walls there move no
-     more than the clean trough's (read across the switch: 80 m and more, the beads and capsules)
+     more than the clean trough's (read across the switch: 80 m and more, the beads and capsules), eight in ten of
+     the wall's cells still sharpened
  11. wall_flutes' families: no couloir on a level narrower than 2 of its cells across the fall line, and the coarse
      level's couloirs kept on the finer level over the same ground
  12. valley_centre: seeds following a path 250 m off a valley's axis move onto it; seeds on the axis stay
@@ -49,6 +50,11 @@
      confined, on a terrace or a flat not; on a trunk valley with an old valley floor (a bench) and a tributary that
      comes down a V valley and then crosses the bench in a shallow swale, the tributary keeps its trough in the V
      and cuts a shallow one across the bench, and the trunk's seeds are the same with and without confine
+ 19. the rock breakup (detail.op_breakup, as alpine_valley runs it): on a 0.5 m level a bench over a 70-degree face
+     at a slant to the grid, the failure fails the face's weak rock (talus at its foot) and adds next to no rim step;
+     its depth (fail_depth) is max_fail_m in the weakest rock inside a face, none in rock of mean strength or more
+     and none on the rim's last rock cell; with no failure passes the relief alone, whatever the failure's
+     parameters; with top_cell_m the stage's first level adds every scale it resolves, the next only its band
 Writes blender/tests/terrain/out/glacial/twin_tests.json; exit code 1 on a failure.
 """
 import json
@@ -1021,12 +1027,111 @@ def test_sharpen_walls():
           f'{unguarded:.1f} m); {kept * 100:.0f} % of the wall\'s sharpened cells kept', round(time.perf_counter() - t0, 2))
 
 
+def rim_steps(h, cell, deg=70.0, top_deg=30.0):
+    """Rim steps: a cell on gentle ground (its opposite axis neighbour within tan(top_deg) x cell of it) beside an
+    axis neighbour more than tan(deg) x cell lower: the flat top and the face of a staircase rim. (count, rim cells:
+    gentle cells beside ground steeper than 45 degrees), the border's two cells left out."""
+    t = math.tan(math.radians(deg))
+    gentle = math.tan(math.radians(top_deg)) * cell
+    out = np.zeros(h.shape, bool)
+    rim = np.zeros(h.shape, bool)
+    gy, gx = np.gradient(h, cell)
+    steep = np.degrees(np.arctan(np.hypot(gx, gy))) > 45.0
+    for ax in (0, 1):
+        for s in (1, -1):
+            nb = np.roll(h, s, ax)
+            op = np.roll(h, -s, ax)
+            flat_top = np.abs(op - h) < gentle
+            out |= (h - nb > t * cell) & flat_top
+            rim |= flat_top & np.roll(steep, s, ax)
+    for a in (out, rim):
+        a[:2], a[-2:], a[:, :2], a[:, -2:] = False, False, False, False
+    return int(out.sum()), int(rim.sum())
+
+
+def test_breakup_rims():
+    """19. The rock breakup's failure at a rim (detail.op_breakup, as alpine_valley and sea_cliffs run it: 'field'):
+    a bench over a 70-degree rock face at a slant to the grid on a 0.5 m hero level, its threshold field at the
+    face's angle. The failure fails the weak rock (chutes, talus at the foot) and adds next to no rim step; with no
+    failure passes the breakup is its relief alone, unchanged by the failure's parameters; and a level whose parent
+    did not run the stage (top_cell_m) adds the relief of every scale it resolves, the next level only its band."""
+    from eidoblend.terrain.core.levels import Level
+    from eidoblend.terrain.solvers import detail as DT
+    t0 = time.perf_counter()
+    n, cell = 96, 0.5
+    lv = Level(4, 'hero', 1000.0, 2000.0, n * cell, cell, n, parent=3, depth=-4)
+    X, Y = lv.xy()
+    a = math.radians(22.5)
+    u = (X - X.mean()) * math.cos(a) + (Y - Y.mean()) * math.sin(a)
+    H, run = 12.0, 12.0 / math.tan(math.radians(70.0))
+    h = 500.0 + np.clip((u + 0.5 * run) / run, 0.0, 1.0) * H + np.where(u > 0.5 * run, (u - 0.5 * run) * 0.15, 0.0)
+    h = h + T.random_field((n, n), 0.0, 0.05, 3, smooth=2).astype(np.float64)
+    steep = np.clip((np.degrees(np.arctan(np.hypot(*np.gradient(h, cell)))) - 45.0) / 20.0, 0.0, 1.0)
+    f0 = dict(h=h, bed=h.copy(), Sc=np.tan(np.radians(38.0 + 32.0 * steep)))
+
+    class Ctx:
+        pins = dict(pin_w=np.zeros((n, n)), pin_h=h.copy())
+        device = None
+        log = None
+        plan = None
+
+    P = {'threshold': 'field', 'rock_slope_deg': [32.0, 45.0], 'spread_deg': 10.0, 'iterations': 200}
+    runs = {}
+    for name, extra in (('fail', {}), ('relief', {'iterations': 0}),
+                        ('relief_other', {'iterations': 0, 'fail_weakness': 0.1, 'fail_rim_m': 5.0})):
+        f = {k: np.array(v, copy=True) for k, v in f0.items()}
+        DT.op_breakup(f, lv, dict(P, **extra), seed=2, backend='numpy', ctx=Ctx(), log=lambda m: None)
+        runs[name] = f
+    s0, rim0 = rim_steps(h, cell)
+    s_rel, _ = rim_steps(np.asarray(runs['relief']['h'], np.float64), cell)
+    s_fail, rim1 = rim_steps(np.asarray(runs['fail']['h'], np.float64), cell)
+    fell = h - np.asarray(runs['fail']['h'], np.float64)
+    tal = float(np.asarray(runs['fail']['talus'], np.float64).max())
+    same = float(np.abs(np.asarray(runs['relief']['h'], np.float64) - np.asarray(runs['relief_other']['h'],
+                                                                                np.float64)).max())
+    check('breakup at a rim: the failure fails the face\'s weak rock and adds next to no rim step; no failure passes '
+          'leave the relief alone, whatever the failure\'s parameters',
+          s_fail <= s_rel + max(3, 0.02 * rim1) and fell.max() > 0.5 and tal > 0.3 and same == 0.0,
+          f'rim steps: start {s0} of {rim0} rim cells, relief only {s_rel}, with the failure {s_fail}; the face '
+          f'failed by up to {fell.max():.2f} m, talus up to {tal:.2f} m; relief alone with other failure parameters '
+          f'differs by {same:.1e} m', round(time.perf_counter() - t0, 2))
+    # the failure's depth itself: max_fail_m in the weakest rock deep in a face, none in rock of mean strength or more,
+    # none on the last rock cell beside ground that is not rock, growing over fail_rim_m into the face
+    pf = DT._params(DT.BREAKUP, {}, 'breakup')
+    R = np.tile(np.linspace(-1.0, 1.0, 21)[None, :], (40, 1))
+    rock = np.zeros((40, 21))
+    rock[8:, :] = 1.0                                          # rows 0-7 ground that is not rock, then the face
+    d = DT.fail_depth(pf, R, rock, 0.5)
+    k = int(round(2.0 * pf['max_fail_m'] / 0.5))
+    ok = (abs(d[30, 0] - pf['max_fail_m']) < 1e-9 and float(d[:, 10:].max()) == 0.0 and float(d[8].max()) == 0.0
+          and float(d[8 + k + 2, 0]) > 0.99 * pf['max_fail_m'] and np.all(np.diff(d[8:8 + k + 1, 0]) >= 0.0))
+    check('breakup failure depth: the full depth in the weakest rock inside a face, none in rock of mean strength or '
+          'more, none on the rim\'s last rock cell, growing into the face', ok,
+          f'weakest inside {d[30, 0]:.2f} m (max_fail_m {pf["max_fail_m"]:.1f}), mean-strength rock '
+          f'{float(d[:, 10:].max()):.2f} m, the rim cell {float(d[8].max()):.2f} m, {k + 2} cells in '
+          f'{float(d[8 + k + 2, 0]):.2f} m')
+    p = DT._params(DT.BREAKUP, {'top_cell_m': 8.0}, 'breakup')
+    first = Level(2, 'main', 0.0, 0.0, 8000.0, 7.8125, 1024, parent=1, depth=0)
+    second = Level(3, 'hero', 0.0, 0.0, 4000.0, 3.90625, 1024, parent=2, depth=-1)
+    t1, _, _ = DT.breakup_terms(p, first, 1)
+    t2, _, _ = DT.breakup_terms(p, second, 1)
+    lam = float(p['scales_m'][0])
+    want1, want2 = DT.resolvable(lam, 7.8125), DT.band(lam, 3.90625)
+    # a term's row 0: (mode, strength amplitude a norm r(size / cell), width, relief amplitude relief size a norm share)
+    ratio1 = float(t1[0, 0, 3]) / max(float(t1[0, 0, 1]) / DT.resolvable(lam, 7.8125), 1e-12) / (p['relief'] * lam)
+    ratio2 = float(t2[0, 0, 3]) / max(float(t2[0, 0, 1]) / DT.resolvable(lam, 3.90625), 1e-12) / (p['relief'] * lam)
+    check('breakup relief from the stage\'s first level (top_cell_m): that level adds every scale it resolves, the '
+          'next only its band', abs(ratio1 - want1) < 1e-6 and abs(ratio2 - want2) < 1e-6,
+          f'the 50 m scale\'s relief share on the 7.8 m level {ratio1:.3f} (resolvable {want1:.3f}; without '
+          f'top_cell_m {DT.band(lam, 7.8125):.3f}), on the 3.9 m level {ratio2:.3f} (band {want2:.3f})')
+
+
 def main():
     for fn in (test_jump_flood, test_mass_balance, test_profile, test_graded_fill, test_best_donor, test_flutes,
                test_flute_families, test_valley_centre, test_rock, test_massive_hold, test_trunk, test_trunk_perched,
                test_drainage_receivers,
                test_shoulder_cut, test_cap_onset, test_lip_open, test_head_taper, test_head_taper_carve,
-               test_wobble_smooth, test_confinement, test_sharpen_walls):
+               test_wobble_smooth, test_confinement, test_sharpen_walls, test_breakup_rims):
         t0 = time.perf_counter()
         try:
             fn()

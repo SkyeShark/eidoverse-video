@@ -18,10 +18,12 @@ contours). From R come
                                        recipes); Sc_factor is its ratio to what the level had
 Then, on exposed rock (rock_slope_deg), the process: differential weathering in closed form (weak rock has worn back,
 strong rock stands proud: the relief D, about 8 % of each scale RMS, along the surface normal), and the threshold
-relaxation (kernels/pipes_thermal.glsl): rock steeper than its own threshold fails, no deeper than max_fail_m (so a
-scar stays a scar: a wall at exactly its threshold would otherwise fail all the way up once one cell gives), and the
-debris slides at its repose angle and gathers as talus at the foot of walls and in couloirs. Ribs, buttresses and
-couloirs come out where the strength says so: couloirs on joints that run down the fall line.
+relaxation (kernels/pipes_thermal.glsl): rock steeper than its own threshold fails, no deeper than the rock is weak
+(fail_depth: up to max_fail_m in the weakest rock, none in rock of mean strength or more, the scars growing shallower
+toward the edge of the exposed rock, so a scar stays a scar and a rim keeps its edge: a wall at exactly its threshold
+would otherwise fail all the way up once one cell gives), and the debris slides at its repose angle and gathers as
+talus at the foot of walls and in couloirs. Ribs, buttresses and couloirs come out where the strength says so:
+couloirs on joints that run down the fall line.
 Scales by level: the strength sees every feature the level resolves (r(size / cell), r = smoothstep(1.5, 3)); the
 relief adds only the band the parent level cannot resolve (r(size / cell) - r(size / (2 cell))), so a feature's relief
 is applied once across the levels that inherit it, and nothing the DEM pixel already holds is added to a real place.
@@ -88,12 +90,20 @@ BREAKUP = {
     'margin_deg': (4.0, 'deg', "'relative': the threshold stands this much above the current slope, so only rock "
                                "weaker than -margin / spread fails (a wall exactly at its threshold would fail all "
                                "the way up once one cell gives)"),
-    'max_fail_m': (2.0, 'm', 'the deepest rock fails below the breakup surface: scars stay local (deeper ones leave '
-                             'planar failure faces at the threshold angle)'),
+    'max_fail_m': (2.0, 'm', 'the deepest the weakest rock fails below the breakup surface: scars stay local (deeper '
+                             'ones leave planar failure faces at the threshold angle)'),
+    'fail_weakness': (0.5, '', "a scar is as deep as its rock is weak: max_fail_m where the strength R reaches "
+                               "-fail_weakness, none where R is 0 or more (smoothstep between)"),
+    'fail_rim_m': (None, 'm', "the scars grow shallower toward the edge of the exposed rock over this distance, to "
+                              "none beside the ground that is not rock (None: 2 x max_fail_m, at least a cell)"),
     'min_deg': (40.0, 'deg', 'the lowest rock threshold'),
     'max_deg': (88.0, 'deg', 'the highest rock threshold'),
     'relief': (0.25, '', "the weathered relief of each isotropic scale, as a fraction of its wavelength (0.25: about "
                          "8 % of it RMS, rock's roughness)"),
+    'top_cell_m': (None, 'm', "the coarsest cell the stage runs on: the level whose parent is coarser than this (the "
+                              "stage's first level) adds the relief of every scale it resolves, the levels below only "
+                              "the band their parent cannot (None: the parent of every level ran the stage too, or "
+                              "holds that relief itself, as a real place's DEM does)"),
     'normal_cap': (4.0, '', 'the largest vertical stretch of a normal displacement (walls steeper than ~76 deg)'),
     'rock_slope_deg': ((38.0, 52.0), 'deg', 'exposed rock: a smoothstep of the slope'),
     'iterations': (400, '', 'threshold-relaxation passes'),
@@ -174,6 +184,13 @@ def breakup_terms(p, level, seed):
     cell = float(level.cell)
     x0, y0 = float(level.x0), float(level.y0)
     rows = []
+    # the relief a level adds: the band its parent could not resolve, or, on the stage's first level (top_cell_m),
+    # every scale it resolves (its parent added none)
+    top = p.get('top_cell_m')
+    first = top is not None and 2.0 * cell > float(top) * (1.0 + 1e-9)
+
+    def share(size_m):
+        return resolvable(size_m, cell) if first else band(size_m, cell)
 
     def term(mode, a_s, width, a_d, M, octave):
         M = np.asarray(M, np.float64)
@@ -188,7 +205,7 @@ def breakup_terms(p, level, seed):
     norm = (1.0 / 3.0) / (N.GRADIENT_STD * math.sqrt(ss)) if ss > 0 else 0.0
     for i, (lam, a) in enumerate(zip(p['scales_m'], amps)):
         lam = float(lam)
-        term(0, a * norm * resolvable(lam, cell), 0.0, p['relief'] * lam * a * norm * band(lam, cell),
+        term(0, a * norm * resolvable(lam, cell), 0.0, p['relief'] * lam * a * norm * share(lam),
              np.eye(2) / lam, i)
     for j, js in enumerate(p['joints'] or ()):
         th = math.radians(float(js.get('strike_deg', 0.0)))
@@ -204,7 +221,7 @@ def breakup_terms(p, level, seed):
         term(1, 0.0, wn, 0.0, M, 16 + 2 * j)
         lam_s = lam_u * 0.7
         term(2, float(js.get('strength', 0.8)) * (w / w_eff), 0.12,
-             float(js.get('depth_m', 1.0)) * band(w, cell), np.stack([u / lam_s, v / lam_s]), 17 + 2 * j)
+             float(js.get('depth_m', 1.0)) * share(w), np.stack([u / lam_s, v / lam_s]), 17 + 2 * j)
     terms = np.zeros((1, max(3 * len(rows), 3), 4), np.float32)
     for t, r in enumerate(rows):
         for q in range(3):
@@ -218,8 +235,7 @@ def breakup_terms(p, level, seed):
         az = math.radians(float(bed.get('azimuth_deg', 0.0)))
         bu = dict(uBedSpacing=float(bed.get('spacing_m', 15.0)), uBedWidth=wz,
                   uBedAmpS=float(bed.get('strength', 0.5)) * on,
-                  uBedAmpD=float(bed.get('depth_m', 0.6)) * (on - resolvable(wz / math.tan(math.radians(70.0)),
-                                                                             2 * cell)),
+                  uBedAmpD=float(bed.get('depth_m', 0.6)) * share(wz / math.tan(math.radians(70.0))),
                   uBedZ0=float(bed.get('z0_m', 0.0)), uDipX=dip * math.cos(az), uDipY=dip * math.sin(az))
     return terms, len(rows), bu
 
@@ -357,6 +373,38 @@ def relax(b0, bed, sc, repose_tan, iterations, rate, backend='gpu', mode=T.BOUND
 
 # ------------------------------------------------------------------------------------------- breakup ---
 
+def _erode3(a):
+    """The minimum over each cell's 3 x 3 neighbourhood, the edges repeated (numpy float64)."""
+    p = np.pad(np.asarray(a, np.float64), 1, mode='edge')
+    n0, n1 = np.shape(a)
+    out = p[1:n0 + 1, 1:n1 + 1].copy()
+    for dj in (0, 1, 2):
+        for di in (0, 1, 2):
+            out = np.minimum(out, p[dj:dj + n0, di:di + n1])
+    return out
+
+
+def fail_depth(p, R, rock, cell):
+    """How deep the cohesive ground may fail below the breakup surface (m, per cell): a scar as deep as its rock is
+    weak (max_fail_m where the strength R reaches -fail_weakness, none where R is 0 or more), growing shallower
+    toward the edge of the exposed rock over fail_rim_m (the rock mask eroded 1..K cells, averaged), to none beside
+    ground that is not rock. A floor of max_fail_m everywhere failed the weaker half of every face to the full depth
+    at once into flat-bottomed scars, and at a rim the scar ended at the last rock cell beside the bench (which does
+    not fail here) in a step a cell wide, which the anchor's high-pass raised into a lip on the bench: a staircase
+    along the rims (the canyon's and the meanders' hero levels; on alpine_valley's 0.98 m level the failure added 45
+    rim steps to a 250 m crop's 69, and adds 9 so)."""
+    t = np.clip(-np.asarray(R, np.float64) / max(float(p['fail_weakness']), 1e-6), 0.0, 1.0)
+    depth = float(p['max_fail_m']) * t * t * (3.0 - 2.0 * t)
+    rim_m = float(p['fail_rim_m']) if p['fail_rim_m'] is not None else 2.0 * float(p['max_fail_m'])
+    k = max(1, int(round(rim_m / float(cell))))
+    e = np.asarray(rock, np.float64)
+    acc = np.zeros_like(e)
+    for _ in range(k):
+        e = _erode3(e)
+        acc += e
+    return depth * acc / k
+
+
 def op_breakup(fields, level, params=None, seed=0, log=None, backend='gpu', ctx=None, **_kw):
     """Stage op 'breakup' (module doc). ctx: the level runner's StageContext (pins, device, log)."""
     log = HY.log_of(log, ctx, '[terrain.detail] ')
@@ -398,7 +446,7 @@ def op_breakup(fields, level, params=None, seed=0, log=None, backend='gpu', ctx=
     bed1 = np.minimum(np.asarray(fields['bed'], np.float64), h1) if 'bed' in fields else h1
     rep = math.tan(math.radians(float(p['repose_deg'])))
     dl, bed_rel, net = relax(to_c(h1), to_c(bed1), sc_eff, rep, p['iterations'], p['rate'], backend,
-                             floor=-float(p['max_fail_m']) / cell)
+                             floor=-fail_depth(p, R, rock, cell) / cell)
     h2 = h1 + dl.astype(np.float64) * cell
     bed2 = h1 + bed_rel.astype(np.float64) * cell
     pw, ph = HY.pins_for(fields, level, h_in, ctx)

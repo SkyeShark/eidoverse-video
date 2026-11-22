@@ -519,6 +519,12 @@ def _smoothstep(e0, e1, x):
     return (t * t * (F32(3) - F32(2) * t)).astype(F32)
 
 
+def _smooth01(x):
+    """smoothstep(0, 1, x) in float64."""
+    t = np.clip(np.asarray(x, np.float64), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
 @T.twin('u_carve')
 def u_carve(s, u):
     """kernels/u_carve.glsl: the U-carve (module doc, step 5)."""
@@ -1471,19 +1477,67 @@ def trough_target(rho, zf, H, ff, fill, rise, prof_u, rock=False):
 
 SHARPEN_RHO_MAX = 2.0                     # sharpen_walls: the farthest from its seed a cell's cross-section is read
 SWITCH_GRAD = 1.0                         # ... and the steepest its floor and lip may change (m per m) to be one seed's
+SWITCH_SOFT = 0.5                         # ... fading out from this share of SWITCH_GRAD
+# Catmull-Rom's weights where a child cell lies a quarter (CR25) and three quarters (CR75) of a parent cell past its
+# second tap (core/grid.upsample2), and the four taps' offsets from the child's centre, in the child's cells
+_CR25 = (-0.0703125, 0.8671875, 0.2265625, -0.0234375)
+_CR75 = (-0.0234375, 0.2265625, 0.8671875, -0.0703125)
+_TAPS_EVEN = (-3.5, -1.5, 0.5, 2.5)        # a child cell 2k (its parent position k - 1/4): taps k - 2 .. k + 1
+_TAPS_ODD = (-2.5, -0.5, 1.5, 3.5)         # a child cell 2k + 1 (k + 1/4): taps k - 1 .. k + 2
+
+
+def _minmod_gradient(a):
+    """The gradient of a per cell (per cell, both axes) from the one-sided differences: the smaller where they agree
+    in sign, 0 where they do not. A distance field's own slope, not the jump to the next seed's field where the best
+    seed changes (a wall cell beside cells whose seed lies hundreds of half-widths away: a jump of hundreds)."""
+    p = np.pad(np.asarray(a, np.float64), 1, mode='edge')
+    out = []
+    for axis in (0, 1):
+        sl = [slice(1, -1), slice(1, -1)]
+        lo, hi = list(sl), list(sl)
+        lo[axis] = slice(0, -2)
+        hi[axis] = slice(2, None)
+        c = p[1:-1, 1:-1]
+        dm, dp = c - p[tuple(lo)], p[tuple(hi)] - c
+        out.append(np.where(dm * dp > 0.0, np.sign(dp) * np.minimum(np.abs(dm), np.abs(dp)), 0.0))
+    return out[0], out[1]
+
+
+def parent_target(f, pu, rock=False):
+    """Each cell's own cross-section as its parent level drew it: the Catmull-Rom upsampling (core/grid.upsample2)
+    of that one cross-section's target T at the parent's cell centres, its rho read along the cell's own distance
+    field (rho is a distance over W: linear across a wall, so rho at a parent's centre is the cell's rho plus its
+    gradient times the offset; the gradient _minmod_gradient's, the cell's own field's). f: the PROFILE_FIELDS and
+    trough_rho on a level whose cells nest 2 x 2 in its parent's (numpy float64)."""
+    rho = f['trough_rho']
+    n0, n1 = rho.shape
+    gy, gx = _minmod_gradient(rho)                              # per child cell
+    par = ('trough_zf', 'trough_H', 'trough_ff', 'trough_fill', 'trough_rise')
+    ox = np.where((np.arange(n1) % 2 == 0)[None, :], 1.0, 0.0)
+    oy = np.where((np.arange(n0) % 2 == 0)[:, None], 1.0, 0.0)
+    out = np.zeros((n0, n1))
+    for a in range(4):
+        wy = oy * _CR75[a] + (1.0 - oy) * _CR25[a]
+        dy = oy * _TAPS_EVEN[a] + (1.0 - oy) * _TAPS_ODD[a]
+        for b in range(4):
+            wx = ox * _CR75[b] + (1.0 - ox) * _CR25[b]
+            dx = ox * _TAPS_EVEN[b] + (1.0 - ox) * _TAPS_ODD[b]
+            r = np.maximum(rho + gx * dx + gy * dy, 0.0)
+            out += wy * wx * trough_target(r, *(f[k] for k in par), pu, rock=rock)
+    return out
 
 
 def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
     """A finer level's walls at its own resolution: the detail its upsampling lost, put back. The level starts as its
     parent upsampled (Catmull-Rom), so its walls are the parent's cliffs smoothed over two of the parent's cells; the
-    trough's cross-section (profile_fields, inherited) gives the target T at the level's own cells and at its
-    parent's (the 2 x 2 block means of the inherited values: rho is linear, so they are the parent's), and
-    h += w (T_own - upsample(T_parent)) (the bedrock likewise with T_rock): the toe, the cliff's core and its lip as
-    sharp as the level resolves, and everything else the level inherited (talus, couloirs, the walls' failures, the
-    fill) kept. w: trough_sharp x the wall zone (from the floor's edge, rho 0.85-1.0 of the cell's floor share, out
-    to just past the lip, rho 1.0-1.15) x the rock's strength squared (rock_strength) x where the ice carved (the
-    carve field, 0-5 m) x off the pinned border band. Returns the largest change (m). numpy (the rock's noise on the
-    GPU with dev)."""
+    trough's cross-section (profile_fields, inherited) gives each cell's target T at its own centre and, read along
+    the cell's own rho, at its parent's cell centres (parent_target: what the parent drew of that one cross-section),
+    and h += w (T_own - upsample(T_parent)) (the bedrock likewise with T_rock): the toe, the cliff's core and its lip
+    as sharp as the level resolves, and everything else the level inherited (talus, couloirs, the walls' failures,
+    the fill) kept. w: trough_sharp x the wall zone (from the floor's edge, rho 0.85-1.0 of the cell's floor share,
+    out to just past the lip, rho 1.0-1.15) x one seed's cross-section (below) x the rock's strength squared
+    (rock_strength) x where the ice carved (the carve field, 0-5 m) x off the pinned border band. Returns the largest
+    change (m). numpy (the rock's noise on the GPU with dev)."""
     if any(k not in fields for k in PROFILE_FIELDS + ('trough_rho',)) or np.ndim(fields['trough_rho']) != 2:
         return 0.0
     n0, n1 = np.shape(fields['h'])
@@ -1492,11 +1546,6 @@ def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
     pu = profile_uniforms(params)
     f = {k: np.asarray(fields[k], np.float64) for k in PROFILE_FIELDS + ('trough_rho',)}
     arg = ('trough_rho', 'trough_zf', 'trough_H', 'trough_ff', 'trough_fill', 'trough_rise')
-
-    def coarse(a):
-        return a.reshape(n0 // 2, 2, n1 // 2, 2).mean(axis=(1, 3))
-
-    fp = {k: coarse(f[k]) for k in arg}
     # a cell's cross-section is one seed's only where its inherited parameters are: the coarsest level keeps each
     # cell's best seed, and where that switches between seeds whose floors and lips differ (beyond a lip a seed
     # down-valley, its floor 150-250 m lower below a confluence, has the lower shoulder there), the floor and the lip
@@ -1505,28 +1554,28 @@ def sharpen_walls(fields, level, params, pin_w=None, seed=0, dev=None):
     # of the coarsest level's cells along every such lip, which each finer level sharpened again into the beaded rim
     # of the main tile and the evenly spaced capsules on the hero walls (seed 1). Within one seed's reach the floor and
     # the lip change by under SWITCH_GRAD metres per metre (the floor's grade, a confluence's deepening smoothed along
-    # the stream); there the walls are sharpened, elsewhere the level keeps its upsampled walls. And a parent cell
-    # stands for the target only where all four of its cells also lie within SHARPEN_RHO_MAX of their seed: beyond
-    # it the cross-section's upper wall rises without bound (its seed's trough cut nothing there), and a block that
-    # mixed a wall cell with one whose best seed lay hundreds of half-widths away averaged them into a target
-    # kilometres high, which the Catmull-Rom carried onto the wall beside it (spikes of 1-5 km on the yosemite
-    # preset's walls). Such a parent is its surface: the block mean of the inherited h (bed)
-    one = f['trough_rho'] <= SHARPEN_RHO_MAX
+    # the stream); there the walls are sharpened, fading out from SWITCH_SOFT x SWITCH_GRAD, and elsewhere the level
+    # keeps its upsampled walls. Beyond SHARPEN_RHO_MAX of its seed (fading over the last quarter half-width) a cell's
+    # cross-section is not read: its upper wall rises without bound there (its seed's trough cut nothing).
+    # Each cell reads only its own cross-section, at its parent's centres too (parent_target). Read from the parent's
+    # cells' own cross-sections instead (the target of each 2 x 2 block's mean parameters, or, where a block mixed
+    # seeds, its surface), the cells beside a switch took a parent row half target and half surface, and where the
+    # carve's cap had left the ground over the target near a lip (by 100-250 m) the sharpening cut that difference
+    # into a line of cells a cell wide along the rim: on seed 1's 3.9 and 1.95 m levels up to 175 and 220 m, the
+    # thin beaded dashes along the hero walls' lips
+    rho = f['trough_rho']
+    q = 1.0 - _smooth01((rho - (SHARPEN_RHO_MAX - 0.25)) / 0.25)
     if level is not None:
+        g = np.zeros_like(q)
         for a in (f['trough_zf'], f['trough_zf'] + f['trough_H']):
             gy, gx = np.gradient(a, float(level.cell))
-            one &= np.hypot(gx, gy) < SWITCH_GRAD
-    whole = coarse(one.astype(np.float64)) > 1.0 - 1e-9
+            g = np.maximum(g, np.hypot(gx, gy))
+        q = q * (1.0 - _smooth01((g - SWITCH_SOFT * SWITCH_GRAD) / ((1.0 - SWITCH_SOFT) * SWITCH_GRAD)))
     out = {}
     for rock in (False, True):
-        t_own = trough_target(*(f[k] for k in arg), pu, rock=rock)
-        surf = np.asarray(fields['bed'] if rock and 'bed' in fields else fields['h'], np.float64)
-        t_p = np.where(whole, trough_target(*(fp[k] for k in arg), pu, rock=rock), coarse(surf))
-        t_par = Gd.crop_upsample2(t_p, 0, 0, n1 // 2, 'catmull', mj=n0 // 2).astype(np.float64)
-        out[rock] = np.where(one, t_own - t_par, 0.0)
-    rho = f['trough_rho']
+        out[rock] = trough_target(*(f[k] for k in arg), pu, rock=rock) - parent_target(f, pu, rock=rock)
     t = np.clip((rho - 1.0) / 0.15, 0.0, 1.0)
-    w = np.clip(f['trough_sharp'], 0.0, 1.0) * (1.0 - t * t * (3.0 - 2.0 * t))
+    w = np.clip(f['trough_sharp'], 0.0, 1.0) * (1.0 - t * t * (3.0 - 2.0 * t)) * q
     # the walls only, from the floor's edge: the floor is the fill's smooth top, which upsampling loses nothing of,
     # while the best seed's parameters jump where it changes across the floor, so the target evaluated from the
     # inherited (interpolated) parameters stood off the envelope along those lines, and sharpening raised them into
