@@ -71,14 +71,35 @@
 //     none. The copies here (the card and full levels' foliage, the billboard) multiply their scatter colour by that
 //     factor against the sun bindSun binds: the plants light as Blender's do (measured under match_billboards' light,
 //     SeedThree's three.js levels read 14-22 ΔE paler than Blender's on the glow, on this route trees 13-17 and shrubs
-//     6-13; what remains is
-//     a pale sky sheen over their crowns, not their geometry: their silhouettes are within 1-3 % of Blender's).
+//     6-13 before the crown's own occlusion of the sky, two items below; their silhouettes are within 1-3 % of
+//     Blender's).
 //   - The sky behind a leaf: EEVEE lights a Translucent BSDF from behind its normal with the world's light as well as
 //     the lamps' (Blender's SeedThree leaves, cards and billboards, and its flora); three's SSS term takes the lamps
 //     only. So every translucent copy here (the card and full levels' foliage, the billboard, the flora strokes) adds
 //     that share as emission: the translucent colour / pi x the environment's irradiance from behind the shading
-//     normal (skyBehind: the scene's environment prefiltered at roughness 1, as three's own irradiance reads it).
-//     Without it a stand in a valley wall's shade read near-black where Blender's glows a pale yellow-green.
+//     normal x EEVEE_TRANSLUCENT_WORLD (EEVEE's share, measured: half the Lambert answer) (skyBehind: the scene's
+//     environment prefiltered at roughness 1, as three's own irradiance reads it; a SeedThree leaf's translucent
+//     colour is pi x its scatter term, the add-on's backlight()).
+//   - The sky's light inside a crown: EEVEE (the review's ray tracing and its horizon scan) occludes a crown's leaves'
+//     share of the sky, diffuse and specular, by the leaves round them; three r184 occludes nothing on this stack (its
+//     GTAO and SSR passes do not compile under Naga: render_scene.mjs). So the card and full levels' foliage takes the
+//     sky as its own crown lets it through: the crown measured once per individual on the GPU (crownOf: its leaves'
+//     area and an ellipsoid of their extent), its leaves a turbid medium, the light along a direction attenuated by
+//     Beer-Lambert over the path to the crown's skin (crownVisibility), as three's ambient occlusion of the leaf's
+//     environment light (along its shading normal) and of the sky behind it. Without it the sky's reflection on the
+//     smooth canopy-dome normals laid a pale grey-blue veil over every crown (the levels 1.3-1.6 x Blender's in red
+//     and blue under match_billboards' light, 1.0-1.1 x without their specular).
+//   - The sky's light under a plant and inside a sward, for the same reason: EEVEE's horizon scan finds the terrain
+//     below a plant's horizon and the blades round a blade; three's environment lights a plant from below with the
+//     environment's own lower half (this edition's sky bakes 0.45 x the sky there). So every plant's environment light
+//     takes the ground's share instead (skyGround: GROUND_ALBEDO x the sky's light from the lower hemisphere's cosine
+//     share), and a flora plant's own leaves and its neighbours' take its lower parts' (a sward, a rosette:
+//     Beer-Lambert in the leaf area above the point, SWARD_G x the stroke's leaf area index x (1 - aH), aH the point's
+//     height on the plant; the index the plant's own covered card area over its footprint plus its neighbours', the
+//     plants' density over the cells they stand in times that area, measured per stroke on the GPU: floraDensities,
+//     swardLai), on the diffuse and specular environment light (three's ambient occlusion) and on the sky behind the
+//     leaf. instancePlants({ ground: false }) leaves the ground's share out (a plant shown alone, as
+//     match_billboards' scene shows it).
 //   - SeedThree's colour dials (barkTint, the frond tints): its app decodes them twice (three's Color(hex) already
 //     takes the hex into the linear working space before its convertSRGBToLinear()); the add-on Blender's plants grow
 //     with decodes them once (bl/materials.py srgb_to_linear_hex), as here: the blackbrush's pale blue-grey bark had
@@ -173,6 +194,10 @@ export const FLORA_ALPHA_CUT = 0.35;     // nodes.py leaf_material: alpha > 0.35
 // a crown's occlusion of the sky's light (crownOf, crownVisibility: the header's deviations)
 export const LEAF_G = 0.5;               // the leaves' projection on a direction (Ross' G, leaves of random orientation)
 export const CROWN_PCT = 95;             // the crown's extent: this percentile of its foliage's distances from its centre
+// the ground's and a sward's occlusion of the sky (skyGround, swardLai: the header's deviations)
+export const GROUND_ALBEDO = 0.15;       // the light the ground under a plant sends up, as a share of the sky's
+export const SWARD_G = 0.5;              // the blades' projection on a direction (Ross' G)
+export const SWARD_CELL_M = 2.0;         // the cells a stroke's plants are counted in, for the density they stand in
 const CARD_RES = 512, CARD_VARIANTS = 3;  // SeedThree's app's branch-card bake (src/main.js optState)
 const NB = 4096;                         // the hero threshold's distance bins
 const LCAP = 1024;                       // distances collected from the bin holding the hero_k-th
@@ -601,7 +626,7 @@ function crownVisibility(p, cW, sW, crown, dir) {
  * through the instance colour, and (a foliage part of an individual whose crown was measured, crownOf) the sky's light
  * as its crown lets it through to the leaf (crownVisibility: the ambient occlusion of its diffuse and specular sky
  * light and of the sky behind it). */
-function tintedMaterial(src, { foliage, centre, mats, cap, tone, card, uSun, crown = null }) {
+function tintedMaterial(src, { foliage, centre, mats, cap, tone, card, uSun, crown = null, ground = true }) {
     const m = keepClassic(src.clone(), src);
     m.userData = { ...src.userData, eidoTintOf: src.name || src.uuid };
     // SeedThree's card materials write an ambient-occlusion mask to its app's MRT pass; outside an MRT pass three r184
@@ -642,14 +667,16 @@ function tintedMaterial(src, { foliage, centre, mats, cap, tone, card, uSun, cro
         if (th) th = th.mul(tv);
     }
     const nW = foliage ? T.cameraWorldMatrix.mul(T.vec4(m.normalNode, 0)).xyz.normalize() : null;
-    // the crown's own occlusion of the sky's light on the leaf, along its shading normal (three's ambient occlusion:
-    // its diffuse and specular share of the environment)
-    if (vis) m.aoNode = vis(nW);
+    // the crown's own occlusion of the sky's light on the leaf, along its shading normal, and the ground's of the
+    // environment's lower half (three's ambient occlusion: its diffuse and specular share of the environment)
+    if (vis) m.aoNode = ground ? vis(nW).mul(skyGround(nW)) : vis(nW);
+    else if (foliage && ground) m.aoNode = skyGround(nW);
     if (th && foliage && uSun) {
         // the sky behind the leaf through the same Translucent BSDF (the header's deviations), as much of it as the
         // crown lets through from that side
         let sky = worldTranslucency(th, nW, uSun, sssOf(src));
         if (vis) sky = sky.mul(vis(nW.negate()));
+        if (ground) sky = sky.mul(skyGround(nW.negate()));
         m.emissiveNode = src.emissiveNode ? T.vec3(src.emissiveNode).add(sky) : sky;
         th = th.mul(backlit(nW, uSun));
     }
@@ -970,7 +997,7 @@ async function instanceSeedThreeStill(entry, rec, focus, group, lod, base, ctx, 
                     const card = p.cardMats.has(q.material);
                     const which = card ? p.centres.card : q.material === p.assets.clusterMat ? p.centres.cluster : p.centres.leaf;
                     return { geometry: sharedGeometry(q.geometry), material: tintedMaterial(q.material, { foliage: q.foliage, centre: which,
-                        mats, cap, tone, card, uSun: ctx.uSun, crown: crowns[v] }), castShadow: q.castShadow !== false,
+                        mats, cap, tone, card, uSun: ctx.uSun, crown: crowns[v], ground: ctx.ground }), castShadow: q.castShadow !== false,
                         receiveShadow: q.receiveShadow !== false };
                 });
             }
@@ -1086,9 +1113,72 @@ async function floraMaps(sheet) {
             return null;
         }
     };
-    const out = { normal: await load('_normal.png'), transl: await load('_translucency.png') };
+    const out = { normal: await load('_normal.png'), transl: await load('_translucency.png'), albedo: await load('_albedo.png') };
     FLORA_MAPS.set(sheet, out);
     return out;
+}
+
+// the environment's light at the world normal n with its lower half (below the horizon) taken by the ground, as EEVEE's
+// horizon scan finds the terrain there, where three's own lookup lights a plant from below with the environment's
+// lower half: the two hemispheres' cosine shares, the lower one's radiance GROUND_ALBEDO x the upper one's instead of
+// its own (a two-hemisphere estimate from the environment's light straight up and straight down), over three's; at
+// most 1, and 1 without an environment
+function skyGround(n) {
+    return T.Fn((builder) => {
+        const env = builder.environmentNode;
+        if (!env?.value) return T.float(1.0);
+        const up = T.luminance(T.vec3(T.pmremTexture(env.value, T.vec3(0.0, 1.0, 0.0), T.float(1.0)).rgb));
+        const dn = T.luminance(T.vec3(T.pmremTexture(env.value, T.vec3(0.0, -1.0, 0.0), T.float(1.0)).rgb));
+        const r = dn.div(T.max(up, 1.0e-6));
+        const a = T.float(1.0).add(n.y), b = T.float(1.0).sub(n.y);
+        return T.min(a.add(b.mul(GROUND_ALBEDO)).div(T.max(a.add(b.mul(r)), 1.0e-6)), 1.0);
+    })();
+}
+
+// per variant of a flora species' strokes: { n, density (the plants per m^2 of the SWARD_CELL_M cell a plant stands in,
+// averaged over its plants: the density its sward has where it stands, which a plan thinned with distance or clustered
+// keeps), s2 (their mean stroke scale squared) }, on the GPU (plants/flora_cell, a bincount over a hashed table of the
+// cells, each plant's cell count gathered back)
+async function floraDensities(outP, n, V, R) {
+    const P = prims(R);
+    let Tn = 1024;
+    while (Tn < 4 * n) Tn *= 2;
+    const out = [];
+    for (let v = 0; v < V; v++) {
+        const keys = P.list(n, 'u32'), s2 = P.list(n, 'f32');
+        R.run(R.kernel('plants/flora_cell'), { pl: outP }, { outK: keys, outS: s2 }, { uInvCell: 1.0 / SWARD_CELL_M, uMask: Tn,
+            uVariant: v, uCount: n }, lineGroups(n));
+        const counts = P.bincount(keys, Tn + 1, { count: n });
+        const per = P.list(n, 'f32');                                  // each plant's cell's count (0: another variant)
+        R.run(R.kernel('plants/cell_count'), { keys, counts }, { outC: per }, { uMask: Tn, uCount: n }, lineGroups(n));
+        const all = (await P.stats(per, { count: n })).sum;
+        const other = Number((await R.readRange(counts, Tn, 1))[0]);   // the other variants' plants, in the last slot
+        const sum = (await P.stats(s2, { count: n })).sum;
+        for (const f of [keys, s2, counts, per]) f.destroy();
+        const nv = n - other;
+        out.push(nv > 0 ? { n: nv, density: all / nv / (SWARD_CELL_M * SWARD_CELL_M), s2: sum / nv } : null);
+    }
+    return out;
+}
+
+// a blade grass stroke's leaf area index over a point of its sward: its own plant's leaf area over the plant's footprint
+// (the prototype's card area, plants/tri_area, x the share of its sheet its alpha covers, plants/alpha_raw, over the
+// disc its bounding box spans) and its neighbours' (that leaf area x the plants' density x their mean scale squared)
+async function swardLai(field, maps, sward, R) {
+    const g = field.mesh.geometry;
+    const pos = g.attributes.position, ni = g.index ? g.index.count : 0, nt = Math.floor(ni / 3);
+    if (!nt || !sward || pos.isInterleavedBufferAttribute) return 0.0;
+    const P = prims(R);
+    const pl = P.list(pos.count * 3, 'f32', arrOf(pos, pos.count, 3));
+    const idx = P.list(ni, 'u32', Uint32Array.from(g.index.array.subarray(0, ni)));
+    const A = P.list(nt, 'f32');
+    R.run(R.kernel('plants/tri_area'), { pos: pl, idx }, { outA: A }, { uCount: nt }, lineGroups(nt));
+    const covered = (await P.stats(A, { count: nt })).sum * (await alphaCover(maps.albedo, R));
+    for (const f of [pl, idx, A]) f.destroy();
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox;
+    const r = 0.5 * Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z, 1.0e-3);
+    return covered / (Math.PI * r * r) + sward.density * covered * sward.s2;
 }
 
 // a createFlora blade prototype's vertex frames as Blender's blade mesh has them (plants/blade_corners,
@@ -1142,7 +1232,7 @@ function strokeTurn(v, aPR, aPh) {
  *     term with that colour x max(0, -N.L) / pi as its ambient share) and by the sky behind the leaf; no emissive
  *     fill (EEVEE's world light replaces vegetation.js' 0.08 albedo, nodes.py);
  *   - shadows: the cards cast the sun's shadow through their alpha (use_transparent_shadow, alpha > 0.35). */
-export async function floraShading(field, ident, opts, R, uSun) {
+export async function floraShading(field, ident, opts, R, uSun, sward = null, ground = true) {
     await three();
     const sp = globalThis.FLORA_SPECIES?.[ident === 'meadow_blades' ? 'grass' : ident];
     const m = field.material;
@@ -1202,6 +1292,18 @@ export async function floraShading(field, ident, opts, R, uSun) {
     const baseCol = T.vec3(m.colorNode);
     m.colorNode = T.vec4(baseCol, alpha);
     m.opacityNode = null;
+    // the sky's light the plant sees (the header's deviations): the ground takes the environment's lower half
+    // (skyGround), and the plant's own leaves and its neighbours' its lower parts (a sward, a rosette: Beer-Lambert in
+    // the leaf area above the point, SWARD_G x the stroke's leaf area index x (1 - aH), aH the point's height on the
+    // plant, 0 at the root and 1 at the top)
+    let swardV = T.float(1.0);
+    if (sward) {
+        const lai = await swardLai(field, maps, sward, R);
+        if (lai > 0.0) swardV = T.exp(T.float(1.0).sub(T.attribute('aH', 'float')).mul(-SWARD_G * lai));
+        field.mesh.userData.eidoSward = { lai: +lai.toFixed(3), density: +sward.density.toFixed(2) };
+    }
+    const nS = T.cameraWorldMatrix.mul(T.vec4(shadeN ?? geoN, 0.0)).xyz.normalize();
+    m.aoNode = ground ? skyGround(nS).mul(swardV) : swardV;
     // the backlight: a Translucent BSDF on the geometric normal, lit by the sun and by the sky behind the leaf
     const trAmt = Number(opts.translucency ?? 1.0);
     if (maps.transl && trAmt > 0) {
@@ -1215,7 +1317,8 @@ export async function floraShading(field, ident, opts, R, uSun) {
         m.thicknessAttenuationNode = T.float(1.0);
         m.thicknessPowerNode = T.float(1.0);
         m.thicknessScaleNode = T.float(0.0);
-        m.emissiveNode = trc.mul(skyBehind(nW));
+        // as much of the sky behind the leaf as the ground and the sward let through
+        m.emissiveNode = trc.mul(skyBehind(nW)).mul(ground ? skyGround(nW.negate()).mul(swardV) : swardV);
     } else {
         m.thicknessColorNode = T.vec3(0.0, 0.0, 0.0);
         m.emissiveNode = T.vec3(0.0, 0.0, 0.0);
@@ -1248,6 +1351,8 @@ async function instanceFlora(entry, rec, group, base, ctx) {
     R.run(R.kernel('plants/flora_place'), { rec: recs, h0: h0l }, { outP }, { uSink: Number(entry.sink),
         uFoot: 0.5 * Number(entry.foot_m), uVariants: V, uCount: n }, lineGroups(n));
     const pl = await R.readRange(outP, 0, n * 5);
+    // per stroke the density its plants stand in and their scale (a blade grass' sward: floraShading)
+    const swards = await floraDensities(outP, n, V, R);
     for (const f of [recs, h0l, outP]) f.destroy();
     // the strokes' placements, as createFlora takes them (one copy per plant: its own interface)
     const per = seeds.map(() => ({ placements: [], heights: [] }));
@@ -1275,7 +1380,7 @@ async function instanceFlora(entry, rec, group, base, ctx) {
             if (field.stemMesh) gainFlora(field.stemMesh.material, opts.gain);
         }
         // the Blender edition's create_flora shading (the header's deviations)
-        if (!ident.startsWith('ph:')) await floraShading(field, ident, opts, R, ctx.uSun);
+        if (!ident.startsWith('ph:')) await floraShading(field, ident, opts, R, ctx.uSun, swards[v], ctx.ground);
         field.mesh.name = `${base}_${PL.filePart(entry.name)}_${v}`;
         field.mesh.userData.eidoPlants = { species: entry.name, source: src, motion: false };
         group.add(field.mesh);
@@ -1318,6 +1423,7 @@ export async function instancePlants(spots, terrain = null, opts = {}) {
     const samples = Number(renderer.currentSamples ?? renderer.samples ?? renderer._samples ?? 0) || 1;
     const ctx = { renderer, R, log, samples, sunDir: opts.sunDir ?? null, gains: opts.billboardGains ?? null,
         crowns: opts.crowns ?? true,                                // the crowns' occlusion of the sky (crownOf)
+        ground: opts.ground ?? true,                                // the ground's occlusion of it (skyGround)
         uSun: T.uniform(new THREE.Vector3(0, 1, 0)) };            // toward the bound sun, three.js' frame (bindSun)
     if (opts.sunDir) ctx.uSun.value.set(...[...opts.sunDir].map(Number)).normalize();
     const focus = spots.meta.focus.map((p) => [Number(p[0]), Number(p[1])]);

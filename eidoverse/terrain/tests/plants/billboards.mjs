@@ -306,8 +306,10 @@ async function matchOne(B, c) {
     for (const o of B.skyObjs) o.visible = false;
     r.setClearColor(0x000000, 0);
     const variant = async (gainEntry, levels, keep = false, noSpec = false) => {
+        // the plant alone on the film, no ground under it (match_billboards' scene): the ground's occlusion of the
+        // environment's lower half off (instancePlants' ground option)
         const plants = await PI.instancePlants(oneSpot(B.PL, c), null, { renderer: r, R: B.R, log: null,
-            billboardGains: { [c.key]: gainEntry } });
+            billboardGains: { [c.key]: gainEntry }, ground: false });
         if (noSpec) {                                    // --sheen: the levels' copies without their specular lobe
             plants.group.traverse((o) => {
                 for (const m of [o.material].flat()) if (m?.isMeshPhysicalNodeMaterial && !m.userData?.eidoBillboard) m.specularIntensity = 0.0;
@@ -365,7 +367,9 @@ async function matchOne(B, c) {
         switch_m: dist, matched_to: lv, gain, alpha: cut, blender: bl, turns: per, card_over_full: avg((p) => p.card_over_full),
         de_before: avg((p) => p.de_before), de_blender: avg((p) => p.de_blender), de_after: avg((p) => p.de_after),
         area_ratio: avg((p) => p.area_ratio), area_ratio_blender: avg((p) => p.area_ratio_blender),
-        area_ratio_after: avg((p) => p.area_ratio_after), seconds: +((performance.now() - t0) / 1000).toFixed(1) };
+        area_ratio_after: avg((p) => p.area_ratio_after), seconds: +((performance.now() - t0) / 1000).toFixed(1),
+        crown: grown.crown ? { rh: +grown.crown.rh.toFixed(2), rv: +grown.crown.rv.toFixed(2), area_m2: +grown.crown.area.toFixed(1),
+            lad: +grown.crown.lad.toFixed(4) } : null };
     rec.passed = rec.de_after <= 3.0 && Math.abs(rec.area_ratio_after - 1.0) <= 0.10;
     console.log('[match] ' + c.tag + ' (' + [...new Set(c.users)].sort().join(', ') + '): against its ' + lv + ' level: gain ' +
         JSON.stringify(gain) + ', alpha ' + cut + ', ΔE ' + rec.de_before + ' -> ' + rec.de_after + ' (Blender\\'s gain: ' + rec.de_blender +
