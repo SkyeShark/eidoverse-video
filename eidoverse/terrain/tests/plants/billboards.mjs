@@ -369,7 +369,11 @@ async function matchOne(B, c) {
         area_ratio: avg((p) => p.area_ratio), area_ratio_blender: avg((p) => p.area_ratio_blender),
         area_ratio_after: avg((p) => p.area_ratio_after), seconds: +((performance.now() - t0) / 1000).toFixed(1),
         crown: grown.crown ? { rh: +grown.crown.rh.toFixed(2), rv: +grown.crown.rv.toFixed(2), area_m2: +grown.crown.area.toFixed(1),
-            lad: +grown.crown.lad.toFixed(4) } : null };
+            lad: +grown.crown.lad.toFixed(4) } : null,
+        bake: (() => {
+            const t = grown.billboard?.textures?.front?.albedo;
+            return t ? { data: !!t.isDataTexture, premultiplied: !!t.userData?.eidoPremultiplied, from_canvas: !!t.userData?.eidoFromCanvas } : null;
+        })() };
     rec.passed = rec.de_after <= 3.0 && Math.abs(rec.area_ratio_after - 1.0) <= 0.10;
     console.log('[match] ' + c.tag + ' (' + [...new Set(c.users)].sort().join(', ') + '): against its ' + lv + ' level: gain ' +
         JSON.stringify(gain) + ', alpha ' + cut + ', ΔE ' + rec.de_before + ' -> ' + rec.de_after + ' (Blender\\'s gain: ' + rec.de_blender +

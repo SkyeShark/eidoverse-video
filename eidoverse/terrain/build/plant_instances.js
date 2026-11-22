@@ -124,7 +124,10 @@
 //   - The billboard's far colour: its baked albedo is premultiplied by its alpha on the GPU before its mips are made
 //     (plants/premultiply) and read back over the alpha, so a far stand keeps its colour at every mip (the bake is
 //     straight, its colour dilated 12 texels past the silhouette and black beyond: straight mips darkened a far
-//     stand, and over the alpha the dilated colour lit single white pixels over a far canopy).
+//     stand, and over the alpha the dilated colour lit single white pixels over a far canopy). A canvas bake
+//     (SeedThree's where the page has a DOM with ImageData: a browser's; the headless renders' bakes are
+//     DataTextures) becomes a DataTexture of its pixels premultiplied the same way; left straight, it would light
+//     every billboard's edges and far mips over the alpha.
 //   - SeedThree's card materials' ambient-occlusion mask (an MRT channel its app's N8AO pass reads) is left out of the
 //     copies: three r184 gives a material MRT outside an MRT pass an empty fragment output (a shader that does not
 //     compile), and this edition's renders run no such pass.
@@ -319,24 +322,47 @@ function foliageTint(mat, tintNode, tintAmount) {
     mat.needsUpdate = true;
 }
 
-// a billboard bake's albedo (an 8-bit sRGB DataTexture, straight alpha, its colour dilated past the silhouette) with its
-// colour premultiplied by its alpha in linear light (plants/premultiply), in place, before its first upload; false
-// when the texture holds no pixel array (a browser's canvas bake: left as it is)
+// a billboard bake's albedo (8-bit sRGB, straight alpha, its colour dilated past the silhouette) with its colour
+// premultiplied by its alpha in linear light (plants/premultiply), before its first upload: a DataTexture in place (the
+// headless renders': SeedThree's textureFromProcessedPixels falls back to one without ImageData); a canvas bake (a
+// browser's) as a DataTexture of its pixels, rows bottom first as the canvas texture's flipY uploads them.
+// Returns the texture to use (the same one when it holds no pixels to read)
 async function premultiplyAlbedo(tex, R) {
-    const img = tex?.image, data = img?.data;
-    if (!data || !img.width || !img.height || data.length < img.width * img.height * 4) return false;
-    if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray) || tex.userData?.eidoPremultiplied) return false;
-    const n = img.width * img.height;
+    const img = tex?.image;
+    if (!img || tex.userData?.eidoPremultiplied) return tex;
+    let data = img.data ?? null, canvas = false;
+    if (!data && typeof img.getContext === 'function') {
+        data = img.getContext('2d').getImageData(0, 0, img.width, img.height).data;
+        canvas = true;
+    }
+    if (!data || !img.width || !img.height || data.length < img.width * img.height * 4) return tex;
+    if (!(data instanceof Uint8Array || data instanceof Uint8ClampedArray)) return tex;
+    const w = img.width, h = img.height, n = w * h;
     const P = prims(R);
     const px = P.list(n, 'u32', new Uint32Array(data.buffer.slice(data.byteOffset, data.byteOffset + 4 * n)));
     const out = P.list(n, 'u32');
-    R.run(R.kernel('plants/premultiply'), { px }, { outP: out }, { uCount: n }, lineGroups(n));
+    R.run(R.kernel('plants/premultiply'), { px }, { outP: out }, { uW: w, uH: h, uFlip: canvas ? 1 : 0, uCount: n },
+        lineGroups(n));
     const got = await R.readRange(out, 0, n);
     for (const f of [px, out]) f.destroy();
-    data.set(new Uint8Array(got.buffer, got.byteOffset, 4 * n));
-    tex.userData = { ...(tex.userData ?? {}), eidoPremultiplied: true };
-    tex.needsUpdate = true;
-    return true;
+    const bytes = new Uint8Array(got.buffer, got.byteOffset, 4 * n);
+    if (!canvas) {
+        data.set(bytes);
+        tex.userData = { ...(tex.userData ?? {}), eidoPremultiplied: true };
+        tex.needsUpdate = true;
+        return tex;
+    }
+    const dt = new THREE.DataTexture(bytes.slice(), w, h, THREE.RGBAFormat);
+    dt.colorSpace = tex.colorSpace;
+    dt.wrapS = tex.wrapS;
+    dt.wrapT = tex.wrapT;
+    dt.anisotropy = tex.anisotropy;
+    dt.magFilter = THREE.LinearFilter;
+    dt.minFilter = THREE.LinearMipmapLinearFilter;
+    dt.generateMipmaps = true;
+    dt.userData = { ...(tex.userData ?? {}), eidoPremultiplied: true, eidoFromCanvas: true };
+    dt.needsUpdate = true;
+    return dt;
 }
 
 const GROWN = new Map();
@@ -406,7 +432,7 @@ export async function growSeedThree(species, seed, dials, { renderer, R = null, 
         // the albedo premultiplied before its first upload, so its mips hold the silhouette's colour alone
         let Rg = R;
         if (!Rg) Rg = await (await import('../core/gpu.js')).init({ renderer });
-        for (const v of views) await premultiplyAlbedo(baked[v.name]?.albedo, Rg);
+        for (const v of views) if (baked[v.name]) baked[v.name].albedo = await premultiplyAlbedo(baked[v.name].albedo, Rg);
         billboard = { textures: baked, halfW, halfH, centreY: cy };
     }
     const summary = res.stats?.summary ?? {};
@@ -1161,7 +1187,7 @@ async function floraDensities(outP, n, V, R) {
     return out;
 }
 
-// a blade grass stroke's leaf area index over a point of its sward: its own plant's leaf area over the plant's footprint
+// a flora stroke's leaf area index over a point of its sward: its own plant's leaf area over the plant's footprint
 // (the prototype's card area, plants/tri_area, x the share of its sheet its alpha covers, plants/alpha_raw, over the
 // disc its bounding box spans) and its neighbours' (that leaf area x the plants' density x their mean scale squared)
 async function swardLai(field, maps, sward, R) {
@@ -1231,7 +1257,11 @@ function strokeTurn(v, aPR, aPh) {
  *     translucency (raw) x sss x 2.2 x TRANSL_GAIN x translucency), lit by the sun (Lambert transmission: three's SSS
  *     term with that colour x max(0, -N.L) / pi as its ambient share) and by the sky behind the leaf; no emissive
  *     fill (EEVEE's world light replaces vegetation.js' 0.08 albedo, nodes.py);
- *   - shadows: the cards cast the sun's shadow through their alpha (use_transparent_shadow, alpha > 0.35). */
+ *   - shadows: the cards cast the sun's shadow through their alpha (use_transparent_shadow, alpha > 0.35);
+ *   - the sky's light (the header's deviations, EEVEE's horizon scan): the ground's occlusion of the environment's
+ *     lower half (skyGround, unless ground is false) and, with sward (floraDensities' record of the stroke), the
+ *     plant's own leaves' and its neighbours' over its lower parts (swardLai), on its environment light and on the sky
+ *     behind the leaf. */
 export async function floraShading(field, ident, opts, R, uSun, sward = null, ground = true) {
     await three();
     const sp = globalThis.FLORA_SPECIES?.[ident === 'meadow_blades' ? 'grass' : ident];
