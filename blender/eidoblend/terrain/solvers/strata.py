@@ -82,13 +82,19 @@ with roughness_scales_m, k_breakup and breakup_scales_m, deposition 0.5, age_myr
                                x exp(-resist_run n): a retreating escarpment leaves the strong patches standing
                                (outliers: mesas, buttes), and a wall is sheer buttresses where the rock is strong,
                                chutes and talus where it is weak
+    resist_run_beds 'all'      the beds the run factor applies to: 'all', or 'strong' (the beds of the formations with
+                               a K factor under 1, the cliff formers; Column.Rm): a massive sandstone stands sheer
+                               while the shale under it, ledges and all, stands at its own angle (with 'all' the Organ
+                               Rock under Monument Valley's strongest blocks stood at 45-60 degrees, a steep plinth
+                               under every cliff)
     resist_noise 1             the noise part of n is scaled by this (the cores are not): a weakly varying caprock
                                with a few massive cores (mesas and buttes with flat tops)
     resist_cores None          strong cores added to n (rock_cores: {'spacing_m', 'radius_m' [lo, hi],
                                'elongation' [lo, hi], 'angles_deg' (joint directions, compass) or None, 'strength',
                                'region_m', 'seed', 'exponent' (the outline's superellipse power, 4), 'wobble' (its
-                               radius noise, 0)}): blue-noise blocks of massive rock the escarpment leaves standing
-                               (buttes)
+                               radius noise, 0), and core_centres' layout options: 'size_power', 'spacing_by_size',
+                               'cluster', 'angle_jitter_deg', 'darts'}): blocks of massive rock the escarpment leaves
+                               standing (mesas, buttes, spires)
     dry_basins False           after each pass, fill every closed depression that does not touch the river's channel
                                with sediment (fill_dry_basins): a desert plateau's basins are dry sinks; the river's
                                pools stay basins, which the end stage holds as water (recipes with lakes 'lake')
@@ -225,18 +231,19 @@ COLUMNS = {
     # are (a weak Moenkopi slope on top wore into convex humps with saw-toothed crests).
     # (the Cedar Mesa at K x0.3 was planed to the wash's level over the run, so the floor lost the dip that lifts
     # Monument Valley's 150-200 m toward the west: K x0.08 keeps it a stripped structural surface)
-    # The proportions are the Mittens': a De Chelly cliff about 160 m tall on an Organ Rock pedestal about 150 m tall
-    # (on the DEM the caps' edges stand 275-300 m over the floor and the cliffs' feet 100-150 m over it, 100-150 m
-    # out; the pedestal reaches 400 m out). With a 210 m De Chelly over 120 m of Organ Rock the cliff came down to
-    # 70 m over the floor and the talus cone was half Monument Valley's (the review: one wall straight to the floor,
-    # no pedestal).
+    # The proportions are the free buttes' on the DEM (the median over them: the cap's rim 284 m over the floor, the
+    # cliff's foot 123 m, so a cliff of about 160 m over a pedestal of about 120 m; the West Mitten's cliff is the
+    # taller in the photographs too): a De Chelly cliff of 165 m and the cap's 20 m over 125 m of Organ Rock. (150 m of
+    # Organ Rock under 160 m of De Chelly, with the shale under the massive blocks standing at 45-60 degrees, made the
+    # pedestals as tall as the cliffs; the pedestals now stand at the shale's own angle, strata_fluvial's
+    # resist_run_beds 'strong'.)
     # The Organ Rock has thin sandstone ledges (every 18 m, a fifth of it, 55 degrees): the pedestals' bands under the
     # Mittens; without them the generated tile had a third less of its caprock and its walls faced four ways (A4 0.10)
     'monument_valley': [
         _L('Cedar Mesa sandstone', 150, 0.08, 62, 'cedar mesa'),
-        _L('Organ Rock shale', 150, 2.5, 31, 'organ rock',
+        _L('Organ Rock shale', 125, 2.5, 31, 'organ rock',
            beds=dict(period_m=18.0, ledge_frac=0.2, ledge_K_factor=0.5, ledge_Sc_deg=55.0, jitter=0.5)),
-        _L('De Chelly sandstone', 160, 0.08, 80, 'de chelly'),
+        _L('De Chelly sandstone', 165, 0.08, 80, 'de chelly'),
         _L('Shinarump conglomerate', 20, 0.1, 78, 'shinarump'),
     ],
     # The Badlands Wall near Cedar Pass: Chadron clay mounds at the foot, the Brule's banded mudstone with thin
@@ -400,6 +407,18 @@ class Column:
         R = cum[k] + (zc - edges[k]) * inv[k]
         R = R + np.where(z < 0.0, z * inv[0], 0.0) + np.where(z > self.top_m, (z - self.top_m) * inv[-1], 0.0)
         self.R = R
+        # the strong beds (those of the formations with a K factor under 1: the cliff formers; a weak formation's
+        # thin ledges are not, the rock mass's massive blocks are in the cliff rock) and their share Rm of the run,
+        # R through those beds only: the composite threshold's 'strong' mode scales Rm alone by the rock mass's run
+        # factor, so a shale stands at its own angle under massive rock (strata_threshold)
+        strong = np.array([1.0 if self.layers[f[5]]['K_factor'] < 1.0 else 0.0 for f in fine])
+        self.fine_strong = strong
+        inv_m = inv * strong
+        cum_m = np.concatenate([[0.0], np.cumsum(np.diff(edges) * inv_m)])
+        Rm = cum_m[k] + (zc - edges[k]) * inv_m[k]
+        self.Rm = Rm + np.where(z < 0.0, z * inv_m[0], 0.0) + np.where(z > self.top_m, (z - self.top_m) * inv_m[-1],
+                                                                        0.0)
+        self.strong = strong[idx]
 
     # -------------------------------------------------------------------------------------- lookups (twins) ---
     def _t(self, zs):
@@ -421,14 +440,19 @@ class Column:
     def creep_at(self, zs):
         return self._lerp(self.creep, zs)
 
-    def run_at(self, zs):
-        """R(zs), linearly continued past the table (as the kernel)."""
+    def run_at(self, zs, table=None):
+        """R(zs), linearly continued past the table (as the kernel); table=self.Rm: the strong beds' share."""
+        R = self.R if table is None else table
         zs = np.asarray(zs, np.float64)
         t = (zs - self.z0) / self.dz
-        n = len(self.R)
-        lo = self.R[0] + t * (self.R[1] - self.R[0])
-        hi = self.R[-1] + (t - (n - 1)) * (self.R[-1] - self.R[-2])
-        return np.where(t <= 0, lo, np.where(t >= n - 1, hi, self._lerp(self.R, zs)))
+        n = len(R)
+        lo = R[0] + t * (R[1] - R[0])
+        hi = R[-1] + (t - (n - 1)) * (R[-1] - R[-2])
+        return np.where(t <= 0, lo, np.where(t >= n - 1, hi, self._lerp(R, zs)))
+
+    def strong_at(self, zs):
+        """1 in a strong formation's bed (K factor under 1), 0 in a weak one's (interpolated across a contact)."""
+        return self._lerp(self.strong, zs)
 
     def layer_at(self, zs):
         """The formation's name at a stratigraphic height."""
@@ -457,6 +481,11 @@ class Column:
     def table_texture(self):
         """(1, n, 4) float32: tan, creep factor, R, K factor (strata_cell, strata_threshold)."""
         return np.stack([self.tan, self.creep, self.R, self.K], 1).astype(F32)[None, :, :]
+
+    def run_texture(self):
+        """(1, n, 4) float32: Rm, 0, R, 0 (strata_threshold's rtab in its 'strong' mode: x the strong beds' run)."""
+        z = np.zeros_like(self.R)
+        return np.stack([self.Rm, z, self.R, z], 1).astype(F32)[None, :, :]
 
     def describe(self):
         lines = [f'column {self.name}: {self.top_m:g} m, {len(self.layers)} formations, {len(self.fine)} beds']
@@ -663,10 +692,20 @@ def strata_threshold(s, u):
     rock = (_run_lookup(rt, (zs - L).astype(F32), z0, dz) - _run_lookup(rt, (zs - span).astype(F32), z0, dz))
     q = s['par'][..., 2]                                         # the rock mass's run factor
     fac = np.asarray(u['uFac'], F32)
-    if fac[0] > 0:                                              # the facies
-        x, y = T.world_xy(h.shape, u['uLv'])
-        q = (q * np.exp(-fac[0] * facies_noise(x, y, zs, fac))).astype(F32)
-    rock = (q * rock).astype(F32)
+    if int(u['uStrongOnly']):
+        # q scales the strong beds' share of the run only (rtab.x: Rm); the facies F all of it
+        F = F32(1)
+        if fac[0] > 0:
+            x, y = T.world_xy(h.shape, u['uLv'])
+            F = np.exp(-fac[0] * facies_noise(x, y, zs, fac)).astype(F32)
+        rtm = s['rtab'][0, :, 0]
+        rm = (_run_lookup(rtm, (zs - L).astype(F32), z0, dz) - _run_lookup(rtm, (zs - span).astype(F32), z0, dz))
+        rock = (F * (q * rm + (rock - rm))).astype(F32)
+    else:
+        if fac[0] > 0:                                          # the facies
+            x, y = T.world_xy(h.shape, u['uLv'])
+            q = (q * np.exp(-fac[0] * facies_noise(x, y, zs, fac))).astype(F32)
+        rock = (q * rock).astype(F32)
     dR = np.where(span > L, dR + rock, dR).astype(F32)
     with np.errstate(divide='ignore', invalid='ignore'):
         phi = np.where((span > 0) & (dR > u['uDx']), F32(1) - u['uDx'] / np.where(dR > 0, dR, F32(1)), F32(0))
@@ -959,11 +998,16 @@ class StrataRun(FL.FluvialRun):
     isotropic exchange; the lock as the stock driver's."""
 
     def __init__(self, dev, cell, fields, par, pins, col, zoff, lock_h0=None, lock_b=2, repose_tan=0.67,
-                 weather=None, lv=(0.0, 0.0, 1.0), facies=FACIES_OFF, facies_w=FACIES_OFF, weather_k_exp=1.0):
+                 weather=None, lv=(0.0, 0.0, 1.0), facies=FACIES_OFF, facies_w=FACIES_OFF, weather_k_exp=1.0,
+                 strong_only=False):
         column = dict(k_factor=np.asarray(col.K, F32), zoff=np.asarray(zoff, F32), z0=col.z0, dz=col.dz)
         super().__init__(dev, cell, fields, par, pins, FL.PINNED, column, lock_h0, lock_b)
         self.column = col                              # (FluvialRun keeps the K table's (z0, dz, n) in self.col)
         self.ctab = dev.texture(weather_table(col, weather_k_exp))
+        # the composite threshold's table: the rock mass's run factor on every bed (ctab's R), or on the strong beds'
+        # share only (strong_only: run_texture's Rm beside R)
+        self.strong_only = bool(strong_only)
+        self.rtab = dev.texture(col.run_texture()) if self.strong_only else self.ctab
         self.tcol = (float(col.z0), float(col.dz), int(len(col.R)))
         self.C = dev.empty(self.shape, 2)
         self.phiS = dev.empty(self.shape, 1)
@@ -998,11 +1042,11 @@ class StrataRun(FL.FluvialRun):
         dev, S, M, b = self.dev, self.S, self.M, self.bound
         z0, dz, nt = self.tcol
         for _ in range(iters):
-            dev.run('strata_threshold', {'st': S.src, 'zoff': self.zoff, 'mk': M.src, 'rtab': self.ctab,
+            dev.run('strata_threshold', {'st': S.src, 'zoff': self.zoff, 'mk': M.src, 'rtab': self.rtab,
                                          'par': self.P},
                     {'outP': self.phiS}, {'uDx': self.cell, 'uRZ0': z0, 'uRDz': dz, 'uRN': nt,
                                           'uRepose': self.repose, 'uLv': self.lv, 'uFac': self.facies,
-                                          'uBound': b})
+                                          'uStrongOnly': int(self.strong_only), 'uBound': b})
             dev.run('threshold', {'st': S.src, 'par': self.P, 'pin': self.Q, 'mk': M.src, 'phiT': self.phiS},
                     {'outS': S.dst, 'outM': M.dst},
                     {'uDx': self.cell, 'uRate': rate, 'uLoose': 0, 'uIso': 1, 'uBound': b})
@@ -1173,46 +1217,109 @@ def rock_mass(level, scales, seed=0, dev=None):
 
 
 CORES_DEFAULTS = dict(spacing_m=1800.0, radius_m=(200.0, 420.0), elongation=(1.0, 2.2), angles_deg=None,
-                      strength=2.5, region_m=40000.0, seed=0, exponent=4.0, wobble=0.0)
+                      strength=2.5, region_m=40000.0, seed=0, exponent=4.0, wobble=0.0, size_power=None,
+                      spacing_by_size=False, cluster=None, angle_jitter_deg=12.0, darts=25.0)
+
+
+def _point_noise(x, y, wavelength, seed, waves=8):
+    """A smooth noise of unit standard deviation at world points (x, y arrays or floats): `waves` random plane waves
+    at about `wavelength` metres (numpy only)."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros_like(np.asarray(x, np.float64))
+    for _ in range(waves):
+        th = rng.uniform(0.0, math.pi)
+        lam = wavelength * rng.uniform(0.7, 1.4)
+        out = out + np.sin(2.0 * math.pi * (x * math.cos(th) + y * math.sin(th)) / lam
+                           + rng.uniform(0.0, 2.0 * math.pi))
+    return out / math.sqrt(0.5 * waves)
 
 
 def core_centres(spec, seed=0):
     """The strong cores' centres and shapes, world metres: [(x, y, a, b, angle_rad, strength)], blue noise (dart
-    throwing at spacing_m over a square region_m wide around the origin), the same on every level of a terrain."""
+    throwing at spacing_m over a square region_m wide around the origin), the same on every level of a terrain.
+
+    The massive blocks of a real caprock are not one size or evenly spaced (Monument Valley's remnants run from mesas
+    of a square kilometre and more to buttes of a few hectares and spires; its free buttes' nearest-neighbour
+    distances vary by 0.8 of their mean, blue noise's by 0.2). Options (each off by default):
+      size_power a       the radius from a truncated power law p(r) ~ r^-a over radius_m (many small blocks, few
+                         large) instead of uniform
+      strength [lo, hi]  each core's strength uniform over it (a number: that x U(0.75, 1.25))
+      spacing_by_size    a pair stands at least spacing_m x (r_i + r_j) / (r0 + r1) apart (big blocks keep their
+                         distance, small ones may stand close: the Mittens' pair) instead of spacing_m
+      cluster {'wavelength_m', 'cover', 'soft'}   a candidate is kept only where a world noise at wavelength_m is
+                         in about its upper `cover` share (a smooth margin `soft` standard deviations wide): groups
+                         of blocks with open ground between, as the jointing varies across kilometres
+      angle_jitter_deg   the spread of a core's angle about its joint direction (12)
+      darts              candidates thrown per spacing_m^2 (25: the plane fills to blue noise; about 1-2: fewer
+                         blocks at irregular distances, never closer than the spacing)"""
     p = dict(CORES_DEFAULTS)
     p.update(spec or {})
     sp = float(p['spacing_m'])
     half = 0.5 * float(p['region_m'])
     rng = np.random.default_rng((int(seed) + int(p['seed'])) * 7919 + 4243)
-    cand = rng.uniform(-half, half, (int(25 * (2 * half / sp) ** 2), 2))
-    gcell = sp / math.sqrt(2.0)
-    grid = {}
-    out = []
+    cand = rng.uniform(-half, half, (int(float(p['darts']) * (2 * half / sp) ** 2), 2))
     r0, r1 = (float(v) for v in p['radius_m'])
     e0, e1 = (float(v) for v in p['elongation'])
     angles = p.get('angles_deg')
-    for x, y in cand:
+    jit = float(p['angle_jitter_deg'])
+    a_pow = p.get('size_power')
+    by_size = bool(p.get('spacing_by_size'))
+    strength = p['strength']
+
+    def radius():
+        if a_pow is None:
+            return rng.uniform(r0, r1)
+        a = float(a_pow)
+        u = rng.uniform()
+        if abs(a - 1.0) < 1e-9:
+            return r0 * (r1 / r0) ** u
+        return (r0 ** (1.0 - a) + u * (r1 ** (1.0 - a) - r0 ** (1.0 - a))) ** (1.0 / (1.0 - a))
+
+    keep = None
+    cl = p.get('cluster')
+    if cl:
+        # the cluster field at every candidate, drawn once (its own stream: the candidates' draws stay as they are)
+        f = _point_noise(cand[:, 0], cand[:, 1], float(cl.get('wavelength_m', 6000.0)),
+                         (int(seed) + int(p['seed'])) * 131 + 61)
+        from statistics import NormalDist
+        t = NormalDist().inv_cdf(1.0 - min(max(float(cl.get('cover', 0.5)), 1e-3), 1.0 - 1e-3))
+        w = max(float(cl.get('soft', 0.35)), 1e-3)
+        q = np.clip((f - t) / w + 0.5, 0.0, 1.0)
+        keep = np.random.default_rng((int(seed) + int(p['seed'])) * 31 + 7).uniform(size=len(cand)) \
+            < q * q * (3.0 - 2.0 * q)
+    gcell = sp if by_size else sp / math.sqrt(2.0)
+    grid = {}
+    out = []
+    for n_c, (x, y) in enumerate(cand):
+        if keep is not None and not keep[n_c]:
+            continue
+        r = radius() if by_size else None
         gi, gj = int(math.floor(x / gcell)), int(math.floor(y / gcell))
         ok = True
         for di in (-2, -1, 0, 1, 2):
             for dj in (-2, -1, 0, 1, 2):
-                q = grid.get((gi + di, gj + dj))
-                if q is not None and (q[0] - x) ** 2 + (q[1] - y) ** 2 < sp * sp:
-                    ok = False
+                for q in grid.get((gi + di, gj + dj), ()):
+                    lim = sp * (r + q[2]) / (r0 + r1) if by_size else sp
+                    if (q[0] - x) ** 2 + (q[1] - y) ** 2 < lim * lim:
+                        ok = False
+                        break
+                if not ok:
                     break
             if not ok:
                 break
         if not ok:
             continue
-        grid[(gi, gj)] = (x, y)
-        r = rng.uniform(r0, r1)
+        if r is None:
+            r = radius()
+        grid.setdefault((gi, gj), []).append((x, y, r))
         e = rng.uniform(e0, e1)
         if angles:
-            ang = math.radians(float(angles[int(rng.integers(len(angles)))]) + rng.uniform(-12.0, 12.0))
+            ang = math.radians(float(angles[int(rng.integers(len(angles)))]) + rng.uniform(-jit, jit))
         else:
             ang = rng.uniform(0.0, math.pi)
-        out.append((float(x), float(y), r * math.sqrt(e), r / math.sqrt(e), ang,
-                    float(p['strength']) * rng.uniform(0.75, 1.25)))
+        s = (rng.uniform(float(strength[0]), float(strength[1])) if isinstance(strength, (list, tuple))
+             else float(strength) * rng.uniform(0.75, 1.25))
+        out.append((float(x), float(y), r * math.sqrt(e), r / math.sqrt(e), ang, s))
     return out
 
 
@@ -1379,7 +1486,7 @@ FLUVIAL_DEFAULTS = dict(U_m_per_yr=0.0, threshold_iters=3, threshold_rate=0.12, 
                         weather_sat=1000.0, weather_loose=2.0, weather_area=0.0, weather_area_slope_deg=(20.0, 35.0),
                         weather_refine=0.0, weather_loose_refine=0.5, weather_k_exp=1.0, joints=(), joint_gain=0.0,
                         resist=0.0,
-                        resist_run=0.0,
+                        resist_run=0.0, resist_run_beds='all',
                         resist_noise=1.0, resist_scales_m=(1400.0, 600.0), edge_follow=True)
 
 
@@ -1506,10 +1613,13 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
     weather = (wf * W0, math.tan(math.radians(float(_q(p, 'weather_slope_deg')))), float(FL._p(p, 'K')), wl,
                float(_q(p, 'weather_area')), float(_q(p, 'weather_sat')), (a_lo, a_hi))
     fac, fac_w = facies_spec(p.get('facies'), s)
+    beds = str(_q(p, 'resist_run_beds'))
+    if beds not in ('all', 'strong'):
+        raise ValueError(f"strata_fluvial resist_run_beds {beds!r}: 'all' or 'strong'")
     run = StrataRun(dev, cell, fields, par, pins, col, zoff, lock, lock_b,
                     math.tan(math.radians(float(_q(p, 'repose_deg')))), weather,
                     lv=(lv.x0, lv.y0, lv.cell), facies=fac, facies_w=fac_w,
-                    weather_k_exp=float(_q(p, 'weather_k_exp')))
+                    weather_k_exp=float(_q(p, 'weather_k_exp')), strong_only=beds == 'strong')
     iters = int(_q(p, 'threshold_iters'))
     rate = float(_q(p, 'threshold_rate'))
     mexp, nexp, pexp = float(FL._p(p, 'm')), float(FL._p(p, 'n')), float(FL._p(p, 'p'))
@@ -1576,8 +1686,10 @@ def op_strata_fluvial(fields, level, params, seed=0, ctx=None):
     fields['zs'] = zs.astype(F32)
     fields['U'] = U.astype(F32)
     fields['K'] = (K * col.k_at(zs)).astype(F32)
-    # the layer's angle where the rock is strong or weak (the rock mass and the facies)
-    fields['Sc'] = (col.tan_at(zs) / (Q * facies_factor(lv, zs, fac))).astype(F32)
+    # the layer's angle where the rock is strong or weak (the rock mass, on the strong beds only with
+    # resist_run_beds 'strong', and the facies)
+    Qz = Q if beds == 'all' else 1.0 + (Q - 1.0) * col.strong_at(zs)
+    fields['Sc'] = (col.tan_at(zs) / (Qz * facies_factor(lv, zs, fac))).astype(F32)
     fields['G'] = G.astype(F32)
     if chan is not None:
         fields['river'] = chan.astype(F32)

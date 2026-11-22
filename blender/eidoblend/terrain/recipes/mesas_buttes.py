@@ -4,17 +4,21 @@ Monument Valley.
     t = make_terrain('mesas_buttes', params={'caprock_fraction': 0.05}, focus=(-1100, -40))
 
 The stages (solvers/strata.py, solvers/rivers.py): Monument Valley's column (the Cedar Mesa sandstone the floor is
-stripped to, the Organ Rock shale's pedestal about 150 m, the De Chelly sandstone's sheer walls about 160 m and a
-thin conglomerate cap: the Mittens' proportions); a plateau at the cap's top; a winding wash across the tile as the
-base level, cut down to the floor over the first part of the run; then the walls retreat (weathering: the Organ
-Rock wears back under the De Chelly, which fails over it at 80 degrees and leaves its debris as talus pedestals),
-fastest where runoff gathers, so the escarpment frays into fingers, and it passes the massive cores of the De Chelly
-(blue noise about 1.3 km apart, the size of Monument Valley's buttes, long along the joints, rounded and each its own
-outline), which it leaves standing as buttes. The first pass, on the coarsest level's 62.5 m cells, stops when the
-caprock left in the main tile (the ground at or above the De Chelly's base) falls to `caprock_fraction` (or at its
-age); the coarsest level's later passes (31 m, 15.6 m) go on evolving for 0.12 of its time, so the walls retreat
-further and stand again at each finer cell, sheer under sharp rims. The floor follows the Cedar Mesa's top, which
-undulates a metre or two over 90-260 m: low swells, ledges and swales. Rock breakup's relief on the hero levels.
+stripped to, the Organ Rock shale's pedestal about 125 m, the De Chelly sandstone's sheer walls about 165 m and a
+thin conglomerate cap: the free buttes' proportions on the DEM, the cliff the taller); a plateau at the cap's top; a
+winding wash across the tile as the base level, cut down to the floor over the first part of the run; then the walls
+retreat (weathering: the Organ Rock wears back under the De Chelly, which fails over it at 80 degrees and leaves its
+debris as talus pedestals), fastest where runoff gathers, so the escarpment frays into fingers, and it passes the
+massive cores of the De Chelly, which it leaves standing: cores of many sizes (many small, few large) in groups with
+open ground between, long along the joints, each its own outline, so the remnants run from mesas through buttes and
+slender buttes to spires on their pedestals and low capless cones. The massive rock stands sheer; the shale under it
+stands at its own angle (resist_run_beds 'strong'), so every pedestal is as broad as Monument Valley's, and a core
+narrower than its pedestal's run leaves a spire or a cone, not a steep plinth. The first pass, on the coarsest level's
+62.5 m cells, stops when the caprock left in the main tile (the ground at or above the De Chelly's base) falls to
+`caprock_fraction` (or at its age); the coarsest level's later passes (31 m, 15.6 m) go on evolving for 0.12 of its
+time, so the walls retreat further and stand again at each finer cell, sheer under sharp rims. The floor follows the
+Cedar Mesa's top, which undulates a metre or two over 90-260 m: low swells, ledges and swales. Rock breakup's relief
+on the hero levels.
 
 Heights: z = 0 is the wash's final bed at the tile centre; base_elevation_m (1520 m) places it.
 """
@@ -24,7 +28,7 @@ from ..core.recipe import Knob, Recipe, Stage
 from ..solvers import strata as S
 
 COLUMN = 'monument_valley'
-CAP_BASE_ZS = S.column(COLUMN).base_of('De Chelly')          # 330 m: the caprock is the De Chelly and above
+CAP_BASE_ZS = S.column(COLUMN).base_of('De Chelly')          # 275 m: the caprock is the De Chelly and above
 
 
 def _surface(p):
@@ -54,20 +58,27 @@ STRATA = {'column': COLUMN, 'zs0_m': '$floor_zs_m', 'dip_deg': 1.4, 'azimuth_deg
 # Valley's 0.016)
 JOINTS = [{'strike_deg': 20.0, 'spacing_m': 650.0, 'width_m': 35.0},
           {'strike_deg': 80.0, 'spacing_m': 900.0, 'width_m': 35.0, 'strength': 0.7}]
-# massive cores in the De Chelly (strata.rock_cores, blue noise about 1.3 km apart, 360-840 m across, long along the
-# joints, rounded and each its own outline): the escarpment retreats past them and leaves them standing as buttes
+# massive cores in the De Chelly (strata.rock_cores): the escarpment retreats past them and leaves them standing
 # (without them it frayed into fingers that were all stripped before any stood alone: no butte in the tile). Every
 # core is the rock mass at its strongest (strength 4.5 x 0.75-1.25 against n's clip at 3.5) and the rock mass weighs
 # 1.0 in the erodibility and the weathering (FLUVIAL's resist): a core's walls then wear back about a thirtieth as
-# fast as the escarpment's, so a block the size of Monument Valley's buttes outlives its passage (cores 1.8 km apart
-# and 600-1300 m across, at strength 3 and resist 0.8, left the escarpment's plateau and four to six remnants with
-# caps of 0.005-0.2 km2 in the main tile; cores of the buttes' size at that strength were worn down to spires with
-# caps under 0.02 km2 once the later passes evolved; at strength 4.5, cores 300-700 m across left buttes with caps of
-# 0.005-0.06 km2 and the main tile's slope p90 at 14-16 degrees against the DEM's 24.5, cores 360-840 m across caps
-# up to 0.11 km2 and p90 22-24.5. The Mittens' and Merrick Butte's tops are 0.04-0.06 km2)
-CORES = {'spacing_m': 1300.0, 'radius_m': [180.0, 420.0], 'elongation': [1.0, 1.8], 'angles_deg': [20.0, 80.0],
-         'strength': 4.5, 'region_m': 40000.0, 'exponent': 2.5, 'wobble': 0.2}
-PLATEAU = {'surface_zs_m': 480.0, 'roughness': [[3000.0, 5.0], [600.0, 2.0], [120.0, 0.6]]}
+# fast as the escarpment's, so a block outlives its passage.
+# What a core leaves is its size less its pedestal: the shale stands at its own angle, so the pedestal's foot sits
+# about 250-300 m out from the cliff's top (Monument Valley's 80 % of the pedestal's height is lost 220 m from the
+# cliff's foot). A core narrower than that leaves a spire on its pedestal or a capless cone, one of 300-450 m radius
+# a butte, a larger one a mesa. The sizes follow a power law (p(r) ~ r^-2.2 over 280-900 m: many small, few large) and the
+# cores stand in groups with open ground between (a world noise 6 km across keeps about two thirds of the plane;
+# a pair stands at least 1.4 km x (r1 + r2) / 1180 m apart: big blocks keep their distance, small ones may stand
+# close, as the Mittens and Merrick Butte; four darts per spacing squared, so the distances are irregular). Rounded
+# (elliptic, up to 1.6 long, along the joints +-35 degrees, the outline wobbling 0.3): long straight walls along one
+# joint set added up in the 4-fold aspect harmonic.
+# (The cores before, 1.3 km apart in blue noise and 360-840 m across, stood as about twenty buttes of one size at
+# near-even spacing from the air; with the shale at its own angle they left one capped butte and six cones.)
+CORES = {'spacing_m': 1400.0, 'radius_m': [280.0, 900.0], 'size_power': 2.2, 'elongation': [1.0, 1.6],
+         'angles_deg': [20.0, 80.0], 'angle_jitter_deg': 35.0, 'strength': 4.5, 'region_m': 40000.0,
+         'exponent': 2.0, 'wobble': 0.3, 'darts': 4.0, 'spacing_by_size': True,
+         'cluster': {'wavelength_m': 6000.0, 'cover': 0.65, 'soft': 0.35}}
+PLATEAU = {'surface_zs_m': 460.0, 'roughness': [[3000.0, 5.0], [600.0, 2.0], [120.0, 0.6]]}
 # the wash winds (32 degrees at 3.5 km): the escarpment retreating from it is embayed, not one straight front
 RIVER = {'kind': 'walk', 'through': [0.0, 0.0], 'flow_azimuth_deg': 20.0, 'wiggle_deg': 32.0,
          'wiggle_wavelength_m': 3500.0, 'width_m': 40.0, 'bed_m': 0.0, 'gradient': 0.004,
@@ -87,12 +98,19 @@ RIVER = {'kind': 'walk', 'through': [0.0, 0.0], 'flow_azimuth_deg': 20.0, 'wiggl
 # stand again at each pass's cells: the De Chelly now drops 115 m between 16 and 47 m from the rim (75 degrees at
 # 8 m; Monument Valley's DEM at 8 m, 100 m in 32 m), over a talus pedestal at about 35 degrees.
 # The debris washes off at 0.3 x the rock's rate (0.6 before; the talus mantles the pedestals longer).
+# The rock mass's run factor steepens the massive formations only (resist_run_beds 'strong'): with it on every bed the
+# Organ Rock under the cores stood at 45-60 degrees (its own angle is 34, the DEM's pedestals' upper halves 30-35), so
+# every butte stood on a steep banded plinth that read as part of its wall, the cliff about as tall as its pedestal,
+# and a worn core ended as a pointed banded cone. With it on the De Chelly alone the cliff stands sheer and the
+# pedestal at the shale's angle: on the main level the cliff drops about 170 m at 64 degrees over 60 m (the DEM's free
+# buttes 150 m at 63 over 46) onto a pedestal of about 125 m that loses 80 % of its height 225 m out (the DEM's
+# 90-120 m and 220 m).
 FLUVIAL = {'K': 1.5e-6, 'valley_spacing_m': 600.0, 'roughness': 0.6, 'roughness_scales_m': [3000.0, 700.0, 150.0],
            'deposition': 0.6, 'age_myr': 6.0, 'max_steps': 8000, 'repose_deg': 33.0, 'later': 'evolve',
            'later_frac': 0.12,
            'weather_m_per_yr': '$weathering_m_per_yr', 'weather_area': '$fraying', 'weather_loose': 0.3,
-           'joints': JOINTS, 'joint_gain': 1.8, 'resist': 1.0, 'resist_run': 0.3, 'resist_noise': 0.5,
-           'resist_scales_m': [1500.0, 600.0, 240.0, 90.0, 35.0], 'resist_cores': CORES,
+           'joints': JOINTS, 'joint_gain': 1.8, 'resist': 1.0, 'resist_run': 0.3, 'resist_run_beds': 'strong',
+           'resist_noise': 0.5, 'resist_scales_m': [1500.0, 600.0, 240.0, 90.0, 35.0], 'resist_cores': CORES,
            'caprock_target': 0.08, 'caprock_zs_m': CAP_BASE_ZS, 'check_every': 40}
 # The rock breakup on the hero levels gives the walls the strength field's relief (fluting along the joints) but no
 # second failure: the composite threshold has already brought every face to its bed's angle there, and the
@@ -111,17 +129,21 @@ MESAS_BUTTES = Recipe(
                                                          'passes then retreat the walls for 0.12 of its time; '
                                                          'Monument Valley: its butte and mesa tops and walls about '
                                                          '0.06-0.08; a young plateau edge 0.3+)', apply=_cap),
-        'relief_m': Knob(340.0, 'm', (50.0, 2000.0), "the cap rock's top above the wash's final bed (the Mittens "
-                                                     'stand about 300-330 m over the floor; 340 puts the start at '
+        'relief_m': Knob(320.0, 'm', (50.0, 2000.0), "the cap rock's top above the wash's final bed (the Mittens "
+                                                     'stand about 300-330 m over the floor; 320 puts the start at '
                                                      "the Shinarump's top)", apply=_surface),
         'floor_zs_m': Knob(140.0, 'm', (0.0, 500.0), "where in the column the wash's bed sits (140: 10 m under "
                                                      "the Cedar Mesa's top, which the floor is stripped to)",
                            apply=_surface),
-        'weathering_m_per_yr': Knob(2e-4, 'm/yr', (0.0, 3e-3), 'how fast rock of erodibility factor 1 on a '
-                                                               '30-degree slope wears down (the Organ Rock shale '
-                                                               'x2.5, the De Chelly x0.08): the walls\' retreat (at '
-                                                               '1e-4 the escarpment had not retreated far enough '
-                                                               'to free the buttes by the end of the run)'),
+        'weathering_m_per_yr': Knob(2.2e-4, 'm/yr', (0.0, 3e-3), 'how fast rock of erodibility factor 1 on a '
+                                                                 '30-degree slope wears down (the Organ Rock shale '
+                                                                 'x2.5, the De Chelly x0.08): the walls\' retreat '
+                                                                 '(at 1e-4 the escarpment had not retreated far '
+                                                                 'enough to free the buttes by the end of the run; '
+                                                                 'at 2e-4, with cores large enough for their '
+                                                                 'pedestals, the plateau kept a sixth of the main '
+                                                                 'tile and its rim zone 5 % against Monument '
+                                                                 "Valley's 2.5)"),
         'fraying': Knob(3.0, '', (0.0, 6.0), 'how much faster the walls wear back where runoff gathers (x 1 + '
                                              'this sqrt(area / 10 ha)): the escarpment frays into fingers that '
                                              'part into buttes'),

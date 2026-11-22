@@ -17,15 +17,20 @@
    The rock's run is scaled by the rock mass's strength at the cell (par.z, q = exp(-resist_run n), solvers/strata.py
    rock_mass; 1 for a uniform rock mass): strong spots stand steeper, weak ones lie back, so one layer is not one
    angle all along a wall. The loose cover's repose is not scaled.
-   The facies (uFac.x > 0): the rock's run is further scaled by exp(-uFac.x f), f a value noise of the cell's world
-   position (wavelength uFac.y metres) and its stratigraphic height zs (uFac.z metres), so each bed's strength
+   The facies (uFac.x > 0): the rock's run is further scaled by F = exp(-uFac.x f), f a value noise of the cell's
+   world position (wavelength uFac.y metres) and its stratigraphic height zs (uFac.z metres), so each bed's strength
    changes along the wall and from bed to bed (a cliff here is a ledgy slope there: a lateral facies change),
    where rock_mass's n is the same through every bed at one place. f: facies_noise, about unit standard deviation.
+   With uStrongOnly 1, q scales only the strong beds' share of the run, Rm (rtab.x: R through the formations of K
+   factor under 1, the cliff formers), so the massive sandstone of a butte stands sheer while the shale under it
+   stands at its own angle:
+       dR = min(span, L) / tan(repose) + F (q (Rm(zs - L) - Rm(zs - span)) + the rest of R over that span)
    Twin: solvers/strata.py strata_threshold. */
 //! sampler st          x: h (m)
 //! sampler zoff        x: z - zs, the cell's stratigraphic offset (m: dip, warp, faults, the column's placement)
 //! sampler mk          w: loose thickness h - bed (m)
-//! sampler rtab        z: R, the column's horizontal run (m) at zs = uRZ0 + i uRDz (1 row of uRN texels)
+//! sampler rtab        z: R, the column's horizontal run (m) at zs = uRZ0 + i uRDz (1 row of uRN texels); x: Rm,
+//                      the strong beds' share of it (read with uStrongOnly 1)
 //! sampler par         z: q, the rock mass's run factor (0 < q; 1 = the column as tabulated)
 //! image   outP r32f   x: phi, the excess (0 where the column stands)
 //! uniform float uDx   the cell, metres
@@ -35,6 +40,7 @@
 //! uniform float uRepose  tan of the loose cover's repose angle
 //! uniform vec3 uLv    the level: x0, y0, cell (m), for the cell's world position
 //! uniform vec4 uFac   the facies: strength (0: off), horizontal wavelength (m), vertical wavelength (m), seed
+//! uniform int uStrongOnly  1: q scales the strong beds' share of the run only (rtab.x); 0: all of it
 //! uniform int uBound
 
 /* the facies noise (twin: solvers/strata.py facies_noise): two octaves of trilinear value noise on the PCG lattice
@@ -74,6 +80,23 @@ float run_at(float z) {
   return mix(texelFetch(rtab, ivec2(i0, 0), 0).z, texelFetch(rtab, ivec2(i0 + 1, 0), 0).z, f);
 }
 
+/* Rm, the strong beds' share of R (rtab.x), continued past the table as run_at */
+float run_strong_at(float z) {
+  float t = (z - uRZ0) / uRDz;
+  float tn = float(uRN - 1);
+  if (t <= 0.0) {
+    float r0 = texelFetch(rtab, ivec2(0, 0), 0).x;
+    return r0 + t * (texelFetch(rtab, ivec2(1, 0), 0).x - r0);
+  }
+  if (t >= tn) {
+    float r1 = texelFetch(rtab, ivec2(uRN - 1, 0), 0).x;
+    return r1 + (t - tn) * (r1 - texelFetch(rtab, ivec2(uRN - 2, 0), 0).x);
+  }
+  int i0 = int(floor(t));
+  float f = t - float(i0);
+  return mix(texelFetch(rtab, ivec2(i0, 0), 0).x, texelFetch(rtab, ivec2(i0 + 1, 0), 0).x, f);
+}
+
 float axis_h(ivec2 p, int k, ivec2 n, float h) {
   ivec2 q;
   return neighbour(p, k, n, uBound, q) ? texelFetch(st, q, 0).x : h;
@@ -92,7 +115,12 @@ void main() {
     float zs = h - texelFetch(zoff, p, 0).x;
     float L = max(texelFetch(mk, p, 0).w, 0.0);
     float dR = min(span, L) / uRepose;
-    if (span > L) {
+    if (span > L && uStrongOnly != 0) {
+      float q = texelFetch(par, p, 0).z;
+      float F = uFac.x > 0.0 ? exp(-uFac.x * facies_noise(world_xy(p, uLv), zs, uFac)) : 1.0;
+      float rm = run_strong_at(zs - L) - run_strong_at(zs - span);
+      dR += F * (q * rm + ((run_at(zs - L) - run_at(zs - span)) - rm));
+    } else if (span > L) {
       float q = texelFetch(par, p, 0).z;
       if (uFac.x > 0.0) q *= exp(-uFac.x * facies_noise(world_xy(p, uLv), zs, uFac));
       dR += q * (run_at(zs - L) - run_at(zs - span));
