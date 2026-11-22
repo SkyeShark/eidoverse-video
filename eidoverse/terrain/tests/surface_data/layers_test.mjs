@@ -31,9 +31,10 @@ const edition = S.W.needBlenderEdition('the bake case\'s snapshot');
 const root = S.fixtureRoot();
 const recFile = root ? `${root}/bakes/palette_bake.json` : null;
 const rec = recFile && S.W.exists(recFile) ? JSON.parse(Deno.readTextFileSync(recFile)).cases[name] : null;
-const snap = edition ? `${S.W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
-if (!rec || rec.error || !snap || !S.W.exists(snap)) {
-    T.ok(`${name}: Blender's bake, palette bake and snapshot present`, false, 'make them: tests/surface_data/blender_bakes.py');
+const snap = S.snapPath(name);
+const why = edition ? S.caseProblem(name, S.blenderBake(name), snap) : 'no Blender edition';
+if (!rec || rec.error || !snap || !S.W.exists(snap) || why) {
+    T.ok(`${name}: Blender's bake, palette bake and snapshot present`, false, why ?? 'make them: tests/surface_data/blender_bakes.py');
     Deno.exit(S.finish(T, 'layers_test'));
 }
 

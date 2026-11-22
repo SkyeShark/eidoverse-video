@@ -5,8 +5,15 @@ colour is a GPU kernel of Blender's GPU module):
     EIDO_BLENDER_EDITION=<a checkout or `git archive` export of the blender branch> EIDO_SURFACE_COMMIT=<its commit>
     bash <the Blender edition>/run_blender.sh eidoverse/terrain/tests/surface_data/blender_bakes.py -- \
         --from <the Blender package's bake cache: blender/tests/terrain/out/surface_data/cache> \
-        --snaps <its snapshots: blender/tests/terrain/out/surface_data/snap> [--case toroweap ...]
+        --snaps <its snapshots: blender/tests/terrain/out/surface_data/snap> [--case toroweap ...] [--pin]
     (on a shared machine, behind the GPU queue)
+
+The snapshot of a case must be the terrain its bake in <from> was made from (the bake record's `terrain`, the
+snapshot's cache_key): the Blender rounds re-make their snapshots, so a case whose snapshot has moved stops with the
+two keys. Make its bake again from the snapshot as it is now (Blender's surface_data/bake_cases.py, in an export
+holding the snapshot in its out/surface_data/snap/) and pass --pin: the snapshot (<case>.npz, .json, _make.json) is
+copied into tests/out/surface_data/fixtures/blender_<commit>/snap/, where the port's tests read it before the Blender
+edition's (_surface.mjs snapPath), so a later re-make in the Blender edition leaves the fixture whole.
 
 Per case, the Blender package's own bake of the case (<from>/<case>/surface_<key>.json and _L<i>.npz: its maps as the
 cache stores them; its palette files are left where they are) is copied into
@@ -41,7 +48,34 @@ def bake_json(folder):
     return None
 
 
-def one(name, src_root, snaps, out_root, log=print):
+def snapshot_terrain(snaps, name):
+    """The terrain a snapshot holds: its sidecar's cache_key (Terrain.save writes <base>.json beside <base>.npz)."""
+    try:
+        with open(os.path.join(snaps, name + '.json'), encoding='utf-8') as f:
+            return json.load(f).get('cache_key')
+    except (OSError, ValueError):
+        return None
+
+
+def pin(snaps, name, out_root):
+    """Copy a case's snapshot (<name>.npz and its sidecars) into the fixtures' snap/ folder beside bakes/: the folder
+    and the files copied."""
+    dst = os.path.join(os.path.dirname(out_root), 'snap')
+    os.makedirs(dst, exist_ok=True)
+    made = []
+    for suffix in ('.npz', '.json', '_make.json'):
+        src = os.path.join(snaps, name + suffix)
+        if not os.path.exists(src):
+            continue
+        tgt = os.path.join(dst, name + suffix)
+        if os.path.normcase(os.path.abspath(src)) != os.path.normcase(os.path.abspath(tgt)):
+            shutil.copyfile(src, tgt + '.tmp')
+            os.replace(tgt + '.tmp', tgt)
+        made.append(name + suffix)
+    return dst, made
+
+
+def one(name, src_root, snaps, out_root, log=print, pin_snapshot=False):
     from eidoblend.terrain import api as A
     from eidoblend.terrain import surface as S
     from eidoblend.terrain.surface import bake as SB
@@ -51,6 +85,12 @@ def one(name, src_root, snaps, out_root, log=print):
         raise FileNotFoundError(f'{name}: no surface bake in {src}')
     with open(os.path.join(src, f'surface_{key}.json'), encoding='utf-8') as f:
         info = json.load(f)
+    terrain, made_of = snapshot_terrain(snaps, name), info.get('terrain')
+    if made_of and terrain != made_of:
+        raise ValueError(f'{name}: the snapshot in {snaps} is terrain {terrain}, the bake in {src} is of terrain '
+                         f'{made_of}: the snapshot was re-made after that bake (bake it again from the snapshot, then '
+                         '--pin)')
+    pinned = pin(snaps, name, out_root)[1] if pin_snapshot else None
     n = len(info['names'])
     dst = os.path.join(out_root, name)
     if os.path.isdir(dst):
@@ -75,8 +115,8 @@ def one(name, src_root, snaps, out_root, log=print):
     t0 = time.perf_counter()
     sd.bake_palette(pal, cache=dst, log=log, provenance=True)
     sec = round(time.perf_counter() - t0, 3)
-    rec = dict(case=name, key=key, palette=palette, palette_name=pal.get('name'), tag=sd.info['palette_bake']['tag'],
-               palette_bake=sd.info['palette_bake'], seconds=sec, package_tags=own,
+    rec = dict(case=name, key=key, terrain=terrain, snapshot_pinned=pinned, palette=palette, palette_name=pal.get('name'),
+               tag=sd.info['palette_bake']['tag'], palette_bake=sd.info['palette_bake'], seconds=sec, package_tags=own,
                same_code_as_package=sd.info['palette_bake']['tag'] in own,
                levels=[dict(index=lv.index, role=lv.role, n=int(lv.n), cell=float(lv.cell)) for lv in t.levels])
     log(f'[blender_bakes] {name}: palette bake {rec["tag"]} in {sec} s ({sd.info["palette_bake"]})')
@@ -97,7 +137,7 @@ def main():
     recs, rc = {}, 0
     for nm in names:
         try:
-            recs[nm] = one(nm, src_root, snaps, out_root)
+            recs[nm] = one(nm, src_root, snaps, out_root, pin_snapshot='--pin' in a)
         except Exception as e:                                # noqa: BLE001 - reported; the other cases go on
             import traceback
             traceback.print_exc()

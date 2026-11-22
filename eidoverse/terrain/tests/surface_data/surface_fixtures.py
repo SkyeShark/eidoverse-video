@@ -25,7 +25,9 @@ manifest.json and one little-endian .bin per distinct array.
             and Blender's own renders of those six Noise and Voronoi nodes (out/surface_data/noise_render/*.exr,
             made by that test in Blender), read with OpenImageIO, with the plane's pixel centres.
 --expr      blender/tests/terrain/surface_data/test_expr.py's cases: every palette's expressions with every noise at
-            its mean, evaluated by palettes.evaluate (float64) on its 4096 random map values per name.
+            its mean, evaluated by palettes.evaluate (float64) on its 4096 random map values per name; then each
+            recipe's 'auto' palette (its RECIPE_LOOKS applied) with the expressions no case before it has, labelled
+            auto:<recipe>.
 --palettes  build/palettes.py as data, for build/palettes.js's JSON-equality test: the module's tables, get() of
             every palette name and of 'auto' for every recipe, check(), material_masks, masks_used, ramp_rows,
             names_in, known_mask over every name, climate_sun cases, column_layers, for_place for every place.
@@ -199,23 +201,45 @@ def expr_fixtures(out, key):
     exec(FX._definitions(test), ns)
     rec = FX.FunctionRecorder(FX.Store(os.path.join(out, 'expr'), 'functions/expr', key), 'expr')
     rng = np.random.default_rng(11)
-    for name in P.names():
-        pal = P.get(name)
-        exprs = ns['expressions'](pal)
+
+    def record(label, pal, exprs, **args):
         names = set()
         for _k, e in exprs:
             names |= P.names_in(e)
         names = sorted(names)
         maps = ns['sample_maps'](names, rng)
         outs = {}
-        for k, (label, e) in enumerate(exprs):
+        for k, (_label, e) in enumerate(exprs):
             outs[f'e{k:03d}'] = np.broadcast_to(np.asarray(P.evaluate(e, maps, constants=pal.get('constants'), flat=True),
                                                            np.float64), (ns['NPTS'],)).copy()
-        rec.case(name, 'palettes.evaluate', dict(palette=name, constants=B.jsonable(pal.get('constants')),
-                                                 exprs=[[label, e] for label, e in exprs], tol=ns['TOL']),
+        rec.case(label, 'palettes.evaluate', dict(args, constants=B.jsonable(pal.get('constants')),
+                                                  exprs=[[lb, e] for lb, e in exprs], tol=ns['TOL']),
                  {f'm_{nm}': np.asarray(maps[nm], np.float64) for nm in names}, outs)
+
+    seen = set()
+    for name in P.names():
+        pal = P.get(name)
+        exprs = ns['expressions'](pal)
+        seen |= {e for _k, e in exprs}
+        record(name, pal, exprs, palette=name)
+    # the recipes' 'auto' palettes (RECIPE_LOOKS over their palettes, as make_terrain resolves them), each with the
+    # expressions no case before it has: test_expr.py takes the base palettes only, and the looks' own terms (the
+    # crater's ejecta and grassland, the meanders' benches) reach the port's material and far colour as well. Drawn
+    # after the base palettes, so those cases' maps stay what they were
+    looks = 0
+    for r in REGISTRY:
+        try:
+            pal = P.get('auto', r)
+        except Exception:                                    # noqa: BLE001 - a recipe without an 'auto' palette
+            continue
+        exprs = [(lb, e) for lb, e in ns['expressions'](pal) if e not in seen]
+        seen |= {e for _k, e in exprs}
+        if exprs:
+            record(f'auto:{r}', pal, exprs, palette='auto', recipe=r)
+            looks += 1
     man = rec.store.finish()
-    print(f"[surface fixtures] expr: {len(man['cases'])} palettes -> {rec.store.dir}", flush=True)
+    print(f"[surface fixtures] expr: {len(man['cases'])} cases ({len(man['cases']) - looks} palettes, {looks} recipes' "
+          f"'auto' palettes) -> {rec.store.dir}", flush=True)
     return man
 
 

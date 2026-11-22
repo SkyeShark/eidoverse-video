@@ -8,7 +8,10 @@
 //
 // The fixtures are keyed by the Blender commit they were made from (blender_<commit>, the surface code hash and the
 // palettes' in key.json): $EIDO_SURFACE_FIXTURES names the folder (tests/out/surface_data/fixtures/<name>), else the
-// newest. JavaScript per cell here is test code (the edition's rule allows it in tests only).
+// newest. A case's snapshot is the fixtures' pinned copy when they hold one, else the Blender edition's (snapPath),
+// and a case is compared only when its snapshot is the terrain its Blender bake was made from (caseProblem): the
+// Blender rounds re-make their snapshots. JavaScript per cell here is test code (the edition's rule allows it in
+// tests only).
 
 import * as C from '../parity/_common.mjs';
 
@@ -58,7 +61,8 @@ export function finish(T, name, extra = {}) {
     const failed = T.rows.filter((r) => !r.passed);
     const res = { test: T.title, deno: Deno.version.deno, date: new Date().toISOString(),
         seconds: +((performance.now() - T.t0) / 1000).toFixed(2), checks: T.rows.length,
-        failed: failed.map((r) => r.check), fixtures: fixtureKey(), ...T.extra, rows: T.rows };
+        failed: failed.map((r) => r.check), fixtures: fixtureKey(),
+        skipped: Object.keys(skipped).length ? skipped : undefined, ...T.extra, rows: T.rows };
     Deno.writeTextFileSync(`${W.out('surface_data')}/${name}.json`, JSON.stringify(res, null, 1));
     return code;
 }
@@ -76,6 +80,43 @@ export function argsOf(argv = Deno.args) {
 /** The bake cases (Blender's surface_data package's, _cases.py): their snapshots are Terrain.save files. */
 export const CASES = ['toroweap', 'lauterbrunnen', 'meteor_crater', 'great_sand_dunes', 'badlands_sd', 'canyon', 'alpine_valley',
     'fluvial_range'];
+
+/** A bake case's snapshot (a Terrain.save file): the fixtures' pinned copy (<fixtures>/snap/<case>.npz, written by
+ * tests/surface_data/blender_bakes.py --pin when it made that case's Blender bake from it), else the Blender edition's
+ * own (blender/tests/terrain/out/surface_data/snap/<case>.npz, which the Blender rounds re-make), or null. */
+export function snapPath(name) {
+    const root = fixtureRoot();
+    if (root && W.exists(`${root}/snap/${name}.npz`)) return `${root}/snap/${name}.npz`;
+    return W.blenderEdition() ? `${W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
+}
+
+/** The terrain a snapshot holds: its sidecar's cache_key (Terrain.save writes <base>.json beside <base>.npz), or null. */
+export function snapTerrain(snap) {
+    try {
+        return JSON.parse(Deno.readTextFileSync(snap.replace(/\.npz$/, '.json'))).cache_key ?? null;
+    } catch (_e) {
+        return null;
+    }
+}
+
+/** Why a case cannot be compared, or null: its snapshot and the Blender bake are there and the snapshot is the
+ * terrain the bake was made from (the bake record's `terrain`, surface/bake.py's terrain_key: the snapshot's
+ * cache_key). A snapshot re-made in the Blender edition after the fixtures were (another round's solver change) is
+ * a different terrain, so its maps are not compared with that bake. */
+export function caseProblem(name, bake = blenderBake(name), snap = snapPath(name)) {
+    if (!snap || !W.exists(snap)) return `no snapshot (${snap}): EIDO_BLENDER_EDITION, or the fixtures' snap/`;
+    if (!bake) return 'no Blender bake: tests/surface_data/blender_bakes.py';
+    const have = snapTerrain(snap), want = bake.info?.terrain ?? null;
+    if (want && have !== want) {
+        return `the snapshot ${snap} is terrain ${String(have).slice(0, 10)}, Blender's bake in ${bake.dir} is of terrain ` +
+            `${want.slice(0, 10)}: the snapshot was re-made after the fixtures (make the case's fixtures again from it: ` +
+            'tests/surface_data/blender_bakes.py --pin)';
+    }
+    return null;
+}
+
+/** The reasons portSurface() skipped cases, by case (the callers' checks say them). */
+export const skipped = {};
 
 /** The Blender bake of a case the tests compare with: the fixtures' copy (blender_bakes.py), else the Blender package's
  * own cache. { dir, key, info } or null. */
@@ -97,10 +138,12 @@ export function blenderBake(name) {
  * (a cache hit on bake_test.mjs's bakes in tests/out/surface_data/bakes/<case>), with palette: its palette bake
  * ('auto', as bakeSurface resolves it; provenance always) beside it. { t, sd } or null (a line says why). */
 export async function portSurface(name, { palette = false, log = null } = {}) {
-    const snap = W.blenderEdition() ? `${W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
+    const snap = snapPath(name);
     const bb = blenderBake(name);
-    if (!snap || !W.exists(snap) || !bb) {
-        console.log(`[skip] ${name}: no snapshot or Blender bake (EIDO_BLENDER_EDITION, tests/surface_data/blender_bakes.py)`);
+    const why = caseProblem(name, bb, snap);
+    if (why) {
+        skipped[name] = why;
+        console.log(`[skip] ${name}: ${why}`);
         return null;
     }
     const SI = await import('../../surface/index.js');

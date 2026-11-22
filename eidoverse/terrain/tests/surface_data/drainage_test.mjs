@@ -53,7 +53,7 @@ const results = {};
 for (const name of Object.keys(EXPECT)) {
     const got = await S.portSurface(name);
     if (!got) {
-        T.ok(`${name}: the case is there`, false, 'no snapshot or Blender bake');
+        T.ok(`${name}: the case is there`, false, S.skipped[name] ?? 'no snapshot or Blender bake');
         continue;
     }
     const { t, sd } = got;

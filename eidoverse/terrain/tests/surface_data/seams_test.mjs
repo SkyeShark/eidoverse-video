@@ -8,9 +8,9 @@
 //      D, E and M tiles' outer gutter ring (surface/layers.js) against the parent's encoded values there, within one
 //      8-bit step (RGBA8) or 1e-3 (16F).
 // The Blender edition's own result at d67f19e (its fix-round report): seven of the eight cases pass, badlands_sd's
-// src_strata at level 2 is 1.03 % of its range. When the Blender edition's own seams run is there
-// (blender/tests/terrain/out/surface_data/seams_<case>.json), a third check per case holds every edge's pass or fail and
-// the case's worst seam to it.
+// src_strata at level 2 is 1.03 % of its range. When Blender's own seams run of the case's bake is there (the fixtures'
+// seams/seams_<case>.json, tests/surface_data/blender_seams.py, else blender/tests/terrain/out/surface_data/
+// seams_<case>.json), a third check per case holds every edge's pass or fail and the case's worst seam to it.
 //
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/surface_data/seams_test.mjs
 //         [--case toroweap,canyon,...]
@@ -67,7 +67,7 @@ const results = {};
 for (const name of cases) {
     const got = await S.portSurface(name, { palette: true });
     if (!got) {
-        T.ok(`${name}: the case is there`, false, 'no snapshot or Blender bake');
+        T.ok(`${name}: the case is there`, false, S.skipped[name] ?? 'no snapshot or Blender bake');
         continue;
     }
     const { t, sd } = got;
@@ -148,12 +148,21 @@ for (const name of cases) {
             : `worst ${worstRow?.map} L${worstRow?.level} ${(100 * (worstRow?.err ?? 0)).toFixed(3)} % of its range`);
     T.ok(`${name}: every D, E and M tile's gutter ring holds the parent's encoded maps (${grows.length})`, gbad.length === 0,
         gbad.slice(0, 4).map((r) => `${r.family} L${r.level} ${S.sci(r.worst, 2)}`).join('; '));
-    // beside the Blender edition's own seams of the same case (test_seams.py's out/surface_data/seams_<case>.json, made
-    // on its own bake run, whose maps the port's equal within the bake's grade: an edge's error can move by that grade,
-    // so what is held equal is each edge's pass or fail and the case's worst seam)
-    const bj = S.W.blenderEdition() ? `${S.W.blenderTests()}/out/surface_data/seams_${name}.json` : null;
-    if (bj && S.W.exists(bj)) {
-        const want = JSON.parse(Deno.readTextFileSync(bj)).seams;
+    // beside the Blender edition's own seams of the same case (test_seams.py's check(), whose maps the port's equal
+    // within the bake's grade: an edge's error can move by that grade, so what is held equal is each edge's pass or
+    // fail and the case's worst seam): the fixtures' record of it (tests/surface_data/blender_seams.py: on the very
+    // bytes these tests read), else the Blender edition's own out/surface_data/seams_<case>.json (of whatever its
+    // cache held when it ran); a record of another bake than the case's is not compared
+    const root = S.fixtureRoot();
+    const fxs = root ? `${root}/seams/seams_${name}.json` : null;
+    const bj = fxs && S.W.exists(fxs) ? fxs : S.W.blenderEdition() ? `${S.W.blenderTests()}/out/surface_data/seams_${name}.json` : null;
+    const brec = bj && S.W.exists(bj) ? JSON.parse(Deno.readTextFileSync(bj)) : null;
+    const bbake = S.blenderBake(name);
+    if (brec && brec.key && bbake && brec.key !== bbake.key) {
+        T.ok(`${name}: Blender's own seams run is of the case's bake`, false, `${bj} is of bake ${brec.key.slice(0, 10)}, the case's ` +
+            `is ${bbake.key.slice(0, 10)}: make it on the fixtures (tests/surface_data/blender_seams.py)`);
+    } else if (brec) {
+        const want = brec.seams;
         const key = (r) => `${r.map} L${r.level}`;
         const mine = new Map(rows.map((r) => [key(r), r]));
         const both = want.filter((w) => mine.has(key(w)));

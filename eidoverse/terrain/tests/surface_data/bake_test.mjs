@@ -1,7 +1,9 @@
 // Every map of Blender-made terrains against Blender's own bake (PORT_PLAN.md 8.2 row P14; SURFACING_DESIGN.md 5.4,
 // package 1): the Blender surface_data package's bake cases (its snapshots, blender/tests/terrain/out/surface_data/
-// snap/<case>.npz, Terrain.save files read by api.js), baked by the port with the options Blender's bake of the same
-// snapshot recorded, every stored map of every level compared with Blender's, decoded from both caches' files.
+// snap/<case>.npz, or the fixtures' pinned copy of one: Terrain.save files read by api.js), baked by the port with the
+// options Blender's bake of the same snapshot recorded, every stored map of every level compared with Blender's,
+// decoded from both caches' files. A case whose snapshot is not the terrain that bake was made from fails its check
+// and is not compared (_surface.mjs caseProblem).
 //
 //     deno run --config deno.json --frozen --unstable-webgpu --allow-all eidoverse/terrain/tests/surface_data/bake_test.mjs
 //         [--case toroweap,canyon,...] [--blender <folder of Blender bakes: <folder>/<case>/surface_<key>*.npz>]
@@ -97,13 +99,18 @@ function compare(port, blender, name) {
 
 const R = await G.init();
 for (const name of cases) {
-    const snap = edition ? `${S.W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
+    const snap = S.snapPath(name);
     const bdir = blenderBakeDir(name);
     if (!snap || !S.W.exists(snap) || !bdir || !S.W.exists(bdir)) {
         T.ok(`${name}: snapshot and Blender bake present`, false, `snapshot ${snap}, bake ${bdir}`);
         continue;
     }
     const bi = bakeInfo(bdir);
+    const why = S.caseProblem(name, bi ? { dir: bdir, ...bi } : null, snap);
+    if (why) {
+        T.ok(`${name}: the snapshot is the terrain Blender's bake was made from`, false, why);
+        continue;
+    }
     const { Terrain } = await import('../../api.js');
     const t = await Terrain.load(snap, { build: false, log: null });
     const portDir = `${S.W.out('surface_data')}/bakes/${name}`;

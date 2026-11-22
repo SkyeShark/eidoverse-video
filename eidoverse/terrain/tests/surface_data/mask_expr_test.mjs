@@ -1,7 +1,8 @@
 // surface/mask_expr.js against palettes.py's evaluate (PORT_PLAN.md 8.2 row P14: "mask_expr.js equal to
 // palettes.evaluate within 1e-5 on every palette's noise-free expressions"; Blender's test_expr.py, its package-1
 // item 2). Every palette's expressions (layer weights, patch and ledge `where`, streaks_where, ramp and satmap `t`,
-// tone, damp_where) with every noise at its mean, compiled through build/ops.js and evaluated
+// tone, damp_where), and those of each recipe's 'auto' palette (its RECIPE_LOOKS) that no palette has (the fixture's
+// auto:<recipe> cases), with every noise at its mean, compiled through build/ops.js and evaluated
 //   1. by the float32 oracle (ops.NUM32, JavaScript on the CPU: test code), and
 //   2. on the GPU (ops.WGSL: one compute kernel per palette through core/gpu.js, as the palette bake runs them),
 // at the fixture's 4096 points of random maps in their units (tests/surface_data/surface_fixtures.py --expr: Blender's
@@ -133,7 +134,8 @@ for (const c of cases) {
     const names = Object.keys(maps).sort();
     nexpr += exprs.length;
     const orc = oracle(names, maps, exprs, consts, { flat: true });
-    const gpu = await gpuEval(c.label, names, maps, exprs, consts, { flat: true });
+    const tag = c.label.replace(/[^A-Za-z0-9_]/g, '_');
+    const gpu = await gpuEval(tag, names, maps, exprs, consts, { flat: true });
     const npts = want[0].length;
     const bad = [];
     let wo = 0, wg = 0;
@@ -157,13 +159,13 @@ for (const c of cases) {
     let wn = 0;
     const noiseRows = [];
     if (noisy.length) {
-        const pal = P.get(c.label);
+        const pal = c.args.recipe ? P.get('auto', c.args.recipe) : P.get(c.label);
         const noise3 = (pal.options ?? {}).detile === 'rotate';
         const pos = positions(npts, maps.height ?? null);
         for (const texelM of [null, 3.0, 'uniform']) {
             const o = oracle(names, maps, noisy, consts, { flat: false, noise3, texelM, pos });
             const o64 = oracle(names, maps, noisy, consts, { flat: false, noise3, texelM, pos, f64: true });
-            const g = await gpuEval(`${c.label}_noise_${texelM}`, names, maps, noisy, consts, { flat: false, noise3, texelM, pos });
+            const g = await gpuEval(`${tag}_noise_${texelM}`, names, maps, noisy, consts, { flat: false, noise3, texelM, pos });
             noisy.forEach(([label, e], q) => {
                 const gd = spread(o[q], g, q, npts, NOISE_TOL), fd = spread(o[q], o64[q], 0, npts, NOISE_TOL);
                 const allow = 2 * fd.p999 + NOISE_TOL;
@@ -188,8 +190,10 @@ for (const c of cases) {
         (bad.length ? `; FAIL ${bad.slice(0, 3).join(', ')}` : ''));
 }
 const failed = rows.filter((r) => r.failed.length);
+const nlooks = cases.filter((c) => c.args.recipe).length;
 T.ok(`the float32 oracle (ops.NUM32) equals palettes.evaluate within 1e-5 on every palette's noise-free expressions ` +
-    `(${nexpr} over ${cases.length} palettes, 4096 points each)`, failed.every((r) => r.worst_oracle <= 1e-5) && worstOracle <= 1e-5,
+    `(${nexpr} over ${cases.length - nlooks} palettes and ${nlooks} recipes' 'auto' palettes, 4096 points each)`,
+    failed.every((r) => r.worst_oracle <= 1e-5) && worstOracle <= 1e-5,
     `worst ${S.sci(worstOracle, 2)}`);
 T.ok(`the GPU (ops.WGSL through core/gpu.js) equals palettes.evaluate within 1e-5 on the same expressions`,
     worstGpu <= 1e-5 && failed.length === 0, `worst ${S.sci(worstGpu, 2)}` +

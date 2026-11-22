@@ -46,9 +46,14 @@ const val = (a, k) => Number(a.data[k]);
 for (const name of cases) {
     const rec = recs[name];
     const dir = `${root}/bakes/${name}`;
-    const snap = edition ? `${S.W.blenderTests()}/out/surface_data/snap/${name}.npz` : null;
+    const snap = S.snapPath(name);
     if (!rec || rec.error || !snap || !S.W.exists(snap)) {
         T.ok(`${name}: Blender's palette bake and the snapshot present`, false, rec?.error ?? `snapshot ${snap}`);
+        continue;
+    }
+    const why = S.caseProblem(name, S.blenderBake(name), snap);
+    if (why) {
+        T.ok(`${name}: the snapshot is the terrain Blender's bake was made from`, false, why);
         continue;
     }
     const t = await Terrain.load(snap, { build: false, log: null });
