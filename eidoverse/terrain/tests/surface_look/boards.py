@@ -180,8 +180,18 @@ def main(argv):
         p = os.path.join(OUT, 'boards', f'{recipe}_{ref}_{label}.jpg')
         sheet.save(p, quality=88)
         print('[boards]', p.replace('\\', '/'), len(rows) // 2, 'views', flush=True)
-    with open(os.path.join(OUT, 'boards', f'crops_{label}.json'), 'w', encoding='utf-8') as f:
-        json.dump(crops, f, indent=1)
+    # one crop file a label, keyed by reference: a board against v5 keeps the final2 boards' crops
+    cp = os.path.join(OUT, 'boards', f'crops_{label}.json')
+    try:
+        with open(cp, encoding='utf-8') as f:
+            kept = json.load(f)
+    except (OSError, ValueError):
+        kept = {}
+    if not all(isinstance(x, dict) and 'most_different' not in x for x in kept.values()):
+        kept = {}                                      # the older layout (one reference): written again in full
+    kept[ref] = {**kept.get(ref, {}), **crops}
+    with open(cp, 'w', encoding='utf-8') as f:
+        json.dump(kept, f, indent=1)
     return 0
 
 

@@ -30,11 +30,15 @@
 //   - one 4096^2 sun shadow map, where EEVEE renders virtual shadow maps: over the aim's ground as the other views
 //     tools place it for an aerial; for an eye view over the ground the camera stands on and looks at out to 1.5 km,
 //     so the near plants and ground keep their shadows (the aim of an eye view can lie kilometres off, beyond a box
-//     round it);
-//   - three.js has no specular occlusion (EEVEE's horizon scan and ray-traced reflections darken the sky's reflection
-//     in crevices and under foliage); the materials are as their packages made them.
+//     round it); ground beyond the box is lit. The shadow camera stands 8 km sunward, so a valley wall kilometres
+//     off still shades the floor, and a throwaway frame in setup() takes three's first-render depth reversal
+//     before any view (see there);
+//   - three.js has no specular occlusion and no sky occlusion (EEVEE's horizon scan and ray-traced reflections darken
+//     the sky's light and its reflection in crevices, under foliage and on a deep valley's shaded floor; water
+//     reflects the environment, not the walls round it); the materials are as their packages made them.
 
 const _lookDeg = Math.PI / 180;
+const SHADOW_BACK = 8000.0;        // metres from the sun's shadow camera to the centre of the ground it maps
 
 globalThis.setup = async function () {
     const V = JSON.parse(Deno.readTextFileSync(Deno.env.get('EIDO_LOOK_SPEC')));
@@ -63,8 +67,25 @@ globalThis.setup = async function () {
     sky.update(0);
     sun.castShadow = true;
     sun.shadow.mapSize.set(V.shadowMap, V.shadowMap);
-    sun.shadow.bias = -0.0002;
+    sun.shadow.bias = -0.0001;                          // of the shadow camera's 16 km depth: 1.6 m
     await sky.bakeEnv();
+    // one throwaway frame with a lit, shadowed plate before any view: three r184 reverses a camera's depth at its first
+    // render (Renderer.render), and ShadowNode.renderShadow takes the shadow's matrix from the projection before it
+    // renders the map, so the sun's first shadow map is reversed while its lookup is not (a job's first view was lit
+    // where its ground lies in shade: alpine floor_axis's floor)
+    {
+        const plate = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardNodeMaterial());
+        plate.rotation.x = -Math.PI / 2;
+        plate.castShadow = plate.receiveShadow = true;
+        scene.add(plate);
+        camera.position.set(0, 20, 20);
+        camera.lookAt(0, 0, 0);
+        camera.updateMatrixWorld(true);
+        await renderer.renderAsync(scene, camera);
+        scene.remove(plate);
+        plate.geometry.dispose();
+        plate.material.dispose();
+    }
     const G = await import(EIDOVERSE_DIR + 'terrain/core/gpu.js');
     globalThis._look = { V, sun, sky, TSL, R: await G.init({ renderer }), cur: null, records: [], frames: V.frames,
         T: await import(EIDOVERSE_DIR + 'terrain/index.js'), SI: await import(EIDOVERSE_DIR + 'terrain/surface/index.js'),
@@ -335,9 +356,13 @@ async function renderView(G, entry) {
         half = Math.min(6000, Math.max(300, 0.8 * c.dist));
     }
     centre.applyMatrix4(Rm);
+    // the shadow camera stands SHADOW_BACK metres sunward of the box's centre and sees everything from there to as far
+    // beyond: a ridge or a valley wall kilometres sunward of the ground it shades must lie in front of it (with the
+    // light 1 km sunward and a negative near plane, as the other views tools place it, a valley wall's shadow across
+    // the floor was lost: alpine floor_axis's floor lit where Blender's lies in the east wall's shadow)
     const sc = sun.shadow.camera;
     sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half;
-    sc.near = -20000; sc.far = 20000;
+    sc.near = 1.0; sc.far = 2.0 * SHADOW_BACK;
     sc.updateProjectionMatrix();
     sun.shadow.normalBias = 2.0 * (2 * half / V.shadowMap);
     // the sky first: its update sets the light's colour and strength and puts the light at 120 x the sun's direction
@@ -345,7 +370,7 @@ async function renderView(G, entry) {
     // elevation, 37.7 degrees: its azimuth is the environment's, turned above)
     sky.update(0);
     sun.target.position.copy(centre);
-    sun.position.copy(centre).add(sunV.clone().multiplyScalar(1000));
+    sun.position.copy(centre).add(sunV.clone().multiplyScalar(SHADOW_BACK));
     sun.target.updateMatrixWorld(true);
     sun.updateMatrixWorld(true);
     if (cur.plants) {
@@ -413,6 +438,16 @@ async function renderView(G, entry) {
         mesh.material = [clay, clay];
         const hidden = [cur.plants?.group, cur.rocks?.group].filter(Boolean).map((o) => [o, o.visible]);
         for (const [o] of hidden) o.visible = false;
+        // a new node frame, so the sun's shadow map is drawn again without the plants and rocks (three r184 draws it
+        // once a frame: ShadowNode.updateBefore keys its WeakMap with [], so every camera shares one key), the clock
+        // kept where the frame's is
+        const nf = r._nodes?.nodeFrame;
+        if (nf) {
+            const tKeep = nf.time;
+            nf.update();
+            nf.time = tKeep;
+            nf.deltaTime = 0;
+        }
         const cl = await linearFrame(r, scene, camera, W2, H2, V.msaa, 1.0);
         writeFrame(`${base}_clay.f16`, cl, { view: v.name, kind: 'clay', k: V.k, msaa: V.msaa });
         for (const [o, vis] of hidden) o.visible = vis;
