@@ -4,7 +4,9 @@
 // individuals() collects them), alone on one spot, rendered as its full level (LOD0), its card level (LOD2) and its
 // billboard through build/plant_instances.js' still grove (the LOD pass' hero count and card distance set to show one
 // level) at the distance where a stand hands one over to the other (SWITCH_M), under make_sky with the sun 70 degrees
-// left of the view (the review's light, no shadows), from the eye height, with a lens that frames the plant, the film
+// left of the view (the review's light: make_sky's shadows=False drops the clouds' shadows only, and the scene keeps
+// EEVEE's own, render_references.new_scene's use_shadows, so the crown shades itself under the sun, here through a
+// shadow map fitted to the plant), from the eye height, with a lens that frames the plant, the film
 // transparent (the sky's own objects hidden, its light kept), at four turns of the plant. Measured within each
 // silhouette (the display image's alpha over 0.5): the area, the mean colour (CIELAB of the display image's mean linear
 // colour, surfacing_judge/measures.mean_lab) and the mean scene-linear colour (a float render: no tone mapping, no
@@ -23,8 +25,10 @@
 //
 //     EIDO_GPU_WRAP='<the GPU queue>' deno run --config deno.json --frozen --allow-all \
 //         eidoverse/terrain/tests/plants/billboards.mjs [--only douglasFir,redMaple] [--sheen] [--from <match.json>]
+//         [--label <name>]
 //
 //     --sheen  a diagnosis (into tests/out/plants/billboards_sheen): each level also drawn without its specular lobe
+//     --label  the run's own folder, tests/out/plants/billboards_<name>
 //     --from   the checks of a match this test wrote, again, without rendering
 //
 // Writes tests/out/plants/billboards/<species>_<seed>_<key8>.png (per turn: the full level | the card level | the
@@ -43,7 +47,9 @@ const only = A.list('--only', null);
 // --sheen (a diagnosis, its own folder): each level also without its specular lobe, to see what of its colour the sky's
 // reflection makes
 const sheen = A.flag('--sheen');
-const out = `${S.W.out('plants')}/billboards${sheen ? '_sheen' : ''}`;
+// --label <name>: a run of its own (tests/out/plants/billboards_<name>), beside the earlier ones
+const label = A.opt('--label', null);
+const out = `${S.W.out('plants')}/billboards${label ? '_' + label : sheen ? '_sheen' : ''}`;
 const work = `${out}/_scenes`;
 Deno.mkdirSync(work, { recursive: true });
 const W = 960, H = 540;
@@ -84,6 +90,7 @@ globalThis.setup = async function () {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.AgXToneMapping;
     renderer.toneMappingExposure = Math.pow(2, V.exposureEv);
+    renderer.shadowMap.enabled = true;                 // the crown's own shadow under the sun, as EEVEE's
     await renderer.init();
     globalThis._r = renderer;
     globalThis._noAutoEnhance = true;
@@ -98,6 +105,24 @@ globalThis.setup = async function () {
     const sky = await makeSky({ scene, camera, renderer, world: 'earth', hours: V.hours, clouds: 'cumulus', weather: null, sun, audio: false });
     sky.update(0);
     await sky.bakeEnv();
+    // one throwaway frame with a lit, shadowed plate first (as tests/surface_look/_scene.js has it): three r184 reverses
+    // a camera's depth at its first render, and the sun's first shadow map is taken before that, reversed against its
+    // lookup
+    {
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(4096, 4096);
+        const plate = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardNodeMaterial());
+        plate.rotation.x = -Math.PI / 2;
+        plate.castShadow = plate.receiveShadow = true;
+        scene.add(plate);
+        camera.position.set(0, 20, 20);
+        camera.lookAt(0, 0, 0);
+        camera.updateMatrixWorld(true);
+        await renderer.renderAsync(scene, camera);
+        scene.remove(plate);
+        plate.geometry.dispose();
+        plate.material.dispose();
+    }
     const G = await import(EIDOVERSE_DIR + 'terrain/core/gpu.js');
     globalThis._b = { V, sky, sun, R: await G.init({ renderer }), PL: await import(EIDOVERSE_DIR + 'terrain/build/plants.js'),
         PI: await import(EIDOVERSE_DIR + 'terrain/build/plant_instances.js'), Io: await import(EIDOVERSE_DIR + 'terrain/core/io.js'),
@@ -264,7 +289,17 @@ async function matchOne(B, c) {
     B.sun.position.set(s.x * 1000, 0.5 * c.size + s.y * 1000, s.z * 1000);
     B.sun.target.updateMatrixWorld(true);
     B.sun.updateMatrixWorld(true);
-    B.sun.castShadow = false;
+    // the sun's shadow over the plant alone: an orthographic map round it, 4096 texels over 1.4 x its height (a
+    // few millimetres a texel on a shrub, a centimetre on a 30 m tree: each leaf's own shadow), from 1 km sunward
+    B.sun.castShadow = true;
+    const sc = B.sun.shadow.camera, half = 0.7 * c.size + 1.0;
+    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half;
+    sc.near = 1000.0 - 2.0 * half; sc.far = 1000.0 + 2.0 * half;
+    sc.updateProjectionMatrix();
+    B.sun.shadow.mapSize.set(4096, 4096);
+    B.sun.shadow.bias = -0.0002;
+    B.sun.shadow.normalBias = 2.0 * (2 * half / 4096);
+    B.sun.shadow.needsUpdate = true;
     // the film transparent: the sky's objects and background hidden, its light (the sun, the baked environment) kept
     const bg = scene.background;
     scene.background = null;

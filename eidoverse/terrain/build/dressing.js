@@ -23,7 +23,9 @@
 //     random tilt, its proportions jittered (squash);
 //   - models: each glTF mesh centred on its bounding box and measured, `size` its longest horizontal side; a model
 //     entry (id, min, max) stands only for rocks of those sizes; with `colour`, each model's albedo is rescaled from its
-//     own mean to that colour (target x (1 + 0.55 (scan / mean - 1))) and its roughness held at 0.6 or more.
+//     own mean to that colour (target x (1 + 0.55 (scan / mean - 1))) and its roughness held at 0.6 or more; a model
+//     whose base colour its vertex colours multiply (rock_07: Blender's glTF importer puts a Mix node there, which
+//     _recolour leaves as it is) keeps its scan colour x its vertex colours, its roughness held all the same.
 //
 // Where this differs from dressing.py, and why (each a forced deviation; the rocks' distribution is Blender's):
 //   - The random numbers: dressing.py draws them in turn from numpy's generator (seeded by the terrain's seed), a
@@ -129,27 +131,32 @@ async function meanLinear(tex, R) {
     return out;
 }
 
-// a model material as a NodeMaterial: its albedo rescaled from its mean to the target (dressing.py _recolour), its
-// roughness held at ROUGH_MIN or more (_matte)
+// a model material as a NodeMaterial: with a target colour (load_models: `_matte(_recolour(m, target))`), its albedo
+// rescaled from its mean to the target (dressing.py _recolour) and its roughness held at ROUGH_MIN or more (_matte);
+// without one, as the model has it. _recolour rescales only a base colour an image texture feeds directly: Blender's
+// glTF importer multiplies a model's vertex colours (COLOR_0) into its base colour through a Mix node, so such a
+// model (rock_07) keeps its scan colour x its vertex colours there, and here (three's GLTFLoader marks it
+// vertexColors)
 async function rockMaterial(src, target, R) {
     const m = new THREE.MeshStandardNodeMaterial();
-    for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'side']) if (src[k] !== undefined) m[k] = src[k];
+    for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'side', 'vertexColors']) if (src[k] !== undefined) m[k] = src[k];
     if (src.normalScale) m.normalScale = src.normalScale.clone();
     m.roughness = src.roughness ?? 1.0;
     m.metalness = src.metalness ?? 0.0;
     m.color = src.color?.clone() ?? new THREE.Color(1, 1, 1);
     if (target) {
         const t = target.map((v) => Math.min(Math.max(v, 0.0), 0.95));
-        const mean = src.map ? await meanLinear(src.map, R) : null;
-        if (!src.map) m.color = new THREE.Color().setRGB(t[0], t[1], t[2]);
+        const direct = !src.vertexColors;                // the base colour fed by the image alone (no Mix node)
+        const mean = src.map && direct ? await meanLinear(src.map, R) : null;
+        if (!src.map && direct) m.color = new THREE.Color().setRGB(t[0], t[1], t[2]);
         else if (mean) {
             const c = RECOLOUR_CONTRAST;
             const inv = T.vec3(...mean.map((v) => 1.0 / Math.max(v, 1e-4)));
             m.colorNode = T.texture(src.map).rgb.mul(inv).mul(c).add(1.0 - c).mul(T.vec3(t[0], t[1], t[2]));
         }
+        const rough = src.roughnessMap ? T.texture(src.roughnessMap).g.mul(m.roughness) : T.float(m.roughness);
+        m.roughnessNode = T.max(rough, ROUGH_MIN);
     }
-    const rough = src.roughnessMap ? T.texture(src.roughnessMap).g.mul(m.roughness) : T.float(m.roughness);
-    m.roughnessNode = T.max(rough, ROUGH_MIN);
     m.name = `${src.name || 'rock'}_eido`;
     return m;
 }
