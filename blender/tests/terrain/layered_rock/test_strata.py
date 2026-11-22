@@ -7,7 +7,8 @@
      degrees steeper than the column in every layer, its foot held at the base, relaxed by strata_threshold + the
      exchange with the failed rock carried off; every layer's slope, away from its contacts, within 2 degrees of its
      own angle (rock only), and the run through each layer within 1.5 cells of thickness / tan(theta); and the
-     column's own wall is exactly its stability limit (no excess at its angles, excess 2 degrees steeper)
+     column's own wall is exactly its stability limit (no excess at its angles, excess 2 degrees steeper), also with
+     the rock mass's run factor on every bed and on the strong beds only (resist_run_beds 'strong')
   2. debris at repose: a cliff of strong rock (80 degrees) over a bench, its foot NOT held: the failed rock gathers
      at the foot as talus standing at the repose angle (34 +- 2.5 degrees) while the cliff above stands
   3. the tables: K(zs) and tan(zs) equal the bed holding zs everywhere 0.5 m or more from a contact, R(zs) equals the
@@ -103,16 +104,18 @@ def profile_run(col, h, pin_w, pin_h, cell, carry_off=True, repose_deg=34.0, max
     return st[0, :, 0].astype(np.float64), mk[0], it
 
 
-def excess(col, h, cell, loose=None, repose_deg=34.0, q=1.0):
-    """strata_threshold's twin on a (1, W) or (H, W) field (zoff 0; q the rock mass's run factor, par.z)."""
+def excess(col, h, cell, loose=None, repose_deg=34.0, q=1.0, strong_only=False):
+    """strata_threshold's twin on a (1, W) or (H, W) field (zoff 0; q the rock mass's run factor, par.z; strong_only:
+    q on the strong beds' share of the run only)."""
     z = np.zeros_like(h, dtype=F32)
     mk = T.rgba(z, z, z, z if loose is None else np.asarray(loose, F32))
     par = T.rgba(z, z, z + F32(q), z)
-    out = T.run_twin('strata_threshold', {'st': np.asarray(h, F32), 'zoff': z, 'mk': mk, 'rtab': col.table_texture(),
+    out = T.run_twin('strata_threshold', {'st': np.asarray(h, F32), 'zoff': z, 'mk': mk,
+                                          'rtab': col.run_texture() if strong_only else col.table_texture(),
                                           'par': par},
                      {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
                       'uRepose': math.tan(math.radians(repose_deg)), 'uLv': (0.0, 0.0, cell),
-                      'uFac': S.FACIES_OFF, 'uBound': T.BOUND_PINNED})
+                      'uFac': S.FACIES_OFF, 'uStrongOnly': int(strong_only), 'uBound': T.BOUND_PINNED})
     return out['outP'][..., 0]
 
 
@@ -139,19 +142,24 @@ def relax_outflow(col, h, pin_w, pin_h, cell, rate=0.3, max_iter=40000, tol=1e-6
     return h[0].astype(np.float64), it
 
 
-def analytic_profile(col, x, x_foot, cell, steeper_deg=0.0, q=1.0):
+def analytic_profile(col, x, x_foot, cell, steeper_deg=0.0, q=1.0, strong_only=False):
     """The column's equilibrium wall x(z) = x_foot - q R(z) (each layer at its own angle, or steeper_deg steeper;
-    q the rock mass's run factor), sampled as h(x) on the cells."""
+    q the rock mass's run factor; strong_only: q on the strong beds only, x_foot - q Rm(z) - (R - Rm)(z)), sampled
+    as h(x) on the cells."""
     zz = np.linspace(0.0, col.top_m, 20001)
     if steeper_deg:
         # each bed's own angle exactly (tan_at interpolates the table across a contact, which made the wall steeper
         # than the column for half a metre under every strong bed)
         edges = np.array([f[0] for f in col.fine])
-        tan_exact = np.array([col.fine[i][3] for i in np.clip(np.searchsorted(edges, zz, side='right') - 1, 0,
-                                                                len(col.fine) - 1)])
-        ang = np.degrees(np.arctan(tan_exact / q)) + steeper_deg
+        fi = np.clip(np.searchsorted(edges, zz, side='right') - 1, 0, len(col.fine) - 1)
+        tan_exact = np.array([col.fine[i][3] for i in fi])
+        qz = np.array([q if (not strong_only or col.fine_strong[i] > 0.5) else 1.0 for i in fi])
+        ang = np.degrees(np.arctan(tan_exact / qz)) + steeper_deg
         inv = 1.0 / np.tan(np.radians(np.clip(ang, 1.0, 89.5)))
         R = np.concatenate([[0.0], np.cumsum(0.5 * (inv[1:] + inv[:-1]) * np.diff(zz))])
+    elif strong_only:
+        rm = col.run_at(zz, col.Rm) - col.run_at(0.0, col.Rm)
+        R = q * rm + (col.run_at(zz) - col.run_at(0.0) - rm)
     else:
         R = q * (col.run_at(zz) - col.run_at(0.0))
     xr = x_foot - R                                       # the wall's position at each height
@@ -167,11 +175,12 @@ def test_profile():
     # the stability limit: the analytic wall x = R(z) stands; 2 degrees steeper in every layer fails in every layer
     stat = []
     ok_static = True
-    # q: the rock mass's run factor (strong rock 0.6: the wall stands on 60 % of the column's run; weak 1.5)
-    for q in (1.0, 0.6, 1.5):
+    # q: the rock mass's run factor (strong rock 0.6: the wall stands on 60 % of the column's run; weak 1.5), on
+    # every bed or (strong_only) on the strong beds only, the weak ones at their own angle
+    for q, strong_only in ((1.0, False), (0.6, False), (1.5, False), (0.35, True), (1.5, True)):
         for dg in (-2.0, 0.0, 2.0):
-            hp = analytic_profile(col, x, step, cell, dg, q)[None, :]
-            phi = excess(col, hp, cell, q=q)[0]
+            hp = analytic_profile(col, x, step, cell, dg, q, strong_only)[None, :]
+            phi = excess(col, hp, cell, q=q, strong_only=strong_only)[0]
             zc = hp[0]
             per = []
             for d in col.layers:
@@ -179,9 +188,9 @@ def test_profile():
                 per.append(round(float(phi[inner].max()) if inner.any() else -1.0, 4))
             good = all(v > 0.01 for v in per) if dg > 0 else all(v <= 0.01 for v in per)
             ok_static = ok_static and good
-            stat.append(dict(q=q, steeper_deg=dg, max_excess_per_layer=per, ok=good))
+            stat.append(dict(q=q, strong_only=strong_only, steeper_deg=dg, max_excess_per_layer=per, ok=good))
     check('composite threshold: the column\'s own wall is exactly its stability limit (also with the rock mass\'s '
-          'run factor q 0.6 and 1.5)', ok_static, stat)
+          'run factor q 0.6 and 1.5 on every bed, and 0.35 and 1.5 on the strong beds only)', ok_static, stat)
     # the start: the wall 8 degrees steeper than the column in every layer (each layer over its threshold, so each
     # must fail back to its own angle; a vertical step needed 40,000 iterations and 23 s for the same answer)
     h = analytic_profile(col, x, step, cell, 8.0).astype(F32)[None, :]
@@ -320,10 +329,30 @@ def test_tables():
     far = np.array([-300.0, col.top_m + 300.0])
     err_far = float(np.max(np.abs(col.run_at(far) - np.array([R_exact(z) for z in far]))))
     mono = bool(np.all(np.diff(col.R) > 0))
-    ok = err_k <= 1e-9 and err_t <= 1e-9 and err_R <= 1e-6 and err_far <= 1e-6 and mono
-    check('column tables: K, tan and R against the beds', ok,
+    # Rm, the strong beds' share (the formations of K factor under 1; a weak formation's ledges are not), on a
+    # column with ledges inside a weak formation: the same integral through those beds only, and never more than
+    # R's rise
+    cm = S.column('monument_valley')
+    e2 = np.array([f[0] for f in cm.fine] + [cm.fine[-1][1]])
+    inv2 = np.array([1.0 / f[3] if cm.layers[f[5]]['K_factor'] < 1.0 else 0.0 for f in cm.fine])
+    cum2 = np.concatenate([[0.0], np.cumsum(np.diff(e2) * inv2)])
+
+    def Rm_exact(z):
+        if z <= 0:
+            return z * inv2[0]
+        if z >= cm.top_m:
+            return cum2[-1] + (z - cm.top_m) * inv2[-1]
+        k = int(np.searchsorted(e2, z, side='right') - 1)
+        return cum2[k] + (z - e2[k]) * inv2[k]
+    gz = np.concatenate([cm.zs[::5], [-200.0, cm.top_m + 200.0]])
+    err_Rm = float(np.max(np.abs(cm.run_at(gz, cm.Rm) - np.array([Rm_exact(z) for z in gz]))))
+    dRm, dR = np.diff(cm.Rm), np.diff(cm.R)
+    part = bool(np.all(dRm >= -1e-12) and np.all(dRm <= dR + 1e-9))
+    ok = err_k <= 1e-9 and err_t <= 1e-9 and err_R <= 1e-6 and err_far <= 1e-6 and mono and err_Rm <= 1e-6 and part
+    check('column tables: K, tan, R and the strong beds\' Rm against the beds', ok,
           dict(column=col.name, beds=len(col.fine), table=len(col.R), max_err_K=err_k, max_err_tan=err_t,
-               max_err_R_m=err_R, max_err_R_beyond_m=err_far, monotonic=mono))
+               max_err_R_m=err_R, max_err_R_beyond_m=err_far, monotonic=mono, max_err_Rm_m=err_Rm,
+               Rm_within_R=part))
     for name in S.COLUMNS:
         c = S.column(name)
         print(c.describe(), flush=True)
@@ -537,7 +566,7 @@ def test_facies():
         out = T.run_twin('strata_threshold', {'st': T.rgba(h), 'zoff': z0, 'mk': T.rgba(z0, z0, z0, z0),
                                               'rtab': col.table_texture(), 'par': T.rgba(z0, z0, z0 + 1.0, z0)},
                          {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
-                          'uRepose': math.tan(math.radians(34.0)), 'uLv': lv, 'uFac': fac,
+                          'uRepose': math.tan(math.radians(34.0)), 'uLv': lv, 'uFac': fac, 'uStrongOnly': 0,
                           'uBound': T.BOUND_PINNED})['outP'][2, 2:-2, 0]
         rows.append(dict(steeper_deg=dg, max_phi=round(float(out.max()), 5), min_phi=round(float(out.min()), 5),
                          angle_range_deg=[round(float(ang.min()), 1), round(float(ang.max()), 1)]))

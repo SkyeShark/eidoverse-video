@@ -5,8 +5,8 @@
 
   1. parity: ONE dispatch of each layered-rock kernel against its numpy twin on a non-square 96 x 80 field with pins,
      in the open, periodic and pinned modes, within 1e-4 x each output channel's range: strata_threshold (the
-     composite excess, with and without loose cover, with the rock mass's run factor varying per cell, without and
-     with the facies noise on a window off the origin), strata_cell
+     composite excess, with and without loose cover, with the rock mass's run factor varying per cell on every bed
+     and on the strong beds only, without and with the facies noise on a window off the origin), strata_cell
      (the layer's tan and creep factor at each cell's zs), strata_creep (creep on soft rock and debris),
      strata_weather (weathering, linear in the slope with and without the drainage-area boost, and saturated, and with
      the facies), and
@@ -92,13 +92,20 @@ def test_parity():
     # (on: 0.6 strength, 90 m across and 12 m up on 12 m cells, so the noise varies cell to cell)
     lv = (-5321.5, 2803.25, 12.0)
     fac_on = (0.6, 90.0, 12.0, 9008.0)
+    # the strong-beds mode reads Rm from rtab.x (run_texture): the rock mass's factor on the strong beds only
+    rtab_m = col.run_texture()
     for mode_name, mode in T.BOUNDARY_CASES:
-        for L, tag, fac in ((np.zeros(shape, F32), 'rock', S.FACIES_OFF), (loose, 'loose', S.FACIES_OFF),
-                            (np.zeros(shape, F32), 'rock, facies', fac_on), (loose, 'loose, facies', fac_on)):
+        for L, tag, fac, strong in ((np.zeros(shape, F32), 'rock', S.FACIES_OFF, 0),
+                                    (loose, 'loose', S.FACIES_OFF, 0),
+                                    (np.zeros(shape, F32), 'rock, facies', fac_on, 0),
+                                    (loose, 'loose, facies', fac_on, 0),
+                                    (np.zeros(shape, F32), 'rock, strong beds only', S.FACIES_OFF, 1),
+                                    (loose, 'loose, facies, strong beds only', fac_on, 1)):
             mkL = T.rgba(mk[..., 0], mk[..., 1], mk[..., 2], L)
-            rep = parity('strata_threshold', {'st': st, 'zoff': zoff, 'mk': mkL, 'rtab': ctab, 'par': parq},
+            rep = parity('strata_threshold', {'st': st, 'zoff': zoff, 'mk': mkL, 'rtab': rtab_m if strong else ctab,
+                                              'par': parq},
                          {'uDx': 12.0, 'uRZ0': z0, 'uRDz': dz, 'uRN': nt, 'uRepose': math.tan(math.radians(34.0)),
-                          'uLv': lv, 'uFac': fac, 'uBound': mode}, {'outP': S1})
+                          'uLv': lv, 'uFac': fac, 'uStrongOnly': strong, 'uBound': mode}, {'outP': S1})
             worst[f'strata_threshold {tag}/{mode_name}'] = rep['worst']
             check(f'parity strata_threshold {tag} {mode_name}', rep['ok'], f"worst {rep['worst']:.3g}")
         rep = parity(S.STRATA_CELL, {'st': st, 'zoff': zoff, 'ctab': ctab}, {'uTZ0': z0, 'uTDz': dz, 'uTN': nt},
@@ -158,26 +165,31 @@ def test_profile_gpu():
     step = 330
     rows = []
     ok = True
-    for dg in (-2.0, 0.0, 2.0):
-        prof = TS.analytic_profile(col, x, step, cell, dg)
-        h = np.repeat(prof.astype(F32)[None, :], 4, 0)
-        z = np.zeros_like(h)
-        tex = {'st': GPU.texture(T.rgba(h)), 'zoff': GPU.texture(z), 'mk': GPU.texture(T.rgba(z, z, z, z)),
-               'rtab': GPU.texture(col.table_texture()), 'par': GPU.texture(T.rgba(z, z, z + 1.0, z))}
-        outP = GPU.empty(h.shape, 1)
-        GPU.run('strata_threshold', tex, {'outP': outP},
-                {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
-                 'uRepose': math.tan(math.radians(34.0)), 'uLv': (0.0, 0.0, cell), 'uFac': S.FACIES_OFF,
-                 'uBound': T.BOUND_PINNED})
-        phi = GPU.read(outP)[2, :, 0]
-        per = []
-        for d in col.layers:
-            inner = (prof > d['base_m'] + 2.0) & (prof < d['top_m'] - 2.0) & (x < step)
-            per.append(round(float(phi[inner].max()) if inner.any() else -1.0, 4))
-        good = all(v > 0.01 for v in per) if dg > 0 else all(v <= 0.01 for v in per)
-        ok = ok and good
-        rows.append(dict(steeper_deg=dg, max_excess_per_layer=per, ok=good))
-    check("composite threshold on the GPU: the column's own wall is exactly its stability limit", ok, rows)
+    # q 1 on every bed (the column as tabulated), and q 0.35 on the strong beds only (a massive block: the strong
+    # beds sheer, the weak ones at their own angle)
+    for q, strong in ((1.0, 0), (0.35, 1)):
+        for dg in (-2.0, 0.0, 2.0):
+            prof = TS.analytic_profile(col, x, step, cell, dg, q, bool(strong))
+            h = np.repeat(prof.astype(F32)[None, :], 4, 0)
+            z = np.zeros_like(h)
+            tex = {'st': GPU.texture(T.rgba(h)), 'zoff': GPU.texture(z), 'mk': GPU.texture(T.rgba(z, z, z, z)),
+                   'rtab': GPU.texture(col.run_texture() if strong else col.table_texture()),
+                   'par': GPU.texture(T.rgba(z, z, z + q, z))}
+            outP = GPU.empty(h.shape, 1)
+            GPU.run('strata_threshold', tex, {'outP': outP},
+                    {'uDx': cell, 'uRZ0': col.z0, 'uRDz': col.dz, 'uRN': len(col.R),
+                     'uRepose': math.tan(math.radians(34.0)), 'uLv': (0.0, 0.0, cell), 'uFac': S.FACIES_OFF,
+                     'uStrongOnly': strong, 'uBound': T.BOUND_PINNED})
+            phi = GPU.read(outP)[2, :, 0]
+            per = []
+            for d in col.layers:
+                inner = (prof > d['base_m'] + 2.0) & (prof < d['top_m'] - 2.0) & (x < step)
+                per.append(round(float(phi[inner].max()) if inner.any() else -1.0, 4))
+            good = all(v > 0.01 for v in per) if dg > 0 else all(v <= 0.01 for v in per)
+            ok = ok and good
+            rows.append(dict(q=q, strong_beds_only=bool(strong), steeper_deg=dg, max_excess_per_layer=per, ok=good))
+    check("composite threshold on the GPU: the column's own wall is exactly its stability limit (also with q 0.35 on "
+          "the strong beds only)", ok, rows)
 
 
 def test_cost():
