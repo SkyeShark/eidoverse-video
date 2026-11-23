@@ -208,6 +208,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/sets/unknown_force/showroom.js](../eidoverse/sets/unknown_force/showroom.js) | Dynamic ESM film set (UNKNOWN FORCE) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/showroom_art.js](../eidoverse/sets/unknown_force/showroom_art.js) | Showroom submodule: canvas art | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sky_system.js](../eidoverse/sky_system.js) | Injected scene API | [sky-weather](../tools-guides/sky-weather.md) |
+| [eidoverse/fxc_fold_check.mjs](../eidoverse/fxc_fold_check.mjs) | Windows check that FXC compiles the sky's WebGL2 shader like its `[fastopt]` reference | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/sky_worlds.js](../eidoverse/sky_worlds.js) | Explicit facade/package component | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/sun_corona.js](../eidoverse/sun_corona.js) | Dynamic ESM scene API | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/surface_layers.js](../eidoverse/surface_layers.js) | Injected scene API | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |

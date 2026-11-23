@@ -258,13 +258,15 @@
         noiseTex.needsUpdate = true;
         const noiseNode = T3.texture(noiseTex);
 
+        // f = p - floor(p) is fract(p); this is the form measured identical on
+        // D3D11/Vulkan/WebGPU. The FXC miscompile it was chasing is fixed in fbmOf.
         const noise2 = (p) => {
-            const i = floor(p), f = fract(p);
+            const i = floor(p), f = p.sub(i);
             const sm = f.mul(f).mul(float(3).sub(f.mul(2)));
             return noiseNode.sample(i.add(sm).add(0.5).div(NSZ)).level(0).r;   // EANPA: explicit LOD — Chrome/Tint forbids implicit-derivative sampling in divergent flow
         };
         const noise3 = (p) => {
-            const i = floor(p), f = fract(p);
+            const i = floor(p), f = p.sub(i);
             const sm = f.mul(f).mul(float(3).sub(f.mul(2)));
             const uvx = i.x.add(float(37).mul(i.z)).add(sm.x);
             const uvy = i.y.add(float(17).mul(i.z)).add(sm.y);
@@ -315,15 +317,22 @@
 
         const m0 = vec3(0.0, 0.8, 0.6), m1 = vec3(-0.8, 0.36, -0.48), m2 = vec3(-0.6, -0.48, 0.64);
         const applyM = (p) => vec3(dot(p, m0), dot(p, m1), dot(p, m2));
-        const fbm3 = (p) => {
+        // The trailing pp.assign is for Direct3D's shader compiler (FXC, Chrome's
+        // WebGL2 path on Windows). A variable declared outside two nested real loops,
+        // starting at an integer and assigned in the inner one, has its last assignment
+        // treated as an integer: floor() and the Hermite vanish from whatever reads it.
+        // After the dead store, no octave reads the last one. Check: fxc_fold_check.mjs.
+        const fbmOf = (noise) => (p) => {
             const pp = p.toVar();
-            const f = noise3(pp).mul(0.5).toVar();
+            const f = noise(pp).mul(0.5).toVar();
             pp.assign(applyM(pp).mul(2.02));
-            f.addAssign(noise3(pp).mul(0.25));
+            f.addAssign(noise(pp).mul(0.25));
             pp.assign(applyM(pp).mul(2.03));
-            f.addAssign(noise3(pp).mul(0.125));
+            f.addAssign(noise(pp).mul(0.125));
+            pp.assign(vec3(0));
             return f;
         };
+        const fbm3 = fbmOf(noise3);
         const hash11 = (n) => fract(sin(n).mul(43758.5453));
         // Pixel jitter needs a genuine 2D decorrelating hash. Feeding screen
         // XY plus a constant Z through hash3 leaves one factor constant and
@@ -349,7 +358,7 @@
             return fract(q.x.mul(q.y).mul(q.z).mul(q.x.add(q.y).add(q.z)));
         };
         const noise3A = (p) => {
-            const i = floor(p), f = fract(p);
+            const i = floor(p), f = p.sub(i);
             const sm = f.mul(f).mul(float(3).sub(f.mul(2)));
             const nx0 = mix(hash3(i), hash3(i.add(vec3(1, 0, 0))), sm.x);
             const nx1 = mix(hash3(i.add(vec3(0, 1, 0))), hash3(i.add(vec3(1, 1, 0))), sm.x);
@@ -357,15 +366,7 @@
             const nx3 = mix(hash3(i.add(vec3(0, 1, 1))), hash3(i.add(vec3(1, 1, 1))), sm.x);
             return mix(mix(nx0, nx1, sm.y), mix(nx2, nx3, sm.y), sm.z);
         };
-        const fbm3A = (p) => {
-            const pp = p.toVar();
-            const f = noise3A(pp).mul(0.5).toVar();
-            pp.assign(applyM(pp).mul(2.02));
-            f.addAssign(noise3A(pp).mul(0.25));
-            pp.assign(applyM(pp).mul(2.03));
-            f.addAssign(noise3A(pp).mul(0.125));
-            return f;
-        };
+        const fbm3A = fbmOf(noise3A);
         // Optional optimized-tier 3D density BASIS. This caches the random
         // lattice used by the erosion FBM, not the animated cloudsAt result:
         // weather, height, wind, both erosion stages, and all FBM octaves stay
@@ -404,20 +405,12 @@
             const P = densityCacheSize;
             const basisNode = T3.texture3D(densityBasisTex);
             const noise3Cached = (p) => {
-                const i = floor(p), f = fract(p);
+                const i = floor(p), f = p.sub(i);
                 const sm = f.mul(f).mul(float(3).sub(f.mul(2)));
                 const uvw = fract(i.div(P)).add(sm.add(0.5).div(P));
                 return basisNode.sample(uvw).level(0).r;
             };
-            fbm3Cached = (p) => {
-                const pp = p.toVar();
-                const f = noise3Cached(pp).mul(0.5).toVar();
-                pp.assign(applyM(pp).mul(2.02));
-                f.addAssign(noise3Cached(pp).mul(0.25));
-                pp.assign(applyM(pp).mul(2.03));
-                f.addAssign(noise3Cached(pp).mul(0.125));
-                return f;
-            };
+            fbm3Cached = fbmOf(noise3Cached);
         }
         // EROSION NOISE: true-3D ALU noise, NOT the texture-slice fbm3. The
         // slice noise's diagonal correlation lattice prints PARALLELOGRAM
@@ -437,6 +430,11 @@
         // coverage control with distinct masses.
         const wSampleL = (uvNode) => weatherNode.sample(uvNode).level(0).r;   // EANPA: explicit LOD
         const wSampleS = (uvNode) => weatherNode.sample(uvNode).level(0).g;   // EANPA: explicit LOD
+        // Height profile of the cloud layer: rises over the bottom half, falls over the top.
+        // The rising edge is mirrored (equal to smoothstep(0, 0.5, ch) within 1.2e-7) because
+        // the plain form reads a value FXC folds inside the march loops; see fbmOf.
+        const layerProfile = (ch) => float(1).sub(smoothstep(0.5, 1.0, float(1).sub(ch)))
+            .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
         const earthC = vec3(0, -R_EARTH, 0);
         const wallLower = (pIn) => {
             // wallCloud packing: (.x = world x, .y = world z, .z = radius, .w = strength)
@@ -471,8 +469,7 @@
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
             const weather2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = largeWeather.mul(weather2)
-                .mul(smoothstep(0.0, 0.5, ch))
-                .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
+                .mul(layerProfile(ch));
             const shapeExp = float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch)));
             const cloudShape = pow(weather.max(1e-6), shapeExp);
             const p3 = p2.add(vec3(u.time.mul(12.3), 0, 0));
@@ -494,8 +491,7 @@
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
             const w2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = lw.mul(w2)
-                .mul(smoothstep(0.0, 0.5, ch))
-                .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
+                .mul(layerProfile(ch));
             const shape = pow(weather.max(1e-6), float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch))));
             const p3 = p2.add(vec3(u.time.mul(12.3), 0, 0));
             const den = max(shape.sub(fbmFn(p3.mul(float(0.01).mul(u.dScale))).mul(0.7)), 0);
@@ -516,8 +512,7 @@
             const p2 = p1.add(vec3(u.skyWind.z.mul(u.time).mul(0.4), 0, u.skyWind.x.mul(u.time).mul(-0.4)));
             const w2 = max(wSampleS(vec2(p2.z.add(zW), p2.x).mul(float(0.00005).mul(u.wScale)).add(vec2(0.37, 0.11))).sub(u.weatherT), 0).div(0.72);
             const weather = lw.mul(w2)
-                .mul(smoothstep(0.0, 0.5, ch))
-                .mul(float(1).sub(smoothstep(0.5, 1.0, ch)));
+                .mul(layerProfile(ch));
             const shape = pow(weather.max(1e-6), float(0.3).add(float(1.5).mul(smoothstep(0.2, 0.5, ch))));
             return lw.mul(u.finalMul).mul(min(shape.mul(3.5), 1)).mul(ringStrip(pIn));
         };
@@ -550,14 +545,18 @@
             const den = float(0).toVar();
             const j0 = jitL ?? float(0.5);
             const addDetailedLight = (target) => {
-                for (let j = 0; j < N_LIGHT; j++) target.addAssign(
-                    cheapDensity(p.add(u.cloudLightDir.mul(stepL).mul(j0.add(j)))),
-                );
+                Loop({ start: 0, end: N_LIGHT, type: 'int', name: 'jL' }, ({ jL }) => {
+                    target.addAssign(
+                        cheapDensity(p.add(u.cloudLightDir.mul(stepL).mul(j0.add(float(jL))))),
+                    );
+                });
             };
             const addMassLight = (target) => {
-                for (let j = 0; j < N_LIGHT; j++) target.addAssign(
-                    smoothDensity(p.add(u.cloudLightDir.mul(stepL).mul(j0.add(j)))).mul(DIRECT_LIGHT_MASS_SCALE),
-                );
+                Loop({ start: 0, end: N_LIGHT, type: 'int', name: 'jL' }, ({ jL }) => {
+                    target.addAssign(
+                        smoothDensity(p.add(u.cloudLightDir.mul(stepL).mul(j0.add(float(jL))))).mul(DIRECT_LIGHT_MASS_SCALE),
+                    );
+                });
             };
             // A stable base phase plus golden-ratio per-pass steps provides
             // quasi-uniform staircase-phase coverage without introducing a
@@ -1154,16 +1153,17 @@
             // so its two FBMs and the complete volumetric march do no work;
             // weather transitions can turn the branch back on dynamically.
             If(marchVisible.and(u.finalMul.greaterThan(0.0001)), () => {
-                for (let k = 0; k < M_PASS; k++) {
+                Loop({ start: 0, end: M_PASS, type: 'int', name: 'kPass' }, ({ kPass }) => {
+                    const kF = float(kPass).toVar();
                     const Trk = float(1).toVar();
                     const colk = vec3(0).toVar();
-                    const jitK = fract(baseJit.add(k / M_PASS));
+                    const jitK = fract(baseJit.add(kF.div(M_PASS)));
                     const p = org.add(dir.mul(t0)).add(dir.mul(stepS).mul(jitK)).toVar();
                     Loop({ start: 0, end: N_MARCH, type: 'int' }, () => {
                         If(Trk.lessThanEqual(0.008), () => Break());
                         const s = cloudsAt(p);
                         If(s.density.greaterThan(0.0), () => {
-                            const intensity = lightRay(p, phaseF, s.density, mu, s.ch, fract(fract(baseJit.mul(73.1063)).add(k * 0.6180339887)));
+                            const intensity = lightRay(p, phaseF, s.density, mu, s.ch, fract(fract(baseJit.mul(73.1063)).add(kF.mul(0.6180339887))));
                             const amb = u.cloudAmbSky.mul(float(0.5).add(s.ch.mul(0.6)))
                                 .add(u.cloudAmbGround.mul(max(float(1).sub(s.ch.mul(2)), 0)));
                             // A sealed cumulonimbus canopy removes direct sun
@@ -1200,7 +1200,7 @@
                     });
                     colSum.addAssign(colk);
                     trSum.addAssign(Trk);
-                }
+                });
             }).Else(() => {
                 trSum.assign(M_PASS);
             });
@@ -1586,7 +1586,8 @@
                 const sy = max(u.cloudLightDir.y, 0.08);
                 const segL = u.cloudHeight.div(sy);
                 const hp = org.add(dir.mul(stepH).mul(baseJit.mul(0.5).add(0.3))).toVar();
-                for (let i = 0; i < 20; i++) {
+                Loop({ start: 0, end: 20, type: 'int', name: 'iRain' }, ({ iRain }) => {
+                    const iRF = float(iRain).toVar();
                     // ring mode: atmoHeight is a remapped PROFILE coordinate,
                     // not meters — the shaft/altitude math needs physical y
                     // (this is what silently killed the god rays)
@@ -1594,9 +1595,9 @@
                         ? max(float(RING_SLAB_LO + 20).sub(hp.y), 0).div(sy)
                         : max(u.cloudStart.sub(atmoHeight(hp)), 0).div(sy);
                     const od = float(0).toVar();
-                    for (let j = 0; j < 6; j++) {
-                        od.addAssign(smoothDensity(hp.add(u.cloudLightDir.mul(hEnter.add(segL.mul((j + 0.5) / 6))))));
-                    }
+                    Loop({ start: 0, end: 6, type: 'int', name: 'jRain' }, ({ jRain }) => {
+                        od.addAssign(smoothDensity(hp.add(u.cloudLightDir.mul(hEnter.add(segL.mul(float(jRain).add(0.5).div(6)))))));
+                    });
                     const vis = exp(od.mul(segL.div(6)).negate());
                     // rain curtains: dense macro cells rain; fine xz column
                     // noise gives the falling-shaft texture
@@ -1605,7 +1606,7 @@
                     const cellCov = clamp(wSampleL(vec2(cp1z, cp1x).mul(float(-0.00005).mul(u.wScale))).sub(u.largeT).mul(u.largeA), 0, 2);
                     // column texture coarsened + faded to smooth murk with
                     // distance — fine detail must stay below the step size
-                    const tCur = stepH.mul(i + 0.5);
+                    const tCur = stepH.mul(iRF.add(0.5));
                     const colTex = wSampleS(vec2(cp1z, cp1x).mul(0.0008).add(vec2(0.61, 0.23)));
                     const colMod = mix(colTex.mul(1.1).add(0.25), float(0.8), smoothstep(900, 2600, tCur));
                     const belowBase = RING_R
@@ -1628,7 +1629,7 @@
                         stormPrecipGate,
                         clamp(u.stormCanopy, 0, 1),
                     );
-                    const precip = u.precipK.mul(precipGate).mul(colMod).mul(2.1e-4 * (1 - (i / 20) * 0.5))
+                    const precip = u.precipK.mul(precipGate).mul(colMod).mul(float(1).sub(iRF.div(20).mul(0.5)).mul(2.1e-4))
                         .mul(belowBase.mul(0.5).add(0.5));
                     const altPhys = RING_R ? hp.y : atmoHeight(hp);
                     // ring mode: curtains OFF pending their own tune — they were
@@ -1639,7 +1640,7 @@
                     shaft.addAssign(trH.mul(vis.mul(0.75).add(0.25)).mul(rho).mul(stepH));
                     trH.assign(trH.mul(exp(rho.mul(stepH).negate())));
                     hp.assign(hp.add(dir.mul(stepH)));
-                }
+                });
             });
             // curtains scatter AMBIENT skylight too — sun-only lighting rendered
             // distant rain as a black wall at the horizon. Under a sealed
