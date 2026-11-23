@@ -32,6 +32,9 @@
 //                                           rain|storm|cyclone|darkstorm
 //   sky.transitionTo(name, k, seconds)      eased weather change
 //   sky.setColors({ cloud, sun, rain, star, shield })   per-channel retints
+//   sky.setGroundHeightAt(fn)               the surface rain splashes land on
+//                                           (also makeSky({ groundHeightAt }));
+//   sky.invalidateGround()                  …after that surface changes shape
 //   sky.update(t)                           REQUIRED per frame; owns ordering
 //
 // Look-dev internals (cloud morphology, terminator shaping, cache tiers,
@@ -136,6 +139,7 @@
     globalThis.makeSky = async function makeSky({
         scene, camera, renderer, world = 'earth', hours = 12, clouds = 'cumulus',
         weather = 'clear', weatherK = 1, sun, hemi, audio = true,
+        groundHeightAt = null,
     } = {}) {
         const W = WORLDS[world];
         if (!W) {
@@ -250,6 +254,8 @@
                     bolt: await readTex('eidoverse/assets/particle_textures/trace_06.png', false),
                     drop: await readTex(A + 'rain_streak.png', true),
                 },
+                // the surface the rain splashes on; without one, the flat y=0 plane
+                ...(typeof groundHeightAt === 'function' ? { groundHeightAt } : {}),
             },
         });
         wx.wrapScene();
@@ -328,6 +334,11 @@
             // and makes no assumption about what one looks like. Already run at
             // construction; call it again after adding geometry later.
             wrapScene() { wx.wrapScene(); return api; },
+            // where the rain lands: fn(x, z) → metres (null = no ground there),
+            // or null for the flat y=0 plane. invalidateGround() after the
+            // ground changes shape under the same function.
+            setGroundHeightAt(fn) { wx.setGroundHeightAt(fn); return api; },
+            invalidateGround() { wx.invalidateGround(); return api; },
 
             // ONE per-frame call. The ordering below is not arbitrary and
             // getting it wrong fails silently, which is exactly why scenes
