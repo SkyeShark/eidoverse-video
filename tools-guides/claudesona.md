@@ -133,6 +133,23 @@ track in by maximum. `get_mouth_openness(v)` is lipsync.py's helper. A JSON
 timeline loads with `L.load(path)` and saves with `L.save(vis, path)`; a WAV
 path passed straight to `key_lipsync` is analysed for you (ffmpeg on PATH).
 
+**A singing mouth from a vocal stem.** With the voice alone and its words,
+`visemes_from_vocal` runs `lipsync.py`'s `get_viseme_timeline_from_vocal` in
+Blender's Python. The stem's own level opens the mouth, so a held note stays
+open and a breath shuts it. The sung word's vowel gives the shape, the lips
+shut before m, b and p, and a hiss shows the teeth. Its values run 0..1, so
+key them with `input_max=1`:
+
+```python
+vis = L.visemes_from_vocal('work/song/vocals.wav', 'work/song/lyrics_aligned.json', fps=24)   # or a words list
+rep = L.key_lipsync(me, vis, start_t=1.0, input_max=1.0)       # raw on any VRM; the suit mouth at inputMax 1
+```
+
+The stem's silences shut the mouth, so no gating is needed between lines; see
+[audio.md](audio.md) for what it reads.
+[`blender/tests/finishing/scene.py`](../blender/tests/finishing/scene.py) keys
+it on claude.vrm.
+
 ## Outfits — `claudesona/wardrobe.py`
 
 `claude_suit_wardrobe.vrm` holds every garment as a hidden layer. A preset
