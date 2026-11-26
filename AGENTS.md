@@ -1234,6 +1234,40 @@ succeeds, else `libx264`. **NEVER hand-roll `tpad=stop_mode=clone`** — cloning
 frame to backfill the audio is exactly how frozen-frame videos ship.
 (Know the audio length before you render and set `duration` from it.)
 
+### The song's clock — `song_clock.py`
+
+Measure the song before you cut to it. `song_clock.py` reads the wav and
+writes where its beats, bars, quiet stretches, sections and lines fall, in
+seconds AND frames. It measures timing only; it never says how a take sounds.
+
+```bash
+python3 song_clock.py song.wav --fps 24 --out work/<id>/song_clock.json [--downbeat 14.93]
+python3 song_clock.py song.wav --lyrics lyrics.txt --vocal vocals.wav      # + the lines, via align_lyrics.py
+python3 song_clock.py song.wav --repeat 33.0 47.6 --within 47.6 140        # where that passage's music returns
+python3 song_clock.py song.wav --offset work/<id>/film.mp4                 # after merge_av: the sound's offset
+```
+
+- **Beats**: librosa's grid usually sits 30–40 ms LATE. The clock measures
+  that lag over the whole song, takes it off, and moves each beat onto the
+  wav's own rise within 18 ms. Each beat says `measured` or `carried`; the
+  `check` block gives the level's steps against the beats. On the three songs
+  it was tried on, the median was 1 to 6 ms. Put a hit on a beat's `frame`.
+- **Bars**: every `--beats-per-bar` beats. ⚠ The phase is a GUESS unless you
+  pass `--downbeat` (a moment on a bar line, e.g. the first word of a verse).
+  A beat the tracker missed or doubled shifts the count after it: check the
+  bars where you cut.
+- **Lyrics** (`--lyrics`, one sung line per line, `[Name]` lines naming the
+  sections) give `lines`, `captions` and `sections`. Without them the
+  sections are the measured `segments`.
+- **Frames**: a moment at t sounds in frame `1 + floor(fps × t)` (frame 1
+  starts at 0 s); the renderer's frame index is that minus one.
+- The JSON is also a timeline: pass it to `contact_sheet.py --lines` and
+  `film_print.py --letters`.
+- `--offset FILM`: 0 ms when the mux is right, positive when the film's sound
+  is LATE. Run it on the final mp4 before you hand off.
+- Dependencies: librosa, soundfile (in the render image); pyloudnorm for
+  loudness (optional); stable-ts for `--lyrics`.
+
 ### Lipsync — any scene with a VRM + audible vocals
 
 ```bash
@@ -1301,6 +1335,43 @@ globalThis.renderFrame = async function (t) {
     // ...effects update + renderAsync...
 };
 ```
+
+#### A singing mouth from the vocal stem — `get_viseme_timeline_from_vocal`
+
+When you have the voice ALONE (a demucs stem, a recorded vocal, a voicebox
+render) and its words, use this instead of the band method. It follows the
+singer, not the spectrum:
+- **How open**: the stem's own level, 4 times a frame. A held note stays
+  open; a breath between words shuts the mouth (open at once, shut in ~70 ms).
+- **Which shape**: the vowel of the word sung then; each word's last vowel is
+  held while the voice goes on.
+- **A hiss with no voice** (s, sh, a stuttered "s-s-") shows the teeth as a
+  narrow `ih`.
+- **Lips shut** on the frame before a word starting with m, b or p.
+- **Voice with no word** ("ooh", a hum): the shape comes from the spectrum.
+
+```bash
+python3 -c "import json; from lipsync import get_viseme_timeline_from_vocal; \
+lines = json.load(open('lyrics_aligned.json')); \
+json.dump({'fps': 30, 'frames': get_viseme_timeline_from_vocal('vocals.wav', lines, fps=30)}, open('visemes.json','w'))"
+```
+
+- `words` = align_lyrics.py's lines (their `"words"`), a flat list of
+  `{word, start, end}`, or `(word, start, end)` tuples. `None` reads every
+  shape off the spectrum.
+- ⚠ **Values run 0..1** (sum at most 1), NOT 0..0.35. Apply them raw with
+  `setValue(k, v)`; for the suit mouth use `makeSuitMouth({ inputMax: 1 })`.
+  Do NOT divide by 0.35. `get_mouth_openness()` is scaled for the band method
+  and saturates here.
+- The shapes are VRM's: `aa` "father", `ih` "see", `ou` "blue", `ee` "bed" and
+  "made", `oh` "go". voicebox's visemes use the same mapping.
+- The stem's own silences shut the mouth, so instrumental passages need no
+  gating. Gate only stretches where demucs bleed is loud enough to read as
+  voice.
+- Measured on voicebox's own voice against its phoneme-exact visemes: open
+  or shut alike on 96 % of frames, an openness correlation of 0.93, the same
+  dominant shape on 90 % of the frames both call open
+  (`eidoverse/examples/finishing/song.py` prints this).
 
 **The petal ring stays off the jacket on its own** (`claude_suit.vrm` and `claude_suit_wardrobe.vrm`). The
 orange ring around the face is split-skinned: the top arc rides the head, the bottom arc the `petals base lower`
@@ -2529,6 +2600,50 @@ readable; keep the radial planes": that became the reading shots above.
 Laptop GPU. The halo's blur pyramid skips its passes when `halo × force` is
 0. The [UNKNOWN FORCE sets](eidoverse/sets/unknown_force/README.md) give
 their per-shot totals with the pass on.
+
+### After the render: the release print — `film_print.py`
+
+`film_print.py` prints a FINISHED film as a period release print. It works on
+the encoded mp4, so it runs on any render. ⚠ It runs LAST:
+1. render the film;
+2. run any neural pass over the frames (a denoiser, a neural renderer such as
+   DLSS 5);
+3. print.
+
+A network run after the print smooths its grain and dirt away. It is not an
+era look: `candle_film` and `poster` are GPU passes inside the render; the
+print is a CPU step over the whole film, after it.
+
+```bash
+python3 film_print.py work/<id>/film.mp4 --stills work/<id>/print_stills --at 3.5,41.0   # LOOK at these first
+python3 film_print.py work/<id>/film.mp4 --out work/<id>/film_print.mp4 \
+    --letters work/<id>/song_clock.json --parts 4      # 4 ranges side by side, joined without a re-encode
+```
+
+- `--era 1970s` (default): a 1970s release print. The dyes' cross-talk (deep,
+  clean primaries), golden highlights and a warm veil in the blacks, red-orange
+  halation, diffusion bloom and the print's tone curve. Then the print as
+  projected: records off register, gate weave, softness, dust and dirt,
+  fibres, the odd hair, scratches that run for seconds, flicker, uneven
+  density, the projector's falloff, and three-layer grain.
+- `--era 1960s`: a clean first-run three-strip print (cross-talk, tone, red
+  halation, fine grain, a little weave and flicker, soft corners; no dirt).
+- `--set name=value[,...]` changes any preset value (`--set grain=0.018,dust=1`,
+  `--set scratch_every=0`); the names are the keys of `ERAS` in the file.
+- Every frame's artefacts come from its frame number and `--seed` alone, so
+  `--parts N` prints N ranges in N processes and joins them with the source's
+  sound (stream copy; each segment's frame count is checked). Each process
+  takes ~2 s a frame at 1080p and ~0.4 s at 960 × 540.
+- `--letters timeline.json` letters the lines in, as heavy swelled
+  poster capitals with a dark padded outline (Anton). It takes
+  `song_clock.py`'s clock, `{"captions": [...]}`, or align_lyrics.py's list.
+  A caption may carry `"where": "bottom" | "top" | "top-left"`,
+  `"style": "arch"` (large, arched across the top) and
+  `"inks": [outline, top, bottom]`. A line shows from 0.25 s before it to
+  0.42 s after it. The weave, dirt and grain go over the lettering too.
+- Output: H.264 High, yuv420p, the sound copied. Check the
+  `_before_after.jpg` stills before printing a whole film.
+- Worked example: `eidoverse/examples/finishing/` (README.md there).
 
 ### Procedural toolkits
 
@@ -4286,6 +4401,27 @@ same frames split into N sheets, for tools with per-image size limits. The
 output is `<video>_contact_sheet.jpg` unless `--out` names it. A sheet maps
 the piece. It cannot show timing, flicker, lipsync or motion, so review those
 in the video itself.
+
+**Line by line, with the sound** — for a song or a spoken piece, hand the
+parent THIS sheet:
+
+```bash
+python3 contact_sheet.py work/<id>/film_final.mp4 --lines --timeline work/<id>/song_clock.json \
+  --beats work/<id>/song_clock.json --title "Title" [--per-row 6] [--png]
+```
+
+- One row per caption, plus one per stretch without words longer than
+  `--gap` s (default 3; labelled with its section, else intro/break/outro).
+- Each row: time, section and words; `--per-row` frames spread over its
+  seconds; under them the sound's mel spectrogram over the same seconds, on
+  ONE dB scale for the whole piece; beat ticks (`--beats`: a JSON list of
+  seconds or song_clock.py's clock) and the frames' moments marked.
+- The sound is the video's own; `--song FILE` uses another, `--song none`
+  drops the strips.
+- Output: `<video>_contact_sheet_lines.jpg` (`--png` adds a lossless copy,
+  `--parts N` splits the rows). It shows where each line falls against the
+  music and the picture. It does NOT show whether a mouth moves on time:
+  watch the video for that.
 
 ## Known stack quirks (handled by the engine)
 
