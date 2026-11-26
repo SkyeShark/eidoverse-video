@@ -25,6 +25,17 @@ python eido.py render eidoverse/examples/finishing/scene.json
 python eidoverse/examples/finishing/finish.py            # add --align to place the lines with Whisper
 ```
 
+In the Blender edition the film is `blender/tests/finishing/scene.json`. Its
+scene reads the mouth from the stem inside Blender
+(`eidoblend.characters.lipsync.visemes_from_vocal`) and keys it at build time:
+
+```bash
+python eidoverse/examples/finishing/song.py
+python eido_blender.py render blender/tests/finishing/scene.json --at 4 --at 9.5
+python eido_blender.py render blender/tests/finishing/scene.json
+python eidoverse/examples/finishing/finish.py --film blender/tests/finishing/out/finishing_video_only.mp4
+```
+
 Everything lands in `work/finishing/`, outside version control:
 - `film_print.mp4`: the finished film;
 - `stills/`: two printed frames with their before | after pictures;

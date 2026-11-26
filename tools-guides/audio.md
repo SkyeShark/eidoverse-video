@@ -92,6 +92,18 @@ Whisper there is an intelligibility meter for synthesized voices, so the
 numbers say how a listener might mishear the handmade lead, not that a tool
 failed.
 
+The finishing tools, run on this branch through the finishing example:
+`eidoverse/examples/finishing/song.py`, then
+`blender/tests/finishing/scene.json` rendered by `eido_blender.py` (960×540,
+24 fps, 336 frames), then `finish.py --film` on that render:
+
+| Tool | What ran |
+| --- | --- |
+| `lipsync.py` `get_viseme_timeline_from_vocal` | in Blender's Python (`characters.lipsync.visemes_from_vocal`) on the example's voicebox stem and its words, keyed onto claude.vrm with `input_max=1`; the mouth opens on the sung lines and shuts in the outro. In the system Python, against voicebox's phoneme-exact visemes: open or shut alike on 96 % of frames, openness correlation 0.93, the same dominant shape on 90 % of open frames |
+| `song_clock.py` | the 14 s song: 120.0 BPM, 27 beats all on their own rise, the tracker's grid 38 ms late and corrected, the level's steps a median 2 ms from the beats; `--offset` on the muxed film: 0.0 ms |
+| `film_print.py` | the EEVEE film as a 1970s print, lettered from the clock's captions, in 3 ranges: 336 of 336 frames, joined with the sound, 53 s |
+| `contact_sheet.py --lines` | the printed film, 4 rows (intro, the two lines, outro) with the sound's spectrogram and the beats |
+
 ## Synthesized voices and music (no models)
 
 When a piece wants its OWN voice or music, made by hand rather than generated: [voicebox](voicebox.md) sings and speaks from scratch (formant synthesis, historical machine voices from the 1939 Voder to neural TTS, choirs, a physical vocal-tract model), and [synthkit](synthkit.md) builds the music (instruments, drums, sequencer, sidechain, a −14 LUFS / −2 dBTP master). [`eidoverse/examples/daisy/`](../eidoverse/examples/daisy/README.md) is a full song made with both.
@@ -460,8 +472,16 @@ language or a lexicon of your own.
 The shapes are VRM's: `aa` is the "a" of "father", `ih` the "i" of "see",
 `ou` the "u" of "blue", `ee` the "e" of "bed" and "made", and `oh` the "o"
 of "go". voicebox's phoneme visemes use the same mapping. The values run 0..1
-with their sum at most 1, so drivers take them as they are:
-`setValue(k, v)` raw, and `makeSuitMouth({ inputMax: 1 })` for the suit mouth.
+with their sum at most 1, so they are keyed as they are. In Blender the same
+function runs in Blender's own Python through `eidoblend.characters.lipsync`:
+
+```python
+from eidoblend.characters import lipsync as L
+vis = L.visemes_from_vocal('work/<id>/vocals.wav', 'work/<id>/lyrics_aligned.json', fps=24)
+L.key_lipsync(me, vis, start_t=0.0, input_max=1.0)     # raw on a VRM's expressions; inputMax 1 for the suit mouth
+```
+
+For `media.audio.prepare_visemes`, these values take `divide=1`, not 0.35.
 `get_mouth_openness()` is scaled for the band method's 0..0.35 and saturates
 here.
 
@@ -471,7 +491,8 @@ stretches as above.
 
 On voicebox's own voice, this mouth agrees with voicebox's phoneme mouth
 (`voicebox.visemes`, frame-exact) as follows, measured by the
-[finishing example](../eidoverse/examples/finishing/README.md):
+[finishing example](../eidoverse/examples/finishing/README.md) (its film in this
+edition: `blender/tests/finishing/scene.json`):
 - the same frames open or shut on 96 % of frames;
 - an openness correlation of 0.93;
 - the same dominant shape on 90 % of the frames both call open.

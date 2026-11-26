@@ -670,6 +670,87 @@ read seven of them. The recorded frames stay on disk until
 `History.prune()` / `clear()`, or `auto_prune` while this session renders: a
 `.blend` rendered from the command line keeps them all.
 
+## After the render: the release print — `film_print.py`
+
+`film_print.py` (repository root, system Python: numpy, Pillow, ffmpeg) prints
+a finished film as a period release print. It works on the encoded video
+that `eido_blender.py render` writes, so it never touches the scene, the
+compositor or the `.blend`. It runs last:
+1. render the film;
+2. run any neural pass over the frames (a denoiser, or a neural renderer such
+   as DLSS 5);
+3. print with `film_print.py`.
+
+A network run after the print would smooth its grain and dirt away. This is
+the difference from the era looks above: `candle_film` and `poster` are
+compositor passes, part of every frame EEVEE renders. The print is a
+film-wide step outside Blender.
+
+```bash
+python film_print.py blender/tests/<area>/out/film.mp4 --out work/<id>/film_print.mp4 \
+    --letters work/<id>/song_clock.json --parts 4        # four ranges side by side, joined without a re-encode
+python film_print.py work/<id>/film.mp4 --stills work/<id>/print_stills --at 3.5,41.0      # look first
+python film_print.py --images a.png,b.png --stills work/<id>/print_stills --at 2.0,6.0     # stills of EEVEE renders
+```
+
+Two eras:
+- **`--era 1970s`** (the default) is a 1970s release print. First the
+  negative and the dyes:
+  - the dye records' cross-talk, which gives deep, clean primaries with greens
+    leaning to blue-green;
+  - the decade's print light: golden highlights, warm-neutral shadows and a
+    faint warm veil in the blacks;
+  - red-orange halation round the highlights, at two spreads;
+  - the soft bloom of a diffusion filter;
+  - the print's tone curve, with dense blacks and a soft shoulder.
+
+  Then the print as projected:
+  - the three dye records a little off register, and the gate's weave;
+  - the softness of a later-generation print;
+  - dust and dirt, white where it lay on the negative and dark where it lies
+    on the print;
+  - fibres, a hair in the gate now and then, and scratches that run for
+    seconds;
+  - the lamp's flicker, uneven density and the projector's falloff to the
+    corners;
+  - grain in three dye layers, new every frame.
+- **`--era 1960s`** is a clean first-run three-strip dye-transfer print: the
+  same cross-talk and tone, red halation, fine grain, a little weave and
+  flicker, and soft corners, with no dirt, scratches or hairs.
+
+Every value of a preset can be changed with `--set name=value[,name=value]`
+(`--set grain=0.018,dust=1`, `--set scratch_every=0`). The names are the keys
+of `ERAS` in the file.
+
+**Frames are independent.** Every frame's artefacts come from its frame
+number and `--seed` alone (the scratches and hairs are scheduled in two-minute
+blocks), so a range of frames prints the same pixels on its own. With
+`--parts N`, the tool prints N ranges in N processes, checks each segment's
+frame count and joins them with the source's sound, stream-copied. Each
+process takes about 2 s a frame at 1920 × 1080 and about 0.4 s at 960 × 540
+(measured with three processes side by side).
+
+**Lettering.** `--letters timeline.json` letters the timeline's lines into the
+picture. It reads `song_clock.py`'s clock, a `{"captions": [...]}` timeline or
+`align_lyrics.py`'s list. The capitals are heavy, swelled and bent to fill a
+band, the way late-1960s concert posters were lettered. They come in two inks
+with a dark outline padded clear of every letter, set in Anton. A line shows
+from 0.25 s before it starts to 0.42 s after it ends, fading in and out.
+A caption may carry:
+- `"where"`: `bottom` (the default), `top` or `top-left`;
+- `"style": "arch"`: large and arched across the top;
+- `"inks"`: `[outline, top, bottom]`.
+
+The lettering goes in before the print's artefacts, as a title printed into
+the film, so the weave, dirt and grain go over it too. Look at stills first:
+their `_before_after.jpg` pictures put each clean frame beside its print.
+The output is H.264 High, yuv420p, with the sound copied.
+
+[`blender/tests/finishing/scene.json`](../blender/tests/finishing/scene.py)
+renders a small film for it. `eidoverse/examples/finishing/finish.py --film`
+then runs the whole chain on that render: the merge, the clock, the print and
+the line-by-line sheet.
+
 ## Not yet ported
 
 - `focus_blur` mode `'screen'` runs three's blur passes at full resolution;

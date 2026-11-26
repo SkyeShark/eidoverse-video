@@ -47,6 +47,7 @@ subpackages load on first use.
 | [blender/tests/pipeline/gn_keying/scene.py](../blender/tests/pipeline/gn_keying/scene.py) | Test scene: a Geometry Nodes modifier's input keyed through `ctx.key`, and the unkeyed variant the digest names | [scene-format](../tools-guides/scene-format.md) |
 | [blender/tests/pipeline/hand_edit.py](../blender/tests/pipeline/hand_edit.py) | Test helper: a hand edit of a built `.blend`, done headless | [development](../tools-guides/development.md) |
 | [blender/tests/claudesona/basic_vrm/scene.py](../blender/tests/claudesona/basic_vrm/scene.py) | Scene example: the minimal VRM scene (`eidoverse/examples/basic_vrm.js`; `scene_claude.json` loads its own `claude.vrm`) | [claudesona](../tools-guides/claudesona.md) |
+| [blender/tests/finishing/scene.py](../blender/tests/finishing/scene.py) | Scene example: the finishing example's film (`eidoverse/examples/finishing/scene.js`), the sona's mouth read from the vocal stem in Blender (`visemes_from_vocal`); `finish.py` then prints and lays it out | [postprocessing](../tools-guides/postprocessing.md), [audio](../tools-guides/audio.md) |
 | [blender/tests/sets_daisy_ocean/](../blender/tests/sets_daisy_ocean/) | The ocean set's parity tests (against the WebGPU modules run in Deno and an independent numpy sea) and its stills | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/tests/sdf/engine\_march.py](../blender/tests/sdf/engine_march.py) | Test helper: the engine's own raymarch of an SDF solid, volume or mushroom cloud from a Blender camera, set beside the EEVEE renders | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [blender/tests/voice_machines_b/](../blender/tests/voice_machines_b/) | Probes and parity: the era-1 machines, the Speak & Spell, the tandem (two teletypes, the dark room) | [voice-machines](../tools-guides/voice-machines.md) |
@@ -97,7 +98,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [clippy.py](../blender/eidoblend/characters/clippy.py) | `make_clippy`: the paperclip, his morphs and his 43 clips (`clippy.js`); `set_weight` overrides one morph at a frame | [clippy](../tools-guides/clippy.md) |
 | [springs.py](../blender/eidoblend/characters/springs.py) | Spring bones simulated once, in frame order, baked to keys (`bake_springs`, `SpringRig`); on a body moving through a set they rest on the ground and stay out of its solids (`ground=`, `solids=`), and a cut settles them on the new pose (`reset_preroll=`) | [claudesona](../tools-guides/claudesona.md), [characters](../tools-guides/characters.md), [controller](../tools-guides/controller.md) |
 | [lookat.py](../blender/eidoblend/characters/lookat.py) | Eyes on a target, as three-vrm's VRMLookAt drives them, baked to keys | [claudesona](../tools-guides/claudesona.md) |
-| [lipsync.py](../blender/eidoblend/characters/lipsync.py) | A VRM's mouth keyed from audio (`key_lipsync`, `visemes_from_audio`) | [claudesona](../tools-guides/claudesona.md), [audio](../tools-guides/audio.md) |
+| [lipsync.py](../blender/eidoblend/characters/lipsync.py) | A VRM's mouth keyed from audio (`key_lipsync`, `visemes_from_audio`; a singing mouth from a vocal stem, `visemes_from_vocal`) | [claudesona](../tools-guides/claudesona.md), [audio](../tools-guides/audio.md) |
 | [claudesona/\_\_init\_\_.py](../blender/eidoblend/characters/claudesona/__init__.py) | The claudesona: its face, wardrobe, TuTa and look | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/face.py](../blender/eidoblend/characters/claudesona/face.py) | `claudesona_face.js`: the mouths, the lipsync drivers, an emotion track keyed to words | [claudesona](../tools-guides/claudesona.md) |
 | [claudesona/wardrobe.py](../blender/eidoblend/characters/claudesona/wardrobe.py) | `claudesona_wardrobe.js`'s garment layers shown, hidden and repainted, keyed | [claudesona](../tools-guides/claudesona.md) |
@@ -482,9 +483,11 @@ system Python, outside Blender, and serve either edition.
 | [fetch_model.py](../fetch_model.py) | CLI: one query over local models, Poly Haven, Smithsonian, NASA and NIH 3D (`--cache`: the shared model library); each delivery previewed in Blender (`model_preview.py`), with its size, pivot, kit and nose-axis lines in Blender's words | [assets](../tools-guides/assets.md) |
 | [fetch_texture.py](../fetch_texture.py) | CLI: CC0 PBR sets (`--cache`: the shared texture library); ends with the `load_pbr` / `load_image_texture` lines for the set | [assets](../tools-guides/assets.md) |
 | [fetch_hdri.py](../fetch_hdri.py) | CLI: environment HDRIs; ends with the `load_hdri` line | [assets](../tools-guides/assets.md) |
-| [contact_sheet.py](../contact_sheet.py) | CLI: labelled contact sheets of a video | [render-review](../tools-guides/render-review.md) |
+| [contact_sheet.py](../contact_sheet.py) | CLI: labelled contact sheets of a video: a grid, or `--lines` (a row per line with its frames and the sound's spectrogram) | [render-review](../tools-guides/render-review.md) |
 | [align_lyrics.py](../align_lyrics.py) | CLI: lyric timestamps from a vocal | [audio](../tools-guides/audio.md) |
-| [lipsync.py](../lipsync.py) | Python audio module: per-frame viseme timelines from vocal audio; no CLI | [audio](../tools-guides/audio.md), [claudesona](../tools-guides/claudesona.md) |
+| [lipsync.py](../lipsync.py) | Python audio module: per-frame viseme timelines from vocal audio (bands), or a singing mouth from a vocal stem and its words; no CLI | [audio](../tools-guides/audio.md), [claudesona](../tools-guides/claudesona.md) |
+| [song_clock.py](../song_clock.py) | CLI: a song's beats, bars, quiet stretches, sections and lines in seconds and frames; where a passage returns; a film's sound offset | [audio](../tools-guides/audio.md) |
+| [film_print.py](../film_print.py) | CLI: a finished film printed as a 1970s (or 1960s) release print, lettering from a timeline, ranges in parallel; after the render and any neural pass | [postprocessing](../tools-guides/postprocessing.md) |
 | [merge_av.py](../merge_av.py) | CLI: safe muxing of sound onto a render | [audio](../tools-guides/audio.md) · [weather-effects](../tools-guides/weather-effects.md) |
 | [bake_weather_audio.py](../bake_weather_audio.py) | CLI: a weather audio timeline baked to a stereo WAV | [sky-weather](../tools-guides/sky-weather.md) · [weather-effects](../tools-guides/weather-effects.md) |
 | [generate_song.py](../generate_song.py) | MiniMax Music 3 generator (local ComfyUI) | [audio](../tools-guides/audio.md) |
@@ -509,6 +512,8 @@ system Python, outside Blender, and serve either edition.
 | [voicebox/tube.py](../voicebox/tube.py) | Kelly–Lochbaum vocal-tract model (the 1961 voice) | [voicebox](../tools-guides/voicebox.md) |
 | [voicebox/util.py](../voicebox/util.py) | WAV I/O, spectrograms, Whisper checks | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/song.py](../eidoverse/examples/daisy/song.py) | Worked example: a complete song with voicebox + synthkit | [voicebox](../tools-guides/voicebox.md) |
+| [eidoverse/examples/finishing/song.py](../eidoverse/examples/finishing/song.py) | Worked example: a sung phrase made from scratch and its mouth from the vocal stem (the film: `blender/tests/finishing/`) | [audio](../tools-guides/audio.md) |
+| [eidoverse/examples/finishing/finish.py](../eidoverse/examples/finishing/finish.py) | Example CLI: a rendered film through the finishing chain (merge, clock, print, line sheet); `--film` takes this edition's render | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/daisy/captions.py](../eidoverse/examples/daisy/captions.py) | Example CLI: timeline to ASS subtitles, lyric preview | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/analyze.py](../eidoverse/examples/daisy/analyze.py) | Example CLI: section-by-section mix measurement | [synthkit](../tools-guides/synthkit.md) |
 | [eidoverse/examples/unknown_force/build_timeline.py](../eidoverse/examples/unknown_force/build_timeline.py) | Example CLI: a song's timing spine (beats, sections, lines, gated visemes, documentary clips) | [audio](../tools-guides/audio.md) |
@@ -606,6 +611,7 @@ installed.
 | [eidoverse/effects_tsl/wavy.js](../eidoverse/effects_tsl/wavy.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/basic_vrm.js](../eidoverse/examples/basic_vrm.js) | Scene example/template (Blender's: `blender/tests/claudesona/basic_vrm/`) | [claudesona](../tools-guides/claudesona.md) |
 | [eidoverse/examples/claude_robot.js](../eidoverse/examples/claude_robot.js) | Scene example/template: the robot body, its face and a clip through its joints (Blender's: `blender/examples/claude_robot/`) | [robot-body](../tools-guides/robot-body.md) |
+| [eidoverse/examples/finishing/scene.js](../eidoverse/examples/finishing/scene.js) | Worked example: the sona sings on a stage, its mouth from the vocal stem (Blender's: `blender/tests/finishing/`) | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template: the walking course (Blender's: `blender/examples/obstacle_course/`) | [geometry](../tools-guides/geometry.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [robotics](../tools-guides/robotics.md) |
@@ -762,6 +768,8 @@ every API was executed. Recount with `python blender/tests/pipeline/check_docs.p
   [daisy sheet source](../eidoverse/assets/grass/daisy_src/README.md).
 - [DAISY song example](../eidoverse/examples/daisy/README.md) and
   [era screen sources](../eidoverse/graphics/SOURCES.md).
+- [The finishing chain example](../eidoverse/examples/finishing/README.md) (its film in this edition:
+  `blender/tests/finishing/scene.json`).
 - UNKNOWN FORCE: the [music video's example folder](../eidoverse/examples/unknown_force/README.md), the
   [WebGPU scene index](../eidoverse/sets/unknown_force/README.md) with its
   [sources](../eidoverse/sets/unknown_force/SOURCES.md), the

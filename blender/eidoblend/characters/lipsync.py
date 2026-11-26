@@ -7,9 +7,14 @@
     vis = L.gate_visemes(vis, [(1.0, 4.2), (5.0, 8.8)])             # mouth shut outside the sung lines (+- 0.12 s)
     rep = L.key_lipsync(me, vis, start_t=1.0)                       # aa/ih/ou/ee/oh keyed on the VRM's expressions
 
+    vis = L.visemes_from_vocal('work/song/vocals.wav', 'work/song/lyrics_aligned.json', fps=24)   # a singing mouth
+    rep = L.key_lipsync(me, vis, input_max=1.0)                     # values 0..1: raw, and inputMax 1 for the suit mouth
+
 The WebGPU path, and what each step becomes here:
     lipsync.py get_viseme_timeline(wav, fps)    the same module (repo root), imported by path: it needs only numpy
                                                 (Blender has it) and ffmpeg/ffprobe on PATH. Values 0..0.35.
+    lipsync.py get_viseme_timeline_from_vocal   visemes_from_vocal(stem, words, fps): the same module's singing mouth
+      (stem, words, fps)                        from a vocal stem and its words, in Blender's Python. Values 0..1.
     voicebox.visemes(segs, tracks, dur, fps)    host-side (scipy/numba): hand Blender its JSON; values 0..1.
     gate to the aligned lyric windows           gate_visemes(vis, windows, pad=0.12) (audio.md's recipe)
     per frame: every viseme 0, then the frame's  key_lipsync -> media.audio.prepare_visemes (frame-exact at the same
@@ -49,6 +54,23 @@ def visemes_from_audio(path, fps=None, fft_size=1024, scene=None):
         r = (scene or bpy.context.scene).render
         fps = r.fps / r.fps_base
     frames = _lipsync_module().get_viseme_timeline(str(path), fps=int(round(fps)), fft_size=fft_size)
+    return frames, float(fps)
+
+
+def visemes_from_vocal(path, words=None, fps=None, scene=None):
+    """lipsync.py's get_viseme_timeline_from_vocal: a singing mouth from a vocal stem -> (frames [{aa, ih, ou, ee, oh}],
+    fps), values 0..1 (key them with input_max=1). words: align_lyrics.py's lines, a list of {word, start, end}, or a
+    JSON file holding either (a dict's "words", else its "lines": song_clock.py's clock); None reads every shape off
+    the spectrum. fps defaults to the scene's."""
+    if fps is None:
+        r = (scene or bpy.context.scene).render
+        fps = r.fps / r.fps_base
+    if isinstance(words, (str, os.PathLike)):
+        with open(words, encoding='utf-8') as f:
+            words = json.load(f)
+    if isinstance(words, dict):
+        words = words.get('words') or words.get('lines') or []
+    frames = _lipsync_module().get_viseme_timeline_from_vocal(str(path), words, fps=int(round(fps)))
     return frames, float(fps)
 
 
@@ -92,7 +114,7 @@ def key_lipsync(h, vis, start_t=0.0, divide=1.0, windows=None, mode='auto', inpu
     mode 'auto': the claudesona -> 'suit' (its own mouth: install_suit_mouth + make_suit_mouth), any other VRM ->
     'expressions' (aa/ih/ou/ee/oh: raw values, the engine's way). 'viseme': the claudesona's full viseme mouth from
     `events` ([{t0, t1, v}], e.g. face.events_from_phones(voicebox segs)). input_max: the suit driver's inputMax
-    (default 0.35 for lipsync.py timelines; pass 1 for voicebox visemes). emotions: a function t -> weights
+    (default 0.35 for lipsync.py's band timelines; pass 1 for voicebox visemes and visemes_from_vocal's). emotions: a function t -> weights
     merged by maximum (face.make_face_track(...).at). windows: [(t0, t1)] film seconds to keep (gate_visemes)."""
     scene = scene or bpy.context.scene
     from ..media.timebase import Timebase
