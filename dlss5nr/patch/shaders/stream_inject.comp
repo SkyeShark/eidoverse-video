@@ -1,0 +1,35 @@
+#version 460
+// `run --stream`: the warped history into the input features' lanes 7-9, centred as the proxy is
+// (round_f16(round_f16(round_f16(h) - 0.5) * 0.125)), over the whole padded field with the padding mirrored as
+// preprocess.comp mirrors it; where a pixel has no history the proxy's copy that preprocess wrote stays, as on a first
+// frame. runRun does the same on the CPU between a download and an upload of the features.
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_GOOGLE_include_directive : require
+#include "stream_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  uint fullWidth;
+  uint fullHeight;
+} pc;
+
+layout(std430, binding = 2) readonly buffer Warped { vec4 warped[]; };   // [height][width]: RGB, alpha 1 with a history
+layout(std430, binding = 7) buffer Features { float features[]; };      // f32 [fullHeight][fullWidth][16]
+
+void main() {
+  const uvec2 id = gl_GlobalInvocationID.xy;
+  if (id.x >= pc.fullWidth || id.y >= pc.fullHeight) return;
+  const uint sourceX = id.x < pc.width ? id.x : 2u * pc.width - id.x - 2u;
+  const uint sourceY = id.y < pc.height ? id.y : 2u * pc.height - id.y - 2u;
+  const vec4 history = warped[sourceY * pc.width + sourceX];
+  if (history.a <= 0.5) return;
+  const uint base = (id.y * pc.fullWidth + id.x) * 16u + 7u;
+  for (uint c = 0u; c < 3u; ++c) {
+    precise float shifted = roundF16(history[c]) - 0.5;
+    precise float scaled = roundF16(shifted) * 0.125;
+    features[base + c] = roundF16(scaled);
+  }
+}

@@ -1,0 +1,3 @@
+# build.py's clone of OpenDLSS-NR, its toolchain and its build (dlss5vk.exe): rebuilt by build.py, never committed
+opendlss/
+__pycache__/

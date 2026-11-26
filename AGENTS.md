@@ -906,6 +906,10 @@ root — the engine always runs with that as its cwd.
 texture sets, VRMs, audio. Declare only what your scene uses; there is no
 required set.
 
+`"motionVectors": "work/<id>/motion"` (optional): the render also writes
+every frame's motion vectors there, the input of DLSS 5's temporal path
+(see "DLSS 5 over a finished film (host tool)").
+
 **Asset injection is RAW BYTES.** Point each asset at the REAL file —
 `hdri.hdr`, `<model_id>_embedded.gltf`, `character.vrm`, `image.png` — NOT a
 `*_b64.txt` sidecar. The engine reads the file and puts a `Uint8Array`
@@ -2601,6 +2605,58 @@ Laptop GPU. The halo's blur pyramid skips its passes when `halo × force` is
 0. The [UNKNOWN FORCE sets](eidoverse/sets/unknown_force/README.md) give
 their per-shot totals with the pass on.
 
+### DLSS 5 over a finished film (host tool)
+
+`dlss5nr/` re-renders a FINISHED film through NVIDIA's DLSS 5 Neural
+Rendering network (OpenDLSS-NR, MIT): same size out, the network's detail,
+shading and tone in. Not an upscaler, not a TSL effect, not part of a render.
+
+**It runs on the HOST, never in the render container.** It needs Windows, an
+NVIDIA Ada (or newer) GPU whose driver exposes `VK_KHR_cooperative_matrix`,
+`VK_NV_cooperative_matrix2`, `VK_EXT_shader_float8` and
+`VK_NV_cuda_kernel_launch`, Visual Studio 2022+ (C++ x64) to build, ffmpeg and
+numpy. The Linux image has none of that. Render in the container as usual
+(the film and its motion files land under `work/` through the mount); the
+DLSS pass is a host step: run it there if you have the host, else hand the
+commands below to the operator and say the film is NOT DLSS'd yet.
+
+**Weights are the operator's.** `--model <dir>` or `DLSS5VK_MODEL`: a model
+directory in OpenDLSS-NR's layout (`manifest.json` + stage files). Nothing of
+NVIDIA's ships here, and never fetch or describe a source for them. No weights
+→ the tool stops with "supply the weights"; report that, don't work around it.
+OpenDLSS-NR is not affiliated with or endorsed by NVIDIA; "DLSS" is NVIDIA's
+trademark (`dlss5nr/patch/NOTICE`).
+
+Build once (host): `python dlss5nr/build.py` — clones OpenDLSS-NR at 9d08f41
+into `dlss5nr/opendlss/` (git-ignored), applies `patch/opendlss_stream.diff` +
+the stream shaders, runs upstream's `fetch_tools.ps1` + `build.ps1`. Keep
+`--dir` within 118 characters (upstream's CMake unzip hits Windows' path limit;
+the script refuses longer).
+
+Motion (the temporal path; without it the light flickers frame to frame):
+- **The runner's**: `"motionVectors": "work/<id>/motion"` in the scene config
+  → `<frame:04d>.npz` per video frame, three's velocity from the auto-enhance
+  scene pass. Covers camera, object transforms, skinned and instanced meshes.
+  Does NOT cover `positionNode` vertex motion (flora wind, cloth, GPU
+  particles/fluids) or morph targets, and a `_noAutoEnhance` scene writes none
+  (the run warns). Picture unchanged.
+- **Optical flow** for those: `python dlss5nr/flow_motion.py <film.mp4> <dir>`
+  (OpenCV; rough on fast fine detail).
+
+```bash
+python dlss5nr/motion_check.py work/<id>/film.mp4 work/<id>/motion --frames 24,48,96 --offset 0   # must print "+X -Y"
+python dlss5nr/dlss5nr.py work/<id>/film.mp4 work/<id>/film_dlss5.mp4 --model <weights> --style 1 \
+    --motion work/<id>/motion --convention "+X -Y" --offset 0 --cuts <first frame of each shot>
+python dlss5nr/flicker.py work/<id>/film.mp4 work/<id>/film_dlss5.mp4   # still pixels: output ≈ input
+```
+Sound is muxed back; `--from/--to --keep-rest` limit the range; `--stills
+<dir>` writes before | after PNGs; `--style 1` moves the picture furthest
+(crisper shading, richer colour). Grain/print-style passes go AFTER it (the
+network smooths grain). ~45 fps at 1920 × 1080 on an RTX 5090 Laptop GPU.
+Checks without a GPU: `python dlss5nr/tests/test_dlss5nr.py`; the motion
+output: `python eidoverse/examples/motion_vectors/check.py` (add `--local` for
+a host render).
+
 ### After the render: the release print — `film_print.py`
 
 `film_print.py` prints a FINISHED film as a period release print. It works on
@@ -2613,6 +2669,11 @@ the encoded mp4, so it runs on any render. ⚠ It runs LAST:
 A network run after the print smooths its grain and dirt away. It is not an
 era look: `candle_film` and `poster` are GPU passes inside the render; the
 print is a CPU step over the whole film, after it.
+
+If the brief asks for DLSS 5 as well, do NOT print in the container: DLSS 5
+is a host step (above), and the print must come after it. Put the
+`film_print.py` line in your plan after the host's DLSS 5 lines and deliver
+the unprinted film.
 
 ```bash
 python3 film_print.py work/<id>/film.mp4 --stills work/<id>/print_stills --at 3.5,41.0   # LOOK at these first

@@ -1,0 +1,9 @@
+{
+  "width": 320,
+  "height": 180,
+  "fps": 24,
+  "duration": 2,
+  "script": "eidoverse/examples/motion_vectors/scene.js",
+  "outputVideo": "work/motion_vectors_example/scene.mp4",
+  "motionVectors": "work/motion_vectors_example/motion"
+}
