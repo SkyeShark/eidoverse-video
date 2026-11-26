@@ -1,0 +1,25 @@
+#version 460
+// `run --stream`: a video frame as ffmpeg gives it (8-bit sRGB, 3 bytes a pixel, rows top-down) -> the RGBA f32 proxy
+// preprocess.comp reads: each 8-bit value through PROXY_LUT (srgb_dec, NVIDIA's shoulder, srgb_enc, on the half grid;
+// built on the host), alpha 1, as a `run --list` proxy file holds it.
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_8bit_storage : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+} pc;
+
+layout(std430, binding = 0) readonly buffer Frame { uint8_t rgb[]; };          // [height][width][3]
+layout(std430, binding = 1) readonly buffer Table { float proxyTable[]; };     // [256]
+layout(std430, binding = 7) writeonly buffer Proxy { vec4 proxy[]; };          // [height][width] RGBA f32
+
+void main() {
+  const uvec2 id = gl_GlobalInvocationID.xy;
+  if (id.x >= pc.width || id.y >= pc.height) return;
+  const uint pixel = id.y * pc.width + id.x;
+  proxy[pixel] = vec4(proxyTable[uint(rgb[pixel * 3u])], proxyTable[uint(rgb[pixel * 3u + 1u])],
+                      proxyTable[uint(rgb[pixel * 3u + 2u])], 1.0);
+}

@@ -1,0 +1,18 @@
+This repository is licensed under the MIT License (see LICENSE). It is not affiliated with, endorsed by, or
+supported by NVIDIA Corporation. "DLSS" is a trademark of NVIDIA Corporation; it is used here only to describe
+what the network implemented by this code is compatible with. No NVIDIA software, weights, headers or
+documentation are included, and no rights under any NVIDIA intellectual property are granted.
+
+Third-party components used by the build (downloaded or cloned by the scripts, not redistributed here):
+
+- Filament by Google (Apache-2.0), including the third-party libraries its build brings in (SDL2 (zlib),
+  Dear ImGui (MIT), stb (MIT / public domain), Draco, meshoptimizer, Basis Universal, zstd, Abseil and others,
+  see its third_party/ directory): the demo renderer. third_party/filament.patch is a modification of Filament's
+  sources and is offered under the same Apache-2.0 license; demo/native_window_cocoa.mm follows Filament's
+  sample framework.
+- volk (MIT), Vulkan-Headers (Apache-2.0 / MIT), glslang (BSD-3-Clause and others), CMake (BSD-3-Clause),
+  Ninja (Apache-2.0): the toolchain under tools/.
+- meshoptimizer (MIT), @gltf-transform (MIT), draco3dgltf (Apache-2.0), Pillow (HPND): the optional scene
+  conversion scripts.
+- No scene assets are included. The "Lone Monk" scene (Carlo Bergonzini, CC BY) is referenced by a camera view
+  file only.
