@@ -50,6 +50,24 @@ python3 eido_blender.py render work/<id>/scene.json          # the film: H.264 +
 - The parent's `--timeout-min` stops the run when time is up: render the film once the stills are
   right, and leave time for it (`bench` tells you how much).
 
+## DLSS 5 is a host step, not yours
+
+If the brief asks for DLSS 5 over the film: it cannot run in this image. `dlss5nr/dlss5nr.py` needs
+Windows, an NVIDIA Ada (or newer) GPU with NVIDIA's Vulkan extensions and weights the operator
+supplies (tools-guides/postprocessing.md, "DLSS 5 over a finished film"). Render the film as usual and
+put the host's commands in `plan.md`, with your film's paths filled in; the collected `.blend` is
+all its motion needs:
+
+```bash
+bash run_blender.sh blender/tools/render_motion.py --blend work/<id>/scene.blend --out work/<id>/motion
+python dlss5nr/dlss5nr.py work/<id>/scene.mp4 work/<id>/scene_dlss5.mp4 --model <weights> --style 1 \
+    --motion work/<id>/motion --convention "+X -Y" --offset -1 --cuts work/<id>/motion/cuts.txt
+```
+
+(`--offset` is minus the scene's `frame_start`; `render_motion.py` prints the exact `dlss5nr.py`
+line when it ends.) Say in `plan.md` that the delivered film is NOT through DLSS 5 yet. Never look
+for, download or describe a source of the weights.
+
 ## After the film renders
 
 The finishing tools run in the image too (numpy, Pillow, librosa, stable-ts, ffmpeg), on the mp4,
@@ -66,6 +84,9 @@ python3 contact_sheet.py work/<id>/film.mp4 --lines --timeline work/<id>/song_cl
 - `film_print.py` (a 1970s or 1960s release print) is a look, not a step every film takes: use it when
   the brief wants an old film's print. It runs last, after any neural pass; see
   `tools-guides/postprocessing.md` ("After the render: the release print").
+- If the brief asks for DLSS 5 as well, do NOT print the film here: the print goes after DLSS (a
+  network would smooth its grain and dirt away), so put the `film_print.py` line in `plan.md` after
+  the host's DLSS 5 lines and deliver the unprinted film.
 - The line-by-line sheet is the parent's quickest read of a song film: leave it beside the final mp4
   (`--png`, since the parent collects PNGs).
 - A singing mouth from a vocal stem: `characters.lipsync.visemes_from_vocal` in the scene

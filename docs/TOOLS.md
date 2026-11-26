@@ -23,6 +23,7 @@ subpackages load on first use.
 | [run_blender.sh](../run_blender.sh) | CLI utility: isolated headless Blender (every runner call goes through it) | [blender](../tools-guides/blender.md), [development](../tools-guides/development.md) |
 | [blender/README.md](../blender/README.md) | The edition's layout, families and tests | [development](../tools-guides/development.md) |
 | [blender/tools/vrm_turntable.py](../blender/tools/vrm_turntable.py) | Blender CLI: VRM outfit, clip, face and PBR sheets, spin reels | [claudesona](../tools-guides/claudesona.md) |
+| [blender/tools/render_motion.py](../blender/tools/render_motion.py) | Blender CLI: a built film's motion vectors for DLSS 5 (EEVEE's Vector pass, one animation render a shot) as `dlss5nr` motion files, with the shots' first frames in `cuts.txt` | [postprocessing](../tools-guides/postprocessing.md) |
 | [blender/examples/obstacle_course/scene.py](../blender/examples/obstacle_course/scene.py) | Scene example: the walking course (`eidoverse/examples/obstacle_course.js`), aporia driven by the character controller through `course.template` | [geometry](../tools-guides/geometry.md), [controller](../tools-guides/controller.md) |
 | [blender/examples/claude_robot/scene.py](../blender/examples/claude_robot/scene.py) | Scene example: the robot body's example (`eidoverse/examples/claude_robot.js`) as a film through the runner, `claude_robot_example()` at its own 30 fps and 8 s | [robot-body](../tools-guides/robot-body.md) |
 | [blender/tests/run_all.py](../blender/tests/run_all.py) | Test runner: every area's tests in one run, PASS / FAIL per test (`--kinds imports` checks the package's wiring in seconds) | [development](../tools-guides/development.md) |
@@ -51,6 +52,7 @@ subpackages load on first use.
 | [blender/tests/sets_daisy_ocean/](../blender/tests/sets_daisy_ocean/) | The ocean set's parity tests (against the WebGPU modules run in Deno and an independent numpy sea) and its stills | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/tests/sdf/engine\_march.py](../blender/tests/sdf/engine_march.py) | Test helper: the engine's own raymarch of an SDF solid, volume or mushroom cloud from a Blender camera, set beside the EEVEE renders | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [blender/tests/voice_machines_b/](../blender/tests/voice_machines_b/) | Probes and parity: the era-1 machines, the Speak & Spell, the tandem (two teletypes, the dark room) | [voice-machines](../tools-guides/voice-machines.md) |
+| [blender/tests/dlss5nr/](../blender/tests/dlss5nr/test_render_motion.py) | `render_motion.py` on a two-shot film (`make_film.py`): the plan, the files, the convention on the rendered picture | [postprocessing](../tools-guides/postprocessing.md) |
 
 Each family's tests live in `blender/tests/<area>/` (renders land in its
 git-ignored `out/`); `run_all.py --list` names them all.
@@ -494,6 +496,14 @@ system Python, outside Blender, and serve either edition.
 | [generate_sfx.py](../generate_sfx.py) | CLI: Stable Audio effects and ambiences (local ComfyUI) | [audio](../tools-guides/audio.md) |
 | [cyborg_stutter.py](../cyborg_stutter.py) | CLI: spoken character voice filter | [audio](../tools-guides/audio.md) |
 | [cyborg_voice.py](../cyborg_voice.py) | CLI: sung character voice filter | [audio](../tools-guides/audio.md) |
+| [dlss5nr/dlss5nr.py](../dlss5nr/dlss5nr.py) | Host CLI: DLSS 5 neural rendering over a finished film, one stream through OpenDLSS-NR (Windows, NVIDIA Ada or newer, weights you supply) | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/build.py](../dlss5nr/build.py) | Host CLI: OpenDLSS-NR cloned at its pinned commit, the stream patch applied, `dlss5vk.exe` built with upstream's scripts | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/motion_check.py](../dlss5nr/motion_check.py) | CLI: which reading of a motion source points to the previous frame, decided on the film | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/flow_motion.py](../dlss5nr/flow_motion.py) | CLI: motion files from optical flow (OpenCV), for what the Vector pass does not see | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/flicker.py](../dlss5nr/flicker.py) | CLI: a re-rendered film's frame-to-frame flicker against its input | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/motion_npz.py](../dlss5nr/motion_npz.py) | Python module: the motion-file layout (save, load, raw planes, conventions); `render_motion.py` writes through it | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/patch/](../dlss5nr/patch/NOTICE) | Third-party patch: OpenDLSS-NR's `run --list` / `run --stream` (`opendlss_stream.diff`) and the stream's compute shaders, with upstream's MIT `LICENSE` and `NOTICE` | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/tests/test_dlss5nr.py](../dlss5nr/tests/test_dlss5nr.py) | Test suite: the DLSS 5 tools without a GPU (the stand-in program `fake_dlss5vk.py`); the real network when it is built and given weights | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/comfy_bridge.py](../eidoverse/comfy_bridge.py) | Optional TCP bridge service to a host ComfyUI | [audio](../tools-guides/audio.md) |
 | [synthkit/__init__.py](../synthkit/__init__.py) | Python package API (import from repo root) | [synthkit](../tools-guides/synthkit.md) |
 | [synthkit/dsp.py](../synthkit/dsp.py) | Oscillators, filters, envelopes (numba) | [synthkit](../tools-guides/synthkit.md) |

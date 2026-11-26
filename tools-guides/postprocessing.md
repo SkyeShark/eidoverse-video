@@ -670,6 +670,93 @@ read seven of them. The recorded frames stay on disk until
 `History.prune()` / `clear()`, or `auto_prune` while this session renders: a
 `.blend` rendered from the command line keeps them all.
 
+## DLSS 5 over a finished film
+
+`dlss5nr/` puts a finished film through NVIDIA's DLSS 5 Neural Rendering
+network, as [OpenDLSS-NR](https://github.com/maanHimself/OpenDLSS-NR) (MIT)
+reimplements it: the network re-renders each frame at the same size, adding
+the detail, shading and tone of its training. It is not an upscaler and not a
+compositor pass: it runs on the host after the render, on the film's H.264,
+with the post chain already in the frames, and before any grain or
+print-style pass (it would smooth the grain away).
+
+**What it needs.** Windows; an NVIDIA Ada (or newer) GPU with a driver exposing
+`VK_KHR_cooperative_matrix`, `VK_NV_cooperative_matrix2`, `VK_EXT_shader_float8`
+and `VK_NV_cuda_kernel_launch`; Visual Studio 2022 or later with the C++ x64
+toolset, git and Python 3 to build; ffmpeg and numpy on the system Python to
+run; OpenCV for `flow_motion.py`. **You supply the weights**: a model directory
+in OpenDLSS-NR's layout (its `manifest.json` and stage files), given as
+`--model` or `DLSS5VK_MODEL`. This toolkit ships no NVIDIA software or weights
+and no instructions for obtaining them. OpenDLSS-NR is not affiliated with or
+endorsed by NVIDIA, and "DLSS" is NVIDIA's trademark; the patch's upstream
+`LICENSE` and `NOTICE` are in `dlss5nr/patch/`.
+
+**Build once.** `python dlss5nr/build.py` clones OpenDLSS-NR at the commit the
+patch is made for (9d08f41) into `dlss5nr/opendlss/` (git-ignored), applies
+`patch/opendlss_stream.diff` (the `run --list` and `run --stream` modes) and
+copies the stream's compute shaders beside upstream's, then runs upstream's own
+`fetch_tools.ps1` and `build.ps1`. `--dir` builds somewhere else: upstream's
+toolchain fetch unpacks CMake to files 141 characters below the clone, so its
+path must stay within 118 characters (Windows' path limit); the script says so
+before it starts.
+
+**The motion.** Frame by frame, the network re-renders each frame on its own
+and the light flickers. With motion vectors it carries its history as a game
+does: the previous published frame, warped by the motion, blended by the
+network's own per-pixel weight. EEVEE's Vector pass is that motion, and
+`blender/tools/render_motion.py` renders it for a built film:
+
+```bash
+python eido_blender.py build work/<id>/scene.json        # or the render's own build, beside its video
+bash run_blender.sh blender/tools/render_motion.py --blend work/<id>/scene.blend --out work/<id>/motion
+```
+
+Each shot (the camera markers `ctx.cut` makes; a film with none is one shot)
+renders as one animation with only the pass: EEVEE at 1 sample, motion blur
+off, ray tracing off, a File Output node taking the raw pass out of the
+compositor. Every frame becomes `<out>/<frame:04d>.npz` (the layout in
+`dlss5nr/motion_npz.py`: X Y Z W float16, rows top-down, Blender's pixels)
+and `<out>/cuts.txt` lists each shot's first frame. The `.blend` is only
+read; a stopped run picks up where it was; `--frames 1-240` renders part of a
+film, `--hide haze,dust` leaves objects out of the pass and `--plan` prints the
+shots without rendering. The pass follows what geometry does, keyed, rigged,
+Geometry Nodes and the flora's wind included ([vegetation](vegetation.md)). It
+does not follow what only a shader changes (a screen's picture, a texture
+scrolling, light): `python dlss5nr/flow_motion.py <film.mp4> <dir>` makes
+motion files from the frames themselves, by optical flow, for such a film
+(offset 0 there).
+
+**Run.**
+```bash
+python dlss5nr/motion_check.py work/<id>/scene.mp4 work/<id>/motion --frames 24,48,96 --offset -1
+python dlss5nr/dlss5nr.py work/<id>/scene.mp4 work/<id>/scene_dlss5.mp4 --model <weights> --style 1 \
+    --motion work/<id>/motion --convention "+X -Y" --offset -1 --cuts work/<id>/motion/cuts.txt
+python dlss5nr/flicker.py work/<id>/scene.mp4 work/<id>/scene_dlss5.mp4
+```
+`--offset` is minus the scene's `frame_start` (the video's frame 0 is frame 1
+by default). `motion_check.py` warps each chosen frame's predecessor by every
+reading of the files and names the one that matches the picture; Blender's
+pass reads as `"+X -Y"`. The film is decoded, every frame streams through one
+`dlss5vk run --stream` and back into x264 (High, yuv420p, crf 16), and the
+film's own sound is muxed back. A display-referred film (AgX) maps into the
+network's proxy through NVIDIA's shoulder and back out through its inverse, so
+wherever the network changes nothing the grade returns as it was (an 8-bit
+value survives the round trip exactly). `--style` 0 is the default; 1 moves
+the picture furthest, toward crisper shading and richer colour; `--tone` and
+`--structure` scale the default; `--skin -1` is automatic. `--from` / `--to`
+pick a range and `--keep-rest` keeps the rest unchanged; `--stills <dir>`
+writes every 12th frame as a before | after PNG. `flicker.py` measures the
+result: where the input holds still, the output should change about as little.
+On an RTX 5090 Laptop GPU a 1920 × 1080 film streams at about 45 frames a
+second (the network itself 7.7–8 ms a frame), and the motion pass renders at
+about 0.7 s a frame for a heavy scene.
+
+Tests: `python blender/tests/dlss5nr/test_render_motion.py` (a two-shot film:
+the plan, the files, the still floor and the moving cube, the convention on the
+rendered picture; `--no-render` checks the plan only) and
+`python dlss5nr/tests/test_dlss5nr.py` (the stream through a stand-in program,
+no GPU).
+
 ## After the render: the release print — `film_print.py`
 
 `film_print.py` (repository root, system Python: numpy, Pillow, ffmpeg) prints

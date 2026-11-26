@@ -13,7 +13,7 @@ plants grown by our own generators (the WebGPU edition's, ported line for line:
 the same seed grows the same stand, except the shrubs' fine detail, see Not yet
 ported), instanced by geometry nodes, and the
 3-layer wind and character pushers evaluated in geometry nodes from Scene Time.
-The motion is real geometry, so EEVEE's Vector pass (DLSS 5's temporal input),
+The motion is real geometry, so EEVEE's Vector pass ([DLSS 5's temporal input](postprocessing.md#dlss-5-over-a-finished-film)),
 motion blur and shadows all see it, and a saved film `.blend` renders any frame
 in a fresh background Blender (no frame handlers). One call paints one stand
 ("stroke"); layer strokes to dress a scene. Blender coordinates: Z up, metres.

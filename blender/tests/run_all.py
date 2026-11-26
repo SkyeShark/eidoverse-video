@@ -217,6 +217,10 @@ M += [gpu('post_effects', s, '--stage', st) for s, st in (
     ('test_parity.py', 'sources'), ('test_parity.py', 'parity'), ('test_looks.py', 'sheets'), ('test_looks.py', 'time'),
     ('test_verify_probes.py', 'simplex'), ('test_verify_probes.py', 'live'))]
 M += [gpu('post_effects', 'test_live.py')]
+# DLSS 5 over a finished film: the shared tools with a stand-in program (system Python, no GPU), the motion tool's plan
+# on a two-shot film (Blender, no render), then its motion files checked against the rendered picture
+M += [py('dlss5nr', '/dlss5nr/tests/test_dlss5nr.py'), py('dlss5nr', 'test_render_motion.py', NR),
+      T('gpy', 'dlss5nr', 'test_render_motion.py', cap=8, vram=3, why='the motion files against the rendered picture')]
 M += [bl('media', 'check_screens_api.py'), py('media', 'test_weather_audio_parity.py'),
       py('media', 'audio_host.py', why='voicebox on the host (system Python): the audio probe\'s first half'),
       bl('media', 'test_text3d.py', NR), bl('media', 'test_book_lectern.py', NR)]
