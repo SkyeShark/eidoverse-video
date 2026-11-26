@@ -243,6 +243,93 @@ Laptop GPU. The halo's blur pyramid skips its passes when `halo × force` is
 0. The [UNKNOWN FORCE sets](../eidoverse/sets/unknown_force/README.md) give
 their per-shot totals with the pass on.
 
+## After the render: the release print — `film_print.py`
+
+`film_print.py` prints a finished film as a period release print. It works on
+the encoded video, so it takes any render from either edition, and it runs
+last:
+1. render the film;
+2. run any neural pass over the frames (a denoiser, or a neural renderer such
+   as DLSS 5);
+3. print with `film_print.py`.
+
+A network run after the print would smooth its grain and dirt away. This is
+the difference from the era looks above: `candle_film` and `poster` are
+in-render passes on the GPU, part of the frame before anything else touches
+it. The print is a film-wide step on the CPU, and only the projector sees
+anything after it.
+
+```bash
+python film_print.py work/<id>/film.mp4 --out work/<id>/film_print.mp4 \
+    --letters work/<id>/song_clock.json --parts 4        # four ranges side by side, joined without a re-encode
+python film_print.py work/<id>/film.mp4 --stills work/<id>/print_stills --at 3.5,41.0   # look first
+python film_print.py --images a.png,b.png --stills work/<id>/print_stills --at 2.0,6.0  # stills of rendered PNGs
+```
+
+Two eras:
+- **`--era 1970s`** (the default) is a 1970s release print. First the
+  negative and the dyes:
+  - the dye records' cross-talk, which gives deep, clean primaries with greens
+    leaning to blue-green;
+  - the decade's print light: golden highlights, warm-neutral shadows and a
+    faint warm veil in the blacks;
+  - red-orange halation round the highlights, at two spreads;
+  - the soft bloom of a diffusion filter;
+  - the print's tone curve, with dense blacks and a soft shoulder.
+
+  Then the print as projected:
+  - the three dye records a little off register, and the gate's weave;
+  - the softness of a later-generation print;
+  - dust and dirt, white where it lay on the negative and dark where it lies
+    on the print;
+  - fibres, a hair in the gate now and then, and scratches that run for
+    seconds;
+  - the lamp's flicker, uneven density and the projector's falloff to the
+    corners;
+  - grain in three dye layers, new every frame.
+- **`--era 1960s`** is a clean first-run three-strip dye-transfer print: the
+  same cross-talk and tone, red halation, fine grain, a little weave and
+  flicker, and soft corners, with no dirt, scratches or hairs.
+
+Every value of a preset can be changed with `--set name=value[,name=value]`.
+For example, `--set grain=0.018,dust=1` gives finer grain and less dirt,
+`--set scratch_every=0` removes the scratches, and `--set exposure=1.4` trims
+the print light. The names are the keys of `ERAS` in the file.
+
+**Frames are independent.** Every frame's artefacts come from its frame
+number and `--seed` alone: its grain, dirt, weave and flicker, and the
+scratches and hairs scheduled in two-minute blocks. A range of frames
+therefore prints the same pixels on its own. With `--parts N`, the tool prints
+N ranges in N processes, checks each segment's frame count and joins them
+with the source's sound, stream-copied. Each process takes about 2 s a frame
+at 1920 × 1080 and about 0.4 s at 960 × 540 (measured with three processes
+side by side). A different `--seed` gives a different strip of film.
+
+**Lettering.** `--letters timeline.json` letters the timeline's lines into the
+picture. It reads `song_clock.py`'s clock, a `{"captions": [...]}` timeline or
+`align_lyrics.py`'s list. The capitals are heavy, swelled and bent to fill a
+band, the way late-1960s concert posters were lettered. They come in two inks
+with a dark outline padded clear of every letter, set in Anton. A line shows
+from 0.25 s before it starts to 0.42 s after it ends, fading in and out.
+A caption may carry:
+- `"where"`: `bottom` (the default, `--where` changes it), `top` or
+  `top-left`. Use `top-left` where the foot of the frame holds what the shot
+  is about.
+- `"style": "arch"`: large and arched across the top, for a title or a
+  refrain's hook.
+- `"inks"`: `[outline, top, bottom]`, to match a scene's colours. `--inks`
+  sets the default.
+
+The lettering goes into the graded picture before the print's artefacts, as a
+title printed into the film, so the weave, dirt and grain go over it too.
+
+Look at stills before printing a whole film. Its `_before_after.jpg` pictures
+put each clean frame beside its print. Sizes are given for 1080 lines and
+scale with the frame. The output is H.264 High, yuv420p (`--crf 16`,
+`--preset medium`), with the sound copied. The
+[finishing example](../eidoverse/examples/finishing/README.md) runs the whole
+chain on a small film.
+
 ## Renderer integration
 
 The renderer injects each `effects_tsl/*.js` implementation before

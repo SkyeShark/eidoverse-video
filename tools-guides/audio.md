@@ -318,6 +318,107 @@ loudness snaps shut on every consonant. Drive it with `installSuitMouth` and
 feeding it these same viseme frames with `inputMax: 0.35`; see
 [characters.md](characters.md).
 
+### A singing mouth from the vocal stem — `get_viseme_timeline_from_vocal`
+
+When a song's voice is available on its own (a recorded vocal, a demucs stem,
+a voicebox render), `lipsync.py` can read a singing mouth from it. The band
+method above follows the spectrum, frame by frame. This one follows the
+singer:
+- **How open** follows the stem's own level, measured four times a frame. A
+  held note stays open for as long as it sounds, and a breath between words
+  closes the mouth. The mouth opens at once and closes over about 70 ms.
+- **Which shape** is the vowel of the word sung then, from the words'
+  times. Each word's last vowel is held while the voice goes on.
+- **A hiss with no voice under it** (s, sh, a stuttered "s-s-") shows the
+  teeth as a narrow `ih`.
+- **The lips shut** on the frame before a word that starts with m, b or p.
+- **Where the voice sounds and no word was heard** ("ooh", a hum), the shape
+  is read off the spectrum: dark vowels round, bright ones wide.
+
+```python
+import json
+from lipsync import get_viseme_timeline_from_vocal
+lines = json.load(open('lyrics_aligned.json'))          # align_lyrics.py output: lines with their "words"
+timeline = get_viseme_timeline_from_vocal('vocals.wav', lines, fps=24)
+json.dump({'fps': 24, 'frames': timeline}, open('visemes.json', 'w'))
+```
+
+The words can be `align_lyrics.py`'s lines, a flat list of
+`{word, start, end}`, or `(word, start, end)` tuples. With `None`, every shape
+comes from the spectrum. A word's vowels come from a small table of common
+words, else from its spelling. Pass `syllables=` your own function for a
+language or a lexicon of your own.
+
+The shapes are VRM's: `aa` is the "a" of "father", `ih` the "i" of "see",
+`ou` the "u" of "blue", `ee` the "e" of "bed" and "made", and `oh` the "o"
+of "go". voicebox's phoneme visemes use the same mapping. The values run 0..1
+with their sum at most 1, so drivers take them as they are:
+`setValue(k, v)` raw, and `makeSuitMouth({ inputMax: 1 })` for the suit mouth.
+`get_mouth_openness()` is scaled for the band method's 0..0.35 and saturates
+here.
+
+The stem's own silences close the mouth, so instrumental passages need no
+gating. Demucs bleed loud enough to read as voice still opens it; gate those
+stretches as above.
+
+On voicebox's own voice, this mouth agrees with voicebox's phoneme mouth
+(`voicebox.visemes`, frame-exact) as follows, measured by the
+[finishing example](../eidoverse/examples/finishing/README.md):
+- the same frames open or shut on 96 % of frames;
+- an openness correlation of 0.93;
+- the same dominant shape on 90 % of the frames both call open.
+
+## The song's clock — `song_clock.py`
+
+`song_clock.py` measures a song's timing from the wav: where its beats, bars,
+quiet stretches, sections and sung lines fall, in seconds and in video frames,
+for cutting a film to it. It measures timing only. It never says how a take
+sounds, which is the listener's call.
+
+```bash
+python song_clock.py song.wav --fps 24 --out work/<id>/song_clock.json [--downbeat 14.93]
+python song_clock.py song.wav --lyrics lyrics.txt --vocal vocals.wav      # + the lines, via align_lyrics.py
+python song_clock.py song.wav --repeat 33.0 47.6 --within 47.6 140        # where that passage's music returns
+python song_clock.py song.wav --offset work/<id>/film.mp4                 # the film's sound against the song
+```
+
+**The beats.** librosa's beat tracker gives the grid, which sits a little
+late on most songs, often 30–40 ms. The clock measures that lag over the
+whole song and takes it off. It then moves each beat onto the wav's own rise
+(spectral flux on a 1 ms clock) where one stands within 18 ms. Each beat says
+whether it is `measured` or `carried` (no clear rise, so the grid smoothed
+through its neighbours). The `check` block reports how far the plain level's
+steepest step sits from each beat. On the three songs it was tried on, the
+median was 1 to 6 ms.
+
+**The bars** are every `--beats-per-bar` beats. Their phase is a guess from
+where the harmony changes, unless `--downbeat` names a moment on a bar line
+(the first word of a verse, say). The song's words and the collaborator's ear
+decide where a bar line is. A beat the tracker missed or doubled shifts the
+count after it, so check the bars near the moments the film cuts on.
+
+**Everything else:**
+- `silences`: 0.2 s or more, 25 dB under the loud parts.
+- `segments`: where timbre and harmony change.
+- With `--lyrics`: `lines` (each line's start, end, words, frame and bar) and
+  `captions`. The lyric file holds one sung line per line. A `[Name]` line
+  names the section of the lines after it, and those names become the
+  clock's `sections`. Without lyrics the sections are the segments.
+- With pyloudnorm installed: the integrated loudness and the true peak.
+
+A moment at `t` seconds sounds in frame `1 + floor(fps × t)`, where frame 1
+starts at 0 s. The WebGPU runner's frame index is that minus one. The clock's
+`sections` and `captions` are the timeline shape `contact_sheet.py` and
+`film_print.py` read.
+
+`--repeat A B` finds where the music of a passage comes back. It compares
+harmony and timbre beat by beat, so it says where the music repeats, never
+what is sung there. `--offset FILM` cross-correlates the film's sound with
+the song at five places and prints the lag in ms and frames: 0 when the mux
+is right, positive when the film's sound is late. Dependencies: librosa and
+soundfile (tier 2), pyloudnorm and scipy for loudness, and stable-ts for
+`--lyrics`.
+
 ## Example workflow: a character performance music video
 
 1. Generate or choose a song and measure its duration.
@@ -338,6 +439,9 @@ captions, a fixed shot count and a fadeout are not prerequisites for a video.
 - `align_lyrics.py` creates word/lyric timing from vocal audio for captions.
   Use `lipsync.py`'s imported functions for mouth animation; it is not a
   standalone viseme JSON CLI. Keep speech and matching timings together.
+- `song_clock.py` measures a song's beats, bars, sections and lines (above);
+  its JSON is also a timeline for `contact_sheet.py --lines` and
+  `film_print.py --letters`.
 - `bake_weather_audio.py` turns the weather system's event timeline into a
   WAV; its recording and bake workflow is in [sky-weather.md](sky-weather.md).
 - `eidoverse/comfy_bridge.py` is an optional TCP bridge for a container client

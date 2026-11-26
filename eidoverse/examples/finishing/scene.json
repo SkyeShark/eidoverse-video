@@ -1,0 +1,12 @@
+{
+    "width": 960,
+    "height": 540,
+    "fps": 24,
+    "duration": 14.0,
+    "script": "eidoverse/examples/finishing/scene.js",
+    "outputVideo": "work/finishing/film_video_only.mp4",
+    "assets": {
+        "character_vrm": "eidoverse/assets/vrms/claude.vrm",
+        "visemes": "work/finishing/visemes.json"
+    }
+}

@@ -14,7 +14,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | --- | --- | --- |
 | [align_lyrics.py](../align_lyrics.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [bake_weather_audio.py](../bake_weather_audio.py) | CLI utility | [sky-weather](../tools-guides/sky-weather.md) |
-| [contact_sheet.py](../contact_sheet.py) | CLI utility: labelled contact sheets of a video | [render-review](../tools-guides/render-review.md) |
+| [contact_sheet.py](../contact_sheet.py) | CLI utility: labelled contact sheets of a video: a grid, or `--lines` (a row per line with its frames and the sound's spectrogram) | [render-review](../tools-guides/render-review.md) |
 | [cyborg_stutter.py](../cyborg_stutter.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [cyborg_voice.py](../cyborg_voice.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [eido.py](../eido.py) | CLI utility | [scene-format](../tools-guides/scene-format.md) |
@@ -84,6 +84,9 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/daisy/analyze.py](../eidoverse/examples/daisy/analyze.py) | Example CLI: section-by-section mix measurement | [synthkit](../tools-guides/synthkit.md) |
 | [eidoverse/examples/daisy/captions.py](../eidoverse/examples/daisy/captions.py) | Example CLI: timeline to ASS subtitles, lyric preview | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/song.py](../eidoverse/examples/daisy/song.py) | Worked example: a complete song with voicebox + synthkit | [voicebox](../tools-guides/voicebox.md) |
+| [eidoverse/examples/finishing/song.py](../eidoverse/examples/finishing/song.py) | Worked example: a sung phrase made from scratch and its mouth from the vocal stem | [audio](../tools-guides/audio.md) |
+| [eidoverse/examples/finishing/scene.js](../eidoverse/examples/finishing/scene.js) | Worked example: the sona sings on a stage, its mouth from the stem | [audio](../tools-guides/audio.md) |
+| [eidoverse/examples/finishing/finish.py](../eidoverse/examples/finishing/finish.py) | Example CLI: a rendered film through the finishing chain (merge, clock, print, line sheet) | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
@@ -233,11 +236,13 @@ to distinguish missing scene APIs from internal implementation functions.
 | [fetch_hdri.py](../fetch_hdri.py) | CLI utility | [assets](../tools-guides/assets.md) |
 | [fetch_model.py](../fetch_model.py) | CLI utility (`--cache`: the shared model library) | [assets](../tools-guides/assets.md) |
 | [fetch_texture.py](../fetch_texture.py) | CLI utility (`--cache`: the shared texture library) | [assets](../tools-guides/assets.md) |
+| [film_print.py](../film_print.py) | CLI utility: a finished film printed as a 1970s (or 1960s) release print, lettering from a timeline, ranges in parallel | [postprocessing](../tools-guides/postprocessing.md) |
 | [generate_sfx.py](../generate_sfx.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [generate_song.py](../generate_song.py) | MiniMax Music 3 generator | [audio](../tools-guides/audio.md) |
-| [lipsync.py](../lipsync.py) | Python audio module; no CLI | [audio](../tools-guides/audio.md) |
+| [lipsync.py](../lipsync.py) | Python audio module: visemes from any voice (bands) or a singing mouth from a vocal stem and its words; no CLI | [audio](../tools-guides/audio.md) |
 | [merge_av.py](../merge_av.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [run_blender.sh](../run_blender.sh) | CLI utility: isolated headless Blender runner | [blender](../tools-guides/blender.md) |
+| [song_clock.py](../song_clock.py) | CLI utility: a song's beats, bars, quiet stretches, sections and lines in seconds and frames; where a passage returns; a film's sound offset | [audio](../tools-guides/audio.md) |
 | [synthkit/__init__.py](../synthkit/__init__.py) | Python package API (import from repo root) | [synthkit](../tools-guides/synthkit.md) |
 | [synthkit/dsp.py](../synthkit/dsp.py) | Oscillators, filters, envelopes (numba) | [synthkit](../tools-guides/synthkit.md) |
 | [synthkit/fx.py](../synthkit/fx.py) | Designed effects (tape stop, stutter, modem, power-down) | [synthkit](../tools-guides/synthkit.md) |
@@ -265,7 +270,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/robotics/rotary_metal.scene.js](../eidoverse/examples/robotics/rotary_metal.scene.js) | Aluminum rotary cutting at physical speed followed by a time-lapse finish | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/relief.scene.js](../eidoverse/examples/robotics/relief.scene.js) | Renderable close study of ball-nose roughing and finishing | [robotics](../tools-guides/robotics.md) |
 
-**243 first-party source/entry-point files, plus 9 asset `_src` folders; 33 guides; 33 post effects.**
+**248 first-party source/entry-point files, plus 9 asset `_src` folders; 33 guides; 33 post effects.**
 This is documentation coverage, not a claim that every API was executed in
 this audit or a count of robot parts. The inspector HTML entry point is included.
 
@@ -283,6 +288,8 @@ this audit or a count of robot parts. The inspector HTML entry point is included
   [daisy sheet source](../eidoverse/assets/grass/daisy_src/README.md).
 - [DAISY song example](../eidoverse/examples/daisy/README.md) and
   [era screen sources](../eidoverse/graphics/SOURCES.md).
+- [The finishing chain example](../eidoverse/examples/finishing/README.md): a film made from
+  nothing, then measured, printed and laid out line by line.
 - UNKNOWN FORCE: the [film example](../eidoverse/examples/unknown_force/README.md), the
   [set index](../eidoverse/sets/unknown_force/README.md) with its
   [sources](../eidoverse/sets/unknown_force/SOURCES.md), the

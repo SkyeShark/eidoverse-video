@@ -180,7 +180,8 @@ takes a frame just inside each section start. It then labels every tile with
 its timestamp, its section and the line sung or spoken at that moment, so
 the story reads without sound. The tool accepts two timeline shapes:
 - `{ "sections": [{name, t0, t1}], "captions": [{text, t0, t1}] }`, as
-  voicebox and song timelines write it (either key may be missing);
+  voicebox and song timelines and `song_clock.py` write it (either key may be
+  missing);
 - `align_lyrics.py`'s list of `{text, start, end}`.
 
 `--names` gives the section keys readable labels. `--parts N` also writes the
@@ -188,6 +189,31 @@ same frames split into N sheets, for tools with per-image size limits. The
 output is `<video>_contact_sheet.jpg` unless `--out` names it. A sheet maps
 the piece. It cannot show timing, flicker, lipsync or motion, so review those
 in the video itself.
+
+**Line by line, with the sound.** For a song or a spoken piece, `--lines`
+lays the film out one row per line instead:
+
+```bash
+python contact_sheet.py work/<id>/film.mp4 --lines --timeline work/<id>/song_clock.json \
+  --beats work/<id>/song_clock.json --title "Title" [--per-row 6] [--song work/<id>/song.wav] [--png]
+```
+
+Each caption gets a row, and so does each stretch without words longer than
+`--gap` seconds (3 by default; labelled with its section, else intro, break or
+outro). A row shows:
+- its time and section, and the words;
+- `--per-row` frames spread over its seconds;
+- under them, the sound's mel spectrogram over the same seconds (40 Hz to
+  11 kHz, on one dB scale for the whole piece, so loud and quiet rows compare);
+- the beats as white ticks (`--beats`: a JSON list of seconds, or
+  `song_clock.py`'s clock) and the frames' moments as orange marks.
+
+The sound is the video's own unless `--song` names another file; `--song none`
+leaves the strips out. Tiles are 320 px wide here (`--tile`), so six make a
+1920 px row. The output is `<video>_contact_sheet_lines.jpg`, plus a lossless
+PNG with `--png`, and `--parts N` splits the rows. The sheet shows where each
+line falls against the music and the picture. It cannot show whether a mouth
+moves on time, so check that in the video.
 
 ## Sharing the work
 
